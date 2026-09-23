@@ -12,7 +12,7 @@ const api = vi.hoisted(() => ({
 vi.mock('@/api/teamLibraries', () => api);
 
 const library: TeamLibraryView = { library_id: 'lib_0123456789abcdef', project_id: 'p1', name: '角色参考', mount_path: '/x', mounted_at: '', reachable: true, asset_count: 2, scanned_at: null };
-const raw: TeamLibraryIndexEntry = { id: 'raw_a', kind: 'raw', title: 'castle.png', author: null, tags: [], mime_type: 'image/png', bytes: 1, relative_path: 'concept/castle.png', sha256: null, updated_at: '2026-09-20T00:00:00Z', reproducible: false, status: 'ready' };
+const raw: TeamLibraryIndexEntry = { id: 'raw_a', kind: 'raw', title: 'castle.png', author: null, tags: [], mime_type: 'image/png', bytes: 1, relative_path: 'concept/castle.png', sha256: null, updated_at: '2026-09-20T00:00:00Z', reproducible: false, status: 'ready', model: null, cost_cny: null };
 const shared: TeamLibraryIndexEntry = { ...raw, id: 'ta_01ARZ3NDEKTSV4RRFFQ69G5FAV', kind: 'media', title: '董卓 待机', author: '老王', tags: ['皮肤'], relative_path: 'shared/老王/ta_01ARZ3NDEKTSV4RRFFQ69G5FAV' };
 
 afterEach(() => vi.clearAllMocks());

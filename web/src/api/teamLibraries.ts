@@ -1,10 +1,13 @@
 import { connectionFetch } from '@/api/connection';
-import { apiError, requestJson } from './http';
+import { apiError, requestError, requestJson } from './http';
 import type {
   TeamAssetAdoptResponse,
   TeamAssetKind,
   TeamLibraryAssetPage,
+  TeamLibraryIndexEntry,
   TeamLibraryView,
+  TeamRelatedEntry,
+  TeamShareRequest,
   UserProfile,
 } from '@/schema/teamLibrary';
 
@@ -13,6 +16,25 @@ export class ProfileRequiredError extends Error {
   constructor() {
     super('先设置显示名');
     this.name = 'ProfileRequiredError';
+  }
+}
+
+/** 参考内容合计超过服务端阈值；带 `allow_large: true` 重发才会写入。 */
+export class TeamRefsTooLargeError extends Error {
+  readonly bytes: number;
+
+  constructor(bytes: number) {
+    super(`参考内容共 ${Math.round(bytes / 1024 / 1024)} MB`);
+    this.name = 'TeamRefsTooLargeError';
+    this.bytes = bytes;
+  }
+}
+
+/** 团队库里只有作者本人能编辑或撤回自己分享的资产。 */
+export class TeamNotAuthorError extends Error {
+  constructor() {
+    super('只有作者能修改');
+    this.name = 'TeamNotAuthorError';
   }
 }
 
@@ -31,11 +53,10 @@ export function saveProfile(displayName: string): Promise<UserProfile> {
   });
 }
 
-export function listTeamLibraries(projectId: string): Promise<TeamLibraryView[]> {
-  return requestJson<TeamLibraryView[]>(
-    `${base}?project_id=${encodeURIComponent(projectId)}`,
-    '读取团队库',
-  );
+/** 省略 projectId = 本机全部挂载（按库去重）。 */
+export function listTeamLibraries(projectId?: string): Promise<TeamLibraryView[]> {
+  const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+  return requestJson<TeamLibraryView[]>(`${base}${query}`, '读取团队库');
 }
 
 export async function mountTeamLibrary(input: {
@@ -105,5 +126,66 @@ export function adoptTeamAsset(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ project_id: projectId ?? null }),
     },
+  );
+}
+
+async function errorCode(response: Response): Promise<{ code?: string; bytes?: number } | null> {
+  const body = await response.clone().json().catch(() => null) as {
+    detail?: { code?: string; bytes?: number };
+  } | null;
+  return body?.detail ?? null;
+}
+
+/** 分享 / 编辑 / 撤回共用的错误映射：先认稳定错误码，其余走通用中文报错。 */
+async function teamWrite(url: string, what: string, init: RequestInit): Promise<Response> {
+  let response: Response;
+  try {
+    response = await connectionFetch(url, init);
+  } catch (error) {
+    throw requestError(error, what);
+  }
+  if (response.ok) return response;
+  const detail = await errorCode(response);
+  if (response.status === 409 && detail?.code === 'profile_required') throw new ProfileRequiredError();
+  if (response.status === 413 && typeof detail?.bytes === 'number') throw new TeamRefsTooLargeError(detail.bytes);
+  if (response.status === 403 && detail?.code === 'not_author') throw new TeamNotAuthorError();
+  throw await apiError(response, what);
+}
+
+export async function shareToTeamLibrary(
+  libraryId: string,
+  request: TeamShareRequest,
+): Promise<TeamLibraryIndexEntry> {
+  const response = await teamWrite(`${lib(libraryId)}/share`, '分享到团队库', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  return response.json() as Promise<TeamLibraryIndexEntry>;
+}
+
+export async function updateTeamAsset(
+  libraryId: string,
+  assetId: string,
+  body: { title: string; tags: string[] },
+): Promise<TeamLibraryIndexEntry> {
+  const response = await teamWrite(`${lib(libraryId)}/assets/${encodeURIComponent(assetId)}`, '编辑团队资产', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return response.json() as Promise<TeamLibraryIndexEntry>;
+}
+
+export async function withdrawTeamAsset(libraryId: string, assetId: string): Promise<void> {
+  await teamWrite(`${lib(libraryId)}/assets/${encodeURIComponent(assetId)}`, '撤回团队资产', {
+    method: 'DELETE',
+  });
+}
+
+export function listRelatedTeamAssets(projectId: string): Promise<TeamRelatedEntry[]> {
+  return requestJson<TeamRelatedEntry[]>(
+    `${base}/related?project_id=${encodeURIComponent(projectId)}`,
+    '读取相关配方',
   );
 }

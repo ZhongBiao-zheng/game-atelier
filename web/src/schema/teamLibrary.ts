@@ -26,6 +26,27 @@ export interface TeamLibraryIndexEntry {
   updated_at: string;
   reproducible: boolean;
   status: 'ready' | 'incomplete';
+  /** 仅生成资产有值。 */
+  model: string | null;
+  cost_cny: number | null;
+}
+
+/** 分享来源：Studio 某次出图的第 output_index 张（Job.output_paths 下标），或一条本机创作资产。 */
+export type TeamShareSource =
+  | { kind: 'job_output'; job_id: string; output_index: number }
+  | { kind: 'creation_asset'; asset_id: string };
+
+export interface TeamShareRequest {
+  source: TeamShareSource;
+  title: string;
+  tags: string[];
+  allow_large?: boolean;
+}
+
+export interface TeamRelatedEntry {
+  library_id: string;
+  library_name: string;
+  entry: TeamLibraryIndexEntry;
 }
 
 export interface TeamLibraryAssetPage {

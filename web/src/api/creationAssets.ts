@@ -4,10 +4,11 @@ import type {
   CreationAsset,
   CreationAssetKind,
   CreationAssetList,
-  CreationAssetRecommendation,
   CreationPromptSegment,
 } from '@/schema/creationAssets';
 import type { CanvasDocument, CanvasPoint } from '@/schema/canvas';
+
+export type CreationAssetStaleness = 'fresh' | 'stale' | 'withdrawn' | 'unknown';
 
 export class DuplicateCreationAssetError extends Error {
   readonly assetId: string;
@@ -36,7 +37,6 @@ export function createPromptCreationAsset(input: {
   title: string;
   segments: CreationPromptSegment[];
   tags: string[];
-  recommendation?: CreationAssetRecommendation | null;
   projectId?: string;
 }): Promise<CreationAsset> {
   return requestJson<CreationAsset>('/api/creation-assets/prompts', '保存提示词资产', {
@@ -46,7 +46,6 @@ export function createPromptCreationAsset(input: {
       title: input.title,
       segments: input.segments,
       tags: input.tags,
-      recommendation: input.recommendation ?? null,
       project_id: input.projectId,
     }),
   });
@@ -120,7 +119,7 @@ export async function saveMediaCreationAssetFromPath(input: {
 
 export function updatePromptCreationAsset(
   assetId: string,
-  input: { title: string; segments: CreationPromptSegment[]; tags: string[]; recommendation?: CreationAssetRecommendation | null },
+  input: { title: string; segments: CreationPromptSegment[]; tags: string[] },
 ): Promise<CreationAsset> {
   return requestJson<CreationAsset>(
     `/api/creation-assets/${encodeURIComponent(assetId)}/prompt`,
@@ -186,6 +185,19 @@ export function markCreationAssetUsed(
 
 export function creationAssetMediaUrl(assetId: string): string {
   return `/api/creation-assets/${encodeURIComponent(assetId)}/content`;
+}
+
+/** 生成资产冻结快照里第 order 份参考内容。 */
+export function creationAssetInputUrl(assetId: string, order: number): string {
+  return `/api/creation-assets/${encodeURIComponent(assetId)}/inputs/${order}`;
+}
+
+export async function fetchCreationAssetStaleness(assetId: string): Promise<CreationAssetStaleness> {
+  const body = await requestJson<{ status: CreationAssetStaleness }>(
+    `/api/creation-assets/${encodeURIComponent(assetId)}/staleness`,
+    '检查资产是否过时',
+  );
+  return body.status;
 }
 
 export function insertCreationAssetIntoCanvas(input: {

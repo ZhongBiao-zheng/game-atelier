@@ -1,4 +1,4 @@
-export type CreationAssetKind = 'prompt' | 'media';
+export type CreationAssetKind = 'prompt' | 'media' | 'generation';
 
 export type CreationPromptSegment =
   | { kind: 'text'; text: string }
@@ -18,14 +18,42 @@ export interface CreationMediaAssetContent {
   filename: string;
 }
 
-export type CreationAssetContent = CreationPromptAssetContent | CreationMediaAssetContent;
+export type RecipeInputRole = 'reference' | 'mask' | 'mj_sref' | 'mj_cref' | 'mj_oref';
 
-/** 提示词资产可选的推荐出图配置；model 是模型 id，不是本机别名。 */
-export interface CreationAssetRecommendation {
+/** 冻结快照里的一份参考内容；order 是提交时的序号（0..n-1），本体按 sha256 存在 blobs。 */
+export interface RecipeInput {
+  order: number;
+  role: RecipeInputRole;
+  kind: 'image' | 'video' | 'audio';
+  sha256: string;
+  mime_type: string;
+}
+
+/** 生成资产的冻结配方：模型用模型 id，alias 只是出图那台机器的 key 名。 */
+export interface GenerationRecipe {
   mode: 'image' | 'video';
   model: string;
-  params: Record<string, string | number | boolean>;
+  provider: string | null;
+  alias: string | null;
+  final_prompt: string;
+  draft_prompt: string | null;
+  params: Record<string, unknown>;
+  inputs: RecipeInput[];
+  cost_cny: number | null;
+  cost_basis: 'actual' | 'estimated' | null;
+  submitted_at: string;
 }
+
+export interface CreationGenerationAssetContent {
+  kind: 'generation';
+  media: CreationMediaAssetContent;
+  snapshot: GenerationRecipe;
+}
+
+export type CreationAssetContent =
+  | CreationPromptAssetContent
+  | CreationMediaAssetContent
+  | CreationGenerationAssetContent;
 
 /** 采用团队库资产时留下的来源：库 + 对方资产 id + 采用当时的源更新时间。 */
 export interface AdoptionOrigin {
@@ -45,13 +73,19 @@ export interface CreationAsset {
   last_used_at: string | null;
   content: CreationAssetContent;
   project_ids: string[];
-  recommendation?: CreationAssetRecommendation | null;
   adopted_from?: AdoptionOrigin | null;
 }
 
 export interface CreationAssetList {
   revision: number;
   assets: CreationAsset[];
+}
+
+/** 资产的媒体本体：媒体资产是它自己，生成资产是成片，提示词没有。 */
+export function assetMediaContent(asset: CreationAsset): CreationMediaAssetContent | null {
+  if (asset.content.kind === 'media') return asset.content;
+  if (asset.content.kind === 'generation') return asset.content.media;
+  return null;
 }
 
 export function renderCreationPrompt(

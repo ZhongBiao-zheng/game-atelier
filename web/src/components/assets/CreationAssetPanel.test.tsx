@@ -29,6 +29,38 @@ const promptAsset: CreationAsset = {
   },
 };
 
+const generationAsset: CreationAsset = {
+  ...promptAsset,
+  asset_id: 'asset-generation',
+  kind: 'generation',
+  title: '雪山白犬',
+  tags: [],
+  content: {
+    kind: 'generation',
+    media: {
+      kind: 'media',
+      path: 'creation-assets/blobs/dog.png',
+      mime_type: 'image/png',
+      bytes: 3,
+      sha256: 'b'.repeat(64),
+      filename: 'white-dog.png',
+    },
+    snapshot: {
+      mode: 'image',
+      model: 'gpt-image-2',
+      provider: 'openai-hk',
+      alias: 'hk',
+      final_prompt: '一只白犬站在雪山。',
+      draft_prompt: null,
+      params: { quality: 'high' },
+      inputs: [],
+      cost_cny: 0.3,
+      cost_basis: 'actual',
+      submitted_at: '2026-09-23T00:00:00Z',
+    },
+  },
+};
+
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   markUsed: vi.fn(),
@@ -159,26 +191,19 @@ describe('CreationAssetPanel', () => {
     expect(await screen.findByRole('heading', { name: '新标题' })).toBeInTheDocument();
   });
 
-  it('saves an optional recommendation as model id plus typed params and shows it in detail', async () => {
-    const recommendation = { mode: 'image' as const, model: 'gpt-image-2', params: { quality: 'high', n: 2, watermark: false } };
-    const updated = { ...promptAsset, recommendation };
-    mocks.list
-      .mockResolvedValueOnce({ revision: 1, assets: [promptAsset] })
-      .mockResolvedValue({ revision: 2, assets: [updated] });
-    mocks.updatePrompt.mockResolvedValue(updated);
+  it('has no recommendation fields in the prompt editor', async () => {
+    mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset] });
+    mocks.updatePrompt.mockResolvedValue(promptAsset);
     render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
     fireEvent.click(screen.getByRole('button', { name: '编辑' }));
-    fireEvent.change(screen.getByLabelText('推荐模型'), { target: { value: ' gpt-image-2 ' } });
-    fireEvent.change(screen.getByLabelText('推荐参数'), { target: { value: 'quality=high\nn=2\nwatermark=false\n垃圾行' } });
+    expect(screen.queryByText('推荐配置')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('推荐模型')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
 
-    await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledWith(
-      'asset-prompt',
-      expect.objectContaining({ recommendation }),
-    ));
-    expect(await screen.findByText('推荐：gpt-image-2 · quality=high · n=2 · watermark=false')).toBeInTheDocument();
+    await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledOnce());
+    expect(mocks.updatePrompt.mock.calls[0][1]).not.toHaveProperty('recommendation');
   });
 
   it('asks before discarding a dirty edit', async () => {
@@ -350,5 +375,55 @@ describe('CreationAssetPanel', () => {
     expect(player?.muted).toBe(true);
     expect(container.querySelector('audio')).toHaveAttribute('src', creationAssetMediaUrl('asset-audio'));
     expect(container.querySelector('img')).toBeNull();
+  });
+
+  it('lists generation assets in the media tab and uses their finished media', async () => {
+    mocks.list.mockResolvedValue({ revision: 1, assets: [generationAsset, promptAsset] });
+    mocks.markUsed.mockResolvedValue(generationAsset);
+    const onUseMedia = vi.fn();
+    const onClose = vi.fn();
+    const { container } = render(
+      <CreationAssetPanel initialKind="media" onClose={onClose} onUsePrompt={vi.fn()} onUseMedia={onUseMedia} />,
+    );
+
+    const card = await screen.findByRole('button', { name: /雪山白犬/ });
+    expect(screen.queryByRole('button', { name: /火山口三头犬/ })).not.toBeInTheDocument();
+    expect(card).toHaveTextContent('white-dog.png');
+    expect(container.querySelector('img')).toHaveAttribute('src', creationAssetMediaUrl('asset-generation'));
+
+    fireEvent.click(card);
+    expect(await screen.findByRole('heading', { name: '雪山白犬' })).toBeInTheDocument();
+    expect(container.querySelector('img')).toHaveAttribute('src', creationAssetMediaUrl('asset-generation'));
+    fireEvent.click(screen.getByRole('button', { name: '使用' }));
+
+    await waitFor(() => expect(onUseMedia).toHaveBeenCalledWith(
+      generationAsset,
+      generationAsset.content.kind === 'generation' ? generationAsset.content.media : null,
+    ));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('finds generation assets by their media filename', async () => {
+    mocks.list.mockResolvedValue({ revision: 1, assets: [generationAsset] });
+    render(<CreationAssetPanel initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
+
+    await screen.findByRole('button', { name: /雪山白犬/ });
+    fireEvent.change(screen.getByPlaceholderText('搜索标题、正文或标签'), { target: { value: 'white-dog' } });
+    expect(screen.getByRole('button', { name: /雪山白犬/ })).toBeInTheDocument();
+  });
+
+  it('deletes a generation asset from its detail', async () => {
+    mocks.list
+      .mockResolvedValueOnce({ revision: 1, assets: [generationAsset] })
+      .mockResolvedValue({ revision: 2, assets: [] });
+    mocks.deleteAsset.mockResolvedValue(undefined);
+    render(<CreationAssetPanel initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /雪山白犬/ }));
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '删除' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
+
+    await waitFor(() => expect(mocks.deleteAsset).toHaveBeenCalledWith('asset-generation'));
   });
 });

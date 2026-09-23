@@ -8,7 +8,6 @@ import {
   FileVideo,
   Plus,
   Search,
-  Tags,
   Trash2,
   Users,
   X,
@@ -35,6 +34,7 @@ import {
   updatePromptCreationAsset,
   uploadMediaCreationAsset,
 } from '@/api/creationAssets';
+import { TagField, parseTags } from '@/components/assets/TagField';
 import { TeamLibraryPanel } from '@/components/assets/TeamLibraryPanel';
 import { Button } from '@/components/ui/button';
 import {
@@ -55,9 +55,9 @@ import {
 } from '@/lib/promptAssetTemplate';
 import { cn } from '@/lib/utils';
 import {
+  assetMediaContent,
   renderCreationPrompt,
   type CreationAsset,
-  type CreationAssetRecommendation,
   type CreationMediaAssetContent,
   type CreationPromptSegment,
 } from '@/schema/creationAssets';
@@ -113,10 +113,6 @@ type PromptEditorState = {
   text: string;
   variables: PromptVariableRange[];
   tags: string;
-  /** 推荐配置（可选）：模型 id + 每行一条 key=value 的参数。 */
-  recommendationMode: 'image' | 'video';
-  recommendationModel: string;
-  recommendationParams: string;
   initialSignature: string;
 };
 
@@ -171,7 +167,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     if (!normalizedQuery) return true;
     const preview = asset.content.kind === 'prompt'
       ? renderCreationPrompt(asset.content.segments)
-      : asset.content.filename;
+      : assetMediaContent(asset)?.filename ?? '';
     return asset.title.toLocaleLowerCase().includes(normalizedQuery)
       || preview.toLocaleLowerCase().includes(normalizedQuery)
       || asset.tags.some(tag => tag.toLocaleLowerCase().includes(normalizedQuery));
@@ -188,15 +184,19 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     if (kind === 'team') return;
     try {
       setError(null);
+      // 媒体 tab 同时列媒体与生成资产（生成资产按成片渲染），所以不按 kind 过滤、取回后再分。
       const response = await listCreationAssets({
-        kind,
+        kind: kind === 'prompt' ? 'prompt' : undefined,
         scope: projectId ? scope : 'all',
         projectId,
       });
-      setAssets(response.assets);
+      const rows = kind === 'prompt'
+        ? response.assets
+        : response.assets.filter(asset => assetMediaContent(asset) !== null);
+      setAssets(rows);
       setSelectedId(current => {
         const target = preferredId ?? current;
-        return response.assets.some(asset => asset.asset_id === target) ? target : null;
+        return rows.some(asset => asset.asset_id === target) ? target : null;
       });
     } catch (caught) {
       setError(errorMessage(caught));
@@ -240,9 +240,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         text: template.text,
         variables: template.variables,
         tags: '',
-        recommendationMode: 'image' as const,
-        recommendationModel: '',
-        recommendationParams: '',
       };
       setPromptEditor({ ...draft, initialSignature: promptEditorSignature(draft) });
       setMediaEditor(null);
@@ -313,10 +310,11 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     setError(null);
     try {
       const updated = await markCreationAssetUsed(asset.asset_id, projectId);
+      const media = assetMediaContent(updated);
       if (updated.content.kind === 'prompt') {
         onUsePrompt(updated, promptFromAsset(updated.content.segments));
-      } else {
-        onUseMedia(updated, updated.content);
+      } else if (media) {
+        onUseMedia(updated, media);
       }
       onClose();
     } catch (caught) {
@@ -337,9 +335,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
       text: template.text,
       variables: template.variables,
       tags: asset?.tags.join(', ') ?? '',
-      recommendationMode: asset?.recommendation?.mode ?? 'image',
-      recommendationModel: asset?.recommendation?.model ?? '',
-      recommendationParams: formatRecommendationParams(asset?.recommendation?.params),
     };
     setSelectedId(null);
     setMediaEditor(null);
@@ -386,7 +381,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         title: promptEditor.title.trim(),
         segments,
         tags: parseTags(promptEditor.tags),
-        recommendation: recommendationFromEditor(promptEditor),
       };
       const saved = promptEditor.assetId
         ? await updatePromptCreationAsset(promptEditor.assetId, input)
@@ -637,7 +631,16 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         </div>
       )}
 
-      {selected && <AssetDetail asset={selected} busy={busy} onUse={() => void applyAsset(selected)} onEdit={() => selected.kind === 'prompt' ? beginPromptEdit(selected) : beginMediaEdit(selected)} />}
+      {selected && (
+        <AssetDetail
+          asset={selected}
+          busy={busy}
+          onUse={() => void applyAsset(selected)}
+          // 生成资产是冻结快照，本机不改；只能删。
+          onEdit={selected.kind === 'generation' ? undefined : () => selected.kind === 'prompt' ? beginPromptEdit(selected) : beginMediaEdit(selected)}
+          onDelete={selected.kind === 'generation' ? () => setDeleteTarget(selected) : undefined}
+        />
+      )}
 
       <Dialog open={discardOpen} onOpenChange={setDiscardOpen}>
         <DialogContent hideClose>
@@ -657,11 +660,12 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
 });
 
 function AssetCard({ asset, onOpen }: { asset: CreationAsset; onOpen: () => void }) {
+  const media = assetMediaContent(asset);
   return (
     <button type="button" className="mb-2 w-full rounded-lg border border-border bg-card p-3 text-left outline-none hover:bg-secondary/50 focus-visible:ring-2 focus-visible:ring-primary" onClick={onOpen}>
-      {asset.content.kind === 'media' && <MediaPreview assetId={asset.asset_id} content={asset.content} alt="" className="mb-3 aspect-[4/3] w-full rounded-md bg-secondary object-cover" />}
+      {media && <MediaPreview assetId={asset.asset_id} content={media} alt="" className="mb-3 aspect-[4/3] w-full rounded-md bg-secondary object-cover" />}
       <p className="truncate text-sm font-medium">{asset.title}</p>
-      {asset.content.kind === 'prompt' ? <PromptPreview segments={asset.content.segments} /> : <p className="mt-1 truncate text-xs text-muted-foreground">{asset.content.filename}</p>}
+      {asset.content.kind === 'prompt' ? <PromptPreview segments={asset.content.segments} /> : <p className="mt-1 truncate text-xs text-muted-foreground">{media?.filename}</p>}
       <TagList tags={asset.tags} />
     </button>
   );
@@ -739,14 +743,6 @@ function PromptEditor({ state, busy, textareaRef, variableName, selection, dupli
         {state.variables.length > 0 && <div className="mt-3 space-y-2">{state.variables.map(variable => <div key={variable.id} className="flex items-center gap-2 rounded-md bg-secondary px-2 py-1.5 text-xs"><span className="text-muted-foreground">{variable.name}：</span><span className="min-w-0 flex-1 truncate">{state.text.slice(variable.start, variable.end)}</span><button type="button" aria-label={`移除变量 ${variable.name}`} className="rounded p-1 text-muted-foreground hover:bg-background hover:text-foreground" onClick={() => onChange({ ...state, variables: state.variables.filter(item => item.id !== variable.id) })}><X className="size-3.5" /></button></div>)}</div>}
       </div>
       <TagField value={state.tags} onChange={tags => onChange({ ...state, tags })} />
-      <div className="rounded-lg border border-border bg-card p-3">
-        <p className="text-sm font-medium">推荐配置</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">可选。Agent 选用这条提示词时按此定模型与参数；填模型 id，不填别名。</p>
-        <div className="mt-3 grid grid-cols-[auto_1fr] gap-2">
-          <select aria-label="推荐模式" value={state.recommendationMode} onChange={event => onChange({ ...state, recommendationMode: event.target.value as 'image' | 'video' })} className="h-9 rounded-md border border-input bg-transparent px-2 text-sm text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"><option value="image">图片</option><option value="video">视频</option></select>
-          <Input aria-label="推荐模型" value={state.recommendationModel} onChange={event => onChange({ ...state, recommendationModel: event.target.value })} placeholder="模型 id，如 gpt-image-2" />
-        </div>
-        <textarea aria-label="推荐参数" rows={3} value={state.recommendationParams} onChange={event => onChange({ ...state, recommendationParams: event.target.value })} placeholder={'每行一条，如\nquality=high\nsize=2048x2048'} className="mt-2 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring" />
-      </div>
       {duplicateTitle ? <div className="rounded-lg border border-border bg-card p-3 text-xs leading-relaxed"><p>提示词正文与“{duplicateTitle}”相同，仍可按你的意图保存为另一条资产。</p><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={onCancelDuplicate}>取消</Button><Button size="sm" disabled={busy} onClick={onConfirmDuplicate}>仍然保存</Button></div></div> : <div className="grid gap-2"><Button className="w-full" disabled={busy} onClick={onSave}>{busy ? '保存中…' : state.assetId ? '保存修改' : '保存提示词资产'}</Button>{showSaveAndAddCanvas && <Button variant="outline" className="w-full" disabled={busy} onClick={onSaveAndAddCanvas}>保存并加入画布</Button>}</div>}
       {onDelete && <DeleteAssetButton disabled={busy} onClick={onDelete} />}
     </div>
@@ -781,20 +777,25 @@ function DeleteAssetButton({ disabled, onClick }: { disabled: boolean; onClick: 
   return <div className="border-t border-border pt-4"><Button variant="ghost" className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={disabled} onClick={onClick}><Trash2 />删除资产</Button></div>;
 }
 
-function AssetDetail({ asset, busy, onUse, onEdit }: {
+function AssetDetail({ asset, busy, onUse, onEdit, onDelete }: {
   asset: CreationAsset;
   busy: boolean;
   onUse: () => void;
-  onEdit: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }) {
+  const media = assetMediaContent(asset);
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-4">
-      {asset.content.kind === 'media' && <MediaPreview assetId={asset.asset_id} content={asset.content} alt={asset.title} className="aspect-square w-full rounded-lg border border-border bg-secondary object-contain" />}
+      {media && <MediaPreview assetId={asset.asset_id} content={media} alt={asset.title} className="aspect-square w-full rounded-lg border border-border bg-secondary object-contain" />}
       <h2 className="mt-3 text-base font-medium">{asset.title}</h2>
       {asset.content.kind === 'prompt' && <PromptPreview segments={asset.content.segments} />}
       <TagList tags={asset.tags} />
-      {asset.recommendation && <p className="mt-2 truncate text-xs text-muted-foreground" title={recommendationSummary(asset.recommendation)}>推荐：{recommendationSummary(asset.recommendation)}</p>}
-      <div className="mt-4 flex gap-2"><Button className="flex-1" disabled={busy} onClick={onUse}>使用</Button><Button variant="outline" disabled={busy} onClick={onEdit}>编辑</Button></div>
+      <div className="mt-4 flex gap-2">
+        <Button className="flex-1" disabled={busy} onClick={onUse}>使用</Button>
+        {onEdit && <Button variant="outline" disabled={busy} onClick={onEdit}>编辑</Button>}
+        {onDelete && <Button variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={busy} onClick={onDelete}>删除</Button>}
+      </div>
     </div>
   );
 }
@@ -811,53 +812,14 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   return <label className="block space-y-1.5"><span className="flex items-center justify-between text-xs text-muted-foreground"><span>{label}</span>{hint && <span className="max-w-48 truncate">{hint}</span>}</span>{children}</label>;
 }
 
-function TagField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  const current = new Set(parseTags(value));
-  const [draft, setDraft] = useState('');
-  const commitDraft = () => { const additions = parseTags(draft); if (!additions.length) return; onChange([...parseTags(value), ...additions].join(', ')); setDraft(''); };
-  return (
-    <Field label="标签">
-      <div className="relative"><Tags className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={draft} onChange={event => setDraft(event.target.value)} onBlur={commitDraft} onKeyDown={event => { if (event.key !== 'Enter' && event.key !== ',') return; event.preventDefault(); commitDraft(); }} placeholder="输入标签，按 Enter 添加" className="pl-9" /></div>
-      {current.size > 0 && <div className="flex flex-wrap gap-1.5 pt-1">{[...current].map(tag => <span key={tag} className="group inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:border-foreground/20 hover:bg-accent hover:text-foreground">{tag}<button type="button" aria-label={`移除标签 ${tag}`} className="rounded-full transition-colors group-hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" onClick={() => onChange(parseTags(value).filter(item => item !== tag).join(', '))}><X className="size-3" /></button></span>)}</div>}
-    </Field>
-  );
-}
-
 function TagList({ tags }: { tags: string[] }) {
   if (!tags.length) return null;
   return <div className="mt-2 flex flex-wrap gap-1.5">{tags.map(tag => <span key={tag} className="rounded-full border border-border bg-secondary px-2 py-0.5 text-xs text-muted-foreground">{tag}</span>)}</div>;
 }
 
 function promptEditorSignature(state: Omit<PromptEditorState, 'assetId' | 'initialSignature'>): string {
-  const { title, text, variables, tags, recommendationMode, recommendationModel, recommendationParams } = state;
-  return JSON.stringify({ title, text, variables, tags, recommendationMode, recommendationModel, recommendationParams });
-}
-
-function formatRecommendationParams(params?: Record<string, string | number | boolean>): string {
-  return Object.entries(params ?? {}).map(([key, value]) => `${key}=${String(value)}`).join('\n');
-}
-
-/** 每行 key=value；数字与 true/false 转成对应类型，其余按字符串。模型留空即不带推荐。 */
-function recommendationFromEditor(state: PromptEditorState): CreationAssetRecommendation | null {
-  const model = state.recommendationModel.trim();
-  if (!model) return null;
-  const params: Record<string, string | number | boolean> = {};
-  for (const line of state.recommendationParams.split(/\r?\n/)) {
-    const separator = line.indexOf('=');
-    if (separator <= 0) continue;
-    const key = line.slice(0, separator).trim();
-    const raw = line.slice(separator + 1).trim();
-    if (!key || !raw) continue;
-    if (raw === 'true' || raw === 'false') params[key] = raw === 'true';
-    else if (/^-?\d+(\.\d+)?$/.test(raw)) params[key] = Number(raw);
-    else params[key] = raw;
-  }
-  return { mode: state.recommendationMode, model, params };
-}
-
-function recommendationSummary(recommendation: CreationAssetRecommendation): string {
-  const params = Object.entries(recommendation.params).map(([key, value]) => `${key}=${String(value)}`);
-  return [recommendation.model, ...params].join(' · ');
+  const { title, text, variables, tags } = state;
+  return JSON.stringify({ title, text, variables, tags });
 }
 
 function mediaEditorSignature(state: Pick<MediaEditorState, 'title' | 'tags'>): string {
@@ -870,10 +832,6 @@ function defaultPromptTitle(text: string): string {
 
 function defaultMediaTitle(request: Extract<CreationAssetSaveRequest, { kind: 'media' }>): string {
   return request.file?.name.replace(/\.[^.]+$/, '') || request.sourcePath?.split('/').pop()?.replace(/\.[^.]+$/, '') || '未命名媒体';
-}
-
-function parseTags(value: string): string[] {
-  return [...new Set(value.split(/[，,]/).map(tag => tag.trim()).filter(Boolean))];
 }
 
 function errorMessage(error: unknown): string {
