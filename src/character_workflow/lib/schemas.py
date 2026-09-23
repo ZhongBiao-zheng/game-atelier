@@ -1669,6 +1669,7 @@ class CreationPromptAssetContent(BaseModel):
 
 
 MEDIA_MIME_PATTERN = r"^(image|video|audio)/"
+SHA256_PATTERN = r"^[a-f0-9]{64}$"
 TEAM_LIBRARY_ID_PATTERN = r"^lib_[a-f0-9]{16}$"
 TEAM_ASSET_ID_PATTERN = r"^ta_[0-9A-HJKMNP-TV-Z]{26}$"
 
@@ -1679,12 +1680,69 @@ class CreationMediaAssetContent(BaseModel):
     path: str = Field(min_length=1)
     mime_type: str = Field(pattern=MEDIA_MIME_PATTERN)
     bytes: int = Field(ge=1)
-    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    sha256: str = Field(pattern=SHA256_PATTERN)
     filename: str = Field(min_length=1, max_length=255)
 
 
+RecipeInputRole = Literal["reference", "mask", "mj_sref", "mj_cref", "mj_oref"]
+RecipeMediaKind = Literal["image", "video", "audio"]
+
+
+class RecipeInput(BaseModel):
+    """冻结快照里的一份参考：本体按 sha256 进 blobs，不引用任何本机路径。"""
+    model_config = ConfigDict(extra="forbid")
+    order: int = Field(ge=0)
+    role: RecipeInputRole
+    kind: RecipeMediaKind
+    sha256: str = Field(pattern=SHA256_PATTERN)
+    mime_type: str = Field(pattern=MEDIA_MIME_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_kind_matches_mime(self) -> "RecipeInput":
+        if self.mime_type.split("/", 1)[0] != self.kind:
+            raise ValueError("参考的 kind 与 mime_type 不一致")
+        return self
+
+
+class _RecipeFields(BaseModel):
+    """GenerationRecipe（本机）与 TeamGenerationSnapshot（团队库）共用的快照字段；只差 inputs 形状。"""
+    mode: Literal["image", "video"]
+    model: str = Field(min_length=1, max_length=200)
+    provider: str | None = None
+    alias: str | None = None
+    final_prompt: str
+    draft_prompt: str | None = None
+    # 提交时的参数，已去掉路径 / 费用 / 运行态字段（分享时由 team_library_share 清洗）。
+    params: dict[str, Any] = Field(default_factory=dict)
+    cost_cny: float | None = Field(default=None, ge=0)
+    cost_basis: Literal["actual", "estimated"] | None = None
+    submitted_at: str
+
+    @model_validator(mode="after")
+    def validate_recipe_shape(self) -> "_RecipeFields":
+        if (self.cost_cny is None) != (self.cost_basis is None):
+            raise ValueError("cost_cny 与 cost_basis 必须同时为空或同时有值")
+        orders = [row.order for row in self.inputs]  # type: ignore[attr-defined]
+        if orders != list(range(len(orders))):
+            raise ValueError("参考的 order 必须按升序从 0 连续编号")
+        return self
+
+
+class GenerationRecipe(_RecipeFields):
+    """生成资产的本机冻结快照：自包含，参考按 sha256 引用 blobs（不同于画布按 version_id 引用）。"""
+    model_config = ConfigDict(extra="forbid")
+    inputs: list[RecipeInput] = Field(default_factory=list, max_length=64)
+
+
+class CreationGenerationAssetContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["generation"]
+    media: CreationMediaAssetContent
+    snapshot: GenerationRecipe
+
+
 CreationAssetContent = Annotated[
-    CreationPromptAssetContent | CreationMediaAssetContent,
+    CreationPromptAssetContent | CreationMediaAssetContent | CreationGenerationAssetContent,
     Field(discriminator="kind"),
 ]
 
@@ -1697,28 +1755,10 @@ class AdoptionOrigin(BaseModel):
     raw_path: str | None = None
 
 
-class CreationAssetRecommendation(BaseModel):
-    """提示词资产可选携带的推荐出图配置。存模型 id 不存别名：别名是本机 keys.json 的东西，
-    换机器或删 key 就失效；运行时按 id 在可用模型里找，找不到由调用方回落默认并明说。
-    params 只收标量，键必须在对应 mode 的浏览器草稿白名单内（路径类字段永远进不来）。"""
-    model_config = ConfigDict(extra="forbid")
-    mode: Literal["image", "video"] = "image"
-    model: str = Field(min_length=1, max_length=200)
-    params: dict[str, str | int | float | bool] = Field(default_factory=dict, max_length=40)
-
-    @model_validator(mode="after")
-    def validate_param_keys(self) -> "CreationAssetRecommendation":
-        allowed = CANVAS_DRAFT_PARAM_FIELDS[self.mode]
-        rejected = sorted(key for key in self.params if key not in allowed)
-        if rejected:
-            raise ValueError(f"推荐参数不允许这些字段：{', '.join(rejected)}")
-        return self
-
-
 class CreationAsset(BaseModel):
     model_config = ConfigDict(extra="forbid")
     asset_id: str = Field(min_length=1, max_length=160)
-    kind: Literal["prompt", "media"]
+    kind: Literal["prompt", "media", "generation"]
     title: str = Field(min_length=1, max_length=120)
     tags: list[str] = Field(default_factory=list, max_length=20)
     created_at: str
@@ -1726,13 +1766,10 @@ class CreationAsset(BaseModel):
     last_used_at: str | None = None
     content: CreationAssetContent
     project_ids: list[str] = Field(default_factory=list)
-    recommendation: CreationAssetRecommendation | None = None
     adopted_from: AdoptionOrigin | None = None
 
     @model_validator(mode="after")
     def validate_content_identity(self) -> "CreationAsset":
-        if self.recommendation is not None and self.kind != "prompt":
-            raise ValueError("只有提示词资产可以携带推荐配置")
         if self.content.kind != self.kind:
             raise ValueError("creation asset content must match asset kind")
         if len(self.project_ids) != len(set(self.project_ids)):
@@ -1742,7 +1779,7 @@ class CreationAsset(BaseModel):
 
 class CreationAssetCatalog(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[3] = 3
+    schema_version: Literal[4] = 4
     revision: int = Field(default=0, ge=0)
     updated_at: str
     assets: list[CreationAsset] = Field(default_factory=list)
@@ -1768,7 +1805,6 @@ class CreationPromptAssetCreate(BaseModel):
     segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
     tags: list[str] = Field(default_factory=list, max_length=20)
     project_id: str | None = Field(default=None, min_length=1, max_length=160)
-    recommendation: CreationAssetRecommendation | None = None
 
 
 class CreationPromptAssetUpdate(BaseModel):
@@ -1776,7 +1812,6 @@ class CreationPromptAssetUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
     tags: list[str] = Field(default_factory=list, max_length=20)
-    recommendation: CreationAssetRecommendation | None = None
 
 
 class CreationMediaPathCreate(BaseModel):
@@ -2425,8 +2460,11 @@ class UserProfile(BaseModel):
 
 
 class TeamLibraryManifest(BaseModel):
-    """挂载目录里唯一被写入的文件 `.atelier-library.json`。"""
-    model_config = ConfigDict(extra="forbid")
+    """挂载目录里唯一被写入的文件 `.atelier-library.json`。
+
+    团队侧文件来自别人的机器：读模型一律 extra="ignore"，新版本多写的字段不让本机读挂。
+    """
+    model_config = ConfigDict(extra="ignore")
     format_version: Literal[1] = 1
     library_id: str = Field(pattern=TEAM_LIBRARY_ID_PATTERN)
     name: str = Field(min_length=1, max_length=120)
@@ -2435,21 +2473,50 @@ class TeamLibraryManifest(BaseModel):
 
 
 class TeamAssetAuthor(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
     display_name: str = Field(min_length=1, max_length=40)
 
 
 class TeamAssetMedia(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
     filename: str = Field(min_length=1, max_length=255)
     mime_type: str = Field(pattern=MEDIA_MIME_PATTERN)
     bytes: int = Field(ge=1)
-    sha256: str
+    sha256: str = Field(pattern=SHA256_PATTERN)
+
+
+class TeamRecipeInput(RecipeInput):
+    """团队库里的参考：多一个相对资产目录的 POSIX 路径（refs/NN-<sha12>.<ext>）。"""
+    model_config = ConfigDict(extra="ignore")
+    path: str = Field(min_length=1, max_length=255)
+
+    @field_validator("path")
+    @classmethod
+    def validate_relative_posix(cls, value: str) -> str:
+        parts = value.split("/")
+        if "\\" in value or value.startswith("/") or any(part in {"", ".", ".."} for part in parts):
+            raise ValueError("参考路径必须是资产目录内的相对 POSIX 路径")
+        return value
+
+
+class TeamGenerationSnapshot(_RecipeFields):
+    """asset.json 里的 snapshot。转本机快照：
+    GenerationRecipe.model_validate(snapshot.model_dump(exclude={"inputs": {"__all__": {"path"}}}))
+    """
+    model_config = ConfigDict(extra="ignore")
+    inputs: list[TeamRecipeInput] = Field(default_factory=list, max_length=64)
+
+
+class TeamAssetOrigin(BaseModel):
+    """只作追溯，不解析。"""
+    model_config = ConfigDict(extra="ignore")
+    job_id: str | None = None
+    canvas_project_id: str | None = None
 
 
 class TeamAssetFile(BaseModel):
     """分享资产的 `<asset_id>/asset.json`。"""
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
     team_asset_version: Literal[1] = 1
     asset_id: str = Field(pattern=TEAM_ASSET_ID_PATTERN)
     kind: Literal["generation", "media", "prompt"]
@@ -2460,8 +2527,8 @@ class TeamAssetFile(BaseModel):
     updated_at: str
     media: TeamAssetMedia | None = None
     prompt: CreationPromptAssetContent | None = None
-    snapshot: dict[str, Any] | None = None
-    origin: dict[str, Any] | None = None
+    snapshot: TeamGenerationSnapshot | None = None
+    origin: TeamAssetOrigin | None = None
 
     @model_validator(mode="after")
     def validate_kind_payload(self) -> "TeamAssetFile":
@@ -2503,6 +2570,9 @@ class TeamLibraryIndexEntry(BaseModel):
     updated_at: str
     reproducible: bool
     status: Literal["ready", "incomplete"]
+    # 仅 generation 有值：团队栏卡片直接显示模型与花费，不必再读 asset.json。
+    model: str | None = None
+    cost_cny: float | None = None
 
 
 class TeamLibraryIndex(BaseModel):
@@ -2547,3 +2617,49 @@ class TeamAssetAdoptResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     asset: CreationAsset
     created: bool
+
+
+class TeamShareJobOutput(BaseModel):
+    """Studio 历史的单张结果；output_index 是 Job.output_paths 的下标。"""
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["job_output"]
+    job_id: str = Field(min_length=1, max_length=160)
+    output_index: int = Field(ge=0)
+
+
+class TeamShareCreationAsset(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["creation_asset"]
+    asset_id: str = Field(min_length=1, max_length=160)
+
+
+TeamShareSource = Annotated[
+    TeamShareJobOutput | TeamShareCreationAsset,
+    Field(discriminator="kind"),
+]
+
+
+class TeamShareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source: TeamShareSource
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    allow_large: bool = False
+
+
+class TeamAssetUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(max_length=20)
+
+
+class TeamRelatedEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    library_id: str = Field(pattern=TEAM_LIBRARY_ID_PATTERN)
+    library_name: str
+    entry: TeamLibraryIndexEntry
+
+
+class CreationAssetStaleness(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["fresh", "stale", "withdrawn", "unknown"]

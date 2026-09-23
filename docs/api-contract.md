@@ -194,7 +194,7 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
 `POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle,layer-decomposition}`
 `POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
-`POST /creation-assets/prompts`（可带 `recommendation: {mode, model, params}`，model 为模型 id，params 键须在对应 mode 的草稿白名单内）`POST /creation-assets/media/{upload,from-path}`
+`POST /creation-assets/prompts` `POST /creation-assets/media/{upload,from-path}`
 `PUT /creation-assets/{asset_id}/{prompt,media}`
 `POST /creation-assets/{asset_id}/use` `DELETE /creation-assets/{asset_id}`
 `POST /canvas/projects/{id}/creation-assets/{asset_id}/insert`
@@ -224,7 +224,8 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `GET /canvas/projects` `/canvas/project-options` `/canvas/projects/{id}/document` `/canvas/projects/{id}/jobs`
 `GET /canvas/projects/{id}/versions/{version_id}/media`
 `GET /canvas/projects/{id}/versions/{version_id}/download`
-`GET /creation-assets?kind={prompt,media}` `/creation-assets/{asset_id}/content`
+`GET /creation-assets?kind={prompt,media,generation}` `/creation-assets/{asset_id}/content`
+`GET /creation-assets/{asset_id}/inputs/{order}`
 `GET /profile` `GET /team-libraries?project_id=`
 `GET /team-libraries/{library_id}/assets?kind&author&tag&q&cursor&limit`
 `GET /team-libraries/{library_id}/assets/{entry_id}/{content,thumb?w=}`
@@ -515,9 +516,20 @@ schema、摘要和项目内引用校验，再凭 30 分钟 token 调用 `commit`
 项目从索引消失后不可恢复。画布不提供回收区、撤销删除或恢复 API。
 
 创作资产是应用级个人数据，真源为 `creation-assets/catalog.json` 与
-`creation-assets/blobs/<sha256>.<ext>`，Studio 与所有 Canvas 共享同一资产身份。资产只有 prompt / media
-（media 覆盖图片 / 视频 / 音频）两类，每个资产只维护一份当前内容；标题、标签、提示词正文/变量和媒体文件
-均由同一个编辑入口原位更新。媒体按 SHA-256 去重，提示词重复只在 Web 提醒。
+`creation-assets/blobs/<sha256>.<ext>`，Studio 与所有 Canvas 共享同一资产身份。资产有 prompt / media
+（media 覆盖图片 / 视频 / 音频）/ generation 三类，每个资产只维护一份当前内容；标题、标签、提示词正文/变量和媒体文件
+均由同一个编辑入口原位更新。媒体按 SHA-256 去重，提示词重复只在 Web 提醒。提示词资产不携带模型或参数
+（`recommendation` 已删除；创建 / 更新请求带它返回 422）。
+
+生成资产 = 成片 + 自包含冻结快照：`content = {kind: "generation", media: CreationMediaAssetContent,
+snapshot: GenerationRecipe}`。`GenerationRecipe = {mode, model, provider, alias, final_prompt, draft_prompt,
+params, inputs, cost_cny, cost_basis, submitted_at}`；`cost_cny` 与 `cost_basis`（`actual | estimated`）同空同有。
+`inputs[] = {order, role, kind, sha256, mime_type}`，`role ∈ reference | mask | mj_sref | mj_cref | mj_oref`，
+`order` 按升序从 0 连续编号；参考本体同样按 sha256 进 blobs，不引用任何本机路径（不同于画布快照按
+`version_id` 引用）。`GET /creation-assets/{asset_id}/content` 对生成资产返回成片；
+`GET /creation-assets/{asset_id}/inputs/{order}` 返回第 `order` 份参考本体，prompt / media 资产、越界或 blob
+缺失均为 404。生成资产插入 Canvas 只复制成片，快照不进画布。删除资产只清理不再被任何资产（含其他生成资产的
+参考）引用的 blob。
 上传上限按类型分档：图片 50 MiB、音频 100 MiB、视频 500 MiB；插入 Canvas 生成面板作参考素材仍只收
 `image/*`。资产可物理删除，删除前必须显式确认，删除后不可恢复。
 
@@ -552,8 +564,10 @@ Canvas 文件复制到 `.runtime/backups/creation-assets/<UTC timestamp>/`；资
 旧引用转成标题快照。Job 与 Canvas 分别在正式锁内完成完整 schema 校验后落盘；已被淘汰的旧图片版本
 blob 只在备份完成后从活动目录清理。运行时永不读取该备份。
 
-v2 在同一次启动中紧接着迁移到 v3：资产种类 `image` 改名 `media`，只改写 `catalog.json`（备份同一份到
-`.runtime/backups/creation-assets/<UTC timestamp>/catalog.json`），blob 文件不动。`image` 不保留兼容读法。
+v2 / v3 在同一次启动中紧接着迁移到 v4（Skill CLI 等无 lifespan 的入口在读目录前补做同一步）：
+v2→v3 资产种类 `image` 改名 `media`，v3→v4 删掉每条资产的 `recommendation` 键；内存里一次改写并按 v4
+整表校验，通过才备份（`.runtime/backups/creation-assets/<UTC timestamp>/catalog.json`）并落盘，任何一条坏记录
+都让原文原封不动。blob 文件不动。`image` 与 `recommendation` 均不保留兼容读法。
 
 ### 角色衍生契约
 

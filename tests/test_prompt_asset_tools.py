@@ -1,10 +1,9 @@
-"""提示词资产的 Agent 读路径：索引过滤 / 标签词表 / 全文读取 / 推荐配置校验 / 授权。"""
+"""提示词资产的 Agent 读路径：索引过滤 / 标签词表 / 全文读取 / 授权。"""
 from __future__ import annotations
 
 from types import SimpleNamespace
 
 import pytest
-from pydantic import ValidationError
 
 from character_workflow.lib import workshop
 from character_workflow.lib.creation_assets import (
@@ -12,7 +11,6 @@ from character_workflow.lib.creation_assets import (
     list_prompt_asset_index,
     read_prompt_asset,
 )
-from character_workflow.lib.schemas import CreationAssetRecommendation
 from character_workflow.lib.workshop_schema import ListPromptAssetsInput, ReadPromptAssetInput
 
 
@@ -20,9 +18,7 @@ def _seed():
     hd = create_prompt_asset("通用高清-写实", [
         {"kind": "text", "text": "使图片变清晰，风格："},
         {"kind": "variable", "name": "风格", "default_value": "写实"},
-    ], ["高清", "写实"], recommendation=CreationAssetRecommendation(
-        model="gpt-image-2", params={"quality": "high", "size": "2048x2048"},
-    ))
+    ], ["高清", "写实"])
     vector = create_prompt_asset("高清-矢量", [{"kind": "text", "text": "矢量化"}], ["高清", "矢量"],
                                  project_id="project-a")
     poster = create_prompt_asset("海报构图", [{"kind": "text", "text": "海报"}], ["海报"])
@@ -51,36 +47,23 @@ def test_index_facets_cover_whole_library_and_project_rows_sort_first(isolated_d
     ]
     ranked = list_prompt_asset_index(project_id="project-a")["assets"]
     assert ranked[0]["asset_id"] == vector.asset_id
-    assert ranked[0]["has_recommendation"] is False
-    assert next(row for row in ranked if row["asset_id"] == hd.asset_id)["has_recommendation"] is True
+    assert set(ranked[0]) == {"asset_id", "title", "tags", "last_used_at"}
 
 
-def test_read_returns_prompt_variables_recommendation_and_marks_used(isolated_data_root):
+def test_read_returns_prompt_variables_and_marks_used(isolated_data_root):
     hd, _, _ = _seed()
     before = list_prompt_asset_index()["assets"]
     assert next(r for r in before if r["asset_id"] == hd.asset_id)["last_used_at"] is None
     detail = read_prompt_asset(hd.asset_id, "project-b")
     assert detail["prompt"] == "使图片变清晰，风格：写实"
     assert detail["variables"] == [{"name": "风格", "default_value": "写实"}]
-    assert detail["recommendation"] == {
-        "mode": "image", "model": "gpt-image-2", "params": {"quality": "high", "size": "2048x2048"},
-    }
+    assert "recommendation" not in detail
     after = next(r for r in list_prompt_asset_index(project_id="project-b")["assets"]
                  if r["asset_id"] == hd.asset_id)
     assert after["last_used_at"] is not None
     assert list_prompt_asset_index(project_id="project-b")["assets"][0]["asset_id"] == hd.asset_id
     with pytest.raises(KeyError):
         read_prompt_asset("creation-asset-missing")
-
-
-def test_recommendation_rejects_non_whitelisted_params():
-    with pytest.raises(ValidationError, match="mask_image"):
-        CreationAssetRecommendation(model="gpt-image-2", params={"mask_image": "/etc/passwd"})
-    with pytest.raises(ValidationError):
-        CreationAssetRecommendation(model="seedance", mode="video", params={"quality": "high"})
-    assert CreationAssetRecommendation(model="seedance", mode="video", params={"duration": 5}).params == {
-        "duration": 5,
-    }
 
 
 def _agent(capabilities, project_ids=(), canvas_project_ids=()):

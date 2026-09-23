@@ -168,7 +168,12 @@ def test_adopt_rejects_kind_mismatch_between_index_and_asset_json(isolated_data_
                     "bytes": len(_PNG),
                     "sha256": hashlib.sha256(_PNG).hexdigest(),
                 },
-                "snapshot": {"model": "seedream"},
+                "snapshot": {
+                    "mode": "image",
+                    "model": "seedream",
+                    "final_prompt": "董卓",
+                    "submitted_at": "2026-09-20T00:00:00Z",
+                },
             },
             ensure_ascii=False,
         ),

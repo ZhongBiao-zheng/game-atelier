@@ -27,8 +27,8 @@ def migrate_creation_assets_to_single_content() -> dict[str, Any] | None:
     if not catalog_path.is_file():
         return None
     raw = json.loads(catalog_path.read_text(encoding="utf-8"))
-    # v2 之后的任何版本都已越过这一步：v2→v3 跑完后再次启动 server 必须静默跳过，不能报错。
-    if raw.get("schema_version") in {2, 3}:
+    # v2 之后的任何版本都已越过这一步：后续迁移跑完后再次启动 server 必须静默跳过，不能报错。
+    if raw.get("schema_version") in {2, 3, 4}:
         return None
     if raw.get("schema_version") != 1:
         raise ValueError("unsupported creation asset catalog schema")
@@ -71,16 +71,22 @@ def migrate_creation_assets_to_single_content() -> dict[str, Any] | None:
 
 
 def migrate_creation_assets_to_media() -> dict[str, Any] | None:
-    """v2 → v3：资产种类 image 改名 media。无备份目录之外的改动，不动 blobs。"""
+    """v2 / v3 → v4，内存里一次改写、整表校验、一次落盘。
+
+    v2→v3：资产种类 image 改名 media；v3→v4：删掉提示词资产的 recommendation 字段。
+    无备份目录之外的改动，不动 blobs。v1 由 `migrate_creation_assets_to_single_content` 先升到 v2。
+    """
     catalog_path = data_root.creation_assets_dir() / "catalog.json"
     if not catalog_path.is_file():
         return None
     raw = json.loads(catalog_path.read_text(encoding="utf-8"))
-    if raw.get("schema_version") == 3:
+    version = raw.get("schema_version")
+    if version == 4:
         return None
-    if raw.get("schema_version") != 2:
+    if version not in {2, 3}:
         raise ValueError("unsupported creation asset catalog schema")
-    # 先在内存里改写并整表校验，通过了才备份 + 落盘：任何一条坏记录都让 v2 原文原封不动。
+    step = f"v{version}→v4"
+    # 先在内存里改写并整表校验，通过了才备份 + 落盘：任何一条坏记录都让原文原封不动。
     assets: list[dict[str, Any]] = []
     broken: list[str] = []
     for asset in raw.get("assets", []):
@@ -89,28 +95,29 @@ def migrate_creation_assets_to_media() -> dict[str, Any] | None:
             continue
         asset_id = asset.get("asset_id")
         label = asset_id if isinstance(asset_id, str) and asset_id else "<缺 asset_id>"
-        if asset.get("kind") == "image":
+        if version == 2 and asset.get("kind") == "image":
             content = asset.get("content")
             if not isinstance(content, dict):
                 broken.append(label)
                 continue
             asset["kind"] = "media"
             content["kind"] = "media"
+        asset.pop("recommendation", None)
         assets.append(asset)
     if broken:
         raise ValueError(
-            "创作资产目录 v2→v3 迁移中止（原文未改写），这些资产的 content 不是对象："
+            f"创作资产目录 {step} 迁移中止（原文未改写），这些资产的 content 不是对象："
             + "、".join(broken)
         )
     payload = {
-        **raw, "schema_version": 3, "revision": int(raw.get("revision", 0)) + 1,
+        **raw, "schema_version": 4, "revision": int(raw.get("revision", 0)) + 1,
         "updated_at": datetime.now(timezone.utc).isoformat(), "assets": assets,
     }
     try:
         CreationAssetCatalog.model_validate(payload)
     except ValidationError as error:
         raise ValueError(
-            "创作资产目录 v2→v3 迁移校验失败（原文未改写）："
+            f"创作资产目录 {step} 迁移校验失败（原文未改写）："
             + _describe_catalog_errors(error, assets)
         ) from error
 
@@ -119,7 +126,7 @@ def migrate_creation_assets_to_media() -> dict[str, Any] | None:
     backup_root.mkdir(parents=True, exist_ok=False)
     shutil.copy2(catalog_path, backup_root / "catalog.json")
     atomic_write_json(catalog_path, payload)
-    return {"migration": "creation-assets-v2-to-v3-media", "catalog_assets": len(assets),
+    return {"migration": f"creation-assets-v{version}-to-v4", "catalog_assets": len(assets),
             "backup_path": str(backup_root)}
 
 

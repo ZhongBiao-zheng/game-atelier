@@ -100,6 +100,7 @@ PUT /api/creation-assets/{asset_id}/media
 POST /api/creation-assets/{asset_id}/use
 DELETE /api/creation-assets/{asset_id}
 GET /api/creation-assets/{asset_id}/content
+GET /api/creation-assets/{asset_id}/inputs/{order}
 POST /api/canvas/projects/{project_id}/creation-assets/{asset_id}/insert
 GET /api/profile
 PUT /api/profile
@@ -160,6 +161,7 @@ _MANAGEMENT_READ_EXEMPT = frozenset({("GET", "/api/keys"), ("GET", "/api/team-li
 MEDIA_ROUTES = frozenset({
     "/api/raw", "/api/images", "/api/gallery/image",
     "/api/creation-assets/{asset_id}/content",
+    "/api/creation-assets/{asset_id}/inputs/{order}",
     "/api/canvas/projects/{project_id}/versions/{version_id}/media",
     "/api/canvas/projects/{project_id}/versions/{version_id}/download",
     "/api/canvas/projects/{project_id}/nodes/{node_id}/layers/download",

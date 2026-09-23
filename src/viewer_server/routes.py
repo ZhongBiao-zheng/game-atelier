@@ -2474,7 +2474,7 @@ def _raise_creation_asset_error(error: Exception) -> None:
 
 @router.get("/creation-assets", response_model=CreationAssetList)
 def get_creation_assets(
-    kind: Literal["prompt", "media"] | None = Query(default=None),
+    kind: Literal["prompt", "media", "generation"] | None = Query(default=None),
     scope: Literal["all", "project"] = Query(default="all"),
     project_id: str | None = Query(default=None),
 ):
@@ -2498,7 +2498,6 @@ def post_creation_prompt(payload: CreationPromptAssetCreate):
             payload.segments,
             payload.tags,
             payload.project_id,
-            recommendation=payload.recommendation,
         )
     except ValueError as error:
         _raise_creation_asset_error(error)
@@ -2557,7 +2556,6 @@ def put_creation_prompt_asset(asset_id: str, payload: CreationPromptAssetUpdate)
             title=payload.title,
             segments=payload.segments,
             tags=payload.tags,
-            recommendation=payload.recommendation,
         )
     except (KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
@@ -2614,6 +2612,17 @@ def get_creation_asset_content(asset_id: str):
     try:
         return FileResponse(creation_asset_media_path(asset_id))
     except (KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.get("/creation-assets/{asset_id}/inputs/{order}")
+def get_creation_asset_input(asset_id: str, order: int):
+    """生成资产快照里第 order 份参考的本体；prompt / media 资产与越界都是 404。"""
+    from character_workflow.lib.creation_assets import creation_asset_input_path
+    try:
+        path, mime_type = creation_asset_input_path(asset_id, order)
+        return FileResponse(path, media_type=mime_type)
+    except (FileNotFoundError, KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
 
 
