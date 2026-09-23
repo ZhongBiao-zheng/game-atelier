@@ -1,6 +1,7 @@
 import { promptFromAsset } from '@/lib/promptVariables';
 import {
   ChevronLeft,
+  Copy,
   ExternalLink,
   FileAudio,
   FileImage,
@@ -100,6 +101,8 @@ export interface CreationAssetPanelProps {
   /** 团队栏「挂载」出口，参数是团队栏当前的画布项目；不给就不显示挂载按钮。 */
   onOpenSettings?: (projectId: string) => void;
   onTeamAssetAdopted?: (result: TeamAssetAdoptResponse, entry: TeamLibraryIndexEntry) => void;
+  /** 复刻生成资产（asset.kind 恒为 'generation'）；传了才显示「复刻」。 */
+  onReproduce?: (asset: CreationAsset) => void;
 }
 
 export interface CreationAssetPanelHandle {
@@ -139,6 +142,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   onUseMedia,
   onOpenSettings,
   onTeamAssetAdopted,
+  onReproduce,
 }: CreationAssetPanelProps, ref) {
   const [kind, setKind] = useState<CreationAssetPanelMode>(initialKind);
   const [scope, setScope] = useState<'all' | 'project'>(projectId ? 'project' : 'all');
@@ -316,6 +320,21 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
       } else if (media) {
         onUseMedia(updated, media);
       }
+      onClose();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // 与「使用」同一套路：记一次使用，交给调用方填输入框，然后收起面板。
+  async function reproduceAsset(asset: CreationAsset) {
+    if (!onReproduce) return;
+    setBusy(true);
+    setError(null);
+    try {
+      onReproduce(await markCreationAssetUsed(asset.asset_id, projectId));
       onClose();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -562,6 +581,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
               projectId={teamProjectId}
               onAdopted={(result, entry) => { void refresh(); onTeamAssetAdopted?.(result, entry); }}
               onOpenSettings={onOpenSettings ? () => onOpenSettings(teamProjectId) : undefined}
+              onReproduce={onReproduce ? asset => { onReproduce(asset); onClose(); } : undefined}
               className="min-h-0 flex-1"
             />
           )}
@@ -578,7 +598,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           )}
           {kind !== 'team' && (
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
-            {visibleAssets.length ? visibleAssets.map(asset => <AssetCard key={asset.asset_id} asset={asset} onOpen={() => openAsset(asset)} />) : (
+            {visibleAssets.length ? visibleAssets.map(asset => <AssetCard key={asset.asset_id} asset={asset} busy={busy} onOpen={() => openAsset(asset)} onReproduce={onReproduce && asset.kind === 'generation' ? () => void reproduceAsset(asset) : undefined} />) : (
               <div className="grid min-h-40 place-items-center rounded-lg border border-dashed border-border px-8 text-center text-xs leading-relaxed text-muted-foreground">{normalizedQuery ? '没有匹配的创作资产' : kind === 'prompt' ? '还没有提示词资产' : '还没有媒体资产'}</div>
             )}
           </div>
@@ -636,6 +656,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           asset={selected}
           busy={busy}
           onUse={() => void applyAsset(selected)}
+          onReproduce={onReproduce && selected.kind === 'generation' ? () => void reproduceAsset(selected) : undefined}
           // 生成资产是冻结快照，本机不改；只能删。
           onEdit={selected.kind === 'generation' ? undefined : () => selected.kind === 'prompt' ? beginPromptEdit(selected) : beginMediaEdit(selected)}
           onDelete={selected.kind === 'generation' ? () => setDeleteTarget(selected) : undefined}
@@ -659,15 +680,24 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   );
 });
 
-function AssetCard({ asset, onOpen }: { asset: CreationAsset; onOpen: () => void }) {
+function AssetCard({ asset, busy, onOpen, onReproduce }: {
+  asset: CreationAsset;
+  busy: boolean;
+  onOpen: () => void;
+  onReproduce?: () => void;
+}) {
   const media = assetMediaContent(asset);
+  // 「复刻」是卡片外的兄弟按钮：按钮不能嵌套在打开详情的按钮里。
   return (
-    <button type="button" className="mb-2 w-full rounded-lg border border-border bg-card p-3 text-left outline-none hover:bg-secondary/50 focus-visible:ring-2 focus-visible:ring-primary" onClick={onOpen}>
-      {media && <MediaPreview assetId={asset.asset_id} content={media} alt="" className="mb-3 aspect-[4/3] w-full rounded-md bg-secondary object-cover" />}
-      <p className="truncate text-sm font-medium">{asset.title}</p>
-      {asset.content.kind === 'prompt' ? <PromptPreview segments={asset.content.segments} /> : <p className="mt-1 truncate text-xs text-muted-foreground">{media?.filename}</p>}
-      <TagList tags={asset.tags} />
-    </button>
+    <div className="mb-2 overflow-hidden rounded-lg border border-border bg-card">
+      <button type="button" className="w-full p-3 text-left outline-none hover:bg-secondary/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" onClick={onOpen}>
+        {media && <MediaPreview assetId={asset.asset_id} content={media} alt="" className="mb-3 aspect-[4/3] w-full rounded-md bg-secondary object-cover" />}
+        <p className="truncate text-sm font-medium">{asset.title}</p>
+        {asset.content.kind === 'prompt' ? <PromptPreview segments={asset.content.segments} /> : <p className="mt-1 truncate text-xs text-muted-foreground">{media?.filename}</p>}
+        <TagList tags={asset.tags} />
+      </button>
+      {onReproduce && <div className="px-3 pb-3"><Button size="sm" variant="outline" disabled={busy} onClick={onReproduce}><Copy />复刻</Button></div>}
+    </div>
   );
 }
 
@@ -777,10 +807,11 @@ function DeleteAssetButton({ disabled, onClick }: { disabled: boolean; onClick: 
   return <div className="border-t border-border pt-4"><Button variant="ghost" className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={disabled} onClick={onClick}><Trash2 />删除资产</Button></div>;
 }
 
-function AssetDetail({ asset, busy, onUse, onEdit, onDelete }: {
+function AssetDetail({ asset, busy, onUse, onReproduce, onEdit, onDelete }: {
   asset: CreationAsset;
   busy: boolean;
   onUse: () => void;
+  onReproduce?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
 }) {
@@ -793,6 +824,7 @@ function AssetDetail({ asset, busy, onUse, onEdit, onDelete }: {
       <TagList tags={asset.tags} />
       <div className="mt-4 flex gap-2">
         <Button className="flex-1" disabled={busy} onClick={onUse}>使用</Button>
+        {onReproduce && <Button variant="outline" disabled={busy} onClick={onReproduce}><Copy />复刻</Button>}
         {onEdit && <Button variant="outline" disabled={busy} onClick={onEdit}>编辑</Button>}
       </div>
       {onDelete && <div className="mt-4"><DeleteAssetButton disabled={busy} onClick={onDelete} /></div>}

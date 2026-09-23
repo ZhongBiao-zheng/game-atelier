@@ -1,30 +1,56 @@
 import {
+  Copy,
   Download,
   FileAudio,
   FileImage,
   FileText,
   FileVideo,
   FolderTree,
+  Pencil,
   RefreshCw,
   Search,
+  Undo2,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type ReactNode,
+} from 'react';
 
 import {
   adoptTeamAsset,
+  fetchProfile,
+  listRelatedTeamAssets,
   listTeamAssets,
   listTeamLibraries,
   rescanTeamLibrary,
   teamAssetThumbUrl,
+  updateTeamAsset,
+  withdrawTeamAsset,
 } from '@/api/teamLibraries';
+import { TagField, parseTags } from '@/components/assets/TagField';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import type { CreationAsset } from '@/schema/creationAssets';
 import {
   TEAM_ASSET_DRAG_TYPE,
   type TeamAssetAdoptResponse,
   type TeamLibraryIndexEntry,
   type TeamLibraryView,
+  type TeamRelatedEntry,
 } from '@/schema/teamLibrary';
 
 export interface TeamLibraryPanelProps {
@@ -33,6 +59,8 @@ export interface TeamLibraryPanelProps {
   onAdopted: (result: TeamAssetAdoptResponse, entry: TeamLibraryIndexEntry) => void;
   /** 没有挂载库时的「挂载」出口；不给就不显示按钮。 */
   onOpenSettings?: () => void;
+  /** 复刻出口（只在 Studio）：面板先采用成本机副本再回调。不给就不显示复刻与相关配方。 */
+  onReproduce?: (asset: CreationAsset) => void;
   className?: string;
 }
 
@@ -77,6 +105,14 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function formatCost(cost: number): string {
+  return `¥${cost.toFixed(2)}`;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 function TypeIcon({ entry, className }: { entry: TeamLibraryIndexEntry; className?: string }) {
   const mime = entry.mime_type ?? '';
   if (entry.kind === 'prompt') return <FileText className={className} />;
@@ -89,6 +125,7 @@ export function TeamLibraryPanel({
   projectId,
   onAdopted,
   onOpenSettings,
+  onReproduce,
   className,
 }: TeamLibraryPanelProps) {
   const [libraries, setLibraries] = useState<TeamLibraryView[]>([]);
@@ -101,7 +138,12 @@ export function TeamLibraryPanel({
   const [cursor, setCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [displayName, setDisplayName] = useState<string | null>(null);
+  const [related, setRelated] = useState<TeamRelatedEntry[]>([]);
+  const [editing, setEditing] = useState<TeamLibraryIndexEntry | null>(null);
+  const [withdrawing, setWithdrawing] = useState<TeamLibraryIndexEntry | null>(null);
   const requestId = useRef(0);
+  const canReproduce = Boolean(onReproduce);
 
   const library = useMemo(
     () => libraries.find(item => item.library_id === libraryId) ?? null,
@@ -123,6 +165,27 @@ export function TeamLibraryPanel({
       .catch(() => { if (alive) setLibraries([]); });
     return () => { alive = false; };
   }, [projectId]);
+
+  // 显示名决定哪些卡是「我分享的」：只有作者本人能编辑 / 撤回。
+  useEffect(() => {
+    let alive = true;
+    void fetchProfile()
+      .then(profile => { if (alive) setDisplayName(profile.display_name); })
+      .catch(() => { if (alive) setDisplayName(null); });
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!canReproduce) {
+      setRelated([]);
+      return;
+    }
+    let alive = true;
+    void listRelatedTeamAssets(projectId)
+      .then(list => { if (alive) setRelated(list); })
+      .catch(() => { if (alive) setRelated([]); });
+    return () => { alive = false; };
+  }, [canReproduce, projectId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearch(query.trim()), 250);
@@ -209,6 +272,42 @@ export function TeamLibraryPanel({
     [libraryId, onAdopted, projectId],
   );
 
+  // 复刻 = 先采用（任何从库到本机的动作都是采用），再把本机副本交给调用方。
+  const reproduce = useCallback(
+    (targetLibraryId: string, entry: TeamLibraryIndexEntry) => {
+      if (!onReproduce) return;
+      setBusy(true);
+      setError(null);
+      void adoptTeamAsset(targetLibraryId, entry.id, projectId)
+        .then(result => onReproduce(result.asset))
+        .catch(() => setError('复刻失败'))
+        .finally(() => setBusy(false));
+    },
+    [onReproduce, projectId],
+  );
+
+  const replaceEntry = useCallback((updated: TeamLibraryIndexEntry) => {
+    setEntries(current => current.map(item => (item.id === updated.id ? updated : item)));
+    setRelated(current =>
+      current.map(item => (item.entry.id === updated.id ? { ...item, entry: updated } : item)),
+    );
+  }, []);
+
+  const confirmWithdraw = useCallback(() => {
+    const target = withdrawing;
+    setWithdrawing(null);
+    if (!target || !libraryId) return;
+    setBusy(true);
+    setError(null);
+    void withdrawTeamAsset(libraryId, target.id)
+      .then(() => {
+        setEntries(current => current.filter(item => item.id !== target.id));
+        setRelated(current => current.filter(item => item.entry.id !== target.id));
+      })
+      .catch(caught => setError(errorMessage(caught, '撤回失败')))
+      .finally(() => setBusy(false));
+  }, [libraryId, withdrawing]);
+
   const typed = useMemo(
     () => entries.filter(entry => matchesType(entry, typeFilter)),
     [entries, typeFilter],
@@ -241,6 +340,32 @@ export function TeamLibraryPanel({
 
   return (
     <div className={cn('flex min-h-0 flex-col gap-3 p-3', className)}>
+      {related.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-xs text-muted-foreground">相关配方</p>
+          <div className="no-scrollbar flex gap-2 overflow-x-auto">
+            {related.map(item => (
+              <button
+                key={`${item.library_id}:${item.entry.id}`}
+                type="button"
+                disabled={busy}
+                onClick={() => reproduce(item.library_id, item.entry)}
+                className="w-36 shrink-0 rounded-md border border-border bg-card px-2 py-1.5 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:opacity-50"
+              >
+                <p className="truncate text-xs" title={item.entry.title}>{item.entry.title}</p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {[
+                    item.entry.author,
+                    item.entry.model,
+                    item.entry.cost_cny != null ? formatCost(item.entry.cost_cny) : null,
+                  ].filter(part => part != null).join(' · ')}
+                </p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         {libraries.length === 1 ? (
           <span className="truncate text-sm font-medium">{libraries[0].name}</span>
@@ -330,7 +455,15 @@ export function TeamLibraryPanel({
                     entry={entry}
                     libraryId={library?.library_id ?? ''}
                     busy={busy}
+                    owned={displayName !== null && entry.kind !== 'raw' && entry.author === displayName}
                     onAdopt={adopt}
+                    onReproduce={
+                      onReproduce && library
+                        ? item => reproduce(library.library_id, item)
+                        : undefined
+                    }
+                    onEdit={setEditing}
+                    onWithdraw={setWithdrawing}
                   />
                 ))}
               </div>
@@ -343,7 +476,75 @@ export function TeamLibraryPanel({
           </div>
         </div>
       )}
+
+      {editing && libraryId && (
+        <TeamAssetEditDialog
+          key={editing.id}
+          entry={editing}
+          libraryId={libraryId}
+          onClose={() => setEditing(null)}
+          onSaved={updated => { replaceEntry(updated); setEditing(null); }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={withdrawing !== null}
+        title="撤回团队资产"
+        message={withdrawing?.title ?? ''}
+        confirmText="撤回"
+        variant="destructive"
+        onConfirm={confirmWithdraw}
+        onCancel={() => setWithdrawing(null)}
+      />
     </div>
+  );
+}
+
+function TeamAssetEditDialog({
+  entry,
+  libraryId,
+  onClose,
+  onSaved,
+}: {
+  entry: TeamLibraryIndexEntry;
+  libraryId: string;
+  onClose: () => void;
+  onSaved: (entry: TeamLibraryIndexEntry) => void;
+}) {
+  const [title, setTitle] = useState(entry.title);
+  const [tags, setTags] = useState(entry.tags.join(', '));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = () => {
+    const trimmed = title.trim();
+    if (!trimmed || saving) return;
+    setSaving(true);
+    setError(null);
+    void updateTeamAsset(libraryId, entry.id, { title: trimmed, tags: parseTags(tags) })
+      .then(onSaved)
+      .catch(caught => {
+        setError(errorMessage(caught, '保存失败'));
+        setSaving(false);
+      });
+  };
+
+  return (
+    <Dialog open onOpenChange={next => { if (!next && !saving) onClose(); }}>
+      <DialogContent aria-describedby={undefined}>
+        <DialogHeader><DialogTitle>编辑团队资产</DialogTitle></DialogHeader>
+        <label className="block space-y-1.5">
+          <span className="text-xs text-muted-foreground">标题</span>
+          <Input value={title} onChange={event => setTitle(event.target.value)} />
+        </label>
+        <TagField value={tags} onChange={setTags} />
+        {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+        <DialogFooter>
+          <Button size="sm" variant="outline" disabled={saving} onClick={onClose}>取消</Button>
+          <Button size="sm" disabled={saving || !title.trim()} onClick={save}>保存</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -351,16 +552,26 @@ function TeamAssetCard({
   entry,
   libraryId,
   busy,
+  owned,
   onAdopt,
+  onReproduce,
+  onEdit,
+  onWithdraw,
 }: {
   entry: TeamLibraryIndexEntry;
   libraryId: string;
   busy: boolean;
+  /** 当前显示名分享的资产：可编辑 / 撤回。 */
+  owned: boolean;
   onAdopt: (entry: TeamLibraryIndexEntry) => void;
+  onReproduce?: (entry: TeamLibraryIndexEntry) => void;
+  onEdit: (entry: TeamLibraryIndexEntry) => void;
+  onWithdraw: (entry: TeamLibraryIndexEntry) => void;
 }) {
   const [broken, setBroken] = useState(false);
   const incomplete = entry.status === 'incomplete';
   const showThumb = !broken && (entry.mime_type ?? '').startsWith('image/');
+  const reproducible = Boolean(onReproduce) && entry.reproducible && entry.status === 'ready';
 
   const onDragStart = (event: DragEvent<HTMLDivElement>) => {
     event.dataTransfer.setData(
@@ -395,7 +606,10 @@ function TeamAssetCard({
       {entry.author && (
         <p className="truncate text-xs text-muted-foreground">{entry.author} · {formatBytes(entry.bytes)}</p>
       )}
-      <div className="mt-1 flex items-center justify-between gap-1">
+      {entry.kind === 'generation' && entry.model != null && (
+        <p className="truncate text-xs text-muted-foreground" title={entry.model}>{entry.model}</p>
+      )}
+      <div className="mt-1 flex flex-wrap items-center gap-1">
         {incomplete ? (
           <span className="text-xs text-muted-foreground">同步中</span>
         ) : (
@@ -403,7 +617,43 @@ function TeamAssetCard({
             <Download />采用
           </Button>
         )}
+        {reproducible && (
+          <CardIconButton label="复刻" disabled={busy} onClick={() => onReproduce?.(entry)}>
+            <Copy />
+          </CardIconButton>
+        )}
+        {owned && (
+          <>
+            <CardIconButton label="编辑" disabled={busy} onClick={() => onEdit(entry)}>
+              <Pencil />
+            </CardIconButton>
+            <CardIconButton label="撤回" disabled={busy} onClick={() => onWithdraw(entry)}>
+              <Undo2 />
+            </CardIconButton>
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+function CardIconButton({ label, disabled, onClick, children }: {
+  label: string;
+  disabled: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Button
+      size="icon"
+      variant="ghost"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="size-8"
+    >
+      {children}
+    </Button>
   );
 }

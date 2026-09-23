@@ -82,9 +82,14 @@ vi.mock('@/api/creationAssets', async importOriginal => {
 });
 
 vi.mock('./TeamLibraryPanel', () => ({
-  TeamLibraryPanel: ({ projectId, onOpenSettings }: { projectId: string; onOpenSettings?: () => void }) => (
+  TeamLibraryPanel: ({ projectId, onOpenSettings, onReproduce }: {
+    projectId: string;
+    onOpenSettings?: () => void;
+    onReproduce?: (asset: CreationAsset) => void;
+  }) => (
     <div data-testid="team-panel" data-project-id={projectId}>
       {onOpenSettings && <button type="button" onClick={onOpenSettings}>挂载</button>}
+      {onReproduce && <button type="button" onClick={() => onReproduce(generationAsset)}>团队复刻</button>}
     </div>
   ),
 }));
@@ -428,5 +433,62 @@ describe('CreationAssetPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
 
     await waitFor(() => expect(mocks.deleteAsset).toHaveBeenCalledWith('asset-generation'));
+  });
+
+  it('passes onReproduce through to the team panel only when given', async () => {
+    mocks.list.mockResolvedValue({ revision: 1, assets: [] });
+    const onReproduce = vi.fn();
+    const view = render(
+      <CreationAssetPanel projectId="canvas-a" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} onReproduce={onReproduce} />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: '团队' }));
+    fireEvent.click(await screen.findByRole('button', { name: '团队复刻' }));
+    expect(onReproduce).toHaveBeenCalledWith(generationAsset);
+
+    view.rerender(
+      <CreationAssetPanel projectId="canvas-a" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />,
+    );
+    expect(await screen.findByTestId('team-panel')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '团队复刻' })).not.toBeInTheDocument();
+  });
+
+  it('reproduces a generation asset from its card and detail', async () => {
+    const mediaAsset: CreationAsset = {
+      ...promptAsset,
+      asset_id: 'asset-media',
+      kind: 'media',
+      title: '普通图',
+      tags: [],
+      content: { kind: 'media', path: 'creation-assets/blobs/m.png', mime_type: 'image/png', bytes: 3, sha256: 'c'.repeat(64), filename: 'm.png' },
+    };
+    mocks.list.mockResolvedValue({ revision: 1, assets: [generationAsset, mediaAsset] });
+    mocks.markUsed.mockResolvedValue(generationAsset);
+    const onReproduce = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <CreationAssetPanel initialKind="media" onClose={onClose} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} onReproduce={onReproduce} />,
+    );
+
+    await screen.findByRole('button', { name: /普通图/ });
+    const cardButtons = screen.getAllByRole('button', { name: '复刻' });
+    expect(cardButtons).toHaveLength(1);
+    fireEvent.click(cardButtons[0]);
+    await waitFor(() => expect(onReproduce).toHaveBeenCalledWith(generationAsset));
+    expect(mocks.markUsed).toHaveBeenCalledWith('asset-generation', undefined);
+    expect(onClose).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole('button', { name: /雪山白犬/ }));
+    await screen.findByRole('heading', { name: '雪山白犬' });
+    fireEvent.click(screen.getByRole('button', { name: '复刻' }));
+    await waitFor(() => expect(onReproduce).toHaveBeenCalledTimes(2));
+  });
+
+  it('hides reproduce on generation assets without onReproduce', async () => {
+    mocks.list.mockResolvedValue({ revision: 1, assets: [generationAsset] });
+    render(<CreationAssetPanel initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /雪山白犬/ }));
+    await screen.findByRole('heading', { name: '雪山白犬' });
+    expect(screen.queryByRole('button', { name: '复刻' })).not.toBeInTheDocument();
   });
 });
