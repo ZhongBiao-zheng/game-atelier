@@ -701,7 +701,7 @@ function AssetCard({ asset, busy, onOpen, onReproduce }: {
   );
 }
 
-/** 服务端能存的媒体类型（与 creation_assets.MEDIA_SUFFIXES 一致）。 */
+/** 服务端能存的媒体类型（与 schemas.MEDIA_SUFFIXES 一致）。 */
 const MEDIA_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime,audio/mpeg,audio/wav,audio/mp4';
 
 /** 已入库的媒体：图片直接显示，视频/音频给原生播放器。 */

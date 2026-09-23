@@ -10,7 +10,7 @@ from tests.local_client import LocalTestClient as TestClient
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.creation_assets import list_creation_assets
 from character_workflow.lib.creation_assets_migration import (
-    migrate_creation_assets_to_media,
+    migrate_creation_assets_to_v4,
     migrate_creation_assets_to_single_content,
 )
 from viewer_server.server_app import build_app
@@ -169,7 +169,7 @@ def test_versioned_assets_are_backed_up_and_migrated_once(isolated_data_root):
     assert (backup / "canvases" / canvas_id / "canvas.json").is_file()
     assert (creation_assets_dir.parent / ".runtime" / "backups" / "creation-assets").is_dir()
     # server 启动顺序：v1→v2 之后紧接 v2→v4，之后目录才可读。
-    assert migrate_creation_assets_to_media()["catalog_assets"] == 2
+    assert migrate_creation_assets_to_v4()["catalog_assets"] == 2
     assert json.loads((creation_assets_dir / "catalog.json").read_text("utf-8"))["schema_version"] == 4
     restored = next(asset for asset in list_creation_assets().assets if asset.asset_id == asset_id)
     assert restored.title == "旧提示词"
@@ -207,15 +207,15 @@ def test_v2_image_assets_migrate_to_media_v4(isolated_data_root):
         }],
     }
     atomic_write_json(isolated_data_root / "creation-assets" / "catalog.json", catalog)
-    from character_workflow.lib.creation_assets_migration import migrate_creation_assets_to_media
-    result = migrate_creation_assets_to_media()
+    from character_workflow.lib.creation_assets_migration import migrate_creation_assets_to_v4
+    result = migrate_creation_assets_to_v4()
     assert result["catalog_assets"] == 1
     listed = list_creation_assets(kind="media")
     assert listed.assets[0].kind == "media" and listed.assets[0].content.kind == "media"
     raw = json.loads((isolated_data_root / "creation-assets" / "catalog.json").read_text("utf-8"))
     assert raw["schema_version"] == 4
     assert "recommendation" not in raw["assets"][0]
-    assert migrate_creation_assets_to_media() is None
+    assert migrate_creation_assets_to_v4() is None
 
 
 def _v2_catalog(content: object) -> dict:
@@ -236,7 +236,7 @@ def test_media_migration_keeps_v2_intact_when_content_is_not_an_object(isolated_
     atomic_write_json(catalog_path, _v2_catalog("creation-assets/blobs/x.png"))
 
     with pytest.raises(ValueError, match="creation-asset-img2"):
-        migrate_creation_assets_to_media()
+        migrate_creation_assets_to_v4()
 
     raw = json.loads(catalog_path.read_text("utf-8"))
     assert raw["schema_version"] == 2 and raw["assets"][0]["kind"] == "image"
@@ -252,7 +252,7 @@ def test_media_migration_keeps_v2_intact_when_a_row_fails_validation(isolated_da
     }))
 
     with pytest.raises(ValueError, match="creation-asset-img2"):
-        migrate_creation_assets_to_media()
+        migrate_creation_assets_to_v4()
 
     raw = json.loads(catalog_path.read_text("utf-8"))
     assert raw["schema_version"] == 2 and raw["assets"][0]["kind"] == "image"
@@ -319,7 +319,7 @@ def test_v3_catalog_drops_recommendation_on_the_read_path(isolated_data_root, cl
     backups = list((isolated_data_root / ".runtime" / "backups" / "creation-assets").iterdir())
     assert len(backups) == 1
     assert json.loads((backups[0] / "catalog.json").read_text("utf-8"))["schema_version"] == 3
-    assert migrate_creation_assets_to_media() is None
+    assert migrate_creation_assets_to_v4() is None
 
 
 def test_v3_catalog_migration_keeps_original_when_a_row_is_broken(isolated_data_root):
@@ -329,7 +329,7 @@ def test_v3_catalog_migration_keeps_original_when_a_row_is_broken(isolated_data_
     atomic_write_json(catalog_path, catalog)
 
     with pytest.raises(ValueError, match="creation-asset-media"):
-        migrate_creation_assets_to_media()
+        migrate_creation_assets_to_v4()
 
     raw = json.loads(catalog_path.read_text("utf-8"))
     assert raw["schema_version"] == 3 and "recommendation" in raw["assets"][0]
@@ -339,9 +339,9 @@ def test_v3_catalog_migration_keeps_original_when_a_row_is_broken(isolated_data_
 def test_v4_catalog_is_left_alone_by_every_step(isolated_data_root):
     catalog_path = isolated_data_root / "creation-assets" / "catalog.json"
     atomic_write_json(catalog_path, _v3_catalog())
-    migrate_creation_assets_to_media()
+    migrate_creation_assets_to_v4()
     before = catalog_path.read_text("utf-8")
 
     assert migrate_creation_assets_to_single_content() is None
-    assert migrate_creation_assets_to_media() is None
+    assert migrate_creation_assets_to_v4() is None
     assert catalog_path.read_text("utf-8") == before

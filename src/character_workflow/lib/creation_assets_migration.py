@@ -70,7 +70,7 @@ def migrate_creation_assets_to_single_content() -> dict[str, Any] | None:
     return {**manifest, "backup_path": str(backup_root)}
 
 
-def migrate_creation_assets_to_media() -> dict[str, Any] | None:
+def migrate_creation_assets_to_v4() -> dict[str, Any] | None:
     """v2 / v3 → v4，内存里一次改写、整表校验、一次落盘。
 
     v2→v3：资产种类 image 改名 media；v3→v4：删掉提示词资产的 recommendation 字段。

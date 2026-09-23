@@ -945,9 +945,9 @@ def migrate_creation_asset_catalog_schema() -> None:
     不在这里补一次就会在 `_read_catalog_unlocked` 里以「创作资产库状态损坏」炸出来。
     延迟 import：迁移模块反向依赖 canvas_projects / jobs。
     """
-    from character_workflow.lib.creation_assets_migration import migrate_creation_assets_to_media
+    from character_workflow.lib.creation_assets_migration import migrate_creation_assets_to_v4
 
-    migrate_creation_assets_to_media()
+    migrate_creation_assets_to_v4()
 
 
 def migrate_legacy_canvas_libraries() -> int:
