@@ -809,15 +809,19 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 | 状态 | `code` | 场景 |
 |---|---|---|
 | 409 | `profile_required` | 本机没设显示名 |
-| 503 | `library_unreachable` | 挂载目录当前不可达 |
+| 503 | `library_unreachable` | 挂载目录当前不可达；或写到一半出 I/O 错误（磁盘满 / 没权限 / 掉线），`message` 带出错路径 |
 | 404 | — | 库不存在；分享源（Studio job / 创作资产）不存在；编辑 / 撤回的资产不在库里 |
 | 403 | `not_author` | 编辑 / 撤回别人的资产（作者 = `asset.json.author.display_name` 与本机显示名相同） |
 | 413 | `refs_too_large` | 参考内容合计超过 200 MB，`detail.bytes` 为合计字节数；确认后带 `allow_large: true` 重发 |
 | 422 | `not_shareable` | 源不可分享：非 Studio 记录、未完成、非图片 / 视频、`output_index` 越界 |
 | 422 | `source_missing` | 本机找不到成片或某份参考的文件 |
-| 422 | `invalid` | 标题 / 标签 / 显示名去空白后为空或超长 |
+| 422 | `invalid` | 标题 / 显示名去空白后为空，或单个标签超过 40 字 |
+| 422 | —（`detail` 为列表） | 请求体校验：标题超 120 字、标签超 20 个等长度 / 数量上限，FastAPI 标准格式 |
+| 409 | —（`detail` 为字符串） | 分享创作资产时本机资产库状态损坏（与 `/creation-assets` 接口同一映射） |
+| 500 | `refresh_failed` | 已写入 / 已撤回，但重扫索引失败；`detail.asset_id` 指明是哪条，画师重新扫描即可 |
 
-检查顺序为显示名 → 库存在 → 库可达 → 源。`TeamShareRequest.source` 为
+检查顺序为显示名 → 库存在 → 库可达 → 标题 / 标签 → 源。坏掉的 job 文件等本机数据故障不归入
+`invalid`，按 500 报出。`TeamShareRequest.source` 为
 `{kind: "job_output", job_id, output_index}`（`output_index` 是 `Job.output_paths` 的下标，只收
 `namespace == "studio"`、`status ∈ done | partial`、`kind ∈ image | video`）或
 `{kind: "creation_asset", asset_id}`（prompt / media / generation 三类都可分享）。成功后路由在同一请求内

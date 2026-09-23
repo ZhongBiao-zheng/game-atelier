@@ -6,9 +6,9 @@
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from character_workflow.lib import data_root
 from character_workflow.lib import team_library as tl
 from character_workflow.lib import team_library_index as idx
-from character_workflow.lib.creation_assets import get_creation_asset
+from character_workflow.lib.creation_assets import CreationAssetStateError, get_creation_asset
 from character_workflow.lib.schemas import (
     CreationAssetStaleness,
     TeamAssetAdoptRequest,
@@ -47,15 +47,17 @@ from character_workflow.lib.team_library_share import (
     share_creation_asset,
     share_job_output,
     update_shared_asset,
+    validate_share_meta,
     withdraw_shared_asset,
 )
+
+logger = logging.getLogger(__name__)
 
 team_library_router = APIRouter(prefix="/api")
 
 _UNREACHABLE = {"code": "library_unreachable", "message": "团队库目录不可达"}
 _PROFILE_REQUIRED = {"code": "profile_required", "message": "先设置显示名"}
 _RELATED_LIMIT = 20
-_EARLIEST = datetime.min.replace(tzinfo=timezone.utc)
 
 
 def _mounts(project_id: str | None = None) -> list[TeamLibraryMount]:
@@ -123,12 +125,24 @@ def _writable_mount(library_id: str) -> TeamLibraryMount:
     return mount
 
 
-@contextmanager
-def _share_errors() -> Iterator[None]:
-    """分享 / 编辑 / 撤回的错误映射。顺序要紧：TooLarge 与 TeamShareError 都是 ValueError。
+def _validate_meta(title: str, tags: list[str], author: str) -> None:
+    """在调 lib 前单独校验标题 / 标签 / 显示名：只有这一步的 ValueError 才是「请求不合法」。
 
-    只认 lib 声明的异常与 ValueError（标题 / 标签 / 显示名非法，含 pydantic ValidationError）；
-    其余异常照常冒成 500，别把真 bug 翻成「请求不合法」。
+    长度 / 数量上限已由请求体模型挡掉（标准 422），这里剩下去空白后为空、单个标签超 40 字。
+    """
+    try:
+        validate_share_meta(title, tags, author)
+    except ValueError as error:
+        raise HTTPException(422, detail={"code": "invalid", "message": str(error)}) from error
+
+
+@contextmanager
+def _share_errors(mount: TeamLibraryMount) -> Iterator[None]:
+    """分享 / 编辑 / 撤回的错误映射，只认 lib 声明的异常。
+
+    顺序要紧：TooLarge 是 TeamShareError 之外的另一种 ValueError，两者都得在别的分支前；
+    TeamShareForbidden 继承 PermissionError，必须先于 OSError。其余 ValueError（坏 job 文件的
+    JSONDecodeError / ValidationError 等）不在这里翻译，照常冒成 500 带 traceback。
     """
     try:
         yield
@@ -138,24 +152,49 @@ def _share_errors() -> Iterator[None]:
         ) from error
     except TeamShareError as error:
         raise HTTPException(422, detail={"code": error.code, "message": str(error)}) from error
+    except CreationAssetStateError as error:
+        # 与 routes.py 的创作资产接口同一映射：本机资产库状态损坏 → 409。
+        raise HTTPException(409, detail=str(error)) from error
     except TeamShareNotFound:
         raise HTTPException(404, detail="找不到要分享的内容或这条团队资产") from None
     except TeamShareForbidden:
         raise HTTPException(
             403, detail={"code": "not_author", "message": "只有作者本人能改或撤回"}
         ) from None
-    except ValueError as error:
-        raise HTTPException(422, detail={"code": "invalid", "message": str(error)}) from error
+    except OSError as error:
+        # 写到一半网盘掉线 / 磁盘满 / 没权限：画师要看到是哪个路径，去修目录而不是重试请求。
+        where = error.filename or mount.mount_path
+        raise HTTPException(503, detail={
+            "code": "library_unreachable",
+            "message": f"写入团队库失败：{where}（{error.strerror or error}）",
+        }) from error
+
+
+def _refresh_after_write(mount: TeamLibraryMount, asset_id: str) -> TeamLibraryIndex:
+    """写入已经落盘，刷新失败不能让画师以为没写成：500 说清 asset_id 与补救动作。"""
+    from viewer_server.watcher import refresh_team_library
+
+    try:
+        return refresh_team_library(mount)
+    except Exception as error:
+        logger.exception("团队库 %s 写入 %s 后刷新索引失败", mount.library_id, asset_id)
+        raise HTTPException(500, detail=_written_but_stale(asset_id)) from error
+
+
+def _written_but_stale(asset_id: str) -> dict:
+    return {
+        "code": "refresh_failed",
+        "asset_id": asset_id,
+        "message": f"{asset_id} 已写入团队库，但索引没刷新成功，请重新扫描",
+    }
 
 
 def _refreshed_entry(mount: TeamLibraryMount, asset_id: str) -> TeamLibraryIndexEntry:
-    from viewer_server.watcher import refresh_team_library
-
-    index = refresh_team_library(mount)
+    index = _refresh_after_write(mount, asset_id)
     try:
         return idx.get_entry(index, asset_id)
     except KeyError:
-        raise HTTPException(500, detail=f"已写入团队库，但重扫后找不到 {asset_id}") from None
+        raise HTTPException(500, detail=_written_but_stale(asset_id)) from None
 
 
 def _reject_reserved_mount_path(raw: str) -> None:
@@ -223,8 +262,14 @@ def get_related_team_assets(project_id: str = Query(...)) -> list[TeamRelatedEnt
             TeamRelatedEntry(library_id=own.library_id, library_name=own.name, entry=entry)
             for entry in idx.related_entries(index, limit=_RELATED_LIMIT)
         )
-    rows.sort(key=lambda row: idx.parse_instant(row.entry.updated_at) or _EARLIEST, reverse=True)
+    rows.sort(key=lambda row: _instant_key(row.entry.updated_at), reverse=True)
     return rows[:_RELATED_LIMIT]
+
+
+def _instant_key(value: str) -> tuple[bool, float]:
+    """按时刻排（同 idx.related_entries）；解析不了的排最后。"""
+    instant = idx.parse_instant(value)
+    return (instant is not None, instant.timestamp() if instant else 0.0)
 
 
 @team_library_router.post("/team-libraries", response_model=TeamLibraryView, status_code=201)
@@ -244,9 +289,9 @@ def post_team_library(payload: TeamLibraryMountRequest) -> TeamLibraryView:
         raise HTTPException(422, detail="目录不存在") from None
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
-    idx.scan_library(mount)
-    from viewer_server.watcher import sync_team_library_watch
+    from viewer_server.watcher import refresh_team_library, sync_team_library_watch
 
+    refresh_team_library(mount)
     sync_team_library_watch(mount.library_id)
     return _view(mount)
 
@@ -375,8 +420,9 @@ def post_team_asset_adopt(
 def post_team_share(library_id: str, payload: TeamShareRequest) -> TeamLibraryIndexEntry:
     author = _author_or_409()
     mount = _writable_mount(library_id)
+    _validate_meta(payload.title, payload.tags, author)
     source = payload.source
-    with _share_errors():
+    with _share_errors(mount):
         if source.kind == "job_output":
             asset = share_job_output(
                 mount, job_id=source.job_id, output_index=source.output_index,
@@ -399,7 +445,8 @@ def put_team_asset(
 ) -> TeamLibraryIndexEntry:
     author = _author_or_409()
     mount = _writable_mount(library_id)
-    with _share_errors():
+    _validate_meta(payload.title, payload.tags, author)
+    with _share_errors(mount):
         update_shared_asset(
             mount, asset_id=asset_id, title=payload.title, tags=payload.tags, author=author
         )
@@ -410,11 +457,9 @@ def put_team_asset(
 def delete_team_asset(library_id: str, asset_id: str) -> Response:
     author = _author_or_409()
     mount = _writable_mount(library_id)
-    with _share_errors():
+    with _share_errors(mount):
         withdraw_shared_asset(mount, asset_id=asset_id, author=author)
-    from viewer_server.watcher import refresh_team_library
-
-    refresh_team_library(mount)
+    _refresh_after_write(mount, asset_id)
     return Response(status_code=204)
 
 

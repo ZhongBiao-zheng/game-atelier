@@ -772,3 +772,155 @@ def test_new_routes_capabilities(method, path, capability):
     from viewer_server.connection_capabilities import local_capability
 
     assert local_capability(method, path) == capability
+
+
+# ------------------------------------------------------------------ P2：评审第 1 轮
+
+
+@pytest.fixture
+def raw_client(isolated_data_root):
+    """另起一个 app（同一 data root），服务端异常回 500 而不是在测试里抛出。"""
+    return TestClient(
+        base_url="http://127.0.0.1",
+        app=build_app(dist_dir=isolated_data_root / "dist"),
+        raise_server_exceptions=False,
+    )
+
+
+def test_share_with_corrupted_job_file_is_500_not_invalid(
+    raw_client, isolated_data_root, shared_lib
+):
+    lib, folder = shared_lib
+    job = _studio_job_with_output(isolated_data_root)
+    (isolated_data_root / ".runtime" / "jobs" / f"{job.job_id}.json").write_text(
+        "{不是 json", encoding="utf-8"
+    )
+    resp = _share_job(raw_client, lib["library_id"], job.job_id)
+    assert resp.status_code == 500, resp.text
+    assert list(folder.rglob("asset.json")) == []
+
+
+def test_share_meta_invalid_vs_body_limits(client, isolated_data_root, shared_lib):
+    lib, _ = shared_lib
+    job = _studio_job_with_output(isolated_data_root)
+    long_tag = _share_job(client, lib["library_id"], job.job_id, tags=["长" * 41])
+    assert long_tag.status_code == 422 and long_tag.json()["detail"]["code"] == "invalid"
+    too_long_title = client.post(
+        f"/api/team-libraries/{lib['library_id']}/share",
+        json={"source": {"kind": "job_output", "job_id": job.job_id, "output_index": 0},
+              "title": "长" * 121},
+    )
+    assert too_long_title.status_code == 422
+    assert isinstance(too_long_title.json()["detail"], list)
+
+
+def test_share_os_error_mid_write_is_503_with_path(client, isolated_data_root, shared_lib, monkeypatch):
+    from character_workflow.lib import team_library_share as share
+
+    lib, folder = shared_lib
+
+    def disk_full(*_args, **_kwargs):
+        raise OSError(28, "No space left on device", "/Volumes/team/shared/x.png")
+
+    monkeypatch.setattr(share, "_stage_media", disk_full)
+    job = _studio_job_with_output(isolated_data_root)
+    resp = _share_job(client, lib["library_id"], job.job_id)
+    assert resp.status_code == 503, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "library_unreachable"
+    assert "/Volumes/team/shared/x.png" in detail["message"]
+    assert [p.name for p in (folder / "shared").rglob("*") if p.name.startswith(".tmp")] == []
+
+
+def test_update_permission_error_is_503_but_not_author_stays_403(
+    client, isolated_data_root, shared_lib, monkeypatch
+):
+    from character_workflow.lib import team_library_share as share
+
+    lib, _ = shared_lib
+    entry = _shared_entry(client, isolated_data_root, lib["library_id"])
+    url = f"/api/team-libraries/{lib['library_id']}/assets/{entry['id']}"
+
+    def denied(path, _data):
+        raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr(share, "atomic_write_json", denied)
+    resp = client.put(url, json={"title": "改", "tags": []})
+    assert resp.status_code == 503, resp.text
+    assert "asset.json" in resp.json()["detail"]["message"]
+
+    client.put("/api/profile", json={"display_name": "小李"})
+    forbidden = client.put(url, json={"title": "改", "tags": []})
+    assert forbidden.status_code == 403 and forbidden.json()["detail"]["code"] == "not_author"
+
+
+def test_creation_asset_state_error_maps_to_409(client, shared_lib, monkeypatch):
+    from character_workflow.lib.creation_assets import CreationAssetStateError
+    from viewer_server import team_library_routes
+
+    lib, _ = shared_lib
+
+    def broken(*_args, **_kwargs):
+        raise CreationAssetStateError("创作资产库状态损坏")
+
+    monkeypatch.setattr(team_library_routes, "share_creation_asset", broken)
+    resp = client.post(
+        f"/api/team-libraries/{lib['library_id']}/share",
+        json={"source": {"kind": "creation_asset", "asset_id": "ca_x"}, "title": "图"},
+    )
+    assert resp.status_code == 409 and resp.json()["detail"] == "创作资产库状态损坏"
+
+
+def test_refresh_failure_after_write_is_500_naming_asset(
+    client, isolated_data_root, shared_lib, monkeypatch
+):
+    from viewer_server import watcher
+
+    lib, folder = shared_lib
+    entry = _shared_entry(client, isolated_data_root, lib["library_id"])
+
+    def broken_refresh(_mount):
+        raise OSError("index 写不进去")
+
+    monkeypatch.setattr(watcher, "refresh_team_library", broken_refresh)
+    job = _studio_job_with_output(isolated_data_root)
+    shared = _share_job(client, lib["library_id"], job.job_id)
+    assert shared.status_code == 500, shared.text
+    detail = shared.json()["detail"]
+    written = [p.name for p in (folder / "shared").glob("*/ta_*") if p.name != entry["id"]]
+    assert detail["asset_id"] == written[0] and "请重新扫描" in detail["message"]
+
+    withdrawn = client.delete(f"/api/team-libraries/{lib['library_id']}/assets/{entry['id']}")
+    assert withdrawn.status_code == 500
+    assert withdrawn.json()["detail"]["asset_id"] == entry["id"]
+    assert "请重新扫描" in withdrawn.json()["detail"]["message"]
+
+
+def test_mount_broadcasts_initial_entries(client, tmp_path, monkeypatch):
+    folder = tmp_path / "lib"
+    folder.mkdir()
+    (folder / "a.png").write_bytes(_PNG)
+    client.put("/api/profile", json={"display_name": "老王"})
+    events = _broadcasts(monkeypatch)
+    lib = _mount(client, "canvas-1", folder)
+    assert [(d["library_id"], d["kind"], d["change"]) for _, d in events] == [
+        (lib["library_id"], "raw", "added")
+    ]
+
+
+def test_related_skips_library_without_index(client, isolated_data_root, tmp_path):
+    from character_workflow.lib import team_library_index as idx
+
+    client.put("/api/profile", json={"display_name": "老王"})
+    scanned_dir, unscanned_dir = tmp_path / "a", tmp_path / "b"
+    scanned_dir.mkdir()
+    unscanned_dir.mkdir()
+    scanned = _mount(client, "canvas-1", scanned_dir)
+    unscanned = _mount(client, "canvas-1", unscanned_dir)
+    kept = _shared_entry(client, isolated_data_root, scanned["library_id"])
+    _shared_entry(client, isolated_data_root, unscanned["library_id"])
+    (idx.cache_dir(unscanned["library_id"]) / "index.json").unlink()
+
+    resp = client.get("/api/team-libraries/related", params={"project_id": "canvas-1"})
+    assert resp.status_code == 200, resp.text
+    assert [r["entry"]["id"] for r in resp.json()] == [kept["id"]]

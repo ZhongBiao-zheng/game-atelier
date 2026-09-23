@@ -298,7 +298,7 @@ def _validated_author(author: str) -> TeamAssetAuthor:
     return TeamAssetAuthor(display_name=_required_text(author, "显示名"))
 
 
-def _validated_meta(
+def validate_share_meta(
     title: str, tags: list[str], author: str
 ) -> tuple[str, list[str], TeamAssetAuthor]:
     """任何 I/O 之前校验标题 / 标签 / 显示名（含长度上限）：失败不建目录、不读源。"""
@@ -369,7 +369,7 @@ def share_job_output(
     author: str,
     allow_large: bool = False,
 ) -> TeamAssetFile:
-    clean_title, clean_tags, team_author = _validated_meta(title, tags, author)
+    clean_title, clean_tags, team_author = validate_share_meta(title, tags, author)
     job = _read_studio_job(job_id)
     output = _job_output(job, output_index)
     output_mime = _mime_for(output)
@@ -457,7 +457,7 @@ def share_creation_asset(
     author: str,
     allow_large: bool = False,
 ) -> TeamAssetFile:
-    clean_title, clean_tags, team_author = _validated_meta(title, tags, author)
+    clean_title, clean_tags, team_author = validate_share_meta(title, tags, author)
     try:
         asset = get_creation_asset(asset_id)
     except KeyError as error:
@@ -523,7 +523,7 @@ def update_shared_asset(
     tags: list[str],
     author: str,
 ) -> TeamAssetFile:
-    clean_title, clean_tags, team_author = _validated_meta(title, tags, author)
+    clean_title, clean_tags, team_author = validate_share_meta(title, tags, author)
     folder, raw = _locate_own_asset(mount, asset_id, team_author.display_name)
     # 改原始 dict 而不是重新 dump 模型：别的版本多写的字段（R1 读时忽略）原样保留。
     updated_raw = {**raw, "title": clean_title, "tags": clean_tags, "updated_at": _now()}
