@@ -26,7 +26,8 @@ beforeEach(() => {
   api.fetchProfile.mockResolvedValue({ display_name: null });
   api.listRelatedTeamAssets.mockResolvedValue([]);
 });
-afterEach(() => vi.clearAllMocks());
+// reset 而不是 clear：clear 不清 mockResolvedValueOnce 队列，没消费完的会漏进下一个用例。
+afterEach(() => vi.resetAllMocks());
 
 describe('TeamLibraryPanel', () => {
   it('shows mount hint when the project has no library', async () => {
@@ -235,5 +236,104 @@ describe('TeamLibraryPanel', () => {
     await screen.findByText('雪山白犬');
     await waitFor(() => expect(api.listRelatedTeamAssets).toHaveBeenCalledWith('p1'));
     expect(screen.queryByText('相关配方')).toBeNull();
+  });
+  it('shows a failed related reproduce even when the selected library is unreachable', async () => {
+    api.listTeamLibraries.mockResolvedValue([{ ...library, reachable: false }]);
+    api.listTeamAssets.mockResolvedValue({ entries: [], next_cursor: null });
+    api.listRelatedTeamAssets.mockResolvedValue([{ library_id: 'lib_other', library_name: '别的库', entry: generation }]);
+    api.adoptTeamAsset.mockRejectedValue(new Error('采用团队资产失败：参考内容缺失'));
+    const onReproduce = vi.fn();
+    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onReproduce={onReproduce} />);
+    expect(await screen.findByText('目录不可达')).toBeInTheDocument();
+    const row = (await screen.findByText('相关配方')).parentElement!;
+    fireEvent.click(within(row).getByRole('button', { name: /雪山白犬/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('采用团队资产失败：参考内容缺失');
+    expect(onReproduce).not.toHaveBeenCalled();
+  });
+  it('keeps the related heading with a read error when the related list fails', async () => {
+    api.listTeamLibraries.mockResolvedValue([library]);
+    api.listTeamAssets.mockResolvedValue({ entries: [generation], next_cursor: null });
+    api.listRelatedTeamAssets.mockRejectedValue(new Error('boom'));
+    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onReproduce={vi.fn()} />);
+    const row = (await screen.findByText('相关配方')).parentElement!;
+    expect(within(row).getByText('读取失败')).toBeInTheDocument();
+  });
+  it('keeps the profile read error across library switches', async () => {
+    api.fetchProfile.mockRejectedValue(new Error('boom'));
+    const second: TeamLibraryView = { ...library, library_id: 'lib_fedcba9876543210', name: '场景参考' };
+    api.listTeamLibraries.mockResolvedValue([library, second]);
+    api.listTeamAssets.mockResolvedValue({ entries: [shared], next_cursor: null });
+    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    expect(await screen.findByText('读取显示名失败')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('团队库'), { target: { value: second.library_id } });
+    await waitFor(() => expect(api.listTeamAssets).toHaveBeenLastCalledWith(second.library_id, {}));
+    expect(screen.getByText('读取显示名失败')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '编辑' })).toBeNull();
+  });
+  it('reloads the first page after withdrawing from a paged list', async () => {
+    api.fetchProfile.mockResolvedValue({ display_name: '老王' });
+    api.listTeamLibraries.mockResolvedValue([library]);
+    const next: TeamLibraryIndexEntry = { ...shared, id: 'ta_next', title: '下一条', author: '小李' };
+    api.listTeamAssets
+      .mockResolvedValueOnce({ entries: [shared], next_cursor: 'c1' })
+      .mockResolvedValueOnce({ entries: [next], next_cursor: null });
+    api.withdrawTeamAsset.mockResolvedValue(undefined);
+    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '撤回' }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '撤回' }));
+    expect(await screen.findByText('下一条')).toBeInTheDocument();
+    expect(api.listTeamAssets).toHaveBeenCalledTimes(2);
+    expect(api.listTeamAssets).toHaveBeenLastCalledWith(library.library_id, {});
+    expect(screen.queryByRole('button', { name: '更多' })).toBeNull();
+  });
+  it('does not reload after withdrawing when there is no next page', async () => {
+    api.fetchProfile.mockResolvedValue({ display_name: '老王' });
+    api.listTeamLibraries.mockResolvedValue([library]);
+    api.listTeamAssets.mockResolvedValue({ entries: [shared], next_cursor: null });
+    api.withdrawTeamAsset.mockResolvedValue(undefined);
+    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '撤回' }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '撤回' }));
+    await waitFor(() => expect(screen.queryByText('董卓 待机')).toBeNull());
+    expect(api.listTeamAssets).toHaveBeenCalledTimes(1);
+  });
+  it('asks for withdraw confirmation with a destructive dialog', async () => {
+    api.fetchProfile.mockResolvedValue({ display_name: '老王' });
+    api.listTeamLibraries.mockResolvedValue([library]);
+    api.listTeamAssets.mockResolvedValue({ entries: [shared], next_cursor: null });
+    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '撤回' }));
+    const confirm = within(await screen.findByRole('dialog')).getByRole('button', { name: '撤回' });
+    // ConfirmDialog 的 destructive 变体把确认按钮换成 destructive 按钮。
+    expect(confirm.className).toContain('bg-destructive');
+  });
+  it('disables reproduce buttons while a reproduce is in flight', async () => {
+    api.listTeamLibraries.mockResolvedValue([library]);
+    api.listTeamAssets.mockResolvedValue({ entries: [generation], next_cursor: null });
+    api.listRelatedTeamAssets.mockResolvedValue([{ library_id: library.library_id, library_name: library.name, entry: generation }]);
+    let release: (value: unknown) => void = () => {};
+    api.adoptTeamAsset.mockImplementation(() => new Promise(resolve => { release = resolve; }));
+    const onReproduce = vi.fn();
+    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onReproduce={onReproduce} />);
+    const card = await screen.findByRole('button', { name: '复刻' });
+    const row = (await screen.findByText('相关配方')).parentElement!;
+    fireEvent.click(card);
+    expect(card).toBeDisabled();
+    expect(within(row).getByRole('button', { name: /雪山白犬/ })).toBeDisabled();
+    await act(async () => { release({ asset: adoptedGeneration, created: true }); });
+    expect(onReproduce).toHaveBeenCalledWith(adoptedGeneration);
+    expect(card).not.toBeDisabled();
+  });
+  it('does not call onReproduce after unmounting mid-adopt', async () => {
+    api.listTeamLibraries.mockResolvedValue([library]);
+    api.listTeamAssets.mockResolvedValue({ entries: [generation], next_cursor: null });
+    let release: (value: unknown) => void = () => {};
+    api.adoptTeamAsset.mockImplementation(() => new Promise(resolve => { release = resolve; }));
+    const onReproduce = vi.fn();
+    const view = render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onReproduce={onReproduce} />);
+    fireEvent.click(await screen.findByRole('button', { name: '复刻' }));
+    view.unmount();
+    await act(async () => { release({ asset: adoptedGeneration, created: true }); });
+    expect(onReproduce).not.toHaveBeenCalled();
   });
 });

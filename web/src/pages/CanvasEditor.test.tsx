@@ -317,7 +317,16 @@ vi.mock('@/api/creationAssets', async importOriginal => {
 
 vi.mock('@/api/teamLibraries', async importOriginal => {
   const original = await importOriginal<typeof import('@/api/teamLibraries')>();
-  return { ...original, adoptTeamAsset: vi.fn(), listTeamLibraries: vi.fn(), listTeamAssets: vi.fn() };
+  return {
+    ...original,
+    adoptTeamAsset: vi.fn(),
+    listTeamLibraries: vi.fn(),
+    listTeamAssets: vi.fn(),
+    // 团队栏挂载就读显示名；不 mock 会发真实请求。画布用例不断言显示名，保持 pending：
+    // resolve 的话 setDisplayName 落在 act 之外，每个团队栏用例多出 act 警告。
+    fetchProfile: vi.fn(() => new Promise(() => {})),
+    listRelatedTeamAssets: vi.fn().mockResolvedValue([]),
+  };
 });
 
 vi.mock('@/api/keys', async importOriginal => {

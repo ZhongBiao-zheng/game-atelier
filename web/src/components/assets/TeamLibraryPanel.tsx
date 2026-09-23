@@ -105,6 +105,14 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** 列表第一页的筛选参数：提示词走服务端 kind，其余类型在前端过滤。 */
+function firstPageFilters(typeFilter: TypeFilter, search: string) {
+  return {
+    ...(typeFilter === 'prompt' ? { kind: 'prompt' as const } : {}),
+    ...(search ? { q: search } : {}),
+  };
+}
+
 function formatCost(cost: number): string {
   return `¥${cost.toFixed(2)}`;
 }
@@ -139,11 +147,20 @@ export function TeamLibraryPanel({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [displayName, setDisplayName] = useState<string | null>(null);
+  // 显示名读失败单独记：面板级 error 会被切库 / 搜索清掉，这条不该跟着消失。
+  const [profileError, setProfileError] = useState(false);
   const [related, setRelated] = useState<TeamRelatedEntry[]>([]);
+  const [relatedError, setRelatedError] = useState(false);
   const [editing, setEditing] = useState<TeamLibraryIndexEntry | null>(null);
   const [withdrawing, setWithdrawing] = useState<TeamLibraryIndexEntry | null>(null);
   const requestId = useRef(0);
+  const mounted = useRef(true);
   const canReproduce = Boolean(onReproduce);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const library = useMemo(
     () => libraries.find(item => item.library_id === libraryId) ?? null,
@@ -170,20 +187,27 @@ export function TeamLibraryPanel({
   useEffect(() => {
     let alive = true;
     void fetchProfile()
-      .then(profile => { if (alive) setDisplayName(profile.display_name); })
-      .catch(() => { if (alive) setDisplayName(null); });
+      .then(profile => {
+        if (!alive) return;
+        setDisplayName(profile.display_name);
+        setProfileError(false);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setDisplayName(null);
+        setProfileError(true);
+      });
     return () => { alive = false; };
   }, []);
 
   useEffect(() => {
-    if (!canReproduce) {
-      setRelated([]);
-      return;
-    }
+    setRelated([]);
+    setRelatedError(false);
+    if (!canReproduce) return;
     let alive = true;
     void listRelatedTeamAssets(projectId)
       .then(list => { if (alive) setRelated(list); })
-      .catch(() => { if (alive) setRelated([]); });
+      .catch(() => { if (alive) setRelatedError(true); });
     return () => { alive = false; };
   }, [canReproduce, projectId]);
 
@@ -201,10 +225,7 @@ export function TeamLibraryPanel({
     let alive = true;
     const token = ++requestId.current;
     setError(null);
-    void listTeamAssets(libraryId, {
-      ...(typeFilter === 'prompt' ? { kind: 'prompt' as const } : {}),
-      ...(search ? { q: search } : {}),
-    })
+    void listTeamAssets(libraryId, firstPageFilters(typeFilter, search))
       .then(page => {
         if (!alive || token !== requestId.current) return;
         setEntries(page.entries);
@@ -223,11 +244,7 @@ export function TeamLibraryPanel({
     if (!libraryId || !cursor) return;
     const token = requestId.current;
     setBusy(true);
-    void listTeamAssets(libraryId, {
-      ...(typeFilter === 'prompt' ? { kind: 'prompt' as const } : {}),
-      ...(search ? { q: search } : {}),
-      cursor,
-    })
+    void listTeamAssets(libraryId, { ...firstPageFilters(typeFilter, search), cursor })
       .then(page => {
         if (token !== requestId.current) return;
         setEntries(current => [...current, ...page.entries]);
@@ -247,10 +264,7 @@ export function TeamLibraryPanel({
         );
         // 刷新期间用户可能切库 / 改搜索 / 换类型：迟到的扫描结果不许覆盖更新的请求。
         const token = ++requestId.current;
-        return listTeamAssets(view.library_id, {
-          ...(typeFilter === 'prompt' ? { kind: 'prompt' as const } : {}),
-          ...(search ? { q: search } : {}),
-        }).then(page => {
+        return listTeamAssets(view.library_id, firstPageFilters(typeFilter, search)).then(page => {
           if (token !== requestId.current) return;
           setEntries(page.entries);
           setCursor(page.next_cursor);
@@ -279,8 +293,8 @@ export function TeamLibraryPanel({
       setBusy(true);
       setError(null);
       void adoptTeamAsset(targetLibraryId, entry.id, projectId)
-        .then(result => onReproduce(result.asset))
-        .catch(() => setError('复刻失败'))
+        .then(result => { if (mounted.current) onReproduce(result.asset); })
+        .catch(caught => setError(errorMessage(caught, '复刻失败')))
         .finally(() => setBusy(false));
     },
     [onReproduce, projectId],
@@ -303,10 +317,18 @@ export function TeamLibraryPanel({
       .then(() => {
         setEntries(current => current.filter(item => item.id !== target.id));
         setRelated(current => current.filter(item => item.entry.id !== target.id));
+        // 已翻过页时游标指向删除前的位置：重拉第一页，免得「更多」漏掉或重复一条。
+        if (!cursor) return;
+        const token = ++requestId.current;
+        return listTeamAssets(libraryId, firstPageFilters(typeFilter, search)).then(page => {
+          if (token !== requestId.current) return;
+          setEntries(page.entries);
+          setCursor(page.next_cursor);
+        });
       })
       .catch(caught => setError(errorMessage(caught, '撤回失败')))
       .finally(() => setBusy(false));
-  }, [libraryId, withdrawing]);
+  }, [cursor, libraryId, search, typeFilter, withdrawing]);
 
   const typed = useMemo(
     () => entries.filter(entry => matchesType(entry, typeFilter)),
@@ -340,9 +362,10 @@ export function TeamLibraryPanel({
 
   return (
     <div className={cn('flex min-h-0 flex-col gap-3 p-3', className)}>
-      {related.length > 0 && (
+      {(related.length > 0 || relatedError) && (
         <div className="space-y-1.5">
           <p className="text-xs text-muted-foreground">相关配方</p>
+          {relatedError && <p className="text-xs text-muted-foreground">读取失败</p>}
           <div className="no-scrollbar flex gap-2 overflow-x-auto">
             {related.map(item => (
               <button
@@ -363,6 +386,13 @@ export function TeamLibraryPanel({
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {(error || profileError) && (
+        <div role="alert" className="space-y-0.5 text-xs text-destructive">
+          {error && <p>{error}</p>}
+          {profileError && <p>读取显示名失败</p>}
         </div>
       )}
 
@@ -444,7 +474,6 @@ export function TeamLibraryPanel({
           </div>
 
           <div className="min-w-0 flex-1 overflow-y-auto">
-            {error && <p className="mb-2 text-xs text-muted-foreground">{error}</p>}
             {visible.length === 0 ? (
               <p className="py-8 text-center text-xs text-muted-foreground">库里还没有内容</p>
             ) : (
