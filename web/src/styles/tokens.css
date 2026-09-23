@@ -648,7 +648,9 @@
   user-select: none;
 }
 
-/* 文字细，3px 已认不出字形；图片 / 视频要 36px 才盖得住轮廓。 */
+/* 文字细，3px 已认不出字形；图片 / 视频要 36px 才盖得住轮廓。
+   文本不需要放大补偿透明边，放大只会让字看起来往外散。 */
 .canvas-node-hidden.canvas-node-hidden-text {
   filter: blur(3px);
+  transform: none;
 }
