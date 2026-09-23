@@ -195,33 +195,40 @@ def _prompt_content(
     )
 
 
-def _media_mime(body: bytes, declared: str | None, filename: str) -> str:
-    detected: str | None = None
+def sniff_media_mime(body: bytes, declared: str | None = None) -> str | None:
+    """只看文件头认媒体类型，认不出 → None。body 给文件开头十几字节就够。
+
+    唯一信声明的情形：ftyp 容器的 brand 分不出音轨，声明 audio/mp4 时照信。
+    """
     if body.startswith(b"\x89PNG\r\n\x1a\n"):
-        detected = "image/png"
-    elif body.startswith(b"\xff\xd8\xff"):
-        detected = "image/jpeg"
-    elif len(body) >= 12 and body.startswith(b"RIFF") and body[8:12] == b"WEBP":
-        detected = "image/webp"
-    elif body.startswith((b"GIF87a", b"GIF89a")):
-        detected = "image/gif"
-    elif len(body) >= 12 and body[4:8] == b"ftyp":
+        return "image/png"
+    if body.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if len(body) >= 12 and body.startswith(b"RIFF") and body[8:12] == b"WEBP":
+        return "image/webp"
+    if body.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if len(body) >= 12 and body[4:8] == b"ftyp":
         brand = body[8:12]
         if brand in {b"M4A ", b"M4B "}:
-            detected = "audio/mp4"
-        elif brand == b"qt  ":
-            detected = "video/quicktime"
-        elif declared == "audio/mp4":
+            return "audio/mp4"
+        if brand == b"qt  ":
+            return "video/quicktime"
+        if declared == "audio/mp4":
             # ffmpeg 产出的 .m4a brand 常是 mp42 / isom，容器与 mp4 同构，brand 分不出音轨：信声明。
-            detected = "audio/mp4"
-        else:
-            detected = "video/mp4"
-    elif body.startswith(b"\x1a\x45\xdf\xa3"):
-        detected = "video/webm"
-    elif body.startswith(b"ID3") or body[:2] in {b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"}:
-        detected = "audio/mpeg"
-    elif len(body) >= 12 and body.startswith(b"RIFF") and body[8:12] == b"WAVE":
-        detected = "audio/wav"
+            return "audio/mp4"
+        return "video/mp4"
+    if body.startswith(b"\x1a\x45\xdf\xa3"):
+        return "video/webm"
+    if body.startswith(b"ID3") or body[:2] in {b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"}:
+        return "audio/mpeg"
+    if len(body) >= 12 and body.startswith(b"RIFF") and body[8:12] == b"WAVE":
+        return "audio/wav"
+    return None
+
+
+def _media_mime(body: bytes, declared: str | None, filename: str) -> str:
+    detected = sniff_media_mime(body, declared)
     guessed = mimetypes.guess_type(filename)[0]
     mime_type = detected or declared or guessed
     if mime_type not in MEDIA_SUFFIXES:

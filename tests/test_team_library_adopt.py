@@ -576,20 +576,64 @@ def test_adopt_generation_validates_everything_before_storing(isolated_data_root
     assert _blob_files(isolated_data_root) == []
 
 
-def test_adopt_rejects_declared_mime_that_content_contradicts(isolated_data_root, tmp_path):
+def test_adopt_rewrites_declared_mime_to_sniffed_type(isolated_data_root, tmp_path):
+    """存量坏资产（声明 image/jpeg 实为 PNG）：sha256 已保证完整，按内容存并改写快照类型。"""
+    from character_workflow.lib.creation_assets import (
+        creation_asset_input_path,
+        creation_asset_media_path,
+    )
+
     folder, mount = _mount(tmp_path)
     asset_dir = _write_generation(folder)
 
     def declare_jpeg(data):
         data["snapshot"]["inputs"][1]["mime_type"] = "image/jpeg"
+        data["media"]["mime_type"] = "image/jpeg"
 
     _rewrite_asset_json(asset_dir, declare_jpeg)
+    asset, created = adopt_team_asset(mount=mount, entry=_generation_entry(), project_id=None)
+    assert created
+    assert asset.content.media.mime_type == "image/png"
+    assert [row.mime_type for row in asset.content.snapshot.inputs] == ["image/png", "image/png"]
+    assert creation_asset_media_path(asset.asset_id).read_bytes() == _PNG
+    path, mime = creation_asset_input_path(asset.asset_id, 1)
+    assert path.read_bytes() == _REF_B and mime == "image/png"
+
+
+def test_adopt_rewrites_ref_kind_when_sniffed_family_differs(isolated_data_root, tmp_path):
+    from character_workflow.lib.creation_assets import creation_asset_input_path
+
+    video = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64
+    folder, mount = _mount(tmp_path)
+    asset_dir = _write_generation(folder, refs=(_REF_A, video))
+    asset, _ = adopt_team_asset(mount=mount, entry=_generation_entry(), project_id=None)
+    row = asset.content.snapshot.inputs[1]
+    assert (row.kind, row.mime_type) == ("video", "video/mp4")
+    path, mime = creation_asset_input_path(asset.asset_id, 1)
+    assert path.read_bytes() == video and mime == "video/mp4"
+    assert (asset_dir / _ref_path(1, video)).is_file()
+
+
+def test_adopt_media_rewrites_declared_mime_to_sniffed_type(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    _write_shared(folder)
+    asset_dir = folder / "shared" / "老王" / _ID
+    _rewrite_asset_json(asset_dir, lambda data: data["media"].update(mime_type="image/jpeg"))
+    asset, created = adopt_team_asset(mount=mount, entry=_entry(), project_id=None)
+    assert created and asset.content.mime_type == "image/png"
+    assert asset.content.path.endswith(".png")
+    assert (isolated_data_root / asset.content.path).read_bytes() == _PNG
+
+
+def test_adopt_rejects_sniffed_type_outside_media_suffixes(isolated_data_root, tmp_path, monkeypatch):
+    from character_workflow.lib import team_library_adopt as adopt
+
+    folder, mount = _mount(tmp_path)
+    _write_generation(folder)
+    monkeypatch.setattr(adopt, "sniff_media_mime", lambda _body, _declared=None: "image/bmp")
     with pytest.raises(TeamAssetAdoptError):
         adopt_team_asset(mount=mount, entry=_generation_entry(), project_id=None)
     assert _blob_files(isolated_data_root) == []
-    _rewrite_asset_json(asset_dir, lambda data: data["media"].update(mime_type="image/jpeg"))
-    with pytest.raises(TeamAssetAdoptError):
-        adopt_team_asset(mount=mount, entry=_generation_entry(), project_id=None)
 
 
 def test_adopt_store_failure_becomes_adopt_error(isolated_data_root, tmp_path, monkeypatch):

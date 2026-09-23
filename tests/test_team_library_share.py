@@ -54,8 +54,12 @@ _FAKE_MP3 = b"ID3" + b"\x00" * 64
 
 
 def _png(color: tuple[int, int, int], size: tuple[int, int] = (4, 4)) -> bytes:
+    return _image(color, "PNG", size)
+
+
+def _image(color: tuple[int, int, int], fmt: str, size: tuple[int, int] = (4, 4)) -> bytes:
     buffer = io.BytesIO()
-    Image.new("RGB", size, color).save(buffer, format="PNG")
+    Image.new("RGB", size, color).save(buffer, format=fmt)
     return buffer.getvalue()
 
 
@@ -130,7 +134,8 @@ def _read_asset(mount: TeamLibraryMount, asset_id: str) -> TeamAssetFile:
 
 
 def test_share_image_job_writes_layout_refs_and_thumbnail(isolated_data_root, mount):
-    ref_a, ref_b, sref = _png((0, 200, 0)), _png((0, 0, 200)), _png((50, 50, 50))
+    ref_a, ref_b = _png((0, 200, 0)), _image((0, 0, 200), "JPEG")
+    sref = _image((50, 50, 50), "WEBP")
     path_a = _write_upload(isolated_data_root, "a.png", ref_a)
     _write_upload(isolated_data_root, "b.jpg", ref_b)
     path_s = _write_upload(isolated_data_root, "s.webp", sref)
@@ -943,3 +948,103 @@ def test_share_media_with_long_name_writes_truncated_file(isolated_data_root, mo
     written = share_creation_asset(mount, asset_id=asset.asset_id, title="长", tags=[], author=_AUTHOR)
     assert len(written.media.filename.encode("utf-8")) <= 255
     assert (_asset_dir(mount, written.asset_id) / written.media.filename).read_bytes() == body
+
+
+# ------------------------------------------- 终审 M1 按内容定类型（后缀会撒谎）
+
+
+def test_jpeg_bytes_named_png_share_with_real_type_and_round_trip(isolated_data_root, mount):
+    """本机大量 .png 实为 JPEG：分享按内容写 mime 与后缀，别人才采用 / 复刻得了。"""
+    output, ref = _image((90, 10, 10), "JPEG"), _image((10, 90, 10), "JPEG")
+    ref_path = _write_upload(isolated_data_root, "ref.png", ref)
+    job = _studio_job(outputs=[("v1.png", output)], params={"reference_images": [str(ref_path)]})
+
+    written = share_job_output(
+        mount, job_id=job.job_id, output_index=0, title="t", tags=[], author=_AUTHOR
+    )
+
+    folder = _asset_dir(mount, written.asset_id)
+    parsed = _read_asset(mount, written.asset_id)
+    assert parsed.media.mime_type == "image/jpeg" and parsed.media.filename == "v1.jpg"
+    assert (folder / "v1.jpg").read_bytes() == output and not (folder / "v1.png").exists()
+    [row] = parsed.snapshot.inputs
+    assert row.mime_type == "image/jpeg" and row.path.endswith(".jpg")
+    assert (folder / row.path).read_bytes() == ref
+
+    entry = _index_entry(mount, written.asset_id)
+    assert entry.status == "ready" and entry.mime_type == "image/jpeg"
+    adopted, created = adopt_team_asset(mount=mount, entry=entry, project_id="canvas-p1")
+    assert created
+    path, mime = creation_asset_input_path(adopted.asset_id, 0)
+    assert path.read_bytes() == ref and mime == "image/jpeg"
+    assert adopted.content.media.mime_type == "image/jpeg"
+    assert (isolated_data_root / adopted.content.media.path).read_bytes() == output
+
+
+def test_jpeg_bytes_named_png_media_asset_shares_as_jpeg(isolated_data_root, mount):
+    body = _image((91, 11, 11), "JPEG")
+    asset = create_media_asset_from_bytes(
+        title="x", body=body, filename="skin.png", mime_type=None, tags=[]
+    )
+    written = share_creation_asset(mount, asset_id=asset.asset_id, title="x", tags=[], author=_AUTHOR)
+    assert written.media.mime_type == "image/jpeg" and written.media.filename == "skin.jpg"
+    entry = _index_entry(mount, written.asset_id)
+    assert entry.status == "ready"
+    adopted, created = adopt_team_asset(mount=mount, entry=entry, project_id=None)
+    assert created and (isolated_data_root / adopted.content.path).read_bytes() == body
+
+
+@pytest.mark.parametrize(
+    ("name", "body", "expected"),
+    [
+        ("a.png", _image((1, 1, 1), "JPEG"), "image/jpeg"),
+        ("a.jpeg", _image((1, 1, 1), "JPEG"), "image/jpeg"),
+        ("a.webp", _image((1, 1, 1), "PNG"), "image/png"),
+        ("a.png", b"not-an-image", "image/png"),  # 嗅不出：信后缀
+        ("voice.m4a", _FAKE_MP4, "audio/mp4"),  # ftyp 普通 brand：信 .m4a 声明
+        ("clip.mp4", _FAKE_MP4, "video/mp4"),
+    ],
+    ids=["jpeg-as-png", "jpeg-ext", "png-as-webp", "unsniffable", "m4a-mp42", "mp4"],
+)
+def test_mime_for_sniffs_content_before_suffix(tmp_path, name, body, expected):
+    path = tmp_path / name
+    path.write_bytes(body)
+    assert share._mime_for(path) == expected
+
+
+@pytest.mark.parametrize("name", ["notes.txt", "noext"])
+def test_mime_for_unsniffable_unknown_suffix_is_not_shareable(tmp_path, name):
+    path = tmp_path / name
+    path.write_bytes(b"plain text")
+    with pytest.raises(TeamShareError) as caught:
+        share._mime_for(path)
+    assert caught.value.code == "not_shareable"
+
+
+def test_mime_for_rejects_sniffed_type_outside_media_suffixes(tmp_path, monkeypatch):
+    path = tmp_path / "a.png"
+    path.write_bytes(_png((2, 2, 2)))
+    monkeypatch.setattr(share, "sniff_media_mime", lambda _head, _declared=None: "image/bmp")
+    with pytest.raises(TeamShareError) as caught:
+        share._mime_for(path)
+    assert caught.value.code == "not_shareable"
+
+
+def test_mime_for_real_type_ignores_misleading_suffix_even_when_unsupported(tmp_path):
+    path = tmp_path / "shot.bmp"
+    path.write_bytes(_image((3, 3, 3), "JPEG"))
+    assert share._mime_for(path) == "image/jpeg"
+
+
+@pytest.mark.parametrize(
+    ("name", "mime", "expected"),
+    [
+        ("v1.png", "image/jpeg", "v1.jpg"),
+        ("v1.jpeg", "image/jpeg", "v1.jpeg"),
+        ("v1.PNG", "image/png", "v1.PNG"),
+        ("clip", "video/mp4", "clip.mp4"),
+        ("a.b.png", "image/webp", "a.b.webp"),
+    ],
+)
+def test_typed_filename_keeps_stem_and_follows_real_type(name, mime, expected):
+    assert share._typed_filename(name, mime) == expected

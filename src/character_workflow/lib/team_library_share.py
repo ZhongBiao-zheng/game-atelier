@@ -27,6 +27,7 @@ from character_workflow.lib.creation_assets import (
     _required_text,
     blob_path_for,
     get_creation_asset,
+    sniff_media_mime,
 )
 from character_workflow.lib.jobs import read_job
 from character_workflow.lib.schemas import (
@@ -99,6 +100,7 @@ _FILENAME_MAX_BYTES = 255
 _SUFFIX_MAX_BYTES = 16
 _AUTHOR_UNSAFE_CHARS = re.compile(r"[^\w-]")
 _COPY_CHUNK = 1024 * 1024
+_SNIFF_HEAD_BYTES = 64
 
 
 class TeamShareError(ValueError):
@@ -165,10 +167,30 @@ def _media_filename(name: str) -> str:
     return _fit_filename_bytes(cleaned)
 
 
+def _typed_filename(name: str, mime_type: str) -> str:
+    """后缀已对应真实类型就原样保留（.jpeg / 大写都算），否则保留主名、换成真实类型的后缀。"""
+    base = Path(name).name
+    suffix = Path(base).suffix
+    if _SUFFIX_MIMES.get(suffix.lower()) == mime_type:
+        return base
+    stem = base[: len(base) - len(suffix)] if suffix else base
+    return f"{stem}{MEDIA_SUFFIXES[mime_type]}"
+
+
 def _mime_for(path: Path) -> str:
-    mime = _SUFFIX_MIMES.get(path.suffix.lower())
+    """按文件头定类型，嗅不出才信后缀：本机 .png 实为 JPEG 的产物很多（Ark 默认出 jpeg），
+    按后缀写进 asset.json 会让采用侧的内容校验把整条资产拒掉。"""
+    suffix_mime = _SUFFIX_MIMES.get(path.suffix.lower())
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(_SNIFF_HEAD_BYTES)
+    except FileNotFoundError as error:
+        raise TeamShareError("source_missing", f"本机找不到文件：{path.name}") from error
+    mime = sniff_media_mime(head, suffix_mime) or suffix_mime
     if mime is None:
         raise TeamShareError("not_shareable", f"不支持分享这种文件格式：{path.suffix or '无扩展名'}")
+    if mime not in MEDIA_SUFFIXES:
+        raise TeamShareError("not_shareable", f"不支持分享这种文件格式：{mime}")
     return mime
 
 
@@ -270,7 +292,7 @@ def _write_new_asset(
 
 
 def _stage_media(source: Path, mime_type: str, filename: str, folder: Path) -> TeamAssetMedia:
-    name = _media_filename(filename)
+    name = _media_filename(_typed_filename(filename, mime_type))
     sha, size, _ = _copy_hashed(source, folder, lambda _sha: name)
     if mime_type.startswith("image/"):
         _write_thumbnail(folder / name, folder / "thumb.webp")
@@ -418,11 +440,13 @@ def _creation_stage(asset: CreationAsset, allow_large: bool) -> Callable[[Path],
         return lambda _folder: {"kind": "prompt", "prompt": prompt}
     if content.kind == "media":
         source = _blob_file(content)
+        source_mime = _mime_for(source)
         return lambda folder: {
             "kind": "media",
-            "media": _stage_media(source, content.mime_type, content.filename, folder),
+            "media": _stage_media(source, source_mime, content.filename, folder),
         }
     output = _blob_file(content.media)
+    output_mime = _mime_for(output)
     recipe = content.snapshot
     ref_paths = []
     for row in recipe.inputs:
@@ -430,13 +454,14 @@ def _creation_stage(asset: CreationAsset, allow_large: bool) -> Callable[[Path],
         if not path.is_file():
             raise TeamShareError("source_missing", f"本机找不到第 {row.order + 1} 份参考")
         ref_paths.append(path)
+    ref_mimes = [_mime_for(path) for path in ref_paths]
     _check_refs_size(ref_paths, allow_large)
 
     def stage(folder: Path) -> dict[str, Any]:
-        media = _stage_media(output, content.media.mime_type, content.media.filename, folder)
+        media = _stage_media(output, output_mime, content.media.filename, folder)
         inputs = [
-            _stage_input(path, row.order, row.role, row.mime_type, folder)
-            for row, path in zip(recipe.inputs, ref_paths)
+            _stage_input(path, row.order, row.role, mime, folder)
+            for row, path, mime in zip(recipe.inputs, ref_paths, ref_mimes)
         ]
         snapshot = TeamGenerationSnapshot.model_validate({
             **recipe.model_dump(mode="json", exclude={"inputs", "params"}),

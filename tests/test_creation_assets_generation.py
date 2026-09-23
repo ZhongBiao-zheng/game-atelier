@@ -21,6 +21,7 @@ from character_workflow.lib.creation_assets import (
     get_creation_asset,
     insert_creation_asset_into_canvas,
     list_creation_assets,
+    sniff_media_mime,
     store_media_blob,
     update_media_asset_from_bytes,
 )
@@ -441,3 +442,32 @@ def test_generation_asset_with_same_adoption_origin_is_not_duplicated():
     assert [row.asset_id for row in list_creation_assets().assets] == [first.asset_id]
     local = create_generation_asset(title="红猫", tags=[], media=media, snapshot=_recipe())
     assert local.asset_id != first.asset_id
+
+
+# ------------------------------------------------------------ 内容嗅探
+
+
+@pytest.mark.parametrize(
+    ("body", "declared", "expected"),
+    [
+        (b"\x89PNG\r\n\x1a\n" + b"\x00" * 8, None, "image/png"),
+        (b"\xff\xd8\xff\xe0" + b"\x00" * 8, "image/png", "image/jpeg"),
+        (b"RIFF\x00\x00\x00\x00WEBP", None, "image/webp"),
+        (b"GIF89a" + b"\x00" * 6, None, "image/gif"),
+        (b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 4, None, "video/mp4"),
+        (b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 4, "audio/mp4", "audio/mp4"),
+        (b"\x00\x00\x00\x18ftypM4A " + b"\x00" * 4, "video/mp4", "audio/mp4"),
+        (b"\x00\x00\x00\x18ftypqt  " + b"\x00" * 4, None, "video/quicktime"),
+        (b"\x1a\x45\xdf\xa3" + b"\x00" * 8, None, "video/webm"),
+        (b"ID3" + b"\x00" * 8, None, "audio/mpeg"),
+        (b"RIFF\x00\x00\x00\x00WAVE", None, "audio/wav"),
+        (b"plain text body", "image/png", None),
+        (b"", None, None),
+    ],
+    ids=[
+        "png", "jpeg-declared-png", "webp", "gif", "mp4", "m4a-declared", "m4a-brand",
+        "mov", "webm", "mp3", "wav", "unknown", "empty",
+    ],
+)
+def test_sniff_media_mime_reads_only_the_content(body, declared, expected):
+    assert sniff_media_mime(body, declared) == expected

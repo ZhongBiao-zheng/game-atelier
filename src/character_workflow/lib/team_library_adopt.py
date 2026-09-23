@@ -8,13 +8,13 @@ from typing import Literal
 
 from character_workflow.lib import team_library_index as idx
 from character_workflow.lib.creation_assets import (
-    _media_mime,
     asset_media_content,
     create_adopted_asset,
     find_adopted_asset,
     find_media_asset_by_sha256,
     mark_creation_asset_used,
     new_creation_asset_id,
+    sniff_media_mime,
     store_media_blob,
 )
 from character_workflow.lib.schemas import (
@@ -22,6 +22,7 @@ from character_workflow.lib.schemas import (
     CreationAsset,
     CreationGenerationAssetContent,
     CreationMediaAssetContent,
+    MEDIA_SUFFIXES,
     GenerationRecipe,
     TeamAssetFile,
     TeamLibraryIndexEntry,
@@ -55,19 +56,24 @@ def _store(body: bytes, filename: str, mime_type: str | None) -> CreationMediaAs
         raise TeamAssetAdoptError(str(error)) from error
 
 
-def _verified_bytes(asset_dir: Path, relative: str, sha256: str, mime_type: str) -> bytes:
-    """读资产目录内的文件并校验归属、内容与类型，不落盘。schema 正则挡不住 symlink。"""
+def _verified_bytes(
+    asset_dir: Path, relative: str, sha256: str, mime_type: str
+) -> tuple[bytes, str]:
+    """读资产目录内的文件并校验归属与内容，不落盘；返回 (字节, 按内容认定的 mime)。
+
+    schema 正则挡不住 symlink。声明的类型与内容不符（别的工具 / 旧版本写的存量资产）
+    不否决：sha256 已保证是分享者那份字节，按嗅探结果存，调用方据此改写快照。
+    """
     target = idx.asset_dir_file(asset_dir, relative)
     if target is None:
         raise TeamAssetAdoptError("库里找不到这个文件，可能还没同步完")
     body = target.read_bytes()
     if hashlib.sha256(body).hexdigest() != sha256:
         raise TeamAssetAdoptError("文件内容与 asset.json 记录不一致，可能还没同步完")
-    try:
-        _media_mime(body, mime_type, Path(relative).name)
-    except ValueError as error:
-        raise TeamAssetAdoptError(str(error)) from error
-    return body
+    actual = sniff_media_mime(body, mime_type) or mime_type
+    if actual not in MEDIA_SUFFIXES:
+        raise TeamAssetAdoptError(f"不支持的媒体类型：{actual}")
+    return body, actual
 
 
 def _join_project(asset: CreationAsset, project_id: str | None) -> CreationAsset:
@@ -142,19 +148,30 @@ def _generation_content(
     """两遍：先把成片与全部参考校验完（不落盘），全过才逐个存 blob，失败不留半套。"""
     media, snapshot = team_asset.media, team_asset.snapshot
     assert media is not None and snapshot is not None
-    output = _verified_bytes(asset_dir, media.filename, media.sha256, media.mime_type)
+    output, output_mime = _verified_bytes(
+        asset_dir, media.filename, media.sha256, media.mime_type
+    )
     refs = [
-        (row, _verified_bytes(asset_dir, row.path, row.sha256, row.mime_type))
+        (row, *_verified_bytes(asset_dir, row.path, row.sha256, row.mime_type))
         for row in snapshot.inputs
     ]
-    stored_media = _store(output, media.filename, media.mime_type)
-    for row, body in refs:
-        _store(body, Path(row.path).name, row.mime_type)
+    stored_media = _store(output, media.filename, output_mime)
+    for row, body, mime in refs:
+        _store(body, Path(row.path).name, mime)
+    # 快照里的类型跟着实际存下的 blob 走，blob_path_for(sha, mime) 才找得到。
+    inputs = [
+        {
+            **row.model_dump(exclude={"path"}),
+            "mime_type": mime,
+            "kind": mime.split("/", 1)[0],
+        }
+        for row, _body, mime in refs
+    ]
     return CreationGenerationAssetContent(
         kind="generation",
         media=stored_media,
         snapshot=GenerationRecipe.model_validate(
-            snapshot.model_dump(exclude={"inputs": {"__all__": {"path"}}})
+            {**snapshot.model_dump(exclude={"inputs"}), "inputs": inputs}
         ),
     )
 
@@ -178,8 +195,8 @@ def _adopt_shared(
     else:
         media = team_asset.media
         assert media is not None
-        body = _verified_bytes(asset_dir, media.filename, media.sha256, media.mime_type)
-        content = _store(body, media.filename, media.mime_type)
+        body, mime = _verified_bytes(asset_dir, media.filename, media.sha256, media.mime_type)
+        content = _store(body, media.filename, mime)
     origin = AdoptionOrigin(
         library_id=mount.library_id,
         asset_id=team_asset.asset_id,
