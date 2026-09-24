@@ -122,6 +122,7 @@ GET /api/team-libraries/related
 POST /api/team-libraries/{library_id}/share
 PUT /api/team-libraries/{library_id}/assets/{asset_id}
 DELETE /api/team-libraries/{library_id}/assets/{asset_id}
+POST /api/canvas/projects/{project_id}/paste
 POST /api/canvas/projects/{project_id}/uploads
 POST /api/canvas/projects/{project_id}/nodes/{node_id}/replace
 POST /api/canvas/projects/{project_id}/media-operations

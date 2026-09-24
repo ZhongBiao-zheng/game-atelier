@@ -1892,6 +1892,14 @@ class CanvasReproduceRequest(BaseModel):
     model: str | None = None
 
 
+class CanvasPasteRequest(BaseModel):
+    """跨画布粘贴：节点 id 已由前端换新，服务端复制媒体版本并改写引用。"""
+    model_config = ConfigDict(extra="forbid")
+    source_project_id: str = Field(min_length=1)
+    nodes: list[CanvasNode] = Field(min_length=1, max_length=500)
+    connections: list[CanvasConnection] = Field(default_factory=list, max_length=2_000)
+
+
 class CanvasReproduceResponse(CanvasDocument):
     """与 creation asset insert 路由的响应（CanvasDocument）同形状，另加 warnings。
 

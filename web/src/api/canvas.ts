@@ -4,10 +4,12 @@ import type { Job } from '@/schema/jobs';
 import type {
   CanvasAgentSession,
   CanvasAgentSessionList,
+  CanvasConnection,
   CanvasDocument,
   CanvasMattingModelStatus,
   CanvasMediaOperation,
   CanvasMediaOperationResult,
+  CanvasNode,
   CanvasPackageImport,
   CanvasPackageInspection,
   CanvasProject,
@@ -302,6 +304,28 @@ export function reproduceIntoCanvas(input: {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'If-Match': String(input.documentRevision) },
       body: JSON.stringify({ position: input.position, alias: input.alias, model: input.model }),
+    },
+  );
+}
+
+/** 跨画布粘贴：服务端把源画布的媒体复制进目标画布、改写节点里的版本引用，一次锁内落节点与连线。
+ *  节点 id 由前端预先换新，与同画布粘贴共用一套 idMap。 */
+export function pasteIntoCanvas(input: {
+  projectId: string;
+  sourceProjectId: string;
+  nodes: CanvasNode[];
+  connections: CanvasConnection[];
+  documentRevision: number;
+}): Promise<CanvasDocument> {
+  return requestJson<CanvasDocument>(
+    `/api/canvas/projects/${encodeURIComponent(input.projectId)}/paste`,
+    '粘贴到画布',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'If-Match': String(input.documentRevision) },
+      body: JSON.stringify({
+        source_project_id: input.sourceProjectId, nodes: input.nodes, connections: input.connections,
+      }),
     },
   );
 }

@@ -65,7 +65,8 @@ from character_workflow.lib.schemas import (
     CharacterAssociationPatch, CharacterAssociationsFile,
     CanvasAgentSession, CanvasAgentSessionCreate, CanvasAgentSessionList,
     CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument, CanvasUpscaleRunCreate,
-    CanvasCreationAssetInsertRequest, CanvasReproduceRequest, CanvasReproduceResponse,
+    CanvasCreationAssetInsertRequest, CanvasPasteRequest, CanvasReproduceRequest,
+    CanvasReproduceResponse,
     CanvasLayerDecompositionCreate,
     CanvasPackageCommitRequest, CanvasPackageImportResponse,
     CanvasMaskEditCreate, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
@@ -2760,6 +2761,35 @@ def post_canvas_creation_asset_reproduce(
     except ValueError as error:
         # 非生成资产、配方拼不出合法草稿（ValidationError 也是 ValueError）→ 422；
         # 画布存档本身坏了（CanvasStorageError）→ 500，见 _canvas_document_http_error。
+        raise _canvas_document_http_error(error) from error
+
+
+@router.post("/canvas/projects/{project_id}/paste", response_model=CanvasDocument)
+def post_canvas_paste(
+    project_id: str,
+    payload: CanvasPasteRequest,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    """跨画布粘贴：复制源画布的媒体进目标画布，改写节点里的版本引用后落节点与连线。"""
+    from character_workflow.lib.canvas_paste import paste_nodes_into_canvas
+    try:
+        document = paste_nodes_into_canvas(
+            project_id=project_id,
+            source_project_id=payload.source_project_id,
+            nodes=payload.nodes,
+            connections=payload.connections,
+            document_revision=_canvas_if_match(if_match, "画布"),
+        )
+        response.headers["ETag"] = f'"{document.revision}"'
+        return document
+    except RuntimeError as error:
+        _raise_canvas_revision_error(error)
+    except (KeyError, FileNotFoundError):
+        raise HTTPException(404, detail="找不到源画布或它的媒体文件") from None
+    except PermissionError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    except ValueError as error:
         raise _canvas_document_http_error(error) from error
 
 

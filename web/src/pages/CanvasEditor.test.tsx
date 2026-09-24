@@ -12,6 +12,7 @@ import {
   getCanvasDocument,
   listCanvasJobs,
   listCanvasProjects,
+  pasteIntoCanvas,
   reproduceIntoCanvas,
   retryCanvasRun,
   replaceCanvasNodeMedia,
@@ -303,6 +304,7 @@ vi.mock('@/api/canvas', () => ({
   listCanvasProjects: vi.fn(),
   renameCanvasProject: vi.fn(),
   replaceCanvasNodeMedia: vi.fn(),
+  pasteIntoCanvas: vi.fn(),
   reproduceIntoCanvas: vi.fn(),
   retryCanvasRun: vi.fn(),
   runCanvasMediaOperation: vi.fn(),
@@ -520,6 +522,48 @@ it('renders solid material links without counting upstream originals and preserv
   fireEvent.paste(window, { clipboardData: { getData: (type: string) => clipboard.get(type) ?? '', items: [] } });
   await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(6));
   expect(lastSavedDocument()?.connections.map(edge => edge.role)).toEqual(['material', 'input', 'material', 'input']);
+});
+
+it('pastes nodes copied from another canvas through the server and adopts the returned document', async () => {
+  const existing = imageNode('existing', '已有');
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [existing] }));
+  const foreign = { ...imageNode('foreign-node', '别处的卡面'), position: { x: 10, y: 20 } };
+  foreign.data.current_version_id = 'foreign-version';
+  vi.mocked(pasteIntoCanvas).mockImplementation(async input => documentWith({
+    revision: input.documentRevision + 1,
+    nodes: [existing, ...input.nodes.map(node => (
+      node.type === 'image'
+        ? { ...node, data: { ...node.data, current_version_id: 'copied-version' } }
+        : node
+    ))],
+    connections: input.connections,
+    content_versions: { 'copied-version': { version_id: 'copied-version', kind: 'image', path: 'uploads/x.png', mime_type: 'image/png',
+      width: 64, height: 64, bytes: 10, created_at: '2026-09-24T00:00:00Z', sha256: 'b'.repeat(64), origin: { kind: 'upload', upload_id: 'x' } } },
+  }));
+  await renderReadyCanvas();
+
+  const serialized = JSON.stringify({ schema_version: 1, source_project_id: 'canvas-two', nodes: [foreign], connections: [] });
+  fireEvent.paste(window, { clipboardData: { getData: (type: string) => (type === 'application/x-game-atelier-canvas-nodes' ? serialized : ''), items: [] } });
+
+  await waitFor(() => expect(pasteIntoCanvas).toHaveBeenCalledTimes(1));
+  const call = vi.mocked(pasteIntoCanvas).mock.calls[0][0];
+  expect(call).toMatchObject({ projectId: 'canvas-one', sourceProjectId: 'canvas-two', documentRevision: 7 });
+  expect(call.nodes).toHaveLength(1);
+  expect(call.nodes[0].id).not.toBe('foreign-node');
+  expect(call.nodes[0].data).toMatchObject({ current_version_id: 'foreign-version' });
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(2));
+  const saved = lastSavedDocument()!;
+  expect(saved.content_versions).toHaveProperty('copied-version');
+  expect(saved.nodes.map(node => node.title)).toEqual(['已有', '别处的卡面']);
+});
+
+it('still pastes within the same canvas from the serialized clipboard without calling the server', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [imageNode('local', '本地')] }));
+  await renderReadyCanvas();
+  const serialized = JSON.stringify({ schema_version: 1, source_project_id: 'canvas-one', nodes: [imageNode('local', '本地')], connections: [] });
+  fireEvent.paste(window, { clipboardData: { getData: (type: string) => (type === 'application/x-game-atelier-canvas-nodes' ? serialized : ''), items: [] } });
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(2));
+  expect(pasteIntoCanvas).not.toHaveBeenCalled();
 });
 
 it('derives read-only named layer ownership lines and removes them only when the binding is removed', async () => {

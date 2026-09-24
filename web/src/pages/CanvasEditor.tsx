@@ -15,8 +15,10 @@ import {
   type NodeChange,
   type OnConnectEnd,
   type Viewport,
+  type ReactFlowState,
   type XYPosition,
   useReactFlow,
+  useStore,
 } from '@xyflow/react';
 import {
   ArrowLeft,
@@ -49,7 +51,7 @@ import {
   WandSparkles,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { Link, useLocation } from 'wouter';
 
 import {
@@ -63,6 +65,7 @@ import {
   listCanvasProjects,
   renameCanvasProject,
   replaceCanvasNodeMedia,
+  pasteIntoCanvas,
   reproduceIntoCanvas,
   retryCanvasRun,
   runCanvasMediaOperation,
@@ -406,7 +409,7 @@ const CANVAS_DELETE_KEYS: readonly string[] = /Mac/i.test(navigator.userAgent)
   : ['Delete'];
 const CANVAS_NODE_CLIPBOARD_TYPE = 'application/x-game-atelier-canvas-nodes';
 const CANVAS_MIN_ZOOM = 0.08;
-const CANVAS_MAX_ZOOM = 2.5;
+const CANVAS_MAX_ZOOM = 5;
 // xyflow 默认只认 Meta/Control，Shift 归 selectionKeyCode（框选）。框选已经由 selectionOnDrag
 // 接管，所以把 Shift 也并进多选键、并把 selectionKeyCode 置空，和快捷键面板写的「Shift / ⌘ 点击」对齐。
 const CANVAS_MULTI_SELECT_KEYS = ['Shift', 'Meta', 'Control'];
@@ -462,7 +465,6 @@ function CanvasEditorInner({
   const [generationPreferencesOpen, setGenerationPreferencesOpen] = useState(false);
   const [generationPreferencesTab, setGenerationPreferencesTab] = useState<CanvasGenerationPreferencesTab>('image');
   const [generationPreferencesSaving, setGenerationPreferencesSaving] = useState(false);
-  const [viewportZoom, setViewportZoom] = useState(1);
   const [projectRenameDraft, setProjectRenameDraft] = useState<string | null>(null);
   const [projectRenameBusy, setProjectRenameBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -740,7 +742,6 @@ function CanvasEditorInner({
     setShortcutsOpen(false);
     setGenerationPreferencesOpen(false);
     setGenerationPreferencesSaving(false);
-    setViewportZoom(1);
     setProjectRenameDraft(null);
     setProjectRenameBusy(false);
     setLibraryMode(null);
@@ -820,7 +821,6 @@ function CanvasEditorInner({
         }
         setProjects(projectRows);
         setDocument(normalizeCanvasGroups(hydrated.document));
-        setViewportZoom(canvasDocument.viewport.zoom);
         serverRevision.current = canvasDocument.revision;
         if (hydrated.versionIds.size) {
           dirtyVersion.current += 1;
@@ -2486,11 +2486,31 @@ function CanvasEditorInner({
     announceToolNotice(`已复制 ${nodes.length} 个节点`);
   }
 
+  async function pasteCanvasNodesFromOtherProject(payload: CanvasClipboardPayload) {
+    // 位置沿用源画布的相对布局，整组由 applyServerInsertion 按 group 放到不重叠的位置。
+    const idMap = new Map(payload.nodes.map(node => [node.id, makeId(node.type)]));
+    const topZ = Math.max(0, ...(document?.nodes.map(node => node.z_index) ?? []));
+    const nodes = payload.nodes.map((source, index) => cloneCanvasNode(
+      source, idMap, source.position, topZ + index + 1,
+    ));
+    const connections = payload.connections.flatMap(connection => {
+      const sourceId = idMap.get(connection.source_node_id);
+      const targetId = idMap.get(connection.target_node_id);
+      return sourceId && targetId
+        ? [{ ...structuredClone(connection), id: makeId('connection'), source_node_id: sourceId, target_node_id: targetId }]
+        : [];
+    });
+    const pasted = await applyServerInsertion(documentRevision => pasteIntoCanvas({
+      projectId,
+      sourceProjectId: payload.source_project_id,
+      nodes,
+      connections,
+      documentRevision,
+    }), { placement: 'group' });
+    if (pasted) announceToolNotice(`已从另一张画布粘贴 ${nodes.length} 个节点`);
+  }
+
   function pasteCanvasNodes(payload: CanvasClipboardPayload) {
-    if (payload.source_project_id !== projectId) {
-      announceToolNotice('节点剪贴板只在当前画布项目内可用');
-      return;
-    }
     if (!payload.nodes.length) return;
     pasteSequence.current += 1;
     const offset = 28 * pasteSequence.current;
@@ -2586,12 +2606,15 @@ function CanvasEditorInner({
       if (!clipboard) return;
       const serialized = clipboard.getData(CANVAS_NODE_CLIPBOARD_TYPE);
       const internalPayload = nodeClipboard.current;
+      // 同一标签页内复制过的用内存里的对象；别的画布（另一标签页 / 切换项目后）只剩系统剪贴板
+      // 里的 JSON，解出来一样能用——媒体归属由服务端粘贴接口处理。
       const payload = internalPayload && serialized === JSON.stringify(internalPayload)
         ? internalPayload
-        : null;
+        : parseCanvasClipboardPayload(serialized);
       if (payload) {
         event.preventDefault();
-        pasteCanvasNodes(payload);
+        if (payload.source_project_id === projectId) pasteCanvasNodes(payload);
+        else void pasteCanvasNodesFromOtherProject(payload);
         return;
       }
       const image = Array.from(clipboard.items)
@@ -4625,7 +4648,6 @@ function CanvasEditorInner({
             interruptViewportCommand();
             viewportSync.current = null;
           }}
-          onMove={(_, viewport: Viewport) => setViewportZoom(viewport.zoom)}
           onPaneClick={() => {
             setCreateMenu(null);
             if (materialPick) {
@@ -4671,12 +4693,8 @@ function CanvasEditorInner({
           nodesConnectable={!activeBatch}
           onlyRenderVisibleElements
           className={cn('canvas-flow', connectionInProgress && 'canvas-flow-connecting')}
-          style={{
-            '--canvas-handle-size': `${48 / viewportZoom}px`,
-            '--canvas-handle-dot-size': `${12 / viewportZoom}px`,
-            '--canvas-handle-border-size': `${2 / viewportZoom}px`,
-          } as CSSProperties}
         >
+          <CanvasZoomCssVars target={editorRegionRef} />
           {background && <Background variant={background} gap={22} size={1} />}
           {document.settings.show_minimap && !materialPick && (
             <MiniMap
@@ -4761,44 +4779,26 @@ function CanvasEditorInner({
         )}
 
         {!materialPick && (
-          <div className="canvas-zoom-dock absolute bottom-3 left-3 z-20 hidden items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
-          {!narrowViewport && renderCanvasConfigControls('desktop')}
-          <span className="mx-1 h-7 w-px bg-border" aria-hidden="true" />
-          <button
-            type="button"
-            aria-label="缩小画布"
-            disabled={viewportZoom <= CANVAS_MIN_ZOOM + 0.0005}
-            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={() => {
+          <CanvasZoomDock
+            configControls={narrowViewport ? null : renderCanvasConfigControls('desktop')}
+            onZoomOut={() => {
               if (getZoom() <= CANVAS_MIN_ZOOM + 0.0005) return;
               void runViewportCommand(() => zoomOut({ duration: 150 }));
             }}
-          ><Minus className="size-4" aria-hidden="true" /></button>
-          <input
-            type="range"
-            min="8"
-            max="250"
-            step="1"
-            value={Math.round(viewportZoom * 100)}
-            aria-label="画布缩放百分比"
-            aria-valuetext={`${Math.round(viewportZoom * 100)}%`}
-            className="h-1 w-24 cursor-pointer accent-primary sm:w-32"
-            onPointerDown={beginZoomSlider}
-            onPointerUp={finishZoomSlider}
-            onPointerCancel={finishZoomSlider}
-            onKeyDown={event => {
-              if (isRangeAdjustmentKey(event.key)) beginZoomSlider();
+            onZoomIn={() => {
+              if (getZoom() >= CANVAS_MAX_ZOOM - 0.0005) return;
+              void runViewportCommand(() => zoomIn({ duration: 150 }));
             }}
-            onKeyUp={event => {
-              if (isRangeAdjustmentKey(event.key)) finishZoomSlider();
+            onResetZoom={() => {
+              if (Math.abs(getZoom() - 1) < 0.001) return;
+              void runViewportCommand(() => zoomTo(1, { duration: 150 }));
             }}
-            onBlur={finishZoomSlider}
-            onChange={event => {
+            onSliderBegin={beginZoomSlider}
+            onSliderFinish={finishZoomSlider}
+            onSliderChange={zoom => {
               const shouldScheduleCommit = !zoomSliderActive.current
                 || zoomSliderCommitTimer.current !== null;
               if (!zoomSliderActive.current) beginZoomSlider();
-              const zoom = Number(event.target.value) / 100;
-              setViewportZoom(zoom);
               const previousMove = zoomSliderMove.current;
               zoomSliderMove.current = previousMove
                 ? previousMove.then(() => zoomTo(zoom), () => zoomTo(zoom))
@@ -4806,27 +4806,6 @@ function CanvasEditorInner({
               if (shouldScheduleCommit) scheduleZoomSliderCommit();
             }}
           />
-          <span aria-live="polite" className="w-11 text-right text-xs tabular-nums text-muted-foreground">{Math.round(viewportZoom * 100)}%</span>
-          <button
-            type="button"
-            aria-label="放大画布"
-            disabled={viewportZoom >= CANVAS_MAX_ZOOM - 0.0005}
-            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={() => {
-              if (getZoom() >= CANVAS_MAX_ZOOM - 0.0005) return;
-              void runViewportCommand(() => zoomIn({ duration: 150 }));
-            }}
-          ><Plus className="size-4" aria-hidden="true" /></button>
-          <button
-            type="button"
-            aria-label="复位画布缩放到 100%"
-            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            onClick={() => {
-              if (Math.abs(getZoom() - 1) < 0.001) return;
-              void runViewportCommand(() => zoomTo(1, { duration: 150 }));
-            }}
-          ><Scan className="size-4" aria-hidden="true" /></button>
-          </div>
         )}
 
         {materialPick && (
@@ -5712,4 +5691,109 @@ function cloneCanvasDraft(
 
 function makeId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
+}
+
+function parseCanvasClipboardPayload(serialized: string): CanvasClipboardPayload | null {
+  if (!serialized) return null;
+  try {
+    const parsed: unknown = JSON.parse(serialized);
+    if (
+      typeof parsed !== 'object' || parsed === null
+      || (parsed as CanvasClipboardPayload).schema_version !== 1
+      || typeof (parsed as CanvasClipboardPayload).source_project_id !== 'string'
+      || !Array.isArray((parsed as CanvasClipboardPayload).nodes)
+      || !Array.isArray((parsed as CanvasClipboardPayload).connections)
+    ) return null;
+    return parsed as CanvasClipboardPayload;
+  } catch {
+    return null;
+  }
+}
+
+const canvasFlowZoom = (state: ReactFlowState) => state.transform[2];
+
+/** 连接把手随缩放反比放大，靠 CSS 变量。变量写在编辑器外壳上由 .canvas-flow 继承——
+ *  原来是把 zoom 存成 CanvasEditor 的 state、每帧平移 / 缩放都让 5000 行的主树整棵重渲染，
+ *  几十个节点就卡。这里只订阅 store 里的 zoom，主树不再知道每一帧。 */
+function CanvasZoomCssVars({ target }: { target: RefObject<HTMLElement> }) {
+  const zoom = useStore(canvasFlowZoom);
+  useEffect(() => {
+    const element = target.current;
+    if (!element) return;
+    element.style.setProperty('--canvas-handle-size', `${48 / zoom}px`);
+    element.style.setProperty('--canvas-handle-dot-size', `${12 / zoom}px`);
+    element.style.setProperty('--canvas-handle-border-size', `${2 / zoom}px`);
+  }, [target, zoom]);
+  return null;
+}
+
+const zoomDockButtonClass = 'grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40';
+
+function CanvasZoomDock({
+  configControls,
+  onZoomOut,
+  onZoomIn,
+  onResetZoom,
+  onSliderBegin,
+  onSliderFinish,
+  onSliderChange,
+}: {
+  configControls: ReactNode;
+  onZoomOut: () => void;
+  onZoomIn: () => void;
+  onResetZoom: () => void;
+  onSliderBegin: () => void;
+  onSliderFinish: () => void;
+  onSliderChange: (zoom: number) => void;
+}) {
+  const zoom = useStore(canvasFlowZoom);
+  const percent = Math.round(zoom * 100);
+  return (
+    <div className="canvas-zoom-dock absolute bottom-3 left-3 z-20 hidden items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
+      {configControls}
+      <span className="mx-1 h-7 w-px bg-border" aria-hidden="true" />
+      <button
+        type="button"
+        aria-label="缩小画布"
+        disabled={zoom <= CANVAS_MIN_ZOOM + 0.0005}
+        className={zoomDockButtonClass}
+        onClick={onZoomOut}
+      ><Minus className="size-4" aria-hidden="true" /></button>
+      <input
+        type="range"
+        min={Math.round(CANVAS_MIN_ZOOM * 100)}
+        max={Math.round(CANVAS_MAX_ZOOM * 100)}
+        step="1"
+        value={percent}
+        aria-label="画布缩放百分比"
+        aria-valuetext={`${percent}%`}
+        className="h-1 w-24 cursor-pointer accent-primary sm:w-32"
+        onPointerDown={onSliderBegin}
+        onPointerUp={onSliderFinish}
+        onPointerCancel={onSliderFinish}
+        onKeyDown={event => {
+          if (isRangeAdjustmentKey(event.key)) onSliderBegin();
+        }}
+        onKeyUp={event => {
+          if (isRangeAdjustmentKey(event.key)) onSliderFinish();
+        }}
+        onBlur={onSliderFinish}
+        onChange={event => onSliderChange(Number(event.target.value) / 100)}
+      />
+      <span aria-live="polite" className="w-11 text-right text-xs tabular-nums text-muted-foreground">{percent}%</span>
+      <button
+        type="button"
+        aria-label="放大画布"
+        disabled={zoom >= CANVAS_MAX_ZOOM - 0.0005}
+        className={zoomDockButtonClass}
+        onClick={onZoomIn}
+      ><Plus className="size-4" aria-hidden="true" /></button>
+      <button
+        type="button"
+        aria-label="复位画布缩放到 100%"
+        className={zoomDockButtonClass}
+        onClick={onResetZoom}
+      ><Scan className="size-4" aria-hidden="true" /></button>
+    </div>
+  );
 }
