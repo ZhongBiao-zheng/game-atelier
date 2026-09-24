@@ -111,3 +111,54 @@ def test_revoked_session_closes_stream_and_releases_subscription(runtime):
             await asyncio.wait_for(stream.__anext__(), timeout=1)
         assert session.event_connections == 0
     asyncio.run(run())
+
+
+def test_in_loop_broadcast_to_full_queue_logs_warning(runtime, caplog):
+    async def run():
+        full = await hub.subscribe()
+        other = await hub.subscribe()
+        try:
+            for i in range(200):
+                full.put_nowait(f"old {i}")
+            with caplog.at_level("WARNING", logger="viewer_server.sse"):
+                hub.broadcast("team-library-changed", {"asset_id": "ta"})
+            assert full.qsize() == 200
+            assert "team-library-changed" in other.get_nowait()
+        finally:
+            hub.unsubscribe(full)
+            hub.unsubscribe(other)
+    asyncio.run(run())
+    assert any("team-library-changed" in r.getMessage() for r in caplog.records)
+
+
+def test_threaded_broadcast_to_full_queue_does_not_raise_in_loop(runtime, caplog):
+    """watchdog 线程广播：队满不能在事件循环回调里抛 QueueFull，其他订阅者照常收到。"""
+    import threading
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        errors: list[dict] = []
+        loop.set_exception_handler(lambda _loop, context: errors.append(context))
+        hub.set_loop(loop)
+        full = await hub.subscribe()
+        other = await hub.subscribe()
+        try:
+            for i in range(200):
+                full.put_nowait(f"old {i}")
+            with caplog.at_level("WARNING", logger="viewer_server.sse"):
+                thread = threading.Thread(
+                    target=hub.broadcast, args=("team-library-changed", {"asset_id": "ta"})
+                )
+                thread.start()
+                thread.join(5)
+                message = await asyncio.wait_for(other.get(), timeout=1.0)
+                await asyncio.sleep(0)
+            assert "team-library-changed" in message
+            assert full.qsize() == 200
+            assert errors == []
+        finally:
+            hub.unsubscribe(full)
+            hub.unsubscribe(other)
+            hub.set_loop(None)
+    asyncio.run(run())
+    assert any("team-library-changed" in r.getMessage() for r in caplog.records)

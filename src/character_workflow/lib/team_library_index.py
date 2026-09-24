@@ -166,6 +166,10 @@ def _shared_entry(root: Path, asset_dir: Path) -> TeamLibraryIndexEntry:
         status="ready" if _asset_files_present(asset_dir, asset) else "incomplete",
         model=snapshot.model if snapshot else None,
         cost_cny=snapshot.cost_cny if snapshot else None,
+        input_sha256=(
+            [row.sha256 for row in sorted(snapshot.inputs, key=lambda row: row.order)]
+            if snapshot and asset.kind == "generation" else []
+        ),
     )
 
 
@@ -261,31 +265,38 @@ def read_index(library_id: str) -> TeamLibraryIndex | None:
         return None
 
 
+def _change(entry: TeamLibraryIndexEntry, change: str) -> dict:
+    """TeamLibraryChangeEvent 除 library_id 外的字段；removed 不带 title / status / mime_type。"""
+    present = change != "removed"
+    return {
+        "asset_id": entry.id, "kind": entry.kind, "author": entry.author, "change": change,
+        "title": entry.title if present else None,
+        "status": entry.status if present else None,
+        "mime_type": entry.mime_type if present else None,
+    }
+
+
 def diff_index(before: TeamLibraryIndex | None, after: TeamLibraryIndex) -> list[dict]:
-    old = {e.id: e for e in (before.entries if before else [])}
+    """两次扫描之间的变化。没有上一份索引（首扫 / 缓存丢了）→ 不产生事件：
+    那时整库都会算成 added，逐条广播就是给每条老资产弹一次提醒。"""
+    if before is None:
+        return []
+    old = {e.id: e for e in before.entries}
     new = {e.id: e for e in after.entries}
     changes: list[dict] = []
     for entry_id, entry in new.items():
         prior = old.get(entry_id)
         if prior is None:
-            change = "added"
+            changes.append(_change(entry, "added"))
         elif (
             prior.updated_at != entry.updated_at
             or prior.status != entry.status
             or prior.bytes != entry.bytes
         ):
-            change = "updated"
-        else:
-            continue
-        changes.append(
-            {"asset_id": entry_id, "kind": entry.kind, "author": entry.author, "change": change}
-        )
-    for entry_id, entry in old.items():
-        if entry_id not in new:
-            changes.append({
-                "asset_id": entry_id, "kind": entry.kind, "author": entry.author,
-                "change": "removed",
-            })
+            changes.append(_change(entry, "updated"))
+    changes.extend(
+        _change(entry, "removed") for entry_id, entry in old.items() if entry_id not in new
+    )
     return changes
 
 
@@ -331,6 +342,14 @@ def related_entries(index: TeamLibraryIndex, *, limit: int = 20) -> list[TeamLib
     """团队栏「相关配方」：可复刻（generation 且 ready）的条目，最近更新的在前。"""
     rows = [e for e in index.entries if e.kind == "generation" and e.status == "ready"]
     rows.sort(key=lambda e: parse_instant(e.updated_at) or _EARLIEST, reverse=True)
+    return rows[:max(0, limit)]
+
+
+def related_by_input_sha(
+    index: TeamLibraryIndex, sha256: str, *, limit: int = 20
+) -> list[TeamLibraryIndexEntry]:
+    """推荐 a：参考里用过这份内容（按 sha256）的可复刻配方，最近更新的在前。"""
+    rows = [e for e in related_entries(index, limit=len(index.entries)) if sha256 in e.input_sha256]
     return rows[:max(0, limit)]
 
 

@@ -160,7 +160,8 @@ def test_refresh_team_library_broadcasts_diff_and_returns_index(
     assert idx.read_index(mount.library_id) == index
     assert events == [("team-library-changed", {
         "library_id": mount.library_id, "asset_id": index.entries[0].id, "kind": "raw",
-        "author": None, "change": "added",
+        "author": None, "change": "added", "title": "a.png", "status": "ready",
+        "mime_type": "image/png",
     })]
     assert watcher.refresh_team_library(mount).entries == index.entries
     assert len(events) == 1
@@ -176,3 +177,22 @@ def test_team_library_handler_rescan_goes_through_refresh(isolated_data_root, tm
     monkeypatch.setattr(watcher, "refresh_team_library", lambda m: calls.append(m.library_id))
     watcher.TeamLibraryHandler(mount, delay=0).rescan()
     assert calls == [mount.library_id]
+
+
+def test_refresh_team_library_without_prior_index_broadcasts_nothing(
+    isolated_data_root, tmp_path, monkeypatch
+):
+    """索引缓存丢了（或首扫）：整库都算 added，不能给每条都广播一次提醒。"""
+    import shutil
+
+    from character_workflow.lib import team_library as tl
+    from character_workflow.lib import team_library_index as idx
+
+    folder = tmp_path / "lib"
+    folder.mkdir()
+    (folder / "a.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+    mount = tl.mount_library(project_id="p1", path=str(folder), name=None, created_by="我")
+    shutil.rmtree(idx.cache_dir(mount.library_id), ignore_errors=True)
+    events = _capture(monkeypatch)
+    index = watcher.refresh_team_library(mount)
+    assert [e.kind for e in index.entries] == ["raw"] and events == []

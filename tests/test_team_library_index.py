@@ -73,16 +73,44 @@ def test_diff_reports_added_updated_removed(isolated_data_root, tmp_path):
     before = idx.scan_library(mount)
     asset_dir = _shared_asset(folder)
     after = idx.scan_library(mount)
-    assert idx.diff_index(before, after) == [
-        {"asset_id": _ASSET_ID, "kind": "media", "author": "老王", "change": "added"}]
+    assert idx.diff_index(before, after) == [{
+        "asset_id": _ASSET_ID, "kind": "media", "author": "老王", "change": "added",
+        "title": "董卓 待机", "status": "ready", "mime_type": "image/png",
+    }]
     data = json.loads((asset_dir / "asset.json").read_text("utf-8"))
     data["updated_at"] = "2026-09-21T00:00:00Z"
+    data["title"] = "董卓 攻击"
     (asset_dir / "asset.json").write_text(json.dumps(data), "utf-8")
     updated = idx.scan_library(mount)
-    assert idx.diff_index(after, updated)[0]["change"] == "updated"
+    assert idx.diff_index(after, updated) == [{
+        "asset_id": _ASSET_ID, "kind": "media", "author": "老王", "change": "updated",
+        "title": "董卓 攻击", "status": "ready", "mime_type": "image/png",
+    }]
     import shutil
     shutil.rmtree(asset_dir)
-    assert idx.diff_index(updated, idx.scan_library(mount))[0]["change"] == "removed"
+    assert idx.diff_index(updated, idx.scan_library(mount)) == [{
+        "asset_id": _ASSET_ID, "kind": "media", "author": "老王", "change": "removed",
+        "title": None, "status": None, "mime_type": None,
+    }]
+
+
+def test_diff_payload_validates_as_change_event(isolated_data_root, tmp_path):
+    from character_workflow.lib.schemas import TeamLibraryChangeEvent
+
+    folder, mount = _mount(tmp_path)
+    before = idx.scan_library(mount)
+    _shared_asset(folder)
+    (change,) = idx.diff_index(before, idx.scan_library(mount))
+    event = TeamLibraryChangeEvent(library_id=mount.library_id, **change)
+    assert event.model_dump(mode="json") == {"library_id": mount.library_id, **change}
+
+
+def test_diff_without_prior_index_is_silent(isolated_data_root, tmp_path):
+    """首扫 / 索引缓存丢失：整库都会算成 added，不能对每条都弹提醒。"""
+    folder, mount = _mount(tmp_path)
+    _shared_asset(folder)
+    (folder / "castle.png").write_bytes(_PNG)
+    assert idx.diff_index(None, idx.scan_library(mount)) == []
 
 
 def test_query_filters_and_pages(isolated_data_root, tmp_path):
@@ -404,3 +432,71 @@ def test_related_entries_sort_by_instant_not_string():
         ],
     )
     assert [e.id for e in idx.related_entries(index)] == ["g_utc", "g_east"]
+
+
+def _two_ref_generation(folder):
+    import hashlib
+    from io import BytesIO
+
+    from PIL import Image
+
+    def png(color):
+        buffer = BytesIO()
+        Image.new("RGB", (2, 2), color).save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    refs = [png((200, 0, 0)), png((0, 200, 0))]
+    asset_dir = _generation_asset(folder, ref=False)
+    data = json.loads((asset_dir / "asset.json").read_text("utf-8"))
+    inputs = []
+    for order, body in enumerate(refs):
+        sha = hashlib.sha256(body).hexdigest()
+        path = f"refs/{order + 1:02d}-{sha[:12]}.png"
+        (asset_dir / path).write_bytes(body)
+        inputs.append({"order": order, "role": "reference", "kind": "image", "sha256": sha,
+                       "mime_type": "image/png", "path": path})
+    data["snapshot"]["inputs"] = inputs
+    (asset_dir / "asset.json").write_text(json.dumps(data, ensure_ascii=False), "utf-8")
+    return [row["sha256"] for row in inputs]
+
+
+def test_generation_entry_lists_input_sha256_in_order(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    shas = _two_ref_generation(folder)
+    (folder / "castle.png").write_bytes(_PNG)
+    entries = {e.kind: e for e in idx.scan_library(mount).entries}
+    assert entries["generation"].status == "ready"
+    assert entries["generation"].input_sha256 == shas
+    assert entries["raw"].input_sha256 == []
+
+
+def test_media_entry_has_no_input_sha256(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    _shared_asset(folder)
+    assert idx.scan_library(mount).entries[0].input_sha256 == []
+
+
+def test_related_by_input_sha_hits_ready_generations_newest_first():
+    from character_workflow.lib.schemas import TeamLibraryIndex
+
+    hit, other = "a" * 64, "b" * 64
+
+    def entry(entry_id, *, shas, **kwargs):
+        return _index_entry(entry_id, **kwargs).model_copy(update={"input_sha256": shas})
+
+    index = TeamLibraryIndex(
+        library_id="lib_" + "1" * 16,
+        scanned_at="2026-09-23T00:00:00Z",
+        entries=[
+            entry("g_old", shas=[other, hit], updated_at="2026-09-01T00:00:00Z"),
+            entry("g_new", shas=[hit], updated_at="2026-09-22T08:00:00+08:00"),
+            entry("g_mid", shas=[hit], updated_at="2026-09-10T00:00:00Z"),
+            entry("g_miss", shas=[other], updated_at="2026-09-23T00:00:00Z"),
+            entry("g_broken", shas=[hit], status="incomplete", updated_at="2026-09-23T00:00:00Z"),
+            entry("m_hit", shas=[hit], kind="media", updated_at="2026-09-23T00:00:00Z"),
+        ],
+    )
+    assert [e.id for e in idx.related_by_input_sha(index, hit)] == ["g_new", "g_mid", "g_old"]
+    assert [e.id for e in idx.related_by_input_sha(index, hit, limit=1)] == ["g_new"]
+    assert idx.related_by_input_sha(index, hit, limit=0) == []
+    assert idx.related_by_input_sha(index, "c" * 64) == []

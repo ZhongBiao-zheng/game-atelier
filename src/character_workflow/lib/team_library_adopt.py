@@ -12,8 +12,11 @@ from character_workflow.lib.creation_assets import (
     create_adopted_asset,
     find_adopted_asset,
     find_media_asset_by_sha256,
+    list_creation_assets,
     mark_creation_asset_used,
+    get_creation_asset,
     new_creation_asset_id,
+    replace_adopted_asset,
     sniff_media_mime,
     store_media_blob,
 )
@@ -22,19 +25,38 @@ from character_workflow.lib.schemas import (
     CreationAsset,
     CreationGenerationAssetContent,
     CreationMediaAssetContent,
+    CreationPromptAssetContent,
     MEDIA_SUFFIXES,
     GenerationRecipe,
     TeamAssetFile,
+    TeamLibraryIndex,
     TeamLibraryIndexEntry,
     TeamLibraryMount,
 )
 from character_workflow.lib.team_library import get_mount, library_reachable
 
 Staleness = Literal["fresh", "stale", "withdrawn", "unknown"]
+_LocalContent = (
+    CreationPromptAssetContent | CreationMediaAssetContent | CreationGenerationAssetContent
+)
 
 
 class TeamAssetAdoptError(ValueError):
     """这条团队资产现在不能采用。"""
+
+
+# 重新采用的三种失败各自映射不同状态码（409 / 409 / 503）：刻意不继承 TeamAssetAdoptError
+# 或 ValueError，免得被路由里既有的 422 分支先接住。
+class TeamAssetNotAdopted(Exception):
+    """这条本机资产不是从团队库采用的。"""
+
+
+class TeamAssetWithdrawn(Exception):
+    """来源条目已不在库里（撤回 / 改名 / 删除）。"""
+
+
+class TeamLibraryUnreachable(Exception):
+    """来源库没挂载、目录不可达或还没扫过索引。"""
 
 
 def _now() -> str:
@@ -111,6 +133,15 @@ def _new_adopted(
     )
 
 
+def _raw_origin(mount: TeamLibraryMount, entry: TeamLibraryIndexEntry) -> AdoptionOrigin:
+    return AdoptionOrigin(
+        library_id=mount.library_id,
+        asset_id=entry.id,
+        source_updated_at=entry.updated_at,
+        raw_path=entry.relative_path,
+    )
+
+
 def _adopt_raw(
     mount: TeamLibraryMount, entry: TeamLibraryIndexEntry, project_id: str | None
 ) -> tuple[CreationAsset, bool]:
@@ -120,15 +151,9 @@ def _adopt_raw(
     if duplicate is not None:
         return _join_project(duplicate, project_id), False
     content = _store(body, Path(entry.relative_path).name, entry.mime_type)
-    origin = AdoptionOrigin(
-        library_id=mount.library_id,
-        asset_id=entry.id,
-        source_updated_at=entry.updated_at,
-        raw_path=entry.relative_path,
-    )
     return _commit(_new_adopted(
         kind="media", title=entry.title, tags=[], content=content,
-        project_id=project_id, origin=origin,
+        project_id=project_id, origin=_raw_origin(mount, entry),
     ))
 
 
@@ -176,12 +201,10 @@ def _generation_content(
     )
 
 
-def _adopt_shared(
-    mount: TeamLibraryMount, entry: TeamLibraryIndexEntry, project_id: str | None
-) -> tuple[CreationAsset, bool]:
-    existing = find_adopted_asset(mount.library_id, entry.id)
-    if existing is not None:
-        return _join_project(existing, project_id), False
+def _shared_copy(
+    mount: TeamLibraryMount, entry: TeamLibraryIndexEntry
+) -> tuple[TeamAssetFile, _LocalContent, AdoptionOrigin]:
+    """读库内分享资产、校验并把 blob 落进本机：返回 (团队资产, 本机内容, 来源记录)。"""
     try:
         asset_dir = idx.shared_asset_dir(mount, entry)
     except FileNotFoundError:
@@ -202,6 +225,16 @@ def _adopt_shared(
         asset_id=team_asset.asset_id,
         source_updated_at=team_asset.updated_at,
     )
+    return team_asset, content, origin
+
+
+def _adopt_shared(
+    mount: TeamLibraryMount, entry: TeamLibraryIndexEntry, project_id: str | None
+) -> tuple[CreationAsset, bool]:
+    existing = find_adopted_asset(mount.library_id, entry.id)
+    if existing is not None:
+        return _join_project(existing, project_id), False
+    team_asset, content, origin = _shared_copy(mount, entry)
     return _commit(_new_adopted(
         kind=team_asset.kind, title=team_asset.title, tags=team_asset.tags, content=content,
         project_id=project_id, origin=origin,
@@ -235,24 +268,35 @@ def _raw_content_unchanged(
     return hashlib.sha256(body).hexdigest() == media.sha256
 
 
-def adoption_staleness(asset: CreationAsset) -> Staleness:
-    """采用副本相对来源的状态。库没挂、不可达、没扫过、条目同步中 → unknown（不提示）。"""
-    origin = asset.adopted_from
-    if origin is None:
-        return "unknown"
+_Source = tuple[TeamLibraryMount, TeamLibraryIndex] | None
+
+
+def _library_source(library_id: str) -> _Source:
+    """来源库的 (挂载, 索引)；没挂载 / 不可达 / 没扫过 → None。"""
     try:
-        mount = get_mount(origin.library_id)
+        mount = get_mount(library_id)
     except KeyError:
-        return "unknown"
+        return None
     if not library_reachable(mount):
-        return "unknown"
-    index = idx.read_index(origin.library_id)
+        return None
+    index = idx.read_index(library_id)
     if index is None:
-        return "unknown"
+        return None
+    return mount, index
+
+
+def _origin_entry_id(origin: AdoptionOrigin) -> str:
     # 原始文件的条目 id 由路径派生：按 raw_path 重新算，不依赖采用时记下的 id 拼法。
-    entry_id = idx.raw_entry_id(origin.raw_path) if origin.raw_path else origin.asset_id
+    return idx.raw_entry_id(origin.raw_path) if origin.raw_path else origin.asset_id
+
+
+def _staleness(asset: CreationAsset, source: _Source) -> Staleness:
+    origin = asset.adopted_from
+    if origin is None or source is None:
+        return "unknown"
+    mount, index = source
     try:
-        entry = idx.get_entry(index, entry_id)
+        entry = idx.get_entry(index, _origin_entry_id(origin))
     except KeyError:
         return "withdrawn"
     if entry.status != "ready":
@@ -269,3 +313,60 @@ def adoption_staleness(asset: CreationAsset) -> Staleness:
     if unchanged is None:
         return "unknown"
     return "fresh" if unchanged else "stale"
+
+
+def adoption_staleness(asset: CreationAsset) -> Staleness:
+    """采用副本相对来源的状态。库没挂、不可达、没扫过、条目同步中 → unknown（不提示）。"""
+    origin = asset.adopted_from
+    if origin is None:
+        return "unknown"
+    return _staleness(asset, _library_source(origin.library_id))
+
+
+def adoption_staleness_batch(asset_ids: list[str]) -> dict[str, Staleness]:
+    """资产面板一次查一批：每个来源库只读一次挂载与索引。不存在的 id 不出现在结果里。"""
+    wanted = set(asset_ids)
+    if not wanted:
+        return {}
+    assets = [row for row in list_creation_assets().assets if row.asset_id in wanted]
+    sources: dict[str, _Source] = {}
+    statuses: dict[str, Staleness] = {}
+    for asset in assets:
+        origin = asset.adopted_from
+        if origin is not None and origin.library_id not in sources:
+            sources[origin.library_id] = _library_source(origin.library_id)
+        source = sources.get(origin.library_id) if origin is not None else None
+        statuses[asset.asset_id] = _staleness(asset, source)
+    return statuses
+
+
+def readopt_team_asset(asset_id: str) -> CreationAsset:
+    """重新采用：用来源的当前版本覆盖本机副本（保留本机 id / 创建时间 / 所属项目 / 最近使用）。
+
+    本机资产不存在 → KeyError；不是采用来的 → TeamAssetNotAdopted；来源库没挂 / 不可达 / 没索引
+    → TeamLibraryUnreachable；条目不在了 → TeamAssetWithdrawn；条目同步中或校验不过 → TeamAssetAdoptError。
+    """
+    asset = get_creation_asset(asset_id)
+    origin = asset.adopted_from
+    if origin is None:
+        raise TeamAssetNotAdopted(asset_id)
+    source = _library_source(origin.library_id)
+    if source is None:
+        raise TeamLibraryUnreachable(origin.library_id)
+    mount, index = source
+    try:
+        entry = idx.get_entry(index, _origin_entry_id(origin))
+    except KeyError:
+        raise TeamAssetWithdrawn(origin.asset_id) from None
+    if entry.status != "ready":
+        raise TeamAssetAdoptError("这条资产还没同步完整")
+    if entry.kind == "raw":
+        body = _library_file(mount, entry.relative_path).read_bytes()
+        content = _store(body, Path(entry.relative_path).name, entry.mime_type)
+        title, tags, new_origin = entry.title, [], _raw_origin(mount, entry)
+    else:
+        team_asset, content, new_origin = _shared_copy(mount, entry)
+        title, tags = team_asset.title, team_asset.tags
+    return replace_adopted_asset(
+        asset_id, title=title, tags=tags, content=content, adopted_from=new_origin,
+    )

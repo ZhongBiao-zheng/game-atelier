@@ -492,7 +492,8 @@ def test_share_job_output_returns_refreshed_entry_and_broadcasts_added(
     assert events == [(
         "team-library-changed",
         {"library_id": lib["library_id"], "asset_id": entry["id"], "kind": "generation",
-         "author": "老王", "change": "added"},
+         "author": "老王", "change": "added", "title": "红猫", "status": "ready",
+         "mime_type": entry["mime_type"]},
     )]
 
 
@@ -896,16 +897,18 @@ def test_refresh_failure_after_write_is_500_naming_asset(
     assert "请重新扫描" in withdrawn.json()["detail"]["message"]
 
 
-def test_mount_broadcasts_initial_entries(client, tmp_path, monkeypatch):
+def test_mount_first_scan_is_silent(client, tmp_path, monkeypatch):
+    """挂载后的首扫没有上一份索引：整库都算 added，不能逐条广播成分享提醒（P3 Q3）。"""
+    from character_workflow.lib import team_library_index as idx
+
     folder = tmp_path / "lib"
     folder.mkdir()
     (folder / "a.png").write_bytes(_PNG)
     client.put("/api/profile", json={"display_name": "老王"})
     events = _broadcasts(monkeypatch)
     lib = _mount(client, "canvas-1", folder)
-    assert [(d["library_id"], d["kind"], d["change"]) for _, d in events] == [
-        (lib["library_id"], "raw", "added")
-    ]
+    assert events == []
+    assert [e.kind for e in idx.read_index(lib["library_id"]).entries] == ["raw"]
 
 
 def test_related_skips_library_without_index(client, isolated_data_root, tmp_path):

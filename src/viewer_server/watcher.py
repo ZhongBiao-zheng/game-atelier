@@ -221,12 +221,14 @@ def refresh_team_library(mount: TeamLibraryMount) -> TeamLibraryIndex:
     added 广播两遍。调用方负责先判可达（不可达时扫出的是空索引，见 TeamLibraryHandler.rescan）。
     """
     from character_workflow.lib import team_library_index as idx
+    from character_workflow.lib.schemas import TeamLibraryChangeEvent
 
     with _refresh_lock(mount.library_id):
         before = idx.read_index(mount.library_id)
         after = idx.scan_library(mount)
         for change in idx.diff_index(before, after):
-            hub.broadcast("team-library-changed", {"library_id": mount.library_id, **change})
+            event = TeamLibraryChangeEvent(library_id=mount.library_id, **change)
+            hub.broadcast("team-library-changed", event.model_dump(mode="json"))
     return after
 
 

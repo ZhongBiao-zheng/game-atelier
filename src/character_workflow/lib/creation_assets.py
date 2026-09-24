@@ -812,6 +812,52 @@ def create_adopted_asset(asset: CreationAsset) -> CreationAsset:
         return asset
 
 
+def replace_adopted_asset(
+    asset_id: str,
+    *,
+    title: str,
+    tags: list[str],
+    content: (
+        CreationPromptAssetContent | CreationMediaAssetContent | CreationGenerationAssetContent
+    ),
+    adopted_from: AdoptionOrigin,
+) -> CreationAsset:
+    """重新采用：内容、标题、标签、来源记录跟来源走；id / created_at / project_ids / last_used_at 保留。
+
+    新内容的 blob 须已由调用方落好（持锁再核一次，防并发删除清掉）。旧 blob 没人用了就删。
+    新内容撞上另一条同来源 / 同内容（原始文件按内容去重）的资产 → CreationAssetDuplicateError。
+    """
+    orphan_paths: list[Path] = []
+    with file_lock(_catalog_lock_path()):
+        current = _read_catalog_unlocked()
+        asset = next((row for row in current.assets if row.asset_id == asset_id), None)
+        if asset is None:
+            raise KeyError(asset_id)
+        if asset.adopted_from is None:
+            raise ValueError("只有从团队库采用的资产可以重新采用")
+        updated = CreationAsset.model_validate({
+            **asset.model_dump(),
+            "kind": content.kind,
+            "title": _required_text(title, "资产标题"),
+            "tags": _normalize_tags(tags),
+            "content": content.model_dump(),
+            "adopted_from": adopted_from.model_dump(),
+            "updated_at": _now(),
+        })
+        duplicate = _adopted_duplicate(current, updated)
+        if duplicate is not None and duplicate.asset_id != asset_id:
+            raise CreationAssetDuplicateError(duplicate.asset_id)
+        _require_blobs(updated)
+        _replace_asset(current, updated)
+        orphan_paths = _orphan_blob_paths(
+            _asset_blob_paths(asset),
+            [updated if row.asset_id == asset_id else row for row in current.assets],
+        )
+    for path in orphan_paths:
+        path.unlink(missing_ok=True)
+    return updated
+
+
 def find_adopted_asset(library_id: str, asset_id: str) -> CreationAsset | None:
     with file_lock(_catalog_lock_path()):
         for row in _read_catalog_unlocked().assets:

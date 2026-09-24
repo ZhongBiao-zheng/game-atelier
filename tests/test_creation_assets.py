@@ -20,6 +20,7 @@ from character_workflow.lib.creation_assets import (
     create_prompt_asset,
     creation_asset_media_path,
     delete_creation_asset,
+    get_creation_asset,
     find_adopted_asset,
     find_media_asset_by_sha256,
     insert_creation_asset_into_canvas,
@@ -463,3 +464,136 @@ def test_team_asset_id_pattern_accepts_crockford_ulid_only():
     assert re.fullmatch(TEAM_ASSET_ID_PATTERN, "ta_01JZ9KHVTPQRSXYZABCDEFGHJK")
     for bad in ("ta_" + "0" * 25, "ta_" + "I" * 26, "ta_" + "l" * 26, "ta_" + "u" * 26):
         assert re.fullmatch(TEAM_ASSET_ID_PATTERN, bad) is None
+
+
+# ---- 重新采用：覆盖本机副本 ----
+
+def _png_of(color) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", (2, 2), color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _adopted_media(body: bytes, *, raw_path: str | None = None, **overrides) -> CreationAsset:
+    origin = AdoptionOrigin(
+        library_id="lib_" + "a" * 16,
+        asset_id="raw_1" if raw_path else "ta_" + "0" * 26,
+        source_updated_at="2026-09-20T00:00:00Z",
+        raw_path=raw_path,
+    )
+    return create_adopted_asset(CreationAsset(**{
+        "asset_id": new_creation_asset_id(),
+        "kind": "media",
+        "title": "团队图",
+        "tags": ["团队"],
+        "created_at": "2026-09-20T00:00:00Z",
+        "updated_at": "2026-09-20T00:00:00Z",
+        "content": store_media_blob(body, "a.png", "image/png"),
+        "project_ids": ["p1"],
+        "adopted_from": origin,
+        **overrides,
+    }))
+
+
+def _newer_origin(asset: CreationAsset) -> AdoptionOrigin:
+    return asset.adopted_from.model_copy(update={"source_updated_at": "2026-09-21T00:00:00Z"})
+
+
+def test_replace_adopted_asset_overwrites_content_and_keeps_identity(isolated_data_root):
+    from character_workflow.lib.creation_assets import replace_adopted_asset
+
+    old_body, new_body = _png_of((1, 2, 3)), _png_of((4, 5, 6))
+    asset = mark_creation_asset_used(_adopted_media(old_body).asset_id, "p2")
+    old_path = creation_asset_media_path(asset.asset_id)
+    content = store_media_blob(new_body, "b.png", "image/png")
+    replaced = replace_adopted_asset(
+        asset.asset_id, title="  新图 ", tags=["新", "新"], content=content,
+        adopted_from=_newer_origin(asset),
+    )
+    assert replaced.asset_id == asset.asset_id and replaced.created_at == asset.created_at
+    assert replaced.project_ids == ["p1", "p2"] and replaced.last_used_at == asset.last_used_at
+    assert replaced.title == "新图" and replaced.tags == ["新"]
+    assert replaced.content == content
+    assert replaced.adopted_from.source_updated_at == "2026-09-21T00:00:00Z"
+    assert replaced.updated_at != asset.updated_at
+    assert list_creation_assets().assets == [replaced]
+    assert not old_path.exists()
+    assert creation_asset_media_path(asset.asset_id).read_bytes() == new_body
+
+
+def test_replace_adopted_asset_keeps_blob_still_used_elsewhere(isolated_data_root):
+    from character_workflow.lib.creation_assets import replace_adopted_asset
+
+    shared = _png_of((7, 8, 9))
+    from character_workflow.lib.creation_assets import create_generation_asset
+    from character_workflow.lib.schemas import GenerationRecipe
+
+    asset = _adopted_media(shared)
+    old_path = creation_asset_media_path(asset.asset_id)
+    # 另一条生成资产的参考也用着这份 blob：不能当孤儿删。
+    output = store_media_blob(_png_of((0, 0, 0)), "out.png", "image/png")
+    create_generation_asset(
+        title="生成", tags=[], media=output,
+        snapshot=GenerationRecipe(
+            mode="image", model="m", final_prompt="p", submitted_at="2026-09-20T00:00:00Z",
+            inputs=[{"order": 0, "role": "reference", "kind": "image",
+                     "sha256": asset.content.sha256, "mime_type": "image/png"}],
+        ),
+    )
+    replace_adopted_asset(
+        asset.asset_id, title="团队图", tags=[],
+        content=store_media_blob(_png_of((9, 9, 9)), "c.png", "image/png"),
+        adopted_from=_newer_origin(asset),
+    )
+    assert old_path.is_file()
+
+
+def test_replace_adopted_asset_rejects_local_missing_and_blobless(isolated_data_root):
+    from character_workflow.lib.creation_assets import replace_adopted_asset
+
+    local = create_media_asset_from_bytes(
+        title="本机", body=_png_of((1, 1, 1)), filename="l.png", mime_type="image/png", tags=[],
+    )
+    adopted = _adopted_media(_png_of((2, 2, 2)))
+    content = store_media_blob(_png_of((3, 3, 3)), "n.png", "image/png")
+    with pytest.raises(ValueError):
+        replace_adopted_asset(
+            local.asset_id, title="x", tags=[], content=content,
+            adopted_from=adopted.adopted_from,
+        )
+    with pytest.raises(KeyError):
+        replace_adopted_asset(
+            "creation-asset-missing", title="x", tags=[], content=content,
+            adopted_from=adopted.adopted_from,
+        )
+    ghost = content.model_copy(update={
+        "sha256": "e" * 64, "path": f"creation-assets/blobs/{'e' * 64}.png",
+    })
+    with pytest.raises(FileNotFoundError):
+        replace_adopted_asset(
+            adopted.asset_id, title="x", tags=[], content=ghost,
+            adopted_from=adopted.adopted_from,
+        )
+    assert get_creation_asset(adopted.asset_id) == adopted
+
+
+def test_replace_adopted_raw_asset_rejects_content_already_in_library(isolated_data_root):
+    """原始文件按内容去重：新内容已是另一条媒体资产，就不能再覆盖出第二份。"""
+    from character_workflow.lib.creation_assets import replace_adopted_asset
+
+    taken = _png_of((5, 5, 5))
+    existing = create_media_asset_from_bytes(
+        title="已有", body=taken, filename="t.png", mime_type="image/png", tags=[],
+    )
+    asset = _adopted_media(_png_of((6, 6, 6)), raw_path="concept/castle.png")
+    with pytest.raises(CreationAssetDuplicateError) as caught:
+        replace_adopted_asset(
+            asset.asset_id, title="castle.png", tags=[],
+            content=store_media_blob(taken, "castle.png", "image/png"),
+            adopted_from=_newer_origin(asset),
+        )
+    assert caught.value.asset_id == existing.asset_id

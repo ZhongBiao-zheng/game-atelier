@@ -705,3 +705,200 @@ def test_concurrent_adoption_of_one_entry_keeps_a_single_copy(
     catalog = list_creation_assets().assets
     assert len(catalog) == 1
     assert sorted(catalog[0].project_ids) == ["p0", "p1", "p2", "p3"]
+
+
+# ---- 重新采用（覆盖本机副本）----
+
+_REF_C = _png((10, 10, 200))
+
+
+def test_readopt_overwrites_copy_and_keeps_local_identity(isolated_data_root, tmp_path):
+    import shutil
+
+    from character_workflow.lib import team_library_index as idx
+    from character_workflow.lib.creation_assets import (
+        blob_path_for,
+        creation_asset_input_path,
+        mark_creation_asset_used,
+    )
+    from character_workflow.lib.team_library_adopt import adoption_staleness, readopt_team_asset
+
+    folder, mount = _registered_mount(tmp_path)
+    asset_dir = _write_generation(folder)
+    adopted = _adopt_from_index(mount, _ID)
+    adopted = mark_creation_asset_used(adopted.asset_id, "p2")
+    old_ref_b = blob_path_for(_sha(_REF_B), "image/png")
+    assert old_ref_b.is_file()
+
+    shutil.rmtree(asset_dir)
+    asset_dir = _write_generation(folder, refs=(_REF_A, _REF_C), updated_at="2026-09-21T00:00:00Z")
+    _rewrite_asset_json(asset_dir, lambda data: data.update(title="董卓 新", tags=["新皮肤"]))
+    idx.scan_library(mount)
+    assert adoption_staleness(adopted) == "stale"
+
+    renewed = readopt_team_asset(adopted.asset_id)
+    assert renewed.asset_id == adopted.asset_id and renewed.created_at == adopted.created_at
+    assert renewed.project_ids == ["p1", "p2"] and renewed.last_used_at == adopted.last_used_at
+    assert renewed.title == "董卓 新" and renewed.tags == ["新皮肤"]
+    assert renewed.adopted_from.source_updated_at == "2026-09-21T00:00:00Z"
+    assert renewed.adopted_from.asset_id == _ID
+    assert [row.sha256 for row in renewed.content.snapshot.inputs] == [_sha(_REF_A), _sha(_REF_C)]
+    assert creation_asset_input_path(renewed.asset_id, 1)[0].read_bytes() == _REF_C
+    assert not old_ref_b.exists()
+    assert blob_path_for(_sha(_REF_A), "image/png").is_file()
+    assert [a.asset_id for a in list_creation_assets().assets] == [adopted.asset_id]
+    assert adoption_staleness(renewed) == "fresh"
+
+
+def test_readopt_raw_follows_new_content(isolated_data_root, tmp_path):
+    import os
+
+    from character_workflow.lib import team_library_index as idx
+    from character_workflow.lib.creation_assets import creation_asset_media_path
+    from character_workflow.lib.team_library_adopt import readopt_team_asset
+
+    folder, mount = _registered_mount(tmp_path)
+    target = folder / "castle.png"
+    target.write_bytes(_PNG)
+    os.utime(target, (1_700_000_000, 1_700_000_000))
+    adopted = _adopt_from_index(mount, idx.raw_entry_id("castle.png"))
+    old_blob = creation_asset_media_path(adopted.asset_id)
+    target.write_bytes(_REF_A)
+    os.utime(target, (1_800_000_000, 1_800_000_000))
+    entry = idx.get_entry(idx.scan_library(mount), idx.raw_entry_id("castle.png"))
+
+    renewed = readopt_team_asset(adopted.asset_id)
+    assert renewed.asset_id == adopted.asset_id
+    assert renewed.content.sha256 == _sha(_REF_A)
+    assert renewed.adopted_from.raw_path == "castle.png"
+    assert renewed.adopted_from.source_updated_at == entry.updated_at
+    assert not old_blob.exists()
+
+
+def test_readopt_errors_are_distinguishable(isolated_data_root, tmp_path):
+    import shutil
+
+    from character_workflow.lib import team_library as tl
+    from character_workflow.lib import team_library_index as idx
+    from character_workflow.lib.creation_assets import create_prompt_asset
+    from character_workflow.lib.team_library_adopt import (
+        TeamAssetNotAdopted,
+        TeamAssetWithdrawn,
+        TeamLibraryUnreachable,
+        readopt_team_asset,
+    )
+
+    local = create_prompt_asset("猫", [{"kind": "text", "text": "像素猫"}], [])
+    with pytest.raises(TeamAssetNotAdopted):
+        readopt_team_asset(local.asset_id)
+    with pytest.raises(KeyError):
+        readopt_team_asset("creation-asset-missing")
+
+    folder, mount = _registered_mount(tmp_path)
+    asset_dir = _write_generation(folder)
+    adopted = _adopt_from_index(mount, _ID)
+    shutil.rmtree(idx.cache_dir(mount.library_id))
+    with pytest.raises(TeamLibraryUnreachable):
+        readopt_team_asset(adopted.asset_id)
+    idx.scan_library(mount)
+    manifest = folder / tl.MANIFEST_NAME
+    saved = manifest.read_bytes()
+    manifest.unlink()
+    with pytest.raises(TeamLibraryUnreachable):
+        readopt_team_asset(adopted.asset_id)
+    manifest.write_bytes(saved)
+    shutil.rmtree(asset_dir)
+    idx.scan_library(mount)
+    with pytest.raises(TeamAssetWithdrawn):
+        readopt_team_asset(adopted.asset_id)
+    assert list_creation_assets(kind="generation").assets == [adopted]
+
+
+def test_readopt_unmounted_library_is_unreachable(isolated_data_root, tmp_path):
+    from character_workflow.lib.team_library_adopt import TeamLibraryUnreachable, readopt_team_asset
+
+    folder, mount = _mount(tmp_path)  # 只构造挂载记录，没登记
+    _write_shared(folder)
+    asset, _ = adopt_team_asset(mount=mount, entry=_entry(), project_id="p1")
+    with pytest.raises(TeamLibraryUnreachable):
+        readopt_team_asset(asset.asset_id)
+
+
+def test_readopt_failure_leaves_copy_untouched(isolated_data_root, tmp_path):
+    from character_workflow.lib import team_library_index as idx
+    from character_workflow.lib.team_library_adopt import readopt_team_asset
+
+    folder, mount = _registered_mount(tmp_path)
+    asset_dir = _write_generation(folder)
+    adopted = _adopt_from_index(mount, _ID)
+    blobs = _blob_files(isolated_data_root)
+    _rewrite_asset_json(asset_dir, lambda data: data.update(updated_at="2026-09-21T00:00:00Z"))
+    (asset_dir / _ref_path(1, _REF_B)).write_bytes(_REF_C)  # 内容与记录的 sha 不符
+    idx.scan_library(mount)
+    with pytest.raises(TeamAssetAdoptError):
+        readopt_team_asset(adopted.asset_id)
+    assert list_creation_assets().assets == [adopted]
+    assert _blob_files(isolated_data_root) == blobs
+
+
+def test_readopt_refuses_entry_still_syncing(isolated_data_root, tmp_path):
+    from character_workflow.lib import team_library_index as idx
+    from character_workflow.lib.team_library_adopt import readopt_team_asset
+
+    folder, mount = _registered_mount(tmp_path)
+    asset_dir = _write_generation(folder)
+    adopted = _adopt_from_index(mount, _ID)
+    (asset_dir / _ref_path(0, _REF_A)).unlink()
+    assert idx.get_entry(idx.scan_library(mount), _ID).status == "incomplete"
+    with pytest.raises(TeamAssetAdoptError):
+        readopt_team_asset(adopted.asset_id)
+
+
+def test_staleness_batch_reads_each_library_once_and_skips_missing_ids(
+    isolated_data_root, tmp_path, monkeypatch
+):
+    from character_workflow.lib import team_library_index as idx
+    from character_workflow.lib.creation_assets import create_prompt_asset
+    from character_workflow.lib.team_library_adopt import adoption_staleness_batch
+
+    folder, mount = _registered_mount(tmp_path)
+    asset_dir = _write_generation(folder)
+    (folder / "castle.png").write_bytes(_PNG)
+    generation = _adopt_from_index(mount, _ID)
+    raw = _adopt_from_index(mount, idx.raw_entry_id("castle.png"))
+    local = create_prompt_asset("猫", [{"kind": "text", "text": "像素猫"}], [])
+    _rewrite_asset_json(asset_dir, lambda data: data.update(updated_at="2026-09-21T00:00:00Z"))
+    idx.scan_library(mount)
+
+    reads: list[str] = []
+    original = idx.read_index
+    monkeypatch.setattr(idx, "read_index", lambda lib: reads.append(lib) or original(lib))
+    statuses = adoption_staleness_batch(
+        [generation.asset_id, raw.asset_id, local.asset_id, "creation-asset-missing"]
+    )
+    assert statuses == {
+        generation.asset_id: "stale", raw.asset_id: "fresh", local.asset_id: "unknown",
+    }
+    assert reads == [mount.library_id]
+    assert adoption_staleness_batch([]) == {}
+
+
+def test_readopt_prompt_overwrites_segments(isolated_data_root, tmp_path):
+    from character_workflow.lib import team_library_index as idx
+    from character_workflow.lib.team_library_adopt import readopt_team_asset
+
+    folder, mount = _registered_mount(tmp_path)
+    _write_shared(
+        folder, kind="prompt",
+        prompt={"kind": "prompt", "segments": [{"kind": "text", "text": "像素猫"}]},
+    )
+    adopted = _adopt_from_index(mount, _ID)
+    _rewrite_asset_json(folder / "shared" / "老王" / _ID, lambda data: data.update(
+        updated_at="2026-09-21T00:00:00Z",
+        prompt={"kind": "prompt", "segments": [{"kind": "text", "text": "像素狗", "x": 1}]},
+    ))
+    idx.scan_library(mount)
+    renewed = readopt_team_asset(adopted.asset_id)
+    assert renewed.kind == "prompt" and renewed.asset_id == adopted.asset_id
+    assert [seg.text for seg in renewed.content.segments] == ["像素狗"]
+    assert list_creation_assets().assets == [renewed]
