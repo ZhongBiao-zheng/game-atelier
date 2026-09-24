@@ -14,7 +14,12 @@ from character_workflow.lib.canvas_projects import (
 )
 from character_workflow.lib.canvas_reproduce import reproduce_generation_asset_into_canvas
 from character_workflow.lib.canvas_runs import canvas_input_sources
+from character_workflow.lib.keys import KeySpec, KeysDB, ModelSpec, write_keys_db
+from character_workflow.lib import canvas_reproduce
+from character_workflow.lib.canvas_runs import prepare_canvas_generation
 from character_workflow.lib.creation_assets import (
+    CreationAssetStateError,
+    blob_path_for,
     create_generation_asset,
     create_media_asset_from_bytes,
     get_creation_asset,
@@ -199,6 +204,43 @@ def test_video_recipe_without_frame_mode_uses_plain_input_connections():
     assert [edge.slot for edge in document.connections] == [None]
 
 
+def test_video_recipe_missing_frame_mode_writes_auto_for_omni_references():
+    project = create_canvas_project("复刻")
+    asset = _asset(
+        [(_REF_A, "reference")],
+        mode="video", model="doubao-seedance-1-0-pro", params={"duration": 5},
+    )
+
+    document = _reproduce(project.project_id, asset.asset_id, model="doubao-seedance-1-0-pro")
+
+    assert _config(document).data.draft.params.frame_mode == "auto"
+    assert [edge.slot for edge in document.connections] == [None]
+
+
+def test_video_recipe_without_inputs_keeps_frame_mode_unset():
+    project = create_canvas_project("复刻")
+    asset = _asset([], mode="video", model="doubao-seedance-1-0-pro", params={"duration": 5})
+
+    document = _reproduce(project.project_id, asset.asset_id, model="doubao-seedance-1-0-pro")
+
+    assert _config(document).data.draft.params.frame_mode is None
+    assert document.connections == []
+
+
+def test_firstlast_recipe_truncates_extra_references_with_warning():
+    project = create_canvas_project("复刻")
+    asset = _asset(
+        [(_REF_A, "reference"), (_REF_B, "reference"), (_SREF, "reference")],
+        mode="video", model="doubao-seedance-1-0-pro", params={"frame_mode": "firstlast"},
+    )
+
+    document = _reproduce(project.project_id, asset.asset_id, model="doubao-seedance-1-0-pro")
+
+    assert [edge.slot for edge in document.connections] == ["first_frame", "last_frame"]
+    assert len([node for node in document.nodes if node.type == "image"]) == 2
+    assert len(document.warnings) == 1 and "首尾帧" in document.warnings[0]
+
+
 def test_mask_and_mj_inputs_are_skipped_with_warnings():
     project = create_canvas_project("复刻")
     asset = _asset([(_REF_A, "reference"), (_MASK, "mask"), (_SREF, "mj_sref")])
@@ -224,16 +266,14 @@ def test_missing_local_model_leaves_the_config_model_empty():
     assert draft.alias is None
 
 
-def test_canvas_run_prompt_prefix_is_not_duplicated():
+def test_final_prompt_is_written_verbatim():
     project = create_canvas_project("复刻")
-    asset = _asset(
-        [(_REF_A, "reference")],
-        final_prompt="参考素材编号：图片1。请按这些编号理解提示词中的引用。\n\n图片1 里的猫",
-    )
+    prompt = "参考素材编号：图片1。请按这些编号理解提示词中的引用。\n\n图片1 里的猫"
+    asset = _asset([(_REF_A, "reference")], final_prompt=prompt)
 
     document = _reproduce(project.project_id, asset.asset_id)
 
-    assert _config(document).data.draft.prompt == "图片1 里的猫"
+    assert _config(document).data.draft.prompt == prompt
 
 
 def test_revision_mismatch_is_a_conflict_and_writes_nothing():
@@ -268,3 +308,86 @@ def test_stored_document_has_no_warnings_and_round_trips_through_save():
 
     saved = save_canvas_document(project.project_id, stored, stored.revision)
     assert saved.model_dump(exclude={"updated_at"}) == stored.model_dump(exclude={"updated_at"})
+
+
+def test_failed_commit_removes_written_bytes_and_keeps_canvas_json(monkeypatch):
+    project = create_canvas_project("复刻")
+    asset = _asset([(_REF_A, "reference"), (_REF_B, "reference")])
+    project_dir = canvas_project_dir(project.project_id)
+    before = (project_dir / "canvas.json").read_bytes()
+    real_write_json = canvas_reproduce.atomic_write_json
+
+    def failing_write_json(path, payload):
+        if path.name == "canvas.json":
+            raise OSError("disk full")
+        real_write_json(path, payload)
+
+    monkeypatch.setattr(canvas_reproduce, "atomic_write_json", failing_write_json)
+
+    with pytest.raises(OSError, match="disk full"):
+        _reproduce(project.project_id, asset.asset_id)
+
+    assert list((project_dir / "uploads").iterdir()) == []
+    assert (project_dir / "canvas.json").read_bytes() == before
+    assert get_creation_asset(asset.asset_id).last_used_at is None
+
+
+def test_missing_reference_blob_is_a_state_error():
+    project = create_canvas_project("复刻")
+    asset = _asset([(_REF_A, "reference")])
+    row = asset.content.snapshot.inputs[0]
+    blob_path_for(row.sha256, row.mime_type).unlink()
+
+    with pytest.raises(CreationAssetStateError):
+        _reproduce(project.project_id, asset.asset_id)
+
+    assert read_canvas_document(project.project_id).nodes == []
+
+
+_NOW = "2026-09-24T00:00:00Z"
+
+
+def _configure_keys() -> None:
+    write_keys_db(KeysDB(default_alias="tuzi-main", keys=[
+        KeySpec(
+            alias="tuzi-main", provider="openai", access_key="sk-test", created_at=_NOW,
+            models=[
+                ModelSpec(name="图片", id="gpt-image-2", modality="image"),
+                ModelSpec(
+                    name="视频", id="doubao-seedance-1-0-pro", modality="video",
+                    protocol="seedance",
+                ),
+            ],
+        ),
+    ]))
+
+
+def test_reproduced_image_config_prepares_for_a_run():
+    _configure_keys()
+    project = create_canvas_project("复刻")
+    asset = _asset([(_REF_A, "reference"), (_REF_B, "reference")])
+    _reproduce(project.project_id, asset.asset_id)
+    stored = read_canvas_document(project.project_id)
+    images = [node.id for node in stored.nodes if node.type == "image"]
+
+    prepared = prepare_canvas_generation(project.project_id, stored, _config(stored))
+
+    assert [item.node_id for item in prepared.inputs] == images
+    assert "一只红色的猫" in prepared.final_prompt
+
+
+def test_reproduced_firstlast_video_config_prepares_for_a_run():
+    _configure_keys()
+    project = create_canvas_project("复刻")
+    asset = _asset(
+        [(_REF_A, "reference"), (_REF_B, "reference")],
+        mode="video", model="doubao-seedance-1-0-pro",
+        params={"duration": 5, "frame_mode": "firstlast"},
+    )
+    _reproduce(project.project_id, asset.asset_id, model="doubao-seedance-1-0-pro")
+    stored = read_canvas_document(project.project_id)
+
+    prepared = prepare_canvas_generation(project.project_id, stored, _config(stored))
+
+    assert [item.source for item in prepared.inputs] == ["first_frame", "last_frame"]
+    assert prepared.normalized["frame_mode"] == "firstlast"

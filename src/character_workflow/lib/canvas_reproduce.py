@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-import re
 import secrets
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,9 +60,6 @@ _SKIPPED_ROLE_LABELS = {
     "mj_oref": "Midjourney 全能参考",
 }
 _MODE_LABELS = {"image": "图片", "video": "视频"}
-# 画布 Run 冻结提示词时会在开头补这段编号说明（canvas_runs._render_final_prompt）；复刻回画布
-# 再跑一次会被重新补上，原样带回去就会叠两遍。
-_CANVAS_LABEL_PREFIX = re.compile(r"^参考素材编号：[^\n]*?。请按这些编号理解提示词中的引用。\n\n")
 
 # 与前端 canvasEditorModel 的节点尺寸规则保持一致，只用于排布，不写进节点。
 _NODE_WIDTH = 320.0
@@ -133,13 +129,17 @@ def _rendered_size(width: int | None, height: int | None) -> tuple[float, float]
 
 
 def _draft(recipe: GenerationRecipe, title: str, model: str | None, alias: str | None,
-           timestamp: str) -> CanvasGenerationDraft:
+           has_inputs: bool, timestamp: str) -> CanvasGenerationDraft:
     allowed = CANVAS_DRAFT_PARAM_FIELDS[recipe.mode]
     params = {key: value for key, value in recipe.params.items() if key in allowed}
     params["creation_asset_source_title"] = title
+    if recipe.mode == "video" and has_inputs and not _frame_slots(recipe):
+        # 画布视频的全能参考正式写法是 frame_mode="auto"；缺省时前端会按首尾帧处理并拦住 Run。
+        params["frame_mode"] = "auto"
     return CanvasGenerationDraft(
         mode=recipe.mode,
-        prompt=_CANVAS_LABEL_PREFIX.sub("", recipe.final_prompt, count=1),
+        # 画布 Run 补的编号前缀已由 generation_recipe 建配方时精确去掉，这里原样写入。
+        prompt=recipe.final_prompt,
         input_policy="all_connected",
         model=model or "",
         alias=alias,
@@ -230,7 +230,9 @@ def reproduce_generation_asset_into_canvas(
             title=f"{_MODE_LABELS[recipe.mode]}生成",
             position=CanvasPoint(x=config_x, y=position.y),
             z_index=0,
-            data=CanvasConfigNodeData(draft=_draft(recipe, asset.title, model, alias, timestamp)),
+            data=CanvasConfigNodeData(draft=_draft(
+                recipe, asset.title, model, alias, bool(input_nodes), timestamp,
+            )),
         )
         connections = [
             CanvasInputConnection(
