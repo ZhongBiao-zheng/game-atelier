@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LayoutGroup, motion } from 'motion/react';
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter';
 import { HomeIcon, LibraryBig, Moon, Palette, Settings, Sparkles, Sun } from 'lucide-react';
 
 import { ChangelogButton } from '@/components/ChangelogButton';
+import { TeamShareReminder, type TeamShareReminderHandle } from '@/components/team/TeamShareReminder';
 import { fetchWorkshopRequests } from '@/api/workshopRequests';
 import { useSSE } from '@/hooks/useSSE';
 import { Home } from '@/pages/Home';
@@ -75,8 +76,7 @@ function NavTab({ to, label, isActive, icon: Icon, badge = 0 }: { to: string; la
 }
 
 /** 待批准生成数：只在本机页面能读到；网站会话 / 未连接时接口拒绝，按 0 处理。 */
-function useAwaitingWorkshopRequests(): number {
-  const signal = useSSE();
+function useAwaitingWorkshopRequests(signal: number): number {
   const [count, setCount] = useState(0);
   useEffect(() => {
     let active = true;
@@ -97,7 +97,13 @@ export function AppShell() {
   const onSettings = loc.startsWith('/settings');
   const immersiveCanvas = /^\/canvas\/[^/]+$/.test(loc);
   const activeIndex = onHome ? 0 : onStudio ? 1 : onCanvas ? 2 : onWorkshop ? 3 : -1;
-  const awaiting = useAwaitingWorkshopRequests();
+  const reminderRef = useRef<TeamShareReminderHandle>(null);
+  // 全壳唯一一条 SSE（服务端每会话限 4 条）：顺带把团队库变更交给分享提醒，重连时让它重取显示名。
+  const signal = useSSE({
+    onTeamLibraryChanged: event => reminderRef.current?.notify(event),
+    onConnect: () => reminderRef.current?.refreshProfile(),
+  });
+  const awaiting = useAwaitingWorkshopRequests(signal);
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
@@ -254,6 +260,7 @@ export function AppShell() {
           </Route>
         </Switch>
       </main>
+      <TeamShareReminder ref={reminderRef} />
     </div>
   );
 }
