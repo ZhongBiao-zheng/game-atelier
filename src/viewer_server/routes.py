@@ -65,7 +65,7 @@ from character_workflow.lib.schemas import (
     CharacterAssociationPatch, CharacterAssociationsFile,
     CanvasAgentSession, CanvasAgentSessionCreate, CanvasAgentSessionList,
     CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument, CanvasUpscaleRunCreate,
-    CanvasCreationAssetInsertRequest,
+    CanvasCreationAssetInsertRequest, CanvasReproduceRequest, CanvasReproduceResponse,
     CanvasLayerDecompositionCreate,
     CanvasPackageCommitRequest, CanvasPackageImportResponse,
     CanvasMaskEditCreate, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
@@ -77,6 +77,7 @@ from character_workflow.lib.schemas import (
     CharacterDerivativeCreate,
     CharacterProjectAssign, ClipboardAttempt,
     CreationAsset, CreationAssetList, CreationAssetUseRequest,
+    CreationGenerationFromCanvas, CreationGenerationFromJob,
     CreationMediaPathCreate, CreationPromptAssetCreate, CreationPromptAssetUpdate,
     FeedbackPost, GalleryMedia, Job, JobKind, JobParams, JobStatus, ProjectCreate,
     ProjectRename, ProjectGalleryResponse, ProjectIndexResponse,
@@ -2547,6 +2548,57 @@ async def post_creation_media_upload(
         _raise_creation_asset_error(error)
 
 
+def _save_generation(load_source, *, title: str, tags: list[str], project_id: str | None):
+    """生成结果「保存为创作资产」：配方来源与分享共用 generation_recipe，错误按「谁能修」分。
+
+    CreationAssetStateError 与 RecipeSourceError 都是 ValueError，必须先于通用 ValueError 接。
+    """
+    from character_workflow.lib.creation_assets import CreationAssetStateError
+    from character_workflow.lib.generation_recipe import (
+        RecipeSourceError,
+        RecipeSourceNotFound,
+        save_generation_asset,
+    )
+    try:
+        return save_generation_asset(
+            load_source(), title=title, tags=tags, project_id=project_id,
+        )
+    except RecipeSourceError as error:
+        raise HTTPException(422, detail={"code": error.code, "message": str(error)}) from error
+    except (RecipeSourceNotFound, KeyError):
+        raise HTTPException(404, detail="找不到这次生成的记录或画布结果") from None
+    except CreationAssetStateError as error:
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        # 剩下的是标题去空白后为空、单个标签超 40 字：请求内容不合规。
+        raise HTTPException(422, detail={"code": "invalid", "message": str(error)}) from error
+
+
+# 静态段 generation 与 {asset_id} 路由段数不同（后者是 /{asset_id}/<动作>），不会互相吞。
+@router.post(
+    "/creation-assets/generation/from-job", response_model=CreationAsset, status_code=201
+)
+def post_creation_generation_from_job(payload: CreationGenerationFromJob):
+    from character_workflow.lib.generation_recipe import recipe_from_job_output
+    return _save_generation(
+        lambda: recipe_from_job_output(payload.job_id, payload.output_index),
+        title=payload.title, tags=payload.tags, project_id=payload.project_id,
+    )
+
+
+@router.post(
+    "/creation-assets/generation/from-canvas", response_model=CreationAsset, status_code=201
+)
+def post_creation_generation_from_canvas(payload: CreationGenerationFromCanvas):
+    from character_workflow.lib.generation_recipe import recipe_from_canvas_result
+    return _save_generation(
+        lambda: recipe_from_canvas_result(
+            payload.canvas_project_id, payload.node_id, payload.version_id,
+        ),
+        title=payload.title, tags=payload.tags, project_id=payload.canvas_project_id,
+    )
+
+
 @router.put("/creation-assets/{asset_id}/prompt", response_model=CreationAsset)
 def put_creation_prompt_asset(asset_id: str, payload: CreationPromptAssetUpdate):
     from character_workflow.lib.creation_assets import update_prompt_asset
@@ -2655,6 +2707,44 @@ def post_canvas_creation_asset_insert(
         raise HTTPException(404, detail="找不到这个画布、节点或创作资产") from None
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
+
+
+@router.post(
+    "/canvas/projects/{project_id}/creation-assets/{asset_id}/reproduce",
+    response_model=CanvasReproduceResponse,
+)
+def post_canvas_creation_asset_reproduce(
+    project_id: str,
+    asset_id: str,
+    payload: CanvasReproduceRequest,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    """画布复刻：生成资产 → 参考输入节点 + 生成配置节点 + 连线，不自动 Run。"""
+    from character_workflow.lib.canvas_reproduce import reproduce_generation_asset_into_canvas
+    from character_workflow.lib.creation_assets import CreationAssetStateError
+    try:
+        document = reproduce_generation_asset_into_canvas(
+            project_id=project_id,
+            asset_id=asset_id,
+            position=payload.position,
+            alias=payload.alias,
+            model=payload.model,
+            document_revision=_canvas_if_match(if_match, "画布"),
+        )
+        response.headers["ETag"] = f'"{document.revision}"'
+        return document
+    except RuntimeError as error:
+        _raise_canvas_revision_error(error)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布或创作资产") from None
+    except CreationAssetStateError as error:
+        # 与 /creation-assets 接口同一映射：参考 blob 缺失 = 本机资产库状态损坏。
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        # 非生成资产、配方拼不出合法草稿（ValidationError 也是 ValueError）→ 422；
+        # 画布存档本身坏了（CanvasStorageError）→ 500，见 _canvas_document_http_error。
+        raise _canvas_document_http_error(error) from error
 
 
 @router.post(

@@ -927,3 +927,225 @@ def test_related_skips_library_without_index(client, isolated_data_root, tmp_pat
     resp = client.get("/api/team-libraries/related", params={"project_id": "canvas-1"})
     assert resp.status_code == 200, resp.text
     assert [r["entry"]["id"] for r in resp.json()] == [kept["id"]]
+
+
+# ------------------------------------------------------------------ P3：路由
+
+
+def _canvas_result():
+    """真实画布 run 跑完的结果节点版本：(project_id, node_id, version_id, 参考 sha 列表)。"""
+    from tests.test_generation_recipe import canvas_run_with_inputs, png, result_version
+
+    ref_a, ref_b = png((0, 90, 0)), png((0, 0, 90))
+    project_id, job, _document = canvas_run_with_inputs(ref_a, ref_b, png((90, 0, 0)))
+    node_id, version_id = result_version(job)
+    shas = [hashlib.sha256(body).hexdigest() for body in (ref_a, ref_b)]
+    return project_id, node_id, version_id, shas
+
+
+def _share_canvas(client, library_id: str, project_id: str, node_id: str, version_id: str):
+    return client.post(
+        f"/api/team-libraries/{library_id}/share",
+        json={
+            "source": {"kind": "canvas_result", "canvas_project_id": project_id,
+                       "node_id": node_id, "version_id": version_id},
+            "title": "画布结果", "tags": [],
+        },
+    )
+
+
+def test_share_canvas_result_writes_generation_with_canvas_origin(client, shared_lib):
+    lib, folder = shared_lib
+    project_id, node_id, version_id, shas = _canvas_result()
+    resp = _share_canvas(client, lib["library_id"], project_id, node_id, version_id)
+    assert resp.status_code == 201, resp.text
+    entry = resp.json()
+    assert entry["kind"] == "generation" and entry["title"] == "画布结果"
+    assert entry["input_sha256"] == shas
+    asset_json = json.loads(
+        next(folder.glob(f"shared/*/{entry['id']}/asset.json")).read_text(encoding="utf-8")
+    )
+    assert asset_json["origin"]["canvas_project_id"] == project_id
+
+
+def test_share_canvas_result_errors(client, shared_lib):
+    from character_workflow.lib.canvas_projects import read_canvas_document
+
+    lib, _ = shared_lib
+    project_id, node_id, version_id, _ = _canvas_result()
+    missing = _share_canvas(client, lib["library_id"], "cp-missing", node_id, version_id)
+    assert missing.status_code == 404, missing.text
+    wrong_node = _share_canvas(client, lib["library_id"], project_id, "image-a", version_id)
+    assert wrong_node.status_code == 404, wrong_node.text
+    upload_version = next(
+        node.data.current_version_id
+        for node in read_canvas_document(project_id).nodes if node.id == "image-a"
+    )
+    resp = _share_canvas(client, lib["library_id"], project_id, "image-a", upload_version)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "not_shareable"
+
+
+def test_share_canvas_result_blank_title_is_422_invalid(client, shared_lib):
+    lib, _ = shared_lib
+    resp = client.post(
+        f"/api/team-libraries/{lib['library_id']}/share",
+        json={"source": {"kind": "canvas_result", "canvas_project_id": "cp-x", "node_id": "n",
+                         "version_id": "v"}, "title": "   "},
+    )
+    assert resp.status_code == 422 and resp.json()["detail"]["code"] == "invalid"
+
+
+def test_related_by_sha256_merges_reachable_libraries(client, isolated_data_root, tmp_path):
+    client.put("/api/profile", json={"display_name": "老王"})
+    folders = [tmp_path / "a", tmp_path / "b"]
+    for folder in folders:
+        folder.mkdir()
+    libs = [_mount(client, "canvas-1", folder) for folder in folders]
+    with_ref = [
+        _share_job(
+            client, lib["library_id"],
+            _studio_job_with_output(isolated_data_root, reference=True).job_id,
+        ).json()["id"]
+        for lib in libs
+    ]
+    _shared_entry(client, isolated_data_root, libs[0]["library_id"])  # 无参考，不命中
+
+    sha = hashlib.sha256(_PNG).hexdigest()
+    resp = client.get(
+        "/api/team-libraries/related", params={"project_id": "canvas-1", "sha256": sha}
+    )
+    assert resp.status_code == 200, resp.text
+    assert [r["entry"]["id"] for r in resp.json()] == list(reversed(with_ref))
+    assert all(sha in r["entry"]["input_sha256"] for r in resp.json())
+    miss = client.get(
+        "/api/team-libraries/related", params={"project_id": "canvas-1", "sha256": "0" * 64}
+    )
+    assert miss.json() == []
+    plain = client.get("/api/team-libraries/related", params={"project_id": "canvas-1"}).json()
+    assert len(plain) == 3
+
+
+def _adopted(client, isolated_data_root, lib) -> tuple[dict, str]:
+    entry = _shared_entry(client, isolated_data_root, lib["library_id"])
+    adopted = client.post(
+        f"/api/team-libraries/{lib['library_id']}/assets/{entry['id']}/adopt",
+        json={"project_id": "canvas-1"},
+    )
+    assert adopted.status_code == 200, adopted.text
+    return entry, adopted.json()["asset"]["asset_id"]
+
+
+def test_staleness_batch_reports_known_assets_only(client, isolated_data_root, shared_lib):
+    from character_workflow.lib.creation_assets import create_media_asset_from_bytes
+
+    lib, _ = shared_lib
+    own = create_media_asset_from_bytes(
+        title="本机图", body=_PNG, filename="a.png", mime_type="image/png", tags=[],
+    )
+    entry, adopted_id = _adopted(client, isolated_data_root, lib)
+    body = {"asset_ids": [own.asset_id, adopted_id, "ca_missing"]}
+    resp = client.post("/api/creation-assets/staleness", json=body)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"statuses": {own.asset_id: "unknown", adopted_id: "fresh"}}
+
+    client.put(
+        f"/api/team-libraries/{lib['library_id']}/assets/{entry['id']}",
+        json={"title": "改过", "tags": []},
+    )
+    stale = client.post("/api/creation-assets/staleness", json=body).json()
+    assert stale["statuses"][adopted_id] == "stale"
+    assert client.post("/api/creation-assets/staleness", json={"asset_ids": []}).status_code == 422
+
+
+def test_readopt_overwrites_local_copy(client, isolated_data_root, shared_lib):
+    from character_workflow.lib.creation_assets import get_creation_asset
+
+    lib, _ = shared_lib
+    entry, asset_id = _adopted(client, isolated_data_root, lib)
+    before = get_creation_asset(asset_id)
+    client.put(
+        f"/api/team-libraries/{lib['library_id']}/assets/{entry['id']}",
+        json={"title": "改过", "tags": ["新"]},
+    )
+    resp = client.post(f"/api/creation-assets/{asset_id}/readopt")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["asset_id"] == asset_id and body["created_at"] == before.created_at
+    assert body["title"] == "改过" and body["tags"] == ["新"]
+    assert body["project_ids"] == before.project_ids
+    status = client.get(f"/api/creation-assets/{asset_id}/staleness").json()
+    assert status == {"status": "fresh"}
+
+
+def test_readopt_error_codes(client, isolated_data_root, shared_lib):
+    import shutil
+
+    from character_workflow.lib.creation_assets import create_media_asset_from_bytes
+
+    lib, folder = shared_lib
+    assert client.post("/api/creation-assets/ca_missing/readopt").status_code == 404
+    own = create_media_asset_from_bytes(
+        title="本机图", body=_PNG, filename="a.png", mime_type="image/png", tags=[],
+    )
+    not_adopted = client.post(f"/api/creation-assets/{own.asset_id}/readopt")
+    assert not_adopted.status_code == 409 and not_adopted.json()["detail"]["code"] == "not_adopted"
+
+    entry, asset_id = _adopted(client, isolated_data_root, lib)
+    client.delete(f"/api/team-libraries/{lib['library_id']}/assets/{entry['id']}")
+    withdrawn = client.post(f"/api/creation-assets/{asset_id}/readopt")
+    assert withdrawn.status_code == 409 and withdrawn.json()["detail"]["code"] == "withdrawn"
+
+    shutil.rmtree(folder)
+    unreachable = client.post(f"/api/creation-assets/{asset_id}/readopt")
+    assert unreachable.status_code == 503
+    assert unreachable.json()["detail"]["code"] == "library_unreachable"
+
+
+@pytest.mark.parametrize(("error", "status", "code"), [
+    ("duplicate", 409, "duplicate"),
+    ("file_missing", 409, "retry"),
+    ("not_adoptable", 422, "not_adoptable"),
+])
+def test_readopt_race_and_adopt_errors(client, monkeypatch, error, status, code):
+    from character_workflow.lib.creation_assets import CreationAssetDuplicateError
+    from character_workflow.lib.team_library_adopt import TeamAssetAdoptError
+    from viewer_server import team_library_routes
+
+    raised = {
+        "duplicate": CreationAssetDuplicateError("ca_other"),
+        "file_missing": FileNotFoundError("blob"),
+        "not_adoptable": TeamAssetAdoptError("这条资产还没同步完整"),
+    }[error]
+
+    def broken(_asset_id):
+        raise raised
+
+    monkeypatch.setattr(team_library_routes, "readopt_team_asset", broken)
+    resp = client.post("/api/creation-assets/ca_x/readopt")
+    assert resp.status_code == status, resp.text
+    assert resp.json()["detail"]["code"] == code
+    if error == "duplicate":
+        assert resp.json()["detail"]["asset_id"] == "ca_other"
+
+
+@pytest.mark.parametrize(("method", "path", "capability"), [
+    ("POST", "/api/team-libraries/lib_x/share", "edit"),
+    ("POST", "/api/creation-assets/generation/from-job", "edit"),
+    ("POST", "/api/creation-assets/generation/from-canvas", "edit"),
+    ("POST", "/api/creation-assets/staleness", "read"),
+    ("POST", "/api/creation-assets/ca_x/readopt", "edit"),
+    ("POST", "/api/canvas/projects/cp_x/creation-assets/ca_x/reproduce", "edit"),
+    ("GET", "/api/team-libraries/related", "read"),
+])
+def test_p3_routes_capabilities(method, path, capability):
+    from viewer_server.connection_capabilities import local_capability
+
+    assert local_capability(method, path) == capability
+
+
+def test_team_asset_content_is_a_media_route():
+    from viewer_server.connection_capabilities import MEDIA_ROUTES, is_media_route
+
+    assert "/api/team-libraries/{library_id}/assets/{entry_id}/content" in MEDIA_ROUTES
+    assert is_media_route("/api/team-libraries/lib_x/assets/raw_y/content")

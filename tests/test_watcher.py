@@ -196,3 +196,113 @@ def test_refresh_team_library_without_prior_index_broadcasts_nothing(
     events = _capture(monkeypatch)
     index = watcher.refresh_team_library(mount)
     assert [e.kind for e in index.entries] == ["raw"] and events == []
+
+
+def _png_bytes(tag: bytes = b"") -> bytes:
+    return b"\x89PNG\r\n\x1a\n" + tag + b"\x00" * 16
+
+
+def test_startup_rescan_broadcasts_only_changes_since_cached_index(
+    isolated_data_root, tmp_path, monkeypatch
+):
+    """停服期间库里多了东西：启动补扫对老缓存只发增量，不把整库再报一遍。"""
+    from character_workflow.lib import team_library as tl
+    from character_workflow.lib import team_library_index as idx
+
+    folder = tmp_path / "lib"
+    folder.mkdir()
+    (folder / "old.png").write_bytes(_png_bytes(b"old"))
+    mount = tl.mount_library(project_id="p1", path=str(folder), name=None, created_by="我")
+    idx.scan_library(mount)
+    (folder / "new.png").write_bytes(_png_bytes(b"new"))
+    events = _capture(monkeypatch)
+    watcher.rescan_team_libraries()
+    assert [(d["title"], d["change"]) for _, d in events] == [("new.png", "added")]
+    assert {e.title for e in idx.read_index(mount.library_id).entries} == {"old.png", "new.png"}
+
+
+def test_startup_rescan_without_cache_is_silent_and_skips_unreachable(
+    isolated_data_root, tmp_path, monkeypatch
+):
+    import shutil
+
+    from character_workflow.lib import team_library as tl
+    from character_workflow.lib import team_library_index as idx
+
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    (fresh / "a.png").write_bytes(_png_bytes())
+    fresh_mount = tl.mount_library(project_id="p1", path=str(fresh), name=None, created_by="我")
+    shutil.rmtree(idx.cache_dir(fresh_mount.library_id), ignore_errors=True)
+    offline = tmp_path / "offline"
+    offline.mkdir()
+    (offline / "b.png").write_bytes(_png_bytes())
+    offline_mount = tl.mount_library(
+        project_id="p1", path=str(offline), name=None, created_by="我"
+    )
+    idx.scan_library(offline_mount)
+    cached = (idx.cache_dir(offline_mount.library_id) / "index.json").read_text(encoding="utf-8")
+    shutil.rmtree(offline)
+
+    events = _capture(monkeypatch)
+    watcher.rescan_team_libraries()
+    assert events == []
+    assert [e.title for e in idx.read_index(fresh_mount.library_id).entries] == ["a.png"]
+    after = (idx.cache_dir(offline_mount.library_id) / "index.json").read_text(encoding="utf-8")
+    assert after == cached
+
+
+def test_startup_rescan_failure_is_logged_and_other_libraries_continue(
+    isolated_data_root, tmp_path, monkeypatch, caplog
+):
+    from character_workflow.lib import team_library as tl
+
+    mounts = []
+    for name in ("a", "b"):
+        folder = tmp_path / name
+        folder.mkdir()
+        mounts.append(tl.mount_library(project_id="p1", path=str(folder), name=None, created_by="我"))
+    refreshed: list[str] = []
+
+    def flaky(mount):
+        if mount.library_id == mounts[0].library_id:
+            raise OSError("网盘掉线")
+        refreshed.append(mount.library_id)
+
+    monkeypatch.setattr(watcher, "refresh_team_library", flaky)
+    with caplog.at_level("ERROR", logger=watcher.__name__):
+        watcher.rescan_team_libraries()
+    assert refreshed == [mounts[1].library_id]
+    assert mounts[0].library_id in caplog.text
+
+
+def test_startup_rescan_survives_broken_mount_table(isolated_data_root, monkeypatch, caplog):
+    from character_workflow.lib import team_library as tl
+
+    def broken(_project_id=None):
+        raise ValueError("挂载表坏了")
+
+    monkeypatch.setattr(tl, "list_mounts", broken)
+    with caplog.at_level("WARNING", logger=watcher.__name__):
+        watcher.rescan_team_libraries()
+    assert "挂载表坏了" in caplog.text
+
+
+def test_start_watchers_runs_startup_rescan_in_background(isolated_data_root, monkeypatch):
+    import threading
+
+    started = threading.Event()
+    caller: list[threading.Thread] = []
+
+    def record():
+        caller.append(threading.current_thread())
+        started.set()
+
+    monkeypatch.setattr(watcher, "rescan_team_libraries", record)
+    obs = watcher.start_watchers()
+    try:
+        assert started.wait(5)
+        assert caller[0] is not threading.main_thread() and caller[0].daemon
+    finally:
+        obs.stop()
+        obs.join(timeout=5)

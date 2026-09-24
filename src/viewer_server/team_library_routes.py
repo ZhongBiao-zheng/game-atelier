@@ -1,4 +1,4 @@
-"""团队库 API：挂载 / 索引 / 内容 / 缩略图 / 采用 / 分享 / 编辑 / 撤回 / 相关配方 / 过时 / 显示名。
+"""团队库 API：挂载 / 索引 / 内容 / 缩略图 / 采用 / 分享 / 编辑 / 撤回 / 相关配方 / 过时 / 重新采用 / 显示名。
 
 所有路径经本地会话 cookie（与 routes.py 同一 middleware）。路由一律写成同步 `def`：
 本模块每个处理器都会读盘 / 抢挂载表文件锁，FastAPI 会把同步路由挪到线程池，
@@ -18,9 +18,16 @@ from pydantic import ValidationError
 from character_workflow.lib import data_root
 from character_workflow.lib import team_library as tl
 from character_workflow.lib import team_library_index as idx
-from character_workflow.lib.creation_assets import CreationAssetStateError, get_creation_asset
+from character_workflow.lib.creation_assets import (
+    CreationAssetDuplicateError,
+    CreationAssetStateError,
+    get_creation_asset,
+)
 from character_workflow.lib.schemas import (
+    CreationAsset,
     CreationAssetStaleness,
+    CreationAssetStalenessBatch,
+    CreationAssetStalenessBatchRequest,
     TeamAssetAdoptRequest,
     TeamAssetAdoptResponse,
     TeamAssetUpdateRequest,
@@ -36,14 +43,20 @@ from character_workflow.lib.schemas import (
 )
 from character_workflow.lib.team_library_adopt import (
     TeamAssetAdoptError,
+    TeamAssetNotAdopted,
+    TeamAssetWithdrawn,
+    TeamLibraryUnreachable,
     adopt_team_asset,
     adoption_staleness,
+    adoption_staleness_batch,
+    readopt_team_asset,
 )
 from character_workflow.lib.team_library_share import (
     TeamShareError,
     TeamShareForbidden,
     TeamShareNotFound,
     TeamShareTooLarge,
+    share_canvas_result,
     share_creation_asset,
     share_job_output,
     update_shared_asset,
@@ -241,8 +254,18 @@ def get_team_libraries(project_id: str | None = None) -> list[TeamLibraryView]:
 
 # 必须注册在任何 /team-libraries/{library_id} 通配 GET 之前，否则 "related" 会被当成 library_id。
 @team_library_router.get("/team-libraries/related", response_model=list[TeamRelatedEntry])
-def get_related_team_assets(project_id: str = Query(...)) -> list[TeamRelatedEntry]:
-    """该画布挂载的全部可达库里最近的可复刻配方；不可达 / 没扫过的库跳过，不拖垮整栏。"""
+def get_related_team_assets(
+    project_id: str = Query(...), sha256: str | None = Query(default=None)
+) -> list[TeamRelatedEntry]:
+    """该画布挂载的全部可达库里最近的可复刻配方；不可达 / 没扫过的库跳过，不拖垮整栏。
+
+    给了 sha256 只列参考里用过这份内容的配方（推荐 a：拖入团队原始文件后查相关配方）。
+    """
+    def pick(index: TeamLibraryIndex) -> list[TeamLibraryIndexEntry]:
+        if sha256 is None:
+            return idx.related_entries(index, limit=_RELATED_LIMIT)
+        return idx.related_by_input_sha(index, sha256, limit=_RELATED_LIMIT)
+
     rows: list[TeamRelatedEntry] = []
     seen: set[str] = set()
     for own in _mounts(project_id):
@@ -260,7 +283,7 @@ def get_related_team_assets(project_id: str = Query(...)) -> list[TeamRelatedEnt
             continue
         rows.extend(
             TeamRelatedEntry(library_id=own.library_id, library_name=own.name, entry=entry)
-            for entry in idx.related_entries(index, limit=_RELATED_LIMIT)
+            for entry in pick(index)
         )
     rows.sort(key=lambda row: _instant_key(row.entry.updated_at), reverse=True)
     return rows[:_RELATED_LIMIT]
@@ -429,6 +452,12 @@ def post_team_share(library_id: str, payload: TeamShareRequest) -> TeamLibraryIn
                 title=payload.title, tags=payload.tags, author=author,
                 allow_large=payload.allow_large,
             )
+        elif source.kind == "canvas_result":
+            asset = share_canvas_result(
+                mount, canvas_project_id=source.canvas_project_id, node_id=source.node_id,
+                version_id=source.version_id, title=payload.title, tags=payload.tags,
+                author=author, allow_large=payload.allow_large,
+            )
         else:
             asset = share_creation_asset(
                 mount, asset_id=source.asset_id, title=payload.title, tags=payload.tags,
@@ -475,3 +504,55 @@ def get_creation_asset_staleness(asset_id: str) -> CreationAssetStaleness:
     if asset.adopted_from is not None:
         _mounts()  # 挂载表损坏 → 500 带文件名，别被当成 unknown 静默吞掉
     return CreationAssetStaleness(status=adoption_staleness(asset))
+
+
+# POST 而不是 GET：id 列表放不进查询串。只读，能力登记为 read。与 routes.py 里同段数的
+# `DELETE /creation-assets/{asset_id}` 只是路径部分匹配（方法不同），不会吞掉这条。
+@team_library_router.post(
+    "/creation-assets/staleness", response_model=CreationAssetStalenessBatch
+)
+def post_creation_asset_staleness_batch(
+    payload: CreationAssetStalenessBatchRequest,
+) -> CreationAssetStalenessBatch:
+    """资产面板一次查一批；不存在的 id 不出现在结果里。"""
+    _mounts()  # 挂载表损坏 → 500 带文件名，别被当成一批 unknown 静默吞掉
+    return CreationAssetStalenessBatch(statuses=adoption_staleness_batch(payload.asset_ids))
+
+
+@team_library_router.post("/creation-assets/{asset_id}/readopt", response_model=CreationAsset)
+def post_creation_asset_readopt(asset_id: str) -> CreationAsset:
+    """重新采用：用团队来源的当前版本覆盖本机副本（id / 创建时间 / 所属项目保留）。
+
+    顺序要紧：CreationAssetDuplicateError / CreationAssetStateError / TeamAssetAdoptError 都是
+    ValueError，各自先接；FileNotFoundError 是写目录时发现新 blob 被并发删除——重试就好，所以 409。
+    """
+    _mounts()
+    try:
+        return readopt_team_asset(asset_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个创作资产") from None
+    except TeamAssetNotAdopted:
+        raise HTTPException(409, detail={
+            "code": "not_adopted", "message": "这个资产不是从团队库采用的",
+        }) from None
+    except TeamAssetWithdrawn:
+        raise HTTPException(409, detail={
+            "code": "withdrawn", "message": "来源已撤回",
+        }) from None
+    except TeamLibraryUnreachable:
+        raise HTTPException(503, detail=_UNREACHABLE) from None
+    except CreationAssetDuplicateError as error:
+        raise HTTPException(409, detail={
+            "code": "duplicate", "asset_id": error.asset_id, "message": str(error),
+        }) from error
+    except CreationAssetStateError as error:
+        raise HTTPException(409, detail=str(error)) from error
+    except FileNotFoundError as error:
+        raise HTTPException(409, detail={
+            "code": "retry", "message": "资产库正在被别处修改，请重试",
+        }) from error
+    # 库里 asset.json 坏掉走 ValidationError，与 TeamAssetAdoptError 同义：这条现在不能采用。
+    except (TeamAssetAdoptError, ValidationError) as error:
+        raise HTTPException(422, detail={
+            "code": "not_adoptable", "message": str(error),
+        }) from error

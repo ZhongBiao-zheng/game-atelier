@@ -89,9 +89,13 @@ P1b 对全部路由先校验实际监听 Host、精确 Origin 与浏览器 Fetch
 
 SSE（`GET /events`）事件：`job-changed` `image-added` `spec-changed` `active-character-changed`
 `projects-changed` `workshop-request-changed` `canvas-document-changed` `team-library-changed`。
-`team-library-changed` 为 `{library_id, asset_id, kind, author, change}`，`change ∈ added | updated | removed`，
-由 watcher 盯挂载目录发出：任何变化触发 2 秒防抖后的全量重扫，再按索引 diff 逐条广播（隐藏目录不触发）；
-分享 / 编辑 / 撤回 / 重扫接口在同一请求内走同一个刷新（`refresh_team_library`），不等防抖。
+`team-library-changed` 为 `TeamLibraryChangeEvent = {library_id, asset_id, kind, author, change, title, status,
+mime_type}`，`change ∈ added | updated | removed`，`status ∈ ready | incomplete`；`removed` 事件的 `title` /
+`status` / `mime_type` 为 `null`。由 watcher 盯挂载目录发出：任何变化触发 2 秒防抖后的全量重扫，再按索引 diff
+逐条广播（隐藏目录不触发）；分享 / 编辑 / 撤回 / 重扫接口在同一请求内走同一个刷新（`refresh_team_library`），
+不等防抖。**首扫静默**：没有上一份索引（挂载后首扫、缓存被删）时整库都会算成 added，此时不广播任何事件。
+server 启动建好监听后在后台线程对每个可达库补扫一次：有旧索引只广播停服期间的增量，没有就静默建索引；
+某个库补扫失败只记日志，不影响其他库与启动。
 `canvas-document-changed` 由 watcher 盯
 `canvases/<project_id>/canvas.json` 发出（`{project_id, revision}`），浏览器保存与 Agent 经 MCP 的
 `canvas_apply_changes` / `canvas_import_media` / `canvas_run` 都会触发；画布编辑器按 `revision` 判断
@@ -196,9 +200,10 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle,layer-decomposition}`
 `POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
 `POST /creation-assets/prompts` `POST /creation-assets/media/{upload,from-path}`
+`POST /creation-assets/generation/{from-job,from-canvas}`
 `PUT /creation-assets/{asset_id}/{prompt,media}`
-`POST /creation-assets/{asset_id}/use` `DELETE /creation-assets/{asset_id}`
-`POST /canvas/projects/{id}/creation-assets/{asset_id}/insert`
+`POST /creation-assets/{asset_id}/use` `POST /creation-assets/{asset_id}/readopt` `DELETE /creation-assets/{asset_id}`
+`POST /canvas/projects/{id}/creation-assets/{asset_id}/{insert,reproduce}`
 `PUT /profile`
 `POST /team-libraries` `DELETE /team-libraries/{library_id}`
 `POST /team-libraries/{library_id}/rescan`
@@ -229,7 +234,8 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `GET /canvas/projects/{id}/versions/{version_id}/download`
 `GET /creation-assets?kind={prompt,media,generation}` `/creation-assets/{asset_id}/content`
 `GET /creation-assets/{asset_id}/inputs/{order}` `GET /creation-assets/{asset_id}/staleness`
-`GET /profile` `GET /team-libraries?project_id=` `GET /team-libraries/related?project_id=`
+`POST /creation-assets/staleness`（只读：id 列表放不进查询串才用 POST，不需要编辑租约）
+`GET /profile` `GET /team-libraries?project_id=` `GET /team-libraries/related?project_id=&sha256=`
 `GET /team-libraries/{library_id}/assets?kind&author&tag&q&cursor&limit`
 `GET /team-libraries/{library_id}/assets/{entry_id}/{content,thumb?w=}`
 `GET /canvas/projects/{id}/agent/sessions` `/canvas/projects/{id}/agent/sessions/{session_id}`
@@ -787,8 +793,13 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 | POST | `/team-libraries/{library_id}/share` | `TeamShareRequest` | `TeamLibraryIndexEntry` 201 |
 | PUT | `/team-libraries/{library_id}/assets/{asset_id}` | `TeamAssetUpdateRequest` | `TeamLibraryIndexEntry` |
 | DELETE | `/team-libraries/{library_id}/assets/{asset_id}` | — | 204 |
-| GET | `/team-libraries/related?project_id=` | — | `list[TeamRelatedEntry]` |
+| GET | `/team-libraries/related?project_id=&sha256=` | — | `list[TeamRelatedEntry]`（`sha256` 可选） |
 | GET | `/creation-assets/{asset_id}/staleness` | — | `CreationAssetStaleness` |
+| POST | `/creation-assets/staleness` | `CreationAssetStalenessBatchRequest` | `CreationAssetStalenessBatch` |
+| POST | `/creation-assets/{asset_id}/readopt` | — | `CreationAsset` |
+| POST | `/creation-assets/generation/from-job` | `CreationGenerationFromJob` | `CreationAsset` 201 |
+| POST | `/creation-assets/generation/from-canvas` | `CreationGenerationFromCanvas` | `CreationAsset` 201 |
+| POST | `/canvas/projects/{project_id}/creation-assets/{asset_id}/reproduce` | `CanvasReproduceRequest` + `If-Match` | `CanvasReproduceResponse` |
 
 `GET /team-libraries` 带 `project_id` 时只列该画布的挂载；不带时列本机全部挂载，按 `library_id` 去重，
 每个库取库级端点选中的那条记录（见下）。分享对话框用不带参数的形式。
@@ -810,10 +821,10 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 |---|---|---|
 | 409 | `profile_required` | 本机没设显示名 |
 | 503 | `library_unreachable` | 挂载目录当前不可达；或写到一半出 I/O 错误（磁盘满 / 没权限 / 掉线），`message` 带出错路径 |
-| 404 | — | 库不存在；分享源（Studio job / 创作资产）不存在；编辑 / 撤回的资产不在库里 |
+| 404 | — | 库不存在；分享源（Studio job / 创作资产 / 画布项目、节点、版本）不存在或节点与版本对不上；编辑 / 撤回的资产不在库里 |
 | 403 | `not_author` | 编辑 / 撤回别人的资产（作者 = `asset.json.author.display_name` 与本机显示名相同） |
 | 413 | `refs_too_large` | 参考内容合计超过 200 MB，`detail.bytes` 为合计字节数；确认后带 `allow_large: true` 重发 |
-| 422 | `not_shareable` | 源不可分享：非 Studio 记录、未完成、非图片 / 视频、`output_index` 越界 |
+| 422 | `not_shareable` | 源不可分享：非 Studio 记录、未完成、非图片 / 视频、`output_index` 越界；画布版本不是生成结果（`origin.kind != "job_output"`） |
 | 422 | `source_missing` | 本机找不到成片或某份参考的文件 |
 | 422 | `invalid` | 标题 / 显示名去空白后为空，或单个标签超过 40 字 |
 | 422 | —（`detail` 为列表） | 请求体校验：标题超 120 字、标签超 20 个等长度 / 数量上限，FastAPI 标准格式 |
@@ -824,17 +835,58 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 `invalid`，按 500 报出。`TeamShareRequest.source` 为
 `{kind: "job_output", job_id, output_index}`（`output_index` 是 `Job.output_paths` 的下标，只收
 `namespace == "studio"`、`status ∈ done | partial`、`kind ∈ image | video`）或
-`{kind: "creation_asset", asset_id}`（prompt / media / generation 三类都可分享）。成功后路由在同一请求内
+`{kind: "creation_asset", asset_id}`（prompt / media / generation 三类都可分享）或
+`{kind: "canvas_result", canvas_project_id, node_id, version_id}`（`version_id` 是该画布
+`content_versions` 的键且必须挂在 `node_id` 上；版本 `origin.job_id` 指向的 Job 的 `canvas_run.snapshot`
+是配方来源，参考只收媒体输入、蒙版记 `role: "mask"`，`origin.canvas_project_id` 记该画布）。成功后路由在同一请求内
 重扫该库、按 diff 广播 `team-library-changed`，响应条目取自重扫后的索引（分享资产的条目 `id` 等于
 `asset_id`，形如 `ta_<ULID>`）。编辑只改 `title` / `tags` / `updated_at`；撤回删掉整个资产目录，条目随之消失。
 
 `GET /team-libraries/related` 是团队栏的「相关配方」：该画布挂载的全部可达库中 `kind == "generation"` 且
 `status == "ready"` 的条目，跨库合并后按 `updated_at` 时刻降序取 20；不可达或尚未扫描的库直接跳过，
 不报错。`TeamRelatedEntry = {library_id, library_name, entry}`，`library_name` 取该画布自己那条挂载的名字。
+带 `sha256` 时（推荐 a：拖入团队原始文件、采用后用副本 `content.sha256` 查）只留 `entry.input_sha256`
+含这份内容的配方，同样跨库合并、按时刻降序取 20。`input_sha256` 只有 generation 条目有值
+（`snapshot.inputs[].sha256`，按 `order`），P3 之前的索引缓存由启动补扫 / 下一次重扫补上。
 
 `GET /creation-assets/{asset_id}/staleness` 判断采用副本相对团队来源的状态：`fresh`（来源没变）、
 `stale`（来源 `updated_at` 晚于采用时；原始文件还要内容 sha256 真变了才算）、`withdrawn`（库可达、
 已扫描但条目不在了）、`unknown`（不是采用来的、库没挂 / 不可达 / 没扫过、条目同步中）。资产不存在 404。
+`POST /creation-assets/staleness` 是资产面板的批量版（`asset_ids` 1–200 个），每个来源库只读一次挂载与索引；
+不存在的 id 不出现在 `statuses` 里。
+
+`POST /creation-assets/{asset_id}/readopt` 用来源当前版本覆盖本机副本：内容、快照、标题、标签、`adopted_from`
+跟来源走，`asset_id` / `created_at` / `project_ids` / `last_used_at` 保留，旧 blob 无人引用则删除。错误：
+
+| 状态 | `code` | 场景 |
+|---|---|---|
+| 404 | — | 本机资产不存在 |
+| 409 | `not_adopted` | 本机资产不是从团队库采用的 |
+| 409 | `withdrawn` | 来源库可达、已扫描，但条目不在了 |
+| 503 | `library_unreachable` | 来源库没挂载、不可达或还没扫过 |
+| 409 | `duplicate` | 新内容撞上另一条同来源 / 同内容的本机资产，`detail.asset_id` 指明是哪条 |
+| 409 | `retry` | 写目录时新 blob 被并发删除，重试即可 |
+| 422 | `not_adoptable` | 条目同步中、内容与 `asset.json` 对不上、库内 `asset.json` 损坏 |
+| 409 | —（`detail` 为字符串） | 本机资产库状态损坏（与 `/creation-assets` 接口同一映射） |
+
+生成结果「保存为创作资产」存生成资产（带配方），与分享共用同一份配方来源规则（`generation_recipe`）：
+`POST /creation-assets/generation/from-job` 收 Studio job 的 `output_index`（规则同 `job_output` 分享，
+`project_id` 可选）；`POST /creation-assets/generation/from-canvas` 收画布结果版本（规则同 `canvas_result`
+分享，`project_id` 取 `canvas_project_id`，请求体不收）。成片与参考按内容进 blobs。错误：来源不存在 404；
+来源不可保存 422 `{code: "not_shareable" | "source_missing", message}`；标题去空白后为空 / 标签超 40 字
+422 `{code: "invalid", message}`；本机资产库状态损坏 409（`detail` 为字符串）；长度上限按 FastAPI 标准 422。
+
+`POST /canvas/projects/{project_id}/creation-assets/{asset_id}/reproduce` 画布复刻：与 insert 同样携带
+`If-Match`（缺失 428，非整数 422），一次画布锁内把生成资产展开成参考输入节点 + 生成配置节点 + 连线，
+不自动 Run；响应 `CanvasReproduceResponse` = `CanvasDocument` 全部字段 + `warnings: list[str]`，并回
+`ETag`。`warnings` 只在响应里，不落 `canvas.json`。只带 `role == "reference"` 的参考（`mask` / `mj_*`
+跳过并写进 `warnings`）；视频配方 `frame_mode ∈ first | last | firstlast` 时图片参考按顺序接首帧 / 尾帧槽。
+`model` 由前端匹配本机 key 后传入，传 `null` 时配置节点模型位留空。错误：revision 不符 409
+`{code: "revision_conflict", current_revision}`；画布或资产不存在 404；非生成资产、配方拼不出合法草稿 422；
+参考 blob 缺失 409（`detail` 为字符串，本机资产库状态损坏）；画布存档本身坏了 500。
+
+`GET /team-libraries/{library_id}/assets/{entry_id}/content` 与 `thumb` 同属媒体路由：网站会话可凭媒体令牌
+读取（`<img>` / `<video>` 不带 Origin）。
 
 `TeamLibraryIndexEntry.kind` 为 `generation | media | prompt | raw`：前三种来自
 `shared/<作者>/<asset_id>/asset.json`，`raw` 是库内直接摆着的媒体文件（`id` 为

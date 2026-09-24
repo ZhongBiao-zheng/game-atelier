@@ -4,6 +4,7 @@ macOS 用 FSEvents（默认）；Linux 用 inotify；显式不用 PollingObserve
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,6 +17,8 @@ from viewer_server.sse import hub
 
 if TYPE_CHECKING:
     from character_workflow.lib.schemas import TeamLibraryIndex, TeamLibraryMount
+
+logger = logging.getLogger(__name__)
 
 
 class JobsHandler(FileSystemEventHandler):
@@ -305,6 +308,36 @@ def stop_team_library_watches() -> None:
     _team_watches.clear()
 
 
+def rescan_team_libraries() -> None:
+    """启动补扫：每个可达库重扫一次，按 diff 广播停服期间的变化。
+
+    有旧索引只发增量（diff_index），没有就静默建索引——不会把整库当新分享刷一遍。顺带让 P3 之前
+    的老缓存补上 input_sha256。任何一个库失败只记日志，不影响其他库，更不影响启动。
+    """
+    from character_workflow.lib import team_library as tl
+
+    try:
+        library_ids = sorted({mount.library_id for mount in tl.list_mounts()})
+    except (ValueError, OSError) as error:
+        logger.warning("团队库启动补扫跳过：读不了挂载记录（%s）", error)
+        return
+    for library_id in library_ids:
+        try:
+            mount = tl.get_mount(library_id)
+            # 不可达时 scan_library 扫出空索引：照扫就是广播一整轮 removed（见 TeamLibraryHandler）。
+            if tl.library_reachable(mount):
+                refresh_team_library(mount)
+        except Exception:
+            logger.exception("团队库 %s 启动补扫失败", library_id)
+
+
+def _start_team_library_rescan() -> None:
+    # 整库扫描是秒级（网盘上更久），放后台线程，别拖住 server 启动。
+    threading.Thread(
+        target=rescan_team_libraries, name="team-library-startup-rescan", daemon=True
+    ).start()
+
+
 def start_watchers() -> Observer:
     runtime = data_root.runtime_dir()
     project_root = data_root.resolve_data_root()
@@ -355,4 +388,6 @@ def start_watchers() -> Observer:
     sync_team_library_watches()
 
     observer.start()
+    # 监听建好之后再补扫：补扫期间库里的新变化由监听接住，不会漏在两者之间。
+    _start_team_library_rescan()
     return observer
