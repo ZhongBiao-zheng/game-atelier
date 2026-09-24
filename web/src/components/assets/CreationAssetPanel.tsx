@@ -1,15 +1,11 @@
 import { promptFromAsset } from '@/lib/promptVariables';
 import {
   ChevronLeft,
-  Copy,
   ExternalLink,
-  FileAudio,
   FileImage,
   FileText,
-  FileVideo,
   Plus,
   Search,
-  Trash2,
   Users,
   X,
 } from 'lucide-react';
@@ -25,18 +21,25 @@ import {
 
 import {
   DuplicateCreationAssetError,
+  TeamSourceWithdrawnError,
   createPromptCreationAsset,
   creationAssetMediaUrl,
   deleteCreationAsset,
+  fetchCreationAssetStalenessBatch,
   listCreationAssets,
   markCreationAssetUsed,
+  readoptCreationAsset,
+  saveGenerationFromCanvas,
+  saveGenerationFromJob,
   saveMediaCreationAssetFromPath,
   updateMediaCreationAsset,
   updatePromptCreationAsset,
   uploadMediaCreationAsset,
 } from '@/api/creationAssets';
+import { AssetCard, AssetDetail, DeleteAssetButton, PathPreview, PendingFilePreview } from '@/components/assets/CreationAssetCards';
 import { TagField, parseTags } from '@/components/assets/TagField';
 import { TeamLibraryPanel } from '@/components/assets/TeamLibraryPanel';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -59,6 +62,7 @@ import {
   assetMediaContent,
   renderCreationPrompt,
   type CreationAsset,
+  type CreationAssetStaleness,
   type CreationMediaAssetContent,
   type CreationPromptSegment,
 } from '@/schema/creationAssets';
@@ -66,6 +70,11 @@ import type { TeamAssetAdoptResponse, TeamLibraryIndexEntry } from '@/schema/tea
 
 /** 面板的三个模式：前两个是本机创作资产，第三个是只读的团队库。 */
 export type CreationAssetPanelMode = 'prompt' | 'media' | 'team';
+
+/** 生成结果的来源：有它时保存为带配方的生成资产，而不是普通媒体。 */
+export type CreationGenerationSource =
+  | { kind: 'job_output'; job_id: string; output_index: number }
+  | { kind: 'canvas_result'; canvas_project_id: string; node_id: string; version_id: string };
 
 export type CreationAssetSaveRequest =
   | {
@@ -83,6 +92,7 @@ export type CreationAssetSaveRequest =
     sourcePath?: string;
     previewUrl?: string;
     projectId?: string;
+    source?: CreationGenerationSource;
   };
 
 export interface CreationAssetPanelProps {
@@ -103,6 +113,8 @@ export interface CreationAssetPanelProps {
   onTeamAssetAdopted?: (result: TeamAssetAdoptResponse, entry: TeamLibraryIndexEntry) => void;
   /** 复刻生成资产（asset.kind 恒为 'generation'）；传了才显示「复刻」。 */
   onReproduce?: (asset: CreationAsset) => void;
+  /** 透传给团队栏：有值时「相关配方」按参考 sha256 命中。 */
+  teamRelatedSha256?: string | null;
 }
 
 export interface CreationAssetPanelHandle {
@@ -127,6 +139,7 @@ type MediaEditorState = {
   sourcePath?: string;
   previewUrl?: string;
   projectId?: string;
+  source?: CreationGenerationSource;
   initialSignature: string;
 };
 
@@ -143,6 +156,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   onOpenSettings,
   onTeamAssetAdopted,
   onReproduce,
+  teamRelatedSha256,
 }: CreationAssetPanelProps, ref) {
   const [kind, setKind] = useState<CreationAssetPanelMode>(initialKind);
   const [scope, setScope] = useState<'all' | 'project'>(projectId ? 'project' : 'all');
@@ -162,6 +176,9 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   const [linkedCanvas, setLinkedCanvas] = useState<{ projectId: string; name: string } | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CreationAsset | null>(null);
+  const [staleness, setStaleness] = useState<Record<string, CreationAssetStaleness>>({});
+  const [readoptTarget, setReadoptTarget] = useState<CreationAsset | null>(null);
+  const stalenessRequest = useRef(0);
   const leaveActionRef = useRef<(() => void) | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -202,8 +219,50 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         const target = preferredId ?? current;
         return rows.some(asset => asset.asset_id === target) ? target : null;
       });
+      void checkStaleness(rows);
     } catch (caught) {
       setError(errorMessage(caught));
+    }
+  }
+
+  // 每次列表刷新批量查一次采用副本是否过时；迟到的结果不许盖掉更新的一次。
+  async function checkStaleness(rows: CreationAsset[]) {
+    const token = ++stalenessRequest.current;
+    const adopted = rows.filter(asset => asset.adopted_from).map(asset => asset.asset_id);
+    if (!adopted.length) {
+      setStaleness({});
+      return;
+    }
+    try {
+      const statuses = await fetchCreationAssetStalenessBatch(adopted);
+      if (token === stalenessRequest.current) setStaleness(statuses);
+    } catch {
+      // 徽标只是提示：查不到就不显示，不挡住列表。
+      if (token === stalenessRequest.current) setStaleness({});
+    }
+  }
+
+  async function confirmReadopt() {
+    const target = readoptTarget;
+    setReadoptTarget(null);
+    if (!target) return;
+    const id = target.asset_id;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await readoptCreationAsset(id);
+      stalenessRequest.current += 1;
+      setAssets(current => current.map(asset => asset.asset_id === id ? updated : asset));
+      setStaleness(current => ({ ...current, [id]: 'fresh' }));
+    } catch (caught) {
+      if (caught instanceof TeamSourceWithdrawnError) {
+        stalenessRequest.current += 1;
+        setStaleness(current => ({ ...current, [id]: 'withdrawn' }));
+      } else {
+        setError(errorMessage(caught));
+      }
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -255,6 +314,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         sourcePath: saveRequest.sourcePath,
         previewUrl: saveRequest.previewUrl,
         projectId: saveRequest.projectId,
+        source: saveRequest.source,
       };
       setMediaEditor({ ...draft, initialSignature: mediaEditorSignature(draft) });
       setPromptEditor(null);
@@ -425,6 +485,8 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
       let saved: CreationAsset;
       if (mediaEditor.assetId) {
         saved = await updateMediaCreationAsset(mediaEditor.assetId, { ...common, file: mediaEditor.file });
+      } else if (mediaEditor.source) {
+        saved = await saveGenerationAsset(mediaEditor.source, common, mediaEditor.projectId ?? projectId);
       } else if (mediaEditor.file) {
         saved = await uploadMediaCreationAsset({
           ...common,
@@ -582,6 +644,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
               onAdopted={(result, entry) => { void refresh(); onTeamAssetAdopted?.(result, entry); }}
               onOpenSettings={onOpenSettings ? () => onOpenSettings(teamProjectId) : undefined}
               onReproduce={onReproduce ? asset => { onReproduce(asset); onClose(); } : undefined}
+              relatedSha256={teamRelatedSha256}
               className="min-h-0 flex-1"
             />
           )}
@@ -598,7 +661,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           )}
           {kind !== 'team' && (
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
-            {visibleAssets.length ? visibleAssets.map(asset => <AssetCard key={asset.asset_id} asset={asset} busy={busy} onOpen={() => openAsset(asset)} onReproduce={onReproduce && asset.kind === 'generation' ? () => void reproduceAsset(asset) : undefined} />) : (
+            {visibleAssets.length ? visibleAssets.map(asset => <AssetCard key={asset.asset_id} asset={asset} busy={busy} staleness={staleness[asset.asset_id]} onOpen={() => openAsset(asset)} onReproduce={onReproduce && asset.kind === 'generation' ? () => void reproduceAsset(asset) : undefined} onReadopt={() => setReadoptTarget(asset)} />) : (
               <div className="grid min-h-40 place-items-center rounded-lg border border-dashed border-border px-8 text-center text-xs leading-relaxed text-muted-foreground">{normalizedQuery ? '没有匹配的创作资产' : kind === 'prompt' ? '还没有提示词资产' : '还没有媒体资产'}</div>
             )}
           </div>
@@ -655,6 +718,8 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         <AssetDetail
           asset={selected}
           busy={busy}
+          staleness={staleness[selected.asset_id]}
+          onReadopt={() => setReadoptTarget(selected)}
           onUse={() => void applyAsset(selected)}
           onReproduce={onReproduce && selected.kind === 'generation' ? () => void reproduceAsset(selected) : undefined}
           // 生成资产是冻结快照，本机不改；只能删。
@@ -662,6 +727,15 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           onDelete={selected.kind === 'generation' ? () => setDeleteTarget(selected) : undefined}
         />
       )}
+
+      <ConfirmDialog
+        open={Boolean(readoptTarget)}
+        title="覆盖本机副本？"
+        message={readoptTarget?.title ?? ''}
+        confirmText="覆盖"
+        onConfirm={() => void confirmReadopt()}
+        onCancel={() => setReadoptTarget(null)}
+      />
 
       <Dialog open={discardOpen} onOpenChange={setDiscardOpen}>
         <DialogContent hideClose>
@@ -680,68 +754,18 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   );
 });
 
-function AssetCard({ asset, busy, onOpen, onReproduce }: {
-  asset: CreationAsset;
-  busy: boolean;
-  onOpen: () => void;
-  onReproduce?: () => void;
-}) {
-  const media = assetMediaContent(asset);
-  // 「复刻」是卡片外的兄弟按钮：按钮不能嵌套在打开详情的按钮里。
-  return (
-    <div className="mb-2 overflow-hidden rounded-lg border border-border bg-card">
-      <button type="button" className="w-full p-3 text-left outline-none hover:bg-secondary/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" onClick={onOpen}>
-        {media && <MediaPreview assetId={asset.asset_id} content={media} alt="" className="mb-3 aspect-[4/3] w-full rounded-md bg-secondary object-cover" />}
-        <p className="truncate text-sm font-medium">{asset.title}</p>
-        {asset.content.kind === 'prompt' ? <PromptPreview segments={asset.content.segments} /> : <p className="mt-1 truncate text-xs text-muted-foreground">{media?.filename}</p>}
-        <TagList tags={asset.tags} />
-      </button>
-      {onReproduce && <div className="px-3 pb-3"><Button size="sm" variant="outline" disabled={busy} onClick={onReproduce}><Copy />复刻</Button></div>}
-    </div>
-  );
-}
-
 /** 服务端能存的媒体类型（与 schemas.MEDIA_SUFFIXES 一致）。 */
 const MEDIA_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime,audio/mpeg,audio/wav,audio/mp4';
 
-/** 已入库的媒体：图片直接显示，视频/音频给原生播放器。 */
-function MediaPreview({ assetId, content, alt, className }: {
-  assetId: string;
-  content: CreationMediaAssetContent;
-  alt: string;
-  className: string;
-}) {
-  const src = creationAssetMediaUrl(assetId);
-  if (content.mime_type.startsWith('image/')) return <img src={src} alt={alt} loading="lazy" className={className} />;
-  if (content.mime_type.startsWith('video/')) return <video src={src} muted playsInline preload="metadata" className={className} />;
-  if (content.mime_type.startsWith('audio/')) return <audio src={src} controls preload="metadata" className="w-full" />;
-  return null;
-}
-
-/** 还没上传的本地文件：图片出缩略图，其余用图标占位。 */
-function PendingFilePreview({ file }: { file: File }) {
-  const [url, setUrl] = useState('');
-  const isImage = file.type.startsWith('image/');
-  useEffect(() => {
-    if (!isImage) return;
-    const next = URL.createObjectURL(file);
-    setUrl(next);
-    return () => URL.revokeObjectURL(next);
-  }, [file, isImage]);
-  if (isImage) {
-    return url ? <img src={url} alt="待保存媒体预览" className="aspect-square w-full rounded-lg border border-border object-contain" /> : null;
+function saveGenerationAsset(
+  source: CreationGenerationSource,
+  common: { title: string; tags: string[] },
+  projectId?: string,
+): Promise<CreationAsset> {
+  if (source.kind === 'job_output') {
+    return saveGenerationFromJob({ job_id: source.job_id, output_index: source.output_index, ...common, project_id: projectId ?? null });
   }
-  const Icon = file.type.startsWith('audio/') ? FileAudio : FileVideo;
-  return (
-    <div className="grid aspect-square w-full place-items-center gap-2 rounded-lg border border-border text-muted-foreground">
-      <Icon className="size-8" />
-      <p className="max-w-full truncate px-4 text-xs">{file.name}</p>
-    </div>
-  );
-}
-
-function PromptPreview({ segments }: { segments: CreationPromptSegment[] }) {
-  return <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{segments.map((segment, index) => segment.kind === 'text' ? segment.text : <span key={`${segment.name}-${index}`} className="mx-0.5 rounded border border-border bg-secondary px-1"><span className="text-muted-foreground">{segment.name}：</span><span className="text-foreground/80">{segment.default_value}</span></span>)}</p>;
+  return saveGenerationFromCanvas({ canvas_project_id: source.canvas_project_id, node_id: source.node_id, version_id: source.version_id, ...common });
 }
 
 function PromptEditor({ state, busy, textareaRef, variableName, selection, duplicateTitle, showSaveAndAddCanvas, onChange, onTextChange, onCaptureSelection, onVariableNameChange, onAddVariable, onSave, onSaveAndAddCanvas, onConfirmDuplicate, onCancelDuplicate, onDelete }: {
@@ -793,41 +817,12 @@ function MediaEditor({ state, busy, duplicateTitle, showSaveAndAddCanvas, onChan
 }) {
   return (
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-      {state.file ? <PendingFilePreview file={state.file} /> : state.previewUrl || state.sourcePath ? <img src={state.previewUrl || state.sourcePath} alt="媒体资产预览" className="aspect-square w-full rounded-lg border border-border object-contain" /> : null}
-      {state.assetId && <label className="inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-secondary focus-within:ring-1 focus-within:ring-primary"><FileImage className="size-4" />{state.file ? '重新选择文件' : '替换文件（可选）'}<input type="file" accept={MEDIA_ACCEPT} className="sr-only" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (file) onChange({ ...state, file }); event.target.value = ''; }} /></label>}
+      {state.file ? <PendingFilePreview file={state.file} /> : state.previewUrl || state.sourcePath ? <PathPreview src={state.previewUrl || state.sourcePath || ''} /> : null}
+      {state.assetId && !state.source && <label className="inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-secondary focus-within:ring-1 focus-within:ring-primary"><FileImage className="size-4" />{state.file ? '重新选择文件' : '替换文件（可选）'}<input type="file" accept={MEDIA_ACCEPT} className="sr-only" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (file) onChange({ ...state, file }); event.target.value = ''; }} /></label>}
       <Field label="标题"><Input value={state.title} onChange={event => onChange({ ...state, title: event.target.value })} /></Field>
       <TagField value={state.tags} onChange={tags => onChange({ ...state, tags })} />
-      {duplicateTitle ? <div className="rounded-lg border border-border bg-card p-3 text-xs leading-relaxed"><p>这个文件已经在资产库的“{duplicateTitle}”中。可以复用原资产，不会创建重复副本。</p><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={onCancelDuplicate}>取消</Button>{!state.assetId && <Button size="sm" disabled={busy} onClick={onConfirmDuplicate}>复用原资产</Button>}</div></div> : <div className="grid gap-2"><Button className="w-full" disabled={busy} onClick={onSave}>{busy ? '保存中…' : state.assetId ? '保存修改' : '保存媒体资产'}</Button>{showSaveAndAddCanvas && <Button variant="outline" className="w-full" disabled={busy} onClick={onSaveAndAddCanvas}>保存并加入画布</Button>}</div>}
+      {duplicateTitle ? <div className="rounded-lg border border-border bg-card p-3 text-xs leading-relaxed"><p>这个文件已经在资产库的“{duplicateTitle}”中。可以复用原资产，不会创建重复副本。</p><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={onCancelDuplicate}>取消</Button>{!state.assetId && <Button size="sm" disabled={busy} onClick={onConfirmDuplicate}>复用原资产</Button>}</div></div> : <div className="grid gap-2"><Button className="w-full" disabled={busy} onClick={onSave}>{busy ? '保存中…' : state.assetId ? '保存修改' : state.source ? '保存生成资产' : '保存媒体资产'}</Button>{showSaveAndAddCanvas && <Button variant="outline" className="w-full" disabled={busy} onClick={onSaveAndAddCanvas}>保存并加入画布</Button>}</div>}
       {onDelete && <DeleteAssetButton disabled={busy} onClick={onDelete} />}
-    </div>
-  );
-}
-
-function DeleteAssetButton({ disabled, onClick }: { disabled: boolean; onClick: () => void }) {
-  return <div className="border-t border-border pt-4"><Button variant="ghost" className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={disabled} onClick={onClick}><Trash2 />删除资产</Button></div>;
-}
-
-function AssetDetail({ asset, busy, onUse, onReproduce, onEdit, onDelete }: {
-  asset: CreationAsset;
-  busy: boolean;
-  onUse: () => void;
-  onReproduce?: () => void;
-  onEdit?: () => void;
-  onDelete?: () => void;
-}) {
-  const media = assetMediaContent(asset);
-  return (
-    <div className="min-h-0 flex-1 overflow-y-auto p-4">
-      {media && <MediaPreview assetId={asset.asset_id} content={media} alt={asset.title} className="aspect-square w-full rounded-lg border border-border bg-secondary object-contain" />}
-      <h2 className="mt-3 text-base font-medium">{asset.title}</h2>
-      {asset.content.kind === 'prompt' && <PromptPreview segments={asset.content.segments} />}
-      <TagList tags={asset.tags} />
-      <div className="mt-4 flex gap-2">
-        <Button className="flex-1" disabled={busy} onClick={onUse}>使用</Button>
-        {onReproduce && <Button variant="outline" disabled={busy} onClick={onReproduce}><Copy />复刻</Button>}
-        {onEdit && <Button variant="outline" disabled={busy} onClick={onEdit}>编辑</Button>}
-      </div>
-      {onDelete && <div className="mt-4"><DeleteAssetButton disabled={busy} onClick={onDelete} /></div>}
     </div>
   );
 }
@@ -842,11 +837,6 @@ function ScopeButton({ active, onClick, children }: { active: boolean; onClick: 
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return <label className="block space-y-1.5"><span className="flex items-center justify-between text-xs text-muted-foreground"><span>{label}</span>{hint && <span className="max-w-48 truncate">{hint}</span>}</span>{children}</label>;
-}
-
-function TagList({ tags }: { tags: string[] }) {
-  if (!tags.length) return null;
-  return <div className="mt-2 flex flex-wrap gap-1.5">{tags.map(tag => <span key={tag} className="rounded-full border border-border bg-secondary px-2 py-0.5 text-xs text-muted-foreground">{tag}</span>)}</div>;
 }
 
 function promptEditorSignature(state: Omit<PromptEditorState, 'assetId' | 'initialSignature'>): string {

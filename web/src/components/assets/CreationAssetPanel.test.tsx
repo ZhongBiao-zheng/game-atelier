@@ -1,8 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createRef } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { creationAssetMediaUrl } from '@/api/creationAssets';
+import { TeamSourceWithdrawnError, creationAssetMediaUrl } from '@/api/creationAssets';
 import type { CreationAsset } from '@/schema/creationAssets';
 import { promptFromAsset } from '@/lib/promptVariables';
 import {
@@ -67,6 +67,12 @@ const mocks = vi.hoisted(() => ({
   createPrompt: vi.fn(),
   updatePrompt: vi.fn(),
   deleteAsset: vi.fn(),
+  staleness: vi.fn(),
+  readopt: vi.fn(),
+  fromJob: vi.fn(),
+  fromCanvas: vi.fn(),
+  upload: vi.fn(),
+  fromPath: vi.fn(),
 }));
 
 vi.mock('@/api/creationAssets', async importOriginal => {
@@ -78,16 +84,23 @@ vi.mock('@/api/creationAssets', async importOriginal => {
     createPromptCreationAsset: mocks.createPrompt,
     updatePromptCreationAsset: mocks.updatePrompt,
     deleteCreationAsset: mocks.deleteAsset,
+    fetchCreationAssetStalenessBatch: mocks.staleness,
+    readoptCreationAsset: mocks.readopt,
+    saveGenerationFromJob: mocks.fromJob,
+    saveGenerationFromCanvas: mocks.fromCanvas,
+    uploadMediaCreationAsset: mocks.upload,
+    saveMediaCreationAssetFromPath: mocks.fromPath,
   };
 });
 
 vi.mock('./TeamLibraryPanel', () => ({
-  TeamLibraryPanel: ({ projectId, onOpenSettings, onReproduce }: {
+  TeamLibraryPanel: ({ projectId, onOpenSettings, onReproduce, relatedSha256 }: {
     projectId: string;
     onOpenSettings?: () => void;
     onReproduce?: (asset: CreationAsset) => void;
+    relatedSha256?: string | null;
   }) => (
-    <div data-testid="team-panel" data-project-id={projectId}>
+    <div data-testid="team-panel" data-project-id={projectId} data-related-sha256={relatedSha256 ?? ''}>
       {onOpenSettings && <button type="button" onClick={onOpenSettings}>挂载</button>}
       {onReproduce && <button type="button" onClick={() => onReproduce(generationAsset)}>团队复刻</button>}
     </div>
@@ -490,5 +503,153 @@ describe('CreationAssetPanel', () => {
     fireEvent.click(await screen.findByRole('button', { name: /雪山白犬/ }));
     await screen.findByRole('heading', { name: '雪山白犬' });
     expect(screen.queryByRole('button', { name: '复刻' })).not.toBeInTheDocument();
+  });
+
+  describe('adopted copies', () => {
+    const origin = { library_id: 'lib_0123456789abcdef', source_updated_at: '2026-09-20T00:00:00Z', raw_path: null };
+    const stale: CreationAsset = { ...generationAsset, asset_id: 'asset-stale', title: '旧白犬', adopted_from: { ...origin, asset_id: 'ta_stale' } };
+    const gone: CreationAsset = { ...generationAsset, asset_id: 'asset-gone', title: '撤回的', adopted_from: { ...origin, asset_id: 'ta_gone' } };
+    const fresh: CreationAsset = { ...generationAsset, asset_id: 'asset-fresh', title: '最新的', adopted_from: { ...origin, asset_id: 'ta_fresh' } };
+
+    function renderMedia() {
+      return render(<CreationAssetPanel initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
+    }
+
+    function cardOf(title: string) {
+      return screen.getByRole('button', { name: new RegExp(title) }).parentElement!;
+    }
+
+    it('checks staleness once in a batch for adopted assets only', async () => {
+      mocks.list.mockResolvedValue({ revision: 1, assets: [stale, gone, fresh, generationAsset] });
+      mocks.staleness.mockResolvedValue({ 'asset-stale': 'stale', 'asset-gone': 'withdrawn', 'asset-fresh': 'fresh' });
+      renderMedia();
+
+      expect(await screen.findByText('来源已更新')).toBeInTheDocument();
+      expect(mocks.staleness).toHaveBeenCalledOnce();
+      expect(mocks.staleness).toHaveBeenCalledWith(['asset-stale', 'asset-gone', 'asset-fresh']);
+      expect(within(cardOf('旧白犬')).getByRole('button', { name: '重新采用' })).toBeInTheDocument();
+      expect(within(cardOf('撤回的')).getByText('来源已撤回')).toBeInTheDocument();
+      expect(within(cardOf('撤回的')).queryByRole('button', { name: '重新采用' })).toBeNull();
+      expect(within(cardOf('最新的')).queryByText(/来源已/)).toBeNull();
+      expect(screen.getAllByRole('button', { name: '重新采用' })).toHaveLength(1);
+
+      fireEvent.change(screen.getByPlaceholderText('搜索标题、正文或标签'), { target: { value: '白犬' } });
+      expect(screen.getByText('来源已更新')).toBeInTheDocument();
+      expect(mocks.staleness).toHaveBeenCalledOnce();
+    });
+
+    it('skips the staleness check when nothing is adopted', async () => {
+      mocks.list.mockResolvedValue({ revision: 1, assets: [generationAsset] });
+      renderMedia();
+      await screen.findByRole('button', { name: /雪山白犬/ });
+      expect(mocks.staleness).not.toHaveBeenCalled();
+    });
+
+    it('readopts after confirmation and clears the badge', async () => {
+      mocks.list.mockResolvedValue({ revision: 1, assets: [stale] });
+      mocks.staleness.mockResolvedValue({ 'asset-stale': 'stale' });
+      mocks.readopt.mockResolvedValue({ ...stale, title: '新白犬' });
+      renderMedia();
+
+      fireEvent.click(await screen.findByRole('button', { name: '重新采用' }));
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByRole('heading', { name: '覆盖本机副本？' })).toBeInTheDocument();
+      expect(mocks.readopt).not.toHaveBeenCalled();
+      fireEvent.click(within(dialog).getByRole('button', { name: '覆盖' }));
+
+      await waitFor(() => expect(mocks.readopt).toHaveBeenCalledWith('asset-stale'));
+      expect(await screen.findByRole('button', { name: /新白犬/ })).toBeInTheDocument();
+      expect(screen.queryByText('来源已更新')).toBeNull();
+      expect(screen.queryByRole('button', { name: '重新采用' })).toBeNull();
+    });
+
+    it('turns the badge into withdrawn when the source was withdrawn meanwhile', async () => {
+      mocks.list.mockResolvedValue({ revision: 1, assets: [stale] });
+      mocks.staleness.mockResolvedValue({ 'asset-stale': 'stale' });
+      mocks.readopt.mockRejectedValue(new TeamSourceWithdrawnError());
+      renderMedia();
+
+      fireEvent.click(await screen.findByRole('button', { name: '重新采用' }));
+      fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '覆盖' }));
+
+      expect(await screen.findByText('来源已撤回')).toBeInTheDocument();
+      expect(screen.queryByText('来源已更新')).toBeNull();
+      expect(screen.queryByRole('button', { name: '重新采用' })).toBeNull();
+    });
+
+    it('shows the badge and readopt in the detail too', async () => {
+      mocks.list.mockResolvedValue({ revision: 1, assets: [stale] });
+      mocks.staleness.mockResolvedValue({ 'asset-stale': 'stale' });
+      renderMedia();
+
+      await screen.findByText('来源已更新');
+      fireEvent.click(screen.getByRole('button', { name: /旧白犬/ }));
+      await screen.findByRole('heading', { name: '旧白犬' });
+      expect(screen.getByText('来源已更新')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '重新采用' })).toBeInTheDocument();
+    });
+  });
+
+  describe('saving generation results', () => {
+    it('saves a Studio result as a generation asset without file replacement', async () => {
+      mocks.list
+        .mockResolvedValueOnce({ revision: 1, assets: [] })
+        .mockResolvedValue({ revision: 2, assets: [generationAsset] });
+      mocks.fromJob.mockResolvedValue(generationAsset);
+      render(
+        <CreationAssetPanel
+          saveRequest={{ requestId: 'r1', kind: 'media', title: '雪山白犬', previewUrl: '/api/raw/x.png', source: { kind: 'job_output', job_id: 'job-1', output_index: 2 } }}
+          onClose={vi.fn()}
+          onUsePrompt={vi.fn()}
+          onUseMedia={vi.fn()}
+        />,
+      );
+
+      await screen.findByDisplayValue('雪山白犬');
+      expect(screen.queryByText(/替换文件/)).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: '保存生成资产' }));
+
+      await waitFor(() => expect(mocks.fromJob).toHaveBeenCalledWith(expect.objectContaining({
+        job_id: 'job-1',
+        output_index: 2,
+        title: '雪山白犬',
+        tags: [],
+      })));
+      expect(mocks.upload).not.toHaveBeenCalled();
+      expect(mocks.fromPath).not.toHaveBeenCalled();
+      expect(await screen.findByRole('heading', { name: '雪山白犬' })).toBeInTheDocument();
+    });
+
+    it('saves a canvas result as a generation asset', async () => {
+      mocks.list.mockResolvedValue({ revision: 1, assets: [] });
+      mocks.fromCanvas.mockResolvedValue(generationAsset);
+      render(
+        <CreationAssetPanel
+          projectId="canvas-a"
+          saveRequest={{ requestId: 'r2', kind: 'media', title: '节点结果', sourcePath: '/data/x.png', source: { kind: 'canvas_result', canvas_project_id: 'canvas-a', node_id: 'n1', version_id: 'v1' } }}
+          onClose={vi.fn()}
+          onUsePrompt={vi.fn()}
+          onUseMedia={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(await screen.findByRole('button', { name: '保存生成资产' }));
+      await waitFor(() => expect(mocks.fromCanvas).toHaveBeenCalledWith({
+        canvas_project_id: 'canvas-a',
+        node_id: 'n1',
+        version_id: 'v1',
+        title: '节点结果',
+        tags: [],
+      }));
+      expect(mocks.fromPath).not.toHaveBeenCalled();
+    });
+  });
+
+  it('passes the related sha256 through to the team panel', async () => {
+    mocks.list.mockResolvedValue({ revision: 1, assets: [] });
+    render(
+      <CreationAssetPanel projectId="canvas-a" initialKind="team" teamRelatedSha256={'d'.repeat(64)} onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} onReproduce={vi.fn()} />,
+    );
+    expect(await screen.findByTestId('team-panel')).toHaveAttribute('data-related-sha256', 'd'.repeat(64));
   });
 });

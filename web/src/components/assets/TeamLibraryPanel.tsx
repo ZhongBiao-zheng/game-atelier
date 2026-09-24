@@ -28,6 +28,7 @@ import {
   listTeamAssets,
   listTeamLibraries,
   rescanTeamLibrary,
+  teamAssetContentUrl,
   teamAssetThumbUrl,
   updateTeamAsset,
   withdrawTeamAsset,
@@ -61,6 +62,8 @@ export interface TeamLibraryPanelProps {
   onOpenSettings?: () => void;
   /** 复刻出口（只在 Studio）：面板先采用成本机副本再回调。不给就不显示复刻与相关配方。 */
   onReproduce?: (asset: CreationAsset) => void;
+  /** 有值时顶部「相关配方」改为参考内容命中这份 sha256 的配方。 */
+  relatedSha256?: string | null;
   className?: string;
 }
 
@@ -134,6 +137,7 @@ export function TeamLibraryPanel({
   onAdopted,
   onOpenSettings,
   onReproduce,
+  relatedSha256,
   className,
 }: TeamLibraryPanelProps) {
   const [libraries, setLibraries] = useState<TeamLibraryView[]>([]);
@@ -205,11 +209,11 @@ export function TeamLibraryPanel({
     setRelatedError(false);
     if (!canReproduce) return;
     let alive = true;
-    void listRelatedTeamAssets(projectId)
+    void (relatedSha256 ? listRelatedTeamAssets(projectId, relatedSha256) : listRelatedTeamAssets(projectId))
       .then(list => { if (alive) setRelated(list); })
       .catch(() => { if (alive) setRelatedError(true); });
     return () => { alive = false; };
-  }, [canReproduce, projectId]);
+  }, [canReproduce, projectId, relatedSha256]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearch(query.trim()), 250);
@@ -599,7 +603,9 @@ function TeamAssetCard({
 }) {
   const [broken, setBroken] = useState(false);
   const incomplete = entry.status === 'incomplete';
-  const showThumb = !broken && (entry.mime_type ?? '').startsWith('image/');
+  const mime = entry.mime_type ?? '';
+  const showThumb = !broken && mime.startsWith('image/');
+  const showFirstFrame = !broken && !incomplete && mime.startsWith('video/');
   const reproducible = Boolean(onReproduce) && entry.reproducible && entry.status === 'ready';
 
   const onDragStart = (event: DragEvent<HTMLDivElement>) => {
@@ -626,6 +632,8 @@ function TeamAssetCard({
           onError={() => setBroken(true)}
           className="aspect-square w-full rounded-md bg-secondary object-cover"
         />
+      ) : showFirstFrame ? (
+        <FirstFrame src={teamAssetContentUrl(libraryId, entry.id)} onError={() => setBroken(true)} />
       ) : (
         <div className="grid aspect-square w-full place-items-center rounded-md bg-secondary text-muted-foreground">
           <TypeIcon entry={entry} className="size-5" />
@@ -663,6 +671,38 @@ function TeamAssetCard({
         )}
       </div>
     </div>
+  );
+}
+
+/** 视频首帧：接近视口才绑 src，免得整页卡片一起拉视频。 */
+function FirstFrame({ src, onError }: { src: string; onError: () => void }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const [bound, setBound] = useState(false);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    if (!('IntersectionObserver' in window)) {
+      setBound(true);
+      return;
+    }
+    const observer = new IntersectionObserver(entries => {
+      if (!entries.some(item => item.isIntersecting)) return;
+      setBound(true);
+      observer.disconnect();
+    }, { rootMargin: '240px' });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <video
+      ref={ref}
+      src={bound ? src : undefined}
+      muted
+      playsInline
+      preload="metadata"
+      onError={onError}
+      className="aspect-square w-full rounded-md bg-secondary object-cover"
+    />
   );
 }
 

@@ -336,4 +336,47 @@ describe('TeamLibraryPanel', () => {
     await act(async () => { release({ asset: adoptedGeneration, created: true }); });
     expect(onReproduce).not.toHaveBeenCalled();
   });
+
+  it('binds the video first frame only once the card nears the viewport', async () => {
+    let intersect: IntersectionObserverCallback | undefined;
+    class MockIntersectionObserver implements IntersectionObserver {
+      readonly root = null;
+      readonly rootMargin = '';
+      readonly thresholds = [0];
+      constructor(callback: IntersectionObserverCallback) { intersect = callback; }
+      disconnect() {}
+      observe() {}
+      takeRecords() { return []; }
+      unobserve() {}
+    }
+    vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+    try {
+      const clip: TeamLibraryIndexEntry = { ...shared, id: 'ta_clip', title: '开场', mime_type: 'video/mp4' };
+      api.listTeamLibraries.mockResolvedValue([library]);
+      api.listTeamAssets.mockResolvedValue({ entries: [clip], next_cursor: null });
+      const { container } = render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+      await screen.findByText('开场');
+      const video = container.querySelector('video')!;
+      expect(video).not.toBeNull();
+      expect(video.getAttribute('src')).toBeNull();
+      expect(video.muted).toBe(true);
+      expect(video).toHaveAttribute('preload', 'metadata');
+      expect(video).toHaveAttribute('playsinline');
+
+      act(() => { intersect?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver); });
+      expect(video).toHaveAttribute('src', `/content/${library.library_id}/ta_clip`);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it('lists related recipes by reference sha256 when given', async () => {
+    api.listTeamLibraries.mockResolvedValue([library]);
+    api.listTeamAssets.mockResolvedValue({ entries: [], next_cursor: null });
+    api.listRelatedTeamAssets.mockResolvedValue([{ library_id: library.library_id, library_name: library.name, entry: generation }]);
+    render(<TeamLibraryPanel projectId="p1" relatedSha256={'e'.repeat(64)} onAdopted={vi.fn()} onReproduce={vi.fn()} />);
+    const row = (await screen.findByText('相关配方')).parentElement!;
+    expect(api.listRelatedTeamAssets).toHaveBeenCalledWith('p1', 'e'.repeat(64));
+    expect(api.listRelatedTeamAssets).toHaveBeenCalledOnce();
+    expect(within(row).getByRole('button', { name: /雪山白犬/ })).toBeInTheDocument();
+  });
 });
