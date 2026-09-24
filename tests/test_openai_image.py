@@ -2261,3 +2261,76 @@ def test_model_id_normalization_matches_frontend():
     for mid in ("seedream-5.0-lite", "doubao-seedream-4-5-251128"):
         assert openai_image._min_pixels_for_seedream(mid) == 3_686_400, mid
         assert openai_image._supports_sequential(mid) is True, mid
+
+
+def _write_png(path: Path, width: int, height: int) -> None:
+    from PIL import Image
+
+    Image.new("RGB", (width, height), (200, 120, 40)).save(path, format="PNG")
+
+
+def _payload_image_size(data_url: str) -> tuple[int, int]:
+    import io
+
+    from PIL import Image
+
+    raw = base64.b64decode(data_url.split(",", 1)[1])
+    with Image.open(io.BytesIO(raw)) as image:
+        return image.size
+
+
+def _render_seedream_with_reference(tmp_path, monkeypatch, ref: Path) -> dict:
+    _add_key(
+        alias="seedream",
+        provider="seedream",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["payload"] = json
+        return FakePostResponse({
+            "data": [{
+                "b64_json": "data:image/png;base64,"
+                + base64.b64encode(b"\x89PNG\r\n\x1a\nout").decode("ascii"),
+            }],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    openai_image.render(
+        prompt="split layers",
+        model="seedream-5.0-pro",
+        alias="seedream",
+        output_dir=tmp_path,
+        n=1,
+        size="2048x2048",
+        reference_images=[str(ref)],
+    )
+    return captured["payload"]
+
+
+def test_seedream_upscales_small_reference_image_to_input_pixel_floor(
+    isolated_data_root, tmp_path, monkeypatch
+):
+    # 词元跳动 seedream-5.0-pro 实测：参考图低于 262144px（512²）在参数校验阶段 400
+    # 「expected the pixel to be at least 262144px, but received a 126x174px image」。
+    ref = tmp_path / "card.png"
+    _write_png(ref, 126, 174)
+
+    payload = _render_seedream_with_reference(tmp_path, monkeypatch, ref)
+
+    width, height = _payload_image_size(payload["image"])
+    assert width * height >= 262_144
+    assert abs(width / height - 126 / 174) < 0.02
+
+
+def test_seedream_keeps_reference_image_bytes_when_already_large_enough(
+    isolated_data_root, tmp_path, monkeypatch
+):
+    ref = tmp_path / "big.png"
+    _write_png(ref, 512, 512)
+
+    payload = _render_seedream_with_reference(tmp_path, monkeypatch, ref)
+
+    expected = "data:image/png;base64," + base64.b64encode(ref.read_bytes()).decode("ascii")
+    assert payload["image"] == expected

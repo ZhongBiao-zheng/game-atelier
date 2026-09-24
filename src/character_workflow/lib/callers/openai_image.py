@@ -758,18 +758,48 @@ def _reference_image_param(
 
     单张返回 str、多张返回 list、无返回 None。
     """
-    urls = [_image_data_url(p) for p in _collect_ref_paths(kwargs, provider, model)]
+    min_pixels = _SEEDREAM_MIN_INPUT_PIXELS if image_family(model) == "seedream" else 0
+    urls = [
+        _image_data_url(p, min_pixels=min_pixels)
+        for p in _collect_ref_paths(kwargs, provider, model)
+    ]
     if not urls:
         return None
     return urls[0] if len(urls) == 1 else urls
 
 
-def _image_data_url(path: str) -> str:
+# 词元跳动 seedream-5.0-pro 实测：参考图低于 512² 在参数校验阶段 400
+# 「expected the pixel to be at least 262144px」。小卡面（126x174 的技能卡）是常态，
+# 发送前等比放大到下限，产物分辨率仍按原图落盘（job_runner 读的是原文件尺寸）。
+_SEEDREAM_MIN_INPUT_PIXELS = 262_144
+
+
+def _image_data_url(path: str, *, min_pixels: int = 0) -> str:
     raw = Path(path).read_bytes()
-    b64 = base64.b64encode(raw).decode()
     ext = Path(path).suffix.lstrip(".").lower() or "png"
     mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+    if min_pixels:
+        upscaled = _upscaled_to_min_pixels(raw, min_pixels)
+        if upscaled is not None:
+            raw, mime = upscaled, "image/png"
+    b64 = base64.b64encode(raw).decode()
     return f"data:{mime};base64,{b64}"
+
+
+def _upscaled_to_min_pixels(raw: bytes, min_pixels: int) -> bytes | None:
+    """像素不足则等比放大到下限，返回 PNG 字节；够大或解不开返回 None（原样发送）。"""
+    try:
+        with Image.open(io.BytesIO(raw)) as opened:
+            width, height = opened.size
+            if width * height >= min_pixels:
+                return None
+            scale = math.sqrt(min_pixels / (width * height))
+            target = (math.ceil(width * scale), math.ceil(height * scale))
+            output = io.BytesIO()
+            opened.resize(target, Image.Resampling.LANCZOS).save(output, format="PNG")
+            return output.getvalue()
+    except (OSError, UnidentifiedImageError, ValueError):
+        return None
 
 
 def _api_root(base_url: str) -> str:
