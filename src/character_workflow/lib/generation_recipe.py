@@ -14,7 +14,7 @@ from typing import Any
 
 from character_workflow.lib import data_root
 from character_workflow.lib.canvas_projects import read_canvas_document, resolve_canvas_media
-from character_workflow.lib.canvas_runs import _input_label
+from character_workflow.lib.canvas_runs import canvas_numbering_prefix
 from character_workflow.lib.creation_assets import (
     _normalize_tags,
     _required_text,
@@ -72,10 +72,11 @@ _SOURCE_KINDS = frozenset({JobKind.IMAGE, JobKind.VIDEO})
 _RECIPE_MODES = frozenset({"image", "video"})
 _SUFFIX_MIMES = {suffix: mime for mime, suffix in MEDIA_SUFFIXES.items()} | {".jpeg": "image/jpeg"}
 _SNIFF_HEAD_BYTES = 64
-# 画布冻结 final_prompt 时在开头补的编号说明，格式与 canvas_runs._render_final_prompt 逐字一致
-# （那边是内联 f-string，没有可复用的常量）；配方里只留画师自己的提示词。
-_CANVAS_NUMBERING_TEMPLATE = "参考素材编号：{labels}。请按这些编号理解提示词中的引用。\n\n"
 _HASH_CHUNK = 1024 * 1024
+# 与 CreationAsset.title / tags 的 Field 上限一致：写 blob 之前先挡，别等建目录项时才炸、
+# 留下一堆没有目录项引用的 blob。单个标签的长度由 _normalize_tags 管。
+_TITLE_MAX_LENGTH = 120
+_TAG_MAX_COUNT = 20
 
 
 @dataclass(frozen=True)
@@ -290,26 +291,10 @@ def _canvas_job(project_id: str, version: CanvasMediaVersion) -> Job:
     return job
 
 
-def _canvas_numbering_prefix(snapshot: CanvasGenerationSnapshot) -> str | None:
-    """按 snapshot.inputs 复算 _render_final_prompt 会补的那段编号说明（同一个 _input_label、
-    同一条「语义首尾帧不补」规则）；这次 run 不会补时返回 None。"""
-    if any(row.source in {"first_frame", "last_frame"} for row in snapshot.inputs):
-        return None
-    counts = {"text": 0, "image": 0, "video": 0, "audio": 0}
-    labels: list[str] = []
-    for row in snapshot.inputs:
-        counts[row.kind] += 1
-        if row.kind != "text":
-            labels.append(_input_label(row.kind, counts[row.kind]))
-    return _CANVAS_NUMBERING_TEMPLATE.format(labels="、".join(labels)) if labels else None
-
-
 def _clean_canvas_prompt(snapshot: CanvasGenerationSnapshot) -> str:
-    """去掉开头的编号说明；末尾的「参考文本」保留——文本输入不进 recipe.inputs，内容只在这里。"""
-    prefix = _canvas_numbering_prefix(snapshot)
-    if prefix is None:
-        return snapshot.final_prompt
-    return snapshot.final_prompt.removeprefix(prefix)
+    """去掉画布冻结时补在开头的编号说明，配方里只留画师自己的提示词；末尾的「参考文本」保留
+    ——文本输入不进 recipe.inputs，内容只在这里。"""
+    return snapshot.final_prompt.removeprefix(canvas_numbering_prefix(snapshot.inputs))
 
 
 def recipe_from_canvas_result(
@@ -373,7 +358,11 @@ def save_generation_asset(
 ) -> CreationAsset:
     """成片与每份参考按内容落进 blobs，再建一条生成资产。快照里参考的 sha / 类型取落盘那份字节。"""
     clean_title = _required_text(title, "资产标题")
+    if len(clean_title) > _TITLE_MAX_LENGTH:
+        raise ValueError(f"资产标题不能超过 {_TITLE_MAX_LENGTH} 个字符")
     clean_tags = _normalize_tags(tags)
+    if len(clean_tags) > _TAG_MAX_COUNT:
+        raise ValueError(f"标签不能超过 {_TAG_MAX_COUNT} 个")
     media = _store(source.media_path, source.media_filename)
     inputs = []
     for row, path in zip(source.recipe.inputs, source.input_paths, strict=True):

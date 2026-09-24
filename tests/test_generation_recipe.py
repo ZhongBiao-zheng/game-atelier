@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from character_workflow.lib import canvas_runs
+from character_workflow.lib import canvas_runs, generation_recipe
 from character_workflow.lib.canvas_projects import (
     canvas_output_dir,
     canvas_project_dir,
@@ -17,7 +17,11 @@ from character_workflow.lib.canvas_projects import (
     replace_canvas_node_media,
     save_canvas_document,
 )
-from character_workflow.lib.canvas_runs import finalize_canvas_run, submit_canvas_run
+from character_workflow.lib.canvas_runs import (
+    canvas_numbering_prefix,
+    finalize_canvas_run,
+    submit_canvas_run,
+)
 from character_workflow.lib.creation_assets import creation_asset_input_path, get_creation_asset
 from character_workflow.lib.generation_recipe import (
     RECIPE_PARAM_ALLOW,
@@ -33,6 +37,7 @@ from character_workflow.lib.keys import KeysDB, KeySpec, ModelSpec, write_keys_d
 from character_workflow.lib.schemas import (
     CanvasDocument,
     CanvasGenerationDraft,
+    CreationAsset,
     Job,
     JobKind,
     JobParams,
@@ -53,16 +58,23 @@ def sha(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()
 
 
+MP4 = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 16
+VIDEO_MODEL = "doubao-seedance-1-0-pro"
+
+
 def _write_keys() -> None:
     write_keys_db(KeysDB(default_alias="openai", keys=[KeySpec(
         alias="openai", provider="openai", access_key="test", created_at=NOW,
-        models=[ModelSpec(name="GPT", id="gpt-image-1", modality="image")],
+        models=[
+            ModelSpec(name="GPT", id="gpt-image-1", modality="image"),
+            ModelSpec(name="视频", id=VIDEO_MODEL, modality="video", protocol="seedance"),
+        ],
     )]))
 
 
-def _media_node(node_id: str, draft: dict | None = None) -> dict:
+def _media_node(node_id: str, draft: dict | None = None, node_type: str = "image") -> dict:
     return {
-        "id": node_id, "title": node_id, "type": "image", "position": {"x": 0, "y": 0},
+        "id": node_id, "title": node_id, "type": node_type, "position": {"x": 0, "y": 0},
         "z_index": 0,
         "data": {
             "current_version_id": None, "generation_draft": draft, "active_run_id": None,
@@ -79,13 +91,18 @@ def _save_nodes(project_id: str, nodes: list[dict], connections: list[dict],
     return save_canvas_document(project_id, CanvasDocument.model_validate(payload), current.revision)
 
 
-def _complete_run(project_id: str, job: Job, output: bytes) -> tuple[Job, CanvasDocument]:
+def _complete_run(
+    project_id: str, job: Job, *outputs: bytes, suffix: str = ".png"
+) -> tuple[Job, CanvasDocument]:
     """模拟 runner：产物写进本 run 的输出目录、记实际费用、标 DONE，再走真实的 finalize。"""
-    target = canvas_output_dir(project_id, job.job_id) / "candidate.png"
-    target.write_bytes(output)
+    targets = []
+    for index, output in enumerate(outputs):
+        target = canvas_output_dir(project_id, job.job_id) / f"candidate-{index}{suffix}"
+        target.write_bytes(output)
+        targets.append(str(target))
     save_job(job.model_copy(update={
         "status": JobStatus.DONE,
-        "output_paths": [str(target)],
+        "output_paths": targets,
         "params": job.params.model_copy(update={"actual_cost_cny": 0.3}),
     }))
     finalized, document = finalize_canvas_run(project_id, job.job_id)
@@ -93,8 +110,9 @@ def _complete_run(project_id: str, job: Job, output: bytes) -> tuple[Job, Canvas
     return finalized, document
 
 
-def canvas_run_with_inputs(ref_a: bytes, ref_b: bytes, output: bytes):
-    """两张图片 + 一段文本连到配置节点，跑完一次生成。返回 (project_id, job, document)。"""
+def canvas_run_with_inputs(ref_a: bytes, ref_b: bytes, *outputs: bytes):
+    """两张图片 + 一段文本连到配置节点，跑完一次生成（每份 output 一个候选）。
+    返回 (project_id, job, document)。"""
     _write_keys()
     project = create_canvas_project("配方来源")
     pid = project.project_id
@@ -132,8 +150,44 @@ def canvas_run_with_inputs(ref_a: bytes, ref_b: bytes, output: bytes):
     ext_b = ".jpg" if ref_b.startswith(b"\xff\xd8") else ".png"
     _vb, saved, _ = replace_canvas_node_media(pid, "image-b", f"b{ext_b}", ext_b, ref_b, "image",
                                               saved.revision)
+    job, _submitted = submit_canvas_run(pid, "config", saved.revision, len(outputs))
+    finalized, document = _complete_run(pid, job, *outputs)
+    return pid, finalized, document
+
+
+def _video_config(prompt: str, params: dict) -> dict:
+    return {
+        "id": "config", "title": "生成", "type": "config", "position": {"x": 0, "y": 0},
+        "z_index": 0,
+        "data": {"draft": {
+            "mode": "video", "prompt": prompt, "input_policy": "all_connected",
+            "model": VIDEO_MODEL, "alias": "openai", "params": params, "updated_at": NOW,
+        }},
+    }
+
+
+def canvas_video_run(media: list[tuple[str, str, bytes, str | None]], prompt: str, params: dict):
+    """按顺序把媒体节点连到视频配置节点并跑完：media = [(节点 id, 节点类型, 字节, 首尾帧槽)]。
+    返回 (project_id, job, document)。"""
+    _write_keys()
+    pid = create_canvas_project("视频配方").project_id
+    edges = [
+        {"id": f"edge-{node_id}", "role": "input", "source_node_id": node_id,
+         "target_node_id": "config", **({"slot": slot} if slot else {})}
+        for node_id, _type, _body, slot in media
+    ]
+    saved = _save_nodes(
+        pid,
+        [_media_node(node_id, node_type=node_type) for node_id, node_type, _b, _s in media]
+        + [_video_config(prompt, params)],
+        edges,
+    )
+    for node_id, node_type, body, _slot in media:
+        ext = ".mp4" if node_type == "video" else ".png"
+        _v, saved, _ = replace_canvas_node_media(pid, node_id, f"{node_id}{ext}", ext, body,
+                                                 node_type, saved.revision)
     job, _submitted = submit_canvas_run(pid, "config", saved.revision)
-    finalized, document = _complete_run(pid, job, output)
+    finalized, document = _complete_run(pid, job, MP4, suffix=".mp4")
     return pid, finalized, document
 
 
@@ -325,6 +379,72 @@ def test_recipe_from_canvas_result_rejects_non_generated_and_mismatched_node(iso
         recipe_from_canvas_result("../x", node_id, version_id)
 
 
+def test_recipe_from_canvas_firstlast_video_keeps_final_prompt_verbatim(isolated_data_root):
+    """首尾帧 run 不补编号说明：配方里的 final_prompt 与快照逐字一致。"""
+    first, last = png((70, 0, 0)), png((0, 70, 0))
+    pid, job, _document = canvas_video_run(
+        [("frame-a", "image", first, "first_frame"), ("frame-b", "image", last, "last_frame")],
+        "镜头缓慢推近", {"duration": 5, "ratio": "16:9", "frame_mode": "firstlast"},
+    )
+    snapshot = job.canvas_run.snapshot
+    assert [row.source for row in snapshot.inputs] == ["first_frame", "last_frame"]
+    assert canvas_numbering_prefix(snapshot.inputs) == ""
+
+    source = recipe_from_canvas_result(pid, *result_version(job))
+
+    assert snapshot.final_prompt == "镜头缓慢推近"
+    assert source.recipe.mode == "video" and source.recipe.final_prompt == snapshot.final_prompt
+    assert [r.sha256 for r in source.recipe.inputs] == [sha(first), sha(last)]
+
+
+def test_recipe_from_canvas_mixed_image_video_strips_numbering_prefix(isolated_data_root):
+    """图片、视频各自计数编号；配方只留画师自己的提示词。"""
+    ref_a, clip, ref_b = png((80, 0, 0)), MP4, png((0, 80, 0))
+    pid, job, document = canvas_video_run(
+        [("image-a", "image", ref_a, None), ("video-a", "video", clip, None),
+         ("image-b", "image", ref_b, None)],
+        "参考视频的运镜", {"duration": 5, "ratio": "16:9", "frame_mode": "auto"},
+    )
+    snapshot = job.canvas_run.snapshot
+    prefix = canvas_numbering_prefix(snapshot.inputs)
+    assert prefix == "参考素材编号：图片1、视频1、图片2。请按这些编号理解提示词中的引用。\n\n"
+
+    source = recipe_from_canvas_result(pid, *result_version(job))
+
+    assert snapshot.final_prompt == prefix + "参考视频的运镜"
+    assert source.recipe.final_prompt == "参考视频的运镜"
+    assert [(r.kind, r.sha256) for r in source.recipe.inputs] == [
+        ("image", sha(ref_a)), ("video", sha(clip)), ("image", sha(ref_b)),
+    ]
+    # 编号前缀只有一处来源：_render_final_prompt 按同样的输入重渲染，开头正是这段前缀。
+    config = next(node for node in document.nodes if node.id == "config")
+    rendered = canvas_runs._render_final_prompt(document, config.data.draft, snapshot.inputs)
+    assert rendered == snapshot.final_prompt and rendered.startswith(prefix)
+
+
+def test_canvas_numbering_prefix_empty_without_media_inputs():
+    assert canvas_numbering_prefix([]) == ""
+
+
+def test_recipe_from_canvas_result_accepts_non_current_candidate(isolated_data_root):
+    """n=2：第二个候选不是节点当前版本，也属于这个结果节点；换个节点拿它就对不上。"""
+    first, second = png((90, 0, 0)), png((0, 90, 0))
+    pid, job, document = canvas_run_with_inputs(png((1, 1, 0)), png((0, 1, 1)), first, second)
+    context = job.canvas_run
+    node_id = context.result_node_id
+    second_version = context.candidates[1].version_id
+    assert second_version is not None
+    node = next(row for row in document.nodes if row.id == node_id)
+    assert node.data.current_version_id == context.candidates[0].version_id != second_version
+
+    source = recipe_from_canvas_result(pid, node_id, second_version)
+
+    assert source.media_path.read_bytes() == second
+    assert source.origin_job_id == job.job_id
+    with pytest.raises(RecipeSourceNotFound):
+        recipe_from_canvas_result(pid, "image-a", second_version)
+
+
 def test_recipe_from_canvas_result_rejects_input_escaping_project(isolated_data_root, tmp_path):
     """参考输入的闸门是 resolve_canvas_media：resolve 后（symlink 已展开）必须在本画布项目目录内。"""
     pid, job, document = canvas_run_with_inputs(png((3, 0, 0)), png((0, 3, 0)), png((0, 0, 3)))
@@ -398,6 +518,45 @@ def test_save_generation_asset_rejects_blank_title_before_writing_blobs(isolated
     with pytest.raises(ValueError):
         save_generation_asset(source, title="  ", tags=[], project_id=None)
     assert not (isolated_data_root / "creation-assets" / "blobs").exists()
+
+
+@pytest.mark.parametrize(
+    ("title", "tags"),
+    [
+        ("长" * 121, []),
+        ("t", [f"标签{index}" for index in range(21)]),
+        ("t", ["长" * 41]),
+    ],
+    ids=["title-121", "tags-21", "tag-41"],
+)
+def test_save_generation_asset_rejects_oversized_title_or_tags_before_writing_blobs(
+    isolated_data_root, title, tags
+):
+    job = _studio_job(png((55, 0, 0)), {})
+    source = recipe_from_job_output(job.job_id, 0)
+    with pytest.raises(ValueError):
+        save_generation_asset(source, title=title, tags=tags, project_id=None)
+    blobs = isolated_data_root / "creation-assets" / "blobs"
+    assert not blobs.exists() or not any(blobs.rglob("*"))
+
+
+def test_save_generation_asset_accepts_limits_exactly(isolated_data_root):
+    job = _studio_job(png((56, 0, 0)), {})
+    asset = save_generation_asset(
+        recipe_from_job_output(job.job_id, 0), title="长" * 120,
+        tags=[f"标签{index}" for index in range(20)], project_id=None,
+    )
+    assert len(asset.title) == 120 and len(asset.tags) == 20
+
+
+def test_save_generation_asset_limits_match_creation_asset_schema():
+    """前置校验的上限必须与 CreationAsset 的 Field 上限一致，否则要么误拒、要么漏挡。"""
+    def max_length(field: str) -> int:
+        metadata = CreationAsset.model_fields[field].metadata
+        return next(item.max_length for item in metadata if hasattr(item, "max_length"))
+
+    assert generation_recipe._TITLE_MAX_LENGTH == max_length("title")
+    assert generation_recipe._TAG_MAX_COUNT == max_length("tags")
 
 
 def test_save_generation_asset_missing_file_is_source_missing(isolated_data_root):
