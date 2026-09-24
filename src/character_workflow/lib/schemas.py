@@ -1864,6 +1864,42 @@ class CanvasCreationAssetInsertRequest(BaseModel):
     target_node_id: str | None = Field(default=None, min_length=1, max_length=160)
 
 
+class CreationGenerationFromJob(BaseModel):
+    """Studio 结果「保存为创作资产」：output_index 是 Job.output_paths 的下标。"""
+    model_config = ConfigDict(extra="forbid")
+    job_id: str = Field(min_length=1, max_length=160)
+    output_index: int = Field(ge=0)
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    project_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class CreationGenerationFromCanvas(BaseModel):
+    """画布结果「保存为创作资产」；project_id 取 canvas_project_id，不单独收。"""
+    model_config = ConfigDict(extra="forbid")
+    canvas_project_id: str = Field(min_length=1, max_length=160)
+    node_id: str = Field(min_length=1, max_length=160)
+    version_id: str = Field(min_length=1, max_length=160)
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class CanvasReproduceRequest(BaseModel):
+    """画布复刻；model 为 null 时配置节点模型位留空（本机没有配方里的模型）。"""
+    model_config = ConfigDict(extra="forbid")
+    position: CanvasPoint
+    alias: str | None = None
+    model: str | None = None
+
+
+class CanvasReproduceResponse(CanvasDocument):
+    """与 creation asset insert 路由的响应（CanvasDocument）同形状，另加 warnings。
+
+    只作响应：warnings 不属于画布文档，不能当 CanvasDocument 落盘。
+    """
+    warnings: list[str] = Field(default_factory=list)
+
+
 class CanvasPluginState(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: int = Field(ge=1)
@@ -2615,6 +2651,8 @@ class TeamLibraryIndexEntry(BaseModel):
     # 仅 generation 有值：团队栏卡片直接显示模型与花费，不必再读 asset.json。
     model: str | None = None
     cost_cny: float | None = None
+    # 仅 generation 有值：snapshot.inputs[].sha256，按 order（推荐 a 按参考 sha 查配方）。
+    input_sha256: list[str] = Field(default_factory=list)
 
 
 class TeamLibraryIndex(BaseModel):
@@ -2675,8 +2713,17 @@ class TeamShareCreationAsset(BaseModel):
     asset_id: str = Field(min_length=1, max_length=160)
 
 
+class TeamShareCanvasResult(BaseModel):
+    """画布结果节点的一个版本；version_id 是 CanvasDocument.content_versions 的键。"""
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["canvas_result"]
+    canvas_project_id: str = Field(min_length=1, max_length=160)
+    node_id: str = Field(min_length=1, max_length=160)
+    version_id: str = Field(min_length=1, max_length=160)
+
+
 TeamShareSource = Annotated[
-    TeamShareJobOutput | TeamShareCreationAsset,
+    TeamShareJobOutput | TeamShareCreationAsset | TeamShareCanvasResult,
     Field(discriminator="kind"),
 ]
 
@@ -2702,6 +2749,39 @@ class TeamRelatedEntry(BaseModel):
     entry: TeamLibraryIndexEntry
 
 
+CreationAssetStalenessStatus = Literal["fresh", "stale", "withdrawn", "unknown"]
+
+
 class CreationAssetStaleness(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    status: Literal["fresh", "stale", "withdrawn", "unknown"]
+    status: CreationAssetStalenessStatus
+
+
+class CreationAssetStalenessBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    asset_ids: list[str] = Field(min_length=1, max_length=200)
+
+
+class CreationAssetStalenessBatch(BaseModel):
+    """不存在的 asset_id 不出现在 statuses 里。"""
+    model_config = ConfigDict(extra="forbid")
+    statuses: dict[str, CreationAssetStalenessStatus]
+
+
+TeamLibraryChangeKind = Literal["added", "updated", "removed"]
+
+
+class TeamLibraryChangeEvent(BaseModel):
+    """SSE team-library-changed 载荷（broadcast 时 model_dump(mode="json")）。
+
+    removed 事件的 title / status / mime_type 为 None。
+    """
+    model_config = ConfigDict(extra="forbid")
+    library_id: str
+    asset_id: str
+    kind: str
+    author: str | None
+    change: TeamLibraryChangeKind
+    title: str | None = None
+    status: Literal["ready", "incomplete"] | None = None
+    mime_type: str | None = None
