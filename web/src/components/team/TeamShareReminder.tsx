@@ -12,8 +12,8 @@ import type { TeamLibraryChangeEvent } from '@/schema/teamLibrary';
 
 /** AppShell 持有句柄：SSE `team-library-changed` 交给 notify，SSE（重）连上时 refreshProfile。 */
 export interface TeamShareReminderHandle {
-  notify: (event: TeamLibraryChangeEvent) => void;
-  refreshProfile: () => void;
+  notify: (event: TeamLibraryChangeEvent) => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const REMINDED_KEY = 'atelier:team-reminded';
@@ -24,7 +24,7 @@ const MAX_SINGLE_TOASTS = 3;
 const VISIBLE_MS = 8000;
 const THUMB_WIDTH = 96;
 
-type SingleToast = { id: number; type: 'single'; event: TeamLibraryChangeEvent };
+type SingleToast = { id: number; type: 'single'; event: TeamLibraryChangeEvent; at: number };
 type MergedToast = { id: number; type: 'merged'; count: number };
 type Toast = SingleToast | MergedToast;
 
@@ -43,10 +43,14 @@ function writeReminded(ids: string[]): void {
   } catch { /* 存不下只影响跨会话去重，本会话仍由内存集合去重。 */ }
 }
 
-function isTeammateShare(event: TeamLibraryChangeEvent, displayName: string | null): boolean {
-  if (event.change === 'removed' || event.status !== 'ready' || event.kind === 'raw') return false;
-  const author = event.author?.trim();
-  return Boolean(author) && author !== displayName;
+function isReminded(session: ReadonlySet<string>, assetId: string): boolean {
+  return session.has(assetId) || readReminded().includes(assetId);
+}
+
+/** 作者（已 trim）；不该提醒的事件返回 null。是不是本人另判，因为显示名可能要现取。 */
+function reminderAuthor(event: TeamLibraryChangeEvent): string | null {
+  if (event.change === 'removed' || event.status !== 'ready' || event.kind === 'raw') return null;
+  return event.author?.trim() || null;
 }
 
 function actionFor(event: TeamLibraryChangeEvent): TeamAssetAction {
@@ -81,6 +85,8 @@ export const TeamShareReminder = forwardRef<TeamShareReminderHandle>(function Te
   }, []);
 
   const dismiss = useCallback((id: number) => {
+    // 合并条关掉后清空 burst：同一波里后续的分享从单条重新算，不再把已合并过的计进新合并条。
+    if (toastsRef.current.some(toast => toast.id === id && toast.type === 'merged')) burstRef.current = [];
     commit(toastsRef.current.filter(toast => toast.id !== id));
   }, [commit]);
 
@@ -89,46 +95,58 @@ export const TeamShareReminder = forwardRef<TeamShareReminderHandle>(function Te
     timersRef.current.set(id, setTimeout(() => dismiss(id), VISIBLE_MS));
   }, [dismiss]);
 
-  const refreshProfile = useCallback(() => {
+  const refreshProfile = useCallback(async () => {
     const request = ++profileRequestRef.current;
-    fetchProfile()
-      .then(profile => {
-        if (request === profileRequestRef.current) displayNameRef.current = profile?.display_name?.trim() || null;
-      })
-      .catch(() => { /* 读不到显示名时沿用上次的，宁可多提醒也不漏。 */ });
+    try {
+      const profile = await fetchProfile();
+      // 只认最新一次请求：先发后到的旧响应不能盖掉新显示名。
+      if (request === profileRequestRef.current) displayNameRef.current = profile?.display_name?.trim() || null;
+    } catch { /* 读不到显示名时沿用上次的，宁可多提醒也不漏。 */ }
   }, []);
 
-  const notify = useCallback((event: TeamLibraryChangeEvent) => {
-    if (!isTeammateShare(event, displayNameRef.current)) return;
-    const reminded = readReminded();
-    if (sessionRemindedRef.current.has(event.asset_id) || reminded.includes(event.asset_id)) return;
-    sessionRemindedRef.current.add(event.asset_id);
-    writeReminded([...reminded, event.asset_id]);
-
-    const now = Date.now();
-    const burst = [...burstRef.current.filter(at => now - at < MERGE_WINDOW_MS), now];
+  const show = useCallback((event: TeamLibraryChangeEvent, at: number) => {
+    const burst = [...burstRef.current.filter(prior => at - prior < MERGE_WINDOW_MS), at];
     burstRef.current = burst;
-
     const current = toastsRef.current;
-    const merged = current.find((toast): toast is MergedToast => toast.type === 'merged');
-    if (merged) {
-      commit(current.map(toast => (toast.id === merged.id ? { ...merged, count: merged.count + 1 } : toast)));
-      scheduleDismiss(merged.id);
+    if (burst.length <= MERGE_THRESHOLD) {
+      const id = nextIdRef.current++;
+      const next: Toast[] = [...current, { id, type: 'single', event, at }];
+      const singles = next.filter(toast => toast.type === 'single');
+      const dropped = new Set(singles.slice(0, Math.max(0, singles.length - MAX_SINGLE_TOASTS)).map(toast => toast.id));
+      commit(next.filter(toast => !dropped.has(toast.id)));
+      scheduleDismiss(id);
       return;
     }
-    const id = nextIdRef.current++;
-    if (burst.length > MERGE_THRESHOLD) {
-      commit([{ id, type: 'merged', count: burst.length }]);
-    } else {
-      commit([...current, { id, type: 'single', event } satisfies SingleToast].slice(-MAX_SINGLE_TOASTS));
-    }
+    // 本波超过阈值：本波已弹出的单条并入合并条，窗口外的旧单条原样保留。
+    const inBurst = current.filter((toast): toast is SingleToast => toast.type === 'single' && at - toast.at < MERGE_WINDOW_MS);
+    const folded = new Set(inBurst.map(toast => toast.id));
+    const merged = current.find((toast): toast is MergedToast => toast.type === 'merged');
+    const id = merged?.id ?? nextIdRef.current++;
+    const count = (merged?.count ?? 0) + inBurst.length + 1;
+    commit([
+      ...current.filter(toast => toast.type === 'single' && !folded.has(toast.id)),
+      { id, type: 'merged', count } satisfies MergedToast,
+    ]);
     scheduleDismiss(id);
   }, [commit, scheduleDismiss]);
+
+  const notify = useCallback(async (event: TeamLibraryChangeEvent) => {
+    const author = reminderAuthor(event);
+    const reminded = sessionRemindedRef.current;
+    if (!author || author === displayNameRef.current || isReminded(reminded, event.asset_id)) return;
+    const at = Date.now();
+    // 作者与缓存的显示名不同：可能是刚设好显示名后的第一次分享，现取一次再判，免得提醒到自己。
+    await refreshProfile();
+    if (author === displayNameRef.current || isReminded(reminded, event.asset_id)) return;
+    reminded.add(event.asset_id);
+    writeReminded([...readReminded(), event.asset_id]);
+    show(event, at);
+  }, [refreshProfile, show]);
 
   useImperativeHandle(ref, () => ({ notify, refreshProfile }), [notify, refreshProfile]);
 
   useEffect(() => {
-    refreshProfile();
+    void refreshProfile();
   }, [refreshProfile]);
 
   useEffect(() => {
@@ -146,10 +164,11 @@ export const TeamShareReminder = forwardRef<TeamShareReminderHandle>(function Te
   };
 
   return (
+    // 右上角、顶栏（lg:h-20）下方：避开 Studio 底部输入壳与画布右下的批量结果 / MiniMap。
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed bottom-4 right-4 z-30 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2"
+      className="pointer-events-none fixed top-24 right-4 z-30 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2"
     >
       {toasts.map(toast => (
         <div

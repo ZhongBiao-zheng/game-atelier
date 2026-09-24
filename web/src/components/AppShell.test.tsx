@@ -8,6 +8,20 @@ import { AppShell } from './AppShell';
 
 type SSEOptions = NonNullable<Parameters<typeof UseSSE>[0]>;
 const sseCalls = vi.hoisted(() => [] as Array<SSEOptions | undefined>);
+const connection = vi.hoisted(() => ({ forceReady: false }));
+
+// 默认沿用 test/setup 的连接 mock；个别用例把连接态强制成 ready，让 useSSE 真的去连 /events。
+vi.mock('@/api/connection', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/api/connection')>();
+  return {
+    ...actual,
+    connectionFetch: (input: string, init?: RequestInit) => init ? fetch(input, init) : fetch(input),
+    useConnectionState: () => {
+      const state = actual.useConnectionState();
+      return connection.forceReady ? { ...state, phase: 'ready' as const, generation: 1 } : state;
+    },
+  };
+});
 
 vi.mock('@/hooks/useSSE', async importOriginal => {
   const actual = await importOriginal<typeof import('@/hooks/useSSE')>();
@@ -30,6 +44,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   sseCalls.splice(0);
+  connection.forceReady = false;
   window.localStorage.removeItem('atelier:team-reminded');
   window.localStorage.removeItem('atelier:theme');
   window.localStorage.removeItem('atelier:changelog-seen');
@@ -432,5 +447,23 @@ describe('AppShell', () => {
     const before = profileCalls();
     act(() => { shell.onConnect?.(); });
     await waitFor(() => expect(profileCalls()).toBe(before + 1));
+  });
+
+  it('opens exactly one /events stream for the whole shell', async () => {
+    connection.forceReady = true;
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url) === '/events') {
+        return new Response(new ReadableStream({ start() {} }), { headers: { 'Content-Type': 'text/event-stream' } });
+      }
+      return { ok: true, json: async () => (String(url) === '/api/profile' ? { display_name: '我' } : {}) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const view = renderAt('/settings');
+    const eventStreams = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/events').length;
+
+    await waitFor(() => expect(eventStreams()).toBe(1));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+    expect(eventStreams()).toBe(1);
+    view.unmount();
   });
 });
