@@ -13,7 +13,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, BookmarkPlus, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
   useRef, useState,
@@ -109,6 +109,7 @@ import {
   switchCanvasGenerationDraft,
   type CanvasPendingInput,
 } from '@/pages/canvasEditorModel';
+import { isSavableCanvasVersion, isShareableCanvasVersion } from '@/pages/canvasTeamActions';
 
 export type CanvasFlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
 /** 本地媒体操作（抠图 / 裁剪 / 切图 / 放大）进行中的占位节点：不在文档里，结果节点落地即撤。 */
@@ -184,6 +185,8 @@ export interface CanvasNodeContextValue {
   createImageFromSource?: (id: string) => void;
   recordHistory: () => void;
   saveAsset: (node: CanvasContentNode) => Promise<void>;
+  /** 分享生成结果到团队库；不传就不显示「分享」。 */
+  shareResult?: (node: CanvasContentNode) => void;
   copyPrompt: (node: CanvasContentNode) => Promise<void>;
   reversePrompt: (node: CanvasContentNode) => Promise<void>;
   createLayerDecomposition: (node: Extract<CanvasContentNode, { type: 'image' }>) => void;
@@ -673,6 +676,16 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               onDecreaseText={() => setTextScale(-1)}
               onIncreaseText={() => setTextScale(1)}
             />
+          )}
+          {isCanvasContentNode(node) && isSavableCanvasVersion(content) && (
+            <MediaToolButton label={`保存 ${node.title}`} text="保存" onClick={() => void context.saveAsset(node)}>
+              <BookmarkPlus />
+            </MediaToolButton>
+          )}
+          {isCanvasContentNode(node) && context.shareResult && isShareableCanvasVersion(content) && (
+            <MediaToolButton label={`分享 ${node.title}`} text="分享" onClick={() => context.shareResult?.(node)}>
+              <Share2 />
+            </MediaToolButton>
           )}
           <MediaToolButton
             label={node.hidden ? `显示 ${node.title} 的内容` : `隐藏 ${node.title} 的内容`}

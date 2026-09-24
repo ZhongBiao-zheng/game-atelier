@@ -1,5 +1,5 @@
 import '@xyflow/react/dist/style.css';
-import { promptToAssetSegments, readablePromptVariables } from '@/lib/promptVariables';
+import { readablePromptVariables } from '@/lib/promptVariables';
 
 import {
   Background,
@@ -63,6 +63,7 @@ import {
   listCanvasProjects,
   renameCanvasProject,
   replaceCanvasNodeMedia,
+  reproduceIntoCanvas,
   retryCanvasRun,
   runCanvasMediaOperation,
   getCanvasMattingModel,
@@ -134,8 +135,10 @@ import {
   type CreationAssetSaveRequest,
 } from '@/components/assets/CreationAssetPanel';
 import { insertCreationAssetIntoCanvas } from '@/api/creationAssets';
-import { adoptTeamAsset } from '@/api/teamLibraries';
+import { adoptTeamAsset, listRelatedTeamAssets } from '@/api/teamLibraries';
 import { TEAM_ASSET_DRAG_TYPE, readTeamAssetDrag } from '@/schema/teamLibrary';
+import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
+import { TEAM_ASSET_ACTION_EVENT, type TeamAssetAction } from '@/lib/teamAssetActions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -222,6 +225,13 @@ import {
   expandCanvasInputSource,
 } from './canvasEditorModel';
 import { restoreCanvasRetryConfiguration } from './canvasRetryMerge';
+import { resolveRecipeModel } from './studioRecipe';
+import {
+  canvasNodeSaveRequest,
+  canvasNodeShareRequest,
+  canvasReproduceFootprint,
+  canvasReproduceNotices,
+} from './canvasTeamActions';
 import { canvasLayerMaterialConnections, type CanvasLayerMaterialConnection } from './canvasLayerMaterialConnections';
 
 interface CreateMenuState {
@@ -402,6 +412,13 @@ const CANVAS_MAX_ZOOM = 2.5;
 const CANVAS_MULTI_SELECT_KEYS = ['Shift', 'Meta', 'Control'];
 type CanvasLibraryMode = 'assets' | 'prompts' | 'team';
 
+interface CanvasNoticeAction { label: string; run: () => void }
+
+const TOOL_NOTICE_MS = 1800;
+/** 带动作或多条的提示要留出读完、点按钮的时间。 */
+const TOOL_NOTICE_LONG_MS = 6000;
+const REPRODUCE_CONFLICT_MESSAGE = '画布已更新，请重试';
+
 const CANVAS_CHROME_BUTTON_CLASS = 'grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
 export function CanvasEditor(props: {
@@ -481,6 +498,9 @@ function CanvasEditorInner({
   const [mediaReplaceBusyNodeIds, setMediaReplaceBusyNodeIds] = useState<Set<string>>(() => new Set());
   const [mediaReplaceError, setMediaReplaceError] = useState<{ nodeId: string; message: string } | null>(null);
   const [toolNotice, setToolNotice] = useState<string | null>(null);
+  const [toolNoticeAction, setToolNoticeAction] = useState<CanvasNoticeAction | null>(null);
+  const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
+  const [teamRelatedSha256, setTeamRelatedSha256] = useState<string | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const replaceMediaRef = useRef<HTMLInputElement>(null);
   const editorRegionRef = useRef<HTMLElement>(null);
@@ -534,6 +554,8 @@ function CanvasEditorInner({
   const focusNewNodeHandler = useRef<(node: CanvasNode) => void>(() => undefined);
   const canvasUiPreferencesSaveInFlight = useRef(false);
   const toolNoticeTimer = useRef<number | null>(null);
+  /** 每次渲染换成最新的处理函数；window 监听只挂一次。 */
+  const teamAssetActionRef = useRef<(action: TeamAssetAction) => void>(() => undefined);
   const latestDocument = useRef<CanvasDocument | null>(null);
   const pendingTextVersions = useRef(new Map<string, string>());
   // Agent 经 MCP 改画布后的重载入口（#92）。用 ref 是因为保存失败分支（flushSave）声明在它之前，
@@ -574,11 +596,23 @@ function CanvasEditorInner({
   const usedPromptAssetRef = useRef(false);
   const [focusVariableNodeId, setFocusVariableNodeId] = useState<string | null>(null);
   const consumeVariableFocus = useCallback(() => setFocusVariableNodeId(null), []);
+  useEffect(() => {
+    const claim = (event: Event) => {
+      const action = (event as CustomEvent<TeamAssetAction>).detail;
+      if (!action) return;
+      event.preventDefault();
+      teamAssetActionRef.current(action);
+    };
+    window.addEventListener(TEAM_ASSET_ACTION_EVENT, claim);
+    return () => window.removeEventListener(TEAM_ASSET_ACTION_EVENT, claim);
+  }, []);
+
   const closeLibrary = useCallback(() => {
     const trigger = libraryMode === 'prompts'
       ? promptLibraryTriggerRef.current
       : assetLibraryTriggerRef.current;
     setLibraryMode(null);
+    setTeamRelatedSha256(null);
     if (!usedPromptAssetRef.current) requestAnimationFrame(() => trigger?.focus());
     usedPromptAssetRef.current = false;
   }, [libraryMode]);
@@ -1827,68 +1861,72 @@ function CanvasEditorInner({
     );
   }
 
-  const saveNodeToLibrary = useCallback(async (node: CanvasContentNode) => {
+  /** 工具条「保存」/「分享」共用：先落盘（服务端按画布文档核对节点与版本），再取当前版本。 */
+  const persistedCurrentVersion = useCallback(async (node: CanvasContentNode) => {
     const versionId = node.data.current_version_id;
     if (!versionId) {
       setError('这个节点还没有可保存的内容。');
-      return;
+      return null;
     }
-    if (!await persistNow()) return;
+    if (!await persistNow()) return null;
     const version = latestDocument.current?.content_versions[versionId];
     if (!version) {
       setError('这个节点的内容版本已经不存在。');
-      return;
+      return null;
     }
-    if (version.kind === 'text') {
-      setLibraryMode('prompts');
-      setCreationAssetSaveRequest({
-        requestId: crypto.randomUUID(),
-        kind: 'prompt',
-        title: node.title,
-        segments: promptToAssetSegments(version.text),
-        projectId,
-      });
-      return;
-    }
-    if (version.kind === 'image') {
-      setLibraryMode('assets');
-      setCreationAssetSaveRequest({
-        requestId: crypto.randomUUID(),
-        kind: 'media',
-        title: node.title,
-        sourcePath: `canvases/${projectId}/${version.path}`,
-        previewUrl: canvasMediaUrl(projectId, version.version_id),
-        projectId,
-      });
-      return;
-    }
-    setError('第一版创作资产只支持提示词和单张图片。');
-  }, [persistNow, projectId]);
+    return version;
+  }, [persistNow]);
 
-  async function insertCreationAsset(
-    assetId: string,
-    variableValues: Record<string, string>,
-    targetNodeId?: string,
-    position?: CanvasPoint,
-  ) {
-    if (!await persistNow()) return;
+  const saveNodeToLibrary = useCallback(async (node: CanvasContentNode) => {
+    const version = await persistedCurrentVersion(node);
+    if (!version) return;
+    const save = canvasNodeSaveRequest({
+      node,
+      version,
+      projectId,
+      previewUrl: canvasMediaUrl(projectId, version.version_id),
+      requestId: crypto.randomUUID(),
+    });
+    if (!save) {
+      setError('音频不能存为创作资产。');
+      return;
+    }
+    setLibraryMode(save.libraryMode);
+    setCreationAssetSaveRequest(save.request);
+  }, [persistedCurrentVersion, projectId]);
+
+  const shareCanvasResult = useCallback(async (node: CanvasContentNode) => {
+    const version = await persistedCurrentVersion(node);
+    if (!version) return;
+    const request = canvasNodeShareRequest({
+      node,
+      version,
+      projectId,
+      previewUrl: canvasMediaUrl(projectId, version.version_id),
+    });
+    if (!request) {
+      setError('只有生成的图片或视频能分享。');
+      return;
+    }
+    setShareRequest(request);
+  }, [persistedCurrentVersion, projectId]);
+
+  /** 服务端一次锁内往画布里加节点（插入资产 / 复刻）的共用合并：只收新节点、新版本、新连线，
+   *  并发编辑保留，新节点按本地画布避让，整次插入是一步可撤销的历史。
+   *  返回 true = 已合并；失败交给 onError（缺省报错条）。 */
+  async function applyServerInsertion(
+    request: (documentRevision: number) => Promise<CanvasDocument>,
+    onError: (error: unknown) => void = insertError => setError((insertError as Error).message),
+  ): Promise<boolean> {
+    if (!await persistNow()) return false;
     const before = latestDocument.current;
-    if (!before) return;
+    if (!before) return false;
     const dirtyAtInsertion = dirtyVersion.current;
     libraryInsertInFlight.current = true;
+    let inserted = false;
     const command = (async () => {
       try {
-        const insertionPosition = position
-          ? placeNewNode(position, CANVAS_DEFAULT_NODE_SIZE)
-          : defaultPosition();
-        const remote = await insertCreationAssetIntoCanvas({
-          projectId,
-          assetId,
-          position: insertionPosition,
-          documentRevision: serverRevision.current,
-          variableValues,
-          targetNodeId,
-        });
+        const remote = await request(serverRevision.current);
         const previousIds = new Set(before.nodes.map(node => node.id));
         const insertedNodes = remote.nodes.filter(node => !previousIds.has(node.id));
         const insertedVersions = Object.fromEntries(
@@ -1955,8 +1993,9 @@ function CanvasEditorInner({
         setSelectedConnectionIds(new Set());
         setSelectedNodeIds(new Set());
         setFocusVariableNodeId(insertedNodes.find(node => node.type === 'text')?.id ?? null);
+        inserted = true;
       } catch (insertError) {
-        setError((insertError as Error).message);
+        onError(insertError);
       } finally {
         libraryInsertInFlight.current = false;
         if (saveQueued.current) {
@@ -1974,7 +2013,112 @@ function CanvasEditorInner({
     } finally {
       if (libraryInsertCommand.current === command) libraryInsertCommand.current = null;
     }
+    return inserted;
   }
+
+  function insertCreationAsset(
+    assetId: string,
+    variableValues: Record<string, string>,
+    targetNodeId?: string,
+    position?: CanvasPoint,
+  ) {
+    return applyServerInsertion(documentRevision => insertCreationAssetIntoCanvas({
+      projectId,
+      assetId,
+      position: position ? placeNewNode(position, CANVAS_DEFAULT_NODE_SIZE) : defaultPosition(),
+      documentRevision,
+      variableValues,
+      targetNodeId,
+    }));
+  }
+
+  /** 画布复刻：模型按本机 key 匹配，匹配不到传 null（配置节点模型位留空，「先选模型」阻断生效）。 */
+  async function reproduceGenerationAsset(asset: CreationAsset) {
+    if (asset.content.kind !== 'generation') {
+      setError('只有生成资产能复刻。');
+      return;
+    }
+    const recipe = asset.content.snapshot;
+    const match = resolveRecipeModel(recipe, keys);
+    let warnings: string[] = [];
+    const reproduced = await applyServerInsertion(async documentRevision => {
+      const { warnings: responseWarnings, ...remote } = await reproduceIntoCanvas({
+        projectId,
+        assetId: asset.asset_id,
+        position: defaultPosition(canvasReproduceFootprint(recipe)),
+        alias: match?.alias ?? null,
+        model: match?.model ?? null,
+        documentRevision,
+      });
+      // warnings 只是这次响应的附言，混进文档状态下一次 PUT 就是 422（extra=forbid）。
+      warnings = responseWarnings;
+      return remote;
+    }, reproduceError => {
+      if (reproduceError instanceof ApiError && reproduceError.status === 409) {
+        // 别处先改了画布：收服务端文档，再让画师点一次重试（位置与版本号都要按新文档重算）。
+        void reloadDocumentFromServer()
+          .then(() => {
+            setError(REPRODUCE_CONFLICT_MESSAGE);
+            setErrorAction({
+              message: REPRODUCE_CONFLICT_MESSAGE,
+              label: '重试',
+              run: () => {
+                setError(null);
+                void reproduceGenerationAsset(asset);
+              },
+            });
+          })
+          .catch(reloadError => setError((reloadError as Error).message));
+        return;
+      }
+      setError((reproduceError as Error).message);
+    });
+    if (!reproduced) return;
+    const notices = canvasReproduceNotices(recipe, match, warnings);
+    if (notices.length) announceToolNotice(notices.join('\n'));
+  }
+
+  function openTeamPanel(relatedSha256: string | null) {
+    setAddOpen(false);
+    setCreateMenu(null);
+    const open = () => {
+      setTeamRelatedSha256(relatedSha256);
+      setLibraryMode('team');
+    };
+    if (libraryMode) creationAssetPanelRef.current?.requestTransition(open);
+    else open();
+  }
+
+  /** 推荐是附加信息：查不到或查询失败都不打断拖入，只在有命中时提示。 */
+  async function suggestRelatedRecipes(sha256: string) {
+    let related: Awaited<ReturnType<typeof listRelatedTeamAssets>>;
+    try {
+      related = await listRelatedTeamAssets(projectId, sha256);
+    } catch {
+      return;
+    }
+    if (!related.length) return;
+    announceToolNotice(`有 ${related.length} 条相关配方`, { label: '看看', run: () => openTeamPanel(sha256) });
+  }
+
+  /** 分享提醒的「复刻」/「看看」：画布页认领后就地处理，不再导航去 Studio。 */
+  async function handleTeamAssetAction(action: TeamAssetAction) {
+    if (action.action === 'open') {
+      openTeamPanel(null);
+      return;
+    }
+    try {
+      const result = await adoptTeamAsset(action.library_id, action.asset_id, projectId);
+      if (result.asset.kind !== 'generation') {
+        openTeamPanel(null);
+        return;
+      }
+      await reproduceGenerationAsset(result.asset);
+    } catch (adoptError) {
+      setError(adoptError instanceof Error ? adoptError.message : String(adoptError));
+    }
+  }
+  teamAssetActionRef.current = action => void handleTeamAssetAction(action);
 
   function handleCanvasDrop(event: DragEvent) {
     // 团队库的拖放先落成本机创作资产，再走与「资产面板拖入」完全一样的插入路径。
@@ -1989,6 +2133,9 @@ function CanvasEditorInner({
         try {
           const result = await adoptTeamAsset(teamAsset.library_id, teamAsset.entry_id, projectId);
           await insertCreationAsset(result.asset.asset_id, {}, undefined, flow);
+          if (result.asset.kind === 'media' && result.asset.content.kind === 'media') {
+            await suggestRelatedRecipes(result.asset.content.sha256);
+          }
         } catch (adoptError) {
           setError(adoptError instanceof Error ? adoptError.message : String(adoptError));
         }
@@ -3171,13 +3318,16 @@ function CanvasEditorInner({
 
   const previewLayerStack = useCallback((nodeId: string) => setLayerPreviewId(nodeId), []);
 
-  const announceToolNotice = useCallback((message: string) => {
+  /** 多条提示用换行分隔，逐行显示。 */
+  const announceToolNotice = useCallback((message: string, action: CanvasNoticeAction | null = null) => {
     setToolNotice(message);
+    setToolNoticeAction(action);
     if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
     toolNoticeTimer.current = window.setTimeout(() => {
       setToolNotice(null);
+      setToolNoticeAction(null);
       toolNoticeTimer.current = null;
-    }, 1800);
+    }, action || message.includes('\n') ? TOOL_NOTICE_LONG_MS : TOOL_NOTICE_MS);
   }, []);
 
   const copyPrompt = useCallback(async (node: CanvasContentNode) => {
@@ -4154,6 +4304,7 @@ function CanvasEditorInner({
     createImageFromSource,
     recordHistory: recordHistorySnapshot,
     saveAsset: saveNodeToLibrary,
+    shareResult: shareCanvasResult,
     copyPrompt,
     reversePrompt,
     createLayerDecomposition,
@@ -4226,6 +4377,7 @@ function CanvasEditorInner({
     retryRun,
     renameNode,
     saveNodeToLibrary,
+    shareCanvasResult,
     selectedNodeIds.size,
     selectCandidate,
     selectOnlyNode,
@@ -4857,8 +5009,20 @@ function CanvasEditorInner({
             }}
             onOpenSettings={canvasId => setLocation(`/settings?canvas=${encodeURIComponent(canvasId)}`)}
             onTeamAssetAdopted={result => announceToolNotice(result.created ? '已加入资产库' : '已在你的资产库')}
+            onReproduce={asset => void reproduceGenerationAsset(asset)}
+            teamRelatedSha256={teamRelatedSha256}
           />
         )}
+
+        <TeamShareDialog
+          request={shareRequest}
+          onClose={() => setShareRequest(null)}
+          onShared={(_entry, libraryName) => announceToolNotice(`已分享到 ${libraryName}`)}
+          onOpenSettings={() => {
+            setShareRequest(null);
+            setLocation(`/settings?canvas=${encodeURIComponent(projectId)}`);
+          }}
+        />
 
         {narrowViewport && generationPanelOpen && selectedNode && selectedDraft && (
           <CanvasMobileGenerationPanel
@@ -4881,6 +5045,7 @@ function CanvasEditorInner({
           <CanvasActionFeedback
             error={null}
             notice={toolNotice}
+            noticeAction={toolNoticeAction}
             action={errorAction && errorAction.message === error ? errorAction : null} onDismissError={() => setError(null)}
             className="absolute right-3 top-20 z-30 max-w-sm items-end md:right-4"
           />
@@ -5143,10 +5308,11 @@ function CanvasPreview({
   );
 }
 
-function CanvasActionFeedback({ error, notice, action = null, onDismissError, className }: {
+function CanvasActionFeedback({ error, notice, action = null, noticeAction = null, onDismissError, className }: {
   error: string | null;
   notice: string | null;
-  action?: { label: string; run: () => void } | null;
+  action?: CanvasNoticeAction | null;
+  noticeAction?: CanvasNoticeAction | null;
   onDismissError: () => void;
   className?: string;
 }) {
@@ -5167,7 +5333,20 @@ function CanvasActionFeedback({ error, notice, action = null, onDismissError, cl
           <button type="button" aria-label="关闭错误提示" onClick={onDismissError}><X className="size-4" /></button>
         </div>
       )}
-      {notice && <div role="status" className="rounded-lg border border-border bg-popover px-3 py-2 text-sm text-foreground shell-glow">{notice}</div>}
+      {notice && (
+        <div role="status" className="flex min-w-0 items-start gap-2 rounded-lg border border-border bg-popover px-3 py-2 text-sm text-foreground shell-glow">
+          <div className="min-w-0 flex-1">
+            {notice.split('\n').map((line, index) => <p key={index}>{line}</p>)}
+          </div>
+          {noticeAction && (
+            <button
+              type="button"
+              className="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              onClick={noticeAction.run}
+            >{noticeAction.label}</button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

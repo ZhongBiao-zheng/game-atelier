@@ -839,3 +839,59 @@ it('hide toggles the node hidden flag and flips the button label', () => {
   expect(screen.getByRole('button', { name: '显示 文本 的内容' })).toBeInTheDocument();
   expect(document.querySelector('[data-canvas-node-hidden="true"]')).not.toBeNull();
 });
+
+it('puts fixed save and share buttons before hide, sharing only generated media', () => {
+  const generatedImage = { ...nodes[1], data: { ...nodes[1].data, current_version_id: 'generated' } } as CanvasNode;
+  const uploadedVideo = { ...nodes[2], data: { ...nodes[2].data, current_version_id: 'uploaded' } } as CanvasNode;
+  const writtenText = { ...nodes[0], data: { ...nodes[0].data, current_version_id: 'written' } } as CanvasNode;
+  const base = { created_at: '2026-09-24T00:00:00Z', sha256: 'd'.repeat(64), bytes: 1, width: 64, height: 64 };
+  const context = nodeContext({
+    shareResult: vi.fn(),
+    resolveVersion: versionResolver({
+      generated: { ...base, version_id: 'generated', kind: 'image', path: 'runs/a.png', mime_type: 'image/png',
+        origin: { kind: 'job_output', job_id: 'job-1', candidate_id: 'c-1' } },
+      uploaded: { ...base, version_id: 'uploaded', kind: 'video', path: 'uploads/b.mp4', mime_type: 'video/mp4',
+        origin: { kind: 'upload', upload_id: 'u-1' } },
+      written: { version_id: 'written', kind: 'text', text: '台词', sha256: 'x', created_at: base.created_at,
+        origin: { kind: 'user_edit' } },
+    }),
+  });
+  render(
+    <CanvasNodeContext.Provider value={context}>
+      {[generatedImage, uploadedVideo, writtenText].map(node => <NodeCard key={node.id} data={{ domain: node }} selected />)}
+    </CanvasNodeContext.Provider>,
+  );
+
+  const imageButtons = within(screen.getByRole('toolbar', { name: '图片 节点工具' })).getAllByRole('button')
+    .map(button => button.getAttribute('aria-label'));
+  expect(imageButtons.slice(-3)).toEqual(['保存 图片', '分享 图片', '隐藏 图片 的内容']);
+  expect(imageButtons).not.toContain('将 图片 存入资产库');
+
+  const videoToolbar = screen.getByRole('toolbar', { name: '视频 节点工具' });
+  expect(within(videoToolbar).getByRole('button', { name: '保存 视频' })).toBeInTheDocument();
+  expect(within(videoToolbar).queryByRole('button', { name: '分享 视频' })).not.toBeInTheDocument();
+  const textToolbar = screen.getByRole('toolbar', { name: '文本 节点工具' });
+  expect(within(textToolbar).getByRole('button', { name: '保存 文本' })).toBeInTheDocument();
+  expect(within(textToolbar).queryByRole('button', { name: '分享 文本' })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: '保存 图片' }));
+  expect(context.saveAsset).toHaveBeenCalledWith(generatedImage);
+  fireEvent.click(screen.getByRole('button', { name: '分享 图片' }));
+  expect(context.shareResult).toHaveBeenCalledWith(generatedImage);
+});
+
+it('has no fixed save button on an audio node', () => {
+  const audio = { ...nodes[3], data: { ...nodes[3].data, current_version_id: 'sound' } } as CanvasNode;
+  const context = nodeContext({
+    shareResult: vi.fn(),
+    resolveVersion: versionResolver({
+      sound: { version_id: 'sound', kind: 'audio', path: 'runs/a.mp3', mime_type: 'audio/mpeg', bytes: 1,
+        created_at: '2026-09-24T00:00:00Z', sha256: 'e'.repeat(64),
+        origin: { kind: 'job_output', job_id: 'job-2', candidate_id: 'c-2' } },
+    }),
+  });
+  render(<CanvasNodeContext.Provider value={context}><NodeCard data={{ domain: audio }} selected /></CanvasNodeContext.Provider>);
+  const toolbar = screen.getByRole('toolbar', { name: '音频 节点工具' });
+  expect(within(toolbar).queryByRole('button', { name: '保存 音频' })).not.toBeInTheDocument();
+  expect(within(toolbar).queryByRole('button', { name: '分享 音频' })).not.toBeInTheDocument();
+});
