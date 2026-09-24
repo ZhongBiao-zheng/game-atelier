@@ -1,0 +1,270 @@
+"""画布复刻：从生成资产建输入节点 + 生成配置节点 + 连线，不自动 Run。"""
+from __future__ import annotations
+
+import io
+
+import pytest
+from PIL import Image
+
+from character_workflow.lib.canvas_projects import (
+    canvas_project_dir,
+    create_canvas_project,
+    read_canvas_document,
+    save_canvas_document,
+)
+from character_workflow.lib.canvas_reproduce import reproduce_generation_asset_into_canvas
+from character_workflow.lib.canvas_runs import canvas_input_sources
+from character_workflow.lib.creation_assets import (
+    create_generation_asset,
+    create_media_asset_from_bytes,
+    get_creation_asset,
+    store_media_blob,
+)
+from character_workflow.lib.schemas import (
+    CanvasPoint,
+    CanvasReproduceResponse,
+    CreationMediaAssetContent,
+    GenerationRecipe,
+    RecipeInput,
+)
+
+
+def _png(color: tuple[int, int, int], size: tuple[int, int] = (4, 2)) -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", size, color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+_OUTPUT = _png((200, 10, 10))
+_REF_A = _png((10, 200, 10))
+_REF_B = _png((10, 10, 200), (2, 4))
+_MASK = _png((255, 255, 255))
+_SREF = _png((90, 90, 90))
+
+
+def _input(content: CreationMediaAssetContent, order: int, role: str = "reference") -> RecipeInput:
+    return RecipeInput(
+        order=order,
+        role=role,
+        kind=content.mime_type.split("/", 1)[0],
+        sha256=content.sha256,
+        mime_type=content.mime_type,
+    )
+
+
+def _asset(bodies_roles: list[tuple[bytes, str]], **recipe_overrides):
+    media = store_media_blob(_OUTPUT, "out.png", "image/png")
+    inputs = [
+        _input(store_media_blob(body, f"ref-{order}.png", "image/png"), order, role)
+        for order, (body, role) in enumerate(bodies_roles)
+    ]
+    fields = {
+        "mode": "image",
+        "model": "gpt-image-2",
+        "provider": "tuzi",
+        "alias": "tuzi-main",
+        "final_prompt": "一只红色的猫",
+        "draft_prompt": None,
+        "params": {"size": "1024x1024", "quality": "high", "steps": 30},
+        "inputs": inputs,
+        "cost_cny": 0.21,
+        "cost_basis": "actual",
+        "submitted_at": "2026-09-23T00:00:00Z",
+    }
+    snapshot = GenerationRecipe(**{**fields, **recipe_overrides})
+    return create_generation_asset(title="红猫", tags=[], media=media, snapshot=snapshot)
+
+
+def _reproduce(project_id: str, asset_id: str, **overrides) -> CanvasReproduceResponse:
+    arguments = {
+        "project_id": project_id,
+        "asset_id": asset_id,
+        "position": CanvasPoint(x=100, y=200),
+        "alias": "tuzi-main",
+        "model": "gpt-image-2",
+        "document_revision": read_canvas_document(project_id).revision,
+    }
+    return reproduce_generation_asset_into_canvas(**{**arguments, **overrides})
+
+
+def _config(document):
+    return next(node for node in document.nodes if node.type == "config")
+
+
+def test_image_recipe_builds_inputs_config_and_ordered_connections():
+    project = create_canvas_project("复刻")
+    asset = _asset([(_REF_A, "reference"), (_REF_B, "reference")])
+
+    document = _reproduce(project.project_id, asset.asset_id)
+
+    assert isinstance(document, CanvasReproduceResponse)
+    assert document.warnings == []
+    assert document.revision == 1
+    images = [node for node in document.nodes if node.type == "image"]
+    config = _config(document)
+    assert len(images) == 2 and len(document.nodes) == 3
+    assert [(edge.source_node_id, edge.target_node_id, edge.slot) for edge in document.connections] == [
+        (images[0].id, config.id, None),
+        (images[1].id, config.id, None),
+    ]
+    for node, body in zip(images, (_REF_A, _REF_B), strict=True):
+        version = document.content_versions[node.data.current_version_id]
+        assert version.origin.kind == "creation_asset_snapshot"
+        assert version.origin.title == "红猫"
+        assert version.path.startswith("uploads/")
+        assert (canvas_project_dir(project.project_id) / version.path).read_bytes() == body
+    widths = [document.content_versions[node.data.current_version_id].width for node in images]
+    assert widths == [4, 2]
+
+    draft = config.data.draft
+    assert draft.mode == "image"
+    assert draft.prompt == "一只红色的猫"
+    assert draft.model == "gpt-image-2" and draft.alias == "tuzi-main"
+    params = draft.params.model_dump(exclude_none=True)
+    assert params == {
+        "size": "1024x1024", "quality": "high", "creation_asset_source_title": "红猫",
+    }
+
+    sources = canvas_input_sources(document, config, draft)
+    assert [node_id for _, node_id in sources] == [images[0].id, images[1].id]
+
+    # 输入节点在配置节点左侧纵向排开，互不重叠
+    assert all(node.position.x < config.position.x for node in images)
+    assert images[0].position.x == images[1].position.x
+    assert images[0].position.y < images[1].position.y
+    assert config.position.y == 200
+
+
+def test_reproduce_marks_asset_used_in_the_canvas_project():
+    project = create_canvas_project("复刻")
+    asset = _asset([(_REF_A, "reference")])
+
+    _reproduce(project.project_id, asset.asset_id)
+
+    used = get_creation_asset(asset.asset_id)
+    assert used.last_used_at is not None
+    assert project.project_id in used.project_ids
+
+
+def test_video_firstlast_recipe_connects_first_and_last_frame_slots():
+    project = create_canvas_project("复刻")
+    asset = _asset(
+        [(_REF_A, "reference"), (_REF_B, "reference")],
+        mode="video",
+        model="doubao-seedance-1-0-pro",
+        params={"duration": 5, "ratio": "16:9", "frame_mode": "firstlast", "size": "1280x720"},
+    )
+
+    document = _reproduce(project.project_id, asset.asset_id, model="doubao-seedance-1-0-pro")
+
+    images = [node for node in document.nodes if node.type == "image"]
+    config = _config(document)
+    assert [(edge.source_node_id, edge.slot) for edge in document.connections] == [
+        (images[0].id, "first_frame"),
+        (images[1].id, "last_frame"),
+    ]
+    draft = config.data.draft
+    assert draft.mode == "video"
+    assert draft.params.model_dump(exclude_none=True) == {
+        "duration": 5, "ratio": "16:9", "frame_mode": "firstlast",
+        "creation_asset_source_title": "红猫",
+    }
+    assert canvas_input_sources(document, config, draft) == [
+        ("first_frame", images[0].id),
+        ("last_frame", images[1].id),
+    ]
+
+
+def test_video_last_frame_recipe_uses_the_last_frame_slot():
+    project = create_canvas_project("复刻")
+    asset = _asset(
+        [(_REF_A, "reference")],
+        mode="video", model="doubao-seedance-1-0-pro", params={"frame_mode": "last"},
+    )
+
+    document = _reproduce(project.project_id, asset.asset_id)
+
+    assert [edge.slot for edge in document.connections] == ["last_frame"]
+
+
+def test_video_recipe_without_frame_mode_uses_plain_input_connections():
+    project = create_canvas_project("复刻")
+    asset = _asset(
+        [(_REF_A, "reference")],
+        mode="video", model="doubao-seedance-1-0-pro", params={"frame_mode": "auto"},
+    )
+
+    document = _reproduce(project.project_id, asset.asset_id)
+
+    assert [edge.slot for edge in document.connections] == [None]
+
+
+def test_mask_and_mj_inputs_are_skipped_with_warnings():
+    project = create_canvas_project("复刻")
+    asset = _asset([(_REF_A, "reference"), (_MASK, "mask"), (_SREF, "mj_sref")])
+
+    document = _reproduce(project.project_id, asset.asset_id)
+
+    assert len([node for node in document.nodes if node.type == "image"]) == 1
+    assert len(document.connections) == 1
+    assert len(document.warnings) == 2
+    assert any("蒙版" in warning for warning in document.warnings)
+    assert any("Midjourney" in warning for warning in document.warnings)
+    assert len(document.content_versions) == 1
+
+
+def test_missing_local_model_leaves_the_config_model_empty():
+    project = create_canvas_project("复刻")
+    asset = _asset([(_REF_A, "reference")])
+
+    document = _reproduce(project.project_id, asset.asset_id, model=None, alias=None)
+
+    draft = _config(document).data.draft
+    assert draft.model == ""
+    assert draft.alias is None
+
+
+def test_canvas_run_prompt_prefix_is_not_duplicated():
+    project = create_canvas_project("复刻")
+    asset = _asset(
+        [(_REF_A, "reference")],
+        final_prompt="参考素材编号：图片1。请按这些编号理解提示词中的引用。\n\n图片1 里的猫",
+    )
+
+    document = _reproduce(project.project_id, asset.asset_id)
+
+    assert _config(document).data.draft.prompt == "图片1 里的猫"
+
+
+def test_revision_mismatch_is_a_conflict_and_writes_nothing():
+    project = create_canvas_project("复刻")
+    asset = _asset([(_REF_A, "reference")])
+
+    with pytest.raises(RuntimeError, match="revision_conflict:0"):
+        _reproduce(project.project_id, asset.asset_id, document_revision=3)
+
+    assert read_canvas_document(project.project_id).nodes == []
+    assert list((canvas_project_dir(project.project_id) / "uploads").iterdir()) == []
+
+
+def test_non_generation_asset_is_rejected():
+    project = create_canvas_project("复刻")
+    media = create_media_asset_from_bytes(
+        title="图", body=_REF_A, filename="a.png", mime_type="image/png", tags=[],
+    )
+
+    with pytest.raises(ValueError):
+        _reproduce(project.project_id, media.asset_id)
+
+
+def test_stored_document_has_no_warnings_and_round_trips_through_save():
+    project = create_canvas_project("复刻")
+    asset = _asset([(_REF_A, "reference"), (_MASK, "mask")])
+    reproduced = _reproduce(project.project_id, asset.asset_id)
+
+    stored = read_canvas_document(project.project_id)
+    assert "warnings" not in stored.model_dump()
+    assert stored.model_dump() == reproduced.model_dump(exclude={"warnings"})
+
+    saved = save_canvas_document(project.project_id, stored, stored.revision)
+    assert saved.model_dump(exclude={"updated_at"}) == stored.model_dump(exclude={"updated_at"})
