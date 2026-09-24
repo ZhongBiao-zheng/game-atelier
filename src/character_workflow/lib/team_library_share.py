@@ -1,7 +1,8 @@
-"""分享：把 Studio 结果与创作资产写进团队库作者自己的目录。
+"""分享：把 Studio 结果、画布结果与创作资产写进团队库作者自己的目录。
 
 只写 `shared/<author_dir_name(author)>/<asset_id>/`，别人的目录永远不碰（ADR-0020）。
 新资产先在同级 `.tmp-<asset_id>/` 写完再整体改名；索引跳过点目录，读不到半成品。
+Studio / 画布结果的配方来源（R6、参考路径闸门、参数白名单、按内容定类型）在 generation_recipe。
 """
 from __future__ import annotations
 
@@ -13,32 +14,36 @@ import re
 import shutil
 import unicodedata
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.creation_assets import (
     _normalize_tags,
     _required_text,
     blob_path_for,
     get_creation_asset,
-    sniff_media_mime,
 )
-from character_workflow.lib.jobs import read_job
+from character_workflow.lib.generation_recipe import (
+    RecipeSource,
+    RecipeSourceError,
+    RecipeSourceNotFound,
+    media_mime,
+    recipe_from_canvas_result,
+    recipe_from_job_output,
+    recipe_params,
+)
 from character_workflow.lib.schemas import (
     MEDIA_SUFFIXES,
     TEAM_ASSET_ID_PATTERN,
     CreationAsset,
     CreationMediaAssetContent,
-    Job,
-    JobKind,
-    JobParams,
-    JobStatus,
+    GenerationRecipe,
     RecipeInputRole,
     TeamAssetAuthor,
     TeamAssetFile,
@@ -58,36 +63,6 @@ LARGE_REFS_BYTES = 200 * 1024 * 1024
 THUMB_MAX_EDGE = 512
 AUTHOR_DIR_MAX = 60
 
-# 快照 params 不带的字段：本机路径（参考本体已进 refs/）、费用（进 cost_cny）、
-# 运行后由 caller / runner 回写的状态、指回本机对象的来源记录。
-RECIPE_PARAM_EXCLUDE = frozenset({
-    # 本机文件路径
-    "reference_images", "reference_videos", "reference_audios", "mask_image",
-    "mj_sref", "mj_cref", "mj_oref", "archived_from_path",
-    # 费用
-    "estimated_cost_cny", "actual_cost_cny",
-    # 运行后回写
-    "warnings", "requested_size", "actual_size", "provider_task_protocol",
-    "provider_task_ids", "layer_decomposition_result", "mj_flags",
-    # 本机来源记录
-    "creation_asset_source_title", "archived_from_job_id",
-})
-# 白名单：JobParams 声明过的字段去掉上面的排除项，再放行前端可编辑的 seed。
-# JobParams 是 extra="allow"，浏览器能塞任意键（含路径）：未声明的额外键一律不进快照。
-RECIPE_PARAM_ALLOW = frozenset(set(JobParams.model_fields) - RECIPE_PARAM_EXCLUDE) | {"seed"}
-
-# 参考在快照里的顺序（order 全局递增）；首尾帧靠 params.frame_mode 解释 reference_images 顺序。
-_JOB_REF_FIELDS: tuple[tuple[str, RecipeInputRole], ...] = (
-    ("reference_images", "reference"),
-    ("reference_videos", "reference"),
-    ("reference_audios", "reference"),
-    ("mask_image", "mask"),
-    ("mj_sref", "mj_sref"),
-    ("mj_cref", "mj_cref"),
-    ("mj_oref", "mj_oref"),
-)
-_SHAREABLE_STATUSES = frozenset({JobStatus.DONE, JobStatus.PARTIAL})
-_SHAREABLE_KINDS = frozenset({JobKind.IMAGE, JobKind.VIDEO})
 _SUFFIX_MIMES = {suffix: mime for mime, suffix in MEDIA_SUFFIXES.items()} | {".jpeg": "image/jpeg"}
 _RESERVED_NAMES = frozenset({"asset.json", "thumb.webp", "refs"})
 _UNSAFE_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -100,7 +75,6 @@ _FILENAME_MAX_BYTES = 255
 _SUFFIX_MAX_BYTES = 16
 _AUTHOR_UNSAFE_CHARS = re.compile(r"[^\w-]")
 _COPY_CHUNK = 1024 * 1024
-_SNIFF_HEAD_BYTES = 64
 
 
 class TeamShareError(ValueError):
@@ -177,45 +151,20 @@ def _typed_filename(name: str, mime_type: str) -> str:
     return f"{stem}{MEDIA_SUFFIXES[mime_type]}"
 
 
+@contextmanager
+def _share_errors() -> Iterator[None]:
+    """配方来源的错误映射成分享原有的错误类型（路由按它们定状态码）。"""
+    try:
+        yield
+    except RecipeSourceNotFound as error:
+        raise TeamShareNotFound(*error.args) from error
+    except RecipeSourceError as error:
+        raise TeamShareError(error.code, str(error)) from error
+
+
 def _mime_for(path: Path) -> str:
-    """按文件头定类型，嗅不出才信后缀：本机 .png 实为 JPEG 的产物很多（Ark 默认出 jpeg），
-    按后缀写进 asset.json 会让采用侧的内容校验把整条资产拒掉。"""
-    suffix_mime = _SUFFIX_MIMES.get(path.suffix.lower())
-    try:
-        with path.open("rb") as handle:
-            head = handle.read(_SNIFF_HEAD_BYTES)
-    except FileNotFoundError as error:
-        raise TeamShareError("source_missing", f"本机找不到文件：{path.name}") from error
-    mime = sniff_media_mime(head, suffix_mime) or suffix_mime
-    if mime is None:
-        raise TeamShareError("not_shareable", f"不支持分享这种文件格式：{path.suffix or '无扩展名'}")
-    if mime not in MEDIA_SUFFIXES:
-        raise TeamShareError("not_shareable", f"不支持分享这种文件格式：{mime}")
-    return mime
-
-
-def _local_file(value: str) -> Path:
-    """job 里登记的参考路径：绝对路径或数据根相对路径。
-
-    浏览器能经 POST /api/prompt/{job_id} 整体替换 params，所以这是最后一道闸：resolve 后
-    （symlink 已展开）必须在数据根内，不能在 .config/ 下，.runtime/ 下只认 uploads/。
-    """
-    if value.startswith(("http://", "https://")):
-        raise TeamShareError("not_shareable", "网络地址的参考无法打包进团队库")
-    root = data_root.resolve_data_root().resolve()
-    raw = Path(value)
-    path = (raw if raw.is_absolute() else root / raw).resolve()
-    try:
-        parts = path.relative_to(root).parts
-    except ValueError as error:
-        raise TeamShareError("not_shareable", "参考文件不在数据目录内") from error
-    if not parts or parts[0] == ".config" or (
-        parts[0] == ".runtime" and (len(parts) < 3 or parts[1] != "uploads")
-    ):
-        raise TeamShareError("not_shareable", "参考文件不在允许分享的目录内")
-    if not path.is_file():
-        raise TeamShareError("source_missing", f"本机找不到文件：{path.name}")
-    return path
+    with _share_errors():
+        return media_mime(path)
 
 
 def _copy_hashed(source: Path, folder: Path, name_for: Callable[[str], str]) -> tuple[str, int, str]:
@@ -312,10 +261,6 @@ def _stage_input(
     )
 
 
-def _recipe_params(params: dict[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in params.items() if k in RECIPE_PARAM_ALLOW and v is not None}
-
-
 def _validated_author(author: str) -> TeamAssetAuthor:
     return TeamAssetAuthor(display_name=_required_text(author, "显示名"))
 
@@ -330,55 +275,63 @@ def validate_share_meta(
     return request.title, request.tags, _validated_author(author)
 
 
-# ------------------------------------------------------------------ job_output
+# ------------------------------------------------------------- 生成结果（配方）
 
 
-def _read_studio_job(job_id: str) -> Job:
-    if Path(job_id).name != job_id or job_id.startswith("."):
-        raise TeamShareNotFound(job_id)
-    try:
-        return read_job(job_id)
-    except FileNotFoundError as error:
-        raise TeamShareNotFound(job_id) from error
+def _generation_stage(
+    media_path: Path,
+    media_filename: str,
+    recipe: GenerationRecipe,
+    input_paths: list[Path],
+    allow_large: bool,
+) -> Callable[[Path], dict[str, Any]]:
+    """读源、定类型、查总量都在建临时目录之前做完；返回「把成片与参考拷进资产目录并给出
+    asset.json 的 media / snapshot」的函数。参考的 sha 取拷进库的那份字节。"""
+    output_mime = _mime_for(media_path)
+    ref_mimes = [_mime_for(path) for path in input_paths]
+    _check_refs_size(input_paths, allow_large)
+
+    def stage(folder: Path) -> dict[str, Any]:
+        media = _stage_media(media_path, output_mime, media_filename, folder)
+        inputs = [
+            _stage_input(path, row.order, row.role, mime, folder)
+            for row, path, mime in zip(recipe.inputs, input_paths, ref_mimes, strict=True)
+        ]
+        snapshot = TeamGenerationSnapshot.model_validate({
+            **recipe.model_dump(mode="json", exclude={"inputs", "params"}),
+            "params": recipe_params(recipe.params),
+            "inputs": [row.model_dump(mode="json") for row in inputs],
+        })
+        return {"kind": "generation", "media": media, "snapshot": snapshot}
+
+    return stage
 
 
-def _job_output(job: Job, output_index: int) -> Path:
-    if job.namespace != "studio":
-        raise TeamShareError("not_shareable", "只有 Studio 记录可以分享")
-    if job.status not in _SHAREABLE_STATUSES:
-        raise TeamShareError("not_shareable", "只有已完成的记录可以分享")
-    if job.kind not in _SHAREABLE_KINDS:
-        raise TeamShareError("not_shareable", "只有图片与视频结果可以分享")
-    if not 0 <= output_index < len(job.output_paths):
-        raise TeamShareError("not_shareable", "这条记录没有这张结果")
-    root = data_root.resolve_data_root().resolve()
-    raw = Path(job.output_paths[output_index])
-    path = (raw if raw.is_absolute() else root / raw).resolve()
-    studio_dir = (root / "studio" / job.job_id).resolve()
-    if path.parent != studio_dir:
-        raise TeamShareError("not_shareable", "Studio 记录的产物路径不在自己的输出目录")
-    if not path.is_file():
-        raise TeamShareError("source_missing", f"本机找不到结果文件：{path.name}")
-    return path
+def _share_recipe_source(
+    mount: TeamLibraryMount,
+    source: RecipeSource,
+    *,
+    title: str,
+    tags: list[str],
+    author: TeamAssetAuthor,
+    allow_large: bool,
+) -> TeamAssetFile:
+    payload_for = _generation_stage(
+        source.media_path, source.media_filename, source.recipe, source.input_paths, allow_large
+    )
+    origin = TeamAssetOrigin(
+        job_id=source.origin_job_id, canvas_project_id=source.origin_canvas_project_id
+    )
 
+    def stage(asset_id: str, folder: Path) -> TeamAssetFile:
+        payload = payload_for(folder)
+        timestamp = _now()
+        return TeamAssetFile(
+            asset_id=asset_id, title=title, tags=tags, author=author, shared_at=timestamp,
+            updated_at=timestamp, origin=origin, **payload,
+        )
 
-def _job_refs(job: Job) -> list[tuple[RecipeInputRole, Path, str]]:
-    refs: list[tuple[RecipeInputRole, Path, str]] = []
-    for field, role in _JOB_REF_FIELDS:
-        value = getattr(job.params, field)
-        values = [value] if isinstance(value, str) else list(value or [])
-        for item in values:
-            path = _local_file(item)
-            refs.append((role, path, _mime_for(path)))
-    return refs
-
-
-def _job_cost(job: Job) -> tuple[float | None, str | None]:
-    if job.params.actual_cost_cny is not None:
-        return job.params.actual_cost_cny, "actual"
-    if job.params.estimated_cost_cny is not None:
-        return job.params.estimated_cost_cny, "estimated"
-    return None, None
+    return _write_new_asset(mount, author.display_name, stage)
 
 
 def share_job_output(
@@ -392,34 +345,32 @@ def share_job_output(
     allow_large: bool = False,
 ) -> TeamAssetFile:
     clean_title, clean_tags, team_author = validate_share_meta(title, tags, author)
-    job = _read_studio_job(job_id)
-    output = _job_output(job, output_index)
-    output_mime = _mime_for(output)
-    refs = _job_refs(job)
-    _check_refs_size([path for _, path, _ in refs], allow_large)
-    cost_cny, cost_basis = _job_cost(job)
+    with _share_errors():
+        source = recipe_from_job_output(job_id, output_index)
+    return _share_recipe_source(
+        mount, source, title=clean_title, tags=clean_tags, author=team_author,
+        allow_large=allow_large,
+    )
 
-    def stage(asset_id: str, folder: Path) -> TeamAssetFile:
-        media = _stage_media(output, output_mime, output.name, folder)
-        inputs = [
-            _stage_input(path, order, role, mime, folder)
-            for order, (role, path, mime) in enumerate(refs)
-        ]
-        snapshot = TeamGenerationSnapshot(
-            mode=job.kind.value, model=job.model, provider=job.provider, alias=job.alias,
-            final_prompt=job.prompt, draft_prompt=None,
-            params=_recipe_params(job.params.model_dump(mode="json", exclude_none=True)),
-            inputs=inputs, cost_cny=cost_cny, cost_basis=cost_basis,
-            submitted_at=job.submitted_at,
-        )
-        timestamp = _now()
-        return TeamAssetFile(
-            asset_id=asset_id, kind="generation", title=clean_title, tags=clean_tags,
-            author=team_author, shared_at=timestamp, updated_at=timestamp, media=media,
-            snapshot=snapshot, origin=TeamAssetOrigin(job_id=job.job_id),
-        )
 
-    return _write_new_asset(mount, team_author.display_name, stage)
+def share_canvas_result(
+    mount: TeamLibraryMount,
+    *,
+    canvas_project_id: str,
+    node_id: str,
+    version_id: str,
+    title: str,
+    tags: list[str],
+    author: str,
+    allow_large: bool = False,
+) -> TeamAssetFile:
+    clean_title, clean_tags, team_author = validate_share_meta(title, tags, author)
+    with _share_errors():
+        source = recipe_from_canvas_result(canvas_project_id, node_id, version_id)
+    return _share_recipe_source(
+        mount, source, title=clean_title, tags=clean_tags, author=team_author,
+        allow_large=allow_large,
+    )
 
 
 # ------------------------------------------------------------ creation_asset
@@ -445,8 +396,6 @@ def _creation_stage(asset: CreationAsset, allow_large: bool) -> Callable[[Path],
             "kind": "media",
             "media": _stage_media(source, source_mime, content.filename, folder),
         }
-    output = _blob_file(content.media)
-    output_mime = _mime_for(output)
     recipe = content.snapshot
     ref_paths = []
     for row in recipe.inputs:
@@ -454,23 +403,9 @@ def _creation_stage(asset: CreationAsset, allow_large: bool) -> Callable[[Path],
         if not path.is_file():
             raise TeamShareError("source_missing", f"本机找不到第 {row.order + 1} 份参考")
         ref_paths.append(path)
-    ref_mimes = [_mime_for(path) for path in ref_paths]
-    _check_refs_size(ref_paths, allow_large)
-
-    def stage(folder: Path) -> dict[str, Any]:
-        media = _stage_media(output, output_mime, content.media.filename, folder)
-        inputs = [
-            _stage_input(path, row.order, row.role, mime, folder)
-            for row, path, mime in zip(recipe.inputs, ref_paths, ref_mimes)
-        ]
-        snapshot = TeamGenerationSnapshot.model_validate({
-            **recipe.model_dump(mode="json", exclude={"inputs", "params"}),
-            "params": _recipe_params(recipe.params),
-            "inputs": [row.model_dump(mode="json") for row in inputs],
-        })
-        return {"kind": "generation", "media": media, "snapshot": snapshot}
-
-    return stage
+    return _generation_stage(
+        _blob_file(content.media), content.media.filename, recipe, ref_paths, allow_large
+    )
 
 
 def share_creation_asset(

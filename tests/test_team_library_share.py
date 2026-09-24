@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from character_workflow.lib import generation_recipe
 from character_workflow.lib import team_library_share as share
 from character_workflow.lib.creation_assets import (
     blob_path_for,
@@ -20,6 +21,7 @@ from character_workflow.lib.creation_assets import (
     creation_asset_input_path,
     store_media_blob,
 )
+from character_workflow.lib.generation_recipe import RECIPE_PARAM_ALLOW, RECIPE_PARAM_EXCLUDE
 from character_workflow.lib.jobs import new_job_id, save_job
 from character_workflow.lib.schemas import (
     TEAM_RECIPE_INPUT_PATH_PATTERN,
@@ -36,12 +38,12 @@ from character_workflow.lib.studio_jobs import studio_output_dir
 from character_workflow.lib.team_library_adopt import adopt_team_asset
 from character_workflow.lib.team_library_index import scan_library
 from character_workflow.lib.team_library_share import (
-    RECIPE_PARAM_EXCLUDE,
     TeamShareError,
     TeamShareForbidden,
     TeamShareNotFound,
     TeamShareTooLarge,
     author_dir_name,
+    share_canvas_result,
     share_creation_asset,
     share_job_output,
     update_shared_asset,
@@ -725,7 +727,7 @@ def test_unknown_param_keys_never_reach_snapshot(isolated_data_root, mount):
         mount, job_id=job.job_id, output_index=0, title="t", tags=[], author=_AUTHOR
     )
     assert written.snapshot.params == {"size": "1024x1024", "seed": 42, "mj_sw": 100}
-    assert share.RECIPE_PARAM_ALLOW.isdisjoint(RECIPE_PARAM_EXCLUDE)
+    assert RECIPE_PARAM_ALLOW.isdisjoint(RECIPE_PARAM_EXCLUDE)
 
 
 def test_generation_asset_share_drops_unknown_param_keys(isolated_data_root, mount):
@@ -1024,7 +1026,9 @@ def test_mime_for_unsniffable_unknown_suffix_is_not_shareable(tmp_path, name):
 def test_mime_for_rejects_sniffed_type_outside_media_suffixes(tmp_path, monkeypatch):
     path = tmp_path / "a.png"
     path.write_bytes(_png((2, 2, 2)))
-    monkeypatch.setattr(share, "sniff_media_mime", lambda _head, _declared=None: "image/bmp")
+    monkeypatch.setattr(
+        generation_recipe, "sniff_media_mime", lambda _head, _declared=None: "image/bmp"
+    )
     with pytest.raises(TeamShareError) as caught:
         share._mime_for(path)
     assert caught.value.code == "not_shareable"
@@ -1048,3 +1052,91 @@ def test_mime_for_real_type_ignores_misleading_suffix_even_when_unsupported(tmp_
 )
 def test_typed_filename_keeps_stem_and_follows_real_type(name, mime, expected):
     assert share._typed_filename(name, mime) == expected
+
+
+# ------------------------------------------------------------ canvas_result
+
+
+def test_share_canvas_result_writes_p2_layout_with_canvas_origin(isolated_data_root, mount):
+    from tests.test_generation_recipe import canvas_run_with_inputs, result_version
+
+    ref_a, ref_b, output = _png((5, 0, 0)), _image((0, 5, 0), "JPEG"), _png((0, 0, 5))
+    pid, job, _document = canvas_run_with_inputs(ref_a, ref_b, output)
+    node_id, version_id = result_version(job)
+
+    written = share_canvas_result(
+        mount, canvas_project_id=pid, node_id=node_id, version_id=version_id,
+        title=" 纸雕狐狸 ", tags=["狐"], author=_AUTHOR,
+    )
+
+    folder = _asset_dir(mount, written.asset_id)
+    parsed = _read_asset(mount, written.asset_id)
+    assert parsed == written
+    assert parsed.kind == "generation" and parsed.title == "纸雕狐狸"
+    assert parsed.origin is not None
+    assert parsed.origin.canvas_project_id == pid and parsed.origin.job_id == job.job_id
+    assert parsed.media is not None and parsed.media.sha256 == _sha(output)
+    assert (folder / parsed.media.filename).read_bytes() == output
+    snapshot = parsed.snapshot
+    assert snapshot is not None and snapshot.model == "gpt-image-1"
+    assert snapshot.final_prompt.startswith("一只纸雕狐狸")
+    assert "参考素材编号" not in snapshot.final_prompt
+    assert "creation_asset_source_title" not in snapshot.params
+    assert [(r.order, r.role, r.sha256) for r in snapshot.inputs] == [
+        (0, "reference", _sha(ref_a)), (1, "reference", _sha(ref_b)),
+    ]
+    for row in snapshot.inputs:
+        assert re.fullmatch(TEAM_RECIPE_INPUT_PATH_PATTERN, row.path)
+        assert _sha((folder / row.path).read_bytes()) == row.sha256
+    assert sorted(p.name for p in folder.iterdir()) == sorted(
+        [parsed.media.filename, "asset.json", "refs", "thumb.webp"]
+    )
+    raw = json.loads((folder / "asset.json").read_text(encoding="utf-8"))
+    assert raw["origin"] == {"job_id": job.job_id, "canvas_project_id": pid}
+
+    entry = _index_entry(mount, written.asset_id)
+    assert entry.status == "ready" and entry.kind == "generation"
+
+
+def test_share_canvas_result_maps_recipe_errors(isolated_data_root, mount):
+    from tests.test_generation_recipe import canvas_run_with_inputs, result_version
+
+    pid, job, document = canvas_run_with_inputs(_png((6, 0, 0)), _png((0, 6, 0)), _png((0, 0, 6)))
+    node_id, version_id = result_version(job)
+    upload_version = next(n for n in document.nodes if n.id == "image-a").data.current_version_id
+
+    with pytest.raises(TeamShareError) as caught:
+        share_canvas_result(
+            mount, canvas_project_id=pid, node_id="image-a", version_id=upload_version,
+            title="t", tags=[], author=_AUTHOR,
+        )
+    assert caught.value.code == "not_shareable"
+    with pytest.raises(TeamShareNotFound):
+        share_canvas_result(
+            mount, canvas_project_id=pid, node_id="image-a", version_id=version_id,
+            title="t", tags=[], author=_AUTHOR,
+        )
+    with pytest.raises(ValueError):
+        share_canvas_result(
+            mount, canvas_project_id=pid, node_id=node_id, version_id=version_id,
+            title="  ", tags=[], author=_AUTHOR,
+        )
+    assert not (Path(mount.mount_path) / "shared").exists()
+
+
+def test_share_canvas_result_large_refs_need_allow_large(isolated_data_root, mount, monkeypatch):
+    from tests.test_generation_recipe import canvas_run_with_inputs, result_version
+
+    pid, job, _document = canvas_run_with_inputs(_png((7, 0, 0)), _png((0, 7, 0)), _png((0, 0, 7)))
+    node_id, version_id = result_version(job)
+    monkeypatch.setattr(share, "LARGE_REFS_BYTES", 1)
+    with pytest.raises(TeamShareTooLarge):
+        share_canvas_result(
+            mount, canvas_project_id=pid, node_id=node_id, version_id=version_id,
+            title="t", tags=[], author=_AUTHOR,
+        )
+    written = share_canvas_result(
+        mount, canvas_project_id=pid, node_id=node_id, version_id=version_id,
+        title="t", tags=[], author=_AUTHOR, allow_large=True,
+    )
+    assert len(written.snapshot.inputs) == 2
