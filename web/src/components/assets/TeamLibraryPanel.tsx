@@ -64,6 +64,8 @@ export interface TeamLibraryPanelProps {
   onReproduce?: (asset: CreationAsset) => void;
   /** 有值时顶部「相关配方」改为参考内容命中这份 sha256 的配方。 */
   relatedSha256?: string | null;
+  /** 初始选中的库（「看看」定位到提醒里的库）；不在本画布的挂载列表里就忽略。 */
+  initialTeamLibraryId?: string | null;
   className?: string;
 }
 
@@ -138,6 +140,7 @@ export function TeamLibraryPanel({
   onOpenSettings,
   onReproduce,
   relatedSha256,
+  initialTeamLibraryId,
   className,
 }: TeamLibraryPanelProps) {
   const [libraries, setLibraries] = useState<TeamLibraryView[]>([]);
@@ -177,15 +180,16 @@ export function TeamLibraryPanel({
       .then(list => {
         if (!alive) return;
         setLibraries(list);
+        // 已选的库还在就留着；否则先落到调用方指定的库，再退回第一个。
         setLibraryId(current =>
-          current && list.some(item => item.library_id === current)
-            ? current
-            : list[0]?.library_id ?? null,
+          [current, initialTeamLibraryId].find(id => id && list.some(item => item.library_id === id))
+            ?? list[0]?.library_id
+            ?? null,
         );
       })
       .catch(() => { if (alive) setLibraries([]); });
     return () => { alive = false; };
-  }, [projectId]);
+  }, [projectId, initialTeamLibraryId]);
 
   // 显示名决定哪些卡是「我分享的」：只有作者本人能编辑 / 撤回。
   useEffect(() => {

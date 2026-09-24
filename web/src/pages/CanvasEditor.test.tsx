@@ -2309,6 +2309,20 @@ it('opens the team tab for a reminder «look» action', async () => {
   await waitFor(() => expect(screen.getByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true'));
 });
 
+it('opens the reminder «look» action on the library it came from', async () => {
+  vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
+  const view = (library_id: string, name: string) => ({
+    library_id, project_id: 'canvas-one', name, mount_path: '/x', mounted_at: '', reachable: true, asset_count: 0, scanned_at: null,
+  });
+  vi.mocked(listTeamLibraries).mockResolvedValue([view('lib_other', '场景参考'), view('lib_0123456789abcdef', '角色参考')]);
+  vi.mocked(listTeamAssets).mockResolvedValue({ entries: [], next_cursor: null });
+  await renderReadyCanvas();
+  act(() => {
+    dispatchTeamAssetAction({ library_id: 'lib_0123456789abcdef', asset_id: 'ta-raw', action: 'open' });
+  });
+  await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveValue('lib_0123456789abcdef'));
+});
+
 it('does not look up related recipes when inserting the dropped asset fails', async () => {
   vi.mocked(adoptTeamAsset).mockResolvedValue({
     asset: {

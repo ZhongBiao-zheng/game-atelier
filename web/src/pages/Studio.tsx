@@ -39,9 +39,9 @@ import { readStudioDraft, writeStudioDraft } from './studioDraft';
 import { clampImageCount, configForJob, isOmniVideoConfig, referencePathCounts } from './studioJobConfig';
 import { routeStudioMediaAsset } from './studioAssetRouting';
 import { recipeToDraft } from './studioRecipe';
-import { creationAssetInputUrl, creationAssetMediaUrl } from '@/api/creationAssets';
+import { creationAssetInputUrl, creationAssetMediaUrl, markCreationAssetUsed } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
-import { adoptTeamAsset } from '@/api/teamLibraries';
+import { adoptTeamAsset, listTeamLibraries } from '@/api/teamLibraries';
 import { TEAM_ASSET_ACTION_EVENT, teamAssetActionFromSearch, type TeamAssetAction } from '@/lib/teamAssetActions';
 import type { CreationAsset, CreationMediaAssetContent, RecipeInput } from '@/schema/creationAssets';
 import type { CanvasProject } from '@/schema/canvas';
@@ -167,6 +167,8 @@ function StudioFull() {
   const [assetPanelKind, setAssetPanelKind] = useState<CreationAssetPanelMode>('prompt');
   // 面板只在挂载与 initialKind 变化时同步栏位；「看看」要确定落在团队栏，就换 key 重新挂载。
   const [assetPanelMount, setAssetPanelMount] = useState(0);
+  // 「看看」定位：团队栏初始落在挂着该库的画布与该库上。
+  const [teamPanelTarget, setTeamPanelTarget] = useState<{ projectId: string; libraryId: string } | null>(null);
   const [assetSaveRequest, setAssetSaveRequest] = useState<CreationAssetSaveRequest | null>(null);
   const assetPanelRef = useRef<CreationAssetPanelHandle>(null);
   const [canvasTargets, setCanvasTargets] = useState<CanvasProject[]>([]);
@@ -334,7 +336,14 @@ function StudioFull() {
 
   // 分享提醒的「复刻」/「看看」：本页在就地认领；别的页面带着 ?team_asset= 跳过来，挂载后处理一次。
   const teamAssetActionRef = useRef<(action: TeamAssetAction) => void>(() => {});
-  useEffect(() => { teamAssetActionRef.current = handleTeamAssetAction; });
+  // 采用 / 记使用是异步的：回来时要用最新一帧的 requestReproduce（keys 可能在等待期间加载完）。
+  const requestReproduceRef = useRef<(asset: CreationAsset) => void>(() => {});
+  // keys 未加载时的复刻先记在这里，加载完由下面的 effect 补做。
+  const pendingReproduceRef = useRef<CreationAsset | null>(null);
+  useEffect(() => {
+    teamAssetActionRef.current = handleTeamAssetAction;
+    requestReproduceRef.current = requestReproduce;
+  });
   useEffect(() => {
     const listener = (event: Event) => {
       const action = (event as CustomEvent<TeamAssetAction | undefined>).detail;
@@ -345,10 +354,16 @@ function StudioFull() {
     window.addEventListener(TEAM_ASSET_ACTION_EVENT, listener);
     return () => window.removeEventListener(TEAM_ASSET_ACTION_EVENT, listener);
   }, []);
-  // 复刻要先判本机有没有配方模型，所以等 keys 加载完再处理。
+  // 复刻要先判本机有没有配方模型，所以等 keys 加载完再处理：挂起的复刻与 ?team_asset= 都从这里出。
   const teamSearchHandledRef = useRef(false);
   useEffect(() => {
-    if (teamSearchHandledRef.current || !keysLoaded) return;
+    if (!keysLoaded) return;
+    const pendingReproduce = pendingReproduceRef.current;
+    if (pendingReproduce) {
+      pendingReproduceRef.current = null;
+      requestReproduceRef.current(pendingReproduce);
+    }
+    if (teamSearchHandledRef.current) return;
     teamSearchHandledRef.current = true;
     const action = teamAssetActionFromSearch(search);
     if (!action) return;
@@ -973,6 +988,8 @@ function StudioFull() {
           key={assetPanelMount}
           ref={assetPanelRef}
           initialKind={assetPanelKind}
+          initialTeamProjectId={teamPanelTarget?.projectId}
+          initialTeamLibraryId={teamPanelTarget?.libraryId}
           canvasTargets={canvasTargets.map(target => ({
             projectId: target.project_id,
             name: target.name,
@@ -981,7 +998,10 @@ function StudioFull() {
           onSaveRequestHandled={(requestId) => {
             setAssetSaveRequest(current => current?.requestId === requestId ? null : current);
           }}
-          onClose={() => setAssetPanelOpen(false)}
+          onClose={() => {
+            setAssetPanelOpen(false);
+            setTeamPanelTarget(null);
+          }}
           onUsePrompt={(asset, renderedPrompt) => {
             setPromptText(renderedPrompt);
             setPromptAssetSourceTitle(asset.title);
@@ -1051,22 +1071,41 @@ function StudioFull() {
   // 复刻 = 先采用（从库到本机一律是采用；Studio 没有当前画布，不挂项目），再走资产复刻。
   async function handleTeamAssetAction(action: TeamAssetAction) {
     if (action.action === 'open') {
-      await openTeamPanel();
+      await openTeamPanel(action.library_id);
       return;
     }
     try {
       const { asset } = await adoptTeamAsset(action.library_id, action.asset_id);
-      requestReproduce(asset);
+      // 与面板里的「复刻」一致：先记一次使用。
+      requestReproduceRef.current(await markCreationAssetUsed(asset.asset_id));
     } catch (error) {
       setAssetNotice(error instanceof Error ? error.message : '复刻失败');
     }
   }
 
-  // 团队栏挂在画布项目上：先拿到画布列表再挂载面板，否则首帧没有项目会退回提示词栏。
-  async function openTeamPanel() {
-    const projects = await listCanvasProjects(true).catch((): CanvasProject[] => []);
+  // 团队栏挂在画布项目上：先拿到画布列表与挂着该库的画布再挂载面板，否则首帧没有项目会退回提示词栏。
+  async function openTeamPanel(libraryId: string) {
+    let projects: CanvasProject[];
+    let projectId: string | undefined;
+    try {
+      const [canvases, mounts] = await Promise.all([
+        listCanvasProjects(true),
+        listTeamLibraries(),
+      ]);
+      projects = canvases;
+      projectId = mounts.find(mount => mount.library_id === libraryId)?.project_id;
+    } catch (error) {
+      setAssetNotice(error instanceof Error ? error.message : '读取团队库失败');
+      return;
+    }
+    if (!projectId || !projects.some(project => project.project_id === projectId)) {
+      setAssetNotice('没有挂载这个团队库');
+      return;
+    }
+    const target = { projectId, libraryId };
     const show = () => {
       setCanvasTargets(projects);
+      setTeamPanelTarget(target);
       setAssetPanelKind('team');
       setAssetPanelMount(current => current + 1);
       setAssetPanelOpen(true);
@@ -1077,9 +1116,9 @@ function StudioFull() {
 
   // 复刻 = 把生成资产的配方填进当前输入框（同「重新编辑」），不自动提交；已有输入先确认覆盖。
   function requestReproduce(asset: CreationAsset) {
-    // keys 未加载时判不出本机有没有配方模型，不能当成缺模型去填；加载完为空则照常按缺模型填。
+    // keys 未加载时判不出本机有没有配方模型，不能当成缺模型去填：先记下，加载完补做（为空则照常按缺模型填）。
     if (!keysLoaded) {
-      setAssetNotice('模型列表未加载');
+      pendingReproduceRef.current = asset;
       return;
     }
     if (hasEditorInput()) {

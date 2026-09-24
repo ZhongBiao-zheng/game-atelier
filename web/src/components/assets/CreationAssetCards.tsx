@@ -1,7 +1,7 @@
 import { Copy, FileAudio, FileVideo, RefreshCw, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { creationAssetMediaUrl } from '@/api/creationAssets';
+import { mediaUrl } from '@/api/connection';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
@@ -42,10 +42,10 @@ export function AssetCard({ asset, busy, staleness, onOpen, onReproduce, onReado
   );
 }
 
-/** 媒体地址带内容版本：重新采用换了内容后 URL 跟着变，浏览器不会继续显示缓存的旧图。 */
+/** 媒体地址带内容版本：重新采用换了内容后 URL 跟着变，浏览器不会继续显示缓存的旧图。
+ *  走 mediaUrl：托管网站的 `<img>` 带不了会话头，要拼上本机地址与媒体令牌。 */
 export function assetMediaSrc(assetId: string, content: CreationMediaAssetContent): string {
-  const url = creationAssetMediaUrl(assetId);
-  return `${url}${url.includes('?') ? '&' : '?'}v=${content.sha256.slice(0, 12)}`;
+  return mediaUrl(`/api/creation-assets/${encodeURIComponent(assetId)}/content?v=${content.sha256.slice(0, 12)}`);
 }
 
 /** 已入库的媒体：图片直接显示，视频/音频给原生播放器。 */

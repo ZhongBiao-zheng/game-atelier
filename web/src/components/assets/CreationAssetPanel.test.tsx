@@ -99,13 +99,14 @@ vi.mock('@/api/creationAssets', async importOriginal => {
 });
 
 vi.mock('./TeamLibraryPanel', () => ({
-  TeamLibraryPanel: ({ projectId, onOpenSettings, onReproduce, relatedSha256 }: {
+  TeamLibraryPanel: ({ projectId, onOpenSettings, onReproduce, relatedSha256, initialTeamLibraryId }: {
     projectId: string;
     onOpenSettings?: () => void;
     onReproduce?: (asset: CreationAsset) => void;
     relatedSha256?: string | null;
+    initialTeamLibraryId?: string | null;
   }) => (
-    <div data-testid="team-panel" data-project-id={projectId} data-related-sha256={relatedSha256 ?? ''}>
+    <div data-testid="team-panel" data-project-id={projectId} data-related-sha256={relatedSha256 ?? ''} data-library-id={initialTeamLibraryId ?? ''}>
       {onOpenSettings && <button type="button" onClick={onOpenSettings}>挂载</button>}
       {onReproduce && <button type="button" onClick={() => onReproduce(generationAsset)}>团队复刻</button>}
     </div>
@@ -754,6 +755,48 @@ describe('CreationAssetPanel', () => {
       expect(container.querySelector('video')).toBeNull();
       expect(screen.getByRole('img', { name: '媒体资产预览' })).toBeInTheDocument();
     });
+  });
+
+  it('passes the initial team library through to the team panel', async () => {
+    mocks.list.mockResolvedValue({ revision: 1, assets: [] });
+    render(
+      <CreationAssetPanel projectId="canvas-a" initialKind="team" initialTeamLibraryId="lib-art" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />,
+    );
+    expect(await screen.findByTestId('team-panel')).toHaveAttribute('data-library-id', 'lib-art');
+  });
+
+  it('lets Studio start the team tab on the canvas that mounts the library', async () => {
+    mocks.list.mockResolvedValue({ revision: 1, assets: [] });
+    render(
+      <CreationAssetPanel
+        canvasTargets={[{ projectId: 'canvas-a', name: '画布甲' }, { projectId: 'canvas-b', name: '画布乙' }]}
+        initialKind="team"
+        initialTeamProjectId="canvas-b"
+        initialTeamLibraryId="lib-art"
+        onClose={vi.fn()}
+        onUsePrompt={vi.fn()}
+        onUseMedia={vi.fn()}
+      />,
+    );
+    const team = await screen.findByTestId('team-panel');
+    expect(team).toHaveAttribute('data-project-id', 'canvas-b');
+    expect(team).toHaveAttribute('data-library-id', 'lib-art');
+    expect(screen.getByLabelText('画布项目')).toHaveValue('canvas-b');
+  });
+
+  it('falls back to the first canvas when the initial team project is not listed', async () => {
+    mocks.list.mockResolvedValue({ revision: 1, assets: [] });
+    render(
+      <CreationAssetPanel
+        canvasTargets={[{ projectId: 'canvas-a', name: '画布甲' }, { projectId: 'canvas-b', name: '画布乙' }]}
+        initialKind="team"
+        initialTeamProjectId="canvas-gone"
+        onClose={vi.fn()}
+        onUsePrompt={vi.fn()}
+        onUseMedia={vi.fn()}
+      />,
+    );
+    expect(await screen.findByTestId('team-panel')).toHaveAttribute('data-project-id', 'canvas-a');
   });
 
   it('passes the related sha256 through to the team panel', async () => {

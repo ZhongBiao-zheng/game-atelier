@@ -501,6 +501,7 @@ function CanvasEditorInner({
   const [toolNoticeAction, setToolNoticeAction] = useState<CanvasNoticeAction | null>(null);
   const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
   const [teamRelatedSha256, setTeamRelatedSha256] = useState<string | null>(null);
+  const [teamLibraryId, setTeamLibraryId] = useState<string | null>(null);
   const [libraryPanelKey, setLibraryPanelKey] = useState(0);
   const uploadRef = useRef<HTMLInputElement>(null);
   const replaceMediaRef = useRef<HTMLInputElement>(null);
@@ -615,6 +616,7 @@ function CanvasEditorInner({
       : assetLibraryTriggerRef.current;
     setLibraryMode(null);
     setTeamRelatedSha256(null);
+    setTeamLibraryId(null);
     if (!usedPromptAssetRef.current) requestAnimationFrame(() => trigger?.focus());
     usedPromptAssetRef.current = false;
   }, [libraryMode]);
@@ -2095,14 +2097,15 @@ function CanvasEditorInner({
     if (notices.length) announceToolNotice(notices.join('\n'));
   }
 
-  function openTeamPanel(relatedSha256: string | null) {
+  function openTeamPanel(relatedSha256: string | null, libraryId: string | null = null) {
     setAddOpen(false);
     setCreateMenu(null);
     const open = () => {
       setTeamRelatedSha256(relatedSha256);
+      setTeamLibraryId(libraryId);
       setLibraryMode('team');
-      // 已经是团队模式时 initialKind 不变，面板里切走的栏不会回来：换 key 重挂到团队栏。
-      if (libraryMode === 'team') setLibraryPanelKey(current => current + 1);
+      // 面板只在挂载时读初始栏位与初始库：一律换 key 重挂，保证落在团队栏和指定的库上。
+      setLibraryPanelKey(current => current + 1);
     };
     if (libraryMode) creationAssetPanelRef.current?.requestTransition(open);
     else open();
@@ -2128,13 +2131,13 @@ function CanvasEditorInner({
       return;
     }
     if (action.action === 'open') {
-      openTeamPanel(null);
+      openTeamPanel(null, action.library_id);
       return;
     }
     try {
       const result = await adoptTeamAsset(action.library_id, action.asset_id, projectId);
       if (result.asset.kind !== 'generation') {
-        openTeamPanel(null);
+        openTeamPanel(null, action.library_id);
         return;
       }
       await reproduceGenerationAsset(result.asset);
@@ -5043,6 +5046,7 @@ function CanvasEditorInner({
             onTeamAssetAdopted={result => announceToolNotice(result.created ? '已加入资产库' : '已在你的资产库')}
             onReproduce={asset => void reproduceGenerationAsset(asset)}
             teamRelatedSha256={teamRelatedSha256}
+            initialTeamLibraryId={teamLibraryId}
           />
         )}
 

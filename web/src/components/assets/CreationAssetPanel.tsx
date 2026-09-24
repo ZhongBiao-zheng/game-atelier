@@ -118,6 +118,10 @@ export interface CreationAssetPanelProps {
   onReproduce?: (asset: CreationAsset) => void;
   /** 透传给团队栏：有值时「相关配方」按参考 sha256 命中。 */
   teamRelatedSha256?: string | null;
+  /** 团队栏初始选中的库；不在当前画布的挂载列表里就忽略。 */
+  initialTeamLibraryId?: string | null;
+  /** 没有 projectId（Studio）时团队栏初始落在哪个画布；不在 canvasTargets 里就退回第一个。 */
+  initialTeamProjectId?: string | null;
 }
 
 export interface CreationAssetPanelHandle {
@@ -161,6 +165,8 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   onTeamAssetAdopted,
   onReproduce,
   teamRelatedSha256,
+  initialTeamLibraryId,
+  initialTeamProjectId,
 }: CreationAssetPanelProps, ref) {
   const [kind, setKind] = useState<CreationAssetPanelMode>(initialKind);
   const [scope, setScope] = useState<'all' | 'project'>(projectId ? 'project' : 'all');
@@ -290,7 +296,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     () => projectId ? [] : canvasTargets,
     [projectId, canvasTargets],
   );
-  const [pickedTeamProjectId, setPickedTeamProjectId] = useState<string | null>(null);
+  const [pickedTeamProjectId, setPickedTeamProjectId] = useState<string | null>(initialTeamProjectId ?? null);
   const teamProjectId = projectId
     ?? teamProjectChoices.find(target => target.projectId === pickedTeamProjectId)?.projectId
     ?? teamProjectChoices[0]?.projectId;
@@ -660,6 +666,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
               onOpenSettings={onOpenSettings ? () => onOpenSettings(teamProjectId) : undefined}
               onReproduce={onReproduce ? asset => { onReproduce(asset); onClose(); } : undefined}
               relatedSha256={teamRelatedSha256}
+              initialTeamLibraryId={initialTeamLibraryId}
               className="min-h-0 flex-1"
             />
           )}

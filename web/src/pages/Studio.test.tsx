@@ -2580,11 +2580,11 @@ describe('Studio 复刻：边界', () => {
     expect(screen.getByLabelText('提交生成')).toBeDisabled();
   });
 
-  it('模型列表还没加载时不判缺模型，提示后不填', async () => {
+  it('模型列表还没加载时不判缺模型，也先不填', async () => {
     const fetchMock = mockPanelEndpoints('never');
     renderStudio();
     await openPanelAndReproduce(generationAsset(recipe()));
-    expect(await screen.findByText('模型列表未加载')).toBeInTheDocument();
+    await act(async () => { await Promise.resolve(); });
     expect(screen.getByLabelText('生图 prompt').textContent).toBe('');
     expect(screen.queryByText(/本机没有/)).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/inputs/'))).toBe(false);
@@ -2686,19 +2686,29 @@ describe('Studio 生成结果保存为创作资产', () => {
 
 describe('Studio 响应团队资产动作', () => {
   const CANVAS = { schema_version: 2, project_id: 'canvas-1', name: '画布一', created_at: '2026-09-20T00:00:00Z', updated_at: '2026-09-20T00:00:00Z' };
+  const CANVAS_2 = { ...CANVAS, project_id: 'canvas-2', name: '画布二' };
+  const libraryView = (library_id: string, project_id: string, name: string) => ({
+    library_id, project_id, name, mount_path: '/x', mounted_at: '', reachable: true, asset_count: 0, scanned_at: null,
+  });
+  const ok = (body: unknown) => Promise.resolve({ ok: true, status: 200, json: async () => body } as any);
 
-  function mockTeamEndpoints() {
+  /** lib-art 挂在第二个画布上；第二个画布还挂着另一个库，默认会选中它。 */
+  function mockTeamEndpoints(mounts = [libraryView('lib-art', 'canvas-2', '美术库')]) {
     const fetchMock = mockPanelEndpoints();
     const fallback = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
       const href = String(url);
       if (href === '/api/team-libraries/lib-art/assets/ta_1/adopt') {
-        return Promise.resolve({
-          ok: true, status: 200, json: async () => ({ asset: generationAsset(recipe()), created: true }),
-        } as any);
+        return ok({ asset: generationAsset(recipe()), created: true });
       }
-      if (href.startsWith('/api/canvas/project-options')) return Promise.resolve({ ok: true, json: async () => [CANVAS] } as any);
-      if (href.startsWith('/api/team-libraries')) return Promise.resolve({ ok: true, status: 200, json: async () => [] } as any);
+      if (href === '/api/creation-assets/gen-1/use') return ok(generationAsset(recipe()));
+      if (href.startsWith('/api/canvas/project-options')) return ok([CANVAS, CANVAS_2]);
+      if (href === '/api/team-libraries') return ok(mounts);
+      if (href === '/api/team-libraries?project_id=canvas-2') {
+        return ok([libraryView('lib-other', 'canvas-2', '场景库'), libraryView('lib-art', 'canvas-2', '美术库')]);
+      }
+      if (/^\/api\/team-libraries\/[^/]+\/assets(\?|$)/.test(href)) return ok({ entries: [], next_cursor: null });
+      if (href.startsWith('/api/team-libraries')) return ok([]);
       return fallback(url, init);
     });
     return fetchMock;
@@ -2734,6 +2744,64 @@ describe('Studio 响应团队资产动作', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true'));
     expect(screen.getByLabelText('打开创作资产')).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('「看看」：团队栏落在挂载该库的画布和该库上', async () => {
+    mockTeamEndpoints();
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' }); });
+
+    await waitFor(() => expect(screen.getByLabelText('画布项目')).toHaveValue('canvas-2'));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveValue('lib-art'));
+  });
+
+  it('「看看」：没有画布挂着这个库时只给一行提示', async () => {
+    mockTeamEndpoints([libraryView('lib-other', 'canvas-1', '场景库')]);
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' }); });
+
+    expect(await screen.findByText('没有挂载这个团队库')).toBeInTheDocument();
+    expect(screen.getByLabelText('打开创作资产')).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('「复刻」：采用后先记一次使用再填入', async () => {
+    const fetchMock = mockTeamEndpoints();
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'reproduce' }); });
+
+    const editor = screen.getByLabelText('生图 prompt');
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    const used = urls.indexOf('/api/creation-assets/gen-1/use');
+    expect(used).toBeGreaterThan(urls.indexOf('/api/team-libraries/lib-art/assets/ta_1/adopt'));
+    expect(used).toBeLessThan(urls.indexOf('/api/creation-assets/gen-1/inputs/0'));
+  });
+
+  it('「复刻」：模型列表还没加载时先记下，加载完补做', async () => {
+    const fetchMock = mockTeamEndpoints();
+    const withTeam = fetchMock.getMockImplementation()!;
+    let releaseKeys = () => {};
+    const keysGate = new Promise<void>((resolve) => { releaseKeys = resolve; });
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => (
+      String(url) === '/api/keys' ? keysGate.then(() => withTeam(url, init)) : withTeam(url, init)
+    ));
+    renderStudio();
+
+    act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'reproduce' }); });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/creation-assets/gen-1/use')).toBe(true));
+    await act(async () => { await Promise.resolve(); });
+    const editor = screen.getByLabelText('生图 prompt');
+    expect(editor.textContent).toBe('');
+
+    await act(async () => { releaseKeys(); await keysGate; });
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    expect(adoptCalls(fetchMock)).toHaveLength(1);
   });
 
   it('采用失败时给提示，输入框不动', async () => {

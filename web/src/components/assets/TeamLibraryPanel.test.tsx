@@ -63,6 +63,22 @@ describe('TeamLibraryPanel', () => {
     await waitFor(() => expect(onAdopted).toHaveBeenCalledWith({ asset: { asset_id: 'ca' }, created: true }, shared));
     expect(api.adoptTeamAsset).toHaveBeenCalledWith(library.library_id, shared.id, 'p1');
   });
+  it('starts on the requested library when it is mounted here', async () => {
+    const other: TeamLibraryView = { ...library, library_id: 'lib_other', name: '场景参考' };
+    api.listTeamLibraries.mockResolvedValue([other, library]);
+    api.listTeamAssets.mockResolvedValue({ entries: [], next_cursor: null });
+    render(<TeamLibraryPanel projectId="p1" initialTeamLibraryId={library.library_id} onAdopted={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveValue(library.library_id));
+    await waitFor(() => expect(api.listTeamAssets).toHaveBeenCalledWith(library.library_id, expect.anything()));
+    expect(api.listTeamAssets).not.toHaveBeenCalledWith('lib_other', expect.anything());
+  });
+  it('ignores a requested library that is not mounted here', async () => {
+    const other: TeamLibraryView = { ...library, library_id: 'lib_other', name: '场景参考' };
+    api.listTeamLibraries.mockResolvedValue([other, library]);
+    api.listTeamAssets.mockResolvedValue({ entries: [], next_cursor: null });
+    render(<TeamLibraryPanel projectId="p1" initialTeamLibraryId="lib_missing" onAdopted={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveValue('lib_other'));
+  });
   it('sets drag payload on cards', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [raw], next_cursor: null });
