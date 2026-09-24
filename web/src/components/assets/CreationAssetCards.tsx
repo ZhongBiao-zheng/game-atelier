@@ -42,6 +42,12 @@ export function AssetCard({ asset, busy, staleness, onOpen, onReproduce, onReado
   );
 }
 
+/** 媒体地址带内容版本：重新采用换了内容后 URL 跟着变，浏览器不会继续显示缓存的旧图。 */
+export function assetMediaSrc(assetId: string, content: CreationMediaAssetContent): string {
+  const url = creationAssetMediaUrl(assetId);
+  return `${url}${url.includes('?') ? '&' : '?'}v=${content.sha256.slice(0, 12)}`;
+}
+
 /** 已入库的媒体：图片直接显示，视频/音频给原生播放器。 */
 export function MediaPreview({ assetId, content, alt, className }: {
   assetId: string;
@@ -49,7 +55,7 @@ export function MediaPreview({ assetId, content, alt, className }: {
   alt: string;
   className: string;
 }) {
-  const src = creationAssetMediaUrl(assetId);
+  const src = assetMediaSrc(assetId, content);
   if (content.mime_type.startsWith('image/')) return <img src={src} alt={alt} loading="lazy" className={className} />;
   if (content.mime_type.startsWith('video/')) return <video src={src} muted playsInline preload="metadata" className={className} />;
   if (content.mime_type.startsWith('audio/')) return <audio src={src} controls preload="metadata" className="w-full" />;
@@ -128,11 +134,16 @@ export function PendingFilePreview({ file }: { file: File }) {
   );
 }
 
-/** 已在磁盘上的待保存媒体（Studio / 画布结果）：视频结果给首帧，其余当图片。 */
-export function PathPreview({ src }: { src: string }) {
+/** 已在磁盘上的待保存媒体（Studio / 画布结果）：视频给首帧，其余当图片。 */
+export function PathPreview({ src, video }: { src: string; video: boolean }) {
   const className = 'aspect-square w-full rounded-lg border border-border object-contain';
-  if (VIDEO_PATH.test(src)) return <video src={src} muted playsInline preload="metadata" aria-label="媒体资产预览" className={className} />;
+  if (video) return <video src={src} muted playsInline preload="metadata" aria-label="媒体资产预览" className={className} />;
   return <img src={src} alt="媒体资产预览" className={className} />;
 }
 
-const VIDEO_PATH = /\.(mp4|webm|mov)(?:[?#]|$)/i;
+const VIDEO_SUFFIX = /\.(mp4|webm|mov)$/i;
+
+/** 调用方没说媒体类型时的退路：只看 sourcePath 去掉查询串后的后缀，不从预览 URL 猜。 */
+export function isVideoSourcePath(sourcePath: string | undefined): boolean {
+  return VIDEO_SUFFIX.test((sourcePath ?? '').split(/[?#]/)[0]);
+}

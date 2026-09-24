@@ -61,6 +61,11 @@ const generationAsset: CreationAsset = {
   },
 };
 
+/** 面板里的媒体地址带内容版本（sha256 前 12 位）。 */
+function versioned(assetId: string, sha256: string): string {
+  return `${creationAssetMediaUrl(assetId)}?v=${sha256.slice(0, 12)}`;
+}
+
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   markUsed: vi.fn(),
@@ -390,9 +395,9 @@ describe('CreationAssetPanel', () => {
 
     await screen.findByRole('button', { name: /开场/ });
     const player = container.querySelector('video');
-    expect(player).toHaveAttribute('src', creationAssetMediaUrl('asset-video'));
+    expect(player).toHaveAttribute('src', versioned('asset-video', 'a'.repeat(64)));
     expect(player?.muted).toBe(true);
-    expect(container.querySelector('audio')).toHaveAttribute('src', creationAssetMediaUrl('asset-audio'));
+    expect(container.querySelector('audio')).toHaveAttribute('src', versioned('asset-audio', 'a'.repeat(64)));
     expect(container.querySelector('img')).toBeNull();
   });
 
@@ -410,11 +415,11 @@ describe('CreationAssetPanel', () => {
     expect(mocks.list.mock.calls[0][0]).toHaveProperty('kind', undefined);
     expect(screen.queryByRole('button', { name: /火山口三头犬/ })).not.toBeInTheDocument();
     expect(card).toHaveTextContent('white-dog.png');
-    expect(container.querySelector('img')).toHaveAttribute('src', creationAssetMediaUrl('asset-generation'));
+    expect(container.querySelector('img')).toHaveAttribute('src', versioned('asset-generation', 'b'.repeat(64)));
 
     fireEvent.click(card);
     expect(await screen.findByRole('heading', { name: '雪山白犬' })).toBeInTheDocument();
-    expect(container.querySelector('img')).toHaveAttribute('src', creationAssetMediaUrl('asset-generation'));
+    expect(container.querySelector('img')).toHaveAttribute('src', versioned('asset-generation', 'b'.repeat(64)));
     fireEvent.click(screen.getByRole('button', { name: '使用' }));
 
     await waitFor(() => expect(onUseMedia).toHaveBeenCalledWith(
@@ -588,6 +593,70 @@ describe('CreationAssetPanel', () => {
       expect(screen.getByText('来源已更新')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: '重新采用' })).toBeInTheDocument();
     });
+
+    it('shows the new media after readopt changes the content', async () => {
+      mocks.list.mockResolvedValue({ revision: 1, assets: [stale] });
+      mocks.staleness.mockResolvedValue({ 'asset-stale': 'stale' });
+      const media = stale.content.kind === 'generation' ? stale.content.media : null;
+      mocks.readopt.mockResolvedValue({
+        ...stale,
+        content: { ...stale.content, media: { ...media!, sha256: 'f'.repeat(64) } },
+      });
+      const { container } = renderMedia();
+
+      await screen.findByText('来源已更新');
+      expect(container.querySelector('img')).toHaveAttribute('src', versioned('asset-stale', 'b'.repeat(64)));
+      fireEvent.click(screen.getByRole('button', { name: '重新采用' }));
+      fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '覆盖' }));
+
+      await waitFor(() => expect(container.querySelector('img')).toHaveAttribute('src', versioned('asset-stale', 'f'.repeat(64))));
+    });
+
+    it('ignores a late staleness batch from an older refresh', async () => {
+      mocks.list.mockResolvedValue({ revision: 1, assets: [stale] });
+      let releaseFirst: (value: unknown) => void = () => {};
+      mocks.staleness
+        .mockImplementationOnce(() => new Promise(resolve => { releaseFirst = resolve; }))
+        .mockResolvedValue({ 'asset-stale': 'fresh' });
+      render(<CreationAssetPanel projectId="canvas-a" initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
+
+      await screen.findByRole('button', { name: /旧白犬/ });
+      fireEvent.click(screen.getByRole('button', { name: '全部资产' }));
+      await waitFor(() => expect(mocks.staleness).toHaveBeenCalledTimes(2));
+      await act(async () => { releaseFirst({ 'asset-stale': 'stale' }); });
+
+      expect(screen.queryByText('来源已更新')).toBeNull();
+    });
+
+    it('keeps a readopted copy fresh when an older batch returns afterwards', async () => {
+      mocks.list.mockResolvedValue({ revision: 1, assets: [stale] });
+      let releaseSecond: (value: unknown) => void = () => {};
+      mocks.staleness
+        .mockResolvedValueOnce({ 'asset-stale': 'stale' })
+        .mockImplementationOnce(() => new Promise(resolve => { releaseSecond = resolve; }));
+      mocks.readopt.mockResolvedValue(stale);
+      render(<CreationAssetPanel projectId="canvas-a" initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
+
+      await screen.findByText('来源已更新');
+      fireEvent.click(screen.getByRole('button', { name: '全部资产' }));
+      await waitFor(() => expect(mocks.staleness).toHaveBeenCalledTimes(2));
+      fireEvent.click(screen.getByRole('button', { name: '重新采用' }));
+      fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '覆盖' }));
+      await waitFor(() => expect(screen.queryByText('来源已更新')).toBeNull());
+
+      await act(async () => { releaseSecond({ 'asset-stale': 'stale' }); });
+      expect(screen.queryByText('来源已更新')).toBeNull();
+    });
+
+    it('notes a failed staleness check and keeps the list usable', async () => {
+      mocks.list.mockResolvedValue({ revision: 1, assets: [stale] });
+      mocks.staleness.mockRejectedValue(new Error('boom'));
+      renderMedia();
+
+      expect(await screen.findByText('来源状态读取失败')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /旧白犬/ })).toBeInTheDocument();
+      expect(screen.queryByText('来源已更新')).toBeNull();
+    });
   });
 
   describe('saving generation results', () => {
@@ -606,15 +675,16 @@ describe('CreationAssetPanel', () => {
       );
 
       await screen.findByDisplayValue('雪山白犬');
-      expect(screen.queryByText(/替换文件/)).toBeNull();
+      expect(screen.getByRole('img', { name: '媒体资产预览' })).toHaveAttribute('src', '/api/raw/x.png');
       fireEvent.click(screen.getByRole('button', { name: '保存生成资产' }));
 
-      await waitFor(() => expect(mocks.fromJob).toHaveBeenCalledWith(expect.objectContaining({
+      await waitFor(() => expect(mocks.fromJob).toHaveBeenCalledWith({
         job_id: 'job-1',
         output_index: 2,
         title: '雪山白犬',
         tags: [],
-      })));
+        project_id: null,
+      }));
       expect(mocks.upload).not.toHaveBeenCalled();
       expect(mocks.fromPath).not.toHaveBeenCalled();
       expect(await screen.findByRole('heading', { name: '雪山白犬' })).toBeInTheDocument();
@@ -642,6 +712,47 @@ describe('CreationAssetPanel', () => {
         tags: [],
       }));
       expect(mocks.fromPath).not.toHaveBeenCalled();
+    });
+
+    it('previews by the given media kind rather than the URL', async () => {
+      mocks.list.mockResolvedValue({ revision: 1, assets: [] });
+      const { container } = render(
+        <CreationAssetPanel
+          saveRequest={{ requestId: 'r3', kind: 'media', title: '视频结果', previewUrl: '/api/canvas/projects/c/versions/v1/media?media_token=t', mediaKind: 'video', source: { kind: 'canvas_result', canvas_project_id: 'c', node_id: 'n1', version_id: 'v1' } }}
+          onClose={vi.fn()}
+          onUsePrompt={vi.fn()}
+          onUseMedia={vi.fn()}
+        />,
+      );
+      await screen.findByDisplayValue('视频结果');
+      expect(container.querySelector('video')).toHaveAttribute('src', '/api/canvas/projects/c/versions/v1/media?media_token=t');
+      expect(container.querySelector('img')).toBeNull();
+    });
+
+    it('falls back to the sourcePath suffix without its query string', async () => {
+      mocks.list.mockResolvedValue({ revision: 1, assets: [] });
+      const { container, rerender } = render(
+        <CreationAssetPanel
+          saveRequest={{ requestId: 'r4', kind: 'media', title: '片段', sourcePath: '/data/studio/clip.mp4?w=1&media_token=t' }}
+          onClose={vi.fn()}
+          onUsePrompt={vi.fn()}
+          onUseMedia={vi.fn()}
+        />,
+      );
+      await screen.findByDisplayValue('片段');
+      expect(container.querySelector('video')).not.toBeNull();
+
+      rerender(
+        <CreationAssetPanel
+          saveRequest={{ requestId: 'r5', kind: 'media', title: '预览', previewUrl: '/api/raw?path=clip.mp4&media_token=t' }}
+          onClose={vi.fn()}
+          onUsePrompt={vi.fn()}
+          onUseMedia={vi.fn()}
+        />,
+      );
+      await screen.findByDisplayValue('预览');
+      expect(container.querySelector('video')).toBeNull();
+      expect(screen.getByRole('img', { name: '媒体资产预览' })).toBeInTheDocument();
     });
   });
 

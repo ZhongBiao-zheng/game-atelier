@@ -23,7 +23,6 @@ import {
   DuplicateCreationAssetError,
   TeamSourceWithdrawnError,
   createPromptCreationAsset,
-  creationAssetMediaUrl,
   deleteCreationAsset,
   fetchCreationAssetStalenessBatch,
   listCreationAssets,
@@ -36,7 +35,7 @@ import {
   updatePromptCreationAsset,
   uploadMediaCreationAsset,
 } from '@/api/creationAssets';
-import { AssetCard, AssetDetail, DeleteAssetButton, PathPreview, PendingFilePreview } from '@/components/assets/CreationAssetCards';
+import { AssetCard, AssetDetail, DeleteAssetButton, PathPreview, PendingFilePreview, assetMediaSrc, isVideoSourcePath } from '@/components/assets/CreationAssetCards';
 import { TagField, parseTags } from '@/components/assets/TagField';
 import { TeamLibraryPanel } from '@/components/assets/TeamLibraryPanel';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -76,6 +75,9 @@ export type CreationGenerationSource =
   | { kind: 'job_output'; job_id: string; output_index: number }
   | { kind: 'canvas_result'; canvas_project_id: string; node_id: string; version_id: string };
 
+/** 待保存媒体的类型：预览 URL 不一定带后缀，由调用方说明；缺省按 sourcePath 后缀判断。 */
+export type CreationMediaKind = 'image' | 'video';
+
 export type CreationAssetSaveRequest =
   | {
     requestId: string;
@@ -91,6 +93,7 @@ export type CreationAssetSaveRequest =
     file?: File;
     sourcePath?: string;
     previewUrl?: string;
+    mediaKind?: CreationMediaKind;
     projectId?: string;
     source?: CreationGenerationSource;
   };
@@ -138,6 +141,7 @@ type MediaEditorState = {
   file?: File;
   sourcePath?: string;
   previewUrl?: string;
+  mediaKind?: CreationMediaKind;
   projectId?: string;
   source?: CreationGenerationSource;
   initialSignature: string;
@@ -178,7 +182,9 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   const [deleteTarget, setDeleteTarget] = useState<CreationAsset | null>(null);
   const [staleness, setStaleness] = useState<Record<string, CreationAssetStaleness>>({});
   const [readoptTarget, setReadoptTarget] = useState<CreationAsset | null>(null);
+  const [stalenessError, setStalenessError] = useState(false);
   const stalenessRequest = useRef(0);
+  const readoptInFlight = useRef(false);
   const leaveActionRef = useRef<(() => void) | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -231,21 +237,27 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     const adopted = rows.filter(asset => asset.adopted_from).map(asset => asset.asset_id);
     if (!adopted.length) {
       setStaleness({});
+      setStalenessError(false);
       return;
     }
     try {
       const statuses = await fetchCreationAssetStalenessBatch(adopted);
-      if (token === stalenessRequest.current) setStaleness(statuses);
+      if (token !== stalenessRequest.current) return;
+      setStaleness(statuses);
+      setStalenessError(false);
     } catch {
-      // 徽标只是提示：查不到就不显示，不挡住列表。
-      if (token === stalenessRequest.current) setStaleness({});
+      // 徽标只是提示：查不到就不显示徽标，列表照常可用，顶部留一行说明。
+      if (token !== stalenessRequest.current) return;
+      setStaleness({});
+      setStalenessError(true);
     }
   }
 
   async function confirmReadopt() {
     const target = readoptTarget;
     setReadoptTarget(null);
-    if (!target) return;
+    if (!target || readoptInFlight.current) return;
+    readoptInFlight.current = true;
     const id = target.asset_id;
     setBusy(true);
     setError(null);
@@ -262,6 +274,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         setError(errorMessage(caught));
       }
     } finally {
+      readoptInFlight.current = false;
       setBusy(false);
     }
   }
@@ -313,6 +326,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         file: saveRequest.file,
         sourcePath: saveRequest.sourcePath,
         previewUrl: saveRequest.previewUrl,
+        mediaKind: saveRequest.mediaKind,
         projectId: saveRequest.projectId,
         source: saveRequest.source,
       };
@@ -428,7 +442,8 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
       assetId: asset.asset_id,
       title: asset.title,
       tags: asset.tags.join(', '),
-      previewUrl: creationAssetMediaUrl(asset.asset_id),
+      previewUrl: assetMediaSrc(asset.asset_id, asset.content),
+      mediaKind: asset.content.mime_type.startsWith('video/') ? 'video' as const : 'image' as const,
     };
     setSelectedId(null);
     setPromptEditor(null);
@@ -661,6 +676,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           )}
           {kind !== 'team' && (
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            {stalenessError && <p className="mb-2 text-xs text-muted-foreground">来源状态读取失败</p>}
             {visibleAssets.length ? visibleAssets.map(asset => <AssetCard key={asset.asset_id} asset={asset} busy={busy} staleness={staleness[asset.asset_id]} onOpen={() => openAsset(asset)} onReproduce={onReproduce && asset.kind === 'generation' ? () => void reproduceAsset(asset) : undefined} onReadopt={() => setReadoptTarget(asset)} />) : (
               <div className="grid min-h-40 place-items-center rounded-lg border border-dashed border-border px-8 text-center text-xs leading-relaxed text-muted-foreground">{normalizedQuery ? '没有匹配的创作资产' : kind === 'prompt' ? '还没有提示词资产' : '还没有媒体资产'}</div>
             )}
@@ -817,8 +833,8 @@ function MediaEditor({ state, busy, duplicateTitle, showSaveAndAddCanvas, onChan
 }) {
   return (
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-      {state.file ? <PendingFilePreview file={state.file} /> : state.previewUrl || state.sourcePath ? <PathPreview src={state.previewUrl || state.sourcePath || ''} /> : null}
-      {state.assetId && !state.source && <label className="inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-secondary focus-within:ring-1 focus-within:ring-primary"><FileImage className="size-4" />{state.file ? '重新选择文件' : '替换文件（可选）'}<input type="file" accept={MEDIA_ACCEPT} className="sr-only" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (file) onChange({ ...state, file }); event.target.value = ''; }} /></label>}
+      {state.file ? <PendingFilePreview file={state.file} /> : state.previewUrl || state.sourcePath ? <PathPreview src={state.previewUrl || state.sourcePath || ''} video={state.mediaKind ? state.mediaKind === 'video' : isVideoSourcePath(state.sourcePath)} /> : null}
+      {state.assetId && <label className="inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-secondary focus-within:ring-1 focus-within:ring-primary"><FileImage className="size-4" />{state.file ? '重新选择文件' : '替换文件（可选）'}<input type="file" accept={MEDIA_ACCEPT} className="sr-only" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (file) onChange({ ...state, file }); event.target.value = ''; }} /></label>}
       <Field label="标题"><Input value={state.title} onChange={event => onChange({ ...state, title: event.target.value })} /></Field>
       <TagField value={state.tags} onChange={tags => onChange({ ...state, tags })} />
       {duplicateTitle ? <div className="rounded-lg border border-border bg-card p-3 text-xs leading-relaxed"><p>这个文件已经在资产库的“{duplicateTitle}”中。可以复用原资产，不会创建重复副本。</p><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={onCancelDuplicate}>取消</Button>{!state.assetId && <Button size="sm" disabled={busy} onClick={onConfirmDuplicate}>复用原资产</Button>}</div></div> : <div className="grid gap-2"><Button className="w-full" disabled={busy} onClick={onSave}>{busy ? '保存中…' : state.assetId ? '保存修改' : state.source ? '保存生成资产' : '保存媒体资产'}</Button>{showSaveAndAddCanvas && <Button variant="outline" className="w-full" disabled={busy} onClick={onSaveAndAddCanvas}>保存并加入画布</Button>}</div>}

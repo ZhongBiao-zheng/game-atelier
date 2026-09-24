@@ -60,7 +60,7 @@ export interface TeamLibraryPanelProps {
   onAdopted: (result: TeamAssetAdoptResponse, entry: TeamLibraryIndexEntry) => void;
   /** 没有挂载库时的「挂载」出口；不给就不显示按钮。 */
   onOpenSettings?: () => void;
-  /** 复刻出口（只在 Studio）：面板先采用成本机副本再回调。不给就不显示复刻与相关配方。 */
+  /** 复刻出口（Studio 与画布都传）：面板先采用成本机副本再回调。不给就不显示复刻与相关配方。 */
   onReproduce?: (asset: CreationAsset) => void;
   /** 有值时顶部「相关配方」改为参考内容命中这份 sha256 的配方。 */
   relatedSha256?: string | null;

@@ -337,6 +337,39 @@ describe('TeamLibraryPanel', () => {
     expect(onReproduce).not.toHaveBeenCalled();
   });
 
+  it('disconnects the first-frame observer on unmount', async () => {
+    const disconnect = vi.fn();
+    class MockIntersectionObserver implements IntersectionObserver {
+      readonly root = null;
+      readonly rootMargin = '';
+      readonly thresholds = [0];
+      disconnect = disconnect;
+      observe() {}
+      takeRecords() { return []; }
+      unobserve() {}
+    }
+    vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+    try {
+      const clip: TeamLibraryIndexEntry = { ...shared, id: 'ta_clip', title: '开场', mime_type: 'video/mp4' };
+      api.listTeamLibraries.mockResolvedValue([library]);
+      api.listTeamAssets.mockResolvedValue({ entries: [clip], next_cursor: null });
+      const view = render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+      await screen.findByText('开场');
+      expect(disconnect).not.toHaveBeenCalled();
+      view.unmount();
+      expect(disconnect).toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it('renders no video for an incomplete video entry', async () => {
+    const clip: TeamLibraryIndexEntry = { ...shared, id: 'ta_clip', title: '同步的片', mime_type: 'video/mp4', status: 'incomplete' };
+    api.listTeamLibraries.mockResolvedValue([library]);
+    api.listTeamAssets.mockResolvedValue({ entries: [clip], next_cursor: null });
+    const { container } = render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    await screen.findByText('同步的片');
+    expect(container.querySelector('video')).toBeNull();
+  });
   it('binds the video first frame only once the card nears the viewport', async () => {
     let intersect: IntersectionObserverCallback | undefined;
     class MockIntersectionObserver implements IntersectionObserver {
