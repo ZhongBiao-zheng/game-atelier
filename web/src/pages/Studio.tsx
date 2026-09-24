@@ -12,11 +12,12 @@ import { PromptInput } from '@/components/studio/PromptInput';
 import {
   CreationAssetPanel,
   type CreationAssetPanelHandle,
+  type CreationAssetPanelMode,
   type CreationAssetSaveRequest,
 } from '@/components/assets/CreationAssetPanel';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import { EMPTY_MJ_REFS, routeReusedImageFiles, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
-import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
+import { RoundList, type RoundConfig, type RoundState, type SaveResultAssetRequest } from '@/components/studio/RoundList';
 import { StudioQueryBar } from '@/components/studio/StudioQueryBar';
 import { StudioArchiveDialog, type StudioArchiveRequest } from '@/components/studio/StudioArchiveDialog';
 import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
@@ -40,6 +41,8 @@ import { routeStudioMediaAsset } from './studioAssetRouting';
 import { recipeToDraft } from './studioRecipe';
 import { creationAssetInputUrl, creationAssetMediaUrl } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
+import { adoptTeamAsset } from '@/api/teamLibraries';
+import { TEAM_ASSET_ACTION_EVENT, teamAssetActionFromSearch, type TeamAssetAction } from '@/lib/teamAssetActions';
 import type { CreationAsset, CreationMediaAssetContent, RecipeInput } from '@/schema/creationAssets';
 import type { CanvasProject } from '@/schema/canvas';
 
@@ -125,7 +128,7 @@ function StudioFull() {
   const [clickPinned, setClickPinned] = useState(false);
   const [reuseLimitNotice, setReuseLimitNotice] = useState(false);
   const [assetNotice, setAssetNotice] = useState<string | null>(null);
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const [archiveRequest, setArchiveRequest] = useState<StudioArchiveRequest | null>(null);
   const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
   const [reproduceConfirm, setReproduceConfirm] = useState<CreationAsset | null>(null);
@@ -161,7 +164,9 @@ function StudioFull() {
   const [mjRefs, setMjRefs] = useState<MjRefSlots>(draft?.mjRefs ?? EMPTY_MJ_REFS);
   const [promptText, setPromptText] = useState(draft?.promptText ?? '');
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
-  const [assetPanelKind, setAssetPanelKind] = useState<'prompt' | 'media'>('prompt');
+  const [assetPanelKind, setAssetPanelKind] = useState<CreationAssetPanelMode>('prompt');
+  // 面板只在挂载与 initialKind 变化时同步栏位；「看看」要确定落在团队栏，就换 key 重新挂载。
+  const [assetPanelMount, setAssetPanelMount] = useState(0);
   const [assetSaveRequest, setAssetSaveRequest] = useState<CreationAssetSaveRequest | null>(null);
   const assetPanelRef = useRef<CreationAssetPanelHandle>(null);
   const [canvasTargets, setCanvasTargets] = useState<CanvasProject[]>([]);
@@ -326,6 +331,34 @@ function StudioFull() {
     setTimeout(scrollToRound, 600);
     setTimeout(scrollToRound, 1600);
   }, [rounds, targetJobId]);
+
+  // 分享提醒的「复刻」/「看看」：本页在就地认领；别的页面带着 ?team_asset= 跳过来，挂载后处理一次。
+  const teamAssetActionRef = useRef<(action: TeamAssetAction) => void>(() => {});
+  useEffect(() => { teamAssetActionRef.current = handleTeamAssetAction; });
+  useEffect(() => {
+    const listener = (event: Event) => {
+      const action = (event as CustomEvent<TeamAssetAction | undefined>).detail;
+      if (!action) return;
+      event.preventDefault();
+      teamAssetActionRef.current(action);
+    };
+    window.addEventListener(TEAM_ASSET_ACTION_EVENT, listener);
+    return () => window.removeEventListener(TEAM_ASSET_ACTION_EVENT, listener);
+  }, []);
+  // 复刻要先判本机有没有配方模型，所以等 keys 加载完再处理。
+  const teamSearchHandledRef = useRef(false);
+  useEffect(() => {
+    if (teamSearchHandledRef.current || !keysLoaded) return;
+    teamSearchHandledRef.current = true;
+    const action = teamAssetActionFromSearch(search);
+    if (!action) return;
+    const rest = new URLSearchParams(search);
+    rest.delete('team_asset');
+    rest.delete('team_action');
+    const query = rest.toString();
+    setLocation(query ? `${location}?${query}` : location, { replace: true });
+    teamAssetActionRef.current(action);
+  }, [keysLoaded, search, location, setLocation]);
 
   const refreshPersistedJobs = useCallback(async () => {
     const jobs = await listStudioJobs();
@@ -791,17 +824,7 @@ function StudioFull() {
               segments: [{ kind: 'text', text: config.prompt }],
             });
           }}
-          onSaveImageAsset={(path, config) => {
-            setAssetPanelKind('media');
-            setAssetPanelOpen(true);
-            setAssetSaveRequest({
-              requestId: crypto.randomUUID(),
-              kind: 'media',
-              title: assetTitleFromPrompt(config.prompt),
-              sourcePath: path,
-              previewUrl: galleryMediaUrl(path),
-            });
-          }}
+          onSaveResultAsset={saveResultAsset}
         />
       </div>
       {/* 浮层输入：wrapper 不收事件，两侧视觉与交互都穿透到历史区；壳本体在 PromptInput 内
@@ -947,6 +970,7 @@ function StudioFull() {
       </div>
       {assetPanelOpen && (
         <CreationAssetPanel
+          key={assetPanelMount}
           ref={assetPanelRef}
           initialKind={assetPanelKind}
           canvasTargets={canvasTargets.map(target => ({
@@ -1007,6 +1031,48 @@ function StudioFull() {
       || mjRefs.cref.length
       || mjRefs.oref.length,
     );
+  }
+
+  // Studio 自家出图存成带配方的生成资产；skill / 归档来的记录后端不收 from-job，只存媒体。
+  function saveResultAsset({ jobId, index, path, mediaKind, generated, config }: SaveResultAssetRequest) {
+    setAssetPanelKind('media');
+    setAssetPanelOpen(true);
+    setAssetSaveRequest({
+      requestId: crypto.randomUUID(),
+      kind: 'media',
+      title: assetTitleFromPrompt(config.prompt),
+      sourcePath: path,
+      previewUrl: galleryMediaUrl(path),
+      mediaKind,
+      ...(generated ? { source: { kind: 'job_output' as const, job_id: jobId, output_index: index } } : {}),
+    });
+  }
+
+  // 复刻 = 先采用（从库到本机一律是采用；Studio 没有当前画布，不挂项目），再走资产复刻。
+  async function handleTeamAssetAction(action: TeamAssetAction) {
+    if (action.action === 'open') {
+      await openTeamPanel();
+      return;
+    }
+    try {
+      const { asset } = await adoptTeamAsset(action.library_id, action.asset_id);
+      requestReproduce(asset);
+    } catch (error) {
+      setAssetNotice(error instanceof Error ? error.message : '复刻失败');
+    }
+  }
+
+  // 团队栏挂在画布项目上：先拿到画布列表再挂载面板，否则首帧没有项目会退回提示词栏。
+  async function openTeamPanel() {
+    const projects = await listCanvasProjects(true).catch((): CanvasProject[] => []);
+    const show = () => {
+      setCanvasTargets(projects);
+      setAssetPanelKind('team');
+      setAssetPanelMount(current => current + 1);
+      setAssetPanelOpen(true);
+    };
+    if (assetPanelRef.current) assetPanelRef.current.requestTransition(show);
+    else show();
   }
 
   // 复刻 = 把生成资产的配方填进当前输入框（同「重新编辑」），不自动提交；已有输入先确认覆盖。

@@ -863,3 +863,59 @@ describe('RoundList 分享到团队库', () => {
     expect(screen.queryByLabelText(/分享生成结果/)).not.toBeInTheDocument();
   });
 });
+
+describe('RoundList 保存为创作资产', () => {
+  const imageBatch: RoundState = {
+    kind: 'done',
+    mode: 'image',
+    jobId: 'job-save-image',
+    shareable: true,
+    submittedAt: '2026-09-24T10:00:00Z',
+    imagePaths: ['/data/studio/job-save-image/v1.png', '/data/studio/job-save-image/v2.png'],
+    config: { prompt: '立绘', model: 'gpt-image-2', kind: 'image', referenceImages: [] },
+  };
+
+  it('图片结果回传 imagePaths 下标、媒体类型与是否 Studio 自家出图', () => {
+    const onSaveResultAsset = vi.fn();
+    render(<RoundList rounds={[imageBatch]} onSaveResultAsset={onSaveResultAsset} />);
+
+    fireEvent.click(screen.getByLabelText('保存生成结果 2 为资产'));
+    expect(onSaveResultAsset).toHaveBeenCalledWith({
+      jobId: 'job-save-image',
+      index: 1,
+      path: '/data/studio/job-save-image/v2.png',
+      mediaKind: 'image',
+      generated: true,
+      config: imageBatch.config,
+    });
+    expect(screen.queryByAltText('大图')).not.toBeInTheDocument();
+  });
+
+  it('视频结果也有保存按钮', () => {
+    const onSaveResultAsset = vi.fn();
+    render(<RoundList rounds={[{ ...videoDone, shareable: true } as RoundState]} onSaveResultAsset={onSaveResultAsset} />);
+
+    fireEvent.click(screen.getByLabelText('保存生成视频 1 为资产'));
+    expect(onSaveResultAsset).toHaveBeenCalledWith({
+      jobId: 'job-vid-1',
+      index: 0,
+      path: '/data/studio/job-vid-1/v1.mp4',
+      mediaKind: 'video',
+      generated: true,
+      config: videoDone.config,
+    });
+  });
+
+  it('非 studio namespace 的记录照样能存，但不算 Studio 生成结果', () => {
+    const onSaveResultAsset = vi.fn();
+    render(<RoundList rounds={[{ ...imageBatch, shareable: false }]} onSaveResultAsset={onSaveResultAsset} />);
+
+    fireEvent.click(screen.getByLabelText('保存生成结果 1 为资产'));
+    expect(onSaveResultAsset).toHaveBeenCalledWith(expect.objectContaining({ generated: false }));
+  });
+
+  it('没传回调时不显示保存按钮', () => {
+    render(<RoundList rounds={[imageBatch, { ...videoDone, shareable: true } as RoundState]} />);
+    expect(screen.queryByLabelText(/为资产$/)).not.toBeInTheDocument();
+  });
+});

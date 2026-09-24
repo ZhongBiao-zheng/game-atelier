@@ -6,6 +6,7 @@ import { memoryLocation } from 'wouter/memory-location';
 import { Studio } from './Studio';
 import { clearStudioDraft, readStudioDraft, writeStudioDraft, type StudioDraft } from './studioDraft';
 import type { CreationAsset, GenerationRecipe } from '@/schema/creationAssets';
+import { dispatchTeamAssetAction } from '@/lib/teamAssetActions';
 
 // 透传真实面板，只记下 Studio 传进来的 props：复刻入口的按钮在面板里（另一个 Task），
 // Studio 侧只需验证拿到 onReproduce 之后怎么填输入框。
@@ -2619,5 +2620,180 @@ describe('Studio 复刻：边界', () => {
       videoResolution: '1080p',
       videoRatio: '21:9',
     });
+  });
+});
+
+describe('Studio 生成结果保存为创作资产', () => {
+  function mockJobs(jobs?: unknown[]) {
+    if (!jobs) mockCompletedBatchAndKeys();
+    const fetchMock = mockPanelEndpoints();
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (jobs && href === '/api/jobs') return Promise.resolve({ ok: true, json: async () => jobs } as any);
+      if (href === '/api/creation-assets/generation/from-job') {
+        return Promise.resolve({ ok: true, status: 201, json: async () => generationAsset(recipe()) } as any);
+      }
+      return fallback(url, init);
+    });
+    return fetchMock;
+  }
+  const studioJob = (overrides: Record<string, unknown>) => ({
+    job_id: 'job-s', character_id: '', prompt: '保存边界', submitted_at: '2026-09-24T01:00:00Z',
+    model: 'doubao-seedream-4-5-251128', params: {}, output_paths: ['/tmp/studio/job-s/v1.png'],
+    status: 'done', error: null, kind: 'image', namespace: 'studio', alias: 'volc', provider: 'seedream',
+    ...overrides,
+  });
+  const fromJobBody = (fetchMock: ReturnType<typeof vi.fn>) => {
+    const call = fetchMock.mock.calls.find(([url]) => url === '/api/creation-assets/generation/from-job');
+    return call ? JSON.parse(String(call[1]!.body)) : null;
+  };
+
+  it('图片结果存成生成资产，来源是该 job 的 output_index（= 结果下标）', async () => {
+    const fetchMock = mockJobs();
+    renderStudio();
+
+    fireEvent.click(await screen.findByLabelText('保存生成结果 2 为资产'));
+    expect(assetPanelProps.current!.initialKind).toBe('media');
+    expect(await screen.findByAltText('媒体资产预览')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: '保存生成资产' }));
+
+    await waitFor(() => expect(fromJobBody(fetchMock)).not.toBeNull());
+    expect(fromJobBody(fetchMock)).toMatchObject({ job_id: 'job-studio-1', output_index: 1 });
+  });
+
+  it('视频结果也能存成生成资产，预览按视频渲染', async () => {
+    const fetchMock = mockJobs([studioJob({ kind: 'video', output_paths: ['/tmp/studio/job-s/v1.mp4'], model: 'seedance-2.0-mini' })]);
+    renderStudio();
+
+    fireEvent.click(await screen.findByLabelText('保存生成视频 1 为资产'));
+    expect((await screen.findByLabelText('媒体资产预览')).tagName).toBe('VIDEO');
+    fireEvent.click(await screen.findByRole('button', { name: '保存生成资产' }));
+
+    await waitFor(() => expect(fromJobBody(fetchMock)).not.toBeNull());
+    expect(fromJobBody(fetchMock)).toMatchObject({ job_id: 'job-s', output_index: 0 });
+  });
+
+  it('归档来的记录（非 studio namespace）只存成普通媒体', async () => {
+    mockJobs([studioJob({ namespace: 'character', params: { archived_from_job_id: 'job-old' } })]);
+    renderStudio();
+
+    fireEvent.click(await screen.findByLabelText('保存生成结果 1 为资产'));
+    expect(await screen.findByRole('button', { name: '保存媒体资产' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '保存生成资产' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Studio 响应团队资产动作', () => {
+  const CANVAS = { schema_version: 2, project_id: 'canvas-1', name: '画布一', created_at: '2026-09-20T00:00:00Z', updated_at: '2026-09-20T00:00:00Z' };
+
+  function mockTeamEndpoints() {
+    const fetchMock = mockPanelEndpoints();
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (href === '/api/team-libraries/lib-art/assets/ta_1/adopt') {
+        return Promise.resolve({
+          ok: true, status: 200, json: async () => ({ asset: generationAsset(recipe()), created: true }),
+        } as any);
+      }
+      if (href.startsWith('/api/canvas/project-options')) return Promise.resolve({ ok: true, json: async () => [CANVAS] } as any);
+      if (href.startsWith('/api/team-libraries')) return Promise.resolve({ ok: true, status: 200, json: async () => [] } as any);
+      return fallback(url, init);
+    });
+    return fetchMock;
+  }
+
+  const adoptCalls = (fetchMock: ReturnType<typeof vi.fn>) =>
+    fetchMock.mock.calls.filter(([url]) => url === '/api/team-libraries/lib-art/assets/ta_1/adopt');
+
+  it('「复刻」：认领事件，先采用再按配方填入输入框', async () => {
+    const fetchMock = mockTeamEndpoints();
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    let claimed = false;
+    act(() => { claimed = dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'reproduce' }); });
+    expect(claimed).toBe(true);
+
+    const editor = screen.getByLabelText('生图 prompt');
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    const calls = adoptCalls(fetchMock);
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(String(calls[0][1]!.body))).toEqual({ project_id: null });
+  });
+
+  it('「看看」：打开资产面板的团队栏', async () => {
+    mockTeamEndpoints();
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    let claimed = false;
+    act(() => { claimed = dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' }); });
+    expect(claimed).toBe(true);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true'));
+    expect(screen.getByLabelText('打开创作资产')).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('采用失败时给提示，输入框不动', async () => {
+    const fetchMock = mockTeamEndpoints();
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url) === '/api/team-libraries/lib-art/assets/ta_1/adopt') {
+        return Promise.resolve(new Response(JSON.stringify({ detail: { code: 'not_adoptable', message: '这条资产还没同步完整' } }), { status: 409 }));
+      }
+      return fallback(url, init);
+    });
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'reproduce' }); });
+    expect(await screen.findByText(/这条资产还没同步完整/)).toBeInTheDocument();
+    expect(screen.getByLabelText('生图 prompt').textContent).not.toContain('橘猫坐在窗台');
+  });
+
+  it('卸载后不再认领', async () => {
+    mockTeamEndpoints();
+    const { unmount } = renderStudio();
+    await screen.findByText('火山引擎');
+    unmount();
+    expect(dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' })).toBe(false);
+  });
+
+  it('挂载时处理一次 ?team_asset= 并替换掉查询串（不留历史条目）', async () => {
+    const fetchMock = mockTeamEndpoints();
+    const { hook, searchHook, history } = memoryLocation({
+      path: '/studio?team_asset=lib-art:ta_1&team_action=reproduce',
+      record: true,
+    });
+    render(<Router hook={hook} searchHook={searchHook}><Studio /></Router>);
+
+    const editor = await screen.findByLabelText('生图 prompt');
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    expect(history).toEqual(['/studio']);
+    await act(async () => { await Promise.resolve(); });
+    expect(adoptCalls(fetchMock)).toHaveLength(1);
+  });
+
+  it('查询串是「看看」时打开团队栏', async () => {
+    mockTeamEndpoints();
+    const { hook, searchHook, history } = memoryLocation({
+      path: '/studio?team_asset=lib-art:ta_1&team_action=open',
+      record: true,
+    });
+    render(<Router hook={hook} searchHook={searchHook}><Studio /></Router>);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true'));
+    expect(history).toEqual(['/studio']);
+  });
+
+  it('非法查询串不动作也不改地址', async () => {
+    const fetchMock = mockTeamEndpoints();
+    const { hook, searchHook, history } = memoryLocation({ path: '/studio?team_asset=bad&team_action=reproduce', record: true });
+    render(<Router hook={hook} searchHook={searchHook}><Studio /></Router>);
+    await screen.findByText('火山引擎');
+    expect(adoptCalls(fetchMock)).toHaveLength(0);
+    expect(history).toEqual(['/studio?team_asset=bad&team_action=reproduce']);
   });
 });
