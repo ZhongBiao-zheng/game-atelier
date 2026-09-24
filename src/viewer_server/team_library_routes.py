@@ -543,7 +543,7 @@ def post_creation_asset_readopt(asset_id: str) -> CreationAsset:
         raise HTTPException(503, detail=_UNREACHABLE) from None
     except CreationAssetDuplicateError as error:
         raise HTTPException(409, detail={
-            "code": "duplicate", "asset_id": error.asset_id, "message": str(error),
+            "code": "duplicate_asset", "asset_id": error.asset_id, "message": str(error),
         }) from error
     except CreationAssetStateError as error:
         raise HTTPException(409, detail=str(error)) from error
@@ -551,8 +551,9 @@ def post_creation_asset_readopt(asset_id: str) -> CreationAsset:
         raise HTTPException(409, detail={
             "code": "retry", "message": "资产库正在被别处修改，请重试",
         }) from error
-    # 库里 asset.json 坏掉走 ValidationError，与 TeamAssetAdoptError 同义：这条现在不能采用。
+    # 与采用接口同一映射：条目同步中 / 内容对不上 / 库里 asset.json 坏掉（ValidationError）
+    # 都是「这条现在不能采用」，等同步完再试。
     except (TeamAssetAdoptError, ValidationError) as error:
-        raise HTTPException(422, detail={
+        raise HTTPException(409, detail={
             "code": "not_adoptable", "message": str(error),
         }) from error

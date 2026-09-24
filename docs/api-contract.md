@@ -864,9 +864,9 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 | 409 | `not_adopted` | 本机资产不是从团队库采用的 |
 | 409 | `withdrawn` | 来源库可达、已扫描，但条目不在了 |
 | 503 | `library_unreachable` | 来源库没挂载、不可达或还没扫过 |
-| 409 | `duplicate` | 新内容撞上另一条同来源 / 同内容的本机资产，`detail.asset_id` 指明是哪条 |
+| 409 | `duplicate_asset` | 新内容撞上另一条同来源 / 同内容的本机资产，`detail.asset_id` 指明是哪条 |
 | 409 | `retry` | 写目录时新 blob 被并发删除，重试即可 |
-| 422 | `not_adoptable` | 条目同步中、内容与 `asset.json` 对不上、库内 `asset.json` 损坏 |
+| 409 | `not_adoptable` | 条目同步中、内容与 `asset.json` 对不上、库内 `asset.json` 损坏（与采用接口同一映射） |
 | 409 | —（`detail` 为字符串） | 本机资产库状态损坏（与 `/creation-assets` 接口同一映射） |
 
 生成结果「保存为创作资产」存生成资产（带配方），与分享共用同一份配方来源规则（`generation_recipe`）：
@@ -874,7 +874,9 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 `project_id` 可选）；`POST /creation-assets/generation/from-canvas` 收画布结果版本（规则同 `canvas_result`
 分享，`project_id` 取 `canvas_project_id`，请求体不收）。成片与参考按内容进 blobs。错误：来源不存在 404；
 来源不可保存 422 `{code: "not_shareable" | "source_missing", message}`；标题去空白后为空 / 标签超 40 字
-422 `{code: "invalid", message}`；本机资产库状态损坏 409（`detail` 为字符串）；长度上限按 FastAPI 标准 422。
+422 `{code: "invalid", message}`（在读来源之前校验）；本机资产库状态损坏 409（`detail` 为字符串）；长度上限按
+FastAPI 标准 422。坏掉的 job 文件、画布存档不见了（`{code: "canvas_document_missing"}` 等）是本机数据故障，
+按 500 报出，不归入 `invalid`。
 
 `POST /canvas/projects/{project_id}/creation-assets/{asset_id}/reproduce` 画布复刻：与 insert 同样携带
 `If-Match`（缺失 428，非整数 422），一次画布锁内把生成资产展开成参考输入节点 + 生成配置节点 + 连线，
@@ -883,7 +885,7 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 跳过并写进 `warnings`）；视频配方 `frame_mode ∈ first | last | firstlast` 时图片参考按顺序接首帧 / 尾帧槽。
 `model` 由前端匹配本机 key 后传入，传 `null` 时配置节点模型位留空。错误：revision 不符 409
 `{code: "revision_conflict", current_revision}`；画布或资产不存在 404；非生成资产、配方拼不出合法草稿 422；
-参考 blob 缺失 409（`detail` 为字符串，本机资产库状态损坏）；画布存档本身坏了 500。
+参考 blob 缺失 500 `{code: "asset_state_broken", message}`（本机数据完整性故障，重试无用）；画布存档本身坏了 500。
 
 `GET /team-libraries/{library_id}/assets/{entry_id}/content` 与 `thumb` 同属媒体路由：网站会话可凭媒体令牌
 读取（`<img>` / `<video>` 不带 Origin）。

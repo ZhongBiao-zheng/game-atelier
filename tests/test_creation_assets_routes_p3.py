@@ -69,6 +69,12 @@ def test_from_job_errors(client, isolated_data_root):
     fresh = _studio_job(png((90, 0, 0)), {})
     blank = _from_job(client, fresh.job_id, title="   ")
     assert blank.status_code == 422 and blank.json()["detail"]["code"] == "invalid"
+    # 标题先于来源校验：来源不存在时也报 invalid 而不是 404。
+    blank_missing = _from_job(client, "job-missing", title="   ")
+    assert blank_missing.status_code == 422
+    assert blank_missing.json()["detail"]["code"] == "invalid"
+    long_tag = _from_job(client, fresh.job_id, tags=["标" * 41])
+    assert long_tag.status_code == 422 and long_tag.json()["detail"]["code"] == "invalid"
     assert client.get("/api/creation-assets").json()["assets"] == []
 
     extra = client.post("/api/creation-assets/generation/from-job", json={
@@ -110,16 +116,47 @@ def test_from_canvas_errors(client):
     assert with_project.status_code == 422  # project_id 取 canvas_project_id，不收
 
 
-@pytest.mark.parametrize("path", [
-    "/api/creation-assets/staleness",
-    "/api/creation-assets/generation/from-job",
-    "/api/creation-assets/generation/from-canvas",
+@pytest.fixture
+def raw_client(isolated_data_root):
+    """服务端异常回 500 而不是在测试里抛出。"""
+    return TestClient(
+        base_url="http://127.0.0.1",
+        app=build_app(dist_dir=isolated_data_root / "dist"),
+        raise_server_exceptions=False,
+    )
+
+
+def test_from_job_corrupted_job_file_is_500_not_invalid(raw_client, isolated_data_root):
+    job = _studio_job(png((90, 0, 0)), {})
+    (isolated_data_root / ".runtime" / "jobs" / f"{job.job_id}.json").write_text(
+        "{不是 json", encoding="utf-8"
+    )
+    resp = _from_job(raw_client, job.job_id)
+    assert resp.status_code == 500, resp.text
+
+
+def test_from_canvas_missing_canvas_json_is_500(raw_client):
+    from character_workflow.lib.canvas_projects import canvas_project_dir
+
+    project_id, job, _document = canvas_run_with_inputs(
+        png((0, 90, 0)), png((0, 0, 90)), png((90, 0, 0))
+    )
+    node_id, version_id = result_version(job)
+    (canvas_project_dir(project_id) / "canvas.json").unlink()
+    resp = _from_canvas(raw_client, project_id, node_id, version_id)
+    assert resp.status_code == 500, resp.text
+    assert resp.json()["detail"]["code"] == "canvas_document_missing"
+
+
+@pytest.mark.parametrize(("path", "field"), [
+    ("/api/creation-assets/staleness", "asset_ids"),
+    ("/api/creation-assets/generation/from-job", "job_id"),
+    ("/api/creation-assets/generation/from-canvas", "canvas_project_id"),
 ])
-def test_static_paths_are_not_swallowed_by_asset_id_routes(client, path):
+def test_static_paths_are_not_swallowed_by_asset_id_routes(client, path, field):
     """同段数的 {asset_id} 路由（DELETE /creation-assets/{asset_id} 等）只能是部分匹配，
-    请求必须落到静态路由上：空请求体按各自的请求模型报 422，而不是 404 / 405。"""
+    请求必须落到静态路由上：空请求体按各自的请求模型报缺字段，而不是 404 / 405。"""
     resp = client.post(path, json={})
     assert resp.status_code == 422, resp.text
-    assert isinstance(resp.json()["detail"], list)
-    fields = {tuple(row["loc"]) for row in resp.json()["detail"]}
-    assert all(loc[0] == "body" for loc in fields)
+    missing = {tuple(row["loc"]) for row in resp.json()["detail"] if row["type"] == "missing"}
+    assert ("body", field) in missing

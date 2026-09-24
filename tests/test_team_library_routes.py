@@ -1103,9 +1103,9 @@ def test_readopt_error_codes(client, isolated_data_root, shared_lib):
 
 
 @pytest.mark.parametrize(("error", "status", "code"), [
-    ("duplicate", 409, "duplicate"),
+    ("duplicate", 409, "duplicate_asset"),
     ("file_missing", 409, "retry"),
-    ("not_adoptable", 422, "not_adoptable"),
+    ("not_adoptable", 409, "not_adoptable"),
 ])
 def test_readopt_race_and_adopt_errors(client, monkeypatch, error, status, code):
     from character_workflow.lib.creation_assets import CreationAssetDuplicateError

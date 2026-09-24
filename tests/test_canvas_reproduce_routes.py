@@ -1,11 +1,17 @@
 """画布复刻路由：If-Match 与 insert 路由同写法，响应是带 warnings 的 CanvasReproduceResponse。"""
 from __future__ import annotations
 
+import json
+
 import pytest
 from tests.local_client import LocalTestClient as TestClient
 from tests.test_canvas_reproduce import _MASK, _REF_A, _REF_B, _asset
 
-from character_workflow.lib.canvas_projects import create_canvas_project, read_canvas_document
+from character_workflow.lib.canvas_projects import (
+    canvas_project_dir,
+    create_canvas_project,
+    read_canvas_document,
+)
 from character_workflow.lib.creation_assets import blob_path_for, create_media_asset_from_bytes
 from viewer_server.server_app import build_app
 
@@ -38,8 +44,8 @@ def test_reproduce_builds_nodes_and_returns_warnings(client):
     assert len(body["warnings"]) == 1
     config = body["nodes"][-1]
     assert config["data"]["draft"]["model"] == "gpt-image-2"
-    stored = read_canvas_document(project.project_id)
-    assert stored.revision == 1 and "warnings" not in stored.model_dump()
+    raw = json.loads((canvas_project_dir(project.project_id) / "canvas.json").read_text("utf-8"))
+    assert raw["revision"] == 1 and "warnings" not in raw
 
 
 def test_reproduce_without_model_leaves_config_model_empty(client):
@@ -83,8 +89,9 @@ def test_reproduce_error_codes(client):
     row = asset.content.snapshot.inputs[0]
     blob_path_for(row.sha256, row.mime_type).unlink()
     state = _post(client, project.project_id, asset.asset_id)
-    assert state.status_code == 409, state.text
-    assert isinstance(state.json()["detail"], str)
+    assert state.status_code == 500, state.text
+    assert state.json()["detail"]["code"] == "asset_state_broken"
+    assert state.json()["detail"]["message"]
     assert read_canvas_document(project.project_id).nodes == []
 
 
