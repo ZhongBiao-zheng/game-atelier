@@ -507,6 +507,9 @@
     padding: 12px;
     margin: -12px;
     border-radius: 0.5rem;
+    /* 选区框只是视觉框：它叠在节点之上，接了指针就把节点边上的连接把手全盖住，框选后
+       只能整组拖、连不了线。拖任意一个选中节点本来就会带着整组走，所以框自己不必接事件。 */
+    pointer-events: none;
   }
   .canvas-flow .react-flow__edge-path {
     stroke-width: 1.5 !important;
