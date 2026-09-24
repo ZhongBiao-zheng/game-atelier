@@ -454,6 +454,11 @@ export interface CanvasRun {
   document: CanvasDocument;
 }
 
+/** 画布复刻的结果：与创作资产插入画布同样返回整份文档，另带没能带过来的内容说明。 */
+export interface CanvasReproduceResponse extends CanvasDocument {
+  warnings: string[];
+}
+
 export interface CanvasPluginState {
   schema_version: number;
   revision: number;

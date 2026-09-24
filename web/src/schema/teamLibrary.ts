@@ -29,18 +29,34 @@ export interface TeamLibraryIndexEntry {
   /** 仅生成资产有值。 */
   model: string | null;
   cost_cny: number | null;
+  /** 仅生成资产有值：配方参考内容的 sha256，按 order。 */
+  input_sha256: string[];
 }
 
-/** 分享来源：Studio 某次出图的第 output_index 张（Job.output_paths 下标），或一条本机创作资产。 */
+/** 分享来源：Studio 某次出图的第 output_index 张（Job.output_paths 下标）、一条本机创作资产，
+ *  或画布某节点的一个生成版本（version_id 是 document.content_versions 的键）。 */
 export type TeamShareSource =
   | { kind: 'job_output'; job_id: string; output_index: number }
-  | { kind: 'creation_asset'; asset_id: string };
+  | { kind: 'creation_asset'; asset_id: string }
+  | { kind: 'canvas_result'; canvas_project_id: string; node_id: string; version_id: string };
 
 export interface TeamShareRequest {
   source: TeamShareSource;
   title: string;
   tags: string[];
   allow_large?: boolean;
+}
+
+/** SSE `team-library-changed` 载荷；removed 事件的 title / status / mime_type 为 null。 */
+export interface TeamLibraryChangeEvent {
+  library_id: string;
+  asset_id: string;
+  kind: string;
+  author: string | null;
+  change: 'added' | 'updated' | 'removed';
+  title: string | null;
+  status: 'ready' | 'incomplete' | null;
+  mime_type: string | null;
 }
 
 export interface TeamRelatedEntry {

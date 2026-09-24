@@ -10,6 +10,7 @@ import {
   shareToTeamLibrary,
   TeamNotAuthorError,
   TeamRefsTooLargeError,
+  teamAssetContentUrl,
   teamAssetThumbUrl,
   updateTeamAsset,
   withdrawTeamAsset,
@@ -20,11 +21,20 @@ const ASSET = 'ta_01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const json = (body: unknown, status: number) => new Response(JSON.stringify(body), { status });
 
 const fetchMock = vi.fn();
+const mediaUrlMock = vi.hoisted(() => vi.fn((input: string) => input));
 vi.mock('@/api/connection', async importOriginal => {
   const actual = await importOriginal<typeof import('@/api/connection')>();
-  return { ...actual, connectionFetch: (...args: unknown[]) => fetchMock(...args) };
+  return {
+    ...actual,
+    connectionFetch: (...args: unknown[]) => fetchMock(...args),
+    mediaUrl: (input: string) => mediaUrlMock(input),
+  };
 });
-afterEach(() => fetchMock.mockReset());
+afterEach(() => {
+  fetchMock.mockReset();
+  mediaUrlMock.mockReset();
+  mediaUrlMock.mockImplementation((input: string) => input);
+});
 
 describe('teamLibraries api', () => {
   it('lists assets with filters as query params', async () => {
@@ -147,5 +157,31 @@ describe('teamLibraries api', () => {
     const related = await listRelatedTeamAssets('canvas-a');
     expect(related[0].library_name).toBe('美术组');
     expect(String(fetchMock.mock.calls[0][0])).toBe('/api/team-libraries/related?project_id=canvas-a');
+  });
+
+  it('lists recipes whose references hit a sha256', async () => {
+    fetchMock.mockResolvedValue(json([], 200));
+    await listRelatedTeamAssets('canvas a', 'ab12');
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/team-libraries/related?project_id=canvas+a&sha256=ab12');
+  });
+
+  it('shares a canvas result', async () => {
+    fetchMock.mockResolvedValue(json({ id: ASSET }, 201));
+    const request = {
+      source: { kind: 'canvas_result' as const, canvas_project_id: 'canvas-a', node_id: 'n1', version_id: 'v1' },
+      title: '白犬',
+      tags: [],
+    };
+    await shareToTeamLibrary(LIB, request);
+    expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))).toEqual(request);
+  });
+
+  it('routes team media urls through mediaUrl so hosted pages carry the media token', () => {
+    mediaUrlMock.mockImplementation((input: string) =>
+      `http://127.0.0.1:5174${input}${input.includes('?') ? '&' : '?'}media_token=tok`);
+    expect(teamAssetThumbUrl('lib_x', 'raw_abc', 256))
+      .toBe('http://127.0.0.1:5174/api/team-libraries/lib_x/assets/raw_abc/thumb?w=256&media_token=tok');
+    expect(teamAssetContentUrl('lib_x', 'ta 1'))
+      .toBe('http://127.0.0.1:5174/api/team-libraries/lib_x/assets/ta%201/content?media_token=tok');
   });
 });

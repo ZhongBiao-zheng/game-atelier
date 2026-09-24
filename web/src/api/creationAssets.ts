@@ -1,14 +1,28 @@
 import { connectionFetch } from '@/api/connection';
-import { apiError, requestJson } from './http';
+import { apiError, ApiError, requestJson } from './http';
 import type {
   CreationAsset,
   CreationAssetKind,
   CreationAssetList,
+  CreationAssetStaleness,
+  CreationGenerationFromCanvas,
+  CreationGenerationFromJob,
   CreationPromptSegment,
 } from '@/schema/creationAssets';
 import type { CanvasDocument, CanvasPoint } from '@/schema/canvas';
 
-export type CreationAssetStaleness = 'fresh' | 'stale' | 'withdrawn' | 'unknown';
+export type { CreationAssetStaleness };
+
+/** 服务端一次最多查 200 条（CreationAssetStalenessBatchRequest.asset_ids 上限）。 */
+const STALENESS_BATCH_LIMIT = 200;
+
+/** 团队库里的来源已被作者撤回，重新采用无从谈起。 */
+export class TeamSourceWithdrawnError extends Error {
+  constructor() {
+    super('来源已撤回');
+    this.name = 'TeamSourceWithdrawnError';
+  }
+}
 
 export class DuplicateCreationAssetError extends Error {
   readonly assetId: string;
@@ -198,6 +212,58 @@ export async function fetchCreationAssetStaleness(assetId: string): Promise<Crea
     '检查资产是否过时',
   );
   return body.status;
+}
+
+/** 批量查采用来的资产是否过时；不存在的 id 不出现在结果里。 */
+export async function fetchCreationAssetStalenessBatch(
+  assetIds: string[],
+): Promise<Record<string, CreationAssetStaleness>> {
+  const chunks: string[][] = [];
+  for (let start = 0; start < assetIds.length; start += STALENESS_BATCH_LIMIT) {
+    chunks.push(assetIds.slice(start, start + STALENESS_BATCH_LIMIT));
+  }
+  const results = await Promise.all(chunks.map(ids => requestJson<{
+    statuses: Record<string, CreationAssetStaleness>;
+  }>('/api/creation-assets/staleness', '检查资产是否过时', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ asset_ids: ids }),
+  })));
+  return Object.assign({}, ...results.map(result => result.statuses));
+}
+
+/** 用团队库来源的当前版本覆盖本机副本（内容、快照、标题、标签都跟来源走）。 */
+export async function readoptCreationAsset(assetId: string): Promise<CreationAsset> {
+  try {
+    return await requestJson<CreationAsset>(
+      `/api/creation-assets/${encodeURIComponent(assetId)}/readopt`,
+      '重新采用',
+      { method: 'POST' },
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409 && error.code === 'withdrawn') {
+      throw new TeamSourceWithdrawnError();
+    }
+    throw error;
+  }
+}
+
+/** 生成结果存成带配方的生成资产（Studio 出图）。 */
+export function saveGenerationFromJob(body: CreationGenerationFromJob): Promise<CreationAsset> {
+  return requestJson<CreationAsset>('/api/creation-assets/generation/from-job', '保存生成资产', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+/** 生成结果存成带配方的生成资产（画布节点版本）。 */
+export function saveGenerationFromCanvas(body: CreationGenerationFromCanvas): Promise<CreationAsset> {
+  return requestJson<CreationAsset>('/api/creation-assets/generation/from-canvas', '保存生成资产', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 }
 
 export function insertCreationAssetIntoCanvas(input: {

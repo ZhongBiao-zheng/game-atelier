@@ -57,6 +57,7 @@ const entry: TeamLibraryIndexEntry = {
   status: 'ready',
   model: 'gpt-image-1',
   cost_cny: 0.2,
+  input_sha256: [],
 };
 
 const request: TeamShareDialogRequest = {

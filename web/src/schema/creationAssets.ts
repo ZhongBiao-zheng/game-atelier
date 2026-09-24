@@ -76,6 +76,26 @@ export interface CreationAsset {
   adopted_from?: AdoptionOrigin | null;
 }
 
+/** 把 Studio 某次出图的第 output_index 张（Job.output_paths 下标）存成生成资产。 */
+export interface CreationGenerationFromJob {
+  job_id: string;
+  output_index: number;
+  title: string;
+  tags: string[];
+  project_id?: string | null;
+}
+
+/** 把画布节点的一个生成版本存成生成资产；项目归属取 canvas_project_id。 */
+export interface CreationGenerationFromCanvas {
+  canvas_project_id: string;
+  node_id: string;
+  version_id: string;
+  title: string;
+  tags: string[];
+}
+
+export type CreationAssetStaleness = 'fresh' | 'stale' | 'withdrawn' | 'unknown';
+
 export interface CreationAssetList {
   revision: number;
   assets: CreationAsset[];

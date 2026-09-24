@@ -1,4 +1,4 @@
-import { connectionFetch } from '@/api/connection';
+import { connectionFetch, mediaUrl } from '@/api/connection';
 import { apiError, requestError, requestJson } from './http';
 import type {
   TeamAssetAdoptResponse,
@@ -105,12 +105,13 @@ export function listTeamAssets(
   return requestJson<TeamLibraryAssetPage>(`${lib(libraryId)}/assets${query}`, '读取团队资产');
 }
 
+/** 媒体地址经 mediaUrl：托管页面要拼本机地址与媒体令牌（`<img>` / `<video>` 带不了 Authorization）。 */
 export function teamAssetContentUrl(libraryId: string, entryId: string): string {
-  return `${lib(libraryId)}/assets/${encodeURIComponent(entryId)}/content`;
+  return mediaUrl(`${lib(libraryId)}/assets/${encodeURIComponent(entryId)}/content`);
 }
 
 export function teamAssetThumbUrl(libraryId: string, entryId: string, width: number): string {
-  return `${lib(libraryId)}/assets/${encodeURIComponent(entryId)}/thumb?w=${width}`;
+  return mediaUrl(`${lib(libraryId)}/assets/${encodeURIComponent(entryId)}/thumb?w=${width}`);
 }
 
 export function adoptTeamAsset(
@@ -194,9 +195,9 @@ export async function withdrawTeamAsset(libraryId: string, assetId: string): Pro
   });
 }
 
-export function listRelatedTeamAssets(projectId: string): Promise<TeamRelatedEntry[]> {
-  return requestJson<TeamRelatedEntry[]>(
-    `${base}/related?project_id=${encodeURIComponent(projectId)}`,
-    '读取相关配方',
-  );
+/** 给了 sha256 = 参考内容命中这份内容的配方（跨该画布全部可达库）；否则按画布项目列相关配方。 */
+export function listRelatedTeamAssets(projectId: string, sha256?: string): Promise<TeamRelatedEntry[]> {
+  const params = new URLSearchParams({ project_id: projectId });
+  if (sha256) params.set('sha256', sha256);
+  return requestJson<TeamRelatedEntry[]>(`${base}/related?${params.toString()}`, '读取相关配方');
 }
