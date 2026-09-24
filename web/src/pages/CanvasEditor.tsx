@@ -229,8 +229,8 @@ import { resolveRecipeModel } from './studioRecipe';
 import {
   canvasNodeSaveRequest,
   canvasNodeShareRequest,
-  canvasReproduceFootprint,
   canvasReproduceNotices,
+  placeCanvasNodeGroupWithoutOverlap,
 } from './canvasTeamActions';
 import { canvasLayerMaterialConnections, type CanvasLayerMaterialConnection } from './canvasLayerMaterialConnections';
 
@@ -501,6 +501,7 @@ function CanvasEditorInner({
   const [toolNoticeAction, setToolNoticeAction] = useState<CanvasNoticeAction | null>(null);
   const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
   const [teamRelatedSha256, setTeamRelatedSha256] = useState<string | null>(null);
+  const [libraryPanelKey, setLibraryPanelKey] = useState(0);
   const uploadRef = useRef<HTMLInputElement>(null);
   const replaceMediaRef = useRef<HTMLInputElement>(null);
   const editorRegionRef = useRef<HTMLElement>(null);
@@ -556,6 +557,7 @@ function CanvasEditorInner({
   const toolNoticeTimer = useRef<number | null>(null);
   /** 每次渲染换成最新的处理函数；window 监听只挂一次。 */
   const teamAssetActionRef = useRef<(action: TeamAssetAction) => void>(() => undefined);
+  const pendingTeamAssetAction = useRef<TeamAssetAction | null>(null);
   const latestDocument = useRef<CanvasDocument | null>(null);
   const pendingTextVersions = useRef(new Map<string, string>());
   // Agent 经 MCP 改画布后的重载入口（#92）。用 ref 是因为保存失败分支（flushSave）声明在它之前，
@@ -1913,10 +1915,17 @@ function CanvasEditorInner({
 
   /** 服务端一次锁内往画布里加节点（插入资产 / 复刻）的共用合并：只收新节点、新版本、新连线，
    *  并发编辑保留，新节点按本地画布避让，整次插入是一步可撤销的历史。
+   *  placement：'each' 逐个节点找空位；'group' 整组按包围盒平移（复刻的组内布局由服务端排好）。
    *  返回 true = 已合并；失败交给 onError（缺省报错条）。 */
   async function applyServerInsertion(
     request: (documentRevision: number) => Promise<CanvasDocument>,
-    onError: (error: unknown) => void = insertError => setError((insertError as Error).message),
+    {
+      placement = 'each',
+      onError = insertError => setError((insertError as Error).message),
+    }: {
+      placement?: 'each' | 'group';
+      onError?: (error: unknown) => void;
+    } = {},
   ): Promise<boolean> {
     if (!await persistNow()) return false;
     const before = latestDocument.current;
@@ -1941,18 +1950,22 @@ function CanvasEditorInner({
           concurrent.content_versions,
           insertedVersions,
         );
-        const placedInsertedNodes: CanvasNode[] = [];
         const { flowBounds } = canvasPlacementBounds();
-        for (const inserted of insertedNodes) {
-          if (concurrentIds.has(inserted.id)) continue;
-          const placedPosition = placeCanvasNodeWithoutOverlap(
-            inserted.position,
-            [...concurrent.nodes, ...placedInsertedNodes],
-            canvasNodeRenderedSize(inserted, mergedVersions),
-            flowBounds,
-            node => canvasNodeRenderedSize(node, mergedVersions),
-          );
-          placedInsertedNodes.push({ ...inserted, position: placedPosition });
+        const newNodes = insertedNodes.filter(inserted => !concurrentIds.has(inserted.id));
+        const placedInsertedNodes: CanvasNode[] = placement === 'group'
+          ? placeCanvasNodeGroupWithoutOverlap(newNodes, concurrent.nodes, mergedVersions, flowBounds)
+          : [];
+        if (placement === 'each') {
+          for (const inserted of newNodes) {
+            const placedPosition = placeCanvasNodeWithoutOverlap(
+              inserted.position,
+              [...concurrent.nodes, ...placedInsertedNodes],
+              canvasNodeRenderedSize(inserted, mergedVersions),
+              flowBounds,
+              node => canvasNodeRenderedSize(node, mergedVersions),
+            );
+            placedInsertedNodes.push({ ...inserted, position: placedPosition });
+          }
         }
         const remoteInsertedPositions = new Map(
           insertedNodes.map(node => [node.id, node.position] as const),
@@ -2045,16 +2058,20 @@ function CanvasEditorInner({
       const { warnings: responseWarnings, ...remote } = await reproduceIntoCanvas({
         projectId,
         assetId: asset.asset_id,
-        position: defaultPosition(canvasReproduceFootprint(recipe)),
+        position: defaultPosition(),
         alias: match?.alias ?? null,
         model: match?.model ?? null,
         documentRevision,
       });
-      // warnings 只是这次响应的附言，混进文档状态下一次 PUT 就是 422（extra=forbid）。
+      // warnings 是这次响应的附言，不属于文档：拆出来单独提示，合并只认节点 / 版本 / 连线。
       warnings = responseWarnings;
       return remote;
-    }, reproduceError => {
-      if (reproduceError instanceof ApiError && reproduceError.status === 409) {
+    }, { placement: 'group', onError: reproduceError => {
+      if (
+        reproduceError instanceof ApiError
+        && reproduceError.status === 409
+        && reproduceError.code === 'revision_conflict'
+      ) {
         // 别处先改了画布：收服务端文档，再让画师点一次重试（位置与版本号都要按新文档重算）。
         void reloadDocumentFromServer()
           .then(() => {
@@ -2072,7 +2089,7 @@ function CanvasEditorInner({
         return;
       }
       setError((reproduceError as Error).message);
-    });
+    } });
     if (!reproduced) return;
     const notices = canvasReproduceNotices(recipe, match, warnings);
     if (notices.length) announceToolNotice(notices.join('\n'));
@@ -2084,6 +2101,8 @@ function CanvasEditorInner({
     const open = () => {
       setTeamRelatedSha256(relatedSha256);
       setLibraryMode('team');
+      // 已经是团队模式时 initialKind 不变，面板里切走的栏不会回来：换 key 重挂到团队栏。
+      if (libraryMode === 'team') setLibraryPanelKey(current => current + 1);
     };
     if (libraryMode) creationAssetPanelRef.current?.requestTransition(open);
     else open();
@@ -2103,6 +2122,11 @@ function CanvasEditorInner({
 
   /** 分享提醒的「复刻」/「看看」：画布页认领后就地处理，不再导航去 Studio。 */
   async function handleTeamAssetAction(action: TeamAssetAction) {
+    if (!document) {
+      // 画布还在展开：先记下，文档到了再执行（复刻要按文档版本号写入）。
+      pendingTeamAssetAction.current = action;
+      return;
+    }
     if (action.action === 'open') {
       openTeamPanel(null);
       return;
@@ -2119,6 +2143,13 @@ function CanvasEditorInner({
     }
   }
   teamAssetActionRef.current = action => void handleTeamAssetAction(action);
+  const documentLoaded = document !== null;
+  useEffect(() => {
+    const pending = pendingTeamAssetAction.current;
+    if (!documentLoaded || !pending) return;
+    pendingTeamAssetAction.current = null;
+    teamAssetActionRef.current(pending);
+  }, [documentLoaded]);
 
   function handleCanvasDrop(event: DragEvent) {
     // 团队库的拖放先落成本机创作资产，再走与「资产面板拖入」完全一样的插入路径。
@@ -2132,8 +2163,8 @@ function CanvasEditorInner({
       void (async () => {
         try {
           const result = await adoptTeamAsset(teamAsset.library_id, teamAsset.entry_id, projectId);
-          await insertCreationAsset(result.asset.asset_id, {}, undefined, flow);
-          if (result.asset.kind === 'media' && result.asset.content.kind === 'media') {
+          const inserted = await insertCreationAsset(result.asset.asset_id, {}, undefined, flow);
+          if (inserted && result.asset.kind === 'media' && result.asset.content.kind === 'media') {
             await suggestRelatedRecipes(result.asset.content.sha256);
           }
         } catch (adoptError) {
@@ -4966,6 +4997,7 @@ function CanvasEditorInner({
 
         {libraryMode && (
           <CreationAssetPanel
+            key={libraryPanelKey}
             ref={creationAssetPanelRef}
             className="canvas-library-panel"
             projectId={projectId}

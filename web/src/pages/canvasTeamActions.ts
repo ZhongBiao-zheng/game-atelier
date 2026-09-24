@@ -1,16 +1,21 @@
 import type { CreationAssetSaveRequest } from '@/components/assets/CreationAssetPanel';
 import type { TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
 import { promptToAssetSegments } from '@/lib/promptVariables';
-import type { CanvasContentNode, CanvasContentVersion, CanvasMediaVersion, CanvasSize } from '@/schema/canvas';
+import type {
+  CanvasContentNode,
+  CanvasContentVersion,
+  CanvasMediaVersion,
+  CanvasNode,
+} from '@/schema/canvas';
 import type { GenerationRecipe } from '@/schema/creationAssets';
-import { CANVAS_DEFAULT_NODE_SIZE } from './canvasEditorModel';
+import {
+  canvasNodeRenderedSize,
+  placeCanvasNodeWithoutOverlap,
+  type CanvasPlacementBounds,
+} from './canvasEditorModel';
 import type { RecipeModelMatch } from './studioRecipe';
 
 type CanvasVisualVersion = CanvasMediaVersion & { kind: 'image' | 'video' };
-
-/** 与服务端复刻布局（canvas_reproduce.py）的列距 / 行距同量级，只用来找一块够大的空位。 */
-const REPRODUCE_COLUMN_GAP = 96;
-const REPRODUCE_ROW_GAP = 32;
 
 function isVisualVersion(version: CanvasContentVersion | null | undefined): version is CanvasVisualVersion {
   return version?.kind === 'image' || version?.kind === 'video';
@@ -82,14 +87,32 @@ export function canvasNodeShareRequest({ node, version, projectId, previewUrl }:
   };
 }
 
-/** 复刻出来的整组节点（参考一列在左、配置节点在右）大致占多大：服务端不避让，空位由前端找。 */
-export function canvasReproduceFootprint(recipe: GenerationRecipe): CanvasSize {
-  const references = recipe.inputs.filter(input => input.role === 'reference').length;
-  if (!references) return CANVAS_DEFAULT_NODE_SIZE;
-  return {
-    width: CANVAS_DEFAULT_NODE_SIZE.width * 2 + REPRODUCE_COLUMN_GAP,
-    height: references * (CANVAS_DEFAULT_NODE_SIZE.height + REPRODUCE_ROW_GAP),
-  };
+/** 服务端建好的一组节点（复刻：参考一列在左、配置在右）作为整体避让：按包围盒只找一次空位，
+ *  所有节点同一位移平移，组内相对布局不变、彼此不判重叠。 */
+export function placeCanvasNodeGroupWithoutOverlap(
+  group: readonly CanvasNode[],
+  existing: readonly CanvasNode[],
+  versions: Readonly<Record<string, CanvasContentVersion>>,
+  bounds?: CanvasPlacementBounds,
+): CanvasNode[] {
+  if (!group.length) return [];
+  const sizeOf = (node: CanvasNode) => canvasNodeRenderedSize(node, versions);
+  const boxes = group.map(node => ({ position: node.position, size: sizeOf(node) }));
+  const left = Math.min(...boxes.map(box => box.position.x));
+  const top = Math.min(...boxes.map(box => box.position.y));
+  const right = Math.max(...boxes.map(box => box.position.x + box.size.width));
+  const bottom = Math.max(...boxes.map(box => box.position.y + box.size.height));
+  const target = placeCanvasNodeWithoutOverlap(
+    { x: left, y: top },
+    existing,
+    { width: right - left, height: bottom - top },
+    bounds,
+    sizeOf,
+  );
+  const dx = target.x - left;
+  const dy = target.y - top;
+  if (!dx && !dy) return [...group];
+  return group.map(node => ({ ...node, position: { x: node.position.x + dx, y: node.position.y + dy } }));
 }
 
 export function canvasReproduceNotices(

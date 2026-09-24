@@ -1,16 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import type { CanvasContentVersion, CanvasImageNode, CanvasTextNode } from '@/schema/canvas';
+import type { CanvasContentVersion, CanvasImageNode, CanvasNode, CanvasTextNode } from '@/schema/canvas';
 import type { GenerationRecipe } from '@/schema/creationAssets';
 import {
   canvasNodeSaveRequest,
   canvasNodeShareRequest,
-  canvasReproduceFootprint,
   canvasReproduceNotices,
   isSavableCanvasVersion,
   isShareableCanvasVersion,
+  placeCanvasNodeGroupWithoutOverlap,
 } from './canvasTeamActions';
-import { CANVAS_DEFAULT_NODE_SIZE } from './canvasEditorModel';
 
 const imageNode: CanvasImageNode = {
   id: 'node-image', title: '城堡', type: 'image', position: { x: 0, y: 0 }, z_index: 0,
@@ -126,22 +125,45 @@ describe('canvasNodeShareRequest', () => {
 });
 
 describe('canvas reproduce helpers', () => {
-  it('reserves one column for the config node and one for references', () => {
-    expect(canvasReproduceFootprint(recipe())).toEqual(CANVAS_DEFAULT_NODE_SIZE);
-    const withRefs = canvasReproduceFootprint(recipe({ inputs: [
-      { order: 0, role: 'reference', kind: 'image', sha256: 'a', mime_type: 'image/png' },
-      { order: 1, role: 'reference', kind: 'image', sha256: 'b', mime_type: 'image/png' },
-      { order: 2, role: 'mask', kind: 'image', sha256: 'c', mime_type: 'image/png' },
-    ] }));
-    expect(withRefs.width).toBeGreaterThan(CANVAS_DEFAULT_NODE_SIZE.width * 2);
-    expect(withRefs.height).toBeGreaterThan(CANVAS_DEFAULT_NODE_SIZE.height * 2);
-  });
-
   it('lists the missing model first, then each server warning', () => {
     expect(canvasReproduceNotices(recipe(), null, ['没有带上遮罩（1 份）'])).toEqual([
       '本机没有 gpt-image-2',
       '没有带上遮罩（1 份）',
     ]);
     expect(canvasReproduceNotices(recipe(), { alias: 'main', model: 'gpt-image-2' }, [])).toEqual([]);
+  });
+});
+
+describe('placeCanvasNodeGroupWithoutOverlap', () => {
+  const portrait = (id: string): CanvasContentVersion => ({
+    version_id: id, kind: 'image', created_at: '', sha256: 'a'.repeat(64), origin: { kind: 'upload', upload_id: id },
+    path: `${id}.png`, mime_type: 'image/png', bytes: 1, width: 900, height: 1600,
+  });
+  const versions = { 'v-1': portrait('v-1'), 'v-2': portrait('v-2') };
+  // 服务端布局：参考一列在左纵排（9:16 渲染成 320 × 568.9，行距 48），配置节点在右、与首个参考顶对齐。
+  const group: CanvasNode[] = [
+    { ...imageNode, id: 'ref-1', position: { x: 40, y: 40 }, data: { ...imageNode.data, current_version_id: 'v-1' } },
+    { ...imageNode, id: 'ref-2', position: { x: 40, y: 40 + 320 * 16 / 9 + 48 }, data: { ...imageNode.data, current_version_id: 'v-2' } },
+    { id: 'config', title: '图片生成', type: 'config', position: { x: 40 + 320 + 96, y: 40 }, z_index: 0,
+      data: { draft: { mode: 'image', prompt: '', input_policy: 'all_connected', model: '', params: {}, updated_at: '' } } },
+  ];
+  const offsets = (nodes: CanvasNode[]) => nodes.map(node => ({
+    x: node.position.x - nodes[0].position.x,
+    y: node.position.y - nodes[0].position.y,
+  }));
+
+  it('moves the whole group by one offset away from an existing node', () => {
+    const blocker = { ...textNode, position: { x: 40, y: 40 } };
+    const placed = placeCanvasNodeGroupWithoutOverlap(group, [blocker], versions, { left: 0, top: 0, right: 1000, bottom: 740 });
+    expect(offsets(placed)).toEqual(offsets(group));
+    expect(placed[0].position).not.toEqual(group[0].position);
+  });
+
+  it('keeps a group that already sits on free canvas untouched', () => {
+    expect(placeCanvasNodeGroupWithoutOverlap(group, [], versions)).toEqual(group);
+  });
+
+  it('places nothing for an empty group', () => {
+    expect(placeCanvasNodeGroupWithoutOverlap([], [], {})).toEqual([]);
   });
 });
