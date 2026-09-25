@@ -63,7 +63,7 @@ from character_workflow.lib.team_library_share import (
     validate_share_meta,
     withdraw_shared_asset,
 )
-from viewer_server.routes import asset_state_broken_error
+from viewer_server.errors import asset_state_broken_error
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +111,8 @@ def _index_or_503(mount: TeamLibraryMount) -> TeamLibraryIndex:
     """读端点只读缓存索引，绝不顺手扫一次。
 
     扫描要走整棵工作副本，几万个文件时是秒级；挂在读端点上，每个没命中缓存的请求都会各扫
-    一遍（没有单飞），刷新一下页面就是并发全量扫描。扫描只发生在挂载与 rescan——那两处本来
-    就在调 scan_library，而且是画师主动触发、等得起的动作。
+    一遍（没有单飞），刷新一下页面就是并发全量扫描。扫描只发生在 refresh_team_library（挂载、
+    rescan、分享写入后、目录监听与启动补扫）——挂载与 rescan 是画师主动触发、等得起的动作。
     """
     if not tl.library_reachable(mount):
         raise HTTPException(503, detail=_UNREACHABLE)
@@ -505,6 +505,8 @@ def get_creation_asset_staleness(asset_id: str) -> CreationAssetStaleness:
         asset = get_creation_asset(asset_id)
     except KeyError:
         raise HTTPException(404, detail="找不到这个创作资产") from None
+    except CreationAssetStateError as error:
+        raise asset_state_broken_error(error) from error
     if asset.adopted_from is not None:
         _mounts()  # 挂载表损坏 → 500 带文件名，别被当成 unknown 静默吞掉
     return CreationAssetStaleness(status=adoption_staleness(asset))
@@ -520,7 +522,11 @@ def post_creation_asset_staleness_batch(
 ) -> CreationAssetStalenessBatch:
     """资产面板一次查一批；不存在的 id 不出现在结果里。"""
     _mounts()  # 挂载表损坏 → 500 带文件名，别被当成一批 unknown 静默吞掉
-    return CreationAssetStalenessBatch(statuses=adoption_staleness_batch(payload.asset_ids))
+    try:
+        statuses = adoption_staleness_batch(payload.asset_ids)
+    except CreationAssetStateError as error:
+        raise asset_state_broken_error(error) from error
+    return CreationAssetStalenessBatch(statuses=statuses)
 
 
 @team_library_router.post("/creation-assets/{asset_id}/readopt", response_model=CreationAsset)

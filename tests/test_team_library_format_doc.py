@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
+from tests.test_team_library_index import scan_and_cache
 from character_workflow.lib.schemas import (
     MEDIA_SUFFIXES,
     SHA256_PATTERN,
@@ -20,7 +21,7 @@ from character_workflow.lib.schemas import (
     TeamLibraryMount,
 )
 from character_workflow.lib.team_library import MANIFEST_NAME, read_manifest
-from character_workflow.lib.team_library_index import _CONFLICT_SUFFIX, RAW_SUFFIXES, scan_library
+from character_workflow.lib.team_library_index import _CONFLICT_SUFFIX, RAW_SUFFIXES
 from character_workflow.lib.team_library_share import author_dir_name
 
 DOC = Path(__file__).resolve().parents[1] / "docs" / "team-library-format.md"
@@ -120,7 +121,7 @@ def test_library_built_from_examples_scans_ready(tmp_path: Path):
         name=manifest.name, mounted_at="2026-09-25T00:00:00+00:00",
     )
 
-    index = scan_library(mount)
+    index = scan_and_cache(mount)
 
     shared = [e for e in index.entries if e.kind != "raw"]
     raw = [e for e in index.entries if e.kind == "raw"]

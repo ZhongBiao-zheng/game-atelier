@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from watchdog.events import FileCreatedEvent, FileMovedEvent
 
+from tests.test_team_library_index import scan_and_cache
 from viewer_server import watcher
 
 
@@ -103,7 +104,7 @@ def test_team_library_handler_ignores_hidden_paths(isolated_data_root, tmp_path,
 def test_team_library_handler_keeps_index_when_directory_goes_offline(
     isolated_data_root, tmp_path, monkeypatch
 ):
-    """目录掉线不是「库空了」：scan_library 对不存在的目录只会返回空索引，不抛 OSError。
+    """目录掉线不是「库空了」：build_index 对不存在的目录只会返回空索引，不抛 OSError。
 
     照扫就会清空缓存并广播一整轮 removed —— 网盘抖一下，画师的库在界面上就全没了。
     """
@@ -154,7 +155,7 @@ def test_refresh_team_library_broadcasts_diff_and_returns_index(
     folder = tmp_path / "lib"
     folder.mkdir()
     mount = tl.mount_library(project_id="p1", path=str(folder), name=None, created_by="我")
-    idx.scan_library(mount)
+    scan_and_cache(mount)
     events = _capture(monkeypatch)
     (folder / "a.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
     index = watcher.refresh_team_library(mount)
@@ -221,7 +222,7 @@ def test_startup_rescan_broadcasts_only_changes_since_cached_index(
     folder.mkdir()
     (folder / "old.png").write_bytes(_png_bytes(b"old"))
     mount = tl.mount_library(project_id="p1", path=str(folder), name=None, created_by="我")
-    idx.scan_library(mount)
+    scan_and_cache(mount)
     (folder / "new.png").write_bytes(_png_bytes(b"new"))
     events = _capture(monkeypatch)
     _rescan_and_join()
@@ -248,7 +249,7 @@ def test_startup_rescan_without_cache_is_silent_and_skips_unreachable(
     offline_mount = tl.mount_library(
         project_id="p1", path=str(offline), name=None, created_by="我"
     )
-    idx.scan_library(offline_mount)
+    scan_and_cache(offline_mount)
     cached = (idx.cache_dir(offline_mount.library_id) / "index.json").read_text(encoding="utf-8")
     shutil.rmtree(offline)
 
@@ -303,11 +304,10 @@ def test_startup_rescan_one_stuck_library_does_not_hold_back_others(
     import threading
 
     from character_workflow.lib import team_library as tl
-    from character_workflow.lib import team_library_index as idx
 
     stuck, live = _mount_folders(tmp_path, ("stuck", "live"))
     for mount in (stuck, live):
-        idx.scan_library(mount)
+        scan_and_cache(mount)
     (Path(live.mount_path) / "new.png").write_bytes(_png_bytes(b"new"))
     release = threading.Event()
     real_reachable, real_refresh = tl.library_reachable, watcher.refresh_team_library
@@ -348,7 +348,7 @@ def test_refresh_scans_outside_lock_so_second_refresh_is_not_blocked(
     from character_workflow.lib import team_library_index as idx
 
     (mount,) = _mount_folders(tmp_path, ("lib",))
-    idx.scan_library(mount)
+    scan_and_cache(mount)
     scanning, release = threading.Event(), threading.Event()
     real_build = idx.build_index
     slow_once = [True]
@@ -380,6 +380,44 @@ def test_refresh_scans_outside_lock_so_second_refresh_is_not_blocked(
     assert [(d["title"], d["change"]) for _, d in events] == [("shared.png", "added")]
 
 
+def test_superseded_refresh_rescans_when_cache_is_gone(isolated_data_root, tmp_path, monkeypatch):
+    """作废的旧结果绝不交给调用方：已落盘的那份恰好读不到（缓存被删）就重刷一次。"""
+    import shutil
+    import threading
+
+    from character_workflow.lib import team_library_index as idx
+
+    (mount,) = _mount_folders(tmp_path, ("lib",))
+    scan_and_cache(mount)
+    scanning, release = threading.Event(), threading.Event()
+    real_build = idx.build_index
+    slow_once = [True]
+
+    def build(target):
+        result = real_build(target)
+        if slow_once[0]:
+            slow_once[0] = False
+            scanning.set()
+            release.wait(10)
+        return result
+
+    monkeypatch.setattr(idx, "build_index", build)
+    _capture(monkeypatch)
+    returned: list = []
+    slow = threading.Thread(
+        target=lambda: returned.append(watcher.refresh_team_library(mount)), daemon=True
+    )
+    slow.start()
+    assert scanning.wait(5)
+    (Path(mount.mount_path) / "shared.png").write_bytes(_png_bytes(b"s"))
+    watcher.refresh_team_library(mount)
+    shutil.rmtree(idx.cache_dir(mount.library_id))
+    release.set()
+    slow.join(5)
+    assert not slow.is_alive()
+    assert [e.title for e in returned[0].entries] == ["shared.png"]
+
+
 def test_startup_rescan_survives_broken_mount_table(isolated_data_root, monkeypatch, caplog):
     from character_workflow.lib import team_library as tl
 
@@ -392,21 +430,13 @@ def test_startup_rescan_survives_broken_mount_table(isolated_data_root, monkeypa
     assert "挂载表坏了" in caplog.text
 
 
-def test_start_watchers_runs_startup_rescan_in_background(isolated_data_root, monkeypatch):
-    import threading
-
-    started = threading.Event()
-    caller: list[threading.Thread] = []
-
-    def record():
-        caller.append(threading.current_thread())
-        started.set()
-
-    monkeypatch.setattr(watcher, "rescan_team_libraries", record)
+def test_start_watchers_runs_startup_rescan(isolated_data_root, monkeypatch):
+    """rescan_team_libraries 只读挂载表、每库起 daemon 线程就返回，start_watchers 直接调它。"""
+    calls: list[str] = []
+    monkeypatch.setattr(watcher, "rescan_team_libraries", lambda: calls.append("rescan") or [])
     obs = watcher.start_watchers()
     try:
-        assert started.wait(5)
-        assert caller[0] is not threading.main_thread() and caller[0].daemon
+        assert calls == ["rescan"]
     finally:
         obs.stop()
         obs.join(timeout=5)

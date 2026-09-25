@@ -91,6 +91,7 @@ from character_workflow.lib.schemas import (
     UiSchemeCreate, UiSchemeDefaultSet, UiSchemesFile,
     WebEditableJobPatch,
 )
+from viewer_server.errors import asset_state_broken_error
 
 
 _STUDIO_SHUTDOWN_EVENT = threading.Event()
@@ -2488,16 +2489,6 @@ def _raise_canvas_revision_error(error: RuntimeError) -> None:
     raise error
 
 
-def asset_state_broken_error(error: Exception) -> HTTPException:
-    """CreationAssetStateError（本机资产库数据损坏 / blob 缺失）的唯一 HTTP 映射：500 asset_state_broken。
-
-    判据是「谁能修」：服务端数据坏了，刷新重试永远不会成功，所以不是 409（前端 409 = 刷新后重试）。
-    创作资产、画布复刻、团队库采用 / 重新采用 / 分享都走这里，别在路由里各写一份。
-    """
-    logger.warning("creation asset state broken: %s", error)
-    return HTTPException(500, detail={"code": "asset_state_broken", "message": str(error)})
-
-
 def _raise_creation_asset_error(error: Exception) -> None:
     from character_workflow.lib.creation_assets import (
         CreationAssetDuplicateError,
@@ -2747,7 +2738,10 @@ def post_canvas_creation_asset_insert(
     response: Response,
     if_match: str | None = Header(default=None, alias="If-Match"),
 ):
-    from character_workflow.lib.creation_assets import insert_creation_asset_into_canvas
+    from character_workflow.lib.creation_assets import (
+        CreationAssetStateError,
+        insert_creation_asset_into_canvas,
+    )
     try:
         document = insert_creation_asset_into_canvas(
             project_id=project_id,
@@ -2763,6 +2757,9 @@ def post_canvas_creation_asset_insert(
         _raise_canvas_revision_error(error)
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布、节点或创作资产") from None
+    # ValueError 子类，必须先于 422：媒体 blob 缺失 / catalog 损坏是本机数据故障，不是请求的错。
+    except CreationAssetStateError as error:
+        raise asset_state_broken_error(error) from error
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
 

@@ -258,12 +258,6 @@ def write_index(index: TeamLibraryIndex) -> None:
     atomic_write_json(_index_path(index.library_id), index.model_dump(mode="json"))
 
 
-def scan_library(mount: TeamLibraryMount) -> TeamLibraryIndex:
-    index = build_index(mount)
-    write_index(index)
-    return index
-
-
 def read_index(library_id: str) -> TeamLibraryIndex | None:
     path = _index_path(library_id)
     if not path.is_file():

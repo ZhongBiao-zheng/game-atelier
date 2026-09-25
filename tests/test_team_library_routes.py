@@ -877,6 +877,29 @@ def test_creation_asset_state_error_on_share_is_500(client, shared_lib, monkeypa
     assert resp.status_code == 500 and resp.json()["detail"] == _STATE_BROKEN
 
 
+def test_creation_asset_state_error_on_staleness_is_500(client, monkeypatch):
+    """catalog 损坏时过时检查原先是裸 500 无 code。"""
+    from viewer_server import team_library_routes
+
+    monkeypatch.setattr(team_library_routes, "get_creation_asset", _raise_state_broken)
+    monkeypatch.setattr(team_library_routes, "adoption_staleness_batch", _raise_state_broken)
+    single = client.get("/api/creation-assets/ca_x/staleness")
+    batch = client.post("/api/creation-assets/staleness", json={"asset_ids": ["ca_x"]})
+    for resp in (single, batch):
+        assert resp.status_code == 500, resp.text
+        assert resp.json()["detail"] == _STATE_BROKEN
+
+
+def test_asset_state_broken_is_logged_with_cause(client, monkeypatch, caplog):
+    from viewer_server import errors, team_library_routes
+
+    monkeypatch.setattr(team_library_routes, "get_creation_asset", _raise_state_broken)
+    with caplog.at_level("WARNING", logger=errors.__name__):
+        client.get("/api/creation-assets/ca_x/staleness")
+    (record,) = [r for r in caplog.records if r.name == errors.__name__]
+    assert record.exc_info is not None and "创作资产库状态损坏" in record.getMessage()
+
+
 def test_creation_asset_state_error_on_adopt_and_readopt_is_500(client, shared_lib, monkeypatch):
     """采用路由原先让它落进 ValueError → 422，重新采用原先是 409，现在都是 500。"""
     from viewer_server import team_library_routes

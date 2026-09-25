@@ -201,7 +201,7 @@ class TeamLibraryHandler(FileSystemEventHandler):
     def rescan(self) -> None:
         from character_workflow.lib import team_library as tl
 
-        # 目录掉线不能当成「库空了」：scan_library 对不存在的目录不抛 OSError，
+        # 目录掉线不能当成「库空了」：build_index 对不存在的目录不抛 OSError，
         # 它只会返回空索引（is_dir() 假 → 空列表；os.walk 缺目录静默跳过）。
         # 照扫就会把缓存索引清空并广播一整轮 removed，网盘一抖画师的库就「全没了」。
         if not tl.library_reachable(self.mount):
@@ -235,7 +235,8 @@ def refresh_team_library(mount: TeamLibraryMount) -> TeamLibraryIndex:
 
     扫描并发之后，先开扫的可能后扫完：它看到的目录更旧，落盘就会把新分享的资产盖掉、
     广播一条假 removed。所以按开扫顺序领票，已经有更晚开扫的结果落盘时，这次结果作废，
-    直接返回已落盘的那份（它开扫时本次调用方要看的写入已经完成了）。
+    直接返回已落盘的那份（它开扫时本次调用方要看的写入已经完成了）；那份恰好读不到（缓存刚被删）
+    就重新刷新一次，绝不把作废的旧结果交给调用方。
     调用方负责先判可达（不可达时扫出的是空索引，见 TeamLibraryHandler.rescan）。
     """
     from character_workflow.lib import team_library_index as idx
@@ -244,15 +245,20 @@ def refresh_team_library(mount: TeamLibraryMount) -> TeamLibraryIndex:
     ticket = _next_ticket()
     after = idx.build_index(mount)
     with _refresh_lock(mount.library_id):
-        if _committed_tickets.get(mount.library_id, -1) > ticket:
-            return idx.read_index(mount.library_id) or after
-        before = idx.read_index(mount.library_id)
-        idx.write_index(after)
-        _committed_tickets[mount.library_id] = ticket
-        for change in idx.diff_index(before, after):
-            event = TeamLibraryChangeEvent(library_id=mount.library_id, **change)
-            hub.broadcast("team-library-changed", event.model_dump(mode="json"))
-    return after
+        superseded = _committed_tickets.get(mount.library_id, -1) > ticket
+        if superseded:
+            latest = idx.read_index(mount.library_id)
+        else:
+            before = idx.read_index(mount.library_id)
+            idx.write_index(after)
+            _committed_tickets[mount.library_id] = ticket
+            for change in idx.diff_index(before, after):
+                event = TeamLibraryChangeEvent(library_id=mount.library_id, **change)
+                hub.broadcast("team-library-changed", event.model_dump(mode="json"))
+    if not superseded:
+        return after
+    # 重刷必须在锁外：_refresh_lock 不可重入。
+    return latest if latest is not None else refresh_team_library(mount)
 
 
 _observer: Observer | None = None
@@ -333,7 +339,7 @@ def _rescan_one(library_id: str) -> None:
 
     try:
         mount = tl.get_mount(library_id)
-        # 不可达时 scan_library 扫出空索引：照扫就是广播一整轮 removed（见 TeamLibraryHandler）。
+        # 不可达时 build_index 扫出空索引：照扫就是广播一整轮 removed（见 TeamLibraryHandler）。
         if tl.library_reachable(mount):
             refresh_team_library(mount)
     except Exception:
@@ -365,13 +371,6 @@ def rescan_team_libraries() -> list[threading.Thread]:
     for thread in threads:
         thread.start()
     return threads
-
-
-def _start_team_library_rescan() -> None:
-    # 整库扫描是秒级（网盘上更久），放后台线程，别拖住 server 启动。
-    threading.Thread(
-        target=rescan_team_libraries, name="team-library-startup-rescan", daemon=True
-    ).start()
 
 
 def start_watchers() -> Observer:
@@ -425,5 +424,6 @@ def start_watchers() -> Observer:
 
     observer.start()
     # 监听建好之后再补扫：补扫期间库里的新变化由监听接住，不会漏在两者之间。
-    _start_team_library_rescan()
+    # 这里只读挂载表、每个库起一条 daemon 线程就返回，不会拖住 server 启动。
+    rescan_team_libraries()
     return observer

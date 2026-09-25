@@ -148,10 +148,16 @@ def test_creation_asset_state_error_is_500_asset_state_broken(client, monkeypatc
     job = _studio_job(png((90, 0, 0)), {})
     monkeypatch.setattr(generation_recipe, "save_generation_asset", _state_broken)
     monkeypatch.setattr(creation_assets, "create_prompt_asset", _state_broken)
+    # 画布插入：媒体 blob 缺失 / catalog 损坏原先落进 ValueError → 422。
+    monkeypatch.setattr(creation_assets, "insert_creation_asset_into_canvas", _state_broken)
     prompt = client.post("/api/creation-assets/prompts", json={
         "title": "模板", "segments": [{"kind": "text", "text": "猫"}], "tags": [],
     })
-    for resp in (_from_job(client, job.job_id), prompt):
+    insert = client.post(
+        "/api/canvas/projects/cp-x/creation-assets/ca_x/insert",
+        headers={"If-Match": "0"}, json={"position": {"x": 0, "y": 0}},
+    )
+    for resp in (_from_job(client, job.job_id), prompt, insert):
         assert resp.status_code == 500, resp.text
         assert resp.json()["detail"] == {
             "code": "asset_state_broken", "message": "创作资产库状态损坏",

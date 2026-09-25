@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from tests.test_team_library_index import scan_and_cache
 from character_workflow.lib import generation_recipe
 from character_workflow.lib import team_library_share as share
 from character_workflow.lib.creation_assets import (
@@ -36,7 +37,6 @@ from character_workflow.lib.schemas import (
 )
 from character_workflow.lib.studio_jobs import studio_output_dir
 from character_workflow.lib.team_library_adopt import adopt_team_asset
-from character_workflow.lib.team_library_index import scan_library
 from character_workflow.lib.team_library_share import (
     TeamShareError,
     TeamShareForbidden,
@@ -535,7 +535,7 @@ def test_author_dir_name_normalizes_to_nfc():
 
 
 def _index_entry(mount, asset_id):
-    return next(e for e in scan_library(mount).entries if e.id == asset_id)
+    return next(e for e in scan_and_cache(mount).entries if e.id == asset_id)
 
 
 # ---------------------------------------------------- C1 参考路径的最后一道闸
@@ -825,7 +825,7 @@ def test_withdraw_succeeds_when_cleanup_fails(isolated_data_root, mount, monkeyp
     assert not _asset_dir(mount, original.asset_id).exists()
     assert (_asset_dir(mount, original.asset_id).parent / f".tmp-del-{original.asset_id}").is_dir()
     assert any("清理" in record.message for record in caplog.records)
-    entries = [e for e in scan_library(mount).entries if e.id == original.asset_id]
+    entries = [e for e in scan_and_cache(mount).entries if e.id == original.asset_id]
     assert entries == []
 
 

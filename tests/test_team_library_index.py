@@ -8,7 +8,7 @@ import pytest
 
 from character_workflow.lib import team_library as tl
 from character_workflow.lib import team_library_index as idx
-from character_workflow.lib.schemas import TeamLibraryIndexEntry
+from character_workflow.lib.schemas import TeamLibraryIndex, TeamLibraryIndexEntry
 
 _PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
@@ -31,6 +31,13 @@ def _shared_asset(folder, author="老王", title="董卓 待机", kind="media"):
     return asset_dir
 
 
+def scan_and_cache(mount) -> TeamLibraryIndex:
+    """扫描并写本机索引缓存（refresh_team_library 去掉广播与并发票号的那部分），供各团队库测试共用。"""
+    index = idx.build_index(mount)
+    idx.write_index(index)
+    return index
+
+
 def _version(entry) -> str:
     return __import__("hashlib").sha1(entry.updated_at.encode("utf-8")).hexdigest()[:10]
 
@@ -50,7 +57,7 @@ def test_scan_finds_shared_and_raw_and_skips_hidden(isolated_data_root, tmp_path
     (folder / "concept" / "castle.png.mine").write_bytes(_PNG)
     (folder / ".svn").mkdir()
     (folder / ".svn" / "x.png").write_bytes(_PNG)
-    index = idx.scan_library(mount)
+    index = scan_and_cache(mount)
     kinds = sorted((e.kind, e.relative_path) for e in index.entries)
     assert kinds == [("media", f"shared/老王/{_ASSET_ID}"), ("raw", "concept/castle.png")]
     raw = next(e for e in index.entries if e.kind == "raw")
@@ -64,15 +71,15 @@ def test_incomplete_asset_is_flagged(isolated_data_root, tmp_path):
     folder, mount = _mount(tmp_path)
     asset_dir = _shared_asset(folder)
     (asset_dir / "dz.png").unlink()
-    entry = idx.scan_library(mount).entries[0]
+    entry = scan_and_cache(mount).entries[0]
     assert entry.status == "incomplete"
 
 
 def test_diff_reports_added_updated_removed(isolated_data_root, tmp_path):
     folder, mount = _mount(tmp_path)
-    before = idx.scan_library(mount)
+    before = scan_and_cache(mount)
     asset_dir = _shared_asset(folder)
-    after = idx.scan_library(mount)
+    after = scan_and_cache(mount)
     assert idx.diff_index(before, after) == [{
         "asset_id": _ASSET_ID, "kind": "media", "author": "老王", "change": "added",
         "title": "董卓 待机", "status": "ready", "mime_type": "image/png",
@@ -81,14 +88,14 @@ def test_diff_reports_added_updated_removed(isolated_data_root, tmp_path):
     data["updated_at"] = "2026-09-21T00:00:00Z"
     data["title"] = "董卓 攻击"
     (asset_dir / "asset.json").write_text(json.dumps(data), "utf-8")
-    updated = idx.scan_library(mount)
+    updated = scan_and_cache(mount)
     assert idx.diff_index(after, updated) == [{
         "asset_id": _ASSET_ID, "kind": "media", "author": "老王", "change": "updated",
         "title": "董卓 攻击", "status": "ready", "mime_type": "image/png",
     }]
     import shutil
     shutil.rmtree(asset_dir)
-    assert idx.diff_index(updated, idx.scan_library(mount)) == [{
+    assert idx.diff_index(updated, scan_and_cache(mount)) == [{
         "asset_id": _ASSET_ID, "kind": "media", "author": "老王", "change": "removed",
         "title": None, "status": None, "mime_type": None,
     }]
@@ -99,30 +106,30 @@ def test_diff_incomplete_becoming_ready_is_added(isolated_data_root, tmp_path):
     folder, mount = _mount(tmp_path)
     asset_dir = _shared_asset(folder)
     (asset_dir / "dz.png").unlink()
-    before = idx.scan_library(mount)
+    before = scan_and_cache(mount)
     assert before.entries[0].status == "incomplete"
     (asset_dir / "dz.png").write_bytes(_PNG)
-    (change,) = idx.diff_index(before, idx.scan_library(mount))
+    (change,) = idx.diff_index(before, scan_and_cache(mount))
     assert (change["change"], change["status"]) == ("added", "ready")
 
 
 def test_diff_ready_title_change_is_updated(isolated_data_root, tmp_path):
     folder, mount = _mount(tmp_path)
     asset_dir = _shared_asset(folder)
-    before = idx.scan_library(mount)
+    before = scan_and_cache(mount)
     data = json.loads((asset_dir / "asset.json").read_text("utf-8"))
     data.update(title="董卓 攻击", updated_at="2026-09-21T00:00:00Z")
     (asset_dir / "asset.json").write_text(json.dumps(data), "utf-8")
-    (change,) = idx.diff_index(before, idx.scan_library(mount))
+    (change,) = idx.diff_index(before, scan_and_cache(mount))
     assert (change["change"], change["title"]) == ("updated", "董卓 攻击")
 
 
 def test_diff_ready_becoming_incomplete_is_updated(isolated_data_root, tmp_path):
     folder, mount = _mount(tmp_path)
     asset_dir = _shared_asset(folder)
-    before = idx.scan_library(mount)
+    before = scan_and_cache(mount)
     (asset_dir / "dz.png").unlink()
-    (change,) = idx.diff_index(before, idx.scan_library(mount))
+    (change,) = idx.diff_index(before, scan_and_cache(mount))
     assert (change["change"], change["status"]) == ("updated", "incomplete")
 
 
@@ -139,9 +146,9 @@ def test_diff_payload_validates_as_change_event(isolated_data_root, tmp_path):
     from character_workflow.lib.schemas import TeamLibraryChangeEvent
 
     folder, mount = _mount(tmp_path)
-    before = idx.scan_library(mount)
+    before = scan_and_cache(mount)
     _shared_asset(folder)
-    (change,) = idx.diff_index(before, idx.scan_library(mount))
+    (change,) = idx.diff_index(before, scan_and_cache(mount))
     event = TeamLibraryChangeEvent(library_id=mount.library_id, **change)
     assert event.model_dump(mode="json") == {"library_id": mount.library_id, **change}
 
@@ -151,7 +158,7 @@ def test_diff_without_prior_index_is_silent(isolated_data_root, tmp_path):
     folder, mount = _mount(tmp_path)
     _shared_asset(folder)
     (folder / "castle.png").write_bytes(_PNG)
-    assert idx.diff_index(None, idx.scan_library(mount)) == []
+    assert idx.diff_index(None, scan_and_cache(mount)) == []
 
 
 def test_query_filters_and_pages(isolated_data_root, tmp_path):
@@ -159,7 +166,7 @@ def test_query_filters_and_pages(isolated_data_root, tmp_path):
     _shared_asset(folder)
     for i in range(3):
         (folder / f"r{i}.png").write_bytes(_PNG)
-    index = idx.scan_library(mount)
+    index = scan_and_cache(mount)
     assert len(idx.query_index(index, kind="raw").entries) == 3
     assert [e.title for e in idx.query_index(index, author="老王").entries] == ["董卓 待机"]
     assert [e.title for e in idx.query_index(index, q="董").entries] == ["董卓 待机"]
@@ -173,7 +180,7 @@ def test_query_filters_and_pages(isolated_data_root, tmp_path):
 def test_thumbnail_is_cached_outside_library(isolated_data_root, tmp_path):
     folder, mount = _mount(tmp_path)
     (folder / "a.png").write_bytes(_PNG)
-    index = idx.scan_library(mount)
+    index = scan_and_cache(mount)
     entry = index.entries[0]
     data = idx.thumbnail_bytes(mount, entry, 256)
     assert data and data[:4] == b"RIFF"
@@ -186,7 +193,7 @@ def test_thumbnail_cache_key_versions_on_updated_at(isolated_data_root, tmp_path
     """SVN 覆盖同名文件后 updated_at 变化 → 缓存键变化，不会永久命中旧图。"""
     folder, mount = _mount(tmp_path)
     (folder / "a.png").write_bytes(_PNG)
-    entry = idx.scan_library(mount).entries[0]
+    entry = scan_and_cache(mount).entries[0]
     assert idx.thumbnail_bytes(mount, entry, 256)
     newer = entry.model_copy(update={"updated_at": "2030-01-01T00:00:00+00:00"})
     assert idx.thumbnail_bytes(mount, newer, 256)
@@ -197,7 +204,7 @@ def test_thumbnail_cache_key_versions_on_updated_at(isolated_data_root, tmp_path
 def test_thumbnail_returns_none_on_decompression_bomb(isolated_data_root, tmp_path, monkeypatch):
     folder, mount = _mount(tmp_path)
     (folder / "a.png").write_bytes(_PNG)
-    entry = idx.scan_library(mount).entries[0]
+    entry = scan_and_cache(mount).entries[0]
 
     def boom(*_args, **_kwargs):
         raise idx.Image.DecompressionBombError("too big")
@@ -228,7 +235,7 @@ def test_entry_content_path_rejects_escaping_media_filename(isolated_data_root, 
     data["media"]["filename"] = "../../../outside.png"
     (asset_dir / "asset.json").write_text(json.dumps(data, ensure_ascii=False), "utf-8")
     (tmp_path.parent / "outside.png").write_bytes(_PNG)
-    entry = idx.scan_library(mount).entries[0]
+    entry = scan_and_cache(mount).entries[0]
     with pytest.raises(FileNotFoundError):
         idx.entry_content_path(mount, entry)
 
@@ -239,7 +246,7 @@ def test_scan_skips_symlink_pointing_outside_library(isolated_data_root, tmp_pat
     outside = tmp_path / "outside.png"
     outside.write_bytes(_PNG)
     (folder / "linked.png").symlink_to(outside)
-    entries = idx.scan_library(mount).entries
+    entries = scan_and_cache(mount).entries
     assert [e.relative_path for e in entries] == ["inside.png"]
 
 
@@ -260,7 +267,7 @@ def test_scan_prunes_hidden_dirs(isolated_data_root, tmp_path, monkeypatch):
             yield dirpath, dirnames, filenames
 
     monkeypatch.setattr(idx.os, "walk", spy)
-    entries = idx.scan_library(mount).entries
+    entries = scan_and_cache(mount).entries
     assert [e.relative_path for e in entries] == ["a.png"]
     assert visited and not any(".svn" in path for path in visited)
 
@@ -277,7 +284,7 @@ def test_scan_survives_file_vanishing_mid_scan(isolated_data_root, tmp_path, mon
         return real_stat(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "stat", flaky)
-    entries = idx.scan_library(mount).entries
+    entries = scan_and_cache(mount).entries
     assert [e.relative_path for e in entries] == ["a.png"]
 
 
@@ -313,7 +320,7 @@ def test_generation_entry_carries_model_and_cost(isolated_data_root, tmp_path):
     folder, mount = _mount(tmp_path)
     _generation_asset(folder)
     (folder / "castle.png").write_bytes(_PNG)
-    entries = {e.kind: e for e in idx.scan_library(mount).entries}
+    entries = {e.kind: e for e in scan_and_cache(mount).entries}
     generation = entries["generation"]
     assert generation.status == "ready" and generation.reproducible
     assert generation.model == "doubao-seedream-4-0" and generation.cost_cny == 0.21
@@ -323,7 +330,7 @@ def test_generation_entry_carries_model_and_cost(isolated_data_root, tmp_path):
 def test_media_entry_has_no_model(isolated_data_root, tmp_path):
     folder, mount = _mount(tmp_path)
     _shared_asset(folder)
-    entry = idx.scan_library(mount).entries[0]
+    entry = scan_and_cache(mount).entries[0]
     assert entry.model is None and entry.cost_cny is None
 
 
@@ -335,14 +342,14 @@ def test_unknown_fields_from_newer_writer_stay_ready(isolated_data_root, tmp_pat
     data["snapshot"]["inputs"][0]["weight"] = 0.5
     data["author"]["avatar"] = "x.png"
     (asset_dir / "asset.json").write_text(json.dumps(data, ensure_ascii=False), "utf-8")
-    entry = idx.scan_library(mount).entries[0]
+    entry = scan_and_cache(mount).entries[0]
     assert entry.kind == "generation" and entry.status == "ready"
 
 
 def test_future_asset_version_is_incomplete(isolated_data_root, tmp_path):
     folder, mount = _mount(tmp_path)
     _generation_asset(folder, extra={"team_asset_version": 2})
-    entry = idx.scan_library(mount).entries[0]
+    entry = scan_and_cache(mount).entries[0]
     assert entry.status == "incomplete" and not entry.reproducible
 
 
@@ -350,7 +357,7 @@ def test_generation_with_missing_ref_is_incomplete(isolated_data_root, tmp_path)
     """refs 还没同步到：采用必失败，索引不能标 ready。"""
     folder, mount = _mount(tmp_path)
     _generation_asset(folder, ref=False)
-    entry = idx.scan_library(mount).entries[0]
+    entry = scan_and_cache(mount).entries[0]
     assert entry.kind == "generation" and entry.status == "incomplete"
 
 
@@ -363,7 +370,7 @@ def test_generation_with_ref_symlink_outside_is_incomplete(isolated_data_root, t
     outside.write_bytes(_PNG)
     sha = hashlib.sha256(_PNG).hexdigest()
     (asset_dir / f"refs/01-{sha[:12]}.png").symlink_to(outside)
-    entry = idx.scan_library(mount).entries[0]
+    entry = scan_and_cache(mount).entries[0]
     assert entry.status == "incomplete"
 
 
@@ -399,14 +406,14 @@ def test_raw_entry_id_matches_scanned_id(isolated_data_root, tmp_path):
     folder, mount = _mount(tmp_path)
     (folder / "concept").mkdir()
     (folder / "concept" / "castle.png").write_bytes(_PNG)
-    entry = idx.scan_library(mount).entries[0]
+    entry = scan_and_cache(mount).entries[0]
     assert entry.id == idx.raw_entry_id("concept/castle.png")
 
 
 def test_entry_content_path_refuses_entries_that_are_not_ready(isolated_data_root, tmp_path):
     folder, mount = _mount(tmp_path)
     _shared_asset(folder)
-    entry = idx.scan_library(mount).entries[0].model_copy(update={"status": "incomplete"})
+    entry = scan_and_cache(mount).entries[0].model_copy(update={"status": "incomplete"})
     with pytest.raises(FileNotFoundError):
         idx.entry_content_path(mount, entry)
     assert idx.thumbnail_bytes(mount, entry, 256) is None
@@ -420,7 +427,7 @@ def test_entry_content_path_keeps_media_inside_its_asset_dir(isolated_data_root,
     data = json.loads((asset_dir / "asset.json").read_text("utf-8"))
     data["media"]["filename"] = "../dz.png"
     (asset_dir / "asset.json").write_text(json.dumps(data, ensure_ascii=False), "utf-8")
-    entry = idx.scan_library(mount).entries[0]
+    entry = scan_and_cache(mount).entries[0]
     assert entry.status == "incomplete"
     with pytest.raises(FileNotFoundError):
         idx.entry_content_path(mount, entry.model_copy(update={"status": "ready"}))
@@ -435,7 +442,7 @@ def test_entry_content_path_rejects_media_symlink_out_of_asset_dir(isolated_data
     (other / "dz.png").write_bytes(_PNG)
     (asset_dir / "dz.png").unlink()
     (asset_dir / "dz.png").symlink_to(other / "dz.png")
-    entry = idx.scan_library(mount).entries
+    entry = scan_and_cache(mount).entries
     shared = next(e for e in entry if e.kind == "media")
     assert shared.status == "incomplete"
     with pytest.raises(FileNotFoundError):
@@ -450,14 +457,14 @@ def test_scan_skips_shared_dirs_symlinked_outside_library(isolated_data_root, tm
     (folder / "shared" / "老王").symlink_to(outside / "shared" / "老王")
     (folder / "shared" / "小李").mkdir()
     (folder / "shared" / "小李" / _ASSET_ID).symlink_to(outside / "shared" / "老王" / _ASSET_ID)
-    assert idx.scan_library(mount).entries == []
+    assert scan_and_cache(mount).entries == []
 
 
 def test_asset_dir_name_must_match_asset_id(isolated_data_root, tmp_path):
     folder, mount = _mount(tmp_path)
     asset_dir = _shared_asset(folder)
     asset_dir.rename(asset_dir.parent / "ta_01ARZ3NDEKTSV4RRFFQ69G5FAW")
-    entry = idx.scan_library(mount).entries[0]
+    entry = scan_and_cache(mount).entries[0]
     assert entry.status == "incomplete" and entry.id == "ta_01ARZ3NDEKTSV4RRFFQ69G5FAW"
 
 
@@ -505,7 +512,7 @@ def test_generation_entry_lists_input_sha256_in_order(isolated_data_root, tmp_pa
     folder, mount = _mount(tmp_path)
     shas = _two_ref_generation(folder)
     (folder / "castle.png").write_bytes(_PNG)
-    entries = {e.kind: e for e in idx.scan_library(mount).entries}
+    entries = {e.kind: e for e in scan_and_cache(mount).entries}
     assert entries["generation"].status == "ready"
     assert entries["generation"].input_sha256 == shas
     assert entries["raw"].input_sha256 == []
@@ -514,7 +521,7 @@ def test_generation_entry_lists_input_sha256_in_order(isolated_data_root, tmp_pa
 def test_media_entry_has_no_input_sha256(isolated_data_root, tmp_path):
     folder, mount = _mount(tmp_path)
     _shared_asset(folder)
-    assert idx.scan_library(mount).entries[0].input_sha256 == []
+    assert scan_and_cache(mount).entries[0].input_sha256 == []
 
 
 def test_related_by_input_sha_hits_ready_generations_newest_first():
