@@ -245,3 +245,22 @@ def test_raw_without_job_id_only_serves_uploads(client, isolated_data_root):
         assert client.get("/api/raw", params={"path": path}).status_code == 403, path
     assert client.get("/api/raw", params={"path": str(upload)}).status_code == 200
     assert client.get("/api/raw", params={"path": ".runtime/uploads/a.png"}).status_code == 200
+
+
+def test_raw_rejects_nul_byte_path_as_bad_request(client):
+    job_id = _create(client, {}).json()["job_id"]
+
+    assert client.get("/api/raw", params={"path": "characters/a\x00.png"}).status_code == 400
+    assert client.get(
+        "/api/raw", params={"job_id": job_id, "path": ".runtime/uploads/a\x00.png"},
+    ).status_code == 400
+
+
+def test_raw_rejects_overlong_file_name_as_bad_request(client, isolated_data_root):
+    # 父目录要真实存在：不存在时 stat 先报 ENOENT，走的是普通 404。
+    (isolated_data_root / ".runtime" / "uploads").mkdir(parents=True, exist_ok=True)
+    job_id = _create(client, {}).json()["job_id"]
+    overlong = ".runtime/uploads/" + "x" * 300 + ".png"
+
+    assert client.get("/api/raw", params={"path": overlong}).status_code == 400
+    assert client.get("/api/raw", params={"job_id": job_id, "path": overlong}).status_code == 400

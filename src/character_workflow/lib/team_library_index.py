@@ -332,7 +332,7 @@ def query_index(
         and (not needle or needle in e.title.lower() or needle in e.relative_path.lower()
              or any(needle in t.lower() for t in e.tags))
     ]
-    rows.sort(key=lambda e: e.updated_at, reverse=True)
+    rows.sort(key=lambda e: parse_instant(e.updated_at) or _EARLIEST, reverse=True)
     start = 0
     if cursor:
         try:

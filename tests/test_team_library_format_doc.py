@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from tests.test_team_library_index import scan_and_cache
+from tests.team_library_helpers import scan_and_cache
 from character_workflow.lib.schemas import (
     MEDIA_SUFFIXES,
     SHA256_PATTERN,

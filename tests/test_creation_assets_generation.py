@@ -208,6 +208,30 @@ def test_generation_asset_inserts_into_canvas_as_its_output_image():
     assert version.kind == "image" and version.sha256 == asset.content.media.sha256
 
 
+def test_insert_survives_asset_deleted_before_marking_used(monkeypatch):
+    from character_workflow.lib import creation_assets
+
+    project = create_canvas_project("生成资产画布")
+    asset, *_ = _generation_asset()
+    real_mark = creation_assets.mark_creation_asset_used
+
+    def delete_then_mark(asset_id, project_id=None):
+        delete_creation_asset(asset_id)
+        return real_mark(asset_id, project_id)
+
+    monkeypatch.setattr(creation_assets, "mark_creation_asset_used", delete_then_mark)
+
+    document = insert_creation_asset_into_canvas(
+        project_id=project.project_id,
+        asset_id=asset.asset_id,
+        position=CanvasPoint(x=0, y=0),
+        expected_revision=read_canvas_document(project.project_id).revision,
+    )
+
+    assert read_canvas_document(project.project_id).revision == document.revision
+    assert len(document.nodes) == 1
+
+
 def test_inputs_endpoint_serves_reference_bytes(client: TestClient):
     asset, *_ = _generation_asset()
 

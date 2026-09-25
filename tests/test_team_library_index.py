@@ -8,7 +8,8 @@ import pytest
 
 from character_workflow.lib import team_library as tl
 from character_workflow.lib import team_library_index as idx
-from character_workflow.lib.schemas import TeamLibraryIndex, TeamLibraryIndexEntry
+from character_workflow.lib.schemas import TeamLibraryIndexEntry
+from tests.team_library_helpers import scan_and_cache
 
 _PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
@@ -29,13 +30,6 @@ def _shared_asset(folder, author="老王", title="董卓 待机", kind="media"):
     }
     (asset_dir / "asset.json").write_text(json.dumps(body, ensure_ascii=False), "utf-8")
     return asset_dir
-
-
-def scan_and_cache(mount) -> TeamLibraryIndex:
-    """扫描并写本机索引缓存（refresh_team_library 去掉广播与并发票号的那部分），供各团队库测试共用。"""
-    index = idx.build_index(mount)
-    idx.write_index(index)
-    return index
 
 
 def _version(entry) -> str:
@@ -480,6 +474,20 @@ def test_related_entries_sort_by_instant_not_string():
         ],
     )
     assert [e.id for e in idx.related_entries(index)] == ["g_utc", "g_east"]
+
+
+def test_query_index_sorts_by_instant_not_string():
+    from character_workflow.lib.schemas import TeamLibraryIndex
+
+    index = TeamLibraryIndex(
+        library_id="lib_" + "1" * 16,
+        scanned_at="2026-09-23T00:00:00Z",
+        entries=[
+            _index_entry("g_east", updated_at="2026-09-20T08:00:00+08:00"),  # = 00:00Z
+            _index_entry("g_utc", updated_at="2026-09-20T01:00:00+00:00"),
+        ],
+    )
+    assert [e.id for e in idx.query_index(index).entries] == ["g_utc", "g_east"]
 
 
 def _two_ref_generation(folder):

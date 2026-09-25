@@ -151,6 +151,25 @@ def test_reproduce_marks_asset_used_in_the_canvas_project():
     assert project.project_id in used.project_ids
 
 
+def test_reproduce_survives_asset_deleted_before_marking_used(monkeypatch):
+    from character_workflow.lib.creation_assets import delete_creation_asset
+
+    project = create_canvas_project("复刻")
+    asset = _asset([(_REF_A, "reference")])
+    real_mark = canvas_reproduce.mark_creation_asset_used
+
+    def delete_then_mark(asset_id, project_id=None):
+        delete_creation_asset(asset_id)
+        return real_mark(asset_id, project_id)
+
+    monkeypatch.setattr(canvas_reproduce, "mark_creation_asset_used", delete_then_mark)
+
+    document = _reproduce(project.project_id, asset.asset_id)
+
+    assert read_canvas_document(project.project_id).revision == document.revision == 1
+    assert _config(document) is not None
+
+
 def test_video_firstlast_recipe_connects_first_and_last_frame_slots():
     project = create_canvas_project("复刻")
     asset = _asset(

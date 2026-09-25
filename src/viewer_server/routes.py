@@ -62,6 +62,7 @@ from pydantic import BaseModel, Field, ValidationError
 from pydantic import field_validator
 
 from character_workflow.lib.schemas import (
+    JOB_PARAM_PATH_FIELDS,
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterAssociationPatch, CharacterAssociationsFile,
     CanvasAgentSession, CanvasAgentSessionCreate, CanvasAgentSessionList,
@@ -414,12 +415,12 @@ def post_spec(character_id: str, patch: SpecPatch) -> dict:
 
 
 # 浏览器提交的参考路径字段：/api/raw 按 job 登记的这些路径放行读取，mj_image 还会把本地文件
-# 上传成公网直链，所以每一项都要过数据根闸门。mask_image 只由服务端写（画布局部编辑）。
-# source_image 不是 JobParams 的声明字段，但 extra="allow" 让浏览器能塞进来，caller 会回退读它。
-_BROWSER_REF_FIELDS = (
-    "reference_images", "reference_videos", "reference_audios", "mj_sref", "mj_cref", "mj_oref",
-    "source_image",
-)
+# 上传成公网直链，所以每一项都要过数据根闸门。
+# 减 mask_image：只由服务端写（画布局部编辑），两个浏览器入口都先把浏览器传的丢掉。
+# 加 source_image：不是 JobParams 的声明字段，但 extra="allow" 让浏览器能塞进来，caller 会回退读它。
+_BROWSER_REF_FIELDS = tuple(
+    field for field in JOB_PARAM_PATH_FIELDS if field != "mask_image"
+) + ("source_image",)
 
 
 def _is_web_url(value: str) -> bool:
@@ -516,8 +517,14 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
     若用 Path(path).resolve() 会解析到 repo 根，与 job.output_paths 里的绝对路径对不上 → 403/404。
     """
     raw = Path(path)
-    target = (raw if raw.is_absolute() else _project_root() / raw).resolve()
-    if not target.exists():
+    # NUL 字节让 resolve 抛 ValueError，超长文件名让 exists 抛 OSError（ENAMETOOLONG）。这是请求
+    # 参数本身不成形，回 400 而不是 403：没有「路径合法但无权读」这回事，也别让它冒成 500。
+    try:
+        target = (raw if raw.is_absolute() else _project_root() / raw).resolve()
+        exists = target.exists()
+    except (ValueError, OSError) as error:
+        raise HTTPException(400, detail="读图被拒：路径无效") from error
+    if not exists:
         raise HTTPException(404)
     if job_id is not None:
         try:
@@ -526,10 +533,9 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
             raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）") from e
         whitelist = set(job.output_paths)
         params = job.params.model_dump() if job.params else {}
-        for field in (
-            "reference_images", "reference_videos", "reference_audios",
-            "mask_image", "mj_sref", "mj_cref", "mj_oref",
-        ):
+        # 全部声明的路径字段都放行（含服务端写的 mask_image）；params 里的 extra 字段 source_image
+        # 不放行——Job 顶层的 source_image 在下面单独加。
+        for field in JOB_PARAM_PATH_FIELDS:
             value = params.get(field)
             if isinstance(value, str):
                 whitelist.add(value)

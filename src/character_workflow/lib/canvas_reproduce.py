@@ -258,7 +258,11 @@ def reproduce_generation_asset_into_canvas(
         document = CanvasDocument.model_validate(updated.model_dump(mode="json"))
         _commit(project_id, document, writes, timestamp)
 
-    mark_creation_asset_used(asset_id, project_id)
+    # 画布已经落盘：资产若在此期间被删，不记使用就是，别把已成功的复刻报成 404。
+    try:
+        mark_creation_asset_used(asset_id, project_id)
+    except KeyError:
+        pass
     return CanvasReproduceResponse.model_validate(
         {**document.model_dump(mode="json"), "warnings": warnings}
     )

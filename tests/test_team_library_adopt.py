@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from tests.test_team_library_index import scan_and_cache
+from tests.team_library_helpers import scan_and_cache
 from character_workflow.lib.creation_assets import list_creation_assets
 from character_workflow.lib.schemas import TeamLibraryIndexEntry, TeamLibraryMount
 from character_workflow.lib.team_library_adopt import TeamAssetAdoptError, adopt_team_asset

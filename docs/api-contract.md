@@ -187,6 +187,8 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `POST /projects/{id}/ui-schemes` `/projects/{id}/ui-schemes/default`
 `PUT /projects/{id}/character-associations`
 
+`POST /studio/jobs` 与 `POST /prompt/{job_id}` 的参考路径字段要过数据根闸门，违规 422，见「几个要当心的」。
+
 项目内新建角色时，`POST /characters` 请求为
 `{ name: string, project_id: string }`，角色目录创建与项目归属在同一次请求内完成；
 不带 `project_id` 仅供项目外工作流建立临时角色。
@@ -937,9 +939,21 @@ FastAPI 标准 422。坏掉的 job 文件、画布存档不见了（`{code: "can
 
 ### 几个要当心的
 
-`GET /raw` 与 `GET /gallery/image`：路径不能随便给，`/raw` 走 job_id 白名单，只读该 Job 的
-`output_paths`、`params.reference_{images,videos,audios}`、MJ 三组参考素材与 `source_image`；
+`GET /raw` 与 `GET /gallery/image`：路径不能随便给。`/raw` 带 `job_id` 时走该 Job 的白名单，只读
+`output_paths`、`params` 的路径字段（`reference_{images,videos,audios}`、`mask_image`、MJ 三组参考素材）
+与 Job 顶层 `source_image`，白名单里的 http(s) 直链不当本机路径解析；不带 `job_id` 时只放行
+`.runtime/uploads/` 下的文件（目录本身不算），原来按 `image_storage_root` 回退放行已删。相对路径按数据根
+解析；路径含 NUL 或文件名超长 → 400，不存在 → 404，不在白名单 → 403。
 `gallery/image` 只放行 characters、projects screens、projects videos 的 `versions/` 资产以及 studio 子树；项目 brief / prompt 不对外暴露。加新产物目录要同步放行。
+
+`POST /studio/jobs` 与 `POST /prompt/{job_id}` 的参考路径闸门：`params` 里的 `reference_images` /
+`reference_videos` / `reference_audios` / `mj_sref` / `mj_cref` / `mj_oref` 与 extra 字段 `source_image`
+（字符串或字符串数组）每一项都要过闸门：绝对路径或数据根相对路径，resolve（展开 symlink）后必须是数据根内
+真实存在的文件，不能在 `.config/` 下，`.runtime/` 下只认 `uploads/`（大小写与 Windows 尾随点 / 空格不绕过）；
+http(s) 直链（带 host）原样放行，供「再次生成」回传历史参考。任一项违规或文件不存在 → 422，
+detail 形如 `params.<字段> 第 N 项：<原因>`，`/prompt` 违规时 job 文件不变。通过的本机路径落盘前改写成
+resolve 后的绝对路径（落盘值就是闸门判过的那个）。`mask_image` 浏览器不能传：两个入口都先丢掉浏览器给的值
+（`/prompt` 保留已有值），只由服务端（画布局部编辑）写。
 
 `GET /keys/{alias}/reveal`：唯一回明文密钥的接口。按显式 alias、按需返回；列表接口一律掩码。
 

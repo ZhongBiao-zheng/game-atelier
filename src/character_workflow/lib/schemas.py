@@ -120,6 +120,16 @@ class LayerDecompositionResult(BaseModel):
         return self
 
 
+# JobParams 里登记本机文件路径的声明字段，按生成快照 inputs 的顺序排。/api/raw 的 job 读取白名单、
+# 浏览器参考路径闸门、生成快照三处共用这一份，新增路径字段只改这里；各调用点的差异
+# （mask_image 只由服务端写、extra 字段 source_image）在调用点显式加减。
+# 只是 Python 常量，不是模型字段，TS 端无对应。
+JOB_PARAM_PATH_FIELDS: tuple[str, ...] = (
+    "reference_images", "reference_videos", "reference_audios", "mask_image",
+    "mj_sref", "mj_cref", "mj_oref",
+)
+
+
 class JobParams(BaseModel):
     model_config = ConfigDict(extra="allow")
     size: str | None = None

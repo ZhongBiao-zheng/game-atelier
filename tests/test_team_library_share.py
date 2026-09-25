@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from tests.test_team_library_index import scan_and_cache
+from tests.team_library_helpers import scan_and_cache
 from character_workflow.lib import generation_recipe
 from character_workflow.lib import team_library_share as share
 from character_workflow.lib.creation_assets import (

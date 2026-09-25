@@ -987,8 +987,16 @@ def insert_creation_asset_into_canvas(
             atomic_write_json(_project_path(project_id), project.model_dump(mode="json"))
             atomic_write_json(_document_path(project_id), updated.model_dump(mode="json"))
 
-    mark_creation_asset_used(asset_id, project_id)
+    _mark_used_if_present(asset_id, project_id)
     return updated
+
+
+def _mark_used_if_present(asset_id: str, project_id: str) -> None:
+    """画布已经落盘后再记使用：资产若在此期间被删，不记就是，别把已成功的插入报成 404。"""
+    try:
+        mark_creation_asset_used(asset_id, project_id)
+    except KeyError:
+        pass
 
 
 def migrate_creation_asset_catalog_schema() -> None:

@@ -25,6 +25,7 @@ from character_workflow.lib.creation_assets import (
 from character_workflow.lib.jobs import read_job
 from character_workflow.lib.local_paths import DataRootFileMissing, data_root_file
 from character_workflow.lib.schemas import (
+    JOB_PARAM_PATH_FIELDS,
     MEDIA_SUFFIXES,
     CanvasDocument,
     CanvasGenerationSnapshot,
@@ -58,15 +59,13 @@ RECIPE_PARAM_EXCLUDE = frozenset({
 # JobParams 是 extra="allow"，浏览器能塞任意键（含路径）：未声明的额外键一律不进快照。
 RECIPE_PARAM_ALLOW = frozenset(set(JobParams.model_fields) - RECIPE_PARAM_EXCLUDE) | {"seed"}
 
-# 参考在快照里的顺序（order 全局递增）；首尾帧靠 params.frame_mode 解释 reference_images 顺序。
-_JOB_REF_FIELDS: tuple[tuple[str, RecipeInputRole], ...] = (
-    ("reference_images", "reference"),
-    ("reference_videos", "reference"),
-    ("reference_audios", "reference"),
-    ("mask_image", "mask"),
-    ("mj_sref", "mj_sref"),
-    ("mj_cref", "mj_cref"),
-    ("mj_oref", "mj_oref"),
+# 参考在快照里的顺序（order 全局递增）= JOB_PARAM_PATH_FIELDS 的顺序；首尾帧靠 params.frame_mode
+# 解释 reference_images 顺序。不含 params 里的 extra 字段 source_image：未声明的键不进快照。
+_REF_ROLES: dict[str, RecipeInputRole] = {
+    "mask_image": "mask", "mj_sref": "mj_sref", "mj_cref": "mj_cref", "mj_oref": "mj_oref",
+}
+_JOB_REF_FIELDS: tuple[tuple[str, RecipeInputRole], ...] = tuple(
+    (field, _REF_ROLES.get(field, "reference")) for field in JOB_PARAM_PATH_FIELDS
 )
 _SOURCE_STATUSES = frozenset({JobStatus.DONE, JobStatus.PARTIAL})
 _SOURCE_KINDS = frozenset({JobKind.IMAGE, JobKind.VIDEO})
