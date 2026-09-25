@@ -63,6 +63,7 @@ from character_workflow.lib.team_library_share import (
     validate_share_meta,
     withdraw_shared_asset,
 )
+from viewer_server.routes import asset_state_broken_error
 
 logger = logging.getLogger(__name__)
 
@@ -166,8 +167,8 @@ def _share_errors(mount: TeamLibraryMount) -> Iterator[None]:
     except TeamShareError as error:
         raise HTTPException(422, detail={"code": error.code, "message": str(error)}) from error
     except CreationAssetStateError as error:
-        # 与 routes.py 的创作资产接口同一映射：本机资产库状态损坏 → 409。
-        raise HTTPException(409, detail=str(error)) from error
+        # 与 routes.py 的创作资产接口同一映射：本机资产库状态损坏 → 500 asset_state_broken。
+        raise asset_state_broken_error(error) from error
     except TeamShareNotFound:
         raise HTTPException(404, detail="找不到要分享的内容或这条团队资产") from None
     except TeamShareForbidden:
@@ -430,6 +431,9 @@ def post_team_asset_adopt(
         raise HTTPException(
             409, detail={"code": "not_adoptable", "message": str(error)}
         ) from error
+    # 也是 ValueError 子类，必须先于下面的 422：本机资产库坏了不是请求的错。
+    except CreationAssetStateError as error:
+        raise asset_state_broken_error(error) from error
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
     return TeamAssetAdoptResponse(asset=asset, created=created)
@@ -546,7 +550,7 @@ def post_creation_asset_readopt(asset_id: str) -> CreationAsset:
             "code": "duplicate_asset", "asset_id": error.asset_id, "message": str(error),
         }) from error
     except CreationAssetStateError as error:
-        raise HTTPException(409, detail=str(error)) from error
+        raise asset_state_broken_error(error) from error
     except FileNotFoundError as error:
         raise HTTPException(409, detail={
             "code": "retry", "message": "资产库正在被别处修改，请重试",

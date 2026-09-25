@@ -91,11 +91,15 @@ SSE（`GET /events`）事件：`job-changed` `image-added` `spec-changed` `activ
 `projects-changed` `workshop-request-changed` `canvas-document-changed` `team-library-changed`。
 `team-library-changed` 为 `TeamLibraryChangeEvent = {library_id, asset_id, kind, author, change, title, status,
 mime_type}`，`change ∈ added | updated | removed`，`status ∈ ready | incomplete`；`removed` 事件的 `title` /
-`status` / `mime_type` 为 `null`。由 watcher 盯挂载目录发出：任何变化触发 2 秒防抖后的全量重扫，再按索引 diff
+`status` / `mime_type` 为 `null`。`added` 的语义是「这条资产第一次可用」：新出现的条目，以及已有条目从
+`incomplete` 变 `ready`（网盘 / SVN 分批同步，`asset.json` 先到、成片后到）都发 `added`；其余变化（改标题 /
+标签、`ready` 退回 `incomplete`）发 `updated`。前端分享提醒只对 `added` 弹。由 watcher 盯挂载目录发出：任何变化触发 2 秒防抖后的全量重扫，再按索引 diff
 逐条广播（隐藏目录不触发）；分享 / 编辑 / 撤回 / 重扫接口在同一请求内走同一个刷新（`refresh_team_library`），
 不等防抖。**首扫静默**：没有上一份索引（挂载后首扫、缓存被删）时整库都会算成 added，此时不广播任何事件。
-server 启动建好监听后在后台线程对每个可达库补扫一次：有旧索引只广播停服期间的增量，没有就静默建索引；
-某个库补扫失败只记日志，不影响其他库与启动。
+server 启动建好监听后对每个库各起一条后台线程补扫一次（可达判定也在该线程里，死网盘挂住只挂住它自己）：
+有旧索引只广播停服期间的增量，没有就静默建索引；某个库补扫失败或挂住只记日志，不影响其他库与启动。
+同一个库的并发刷新只串行「读旧索引 → 写新索引 → 广播」，扫描本身不持锁；开扫更早的结果若晚于更晚开扫的
+结果落盘则作废，不会覆盖索引或广播假 `removed`。
 `canvas-document-changed` 由 watcher 盯
 `canvases/<project_id>/canvas.json` 发出（`{project_id, revision}`），浏览器保存与 Agent 经 MCP 的
 `canvas_apply_changes` / `canvas_import_media` / `canvas_run` 都会触发；画布编辑器按 `revision` 判断
@@ -813,7 +817,10 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 `{code: "library_unreachable"}`，列表仍返回该库并标 `reachable: false`；这条资产现在不能采用
 （没同步完整、内容与 `asset.json` 的 sha256 对不上、库内 `asset.json` 损坏）
 409 `{code: "not_adoptable"}`；库 / 资产不存在 404。`limit` 由路由夹到 `[1, 200]`，非法 `cursor` 422。
-挂载表自身损坏是磁盘状态故障，500 带上文件路径。
+挂载表自身损坏是磁盘状态故障，500 带上文件路径。本机创作资产库状态损坏（`CreationAssetStateError`：
+目录数据坏了、blob 缺失）在全部接口——`/creation-assets` 各接口、保存为生成资产、画布复刻、团队库采用 /
+重新采用 / 分享——一律 500 `{code: "asset_state_broken", message}`：服务端数据坏了，刷新重试修不好，
+所以不用 409。
 
 分享、编辑、撤回的错误码（`detail` 为对象时带 `code` 与 `message`）：
 
@@ -828,7 +835,7 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 | 422 | `source_missing` | 本机找不到成片或某份参考的文件 |
 | 422 | `invalid` | 标题 / 显示名去空白后为空，或单个标签超过 40 字 |
 | 422 | —（`detail` 为列表） | 请求体校验：标题超 120 字、标签超 20 个等长度 / 数量上限，FastAPI 标准格式 |
-| 409 | —（`detail` 为字符串） | 分享创作资产时本机资产库状态损坏（与 `/creation-assets` 接口同一映射） |
+| 500 | `asset_state_broken` | 分享创作资产时本机资产库状态损坏（与 `/creation-assets` 接口同一映射） |
 | 500 | `refresh_failed` | 已写入 / 已撤回，但重扫索引失败；`detail.asset_id` 指明是哪条，画师重新扫描即可 |
 
 检查顺序为显示名 → 库存在 → 库可达 → 标题 / 标签 → 源。坏掉的 job 文件等本机数据故障不归入
@@ -867,14 +874,14 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 | 409 | `duplicate_asset` | 新内容撞上另一条同来源 / 同内容的本机资产，`detail.asset_id` 指明是哪条 |
 | 409 | `retry` | 写目录时新 blob 被并发删除，重试即可 |
 | 409 | `not_adoptable` | 条目同步中、内容与 `asset.json` 对不上、库内 `asset.json` 损坏（与采用接口同一映射） |
-| 409 | —（`detail` 为字符串） | 本机资产库状态损坏（与 `/creation-assets` 接口同一映射） |
+| 500 | `asset_state_broken` | 本机资产库状态损坏（与 `/creation-assets` 接口同一映射） |
 
 生成结果「保存为创作资产」存生成资产（带配方），与分享共用同一份配方来源规则（`generation_recipe`）：
 `POST /creation-assets/generation/from-job` 收 Studio job 的 `output_index`（规则同 `job_output` 分享，
 `project_id` 可选）；`POST /creation-assets/generation/from-canvas` 收画布结果版本（规则同 `canvas_result`
 分享，`project_id` 取 `canvas_project_id`，请求体不收）。成片与参考按内容进 blobs。错误：来源不存在 404；
 来源不可保存 422 `{code: "not_shareable" | "source_missing", message}`；标题去空白后为空 / 标签超 40 字
-422 `{code: "invalid", message}`（在读来源之前校验）；本机资产库状态损坏 409（`detail` 为字符串）；长度上限按
+422 `{code: "invalid", message}`（在读来源之前校验）；本机资产库状态损坏 500 `{code: "asset_state_broken"}`；长度上限按
 FastAPI 标准 422。坏掉的 job 文件、画布存档不见了（`{code: "canvas_document_missing"}` 等）是本机数据故障，
 按 500 报出，不归入 `invalid`。
 

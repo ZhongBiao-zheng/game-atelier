@@ -135,6 +135,29 @@ def test_from_job_corrupted_job_file_is_500_not_invalid(raw_client, isolated_dat
     assert resp.status_code == 500, resp.text
 
 
+def _state_broken(*_args, **_kwargs):
+    from character_workflow.lib.creation_assets import CreationAssetStateError
+
+    raise CreationAssetStateError("创作资产库状态损坏")
+
+
+def test_creation_asset_state_error_is_500_asset_state_broken(client, monkeypatch):
+    """本机资产库坏了刷新也修不好：一律 500 asset_state_broken，不是 409（前端 409 = 刷新重试）。"""
+    from character_workflow.lib import creation_assets, generation_recipe
+
+    job = _studio_job(png((90, 0, 0)), {})
+    monkeypatch.setattr(generation_recipe, "save_generation_asset", _state_broken)
+    monkeypatch.setattr(creation_assets, "create_prompt_asset", _state_broken)
+    prompt = client.post("/api/creation-assets/prompts", json={
+        "title": "模板", "segments": [{"kind": "text", "text": "猫"}], "tags": [],
+    })
+    for resp in (_from_job(client, job.job_id), prompt):
+        assert resp.status_code == 500, resp.text
+        assert resp.json()["detail"] == {
+            "code": "asset_state_broken", "message": "创作资产库状态损坏",
+        }
+
+
 def test_from_canvas_missing_canvas_json_is_500(raw_client):
     from character_workflow.lib.canvas_projects import canvas_project_dir
 

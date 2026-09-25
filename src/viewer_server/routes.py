@@ -2454,6 +2454,16 @@ def _raise_canvas_revision_error(error: RuntimeError) -> None:
     raise error
 
 
+def asset_state_broken_error(error: Exception) -> HTTPException:
+    """CreationAssetStateError（本机资产库数据损坏 / blob 缺失）的唯一 HTTP 映射：500 asset_state_broken。
+
+    判据是「谁能修」：服务端数据坏了，刷新重试永远不会成功，所以不是 409（前端 409 = 刷新后重试）。
+    创作资产、画布复刻、团队库采用 / 重新采用 / 分享都走这里，别在路由里各写一份。
+    """
+    logger.warning("creation asset state broken: %s", error)
+    return HTTPException(500, detail={"code": "asset_state_broken", "message": str(error)})
+
+
 def _raise_creation_asset_error(error: Exception) -> None:
     from character_workflow.lib.creation_assets import (
         CreationAssetDuplicateError,
@@ -2466,7 +2476,7 @@ def _raise_creation_asset_error(error: Exception) -> None:
             "message": str(error),
         }) from None
     if isinstance(error, CreationAssetStateError):
-        raise HTTPException(409, detail=str(error)) from error
+        raise asset_state_broken_error(error) from error
     if isinstance(error, (KeyError, FileNotFoundError)):
         raise HTTPException(404, detail="找不到这个创作资产或文件") from None
     if isinstance(error, ValueError):
@@ -2581,7 +2591,7 @@ def _save_generation(load_source, *, title: str, tags: list[str], project_id: st
     except (RecipeSourceNotFound, KeyError):
         raise HTTPException(404, detail="找不到这次生成的记录或画布结果") from None
     except CreationAssetStateError as error:
-        raise HTTPException(409, detail=str(error)) from error
+        raise asset_state_broken_error(error) from error
     except CanvasDocumentError as error:
         # 画布存档不见了 / 记着别的项目（CanvasStorageError）→ 500，不是请求的错。
         raise _canvas_document_http_error(error) from error
@@ -2753,11 +2763,8 @@ def post_canvas_creation_asset_reproduce(
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布或创作资产") from None
     except CreationAssetStateError as error:
-        # 参考 blob 缺失 = 本机数据完整性故障：重试永远不会成功，所以不是 409（前端 409 = 刷新重试）。
-        logger.warning("reproduce %s into %s: creation asset state broken", asset_id, project_id)
-        raise HTTPException(500, detail={
-            "code": "asset_state_broken", "message": str(error),
-        }) from error
+        # 参考 blob 缺失 = 本机数据完整性故障，见 asset_state_broken_error。
+        raise asset_state_broken_error(error) from error
     except ValueError as error:
         # 非生成资产、配方拼不出合法草稿（ValidationError 也是 ValueError）→ 422；
         # 画布存档本身坏了（CanvasStorageError）→ 500，见 _canvas_document_http_error。

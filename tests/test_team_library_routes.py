@@ -855,21 +855,46 @@ def test_update_permission_error_is_503_but_not_author_stays_403(
     assert forbidden.status_code == 403 and forbidden.json()["detail"]["code"] == "not_author"
 
 
-def test_creation_asset_state_error_maps_to_409(client, shared_lib, monkeypatch):
+_STATE_BROKEN = {"code": "asset_state_broken", "message": "创作资产库状态损坏"}
+
+
+def _raise_state_broken(*_args, **_kwargs):
     from character_workflow.lib.creation_assets import CreationAssetStateError
+
+    raise CreationAssetStateError("创作资产库状态损坏")
+
+
+def test_creation_asset_state_error_on_share_is_500(client, shared_lib, monkeypatch):
+    """本机资产库坏了刷新也修不好：与 routes.py 同一映射，500 asset_state_broken。"""
     from viewer_server import team_library_routes
 
     lib, _ = shared_lib
-
-    def broken(*_args, **_kwargs):
-        raise CreationAssetStateError("创作资产库状态损坏")
-
-    monkeypatch.setattr(team_library_routes, "share_creation_asset", broken)
+    monkeypatch.setattr(team_library_routes, "share_creation_asset", _raise_state_broken)
     resp = client.post(
         f"/api/team-libraries/{lib['library_id']}/share",
         json={"source": {"kind": "creation_asset", "asset_id": "ca_x"}, "title": "图"},
     )
-    assert resp.status_code == 409 and resp.json()["detail"] == "创作资产库状态损坏"
+    assert resp.status_code == 500 and resp.json()["detail"] == _STATE_BROKEN
+
+
+def test_creation_asset_state_error_on_adopt_and_readopt_is_500(client, shared_lib, monkeypatch):
+    """采用路由原先让它落进 ValueError → 422，重新采用原先是 409，现在都是 500。"""
+    from viewer_server import team_library_routes
+
+    lib, folder = shared_lib
+    (folder / "castle.png").write_bytes(_PNG)
+    client.post(f"/api/team-libraries/{lib['library_id']}/rescan")
+    entry = client.get(f"/api/team-libraries/{lib['library_id']}/assets").json()["entries"][0]
+    monkeypatch.setattr(team_library_routes, "adopt_team_asset", _raise_state_broken)
+    monkeypatch.setattr(team_library_routes, "readopt_team_asset", _raise_state_broken)
+    adopt = client.post(
+        f"/api/team-libraries/{lib['library_id']}/assets/{entry['id']}/adopt",
+        json={"project_id": None},
+    )
+    readopt = client.post("/api/creation-assets/ca_x/readopt")
+    for resp in (adopt, readopt):
+        assert resp.status_code == 500, resp.text
+        assert resp.json()["detail"] == _STATE_BROKEN
 
 
 def test_refresh_failure_after_write_is_500_naming_asset(
