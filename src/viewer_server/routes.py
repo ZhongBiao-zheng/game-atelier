@@ -415,8 +415,10 @@ def post_spec(character_id: str, patch: SpecPatch) -> dict:
 
 # 浏览器提交的参考路径字段：/api/raw 按 job 登记的这些路径放行读取，mj_image 还会把本地文件
 # 上传成公网直链，所以每一项都要过数据根闸门。mask_image 只由服务端写（画布局部编辑）。
+# source_image 不是 JobParams 的声明字段，但 extra="allow" 让浏览器能塞进来，caller 会回退读它。
 _BROWSER_REF_FIELDS = (
     "reference_images", "reference_videos", "reference_audios", "mj_sref", "mj_cref", "mj_oref",
+    "source_image",
 )
 
 
@@ -425,19 +427,27 @@ def _is_web_url(value: str) -> bool:
     return value.startswith(("http://", "https://")) and bool(urlsplit(value).netloc)
 
 
-def _check_browser_refs(params: dict[str, Any]) -> None:
+def _gated_ref(field: str, index: int, item: Any) -> Any:
+    if not isinstance(item, str) or _is_web_url(item):
+        return item
+    try:
+        return str(data_root_file(item))
+    except ValueError as error:
+        raise HTTPException(422, detail=f"params.{field} 第 {index} 项：{error}") from error
+
+
+def _gate_browser_refs(params: dict[str, Any]) -> dict[str, Any]:
+    """每个参考路径过数据根闸门，返回改写成 resolve 后绝对路径的字段（落盘值与闸门判的是同一个）。"""
+    gated: dict[str, Any] = {}
     for field in _BROWSER_REF_FIELDS:
         value = params.get(field)
-        items = [value] if isinstance(value, str) else value if isinstance(value, list) else []
-        for index, item in enumerate(items, start=1):
-            if not isinstance(item, str) or _is_web_url(item):
-                continue
-            try:
-                data_root_file(item)
-            except ValueError as error:
-                raise HTTPException(
-                    422, detail=f"params.{field} 第 {index} 项：{error}",
-                ) from error
+        if isinstance(value, str):
+            gated[field] = _gated_ref(field, 1, value)
+        elif isinstance(value, list):
+            gated[field] = [
+                _gated_ref(field, index, item) for index, item in enumerate(value, start=1)
+            ]
+    return gated
 
 
 @router.post("/prompt/{job_id}")
@@ -464,7 +474,7 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                         value[owned] = existing_params[owned]
                     else:
                         value.pop(owned, None)
-                _check_browser_refs(value)
+                value = {**value, **_gate_browser_refs(value)}
             data[field] = value
         # Validate the complete post-patch document before replacing the durable Job JSON.  This
         # catches explicit nulls and cross-field violations without discarding legacy raw fields.
@@ -497,10 +507,9 @@ def post_clipboard_attempt(attempt: ClipboardAttempt) -> dict:
 
 @router.get("/raw")
 def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
-    """三条鉴权路径：
-    - `job_id` 在场：以 job.output_paths / params.reference_images / source_image 作为白名单
-    - 路径在 .runtime/uploads/ 下：放行（画师刚上传，还没绑到 job 上时的 preview 用）
-    - 否则回退到 image_storage_root 前缀检查（兼容老链接）
+    """两条鉴权路径：
+    - `job_id` 在场：以 job.output_paths / params 参考路径 / source_image 作为白名单
+    - 否则只放行 .runtime/uploads/ 下的文件（画师刚上传，还没绑到 job 上时的 preview 用）
 
     相对路径解析基准：data root（_project_root()），而非 CWD。
     /api/gallery/recent 返回的是相对路径（如 characters/foo/turnaround/v2.png），
@@ -538,18 +547,8 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
             raise HTTPException(403, detail="读图被拒：这个路径不在该 job 登记的产物列表里")
         return FileResponse(str(target))
     uploads_dir = (_runtime() / "uploads").resolve()
-    if str(target).startswith(str(uploads_dir) + os.sep):
-        return FileResponse(str(target))
-    cfg_path = _runtime() / "config.json"
-    if not cfg_path.exists():
-        raise HTTPException(
-            403, detail="读图被拒：.runtime/config.json 不存在，无法确认这张图在允许的目录里"
-        )
-    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-    root = Path(cfg.get("image_storage_root", "")).resolve()
-    # is_relative_to 带分隔符语义：/x/images-evil 不能过 /x/images（与 gallery_image 对齐）。
-    if not target.is_relative_to(root):
-        raise HTTPException(403, detail="读图被拒：这个路径在图片存储根目录之外")
+    if not target.is_relative_to(uploads_dir) or target == uploads_dir:
+        raise HTTPException(403, detail="读图被拒：不带 job_id 只能读取刚上传的参考文件")
     return FileResponse(str(target))
 
 
@@ -2121,7 +2120,8 @@ def _create_user_job(
     params.provider_task_protocol = None
     params.provider_task_ids = None
     params.mask_image = None
-    _check_browser_refs(params.model_dump())
+    # 改写值与原值同类型（str / list[str]），model_copy 不需要重新校验。
+    params = params.model_copy(update=_gate_browser_refs(params.model_dump()))
     if body.kind == JobKind.IMAGE:
         from character_workflow.lib.image_size import normalize_image_size_params
 

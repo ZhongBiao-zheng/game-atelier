@@ -57,8 +57,17 @@ def _forbidden_paths(root: Path) -> list[str]:
         str(root / ".config" / "keys.json"),
         str(root / ".runtime" / "jobs" / "x.json"),
         str(root / ".runtime" / "uploads" / ".." / ".." / ".config" / "keys.json"),
+        str(root / ".runtime" / "uploads" / ".." / "jobs" / "x.json"),
+        str(root / ".Config" / "keys.json"),
+        str(root / ".RUNTIME" / "jobs" / "x.json"),
         f"characters/../../{secret.name}",
         str(link),
+        "//etc/hosts",
+        "file:///etc/hosts",
+        "http:///x",
+        "HTTP://evil/../..",
+        "characters/a\x00.png",
+        "characters/" + "x" * 300 + ".png",
     ]
 
 
@@ -90,7 +99,8 @@ def test_create_accepts_references_inside_data_root(client, isolated_data_root, 
     response = _create(client, {field: allowed})
 
     assert response.status_code == 201, response.text
-    assert read_job(response.json()["job_id"]).params.model_dump()[field] == allowed
+    stored = read_job(response.json()["job_id"]).params.model_dump()[field]
+    assert stored == [str(Path(item).resolve()) for item in allowed]
 
 
 def test_create_accepts_web_urls_sent_back_by_rerun(client):
@@ -133,7 +143,7 @@ def test_post_prompt_accepts_references_inside_data_root(client, isolated_data_r
     })
 
     assert response.status_code == 200, response.text
-    assert read_job(job_id).params.reference_images == allowed
+    assert read_job(job_id).params.reference_images == [str(Path(p).resolve()) for p in allowed]
 
 
 def test_post_prompt_cannot_set_mask_image(client, isolated_data_root):
@@ -161,13 +171,77 @@ def test_raw_does_not_resolve_web_url_entries_as_local_paths(client, isolated_da
     assert leaked.status_code == 403
 
 
-def test_raw_without_job_id_rejects_path_outside_allowed_roots(client, isolated_data_root):
-    storage = isolated_data_root / "downloads"
-    storage.mkdir()
-    (isolated_data_root / ".runtime" / "config.json").write_text(
-        json.dumps({"image_storage_root": str(storage)}),
+def test_create_stores_resolved_absolute_paths(client, isolated_data_root):
+    # 闸门按数据根解析相对路径，caller 按 CWD 读；落盘改写成闸门判过的那个绝对路径。
+    target = _touch(isolated_data_root / "characters" / "holy" / "v1.png")
+    link = isolated_data_root / "studio" / "alias.png"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(target)
+    urls = "https://cdn.example.com/a.png"
+
+    response = _create(client, {
+        "reference_images": ["characters/holy/v1.png", str(link), urls],
+    })
+
+    assert response.status_code == 201, response.text
+    assert read_job(response.json()["job_id"]).params.reference_images == [
+        str(target.resolve()), str(target.resolve()), urls,
+    ]
+
+
+def test_create_gates_extra_source_image(client, isolated_data_root):
+    response = _create(client, {"source_image": "/etc/hosts"})
+    assert response.status_code == 422
+    assert response.json()["detail"].startswith("params.source_image 第 1 项")
+
+    allowed = _allowed_paths(isolated_data_root)[0]
+    response = _create(client, {"source_image": allowed})
+    assert response.status_code == 201, response.text
+    assert read_job(response.json()["job_id"]).params.model_dump()["source_image"] == str(
+        Path(allowed).resolve(),
     )
 
-    assert client.get("/api/raw", params={"path": "/etc/hosts"}).status_code == 403
-    inside = _touch(storage / "a.png")
-    assert client.get("/api/raw", params={"path": str(inside)}).status_code == 200
+
+def test_post_prompt_gates_extra_source_image(client, isolated_data_root):
+    job_id = _create(client, {}).json()["job_id"]
+
+    response = client.post(f"/api/prompt/{job_id}", json={"params": {"source_image": "/etc/hosts"}})
+
+    assert response.status_code == 422
+    assert response.json()["detail"].startswith("params.source_image 第 1 项")
+    assert "source_image" not in read_job(job_id).params.model_dump()
+
+
+@pytest.mark.parametrize("variant", [(".Config", "keys.json"), (".RUNTIME", "jobs", "x.json")])
+def test_case_variants_cannot_register_and_raw_refuses(client, isolated_data_root, variant):
+    _forbidden_paths(isolated_data_root)
+    path = str(isolated_data_root.joinpath(*variant))
+    job_id = _create(client, {}).json()["job_id"]
+
+    assert _create(client, {"reference_images": [path]}).status_code == 422
+    assert client.post(f"/api/prompt/{job_id}", json={
+        "params": {"reference_images": [path]},
+    }).status_code == 422
+    assert client.get("/api/raw", params={"job_id": job_id, "path": path}).status_code == 403
+    assert client.get("/api/raw", params={"path": path}).status_code == 403
+
+
+def test_raw_without_job_id_only_serves_uploads(client, isolated_data_root):
+    # 旧的 image_storage_root 兜底已删：配置了也不放行。
+    (isolated_data_root / ".runtime" / "config.json").write_text(
+        json.dumps({"image_storage_root": str(isolated_data_root)}),
+    )
+    upload = _touch(isolated_data_root / ".runtime" / "uploads" / "a.png")
+    forbidden = [
+        str(isolated_data_root / ".config" / "keys.json"),
+        str(_touch(isolated_data_root / "characters" / "x.png")),
+        "characters/x.png",
+        str(_touch(isolated_data_root / "studio" / "j" / "out.png")),
+        str(isolated_data_root / ".runtime" / "uploads"),
+        "/etc/hosts",
+    ]
+
+    for path in forbidden:
+        assert client.get("/api/raw", params={"path": path}).status_code == 403, path
+    assert client.get("/api/raw", params={"path": str(upload)}).status_code == 200
+    assert client.get("/api/raw", params={"path": ".runtime/uploads/a.png"}).status_code == 200

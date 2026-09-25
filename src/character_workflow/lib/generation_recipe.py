@@ -165,7 +165,7 @@ def _shareable_file(value: str) -> Path:
     except DataRootFileMissing as error:
         raise RecipeSourceError("source_missing", str(error)) from error
     except ValueError as error:
-        raise RecipeSourceError("not_shareable", str(error)) from error
+        raise RecipeSourceError("not_shareable", f"参考无法打包：{error}") from error
 
 
 def _read_studio_job(job_id: str) -> Job:
