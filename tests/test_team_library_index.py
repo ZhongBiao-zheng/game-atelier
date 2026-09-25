@@ -94,6 +94,47 @@ def test_diff_reports_added_updated_removed(isolated_data_root, tmp_path):
     }]
 
 
+def test_diff_incomplete_becoming_ready_is_added(isolated_data_root, tmp_path):
+    """网盘同步分批落地：asset.json 先到、成片后到，补全那一刻才是「首次可用」。"""
+    folder, mount = _mount(tmp_path)
+    asset_dir = _shared_asset(folder)
+    (asset_dir / "dz.png").unlink()
+    before = idx.scan_library(mount)
+    assert before.entries[0].status == "incomplete"
+    (asset_dir / "dz.png").write_bytes(_PNG)
+    (change,) = idx.diff_index(before, idx.scan_library(mount))
+    assert (change["change"], change["status"]) == ("added", "ready")
+
+
+def test_diff_ready_title_change_is_updated(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    asset_dir = _shared_asset(folder)
+    before = idx.scan_library(mount)
+    data = json.loads((asset_dir / "asset.json").read_text("utf-8"))
+    data.update(title="董卓 攻击", updated_at="2026-09-21T00:00:00Z")
+    (asset_dir / "asset.json").write_text(json.dumps(data), "utf-8")
+    (change,) = idx.diff_index(before, idx.scan_library(mount))
+    assert (change["change"], change["title"]) == ("updated", "董卓 攻击")
+
+
+def test_diff_ready_becoming_incomplete_is_updated(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    asset_dir = _shared_asset(folder)
+    before = idx.scan_library(mount)
+    (asset_dir / "dz.png").unlink()
+    (change,) = idx.diff_index(before, idx.scan_library(mount))
+    assert (change["change"], change["status"]) == ("updated", "incomplete")
+
+
+def test_build_index_does_not_write_cache(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    _shared_asset(folder)
+    index = idx.build_index(mount)
+    assert idx.read_index(mount.library_id) is None
+    idx.write_index(index)
+    assert idx.read_index(mount.library_id).entries == index.entries
+
+
 def test_diff_payload_validates_as_change_event(isolated_data_root, tmp_path):
     from character_workflow.lib.schemas import TeamLibraryChangeEvent
 

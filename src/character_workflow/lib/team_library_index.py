@@ -247,11 +247,20 @@ def _scan_raw(root: Path) -> list[TeamLibraryIndexEntry]:
     return entries
 
 
-def scan_library(mount: TeamLibraryMount) -> TeamLibraryIndex:
+def build_index(mount: TeamLibraryMount) -> TeamLibraryIndex:
+    """全量扫描挂载目录，只读不落盘。网盘上是秒级甚至更久，调用方别在持锁时调。"""
     root = Path(mount.mount_path)
     entries = [*_scan_shared(root), *_scan_raw(root)]
-    index = TeamLibraryIndex(library_id=mount.library_id, scanned_at=_now(), entries=entries)
-    atomic_write_json(_index_path(mount.library_id), index.model_dump(mode="json"))
+    return TeamLibraryIndex(library_id=mount.library_id, scanned_at=_now(), entries=entries)
+
+
+def write_index(index: TeamLibraryIndex) -> None:
+    atomic_write_json(_index_path(index.library_id), index.model_dump(mode="json"))
+
+
+def scan_library(mount: TeamLibraryMount) -> TeamLibraryIndex:
+    index = build_index(mount)
+    write_index(index)
     return index
 
 
@@ -278,7 +287,14 @@ def _change(entry: TeamLibraryIndexEntry, change: str) -> dict:
 
 def diff_index(before: TeamLibraryIndex | None, after: TeamLibraryIndex) -> list[dict]:
     """两次扫描之间的变化。没有上一份索引（首扫 / 缓存丢了）→ 不产生事件：
-    那时整库都会算成 added，逐条广播就是给每条老资产弹一次提醒。"""
+    那时整库都会算成 added，逐条广播就是给每条老资产弹一次提醒。
+
+    `added` 的语义是「这条资产第一次能用了」，前端只对它弹分享提醒：
+    - 新出现的条目 → added；
+    - 已有条目从 incomplete 变 ready 也是 added：网盘 / SVN 同步是分批落地的，asset.json 先到、
+      成片后到，第一次扫到时还不可采用，补全那一刻才是同事真正「分享到了」；
+    - 其余变化（改标题 / 标签、ready 退回 incomplete、字节数变了）→ updated，不再弹提醒。
+    """
     if before is None:
         return []
     old = {e.id: e for e in before.entries}
@@ -286,7 +302,7 @@ def diff_index(before: TeamLibraryIndex | None, after: TeamLibraryIndex) -> list
     changes: list[dict] = []
     for entry_id, entry in new.items():
         prior = old.get(entry_id)
-        if prior is None:
+        if prior is None or (prior.status == "incomplete" and entry.status == "ready"):
             changes.append(_change(entry, "added"))
         elif (
             prior.updated_at != entry.updated_at

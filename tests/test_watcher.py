@@ -1,7 +1,9 @@
 """watcher handlers — 原子写（tmp.replace）在 Linux/inotify 上发 moved 事件；
 mac FSEvents 合并成 modified，开发机测不出，必须用单元事件回归。"""
 import json
+from pathlib import Path
 
+import pytest
 from watchdog.events import FileCreatedEvent, FileMovedEvent
 
 from viewer_server import watcher
@@ -202,6 +204,12 @@ def _png_bytes(tag: bytes = b"") -> bytes:
     return b"\x89PNG\r\n\x1a\n" + tag + b"\x00" * 16
 
 
+def _rescan_and_join() -> None:
+    for thread in watcher.rescan_team_libraries():
+        thread.join(5)
+        assert not thread.is_alive()
+
+
 def test_startup_rescan_broadcasts_only_changes_since_cached_index(
     isolated_data_root, tmp_path, monkeypatch
 ):
@@ -216,7 +224,7 @@ def test_startup_rescan_broadcasts_only_changes_since_cached_index(
     idx.scan_library(mount)
     (folder / "new.png").write_bytes(_png_bytes(b"new"))
     events = _capture(monkeypatch)
-    watcher.rescan_team_libraries()
+    _rescan_and_join()
     assert [(d["title"], d["change"]) for _, d in events] == [("new.png", "added")]
     assert {e.title for e in idx.read_index(mount.library_id).entries} == {"old.png", "new.png"}
 
@@ -245,7 +253,7 @@ def test_startup_rescan_without_cache_is_silent_and_skips_unreachable(
     shutil.rmtree(offline)
 
     events = _capture(monkeypatch)
-    watcher.rescan_team_libraries()
+    _rescan_and_join()
     assert events == []
     assert [e.title for e in idx.read_index(fresh_mount.library_id).entries] == ["a.png"]
     after = (idx.cache_dir(offline_mount.library_id) / "index.json").read_text(encoding="utf-8")
@@ -271,9 +279,105 @@ def test_startup_rescan_failure_is_logged_and_other_libraries_continue(
 
     monkeypatch.setattr(watcher, "refresh_team_library", flaky)
     with caplog.at_level("ERROR", logger=watcher.__name__):
-        watcher.rescan_team_libraries()
+        _rescan_and_join()
     assert refreshed == [mounts[1].library_id]
     assert mounts[0].library_id in caplog.text
+
+
+def _mount_folders(tmp_path, names):
+    from character_workflow.lib import team_library as tl
+
+    mounts = []
+    for name in names:
+        folder = tmp_path / name
+        folder.mkdir()
+        mounts.append(tl.mount_library(project_id="p1", path=str(folder), name=None, created_by="我"))
+    return mounts
+
+
+@pytest.mark.parametrize("stuck_at", ["reachable", "refresh"])
+def test_startup_rescan_one_stuck_library_does_not_hold_back_others(
+    isolated_data_root, tmp_path, monkeypatch, stuck_at
+):
+    """死网盘上 is_dir() 也会挂住：每个库各自一条线程，挂住的那个不拖住别的，也不拖住调用方。"""
+    import threading
+
+    from character_workflow.lib import team_library as tl
+    from character_workflow.lib import team_library_index as idx
+
+    stuck, live = _mount_folders(tmp_path, ("stuck", "live"))
+    for mount in (stuck, live):
+        idx.scan_library(mount)
+    (Path(live.mount_path) / "new.png").write_bytes(_png_bytes(b"new"))
+    release = threading.Event()
+    real_reachable, real_refresh = tl.library_reachable, watcher.refresh_team_library
+
+    def reachable(mount):
+        if stuck_at == "reachable" and mount.library_id == stuck.library_id:
+            release.wait(10)
+        return real_reachable(mount)
+
+    def refresh(mount):
+        if stuck_at == "refresh" and mount.library_id == stuck.library_id:
+            release.wait(10)
+        return real_refresh(mount)
+
+    monkeypatch.setattr(tl, "library_reachable", reachable)
+    monkeypatch.setattr(watcher, "refresh_team_library", refresh)
+    events = _capture(monkeypatch)
+    try:
+        threads = {t.name: t for t in watcher.rescan_team_libraries()}
+        live_thread = threads[f"team-library-rescan-{live.library_id}"]
+        stuck_thread = threads[f"team-library-rescan-{stuck.library_id}"]
+        live_thread.join(5)
+        assert not live_thread.is_alive()
+        assert [(d["library_id"], d["change"]) for _, d in events] == [(live.library_id, "added")]
+        assert stuck_thread.is_alive() and stuck_thread.daemon
+    finally:
+        release.set()
+    stuck_thread.join(5)
+    assert not stuck_thread.is_alive()
+
+
+def test_refresh_scans_outside_lock_so_second_refresh_is_not_blocked(
+    isolated_data_root, tmp_path, monkeypatch
+):
+    """补扫在扫一个慢网盘时，分享路由写完后的刷新不能排在它后面等。"""
+    import threading
+
+    from character_workflow.lib import team_library_index as idx
+
+    (mount,) = _mount_folders(tmp_path, ("lib",))
+    idx.scan_library(mount)
+    scanning, release = threading.Event(), threading.Event()
+    real_build = idx.build_index
+    slow_once = [True]
+
+    def build(target):
+        result = real_build(target)
+        if slow_once[0]:  # 第一次：扫完了还没落盘就卡住，手里是写入前的目录
+            slow_once[0] = False
+            scanning.set()
+            release.wait(10)
+        return result
+
+    monkeypatch.setattr(idx, "build_index", build)
+    events = _capture(monkeypatch)
+    slow = threading.Thread(target=watcher.refresh_team_library, args=(mount,), daemon=True)
+    slow.start()
+    try:
+        assert scanning.wait(5)
+        (Path(mount.mount_path) / "shared.png").write_bytes(_png_bytes(b"s"))
+        index = watcher.refresh_team_library(mount)
+        assert slow.is_alive()  # 没等慢的那次扫完就返回了
+        assert [e.title for e in index.entries] == ["shared.png"]
+    finally:
+        release.set()
+    slow.join(5)
+    assert not slow.is_alive()
+    # 先开扫、后扫完的那次看到的是写入前的目录：结果作废，不盖索引、不广播假 removed。
+    assert [e.title for e in idx.read_index(mount.library_id).entries] == ["shared.png"]
+    assert [(d["title"], d["change"]) for _, d in events] == [("shared.png", "added")]
 
 
 def test_startup_rescan_survives_broken_mount_table(isolated_data_root, monkeypatch, caplog):

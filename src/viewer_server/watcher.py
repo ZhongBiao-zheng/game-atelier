@@ -3,6 +3,7 @@ macOS 用 FSEvents（默认）；Linux 用 inotify；显式不用 PollingObserve
 """
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import threading
@@ -210,6 +211,9 @@ class TeamLibraryHandler(FileSystemEventHandler):
 
 _refresh_guard = threading.Lock()
 _refresh_locks: dict[str, threading.Lock] = {}
+# 每次刷新开扫前领一张递增票；落盘时只让「开扫更晚」的结果覆盖，见 refresh_team_library。
+_scan_tickets = itertools.count()
+_committed_tickets: dict[str, int] = {}
 
 
 def _refresh_lock(library_id: str) -> threading.Lock:
@@ -217,18 +221,34 @@ def _refresh_lock(library_id: str) -> threading.Lock:
         return _refresh_locks.setdefault(library_id, threading.Lock())
 
 
-def refresh_team_library(mount: TeamLibraryMount) -> TeamLibraryIndex:
-    """读旧索引 → 全量重扫 → 按 diff 逐条广播 team-library-changed，返回新索引。
+def _next_ticket() -> int:
+    with _refresh_guard:
+        return next(_scan_tickets)
 
-    同一个库串行：分享路由的刷新与防抖重扫撞在一起时，各自读到同一份旧索引就会把同一条
-    added 广播两遍。调用方负责先判可达（不可达时扫出的是空索引，见 TeamLibraryHandler.rescan）。
+
+def refresh_team_library(mount: TeamLibraryMount) -> TeamLibraryIndex:
+    """全量重扫 → 读旧索引、落盘、按 diff 逐条广播 team-library-changed，返回最新索引。
+
+    扫描在锁外：网盘上整库扫描是秒级甚至更久，持锁扫描会让分享路由写完后的刷新一直排在
+    启动补扫 / 防抖重扫后面。锁只护「读旧索引 → 写新索引 → 广播」这一段——同一个库两次刷新
+    各自读到同一份旧索引，就会把同一条 added 广播两遍。
+
+    扫描并发之后，先开扫的可能后扫完：它看到的目录更旧，落盘就会把新分享的资产盖掉、
+    广播一条假 removed。所以按开扫顺序领票，已经有更晚开扫的结果落盘时，这次结果作废，
+    直接返回已落盘的那份（它开扫时本次调用方要看的写入已经完成了）。
+    调用方负责先判可达（不可达时扫出的是空索引，见 TeamLibraryHandler.rescan）。
     """
     from character_workflow.lib import team_library_index as idx
     from character_workflow.lib.schemas import TeamLibraryChangeEvent
 
+    ticket = _next_ticket()
+    after = idx.build_index(mount)
     with _refresh_lock(mount.library_id):
+        if _committed_tickets.get(mount.library_id, -1) > ticket:
+            return idx.read_index(mount.library_id) or after
         before = idx.read_index(mount.library_id)
-        after = idx.scan_library(mount)
+        idx.write_index(after)
+        _committed_tickets[mount.library_id] = ticket
         for change in idx.diff_index(before, after):
             event = TeamLibraryChangeEvent(library_id=mount.library_id, **change)
             hub.broadcast("team-library-changed", event.model_dump(mode="json"))
@@ -308,11 +328,25 @@ def stop_team_library_watches() -> None:
     _team_watches.clear()
 
 
-def rescan_team_libraries() -> None:
-    """启动补扫：每个可达库重扫一次，按 diff 广播停服期间的变化。
+def _rescan_one(library_id: str) -> None:
+    from character_workflow.lib import team_library as tl
+
+    try:
+        mount = tl.get_mount(library_id)
+        # 不可达时 scan_library 扫出空索引：照扫就是广播一整轮 removed（见 TeamLibraryHandler）。
+        if tl.library_reachable(mount):
+            refresh_team_library(mount)
+    except Exception:
+        logger.exception("团队库 %s 启动补扫失败", library_id)
+
+
+def rescan_team_libraries() -> list[threading.Thread]:
+    """启动补扫：每个库在自己的 daemon 线程里重扫一次，按 diff 广播停服期间的变化。
 
     有旧索引只发增量（diff_index），没有就静默建索引——不会把整库当新分享刷一遍。顺带让 P3 之前
-    的老缓存补上 input_sha256。任何一个库失败只记日志，不影响其他库，更不影响启动。
+    的老缓存补上 input_sha256。每个库单独一条线程且不 join：死掉的网盘上连 library_reachable
+    的 is_dir() 都可能挂住，串行就会让后面的库全部等它。任何一个库失败只记日志。
+    返回启动的线程，只给测试 join 用。
     """
     from character_workflow.lib import team_library as tl
 
@@ -320,15 +354,17 @@ def rescan_team_libraries() -> None:
         library_ids = sorted({mount.library_id for mount in tl.list_mounts()})
     except (ValueError, OSError) as error:
         logger.warning("团队库启动补扫跳过：读不了挂载记录（%s）", error)
-        return
-    for library_id in library_ids:
-        try:
-            mount = tl.get_mount(library_id)
-            # 不可达时 scan_library 扫出空索引：照扫就是广播一整轮 removed（见 TeamLibraryHandler）。
-            if tl.library_reachable(mount):
-                refresh_team_library(mount)
-        except Exception:
-            logger.exception("团队库 %s 启动补扫失败", library_id)
+        return []
+    threads = [
+        threading.Thread(
+            target=_rescan_one, args=(library_id,),
+            name=f"team-library-rescan-{library_id}", daemon=True,
+        )
+        for library_id in library_ids
+    ]
+    for thread in threads:
+        thread.start()
+    return threads
 
 
 def _start_team_library_rescan() -> None:
