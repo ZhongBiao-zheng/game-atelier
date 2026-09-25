@@ -1,4 +1,4 @@
-import { useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useRef, useState } from 'react';
 
 import {
   TeamSourceWithdrawnError,
@@ -11,10 +11,10 @@ import type { CreationAsset, CreationAssetStaleness } from '@/schema/creationAss
 /**
  * 采用副本的来源状态（徽标）与「重新采用」确认流程。
  *
- * 资产列表、忙碌态、错误行归面板所有：重新采用成功要替换列表里那一条，所以由面板把写入口传进来。
+ * 资产列表、忙碌态、错误行归面板所有：重新采用成功后把新的那一条交回面板，由面板替换列表。
  */
-export function useAdoptionStaleness({ setAssets, setBusy, setError }: {
-  setAssets: Dispatch<SetStateAction<CreationAsset[]>>;
+export function useAdoptionStaleness({ onReadopted, setBusy, setError }: {
+  onReadopted: (updated: CreationAsset) => void;
   setBusy: (busy: boolean) => void;
   setError: (error: string | null) => void;
 }) {
@@ -57,7 +57,7 @@ export function useAdoptionStaleness({ setAssets, setBusy, setError }: {
     try {
       const updated = await readoptCreationAsset(id);
       stalenessRequest.current += 1;
-      setAssets(current => current.map(asset => asset.asset_id === id ? updated : asset));
+      onReadopted(updated);
       setStaleness(current => ({ ...current, [id]: 'fresh' }));
     } catch (caught) {
       if (caught instanceof TeamSourceWithdrawnError) {

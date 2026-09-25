@@ -79,7 +79,11 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   const [discardOpen, setDiscardOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CreationAsset | null>(null);
   const leaveActionRef = useRef<(() => void) | null>(null);
-  const adoption = useAdoptionStaleness({ setAssets, setBusy, setError });
+  const adoption = useAdoptionStaleness({
+    onReadopted: updated => setAssets(current => current.map(asset => asset.asset_id === updated.asset_id ? updated : asset)),
+    setBusy,
+    setError,
+  });
   const editor = useCreationAssetEditor({ projectId, scope, assets, setBusy, setError, onSaved: finishSave });
   const { promptEditor, mediaEditor, editorDirty, clearEditor, loadSaveRequest } = editor;
 

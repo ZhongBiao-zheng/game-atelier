@@ -94,8 +94,7 @@ export function TeamShareDialog({ request, onClose, onShared, onOpenSettings, pr
     setError(null);
     setLargeRefs(null);
     setLoading(true);
-    const librariesRequest = projectId === undefined ? listTeamLibraries() : listTeamLibraries(projectId);
-    Promise.all([fetchProfile(), librariesRequest])
+    Promise.all([fetchProfile(), listTeamLibraries(projectId)])
       .then(([profile, views]) => {
         if (cancelled) return;
         const usable = reachableLibraries(views);

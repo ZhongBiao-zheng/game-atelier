@@ -92,4 +92,24 @@ describe('CreationAssetPanel server errors', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('本机资产文件缺失');
   });
+
+  it('shows the server message when saving a generation asset from a canvas result hits a broken local asset', async () => {
+    route({
+      '/api/creation-assets': () => json({ revision: 1, assets: [] }, 200),
+      '/api/creation-assets/generation/from-canvas': () => json(BROKEN, 500),
+    });
+    render(
+      <CreationAssetPanel
+        saveRequest={{ requestId: 'r1', kind: 'media', title: '节点结果', previewUrl: '/api/raw/x.png', source: { kind: 'canvas_result', canvas_project_id: 'canvas-a', node_id: 'n1', version_id: 'v1' } }}
+        onClose={vi.fn()}
+        onUsePrompt={vi.fn()}
+        onUseMedia={vi.fn()}
+      />,
+    );
+
+    await screen.findByDisplayValue('节点结果');
+    fireEvent.click(screen.getByRole('button', { name: '保存生成资产' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('本机资产文件缺失');
+  });
 });

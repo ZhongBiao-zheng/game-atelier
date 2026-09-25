@@ -88,6 +88,7 @@ export function useCreationAssetEditor({ projectId, scope, assets, setBusy, setE
     }
   }, []);
 
+  // 与 clearEditor 不同：只关两份编辑器，选区与重复提示保留——openAsset 历来如此，别合并。
   function closeEditors() {
     setPromptEditor(null);
     setMediaEditor(null);

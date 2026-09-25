@@ -104,7 +104,7 @@ describe('TeamShareDialog', () => {
 
     expect(mockProfile).toHaveBeenCalledTimes(1);
     expect(mockList).toHaveBeenCalledTimes(1);
-    expect(mockList).toHaveBeenCalledWith();
+    expect(mockList).toHaveBeenCalledWith(undefined);
     resolveProfile({ display_name: '老王' });
 
     const select = await screen.findByLabelText('团队库');
