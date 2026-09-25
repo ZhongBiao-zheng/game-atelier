@@ -127,6 +127,9 @@ export interface CanvasGenerationPanelContextValue {
 export interface CanvasNodeContextValue {
   batchBusy?: boolean;
   prepareBatch?: (nodeId: string) => Promise<void>;
+  /** 正在跑的批量执行：只有它的分组节点显示「停止」，停止中不重复发取消。 */
+  activeBatch?: { scopeNodeId: string; stopping: boolean };
+  stopActiveBatch?: () => Promise<void>;
   uploadBatchImages?: (nodeId: string, files: File[], itemId?: string) => Promise<void>;
   projectId: string;
   layerParentByNodeId?: ReadonlyMap<string, { nodeId: string; title: string }>;
@@ -796,6 +799,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
                     context.recordHistory();
                     if (context.focusVariableNodeId === node.id) context.consumeVariableFocus?.();
                   }}
+                  onEditingChange={editing => setTextEditing?.(node.id, editing)}
                   onChange={text => context.updateText(node.id, text)}
                   className="h-full"
                 />
@@ -2176,6 +2180,9 @@ export function CanvasGenerationComposer({
         disabledMentionHint={usesVideoFrameSlots ? '首尾帧模式不使用 @' : undefined}
         className="max-h-[50vh]"
         onFocus={context.recordHistory}
+        // 用独立 key：node.id 那把在合并任务结果时还兼作「正文有本地未存改动」的判据，
+        // 结果节点自己就带生成面板，改下一轮提示词不能让刚出的图被当成本地正文挡在外面。
+        onEditingChange={editing => context.setTextEditing?.(`prompt:${node.id}`, editing)}
         onChange={prompt => updateDraft(current => ({
           ...current,
           prompt,

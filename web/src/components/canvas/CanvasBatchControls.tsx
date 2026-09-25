@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { canvasMediaUrl } from '@/api/canvas';
-import type { CanvasBatchMaterialNode, CanvasGroupNode, CanvasContentVersion } from '@/schema/canvas';
-import { CANVAS_BATCH_STATUS, isCanvasBatchActive, type CanvasBatchRun } from '@/schema/canvasBatch';
+import type { CanvasBatchMaterialNode, CanvasGroupNode } from '@/schema/canvas';
+import type { CanvasBatchRun } from '@/schema/canvasBatch';
 import type { CanvasNodeContextValue } from './CanvasEditorViews';
 
 export function CanvasBatchMaterialEditor({ node, context }: {
@@ -164,8 +164,11 @@ export function CanvasExecutionGroup({ node, context, selected }: {
                 : { ...current, data: { ...current.data, repeat_count: repeat } });
             }} />轮
         </label>
-        <Button size="sm" disabled={context.batchBusy || context.submittingNodeIds.has(node.id)}
-          onClick={() => void context.prepareBatch?.(node.id)}>执行分组</Button>
+        {context.activeBatch?.scopeNodeId === node.id
+          ? <Button size="sm" variant="outline" disabled={context.activeBatch.stopping}
+            onClick={() => void context.stopActiveBatch?.()}>停止</Button>
+          : <Button size="sm" disabled={context.batchBusy || context.submittingNodeIds.has(node.id)}
+            onClick={() => void context.prepareBatch?.(node.id)}>执行分组</Button>}
         <Button size="sm" variant="ghost" aria-label={`删除 ${node.title}`} title="解散分组，保留成员节点" disabled={context.batchBusy} onClick={() => context.deleteNode(node.id)}>解散</Button>
       </div>}
     </div>
@@ -190,62 +193,4 @@ export function CanvasBatchConfirmation({ run, busy, error, onClose, onStart }: 
         <Button disabled={busy} onClick={onStart}>{busy ? '提交中…' : '开始执行'}</Button></DialogFooter>
     </DialogContent>
   </Dialog>;
-}
-
-export function CanvasBatchResults({ projectId, runs, resolveVersion, onCancel, onPreview }: {
-  projectId: string; runs: CanvasBatchRun[];
-  resolveVersion: (id: string) => CanvasContentVersion | undefined;
-  onCancel: (id: string) => Promise<void>;
-  onPreview: (id: string, title: string, nodeId: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [page, setPage] = useState(0);
-  const [stopping, setStopping] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const active = runs.find(isCanvasBatchActive);
-  const selected = runs.find(run => run.batch_id === selectedId) ?? runs[0];
-  if (!runs.length) return null;
-  return <>
-    <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-      {active ? `批量执行 ${active.executions.filter(entry => entry.status === 'succeeded').length}/${active.executions.length}` : '批量记录'}
-    </Button>
-    <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-h-[85dvh] max-w-2xl overflow-y-auto">
-      <DialogHeader><DialogTitle className="text-balance">批量记录</DialogTitle>
-        <DialogDescription>保留最近 20 个执行计划的入口；每次生成的完整记录仍保存在对应节点。</DialogDescription></DialogHeader>
-      <select className="h-9 rounded-lg border border-border bg-background px-3 text-sm" aria-label="选择批量记录"
-        value={selected.batch_id} onChange={event => { setSelectedId(event.target.value); setPage(0); }}>
-        {runs.map(run => <option key={run.batch_id} value={run.batch_id}>{run.title} · {CANVAS_BATCH_STATUS[run.status]} · {new Date(run.created_at).toLocaleString()}</option>)}
-      </select>
-      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-        <span className="tabular-nums">{CANVAS_BATCH_STATUS[selected.status]} · 已完成 {selected.executions.filter(entry => entry.status === 'succeeded').length}/{selected.executions.length}</span>
-        {isCanvasBatchActive(selected) && <Button size="sm" variant="outline" disabled={stopping || selected.status === 'stopping'} onClick={async () => {
-          setStopping(true); setError(null);
-          try { await onCancel(selected.batch_id); } catch (failure) { setError((failure as Error).message); }
-          finally { setStopping(false); }
-        }}>停止后续执行</Button>}
-      </div>
-      {(error || selected.error) && <p role="alert" className="text-xs text-destructive">{error || selected.error}</p>}
-      <div className="space-y-2">{selected.executions.slice(page * 30, (page + 1) * 30).map(entry => {
-        const version = entry.version_id ? resolveVersion(entry.version_id) : undefined;
-        const step = selected.steps[entry.step_index];
-        const title = `第 ${entry.round_index + 1} 轮 · 第 ${entry.item_index + 1} 项 · ${step.title}`;
-        return <div key={entry.run_id} className="flex items-center gap-3 rounded-lg border border-border p-3">
-          {version && <button type="button" aria-label={`查看 ${title}`} className="shrink-0 rounded-lg focus-visible:ring-2 focus-visible:ring-primary"
-            onClick={() => { setOpen(false); onPreview(version.version_id, title, step.node_id); }}>
-            {version.kind === 'image' ? <img src={canvasMediaUrl(projectId, version.version_id, 128)} alt={title} loading="lazy" className="size-16 rounded-lg object-cover" />
-              : <span className="grid size-16 place-items-center rounded-lg bg-secondary text-xs">{version.kind === 'text' ? '文本' : version.kind === 'video' ? '视频' : '音频'}</span>}
-          </button>}
-          <div className="min-w-0 flex-1 text-xs"><p className="truncate text-foreground">{title}</p>
-            <p className="mt-1 line-clamp-2 text-muted-foreground">{entry.error ?? (entry.status === 'succeeded' ? '已完成' : entry.status === 'running' ? '生成中' : entry.status === 'queued' ? '等待执行' : entry.status === 'failed' ? '失败' : '未继续执行')}</p>
-          </div>
-        </div>;
-      })}</div>
-      {selected.executions.length > 30 && <div className="flex items-center justify-end gap-2 text-xs tabular-nums">
-        <Button size="sm" variant="ghost" disabled={page === 0} onClick={() => setPage(value => value - 1)}>上一页</Button>
-        {page + 1}/{Math.ceil(selected.executions.length / 30)}
-        <Button size="sm" variant="ghost" disabled={(page + 1) * 30 >= selected.executions.length} onClick={() => setPage(value => value + 1)}>下一页</Button>
-      </div>}
-    </DialogContent></Dialog>
-  </>;
 }

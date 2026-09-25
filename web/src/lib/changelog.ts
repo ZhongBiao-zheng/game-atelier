@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.67.1',
+    date: '2026-09-25',
+    headline: '画布提示词：离开输入框才保存，一次 Enter 就换行',
+    changes: [
+      { kind: 'fix', text: '画布里的提示词输入框不再每打一个字就保存；点到输入框外面才保存一次，输入过程不会被保存打断。切到别的应用再回来，光标位置和输入法组合都保住。' },
+      { kind: 'fix', text: '提示词里按一次 Enter 就是一个换行，不用按两次。' },
+      { kind: 'fix', text: '去掉画布右下角的「批量记录」；正在执行的分组节点工具条上有「停止」。' },
+    ],
+  },
+  {
     version: '5.67.0',
     date: '2026-09-25',
     headline: '团队库：目录格式公开，提醒只弹一次，参考路径收进数据目录',

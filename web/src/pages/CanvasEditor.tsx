@@ -85,7 +85,7 @@ import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { useCanvasJobSync } from '@/hooks/useCanvasJobSync';
 import { useCanvasBatchRuns } from '@/hooks/useCanvasBatchRuns';
 import { prepareCanvasBatch, startCanvasBatch, cancelCanvasBatch } from '@/api/canvasBatch';
-import { CanvasBatchConfirmation, CanvasBatchResults } from '@/components/canvas/CanvasBatchControls';
+import { CanvasBatchConfirmation } from '@/components/canvas/CanvasBatchControls';
 import { canvasEdgeTypes } from '@/components/canvas/CanvasConnectionEdge';
 import type { CanvasBatchRun } from '@/schema/canvasBatch';
 import {
@@ -710,7 +710,7 @@ function CanvasEditorInner({
   const jobsByRunId = useMemo(() => new Map(
     jobs.flatMap(job => job.canvas_run ? [[job.canvas_run.run_id, job] as const] : []),
   ), [jobs]);
-  const { runs: batchRuns, active: activeBatch, acceptRun: acceptBatchRun } = useCanvasBatchRuns(
+  const { active: activeBatch, acceptRun: acceptBatchRun } = useCanvasBatchRuns(
     projectId, acceptJobs, mergeRunDocument, setError,
   );
   const batchBusyRef = useRef(false);
@@ -2786,9 +2786,14 @@ function CanvasEditorInner({
     finally { runSubmissionInFlight.current = false; setBatchCommandBusy(false); }
   }
 
-  const stopBatch = useCallback(async (batchId: string) => {
-    acceptBatchRun(await cancelCanvasBatch(projectId, batchId));
-  }, [projectId, acceptBatchRun]);
+  const stopActiveBatch = useCallback(async () => {
+    if (!activeBatch) return;
+    try {
+      acceptBatchRun(await cancelCanvasBatch(projectId, activeBatch.batch_id));
+    } catch (failure) {
+      setError((failure as Error).message);
+    }
+  }, [activeBatch, projectId, acceptBatchRun]);
 
   const submitRun = useCallback(async (nodeId: string) => {
     if (batchBusyRef.current) { setError('批量执行期间请先等待或停止'); return; }
@@ -4317,6 +4322,8 @@ function CanvasEditorInner({
     consumeVariableFocus,
     batchBusy: Boolean(activeBatch),
     prepareBatch,
+    activeBatch: activeBatch ? { scopeNodeId: activeBatch.scope_node_id, stopping: activeBatch.status === 'stopping' } : undefined,
+    stopActiveBatch,
     uploadBatchImages,
     projectId,
     materialReferences,
@@ -4386,6 +4393,7 @@ function CanvasEditorInner({
   }), [
     activeBatch,
     prepareBatch,
+    stopActiveBatch,
     uploadBatchImages,
     beginMaterialPick,
     cancelRun,
@@ -5169,9 +5177,6 @@ function CanvasEditorInner({
 
         <CanvasBatchConfirmation run={batchConfirmation} busy={batchCommandBusy} error={batchError}
           onClose={() => setBatchConfirmation(null)} onStart={() => void confirmBatch()} />
-        <div className="absolute bottom-16 right-3 z-20 md:bottom-3">
-          <CanvasBatchResults projectId={projectId} runs={batchRuns} resolveVersion={resolveVersion} onCancel={stopBatch} onPreview={previewContent} />
-        </div>
         <Dialog open={layerPreviewNode?.type === 'layer_stack'} onOpenChange={open => { if (!open) setLayerPreviewId(null); }}>
           {layerPreviewNode?.type === 'layer_stack' && <CanvasLayerStackPreview key={layerPreviewNode.id}
             node={layerPreviewNode} projectId={projectId} resolveVersion={resolveVersion}

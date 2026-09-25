@@ -47,5 +47,5 @@ export function useCanvasBatchRuns(projectId: string, acceptJobs: (jobs: Job[]) 
     void poll();
     return () => { canceled = true; clearTimeout(timer); };
   }, [projectId, activeId, refresh, acceptJobs, mergeDocument, onError]);
-  return { runs, active, acceptRun };
+  return { active, acceptRun };
 }
