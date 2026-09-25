@@ -97,16 +97,24 @@ describe('TeamShareReminder', () => {
     expect(window.localStorage.getItem(REMINDED_KEY)).toBeNull();
   });
 
-  it('reminds on updated entries', async () => {
+  it('stays silent for a ready entry that was only updated', async () => {
     const { notify } = await renderReminder();
-    await notify(changeEvent({ change: 'updated' }));
+    await notify(changeEvent({ change: 'updated', status: 'ready' }));
+
+    expect(screen.queryByText('雨夜城门')).not.toBeInTheDocument();
+    expect(window.localStorage.getItem(REMINDED_KEY)).toBeNull();
+  });
+
+  it('reminds on added entries', async () => {
+    const { notify } = await renderReminder();
+    await notify(changeEvent({ change: 'added', status: 'ready' }));
     expect(screen.getByText('雨夜城门')).toBeInTheDocument();
   });
 
   it('reminds each asset once and remembers it across mounts', async () => {
     const { notify } = await renderReminder();
     await notify(changeEvent());
-    await notify(changeEvent({ change: 'updated' }));
+    await notify(changeEvent());
 
     expect(screen.getAllByText('雨夜城门')).toHaveLength(1);
     expect(JSON.parse(window.localStorage.getItem(REMINDED_KEY) ?? '[]')).toEqual(['ta_1']);
@@ -137,7 +145,7 @@ describe('TeamShareReminder', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked'); });
     const { notify } = await renderReminder();
     await notify(changeEvent());
-    await notify(changeEvent({ change: 'updated' }));
+    await notify(changeEvent());
 
     expect(screen.getAllByText('雨夜城门')).toHaveLength(1);
   });

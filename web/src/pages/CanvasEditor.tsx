@@ -449,6 +449,9 @@ function CanvasEditorInner({
   const [canvasUiPreferences, setCanvasUiPreferences] = useState<CanvasUiPreferences>(DEFAULT_CANVAS_UI_PREFERENCES);
   const [canvasUiPreferencesError, setCanvasUiPreferencesError] = useState<string | null>(null);
   const [libraryMode, setLibraryMode] = useState<CanvasLibraryMode | null>(null);
+  // 提示条的「看看」等延后回调会在旧渲染的闭包里跑，判断面板开没开要读当前值。
+  const libraryModeRef = useRef(libraryMode);
+  libraryModeRef.current = libraryMode;
   const [creationAssetSaveRequest, setCreationAssetSaveRequest] = useState<CreationAssetSaveRequest | null>(null);
   const [submittingNodeIds, setSubmittingNodeIds] = useState<Set<string>>(() => new Set());
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(() => new Set());
@@ -2107,7 +2110,7 @@ function CanvasEditorInner({
       // 面板只在挂载时读初始栏位与初始库：一律换 key 重挂，保证落在团队栏和指定的库上。
       setLibraryPanelKey(current => current + 1);
     };
-    if (libraryMode) creationAssetPanelRef.current?.requestTransition(open);
+    if (libraryModeRef.current) creationAssetPanelRef.current?.requestTransition(open);
     else open();
   }
 
@@ -5031,6 +5034,7 @@ function CanvasEditorInner({
 
         <TeamShareDialog
           request={shareRequest}
+          projectId={projectId}
           onClose={() => setShareRequest(null)}
           onShared={(_entry, libraryName) => announceToolNotice(`已分享到 ${libraryName}`)}
           onOpenSettings={() => {

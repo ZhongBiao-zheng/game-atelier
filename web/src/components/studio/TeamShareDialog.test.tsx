@@ -316,6 +316,24 @@ describe('TeamShareDialog', () => {
     expect(screen.queryByRole('option', { name: '迟到的库' })).not.toBeInTheDocument();
   });
 
+  it('传了画布项目时只拉该画布的库，只有一个库时默认选中', async () => {
+    mockList.mockResolvedValue([view({ project_id: 'canvas-7' })]);
+    renderDialog({ projectId: 'canvas-7' });
+
+    expect(mockList).toHaveBeenCalledWith('canvas-7');
+    const select = await screen.findByLabelText('团队库');
+    await waitFor(() => expect(select).toHaveValue('lib_a'));
+  });
+
+  it('画布上没有挂库时显示没有可用的团队库', async () => {
+    mockList.mockResolvedValue([]);
+    renderDialog({ projectId: 'canvas-7' });
+
+    expect(await screen.findByRole('status')).toHaveTextContent('没有可用的团队库');
+    expect(mockList).toHaveBeenCalledWith('canvas-7');
+    expect(screen.getByRole('button', { name: '挂载' })).toBeInTheDocument();
+  });
+
   it('读取团队库失败时显示错误', async () => {
     mockList.mockRejectedValue(new Error('读取团队库失败'));
     renderDialog();

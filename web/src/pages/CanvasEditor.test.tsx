@@ -2382,6 +2382,31 @@ it('does not look up related recipes when inserting the dropped asset fails', as
   expect(listRelatedTeamAssets).not.toHaveBeenCalled();
 });
 
+it('opens the team tab from «look» even after the prompt panel it was suggested under is closed', async () => {
+  const sha = 'f'.repeat(64);
+  vi.mocked(adoptTeamAsset).mockResolvedValue({
+    asset: {
+      asset_id: 'ca-raw', kind: 'media', title: 'castle', tags: [], created_at: '', updated_at: '', last_used_at: null,
+      project_ids: [], content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: sha, filename: 'x.png' },
+    },
+    created: true,
+  });
+  vi.mocked(insertCreationAssetIntoCanvas).mockResolvedValue({ ...emptyDocument, revision: 8 });
+  const related = { library_id: 'lib_0123456789abcdef', library_name: '角色参考', entry: {} as never };
+  vi.mocked(listRelatedTeamAssets).mockResolvedValue([related]);
+  vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
+  vi.mocked(listTeamLibraries).mockResolvedValue([]);
+  await renderReadyCanvas();
+  fireEvent.click(screen.getByRole('button', { name: '提示词资产' }));
+  expect(await screen.findByRole('complementary', { name: '创作资产' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'simulate team asset drop' }));
+  expect(await screen.findByText('有 1 条相关配方')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '关闭创作资产' }));
+  await waitFor(() => expect(screen.queryByRole('complementary', { name: '创作资产' })).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: '看看' }));
+  expect(await screen.findByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true');
+});
+
 it('suggests related recipes after dropping a raw team asset and opens them', async () => {
   const sha = 'f'.repeat(64);
   vi.mocked(adoptTeamAsset).mockResolvedValue({

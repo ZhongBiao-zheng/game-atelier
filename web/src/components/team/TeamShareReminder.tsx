@@ -47,9 +47,12 @@ function isReminded(session: ReadonlySet<string>, assetId: string): boolean {
   return session.has(assetId) || readReminded().includes(assetId);
 }
 
-/** 作者（已 trim）；不该提醒的事件返回 null。是不是本人另判，因为显示名可能要现取。 */
+/** 作者（已 trim）；不该提醒的事件返回 null。是不是本人另判，因为显示名可能要现取。
+ *
+ * 只认 added：服务端把「条目首次可用」（新增即 ready，或网盘同步到一半 incomplete → ready）都发成 added，
+ * 其余字段变化（改标题、改标签）发 updated，不打扰人。 */
 function reminderAuthor(event: TeamLibraryChangeEvent): string | null {
-  if (event.change === 'removed' || event.status !== 'ready' || event.kind === 'raw') return null;
+  if (event.change !== 'added' || event.status !== 'ready' || event.kind === 'raw') return null;
   return event.author?.trim() || null;
 }
 

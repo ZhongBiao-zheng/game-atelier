@@ -45,6 +45,8 @@ export interface TeamShareDialogProps {
   onShared(entry: TeamLibraryIndexEntry, libraryName: string): void;
   /** 没有可达库时显示「挂载」。本组件只回调，离开页面或关闭对话框由调用方负责。 */
   onOpenSettings?(): void;
+  /** 画布传当前画布项目 id：只列挂在这个画布上的库。Studio 不传，列全部。 */
+  projectId?: string;
 }
 
 const TITLE_MAX_LENGTH = 120;
@@ -66,7 +68,7 @@ function errorMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error ? cause.message : fallback;
 }
 
-export function TeamShareDialog({ request, onClose, onShared, onOpenSettings }: TeamShareDialogProps) {
+export function TeamShareDialog({ request, onClose, onShared, onOpenSettings, projectId }: TeamShareDialogProps) {
   const [libraries, setLibraries] = useState<TeamLibraryView[]>([]);
   const [libraryId, setLibraryId] = useState('');
   const [needsName, setNeedsName] = useState(false);
@@ -92,7 +94,8 @@ export function TeamShareDialog({ request, onClose, onShared, onOpenSettings }: 
     setError(null);
     setLargeRefs(null);
     setLoading(true);
-    Promise.all([fetchProfile(), listTeamLibraries()])
+    const librariesRequest = projectId === undefined ? listTeamLibraries() : listTeamLibraries(projectId);
+    Promise.all([fetchProfile(), librariesRequest])
       .then(([profile, views]) => {
         if (cancelled) return;
         const usable = reachableLibraries(views);
@@ -107,7 +110,7 @@ export function TeamShareDialog({ request, onClose, onShared, onOpenSettings }: 
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [request]);
+  }, [request, projectId]);
 
   const library = useMemo(
     () => libraries.find(item => item.library_id === libraryId) ?? null,
