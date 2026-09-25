@@ -66,6 +66,10 @@ def _forbidden_paths(root: Path) -> list[str]:
         "file:///etc/hosts",
         "http:///x",
         "HTTP://evil/../..",
+        "http://x/../../../.config/keys.json",
+        "http://x/..%2F..%2F.config/keys.json",
+        "http://x\\..\\..\\.config\\keys.json",
+        "http://../../.config/keys.json",
         "characters/a\x00.png",
         "characters/" + "x" * 300 + ".png",
     ]
@@ -159,11 +163,13 @@ def test_post_prompt_cannot_set_mask_image(client, isolated_data_root):
 
 
 def test_raw_does_not_resolve_web_url_entries_as_local_paths(client, isolated_data_root):
-    # 能过闸门的「网络地址」当路径解析时会穿越到数据根外；白名单里必须跳过它们。
+    # 带 `..` 段的「网络地址」在闸门就被拒（Win32 会把它折叠成真实路径）；
+    # 真直链登记到 job 上后，/api/raw 白名单也不能把它当路径解析。
     disguised = "http://" + "../" * 40 + "etc/hosts"
-    response = _create(client, {"reference_images": [disguised]})
-    assert response.status_code == 201, response.text
+    assert _create(client, {"reference_images": [disguised]}).status_code == 422
 
+    response = _create(client, {"reference_images": ["https://cdn.example.com/a.png"]})
+    assert response.status_code == 201, response.text
     leaked = client.get("/api/raw", params={
         "job_id": response.json()["job_id"], "path": "/etc/hosts",
     })

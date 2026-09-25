@@ -895,3 +895,25 @@ it('has no fixed save button on an audio node', () => {
   expect(within(toolbar).queryByRole('button', { name: '保存 音频' })).not.toBeInTheDocument();
   expect(within(toolbar).queryByRole('button', { name: '分享 音频' })).not.toBeInTheDocument();
 });
+
+it('lets the batch scope node stop the batch even when it is not a group', () => {
+  const stopActiveBatch = vi.fn(async () => undefined);
+  const context = nodeContext({
+    batchBusy: true,
+    activeBatch: { scopeNodeId: 'image', stopping: false },
+    stopActiveBatch,
+  });
+  const view = (node: CanvasNode) => <CanvasNodeContext.Provider value={context}>
+    <NodeCard data={{ domain: node }} selected />
+  </CanvasNodeContext.Provider>;
+  const { rerender } = render(view(nodes[1]));
+  fireEvent.click(screen.getByRole('button', { name: '停止 图片 的批量执行' }));
+  expect(stopActiveBatch).toHaveBeenCalledTimes(1);
+
+  context.activeBatch = { scopeNodeId: 'image', stopping: true };
+  rerender(view(nodes[1]));
+  expect(screen.getByRole('button', { name: '正在停止 图片 的批量执行' })).toBeDisabled();
+
+  rerender(view(nodes[0]));
+  expect(screen.queryByRole('button', { name: /批量执行/ })).toBeNull();
+});

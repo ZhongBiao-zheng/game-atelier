@@ -12,6 +12,9 @@ export function useCanvasBatchRuns(projectId: string, acceptJobs: (jobs: Job[]) 
   const [runs, setRuns] = useState<CanvasBatchRun[]>([]);
   const [refresh, setRefresh] = useState(0);
   const epoch = useRef(0);
+  // 计划级错误（模型配置改变、重复计费拦截、服务重启中断）只记在 run.error 上，
+  // 没有 job 可以在节点上显示；看到进行中的计划结束时报一次。
+  const watchedId = useRef<string | null>(null);
   const acceptRun = useCallback((run: CanvasBatchRun) => {
     epoch.current += 1;
     setRuns(current => [run, ...current.filter(candidate => candidate.batch_id !== run.batch_id)]);
@@ -21,6 +24,7 @@ export function useCanvasBatchRuns(projectId: string, acceptJobs: (jobs: Job[]) 
   const active = runs.find(isCanvasBatchActive);
   const activeId = active?.batch_id;
   useEffect(() => {
+    if (activeId) watchedId.current = activeId;
     let canceled = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -38,6 +42,11 @@ export function useCanvasBatchRuns(projectId: string, acceptJobs: (jobs: Job[]) 
           acceptJobs(jobs);
         }
         setRuns(remote);
+        const watched = remote.find(run => run.batch_id === watchedId.current);
+        if (watched && !isCanvasBatchActive(watched)) {
+          watchedId.current = null;
+          if (watched.error) onError(watched.error);
+        }
       } catch (error) {
         if (!canceled) onError((error as Error).message);
       } finally {

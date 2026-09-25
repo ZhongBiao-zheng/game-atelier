@@ -638,6 +638,17 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               {nodeJob.cancel_requested_at ? <LoaderCircle /> : <Square />}
             </MediaToolButton>
           )}
+          {context.activeBatch?.scopeNodeId === node.id && (
+            // 批量的范围节点不一定是分组：输入连着批量素材节点的普通节点也会发起批量执行。
+            <MediaToolButton
+              label={context.activeBatch.stopping ? `正在停止 ${node.title} 的批量执行` : `停止 ${node.title} 的批量执行`}
+              text="停止批量"
+              disabled={context.activeBatch.stopping}
+              onClick={() => void context.stopActiveBatch?.()}
+            >
+              {context.activeBatch.stopping ? <LoaderCircle /> : <Square />}
+            </MediaToolButton>
+          )}
           {emptyMediaNode ? (
             <MediaToolButton
               label={`上传${CANVAS_GENERATION_MODE_LABELS[emptyMediaNode.type]}`}

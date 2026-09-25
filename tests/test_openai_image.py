@@ -2334,3 +2334,13 @@ def test_seedream_keeps_reference_image_bytes_when_already_large_enough(
 
     expected = "data:image/png;base64," + base64.b64encode(ref.read_bytes()).decode("ascii")
     assert payload["image"] == expected
+
+
+@pytest.mark.parametrize("value", [
+    "http://x/../../../.config/keys.json",
+    "https://cdn.example.com/a.png",
+    "data:image/png;base64,AAAA",
+])
+def test_image_data_url_never_reads_url_shaped_values_as_local_files(value):
+    with pytest.raises(openai_image.OpenAIImageError, match="网址参考图"):
+        openai_image._image_data_url(value)

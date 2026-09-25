@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Body, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
@@ -425,7 +425,13 @@ _BROWSER_REF_FIELDS = tuple(
 
 def _is_web_url(value: str) -> bool:
     # 「再次生成」会把历史 job 的参考原样回传，其中有 http(s) 直链。
-    return value.startswith(("http://", "https://")) and bool(urlsplit(value).netloc)
+    # 直链原样放行，但不认路径的 caller 会拿它当本地文件读；Win32 会把 `..` 按字面折叠，
+    # `http://x/../../.config/keys.json` 就成了真实路径。带 `..` 段或反斜杠的一律不算直链。
+    if not value.startswith(("http://", "https://")) or not urlsplit(value).netloc:
+        return False
+    if "\\" in value:
+        return False
+    return ".." not in unquote(value).split("/")
 
 
 def _gated_ref(field: str, index: int, item: Any) -> Any:

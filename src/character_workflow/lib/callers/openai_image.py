@@ -775,6 +775,10 @@ _SEEDREAM_MIN_INPUT_PIXELS = 262_144
 
 
 def _image_data_url(path: str, *, min_pixels: int = 0) -> str:
+    # 这条协议只收本地文件。网址不能落到 Path()：Win32 会把 `http://x/../..` 的 `..` 按字面
+    # 折叠成真实路径，读出的就不是参考图了。
+    if path.startswith(("http://", "https://", "data:")):
+        raise OpenAIImageError(f"该模型不接受网址参考图，请改用本地文件：{path[:80]}")
     raw = Path(path).read_bytes()
     ext = Path(path).suffix.lstrip(".").lower() or "png"
     mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"

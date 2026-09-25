@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.67.2',
+    date: '2026-09-25',
+    headline: '批量执行：任何发起节点都能停止，出错会提示',
+    changes: [
+      { kind: 'fix', text: '连着批量素材节点的普通节点发起的批量执行，也能在它的工具条上停止；此前只有分组节点有「停止」。' },
+      { kind: 'fix', text: '批量执行因模型配置改变、重复提交拦截或服务重启而停下时，画布会提示原因；此前静默停止。' },
+      { kind: 'fix', text: '参考图路径闸门不再放行带 `..` 段的网址；网址也不会被当成本地文件读取。' },
+    ],
+  },
+  {
     version: '5.67.1',
     date: '2026-09-25',
     headline: '画布提示词：离开输入框才保存，一次 Enter 就换行',
