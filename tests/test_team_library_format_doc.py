@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 
 from character_workflow.lib.schemas import (
     MEDIA_SUFFIXES,
@@ -19,7 +20,7 @@ from character_workflow.lib.schemas import (
     TeamLibraryMount,
 )
 from character_workflow.lib.team_library import MANIFEST_NAME, read_manifest
-from character_workflow.lib.team_library_index import RAW_SUFFIXES, scan_library
+from character_workflow.lib.team_library_index import _CONFLICT_SUFFIX, RAW_SUFFIXES, scan_library
 from character_workflow.lib.team_library_share import author_dir_name
 
 DOC = Path(__file__).resolve().parents[1] / "docs" / "team-library-format.md"
@@ -50,11 +51,27 @@ def test_doc_has_manifest_and_both_asset_kinds():
     assert kinds == ["generation", "prompt"]
 
 
+def _assert_no_unknown_keys(data: dict, instance: BaseModel, where: str) -> None:
+    """读模型是 extra="ignore"，字段拼错也能过校验：逐层比对示例的键与实际命中的模型字段。"""
+    unknown = set(data) - set(type(instance).model_fields)
+    assert not unknown, f"{where} 有模型里没有的字段：{sorted(unknown)}"
+    for name, raw in data.items():
+        value = getattr(instance, name)
+        if isinstance(value, BaseModel):
+            _assert_no_unknown_keys(raw, value, f"{where}.{name}")
+        elif isinstance(value, list):
+            for i, (raw_item, item) in enumerate(zip(raw, value, strict=True)):
+                if isinstance(item, BaseModel):
+                    _assert_no_unknown_keys(raw_item, item, f"{where}.{name}[{i}]")
+
+
 def test_examples_validate_against_team_models():
     for example in _examples("manifest"):
-        TeamLibraryManifest.model_validate(example)
+        manifest = TeamLibraryManifest.model_validate(example)
+        _assert_no_unknown_keys(example, manifest, "manifest")
     for example in _examples("asset"):
-        TeamAssetFile.model_validate(example)
+        asset = TeamAssetFile.model_validate(example)
+        _assert_no_unknown_keys(example, asset, example["asset_id"])
 
 
 def test_example_hashes_match_placeholder_bytes():
@@ -113,19 +130,36 @@ def test_library_built_from_examples_scans_ready(tmp_path: Path):
     assert raw[0].status == "ready"
 
 
-@pytest.mark.parametrize(("mime", "suffix"), sorted(MEDIA_SUFFIXES.items()))
-def test_doc_lists_every_media_suffix(mime: str, suffix: str):
-    assert f"| `{mime}` | `{suffix}` |" in _doc_text()
+_TABLE_ROW = re.compile(r"^\| `([^`]+)` \| `([^`]+)` \|$")
 
 
-@pytest.mark.parametrize(("suffix", "mime"), sorted(RAW_SUFFIXES.items()))
-def test_doc_lists_every_raw_suffix(suffix: str, mime: str):
-    assert f"| `{suffix}` | `{mime}` |" in _doc_text()
+def _table_rows(header: str) -> set[tuple[str, str]]:
+    """表头行之后（跳过分隔行）连续的两列代码行，解析成集合。"""
+    lines = _doc_text().splitlines()
+    start = lines.index(header) + 2
+    rows: set[tuple[str, str]] = set()
+    for line in lines[start:]:
+        match = _TABLE_ROW.match(line)
+        if match is None:
+            break
+        rows.add((match.group(1), match.group(2)))
+    return rows
+
+
+def test_media_suffix_table_matches_code():
+    assert _table_rows("| mime_type | 后缀 |") == set(MEDIA_SUFFIXES.items())
+
+
+def test_raw_suffix_table_matches_code():
+    assert _table_rows("| 后缀 | mime_type |") == set(RAW_SUFFIXES.items())
 
 
 @pytest.mark.parametrize(
     "pattern",
-    [TEAM_LIBRARY_ID_PATTERN, TEAM_ASSET_ID_PATTERN, TEAM_RECIPE_INPUT_PATH_PATTERN, SHA256_PATTERN],
+    [
+        TEAM_LIBRARY_ID_PATTERN, TEAM_ASSET_ID_PATTERN, TEAM_RECIPE_INPUT_PATH_PATTERN,
+        SHA256_PATTERN, _CONFLICT_SUFFIX.pattern,
+    ],
 )
 def test_doc_quotes_patterns_verbatim(pattern: str):
     assert f"`{pattern}`" in _doc_text()

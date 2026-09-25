@@ -1,8 +1,8 @@
 # 团队库目录格式（format_version 1）
 
-团队库是一个普通目录，由团队自己的 SVN / Git / Perforce / 网盘 / NAS 在成员机器之间同步。本文写给要读写这个目录的工具作者：照这里的规则写出来的资产，game-atelier 能列出、采用、复刻；照这里的规则读，就能读懂 game-atelier 写出的资产。
+团队库是一个普通目录，由团队自己的 SVN / Git / Perforce / 网盘 / NAS 在成员机器之间同步。本文写给要读写这个目录的工具作者：照这里的规则写出来的资产，game-atelier 能识别、采用；生成资产在 §3.3 所列条件下还能复刻。照这里的规则读，就能读懂 game-atelier 写出的资产。
 
-本文与代码一致由 `tests/test_team_library_format_doc.py` 保证：下文带 `example` 标记的 JSON 会被拿去做 schema 校验并搭成真实目录扫描，两张后缀表与四条正则逐字比对代码。代码位置：`src/character_workflow/lib/schemas.py`（`TeamLibraryManifest` / `TeamAssetFile` 等）、`team_library.py`、`team_library_share.py`（写方）、`team_library_index.py`（读方）。
+本文与代码一致由 `tests/test_team_library_format_doc.py` 保证：下文带 `example` 标记的 JSON 会被拿去做 schema 校验并搭成真实目录扫描，两张后缀表与五条正则逐字比对代码。代码位置：`src/character_workflow/lib/schemas.py`（`TeamLibraryManifest` / `TeamAssetFile` 等）、`team_library.py`、`team_library_share.py`（写方）、`team_library_index.py`（读方）。
 
 ## 1. 目录布局
 
@@ -25,10 +25,12 @@
 - 路径分隔一律 `/`；`asset.json` 里的路径都相对资产目录，不引用库外或任何本机路径。
 - 只有 `<mount>/shared/`（库根下这一个）按分享资产解析。其下只认两层：`shared/<author-slug>/<asset_id>/`，且目录里有 `asset.json` 才是资产候选；没有 `asset.json` 的目录整个忽略。
 - `<mount>/shared/` 之外、后缀在 §6.3 表内的文件都是原始团队资产。`shared/` 里的文件永远不算原始资产。
+- `shared`、`asset.json`、`thumb.webp`、`refs` 必须是小写原名。大小写不敏感的文件系统上，`Shared/` 会同时被当成分享目录和原始资产目录。
+- 文件名与目录名建议用 Unicode NFC；macOS 上常见的 NFD 名字在别的系统上可能对不上 `asset.json` 里记的文件名。
 
 ## 2. 清单 `.atelier-library.json`
 
-UTF-8 JSON。读模型忽略未知字段。
+UTF-8 JSON，不带 BOM（带 BOM 的文件本产品解析失败）。读模型忽略未知字段。
 
 | 字段 | 类型 | 规则 |
 |---|---|---|
@@ -56,30 +58,32 @@ UTF-8 JSON。读模型忽略未知字段。
 
 ## 3. 分享资产 `asset.json`
 
-UTF-8 JSON。读模型对每一层都忽略未知字段（向前兼容）。本产品写出时省略值为 `null` 的字段，读方把「缺字段」与 `null` 同等对待。
+UTF-8 JSON，不带 BOM。读模型对每一层都忽略未知字段（向前兼容）。本产品写出时省略值为 `null` 的字段，读方把「缺字段」与 `null` 同等对待。
 
 ### 3.1 顶层字段
 
-| 字段 | 类型 | 规则 |
-|---|---|---|
-| `team_asset_version` | int | 固定 `1`；缺省视为 `1`，其他值 = 不可读 |
-| `asset_id` | string | `ta_` + 26 位 Crockford base32（ULID），正则 `^ta_[0-9A-HJKMNP-TV-Z]{26}$`；**必须等于所在目录名** |
-| `kind` | string | `generation` / `media` / `prompt` |
-| `title` | string | 1–120 字符 |
-| `tags` | string[] | ≤ 20 个；本产品写出时每个 ≤ 40 字符、去首尾空白、忽略大小写去重 |
-| `author` | object | `{"display_name": string}`，1–40 字符 |
-| `shared_at` | string | 首次分享时刻 |
-| `updated_at` | string | 最后修改时刻；读方靠它判断「来源已更新」 |
-| `media` | object | 见 §3.2 |
-| `prompt` | object | 见 §3.5 |
-| `snapshot` | object | 见 §3.3 |
-| `origin` | object | `{"job_id"?: string, "canvas_project_id"?: string}`，只作追溯，任何工具都不应解析或依赖 |
+「必填」列为「否」的字段可以省略。
+
+| 字段 | 类型 | 必填 | 规则 |
+|---|---|---|---|
+| `team_asset_version` | int | 否 | 固定 `1`；缺省视为 `1`，其他值 = 不可读 |
+| `asset_id` | string | 是 | `ta_` + 26 位 Crockford base32（ULID），正则 `^ta_[0-9A-HJKMNP-TV-Z]{26}$`；**必须等于所在目录名** |
+| `kind` | string | 是 | `generation` / `media` / `prompt` |
+| `title` | string | 是 | 1–120 字符 |
+| `tags` | string[] | 否 | 缺省为空；≤ 20 个；本产品写出时每个 ≤ 40 字符、去首尾空白、忽略大小写去重 |
+| `author` | object | 是 | `{"display_name": string}`，1–40 字符 |
+| `shared_at` | string | 是 | 首次分享时刻 |
+| `updated_at` | string | 是 | 最后修改时刻；读方靠它判断「来源已更新」 |
+| `media` | object | 按 `kind` | 见 §3.2 |
+| `prompt` | object | 按 `kind` | 见 §3.5 |
+| `snapshot` | object | 按 `kind` | 见 §3.3 |
+| `origin` | object | 否 | `{"job_id"?: string, "canvas_project_id"?: string}`，只作追溯，任何工具都不应解析或依赖 |
 
 `kind` 决定必带的载荷，缺了即不合规：
 
 | `kind` | 必带 | 含义 |
 |---|---|---|
-| `generation` | `media` + `snapshot` | 生成结果 + 冻结快照，可复刻 |
+| `generation` | `media` + `snapshot` | 生成结果 + 冻结快照，可复刻（条件见 §3.3） |
 | `media` | `media` | 纯媒体文件 |
 | `prompt` | `prompt` | 提示词，不带文件 |
 
@@ -100,21 +104,27 @@ UTF-8 JSON。读模型对每一层都忽略未知字段（向前兼容）。本�
 
 ### 3.3 `snapshot`（仅 generation）
 
-| 字段 | 类型 | 规则 |
-|---|---|---|
-| `mode` | string | `image` / `video` |
-| `model` | string | 1–200 字符，模型 id |
-| `provider` | string? | 供应商 id |
-| `alias` | string? | 模型别名 |
-| `final_prompt` | string | 实际提交的提示词 |
-| `draft_prompt` | string? | 提交前的草稿提示词 |
-| `params` | object | 提交参数，键值不透明 |
-| `cost_cny` | number? | ≥ 0，人民币 |
-| `cost_basis` | string? | `actual` / `estimated`；与 `cost_cny` **成对**：同时有值或同时缺省 |
-| `submitted_at` | string | 提交时刻 |
-| `inputs` | array | ≤ 64 份参考，见 §3.4 |
+| 字段 | 类型 | 必填 | 规则 |
+|---|---|---|---|
+| `mode` | string | 是 | `image` / `video` |
+| `model` | string | 是 | 1–200 字符，模型 id |
+| `provider` | string | 否 | 供应商 id |
+| `alias` | string | 否 | 模型别名 |
+| `final_prompt` | string | 是 | 实际提交的提示词 |
+| `draft_prompt` | string | 否 | 提交前的草稿提示词 |
+| `params` | object | 否 | 缺省为 `{}`；提交参数 |
+| `cost_cny` | number | 否 | ≥ 0，人民币 |
+| `cost_basis` | string | 否 | `actual` / `estimated`；与 `cost_cny` **成对**：同时有值或同时缺省 |
+| `submitted_at` | string | 是 | 提交时刻 |
+| `inputs` | array | 否 | 缺省为空；≤ 64 份参考，见 §3.4 |
 
-`params` 由本产品写出时只含生成参数（尺寸、比例、质量、时长、seed 等），不含本机路径、费用、运行后回写的状态；其他工具可以写任意键，读方按不透明对象原样保留。首尾帧视频的参考顺序由 `params.frame_mode` 解释。
+`params` 由本产品写出时只含生成参数（尺寸、比例、质量、时长、seed 等），不含本机路径、费用、运行后回写的状态。读 `asset.json` 时它是不透明对象，任意键都能通过校验、原样保留。首尾帧视频的参考顺序由 `params.frame_mode` 解释。
+
+复刻比读更严。本产品复刻时：
+
+- 只取本产品画布该 `mode` 支持的参数键，其余键丢弃；
+- 已知键的值类型不对（比如 `n` 写成字符串 `"两张"`），复刻失败；
+- `model` 须是本产品已接入的模型 id，否则复刻出的配置没有可用模型。
 
 ### 3.4 `snapshot.inputs[]`
 
@@ -146,7 +156,7 @@ UTF-8 JSON。读模型对每一层都忽略未知字段（向前兼容）。本�
 
 ### 3.6 时间戳
 
-`shared_at` / `updated_at` / `submitted_at` / `created_at` 都是 ISO-8601 字符串。本产品写 UTC、带 `+00:00` 与微秒（如 `2026-09-25T02:13:45.123456+00:00`）。读方按时刻比，不按字符串比：`Z`、`+00:00`、`+08:00` 都接受，不带时区的当 UTC；解析不了的当「未知」（本产品不据此提示更新）。建议其他写方也写 UTC。
+`shared_at` / `updated_at` / `submitted_at` / `created_at` 都是 ISO-8601 字符串。本产品写 UTC、带 `+00:00` 与微秒（如 `2026-09-25T02:13:45.123456+00:00`）。判断来源是否更新时按时刻比：`Z`、`+00:00`、`+08:00` 都接受，不带时区的当 UTC；解析不了的当「未知」（本产品不据此提示更新）。其他场合（如列表排序）不保证按时刻比，写方请统一写 UTC。
 
 ## 4. 命名规则
 
@@ -216,6 +226,7 @@ UTF-8 JSON。读模型对每一层都忽略未知字段（向前兼容）。本�
 
 - 忽略所有以 `.` 开头的目录与文件（`.svn`、`.git`、`.tmp-*`、`.tmp-del-*` 等）。
 - 库内指向库外的 symlink 不属于这个库：扫描与读取都不认。资产目录里的文件必须真在该资产目录内（不含 `..`，不经由指向外面的链接）。
+- 扫描原始资产时不进入任何 symlink 目录（指向库内的也不进）；symlink 文件只在指向库内时被识别。
 - 未知字段忽略。`format_version` 不是 1 的清单不可读（本产品拒绝挂载）；`team_asset_version` 不是 1 的 `asset.json` 不可读（按下条「未就绪」处理）。
 
 ### 6.2 分享资产的就绪判定
@@ -229,9 +240,11 @@ UTF-8 JSON。读模型对每一层都忽略未知字段（向前兼容）。本�
 
 未就绪通常是同步工具还没把整个目录拉完，下次扫描可能就绪。就绪只看文件在不在；使用前要按 `sha256` 校验内容，对不上当作还没同步完（本产品采用时就这样拒绝）。
 
+`media.mime_type` 不在 §4.4 表内、按文件内容也认不出表内类型的资产，显示为就绪，但本产品不能采用。
+
 ### 6.3 原始团队资产
 
-`<mount>/shared/` 之外的每个文件，同时满足以下条件就是一条原始团队资产：不以 `.` 开头、不在点目录里；文件名不以冲突副本后缀 `.mine` 或 `.r<数字>` 结尾（正则 `\.(mine|r\d+)$`）；后缀（忽略大小写）在下表内；不是指向库外的 symlink。
+`<mount>/shared/` 之外的每个文件，同时满足以下条件就是一条原始团队资产：不以 `.` 开头、不在点目录里；文件名不以冲突副本后缀 `.mine` 或 `.r<数字>` 结尾（正则 `\.(mine|r\d+)$`）；后缀（忽略大小写）在下表内；不是指向库外的 symlink；路径上没有 symlink 目录。
 
 | 后缀 | mime_type |
 |---|---|
@@ -249,7 +262,7 @@ UTF-8 JSON。读模型对每一层都忽略未知字段（向前兼容）。本�
 
 - 类型按后缀认定，时刻取文件修改时间。
 - 身份 = `library_id` + 库内相对路径（`/` 分隔）。改名或移动即新资产，旧的视为已撤回。本产品的条目 id 是 `raw_` + 相对路径 UTF-8 字节的 sha1 前 24 位。
-- 同一路径的内容以文件 sha256 判断是否变化：修改时间变了但 sha256 没变（版本工具重新检出）不算更新。
+- 判断采用副本是否过期时，同一路径的内容以文件 sha256 为准：修改时间变了但 sha256 没变（版本工具重新检出）不算过期。索引层只看修改时间，mtime 一变就发 `updated` 事件。
 
 ## 7. 权限
 
@@ -356,4 +369,4 @@ UTF-8 JSON。读模型对每一层都忽略未知字段（向前兼容）。本�
 }
 ```
 
-示例里的 `sha256` 与 `bytes` 对应测试生成的占位文件，不是真实图片。
+示例里的 `sha256` 与 `bytes` 由测试生成的占位字节计算得出。
