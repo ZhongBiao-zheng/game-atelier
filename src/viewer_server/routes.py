@@ -39,6 +39,7 @@ from character_workflow.lib.atomic_io import (
     atomic_write_text,
 )
 from character_workflow.lib.job_runner import image_dimensions_from_bytes
+from character_workflow.lib.local_paths import data_root_file
 from character_workflow.lib.jobs import (
     _load_job, delete_failed_job, is_resumable_studio_job, job_lock, list_jobs, read_job,
     remove_image_from_job, request_job_cancel,
@@ -411,6 +412,33 @@ def post_spec(character_id: str, patch: SpecPatch) -> dict:
     return {"ok": True, "revision": result["revision"]}
 
 
+# 浏览器提交的参考路径字段：/api/raw 按 job 登记的这些路径放行读取，mj_image 还会把本地文件
+# 上传成公网直链，所以每一项都要过数据根闸门。mask_image 只由服务端写（画布局部编辑）。
+_BROWSER_REF_FIELDS = (
+    "reference_images", "reference_videos", "reference_audios", "mj_sref", "mj_cref", "mj_oref",
+)
+
+
+def _is_web_url(value: str) -> bool:
+    # 「再次生成」会把历史 job 的参考原样回传，其中有 http(s) 直链。
+    return value.startswith(("http://", "https://")) and bool(urlsplit(value).netloc)
+
+
+def _check_browser_refs(params: dict[str, Any]) -> None:
+    for field in _BROWSER_REF_FIELDS:
+        value = params.get(field)
+        items = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+        for index, item in enumerate(items, start=1):
+            if not isinstance(item, str) or _is_web_url(item):
+                continue
+            try:
+                data_root_file(item)
+            except ValueError as error:
+                raise HTTPException(
+                    422, detail=f"params.{field} 第 {index} 项：{error}",
+                ) from error
+
+
 @router.post("/prompt/{job_id}")
 def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
     p = _runtime() / "jobs" / f"{job_id}.json"
@@ -429,11 +457,13 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                 # These fields identify an already billed provider task.  Browser edits must never
                 # replace or erase them, otherwise a forged/stale id could retrieve the wrong task
                 # or make the runner submit a second order after losing its recovery handle.
-                for owned in ("provider_task_protocol", "provider_task_ids"):
+                # mask_image 同理只由服务端写。
+                for owned in ("provider_task_protocol", "provider_task_ids", "mask_image"):
                     if owned in existing_params:
                         value[owned] = existing_params[owned]
                     else:
                         value.pop(owned, None)
+                _check_browser_refs(value)
             data[field] = value
         # Validate the complete post-patch document before replacing the durable Job JSON.  This
         # catches explicit nulls and cross-field violations without discarding legacy raw fields.
@@ -497,9 +527,11 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
                 whitelist.update(item for item in value if isinstance(item, str))
         if job.source_image:
             whitelist.add(job.source_image)
+        # 网络直链不是本机文件；当路径解析会把 "http://../../etc/x" 拼成数据根外的真实路径。
         normalized_whitelist = {
             str((Path(p) if Path(p).is_absolute() else _project_root() / p).resolve())
             for p in whitelist
+            if not p.startswith(("http://", "https://"))
         }
         if str(target) not in normalized_whitelist:
             raise HTTPException(403, detail="读图被拒：这个路径不在该 job 登记的产物列表里")
@@ -2087,6 +2119,8 @@ def _create_user_job(
     # order and may not attach itself to an arbitrary existing Tuzi task.
     params.provider_task_protocol = None
     params.provider_task_ids = None
+    params.mask_image = None
+    _check_browser_refs(params.model_dump())
     if body.kind == JobKind.IMAGE:
         from character_workflow.lib.image_size import normalize_image_size_params
 

@@ -1,7 +1,7 @@
 """配方来源：把一次生成（Studio job 结果 / 画布结果版本）解析成自包含的 RecipeSource。
 
 分享到团队库与「保存为生成资产」共用这一处：成片路径、冻结配方、每份参考的本机路径。
-参考路径都过闸——Studio 走 `_local_file`（数据根内、非 .config、.runtime 只认 uploads），
+参考路径都过闸——Studio 走 `local_paths.data_root_file`（数据根内、非 .config、.runtime 只认 uploads），
 画布走 `resolve_canvas_media`（resolve 后必须在本画布项目的 uploads / derived / outputs 内，
 outputs 还须登记在本项目的画布 job 上）。
 """
@@ -23,6 +23,7 @@ from character_workflow.lib.creation_assets import (
     store_media_blob,
 )
 from character_workflow.lib.jobs import read_job
+from character_workflow.lib.local_paths import DataRootFileMissing, data_root_file
 from character_workflow.lib.schemas import (
     MEDIA_SUFFIXES,
     CanvasDocument,
@@ -157,28 +158,14 @@ def _job_cost(job: Job) -> tuple[float | None, str | None]:
 # ------------------------------------------------------------------ job_output
 
 
-def _local_file(value: str) -> Path:
-    """job 里登记的参考路径：绝对路径或数据根相对路径。
-
-    浏览器能经 POST /api/prompt/{job_id} 整体替换 params，所以这是最后一道闸：resolve 后
-    （symlink 已展开）必须在数据根内，不能在 .config/ 下，.runtime/ 下只认 uploads/。
-    """
-    if value.startswith(("http://", "https://")):
-        raise RecipeSourceError("not_shareable", "网络地址的参考无法打包")
-    root = data_root.resolve_data_root().resolve()
-    raw = Path(value)
-    path = (raw if raw.is_absolute() else root / raw).resolve()
+def _shareable_file(value: str) -> Path:
+    """job 里登记的参考路径过 `data_root_file` 闸门（浏览器能经 POST /api/prompt 替换 params）。"""
     try:
-        parts = path.relative_to(root).parts
+        return data_root_file(value)
+    except DataRootFileMissing as error:
+        raise RecipeSourceError("source_missing", str(error)) from error
     except ValueError as error:
-        raise RecipeSourceError("not_shareable", "参考文件不在数据目录内") from error
-    if not parts or parts[0] == ".config" or (
-        parts[0] == ".runtime" and (len(parts) < 3 or parts[1] != "uploads")
-    ):
-        raise RecipeSourceError("not_shareable", "参考文件不在允许打包的目录内")
-    if not path.is_file():
-        raise RecipeSourceError("source_missing", f"本机找不到文件：{path.name}")
-    return path
+        raise RecipeSourceError("not_shareable", str(error)) from error
 
 
 def _read_studio_job(job_id: str) -> Job:
@@ -216,7 +203,7 @@ def _job_ref_paths(job: Job) -> list[tuple[RecipeInputRole, Path]]:
     for field, role in _JOB_REF_FIELDS:
         value = getattr(job.params, field)
         values = [value] if isinstance(value, str) else list(value or [])
-        refs.extend((role, _local_file(item)) for item in values)
+        refs.extend((role, _shareable_file(item)) for item in values)
     return refs
 
 
