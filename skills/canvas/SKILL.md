@@ -2,10 +2,7 @@
 name: canvas
 version: 1.0.0
 description: |
-  用 canvas_* MCP 工具操作本机 Atelier 画布：读节点与连线、增删文本 / 媒体节点、填生成配置、
-  导入本机文件、在授权允许时直接发起生成并读回结果。用户要「在画布上摆节点 / 连线 / 出图」、
-  把本地图片放进画布、批量搭生成流程，或调用 /game-atelier:canvas 时使用。
-  角色 / 美宣 / UI / 视频的工坊流程不归本 skill，交对应工坊 Skill。
+  用户要在本机 Atelier 画布上摆节点、连线、导入素材，或从画布发起生成时用（需 canvas_* 工具已授权）。角色、美宣、三视图、UI、视频的工坊流程不用。
 allowed-tools:
   - Read
   - AskUserQuestion

@@ -2,11 +2,7 @@
 name: ui-page
 version: 1.3.0
 description: |
-  游戏 UI 单页生成与风格切换：读锚文档 + style.md + 页面 brief 组 prompt，走 job 体系出基准页 /
-  单页；结构锁定出 N 个风格候选供并排对比，选定后回写 style.md ui.* 契约。
-  产物归项目中的明确 UI 方案（projects/<slug>/ui/<scheme-id>/screens/<screen-id>/）。一次只做一页。
-  前置门：design/ 三锚文档 approved（或 waiver 在案）且 style.md 存在，否则不生图。
-  用户要生成 UI 页面 / 基准页 / 界面图 / 换风格出候选，或调用 /game-atelier:ui-page 时使用。
+  按已批准的 UI 契约为 game-atelier 项目出一页 UI 图（计费，先出确认卡），或锁定结构出风格候选并回写方案 style.md。用户要出某一页、基准页或风格候选时用。
 allowed-tools:
   - Bash
   - Read
@@ -23,10 +19,10 @@ triggers:
 
 ## 定位
 
-一次只做一页。页面结构写进当前方案 brief（`projects/<slug>/ui/<scheme>/screens/<screen-id>.md`），
+一次只做一页。页面结构写进当前方案 brief（`projects/<slug>/ui/<scheme-id>/screens/<screen-id>.md`），
 生成快照存 job JSON（prompt / model / params）——brief 与 prompt 分离，生成参数不回写 brief。
 产物走完整 job 体系（确认卡 / 失败重试 / 5xx 重试 / 直连白名单全部复用），落
-`projects/<slug>/ui/<scheme>/screens/<screen-id>/vN.png`，Web 对应方案的页面区可见。
+`projects/<slug>/ui/<scheme-id>/screens/<screen-id>/vN.png`，Web 对应方案的页面区可见。
 
 两种模式：**基准页模式**（默认，验结构）与**风格切换模式**（结构锁定、只换风格出候选，见下节）。
 

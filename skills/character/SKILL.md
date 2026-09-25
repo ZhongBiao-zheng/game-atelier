@@ -2,10 +2,7 @@
 name: character
 version: 4.7.0
 description: |
-  游戏角色立绘工作流：承接画师反馈，通过对话问清风格/配色/镜头/道具后出图，
-  并支持对已出立绘改皮肤、换色、重画。
-  用户要做新角色、出立绘、改 / 迭代立绘、继续角色工作流，或调用
-  /game-atelier:character 时使用。
+  为游戏项目建角色、出立绘，或修改已出立绘（换色、换装、重画）时用。美宣和海报走 promo，三视图走 turnaround，画布节点走 canvas。
 allowed-tools:
   - Bash
   - Read

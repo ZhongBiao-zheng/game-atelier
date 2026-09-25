@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.67.3',
+    date: '2026-09-25',
+    headline: '工坊技能说明改短改准，AI 更容易选对技能',
+    changes: [
+      { kind: 'fix', text: '角色、美宣、三视图、UI、视频各技能的触发说明写清何时用、何时不用，AI 不再在它们之间选错，也不会跟通用视频提示词技能抢活。' },
+      { kind: 'fix', text: '本地服务技能不再被 AI 自动调起；要打开画廊或重启服务时手动调用，创作流程照常自己启动服务。' },
+      { kind: 'fix', text: '三视图参考文档的画幅统一为 2048×1152，和实际出图一致。' },
+    ],
+  },
+  {
     version: '5.67.2',
     date: '2026-09-25',
     headline: '批量执行：任何发起节点都能停止，出错会提示',

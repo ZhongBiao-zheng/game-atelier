@@ -95,9 +95,19 @@ warn_duplicate_codex_skills() {
   done
 }
 
+prune_legacy_claude_links() {  # 旧版按 Skill 逐个软链进 ~/.claude/skills/，会和插件入口重复注册
+  for t in "$HOME/.claude/skills/"*; do
+    [ "$t" = "$CLAUDE_LINK" ] && continue
+    is_our_link "$t" || continue
+    rm -f "$t"
+    echo "  ✓ 移除旧版逐个 Skill 链接：$t"
+  done
+}
+
 uninstall() {
   echo "=== 卸载 game-atelier 本地软链 ==="
   if is_our_link "$CLAUDE_LINK"; then rm -f "$CLAUDE_LINK"; echo "  ✓ 移除 $CLAUDE_LINK"; fi
+  prune_legacy_claude_links
   for t in "$CODEX_DIR/$PLUGIN_NAME-"*; do
     if is_our_link "$t"; then rm -f "$t"; echo "  ✓ 移除 $t"; fi
   done
@@ -121,6 +131,7 @@ if [ -d "$HOME/.claude" ] && { [ "$SYNC_ONLY" = 0 ] || is_our_link "$CLAUDE_LINK
   if do_link "$REPO_ROOT" "$CLAUDE_LINK"; then
     installed+=("Claude Code  → $CLAUDE_LINK  (命令：/game-atelier:character 等)")
   fi
+  prune_legacy_claude_links
 else
   if [ "$SYNC_ONLY" = 1 ]; then
     skipped+=("Claude Code（未发现本仓库的本地安装）")

@@ -2,10 +2,7 @@
 name: turnaround
 version: 1.5.0
 description: |
-  角色三视图 / character sheet 生成：基于已有立绘引导画师锁定正/侧/背三面比例、表情、武器拆解，
-  一次性出横版三联视图，也支持改已出的三视图。
-  用户要做三视图 / 角色三面 / 设定集，或调用 /game-atelier:turnaround 时使用；
-  该角色还没有立绘（spec.md + portrait/）则先走 /game-atelier:character。
+  为项目内角色出正、侧、背三视图（character sheet）或改已出三视图时用；需要已有立绘或衍生来源图，否则先走 character。宣传图走 promo，世界观设定文档不用。
 allowed-tools:
   - Bash
   - Read
