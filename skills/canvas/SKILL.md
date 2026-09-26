@@ -18,7 +18,7 @@ triggers:
 
 画布是 server 持有、带 revision 的活文档，本 Skill 只有一条手：`canvas_*` MCP 工具
 （契约见 `docs/contracts/canvas-mcp.md`）。没有 CLI 路径，不读写画布文件，不改 Job。
-工具不可见时，让用户在当前会话执行 `/reload-plugins` 或新开会话（插件自带 MCP）；工具返回 `CREDENTIALS_INVALID`
+工具不可见时，让用户新开一个会话（插件自带的 MCP 只在会话启动时加载，`/reload-plugins` 不生效）；工具返回 `CREDENTIALS_INVALID`
 或授权不含画布时，指用户去本机 Atelier「本机连接」页点「连接本机 Agent」（默认含全部画布与画布操作），
 配置方法见 `docs/mcp-local-client.md`；停在授权环节，不改走 shell。
 

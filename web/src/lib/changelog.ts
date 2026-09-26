@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.68.1',
+    date: '2026-09-26',
+    headline: '改正本机连接说明：新开会话才出现工坊工具',
+    changes: [
+      { kind: 'fix', text: '「如何在 Agent 中使用」改正：装了插件的 Claude Code 要新开一个会话才会出现工坊和画布工具，在已开的会话里执行 /reload-plugins 不会加载。' },
+    ],
+  },
+  {
     version: '5.68.0',
     date: '2026-09-26',
     headline: '本机 Agent 连一次就一直能用',

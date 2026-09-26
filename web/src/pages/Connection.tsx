@@ -118,7 +118,7 @@ function LocalConnectionPage() {
         </>}
       </article>)}
     </section>
-    <details className="border-t border-border pt-5 text-sm"><summary className="cursor-pointer text-muted-foreground">如何在 Agent 中使用</summary><div className="mt-3 space-y-3 text-muted-foreground"><p>Claude Code 装了 game-atelier 插件即自动使用「本机 Agent」，已开的会话执行 <code className="font-mono text-xs">/reload-plugins</code>。Codex 执行一次 <code className="break-all font-mono text-xs">codex mcp add game-atelier -- {quote(python)} -m character_workflow.mcp</code>。</p><p>自定义授权复制卡片上的命令（Codex 把开头换成 <code className="font-mono text-xs">codex mcp add game-atelier --</code>）。授权长期有效，撤销即失效；不要粘贴凭据文件内容。</p><p>Skill 照常安装；勾选「直接执行生成」后终端确认即出图，否则在「待批准生成」页确认。</p></div></details>
+    <details className="border-t border-border pt-5 text-sm"><summary className="cursor-pointer text-muted-foreground">如何在 Agent 中使用</summary><div className="mt-3 space-y-3 text-muted-foreground"><p>Claude Code 装了 game-atelier 插件即自动使用「本机 Agent」，新开的会话里可用。Codex 执行一次 <code className="break-all font-mono text-xs">codex mcp add game-atelier -- {quote(python)} -m character_workflow.mcp</code>。</p><p>自定义授权复制卡片上的命令（Codex 把开头换成 <code className="font-mono text-xs">codex mcp add game-atelier --</code>）。授权长期有效，撤销即失效；不要粘贴凭据文件内容。</p><p>Skill 照常安装；勾选「直接执行生成」后终端确认即出图，否则在「待批准生成」页确认。</p></div></details>
   </div>;
 }
 

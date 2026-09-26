@@ -40,7 +40,8 @@ MCP 进程不会启动、重启或安装 viewer-server，也不扫描端口和�
 MCP 配置只保存解释器、模块和可选的凭据文件位置，不包含明文凭据。
 
 Claude Code 由插件自带 MCP（`.claude-plugin/plugin.json` 的 `mcpServers.atelier`），装好插件即注册，不用执行命令；
-已开的会话执行 `/reload-plugins` 生效，服务显示为 `plugin:game-atelier:atelier`。启动命令是
+插件 MCP 只在会话启动时加载，新开的会话里生效（`/reload-plugins` 只重载 Skill，输出会提示 MCP 改动下个会话生效），
+服务显示为 `plugin:game-atelier:atelier`。启动命令是
 `${ATELIER_PYTHON:-python3} ${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py --run -m character_workflow.mcp`，
 由 bootstrap 找到数据目录的 venv 再启动适配器。Windows 没有 `python3` 时，在用户环境变量里设
 `ATELIER_PYTHON=python`（尚未在 Windows 实测）。服务名用 `atelier` 是因为工具全名
