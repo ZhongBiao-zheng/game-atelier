@@ -299,11 +299,6 @@ class WorkshopClient:
         except ValidationError:
             raise AdapterError("PROTOCOL_MISMATCH", _ERROR_MESSAGES["PROTOCOL_MISMATCH"]) from None
 
-    def connect(self) -> None:
-        with self._lock:
-            credentials = self._load_credentials()
-            self._connect(credentials, self._status(credentials))
-
     def call(self, operation: str, payload: BaseModel) -> dict:
         if operation not in OPERATIONS:
             raise AdapterError("TOOL_NOT_ALLOWED", "此操作不属于工坊工具。")

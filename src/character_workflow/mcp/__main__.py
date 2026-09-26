@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
-from character_workflow.mcp.client import AdapterError, WorkshopClient
+from character_workflow.mcp.client import WorkshopClient
 from character_workflow.mcp.server import create_server
 
 
@@ -19,9 +18,6 @@ def main() -> int:
     # 缺授权 / 服务未起时每次调用返回可操作的错误与指引；授权补上后下一次调用直接可用。
     try:
         create_server(client).run(transport="stdio")
-    except AdapterError as error:
-        print(f"{error.code}: {error.message}", file=sys.stderr)
-        return 2
     finally:
         client.close()
     return 0
