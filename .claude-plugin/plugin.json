@@ -1,10 +1,16 @@
 {
   "name": "game-atelier",
-  "version": "5.67.3",
+  "version": "5.68.0",
   "description": "Game Atelier — 游戏项目资产工坊，本地 Web UI + AI 美术 / 游戏 UI / 视频工作流",
   "author": {
     "name": "zhengzhongbiao"
   },
   "homepage": "https://github.com/ZhongBiao-zheng/game-atelier",
-  "skills": "./skills"
+  "skills": "./skills",
+  "mcpServers": {
+    "atelier": {
+      "command": "${ATELIER_PYTHON:-python3}",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py", "--run", "-m", "character_workflow.mcp"]
+    }
+  }
 }

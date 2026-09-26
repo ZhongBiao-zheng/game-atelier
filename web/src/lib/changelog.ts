@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.68.0',
+    date: '2026-09-26',
+    headline: '本机 Agent 连一次就一直能用',
+    changes: [
+      { kind: 'feat', text: '「连接本机 Agent」的授权不再过期，撤销前一直有效；再点一次会替换成新授权，已连着的 Claude Code / Codex 不用改任何配置。' },
+      { kind: 'feat', text: '装了插件的 Claude Code 自带工坊和画布工具，不用再复制注册命令；先开 Agent 后授权也没关系，授权完下一次调用就能用。' },
+      { kind: 'fix', text: '自定义授权的注册命令改为在所有项目里生效，不再只在执行命令的那个文件夹可用。' },
+    ],
+  },
+  {
     version: '5.67.3',
     date: '2026-09-25',
     headline: '工坊技能说明改短改准，AI 更容易选对技能',

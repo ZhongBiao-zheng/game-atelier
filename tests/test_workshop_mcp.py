@@ -6,7 +6,6 @@ import base64
 import io
 import json
 import socket
-import subprocess
 import sys
 import threading
 import time
@@ -123,7 +122,7 @@ def runtime(tmp_path):
     credentials = tmp_path.resolve() / "grant.json"
     write_private_json(credentials, {
         "service": "game-atelier", "base_url": f"http://127.0.0.1:{server.server_port}",
-        "grant_id": "grant-test", "grant_token": state["grant_token"], "expires_at": expires(24),
+        "grant_id": "grant-test", "grant_token": state["grant_token"],
     })
     state["credentials"] = credentials
     try:
@@ -277,12 +276,12 @@ def test_client_follows_runtime_server_port_over_credential_snapshot(runtime, tm
     stale = tmp_path / "stale-grant.json"
     write_private_json(stale, {
         "service": "game-atelier", "base_url": "http://127.0.0.1:1",
-        "grant_id": live.grant_id, "grant_token": live.grant_token, "expires_at": live.expires_at,
+        "grant_id": live.grant_id, "grant_token": live.grant_token,
     })
     runtime_dir = data_root.runtime_dir()
     runtime_dir.mkdir(parents=True, exist_ok=True)
     (runtime_dir / "server.port").write_text(live.base_url.rsplit(":", 1)[1], encoding="utf-8")
-    client = WorkshopClient(load_credentials(stale))
+    client = WorkshopClient(stale)
     try:
         client.call("list-projects", ListProjectsInput())
         assert runtime["sessions"] == 1
@@ -290,7 +289,7 @@ def test_client_follows_runtime_server_port_over_credential_snapshot(runtime, tm
         client.close()
     # 端口文件缺失时退回凭据快照，且错误里带上尝试过的地址。
     (runtime_dir / "server.port").unlink()
-    client = WorkshopClient(load_credentials(stale))
+    client = WorkshopClient(stale)
     try:
         with pytest.raises(AdapterError) as caught:
             client.call("list-projects", ListProjectsInput())
@@ -301,7 +300,7 @@ def test_client_follows_runtime_server_port_over_credential_snapshot(runtime, tm
 
 
 def test_client_reauthenticates_only_explicit_expiry_and_instance_restart(runtime):
-    client = WorkshopClient(load_credentials(runtime["credentials"]))
+    client = WorkshopClient(runtime["credentials"])
     try:
         runtime["behavior"] = "expire-once"
         client.call("list-projects", ListProjectsInput())
@@ -319,7 +318,7 @@ def test_client_reauthenticates_only_explicit_expiry_and_instance_restart(runtim
                                  "CONTENT_TOO_LARGE", "SESSION_REQUIRED", "QUEUE_FULL"])
 def test_domain_error_codes_remain_actionable_without_forwarding_raw_details(runtime, code):
     runtime.update(behavior="domain-error", domain_error=code)
-    client = WorkshopClient(load_credentials(runtime["credentials"]))
+    client = WorkshopClient(runtime["credentials"])
     try:
         with pytest.raises(AdapterError) as caught:
             client.call("list-projects", ListProjectsInput())
@@ -337,7 +336,7 @@ def test_domain_error_codes_remain_actionable_without_forwarding_raw_details(run
     ("disconnect", "LOCAL_SERVICE_UNAVAILABLE"), ("revoked", "SESSION_REVOKED"),
 ])
 def test_transport_bounds_errors_and_does_not_replay_ambiguous_operations(runtime, behavior, code):
-    client = WorkshopClient(load_credentials(runtime["credentials"]))
+    client = WorkshopClient(runtime["credentials"])
     runtime["behavior"] = behavior
     try:
         with pytest.raises(AdapterError) as caught:
@@ -356,7 +355,7 @@ def test_transport_bounds_errors_and_does_not_replay_ambiguous_operations(runtim
                                         ("protocol", "atelier-local/1")])
 def test_transport_fails_closed_before_grant_exchange_for_wrong_service(runtime, field, value):
     runtime[field] = value
-    client = WorkshopClient(load_credentials(runtime["credentials"]))
+    client = WorkshopClient(runtime["credentials"])
     try:
         with pytest.raises(AdapterError, match="协议不匹配"):
             client.call("list-projects", ListProjectsInput())
@@ -370,7 +369,7 @@ def test_transport_bypasses_environment_proxy_and_does_not_offer_generic_route(r
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:1")
     monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:1")
     monkeypatch.setenv("NO_PROXY", "")
-    client = WorkshopClient(load_credentials(runtime["credentials"]))
+    client = WorkshopClient(runtime["credentials"])
     try:
         assert client.call("list-projects", ListProjectsInput())["items"]
         with pytest.raises(AdapterError) as caught:
@@ -387,20 +386,68 @@ def test_transport_bypasses_environment_proxy_and_does_not_offer_generic_route(r
 ])
 def test_credentials_accept_only_literal_exact_loopback_url(url):
     with pytest.raises(ValidationError):
-        Credentials(service="game-atelier", base_url=url, grant_id="test",
+        Credentials(service="game-atelier", base_url=url, grant_id="test", grant_token="x" * 32)
+
+
+def test_old_credential_with_expiry_is_rejected():
+    # 授权已不设有效期；带 expires_at 的旧凭据按无效处理，页面点一次「连接本机 Agent」即换新。
+    with pytest.raises(ValidationError):
+        Credentials(service="game-atelier", base_url="http://127.0.0.1:5174", grant_id="test",
                     grant_token="x" * 32, expires_at=expires())
 
 
-def test_invalid_credential_entrypoint_never_logs_path_or_writes_stdout(tmp_path):
+async def test_missing_credential_keeps_tools_visible_and_never_leaks_path(tmp_path):
     missing = tmp_path / "private-credential-location.json"
-    result = subprocess.run(
-        [sys.executable, "-m", "character_workflow.mcp", "--credentials", str(missing)],
-        capture_output=True, text=True, encoding="utf-8", timeout=10,
+    params = StdioServerParameters(
+        command=sys.executable, args=["-m", "character_workflow.mcp", "--credentials", str(missing)],
+        cwd=tmp_path, env={"PYTHONPATH": str(SOURCE),
+                           "GAME_ATELIER_DATA_ROOT": str(tmp_path / "unused-data")},
     )
-    assert result.returncode == 2
-    assert result.stdout == ""
-    assert "CREDENTIALS_INVALID" in result.stderr
-    assert str(missing) not in result.stderr
+    async with asyncio.timeout(20):
+        async with Client(params, read_timeout_seconds=10) as client:
+            assert len((await client.list_tools()).tools) == len(TOOL_INPUT_MODELS)
+            result = await client.call_tool("workshop_list_projects", {"payload": {}})
+    assert result.is_error
+    assert result.structured_content["error"]["code"] == "CREDENTIALS_INVALID"
+    assert "--credentials" in result.structured_content["error"]["message"]
+    assert str(missing) not in str(result)
+
+
+def test_default_credential_is_the_data_root_agent_file(runtime):
+    from character_workflow.lib import data_root
+    from character_workflow.lib.private_json import read_private_json
+
+    client = WorkshopClient()
+    try:
+        with pytest.raises(AdapterError) as caught:
+            client.call("list-projects", ListProjectsInput())
+        assert caught.value.code == "CREDENTIALS_INVALID"
+        assert "连接本机 Agent" in caught.value.message
+        # 页面点「连接本机 Agent」写下默认凭据后，同一个客户端的下一次调用直接可用。
+        write_private_json(data_root.agent_credential_file(),
+                           read_private_json(runtime["credentials"]))
+        assert client.call("list-projects", ListProjectsInput())["items"]
+        assert runtime["sessions"] == 1
+    finally:
+        client.close()
+
+
+def test_replaced_credential_is_picked_up_without_restarting_adapter(runtime):
+    from character_workflow.lib.private_json import read_private_json
+
+    client = WorkshopClient(runtime["credentials"])
+    try:
+        client.call("list-projects", ListProjectsInput())
+        # 重新授权 = 同一路径原子写入新令牌；旧令牌从此换不到会话（假服务只认新令牌）。
+        runtime["grant_token"] = "test-grant-secret-" + "c" * 32
+        write_private_json(runtime["credentials"], {
+            **read_private_json(runtime["credentials"]), "grant_token": runtime["grant_token"],
+        })
+        client.call("list-projects", ListProjectsInput())
+        assert runtime["sessions"] == 2
+        assert len(runtime["calls"]) == 2
+    finally:
+        client.close()
 
 
 @pytest.fixture
@@ -438,7 +485,6 @@ def actual_runtime(tmp_path):
         grant = browser.post(base_url + "/api/connection/agent-grants", json={
             "name": "SDK业务回归", "project_ids": [project_ids[0]],
             "capabilities": ["read", "edit_documents", "create_targets", "prepare_generation"],
-            "days": 1,
         }, timeout=5)
         assert grant.status_code == 201, grant.text
         yield {"credentials": Path(grant.json()["credential_path"]),
@@ -562,7 +608,7 @@ def test_adapter_starts_and_reports_unavailable_service_without_exiting(tmp_path
     # Agent 宿主常先于 viewer-server 启动；适配器不能在启动时退出，否则整个会话工具不可见。
     from character_workflow.lib.private_json import write_private_json
     from character_workflow.mcp import __main__ as entry
-    from character_workflow.mcp.client import AdapterError, WorkshopClient, load_credentials
+    from character_workflow.mcp.client import AdapterError, WorkshopClient
 
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -571,7 +617,6 @@ def test_adapter_starts_and_reports_unavailable_service_without_exiting(tmp_path
     write_private_json(credential, {
         "service": "game-atelier", "base_url": f"http://127.0.0.1:{closed_port}",
         "grant_id": "a" * 32, "grant_token": "t" * 43,
-        "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
     })
     served: list[str] = []
 
@@ -584,7 +629,7 @@ def test_adapter_starts_and_reports_unavailable_service_without_exiting(tmp_path
     assert entry.main() == 0
     assert served == ["stdio"]
 
-    client = WorkshopClient(load_credentials(credential))
+    client = WorkshopClient(credential)
     with pytest.raises(AdapterError) as error:
         client.call("list-projects", ListProjectsInput())
     assert error.value.code == "LOCAL_SERVICE_UNAVAILABLE"

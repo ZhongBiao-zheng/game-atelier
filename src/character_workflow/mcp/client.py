@@ -89,7 +89,6 @@ class Credentials(BaseModel):
     base_url: str
     grant_id: str = Field(min_length=1, max_length=128)
     grant_token: str = Field(min_length=20, max_length=512, repr=False)
-    expires_at: str = Field(max_length=64)
 
     @field_validator("base_url")
     @classmethod
@@ -105,12 +104,6 @@ class Credentials(BaseModel):
             or parsed.fragment or value != f"http://127.0.0.1:{port}"
         ):
             raise ValueError("expected an exact loopback URL")
-        return value
-
-    @field_validator("expires_at")
-    @classmethod
-    def expiry(cls, value: str) -> str:
-        _parse_expiry(value)
         return value
 
 
@@ -146,14 +139,11 @@ def load_credentials(path: Path) -> Credentials:
     from character_workflow.lib.private_json import read_private_json
 
     try:
-        result = Credentials.model_validate(read_private_json(path))
+        return Credentials.model_validate(read_private_json(path))
     except (OSError, ValueError, ValidationError):
         raise AdapterError(
             "CREDENTIALS_INVALID", "无法读取受保护的 Agent 凭据，请在本机管理页重新授权。",
         ) from None
-    if _parse_expiry(result.expires_at) <= datetime.now(timezone.utc):
-        raise AdapterError("SESSION_EXPIRED", _ERROR_MESSAGES["SESSION_EXPIRED"])
-    return result
 
 
 def _safe_result(value: object, depth: int = 0) -> bool:
@@ -187,10 +177,17 @@ def _runtime_base_url(fallback: str) -> str:
     return f"http://127.0.0.1:{port}"
 
 
+# viewer-server 的默认端口；端口文件也缺失时，报错指引里用它拼管理页地址。
+_DEFAULT_BASE_URL = "http://127.0.0.1:5174"
+
+
 class WorkshopClient:
-    def __init__(self, credentials: Credentials):
-        self._credentials = credentials
-        self._base_url = credentials.base_url
+    def __init__(self, credentials_path: Path | None = None):
+        # None = 默认授权（「连接本机 Agent」写的 agent.json），每次调用按当前 data root 解析。
+        self._credentials_path = credentials_path
+        self._credentials: Credentials | None = None
+        self._credentials_key: tuple[int, int, int] | None = None
+        self._base_url = _DEFAULT_BASE_URL
         self._http = requests.Session()
         self._http.trust_env = False
         self._http.headers.update({"Accept": "application/json"})
@@ -199,6 +196,34 @@ class WorkshopClient:
 
     def close(self) -> None:
         self._http.close()
+
+    def _load_credentials(self) -> Credentials:
+        """凭据按 (inode, size, mtime) 缓存；重新授权会原子替换文件，下一次调用即换新令牌，不必重开会话。"""
+        from character_workflow.lib import data_root
+
+        path = self._credentials_path or data_root.agent_credential_file()
+        try:
+            info = path.stat()
+            key = (info.st_ino, info.st_size, info.st_mtime_ns)
+        except OSError:
+            key = None
+        if key is not None and key == self._credentials_key and self._credentials is not None:
+            return self._credentials
+        self._credentials, self._credentials_key, self._session = None, None, None
+        page = _runtime_base_url(_DEFAULT_BASE_URL) + "/connection"
+        hint = (
+            f"本机 Agent 还没有连接：打开 {page} 点「连接本机 Agent」后重试。"
+            if self._credentials_path is None
+            else f"无法读取指定的 Agent 凭据：在 {page} 重新授权并更新 --credentials。"
+        )
+        if key is None:
+            raise AdapterError("CREDENTIALS_INVALID", hint)
+        try:
+            credentials = load_credentials(path)
+        except AdapterError:
+            raise AdapterError("CREDENTIALS_INVALID", hint) from None
+        self._credentials, self._credentials_key = credentials, key
+        return credentials
 
     def _request(self, method: str, path: str, payload: dict | None = None) -> dict:
         headers = {}
@@ -250,12 +275,10 @@ class WorkshopClient:
                 "若操作已提交，请查询状态而非重复生成。",
             ) from None
 
-    def _connect(self, status: ServiceStatus) -> None:
-        if _parse_expiry(self._credentials.expires_at) <= datetime.now(timezone.utc):
-            raise AdapterError("SESSION_EXPIRED", _ERROR_MESSAGES["SESSION_EXPIRED"])
+    def _connect(self, credentials: Credentials, status: ServiceStatus) -> None:
         result = self._request("POST", "/api/connection/agent-sessions", {
-            "grant_id": self._credentials.grant_id,
-            "grant_token": self._credentials.grant_token,
+            "grant_id": credentials.grant_id,
+            "grant_token": credentials.grant_token,
             "instance_id": status.instance_id,
         })
         try:
@@ -268,9 +291,9 @@ class WorkshopClient:
             raise AdapterError("SESSION_EXPIRED", _ERROR_MESSAGES["SESSION_EXPIRED"])
         self._session = session
 
-    def _status(self) -> ServiceStatus:
+    def _status(self, credentials: Credentials) -> ServiceStatus:
         # 每次探测都重读端口：服务重启后端口可能漂移，凭据不重签也要能连上。
-        self._base_url = _runtime_base_url(self._credentials.base_url)
+        self._base_url = _runtime_base_url(credentials.base_url)
         try:
             return ServiceStatus.model_validate(self._request("GET", "/api/connection/status"))
         except ValidationError:
@@ -278,18 +301,20 @@ class WorkshopClient:
 
     def connect(self) -> None:
         with self._lock:
-            self._connect(self._status())
+            credentials = self._load_credentials()
+            self._connect(credentials, self._status(credentials))
 
     def call(self, operation: str, payload: BaseModel) -> dict:
         if operation not in OPERATIONS:
             raise AdapterError("TOOL_NOT_ALLOWED", "此操作不属于工坊工具。")
         with self._lock:
-            status = self._status()
+            credentials = self._load_credentials()
+            status = self._status(credentials)
             if (
                 self._session is None or self._session.instance_id != status.instance_id
                 or _parse_expiry(self._session.expires_at) <= datetime.now(timezone.utc)
             ):
-                self._connect(status)
+                self._connect(credentials, status)
             try:
                 result = self._request(
                     "POST", OPERATIONS[operation], payload.model_dump(mode="json"),
@@ -299,7 +324,7 @@ class WorkshopClient:
                     raise
                 # SESSION_EXPIRED is emitted before the route reads or executes the operation.
                 self._session = None
-                self._connect(self._status())
+                self._connect(credentials, self._status(credentials))
                 result = self._request(
                     "POST", OPERATIONS[operation], payload.model_dump(mode="json"),
                 )

@@ -8,44 +8,58 @@ Agent 通过工具读取的文档、预览等获授权内容会进入其会话�
 ## 准备本机连接
 
 1. 安装本项目依赖，正常启动 viewer-server 并打开本机 Atelier 页面。
-2. 在本机的 Agent 连接管理中创建授权：选择工坊项目 / 画布、需要的操作和有效期。只读查看只授予 `read`；
-   改文档、创建目标和准备生成分别需要 `edit_documents`、`create_targets`、`prepare_generation`；
-   `execute_generation` 允许 Agent 在你对话确认后直接批准。画布操作另有 `canvas_read / canvas_edit / canvas_generate`，
-   见[画布 MCP 契约](contracts/canvas-mcp.md)；操作引导在 `skills/canvas/SKILL.md`。
-3. 保存页面提供的凭据文件位置。文件由服务端生成和保护，不要复制其中的 token，
-   不要上传、提交或将它粘贴到聊天 / MCP 配置。
-4. 确定安装了本项目依赖的 Python 解释器绝对路径。插件用户是数据目录下的 `<data_root>/.venv/bin/python`
-   （Windows 为 `<data_root>\.venv\Scripts\python.exe`，默认 data root 是 `~/game-atelier`）；源码开发环境是仓库的 `.venv/bin/python`。
-   「本机 Agent 连接」页会直接给出带本机解释器路径的完整命令。使用此解释器，不要让 Agent 自行选择另一套 Python。
+2. 在「本机连接」页点「连接本机 Agent」：默认授权全部工坊项目、画布和操作（ADR-0017 的本机自用场景）。
+   要缩小范围用「自定义」：只读查看只授予 `read`；改文档、创建目标和准备生成分别需要 `edit_documents`、
+   `create_targets`、`prepare_generation`；`execute_generation` 允许 Agent 在你对话确认后直接批准。
+   画布操作另有 `canvas_read / canvas_edit / canvas_generate`，见[画布 MCP 契约](contracts/canvas-mcp.md)；
+   操作引导在 `skills/canvas/SKILL.md`。
+3. 授权不设有效期，撤销即失效（[ADR-0021](adr/0021-agent-grants-persist-until-revoked.md)）。
+   「连接本机 Agent」创建默认授权，凭据固定写在 `<data_root>/.config/connections/agent.json`；再点一次会替换旧的
+   默认授权并覆盖同一文件，已注册的 Agent 下一次调用自动换用新凭据，不用改配置、不用重开会话。
+   自定义授权的凭据写在 `<grant_id>.json`，注册时带 `--credentials`。凭据文件由服务端生成和保护，
+   不要复制其中的 token，不要上传、提交或将它粘贴到聊天 / MCP 配置。
 
-MCP 启动命令如下，两个绝对路径都需替换为本机实际值：
+MCP 启动命令：默认授权不带参数，自定义授权带 `--credentials <凭据绝对路径>`。
 
 ```text
-/absolute/path/to/python -m character_workflow.mcp --credentials /absolute/path/to/grant.json
+<python> -m character_workflow.mcp
 ```
 
-MCP 进程不会启动、重启或安装 viewer-server，也不扫描端口和用户目录。它只读取指定的受保护凭据，
-核验精确的 `http://127.0.0.1:<port>` 服务和协议，再换取短期会话。
-本机服务重启后会核验新实例并用仍有效的授权重新连接；服务地址变化需要在本机重新生成连接配置。
+`<python>` 是装了本项目依赖的解释器：插件用户是 `<data_root>/.venv/bin/python`（Windows 为
+`<data_root>\.venv\Scripts\python.exe`，默认 data root 是 `~/game-atelier`）；源码开发环境是仓库的 `.venv/bin/python`。
+「本机连接」页给出的命令已带本机解释器，不要让 Agent 自行选择另一套 Python。
 
-## 配置 Codex / Claude Code
+MCP 进程不会启动、重启或安装 viewer-server，也不扫描端口和用户目录。凭据缺失、已撤销或 viewer-server 未启动时
+照常启动，工具保持可见，调用时返回带处理指引的错误；每次调用前按文件状态判断凭据是否已被替换。
+它只读取默认或指定的受保护凭据，核验精确的 `http://127.0.0.1:<port>`（以 `.runtime/server.port` 为准）服务和协议，
+再换取 2 小时的运行会话，到期或服务重启后自动重换。
 
-以下是用户主动安装的示例，不由 Atelier 自动执行，也没有在开发过程中更改任何全局 Agent 配置。
-MCP 配置只保存解释器、模块和凭据文件位置，不包含明文凭据。
+## 配置 Claude Code / Codex
 
-Codex 支持通过 `codex mcp add` 注册本机 stdio 服务，也可在受信任项目的 `.codex/config.toml`
-配置。这里的 CLI 命令会写入用户的 Codex MCP 配置，执行前确认作用范围。
-参见[OpenAI 官方 MCP 文档](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)。
+插件注册和下列命令都由用户主动安装触发，Atelier 服务本身不改写 Agent 配置。
+MCP 配置只保存解释器、模块和可选的凭据文件位置，不包含明文凭据。
 
-```bash
-codex mcp add game-atelier -- /absolute/path/to/python -m character_workflow.mcp --credentials /absolute/path/to/grant.json
-```
+Claude Code 由插件自带 MCP（`.claude-plugin/plugin.json` 的 `mcpServers.atelier`），装好插件即注册，不用执行命令；
+已开的会话执行 `/reload-plugins` 生效，服务显示为 `plugin:game-atelier:atelier`。启动命令是
+`${ATELIER_PYTHON:-python3} ${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py --run -m character_workflow.mcp`，
+由 bootstrap 找到数据目录的 venv 再启动适配器。Windows 没有 `python3` 时，在用户环境变量里设
+`ATELIER_PYTHON=python`（尚未在 Windows 实测）。服务名用 `atelier` 是因为工具全名
+`mcp__plugin_game-atelier_<服务名>__<工具名>` 不能超过 64 个字符。
 
-Claude Code 的 `local` scope 只在当前项目加载，但配置实际仍保存在用户的 Claude 配置文件中。
+默认授权不要再用 `claude mcp add` 手动注册：手动注册的服务与插件服务名字不同，两套工具会同时出现。
+只有自定义授权才手动注册；`--scope user` 让所有项目都能用，`local` 只在执行命令的那个目录生效。
 参见[Claude Code 官方 stdio 与 scope 文档](https://code.claude.com/docs/en/mcp#option-3-add-a-local-stdio-server)。
 
 ```bash
-claude mcp add --transport stdio --scope local game-atelier -- /absolute/path/to/python -m character_workflow.mcp --credentials /absolute/path/to/grant.json
+claude mcp add --transport stdio --scope user <名字> -- <python> -m character_workflow.mcp --credentials <凭据绝对路径>
+```
+
+Codex 没有插件自带的 MCP，默认授权执行一次即可，之后重新授权不用再改；自定义授权在末尾加 `--credentials`。
+这里的 CLI 命令会写入用户的 Codex MCP 配置，执行前确认作用范围。
+参见[OpenAI 官方 MCP 文档](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)。
+
+```bash
+codex mcp add game-atelier -- <python> -m character_workflow.mcp
 ```
 
 路径有空格时给整个路径加引号；Windows 使用解释器和凭据文件的 Windows 绝对路径。
@@ -55,7 +69,8 @@ claude mcp add --transport stdio --scope local game-atelier -- /absolute/path/to
 ## 工具可见与 Skill 可见是两件事
 
 重启或刷新客户端连接后，先确认工具列表中存在 18 个 `workshop_*` 与 8 个 `canvas_*` 工具，再确认客户端加载了
-本项目原有的 Character、Promo、Turnaround、UI 或 Video Skill。注册 MCP 不会自动安装 Skill。
+本项目原有的 Character、Promo、Turnaround、UI 或 Video Skill。Claude Code 插件同时带来 Skill 与 MCP；
+Codex 或手动注册 MCP 的客户端，Skill 需要另外安装。
 不要为通过 MCP 检查给 Agent 开放整个 data root 或无关目录，也不要关闭客户端安全确认。
 
 工具参数统一放在 `payload` 中，未知字段、类型转换、任意路径和额外的 `confirmed` 一律拒绝。
@@ -86,7 +101,7 @@ claude mcp add --transport stdio --scope local game-atelier -- /absolute/path/to
 
 | 结果 | 处理 |
 | --- | --- |
-| `CREDENTIALS_INVALID` | 检查是否用了管理页生成的文件；重新授权，不放宽文件权限 |
+| `CREDENTIALS_INVALID` | 默认授权：在「本机连接」页点「连接本机 Agent」后直接重试；自定义授权：重新授权并更新 `--credentials`；不放宽文件权限 |
 | `LOCAL_SERVICE_UNAVAILABLE` | 先正常启动本机 Atelier；写请求可能已提交时先查询状态，不能盲目重复 |
 | `PROTOCOL_MISMATCH` | 更新本机服务后重新连接，不退回匿名接口 |
 | `SESSION_REVOKED` / `CAPABILITY_DENIED` | 本次授权不允许操作，在管理页明确调整 |

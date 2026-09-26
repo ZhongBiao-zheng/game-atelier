@@ -36,9 +36,8 @@ function LocalConnectionPage() {
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const [canvasProjects, setCanvasProjects] = useState<CanvasProjectOption[]>([]);
   const [canvasProjectIds, setCanvasProjectIds] = useState<string[]>([]);
-  // 本机自用默认满能力、最长有效期：这是 ADR-0017 的默认场景，缩范围的人再取消勾选。
+  // 本机自用默认满能力：这是 ADR-0017 的默认场景，缩范围的人再取消勾选。
   const [capabilities, setCapabilities] = useState<AgentCapability[]>([...CAPABILITIES, ...CANVAS_CAPABILITIES].map(item => item.value));
-  const [days, setDays] = useState(30);
   const [python, setPython] = useState('');
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -58,16 +57,17 @@ function LocalConnectionPage() {
     return () => { active = false; };
   }, []);
 
-  async function submitGrant(grantName: string) {
+  async function submitGrant(grantName: string, isDefault: boolean) {
     setError(null); setBusy('create');
     try {
-      const grant = await createAgentGrant({ name: grantName, project_ids: projectIds, canvas_project_ids: canvasProjectIds, capabilities, days });
-      setGrants(current => [grant, ...current]); setCreating(false); setName('');
+      const grant = await createAgentGrant({ name: grantName, project_ids: projectIds, canvas_project_ids: canvasProjectIds, capabilities, default: isDefault });
+      // 默认授权只有一条，服务端已替换旧的；列表同步去掉旧卡片。
+      setGrants(current => [grant, ...current.filter(item => !(grant.default && item.default))]); setCreating(false); setName('');
     } catch (error) { setError(String(error)); } finally { setBusy(null); }
   }
   function create(event: FormEvent) {
     event.preventDefault();
-    void submitGrant(name.trim());
+    void submitGrant(name.trim(), false);
   }
   const nothingToGrant = projectIds.length === 0 && canvasProjectIds.length === 0;
   async function revoke(grant: AgentGrant) {
@@ -77,7 +77,7 @@ function LocalConnectionPage() {
     catch (error) { setError(String(error)); } finally { setBusy(null); }
   }
   const quote = (value: string) => (/\s/.test(value) ? `"${value}"` : value);
-  const command = (grant: AgentGrant) => `claude mcp add --transport stdio --scope local game-atelier -- ${quote(python)} -m character_workflow.mcp --credentials ${quote(grant.credential_path)}`;
+  const command = (grant: AgentGrant) => `claude mcp add --transport stdio --scope user game-atelier -- ${quote(python)} -m character_workflow.mcp --credentials ${quote(grant.credential_path)}`;
   async function copy(grant: AgentGrant) {
     try {
       await navigator.clipboard.writeText(command(grant));
@@ -94,7 +94,7 @@ function LocalConnectionPage() {
     <SitePairingSection />
     <h2 className="text-base font-medium">Agent 授权</h2>
     {!creating ? <div className="flex flex-wrap items-center gap-3">
-        <button type="button" disabled={busy !== null || nothingToGrant} onClick={() => void submitGrant('本机 Agent')} className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"><Plus size={16} aria-hidden />{busy === 'create' ? '连接中…' : '连接本机 Agent'}</button>
+        <button type="button" disabled={busy !== null || nothingToGrant} onClick={() => void submitGrant('本机 Agent', true)} className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"><Plus size={16} aria-hidden />{busy === 'create' ? '连接中…' : '连接本机 Agent'}</button>
         <button type="button" onClick={() => setCreating(true)} className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">自定义</button>
         {nothingToGrant && <span className="text-sm text-muted-foreground">先创建项目或画布</span>}
       </div> :
@@ -104,20 +104,21 @@ function LocalConnectionPage() {
         <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">允许访问的画布</legend>{canvasProjects.length === 0 && <p className="text-sm text-muted-foreground">还没有画布项目。</p>}{canvasProjects.map(project => <label key={project.project_id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={canvasProjectIds.includes(project.project_id)} onChange={event => setCanvasProjectIds(current => event.target.checked ? [...current, project.project_id] : current.filter(id => id !== project.project_id))} />{project.name}</label>)}</fieldset>
         <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">允许的工坊操作</legend>{CAPABILITIES.map(capability => <label key={capability.value} className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={capability.value === 'read'} checked={capabilities.includes(capability.value)} onChange={event => setCapabilities(current => event.target.checked ? [...current, capability.value] : current.filter(value => value !== capability.value))} />{capability.label}</label>)}</fieldset>
         <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">允许的画布操作</legend>{CANVAS_CAPABILITIES.map(capability => <label key={capability.value} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={capabilities.includes(capability.value)} onChange={event => setCapabilities(current => event.target.checked ? [...current, capability.value] : current.filter(value => value !== capability.value))} />{capability.label}</label>)}</fieldset>
-        <label className="flex items-center gap-3 text-sm">有效天数<input type="number" min={1} max={30} required value={days} onChange={event => setDays(Number(event.target.value))} className="w-20 rounded-md border border-input bg-transparent px-3 py-2" /></label>
         <div className="flex gap-2"><button disabled={busy !== null || nothingToGrant || !name.trim()} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{busy === 'create' ? '创建中…' : '创建授权'}</button><button type="button" onClick={() => setCreating(false)} className="rounded-md px-4 py-2 text-sm hover:bg-accent">取消</button></div>
       </form>}
     <section aria-label="已有 Agent 授权" className="space-y-3">
       {grants.length === 0 && !creating && <p className="py-8 text-sm text-muted-foreground">尚未授权任何 Agent。</p>}
       {grants.map(grant => <article key={grant.grant_id} className="space-y-3 rounded-lg border border-border bg-card p-5">
         <div className="flex items-center justify-between gap-4"><h2 className="text-base font-medium">{grant.name}</h2><button type="button" aria-label={`撤销 ${grant.name}`} disabled={busy !== null} onClick={() => void revoke(grant)} className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-destructive"><Trash2 size={16} aria-hidden /></button></div>
-        <p className="text-sm text-muted-foreground">{[...grant.project_ids.map(id => projects.find(project => project.id === id)?.name ?? id), ...(grant.canvas_project_ids ?? []).map(id => `画布 · ${canvasProjects.find(project => project.project_id === id)?.name ?? id}`)].join(' · ')} · {new Date(grant.expires_at).toLocaleDateString()} 到期</p>
+        <p className="text-sm text-muted-foreground">{[...grant.project_ids.map(id => projects.find(project => project.id === id)?.name ?? id), ...(grant.canvas_project_ids ?? []).map(id => `画布 · ${canvasProjects.find(project => project.project_id === id)?.name ?? id}`)].join(' · ')}</p>
         <p className="text-xs text-muted-foreground">{grant.capabilities.map(value => [...CAPABILITIES, ...CANVAS_CAPABILITIES].find(item => item.value === value)?.label).filter(Boolean).join(' · ')}</p>
-        <div className="flex items-start gap-2"><code className="min-w-0 flex-1 break-all rounded-md bg-background p-3 font-mono text-xs">{command(grant)}</code><button type="button" onClick={() => void copy(grant)} aria-label={`复制 ${grant.name} 注册命令`} className="shrink-0 rounded-md p-3 hover:bg-accent"><Copy size={16} aria-hidden /></button></div>
-        {copied === grant.grant_id && <p role="status" className="text-xs text-muted-foreground">已复制注册命令，未复制密钥。</p>}
+        {grant.default ? <p className="text-xs text-muted-foreground">Claude Code 插件自动使用</p> : <>
+          <div className="flex items-start gap-2"><code className="min-w-0 flex-1 break-all rounded-md bg-background p-3 font-mono text-xs">{command(grant)}</code><button type="button" onClick={() => void copy(grant)} aria-label={`复制 ${grant.name} 注册命令`} className="shrink-0 rounded-md p-3 hover:bg-accent"><Copy size={16} aria-hidden /></button></div>
+          {copied === grant.grant_id && <p role="status" className="text-xs text-muted-foreground">已复制注册命令，未复制密钥。</p>}
+        </>}
       </article>)}
     </section>
-    <details className="border-t border-border pt-5 text-sm"><summary className="cursor-pointer text-muted-foreground">如何在 Agent 中使用</summary><div className="mt-3 space-y-3 text-muted-foreground"><p>在终端执行上面的命令注册（Codex 换成 <code className="font-mono text-xs">codex mcp add game-atelier -- …</code>），重启 Agent 后工具可见。凭据文件由本机保护，不要粘贴其内容。</p><p>Skill 照常安装；勾选「直接执行生成」后终端确认即出图，否则在「待批准生成」页确认。</p></div></details>
+    <details className="border-t border-border pt-5 text-sm"><summary className="cursor-pointer text-muted-foreground">如何在 Agent 中使用</summary><div className="mt-3 space-y-3 text-muted-foreground"><p>Claude Code 装了 game-atelier 插件即自动使用「本机 Agent」，已开的会话执行 <code className="font-mono text-xs">/reload-plugins</code>。Codex 执行一次 <code className="break-all font-mono text-xs">codex mcp add game-atelier -- {quote(python)} -m character_workflow.mcp</code>。</p><p>自定义授权复制卡片上的命令（Codex 把开头换成 <code className="font-mono text-xs">codex mcp add game-atelier --</code>）。授权长期有效，撤销即失效；不要粘贴凭据文件内容。</p><p>Skill 照常安装；勾选「直接执行生成」后终端确认即出图，否则在「待批准生成」页确认。</p></div></details>
   </div>;
 }
 

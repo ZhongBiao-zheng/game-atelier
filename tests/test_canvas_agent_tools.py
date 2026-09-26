@@ -198,7 +198,7 @@ def test_http_agent_session_reaches_canvas_tools_only_within_grant(canvas, tmp_p
     client = LocalTestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=tmp_path / "dist"))
     store = client.app.state.connection_store
     grant = store.create_grant(name="画布助手", project_ids=[], capabilities=["canvas_read", "canvas_edit"],
-                               days=1, base_url="http://127.0.0.1", canvas_project_ids=[canvas.project.project_id])
+                               base_url="http://127.0.0.1", canvas_project_ids=[canvas.project.project_id])
     token = read_private_json(grant["credential_path"])["grant_token"]
     anonymous = LocalTestClient.__mro__[1](client.app, base_url="http://127.0.0.1")
     session = anonymous.post("/api/connection/agent-sessions", json={

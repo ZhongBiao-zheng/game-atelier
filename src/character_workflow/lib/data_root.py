@@ -75,6 +75,14 @@ def canvas_ui_file() -> Path:
     return config_dir() / "canvas-ui.json"
 
 
+AGENT_CREDENTIAL_NAME = "agent.json"
+
+
+def agent_credential_file() -> Path:
+    # 默认授权的凭据固定在这里：插件自带的 MCP 不写路径也能找到，重新授权只换内容不换位置。
+    return config_dir() / "connections" / AGENT_CREDENTIAL_NAME
+
+
 def write_global_config(path: Path) -> None:
     """写全局 data-root 配置文件（用户手动改 data root 时用）。"""
     cfg = _global_config_file()

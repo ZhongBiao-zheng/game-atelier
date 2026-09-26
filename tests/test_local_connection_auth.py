@@ -163,7 +163,7 @@ def test_control_size_content_type_and_extra_fields(client):
 def create_grant(client):
     project = create_project("本机授权测试")
     response = client.post("/api/connection/agent-grants", json={
-        "name": "Codex 测试", "project_ids": [project.id], "capabilities": ["read"], "days": 7,
+        "name": "Codex 测试", "project_ids": [project.id], "capabilities": ["read"],
     })
     assert response.status_code == 201, response.text
     grant = response.json()
@@ -190,7 +190,7 @@ def test_credential_store_failure_is_reported_with_reason(client, monkeypatch):
 
     monkeypatch.setattr(connection_auth, "write_private_json", broken)
     response = client.post("/api/connection/agent-grants", json={
-        "name": "坏盘", "project_ids": [project.id], "capabilities": ["read"], "days": 7,
+        "name": "坏盘", "project_ids": [project.id], "capabilities": ["read"],
     })
     assert response.status_code == 500
     body = response.json()["error"]
@@ -237,6 +237,39 @@ def test_grants_survive_restart_but_runtime_sessions_do_not(client, tmp_path):
         "instance_id": status["instance_id"],
     })
     assert exchange.status_code == 200 and exchange.json()["project_ids"] == [project.id]
+
+
+def test_default_grant_never_expires_and_replaces_the_previous_default(client):
+    bootstrap(client)
+    project = create_project("默认授权")
+    body = {"name": "本机 Agent", "project_ids": [project.id], "capabilities": ["read"],
+            "default": True}
+    # 有效期参数已删除：旧页面带 days 会被拒，而不是悄悄忽略。
+    assert client.post("/api/connection/agent-grants", json={**body, "days": 7}).status_code == 422
+    first = client.post("/api/connection/agent-grants", json=body).json()
+    old_credential = read_private_json(Path(first["credential_path"]))
+    custom = client.post("/api/connection/agent-grants",
+                         json={**body, "name": "Codex", "default": False}).json()
+    second = client.post("/api/connection/agent-grants", json=body).json()
+    assert second["default"] is True and custom["default"] is False
+    assert second["credential_path"] == first["credential_path"]
+    assert Path(second["credential_path"]).name == "agent.json"
+    assert "expires_at" not in second
+    new_credential = read_private_json(Path(second["credential_path"]))
+    assert set(new_credential) == {"service", "base_url", "grant_id", "grant_token"}
+    listed = client.get("/api/connection/agent-grants").json()["grants"]
+    assert {grant["grant_id"] for grant in listed} == {custom["grant_id"], second["grant_id"]}
+    instance_id = client.get("/api/connection/status").json()["instance_id"]
+    native = TestClient(client.app, base_url=ORIGIN)
+
+    def exchange(credential):
+        return native.post("/api/connection/agent-sessions", json={
+            "grant_id": credential["grant_id"], "grant_token": credential["grant_token"],
+            "instance_id": instance_id,
+        }).status_code
+
+    assert exchange(old_credential) == 403
+    assert exchange(new_credential) == 200
 
 
 def test_change_data_root_revokes_existing_sessions(client, monkeypatch, tmp_path):

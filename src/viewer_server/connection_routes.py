@@ -31,7 +31,7 @@ class GrantPayload(ControlPayload):
         "read", "edit_documents", "create_targets", "prepare_generation", "execute_generation",
         "canvas_read", "canvas_edit", "canvas_generate",
     ]], Field(min_length=1, max_length=8)]
-    days: Annotated[int, Field(ge=1, le=30)] = 7
+    default: bool = False
 
 
 class AgentSessionPayload(ControlPayload):

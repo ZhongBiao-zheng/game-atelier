@@ -2,12 +2,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ConnectionPage } from './Connection';
 
-const grant = { grant_id: 'g1', name: 'Codex 角色助手', project_ids: ['p1'], capabilities: ['read'], expires_at: '2099-01-01T00:00:00Z', credential_path: '/private/credentials/g1.json' };
+const grant = { grant_id: 'g1', name: 'Codex 角色助手', project_ids: ['p1'], canvas_project_ids: [], capabilities: ['read'], default: false, credential_path: '/private/credentials/g1.json' };
+const defaultGrant = { ...grant, grant_id: 'g0', name: '本机 Agent', default: true, credential_path: '/private/credentials/agent.json' };
 function server(existing = false) {
+  let issued = 0;
   const network = vi.fn(async (url: string, init?: RequestInit) => {
     if (url === '/api/projects') return new Response(JSON.stringify({ projects: [{ id: 'p1', name: '测试项目' }], assignments: {} }));
     if (url === '/api/canvas/project-options') return new Response(JSON.stringify([{ project_id: 'canvas-one', name: '测试画布' }]));
-    if (url === '/api/connection/agent-grants' && init?.method === 'POST') return new Response(JSON.stringify(grant));
+    if (url === '/api/connection/agent-grants' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body));
+      return new Response(JSON.stringify(body.default ? { ...defaultGrant, grant_id: `g0-${issued++}` } : grant));
+    }
     if (url === '/api/connection/agent-grants/g1') return new Response(null, { status: 204 });
     return new Response(JSON.stringify({ grants: existing ? [grant] : [], python: '/opt/venv/bin/python' }));
   });
@@ -20,10 +25,16 @@ describe('local Agent authorization UI', () => {
     const network = server(); render(<ConnectionPage />);
     const connect = await screen.findByRole('button', { name: '连接本机 Agent' });
     await waitFor(() => expect(connect).toBeEnabled());
-    fireEvent.click(connect); await screen.findByText(new RegExp(grant.credential_path));
+    fireEvent.click(connect); await screen.findByText('Claude Code 插件自动使用');
     const call = network.mock.calls.find(([url, init]) => url.endsWith('agent-grants') && init?.method === 'POST');
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ name: '本机 Agent', project_ids: ['p1'], canvas_project_ids: ['canvas-one'], capabilities: ['read', 'edit_documents', 'create_targets', 'prepare_generation', 'execute_generation', 'canvas_read', 'canvas_edit', 'canvas_generate'], days: 30 });
-    expect(screen.queryByText(/token/i)).not.toBeInTheDocument();
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ name: '本机 Agent', project_ids: ['p1'], canvas_project_ids: ['canvas-one'], capabilities: ['read', 'edit_documents', 'create_targets', 'prepare_generation', 'execute_generation', 'canvas_read', 'canvas_edit', 'canvas_generate'], default: true });
+    expect(screen.queryByText(new RegExp(defaultGrant.credential_path))).not.toBeInTheDocument();
+    expect(screen.queryByText(/token|到期/i)).not.toBeInTheDocument();
+    // 再点一次替换默认授权：列表里仍只有一张默认授权卡片。
+    fireEvent.click(connect);
+    await waitFor(() => expect(network.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2));
+    await waitFor(() => expect(connect).toBeEnabled());
+    expect(screen.getAllByText('Claude Code 插件自动使用')).toHaveLength(1);
   });
   it('lets the user narrow scope and capabilities through the custom form', async () => {
     const network = server(); render(<ConnectionPage />);
@@ -35,7 +46,7 @@ describe('local Agent authorization UI', () => {
     fireEvent.click(screen.getByLabelText('直接执行生成（终端确认即批准，不经页面）'));
     fireEvent.click(create); await screen.findByText(new RegExp(grant.credential_path));
     const call = network.mock.calls.find(([url, init]) => url.endsWith('agent-grants') && init?.method === 'POST');
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ name: grant.name, project_ids: ['p1'], canvas_project_ids: [], capabilities: ['read', 'edit_documents', 'create_targets', 'prepare_generation', 'canvas_read', 'canvas_edit', 'canvas_generate'], days: 30 });
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ name: grant.name, project_ids: ['p1'], canvas_project_ids: [], capabilities: ['read', 'edit_documents', 'create_targets', 'prepare_generation', 'canvas_read', 'canvas_edit', 'canvas_generate'], default: false });
   });
   it('copies the registration command with interpreter and credential path, revokes only after confirmation', async () => {
     const network = server(true); const writeText = vi.fn().mockResolvedValue(undefined);
@@ -43,7 +54,7 @@ describe('local Agent authorization UI', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     render(<ConnectionPage />); await screen.findByText(grant.name);
     fireEvent.click(screen.getByRole('button', { name: `复制 ${grant.name} 注册命令` }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(`claude mcp add --transport stdio --scope local game-atelier -- /opt/venv/bin/python -m character_workflow.mcp --credentials ${grant.credential_path}`));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(`claude mcp add --transport stdio --scope user game-atelier -- /opt/venv/bin/python -m character_workflow.mcp --credentials ${grant.credential_path}`));
     fireEvent.click(screen.getByRole('button', { name: `撤销 ${grant.name}` }));
     expect(network.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
     confirm.mockReturnValue(true); fireEvent.click(screen.getByRole('button', { name: `撤销 ${grant.name}` }));
