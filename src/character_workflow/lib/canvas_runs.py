@@ -7,7 +7,6 @@ import math
 import os
 import re
 import secrets
-from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -101,8 +100,7 @@ _OUTPUT_MIME = {
     ".aac": "audio/aac",
     ".pcm": "audio/pcm",
 }
-_RUN_GLOBAL_GATE = BoundedSemaphore(4)
-_RUN_VIDEO_GATE = BoundedSemaphore(1)
+_RUN_PROJECT_GATES: dict[str, BoundedSemaphore] = {}
 _RUN_ALIAS_GATES: dict[str, BoundedSemaphore] = {}
 _RUN_ALIAS_GATES_LOCK = Lock()
 _REVERSE_PROMPT_PRESET_ID = "canvas.reverse_prompt"
@@ -3346,13 +3344,13 @@ def run_canvas_job(job_id: str) -> Job:
 
 
 def run_canvas_job_scheduled(job_id: str) -> Job:
-    """Run through the process-wide Canvas limits: global 4, per alias 2, video 1."""
+    """Limit all media to six running jobs per key and six per Canvas project."""
     job = read_job(job_id)
     alias = job.alias or job.character_id
     with _RUN_ALIAS_GATES_LOCK:
-        alias_gate = _RUN_ALIAS_GATES.setdefault(alias, BoundedSemaphore(2))
-    video_gate = _RUN_VIDEO_GATE if job.kind == JobKind.VIDEO else nullcontext()
-    with _RUN_GLOBAL_GATE, alias_gate, video_gate:
+        alias_gate = _RUN_ALIAS_GATES.setdefault(alias, BoundedSemaphore(6))
+        project_gate = _RUN_PROJECT_GATES.setdefault(job.canvas_project_id, BoundedSemaphore(6))
+    with alias_gate, project_gate:
         return run_canvas_job(job_id)
 
 

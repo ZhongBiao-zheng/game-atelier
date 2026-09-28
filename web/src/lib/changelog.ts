@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.68.2',
+    date: '2026-09-28',
+    headline: '画布视频支持并发生成',
+    changes: [
+      { kind: 'fix', text: '视频任务支持同时生成，跨画布也可并发；每个密钥和每个画布分别最多同时执行 6 个任务。' },
+    ],
+  },
+  {
     version: '5.68.1',
     date: '2026-09-26',
     headline: '改正本机连接说明：新开会话才出现工坊工具',
