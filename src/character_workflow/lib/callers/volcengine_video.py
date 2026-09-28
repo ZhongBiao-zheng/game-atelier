@@ -8,9 +8,13 @@ OpenAI-chat 式 content[] 数组带 role。提交 POST /contents/generations/tas
 from __future__ import annotations
 
 import base64
+import re
+import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
@@ -32,6 +36,76 @@ _CONTAINER_KEYS = ("data", "result", "results", "content", "output", "outputs", 
 
 class VolcengineVideoError(RuntimeError):
     pass
+
+
+def _submit_task(tasks_url, headers, body, attempt, on_submission):
+    """Submit once; persist only allowlisted metadata, never credentials or media bodies."""
+    parsed = urlsplit(tasks_url)
+    host = parsed.hostname or ""
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
+    diagnostic = {
+        "attempt": attempt,
+        "method": "POST",
+        "url": urlunsplit((parsed.scheme, host, parsed.path, "", "")),
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "outcome": "submitting",
+    }
+    started = time.monotonic()
+    if on_submission:
+        on_submission(dict(diagnostic))
+    try:
+        resp = requests.post(tasks_url, headers=headers, json=body, timeout=600)
+    except requests.RequestException as error:
+        diagnostic.update(outcome="unconfirmed", error_type=type(error).__name__,
+                          elapsed_ms=round((time.monotonic() - started) * 1000))
+        if on_submission:
+            on_submission(dict(diagnostic))
+        raise VolcengineVideoError(
+            "视频提交结果未确认：网络请求未完成，未自动重新提交。"
+            "请先核对厂商记录，避免重复计费。"
+        ) from error
+    diagnostic.update(http_status=resp.status_code,
+                      elapsed_ms=round((time.monotonic() - started) * 1000))
+    response_headers = getattr(resp, "headers", {})
+    request_ids = {}
+    for name in ("x-request-id", "x-trace-id", "request-id", "x-tt-logid"):
+        value = response_headers.get(name, "")
+        if (re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", value)
+                and value not in headers["Authorization"]):
+            request_ids[name] = value
+    diagnostic["request_ids"] = request_ids
+    diagnostic["outcome"] = "unconfirmed" if resp.status_code >= 500 else "response"
+    if on_submission:
+        on_submission(dict(diagnostic))
+    if resp.status_code >= 500:
+        raise VolcengineVideoError(
+            f"视频提交结果未确认：厂商接口返回 HTTP {resp.status_code}，未自动重新提交。"
+            "请先核对厂商记录，避免重复计费。"
+        )
+    try:
+        payload = resp.json()
+        if not isinstance(payload, dict):
+            raise ValueError("expected an object")
+    except (ValueError, TypeError) as error:
+        if not resp.ok:
+            raise VolcengineVideoError(f"视频提交被拒：HTTP {resp.status_code}") from error
+        diagnostic["outcome"] = "unconfirmed"
+        if on_submission:
+            on_submission(dict(diagnostic))
+        raise VolcengineVideoError(
+            "视频提交结果未确认：响应无法解析，未自动重新提交。请先核对厂商记录。"
+        ) from error
+    if not resp.ok:
+        raise VolcengineVideoError(f"视频提交被拒：HTTP {resp.status_code}；{_err(payload, resp.status_code)}")
+    if not _extract_task_id(payload) and _extract_status(payload) not in _FAILURE:
+        picked = _pick_video_url(_dedupe(_collect_video_urls(payload)), _sent_urls(body["content"]))
+        if not picked or _extract_status(payload) not in _SUCCESS | {""}:
+            diagnostic["outcome"] = "unconfirmed"
+            if on_submission:
+                on_submission(dict(diagnostic))
+            raise VolcengineVideoError("视频提交结果未确认：未返回任务 ID，请先核对厂商记录。")
+    return payload
 
 
 def _base_url(key) -> str:
@@ -314,6 +388,8 @@ def render_video(
     poll_interval: float = 5.0,
     on_phase: Callable[[str], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    on_task_id: Callable[[str], None] | None = None,
+    on_submission: Callable[[dict[str, Any]], None] | None = None,
     **_kwargs,
 ) -> list[str]:
     """提交 n 条 Seedance 视频任务（先全部提交再逐个轮询），下 .mp4，返回本地路径 list[str]。
@@ -356,11 +432,13 @@ def render_video(
     # ready: (下载地址, task_id)——task_id 只为报错留痕，内联直出的那条没有。
     ready: list[tuple[str, str]] = []
     pending_ids: list[str] = []
-    for _ in range(n):
-        resp = requests.post(tasks_url, headers=headers, json=body, timeout=600)
-        payload = _json(resp)
-        if not resp.ok:
-            raise VolcengineVideoError(_err(payload, resp.status_code))
+    for index in range(n):
+        if should_cancel and should_cancel():
+            raise VolcengineVideoError("生成已按请求停止")
+        payload = _submit_task(tasks_url, headers, body, index + 1, on_submission)
+        task_id = _extract_task_id(payload)
+        if task_id and on_task_id:
+            on_task_id(task_id)
         status = _extract_status(payload)
         if status in _FAILURE:
             raise VolcengineVideoError(_fail_reason(payload))
@@ -370,9 +448,8 @@ def render_video(
         if picked and (not status or status in _SUCCESS):
             ready.append((picked, ""))
             continue
-        task_id = _extract_task_id(payload)
         if not task_id:
-            raise VolcengineVideoError(f"火山视频提交后未返回 task id: {payload!r}")
+            raise VolcengineVideoError("视频提交结果未确认：未返回任务 ID，请先核对厂商记录。")
         pending_ids.append(task_id)
     if on_phase:
         on_phase("sent")

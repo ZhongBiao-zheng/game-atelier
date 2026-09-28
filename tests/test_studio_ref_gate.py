@@ -123,6 +123,15 @@ def test_create_drops_browser_supplied_mask_image(client, isolated_data_root):
     assert read_job(response.json()["job_id"]).params.mask_image is None
 
 
+def test_create_drops_browser_supplied_video_diagnostics(client):
+    response = _create(client, {"video_submission_attempts": [{
+        "attempt": 1, "url": "https://example.test/tasks", "started_at": "old",
+        "outcome": "unconfirmed",
+    }]})
+    assert response.status_code == 201
+    assert read_job(response.json()["job_id"]).params.video_submission_attempts is None
+
+
 def test_post_prompt_rejects_forbidden_reference_and_keeps_job(client, isolated_data_root):
     job_id = _create(client, {}).json()["job_id"]
     ok = _allowed_paths(isolated_data_root)[0]

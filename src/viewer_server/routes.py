@@ -476,7 +476,10 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                 # replace or erase them, otherwise a forged/stale id could retrieve the wrong task
                 # or make the runner submit a second order after losing its recovery handle.
                 # mask_image 同理只由服务端写。
-                for owned in ("provider_task_protocol", "provider_task_ids", "mask_image"):
+                for owned in (
+                    "provider_task_protocol", "provider_task_ids", "video_submission_attempts",
+                    "mask_image",
+                ):
                     if owned in existing_params:
                         value[owned] = existing_params[owned]
                     else:
@@ -2136,6 +2139,7 @@ def _create_user_job(
     # order and may not attach itself to an arbitrary existing Tuzi task.
     params.provider_task_protocol = None
     params.provider_task_ids = None
+    params.video_submission_attempts = None
     params.mask_image = None
     # 改写值与原值同类型（str / list[str]），model_copy 不需要重新校验。
     params = params.model_copy(update=_gate_browser_refs(params.model_dump()))

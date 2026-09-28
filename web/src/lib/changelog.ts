@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.68.3',
+    date: '2026-09-28',
+    headline: '补齐视频提交失败的排查记录',
+    changes: [
+      { kind: 'fix', text: 'Seedance 视频提交保存请求耗时、HTTP 状态和厂商请求标识；收到任务编号立即保存。提交超时显示结果未确认，不会自动重复下单。' },
+    ],
+  },
+  {
     version: '5.68.2',
     date: '2026-09-28',
     headline: '画布视频支持并发生成',

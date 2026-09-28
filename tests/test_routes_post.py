@@ -64,6 +64,8 @@ def test_post_prompt_rejects_status_field(client, runtime):
 
 
 def test_post_prompt_preserves_runner_owned_provider_task_ids(client, runtime):
+    diagnostics = [{"attempt": 1, "method": "POST", "url": "https://example.test/tasks",
+                    "started_at": "2026-09-28T00:00:00Z", "outcome": "unconfirmed"}]
     (runtime / "jobs" / "j1.json").write_text(json.dumps({
         "job_id": "j1", "character_id": "c", "prompt": "old",
         "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt-image-2",
@@ -71,6 +73,7 @@ def test_post_prompt_preserves_runner_owned_provider_task_ids(client, runtime):
             "size": "2048x2048",
             "provider_task_protocol": "tuzi_async",
             "provider_task_ids": ["server-task"],
+            "video_submission_attempts": diagnostics,
         },
         "output_paths": [], "status": "failed", "error": "network",
     }))
@@ -80,6 +83,7 @@ def test_post_prompt_preserves_runner_owned_provider_task_ids(client, runtime):
             "size": "1024x1024",
             "provider_task_protocol": "tuzi_async",
             "provider_task_ids": ["forged-task"],
+            "video_submission_attempts": [],
         },
     })
 
@@ -87,6 +91,7 @@ def test_post_prompt_preserves_runner_owned_provider_task_ids(client, runtime):
     params = json.loads((runtime / "jobs" / "j1.json").read_text())["params"]
     assert params["size"] == "1024x1024"
     assert params["provider_task_ids"] == ["server-task"]
+    assert params["video_submission_attempts"][0]["outcome"] == "unconfirmed"
 
 
 def test_post_prompt_rejects_null_params_without_losing_provider_task_ids(client, runtime):

@@ -33,9 +33,20 @@ export interface JobParams {
   requested_size?: string;
   actual_size?: string;
   warnings?: string[];
-  /** 聚合商异步任务恢复信息；Web 只读，重启后后端凭此续查，不能重新提交。 */
-  provider_task_protocol?: 'tuzi_async' | 'tuzi_images';
+  /** 厂商订单；Web 只读。Tuzi 支持续查，Seedance 留供核对，不自动重提。 */
+  provider_task_protocol?: 'tuzi_async' | 'tuzi_images' | 'seedance';
   provider_task_ids?: string[];
+  video_submission_attempts?: Array<{
+    attempt: number;
+    method: 'POST';
+    url: string;
+    started_at: string;
+    outcome: 'submitting' | 'response' | 'unconfirmed';
+    elapsed_ms?: number | null;
+    http_status?: number | null;
+    error_type?: string | null;
+    request_ids: Record<string, string>;
+  }>;
   // 图片参数 —— 与 schemas.py::JobParams 同步（ratio 如 "16:9"；quality: low|medium|high|auto）
   ratio?: string;
   quality?: string;

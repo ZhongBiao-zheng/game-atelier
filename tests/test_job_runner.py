@@ -459,6 +459,37 @@ def test_run_job_video_branch_writes_mp4_and_done(project, monkeypatch):
     assert Path(result.output_paths[0]).exists()
 
 
+def test_video_submission_metadata_survives_failure(project, monkeypatch):
+    from character_workflow.lib.schemas import JobKind
+    write_job(job_id="vid-diagnostic", character_id="ark", prompt="p", model="seedance-2.0-mini",
+              params={}, status=JobStatus.PENDING, alias="ark")
+    save_job(read_job("vid-diagnostic").model_copy(update={"kind": JobKind.VIDEO}))
+
+    def dispatch(**kwargs):
+        kwargs["on_submission"]({"attempt": 1, "method": "POST", "url": "https://example.test/tasks",
+                                  "started_at": "2026-09-28T00:00:00+00:00", "outcome": "response",
+                                  "elapsed_ms": 10, "http_status": 200})
+        kwargs["on_task_id"]("task-kept")
+        persisted = read_job("vid-diagnostic")
+        assert persisted.params.provider_task_ids == ["task-kept"]
+        assert persisted.params.video_submission_attempts[0].http_status == 200
+        raise RuntimeError("poll failed")
+
+    monkeypatch.setattr(job_runner, "dispatch_video", dispatch)
+    with pytest.raises(job_runner.JobRunnerError):
+        job_runner.run_job("vid-diagnostic")
+    result = read_job("vid-diagnostic")
+    assert result.params.provider_task_ids == ["task-kept"]
+    assert result.params.provider_task_protocol == "seedance"
+    assert result.status == JobStatus.FAILED
+
+
+def test_unconfirmed_submission_error_is_not_replaced():
+    message = "视频提交结果未确认：厂商接口返回 HTTP 504，未自动重新提交。"
+    assert job_runner._friendly_error(RuntimeError(message)) == message
+    assert "已自动重试" not in job_runner._friendly_error(RuntimeError("Bad Gateway"))
+
+
 def test_run_job_video_branch_writes_progress_phases(project, monkeypatch):
     """caller 的 on_phase 回调要把 sent/downloading 真实卡点写进 job 文件，终态清空。"""
     from character_workflow.lib.schemas import JobKind

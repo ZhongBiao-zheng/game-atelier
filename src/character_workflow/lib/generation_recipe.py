@@ -51,7 +51,7 @@ RECIPE_PARAM_EXCLUDE = frozenset({
     "estimated_cost_cny", "actual_cost_cny",
     # 运行后回写
     "warnings", "requested_size", "actual_size", "provider_task_protocol",
-    "provider_task_ids", "layer_decomposition_result", "mj_flags",
+    "provider_task_ids", "video_submission_attempts", "layer_decomposition_result", "mj_flags",
     # 本机来源记录
     "creation_asset_source_title", "archived_from_job_id",
 })

@@ -333,6 +333,7 @@ def clone_job_for_retry(job_id: str) -> Job:
         # “再次生成”是明确的新订单，不能复用上一单的终态/过期任务 ID。
         "provider_task_protocol": None,
         "provider_task_ids": None,
+        "video_submission_attempts": None,
     })
     clone = src.model_copy(update={
         "job_id": new_job_id(),
