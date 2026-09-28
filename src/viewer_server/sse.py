@@ -3,11 +3,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from typing import AsyncIterator
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
+
+logger = logging.getLogger(__name__)
+
+
+def _offer(q: asyncio.Queue[str], event: str, payload: str) -> None:
+    """慢消费者队满：丢这个订阅者的这条事件并记一笔，不在事件循环回调里抛 QueueFull。"""
+    try:
+        q.put_nowait(payload)
+    except asyncio.QueueFull:
+        logger.warning("SSE subscriber queue full, dropped event: %s", event)
 
 
 class SSEHub:
@@ -15,7 +26,7 @@ class SSEHub:
         self._subscribers: set[asyncio.Queue[str]] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
 
-    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+    def set_loop(self, loop: asyncio.AbstractEventLoop | None) -> None:
         self._loop = loop
 
     async def subscribe(self) -> asyncio.Queue[str]:
@@ -27,9 +38,9 @@ class SSEHub:
         self._subscribers.discard(q)
 
     def broadcast(self, event: str, data: dict) -> None:
-        """投递事件到所有订阅者队列。
+        """投递事件到所有订阅者队列；某个订阅者队满只丢它的这条（见 _offer）。
 
-        - 从事件循环线程内调用（async 上下文 / 测试）：直接 put_nowait，同步可见，队满静默丢弃。
+        - 从事件循环线程内调用（async 上下文 / 测试）：直接投递，同步可见。
         - 从后台线程调用（watchdog）：用 call_soon_threadsafe 跨线程安全投递，需先 set_loop()。
         """
         payload = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -37,22 +48,19 @@ class SSEHub:
         # 检测是否在事件循环线程内（get_running_loop 成功则在循环线程）
         try:
             asyncio.get_running_loop()
-            # 在事件循环线程：直接调用，结果立即可见；队满则静默丢弃
-            for q in list(self._subscribers):
-                try:
-                    q.put_nowait(payload)
-                except asyncio.QueueFull:
-                    pass  # slow consumer — drop this event
-            return
         except RuntimeError:
             pass  # 不在事件循环线程，走下面的 threadsafe 路径
+        else:
+            for q in list(self._subscribers):
+                _offer(q, event, payload)
+            return
 
         # 后台线程路径（watchdog 等）：必须用 call_soon_threadsafe
         loop = self._loop
         if loop is None or not loop.is_running():
             return
         for q in list(self._subscribers):
-            loop.call_soon_threadsafe(q.put_nowait, payload)
+            loop.call_soon_threadsafe(_offer, q, event, payload)
 
 
 hub = SSEHub()

@@ -28,8 +28,3 @@ export interface CanvasBatchRun {
 export const isCanvasBatchActive = (run: CanvasBatchRun) => (
   run.status === 'running' || run.status === 'stopping'
 );
-
-export const CANVAS_BATCH_STATUS: Record<CanvasBatchRun['status'], string> = {
-  ready: '待确认', running: '执行中', stopping: '停止中', completed: '已完成',
-  failed: '已停止 · 有失败', canceled: '已停止', interrupted: '已中断',
-};

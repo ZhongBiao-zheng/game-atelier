@@ -1,7 +1,7 @@
 import { connectionFetch } from '@/api/connection';
 import { mediaUrl } from '@/api/connection';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearch } from 'wouter';
+import { useLocation, useSearch } from 'wouter';
 import { ChevronsDown, Library } from 'lucide-react';
 
 import { createStudioJob, getStudioJob, listStudioJobs, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
@@ -12,33 +12,61 @@ import { PromptInput } from '@/components/studio/PromptInput';
 import {
   CreationAssetPanel,
   type CreationAssetPanelHandle,
+  type CreationAssetPanelMode,
   type CreationAssetSaveRequest,
 } from '@/components/assets/CreationAssetPanel';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import { EMPTY_MJ_REFS, routeReusedImageFiles, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
-import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
+import { RoundList, type RoundConfig, type RoundState, type SaveResultAssetRequest } from '@/components/studio/RoundList';
 import { StudioQueryBar } from '@/components/studio/StudioQueryBar';
 import { StudioArchiveDialog, type StudioArchiveRequest } from '@/components/studio/StudioArchiveDialog';
+import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { imageFamily } from '@/lib/modelFamily';
 import { promptToAssetSegments } from '@/lib/promptVariables';
-import { maxReferenceImages } from '@/lib/referenceLimits';
-import { hasSrefCode, MJ_DEFAULTS, mjParamsFromJob, mjParamsToJob, type MjParams } from '@/lib/mjParams';
+import { hasSrefCode, MJ_DEFAULTS, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { StudioCompact } from './StudioCompact';
+import { convergeModelSelection, modelsForKind } from './studioModelSelection';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
 import { readStudioDraft, writeStudioDraft } from './studioDraft';
-import { creationAssetImageUrl } from '@/api/creationAssets';
+import { clampImageCount, configForJob, isOmniVideoConfig, referencePathCounts } from './studioJobConfig';
+import { routeStudioMediaAsset } from './studioAssetRouting';
+import { recipeToDraft } from './studioRecipe';
+import { creationAssetInputUrl, creationAssetMediaUrl, markCreationAssetUsed } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
-import type { CreationAsset, CreationImageAssetContent } from '@/schema/creationAssets';
+import { adoptTeamAsset, listTeamLibraries } from '@/api/teamLibraries';
+import { TEAM_ASSET_ACTION_EVENT, teamAssetActionFromSearch, type TeamAssetAction } from '@/lib/teamAssetActions';
+import type { CreationAsset, CreationMediaAssetContent, RecipeInput } from '@/schema/creationAssets';
 import type { CanvasProject } from '@/schema/canvas';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
+const ASSET_TITLE_LENGTH = 24;
+
+interface RoundReferenceFiles {
+  images: File[];
+  videos: File[];
+  audios: File[];
+  sref: File[];
+  cref: File[];
+  oref: File[];
+}
+
+/** 复刻后输入框上方的常驻提示：本机缺的模型 + 配方还原时丢掉的东西。 */
+interface RecipeNotice {
+  missingModel: string | null;
+  warnings: string[];
+}
+
+function assetTitleFromPrompt(prompt: string): string {
+  return prompt.trim().replace(/\s+/g, ' ').slice(0, ASSET_TITLE_LENGTH);
+}
 
 interface SavedSelection {
   providerAlias?: string;
@@ -89,6 +117,8 @@ function StudioFull() {
   const [persistedJobs, setPersistedJobs] = useState<Job[]>([]);
   const [pending, setPending] = useState(false);
   const [keys, setKeys] = useState<KeyView[]>([]);
+  // listKeys 返回（成功或失败）后才为 true：区分「还在加载」与「加载完了但一个 key 都没有」。
+  const [keysLoaded, setKeysLoaded] = useState(false);
   // 滚动联动收放：历史区 col-reverse（|scrollTop| 即距底距离），>160 收 / <80 展（滞回防抖）。
   // shellFocused / clickPinned 是两个展开覆盖：输入焦点期间恒展开；点击收缩壳展开但不回滚，
   // 再次滚动（dist>160 的 scroll 事件）即取消点击钉住。
@@ -97,7 +127,12 @@ function StudioFull() {
   const [shellFocused, setShellFocused] = useState(false);
   const [clickPinned, setClickPinned] = useState(false);
   const [reuseLimitNotice, setReuseLimitNotice] = useState(false);
+  const [assetNotice, setAssetNotice] = useState<string | null>(null);
+  const [location, setLocation] = useLocation();
   const [archiveRequest, setArchiveRequest] = useState<StudioArchiveRequest | null>(null);
+  const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
+  const [reproduceConfirm, setReproduceConfirm] = useState<CreationAsset | null>(null);
+  const [recipeNotice, setRecipeNotice] = useState<RecipeNotice | null>(null);
   const dockCollapsed = scrolledUp && !shellFocused && !clickPinned;
 
   // 不走 rAF 节流：后台标签页 rAF 会挂起导致联动滞后；setState 同值自动 bail-out，开销可忽略。
@@ -129,7 +164,11 @@ function StudioFull() {
   const [mjRefs, setMjRefs] = useState<MjRefSlots>(draft?.mjRefs ?? EMPTY_MJ_REFS);
   const [promptText, setPromptText] = useState(draft?.promptText ?? '');
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
-  const [assetPanelKind, setAssetPanelKind] = useState<'prompt' | 'image'>('prompt');
+  const [assetPanelKind, setAssetPanelKind] = useState<CreationAssetPanelMode>('prompt');
+  // 面板只在挂载与 initialKind 变化时同步栏位；「看看」要确定落在团队栏，就换 key 重新挂载。
+  const [assetPanelMount, setAssetPanelMount] = useState(0);
+  // 「看看」定位：团队栏初始落在挂着该库的画布与该库上。
+  const [teamPanelTarget, setTeamPanelTarget] = useState<{ projectId: string; libraryId: string } | null>(null);
   const [assetSaveRequest, setAssetSaveRequest] = useState<CreationAssetSaveRequest | null>(null);
   const assetPanelRef = useRef<CreationAssetPanelHandle>(null);
   const [canvasTargets, setCanvasTargets] = useState<CanvasProject[]>([]);
@@ -176,23 +215,20 @@ function StudioFull() {
   const reEditSequence = useRef(0);
   const selectedModelObj = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
   const videoCaps = videoControlCaps(model, selectedModelObj?.protocol);
-  // 切到视频模式时，若当前 key 没有视频模型，自动选中首个带视频模型的 key —— 让 videoCaps 立即正确（否则退化成 STANDARD_CAPS）。
+  // 切换生成类型 / keys 加载时把 alias、model 收敛到本类模型（规则见 convergeModelSelection）：
+  // 界面显示的模型就是提交的模型；复刻缺模型（model 为空）时只换 key，模型位留空。
   useEffect(() => {
-    if (kind !== 'video' || keys.length === 0) return;
-    const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
-    const cur = keys.find((k) => k.alias === providerAlias);
-    if (cur && videoModelsOf(cur).length > 0) return;
-    const v = keys.find((k) => videoModelsOf(k).length > 0);
-    if (v) {
-      setProviderAlias(v.alias);
-      setModel(videoModelsOf(v)[0]?.id ?? '');
-    }
-    // 仅在切到视频模式 / keys 加载时触发；providerAlias 不入依赖，避免用户改回非视频 key 时被反复抢选成死循环。
+    const next = convergeModelSelection(keys, kind, providerAlias, model);
+    if (!next) return;
+    setProviderAlias(next.alias);
+    setModel(next.model);
+    // 仅在切换类型 / keys 加载时触发；alias / model 不入依赖，避免用户改选时被反复抢回成死循环。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, keys]);
   // 切换视频模型族时把超出 caps 的选择拉回合法值（如 seedance 21:9 → kling 没有；kling 档位 ↔ seedance 无档位）。
   useEffect(() => {
-    if (kind !== 'video') return;
+    // 模型未定（复刻缺模型）时不按兜底 caps 钳制：配方的时长 / 分辨率 / 比例留到用户选了模型再按它收。
+    if (kind !== 'video' || !model) return;
     const selModel = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
     const caps = videoControlCaps(model, selModel?.protocol);
     if (!caps.modes.includes(videoMode)) setVideoMode(caps.modes[0]);
@@ -226,6 +262,12 @@ function StudioFull() {
     const timer = window.setTimeout(() => setReuseLimitNotice(false), 2400);
     return () => window.clearTimeout(timer);
   }, [reuseLimitNotice]);
+
+  useEffect(() => {
+    if (!assetNotice) return;
+    const timer = window.setTimeout(() => setAssetNotice(null), 2400);
+    return () => window.clearTimeout(timer);
+  }, [assetNotice]);
 
   // 图卡左下角「编辑」→ 把这张生成结果取回成 File，塞进「当前模式下真正会被提交的那个槽位」。
   // 一律塞 referenceImages 是错的：MJ 和视频首尾帧模式下通用参考图栏位是隐藏的，
@@ -292,6 +334,47 @@ function StudioFull() {
     setTimeout(scrollToRound, 1600);
   }, [rounds, targetJobId]);
 
+  // 分享提醒的「复刻」/「看看」：本页在就地认领；别的页面带着 ?team_asset= 跳过来，挂载后处理一次。
+  const teamAssetActionRef = useRef<(action: TeamAssetAction) => void>(() => {});
+  // 采用 / 记使用是异步的：回来时要用最新一帧的 requestReproduce（keys 可能在等待期间加载完）。
+  const requestReproduceRef = useRef<(asset: CreationAsset) => void>(() => {});
+  // keys 未加载时的复刻先记在这里，加载完由下面的 effect 补做。
+  const pendingReproduceRef = useRef<CreationAsset | null>(null);
+  useEffect(() => {
+    teamAssetActionRef.current = handleTeamAssetAction;
+    requestReproduceRef.current = requestReproduce;
+  });
+  useEffect(() => {
+    const listener = (event: Event) => {
+      const action = (event as CustomEvent<TeamAssetAction | undefined>).detail;
+      if (!action) return;
+      event.preventDefault();
+      teamAssetActionRef.current(action);
+    };
+    window.addEventListener(TEAM_ASSET_ACTION_EVENT, listener);
+    return () => window.removeEventListener(TEAM_ASSET_ACTION_EVENT, listener);
+  }, []);
+  // 复刻要先判本机有没有配方模型，所以等 keys 加载完再处理：挂起的复刻与 ?team_asset= 都从这里出。
+  const teamSearchHandledRef = useRef(false);
+  useEffect(() => {
+    if (!keysLoaded) return;
+    const pendingReproduce = pendingReproduceRef.current;
+    if (pendingReproduce) {
+      pendingReproduceRef.current = null;
+      requestReproduceRef.current(pendingReproduce);
+    }
+    if (teamSearchHandledRef.current) return;
+    teamSearchHandledRef.current = true;
+    const action = teamAssetActionFromSearch(search);
+    if (!action) return;
+    const rest = new URLSearchParams(search);
+    rest.delete('team_asset');
+    rest.delete('team_action');
+    const query = rest.toString();
+    setLocation(query ? `${location}?${query}` : location, { replace: true });
+    teamAssetActionRef.current(action);
+  }, [keysLoaded, search, location, setLocation]);
+
   const refreshPersistedJobs = useCallback(async () => {
     const jobs = await listStudioJobs();
     setPersistedJobs(jobs);
@@ -352,11 +435,17 @@ function StudioFull() {
         const selected = savedKey ?? usable[0];
         setProviderAlias(selected?.alias ?? '');
         const savedModelValid = wantedModel && selected?.models.some((m) => m.id === wantedModel);
-        const nextModel = savedModelValid ? wantedModel! : selected?.models[0]?.id ?? '';
+        // 没有可恢复的模型时取本类第一个；该 key 没有本类模型就先占一个，交给收敛 effect 换 key。
+        const nextModel = savedModelValid
+          ? wantedModel!
+          : modelsForKind(selected, kind)[0]?.id ?? selected?.models[0]?.id ?? '';
         setModel(nextModel);
+        setKeysLoaded(true);
       })
       .catch(() => {
-        if (!cancelled) setKeys([]);
+        if (cancelled) return;
+        setKeys([]);
+        setKeysLoaded(true);
       });
     return () => {
       cancelled = true;
@@ -527,6 +616,8 @@ function StudioFull() {
       return;
     }
     setPending(false);
+    // 提交真正发出去了，复刻时的提示才算用完。
+    setRecipeNotice(null);
 
     setPersistedJobs((items) => upsertJob(items, job));
     // 终态翻面交给 SSE 定向更新（handleJobChanged → persistedJobs → mergePersistedRounds），
@@ -686,6 +777,7 @@ function StudioFull() {
       return;
     }
     setPending(false);
+    setRecipeNotice(null);
 
     setPersistedJobs((items) => upsertJob(items, job));
     // 同 onSubmit：终态翻面走 SSE 定向更新，无 per-job 轮询（视频分钟级，轮询放大更明显）。
@@ -731,27 +823,23 @@ function StudioFull() {
           onReuseReferences={handleReuseReferences}
           onEditAsReference={handleEditAsReference}
           onArchive={(jobId, path, mediaKind) => setArchiveRequest({ jobId, path, mediaKind })}
+          onShareResult={(jobId, index, path, config) => setShareRequest({
+            source: { kind: 'job_output', job_id: jobId, output_index: index },
+            defaultTitle: assetTitleFromPrompt(config.prompt),
+            // 对话框只把 previewUrl 渲染成 <img>：视频结果不传。
+            ...(config.kind === 'video' ? {} : { previewUrl: galleryMediaUrl(path) }),
+          })}
           onSavePromptAsset={(config) => {
             setAssetPanelKind('prompt');
             setAssetPanelOpen(true);
             setAssetSaveRequest({
               requestId: crypto.randomUUID(),
               kind: 'prompt',
-              title: config.prompt.trim().replace(/\s+/g, ' ').slice(0, 24),
+              title: assetTitleFromPrompt(config.prompt),
               segments: [{ kind: 'text', text: config.prompt }],
             });
           }}
-          onSaveImageAsset={(path, config) => {
-            setAssetPanelKind('image');
-            setAssetPanelOpen(true);
-            setAssetSaveRequest({
-              requestId: crypto.randomUUID(),
-              kind: 'image',
-              title: config.prompt.trim().replace(/\s+/g, ' ').slice(0, 24),
-              sourcePath: path,
-              previewUrl: mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`),
-            });
-          }}
+          onSaveResultAsset={saveResultAsset}
         />
       </div>
       {/* 浮层输入：wrapper 不收事件，两侧视觉与交互都穿透到历史区；壳本体在 PromptInput 内
@@ -775,14 +863,34 @@ function StudioFull() {
             <ChevronsDown size={13} aria-hidden />
             回到底部
           </button>
-        {reuseLimitNotice && (
-          <span
-            role="status"
-            className="absolute bottom-full left-0 mb-2 rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
-          >
-            历史参考图超过 MJ 每槽 4 张，已保留前 4 张
-          </span>
-        )}
+        <div className="absolute bottom-full left-0 mb-2 flex flex-col items-start gap-1">
+          {recipeNotice && (
+            <div
+              role="status"
+              data-testid="studio-recipe-notice"
+              className="rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
+            >
+              {recipeNotice.missingModel && <p>本机没有 {recipeNotice.missingModel}</p>}
+              {recipeNotice.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+            </div>
+          )}
+          {assetNotice && (
+            <span
+              role="status"
+              className="rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
+            >
+              {assetNotice}
+            </span>
+          )}
+          {reuseLimitNotice && (
+            <span
+              role="status"
+              className="rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
+            >
+              历史参考图超过 MJ 每槽 4 张，已保留前 4 张
+            </span>
+          )}
+        </div>
         <PromptInput
           collapsed={dockCollapsed}
           onExpandRequest={() => setClickPinned(true)}
@@ -801,9 +909,9 @@ function StudioFull() {
             });
           }}
           onSaveReferenceImage={(file) => {
-            setAssetPanelKind('image');
+            setAssetPanelKind('media');
             setAssetPanelOpen(true);
-            setAssetSaveRequest({ requestId: crypto.randomUUID(), kind: 'image', file });
+            setAssetSaveRequest({ requestId: crypto.randomUUID(), kind: 'media', file });
           }}
           providers={keys}
           providerAlias={providerAlias}
@@ -822,6 +930,7 @@ function StudioFull() {
           }}
           onModelChange={next => {
             setModel(next);
+            if (next) setRecipeNotice(current => withoutMissingModel(current));
             setSizeParams(previous => imageSizeMode(previous) === 'ratio' ? { ...previous, size: undefined } : previous);
           }}
           onCountChange={setCount}
@@ -876,8 +985,11 @@ function StudioFull() {
       </div>
       {assetPanelOpen && (
         <CreationAssetPanel
+          key={assetPanelMount}
           ref={assetPanelRef}
           initialKind={assetPanelKind}
+          initialTeamProjectId={teamPanelTarget?.projectId}
+          initialTeamLibraryId={teamPanelTarget?.libraryId}
           canvasTargets={canvasTargets.map(target => ({
             projectId: target.project_id,
             name: target.name,
@@ -886,35 +998,204 @@ function StudioFull() {
           onSaveRequestHandled={(requestId) => {
             setAssetSaveRequest(current => current?.requestId === requestId ? null : current);
           }}
-          onClose={() => setAssetPanelOpen(false)}
+          onClose={() => {
+            setAssetPanelOpen(false);
+            setTeamPanelTarget(null);
+          }}
           onUsePrompt={(asset, renderedPrompt) => {
             setPromptText(renderedPrompt);
             setPromptAssetSourceTitle(asset.title);
             setClickPinned(true);
           }}
-          onUseImage={(asset, content) => { void addCreationAssetReference(asset, content); }}
+          onUseMedia={(asset, content) => { void addCreationAssetReference(asset, content); }}
+          onReproduce={requestReproduce}
+          onOpenSettings={canvasId => setLocation(`/settings?canvas=${encodeURIComponent(canvasId)}`)}
+          onTeamAssetAdopted={result => setAssetNotice(result.created ? '已加入资产库' : '已在你的资产库')}
         />
       )}
       <StudioArchiveDialog request={archiveRequest} onClose={() => setArchiveRequest(null)} />
+      <TeamShareDialog
+        request={shareRequest}
+        onClose={() => setShareRequest(null)}
+        onShared={(_entry, libraryName) => setAssetNotice(`已分享到 ${libraryName}`)}
+        onOpenSettings={() => {
+          setShareRequest(null);
+          setLocation('/settings');
+        }}
+      />
+      <ConfirmDialog
+        open={reproduceConfirm !== null}
+        title="覆盖当前输入？"
+        message=""
+        confirmText="覆盖"
+        onConfirm={() => {
+          const asset = reproduceConfirm;
+          setReproduceConfirm(null);
+          if (asset) void reproduce(asset);
+        }}
+        onCancel={() => setReproduceConfirm(null)}
+      />
     </div>
   );
 
-  async function addCreationAssetReference(asset: CreationAsset, content: CreationImageAssetContent) {
+  function hasEditorInput(): boolean {
+    return Boolean(
+      promptText.trim()
+      || referenceImages.length
+      || referenceVideos.length
+      || referenceAudios.length
+      || videoFrames.first
+      || videoFrames.last
+      || mjRefs.image.length
+      || mjRefs.sref.length
+      || mjRefs.cref.length
+      || mjRefs.oref.length,
+    );
+  }
+
+  // Studio 自家出图存成带配方的生成资产；skill / 归档来的记录后端不收 from-job，只存媒体。
+  function saveResultAsset({ jobId, index, path, mediaKind, generated, config }: SaveResultAssetRequest) {
+    setAssetPanelKind('media');
+    setAssetPanelOpen(true);
+    setAssetSaveRequest({
+      requestId: crypto.randomUUID(),
+      kind: 'media',
+      title: assetTitleFromPrompt(config.prompt),
+      sourcePath: path,
+      previewUrl: galleryMediaUrl(path),
+      mediaKind,
+      ...(generated ? { source: { kind: 'job_output' as const, job_id: jobId, output_index: index } } : {}),
+    });
+  }
+
+  // 复刻 = 先采用（从库到本机一律是采用；Studio 没有当前画布，不挂项目），再走资产复刻。
+  async function handleTeamAssetAction(action: TeamAssetAction) {
+    if (action.action === 'open') {
+      await openTeamPanel(action.library_id);
+      return;
+    }
     try {
-      const response = await connectionFetch(creationAssetImageUrl(asset.asset_id));
-      if (!response.ok) throw await apiError(response, '读取图片资产');
+      const { asset } = await adoptTeamAsset(action.library_id, action.asset_id);
+      // 与面板里的「复刻」一致：先记一次使用。
+      requestReproduceRef.current(await markCreationAssetUsed(asset.asset_id));
+    } catch (error) {
+      setAssetNotice(error instanceof Error ? error.message : '复刻失败');
+    }
+  }
+
+  // 团队栏挂在画布项目上：先拿到画布列表与挂着该库的画布再挂载面板，否则首帧没有项目会退回提示词栏。
+  async function openTeamPanel(libraryId: string) {
+    let projects: CanvasProject[];
+    let projectId: string | undefined;
+    try {
+      const [canvases, mounts] = await Promise.all([
+        listCanvasProjects(true),
+        listTeamLibraries(),
+      ]);
+      projects = canvases;
+      projectId = mounts.find(mount => mount.library_id === libraryId)?.project_id;
+    } catch (error) {
+      setAssetNotice(error instanceof Error ? error.message : '读取团队库失败');
+      return;
+    }
+    if (!projectId || !projects.some(project => project.project_id === projectId)) {
+      setAssetNotice('没有挂载这个团队库');
+      return;
+    }
+    const target = { projectId, libraryId };
+    const show = () => {
+      setCanvasTargets(projects);
+      setTeamPanelTarget(target);
+      setAssetPanelKind('team');
+      setAssetPanelMount(current => current + 1);
+      setAssetPanelOpen(true);
+    };
+    if (assetPanelRef.current) assetPanelRef.current.requestTransition(show);
+    else show();
+  }
+
+  // 复刻 = 把生成资产的配方填进当前输入框（同「重新编辑」），不自动提交；已有输入先确认覆盖。
+  function requestReproduce(asset: CreationAsset) {
+    // keys 未加载时判不出本机有没有配方模型，不能当成缺模型去填：先记下，加载完补做（为空则照常按缺模型填）。
+    if (!keysLoaded) {
+      pendingReproduceRef.current = asset;
+      return;
+    }
+    if (hasEditorInput()) {
+      setReproduceConfirm(asset);
+      return;
+    }
+    void reproduce(asset);
+  }
+
+  async function reproduce(asset: CreationAsset) {
+    if (asset.content.kind !== 'generation') return;
+    const recipe = asset.content.snapshot;
+    const requestSequence = ++reEditSequence.current;
+    const recipeDraft = recipeToDraft(recipe, keys);
+    setClickPinned(true);
+    try {
+      const fetchGroup = (inputs: RecipeInput[]) => Promise.all(
+        inputs.map((input) => fetchRecipeInput(asset.asset_id, input)),
+      );
+      const { inputs } = recipeDraft;
+      const [images, videos, audios, sref, cref, oref] = await Promise.all([
+        fetchGroup(inputs.images),
+        fetchGroup(inputs.videos),
+        fetchGroup(inputs.audios),
+        fetchGroup(inputs.mj.sref),
+        fetchGroup(inputs.mj.cref),
+        fetchGroup(inputs.mj.oref),
+      ]);
+      if (requestSequence !== reEditSequence.current) return;
+      applyRoundConfig(
+        { ...recipeDraft.config, sourceAssetTitle: asset.title },
+        { images, videos, audios, sref, cref, oref },
+      );
+      // 缺模型：alias 不动（配置里本就为空），模型位空着等用户选；MJ 参考分组仍按配方模型路由。
+      if (!recipeDraft.model) setModel('');
+      const warnings = recipeDraft.config.warnings ?? [];
+      const missingModel = recipeDraft.model ? null : recipe.model;
+      setRecipeNotice(missingModel || warnings.length > 0 ? { missingModel, warnings } : null);
+    } catch (error) {
+      if (requestSequence !== reEditSequence.current) return;
+      alert(error instanceof Error ? error.message : '参考素材恢复失败');
+    }
+  }
+
+  // 媒体资产「使用」：按 mime 落到当前模式下真正会被提交的槽位；收不了的类型不取文件，只给一句提示。
+  async function addCreationAssetReference(asset: CreationAsset, content: CreationMediaAssetContent) {
+    const route = routeStudioMediaAsset(content.mime_type, {
+      kind,
+      videoMode,
+      model,
+      videoCaps: kind === 'video' ? videoCaps : null,
+      counts: {
+        images: referenceImages.length,
+        mj: mjRefs.image.length,
+        videos: referenceVideos.length,
+        audios: referenceAudios.length,
+      },
+    });
+    if ('notice' in route) {
+      setAssetNotice(route.notice);
+      return;
+    }
+    try {
+      const response = await connectionFetch(creationAssetMediaUrl(asset.asset_id));
+      if (!response.ok) throw await apiError(response, '读取媒体资产');
       const blob = await response.blob();
       const file = new File([blob], content.filename, { type: content.mime_type });
-      setReferenceImages(current => [...current, file].slice(0, maxReferenceImagesForCurrentModel()));
+      if (route.target === 'frame') setVideoFrames(current => ({ ...current, first: file }));
+      else if (route.target === 'mj') setMjRefs(current => ({ ...current, image: [...current.image, file] }));
+      else if (route.target === 'videos') setReferenceVideos(current => [...current, file]);
+      else if (route.target === 'audios') setReferenceAudios(current => [...current, file]);
+      else setReferenceImages(current => [...current, file]);
       setPromptAssetSourceTitle(asset.title);
       setClickPinned(true);
     } catch (error) {
       alert(error instanceof Error ? error.message : String(error));
     }
-  }
-
-  function maxReferenceImagesForCurrentModel(): number {
-    return maxReferenceImages(model);
   }
 
   async function deleteFailedRound(jobId: string) {
@@ -939,67 +1220,78 @@ function StudioFull() {
 
   async function reEdit(config: RoundConfig, jobId?: string) {
     const requestSequence = ++reEditSequence.current;
-    const targetKind = config.kind ?? 'image';
     setClickPinned(true);
     try {
       const refs = await fetchRoundReferences(config, jobId);
       if (requestSequence !== reEditSequence.current) return;
-
-      // 素材全部取回后再一次性替换编辑器快照；任何素材失败都保留用户当前编辑内容。
-      setKind(targetKind);
-      if (config.alias) setProviderAlias(config.alias);
-      setModel(config.model);
-      if (targetKind === 'video') {
-        if (config.ratio) setVideoRatio(config.ratio);
-        if (config.videoResolution) setVideoResolution(config.videoResolution);
-        if (config.duration) setDuration(config.duration);
-        if (config.videoQuality) setVideoQuality(config.videoQuality);
-        if (config.n) setVideoCount(clampImageCount(config.n));
-        setVideoMode(isOmniVideoConfig(config) ? 'omni' : 'firstlast');
-        setGenerateAudio(!!config.generateAudio);
-      } else {
-        setSizeParams({ size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}) });
-        if (config.n) setCount(clampImageCount(config.n));
-        if (config.quality) setQuality(config.quality);
-        if (config.mjParams) setMjParams(config.mjParams);
-      }
-
-      setReferenceImages([]);
-      setReferenceVideos([]);
-      setReferenceAudios([]);
-      setVideoFrames({ first: null, last: null });
-      setMjRefs(EMPTY_MJ_REFS);
-      if (targetKind === 'video') {
-        if (isOmniVideoConfig(config)) {
-          setReferenceImages(refs.images);
-          setReferenceVideos(refs.videos);
-          setReferenceAudios(refs.audios);
-        } else if (config.frameMode === 'last') {
-          setVideoFrames({ first: null, last: refs.images[0] ?? null });
-        } else {
-          setVideoFrames({ first: refs.images[0] ?? null, last: refs.images[1] ?? null });
-        }
-      } else {
-        const routed = routeReusedImageFiles(config.model, config.model, {
-          image: refs.images,
-          sref: refs.sref,
-          cref: refs.cref,
-          oref: refs.oref,
-        });
-        setReferenceImages(routed.referenceImages);
-        setMjRefs(routed.mjRefs);
-        setReuseLimitNotice(routed.droppedCount > 0);
-      }
-      // 模式与素材已同步排入同一批状态更新，Prompt 里的 @图片N 会直接生成带缩略图的 chip。
-      setPromptText(config.prompt);
-      setPromptAssetSourceTitle(config.sourceAssetTitle ?? null);
+      applyRoundConfig(config, refs);
     } catch (error) {
       if (requestSequence !== reEditSequence.current) return;
       alert(error instanceof Error ? error.message : '参考素材恢复失败');
     }
   }
 
+  // 素材全部取回后再一次性替换编辑器快照（重新编辑 / 复刻共用）；取回失败时调用方不会走到这里，
+  // 用户当前编辑内容原样保留。全能参考按实际取回的素材判：复刻时 config 的路径字段是空的。
+  function applyRoundConfig(config: RoundConfig, refs: RoundReferenceFiles) {
+    const targetKind = config.kind ?? 'image';
+    const omni = isOmniVideoConfig(config.frameMode, {
+      images: refs.images.length,
+      videos: refs.videos.length,
+      audios: refs.audios.length,
+    });
+    setRecipeNotice(null);
+    setKind(targetKind);
+    if (config.alias) setProviderAlias(config.alias);
+    setModel(config.model);
+    if (targetKind === 'video') {
+      if (config.ratio) setVideoRatio(config.ratio);
+      if (config.videoResolution) setVideoResolution(config.videoResolution);
+      if (config.duration) setDuration(config.duration);
+      if (config.videoQuality) setVideoQuality(config.videoQuality);
+      if (config.n) setVideoCount(clampImageCount(config.n));
+      setVideoMode(omni ? 'omni' : 'firstlast');
+      setGenerateAudio(!!config.generateAudio);
+    } else {
+      setSizeParams({ size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}) });
+      if (config.n) setCount(clampImageCount(config.n));
+      if (config.quality) setQuality(config.quality);
+      if (config.mjParams) setMjParams(config.mjParams);
+    }
+
+    setReferenceImages([]);
+    setReferenceVideos([]);
+    setReferenceAudios([]);
+    setVideoFrames({ first: null, last: null });
+    setMjRefs(EMPTY_MJ_REFS);
+    if (targetKind === 'video') {
+      if (omni) {
+        setReferenceImages(refs.images);
+        setReferenceVideos(refs.videos);
+        setReferenceAudios(refs.audios);
+      } else if (config.frameMode === 'last') {
+        setVideoFrames({ first: null, last: refs.images[0] ?? null });
+      } else {
+        setVideoFrames({ first: refs.images[0] ?? null, last: refs.images[1] ?? null });
+      }
+    } else {
+      const routed = routeReusedImageFiles(config.model, config.model, {
+        image: refs.images,
+        sref: refs.sref,
+        cref: refs.cref,
+        oref: refs.oref,
+      });
+      setReferenceImages(routed.referenceImages);
+      setMjRefs(routed.mjRefs);
+      setReuseLimitNotice(routed.droppedCount > 0);
+    }
+    // 模式与素材已同步排入同一批状态更新，Prompt 里的 @图片N 会直接生成带缩略图的 chip。
+    setPromptText(config.prompt);
+    setPromptAssetSourceTitle(config.sourceAssetTitle ?? null);
+  }
+
   async function regenerate(config: RoundConfig) {
+    setRecipeNotice(null);
     if (config.alias) setProviderAlias(config.alias);
     setModel(config.model);
     // 提交本身走 overrideConfig（不依赖表单态）；这里只是把表单同步成原 job 参数，便于继续微调。
@@ -1011,7 +1303,7 @@ function StudioFull() {
       if (config.n) setVideoCount(clampImageCount(config.n));
       // 旧 job 的 frame_mode 不回填用户态（提交时按帧数推导）；只同步生成方式：
       // 带视频/音频参考、或参考图没有帧语义（无 frame_mode / auto）→ 全能参考，否则首尾帧。
-      setVideoMode(isOmniVideoConfig(config) ? 'omni' : 'firstlast');
+      setVideoMode(isOmniVideoConfig(config.frameMode, referencePathCounts(config)) ? 'omni' : 'firstlast');
       setGenerateAudio(!!config.generateAudio);
     } else {
       setSizeParams({ size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}) });
@@ -1052,7 +1344,25 @@ async function fetchAssetAsFile(path: string, baseName: string, jobId?: string):
   return new File([blob], `${baseName}.${ext}`, { type: blob.type || 'image/png' });
 }
 
-async function fetchRoundReferences(config: RoundConfig, jobId?: string) {
+function galleryMediaUrl(path: string): string {
+  return mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`);
+}
+
+/** 生成资产冻结快照里的一份参考内容 → File（按快照登记的 mime 命名，不信任响应头）。 */
+async function fetchRecipeInput(assetId: string, input: RecipeInput): Promise<File> {
+  const response = await connectionFetch(creationAssetInputUrl(assetId, input.order));
+  if (!response.ok) throw await apiError(response, '取回复刻参考素材');
+  const blob = await response.blob();
+  const ext = (input.mime_type.split('/')[1] ?? 'bin').split(/[+;]/)[0].replace('jpeg', 'jpg');
+  return new File([blob], `ref-${input.order + 1}.${ext}`, { type: input.mime_type });
+}
+
+function withoutMissingModel(notice: RecipeNotice | null): RecipeNotice | null {
+  if (!notice?.missingModel) return notice;
+  return notice.warnings.length > 0 ? { missingModel: null, warnings: notice.warnings } : null;
+}
+
+async function fetchRoundReferences(config: RoundConfig, jobId?: string): Promise<RoundReferenceFiles> {
   const fetchGroup = (paths: string[], prefix: string) => Promise.all(
     paths.map((path, i) => fetchAssetAsFile(path, `${prefix}-${i + 1}`, jobId)),
   );
@@ -1065,103 +1375,6 @@ async function fetchRoundReferences(config: RoundConfig, jobId?: string) {
     fetchGroup(config.mjRefPaths?.oref ?? [], 'omni-ref'),
   ]);
   return { images, videos, audios, sref, cref, oref };
-}
-
-function isOmniVideoConfig(config: RoundConfig): boolean {
-  return Boolean(
-    config.referenceVideos?.length
-    || config.referenceAudios?.length
-    || (config.referenceImages.length && (!config.frameMode || config.frameMode === 'auto'))
-  );
-}
-
-function referenceImagesFor(job: Job): string[] {
-  const params = job.params ?? {};
-  const refs = [
-    job.source_image,
-    ...(Array.isArray(params.reference_images) ? params.reference_images : []),
-  ].filter((value): value is string => typeof value === 'string' && value.length > 0);
-  // 同一资产可能因 data root 迁移（旧仓 game-ui-ai-workflow → 分离后的 game-atelier）以不同前缀
-  // 重复登记：source_image 存新路径（可渲染）、reference_images 仍是旧仓路径（文件已不在 → 裂图）。
-  // 按尾段（角色/槽位/文件名）去重并保留首个（source_image 在前＝有效路径），消除历史里
-  // 「一张有效 + 一张裂图」的重复缩略图。本地上传走 .runtime/uploads/<uuid> 尾段唯一，不会误并。
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const ref of refs) {
-    const key = ref.startsWith('http') ? ref : ref.split('/').slice(-3).join('/');
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(ref);
-  }
-  return out;
-}
-
-function stringList(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === 'string' && item.length > 0)
-    : [];
-}
-
-function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
-  const selectedKey = keys.find((item) => item.alias === job.alias);
-  const selectedModel = selectedKey?.models.find((item) => item.id === job.model);
-  const isVideo = job.kind === 'video';
-  // 记录统一后更多 job 流经此处（含 skill 出图 / 乐观提交回包），params 缺省给 {} 兜底，免渲染期崩溃。
-  const p = job.params ?? {};
-  return {
-    prompt: job.prompt ?? '',
-    kind: isVideo ? 'video' : 'image',
-    alias: job.alias,
-    provider: job.provider,
-    model: job.model,
-    modelName: selectedModel?.name,
-    ratio: typeof p.ratio === 'string' ? p.ratio : undefined,
-    resolution: ['512', '1K', '2K', '4K'].includes(p.resolution ?? '') ? p.resolution as RoundConfig['resolution'] : undefined,
-    size: typeof p.size === 'string' ? p.size : undefined,
-    sizeMode: imageSizeMode(p),
-    n: typeof p.n === 'number' ? clampImageCount(p.n) : undefined,
-    quality: (p.quality === 'low' || p.quality === 'medium'
-      || p.quality === 'high' || p.quality === 'auto')
-      ? p.quality
-      : undefined,
-    referenceImages: referenceImagesFor(job),
-    sourceAssetTitle: typeof p.creation_asset_source_title === 'string'
-      ? p.creation_asset_source_title
-      : undefined,
-    // 后端跑 job 时回写的静默改写提示（尺寸归一化 / 参考图截断）——两端 schema 早有此字段。
-    warnings: stringList(p.warnings),
-    // MJ 参数从 job 还原：编辑导入 / 再次生成不带上就等于拿默认值重出一张不一样的图。
-    ...(imageFamily(job.model) === 'midjourney'
-      ? {
-          mjParams: mjParamsFromJob(p),
-          mjFlags: typeof p.mj_flags === 'string' ? p.mj_flags : undefined,
-          mjRefPaths: {
-            sref: stringList(p.mj_sref),
-            cref: stringList(p.mj_cref),
-            oref: stringList(p.mj_oref),
-          },
-        }
-      : {}),
-    // 视频参数：再次生成时从原 job 还原（上面只认图片分辨率档位，视频的 720p/1080p 存这里）。
-    // referenceVideos/Audios 给空数组而非 undefined，避免 onSubmitVideo 的 ?? 回落到当前表单文件。
-    ...(isVideo
-      ? {
-          duration: typeof p.duration === 'number' ? p.duration : undefined,
-          videoResolution: typeof p.resolution === 'string' ? p.resolution : undefined,
-          videoQuality: (p.mode === 'std' || p.mode === 'pro') ? p.mode : undefined,
-          frameMode: p.frame_mode,
-          generateAudio: p.generate_audio === true,
-          referenceVideos: stringList(p.reference_videos),
-          referenceAudios: stringList(p.reference_audios),
-        }
-      : {}),
-  };
-}
-
-function clampImageCount(value: unknown): number {
-  const parsed = typeof value === 'number' ? value : parseInt(String(value ?? 1), 10);
-  if (!Number.isFinite(parsed)) return 1;
-  return Math.min(4, Math.max(1, Math.floor(parsed)));
 }
 
 function hydrateRoundModelName(round: RoundState, keys: KeyView[]): RoundState {
@@ -1188,6 +1401,8 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
           submittedAt: job.submitted_at,
           completedAt: job.completed_at,
           imagePaths: job.output_paths,
+          // R6：只有 studio 自家出图能分享；归档来的角色 / UI 等记录不行。
+          shareable: job.namespace === 'studio',
           generationCost: frozenGenerationCost(job),
           config: configForJob(job, keys),
         }];

@@ -214,3 +214,79 @@ describe('CanvasPromptInput', () => {
     expect(editor.querySelector('[data-canvas-mention-id]')).toBeNull();
   });
 });
+
+describe('CanvasPromptInput line breaks', () => {
+  function typedDom(html: string): string {
+    const onChange = vi.fn();
+    const { unmount } = render(<CanvasPromptInput value="" references={[]} onChange={onChange} />);
+    const editor = screen.getByRole('combobox', { name: '提示词' });
+    editor.innerHTML = html;
+    fireEvent.input(editor);
+    unmount();
+    return onChange.mock.calls.at(-1)?.[0] as string;
+  }
+  it('treats the block the browser wraps after Enter as one line break', () => {
+    expect(typedDom('a<div>b</div>')).toBe('a\nb');
+    expect(typedDom('<div>a</div><div>b</div>')).toBe('a\nb');
+  });
+  it('keeps an empty line typed with two Enters as two line breaks', () => {
+    expect(typedDom('a<div><br></div><div>b</div>')).toBe('a\n\nb');
+  });
+  it('does not count the placeholder <br> that keeps a trailing empty line visible', () => {
+    expect(typedDom('a<div><br></div>')).toBe('a\n');
+    expect(typedDom('a<br>b<br>')).toBe('a\nb');
+    expect(typedDom('<div><br></div>')).toBe('');
+  });
+  it('keeps the empty line Chrome puts before inline text when Enter is pressed at the start', () => {
+    expect(typedDom('<div><br></div>abc')).toBe('\nabc');
+    expect(typedDom('<div><br></div>abc<div>d</div>')).toBe('\nabc\nd');
+  });
+  it('ignores empty text nodes left behind by editing', () => {
+    expect(typedDom('<div><br></div><div>a</div>')).toBe('\na');
+    const onChange = vi.fn();
+    render(<CanvasPromptInput value="" references={[]} onChange={onChange} />);
+    const editor = screen.getByRole('combobox', { name: '提示词' });
+    editor.replaceChildren(document.createTextNode(''), Object.assign(document.createElement('div'), { innerHTML: '<br>' }),
+      Object.assign(document.createElement('div'), { textContent: 'a' }));
+    fireEvent.input(editor);
+    expect(onChange).toHaveBeenLastCalledWith('\na');
+    editor.replaceChildren(document.createTextNode('a'), document.createElement('br'), document.createTextNode(''));
+    fireEvent.input(editor);
+    expect(onChange).toHaveBeenLastCalledWith('a');
+  });
+});
+
+describe('CanvasPromptInput editing session', () => {
+  it('starts on focus and ends only when focus moves elsewhere in the page', () => {
+    const onEditingChange = vi.fn();
+    render(<>
+      <CanvasPromptInput value="" references={[]} onChange={() => undefined} onEditingChange={onEditingChange} />
+      <button type="button">别处</button>
+    </>);
+    const editor = screen.getByRole('combobox', { name: '提示词' });
+    const hasFocus = vi.spyOn(window.document, 'hasFocus');
+    fireEvent.focus(editor);
+    expect(onEditingChange).toHaveBeenLastCalledWith(true);
+
+    // 切应用 / 输入法候选窗：整个窗口失焦，会话保住，DOM 也不重建（否则光标塌回开头）。
+    editor.innerHTML = 'a<div>b</div>';
+    fireEvent.input(editor);
+    hasFocus.mockReturnValue(false);
+    fireEvent.blur(editor, { relatedTarget: null });
+    expect(onEditingChange).toHaveBeenCalledTimes(1);
+    expect(editor.innerHTML).toBe('a<div>b</div>');
+
+    hasFocus.mockReturnValue(true);
+    fireEvent.blur(editor, { relatedTarget: screen.getByRole('button', { name: '别处' }) });
+    expect(onEditingChange).toHaveBeenLastCalledWith(false);
+    expect(onEditingChange).toHaveBeenCalledTimes(2);
+    hasFocus.mockRestore();
+  });
+  it('ends the session on unmount', () => {
+    const onEditingChange = vi.fn();
+    const { unmount } = render(<CanvasPromptInput value="" references={[]} onChange={() => undefined} onEditingChange={onEditingChange} />);
+    fireEvent.focus(screen.getByRole('combobox', { name: '提示词' }));
+    unmount();
+    expect(onEditingChange).toHaveBeenLastCalledWith(false);
+  });
+});

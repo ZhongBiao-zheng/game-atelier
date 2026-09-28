@@ -1,7 +1,7 @@
 import { type ButtonHTMLAttributes, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { mediaUrl } from '@/api/connection';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, BookmarkPlus, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Square, Trash2 } from 'lucide-react';
+import { AlertTriangle, BookmarkPlus, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Share2, Square, Trash2 } from 'lucide-react';
 
 import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
@@ -74,7 +74,18 @@ export type RoundState =
       cancelRequested?: boolean;
       config: RoundConfig;
     }
-  | { kind: 'done'; mode?: GenMode; jobId: string; submittedAt: string; completedAt?: string | null; imagePaths: string[]; generationCost?: number; config: RoundConfig }
+  | {
+      kind: 'done';
+      mode?: GenMode;
+      jobId: string;
+      submittedAt: string;
+      completedAt?: string | null;
+      imagePaths: string[];
+      generationCost?: number;
+      /** job.namespace === 'studio'：只有 Studio 自家出图能分享到团队库。 */
+      shareable?: boolean;
+      config: RoundConfig;
+    }
   // canceled=画师主动停止（不是错误）：同一张卡，去掉警示色。
   | { kind: 'failed'; mode?: GenMode; jobId?: string; submittedAt: string; reason: string; canceled?: boolean; config?: RoundConfig };
 
@@ -134,7 +145,8 @@ export function RoundList({
   onEditAsReference,
   onArchive,
   onSavePromptAsset,
-  onSaveImageAsset,
+  onSaveResultAsset,
+  onShareResult,
 }: {
   rounds: RoundState[];
   focusJobId?: string;
@@ -151,7 +163,9 @@ export function RoundList({
   onEditAsReference?: (path: string) => void | Promise<void>;
   onArchive?: (jobId: string, path: string, kind: 'image' | 'video') => void;
   onSavePromptAsset?: (config: RoundConfig) => void;
-  onSaveImageAsset?: (path: string, config: RoundConfig) => void;
+  onSaveResultAsset?: SaveResultAssetHandler;
+  /** index 是 imagePaths 下标（= Job.output_paths 下标），分享来源的 output_index 直接用它。 */
+  onShareResult?: ShareResultHandler;
 }) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const lightboxSources = useMemo(() => rounds.flatMap((round) => (
@@ -294,7 +308,8 @@ export function RoundList({
                   onEditAsReference={onEditAsReference}
                   onArchive={onArchive}
                   onSavePromptAsset={onSavePromptAsset}
-                  onSaveImageAsset={onSaveImageAsset}
+                  onSaveResultAsset={onSaveResultAsset}
+                  onShareResult={onShareResult}
                   mediaActive={mediaActive}
                 />
               )}
@@ -773,6 +788,57 @@ function RefThumb({ src, jobId, mediaActive }: { src: string; jobId?: string; me
   );
 }
 
+type ShareResultHandler = (jobId: string, index: number, path: string, config: RoundConfig) => void;
+
+const RESULT_ACTION_CLASS = 'grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+
+/** 保存一张生成结果。index 是 imagePaths 下标（= Job.output_paths 下标）；
+ *  generated = Studio 自家出图（job.namespace === 'studio'），只有它能存成带配方的生成资产。 */
+export interface SaveResultAssetRequest {
+  jobId: string;
+  index: number;
+  path: string;
+  mediaKind: 'image' | 'video';
+  generated: boolean;
+  config: RoundConfig;
+}
+
+type SaveResultAssetHandler = (request: SaveResultAssetRequest) => void;
+
+function SaveResultButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      aria-label={label}
+      title="保存为创作资产"
+      className={RESULT_ACTION_CLASS}
+    >
+      <BookmarkPlus className="size-4" aria-hidden />
+    </button>
+  );
+}
+
+function ShareResultButton({ index, onClick }: { index: number; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      aria-label={`分享生成结果 ${index + 1}`}
+      title="分享到团队库"
+      className={RESULT_ACTION_CLASS}
+    >
+      <Share2 className="size-4" aria-hidden />
+    </button>
+  );
+}
+
 function DoneBatch({
   round,
   favorites,
@@ -787,7 +853,8 @@ function DoneBatch({
   onEditAsReference,
   onArchive,
   onSavePromptAsset,
-  onSaveImageAsset,
+  onSaveResultAsset,
+  onShareResult,
   mediaActive,
 }: {
   round: Extract<RoundState, { kind: 'done' }>;
@@ -803,7 +870,8 @@ function DoneBatch({
   onEditAsReference?: (path: string) => void | Promise<void>;
   onArchive?: (jobId: string, path: string, kind: 'image' | 'video') => void;
   onSavePromptAsset?: (config: RoundConfig) => void;
-  onSaveImageAsset?: (path: string, config: RoundConfig) => void;
+  onSaveResultAsset?: SaveResultAssetHandler;
+  onShareResult?: ShareResultHandler;
   mediaActive: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -830,6 +898,17 @@ function DoneBatch({
     round.completedAt ? formatBeijingTime(round.completedAt) : undefined,
   ].filter(Boolean);
   const shownMjFlags = shownMjMetadata(round.config);
+  const share = round.shareable ? onShareResult : undefined;
+  const saveResult = onSaveResultAsset
+    ? (index: number, path: string, mediaKind: 'image' | 'video') => onSaveResultAsset({
+        jobId: round.jobId,
+        index,
+        path,
+        mediaKind,
+        generated: round.shareable === true,
+        config: round.config,
+      })
+    : undefined;
 
   return (
     <section className="space-y-3">
@@ -910,6 +989,15 @@ function DoneBatch({
                     </div>
                   )}
                   <div className="absolute right-2 top-2 flex gap-1.5">
+                    {share && (
+                      <ShareResultButton index={index} onClick={() => share(round.jobId, index, path, round.config)} />
+                    )}
+                    {saveResult && (
+                      <SaveResultButton
+                        label={`保存生成视频 ${index + 1} 为资产`}
+                        onClick={() => saveResult(index, path, 'video')}
+                      />
+                    )}
                     {round.mode !== 'skill' && onArchive && (
                       <button
                         type="button"
@@ -961,19 +1049,14 @@ function DoneBatch({
                     className="h-full w-full object-contain"
                   />
                   <div className="absolute right-2 top-2 flex gap-1.5">
-                    {onSaveImageAsset && (
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onSaveImageAsset(path, round.config);
-                        }}
-                        aria-label={`保存生成结果 ${index + 1} 为资产`}
-                        title="保存为创作资产"
-                        className="grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                      >
-                        <BookmarkPlus className="size-4" aria-hidden />
-                      </button>
+                    {share && (
+                      <ShareResultButton index={index} onClick={() => share(round.jobId, index, path, round.config)} />
+                    )}
+                    {saveResult && (
+                      <SaveResultButton
+                        label={`保存生成结果 ${index + 1} 为资产`}
+                        onClick={() => saveResult(index, path, 'image')}
+                      />
                     )}
                     {round.mode !== 'skill' && onArchive && (
                       <button

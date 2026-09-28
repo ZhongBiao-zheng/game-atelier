@@ -23,7 +23,8 @@ from viewer_server.routes import router
 from viewer_server.request_boundary import LocalRequestBoundary, development_origin
 from viewer_server.routes_canvas_batches import router as canvas_batches_router
 from viewer_server.sse import hub, sse_router
-from viewer_server.watcher import start_watchers
+from viewer_server.team_library_routes import team_library_router
+from viewer_server.watcher import start_watchers, stop_team_library_watches
 
 
 _CANVAS_DOCUMENT_MAX_BYTES = 25 * 1024 * 1024
@@ -105,6 +106,7 @@ async def lifespan(app: FastAPI):
 
     _reset_studio_recovery_workers()
     from character_workflow.lib.creation_assets_migration import (
+        migrate_creation_assets_to_v4,
         migrate_creation_assets_to_single_content,
     )
 
@@ -113,6 +115,12 @@ async def lifespan(app: FastAPI):
         logging.getLogger(__name__).info(
             "migrated creation assets to single content; backup: %s",
             asset_migration["backup_path"],
+        )
+    media_migration = migrate_creation_assets_to_v4()
+    if media_migration:
+        logging.getLogger(__name__).info(
+            "migrated creation asset catalog to v4; backup: %s",
+            media_migration["backup_path"],
         )
     # 插件升级入口：旧项目只在 server 启动阶段一次性改成 V1；正常 GET/Skill 读路径不做迁移。
     from character_workflow.lib.ui_schemes import migrate_legacy_projects
@@ -198,6 +206,7 @@ async def lifespan(app: FastAPI):
         maintenance_task.cancel()
         for task in resume_tasks:
             task.cancel()
+        stop_team_library_watches()
         observer.stop()
         observer.join(timeout=2)
         app.state.workshop_runtime.close()
@@ -253,6 +262,7 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(router)
     app.include_router(connection_router(connection_store))
     app.include_router(canvas_batches_router)
+    app.include_router(team_library_router)
     app.include_router(sse_router)
     from viewer_server.workshop_routes import register_workshop_routes
 

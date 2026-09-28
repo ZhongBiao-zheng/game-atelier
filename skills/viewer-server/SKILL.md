@@ -1,6 +1,7 @@
 ---
 name: viewer-server
-description: 本地 FastAPI server，给 Web UI 提供文件读写 API + SSE 推送。仅本地访问（127.0.0.1）。
+description: 用户要打开 Atelier Web 画廊、首次安装初始化，或 Web 打不开需要重启本地服务时用。出图、改图等创作请求不用，各工坊技能会自行启动服务。
+disable-model-invocation: true
 ---
 
 ## ⚠️ 启动必读 Memory（两层，均在 data_root，turn-start 自动注入）

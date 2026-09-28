@@ -120,6 +120,16 @@ class LayerDecompositionResult(BaseModel):
         return self
 
 
+# JobParams 里登记本机文件路径的声明字段，按生成快照 inputs 的顺序排。/api/raw 的 job 读取白名单、
+# 浏览器参考路径闸门、生成快照三处共用这一份，新增路径字段只改这里；各调用点的差异
+# （mask_image 只由服务端写、extra 字段 source_image）在调用点显式加减。
+# 只是 Python 常量，不是模型字段，TS 端无对应。
+JOB_PARAM_PATH_FIELDS: tuple[str, ...] = (
+    "reference_images", "reference_videos", "reference_audios", "mask_image",
+    "mj_sref", "mj_cref", "mj_oref",
+)
+
+
 class JobParams(BaseModel):
     model_config = ConfigDict(extra="allow")
     size: str | None = None
@@ -793,6 +803,8 @@ class CanvasNodeBase(BaseModel):
     position: CanvasPoint
     size: CanvasSize | None = None
     z_index: int = Field(default=0, ge=-10_000, le=10_000)
+    # 内容打码：只影响显示，连线 / 导出 / 参考照常。随文档保存。
+    hidden: bool = False
 
 
 class CanvasTextNode(CanvasNodeBase):
@@ -1666,44 +1678,121 @@ class CreationPromptAssetContent(BaseModel):
     segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
 
 
-class CreationImageAssetContent(BaseModel):
+MEDIA_MIME_PATTERN = r"^(image|video|audio)/"
+# 创作资产 blob 能存的媒体类型 → 后缀；快照参考只收这张表里的类型，否则 blob 路径算不出来。
+MEDIA_SUFFIXES = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/quicktime": ".mov",
+    "audio/mpeg": ".mp3",
+    "audio/wav": ".wav",
+    "audio/mp4": ".m4a",
+}
+TEAM_RECIPE_INPUT_PATH_PATTERN = r"^refs/[0-9]{2}-[a-f0-9]{12}\.[a-z0-9]{2,5}$"
+SHA256_PATTERN = r"^[a-f0-9]{64}$"
+TEAM_LIBRARY_ID_PATTERN = r"^lib_[a-f0-9]{16}$"
+TEAM_ASSET_ID_PATTERN = r"^ta_[0-9A-HJKMNP-TV-Z]{26}$"
+
+
+class CreationMediaAssetContent(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["image"]
+    kind: Literal["media"]
     path: str = Field(min_length=1)
-    mime_type: str = Field(pattern=r"^image/")
+    mime_type: str = Field(pattern=MEDIA_MIME_PATTERN)
     bytes: int = Field(ge=1)
-    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    sha256: str = Field(pattern=SHA256_PATTERN)
     filename: str = Field(min_length=1, max_length=255)
 
 
+RecipeInputRole = Literal["reference", "mask", "mj_sref", "mj_cref", "mj_oref"]
+RecipeMediaKind = Literal["image", "video", "audio"]
+
+
+class RecipeInput(BaseModel):
+    """冻结快照里的一份参考：本体按 sha256 进 blobs，不引用任何本机路径。"""
+    model_config = ConfigDict(extra="forbid")
+    order: int = Field(ge=0)
+    role: RecipeInputRole
+    kind: RecipeMediaKind
+    sha256: str = Field(pattern=SHA256_PATTERN)
+    mime_type: str = Field(pattern=MEDIA_MIME_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_mime(self) -> "RecipeInput":
+        if self.mime_type not in MEDIA_SUFFIXES:
+            raise ValueError(f"参考的媒体类型不受支持：{self.mime_type}")
+        if self.mime_type.split("/", 1)[0] != self.kind:
+            raise ValueError("参考的 kind 与 mime_type 不一致")
+        return self
+
+
+def _check_input_orders(inputs: list[RecipeInput]) -> None:
+    orders = [row.order for row in inputs]
+    if orders != list(range(len(orders))):
+        raise ValueError("参考的 order 必须按升序从 0 连续编号")
+
+
+class _RecipeFields(BaseModel):
+    """GenerationRecipe（本机）与 TeamGenerationSnapshot（团队库）共用的快照字段；只差 inputs 形状。"""
+    mode: Literal["image", "video"]
+    model: str = Field(min_length=1, max_length=200)
+    provider: str | None = None
+    alias: str | None = None
+    final_prompt: str
+    draft_prompt: str | None = None
+    # 提交时的参数，已去掉路径 / 费用 / 运行态字段（分享时由 team_library_share 清洗）。
+    params: dict[str, Any] = Field(default_factory=dict)
+    cost_cny: float | None = Field(default=None, ge=0)
+    cost_basis: Literal["actual", "estimated"] | None = None
+    submitted_at: str
+
+    @model_validator(mode="after")
+    def validate_cost_pair(self) -> "_RecipeFields":
+        if (self.cost_cny is None) != (self.cost_basis is None):
+            raise ValueError("cost_cny 与 cost_basis 必须同时为空或同时有值")
+        return self
+
+
+class GenerationRecipe(_RecipeFields):
+    """生成资产的本机冻结快照：自包含，参考按 sha256 引用 blobs（不同于画布按 version_id 引用）。"""
+    model_config = ConfigDict(extra="forbid")
+    inputs: list[RecipeInput] = Field(default_factory=list, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_input_orders(self) -> "GenerationRecipe":
+        _check_input_orders(self.inputs)
+        return self
+
+
+class CreationGenerationAssetContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["generation"]
+    media: CreationMediaAssetContent
+    snapshot: GenerationRecipe
+
+
 CreationAssetContent = Annotated[
-    CreationPromptAssetContent | CreationImageAssetContent,
+    CreationPromptAssetContent | CreationMediaAssetContent | CreationGenerationAssetContent,
     Field(discriminator="kind"),
 ]
 
 
-class CreationAssetRecommendation(BaseModel):
-    """提示词资产可选携带的推荐出图配置。存模型 id 不存别名：别名是本机 keys.json 的东西，
-    换机器或删 key 就失效；运行时按 id 在可用模型里找，找不到由调用方回落默认并明说。
-    params 只收标量，键必须在对应 mode 的浏览器草稿白名单内（路径类字段永远进不来）。"""
+class AdoptionOrigin(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    mode: Literal["image", "video"] = "image"
-    model: str = Field(min_length=1, max_length=200)
-    params: dict[str, str | int | float | bool] = Field(default_factory=dict, max_length=40)
-
-    @model_validator(mode="after")
-    def validate_param_keys(self) -> "CreationAssetRecommendation":
-        allowed = CANVAS_DRAFT_PARAM_FIELDS[self.mode]
-        rejected = sorted(key for key in self.params if key not in allowed)
-        if rejected:
-            raise ValueError(f"推荐参数不允许这些字段：{', '.join(rejected)}")
-        return self
+    library_id: str = Field(pattern=TEAM_LIBRARY_ID_PATTERN)
+    asset_id: str = Field(min_length=1, max_length=160)
+    source_updated_at: str
+    raw_path: str | None = None
 
 
 class CreationAsset(BaseModel):
     model_config = ConfigDict(extra="forbid")
     asset_id: str = Field(min_length=1, max_length=160)
-    kind: Literal["prompt", "image"]
+    kind: Literal["prompt", "media", "generation"]
     title: str = Field(min_length=1, max_length=120)
     tags: list[str] = Field(default_factory=list, max_length=20)
     created_at: str
@@ -1711,12 +1800,10 @@ class CreationAsset(BaseModel):
     last_used_at: str | None = None
     content: CreationAssetContent
     project_ids: list[str] = Field(default_factory=list)
-    recommendation: CreationAssetRecommendation | None = None
+    adopted_from: AdoptionOrigin | None = None
 
     @model_validator(mode="after")
     def validate_content_identity(self) -> "CreationAsset":
-        if self.recommendation is not None and self.kind != "prompt":
-            raise ValueError("只有提示词资产可以携带推荐配置")
         if self.content.kind != self.kind:
             raise ValueError("creation asset content must match asset kind")
         if len(self.project_ids) != len(set(self.project_ids)):
@@ -1726,7 +1813,7 @@ class CreationAsset(BaseModel):
 
 class CreationAssetCatalog(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[2] = 2
+    schema_version: Literal[4] = 4
     revision: int = Field(default=0, ge=0)
     updated_at: str
     assets: list[CreationAsset] = Field(default_factory=list)
@@ -1752,7 +1839,6 @@ class CreationPromptAssetCreate(BaseModel):
     segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
     tags: list[str] = Field(default_factory=list, max_length=20)
     project_id: str | None = Field(default=None, min_length=1, max_length=160)
-    recommendation: CreationAssetRecommendation | None = None
 
 
 class CreationPromptAssetUpdate(BaseModel):
@@ -1760,10 +1846,9 @@ class CreationPromptAssetUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
     tags: list[str] = Field(default_factory=list, max_length=20)
-    recommendation: CreationAssetRecommendation | None = None
 
 
-class CreationImagePathCreate(BaseModel):
+class CreationMediaPathCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=120)
     source_path: str = Field(min_length=1)
@@ -1787,6 +1872,50 @@ class CanvasCreationAssetInsertRequest(BaseModel):
     position: CanvasPoint
     variable_values: dict[str, str] = Field(default_factory=dict)
     target_node_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class CreationGenerationFromJob(BaseModel):
+    """Studio 结果「保存为创作资产」：output_index 是 Job.output_paths 的下标。"""
+    model_config = ConfigDict(extra="forbid")
+    job_id: str = Field(min_length=1, max_length=160)
+    output_index: int = Field(ge=0)
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    project_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class CreationGenerationFromCanvas(BaseModel):
+    """画布结果「保存为创作资产」；project_id 取 canvas_project_id，不单独收。"""
+    model_config = ConfigDict(extra="forbid")
+    canvas_project_id: str = Field(min_length=1, max_length=160)
+    node_id: str = Field(min_length=1, max_length=160)
+    version_id: str = Field(min_length=1, max_length=160)
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class CanvasReproduceRequest(BaseModel):
+    """画布复刻；model 为 null 时配置节点模型位留空（本机没有配方里的模型）。"""
+    model_config = ConfigDict(extra="forbid")
+    position: CanvasPoint
+    alias: str | None = None
+    model: str | None = None
+
+
+class CanvasPasteRequest(BaseModel):
+    """跨画布粘贴：节点 id 已由前端换新，服务端复制媒体版本并改写引用。"""
+    model_config = ConfigDict(extra="forbid")
+    source_project_id: str = Field(min_length=1)
+    nodes: list[CanvasNode] = Field(min_length=1, max_length=500)
+    connections: list[CanvasConnection] = Field(default_factory=list, max_length=2_000)
+
+
+class CanvasReproduceResponse(CanvasDocument):
+    """与 creation asset insert 路由的响应（CanvasDocument）同形状，另加 warnings。
+
+    只作响应：warnings 不属于画布文档，不能当 CanvasDocument 落盘。
+    """
+    warnings: list[str] = Field(default_factory=list)
 
 
 class CanvasPluginState(BaseModel):
@@ -2396,3 +2525,281 @@ class TurnStartResult(BaseModel):
     derivative: CharacterDerivativeContext | None = None
     # v5.4.0 (A2): active 角色定稿 ← characters/<id>/canonical.json（promo/turnaround 选参考图用）。
     canonical: dict = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# 团队库（P1）：挂载目录只读共享，本机身份只有一个显示名。
+# ---------------------------------------------------------------------------
+
+
+class UserProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    display_name: str = Field(min_length=1, max_length=40)
+
+
+class TeamLibraryManifest(BaseModel):
+    """挂载目录里唯一被写入的文件 `.atelier-library.json`。
+
+    团队侧文件来自别人的机器：读模型一律 extra="ignore"，新版本多写的字段不让本机读挂。
+    """
+    model_config = ConfigDict(extra="ignore")
+    format_version: Literal[1] = 1
+    library_id: str = Field(pattern=TEAM_LIBRARY_ID_PATTERN)
+    name: str = Field(min_length=1, max_length=120)
+    created_at: str
+    created_by: str = Field(min_length=1, max_length=40)
+
+
+class TeamAssetAuthor(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    display_name: str = Field(min_length=1, max_length=40)
+
+
+class TeamAssetMedia(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    filename: str = Field(min_length=1, max_length=255)
+    mime_type: str = Field(pattern=MEDIA_MIME_PATTERN)
+    bytes: int = Field(ge=1)
+    sha256: str = Field(pattern=SHA256_PATTERN)
+
+
+class TeamRecipeInput(RecipeInput):
+    """团队库里的参考：多一个相对资产目录的路径，白名单只认 asset.json 布局的 refs/NN-<sha12>.<ext>。"""
+    model_config = ConfigDict(extra="ignore")
+    path: str = Field(pattern=TEAM_RECIPE_INPUT_PATH_PATTERN)
+
+
+class TeamGenerationSnapshot(_RecipeFields):
+    """asset.json 里的 snapshot。转本机快照：
+    GenerationRecipe.model_validate(snapshot.model_dump(exclude={"inputs": {"__all__": {"path"}}}))
+    """
+    model_config = ConfigDict(extra="ignore")
+    inputs: list[TeamRecipeInput] = Field(default_factory=list, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_input_orders(self) -> "TeamGenerationSnapshot":
+        _check_input_orders(self.inputs)
+        return self
+
+
+# from_attributes：分享时直接传本机 CreationPromptAssetContent 实例也能写进 TeamAssetFile。
+class TeamPromptTextSegment(CreationPromptTextSegment):
+    model_config = ConfigDict(extra="ignore", from_attributes=True)
+
+
+class TeamPromptVariableSegment(CreationPromptVariableSegment):
+    model_config = ConfigDict(extra="ignore", from_attributes=True)
+
+
+TeamPromptSegment = Annotated[
+    TeamPromptTextSegment | TeamPromptVariableSegment,
+    Field(discriminator="kind"),
+]
+
+
+class TeamPromptContent(CreationPromptAssetContent):
+    """asset.json 里的 prompt：团队侧宽松读（R1）。继承本机模型，采用时可直接作为 content。"""
+    model_config = ConfigDict(extra="ignore", from_attributes=True)
+    segments: list[TeamPromptSegment] = Field(min_length=1, max_length=400)
+
+
+class TeamAssetOrigin(BaseModel):
+    """只作追溯，不解析。"""
+    model_config = ConfigDict(extra="ignore")
+    job_id: str | None = None
+    canvas_project_id: str | None = None
+
+
+class TeamAssetFile(BaseModel):
+    """分享资产的 `<asset_id>/asset.json`。"""
+    model_config = ConfigDict(extra="ignore")
+    team_asset_version: Literal[1] = 1
+    asset_id: str = Field(pattern=TEAM_ASSET_ID_PATTERN)
+    kind: Literal["generation", "media", "prompt"]
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    author: TeamAssetAuthor
+    shared_at: str
+    updated_at: str
+    media: TeamAssetMedia | None = None
+    prompt: TeamPromptContent | None = None
+    snapshot: TeamGenerationSnapshot | None = None
+    origin: TeamAssetOrigin | None = None
+
+    @model_validator(mode="after")
+    def validate_kind_payload(self) -> "TeamAssetFile":
+        if self.kind in {"generation", "media"} and self.media is None:
+            raise ValueError("媒体或生成资产必须带 media")
+        if self.kind == "prompt" and self.prompt is None:
+            raise ValueError("提示词资产必须带 prompt")
+        if self.kind == "generation" and self.snapshot is None:
+            raise ValueError("生成资产必须带 snapshot")
+        return self
+
+
+class TeamLibraryMount(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    library_id: str = Field(pattern=TEAM_LIBRARY_ID_PATTERN)
+    project_id: str = Field(min_length=1, max_length=160)
+    mount_path: str
+    name: str = Field(min_length=1, max_length=120)
+    mounted_at: str
+
+
+class TeamLibraryMountFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1] = 1
+    mounts: list[TeamLibraryMount] = Field(default_factory=list)
+
+
+class TeamLibraryIndexEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1)
+    kind: Literal["generation", "media", "prompt", "raw"]
+    title: str
+    author: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    mime_type: str | None = None
+    bytes: int = Field(ge=0)
+    relative_path: str
+    sha256: str | None = None
+    updated_at: str
+    reproducible: bool
+    status: Literal["ready", "incomplete"]
+    # 仅 generation 有值：团队栏卡片直接显示模型与花费，不必再读 asset.json。
+    model: str | None = None
+    cost_cny: float | None = None
+    # 仅 generation 有值：snapshot.inputs[].sha256，按 order（推荐 a 按参考 sha 查配方）。
+    input_sha256: list[str] = Field(default_factory=list)
+
+
+class TeamLibraryIndex(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1] = 1
+    library_id: str = Field(pattern=TEAM_LIBRARY_ID_PATTERN)
+    scanned_at: str
+    entries: list[TeamLibraryIndexEntry] = Field(default_factory=list)
+
+
+class TeamLibraryView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    library_id: str = Field(pattern=TEAM_LIBRARY_ID_PATTERN)
+    project_id: str = Field(min_length=1, max_length=160)
+    name: str = Field(min_length=1, max_length=120)
+    mount_path: str
+    mounted_at: str
+    reachable: bool
+    asset_count: int = Field(ge=0)
+    scanned_at: str | None = None
+
+
+class TeamLibraryAssetPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    entries: list[TeamLibraryIndexEntry] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class TeamLibraryMountRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project_id: str = Field(min_length=1, max_length=160)
+    path: str = Field(min_length=1)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+
+
+class TeamAssetAdoptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class TeamAssetAdoptResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    asset: CreationAsset
+    created: bool
+
+
+class TeamShareJobOutput(BaseModel):
+    """Studio 历史的单张结果；output_index 是 Job.output_paths 的下标。"""
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["job_output"]
+    job_id: str = Field(min_length=1, max_length=160)
+    output_index: int = Field(ge=0)
+
+
+class TeamShareCreationAsset(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["creation_asset"]
+    asset_id: str = Field(min_length=1, max_length=160)
+
+
+class TeamShareCanvasResult(BaseModel):
+    """画布结果节点的一个版本；version_id 是 CanvasDocument.content_versions 的键。"""
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["canvas_result"]
+    canvas_project_id: str = Field(min_length=1, max_length=160)
+    node_id: str = Field(min_length=1, max_length=160)
+    version_id: str = Field(min_length=1, max_length=160)
+
+
+TeamShareSource = Annotated[
+    TeamShareJobOutput | TeamShareCreationAsset | TeamShareCanvasResult,
+    Field(discriminator="kind"),
+]
+
+
+class TeamShareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source: TeamShareSource
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    allow_large: bool = False
+
+
+class TeamAssetUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(max_length=20)
+
+
+class TeamRelatedEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    library_id: str = Field(pattern=TEAM_LIBRARY_ID_PATTERN)
+    library_name: str
+    entry: TeamLibraryIndexEntry
+
+
+CreationAssetStalenessStatus = Literal["fresh", "stale", "withdrawn", "unknown"]
+
+
+class CreationAssetStaleness(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: CreationAssetStalenessStatus
+
+
+class CreationAssetStalenessBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    asset_ids: list[str] = Field(min_length=1, max_length=200)
+
+
+class CreationAssetStalenessBatch(BaseModel):
+    """不存在的 asset_id 不出现在 statuses 里。"""
+    model_config = ConfigDict(extra="forbid")
+    statuses: dict[str, CreationAssetStalenessStatus]
+
+
+TeamLibraryChangeKind = Literal["added", "updated", "removed"]
+
+
+class TeamLibraryChangeEvent(BaseModel):
+    """SSE team-library-changed 载荷（broadcast 时 model_dump(mode="json")）。
+
+    removed 事件的 title / status / mime_type 为 None。
+    """
+    model_config = ConfigDict(extra="forbid")
+    library_id: str
+    asset_id: str
+    kind: str
+    author: str | None
+    change: TeamLibraryChangeKind
+    title: str | None = None
+    status: Literal["ready", "incomplete"] | None = None
+    mime_type: str | None = None

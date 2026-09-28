@@ -507,6 +507,9 @@
     padding: 12px;
     margin: -12px;
     border-radius: 0.5rem;
+    /* 选区框只是视觉框：它叠在节点之上，接了指针就把节点边上的连接把手全盖住，框选后
+       只能整组拖、连不了线。拖任意一个选中节点本来就会带着整组走，所以框自己不必接事件。 */
+    pointer-events: none;
   }
   .canvas-flow .react-flow__edge-path {
     stroke-width: 1.5 !important;
@@ -637,4 +640,20 @@
 }
 .canvas-editor-region {
   overscroll-behavior: none;
+}
+
+/* 节点内容打码：高斯模糊 36px，外扩 1.15 倍吃掉模糊透明边；
+   只作用于内容区，标题、工具栏、连接点不受影响。 */
+.canvas-node-hidden {
+  filter: blur(36px);
+  transform: scale(1.15);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* 文字细，3px 已认不出字形；图片 / 视频要 36px 才盖得住轮廓。
+   文本不需要放大补偿透明边，放大只会让字看起来往外散。 */
+.canvas-node-hidden.canvas-node-hidden-text {
+  filter: blur(3px);
+  transform: none;
 }

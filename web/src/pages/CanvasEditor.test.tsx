@@ -12,6 +12,8 @@ import {
   getCanvasDocument,
   listCanvasJobs,
   listCanvasProjects,
+  pasteIntoCanvas,
+  reproduceIntoCanvas,
   retryCanvasRun,
   replaceCanvasNodeMedia,
   saveCanvasDocument,
@@ -21,6 +23,16 @@ import {
 } from '@/api/canvas';
 import { getCanvasUiPreferences } from '@/api/canvasUi';
 import { listKeys } from '@/api/keys';
+import {
+  insertCreationAssetIntoCanvas,
+  listCreationAssets,
+  markCreationAssetUsed,
+  saveGenerationFromCanvas,
+} from '@/api/creationAssets';
+import { adoptTeamAsset, listRelatedTeamAssets, listTeamAssets, listTeamLibraries } from '@/api/teamLibraries';
+import { ApiError } from '@/api/http';
+import { dispatchTeamAssetAction } from '@/lib/teamAssetActions';
+import type { CreationAsset } from '@/schema/creationAssets';
 import { DEFAULT_CANVAS_UI_PREFERENCES } from '@/components/canvas/canvasImageToolbar';
 import type { Job } from '@/schema/jobs';
 import type {
@@ -185,6 +197,27 @@ vi.mock('@xyflow/react', () => {
           <CanvasContextIdentityProbe />
           <button
             type="button"
+            aria-label="simulate team asset drop"
+            onClick={event => {
+              let dropPrevented = false;
+              const dataTransfer = {
+                files: [],
+                types: ['application/x-game-atelier-team-asset'],
+                getData: (type: string) => (
+                  type === 'application/x-game-atelier-team-asset'
+                    ? JSON.stringify({ library_id: 'lib_0123456789abcdef', entry_id: 'ta-entry' })
+                    : ''
+                ),
+                dropEffect: '',
+              };
+              onDragOver?.({ dataTransfer, preventDefault: () => {} });
+              onDrop?.({ dataTransfer, clientX: 240, clientY: 180, preventDefault: () => { dropPrevented = true; } });
+              event.currentTarget.dataset.dropEffect = dataTransfer.dropEffect;
+              event.currentTarget.dataset.dropPrevented = String(dropPrevented);
+            }}
+          />
+          <button
+            type="button"
             aria-label="simulate file drop"
             onDrop={onDrop}
             onClick={event => {
@@ -271,6 +304,8 @@ vi.mock('@/api/canvas', () => ({
   listCanvasProjects: vi.fn(),
   renameCanvasProject: vi.fn(),
   replaceCanvasNodeMedia: vi.fn(),
+  pasteIntoCanvas: vi.fn(),
+  reproduceIntoCanvas: vi.fn(),
   retryCanvasRun: vi.fn(),
   runCanvasMediaOperation: vi.fn(),
   saveCanvasDocument: vi.fn(),
@@ -286,6 +321,31 @@ vi.mock('@/api/canvasUi', () => ({
   getCanvasUiPreferences: vi.fn(),
   saveCanvasUiPreferences: vi.fn(),
 }));
+
+vi.mock('@/api/creationAssets', async importOriginal => {
+  const original = await importOriginal<typeof import('@/api/creationAssets')>();
+  return {
+    ...original,
+    insertCreationAssetIntoCanvas: vi.fn(),
+    listCreationAssets: vi.fn(),
+    markCreationAssetUsed: vi.fn(),
+    saveGenerationFromCanvas: vi.fn(),
+  };
+});
+
+vi.mock('@/api/teamLibraries', async importOriginal => {
+  const original = await importOriginal<typeof import('@/api/teamLibraries')>();
+  return {
+    ...original,
+    adoptTeamAsset: vi.fn(),
+    listTeamLibraries: vi.fn(),
+    listTeamAssets: vi.fn(),
+    // 团队栏挂载就读显示名；不 mock 会发真实请求。画布用例不断言显示名，保持 pending：
+    // resolve 的话 setDisplayName 落在 act 之外，每个团队栏用例多出 act 警告。
+    fetchProfile: vi.fn(() => new Promise(() => {})),
+    listRelatedTeamAssets: vi.fn().mockResolvedValue([]),
+  };
+});
 
 vi.mock('@/api/keys', async importOriginal => {
   const original = await importOriginal<typeof import('@/api/keys')>();
@@ -462,6 +522,48 @@ it('renders solid material links without counting upstream originals and preserv
   fireEvent.paste(window, { clipboardData: { getData: (type: string) => clipboard.get(type) ?? '', items: [] } });
   await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(6));
   expect(lastSavedDocument()?.connections.map(edge => edge.role)).toEqual(['material', 'input', 'material', 'input']);
+});
+
+it('pastes nodes copied from another canvas through the server and adopts the returned document', async () => {
+  const existing = imageNode('existing', '已有');
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [existing] }));
+  const foreign = { ...imageNode('foreign-node', '别处的卡面'), position: { x: 10, y: 20 } };
+  foreign.data.current_version_id = 'foreign-version';
+  vi.mocked(pasteIntoCanvas).mockImplementation(async input => documentWith({
+    revision: input.documentRevision + 1,
+    nodes: [existing, ...input.nodes.map(node => (
+      node.type === 'image'
+        ? { ...node, data: { ...node.data, current_version_id: 'copied-version' } }
+        : node
+    ))],
+    connections: input.connections,
+    content_versions: { 'copied-version': { version_id: 'copied-version', kind: 'image', path: 'uploads/x.png', mime_type: 'image/png',
+      width: 64, height: 64, bytes: 10, created_at: '2026-09-24T00:00:00Z', sha256: 'b'.repeat(64), origin: { kind: 'upload', upload_id: 'x' } } },
+  }));
+  await renderReadyCanvas();
+
+  const serialized = JSON.stringify({ schema_version: 1, source_project_id: 'canvas-two', nodes: [foreign], connections: [] });
+  fireEvent.paste(window, { clipboardData: { getData: (type: string) => (type === 'application/x-game-atelier-canvas-nodes' ? serialized : ''), items: [] } });
+
+  await waitFor(() => expect(pasteIntoCanvas).toHaveBeenCalledTimes(1));
+  const call = vi.mocked(pasteIntoCanvas).mock.calls[0][0];
+  expect(call).toMatchObject({ projectId: 'canvas-one', sourceProjectId: 'canvas-two', documentRevision: 7 });
+  expect(call.nodes).toHaveLength(1);
+  expect(call.nodes[0].id).not.toBe('foreign-node');
+  expect(call.nodes[0].data).toMatchObject({ current_version_id: 'foreign-version' });
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(2));
+  const saved = lastSavedDocument()!;
+  expect(saved.content_versions).toHaveProperty('copied-version');
+  expect(saved.nodes.map(node => node.title)).toEqual(['已有', '别处的卡面']);
+});
+
+it('still pastes within the same canvas from the serialized clipboard without calling the server', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [imageNode('local', '本地')] }));
+  await renderReadyCanvas();
+  const serialized = JSON.stringify({ schema_version: 1, source_project_id: 'canvas-one', nodes: [imageNode('local', '本地')], connections: [] });
+  fireEvent.paste(window, { clipboardData: { getData: (type: string) => (type === 'application/x-game-atelier-canvas-nodes' ? serialized : ''), items: [] } });
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(2));
+  expect(pasteIntoCanvas).not.toHaveBeenCalled();
 });
 
 it('derives read-only named layer ownership lines and removes them only when the binding is removed', async () => {
@@ -1172,6 +1274,61 @@ it('keeps a dropped file inside the app and uploads it to the canvas', async () 
   expect(drop.dataset.overPrevented).toBe('true');
   expect(drop.dataset.dropPrevented).toBe('true');
   await waitFor(() => expect(uploadCanvasMedia).toHaveBeenCalled());
+});
+
+it('adopts a team asset dropped on the canvas and inserts it', async () => {
+  vi.mocked(adoptTeamAsset).mockResolvedValue({
+    asset: { asset_id: 'ca1' } as never,
+    created: true,
+  });
+  vi.mocked(insertCreationAssetIntoCanvas).mockResolvedValue({ ...emptyDocument, revision: 8 });
+
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  const drop = screen.getByRole('button', { name: 'simulate team asset drop' });
+  fireEvent.click(drop);
+
+  expect(drop.dataset.dropPrevented).toBe('true');
+  expect(drop.dataset.dropEffect).toBe('copy');
+  await waitFor(() => expect(adoptTeamAsset).toHaveBeenCalledWith('lib_0123456789abcdef', 'ta-entry', 'canvas-one'));
+  await waitFor(() => expect(vi.mocked(insertCreationAssetIntoCanvas).mock.calls.at(-1)?.[0].assetId).toBe('ca1'));
+});
+
+async function openTeamTab() {
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByRole('button', { name: '媒体资产' }));
+  fireEvent.click(await screen.findByRole('button', { name: '团队' }));
+}
+
+it('team tab mount exit opens settings on the current canvas', async () => {
+  vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
+  vi.mocked(listTeamLibraries).mockResolvedValue([]);
+  try {
+    await openTeamTab();
+    fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
+    await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe('/settings?canvas=canvas-one'));
+  } finally {
+    window.history.replaceState(null, '', '/');
+  }
+});
+
+it('announces a team asset adopted from the panel', async () => {
+  vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
+  vi.mocked(listTeamLibraries).mockResolvedValue([{
+    library_id: 'lib_0123456789abcdef', project_id: 'canvas-one', name: '角色参考', mount_path: '/x',
+    mounted_at: '', reachable: true, asset_count: 1, scanned_at: null,
+  }]);
+  vi.mocked(listTeamAssets).mockResolvedValue({ entries: [{
+    id: 'raw_a', kind: 'raw', title: 'castle.png', author: null, tags: [], mime_type: 'image/png', bytes: 1,
+    relative_path: 'concept/castle.png', sha256: null, updated_at: '2026-09-20T00:00:00Z', reproducible: false, status: 'ready', model: null, cost_cny: null,
+    input_sha256: [],
+  }], next_cursor: null });
+  vi.mocked(adoptTeamAsset).mockResolvedValueOnce({ asset: { asset_id: 'ca1' } as never, created: true });
+  await openTeamTab();
+  fireEvent.click(await screen.findByRole('button', { name: '采用' }));
+  expect(await screen.findByText('已加入资产库')).toBeInTheDocument();
+  expect(adoptTeamAsset).toHaveBeenCalledWith('lib_0123456789abcdef', 'raw_a', 'canvas-one');
 });
 
 function mockFileUpload(file: File, revision: number) {
@@ -1964,4 +2121,312 @@ it('分组成员变化会改变引用图签名，参考位不用硬刷新', () =
   const after = canvasMentionGraphSignature({ ...base, nodes: [image, group(['image'])] });
 
   expect(after).not.toEqual(before);
+});
+
+const generatedVersion = {
+  version_id: 'v-generated', kind: 'image' as const, path: 'runs/gen.png', mime_type: 'image/png', bytes: 20,
+  width: 100, height: 100, created_at: '2026-09-24T00:00:00Z', sha256: 'a'.repeat(64),
+  origin: { kind: 'job_output' as const, job_id: 'job-1', candidate_id: 'c-1' },
+};
+
+function canvasWithImage(version: CanvasDocument['content_versions'][string]) {
+  const node = imageNode('result-image', '成图');
+  return documentWith({
+    nodes: [{ ...node, data: { ...node.data, current_version_id: version.version_id } }],
+    content_versions: { [version.version_id]: version },
+  });
+}
+
+const generationAsset: CreationAsset = {
+  asset_id: 'ca-gen', kind: 'generation', title: '雪山白犬', tags: [], created_at: '2026-09-24T00:00:00Z',
+  updated_at: '2026-09-24T00:00:00Z', last_used_at: null, project_ids: [],
+  content: {
+    kind: 'generation',
+    media: { kind: 'media', path: 'creation-assets/blobs/dog.png', mime_type: 'image/png', bytes: 3, sha256: 'b'.repeat(64), filename: 'dog.png' },
+    snapshot: {
+      mode: 'image', model: 'gpt-image-2', provider: 'openai', alias: 'main', final_prompt: '白犬', draft_prompt: null,
+      params: {}, inputs: [{ order: 0, role: 'reference', kind: 'image', sha256: 'c'.repeat(64), mime_type: 'image/png' }],
+      cost_cny: null, cost_basis: null, submitted_at: '2026-09-24T00:00:00Z',
+    },
+  },
+};
+
+/** 按服务端真实布局（canvas_reproduce.py）造复刻响应：参考一列在左、按渲染高度 + 48 纵排，
+ *  配置节点在右（列距 96）、与首个参考顶对齐。 */
+function reproducedDocument({ warnings = [] as string[], width = 100, height = 100, references = 1 } = {}) {
+  const renderedHeight = 320 * height / width;
+  const refs = Array.from({ length: references }, (_, index) => {
+    const node = imageNode(`ref-${index + 1}`, `参考 ${index + 1}`);
+    return { ...node, position: { x: 40, y: 40 + index * (renderedHeight + 48) },
+      data: { ...node.data, current_version_id: `v-ref-${index + 1}` } };
+  });
+  return {
+    ...emptyDocument,
+    revision: 8,
+    nodes: [
+      ...refs,
+      { id: 'config-1', title: '图片生成', type: 'config' as const, position: { x: 40 + 320 + 96, y: 40 }, z_index: 0,
+        data: { draft: { ...imageDraft, prompt: '白犬' } } },
+    ],
+    connections: refs.map(ref => ({ id: `connection-${ref.id}`, role: 'input' as const, source_node_id: ref.id, target_node_id: 'config-1' })),
+    content_versions: Object.fromEntries(refs.map(ref => [ref.data.current_version_id, {
+      ...generatedVersion, version_id: ref.data.current_version_id, width, height,
+      origin: { kind: 'creation_asset_snapshot' as const, title: '雪山白犬' },
+    }])),
+    warnings,
+  };
+}
+
+/** 新建节点彼此的相对位置（以 config-1 为原点）。 */
+function relativeLayout(nodes: CanvasNode[], ids: string[]) {
+  const origin = nodes.find(node => node.id === 'config-1')!.position;
+  return ids.map(id => {
+    const position = nodes.find(node => node.id === id)!.position;
+    return { id, x: position.x - origin.x, y: position.y - origin.y };
+  });
+}
+
+/** 画布上预先占住复刻落点的空节点：逼得新节点必须整体挪开。 */
+function blockedCanvas() {
+  const blocker = imageNode('blocker', '占位');
+  return documentWith({ nodes: [{ ...blocker, position: { x: 40, y: 40 } }] });
+}
+
+function dispatchReproduce() {
+  let claimed = false;
+  act(() => {
+    claimed = dispatchTeamAssetAction({ library_id: 'lib_0123456789abcdef', asset_id: 'ta-gen', action: 'reproduce' });
+  });
+  return claimed;
+}
+
+async function renderReadyCanvas() {
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+}
+
+it('saves a generated canvas result as a generation asset', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(canvasWithImage(generatedVersion));
+  vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
+  vi.mocked(saveGenerationFromCanvas).mockResolvedValue(generationAsset);
+  await renderReadyCanvas();
+  fireEvent.click(screen.getByRole('button', { name: 'flow-node-result-image' }));
+  fireEvent.click(await screen.findByRole('button', { name: '保存 成图' }));
+  fireEvent.click(await screen.findByRole('button', { name: '保存生成资产' }));
+  await waitFor(() => expect(saveGenerationFromCanvas).toHaveBeenCalledWith(expect.objectContaining({
+    canvas_project_id: 'canvas-one', node_id: 'result-image', version_id: 'v-generated',
+  })));
+});
+
+it('saves an uploaded canvas image as a plain media asset', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(canvasWithImage({
+    ...generatedVersion, version_id: 'v-upload', origin: { kind: 'upload', upload_id: 'u-1' },
+  }));
+  vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
+  await renderReadyCanvas();
+  fireEvent.click(screen.getByRole('button', { name: 'flow-node-result-image' }));
+  expect(screen.queryByRole('button', { name: '分享 成图' })).not.toBeInTheDocument();
+  fireEvent.click(await screen.findByRole('button', { name: '保存 成图' }));
+  expect(await screen.findByRole('button', { name: '保存媒体资产' })).toBeInTheDocument();
+  expect(saveGenerationFromCanvas).not.toHaveBeenCalled();
+});
+
+it('opens the team share dialog for a generated canvas result', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(canvasWithImage(generatedVersion));
+  vi.mocked(listTeamLibraries).mockResolvedValue([]);
+  await renderReadyCanvas();
+  fireEvent.click(screen.getByRole('button', { name: 'flow-node-result-image' }));
+  fireEvent.click(await screen.findByRole('button', { name: '分享 成图' }));
+  const dialog = await screen.findByRole('dialog', { name: '分享到团队库' });
+  expect(dialog.querySelector('img')).toHaveAttribute('src', '/media');
+});
+
+it('reproduces a team asset from a reminder action, moves the group as one and reports warnings', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(blockedCanvas());
+  vi.mocked(adoptTeamAsset).mockResolvedValue({ asset: generationAsset, created: true });
+  const remote = reproducedDocument({ warnings: ['没有带上遮罩（1 份）'] });
+  vi.mocked(reproduceIntoCanvas).mockResolvedValue(remote);
+  await renderReadyCanvas();
+  expect(dispatchReproduce()).toBe(true);
+  await waitFor(() => expect(reproduceIntoCanvas).toHaveBeenCalledWith(expect.objectContaining({
+    projectId: 'canvas-one', assetId: 'ca-gen', alias: 'main', model: 'gpt-image-2', documentRevision: 7,
+  })));
+  expect(adoptTeamAsset).toHaveBeenCalledWith('lib_0123456789abcdef', 'ta-gen', 'canvas-one');
+  expect(await screen.findByText('没有带上遮罩（1 份）')).toBeInTheDocument();
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(3));
+  const saved = lastSavedDocument()!;
+  expect(saved.connections).toHaveLength(1);
+  expect(saved.content_versions).toHaveProperty('v-ref-1');
+  expect(saved.nodes.find(node => node.id === 'blocker')!.position).toEqual({ x: 40, y: 40 });
+  expect(saved.nodes.find(node => node.id === 'config-1')!.position).not.toEqual({ x: 456, y: 40 });
+  expect(relativeLayout(saved.nodes, ['ref-1'])).toEqual(relativeLayout(remote.nodes, ['ref-1']));
+});
+
+it('keeps two 9:16 references stacked in the left column when the group has to move', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(blockedCanvas());
+  vi.mocked(adoptTeamAsset).mockResolvedValue({ asset: generationAsset, created: true });
+  const remote = reproducedDocument({ width: 900, height: 1600, references: 2 });
+  vi.mocked(reproduceIntoCanvas).mockResolvedValue(remote);
+  await renderReadyCanvas();
+  dispatchReproduce();
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(4));
+  const saved = lastSavedDocument()!;
+  expect(relativeLayout(saved.nodes, ['ref-1', 'ref-2'])).toEqual(relativeLayout(remote.nodes, ['ref-1', 'ref-2']));
+  const [first, second] = ['ref-1', 'ref-2'].map(id => saved.nodes.find(node => node.id === id)!.position);
+  expect(second.x).toBe(first.x);
+});
+
+it('reproduces from the asset panel and names a model this machine lacks', async () => {
+  const missingModel: CreationAsset = {
+    ...generationAsset,
+    content: { ...generationAsset.content, snapshot: {
+      ...(generationAsset.content as Extract<CreationAsset['content'], { kind: 'generation' }>).snapshot,
+      model: 'flux-pro', provider: 'bfl', alias: 'bfl',
+    } } as CreationAsset['content'],
+  };
+  vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [missingModel] });
+  vi.mocked(markCreationAssetUsed).mockResolvedValue(missingModel);
+  vi.mocked(reproduceIntoCanvas).mockResolvedValue(reproducedDocument());
+  await renderReadyCanvas();
+  fireEvent.click(screen.getByRole('button', { name: '媒体资产' }));
+  fireEvent.click(await screen.findByRole('button', { name: '复刻' }));
+  await waitFor(() => expect(reproduceIntoCanvas).toHaveBeenCalledWith(expect.objectContaining({
+    assetId: 'ca-gen', alias: null, model: null,
+  })));
+  expect(await screen.findByText('本机没有 flux-pro')).toBeInTheDocument();
+});
+
+it('reloads the canvas and offers a retry when reproduce hits a revision conflict', async () => {
+  vi.mocked(adoptTeamAsset).mockResolvedValue({ asset: generationAsset, created: false });
+  vi.mocked(reproduceIntoCanvas)
+    .mockRejectedValueOnce(new ApiError('复刻到画布失败', { status: 409, code: 'revision_conflict' }))
+    .mockResolvedValueOnce(reproducedDocument());
+  await renderReadyCanvas();
+  vi.mocked(getCanvasDocument).mockResolvedValue({ ...emptyDocument, revision: 9 });
+  dispatchReproduce();
+  fireEvent.click(await screen.findByRole('button', { name: '重试' }));
+  await waitFor(() => expect(reproduceIntoCanvas).toHaveBeenCalledTimes(2));
+  expect(getCanvasDocument).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(reproduceIntoCanvas).mock.calls[1][0].documentRevision).toBe(9);
+});
+
+it.each([
+  ['a 409 without the revision_conflict code', new ApiError('复刻到画布失败：冲突', { status: 409, code: null })],
+  ['a broken asset', new ApiError('复刻到画布失败：资产已损坏', { status: 500, code: 'asset_state_broken' })],
+])('reports %s without reloading or offering a retry', async (_label, failure) => {
+  vi.mocked(adoptTeamAsset).mockResolvedValue({ asset: generationAsset, created: false });
+  vi.mocked(reproduceIntoCanvas).mockRejectedValueOnce(failure);
+  await renderReadyCanvas();
+  dispatchReproduce();
+  expect(await screen.findByText(failure.message)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+  expect(getCanvasDocument).toHaveBeenCalledTimes(1);
+});
+
+it('holds a reminder «reproduce» until the canvas has loaded', async () => {
+  let loadCanvas: (document: CanvasDocument) => void = () => undefined;
+  vi.mocked(getCanvasDocument).mockReturnValueOnce(new Promise(resolve => { loadCanvas = resolve; }));
+  vi.mocked(adoptTeamAsset).mockResolvedValue({ asset: generationAsset, created: true });
+  vi.mocked(reproduceIntoCanvas).mockResolvedValue(reproducedDocument());
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  expect(dispatchReproduce()).toBe(true);
+  await act(async () => undefined);
+  expect(adoptTeamAsset).not.toHaveBeenCalled();
+  await act(async () => loadCanvas(emptyDocument));
+  await waitFor(() => expect(reproduceIntoCanvas).toHaveBeenCalledWith(expect.objectContaining({ documentRevision: 7 })));
+  expect(adoptTeamAsset).toHaveBeenCalledOnce();
+});
+
+it('opens the team tab for a reminder «look» action', async () => {
+  vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
+  vi.mocked(listTeamLibraries).mockResolvedValue([]);
+  await renderReadyCanvas();
+  act(() => {
+    dispatchTeamAssetAction({ library_id: 'lib_0123456789abcdef', asset_id: 'ta-raw', action: 'open' });
+  });
+  expect(await screen.findByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(screen.getByRole('button', { name: '媒体' }));
+  expect(screen.getByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'false');
+  act(() => {
+    dispatchTeamAssetAction({ library_id: 'lib_0123456789abcdef', asset_id: 'ta-raw', action: 'open' });
+  });
+  await waitFor(() => expect(screen.getByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true'));
+});
+
+it('opens the reminder «look» action on the library it came from', async () => {
+  vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
+  const view = (library_id: string, name: string) => ({
+    library_id, project_id: 'canvas-one', name, mount_path: '/x', mounted_at: '', reachable: true, asset_count: 0, scanned_at: null,
+  });
+  vi.mocked(listTeamLibraries).mockResolvedValue([view('lib_other', '场景参考'), view('lib_0123456789abcdef', '角色参考')]);
+  vi.mocked(listTeamAssets).mockResolvedValue({ entries: [], next_cursor: null });
+  await renderReadyCanvas();
+  act(() => {
+    dispatchTeamAssetAction({ library_id: 'lib_0123456789abcdef', asset_id: 'ta-raw', action: 'open' });
+  });
+  await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveValue('lib_0123456789abcdef'));
+});
+
+it('does not look up related recipes when inserting the dropped asset fails', async () => {
+  vi.mocked(adoptTeamAsset).mockResolvedValue({
+    asset: {
+      asset_id: 'ca-raw', kind: 'media', title: 'castle', tags: [], created_at: '', updated_at: '', last_used_at: null,
+      project_ids: [], content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: 'f'.repeat(64), filename: 'x.png' },
+    },
+    created: true,
+  });
+  vi.mocked(insertCreationAssetIntoCanvas).mockRejectedValueOnce(new Error('插入失败'));
+  await renderReadyCanvas();
+  fireEvent.click(screen.getByRole('button', { name: 'simulate team asset drop' }));
+  expect(await screen.findByText('插入失败')).toBeInTheDocument();
+  expect(listRelatedTeamAssets).not.toHaveBeenCalled();
+});
+
+it('opens the team tab from «look» even after the prompt panel it was suggested under is closed', async () => {
+  const sha = 'f'.repeat(64);
+  vi.mocked(adoptTeamAsset).mockResolvedValue({
+    asset: {
+      asset_id: 'ca-raw', kind: 'media', title: 'castle', tags: [], created_at: '', updated_at: '', last_used_at: null,
+      project_ids: [], content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: sha, filename: 'x.png' },
+    },
+    created: true,
+  });
+  vi.mocked(insertCreationAssetIntoCanvas).mockResolvedValue({ ...emptyDocument, revision: 8 });
+  const related = { library_id: 'lib_0123456789abcdef', library_name: '角色参考', entry: {} as never };
+  vi.mocked(listRelatedTeamAssets).mockResolvedValue([related]);
+  vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
+  vi.mocked(listTeamLibraries).mockResolvedValue([]);
+  await renderReadyCanvas();
+  fireEvent.click(screen.getByRole('button', { name: '提示词资产' }));
+  expect(await screen.findByRole('complementary', { name: '创作资产' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'simulate team asset drop' }));
+  expect(await screen.findByText('有 1 条相关配方')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '关闭创作资产' }));
+  await waitFor(() => expect(screen.queryByRole('complementary', { name: '创作资产' })).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: '看看' }));
+  expect(await screen.findByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true');
+});
+
+it('suggests related recipes after dropping a raw team asset and opens them', async () => {
+  const sha = 'f'.repeat(64);
+  vi.mocked(adoptTeamAsset).mockResolvedValue({
+    asset: {
+      asset_id: 'ca-raw', kind: 'media', title: 'castle', tags: [], created_at: '', updated_at: '', last_used_at: null,
+      project_ids: [], content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: sha, filename: 'x.png' },
+    },
+    created: true,
+  });
+  vi.mocked(insertCreationAssetIntoCanvas).mockResolvedValue({ ...emptyDocument, revision: 8 });
+  const related = { library_id: 'lib_0123456789abcdef', library_name: '角色参考', entry: {} as never };
+  vi.mocked(listRelatedTeamAssets).mockResolvedValue([related, related]);
+  vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
+  vi.mocked(listTeamLibraries).mockResolvedValue([]);
+  await renderReadyCanvas();
+  fireEvent.click(screen.getByRole('button', { name: 'simulate team asset drop' }));
+  expect(await screen.findByText('有 2 条相关配方')).toBeInTheDocument();
+  expect(listRelatedTeamAssets).toHaveBeenCalledWith('canvas-one', sha);
+  vi.mocked(listRelatedTeamAssets).mockClear();
+  fireEvent.click(screen.getByRole('button', { name: '看看' }));
+  expect(await screen.findByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true');
+  await waitFor(() => expect(listRelatedTeamAssets).toHaveBeenCalledWith('canvas-one', sha));
 });

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { connectionFetch, useConnectionState } from '@/api/connection';
 import { readServerEvents } from '@/api/sse';
+import type { TeamLibraryChangeEvent } from '@/schema/teamLibrary';
 
 export interface JobChangedPayload {
   job_id?: string;
@@ -19,6 +20,8 @@ interface UseSSEOptions {
   onJobChanged?: (data: JobChangedPayload) => void;
   /** 画布文档落盘（浏览器保存、Agent 经 MCP 改动都算）→ {project_id, revision}；只发回调，不触发全局刷新信号。 */
   onCanvasDocumentChanged?: (data: CanvasDocumentChangedPayload) => void;
+  /** 团队库索引有条目增删改（watcher 重扫后按 diff 逐条广播）；只发回调，不触发全局刷新信号。 */
+  onTeamLibraryChanged?: (event: TeamLibraryChangeEvent) => void;
   /** 连接（含重连）成功时回调 —— 全量刷新兜底，覆盖断连期间丢失的事件。 */
   onConnect?: () => void;
 }
@@ -32,6 +35,8 @@ export function useSSE(options?: UseSSEOptions): number {
   onJobChangedRef.current = options?.onJobChanged;
   const onCanvasDocumentChangedRef = useRef(options?.onCanvasDocumentChanged);
   onCanvasDocumentChangedRef.current = options?.onCanvasDocumentChanged;
+  const onTeamLibraryChangedRef = useRef(options?.onTeamLibraryChanged);
+  onTeamLibraryChangedRef.current = options?.onTeamLibraryChanged;
   const onConnectRef = useRef(options?.onConnect);
   onConnectRef.current = options?.onConnect;
 
@@ -62,6 +67,9 @@ export function useSSE(options?: UseSSEOptions): number {
           }
           if (event === 'canvas-document-changed') {
             try { onCanvasDocumentChangedRef.current?.(JSON.parse(data) as CanvasDocumentChangedPayload); } catch { /* Malformed payload: the next save or reload resyncs. */ }
+          }
+          if (event === 'team-library-changed') {
+            try { onTeamLibraryChangedRef.current?.(JSON.parse(data) as TeamLibraryChangeEvent); } catch { /* Malformed payload: a missed reminder is harmless. */ }
           }
         }, controller.signal);
       } catch { /* Reconnect only while this connection generation remains mounted. */ }

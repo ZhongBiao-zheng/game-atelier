@@ -282,3 +282,37 @@ def test_pairing_and_media_endpoints_are_registered_control_routes(app):
     from viewer_server.connection_middleware import _CONTROL_ROUTES
     assert {("POST", "/api/connection/pairings"), ("POST", "/api/connection/pair"),
             ("POST", "/api/connection/media-token")} <= _CONTROL_ROUTES
+
+
+def _take_lease(client, client_id):
+    client.headers["X-Atelier-Client"] = client_id
+    response = client.post(
+        "/api/connection/editor-lease", json={"client_id": client_id, "takeover": True}
+    )
+    assert response.status_code == 200, response.text
+
+
+def test_site_session_cannot_mount_team_library_but_can_list(local, site, tmp_path):
+    """挂载 = 让服务往本机任意目录写清单并整棵扫描，和 folder-picker 一样只给本机页面。"""
+    folder = tmp_path / "lib"
+    folder.mkdir()
+    body = {"project_id": "canvas-1", "path": str(folder), "name": None}
+    pair(local, site)
+    _take_lease(local, "local-tab")
+    assert local.put("/api/profile", json={"display_name": "老王"}).status_code == 200
+
+    _take_lease(site, "site-tab")
+    denied = site.post("/api/team-libraries", json=body)
+    assert denied.status_code == 403, denied.text
+    assert denied.json()["error"]["code"] == "CAPABILITY_DENIED"
+    assert not (folder / ".atelier-library.json").exists()
+    assert site.get("/api/team-libraries", params={"project_id": "canvas-1"}).status_code == 200
+
+    _take_lease(local, "local-tab")
+    created = local.post("/api/team-libraries", json=body)
+    assert created.status_code == 201, created.text
+    library_id = created.json()["library_id"]
+    _take_lease(site, "site-tab")
+    assert site.post(f"/api/team-libraries/{library_id}/rescan", json={}).status_code == 200
+    listed = site.get("/api/team-libraries", params={"project_id": "canvas-1"})
+    assert [row["library_id"] for row in listed.json()] == [library_id]

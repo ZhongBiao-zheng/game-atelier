@@ -2,10 +2,7 @@
 name: ui-anchor
 version: 1.0.0
 description: |
-  游戏 UI 设计的策划锚阶段：对话式生成项目三锚文档（gdd / prd / interaction），
-  交叉检查一致后停在批准门。三文档 approved 是 UI 页面生图的正式门禁。
-  用户要写策划文档 / PRD / 交互逻辑、为 UI 生成做准备，或调用
-  /game-atelier:ui-anchor 时使用；已有外部 GDD 时只补缺不重写。
+  为 game-atelier 项目写或补齐 UI 前置三文档（gdd、prd、interaction），交叉检查后请画师批准。用户要写 PRD、交互逻辑，或为 UI 出图做准备时用；已有外部 GDD 时只补缺。
 allowed-tools:
   - Bash
   - Read

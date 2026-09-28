@@ -301,7 +301,8 @@ export function PromptInput({
   const provider = visibleProviders.find((item) => item.alias === providerAlias) ?? visibleProviders[0];
   const providerDisplayName = providerName(provider);
   const models = (provider?.models ?? []).filter((m) => modelModality(m, provider) === wantedModality);
-  const selectedModel = models.find((item) => item.id === model) ?? models[0];
+  // 模型不在当前列表时模型位空着、不能生成，不偷偷换成第一个模型：换类型后的收敛由上层做。
+  const selectedModel = models.find((item) => item.id === model);
   const isOmni = isVideo && videoMode === 'omni' && Boolean(videoCaps);
   // @引用开放给两类入口：视频「全能参考」(omni)，以及图片图生图（MJ 除外）。@ 提交时只剩
   // 「图N」字面量（见 serializeMentions），能不能吃到取决于模型是否按输入顺序理解序号：
@@ -1142,7 +1143,9 @@ export function PromptInput({
                     aria-selected={item.alias === provider?.alias}
                     onClick={() => {
                       onProviderChange?.(item.alias);
-                      onModelChange?.(item.models[0]?.id ?? '');
+                      onModelChange?.(
+                        item.models.find((m) => modelModality(m, item) === wantedModality)?.id ?? '',
+                      );
                       setOpenPanel(null);
                     }}
                     className="flex shrink-0 h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
@@ -1164,7 +1167,7 @@ export function PromptInput({
               onClick={() => setOpenPanel(openPanel === 'model' ? null : 'model')}
               disabled={!provider || models.length === 0}
             >
-              <Box size={14} aria-hidden /> {selectedModel ? selectedModel.name : '未配置模型'}
+              <Box size={14} aria-hidden /> {selectedModel ? selectedModel.name : models.length > 0 ? '选择模型' : '未配置模型'}
             </ControlButton>
             <ToolbarPopover
               open={openPanel === 'model'}

@@ -515,3 +515,37 @@ def test_viewport_only_save_keeps_revision_but_persists_viewport(client):
     })
     assert changed.status_code == 200, changed.json()
     assert changed.json()["revision"] == current["revision"] + 1
+
+
+def test_cover_skips_hidden_image_nodes(client):
+    """打码的节点不能被挑去当画布列表封面——封面不走节点的模糊显示。"""
+    project_id = _create_project(client)["project_id"]
+    versions = []
+    for name in ("shown.png", "secret.png"):
+        revision = _document(client, project_id)["revision"]
+        uploaded = client.post(
+            f"/api/canvas/projects/{project_id}/uploads",
+            files={"file": (name, _PNG, "image/png")},
+            data={"expected_revision": str(revision)},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        versions.append(uploaded.json()["version"]["version_id"])
+    document = _document(client, project_id)
+    nodes = [
+        {
+            "id": node_id,
+            "type": "image",
+            "title": node_id,
+            "position": {"x": 0, "y": 0},
+            "hidden": hidden,
+            "data": {"current_version_id": version_id},
+        }
+        for node_id, version_id, hidden in (
+            ("shown", versions[0], False),
+            ("secret", versions[1], True),
+        )
+    ]
+    saved = _save_document(client, project_id, {**document, "nodes": nodes})
+    assert saved.status_code == 200, saved.text
+    listed = client.get("/api/canvas/projects").json()["projects"]
+    assert listed[0]["cover"] == {"version_id": versions[0]}

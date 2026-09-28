@@ -4,7 +4,22 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
 import { Studio } from './Studio';
-import { clearStudioDraft } from './studioDraft';
+import { clearStudioDraft, readStudioDraft, writeStudioDraft, type StudioDraft } from './studioDraft';
+import type { CreationAsset, GenerationRecipe } from '@/schema/creationAssets';
+import { dispatchTeamAssetAction } from '@/lib/teamAssetActions';
+
+// 透传真实面板，只记下 Studio 传进来的 props：复刻入口的按钮在面板里（另一个 Task），
+// Studio 侧只需验证拿到 onReproduce 之后怎么填输入框。
+const assetPanelProps = vi.hoisted(() => ({ current: null as null | Record<string, any> }));
+vi.mock('@/components/assets/CreationAssetPanel', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/assets/CreationAssetPanel')>();
+  const { createElement, forwardRef } = await import('react');
+  const Recording = forwardRef<unknown, Record<string, any>>((props, ref) => {
+    assetPanelProps.current = props;
+    return createElement(actual.CreationAssetPanel as any, { ...props, ref });
+  });
+  return { ...actual, CreationAssetPanel: Recording };
+});
 import * as connection from '@/api/connection';
 import { createTestEventStream } from '@/test/eventStream';
 import { promptVariableToken, resolvePromptVariables } from '@/lib/promptVariables';
@@ -228,6 +243,42 @@ describe('Studio', () => {
       'px-4',
       'pb-4',
     );
+  });
+
+  it('媒体资产按类型分流：图片模式点「使用」音频不进参考图，给一句提示', async () => {
+    const audio = {
+      asset_id: 'asset-bgm', kind: 'media', title: '战鼓', tags: [], project_ids: [],
+      created_at: '2026-09-20T00:00:00Z', updated_at: '2026-09-20T00:00:00Z', last_used_at: null,
+      content: { kind: 'media', path: 'creation-assets/blobs/a.mp3', mime_type: 'audio/mpeg', bytes: 3, sha256: 'a'.repeat(64), filename: 'drum.mp3' },
+    };
+    const image = { ...audio, asset_id: 'asset-img', title: '城堡', content: { ...audio.content, mime_type: 'image/png', filename: 'castle.png' } };
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (href.startsWith('/api/canvas/project-options')) return Promise.resolve({ ok: true, json: async () => [] } as any);
+      if (href.startsWith('/api/creation-assets?')) return Promise.resolve({ ok: true, json: async () => ({ revision: 1, assets: [audio, image] }) } as any);
+      if (href === '/api/creation-assets/asset-bgm/use') return Promise.resolve({ ok: true, json: async () => audio } as any);
+      if (href === '/api/creation-assets/asset-img/use') return Promise.resolve({ ok: true, json: async () => image } as any);
+      if (href === '/api/creation-assets/asset-img/content') return Promise.resolve({ ok: true, blob: async () => new Blob(['png'], { type: 'image/png' }) } as any);
+      return fallback(url, init);
+    });
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    fireEvent.click(screen.getByLabelText('打开创作资产'));
+    fireEvent.click(await screen.findByRole('button', { name: /媒体/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /战鼓/ }));
+    fireEvent.click(screen.getByRole('button', { name: '使用' }));
+    expect(await screen.findByText('当前模式不支持音频参考')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/creation-assets/asset-bgm/content')).toBe(false);
+
+    fireEvent.click(screen.getByLabelText('打开创作资产'));
+    fireEvent.click(await screen.findByRole('button', { name: /媒体/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /城堡/ }));
+    fireEvent.click(screen.getByRole('button', { name: '使用' }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/creation-assets/asset-img/content')).toBe(true));
+    await waitFor(() => expect(screen.queryByLabelText('添加参考图')).not.toBeInTheDocument());
   });
 
   it('资产入口与展开态生成按钮同尺寸、同底部高度', () => {
@@ -2095,5 +2146,722 @@ describe('Studio 图卡编辑导入参考图', () => {
     expect(screen.queryByRole('alert')).toBeNull();
     // 空参考图槽还在（没有塞进半个坏文件）
     expect(screen.getByLabelText('添加参考图')).toBeInTheDocument();
+  });
+});
+
+describe('Studio 分享生成结果到团队库', () => {
+  function mockShareEndpoints() {
+    const fetchMock = mockCompletedBatchAndKeys();
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (href === '/api/profile') {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ display_name: '老王' }) } as any);
+      }
+      if (href === '/api/team-libraries') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => [{
+            library_id: 'lib-art', project_id: 'canvas-1', name: '美术库', mount_path: '/tmp/art',
+            mounted_at: '2026-09-20T00:00:00Z', reachable: true, asset_count: 0, scanned_at: null,
+          }],
+        } as any);
+      }
+      if (href === '/api/team-libraries/lib-art/share') {
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          json: async () => ({
+            id: 'ta_1', kind: 'generation', title: 't', author: '老王', tags: [], mime_type: 'image/png',
+            bytes: 1, relative_path: 'shared/老王/ta_1', sha256: null, updated_at: '2026-09-23T00:00:00Z',
+            reproducible: true, status: 'ready', model: 'doubao-seedream-4-5-251128', cost_cny: 0.63,
+          }),
+        } as any);
+      }
+      return fallback(url, init);
+    });
+    return fetchMock;
+  }
+
+  it('点第 2 张的分享：来源是该 job 的 output_index 1，默认标题取提示词前 24 字，成功后提示库名', async () => {
+    const fetchMock = mockShareEndpoints();
+    renderStudio();
+
+    fireEvent.click(await screen.findByLabelText('分享生成结果 2'));
+    expect(await screen.findByText('分享到团队库')).toBeInTheDocument();
+    expect(screen.getByLabelText('标题')).toHaveValue(
+      '一个身披白床单的幽灵般的身影在上海某城市公园的儿童游乐场玩耍，她戴着太阳镜，没有眼。背景是万圣节夜森。'.slice(0, 24),
+    );
+    const preview = document.querySelector('img[src*="v2.png"]');
+    expect(preview).not.toBeNull();
+
+    const shareButton = screen.getByRole('button', { name: '分享' });
+    await waitFor(() => expect(shareButton).not.toBeDisabled());
+    fireEvent.click(shareButton);
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/team-libraries/lib-art/share')).toBe(true));
+    const call = fetchMock.mock.calls.find(([url]) => url === '/api/team-libraries/lib-art/share')!;
+    expect(JSON.parse(String(call[1]!.body)).source).toEqual({
+      kind: 'job_output', job_id: 'job-studio-1', output_index: 1,
+    });
+    expect(await screen.findByText('已分享到 美术库')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('分享到团队库')).not.toBeInTheDocument());
+  });
+});
+
+function recipe(overrides: Partial<GenerationRecipe> = {}): GenerationRecipe {
+  return {
+    mode: 'image',
+    model: 'gpt-image-2',
+    provider: 'openai',
+    alias: 'oa',
+    final_prompt: '橘猫坐在窗台',
+    draft_prompt: null,
+    params: { size_mode: 'ratio', ratio: '3:4', resolution: '2K', n: 2 },
+    inputs: [{ order: 0, role: 'reference', kind: 'image', sha256: 'a'.repeat(64), mime_type: 'image/png' }],
+    cost_cny: 0.21,
+    cost_basis: 'actual',
+    submitted_at: '2026-09-20T10:00:00Z',
+    ...overrides,
+  };
+}
+
+function generationAsset(snapshot: GenerationRecipe): CreationAsset {
+  return {
+    asset_id: 'gen-1', kind: 'generation', title: '窗台橘猫', tags: [], project_ids: [],
+    created_at: '2026-09-20T00:00:00Z', updated_at: '2026-09-20T00:00:00Z', last_used_at: null,
+    content: {
+      kind: 'generation',
+      media: { kind: 'media', path: 'creation-assets/blobs/b.png', mime_type: 'image/png', bytes: 3, sha256: 'b'.repeat(64), filename: 'cat.png' },
+      snapshot,
+    },
+  };
+}
+
+function mockPanelEndpoints(keys?: unknown, inputResponse?: (order: number) => Promise<any>) {
+  const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+  const fallback = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+    const href = String(url);
+    if (keys === 'never' && href === '/api/keys') return new Promise(() => {});
+    if (keys && href === '/api/keys') return Promise.resolve({ ok: true, json: async () => keys } as any);
+    if (inputResponse && href.startsWith('/api/creation-assets/gen-1/inputs/')) {
+      return inputResponse(Number(href.split('/').pop()));
+    }
+    if (href.startsWith('/api/canvas/project-options')) return Promise.resolve({ ok: true, json: async () => [] } as any);
+    if (href.startsWith('/api/creation-assets?')) return Promise.resolve({ ok: true, json: async () => ({ revision: 1, assets: [] }) } as any);
+    if (href.startsWith('/api/creation-assets/gen-1/inputs/')) {
+      const order = Number(href.split('/').pop());
+      const type = order === 1 ? 'video/mp4' : 'image/png';
+      return Promise.resolve({ ok: true, blob: async () => new Blob(['ref'], { type }) } as any);
+    }
+    return fallback(url, init);
+  });
+  return fetchMock;
+}
+
+async function openPanelAndReproduce(asset: CreationAsset) {
+  fireEvent.click(screen.getByLabelText('打开创作资产'));
+  await waitFor(() => expect(assetPanelProps.current?.onReproduce).toBeTypeOf('function'));
+  await act(async () => { await assetPanelProps.current!.onReproduce(asset); });
+}
+
+describe('Studio 复刻生成资产', () => {
+  it('输入框为空时直接填入提示词、模型、参数与参考图，来源记为资产标题', async () => {
+    const fetchMock = mockPanelEndpoints();
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    await openPanelAndReproduce(generationAsset(recipe()));
+
+    const editor = screen.getByLabelText('生图 prompt');
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/creation-assets/gen-1/inputs/0')).toBe(true);
+    expect(screen.getByTestId('reference-images-panel').querySelector('img')).not.toBeNull();
+    expect(screen.getByLabelText('选择模型')).toHaveTextContent('GPT Image 2');
+    expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('3:4');
+    expect(readStudioDraft()?.promptAssetSourceTitle).toBe('窗台橘猫');
+    expect(readStudioDraft()?.count).toBe(2);
+    expect(screen.queryByText(/本机没有/)).not.toBeInTheDocument();
+  });
+
+  it('已有输入时先确认覆盖；取消不动，确认后覆盖', async () => {
+    const fetchMock = mockPanelEndpoints();
+    renderStudio();
+    await screen.findByText('火山引擎');
+    const editor = screen.getByLabelText('生图 prompt');
+    typePrompt(editor, '我正在写的');
+
+    await openPanelAndReproduce(generationAsset(recipe()));
+    expect(await screen.findByText('覆盖当前输入？')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    await waitFor(() => expect(screen.queryByText('覆盖当前输入？')).not.toBeInTheDocument());
+    expect(editor.textContent).toContain('我正在写的');
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/inputs/'))).toBe(false);
+
+    await act(async () => { await assetPanelProps.current!.onReproduce(generationAsset(recipe())); });
+    fireEvent.click(await screen.findByRole('button', { name: '覆盖' }));
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    expect(editor.textContent).not.toContain('我正在写的');
+  });
+
+  it('本机没有配方模型：模型位空着、生成禁用、常驻提示连同配方提示；选了模型后提示消失', async () => {
+    mockPanelEndpoints();
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    await openPanelAndReproduce(generationAsset(recipe({
+      model: 'seedream-9',
+      provider: 'seedream',
+      alias: 'far-away',
+      inputs: [
+        { order: 0, role: 'reference', kind: 'image', sha256: 'a'.repeat(64), mime_type: 'image/png' },
+        { order: 1, role: 'mask', kind: 'image', sha256: 'c'.repeat(64), mime_type: 'image/png' },
+      ],
+    })));
+
+    const editor = screen.getByLabelText('生图 prompt');
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    const notice = screen.getByTestId('studio-recipe-notice');
+    expect(notice).toHaveTextContent('本机没有 seedream-9');
+    expect(notice).toHaveTextContent('遮罩参考未带入');
+    expect(screen.getByLabelText('选择模型')).toHaveTextContent('选择模型');
+    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText('选择模型'));
+    fireEvent.click(screen.getByRole('option', { name: /图片 4.7/ }));
+    await waitFor(() => expect(screen.queryByText('本机没有 seedream-9')).not.toBeInTheDocument());
+    expect(screen.getByLabelText('提交生成')).not.toBeDisabled();
+  });
+
+  it('带参考视频的视频配方复刻后进全能参考，参考图与参考视频都不丢', async () => {
+    const fetchMock = mockPanelEndpoints({
+      default_alias: 'tokendance',
+      keys: [{
+        alias: 'tokendance', provider: 'tokendance', access_key: 'key', secret_key: null,
+        capabilities: [], modalities: ['video'],
+        models: [{ name: 'Seedance 2.0 Mini', id: 'seedance-2.0-mini', protocol: 'seedance' }],
+        notes: '', created_at: '2026-08-22T00:00:00Z', is_default: true,
+      }],
+    });
+    renderStudio();
+    await screen.findByLabelText('选择模型');
+
+    await openPanelAndReproduce(generationAsset(recipe({
+      mode: 'video',
+      model: 'seedance-2.0-mini',
+      provider: 'tokendance',
+      alias: 'tokendance',
+      final_prompt: '参考@图片1 和@视频1 做个转场',
+      params: { duration: 5, resolution: '720p', ratio: '16:9' },
+      inputs: [
+        { order: 0, role: 'reference', kind: 'image', sha256: 'a'.repeat(64), mime_type: 'image/png' },
+        { order: 1, role: 'reference', kind: 'video', sha256: 'd'.repeat(64), mime_type: 'video/mp4' },
+      ],
+    })));
+
+    await waitFor(() => {
+      const panel = screen.getByTestId('reference-images-panel');
+      expect(panel.textContent).toContain('图1');
+      expect(panel.textContent).toContain('视频1');
+    });
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/creation-assets/gen-1/inputs/1')).toBe(true);
+    expect(readStudioDraft()?.videoMode).toBe('omni');
+    expect(readStudioDraft()?.referenceVideos).toHaveLength(1);
+  });
+});
+
+const IMAGE_AND_VIDEO_KEYS = {
+  default_alias: 'volc',
+  keys: [
+    {
+      alias: 'volc', provider: 'seedream', access_key: 'ark...key', secret_key: null, capabilities: ['portrait'],
+      models: [
+        { name: '图片 5.0 Lite', id: 'doubao-seedream-5-0-260128' },
+        { name: '图片 4.7', id: 'doubao-seedream-4-5-251128' },
+      ],
+      notes: '', created_at: '2026-05-25T00:00:00Z', is_default: true,
+    },
+    {
+      alias: 'tokendance', provider: 'tokendance', access_key: 'key', secret_key: null,
+      capabilities: [], modalities: ['video'],
+      models: [{ name: 'Seedance 2.0', id: 'doubao-seedance-2-0-260128', protocol: 'seedance' }],
+      notes: '', created_at: '2026-08-22T00:00:00Z', is_default: false,
+    },
+  ],
+};
+
+function baseDraft(overrides: Partial<StudioDraft> = {}): StudioDraft {
+  return {
+    providerAlias: 'volc', model: 'doubao-seedream-5-0-260128', kind: 'image', promptText: '',
+    promptAssetSourceTitle: null, referenceImages: [], referenceVideos: [], referenceAudios: [],
+    videoFrames: { first: null, last: null }, mjRefs: { image: [], sref: [], cref: [], oref: [] },
+    mjParams: { ...(readStudioDraft()?.mjParams ?? {}) } as StudioDraft['mjParams'],
+    sizeParams: {}, count: 1, quality: 'low',
+    videoMode: 'firstlast', duration: 5, videoResolution: '720p', videoRatio: '16:9', videoQuality: 'std',
+    videoCount: 1, generateAudio: false,
+    ...overrides,
+  };
+}
+
+function pickKind(label: '图片生成' | '视频生成') {
+  fireEvent.click(screen.getByLabelText('选择生成模式'));
+  fireEvent.click(screen.getByRole('option', { name: label }));
+}
+
+describe('Studio 模型选择按模态收敛（界面显示 = 实际提交）', () => {
+  it.each([false, true])('视频切回图片后提交的 model 就是界面显示的模型，compact=%s', async (compact) => {
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      if (url === '/api/keys') return Promise.resolve({ ok: true, json: async () => IMAGE_AND_VIDEO_KEYS } as any);
+      if (url === '/api/studio/jobs') {
+        return Promise.resolve({ ok: true, json: async () => ({ job_id: 'job-x', status: 'pending', submitted_at: '2026-09-23T00:00:00Z' }) } as any);
+      }
+      return fallback(url, init);
+    });
+    const { hook } = memoryLocation({ path: compact ? '/' : '/studio', static: true });
+    render(<Router hook={hook}><Studio compact={compact} /></Router>);
+    await waitFor(() => expect(screen.getByLabelText('选择模型')).toHaveTextContent('图片 5.0 Lite'));
+
+    pickKind('视频生成');
+    await waitFor(() => expect(screen.getByLabelText('选择模型')).toHaveTextContent('Seedance 2.0'));
+    pickKind('图片生成');
+    await waitFor(() => expect(screen.getByLabelText('选择模型')).toHaveTextContent('图片 5.0 Lite'));
+
+    typePrompt(screen.getByLabelText('生图 prompt'), '一座城堡');
+    await waitFor(() => expect(screen.getByLabelText('提交生成')).not.toBeDisabled());
+    fireEvent.click(screen.getByLabelText('提交生成'));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
+    const payload = JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs')![1]!.body));
+    expect(payload.alias).toBe('volc');
+    expect(payload.model).toBe('doubao-seedream-5-0-260128');
+  });
+});
+
+describe('Studio 分享：边界', () => {
+  function mockJobs(jobs: unknown[], libraries: unknown[] = []) {
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (href === '/api/jobs') return Promise.resolve({ ok: true, json: async () => jobs } as any);
+      if (href === '/api/profile') return Promise.resolve({ ok: true, status: 200, json: async () => ({ display_name: '老王' }) } as any);
+      if (href === '/api/team-libraries') return Promise.resolve({ ok: true, status: 200, json: async () => libraries } as any);
+      return fallback(url, init);
+    });
+  }
+  const studioJob = (overrides: Record<string, unknown>) => ({
+    job_id: 'job-s', character_id: '', prompt: '分享边界', submitted_at: '2026-09-23T01:00:00Z',
+    model: 'doubao-seedream-4-5-251128', params: {}, output_paths: ['/tmp/studio/job-s/v1.png'],
+    status: 'done', error: null, kind: 'image', namespace: 'studio', alias: 'volc', provider: 'seedream',
+    ...overrides,
+  });
+
+  it('没有可达团队库时点「挂载」跳到设置页', async () => {
+    mockJobs([studioJob({})]);
+    const { hook, history } = memoryLocation({ path: '/studio', record: true });
+    render(<Router hook={hook}><Studio /></Router>);
+    fireEvent.click(await screen.findByLabelText('分享生成结果 1'));
+    fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
+    expect(history).toContain('/settings');
+  });
+
+  it('视频结果分享时对话框里没有预览图', async () => {
+    mockJobs([studioJob({ kind: 'video', output_paths: ['/tmp/studio/job-s/v1.mp4'], model: 'seedance-2.0-mini' })]);
+    renderStudio();
+    fireEvent.click(await screen.findByLabelText('分享生成结果 1'));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.querySelector('img')).toBeNull();
+  });
+
+  it('归档来的角色出图记录（非 studio namespace）没有分享按钮', async () => {
+    mockJobs([studioJob({ namespace: 'character', params: { archived_from_job_id: 'job-old' } })]);
+    renderStudio();
+    expect(await screen.findByText('分享边界')).toBeInTheDocument();
+    expect(screen.queryByLabelText('分享生成结果 1')).not.toBeInTheDocument();
+  });
+});
+
+describe('Studio 复刻：边界', () => {
+  const file = (name: string, type: string) => new File(['x'], name, { type });
+
+  it.each([
+    ['首尾帧', { kind: 'video' as const, videoFrames: { first: file('f.png', 'image/png'), last: null } }],
+    ['MJ 参考', { mjRefs: { image: [], sref: [file('s.png', 'image/png')], cref: [], oref: [] } }],
+    ['参考音频', { kind: 'video' as const, videoMode: 'omni' as const, referenceAudios: [file('a.mp3', 'audio/mpeg')] }],
+  ])('只有%s、没有提示词时也先确认覆盖', async (_label, overrides) => {
+    writeStudioDraft(baseDraft(overrides));
+    mockPanelEndpoints(IMAGE_AND_VIDEO_KEYS);
+    renderStudio();
+    await waitFor(() => expect(screen.getByLabelText('选择模型')).not.toHaveTextContent('未配置模型'));
+    await openPanelAndReproduce(generationAsset(recipe({ model: 'doubao-seedream-4-5-251128', provider: 'seedream', alias: 'volc' })));
+    expect(await screen.findByText('覆盖当前输入？')).toBeInTheDocument();
+  });
+
+  it('提交真正发出后复刻提示条清掉', async () => {
+    const fetchMock = mockPanelEndpoints();
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      if (url === '/api/uploads') return Promise.resolve({ ok: true, json: async () => ({ path: '/runtime/uploads/r.png' }) } as any);
+      if (url === '/api/studio/jobs') {
+        return Promise.resolve({ ok: true, json: async () => ({ job_id: 'job-x', status: 'pending', submitted_at: '2026-09-23T00:00:00Z' }) } as any);
+      }
+      return fallback(url, init);
+    });
+    renderStudio();
+    await screen.findByText('火山引擎');
+    await openPanelAndReproduce(generationAsset(recipe({
+      inputs: [
+        { order: 0, role: 'reference', kind: 'image', sha256: 'a'.repeat(64), mime_type: 'image/png' },
+        { order: 1, role: 'mask', kind: 'image', sha256: 'c'.repeat(64), mime_type: 'image/png' },
+      ],
+    })));
+    expect(await screen.findByText('遮罩参考未带入')).toBeInTheDocument();
+
+    await waitFor(() => expect(screen.getByLabelText('提交生成')).not.toBeDisabled());
+    fireEvent.click(screen.getByLabelText('提交生成'));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
+    await waitFor(() => expect(screen.queryByText('遮罩参考未带入')).not.toBeInTheDocument());
+  });
+
+  it('参考取回失败时输入框保持原样', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    mockPanelEndpoints(undefined, async () => new Response('', { status: 404 }));
+    renderStudio();
+    await screen.findByText('火山引擎');
+    const editor = screen.getByLabelText('生图 prompt');
+    typePrompt(editor, '我正在写的');
+
+    await openPanelAndReproduce(generationAsset(recipe()));
+    fireEvent.click(await screen.findByRole('button', { name: '覆盖' }));
+    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+    expect(editor.textContent).toContain('我正在写的');
+    expect(screen.getByLabelText('选择模型')).toHaveTextContent('图片 5.0 Lite');
+  });
+
+  it('复刻取参考期间再点「重新编辑」，以后点的为准', async () => {
+    mockCompletedBatchAndKeys();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    mockPanelEndpoints(undefined, async () => {
+      await gate;
+      return { ok: true, blob: async () => new Blob(['ref'], { type: 'image/png' }) };
+    });
+    renderStudio();
+    const reEditButton = await screen.findByRole('button', { name: '重新编辑' });
+    fireEvent.click(screen.getByLabelText('打开创作资产'));
+    await waitFor(() => expect(assetPanelProps.current?.onReproduce).toBeTypeOf('function'));
+    act(() => { assetPanelProps.current!.onReproduce(generationAsset(recipe())); });
+
+    fireEvent.click(reEditButton);
+    const editor = screen.getByLabelText('生图 prompt');
+    await waitFor(() => expect(editor.textContent).toContain('一个身披白床单'));
+    await act(async () => { release(); await gate; });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(editor.textContent).toContain('一个身披白床单');
+    expect(editor.textContent).not.toContain('橘猫坐在窗台');
+  });
+
+  it('模型列表已加载但为空（没配任何 key）：照常填入，提示本机没有该模型，生成禁用', async () => {
+    const fetchMock = mockPanelEndpoints({ default_alias: null, keys: [] });
+    renderStudio();
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/keys')).toBe(true));
+    await screen.findByLabelText('选择模型');
+
+    await openPanelAndReproduce(generationAsset(recipe()));
+
+    const editor = screen.getByLabelText('生图 prompt');
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    expect(screen.queryByText('模型列表未加载')).not.toBeInTheDocument();
+    expect(readStudioDraft()?.referenceImages).toHaveLength(1);
+    expect(screen.getByTestId('studio-recipe-notice')).toHaveTextContent('本机没有 gpt-image-2');
+    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+  });
+
+  it('模型列表还没加载时不判缺模型，也先不填', async () => {
+    const fetchMock = mockPanelEndpoints('never');
+    renderStudio();
+    await openPanelAndReproduce(generationAsset(recipe()));
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByLabelText('生图 prompt').textContent).toBe('');
+    expect(screen.queryByText(/本机没有/)).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/inputs/'))).toBe(false);
+  });
+
+  it('缺模型的视频配方：alias 收敛到视频 key、模型留空，配方参数保留到选模型之后', async () => {
+    mockPanelEndpoints(IMAGE_AND_VIDEO_KEYS);
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    await openPanelAndReproduce(generationAsset(recipe({
+      mode: 'video',
+      model: 'seedance-3.0-pro',
+      provider: 'far',
+      alias: 'far',
+      final_prompt: '雪夜长街',
+      params: { duration: 10, resolution: '1080p', ratio: '21:9' },
+      inputs: [],
+    })));
+
+    await waitFor(() => expect(screen.getByTestId('studio-recipe-notice')).toHaveTextContent('本机没有 seedance-3.0-pro'));
+    await waitFor(() => expect(readStudioDraft()?.providerAlias).toBe('tokendance'));
+    expect(readStudioDraft()).toMatchObject({ model: '', kind: 'video', duration: 10, videoResolution: '1080p', videoRatio: '21:9' });
+    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText('选择模型'));
+    fireEvent.click(screen.getByRole('option', { name: /Seedance 2.0/ }));
+    await waitFor(() => expect(screen.queryByText(/本机没有/)).not.toBeInTheDocument());
+    expect(readStudioDraft()).toMatchObject({
+      providerAlias: 'tokendance',
+      model: 'doubao-seedance-2-0-260128',
+      duration: 10,
+      videoResolution: '1080p',
+      videoRatio: '21:9',
+    });
+  });
+});
+
+describe('Studio 生成结果保存为创作资产', () => {
+  function mockJobs(jobs?: unknown[]) {
+    if (!jobs) mockCompletedBatchAndKeys();
+    const fetchMock = mockPanelEndpoints();
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (jobs && href === '/api/jobs') return Promise.resolve({ ok: true, json: async () => jobs } as any);
+      if (href === '/api/creation-assets/generation/from-job') {
+        return Promise.resolve({ ok: true, status: 201, json: async () => generationAsset(recipe()) } as any);
+      }
+      return fallback(url, init);
+    });
+    return fetchMock;
+  }
+  const studioJob = (overrides: Record<string, unknown>) => ({
+    job_id: 'job-s', character_id: '', prompt: '保存边界', submitted_at: '2026-09-24T01:00:00Z',
+    model: 'doubao-seedream-4-5-251128', params: {}, output_paths: ['/tmp/studio/job-s/v1.png'],
+    status: 'done', error: null, kind: 'image', namespace: 'studio', alias: 'volc', provider: 'seedream',
+    ...overrides,
+  });
+  const fromJobBody = (fetchMock: ReturnType<typeof vi.fn>) => {
+    const call = fetchMock.mock.calls.find(([url]) => url === '/api/creation-assets/generation/from-job');
+    return call ? JSON.parse(String(call[1]!.body)) : null;
+  };
+
+  it('图片结果存成生成资产，来源是该 job 的 output_index（= 结果下标）', async () => {
+    const fetchMock = mockJobs();
+    renderStudio();
+
+    fireEvent.click(await screen.findByLabelText('保存生成结果 2 为资产'));
+    expect(assetPanelProps.current!.initialKind).toBe('media');
+    expect(await screen.findByAltText('媒体资产预览')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: '保存生成资产' }));
+
+    await waitFor(() => expect(fromJobBody(fetchMock)).not.toBeNull());
+    expect(fromJobBody(fetchMock)).toMatchObject({ job_id: 'job-studio-1', output_index: 1 });
+  });
+
+  it('视频结果也能存成生成资产，预览按视频渲染', async () => {
+    const fetchMock = mockJobs([studioJob({ kind: 'video', output_paths: ['/tmp/studio/job-s/v1.mp4'], model: 'seedance-2.0-mini' })]);
+    renderStudio();
+
+    fireEvent.click(await screen.findByLabelText('保存生成视频 1 为资产'));
+    expect((await screen.findByLabelText('媒体资产预览')).tagName).toBe('VIDEO');
+    fireEvent.click(await screen.findByRole('button', { name: '保存生成资产' }));
+
+    await waitFor(() => expect(fromJobBody(fetchMock)).not.toBeNull());
+    expect(fromJobBody(fetchMock)).toMatchObject({ job_id: 'job-s', output_index: 0 });
+  });
+
+  it('归档来的记录（非 studio namespace）只存成普通媒体', async () => {
+    mockJobs([studioJob({ namespace: 'character', params: { archived_from_job_id: 'job-old' } })]);
+    renderStudio();
+
+    fireEvent.click(await screen.findByLabelText('保存生成结果 1 为资产'));
+    expect(await screen.findByRole('button', { name: '保存媒体资产' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '保存生成资产' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Studio 响应团队资产动作', () => {
+  const CANVAS = { schema_version: 2, project_id: 'canvas-1', name: '画布一', created_at: '2026-09-20T00:00:00Z', updated_at: '2026-09-20T00:00:00Z' };
+  const CANVAS_2 = { ...CANVAS, project_id: 'canvas-2', name: '画布二' };
+  const libraryView = (library_id: string, project_id: string, name: string) => ({
+    library_id, project_id, name, mount_path: '/x', mounted_at: '', reachable: true, asset_count: 0, scanned_at: null,
+  });
+  const ok = (body: unknown) => Promise.resolve({ ok: true, status: 200, json: async () => body } as any);
+
+  /** lib-art 挂在第二个画布上；第二个画布还挂着另一个库，默认会选中它。 */
+  function mockTeamEndpoints(mounts = [libraryView('lib-art', 'canvas-2', '美术库')]) {
+    const fetchMock = mockPanelEndpoints();
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (href === '/api/team-libraries/lib-art/assets/ta_1/adopt') {
+        return ok({ asset: generationAsset(recipe()), created: true });
+      }
+      if (href === '/api/creation-assets/gen-1/use') return ok(generationAsset(recipe()));
+      if (href.startsWith('/api/canvas/project-options')) return ok([CANVAS, CANVAS_2]);
+      if (href === '/api/team-libraries') return ok(mounts);
+      if (href === '/api/team-libraries?project_id=canvas-2') {
+        return ok([libraryView('lib-other', 'canvas-2', '场景库'), libraryView('lib-art', 'canvas-2', '美术库')]);
+      }
+      if (/^\/api\/team-libraries\/[^/]+\/assets(\?|$)/.test(href)) return ok({ entries: [], next_cursor: null });
+      if (href.startsWith('/api/team-libraries')) return ok([]);
+      return fallback(url, init);
+    });
+    return fetchMock;
+  }
+
+  const adoptCalls = (fetchMock: ReturnType<typeof vi.fn>) =>
+    fetchMock.mock.calls.filter(([url]) => url === '/api/team-libraries/lib-art/assets/ta_1/adopt');
+
+  it('「复刻」：认领事件，先采用再按配方填入输入框', async () => {
+    const fetchMock = mockTeamEndpoints();
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    let claimed = false;
+    act(() => { claimed = dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'reproduce' }); });
+    expect(claimed).toBe(true);
+
+    const editor = screen.getByLabelText('生图 prompt');
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    const calls = adoptCalls(fetchMock);
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(String(calls[0][1]!.body))).toEqual({ project_id: null });
+  });
+
+  it('「看看」：打开资产面板的团队栏', async () => {
+    mockTeamEndpoints();
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    let claimed = false;
+    act(() => { claimed = dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' }); });
+    expect(claimed).toBe(true);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true'));
+    expect(screen.getByLabelText('打开创作资产')).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('「看看」：团队栏落在挂载该库的画布和该库上', async () => {
+    mockTeamEndpoints();
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' }); });
+
+    await waitFor(() => expect(screen.getByLabelText('画布项目')).toHaveValue('canvas-2'));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveValue('lib-art'));
+  });
+
+  it('「看看」：没有画布挂着这个库时只给一行提示', async () => {
+    mockTeamEndpoints([libraryView('lib-other', 'canvas-1', '场景库')]);
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' }); });
+
+    expect(await screen.findByText('没有挂载这个团队库')).toBeInTheDocument();
+    expect(screen.getByLabelText('打开创作资产')).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('「复刻」：采用后先记一次使用再填入', async () => {
+    const fetchMock = mockTeamEndpoints();
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'reproduce' }); });
+
+    const editor = screen.getByLabelText('生图 prompt');
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    const used = urls.indexOf('/api/creation-assets/gen-1/use');
+    expect(used).toBeGreaterThan(urls.indexOf('/api/team-libraries/lib-art/assets/ta_1/adopt'));
+    expect(used).toBeLessThan(urls.indexOf('/api/creation-assets/gen-1/inputs/0'));
+  });
+
+  it('「复刻」：模型列表还没加载时先记下，加载完补做', async () => {
+    const fetchMock = mockTeamEndpoints();
+    const withTeam = fetchMock.getMockImplementation()!;
+    let releaseKeys = () => {};
+    const keysGate = new Promise<void>((resolve) => { releaseKeys = resolve; });
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => (
+      String(url) === '/api/keys' ? keysGate.then(() => withTeam(url, init)) : withTeam(url, init)
+    ));
+    renderStudio();
+
+    act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'reproduce' }); });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/creation-assets/gen-1/use')).toBe(true));
+    await act(async () => { await Promise.resolve(); });
+    const editor = screen.getByLabelText('生图 prompt');
+    expect(editor.textContent).toBe('');
+
+    await act(async () => { releaseKeys(); await keysGate; });
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    expect(adoptCalls(fetchMock)).toHaveLength(1);
+  });
+
+  it('采用失败时给提示，输入框不动', async () => {
+    const fetchMock = mockTeamEndpoints();
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url) === '/api/team-libraries/lib-art/assets/ta_1/adopt') {
+        return Promise.resolve(new Response(JSON.stringify({ detail: { code: 'not_adoptable', message: '这条资产还没同步完整' } }), { status: 409 }));
+      }
+      return fallback(url, init);
+    });
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'reproduce' }); });
+    expect(await screen.findByText(/这条资产还没同步完整/)).toBeInTheDocument();
+    expect(screen.getByLabelText('生图 prompt').textContent).not.toContain('橘猫坐在窗台');
+  });
+
+  it('卸载后不再认领', async () => {
+    mockTeamEndpoints();
+    const { unmount } = renderStudio();
+    await screen.findByText('火山引擎');
+    unmount();
+    expect(dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' })).toBe(false);
+  });
+
+  it('挂载时处理一次 ?team_asset= 并替换掉查询串（不留历史条目）', async () => {
+    const fetchMock = mockTeamEndpoints();
+    const { hook, searchHook, history } = memoryLocation({
+      path: '/studio?team_asset=lib-art:ta_1&team_action=reproduce',
+      record: true,
+    });
+    render(<Router hook={hook} searchHook={searchHook}><Studio /></Router>);
+
+    const editor = await screen.findByLabelText('生图 prompt');
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    expect(history).toEqual(['/studio']);
+    await act(async () => { await Promise.resolve(); });
+    expect(adoptCalls(fetchMock)).toHaveLength(1);
+  });
+
+  it('查询串是「看看」时打开团队栏', async () => {
+    mockTeamEndpoints();
+    const { hook, searchHook, history } = memoryLocation({
+      path: '/studio?team_asset=lib-art:ta_1&team_action=open',
+      record: true,
+    });
+    render(<Router hook={hook} searchHook={searchHook}><Studio /></Router>);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true'));
+    expect(history).toEqual(['/studio']);
+  });
+
+  it('非法查询串不动作也不改地址', async () => {
+    const fetchMock = mockTeamEndpoints();
+    const { hook, searchHook, history } = memoryLocation({ path: '/studio?team_asset=bad&team_action=reproduce', record: true });
+    render(<Router hook={hook} searchHook={searchHook}><Studio /></Router>);
+    await screen.findByText('火山引擎');
+    expect(adoptCalls(fetchMock)).toHaveLength(0);
+    expect(history).toEqual(['/studio?team_asset=bad&team_action=reproduce']);
   });
 });

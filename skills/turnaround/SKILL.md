@@ -2,10 +2,7 @@
 name: turnaround
 version: 1.5.0
 description: |
-  角色三视图 / character sheet 生成：基于已有立绘引导画师锁定正/侧/背三面比例、表情、武器拆解，
-  一次性出横版三联视图，也支持改已出的三视图。
-  用户要做三视图 / 角色三面 / 设定集，或调用 /game-atelier:turnaround 时使用；
-  该角色还没有立绘（spec.md + portrait/）则先走 /game-atelier:character。
+  为项目内角色出正、侧、背三视图（character sheet）或改已出三视图时用；需要已有立绘或衍生来源图，否则先走 character。宣传图走 promo，世界观设定文档不用。
 allowed-tools:
   - Bash
   - Read
@@ -229,8 +226,8 @@ turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、
 
 ## 提示词资产（任务明确后先查）
 
-写 prompt 前先查画师存的提示词模板：按需求挑标签查索引 → 命中则读全文、填变量、按其
-`recommendation` 定模型参数（本机无此模型则回落默认并说明）→ 确认卡注明「提示词来自资产〈标题〉」
+写 prompt 前先查画师存的提示词模板：按需求挑标签查索引 → 命中则读全文、填变量（模型参数按
+常规默认，提示词资产不带模型参数）→ 确认卡注明「提示词来自资产〈标题〉」
 与配置来源层级；没命中就明说后自己组，不硬套。两级接口、优先级与不做的事见
 `docs/references/prompt-assets.md`。不在启动时读全库。
 

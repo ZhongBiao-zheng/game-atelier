@@ -15,27 +15,30 @@
 
 ## MCP 进程与授权
 
-采用官方 Python SDK 的 stdio server，入口 `python -m character_workflow.mcp --credentials <file>`。
+采用官方 Python SDK 的 stdio server，入口 `python -m character_workflow.mcp [--credentials <file>]`。
 这个入口是协议适配器，不是第二个 viewer-server；stdout 只输出 MCP JSON-RPC，诊断去 stderr，
-不调用会把安装进度或出图卡片写到 stdout 的 bootstrap / CLI 分支。
+不调用会把安装进度或出图卡片写到 stdout 的 bootstrap / CLI 分支。插件自带的 MCP 经 `bootstrap.py --run`
+转到数据目录 venv 启动它：`--run` 只定位 venv 并继承 stdio，成功路径不写 stdout；venv 缺失时才输出错误并退出。
 用户已于 2026-08-31 同意新增官方 SDK。运行依赖为 `mcp>=2.1.1,<3`，当前锁定 2.1.1；
 回归包含 SDK 客户端真实启动 Atelier stdio、连接真实本机 HTTP、项目授权、文档冲突和撤销；
 不等于已经验收所有 Codex / Claude 客户端版本，具体限制见[本机客户端说明](../mcp-local-client.md)。
 不引入 SDK 的开发 CLI extra 或新的 Node 服务，只使用已需要的服务端协议能力。
 
-用户先在本地管理页选择允许访问的项目，以及 `read`、`edit_documents`、`create_targets`、
-`prepare_generation` 能力。新增 Agent 授权只能由该页创建，生成一个 OS 权限保护的凭据文件；
-MCP 配置只含固定解释器、模块和凭据文件位置，不含明文 token / API Key。
+用户在本地管理页点「连接本机 Agent」一键创建默认授权（全部项目、画布与能力），或用「自定义」选择项目、画布
+以及 `read`、`edit_documents`、`create_targets`、`prepare_generation` 等能力。新增 Agent 授权只能由该页创建，
+生成一个 OS 权限保护的凭据文件：默认授权固定为 `.config/connections/agent.json`，再次创建会替换旧默认授权并覆盖
+该文件；自定义授权为 `<grant_id>.json`。MCP 配置只含固定解释器、模块和可选的凭据文件位置，不含明文 token / API Key。
 文件在 data root 的私有配置子目录，POSIX 使用 0600，Windows 核验当前用户 ACL，不能以 chmod 成功当作 ACL 已验证。
-服务端保存凭据摘要，撤销 / 到期后拒绝后续调用；凭据不会因知道 project_id 就扩大权限。
+服务端保存凭据摘要，撤销后拒绝后续调用；授权不设有效期（ADR-0021）；凭据不会因知道 project_id 就扩大权限。
 
-MCP 启动只读取自身的连接凭据，不扫描用户目录或更改 Agent 配置。服务未启动时返回明确的本机启动指引，
-不私自重启或新建不同 data root。连接须核对实例及协议，不使用系统代理或跟随 HTTP 重定向。
-服务重启需重新建立运行时工具会话；持久授权仍须未撤销且在有效期内，不能用过期 session ID 当授权。
+MCP 启动只读取自身的连接凭据（默认授权或 `--credentials` 指定的文件），不扫描用户目录或更改 Agent 配置。
+凭据缺失、失效或服务未启动时照常启动，调用时返回明确指引，不私自重启或新建不同 data root；
+每次调用前按文件状态检查凭据，被替换就重读并重换会话。连接须核对实例及协议，不使用系统代理或跟随 HTTP 重定向。
+服务重启需重新建立运行时工具会话；持久授权须未撤销，不能用过期 session ID 当授权。
 
-管理端点 `POST /api/connection/agent-grants` 接受 `{ name, project_ids, capabilities, days?: 7 }`，
-默认有效期 7 天、最长 30 天；返回名称和本机凭据文件位置，原始秘密不经网站或工具返回。
-`POST /api/connection/agent-sessions` 用该凭据换取最长 2 小时且不超过 grant 到期时间的运行会话。
+管理端点 `POST /api/connection/agent-grants` 接受 `{ name, project_ids, canvas_project_ids, capabilities, default? }`，
+`default: true` 创建默认授权并替换旧的；返回名称、`default` 和本机凭据文件位置，原始秘密不经网站或工具返回。
+`POST /api/connection/agent-sessions` 用该凭据换取 2 小时的运行会话，到期由适配器自动重换。
 `DELETE /api/connection/agent-grants/{id}` 同时撤销派生会话并关闭连接。
 Agent 自报的 client 名称只供显示，不作为权限证明；HTTP 请求无 Origin 时仍必须提供工具身份。
 
@@ -88,8 +91,8 @@ project / ui_scheme 只用于文档与上下文，不能 prepare 生成；新项
 | `workshop_withdraw_generation` | request_id、expected_revision → 已撤回 / 已开始不可撤回 | prepare_generation；仅撤回尚未执行的自身请求 |
 | `workshop_approve_generation` | request_id、expected_revision → approved + Job | execute_generation；仅批准自身请求，用户在对话中明确肯定后调用 |
 | `workshop_read_lessons` | target → workspace / project 两层经验（按资产槽位） | read；只读 |
-| `workshop_list_prompt_assets` | tags?、query?、project_id?、limit → 提示词资产索引（id / 标题 / 标签 / 最近使用 / 有无推荐配置）+ 全库 `tag_facets` | read 或 canvas_read；只读；不带正文，任务明确后调一次 |
-| `workshop_read_prompt_asset` | asset_id、project_id? → segments、variables、按默认值渲染的 prompt、可选 `recommendation`（mode / model id / 白名单 params） | read 或 canvas_read；记一次使用并关联项目 |
+| `workshop_list_prompt_assets` | tags?、query?、project_id?、limit → 提示词资产索引（id / 标题 / 标签 / 最近使用）+ 全库 `tag_facets` | read 或 canvas_read；只读；不带正文，任务明确后调一次 |
+| `workshop_read_prompt_asset` | asset_id、project_id? → segments、variables、按默认值渲染的 prompt | read 或 canvas_read；记一次使用并关联项目 |
 | `workshop_append_lesson` | target、scope、line?、distilled_media_ids、幂等键 → 写入位置 | edit_documents；line 省略时只标记证据图已处理 |
 
 `tools/list` 的注解用于说明副作用，不承担权限验证。内部 HTTP 对应同名语义的 `/api/workshop/...`

@@ -3,22 +3,10 @@
 > 此文件同时服务于 Claude Code 和 Codex。AGENTS.md 是本文件的软链接，两者内容完全一致。
 > 路径差异：Claude Code 使用 `~/.claude/`，Codex 使用 `~/.codex/`。
 
-## ⚠️ 启动必读 Memory 三层
+## Memory
 
-每次进入本仓库的对话, 你必须先 Read 以下文件 (按顺序), 把内容作为本轮上下文:
-
-1. 全局跨工作区经验：
-   - Claude Code: `~/.claude/MEMORY.md`
-   - Codex: `~/.codex/MEMORY.md`
-2. `MEMORY.md` (仓库根) — 本工作区跨项目通用经验
-3. 如果对话涉及具体角色:
-   - 从 `~/game-atelier/.runtime/projects.json::assignments` 解析角色所属 project_id
-   - 从 `~/game-atelier/.runtime/projects.json::projects[].slug` 找到 slug
-   - Read `~/game-atelier/projects/<slug>/MEMORY.md`
-
-不读 MEMORY 就开始写 prompt / 出图 / 改 spec / 改 Skill 视为违规。
-
-走 /game-atelier:character 等 Skill 命令时, Skill 内部已自动加载, 无需重复 Read。
+- 排查厂商调用、出图失败、Windows 首启、安装与更新这类已知问题时，先查仓库根 `MEMORY.md`（本工作区跨项目经验）和全局 MEMORY（Claude Code `~/.claude/MEMORY.md`，Codex `~/.codex/MEMORY.md`）。
+- 角色和项目的经验由 Skill 的 turn-start 按出图类型注入（工作区与 `projects/<slug>/MEMORY.md` 的对应小节），走 /game-atelier:* Skill 时不必手动解析 `projects.json`。
 
 ---
 
@@ -44,6 +32,8 @@ This file provides guidance to Claude Code (claude.ai/code) and Codex when worki
 make dev-link              # symlink skills/* → .claude/skills/
 make install               # uv sync + pnpm install
 ```
+
+用 `install.sh` 装过的机器，插件入口 `~/.claude/skills/game-atelier` 已指向本仓库工作区，不需要 `make dev-link`；两者同时存在时，在仓库里工作会让同一 Skill 注册两次。
 
 不需要手动设 `GAME_ATELIER_DATA_ROOT`。pytest 用 autouse `isolated_data_root` fixture 给每个测试一个独立 tmp 目录，不污染 `~/game-atelier`。
 
@@ -124,7 +114,7 @@ uv run pytest -v -k "test_pending_confirm"            # 按名字过滤
 cd web && pnpm test                                   # vitest run
 
 # Lint / TypeCheck
-uv run ruff check src tests                           # Python lint（line-length=100）
+uv run ruff check src scripts tests                   # Python lint（line-length=100）
 cd web && pnpm lint                                   # tsc -b --noEmit + eslint（只开 react-hooks 两条规则）
 
 # 构建
@@ -135,12 +125,19 @@ uv run python src/viewer_server/server.py stop
 uv run python src/viewer_server/server.py open-browser
 ```
 
-## 技术栈（不要偏离）
+## 验证与完成
+
+- `make test`、单个 pytest 文件、`cd web && pnpm test`、`uv run ruff check src scripts tests`、`cd web && pnpm lint` 可以直接跑、修、重跑，不必逐步请示；pytest 由 autouse fixture 隔离 data root，不碰 `~/game-atelier`。
+- `make verify` 会重建入库的 `web/dist/`，跑之前先 stage 自己的改动，方便区分产物变化。
+- 完成标准：相关测试通过，`make verify` 通过，UI 改动在真实页面验证过，已提交并推送到 `dev`。
+- 先问再做：计费出图或出视频、合入 `main`、删除用户数据。
+
+## 技术栈（新增依赖先说明理由）
 
 - **Python 3.11+** / FastAPI 0.115 / Pydantic 2.9 / uvicorn / watchdog；`uv` 装包。
 - **React 18.3** / TS 5.6 / Vite 5.4 / Vitest 2 / pnpm。
 - **Tailwind v4.3 + shadcn**：永远 v4 写法（`@import "tailwindcss"`、`@theme`），禁止 v3 的 `tailwind.config.js` + PostCSS 组合。
-- 设计系统：先读 `DESIGN.md`（Atelier 暖调暗色画廊，黄铜 `#D4A574` primary，Instrument Serif display + Geist body）。
+- 设计系统：改 web 视觉时读 `DESIGN.md`（Atelier 暖调暗色画廊，黄铜 `#D4A574` primary，Instrument Serif display + Geist body）。
 
 ## 安全 / 部署约束
 
@@ -148,36 +145,9 @@ uv run python src/viewer_server/server.py open-browser
 - `/api/raw` 媒体读取用 job_id 白名单（只读 `output_paths`、`params` 三组参考素材、MJ 三组参考素材与 `source_image` 中登记的路径）。
 - 同一时间只支持一个 Web tab（多 tab 行为未定义）。
 
-## Turn 起始（Skill 每次必做）
-
-一次 CLI 拿齐三件事：
-
-```
-uv run python -m character_workflow turn-start
-# → {"drafts": [...], "active_id": "...", "spec": "<characters/<id>/spec.md 内容>"}
-```
-
 ## 反 Slop 红线（来自 DESIGN.md）
 
 紫蓝渐变 / 3 列 feature grid / Inter 正文 / system-ui display / 渐变按钮 / 居中一切 —— 一律拒绝。另两条硬纪律：**tsx 不写阴影**（深度靠玻璃配方 `bg-glass backdrop-blur-glass border border-border`，tsx 内联 `shadow-*` 全禁；唯一放行的微阴影是 `tokens.css` 的 `.shell-glow` 工具类——inset 发丝高光 + 极淡软投影，复刻 tapnow，引类名即可，别在 tsx 内联）、**字阶四档**（xs/sm/base/display，禁任意值字号与 `text-lg` 以上档位）。以上由 `web/src/test/designDrift.test.ts` 守卫强制执行。详见 `DESIGN.md` "反 AI Slop 清单" 与 "组件配方"。
-
-## Skill routing
-
-When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
-
-Key routing rules:
-- Product ideas/brainstorming → invoke /office-hours
-- Strategy/scope → invoke /plan-ceo-review
-- Architecture → invoke /plan-eng-review
-- Design system/plan review → invoke /design-consultation or /plan-design-review
-- Full review pipeline → invoke /autoplan
-- Bugs/errors → invoke /investigate
-- QA/testing site behavior → invoke /qa or /qa-only
-- Code review/diff check → invoke /review
-- Visual polish → invoke /design-review
-- Ship/deploy/PR → invoke /ship or /land-and-deploy
-- Save progress → invoke /context-save
-- Resume context → invoke /context-restore
 
 ## Agent skills
 
@@ -186,7 +156,6 @@ Key routing rules:
 - 日常开发统一在长期 `dev` 分支完成并推送；本地工作目录默认保持在 `dev`，不再为每项开发默认新建功能分支。
 - `main` 是稳定同步分支。只有用户明确说“同步”或指定本次合入 `main`，才通过 `dev → main` PR 同步；开发完成、测试通过、普通提交或推送都不代表同步授权。
 - 同步前核对范围与 CI；同步后保留 `dev` 和 `main` 两个长期分支，回到 `dev` 继续开发。保留既有未合并分支与工作树，不自动吸收其改动。
-- 2026-09-09 的 PR #97 已按用户明确要求先合入 `main`；后续遵循上述流程。
 
 ### Product features
 
@@ -204,4 +173,4 @@ UI 改动需真实页面验证；用户明确授权后才合并，保留其他�
 
 ### Domain docs
 
-采用单一领域上下文：根目录 `CONTEXT.md` + `docs/adr/`。详见 `docs/agents/domain.md`。
+采用单一领域上下文：根目录 `CONTEXT.md` + `docs/adr/`，新增或改名领域术语、改动涉及架构决策时查。详见 `docs/agents/domain.md`。

@@ -7,7 +7,6 @@ import math
 import os
 import re
 import secrets
-from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -101,8 +100,7 @@ _OUTPUT_MIME = {
     ".aac": "audio/aac",
     ".pcm": "audio/pcm",
 }
-_RUN_GLOBAL_GATE = BoundedSemaphore(4)
-_RUN_VIDEO_GATE = BoundedSemaphore(1)
+_RUN_PROJECT_GATES: dict[str, BoundedSemaphore] = {}
 _RUN_ALIAS_GATES: dict[str, BoundedSemaphore] = {}
 _RUN_ALIAS_GATES_LOCK = Lock()
 _REVERSE_PROMPT_PRESET_ID = "canvas.reverse_prompt"
@@ -788,7 +786,6 @@ def _render_final_prompt(
 ) -> str:
     prompt = draft.prompt.strip()
     appended_text: list[str] = []
-    media_labels: list[str] = []
     kind_counts = {"text": 0, "image": 0, "video": 0, "audio": 0}
     replacements: dict[str, list[str]] = {}
     # Draft tokens are stable node IDs. Labels are rebuilt only after the current graph and
@@ -802,25 +799,35 @@ def _render_final_prompt(
             replacements.setdefault(marker, []).append(f"【{label}】")
             appended_text.append(f"【{label}】\n{version.text}")
         else:
-            media_labels.append(label)
             replacements.setdefault(marker, []).append(label)
     for marker, labels in replacements.items():
         prompt = prompt.replace(marker, "、".join(labels))
-    semantic_video_frames = any(
-        item.source in {"first_frame", "last_frame"}
-        for item in inputs
-    )
-    if media_labels and not semantic_video_frames:
-        prompt = (
-            f"参考素材编号：{'、'.join(media_labels)}。请按这些编号理解提示词中的引用。"
-            f"\n\n{prompt}"
-        )
+    prompt = canvas_numbering_prefix(inputs) + prompt
     if appended_text:
         prompt = f"{prompt}\n\n参考文本：\n" + "\n\n".join(appended_text)
     prompt = resolve_prompt_variables(prompt)
     if not prompt.strip():
         raise ValueError("生成提示词不能为空")
     return prompt
+
+
+def canvas_numbering_prefix(inputs: list[CanvasSnapshotInput]) -> str:
+    """冻结 final_prompt 时补在开头的参考素材编号说明；不补时返回空串。
+
+    非文本输入按种类各自计数（图片1、视频1、图片2…）；有首帧 / 尾帧输入时不补。
+    配方（generation_recipe）剥离前缀也调这里，两边逐字一致。
+    """
+    if any(item.source in {"first_frame", "last_frame"} for item in inputs):
+        return ""
+    kind_counts = {"text": 0, "image": 0, "video": 0, "audio": 0}
+    media_labels: list[str] = []
+    for item in inputs:
+        kind_counts[item.kind] += 1
+        if item.kind != "text":
+            media_labels.append(_input_label(item.kind, kind_counts[item.kind]))
+    if not media_labels:
+        return ""
+    return f"参考素材编号：{'、'.join(media_labels)}。请按这些编号理解提示词中的引用。\n\n"
 
 
 def _input_label(kind: str, index: int) -> str:
@@ -3337,13 +3344,13 @@ def run_canvas_job(job_id: str) -> Job:
 
 
 def run_canvas_job_scheduled(job_id: str) -> Job:
-    """Run through the process-wide Canvas limits: global 4, per alias 2, video 1."""
+    """Limit all media to six running jobs per key and six per Canvas project."""
     job = read_job(job_id)
     alias = job.alias or job.character_id
     with _RUN_ALIAS_GATES_LOCK:
-        alias_gate = _RUN_ALIAS_GATES.setdefault(alias, BoundedSemaphore(2))
-    video_gate = _RUN_VIDEO_GATE if job.kind == JobKind.VIDEO else nullcontext()
-    with _RUN_GLOBAL_GATE, alias_gate, video_gate:
+        alias_gate = _RUN_ALIAS_GATES.setdefault(alias, BoundedSemaphore(6))
+        project_gate = _RUN_PROJECT_GATES.setdefault(job.canvas_project_id, BoundedSemaphore(6))
+    with alias_gate, project_gate:
         return run_canvas_job(job_id)
 
 

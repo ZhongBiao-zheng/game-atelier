@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Body, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
@@ -39,6 +39,7 @@ from character_workflow.lib.atomic_io import (
     atomic_write_text,
 )
 from character_workflow.lib.job_runner import image_dimensions_from_bytes
+from character_workflow.lib.local_paths import data_root_file
 from character_workflow.lib.jobs import (
     _load_job, delete_failed_job, is_resumable_studio_job, job_lock, list_jobs, read_job,
     remove_image_from_job, request_job_cancel,
@@ -61,11 +62,13 @@ from pydantic import BaseModel, Field, ValidationError
 from pydantic import field_validator
 
 from character_workflow.lib.schemas import (
+    JOB_PARAM_PATH_FIELDS,
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterAssociationPatch, CharacterAssociationsFile,
     CanvasAgentSession, CanvasAgentSessionCreate, CanvasAgentSessionList,
     CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument, CanvasUpscaleRunCreate,
-    CanvasCreationAssetInsertRequest,
+    CanvasCreationAssetInsertRequest, CanvasPasteRequest, CanvasReproduceRequest,
+    CanvasReproduceResponse,
     CanvasLayerDecompositionCreate,
     CanvasPackageCommitRequest, CanvasPackageImportResponse,
     CanvasMaskEditCreate, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
@@ -77,7 +80,8 @@ from character_workflow.lib.schemas import (
     CharacterDerivativeCreate,
     CharacterProjectAssign, ClipboardAttempt,
     CreationAsset, CreationAssetList, CreationAssetUseRequest,
-    CreationImagePathCreate, CreationPromptAssetCreate, CreationPromptAssetUpdate,
+    CreationGenerationFromCanvas, CreationGenerationFromJob,
+    CreationMediaPathCreate, CreationPromptAssetCreate, CreationPromptAssetUpdate,
     FeedbackPost, GalleryMedia, Job, JobKind, JobParams, JobStatus, ProjectCreate,
     ProjectRename, ProjectGalleryResponse, ProjectIndexResponse,
     ProjectVideoProduction, ProjectVideoReferencesResponse,
@@ -88,6 +92,7 @@ from character_workflow.lib.schemas import (
     UiSchemeCreate, UiSchemeDefaultSet, UiSchemesFile,
     WebEditableJobPatch,
 )
+from viewer_server.errors import asset_state_broken_error
 
 
 _STUDIO_SHUTDOWN_EVENT = threading.Event()
@@ -409,6 +414,49 @@ def post_spec(character_id: str, patch: SpecPatch) -> dict:
     return {"ok": True, "revision": result["revision"]}
 
 
+# 浏览器提交的参考路径字段：/api/raw 按 job 登记的这些路径放行读取，mj_image 还会把本地文件
+# 上传成公网直链，所以每一项都要过数据根闸门。
+# 减 mask_image：只由服务端写（画布局部编辑），两个浏览器入口都先把浏览器传的丢掉。
+# 加 source_image：不是 JobParams 的声明字段，但 extra="allow" 让浏览器能塞进来，caller 会回退读它。
+_BROWSER_REF_FIELDS = tuple(
+    field for field in JOB_PARAM_PATH_FIELDS if field != "mask_image"
+) + ("source_image",)
+
+
+def _is_web_url(value: str) -> bool:
+    # 「再次生成」会把历史 job 的参考原样回传，其中有 http(s) 直链。
+    # 直链原样放行，但不认路径的 caller 会拿它当本地文件读；Win32 会把 `..` 按字面折叠，
+    # `http://x/../../.config/keys.json` 就成了真实路径。带 `..` 段或反斜杠的一律不算直链。
+    if not value.startswith(("http://", "https://")) or not urlsplit(value).netloc:
+        return False
+    if "\\" in value:
+        return False
+    return ".." not in unquote(value).split("/")
+
+
+def _gated_ref(field: str, index: int, item: Any) -> Any:
+    if not isinstance(item, str) or _is_web_url(item):
+        return item
+    try:
+        return str(data_root_file(item))
+    except ValueError as error:
+        raise HTTPException(422, detail=f"params.{field} 第 {index} 项：{error}") from error
+
+
+def _gate_browser_refs(params: dict[str, Any]) -> dict[str, Any]:
+    """每个参考路径过数据根闸门，返回改写成 resolve 后绝对路径的字段（落盘值与闸门判的是同一个）。"""
+    gated: dict[str, Any] = {}
+    for field in _BROWSER_REF_FIELDS:
+        value = params.get(field)
+        if isinstance(value, str):
+            gated[field] = _gated_ref(field, 1, value)
+        elif isinstance(value, list):
+            gated[field] = [
+                _gated_ref(field, index, item) for index, item in enumerate(value, start=1)
+            ]
+    return gated
+
+
 @router.post("/prompt/{job_id}")
 def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
     p = _runtime() / "jobs" / f"{job_id}.json"
@@ -427,11 +475,13 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                 # These fields identify an already billed provider task.  Browser edits must never
                 # replace or erase them, otherwise a forged/stale id could retrieve the wrong task
                 # or make the runner submit a second order after losing its recovery handle.
-                for owned in ("provider_task_protocol", "provider_task_ids"):
+                # mask_image 同理只由服务端写。
+                for owned in ("provider_task_protocol", "provider_task_ids", "mask_image"):
                     if owned in existing_params:
                         value[owned] = existing_params[owned]
                     else:
                         value.pop(owned, None)
+                value = {**value, **_gate_browser_refs(value)}
             data[field] = value
         # Validate the complete post-patch document before replacing the durable Job JSON.  This
         # catches explicit nulls and cross-field violations without discarding legacy raw fields.
@@ -464,18 +514,28 @@ def post_clipboard_attempt(attempt: ClipboardAttempt) -> dict:
 
 @router.get("/raw")
 def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
-    """三条鉴权路径：
-    - `job_id` 在场：以 job.output_paths / params.reference_images / source_image 作为白名单
-    - 路径在 .runtime/uploads/ 下：放行（画师刚上传，还没绑到 job 上时的 preview 用）
-    - 否则回退到 image_storage_root 前缀检查（兼容老链接）
+    """两条鉴权路径：
+    - `job_id` 在场：以 job.output_paths / params 参考路径 / source_image 作为白名单
+    - 否则只放行 .runtime/uploads/ 下的文件（画师刚上传，还没绑到 job 上时的 preview 用）
 
     相对路径解析基准：data root（_project_root()），而非 CWD。
     /api/gallery/recent 返回的是相对路径（如 characters/foo/turnaround/v2.png），
     若用 Path(path).resolve() 会解析到 repo 根，与 job.output_paths 里的绝对路径对不上 → 403/404。
     """
     raw = Path(path)
-    target = (raw if raw.is_absolute() else _project_root() / raw).resolve()
-    if not target.exists():
+    # 用 stat 保留 Windows 超长文件名错误，exists 会将它吞成不存在。这是请求
+    # 参数本身不成形，回 400 而不是 403：没有「路径合法但无权读」这回事，也别让它冒成 500。
+    try:
+        target = (raw if raw.is_absolute() else _project_root() / raw).resolve()
+        target.stat()
+        exists = True
+    except FileNotFoundError as error:
+        if getattr(error, "winerror", None) == 206:
+            raise HTTPException(400, detail="读图被拒：路径无效") from error
+        exists = False
+    except (ValueError, OSError) as error:
+        raise HTTPException(400, detail="读图被拒：路径无效") from error
+    if not exists:
         raise HTTPException(404)
     if job_id is not None:
         try:
@@ -484,10 +544,9 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
             raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）") from e
         whitelist = set(job.output_paths)
         params = job.params.model_dump() if job.params else {}
-        for field in (
-            "reference_images", "reference_videos", "reference_audios",
-            "mask_image", "mj_sref", "mj_cref", "mj_oref",
-        ):
+        # 全部声明的路径字段都放行（含服务端写的 mask_image）；params 里的 extra 字段 source_image
+        # 不放行——Job 顶层的 source_image 在下面单独加。
+        for field in JOB_PARAM_PATH_FIELDS:
             value = params.get(field)
             if isinstance(value, str):
                 whitelist.add(value)
@@ -495,26 +554,18 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
                 whitelist.update(item for item in value if isinstance(item, str))
         if job.source_image:
             whitelist.add(job.source_image)
+        # 网络直链不是本机文件；当路径解析会把 "http://../../etc/x" 拼成数据根外的真实路径。
         normalized_whitelist = {
             str((Path(p) if Path(p).is_absolute() else _project_root() / p).resolve())
             for p in whitelist
+            if not p.startswith(("http://", "https://"))
         }
         if str(target) not in normalized_whitelist:
             raise HTTPException(403, detail="读图被拒：这个路径不在该 job 登记的产物列表里")
         return FileResponse(str(target))
     uploads_dir = (_runtime() / "uploads").resolve()
-    if str(target).startswith(str(uploads_dir) + os.sep):
-        return FileResponse(str(target))
-    cfg_path = _runtime() / "config.json"
-    if not cfg_path.exists():
-        raise HTTPException(
-            403, detail="读图被拒：.runtime/config.json 不存在，无法确认这张图在允许的目录里"
-        )
-    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-    root = Path(cfg.get("image_storage_root", "")).resolve()
-    # is_relative_to 带分隔符语义：/x/images-evil 不能过 /x/images（与 gallery_image 对齐）。
-    if not target.is_relative_to(root):
-        raise HTTPException(403, detail="读图被拒：这个路径在图片存储根目录之外")
+    if not target.is_relative_to(uploads_dir) or target == uploads_dir:
+        raise HTTPException(403, detail="读图被拒：不带 job_id 只能读取刚上传的参考文件")
     return FileResponse(str(target))
 
 
@@ -2085,6 +2136,9 @@ def _create_user_job(
     # order and may not attach itself to an arbitrary existing Tuzi task.
     params.provider_task_protocol = None
     params.provider_task_ids = None
+    params.mask_image = None
+    # 改写值与原值同类型（str / list[str]），model_copy 不需要重新校验。
+    params = params.model_copy(update=_gate_browser_refs(params.model_dump()))
     if body.kind == JobKind.IMAGE:
         from character_workflow.lib.image_size import normalize_image_size_params
 
@@ -2263,7 +2317,6 @@ def delete_canvas_project_route(
     )
     try:
         delete_canvas_project(project_id, payload.expected_revision)
-        return Response(status_code=204)
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
     except CanvasProjectBusyError as error:
@@ -2278,6 +2331,11 @@ def delete_canvas_project_route(
         raise
     except CanvasPackageError as error:
         raise HTTPException(422, detail=str(error)) from error
+    # 删画布时挂载记录已随之清掉；已无任何挂载的库停止监听，还有挂载的对齐到剩下那条。
+    from viewer_server.watcher import sync_team_library_watches
+
+    sync_team_library_watches()
+    return Response(status_code=204)
 
 
 @router.get("/canvas/projects/{project_id}/document", response_model=CanvasDocument)
@@ -2460,7 +2518,7 @@ def _raise_creation_asset_error(error: Exception) -> None:
             "message": str(error),
         }) from None
     if isinstance(error, CreationAssetStateError):
-        raise HTTPException(409, detail=str(error)) from error
+        raise asset_state_broken_error(error) from error
     if isinstance(error, (KeyError, FileNotFoundError)):
         raise HTTPException(404, detail="找不到这个创作资产或文件") from None
     if isinstance(error, ValueError):
@@ -2470,7 +2528,7 @@ def _raise_creation_asset_error(error: Exception) -> None:
 
 @router.get("/creation-assets", response_model=CreationAssetList)
 def get_creation_assets(
-    kind: Literal["prompt", "image"] | None = Query(default=None),
+    kind: Literal["prompt", "media", "generation"] | None = Query(default=None),
     scope: Literal["all", "project"] = Query(default="all"),
     project_id: str | None = Query(default=None),
 ):
@@ -2494,17 +2552,16 @@ def post_creation_prompt(payload: CreationPromptAssetCreate):
             payload.segments,
             payload.tags,
             payload.project_id,
-            recommendation=payload.recommendation,
         )
     except ValueError as error:
         _raise_creation_asset_error(error)
 
 
-@router.post("/creation-assets/images/from-path", response_model=CreationAsset, status_code=201)
-def post_creation_image_from_path(payload: CreationImagePathCreate):
-    from character_workflow.lib.creation_assets import create_image_asset_from_path
+@router.post("/creation-assets/media/from-path", response_model=CreationAsset, status_code=201)
+def post_creation_media_from_path(payload: CreationMediaPathCreate):
+    from character_workflow.lib.creation_assets import create_media_asset_from_path
     try:
-        return create_image_asset_from_path(
+        return create_media_asset_from_path(
             title=payload.title,
             source_path=payload.source_path,
             tags=payload.tags,
@@ -2515,23 +2572,26 @@ def post_creation_image_from_path(payload: CreationImagePathCreate):
         _raise_creation_asset_error(error)
 
 
-@router.post("/creation-assets/images/upload", response_model=CreationAsset, status_code=201)
-async def post_creation_image_upload(
+@router.post("/creation-assets/media/upload", response_model=CreationAsset, status_code=201)
+async def post_creation_media_upload(
     file: UploadFile = File(...),
     title: str = Form(...),
     tags: str = Form(default="[]"),
     project_id: str | None = Form(default=None),
     allow_existing: bool = Form(default=False),
 ):
-    from character_workflow.lib.creation_assets import create_image_asset_from_bytes
+    from character_workflow.lib.creation_assets import create_media_asset_from_bytes
     try:
         parsed_tags = json.loads(tags)
         if not isinstance(parsed_tags, list) or not all(isinstance(tag, str) for tag in parsed_tags):
             raise ValueError("tags 必须是字符串数组")
-        return create_image_asset_from_bytes(
+        body = await file.read()
+        # 抢 catalog 文件锁 + sha256 + 落盘（视频上限 500 MiB）：留在事件循环里会连 SSE 一起卡住。
+        return await asyncio.to_thread(
+            create_media_asset_from_bytes,
             title=title,
-            body=await file.read(),
-            filename=file.filename or "image",
+            body=body,
+            filename=file.filename or "media",
             mime_type=file.content_type,
             tags=parsed_tags,
             project_id=project_id,
@@ -2539,6 +2599,70 @@ async def post_creation_image_upload(
         )
     except (json.JSONDecodeError, KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
+
+
+def _save_generation(load_source, *, title: str, tags: list[str], project_id: str | None):
+    """生成结果「保存为创作资产」：配方来源与分享共用 generation_recipe，错误按「谁能修」分。
+
+    标题 / 标签在读来源之前单独校验：只有这一步的 ValueError 才是「请求不合规」（422 invalid）。
+    之后冒出来的其他 ValueError（坏 job 文件的 JSONDecodeError / ValidationError 等）是本机数据
+    故障，不翻译，照常 500 带 traceback。RecipeSourceError / CreationAssetStateError /
+    CanvasDocumentError 都是 ValueError 的子类，各自按声明的语义接。
+    """
+    from character_workflow.lib.canvas_projects import CanvasDocumentError
+    from character_workflow.lib.creation_assets import (
+        CreationAssetStateError,
+        _normalize_tags,
+        _required_text,
+    )
+    from character_workflow.lib.generation_recipe import (
+        RecipeSourceError,
+        RecipeSourceNotFound,
+        save_generation_asset,
+    )
+    try:
+        clean_title, clean_tags = _required_text(title, "资产标题"), _normalize_tags(tags)
+    except ValueError as error:
+        raise HTTPException(422, detail={"code": "invalid", "message": str(error)}) from error
+    try:
+        return save_generation_asset(
+            load_source(), title=clean_title, tags=clean_tags, project_id=project_id,
+        )
+    except RecipeSourceError as error:
+        raise HTTPException(422, detail={"code": error.code, "message": str(error)}) from error
+    except (RecipeSourceNotFound, KeyError):
+        raise HTTPException(404, detail="找不到这次生成的记录或画布结果") from None
+    except CreationAssetStateError as error:
+        raise asset_state_broken_error(error) from error
+    except CanvasDocumentError as error:
+        # 画布存档不见了 / 记着别的项目（CanvasStorageError）→ 500，不是请求的错。
+        raise _canvas_document_http_error(error) from error
+
+
+# 与 `POST /creation-assets/{asset_id}/<动作>` 段数相同，靠末段字面量区分（from-job / from-canvas
+# 不是任何 {asset_id} 路由的动作名）；给 {asset_id} 加新动作时不能取这两个名字。
+@router.post(
+    "/creation-assets/generation/from-job", response_model=CreationAsset, status_code=201
+)
+def post_creation_generation_from_job(payload: CreationGenerationFromJob):
+    from character_workflow.lib.generation_recipe import recipe_from_job_output
+    return _save_generation(
+        lambda: recipe_from_job_output(payload.job_id, payload.output_index),
+        title=payload.title, tags=payload.tags, project_id=payload.project_id,
+    )
+
+
+@router.post(
+    "/creation-assets/generation/from-canvas", response_model=CreationAsset, status_code=201
+)
+def post_creation_generation_from_canvas(payload: CreationGenerationFromCanvas):
+    from character_workflow.lib.generation_recipe import recipe_from_canvas_result
+    return _save_generation(
+        lambda: recipe_from_canvas_result(
+            payload.canvas_project_id, payload.node_id, payload.version_id,
+        ),
+        title=payload.title, tags=payload.tags, project_id=payload.canvas_project_id,
+    )
 
 
 @router.put("/creation-assets/{asset_id}/prompt", response_model=CreationAsset)
@@ -2550,31 +2674,31 @@ def put_creation_prompt_asset(asset_id: str, payload: CreationPromptAssetUpdate)
             title=payload.title,
             segments=payload.segments,
             tags=payload.tags,
-            recommendation=payload.recommendation,
         )
     except (KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
 
 
-@router.put("/creation-assets/{asset_id}/image", response_model=CreationAsset)
-async def put_creation_image_asset(
+@router.put("/creation-assets/{asset_id}/media", response_model=CreationAsset)
+async def put_creation_media_asset(
     asset_id: str,
     title: str = Form(...),
     tags: str = Form(default="[]"),
     file: UploadFile | None = File(default=None),
 ):
-    from character_workflow.lib.creation_assets import update_image_asset_from_bytes
+    from character_workflow.lib.creation_assets import update_media_asset_from_bytes
     try:
         parsed_tags = json.loads(tags)
         if not isinstance(parsed_tags, list) or not all(isinstance(tag, str) for tag in parsed_tags):
             raise ValueError("tags 必须是字符串数组")
         body = await file.read() if file is not None else None
-        return update_image_asset_from_bytes(
+        return await asyncio.to_thread(
+            update_media_asset_from_bytes,
             asset_id,
             title=title,
             tags=parsed_tags,
             body=body,
-            filename=file.filename or "image" if file is not None else "image",
+            filename=file.filename or "media" if file is not None else "media",
             mime_type=file.content_type if file is not None else None,
         )
     except (json.JSONDecodeError, KeyError, ValueError) as error:
@@ -2602,10 +2726,21 @@ def delete_creation_asset_route(asset_id: str) -> Response:
 
 @router.get("/creation-assets/{asset_id}/content")
 def get_creation_asset_content(asset_id: str):
-    from character_workflow.lib.creation_assets import creation_asset_image_path
+    from character_workflow.lib.creation_assets import creation_asset_media_path
     try:
-        return FileResponse(creation_asset_image_path(asset_id))
+        return FileResponse(creation_asset_media_path(asset_id))
     except (KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.get("/creation-assets/{asset_id}/inputs/{order}")
+def get_creation_asset_input(asset_id: str, order: int):
+    """生成资产快照里第 order 份参考的本体；prompt / media 资产与越界都是 404。"""
+    from character_workflow.lib.creation_assets import creation_asset_input_path
+    try:
+        path, mime_type = creation_asset_input_path(asset_id, order)
+        return FileResponse(path, media_type=mime_type)
+    except (FileNotFoundError, KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
 
 
@@ -2620,7 +2755,10 @@ def post_canvas_creation_asset_insert(
     response: Response,
     if_match: str | None = Header(default=None, alias="If-Match"),
 ):
-    from character_workflow.lib.creation_assets import insert_creation_asset_into_canvas
+    from character_workflow.lib.creation_assets import (
+        CreationAssetStateError,
+        insert_creation_asset_into_canvas,
+    )
     try:
         document = insert_creation_asset_into_canvas(
             project_id=project_id,
@@ -2636,8 +2774,78 @@ def post_canvas_creation_asset_insert(
         _raise_canvas_revision_error(error)
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布、节点或创作资产") from None
+    # ValueError 子类，必须先于 422：媒体 blob 缺失 / catalog 损坏是本机数据故障，不是请求的错。
+    except CreationAssetStateError as error:
+        raise asset_state_broken_error(error) from error
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
+
+
+@router.post(
+    "/canvas/projects/{project_id}/creation-assets/{asset_id}/reproduce",
+    response_model=CanvasReproduceResponse,
+)
+def post_canvas_creation_asset_reproduce(
+    project_id: str,
+    asset_id: str,
+    payload: CanvasReproduceRequest,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    """画布复刻：生成资产 → 参考输入节点 + 生成配置节点 + 连线，不自动 Run。"""
+    from character_workflow.lib.canvas_reproduce import reproduce_generation_asset_into_canvas
+    from character_workflow.lib.creation_assets import CreationAssetStateError
+    try:
+        document = reproduce_generation_asset_into_canvas(
+            project_id=project_id,
+            asset_id=asset_id,
+            position=payload.position,
+            alias=payload.alias,
+            model=payload.model,
+            document_revision=_canvas_if_match(if_match, "画布"),
+        )
+        response.headers["ETag"] = f'"{document.revision}"'
+        return document
+    except RuntimeError as error:
+        _raise_canvas_revision_error(error)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布或创作资产") from None
+    except CreationAssetStateError as error:
+        # 参考 blob 缺失 = 本机数据完整性故障，见 asset_state_broken_error。
+        raise asset_state_broken_error(error) from error
+    except ValueError as error:
+        # 非生成资产、配方拼不出合法草稿（ValidationError 也是 ValueError）→ 422；
+        # 画布存档本身坏了（CanvasStorageError）→ 500，见 _canvas_document_http_error。
+        raise _canvas_document_http_error(error) from error
+
+
+@router.post("/canvas/projects/{project_id}/paste", response_model=CanvasDocument)
+def post_canvas_paste(
+    project_id: str,
+    payload: CanvasPasteRequest,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    """跨画布粘贴：复制源画布的媒体进目标画布，改写节点里的版本引用后落节点与连线。"""
+    from character_workflow.lib.canvas_paste import paste_nodes_into_canvas
+    try:
+        document = paste_nodes_into_canvas(
+            project_id=project_id,
+            source_project_id=payload.source_project_id,
+            nodes=payload.nodes,
+            connections=payload.connections,
+            document_revision=_canvas_if_match(if_match, "画布"),
+        )
+        response.headers["ETag"] = f'"{document.revision}"'
+        return document
+    except RuntimeError as error:
+        _raise_canvas_revision_error(error)
+    except (KeyError, FileNotFoundError):
+        raise HTTPException(404, detail="找不到源画布或它的媒体文件") from None
+    except PermissionError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    except ValueError as error:
+        raise _canvas_document_http_error(error) from error
 
 
 @router.post(

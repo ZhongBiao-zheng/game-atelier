@@ -111,10 +111,8 @@ spec 变更影响当前角色各槽位；方案 ui_style 变更影响当前方�
    已定稿图优先；过期标记存在先告知；派生角色优先当前自己的作品，其次已冻结的派生来源，
    不能偷偷改用父角色后来新增的图。
 3. 需求明确后先查提示词资产：`workshop_list_prompt_assets` 带候选标签查索引（回 id / 标题 / 标签
-   与全库 `tag_facets`，不带正文），命中再 `workshop_read_prompt_asset` 读那一条，填变量、取其
-   `recommendation`。没命中明说后自己组。协议全文见 `docs/references/prompt-assets.md`。
-4. `workshop_list_models` 按当前目标列实际可用 alias/model/能力，再定模型与参数。资产推荐的
-   模型 id 在列表里才用，不在则回落并在确认卡写明。
+   与全库 `tag_facets`，不带正文），命中再 `workshop_read_prompt_asset` 读那一条，填变量。没命中明说后自己组。协议全文见 `docs/references/prompt-assets.md`。
+4. `workshop_list_models` 按当前目标列实际可用 alias/model/能力，再定模型与参数。
    能力为 null 表示尚未提供可靠枚举，不表示任意值都支持；不得把缺失能力写成已核验。
    用户点名优先，但不可用或超出能力时说明并让用户选择；不虚构 Key、价格或支持的尺寸。
    数量默认 1；保留用户明确的画幅 / 质量，价格未知不能写成免费。

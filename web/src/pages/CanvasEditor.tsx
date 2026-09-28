@@ -1,5 +1,5 @@
 import '@xyflow/react/dist/style.css';
-import { promptToAssetSegments, readablePromptVariables } from '@/lib/promptVariables';
+import { readablePromptVariables } from '@/lib/promptVariables';
 
 import {
   Background,
@@ -15,8 +15,10 @@ import {
   type NodeChange,
   type OnConnectEnd,
   type Viewport,
+  type ReactFlowState,
   type XYPosition,
   useReactFlow,
+  useStore,
 } from '@xyflow/react';
 import {
   ArrowLeft,
@@ -49,8 +51,8 @@ import {
   WandSparkles,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react';
-import { Link } from 'wouter';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
+import { Link, useLocation } from 'wouter';
 
 import {
   cancelCanvasRun,
@@ -63,6 +65,8 @@ import {
   listCanvasProjects,
   renameCanvasProject,
   replaceCanvasNodeMedia,
+  pasteIntoCanvas,
+  reproduceIntoCanvas,
   retryCanvasRun,
   runCanvasMediaOperation,
   getCanvasMattingModel,
@@ -81,7 +85,7 @@ import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { useCanvasJobSync } from '@/hooks/useCanvasJobSync';
 import { useCanvasBatchRuns } from '@/hooks/useCanvasBatchRuns';
 import { prepareCanvasBatch, startCanvasBatch, cancelCanvasBatch } from '@/api/canvasBatch';
-import { CanvasBatchConfirmation, CanvasBatchResults } from '@/components/canvas/CanvasBatchControls';
+import { CanvasBatchConfirmation } from '@/components/canvas/CanvasBatchControls';
 import { canvasEdgeTypes } from '@/components/canvas/CanvasConnectionEdge';
 import type { CanvasBatchRun } from '@/schema/canvasBatch';
 import {
@@ -134,6 +138,10 @@ import {
   type CreationAssetSaveRequest,
 } from '@/components/assets/CreationAssetPanel';
 import { insertCreationAssetIntoCanvas } from '@/api/creationAssets';
+import { adoptTeamAsset, listRelatedTeamAssets } from '@/api/teamLibraries';
+import { TEAM_ASSET_DRAG_TYPE, readTeamAssetDrag } from '@/schema/teamLibrary';
+import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
+import { TEAM_ASSET_ACTION_EVENT, type TeamAssetAction } from '@/lib/teamAssetActions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -220,6 +228,13 @@ import {
   expandCanvasInputSource,
 } from './canvasEditorModel';
 import { restoreCanvasRetryConfiguration } from './canvasRetryMerge';
+import { resolveRecipeModel } from './studioRecipe';
+import {
+  canvasNodeSaveRequest,
+  canvasNodeShareRequest,
+  canvasReproduceNotices,
+  placeCanvasNodeGroupWithoutOverlap,
+} from './canvasTeamActions';
 import { canvasLayerMaterialConnections, type CanvasLayerMaterialConnection } from './canvasLayerMaterialConnections';
 
 interface CreateMenuState {
@@ -394,11 +409,18 @@ const CANVAS_DELETE_KEYS: readonly string[] = /Mac/i.test(navigator.userAgent)
   : ['Delete'];
 const CANVAS_NODE_CLIPBOARD_TYPE = 'application/x-game-atelier-canvas-nodes';
 const CANVAS_MIN_ZOOM = 0.08;
-const CANVAS_MAX_ZOOM = 2.5;
+const CANVAS_MAX_ZOOM = 5;
 // xyflow 默认只认 Meta/Control，Shift 归 selectionKeyCode（框选）。框选已经由 selectionOnDrag
 // 接管，所以把 Shift 也并进多选键、并把 selectionKeyCode 置空，和快捷键面板写的「Shift / ⌘ 点击」对齐。
 const CANVAS_MULTI_SELECT_KEYS = ['Shift', 'Meta', 'Control'];
-type CanvasLibraryMode = 'assets' | 'prompts';
+type CanvasLibraryMode = 'assets' | 'prompts' | 'team';
+
+interface CanvasNoticeAction { label: string; run: () => void }
+
+const TOOL_NOTICE_MS = 1800;
+/** 带动作或多条的提示要留出读完、点按钮的时间。 */
+const TOOL_NOTICE_LONG_MS = 6000;
+const REPRODUCE_CONFLICT_MESSAGE = '画布已更新，请重试';
 
 const CANVAS_CHROME_BUTTON_CLASS = 'grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
@@ -420,12 +442,16 @@ function CanvasEditorInner({
   onSwitchProject: (projectId: string) => void;
 }) {
   const narrowViewport = useNarrowCanvasViewport();
+  const [, setLocation] = useLocation();
   const [document, setDocument] = useState<CanvasDocument | null>(null);
   const [projects, setProjects] = useState<Array<{ project_id: string; name: string }>>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [canvasUiPreferences, setCanvasUiPreferences] = useState<CanvasUiPreferences>(DEFAULT_CANVAS_UI_PREFERENCES);
   const [canvasUiPreferencesError, setCanvasUiPreferencesError] = useState<string | null>(null);
   const [libraryMode, setLibraryMode] = useState<CanvasLibraryMode | null>(null);
+  // 提示条的「看看」等延后回调会在旧渲染的闭包里跑，判断面板开没开要读当前值。
+  const libraryModeRef = useRef(libraryMode);
+  libraryModeRef.current = libraryMode;
   const [creationAssetSaveRequest, setCreationAssetSaveRequest] = useState<CreationAssetSaveRequest | null>(null);
   const [submittingNodeIds, setSubmittingNodeIds] = useState<Set<string>>(() => new Set());
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(() => new Set());
@@ -442,7 +468,6 @@ function CanvasEditorInner({
   const [generationPreferencesOpen, setGenerationPreferencesOpen] = useState(false);
   const [generationPreferencesTab, setGenerationPreferencesTab] = useState<CanvasGenerationPreferencesTab>('image');
   const [generationPreferencesSaving, setGenerationPreferencesSaving] = useState(false);
-  const [viewportZoom, setViewportZoom] = useState(1);
   const [projectRenameDraft, setProjectRenameDraft] = useState<string | null>(null);
   const [projectRenameBusy, setProjectRenameBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -478,6 +503,11 @@ function CanvasEditorInner({
   const [mediaReplaceBusyNodeIds, setMediaReplaceBusyNodeIds] = useState<Set<string>>(() => new Set());
   const [mediaReplaceError, setMediaReplaceError] = useState<{ nodeId: string; message: string } | null>(null);
   const [toolNotice, setToolNotice] = useState<string | null>(null);
+  const [toolNoticeAction, setToolNoticeAction] = useState<CanvasNoticeAction | null>(null);
+  const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
+  const [teamRelatedSha256, setTeamRelatedSha256] = useState<string | null>(null);
+  const [teamLibraryId, setTeamLibraryId] = useState<string | null>(null);
+  const [libraryPanelKey, setLibraryPanelKey] = useState(0);
   const uploadRef = useRef<HTMLInputElement>(null);
   const replaceMediaRef = useRef<HTMLInputElement>(null);
   const editorRegionRef = useRef<HTMLElement>(null);
@@ -531,6 +561,9 @@ function CanvasEditorInner({
   const focusNewNodeHandler = useRef<(node: CanvasNode) => void>(() => undefined);
   const canvasUiPreferencesSaveInFlight = useRef(false);
   const toolNoticeTimer = useRef<number | null>(null);
+  /** 每次渲染换成最新的处理函数；window 监听只挂一次。 */
+  const teamAssetActionRef = useRef<(action: TeamAssetAction) => void>(() => undefined);
+  const pendingTeamAssetAction = useRef<TeamAssetAction | null>(null);
   const latestDocument = useRef<CanvasDocument | null>(null);
   const pendingTextVersions = useRef(new Map<string, string>());
   // Agent 经 MCP 改画布后的重载入口（#92）。用 ref 是因为保存失败分支（flushSave）声明在它之前，
@@ -571,11 +604,24 @@ function CanvasEditorInner({
   const usedPromptAssetRef = useRef(false);
   const [focusVariableNodeId, setFocusVariableNodeId] = useState<string | null>(null);
   const consumeVariableFocus = useCallback(() => setFocusVariableNodeId(null), []);
+  useEffect(() => {
+    const claim = (event: Event) => {
+      const action = (event as CustomEvent<TeamAssetAction>).detail;
+      if (!action) return;
+      event.preventDefault();
+      teamAssetActionRef.current(action);
+    };
+    window.addEventListener(TEAM_ASSET_ACTION_EVENT, claim);
+    return () => window.removeEventListener(TEAM_ASSET_ACTION_EVENT, claim);
+  }, []);
+
   const closeLibrary = useCallback(() => {
     const trigger = libraryMode === 'prompts'
       ? promptLibraryTriggerRef.current
       : assetLibraryTriggerRef.current;
     setLibraryMode(null);
+    setTeamRelatedSha256(null);
+    setTeamLibraryId(null);
     if (!usedPromptAssetRef.current) requestAnimationFrame(() => trigger?.focus());
     usedPromptAssetRef.current = false;
   }, [libraryMode]);
@@ -664,7 +710,7 @@ function CanvasEditorInner({
   const jobsByRunId = useMemo(() => new Map(
     jobs.flatMap(job => job.canvas_run ? [[job.canvas_run.run_id, job] as const] : []),
   ), [jobs]);
-  const { runs: batchRuns, active: activeBatch, acceptRun: acceptBatchRun } = useCanvasBatchRuns(
+  const { active: activeBatch, acceptRun: acceptBatchRun } = useCanvasBatchRuns(
     projectId, acceptJobs, mergeRunDocument, setError,
   );
   const batchBusyRef = useRef(false);
@@ -699,7 +745,6 @@ function CanvasEditorInner({
     setShortcutsOpen(false);
     setGenerationPreferencesOpen(false);
     setGenerationPreferencesSaving(false);
-    setViewportZoom(1);
     setProjectRenameDraft(null);
     setProjectRenameBusy(false);
     setLibraryMode(null);
@@ -779,7 +824,6 @@ function CanvasEditorInner({
         }
         setProjects(projectRows);
         setDocument(normalizeCanvasGroups(hydrated.document));
-        setViewportZoom(canvasDocument.viewport.zoom);
         serverRevision.current = canvasDocument.revision;
         if (hydrated.versionIds.size) {
           dirtyVersion.current += 1;
@@ -1824,68 +1868,79 @@ function CanvasEditorInner({
     );
   }
 
-  const saveNodeToLibrary = useCallback(async (node: CanvasContentNode) => {
+  /** 工具条「保存」/「分享」共用：先落盘（服务端按画布文档核对节点与版本），再取当前版本。 */
+  const persistedCurrentVersion = useCallback(async (node: CanvasContentNode) => {
     const versionId = node.data.current_version_id;
     if (!versionId) {
       setError('这个节点还没有可保存的内容。');
-      return;
+      return null;
     }
-    if (!await persistNow()) return;
+    if (!await persistNow()) return null;
     const version = latestDocument.current?.content_versions[versionId];
     if (!version) {
       setError('这个节点的内容版本已经不存在。');
-      return;
+      return null;
     }
-    if (version.kind === 'text') {
-      setLibraryMode('prompts');
-      setCreationAssetSaveRequest({
-        requestId: crypto.randomUUID(),
-        kind: 'prompt',
-        title: node.title,
-        segments: promptToAssetSegments(version.text),
-        projectId,
-      });
-      return;
-    }
-    if (version.kind === 'image') {
-      setLibraryMode('assets');
-      setCreationAssetSaveRequest({
-        requestId: crypto.randomUUID(),
-        kind: 'image',
-        title: node.title,
-        sourcePath: `canvases/${projectId}/${version.path}`,
-        previewUrl: canvasMediaUrl(projectId, version.version_id),
-        projectId,
-      });
-      return;
-    }
-    setError('第一版创作资产只支持提示词和单张图片。');
-  }, [persistNow, projectId]);
+    return version;
+  }, [persistNow]);
 
-  async function insertCreationAsset(
-    assetId: string,
-    variableValues: Record<string, string>,
-    targetNodeId?: string,
-    position?: CanvasPoint,
-  ) {
-    if (!await persistNow()) return;
+  const saveNodeToLibrary = useCallback(async (node: CanvasContentNode) => {
+    const version = await persistedCurrentVersion(node);
+    if (!version) return;
+    const save = canvasNodeSaveRequest({
+      node,
+      version,
+      projectId,
+      previewUrl: canvasMediaUrl(projectId, version.version_id),
+      requestId: crypto.randomUUID(),
+    });
+    if (!save) {
+      setError('音频不能存为创作资产。');
+      return;
+    }
+    setLibraryMode(save.libraryMode);
+    setCreationAssetSaveRequest(save.request);
+  }, [persistedCurrentVersion, projectId]);
+
+  const shareCanvasResult = useCallback(async (node: CanvasContentNode) => {
+    const version = await persistedCurrentVersion(node);
+    if (!version) return;
+    const request = canvasNodeShareRequest({
+      node,
+      version,
+      projectId,
+      previewUrl: canvasMediaUrl(projectId, version.version_id),
+    });
+    if (!request) {
+      setError('只有生成的图片或视频能分享。');
+      return;
+    }
+    setShareRequest(request);
+  }, [persistedCurrentVersion, projectId]);
+
+  /** 服务端一次锁内往画布里加节点（插入资产 / 复刻）的共用合并：只收新节点、新版本、新连线，
+   *  并发编辑保留，新节点按本地画布避让，整次插入是一步可撤销的历史。
+   *  placement：'each' 逐个节点找空位；'group' 整组按包围盒平移（复刻的组内布局由服务端排好）。
+   *  返回 true = 已合并；失败交给 onError（缺省报错条）。 */
+  async function applyServerInsertion(
+    request: (documentRevision: number) => Promise<CanvasDocument>,
+    {
+      placement = 'each',
+      onError = insertError => setError((insertError as Error).message),
+    }: {
+      placement?: 'each' | 'group';
+      onError?: (error: unknown) => void;
+    } = {},
+  ): Promise<boolean> {
+    if (!await persistNow()) return false;
     const before = latestDocument.current;
-    if (!before) return;
+    if (!before) return false;
     const dirtyAtInsertion = dirtyVersion.current;
     libraryInsertInFlight.current = true;
+    let inserted = false;
     const command = (async () => {
       try {
-        const insertionPosition = position
-          ? placeNewNode(position, CANVAS_DEFAULT_NODE_SIZE)
-          : defaultPosition();
-        const remote = await insertCreationAssetIntoCanvas({
-          projectId,
-          assetId,
-          position: insertionPosition,
-          documentRevision: serverRevision.current,
-          variableValues,
-          targetNodeId,
-        });
+        const remote = await request(serverRevision.current);
         const previousIds = new Set(before.nodes.map(node => node.id));
         const insertedNodes = remote.nodes.filter(node => !previousIds.has(node.id));
         const insertedVersions = Object.fromEntries(
@@ -1900,18 +1955,22 @@ function CanvasEditorInner({
           concurrent.content_versions,
           insertedVersions,
         );
-        const placedInsertedNodes: CanvasNode[] = [];
         const { flowBounds } = canvasPlacementBounds();
-        for (const inserted of insertedNodes) {
-          if (concurrentIds.has(inserted.id)) continue;
-          const placedPosition = placeCanvasNodeWithoutOverlap(
-            inserted.position,
-            [...concurrent.nodes, ...placedInsertedNodes],
-            canvasNodeRenderedSize(inserted, mergedVersions),
-            flowBounds,
-            node => canvasNodeRenderedSize(node, mergedVersions),
-          );
-          placedInsertedNodes.push({ ...inserted, position: placedPosition });
+        const newNodes = insertedNodes.filter(inserted => !concurrentIds.has(inserted.id));
+        const placedInsertedNodes: CanvasNode[] = placement === 'group'
+          ? placeCanvasNodeGroupWithoutOverlap(newNodes, concurrent.nodes, mergedVersions, flowBounds)
+          : [];
+        if (placement === 'each') {
+          for (const inserted of newNodes) {
+            const placedPosition = placeCanvasNodeWithoutOverlap(
+              inserted.position,
+              [...concurrent.nodes, ...placedInsertedNodes],
+              canvasNodeRenderedSize(inserted, mergedVersions),
+              flowBounds,
+              node => canvasNodeRenderedSize(node, mergedVersions),
+            );
+            placedInsertedNodes.push({ ...inserted, position: placedPosition });
+          }
         }
         const remoteInsertedPositions = new Map(
           insertedNodes.map(node => [node.id, node.position] as const),
@@ -1952,8 +2011,9 @@ function CanvasEditorInner({
         setSelectedConnectionIds(new Set());
         setSelectedNodeIds(new Set());
         setFocusVariableNodeId(insertedNodes.find(node => node.type === 'text')?.id ?? null);
+        inserted = true;
       } catch (insertError) {
-        setError((insertError as Error).message);
+        onError(insertError);
       } finally {
         libraryInsertInFlight.current = false;
         if (saveQueued.current) {
@@ -1971,9 +2031,154 @@ function CanvasEditorInner({
     } finally {
       if (libraryInsertCommand.current === command) libraryInsertCommand.current = null;
     }
+    return inserted;
   }
 
+  function insertCreationAsset(
+    assetId: string,
+    variableValues: Record<string, string>,
+    targetNodeId?: string,
+    position?: CanvasPoint,
+  ) {
+    return applyServerInsertion(documentRevision => insertCreationAssetIntoCanvas({
+      projectId,
+      assetId,
+      position: position ? placeNewNode(position, CANVAS_DEFAULT_NODE_SIZE) : defaultPosition(),
+      documentRevision,
+      variableValues,
+      targetNodeId,
+    }));
+  }
+
+  /** 画布复刻：模型按本机 key 匹配，匹配不到传 null（配置节点模型位留空，「先选模型」阻断生效）。 */
+  async function reproduceGenerationAsset(asset: CreationAsset) {
+    if (asset.content.kind !== 'generation') {
+      setError('只有生成资产能复刻。');
+      return;
+    }
+    const recipe = asset.content.snapshot;
+    const match = resolveRecipeModel(recipe, keys);
+    let warnings: string[] = [];
+    const reproduced = await applyServerInsertion(async documentRevision => {
+      const { warnings: responseWarnings, ...remote } = await reproduceIntoCanvas({
+        projectId,
+        assetId: asset.asset_id,
+        position: defaultPosition(),
+        alias: match?.alias ?? null,
+        model: match?.model ?? null,
+        documentRevision,
+      });
+      // warnings 是这次响应的附言，不属于文档：拆出来单独提示，合并只认节点 / 版本 / 连线。
+      warnings = responseWarnings;
+      return remote;
+    }, { placement: 'group', onError: reproduceError => {
+      if (
+        reproduceError instanceof ApiError
+        && reproduceError.status === 409
+        && reproduceError.code === 'revision_conflict'
+      ) {
+        // 别处先改了画布：收服务端文档，再让画师点一次重试（位置与版本号都要按新文档重算）。
+        void reloadDocumentFromServer()
+          .then(() => {
+            setError(REPRODUCE_CONFLICT_MESSAGE);
+            setErrorAction({
+              message: REPRODUCE_CONFLICT_MESSAGE,
+              label: '重试',
+              run: () => {
+                setError(null);
+                void reproduceGenerationAsset(asset);
+              },
+            });
+          })
+          .catch(reloadError => setError((reloadError as Error).message));
+        return;
+      }
+      setError((reproduceError as Error).message);
+    } });
+    if (!reproduced) return;
+    const notices = canvasReproduceNotices(recipe, match, warnings);
+    if (notices.length) announceToolNotice(notices.join('\n'));
+  }
+
+  function openTeamPanel(relatedSha256: string | null, libraryId: string | null = null) {
+    setAddOpen(false);
+    setCreateMenu(null);
+    const open = () => {
+      setTeamRelatedSha256(relatedSha256);
+      setTeamLibraryId(libraryId);
+      setLibraryMode('team');
+      // 面板只在挂载时读初始栏位与初始库：一律换 key 重挂，保证落在团队栏和指定的库上。
+      setLibraryPanelKey(current => current + 1);
+    };
+    if (libraryModeRef.current) creationAssetPanelRef.current?.requestTransition(open);
+    else open();
+  }
+
+  /** 推荐是附加信息：查不到或查询失败都不打断拖入，只在有命中时提示。 */
+  async function suggestRelatedRecipes(sha256: string) {
+    let related: Awaited<ReturnType<typeof listRelatedTeamAssets>>;
+    try {
+      related = await listRelatedTeamAssets(projectId, sha256);
+    } catch {
+      return;
+    }
+    if (!related.length) return;
+    announceToolNotice(`有 ${related.length} 条相关配方`, { label: '看看', run: () => openTeamPanel(sha256) });
+  }
+
+  /** 分享提醒的「复刻」/「看看」：画布页认领后就地处理，不再导航去 Studio。 */
+  async function handleTeamAssetAction(action: TeamAssetAction) {
+    if (!document) {
+      // 画布还在展开：先记下，文档到了再执行（复刻要按文档版本号写入）。
+      pendingTeamAssetAction.current = action;
+      return;
+    }
+    if (action.action === 'open') {
+      openTeamPanel(null, action.library_id);
+      return;
+    }
+    try {
+      const result = await adoptTeamAsset(action.library_id, action.asset_id, projectId);
+      if (result.asset.kind !== 'generation') {
+        openTeamPanel(null, action.library_id);
+        return;
+      }
+      await reproduceGenerationAsset(result.asset);
+    } catch (adoptError) {
+      setError(adoptError instanceof Error ? adoptError.message : String(adoptError));
+    }
+  }
+  teamAssetActionRef.current = action => void handleTeamAssetAction(action);
+  const documentLoaded = document !== null;
+  useEffect(() => {
+    const pending = pendingTeamAssetAction.current;
+    if (!documentLoaded || !pending) return;
+    pendingTeamAssetAction.current = null;
+    teamAssetActionRef.current(pending);
+  }, [documentLoaded]);
+
   function handleCanvasDrop(event: DragEvent) {
+    // 团队库的拖放先落成本机创作资产，再走与「资产面板拖入」完全一样的插入路径。
+    // 先看 types：文件拖放不带这个类型，没必要（也不保证能）读 dataTransfer。
+    const teamAsset = Array.from(event.dataTransfer.types ?? []).includes(TEAM_ASSET_DRAG_TYPE)
+      ? readTeamAssetDrag(event.dataTransfer)
+      : null;
+    if (teamAsset) {
+      event.preventDefault();
+      const flow = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      void (async () => {
+        try {
+          const result = await adoptTeamAsset(teamAsset.library_id, teamAsset.entry_id, projectId);
+          const inserted = await insertCreationAsset(result.asset.asset_id, {}, undefined, flow);
+          if (inserted && result.asset.kind === 'media' && result.asset.content.kind === 'media') {
+            await suggestRelatedRecipes(result.asset.content.sha256);
+          }
+        } catch (adoptError) {
+          setError(adoptError instanceof Error ? adoptError.message : String(adoptError));
+        }
+      })();
+      return;
+    }
     const files = Array.from(event.dataTransfer.files ?? []);
     if (files.length) {
       // 不 preventDefault 的话浏览器按默认行为打开这个文件，整个应用被顶掉，
@@ -2284,11 +2489,31 @@ function CanvasEditorInner({
     announceToolNotice(`已复制 ${nodes.length} 个节点`);
   }
 
+  async function pasteCanvasNodesFromOtherProject(payload: CanvasClipboardPayload) {
+    // 位置沿用源画布的相对布局，整组由 applyServerInsertion 按 group 放到不重叠的位置。
+    const idMap = new Map(payload.nodes.map(node => [node.id, makeId(node.type)]));
+    const topZ = Math.max(0, ...(document?.nodes.map(node => node.z_index) ?? []));
+    const nodes = payload.nodes.map((source, index) => cloneCanvasNode(
+      source, idMap, source.position, topZ + index + 1,
+    ));
+    const connections = payload.connections.flatMap(connection => {
+      const sourceId = idMap.get(connection.source_node_id);
+      const targetId = idMap.get(connection.target_node_id);
+      return sourceId && targetId
+        ? [{ ...structuredClone(connection), id: makeId('connection'), source_node_id: sourceId, target_node_id: targetId }]
+        : [];
+    });
+    const pasted = await applyServerInsertion(documentRevision => pasteIntoCanvas({
+      projectId,
+      sourceProjectId: payload.source_project_id,
+      nodes,
+      connections,
+      documentRevision,
+    }), { placement: 'group' });
+    if (pasted) announceToolNotice(`已从另一张画布粘贴 ${nodes.length} 个节点`);
+  }
+
   function pasteCanvasNodes(payload: CanvasClipboardPayload) {
-    if (payload.source_project_id !== projectId) {
-      announceToolNotice('节点剪贴板只在当前画布项目内可用');
-      return;
-    }
     if (!payload.nodes.length) return;
     pasteSequence.current += 1;
     const offset = 28 * pasteSequence.current;
@@ -2384,12 +2609,15 @@ function CanvasEditorInner({
       if (!clipboard) return;
       const serialized = clipboard.getData(CANVAS_NODE_CLIPBOARD_TYPE);
       const internalPayload = nodeClipboard.current;
+      // 同一标签页内复制过的用内存里的对象；别的画布（另一标签页 / 切换项目后）只剩系统剪贴板
+      // 里的 JSON，解出来一样能用——媒体归属由服务端粘贴接口处理。
       const payload = internalPayload && serialized === JSON.stringify(internalPayload)
         ? internalPayload
-        : null;
+        : parseCanvasClipboardPayload(serialized);
       if (payload) {
         event.preventDefault();
-        pasteCanvasNodes(payload);
+        if (payload.source_project_id === projectId) pasteCanvasNodes(payload);
+        else void pasteCanvasNodesFromOtherProject(payload);
         return;
       }
       const image = Array.from(clipboard.items)
@@ -2558,9 +2786,14 @@ function CanvasEditorInner({
     finally { runSubmissionInFlight.current = false; setBatchCommandBusy(false); }
   }
 
-  const stopBatch = useCallback(async (batchId: string) => {
-    acceptBatchRun(await cancelCanvasBatch(projectId, batchId));
-  }, [projectId, acceptBatchRun]);
+  const stopActiveBatch = useCallback(async () => {
+    if (!activeBatch) return;
+    try {
+      acceptBatchRun(await cancelCanvasBatch(projectId, activeBatch.batch_id));
+    } catch (failure) {
+      setError((failure as Error).message);
+    }
+  }, [activeBatch, projectId, acceptBatchRun]);
 
   const submitRun = useCallback(async (nodeId: string) => {
     if (batchBusyRef.current) { setError('批量执行期间请先等待或停止'); return; }
@@ -3150,13 +3383,16 @@ function CanvasEditorInner({
 
   const previewLayerStack = useCallback((nodeId: string) => setLayerPreviewId(nodeId), []);
 
-  const announceToolNotice = useCallback((message: string) => {
+  /** 多条提示用换行分隔，逐行显示。 */
+  const announceToolNotice = useCallback((message: string, action: CanvasNoticeAction | null = null) => {
     setToolNotice(message);
+    setToolNoticeAction(action);
     if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
     toolNoticeTimer.current = window.setTimeout(() => {
       setToolNotice(null);
+      setToolNoticeAction(null);
       toolNoticeTimer.current = null;
-    }, 1800);
+    }, action || message.includes('\n') ? TOOL_NOTICE_LONG_MS : TOOL_NOTICE_MS);
   }, []);
 
   const copyPrompt = useCallback(async (node: CanvasContentNode) => {
@@ -3651,38 +3887,6 @@ function CanvasEditorInner({
     announceToolNotice(`已创建“${node.title}”的下游视频节点`);
   }, [announceToolNotice, commit, jobsByResultNodeId, keys]);
 
-  const createImageConfigFromText = useCallback((nodeId: string) => {
-    const current = latestDocument.current;
-    const source = current?.nodes.find(node => node.id === nodeId);
-    const version = source && source.type === 'text' && source.data.current_version_id
-      ? current?.content_versions[source.data.current_version_id]
-      : null;
-    if (!current || !source || source.type !== 'text' || version?.kind !== 'text') {
-      setError('这个文本节点暂时无法创建图片生成配置。');
-      return;
-    }
-    const configId = makeId('config');
-    const next = createConnectedCanvasConfig(
-      current,
-      nodeId,
-      createCanvasGenerationDraft(keys, 'image', {
-        preference: canvasUiPreferences.generation_defaults.image,
-      }),
-      { nodeId: configId, connectionId: makeId('connection') },
-    );
-    if (!next) {
-      setError('无法从这个文本节点创建图片生成配置。');
-      return;
-    }
-    setError(null);
-    commit(() => next, true);
-    setDismissedGenerationPanelNodeId(null);
-    setSelectedConnectionIds(new Set());
-    setSelectedNodeIds(new Set());
-    setAddOpen(false);
-    setCreateMenu(null);
-  }, [canvasUiPreferences.generation_defaults.image, commit, keys]);
-
   const createImageFromSource = useCallback((nodeId: string) => {
     const current = latestDocument.current;
     if (!current) return;
@@ -3691,7 +3895,7 @@ function CanvasEditorInner({
       createCanvasGenerationDraft(keys, 'image', {
         preference: canvasUiPreferences.generation_defaults.image,
       }), { nodeId: newNodeId, connectionId: makeId('connection') }, 'image');
-    if (!next) { setError('这个节点没有可用的图片内容。'); return; }
+    if (!next) { setError('这个节点没有可用的内容。'); return; }
     setError(null);
     commit(() => next, true);
     setDismissedGenerationPanelNodeId(null);
@@ -4118,6 +4322,8 @@ function CanvasEditorInner({
     consumeVariableFocus,
     batchBusy: Boolean(activeBatch),
     prepareBatch,
+    activeBatch: activeBatch ? { scopeNodeId: activeBatch.scope_node_id, stopping: activeBatch.status === 'stopping' } : undefined,
+    stopActiveBatch,
     uploadBatchImages,
     projectId,
     materialReferences,
@@ -4162,10 +4368,10 @@ function CanvasEditorInner({
     renameNode,
     updateText,
     setTextEditing,
-    createImageConfigFromText,
     createImageFromSource,
     recordHistory: recordHistorySnapshot,
     saveAsset: saveNodeToLibrary,
+    shareResult: shareCanvasResult,
     copyPrompt,
     reversePrompt,
     createLayerDecomposition,
@@ -4187,6 +4393,7 @@ function CanvasEditorInner({
   }), [
     activeBatch,
     prepareBatch,
+    stopActiveBatch,
     uploadBatchImages,
     beginMaterialPick,
     cancelRun,
@@ -4195,7 +4402,6 @@ function CanvasEditorInner({
     connectedMaterialNodeIdsByNodeId,
     completeNodeResize,
     copyPrompt,
-    createImageConfigFromText,
     createImageFromSource,
     layerParentByNodeId,
     locateNode,
@@ -4239,6 +4445,7 @@ function CanvasEditorInner({
     retryRun,
     renameNode,
     saveNodeToLibrary,
+    shareCanvasResult,
     selectedNodeIds.size,
     selectCandidate,
     selectOnlyNode,
@@ -4315,7 +4522,7 @@ function CanvasEditorInner({
           settings: { ...current.settings, show_minimap: !current.settings.show_minimap },
         }), true)}
       ><MapPinned /></button>
-      <ToolButton buttonRef={assetLibraryTriggerRef} label="图片资产" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('assets'); else if (libraryMode === 'assets') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('assets')); }}><Library /></ToolButton>
+      <ToolButton buttonRef={assetLibraryTriggerRef} label="媒体资产" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('assets'); else if (libraryMode === 'assets') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('assets')); }}><Library /></ToolButton>
       <ToolButton buttonRef={promptLibraryTriggerRef} label="提示词资产" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('prompts'); else if (libraryMode === 'prompts') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('prompts')); }}><WandSparkles /></ToolButton>
       <ToolButton
         buttonRef={generationPreferencesTriggerRef}
@@ -4452,7 +4659,6 @@ function CanvasEditorInner({
             interruptViewportCommand();
             viewportSync.current = null;
           }}
-          onMove={(_, viewport: Viewport) => setViewportZoom(viewport.zoom)}
           onPaneClick={() => {
             setCreateMenu(null);
             if (materialPick) {
@@ -4467,7 +4673,7 @@ function CanvasEditorInner({
             const types = event.dataTransfer.types;
             // 'Files' 也要接：dragover 不 preventDefault 时 drop 事件根本不会派发，
             // 浏览器直接导航到被拖进来的文件。
-            if (!types.includes('Files')) return;
+            if (!types.includes('Files') && !types.includes(TEAM_ASSET_DRAG_TYPE)) return;
             event.preventDefault();
             event.dataTransfer.dropEffect = 'copy';
           }}
@@ -4498,12 +4704,8 @@ function CanvasEditorInner({
           nodesConnectable={!activeBatch}
           onlyRenderVisibleElements
           className={cn('canvas-flow', connectionInProgress && 'canvas-flow-connecting')}
-          style={{
-            '--canvas-handle-size': `${48 / viewportZoom}px`,
-            '--canvas-handle-dot-size': `${12 / viewportZoom}px`,
-            '--canvas-handle-border-size': `${2 / viewportZoom}px`,
-          } as CSSProperties}
         >
+          <CanvasZoomCssVars target={editorRegionRef} />
           {background && <Background variant={background} gap={22} size={1} />}
           {document.settings.show_minimap && !materialPick && (
             <MiniMap
@@ -4588,44 +4790,26 @@ function CanvasEditorInner({
         )}
 
         {!materialPick && (
-          <div className="canvas-zoom-dock absolute bottom-3 left-3 z-20 hidden items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
-          {!narrowViewport && renderCanvasConfigControls('desktop')}
-          <span className="mx-1 h-7 w-px bg-border" aria-hidden="true" />
-          <button
-            type="button"
-            aria-label="缩小画布"
-            disabled={viewportZoom <= CANVAS_MIN_ZOOM + 0.0005}
-            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={() => {
+          <CanvasZoomDock
+            configControls={narrowViewport ? null : renderCanvasConfigControls('desktop')}
+            onZoomOut={() => {
               if (getZoom() <= CANVAS_MIN_ZOOM + 0.0005) return;
               void runViewportCommand(() => zoomOut({ duration: 150 }));
             }}
-          ><Minus className="size-4" aria-hidden="true" /></button>
-          <input
-            type="range"
-            min="8"
-            max="250"
-            step="1"
-            value={Math.round(viewportZoom * 100)}
-            aria-label="画布缩放百分比"
-            aria-valuetext={`${Math.round(viewportZoom * 100)}%`}
-            className="h-1 w-24 cursor-pointer accent-primary sm:w-32"
-            onPointerDown={beginZoomSlider}
-            onPointerUp={finishZoomSlider}
-            onPointerCancel={finishZoomSlider}
-            onKeyDown={event => {
-              if (isRangeAdjustmentKey(event.key)) beginZoomSlider();
+            onZoomIn={() => {
+              if (getZoom() >= CANVAS_MAX_ZOOM - 0.0005) return;
+              void runViewportCommand(() => zoomIn({ duration: 150 }));
             }}
-            onKeyUp={event => {
-              if (isRangeAdjustmentKey(event.key)) finishZoomSlider();
+            onResetZoom={() => {
+              if (Math.abs(getZoom() - 1) < 0.001) return;
+              void runViewportCommand(() => zoomTo(1, { duration: 150 }));
             }}
-            onBlur={finishZoomSlider}
-            onChange={event => {
+            onSliderBegin={beginZoomSlider}
+            onSliderFinish={finishZoomSlider}
+            onSliderChange={zoom => {
               const shouldScheduleCommit = !zoomSliderActive.current
                 || zoomSliderCommitTimer.current !== null;
               if (!zoomSliderActive.current) beginZoomSlider();
-              const zoom = Number(event.target.value) / 100;
-              setViewportZoom(zoom);
               const previousMove = zoomSliderMove.current;
               zoomSliderMove.current = previousMove
                 ? previousMove.then(() => zoomTo(zoom), () => zoomTo(zoom))
@@ -4633,27 +4817,6 @@ function CanvasEditorInner({
               if (shouldScheduleCommit) scheduleZoomSliderCommit();
             }}
           />
-          <span aria-live="polite" className="w-11 text-right text-xs tabular-nums text-muted-foreground">{Math.round(viewportZoom * 100)}%</span>
-          <button
-            type="button"
-            aria-label="放大画布"
-            disabled={viewportZoom >= CANVAS_MAX_ZOOM - 0.0005}
-            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={() => {
-              if (getZoom() >= CANVAS_MAX_ZOOM - 0.0005) return;
-              void runViewportCommand(() => zoomIn({ duration: 150 }));
-            }}
-          ><Plus className="size-4" aria-hidden="true" /></button>
-          <button
-            type="button"
-            aria-label="复位画布缩放到 100%"
-            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            onClick={() => {
-              if (Math.abs(getZoom() - 1) < 0.001) return;
-              void runViewportCommand(() => zoomTo(1, { duration: 150 }));
-            }}
-          ><Scan className="size-4" aria-hidden="true" /></button>
-          </div>
         )}
 
         {materialPick && (
@@ -4827,10 +4990,11 @@ function CanvasEditorInner({
 
         {libraryMode && (
           <CreationAssetPanel
+            key={libraryPanelKey}
             ref={creationAssetPanelRef}
             className="canvas-library-panel"
             projectId={projectId}
-            initialKind={libraryMode === 'prompts' ? 'prompt' : 'image'}
+            initialKind={libraryMode === 'prompts' ? 'prompt' : libraryMode === 'team' ? 'team' : 'media'}
             saveRequest={creationAssetSaveRequest}
             onSaveRequestHandled={requestId => {
               setCreationAssetSaveRequest(current => current?.requestId === requestId ? null : current);
@@ -4861,15 +5025,31 @@ function CanvasEditorInner({
               }
               void insertCreationAsset(asset.asset_id, {});
             }}
-            onUseImage={(asset: CreationAsset) => {
+            onUseMedia={(asset: CreationAsset) => {
               void insertCreationAsset(
                 asset.asset_id,
                 {},
                 selectedNode && selectedDraft ? selectedNode.id : undefined,
               );
             }}
+            onOpenSettings={canvasId => setLocation(`/settings?canvas=${encodeURIComponent(canvasId)}`)}
+            onTeamAssetAdopted={result => announceToolNotice(result.created ? '已加入资产库' : '已在你的资产库')}
+            onReproduce={asset => void reproduceGenerationAsset(asset)}
+            teamRelatedSha256={teamRelatedSha256}
+            initialTeamLibraryId={teamLibraryId}
           />
         )}
+
+        <TeamShareDialog
+          request={shareRequest}
+          projectId={projectId}
+          onClose={() => setShareRequest(null)}
+          onShared={(_entry, libraryName) => announceToolNotice(`已分享到 ${libraryName}`)}
+          onOpenSettings={() => {
+            setShareRequest(null);
+            setLocation(`/settings?canvas=${encodeURIComponent(projectId)}`);
+          }}
+        />
 
         {narrowViewport && generationPanelOpen && selectedNode && selectedDraft && (
           <CanvasMobileGenerationPanel
@@ -4892,6 +5072,7 @@ function CanvasEditorInner({
           <CanvasActionFeedback
             error={null}
             notice={toolNotice}
+            noticeAction={toolNoticeAction}
             action={errorAction && errorAction.message === error ? errorAction : null} onDismissError={() => setError(null)}
             className="absolute right-3 top-20 z-30 max-w-sm items-end md:right-4"
           />
@@ -4996,9 +5177,6 @@ function CanvasEditorInner({
 
         <CanvasBatchConfirmation run={batchConfirmation} busy={batchCommandBusy} error={batchError}
           onClose={() => setBatchConfirmation(null)} onStart={() => void confirmBatch()} />
-        <div className="absolute bottom-16 right-3 z-20 md:bottom-3">
-          <CanvasBatchResults projectId={projectId} runs={batchRuns} resolveVersion={resolveVersion} onCancel={stopBatch} onPreview={previewContent} />
-        </div>
         <Dialog open={layerPreviewNode?.type === 'layer_stack'} onOpenChange={open => { if (!open) setLayerPreviewId(null); }}>
           {layerPreviewNode?.type === 'layer_stack' && <CanvasLayerStackPreview key={layerPreviewNode.id}
             node={layerPreviewNode} projectId={projectId} resolveVersion={resolveVersion}
@@ -5154,10 +5332,11 @@ function CanvasPreview({
   );
 }
 
-function CanvasActionFeedback({ error, notice, action = null, onDismissError, className }: {
+function CanvasActionFeedback({ error, notice, action = null, noticeAction = null, onDismissError, className }: {
   error: string | null;
   notice: string | null;
-  action?: { label: string; run: () => void } | null;
+  action?: CanvasNoticeAction | null;
+  noticeAction?: CanvasNoticeAction | null;
   onDismissError: () => void;
   className?: string;
 }) {
@@ -5178,7 +5357,20 @@ function CanvasActionFeedback({ error, notice, action = null, onDismissError, cl
           <button type="button" aria-label="关闭错误提示" onClick={onDismissError}><X className="size-4" /></button>
         </div>
       )}
-      {notice && <div role="status" className="rounded-lg border border-border bg-popover px-3 py-2 text-sm text-foreground shell-glow">{notice}</div>}
+      {notice && (
+        <div role="status" className="flex min-w-0 items-start gap-2 rounded-lg border border-border bg-popover px-3 py-2 text-sm text-foreground shell-glow">
+          <div className="min-w-0 flex-1">
+            {notice.split('\n').map((line, index) => <p key={index}>{line}</p>)}
+          </div>
+          {noticeAction && (
+            <button
+              type="button"
+              className="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              onClick={noticeAction.run}
+            >{noticeAction.label}</button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -5508,4 +5700,109 @@ function cloneCanvasDraft(
 
 function makeId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
+}
+
+function parseCanvasClipboardPayload(serialized: string): CanvasClipboardPayload | null {
+  if (!serialized) return null;
+  try {
+    const parsed: unknown = JSON.parse(serialized);
+    if (
+      typeof parsed !== 'object' || parsed === null
+      || (parsed as CanvasClipboardPayload).schema_version !== 1
+      || typeof (parsed as CanvasClipboardPayload).source_project_id !== 'string'
+      || !Array.isArray((parsed as CanvasClipboardPayload).nodes)
+      || !Array.isArray((parsed as CanvasClipboardPayload).connections)
+    ) return null;
+    return parsed as CanvasClipboardPayload;
+  } catch {
+    return null;
+  }
+}
+
+const canvasFlowZoom = (state: ReactFlowState) => state.transform[2];
+
+/** 连接把手随缩放反比放大，靠 CSS 变量。变量写在编辑器外壳上由 .canvas-flow 继承——
+ *  原来是把 zoom 存成 CanvasEditor 的 state、每帧平移 / 缩放都让 5000 行的主树整棵重渲染，
+ *  几十个节点就卡。这里只订阅 store 里的 zoom，主树不再知道每一帧。 */
+function CanvasZoomCssVars({ target }: { target: RefObject<HTMLElement> }) {
+  const zoom = useStore(canvasFlowZoom);
+  useEffect(() => {
+    const element = target.current;
+    if (!element) return;
+    element.style.setProperty('--canvas-handle-size', `${48 / zoom}px`);
+    element.style.setProperty('--canvas-handle-dot-size', `${12 / zoom}px`);
+    element.style.setProperty('--canvas-handle-border-size', `${2 / zoom}px`);
+  }, [target, zoom]);
+  return null;
+}
+
+const zoomDockButtonClass = 'grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40';
+
+function CanvasZoomDock({
+  configControls,
+  onZoomOut,
+  onZoomIn,
+  onResetZoom,
+  onSliderBegin,
+  onSliderFinish,
+  onSliderChange,
+}: {
+  configControls: ReactNode;
+  onZoomOut: () => void;
+  onZoomIn: () => void;
+  onResetZoom: () => void;
+  onSliderBegin: () => void;
+  onSliderFinish: () => void;
+  onSliderChange: (zoom: number) => void;
+}) {
+  const zoom = useStore(canvasFlowZoom);
+  const percent = Math.round(zoom * 100);
+  return (
+    <div className="canvas-zoom-dock absolute bottom-3 left-3 z-20 hidden items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
+      {configControls}
+      <span className="mx-1 h-7 w-px bg-border" aria-hidden="true" />
+      <button
+        type="button"
+        aria-label="缩小画布"
+        disabled={zoom <= CANVAS_MIN_ZOOM + 0.0005}
+        className={zoomDockButtonClass}
+        onClick={onZoomOut}
+      ><Minus className="size-4" aria-hidden="true" /></button>
+      <input
+        type="range"
+        min={Math.round(CANVAS_MIN_ZOOM * 100)}
+        max={Math.round(CANVAS_MAX_ZOOM * 100)}
+        step="1"
+        value={percent}
+        aria-label="画布缩放百分比"
+        aria-valuetext={`${percent}%`}
+        className="h-1 w-24 cursor-pointer accent-primary sm:w-32"
+        onPointerDown={onSliderBegin}
+        onPointerUp={onSliderFinish}
+        onPointerCancel={onSliderFinish}
+        onKeyDown={event => {
+          if (isRangeAdjustmentKey(event.key)) onSliderBegin();
+        }}
+        onKeyUp={event => {
+          if (isRangeAdjustmentKey(event.key)) onSliderFinish();
+        }}
+        onBlur={onSliderFinish}
+        onChange={event => onSliderChange(Number(event.target.value) / 100)}
+      />
+      <span aria-live="polite" className="w-11 text-right text-xs tabular-nums text-muted-foreground">{percent}%</span>
+      <button
+        type="button"
+        aria-label="放大画布"
+        disabled={zoom >= CANVAS_MAX_ZOOM - 0.0005}
+        className={zoomDockButtonClass}
+        onClick={onZoomIn}
+      ><Plus className="size-4" aria-hidden="true" /></button>
+      <button
+        type="button"
+        aria-label="复位画布缩放到 100%"
+        className={zoomDockButtonClass}
+        onClick={onResetZoom}
+      ><Scan className="size-4" aria-hidden="true" /></button>
+    </div>
+  );
 }

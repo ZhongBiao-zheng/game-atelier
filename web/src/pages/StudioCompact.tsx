@@ -14,6 +14,7 @@ import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/video
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import type { JobKind, JobParams } from '@/schema/jobs';
 import { readStudioDraft, writeStudioDraft } from './studioDraft';
+import { convergeModelSelection, modelsForKind } from './studioModelSelection';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
 
@@ -110,7 +111,11 @@ export function StudioCompact() {
         const selected = savedKey ?? usable[0];
         setProviderAlias(selected?.alias ?? '');
         const savedModelValid = wantedModel && selected?.models.some((m) => m.id === wantedModel);
-        const nextModel = savedModelValid ? wantedModel! : selected?.models[0]?.id ?? '';
+        // 没有可恢复的模型时取本类第一个；该 key 没有本类模型就先占一个，交给收敛 effect 换 key。
+        const initialKind = draft?.kind ?? saved.kind ?? 'image';
+        const nextModel = savedModelValid
+          ? wantedModel!
+          : modelsForKind(selected, initialKind)[0]?.id ?? selected?.models[0]?.id ?? '';
         setModel(nextModel);
       })
       .catch(() => {
@@ -121,21 +126,18 @@ export function StudioCompact() {
     };
   }, [saved, draft]);
 
+  // 只在切换生成类型 / keys 加载时收敛；alias / model 不入依赖，用户手动改选不被抢回。
   useEffect(() => {
-    if (kind !== 'video' || keys.length === 0) return;
-    const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
-    const cur = keys.find((k) => k.alias === providerAlias);
-    if (cur && videoModelsOf(cur).length > 0) return;
-    const v = keys.find((k) => videoModelsOf(k).length > 0);
-    if (v) {
-      setProviderAlias(v.alias);
-      setModel(videoModelsOf(v)[0]?.id ?? '');
-    }
+    const next = convergeModelSelection(keys, kind, providerAlias, model);
+    if (!next) return;
+    setProviderAlias(next.alias);
+    setModel(next.model);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, keys]);
 
   useEffect(() => {
-    if (kind !== 'video') return;
+    // 模型未定时不按兜底 caps 钳制，选了模型再按它的能力收。
+    if (kind !== 'video' || !model) return;
     const selModel = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
     const caps = videoControlCaps(model, selModel?.protocol);
     if (!caps.modes.includes(videoMode)) setVideoMode(caps.modes[0]);

@@ -38,6 +38,8 @@ claude --plugin-dir .
 ```
 
 > Windows 同事详细步骤见 [`docs/windows-install-checklist.md`](docs/windows-install-checklist.md)。
+>
+> 团队库目录格式（供其他工具读写）见 [`docs/team-library-format.md`](docs/team-library-format.md)。
 
 ---
 

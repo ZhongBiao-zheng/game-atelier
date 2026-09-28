@@ -13,7 +13,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, BookmarkPlus, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
   useRef, useState,
@@ -109,6 +109,7 @@ import {
   switchCanvasGenerationDraft,
   type CanvasPendingInput,
 } from '@/pages/canvasEditorModel';
+import { isSavableCanvasVersion, isShareableCanvasVersion } from '@/pages/canvasTeamActions';
 
 export type CanvasFlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
 /** 本地媒体操作（抠图 / 裁剪 / 切图 / 放大）进行中的占位节点：不在文档里，结果节点落地即撤。 */
@@ -126,6 +127,9 @@ export interface CanvasGenerationPanelContextValue {
 export interface CanvasNodeContextValue {
   batchBusy?: boolean;
   prepareBatch?: (nodeId: string) => Promise<void>;
+  /** 正在跑的批量执行：只有它的分组节点显示「停止」，停止中不重复发取消。 */
+  activeBatch?: { scopeNodeId: string; stopping: boolean };
+  stopActiveBatch?: () => Promise<void>;
   uploadBatchImages?: (nodeId: string, files: File[], itemId?: string) => Promise<void>;
   projectId: string;
   layerParentByNodeId?: ReadonlyMap<string, { nodeId: string; title: string }>;
@@ -181,10 +185,11 @@ export interface CanvasNodeContextValue {
   renameNode: (id: string, title: string) => void;
   updateText: (id: string, text: string) => void;
   setTextEditing?: (id: string, editing: boolean) => void;
-  createImageConfigFromText: (id: string) => void;
   createImageFromSource?: (id: string) => void;
   recordHistory: () => void;
   saveAsset: (node: CanvasContentNode) => Promise<void>;
+  /** 分享生成结果到团队库；不传就不显示「分享」。 */
+  shareResult?: (node: CanvasContentNode) => void;
   copyPrompt: (node: CanvasContentNode) => Promise<void>;
   reversePrompt: (node: CanvasContentNode) => Promise<void>;
   createLayerDecomposition: (node: Extract<CanvasContentNode, { type: 'image' }>) => void;
@@ -482,6 +487,12 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     restoreTextEditingFocus();
   }
 
+  function toggleHidden() {
+    if (!context) return;
+    context.recordHistory();
+    context.updateNode(node.id, candidate => ({ ...candidate, hidden: !candidate.hidden }));
+  }
+
   function setTextScale(direction: -1 | 1) {
     if (!context || node.type !== 'text') return;
     const scales = ['xs', 'sm', 'base'] as const;
@@ -627,6 +638,17 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               {nodeJob.cancel_requested_at ? <LoaderCircle /> : <Square />}
             </MediaToolButton>
           )}
+          {context.activeBatch?.scopeNodeId === node.id && (
+            // 批量的范围节点不一定是分组：输入连着批量素材节点的普通节点也会发起批量执行。
+            <MediaToolButton
+              label={context.activeBatch.stopping ? `正在停止 ${node.title} 的批量执行` : `停止 ${node.title} 的批量执行`}
+              text="停止批量"
+              disabled={context.activeBatch.stopping}
+              onClick={() => void context.stopActiveBatch?.()}
+            >
+              {context.activeBatch.stopping ? <LoaderCircle /> : <Square />}
+            </MediaToolButton>
+          )}
           {emptyMediaNode ? (
             <MediaToolButton
               label={`上传${CANVAS_GENERATION_MODE_LABELS[emptyMediaNode.type]}`}
@@ -669,6 +691,23 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               onIncreaseText={() => setTextScale(1)}
             />
           )}
+          {isCanvasContentNode(node) && isSavableCanvasVersion(content) && (
+            <MediaToolButton label={`保存 ${node.title}`} text="保存" onClick={() => void context.saveAsset(node)}>
+              <BookmarkPlus />
+            </MediaToolButton>
+          )}
+          {isCanvasContentNode(node) && context.shareResult && isShareableCanvasVersion(content) && (
+            <MediaToolButton label={`分享 ${node.title}`} text="分享" onClick={() => context.shareResult?.(node)}>
+              <Share2 />
+            </MediaToolButton>
+          )}
+          <MediaToolButton
+            label={node.hidden ? `显示 ${node.title} 的内容` : `隐藏 ${node.title} 的内容`}
+            text={node.hidden ? '显示' : '隐藏'}
+            onClick={toggleHidden}
+          >
+            {node.hidden ? <Eye /> : <EyeOff />}
+          </MediaToolButton>
         </div>
       </NodeToolbar>
       {node.type === 'image' && mediaCandidates.length > 0 && (
@@ -751,8 +790,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
             {canvasNodeRunDisplayError(context.mediaReplaceError.message, '替换失败，请稍后重试')}
           </p>
         )}
-        <div className={cn('h-full', node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-secondary/20', node.type === 'text' ? 'min-h-32'
-          : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44')}>
+        <div
+          data-canvas-node-hidden={node.hidden ? 'true' : undefined}
+          className={cn('h-full', node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-secondary/20', node.type === 'text' ? 'min-h-32'
+            : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44', node.hidden && 'canvas-node-hidden', node.hidden && node.type === 'text' && 'canvas-node-hidden-text')}
+        >
           {node.type === 'text' && (
             content?.kind === 'text' && (isEditingInlineText || promptVariableParts(content.text).some(part => part.kind === 'variable')) ? (
               <div className="nodrag nowheel h-full overflow-y-auto" onPointerDown={event => event.stopPropagation()} onBlur={event => {
@@ -768,6 +810,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
                     context.recordHistory();
                     if (context.focusVariableNodeId === node.id) context.consumeVariableFocus?.();
                   }}
+                  onEditingChange={editing => setTextEditing?.(node.id, editing)}
                   onChange={text => context.updateText(node.id, text)}
                   className="h-full"
                 />
@@ -1448,7 +1491,7 @@ function CanvasNodeToolbar({
             label={`用 ${node.title} 生成图片`}
             text="生成图片"
             disabled={content?.kind !== 'text'}
-            onClick={() => context.createImageConfigFromText(node.id)}
+            onClick={() => context.createImageFromSource?.(node.id)}
           >
             <FileImage />
           </MediaToolButton>
@@ -2148,6 +2191,9 @@ export function CanvasGenerationComposer({
         disabledMentionHint={usesVideoFrameSlots ? '首尾帧模式不使用 @' : undefined}
         className="max-h-[50vh]"
         onFocus={context.recordHistory}
+        // 用独立 key：node.id 那把在合并任务结果时还兼作「正文有本地未存改动」的判据，
+        // 结果节点自己就带生成面板，改下一轮提示词不能让刚出的图被当成本地正文挡在外面。
+        onEditingChange={editing => context.setTextEditing?.(`prompt:${node.id}`, editing)}
         onChange={prompt => updateDraft(current => ({
           ...current,
           prompt,

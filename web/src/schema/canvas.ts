@@ -158,6 +158,8 @@ interface CanvasNodeBase {
   position: CanvasPoint;
   size?: CanvasSize | null;
   z_index: number;
+  /** 内容打码：只影响显示，连线 / 导出 / 参考照常。 */
+  hidden?: boolean;
 }
 
 export interface CanvasTextNode extends CanvasNodeBase {
@@ -450,6 +452,11 @@ export interface CanvasMediaOperationResult {
 export interface CanvasRun {
   job: Job;
   document: CanvasDocument;
+}
+
+/** 画布复刻的结果：与创作资产插入画布同样返回整份文档，另带没能带过来的内容说明。 */
+export interface CanvasReproduceResponse extends CanvasDocument {
+  warnings: string[];
 }
 
 export interface CanvasPluginState {

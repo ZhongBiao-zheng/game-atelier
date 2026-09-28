@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { canvasMediaUrl, downloadCanvasLayers } from './canvas';
+import { canvasMediaUrl, downloadCanvasLayers, reproduceIntoCanvas } from './canvas';
 
 const BASE = '/api/canvas/projects/canvas-1/versions/v-1/media';
 
@@ -70,5 +70,51 @@ describe('canvasMediaUrl', () => {
     // 拖节点边框时宽度每一帧都在变。URL 只有几个取值，浏览器才不会把同一张图重拉几十遍。
     const urls = new Set([260, 300, 400, 511, 512].map(width => canvasMediaUrl('canvas-1', 'v-1', width)));
     expect([...urls]).toEqual([`${BASE}?w=512`]);
+  });
+});
+
+describe('reproduceIntoCanvas', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('posts the reproduce request with the document revision and returns warnings', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ revision: 8, nodes: [], edges: [], warnings: ['蒙版没有带过来'] }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await reproduceIntoCanvas({
+      projectId: 'canvas 1',
+      assetId: 'asset/1',
+      position: { x: 10, y: 20 },
+      alias: 'hk',
+      model: 'gpt-image-1',
+      documentRevision: 7,
+    });
+    expect(result.warnings).toEqual(['蒙版没有带过来']);
+    expect(result.revision).toBe(8);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/canvas/projects/canvas%201/creation-assets/asset%2F1/reproduce');
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('If-Match')).toBe('7');
+    expect(JSON.parse(String(init.body))).toEqual({ position: { x: 10, y: 20 }, alias: 'hk', model: 'gpt-image-1' });
+  });
+
+  it('sends null model and alias when the recipe model is not available locally', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ warnings: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await reproduceIntoCanvas({
+      projectId: 'c', assetId: 'a', position: { x: 0, y: 0 }, alias: null, model: null, documentRevision: 1,
+    });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({ position: { x: 0, y: 0 }, alias: null, model: null });
+  });
+
+  it('maps a revision conflict to a Chinese error with its code', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: { code: 'revision_conflict', message: '画布已在别处改动' } }), { status: 409 },
+    )));
+    await expect(reproduceIntoCanvas({
+      projectId: 'c', assetId: 'a', position: { x: 0, y: 0 }, alias: null, model: null, documentRevision: 1,
+    })).rejects.toMatchObject({ status: 409, code: 'revision_conflict' });
   });
 });

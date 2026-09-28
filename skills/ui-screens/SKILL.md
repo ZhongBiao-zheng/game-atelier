@@ -2,11 +2,7 @@
 name: ui-screens
 version: 1.1.0
 description: |
-  游戏 UI 页面延展：读锚三文档，按玩家旅程 8 步审计推带优先级的页面清单，
-  画师批准范围后写当前 UI 方案的 screens/screen-map.md（清单表 + 每页契约）。
-  本 skill 只产 screen-map，不生图——逐页生成交给 ui-page 从 map 取契约基础。
-  前置门：三锚文档 approved（或 waiver）+ style.md ui.* approved（风格已定稿）。
-  用户要页面清单 / 屏幕地图 / 批量延展页面 / 审计缺页，或调用 /game-atelier:ui-screens 时使用。
+  UI 风格定稿后按玩家旅程查缺页，为 game-atelier 当前 UI 方案写页面清单和每页契约（screen-map），不出图。用户要补全或批量规划页面时用。
 allowed-tools:
   - Bash
   - Read

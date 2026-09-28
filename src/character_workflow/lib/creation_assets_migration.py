@@ -12,12 +12,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.canvas_projects import canvas_project_lock_path
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.jobs import job_lock, write_job_under_lock
-from character_workflow.lib.schemas import CanvasDocument, Job
+from character_workflow.lib.schemas import CanvasDocument, CreationAssetCatalog, Job
 
 
 def migrate_creation_assets_to_single_content() -> dict[str, Any] | None:
@@ -25,7 +27,8 @@ def migrate_creation_assets_to_single_content() -> dict[str, Any] | None:
     if not catalog_path.is_file():
         return None
     raw = json.loads(catalog_path.read_text(encoding="utf-8"))
-    if raw.get("schema_version") == 2:
+    # v2 之后的任何版本都已越过这一步：后续迁移跑完后再次启动 server 必须静默跳过，不能报错。
+    if raw.get("schema_version") in {2, 3, 4}:
         return None
     if raw.get("schema_version") != 1:
         raise ValueError("unsupported creation asset catalog schema")
@@ -65,6 +68,85 @@ def migrate_creation_assets_to_single_content() -> dict[str, Any] | None:
     }
     atomic_write_json(backup_root / "manifest.json", manifest)
     return {**manifest, "backup_path": str(backup_root)}
+
+
+def migrate_creation_assets_to_v4() -> dict[str, Any] | None:
+    """v2 / v3 → v4，内存里一次改写、整表校验、一次落盘。
+
+    v2→v3：资产种类 image 改名 media；v3→v4：删掉提示词资产的 recommendation 字段。
+    无备份目录之外的改动，不动 blobs。v1 由 `migrate_creation_assets_to_single_content` 先升到 v2。
+    """
+    catalog_path = data_root.creation_assets_dir() / "catalog.json"
+    if not catalog_path.is_file():
+        return None
+    raw = json.loads(catalog_path.read_text(encoding="utf-8"))
+    version = raw.get("schema_version")
+    if version == 4:
+        return None
+    if version not in {2, 3}:
+        raise ValueError("unsupported creation asset catalog schema")
+    step = f"v{version}→v4"
+    # 先在内存里改写并整表校验，通过了才备份 + 落盘：任何一条坏记录都让原文原封不动。
+    assets: list[dict[str, Any]] = []
+    broken: list[str] = []
+    for asset in raw.get("assets", []):
+        if not isinstance(asset, dict):
+            broken.append("<非对象记录>")
+            continue
+        asset_id = asset.get("asset_id")
+        label = asset_id if isinstance(asset_id, str) and asset_id else "<缺 asset_id>"
+        if version == 2 and asset.get("kind") == "image":
+            content = asset.get("content")
+            if not isinstance(content, dict):
+                broken.append(label)
+                continue
+            asset["kind"] = "media"
+            content["kind"] = "media"
+        asset.pop("recommendation", None)
+        assets.append(asset)
+    if broken:
+        raise ValueError(
+            f"创作资产目录 {step} 迁移中止（原文未改写），这些资产的 content 不是对象："
+            + "、".join(broken)
+        )
+    payload = {
+        **raw, "schema_version": 4, "revision": int(raw.get("revision", 0)) + 1,
+        "updated_at": datetime.now(timezone.utc).isoformat(), "assets": assets,
+    }
+    try:
+        CreationAssetCatalog.model_validate(payload)
+    except ValidationError as error:
+        raise ValueError(
+            f"创作资产目录 {step} 迁移校验失败（原文未改写）："
+            + _describe_catalog_errors(error, assets)
+        ) from error
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    backup_root = data_root.runtime_dir() / "backups" / "creation-assets" / timestamp
+    backup_root.mkdir(parents=True, exist_ok=False)
+    shutil.copy2(catalog_path, backup_root / "catalog.json")
+    atomic_write_json(catalog_path, payload)
+    return {"migration": f"creation-assets-v{version}-to-v4", "catalog_assets": len(assets),
+            "backup_path": str(backup_root)}
+
+
+def _describe_catalog_errors(
+    error: ValidationError,
+    assets: list[dict[str, Any]],
+) -> str:
+    """把 pydantic 的 loc 下标翻回 asset_id，否则报错里只有一串数字。"""
+    seen: list[str] = []
+    for detail in error.errors():
+        loc = detail.get("loc", ())
+        label = "<目录本身>"
+        if len(loc) >= 2 and loc[0] == "assets" and isinstance(loc[1], int):
+            asset = assets[loc[1]] if loc[1] < len(assets) else {}
+            asset_id = asset.get("asset_id")
+            label = asset_id if isinstance(asset_id, str) and asset_id else f"#{loc[1]}"
+        entry = f"{label}（{detail.get('msg', '')}）"
+        if entry not in seen:
+            seen.append(entry)
+    return "、".join(seen)
 
 
 def _flatten_asset(asset: dict[str, Any]) -> dict[str, Any]:

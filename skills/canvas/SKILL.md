@@ -2,10 +2,7 @@
 name: canvas
 version: 1.0.0
 description: |
-  用 canvas_* MCP 工具操作本机 Atelier 画布：读节点与连线、增删文本 / 媒体节点、填生成配置、
-  导入本机文件、在授权允许时直接发起生成并读回结果。用户要「在画布上摆节点 / 连线 / 出图」、
-  把本地图片放进画布、批量搭生成流程，或调用 /game-atelier:canvas 时使用。
-  角色 / 美宣 / UI / 视频的工坊流程不归本 skill，交对应工坊 Skill。
+  用户要在本机 Atelier 画布上摆节点、连线、导入素材，或从画布发起生成时用（需 canvas_* 工具已授权）。角色、美宣、三视图、UI、视频的工坊流程不用。
 allowed-tools:
   - Read
   - AskUserQuestion
@@ -21,7 +18,8 @@ triggers:
 
 画布是 server 持有、带 revision 的活文档，本 Skill 只有一条手：`canvas_*` MCP 工具
 （契约见 `docs/contracts/canvas-mcp.md`）。没有 CLI 路径，不读写画布文件，不改 Job。
-工具不可见 / 授权不含画布时，指用户去本机 Atelier「本机 Agent 连接」页勾选画布与画布操作，
+工具不可见时，让用户新开一个会话（插件自带的 MCP 只在会话启动时加载，`/reload-plugins` 不生效）；工具返回 `CREDENTIALS_INVALID`
+或授权不含画布时，指用户去本机 Atelier「本机连接」页点「连接本机 Agent」（默认含全部画布与画布操作），
 配置方法见 `docs/mcp-local-client.md`；停在授权环节，不改走 shell。
 
 ## 先读再改
@@ -57,8 +55,8 @@ triggers:
 
 ## 提示词资产（任务明确后先查）
 
-给生成面填 `set_draft` 前先查画师存的提示词模板：按需求挑标签查索引 → 命中则读全文、填变量、按其
-`recommendation` 定模型参数（本机无此模型则回落默认并说明）→ 确认卡注明「提示词来自资产〈标题〉」
+给生成面填 `set_draft` 前先查画师存的提示词模板：按需求挑标签查索引 → 命中则读全文、填变量（模型参数按
+常规默认，提示词资产不带模型参数）→ 确认卡注明「提示词来自资产〈标题〉」
 与配置来源层级；没命中就明说后自己组，不硬套。接口在工坊命名空间（`workshop_list_prompt_assets` / `workshop_read_prompt_asset`，画布授权含 `canvas_read` 即可用），两级接口、优先级与不做的事见
 `docs/references/prompt-assets.md`。不在启动时读全库。
 

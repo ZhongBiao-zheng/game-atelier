@@ -38,6 +38,8 @@ interface CanvasPromptInputProps {
   disabledMentionHint?: string;
   onChange: (value: string) => void;
   onFocus?: () => void;
+  /** 编辑会话开始 / 结束：焦点进来算开始；焦点去了本页别处才算结束，整个窗口失焦不算。 */
+  onEditingChange?: (editing: boolean) => void;
   onPreviewReference?: (reference: CanvasMentionReference) => void;
   placeholder?: string;
   className?: string;
@@ -51,6 +53,7 @@ export function CanvasPromptInput({
   disabledMentionHint,
   onChange,
   onFocus,
+  onEditingChange,
   onPreviewReference,
   placeholder,
   className,
@@ -64,6 +67,8 @@ export function CanvasPromptInput({
   const initializedRef = useRef(false);
   const focusEnabledRef = useRef(false);
   const previewRef = useRef(onPreviewReference);
+  const editingRef = useRef(false);
+  const editingChangeRef = useRef(onEditingChange);
   const [mention, setMention] = useState<MentionState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [hoveredReference, setHoveredReference] = useState<CanvasMaterialHoverState | null>(null);
@@ -95,6 +100,23 @@ export function CanvasPromptInput({
   useEffect(() => {
     previewRef.current = onPreviewReference;
   }, [onPreviewReference]);
+
+  useEffect(() => {
+    editingChangeRef.current = onEditingChange;
+  }, [onEditingChange]);
+
+  // 卸载时结束会话：宿主靠它解除「编辑中不保存」的挂起。
+  useEffect(() => () => {
+    if (!editingRef.current) return;
+    editingRef.current = false;
+    editingChangeRef.current?.(false);
+  }, []);
+
+  function setEditing(editing: boolean) {
+    if (editingRef.current === editing) return;
+    editingRef.current = editing;
+    editingChangeRef.current?.(editing);
+  }
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -219,7 +241,10 @@ export function CanvasPromptInput({
           showDisabledMentionHint && 'pb-11',
           className,
         )}
-        onFocus={onFocus}
+        onFocus={() => {
+          setEditing(true);
+          onFocus?.();
+        }}
         onInput={event => {
           if (composingRef.current) return;
           syncVariableInput(event.currentTarget, event.target);
@@ -349,6 +374,9 @@ export function CanvasPromptInput({
             && event.currentTarget.contains(event.relatedTarget)
           ) return;
           setHoveredReference(null);
+          // 切应用、切标签、输入法候选窗都会让编辑器失焦，但整个 document 也没有焦点。
+          // 那不是编辑结束：既不重建 DOM（会删掉光标所在节点、丢掉组合中的文字），也不结束会话。
+          if (!window.document.hasFocus()) return;
           const editor = editorRef.current;
           if (editor) {
             editor.replaceChildren(...promptNodes(
@@ -358,6 +386,7 @@ export function CanvasPromptInput({
             ));
           }
           window.setTimeout(closeMention, 120);
+          setEditing(false);
         }}
       />
       {showDisabledMentionHint && (
@@ -529,9 +558,25 @@ export function serializePromptEditor(editor: HTMLElement): string {
   return serializeNodes(editor.childNodes).replace(/\uFEFF/g, '');
 }
 
+const BLOCK_TAGS = new Set(['DIV', 'P']);
+
+function isBlock(node: ChildNode): boolean {
+  return node instanceof HTMLElement && BLOCK_TAGS.has(node.tagName);
+}
+
+// 删提及、编辑残留都会留下空文本节点，判「前后还有没有内容」时要跳过它们。
+function isEmptyText(node: ChildNode): boolean {
+  return node.nodeType === Node.TEXT_NODE && !(node.textContent ?? '');
+}
+
+// 浏览器在 contenteditable 里按 Enter 不是插 "\n"：Chrome / Firefox 把一行包进 <div>，
+// 空行是 <div><br></div>，行首按 Enter 会把新空行放在行内文本前面（<div><br></div>abc）。
+// 块末尾的 <br> 只是让空行有高度的占位，不多占一行。所以：块与前面的内容之间、块与后面紧跟的
+// 行内内容之间各一个换行，占位 <br> 不算换行。漏掉块边界就是「按一次 Enter 不换行、按两次才换一行」。
 function serializeNodes(nodes: NodeListOf<ChildNode>): string {
+  const meaningful = Array.from(nodes).filter(node => !isEmptyText(node));
   let value = '';
-  nodes.forEach(node => {
+  meaningful.forEach((node, index) => {
     if (node.nodeType === Node.TEXT_NODE) {
       value += node.textContent ?? '';
       return;
@@ -546,11 +591,17 @@ function serializeNodes(nodes: NodeListOf<ChildNode>): string {
       return;
     }
     if (node.tagName === 'BR') {
-      value += '\n';
+      if (index < meaningful.length - 1) value += '\n';
       return;
     }
-    const inner = serializeNodes(node.childNodes);
-    value += inner;
+    if (isBlock(node)) {
+      if (index > 0) value += '\n';
+      value += serializeNodes(node.childNodes);
+      const next = meaningful[index + 1];
+      if (next && !isBlock(next)) value += '\n';
+      return;
+    }
+    value += serializeNodes(node.childNodes);
   });
   return value;
 }

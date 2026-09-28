@@ -3,7 +3,36 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
+import type { useSSE as UseSSE } from '@/hooks/useSSE';
 import { AppShell } from './AppShell';
+
+type SSEOptions = NonNullable<Parameters<typeof UseSSE>[0]>;
+const sseCalls = vi.hoisted(() => [] as Array<SSEOptions | undefined>);
+const connection = vi.hoisted(() => ({ forceReady: false }));
+
+// 默认沿用 test/setup 的连接 mock；个别用例把连接态强制成 ready，让 useSSE 真的去连 /events。
+vi.mock('@/api/connection', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/api/connection')>();
+  return {
+    ...actual,
+    connectionFetch: (input: string, init?: RequestInit) => init ? fetch(input, init) : fetch(input),
+    useConnectionState: () => {
+      const state = actual.useConnectionState();
+      return connection.forceReady ? { ...state, phase: 'ready' as const, generation: 1 } : state;
+    },
+  };
+});
+
+vi.mock('@/hooks/useSSE', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/hooks/useSSE')>();
+  return {
+    ...actual,
+    useSSE: (options?: SSEOptions) => {
+      sseCalls.push(options);
+      return actual.useSSE(options);
+    },
+  };
+});
 
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -14,6 +43,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  sseCalls.splice(0);
+  connection.forceReady = false;
+  window.localStorage.removeItem('atelier:team-reminded');
   window.localStorage.removeItem('atelier:theme');
   window.localStorage.removeItem('atelier:changelog-seen');
   document.documentElement.classList.remove('light');
@@ -386,5 +418,52 @@ describe('AppShell', () => {
     fireEvent.click(screen.getByLabelText('切换到深色主题'));
     expect(document.documentElement.classList.contains('light')).toBe(false);
     expect(window.localStorage.getItem('atelier:theme')).toBe('dark');
+  });
+
+  it('hosts the team share reminder on the shell SSE connection', async () => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => ({
+      ok: true,
+      json: async () => (String(url) === '/api/profile' ? { display_name: '我' } : {}),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    renderAt('/settings');
+    const profileCalls = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/api/profile').length;
+    await waitFor(() => expect(profileCalls()).toBeGreaterThan(0));
+
+    const hosts = sseCalls.filter(options => options?.onTeamLibraryChanged);
+    expect(hosts.length).toBeGreaterThan(0);
+    const shell = hosts.at(-1)!;
+    expect(shell.onConnect).toBeInstanceOf(Function);
+
+    act(() => {
+      shell.onTeamLibraryChanged?.({
+        library_id: 'lib_a', asset_id: 'ta_1', kind: 'generation', author: '阿岚',
+        change: 'added', title: '雨夜城门', status: 'ready', mime_type: 'image/png',
+      });
+    });
+    expect(await screen.findByText('雨夜城门')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '复刻' })).toBeInTheDocument();
+
+    const before = profileCalls();
+    act(() => { shell.onConnect?.(); });
+    await waitFor(() => expect(profileCalls()).toBe(before + 1));
+  });
+
+  it('opens exactly one /events stream for the whole shell', async () => {
+    connection.forceReady = true;
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url) === '/events') {
+        return new Response(new ReadableStream({ start() {} }), { headers: { 'Content-Type': 'text/event-stream' } });
+      }
+      return { ok: true, json: async () => (String(url) === '/api/profile' ? { display_name: '我' } : {}) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const view = renderAt('/settings');
+    const eventStreams = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/events').length;
+
+    await waitFor(() => expect(eventStreams()).toBe(1));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+    expect(eventStreams()).toBe(1);
+    view.unmount();
   });
 });

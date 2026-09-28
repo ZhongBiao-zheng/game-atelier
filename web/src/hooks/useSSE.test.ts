@@ -47,4 +47,20 @@ describe('useSSE', () => {
     const { unmount } = renderHook(() => useSSE()); await act(async () => {}); unmount();
     await act(async () => vi.advanceTimersByTimeAsync(10_000)); expect(transport).toHaveBeenCalledTimes(1);
   });
+  it('forwards team library changes and survives malformed payloads', async () => {
+    const source = events(); const onTeamLibraryChanged = vi.fn(); const onConnect = vi.fn();
+    const { result } = renderHook(() => useSSE({ onTeamLibraryChanged, onConnect }));
+    await waitFor(() => expect(onConnect).toHaveBeenCalled());
+    const payload = {
+      library_id: 'lib_a', asset_id: 'ta_b', kind: 'generation', author: '阿青', change: 'added',
+      title: '白犬', status: 'ready', mime_type: 'image/png',
+    };
+    await act(async () => source.emit(`event: team-library-changed\ndata: ${JSON.stringify(payload)}\n\n`));
+    expect(onTeamLibraryChanged).toHaveBeenCalledWith(payload);
+    await act(async () => source.emit('event: team-library-changed\ndata: {half-written\n\n'));
+    expect(onTeamLibraryChanged).toHaveBeenCalledTimes(1);
+    await act(async () => source.emit(`event: team-library-changed\ndata: ${JSON.stringify(payload)}\n\n`));
+    expect(onTeamLibraryChanged).toHaveBeenCalledTimes(2);
+    expect(result.current).toBe(1);
+  });
 });

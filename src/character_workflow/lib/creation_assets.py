@@ -1,8 +1,9 @@
-"""Application-level prompt and image assets shared by Studio and Canvas."""
+"""Application-level prompt and media assets shared by Studio and Canvas."""
 from __future__ import annotations
 
 import hashlib
 import mimetypes
+import re
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,8 +19,11 @@ from character_workflow.lib.canvas_projects import (
     canvas_project_lock_path,
 )
 from character_workflow.lib.file_lock import file_lock
+from character_workflow.lib.media_probe import mp4_track_dimensions as video_dimensions_from_bytes
 from character_workflow.lib.prompt_variables import build_prompt_variable_template
 from character_workflow.lib.schemas import (
+    MEDIA_SUFFIXES,
+    AdoptionOrigin,
     CanvasCreationAssetSnapshotOrigin,
     CanvasInputConnection,
     CanvasLibraryAsset,
@@ -29,23 +33,27 @@ from character_workflow.lib.schemas import (
     CreationAsset,
     CreationAssetCatalog,
     CreationAssetList,
-    CreationAssetRecommendation,
-    CreationImageAssetContent,
+    CreationGenerationAssetContent,
+    CreationMediaAssetContent,
     CreationPromptAssetContent,
     CreationPromptSegment,
     CreationPromptTextSegment,
     CreationPromptVariableSegment,
+    GenerationRecipe,
     RevisionedSidecar,
 )
 
 
 _PROMPT_SEGMENTS = TypeAdapter(list[CreationPromptSegment])
-_IMAGE_SUFFIXES = {
-    "image/png": ".png",
-    "image/jpeg": ".jpg",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
+# 上限按类型分档：图片小、音频中、视频大。
+_MEDIA_SIZE_LIMITS = {
+    "image": 50 * 1024 * 1024,
+    "audio": 100 * 1024 * 1024,
+    "video": 500 * 1024 * 1024,
 }
+_MEDIA_SIZE_LABELS = {"image": "图片", "audio": "音频", "video": "视频"}
+_BLOB_DIR = Path("creation-assets") / "blobs"
+_SHA256_RE = re.compile(r"[a-f0-9]{64}")
 
 
 class CreationAssetStateError(ValueError):
@@ -53,10 +61,10 @@ class CreationAssetStateError(ValueError):
 
 
 class CreationAssetDuplicateError(ValueError):
-    """Saving an image would duplicate an existing asset."""
+    """Saving a media file would duplicate an existing asset."""
 
     def __init__(self, asset_id: str):
-        super().__init__("这张图片已经在资产库中")
+        super().__init__("这个文件已经在资产库中")
         self.asset_id = asset_id
 
 
@@ -187,40 +195,72 @@ def _prompt_content(
     )
 
 
-def _image_mime(body: bytes, declared: str | None, filename: str) -> str:
-    detected: str | None = None
+def sniff_media_mime(body: bytes, declared: str | None = None) -> str | None:
+    """只看文件头认媒体类型，认不出 → None。body 给文件开头十几字节就够。
+
+    唯一信声明的情形：ftyp 容器的 brand 分不出音轨，声明 audio/mp4 时照信。
+    """
     if body.startswith(b"\x89PNG\r\n\x1a\n"):
-        detected = "image/png"
-    elif body.startswith(b"\xff\xd8\xff"):
-        detected = "image/jpeg"
-    elif len(body) >= 12 and body.startswith(b"RIFF") and body[8:12] == b"WEBP":
-        detected = "image/webp"
-    elif body.startswith((b"GIF87a", b"GIF89a")):
-        detected = "image/gif"
+        return "image/png"
+    if body.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if len(body) >= 12 and body.startswith(b"RIFF") and body[8:12] == b"WEBP":
+        return "image/webp"
+    if body.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if len(body) >= 12 and body[4:8] == b"ftyp":
+        brand = body[8:12]
+        if brand in {b"M4A ", b"M4B "}:
+            return "audio/mp4"
+        if brand == b"qt  ":
+            return "video/quicktime"
+        if declared == "audio/mp4":
+            # ffmpeg 产出的 .m4a brand 常是 mp42 / isom，容器与 mp4 同构，brand 分不出音轨：信声明。
+            return "audio/mp4"
+        return "video/mp4"
+    if body.startswith(b"\x1a\x45\xdf\xa3"):
+        return "video/webm"
+    if body.startswith(b"ID3") or body[:2] in {b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"}:
+        return "audio/mpeg"
+    if len(body) >= 12 and body.startswith(b"RIFF") and body[8:12] == b"WAVE":
+        return "audio/wav"
+    return None
+
+
+def _media_mime(body: bytes, declared: str | None, filename: str) -> str:
+    detected = sniff_media_mime(body, declared)
     guessed = mimetypes.guess_type(filename)[0]
     mime_type = detected or declared or guessed
-    if mime_type not in _IMAGE_SUFFIXES:
-        raise ValueError("只支持 PNG、JPEG、WebP 或 GIF 图片")
+    if mime_type not in MEDIA_SUFFIXES:
+        raise ValueError(
+            "只支持 PNG、JPEG、WebP、GIF 图片，MP4、WebM、MOV 视频，MP3、WAV、M4A 音频"
+        )
     if detected and declared and declared != detected:
-        raise ValueError("图片内容与声明的文件类型不一致")
+        raise ValueError("文件内容与声明的文件类型不一致")
     return mime_type
 
 
-def _store_image_blob(body: bytes, filename: str, mime_type: str | None) -> CreationImageAssetContent:
+def store_media_blob(
+    body: bytes,
+    filename: str,
+    mime_type: str | None,
+) -> CreationMediaAssetContent:
     if not body:
-        raise ValueError("图片内容不能为空")
-    if len(body) > 50 * 1024 * 1024:
-        raise ValueError("图片不能超过 50 MiB")
-    safe_filename = Path(filename).name or "image"
-    detected_mime = _image_mime(body, mime_type, safe_filename)
+        raise ValueError("文件内容不能为空")
+    safe_filename = Path(filename).name or "media"
+    detected_mime = _media_mime(body, mime_type, safe_filename)
+    family = detected_mime.split("/", 1)[0]
+    limit = _MEDIA_SIZE_LIMITS.get(family, 50 * 1024 * 1024)
+    if len(body) > limit:
+        label = _MEDIA_SIZE_LABELS.get(family, "文件")
+        raise ValueError(f"{label}不能超过 {limit // (1024 * 1024)} MiB")
     digest = hashlib.sha256(body).hexdigest()
-    suffix = _IMAGE_SUFFIXES[detected_mime]
-    relative = Path("creation-assets") / "blobs" / f"{digest}{suffix}"
+    relative = _blob_relative_path(digest, detected_mime)
     target = data_root.resolve_data_root() / relative
     if not target.exists():
         atomic_write_bytes(target, body)
-    return CreationImageAssetContent(
-        kind="image",
+    return CreationMediaAssetContent(
+        kind="media",
         path=relative.as_posix(),
         mime_type=detected_mime,
         bytes=len(body),
@@ -229,18 +269,80 @@ def _store_image_blob(body: bytes, filename: str, mime_type: str | None) -> Crea
     )
 
 
+def _blob_relative_path(sha256: str, mime_type: str) -> Path:
+    if not _SHA256_RE.fullmatch(sha256):
+        raise ValueError("sha256 必须是 64 位小写十六进制")
+    suffix = MEDIA_SUFFIXES.get(mime_type)
+    if suffix is None:
+        raise ValueError(f"不支持的媒体类型：{mime_type}")
+    return _BLOB_DIR / f"{sha256}{suffix}"
+
+
+def blob_path_for(sha256: str, mime_type: str) -> Path:
+    """按内容寻址的 blob 路径：creation-assets/blobs/<sha256><suffix>（不保证文件存在）。"""
+    return data_root.resolve_data_root() / _blob_relative_path(sha256, mime_type)
+
+
+def asset_media_content(asset: CreationAsset) -> CreationMediaAssetContent | None:
+    """媒体资产取 content，生成资产取成片 content.media，提示词没有媒体本体。"""
+    content = asset.content
+    if content.kind == "media":
+        return content
+    if content.kind == "generation":
+        return content.media
+    return None
+
+
+def _asset_blob_paths(asset: CreationAsset) -> set[str]:
+    """这条资产引用的全部 blob（数据根相对 POSIX 路径）：成片 + 生成快照的每份参考。"""
+    paths: set[str] = set()
+    media = asset_media_content(asset)
+    if media is not None:
+        paths.add(media.path)
+    if asset.content.kind == "generation":
+        paths.update(
+            _blob_relative_path(row.sha256, row.mime_type).as_posix()
+            for row in asset.content.snapshot.inputs
+        )
+    return paths
+
+
+def _orphan_blob_paths(removed: set[str], remaining: list[CreationAsset]) -> list[Path]:
+    """两边都 resolve 后再比：同一个 blob 的不同拼法（./、..）不能被误判成孤儿删掉。"""
+    root = data_root.resolve_data_root().resolve()
+    still_used = {
+        (root / relative).resolve()
+        for row in remaining
+        for relative in _asset_blob_paths(row)
+    }
+    orphans: list[Path] = []
+    for path in sorted({(root / relative).resolve() for relative in removed} - still_used):
+        try:
+            path.relative_to(root / _BLOB_DIR)
+        except ValueError as error:
+            raise CreationAssetStateError("媒体资产路径越出创作资产目录") from error
+        orphans.append(path)
+    return orphans
+
+
+def new_creation_asset_id() -> str:
+    return f"creation-asset-{secrets.token_hex(10)}"
+
+
 def _new_asset(
     *,
-    kind: Literal["prompt", "image"],
+    kind: Literal["prompt", "media", "generation"],
     title: str,
     tags: list[str],
-    content: CreationPromptAssetContent | CreationImageAssetContent,
+    content: (
+        CreationPromptAssetContent | CreationMediaAssetContent | CreationGenerationAssetContent
+    ),
     project_id: str | None,
-    recommendation: CreationAssetRecommendation | None = None,
+    adopted_from: AdoptionOrigin | None = None,
 ) -> CreationAsset:
     timestamp = _now()
     return CreationAsset(
-        asset_id=f"creation-asset-{secrets.token_hex(10)}",
+        asset_id=new_creation_asset_id(),
         kind=kind,
         title=_required_text(title, "资产标题"),
         tags=_normalize_tags(tags),
@@ -248,7 +350,7 @@ def _new_asset(
         updated_at=timestamp,
         content=content,
         project_ids=[project_id] if project_id else [],
-        recommendation=recommendation,
+        adopted_from=adopted_from,
     )
 
 
@@ -257,7 +359,6 @@ def create_prompt_asset(
     segments: list[CreationPromptSegment] | list[dict[str, str]],
     tags: list[str],
     project_id: str | None = None,
-    recommendation: CreationAssetRecommendation | None = None,
 ) -> CreationAsset:
     with file_lock(_catalog_lock_path()):
         current = _read_catalog_unlocked()
@@ -267,22 +368,53 @@ def create_prompt_asset(
             tags=tags,
             content=_prompt_content(segments),
             project_id=project_id,
-            recommendation=recommendation,
         )
         _write_catalog_unlocked(current, [asset, *current.assets])
         return asset
 
 
-def _image_duplicate(catalog: CreationAssetCatalog, digest: str) -> CreationAsset | None:
+def create_generation_asset(
+    *,
+    title: str,
+    tags: list[str],
+    media: CreationMediaAssetContent,
+    snapshot: GenerationRecipe,
+    project_id: str | None = None,
+    adopted_from: AdoptionOrigin | None = None,
+) -> CreationAsset:
+    """建一条生成资产目录项。成片与每份参考须已由调用方经 store_media_blob 落进 blobs；
+    缺任何一份就拒绝，否则目录里会留一条复刻不了的记录。
+    带 adopted_from 且同一来源已采用过 → 返回已有那条（补上 project_id），不重复建。"""
+    content = CreationGenerationAssetContent(kind="generation", media=media, snapshot=snapshot)
+    asset = _new_asset(
+        kind="generation",
+        title=title,
+        tags=tags,
+        content=content,
+        project_id=project_id,
+        adopted_from=adopted_from,
+    )
+    migrate_creation_asset_catalog_schema()
+    with file_lock(_catalog_lock_path()):
+        current = _read_catalog_unlocked()
+        duplicate = _adopted_duplicate(current, asset)
+        if duplicate is not None:
+            return _join_projects_unlocked(current, duplicate, asset.project_ids)
+        _require_blobs(asset)
+        _write_catalog_unlocked(current, [asset, *current.assets])
+        return asset
+
+
+def _media_duplicate(catalog: CreationAssetCatalog, digest: str) -> CreationAsset | None:
     for asset in catalog.assets:
-        if asset.kind != "image":
+        if asset.kind != "media":
             continue
-        if asset.content.kind == "image" and asset.content.sha256 == digest:
+        if asset.content.kind == "media" and asset.content.sha256 == digest:
             return asset
     return None
 
 
-def create_image_asset_from_bytes(
+def create_media_asset_from_bytes(
     *,
     title: str,
     body: bytes,
@@ -292,10 +424,10 @@ def create_image_asset_from_bytes(
     project_id: str | None = None,
     allow_existing: bool = False,
 ) -> CreationAsset:
-    content = _store_image_blob(body, filename, mime_type)
+    content = store_media_blob(body, filename, mime_type)
     with file_lock(_catalog_lock_path()):
         current = _read_catalog_unlocked()
-        duplicate = _image_duplicate(current, content.sha256)
+        duplicate = _media_duplicate(current, content.sha256)
         if duplicate:
             if not allow_existing:
                 raise CreationAssetDuplicateError(duplicate.asset_id)
@@ -316,7 +448,7 @@ def create_image_asset_from_bytes(
             )
             return reused
         asset = _new_asset(
-            kind="image",
+            kind="media",
             title=title,
             tags=tags,
             content=content,
@@ -326,7 +458,7 @@ def create_image_asset_from_bytes(
         return asset
 
 
-def create_image_asset_from_path(
+def create_media_asset_from_path(
     *,
     title: str,
     source_path: str,
@@ -340,10 +472,10 @@ def create_image_asset_from_path(
     try:
         source.relative_to(root)
     except ValueError as error:
-        raise ValueError("图片路径不在数据目录内") from error
+        raise ValueError("文件路径不在数据目录内") from error
     if not source.is_file():
         raise FileNotFoundError(source_path)
-    return create_image_asset_from_bytes(
+    return create_media_asset_from_bytes(
         title=title,
         body=source.read_bytes(),
         filename=source.name,
@@ -376,7 +508,7 @@ def get_creation_asset(asset_id: str) -> CreationAsset:
 
 def list_creation_assets(
     *,
-    kind: Literal["prompt", "image"] | None = None,
+    kind: Literal["prompt", "media", "generation"] | None = None,
     scope: Literal["all", "project"] = "all",
     project_id: str | None = None,
 ) -> CreationAssetList:
@@ -436,7 +568,6 @@ def list_prompt_asset_index(
             "title": asset.title,
             "tags": asset.tags,
             "last_used_at": asset.last_used_at,
-            "has_recommendation": asset.recommendation is not None,
         } for asset in rows[:limit]],
         "total": len(rows),
         "tag_facets": facets,
@@ -457,7 +588,6 @@ def read_prompt_asset(asset_id: str, project_id: str | None = None) -> dict:
         "variables": [{"name": segment.name, "default_value": segment.default_value}
                       for segment in segments if segment.kind == "variable"],
         "prompt": render_prompt_segments(segments, {}),
-        "recommendation": asset.recommendation.model_dump() if asset.recommendation else None,
     }
 
 
@@ -467,7 +597,6 @@ def update_prompt_asset(
     title: str,
     segments: list[CreationPromptSegment] | list[dict[str, str]],
     tags: list[str],
-    recommendation: CreationAssetRecommendation | None = None,
 ) -> CreationAsset:
     with file_lock(_catalog_lock_path()):
         current = _read_catalog_unlocked()
@@ -480,34 +609,33 @@ def update_prompt_asset(
             "title": _required_text(title, "资产标题"),
             "tags": _normalize_tags(tags),
             "content": _prompt_content(segments),
-            "recommendation": recommendation,
             "updated_at": _now(),
         })
         _replace_asset(current, updated)
         return updated
 
 
-def update_image_asset_from_bytes(
+def update_media_asset_from_bytes(
     asset_id: str,
     *,
     title: str,
     tags: list[str],
     body: bytes | None = None,
-    filename: str = "image",
+    filename: str = "media",
     mime_type: str | None = None,
 ) -> CreationAsset:
-    orphan_path: Path | None = None
+    orphan_paths: list[Path] = []
     with file_lock(_catalog_lock_path()):
         current = _read_catalog_unlocked()
         asset = next((row for row in current.assets if row.asset_id == asset_id), None)
         if asset is None:
             raise KeyError(asset_id)
-        if asset.kind != "image":
-            raise ValueError("只有图片资产可以使用这个编辑入口")
-        replacement = _store_image_blob(body, filename, mime_type) if body is not None else None
+        if asset.kind != "media":
+            raise ValueError("只有媒体资产可以使用这个编辑入口")
+        replacement = store_media_blob(body, filename, mime_type) if body is not None else None
         content = replacement or asset.content
-        assert content.kind == "image"
-        duplicate = _image_duplicate(current, content.sha256)
+        assert content.kind == "media"
+        duplicate = _media_duplicate(current, content.sha256)
         if duplicate and duplicate.asset_id != asset_id:
             raise CreationAssetDuplicateError(duplicate.asset_id)
         updated = asset.model_copy(update={
@@ -517,36 +645,27 @@ def update_image_asset_from_bytes(
             "updated_at": _now(),
         })
         _replace_asset(current, updated)
-        assert asset.content.kind == "image"
-        if content.path != asset.content.path and not any(
-            row.asset_id != asset_id
-            and row.content.kind == "image"
-            and row.content.path == asset.content.path
-            for row in current.assets
-        ):
-            orphan_path = _image_blob_path(asset.content)
-    if orphan_path is not None:
-        orphan_path.unlink(missing_ok=True)
+        orphan_paths = _orphan_blob_paths(
+            _asset_blob_paths(asset),
+            [updated if row.asset_id == asset_id else row for row in current.assets],
+        )
+    for path in orphan_paths:
+        path.unlink(missing_ok=True)
     return updated
 
 
 def delete_creation_asset(asset_id: str) -> None:
-    """Physically remove one asset and delete its blob when no other asset uses it."""
-    orphan_path: Path | None = None
+    """Physically remove one asset and delete its blobs when no other asset uses them."""
     with file_lock(_catalog_lock_path()):
         current = _read_catalog_unlocked()
         asset = next((row for row in current.assets if row.asset_id == asset_id), None)
         if asset is None:
             raise KeyError(asset_id)
         remaining = [row for row in current.assets if row.asset_id != asset_id]
-        if asset.content.kind == "image" and not any(
-            row.content.kind == "image" and row.content.path == asset.content.path
-            for row in remaining
-        ):
-            orphan_path = _image_blob_path(asset.content)
+        orphan_paths = _orphan_blob_paths(_asset_blob_paths(asset), remaining)
         _write_catalog_unlocked(current, remaining)
-    if orphan_path is not None:
-        orphan_path.unlink(missing_ok=True)
+    for path in orphan_paths:
+        path.unlink(missing_ok=True)
 
 
 def mark_creation_asset_used(asset_id: str, project_id: str | None = None) -> CreationAsset:
@@ -587,25 +706,170 @@ def remove_canvas_project_asset_relations(project_id: str) -> None:
         _write_catalog_unlocked(current, assets)
 
 
-def _image_blob_path(content: CreationImageAssetContent) -> Path:
+def _media_blob_path(content: CreationMediaAssetContent) -> Path:
     root = data_root.resolve_data_root().resolve()
     path = (root / content.path).resolve()
     try:
         path.relative_to(root / "creation-assets" / "blobs")
     except ValueError as error:
-        raise CreationAssetStateError("图片资产路径越出创作资产目录") from error
+        raise CreationAssetStateError("媒体资产路径越出创作资产目录") from error
     return path
 
 
-def creation_asset_image_path(asset_id: str) -> Path:
-    asset = get_creation_asset(asset_id)
-    content = asset.content
-    if content.kind != "image":
+def creation_asset_media_path(asset_id: str) -> Path:
+    """媒体资产的本体；生成资产的成片。"""
+    content = asset_media_content(get_creation_asset(asset_id))
+    if content is None:
         raise KeyError(asset_id)
-    path = _image_blob_path(content)
+    path = _media_blob_path(content)
     if not path.is_file():
-        raise CreationAssetStateError("图片资产文件缺失")
+        raise CreationAssetStateError("媒体资产文件缺失")
     return path
+
+
+def creation_asset_input_path(asset_id: str, order: int) -> tuple[Path, str]:
+    """生成资产快照里第 order 份参考的 (blob 路径, mime)。非生成资产 / 越界 → KeyError。"""
+    content = get_creation_asset(asset_id).content
+    if content.kind != "generation":
+        raise KeyError(asset_id)
+    row = next((row for row in content.snapshot.inputs if row.order == order), None)
+    if row is None:
+        raise KeyError(order)
+    path = blob_path_for(row.sha256, row.mime_type)
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    return path, row.mime_type
+
+
+def _required_blob_paths(asset: CreationAsset) -> list[Path]:
+    media = asset_media_content(asset)
+    paths = [_media_blob_path(media)] if media is not None else []
+    if asset.content.kind == "generation":
+        paths.extend(blob_path_for(row.sha256, row.mime_type) for row in asset.content.snapshot.inputs)
+    return paths
+
+
+def _require_blobs(asset: CreationAsset) -> None:
+    """持锁调用：删除资产时的孤儿 blob 清理也在这把锁下判定，锁外查完可能被并发删掉。"""
+    missing = [path for path in _required_blob_paths(asset) if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(missing[0])
+
+
+def _adopted_duplicate(
+    catalog: CreationAssetCatalog, asset: CreationAsset
+) -> CreationAsset | None:
+    """同一来源已采用过的那条。原始文件按内容去重（它的 id 只由路径得来），分享资产按来源 id。"""
+    origin = asset.adopted_from
+    if origin is None:
+        return None
+    if origin.raw_path is not None:
+        media = asset_media_content(asset)
+        return _media_duplicate(catalog, media.sha256) if media is not None else None
+    return next(
+        (
+            row for row in catalog.assets
+            if row.adopted_from is not None
+            and row.adopted_from.library_id == origin.library_id
+            and row.adopted_from.asset_id == origin.asset_id
+        ),
+        None,
+    )
+
+
+def _join_projects_unlocked(
+    current: CreationAssetCatalog, asset: CreationAsset, project_ids: list[str]
+) -> CreationAsset:
+    added = [value for value in project_ids if value not in asset.project_ids]
+    if not added:
+        return asset
+    timestamp = _now()
+    updated = asset.model_copy(update={
+        "last_used_at": timestamp,
+        "updated_at": timestamp,
+        "project_ids": _normalize_project_ids([*asset.project_ids, *added]),
+    })
+    _replace_asset(current, updated)
+    return updated
+
+
+def create_adopted_asset(asset: CreationAsset) -> CreationAsset:
+    """把已经构造好的采用资产追加进目录（asset_id 由调用方生成）。
+
+    持锁再按来源查一次：并发采用同一条时只留一份。命中则返回已有那条（补上 project_ids），
+    调用方以「返回的 asset_id 与传入的不同」判定没有新建。
+    """
+    migrate_legacy_canvas_libraries()
+    with file_lock(_catalog_lock_path()):
+        current = _read_catalog_unlocked()
+        if any(row.asset_id == asset.asset_id for row in current.assets):
+            raise ValueError("creation asset id already exists")
+        duplicate = _adopted_duplicate(current, asset)
+        if duplicate is not None:
+            return _join_projects_unlocked(current, duplicate, asset.project_ids)
+        _require_blobs(asset)
+        _write_catalog_unlocked(current, [*current.assets, asset])
+        return asset
+
+
+def replace_adopted_asset(
+    asset_id: str,
+    *,
+    title: str,
+    tags: list[str],
+    content: (
+        CreationPromptAssetContent | CreationMediaAssetContent | CreationGenerationAssetContent
+    ),
+    adopted_from: AdoptionOrigin,
+) -> CreationAsset:
+    """重新采用：内容、标题、标签、来源记录跟来源走；id / created_at / project_ids / last_used_at 保留。
+
+    新内容的 blob 须已由调用方落好（持锁再核一次，防并发删除清掉）。旧 blob 没人用了就删。
+    新内容撞上另一条同来源 / 同内容（原始文件按内容去重）的资产 → CreationAssetDuplicateError。
+    """
+    orphan_paths: list[Path] = []
+    with file_lock(_catalog_lock_path()):
+        current = _read_catalog_unlocked()
+        asset = next((row for row in current.assets if row.asset_id == asset_id), None)
+        if asset is None:
+            raise KeyError(asset_id)
+        if asset.adopted_from is None:
+            raise ValueError("只有从团队库采用的资产可以重新采用")
+        updated = CreationAsset.model_validate({
+            **asset.model_dump(),
+            "kind": content.kind,
+            "title": _required_text(title, "资产标题"),
+            "tags": _normalize_tags(tags),
+            "content": content.model_dump(),
+            "adopted_from": adopted_from.model_dump(),
+            "updated_at": _now(),
+        })
+        duplicate = _adopted_duplicate(current, updated)
+        if duplicate is not None and duplicate.asset_id != asset_id:
+            raise CreationAssetDuplicateError(duplicate.asset_id)
+        _require_blobs(updated)
+        _replace_asset(current, updated)
+        orphan_paths = _orphan_blob_paths(
+            _asset_blob_paths(asset),
+            [updated if row.asset_id == asset_id else row for row in current.assets],
+        )
+    for path in orphan_paths:
+        path.unlink(missing_ok=True)
+    return updated
+
+
+def find_adopted_asset(library_id: str, asset_id: str) -> CreationAsset | None:
+    with file_lock(_catalog_lock_path()):
+        for row in _read_catalog_unlocked().assets:
+            origin = row.adopted_from
+            if origin and origin.library_id == library_id and origin.asset_id == asset_id:
+                return row
+    return None
+
+
+def find_media_asset_by_sha256(digest: str) -> CreationAsset | None:
+    with file_lock(_catalog_lock_path()):
+        return _media_duplicate(_read_catalog_unlocked(), digest)
 
 
 def insert_creation_asset_into_canvas(
@@ -631,10 +895,11 @@ def insert_creation_asset_into_canvas(
 
     values = variable_values or {}
     asset = get_creation_asset(asset_id)
-    content = asset.content
-    image_body: bytes | None = None
-    if content.kind == "image":
-        image_body = creation_asset_image_path(asset_id).read_bytes()
+    # 生成资产进画布只放成片；快照不跟进画布（画布复刻属 P3）。
+    content = asset_media_content(asset) or asset.content
+    media_body: bytes | None = None
+    if content.kind == "media":
+        media_body = creation_asset_media_path(asset_id).read_bytes()
 
     with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
@@ -648,7 +913,12 @@ def insert_creation_asset_into_canvas(
             draft = getattr(target.data, "generation_draft", None)
             if getattr(target, "type", None) == "config":
                 draft = getattr(target.data, "draft", None)
-            if content.kind != "image" or draft is None or draft.mode not in {"image", "video"}:
+            if (
+                content.kind != "media"
+                or not content.mime_type.startswith("image/")
+                or draft is None
+                or draft.mode not in {"image", "video"}
+            ):
                 raise ValueError("当前生成面板不能接收这个创作资产")
 
         timestamp = _now()
@@ -669,20 +939,27 @@ def insert_creation_asset_into_canvas(
                 text=rendered,
             )
         else:
-            assert image_body is not None
-            suffix = _IMAGE_SUFFIXES[content.mime_type]
+            assert media_body is not None
+            media_kind = content.mime_type.split("/", 1)[0]  # image | video | audio
+            suffix = MEDIA_SUFFIXES[content.mime_type]
             relative = Path("uploads") / f"creation-asset-{secrets.token_hex(12)}{suffix}"
             write_target = canvas_project_dir(project_id) / relative
-            width, height = _display_image_dimensions(image_body)
+            width = height = None
+            if media_kind == "image":
+                width, height = _display_image_dimensions(media_body)
+            elif media_kind == "video":
+                dims = video_dimensions_from_bytes(media_body)
+                if dims:
+                    width, height = dims
             canvas_version = CanvasMediaVersion(
                 version_id=version_id,
                 created_at=timestamp,
                 sha256=content.sha256,
                 origin=origin,
-                kind="image",
+                kind=media_kind,
                 path=relative.as_posix(),
                 mime_type=content.mime_type,
-                bytes=len(image_body),
+                bytes=len(media_body),
                 width=width,
                 height=height,
             )
@@ -704,17 +981,38 @@ def insert_creation_asset_into_canvas(
         })
         project = read_canvas_project(project_id).model_copy(update={"updated_at": timestamp})
         if write_target is not None:
-            assert image_body is not None
-            _commit_canvas_upload(project_id, project, updated, write_target, image_body, timestamp)
+            assert media_body is not None
+            _commit_canvas_upload(project_id, project, updated, write_target, media_body, timestamp)
         else:
             atomic_write_json(_project_path(project_id), project.model_dump(mode="json"))
             atomic_write_json(_document_path(project_id), updated.model_dump(mode="json"))
 
-    mark_creation_asset_used(asset_id, project_id)
+    _mark_used_if_present(asset_id, project_id)
     return updated
 
 
+def _mark_used_if_present(asset_id: str, project_id: str) -> None:
+    """画布已经落盘后再记使用：资产若在此期间被删，不记就是，别把已成功的插入报成 404。"""
+    try:
+        mark_creation_asset_used(asset_id, project_id)
+    except KeyError:
+        pass
+
+
+def migrate_creation_asset_catalog_schema() -> None:
+    """读目录前先把 v2 / v3 目录升到 v4。
+
+    server 启动时已经跑过一次；Skill CLI / workshop 这些非 server 入口没有 lifespan，
+    不在这里补一次就会在 `_read_catalog_unlocked` 里以「创作资产库状态损坏」炸出来。
+    延迟 import：迁移模块反向依赖 canvas_projects / jobs。
+    """
+    from character_workflow.lib.creation_assets_migration import migrate_creation_assets_to_v4
+
+    migrate_creation_assets_to_v4()
+
+
 def migrate_legacy_canvas_libraries() -> int:
+    migrate_creation_asset_catalog_schema()
     root = data_root.canvases_dir()
     if not root.is_dir():
         return 0
@@ -772,7 +1070,7 @@ def migrate_legacy_canvas_libraries() -> int:
                 source = canvas_project_dir(project_id) / canvas_version.path
                 if not source.is_file():
                     continue
-                content = _store_image_blob(
+                content = store_media_blob(
                     source.read_bytes(),
                     source.name,
                     canvas_version.mime_type,
@@ -780,8 +1078,8 @@ def migrate_legacy_canvas_libraries() -> int:
                 duplicate = next((
                     row
                     for row in assets
-                    if row.kind == "image"
-                    and row.content.kind == "image"
+                    if row.kind == "media"
+                    and row.content.kind == "media"
                     and row.content.sha256 == content.sha256
                 ), None)
                 if duplicate:
@@ -794,7 +1092,7 @@ def migrate_legacy_canvas_libraries() -> int:
                     ]
                 else:
                     assets.insert(0, _new_asset(
-                        kind="image",
+                        kind="media",
                         title=legacy_asset.title,
                         tags=legacy_asset.tags,
                         content=content,

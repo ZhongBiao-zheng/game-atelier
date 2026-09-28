@@ -92,15 +92,37 @@ POST /api/canvas/projects/{project_id}/agent/sessions
 GET /api/canvas/projects/{project_id}/agent/sessions/{session_id}
 DELETE /api/canvas/projects/{project_id}/agent/sessions/{session_id}
 GET /api/creation-assets
+POST /api/creation-assets/staleness
+POST /api/creation-assets/generation/from-job
+POST /api/creation-assets/generation/from-canvas
 POST /api/creation-assets/prompts
-POST /api/creation-assets/images/from-path
-POST /api/creation-assets/images/upload
+POST /api/creation-assets/media/from-path
+POST /api/creation-assets/media/upload
 PUT /api/creation-assets/{asset_id}/prompt
-PUT /api/creation-assets/{asset_id}/image
+PUT /api/creation-assets/{asset_id}/media
 POST /api/creation-assets/{asset_id}/use
 DELETE /api/creation-assets/{asset_id}
 GET /api/creation-assets/{asset_id}/content
+GET /api/creation-assets/{asset_id}/inputs/{order}
+GET /api/creation-assets/{asset_id}/staleness
+POST /api/creation-assets/{asset_id}/readopt
 POST /api/canvas/projects/{project_id}/creation-assets/{asset_id}/insert
+POST /api/canvas/projects/{project_id}/creation-assets/{asset_id}/reproduce
+GET /api/profile
+PUT /api/profile
+GET /api/team-libraries
+POST /api/team-libraries
+DELETE /api/team-libraries/{library_id}
+POST /api/team-libraries/{library_id}/rescan
+GET /api/team-libraries/{library_id}/assets
+GET /api/team-libraries/{library_id}/assets/{entry_id}/content
+GET /api/team-libraries/{library_id}/assets/{entry_id}/thumb
+POST /api/team-libraries/{library_id}/assets/{entry_id}/adopt
+GET /api/team-libraries/related
+POST /api/team-libraries/{library_id}/share
+PUT /api/team-libraries/{library_id}/assets/{asset_id}
+DELETE /api/team-libraries/{library_id}/assets/{asset_id}
+POST /api/canvas/projects/{project_id}/paste
 POST /api/canvas/projects/{project_id}/uploads
 POST /api/canvas/projects/{project_id}/nodes/{node_id}/replace
 POST /api/canvas/projects/{project_id}/media-operations
@@ -141,16 +163,24 @@ LOCAL_MANAGEMENT = frozenset({
     "/api/config", "/api/keys", "/api/keys/{alias}", "/api/keys/{alias}/reveal",
     "/api/keys/models-preview", "/api/folder-picker", "/api/onboarding/status",
     "/api/onboarding/data-root",
+    # 挂载团队库 = 往本机任意目录写清单并整棵扫描，同 folder-picker 只给本机页面。
+    "/api/team-libraries",
 })
 # 已脱敏的 Key 列表（alias / 能力 / 掩码）是选模型的依据，网站会话也要读；增删改与 reveal 仍属管理。
-_MANAGEMENT_READ_EXEMPT = frozenset({("GET", "/api/keys")})
+# 已挂载的团队库列表同理：网站会话要读它才能浏览 / 采用。
+_MANAGEMENT_READ_EXEMPT = frozenset({("GET", "/api/keys"), ("GET", "/api/team-libraries")})
+# 用 POST 只因为 id 列表放不进查询串；它只读，不需要编辑租约。
+_READ_POSTS = frozenset({("POST", "/api/creation-assets/staleness")})
 MEDIA_ROUTES = frozenset({
     "/api/raw", "/api/images", "/api/gallery/image",
     "/api/creation-assets/{asset_id}/content",
+    "/api/creation-assets/{asset_id}/inputs/{order}",
     "/api/canvas/projects/{project_id}/versions/{version_id}/media",
     "/api/canvas/projects/{project_id}/versions/{version_id}/download",
     "/api/canvas/projects/{project_id}/nodes/{node_id}/layers/download",
     "/api/workshop/requests/{request_id}/references/{media_id}",
+    "/api/team-libraries/{library_id}/assets/{entry_id}/content",
+    "/api/team-libraries/{library_id}/assets/{entry_id}/thumb",
 })
 WORKSHOP_TOOLS = frozenset({
     "list-projects", "list-targets", "get-context", "list-models", "create-target", "read-document",
@@ -181,5 +211,7 @@ def local_capability(method: str, path: str) -> str | None:
         )) and pattern.fullmatch(path):
             if template in LOCAL_MANAGEMENT and (method, template) not in _MANAGEMENT_READ_EXEMPT:
                 return "manage"
-            return "read" if method in {"GET", "HEAD"} else "edit"
+            if method in {"GET", "HEAD"} or (method, template) in _READ_POSTS:
+                return "read"
+            return "edit"
     return None

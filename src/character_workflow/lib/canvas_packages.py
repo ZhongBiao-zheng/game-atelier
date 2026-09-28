@@ -1308,3 +1308,5 @@ def delete_canvas_project(
     discard_canvas_thumbnails(project_id)
     from character_workflow.lib.creation_assets import remove_canvas_project_asset_relations
     remove_canvas_project_asset_relations(project_id)
+    from character_workflow.lib.team_library import remove_project_mounts
+    remove_project_mounts(project_id)
