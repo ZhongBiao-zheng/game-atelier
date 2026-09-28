@@ -149,7 +149,9 @@ server 启动建好监听后对每个库各起一条后台线程补扫一次（�
 `execute_generation` 能力的 Agent 会话（ADR-0017）。`POST /jobs/{id}/confirm` 继续批准 CLI 草稿。
 Canvas / Studio 保留自己的人工提交路径，不要求工坊请求。旧历史记录不伪造批准或批量改写。
 
-`JobParams` = `extra="allow"`（加字段不会被上游拒），但**双端仍要同步声明**，否则 TS 那边拿不到类型。Studio 在新建 Job 时可写 `estimated_cost_cny`，它是按当次 Key 渠道、模型与参数冻结的人民币预计总价；OpenRouter 等返回账单用量的 caller 可写 `actual_cost_cny`，历史优先实际费用、其次预计快照，缺失时不用当前 Key 重算。后端独占写入的还有 `actual_size`、`warnings`、`requested_size`、`provider_task_protocol`、`provider_task_ids` —— 前端只读不写。后两项用于恢复已计费的聚合商异步任务：任务 ID 必须在首次轮询前落盘，重启后只允许续查原任务，不能重新提交。
+`JobParams` = `extra="allow"`（加字段不会被上游拒），但**双端仍要同步声明**，否则 TS 那边拿不到类型。Studio 在新建 Job 时可写 `estimated_cost_cny`，它是按当次 Key 渠道、模型与参数冻结的人民币预计总价；OpenRouter 等返回账单用量的 caller 可写 `actual_cost_cny`，历史优先实际费用、其次预计快照，缺失时不用当前 Key 重算。后端独占写入的还有 `actual_size`、`warnings`、`requested_size`、`provider_task_protocol`、`provider_task_ids`、`video_submission_attempts` —— 前端只读不写。任务 ID 必须在首次轮询前落盘；Tuzi 支持重启续查，Seedance（`provider_task_protocol=seedance`）保留订单供核对，不自动恢复或重新提交。
+
+Seedance 提交诊断位于 `params.video_submission_attempts`（每单最多四项）：`attempt`、`method`、`url`（去掉凭证、query 与 fragment）、`started_at`（UTC）、`elapsed_ms`、`http_status`、`request_ids`（只取白名单响应头）、`error_type`（网络异常类名）与 `outcome`。提交前记录 `submitting`，收到响应记录 `response`；5xx、网络中断及无法解析的成功响应标为 `unconfirmed`。不保存请求正文、授权头、图片 Base64 或原始网络异常文本。504 等错误说明“提交结果未确认”，不自动重提。Windows 复测后提供数据目录 `.runtime/jobs/<job_id>.json` 即可核对记录；无须提供 `.config/keys.json`。这些诊断不进入复用配方，新订单不继承。
 
 Canvas 节点媒体设置新增的显式参数也遵循同一契约：图片 `background` 只允许
 `auto | opaque | transparent`，并只向已验证的 GPT Image 直连协议发送；视频 `watermark`

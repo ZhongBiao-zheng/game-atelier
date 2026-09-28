@@ -81,6 +81,8 @@ def _friendly_error(err: BaseException) -> str:
     整条替换会把这类关键标识一起冲掉。所以分支只负责给中文提示，原文由这里统一附加。
     """
     raw = _redact_local_paths(str(err))
+    if str(err).startswith("视频提交结果未确认"):
+        return raw
     hint = _error_hint(str(err).lower())
     if hint is None:
         return raw
@@ -301,8 +303,7 @@ def _error_hint(low: str) -> str | None:
         return "网络连不上厂商接口：请检查网络 / 代理设置，确认厂商域名可访问后重试。"
     if "gateway" in low or "网关" in low or "bad response status code" in low:
         return (
-            "厂商网关瞬时超时（已自动重试仍失败）：通常是该模型上游过载或排队，"
-            "请稍后重试或换模型。"
+            "厂商网关请求失败：请先核对厂商任务记录，再决定是否重试。"
         )
     return None
 
@@ -703,6 +704,20 @@ def _run_video_job(job: Job) -> Job:
     params = _params(job)
     should_cancel = _cancel_checker(job)
 
+    def on_task_id(task_id: str) -> None:
+        ids = list(params.get("provider_task_ids") or [])
+        if task_id not in ids:
+            ids.append(task_id)
+        params["provider_task_ids"] = ids
+        params["provider_task_protocol"] = "seedance"
+        update_job_params(job.job_id, params)
+
+    def on_submission(attempt: dict[str, Any]) -> None:
+        attempts = [item for item in (params.get("video_submission_attempts") or [])
+                    if item["attempt"] != attempt["attempt"]]
+        params["video_submission_attempts"] = [*attempts, attempt]
+        update_job_params(job.job_id, params)
+
     def on_phase(phase: str) -> None:
         _raise_if_canceled(should_cancel)
         update_job_phase(job.job_id, phase)
@@ -720,6 +735,8 @@ def _run_video_job(job: Job) -> Job:
                 params=params,
                 # 进度卡点回写 job 文件（sent/downloading），watcher SSE 推给前端。
                 on_phase=on_phase,
+                on_task_id=on_task_id,
+                on_submission=on_submission,
                 on_cost_usd=_actual_cost_recorder(job.job_id, params),
                 should_cancel=should_cancel,
             )

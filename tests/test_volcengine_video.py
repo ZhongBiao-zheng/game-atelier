@@ -35,6 +35,53 @@ class _FakeResp:
         return b"\x00\x00\x00\x18ftypmp42fake-mp4-bytes"
 
 
+@pytest.mark.parametrize("failure", ["html504", "timeout", "bad_json"])
+def test_submission_diagnostics_never_repost_or_store_secrets(monkeypatch, failure):
+    events = []
+    calls = []
+
+    def post(*args, **kwargs):
+        calls.append(1)
+        if failure == "timeout":
+            raise requests.Timeout("secret-in-exception")
+        resp = _FakeResp(504 if failure == "html504" else 200, {})
+        resp.headers = {"x-request-id": "request-123", "authorization": "secret"}
+        resp.text = "<html>504 Gateway</html>secret-in-body"
+        resp.json = lambda: (_ for _ in ()).throw(ValueError("not json"))
+        return resp
+
+    monkeypatch.setattr(vv.requests, "post", post)
+    with pytest.raises(vv.VolcengineVideoError, match="提交结果未确认") as caught:
+        vv._submit_task(
+            "https://user:password@tokendance.space/gateway/ark/v3/generations/tasks?key=secret",
+            {"Authorization": "Bearer secret"}, {"content": "secret-base64"}, 1, events.append,
+        )
+    assert len(calls) == 1
+    assert events[0]["outcome"] == "submitting"
+    assert events[-1]["outcome"] == "unconfirmed"
+    assert events[-1]["elapsed_ms"] >= 0
+    assert events[-1]["url"] == "https://tokendance.space/gateway/ark/v3/generations/tasks"
+    assert "secret" not in json.dumps(events) + str(caught.value)
+    assert "password" not in json.dumps(events)
+    if failure == "html504":
+        assert events[-1]["http_status"] == 504
+        assert events[-1]["request_ids"] == {"x-request-id": "request-123"}
+
+
+def test_task_id_is_reported_before_polling(seedance_key, tmp_path, monkeypatch):
+    ids = []
+    monkeypatch.setattr(vv.requests, "post", lambda *a, **k: _FakeResp(200, {"id": "task-1"}))
+
+    def poll(**kwargs):
+        assert ids == ["task-1"]
+        raise vv.VolcengineVideoError("poll failed")
+
+    monkeypatch.setattr(vv, "_poll_video_task", poll)
+    with pytest.raises(vv.VolcengineVideoError, match="poll failed"):
+        vv.render_video(prompt="p", model="seedance-2.0-mini", alias="ark",
+                        output_dir=tmp_path, on_task_id=ids.append)
+
+
 @pytest.fixture
 def seedance_key(tmp_path, monkeypatch):
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
@@ -327,10 +374,13 @@ def test_success_without_urls_raises(seedance_key, tmp_path, monkeypatch):
 
 
 def test_submit_without_url_or_taskid_raises(seedance_key, tmp_path, monkeypatch):
+    events = []
     monkeypatch.setattr(vv.requests, "post", lambda *a, **k: _FakeResp(200, {"data": {}}))
     monkeypatch.setattr(vv.requests, "get", lambda *a, **k: _FakeResp(200, {}))
-    with pytest.raises(vv.VolcengineVideoError, match="task id"):
-        vv.render_video(prompt="p", model="", alias="ark", output_dir=tmp_path / "o", params={}, poll_interval=0)
+    with pytest.raises(vv.VolcengineVideoError, match="未返回任务 ID"):
+        vv.render_video(prompt="p", model="", alias="ark", output_dir=tmp_path / "o",
+                        params={}, poll_interval=0, on_submission=events.append)
+    assert events[-1]["outcome"] == "unconfirmed"
 
 
 # ---------------------------------------------------------------- 轮询期网络抖动
