@@ -170,8 +170,9 @@ def test_raw_does_not_resolve_web_url_entries_as_local_paths(client, isolated_da
 
     response = _create(client, {"reference_images": ["https://cdn.example.com/a.png"]})
     assert response.status_code == 201, response.text
+    outside = _touch(isolated_data_root.parent / "outside.png")
     leaked = client.get("/api/raw", params={
-        "job_id": response.json()["job_id"], "path": "/etc/hosts",
+        "job_id": response.json()["job_id"], "path": str(outside),
     })
 
     assert leaked.status_code == 403
@@ -221,7 +222,11 @@ def test_post_prompt_gates_extra_source_image(client, isolated_data_root):
 @pytest.mark.parametrize("variant", [(".Config", "keys.json"), (".RUNTIME", "jobs", "x.json")])
 def test_case_variants_cannot_register_and_raw_refuses(client, isolated_data_root, variant):
     _forbidden_paths(isolated_data_root)
-    path = str(isolated_data_root.joinpath(*variant))
+    variant_path = isolated_data_root.joinpath(*variant)
+    # Linux 大小写敏感；macOS / Windows 上不覆盖已有的 keys.json。
+    if not variant_path.exists():
+        _touch(variant_path)
+    path = str(variant_path)
     job_id = _create(client, {}).json()["job_id"]
 
     assert _create(client, {"reference_images": [path]}).status_code == 422
@@ -244,7 +249,7 @@ def test_raw_without_job_id_only_serves_uploads(client, isolated_data_root):
         "characters/x.png",
         str(_touch(isolated_data_root / "studio" / "j" / "out.png")),
         str(isolated_data_root / ".runtime" / "uploads"),
-        "/etc/hosts",
+        str(_touch(isolated_data_root.parent / "outside.png")),
     ]
 
     for path in forbidden:

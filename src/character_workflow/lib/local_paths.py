@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from stat import S_ISREG
 
 from character_workflow.lib import data_root
 
@@ -41,7 +42,11 @@ def data_root_file(value: str) -> Path:
     if _is_protected(parts):
         raise ValueError("参考文件在受保护目录内")
     try:
-        is_file = path.is_file()
+        is_file = S_ISREG(path.stat().st_mode)
+    except FileNotFoundError as error:
+        if getattr(error, "winerror", None) == 206:
+            raise ValueError("参考路径无效") from error
+        is_file = False
     except OSError as error:
         raise ValueError("参考路径无效") from error
     if not is_file:

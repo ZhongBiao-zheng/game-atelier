@@ -523,11 +523,16 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
     若用 Path(path).resolve() 会解析到 repo 根，与 job.output_paths 里的绝对路径对不上 → 403/404。
     """
     raw = Path(path)
-    # NUL 字节让 resolve 抛 ValueError，超长文件名让 exists 抛 OSError（ENAMETOOLONG）。这是请求
+    # 用 stat 保留 Windows 超长文件名错误，exists 会将它吞成不存在。这是请求
     # 参数本身不成形，回 400 而不是 403：没有「路径合法但无权读」这回事，也别让它冒成 500。
     try:
         target = (raw if raw.is_absolute() else _project_root() / raw).resolve()
-        exists = target.exists()
+        target.stat()
+        exists = True
+    except FileNotFoundError as error:
+        if getattr(error, "winerror", None) == 206:
+            raise HTTPException(400, detail="读图被拒：路径无效") from error
+        exists = False
     except (ValueError, OSError) as error:
         raise HTTPException(400, detail="读图被拒：路径无效") from error
     if not exists:
