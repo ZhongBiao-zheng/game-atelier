@@ -936,7 +936,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
   );
 }
 
-export const CANVAS_GENERATION_PANEL_WIDTH = 608;
+export const CANVAS_GENERATION_PANEL_WIDTH = 456;
 const CANVAS_GENERATION_PANEL_GAP = 16;
 
 /** 只用到矩形的这几个数，写成最小接口好让放置逻辑纯函数化、能单测。 */
@@ -1035,7 +1035,7 @@ function samePlacement(a: CanvasPanelPlacement | null, b: CanvasPanelPlacement) 
 /** 生成面板挂在画布区域上，不再挂在节点里面。
  *
  *  原实现是 React Flow 节点的子元素，靠 scale(1/zoom) 反缩放对抗画布缩放。两个后果：
- *  transform 默认绕中心缩放，608px 的面板放大后向左右各溢出上百像素（1280×720 视口实测面板
+ *  transform 默认绕中心缩放，当时 608px 的面板放大后向左右各溢出上百像素（1280×720 视口实测面板
  *  left=-77，提示词编辑区左边 64px 落在视口外，看不见也点不到）；而且它活在 transform 层里，
  *  夹视口这件事在那儿做不到——父级 transform 之后再 clamp 也夹不回来。
  *  portal 到 .canvas-editor-region（position:relative）之后：尺寸恒定不再受缩放影响，位置按节点

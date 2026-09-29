@@ -409,7 +409,7 @@ class CanvasViewport(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     x: float = 0
     y: float = 0
-    zoom: float = Field(default=1, gt=0.05, le=4)
+    zoom: float = Field(default=1, gt=0.05, le=5)
 
 
 class CanvasSettings(BaseModel):

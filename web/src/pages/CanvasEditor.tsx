@@ -429,6 +429,12 @@ export function CanvasEditor(props: {
   onBack: () => void;
   onSwitchProject: (projectId: string) => void;
 }) {
+  // 画布页整体按 75% 显示，见 tokens.css 的 html.canvas-compact；离开画布恢复。
+  useEffect(() => {
+    const root = window.document.documentElement;
+    root.classList.add('canvas-compact');
+    return () => root.classList.remove('canvas-compact');
+  }, []);
   return <ReactFlowProvider><CanvasEditorInner {...props} /></ReactFlowProvider>;
 }
 

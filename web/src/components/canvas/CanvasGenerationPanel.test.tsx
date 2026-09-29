@@ -1106,7 +1106,7 @@ it('clamps the generation panel inside the left edge instead of centering off-sc
   const placement = placeCanvasGenerationPanel(nearLeftEdge, VIEWPORT, 290);
 
   expect(placement.left).toBe(16);
-  expect(placement.width).toBe(608);
+  expect(placement.width).toBe(456);
   expect(placement.top).toBe(376);
   expect(placement.side).toBe('below');
 });
@@ -1126,9 +1126,9 @@ it('keeps the generation panel directly below a node with room to spare', () => 
 
   const placement = placeCanvasGenerationPanel(node, rect(0, 0, 1440, 900), 400);
 
-  expect(placement.left).toBe(400 + 165 - 304);
+  expect(placement.left).toBe(400 + 165 - 228);
   expect(placement.top).toBe(node.bottom + 16);
-  expect(placement.width).toBe(608);
+  expect(placement.width).toBe(456);
 });
 
 it('clamps at the right edge and limits the panel height to the viewport', () => {
@@ -1136,7 +1136,7 @@ it('clamps at the right edge and limits the panel height to the viewport', () =>
 
   const placement = placeCanvasGenerationPanel(wideNode, rect(0, 0, 1440, 900), 860);
 
-  expect(placement.left).toBe(1440 - 16 - 608);
+  expect(placement.left).toBe(1440 - 16 - 456);
   expect(placement.maxHeight).toBe(868);
   expect(placement.top).toBe(900 - 16 - 860);
 });

@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.68.4',
+    date: '2026-09-29',
+    headline: '画布界面缩小、放大后新建节点不再保存失败',
+    changes: [
+      { kind: 'feat', text: '画布上的工具条、菜单、生成面板整体缩小到原来的 75%。' },
+      { kind: 'fix', text: '画布放大超过 400% 时（新建节点会自动放大）保存报「viewport.zoom」错误，现在最高 500% 都能保存。' },
+    ],
+  },
+  {
     version: '5.68.3',
     date: '2026-09-28',
     headline: '补齐视频提交失败的排查记录',

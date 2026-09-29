@@ -629,6 +629,10 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+  /* 画布编辑页整体按 75% 显示（飙哥 2026-09-29：浏览器缩到 75% 刚好）。尺寸几乎都是 rem，
+     压根字号即可等比缩小工具条、菜单、弹窗；媒体查询里的 rem 按初始字号算，断点不受影响。 */
+  html.canvas-compact { font-size: 75%; }
+  html.canvas-compact body { font-size: 0.875rem; }
   code, pre, kbd, samp { font-family: var(--font-mono); }
   /* 衬线斜体在小字号下抗锯齿优化 */
   .italic { font-synthesis-style: none; }
