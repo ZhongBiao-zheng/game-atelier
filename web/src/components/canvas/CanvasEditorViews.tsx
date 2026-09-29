@@ -254,6 +254,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
   const node = data.domain;
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingText, setIsEditingText] = useState(false);
+  const [textDraft, setTextDraft] = useState<string | null>(null);
   const [isEditingInlineText, setIsEditingInlineText] = useState(false);
   const [titleDraft, setTitleDraft] = useState(node.title);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -441,6 +442,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     context.recordHistory();
     textEditingExitRequested.current = false;
     textSelectionRef.current = null;
+    // 草稿只在编辑期间生效，每次进入都从文档里的正文开始。
+    setTextDraft(null);
     setTextEditing?.(node.id, true);
     setIsEditingText(true);
   }
@@ -819,7 +822,9 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               <textarea
                 ref={textEditorRef}
                 aria-label={`编辑 ${node.title} 正文`}
-                value={content?.kind === 'text' ? content.text : ''}
+                // 显示值取本地草稿：文档值要绕画布文档 → React Flow 节点 → 本组件一圈才回来，
+                // 慢一拍时 React 会先把旧值写回 textarea，当场打断中文输入法的拼音组合。
+                value={textDraft ?? (content?.kind === 'text' ? content.text : '')}
                 disabled={nodeRunState.status === 'loading'}
                 placeholder="输入文本…"
                 className={cn(
@@ -828,14 +833,19 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
                 )}
                 onChange={event => {
                   rememberTextSelection(event.target);
-                  context.updateText(node.id, event.target.value);
+                  setTextDraft(event.target.value);
+                  // 拼音组合中只更新草稿，不让整张画布跟着每个字母重渲染；选字后由 compositionend 提交。
+                  if (!(event.nativeEvent as InputEvent).isComposing) context.updateText(node.id, event.target.value);
                 }}
+                onCompositionEnd={event => context.updateText(node.id, event.currentTarget.value)}
                 onSelect={event => rememberTextSelection(event.currentTarget)}
                 onBlur={handleTextEditorBlur}
                 onPointerDown={event => event.stopPropagation()}
                 onDoubleClick={event => event.stopPropagation()}
                 onKeyDown={event => {
                   event.stopPropagation();
+                  // 输入法组合中的 Esc / Tab 归输入法（取消拼音、切候选），不算退出编辑。
+                  if (event.nativeEvent.isComposing) return;
                   if (event.key === 'Tab') {
                     event.preventDefault();
                     finishTextEditing(true);

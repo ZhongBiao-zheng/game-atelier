@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.68.5',
+    date: '2026-09-29',
+    headline: '文本节点中文输入不再被打断',
+    changes: [
+      { kind: 'fix', text: '文本节点里用中文输入法打字，拼音组合不会再被打断；输入法里按 Esc / Tab 取消拼音也不会退出编辑。' },
+    ],
+  },
+  {
     version: '5.68.4',
     date: '2026-09-29',
     headline: '画布界面缩小、放大后新建节点不再保存失败',
