@@ -19,6 +19,7 @@ import {
   useRef, useState,
   type FocusEvent as ReactFocusEvent, type ReactNode, type Ref, type RefObject,
 } from 'react';
+import { Reorder } from 'motion/react';
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
 
@@ -72,6 +73,7 @@ import { presentCanvasCandidates, type CanvasCandidateEntry } from '@/lib/canvas
 import { useVideoFrame } from '@/lib/videoFrame';
 import {
   canvasMentionMatches,
+  labelCanvasMentionReferences,
   missingCanvasMentionIds,
   mentionKindLabel,
   type CanvasMaterialReference,
@@ -166,6 +168,7 @@ export interface CanvasNodeContextValue {
     selectableNodeIds: ReadonlySet<string>;
   }) => void;
   setMaterialConnected: (sourceNodeId: string, targetNodeId: string, connected: boolean) => void;
+  reorderMaterialConnections?: (targetNodeId: string, orderedSourceIds: readonly string[]) => void;
   setVideoFrameConnections?: (
     targetNodeId: string,
     frames: Readonly<Record<CanvasVideoFrameSlot, string | null>>,
@@ -410,6 +413,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     ? presentCanvasCandidates(context.jobsByResultNodeId.get(node.id) ?? [])
     : null;
   const mediaCandidates = candidatePresentation?.current ?? [];
+  // 「隐藏」只对有内容的节点有意义；已隐藏的节点照样给出「显示」。
+  const hasHideableContent = node.type === 'layer_stack'
+    || (node.type === 'batch_material' ? node.data.items.length > 0
+      : content !== undefined && (content.kind !== 'text' || content.text.trim() !== ''));
 
   function beginTitleEditing() {
     titleExitInProgress.current = false;
@@ -704,13 +711,13 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               <Share2 />
             </MediaToolButton>
           )}
-          <MediaToolButton
+          {(hasHideableContent || node.hidden) && <MediaToolButton
             label={node.hidden ? `显示 ${node.title} 的内容` : `隐藏 ${node.title} 的内容`}
             text={node.hidden ? '显示' : '隐藏'}
             onClick={toggleHidden}
           >
             {node.hidden ? <Eye /> : <EyeOff />}
-          </MediaToolButton>
+          </MediaToolButton>}
         </div>
       </NodeToolbar>
       {node.type === 'image' && mediaCandidates.length > 0 && (
@@ -2178,6 +2185,9 @@ export function CanvasGenerationComposer({
             node.id,
             connected,
           )}
+          onReorder={context.reorderMaterialConnections
+            ? orderedNodeIds => context.reorderMaterialConnections?.(node.id, orderedNodeIds)
+            : undefined}
         />
       )}
       {promptCollapsed ? (
@@ -2589,6 +2599,7 @@ function CanvasMaterialConnections({
   onPreview,
   onBeginPick,
   onConnectedChange,
+  onReorder,
 }: {
   node: CanvasNode;
   materials: readonly CanvasMaterialReference[];
@@ -2599,9 +2610,29 @@ function CanvasMaterialConnections({
   onPreview: (reference: CanvasMaterialReference) => void;
   onBeginPick: (selectableNodeIds: ReadonlySet<string>) => void;
   onConnectedChange: (sourceNodeId: string, connected: boolean) => void;
+  onReorder?: (orderedNodeIds: readonly string[]) => void;
 }) {
   const choices = materials.filter(reference => reference.nodeId !== node.id);
-  const connected = connectedReferences;
+  // 拖动期间只动本地顺序（编号跟着实时变），松手才写回文档，一次拖拽一条撤销记录。
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
+  const dragOrderRef = useRef<string[] | null>(null);
+  const draggedRef = useRef(false);
+  const referenceById = new Map(connectedReferences.map(reference => [reference.nodeId, reference]));
+  const connected = dragOrder
+    ? labelCanvasMentionReferences(dragOrder.flatMap(id => referenceById.get(id) ?? []))
+    : connectedReferences;
+  const updateDragOrder = (order: string[]) => {
+    dragOrderRef.current = order;
+    setDragOrder(order);
+  };
+  const finishDrag = () => {
+    const order = dragOrderRef.current;
+    dragOrderRef.current = null;
+    setDragOrder(null);
+    if (order) onReorder?.(order);
+    // 松手那一下还会触发一次 click，别把它当成「查看素材」。
+    window.setTimeout(() => { draggedRef.current = false; }, 0);
+  };
   const connectedCounts = connected.reduce<Record<'image' | 'video' | 'audio', number>>(
     (counts, reference) => {
       if (reference.kind !== 'text') counts[reference.kind] += reference.inputCount ?? 1;
@@ -2647,10 +2678,30 @@ function CanvasMaterialConnections({
         aria-label={`${node.title} 已对接素材`}
         className="mb-1 flex min-h-12 min-w-0 items-center gap-2 overflow-x-auto px-1 py-1"
       >
+        <Reorder.Group
+          as="div"
+          axis="x"
+          values={connected.map(reference => reference.nodeId)}
+          onReorder={updateDragOrder}
+          className="flex shrink-0 items-center gap-2"
+        >
         {connected.map(reference => {
           const detailVisible = hoveredMaterial?.reference.nodeId === reference.nodeId;
           return (
-            <span key={reference.nodeId} className="relative size-12 shrink-0">
+            <Reorder.Item
+              key={reference.nodeId}
+              as="span"
+              value={reference.nodeId}
+              drag={onReorder && connected.length > 1 ? 'x' : false}
+              whileDrag={{ zIndex: 20 }}
+              onDragStart={() => {
+                draggedRef.current = true;
+                setHoveredMaterial(null);
+                dragOrderRef.current = connected.map(item => item.nodeId);
+              }}
+              onDragEnd={finishDrag}
+              className={cn('relative size-12 shrink-0', onReorder && connected.length > 1 && 'cursor-grab active:cursor-grabbing')}
+            >
               <button
                 type="button"
                 aria-label={`查看已对接素材 ${reference.title}`}
@@ -2661,7 +2712,7 @@ function CanvasMaterialConnections({
                 onMouseLeave={() => setHoveredMaterial(null)}
                 onFocus={event => showMaterialDetail(reference, event.currentTarget)}
                 onBlur={() => setHoveredMaterial(null)}
-                onClick={() => onPreview(reference)}
+                onClick={() => { if (!draggedRef.current) onPreview(reference); }}
               >
                 <CanvasMaterialPreview reference={reference} />
                 <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-xs text-foreground">
@@ -2676,9 +2727,10 @@ function CanvasMaterialConnections({
               >
                 <X className="size-3" aria-hidden="true" />
               </button>
-            </span>
+            </Reorder.Item>
           );
         })}
+        </Reorder.Group>
         <button
           type="button"
           aria-label={`为 ${node.title} 在画布选择素材`}

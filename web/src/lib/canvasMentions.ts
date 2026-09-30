@@ -95,14 +95,8 @@ export function buildCanvasMentionReferences(
   contentVersions: Readonly<Record<string, CanvasContentVersion>>,
 ): CanvasMentionReference[] {
   const nodesById = new Map(nodes.map(node => [node.id, node]));
-  const counts: Record<CanvasMentionKind, number> = {
-    text: 0,
-    image: 0,
-    video: 0,
-    audio: 0,
-  };
   const seen = new Set<string>();
-  return connections.flatMap(connection => {
+  return labelCanvasMentionReferences(connections.flatMap(connection => {
     if (connection.role !== 'input' || connection.target_node_id !== surface.id) return [];
     return canvasInputSourceIds(nodes, connection.source_node_id).flatMap(sourceId => {
       if (seen.has(sourceId)) return [];
@@ -112,14 +106,23 @@ export function buildCanvasMentionReferences(
         ? canvasMaterialReference(projectId, node, contentVersions, isMentionContentNode(surface)
           ? surface.data.batch_result : null)
         : null;
-      if (!material) return [];
-      const index = counts[material.kind] + 1;
-      counts[material.kind] += material.inputCount ?? 1;
-      return [{
-        ...material,
-        label: `${mentionKindLabel(material.kind)}${index}${counts[material.kind] > index ? `–${counts[material.kind]}` : ''}`,
-      }];
+      return material ? [material] : [];
     });
+  }));
+}
+
+/** 按排列顺序给参考素材编号：各类型分别计数（图片1、视频1、图片2…），多张一组的写成区间。 */
+export function labelCanvasMentionReferences(
+  materials: readonly CanvasMaterialReference[],
+): CanvasMentionReference[] {
+  const counts: Record<CanvasMentionKind, number> = { text: 0, image: 0, video: 0, audio: 0 };
+  return materials.map(material => {
+    const index = counts[material.kind] + 1;
+    counts[material.kind] += material.inputCount ?? 1;
+    return {
+      ...material,
+      label: `${mentionKindLabel(material.kind)}${index}${counts[material.kind] > index ? `–${counts[material.kind]}` : ''}`,
+    };
   });
 }
 

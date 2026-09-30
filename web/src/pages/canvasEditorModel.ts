@@ -13,6 +13,7 @@ import {
 import type {
   CanvasContentNode,
   CanvasBatchMaterialNode,
+  CanvasConnection,
   CanvasContentVersion,
   CanvasGenerationDefault,
   CanvasGenerationMode,
@@ -957,6 +958,34 @@ export function switchCanvasGenerationDraft(
   });
 }
 
+/** 按拖拽后的顺序重排某个节点的直连输入（不含首尾帧槽位）。
+ *
+ *  参考素材的顺序就是输入连线在文档里的顺序：前端「图片1 / 图片2」编号与后端提交顺序都按它算。
+ *  orderedSourceIds 是界面上参考素材的顺序（分组已展开成成员）。只在这几条连线原来占的
+ *  下标里换位，其他连线的位置不动。顺序没变时原样返回。 */
+export function reorderCanvasInputConnections(
+  document: CanvasDocument,
+  targetNodeId: string,
+  orderedSourceIds: readonly string[],
+): CanvasDocument {
+  const isDirectInput = (connection: CanvasConnection) => (
+    connection.role === 'input' && !connection.slot && connection.target_node_id === targetNodeId
+  );
+  const slots = document.connections.flatMap((connection, index) => isDirectInput(connection) ? [index] : []);
+  const position = new Map(orderedSourceIds.map((id, index) => [id, index]));
+  // 连的是分组时按成员里排得最靠前的那个算：分组整包移动，成员之间的顺序归分组自己管。
+  const rank = (connection: CanvasConnection) => Math.min(
+    ...canvasInputSourceIds(document.nodes, connection.source_node_id).map(id => position.get(id) ?? Infinity),
+  );
+  const sorted = slots
+    .map(index => document.connections[index])
+    .sort((a, b) => rank(a) - rank(b));
+  if (sorted.every((connection, index) => connection === document.connections[slots[index]])) return document;
+  const connections = [...document.connections];
+  slots.forEach((slot, index) => { connections[slot] = sorted[index]; });
+  return { ...document, connections };
+}
+
 export function createConnectedCanvasConfig(
   document: CanvasDocument,
   sourceNodeId: string,
@@ -971,8 +1000,9 @@ export function createConnectedCanvasConfig(
   const source = document.nodes.find(node => node.id === sourceNodeId);
   if (!source || !canvasNodeHasCurrentContent(source, document.content_versions)) return null;
   const sourceWidth = source.size?.width ?? (source.type === 'text' ? 256 : 320);
-  const token = `@[node:${source.id}]`;
-  const prompt = draft.prompt.trim() ? `${draft.prompt.trim()} ${token}` : token;
+  // 文本来源在提示词里引用；图片 / 视频 / 音频只连线，作为参考素材提交（连线即输入，不需要 @）。
+  const token = source.type === 'text' ? `@[node:${source.id}]` : '';
+  const prompt = [draft.prompt.trim(), token].filter(Boolean).join(' ');
   const configSize = CANVAS_DEFAULT_NODE_SIZE;
   const base = {
     id: ids.nodeId,

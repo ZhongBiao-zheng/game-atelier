@@ -213,6 +213,7 @@ import {
   createCanvasGenerationDraft,
   resolveCanvasGenerationDraft,
   createConnectedCanvasConfig,
+  reorderCanvasInputConnections,
   layerStackSizeForCanvasVersion,
   normalizeCanvasVideoParams,
   normalizeCanvasGroups,
@@ -1555,6 +1556,12 @@ function CanvasEditorInner({
         target_node_id: targetNodeId,
       }))],
     }, new Set([targetNodeId])), true);
+  }, [commit]);
+
+  const reorderMaterialConnections = useCallback((targetNodeId: string, orderedSourceIds: readonly string[]) => {
+    const current = latestDocument.current;
+    if (!current || reorderCanvasInputConnections(current, targetNodeId, orderedSourceIds) === current) return;
+    commit(document => reorderCanvasInputConnections(document, targetNodeId, orderedSourceIds), true);
   }, [commit]);
 
   const setMaterialConnected = useCallback((
@@ -4358,6 +4365,7 @@ function CanvasEditorInner({
     materialPick,
     beginMaterialPick,
     setMaterialConnected,
+    reorderMaterialConnections,
     setVideoFrameConnections,
     selectNode: selectOnlyNode,
     previewContent,
@@ -4456,6 +4464,7 @@ function CanvasEditorInner({
     selectCandidate,
     selectOnlyNode,
     setMaterialConnected,
+    reorderMaterialConnections,
     setTextEditing,
     setVideoFrameConnections,
     submitLayerDecomposition,
