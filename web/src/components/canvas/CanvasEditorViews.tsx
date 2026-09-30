@@ -19,6 +19,7 @@ import {
   useRef, useState,
   type FocusEvent as ReactFocusEvent, type ReactNode, type Ref, type RefObject,
 } from 'react';
+import { Reorder } from 'motion/react';
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
 
@@ -72,6 +73,7 @@ import { presentCanvasCandidates, type CanvasCandidateEntry } from '@/lib/canvas
 import { useVideoFrame } from '@/lib/videoFrame';
 import {
   canvasMentionMatches,
+  labelCanvasMentionReferences,
   missingCanvasMentionIds,
   mentionKindLabel,
   type CanvasMaterialReference,
@@ -166,6 +168,7 @@ export interface CanvasNodeContextValue {
     selectableNodeIds: ReadonlySet<string>;
   }) => void;
   setMaterialConnected: (sourceNodeId: string, targetNodeId: string, connected: boolean) => void;
+  reorderMaterialConnections?: (targetNodeId: string, orderedSourceIds: readonly string[]) => void;
   setVideoFrameConnections?: (
     targetNodeId: string,
     frames: Readonly<Record<CanvasVideoFrameSlot, string | null>>,
@@ -254,6 +257,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
   const node = data.domain;
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingText, setIsEditingText] = useState(false);
+  const [textDraft, setTextDraft] = useState<string | null>(null);
   const [isEditingInlineText, setIsEditingInlineText] = useState(false);
   const [titleDraft, setTitleDraft] = useState(node.title);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -409,6 +413,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     ? presentCanvasCandidates(context.jobsByResultNodeId.get(node.id) ?? [])
     : null;
   const mediaCandidates = candidatePresentation?.current ?? [];
+  // 「隐藏」只对有内容的节点有意义；已隐藏的节点照样给出「显示」。
+  const hasHideableContent = node.type === 'layer_stack'
+    || (node.type === 'batch_material' ? node.data.items.length > 0
+      : content !== undefined && (content.kind !== 'text' || content.text.trim() !== ''));
 
   function beginTitleEditing() {
     titleExitInProgress.current = false;
@@ -441,6 +449,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     context.recordHistory();
     textEditingExitRequested.current = false;
     textSelectionRef.current = null;
+    // 草稿只在编辑期间生效，每次进入都从文档里的正文开始。
+    setTextDraft(null);
     setTextEditing?.(node.id, true);
     setIsEditingText(true);
   }
@@ -701,13 +711,13 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               <Share2 />
             </MediaToolButton>
           )}
-          <MediaToolButton
+          {(hasHideableContent || node.hidden) && <MediaToolButton
             label={node.hidden ? `显示 ${node.title} 的内容` : `隐藏 ${node.title} 的内容`}
             text={node.hidden ? '显示' : '隐藏'}
             onClick={toggleHidden}
           >
             {node.hidden ? <Eye /> : <EyeOff />}
-          </MediaToolButton>
+          </MediaToolButton>}
         </div>
       </NodeToolbar>
       {node.type === 'image' && mediaCandidates.length > 0 && (
@@ -819,7 +829,9 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               <textarea
                 ref={textEditorRef}
                 aria-label={`编辑 ${node.title} 正文`}
-                value={content?.kind === 'text' ? content.text : ''}
+                // 显示值取本地草稿：文档值要绕画布文档 → React Flow 节点 → 本组件一圈才回来，
+                // 慢一拍时 React 会先把旧值写回 textarea，当场打断中文输入法的拼音组合。
+                value={textDraft ?? (content?.kind === 'text' ? content.text : '')}
                 disabled={nodeRunState.status === 'loading'}
                 placeholder="输入文本…"
                 className={cn(
@@ -828,14 +840,19 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
                 )}
                 onChange={event => {
                   rememberTextSelection(event.target);
-                  context.updateText(node.id, event.target.value);
+                  setTextDraft(event.target.value);
+                  // 拼音组合中只更新草稿，不让整张画布跟着每个字母重渲染；选字后由 compositionend 提交。
+                  if (!(event.nativeEvent as InputEvent).isComposing) context.updateText(node.id, event.target.value);
                 }}
+                onCompositionEnd={event => context.updateText(node.id, event.currentTarget.value)}
                 onSelect={event => rememberTextSelection(event.currentTarget)}
                 onBlur={handleTextEditorBlur}
                 onPointerDown={event => event.stopPropagation()}
                 onDoubleClick={event => event.stopPropagation()}
                 onKeyDown={event => {
                   event.stopPropagation();
+                  // 输入法组合中的 Esc / Tab 归输入法（取消拼音、切候选），不算退出编辑。
+                  if (event.nativeEvent.isComposing) return;
                   if (event.key === 'Tab') {
                     event.preventDefault();
                     finishTextEditing(true);
@@ -936,7 +953,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
   );
 }
 
-export const CANVAS_GENERATION_PANEL_WIDTH = 608;
+export const CANVAS_GENERATION_PANEL_WIDTH = 456;
 const CANVAS_GENERATION_PANEL_GAP = 16;
 
 /** 只用到矩形的这几个数，写成最小接口好让放置逻辑纯函数化、能单测。 */
@@ -1035,7 +1052,7 @@ function samePlacement(a: CanvasPanelPlacement | null, b: CanvasPanelPlacement) 
 /** 生成面板挂在画布区域上，不再挂在节点里面。
  *
  *  原实现是 React Flow 节点的子元素，靠 scale(1/zoom) 反缩放对抗画布缩放。两个后果：
- *  transform 默认绕中心缩放，608px 的面板放大后向左右各溢出上百像素（1280×720 视口实测面板
+ *  transform 默认绕中心缩放，当时 608px 的面板放大后向左右各溢出上百像素（1280×720 视口实测面板
  *  left=-77，提示词编辑区左边 64px 落在视口外，看不见也点不到）；而且它活在 transform 层里，
  *  夹视口这件事在那儿做不到——父级 transform 之后再 clamp 也夹不回来。
  *  portal 到 .canvas-editor-region（position:relative）之后：尺寸恒定不再受缩放影响，位置按节点
@@ -2168,6 +2185,9 @@ export function CanvasGenerationComposer({
             node.id,
             connected,
           )}
+          onReorder={context.reorderMaterialConnections
+            ? orderedNodeIds => context.reorderMaterialConnections?.(node.id, orderedNodeIds)
+            : undefined}
         />
       )}
       {promptCollapsed ? (
@@ -2579,6 +2599,7 @@ function CanvasMaterialConnections({
   onPreview,
   onBeginPick,
   onConnectedChange,
+  onReorder,
 }: {
   node: CanvasNode;
   materials: readonly CanvasMaterialReference[];
@@ -2589,9 +2610,29 @@ function CanvasMaterialConnections({
   onPreview: (reference: CanvasMaterialReference) => void;
   onBeginPick: (selectableNodeIds: ReadonlySet<string>) => void;
   onConnectedChange: (sourceNodeId: string, connected: boolean) => void;
+  onReorder?: (orderedNodeIds: readonly string[]) => void;
 }) {
   const choices = materials.filter(reference => reference.nodeId !== node.id);
-  const connected = connectedReferences;
+  // 拖动期间只动本地顺序（编号跟着实时变），松手才写回文档，一次拖拽一条撤销记录。
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
+  const dragOrderRef = useRef<string[] | null>(null);
+  const draggedRef = useRef(false);
+  const referenceById = new Map(connectedReferences.map(reference => [reference.nodeId, reference]));
+  const connected = dragOrder
+    ? labelCanvasMentionReferences(dragOrder.flatMap(id => referenceById.get(id) ?? []))
+    : connectedReferences;
+  const updateDragOrder = (order: string[]) => {
+    dragOrderRef.current = order;
+    setDragOrder(order);
+  };
+  const finishDrag = () => {
+    const order = dragOrderRef.current;
+    dragOrderRef.current = null;
+    setDragOrder(null);
+    if (order) onReorder?.(order);
+    // 松手那一下还会触发一次 click，别把它当成「查看素材」。
+    window.setTimeout(() => { draggedRef.current = false; }, 0);
+  };
   const connectedCounts = connected.reduce<Record<'image' | 'video' | 'audio', number>>(
     (counts, reference) => {
       if (reference.kind !== 'text') counts[reference.kind] += reference.inputCount ?? 1;
@@ -2637,10 +2678,30 @@ function CanvasMaterialConnections({
         aria-label={`${node.title} 已对接素材`}
         className="mb-1 flex min-h-12 min-w-0 items-center gap-2 overflow-x-auto px-1 py-1"
       >
+        <Reorder.Group
+          as="div"
+          axis="x"
+          values={connected.map(reference => reference.nodeId)}
+          onReorder={updateDragOrder}
+          className="flex shrink-0 items-center gap-2"
+        >
         {connected.map(reference => {
           const detailVisible = hoveredMaterial?.reference.nodeId === reference.nodeId;
           return (
-            <span key={reference.nodeId} className="relative size-12 shrink-0">
+            <Reorder.Item
+              key={reference.nodeId}
+              as="span"
+              value={reference.nodeId}
+              drag={onReorder && connected.length > 1 ? 'x' : false}
+              whileDrag={{ zIndex: 20 }}
+              onDragStart={() => {
+                draggedRef.current = true;
+                setHoveredMaterial(null);
+                dragOrderRef.current = connected.map(item => item.nodeId);
+              }}
+              onDragEnd={finishDrag}
+              className={cn('relative size-12 shrink-0', onReorder && connected.length > 1 && 'cursor-grab active:cursor-grabbing')}
+            >
               <button
                 type="button"
                 aria-label={`查看已对接素材 ${reference.title}`}
@@ -2651,7 +2712,7 @@ function CanvasMaterialConnections({
                 onMouseLeave={() => setHoveredMaterial(null)}
                 onFocus={event => showMaterialDetail(reference, event.currentTarget)}
                 onBlur={() => setHoveredMaterial(null)}
-                onClick={() => onPreview(reference)}
+                onClick={() => { if (!draggedRef.current) onPreview(reference); }}
               >
                 <CanvasMaterialPreview reference={reference} />
                 <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-xs text-foreground">
@@ -2666,9 +2727,10 @@ function CanvasMaterialConnections({
               >
                 <X className="size-3" aria-hidden="true" />
               </button>
-            </span>
+            </Reorder.Item>
           );
         })}
+        </Reorder.Group>
         <button
           type="button"
           aria-label={`为 ${node.title} 在画布选择素材`}

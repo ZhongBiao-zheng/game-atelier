@@ -213,6 +213,7 @@ import {
   createCanvasGenerationDraft,
   resolveCanvasGenerationDraft,
   createConnectedCanvasConfig,
+  reorderCanvasInputConnections,
   layerStackSizeForCanvasVersion,
   normalizeCanvasVideoParams,
   normalizeCanvasGroups,
@@ -429,6 +430,12 @@ export function CanvasEditor(props: {
   onBack: () => void;
   onSwitchProject: (projectId: string) => void;
 }) {
+  // 画布页整体按 75% 显示，见 tokens.css 的 html.canvas-compact；离开画布恢复。
+  useEffect(() => {
+    const root = window.document.documentElement;
+    root.classList.add('canvas-compact');
+    return () => root.classList.remove('canvas-compact');
+  }, []);
   return <ReactFlowProvider><CanvasEditorInner {...props} /></ReactFlowProvider>;
 }
 
@@ -1549,6 +1556,12 @@ function CanvasEditorInner({
         target_node_id: targetNodeId,
       }))],
     }, new Set([targetNodeId])), true);
+  }, [commit]);
+
+  const reorderMaterialConnections = useCallback((targetNodeId: string, orderedSourceIds: readonly string[]) => {
+    const current = latestDocument.current;
+    if (!current || reorderCanvasInputConnections(current, targetNodeId, orderedSourceIds) === current) return;
+    commit(document => reorderCanvasInputConnections(document, targetNodeId, orderedSourceIds), true);
   }, [commit]);
 
   const setMaterialConnected = useCallback((
@@ -4352,6 +4365,7 @@ function CanvasEditorInner({
     materialPick,
     beginMaterialPick,
     setMaterialConnected,
+    reorderMaterialConnections,
     setVideoFrameConnections,
     selectNode: selectOnlyNode,
     previewContent,
@@ -4450,6 +4464,7 @@ function CanvasEditorInner({
     selectCandidate,
     selectOnlyNode,
     setMaterialConnected,
+    reorderMaterialConnections,
     setTextEditing,
     setVideoFrameConnections,
     submitLayerDecomposition,
@@ -4903,18 +4918,14 @@ function CanvasEditorInner({
               />
             )}
           </div>
-          <div
-            aria-live="polite"
-            className={cn(
-              'pointer-events-auto max-w-24 truncate rounded-full border bg-glass px-3 py-2 text-xs backdrop-blur-glass shell-glow sm:max-w-none',
-              saveState === 'error'
-                ? 'border-destructive/40 text-destructive'
-                : 'border-border text-muted-foreground',
-            )}
-          >
-            {saveState === 'saving' ? '保存中…' : saveState === 'error' ? (
-              // 原文案是「保存冲突，内容已保留」。它把所有失败都说成冲突，还向用户保证内容没事——
-              // 实际是本地已经和服务端分叉，之后的编辑都不落盘。这里只说失败，并给出重试入口。
+          {/* 正常保存不打扰（飙哥 2026-09-30 去掉「已保存 · vN」）；只有失败要露出来并给重试。 */}
+          {saveState === 'error' && (
+            <div
+              aria-live="polite"
+              className="pointer-events-auto max-w-24 truncate rounded-full border border-destructive/40 bg-glass px-3 py-2 text-xs text-destructive backdrop-blur-glass shell-glow sm:max-w-none"
+            >
+              {/* 原文案是「保存冲突，内容已保留」。它把所有失败都说成冲突，还向用户保证内容没事——
+                  实际是本地已经和服务端分叉，之后的编辑都不落盘。这里只说失败，并给出重试入口。 */}
               <button
                 type="button"
                 title={saveErrorDetail ?? undefined}
@@ -4923,8 +4934,8 @@ function CanvasEditorInner({
               >
                 保存失败 · 重试
               </button>
-            ) : `已保存 · v${document.revision}`}
-          </div>
+            </div>
+          )}
         </div>
 
         {!materialPick && (

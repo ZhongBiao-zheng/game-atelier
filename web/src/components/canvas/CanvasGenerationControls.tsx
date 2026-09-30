@@ -97,7 +97,7 @@ export function CanvasModelPicker({
         data-testid="canvas-model-popover"
         className={cn(
           portalContainerRef ? 'max-h-[45vh]' : 'max-h-[60vh]',
-          'w-[320px] overflow-y-auto rounded-xl border border-border bg-card p-3',
+          'w-80 overflow-y-auto rounded-xl border border-border bg-card p-3',
         )}
       >
         {grouped.length ? (
@@ -190,7 +190,7 @@ export function CanvasImageSettings({
         data-testid="canvas-image-settings-popover"
         className={cn(
           portalContainerRef ? 'max-h-[55vh]' : 'max-h-[70vh]',
-          'w-[320px] overflow-y-auto rounded-xl border border-border bg-card p-3',
+          'w-80 overflow-y-auto rounded-xl border border-border bg-card p-3',
         )}
       >
         <div className="space-y-4">
@@ -275,7 +275,7 @@ export function CanvasTextSettings({
         direction={menuDirection}
         portalContainerRef={portalContainerRef}
         data-testid="canvas-text-settings-popover"
-        className="w-[320px] rounded-xl border border-border bg-card p-3"
+        className="w-80 rounded-xl border border-border bg-card p-3"
       >
         <div className="space-y-4">
           {supportsReasoning && (
@@ -419,7 +419,7 @@ export function CanvasAudioSettings({
         data-testid="canvas-audio-settings-popover"
         className={cn(
           portalContainerRef ? 'max-h-[55vh]' : 'max-h-[70vh]',
-          'w-[356px] overflow-y-auto rounded-xl border border-border bg-card p-3',
+          'w-[22.25rem] overflow-y-auto rounded-xl border border-border bg-card p-3',
         )}
       >
         <div className="space-y-4">

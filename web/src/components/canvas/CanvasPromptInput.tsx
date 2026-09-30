@@ -62,6 +62,8 @@ export function CanvasPromptInput({
   const editorRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const composingRef = useRef(false);
+  // 拖动中的 chip 按「引用哪个节点 + 同一节点的第几个」记：拖动期间编辑器可能重建 DOM，不能攥着元素本身。
+  const draggedChipRef = useRef<{ nodeId: string; ordinal: number } | null>(null);
   const lastEmittedRef = useRef(value);
   const lastReferenceSignatureRef = useRef('');
   const initializedRef = useRef(false);
@@ -258,6 +260,48 @@ export function CanvasPromptInput({
           syncVariableInput(event.currentTarget, event.target);
           syncFromEditor();
         }}
+        onDragStart={event => {
+          const chip = event.target instanceof Element
+            ? event.target.closest<HTMLElement>('[data-canvas-mention-id]')
+            : null;
+          const nodeId = chip?.dataset.canvasMentionId;
+          if (!chip || !nodeId) return;
+          const sameNode = [...event.currentTarget.querySelectorAll<HTMLElement>('[data-canvas-mention-id]')]
+            .filter(element => element.dataset.canvasMentionId === nodeId);
+          draggedChipRef.current = { nodeId, ordinal: sameNode.indexOf(chip) };
+          setHoveredReference(null);
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', '');
+        }}
+        onDragOver={event => {
+          if (!draggedChipRef.current) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+        }}
+        onDrop={event => {
+          const dragged = draggedChipRef.current;
+          if (!dragged) return;
+          // 浏览器默认的 drop 会把 chip 的 HTML 再复制一份进来；这里改成在文本层面挪 token。
+          event.preventDefault();
+          draggedChipRef.current = null;
+          const editor = event.currentTarget;
+          // 按下拖动时焦点落在 chip 上（它有 tabIndex）；先把焦点收回编辑器，否则删 chip 时
+          // 同步触发的 blur 会重建整棵 DOM，落点和 chip 都失效。
+          editor.focus({ preventScroll: true });
+          const chip = [...editor.querySelectorAll<HTMLElement>('[data-canvas-mention-id]')]
+            .filter(element => element.dataset.canvasMentionId === dragged.nodeId)[dragged.ordinal];
+          const range = dropRangeAt(editor, event.clientX, event.clientY);
+          if (!chip || !range) return;
+          range.insertNode(document.createTextNode(DROP_MARKER));
+          chip.remove();
+          const token = canvasMentionToken(dragged.nodeId);
+          const [before, after = ''] = serializePromptEditor(editor).split(DROP_MARKER);
+          const next = `${before}${token}${after}`;
+          editor.replaceChildren(...promptNodes(`${before}${token}\uFEFF${after}`, referenceById, mentionsEnabled));
+          placeCaretAtMarker(editor);
+          emit(next);
+        }}
+        onDragEnd={() => { draggedChipRef.current = null; }}
         onCopy={event => {
           if (variableInput(event.target)) return;
           const selection = window.getSelection();
@@ -533,10 +577,11 @@ function mentionChip(reference: CanvasMentionReference): HTMLElement {
   const id = reference.nodeId;
   const wrapper = document.createElement('span');
   wrapper.setAttribute('contenteditable', 'false');
+  wrapper.draggable = true;
   wrapper.tabIndex = 0;
   wrapper.dataset.canvasMentionId = id;
   wrapper.dataset.canvasMentionToken = canvasMentionToken(id);
-  wrapper.className = 'mx-0.5 inline-flex h-7 max-w-40 items-center gap-1 overflow-hidden rounded-md border border-border bg-secondary px-1.5 align-middle text-xs leading-none text-foreground';
+  wrapper.className = 'mx-0.5 inline-flex h-7 max-w-40 cursor-grab items-center gap-1 overflow-hidden rounded-md border border-border bg-secondary px-1.5 align-middle text-xs leading-none text-foreground active:cursor-grabbing';
   wrapper.setAttribute('aria-describedby', `canvas-material-detail-${id}`);
   wrapper.setAttribute('aria-label', `引用${mentionKindLabel(reference.kind)}：${reference.title}`);
   wrapper.title = `${reference.label} · ${reference.title}`;
@@ -683,6 +728,33 @@ function adjacentMention(range: Range, previous: boolean): HTMLElement | null {
   }
   const children = Array.from(container.childNodes);
   return findMentionSibling(children[previous ? offset - 1 : offset] ?? container, previous, true);
+}
+
+const DROP_MARKER = '\uE000';
+
+/** 拖放落点对应的插入位置，精确到字与字之间；落在 chip / 变量块上时放到它后面。 */
+function dropRangeAt(editor: HTMLElement, x: number, y: number): Range | null {
+  let range: Range | null = null;
+  if (typeof document.caretRangeFromPoint === 'function') {
+    range = document.caretRangeFromPoint(x, y);
+  } else if (typeof document.caretPositionFromPoint === 'function') {
+    const position = document.caretPositionFromPoint(x, y);
+    if (position) {
+      range = document.createRange();
+      range.setStart(position.offsetNode, position.offset);
+      range.collapse(true);
+    }
+  }
+  if (!range || !editor.contains(range.startContainer)) return null;
+  const container = range.startContainer instanceof Element
+    ? range.startContainer
+    : range.startContainer.parentElement;
+  const atomic = container?.closest<HTMLElement>('[data-canvas-mention-id], [data-prompt-variable]');
+  if (atomic && editor.contains(atomic)) {
+    range.setStartAfter(atomic);
+    range.collapse(true);
+  }
+  return range;
 }
 
 function findMentionSibling(node: Node, previous: boolean, includeSelf = false): HTMLElement | null {

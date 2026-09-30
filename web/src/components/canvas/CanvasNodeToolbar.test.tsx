@@ -216,14 +216,14 @@ it('renders one independent selected toolbar for every canvas node type', () => 
   );
 
   expect(screen.getAllByRole('toolbar')).toHaveLength(7);
-  // 空媒体节点继续保留唯一上传入口；分组的“解散”不是删除素材。
+  // 空媒体节点继续保留唯一上传入口、不给「隐藏」（没有内容可隐藏）；分组的“解散”不是删除素材。
   const emptyMediaTitles = new Set(['图片', '视频', '音频']);
   for (const node of nodes) {
     const toolbar = screen.getByRole('toolbar', { name: `${node.title} 节点工具` });
     expect(toolbar).toHaveAttribute('data-canvas-node-toolbar', node.id);
     if (emptyMediaTitles.has(node.title)) {
       expect(within(toolbar).getAllByRole('button').map(button => button.getAttribute('aria-label')))
-        .toEqual([`上传${node.title}`, `隐藏 ${node.title} 的内容`]);
+        .toEqual([`上传${node.title}`]);
       continue;
     }
     if (node.type !== 'group') expect(within(toolbar).queryByRole('button', { name: `删除 ${node.title}` })).not.toBeInTheDocument();
@@ -820,20 +820,26 @@ it('loads node-card images at the tier above the card width, not the original', 
 });
 
 it('hide toggles the node hidden flag and flips the button label', () => {
-  const context = nodeContext();
+  const written = { ...nodes[0], data: { ...nodes[0].data, current_version_id: 'written' } } as CanvasNode;
+  const context = nodeContext({
+    resolveVersion: versionResolver({
+      written: { version_id: 'written', kind: 'text', text: '台词', sha256: 'x', created_at: '2026-09-24T00:00:00Z',
+        origin: { kind: 'user_edit' } },
+    }),
+  });
   const { rerender } = render(
     <CanvasNodeContext.Provider value={context}>
-      <NodeCard data={{ domain: nodes[0] }} selected />
+      <NodeCard data={{ domain: written }} selected />
     </CanvasNodeContext.Provider>,
   );
   fireEvent.click(screen.getByRole('button', { name: '隐藏 文本 的内容' }));
   expect(context.recordHistory).toHaveBeenCalled();
   const updater = (context.updateNode as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as (node: CanvasNode) => CanvasNode;
-  expect(updater(nodes[0]).hidden).toBe(true);
+  expect(updater(written).hidden).toBe(true);
 
   rerender(
     <CanvasNodeContext.Provider value={context}>
-      <NodeCard data={{ domain: { ...nodes[0], hidden: true } }} selected />
+      <NodeCard data={{ domain: { ...written, hidden: true } }} selected />
     </CanvasNodeContext.Provider>,
   );
   expect(screen.getByRole('button', { name: '显示 文本 的内容' })).toBeInTheDocument();

@@ -33,6 +33,42 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.68.7',
+    date: '2026-09-30',
+    headline: '画布顶部不再显示保存状态',
+    changes: [
+      { kind: 'fix', text: '去掉画布顶部的「已保存 · 版本号」，只在保存失败时显示「保存失败 · 重试」。' },
+    ],
+  },
+  {
+    version: '5.68.6',
+    date: '2026-09-30',
+    headline: '参考素材可拖动换位，图生图不再往提示词里插图片引用',
+    changes: [
+      { kind: 'feat', text: '生成面板上方的参考素材可以拖动换位，编号（图片1、图片2…）和提示词里的引用跟着变。' },
+      { kind: 'feat', text: '提示词里的引用可以拖到任意两个字之间。' },
+      { kind: 'fix', text: '从图片 / 视频节点点「图生图」等入口新建生成节点时，素材只作为参考图，不再往提示词里插引用；从文本节点进入仍会引用这段文本。' },
+      { kind: 'fix', text: '空节点不再显示「隐藏」。' },
+    ],
+  },
+  {
+    version: '5.68.5',
+    date: '2026-09-29',
+    headline: '文本节点中文输入不再被打断',
+    changes: [
+      { kind: 'fix', text: '文本节点里用中文输入法打字，拼音组合不会再被打断；输入法里按 Esc / Tab 取消拼音也不会退出编辑。' },
+    ],
+  },
+  {
+    version: '5.68.4',
+    date: '2026-09-29',
+    headline: '画布界面缩小、放大后新建节点不再保存失败',
+    changes: [
+      { kind: 'feat', text: '画布上的工具条、菜单、生成面板整体缩小到原来的 75%。' },
+      { kind: 'fix', text: '画布放大超过 400% 时（新建节点会自动放大）保存报「viewport.zoom」错误，现在最高 500% 都能保存。' },
+    ],
+  },
+  {
     version: '5.68.3',
     date: '2026-09-28',
     headline: '补齐视频提交失败的排查记录',
