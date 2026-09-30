@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.68.7',
+    date: '2026-09-30',
+    headline: '画布顶部不再显示保存状态',
+    changes: [
+      { kind: 'fix', text: '去掉画布顶部的「已保存 · 版本号」，只在保存失败时显示「保存失败 · 重试」。' },
+    ],
+  },
+  {
     version: '5.68.6',
     date: '2026-09-30',
     headline: '参考素材可拖动换位，图生图不再往提示词里插图片引用',
