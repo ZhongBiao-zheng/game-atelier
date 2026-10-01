@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useHeicAsJpeg } from '@/lib/heicImages';
 import { useLocation } from 'wouter';
 
 import { createStudioJob, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
@@ -78,6 +79,10 @@ export function StudioCompact() {
   const [referenceVideos, setReferenceVideos] = useState<File[]>(draft?.referenceVideos ?? []);
   const [referenceAudios, setReferenceAudios] = useState<File[]>(draft?.referenceAudios ?? []);
   const [videoFrames, setVideoFrames] = useState<FrameSlots>(draft?.videoFrames ?? { first: null, last: null });
+  // iPhone 的 HEIC 照片 Chrome 预览不了：无论从哪个入口进来，都在后台换成 JPEG。
+  useHeicAsJpeg(referenceImages, setReferenceImages, setCompactError);
+  useHeicAsJpeg(mjRefs, setMjRefs, setCompactError);
+  useHeicAsJpeg(videoFrames, setVideoFrames, setCompactError);
 
   // 每次改动都把未提交的输入写进内存草稿；切页卸载后回来按它恢复，刷新即清空。
   useEffect(() => {

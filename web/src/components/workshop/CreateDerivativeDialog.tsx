@@ -5,6 +5,7 @@ import { Check, ImagePlus, Upload, X } from 'lucide-react';
 import { createCharacterDerivative } from '@/api/characters';
 import { fetchProjectGallery, type ProjectGalleryMedia } from '@/api/gallery';
 import { uploadReferenceImage } from '@/api/studio';
+import { heicFileAsJpeg, isHeicFile } from '@/lib/heicImages';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -71,7 +72,7 @@ export function CreateDerivativeDialog({
 
   const selected = useMemo(() => new Set(selectedPaths), [selectedPaths]);
 
-  function addLocalSources(files: FileList | null) {
+  async function addLocalSources(files: FileList | null) {
     if (!files?.length) return;
     const remaining = SUPPLEMENTAL_SOURCE_LIMIT - selectedPaths.length - localSources.length;
     if (remaining <= 0) {
@@ -79,7 +80,17 @@ export function CreateDerivativeDialog({
       return;
     }
     const candidates = Array.from(files);
-    const additions = candidates.slice(0, remaining).map(file => ({
+    let picked: File[];
+    try {
+      // HEIC 先换成 JPEG，否则本地预览是破图。
+      picked = await Promise.all(candidates.slice(0, remaining).map(file => (
+        isHeicFile(file) ? heicFileAsJpeg(file) : file
+      )));
+    } catch (conversionError) {
+      setError(conversionError instanceof Error ? conversionError.message : 'HEIC 照片转换失败');
+      return;
+    }
+    const additions = picked.map(file => ({
       file,
       preview: URL.createObjectURL(file),
     }));
@@ -158,7 +169,7 @@ export function CreateDerivativeDialog({
                 id={fileId}
                 className="sr-only"
                 type="file"
-                accept="image/png,image/jpeg,image/webp"
+                accept="image/png,image/jpeg,image/webp,image/heic,image/heif,.heic,.heif"
                 multiple
                 onChange={event => addLocalSources(event.target.files)}
               />

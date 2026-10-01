@@ -1,4 +1,5 @@
 import { connectionFetch } from '@/api/connection';
+import { useHeicAsJpeg } from '@/lib/heicImages';
 import { mediaUrl } from '@/api/connection';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useSearch } from 'wouter';
@@ -187,6 +188,10 @@ function StudioFull() {
   const [referenceAudios, setReferenceAudios] = useState<File[]>(draft?.referenceAudios ?? []);
   // 首尾帧模式的双槽（与 referenceImages 分离：两个槽各自独立可空，仅尾帧也合法）。
   const [videoFrames, setVideoFrames] = useState<FrameSlots>(draft?.videoFrames ?? { first: null, last: null });
+  // iPhone 的 HEIC 照片 Chrome 预览不了：无论从哪个入口进来，都在后台换成 JPEG。
+  useHeicAsJpeg(referenceImages, setReferenceImages, setAssetNotice);
+  useHeicAsJpeg(mjRefs, setMjRefs, setAssetNotice);
+  useHeicAsJpeg(videoFrames, setVideoFrames, setAssetNotice);
 
   // 每次改动都把未提交的输入写进内存草稿；切页卸载后回来按它恢复，刷新即清空。
   useEffect(() => {
