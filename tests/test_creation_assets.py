@@ -95,7 +95,16 @@ def test_prompt_asset_has_one_mutable_content_and_renders_variables():
     assert render_prompt_segments(updated.content.segments, {}) == "一只毛绒三头犬站在火山口中。"
 
 
-def test_project_scope_uses_last_used_sorting():
+def test_project_scope_uses_last_used_sorting(monkeypatch):
+    # 排序靠时间戳先后；Windows 上连续两次 datetime.now() 可能落在同一个时钟刻度，换成严格递增的时钟。
+    import itertools
+    from datetime import datetime, timedelta, timezone
+
+    import character_workflow.lib.creation_assets as creation_assets
+    ticks = itertools.count()
+    monkeypatch.setattr(creation_assets, "_now", lambda: (
+        datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=next(ticks))
+    ).isoformat())
     first = create_prompt_asset("先创建", _segments(), ["角色"])
     second = create_prompt_asset("后创建", _segments("狐狸"), ["角色"], project_id="canvas-a")
 

@@ -463,7 +463,16 @@ def _shared(mount) -> TeamAssetFile:
     return share_creation_asset(mount, asset_id=asset.asset_id, title="旧名", tags=["a"], author=_AUTHOR)
 
 
-def test_author_updates_title_and_tags(isolated_data_root, mount):
+def test_author_updates_title_and_tags(isolated_data_root, mount, monkeypatch):
+    # 断言 updated_at 严格晚于分享时间；Windows 上两次 datetime.now() 可能同一个时钟刻度，换成递增时钟。
+    import itertools
+    from datetime import datetime, timedelta, timezone
+
+    import character_workflow.lib.team_library_share as team_library_share
+    ticks = itertools.count()
+    monkeypatch.setattr(team_library_share, "_now", lambda: (
+        datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=next(ticks))
+    ).isoformat())
     original = _shared(mount)
     updated = update_shared_asset(
         mount, asset_id=original.asset_id, title=" 新名 ", tags=["b", "b"], author=_AUTHOR
