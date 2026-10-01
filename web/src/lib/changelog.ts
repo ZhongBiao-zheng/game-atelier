@@ -33,6 +33,22 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.68.9',
+    date: '2026-10-01',
+    headline: '支持上传 iPhone 照片（HEIC）',
+    changes: [
+      { kind: 'feat', text: 'iPhone 照片、实况图（HEIC / HEIF）可以直接上传，自动转成 JPEG，方向自动摆正。' },
+    ],
+  },
+  {
+    version: '5.68.8',
+    date: '2026-09-30',
+    headline: '画布工具栏图标跟着缩小',
+    changes: [
+      { kind: 'fix', text: '画布缩到 75% 后工具栏图标没跟着缩，按钮显得拥挤；现在图标与按钮同比例缩小。' },
+    ],
+  },
+  {
     version: '5.68.7',
     date: '2026-09-30',
     headline: '画布顶部不再显示保存状态',

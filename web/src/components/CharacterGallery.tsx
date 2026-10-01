@@ -685,7 +685,7 @@ function GalleryUpload({
       <input
         ref={inputRef}
         type="file"
-        accept="image/png,image/jpeg,image/webp"
+        accept="image/png,image/jpeg,image/webp,image/heic,image/heif,.heic,.heif"
         className="hidden"
         onChange={e => {
           const f = e.target.files?.[0];

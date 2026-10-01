@@ -18,6 +18,7 @@ dependencies = [
   # 抠图运行时；PyPI 没有 Intel Mac wheel，装了会让整个 uv sync 失败，故排除。
   'onnxruntime>=1.20; sys_platform != "darwin" or platform_machine == "arm64"',
   "psd-tools>=1.19,<2",
+  "pillow-heif>=1.8,<2",
 ]
 
 [build-system]

@@ -633,6 +633,9 @@
      压根字号即可等比缩小工具条、菜单、弹窗；媒体查询里的 rem 按初始字号算，断点不受影响。 */
   html.canvas-compact { font-size: 75%; }
   html.canvas-compact body { font-size: 0.875rem; }
+  /* lucide 默认 width="24" 是像素属性，不跟根字号缩；没写 size-* 的图标会把缩小后的按钮撑满。
+     :where 让优先级为 0，任何显式 size-* 都照旧生效。 */
+  :where(html.canvas-compact) :where(svg.lucide) { width: 1.5rem; height: 1.5rem; }
   code, pre, kbd, samp { font-family: var(--font-mono); }
   /* 衬线斜体在小字号下抗锯齿优化 */
   .italic { font-synthesis-style: none; }
