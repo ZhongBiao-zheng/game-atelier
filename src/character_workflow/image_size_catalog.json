@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-09",
+  "verified_at": "2026-10-01",
   "legacy_ratios": ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"],
   "hk_nano_ratios": ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2"],
   "sources": {
@@ -20,6 +20,25 @@
     "21:9"
   ],
   "openrouter": {
+    "recraft/recraft-v4.1-flash": {
+      "ratios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "auto"
+      ],
+      "resolutions": []
+    },
+    "inclusionai/ming-image-0.1-design": {
+      "ratios": [],
+      "resolutions": []
+    },
+    "inclusionai/ming-image-0.1-design-layer": {
+      "ratios": [],
+      "resolutions": []
+    },
     "openai/gpt-image-2.5-sunburst": {
       "ratios": [
         "1:1",

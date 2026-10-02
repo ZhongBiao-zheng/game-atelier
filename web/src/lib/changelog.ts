@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.68.10',
+    date: '2026-10-01',
+    headline: '补齐 OpenRouter 新图像模型的尺寸选项',
+    changes: [
+      { kind: 'fix', text: 'OpenRouter 的 Recraft v4.1 Flash、Ming Image 两款新模型按官方能力登记比例选项，不再给出通用比例。' },
+    ],
+  },
+  {
     version: '5.68.9',
     date: '2026-10-01',
     headline: '支持上传 iPhone 照片（HEIC）',
