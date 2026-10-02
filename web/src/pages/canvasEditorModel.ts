@@ -569,6 +569,16 @@ export function canvasNodeProvidesContent(node: CanvasNode): node is CanvasConte
   return node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio';
 }
 
+/** 「隐藏」只对有内容的节点有意义：图层栈、有条目的批量素材、有当前版本（文本还得非空）的内容节点。 */
+export function canvasNodeHasHideableContent(
+  node: CanvasNode,
+  content: CanvasContentVersion | undefined,
+): boolean {
+  if (node.type === 'layer_stack') return true;
+  if (node.type === 'batch_material') return node.data.items.length > 0;
+  return content !== undefined && (content.kind !== 'text' || content.text.trim() !== '');
+}
+
 export function canvasNodeRenderZIndex(
   persistedZIndex: number,
   selected: boolean,
@@ -895,6 +905,36 @@ export function canvasGenerationPreferenceForModel<M extends CanvasGenerationMod
       { ...defaultCanvasGenerationParams(mode), ...current },
     ) as CanvasGenerationParamsByMode[M],
   };
+}
+
+/** 生成偏好里能记住的参数（与服务端 Canvas*DefaultParams 逐字段对应，多一个键整份偏好 422）。
+ *  张数 n 不在里面：每次出几张是当次的决定，不跟着上一次走。 */
+const CANVAS_REMEMBERED_PARAM_KEYS: Record<CanvasGenerationMode, readonly string[]> = {
+  text: ['temperature', 'max_tokens', 'reasoning_effort'],
+  image: ['ratio', 'resolution', 'size', 'size_mode', 'custom_size', 'quality'],
+  video: ['duration', 'ratio', 'resolution', 'frame_mode', 'mode', 'generate_audio', 'watermark'],
+  audio: ['voice', 'response_format', 'speed', 'instructions'],
+};
+
+/** 出图后把这次的模型和参数记成该类型的生成偏好，之后新建的节点从它开始。
+ *  张数保留偏好里原来的值。和当前偏好相同时返回 null，不必写回。 */
+export function canvasGenerationDefaultFromDraft(
+  draft: CanvasGenerationDraft,
+  current: CanvasGenerationDefault,
+): CanvasGenerationDefault | null {
+  if (!draft.alias || !draft.model) return null;
+  const params: Record<string, unknown> = Object.fromEntries(
+    CANVAS_REMEMBERED_PARAM_KEYS[draft.mode].flatMap(key => (
+      draft.params[key] === undefined || draft.params[key] === null ? [] : [[key, draft.params[key]]]
+    )),
+  );
+  const count = (current.params as { n?: unknown }).n;
+  if (count !== undefined) params.n = count;
+  const next = {
+    selection: { alias: draft.alias, model: draft.model },
+    params,
+  } as CanvasGenerationDefault;
+  return JSON.stringify(next) === JSON.stringify(current) ? null : next;
 }
 
 export function createCanvasGenerationDraft(

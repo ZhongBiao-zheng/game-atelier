@@ -13,7 +13,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, BookmarkPlus, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, BookmarkPlus, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Pause, Pencil, Play, Plus, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
   useRef, useState,
@@ -109,6 +109,7 @@ import {
   supportsCanvasTextReasoning,
   resolveCanvasGenerationDraft,
   switchCanvasGenerationDraft,
+  canvasNodeHasHideableContent,
   type CanvasPendingInput,
 } from '@/pages/canvasEditorModel';
 import { isSavableCanvasVersion, isShareableCanvasVersion } from '@/pages/canvasTeamActions';
@@ -413,10 +414,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     ? presentCanvasCandidates(context.jobsByResultNodeId.get(node.id) ?? [])
     : null;
   const mediaCandidates = candidatePresentation?.current ?? [];
-  // 「隐藏」只对有内容的节点有意义；已隐藏的节点照样给出「显示」。
-  const hasHideableContent = node.type === 'layer_stack'
-    || (node.type === 'batch_material' ? node.data.items.length > 0
-      : content !== undefined && (content.kind !== 'text' || content.text.trim() !== ''));
+  // 已隐藏的节点照样给出「显示」。
+  const hasHideableContent = canvasNodeHasHideableContent(node, content);
 
   function beginTitleEditing() {
     titleExitInProgress.current = false;
@@ -501,18 +500,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     if (!context) return;
     context.recordHistory();
     context.updateNode(node.id, candidate => ({ ...candidate, hidden: !candidate.hidden }));
-  }
-
-  function setTextScale(direction: -1 | 1) {
-    if (!context || node.type !== 'text') return;
-    const scales = ['xs', 'sm', 'base'] as const;
-    const current = scales.indexOf(node.data.display.scale);
-    const scale = scales[Math.max(0, Math.min(scales.length - 1, current + direction))];
-    if (scale === node.data.display.scale) return;
-    context.recordHistory();
-    context.updateNode(node.id, candidate => candidate.type === 'text'
-      ? { ...candidate, data: { ...candidate.data, display: { scale } } }
-      : candidate);
   }
 
   return (
@@ -697,8 +684,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               submitting={submittingNode || nodeRunState.status === 'loading'}
               context={context}
               onEditText={beginTextEditing}
-              onDecreaseText={() => setTextScale(-1)}
-              onIncreaseText={() => setTextScale(1)}
             />
           )}
           {isCanvasContentNode(node) && isSavableCanvasVersion(content) && (
@@ -1463,8 +1448,6 @@ function CanvasNodeToolbar({
   submitting,
   context,
   onEditText,
-  onDecreaseText,
-  onIncreaseText,
 }: {
   node: CanvasNode;
   content: CanvasContentVersion | undefined;
@@ -1472,8 +1455,6 @@ function CanvasNodeToolbar({
   submitting: boolean;
   context: CanvasNodeContextValue;
   onEditText: () => void;
-  onDecreaseText: () => void;
-  onIncreaseText: () => void;
 }) {
   const contentNode = isCanvasContentNode(node) ? node : null;
   const mediaNode = contentNode && contentNode.type !== 'text' ? contentNode : null;
@@ -1487,22 +1468,6 @@ function CanvasNodeToolbar({
         <>
           <MediaToolButton label={`编辑文本 ${node.title}`} text="编辑" disabled={submitting} onClick={onEditText}>
             <Pencil />
-          </MediaToolButton>
-          <MediaToolButton
-            label={`减小 ${node.title} 字号`}
-            text="减小字号"
-            disabled={node.data.display.scale === 'xs'}
-            onClick={onDecreaseText}
-          >
-            <Minus />
-          </MediaToolButton>
-          <MediaToolButton
-            label={`增大 ${node.title} 字号`}
-            text="增大字号"
-            disabled={node.data.display.scale === 'base'}
-            onClick={onIncreaseText}
-          >
-            <Plus />
           </MediaToolButton>
           <MediaToolButton
             label={`用 ${node.title} 生成图片`}
@@ -2589,6 +2554,8 @@ function CanvasVideoFrameSlot({
   );
 }
 
+const INSTANT_LAYOUT = { layout: { duration: 0 } } as const;
+
 function CanvasMaterialConnections({
   node,
   materials,
@@ -2617,6 +2584,9 @@ function CanvasMaterialConnections({
   const [dragOrder, setDragOrder] = useState<string[] | null>(null);
   const dragOrderRef = useRef<string[] | null>(null);
   const draggedRef = useRef(false);
+  // Reorder.Item 常开 layout 动画（排序靠它测量，关不掉）：画布平移 / 缩放时缩略图的屏幕位置一变，
+  // 它就补间追过去，像果冻一样拖在后面、甚至飞出节点。不在拖动排序时补间时长为 0，直接到位。
+  const [dragging, setDragging] = useState(false);
   const referenceById = new Map(connectedReferences.map(reference => [reference.nodeId, reference]));
   const connected = dragOrder
     ? labelCanvasMentionReferences(dragOrder.flatMap(id => referenceById.get(id) ?? []))
@@ -2629,6 +2599,7 @@ function CanvasMaterialConnections({
     const order = dragOrderRef.current;
     dragOrderRef.current = null;
     setDragOrder(null);
+    setDragging(false);
     if (order) onReorder?.(order);
     // 松手那一下还会触发一次 click，别把它当成「查看素材」。
     window.setTimeout(() => { draggedRef.current = false; }, 0);
@@ -2693,9 +2664,11 @@ function CanvasMaterialConnections({
               as="span"
               value={reference.nodeId}
               drag={onReorder && connected.length > 1 ? 'x' : false}
+              transition={dragging ? undefined : INSTANT_LAYOUT}
               whileDrag={{ zIndex: 20 }}
               onDragStart={() => {
                 draggedRef.current = true;
+                setDragging(true);
                 setHoveredMaterial(null);
                 dragOrderRef.current = connected.map(item => item.nodeId);
               }}

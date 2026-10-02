@@ -899,7 +899,7 @@ it('keeps the server-owned content hash when typing continues during a save', as
   expect(versionId).toBeTruthy();
 
   // 第一次保存还在飞，画师又改了一笔：排队的快照就此带着占位 sha256。
-  fireEvent.click(screen.getByRole('button', { name: '增大 文本 字号' }));
+  fireEvent.click(screen.getByRole('button', { name: '隐藏 文本 的内容' }));
   releaseFirstSave();
 
   await waitFor(
