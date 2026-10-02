@@ -233,17 +233,6 @@ it('renders one independent selected toolbar for every canvas node type', () => 
   fireEvent.click(within(imageToolbar).getByRole('button', { name: '上传图片' }));
   expect(context.replaceMedia).toHaveBeenCalledWith(nodes[1]);
 
-  const configToolbar = screen.getByRole('toolbar', { name: '文本 节点工具' });
-  const firstTool = within(configToolbar).getAllByRole('button')[0];
-  const secondTool = within(configToolbar).getAllByRole('button')[1];
-  expect(firstTool).toHaveAttribute('tabindex', '0');
-  expect(secondTool).toHaveAttribute('tabindex', '-1');
-  act(() => firstTool.focus());
-  fireEvent.keyDown(firstTool, { key: 'ArrowRight' });
-  expect(secondTool).toHaveFocus();
-  expect(firstTool).toHaveAttribute('tabindex', '-1');
-  expect(secondTool).toHaveAttribute('tabindex', '0');
-
   const imageShell = imageToolbar.closest('.canvas-node-shell');
   const title = within(imageShell as HTMLElement).getByRole('button', { name: '重命名节点 图片' });
   expect(title.closest('header')).not.toContainElement(
@@ -332,25 +321,6 @@ it('edits text inside the node as one history session', () => {
   expect(context.previewContent).not.toHaveBeenCalled();
 });
 
-it('cycles text size through Atelier type tokens', () => {
-  const context = nodeContext();
-  render(
-    <CanvasNodeContext.Provider value={context}>
-      <NodeCard data={{ domain: nodes[0] }} selected />
-    </CanvasNodeContext.Provider>,
-  );
-
-  const toolbar = screen.getByRole('toolbar', { name: '文本 节点工具' });
-  fireEvent.click(within(toolbar).getByRole('button', { name: '减小 文本 字号' }));
-  const decrease = vi.mocked(context.updateNode).mock.calls[0]?.[1];
-  expect(decrease?.(nodes[0])).toMatchObject({ data: { display: { scale: 'xs' } } });
-
-  fireEvent.click(within(toolbar).getByRole('button', { name: '增大 文本 字号' }));
-  const increase = vi.mocked(context.updateNode).mock.calls[1]?.[1];
-  expect(increase?.(nodes[0])).toMatchObject({ data: { display: { scale: 'base' } } });
-  expect(context.recordHistory).toHaveBeenCalledTimes(2);
-});
-
 it('creates an image node from populated text and disables the shortcut for empty text', () => {
   const populated = {
     ...nodes[0],
@@ -370,6 +340,17 @@ it('creates an image node from populated text and disables the shortcut for empt
       <NodeCard data={{ domain: populated }} selected />
     </CanvasNodeContext.Provider>,
   );
+
+  const textToolbar = screen.getByRole('toolbar', { name: '文本 节点工具' });
+  const firstTool = within(textToolbar).getAllByRole('button')[0];
+  const secondTool = within(textToolbar).getAllByRole('button')[1];
+  expect(firstTool).toHaveAttribute('tabindex', '0');
+  expect(secondTool).toHaveAttribute('tabindex', '-1');
+  act(() => firstTool.focus());
+  fireEvent.keyDown(firstTool, { key: 'ArrowRight' });
+  expect(secondTool).toHaveFocus();
+  expect(firstTool).toHaveAttribute('tabindex', '-1');
+  expect(secondTool).toHaveAttribute('tabindex', '0');
 
   fireEvent.click(screen.getByRole('button', { name: '用 文本 生成图片' }));
   expect(context.createImageFromSource).toHaveBeenCalledWith('text');

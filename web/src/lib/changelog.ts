@@ -33,6 +33,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.69.0',
+    date: '2026-10-02',
+    headline: '画布新节点沿用上次的生成设置，多选可一起隐藏',
+    changes: [
+      { kind: 'feat', text: '新建图片 / 视频 / 音频 / 文本生成节点时沿用上一次生成用的模型和参数（尺寸、质量等），张数不沿用。' },
+      { kind: 'feat', text: '多选节点时，工具条可一次隐藏或显示所有有内容的节点。' },
+      { kind: 'fix', text: '拖动画布时，生成面板里的参考素材缩略图不再拖着延迟、飞出节点。' },
+      { kind: 'fix', text: '去掉文本节点上的「增大 / 减小字号」按钮。' },
+    ],
+  },
+  {
     version: '5.68.10',
     date: '2026-10-01',
     headline: '补齐 OpenRouter 新图像模型的尺寸选项',

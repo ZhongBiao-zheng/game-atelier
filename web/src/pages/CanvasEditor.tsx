@@ -27,6 +27,8 @@ import {
   CircleDot,
   ClipboardCopy,
   Download,
+  Eye,
+  EyeOff,
   FileAudio,
   FileImage,
   FileVideo,
@@ -203,6 +205,7 @@ import {
   canvasMediaOperationPlaceholder,
   type CanvasMediaOperationPlaceholder,
   canvasNodeRenderZIndex,
+  canvasNodeProvidesContent,
   canvasNodeProvidesOutput,
   canvasNodeRenderedSize,
   canCreateCanvasInputConnection,
@@ -210,6 +213,8 @@ import {
   canvasPendingInputNodes,
   canvasRequiresBatchRun,
   closestCanvasConnectionEndpoint,
+  canvasGenerationDefaultFromDraft,
+  canvasNodeHasHideableContent,
   createCanvasGenerationDraft,
   resolveCanvasGenerationDraft,
   createConnectedCanvasConfig,
@@ -1737,6 +1742,28 @@ function CanvasEditorInner({
     }
   }, [commit]);
 
+  // 多选里能隐藏的节点：有内容的，或已经隐藏的（让它们能一起显示回来）。
+  const hideableSelection = useMemo(() => (document?.nodes ?? []).filter(node => {
+    if (!selectedNodeIds.has(node.id)) return false;
+    if (node.hidden) return true;
+    const versionId = canvasNodeProvidesContent(node) ? node.data.current_version_id : null;
+    return canvasNodeHasHideableContent(node, versionId ? document?.content_versions[versionId] : undefined);
+  }), [document, selectedNodeIds]);
+  const hideableSelectionAllHidden = hideableSelection.length > 0
+    && hideableSelection.every(node => node.hidden);
+
+  const toggleSelectionHidden = useCallback(() => {
+    const ids = new Set(hideableSelection.map(node => node.id));
+    if (ids.size === 0) return;
+    const hidden = !hideableSelectionAllHidden;
+    commit(current => ({
+      ...current,
+      nodes: current.nodes.map(node => ids.has(node.id) && Boolean(node.hidden) !== hidden
+        ? { ...node, hidden }
+        : node),
+    }), true);
+  }, [commit, hideableSelection, hideableSelectionAllHidden]);
+
   const deleteSelection = useCallback(() => {
     if (selectedNodeIds.size === 0 && selectedConnectionIds.size === 0) return;
     const nodeIds = selectedNodeIds;
@@ -2808,6 +2835,27 @@ function CanvasEditorInner({
     }
   }, [activeBatch, projectId, acceptBatchRun]);
 
+  // 出图成功后把这次的模型和参数（张数除外）写成生成偏好，下一个新建节点从这里开始。
+  // 只是顺手记住，写不进去（偏好正在别处保存、版本冲突）就跳过，不打断出图。
+  const latestCanvasUiPreferences = useRef(canvasUiPreferences);
+  useEffect(() => { latestCanvasUiPreferences.current = canvasUiPreferences; }, [canvasUiPreferences]);
+  const rememberGenerationDefault = useCallback((draft: CanvasGenerationDraft) => {
+    const preferences = latestCanvasUiPreferences.current;
+    const next = canvasGenerationDefaultFromDraft(draft, preferences.generation_defaults[draft.mode]);
+    if (!next || canvasUiPreferencesSaveInFlight.current) return;
+    canvasUiPreferencesSaveInFlight.current = true;
+    void saveCanvasUiPreferences(
+      preferences.revision,
+      preferences.image_toolbar,
+      { ...preferences.generation_defaults, [draft.mode]: next },
+      preferences.upscale,
+    )
+      .then(saved => setCanvasUiPreferences(saved))
+      // 版本冲突时重新读一次，下次出图就能接着记。
+      .catch(() => getCanvasUiPreferences().then(setCanvasUiPreferences, () => undefined))
+      .finally(() => { canvasUiPreferencesSaveInFlight.current = false; });
+  }, []);
+
   const submitRun = useCallback(async (nodeId: string) => {
     if (batchBusyRef.current) { setError('批量执行期间请先等待或停止'); return; }
     if (canvasRequiresBatchRun(latestDocument.current, nodeId)) {
@@ -2838,6 +2886,7 @@ function CanvasEditorInner({
       );
       mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
       applyLocalJob(run.job);
+      rememberGenerationDefault(draft);
       const resultId = run.job.canvas_run?.result_node_id;
       if (resultId) setSelectedNodeIds(new Set([resultId]));
     } catch (submitError) {
@@ -2858,6 +2907,7 @@ function CanvasEditorInner({
     persistNow,
     projectId,
     prepareBatch,
+    rememberGenerationDefault,
   ]);
 
   const reversePrompt = useCallback(async (node: CanvasContentNode) => {
@@ -4777,6 +4827,13 @@ function CanvasEditorInner({
             <Button type="button" variant="ghost" size="sm" disabled={Boolean(activeBatch)} onClick={groupSelection}>
               <Layers aria-hidden="true" />分组
             </Button>
+            {hideableSelection.length > 0 && (
+              <Button type="button" variant="ghost" size="sm" onClick={toggleSelectionHidden}>
+                {hideableSelectionAllHidden
+                  ? <><Eye aria-hidden="true" />显示</>
+                  : <><EyeOff aria-hidden="true" />隐藏</>}
+              </Button>
+            )}
             <Button
               type="button"
               variant="ghost"
