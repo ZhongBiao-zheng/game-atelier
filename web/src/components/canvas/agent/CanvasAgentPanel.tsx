@@ -4,6 +4,7 @@ import {
   ArrowUp, Brain, Check, ChevronDown, FileImage, FileText, FileVideo, Loader2, Paperclip,
   Puzzle, ShieldCheck, Square, SquarePen, Wrench, X, Zap,
 } from 'lucide-react';
+import { canvasMediaUrl } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -28,6 +29,7 @@ const TOOL_LABELS: Record<string, string> = {
   run_generation: '生成',
   get_run: '查询生成进度',
   read_media: '读取媒体信息',
+  wait_for_run: '等待生成结果',
   load_skill: '读取 Skill',
   read_skill_file: '读取 Skill 文件',
 };
@@ -61,7 +63,10 @@ function AgentMarkdown({ text }: { text: string }) {
   );
 }
 
-function Message({ message }: { message: CanvasAgentMessage }) {
+/** 显示宽度 = 缩略图格子宽（w-20 = 80px）的 2 倍，留给高分屏。 */
+const THUMB_DISPLAY_WIDTH = 160;
+
+function Message({ projectId, message }: { projectId: string; message: CanvasAgentMessage }) {
   if (message.role === 'user') {
     return (
       <div className="flex flex-col items-end gap-1">
@@ -81,13 +86,29 @@ function Message({ message }: { message: CanvasAgentMessage }) {
   }
   if (message.role === 'tool') {
     const label = TOOL_LABELS[message.title ?? ''] ?? message.title;
+    const images = message.references.filter(ref => ref.kind === 'content' && ref.version_id);
     return (
       <div className="flex gap-2 text-xs text-muted-foreground">
         <Wrench className="mt-0.5 size-3.5 shrink-0" />
-        <p className="min-w-0 whitespace-pre-line break-words">
-          <span className="text-foreground/80">{label}</span>
-          {message.text && message.text !== label && <span className="ml-1.5">{message.text}</span>}
-        </p>
+        <div className="min-w-0 flex-1">
+          <p className="whitespace-pre-line break-words">
+            <span className="text-foreground/80">{label}</span>
+            {message.text && message.text !== label && <span className="ml-1.5">{message.text}</span>}
+          </p>
+          {images.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {images.map(ref => (
+                <img
+                  key={ref.reference_id}
+                  src={canvasMediaUrl(projectId, ref.version_id!, THUMB_DISPLAY_WIDTH)}
+                  alt={ref.title}
+                  loading="lazy"
+                  className="size-20 rounded-md border border-border object-cover"
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -190,7 +211,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
       </header>
 
       <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
-        {messages.map(message => <Message key={message.message_id} message={message} />)}
+        {messages.map(message => <Message key={message.message_id} projectId={projectId} message={message} />)}
         {running && streaming && <AgentMarkdown text={streaming} />}
         {running && (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">

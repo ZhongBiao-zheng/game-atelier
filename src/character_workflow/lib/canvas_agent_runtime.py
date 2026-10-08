@@ -21,6 +21,7 @@ from typing import Any, Awaitable, Callable
 
 from character_workflow.lib import canvas_agent_skills as skills
 from character_workflow.lib import canvas_agent_tools as tools
+from character_workflow.lib import canvas_agent_vision as vision
 from character_workflow.lib import keys
 from character_workflow.lib.canvas_agent_models import chat_base_url
 from character_workflow.lib.canvas_agent_schema import (
@@ -48,7 +49,7 @@ MEDIA_SCHEME = "atelier-media://"
 LOCAL = SimpleNamespace(kind="local", session_id="canvas-chat", grant_id=None)
 
 READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "read_media", "load_skill",
-                        "read_skill_file"})
+                        "read_skill_file", "wait_for_run"})
 ADDITIVE_OPS = frozenset({"add_text", "add_media_node", "add_surface", "connect"})
 NODE_TARGET_OPS = frozenset({"set_text", "set_draft", "move", "remove_node"})
 
@@ -62,6 +63,9 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
 - 这几步放进同一次 apply_changes：add_surface 时自己指定 node_id（如 cat-1），同一批后面的
   set_draft / connect 用这个 node_id 引用它；节点标题不能当 id 用。
 - 新节点放在已有内容旁边，避免重叠：参考现有节点的 position 和 size，往右或往下留出间距。
+- 发起生成后调用 wait_for_run 等结果，结果图会附在工具结果后面给你看。看完向用户简短汇报：
+  画面是否符合要求、哪里需要改。只有用户明确让你「多试几次 / 迭代到满意」时才自己改提示词重跑。
+- 想看画布上已有的某张图，用 read_media，图片同样会附给你。
 - 生成是付费的。不要自动重试失败的生成；失败时告诉用户原因，由用户决定。
 - 用户拒绝某个操作时，不要换个方式再做同一件事，先问用户想怎么改。
 - 回复用中文，简短直接。"""
@@ -137,7 +141,9 @@ def execute_tool(project_id: str, tool: str, arguments: dict) -> tuple[dict, lis
     if tool == "read_media":
         payload = CanvasReadMediaInput(project_id=project_id, version_id=arguments["version_id"])
         result = tools.read_media(LOCAL, payload)
-        result.pop("preview", None)  # 对话模型的工具结果只收文本
+        result.pop("preview", None)  # 工具结果只收文本；图片由 vision 在调模型前附上
+        if result.get("kind") == "image":
+            result[vision.ATTACH_KEY] = [payload.version_id]
         return result, []
     if tool == "load_skill":
         return {"name": arguments["name"], "content": skills.read_skill(arguments["name"])}, []
@@ -209,6 +215,9 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
     "read_media": ("读取一个媒体版本的元数据（类型、尺寸、时长）。",
                    {"type": "object", "required": ["version_id"],
                     "properties": {"version_id": {"type": "string"}}}),
+    "wait_for_run": ("等一次生成跑完（最多约 4 分钟），返回状态与产物版本；成功的图片会附给你看。",
+                     {"type": "object", "required": ["run_id"],
+                      "properties": {"run_id": {"type": "string"}}}),
     "load_skill": ("读取一个 Skill 的完整说明（名称见系统提示里的 Skill 列表）。",
                    {"type": "object", "required": ["name"],
                     "properties": {"name": {"type": "string"}}}),
@@ -261,6 +270,23 @@ def arguments_valid(project_id: str, tool: str, arguments: dict) -> bool:
     return True
 
 
+def _is_image_version(project_id: str, version_id: str) -> bool:
+    version = read_canvas_document(project_id).content_versions.get(version_id)
+    return version is not None and version.kind == "image"
+
+
+async def _wait_for_run(project_id: str, run_id: str) -> str:
+    """轮询期间不占线程：每次查询进线程池，等待用 asyncio.sleep。"""
+    try:
+        result = await vision.wait_for_run(
+            lambda: tools.get_run(LOCAL, GetRunInput(project_id=project_id, run_id=run_id)),
+            lambda version_id: _is_image_version(project_id, version_id),
+        )
+    except WorkshopError as error:
+        return f"错误（{error.code}）：{error.message}"
+    return json.dumps(result, ensure_ascii=False)
+
+
 def build_tools() -> list:
     from agents import FunctionTool
 
@@ -268,6 +294,8 @@ def build_tools() -> list:
         async def invoke(ctx, raw: str) -> str:
             turn: TurnContext = ctx.context
             arguments = json.loads(raw or "{}")
+            if name == "wait_for_run":
+                return await _wait_for_run(turn.project_id, str(arguments.get("run_id", "")))
             text, created = await asyncio.to_thread(run_tool_safely, turn.project_id, name,
                                                     arguments)
             turn.created_node_ids.update(created)
@@ -384,7 +412,7 @@ def _arguments(raw: str | None) -> dict:
 
 
 READ_LABELS = {"get_canvas": "读取画布", "list_models": "查看可用模型", "get_run": "查询生成进度",
-               "read_media": "读取媒体信息"}
+               "read_media": "读取媒体信息", "wait_for_run": "等待生成结果"}
 
 
 def summarize_call(tool: str, arguments: dict) -> str:
@@ -417,8 +445,9 @@ def display_messages(items: list[dict], turn_id: str) -> list[CanvasAgentMessage
 
     待确认的调用（还没有 output）不在这里出现：面板用确认卡展示它，裁决后由 resolve_approvals
     补一条带结果的工具消息，同一个操作只显示一次。"""
-    outputs = {item.get("call_id"): str(item.get("output", "")) for item in items
-               if item.get("type") == "function_call_output"}
+    item_by_call = {item.get("call_id"): item for item in items
+                    if item.get("type") == "function_call_output"}
+    outputs = {call_id: str(item.get("output", "")) for call_id, item in item_by_call.items()}
     messages: list[CanvasAgentMessageCreate] = []
     reasoning: list[str] = []
     for item in items:
@@ -440,8 +469,12 @@ def display_messages(items: list[dict], turn_id: str) -> list[CanvasAgentMessage
             text = summarize_call(name, _arguments(item.get("arguments")))
             if is_tool_error(output):
                 text = f"{tool_error_label(output)}\n{text}"
+            # 附给模型看的图同时作为引用显示在对话里（面板按 version_id 出缩略图）。
+            images = vision.attached_ids(item_by_call.get(item.get("call_id"), {}))
             messages.append(CanvasAgentMessageCreate(
                 role="tool", turn_id=turn_id, title=name, text=redact(text),
+                references=[CanvasAgentReference(reference_id=vid, kind="content", version_id=vid,
+                                                 title="生成结果") for vid in images],
             ))
     return messages
 
@@ -469,7 +502,7 @@ def build_agent(session: CanvasAgentSession):
 
 def friendly_error(error: BaseException) -> str:
     from agents.exceptions import MaxTurnsExceeded
-    from openai import APIConnectionError, APIStatusError, APITimeoutError
+    from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError
     if isinstance(error, WorkshopError):
         return error.message
     if isinstance(error, MaxTurnsExceeded):
@@ -483,9 +516,14 @@ def friendly_error(error: BaseException) -> str:
         if isinstance(error.body, dict):
             detail = error.body.get("error", error.body)
             message = str(detail.get("message") if isinstance(detail, dict) else detail)
-        if "tool" in message.lower() or "function" in message.lower():
+        lowered = message.lower()
+        if "image" in lowered or "vision" in lowered or "multimodal" in lowered:
+            return f"该模型不能看图，请换一个支持图片输入的模型（{error.status_code}）"
+        if "tool" in lowered or "function" in lowered:
             return f"该模型不支持工具调用，请换一个（{error.status_code}）"
         return f"对话模型返回错误 {error.status_code}：{redact(message)[:300]}"
+    if isinstance(error, APIError):  # 流式响应里的错误不带状态码（如模型已下线的 410）
+        return f"对话模型返回错误：{redact(str(error.message))[:300]}"
     return "对话出错，详情见服务日志"
 
 
@@ -515,12 +553,28 @@ class DeltaBuffer:
         self.last = time.monotonic()
 
 
+def _run_config(project_id: str):
+    """每次调模型前把最近的结果图附上（只影响这次请求，不进历史）。"""
+    from agents import RunConfig
+    from agents.run_config import ModelInputData
+
+    async def attach(data) -> ModelInputData:
+        items = await asyncio.to_thread(
+            vision.with_attached_images, list(data.model_data.input),
+            lambda version_id: _media_data_url(project_id, version_id),
+        )
+        return ModelInputData(input=items, instructions=data.model_data.instructions)
+
+    return RunConfig(call_model_input_filter=attach)
+
+
 async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: DeltaBuffer):
     from agents import Runner
     agent = build_agent(session)
     context = TurnContext(session.project_id, session.permission_mode,
                           set(session.created_node_ids))
-    result = Runner.run_streamed(agent, history, context=context, max_turns=MAX_TURNS)
+    result = Runner.run_streamed(agent, history, context=context, max_turns=MAX_TURNS,
+                                 run_config=_run_config(session.project_id))
     async for event in result.stream_events():
         data = getattr(event, "data", None)
         if getattr(event, "type", "") == "raw_response_event" \

@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.78.0',
+    date: '2026-10-08',
+    headline: '画布 Agent 能看生成结果',
+    changes: [
+      { kind: 'feat', text: 'Agent 发起生成后会等结果出来、亲眼看图，再告诉你画面是否符合要求；你让它「多试几次」时它会按看到的结果改提示词重跑。' },
+      { kind: 'feat', text: 'Agent 也能看画布上已有的图片；看过的图在对话里显示缩略图。' },
+      { kind: 'fix', text: '对话模型已下线或不能看图时，直接显示服务商给的原因，不再只说「对话出错」。' },
+    ],
+  },
+  {
     version: '5.77.0',
     date: '2026-10-08',
     headline: '画布 Agent 支持 Skill',
