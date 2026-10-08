@@ -10,8 +10,10 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-import type { CanvasAgentMessage } from '@/schema/canvas';
+import type { CanvasAgentCreationMode, CanvasAgentMessage } from '@/schema/canvas';
+import { CanvasAgentModeMenu } from './CanvasAgentModeMenu';
 import { CanvasAgentModelPicker } from './CanvasAgentModelPicker';
+import { CanvasAgentPreferencePicker } from './CanvasAgentPreferencePicker';
 import { CanvasAgentSkillPicker } from './CanvasAgentSkillPicker';
 import { useCanvasAgent } from './useCanvasAgent';
 
@@ -62,6 +64,13 @@ function AgentMarkdown({ text }: { text: string }) {
     </div>
   );
 }
+
+/** 空对话里的示例需求：点一下填进输入框（不直接发送，生成要花钱）。 */
+const PRESETS: Record<CanvasAgentCreationMode, string[]> = {
+  all: ['生成一只像素风格的小狗', '设计一个赛博朋克风格的女性角色立绘', '把选中的图片做成 5 秒的动态视频'],
+  image: ['生成一只像素风格的小狗', '设计一组奇幻 RPG 的道具图标', '为选中的角色画正面、侧面、背面三视图'],
+  video: ['把选中的图片做成 5 秒的动态视频', '生成一段像素风小狗奔跑的循环动画', '做一个角色登场的 5 秒镜头'],
+};
 
 /** 显示宽度 = 缩略图格子宽（w-20 = 80px）的 2 倍，留给高分屏。 */
 const THUMB_DISPLAY_WIDTH = 160;
@@ -154,6 +163,9 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
   const selectedModel = agent.models?.models.find(item => item.alias === modelAlias && item.model === modelId);
   const thinkingOn = Boolean(settings.effort && settings.effort !== 'off');
   const autoMode = settings.permission_mode === 'auto';
+  const creationMode = settings.creation_mode ?? 'all';
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const empty = messages.length === 0 && !running && !awaiting;
 
   // 选中的节点变了：之前移除过的不再记着，免得重新选中却带不进来。
   const selectionKey = selectedNodes.map(node => node.id).join(',');
@@ -164,7 +176,9 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
     if (list) list.scrollTop = list.scrollHeight;
   }, [messages.length, streaming, status]);
 
-  const canSend = text.trim().length > 0 && !running && !awaiting && !pending;
+  // 列表读到之后，只有列表里的模型能发（Key 里停用的文本模型不再可用）。
+  const modelReady = !agent.models || Boolean(selectedModel);
+  const canSend = text.trim().length > 0 && !running && !awaiting && !pending && modelReady;
 
   async function submit() {
     if (!canSend) return;
@@ -211,6 +225,21 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
       </header>
 
       <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
+        {empty && (
+          <div className="my-auto flex flex-col gap-3 px-1">
+            <p className="font-display text-display leading-tight">想在画布上创作什么？</p>
+            <div className="flex flex-col items-start gap-1.5">
+              {PRESETS[creationMode].map(preset => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => { setText(preset); textareaRef.current?.focus(); }}
+                  className="rounded-full border border-border px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+                >{preset}</button>
+              ))}
+            </div>
+          </div>
+        )}
         {messages.map(message => <Message key={message.message_id} projectId={projectId} message={message} />)}
         {running && streaming && <AgentMarkdown text={streaming} />}
         {running && (
@@ -242,6 +271,37 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
         </p>
       )}
 
+      {/* 对话模型这一组管 Agent 自己；输入框下面那组管这次创作（类型、出图出视频的模型）。 */}
+      <div className="flex items-center gap-0.5 px-2 pb-1">
+        <CanvasAgentModelPicker
+          models={agent.models}
+          alias={modelAlias}
+          model={modelId}
+          disabled={running || pending}
+          onSelect={choice => void agent.updateSettings({ model: choice.model, model_alias: choice.alias })}
+        />
+        <button
+          type="button"
+          title={selectedModel?.reasoning === false ? '该模型不支持思考' : thinkingOn ? '思考：开' : '思考：关'}
+          aria-label="思考模式"
+          aria-pressed={thinkingOn}
+          disabled={running || pending || selectedModel?.reasoning === false}
+          onClick={() => void agent.updateSettings({ effort: thinkingOn ? 'off' : 'high' })}
+          className={cn(ICON_BUTTON, thinkingOn && 'text-primary')}
+        ><Brain className="size-4" /></button>
+        <button
+          type="button"
+          title={autoMode ? 'Auto：新增内容自动执行，改动已有内容才确认' : '审查：每一步都先确认'}
+          aria-label="权限模式"
+          disabled={running || pending}
+          onClick={() => void agent.updateSettings({ permission_mode: autoMode ? 'review' : 'auto' })}
+          className="flex h-8 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40"
+        >
+          {autoMode ? <Zap className="size-3.5 text-primary" /> : <ShieldCheck className="size-3.5" />}
+          {autoMode ? 'Auto' : '审查'}
+        </button>
+      </div>
+
       <div className="m-2 mt-0 rounded-xl border border-border bg-background/60 focus-within:border-primary/60">
         {(attached.length > 0 || skill) && (
           <div className="flex flex-wrap gap-1 px-2 pt-2">
@@ -262,6 +322,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
           </div>
         )}
         <textarea
+          ref={textareaRef}
           value={text}
           onChange={event => setText(event.target.value)}
           onKeyDown={onKeyDown}
@@ -279,33 +340,18 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             onSelect={setSkill}
             onChanged={agent.reloadSkills}
           />
-          <CanvasAgentModelPicker
-            models={agent.models}
-            alias={modelAlias}
-            model={modelId}
+          <CanvasAgentModeMenu
+            mode={creationMode}
             disabled={running || pending}
-            onSelect={choice => void agent.updateSettings({ model: choice.model, model_alias: choice.alias })}
+            onSelect={mode => void agent.updateSettings({ creation_mode: mode })}
           />
-          <button
-            type="button"
-            title={selectedModel?.reasoning === false ? '该模型不支持思考' : thinkingOn ? '思考：开' : '思考：关'}
-            aria-label="思考模式"
-            aria-pressed={thinkingOn}
-            disabled={running || pending || selectedModel?.reasoning === false}
-            onClick={() => void agent.updateSettings({ effort: thinkingOn ? 'off' : 'high' })}
-            className={cn(ICON_BUTTON, thinkingOn && 'text-primary')}
-          ><Brain className="size-4" /></button>
-          <button
-            type="button"
-            title={autoMode ? 'Auto：新增内容自动执行，改动已有内容才确认' : '审查：每一步都先确认'}
-            aria-label="权限模式"
+          <CanvasAgentPreferencePicker
+            models={agent.generationModels}
+            mode={creationMode}
+            preferred={settings.preferred_models ?? []}
             disabled={running || pending}
-            onClick={() => void agent.updateSettings({ permission_mode: autoMode ? 'review' : 'auto' })}
-            className="flex h-8 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40"
-          >
-            {autoMode ? <Zap className="size-3.5 text-primary" /> : <ShieldCheck className="size-3.5" />}
-            {autoMode ? 'Auto' : '审查'}
-          </button>
+            onChange={preferred => void agent.updateSettings({ preferred_models: preferred })}
+          />
           <span className="flex-1" />
           {running ? (
             <button type="button" title="停止" aria-label="停止" onClick={() => void agent.stop()} className="grid size-8 place-items-center rounded-full bg-secondary text-foreground hover:bg-secondary/80"><Square className="size-3.5 fill-current" /></button>

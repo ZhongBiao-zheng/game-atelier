@@ -5,6 +5,7 @@ import {
   decideCanvasAgentApprovals,
   getCanvasAgentSession,
   listCanvasAgentChatModels,
+  listCanvasAgentGenerationModels,
   listCanvasAgentSessions,
   listCanvasAgentSkills,
   sendCanvasAgentMessage,
@@ -13,6 +14,7 @@ import {
 import { useSSE, type CanvasAgentEventPayload } from '@/hooks/useSSE';
 import type {
   CanvasAgentChatModelList,
+  CanvasAgentGenerationModel,
   CanvasAgentSession,
   CanvasAgentSessionSummary,
   CanvasAgentSessionUpdate,
@@ -41,8 +43,34 @@ function rememberedModel(): RememberedModel | null {
   } catch { return null; }
 }
 
+/** 创作模式与模型偏好是用户偏好：跨会话、跨刷新记住，新对话默认用它。 */
+const CREATION_STORAGE_KEY = 'canvas-agent-creation';
+type RememberedCreation = Pick<CanvasAgentSessionUpdate, 'creation_mode' | 'preferred_models'>;
+
+function rememberedCreation(): RememberedCreation {
+  try {
+    const value = JSON.parse(readStorage(CREATION_STORAGE_KEY) ?? 'null') as RememberedCreation | null;
+    return {
+      ...(value?.creation_mode ? { creation_mode: value.creation_mode } : {}),
+      ...(Array.isArray(value?.preferred_models) ? { preferred_models: value.preferred_models } : {}),
+    };
+  } catch { return {}; }
+}
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** 新会话沿用的设置：模型、思考、权限、创作模式、模型偏好。 */
+function carriedSettings(session: CanvasAgentSession): CanvasAgentSessionUpdate {
+  return {
+    ...(session.model && session.model_alias
+      ? { model: session.model, model_alias: session.model_alias } : {}),
+    ...(session.effort ? { effort: session.effort } : {}),
+    permission_mode: session.permission_mode,
+    creation_mode: session.creation_mode,
+    preferred_models: session.preferred_models,
+  };
 }
 
 export function useCanvasAgent(projectId: string, open: boolean) {
@@ -51,13 +79,14 @@ export function useCanvasAgent(projectId: string, open: boolean) {
   const [streaming, setStreaming] = useState('');
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [models, setModels] = useState<CanvasAgentChatModelList | null>(null);
+  const [generationModels, setGenerationModels] = useState<CanvasAgentGenerationModel[] | null>(null);
   const [skills, setSkills] = useState<CanvasAgentSkill[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // 还没有会话时的设置：只记在本地，发第一条消息建会话时一并写入，不为选个模型就建空会话。
   const [draft, setDraft] = useState<CanvasAgentSessionUpdate>(() => {
     const model = rememberedModel();
-    return model ? { model: model.model, model_alias: model.alias } : {};
+    return { ...(model ? { model: model.model, model_alias: model.alias } : {}), ...rememberedCreation() };
   });
   // 「当前会话」以这个 ref 为准，只由选择 / 新建会话改写：不能每次 render 从 state 同步，
   // 否则读取途中任何一次重渲染都会把它冲回 null，读到的会话被当成过期结果丢掉。
@@ -112,6 +141,12 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     listCanvasAgentChatModels().then(setModels, loadError => setError(messageOf(loadError)));
   }, [open, models]);
 
+  useEffect(() => {
+    if (!open || generationModels) return;
+    listCanvasAgentGenerationModels()
+      .then(result => setGenerationModels(result.models), loadError => setError(messageOf(loadError)));
+  }, [open, generationModels]);
+
   const reloadSkills = useCallback(() => {
     listCanvasAgentSkills().then(result => setSkills(result.skills), loadError => setError(messageOf(loadError)));
   }, []);
@@ -156,14 +191,7 @@ export function useCanvasAgent(projectId: string, open: boolean) {
   /** 新会话沿用当前会话的模型 / 思考 / 权限；没有当前会话时用上次选过的模型。 */
   const createSession = useCallback(async (): Promise<CanvasAgentSession> => {
     let created = await createCanvasAgentSession(projectId, '新对话');
-    const settings: CanvasAgentSessionUpdate = session
-      ? {
-        ...(session.model && session.model_alias
-          ? { model: session.model, model_alias: session.model_alias } : {}),
-        ...(session.effort ? { effort: session.effort } : {}),
-        permission_mode: session.permission_mode,
-      }
-      : draft;
+    const settings: CanvasAgentSessionUpdate = session ? carriedSettings(session) : draft;
     if (Object.keys(settings).length) {
       created = await updateCanvasAgentSession(projectId, created.session_id, settings);
     }
@@ -177,14 +205,7 @@ export function useCanvasAgent(projectId: string, open: boolean) {
 
   /** 新对话只清空面板，设置沿用当前会话；真正的会话在发第一条消息时才建。 */
   const newSession = useCallback(() => {
-    if (session) {
-      setDraft({
-        ...(session.model && session.model_alias
-          ? { model: session.model, model_alias: session.model_alias } : {}),
-        ...(session.effort ? { effort: session.effort } : {}),
-        permission_mode: session.permission_mode,
-      });
-    }
+    if (session) setDraft(carriedSettings(session));
     sessionIdRef.current = null;
     setSession(null);
     setStreaming('');
@@ -195,6 +216,13 @@ export function useCanvasAgent(projectId: string, open: boolean) {
   const updateSettings = useCallback((update: CanvasAgentSessionUpdate) => {
     if (update.model && update.model_alias) {
       writeStorage(MODEL_STORAGE_KEY, JSON.stringify({ alias: update.model_alias, model: update.model }));
+    }
+    if (update.creation_mode || update.preferred_models) {
+      writeStorage(CREATION_STORAGE_KEY, JSON.stringify({
+        ...rememberedCreation(),
+        ...(update.creation_mode ? { creation_mode: update.creation_mode } : {}),
+        ...(update.preferred_models ? { preferred_models: update.preferred_models } : {}),
+      }));
     }
     if (!session) {
       setDraft(current => ({ ...current, ...update }));
@@ -238,7 +266,8 @@ export function useCanvasAgent(projectId: string, open: boolean) {
   const clearError = useCallback(() => setError(null), []);
 
   return {
-    sessions, session, draft, streaming, activeTool, models, skills, error, pending, reloadSkills,
+    sessions, session, draft, streaming, activeTool, models, generationModels, skills, error, pending,
+    reloadSkills,
     selectSession, newSession, updateSettings, send, decide, stop, clearError,
   };
 }

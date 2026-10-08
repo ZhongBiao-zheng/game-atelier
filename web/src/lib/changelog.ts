@@ -33,6 +33,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.79.0',
+    date: '2026-10-08',
+    headline: '画布 Agent 创作模式与模型偏好',
+    changes: [
+      { kind: 'feat', text: 'Agent 分三种创作模式：全能创作按需求出图或出视频，图像创作只用图像模型，视频创作只用视频模型。' },
+      { kind: 'feat', text: '新增模型偏好：默认自动，也可以勾选 Agent 能用哪些图片 / 视频模型；设置会记住。' },
+      { kind: 'feat', text: '对话模型只列 Key 里启用的文本模型，并去掉不支持工具调用的。' },
+      { kind: 'feat', text: 'Agent 入口移到画布右上角；空对话里给出几个示例需求，点一下填进输入框。' },
+    ],
+  },
+  {
     version: '5.78.0',
     date: '2026-10-08',
     headline: '画布 Agent 能看生成结果',

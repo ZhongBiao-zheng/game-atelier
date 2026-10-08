@@ -96,6 +96,7 @@ POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/messages
 POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/approvals
 POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/cancel
 GET /api/canvas/agent/models
+GET /api/canvas/agent/generation-models
 GET /api/canvas/agent/skills
 POST /api/canvas/agent/skills/import
 DELETE /api/canvas/agent/skills/{name}

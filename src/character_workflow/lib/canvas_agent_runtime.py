@@ -71,11 +71,45 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
 - 回复用中文，简短直接。"""
 
 
+@dataclass(frozen=True)
+class ModelScope:
+    """会话的创作模式与模型偏好：决定 Agent 能看到、能用哪些生成模型。"""
+    creation_mode: str = "all"
+    preferred: frozenset[tuple[str, str]] = frozenset()
+
+    @classmethod
+    def of(cls, session: CanvasAgentSession) -> "ModelScope":
+        return cls(session.creation_mode,
+                   frozenset((ref.alias, ref.model) for ref in session.preferred_models))
+
+    def kinds(self) -> tuple[str, ...]:
+        return ("image", "video") if self.creation_mode == "all" else (self.creation_mode,)
+
+    def models(self, kind: str) -> list[dict]:
+        """该类型可用的生成模型；偏好里没有这一类型的模型时按自动处理（全部可用）。"""
+        if kind not in self.kinds():
+            return []
+        from character_workflow.lib.workshop_generation import model_rows
+        rows = model_rows(kind)
+        picked = [row for row in rows if (row["alias"], row["model"]) in self.preferred]
+        return picked or rows
+
+
+ALL_MODELS = ModelScope()
+
+CREATION_MODE_PROMPTS = {
+    "all": "",
+    "image": "\n\n当前是「图像创作」模式：只生成图片，不要生成视频。",
+    "video": "\n\n当前是「视频创作」模式：只生成视频；需要参考图时用画布上已有的图片。",
+}
+
+
 @dataclass
 class TurnContext:
     project_id: str
     permission_mode: str
     created_node_ids: set[str] = field(default_factory=set)
+    scope: ModelScope = ALL_MODELS
 
 
 # ── 权限 ────────────────────────────────────────────────────────────────────────
@@ -128,13 +162,32 @@ def _with_fresh_revision(project_id: str, call: Callable[[int], dict]) -> dict:
         return call(_current_revision(project_id))
 
 
-def execute_tool(project_id: str, tool: str, arguments: dict) -> tuple[dict, list[str]]:
+def _check_generation_allowed(project_id: str, node_id: str, scope: ModelScope) -> None:
+    """发起生成前按会话的创作模式与模型偏好把关（set_draft 不拦，付费的这一步拦）。"""
+    node = next((n for n in read_canvas_document(project_id).nodes if n.id == node_id), None)
+    if node is None:
+        return  # 交给 run 报「找不到这个生成节点」
+    draft = getattr(node.data, "generation_draft", None) or getattr(node.data, "draft", None)
+    if draft is None or draft.mode not in ("image", "video"):
+        return
+    if draft.mode not in scope.kinds():
+        raise WorkshopError("INVALID_PARAMETERS",
+                            f"当前创作模式不能生成{'视频' if draft.mode == 'video' else '图片'}", 422)
+    allowed = {(row["alias"], row["model"]) for row in scope.models(draft.mode)}
+    if (draft.alias, draft.model) not in allowed:
+        raise WorkshopError("INVALID_PARAMETERS",
+                            f"模型 {draft.model} 不在可用范围内，请从 list_models 里选", 422)
+
+
+def execute_tool(project_id: str, tool: str, arguments: dict,
+                 scope: ModelScope = ALL_MODELS) -> tuple[dict, list[str]]:
     """Run one tool call; returns (result, node ids it created). Raises WorkshopError."""
     if tool == "get_canvas":
         return tools.get_document(LOCAL, CanvasProjectInput(project_id=project_id)), []
     if tool == "list_models":
         payload = CanvasListModelsInput(project_id=project_id, mode=arguments.get("mode", "image"))
-        return tools.list_models(LOCAL, payload), []
+        tools.authorize(LOCAL, payload.project_id, "canvas_read")
+        return {"models": scope.models(payload.mode)}, []
     if tool == "get_run":
         payload = GetRunInput(project_id=project_id, run_id=arguments["run_id"])
         return tools.get_run(LOCAL, payload), []
@@ -157,6 +210,8 @@ def execute_tool(project_id: str, tool: str, arguments: dict) -> tuple[dict, lis
         ))
         return result, list(result.get("node_ids") or [])
     if tool == "run_generation":
+        _check_generation_allowed(project_id, arguments["surface_node_id"], scope)
+
         def submit(revision: int) -> dict:
             result, job = tools.run(LOCAL, RunInput(
                 project_id=project_id, surface_node_id=arguments["surface_node_id"],
@@ -169,10 +224,11 @@ def execute_tool(project_id: str, tool: str, arguments: dict) -> tuple[dict, lis
     raise WorkshopError("INVALID_TARGET", f"未知工具 {tool}", 422)
 
 
-def run_tool_safely(project_id: str, tool: str, arguments: dict) -> tuple[str, list[str]]:
+def run_tool_safely(project_id: str, tool: str, arguments: dict,
+                    scope: ModelScope = ALL_MODELS) -> tuple[str, list[str]]:
     """Tool output text for the model; errors become text the model can react to."""
     try:
-        result, created = execute_tool(project_id, tool, arguments)
+        result, created = execute_tool(project_id, tool, arguments, scope)
     except WorkshopError as error:
         return f"错误（{error.code}）：{error.message}", []
     except (KeyError, TypeError, ValueError) as error:
@@ -297,7 +353,7 @@ def build_tools() -> list:
             if name == "wait_for_run":
                 return await _wait_for_run(turn.project_id, str(arguments.get("run_id", "")))
             text, created = await asyncio.to_thread(run_tool_safely, turn.project_id, name,
-                                                    arguments)
+                                                    arguments, turn.scope)
             turn.created_node_ids.update(created)
             return text
 
@@ -493,7 +549,9 @@ def build_agent(session: CanvasAgentSession):
     settings = ModelSettings(reasoning=Reasoning(effort=session.effort)) if session.effort \
         else ModelSettings()
     return Agent(
-        name="canvas-agent", instructions=INSTRUCTIONS + skills.skills_prompt(),
+        name="canvas-agent",
+        instructions=INSTRUCTIONS + CREATION_MODE_PROMPTS[session.creation_mode]
+        + skills.skills_prompt(),
         tools=build_tools(),
         model=OpenAIChatCompletionsModel(model=session.model, openai_client=client),
         model_settings=settings,
@@ -572,7 +630,7 @@ async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: D
     from agents import Runner
     agent = build_agent(session)
     context = TurnContext(session.project_id, session.permission_mode,
-                          set(session.created_node_ids))
+                          set(session.created_node_ids), ModelScope.of(session))
     result = Runner.run_streamed(agent, history, context=context, max_turns=MAX_TURNS,
                                  run_config=_run_config(session.project_id))
     async for event in result.stream_events():
@@ -700,7 +758,8 @@ def resolve_approvals(project_id: str, session_id: str,
     for approval in session.pending_approvals:
         if decisions[approval.call_id]:
             text, new_nodes = run_tool_safely(project_id, approval.tool,
-                                              _arguments(approval.arguments))
+                                              _arguments(approval.arguments),
+                                              ModelScope.of(session))
             created.update(new_nodes)
             label = tool_error_label(text) if is_tool_error(text) else "已执行"
         else:

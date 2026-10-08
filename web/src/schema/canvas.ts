@@ -378,6 +378,14 @@ export interface CanvasAgentMessage {
 
 export type CanvasAgentStatus = 'idle' | 'running' | 'awaiting_approval' | 'interrupted' | 'failed';
 export type CanvasAgentPermissionMode = 'review' | 'auto';
+/** 全能：按需求出图或出视频；图像 / 视频创作：只用对应类型的模型。 */
+export type CanvasAgentCreationMode = 'all' | 'image' | 'video';
+
+/** 模型偏好里的一项生成模型（别名 + 模型成对）。 */
+export interface CanvasAgentModelRef {
+  alias: string;
+  model: string;
+}
 export type CanvasAgentEffort = 'low' | 'medium' | 'high' | 'xhigh';
 
 /** 一次待确认的工具调用；会话停在 awaiting_approval，直到用户逐条执行或拒绝。 */
@@ -400,6 +408,9 @@ export interface CanvasAgentSession {
   model_alias: string | null;
   effort: CanvasAgentEffort | null;
   permission_mode: CanvasAgentPermissionMode;
+  creation_mode: CanvasAgentCreationMode;
+  /** 空 = 自动；非空时 Agent 只能从中挑（按图片 / 视频分别生效）。 */
+  preferred_models: CanvasAgentModelRef[];
   token_usage: CanvasAgentTokenUsage;
   messages: CanvasAgentMessage[];
   /** 发给模型的上下文（Agents SDK input items），页面不解析。 */
@@ -417,6 +428,8 @@ export interface CanvasAgentSessionUpdate {
   model_alias?: string;
   effort?: CanvasAgentEffort | 'off';
   permission_mode?: CanvasAgentPermissionMode;
+  creation_mode?: CanvasAgentCreationMode;
+  preferred_models?: CanvasAgentModelRef[];
 }
 
 export interface CanvasAgentTurnCreate {
@@ -443,6 +456,11 @@ export interface CanvasAgentChatModel {
   model: string;
   name: string;
   reasoning: boolean | null;
+}
+
+export interface CanvasAgentGenerationModel extends CanvasAgentModelRef {
+  name: string;
+  kind: 'image' | 'video';
 }
 
 export interface CanvasAgentChatModelList {

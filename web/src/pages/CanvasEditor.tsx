@@ -470,6 +470,14 @@ function CanvasEditorInner({
   const [libraryMode, setLibraryMode] = useState<CanvasLibraryMode | null>(null);
   // Agent 面板与资产面板占同一块位置：任一处打开资产面板都把 Agent 收起。
   const [agentOpen, setAgentOpen] = useState(false);
+  // 与资产面板互斥：开 Agent 前先让资产面板走完关闭过渡。
+  function toggleAgent() {
+    setAddOpen(false);
+    setCreateMenu(null);
+    if (agentOpen) { setAgentOpen(false); return; }
+    if (!libraryMode) { setAgentOpen(true); return; }
+    creationAssetPanelRef.current?.requestTransition(() => { closeLibrary(); setAgentOpen(true); });
+  }
   useEffect(() => { if (libraryMode) setAgentOpen(false); }, [libraryMode]);
   // 提示条的「看看」等延后回调会在旧渲染的闭包里跑，判断面板开没开要读当前值。
   const libraryModeRef = useRef(libraryMode);
@@ -4599,13 +4607,6 @@ function CanvasEditorInner({
       ><MapPinned /></button>
       <ToolButton buttonRef={assetLibraryTriggerRef} label="媒体资产" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setAgentOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('assets'); else if (libraryMode === 'assets') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('assets')); }}><Library /></ToolButton>
       <ToolButton buttonRef={promptLibraryTriggerRef} label="提示词资产" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setAgentOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('prompts'); else if (libraryMode === 'prompts') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('prompts')); }}><WandSparkles /></ToolButton>
-      <ToolButton label="Agent" active={agentOpen} expanded={agentOpen} controlsId="canvas-agent-panel" popup={false} onClick={() => {
-        setAddOpen(false);
-        setCreateMenu(null);
-        if (agentOpen) { setAgentOpen(false); return; }
-        if (!libraryMode) { setAgentOpen(true); return; }
-        creationAssetPanelRef.current?.requestTransition(() => { closeLibrary(); setAgentOpen(true); });
-      }}><Sparkles /></ToolButton>
       <ToolButton
         buttonRef={generationPreferencesTriggerRef}
         label="生成偏好"
@@ -5010,6 +5011,16 @@ function CanvasEditorInner({
               </button>
             </div>
           )}
+          <div className="pointer-events-auto ml-auto shrink-0 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
+            <Button
+              variant="ghost"
+              aria-label="Agent"
+              aria-expanded={agentOpen}
+              aria-controls="canvas-agent-panel"
+              onClick={toggleAgent}
+              className={cn('h-9 gap-1.5 px-3', agentOpen && 'bg-secondary text-primary hover:text-primary')}
+            ><Sparkles />Agent</Button>
+          </div>
         </div>
 
         {!materialPick && (

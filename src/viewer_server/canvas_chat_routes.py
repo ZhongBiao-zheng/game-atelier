@@ -76,6 +76,19 @@ async def get_chat_models() -> dict:
     return await asyncio.to_thread(list_chat_models)
 
 
+def _generation_models() -> dict:
+    from character_workflow.lib.workshop_generation import model_rows
+    return {"models": [{"alias": row["alias"], "model": row["model"], "name": row["name"],
+                        "kind": kind}
+                       for kind in ("image", "video") for row in model_rows(kind)]}
+
+
+@router.get("/agent/generation-models")
+async def get_generation_models() -> dict:
+    """模型偏好可选的图片 / 视频模型（与 Agent 的 list_models 同源）。"""
+    return await asyncio.to_thread(_generation_models)
+
+
 @router.patch(SESSION, response_model=CanvasAgentSession)
 async def patch_session(project_id: str, session_id: str,
                         payload: CanvasAgentSessionUpdate) -> CanvasAgentSession:

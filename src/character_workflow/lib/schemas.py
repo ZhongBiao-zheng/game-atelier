@@ -1410,6 +1410,15 @@ class CanvasAgentMessage(CanvasAgentMessageCreate):
 
 CanvasAgentStatus = Literal["idle", "running", "awaiting_approval", "interrupted", "failed"]
 CanvasAgentPermissionMode = Literal["review", "auto"]
+# 全能：按需求出图或出视频；图像 / 视频创作：只用对应类型的模型。
+CanvasAgentCreationMode = Literal["all", "image", "video"]
+
+
+class CanvasAgentModelRef(BaseModel):
+    """模型偏好里的一项生成模型；同名模型可能挂在多个 Key 下，按别名 + 模型成对记。"""
+    model_config = ConfigDict(extra="forbid")
+    alias: str = Field(min_length=1, max_length=120)
+    model: str = Field(min_length=1, max_length=200)
 
 
 class CanvasAgentApproval(BaseModel):
@@ -1435,6 +1444,9 @@ class CanvasAgentSession(BaseModel):
     model_alias: str | None = Field(default=None, min_length=1, max_length=120)
     effort: Literal["low", "medium", "high", "xhigh"] | None = None
     permission_mode: CanvasAgentPermissionMode = "review"
+    creation_mode: CanvasAgentCreationMode = "all"
+    # 空 = 自动：Agent 从全部可用生成模型里挑；非空时只能从这些里挑（按图片 / 视频分别生效）。
+    preferred_models: list[CanvasAgentModelRef] = Field(default_factory=list, max_length=200)
     token_usage: CanvasAgentTokenUsage = Field(default_factory=CanvasAgentTokenUsage)
     messages: list[CanvasAgentMessage] = Field(default_factory=list, max_length=20_000)
     # 发给模型的上下文（OpenAI Agents SDK 的 input items）；图片只存 atelier-media 引用。
@@ -1475,6 +1487,8 @@ class CanvasAgentSessionUpdate(BaseModel):
     model_alias: str | None = Field(default=None, min_length=1, max_length=120)
     effort: Literal["low", "medium", "high", "xhigh", "off"] | None = None
     permission_mode: CanvasAgentPermissionMode | None = None
+    creation_mode: CanvasAgentCreationMode | None = None
+    preferred_models: list[CanvasAgentModelRef] | None = Field(default=None, max_length=200)
 
     @model_validator(mode="after")
     def model_pairs_with_alias(self) -> "CanvasAgentSessionUpdate":

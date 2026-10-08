@@ -1,5 +1,8 @@
-"""画布 Agent 的对话模型列表：实时拉取已配置 Key 的 /models，只留能对话、能调用工具的。
+"""画布 Agent 的对话模型列表：各 Key 里用户启用的文本模型，再用上游 /models 去掉不能调用工具的。
 
+候选只来自 keys.json 里启用的模型（modality=text），上游有几百个模型也不全列。
+/models 只用来判「能不能当 Agent」：上游明确判为不能对话 / 不支持 tools 的去掉，
+上游没列出或拉取失败的照常保留（能力未知时交给用户试，失败会有明确报错）。
 聚合商的 /models 形状各不相同（new-api 的 supported_endpoint_types、OpenRouter 的
 architecture + supported_parameters、词元跳动的 supported_protocols），判据按字段有无分流；
 都没有时按模型 id 排除明显的出图 / 视频 / 语音 / 向量模型。
@@ -32,7 +35,7 @@ _NON_CHAT_ID_HINTS = (
 _NEW_API_CHAT_TYPES = frozenset({"openai", "openai-chat"})
 _NEW_API_MEDIA_TYPES = ("image", "video", "generate", "edit", "embedding", "audio", "veo", "sora")
 
-_cache: dict[str, tuple[float, list[dict]]] = {}
+_cache: dict[str, tuple[float, dict[str, dict]]] = {}
 _cache_lock = threading.Lock()
 
 
@@ -70,7 +73,15 @@ def _supports_reasoning(item: dict[str, Any]) -> bool | None:
     return None
 
 
-def _fetch(key: keys.KeySpec) -> list[dict]:
+def enabled_text_models(key: keys.KeySpec) -> list[keys.ModelSpec]:
+    """用户在这把 Key 里启用的文本模型；未标模态的模型只在 Key 只开了 llm 时算文本。"""
+    llm_only = set(key.modalities) == {"llm"}
+    return [model for model in key.models
+            if model.modality == "text" or (model.modality is None and llm_only)]
+
+
+def _fetch(key: keys.KeySpec) -> dict[str, dict]:
+    """上游 /models 里每个模型的能力：{id: {"agent": bool, "reasoning": bool | None}}。"""
     response = requests.get(
         f"{chat_base_url(key)}/models",
         headers={"Authorization": f"Bearer {key.access_key}"},
@@ -78,33 +89,45 @@ def _fetch(key: keys.KeySpec) -> list[dict]:
     )
     response.raise_for_status()
     data = response.json().get("data") or []
-    return [
-        {"alias": key.alias, "model": str(item["id"]), "name": str(item.get("name") or item["id"]),
-         "reasoning": _supports_reasoning(item)}
-        for item in data if isinstance(item, dict) and is_chat_model(item)
-    ]
+    return {
+        str(item["id"]): {"agent": is_chat_model(item), "reasoning": _supports_reasoning(item)}
+        for item in data if isinstance(item, dict) and item.get("id")
+    }
 
 
-def _models_for(key: keys.KeySpec, now: float) -> tuple[list[dict], str | None]:
+def _upstream_for(key: keys.KeySpec, now: float) -> tuple[dict[str, dict], str | None]:
     with _cache_lock:
         cached = _cache.get(key.alias)
     if cached and now - cached[0] < CACHE_SECONDS:
         return cached[1], None
     try:
-        rows = _fetch(key)
+        upstream = _fetch(key)
     except (requests.RequestException, ValueError) as error:
         logger.warning("chat model list failed for %s: %s", key.alias, type(error).__name__)
-        return (cached[1] if cached else []), "模型列表获取失败"
+        return (cached[1] if cached else {}), "模型能力获取失败"
     with _cache_lock:
-        _cache[key.alias] = (now, rows)
-    return rows, None
+        _cache[key.alias] = (now, upstream)
+    return upstream, None
+
+
+def _models_for(key: keys.KeySpec, now: float) -> tuple[list[dict], str | None]:
+    upstream, error = _upstream_for(key, now)
+    rows = []
+    for model in enabled_text_models(key):
+        info = upstream.get(model.id)
+        if info is not None and not info["agent"]:
+            continue
+        rows.append({"alias": key.alias, "model": model.id, "name": model.name or model.id,
+                     "reasoning": info["reasoning"] if info else None})
+    return rows, error
 
 
 def list_chat_models() -> dict:
-    """Every configured key's chat models, fetched in parallel; failures are reported per key."""
+    """Every configured key's enabled agent-capable text models; failures are reported per key."""
     candidates = [
         key for key in keys.read_keys_db().keys
         if key.provider in CHAT_PROVIDERS and (key.base_url or key.provider == "openai")
+        and enabled_text_models(key)
     ]
     if not candidates:
         return {"models": [], "errors": []}

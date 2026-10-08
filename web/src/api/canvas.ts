@@ -4,6 +4,7 @@ import type { Job } from '@/schema/jobs';
 import type {
   CanvasAgentApprovalDecision,
   CanvasAgentChatModelList,
+  CanvasAgentGenerationModel,
   CanvasAgentSession,
   CanvasAgentSessionList,
   CanvasAgentSessionUpdate,
@@ -143,6 +144,10 @@ export function cancelCanvasAgentTurn(projectId: string, sessionId: string): Pro
 
 export function listCanvasAgentChatModels(): Promise<CanvasAgentChatModelList> {
   return requestJson<CanvasAgentChatModelList>('/api/canvas/agent/models', '读取对话模型');
+}
+
+export function listCanvasAgentGenerationModels(): Promise<{ models: CanvasAgentGenerationModel[] }> {
+  return requestJson<{ models: CanvasAgentGenerationModel[] }>('/api/canvas/agent/generation-models', '读取生成模型');
 }
 
 export function listCanvasAgentSkills(): Promise<{ skills: CanvasAgentSkill[] }> {

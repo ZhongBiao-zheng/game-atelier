@@ -205,3 +205,75 @@ def test_apply_changes_schema_is_flat_and_bad_arguments_skip_approval():
                          "position": {"x": 0, "y": 0}}]}
     assert runtime.arguments_valid("canvas-12345678", "apply_changes", bad) is False
     assert runtime.arguments_valid("canvas-12345678", "apply_changes", good) is True
+
+
+def test_chat_models_are_enabled_text_models_that_can_use_tools(isolated_data_root, monkeypatch):
+    from character_workflow.lib import canvas_agent_models as chat_models
+    keys.write_keys_db(keys.KeysDB(keys=[keys.KeySpec(
+        alias="hub", provider="custom", base_url="https://hub.invalid/v1",
+        access_key="test-only-not-a-real-key", created_at="2026-10-08T00:00:00Z",
+        models=[keys.ModelSpec(name="Claude", id="claude-x", modality="text"),
+                keys.ModelSpec(name="出图", id="gpt-image-2", modality="image"),
+                keys.ModelSpec(name="无工具", id="no-tools", modality="text"),
+                keys.ModelSpec(name="未知", id="unknown", modality="text")],
+    )]))
+    monkeypatch.setattr(chat_models, "_cache", {})
+    monkeypatch.setattr(chat_models, "_fetch", lambda key: {
+        "claude-x": {"agent": True, "reasoning": True},
+        "no-tools": {"agent": False, "reasoning": None},
+        "doubao-lite-4k": {"agent": True, "reasoning": None},  # 上游有、用户没启用：不列
+    })
+    rows = chat_models.list_chat_models()["models"]
+    assert [(row["model"], row["name"], row["reasoning"]) for row in rows] == [
+        ("claude-x", "Claude", True), ("unknown", "未知", None)]
+
+
+def _rows(kind: str) -> list[dict]:
+    return {"image": [{"alias": "a", "model": "img-1"}, {"alias": "a", "model": "img-2"}],
+            "video": [{"alias": "a", "model": "vid-1"}]}[kind]
+
+
+def test_model_scope_follows_creation_mode_and_preference(monkeypatch):
+    from character_workflow.lib import workshop_generation
+    monkeypatch.setattr(workshop_generation, "model_rows", _rows)
+    image_only = runtime.ModelScope("image", frozenset({("a", "img-2")}))
+    assert [row["model"] for row in image_only.models("image")] == ["img-2"]
+    assert image_only.models("video") == []
+    # 偏好里没有视频模型：视频按自动处理。
+    mixed = runtime.ModelScope("all", frozenset({("a", "img-2")}))
+    assert [row["model"] for row in mixed.models("video")] == ["vid-1"]
+    assert [row["model"] for row in runtime.ALL_MODELS.models("image")] == ["img-1", "img-2"]
+
+
+@pytest.mark.parametrize(("scope", "mode", "model", "error"), [
+    (runtime.ModelScope("image"), "video", "vid-1", "不能生成视频"),
+    (runtime.ModelScope("all", frozenset({("a", "img-2")})), "image", "img-1", "不在可用范围"),
+    (runtime.ModelScope("all", frozenset({("a", "img-2")})), "image", "img-2", None),
+    (runtime.ModelScope("video"), "video", "vid-1", None),
+])
+def test_generation_is_gated_by_scope(monkeypatch, scope, mode, model, error):
+    from character_workflow.lib import workshop_generation
+    from character_workflow.lib.workshop import WorkshopError
+    monkeypatch.setattr(workshop_generation, "model_rows", _rows)
+    draft = SimpleNamespace(mode=mode, alias="a", model=model)
+    document = SimpleNamespace(nodes=[SimpleNamespace(id="n", data=SimpleNamespace(
+        generation_draft=draft))])
+    monkeypatch.setattr(runtime, "read_canvas_document", lambda _project_id: document)
+    if error is None:
+        runtime._check_generation_allowed("p", "n", scope)
+        return
+    with pytest.raises(WorkshopError, match=error):
+        runtime._check_generation_allowed("p", "n", scope)
+
+
+def test_session_settings_store_creation_mode_and_preference(isolated_data_root):
+    with LocalTestClient(base_url="http://127.0.0.1",
+                         app=build_app(dist_dir=isolated_data_root / "dist")) as client:
+        _project_id, _session_id, base = _session(client)
+        patched = client.patch(base, json={"creation_mode": "image", "preferred_models": [
+            {"alias": "a", "model": "img-2"}]})
+        assert patched.status_code == 200, patched.json()
+        assert patched.json()["creation_mode"] == "image"
+        assert patched.json()["preferred_models"] == [{"alias": "a", "model": "img-2"}]
+        assert client.patch(base, json={"preferred_models": []}).json()["preferred_models"] == []
+        assert client.patch(base, json={"creation_mode": "3d"}).status_code == 422

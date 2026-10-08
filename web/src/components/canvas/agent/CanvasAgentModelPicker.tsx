@@ -4,9 +4,6 @@ import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
 import { cn } from '@/lib/utils';
 import type { CanvasAgentChatModel, CanvasAgentChatModelList } from '@/schema/canvas';
 
-/** 列表可能上千条（各 Key 的 /models 合起来）：只渲染前这么多条匹配项，靠搜索缩小。 */
-const MAX_VISIBLE = 200;
-
 export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelect }: {
   models: CanvasAgentChatModelList | null;
   alias: string | null;
@@ -17,6 +14,7 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const anchorRef = useRef<HTMLButtonElement>(null);
+  const current = models?.models.find(item => item.alias === alias && item.model === model);
 
   const matches = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -28,7 +26,7 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
 
   const groups = useMemo(() => {
     const byAlias = new Map<string, CanvasAgentChatModel[]>();
-    for (const item of matches.slice(0, MAX_VISIBLE)) {
+    for (const item of matches) {
       byAlias.set(item.alias, [...(byAlias.get(item.alias) ?? []), item]);
     }
     return [...byAlias.entries()];
@@ -42,11 +40,12 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={model ? `${alias} · ${model}` : '选择对话模型'}
+        title={current || (!models && model) ? `${alias} · ${model}` : '选择对话模型'}
         onClick={() => setOpen(value => !value)}
-        className="flex h-8 min-w-0 max-w-[11rem] items-center gap-1 rounded-full px-2.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
+        className="flex h-8 min-w-0 max-w-[14rem] items-center gap-1 rounded-full px-2.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
       >
-        <span className="truncate">{model ?? '选择模型'}</span>
+        {/* 记住的模型已不在列表里（Key 里停用了）：当作没选。 */}
+        <span className="truncate">{(models ? current?.name : model) ?? '选择模型'}</span>
         <ChevronDown className="size-3.5 shrink-0" />
       </button>
       <ToolbarPopover
@@ -68,7 +67,8 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
         />
         <div role="listbox" aria-label="对话模型列表" className="max-h-72 overflow-y-auto">
           {!models && <p className="px-2 py-3 text-xs text-muted-foreground">读取中…</p>}
-          {models && matches.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">没有匹配的模型</p>}
+          {models && models.models.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">没有可用的对话模型，请在 Key 设置里启用文本模型</p>}
+          {models && models.models.length > 0 && matches.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">没有匹配的模型</p>}
           {groups.map(([groupAlias, items]) => (
             <div key={groupAlias} role="group" aria-label={groupAlias}>
               <p className="px-2 pb-1 pt-2 text-xs text-muted-foreground">{groupAlias}</p>
@@ -86,16 +86,13 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
                       selected && 'text-primary',
                     )}
                   >
-                    <span className="min-w-0 flex-1 truncate">{item.model}</span>
+                    <span className="min-w-0 flex-1 truncate" title={item.model}>{item.name}</span>
                     {selected && <Check className="size-3.5 shrink-0" />}
                   </button>
                 );
               })}
             </div>
           ))}
-          {matches.length > MAX_VISIBLE && (
-            <p className="px-2 py-2 text-xs text-muted-foreground">还有 {matches.length - MAX_VISIBLE} 个，输入关键词缩小范围</p>
-          )}
           {models?.errors.map(item => (
             <p key={item.alias} className="px-2 py-1 text-xs text-destructive">{item.alias}：{item.message}</p>
           ))}
