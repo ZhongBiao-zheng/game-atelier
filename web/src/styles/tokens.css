@@ -100,6 +100,13 @@
   --status-running: #E5B570;
   --status-done: #7FB069;
   --status-failed: #C95C5C;
+
+  /* 动效：时长三档与缓动，与 lib/motion.ts 同值（GSAP 侧）；Tailwind 类侧对应 duration-150/200/300 */
+  --motion-fast: 150ms;
+  --motion-base: 200ms;
+  --motion-slow: 300ms;
+  --ease-atelier-out: cubic-bezier(0.215, 0.61, 0.355, 1); /* = GSAP power2.out */
+  --ease-atelier-in: cubic-bezier(0.55, 0.055, 0.675, 0.19); /* = GSAP power2.in */
 }
 
 /* Atelier — clean light palette（浅色主题，<html class="light"> 时生效）
@@ -173,11 +180,36 @@
     }
   }
   .popover-in {
-    animation: popoverIn 150ms ease-out;
+    animation: popoverIn var(--motion-fast) var(--ease-atelier-out);
     transform-origin: top center;
   }
+  /* Radix 浮层（Dialog / DropdownMenu）关闭时带 data-state=closed，Presence 会等这段动画播完再卸载。 */
+  @keyframes popoverOut {
+    to {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.98);
+    }
+  }
+  .popover-in[data-state='closed'] {
+    animation: popoverOut var(--motion-fast) var(--ease-atelier-in) forwards;
+  }
+  @keyframes scrimIn {
+    from { opacity: 0; }
+  }
+  @keyframes scrimOut {
+    to { opacity: 0; }
+  }
+  .scrim-fade {
+    animation: scrimIn var(--motion-base) var(--ease-atelier-out);
+  }
+  .scrim-fade[data-state='closed'] {
+    animation: scrimOut var(--motion-fast) var(--ease-atelier-in) forwards;
+  }
   @media (prefers-reduced-motion: reduce) {
-    .popover-in {
+    .popover-in,
+    .popover-in[data-state='closed'],
+    .scrim-fade,
+    .scrim-fade[data-state='closed'] {
       animation: none;
     }
   }
@@ -429,7 +461,7 @@
     z-index: 30;
     opacity: 0;
     pointer-events: none !important;
-    transition: opacity 160ms ease;
+    transition: opacity var(--motion-fast) ease;
   }
   .canvas-flow .react-flow__handle.canvas-node-handle::before {
     position: absolute;
@@ -461,7 +493,7 @@
     background: var(--card);
     pointer-events: none;
     transform: translate(-50%, -50%);
-    transition: border-color 160ms ease;
+    transition: border-color var(--motion-fast) ease;
   }
   .canvas-flow .canvas-node-handle:hover .canvas-node-handle-dot {
     border-color: var(--primary);

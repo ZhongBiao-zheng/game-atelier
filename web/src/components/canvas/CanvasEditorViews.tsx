@@ -20,6 +20,7 @@ import {
   type FocusEvent as ReactFocusEvent, type ReactNode, type Ref, type RefObject,
 } from 'react';
 import { Reorder } from 'motion/react';
+import { gsap, MOTION_DURATION, MOTION_STAGGER, prefersReducedMotion, useAnimateOnChange, useGSAP } from '@/lib/motion';
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
 
@@ -379,6 +380,12 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
       size: { width: params.width, height: params.height },
     });
   }, [completeNodeResize, node.id]);
+
+  // 出了新结果（版本变化）时媒体淡入；首次挂载与平移回视口重新挂载都不播。
+  useAnimateOnChange(nodeContent?.version_id ?? null, contentSurfaceRef, versionId => {
+    const media = versionId ? contentSurfaceRef.current?.querySelector('[data-canvas-media]') : null;
+    if (media) gsap.from(media, { opacity: 0, scale: 0.985, duration: MOTION_DURATION.slow, clearProps: 'opacity,transform' });
+  });
 
   function moveMaterialPickTooltip(clientX: number, clientY: number) {
     setMaterialPickPointer({
@@ -1063,6 +1070,10 @@ function CanvasNodeFloatingPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const [placement, setPlacement] = useState<CanvasPanelPlacement | null>(null);
   const side = placement?.side;
+  // 定位完成（visibility 解除）那一刻进场；left/top 管位置，动画只动 transform。
+  useAnimateOnChange(placement !== null, panelRef, placed => {
+    if (placed) gsap.from(panelRef.current, { opacity: 0, y: 6, duration: MOTION_DURATION.base, clearProps: 'opacity,transform' });
+  });
   useEffect(() => {
     if (side) onSideChange?.(side);
   }, [onSideChange, side]);
@@ -1156,9 +1167,15 @@ function MediaCandidateBatch({
   const others = entries.filter(entry => entry.candidate.candidate_id !== primary.candidate.candidate_id);
   const primaryTerminalFailure = primary.candidate.status === 'failed' || primary.candidate.status === 'canceled';
   const primaryNumber = primary.candidate.index + 1;
+  const stackRef = useRef<HTMLDivElement>(null);
+  // 展开时候选卡从主结果背后依次滑出。
+  useAnimateOnChange(expanded, stackRef, open => {
+    if (open) gsap.from('[data-candidate-card]', { x: -24, opacity: 0, duration: MOTION_DURATION.slow, stagger: MOTION_STAGGER, clearProps: 'opacity,transform' });
+  });
 
   return (
     <div
+      ref={stackRef}
       data-testid="canvas-candidate-stack"
       data-expanded={expanded ? 'true' : 'false'}
       className="nodrag nowheel pointer-events-none absolute inset-0 overflow-visible"
@@ -1233,6 +1250,7 @@ function MediaCandidateCard({
   return (
     <section
       role="group"
+      data-candidate-card
       aria-label={`候选 ${number}`}
       className={cn('pointer-events-auto absolute top-0 z-20 h-full overflow-hidden rounded-lg border border-border shell-glow', version?.kind === 'image' ? 'bg-transparent' : 'bg-card')}
       style={{
@@ -2847,13 +2865,28 @@ function CandidateGrid({
   primaryVersionId: string | null;
   actionsDisabled: boolean;
 }) {
+  const gridRef = useRef<HTMLDivElement>(null);
+  const readyKey = entries.filter(({ candidate }) => candidate.version_id).map(({ candidate }) => candidate.candidate_id).join('|');
+  const seenReady = useRef<Set<string> | null>(null);
+  // 候选出图完成时依次浮现；打开面板时已有的结果不播。
+  useGSAP(() => {
+    const ready = readyKey ? readyKey.split('|') : [];
+    const seen = seenReady.current;
+    seenReady.current = new Set(ready);
+    if (!seen || prefersReducedMotion()) return;
+    const fresh = Array.from(gridRef.current?.querySelectorAll<HTMLElement>('[data-candidate-id]') ?? [])
+      .filter(element => ready.includes(element.dataset.candidateId ?? '') && !seen.has(element.dataset.candidateId ?? ''));
+    if (fresh.length) gsap.from(fresh, { opacity: 0, scale: 0.96, duration: MOTION_DURATION.slow, stagger: MOTION_STAGGER, clearProps: 'opacity,transform' });
+  }, { dependencies: [readyKey], scope: gridRef });
+
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label={label}>
+    <div ref={gridRef} className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label={label}>
       {entries.map(({ candidate }) => {
         const version = context.resolveVersion(candidate.version_id);
         return (
           <div
             key={candidate.candidate_id}
+            data-candidate-id={candidate.candidate_id}
             className={cn(
               'relative min-h-20 overflow-hidden rounded-md border bg-secondary/30',
               candidate.version_id === primaryVersionId ? 'border-primary' : 'border-border',
@@ -3328,6 +3361,7 @@ function MediaPreview({
     <img
       src={src}
       alt={title}
+      data-canvas-media
       loading="lazy"
       decoding="async"
       draggable={false}
@@ -3341,7 +3375,7 @@ function MediaPreview({
   if (kind === 'video') {
     const mediaLabel = title || '视频';
     return (
-      <div className={cn('relative size-full', compact && 'max-h-48')}>
+      <div data-canvas-media className={cn('relative size-full', compact && 'max-h-48')}>
         <video
           ref={videoRef}
           src={resolvedSrc}
@@ -3443,7 +3477,7 @@ function MediaPreview({
     );
   }
   return (
-    <div className="nodrag nowheel grid size-full place-items-center gap-3 p-4 text-xs text-muted-foreground">
+    <div data-canvas-media className="nodrag nowheel grid size-full place-items-center gap-3 p-4 text-xs text-muted-foreground">
       {!compact && <span className="flex items-center gap-2"><FileAudio className="size-5" aria-hidden="true" />音频素材</span>}
       <audio
         ref={mediaRef}

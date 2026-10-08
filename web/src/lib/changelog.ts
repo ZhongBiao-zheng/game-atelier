@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.70.0',
+    date: '2026-10-08',
+    headline: '界面动效：浮层、侧栏、画布结果有了进出场',
+    changes: [
+      { kind: 'feat', text: '弹窗和下拉菜单关闭时淡出，不再瞬间消失。' },
+      { kind: 'feat', text: '工坊侧栏的角色列表、UI 方案展开收起改为平滑过渡。' },
+      { kind: 'feat', text: '画布生成面板打开时淡入；节点出了新结果时图片淡入，候选结果依次浮现。' },
+    ],
+  },
+  {
     version: '5.69.0',
     date: '2026-10-02',
     headline: '画布新节点沿用上次的生成设置，多选可一起隐藏',
