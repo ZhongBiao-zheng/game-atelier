@@ -92,11 +92,14 @@ def _venv_signature() -> str:
 
 
 # ---------- 版本更新检查 ----------
-# 最新版取 GitHub main 上的 plugin.json（本仓惯例：版本 bump 随 PR 合入 main，main 即最新发布）。
+# 最新版取 main 上的 plugin.json（本仓惯例：版本 bump 随 PR 合入 main，main 即最新发布）。
+# 读 CNB 国内镜像：raw.githubusercontent.com 在国内基本连不上；镜像由 GitHub Action 随 main 同步。
 LATEST_VERSION_URL = (
-    "https://raw.githubusercontent.com/ZhongBiao-zheng/game-atelier"
-    "/main/.claude-plugin/plugin.json"
+    "https://cnb.cool/ZhongBiao-zheng/game-atelier"
+    "/-/git/raw/main/.claude-plugin/plugin.json"
 )
+# uv 找不到本机 Python 3.11+ 时要下载一份；默认源是 GitHub，国内基本下不动。
+PYTHON_INSTALL_MIRROR = "https://registry.npmmirror.com/-/binary/python-build-standalone"
 UPDATE_CACHE_TTL_OK = 24 * 3600  # 拉取成功后 24h 内不再联网
 UPDATE_CACHE_TTL_FAIL = 3600  # 拉取失败 1h 内不重试，避免断网时每次 --check 都等超时
 UPDATE_FETCH_TIMEOUT = 3  # 秒；检查是顺路的，绝不为它拖慢 skill 启动
@@ -324,7 +327,11 @@ def ensure_venv() -> int:
 
     venv = data_root / ".venv"
     venv.parent.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv)}
+    env = {
+        "UV_PYTHON_INSTALL_MIRROR": PYTHON_INSTALL_MIRROR,
+        **os.environ,
+        "UV_PROJECT_ENVIRONMENT": str(venv),
+    }
     proc = subprocess.run(
         [uv_path, "sync", "--project", str(PLUGIN_DIR)],
         env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",

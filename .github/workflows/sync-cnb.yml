@@ -1,0 +1,26 @@
+name: Sync CNB mirror
+
+# main 的国内镜像 cnb.cool/ZhongBiao-zheng/game-atelier：一键启动和版本检查先读它。
+# 镜像只跟随 GitHub，不在 CNB 上直接提交，所以强推覆盖。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: sync-cnb
+  cancel-in-progress: false
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push main to CNB
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+        run: |
+          git push --force "https://cnb:${CNB_TOKEN}@cnb.cool/ZhongBiao-zheng/game-atelier.git" HEAD:refs/heads/main

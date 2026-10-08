@@ -44,7 +44,9 @@ fi
 
 export GIT_TERMINAL_PROMPT=0
 echo "[更新] 正在检查远程版本..."
-git fetch --quiet || fail "无法连接远程仓库，请检查网络或仓库访问权限。"
+# 先拉国内镜像（只有 main，写进 origin/main），失败再走 GitHub。
+git fetch --quiet https://cnb.cool/ZhongBiao-zheng/game-atelier.git main:refs/remotes/origin/main 2>/dev/null ||
+  git fetch --quiet || fail "无法连接远程仓库，请检查网络或仓库访问权限。"
 
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
 if ! upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"; then
@@ -57,7 +59,7 @@ if ! upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/n
   fi
 fi
 
-if ! git pull --ff-only; then
+if ! git merge --ff-only "$upstream"; then
   echo
   echo "以下非 dist 本地改动可能挡住了更新；修复脚本不会删除它们："
   git status --short

@@ -904,3 +904,42 @@ it('lets the batch scope node stop the batch even when it is not a group', () =>
   rerender(view(nodes[0]));
   expect(screen.queryByRole('button', { name: /批量执行/ })).toBeNull();
 });
+
+it('treats a double-click on a button inside a node as two clicks, not a node preview', () => {
+  const versions: Record<string, CanvasContentVersion> = {
+    base: {
+      version_id: 'base', kind: 'image', path: 'outputs/job-layer/base.png', mime_type: 'image/png', bytes: 42,
+      width: 1000, height: 800, duration_ms: null, created_at: '2026-09-03T00:00:00Z',
+      sha256: 'a'.repeat(64), origin: { kind: 'job_output', job_id: 'job-layer', candidate_id: 'base' },
+    },
+    subject: {
+      version_id: 'subject', kind: 'image', path: 'outputs/job-layer/subject.png', mime_type: 'image/png', bytes: 42,
+      width: 400, height: 500, duration_ms: null, created_at: '2026-09-03T00:00:00Z',
+      sha256: 'b'.repeat(64),
+      origin: { kind: 'layer_decomposition', job_id: 'job-layer', output_index: 1 },
+    },
+  };
+  const stack = {
+    id: 'stack-dblclick', title: '拆分图层', type: 'layer_stack', position: { x: 0, y: 0 }, z_index: 0,
+    size: { width: 760, height: 480 },
+    data: {
+      source_version_id: 'source', alias: null, model: null, prompt: '', resolution: 'auto',
+      base_version_id: 'base', base_visible: true, active_run_id: null, error: null,
+      layers: [{
+        id: 'layer-subject', version_id: 'subject', z_index: 1, name: '主体', description: '透明主体',
+        bounding_box: { absolute: [100, 120, 500, 620], normalized: [100, 150, 500, 775] },
+        visible: true,
+      }],
+    },
+  } satisfies Extract<CanvasNode, { type: 'layer_stack' }>;
+  const context = nodeContext({ resolveVersion: versionResolver(versions) });
+  render(<CanvasNodeContext.Provider value={context}><NodeCard data={{ domain: stack }} selected /></CanvasNodeContext.Provider>);
+
+  // 连点显示 / 隐藏、连点下载会凑成 dblclick；落在按钮或链接上不算「双击节点」。
+  fireEvent.doubleClick(screen.getByRole('button', { name: '隐藏主体' }));
+  fireEvent.doubleClick(screen.getByRole('link', { name: '下载主体' }));
+  expect(context.previewLayerStack).not.toHaveBeenCalled();
+
+  fireEvent.doubleClick(screen.getByRole('group', { name: /选择节点 拆分图层/ }));
+  expect(context.previewLayerStack).toHaveBeenCalledWith(stack.id);
+});

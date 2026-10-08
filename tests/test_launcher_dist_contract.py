@@ -34,7 +34,7 @@ def test_repair_scripts_are_scoped_to_dist_and_never_hard_reset():
         assert "reset --hard" not in script
         assert "git restore" in script
         assert "git clean" in script
-        assert "pull --ff-only" in script
+        assert "merge --ff-only" in script
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX repair behavior is covered on macOS/Linux")

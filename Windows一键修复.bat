@@ -39,8 +39,12 @@ echo [自检] 前端发布文件正常。
 if /i "%~1"=="--repair-only" goto :success_local
 set "GIT_TERMINAL_PROMPT=0"
 echo [更新] 正在检查远程版本...
+rem 先拉国内镜像（只有 main，写进 origin/main），失败再走 GitHub。
+git fetch --quiet https://cnb.cool/ZhongBiao-zheng/game-atelier.git main:refs/remotes/origin/main 2>nul
+if not errorlevel 1 goto :fetched
 git fetch --quiet
 if errorlevel 1 goto :fetch_failed
+:fetched
 
 set "CURBR=?"
 for /f "delims=" %%b in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "CURBR=%%b"
@@ -55,7 +59,7 @@ if errorlevel 1 goto :no_upstream
 set "UPSTREAM=origin/main"
 
 :pull
-git pull --ff-only
+git merge --ff-only "!UPSTREAM!"
 if errorlevel 1 goto :pull_failed
 if not exist "web\dist\index.html" goto :dist_failed
 echo.

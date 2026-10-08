@@ -19,6 +19,10 @@ claude plugin install game-atelier@atelier
 
 ### 方式二：本地源码包（要看 / 改代码，或离线分发）
 
+```bash
+git clone https://cnb.cool/ZhongBiao-zheng/game-atelier.git   # 国内镜像，与 GitHub main 同步
+```
+
 仓库自带一键安装脚本，自动检测本机已装的代理（Claude Code / Codex），把 Skill 软链过去：
 
 ```bash

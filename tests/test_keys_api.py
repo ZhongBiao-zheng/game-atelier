@@ -568,6 +568,9 @@ def test_models_preview_reports_failed_complete_catalog(tmp_path, monkeypatch):
      "https://tokendance.space/gateway/v1/models"),
     ("https://openrouter.ai.example/v1?limit=10", "custom",
      "https://openrouter.ai.example/v1/models?limit=10"),
+    # 只填根域名时与出图同规则补 /v1：拼成 /models 时 OpenAI-HK 回 404、Tuzi 回首页 HTML。
+    ("https://api.openai-hk.com", "custom", "https://api.openai-hk.com/v1/models"),
+    ("https://api.tu-zi.com/", "custom", "https://api.tu-zi.com/v1/models"),
 ])
 def test_model_list_url(base, provider, expected):
     from viewer_server.routes import _model_list_url
