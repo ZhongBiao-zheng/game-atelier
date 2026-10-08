@@ -46,6 +46,7 @@ import { adoptTeamAsset, listTeamLibraries } from '@/api/teamLibraries';
 import { TEAM_ASSET_ACTION_EVENT, teamAssetActionFromSearch, type TeamAssetAction } from '@/lib/teamAssetActions';
 import type { CreationAsset, CreationMediaAssetContent, RecipeInput } from '@/schema/creationAssets';
 import type { CanvasProject } from '@/schema/canvas';
+import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
 const ASSET_TITLE_LENGTH = 24;
@@ -118,6 +119,14 @@ function StudioFull() {
   const [persistedJobs, setPersistedJobs] = useState<Job[]>([]);
   const [pending, setPending] = useState(false);
   const [keys, setKeys] = useState<KeyView[]>([]);
+  // 公告「快速添加」等别处改了密钥的模型列表：只刷新列表，不动当前选中的供应商 / 模型。
+  useEffect(() => {
+    const refresh = () => {
+      void listKeys().then(resp => setKeys(resp.keys.filter(key => key.models.length > 0))).catch(() => undefined);
+    };
+    window.addEventListener(KEYS_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(KEYS_CHANGED_EVENT, refresh);
+  }, []);
   // listKeys 返回（成功或失败）后才为 true：区分「还在加载」与「加载完了但一个 key 都没有」。
   const [keysLoaded, setKeysLoaded] = useState(false);
   // 滚动联动收放：历史区 col-reverse（|scrollTop| 即距底距离），>160 收 / <80 展（滞回防抖）。

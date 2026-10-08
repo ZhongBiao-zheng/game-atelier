@@ -20,6 +20,7 @@ import {
   isWorkshopWorkspace,
 } from '@/components/workshop/workspaces';
 import { SwapIcon } from '@/components/ui/swap-icon';
+import { AnnouncementHost } from '@/components/AnnouncementDialog';
 
 /** 深浅主题切换：图标显示目的地（暗色显太阳 = 点了去浅色） */
 function ThemeToggle() {
@@ -262,6 +263,7 @@ export function AppShell() {
         </Switch>
       </main>
       <TeamShareReminder ref={reminderRef} />
+      <AnnouncementHost />
     </div>
   );
 }

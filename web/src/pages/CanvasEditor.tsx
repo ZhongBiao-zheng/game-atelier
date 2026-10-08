@@ -156,6 +156,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import {
   Dialog,
   DialogContent,
@@ -458,6 +459,16 @@ function CanvasEditorInner({
   const [document, setDocument] = useState<CanvasDocument | null>(null);
   const [projects, setProjects] = useState<Array<{ project_id: string; name: string }>>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
+  // 公告「快速添加」等别处改了密钥的模型列表：只刷新列表，不动节点上已选的模型。
+  useEffect(() => {
+    const refresh = () => {
+      void listKeys().then(resp => setKeys([...resp.keys].sort((left, right) => (
+        Number(Boolean(right.is_default)) - Number(Boolean(left.is_default))
+      )))).catch(() => undefined);
+    };
+    window.addEventListener(KEYS_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(KEYS_CHANGED_EVENT, refresh);
+  }, []);
   const [canvasUiPreferences, setCanvasUiPreferences] = useState<CanvasUiPreferences>(DEFAULT_CANVAS_UI_PREFERENCES);
   const [canvasUiPreferencesError, setCanvasUiPreferencesError] = useState<string | null>(null);
   const [libraryMode, setLibraryMode] = useState<CanvasLibraryMode | null>(null);

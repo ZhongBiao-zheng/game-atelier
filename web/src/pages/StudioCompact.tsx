@@ -16,6 +16,7 @@ import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import type { JobKind, JobParams } from '@/schema/jobs';
 import { readStudioDraft, writeStudioDraft } from './studioDraft';
 import { convergeModelSelection, modelsForKind } from './studioModelSelection';
+import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
 
@@ -58,6 +59,14 @@ export function StudioCompact() {
   const [pending, setPending] = useState(false);
   const [compactError, setCompactError] = useState<string | null>(null);
   const [keys, setKeys] = useState<KeyView[]>([]);
+  // 公告「快速添加」等别处改了密钥的模型列表：只刷新列表，不动当前选中的供应商 / 模型。
+  useEffect(() => {
+    const refresh = () => {
+      void listKeys().then(resp => setKeys(resp.keys.filter(key => key.models.length > 0))).catch(() => undefined);
+    };
+    window.addEventListener(KEYS_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(KEYS_CHANGED_EVENT, refresh);
+  }, []);
   const [providerAlias, setProviderAlias] = useState('');
   const [model, setModel] = useState('');
   const [sizeParams, setSizeParams] = useState<JobParams>(draft?.sizeParams ?? saved.sizeParams ?? {});

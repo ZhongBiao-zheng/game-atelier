@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.72.0',
+    date: '2026-10-08',
+    headline: '新模型公告与一键添加',
+    changes: [
+      { kind: 'feat', text: '有新模型时启动弹出公告，点「快速添加」查找各供应商已开通的同名模型，确认后加入模型列表。' },
+      { kind: 'feat', text: '关掉的公告可在更新日志面板的「模型公告」里再打开。' },
+    ],
+  },
+  {
     version: '5.71.1',
     date: '2026-10-08',
     headline: '画布节点上的按钮可以放心连点',
