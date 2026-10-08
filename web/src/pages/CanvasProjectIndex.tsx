@@ -31,6 +31,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { CanvasPackageInspection, CanvasProjectSummary } from '@/schema/canvas';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 
 type EditorState =
@@ -278,7 +279,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
               <DialogFooter>
                 <Button type="button" variant="outline" disabled={saving} onClick={() => setEditor({ open: false })}>取消</Button>
                 <Button type="submit" disabled={saving}>
-                  {saving ? '保存中…' : '创建并进入'}
+                  <SwapLabel active={Boolean(saving)} on="保存中…" off="创建并进入" />
                 </Button>
               </DialogFooter>
             </form>
@@ -326,7 +327,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
               <DialogFooter>
                 <Button type="button" variant="outline" disabled={Boolean(busyProjectId)} onClick={() => setDeleteState({ open: false })}>取消</Button>
                 <Button type="submit" variant="destructive" disabled={Boolean(busyProjectId)}>
-                  {busyProjectId ? '正在删除…' : '确认删除'}
+                  <SwapLabel active={Boolean(busyProjectId)} on="正在删除…" off="确认删除" />
                 </Button>
               </DialogFooter>
             </form>

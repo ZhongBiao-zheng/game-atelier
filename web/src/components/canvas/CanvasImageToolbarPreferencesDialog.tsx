@@ -18,6 +18,7 @@ import type {
   CanvasImageQuickToolId,
   CanvasImageToolbarPreferences,
 } from '@/schema/canvas';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 export function CanvasImageToolbarPreferencesDialog({
   open,
@@ -147,7 +148,7 @@ export function CanvasImageToolbarPreferencesDialog({
 
         <DialogFooter>
           <Button variant="outline" disabled={saving} onClick={() => onOpenChange(false)}>取消</Button>
-          <Button disabled={saving} onClick={() => onSave(draft)}>{saving ? '保存中…' : '保存设置'}</Button>
+          <Button disabled={saving} onClick={() => onSave(draft)}><SwapLabel active={Boolean(saving)} on="保存中…" off="保存设置" /></Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

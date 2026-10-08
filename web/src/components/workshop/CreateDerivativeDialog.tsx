@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import type { CharacterEntry } from '@/schema/jobs';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 interface LocalSource {
   file: File;
@@ -249,7 +250,7 @@ export function CreateDerivativeDialog({
               取消
             </Button>
             <Button type="submit" disabled={!source || !name.trim() || busy}>
-              {busy ? '创建中…' : '创建衍生'}
+              <SwapLabel active={Boolean(busy)} on="创建中…" off="创建衍生" />
             </Button>
           </DialogFooter>
         </form>

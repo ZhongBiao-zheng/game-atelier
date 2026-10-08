@@ -4,6 +4,7 @@ import { Link } from 'wouter';
 
 import type { CharacterEntry, Project } from '@/schema/jobs';
 import { Button } from '@/components/ui/button';
+import { Collapse } from '@/components/ui/collapse';
 import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
@@ -149,7 +150,7 @@ export function ProjectNavigation({
             </Button>
           )}
         </div>
-        {charactersExpanded && (
+        <Collapse open={charactersExpanded}>
           <div className="space-y-2 pl-2">
             <label className="relative block">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
@@ -172,7 +173,7 @@ export function ProjectNavigation({
               查看全部角色
             </Link>
           </div>
-        )}
+        </Collapse>
         <ProjectSideDisclosureLink
           descriptor={ui}
           current={currentWorkspace === ui.id}
@@ -181,7 +182,7 @@ export function ProjectNavigation({
           href={uiHref}
           onNavigate={onNavigate}
         />
-        {hasVisibleUiSchemes && uiExpanded && (
+        <Collapse open={hasVisibleUiSchemes && uiExpanded}>
           <ul className="m-0 list-none space-y-0.5 pl-4 pr-0 pt-1">
             {visibleSchemes.map(scheme => {
               const isDefault = scheme.id === uiSchemes?.default_scheme_id;
@@ -206,7 +207,7 @@ export function ProjectNavigation({
               );
             })}
           </ul>
-        )}
+        </Collapse>
         <ProjectSideLink
           projectBase={projectBase}
           descriptor={video}

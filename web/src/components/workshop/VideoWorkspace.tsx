@@ -14,6 +14,7 @@ import { useClipboard } from '@/hooks/useClipboard';
 import { Button } from '@/components/ui/button';
 import { GalleryVisibilityButton } from './GalleryVisibilityButton';
 import { CharacterAssociationPicker } from './CharacterAssociationPicker';
+import { SwapIcon } from '@/components/ui/swap-icon';
 
 export function VideoWorkspace({
   projectId,
@@ -269,7 +270,7 @@ function GenerationCommand({ production }: { production: ProjectVideoProduction 
         onClick={() => void copyCommand()}
         className="min-h-11"
       >
-        {copyState === 'copied' ? <Check aria-hidden /> : <Copy aria-hidden />}
+        <SwapIcon swapKey={copyState === 'copied'}>{copyState === 'copied' ? <Check aria-hidden /> : <Copy aria-hidden />}</SwapIcon>
         {copyState === 'copying' ? '复制中…' : copyState === 'copied' ? '已复制' : '复制生成指令'}
       </Button>
       {copyState === 'error' && (
@@ -509,7 +510,7 @@ function VideoEmpty() {
             onClick={() => void copyCommand()}
             className="min-h-11"
           >
-            {copyState === 'copied' ? <Check aria-hidden /> : <Copy aria-hidden />}
+            <SwapIcon swapKey={copyState === 'copied'}>{copyState === 'copied' ? <Check aria-hidden /> : <Copy aria-hidden />}</SwapIcon>
             {copyState === 'copying' ? '复制中…' : copyState === 'copied' ? '已复制' : '复制新建企划指令'}
           </Button>
         </div>

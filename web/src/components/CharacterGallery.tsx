@@ -21,6 +21,8 @@ import {
   fetchCharacterWorkspace,
   type CharacterRelatedObject,
 } from '@/api/characters';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 interface Props {
   projectId?: string;
@@ -389,7 +391,7 @@ export function CharacterGallery({
                     aria-label={hidden ? '恢复展示' : '隐藏'}
                     className={cn(btn, hidden ? 'text-white opacity-100 hover:bg-background/90' : 'text-white opacity-0 group-hover:opacity-100 hover:bg-background/90')}
                   >
-                    {hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                    <SwapIcon swapKey={Boolean(hidden)}>{hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}</SwapIcon>
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); void deleteImage(img.jobId, img.path); }}
@@ -707,7 +709,7 @@ function GalleryUpload({
         className="shrink-0"
       >
         <Upload className="size-3.5" />
-        {busy ? '上传中…' : '添加图片'}
+        <SwapLabel active={Boolean(busy)} on="上传中…" off="添加图片" />
       </Button>
     </div>
   );

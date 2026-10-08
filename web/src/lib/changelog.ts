@@ -33,6 +33,90 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.73.2',
+    date: '2026-10-08',
+    headline: 'Tuzi 的 Nano Banana 2.1 可选清晰度',
+    changes: [
+      { kind: 'feat', text: 'Tuzi 上的 Nano Banana 2.1 可选低 / 中 / 高质量，对应 1K / 2K / 4K 出图。' },
+    ],
+  },
+  {
+    version: '5.73.1',
+    date: '2026-10-08',
+    headline: '快速添加修复',
+    changes: [
+      { kind: 'fix', text: '只填了根域名的供应商（如 OpenAI-HK、Tuzi）拉取模型列表失败。' },
+      { kind: 'fix', text: '快速添加只列出已开通的供应商，去掉匹配备注。' },
+      { kind: 'feat', text: 'OpenRouter 的 Nano Banana 2.1 可选 1K / 2K / 4K 与 14 种比例。' },
+    ],
+  },
+  {
+    version: '5.73.0',
+    date: '2026-10-08',
+    headline: '首条模型公告：Nano Banana 2.1',
+    changes: [
+      { kind: 'feat', text: '新增 Nano Banana 2.1 公告，可一键加入已开通该模型的供应商。' },
+      { kind: 'fix', text: '快速添加不再把上一代型号（如 Nano Banana 2）列为相似项。' },
+    ],
+  },
+  {
+    version: '5.72.1',
+    date: '2026-10-08',
+    headline: '公告弹窗图片留边',
+    changes: [
+      { kind: 'fix', text: '模型公告的宣传图与弹窗边框之间留出间距，圆角与外框对齐。' },
+    ],
+  },
+  {
+    version: '5.72.0',
+    date: '2026-10-08',
+    headline: '新模型公告与一键添加',
+    changes: [
+      { kind: 'feat', text: '有新模型时启动弹出公告，点「快速添加」查找各供应商已开通的同名模型，确认后加入模型列表。' },
+      { kind: 'feat', text: '关掉的公告可在更新日志面板的「模型公告」里再打开。' },
+    ],
+  },
+  {
+    version: '5.71.1',
+    date: '2026-10-08',
+    headline: '画布节点上的按钮可以放心连点',
+    changes: [
+      { kind: 'fix', text: '快速连点节点上的按钮（隐藏、下载等）时，不再误触发双击打开预览。' },
+    ],
+  },
+  {
+    version: '5.71.0',
+    date: '2026-10-08',
+    headline: '按钮细节动效：按下回弹、图标换态、选中滑块',
+    changes: [
+      { kind: 'feat', text: '所有按钮按下时轻微回弹。' },
+      { kind: 'feat', text: '播放 / 暂停、显示 / 隐藏、复制、加载中等图标切换时弹入，不再硬切。' },
+      { kind: 'feat', text: '尺寸、比例、时长、Midjourney 参数等选项组，选中底色从旧选项滑到新选项。' },
+      { kind: 'feat', text: '「保存」「提交」等按钮切到「…中」时宽度不跳，文案淡入。' },
+    ],
+  },
+  {
+    version: '5.70.0',
+    date: '2026-10-08',
+    headline: '界面动效：浮层、侧栏、画布结果有了进出场',
+    changes: [
+      { kind: 'feat', text: '弹窗和下拉菜单关闭时淡出，不再瞬间消失。' },
+      { kind: 'feat', text: '工坊侧栏的角色列表、UI 方案展开收起改为平滑过渡。' },
+      { kind: 'feat', text: '画布生成面板打开时淡入；节点出了新结果时图片淡入，候选结果依次浮现。' },
+    ],
+  },
+  {
+    version: '5.69.0',
+    date: '2026-10-02',
+    headline: '画布新节点沿用上次的生成设置，多选可一起隐藏',
+    changes: [
+      { kind: 'feat', text: '新建图片 / 视频 / 音频 / 文本生成节点时沿用上一次生成用的模型和参数（尺寸、质量等），张数不沿用。' },
+      { kind: 'feat', text: '多选节点时，工具条可一次隐藏或显示所有有内容的节点。' },
+      { kind: 'fix', text: '拖动画布时，生成面板里的参考素材缩略图不再拖着延迟、飞出节点。' },
+      { kind: 'fix', text: '去掉文本节点上的「增大 / 减小字号」按钮。' },
+    ],
+  },
+  {
     version: '5.68.10',
     date: '2026-10-01',
     headline: '补齐 OpenRouter 新图像模型的尺寸选项',

@@ -3,6 +3,7 @@ import { useLocation } from 'wouter';
 import { localConnection, siteBaseForPort, useConnectionState } from '@/api/connection';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 export function LocalConnectionGate({ children }: { children: ReactNode }) {
   const [location] = useLocation();
@@ -164,7 +165,7 @@ function SitePairingForm({ message }: { message: string | null }) {
       <label className="block space-y-2 text-sm"><span>配对码</span>
         <input autoFocus autoComplete="off" spellCheck={false} value={code} onChange={event => setCode(event.target.value)} className={`${field} font-mono`} /></label>
       {error && <p role="alert" className="text-sm text-pretty text-destructive">{error}</p>}
-      <Button type="submit" disabled={busy || !code.trim()}>{busy ? '连接中…' : '连接'}</Button>
+      <Button type="submit" disabled={busy || !code.trim()}><SwapLabel active={Boolean(busy)} on="连接中…" off="连接" /></Button>
     </form>
   </main>;
 }

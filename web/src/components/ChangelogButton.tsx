@@ -13,6 +13,7 @@ import {
   saveSeenVersion,
   type ChangelogEntry,
 } from '@/lib/changelog';
+import { ANNOUNCEMENTS, OPEN_ANNOUNCEMENT_EVENT } from '@/lib/announcements';
 
 function VersionBlock({
   entry,
@@ -180,7 +181,21 @@ export function ChangelogButton() {
         {/* 标题栏不跟着滚：滚到第三个版本时仍要知道自己在读什么、当前是哪一版 */}
         <div className="flex shrink-0 items-baseline justify-between gap-3 border-b border-border px-5 pb-4 pt-5">
           <h2 className="text-base font-medium text-foreground">更新日志</h2>
-          <span className="font-mono text-xs text-muted-foreground/70">当前 v{CURRENT_VERSION}</span>
+          <span className="flex items-baseline gap-3">
+            {ANNOUNCEMENTS.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  close();
+                  window.dispatchEvent(new Event(OPEN_ANNOUNCEMENT_EVENT));
+                }}
+                className="rounded-sm text-xs text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                模型公告
+              </button>
+            )}
+            <span className="font-mono text-xs text-muted-foreground/70">当前 v{CURRENT_VERSION}</span>
+          </span>
         </div>
         <div
           ref={measure}

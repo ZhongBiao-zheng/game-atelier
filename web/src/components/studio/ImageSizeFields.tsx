@@ -4,6 +4,7 @@ import type { ImageControlCaps } from '@/lib/imageControlCaps';
 import { imageSizeError, imageSizeMode } from '@/lib/imageSizeMode';
 import { defaultResolution, normalizeImagePixelSize, studioSizeFor, type Resolution } from '@/lib/studioSize';
 import { RatioIcon } from './RatioIcon';
+import { SelectionHighlight } from '@/components/ui/selection-highlight';
 
 export function ImageSizeFields({ caps, model, baseUrl, params, onPatch }: {
   caps: ImageControlCaps;
@@ -47,12 +48,13 @@ export function ImageSizeFields({ caps, model, baseUrl, params, onPatch }: {
     <>
       {options.length > 0 && <section>
         <div className="mb-1 px-1 text-xs text-muted-foreground">尺寸</div>
-        <div role="listbox" aria-label="选择图片尺寸" className="grid grid-cols-4 gap-y-1 rounded-lg bg-popover p-1">
+        <div role="listbox" aria-label="选择图片尺寸" className="relative isolate grid grid-cols-4 gap-y-1 rounded-lg bg-popover p-1">
+          <SelectionHighlight />
           {options.map(value => (
             <button key={value} type="button" role="option"
               aria-selected={value === 'auto' || value === 'custom' ? mode === value : mode === 'ratio' && ratio === value}
               onClick={() => select(value)}
-              className="flex h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-md text-xs transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+              className="flex h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-md text-xs transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
               {value === 'auto' ? <Scan className="size-4" aria-hidden="true" /> : value === 'custom'
                 ? <SlidersHorizontal className="size-4" aria-hidden="true" /> : <RatioIcon ratio={value} box={16} />}
               {value === 'auto' ? 'AUTO' : value === 'custom' ? '自定义' : value}
@@ -63,11 +65,12 @@ export function ImageSizeFields({ caps, model, baseUrl, params, onPatch }: {
       {caps.showResolution && mode === 'ratio' && (
         <section>
           <div className="mb-1 px-1 text-xs text-muted-foreground">分辨率</div>
-          <div role="listbox" aria-label="选择图片分辨率" className="flex rounded-lg bg-popover p-1">
+          <div role="listbox" aria-label="选择图片分辨率" className="relative isolate flex rounded-lg bg-popover p-1">
+            <SelectionHighlight />
             {[...(providerResolution ? ['default'] : []), ...caps.resolutions].map(value => <button key={value} type="button" role="option"
               aria-selected={selectedResolution === value}
               onClick={() => onPatch({ resolution: value === 'default' ? undefined : value, size: undefined })}
-              className="h-8 flex-1 rounded-md text-xs transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60">{value === 'default' ? '默认' : value}</button>)}
+              className="h-8 flex-1 rounded-md text-xs transition-colors hover:bg-secondary/60">{value === 'default' ? '默认' : value}</button>)}
           </div>
         </section>
       )}

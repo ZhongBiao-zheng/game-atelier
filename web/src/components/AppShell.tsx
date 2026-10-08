@@ -19,6 +19,8 @@ import { setTheme, useTheme, type Theme } from '@/lib/theme';
 import {
   isWorkshopWorkspace,
 } from '@/components/workshop/workspaces';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { AnnouncementHost } from '@/components/AnnouncementDialog';
 
 /** 深浅主题切换：图标显示目的地（暗色显太阳 = 点了去浅色） */
 function ThemeToggle() {
@@ -31,7 +33,7 @@ function ThemeToggle() {
       onClick={() => setTheme(next)}
       className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-glass backdrop-blur-glass text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
-      {theme === 'dark' ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}
+      <SwapIcon swapKey={theme}>{theme === 'dark' ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}</SwapIcon>
     </button>
   );
 }
@@ -261,6 +263,7 @@ export function AppShell() {
         </Switch>
       </main>
       <TeamShareReminder ref={reminderRef} />
+      <AnnouncementHost />
     </div>
   );
 }

@@ -44,6 +44,7 @@ import type {
   CanvasUpscaleTierPreferences,
 } from '@/schema/canvas';
 import type { JobParams } from '@/schema/jobs';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 const MODES = ['text', 'image', 'video', 'audio'] as const;
 export type CanvasGenerationPreferencesTab = CanvasGenerationMode | 'upscale';
@@ -545,7 +546,7 @@ export function CanvasGenerationPreferencesDialog({
             disabled={saving}
             onClick={() => onSave(defaultsForSave(draft, keys), upscaleForSave(upscaleDraft, keys))}
           >
-            {saving ? '保存中…' : '保存偏好'}
+            <SwapLabel active={Boolean(saving)} on="保存中…" off="保存偏好" />
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -11,6 +11,8 @@ import {
 import { RatioIcon } from './RatioIcon';
 import { ToolbarPopover, type ToolbarPopoverMenuProps } from './ToolbarPopover';
 import { cn } from '@/lib/utils';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { SelectionHighlight } from '@/components/ui/selection-highlight';
 
 interface Props extends ToolbarPopoverMenuProps {
   caps: VideoControlCaps;
@@ -91,9 +93,11 @@ export function VideoControls({
         )}
         {summary && <span className="truncate">{' · '}{summary}</span>}
         {caps.supportsAudio && (
-          generateAudio
-            ? <Volume2 size={13} aria-hidden className="shrink-0" />
-            : <VolumeX size={13} aria-hidden className="shrink-0 text-muted-foreground" />
+          <SwapIcon swapKey={Boolean(generateAudio)}>
+            {generateAudio
+              ? <Volume2 size={13} aria-hidden className="shrink-0" />
+              : <VolumeX size={13} aria-hidden className="shrink-0 text-muted-foreground" />}
+          </SwapIcon>
         )}
       </button>
 
@@ -113,7 +117,8 @@ export function VideoControls({
         <div className="space-y-4">
             {caps.modes.length > 1 && (
               <Section title="生成方式">
-                <div role="listbox" aria-label="选择生成方式" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                <div role="listbox" aria-label="选择生成方式" className="relative isolate grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                  <SelectionHighlight />
                   {caps.modes.map((m) => (
                     <SegmentButton key={m} selected={mode === m} onClick={() => onModeChange(m)}>
                       {VIDEO_MODE_LABELS[m]}
@@ -125,7 +130,8 @@ export function VideoControls({
 
             {caps.ratios.length > 0 && (
               <Section title="比例">
-                <div role="listbox" aria-label="选择比例" className={`grid ${caps.ratios.length > 5 ? 'grid-cols-4' : 'grid-cols-5'} gap-y-1 rounded-lg bg-popover p-1`}>
+                <div role="listbox" aria-label="选择比例" className={`relative isolate grid ${caps.ratios.length > 5 ? 'grid-cols-4' : 'grid-cols-5'} gap-y-1 rounded-lg bg-popover p-1`}>
+                  <SelectionHighlight />
                   {caps.ratios.map((item) => (
                     <button
                       key={item}
@@ -133,7 +139,7 @@ export function VideoControls({
                       role="option"
                       aria-selected={ratio === item}
                       onClick={() => onRatioChange(item)}
-                      className="flex h-[43px] min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg text-xs hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+                      className="flex h-[43px] min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg text-xs hover:bg-secondary/60 transition-colors"
                     >
                       <RatioIcon ratio={item} box={16} />
                       <span>{ratioLabel(item)}</span>
@@ -145,7 +151,8 @@ export function VideoControls({
 
             {caps.resolutions.length > 0 && (
               <Section title="清晰度">
-                <div role="listbox" aria-label="选择清晰度" className={`grid h-9 ${caps.resolutions.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'} rounded-lg bg-popover p-0.5`}>
+                <div role="listbox" aria-label="选择清晰度" className={`relative isolate grid h-9 ${caps.resolutions.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'} rounded-lg bg-popover p-0.5`}>
+                  <SelectionHighlight />
                   {caps.resolutions.map((item) => (
                     <SegmentButton key={item} selected={resolution === item} onClick={() => onResolutionChange(item)}>
                       {item}
@@ -157,7 +164,8 @@ export function VideoControls({
 
             {caps.qualities && (
               <Section title="生成档位">
-                <div role="listbox" aria-label="选择生成档位" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                <div role="listbox" aria-label="选择生成档位" className="relative isolate grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                  <SelectionHighlight />
                   {caps.qualities.map((item) => (
                     <SegmentButton key={item} selected={effectiveQuality === item} onClick={() => onQualityChange?.(item)}>
                       {VIDEO_QUALITY_LABELS[item]}
@@ -173,8 +181,9 @@ export function VideoControls({
                 <div
                   role="listbox"
                   aria-label="选择生成时长"
-                  className={`grid ${caps.durations.length > 4 ? 'grid-cols-6 gap-0.5' : 'h-9 grid-cols-2'} rounded-lg bg-popover p-0.5`}
+                  className={`relative isolate grid ${caps.durations.length > 4 ? 'grid-cols-6 gap-0.5' : 'h-9 grid-cols-2'} rounded-lg bg-popover p-0.5`}
                 >
+                  <SelectionHighlight />
                   {caps.durations.map((item) => (
                     <SegmentButton key={item} selected={duration === item} onClick={() => onDurationChange(item)}>
                       {item}s
@@ -186,7 +195,8 @@ export function VideoControls({
 
             {caps.supportsAudio && (
               <Section title="生成音频">
-                <div role="listbox" aria-label="生成音频开关" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                <div role="listbox" aria-label="生成音频开关" className="relative isolate grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                  <SelectionHighlight />
                   <SegmentButton selected={generateAudio} onClick={() => onGenerateAudioChange(true)}>
                     开启
                   </SegmentButton>
@@ -199,7 +209,8 @@ export function VideoControls({
 
             {caps.supportsWatermark && onWatermarkChange && (
               <Section title="视频水印">
-                <div role="listbox" aria-label="视频水印开关" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                <div role="listbox" aria-label="视频水印开关" className="relative isolate grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                  <SelectionHighlight />
                   <SegmentButton selected={watermark} onClick={() => onWatermarkChange(true)}>
                     开启
                   </SegmentButton>
@@ -239,7 +250,7 @@ function SegmentButton({
       role="option"
       aria-selected={selected}
       onClick={onClick}
-      className="h-8 rounded-md text-center text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+      className="h-8 rounded-md text-center text-sm hover:bg-secondary/60 transition-colors"
     >
       {children}
     </button>

@@ -5,6 +5,7 @@ import { memoryLocation } from 'wouter/memory-location';
 
 import type { useSSE as UseSSE } from '@/hooks/useSSE';
 import { AppShell } from './AppShell';
+import { markAnnouncementsSeen } from '@/lib/announcements';
 
 type SSEOptions = NonNullable<Parameters<typeof UseSSE>[0]>;
 const sseCalls = vi.hoisted(() => [] as Array<SSEOptions | undefined>);
@@ -39,6 +40,8 @@ beforeEach(() => {
     ok: true,
     json: async () => ({}),
   }));
+  // 模型公告是模态弹窗，弹出时外壳整体 aria-hidden；外壳测试按已读起步。
+  markAnnouncementsSeen();
 });
 
 afterEach(() => {
@@ -48,6 +51,7 @@ afterEach(() => {
   window.localStorage.removeItem('atelier:team-reminded');
   window.localStorage.removeItem('atelier:theme');
   window.localStorage.removeItem('atelier:changelog-seen');
+  window.localStorage.removeItem('atelier:announcements-seen');
   document.documentElement.classList.remove('light');
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
 });

@@ -625,7 +625,11 @@ def fixed_nano_resolution_quality(model: str) -> str | None:
     return match.group(1) if match else None
 
 
+# 前缀匹配，长的排前面：`nano-banana-2.1` 归一后是 `nano-banana-2-1`，会被 `nano-banana-2` 吃掉。
+# 2.1 于 2026-10-08 实测接收 quality：1k → 1024²、4k → 4096²。
 _TUZI_NANO_ROUTES = (
+    ("gemini-nano-banana-2-1", "gemini-nano-banana-2.1", True),
+    ("nano-banana-2-1", "gemini-nano-banana-2.1", True),
     ("nano-banana-pro", "gemini-3-pro-image-preview", True),
     ("nano-banana-2", "gemini-3.1-flash-image-preview", True),
     ("nano-banana", "gemini-2.5-flash-image", False),

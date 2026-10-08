@@ -23,6 +23,7 @@ import {
   normalizeAudioVoice,
 } from '@/lib/audioGeneration';
 import type { JobParams } from '@/schema/jobs';
+import { SelectionHighlight } from '@/components/ui/selection-highlight';
 
 const REASONING_OPTIONS = ['auto', 'low', 'medium', 'high', 'xhigh'] as const;
 const REASONING_LABELS: Record<(typeof REASONING_OPTIONS)[number], string> = {
@@ -505,8 +506,9 @@ export function OptionTrack<T extends string | number>({
     <div
       role="listbox"
       aria-label={label}
-      className="grid auto-cols-fr grid-flow-col rounded-lg bg-popover p-0.5"
+      className="relative isolate grid auto-cols-fr grid-flow-col rounded-lg bg-popover p-0.5"
     >
+      <SelectionHighlight />
       {values.map(value => (
         <button
           key={value}
@@ -516,7 +518,7 @@ export function OptionTrack<T extends string | number>({
           onClick={() => {
             if (selected !== String(value)) onSelect(value);
           }}
-          className="h-8 rounded-md px-2 text-center text-sm transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60"
+          className="h-8 rounded-md px-2 text-center text-sm transition-colors hover:bg-secondary/60"
         >
           {getLabel(value)}
         </button>
@@ -537,7 +539,8 @@ function OptionGrid<T extends string>({
   onSelect: (value: T) => void;
 }) {
   return (
-    <div role="listbox" aria-label={label} className="grid grid-cols-3 gap-y-1 rounded-lg bg-popover p-1">
+    <div role="listbox" aria-label={label} className="relative isolate grid grid-cols-3 gap-y-1 rounded-lg bg-popover p-1">
+      <SelectionHighlight />
       {values.map(item => (
         <button
           key={item.value}
@@ -547,7 +550,7 @@ function OptionGrid<T extends string>({
           onClick={() => {
             if (selected !== item.value) onSelect(item.value);
           }}
-          className="h-8 rounded-md px-2 text-center text-sm transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60"
+          className="h-8 rounded-md px-2 text-center text-sm transition-colors hover:bg-secondary/60"
         >
           {item.label}
         </button>

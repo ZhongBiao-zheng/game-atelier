@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { ArrowLeft, Eye, EyeOff, X } from 'lucide-react';
 import { createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelInputModality, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
+import { SwapIcon } from '@/components/ui/swap-icon';
 
 type ProviderKind = 'official' | 'third_party' | 'custom';
 type ApiModality = 'image' | 'video' | 'audio' | 'llm';
@@ -668,7 +669,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                     aria-label={showKey ? '隐藏密钥' : '显示密钥'}
                     className="absolute inset-y-0 right-0 inline-flex w-10 items-center justify-center rounded-r-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   >
-                    {showKey ? <EyeOff size={16} aria-hidden /> : <Eye size={16} aria-hidden />}
+                    <SwapIcon swapKey={Boolean(showKey)}>{showKey ? <EyeOff size={16} aria-hidden /> : <Eye size={16} aria-hidden />}</SwapIcon>
                   </button>
                 </div>
               </div>

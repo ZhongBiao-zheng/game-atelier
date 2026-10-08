@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 
 export interface StudioArchiveRequest {
@@ -251,7 +252,7 @@ export function StudioArchiveDialog({
                 disabled={loading || submitting || !selected}
                 onClick={() => void submit()}
               >
-                {submitting ? '归档中…' : '确认归档'}
+                <SwapLabel active={Boolean(submitting)} on="归档中…" off="确认归档" />
               </Button>
             </DialogFooter>
           </>

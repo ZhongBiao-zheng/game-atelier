@@ -4,6 +4,7 @@ import { Check, Plus, Star } from 'lucide-react';
 import type { UiSchemeCreate, UiSchemesFile } from '@/api/uiSchemes';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 export function UiSchemeBar({
   currentSchemeId,
@@ -153,7 +154,7 @@ export function UiSchemeBar({
             <Button type="button" variant="ghost" size="sm" onClick={() => setCreating(false)}>取消</Button>
             <Button type="submit" size="sm" disabled={busy || !name.trim()}>
               <Check aria-hidden />
-              {busy ? '创建中…' : '创建并打开'}
+              <SwapLabel active={Boolean(busy)} on="创建中…" off="创建并打开" />
             </Button>
           </div>
         </form>

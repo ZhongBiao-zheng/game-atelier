@@ -13,13 +13,14 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, BookmarkPlus, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, BookmarkPlus, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Pause, Pencil, Play, Plus, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
   useRef, useState,
   type FocusEvent as ReactFocusEvent, type ReactNode, type Ref, type RefObject,
 } from 'react';
 import { Reorder } from 'motion/react';
+import { gsap, MOTION_DURATION, MOTION_STAGGER, prefersReducedMotion, useAnimateOnChange, useGSAP } from '@/lib/motion';
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
 
@@ -109,9 +110,13 @@ import {
   supportsCanvasTextReasoning,
   resolveCanvasGenerationDraft,
   switchCanvasGenerationDraft,
+  canvasNodeHasHideableContent,
   type CanvasPendingInput,
 } from '@/pages/canvasEditorModel';
 import { isSavableCanvasVersion, isShareableCanvasVersion } from '@/pages/canvasTeamActions';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { SwapLabel } from '@/components/ui/swap-label';
+import { SelectionHighlight } from '@/components/ui/selection-highlight';
 
 export type CanvasFlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
 /** 本地媒体操作（抠图 / 裁剪 / 切图 / 放大）进行中的占位节点：不在文档里，结果节点落地即撤。 */
@@ -379,6 +384,12 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     });
   }, [completeNodeResize, node.id]);
 
+  // 出了新结果（版本变化）时媒体淡入；首次挂载与平移回视口重新挂载都不播。
+  useAnimateOnChange(nodeContent?.version_id ?? null, contentSurfaceRef, versionId => {
+    const media = versionId ? contentSurfaceRef.current?.querySelector('[data-canvas-media]') : null;
+    if (media) gsap.from(media, { opacity: 0, scale: 0.985, duration: MOTION_DURATION.slow, clearProps: 'opacity,transform' });
+  });
+
   function moveMaterialPickTooltip(clientX: number, clientY: number) {
     setMaterialPickPointer({
       left: clientX + 14,
@@ -413,10 +424,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     ? presentCanvasCandidates(context.jobsByResultNodeId.get(node.id) ?? [])
     : null;
   const mediaCandidates = candidatePresentation?.current ?? [];
-  // 「隐藏」只对有内容的节点有意义；已隐藏的节点照样给出「显示」。
-  const hasHideableContent = node.type === 'layer_stack'
-    || (node.type === 'batch_material' ? node.data.items.length > 0
-      : content !== undefined && (content.kind !== 'text' || content.text.trim() !== ''));
+  // 已隐藏的节点照样给出「显示」。
+  const hasHideableContent = canvasNodeHasHideableContent(node, content);
 
   function beginTitleEditing() {
     titleExitInProgress.current = false;
@@ -501,18 +510,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     if (!context) return;
     context.recordHistory();
     context.updateNode(node.id, candidate => ({ ...candidate, hidden: !candidate.hidden }));
-  }
-
-  function setTextScale(direction: -1 | 1) {
-    if (!context || node.type !== 'text') return;
-    const scales = ['xs', 'sm', 'base'] as const;
-    const current = scales.indexOf(node.data.display.scale);
-    const scale = scales[Math.max(0, Math.min(scales.length - 1, current + direction))];
-    if (scale === node.data.display.scale) return;
-    context.recordHistory();
-    context.updateNode(node.id, candidate => candidate.type === 'text'
-      ? { ...candidate, data: { ...candidate.data, display: { scale } } }
-      : candidate);
   }
 
   return (
@@ -645,7 +642,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               disabled={Boolean(nodeJob.cancel_requested_at)}
               onClick={() => void context.cancelRun(nodeJob.canvas_run!.run_id)}
             >
-              {nodeJob.cancel_requested_at ? <LoaderCircle /> : <Square />}
+              <SwapIcon swapKey={Boolean(nodeJob.cancel_requested_at)}>{nodeJob.cancel_requested_at ? <LoaderCircle /> : <Square />}</SwapIcon>
             </MediaToolButton>
           )}
           {context.activeBatch?.scopeNodeId === node.id && (
@@ -656,7 +653,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               disabled={context.activeBatch.stopping}
               onClick={() => void context.stopActiveBatch?.()}
             >
-              {context.activeBatch.stopping ? <LoaderCircle /> : <Square />}
+              <SwapIcon swapKey={Boolean(context.activeBatch.stopping)}>{context.activeBatch.stopping ? <LoaderCircle /> : <Square />}</SwapIcon>
             </MediaToolButton>
           )}
           {emptyMediaNode ? (
@@ -666,7 +663,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               disabled={replacingMedia}
               onClick={() => context.replaceMedia(emptyMediaNode)}
             >
-              {replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}
+              <SwapIcon swapKey={Boolean(replacingMedia)}>{replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}</SwapIcon>
             </MediaToolButton>
           ) : node.type === 'image' ? (
             <>
@@ -685,7 +682,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
                   disabled={submittingNode}
                   onClick={() => void context.recoverReversePromptConfig(reversePromptJob)}
                 >
-                  {submittingNode ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
+                  <SwapIcon swapKey={Boolean(submittingNode)}>{submittingNode ? <LoaderCircle className="animate-spin" /> : <Sparkles />}</SwapIcon>
                 </MediaToolButton>
               )}
             </>
@@ -697,8 +694,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               submitting={submittingNode || nodeRunState.status === 'loading'}
               context={context}
               onEditText={beginTextEditing}
-              onDecreaseText={() => setTextScale(-1)}
-              onIncreaseText={() => setTextScale(1)}
             />
           )}
           {isCanvasContentNode(node) && isSavableCanvasVersion(content) && (
@@ -716,7 +711,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
             text={node.hidden ? '显示' : '隐藏'}
             onClick={toggleHidden}
           >
-            {node.hidden ? <Eye /> : <EyeOff />}
+            <SwapIcon swapKey={Boolean(node.hidden)}>{node.hidden ? <Eye /> : <EyeOff />}</SwapIcon>
           </MediaToolButton>}
         </div>
       </NodeToolbar>
@@ -768,6 +763,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
         }}
         onDoubleClick={event => {
           event.stopPropagation();
+          if (isControlDoubleClick(event)) return;
           if (node.type === 'text') {
             if (nodeRunState.status === 'loading') return;
             beginTextEditing();
@@ -1078,6 +1074,10 @@ function CanvasNodeFloatingPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const [placement, setPlacement] = useState<CanvasPanelPlacement | null>(null);
   const side = placement?.side;
+  // 定位完成（visibility 解除）那一刻进场；left/top 管位置，动画只动 transform。
+  useAnimateOnChange(placement !== null, panelRef, placed => {
+    if (placed) gsap.from(panelRef.current, { opacity: 0, y: 6, duration: MOTION_DURATION.base, clearProps: 'opacity,transform' });
+  });
   useEffect(() => {
     if (side) onSideChange?.(side);
   }, [onSideChange, side]);
@@ -1171,9 +1171,15 @@ function MediaCandidateBatch({
   const others = entries.filter(entry => entry.candidate.candidate_id !== primary.candidate.candidate_id);
   const primaryTerminalFailure = primary.candidate.status === 'failed' || primary.candidate.status === 'canceled';
   const primaryNumber = primary.candidate.index + 1;
+  const stackRef = useRef<HTMLDivElement>(null);
+  // 展开时候选卡从主结果背后依次滑出。
+  useAnimateOnChange(expanded, stackRef, open => {
+    if (open) gsap.from('[data-candidate-card]', { x: -24, opacity: 0, duration: MOTION_DURATION.slow, stagger: MOTION_STAGGER, clearProps: 'opacity,transform' });
+  });
 
   return (
     <div
+      ref={stackRef}
       data-testid="canvas-candidate-stack"
       data-expanded={expanded ? 'true' : 'false'}
       className="nodrag nowheel pointer-events-none absolute inset-0 overflow-visible"
@@ -1248,6 +1254,7 @@ function MediaCandidateCard({
   return (
     <section
       role="group"
+      data-candidate-card
       aria-label={`候选 ${number}`}
       className={cn('pointer-events-auto absolute top-0 z-20 h-full overflow-hidden rounded-lg border border-border shell-glow', version?.kind === 'image' ? 'bg-transparent' : 'bg-card')}
       style={{
@@ -1257,6 +1264,7 @@ function MediaCandidateCard({
       onPointerDown={event => event.stopPropagation()}
       onDoubleClick={event => {
         event.stopPropagation();
+        if (isControlDoubleClick(event)) return;
         if (version) context.previewContent(version.version_id, `${node.title} · 候选 ${number}`, node.id);
       }}
     >
@@ -1402,11 +1410,12 @@ function CanvasConfigNodeSurface({
       <div
         role="radiogroup"
         aria-label="生成类型"
-        className="nodrag nowheel grid grid-cols-3 gap-1 rounded-lg border border-border bg-background/50 p-1"
+        className="nodrag nowheel relative isolate grid grid-cols-3 gap-1 rounded-lg border border-border bg-background/50 p-1"
         onPointerDown={event => event.stopPropagation()}
         onClick={event => event.stopPropagation()}
         onKeyDown={handleModeKeys}
       >
+        <SelectionHighlight className="ring-0" />
         {CONFIG_OUTPUT_MODES.map(({ mode, label, icon: Icon }) => (
           <button
             key={mode}
@@ -1418,7 +1427,7 @@ function CanvasConfigNodeSurface({
             className={cn(
               'flex min-w-0 flex-col items-center gap-1 rounded-md px-1 py-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
               draft.mode === mode
-                ? 'bg-secondary font-medium text-foreground'
+                ? 'font-medium text-foreground'
                 : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
             )}
             onClick={() => selectMode(mode)}
@@ -1463,8 +1472,6 @@ function CanvasNodeToolbar({
   submitting,
   context,
   onEditText,
-  onDecreaseText,
-  onIncreaseText,
 }: {
   node: CanvasNode;
   content: CanvasContentVersion | undefined;
@@ -1472,8 +1479,6 @@ function CanvasNodeToolbar({
   submitting: boolean;
   context: CanvasNodeContextValue;
   onEditText: () => void;
-  onDecreaseText: () => void;
-  onIncreaseText: () => void;
 }) {
   const contentNode = isCanvasContentNode(node) ? node : null;
   const mediaNode = contentNode && contentNode.type !== 'text' ? contentNode : null;
@@ -1487,22 +1492,6 @@ function CanvasNodeToolbar({
         <>
           <MediaToolButton label={`编辑文本 ${node.title}`} text="编辑" disabled={submitting} onClick={onEditText}>
             <Pencil />
-          </MediaToolButton>
-          <MediaToolButton
-            label={`减小 ${node.title} 字号`}
-            text="减小字号"
-            disabled={node.data.display.scale === 'xs'}
-            onClick={onDecreaseText}
-          >
-            <Minus />
-          </MediaToolButton>
-          <MediaToolButton
-            label={`增大 ${node.title} 字号`}
-            text="增大字号"
-            disabled={node.data.display.scale === 'base'}
-            onClick={onIncreaseText}
-          >
-            <Plus />
           </MediaToolButton>
           <MediaToolButton
             label={`用 ${node.title} 生成图片`}
@@ -1530,7 +1519,7 @@ function CanvasNodeToolbar({
                     .finally(() => setDownloadingLayers(null));
                 }}
               >
-                {downloadingLayers === format ? <LoaderCircle className="animate-spin" /> : icon}
+                <SwapIcon swapKey={downloadingLayers === format}>{downloadingLayers === format ? <LoaderCircle className="animate-spin" /> : icon}</SwapIcon>
               </MediaToolButton>
             ),
           )}
@@ -1575,7 +1564,7 @@ function CanvasNodeToolbar({
           disabled={replacing}
           onClick={() => context.replaceMedia(mediaNode)}
         >
-          {replacing ? <LoaderCircle className="animate-spin" /> : <FileUp />}
+          <SwapIcon swapKey={Boolean(replacing)}>{replacing ? <LoaderCircle className="animate-spin" /> : <FileUp />}</SwapIcon>
         </MediaToolButton>
       )}
       {node.type === 'video' && (
@@ -1592,6 +1581,13 @@ function CanvasNodeToolbar({
       )}
     </>
   );
+}
+
+/** 节点上的按钮常被快速连点（连续切换显示 / 隐藏、连点下载），两次点击会凑成一次 dblclick；
+ *  落在按钮或链接上的双击不算「双击节点」，不打开预览 / 进入编辑。 */
+function isControlDoubleClick(event: React.MouseEvent<HTMLElement>) {
+  const control = event.target instanceof Element ? event.target.closest('button, a[href]') : null;
+  return Boolean(control && event.currentTarget.contains(control));
 }
 
 function isCanvasContentNode(node: CanvasNode): node is CanvasContentNode {
@@ -1822,7 +1818,7 @@ function ImageNodeToolbar({
           text={action.text}
           href={action.href}
         >
-          {action.icon}
+          <SwapIcon swapKey={action.text}>{action.icon}</SwapIcon>
         </MediaToolLink>
       ) : action.menu ? (
         <DropdownMenu key={action.id} onOpenChange={updateMenuOpen}>
@@ -1833,7 +1829,7 @@ function ImageNodeToolbar({
               disabled={action.disabled}
               onClick={() => undefined}
             >
-              {action.icon}
+              <SwapIcon swapKey={action.text}>{action.icon}</SwapIcon>
             </MediaToolButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -1862,7 +1858,7 @@ function ImageNodeToolbar({
           disabled={action.disabled}
           onClick={action.run}
         >
-          {action.icon}
+          <SwapIcon swapKey={action.text}>{action.icon}</SwapIcon>
         </MediaToolButton>
       ))}
       <MediaToolButton
@@ -2412,7 +2408,7 @@ export function CanvasGenerationComposer({
             disabled={Boolean(activeJob.cancel_requested_at)}
             onClick={() => void context.cancelRun(activeJob.canvas_run!.run_id)}
           >
-            {activeJob.cancel_requested_at ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Square aria-hidden="true" />}
+            <SwapIcon swapKey={Boolean(activeJob.cancel_requested_at)}>{activeJob.cancel_requested_at ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Square aria-hidden="true" />}</SwapIcon>
             {activeJob.cancel_requested_at ? '正在停止…' : '停止'}
           </Button>
         )}
@@ -2436,7 +2432,7 @@ export function CanvasGenerationComposer({
             disabled={submitting}
             onClick={submitGeneration}
           >
-            {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
+            <SwapIcon swapKey={Boolean(submitting)}>{submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}</SwapIcon>
             {submitting ? '提交中…' : textMode ? '生成' : '开始生成'}
           </Button>
         )}
@@ -2589,6 +2585,8 @@ function CanvasVideoFrameSlot({
   );
 }
 
+const INSTANT_LAYOUT = { layout: { duration: 0 } } as const;
+
 function CanvasMaterialConnections({
   node,
   materials,
@@ -2617,6 +2615,9 @@ function CanvasMaterialConnections({
   const [dragOrder, setDragOrder] = useState<string[] | null>(null);
   const dragOrderRef = useRef<string[] | null>(null);
   const draggedRef = useRef(false);
+  // Reorder.Item 常开 layout 动画（排序靠它测量，关不掉）：画布平移 / 缩放时缩略图的屏幕位置一变，
+  // 它就补间追过去，像果冻一样拖在后面、甚至飞出节点。不在拖动排序时补间时长为 0，直接到位。
+  const [dragging, setDragging] = useState(false);
   const referenceById = new Map(connectedReferences.map(reference => [reference.nodeId, reference]));
   const connected = dragOrder
     ? labelCanvasMentionReferences(dragOrder.flatMap(id => referenceById.get(id) ?? []))
@@ -2629,6 +2630,7 @@ function CanvasMaterialConnections({
     const order = dragOrderRef.current;
     dragOrderRef.current = null;
     setDragOrder(null);
+    setDragging(false);
     if (order) onReorder?.(order);
     // 松手那一下还会触发一次 click，别把它当成「查看素材」。
     window.setTimeout(() => { draggedRef.current = false; }, 0);
@@ -2693,9 +2695,11 @@ function CanvasMaterialConnections({
               as="span"
               value={reference.nodeId}
               drag={onReorder && connected.length > 1 ? 'x' : false}
+              transition={dragging ? undefined : INSTANT_LAYOUT}
               whileDrag={{ zIndex: 20 }}
               onDragStart={() => {
                 draggedRef.current = true;
+                setDragging(true);
                 setHoveredMaterial(null);
                 dragOrderRef.current = connected.map(item => item.nodeId);
               }}
@@ -2874,13 +2878,28 @@ function CandidateGrid({
   primaryVersionId: string | null;
   actionsDisabled: boolean;
 }) {
+  const gridRef = useRef<HTMLDivElement>(null);
+  const readyKey = entries.filter(({ candidate }) => candidate.version_id).map(({ candidate }) => candidate.candidate_id).join('|');
+  const seenReady = useRef<Set<string> | null>(null);
+  // 候选出图完成时依次浮现；打开面板时已有的结果不播。
+  useGSAP(() => {
+    const ready = readyKey ? readyKey.split('|') : [];
+    const seen = seenReady.current;
+    seenReady.current = new Set(ready);
+    if (!seen || prefersReducedMotion()) return;
+    const fresh = Array.from(gridRef.current?.querySelectorAll<HTMLElement>('[data-candidate-id]') ?? [])
+      .filter(element => ready.includes(element.dataset.candidateId ?? '') && !seen.has(element.dataset.candidateId ?? ''));
+    if (fresh.length) gsap.from(fresh, { opacity: 0, scale: 0.96, duration: MOTION_DURATION.slow, stagger: MOTION_STAGGER, clearProps: 'opacity,transform' });
+  }, { dependencies: [readyKey], scope: gridRef });
+
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label={label}>
+    <div ref={gridRef} className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label={label}>
       {entries.map(({ candidate }) => {
         const version = context.resolveVersion(candidate.version_id);
         return (
           <div
             key={candidate.candidate_id}
+            data-candidate-id={candidate.candidate_id}
             className={cn(
               'relative min-h-20 overflow-hidden rounded-md border bg-secondary/30',
               candidate.version_id === primaryVersionId ? 'border-primary' : 'border-border',
@@ -2970,7 +2989,7 @@ const MediaToolButton = forwardRef<HTMLButtonElement, {
           onClick();
         }}
       >
-        <span aria-hidden="true" className="[&>svg]:size-3.5">{children}</span>
+        <span aria-hidden="true" className="[&_svg]:size-3.5">{children}</span>
         <span className="text-xs">{text}</span>
       </button>
     );
@@ -2994,7 +3013,7 @@ function MediaToolLink({ label, text, href, children }: {
       )}
       onClick={event => event.stopPropagation()}
     >
-      <span aria-hidden="true" className="[&>svg]:size-3.5">{children}</span>
+      <span aria-hidden="true" className="[&_svg]:size-3.5">{children}</span>
       {text && <span className="text-xs">{text}</span>}
     </a>
   );
@@ -3206,7 +3225,8 @@ export function CanvasLayerStackSurface({
             </div>
             <div className="space-y-1.5 text-xs text-muted-foreground">
               <span>分辨率</span>
-              <div role="listbox" aria-label="选择拆分分辨率" className="grid grid-cols-4 rounded-lg bg-popover p-0.5">
+              <div role="listbox" aria-label="选择拆分分辨率" className="relative isolate grid grid-cols-4 rounded-lg bg-popover p-0.5">
+                <SelectionHighlight />
                 {(['auto', '1K', '1.5K', '2K'] as const).map(resolution => (
                   <button
                     key={resolution}
@@ -3219,7 +3239,7 @@ export function CanvasLayerStackSurface({
                       context.recordHistory();
                       updateDraft({ resolution });
                     }}
-                    className="nodrag h-8 rounded-md px-1 text-center text-sm text-foreground transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 disabled:opacity-50"
+                    className="nodrag h-8 rounded-md px-1 text-center text-sm text-foreground transition-colors hover:bg-secondary/60 disabled:opacity-50"
                   >
                     {resolution === 'auto' ? '智能' : resolution}
                   </button>
@@ -3239,8 +3259,8 @@ export function CanvasLayerStackSurface({
                   disabled={!selectedChoice || busy || !sourceImage}
                   onClick={() => void context.submitLayerDecomposition(node.id)}
                 >
-                  {busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Layers3 aria-hidden="true" />}
-                  {busy ? '拆分中…' : '开始拆分'}
+                  <SwapIcon swapKey={Boolean(busy)}>{busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Layers3 aria-hidden="true" />}</SwapIcon>
+                  <SwapLabel active={Boolean(busy)} on="拆分中…" off="开始拆分" />
                 </Button>
               ) : (
                 <Button asChild variant="outline" size="sm" className="nodrag">
@@ -3355,6 +3375,7 @@ function MediaPreview({
     <img
       src={src}
       alt={title}
+      data-canvas-media
       loading="lazy"
       decoding="async"
       draggable={false}
@@ -3368,7 +3389,7 @@ function MediaPreview({
   if (kind === 'video') {
     const mediaLabel = title || '视频';
     return (
-      <div className={cn('relative size-full', compact && 'max-h-48')}>
+      <div data-canvas-media className={cn('relative size-full', compact && 'max-h-48')}>
         <video
           ref={videoRef}
           src={resolvedSrc}
@@ -3410,9 +3431,11 @@ function MediaPreview({
             className="grid size-7 shrink-0 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             onClick={toggleVideoPlayback}
           >
-            {videoPlaying
-              ? <Pause className="size-4" aria-hidden="true" />
-              : <Play className="size-4" aria-hidden="true" />}
+            <SwapIcon swapKey={videoPlaying}>
+              {videoPlaying
+                ? <Pause className="size-4" aria-hidden="true" />
+                : <Play className="size-4" aria-hidden="true" />}
+            </SwapIcon>
           </button>
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{formatMediaTime(videoCurrentTime)}</span>
           <input
@@ -3437,9 +3460,11 @@ function MediaPreview({
               className="grid size-7 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               onClick={toggleVideoMuted}
             >
-              {videoMuted || videoVolume === 0
-                ? <VolumeX className="size-4" aria-hidden="true" />
-                : <Volume2 className="size-4" aria-hidden="true" />}
+              <SwapIcon swapKey={videoMuted || videoVolume === 0}>
+                {videoMuted || videoVolume === 0
+                  ? <VolumeX className="size-4" aria-hidden="true" />
+                  : <Volume2 className="size-4" aria-hidden="true" />}
+              </SwapIcon>
             </button>
             <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 pb-1 opacity-0 transition-opacity group-focus-within/volume:pointer-events-auto group-focus-within/volume:opacity-100 group-hover/volume:pointer-events-auto group-hover/volume:opacity-100">
               <div className="grid h-24 w-7 place-items-center rounded-lg border border-border bg-glass py-2 backdrop-blur-glass">
@@ -3470,7 +3495,7 @@ function MediaPreview({
     );
   }
   return (
-    <div className="nodrag nowheel grid size-full place-items-center gap-3 p-4 text-xs text-muted-foreground">
+    <div data-canvas-media className="nodrag nowheel grid size-full place-items-center gap-3 p-4 text-xs text-muted-foreground">
       {!compact && <span className="flex items-center gap-2"><FileAudio className="size-5" aria-hidden="true" />音频素材</span>}
       <audio
         ref={mediaRef}

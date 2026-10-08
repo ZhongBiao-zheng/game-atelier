@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 export interface TeamShareDialogRequest {
   source: TeamShareSource;
@@ -237,7 +238,7 @@ export function TeamShareDialog({ request, onClose, onShared, onOpenSettings, pr
               取消
             </Button>
             <Button type="button" className="min-h-11" disabled={!canSubmit} onClick={() => void share(false)}>
-              {submitting ? '分享中…' : '分享'}
+              <SwapLabel active={Boolean(submitting)} on="分享中…" off="分享" />
             </Button>
           </DialogFooter>
         </DialogContent>
