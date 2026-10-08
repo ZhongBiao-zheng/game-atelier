@@ -13,6 +13,14 @@ export interface CanvasDocumentChangedPayload {
   revision?: number | null;
 }
 
+/** 画布内置 Agent：delta=流式文字片段，tool=开始调用某个工具（text 为工具名），session=会话已落盘、应重新读取。 */
+export interface CanvasAgentEventPayload {
+  project_id?: string;
+  session_id?: string;
+  kind?: 'delta' | 'tool' | 'session';
+  text?: string;
+}
+
 interface UseSSEOptions {
   /** false 时整个 hook 不建连（compact 模式 / 不需要推送的页面）。 */
   enabled?: boolean;
@@ -22,6 +30,8 @@ interface UseSSEOptions {
   onCanvasDocumentChanged?: (data: CanvasDocumentChangedPayload) => void;
   /** 团队库索引有条目增删改（watcher 重扫后按 diff 逐条广播）；只发回调，不触发全局刷新信号。 */
   onTeamLibraryChanged?: (event: TeamLibraryChangeEvent) => void;
+  /** 画布 Agent 会话的流式文字与落盘通知；只发回调，不触发全局刷新信号。 */
+  onCanvasAgent?: (data: CanvasAgentEventPayload) => void;
   /** 连接（含重连）成功时回调 —— 全量刷新兜底，覆盖断连期间丢失的事件。 */
   onConnect?: () => void;
 }
@@ -37,6 +47,8 @@ export function useSSE(options?: UseSSEOptions): number {
   onCanvasDocumentChangedRef.current = options?.onCanvasDocumentChanged;
   const onTeamLibraryChangedRef = useRef(options?.onTeamLibraryChanged);
   onTeamLibraryChangedRef.current = options?.onTeamLibraryChanged;
+  const onCanvasAgentRef = useRef(options?.onCanvasAgent);
+  onCanvasAgentRef.current = options?.onCanvasAgent;
   const onConnectRef = useRef(options?.onConnect);
   onConnectRef.current = options?.onConnect;
 
@@ -67,6 +79,9 @@ export function useSSE(options?: UseSSEOptions): number {
           }
           if (event === 'canvas-document-changed') {
             try { onCanvasDocumentChangedRef.current?.(JSON.parse(data) as CanvasDocumentChangedPayload); } catch { /* Malformed payload: the next save or reload resyncs. */ }
+          }
+          if (event === 'canvas-agent') {
+            try { onCanvasAgentRef.current?.(JSON.parse(data) as CanvasAgentEventPayload); } catch { /* Malformed payload: polling while running resyncs. */ }
           }
           if (event === 'team-library-changed') {
             try { onTeamLibraryChangedRef.current?.(JSON.parse(data) as TeamLibraryChangeEvent); } catch { /* Malformed payload: a missed reminder is harmless. */ }

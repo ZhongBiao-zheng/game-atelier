@@ -155,9 +155,10 @@ def test_turn_pauses_for_approval_then_continues_after_reject(isolated_data_root
         assert done.status == "idle", done.error
         assert calls[1][-1] == {"type": "function_call_output", "call_id": "call-1",
                                 "output": "用户拒绝了这个操作。"}
+        # 待确认的调用只在裁决后出现一次，带上结果。
         assert [(m.role, m.title) for m in done.messages] == [
-            ("user", None), ("tool", "run_generation"), ("tool", "run_generation"),
-            ("assistant", None)]
+            ("user", None), ("tool", "run_generation"), ("assistant", None)]
+        assert done.messages[1].text.startswith("已拒绝\n在节点 image-1")
         assert done.messages[0].references[0].node_id == imported["node_id"]
         assert done.messages[-1].text == "那先不生成，你想怎么改？"
         assert done.token_usage.input_tokens == 20

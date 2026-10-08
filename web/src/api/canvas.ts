@@ -2,8 +2,12 @@ import { request, requestJson } from './http';
 import { mediaUrl } from '@/api/connection';
 import type { Job } from '@/schema/jobs';
 import type {
+  CanvasAgentApprovalDecision,
+  CanvasAgentChatModelList,
   CanvasAgentSession,
   CanvasAgentSessionList,
+  CanvasAgentSessionUpdate,
+  CanvasAgentTurnCreate,
   CanvasConnection,
   CanvasDocument,
   CanvasMattingModelStatus,
@@ -94,6 +98,50 @@ export function deleteCanvasAgentSession(
     '删除画布 Agent 会话',
     { method: 'DELETE', headers: { 'If-Match': String(revision) } },
   ).then(() => undefined);
+}
+
+function agentSessionPath(projectId: string, sessionId: string): string {
+  return `/api/canvas/projects/${encodeURIComponent(projectId)}/agent/sessions/${encodeURIComponent(sessionId)}`;
+}
+
+function sendAgentJson<T>(path: string, label: string, body: unknown, method = 'POST'): Promise<T> {
+  return requestJson<T>(path, label, {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateCanvasAgentSession(
+  projectId: string,
+  sessionId: string,
+  update: CanvasAgentSessionUpdate,
+): Promise<CanvasAgentSession> {
+  return sendAgentJson(agentSessionPath(projectId, sessionId), '修改 Agent 会话设置', update, 'PATCH');
+}
+
+export function sendCanvasAgentMessage(
+  projectId: string,
+  sessionId: string,
+  turn: CanvasAgentTurnCreate,
+): Promise<CanvasAgentSession> {
+  return sendAgentJson(`${agentSessionPath(projectId, sessionId)}/messages`, '发送消息', turn);
+}
+
+export function decideCanvasAgentApprovals(
+  projectId: string,
+  sessionId: string,
+  decisions: CanvasAgentApprovalDecision[],
+): Promise<CanvasAgentSession> {
+  return sendAgentJson(`${agentSessionPath(projectId, sessionId)}/approvals`, '确认 Agent 操作', { decisions });
+}
+
+export function cancelCanvasAgentTurn(projectId: string, sessionId: string): Promise<CanvasAgentSession> {
+  return sendAgentJson(`${agentSessionPath(projectId, sessionId)}/cancel`, '停止 Agent', {});
+}
+
+export function listCanvasAgentChatModels(): Promise<CanvasAgentChatModelList> {
+  return requestJson<CanvasAgentChatModelList>('/api/canvas/agent/models', '读取对话模型');
 }
 
 export async function exportCanvasProjects(projectIds: string[]): Promise<void> {

@@ -50,6 +50,7 @@ import {
   Trash2,
   Type,
   Upload,
+  Sparkles,
   WandSparkles,
   X,
 } from 'lucide-react';
@@ -139,6 +140,7 @@ import {
   type CreationAssetPanelHandle,
   type CreationAssetSaveRequest,
 } from '@/components/assets/CreationAssetPanel';
+import { CanvasAgentPanel } from '@/components/canvas/agent/CanvasAgentPanel';
 import { insertCreationAssetIntoCanvas } from '@/api/creationAssets';
 import { adoptTeamAsset, listRelatedTeamAssets } from '@/api/teamLibraries';
 import { TEAM_ASSET_DRAG_TYPE, readTeamAssetDrag } from '@/schema/teamLibrary';
@@ -466,6 +468,9 @@ function CanvasEditorInner({
   const [canvasUiPreferences, setCanvasUiPreferences] = useState<CanvasUiPreferences>(DEFAULT_CANVAS_UI_PREFERENCES);
   const [canvasUiPreferencesError, setCanvasUiPreferencesError] = useState<string | null>(null);
   const [libraryMode, setLibraryMode] = useState<CanvasLibraryMode | null>(null);
+  // Agent 面板与资产面板占同一块位置：任一处打开资产面板都把 Agent 收起。
+  const [agentOpen, setAgentOpen] = useState(false);
+  useEffect(() => { if (libraryMode) setAgentOpen(false); }, [libraryMode]);
   // 提示条的「看看」等延后回调会在旧渲染的闭包里跑，判断面板开没开要读当前值。
   const libraryModeRef = useRef(libraryMode);
   libraryModeRef.current = libraryMode;
@@ -4592,8 +4597,15 @@ function CanvasEditorInner({
           settings: { ...current.settings, show_minimap: !current.settings.show_minimap },
         }), true)}
       ><MapPinned /></button>
-      <ToolButton buttonRef={assetLibraryTriggerRef} label="媒体资产" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('assets'); else if (libraryMode === 'assets') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('assets')); }}><Library /></ToolButton>
-      <ToolButton buttonRef={promptLibraryTriggerRef} label="提示词资产" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('prompts'); else if (libraryMode === 'prompts') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('prompts')); }}><WandSparkles /></ToolButton>
+      <ToolButton buttonRef={assetLibraryTriggerRef} label="媒体资产" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setAgentOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('assets'); else if (libraryMode === 'assets') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('assets')); }}><Library /></ToolButton>
+      <ToolButton buttonRef={promptLibraryTriggerRef} label="提示词资产" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setAgentOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('prompts'); else if (libraryMode === 'prompts') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('prompts')); }}><WandSparkles /></ToolButton>
+      <ToolButton label="Agent" active={agentOpen} expanded={agentOpen} controlsId="canvas-agent-panel" popup={false} onClick={() => {
+        setAddOpen(false);
+        setCreateMenu(null);
+        if (agentOpen) { setAgentOpen(false); return; }
+        if (!libraryMode) { setAgentOpen(true); return; }
+        creationAssetPanelRef.current?.requestTransition(() => { closeLibrary(); setAgentOpen(true); });
+      }}><Sparkles /></ToolButton>
       <ToolButton
         buttonRef={generationPreferencesTriggerRef}
         label="生成偏好"
@@ -5110,6 +5122,19 @@ function CanvasEditorInner({
             onReproduce={asset => void reproduceGenerationAsset(asset)}
             teamRelatedSha256={teamRelatedSha256}
             initialTeamLibraryId={teamLibraryId}
+          />
+        )}
+
+        {agentOpen && !libraryMode && (
+          <CanvasAgentPanel
+            key={projectId}
+            className="canvas-library-panel"
+            projectId={projectId}
+            selectedNodes={document.nodes
+              .filter(node => selectedNodeIds.has(node.id))
+              .map(node => ({ id: node.id, title: node.title, type: node.type }))}
+            onClose={() => setAgentOpen(false)}
+            onUpload={() => uploadRef.current?.click()}
           />
         )}
 

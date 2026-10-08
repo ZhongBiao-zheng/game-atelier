@@ -1,7 +1,7 @@
 """画布内置 Agent 的对话入口：发消息、裁决待确认操作、停止、改会话设置、列对话模型。
 
 会话的增删查沿用 routes.py 里的 /agent/sessions 端点。一轮对话在服务端事件循环里作为任务运行，
-进度经 SSE `canvas_agent` 事件推给页面（kind=delta 是流式文字，kind=session 表示会话已落盘）。
+进度经 SSE `canvas-agent` 事件推给页面（kind=delta 是流式文字，kind=session 表示会话已落盘）。
 """
 from __future__ import annotations
 

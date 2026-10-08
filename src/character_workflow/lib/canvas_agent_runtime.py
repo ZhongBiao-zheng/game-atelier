@@ -350,7 +350,12 @@ def summarize_call(tool: str, arguments: dict) -> str:
 
 
 def display_messages(items: list[dict], turn_id: str) -> list[CanvasAgentMessageCreate]:
-    """Model-side items (this run's new ones) → messages the panel shows."""
+    """Model-side items (this run's new ones) → messages the panel shows.
+
+    待确认的调用（还没有 output）不在这里出现：面板用确认卡展示它，裁决后由 resolve_approvals
+    补一条带结果的工具消息，同一个操作只显示一次。"""
+    outputs = {item.get("call_id"): str(item.get("output", "")) for item in items
+               if item.get("type") == "function_call_output"}
     messages: list[CanvasAgentMessageCreate] = []
     reasoning: list[str] = []
     for item in items:
@@ -366,11 +371,14 @@ def display_messages(items: list[dict], turn_id: str) -> list[CanvasAgentMessage
                     reasoning_summary=summary or None,
                 ))
             reasoning = []
-        elif kind == "function_call":
+        elif kind == "function_call" and item.get("call_id") in outputs:
             name = str(item.get("name"))
+            output = outputs[item.get("call_id")]
+            text = summarize_call(name, _arguments(item.get("arguments")))
+            if is_tool_error(output):
+                text = f"{text}\n{output[:300]}"
             messages.append(CanvasAgentMessageCreate(
-                role="tool", turn_id=turn_id, title=name,
-                text=redact(summarize_call(name, _arguments(item.get("arguments")))),
+                role="tool", turn_id=turn_id, title=name, text=redact(text),
             ))
     return messages
 
@@ -428,9 +436,15 @@ class DeltaBuffer:
         if time.monotonic() - self.last >= DELTA_FLUSH_SECONDS:
             self.flush()
 
+    def tool(self, name: str) -> None:
+        """模型开始调用工具：先把已有文字推出去，再告诉面板正在做哪一步。"""
+        self.flush()
+        self.notify("canvas-agent", {"project_id": self.project_id, "session_id": self.session_id,
+                                     "kind": "tool", "text": name})
+
     def flush(self) -> None:
         if self.pending:
-            self.notify("canvas_agent", {"project_id": self.project_id,
+            self.notify("canvas-agent", {"project_id": self.project_id,
                                          "session_id": self.session_id,
                                          "kind": "delta", "text": self.pending})
             self.pending = ""
@@ -448,6 +462,9 @@ async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: D
         if getattr(event, "type", "") == "raw_response_event" \
                 and getattr(data, "type", "") == "response.output_text.delta":
             buffer.add(data.delta)
+        elif getattr(event, "type", "") == "run_item_stream_event" \
+                and getattr(event, "name", "") == "tool_called":
+            buffer.tool(str(getattr(getattr(event.item, "raw_item", None), "name", "")))
     buffer.flush()
     return result, context
 
@@ -457,7 +474,7 @@ run_model: Callable[..., Awaitable[Any]] = _run_model
 
 
 def notify_session(notify: Notify, project_id: str, session_id: str) -> None:
-    notify("canvas_agent", {"project_id": project_id, "session_id": session_id,
+    notify("canvas-agent", {"project_id": project_id, "session_id": session_id,
                             "kind": "session"})
 
 
@@ -568,7 +585,7 @@ def resolve_approvals(project_id: str, session_id: str,
         outputs.append({"type": "function_call_output", "call_id": approval.call_id,
                         "output": text})
         results.append(CanvasAgentMessageCreate(role="tool", title=approval.tool,
-                                                text=redact(label)))
+                                                text=redact(f"{label}\n{approval.summary}")))
 
     def update(current: CanvasAgentSession, now: str) -> dict:
         if current.status != "awaiting_approval":

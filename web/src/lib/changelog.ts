@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.76.0',
+    date: '2026-10-08',
+    headline: '画布内置 Agent',
+    changes: [
+      { kind: 'feat', text: '画布右下工具栏新增 Agent：用对话让它读画布、建节点、写生成配置、发起出图出视频，对话模型可从已配置的 Key 里搜索选择。' },
+      { kind: 'feat', text: '选中的画布节点自动带进消息，图片会发给模型看；对话按画布项目保存，可新建、切换。' },
+      { kind: 'feat', text: '「审查」模式每一步先确认；「Auto」模式新增内容直接执行，改动或删除已有内容仍要确认。' },
+    ],
+  },
+  {
     version: '5.75.1',
     date: '2026-10-08',
     headline: '画布界面恢复原尺寸',
