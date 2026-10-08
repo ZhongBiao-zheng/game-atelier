@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.74.0',
+    date: '2026-10-08',
+    headline: '国内更新走 CNB 镜像',
+    changes: [
+      { kind: 'feat', text: '一键启动和一键修复先从国内镜像 cnb.cool 拉更新，连不上再走 GitHub；新版提醒也改读国内镜像。' },
+      { kind: 'feat', text: '首次安装需要下载 Python 时改用国内镜像。' },
+    ],
+  },
+  {
     version: '5.73.2',
     date: '2026-10-08',
     headline: 'Tuzi 的 Nano Banana 2.1 可选清晰度',

@@ -4,6 +4,10 @@ setlocal enabledelayedexpansion
 set "PYTHONUTF8=1"
 set "GIT_TERMINAL_PROMPT=0"
 set "UV_HTTP_TIMEOUT=20"
+rem uv 找不到本机 Python 3.11+ 时要下载一份；默认源是 GitHub，国内基本下不动。
+if not defined UV_PYTHON_INSTALL_MIRROR set "UV_PYTHON_INSTALL_MIRROR=https://registry.npmmirror.com/-/binary/python-build-standalone"
+rem main 的国内镜像（GitHub Action 每次推 main 后同步）。先拉它，失败再走 GitHub。
+set "CNB_URL=https://cnb.cool/ZhongBiao-zheng/game-atelier.git"
 cd /d "%~dp0"
 title Game Atelier
 
@@ -19,10 +23,8 @@ set "NOWVER=?"
 for /f "delims=" %%b in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "CURBR=%%b"
 for /f "delims=" %%v in ('git rev-parse --short HEAD 2^>nul') do set "NOWVER=%%v"
 echo 当前 !CURBR! @ !NOWVER!
-curl.exe -s -m 6 -o nul https://github.com >nul 2>nul
-if errorlevel 1 (set "MSG=连不上 GitHub，跳过更新" & call :warn & goto :update_done)
-git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 fetch --quiet 2>nul
-if errorlevel 1 (set "MSG=检查更新失败，跳过更新" & call :warn & goto :update_done)
+call :fetch_updates
+if errorlevel 1 (set "MSG=连不上更新源，跳过更新" & call :warn & goto :update_done)
 git restore --source=HEAD --staged --worktree -- web/dist 2>nul
 if errorlevel 1 git checkout HEAD -- web/dist 2>nul
 git clean -qfd -- web/dist 2>nul
@@ -37,7 +39,7 @@ echo 有新版本（落后 !BEHIND! 个提交）
 set "UPD=1"
 set /p "UPD=[1] 更新并启动  [2] 直接启动: "
 if "!UPD!"=="2" goto :update_done
-git pull --ff-only
+git merge --ff-only --quiet "@{u}"
 if errorlevel 1 goto :pull_failed
 echo 已更新，重新启动...
 start "" cmd /c ""%~f0" --skip-update" & exit /b 0
@@ -60,7 +62,7 @@ set /p "SW=[1] 切到 main 并更新  [2] 直接启动: "
 if "!SW!"=="2" goto :update_done
 git switch main
 if errorlevel 1 (set "MSG=切换失败，请手动 git switch main" & call :err & goto :update_done)
-git pull --ff-only
+git merge --ff-only --quiet origin/main
 if errorlevel 1 goto :pull_failed
 echo 已切到 main 并更新，重新启动...
 start "" cmd /c ""%~f0" --skip-update" & exit /b 0
@@ -129,6 +131,19 @@ echo.
 echo 已启动 http://127.0.0.1:5174/ ，本窗口可关闭。
 timeout /t 2 >nul
 exit /b 0
+
+rem 镜像只有 main：拉到 origin/main，后续按上游 fast-forward 合并，与从 GitHub 拉取等价。
+rem 镜像比本地 origin/main 旧（同步还没跑完）时这一步被拒，回落 GitHub。
+:fetch_updates
+curl.exe -s -m 6 -o nul https://cnb.cool >nul 2>nul
+if errorlevel 1 goto :fetch_github
+git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 fetch --quiet "%CNB_URL%" main:refs/remotes/origin/main 2>nul
+if not errorlevel 1 exit /b 0
+:fetch_github
+curl.exe -s -m 6 -o nul https://github.com >nul 2>nul
+if errorlevel 1 exit /b 1
+git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 fetch --quiet 2>nul
+exit /b
 
 :warn
 powershell -NoProfile -Command "Write-Host ('[警告] ' + $env:MSG) -ForegroundColor Yellow"
