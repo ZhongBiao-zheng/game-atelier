@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.72.1',
+    date: '2026-10-08',
+    headline: '公告弹窗图片留边',
+    changes: [
+      { kind: 'fix', text: '模型公告的宣传图与弹窗边框之间留出间距，圆角与外框对齐。' },
+    ],
+  },
+  {
     version: '5.72.0',
     date: '2026-10-08',
     headline: '新模型公告与一键添加',

@@ -122,20 +122,23 @@ export function AnnouncementDialog({ announcement, onClose }: { announcement: An
       <DialogContent hideClose className="max-w-md gap-0 overflow-hidden p-0">
         <DialogClose
           aria-label="关闭"
-          className="absolute right-3 top-3 z-10 grid size-8 place-items-center rounded-full bg-scrim text-white backdrop-blur-glass transition-colors hover:bg-scrim/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="absolute right-5 top-5 z-10 grid size-8 place-items-center rounded-full bg-scrim text-white backdrop-blur-glass transition-colors hover:bg-scrim/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           <X className="size-4" aria-hidden="true" />
         </DialogClose>
 
         {(step.kind === 'intro' || step.kind === 'scanning') && (
           <>
+            {/* 同心圆角：图片内缩 10px，圆角 = 外框 20px − 10px */}
             {!imageFailed && (
-              <img
-                src={announcement.imageUrl}
-                alt=""
-                className="aspect-video w-full bg-secondary object-cover"
-                onError={() => setImageFailed(true)}
-              />
+              <div className="p-2.5 pb-0">
+                <img
+                  src={announcement.imageUrl}
+                  alt=""
+                  className="aspect-video w-full rounded-md bg-secondary object-cover"
+                  onError={() => setImageFailed(true)}
+                />
+              </div>
             )}
             <div className="space-y-3 p-5">
               <DialogTitle className="leading-snug">{announcement.title}</DialogTitle>
