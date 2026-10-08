@@ -30,6 +30,9 @@ type Step =
 
 const selectionKey = (alias: string, modelId: string) => `${alias}\u0000${modelId}`;
 
+/** 没开通的供应商不列出；拉取失败的保留，否则分不清「没开通」和「查不了」。 */
+const visibleScans = (scans: KeyScan[]) => scans.filter(item => item.status === 'error' || item.candidates.length > 0);
+
 /** 启动时弹出最新一条未读公告；关掉即记为已读。更新日志面板可通过事件再次打开。 */
 export function AnnouncementHost() {
   const [announcement, setAnnouncement] = useState<Announcement | null>(() => latestUnseenAnnouncement());
@@ -166,13 +169,13 @@ export function AnnouncementDialog({ announcement, onClose }: { announcement: An
             <DialogTitle>添加到供应商</DialogTitle>
             <DialogDescription className="sr-only">勾选要加入各供应商模型列表的模型</DialogDescription>
             <div className="max-h-80 space-y-4 overflow-y-auto">
-              {step.scans.map(item => (
+              {!visibleScans(step.scans).length && <p className="text-sm text-muted-foreground">暂无供应商开通</p>}
+              {visibleScans(step.scans).map(item => (
                 <section key={item.key.alias} className="space-y-1.5">
                   <h3 className="text-xs text-muted-foreground">
                     {item.key.alias} · {providerLabel(item.key.provider, item.key.alias)}
                   </h3>
                   {item.status === 'error' && <p className="text-xs text-destructive" title={item.message}>拉取模型列表失败</p>}
-                  {item.status === 'ok' && !item.candidates.length && <p className="text-xs text-muted-foreground/70">未开通</p>}
                   {item.status === 'ok' && item.candidates.map(candidate => {
                     const key = selectionKey(item.key.alias, candidate.model.id);
                     return (
@@ -185,9 +188,6 @@ export function AnnouncementDialog({ announcement, onClose }: { announcement: An
                           onChange={() => toggle(key)}
                         />
                         <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">{candidate.model.id}</span>
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {candidate.added ? '已添加' : candidate.kind === 'exact' ? '同名' : '相似'}
-                        </span>
                       </label>
                     );
                   })}

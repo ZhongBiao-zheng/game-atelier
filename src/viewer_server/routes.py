@@ -1677,6 +1677,10 @@ def _model_list_url(base_url: str, provider: str) -> str:
     """OpenRouter 默认只返回文本输出；显式取全量，避免静默漏掉其他模态。"""
     parts = urlsplit(base_url)
     path = parts.path.rstrip("/")
+    # 只填了根域名（https://api.openai-hk.com）时与出图同规则补 /v1（见 openai_image._api_root）；
+    # 否则拉到 /models，OpenAI-HK 回 404、Tuzi 回网站首页 HTML。
+    if not path:
+        path = "/v1"
     if not path.endswith("/models"):
         path += "/models"
     host = (parts.hostname or "").lower()

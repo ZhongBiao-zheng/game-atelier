@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.73.1',
+    date: '2026-10-08',
+    headline: '快速添加修复',
+    changes: [
+      { kind: 'fix', text: '只填了根域名的供应商（如 OpenAI-HK、Tuzi）拉取模型列表失败。' },
+      { kind: 'fix', text: '快速添加只列出已开通的供应商，去掉匹配备注。' },
+      { kind: 'feat', text: 'OpenRouter 的 Nano Banana 2.1 可选 1K / 2K / 4K 与 14 种比例。' },
+    ],
+  },
+  {
     version: '5.73.0',
     date: '2026-10-08',
     headline: '首条模型公告：Nano Banana 2.1',
