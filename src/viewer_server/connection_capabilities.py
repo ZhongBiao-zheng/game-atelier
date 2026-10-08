@@ -91,6 +91,11 @@ GET /api/canvas/projects/{project_id}/agent/sessions
 POST /api/canvas/projects/{project_id}/agent/sessions
 GET /api/canvas/projects/{project_id}/agent/sessions/{session_id}
 DELETE /api/canvas/projects/{project_id}/agent/sessions/{session_id}
+PATCH /api/canvas/projects/{project_id}/agent/sessions/{session_id}
+POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/messages
+POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/approvals
+POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/cancel
+GET /api/canvas/agent/models
 GET /api/creation-assets
 POST /api/creation-assets/staleness
 POST /api/creation-assets/generation/from-job

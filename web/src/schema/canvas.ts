@@ -376,6 +376,18 @@ export interface CanvasAgentMessage {
   created_at: string;
 }
 
+export type CanvasAgentStatus = 'idle' | 'running' | 'awaiting_approval' | 'interrupted' | 'failed';
+export type CanvasAgentPermissionMode = 'review' | 'auto';
+export type CanvasAgentEffort = 'low' | 'medium' | 'high' | 'xhigh';
+
+/** 一次待确认的工具调用；会话停在 awaiting_approval，直到用户逐条执行或拒绝。 */
+export interface CanvasAgentApproval {
+  call_id: string;
+  tool: string;
+  arguments: string;
+  summary: string;
+}
+
 export interface CanvasAgentSession {
   schema_version: 1;
   revision: number;
@@ -383,20 +395,57 @@ export interface CanvasAgentSession {
   session_id: string;
   project_id: string;
   title: string;
-  status: 'idle' | 'running' | 'interrupted' | 'failed';
+  status: CanvasAgentStatus;
   model: string | null;
-  effort: 'low' | 'medium' | 'high' | 'xhigh' | null;
+  model_alias: string | null;
+  effort: CanvasAgentEffort | null;
+  permission_mode: CanvasAgentPermissionMode;
   token_usage: CanvasAgentTokenUsage;
   messages: CanvasAgentMessage[];
+  /** 发给模型的上下文（Agents SDK input items），页面不解析。 */
+  history: Record<string, unknown>[];
+  pending_approvals: CanvasAgentApproval[];
+  created_node_ids: string[];
+  error: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface CanvasAgentSessionUpdate {
+  title?: string;
+  model?: string;
+  model_alias?: string;
+  effort?: CanvasAgentEffort | 'off';
+  permission_mode?: CanvasAgentPermissionMode;
+}
+
+export interface CanvasAgentTurnCreate {
+  text: string;
+  node_ids?: string[];
+}
+
+export interface CanvasAgentApprovalDecision {
+  call_id: string;
+  approve: boolean;
+}
+
+export interface CanvasAgentChatModel {
+  alias: string;
+  model: string;
+  name: string;
+  reasoning: boolean | null;
+}
+
+export interface CanvasAgentChatModelList {
+  models: CanvasAgentChatModel[];
+  errors: { alias: string; message: string }[];
 }
 
 export interface CanvasAgentSessionSummary {
   session_id: string;
   project_id: string;
   title: string;
-  status: 'idle' | 'running' | 'interrupted' | 'failed';
+  status: CanvasAgentStatus;
   revision: number;
   sequence: number;
   message_count: number;

@@ -1335,6 +1335,14 @@ _CANVAS_AGENT_PRIVATE_TEXT = re.compile(
 )
 
 
+_CANVAS_AGENT_DATA_URL = re.compile(r"data:[a-z0-9.+-]+/[a-z0-9.+-]+;", re.IGNORECASE)
+
+
+def redact_canvas_agent_private_text(value: str) -> str:
+    """模型输出不受我们控制：落盘前把会被拒收的片段替换掉，而不是让整轮对话写盘失败。"""
+    return _CANVAS_AGENT_PRIVATE_TEXT.sub(" [已隐藏]", value)
+
+
 def _reject_canvas_agent_private_text(*values: str | None) -> None:
     if any(
         value is not None and _CANVAS_AGENT_PRIVATE_TEXT.search(value)
@@ -1400,6 +1408,19 @@ class CanvasAgentMessage(CanvasAgentMessageCreate):
     created_at: str
 
 
+CanvasAgentStatus = Literal["idle", "running", "awaiting_approval", "interrupted", "failed"]
+CanvasAgentPermissionMode = Literal["review", "auto"]
+
+
+class CanvasAgentApproval(BaseModel):
+    """一次待确认的工具调用；会话停在 awaiting_approval，直到用户逐条执行或拒绝。"""
+    model_config = ConfigDict(extra="forbid")
+    call_id: str = Field(min_length=1, max_length=200)
+    tool: str = Field(min_length=1, max_length=80)
+    arguments: str = Field(max_length=200_000)
+    summary: str = Field(max_length=4000)
+
+
 class CanvasAgentSession(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal[1] = 1
@@ -1408,17 +1429,28 @@ class CanvasAgentSession(BaseModel):
     session_id: CanvasAgentSessionId
     project_id: str = Field(pattern=r"^canvas-[a-z0-9-]{8,64}$")
     title: CanvasProjectName
-    status: Literal["idle", "running", "interrupted", "failed"] = "idle"
+    status: CanvasAgentStatus = "idle"
     model: str | None = Field(default=None, min_length=1, max_length=160)
+    # 对话模型所在的 Key 别名；同名模型可能挂在多个聚合商下，必须和模型成对保存。
+    model_alias: str | None = Field(default=None, min_length=1, max_length=120)
     effort: Literal["low", "medium", "high", "xhigh"] | None = None
+    permission_mode: CanvasAgentPermissionMode = "review"
     token_usage: CanvasAgentTokenUsage = Field(default_factory=CanvasAgentTokenUsage)
     messages: list[CanvasAgentMessage] = Field(default_factory=list, max_length=20_000)
+    # 发给模型的上下文（OpenAI Agents SDK 的 input items）；图片只存 atelier-media 引用。
+    history: list[dict[str, Any]] = Field(default_factory=list, max_length=20_000)
+    pending_approvals: list[CanvasAgentApproval] = Field(default_factory=list, max_length=50)
+    # 本会话新建的节点：Auto 模式下改它们算「新增」，不打断用户。
+    created_node_ids: list[str] = Field(default_factory=list, max_length=5000)
+    error: str | None = Field(default=None, max_length=4000)
     created_at: str
     updated_at: str
 
     @model_validator(mode="after")
     def validate_message_sequence(self) -> "CanvasAgentSession":
-        _reject_canvas_agent_private_text(self.title, self.model)
+        _reject_canvas_agent_private_text(self.title, self.model, self.model_alias)
+        if _CANVAS_AGENT_DATA_URL.search(json.dumps(self.history, ensure_ascii=False)):
+            raise ValueError("canvas agent history cannot persist data URLs")
         message_ids = [message.message_id for message in self.messages]
         sequences = [message.sequence for message in self.messages]
         if len(message_ids) != len(set(message_ids)) or len(sequences) != len(set(sequences)):
@@ -1435,12 +1467,46 @@ class CanvasAgentSessionCreate(BaseModel):
     title: CanvasProjectName = "新对话"
 
 
+class CanvasAgentSessionUpdate(BaseModel):
+    """面板上的会话设置；未给的字段不变。model 与 model_alias 必须一起给。"""
+    model_config = ConfigDict(extra="forbid")
+    title: CanvasProjectName | None = None
+    model: str | None = Field(default=None, min_length=1, max_length=160)
+    model_alias: str | None = Field(default=None, min_length=1, max_length=120)
+    effort: Literal["low", "medium", "high", "xhigh", "off"] | None = None
+    permission_mode: CanvasAgentPermissionMode | None = None
+
+    @model_validator(mode="after")
+    def model_pairs_with_alias(self) -> "CanvasAgentSessionUpdate":
+        if (self.model is None) != (self.model_alias is None):
+            raise ValueError("model and model_alias must be set together")
+        return self
+
+
+class CanvasAgentTurnCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=40_000)
+    # 用户从画布带进对话的节点；图片节点会把当前版本作为图片发给模型。
+    node_ids: list[str] = Field(default_factory=list, max_length=16)
+
+
+class CanvasAgentApprovalDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    call_id: str = Field(min_length=1, max_length=200)
+    approve: bool
+
+
+class CanvasAgentApprovalsSubmit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decisions: list[CanvasAgentApprovalDecision] = Field(min_length=1, max_length=50)
+
+
 class CanvasAgentSessionSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session_id: CanvasAgentSessionId
     project_id: str = Field(pattern=r"^canvas-[a-z0-9-]{8,64}$")
     title: CanvasProjectName
-    status: Literal["idle", "running", "interrupted", "failed"]
+    status: CanvasAgentStatus
     revision: int = Field(ge=0)
     sequence: int = Field(ge=0)
     message_count: int = Field(ge=0)

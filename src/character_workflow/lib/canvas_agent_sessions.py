@@ -11,6 +11,7 @@ import re
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from pydantic import ValidationError
 
@@ -180,6 +181,56 @@ def append_canvas_agent_message(
             })
             # model_copy does not revalidate nested invariants; validate before writing.
             updated = CanvasAgentSession.model_validate(updated.model_dump(mode="python"))
+            atomic_write_json(
+                _session_path(project_id, session_id),
+                updated.model_dump(mode="json"),
+            )
+        return updated
+
+
+def with_appended_messages(
+    session: CanvasAgentSession,
+    payloads: list[CanvasAgentMessageCreate],
+    timestamp: str,
+) -> dict:
+    """Return the `messages` / `sequence` update that appends payloads in order."""
+    messages = list(session.messages)
+    sequence = session.sequence
+    for payload in payloads:
+        sequence += 1
+        messages.append(CanvasAgentMessage(
+            **payload.model_dump(mode="python"),
+            message_id=f"message-{secrets.token_hex(8)}",
+            sequence=sequence,
+            created_at=timestamp,
+        ))
+    return {"messages": messages, "sequence": sequence}
+
+
+def mutate_canvas_agent_session(
+    project_id: str,
+    session_id: str,
+    update: Callable[[CanvasAgentSession, str], dict],
+    expected_revision: int | None = None,
+) -> CanvasAgentSession:
+    """Locked read → update(session, now) field dict → validate → write.
+
+    The runtime passes no expected_revision: it is the session's only writer while a turn runs,
+    and the routes refuse settings changes during that time."""
+    _validate_session_id(session_id)
+    timestamp = _now()
+    with file_lock(canvas_agent_sessions_lock_path(project_id)):
+        with file_lock(_session_lock_path(project_id, session_id)):
+            current = _read_session_unlocked(project_id, session_id)
+            if expected_revision is not None and current.revision != expected_revision:
+                raise RuntimeError(f"revision_conflict:{current.revision}")
+            fields = update(current, timestamp)
+            updated = CanvasAgentSession.model_validate({
+                **current.model_dump(mode="python"),
+                **fields,
+                "revision": current.revision + 1,
+                "updated_at": timestamp,
+            })
             atomic_write_json(
                 _session_path(project_id, session_id),
                 updated.model_dump(mode="json"),
