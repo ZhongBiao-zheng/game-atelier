@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.71.1',
+    date: '2026-10-08',
+    headline: '画布节点上的按钮可以放心连点',
+    changes: [
+      { kind: 'fix', text: '快速连点节点上的按钮（隐藏、下载等）时，不再误触发双击打开预览。' },
+    ],
+  },
+  {
     version: '5.71.0',
     date: '2026-10-08',
     headline: '按钮细节动效：按下回弹、图标换态、选中滑块',

@@ -763,6 +763,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
         }}
         onDoubleClick={event => {
           event.stopPropagation();
+          if (isControlDoubleClick(event)) return;
           if (node.type === 'text') {
             if (nodeRunState.status === 'loading') return;
             beginTextEditing();
@@ -1263,6 +1264,7 @@ function MediaCandidateCard({
       onPointerDown={event => event.stopPropagation()}
       onDoubleClick={event => {
         event.stopPropagation();
+        if (isControlDoubleClick(event)) return;
         if (version) context.previewContent(version.version_id, `${node.title} · 候选 ${number}`, node.id);
       }}
     >
@@ -1579,6 +1581,13 @@ function CanvasNodeToolbar({
       )}
     </>
   );
+}
+
+/** 节点上的按钮常被快速连点（连续切换显示 / 隐藏、连点下载），两次点击会凑成一次 dblclick；
+ *  落在按钮或链接上的双击不算「双击节点」，不打开预览 / 进入编辑。 */
+function isControlDoubleClick(event: React.MouseEvent<HTMLElement>) {
+  const control = event.target instanceof Element ? event.target.closest('button, a[href]') : null;
+  return Boolean(control && event.currentTarget.contains(control));
 }
 
 function isCanvasContentNode(node: CanvasNode): node is CanvasContentNode {
