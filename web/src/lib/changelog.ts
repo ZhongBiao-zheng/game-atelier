@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.75.1',
+    date: '2026-10-08',
+    headline: '画布界面恢复原尺寸',
+    changes: [
+      { kind: 'fix', text: '画布上的工具条、菜单、生成面板恢复 100% 大小，不再整体缩到 75%。' },
+    ],
+  },
+  {
     version: '5.75.0',
     date: '2026-10-08',
     headline: '一键启动自动更新',

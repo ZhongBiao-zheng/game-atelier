@@ -949,7 +949,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
   );
 }
 
-export const CANVAS_GENERATION_PANEL_WIDTH = 456;
+export const CANVAS_GENERATION_PANEL_WIDTH = 608;
 const CANVAS_GENERATION_PANEL_GAP = 16;
 
 /** 只用到矩形的这几个数，写成最小接口好让放置逻辑纯函数化、能单测。 */
