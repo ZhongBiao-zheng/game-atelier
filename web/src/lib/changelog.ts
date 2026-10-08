@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.73.0',
+    date: '2026-10-08',
+    headline: '首条模型公告：Nano Banana 2.1',
+    changes: [
+      { kind: 'feat', text: '新增 Nano Banana 2.1 公告，可一键加入已开通该模型的供应商。' },
+      { kind: 'fix', text: '快速添加不再把上一代型号（如 Nano Banana 2）列为相似项。' },
+    ],
+  },
+  {
     version: '5.72.1',
     date: '2026-10-08',
     headline: '公告弹窗图片留边',

@@ -23,7 +23,17 @@ export interface Announcement {
   models: AnnouncedModel[];
 }
 
-export const ANNOUNCEMENTS: Announcement[] = [];
+export const ANNOUNCEMENTS: Announcement[] = [
+  {
+    id: '2026-10-nano-banana-2-1',
+    date: '2026-10-08',
+    title: 'Nano Banana 2.1 上线',
+    summary: 'Google 最新的 Flash 档图像模型：画面质量、文字排版和多轮编辑的一致性全面提升，最多 14 张参考图，支持 1K / 2K / 4K，官方 API 单价约为 Nano Banana 2 的一半。',
+    // Google 未为 2.1 单独出宣传图，用 DeepMind Gemini Image 官方页主图。
+    imageUrl: 'https://lh3.googleusercontent.com/IQrKmeotvku7oU92ImkQ4h74TbS7A695HU4Zq633YsuNW0hvjZlndcmzyhh5-CqxFntzW6K9J1pgaTUayRTYgK93laVGdPBp2uDAdJASSm4CZprKE3Q=w1440-h810-n-nu',
+    models: [{ name: 'Nano Banana 2.1', ids: ['gemini-nano-banana-2.1', 'nano-banana-2.1'] }],
+  },
+];
 
 export const OPEN_ANNOUNCEMENT_EVENT = 'atelier:open-announcement';
 export const KEYS_CHANGED_EVENT = 'atelier:keys-changed';
@@ -76,16 +86,15 @@ function compact(id: string) {
   return lastSegment(id).replace(/[^a-z0-9]/g, '');
 }
 
-/** 同名：忽略大小写，聚合商的 `厂商/模型` 前缀也算同名。
- *  相似：去掉符号后一方包含另一方（日期后缀、-preview 之类），较短一方至少 4 个字符。 */
+/** 同名：忽略大小写与符号，聚合商的 `厂商/模型` 前缀也算同名（`nano-banana-2-1` = `nano-banana-2.1`）。
+ *  相似：远端 ID 包含公告 ID（多了日期后缀、-preview 之类）。反过来不算：远端更短往往是旧版本，
+ *  `nano-banana-2` 是 `nano-banana-2.1` 的前缀，却是上一代模型。 */
 export function matchModel(remoteId: string, announcedId: string): ModelMatchKind | null {
-  const remote = remoteId.toLowerCase();
-  const target = announcedId.toLowerCase();
-  if (remote === target || lastSegment(remote) === lastSegment(target)) return 'exact';
-  const a = compact(remote);
-  const b = compact(target);
-  if (Math.min(a.length, b.length) < 4) return null;
-  return a.includes(b) || b.includes(a) ? 'similar' : null;
+  const remote = compact(remoteId);
+  const target = compact(announcedId);
+  if (target.length < 4) return remote === target ? 'exact' : null;
+  if (remote === target) return 'exact';
+  return remote.includes(target) ? 'similar' : null;
 }
 
 /** 在一个供应商实际开通的模型里找公告模型；同一个远端模型只归到匹配度最高的那条。 */
