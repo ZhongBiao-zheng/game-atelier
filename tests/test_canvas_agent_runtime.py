@@ -239,16 +239,26 @@ def test_model_scope_follows_creation_mode_and_preference(monkeypatch):
     image_only = runtime.ModelScope("image", frozenset({("a", "img-2")}))
     assert [row["model"] for row in image_only.models("image")] == ["img-2"]
     assert image_only.models("video") == []
-    # 偏好里没有视频模型：视频按自动处理。
+    # 关掉自动后只用勾选的：没勾视频模型就没有视频模型可用。
     mixed = runtime.ModelScope("all", frozenset({("a", "img-2")}))
-    assert [row["model"] for row in mixed.models("video")] == ["vid-1"]
+    assert mixed.models("video") == []
+    assert runtime.ModelScope("all", frozenset()).models("image") == []
     assert [row["model"] for row in runtime.ALL_MODELS.models("image")] == ["img-1", "img-2"]
+
+
+def test_scope_of_session_keeps_selection_while_auto():
+    session = SimpleNamespace(creation_mode="all", auto_models=True,
+                              preferred_models=[SimpleNamespace(alias="a", model="img-2")])
+    assert runtime.ModelScope.of(session).preferred is None
+    session.auto_models = False
+    assert runtime.ModelScope.of(session).preferred == frozenset({("a", "img-2")})
 
 
 @pytest.mark.parametrize(("scope", "mode", "model", "error"), [
     (runtime.ModelScope("image"), "video", "vid-1", "不能生成视频"),
     (runtime.ModelScope("all", frozenset({("a", "img-2")})), "image", "img-1", "不在可用范围"),
     (runtime.ModelScope("all", frozenset({("a", "img-2")})), "image", "img-2", None),
+    (runtime.ModelScope("all", frozenset()), "image", "img-1", "请用户先在模型偏好里选择"),
     (runtime.ModelScope("video"), "video", "vid-1", None),
 ])
 def test_generation_is_gated_by_scope(monkeypatch, scope, mode, model, error):

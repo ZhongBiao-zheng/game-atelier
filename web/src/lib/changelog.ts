@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.79.1',
+    date: '2026-10-08',
+    headline: '画布 Agent 修复菜单卡死与出图位置',
+    changes: [
+      { kind: 'fix', text: '点「全能创作」或对话列表时菜单被面板挡住、整页点不动的问题；Mac 双指横滑不再误触浏览器后退。' },
+      { kind: 'fix', text: 'Agent 新建的图片排在上一次出图的右侧，挡路就继续往右挪，不再和其他节点重叠。' },
+      { kind: 'feat', text: '模型偏好关掉「自动」后默认一个都不选，需要自己勾选；再打开自动也会记住上次勾的模型。' },
+    ],
+  },
+  {
     version: '5.79.0',
     date: '2026-10-08',
     headline: '画布 Agent 创作模式与模型偏好',

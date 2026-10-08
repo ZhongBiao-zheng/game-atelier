@@ -12,36 +12,31 @@ const KIND_LABELS: Record<Kind, string> = { image: '图片', video: '视频' };
 const sameRef = (a: CanvasAgentModelRef, b: CanvasAgentModelRef) => a.alias === b.alias && a.model === b.model;
 
 /**
- * 模型偏好：空列表 = 自动（Agent 从全部可用模型里挑）。某一类型一个都没选时，该类型按自动处理，
- * 与服务端 ModelScope.models 一致。
+ * 模型偏好：自动 = Agent 从全部可用模型里挑。关掉自动后只能用勾选的模型（与服务端 ModelScope.models
+ * 一致）：一个都没勾就不能生成。勾选结果在自动打开时也保留，再关掉时恢复。
  */
-export function CanvasAgentPreferencePicker({ models, mode, preferred, disabled, onChange }: {
+export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, disabled, onChange }: {
   models: CanvasAgentGenerationModel[] | null;
   mode: CanvasAgentCreationMode;
+  auto: boolean;
   preferred: CanvasAgentModelRef[];
   disabled?: boolean;
-  onChange: (preferred: CanvasAgentModelRef[]) => void;
+  onChange: (update: { auto_models?: boolean; preferred_models?: CanvasAgentModelRef[] }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Kind>('image');
   const anchorRef = useRef<HTMLButtonElement>(null);
   const kinds: Kind[] = mode === 'all' ? ['image', 'video'] : [mode];
   const activeKind = kinds.includes(tab) ? tab : kinds[0];
-  const auto = preferred.length === 0;
   const rows = (models ?? []).filter(item => item.kind === activeKind);
   const chosenOfKind = rows.filter(item => preferred.some(ref => sameRef(ref, item)));
-
-  function toggleAuto() {
-    // 关掉自动：先把全部模型勾上，再由用户去掉不想用的。
-    onChange(auto ? (models ?? []).map(({ alias, model }) => ({ alias, model })) : []);
-  }
+  const chosenCount = (models ?? []).filter(item => kinds.includes(item.kind)
+    && preferred.some(ref => sameRef(ref, item))).length;
 
   function toggle(item: CanvasAgentGenerationModel) {
     const ref = { alias: item.alias, model: item.model };
-    // 自动状态下点某个模型 = 这一类型只用它。
-    if (auto) { onChange([ref]); return; }
     const has = preferred.some(existing => sameRef(existing, ref));
-    onChange(has ? preferred.filter(existing => !sameRef(existing, ref)) : [...preferred, ref]);
+    onChange({ preferred_models: has ? preferred.filter(existing => !sameRef(existing, ref)) : [...preferred, ref] });
   }
 
   return (
@@ -49,7 +44,7 @@ export function CanvasAgentPreferencePicker({ models, mode, preferred, disabled,
       <button
         ref={anchorRef}
         type="button"
-        title={auto ? '模型偏好：自动' : `模型偏好：已选 ${preferred.length} 个`}
+        title={auto ? '模型偏好：自动' : `模型偏好：已选 ${chosenCount} 个`}
         aria-label="模型偏好"
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -78,7 +73,7 @@ export function CanvasAgentPreferencePicker({ models, mode, preferred, disabled,
               role="switch"
               aria-checked={auto}
               aria-label="自动选择模型"
-              onClick={toggleAuto}
+              onClick={() => onChange({ auto_models: !auto })}
               className={cn('relative h-5 w-9 rounded-full transition-colors', auto ? 'bg-primary' : 'bg-secondary')}
             >
               <span className={cn('absolute top-0.5 size-4 rounded-full bg-background transition-transform', auto ? 'translate-x-[1.125rem]' : 'translate-x-0.5')} />
@@ -110,8 +105,10 @@ export function CanvasAgentPreferencePicker({ models, mode, preferred, disabled,
                 type="button"
                 role="option"
                 aria-selected={checked}
+                aria-disabled={auto}
+                disabled={auto}
                 onClick={() => toggle(item)}
-                className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-secondary', auto && 'text-muted-foreground')}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-secondary disabled:opacity-50 disabled:hover:bg-transparent"
               >
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs" title={item.model}>{item.name}</span>
@@ -123,7 +120,7 @@ export function CanvasAgentPreferencePicker({ models, mode, preferred, disabled,
           })}
         </div>
         {!auto && chosenOfKind.length === 0 && rows.length > 0 && (
-          <p className="px-1 text-xs text-muted-foreground">{KIND_LABELS[activeKind]}未选，按自动处理</p>
+          <p className="px-1 text-xs text-muted-foreground">未选{KIND_LABELS[activeKind]}模型，Agent 无法生成{KIND_LABELS[activeKind]}</p>
         )}
       </ToolbarPopover>
     </>

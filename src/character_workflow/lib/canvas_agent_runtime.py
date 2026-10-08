@@ -19,6 +19,7 @@ from pathlib import PurePosixPath
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable
 
+from character_workflow.lib import canvas_agent_layout as layout
 from character_workflow.lib import canvas_agent_skills as skills
 from character_workflow.lib import canvas_agent_tools as tools
 from character_workflow.lib import canvas_agent_vision as vision
@@ -62,10 +63,12 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
   把参考节点连到它 → run_generation 发起生成。
 - 这几步放进同一次 apply_changes：add_surface 时自己指定 node_id（如 cat-1），同一批后面的
   set_draft / connect 用这个 node_id 引用它；节点标题不能当 id 用。
-- 新节点放在已有内容旁边，避免重叠：参考现有节点的 position 和 size，往右或往下留出间距。
+- 新节点的位置由系统自动排在上一次出图的右侧、不和其他节点重叠；add_* 的 position 填 {x: 0, y: 0}
+  即可，不用自己计算。
 - 发起生成后调用 wait_for_run 等结果，结果图会附在工具结果后面给你看。看完向用户简短汇报：
   画面是否符合要求、哪里需要改。只有用户明确让你「多试几次 / 迭代到满意」时才自己改提示词重跑。
 - 想看画布上已有的某张图，用 read_media，图片同样会附给你。
+- list_models 返回空列表时不要建生成节点，告诉用户在输入框的「模型偏好」里选择模型。
 - 生成是付费的。不要自动重试失败的生成；失败时告诉用户原因，由用户决定。
 - 用户拒绝某个操作时，不要换个方式再做同一件事，先问用户想怎么改。
 - 回复用中文，简短直接。"""
@@ -75,24 +78,27 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
 class ModelScope:
     """会话的创作模式与模型偏好：决定 Agent 能看到、能用哪些生成模型。"""
     creation_mode: str = "all"
-    preferred: frozenset[tuple[str, str]] = frozenset()
+    # None = 自动（全部可用）；否则只能用这些（空集 = 不能生成）。
+    preferred: frozenset[tuple[str, str]] | None = None
 
     @classmethod
     def of(cls, session: CanvasAgentSession) -> "ModelScope":
-        return cls(session.creation_mode,
-                   frozenset((ref.alias, ref.model) for ref in session.preferred_models))
+        preferred = None if session.auto_models else frozenset(
+            (ref.alias, ref.model) for ref in session.preferred_models)
+        return cls(session.creation_mode, preferred)
 
     def kinds(self) -> tuple[str, ...]:
         return ("image", "video") if self.creation_mode == "all" else (self.creation_mode,)
 
     def models(self, kind: str) -> list[dict]:
-        """该类型可用的生成模型；偏好里没有这一类型的模型时按自动处理（全部可用）。"""
+        """该类型可用的生成模型。"""
         if kind not in self.kinds():
             return []
         from character_workflow.lib.workshop_generation import model_rows
         rows = model_rows(kind)
-        picked = [row for row in rows if (row["alias"], row["model"]) in self.preferred]
-        return picked or rows
+        if self.preferred is None:
+            return rows
+        return [row for row in rows if (row["alias"], row["model"]) in self.preferred]
 
 
 ALL_MODELS = ModelScope()
@@ -174,14 +180,19 @@ def _check_generation_allowed(project_id: str, node_id: str, scope: ModelScope) 
         raise WorkshopError("INVALID_PARAMETERS",
                             f"当前创作模式不能生成{'视频' if draft.mode == 'video' else '图片'}", 422)
     allowed = {(row["alias"], row["model"]) for row in scope.models(draft.mode)}
+    if not allowed:
+        raise WorkshopError("INVALID_PARAMETERS", "模型偏好里没有可用的"
+                            f"{'视频' if draft.mode == 'video' else '图片'}模型，请用户先在模型偏好里选择", 422)
     if (draft.alias, draft.model) not in allowed:
         raise WorkshopError("INVALID_PARAMETERS",
                             f"模型 {draft.model} 不在可用范围内，请从 list_models 里选", 422)
 
 
-def execute_tool(project_id: str, tool: str, arguments: dict,
-                 scope: ModelScope = ALL_MODELS) -> tuple[dict, list[str]]:
-    """Run one tool call; returns (result, node ids it created). Raises WorkshopError."""
+def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope = ALL_MODELS,
+                 created_ids: frozenset[str] = frozenset()) -> tuple[dict, list[str]]:
+    """Run one tool call; returns (result, node ids it created). Raises WorkshopError.
+
+    created_ids: 本会话已建的节点，新节点排位时用来找「上一次出图」。"""
     if tool == "get_canvas":
         return tools.get_document(LOCAL, CanvasProjectInput(project_id=project_id)), []
     if tool == "list_models":
@@ -204,10 +215,13 @@ def execute_tool(project_id: str, tool: str, arguments: dict,
         return {"path": arguments["path"],
                 "content": skills.read_skill_file(arguments["name"], arguments["path"])}, []
     if tool == "apply_changes":
-        result = _with_fresh_revision(project_id, lambda revision: tools.apply_changes(
-            LOCAL, ApplyChangesInput(project_id=project_id, expected_revision=revision,
-                                     changes=arguments.get("changes") or []),
-        ))
+        def apply(revision: int) -> dict:
+            # 新节点的位置不用模型给的，按「上一次出图右侧、不重叠」重新排（见 canvas_agent_layout）。
+            changes = layout.with_auto_positions(read_canvas_document(project_id),
+                                                 arguments.get("changes") or [], created_ids)
+            return tools.apply_changes(LOCAL, ApplyChangesInput(
+                project_id=project_id, expected_revision=revision, changes=changes))
+        result = _with_fresh_revision(project_id, apply)
         return result, list(result.get("node_ids") or [])
     if tool == "run_generation":
         _check_generation_allowed(project_id, arguments["surface_node_id"], scope)
@@ -224,11 +238,11 @@ def execute_tool(project_id: str, tool: str, arguments: dict,
     raise WorkshopError("INVALID_TARGET", f"未知工具 {tool}", 422)
 
 
-def run_tool_safely(project_id: str, tool: str, arguments: dict,
-                    scope: ModelScope = ALL_MODELS) -> tuple[str, list[str]]:
+def run_tool_safely(project_id: str, tool: str, arguments: dict, scope: ModelScope = ALL_MODELS,
+                    created_ids: frozenset[str] = frozenset()) -> tuple[str, list[str]]:
     """Tool output text for the model; errors become text the model can react to."""
     try:
-        result, created = execute_tool(project_id, tool, arguments, scope)
+        result, created = execute_tool(project_id, tool, arguments, scope, created_ids)
     except WorkshopError as error:
         return f"错误（{error.code}）：{error.message}", []
     except (KeyError, TypeError, ValueError) as error:
@@ -353,7 +367,8 @@ def build_tools() -> list:
             if name == "wait_for_run":
                 return await _wait_for_run(turn.project_id, str(arguments.get("run_id", "")))
             text, created = await asyncio.to_thread(run_tool_safely, turn.project_id, name,
-                                                    arguments, turn.scope)
+                                                    arguments, turn.scope,
+                                                    frozenset(turn.created_node_ids))
             turn.created_node_ids.update(created)
             return text
 
@@ -759,7 +774,8 @@ def resolve_approvals(project_id: str, session_id: str,
         if decisions[approval.call_id]:
             text, new_nodes = run_tool_safely(project_id, approval.tool,
                                               _arguments(approval.arguments),
-                                              ModelScope.of(session))
+                                              ModelScope.of(session),
+                                              frozenset(session.created_node_ids) | created)
             created.update(new_nodes)
             label = tool_error_label(text) if is_tool_error(text) else "已执行"
         else:

@@ -409,7 +409,9 @@ export interface CanvasAgentSession {
   effort: CanvasAgentEffort | null;
   permission_mode: CanvasAgentPermissionMode;
   creation_mode: CanvasAgentCreationMode;
-  /** 空 = 自动；非空时 Agent 只能从中挑（按图片 / 视频分别生效）。 */
+  /** 自动：Agent 从全部可用生成模型里挑；关掉后只能用 preferred_models（一个没选就不能生成）。 */
+  auto_models: boolean;
+  /** 用户勾选的模型；打开自动时保留，再关掉时恢复。 */
   preferred_models: CanvasAgentModelRef[];
   token_usage: CanvasAgentTokenUsage;
   messages: CanvasAgentMessage[];
@@ -429,6 +431,7 @@ export interface CanvasAgentSessionUpdate {
   effort?: CanvasAgentEffort | 'off';
   permission_mode?: CanvasAgentPermissionMode;
   creation_mode?: CanvasAgentCreationMode;
+  auto_models?: boolean;
   preferred_models?: CanvasAgentModelRef[];
 }
 

@@ -45,13 +45,14 @@ function rememberedModel(): RememberedModel | null {
 
 /** 创作模式与模型偏好是用户偏好：跨会话、跨刷新记住，新对话默认用它。 */
 const CREATION_STORAGE_KEY = 'canvas-agent-creation';
-type RememberedCreation = Pick<CanvasAgentSessionUpdate, 'creation_mode' | 'preferred_models'>;
+type RememberedCreation = Pick<CanvasAgentSessionUpdate, 'creation_mode' | 'auto_models' | 'preferred_models'>;
 
 function rememberedCreation(): RememberedCreation {
   try {
     const value = JSON.parse(readStorage(CREATION_STORAGE_KEY) ?? 'null') as RememberedCreation | null;
     return {
       ...(value?.creation_mode ? { creation_mode: value.creation_mode } : {}),
+      ...(typeof value?.auto_models === 'boolean' ? { auto_models: value.auto_models } : {}),
       ...(Array.isArray(value?.preferred_models) ? { preferred_models: value.preferred_models } : {}),
     };
   } catch { return {}; }
@@ -69,6 +70,7 @@ function carriedSettings(session: CanvasAgentSession): CanvasAgentSessionUpdate 
     ...(session.effort ? { effort: session.effort } : {}),
     permission_mode: session.permission_mode,
     creation_mode: session.creation_mode,
+    auto_models: session.auto_models,
     preferred_models: session.preferred_models,
   };
 }
@@ -217,12 +219,13 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     if (update.model && update.model_alias) {
       writeStorage(MODEL_STORAGE_KEY, JSON.stringify({ alias: update.model_alias, model: update.model }));
     }
-    if (update.creation_mode || update.preferred_models) {
-      writeStorage(CREATION_STORAGE_KEY, JSON.stringify({
-        ...rememberedCreation(),
-        ...(update.creation_mode ? { creation_mode: update.creation_mode } : {}),
-        ...(update.preferred_models ? { preferred_models: update.preferred_models } : {}),
-      }));
+    const creation: RememberedCreation = {
+      ...(update.creation_mode ? { creation_mode: update.creation_mode } : {}),
+      ...(update.auto_models !== undefined ? { auto_models: update.auto_models } : {}),
+      ...(update.preferred_models ? { preferred_models: update.preferred_models } : {}),
+    };
+    if (Object.keys(creation).length) {
+      writeStorage(CREATION_STORAGE_KEY, JSON.stringify({ ...rememberedCreation(), ...creation }));
     }
     if (!session) {
       setDraft(current => ({ ...current, ...update }));

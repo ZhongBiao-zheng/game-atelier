@@ -76,6 +76,7 @@ def test_agent_session_api_is_project_scoped_and_revision_safe(client, isolated_
         "effort": None,
         "permission_mode": "review",
         "creation_mode": "all",
+        "auto_models": True,
         "preferred_models": [],
         "token_usage": {"input_tokens": 0, "output_tokens": 0},
         "messages": [],

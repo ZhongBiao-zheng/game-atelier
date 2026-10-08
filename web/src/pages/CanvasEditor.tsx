@@ -4564,6 +4564,16 @@ function CanvasEditorInner({
     });
   }, [document?.project_id]);
 
+  // 上面的拦截只在滚轮落进编辑区时生效。弹窗类组件（Radix 模态菜单）会给 body 加
+  // pointer-events: none，滚轮直接落到根节点，Mac 双指横滑就成了浏览器后退。
+  // 画布页在根节点上关掉横向回弹，后退手势无论落在哪都触发不了。
+  useEffect(() => {
+    const root = window.document.documentElement;
+    const previous = root.style.overscrollBehaviorX;
+    root.style.overscrollBehaviorX = 'none';
+    return () => { root.style.overscrollBehaviorX = previous; };
+  }, []);
+
   if (loading) return <EditorMessage icon={<LoaderCircle className="size-5 animate-spin" />} text="正在展开画布…" />;
   if (!document) return <EditorMessage text={error || '画布读取失败'} action={<Button onClick={onBack}>返回项目列表</Button>} />;
 

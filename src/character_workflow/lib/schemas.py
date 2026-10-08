@@ -1445,7 +1445,9 @@ class CanvasAgentSession(BaseModel):
     effort: Literal["low", "medium", "high", "xhigh"] | None = None
     permission_mode: CanvasAgentPermissionMode = "review"
     creation_mode: CanvasAgentCreationMode = "all"
-    # 空 = 自动：Agent 从全部可用生成模型里挑；非空时只能从这些里挑（按图片 / 视频分别生效）。
+    # 自动：Agent 从全部可用生成模型里挑；关掉后只能用 preferred_models 里的（一个都没选就不能生成）。
+    # 重新打开自动不清空 preferred_models，再关掉时恢复用户上次的选择。
+    auto_models: bool = True
     preferred_models: list[CanvasAgentModelRef] = Field(default_factory=list, max_length=200)
     token_usage: CanvasAgentTokenUsage = Field(default_factory=CanvasAgentTokenUsage)
     messages: list[CanvasAgentMessage] = Field(default_factory=list, max_length=20_000)
@@ -1488,6 +1490,7 @@ class CanvasAgentSessionUpdate(BaseModel):
     effort: Literal["low", "medium", "high", "xhigh", "off"] | None = None
     permission_mode: CanvasAgentPermissionMode | None = None
     creation_mode: CanvasAgentCreationMode | None = None
+    auto_models: bool | None = None
     preferred_models: list[CanvasAgentModelRef] | None = Field(default=None, max_length=200)
 
     @model_validator(mode="after")

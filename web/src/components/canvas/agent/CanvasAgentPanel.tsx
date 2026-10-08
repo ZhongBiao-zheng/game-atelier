@@ -210,7 +210,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
               <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="max-h-80 w-72 overflow-y-auto">
+          <DropdownMenuContent align="start" className="z-50 max-h-80 w-72 overflow-y-auto">
             {agent.sessions.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground">还没有对话</p>}
             {agent.sessions.map(item => (
               <DropdownMenuItem key={item.session_id} onSelect={() => void agent.selectSession(item.session_id)} className="gap-2 text-sm">
@@ -348,9 +348,10 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
           <CanvasAgentPreferencePicker
             models={agent.generationModels}
             mode={creationMode}
+            auto={settings.auto_models ?? true}
             preferred={settings.preferred_models ?? []}
             disabled={running || pending}
-            onChange={preferred => void agent.updateSettings({ preferred_models: preferred })}
+            onChange={update => void agent.updateSettings(update)}
           />
           <span className="flex-1" />
           {running ? (

@@ -30,7 +30,8 @@ export function CanvasAgentModeMenu({ mode, disabled, onSelect }: {
           <ChevronDown className="size-3.5" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="w-52">
+      {/* 面板是 z-40：菜单默认 z-20 会被压在面板下面，而 Radix 已锁住页面指针 → 整页像卡死。 */}
+      <DropdownMenuContent side="top" align="start" className="z-50 w-52">
         {CREATION_MODES.map(item => (
           <DropdownMenuItem key={item.value} onSelect={() => onSelect(item.value)} className="items-start gap-2">
             <item.Icon className="mt-0.5 size-4 shrink-0" />
