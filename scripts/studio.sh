@@ -16,8 +16,6 @@ export GIT_TERMINAL_PROMPT=0
 export UV_HTTP_TIMEOUT=20
 # uv 找不到本机 Python 3.11+ 时要下载一份；默认源是 GitHub，国内基本下不动。
 export UV_PYTHON_INSTALL_MIRROR="${UV_PYTHON_INSTALL_MIRROR:-https://registry.npmmirror.com/-/binary/python-build-standalone}"
-# main 的国内镜像（GitHub Action 每次推 main 后同步）。先拉它，失败再走 GitHub。
-CNB_URL="https://cnb.cool/ZhongBiao-zheng/game-atelier.git"
 
 if [ -t 1 ]; then RED=$'\033[31m'; YEL=$'\033[33m'; RST=$'\033[0m'; else RED=""; YEL=""; RST=""; fi
 warn() { echo "${YEL}[警告] $*${RST}"; }
@@ -27,23 +25,6 @@ pause_exit() {
   read -rp "按 Enter 关闭本窗口..." _ || true
   exit "${1:-1}"
 }
-report_pull_failure() {
-  err "更新失败，以下本地改动挡住了更新："
-  git status --short
-  echo "处理后再运行；现在直接启动。"
-}
-git_fetch() {
-  git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 fetch --quiet "$@" 2>/dev/null
-}
-# 镜像只有 main：拉到 origin/main，后续按上游 fast-forward 合并，与从 GitHub 拉取等价。
-# 镜像比本地 origin/main 旧（同步还没跑完）时这一步被拒，回落 GitHub。
-fetch_updates() {
-  if curl -s -m 6 -o /dev/null https://cnb.cool 2>/dev/null &&
-    git_fetch "$CNB_URL" main:refs/remotes/origin/main; then
-    return 0
-  fi
-  curl -s -m 6 -o /dev/null https://github.com 2>/dev/null && git_fetch
-}
 sync_local_skills() {
   if [ -f "$PROJECT_ROOT/install.sh" ]; then
     bash "$PROJECT_ROOT/install.sh" --sync || warn "Skill 同步失败，可稍后运行 ./install.sh"
@@ -52,65 +33,6 @@ sync_local_skills() {
 
 echo "Game Atelier"
 echo
-
-if [ "${1:-}" = "--skip-update" ]; then
-  :
-elif ! command -v git &>/dev/null; then
-  warn "未安装 git，跳过更新"
-elif [ ! -d ".git" ]; then
-  warn "不是 git 仓库，无法更新"
-else
-  curbr="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
-  echo "当前 $curbr @ $(git rev-parse --short HEAD 2>/dev/null || echo '?')"
-  if ! fetch_updates; then
-    warn "连不上更新源，跳过更新"
-  else
-    if ! git restore --source=HEAD --staged --worktree -- web/dist 2>/dev/null; then
-      git checkout HEAD -- web/dist 2>/dev/null || true
-    fi
-    git clean -qfd -- web/dist 2>/dev/null || true
-    if ! upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"; then
-      warn "分支 $curbr 没有上游，无法自动更新"
-      if git show-ref --verify --quiet refs/remotes/origin/main; then
-        if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-          echo "工作区有改动，请手动 git switch main"
-        else
-          read -rp "[1] 切到 main 并更新  [2] 直接启动: " SW || true
-          if [ "$SW" != "2" ]; then
-            if ! git switch main; then
-              err "切换失败，请手动 git switch main"
-            elif ! git merge --ff-only --quiet origin/main; then
-              report_pull_failure
-            else
-              echo "已切到 main 并更新，重新启动..."
-              exec bash "$_self" --skip-update
-            fi
-          fi
-        fi
-      fi
-    else
-      behind="$(git rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)"
-      [ -n "$behind" ] || behind=0
-      if [ "$behind" = "0" ]; then
-        echo "已是最新"
-      else
-        echo "有新版本（落后 $behind 个提交）"
-        read -rp "[1] 更新并启动  [2] 直接启动: " UPD || true
-        if [ "$UPD" != "2" ]; then
-          if git merge --ff-only --quiet '@{u}'; then
-            echo "已更新，重新启动..."
-            exec bash "$_self" --skip-update
-          else
-            report_pull_failure
-          fi
-        fi
-      fi
-    fi
-  fi
-fi
-echo
-
-sync_local_skills
 
 UV="$(command -v uv 2>/dev/null || true)"
 if [ -z "$UV" ] && [ -x "$HOME/.local/bin/uv" ]; then
@@ -134,6 +56,15 @@ if [ -z "$UV" ]; then
     pause_exit 1
   fi
 fi
+
+if [ "${1:-}" != "--skip-update" ]; then
+  # 更新逻辑在 self_update.py（与 Windows 共用）；退出码 10 = 已更新，重跑新版启动器。
+  "$UV" run --no-project python scripts/self_update.py
+  [ $? -eq 10 ] && exec bash "$_self" --skip-update
+fi
+echo
+
+sync_local_skills
 
 if [ ! -d ".venv" ]; then
   echo "首次启动，安装依赖（约 1-2 分钟）..."
