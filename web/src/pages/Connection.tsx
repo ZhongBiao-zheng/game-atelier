@@ -8,6 +8,7 @@ import { HostedManagementNotice } from '@/components/HostedManagementNotice';
 import { fetchProjects } from '@/api/projects';
 import { requestJson } from '@/api/http';
 import type { ProjectsFile } from '@/schema/jobs';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 interface CanvasProjectOption { project_id: string; name: string }
 
@@ -94,7 +95,7 @@ function LocalConnectionPage() {
     <SitePairingSection />
     <h2 className="text-base font-medium">Agent 授权</h2>
     {!creating ? <div className="flex flex-wrap items-center gap-3">
-        <button type="button" disabled={busy !== null || nothingToGrant} onClick={() => void submitGrant('本机 Agent', true)} className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"><Plus size={16} aria-hidden />{busy === 'create' ? '连接中…' : '连接本机 Agent'}</button>
+        <button type="button" disabled={busy !== null || nothingToGrant} onClick={() => void submitGrant('本机 Agent', true)} className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"><Plus size={16} aria-hidden /><SwapLabel active={Boolean(busy === 'create')} on="连接中…" off="连接本机 Agent" /></button>
         <button type="button" onClick={() => setCreating(true)} className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">自定义</button>
         {nothingToGrant && <span className="text-sm text-muted-foreground">先创建项目或画布</span>}
       </div> :
@@ -104,7 +105,7 @@ function LocalConnectionPage() {
         <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">允许访问的画布</legend>{canvasProjects.length === 0 && <p className="text-sm text-muted-foreground">还没有画布项目。</p>}{canvasProjects.map(project => <label key={project.project_id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={canvasProjectIds.includes(project.project_id)} onChange={event => setCanvasProjectIds(current => event.target.checked ? [...current, project.project_id] : current.filter(id => id !== project.project_id))} />{project.name}</label>)}</fieldset>
         <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">允许的工坊操作</legend>{CAPABILITIES.map(capability => <label key={capability.value} className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={capability.value === 'read'} checked={capabilities.includes(capability.value)} onChange={event => setCapabilities(current => event.target.checked ? [...current, capability.value] : current.filter(value => value !== capability.value))} />{capability.label}</label>)}</fieldset>
         <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">允许的画布操作</legend>{CANVAS_CAPABILITIES.map(capability => <label key={capability.value} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={capabilities.includes(capability.value)} onChange={event => setCapabilities(current => event.target.checked ? [...current, capability.value] : current.filter(value => value !== capability.value))} />{capability.label}</label>)}</fieldset>
-        <div className="flex gap-2"><button disabled={busy !== null || nothingToGrant || !name.trim()} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{busy === 'create' ? '创建中…' : '创建授权'}</button><button type="button" onClick={() => setCreating(false)} className="rounded-md px-4 py-2 text-sm hover:bg-accent">取消</button></div>
+        <div className="flex gap-2"><button disabled={busy !== null || nothingToGrant || !name.trim()} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"><SwapLabel active={Boolean(busy === 'create')} on="创建中…" off="创建授权" /></button><button type="button" onClick={() => setCreating(false)} className="rounded-md px-4 py-2 text-sm hover:bg-accent">取消</button></div>
       </form>}
     <section aria-label="已有 Agent 授权" className="space-y-3">
       {grants.length === 0 && !creating && <p className="py-8 text-sm text-muted-foreground">尚未授权任何 Agent。</p>}
@@ -160,7 +161,7 @@ function SitePairingSection() {
       <label className="min-w-64 flex-1 space-y-2 text-sm"><span>网站地址</span>
         <input required value={origin} onChange={event => setOrigin(event.target.value)} placeholder="https://xxx.vercel.app" autoComplete="off" spellCheck={false}
           className="block w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono focus-visible:ring-1 focus-visible:ring-ring" /></label>
-      <button disabled={busy || !origin.trim()} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{busy ? '生成中…' : '生成配对码'}</button>
+      <button disabled={busy || !origin.trim()} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"><SwapLabel active={Boolean(busy)} on="生成中…" off="生成配对码" /></button>
     </form>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {pairing && <div className="space-y-2">

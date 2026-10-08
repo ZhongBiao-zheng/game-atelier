@@ -696,3 +696,20 @@
   filter: blur(3px);
   transform: none;
 }
+
+/* 按下反馈：可点按钮按住时缩到 97%。不进 @layer，才能压过按钮自带的 transition-colors 等工具类。
+   用独立的 scale 属性，不碰 transform / translate：Tailwind 的 -translate-* 定位与 GSAP 的 transform 补间都不受影响。
+   transition-property 要把 scale 并进去，否则按钮自带的 transition-colors 会让缩放瞬切；
+   没写任何 transition 类的按钮时长为 0，缩放瞬切，同样有反馈。
+   不需要的元素加 data-press="none"；Button asChild 渲染成链接时靠 .press 类接入。 */
+:where(button, .press):not(:disabled):not([data-press='none']) {
+  transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, opacity, transform, translate, scale, rotate;
+}
+:where(button, .press):not(:disabled):not([data-press='none']):active {
+  scale: 0.97;
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(button, .press):not(:disabled):not([data-press='none']):active {
+    scale: none;
+  }
+}

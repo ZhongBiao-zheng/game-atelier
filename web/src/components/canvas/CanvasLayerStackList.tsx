@@ -7,6 +7,7 @@ import type { CanvasLayerStackNode } from '@/schema/canvas';
 import { cn } from '@/lib/utils';
 import { moveLayerStackPart, orderedLayerStackParts } from './canvasLayerOrder';
 import type { CanvasNodeContextValue } from './CanvasEditorViews';
+import { SwapIcon } from '@/components/ui/swap-icon';
 
 export function CanvasLayerStackList({ node, context, disabled, onVisibility, onHover }: {
   node: CanvasLayerStackNode;
@@ -83,7 +84,7 @@ export function CanvasLayerStackList({ node, context, disabled, onVisibility, on
       <Button variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground"
         aria-label={`${part.visible ? '隐藏' : '显示'}${part.name}`} aria-pressed={part.visible}
         onClick={event => { event.stopPropagation(); onVisibility(part.layer?.id ?? null, !part.visible); }}>
-        {part.visible ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+        <SwapIcon swapKey={Boolean(part.visible)}>{part.visible ? <Eye className="size-4" /> : <EyeOff className="size-4" />}</SwapIcon>
       </Button>
       <DropdownMenu><DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="size-6 shrink-0 text-muted-foreground"

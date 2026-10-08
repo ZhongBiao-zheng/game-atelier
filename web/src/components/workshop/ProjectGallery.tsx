@@ -27,6 +27,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { SwapLabel } from '@/components/ui/swap-label';
+import { SelectionHighlight } from '@/components/ui/selection-highlight';
 
 const FILTERS: Array<{ id: ProjectGalleryCategory; label: string }> = [
   { id: 'all', label: '全部' },
@@ -153,12 +155,13 @@ export function ProjectGallery({ projectId }: { projectId: string }) {
             最新作品
           </h2>
         </div>
-        <div role="group" aria-label="筛选项目作品" className="flex flex-wrap gap-1 rounded-lg border border-border bg-card/40 p-1">
+        <div role="group" aria-label="筛选项目作品" className="relative isolate flex flex-wrap gap-1 rounded-lg border border-border bg-card/40 p-1">
+          <SelectionHighlight className="border border-border bg-secondary/65 ring-0" />
           {FILTERS.map(filter => (
             <Button
               key={filter.id}
               type="button"
-              variant={category === filter.id ? 'secondary' : 'ghost'}
+              variant="ghost"
               size="sm"
               aria-pressed={category === filter.id}
               onClick={() => setCategory(filter.id)}
@@ -241,7 +244,7 @@ export function ProjectGallery({ projectId }: { projectId: string }) {
         <div className="flex justify-center">
           <Button type="button" variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
             {loadingMore && <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />}
-            {loadingMore ? '加载中…' : '加载更多'}
+            <SwapLabel active={Boolean(loadingMore)} on="加载中…" off="加载更多" />
           </Button>
         </div>
       )}

@@ -114,6 +114,9 @@ import {
   type CanvasPendingInput,
 } from '@/pages/canvasEditorModel';
 import { isSavableCanvasVersion, isShareableCanvasVersion } from '@/pages/canvasTeamActions';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { SwapLabel } from '@/components/ui/swap-label';
+import { SelectionHighlight } from '@/components/ui/selection-highlight';
 
 export type CanvasFlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
 /** 本地媒体操作（抠图 / 裁剪 / 切图 / 放大）进行中的占位节点：不在文档里，结果节点落地即撤。 */
@@ -639,7 +642,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               disabled={Boolean(nodeJob.cancel_requested_at)}
               onClick={() => void context.cancelRun(nodeJob.canvas_run!.run_id)}
             >
-              {nodeJob.cancel_requested_at ? <LoaderCircle /> : <Square />}
+              <SwapIcon swapKey={Boolean(nodeJob.cancel_requested_at)}>{nodeJob.cancel_requested_at ? <LoaderCircle /> : <Square />}</SwapIcon>
             </MediaToolButton>
           )}
           {context.activeBatch?.scopeNodeId === node.id && (
@@ -650,7 +653,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               disabled={context.activeBatch.stopping}
               onClick={() => void context.stopActiveBatch?.()}
             >
-              {context.activeBatch.stopping ? <LoaderCircle /> : <Square />}
+              <SwapIcon swapKey={Boolean(context.activeBatch.stopping)}>{context.activeBatch.stopping ? <LoaderCircle /> : <Square />}</SwapIcon>
             </MediaToolButton>
           )}
           {emptyMediaNode ? (
@@ -660,7 +663,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               disabled={replacingMedia}
               onClick={() => context.replaceMedia(emptyMediaNode)}
             >
-              {replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}
+              <SwapIcon swapKey={Boolean(replacingMedia)}>{replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}</SwapIcon>
             </MediaToolButton>
           ) : node.type === 'image' ? (
             <>
@@ -679,7 +682,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
                   disabled={submittingNode}
                   onClick={() => void context.recoverReversePromptConfig(reversePromptJob)}
                 >
-                  {submittingNode ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
+                  <SwapIcon swapKey={Boolean(submittingNode)}>{submittingNode ? <LoaderCircle className="animate-spin" /> : <Sparkles />}</SwapIcon>
                 </MediaToolButton>
               )}
             </>
@@ -708,7 +711,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
             text={node.hidden ? '显示' : '隐藏'}
             onClick={toggleHidden}
           >
-            {node.hidden ? <Eye /> : <EyeOff />}
+            <SwapIcon swapKey={Boolean(node.hidden)}>{node.hidden ? <Eye /> : <EyeOff />}</SwapIcon>
           </MediaToolButton>}
         </div>
       </NodeToolbar>
@@ -1405,11 +1408,12 @@ function CanvasConfigNodeSurface({
       <div
         role="radiogroup"
         aria-label="生成类型"
-        className="nodrag nowheel grid grid-cols-3 gap-1 rounded-lg border border-border bg-background/50 p-1"
+        className="nodrag nowheel relative isolate grid grid-cols-3 gap-1 rounded-lg border border-border bg-background/50 p-1"
         onPointerDown={event => event.stopPropagation()}
         onClick={event => event.stopPropagation()}
         onKeyDown={handleModeKeys}
       >
+        <SelectionHighlight className="ring-0" />
         {CONFIG_OUTPUT_MODES.map(({ mode, label, icon: Icon }) => (
           <button
             key={mode}
@@ -1421,7 +1425,7 @@ function CanvasConfigNodeSurface({
             className={cn(
               'flex min-w-0 flex-col items-center gap-1 rounded-md px-1 py-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
               draft.mode === mode
-                ? 'bg-secondary font-medium text-foreground'
+                ? 'font-medium text-foreground'
                 : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
             )}
             onClick={() => selectMode(mode)}
@@ -1513,7 +1517,7 @@ function CanvasNodeToolbar({
                     .finally(() => setDownloadingLayers(null));
                 }}
               >
-                {downloadingLayers === format ? <LoaderCircle className="animate-spin" /> : icon}
+                <SwapIcon swapKey={downloadingLayers === format}>{downloadingLayers === format ? <LoaderCircle className="animate-spin" /> : icon}</SwapIcon>
               </MediaToolButton>
             ),
           )}
@@ -1558,7 +1562,7 @@ function CanvasNodeToolbar({
           disabled={replacing}
           onClick={() => context.replaceMedia(mediaNode)}
         >
-          {replacing ? <LoaderCircle className="animate-spin" /> : <FileUp />}
+          <SwapIcon swapKey={Boolean(replacing)}>{replacing ? <LoaderCircle className="animate-spin" /> : <FileUp />}</SwapIcon>
         </MediaToolButton>
       )}
       {node.type === 'video' && (
@@ -1805,7 +1809,7 @@ function ImageNodeToolbar({
           text={action.text}
           href={action.href}
         >
-          {action.icon}
+          <SwapIcon swapKey={action.text}>{action.icon}</SwapIcon>
         </MediaToolLink>
       ) : action.menu ? (
         <DropdownMenu key={action.id} onOpenChange={updateMenuOpen}>
@@ -1816,7 +1820,7 @@ function ImageNodeToolbar({
               disabled={action.disabled}
               onClick={() => undefined}
             >
-              {action.icon}
+              <SwapIcon swapKey={action.text}>{action.icon}</SwapIcon>
             </MediaToolButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -1845,7 +1849,7 @@ function ImageNodeToolbar({
           disabled={action.disabled}
           onClick={action.run}
         >
-          {action.icon}
+          <SwapIcon swapKey={action.text}>{action.icon}</SwapIcon>
         </MediaToolButton>
       ))}
       <MediaToolButton
@@ -2395,7 +2399,7 @@ export function CanvasGenerationComposer({
             disabled={Boolean(activeJob.cancel_requested_at)}
             onClick={() => void context.cancelRun(activeJob.canvas_run!.run_id)}
           >
-            {activeJob.cancel_requested_at ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Square aria-hidden="true" />}
+            <SwapIcon swapKey={Boolean(activeJob.cancel_requested_at)}>{activeJob.cancel_requested_at ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Square aria-hidden="true" />}</SwapIcon>
             {activeJob.cancel_requested_at ? '正在停止…' : '停止'}
           </Button>
         )}
@@ -2419,7 +2423,7 @@ export function CanvasGenerationComposer({
             disabled={submitting}
             onClick={submitGeneration}
           >
-            {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
+            <SwapIcon swapKey={Boolean(submitting)}>{submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}</SwapIcon>
             {submitting ? '提交中…' : textMode ? '生成' : '开始生成'}
           </Button>
         )}
@@ -2976,7 +2980,7 @@ const MediaToolButton = forwardRef<HTMLButtonElement, {
           onClick();
         }}
       >
-        <span aria-hidden="true" className="[&>svg]:size-3.5">{children}</span>
+        <span aria-hidden="true" className="[&_svg]:size-3.5">{children}</span>
         <span className="text-xs">{text}</span>
       </button>
     );
@@ -3000,7 +3004,7 @@ function MediaToolLink({ label, text, href, children }: {
       )}
       onClick={event => event.stopPropagation()}
     >
-      <span aria-hidden="true" className="[&>svg]:size-3.5">{children}</span>
+      <span aria-hidden="true" className="[&_svg]:size-3.5">{children}</span>
       {text && <span className="text-xs">{text}</span>}
     </a>
   );
@@ -3212,7 +3216,8 @@ export function CanvasLayerStackSurface({
             </div>
             <div className="space-y-1.5 text-xs text-muted-foreground">
               <span>分辨率</span>
-              <div role="listbox" aria-label="选择拆分分辨率" className="grid grid-cols-4 rounded-lg bg-popover p-0.5">
+              <div role="listbox" aria-label="选择拆分分辨率" className="relative isolate grid grid-cols-4 rounded-lg bg-popover p-0.5">
+                <SelectionHighlight />
                 {(['auto', '1K', '1.5K', '2K'] as const).map(resolution => (
                   <button
                     key={resolution}
@@ -3225,7 +3230,7 @@ export function CanvasLayerStackSurface({
                       context.recordHistory();
                       updateDraft({ resolution });
                     }}
-                    className="nodrag h-8 rounded-md px-1 text-center text-sm text-foreground transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 disabled:opacity-50"
+                    className="nodrag h-8 rounded-md px-1 text-center text-sm text-foreground transition-colors hover:bg-secondary/60 disabled:opacity-50"
                   >
                     {resolution === 'auto' ? '智能' : resolution}
                   </button>
@@ -3245,8 +3250,8 @@ export function CanvasLayerStackSurface({
                   disabled={!selectedChoice || busy || !sourceImage}
                   onClick={() => void context.submitLayerDecomposition(node.id)}
                 >
-                  {busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Layers3 aria-hidden="true" />}
-                  {busy ? '拆分中…' : '开始拆分'}
+                  <SwapIcon swapKey={Boolean(busy)}>{busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Layers3 aria-hidden="true" />}</SwapIcon>
+                  <SwapLabel active={Boolean(busy)} on="拆分中…" off="开始拆分" />
                 </Button>
               ) : (
                 <Button asChild variant="outline" size="sm" className="nodrag">
@@ -3417,9 +3422,11 @@ function MediaPreview({
             className="grid size-7 shrink-0 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             onClick={toggleVideoPlayback}
           >
-            {videoPlaying
-              ? <Pause className="size-4" aria-hidden="true" />
-              : <Play className="size-4" aria-hidden="true" />}
+            <SwapIcon swapKey={videoPlaying}>
+              {videoPlaying
+                ? <Pause className="size-4" aria-hidden="true" />
+                : <Play className="size-4" aria-hidden="true" />}
+            </SwapIcon>
           </button>
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{formatMediaTime(videoCurrentTime)}</span>
           <input
@@ -3444,9 +3451,11 @@ function MediaPreview({
               className="grid size-7 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               onClick={toggleVideoMuted}
             >
-              {videoMuted || videoVolume === 0
-                ? <VolumeX className="size-4" aria-hidden="true" />
-                : <Volume2 className="size-4" aria-hidden="true" />}
+              <SwapIcon swapKey={videoMuted || videoVolume === 0}>
+                {videoMuted || videoVolume === 0
+                  ? <VolumeX className="size-4" aria-hidden="true" />
+                  : <Volume2 className="size-4" aria-hidden="true" />}
+              </SwapIcon>
             </button>
             <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 pb-1 opacity-0 transition-opacity group-focus-within/volume:pointer-events-auto group-focus-within/volume:opacity-100 group-hover/volume:pointer-events-auto group-hover/volume:opacity-100">
               <div className="grid h-24 w-7 place-items-center rounded-lg border border-border bg-glass py-2 backdrop-blur-glass">

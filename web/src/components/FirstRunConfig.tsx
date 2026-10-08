@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { chooseFolder } from '@/api/folders';
 import { setDataRoot } from '@/api/onboarding';
 import { cn } from '@/lib/utils';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 interface Props { onSaved: (root: string) => void }
 
@@ -96,7 +97,7 @@ export function FirstRunConfig({ onSaved }: Props) {
           className="w-full"
           size="lg"
         >
-          {submitting ? '保存中…' : '开始使用'}
+          <SwapLabel active={Boolean(submitting)} on="保存中…" off="开始使用" />
         </Button>
 
         <p className="text-xs text-muted-foreground mt-3 text-center">

@@ -16,6 +16,8 @@ import { imageSizeError } from '@/lib/imageSizeMode';
 import { normalizeImagePixelSize } from '@/lib/studioSize';
 import { normalizeCanvasImageParams } from '@/pages/canvasEditorModel';
 import type { CanvasGenerationDraft, CanvasMediaVersion } from '@/schema/canvas';
+import { SwapIcon } from '@/components/ui/swap-icon';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 
 type MaskTool = 'brush' | 'eraser';
@@ -354,8 +356,8 @@ export function CanvasMaskEditDialog({
         <DialogFooter>
           <Button type="button" variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>取消</Button>
           <Button type="button" disabled={busy || !ready || !!sizeError || !outputSize || !prompt.trim() || !alias || !model || !availableKeys.length} onClick={() => void submit()}>
-            {busy ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
-            {busy ? '提交中…' : '生成局部编辑'}
+            <SwapIcon swapKey={Boolean(busy)}>{busy ? <LoaderCircle className="animate-spin" /> : <Sparkles />}</SwapIcon>
+            <SwapLabel active={Boolean(busy)} on="提交中…" off="生成局部编辑" />
           </Button>
         </DialogFooter>
       </DialogContent>

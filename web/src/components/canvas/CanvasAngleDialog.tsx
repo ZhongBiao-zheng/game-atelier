@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 
 export interface CanvasAngleParams {
@@ -112,7 +113,7 @@ export function CanvasAngleDialog({
         <DialogFooter>
           <Button type="button" variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>取消</Button>
           <Button type="button" disabled={busy} onClick={() => onSubmit(params)}>
-            <WandSparkles />{busy ? '提交中…' : '生成新角度'}
+            <WandSparkles /><SwapLabel active={Boolean(busy)} on="提交中…" off="生成新角度" />
           </Button>
         </DialogFooter>
       </DialogContent>

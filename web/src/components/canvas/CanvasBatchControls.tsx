@@ -8,6 +8,7 @@ import { canvasMediaUrl } from '@/api/canvas';
 import type { CanvasBatchMaterialNode, CanvasGroupNode } from '@/schema/canvas';
 import type { CanvasBatchRun } from '@/schema/canvasBatch';
 import type { CanvasNodeContextValue } from './CanvasEditorViews';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 export function CanvasBatchMaterialEditor({ node, context }: {
   node: CanvasBatchMaterialNode; context: CanvasNodeContextValue;
@@ -190,7 +191,7 @@ export function CanvasBatchConfirmation({ run, busy, error, onClose, onStart }: 
       </>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       <DialogFooter><Button variant="outline" disabled={busy} onClick={onClose}>返回修改</Button>
-        <Button disabled={busy} onClick={onStart}>{busy ? '提交中…' : '开始执行'}</Button></DialogFooter>
+        <Button disabled={busy} onClick={onStart}><SwapLabel active={Boolean(busy)} on="提交中…" off="开始执行" /></Button></DialogFooter>
     </DialogContent>
   </Dialog>;
 }

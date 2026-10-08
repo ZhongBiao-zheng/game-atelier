@@ -10,6 +10,7 @@ import { ProfileSection } from './ProfileSection';
 import { TeamLibrariesSection } from './TeamLibrariesSection';
 import { HOSTED_SITE } from '@/api/connection';
 import { HostedManagementNotice } from '@/components/HostedManagementNotice';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 const DEFAULT_ROOT = '~/game-atelier';
 
@@ -132,7 +133,7 @@ function LocalSettingsPage() {
                     disabled={saving}
                     className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background"
                   >
-                    {saving ? '保存中...' : '保存'}
+                    <SwapLabel active={Boolean(saving)} on="保存中..." off="保存" />
                   </button>
                   <button
                     type="button"

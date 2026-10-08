@@ -20,6 +20,7 @@ import {
 
 import { Lightbox } from '../Lightbox';
 import { WaitingCopy } from './WaitingCopy';
+import { SwapIcon } from '@/components/ui/swap-icon';
 
 const HISTORY_BATCH_SIZE = 30;
 const MEDIA_ROOT_MARGIN = '600px 0px';
@@ -1089,7 +1090,7 @@ function DoneBatch({
                         title={hidden ? '取消隐藏' : '隐藏（不在首页展示）'}
                         className={`grid size-8 place-items-center rounded-full border border-border bg-scrim backdrop-blur-glass transition-opacity hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${hidden ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
                       >
-                        {hidden ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
+                        <SwapIcon swapKey={Boolean(hidden)}>{hidden ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}</SwapIcon>
                       </button>
                     )}
                     <a

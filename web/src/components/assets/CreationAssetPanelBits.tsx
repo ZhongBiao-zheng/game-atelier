@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import type { CreationAsset } from '@/schema/creationAssets';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 export function PanelTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return <button type="button" aria-pressed={active} onClick={onClick} className={cn('flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground outline-none transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary [&_svg]:size-4', active && 'bg-secondary text-foreground')}>{children}</button>;
@@ -66,7 +67,7 @@ export function DeleteAssetDialog({ target, busy, onCancel, onConfirm }: {
     <Dialog open={Boolean(target)} onOpenChange={open => { if (!open) onCancel(); }}>
       <DialogContent hideClose>
         <DialogHeader><DialogTitle>删除“{target?.title}”？</DialogTitle><DialogDescription>删除后不可恢复。已经使用过的提示词、媒体和来源名称快照不会受影响。</DialogDescription></DialogHeader>
-        <DialogFooter><Button variant="outline" disabled={busy} onClick={onCancel}>取消</Button><Button variant="destructive" disabled={busy} onClick={onConfirm}>{busy ? '删除中…' : '确认删除'}</Button></DialogFooter>
+        <DialogFooter><Button variant="outline" disabled={busy} onClick={onCancel}>取消</Button><Button variant="destructive" disabled={busy} onClick={onConfirm}><SwapLabel active={Boolean(busy)} on="删除中…" off="确认删除" /></Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );

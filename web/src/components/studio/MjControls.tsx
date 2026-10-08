@@ -19,6 +19,7 @@ import {
   type MjParams,
 } from '@/lib/mjParams';
 import { ToolbarPopover } from './ToolbarPopover';
+import { SelectionHighlight } from '@/components/ui/selection-highlight';
 
 interface Props {
   value: MjParams;
@@ -67,7 +68,8 @@ export function MjControls({
       >
         <div className="space-y-4">
           <Section title="模型">
-            <div role="listbox" aria-label="选择 Midjourney 模型" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+            <div role="listbox" aria-label="选择 Midjourney 模型" className="relative isolate grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+              <SelectionHighlight />
               {MJ_BOT_TYPES.map((item) => (
                 <SegmentButton
                   key={item.value}
@@ -104,7 +106,8 @@ export function MjControls({
           </Section>
 
           <Section title="速度档">
-            <div role="listbox" aria-label="选择速度档" className="grid h-9 grid-cols-3 rounded-lg bg-popover p-0.5">
+            <div role="listbox" aria-label="选择速度档" className="relative isolate grid h-9 grid-cols-3 rounded-lg bg-popover p-0.5">
+              <SelectionHighlight />
               {MJ_MODES.map((item) => (
                 <SegmentButton key={item.value} selected={value.mode === item.value} onClick={() => onChange({ mode: item.value })}>
                   {item.label}
@@ -114,7 +117,8 @@ export function MjControls({
           </Section>
 
           <Section title="风格化 stylize" hint="越高越有 MJ 自己的美术判断，越低越贴着 prompt">
-            <div role="listbox" aria-label="选择风格化强度" className="grid grid-cols-6 gap-0.5 rounded-lg bg-popover p-0.5">
+            <div role="listbox" aria-label="选择风格化强度" className="relative isolate grid grid-cols-6 gap-0.5 rounded-lg bg-popover p-0.5">
+              <SelectionHighlight />
               {MJ_STYLIZE_STEPS.map((item) => (
                 <SegmentButton key={item} selected={value.stylize === item} onClick={() => onChange({ stylize: item })}>
                   {item}
@@ -125,7 +129,8 @@ export function MjControls({
 
           {filledRefs.image && (
             <Section title="垫图权重 iw" hint="图片槽那张对结果的影响强度">
-              <div role="listbox" aria-label="选择垫图权重" className="grid h-9 grid-cols-5 rounded-lg bg-popover p-0.5">
+              <div role="listbox" aria-label="选择垫图权重" className="relative isolate grid h-9 grid-cols-5 rounded-lg bg-popover p-0.5">
+                <SelectionHighlight />
                 <SegmentButton selected={value.iw === null} onClick={() => onChange({ iw: null })}>默认</SegmentButton>
                 {MJ_IW_STEPS.map((item) => (
                   <SegmentButton key={item} selected={value.iw === item} onClick={() => onChange({ iw: item })}>
@@ -138,7 +143,8 @@ export function MjControls({
 
           {filledRefs.sref && (
             <Section title="风格权重 sw" hint="风格参考图的影响强度（0-1000）">
-              <div role="listbox" aria-label="选择风格权重" className="grid h-9 grid-cols-6 rounded-lg bg-popover p-0.5">
+              <div role="listbox" aria-label="选择风格权重" className="relative isolate grid h-9 grid-cols-6 rounded-lg bg-popover p-0.5">
+                <SelectionHighlight />
                 <SegmentButton selected={value.sw === null} onClick={() => onChange({ sw: null })}>默认</SegmentButton>
                 {MJ_SW_STEPS.map((item) => (
                   <SegmentButton key={item} selected={value.sw === item} onClick={() => onChange({ sw: item })}>
@@ -151,7 +157,8 @@ export function MjControls({
 
           {filledRefs.cref && (
             <Section title="角色权重 cw" hint="角色参考图的影响强度（0-100）">
-              <div role="listbox" aria-label="选择角色权重" className="grid h-9 grid-cols-5 rounded-lg bg-popover p-0.5">
+              <div role="listbox" aria-label="选择角色权重" className="relative isolate grid h-9 grid-cols-5 rounded-lg bg-popover p-0.5">
+                <SelectionHighlight />
                 <SegmentButton selected={value.cw === null} onClick={() => onChange({ cw: null })}>默认</SegmentButton>
                 {MJ_CW_STEPS.map((item) => (
                   <SegmentButton key={item} selected={value.cw === item} onClick={() => onChange({ cw: item })}>
@@ -164,7 +171,8 @@ export function MjControls({
 
           {filledRefs.oref && (
             <Section title="Omni 权重 ow" hint="Omni 参考图的影响强度（0-1000）">
-              <div role="listbox" aria-label="选择 Omni 权重" className="grid h-9 grid-cols-6 rounded-lg bg-popover p-0.5">
+              <div role="listbox" aria-label="选择 Omni 权重" className="relative isolate grid h-9 grid-cols-6 rounded-lg bg-popover p-0.5">
+                <SelectionHighlight />
                 <SegmentButton selected={value.ow === null} onClick={() => onChange({ ow: null })}>默认</SegmentButton>
                 {MJ_OW_STEPS.map((item) => (
                   <SegmentButton key={item} selected={value.ow === item} onClick={() => onChange({ ow: item })}>
@@ -176,7 +184,8 @@ export function MjControls({
           )}
 
           <Section title="混乱度 chaos" hint="越高，四张方案之间差异越大">
-            <div role="listbox" aria-label="选择混乱度" className="grid grid-cols-5 gap-0.5 rounded-lg bg-popover p-0.5">
+            <div role="listbox" aria-label="选择混乱度" className="relative isolate grid grid-cols-5 gap-0.5 rounded-lg bg-popover p-0.5">
+              <SelectionHighlight />
               {MJ_CHAOS_STEPS.map((item) => (
                 <SegmentButton key={item} selected={value.chaos === item} onClick={() => onChange({ chaos: item })}>
                   {item}
@@ -239,7 +248,8 @@ export function MjControls({
           </Section>
 
           <Section title="怪异度 weird" hint="往非常规审美偏，和 stylize 是两个方向">
-            <div role="listbox" aria-label="选择怪异度" className="grid h-9 grid-cols-4 rounded-lg bg-popover p-0.5">
+            <div role="listbox" aria-label="选择怪异度" className="relative isolate grid h-9 grid-cols-4 rounded-lg bg-popover p-0.5">
+              <SelectionHighlight />
               {MJ_WEIRD_STEPS.map((item) => (
                 <SegmentButton key={item} selected={value.weird === item} onClick={() => onChange({ weird: item })}>
                   {item}
@@ -250,7 +260,8 @@ export function MjControls({
 
           {tileSupported(value.botType, value.version) && (
             <Section title="无缝平铺 tile" hint="出可四方连续的贴图">
-              <div role="listbox" aria-label="无缝平铺开关" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+              <div role="listbox" aria-label="无缝平铺开关" className="relative isolate grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                <SelectionHighlight />
                 <SegmentButton selected={value.tile} onClick={() => onChange({ tile: true })}>开启</SegmentButton>
                 <SegmentButton selected={!value.tile} onClick={() => onChange({ tile: false })}>关闭</SegmentButton>
               </div>
@@ -295,7 +306,7 @@ function SegmentButton({
       role="option"
       aria-selected={selected}
       onClick={onClick}
-      className="h-8 rounded-md text-center text-xs hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+      className="h-8 rounded-md text-center text-xs hover:bg-secondary/60 transition-colors"
     >
       {children}
     </button>

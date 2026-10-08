@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 export function OverviewWorkspace({
   draft,
@@ -60,7 +61,7 @@ export function OverviewWorkspace({
             </Button>
             <Button type="button" onClick={onSave} disabled={saving || !dirty}>
               <Save className="size-4" aria-hidden />
-              {saving ? '保存中…' : '保存'}
+              <SwapLabel active={Boolean(saving)} on="保存中…" off="保存" />
             </Button>
           </div>
         </div>

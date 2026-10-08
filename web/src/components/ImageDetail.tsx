@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { apiError } from '@/api/http';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 interface Props {
   jobId: string;
@@ -119,7 +120,7 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
             title="保存对提示词的修改"
           >
             <Save className="size-3.5" />
-            {saving ? '保存中…' : '保存'}
+            <SwapLabel active={Boolean(saving)} on="保存中…" off="保存" />
           </Button>
           <Button
             variant="ghost"

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { chooseFolder } from '@/api/folders';
 import { setDataRoot } from '@/api/onboarding';
+import { SwapLabel } from '@/components/ui/swap-label';
 
 interface Props {
   onComplete: () => void;
@@ -101,7 +102,7 @@ export function DataRootPage({ onComplete }: Props) {
         disabled={!path || saving || choosing}
         className="px-4 py-2 bg-stone-900 text-white rounded disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
-        {saving ? '保存中...' : '保存并继续'}
+        <SwapLabel active={Boolean(saving)} on="保存中..." off="保存并继续" />
       </button>
     </div>
   );

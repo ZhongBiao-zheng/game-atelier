@@ -33,6 +33,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.71.0',
+    date: '2026-10-08',
+    headline: '按钮细节动效：按下回弹、图标换态、选中滑块',
+    changes: [
+      { kind: 'feat', text: '所有按钮按下时轻微回弹。' },
+      { kind: 'feat', text: '播放 / 暂停、显示 / 隐藏、复制、加载中等图标切换时弹入，不再硬切。' },
+      { kind: 'feat', text: '尺寸、比例、时长、Midjourney 参数等选项组，选中底色从旧选项滑到新选项。' },
+      { kind: 'feat', text: '「保存」「提交」等按钮切到「…中」时宽度不跳，文案淡入。' },
+    ],
+  },
+  {
     version: '5.70.0',
     date: '2026-10-08',
     headline: '界面动效：浮层、侧栏、画布结果有了进出场',
