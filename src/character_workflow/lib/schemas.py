@@ -1488,6 +1488,8 @@ class CanvasAgentTurnCreate(BaseModel):
     text: str = Field(min_length=1, max_length=40_000)
     # 用户从画布带进对话的节点；图片节点会把当前版本作为图片发给模型。
     node_ids: list[str] = Field(default_factory=list, max_length=16)
+    # 用户在输入框点选的 Skill：本轮把它的说明附在消息里。
+    skill: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class CanvasAgentApprovalDecision(BaseModel):

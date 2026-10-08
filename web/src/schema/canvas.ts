@@ -422,6 +422,15 @@ export interface CanvasAgentSessionUpdate {
 export interface CanvasAgentTurnCreate {
   text: string;
   node_ids?: string[];
+  /** 用户在输入框点选的 Skill：本轮把它的说明附在消息里。 */
+  skill?: string;
+}
+
+export interface CanvasAgentSkill {
+  name: string;
+  description: string;
+  /** 带脚本的 Skill 只用文字说明，脚本不执行。 */
+  has_scripts: boolean;
 }
 
 export interface CanvasAgentApprovalDecision {

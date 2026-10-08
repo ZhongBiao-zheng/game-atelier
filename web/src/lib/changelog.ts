@@ -33,6 +33,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.77.0',
+    date: '2026-10-08',
+    headline: '画布 Agent 支持 Skill',
+    changes: [
+      { kind: 'feat', text: 'Agent 输入框新增 Skill：导入 zip、SKILL.md 或整个文件夹（与 Claude Code / Codex 同格式），可搜索、删除；Skill 自带的脚本不会执行，只用文字说明。' },
+      { kind: 'feat', text: '选中一个 Skill 后这一条消息按它的说明来做；不选时 Agent 也会按任务自己挑合适的 Skill 读。' },
+      { kind: 'feat', text: 'Agent 的回复支持列表、加粗等格式。' },
+      { kind: 'fix', text: '读画布、查模型这类只读步骤不再弹确认；模型给错参数时自动退回让它改，不再弹出看不懂的确认卡。' },
+    ],
+  },
+  {
     version: '5.76.0',
     date: '2026-10-08',
     headline: '画布内置 Agent',

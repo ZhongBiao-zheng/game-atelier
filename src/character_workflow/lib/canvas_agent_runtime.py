@@ -15,9 +15,11 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable
 
+from character_workflow.lib import canvas_agent_skills as skills
 from character_workflow.lib import canvas_agent_tools as tools
 from character_workflow.lib import keys
 from character_workflow.lib.canvas_agent_models import chat_base_url
@@ -45,7 +47,8 @@ DELTA_FLUSH_SECONDS = 0.15
 MEDIA_SCHEME = "atelier-media://"
 LOCAL = SimpleNamespace(kind="local", session_id="canvas-chat", grant_id=None)
 
-READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "read_media"})
+READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "read_media", "load_skill",
+                        "read_skill_file"})
 ADDITIVE_OPS = frozenset({"add_text", "add_media_node", "add_surface", "connect"})
 NODE_TARGET_OPS = frozenset({"set_text", "set_draft", "move", "remove_node"})
 
@@ -136,6 +139,11 @@ def execute_tool(project_id: str, tool: str, arguments: dict) -> tuple[dict, lis
         result = tools.read_media(LOCAL, payload)
         result.pop("preview", None)  # 对话模型的工具结果只收文本
         return result, []
+    if tool == "load_skill":
+        return {"name": arguments["name"], "content": skills.read_skill(arguments["name"])}, []
+    if tool == "read_skill_file":
+        return {"path": arguments["path"],
+                "content": skills.read_skill_file(arguments["name"], arguments["path"])}, []
     if tool == "apply_changes":
         result = _with_fresh_revision(project_id, lambda revision: tools.apply_changes(
             LOCAL, ApplyChangesInput(project_id=project_id, expected_revision=revision,
@@ -173,6 +181,13 @@ def is_tool_error(text: str) -> bool:
     return text.startswith(("错误", "参数错误"))
 
 
+def tool_error_label(text: str) -> str:
+    """面板上的一行说明；完整的校验信息只给模型看（它要靠这个改参数）。"""
+    if text.startswith("参数错误"):
+        return "参数不合规，已退回模型修正"
+    return text.splitlines()[0][:200]
+
+
 # ── 工具定义（给模型看的 schema）─────────────────────────────────────────────────
 
 TOOL_SPECS: dict[str, tuple[str, dict]] = {
@@ -194,17 +209,56 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
     "read_media": ("读取一个媒体版本的元数据（类型、尺寸、时长）。",
                    {"type": "object", "required": ["version_id"],
                     "properties": {"version_id": {"type": "string"}}}),
+    "load_skill": ("读取一个 Skill 的完整说明（名称见系统提示里的 Skill 列表）。",
+                   {"type": "object", "required": ["name"],
+                    "properties": {"name": {"type": "string"}}}),
+    "read_skill_file": ("读取 Skill 附带的参考文件（路径见 load_skill 结果末尾的清单）。",
+                        {"type": "object", "required": ["name", "path"],
+                         "properties": {"name": {"type": "string"},
+                                        "path": {"type": "string"}}}),
 }
+
+
+def _inline_refs(schema: dict) -> dict:
+    """展开 $ref / $defs、去掉 discriminator：聚合商把工具转给 Claude 等模型时常丢掉 $defs，
+    模型看不到真实结构就自己编字段（实测 Tuzi 的 Claude 把 op 写成 action）。"""
+    defs = schema.get("$defs", {})
+
+    def walk(value):
+        if isinstance(value, dict):
+            if "$ref" in value:
+                return walk(defs[value["$ref"].rsplit("/", 1)[-1]])
+            return {key: walk(item) for key, item in value.items()
+                    if key not in {"$defs", "discriminator"}}
+        if isinstance(value, list):
+            return [walk(item) for item in value]
+        return value
+
+    return walk(schema)
 
 
 def _params_schema(name: str, base: dict) -> dict:
     if name != "apply_changes":
         return base
     from pydantic import TypeAdapter
-    changes = TypeAdapter(list[CanvasChange]).json_schema()
-    defs = changes.pop("$defs", {})
-    return {"type": "object", "required": ["changes"], "$defs": defs,
-            "properties": {"changes": changes}}
+    changes = _inline_refs(TypeAdapter(list[CanvasChange]).json_schema())
+    return {"type": "object", "required": ["changes"], "properties": {"changes": changes}}
+
+
+def arguments_valid(project_id: str, tool: str, arguments: dict) -> bool:
+    """写操作的参数先按真实入参模型校验：不合格的调用不打扰用户，直接把校验错误回给模型去改。"""
+    from pydantic import ValidationError
+    try:
+        if tool == "apply_changes":
+            ApplyChangesInput(project_id=project_id, expected_revision=0,
+                              changes=arguments.get("changes") or [])
+        elif tool == "run_generation":
+            RunInput(project_id=project_id, expected_revision=0,
+                     surface_node_id=arguments.get("surface_node_id", ""),
+                     requested_count=arguments.get("count", 1))
+    except (ValidationError, TypeError):
+        return False
+    return True
 
 
 def build_tools() -> list:
@@ -221,12 +275,16 @@ def build_tools() -> list:
 
         async def approval(ctx, arguments: dict, _call_id: str) -> bool:
             turn: TurnContext = ctx.context
+            if not arguments_valid(turn.project_id, name, arguments):
+                return False  # 执行时会因校验失败直接返回错误，没有任何副作用
             return needs_confirmation(name, arguments, turn.permission_mode,
                                       turn.created_node_ids)
 
+        # 只读工具直接给 False：部分模型（Tuzi 的 Claude）对无参工具传空字符串参数，SDK 判为
+        # 「参数无法解析」后会无视回调、一律要求人工确认，读画布也弹确认卡。
         return FunctionTool(name=name, description=description, params_json_schema=schema,
                             on_invoke_tool=invoke, strict_json_schema=False,
-                            needs_approval=approval)
+                            needs_approval=False if name in READ_TOOLS else approval)
 
     return [make(name, desc, _params_schema(name, schema))
             for name, (desc, schema) in TOOL_SPECS.items()]
@@ -330,6 +388,11 @@ READ_LABELS = {"get_canvas": "读取画布", "list_models": "查看可用模型"
 
 
 def summarize_call(tool: str, arguments: dict) -> str:
+    if tool == "load_skill":
+        return str(arguments.get("name", ""))
+    if tool == "read_skill_file":
+        # 只显示文件名：带目录的相对路径会被落盘前的隐私替换当成本机路径藏掉。
+        return f"{arguments.get('name', '')} · {PurePosixPath(str(arguments.get('path', ''))).name}"
     if tool in READ_LABELS:
         return READ_LABELS[tool]
     if tool == "run_generation":
@@ -376,7 +439,7 @@ def display_messages(items: list[dict], turn_id: str) -> list[CanvasAgentMessage
             output = outputs[item.get("call_id")]
             text = summarize_call(name, _arguments(item.get("arguments")))
             if is_tool_error(output):
-                text = f"{text}\n{output[:300]}"
+                text = f"{tool_error_label(output)}\n{text}"
             messages.append(CanvasAgentMessageCreate(
                 role="tool", turn_id=turn_id, title=name, text=redact(text),
             ))
@@ -397,7 +460,8 @@ def build_agent(session: CanvasAgentSession):
     settings = ModelSettings(reasoning=Reasoning(effort=session.effort)) if session.effort \
         else ModelSettings()
     return Agent(
-        name="canvas-agent", instructions=INSTRUCTIONS, tools=build_tools(),
+        name="canvas-agent", instructions=INSTRUCTIONS + skills.skills_prompt(),
+        tools=build_tools(),
         model=OpenAIChatCompletionsModel(model=session.model, openai_client=client),
         model_settings=settings,
     )
@@ -540,10 +604,15 @@ def _finish_failed(project_id: str, session_id: str, turn_id: str, status: str,
 
 # ── 会话入口（路由在线程里调用；之后由路由调度 run_turn）────────────────────────
 
-def begin_user_turn(project_id: str, session_id: str, text: str,
-                    node_ids: list[str]) -> CanvasAgentSession:
-    """Append the user's message and mark the session running."""
+def begin_user_turn(project_id: str, session_id: str, text: str, node_ids: list[str],
+                    skill: str | None = None) -> CanvasAgentSession:
+    """Append the user's message and mark the session running.
+
+    用户在输入框点选了 Skill：把它的正文直接附在本条消息里，不靠模型自己判断要不要 load_skill。"""
     item, references = user_item(project_id, text, node_ids)
+    if skill:
+        item["content"].append({"type": "input_text", "text": (
+            f"[本轮按 Skill「{skill}」的说明来做；其中提到的脚本不能执行]\n{skills.read_skill(skill)}")})
 
     def update(current: CanvasAgentSession, now: str) -> dict:
         if current.status in {"running", "awaiting_approval"}:
@@ -551,7 +620,7 @@ def begin_user_turn(project_id: str, session_id: str, text: str,
         if not current.model or not current.model_alias:
             raise WorkshopError("INVALID_PARAMETERS", "请先选择对话模型", 422)
         message = CanvasAgentMessageCreate(
-            role="user", text=redact(text),
+            role="user", text=redact(text), title=skill,
             references=[CanvasAgentReference(**ref) for ref in references],
         )
         title = current.title
@@ -579,7 +648,7 @@ def resolve_approvals(project_id: str, session_id: str,
             text, new_nodes = run_tool_safely(project_id, approval.tool,
                                               _arguments(approval.arguments))
             created.update(new_nodes)
-            label = text[:300] if is_tool_error(text) else "已执行"
+            label = tool_error_label(text) if is_tool_error(text) else "已执行"
         else:
             text, label = "用户拒绝了这个操作。", "已拒绝"
         outputs.append({"type": "function_call_output", "call_id": approval.call_id,

@@ -8,9 +8,10 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, File, Form, Response, UploadFile
 
 from character_workflow.lib import canvas_agent_runtime as runtime
+from character_workflow.lib import canvas_agent_skills as skills
 from character_workflow.lib.canvas_agent_models import list_chat_models
 from character_workflow.lib.canvas_agent_sessions import (
     mutate_canvas_agent_session, read_canvas_agent_session,
@@ -97,7 +98,7 @@ async def post_message(project_id: str, session_id: str,
         raise WorkshopError("SESSION_BUSY", "上一轮还没结束", 409)
     await _call(recover_if_stale, await _call(read_canvas_agent_session, project_id, session_id))
     session = await _call(runtime.begin_user_turn, project_id, session_id, payload.text,
-                          payload.node_ids)
+                          payload.node_ids, payload.skill)
     _schedule(project_id, session_id)
     return session
 
@@ -137,6 +138,49 @@ async def post_cancel(project_id: str, session_id: str) -> CanvasAgentSession:
                               _reject_pending)
         runtime.notify_session(hub.broadcast, project_id, session_id)
     return await _call(recover_if_stale, session)
+
+
+@router.get("/agent/skills")
+async def get_skills() -> dict:
+    rows = await asyncio.to_thread(skills.list_skills)
+    return {"skills": [row.as_dict() for row in rows]}
+
+
+async def _read_upload(upload: UploadFile, budget: int) -> bytes:
+    data = await upload.read(budget + 1)
+    if len(data) > budget:
+        raise WorkshopError("CONTENT_TOO_LARGE", skills.TOO_LARGE, 413)
+    return data
+
+
+@router.post("/agent/skills/import")
+async def import_skill(
+    files: list[UploadFile] = File(...),
+    paths: list[str] = Form(default=[]),
+    replace: bool = Form(default=False),
+) -> dict:
+    """zip（单个 .zip 文件）、文件夹（paths 与 files 一一对应的相对路径）或单个 SKILL.md。"""
+    if len(files) > skills.MAX_FILES:
+        raise WorkshopError("CONTENT_TOO_LARGE", skills.TOO_LARGE, 413)
+    if len(files) == 1 and (files[0].filename or "").lower().endswith(".zip"):
+        payload = await _read_upload(files[0], skills.MAX_TOTAL_BYTES)
+        contents = await asyncio.to_thread(skills.files_from_zip, payload)
+    else:
+        if paths and len(paths) != len(files):
+            raise WorkshopError("INVALID_PARAMETERS", "文件与路径数量不一致", 422)
+        contents, budget = {}, skills.MAX_TOTAL_BYTES
+        for index, upload in enumerate(files):
+            data = await _read_upload(upload, budget)
+            budget -= len(data)
+            contents[paths[index] if paths else (upload.filename or "SKILL.md")] = data
+    info = await asyncio.to_thread(lambda: skills.install_skill(contents, replace=replace))
+    return info.as_dict()
+
+
+@router.delete("/agent/skills/{name}", status_code=204)
+async def remove_skill(name: str) -> Response:
+    await asyncio.to_thread(skills.delete_skill, name)
+    return Response(status_code=204)
 
 
 def register_canvas_chat_routes(app: FastAPI) -> None:

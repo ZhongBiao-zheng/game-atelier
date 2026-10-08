@@ -19,6 +19,8 @@ dependencies = [
   'onnxruntime>=1.20; sys_platform != "darwin" or platform_machine == "arm64"',
   "psd-tools>=1.19,<2",
   "pillow-heif>=1.8,<2",
+  # Agent Skill 的 SKILL.md frontmatter 是 YAML（description 常用多行写法）。
+  "pyyaml>=6",
   "openai-agents>=0.4",
 ]
 

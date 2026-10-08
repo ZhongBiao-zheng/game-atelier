@@ -6,6 +6,7 @@ import {
   getCanvasAgentSession,
   listCanvasAgentChatModels,
   listCanvasAgentSessions,
+  listCanvasAgentSkills,
   sendCanvasAgentMessage,
   updateCanvasAgentSession,
 } from '@/api/canvas';
@@ -15,6 +16,7 @@ import type {
   CanvasAgentSession,
   CanvasAgentSessionSummary,
   CanvasAgentSessionUpdate,
+  CanvasAgentSkill,
 } from '@/schema/canvas';
 
 /** SSE 可能被本机代理整条憋住：运行中再按这个间隔拉一次会话兜底。 */
@@ -49,6 +51,7 @@ export function useCanvasAgent(projectId: string, open: boolean) {
   const [streaming, setStreaming] = useState('');
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [models, setModels] = useState<CanvasAgentChatModelList | null>(null);
+  const [skills, setSkills] = useState<CanvasAgentSkill[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // 还没有会话时的设置：只记在本地，发第一条消息建会话时一并写入，不为选个模型就建空会话。
@@ -108,6 +111,11 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     if (!open || models) return;
     listCanvasAgentChatModels().then(setModels, loadError => setError(messageOf(loadError)));
   }, [open, models]);
+
+  const reloadSkills = useCallback(() => {
+    listCanvasAgentSkills().then(result => setSkills(result.skills), loadError => setError(messageOf(loadError)));
+  }, []);
+  useEffect(() => { if (open) reloadSkills(); }, [open, reloadSkills]);
 
   useSSE({
     enabled: open,
@@ -199,10 +207,12 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     });
   }, [projectId, run, session]);
 
-  const send = useCallback((text: string, nodeIds: string[]) => run(async () => {
+  const send = useCallback((text: string, nodeIds: string[], skill: string | null) => run(async () => {
     const target = session ?? await createSession();
     setStreaming('');
-    const updated = await sendCanvasAgentMessage(projectId, target.session_id, { text, node_ids: nodeIds });
+    const updated = await sendCanvasAgentMessage(projectId, target.session_id, {
+      text, node_ids: nodeIds, ...(skill ? { skill } : {}),
+    });
     setSession(updated);
     void refreshList().catch(() => undefined);
     return updated;
@@ -228,7 +238,7 @@ export function useCanvasAgent(projectId: string, open: boolean) {
   const clearError = useCallback(() => setError(null), []);
 
   return {
-    sessions, session, draft, streaming, activeTool, models, error, pending,
+    sessions, session, draft, streaming, activeTool, models, skills, error, pending, reloadSkills,
     selectSession, newSession, updateSettings, send, decide, stop, clearError,
   };
 }

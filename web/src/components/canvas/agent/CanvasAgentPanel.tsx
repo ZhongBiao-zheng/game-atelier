@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import ReactMarkdown from 'react-markdown';
 import {
   ArrowUp, Brain, Check, ChevronDown, FileImage, FileText, FileVideo, Loader2, Paperclip,
-  ShieldCheck, Square, SquarePen, Wrench, X, Zap,
+  Puzzle, ShieldCheck, Square, SquarePen, Wrench, X, Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -10,6 +11,7 @@ import {
 import { cn } from '@/lib/utils';
 import type { CanvasAgentMessage } from '@/schema/canvas';
 import { CanvasAgentModelPicker } from './CanvasAgentModelPicker';
+import { CanvasAgentSkillPicker } from './CanvasAgentSkillPicker';
 import { useCanvasAgent } from './useCanvasAgent';
 
 export interface CanvasAgentNodeRef {
@@ -26,6 +28,8 @@ const TOOL_LABELS: Record<string, string> = {
   run_generation: '生成',
   get_run: '查询生成进度',
   read_media: '读取媒体信息',
+  load_skill: '读取 Skill',
+  read_skill_file: '读取 Skill 文件',
 };
 
 const ICON_BUTTON = 'grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40';
@@ -36,11 +40,35 @@ function NodeIcon({ type }: { type: string }) {
   return <FileText className="size-3.5 shrink-0" />;
 }
 
+/** 模型回复常带 Markdown：标题压到正文字号，面板里只用 sm / xs 两档。 */
+function AgentMarkdown({ text }: { text: string }) {
+  return (
+    <div className="break-words text-sm">
+      <ReactMarkdown
+        components={{
+          h1: ({ node: _node, ...props }) => <p className="my-2 font-medium first:mt-0" {...props} />,
+          h2: ({ node: _node, ...props }) => <p className="my-2 font-medium first:mt-0" {...props} />,
+          h3: ({ node: _node, ...props }) => <p className="my-2 font-medium first:mt-0" {...props} />,
+          p: ({ node: _node, ...props }) => <p className="my-2 first:mt-0 last:mb-0" {...props} />,
+          ul: ({ node: _node, ...props }) => <ul className="my-2 list-disc space-y-0.5 pl-4" {...props} />,
+          ol: ({ node: _node, ...props }) => <ol className="my-2 list-decimal space-y-0.5 pl-4" {...props} />,
+          code: ({ node: _node, ...props }) => <code className="rounded bg-secondary px-1 text-xs" {...props} />,
+          pre: ({ node: _node, ...props }) => <pre className="my-2 overflow-x-auto rounded-md bg-secondary p-2 text-xs" {...props} />,
+          a: ({ node: _node, ...props }) => <a className="text-primary underline underline-offset-2" target="_blank" rel="noreferrer" {...props} />,
+        }}
+      >{text}</ReactMarkdown>
+    </div>
+  );
+}
+
 function Message({ message }: { message: CanvasAgentMessage }) {
   if (message.role === 'user') {
     return (
       <div className="flex flex-col items-end gap-1">
         <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-xl bg-secondary px-3 py-2 text-sm">{message.text}</p>
+        {message.title && (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground"><Puzzle className="size-3" />{message.title}</span>
+        )}
         {message.references.length > 0 && (
           <div className="flex max-w-[85%] flex-wrap justify-end gap-1">
             {message.references.map(ref => (
@@ -74,7 +102,7 @@ function Message({ message }: { message: CanvasAgentMessage }) {
           <p className="mt-1 whitespace-pre-wrap break-words border-l border-border pl-2">{message.reasoning_summary}</p>
         </details>
       )}
-      {message.text && <p className="whitespace-pre-wrap break-words text-sm">{message.text}</p>}
+      {message.text && <AgentMarkdown text={message.text} />}
     </div>
   );
 }
@@ -91,6 +119,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
   const { session, streaming, activeTool, pending } = agent;
   const [text, setText] = useState('');
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
+  const [skill, setSkill] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const status = session?.status ?? 'idle';
   const running = status === 'running';
@@ -118,9 +147,10 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
 
   async function submit() {
     if (!canSend) return;
-    const sent = await agent.send(text.trim(), attached.map(node => node.id));
+    const sent = await agent.send(text.trim(), attached.map(node => node.id), skill);
     if (!sent) return;
     setText('');
+    setSkill(null);
     // 发出去的节点不再自动带进下一条；重新选中才会再带。
     setDismissed(new Set(selectedNodes.map(node => node.id)));
   }
@@ -161,7 +191,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
 
       <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
         {messages.map(message => <Message key={message.message_id} message={message} />)}
-        {running && streaming && <p className="whitespace-pre-wrap break-words text-sm">{streaming}</p>}
+        {running && streaming && <AgentMarkdown text={streaming} />}
         {running && (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
             <Loader2 aria-label="Agent 正在处理" className="size-3.5 animate-spin" />
@@ -192,8 +222,15 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
       )}
 
       <div className="m-2 mt-0 rounded-xl border border-border bg-background/60 focus-within:border-primary/60">
-        {attached.length > 0 && (
+        {(attached.length > 0 || skill) && (
           <div className="flex flex-wrap gap-1 px-2 pt-2">
+            {skill && (
+              <span className="flex max-w-[12rem] items-center gap-1 rounded-full border border-primary/50 py-0.5 pl-2 pr-1 text-xs text-primary">
+                <Puzzle className="size-3.5 shrink-0" />
+                <span className="truncate">{skill}</span>
+                <button type="button" aria-label={`不用 Skill ${skill}`} onClick={() => setSkill(null)} className="rounded-full p-0.5 hover:bg-secondary"><X className="size-3" /></button>
+              </span>
+            )}
             {attached.map(node => (
               <span key={node.id} className="flex max-w-[10rem] items-center gap-1 rounded-full border border-border py-0.5 pl-2 pr-1 text-xs text-muted-foreground">
                 <NodeIcon type={node.type} />
@@ -214,6 +251,13 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
         />
         <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
           <button type="button" title="上传素材" aria-label="上传素材" onClick={onUpload} className={ICON_BUTTON}><Paperclip className="size-4" /></button>
+          <CanvasAgentSkillPicker
+            skills={agent.skills}
+            selected={skill}
+            disabled={running || pending}
+            onSelect={setSkill}
+            onChanged={agent.reloadSkills}
+          />
           <CanvasAgentModelPicker
             models={agent.models}
             alias={modelAlias}

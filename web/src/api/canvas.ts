@@ -7,6 +7,7 @@ import type {
   CanvasAgentSession,
   CanvasAgentSessionList,
   CanvasAgentSessionUpdate,
+  CanvasAgentSkill,
   CanvasAgentTurnCreate,
   CanvasConnection,
   CanvasDocument,
@@ -142,6 +143,33 @@ export function cancelCanvasAgentTurn(projectId: string, sessionId: string): Pro
 
 export function listCanvasAgentChatModels(): Promise<CanvasAgentChatModelList> {
   return requestJson<CanvasAgentChatModelList>('/api/canvas/agent/models', '读取对话模型');
+}
+
+export function listCanvasAgentSkills(): Promise<{ skills: CanvasAgentSkill[] }> {
+  return requestJson<{ skills: CanvasAgentSkill[] }>('/api/canvas/agent/skills', '读取 Skill');
+}
+
+/** zip：传一个 .zip；文件夹：files 与 paths（相对路径）一一对应；也可只传一个 SKILL.md。 */
+export function importCanvasAgentSkill(
+  files: File[],
+  paths: string[],
+  replace = false,
+): Promise<CanvasAgentSkill> {
+  const form = new FormData();
+  files.forEach((file, index) => {
+    form.append('files', file);
+    if (paths.length) form.append('paths', paths[index]);
+  });
+  form.append('replace', String(replace));
+  return requestJson<CanvasAgentSkill>('/api/canvas/agent/skills/import', '导入 Skill', {
+    method: 'POST', body: form,
+  });
+}
+
+export function deleteCanvasAgentSkill(name: string): Promise<void> {
+  return request(`/api/canvas/agent/skills/${encodeURIComponent(name)}`, '删除 Skill', {
+    method: 'DELETE',
+  }).then(() => undefined);
 }
 
 export async function exportCanvasProjects(projectIds: string[]): Promise<void> {

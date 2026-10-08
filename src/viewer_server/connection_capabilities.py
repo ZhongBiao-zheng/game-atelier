@@ -96,6 +96,9 @@ POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/messages
 POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/approvals
 POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/cancel
 GET /api/canvas/agent/models
+GET /api/canvas/agent/skills
+POST /api/canvas/agent/skills/import
+DELETE /api/canvas/agent/skills/{name}
 GET /api/creation-assets
 POST /api/creation-assets/staleness
 POST /api/creation-assets/generation/from-job
@@ -170,6 +173,8 @@ LOCAL_MANAGEMENT = frozenset({
     "/api/onboarding/data-root",
     # 挂载团队库 = 往本机任意目录写清单并整棵扫描，同 folder-picker 只给本机页面。
     "/api/team-libraries",
+    # 导入 / 删除 Agent Skill 改写数据目录里的说明文件，Agent 每轮都会读，只给本机页面。
+    "/api/canvas/agent/skills/import", "/api/canvas/agent/skills/{name}",
 })
 # 已脱敏的 Key 列表（alias / 能力 / 掩码）是选模型的依据，网站会话也要读；增删改与 reveal 仍属管理。
 # 已挂载的团队库列表同理：网站会话要读它才能浏览 / 采用。

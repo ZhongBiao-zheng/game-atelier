@@ -186,3 +186,22 @@ def test_assistant_text_with_local_path_is_redacted_not_rejected():
               "content": [{"type": "output_text", "text": "文件在 /Users/someone/secret.png 里"}]}]
     [message] = runtime.display_messages(items, "turn-1")
     assert "/Users/someone" not in message.text and "[已隐藏]" in message.text
+
+
+def test_read_tools_never_wait_for_approval():
+    # 回调对「参数无法解析」无效（Tuzi 的 Claude 给无参工具传空字符串），只读工具必须是常量 False。
+    flags = {tool.name: tool.needs_approval for tool in runtime.build_tools()}
+    assert all(flags[name] is False for name in runtime.READ_TOOLS)
+    assert callable(flags["apply_changes"]) and callable(flags["run_generation"])
+
+
+def test_apply_changes_schema_is_flat_and_bad_arguments_skip_approval():
+    import json as _json
+    text = _json.dumps(runtime._params_schema("apply_changes", {}))
+    # 聚合商转给 Claude 时会丢 $defs：引用必须展开，否则模型看不到 op 字段自己编。
+    assert "$ref" not in text and "$defs" not in text and '"op"' in text
+    bad = {"changes": [{"action": "add_surface", "node_id": "x"}]}
+    good = {"changes": [{"op": "add_surface", "kind": "image", "title": "t",
+                         "position": {"x": 0, "y": 0}}]}
+    assert runtime.arguments_valid("canvas-12345678", "apply_changes", bad) is False
+    assert runtime.arguments_valid("canvas-12345678", "apply_changes", good) is True
