@@ -118,7 +118,7 @@ export function imageControlCaps(
   // 2880²），而且超限请求比按 2880 发多花一倍 token（1483 vs 659）。
   const tuziGptImageTiers = isTuzi && family === 'gpt-image';
   const tuziNanoWithoutQuality = isTuzi && family === 'nano-banana'
-    && normalized !== 'nano-banana-pro' && normalized !== 'nano-banana-2';
+    && !['nano-banana-pro', 'nano-banana-2', 'gemini-nano-banana-2.1', 'nano-banana-2.1'].includes(normalized);
   const qualities = supportsImageQuality(modelId) && !tuziNanoWithoutQuality
     ? base.qualities
     : null;

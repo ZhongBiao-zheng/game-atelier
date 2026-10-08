@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.73.2',
+    date: '2026-10-08',
+    headline: 'Tuzi 的 Nano Banana 2.1 可选清晰度',
+    changes: [
+      { kind: 'feat', text: 'Tuzi 上的 Nano Banana 2.1 可选低 / 中 / 高质量，对应 1K / 2K / 4K 出图。' },
+    ],
+  },
+  {
     version: '5.73.1',
     date: '2026-10-08',
     headline: '快速添加修复',
