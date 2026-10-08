@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.75.0',
+    date: '2026-10-08',
+    headline: '一键启动自动更新',
+    changes: [
+      { kind: 'feat', text: '有新版直接更新，不再询问；提示显示版本号和这几版的更新内容。' },
+      { kind: 'feat', text: '本地改动挡住更新时，列出是哪些文件，可选择暂存后继续更新。' },
+      { kind: 'feat', text: '断网时最多等 3 秒就跳过更新，启动更快。' },
+    ],
+  },
+  {
     version: '5.74.0',
     date: '2026-10-08',
     headline: '国内更新走 CNB 镜像',
