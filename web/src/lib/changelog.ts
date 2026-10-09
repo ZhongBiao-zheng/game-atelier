@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.82.1',
+    date: '2026-10-09',
+    headline: '出图按真实格式保存',
+    changes: [
+      { kind: 'fix', text: '出图结果按厂商实际返回的格式保存：JPEG 存成 .jpg、PNG 存成 .png，不再统一转成 PNG（文件小很多）。' },
+    ],
+  },
+  {
     version: '5.82.0',
     date: '2026-10-09',
     headline: '画布 Agent：Auto 全自动、面板可拖宽',

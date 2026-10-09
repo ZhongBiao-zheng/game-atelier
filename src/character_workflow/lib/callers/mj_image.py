@@ -37,7 +37,7 @@ import requests
 
 from character_workflow.lib import keys as _keys
 from character_workflow.lib.callers import video_poll
-from character_workflow.lib.callers.png_output import write_png
+from character_workflow.lib.callers.image_output import write_image
 
 # 提交受理码：1=成功，21=任务已存在（同 prompt 被兼容层归并），22=排队中。
 _ACCEPTED_CODES = {1, 21, 22}
@@ -365,9 +365,7 @@ def _download_png(url: str, output_dir: Path, index: int, *, task_ref: str = "")
             last_exc, last_status = e, None
         else:
             if resp.ok:
-                path = output_dir / f"mj{index}.png"
-                write_png(path, resp.content)
-                return str(path)
+                return str(write_image(output_dir, f"mj{index}", resp.content))
             last_exc, last_status = None, int(resp.status_code)
             if not video_poll.is_transient_status(last_status):
                 break

@@ -868,3 +868,27 @@ def test_run_job_video_cancel_requested_lands_canceled(project, monkeypatch):
         job_runner.run_job("c3")
 
     assert read_job("c3").status is JobStatus.CANCELED
+
+
+def test_run_job_keeps_real_jpeg_extension(project, monkeypatch):
+    """caller 按真实格式落盘（JPEG 存 .jpg）；搬进资产目录时不能再改回 .png。"""
+    from PIL import Image
+
+    save_job(Job(
+        job_id="studio-jpeg-001", character_id="zz-main", prompt="fox",
+        submitted_at="2026-10-09T00:00:00+08:00", model="doubao-seedream-4-5-251128",
+        params=JobParams(size="2048x2048", n=1), output_paths=[], status=JobStatus.PENDING,
+        error=None, asset_slot=AssetSlot.PORTRAIT, kind=JobKind.IMAGE, namespace="studio",
+        alias="zz-main", provider="custom",
+    ))
+
+    def fake_dispatch(*, output_dir, **kw):
+        out = Path(output_dir) / "v1.jpg"
+        Image.new("RGB", (5, 4), "red").save(out, format="JPEG")
+        return [str(out)]
+
+    monkeypatch.setattr(job_runner, "dispatch", fake_dispatch)
+    final = job_runner.run_job("studio-jpeg-001")
+    expected = project / "studio" / "studio-jpeg-001" / "v1.jpg"
+    assert final.output_paths == [str(expected)]
+    assert expected.read_bytes()[:3] == b"\xff\xd8\xff"
