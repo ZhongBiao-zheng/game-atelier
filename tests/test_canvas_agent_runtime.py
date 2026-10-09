@@ -19,24 +19,17 @@ from viewer_server.server_app import build_app
 from tests.local_client import LocalTestClient
 
 
-@pytest.mark.parametrize(("tool", "arguments", "mode", "created", "expected"), [
-    ("get_canvas", {}, "review", set(), False),
-    ("read_media", {"version_id": "v"}, "auto", set(), False),
-    ("run_generation", {"surface_node_id": "n"}, "review", set(), True),
-    ("run_generation", {"surface_node_id": "n"}, "auto", set(), False),
-    ("apply_changes", {"changes": [{"op": "add_surface"}, {"op": "connect"}]}, "review", set(), True),
-    ("apply_changes", {"changes": [{"op": "add_surface"}, {"op": "connect"}]}, "auto", set(), False),
-    # Auto 下改本会话新建的节点仍算新增；改用户原有节点、断线一律确认。
-    ("apply_changes", {"changes": [{"op": "set_draft", "node_id": "mine"}]}, "auto", {"mine"}, False),
-    ("apply_changes", {"changes": [{"op": "set_draft", "node_id": "theirs"}]}, "auto", {"mine"}, True),
-    ("apply_changes", {"changes": [{"op": "remove_node", "node_id": "theirs"}]}, "auto", set(), True),
-    ("apply_changes", {"changes": [{"op": "disconnect", "connection_id": "e"}]}, "auto", set(), True),
-    # 混合批次：一项需要确认，整批确认。
-    ("apply_changes", {"changes": [{"op": "add_text"}, {"op": "move", "node_id": "x"}]}, "auto",
-     set(), True),
+@pytest.mark.parametrize(("tool", "mode", "expected"), [
+    ("get_canvas", "review", False),
+    ("read_media", "auto", False),
+    ("run_generation", "review", True),
+    ("apply_changes", "review", True),
+    # Auto 一律不确认：出图、修改、删除都直接执行。
+    ("run_generation", "auto", False),
+    ("apply_changes", "auto", False),
 ])
-def test_permission_matrix(tool, arguments, mode, created, expected):
-    assert needs_confirmation(tool, arguments, mode, created) is expected
+def test_permission_matrix(tool, mode, expected):
+    assert needs_confirmation(tool, mode) is expected
 
 
 @pytest.mark.parametrize(("item", "expected"), [

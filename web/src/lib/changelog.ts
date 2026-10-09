@@ -33,6 +33,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.82.0',
+    date: '2026-10-09',
+    headline: '画布 Agent：Auto 全自动、面板可拖宽',
+    changes: [
+      { kind: 'feat', text: 'Auto 模式不再弹任何确认：出图、修改、删除都直接执行；要逐步把关请切到审查。' },
+      { kind: 'feat', text: 'Agent 面板左边缘可以拖动调宽，宽度会记住。' },
+      { kind: 'fix', text: 'Agent 发起的生成，画布节点现在会立刻显示「正在生成」，出图后自动更新。' },
+      { kind: 'fix', text: '需求涉及多个角色（如「他俩的孩子」）时，Agent 会把这些角色都连成参考图。' },
+    ],
+  },
+  {
     version: '5.81.0',
     date: '2026-10-09',
     headline: '画布 Agent 工具栏合成一排、默认 Auto',

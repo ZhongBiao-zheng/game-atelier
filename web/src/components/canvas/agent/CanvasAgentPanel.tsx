@@ -16,6 +16,7 @@ import { CanvasAgentModelPicker } from './CanvasAgentModelPicker';
 import { CanvasAgentPreferencePicker } from './CanvasAgentPreferencePicker';
 import { CanvasAgentReferenceThumb } from './CanvasAgentReferenceThumb';
 import { buildCanvasAgentTimeline } from './canvasAgentTimeline';
+import { AGENT_PANEL_MAX_WIDTH, AGENT_PANEL_MIN_WIDTH, useAgentPanelWidth } from './useAgentPanelWidth';
 import { CanvasAgentSkillPicker } from './CanvasAgentSkillPicker';
 import { useCanvasAgent } from './useCanvasAgent';
 
@@ -204,6 +205,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
   const [text, setText] = useState('');
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const [skill, setSkill] = useState<string | null>(null);
+  const { width: panelWidth, startResize, resizeByKey } = useAgentPanelWidth();
   const listRef = useRef<HTMLDivElement>(null);
   const status = session?.status ?? 'idle';
   const running = status === 'running';
@@ -255,8 +257,23 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
     <aside
       id="canvas-agent-panel"
       aria-label="画布 Agent"
-      className={cn('fixed bottom-56 right-4 top-24 z-40 flex w-[min(25rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-popover shell-glow', className)}
+      className={cn('fixed bottom-56 right-4 top-24 z-40 flex flex-col overflow-hidden rounded-xl border border-border bg-popover shell-glow', className)}
+      style={{ width: `min(${panelWidth}px, calc(100vw - 2rem))` }}
     >
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="拖动调整 Agent 面板宽度"
+        aria-valuenow={panelWidth}
+        aria-valuemin={AGENT_PANEL_MIN_WIDTH}
+        aria-valuemax={AGENT_PANEL_MAX_WIDTH}
+        tabIndex={0}
+        onPointerDown={startResize}
+        onKeyDown={resizeByKey}
+        className="group absolute inset-y-0 left-0 z-10 w-2 cursor-ew-resize touch-none focus-visible:outline-none"
+      >
+        <span className="absolute inset-y-3 left-0.5 w-0.5 rounded-full bg-primary/0 transition-colors group-hover:bg-primary/60 group-focus-visible:bg-primary/60 group-active:bg-primary" />
+      </div>
       <header className="flex items-center gap-1 border-b border-border px-2 py-1.5">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -407,7 +424,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
           ><Brain className="size-4" /></button>
           <button
             type="button"
-            title={autoMode ? 'Auto：新增内容自动执行，改动已有内容才确认' : '审查：每一步都先确认'}
+            title={autoMode ? 'Auto：全部直接执行，不再确认' : '审查：每一步都先确认'}
             aria-label={autoMode ? '权限模式：Auto' : '权限模式：审查'}
             disabled={running || pending}
             onClick={() => void agent.updateSettings({ permission_mode: autoMode ? 'review' : 'auto' })}

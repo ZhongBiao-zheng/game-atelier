@@ -51,8 +51,6 @@ LOCAL = SimpleNamespace(kind="local", session_id="canvas-chat", grant_id=None)
 
 READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "read_media", "load_skill",
                         "read_skill_file", "wait_for_run"})
-ADDITIVE_OPS = frozenset({"add_text", "add_media_node", "add_surface", "connect"})
-NODE_TARGET_OPS = frozenset({"set_text", "set_draft", "move", "remove_node"})
 
 INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术和策划在无限画布上出图、出视频。
 
@@ -65,6 +63,9 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
   set_draft / connect 用这个 node_id 引用它；节点标题不能当 id 用。
 - 用画布上已有的图当参考（用户带进来的节点、上一次出的图）：直接 connect 那个节点到新的生成节点，
   不要 add_media_node 把它复制成新节点再连。
+- 需求涉及画布上多个已有角色或元素时（如「他们俩的儿子」「把 A 和 B 放进同一场景」），把相关的
+  节点都 connect 到生成节点，每个都作为参考图；数量不超过 list_models 里该模型的 reference_limits.image。
+  只连一张会丢掉另一个角色的特征。
 - 新节点的位置由系统自动排在上一次出图的右侧、不和其他节点重叠；add_* 的 position 填 {x: 0, y: 0}
   即可，不用自己计算。
 - 发起生成后调用 wait_for_run 等结果，结果图会附在工具结果后面给你看。看完向用户简短汇报：
@@ -122,24 +123,9 @@ class TurnContext:
 
 # ── 权限 ────────────────────────────────────────────────────────────────────────
 
-def needs_confirmation(tool: str, arguments: dict, mode: str, created_node_ids: set[str]) -> bool:
-    """审查模式：所有写操作都确认。Auto：只有修改 / 删除用户已有内容才确认。"""
-    if tool in READ_TOOLS:
-        return False
-    if mode != "auto":
-        return True
-    if tool == "run_generation":
-        return False
-    if tool == "apply_changes":
-        for change in arguments.get("changes") or []:
-            op = change.get("op") if isinstance(change, dict) else None
-            if op in ADDITIVE_OPS:
-                continue
-            if op in NODE_TARGET_OPS and change.get("node_id") in created_node_ids:
-                continue
-            return True
-        return False
-    return True
+def needs_confirmation(tool: str, mode: str) -> bool:
+    """审查模式：所有写操作都确认。Auto：一律直接执行，出图、修改、删除都不再询问（2026-10-09 定）。"""
+    return tool not in READ_TOOLS and mode != "auto"
 
 
 # ── 工具执行（同步，跑在线程里）──────────────────────────────────────────────────
@@ -398,8 +384,7 @@ def build_tools() -> list:
             turn: TurnContext = ctx.context
             if not arguments_valid(turn.project_id, name, arguments):
                 return False  # 执行时会因校验失败直接返回错误，没有任何副作用
-            return needs_confirmation(name, arguments, turn.permission_mode,
-                                      turn.created_node_ids)
+            return needs_confirmation(name, turn.permission_mode)
 
         # 只读工具直接给 False：部分模型（Tuzi 的 Claude）对无参工具传空字符串参数，SDK 判为
         # 「参数无法解析」后会无视回调、一律要求人工确认，读画布也弹确认卡。
