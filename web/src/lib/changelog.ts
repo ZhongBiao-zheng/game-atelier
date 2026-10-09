@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.83.1',
+    date: '2026-10-09',
+    headline: '框选后的选区框回来了',
+    changes: [
+      { kind: 'fix', text: '框选结束后选区框不显示的问题。' },
+      { kind: 'fix', text: '开始框选的第一帧偶尔闪一下「全部节点选中」的问题。' },
+    ],
+  },
+  {
     version: '5.83.0',
     date: '2026-10-09',
     headline: '画布框选更准、新建节点不再放大',

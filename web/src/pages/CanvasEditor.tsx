@@ -1747,15 +1747,27 @@ function CanvasEditorInner({
     });
   }, [connectSources, connectionSourceIds, onConnect, screenToFlowPosition]);
 
+  const sweepHits = useRef<ReadonlySet<string>>(new Set());
+
   const onSelectionStart = useCallback(() => {
     selectionRectActive.current = true;
+    sweepHits.current = new Set();
+    // xyflow 在这个回调返回后、React 重渲染之前就会按自己的规则算一次命中，并把 selected 直接
+    // 写进内部节点对象（画面会闪一帧「全部选中」）。这里同步把内部节点置为不可选，堵住这一帧；
+    // 随后的 setSweeping 渲染会正式下发 selectable:false。
+    for (const node of flowStore.getState().nodeLookup.values()) node.selectable = false;
     setSweeping(true);
-  }, []);
+  }, [flowStore]);
 
   const onSelectionEnd = useCallback(() => {
     selectionRectActive.current = false;
     setSweeping(false);
-  }, []);
+    // 选区框（nodesselection-rect）由 xyflow 按它自己的命中数决定显隐，而它这一路被我们
+    // 关掉了，永远是空的。它在本回调之后同步把 nodesSelectionActive 写成 false，
+    // 所以放到微任务里按我们的命中结果再写一次。
+    const active = sweepHits.current.size > 0;
+    queueMicrotask(() => flowStore.setState({ nodesSelectionActive: active }));
+  }, [flowStore]);
 
   // 普通节点碰到框就选中；分组框要被完整包住才选中（同 tldraw 对 frame 的规则），
   // 否则在分组里随手一框，整个分组连同成员都被带上。
@@ -1779,6 +1791,7 @@ function CanvasEditorInner({
         : node.position.x < right && nodeRight > left && node.position.y < bottom && nodeBottom > top;
       if (hit) hits.add(node.id);
     }
+    sweepHits.current = hits;
     setSelectedNodeIds(selection => (
       selection.size === hits.size && [...hits].every(id => selection.has(id)) ? selection : hits
     ));

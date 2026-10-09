@@ -66,6 +66,8 @@ vi.mock('@xyflow/react', () => {
   const selectionListeners = new Set<(state: MockSelectionState, previous: MockSelectionState) => void>();
   let selectionState: MockSelectionState = { transform: flowTransform, userSelectionRect: null };
   const flowStoreApi = {
+    getState: () => ({ nodeLookup: new Map<string, { selectable?: boolean }>() }),
+    setState: () => undefined,
     subscribe: (listener: (state: MockSelectionState, previous: MockSelectionState) => void) => {
       selectionListeners.add(listener);
       return () => { selectionListeners.delete(listener); };
