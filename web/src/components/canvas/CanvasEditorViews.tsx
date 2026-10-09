@@ -17,7 +17,7 @@ import { ArrowLeftRight, BookmarkPlus, Check, ChevronRight, CircleHelp, Download
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
   useRef, useState,
-  type FocusEvent as ReactFocusEvent, type ReactNode, type Ref, type RefObject,
+  type FocusEvent as ReactFocusEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject,
 } from 'react';
 import { Reorder } from 'motion/react';
 import { gsap, MOTION_DURATION, MOTION_STAGGER, prefersReducedMotion, useAnimateOnChange, useGSAP } from '@/lib/motion';
@@ -517,6 +517,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
       ref={setShellElement}
       className="canvas-node-shell group relative h-full w-full overflow-visible"
       data-selected={selected ? 'true' : 'false'}
+      onPointerMove={showHandleOnHoveredSide}
+      onPointerLeave={hideHoverHandles}
     >
       <NodeResizer
         isVisible={selected && !context.multiSelectionActive && !replacingMedia}
@@ -3568,3 +3570,15 @@ export const canvasNodeTypes = {
   )),
   canvasPlaceholder: CanvasPlaceholderCard,
 };
+
+/** 只露指针所在一侧的连接点。直接写 DOM 属性而不走 state：pointermove 每帧都来，进 React 就是整节点重渲染。 */
+function showHandleOnHoveredSide(event: ReactPointerEvent<HTMLDivElement>) {
+  const shell = event.currentTarget;
+  const rect = shell.getBoundingClientRect();
+  const side = event.clientX < rect.left + rect.width / 2 ? 'left' : 'right';
+  if (shell.dataset.hoverSide !== side) shell.dataset.hoverSide = side;
+}
+
+function hideHoverHandles(event: ReactPointerEvent<HTMLDivElement>) {
+  delete event.currentTarget.dataset.hoverSide;
+}

@@ -19,6 +19,7 @@ import {
   type XYPosition,
   useReactFlow,
   useStore,
+  useStoreApi,
 } from '@xyflow/react';
 import {
   ArrowLeft,
@@ -520,6 +521,10 @@ function CanvasEditorInner({
   // 框选期间 React Flow 会把与选中节点相连的边一并选中，边上的剪刀就冒出来了。
   // 边的选中只认点击，框选期间到达的 select 变更一律丢弃。
   const selectionRectActive = useRef(false);
+  // 框选命中由我们自己按文档几何算，不用 xyflow 的 getNodesInside：它把没测量过连接点的节点
+  // （onlyRenderVisibleElements 下从没渲染过的屏外节点）一律当成「在框内」，随手一框就选中一大片。
+  // 框选期间节点设为不可选，让 xyflow 那一路选不出任何东西。
+  const [sweeping, setSweeping] = useState(false);
   const [mediaOperationError, setMediaOperationError] = useState<string | null>(null);
   const [mattingPrompt, setMattingPrompt] = useState<MattingPromptState | null>(null);
   const [mattingDownloading, setMattingDownloading] = useState(false);
@@ -556,6 +561,7 @@ function CanvasEditorInner({
   const flowNodeCache = useRef(new Map<string, {
     node: CanvasNode;
     selected: boolean;
+    selectable: boolean;
     liveLayout: LiveNodeLayout | undefined;
     flowNode: FlowNode;
   }>());
@@ -587,8 +593,8 @@ function CanvasEditorInner({
   const mediaOperationInFlight = useRef(false);
   const documentCommandInFlight = useRef(false);
   const uploadQueue = useRef<Promise<void> | null>(null);
-  // 新建节点后把视口对到它上面；实现在 runViewportCommand 定义之后挂到 ref 上。
-  const focusNewNodeHandler = useRef<(node: CanvasNode) => void>(() => undefined);
+  // 新建节点后把视口对到它们上面；实现在 runViewportCommand 定义之后挂到 ref 上。
+  const focusNewNodesHandler = useRef<(nodes: readonly CanvasNode[]) => void>(() => undefined);
   const canvasUiPreferencesSaveInFlight = useRef(false);
   const toolNoticeTimer = useRef<number | null>(null);
   /** 每次渲染换成最新的处理函数；window 监听只挂一次。 */
@@ -631,6 +637,7 @@ function CanvasEditorInner({
     zoomOut,
     zoomTo,
   } = useReactFlow<FlowNode>();
+  const flowStore = useStoreApi<FlowNode>();
   const usedPromptAssetRef = useRef(false);
   const [focusVariableNodeId, setFocusVariableNodeId] = useState<string | null>(null);
   const consumeVariableFocus = useCallback(() => setFocusVariableNodeId(null), []);
@@ -1333,10 +1340,12 @@ function CanvasEditorInner({
       activeIds.add(node.id);
       const selected = selectedNodeIds.has(node.id);
       const liveLayout = liveNodeLayout?.nodeId === node.id ? liveNodeLayout : undefined;
+      const selectable = !sweeping;
       const cached = flowNodeCache.current.get(node.id);
       if (
         cached?.node === node
         && cached.selected === selected
+        && cached.selectable === selectable
         && cached.liveLayout === liveLayout
       ) return cached.flowNode;
       const renderedSize = liveLayout?.size
@@ -1353,9 +1362,10 @@ function CanvasEditorInner({
           ...(node.type === 'group' ? { pointerEvents: 'none' as const } : {}),
         },
         selected,
+        selectable,
         data: { domain: node },
       };
-      flowNodeCache.current.set(node.id, { node, selected, liveLayout, flowNode });
+      flowNodeCache.current.set(node.id, { node, selected, selectable, liveLayout, flowNode });
       return flowNode;
     });
     for (const id of flowNodeCache.current.keys()) {
@@ -1380,7 +1390,7 @@ function CanvasEditorInner({
       });
     }
     return next;
-  }, [document?.content_versions, document?.nodes, liveNodeLayout, mediaPlaceholder, selectedNodeIds]);
+  }, [document?.content_versions, document?.nodes, liveNodeLayout, mediaPlaceholder, selectedNodeIds, sweeping]);
 
   const activeNodeId = hoveredNodeId ?? (
     selectedNodeIds.size === 1 ? selectedNodeIds.values().next().value ?? null : null
@@ -1456,7 +1466,11 @@ function CanvasEditorInner({
   ), []);
 
   const onNodesChange = useCallback((changes: NodeChange<FlowNode>[]) => {
-    const selectionChanges = changes.filter(change => change.type === 'select' || change.type === 'remove');
+    // 框选期间的选中由 sweepSelection 接管，xyflow 发来的 select 一律忽略。
+    const swept = selectionRectActive.current;
+    const selectionChanges = changes.filter(change => (
+      (change.type === 'select' && !swept) || change.type === 'remove'
+    ));
     if (selectionChanges.length) {
       setSelectedNodeIds(current => {
         const next = new Set(current);
@@ -1732,6 +1746,43 @@ function CanvasEditorInner({
       sourceHandle: state.fromHandle?.type ?? 'source',
     });
   }, [connectSources, connectionSourceIds, onConnect, screenToFlowPosition]);
+
+  const onSelectionStart = useCallback(() => {
+    selectionRectActive.current = true;
+    setSweeping(true);
+  }, []);
+
+  const onSelectionEnd = useCallback(() => {
+    selectionRectActive.current = false;
+    setSweeping(false);
+  }, []);
+
+  // 普通节点碰到框就选中；分组框要被完整包住才选中（同 tldraw 对 frame 的规则），
+  // 否则在分组里随手一框，整个分组连同成员都被带上。
+  useEffect(() => flowStore.subscribe((state, previous) => {
+    const rect = state.userSelectionRect;
+    if (!rect || rect === previous.userSelectionRect || !selectionRectActive.current) return;
+    const current = latestDocument.current;
+    if (!current) return;
+    const [tx, ty, zoom] = state.transform;
+    const left = (rect.x - tx) / zoom;
+    const top = (rect.y - ty) / zoom;
+    const right = left + rect.width / zoom;
+    const bottom = top + rect.height / zoom;
+    const hits = new Set<string>();
+    for (const node of current.nodes) {
+      const size = canvasNodeRenderedSize(node, current.content_versions);
+      const nodeRight = node.position.x + size.width;
+      const nodeBottom = node.position.y + size.height;
+      const hit = node.type === 'group'
+        ? node.position.x >= left && node.position.y >= top && nodeRight <= right && nodeBottom <= bottom
+        : node.position.x < right && nodeRight > left && node.position.y < bottom && nodeBottom > top;
+      if (hit) hits.add(node.id);
+    }
+    setSelectedNodeIds(selection => (
+      selection.size === hits.size && [...hits].every(id => selection.has(id)) ? selection : hits
+    ));
+  }), [flowStore]);
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
     // 框选态要在事件到达的当下判定：setState 的 updater 可能延后到框选结束之后才跑。
@@ -2253,6 +2304,7 @@ function CanvasEditorInner({
     menu: CreateMenuState | null,
     baseDocument?: CanvasDocument,
     initialVersions: CanvasContentVersion[] = [],
+    focus = true,
   ) {
     const apply = (current: CanvasDocument) => {
       const nodes = [...current.nodes, node];
@@ -2303,7 +2355,7 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set());
     setAddOpen(false);
     setCreateMenu(null);
-    focusNewNodeHandler.current(node);
+    if (focus) focusNewNodesHandler.current([node]);
   }
 
   function addTextNode(menu: CreateMenuState | null = createMenu) {
@@ -2445,7 +2497,8 @@ function CanvasEditorInner({
             type: 'video',
             data: { current_version_id: version.version_id, generation_draft: null, active_run_id: null, display: { fit: 'contain', free_resize: false } },
           };
-    appendNode(node, menu, baseDocument);
+    // 多文件上传由 handleUploads 在全部落位后统一对一次视口。
+    appendNode(node, menu, baseDocument, [], false);
     return node.id;
   }
 
@@ -2508,6 +2561,8 @@ function CanvasEditorInner({
           if (latestDocument.current?.project_id === projectId) {
             setSelectedConnectionIds(new Set());
             setSelectedNodeIds(new Set(added));
+            const addedIds = new Set(added);
+            focusNewNodesHandler.current(latestDocument.current.nodes.filter(node => addedIds.has(node.id)));
             if (failures.length) setError(failures.slice(0, 3).join('；') + (failures.length > 3 ? `；共 ${failures.length} 项失败` : ''));
             else announceToolNotice(`已添加 ${added.length} 个素材`);
           }
@@ -4386,16 +4441,25 @@ function CanvasEditorInner({
       node.position.y + size.height / 2, { zoom: getZoom(), duration: 0 }));
   };
   const locateNode = useCallback((nodeId: string) => locateNodeHandler.current(nodeId), []);
-  // 新建节点：视口动画对中并放大到节点占视口大部分（飙哥 2026-09-14）。padding 按视口比例，
-  // 0.3 ≈ 节点占约六成；小节点受 CANVAS_MAX_ZOOM 限制不会放到糊。
-  focusNewNodeHandler.current = (node: CanvasNode) => {
-    const size = canvasNodeRenderedSize(node, latestDocument.current?.content_versions ?? {});
-    void runViewportCommand(() => fitBounds(
-      { x: node.position.x, y: node.position.y, width: size.width, height: size.height },
-      { duration: 250, padding: 0.3 },
-    ));
+  // 新建节点：只平移到新节点（多个时取包围盒）的中心，保持当前缩放（飙哥 2026-10-09，
+  // 取代 09-14 的「放大到占视口大部分」）。一批新节点只算一次、只动一次视口。
+  focusNewNodesHandler.current = (nodes: readonly CanvasNode[]) => {
+    if (!nodes.length) return;
+    const versions = latestDocument.current?.content_versions ?? {};
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    for (const node of nodes) {
+      const size = canvasNodeRenderedSize(node, versions);
+      left = Math.min(left, node.position.x);
+      top = Math.min(top, node.position.y);
+      right = Math.max(right, node.position.x + size.width);
+      bottom = Math.max(bottom, node.position.y + size.height);
+    }
+    void runViewportCommand(() => setCenter((left + right) / 2, (top + bottom) / 2,
+      { zoom: getZoom(), duration: 250 }));
   };
 
+  // 框选时选中数每帧在变；context 只关心「是否多选」，依赖写成 size 会让所有节点跟着每帧重渲染。
+  const multiSelectionActive = selectedNodeIds.size > 1;
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
     layerParentByNodeId,
     locateNode,
@@ -4423,7 +4487,7 @@ function CanvasEditorInner({
     canvasUiPreferencesError,
     showImageInfo: document?.settings?.show_image_info ?? true,
     libraryBusy: false,
-    multiSelectionActive: selectedNodeIds.size > 1,
+    multiSelectionActive,
     generationPanel: {
       dismissedNodeId: dismissedGenerationPanelNodeId,
       narrowViewport,
@@ -4528,7 +4592,7 @@ function CanvasEditorInner({
     renameNode,
     saveNodeToLibrary,
     shareCanvasResult,
-    selectedNodeIds.size,
+    multiSelectionActive,
     selectCandidate,
     selectOnlyNode,
     setMaterialConnected,
@@ -4722,8 +4786,8 @@ function CanvasEditorInner({
           edges={flowEdges}
           nodeTypes={canvasNodeTypes}
           edgeTypes={canvasEdgeTypes}
-          onSelectionStart={() => { selectionRectActive.current = true; }}
-          onSelectionEnd={() => { selectionRectActive.current = false; }}
+          onSelectionStart={onSelectionStart}
+          onSelectionEnd={onSelectionEnd}
           onConnect={onConnect}
           onConnectStart={() => setConnectionInProgress(true)}
           onConnectEnd={onConnectEnd}

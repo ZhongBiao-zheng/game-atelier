@@ -480,11 +480,12 @@
     content: '';
     transform: translate(-50%, -50%);
   }
-  .canvas-flow .canvas-node-shell:hover .canvas-node-handle,
-  .canvas-flow .canvas-node-shell:focus-within .canvas-node-handle,
-  .canvas-flow .react-flow__node:focus .canvas-node-handle,
+  /* 连接点只在指针所在的那一侧出现（data-hover-side 由节点外壳的 pointermove 写）；选中不再常显，
+     否则框选一片节点时每个都挂着两个圆点。分组框 pointer-events:none 收不到 hover，选中是它唯一的入口。 */
+  .canvas-flow .canvas-node-shell[data-hover-side="left"] .canvas-node-handle.react-flow__handle-left,
+  .canvas-flow .canvas-node-shell[data-hover-side="right"] .canvas-node-handle.react-flow__handle-right,
   .canvas-flow .react-flow__node:focus-visible .canvas-node-handle,
-  .canvas-flow .canvas-node-shell[data-selected="true"] .canvas-node-handle,
+  .canvas-flow .canvas-group-shell[data-selected="true"] .canvas-node-handle,
   .canvas-flow.canvas-flow-connecting .canvas-node-handle {
     opacity: 1;
     pointer-events: auto !important;

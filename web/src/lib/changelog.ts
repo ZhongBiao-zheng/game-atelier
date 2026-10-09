@@ -33,6 +33,18 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.83.0',
+    date: '2026-10-09',
+    headline: '画布框选更准、新建节点不再放大',
+    changes: [
+      { kind: 'feat', text: '新建节点后画面只平移到它的中心，保持当前缩放；一次添加多个时，一次性移到这批节点的中心。' },
+      { kind: 'feat', text: '分组框要被框选矩形完整包住才会选中，在分组里框选只选碰到的节点。' },
+      { kind: 'feat', text: '节点的连接点只在鼠标移到那一侧时出现，选中节点不再常显两侧连接点。' },
+      { kind: 'fix', text: '框选偶尔会把屏幕外的节点一起选上（随手一框选中一大片）的问题。' },
+      { kind: 'fix', text: '框选拖动时节点数多会卡顿的问题。' },
+    ],
+  },
+  {
     version: '5.82.3',
     date: '2026-10-09',
     headline: '模型公告收进更新日志',

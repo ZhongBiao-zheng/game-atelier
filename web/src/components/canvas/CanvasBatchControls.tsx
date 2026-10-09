@@ -125,7 +125,7 @@ export function CanvasBatchMaterialEditor({ node, context }: {
 export function CanvasExecutionGroup({ node, context, selected }: {
   node: CanvasGroupNode; context: CanvasNodeContextValue; selected: boolean;
 }) {
-  return <div className="pointer-events-none h-full w-full rounded-2xl border border-dashed border-border bg-secondary/10"
+  return <div className="canvas-group-shell pointer-events-none h-full w-full rounded-2xl border border-dashed border-border bg-secondary/10"
     data-selected={selected ? 'true' : 'false'}>
     {/* 分组的框由画师决定，不再跟着成员长。改框只改框：框外的成员会被摘掉，但把框拉大盖住
         的节点不会被吞进来（要吞得去碰那个节点），见 normalizeCanvasGroups。 */}
