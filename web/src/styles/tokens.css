@@ -225,6 +225,13 @@
   /* tapnow 玻璃卡配方：顶部 0.5px inset 发丝高光 + 一层极淡软投影。
      这是设计身份内唯一放行的阴影（DESIGN.md Elevation）—— 封装在 CSS 工具类、
      不进 tsx 内联，漂移守卫扫不到也无需放开正则（方案 A）。 */
+  /* 顶栏字标：Instrument Serif 只有 400 一档，发丝描边补一点字重（不触发浏览器伪粗体的糊边），
+     衬线展示体在 24px 偏紧，微放字距让 A-t-e-l 的竖笔分开。 */
+  .brand-wordmark {
+    -webkit-text-stroke: 0.35px currentColor;
+    letter-spacing: 0.02em;
+  }
+
   .shell-glow {
     box-shadow:
       0 0.5px 0 0 var(--hairline-inset) inset,

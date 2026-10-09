@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.82.3',
+    date: '2026-10-09',
+    headline: '模型公告收进更新日志',
+    changes: [
+      { kind: 'feat', text: '模型公告以图文卡片出现在更新日志里，点卡片右下角「模型公告」查看完整介绍并快速添加模型。' },
+      { kind: 'feat', text: '顶栏只保留 Atelier 字标，字重与字距微调。' },
+    ],
+  },
+  {
     version: '5.82.2',
     date: '2026-10-09',
     headline: '画布 Agent 缺模型时提前提示',

@@ -13,7 +13,7 @@ import {
   saveSeenVersion,
   type ChangelogEntry,
 } from '@/lib/changelog';
-import { ANNOUNCEMENTS, OPEN_ANNOUNCEMENT_EVENT } from '@/lib/announcements';
+import { ANNOUNCEMENTS, OPEN_ANNOUNCEMENT_EVENT, type Announcement } from '@/lib/announcements';
 
 function VersionBlock({
   entry,
@@ -76,6 +76,56 @@ function VersionBlock({
       </div>
     </section>
   );
+}
+
+/** 模型公告混排在版本之间：图 + 一句介绍，完整内容与「快速添加」在右下角入口打开的弹窗里。 */
+function AnnouncementBlock({ announcement, onOpen }: { announcement: Announcement; onOpen: () => void }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  return (
+    <section className="border-t border-border pt-6" data-testid="changelog-announcement">
+      <time className="text-xs text-muted-foreground/70" dateTime={announcement.date}>
+        {announcement.date}
+      </time>
+      <h3 className="mt-1 font-display text-base text-foreground">{announcement.title}</h3>
+      {!imageFailed && (
+        <img
+          src={announcement.imageUrl}
+          alt=""
+          loading="lazy"
+          className="mt-3 aspect-video w-full rounded-md bg-secondary object-cover"
+          onError={() => setImageFailed(true)}
+        />
+      )}
+      <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{announcement.summary}</p>
+      <div className="mt-2 flex justify-end">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="rounded-sm text-xs text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          模型公告
+        </button>
+      </div>
+    </section>
+  );
+}
+
+type FeedItem =
+  | { kind: 'version'; entry: ChangelogEntry; index: number }
+  | { kind: 'announcement'; announcement: Announcement };
+
+/** 公告按日期插到同日及更早版本之前（两者都是新的在前）。 */
+function buildFeed(): FeedItem[] {
+  const pending = [...ANNOUNCEMENTS];
+  const feed: FeedItem[] = [];
+  CHANGELOG.forEach((entry, index) => {
+    while (pending.length && index > 0 && pending[0].date >= entry.date) {
+      feed.push({ kind: 'announcement', announcement: pending.shift()! });
+    }
+    feed.push({ kind: 'version', entry, index });
+  });
+  for (const announcement of pending) feed.push({ kind: 'announcement', announcement });
+  return feed;
 }
 
 /** 顶栏版本号与仓库入口，更新日志只在主动点击时展开。
@@ -181,21 +231,7 @@ export function ChangelogButton() {
         {/* 标题栏不跟着滚：滚到第三个版本时仍要知道自己在读什么、当前是哪一版 */}
         <div className="flex shrink-0 items-baseline justify-between gap-3 border-b border-border px-5 pb-4 pt-5">
           <h2 className="text-base font-medium text-foreground">更新日志</h2>
-          <span className="flex items-baseline gap-3">
-            {ANNOUNCEMENTS.length > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  close();
-                  window.dispatchEvent(new Event(OPEN_ANNOUNCEMENT_EVENT));
-                }}
-                className="rounded-sm text-xs text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                模型公告
-              </button>
-            )}
-            <span className="font-mono text-xs text-muted-foreground/70">当前 v{CURRENT_VERSION}</span>
-          </span>
+          <span className="font-mono text-xs text-muted-foreground/70">当前 v{CURRENT_VERSION}</span>
         </div>
         <div
           ref={measure}
@@ -206,9 +242,25 @@ export function ChangelogButton() {
             fade ? 'scroll-fade-b' : '',
           ].join(' ')}
         >
-          {CHANGELOG.map((e, i) => (
-            <VersionBlock key={e.version} entry={e} isLatest={i === 0} isNew={unread && i === 0} />
-          ))}
+          {buildFeed().map((item) =>
+            item.kind === 'version' ? (
+              <VersionBlock
+                key={item.entry.version}
+                entry={item.entry}
+                isLatest={item.index === 0}
+                isNew={unread && item.index === 0}
+              />
+            ) : (
+              <AnnouncementBlock
+                key={item.announcement.id}
+                announcement={item.announcement}
+                onOpen={() => {
+                  close();
+                  window.dispatchEvent(new CustomEvent(OPEN_ANNOUNCEMENT_EVENT, { detail: item.announcement.id }));
+                }}
+              />
+            ),
+          )}
         </div>
       </ToolbarPopover>
     </>

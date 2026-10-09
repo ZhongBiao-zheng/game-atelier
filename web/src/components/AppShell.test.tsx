@@ -71,12 +71,6 @@ describe('AppShell', () => {
     expect(screen.getByText('Atelier')).toBeInTheDocument();
   });
 
-  it('hides the brand subtitle until there is room for it', () => {
-    renderAt('/');
-    expect(screen.getByText('· 工作流').className).toContain('hidden');
-    expect(screen.getByText('· 工作流').className).toContain('sm:inline');
-  });
-
   it('highlights 创作台 tab on /studio', () => {
     renderAt('/studio');
     expect(screen.getByText('创作台')).toHaveAttribute('aria-current', 'page');
