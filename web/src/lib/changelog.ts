@@ -33,6 +33,116 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.82.2',
+    date: '2026-10-09',
+    headline: '画布 Agent 缺模型时提前提示',
+    changes: [
+      { kind: 'feat', text: '没有可用的对话模型、当前创作模式没有可用的图像 / 视频模型时，输入框上方直接提示，并可一键去设置页的 Key 区块。' },
+      { kind: 'feat', text: '模型偏好关了自动却没勾当前模式需要的模型（如视频创作只勾了图像）时提示，可一键改回自动。' },
+    ],
+  },
+  {
+    version: '5.82.1',
+    date: '2026-10-09',
+    headline: '出图按真实格式保存',
+    changes: [
+      { kind: 'fix', text: '出图结果按厂商实际返回的格式保存：JPEG 存成 .jpg、PNG 存成 .png，不再统一转成 PNG（文件小很多）。' },
+    ],
+  },
+  {
+    version: '5.82.0',
+    date: '2026-10-09',
+    headline: '画布 Agent：Auto 全自动、面板可拖宽',
+    changes: [
+      { kind: 'feat', text: 'Auto 模式不再弹任何确认：出图、修改、删除都直接执行；要逐步把关请切到审查。' },
+      { kind: 'feat', text: 'Agent 面板左边缘可以拖动调宽，宽度会记住。' },
+      { kind: 'fix', text: 'Agent 发起的生成，画布节点现在会立刻显示「正在生成」，出图后自动更新。' },
+      { kind: 'fix', text: '需求涉及多个角色（如「他俩的孩子」）时，Agent 会把这些角色都连成参考图。' },
+    ],
+  },
+  {
+    version: '5.81.0',
+    date: '2026-10-09',
+    headline: '画布 Agent 工具栏合成一排、默认 Auto',
+    changes: [
+      { kind: 'feat', text: '模型偏好分「图像 / 视频」两页，页内按供应商分组，并显示各自已选几个。' },
+      { kind: 'feat', text: '对话模型、思考、权限和创作模式、模型偏好合到输入框下面同一排。' },
+      { kind: 'feat', text: '新对话默认 Auto：新建节点、出图直接执行，改动或删除已有内容仍会确认。' },
+    ],
+  },
+  {
+    version: '5.80.0',
+    date: '2026-10-09',
+    headline: '画布 Agent 对话更清爽',
+    changes: [
+      { kind: 'feat', text: 'Agent 一轮结束后，中间的处理过程收成一行，点开可看；生成出的图收起时也能直接看到。' },
+      { kind: 'feat', text: '对话里带的参考图显示成小缩略图，鼠标悬停放大，和生成节点里的素材一致。' },
+      { kind: 'fix', text: '出图结果一律存成真正的 PNG（之前有的厂商返回 JPEG 却存成 .png）。' },
+      { kind: 'fix', text: 'Agent 用画布上已有的图当参考时直接连线，不再复制一份。' },
+    ],
+  },
+  {
+    version: '5.79.2',
+    date: '2026-10-09',
+    headline: '修复 Tuzi Seedream 出图失败',
+    changes: [
+      { kind: 'fix', text: 'Tuzi 的 Seedream 4.5 出图报「未知字段 output_format」失败的问题。' },
+      { kind: 'fix', text: 'Agent 写生成配置漏填 Key 时自动补上，不再被当成「模型不在可用范围」拦下。' },
+    ],
+  },
+  {
+    version: '5.79.1',
+    date: '2026-10-08',
+    headline: '画布 Agent 修复菜单卡死与出图位置',
+    changes: [
+      { kind: 'fix', text: '点「全能创作」或对话列表时菜单被面板挡住、整页点不动的问题；Mac 双指横滑不再误触浏览器后退。' },
+      { kind: 'fix', text: 'Agent 新建的图片排在上一次出图的右侧，挡路就继续往右挪，不再和其他节点重叠。' },
+      { kind: 'feat', text: '模型偏好关掉「自动」后默认一个都不选，需要自己勾选；再打开自动也会记住上次勾的模型。' },
+    ],
+  },
+  {
+    version: '5.79.0',
+    date: '2026-10-08',
+    headline: '画布 Agent 创作模式与模型偏好',
+    changes: [
+      { kind: 'feat', text: 'Agent 分三种创作模式：全能创作按需求出图或出视频，图像创作只用图像模型，视频创作只用视频模型。' },
+      { kind: 'feat', text: '新增模型偏好：默认自动，也可以勾选 Agent 能用哪些图片 / 视频模型；设置会记住。' },
+      { kind: 'feat', text: '对话模型只列 Key 里启用的文本模型，并去掉不支持工具调用的。' },
+      { kind: 'feat', text: 'Agent 入口移到画布右上角；空对话里给出几个示例需求，点一下填进输入框。' },
+    ],
+  },
+  {
+    version: '5.78.0',
+    date: '2026-10-08',
+    headline: '画布 Agent 能看生成结果',
+    changes: [
+      { kind: 'feat', text: 'Agent 发起生成后会等结果出来、亲眼看图，再告诉你画面是否符合要求；你让它「多试几次」时它会按看到的结果改提示词重跑。' },
+      { kind: 'feat', text: 'Agent 也能看画布上已有的图片；看过的图在对话里显示缩略图。' },
+      { kind: 'fix', text: '对话模型已下线或不能看图时，直接显示服务商给的原因，不再只说「对话出错」。' },
+    ],
+  },
+  {
+    version: '5.77.0',
+    date: '2026-10-08',
+    headline: '画布 Agent 支持 Skill',
+    changes: [
+      { kind: 'feat', text: 'Agent 输入框新增 Skill：导入 zip、SKILL.md 或整个文件夹（与 Claude Code / Codex 同格式），可搜索、删除；Skill 自带的脚本不会执行，只用文字说明。' },
+      { kind: 'feat', text: '选中一个 Skill 后这一条消息按它的说明来做；不选时 Agent 也会按任务自己挑合适的 Skill 读。' },
+      { kind: 'feat', text: 'Agent 的回复支持列表、加粗等格式。' },
+      { kind: 'fix', text: '读画布、查模型这类只读步骤不再弹确认；模型给错参数时自动退回让它改，不再弹出看不懂的确认卡。' },
+    ],
+  },
+  {
+    version: '5.76.0',
+    date: '2026-10-08',
+    headline: '画布内置 Agent',
+    changes: [
+      { kind: 'feat', text: '画布右下工具栏新增 Agent：用对话让它读画布、建节点、写生成配置、发起出图出视频，对话模型可从已配置的 Key 里搜索选择。' },
+      { kind: 'feat', text: '选中的画布节点自动带进消息，图片会发给模型看；对话按画布项目保存，可新建、切换。' },
+      { kind: 'feat', text: '「审查」模式每一步先确认；「Auto」模式新增内容直接执行，改动或删除已有内容仍要确认。' },
+    ],
+  },
+  {
     version: '5.75.1',
     date: '2026-10-08',
     headline: '画布界面恢复原尺寸',

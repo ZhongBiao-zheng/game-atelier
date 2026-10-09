@@ -24,6 +24,7 @@ from typing import Any
 from character_workflow.lib import keys as _keys
 from character_workflow.lib import net_env
 from character_workflow.lib.callers.openrouter_usage import cost_usd
+from character_workflow.lib.callers.image_output import write_image
 
 from .openai_image import OpenAIImageError, _post_json
 
@@ -161,9 +162,7 @@ def _write_outputs(payload: dict, output_dir: Path, *, start_index: int = 1) -> 
         b64 = item.get("b64_json")
         if not (isinstance(b64, str) and b64):
             continue
-        target = output_dir / f"v{i}.png"
-        target.write_bytes(base64.b64decode(b64))
-        paths.append(str(target))
+        paths.append(str(write_image(output_dir, f"v{i}", base64.b64decode(b64))))
     if not paths:
         raise OpenAIImageError(f"openrouter image response has no b64_json: {payload!r}")
     return paths

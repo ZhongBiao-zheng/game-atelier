@@ -18,6 +18,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from character_workflow.lib import net_env
 from character_workflow.lib.callers import tuzi_async
+from character_workflow.lib.callers.image_output import write_image
 from character_workflow.lib.image_size_catalog import image_size_options, is_nano_image_size_model
 
 DEFAULT_SEEDREAM_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
@@ -346,6 +347,7 @@ def render(
             background=background,
             seedream=is_seedream,
             sequential=sends_ark_params and _supports_sequential(model),
+            seedream_png=not _is_tuzi_gateway(base_url),
         )
 
     data = _post_image_json(generations_url, _gen_payload(requested))
@@ -556,6 +558,7 @@ def _image_generation_payload(
     background: str | None = None,
     seedream: bool = False,
     sequential: bool = False,
+    seedream_png: bool = True,
 ) -> dict:
     payload: dict[str, Any] = {
         "model": model,
@@ -572,7 +575,10 @@ def _image_generation_payload(
         payload["watermark"] = False
         # output_format：Ark 默认 jpeg，而我们把产物一律存成 .png —— 实测 26 张历史产物里
         # 11 张实际是 JPEG，既名实不符又白挨一道有损压缩。立绘要无损，显式要 png。
-        payload["output_format"] = "png"
+        # 例外：Tuzi 网关 2026-10 起按白名单收字段，output_format 不在其中会直接 400
+        #（「未知字段 ['output_format']」）；watermark 属于「认得但做不到」，只降级不报错。
+        if seedream_png:
+            payload["output_format"] = "png"
     # Tuzi 可调质量基础型号与其非 VIP 固定别名靠 quality 路由；
     # VIP/HD/NT 与旧版 2.5 型号的档位内建在 model id。
     if quality:
@@ -890,17 +896,15 @@ def _write_outputs(payload: dict, output_dir: Path, *, start_index: int = 1) -> 
     for i, item in enumerate(items, start=start_index):
         if not isinstance(item, dict):
             continue
-        target = output_dir / f"v{i}.png"
         b64 = item.get("b64_json")
         # 空串防御：Tuzi 在 response_format=url 时仍回 b64_json:""，别把空串当图写出空文件——
         # 落到下面的 url 分支。
         if isinstance(b64, str) and b64:
-            target.write_bytes(_decode_b64_image(b64))
-            paths.append(str(target))
+            paths.append(str(write_image(output_dir, f"v{i}", _decode_b64_image(b64))))
             continue
         if isinstance(item.get("url"), str):
-            target.write_bytes(_download_image_url(_clean_image_url(item["url"])))
-            paths.append(str(target))
+            paths.append(str(write_image(
+                output_dir, f"v{i}", _download_image_url(_clean_image_url(item["url"])))))
     if not paths:
         raise OpenAIImageError(f"image api returned no downloadable image: {payload!r}")
     return paths
@@ -1007,9 +1011,7 @@ def _write_layer_decomposition_outputs(
     paths: list[str] = []
     outputs: list[dict[str, Any]] = []
     for output_index, (item, image_bytes) in enumerate(decoded):
-        target = output_dir / f"v{output_index + 1}.png"
-        target.write_bytes(image_bytes)
-        paths.append(str(target))
+        paths.append(str(write_image(output_dir, f"v{output_index + 1}", image_bytes)))
         outputs.append({
             "output_index": output_index,
             "z_index": item["z_index"],

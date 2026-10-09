@@ -2498,8 +2498,9 @@ def get_canvas_agent_session(
     response: Response,
 ) -> CanvasAgentSession:
     from character_workflow.lib.canvas_agent_sessions import read_canvas_agent_session
+    from viewer_server.canvas_chat_routes import recover_if_stale
     try:
-        session = read_canvas_agent_session(project_id, session_id)
+        session = recover_if_stale(read_canvas_agent_session(project_id, session_id))
         response.headers["ETag"] = f'"{session.revision}"'
         return session
     except (KeyError, ValueError) as error:
@@ -2516,6 +2517,8 @@ def delete_canvas_agent_session_route(
     if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> Response:
     from character_workflow.lib.canvas_agent_sessions import delete_canvas_agent_session
+    from viewer_server.canvas_chat_routes import cancel
+    cancel(project_id, session_id)
     try:
         delete_canvas_agent_session(
             project_id,

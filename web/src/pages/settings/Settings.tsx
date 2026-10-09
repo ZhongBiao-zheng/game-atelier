@@ -42,6 +42,12 @@ function LocalSettingsPage() {
       .catch(() => {});
   }, []);
 
+  // 从别处「去设置」跳过来配 Key（如画布 Agent 没有对话模型）：?section=keys 时滚到密钥区块。
+  useEffect(() => {
+    if (loading || new URLSearchParams(window.location.search).get('section') !== 'keys') return;
+    window.document.getElementById('settings-keys')?.scrollIntoView({ block: 'start' });
+  }, [loading]);
+
   async function toggleShowStudioOnHome() {
     const next = !showStudioOnHome;
     setShowStudioOnHome(next);
@@ -198,7 +204,7 @@ function LocalSettingsPage() {
         <TeamLibrariesSection />
       </section>
 
-      <section className="grid gap-6 border-t border-border py-10 md:grid-cols-[220px_1fr] md:gap-12">
+      <section id="settings-keys" className="grid scroll-mt-16 gap-6 border-t border-border py-10 md:grid-cols-[220px_1fr] md:gap-12">
         <div>
           <h2 className="text-xs uppercase tracking-label text-muted-foreground/70">API 密钥</h2>
           <p className="mt-2 text-sm text-muted-foreground">

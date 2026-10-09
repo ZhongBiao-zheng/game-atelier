@@ -50,6 +50,7 @@ import {
   Trash2,
   Type,
   Upload,
+  Sparkles,
   WandSparkles,
   X,
 } from 'lucide-react';
@@ -139,6 +140,7 @@ import {
   type CreationAssetPanelHandle,
   type CreationAssetSaveRequest,
 } from '@/components/assets/CreationAssetPanel';
+import { CanvasAgentPanel } from '@/components/canvas/agent/CanvasAgentPanel';
 import { insertCreationAssetIntoCanvas } from '@/api/creationAssets';
 import { adoptTeamAsset, listRelatedTeamAssets } from '@/api/teamLibraries';
 import { TEAM_ASSET_DRAG_TYPE, readTeamAssetDrag } from '@/schema/teamLibrary';
@@ -466,6 +468,17 @@ function CanvasEditorInner({
   const [canvasUiPreferences, setCanvasUiPreferences] = useState<CanvasUiPreferences>(DEFAULT_CANVAS_UI_PREFERENCES);
   const [canvasUiPreferencesError, setCanvasUiPreferencesError] = useState<string | null>(null);
   const [libraryMode, setLibraryMode] = useState<CanvasLibraryMode | null>(null);
+  // Agent 面板与资产面板占同一块位置：任一处打开资产面板都把 Agent 收起。
+  const [agentOpen, setAgentOpen] = useState(false);
+  // 与资产面板互斥：开 Agent 前先让资产面板走完关闭过渡。
+  function toggleAgent() {
+    setAddOpen(false);
+    setCreateMenu(null);
+    if (agentOpen) { setAgentOpen(false); return; }
+    if (!libraryMode) { setAgentOpen(true); return; }
+    creationAssetPanelRef.current?.requestTransition(() => { closeLibrary(); setAgentOpen(true); });
+  }
+  useEffect(() => { if (libraryMode) setAgentOpen(false); }, [libraryMode]);
   // 提示条的「看看」等延后回调会在旧渲染的闭包里跑，判断面板开没开要读当前值。
   const libraryModeRef = useRef(libraryMode);
   libraryModeRef.current = libraryMode;
@@ -4551,6 +4564,16 @@ function CanvasEditorInner({
     });
   }, [document?.project_id]);
 
+  // 上面的拦截只在滚轮落进编辑区时生效。弹窗类组件（Radix 模态菜单）会给 body 加
+  // pointer-events: none，滚轮直接落到根节点，Mac 双指横滑就成了浏览器后退。
+  // 画布页在根节点上关掉横向回弹，后退手势无论落在哪都触发不了。
+  useEffect(() => {
+    const root = window.document.documentElement;
+    const previous = root.style.overscrollBehaviorX;
+    root.style.overscrollBehaviorX = 'none';
+    return () => { root.style.overscrollBehaviorX = previous; };
+  }, []);
+
   if (loading) return <EditorMessage icon={<LoaderCircle className="size-5 animate-spin" />} text="正在展开画布…" />;
   if (!document) return <EditorMessage text={error || '画布读取失败'} action={<Button onClick={onBack}>返回项目列表</Button>} />;
 
@@ -4592,8 +4615,8 @@ function CanvasEditorInner({
           settings: { ...current.settings, show_minimap: !current.settings.show_minimap },
         }), true)}
       ><MapPinned /></button>
-      <ToolButton buttonRef={assetLibraryTriggerRef} label="媒体资产" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('assets'); else if (libraryMode === 'assets') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('assets')); }}><Library /></ToolButton>
-      <ToolButton buttonRef={promptLibraryTriggerRef} label="提示词资产" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('prompts'); else if (libraryMode === 'prompts') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('prompts')); }}><WandSparkles /></ToolButton>
+      <ToolButton buttonRef={assetLibraryTriggerRef} label="媒体资产" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setAgentOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('assets'); else if (libraryMode === 'assets') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('assets')); }}><Library /></ToolButton>
+      <ToolButton buttonRef={promptLibraryTriggerRef} label="提示词资产" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setAgentOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('prompts'); else if (libraryMode === 'prompts') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('prompts')); }}><WandSparkles /></ToolButton>
       <ToolButton
         buttonRef={generationPreferencesTriggerRef}
         label="生成偏好"
@@ -4998,6 +5021,16 @@ function CanvasEditorInner({
               </button>
             </div>
           )}
+          <div className="pointer-events-auto ml-auto shrink-0 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
+            <Button
+              variant="ghost"
+              aria-label="Agent"
+              aria-expanded={agentOpen}
+              aria-controls="canvas-agent-panel"
+              onClick={toggleAgent}
+              className={cn('h-9 gap-1.5 px-3', agentOpen && 'bg-secondary text-primary hover:text-primary')}
+            ><Sparkles />Agent</Button>
+          </div>
         </div>
 
         {!materialPick && (
@@ -5110,6 +5143,23 @@ function CanvasEditorInner({
             onReproduce={asset => void reproduceGenerationAsset(asset)}
             teamRelatedSha256={teamRelatedSha256}
             initialTeamLibraryId={teamLibraryId}
+          />
+        )}
+
+        {agentOpen && !libraryMode && (
+          <CanvasAgentPanel
+            key={projectId}
+            className="canvas-library-panel"
+            projectId={projectId}
+            selectedNodes={document.nodes
+              .filter(node => selectedNodeIds.has(node.id))
+              .map(node => ({
+                id: node.id, title: node.title, type: node.type,
+                versionId: node.type === 'image' ? node.data.current_version_id : null,
+              }))}
+            onClose={() => setAgentOpen(false)}
+            onUpload={() => uploadRef.current?.click()}
+            onOpenKeySettings={() => void persistNow().then(saved => { if (saved) setLocation('/settings?section=keys'); })}
           />
         )}
 

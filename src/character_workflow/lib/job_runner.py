@@ -551,7 +551,8 @@ def _run_job_claimed(
             )
             with asset_output_lock(output_dir):
                 for src, dims in selected_outputs:
-                    target = next_asset_path(output_dir, "png")
+                    # 扩展名跟着 caller 落盘的真实格式走（JPEG 存 .jpg），不统一改成 .png。
+                    target = next_asset_path(output_dir, src.suffix or ".png")
                     shutil.move(str(src), target)
                     output_paths.append(str(target))
                     first_dims = first_dims or dims

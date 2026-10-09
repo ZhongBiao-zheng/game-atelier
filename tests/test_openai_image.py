@@ -1941,7 +1941,11 @@ def test_every_seedream_route_disables_watermark_and_asks_png(
     openai_image.render(prompt="fox", model=model, alias="k", output_dir=tmp_path, size="2048x2048")
 
     assert seen["watermark"] is False, f"{provider} 这条路没关水印"
-    assert seen["output_format"] == "png", f"{provider} 这条路没要 png"
+    if "tu-zi.com" in base_url:
+        # Tuzi 网关按白名单收字段：output_format 会被当成未知字段直接 400（2026-10-09 实测）。
+        assert "output_format" not in seen
+    else:
+        assert seen["output_format"] == "png", f"{provider} 这条路没要 png"
 
 
 def test_non_seedream_models_never_get_ark_appearance_params(

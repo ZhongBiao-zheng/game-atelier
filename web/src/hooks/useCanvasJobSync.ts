@@ -178,6 +178,18 @@ export function useCanvasJobSync({
     onCanvasDocumentChanged: data => {
       if (data.project_id !== projectId) return;
       onDocumentChangedRef.current?.(typeof data.revision === 'number' ? data.revision : null);
+      // Agent / MCP 在服务端发起的生成本页不认识它的 job：上面的 job-changed 会被跳过，没有在跑的
+      // job 时轮询也没开，节点就一直不进「生成中」。发起生成必定改画布，借这个事件补拉一次列表，
+      // 拉到新的 pending job 后 hasRunningJobs 变真，常规轮询接手。
+      if (hasRunningJobs) {
+        requestJobSync.current();
+        return;
+      }
+      const epoch = jobsEpoch.current;
+      listCanvasJobs(projectId).then(canvasJobs => {
+        if (jobsEpoch.current !== epoch) return;
+        setJobs(current => acceptCanvasJobs(current, canvasJobs));
+      }, () => undefined);
     },
     onJobChanged: data => {
       // job-changed 是全局广播，角色出图和 Studio 出图也会进来。认得的才拉。

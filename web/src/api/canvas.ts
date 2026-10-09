@@ -2,8 +2,14 @@ import { request, requestJson } from './http';
 import { mediaUrl } from '@/api/connection';
 import type { Job } from '@/schema/jobs';
 import type {
+  CanvasAgentApprovalDecision,
+  CanvasAgentChatModelList,
+  CanvasAgentGenerationModel,
   CanvasAgentSession,
   CanvasAgentSessionList,
+  CanvasAgentSessionUpdate,
+  CanvasAgentSkill,
+  CanvasAgentTurnCreate,
   CanvasConnection,
   CanvasDocument,
   CanvasMattingModelStatus,
@@ -94,6 +100,81 @@ export function deleteCanvasAgentSession(
     '删除画布 Agent 会话',
     { method: 'DELETE', headers: { 'If-Match': String(revision) } },
   ).then(() => undefined);
+}
+
+function agentSessionPath(projectId: string, sessionId: string): string {
+  return `/api/canvas/projects/${encodeURIComponent(projectId)}/agent/sessions/${encodeURIComponent(sessionId)}`;
+}
+
+function sendAgentJson<T>(path: string, label: string, body: unknown, method = 'POST'): Promise<T> {
+  return requestJson<T>(path, label, {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateCanvasAgentSession(
+  projectId: string,
+  sessionId: string,
+  update: CanvasAgentSessionUpdate,
+): Promise<CanvasAgentSession> {
+  return sendAgentJson(agentSessionPath(projectId, sessionId), '修改 Agent 会话设置', update, 'PATCH');
+}
+
+export function sendCanvasAgentMessage(
+  projectId: string,
+  sessionId: string,
+  turn: CanvasAgentTurnCreate,
+): Promise<CanvasAgentSession> {
+  return sendAgentJson(`${agentSessionPath(projectId, sessionId)}/messages`, '发送消息', turn);
+}
+
+export function decideCanvasAgentApprovals(
+  projectId: string,
+  sessionId: string,
+  decisions: CanvasAgentApprovalDecision[],
+): Promise<CanvasAgentSession> {
+  return sendAgentJson(`${agentSessionPath(projectId, sessionId)}/approvals`, '确认 Agent 操作', { decisions });
+}
+
+export function cancelCanvasAgentTurn(projectId: string, sessionId: string): Promise<CanvasAgentSession> {
+  return sendAgentJson(`${agentSessionPath(projectId, sessionId)}/cancel`, '停止 Agent', {});
+}
+
+export function listCanvasAgentChatModels(): Promise<CanvasAgentChatModelList> {
+  return requestJson<CanvasAgentChatModelList>('/api/canvas/agent/models', '读取对话模型');
+}
+
+export function listCanvasAgentGenerationModels(): Promise<{ models: CanvasAgentGenerationModel[] }> {
+  return requestJson<{ models: CanvasAgentGenerationModel[] }>('/api/canvas/agent/generation-models', '读取生成模型');
+}
+
+export function listCanvasAgentSkills(): Promise<{ skills: CanvasAgentSkill[] }> {
+  return requestJson<{ skills: CanvasAgentSkill[] }>('/api/canvas/agent/skills', '读取 Skill');
+}
+
+/** zip：传一个 .zip；文件夹：files 与 paths（相对路径）一一对应；也可只传一个 SKILL.md。 */
+export function importCanvasAgentSkill(
+  files: File[],
+  paths: string[],
+  replace = false,
+): Promise<CanvasAgentSkill> {
+  const form = new FormData();
+  files.forEach((file, index) => {
+    form.append('files', file);
+    if (paths.length) form.append('paths', paths[index]);
+  });
+  form.append('replace', String(replace));
+  return requestJson<CanvasAgentSkill>('/api/canvas/agent/skills/import', '导入 Skill', {
+    method: 'POST', body: form,
+  });
+}
+
+export function deleteCanvasAgentSkill(name: string): Promise<void> {
+  return request(`/api/canvas/agent/skills/${encodeURIComponent(name)}`, '删除 Skill', {
+    method: 'DELETE',
+  }).then(() => undefined);
 }
 
 export async function exportCanvasProjects(projectIds: string[]): Promise<void> {
