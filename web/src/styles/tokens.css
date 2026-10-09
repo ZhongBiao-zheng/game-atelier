@@ -486,8 +486,14 @@
   .canvas-flow .canvas-node-shell[data-hover-side="right"] .canvas-node-handle.react-flow__handle-right,
   .canvas-flow .react-flow__node:focus-visible .canvas-node-handle,
   .canvas-flow .canvas-group-shell[data-selected="true"] .canvas-node-handle,
-  .canvas-flow.canvas-flow-connecting .canvas-node-handle {
+  .canvas-flow.canvas-flow-connecting .canvas-node-handle.connectingfrom,
+  .canvas-flow.canvas-flow-connecting .canvas-node-handle.connectingto {
     opacity: 1;
+    pointer-events: auto !important;
+  }
+  /* 拖线时所有连接点都要能接住落点，但只显示起点、吸附中的目标（xyflow 的 connectingto）
+     和指针所在那一侧，不再一拖线满屏都是圆点。 */
+  .canvas-flow.canvas-flow-connecting .canvas-node-handle {
     pointer-events: auto !important;
   }
   .canvas-flow .canvas-node-handle-dot {

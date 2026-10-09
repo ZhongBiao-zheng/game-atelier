@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.83.3',
+    date: '2026-10-09',
+    headline: '拖线时只显示要连的那个连接点',
+    changes: [
+      { kind: 'feat', text: '拖出连线时，不再让所有节点的连接点同时出现；只显示起点和鼠标靠近的那个节点那一侧的连接点。' },
+    ],
+  },
+  {
     version: '5.83.2',
     date: '2026-10-09',
     headline: '框选后能正常连线',
