@@ -112,10 +112,7 @@ export function AppShell() {
       {!immersiveCanvas && <header className="sticky top-0 z-30 shrink-0">
         <div className="mx-auto grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 lg:h-20 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:gap-4 lg:px-8 lg:py-0">
           <Link href="/" className="flex shrink-0 items-baseline gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
-            <span className="font-display text-2xl font-normal">
-              Atelier
-            </span>
-            <span className="hidden text-xs text-muted-foreground sm:inline">· 工作流</span>
+            <span className="brand-wordmark font-display text-2xl">Atelier</span>
           </Link>
           <LayoutGroup>
             <nav className="order-last col-span-2 flex min-w-0 items-center justify-center gap-1 overflow-x-auto no-scrollbar px-2 lg:order-none lg:col-span-1 lg:gap-3 lg:px-3">

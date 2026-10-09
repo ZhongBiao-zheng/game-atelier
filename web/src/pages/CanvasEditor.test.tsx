@@ -58,9 +58,30 @@ vi.mock('@xyflow/react', () => {
   };
   const flowTransform: [number, number, number] = [0, 0, 1];
   let flowNodeLookup = new Map<string, MockInternalNode>();
+  // 只模拟框选矩形这一路：CanvasEditor 订阅 userSelectionRect 自己算框选命中。
+  type MockSelectionState = {
+    transform: [number, number, number];
+    userSelectionRect: { x: number; y: number; width: number; height: number } | null;
+  };
+  const selectionListeners = new Set<(state: MockSelectionState, previous: MockSelectionState) => void>();
+  let selectionState: MockSelectionState = { transform: flowTransform, userSelectionRect: null };
+  const flowStoreApi = {
+    getState: () => ({ nodeLookup: new Map<string, { selectable?: boolean }>() }),
+    setState: () => undefined,
+    subscribe: (listener: (state: MockSelectionState, previous: MockSelectionState) => void) => {
+      selectionListeners.add(listener);
+      return () => { selectionListeners.delete(listener); };
+    },
+  };
+  const setSelectionRect = (userSelectionRect: MockSelectionState['userSelectionRect']) => {
+    const previous = selectionState;
+    selectionState = { ...selectionState, userSelectionRect };
+    for (const listener of selectionListeners) listener(selectionState, previous);
+  };
   // React Flow 的 useViewportHelper/useReactFlow 用 useMemo 保持这些方法的引用稳定。
   const viewportHelpers = {
     fitBounds: vi.fn().mockResolvedValue(true),
+    setCenter: vi.fn().mockResolvedValue(true),
     getViewport: () => ({ x: 0, y: 0, zoom: 1 }),
   };
   return {
@@ -84,8 +105,8 @@ vi.mock('@xyflow/react', () => {
       onConnect?: (connection: { source: string; target: string; sourceHandle: null; targetHandle: null }) => void;
       onConnectEnd?: (event: MouseEvent, state: { isValid: boolean; fromNode: { id: string }; fromHandle: { type: 'source' | 'target' }; toNode?: { id: string } }) => void;
       onEdgesChange?: (changes: Array<{ id: string; type: 'select'; selected: boolean } | { id: string; type: 'remove' }>) => void;
-      onSelectionStart?: () => void;
-      onSelectionEnd?: () => void;
+      onSelectionStart?: (event: { clientX: number; clientY: number }) => void;
+      onSelectionEnd?: (event: { clientX: number; clientY: number }) => void;
       onNodesChange?: (changes: Array<{ id: string; type: string; selected?: boolean; position?: { x: number; y: number } }>) => void;
       onNodeClick?: (event: React.MouseEvent, node: { id: string }) => void;
       onNodeMouseEnter?: (event: unknown, node: { id: string }) => void;
@@ -184,10 +205,12 @@ vi.mock('@xyflow/react', () => {
                 type="button"
                 aria-label="simulate box selection over edge"
                 onClick={() => {
-                  onSelectionStart?.();
+                  onSelectionStart?.({ clientX: 0, clientY: 0 });
                   onNodesChange?.(nodes.map(node => ({ id: node.id, type: 'select', selected: true })));
+                  setSelectionRect({ x: -10000, y: -10000, width: 20000, height: 20000 });
                   onEdgesChange?.([{ id: edges[0].id, type: 'select', selected: true }]);
-                  onSelectionEnd?.();
+                  onSelectionEnd?.({ clientX: 0, clientY: 0 });
+                  setSelectionRect(null);
                 }}
               />
             </>
@@ -239,12 +262,12 @@ vi.mock('@xyflow/react', () => {
         </div>
       );
     },
+    useStoreApi: () => flowStoreApi,
     useReactFlow: () => ({
       screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({ x, y }),
       fitView: vi.fn(),
       ...viewportHelpers,
       getZoom: () => 1,
-      setCenter: vi.fn(),
       setViewport: vi.fn(),
       zoomIn: vi.fn(),
       zoomOut: vi.fn(),
@@ -835,19 +858,19 @@ it('loads the immersive editor and stores a manually-authored text node as one c
   expect(lastSavedDocument()?.nodes[0]).toMatchObject({ type: 'text', title: '文本' });
 });
 
-it('fits the viewport onto a newly created node', async () => {
-  // 飙哥 2026-09-14：新建节点后视口直接对到它上面，节点居中并占视口大部分。
-  const { fitBounds } = useReactFlow();
+it('centers the viewport on a newly created node without zooming', async () => {
+  // 飙哥 2026-10-09：新建节点后只把它平移到画面中心，保持当前缩放。
+  const { fitBounds, setCenter } = useReactFlow();
   vi.mocked(fitBounds).mockClear();
+  vi.mocked(setCenter).mockClear();
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
   await addTextNodeWithBody('新建后对焦');
-  await waitFor(() => expect(fitBounds).toHaveBeenCalled());
-  const [bounds, options] = vi.mocked(fitBounds).mock.calls.at(-1)!;
-  expect(typeof bounds.x).toBe('number');
-  expect(typeof bounds.y).toBe('number');
-  expect(bounds.width).toBeGreaterThan(0);
-  expect(bounds.height).toBeGreaterThan(0);
-  expect(options).toMatchObject({ padding: 0.3 });
+  await waitFor(() => expect(setCenter).toHaveBeenCalled());
+  const [x, y, options] = vi.mocked(setCenter).mock.calls.at(-1)!;
+  expect(typeof x).toBe('number');
+  expect(typeof y).toBe('number');
+  expect(options).toMatchObject({ zoom: 1 });
+  expect(fitBounds).not.toHaveBeenCalled();
 });
 
 it('does not autosave during text editing and saves exactly once after exit', async () => {

@@ -225,6 +225,13 @@
   /* tapnow 玻璃卡配方：顶部 0.5px inset 发丝高光 + 一层极淡软投影。
      这是设计身份内唯一放行的阴影（DESIGN.md Elevation）—— 封装在 CSS 工具类、
      不进 tsx 内联，漂移守卫扫不到也无需放开正则（方案 A）。 */
+  /* 顶栏字标：Instrument Serif 只有 400 一档，发丝描边补一点字重（不触发浏览器伪粗体的糊边），
+     衬线展示体在 24px 偏紧，微放字距让 A-t-e-l 的竖笔分开。 */
+  .brand-wordmark {
+    -webkit-text-stroke: 0.35px currentColor;
+    letter-spacing: 0.02em;
+  }
+
   .shell-glow {
     box-shadow:
       0 0.5px 0 0 var(--hairline-inset) inset,
@@ -473,13 +480,20 @@
     content: '';
     transform: translate(-50%, -50%);
   }
-  .canvas-flow .canvas-node-shell:hover .canvas-node-handle,
-  .canvas-flow .canvas-node-shell:focus-within .canvas-node-handle,
-  .canvas-flow .react-flow__node:focus .canvas-node-handle,
+  /* 连接点只在指针所在的那一侧出现（data-hover-side 由节点外壳的 pointermove 写）；选中不再常显，
+     否则框选一片节点时每个都挂着两个圆点。分组框 pointer-events:none 收不到 hover，选中是它唯一的入口。 */
+  .canvas-flow .canvas-node-shell[data-hover-side="left"] .canvas-node-handle.react-flow__handle-left,
+  .canvas-flow .canvas-node-shell[data-hover-side="right"] .canvas-node-handle.react-flow__handle-right,
   .canvas-flow .react-flow__node:focus-visible .canvas-node-handle,
-  .canvas-flow .canvas-node-shell[data-selected="true"] .canvas-node-handle,
-  .canvas-flow.canvas-flow-connecting .canvas-node-handle {
+  .canvas-flow .canvas-group-shell[data-selected="true"] .canvas-node-handle,
+  .canvas-flow.canvas-flow-connecting .canvas-node-handle.connectingfrom,
+  .canvas-flow.canvas-flow-connecting .canvas-node-handle.connectingto {
     opacity: 1;
+    pointer-events: auto !important;
+  }
+  /* 拖线时所有连接点都要能接住落点，但只显示起点、吸附中的目标（xyflow 的 connectingto）
+     和指针所在那一侧，不再一拖线满屏都是圆点。 */
+  .canvas-flow.canvas-flow-connecting .canvas-node-handle {
     pointer-events: auto !important;
   }
   .canvas-flow .canvas-node-handle-dot {
@@ -540,8 +554,10 @@
     margin: -12px;
     border-radius: 0.5rem;
     /* 选区框只是视觉框：它叠在节点之上，接了指针就把节点边上的连接把手全盖住，框选后
-       只能整组拖、连不了线。拖任意一个选中节点本来就会带着整组走，所以框自己不必接事件。 */
-    pointer-events: none;
+       只能整组拖、连不了线。拖任意一个选中节点本来就会带着整组走，所以框自己不必接事件。
+       必须 !important：本文件的规则在 @layer 里，xyflow 的 style.css 不分层，不分层的
+       `pointer-events: all` 无论选择器多具体都会赢。 */
+    pointer-events: none !important;
   }
   .canvas-flow .react-flow__edge-path {
     stroke-width: 1.5 !important;

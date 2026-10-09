@@ -33,12 +33,15 @@ const selectionKey = (alias: string, modelId: string) => `${alias}\u0000${modelI
 /** 没开通的供应商不列出；拉取失败的保留，否则分不清「没开通」和「查不了」。 */
 const visibleScans = (scans: KeyScan[]) => scans.filter(item => item.status === 'error' || item.candidates.length > 0);
 
-/** 启动时弹出最新一条未读公告；关掉即记为已读。更新日志面板可通过事件再次打开。 */
+/** 启动时弹出最新一条未读公告；关掉即记为已读。更新日志里的公告卡片按 id 通过事件再次打开。 */
 export function AnnouncementHost() {
   const [announcement, setAnnouncement] = useState<Announcement | null>(() => latestUnseenAnnouncement());
 
   useEffect(() => {
-    const open = () => setAnnouncement(ANNOUNCEMENTS[0] ?? null);
+    const open = (event: Event) => {
+      const id = (event as CustomEvent<string | undefined>).detail;
+      setAnnouncement(ANNOUNCEMENTS.find(item => item.id === id) ?? ANNOUNCEMENTS[0] ?? null);
+    };
     window.addEventListener(OPEN_ANNOUNCEMENT_EVENT, open);
     return () => window.removeEventListener(OPEN_ANNOUNCEMENT_EVENT, open);
   }, []);
