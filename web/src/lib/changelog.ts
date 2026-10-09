@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.83.2',
+    date: '2026-10-09',
+    headline: '框选后能正常连线',
+    changes: [
+      { kind: 'fix', text: '框选后选区框挡住节点：鼠标移到节点上不出连接点、拉不出连线、只能整组拖动。现在选区框只做显示，节点照常可连线、可操作。' },
+    ],
+  },
+  {
     version: '5.83.1',
     date: '2026-10-09',
     headline: '框选后的选区框回来了',
