@@ -126,7 +126,9 @@ def test_turn_pauses_for_approval_then_continues_after_reject(isolated_data_root
 
         refused = client.post(f"{base}/messages", json={"text": "出图"})
         assert refused.status_code == 422  # 还没选对话模型
-        patched = client.patch(base, json={"model": "m", "model_alias": "chat"})
+        assert client.get(base).json()["permission_mode"] == "auto"  # 默认 Auto
+        patched = client.patch(base, json={"model": "m", "model_alias": "chat",
+                                           "permission_mode": "review"})
         assert patched.status_code == 200 and patched.json()["permission_mode"] == "review"
 
         sent = client.post(f"{base}/messages",

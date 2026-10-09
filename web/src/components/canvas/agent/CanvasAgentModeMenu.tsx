@@ -4,10 +4,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 import type { CanvasAgentCreationMode } from '@/schema/canvas';
 
-export const CREATION_MODES: { value: CanvasAgentCreationMode; label: string; description: string; Icon: typeof Sparkles }[] = [
-  { value: 'all', label: '全能创作', description: '按需求出图或出视频', Icon: Sparkles },
-  { value: 'image', label: '图像创作', description: '只用图像模型', Icon: ImageIcon },
-  { value: 'video', label: '视频创作', description: '只用视频模型', Icon: Clapperboard },
+export const CREATION_MODES: { value: CanvasAgentCreationMode; label: string; short: string; description: string; Icon: typeof Sparkles }[] = [
+  { value: 'all', label: '全能创作', short: '全能', description: '按需求出图或出视频', Icon: Sparkles },
+  { value: 'image', label: '图像创作', short: '图像', description: '只用图像模型', Icon: ImageIcon },
+  { value: 'video', label: '视频创作', short: '视频', description: '只用视频模型', Icon: Clapperboard },
 ];
 
 export function CanvasAgentModeMenu({ mode, disabled, onSelect }: {
@@ -23,11 +23,12 @@ export function CanvasAgentModeMenu({ mode, disabled, onSelect }: {
           type="button"
           disabled={disabled}
           aria-label="创作模式"
-          className="flex h-8 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40"
+          title={current.label}
+          className="flex h-7 shrink-0 items-center gap-0.5 rounded-full px-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40"
         >
           <current.Icon className="size-3.5" />
-          {current.label}
-          <ChevronDown className="size-3.5" />
+          {current.short}
+          <ChevronDown className="size-3" />
         </button>
       </DropdownMenuTrigger>
       {/* 面板是 z-40：菜单默认 z-20 会被压在面板下面，而 Radix 已锁住页面指针 → 整页像卡死。 */}

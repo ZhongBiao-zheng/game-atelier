@@ -1443,7 +1443,8 @@ class CanvasAgentSession(BaseModel):
     # 对话模型所在的 Key 别名；同名模型可能挂在多个聚合商下，必须和模型成对保存。
     model_alias: str | None = Field(default=None, min_length=1, max_length=120)
     effort: Literal["low", "medium", "high", "xhigh"] | None = None
-    permission_mode: CanvasAgentPermissionMode = "review"
+    # 默认 Auto：新增内容（建节点、出图）直接执行，改动 / 删除已有内容仍要确认。
+    permission_mode: CanvasAgentPermissionMode = "auto"
     creation_mode: CanvasAgentCreationMode = "all"
     # 自动：Agent 从全部可用生成模型里挑；关掉后只能用 preferred_models 里的（一个都没选就不能生成）。
     # 重新打开自动不清空 preferred_models，再关掉时恢复用户上次的选择。

@@ -40,7 +40,7 @@ const TOOL_LABELS: Record<string, string> = {
   read_skill_file: '读取 Skill 文件',
 };
 
-const ICON_BUTTON = 'grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40';
+const ICON_BUTTON = 'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40';
 
 function NodeIcon({ type }: { type: string }) {
   if (type === 'image') return <FileImage className="size-3.5 shrink-0" />;
@@ -216,7 +216,8 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
   const modelId = settings.model ?? null;
   const selectedModel = agent.models?.models.find(item => item.alias === modelAlias && item.model === modelId);
   const thinkingOn = Boolean(settings.effort && settings.effort !== 'off');
-  const autoMode = settings.permission_mode === 'auto';
+  // 草稿里没设过权限时跟服务端默认一致：Auto。
+  const autoMode = (settings.permission_mode ?? 'auto') === 'auto';
   const creationMode = settings.creation_mode ?? 'all';
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const empty = messages.length === 0 && !running && !awaiting;
@@ -327,37 +328,6 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
         </p>
       )}
 
-      {/* 对话模型这一组管 Agent 自己；输入框下面那组管这次创作（类型、出图出视频的模型）。 */}
-      <div className="flex items-center gap-0.5 px-2 pb-1">
-        <CanvasAgentModelPicker
-          models={agent.models}
-          alias={modelAlias}
-          model={modelId}
-          disabled={running || pending}
-          onSelect={choice => void agent.updateSettings({ model: choice.model, model_alias: choice.alias })}
-        />
-        <button
-          type="button"
-          title={selectedModel?.reasoning === false ? '该模型不支持思考' : thinkingOn ? '思考：开' : '思考：关'}
-          aria-label="思考模式"
-          aria-pressed={thinkingOn}
-          disabled={running || pending || selectedModel?.reasoning === false}
-          onClick={() => void agent.updateSettings({ effort: thinkingOn ? 'off' : 'high' })}
-          className={cn(ICON_BUTTON, thinkingOn && 'text-primary')}
-        ><Brain className="size-4" /></button>
-        <button
-          type="button"
-          title={autoMode ? 'Auto：新增内容自动执行，改动已有内容才确认' : '审查：每一步都先确认'}
-          aria-label="权限模式"
-          disabled={running || pending}
-          onClick={() => void agent.updateSettings({ permission_mode: autoMode ? 'review' : 'auto' })}
-          className="flex h-8 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40"
-        >
-          {autoMode ? <Zap className="size-3.5 text-primary" /> : <ShieldCheck className="size-3.5" />}
-          {autoMode ? 'Auto' : '审查'}
-        </button>
-      </div>
-
       <div className="m-2 mt-0 rounded-xl border border-border bg-background/60 focus-within:border-primary/60">
         {(attached.length > 0 || skill) && (
           <div className="flex flex-wrap gap-1 px-2 pt-2">
@@ -418,11 +388,36 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             disabled={running || pending}
             onChange={update => void agent.updateSettings(update)}
           />
-          <span className="flex-1" />
+          <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-border" />
+          <CanvasAgentModelPicker
+            models={agent.models}
+            alias={modelAlias}
+            model={modelId}
+            disabled={running || pending}
+            onSelect={choice => void agent.updateSettings({ model: choice.model, model_alias: choice.alias })}
+          />
+          <button
+            type="button"
+            title={selectedModel?.reasoning === false ? '该模型不支持思考' : thinkingOn ? '思考：开' : '思考：关'}
+            aria-label="思考模式"
+            aria-pressed={thinkingOn}
+            disabled={running || pending || selectedModel?.reasoning === false}
+            onClick={() => void agent.updateSettings({ effort: thinkingOn ? 'off' : 'high' })}
+            className={cn(ICON_BUTTON, thinkingOn && 'text-primary')}
+          ><Brain className="size-4" /></button>
+          <button
+            type="button"
+            title={autoMode ? 'Auto：新增内容自动执行，改动已有内容才确认' : '审查：每一步都先确认'}
+            aria-label={autoMode ? '权限模式：Auto' : '权限模式：审查'}
+            disabled={running || pending}
+            onClick={() => void agent.updateSettings({ permission_mode: autoMode ? 'review' : 'auto' })}
+            className={cn(ICON_BUTTON, autoMode && 'text-primary')}
+          >{autoMode ? <Zap className="size-4" /> : <ShieldCheck className="size-4" />}</button>
+          <span className="min-w-1 flex-1" />
           {running ? (
-            <button type="button" title="停止" aria-label="停止" onClick={() => void agent.stop()} className="grid size-8 place-items-center rounded-full bg-secondary text-foreground hover:bg-secondary/80"><Square className="size-3.5 fill-current" /></button>
+            <button type="button" title="停止" aria-label="停止" onClick={() => void agent.stop()} className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-foreground hover:bg-secondary/80"><Square className="size-3.5 fill-current" /></button>
           ) : (
-            <button type="button" title="发送" aria-label="发送" disabled={!canSend} onClick={() => void submit()} className="grid size-8 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-40"><ArrowUp className="size-4" /></button>
+            <button type="button" title="发送" aria-label="发送" disabled={!canSend} onClick={() => void submit()} className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-40"><ArrowUp className="size-4" /></button>
           )}
         </div>
       </div>

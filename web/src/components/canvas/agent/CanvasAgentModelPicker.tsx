@@ -42,7 +42,7 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
         aria-expanded={open}
         title={current || (!models && model) ? `${alias} · ${model}` : '选择对话模型'}
         onClick={() => setOpen(value => !value)}
-        className="flex h-8 min-w-0 max-w-[14rem] items-center gap-1 rounded-full px-2.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
+        className="flex h-7 min-w-0 max-w-[8rem] items-center gap-0.5 rounded-full px-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
       >
         {/* 记住的模型已不在列表里（Key 里停用了）：当作没选。 */}
         <span className="truncate">{(models ? current?.name : model) ?? '选择模型'}</span>

@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.81.0',
+    date: '2026-10-09',
+    headline: '画布 Agent 工具栏合成一排、默认 Auto',
+    changes: [
+      { kind: 'feat', text: '模型偏好分「图像 / 视频」两页，页内按供应商分组，并显示各自已选几个。' },
+      { kind: 'feat', text: '对话模型、思考、权限和创作模式、模型偏好合到输入框下面同一排。' },
+      { kind: 'feat', text: '新对话默认 Auto：新建节点、出图直接执行，改动或删除已有内容仍会确认。' },
+    ],
+  },
+  {
     version: '5.80.0',
     date: '2026-10-09',
     headline: '画布 Agent 对话更清爽',

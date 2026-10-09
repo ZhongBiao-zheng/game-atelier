@@ -89,7 +89,7 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
         disabled={disabled}
         onClick={() => setOpen(value => !value)}
         className={cn(
-          'grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40',
+          'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40',
           selected && 'text-primary',
         )}
       ><Puzzle className="size-4" /></button>
