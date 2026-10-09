@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.79.2',
+    date: '2026-10-09',
+    headline: '修复 Tuzi Seedream 出图失败',
+    changes: [
+      { kind: 'fix', text: 'Tuzi 的 Seedream 4.5 出图报「未知字段 output_format」失败的问题。' },
+      { kind: 'fix', text: 'Agent 写生成配置漏填 Key 时自动补上，不再被当成「模型不在可用范围」拦下。' },
+    ],
+  },
+  {
     version: '5.79.1',
     date: '2026-10-08',
     headline: '画布 Agent 修复菜单卡死与出图位置',

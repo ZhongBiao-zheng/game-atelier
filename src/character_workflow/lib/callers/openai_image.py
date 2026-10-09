@@ -346,6 +346,7 @@ def render(
             background=background,
             seedream=is_seedream,
             sequential=sends_ark_params and _supports_sequential(model),
+            seedream_png=not _is_tuzi_gateway(base_url),
         )
 
     data = _post_image_json(generations_url, _gen_payload(requested))
@@ -556,6 +557,7 @@ def _image_generation_payload(
     background: str | None = None,
     seedream: bool = False,
     sequential: bool = False,
+    seedream_png: bool = True,
 ) -> dict:
     payload: dict[str, Any] = {
         "model": model,
@@ -572,7 +574,10 @@ def _image_generation_payload(
         payload["watermark"] = False
         # output_format：Ark 默认 jpeg，而我们把产物一律存成 .png —— 实测 26 张历史产物里
         # 11 张实际是 JPEG，既名实不符又白挨一道有损压缩。立绘要无损，显式要 png。
-        payload["output_format"] = "png"
+        # 例外：Tuzi 网关 2026-10 起按白名单收字段，output_format 不在其中会直接 400
+        #（「未知字段 ['output_format']」）；watermark 属于「认得但做不到」，只降级不报错。
+        if seedream_png:
+            payload["output_format"] = "png"
     # Tuzi 可调质量基础型号与其非 VIP 固定别名靠 quality 路由；
     # VIP/HD/NT 与旧版 2.5 型号的档位内建在 model id。
     if quality:

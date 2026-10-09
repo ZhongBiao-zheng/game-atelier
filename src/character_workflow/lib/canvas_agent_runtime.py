@@ -59,7 +59,7 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
 工作方式：
 - 先用 get_canvas 看清画布现状，再动手；节点 id、版本 id 都以读到的为准，不要编。
 - 生成一张图或一段视频的标准步骤：apply_changes 里 add_surface 建一个空的图片/视频节点 →
-  set_draft 写提示词、模型（alias 与 model 必须来自 list_models）、参数 → 需要参考图时 connect
+  set_draft 写提示词、模型（alias 与 model 是两个独立的字符串字段，都必须来自 list_models）、参数 → 需要参考图时 connect
   把参考节点连到它 → run_generation 发起生成。
 - 这几步放进同一次 apply_changes：add_surface 时自己指定 node_id（如 cat-1），同一批后面的
   set_draft / connect 用这个 node_id 引用它；节点标题不能当 id 用。
@@ -184,8 +184,27 @@ def _check_generation_allowed(project_id: str, node_id: str, scope: ModelScope) 
         raise WorkshopError("INVALID_PARAMETERS", "模型偏好里没有可用的"
                             f"{'视频' if draft.mode == 'video' else '图片'}模型，请用户先在模型偏好里选择", 422)
     if (draft.alias, draft.model) not in allowed:
+        if draft.alias is None:
+            raise WorkshopError("INVALID_PARAMETERS", "set_draft 缺少 alias：alias 与 model 是两个"
+                                "字段，都要填 list_models 返回的值", 422)
         raise WorkshopError("INVALID_PARAMETERS",
-                            f"模型 {draft.model} 不在可用范围内，请从 list_models 里选", 422)
+                            f"模型 {draft.alias}/{draft.model} 不在可用范围内，请从 list_models 里选", 422)
+
+
+def _with_draft_aliases(changes: list, scope: ModelScope) -> list:
+    """set_draft 漏填 alias 时，在可用模型里按 model 唯一匹配补上。
+
+    不补的话 run 会回落到默认 Key（可能是欠费 / 不含这个模型的那家）。"""
+    result = []
+    for change in changes:
+        if isinstance(change, dict) and change.get("op") == "set_draft" and not change.get("alias") \
+                and change.get("mode") in scope.kinds():
+            aliases = {row["alias"] for row in scope.models(change["mode"])
+                       if row["model"] == change.get("model")}
+            if len(aliases) == 1:
+                change = {**change, "alias": aliases.pop()}
+        result.append(change)
+    return result
 
 
 def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope = ALL_MODELS,
@@ -217,8 +236,9 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
     if tool == "apply_changes":
         def apply(revision: int) -> dict:
             # 新节点的位置不用模型给的，按「上一次出图右侧、不重叠」重新排（见 canvas_agent_layout）。
-            changes = layout.with_auto_positions(read_canvas_document(project_id),
-                                                 arguments.get("changes") or [], created_ids)
+            changes = layout.with_auto_positions(
+                read_canvas_document(project_id),
+                _with_draft_aliases(arguments.get("changes") or [], scope), created_ids)
             return tools.apply_changes(LOCAL, ApplyChangesInput(
                 project_id=project_id, expected_revision=revision, changes=changes))
         result = _with_fresh_revision(project_id, apply)

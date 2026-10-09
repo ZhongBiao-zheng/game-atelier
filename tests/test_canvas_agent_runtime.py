@@ -287,3 +287,17 @@ def test_session_settings_store_creation_mode_and_preference(isolated_data_root)
         assert patched.json()["preferred_models"] == [{"alias": "a", "model": "img-2"}]
         assert client.patch(base, json={"preferred_models": []}).json()["preferred_models"] == []
         assert client.patch(base, json={"creation_mode": "3d"}).status_code == 422
+
+
+def test_missing_draft_alias_is_filled_only_when_unique(monkeypatch):
+    from character_workflow.lib import workshop_generation
+    monkeypatch.setattr(workshop_generation, "model_rows", lambda kind: {
+        "image": [{"alias": "Tuzi", "model": "seedream"}, {"alias": "A", "model": "gpt"},
+                  {"alias": "B", "model": "gpt"}], "video": []}[kind])
+    changes = [{"op": "set_draft", "node_id": "n", "mode": "image", "model": "seedream"},
+               {"op": "set_draft", "node_id": "m", "mode": "image", "model": "gpt"},
+               {"op": "add_text", "node_id": "t"}]
+    filled = runtime._with_draft_aliases(changes, runtime.ALL_MODELS)
+    assert filled[0]["alias"] == "Tuzi"
+    assert "alias" not in filled[1]  # 两家都有：不猜，交给生成前的校验报错
+    assert filled[2] == changes[2]
