@@ -17,15 +17,15 @@ import { ANNOUNCEMENTS, OPEN_ANNOUNCEMENT_EVENT, type Announcement } from '@/lib
 
 function VersionBlock({
   entry,
-  isLatest,
+  isFirst,
   isNew,
 }: {
   entry: ChangelogEntry;
-  isLatest: boolean;
+  isFirst: boolean;
   isNew: boolean;
 }) {
   return (
-    <section className={isLatest ? '' : 'border-t border-border pt-6'}>
+    <section className={isFirst ? '' : 'border-t border-border pt-6'}>
       {/* 版本号与日期紧邻左对齐：它们是一个语义单元（哪一版、什么时候）。
           日期右对齐会把这对信息拆成两栏，视线要横跨整个面板才配得上。 */}
       <div className="flex items-baseline gap-2">
@@ -79,10 +79,21 @@ function VersionBlock({
 }
 
 /** 模型公告混排在版本之间：图 + 一句介绍，完整内容与「快速添加」在右下角入口打开的弹窗里。 */
-function AnnouncementBlock({ announcement, onOpen }: { announcement: Announcement; onOpen: () => void }) {
+function AnnouncementBlock({
+  announcement,
+  isFirst,
+  onOpen,
+}: {
+  announcement: Announcement;
+  isFirst: boolean;
+  onOpen: () => void;
+}) {
   const [imageFailed, setImageFailed] = useState(false);
   return (
-    <section className="border-t border-border pt-6" data-testid="changelog-announcement">
+    <section
+      className={isFirst ? '' : 'border-t border-border pt-6'}
+      data-testid="changelog-announcement"
+    >
       <time className="text-xs text-muted-foreground/70" dateTime={announcement.date}>
         {announcement.date}
       </time>
@@ -114,12 +125,12 @@ type FeedItem =
   | { kind: 'version'; entry: ChangelogEntry; index: number }
   | { kind: 'announcement'; announcement: Announcement };
 
-/** 公告按日期插到同日及更早版本之前（两者都是新的在前）。 */
+/** 最新一条公告置顶（否则排在当天几个版本之后，打开面板看不到）；其余公告按日期插到同日及更早版本之前。 */
 function buildFeed(): FeedItem[] {
-  const pending = [...ANNOUNCEMENTS];
-  const feed: FeedItem[] = [];
+  const [latest, ...pending] = ANNOUNCEMENTS;
+  const feed: FeedItem[] = latest ? [{ kind: 'announcement', announcement: latest }] : [];
   CHANGELOG.forEach((entry, index) => {
-    while (pending.length && index > 0 && pending[0].date >= entry.date) {
+    while (pending.length && pending[0].date >= entry.date) {
       feed.push({ kind: 'announcement', announcement: pending.shift()! });
     }
     feed.push({ kind: 'version', entry, index });
@@ -242,18 +253,19 @@ export function ChangelogButton() {
             fade ? 'scroll-fade-b' : '',
           ].join(' ')}
         >
-          {buildFeed().map((item) =>
+          {buildFeed().map((item, position) =>
             item.kind === 'version' ? (
               <VersionBlock
                 key={item.entry.version}
                 entry={item.entry}
-                isLatest={item.index === 0}
+                isFirst={position === 0}
                 isNew={unread && item.index === 0}
               />
             ) : (
               <AnnouncementBlock
                 key={item.announcement.id}
                 announcement={item.announcement}
+                isFirst={position === 0}
                 onOpen={() => {
                   close();
                   window.dispatchEvent(new CustomEvent(OPEN_ANNOUNCEMENT_EVENT, { detail: item.announcement.id }));

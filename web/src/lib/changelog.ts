@@ -37,7 +37,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '2026-10-09',
     headline: '模型公告收进更新日志',
     changes: [
-      { kind: 'feat', text: '模型公告以图文卡片出现在更新日志里，点卡片右下角「模型公告」查看完整介绍并快速添加模型。' },
+      { kind: 'feat', text: '最新的模型公告以图文卡片置顶在更新日志里，点卡片右下角「模型公告」查看完整介绍并快速添加模型。' },
       { kind: 'feat', text: '顶栏只保留 Atelier 字标，字重与字距微调。' },
     ],
   },
