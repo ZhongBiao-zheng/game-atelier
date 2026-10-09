@@ -5159,6 +5159,7 @@ function CanvasEditorInner({
               }))}
             onClose={() => setAgentOpen(false)}
             onUpload={() => uploadRef.current?.click()}
+            onOpenKeySettings={() => void persistNow().then(saved => { if (saved) setLocation('/settings?section=keys'); })}
           />
         )}
 

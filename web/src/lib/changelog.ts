@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.82.2',
+    date: '2026-10-09',
+    headline: '画布 Agent 缺模型时提前提示',
+    changes: [
+      { kind: 'feat', text: '没有可用的对话模型、当前创作模式没有可用的图像 / 视频模型时，输入框上方直接提示，并可一键去设置页的 Key 区块。' },
+      { kind: 'feat', text: '模型偏好关了自动却没勾当前模式需要的模型（如视频创作只勾了图像）时提示，可一键改回自动。' },
+    ],
+  },
+  {
     version: '5.82.1',
     date: '2026-10-09',
     headline: '出图按真实格式保存',

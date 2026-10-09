@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import {
-  ArrowUp, Brain, Check, ChevronDown, ChevronRight, FileImage, FileText, FileVideo, Loader2, Paperclip,
+  ArrowUp, Brain, Check, ChevronDown, ChevronRight, CircleAlert, FileImage, FileText, FileVideo, Loader2, Paperclip,
   Puzzle, ShieldCheck, Square, SquarePen, Wrench, X, Zap,
 } from 'lucide-react';
 import { canvasMediaUrl } from '@/api/canvas';
@@ -16,6 +16,7 @@ import { CanvasAgentModelPicker } from './CanvasAgentModelPicker';
 import { CanvasAgentPreferencePicker } from './CanvasAgentPreferencePicker';
 import { CanvasAgentReferenceThumb } from './CanvasAgentReferenceThumb';
 import { buildCanvasAgentTimeline } from './canvasAgentTimeline';
+import { canvasAgentSetupNotice } from './canvasAgentSetupNotice';
 import { AGENT_PANEL_MAX_WIDTH, AGENT_PANEL_MIN_WIDTH, useAgentPanelWidth } from './useAgentPanelWidth';
 import { CanvasAgentSkillPicker } from './CanvasAgentSkillPicker';
 import { useCanvasAgent } from './useCanvasAgent';
@@ -192,12 +193,14 @@ function Message({ projectId, message }: { projectId: string; message: CanvasAge
   );
 }
 
-export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, className }: {
+export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, onOpenKeySettings, className }: {
   projectId: string;
   /** 画布当前选中的节点：自动带进下一条消息，可逐个移除。 */
   selectedNodes: CanvasAgentNodeRef[];
   onClose: () => void;
   onUpload: () => void;
+  /** 缺模型时「去设置」：跳到设置页的 Key 区块。 */
+  onOpenKeySettings: () => void;
   className?: string;
 }) {
   const agent = useCanvasAgent(projectId, true);
@@ -221,6 +224,13 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
   // 草稿里没设过权限时跟服务端默认一致：Auto。
   const autoMode = (settings.permission_mode ?? 'auto') === 'auto';
   const creationMode = settings.creation_mode ?? 'all';
+  const setupNotice = canvasAgentSetupNotice({
+    chatModels: agent.models?.models ?? null,
+    generationModels: agent.generationModels,
+    mode: creationMode,
+    auto: settings.auto_models ?? true,
+    preferred: settings.preferred_models ?? [],
+  });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const empty = messages.length === 0 && !running && !awaiting;
 
@@ -342,6 +352,20 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
         <p role="alert" className="mx-3 mb-2 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
           <span className="min-w-0 flex-1 break-words">{agent.error}</span>
           <button type="button" aria-label="关闭提示" onClick={agent.clearError}><X className="size-3.5" /></button>
+        </p>
+      )}
+
+      {setupNotice && (
+        <p role="status" className="mx-3 mb-2 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs text-muted-foreground">
+          <CircleAlert className="size-3.5 shrink-0 text-primary" />
+          <span className="min-w-0 flex-1 break-words">{setupNotice.text}</span>
+          <button
+            type="button"
+            onClick={() => setupNotice.action === 'settings'
+              ? onOpenKeySettings()
+              : void agent.updateSettings({ auto_models: true })}
+            className="shrink-0 text-primary underline-offset-2 hover:underline"
+          >{setupNotice.action === 'settings' ? '去设置' : '改为自动'}</button>
         </p>
       )}
 
