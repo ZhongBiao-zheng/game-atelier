@@ -5153,7 +5153,10 @@ function CanvasEditorInner({
             projectId={projectId}
             selectedNodes={document.nodes
               .filter(node => selectedNodeIds.has(node.id))
-              .map(node => ({ id: node.id, title: node.title, type: node.type }))}
+              .map(node => ({
+                id: node.id, title: node.title, type: node.type,
+                versionId: node.type === 'image' ? node.data.current_version_id : null,
+              }))}
             onClose={() => setAgentOpen(false)}
             onUpload={() => uploadRef.current?.click()}
           />

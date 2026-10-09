@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import {
-  ArrowUp, Brain, Check, ChevronDown, FileImage, FileText, FileVideo, Loader2, Paperclip,
+  ArrowUp, Brain, Check, ChevronDown, ChevronRight, FileImage, FileText, FileVideo, Loader2, Paperclip,
   Puzzle, ShieldCheck, Square, SquarePen, Wrench, X, Zap,
 } from 'lucide-react';
 import { canvasMediaUrl } from '@/api/canvas';
@@ -14,6 +14,8 @@ import type { CanvasAgentCreationMode, CanvasAgentMessage } from '@/schema/canva
 import { CanvasAgentModeMenu } from './CanvasAgentModeMenu';
 import { CanvasAgentModelPicker } from './CanvasAgentModelPicker';
 import { CanvasAgentPreferencePicker } from './CanvasAgentPreferencePicker';
+import { CanvasAgentReferenceThumb } from './CanvasAgentReferenceThumb';
+import { buildCanvasAgentTimeline } from './canvasAgentTimeline';
 import { CanvasAgentSkillPicker } from './CanvasAgentSkillPicker';
 import { useCanvasAgent } from './useCanvasAgent';
 
@@ -21,6 +23,8 @@ export interface CanvasAgentNodeRef {
   id: string;
   title: string;
   type: string;
+  /** 图片节点的当前版本：有就显示缩略图。 */
+  versionId?: string | null;
 }
 
 // 与服务端 canvas_agent_runtime.READ_LABELS 同名同字：只读工具的消息正文就是这个标签，相同则不重复显示。
@@ -75,6 +79,48 @@ const PRESETS: Record<CanvasAgentCreationMode, string[]> = {
 /** 显示宽度 = 缩略图格子宽（w-20 = 80px）的 2 倍，留给高分屏。 */
 const THUMB_DISPLAY_WIDTH = 160;
 
+/** 已结束一轮的中间过程：默认收起成一行，可展开；生成出的图收起时也露在外面。 */
+function ProcessGroup({ projectId, messages, steps }: {
+  projectId: string;
+  messages: CanvasAgentMessage[];
+  steps: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const images = messages.flatMap(message => message.role === 'tool'
+    ? message.references.filter(ref => ref.kind === 'content' && ref.version_id) : []);
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(value => !value)}
+        className="flex w-fit items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <Wrench className="size-3.5" />
+        处理过程 · {steps} 步
+        <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
+      </button>
+      {open ? (
+        <div className="flex flex-col gap-3 border-l border-border pl-3">
+          {messages.map(message => <Message key={message.message_id} projectId={projectId} message={message} />)}
+        </div>
+      ) : images.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {images.map(ref => (
+            <img
+              key={ref.reference_id}
+              src={canvasMediaUrl(projectId, ref.version_id!, THUMB_DISPLAY_WIDTH)}
+              alt={ref.title}
+              loading="lazy"
+              className="size-20 rounded-md border border-border object-cover"
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Message({ projectId, message }: { projectId: string; message: CanvasAgentMessage }) {
   if (message.role === 'user') {
     return (
@@ -84,8 +130,16 @@ function Message({ projectId, message }: { projectId: string; message: CanvasAge
           <span className="flex items-center gap-1 text-xs text-muted-foreground"><Puzzle className="size-3" />{message.title}</span>
         )}
         {message.references.length > 0 && (
-          <div className="flex max-w-[85%] flex-wrap justify-end gap-1">
-            {message.references.map(ref => (
+          <div className="flex max-w-[85%] flex-wrap items-center justify-end gap-1.5">
+            {message.references.map(ref => ref.version_id ? (
+              <CanvasAgentReferenceThumb
+                key={ref.reference_id}
+                projectId={projectId}
+                nodeId={ref.node_id ?? ref.reference_id}
+                versionId={ref.version_id}
+                title={ref.title}
+              />
+            ) : (
               <span key={ref.reference_id} className="truncate rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">{ref.title}</span>
             ))}
           </div>
@@ -240,7 +294,9 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             </div>
           </div>
         )}
-        {messages.map(message => <Message key={message.message_id} projectId={projectId} message={message} />)}
+        {buildCanvasAgentTimeline(messages, running || awaiting).map(block => block.kind === 'message'
+          ? <Message key={block.message.message_id} projectId={projectId} message={block.message} />
+          : <ProcessGroup key={block.id} projectId={projectId} messages={block.messages} steps={block.steps} />)}
         {running && streaming && <AgentMarkdown text={streaming} />}
         {running && (
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -312,7 +368,16 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
                 <button type="button" aria-label={`不用 Skill ${skill}`} onClick={() => setSkill(null)} className="rounded-full p-0.5 hover:bg-secondary"><X className="size-3" /></button>
               </span>
             )}
-            {attached.map(node => (
+            {attached.map(node => node.type === 'image' && node.versionId ? (
+              <CanvasAgentReferenceThumb
+                key={node.id}
+                projectId={projectId}
+                nodeId={node.id}
+                versionId={node.versionId}
+                title={node.title}
+                onRemove={() => setDismissed(current => new Set(current).add(node.id))}
+              />
+            ) : (
               <span key={node.id} className="flex max-w-[10rem] items-center gap-1 rounded-full border border-border py-0.5 pl-2 pr-1 text-xs text-muted-foreground">
                 <NodeIcon type={node.type} />
                 <span className="truncate">{node.title}</span>

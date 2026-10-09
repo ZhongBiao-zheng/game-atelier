@@ -33,6 +33,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.80.0',
+    date: '2026-10-09',
+    headline: '画布 Agent 对话更清爽',
+    changes: [
+      { kind: 'feat', text: 'Agent 一轮结束后，中间的处理过程收成一行，点开可看；生成出的图收起时也能直接看到。' },
+      { kind: 'feat', text: '对话里带的参考图显示成小缩略图，鼠标悬停放大，和生成节点里的素材一致。' },
+      { kind: 'fix', text: '出图结果一律存成真正的 PNG（之前有的厂商返回 JPEG 却存成 .png）。' },
+      { kind: 'fix', text: 'Agent 用画布上已有的图当参考时直接连线，不再复制一份。' },
+    ],
+  },
+  {
     version: '5.79.2',
     date: '2026-10-09',
     headline: '修复 Tuzi Seedream 出图失败',

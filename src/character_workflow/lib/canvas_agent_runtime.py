@@ -63,6 +63,8 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
   把参考节点连到它 → run_generation 发起生成。
 - 这几步放进同一次 apply_changes：add_surface 时自己指定 node_id（如 cat-1），同一批后面的
   set_draft / connect 用这个 node_id 引用它；节点标题不能当 id 用。
+- 用画布上已有的图当参考（用户带进来的节点、上一次出的图）：直接 connect 那个节点到新的生成节点，
+  不要 add_media_node 把它复制成新节点再连。
 - 新节点的位置由系统自动排在上一次出图的右侧、不和其他节点重叠；add_* 的 position 填 {x: 0, y: 0}
   即可，不用自己计算。
 - 发起生成后调用 wait_for_run 等结果，结果图会附在工具结果后面给你看。看完向用户简短汇报：
