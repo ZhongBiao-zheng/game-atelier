@@ -98,6 +98,9 @@ export function AppShell() {
   const onHome = loc === '/';
   const onSettings = loc.startsWith('/settings');
   const immersiveCanvas = /^\/canvas\/[^/]+$/.test(loc);
+  // 这些页面自带滚动容器；外层再留一条滚动槽会让内容右侧多出 10px 空白。
+  const pageOwnsScroll = loc === '/studio' || loc === '/canvas'
+    || (loc.startsWith('/workshop') && loc !== '/workshop/requests');
   const activeIndex = onHome ? 0 : onStudio ? 1 : onCanvas ? 2 : onWorkshop ? 3 : -1;
   const reminderRef = useRef<TeamShareReminderHandle>(null);
   // 全壳唯一一条 SSE（服务端每会话限 4 条）：顺带把团队库变更交给分享提醒，重连时让它重取显示名。
@@ -139,7 +142,7 @@ export function AppShell() {
       </header>}
 
       {/* stable-scroll：本壳是首页/工坊的真·滚动容器，固定滚动槽避免滚动条增删改内宽 → 列宽 → w-full 图高 → 墙高的自激抽搐环（见 scrollbar-gutter-feedback-loop memory）*/}
-      <main role="main" className={immersiveCanvas ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 min-h-0 overflow-y-auto stable-scroll'}>
+      <main role="main" className={immersiveCanvas || pageOwnsScroll ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 min-h-0 overflow-y-auto stable-scroll'}>
         <Switch>
           <Route path="/connection">{() => <ConnectionPage />}</Route>
           <Route path="/workshop/requests">{() => <WorkshopRequestsPage />}</Route>

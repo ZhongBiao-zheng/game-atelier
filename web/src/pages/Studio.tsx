@@ -810,8 +810,10 @@ function StudioFull() {
       aria-label="生图沙箱"
     >
       {/* 查询条：固定顶部覆盖层，不随历史滚动。wrapper 不收事件，条本体 pointer-events-auto。 */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-end px-3 pt-4 sm:px-6">
-        <StudioQueryBar filters={historyFilters} onChange={setHistoryFilters} />
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 px-3 pt-4 sm:px-6">
+        <div className="mx-auto flex w-full max-w-[1024px] justify-end">
+          <StudioQueryBar filters={historyFilters} onChange={setHistoryFilters} />
+        </div>
       </div>
       {/* col-reverse：浏览器原生钉底，scrollTop 0 即底部；rounds 反转后最新一轮落在视觉底部。
           pt 让出查询条空间，pb 预留输入壳展开高度，最后一轮不被浮层压住。 */}
@@ -820,7 +822,7 @@ function StudioFull() {
         onScroll={handleHistoryScroll}
         data-studio-history-scroll
         data-testid="studio-history-scroll"
-        className="flex h-full flex-col-reverse overflow-y-auto pt-20 pb-[210px]"
+        className="flex h-full flex-col-reverse overflow-y-auto [scrollbar-gutter:stable_both-edges] pt-20 pb-[210px]"
       >
         <RoundList
           rounds={reversedRounds}
@@ -859,7 +861,7 @@ function StudioFull() {
       {/* 浮层输入：wrapper 不收事件，两侧视觉与交互都穿透到历史区；壳本体在 PromptInput 内
           pointer-events-auto。 */}
       <div className="pointer-events-none absolute inset-x-0 bottom-4 px-3 sm:px-6">
-        <div className="relative mx-auto flex max-w-[844px] items-end gap-3">
+        <div className="relative mx-auto flex max-w-[844px] items-end gap-3 lg:max-w-[780px]">
           <div className="relative min-w-0 flex-1">
           {/* 回到底部：常驻挂载才有进出动画。锚定 bottom-full 让它跟着壳顶升降——
               壳展开时被顶着上移、同时向右上平移渐隐；收起时反向浮现。 */}
@@ -985,7 +987,7 @@ function StudioFull() {
               if (assetPanelOpen) assetPanelRef.current?.requestClose();
               else setAssetPanelOpen(true);
             }}
-            className={`pointer-events-auto grid shrink-0 place-items-center rounded-full border border-input bg-glass text-muted-foreground backdrop-blur-glass transition-all duration-300 hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+            className={`pointer-events-auto grid shrink-0 place-items-center lg:absolute lg:bottom-0 lg:left-full lg:ml-3 rounded-full border border-input bg-glass text-muted-foreground backdrop-blur-glass transition-all duration-300 hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
               dockCollapsed ? 'mb-[22px] size-8' : 'mb-4 size-10'
             }`}
           >

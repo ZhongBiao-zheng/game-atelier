@@ -70,7 +70,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
 
   const content = (
     <>
-      <div className={`mb-4 flex items-baseline ${embedded ? 'justify-end' : 'justify-between'}`}>
+      <div className={`mb-4 flex items-baseline ${embedded ? 'justify-start' : 'justify-between'}`}>
         {!embedded && (
           <h1 className="font-display text-display text-foreground">API 密钥</h1>
         )}

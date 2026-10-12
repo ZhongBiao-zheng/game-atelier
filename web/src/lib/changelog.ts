@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.83.4',
+    date: '2026-10-12',
+    headline: '创作台、设置页对齐修正',
+    changes: [
+      { kind: 'fix', text: '创作台的记录列表、输入框、筛选条对齐到同一条中轴；创作资产按钮挂到输入框外侧。' },
+      { kind: 'fix', text: '设置页「更换文件夹」「新建供应商」改为与其他控件左对齐。' },
+      { kind: 'fix', text: '创作台、画布列表、工坊页面右侧不再多出一条空白。' },
+    ],
+  },
+  {
     version: '5.83.3',
     date: '2026-10-09',
     headline: '拖线时只显示要连的那个连接点',
