@@ -92,6 +92,13 @@ export type RoundState =
 
 /** 生成中占位框的宽高比：按目标比例（"16:9"）→ 退回尺寸（"1024x1536"）→ 退回 1:1。
  *  别再固定 aspect-square，否则出竖图/宽图时占位是方框、出图后尺寸跳变。 */
+// xl 起一条记录分两栏：结果在左，提示词 / 元数据 / 操作在右。DOM 顺序不变（头 → 结果 → 操作），
+// 位置靠栅格行列指定，窄屏仍是原来的上下堆叠。
+const ROUND_SECTION_CLASS = 'space-y-3 xl:grid xl:grid-cols-[minmax(0,1fr)_20rem] xl:grid-rows-[auto_1fr] xl:gap-x-6 xl:gap-y-3 xl:space-y-0';
+const ROUND_HEADER_CLASS = 'flex items-start gap-3 text-sm xl:col-start-2 xl:row-start-1';
+const ROUND_MEDIA_CLASS = 'flex flex-wrap gap-1 xl:col-start-1 xl:row-span-2 xl:row-start-1 xl:content-start';
+const ROUND_ACTIONS_CLASS = 'flex items-center gap-2 xl:col-start-2 xl:row-start-2 xl:self-start';
+
 function aspectStyle(config: RoundConfig): { aspectRatio: string } {
   const r = !config.sizeMode || config.sizeMode === 'ratio' ? config.ratio : undefined;
   if (r && /^\d+\s*:\s*\d+$/.test(r)) return { aspectRatio: r.replace(/\s*:\s*/, ' / ') };
@@ -264,7 +271,7 @@ export function RoundList({
     <>
       <div
         data-testid="studio-round-list"
-        className="mx-auto mt-8 w-full min-w-[800px] max-w-[1024px] space-y-8 text-left"
+        className="mx-auto mt-8 w-full min-w-[800px] max-w-[1024px] space-y-8 text-left xl:max-w-[1368px]"
       >
         {hasEarlierHistory && (
           <div
@@ -372,8 +379,8 @@ function PendingBatch({
       <div className="mb-3">
         <WaitingCopy startedAt={round.startedAt} now={now} />
       </div>
-      <section className="space-y-3">
-        <div className="flex items-start gap-3 text-sm">
+      <section className={ROUND_SECTION_CLASS}>
+        <div className={ROUND_HEADER_CLASS}>
           <ReferenceStack
             config={round.config}
             jobId={round.jobId}
@@ -399,7 +406,7 @@ function PendingBatch({
             {round.config.sourceAssetTitle && <p className="mt-0.5 text-xs text-muted-foreground">来源：{round.config.sourceAssetTitle}</p>}
           </div>
         </div>
-        <div className="flex flex-wrap gap-1">
+        <div className={ROUND_MEDIA_CLASS}>
           {Array.from({ length: Math.max(1, round.config.n ?? 1) }, (_, i) => (
             <div
               key={i}
@@ -414,7 +421,7 @@ function PendingBatch({
             </div>
           ))}
         </div>
-        <div className="flex items-center gap-2">
+        <div className={ROUND_ACTIONS_CLASS}>
           <ActionButton onClick={() => { void onReEdit?.(round.config, round.jobId); }}>重新编辑</ActionButton>
           <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
           {round.jobId && onCancel && (
@@ -912,8 +919,8 @@ function DoneBatch({
     : undefined;
 
   return (
-    <section className="space-y-3">
-      <div className="flex items-start gap-3 text-sm">
+    <section className={ROUND_SECTION_CLASS}>
+      <div className={ROUND_HEADER_CLASS}>
         <ReferenceStack
           config={round.config}
           jobId={round.jobId}
@@ -962,7 +969,7 @@ function DoneBatch({
           )}
         </div>
       </div>
-      <div className="flex flex-wrap gap-1">
+      <div className={ROUND_MEDIA_CLASS}>
         {round.config.kind === 'video'
           ? round.imagePaths.map((path, index) => {
               const favorited = !!favorites && isGalleryFavorited(path, favorites);
@@ -1120,7 +1127,7 @@ function DoneBatch({
               );
             })}
       </div>
-      <div className="flex items-center gap-2">
+      <div className={ROUND_ACTIONS_CLASS}>
         <ActionButton onClick={() => { void onReEdit?.(round.config, round.jobId); }}>重新编辑</ActionButton>
         <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
         {/* skill 出图（角色立绘/KV/三视图）在出图页只作溯源展示——删除会从磁盘抹掉角色资产，
@@ -1129,7 +1136,8 @@ function DoneBatch({
         <div className="relative" ref={menuWrapRef}>
           <ActionButton compact aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
           {menuOpen && (
-            <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 w-[195px] rounded-xl border border-border bg-glass p-1 backdrop-blur-glass">
+            // 两栏下操作在右栏贴近视口右缘，向右弹会被裁掉，xl 起改为向下、右对齐
+            <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 w-[195px] rounded-xl border border-border bg-glass p-1 backdrop-blur-glass xl:left-auto xl:right-0 xl:top-full xl:ml-0 xl:mt-2">
               {onSavePromptAsset && (
                 <button
                   type="button"
@@ -1174,7 +1182,7 @@ function ActionButton({
   return (
     <button
       type="button"
-      className={`inline-flex items-center justify-center ${compact ? 'h-9 w-9 px-0' : 'h-9 w-[94px] px-3'} rounded-md bg-secondary text-sm font-medium text-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
+      className={`inline-flex items-center justify-center ${compact ? 'h-9 w-9 px-0' : 'h-9 w-[94px] px-3'} rounded-md text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
       {...props}
     />
   );
@@ -1199,9 +1207,9 @@ function FailedCard({
   const meta = config ? specMetadata(config) : [];
 
   return (
-    <section className="space-y-3">
+    <section className={ROUND_SECTION_CLASS}>
       {config && (
-        <div className="flex items-start gap-3 text-sm">
+        <div className={ROUND_HEADER_CLASS}>
           <ReferenceStack
             config={config}
             jobId={round.jobId}
@@ -1223,7 +1231,7 @@ function FailedCard({
       )}
       <div
         data-testid={round.canceled ? 'studio-canceled-note' : undefined}
-        className={`flex items-start gap-2 rounded-lg border px-4 py-3 text-sm ${round.canceled ? 'border-border bg-card/40' : 'border-destructive/30 bg-destructive/5'}`}
+        className={`flex items-start gap-2 rounded-lg border px-4 py-3 text-sm xl:col-start-1 xl:row-span-2 xl:row-start-1 xl:self-start ${round.canceled ? 'border-border bg-card/40' : 'border-destructive/30 bg-destructive/5'}`}
       >
         {round.canceled
           ? <Square className="mt-1 size-3 shrink-0 fill-current text-muted-foreground" aria-hidden />
@@ -1244,7 +1252,7 @@ function FailedCard({
         )}
       </div>
       {config && (
-        <div className="flex items-center gap-2">
+        <div className={ROUND_ACTIONS_CLASS}>
           <ActionButton onClick={() => { void onReEdit?.(config, round.jobId); }}>重新编辑</ActionButton>
           <ActionButton onClick={() => { void onRegenerate?.(config); }}>再次生成</ActionButton>
         </div>

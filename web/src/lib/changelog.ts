@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.85.6',
+    date: '2026-10-12',
+    headline: '创作台记录在宽屏下分两栏',
+    changes: [
+      { kind: 'feat', text: '宽屏下每条生成记录分成两栏：结果图在左，提示词、参数和操作在右。' },
+      { kind: 'fix', text: '「重新编辑」「再次生成」改成无底色按钮，不再和图片抢视线。' },
+    ],
+  },
+  {
     version: '5.85.5',
     date: '2026-10-12',
     headline: '设置页加了分区导航',
