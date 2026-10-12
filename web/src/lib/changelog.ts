@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.83.5',
+    date: '2026-10-12',
+    headline: '画布缩放条移到右下角',
+    changes: [
+      { kind: 'feat', text: '画布底部工具条拆成两组：画布设置留在左下，缩放移到右下。' },
+      { kind: 'fix', text: '系统只设置了大写 NO_PROXY 时，本机请求不再被误送进代理。' },
+    ],
+  },
+  {
     version: '5.83.4',
     date: '2026-10-12',
     headline: '创作台、设置页对齐修正',

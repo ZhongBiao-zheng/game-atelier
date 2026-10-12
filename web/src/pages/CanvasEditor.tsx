@@ -4799,6 +4799,7 @@ function CanvasEditorInner({
           edges={flowEdges}
           nodeTypes={canvasNodeTypes}
           edgeTypes={canvasEdgeTypes}
+          attributionPosition="bottom-center"
           onSelectionStart={onSelectionStart}
           onSelectionEnd={onSelectionEnd}
           onConnect={onConnect}
@@ -5958,9 +5959,13 @@ function CanvasZoomDock({
   const zoom = useStore(canvasFlowZoom);
   const percent = Math.round(zoom * 100);
   return (
-    <div className="canvas-zoom-dock absolute bottom-3 left-3 z-20 hidden items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
-      {configControls}
-      <span className="mx-1 h-7 w-px bg-border" aria-hidden="true" />
+    <>
+    {configControls && (
+      <div className="canvas-config-dock absolute bottom-3 left-3 z-20 hidden items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
+        {configControls}
+      </div>
+    )}
+    <div className="canvas-zoom-dock absolute bottom-3 right-3 z-20 hidden items-center gap-1 rounded-xl border border-border bg-glass px-2 py-2.5 backdrop-blur-glass shell-glow md:flex">
       <button
         type="button"
         aria-label="缩小画布"
@@ -6004,5 +6009,6 @@ function CanvasZoomDock({
         onClick={onResetZoom}
       ><Scan className="size-4" aria-hidden="true" /></button>
     </div>
+    </>
   );
 }

@@ -998,19 +998,20 @@ export function placeCanvasGenerationPanel(
 
 /** 画布外框上的常驻控件占了哪几条边。
  *
- *  只夹进视口还不够：面板贴着可视区下沿摆的时候，「开始生成」正好落在左下那组缩放控件底下
+ *  只夹进视口还不够：面板贴着可视区下沿摆的时候，「开始生成」正好落在底部那两组控件底下
  *  （1280×720 实测），主操作点不到。按控件的实际矩形收缩可用区域，尺寸变了不用改这里。 */
 function canvasChromeInsetBounds(surface: HTMLElement): CanvasPanelRect {
   const bounds = surface.getBoundingClientRect();
   const edge = (selector: string) => surface.querySelector(selector)?.getBoundingClientRect() ?? null;
   const rail = edge('.canvas-tool-dock') ?? edge('.canvas-mobile-rail');
   const zoom = edge('.canvas-zoom-dock');
+  const config = edge('.canvas-config-dock');
   const library = edge('.canvas-library-panel');
   const top = edge('.canvas-editor-top');
   const left = rail ? Math.max(bounds.left, rail.right) : bounds.left;
   const right = library ? Math.min(bounds.right, library.left) : bounds.right;
   const upper = top ? Math.max(bounds.top, top.bottom) : bounds.top;
-  const lower = zoom ? Math.min(bounds.bottom, zoom.top) : bounds.bottom;
+  const lower = Math.min(bounds.bottom, zoom?.top ?? bounds.bottom, config?.top ?? bounds.bottom);
   return {
     left,
     right,

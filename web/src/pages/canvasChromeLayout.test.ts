@@ -55,12 +55,15 @@ describe('canvas chrome spatial hierarchy', () => {
     expect(tokenSource).toMatch(
       /\.canvas-add-menu \{[\s\S]*?left: calc\(max\(1rem, env\(safe-area-inset-left\)\) \+ 3\.75rem\)/,
     );
-    // 缩放与画布设置合并到左下同一组，创作库停靠右侧并按断点上抬避让。
+    // 飙哥 2026-10-12：画布设置留左下、缩放移到右下，左右各一组；创作库停靠右侧并按断点上抬避让。
     expect(tokenSource).toMatch(
-      /\.canvas-zoom-dock \{\s*left: max\(0\.75rem, env\(safe-area-inset-left\)\)/,
+      /\.canvas-config-dock \{\s*left: max\(0\.75rem, env\(safe-area-inset-left\)\)/,
     );
     expect(tokenSource).toMatch(
-      /@media \(min-width: 48rem\) \{[\s\S]*?\.canvas-library-panel \{[\s\S]*?right: max\(1rem, env\(safe-area-inset-right\)\)[\s\S]*?\+ 3\.375rem/,
+      /\.canvas-zoom-dock \{\s*right: max\(0\.75rem, env\(safe-area-inset-right\)\)/,
+    );
+    expect(tokenSource).toMatch(
+      /@media \(min-width: 48rem\) \{[\s\S]*?\.canvas-library-panel \{[\s\S]*?right: max\(1rem, env\(safe-area-inset-right\)\)[\s\S]*?\+ 4rem/,
     );
     expect(tokenSource).toMatch(
       /@media \(min-width: 48rem\) and \(max-width: 63\.999rem\) \{[\s\S]*?\.canvas-library-panel \{[\s\S]*?\+ 8\.125rem/,
@@ -69,6 +72,5 @@ describe('canvas chrome spatial hierarchy', () => {
     expect(tokenSource).toMatch(/\.canvas-editor-region \{[\s\S]*?overscroll-behavior: none/);
     // 已删除的遗留类名不得回流。
     expect(tokenSource).not.toContain('.canvas-tool-rail');
-    expect(canvasEditorSource).not.toContain('canvas-config-dock');
   });
 });
