@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.85.8',
+    date: '2026-10-12',
+    headline: '创作台记录信息重新排版',
+    changes: [
+      { kind: 'fix', text: '有参考图和没有参考图的记录，文字都从同一条左边线开始；参考图移到提示词右侧。' },
+      { kind: 'fix', text: '参数标签换成实底，来源并进同一行；耗时、时间、费用移到操作按钮右侧。' },
+      { kind: 'fix', text: '「重新编辑」「再次生成」的文字和上面的内容对齐。' },
+    ],
+  },
+  {
     version: '5.85.7',
     date: '2026-10-12',
     headline: '创作台记录按日期分组',

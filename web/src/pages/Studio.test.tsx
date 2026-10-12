@@ -1242,12 +1242,12 @@ describe('Studio', () => {
     expect(screen.getByRole('button', { name: '更多操作' })).toBeInTheDocument();
   });
 
-  it('uses fixed batch action sizes and opens the more menu to the right', async () => {
+  it('sizes batch actions to their labels and opens the more menu to the right', async () => {
     renderStudioWithCompletedBatch();
 
-    expect(await screen.findByRole('button', { name: '重新编辑' })).toHaveClass('h-9', 'w-[94px]');
-    expect(screen.getByRole('button', { name: '再次生成' })).toHaveClass('h-9', 'w-[94px]');
-    expect(screen.getByRole('button', { name: '更多操作' })).toHaveClass('h-9', 'w-9');
+    expect(await screen.findByRole('button', { name: '重新编辑' })).toHaveClass('h-8', 'px-2');
+    expect(screen.getByRole('button', { name: '再次生成' })).toHaveClass('h-8', 'px-2');
+    expect(screen.getByRole('button', { name: '更多操作' })).toHaveClass('h-8', 'w-8');
 
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
 

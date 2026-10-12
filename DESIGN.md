@@ -198,7 +198,7 @@
 | 控件下拉面板限高 | `ToolbarPopover` 把定位算出的可用高度写在内联 style 上，会盖过 className 里的 `max-h-*`；要限高传 `maxHeight` prop（厂商 / 模型列表 400，生成模式 280） |
 | 玻璃浮层（无选项的悬浮 panel/菜单） | `bg-glass backdrop-blur-glass border border-border rounded-xl` |
 | Studio 输入壳（滚动联动收放） | 浮于历史滚动区上（wrapper `pointer-events-none`，壳 `pointer-events-auto`，两侧视觉与交互都穿透）；`rounded-xl` 收放两态一致（胶囊 `rounded-full` 试装后被否——过圆），展开 `min-h-[174px]`，距底 >160px 收成单行条：控件行 `grid-rows-[0fr] opacity-0` 折叠、textarea 单行、参考堆叠 `scale-80`，全程 `transition 300ms`；点击收缩壳展开但**不回滚**，「回到底部」独立玻璃 pill 出现在壳右上方，点击**瞬时跳底**不播滚动过程 |
-| Studio 生成记录 | xl（≥1280）起一条记录两栏：结果在左，提示词 / 参数 / 操作在右栏 20rem，列表上限放到 1368px；DOM 顺序不变，位置靠栅格行列指定，窄屏仍上下堆叠。出图参数逐项成标签（`rounded-sm border border-border px-1.5 py-0.5 text-xs`），MJ flags 另起一行等宽；耗时 / 时间 / 费用仍是其下的 `text-xs` 运行信息行。列表按北京日期分组，每组第一条上方一行等宽日期（`font-mono text-xs text-muted-foreground`）。查询条容器与列表同宽，右缘对齐右栏。批次操作按钮固定 `h-9 w-[94px]`、无底色（`text-muted-foreground hover:bg-secondary/60`）；更多菜单默认向右弹，xl 起因贴近视口右缘改为向下右对齐 |
+| Studio 生成记录 | xl（≥1280）起一条记录两栏：结果在左，信息栏在右 20rem，列表上限 1368px；DOM 顺序不变（头 → 结果 → 操作），位置靠栅格行列指定，窄屏上下堆叠。信息栏三段、共用一条左缘：① 提示词，参考图贴在它右上角（有无参考图都不改变下面各行的左缘）② 参数标签：实底 `rounded-sm bg-card px-2 py-0.5 text-xs`，来源是同一行里的描边标签，MJ flags 另起一行等宽灰字 ③ 操作行：上方发丝分隔，按钮 `h-8 px-2 text-xs` 无底色、宽度随文字、整行 `-ml-2` 让文字贴左缘；耗时 · 时分 · 费用等宽靠右。日期由分组标题承担（列表按北京日期分组，每组第一条上方一行 `font-mono text-xs`）。查询条容器与列表同宽，右缘对齐右栏。更多菜单默认向右弹，xl 起向下右对齐 |
 | 玻璃 pill（顶栏 tab） | `bg-glass backdrop-blur-glass border border-border rounded-full` |
 | 顶栏圆形 icon 钮（主题切换 / 设置） | `h-10 w-10 rounded-full bg-glass backdrop-blur-glass text-muted-foreground hover:bg-secondary/60 hover:text-foreground`，icon 18px |
 | 遮罩层（lightbox） | `fixed inset-0 z-50 bg-scrim` |
