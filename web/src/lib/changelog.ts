@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.85.2',
+    date: '2026-10-12',
+    headline: '画布分组的选中和拖线手感',
+    changes: [
+      { kind: 'feat', text: '点分组框内的空白处或边线就能选中分组。' },
+      { kind: 'feat', text: '从分组右侧「+」拖线时「+」跟着鼠标走；松手后创建列表开着时，线一直连在列表上。' },
+    ],
+  },
+  {
     version: '5.85.1',
     date: '2026-10-12',
     headline: '画布分组换成圆角面板样式',

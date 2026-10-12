@@ -55,7 +55,7 @@ import {
   WandSparkles,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { Link, useLocation } from 'wouter';
 
 import {
@@ -90,7 +90,7 @@ import { useCanvasBatchRuns } from '@/hooks/useCanvasBatchRuns';
 import { prepareCanvasBatch, startCanvasBatch, cancelCanvasBatch } from '@/api/canvasBatch';
 import { CanvasBatchConfirmation } from '@/components/canvas/CanvasBatchControls';
 import { canvasEdgeTypes } from '@/components/canvas/CanvasConnectionEdge';
-import { CanvasConnectionLine } from '@/components/canvas/CanvasConnectionLine';
+import { CanvasConnectionLine, CanvasPendingConnection } from '@/components/canvas/CanvasConnectionLine';
 import type { CanvasBatchRun } from '@/schema/canvasBatch';
 import {
   AddMenuButton,
@@ -253,6 +253,8 @@ interface CreateMenuState {
   /** 从输出侧拖出时要一起连进新节点的全部来源：起点在多选里就是整组，否则只有起点。 */
   sourceIds?: string[];
   sourceHandle?: 'source' | 'target';
+  /** 拖线松手时指针的屏幕位置；列表贴着它摆，线接到列表靠来源那一侧的正中。 */
+  pointer?: XYPosition;
 }
 
 interface MaterialPickState {
@@ -550,6 +552,7 @@ function CanvasEditorInner({
   const creationAssetPanelRef = useRef<CreationAssetPanelHandle>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const createMenuRef = useRef<HTMLDivElement>(null);
+  const [createMenuDock, setCreateMenuDock] = useState<{ left: number; top: number; anchor: XYPosition } | null>(null);
   const shortcutsTriggerRef = useRef<HTMLButtonElement>(null);
   const generationPreferencesTriggerRef = useRef<HTMLButtonElement>(null);
   const openGenerationPreferences = useCallback((tab: CanvasGenerationPreferencesTab) => {
@@ -1736,8 +1739,28 @@ function CanvasEditorInner({
       sourceId: state.fromNode.id,
       sourceIds: startedFromTarget ? undefined : sourceIds,
       sourceHandle: state.fromHandle?.type ?? 'source',
+      pointer,
     });
   }, [connectSources, connectionSourceIds, onConnect, screenToFlowPosition]);
+
+  const screenToFlowPositionRef = useRef(screenToFlowPosition);
+  screenToFlowPositionRef.current = screenToFlowPosition;
+  // 从连线拖出的创建列表：垂直居中对着松手点，线贴着列表靠来源那一侧的边、接在正中。
+  // 量的是 offset 尺寸，不受进场动效的 transform 影响。
+  useLayoutEffect(() => {
+    const menu = createMenuRef.current;
+    const pointer = createMenu?.pointer;
+    if (!menu || !pointer) { setCreateMenuDock(null); return; }
+    const toFlow = screenToFlowPositionRef.current;
+    const fromOutput = createMenu.sourceHandle !== 'target';
+    const { offsetWidth: width, offsetHeight: height } = menu;
+    const left = Math.max(12, Math.min(fromOutput ? pointer.x : pointer.x - width, window.innerWidth - width - 12));
+    const top = Math.max(12, Math.min(pointer.y - height / 2, window.innerHeight - height - 12));
+    setCreateMenuDock({
+      left, top,
+      anchor: toFlow({ x: fromOutput ? left : left + width, y: top + height / 2 }),
+    });
+  }, [createMenu]);
 
   const sweepHits = useRef<ReadonlySet<string>>(new Set());
 
@@ -4776,7 +4799,7 @@ function CanvasEditorInner({
             interruptViewportCommand();
             viewportSync.current = null;
           }}
-          onPaneClick={() => {
+          onPaneClick={event => {
             setCreateMenu(null);
             if (materialPick) {
               requestAnimationFrame(() => editorRegionRef.current?.focus());
@@ -4784,6 +4807,18 @@ function CanvasEditorInner({
             }
             setSelectedConnectionIds(new Set());
             setSelectedNodeIds(new Set());
+            // 分组框不接指针（好让框里的连线和框选照常工作），点在框内空白或边线上的
+            // 点击会落到这里：按位置找到分组并选中它。xyflow 在本回调之后还会同步清一次
+            // 它自己的选择，所以放到微任务里再写。
+            const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+            // 边线只有 1px，往外放 6 屏幕像素才点得中。
+            const slack = 6 / getZoom();
+            const group = (latestDocument.current?.nodes ?? [])
+              .filter(node => node.type === 'group' && node.size
+                && point.x >= node.position.x - slack && point.x <= node.position.x + node.size.width + slack
+                && point.y >= node.position.y - slack && point.y <= node.position.y + node.size.height + slack)
+              .sort((a, b) => a.size!.width * a.size!.height - b.size!.width * b.size!.height)[0];
+            if (group) queueMicrotask(() => setSelectedNodeIds(new Set([group.id])));
             requestAnimationFrame(() => editorRegionRef.current?.focus());
           }}
           onDragOver={event => {
@@ -4837,6 +4872,13 @@ function CanvasEditorInner({
                 event.stopPropagation();
                 void runViewportCommand(() => setCenter(position.x, position.y, { zoom: getZoom(), duration: 150 }));
               }}
+            />
+          )}
+          {createMenu?.sourceId && (
+            <CanvasPendingConnection
+              sourceIds={createMenu.sourceIds ?? [createMenu.sourceId]}
+              handle={createMenu.sourceHandle ?? 'source'}
+              to={createMenuDock?.anchor ?? createMenu.flow}
             />
           )}
         </ReactFlow>
@@ -5112,7 +5154,7 @@ function CanvasEditorInner({
         />
 
         {createMenu && (
-          <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenu.screen.x, top: createMenu.screen.y }}>
+          <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenuDock?.left ?? createMenu.screen.x, top: createMenuDock?.top ?? createMenu.screen.y }}>
             <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs uppercase tracking-label text-muted-foreground">创建并连接</p><button type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><X className="size-4" /></button></div>
             <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddBatch={createMenu.sourceId ? undefined : () => addBatchMaterialNode(createMenu)} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onAddConfig={() => addConfigNode(createMenu)} onUpload={() => uploadRef.current?.click()} />
           </div>

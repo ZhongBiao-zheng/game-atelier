@@ -544,6 +544,21 @@
   .canvas-flow .canvas-node-handle:hover .canvas-group-add {
     border-color: var(--primary);
   }
+  /* 从分组拖线时「+」跟着指针走：原位的那个藏起来，连线层里画一个一样的。 */
+  .canvas-flow.canvas-flow-connecting .canvas-group-add-handle.connectingfrom .canvas-group-add {
+    opacity: 0;
+  }
+  .canvas-flow .canvas-group-add-ghost circle {
+    fill: var(--secondary);
+    stroke: var(--border);
+    stroke-width: 1;
+  }
+  .canvas-flow .canvas-group-add-ghost path {
+    fill: none;
+    stroke: var(--foreground);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+  }
   /* 框选时的拖拽框与框选后的选区框、分组框用同一个圆角。 */
   .canvas-flow .react-flow__selection {
     border-radius: 1rem;

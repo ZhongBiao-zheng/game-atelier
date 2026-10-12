@@ -54,6 +54,7 @@ vi.mock('@xyflow/react', () => {
   type MockInternalNode = {
     internals: { positionAbsolute: { x: number; y: number } };
     measured: { width?: number; height?: number };
+    data: unknown;
   };
   const flowTransform: [number, number, number] = [0, 0, 1];
   let flowNodeLookup = new Map<string, MockInternalNode>();
@@ -89,6 +90,8 @@ vi.mock('@xyflow/react', () => {
       nodeLookup: Map<string, MockInternalNode>;
     }) => unknown) => selector({ transform: flowTransform, nodeLookup: flowNodeLookup }),
     ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    ViewportPortal: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    getBezierPath: () => [''],
     ReactFlow: ({ children, edges, nodes, nodeTypes, onlyRenderVisibleElements, multiSelectionKeyCode, selectionKeyCode, onConnect, onConnectEnd, onEdgesChange, onNodesChange, onNodeClick, onNodeMouseEnter, onMove, onMoveEnd, onDragOver, onDrop, onSelectionStart, onSelectionEnd }: {
       children: React.ReactNode;
       edges: Array<{ id: string; selected?: boolean }>;
@@ -123,6 +126,7 @@ vi.mock('@xyflow/react', () => {
       flowNodeLookup = new Map(nodes.map(node => [node.id, {
         internals: { positionAbsolute: node.position ?? { x: 0, y: 0 } },
         measured: { width: node.style?.width, height: node.style?.height },
+        data: node.data,
       }]));
       return (
         <div data-testid="react-flow" data-node-count={nodes.length} data-visible-only={onlyRenderVisibleElements} data-multi-select-keys={(multiSelectionKeyCode ?? []).join(',')} data-selection-key={selectionKeyCode === null ? 'none' : String(selectionKeyCode)}>
