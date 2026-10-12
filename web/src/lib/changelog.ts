@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.84.0',
+    date: '2026-10-12',
+    headline: '支持 FLUX 3 Image',
+    changes: [
+      { kind: 'feat', text: '新模型公告：FLUX 3 Image。Tuzi 密钥可在公告里一键添加，文生图和带参考图的图生图都已实测可用，估价按 ¥0.15 / 次。' },
+    ],
+  },
+  {
     version: '5.83.6',
     date: '2026-10-12',
     headline: 'Tuzi 香蕉 Pro 降价',

@@ -56,6 +56,8 @@ export const TUZI_GROUP_YUAN_PER_IMAGE: Record<string, Record<string, number>> =
     'nano-banana-2': 0.3,
     'nano-banana-2-2k': 0.48,
     'nano-banana-2-4k': 0.82,
+    // 2026-10-12 用户提供的上线公告，并与公开 /api/pricing 核对（挂牌 0.2143 × 0.7）；按次固定价。
+    'flux-3-image': 0.15,
   },
   '绘画': { 'gpt-image-2': 0.21 },
 };
