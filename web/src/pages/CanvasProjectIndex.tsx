@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, MoreHorizontal, Palette, Pencil, Plus, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { Download, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2, Upload } from 'lucide-react';
 
 import {
   canvasMediaUrl,
@@ -182,17 +182,19 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
   return (
     <section className="stable-scroll h-full overflow-y-auto bg-background">
       <div className="w-full px-4 py-8 sm:px-6 md:px-10 md:py-12">
-        <header className="mb-8 flex flex-wrap items-end justify-between gap-5">
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">人工创作空间</p>
-            <h1 className="text-balance font-display text-display italic text-foreground">画布项目</h1>
-            <p className="max-w-2xl text-pretty text-sm leading-relaxed text-muted-foreground">
-              从空白空间开始，手动放置文本、素材与生成节点。
-            </p>
-          </div>
+        <header className="mb-8 flex flex-wrap items-center justify-between gap-5">
+          <h1 className="text-balance font-display text-display italic text-foreground">画布项目</h1>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" disabled={importing} onClick={() => importRef.current?.click()}>
               <Upload aria-hidden="true" />{importing ? '校验中…' : '导入项目包'}
+            </Button>
+            <Button
+              onClick={() => {
+                setEditor({ open: true, name: '' });
+                setEditorError(null);
+              }}
+            >
+              <Plus aria-hidden="true" />新建项目
             </Button>
           </div>
           <input
@@ -220,23 +222,11 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
           </div>
         )}
 
+        {!loading && !loadError && projects.length === 0 && (
+          <p className="font-display text-display italic text-foreground/70">还没有画布项目</p>
+        )}
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-busy={loading}>
           {loading && <span role="status" className="sr-only">正在加载画布项目</span>}
-          <button
-            type="button"
-            aria-label="新建项目"
-            onClick={() => {
-              setEditor({ open: true, name: '' });
-              setEditorError(null);
-            }}
-            className="group flex min-h-72 cursor-pointer flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border bg-card/30 px-6 text-center transition-colors hover:border-input hover:bg-card/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <span className="flex size-12 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-colors group-hover:text-foreground">
-              <Plus className="size-5" aria-hidden="true" />
-            </span>
-            <span className="text-base font-medium text-foreground">新建项目</span>
-          </button>
-
           {loading && projects.length === 0
             ? Array.from({ length: 3 }, (_, index) => <CanvasCardSkeleton key={index} />)
             : projects.map(project => (
@@ -418,12 +408,12 @@ function CanvasProjectCard({
             className="aspect-[16/10] w-full border-b border-border object-cover"
           />
         ) : (
-          <div className="grid aspect-[16/10] place-items-center border-b border-border bg-secondary/30 text-muted-foreground">
-            <Palette className="size-8" aria-hidden="true" />
+          <div className="grid aspect-[16/10] place-items-center border-b border-border bg-secondary/30 px-4 text-center font-display text-display text-muted-foreground">
+            <span className="line-clamp-2">{project.name}</span>
           </div>
         )}
       </button>
-      <div className="min-h-28 space-y-1 p-4 pr-14">
+      <div className="space-y-1 p-4 pr-14">
         {renaming ? (
           <div className="space-y-1.5">
             <Input
@@ -467,10 +457,9 @@ function CanvasProjectCard({
             <h2 className="truncate text-base font-medium text-foreground">{project.name}</h2>
           </button>
         )}
-        <p className="text-xs text-muted-foreground">
-          <span className="tabular-nums">{project.node_count}</span> 个节点 · <span className="tabular-nums">{project.connection_count}</span> 条连线
+        <p className="text-xs tabular-nums text-muted-foreground">
+          {project.node_count} 个节点 · {project.connection_count} 条连线 · {formatActivity(project.updated_at)}
         </p>
-        <p className="tabular-nums text-sm text-muted-foreground">{formatActivity(project.updated_at)}</p>
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

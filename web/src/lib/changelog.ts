@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.85.4',
+    date: '2026-10-12',
+    headline: '项目列表更紧凑',
+    changes: [
+      { kind: 'feat', text: '画布项目和工坊项目的「新建项目」移到页面右上角，列表整页留给项目。' },
+      { kind: 'feat', text: '没有封面的项目直接显示项目名。' },
+      { kind: 'fix', text: '画布项目的节点数、连线数和编辑日期并成一行。' },
+    ],
+  },
+  {
     version: '5.85.3',
     date: '2026-10-12',
     headline: '只读提示不再挡住导航',
