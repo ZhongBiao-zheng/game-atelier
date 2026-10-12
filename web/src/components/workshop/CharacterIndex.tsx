@@ -110,7 +110,7 @@ export function CharacterIndex({
     <section className="space-y-5" aria-label="角色索引">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-xs uppercase tracking-label text-muted-foreground/70">Character Index</p>
+          <p className="text-xs uppercase tracking-label text-muted-foreground">Character Index</p>
           <h1 className="mt-2 font-display text-display italic text-foreground">全部角色</h1>
         </div>
         <label className="relative block w-full max-w-72">

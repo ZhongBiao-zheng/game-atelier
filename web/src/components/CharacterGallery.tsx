@@ -334,7 +334,7 @@ export function CharacterGallery({
                 {/* 和首页作品展示一致的卡片结构 */}
                 <button
                   onClick={() => onSelectImage(img.path, img.jobId, tab)}
-                  className="block w-full overflow-hidden rounded-2xl cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  className="block w-full overflow-hidden rounded-xl cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   <img
                     src={rawSrc}
@@ -463,7 +463,7 @@ function GalleryShell({
       <header className="border-b border-border/40 px-8 pt-8">
         <div className="flex items-end justify-between gap-4">
           <div className="min-w-0">
-            <div className="uppercase text-muted-foreground/70 mb-1 text-xs tracking-label">
+            <div className="uppercase text-muted-foreground mb-1 text-xs tracking-label">
               {projectName ? `${projectName} · Collection` : 'Collection'}
             </div>
             <h1 className="font-display italic leading-[1.05] tracking-tight text-foreground truncate text-display">
@@ -580,7 +580,7 @@ function RelatedWorkCard({
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-foreground">{item.title}</span>
           <span className="mt-1 block text-xs text-muted-foreground">{item.detail}</span>
-          <span className="mt-2 block text-xs text-muted-foreground/70">
+          <span className="mt-2 block text-xs text-muted-foreground">
             {item.source === 'auto' ? '自动关联' : item.source === 'both' ? '自动 + 手动' : '手动关联'}
           </span>
         </span>
@@ -624,7 +624,7 @@ function TabStrip({
             )}
           >
             <span className="font-display italic text-base">{t.label}</span>
-            <span className="font-mono tabular-nums text-xs text-muted-foreground/70">
+            <span className="font-mono tabular-nums text-xs text-muted-foreground">
               {counts[t.key]}
             </span>
             {/* 下划线贴 tab 行底边（pb-3.5 = 14px） */}
@@ -652,7 +652,7 @@ function ColSlider({ value, onChange }: { value: number; onChange: (n: number) =
         aria-label="列数"
         className="range-cols w-20 md:w-24"
       />
-      <span className="font-mono text-xs tabular-nums text-muted-foreground/60 whitespace-nowrap select-none">
+      <span className="font-mono text-xs tabular-nums text-muted-foreground whitespace-nowrap select-none">
         {value} 列
       </span>
     </div>
@@ -723,7 +723,7 @@ function EmptyShell({ title, subtitle }: { title: string; subtitle?: string }) {
           {title}
         </p>
         {subtitle && (
-          <p className="text-xs uppercase tracking-label text-muted-foreground/70">
+          <p className="text-xs uppercase tracking-label text-muted-foreground">
             {subtitle}
           </p>
         )}
@@ -760,7 +760,7 @@ function SkeletonCard({ loading = false, phase }: {
         </div>
       )}
       {!loading && pct && (
-        <span className="absolute bottom-3 right-3 font-mono text-xs tabular-nums text-muted-foreground/70">
+        <span className="absolute bottom-3 right-3 font-mono text-xs tabular-nums text-muted-foreground">
           {pct}
         </span>
       )}
@@ -777,7 +777,7 @@ function StalePendingCard({ jobId, onVoid }: { jobId: string; onVoid: (jobId: st
     >
       <AlertTriangle className="size-7 text-muted-foreground" />
       <div className="text-xs text-muted-foreground font-medium">可能已中断</div>
-      <p className="text-xs text-muted-foreground/70">超过 1 小时未完成，出图进程可能已退出</p>
+      <p className="text-xs text-muted-foreground">超过 1 小时未完成，出图进程可能已退出</p>
       <button
         onClick={() => onVoid(jobId)}
         className="text-xs text-foreground font-medium hover:underline cursor-pointer bg-transparent border-0 p-0"

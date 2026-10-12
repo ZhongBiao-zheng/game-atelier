@@ -184,7 +184,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
       <div className="w-full px-4 py-8 sm:px-6 md:px-10 md:py-12">
         <header className="mb-8 flex flex-wrap items-end justify-between gap-5">
           <div className="space-y-2">
-            <p className="text-xs uppercase tracking-label text-muted-foreground">人工创作空间</p>
+            <p className="text-xs text-muted-foreground">人工创作空间</p>
             <h1 className="text-balance font-display text-display italic text-foreground">画布项目</h1>
             <p className="max-w-2xl text-pretty text-sm leading-relaxed text-muted-foreground">
               从空白空间开始，手动放置文本、素材与生成节点。

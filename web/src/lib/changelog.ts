@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.85.3',
+    date: '2026-10-12',
+    headline: '只读提示不再挡住导航',
+    changes: [
+      { kind: 'fix', text: '另一页面正在编辑时，「只读 · 接管编辑」移到顶栏左侧，不再盖住创作台和画布的入口。' },
+      { kind: 'fix', text: '小字说明加深了一档，暗色下更容易看清。' },
+      { kind: 'fix', text: '中文标题在 Windows 和 Mac 上使用同一款衬线字体。' },
+    ],
+  },
+  {
     version: '5.85.2',
     date: '2026-10-12',
     headline: '画布分组的选中和拖线手感',

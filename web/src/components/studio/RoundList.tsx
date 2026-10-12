@@ -390,13 +390,13 @@ function PendingBatch({
             <p data-testid="pending-spec-meta" className="mt-1 text-sm text-muted-foreground">
               {specMeta.join(' · ')}
               {shownMjFlags && (
-                <span className="ml-2 text-muted-foreground/60">{shownMjFlags}</span>
+                <span className="ml-2 text-muted-foreground">{shownMjFlags}</span>
               )}
             </p>
-            <p data-testid="pending-run-meta" className="mt-0.5 text-xs text-muted-foreground/60">
+            <p data-testid="pending-run-meta" className="mt-0.5 text-xs text-muted-foreground">
               耗时 {elapsedSec}s · {submittedAt}
             </p>
-            {round.config.sourceAssetTitle && <p className="mt-0.5 text-xs text-muted-foreground/50">来源：{round.config.sourceAssetTitle}</p>}
+            {round.config.sourceAssetTitle && <p className="mt-0.5 text-xs text-muted-foreground">来源：{round.config.sourceAssetTitle}</p>}
           </div>
         </div>
         <div className="flex flex-wrap gap-1">
@@ -930,13 +930,13 @@ function DoneBatch({
           <p className="mt-1 text-sm text-muted-foreground">
             {specMeta.join(' · ')}
             {shownMjFlags && (
-              <span data-testid="round-mj-flags" className="ml-2 text-muted-foreground/60">
+              <span data-testid="round-mj-flags" className="ml-2 text-muted-foreground">
                 {shownMjFlags}
               </span>
             )}
           </p>
           {(runMeta.length > 0 || round.generationCost != null) && (
-            <p data-testid="round-run-meta" className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground/60">
+            <p data-testid="round-run-meta" className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground">
               <span>{runMeta.join(' · ')}</span>
               {round.generationCost != null && (
                 <span
@@ -948,7 +948,7 @@ function DoneBatch({
               )}
             </p>
           )}
-          {round.config.sourceAssetTitle && <p data-testid="round-asset-source" className="mt-0.5 text-xs text-muted-foreground/50">来源：{round.config.sourceAssetTitle}</p>}
+          {round.config.sourceAssetTitle && <p data-testid="round-asset-source" className="mt-0.5 text-xs text-muted-foreground">来源：{round.config.sourceAssetTitle}</p>}
           {/* 后端回写的静默改写提示（尺寸归一化 / 参考图截断）——是提示不是错误，走 muted 灰不用暖红。 */}
           {(round.config.warnings?.length ?? 0) > 0 && (
             <ul data-testid="round-warnings" className="mt-1.5 space-y-1">
@@ -1226,7 +1226,7 @@ function FailedCard({
         className={`flex items-start gap-2 rounded-lg border px-4 py-3 text-sm ${round.canceled ? 'border-border bg-card/40' : 'border-destructive/30 bg-destructive/5'}`}
       >
         {round.canceled
-          ? <Square className="mt-1 size-3 shrink-0 fill-current text-muted-foreground/70" aria-hidden />
+          ? <Square className="mt-1 size-3 shrink-0 fill-current text-muted-foreground" aria-hidden />
           : <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive/70" aria-hidden />}
         <p className="flex-1 text-muted-foreground">{round.reason}</p>
         {round.jobId && onDeleteFailed && (

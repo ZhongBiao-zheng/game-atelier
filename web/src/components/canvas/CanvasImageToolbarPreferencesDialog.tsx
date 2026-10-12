@@ -77,7 +77,7 @@ export function CanvasImageToolbarPreferencesDialog({
         </DialogHeader>
 
         <section aria-label="工具栏预览" className="rounded-lg border border-border bg-card p-4">
-          <p className="mb-3 text-xs uppercase tracking-label text-muted-foreground/70">节点预览</p>
+          <p className="mb-3 text-xs text-muted-foreground">节点预览</p>
           <div className="overflow-x-auto rounded-xl border border-border bg-glass p-1 backdrop-blur-glass shell-glow">
             <div className="flex min-w-max items-center">
               {preview.map(tool => {

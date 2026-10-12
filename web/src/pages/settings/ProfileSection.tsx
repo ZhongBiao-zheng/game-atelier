@@ -36,7 +36,7 @@ export function ProfileSection() {
   return (
     <>
       <div>
-        <h2 className="text-xs uppercase tracking-label text-muted-foreground/70">显示名</h2>
+        <h2 className="text-xs text-muted-foreground">显示名</h2>
       </div>
       <div className="min-w-0 space-y-3">
         <div className="flex flex-wrap items-center gap-2">

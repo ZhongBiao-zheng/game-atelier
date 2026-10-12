@@ -161,7 +161,7 @@ export function CanvasGenerationMetadata({ snapshot, job, nodes }: {
   return (
     <section role="region" aria-label="生成记录" className="space-y-4 rounded-lg border border-border bg-background p-4">
       <div>
-        <p className="text-xs font-medium uppercase tracking-label text-muted-foreground/70">生成记录</p>
+        <p className="text-xs font-medium text-muted-foreground">生成记录</p>
         <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
           {generationRecordPrompt(snapshot.final_prompt)}
         </p>

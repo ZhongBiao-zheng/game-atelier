@@ -150,7 +150,7 @@ export function ProjectGallery({ projectId }: { projectId: string }) {
     <section aria-labelledby="project-gallery-heading" className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-1">
-          <p className="text-xs uppercase tracking-label text-muted-foreground">项目画廊</p>
+          <p className="text-xs text-muted-foreground">项目画廊</p>
           <h2 id="project-gallery-heading" className="text-base font-medium text-foreground">
             最新作品
           </h2>
@@ -274,7 +274,7 @@ export function ProjectGallery({ projectId }: { projectId: string }) {
               </div>
               <div className="flex flex-col gap-5 p-5">
                 <div className="space-y-1 pr-8">
-                  <p className="text-xs uppercase tracking-label text-muted-foreground">作品详情</p>
+                  <p className="text-xs text-muted-foreground">作品详情</p>
                   <h2 className="text-base font-medium text-foreground">{selected.title}</h2>
                   <p className="text-sm text-muted-foreground">{selected.detail}</p>
                 </div>

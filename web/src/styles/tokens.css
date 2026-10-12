@@ -1,9 +1,9 @@
 /* Atelier 字体加载 —— Google Fonts CDN（必须在所有 @import 前面）
-   Display: Instrument Serif (italic + regular)
+   Display: Instrument Serif (italic + regular)，中文字形 Noto Serif SC (400)
    Body: Geist (400/500/600)
    Mono: JetBrains Mono (400/500)
 */
-@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=Noto+Serif+SC:wght@400&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -42,7 +42,6 @@
   --radius-md: 10px;  /* 按钮、输入框 */
   --radius-lg: 16px;  /* 卡片、媒体瓦片 */
   --radius-xl: 20px;  /* 浮层：输入壳、popover、dialog */
-  --radius-2xl: 20px; /* 过渡期与 xl 同值，类名应归一到 xl */
 
   /* 字阶：xs/sm/base 三档 + 唯一大跳跃（serif 400 专用） */
   --text-display: 2.25rem;
@@ -54,7 +53,7 @@
   /* 小帽标签字距 */
   --tracking-label: 0.18em;
 
-  --font-display: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-display: "Instrument Serif", "Noto Serif SC", "Songti SC", "SimSun", ui-serif, Georgia, serif;
   --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }

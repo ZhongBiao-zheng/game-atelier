@@ -106,12 +106,12 @@ export function TeamLibrariesSection() {
     <>
       <div>
         <div className="flex items-center gap-1.5">
-          <h2 className="text-xs uppercase tracking-label text-muted-foreground/70">团队库</h2>
+          <h2 className="text-xs text-muted-foreground">团队库</h2>
           <button
             type="button"
             title={SYNC_HINT}
             aria-label={SYNC_HINT}
-            className="text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className="text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             <HelpCircle className="size-3.5" aria-hidden />
           </button>
@@ -141,10 +141,10 @@ export function TeamLibrariesSection() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-foreground">{library.name}</span>
                   {!library.reachable && (
-                    <span className="text-xs uppercase tracking-label text-destructive">不可达</span>
+                    <span className="text-xs text-destructive">不可达</span>
                   )}
                 </div>
-                <p className="break-all font-mono text-xs text-muted-foreground/70">
+                <p className="break-all font-mono text-xs text-muted-foreground">
                   {library.mount_path}
                 </p>
               </div>

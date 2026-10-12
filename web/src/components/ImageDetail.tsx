@@ -181,16 +181,16 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
           <Separator className="opacity-50" />
 
           <dl className="grid grid-cols-[84px_1fr] gap-y-2 gap-x-3 text-xs leading-relaxed">
-            <dt className="text-xs uppercase tracking-label text-muted-foreground/70 mt-0.5">job_id</dt>
+            <dt className="text-xs uppercase tracking-label text-muted-foreground mt-0.5">job_id</dt>
             <dd className="font-mono text-muted-foreground break-all">{job.job_id}</dd>
 
-            <dt className="text-xs uppercase tracking-label text-muted-foreground/70 mt-0.5">model</dt>
+            <dt className="text-xs uppercase tracking-label text-muted-foreground mt-0.5">model</dt>
             <dd className="font-mono text-muted-foreground break-all">{job.model}</dd>
 
-            <dt className="text-xs uppercase tracking-label text-muted-foreground/70 mt-0.5">submitted</dt>
+            <dt className="text-xs uppercase tracking-label text-muted-foreground mt-0.5">submitted</dt>
             <dd className="font-mono text-muted-foreground break-all">{formatBeijingTime(job.submitted_at)}</dd>
 
-            <dt className="text-xs uppercase tracking-label text-muted-foreground/70 mt-0.5">path</dt>
+            <dt className="text-xs uppercase tracking-label text-muted-foreground mt-0.5">path</dt>
             <dd className="font-mono text-muted-foreground break-all">{path}</dd>
           </dl>
 
@@ -233,7 +233,7 @@ function ImageIdChip({ characterId, path }: { characterId: string; path: string 
 
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-xs uppercase tracking-label text-muted-foreground/70">图片路径</span>
+      <span className="text-xs text-muted-foreground">图片路径</span>
       <div className="flex items-center gap-2">
         <code className="flex-1 min-w-0 font-mono text-xs text-foreground/85 bg-card/60 border border-border rounded-sm px-2.5 py-1.5 truncate">
           {relPath}

@@ -135,7 +135,7 @@ export function CanvasGroupFrame({ node, context, selected }: {
     setEditing(false);
     if (title && title !== node.title) context.renameNode(node.id, title);
   }
-  return <div className={`canvas-group-shell pointer-events-none h-full w-full border bg-secondary/40 ${selected ? 'border-transparent' : 'rounded-2xl border-border'}`}
+  return <div className={`canvas-group-shell pointer-events-none h-full w-full border bg-secondary/40 ${selected ? 'border-transparent' : 'rounded-xl border-border'}`}
     data-selected={selected ? 'true' : 'false'}>
     {/* 分组的框由画师决定，不再跟着成员长。改框只改框：框外的成员会被摘掉，但把框拉大盖住
         的节点不会被吞进来（要吞得去碰那个节点），见 normalizeCanvasGroups。 */}

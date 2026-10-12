@@ -103,7 +103,7 @@ function LocalSettingsPage() {
 
       <section className="grid gap-6 py-10 md:grid-cols-[220px_1fr] md:gap-12">
         <div>
-          <h2 className="text-xs uppercase tracking-label text-muted-foreground/70">项目存放</h2>
+          <h2 className="text-xs text-muted-foreground">项目存放</h2>
           <p className="mt-2 text-sm text-muted-foreground">
             角色、项目、历史 job 和 API Key 所在的根目录。
           </p>
@@ -118,7 +118,7 @@ function LocalSettingsPage() {
                 {loading ? '读取中...' : displayRoot || '尚未选择数据目录'}
               </span>
               {changed && (
-                <span className="text-xs uppercase tracking-label text-muted-foreground/70">未保存</span>
+                <span className="text-xs text-muted-foreground">未保存</span>
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -165,7 +165,7 @@ function LocalSettingsPage() {
 
       <section className="grid gap-6 border-t border-border py-10 md:grid-cols-[220px_1fr] md:gap-12">
         <div>
-          <h2 className="text-xs uppercase tracking-label text-muted-foreground/70">首页展示</h2>
+          <h2 className="text-xs text-muted-foreground">首页展示</h2>
           <p className="mt-2 text-sm text-muted-foreground">
             控制首页下方作品展示区的内容来源。
           </p>
@@ -206,7 +206,7 @@ function LocalSettingsPage() {
 
       <section id="settings-keys" className="grid scroll-mt-16 gap-6 border-t border-border py-10 md:grid-cols-[220px_1fr] md:gap-12">
         <div>
-          <h2 className="text-xs uppercase tracking-label text-muted-foreground/70">API 密钥</h2>
+          <h2 className="text-xs text-muted-foreground">API 密钥</h2>
           <p className="mt-2 text-sm text-muted-foreground">
             图像 / 视频生成服务的访问凭证，按供应商管理。
           </p>

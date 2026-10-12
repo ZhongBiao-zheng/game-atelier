@@ -155,7 +155,7 @@ describe('local connection gate', () => {
   });
   it('warns about unsaved content before an explicit takeover', async () => {
     const network = server({ occupied: true }); const onMount = vi.fn(); render(<LocalConnectionGate><Draft onMount={onMount} /></LocalConnectionGate>);
-    await screen.findByText('只读 · 另一页面正在编辑');
+    await screen.findByText('只读');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(network.mock.calls.some(([, init]) => init.body && JSON.parse(String(init.body)).takeover === true)).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: '接管编辑' }));
@@ -169,14 +169,14 @@ describe('local connection gate', () => {
     const editor = await screen.findByLabelText('编辑草稿');
     expect(localConnection.getSnapshot()).toMatchObject({ phase: 'ready', editing: false });
     expect(network.mock.calls.filter(([url]) => url.endsWith('editor-lease'))).toHaveLength(1);
-    expect(screen.getByText('只读 · 另一页面正在编辑')).toBeInTheDocument();
+    expect(screen.getByText('只读')).toBeInTheDocument();
     expect(editor).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '接管编辑' }));
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '接管编辑' }));
     await waitFor(() => expect(localConnection.getSnapshot()).toMatchObject({ phase: 'ready', editing: true }));
     // 重新拿到编辑权不重挂载：草稿留着，业务组件只挂载过一次。
     expect(screen.getByLabelText('编辑草稿')).toHaveValue(''); expect(onMount).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText('只读 · 另一页面正在编辑')).not.toBeInTheDocument();
+    expect(screen.queryByText('只读')).not.toBeInTheDocument();
   });
   it('opens authorization management without stealing the editor lease', async () => {
     const network = server(); const onMount = vi.fn(); const { hook } = memoryLocation({ path: '/connection' });

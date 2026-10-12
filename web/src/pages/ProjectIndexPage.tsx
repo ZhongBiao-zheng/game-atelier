@@ -111,7 +111,7 @@ export function ProjectIndexPage({
     <section className="stable-scroll h-full overflow-y-auto bg-background">
       <div className="w-full px-4 py-8 sm:px-6 md:px-10 md:py-12">
         <header className="mb-8 space-y-2">
-          <p className="text-xs uppercase tracking-label text-muted-foreground">项目目录</p>
+          <p className="text-xs text-muted-foreground">项目目录</p>
           <h1 className="font-display text-display italic text-foreground">全部项目</h1>
           <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
             每个项目保存自己的世界观与角色、UI、视频资产。

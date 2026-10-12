@@ -285,7 +285,7 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
   return (
     <section className="w-[296px]">
       <div className="py-1 px-1 text-xs text-muted-foreground">{title}</div>
-      {hint && <div className="px-1 pb-1 text-xs text-muted-foreground/70">{hint}</div>}
+      {hint && <div className="px-1 pb-1 text-xs text-muted-foreground">{hint}</div>}
       {children}
     </section>
   );

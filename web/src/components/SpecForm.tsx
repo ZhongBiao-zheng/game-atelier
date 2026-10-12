@@ -108,7 +108,7 @@ export function SpecForm({ characterId, characterName, sseSignal }: Props) {
     <section className="h-full border-l border-border/60 bg-card/30 flex flex-col">
       <header className="flex items-end justify-between px-6 pt-6 pb-4 border-b border-border/40 gap-4">
         <div className="min-w-0 flex-1">
-          <div className="text-xs uppercase tracking-label text-muted-foreground/70 mb-1">
+          <div className="text-xs uppercase tracking-label text-muted-foreground mb-1">
             spec · 档案
           </div>
           <h2 className="font-display italic text-display tracking-tight truncate text-foreground/95">

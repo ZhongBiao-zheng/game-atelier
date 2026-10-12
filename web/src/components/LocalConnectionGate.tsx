@@ -13,6 +13,7 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
   const [confirmTakeover, setConfirmTakeover] = useState(false);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const management = location.startsWith('/connection');
+  const immersiveCanvas = /^\/canvas\/[^/]+$/.test(location);
   const editing = !viewOnly && !management;
   const ready = connection.phase === 'ready';
   const unpaired = connection.phase === 'unpaired';
@@ -100,16 +101,30 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
           </>}
         </div>
       </main>}
-      {activated && !unpaired && (!ready || (viewOnly && !management)) && <div
+      {activated && !unpaired && !ready && <div
         data-connection-controls
         className="fixed inset-x-3 top-3 z-50 mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-3 rounded-lg border border-border bg-popover px-4 py-2 text-sm"
         style={{ marginTop: 'env(safe-area-inset-top)' }}>
         <div role="status" className="min-w-0 flex-1">
-          <p className="text-pretty">{ready ? '只读 · 另一页面正在编辑' : busy ? '正在恢复工坊连接…' : '工坊服务连接已暂停'}</p>
-          {!ready && <p className="text-xs text-pretty text-muted-foreground">{busy ? '暂时无法保存，请勿关闭页面。' : connection.message}</p>}
+          <p className="text-pretty">{busy ? '正在恢复工坊连接…' : '工坊服务连接已暂停'}</p>
+          <p className="text-xs text-pretty text-muted-foreground">{busy ? '暂时无法保存，请勿关闭页面。' : connection.message}</p>
         </div>
-        {ready ? <Button variant="outline" size="sm" onClick={() => setConfirmTakeover(true)}>接管编辑</Button>
-          : !busy && <Button variant="outline" size="sm" onClick={reconnect}>重新连接</Button>}
+        {!busy && <Button variant="outline" size="sm" onClick={reconnect}>重新连接</Button>}
+      </div>}
+      {/* 只读是常驻状态而非故障：顶栏字标右侧的胶囊，不压导航。它必须留在 fieldset 之外
+          （disabled fieldset 会连带禁用里面的按钮），所以用 fixed 对齐顶栏而不是渲染进顶栏。
+          画布编辑器没有顶栏，仍居中。 */}
+      {activated && !unpaired && ready && viewOnly && !management && <div
+        data-connection-controls
+        title="另一页面正在编辑"
+        className={`fixed z-50 flex h-10 items-center gap-2.5 rounded-full border border-border bg-glass pl-1.5 pr-1.5 text-sm backdrop-blur-glass sm:pl-3.5 ${immersiveCanvas ? 'inset-x-3 top-3 mx-auto w-fit' : 'left-20 top-2 sm:left-24 lg:left-32 lg:top-5'}`}
+        style={{ marginTop: 'env(safe-area-inset-top)' }}>
+        <span aria-hidden className="hidden size-1.5 rounded-full bg-status-running sm:block" />
+        <p role="status" className="hidden sm:block">只读</p>
+        {/* 手机宽度下字标与版本号之间只容得下两个字 */}
+        <Button variant="secondary" size="sm" aria-label="接管编辑" className="h-7 rounded-full px-3 text-xs" onClick={() => setConfirmTakeover(true)}>
+          <span className="sm:hidden">接管</span><span className="hidden sm:inline">接管编辑</span>
+        </Button>
       </div>}
       <Dialog open={confirmTakeover} onOpenChange={setConfirmTakeover}>
         <DialogContent data-connection-controls onOpenAutoFocus={event => { event.preventDefault(); cancelRef.current?.focus(); }}>

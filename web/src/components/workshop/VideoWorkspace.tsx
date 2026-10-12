@@ -86,7 +86,7 @@ function ProductionList({ projectId, productions }: {
   return (
     <section className="space-y-4" data-testid="project-videos">
       <div>
-        <p className="text-xs uppercase tracking-label text-muted-foreground/70">Video Productions</p>
+        <p className="text-xs uppercase tracking-label text-muted-foreground">Video Productions</p>
         <h2 className="mt-2 font-display text-display italic text-foreground">视频企划</h2>
       </div>
       <div className="divide-y divide-border rounded-lg border border-border bg-card/30">
@@ -407,7 +407,7 @@ function JobHistory({ records }: { records: ProjectVideoJobRecord[] }) {
               <p className="font-mono text-xs text-muted-foreground">
                 {record.model} · {record.status} · {formatDate(record.submitted_at)}
               </p>
-              <span className="font-mono text-xs text-muted-foreground/70">{record.job_id}</span>
+              <span className="font-mono text-xs text-muted-foreground">{record.job_id}</span>
             </div>
             {record.prompt && (
               <div className="space-y-1.5">

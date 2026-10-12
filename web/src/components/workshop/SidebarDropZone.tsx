@@ -26,7 +26,7 @@ export function SidebarDropZone({
       )}
     >
       {label && (
-        <header className="px-1.5 py-1.5 text-xs font-medium uppercase tracking-label text-muted-foreground/70 select-none">
+        <header className="px-1.5 py-1.5 text-xs font-medium text-muted-foreground select-none">
           {label}
         </header>
       )}

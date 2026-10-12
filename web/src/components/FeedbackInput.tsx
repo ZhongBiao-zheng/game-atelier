@@ -27,7 +27,7 @@ export function FeedbackInput({ characterId }: Props) {
     <div className="space-y-2.5">
       <div className="flex items-baseline justify-between">
         <span className="font-display italic text-base text-foreground/90">反馈</span>
-        <span className="text-xs uppercase tracking-label text-muted-foreground/60">to AI</span>
+        <span className="text-xs uppercase tracking-label text-muted-foreground">to AI</span>
       </div>
       <Textarea
         value={text}
