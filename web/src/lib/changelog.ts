@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.83.6',
+    date: '2026-10-12',
+    headline: 'Tuzi 香蕉 Pro 降价',
+    changes: [
+      { kind: 'feat', text: 'Tuzi default 分组的 Nano Banana Pro（gemini-3-pro-image-preview）估价按新价计算：1K ¥0.099、2K ¥0.105、4K ¥0.126。' },
+    ],
+  },
+  {
     version: '5.83.5',
     date: '2026-10-12',
     headline: '画布缩放条移到右下角',

@@ -21,13 +21,14 @@ export const OPENAI_HK_NANO_BANANA_2_YUAN: Partial<Record<Quality, number>> = {
   high: 1,
 };
 
-// Tuzi default 香蕉 Pro：元 / 次（一张）。用户提供的 2026-08-31 调价公告。
+// Tuzi default 香蕉 Pro：元 / 次（一张）。用户提供的 2026-10-12 降价公告，并与公开 /api/pricing
+// 核对（挂牌 0.142 / 0.15 / 0.18 × 0.7）。
 // gemini-3-pro-image 与 gemini-3-pro-image-preview 为同一模型，共用此表。
 // nano-banana-pro 与其固定 2K/4K 展示别名也共用，不复制单价。
 export const TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE = {
-  '1k': 0.12,
-  '2k': 0.15,
-  '4k': 0.18,
+  '1k': 0.099,
+  '2k': 0.105,
+  '4k': 0.126,
 };
 
 // Tuzi default GPT Image 2：元 / 张。2026-09-04 用户公告及公开 /api/pricing 核对。
