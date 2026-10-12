@@ -2,7 +2,6 @@ import { useId, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position } from '@xyflow/react';
 import { ArrowDown, ArrowUp, CircleHelp, Layers, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { canvasMediaUrl } from '@/api/canvas';
 import type { CanvasBatchMaterialNode, CanvasGroupNode } from '@/schema/canvas';
@@ -116,16 +115,28 @@ export function CanvasBatchMaterialEditor({ node, context }: {
       </Button>
       <p id={helpId} role="tooltip"
         className="pointer-events-none invisible absolute bottom-full right-0 z-20 mb-2 w-64 max-w-full rounded-lg border border-border bg-popover px-3 py-2 text-pretty text-xs leading-relaxed text-foreground peer-hover:visible peer-focus-visible:visible">
-        默认一张图一项；每项“+”追加同项参考图。拖动或用箭头排序。连接生成节点可逐项生成，分组后可连续执行链路。
+        默认一张图一项；每项“+”追加同项参考图。拖动或用箭头排序。连接生成节点可逐项生成。
       </p>
     </div>
   </div>;
 }
 
-export function CanvasExecutionGroup({ node, context, selected }: {
+export function CanvasGroupFrame({ node, context, selected }: {
   node: CanvasGroupNode; context: CanvasNodeContextValue; selected: boolean;
 }) {
-  return <div className="canvas-group-shell pointer-events-none h-full w-full rounded-2xl border border-dashed border-border bg-secondary/10"
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(node.title);
+  const border = selected ? 'border-primary' : 'border-border';
+  function beginRename() {
+    setDraft(node.title);
+    setEditing(true);
+  }
+  function finishRename() {
+    const title = draft.trim();
+    setEditing(false);
+    if (title && title !== node.title) context.renameNode(node.id, title);
+  }
+  return <div className={`canvas-group-shell pointer-events-none h-full w-full rounded-b-2xl border bg-secondary/10 ${border}`}
     data-selected={selected ? 'true' : 'false'}>
     {/* 分组的框由画师决定，不再跟着成员长。改框只改框：框外的成员会被摘掉，但把框拉大盖住
         的节点不会被吞进来（要吞得去碰那个节点），见 normalizeCanvasGroups。 */}
@@ -151,26 +162,32 @@ export function CanvasExecutionGroup({ node, context, selected }: {
       className="canvas-node-handle pointer-events-auto" aria-label="把这个分组作为素材包连出去">
       <span className="canvas-node-handle-dot" aria-hidden="true" />
     </Handle>
-    <div className="pointer-events-auto absolute bottom-full left-0 flex items-center gap-2 pb-3 text-xs">
-      <button type="button" className="rounded-md px-2 py-1 font-medium text-foreground hover:bg-secondary focus-visible:ring-2 focus-visible:ring-primary"
-        onClick={() => context.selectNode(node.id)}>{node.title} · {node.data.member_node_ids.length} 节点</button>
+    {/* 标题栏就是分组本身的把手：按住拖动整组，双击改名。它贴在框的上沿外侧，不占成员的位置。 */}
+    <div className={`pointer-events-auto absolute -inset-x-px bottom-full flex h-9 items-center gap-2 rounded-t-2xl border border-b-0 bg-secondary pl-3 pr-1.5 text-sm ${border}`}
+      onClick={() => context.selectNode(node.id)}
+      onDoubleClick={event => { event.stopPropagation(); if (!editing) beginRename(); }}>
+      {editing
+        ? <input autoFocus value={draft} maxLength={120} aria-label={`重命名分组 ${node.title}`}
+          className="nodrag nowheel h-7 min-w-0 flex-1 border-0 border-b border-dashed border-input bg-transparent px-0 text-sm font-medium text-foreground outline-none focus-visible:border-ring"
+          onChange={event => setDraft(event.target.value)}
+          onFocus={event => event.target.select()}
+          onPointerDown={event => event.stopPropagation()}
+          // 切应用、切标签页也会触发 blur；那不算编辑结束，否则输入法组合会被掐断。
+          onBlur={() => { if (window.document.hasFocus()) finishRename(); }}
+          onKeyDown={event => {
+            event.stopPropagation();
+            if (event.key === 'Enter') { event.preventDefault(); finishRename(); }
+            else if (event.key === 'Escape') { event.preventDefault(); setEditing(false); }
+          }} />
+        : <button type="button" title="双击重命名" aria-label={`分组 ${node.title}`}
+          className="min-w-0 truncate text-left font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          onKeyDown={event => {
+            if (event.key !== 'Enter' && event.key !== 'F2') return;
+            event.preventDefault(); event.stopPropagation(); beginRename();
+          }}>{node.title}</button>}
       {selected && !context.multiSelectionActive && <div role="toolbar" aria-label={`${node.title} 节点工具`} data-canvas-node-toolbar={node.id}
-        className="nodrag nopan flex items-center gap-2 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass">
-        <label className="flex items-center gap-1 text-muted-foreground">重复
-          <Input type="number" min={1} max={20} aria-label="分组重复轮数" value={node.data.repeat_count ?? 1}
-            disabled={context.batchBusy} className="h-7 w-14 text-xs tabular-nums"
-            onChange={event => {
-              const repeat = Math.max(1, Math.min(20, Number(event.target.value) || 1));
-              context.updateNode(node.id, current => current.type !== 'group' ? current
-                : { ...current, data: { ...current.data, repeat_count: repeat } });
-            }} />轮
-        </label>
-        {context.activeBatch?.scopeNodeId === node.id
-          ? <Button size="sm" variant="outline" disabled={context.activeBatch.stopping}
-            onClick={() => void context.stopActiveBatch?.()}>停止</Button>
-          : <Button size="sm" disabled={context.batchBusy || context.submittingNodeIds.has(node.id)}
-            onClick={() => void context.prepareBatch?.(node.id)}>执行分组</Button>}
-        <Button size="sm" variant="ghost" aria-label={`删除 ${node.title}`} title="解散分组，保留成员节点" disabled={context.batchBusy} onClick={() => context.deleteNode(node.id)}>解散</Button>
+        className="nodrag nopan flex shrink-0 items-center">
+        <Button size="sm" variant="ghost" className="h-7" aria-label={`删除 ${node.title}`} title="解散分组，保留成员节点" disabled={context.batchBusy} onClick={() => context.deleteNode(node.id)}>解散</Button>
       </div>}
     </div>
   </div>;
@@ -185,9 +202,9 @@ export function CanvasBatchConfirmation({ run, busy, error, onClose, onStart }: 
         <DialogDescription className="text-pretty">按当前素材、提示词和模型设置执行；点击开始后才提交生成。</DialogDescription>
       </DialogHeader>
       {run && <>
-        <p className="text-sm tabular-nums">{run.items.length} 项 × {run.steps.length} 步 × {run.repeat_count} 轮 = {run.executions.length} 次生成</p>
+        <p className="text-sm tabular-nums">共 {run.executions.length} 次生成</p>
         <ol className="space-y-2 text-xs text-muted-foreground">{run.steps.map((step, index) => <li key={step.node_id}>{index + 1}. {step.title} · {step.model}</li>)}</ol>
-        <p className="text-xs leading-relaxed text-muted-foreground">每项每步生成 1 个产物。同项结果接给下一步，失败即停止。执行期间暂时锁定画布编辑；停止不能撤回已提交的请求或保证退款。</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">每项生成 1 个产物，失败即停止。执行期间暂时锁定画布编辑；停止不能撤回已提交的请求或保证退款。</p>
       </>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       <DialogFooter><Button variant="outline" disabled={busy} onClick={onClose}>返回修改</Button>

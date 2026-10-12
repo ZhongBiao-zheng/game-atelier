@@ -2386,13 +2386,12 @@ function CanvasEditorInner({
     const right = Math.max(...members.map(node => node.position.x + canvasNodeRenderedSize(node, current.content_versions).width)) + 24;
     const bottom = Math.max(...members.map(node => node.position.y + canvasNodeRenderedSize(node, current.content_versions).height)) + 24;
     const id = makeId('group');
-    commit(document => ({ ...document, nodes: [...document.nodes, { id, type: 'group', title: '执行分组',
+    commit(document => ({ ...document, nodes: [...document.nodes, { id, type: 'group', title: '分组',
       position: { x: left, y: top }, size: { width: right - left, height: bottom - top }, z_index: 0,
       data: {
         // 顺序按画布阅读顺序写死在数据里：它既是分组当素材包时的参考编号顺序，也是超上限时
         // 的截断依据。存成数据而不是两端各排一次，省掉一个必然漂移的判据。
         member_node_ids: canvasReadingOrder(members, current.content_versions).map(node => node.id),
-        repeat_count: 1,
       } }] }), true);
     setSelectedNodeIds(new Set([id]));
   }
@@ -2879,10 +2878,8 @@ function CanvasEditorInner({
     setError(null); setBatchError(null);
     try {
       if (!await persistNow()) return;
-      const node = latestDocument.current?.nodes.find(candidate => candidate.id === nodeId);
       const preparedEditVersion = dirtyVersion.current;
-      const plan = await prepareCanvasBatch(projectId, nodeId, serverRevision.current,
-        node?.type === 'group' ? node.data.repeat_count ?? 1 : 1);
+      const plan = await prepareCanvasBatch(projectId, nodeId, serverRevision.current);
       batchPreparedEditVersion.current = preparedEditVersion;
       setBatchConfirmation(plan);
     } catch (failure) { setError((failure as Error).message); }
@@ -4430,7 +4427,6 @@ function CanvasEditorInner({
     focusVariableNodeId,
     consumeVariableFocus,
     batchBusy: Boolean(activeBatch),
-    prepareBatch,
     activeBatch: activeBatch ? { scopeNodeId: activeBatch.scope_node_id, stopping: activeBatch.status === 'stopping' } : undefined,
     stopActiveBatch,
     uploadBatchImages,
@@ -4501,7 +4497,6 @@ function CanvasEditorInner({
     deleteNode,
   }), [
     activeBatch,
-    prepareBatch,
     stopActiveBatch,
     uploadBatchImages,
     beginMaterialPick,

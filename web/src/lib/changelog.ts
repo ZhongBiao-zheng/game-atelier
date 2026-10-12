@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.85.0',
+    date: '2026-10-12',
+    headline: '画布分组改成标题栏样式',
+    changes: [
+      { kind: 'feat', text: '画布分组顶部是一条标题栏：按住拖动整组，双击改名。新建的分组默认叫「分组」。' },
+      { kind: 'fix', text: '去掉分组上的「执行分组」和重复轮数。批量素材仍然连到生成节点逐项生成。' },
+    ],
+  },
+  {
     version: '5.84.1',
     date: '2026-10-12',
     headline: '节点生成失败时面板不再错位',

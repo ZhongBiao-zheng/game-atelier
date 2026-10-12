@@ -2085,7 +2085,7 @@ it('分组成员变化会改变引用图签名，参考位不用硬刷新', () =
   const group = (memberIds: string[]) => ({
     id: 'group', title: '执行分组', type: 'group' as const,
     position: { x: 0, y: 0 }, size: { width: 400, height: 400 }, z_index: 0,
-    data: { member_node_ids: memberIds, repeat_count: 1 },
+    data: { member_node_ids: memberIds },
   });
 
   const before = canvasMentionGraphSignature({ ...base, nodes: [image, group([])] });

@@ -743,7 +743,14 @@ class CanvasConfigNodeData(BaseModel):
 class CanvasGroupNodeData(BaseModel):
     model_config = ConfigDict(extra="forbid")
     member_node_ids: list[str] = Field(default_factory=list)
-    repeat_count: int = Field(default=1, ge=1, le=20)
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_repeat_count(cls, value: object) -> object:
+        # 5.85.0 删除「执行分组」前，分组带着 `repeat_count`；已有画布和导出包里还留着这个键。
+        if isinstance(value, dict) and "repeat_count" in value:
+            return {key: item for key, item in value.items() if key != "repeat_count"}
+        return value
 
 
 class CanvasBatchMaterialItem(BaseModel):

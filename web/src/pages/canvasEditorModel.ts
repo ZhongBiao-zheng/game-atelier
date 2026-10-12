@@ -375,7 +375,7 @@ export function expandCanvasLayerStack(
   const group: CanvasGroupNode = {
     id: existingGroup?.id ?? makeId('group'), type: 'group', title: existingGroup?.title ?? `${stack.title} · 图层`,
     position: { x: left, y: top }, size: { width: groupWidth, height: groupHeight }, z_index: existingGroup?.z_index ?? 0,
-    data: { member_node_ids: images.map(node => node.id), repeat_count: existingGroup?.type === 'group' ? existingGroup.data.repeat_count : 1 },
+    data: { member_node_ids: images.map(node => node.id) },
   };
   const arranged = [...placed, group];
   if (existingGroup && arranged.every(node => {

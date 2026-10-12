@@ -190,7 +190,7 @@ export interface CanvasConfigNode extends CanvasNodeBase {
 export interface CanvasGroupNode extends CanvasNodeBase {
   type: 'group';
   size?: CanvasGroupSize | null;
-  data: { member_node_ids: string[]; repeat_count?: number };
+  data: { member_node_ids: string[] };
 }
 
 export interface CanvasBatchMaterialItem {

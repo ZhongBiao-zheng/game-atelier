@@ -335,14 +335,14 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 （`actual_size`、`warnings`、`mj_flags`）都不在名单里 —— 浏览器不能提交路径，Canvas 的参考素材只能
 来自不可变 Content Version。
 批量执行使用 `batch_material` 节点：`data.items` 为最多 200 个 `{id,image_version_ids}`，
-每项 1–16 张已登记图片；项 ID 在节点内唯一。节点仅提供输入，没有生成 Draft。`group.data.repeat_count`
-为 1–20 轮，一层显式成员关系保持不变。分组外框按成员显示边界派生，加载与实时合并使用同一规则；
+每项 1–16 张已登记图片；项 ID 在节点内唯一。节点仅提供输入，没有生成 Draft。分组不能执行，
+`group.data` 只有 `member_node_ids`，一层显式成员关系保持不变。分组外框按成员显示边界派生，加载与实时合并使用同一规则；
 `group.size` 为正有限数的 `CanvasGroupSize`，不受普通节点 `CanvasSize` 的 4000px 上限影响，
-大批次展开后仍能包围所有成员。图片、视频等普通节点继续保留 4000px 尺寸上限。分组或单节点可以调用：
+大批次展开后仍能包围所有成员。图片、视频等普通节点继续保留 4000px 尺寸上限。单个生成节点可以调用：
 
-- `POST /canvas/projects/{id}/batch-runs/prepare`：`{scope_node_id,expected_revision,repeat_count}`；
-  校验冻结素材、输入依赖、模型能力及每步单产物，返回 `ready` 计划，不调用模型。最多 20 步、2000 次生成；
-  一个范围只允许一个批量素材来源，无素材节点时固定输入为一项；不支持循环或配置/插件节点执行。
+- `POST /canvas/projects/{id}/batch-runs/prepare`：`{scope_node_id,expected_revision}`，`scope_node_id` 是分组时 422；
+  校验冻结素材、输入依赖、模型能力及单产物，返回 `ready` 计划，不调用模型。计划只有这一个节点一步，最多 2000 次生成；
+  只允许一个批量素材来源，无素材节点时固定输入为一项；不支持配置/插件节点执行。
 - `POST .../batch-runs/{batch_id}/start`：确认后启动；revision 必须仍匹配，同项目只允许一份活动计划。
   同一计划重复 start 不再调度。串行执行的普通 Canvas Job 带 `canvas_run.batch`
   `{batch_id,item_id,round_index,step_index}`，两个 index 从 0 开始。

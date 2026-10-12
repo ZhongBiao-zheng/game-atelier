@@ -7,10 +7,10 @@ export const listCanvasBatches = (projectId: string) => (
   requestJson<CanvasBatchRun[]>(base(projectId), '读取批量执行')
 );
 
-export const prepareCanvasBatch = (projectId: string, nodeId: string, revision: number, repeat: number) => (
+export const prepareCanvasBatch = (projectId: string, nodeId: string, revision: number) => (
   requestJson<CanvasBatchRun>(`${base(projectId)}/prepare`, '检查批量执行', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ scope_node_id: nodeId, expected_revision: revision, repeat_count: repeat }),
+    body: JSON.stringify({ scope_node_id: nodeId, expected_revision: revision }),
   })
 );
 

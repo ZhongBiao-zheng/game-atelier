@@ -400,7 +400,7 @@ function groupDoc(
     id: 'group', title: '执行分组', type: 'group',
     position: { x: groupFrame.x, y: groupFrame.y },
     size: { width: groupFrame.width, height: groupFrame.height },
-    z_index: 0, data: { member_node_ids: members, repeat_count: 1 },
+    z_index: 0, data: { member_node_ids: members },
   } as CanvasNode);
   return {
     schema_version: 2, project_id: 'canvas-group', revision: 1,

@@ -25,7 +25,7 @@ import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
 
 import { canvasDownloadUrl, canvasMediaUrl, downloadCanvasLayers, type CanvasLayerExportFormat } from '@/api/canvas';
-import { CanvasBatchMaterialEditor, CanvasExecutionGroup } from './CanvasBatchControls';
+import { CanvasBatchMaterialEditor, CanvasGroupFrame } from './CanvasBatchControls';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
 import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
 import type { KeyView } from '@/api/keys';
@@ -133,7 +133,6 @@ export interface CanvasGenerationPanelContextValue {
 
 export interface CanvasNodeContextValue {
   batchBusy?: boolean;
-  prepareBatch?: (nodeId: string) => Promise<void>;
   /** 正在跑的批量执行：只有它的分组节点显示「停止」，停止中不重复发取消。 */
   activeBatch?: { scopeNodeId: string; stopping: boolean };
   stopActiveBatch?: () => Promise<void>;
@@ -396,7 +395,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     });
   }
   if (!context) return null;
-  if (node.type === 'group') return <CanvasExecutionGroup node={node} context={context} selected={Boolean(selected)} />;
+  if (node.type === 'group') return <CanvasGroupFrame node={node} context={context} selected={Boolean(selected)} />;
   const renameNode = context.renameNode;
   const content = nodeContent;
   // 拆分图层节点没有单一 content：尺寸取底图，大小是底图 + 全部图层文件之和。
