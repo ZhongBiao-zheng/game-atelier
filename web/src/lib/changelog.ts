@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.85.5',
+    date: '2026-10-12',
+    headline: '设置页加了分区导航',
+    changes: [
+      { kind: 'feat', text: '设置页左侧多了分区导航，点一下跳到对应设置。' },
+      { kind: 'fix', text: '设置页的「保存」「新建供应商」改成描边按钮，页面上只有开关用黄铜色。' },
+      { kind: 'fix', text: '各处下拉框换成统一的箭头样式。' },
+    ],
+  },
+  {
     version: '5.85.4',
     date: '2026-10-12',
     headline: '项目列表更紧凑',

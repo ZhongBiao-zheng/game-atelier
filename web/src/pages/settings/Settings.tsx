@@ -14,6 +14,16 @@ import { SwapLabel } from '@/components/ui/swap-label';
 
 const DEFAULT_ROOT = '~/game-atelier';
 
+const SECTIONS = [
+  { id: 'settings-storage', label: '项目存放' },
+  { id: 'settings-home', label: '首页展示' },
+  { id: 'settings-profile', label: '显示名' },
+  { id: 'settings-team', label: '团队库' },
+  { id: 'settings-keys', label: 'API 密钥' },
+];
+const navItemClass = 'rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+const sectionClass = 'scroll-mt-6 space-y-4';
+
 export function SettingsPage() {
   if (HOSTED_SITE) return <HostedManagementNotice title="设置" />;
   return <LocalSettingsPage />;
@@ -99,15 +109,19 @@ function LocalSettingsPage() {
   return (
     <div className="px-6 py-8 max-w-5xl mx-auto">
       <h1 className="font-display text-display text-foreground">设置</h1>
-      <Link href="/connection" className="mt-5 inline-flex rounded-md border border-border px-4 py-2 text-sm hover:bg-accent">本机连接</Link>
 
-      <section className="grid gap-6 py-10 md:grid-cols-[220px_1fr] md:gap-12">
-        <div>
-          <h2 className="text-xs text-muted-foreground">项目存放</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            角色、项目、历史 job 和 API Key 所在的根目录。
-          </p>
+      <div className="mt-6 md:grid md:grid-cols-[160px_minmax(0,1fr)] md:gap-12">
+      <nav aria-label="设置分区" className="mb-8 md:mb-0">
+        <div className="-mx-3 flex flex-wrap gap-0.5 md:sticky md:top-6 md:flex-col">
+          {SECTIONS.map(section => (
+            <a key={section.id} href={`#${section.id}`} className={navItemClass}>{section.label}</a>
+          ))}
+          <Link href="/connection" className={navItemClass}>本机连接</Link>
         </div>
+      </nav>
+      <div className="min-w-0">
+      <section id="settings-storage" className={`${sectionClass} pb-10`}>
+        <h2 className="text-base font-medium text-foreground">项目存放</h2>
         <div className="min-w-0 space-y-3">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex min-w-0 flex-wrap items-center gap-3">
@@ -163,13 +177,8 @@ function LocalSettingsPage() {
         </div>
       </section>
 
-      <section className="grid gap-6 border-t border-border py-10 md:grid-cols-[220px_1fr] md:gap-12">
-        <div>
-          <h2 className="text-xs text-muted-foreground">首页展示</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            控制首页下方作品展示区的内容来源。
-          </p>
-        </div>
+      <section id="settings-home" className={`${sectionClass} border-t border-border py-10`}>
+        <h2 className="text-base font-medium text-foreground">首页展示</h2>
         <div className="min-w-0">
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0">
@@ -196,25 +205,22 @@ function LocalSettingsPage() {
         </div>
       </section>
 
-      <section className="grid gap-6 border-t border-border py-10 md:grid-cols-[220px_1fr] md:gap-12">
+      <section id="settings-profile" className={`${sectionClass} border-t border-border py-10`}>
         <ProfileSection />
       </section>
 
-      <section className="grid gap-6 border-t border-border py-10 md:grid-cols-[220px_1fr] md:gap-12">
+      <section id="settings-team" className={`${sectionClass} border-t border-border py-10`}>
         <TeamLibrariesSection />
       </section>
 
-      <section id="settings-keys" className="grid scroll-mt-16 gap-6 border-t border-border py-10 md:grid-cols-[220px_1fr] md:gap-12">
-        <div>
-          <h2 className="text-xs text-muted-foreground">API 密钥</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            图像 / 视频生成服务的访问凭证，按供应商管理。
-          </p>
-        </div>
+      <section id="settings-keys" className={`${sectionClass} border-t border-border py-10`}>
+        <h2 className="text-base font-medium text-foreground">API 密钥</h2>
         <div className="min-w-0">
           <KeysPage key={keysVersion} embedded />
         </div>
       </section>
+      </div>
+      </div>
     </div>
   );
 }

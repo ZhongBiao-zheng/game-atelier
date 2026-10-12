@@ -106,7 +106,7 @@ export function TeamLibrariesSection() {
     <>
       <div>
         <div className="flex items-center gap-1.5">
-          <h2 className="text-xs text-muted-foreground">团队库</h2>
+          <h2 className="text-base font-medium text-foreground">团队库</h2>
           <button
             type="button"
             title={SYNC_HINT}
