@@ -46,9 +46,16 @@ def configure_proxy_bypass() -> None:
     requests / urllib / curl 都认 NO_PROXY：命中的 host 绕过系统/环境代理直连，
     其它 host 照常走代理。在出图 / 出视频进程入口调用即可，无需改调用点。
     """
+    # 两个变量合并后写回同一份：urllib / requests / httpx 在两者并存时只认小写。用户只设了大写
+    # NO_PROXY 时若各写各的，新建的小写变量里没有用户条目（localhost / 127.0.0.1），反而把
+    # 原本直连的本机请求送进代理。
+    merged: list[str] = []
     for var in ("NO_PROXY", "no_proxy"):
-        existing = [p.strip() for p in os.environ.get(var, "").split(",") if p.strip()]
-        for suffix in DIRECT_HOST_SUFFIXES:
-            if suffix not in existing:
-                existing.append(suffix)
-        os.environ[var] = ",".join(existing)
+        for entry in os.environ.get(var, "").split(","):
+            if entry.strip() and entry.strip() not in merged:
+                merged.append(entry.strip())
+    for suffix in DIRECT_HOST_SUFFIXES:
+        if suffix not in merged:
+            merged.append(suffix)
+    for var in ("NO_PROXY", "no_proxy"):
+        os.environ[var] = ",".join(merged)

@@ -19,11 +19,14 @@
 | 火山 Ark Seedance | `ARK_SEEDANCE_YUAN_PER_MILLION_TOKENS` | 元 / 百万输出 token |
 | 阿里 DashScope HappyHorse | `HAPPYHORSE_1_0_YUAN_PER_SECOND`、`HAPPYHORSE_1_1_YUAN_PER_SECOND` | 元 / 秒 |
 
-## Tuzi 香蕉 Pro：2026-08-31 更新
+## Tuzi 香蕉 Pro：2026-10-12 更新
 
-来源为用户在本次任务提供的 Tuzi 调价公告：`gemini-3-pro-image` 与
-`gemini-3-pro-image-preview` 是同一模型，已由统一每张计价改为 1K / 2K / 4K 三档。
-具体金额只维护在上表对应的数据项，不在本文复制。
+来源为用户提供的 Tuzi 降价公告（default 分组三档同时下调），并核对了 Tuzi
+[公开价表 API](https://api.tu-zi.com/api/pricing) 的
+`group_model_pricing.default.billing_expr["gemini-3-pro-image-preview"]`。公开价表的挂牌数字乘 0.7
+才是公告里的人民币单价（GPT Image 2、flux-3-image 同样成立），核对时按这个系数换算。
+`gemini-3-pro-image` 与 `gemini-3-pro-image-preview` 是同一模型，按 1K / 2K / 4K 三档计价
+（2026-08-31 起）。具体金额只维护在上表对应的数据项，不在本文复制。
 
 - 仅用于 `tu-zi.com` 及其子域名、明确配置 `billing_group=default` 的 Key。
 - 工坊的 `nano-banana-pro` 展示别名共用该表；`quality=low/medium/high` 分别对应 1K/2K/4K。

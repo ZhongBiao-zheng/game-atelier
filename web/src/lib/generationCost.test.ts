@@ -59,8 +59,8 @@ describe('estimateGenerationCost', () => {
   });
 
   it.each([
-    ['low', 0.12], ['medium', 0.15], ['high', 0.18],
-    ['auto', 0.12], [undefined, 0.12],
+    ['low', 0.099], ['medium', 0.105], ['high', 0.126],
+    ['auto', 0.099], [undefined, 0.099],
   ] as const)('prices Tuzi Gemini 3 Pro %s at the announced tier', (quality, price) => {
     const provider = {
       provider: 'custom', baseUrl: 'https://api.tu-zi.com', billingGroup: 'default',
@@ -77,7 +77,7 @@ describe('estimateGenerationCost', () => {
   });
 
   it.each([
-    ['nano-banana-pro-2k', 0.3], ['nano-banana-pro-4k', 0.36],
+    ['nano-banana-pro-2k', 0.21], ['nano-banana-pro-4k', 0.252],
   ])('uses the fixed resolution encoded in %s', (model, price) => {
     for (const quality of ['low', 'medium', 'high', 'auto', undefined] as const) {
       expect(estimateGenerationCost({
@@ -255,7 +255,7 @@ describe('estimateGenerationCost', () => {
       billing_group: 'default', access_key: 'masked', secret_key: null,
       capabilities: ['portrait'], notes: '', created_at: '2026-08-31T00:00:00Z',
       models: [{ id: 'nano-banana-pro', name: 'Nano Banana Pro', modality: 'image' }],
-    }, 'nano-banana-pro', 'image', params)).toBe(0.36);
+    }, 'nano-banana-pro', 'image', params)).toBe(0.252);
     expect(params).toEqual({ n: 2, quality: 'high', estimated_cost_cny: 0.6 });
   });
 

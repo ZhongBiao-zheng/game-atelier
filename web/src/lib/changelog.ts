@@ -33,6 +33,41 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.84.0',
+    date: '2026-10-12',
+    headline: '支持 FLUX 3 Image',
+    changes: [
+      { kind: 'feat', text: '新模型公告：FLUX 3 Image。Tuzi 密钥可在公告里一键添加，文生图和带参考图的图生图都已实测可用，估价按 ¥0.15 / 次。' },
+    ],
+  },
+  {
+    version: '5.83.6',
+    date: '2026-10-12',
+    headline: 'Tuzi 香蕉 Pro 降价',
+    changes: [
+      { kind: 'feat', text: 'Tuzi default 分组的 Nano Banana Pro（gemini-3-pro-image-preview）估价按新价计算：1K ¥0.099、2K ¥0.105、4K ¥0.126。' },
+    ],
+  },
+  {
+    version: '5.83.5',
+    date: '2026-10-12',
+    headline: '画布缩放条移到右下角',
+    changes: [
+      { kind: 'feat', text: '画布底部工具条拆成两组：画布设置留在左下，缩放移到右下。' },
+      { kind: 'fix', text: '系统只设置了大写 NO_PROXY 时，本机请求不再被误送进代理。' },
+    ],
+  },
+  {
+    version: '5.83.4',
+    date: '2026-10-12',
+    headline: '创作台、设置页对齐修正',
+    changes: [
+      { kind: 'fix', text: '创作台的记录列表、输入框、筛选条对齐到同一条中轴；创作资产按钮挂到输入框外侧。' },
+      { kind: 'fix', text: '设置页「更换文件夹」「新建供应商」改为与其他控件左对齐。' },
+      { kind: 'fix', text: '创作台、画布列表、工坊页面右侧不再多出一条空白。' },
+    ],
+  },
+  {
     version: '5.83.3',
     date: '2026-10-09',
     headline: '拖线时只显示要连的那个连接点',
