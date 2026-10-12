@@ -126,7 +126,6 @@ export function CanvasGroupFrame({ node, context, selected }: {
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(node.title);
-  const border = selected ? 'border-primary' : 'border-border';
   function beginRename() {
     setDraft(node.title);
     setEditing(true);
@@ -136,7 +135,7 @@ export function CanvasGroupFrame({ node, context, selected }: {
     setEditing(false);
     if (title && title !== node.title) context.renameNode(node.id, title);
   }
-  return <div className={`canvas-group-shell pointer-events-none h-full w-full rounded-b-2xl border bg-secondary/10 ${border}`}
+  return <div className={`canvas-group-shell pointer-events-none h-full w-full border bg-secondary/40 ${selected ? 'border-transparent' : 'rounded-2xl border-border'}`}
     data-selected={selected ? 'true' : 'false'}>
     {/* 分组的框由画师决定，不再跟着成员长。改框只改框：框外的成员会被摘掉，但把框拉大盖住
         的节点不会被吞进来（要吞得去碰那个节点），见 normalizeCanvasGroups。 */}
@@ -159,16 +158,16 @@ export function CanvasGroupFrame({ node, context, selected }: {
     {/* 分组作为素材包整包供参考：这是它唯一的连线端点（只出不进）。外层 flow 节点是
         pointer-events:none（好让下面的连线露出来），所以这个把手要自己开回可点。 */}
     <Handle type="source" position={Position.Right}
-      className="canvas-node-handle pointer-events-auto" aria-label="把这个分组作为素材包连出去">
-      <span className="canvas-node-handle-dot" aria-hidden="true" />
+      className="canvas-node-handle canvas-group-add-handle pointer-events-auto" aria-label="把这个分组作为素材包连出去">
+      <span className="canvas-group-add" aria-hidden="true"><Plus /></span>
     </Handle>
-    {/* 标题栏就是分组本身的把手：按住拖动整组，双击改名。它贴在框的上沿外侧，不占成员的位置。 */}
-    <div className={`pointer-events-auto absolute -inset-x-px bottom-full flex h-9 items-center gap-2 rounded-t-2xl border border-b-0 bg-secondary pl-3 pr-1.5 text-sm ${border}`}
+    {/* 名字就是分组本身的把手：按住拖动整组，双击改名。它在框的左上角外侧，不占成员的位置。 */}
+    <div className="pointer-events-auto absolute bottom-full left-0 flex max-w-full items-center gap-2 pb-2 text-sm"
       onClick={() => context.selectNode(node.id)}
       onDoubleClick={event => { event.stopPropagation(); if (!editing) beginRename(); }}>
       {editing
         ? <input autoFocus value={draft} maxLength={120} aria-label={`重命名分组 ${node.title}`}
-          className="nodrag nowheel h-7 min-w-0 flex-1 border-0 border-b border-dashed border-input bg-transparent px-0 text-sm font-medium text-foreground outline-none focus-visible:border-ring"
+          className="nodrag nowheel h-7 w-48 min-w-0 border-0 border-b border-dashed border-input bg-transparent px-0 text-sm text-foreground outline-none focus-visible:border-ring"
           onChange={event => setDraft(event.target.value)}
           onFocus={event => event.target.select()}
           onPointerDown={event => event.stopPropagation()}
@@ -180,7 +179,7 @@ export function CanvasGroupFrame({ node, context, selected }: {
             else if (event.key === 'Escape') { event.preventDefault(); setEditing(false); }
           }} />
         : <button type="button" title="双击重命名" aria-label={`分组 ${node.title}`}
-          className="min-w-0 truncate text-left font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="min-w-0 truncate text-left text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           onKeyDown={event => {
             if (event.key !== 'Enter' && event.key !== 'F2') return;
             event.preventDefault(); event.stopPropagation(); beginRename();

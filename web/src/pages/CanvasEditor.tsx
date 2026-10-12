@@ -90,6 +90,7 @@ import { useCanvasBatchRuns } from '@/hooks/useCanvasBatchRuns';
 import { prepareCanvasBatch, startCanvasBatch, cancelCanvasBatch } from '@/api/canvasBatch';
 import { CanvasBatchConfirmation } from '@/components/canvas/CanvasBatchControls';
 import { canvasEdgeTypes } from '@/components/canvas/CanvasConnectionEdge';
+import { CanvasConnectionLine } from '@/components/canvas/CanvasConnectionLine';
 import type { CanvasBatchRun } from '@/schema/canvasBatch';
 import {
   AddMenuButton,
@@ -4743,6 +4744,7 @@ function CanvasEditorInner({
           edges={flowEdges}
           nodeTypes={canvasNodeTypes}
           edgeTypes={canvasEdgeTypes}
+          connectionLineComponent={CanvasConnectionLine}
           attributionPosition="bottom-center"
           onSelectionStart={onSelectionStart}
           onSelectionEnd={onSelectionEnd}

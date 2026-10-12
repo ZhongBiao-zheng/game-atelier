@@ -516,6 +516,38 @@
   .canvas-flow .canvas-node-handle:hover .canvas-node-handle-dot {
     border-color: var(--primary);
   }
+  /* 分组的连接点是框右侧外面的「+」：选中分组才出现，拖出去就是把整组连给新节点。
+     必须 !important：xyflow 的 style.css 不分层，它的 right: 0 会赢过 @layer 里的规则。 */
+  .canvas-flow .react-flow__handle.canvas-group-add-handle {
+    right: -2.25rem !important;
+  }
+  .canvas-flow .canvas-group-add {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    display: grid;
+    width: 2rem;
+    height: 2rem;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--secondary);
+    color: var(--foreground);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    transition: border-color var(--motion-fast) ease;
+  }
+  .canvas-flow .canvas-group-add svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .canvas-flow .canvas-node-handle:hover .canvas-group-add {
+    border-color: var(--primary);
+  }
+  /* 框选时的拖拽框与框选后的选区框、分组框用同一个圆角。 */
+  .canvas-flow .react-flow__selection {
+    border-radius: 1rem;
+  }
   .canvas-flow .react-flow__resize-control.canvas-node-resize-line {
     border-color: color-mix(in srgb, var(--primary) 72%, transparent);
   }
@@ -556,7 +588,7 @@
     box-sizing: content-box;
     padding: 12px;
     margin: -12px;
-    border-radius: 0.5rem;
+    border-radius: 1rem;
     /* 选区框只是视觉框：它叠在节点之上，接了指针就把节点边上的连接把手全盖住，框选后
        只能整组拖、连不了线。拖任意一个选中节点本来就会带着整组走，所以框自己不必接事件。
        必须 !important：本文件的规则在 @layer 里，xyflow 的 style.css 不分层，不分层的
