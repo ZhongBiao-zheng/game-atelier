@@ -33,6 +33,18 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.85.7',
+    date: '2026-10-12',
+    headline: '创作台记录按日期分组',
+    changes: [
+      { kind: 'feat', text: '创作台的生成记录按日期分组，每天第一条上方显示日期。' },
+      { kind: 'feat', text: '模型、比例、清晰度、张数改成一个个小标签，不再挤成一行字。' },
+      { kind: 'fix', text: '模型和厂商列表最高 400，超出部分在列表里滚动，不再顶到屏幕最上面。' },
+      { kind: 'fix', text: '宽屏下筛选条对齐到右侧一栏。' },
+      { kind: 'fix', text: '画布右下角的「React Flow」字样已隐藏。' },
+    ],
+  },
+  {
     version: '5.85.6',
     date: '2026-10-12',
     headline: '创作台记录在宽屏下分两栏',

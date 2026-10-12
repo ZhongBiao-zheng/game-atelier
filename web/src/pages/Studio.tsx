@@ -811,7 +811,7 @@ function StudioFull() {
     >
       {/* 查询条：固定顶部覆盖层，不随历史滚动。wrapper 不收事件，条本体 pointer-events-auto。 */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 px-3 pt-4 sm:px-6">
-        <div className="mx-auto flex w-full max-w-[1024px] justify-end">
+        <div className="mx-auto flex w-full max-w-[1024px] justify-end xl:max-w-[1368px]">
           <StudioQueryBar filters={historyFilters} onChange={setHistoryFilters} />
         </div>
       </div>

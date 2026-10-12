@@ -1,4 +1,4 @@
-import { type ButtonHTMLAttributes, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ButtonHTMLAttributes, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { mediaUrl } from '@/api/connection';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, BookmarkPlus, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Share2, Square, Trash2 } from 'lucide-react';
@@ -116,6 +116,26 @@ function specMetadata(config: RoundConfig): string[] {
     config.n && config.n > 1 ? `${config.n} 张` : undefined,
   ].filter((value): value is string => Boolean(value));
   return values.filter((value, index) => values.indexOf(value) === index);
+}
+
+/** 出图参数（模型 / 尺寸 / 比例 / 清晰度 / 张数）逐项成标签；MJ flags 这类长串作为 children 另起一行。 */
+function SpecChips({ values, testId, children }: { values: string[]; testId?: string; children?: ReactNode }) {
+  return (
+    <div data-testid={testId} className="mt-1.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+      {values.map(value => (
+        <span key={value} className="rounded-sm border border-border px-1.5 py-0.5 tabular-nums">{value}</span>
+      ))}
+      {children}
+    </div>
+  );
+}
+
+/** 记录所属的北京日期（YYYY-MM-DD），日期分组用。 */
+function roundDate(round: RoundState): string {
+  const iso = round.kind === 'pending'
+    ? new Date(round.startedAt).toISOString()
+    : round.kind === 'done' ? round.completedAt ?? round.submittedAt : round.submittedAt;
+  return formatBeijingTime(iso).slice(0, 10);
 }
 
 function shownMjMetadata(config: RoundConfig): string {
@@ -281,14 +301,19 @@ export function RoundList({
             className="h-px w-full"
           />
         )}
-        {mountedRounds.map((r) => {
+        {mountedRounds.map((r, index) => {
+          const date = roundDate(r);
+          const startsDate = index === 0 || roundDate(mountedRounds[index - 1]) !== date;
           const stableKey =
             r.kind === 'pending' && r.jobId ? `pending-${r.jobId}` :
             r.kind === 'pending' ? `pending-${r.startedAt}` :
             `${r.kind}-${r.submittedAt}`;
           return (
             // data-round-job：首页作品深链（/studio?job=）滚动定位的锚点。
-            <MediaActivationBoundary key={stableKey} jobId={r.jobId}>
+            <Fragment key={stableKey}>
+            {/* 列表的 space-y-8 给每个子项加 2rem 下边距；组标题收成 0.75rem，贴近它带起的第一条记录 */}
+            {startsDate && <h3 data-testid="round-date" className="mb-3 font-mono text-xs tabular-nums text-muted-foreground">{date}</h3>}
+            <MediaActivationBoundary jobId={r.jobId}>
               {(mediaActive) => (
               <>
               {r.kind === 'pending' && (
@@ -334,6 +359,7 @@ export function RoundList({
               </>
               )}
             </MediaActivationBoundary>
+            </Fragment>
           );
         })}
       </div>
@@ -394,12 +420,11 @@ function PendingBatch({
               jobId={round.jobId}
               mediaActive={mediaActive}
             />
-            <p data-testid="pending-spec-meta" className="mt-1 text-sm text-muted-foreground">
-              {specMeta.join(' · ')}
+            <SpecChips testId="pending-spec-meta" values={specMeta}>
               {shownMjFlags && (
-                <span className="ml-2 text-muted-foreground">{shownMjFlags}</span>
+                <span className="basis-full font-mono">{shownMjFlags}</span>
               )}
-            </p>
+            </SpecChips>
             <p data-testid="pending-run-meta" className="mt-0.5 text-xs text-muted-foreground">
               耗时 {elapsedSec}s · {submittedAt}
             </p>
@@ -934,14 +959,13 @@ function DoneBatch({
             jobId={round.jobId}
             mediaActive={mediaActive}
           />
-          <p className="mt-1 text-sm text-muted-foreground">
-            {specMeta.join(' · ')}
+          <SpecChips testId="round-spec-meta" values={specMeta}>
             {shownMjFlags && (
-              <span data-testid="round-mj-flags" className="ml-2 text-muted-foreground">
+              <span data-testid="round-mj-flags" className="basis-full font-mono">
                 {shownMjFlags}
               </span>
             )}
-          </p>
+          </SpecChips>
           {(runMeta.length > 0 || round.generationCost != null) && (
             <p data-testid="round-run-meta" className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground">
               <span>{runMeta.join(' · ')}</span>
@@ -1223,9 +1247,7 @@ function FailedCard({
               jobId={round.jobId}
               mediaActive={mediaActive}
             />
-            {meta.length > 0 && (
-              <p className="mt-1 text-sm text-muted-foreground">{meta.join(' | ')}</p>
-            )}
+            {meta.length > 0 && <SpecChips values={meta} />}
           </div>
         </div>
       )}

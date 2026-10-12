@@ -434,6 +434,9 @@ const REPRODUCE_CONFLICT_MESSAGE = '画布已更新，请重试';
 
 const CANVAS_CHROME_BUTTON_CLASS = 'grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
+// 模块级常量：xyflow 按引用比较 props，内联对象会让它每次渲染都当成变更。
+const CANVAS_PRO_OPTIONS = { hideAttribution: true };
+
 export function CanvasEditor(props: {
   projectId: string;
   onBack: () => void;
@@ -4763,6 +4766,7 @@ function CanvasEditorInner({
         }}
       >
         <ReactFlow<FlowNode>
+          proOptions={CANVAS_PRO_OPTIONS}
           nodes={flowNodes}
           edges={flowEdges}
           nodeTypes={canvasNodeTypes}

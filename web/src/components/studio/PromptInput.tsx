@@ -1021,6 +1021,7 @@ export function PromptInput({
           role="listbox"
           aria-label="引用参考素材"
           data-testid="mention-popover"
+          maxHeight={280}
           className="w-[260px] max-h-[280px] overflow-y-auto rounded-xl border border-border bg-card p-1"
         >
           {mentionItems.map((item) => (
@@ -1132,6 +1133,7 @@ export function PromptInput({
               direction={menuDirection}
               role="listbox"
               aria-label="选择厂商列表"
+              maxHeight={400}
               className="flex flex-col gap-2 w-[280px] max-h-[400px] overflow-y-auto no-scrollbar rounded-xl border border-border bg-card p-2"
             >
                 <div className="px-3 py-2 text-sm text-muted-foreground">选择厂商</div>
@@ -1176,6 +1178,7 @@ export function PromptInput({
               direction={menuDirection}
               role="listbox"
               aria-label="选择模型列表"
+              maxHeight={400}
               className="flex flex-col gap-2 w-[280px] max-h-[400px] overflow-y-auto no-scrollbar rounded-xl border border-border bg-card p-2"
             >
                 <div className="px-3 py-2 text-sm text-muted-foreground">选择模型：{providerDisplayName}</div>
