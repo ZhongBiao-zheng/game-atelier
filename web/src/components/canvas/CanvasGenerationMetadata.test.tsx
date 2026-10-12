@@ -1,8 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import { expect, it } from 'vitest';
 
-import { CanvasGenerationMetadata, canvasRetryErrorMessage } from './CanvasGenerationMetadata';
-import { ApiError } from '@/api/http';
+import { CanvasGenerationMetadata } from './CanvasGenerationMetadata';
 import type { CanvasGenerationSnapshot, Job } from '@/schema/jobs';
 
 const snapshot: CanvasGenerationSnapshot = {
@@ -97,21 +96,4 @@ it('shows the immutable prompt, model parameters, actual output and frozen refer
   expect(record).not.toHaveTextContent('client-secret');
   expect(within(record).getByText('敏感值（已隐藏）')).toBeInTheDocument();
   expect(record).toHaveTextContent('本地文件（路径已隐藏）');
-});
-
-it('shows the server message together with its recovery hint on retry failure', () => {
-  const error = new ApiError(
-    '原结果节点已被删除，不能在原位置重试',
-    {
-      status: 409,
-      code: 'result_node_missing',
-      reason: '原结果节点已被删除，不能在原位置重试',
-      recovery: '恢复结果节点，或新建生成节点后重新提交。',
-    },
-  );
-
-  expect(canvasRetryErrorMessage(error)).toBe(
-    '原结果节点已被删除，不能在原位置重试 恢复结果节点，或新建生成节点后重新提交。',
-  );
-  expect(canvasRetryErrorMessage(new Error('网络中断'))).toBe('网络中断');
 });

@@ -1,6 +1,5 @@
 import { AlertTriangle, Link2 } from 'lucide-react';
 
-import { ApiError } from '@/api/http';
 import type { CanvasGenerationSnapshot, Job } from '@/schema/jobs';
 
 interface CanvasNodeIdentity {
@@ -142,14 +141,6 @@ function generationRecordPrompt(finalPrompt: string): string {
     sections.push(`参考文本：\n${appendedReferences.join('\n\n')}`);
   }
   return sections.filter(Boolean).join('\n\n') || '空提示词';
-}
-
-export function canvasRetryErrorMessage(error: unknown): string {
-  if (error instanceof ApiError) {
-    return error.recovery ? `${error.message} ${error.recovery}` : error.message;
-  }
-  if (error instanceof Error) return error.message;
-  return String(error);
 }
 
 export function CanvasGenerationMetadata({ snapshot, job, nodes }: {

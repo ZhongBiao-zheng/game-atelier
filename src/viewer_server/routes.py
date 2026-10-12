@@ -74,7 +74,7 @@ from character_workflow.lib.schemas import (
     CanvasMaskEditCreate, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
     CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
-    CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse, CanvasRunRetry,
+    CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse,
     CanvasUiPreferences, CanvasUiPreferencesUpdate, CanvasUploadResponse,
     CharacterIndexResponse, CharacterWorkspaceResponse,
     CharacterDerivativeCreate,
@@ -3523,58 +3523,6 @@ def post_canvas_run(
                 "current_revision": current_revision,
             }) from None
         raise HTTPException(409, detail=str(error)) from error
-    except ValueError as error:
-        raise HTTPException(422, detail=str(error)) from error
-    from viewer_server import routes as _self
-    background.add_task(_self._run_canvas_job_safely, job.job_id)
-    return CanvasRunResponse(job=job, document=document)
-
-
-@router.post(
-    "/canvas/projects/{project_id}/runs/{run_id}/retry",
-    response_model=CanvasRunResponse,
-    status_code=201,
-)
-def post_canvas_run_retry(
-    project_id: str,
-    run_id: str,
-    payload: CanvasRunRetry,
-    background: BackgroundTasks,
-) -> CanvasRunResponse:
-    from character_workflow.lib.canvas_runs import retry_canvas_run
-
-    try:
-        job, document = retry_canvas_run(
-            project_id,
-            run_id,
-            payload.expected_revision,
-        )
-    except KeyError:
-        raise HTTPException(404, detail="找不到这个生成记录") from None
-    except RuntimeError as error:
-        detail = str(error)
-        if detail.startswith("revision_conflict:"):
-            current_revision = int(detail.split(":", 1)[1])
-            raise HTTPException(409, detail={
-                "code": "revision_conflict",
-                "current_revision": current_revision,
-            }) from None
-        messages = {
-            "run_not_terminal": (
-                "当前生成尚未结束，不能重试",
-                "等待当前生成结束，或先停止生成。",
-            ),
-            "result_node_missing": (
-                "原结果节点已被删除，不能在原位置重试",
-                "恢复结果节点，或新建生成节点后重新提交。",
-            ),
-        }
-        message, recovery = messages.get(detail, (detail, "检查画布当前状态后重试。"))
-        raise HTTPException(409, detail={
-            "code": detail,
-            "message": message,
-            "recovery": recovery,
-        }) from error
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
     from viewer_server import routes as _self

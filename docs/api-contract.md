@@ -206,7 +206,7 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `POST /canvas/projects/{id}/agent/sessions` `DELETE /canvas/projects/{id}/agent/sessions/{session_id}`
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
 `POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle,layer-decomposition}`
-`POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
+`POST /canvas/projects/{id}/runs/{run_id}/cancel`
 `POST /creation-assets/prompts` `POST /creation-assets/media/{upload,from-path}`
 `POST /creation-assets/generation/{from-job,from-canvas}`
 `PUT /creation-assets/{asset_id}/{prompt,media}`
@@ -319,7 +319,7 @@ prompt 留空保存即恢复内置提示词（服务端填回全文，GET 永远
 或插件私有状态；凭证、Base URL 与模型目录仍只属于 Keys。
 
 画布连接为 `role: input | material`，均以实线呈现。`Input Connection` 表示当前参考输入，不触发下游；只有 input 进入参考列表、输入解析和批量依赖。`Material Connection` 只含 `id / role / source_node_id / target_node_id`，两端须为图片节点，不带 slot，表达本地处理的素材来源，不自动追溯取图。两种角色可在同一对节点间共存。历史真源仍是 Job Snapshot 与 Content Version origin，不创建历史派生边。普通生成不引用节点自身的当前内容；基于本图生成通过下游节点与 input 明确输入。
-生成面板仅展示当前素材、提示词和生成设置，不展示“原任务输入／本轮冻结输入”重复区块；删除展示不改变 Snapshot、Job 历史或原参数重试。
+生成面板仅展示当前素材、提示词和生成设置，不展示“原任务输入／本轮冻结输入”重复区块；删除展示不改变 Snapshot 与 Job 历史。
 普通 `PUT document` 必须携带 `If-Match: <revision>`：服务端项目锁内校验后 revision + 1；冲突返回 409，不做自动合并。Web PUT 只能新增 `user_edit` 文本版本，不能写媒体版本、修改既有版本。输入连接可编辑，撤销/重做只改变画布节点与连接，必须保留全部已有内容版本；历史真实性不依赖当前连线。
 
 上传接口使用 multipart `file + expected_revision`，服务端登记不可变媒体 Content Version 并返回更新后的
@@ -395,9 +395,8 @@ Content Version、candidate 状态与首个成功主结果；Midjourney 原生�
 
 批量候选逐个校验：全部成功为 `done`，部分成功为 `partial`，全部失败为 `failed`，
 停止且没有有效产物为 `canceled`；部分失败不会抹掉已经成功的 Content Version。
-`POST .../runs/{run_id}/retry` 只接受 `expected_revision`：按原 Job 的不可变 Snapshot、参数和精确输入版本创建新 Job/Run，设置 retry_of，不读取当前节点草稿重建输入。缺失或摘要不符的素材、不可用模型及已失效参数明确拒绝；不自动丢参考或换模型。修改配置后的“生成”使用当前草稿和实线，与原任务重试区分。
-新 Snapshot 同时冻结 `draft_prompt` 原始可编辑稿与 `final_prompt` 厂商提示词。重试发送后者，但结果节点只恢复前者；旧任务未记录原稿时留空，不把已经展开的历史参考正文写进新草稿。原任务仍可按其完整 `final_prompt` 重试。
-本地失败不等于厂商订单已终止。原 Job 保留 `params.provider_task_ids` 时拒绝直接重试，要求先核对订单结果；当前不持有可证明厂商终态的结构化状态，因此对失败、部分成功及已停止订单均采用此保守限制，避免从不含订单号的原 Snapshot 再次下单。
+失败后没有「按原任务重试」接口（2026-10-12 移除）：再次生成一律走 `POST .../runs`，使用当前草稿和实线。
+新 Snapshot 同时冻结 `draft_prompt` 原始可编辑稿与 `final_prompt` 厂商提示词，仅作记录与复现用途。
 `POST .../runs/{run_id}/cancel` 只持久化幂等 `cancel_requested_at`。Runner 尚未认领时不调用厂商并落为
 `canceled`；同步厂商请求已发出时不伪装即时中断，UI 明示上游可能继续执行，有效返回仍登记，未返回候选
 才标记 canceled。prepared 事务在下次项目访问或命令前完成/丢弃，不能从节点当前内容重造 Snapshot。
@@ -417,7 +416,7 @@ Midjourney 异步轮询会在每个间隔和下载前检查停止请求。进程
 `input_modalities` 明确包含 image 且支持 OpenAI-compatible chat 的模型；浏览器不能传 preset、alias、
 model 或媒体路径。Snapshot 冻结完整 preset 正文/版本、真实模型与唯一图片 Version，文本 caller 用
 multimodal content 发送服务端解析的项目内图片。成功结果是独立文本节点及 实际输入连接，源图片
-Draft 不读不改；停止与 original retry 复用普通 Run 生命周期，current retry 不适用。
+Draft 不读不改；停止复用普通 Run 生命周期。
 
 普通文本 Run 可冻结并传输图片、视频和音频 Input Connection，但只认所选文本模型显式声明的
 `input_modalities`，不按模型名称猜测能力。Chat Completions 在兼容端点分别使用 `image_url`、
@@ -470,8 +469,7 @@ requested_count / mask_file`。prompt、alias、model 与参数必须先保存�
 读取后冻结；浏览器不能传媒体路径或绕过 Draft。蒙版必须是与 EXIF 归一后源图同尺寸的单帧 PNG，透明或
 灰度值 0 表示编辑、255 表示保留，空蒙版拒绝。服务端把归一灰度蒙版登记为不可变 `user_mask` Content
 Version，并与 Job、Snapshot、结果节点、实际输入连接在同一可恢复事务提交；Snapshot 记录
-`mask_version_id`，且唯一输入固定为当前源图 Version，不接收其它连接节点引用；original retry 重新校验
-源图与蒙版摘要后原样复用。首版只允许已验证走 OpenAI-compatible
+`mask_version_id`，且唯一输入固定为当前源图 Version，不接收其它连接节点引用。首版只允许已验证走 OpenAI-compatible
 `/images/edits` 的 GPT Image 模型；不支持时返回 `canvas_media_capability_missing`，绝不降级为整图生成。
 
 `POST /canvas/projects/{id}/runs/angle` 只接受 `surface_node_id / expected_revision / requested_count` 与
@@ -479,7 +477,7 @@ Version，并与 Job、Snapshot、结果节点、实际输入连接在同一可�
 default Key、再按登记顺序选择首个支持至少一张参考图的图片模型；浏览器不能传自由 prompt、alias、model
 或媒体路径。服务端固定 `canvas.angle_edit` preset v1，把当前图片 Version 作为唯一 Snapshot input，完整
 机位参数、preset、真实 provider/alias/model 和受控最终 prompt 一并冻结。结果始终是独立图片节点及一条
-实际输入连接；original retry 重新校验源图摘要并逐字段复用原 Snapshot。
+实际输入连接。
 
 `POST /canvas/projects/{id}/runs/upscale` 只接受 `surface_node_id / expected_revision / target(2K|4K|8K)`。服务端先校验
 源图长边小于目标长边（2048 / 4096 / 8192，否则 422 `canvas_upscale_not_needed`），再按 `ui-preferences.upscale.tiers[target]` 选模型：

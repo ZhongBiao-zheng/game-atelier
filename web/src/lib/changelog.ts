@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.84.1',
+    date: '2026-10-12',
+    headline: '节点生成失败时面板不再错位',
+    changes: [
+      { kind: 'fix', text: '画布节点生成失败后，面板底部的参数控件不再被挤成两行：去掉了多余的「重试原任务」按钮，失败后直接点「开始生成」。' },
+    ],
+  },
+  {
     version: '5.84.0',
     date: '2026-10-12',
     headline: '支持 FLUX 3 Image',

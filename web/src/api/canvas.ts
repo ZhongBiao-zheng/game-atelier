@@ -561,22 +561,6 @@ export function createCanvasReversePromptConfig(
   );
 }
 
-export function retryCanvasRun(
-  projectId: string,
-  runId: string,
-  expectedRevision: number,
-): Promise<CanvasRun> {
-  return requestJson<CanvasRun>(
-    `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/retry`,
-    '按当前设置再次生成',
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ expected_revision: expectedRevision }),
-    },
-  );
-}
-
 export function cancelCanvasRun(projectId: string, runId: string): Promise<Job> {
   return requestJson<Job>(
     `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/cancel`,

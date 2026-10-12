@@ -1669,11 +1669,6 @@ class CanvasRunResponse(BaseModel):
     document: CanvasDocument
 
 
-class CanvasRunRetry(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    expected_revision: int = Field(ge=0)
-
-
 class CanvasCandidateDismiss(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_revision: int = Field(ge=0)

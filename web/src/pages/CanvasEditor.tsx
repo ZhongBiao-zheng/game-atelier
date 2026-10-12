@@ -71,7 +71,6 @@ import {
   replaceCanvasNodeMedia,
   pasteIntoCanvas,
   reproduceIntoCanvas,
-  retryCanvasRun,
   runCanvasMediaOperation,
   getCanvasMattingModel,
   downloadCanvasMattingModel,
@@ -109,7 +108,6 @@ import { CanvasLayerStackPreview } from '@/components/canvas/CanvasLayerStackPre
 import { CanvasThemeSelector } from '@/components/canvas/CanvasThemeSelector';
 import {
   CanvasGenerationMetadata,
-  canvasRetryErrorMessage,
 } from '@/components/canvas/CanvasGenerationMetadata';
 import {
   CanvasGenerationPreferencesDialog,
@@ -237,7 +235,6 @@ import {
   canvasReadingOrder,
   expandCanvasInputSource,
 } from './canvasEditorModel';
-import { restoreCanvasRetryConfiguration } from './canvasRetryMerge';
 import { resolveRecipeModel } from './studioRecipe';
 import {
   canvasNodeSaveRequest,
@@ -889,7 +886,6 @@ function CanvasEditorInner({
     remote: CanvasDocument,
     job: Job,
     dirtyAtSubmission: number,
-    submittedDocument?: CanvasDocument | null,
   ) => {
     serverRevision.current = Math.max(serverRevision.current, remote.revision);
     const context = job.canvas_run;
@@ -898,10 +894,7 @@ function CanvasEditorInner({
       setDocument(remote);
       return;
     }
-    const restoringRetry = Boolean(job.retry_of && submittedDocument);
-    const current = restoringRetry && submittedDocument
-      ? restoreCanvasRetryConfiguration(latest, remote, submittedDocument, context.result_node_id)
-      : latest;
+    const current = latest;
     const remoteNodes = new Map(remote.nodes.map(node => [node.id, node]));
     const remoteResult = remoteNodes.get(context.result_node_id);
     const hasResult = current.nodes.some(node => node.id === context.result_node_id);
@@ -909,9 +902,7 @@ function CanvasEditorInner({
     const nodes = current.nodes.map(node => {
       if (node.id !== context.result_node_id || !remoteResult) return node;
       if (node.type === 'layer_stack' && remoteResult.type === 'layer_stack') {
-        return { ...node, data: restoringRetry
-          ? { ...node.data, active_run_id: remoteResult.data.active_run_id, error: remoteResult.data.error }
-          : remoteResult.data };
+        return { ...node, data: remoteResult.data };
       }
       if (!isContentNode(node) || !isContentNode(remoteResult)) return node;
       return {
@@ -3147,46 +3138,6 @@ function CanvasEditorInner({
     projectId,
   ]);
 
-  const retryRun = useCallback(async (nodeId: string, runId: string) => {
-    if (batchBusyRef.current) { setError('批量执行期间请先等待或停止'); return; }
-    if (runSubmissionInFlight.current) {
-      setError('另一项生成正在提交，请稍后再试。');
-      return;
-    }
-    setSubmittingNodeIds(current => new Set(current).add(nodeId));
-    setError(null);
-    try {
-      if (!await persistNow()) return;
-      const submittedDocument = latestDocument.current;
-      const dirtyAtSubmission = dirtyVersion.current;
-      runSubmissionInFlight.current = true;
-      const run = await retryCanvasRun(projectId, runId, serverRevision.current);
-      if (run.job.canvas_run && isReversePromptJob(run.job)) {
-        reversePromptConfigEligibleRuns.current.add(run.job.canvas_run.run_id);
-      }
-      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission, submittedDocument);
-      applyLocalJob(run.job);
-      const resultId = run.job.canvas_run?.result_node_id;
-      if (resultId) setSelectedNodeIds(new Set([resultId]));
-    } catch (retryError) {
-      setError(canvasRetryErrorMessage(retryError));
-    } finally {
-      runSubmissionInFlight.current = false;
-      if (saveQueued.current) void flushSave().catch(() => undefined);
-      setSubmittingNodeIds(current => {
-        const next = new Set(current);
-        next.delete(nodeId);
-        return next;
-      });
-    }
-  }, [
-    applyLocalJob,
-    flushSave,
-    mergeSubmittedRunDocument,
-    persistNow,
-    projectId,
-  ]);
-
   const cancelRun = useCallback(async (runId: string) => {
     setError(null);
     try {
@@ -4518,7 +4469,6 @@ function CanvasEditorInner({
     selectCandidate,
     reportError,
     submitRun,
-    retryRun,
     cancelRun,
     dismissCandidate,
     updateNode,
@@ -4601,7 +4551,6 @@ function CanvasEditorInner({
     expandLayerStack,
     reversePrompt,
     reversePromptConfiguredNodeIds,
-    retryRun,
     renameNode,
     saveNodeToLibrary,
     shareCanvasResult,

@@ -184,7 +184,6 @@ export interface CanvasNodeContextValue {
   selectCandidate: (id: string, versionId: string) => void;
   reportError?: (message: string) => void;
   submitRun: (id: string) => Promise<void>;
-  retryRun: (id: string, runId: string) => Promise<void>;
   cancelRun: (runId: string) => Promise<void>;
   dismissCandidate: (runId: string, candidateId: string) => Promise<void>;
   updateNode: (id: string, updater: (node: CanvasNode) => CanvasNode) => void;
@@ -1956,7 +1955,6 @@ export function CanvasGenerationComposer({
     ?? EMPTY_VIDEO_FRAME_NODE_IDS;
   const nodeRunState = canvasNodeRunState(node, context.jobsByRunId, context.jobsByResultNodeId);
   const activeJob = nodeRunState.job;
-  const runId = activeJob?.canvas_run?.run_id;
   const submitting = context.submittingNodeIds.has(node.id);
   const running = nodeRunState.status === 'loading';
   const textMode = draft.mode === 'text';
@@ -2413,18 +2411,6 @@ export function CanvasGenerationComposer({
           >
             <SwapIcon swapKey={Boolean(activeJob.cancel_requested_at)}>{activeJob.cancel_requested_at ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Square aria-hidden="true" />}</SwapIcon>
             {activeJob.cancel_requested_at ? '正在停止…' : '停止'}
-          </Button>
-        )}
-        {!running && activeJob?.status === 'failed' && runId && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="shrink-0"
-            disabled={submitting}
-            onClick={() => void context.retryRun(node.id, runId)}
-          >
-            重试原任务
           </Button>
         )}
         {!running && (

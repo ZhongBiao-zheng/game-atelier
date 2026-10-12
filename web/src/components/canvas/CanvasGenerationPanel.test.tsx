@@ -62,7 +62,7 @@ const node: CanvasNode = {
   data: { draft },
 };
 
-it('submits the visible draft independently of retrying the immutable failed task', () => {
+it('submits the visible draft after a failed task without offering a separate retry', () => {
   const job = { ...batchJob(), status: 'failed' as const };
   const key = {
     alias: 'main', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
@@ -74,9 +74,7 @@ it('submits the visible draft independently of retrying the immutable failed tas
   render(<CanvasGenerationComposer node={imageResultNode} draft={currentDraft} context={context} />);
   fireEvent.click(screen.getByRole('button', { name: '开始生成' }));
   expect(context.submitRun).toHaveBeenCalledWith(imageResultNode.id);
-  expect(context.retryRun).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '重试原任务' }));
-  expect(context.retryRun).toHaveBeenCalledWith(imageResultNode.id, 'run-batch');
+  expect(screen.queryByRole('button', { name: /重试/ })).not.toBeInTheDocument();
   expect(screen.queryByText(/原任务输入|本轮冻结输入/)).not.toBeInTheDocument();
 });
 
@@ -175,7 +173,6 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     previewLayerStack: vi.fn(),
     selectCandidate: vi.fn(),
     submitRun: vi.fn(async () => undefined),
-    retryRun: vi.fn(async () => undefined),
     cancelRun: vi.fn(async () => undefined),
     dismissCandidate: vi.fn(async () => undefined),
     updateNode: vi.fn(),

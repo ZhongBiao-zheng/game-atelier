@@ -153,7 +153,6 @@ POST /api/canvas/projects/{project_id}/batch-runs/{batch_id}/start
 POST /api/canvas/projects/{project_id}/batch-runs/{batch_id}/cancel
 POST /api/canvas/projects/{project_id}/runs/{run_id}/reverse-prompt-config
 POST /api/canvas/projects/{project_id}/runs
-POST /api/canvas/projects/{project_id}/runs/{run_id}/retry
 POST /api/canvas/projects/{project_id}/runs/{run_id}/cancel
 POST /api/canvas/projects/{project_id}/runs/{run_id}/candidates/{candidate_id}/dismiss
 GET /api/projects/{project_id}/studio-archive-targets

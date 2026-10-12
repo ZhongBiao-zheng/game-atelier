@@ -1216,7 +1216,6 @@ def _commit_frozen_run(
     artifacts: list[dict[str, Any]] | None = None,
     batch_origin: CanvasBatchJobOrigin | None = None,
     job_id: str | None = None,
-    retry_of: str | None = None,
 ) -> tuple[Job, CanvasDocument]:
     timestamp = _now()
     job_id = job_id or new_job_id()
@@ -1284,7 +1283,6 @@ def _commit_frozen_run(
         canvas_run=context,
         alias=key.alias,
         provider=key.provider,
-        retry_of=retry_of,
     )
 
     nodes = [
@@ -1292,24 +1290,6 @@ def _commit_frozen_run(
         for node in current.nodes
     ]
     connections = list(current.connections)
-    if use_surface and retry_of:
-        restored_nodes = []
-        for node in nodes:
-            if node.id != result_id:
-                restored_nodes.append(node)
-                continue
-            if node.type == "layer_stack":
-                restored_data = node.data.model_copy(update={
-                    "source_version_id": inputs[0].version_id, "prompt": final_prompt,
-                    "alias": key.alias, "model": model.id, "resolution": str(job_params.size),
-                    "error": None,
-                })
-            else:
-                restored_data = node.data.model_copy(update={"generation_draft": result_draft})
-            restored_nodes.append(node.model_copy(update={"data": restored_data}))
-        nodes = restored_nodes
-        connections = [edge for edge in connections
-                       if edge.role != "input" or edge.target_node_id != result_id]
     if result_id != surface.id:
         nodes.append(_new_result_node(
             surface,
@@ -1321,7 +1301,7 @@ def _commit_frozen_run(
             result_title,
             job_params,
         ))
-    if result_id != surface.id or retry_of:
+    if result_id != surface.id:
         for item in inputs:
             if item.node_id == result_id:
                 continue  # Dedicated edits expose their fixed source through the Snapshot.
@@ -2328,122 +2308,6 @@ def _job_for_run(project_id: str, run_id: str) -> Job:
     if job is None:
         raise KeyError(run_id)
     return job
-
-
-def retry_canvas_run(
-    project_id: str,
-    run_id: str,
-    expected_revision: int,
-) -> tuple[Job, CanvasDocument]:
-    """Revalidate an immutable failed request and submit its exact inputs as a new Job."""
-    original = _job_for_run(project_id, run_id)
-    with file_lock(canvas_project_lock_path(project_id)):
-        recover_canvas_transactions_unlocked(project_id)
-        current = _read_document_unlocked(project_id)
-        if current.revision != expected_revision:
-            raise RuntimeError(f"revision_conflict:{current.revision}")
-        with job_lock(original.job_id):
-            original = read_job(original.job_id)
-        context = original.canvas_run
-        if context is None:
-            raise ValueError("Canvas Run 缺少 Snapshot")
-        if original.status in {JobStatus.PENDING, JobStatus.PENDING_CONFIRM}:
-            raise RuntimeError("run_not_terminal")
-        if original.status == JobStatus.DONE:
-            raise ValueError("成功任务请使用生成；重试只适用于失败或已停止任务")
-        # A local terminal status does not establish the provider order's terminal state.
-        # Retrying from the immutable snapshot would discard these billed task IDs.
-        if original.params.provider_task_ids:
-            raise ValueError("原任务已有厂商订单，请先核对订单结果，不能直接重试以免重复计费")
-        if (
-            original.cancel_requested_at and original.runner_started_at
-        ) or "状态未知" in (original.error or ""):
-            raise ValueError("原任务厂商状态未知，请先核对厂商结果，不能直接重试")
-        snapshot = context.snapshot
-        result = next((node for node in current.nodes if node.id == context.result_node_id), None)
-        if result is None:
-            raise RuntimeError("result_node_missing")
-        if canvas_node_has_pending_run(current, result) and (
-            getattr(result.data, "active_run_id", None) != context.run_id
-        ):
-            raise ValueError("结果节点正在生成，请等待完成后再重试")
-        frozen_params = JobParams.model_validate(snapshot.normalized_params)
-        alias = snapshot.alias or original.alias
-        if not alias:
-            raise ValueError("原任务没有记录密钥渠道，不能改用当前默认模型重试")
-        draft = CanvasGenerationDraft(
-            mode=snapshot.mode, prompt=snapshot.draft_prompt or "", input_policy="all_connected",
-            model=snapshot.model, alias=alias, params=frozen_params, updated_at=_now(),
-        )
-        key, model, kind = _resolve_key_and_model(draft)
-        if key.provider != snapshot.provider:
-            raise ValueError("原任务模型渠道已经变化，请调整配置后使用生成")
-        requested_count = len(context.candidates)
-        normalized, checked_params, effective_count = _normalized_params(
-            draft, requested_count, key, model,
-        )
-        expected = canvas_allowed_draft_params(snapshot.mode, frozen_params)
-        if normalized != expected or effective_count != requested_count:
-            raise ValueError("原任务参数已不符合当前模型要求，请调整后使用生成")
-        if kind == JobKind.IMAGE and not _supports_canvas_image_generation(key, model):
-            raise ValueError("原任务图片模型当前不可用")
-        inputs = [item.model_copy(deep=True) for item in snapshot.inputs]
-        if [item.order for item in inputs] != list(range(len(inputs))):
-            raise ValueError("原任务输入顺序无效")
-        nodes = {node.id for node in current.nodes}
-        for item in inputs:
-            version = current.content_versions.get(item.version_id)
-            if item.node_id not in nodes or version is None or version.kind != item.kind:
-                raise ValueError("原任务输入节点或精确内容版本已不存在，不能省略参考重试")
-        _validate_input_capabilities(model, kind, inputs, checked_params, key.provider)
-        paths = _retry_input_paths(project_id, current, inputs)
-        job_params = frozen_params.model_copy(update={
-            "reference_images": paths["image"] or None,
-            "reference_videos": paths["video"] or None,
-            "reference_audios": paths["audio"] or None,
-        })
-        if snapshot.mask_version_id:
-            from character_workflow.lib.callers.openai_image import supports_image_mask
-
-            mask = current.content_versions.get(snapshot.mask_version_id)
-            if not supports_image_mask(key.provider, model.id, model.protocol):
-                raise ValueError("原任务模型已不支持局部蒙版编辑")
-            if (
-                not isinstance(mask, CanvasMediaVersion) or mask.kind != "image"
-                or mask.origin.kind != "user_mask" or len(inputs) != 1
-                or mask.origin.source_version_id != inputs[0].version_id
-            ):
-                raise ValueError("原任务蒙版或源图版本已不存在")
-            mask_paths = _retry_input_paths(project_id, current, [CanvasSnapshotInput(
-                order=0, source="explicit_source", node_id=result.id,
-                version_id=mask.version_id, kind="image",
-            )])
-            job_params.mask_image = mask_paths["image"][0]
-        if frozen_params.layer_decomposition:
-            _resolve_layer_decomposition_model(key.alias, model.id)
-            if result.type != "layer_stack" or len(inputs) != 1 or inputs[0].kind != "image":
-                raise ValueError("原任务图层拆分源图或结果节点已不存在")
-        return _commit_frozen_run(
-            project_id, current, result, key, model, kind, mode=snapshot.mode,
-            final_prompt=snapshot.final_prompt, input_policy=snapshot.input_policy,
-            normalized=dict(snapshot.normalized_params), job_params=job_params, inputs=inputs,
-            requested_count=requested_count, result_title=result.title, result_draft=draft,
-            allow_surface_reuse=False, transaction_kind="submit",
-            mask_version_id=snapshot.mask_version_id, retry_of=original.job_id,
-        )
-
-
-def _retry_input_paths(
-    project_id: str, document: CanvasDocument, inputs: list[CanvasSnapshotInput],
-) -> dict[str, list[str]]:
-    paths = _input_paths(project_id, document, inputs)
-    for item in inputs:
-        version = document.content_versions[item.version_id]
-        if isinstance(version, CanvasMediaVersion):
-            path = canvas_project_dir(project_id) / version.path
-            if path.stat().st_size != version.bytes or hashlib.sha256(path.read_bytes()).hexdigest() != version.sha256:
-                raise ValueError("原任务参考文件已变化，请恢复精确版本后再重试")
-    return paths
 
 
 def request_canvas_run_cancel(project_id: str, run_id: str) -> Job:
