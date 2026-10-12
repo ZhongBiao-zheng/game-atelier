@@ -92,14 +92,13 @@ export type RoundState =
 
 /** 生成中占位框的宽高比：按目标比例（"16:9"）→ 退回尺寸（"1024x1536"）→ 退回 1:1。
  *  别再固定 aspect-square，否则出竖图/宽图时占位是方框、出图后尺寸跳变。 */
-// xl 起一条记录分两栏：结果在左，提示词 / 元数据 / 操作在右。DOM 顺序不变（头 → 结果 → 操作），
-// 位置靠栅格行列指定，窄屏仍是原来的上下堆叠。
-const ROUND_SECTION_CLASS = 'space-y-3 xl:grid xl:grid-cols-[minmax(0,1fr)_20rem] xl:grid-rows-[auto_1fr] xl:gap-x-6 xl:gap-y-3 xl:space-y-0';
-const ROUND_HEADER_CLASS = 'flex flex-col gap-3 text-sm xl:col-start-2 xl:row-start-1';
-// 提示词一行：文字占满，参考图贴右上角——有没有参考图，下面各行的左缘都不变。
+// 一条记录上下三段：信息（提示词 + 参数标签）→ 结果 → 操作。
+const ROUND_SECTION_CLASS = 'space-y-3';
+const ROUND_HEADER_CLASS = 'flex flex-col gap-3 text-sm';
+// 参考图只占提示词这一行的左侧——标签行与操作行始终从最左缘开始，有没有参考图都一样。
 const ROUND_PROMPT_ROW_CLASS = 'flex items-start gap-3';
-const ROUND_MEDIA_CLASS = 'flex flex-wrap gap-1 xl:col-start-1 xl:row-span-2 xl:row-start-1 xl:content-start';
-const ROUND_ACTIONS_CLASS = '-ml-2 flex flex-wrap items-center gap-0.5 border-t border-border pt-2 xl:col-start-2 xl:row-start-2 xl:self-start';
+const ROUND_MEDIA_CLASS = 'flex flex-wrap gap-1';
+const ROUND_ACTIONS_CLASS = '-ml-2 flex flex-wrap items-center gap-0.5';
 const ROUND_RUN_META_CLASS = 'ml-auto flex items-center gap-1.5 pl-2 font-mono text-xs tabular-nums text-muted-foreground';
 
 function aspectStyle(config: RoundConfig): { aspectRatio: string } {
@@ -304,7 +303,7 @@ export function RoundList({
     <>
       <div
         data-testid="studio-round-list"
-        className="mx-auto mt-8 w-full min-w-[800px] max-w-[1024px] space-y-8 text-left xl:max-w-[1368px]"
+        className="mx-auto mt-8 w-full min-w-[800px] max-w-[1024px] space-y-8 text-left"
       >
         {hasEarlierHistory && (
           <div
@@ -421,6 +420,12 @@ function PendingBatch({
       <section className={ROUND_SECTION_CLASS}>
         <div className={ROUND_HEADER_CLASS}>
           <div className={ROUND_PROMPT_ROW_CLASS}>
+            <ReferenceStack
+              config={round.config}
+              jobId={round.jobId}
+              onReuse={onReuseReferences}
+              mediaActive={mediaActive}
+            />
             <div className="min-w-0 flex-1">
               <MentionPrompt
                 prompt={round.config.prompt}
@@ -429,12 +434,6 @@ function PendingBatch({
                 mediaActive={mediaActive}
               />
             </div>
-            <ReferenceStack
-              config={round.config}
-              jobId={round.jobId}
-              onReuse={onReuseReferences}
-              mediaActive={mediaActive}
-            />
           </div>
           <SpecChips testId="pending-spec-meta" values={specMeta}>
             {round.config.sourceAssetTitle && <SourceChip title={round.config.sourceAssetTitle} />}
@@ -963,6 +962,12 @@ function DoneBatch({
     <section className={ROUND_SECTION_CLASS}>
       <div className={ROUND_HEADER_CLASS}>
         <div className={ROUND_PROMPT_ROW_CLASS}>
+          <ReferenceStack
+            config={round.config}
+            jobId={round.jobId}
+            onReuse={onReuseReferences}
+            mediaActive={mediaActive}
+          />
           <div className="min-w-0 flex-1">
             <MentionPrompt
               prompt={round.config.prompt}
@@ -971,12 +976,6 @@ function DoneBatch({
               mediaActive={mediaActive}
             />
           </div>
-          <ReferenceStack
-            config={round.config}
-            jobId={round.jobId}
-            onReuse={onReuseReferences}
-            mediaActive={mediaActive}
-          />
         </div>
         <div>
           <SpecChips testId="round-spec-meta" values={specMeta}>
@@ -1168,7 +1167,7 @@ function DoneBatch({
           <ActionButton compact aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
           {menuOpen && (
             // 两栏下操作在右栏贴近视口右缘，向右弹会被裁掉，xl 起改为向下、右对齐
-            <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 w-[195px] rounded-xl border border-border bg-glass p-1 backdrop-blur-glass xl:left-auto xl:right-0 xl:top-full xl:ml-0 xl:mt-2">
+            <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 w-[195px] rounded-xl border border-border bg-glass p-1 backdrop-blur-glass">
               {onSavePromptAsset && (
                 <button
                   type="button"
@@ -1253,6 +1252,12 @@ function FailedCard({
       {config && (
         <div className={ROUND_HEADER_CLASS}>
           <div className={ROUND_PROMPT_ROW_CLASS}>
+            <ReferenceStack
+              config={config}
+              jobId={round.jobId}
+              onReuse={onReuseReferences}
+              mediaActive={mediaActive}
+            />
             <div className="min-w-0 flex-1">
               <MentionPrompt
                 prompt={config.prompt}
@@ -1261,19 +1266,13 @@ function FailedCard({
                 mediaActive={mediaActive}
               />
             </div>
-            <ReferenceStack
-              config={config}
-              jobId={round.jobId}
-              onReuse={onReuseReferences}
-              mediaActive={mediaActive}
-            />
           </div>
           {meta.length > 0 && <SpecChips values={meta} />}
         </div>
       )}
       <div
         data-testid={round.canceled ? 'studio-canceled-note' : undefined}
-        className={`flex items-start gap-2 rounded-lg border px-4 py-3 text-sm xl:col-start-1 xl:row-span-2 xl:row-start-1 xl:self-start ${round.canceled ? 'border-border bg-card/40' : 'border-destructive/30 bg-destructive/5'}`}
+        className={`flex items-start gap-2 rounded-lg border px-4 py-3 text-sm ${round.canceled ? 'border-border bg-card/40' : 'border-destructive/30 bg-destructive/5'}`}
       >
         {round.canceled
           ? <Square className="mt-1 size-3 shrink-0 fill-current text-muted-foreground" aria-hidden />

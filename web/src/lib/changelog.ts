@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.85.9',
+    date: '2026-10-12',
+    headline: '创作台记录回到上下排列',
+    changes: [
+      { kind: 'fix', text: '生成记录恢复上下排列：提示词和参数在上，结果图在中间，操作在下。参考图回到提示词左侧，多张时有整行宽度可以展开。' },
+      { kind: 'fix', text: '去掉操作按钮上方的横线。' },
+    ],
+  },
+  {
     version: '5.85.8',
     date: '2026-10-12',
     headline: '创作台记录信息重新排版',
