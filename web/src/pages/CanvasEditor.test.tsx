@@ -1759,7 +1759,9 @@ it('offers a way in on an empty canvas and a settings entry the immersive chrome
 
   await screen.findByLabelText('画布编辑器 列车短片');
   expect(screen.getByText('画布还是空的')).toBeTruthy();
-  expect(screen.getByRole('link', { name: '设置' }).getAttribute('href')).toBe('/settings');
+  fireEvent.keyDown(screen.getByRole('button', { name: '画布菜单' }), { key: 'Enter' });
+  expect((await screen.findByRole('menuitem', { name: '设置' })).getAttribute('href')).toBe('/settings');
+  fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
 
   fireEvent.click(screen.getByRole('button', { name: '文本节点' }));
   expect(screen.queryByText('画布还是空的')).toBeNull();

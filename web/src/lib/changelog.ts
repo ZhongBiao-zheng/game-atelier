@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.88.0',
+    date: '2026-10-13',
+    headline: '画布四角的按钮重新分组',
+    changes: [
+      { kind: 'feat', text: '左下只留「资产」；小地图、缩放、适应全部节点都在右下。缩放滑杆换成百分比，点它可以选「适应全部」或「100%」。' },
+      { kind: 'feat', text: '项目名旁边多了「⋯」菜单：重命名、生成偏好、快捷键、设置、主题和画布背景都在这里。' },
+      { kind: 'feat', text: '有节点在生成时，右上角显示「生成中」和数量，点一下画面移到这些节点。' },
+    ],
+  },
+  {
     version: '5.87.1',
     date: '2026-10-13',
     headline: '首页展示开关改成「展示画布出图」',
