@@ -121,10 +121,10 @@ def test_versioned_assets_are_backed_up_and_migrated_once(isolated_data_root):
         "nodes": [{
             "id": "node-config",
             "title": "生成节点",
-            "type": "config",
+            "type": "image",
             "position": {"x": 0, "y": 0},
             "data": {
-                "draft": {
+                "generation_draft": {
                     "mode": "image",
                     "prompt": "旧提示词正文",
                     "model": "gpt-image-2",
@@ -188,7 +188,7 @@ def test_versioned_assets_are_backed_up_and_migrated_once(isolated_data_root):
         "kind": "creation_asset_snapshot",
         "title": "旧提示词",
     }
-    migrated_params = migrated_canvas["nodes"][0]["data"]["draft"]["params"]
+    migrated_params = migrated_canvas["nodes"][0]["data"]["generation_draft"]["params"]
     assert migrated_params["creation_asset_source_title"] == "旧提示词"
     assert "creation_prompt_asset_id" not in migrated_params
     assert migrate_creation_assets_to_single_content() is None

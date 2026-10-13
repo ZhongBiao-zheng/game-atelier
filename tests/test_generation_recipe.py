@@ -127,9 +127,9 @@ def canvas_run_with_inputs(ref_a: bytes, ref_b: bytes, *outputs: bytes):
                  "active_run_id": None},
     }
     config = {
-        "id": "config", "title": "生成", "type": "config", "position": {"x": 0, "y": 0},
+        "id": "config", "title": "生成", "type": "image", "position": {"x": 0, "y": 0},
         "z_index": 0,
-        "data": {"draft": {
+        "data": {"generation_draft": {
             "mode": "image", "prompt": "一只纸雕狐狸", "input_policy": "all_connected",
             "model": "gpt-image-1", "alias": "openai",
             "params": {"ratio": "1:1", "quality": "high", "creation_asset_source_title": "旧"},
@@ -157,9 +157,9 @@ def canvas_run_with_inputs(ref_a: bytes, ref_b: bytes, *outputs: bytes):
 
 def _video_config(prompt: str, params: dict) -> dict:
     return {
-        "id": "config", "title": "生成", "type": "config", "position": {"x": 0, "y": 0},
+        "id": "config", "title": "生成", "type": "video", "position": {"x": 0, "y": 0},
         "z_index": 0,
-        "data": {"draft": {
+        "data": {"generation_draft": {
             "mode": "video", "prompt": prompt, "input_policy": "all_connected",
             "model": VIDEO_MODEL, "alias": "openai", "params": params, "updated_at": NOW,
         }},
@@ -418,7 +418,7 @@ def test_recipe_from_canvas_mixed_image_video_strips_numbering_prefix(isolated_d
     ]
     # 编号前缀只有一处来源：_render_final_prompt 按同样的输入重渲染，开头正是这段前缀。
     config = next(node for node in document.nodes if node.id == "config")
-    rendered = canvas_runs._render_final_prompt(document, config.data.draft, snapshot.inputs)
+    rendered = canvas_runs._render_final_prompt(document, config.data.generation_draft, snapshot.inputs)
     assert rendered == snapshot.final_prompt and rendered.startswith(prefix)
 
 

@@ -49,8 +49,6 @@ from character_workflow.lib.schemas import (
     CanvasActor,
     CanvasBatchJobOrigin,
     CanvasContentVersion,
-    CanvasConfigNode,
-    CanvasConfigNodeData,
     CanvasDocument,
     CanvasGenerationDraft,
     CanvasGenerationSnapshot,
@@ -664,8 +662,6 @@ def _resolve_key_and_model(
 
 
 def _draft_for_node(node: CanvasNode) -> CanvasGenerationDraft | None:
-    if node.type == "config":
-        return node.data.draft
     if node.type in {"text", "image", "video", "audio"}:
         return node.data.generation_draft
     return None
@@ -728,7 +724,9 @@ def canvas_input_sources(
                     draft.mode, {"text", "image", "video", "audio"})
                 for member_id in source.data.member_node_ids:
                     member = nodes_by_id.get(member_id)
-                    if member is not None and member.type in accepted:
+                    # 目标节点自己也在这个组里时，不把自己当参考。
+                    if (member is not None and member.id != surface.id
+                            and member.type in accepted):
                         roles.setdefault(member_id, "group_member")
                 continue
             # 同一个节点既直连又在组里时按直连算：直连是画师一笔一笔连的，截断时优先保留。
@@ -1377,11 +1375,6 @@ def prepare_canvas_generation(
     draft = _draft_for_node(surface)
     if draft is None:
         raise ValueError("当前节点没有可提交的生成设置")
-    if surface.type == "config" and draft.mode == "text":
-        raise CanvasRunCommandError(
-            "canvas_text_config_removed",
-            "文本生成已合并到文本节点，请使用文本节点。",
-        )
     key, model, kind = _resolve_key_and_model(draft)
     normalized, job_params, effective_count = _normalized_params(draft, requested_count, key, model)
     inputs = _resolve_inputs(document, surface, draft, version_bindings)
@@ -2202,7 +2195,7 @@ def _is_reverse_prompt_snapshot(snapshot: CanvasGenerationSnapshot) -> bool:
 
 
 def _reverse_prompt_config_ids(result_node_id: str) -> tuple[str, str]:
-    return f"config-reverse-{result_node_id}", f"connection-reverse-{result_node_id}"
+    return f"image-reverse-{result_node_id}", f"connection-reverse-{result_node_id}"
 
 
 def create_reverse_prompt_config(
@@ -2251,7 +2244,7 @@ def create_reverse_prompt_config(
             ),
             None,
         )
-        if existing_config is not None and not isinstance(existing_config, CanvasConfigNode):
+        if existing_config is not None and not isinstance(existing_config, CanvasImageNode):
             raise CanvasRunCommandError(
                 "canvas_reverse_prompt_config_conflict",
                 "画布中已有同标识但类型不兼容的节点，无法恢复图片配置。",
@@ -2266,13 +2259,13 @@ def create_reverse_prompt_config(
         if existing_config is None:
             key, model, params = _resolve_default_image_model()
             width = result.size.width if result.size is not None else 320
-            nodes.append(CanvasConfigNode(
+            nodes.append(CanvasImageNode(
                 id=config_id,
-                type="config",
-                title="图片生成配置",
+                type="image",
+                title="图片生成",
                 position=result.position.model_copy(update={"x": result.position.x + width + 120}),
                 z_index=result.z_index,
-                data=CanvasConfigNodeData(draft=CanvasGenerationDraft(
+                data=CanvasMediaNodeData(generation_draft=CanvasGenerationDraft(
                     mode="image",
                     prompt=f"@[node:{result.id}]",
                     input_policy="all_connected",

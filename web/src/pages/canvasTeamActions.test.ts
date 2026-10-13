@@ -144,8 +144,8 @@ describe('placeCanvasNodeGroupWithoutOverlap', () => {
   const group: CanvasNode[] = [
     { ...imageNode, id: 'ref-1', position: { x: 40, y: 40 }, data: { ...imageNode.data, current_version_id: 'v-1' } },
     { ...imageNode, id: 'ref-2', position: { x: 40, y: 40 + 320 * 16 / 9 + 48 }, data: { ...imageNode.data, current_version_id: 'v-2' } },
-    { id: 'config', title: '图片生成', type: 'config', position: { x: 40 + 320 + 96, y: 40 }, z_index: 0,
-      data: { draft: { mode: 'image', prompt: '', input_policy: 'all_connected', model: '', params: {}, updated_at: '' } } },
+    { id: 'config', title: '图片生成', type: 'image', position: { x: 40 + 320 + 96, y: 40 }, z_index: 0,
+      data: { current_version_id: null, active_run_id: null, display: { fit: 'contain', free_resize: false }, generation_draft: { mode: 'image', prompt: '', input_policy: 'all_connected', model: '', params: {}, updated_at: '' } } },
   ];
   const offsets = (nodes: CanvasNode[]) => nodes.map(node => ({
     x: node.position.x - nodes[0].position.x,

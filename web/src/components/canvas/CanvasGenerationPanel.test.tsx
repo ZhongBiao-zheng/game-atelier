@@ -56,10 +56,10 @@ const draft = {
 const node: CanvasNode = {
   id: 'config-one',
   title: '分镜出图',
-  type: 'config',
+  type: 'image',
   position: { x: 0, y: 0 },
   z_index: 0,
-  data: { draft },
+  data: { current_version_id: null, active_run_id: null, display: { fit: 'contain', free_resize: false }, generation_draft: draft },
 };
 
 it('submits the visible draft after a failed task without offering a separate retry', () => {
@@ -327,7 +327,7 @@ it('defaults a blank image config to AUTO on first model selection without a dow
     capabilities: [], notes: '', created_at: '2026-08-25T00:00:00Z',
     models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image' as const, protocol: 'openai' }],
   };
-  const blank = { ...node, data: { draft: { ...draft, params: {} } } } as CanvasNode;
+  const blank = { ...node, data: { ...node.data, generation_draft: { ...draft, params: {} } } } as CanvasNode;
   render(
     <CanvasNodeContext.Provider value={nodeContext({ keys: [imageKey], updateNode, reportError })}>
       <NodeCard data={{ domain: blank }} selected />
@@ -337,57 +337,7 @@ it('defaults a blank image config to AUTO on first model selection without a dow
   fireEvent.click(screen.getByRole('option', { name: 'GPT Image 2' }));
   expect(reportError).not.toHaveBeenCalled();
   expect(updateNode.mock.calls[0]?.[1](blank)).toMatchObject({
-    data: { draft: { params: { size_mode: 'auto', size: 'auto' } } },
-  });
-});
-
-it('switches a config node between generation modes and summarizes connected inputs', () => {
-  const recordHistory = vi.fn();
-  const updateNode = vi.fn();
-  const imageKey = {
-    alias: 'image-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
-    capabilities: [], notes: '', created_at: '2026-08-25T00:00:00Z',
-    models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image' as const, protocol: 'openai' }],
-  };
-  const videoKey = {
-    alias: 'video-key', provider: 'seedance', base_url: null, access_key: '***', secret_key: null,
-    capabilities: [], notes: '', created_at: '2026-08-25T00:00:00Z',
-    models: [{ id: 'seedance-2.0', name: 'Seedance 2.0', modality: 'video' as const, protocol: 'seedance' }],
-  };
-  const context = nodeContext({
-    keys: [imageKey, videoKey],
-    recordHistory,
-    updateNode,
-    mentionReferencesByNodeId: new Map([[node.id, [
-      { nodeId: 'text-one', versionId: 'text-v1', kind: 'text', label: '文本1', title: '脚本' },
-      { nodeId: 'image-one', versionId: 'image-v1', kind: 'image', label: '图片1', title: '构图', previewUrl: '/image' },
-    ]]]),
-  });
-  const configured = {
-    ...node,
-    data: { draft: { ...draft, alias: imageKey.alias, model: imageKey.models[0].id } },
-  } as CanvasNode;
-  render(
-    <CanvasNodeContext.Provider value={context}>
-      <NodeCard data={{ domain: configured }} selected />
-    </CanvasNodeContext.Provider>,
-  );
-
-  const modes = screen.getByRole('radiogroup', { name: '生成类型' });
-  expect(within(modes).getByRole('radio', { name: '图片' })).toHaveAttribute('aria-checked', 'true');
-  expect(screen.getByLabelText('当前模型')).toHaveTextContent('GPT Image 2');
-  expect(screen.getByText('文本 1')).toBeInTheDocument();
-  expect(screen.getByText('图片 1')).toBeInTheDocument();
-
-  const imageMode = within(modes).getByRole('radio', { name: '图片' });
-  const videoMode = within(modes).getByRole('radio', { name: '视频' });
-  act(() => imageMode.focus());
-  fireEvent.keyDown(imageMode, { key: 'ArrowRight' });
-  expect(videoMode).toHaveFocus();
-  expect(recordHistory).toHaveBeenCalledOnce();
-  const updater = updateNode.mock.calls[0]?.[1];
-  expect(updater?.(configured)).toMatchObject({
-    data: { draft: { mode: 'video', alias: 'video-key', model: 'seedance-2.0' } },
+    data: { generation_draft: { params: { size_mode: 'auto', size: 'auto' } } },
   });
 });
 
@@ -742,17 +692,13 @@ it('renders connected references as chips and reports a disconnected reference o
       display: { fit: 'contain', free_resize: false },
     },
   };
-  const configuredNode: CanvasNode = {
-    ...node,
-    data: {
-      draft: {
+  const configuredDraft = {
         ...draft,
         prompt: '沿用 @[node:image-source] 的构图',
         alias: imageKey.alias,
         model: imageKey.models[0].id,
-      },
-    },
   };
+  const configuredNode = { ...node, data: { ...node.data, generation_draft: configuredDraft } } as CanvasNode;
   const version = {
     version_id: 'version-source', kind: 'image' as const, path: 'uploads/source.png',
     mime_type: 'image/png', bytes: 12, created_at: '2026-08-25T00:00:00Z',
@@ -772,7 +718,7 @@ it('renders connected references as chips and reports a disconnected reference o
   });
   const { rerender } = render(
     <CanvasNodeContext.Provider value={connected}>
-      <CanvasMobileGenerationPanel node={configuredNode} draft={configuredNode.data.draft} context={connected} />
+      <CanvasMobileGenerationPanel node={configuredNode} draft={configuredDraft} context={connected} />
     </CanvasNodeContext.Provider>,
   );
 
@@ -787,7 +733,7 @@ it('renders connected references as chips and reports a disconnected reference o
   });
   rerender(
     <CanvasNodeContext.Provider value={disconnected}>
-      <CanvasMobileGenerationPanel node={configuredNode} draft={configuredNode.data.draft} context={disconnected} />
+      <CanvasMobileGenerationPanel node={configuredNode} draft={configuredDraft} context={disconnected} />
     </CanvasNodeContext.Provider>,
   );
   // 断连后引用 chip 不再渲染；按钮仍可点击，原因由画布顶部统一反馈。

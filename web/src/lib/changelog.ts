@@ -33,6 +33,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.86.0',
+    date: '2026-10-13',
+    headline: '去掉「生成配置」节点',
+    changes: [
+      { kind: 'fix', text: '画布不再有「生成配置」节点：生成设置直接填在文本、图片、视频、音频节点上。已有画布里的生成配置节点会自动变成对应类型的空节点，连线保留。' },
+      { kind: 'fix', text: '复刻生成记录、用反推文本出图，现在直接得到一个带好设置的图片或视频节点。' },
+      { kind: 'fix', text: '拖线松手后的创建列表跟着画布走：平移或缩放画布时不再钉在屏幕上。' },
+      { kind: 'fix', text: '节点自己在某个分组里、又把这个分组连给自己时，不再把自己当参考。' },
+    ],
+  },
+  {
     version: '5.85.11',
     date: '2026-10-13',
     headline: '拖线创建节点时，用不了的类型置灰',

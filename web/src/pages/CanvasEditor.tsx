@@ -220,7 +220,7 @@ import {
   canvasNodeHasHideableContent,
   createCanvasGenerationDraft,
   resolveCanvasGenerationDraft,
-  createConnectedCanvasConfig,
+  createConnectedCanvasSurface,
   reorderCanvasInputConnections,
   layerStackSizeForCanvasVersion,
   normalizeCanvasVideoParams,
@@ -355,9 +355,7 @@ function mentionNodeFragment(node: CanvasNode): string {
   const cached = mentionNodeFragments.get(node);
   if (cached !== undefined) return cached;
   const fragment = JSON.stringify(
-    node.type === 'config'
-      ? [node.id, node.title, node.type, null, node.data.draft.mode]
-      : node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio'
+    node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio'
         ? [
           node.id,
           node.title,
@@ -1766,6 +1764,27 @@ function CanvasEditorInner({
     });
   }, [createMenu]);
 
+  // 创建列表是屏幕上的浮层，但它属于画布上的一个位置：平移 / 缩放画布时跟着那个位置走，
+  // 否则列表钉在屏幕上、连线却跟着画布跑。直接改 style，不走 React（平移每帧都会触发）。
+  useEffect(() => {
+    const menu = createMenuRef.current;
+    if (!menu || !createMenu) return;
+    const [originX, originY, originZoom] = flowStore.getState().transform ?? [0, 0, 1];
+    const docked = Boolean(createMenu.pointer);
+    const attachX = docked && createMenu.sourceHandle === 'target' ? menu.offsetWidth : 0;
+    const attachY = docked ? menu.offsetHeight / 2 : 0;
+    const startX = Number.parseFloat(menu.style.left) + attachX;
+    const startY = Number.parseFloat(menu.style.top) + attachY;
+    return flowStore.subscribe((state, previous) => {
+      if (!state.transform || state.transform === previous.transform) return;
+      const frame = state.domNode?.getBoundingClientRect();
+      const [x, y, zoom] = state.transform;
+      const scale = zoom / originZoom;
+      menu.style.left = `${(startX - (frame?.left ?? 0) - originX) * scale + x + (frame?.left ?? 0) - attachX}px`;
+      menu.style.top = `${(startY - (frame?.top ?? 0) - originY) * scale + y + (frame?.top ?? 0) - attachY}px`;
+    });
+  }, [createMenu, createMenuDock, flowStore]);
+
   const sweepHits = useRef<ReadonlySet<string>>(new Set());
 
   const onSelectionStart = useCallback(() => {
@@ -1916,7 +1935,6 @@ function CanvasEditorInner({
     ),
   );
   const selectedDraft = useMemo(() => selectedNode && !selectedIsUploadedImageMaterial
-    && !(selectedNode.type === 'config' && selectedNode.data.draft.mode === 'text')
     ? resolveCanvasGenerationDraft(selectedNode, keys, canvasUiPreferences.generation_defaults.text)
     : null, [selectedNode, selectedIsUploadedImageMaterial, keys, canvasUiPreferences.generation_defaults.text]);
   const generationPanelOpen = Boolean(
@@ -2463,25 +2481,6 @@ function CanvasEditorInner({
       ...base,
       type: 'video',
       data: { ...data, display: { fit: 'contain', free_resize: false } },
-    }, menu);
-  }
-
-  function addConfigNode(menu: CreateMenuState | null = createMenu) {
-    const draft = createCanvasGenerationDraft(keys, 'image', {
-      preference: canvasUiPreferences.generation_defaults.image,
-      prompt: menu?.sourceId && menu.sourceHandle !== 'target'
-        ? (menu.sourceIds ?? [menu.sourceId]).map(id => `@[node:${id}]`).join(' ')
-        : '',
-    });
-    appendNode({
-      id: makeId('config'),
-      title: '生成配置',
-      type: 'config',
-      position: menu?.flow
-        ? placeNewNode(menu.flow, CANVAS_DEFAULT_NODE_SIZE)
-        : defaultPosition(CANVAS_DEFAULT_NODE_SIZE),
-      z_index: 0,
-      data: { draft },
     }, menu);
   }
 
@@ -3487,7 +3486,7 @@ function CanvasEditorInner({
     const document = mentionDocumentRef.current;
     if (!document) return configured;
     const configIds = new Set(
-      document.nodes.filter(node => node.type === 'config').map(node => node.id),
+      document.nodes.filter(node => node.type === 'image').map(node => node.id),
     );
     for (const connection of document.connections) {
       if (
@@ -3555,8 +3554,8 @@ function CanvasEditorInner({
       const concurrent = latestDocument.current ?? remote;
       const configId = reversePromptConfigNodeId(context.result_node_id);
       const remoteConfig = remote.nodes.find(node => node.id === configId);
-      if (!remoteConfig || remoteConfig.type !== 'config') {
-        throw new Error('服务端没有返回反推图片配置节点。');
+      if (!remoteConfig || remoteConfig.type !== 'image') {
+        throw new Error('服务端没有返回反推后的图片节点。');
       }
       const hadConfig = concurrent.nodes.some(node => node.id === configId);
       const connectionIds = new Set(concurrent.connections.map(connection => connection.id));
@@ -3595,13 +3594,13 @@ function CanvasEditorInner({
       flowNodeCache.current.clear();
       setDocument(merged);
       // 这是后台自动动作，不是用户点出来的：只有当选择还停在反推结果节点上（提交时留下的那个
-      // 选中态）才把焦点挪到新配置节点。用户已经去点别的东西了就别抢。
+      // 选中态）才把焦点挪到新图片节点。用户已经去点别的东西了就别抢。
       const selection = latestSelectedNodeIds.current;
       if (selection.size === 1 && selection.has(context.result_node_id)) {
         setSelectedConnectionIds(new Set());
         setSelectedNodeIds(new Set([configId]));
       }
-      announceToolNotice('已从反推文本创建图片生成配置');
+      announceToolNotice('已用反推文本创建图片节点');
     } catch (configError) {
       setError((configError as Error).message);
     } finally {
@@ -4002,7 +4001,7 @@ function CanvasEditorInner({
     setError(null);
     const newNodeId = makeId('video');
     const current = latestDocument.current;
-    const next = current && createConnectedCanvasConfig(current, node.id, draft,
+    const next = current && createConnectedCanvasSurface(current, node.id, draft,
       { nodeId: newNodeId, connectionId: makeId('connection') }, 'video');
     if (!next) { setError('无法创建视频编辑节点。'); return; }
     commit(() => next, true);
@@ -4016,7 +4015,7 @@ function CanvasEditorInner({
     const current = latestDocument.current;
     if (!current) return;
     const newNodeId = makeId('image');
-    const next = createConnectedCanvasConfig(current, nodeId,
+    const next = createConnectedCanvasSurface(current, nodeId,
       createCanvasGenerationDraft(keys, 'image', {
         preference: canvasUiPreferences.generation_defaults.image,
       }), { nodeId: newNodeId, connectionId: makeId('connection') }, 'image');
@@ -5129,7 +5128,7 @@ function CanvasEditorInner({
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs text-muted-foreground">添加节点</p>
-              <CanvasCreateMenuItems allowEmptyNodes allowUpload allowConfig={false} onAddBatch={() => addBatchMaterialNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onAddConfig={() => addConfigNode(null)} onUpload={() => uploadRef.current?.click()} />
+              <CanvasCreateMenuItems allowEmptyNodes allowUpload onAddBatch={() => addBatchMaterialNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onUpload={() => uploadRef.current?.click()} />
             </div>
           )}
           </div>
@@ -5161,7 +5160,7 @@ function CanvasEditorInner({
         {createMenu && (
           <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenuDock?.left ?? createMenu.screen.x, top: createMenuDock?.top ?? createMenu.screen.y }}>
             <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs text-muted-foreground">创建并连接</p><button type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><X className="size-4" /></button></div>
-            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} rejectedModes={createMenu.sourceHandle === 'target' || !createMenu.sourceId ? undefined : canvasModesRejectingSources(document, createMenu.sourceIds ?? [createMenu.sourceId])} onAddBatch={createMenu.sourceId ? undefined : () => addBatchMaterialNode(createMenu)} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onAddConfig={() => addConfigNode(createMenu)} onUpload={() => uploadRef.current?.click()} />
+            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} rejectedModes={createMenu.sourceHandle === 'target' || !createMenu.sourceId ? undefined : canvasModesRejectingSources(document, createMenu.sourceIds ?? [createMenu.sourceId])} onAddBatch={createMenu.sourceId ? undefined : () => addBatchMaterialNode(createMenu)} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onUpload={() => uploadRef.current?.click()} />
           </div>
         )}
 
@@ -5401,18 +5400,16 @@ function CanvasEditorInner({
   );
 }
 
-function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, allowConfig, rejectedModes, onAddText, onAddImage, onAddVideo, onAddAudio, onAddConfig, onUpload, onAddBatch }: {
+function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, onAddText, onAddImage, onAddVideo, onAddAudio, onUpload, onAddBatch }: {
   onAddBatch?: () => void;
   /** 连出来的素材里有这些模式收不下的类型：对应选项置灰。 */
   rejectedModes?: ReadonlySet<string>;
   allowEmptyNodes: boolean;
   allowUpload: boolean;
-  allowConfig: boolean;
   onAddText: () => void;
   onAddImage: () => void;
   onAddVideo: () => void;
   onAddAudio: () => void;
-  onAddConfig: () => void;
   onUpload: () => void;
 }) {
   return <>
@@ -5421,7 +5418,6 @@ function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, allowConfig, reje
     {allowEmptyNodes && <AddMenuButton icon={<FileImage />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} disabledReason={rejectedModes?.has('image') ? '图片生成只能参考文本和图片' : undefined} />}
     {allowEmptyNodes && <AddMenuButton icon={<FileVideo />} title="视频" description="空节点可填写生成设置" onClick={onAddVideo} />}
     {allowEmptyNodes && <AddMenuButton icon={<FileAudio />} title="音频" description="旁白、对白与语音" onClick={onAddAudio} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
-    {allowConfig && <AddMenuButton icon={<WandSparkles />} title="生成配置" description="连接内容并选择生成类型" onClick={onAddConfig} />}
     {allowUpload && <AddMenuButton icon={<Upload />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
   </>;
 }
@@ -5656,7 +5652,6 @@ function isContentNode(node: CanvasNode): node is CanvasContentNode {
 }
 
 function generationDraftForNode(node: CanvasNode) {
-  if (node.type === 'config') return node.data.draft;
   if ('generation_draft' in node.data) return node.data.generation_draft;
   return null;
 }
@@ -5665,7 +5660,6 @@ function withGenerationDraftForNode(
   node: CanvasNode,
   draft: CanvasGenerationDraft,
 ): CanvasNode {
-  if (node.type === 'config') return { ...node, data: { draft } };
   if ('generation_draft' in node.data) {
     return { ...node, data: { ...node.data, generation_draft: draft } } as CanvasNode;
   }
@@ -5808,7 +5802,7 @@ function replacementAccept(kind: MediaReplaceTarget['kind']) {
 }
 
 function reversePromptConfigNodeId(resultNodeId: string) {
-  return `config-reverse-${resultNodeId}`;
+  return `image-reverse-${resultNodeId}`;
 }
 
 function cloneCanvasNode(
@@ -5838,15 +5832,6 @@ function cloneCanvasNode(
         } : null,
       },
     } as CanvasNode;
-  }
-  if (clone.type === 'config') {
-    return {
-      ...clone,
-      id: idMap.get(source.id)!,
-      position,
-      z_index: zIndex,
-      data: { draft: cloneCanvasDraft(clone.data.draft, idMap)! },
-    };
   }
   if (clone.type === 'group') {
     return {

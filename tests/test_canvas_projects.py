@@ -130,10 +130,10 @@ def test_canvas_document_roundtrip_and_rejects_dangling_connection(client):
             {
                 "id": "config-1",
                 "title": "图片生成",
-                "type": "config",
+                "type": "image",
                 "position": {"x": 420, "y": 30},
                 "z_index": 0,
-                "data": {"draft": _image_draft()},
+                "data": {"generation_draft": _image_draft()},
             },
         ],
         "connections": [{
@@ -354,10 +354,10 @@ def _project_with_config_node(client: TestClient) -> tuple[str, int]:
         "nodes": [{
             "id": "config-1",
             "title": "图片生成",
-            "type": "config",
+            "type": "image",
             "position": {"x": 0, "y": 0},
             "z_index": 0,
-            "data": {"draft": _image_draft()},
+            "data": {"generation_draft": _image_draft()},
         }],
     })
     assert saved.status_code == 200, saved.json()
@@ -377,7 +377,7 @@ def test_canvas_job_has_independent_namespace_and_output_dir(client, isolated_da
     assert payload["namespace"] == "canvas"
     assert payload["canvas_project_id"] == project_id
     assert payload["status"] == "pending"
-    assert payload["canvas_run"]["result_node_id"] != "config-1"
+    assert payload["canvas_run"]["result_node_id"] == "config-1"
     assert len(payload["canvas_run"]["candidates"]) == 2
 
     listed = client.get(f"/api/canvas/projects/{project_id}/jobs")
@@ -427,10 +427,10 @@ def test_document_save_drops_draft_params_a_browser_may_not_submit(client, isola
         "nodes": [{
             "id": "config-1",
             "title": "图片生成",
-            "type": "config",
+            "type": "image",
             "position": {"x": 0, "y": 0},
             "z_index": 0,
-            "data": {"draft": {
+            "data": {"generation_draft": {
                 **_image_draft(),
                 "params": {
                     "n": 1,
@@ -444,7 +444,7 @@ def test_document_save_drops_draft_params_a_browser_may_not_submit(client, isola
     })
 
     assert saved.status_code == 200, saved.json()
-    params = saved.json()["nodes"][0]["data"]["draft"]["params"]
+    params = saved.json()["nodes"][0]["data"]["generation_draft"]["params"]
     assert params["n"] == 1 and params["ratio"] == "1:1"
     for field in ("mask_image", "mj_sref", "reference_images"):
         assert params.get(field) is None, field
@@ -458,7 +458,7 @@ def test_frozen_run_never_reads_a_draft_supplied_path(client, isolated_data_root
     # 绕过写入侧闸门，模拟历史残留 / 直接改盘。
     truth = isolated_data_root / "canvases" / project_id / "canvas.json"
     document = json.loads(truth.read_text(encoding="utf-8"))
-    document["nodes"][0]["data"]["draft"]["params"].update({
+    document["nodes"][0]["data"]["generation_draft"]["params"].update({
         "mask_image": str(secret),
         "mj_sref": [str(secret)],
     })

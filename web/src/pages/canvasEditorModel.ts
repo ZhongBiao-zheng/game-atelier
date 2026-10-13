@@ -768,8 +768,8 @@ export function canvasModesRejectingSources(
 
 export function canvasConnectionCreationCapabilities(sourceHandle: 'source' | 'target') {
   return sourceHandle === 'target'
-    ? { allowEmptyNodes: false, allowUpload: true, allowConfig: false }
-    : { allowEmptyNodes: true, allowUpload: false, allowConfig: true };
+    ? { allowEmptyNodes: false, allowUpload: true }
+    : { allowEmptyNodes: true, allowUpload: false };
 }
 
 export const CANVAS_GENERATION_MODE_LABELS: Record<CanvasGenerationDraft['mode'], string> = {
@@ -992,7 +992,6 @@ export function resolveCanvasGenerationDraft(
   keys: readonly KeyView[],
   textPreference?: CanvasGenerationDefault<'text'>,
 ): CanvasGenerationDraft | null {
-  if (node.type === 'config') return node.data.draft;
   if (!('generation_draft' in node.data)) return null;
   if (node.data.generation_draft) return node.data.generation_draft;
   // 文本的生成能力由节点类型决定，MCP / 素材库创建的正文也可在首次操作时配置。
@@ -1000,21 +999,6 @@ export function resolveCanvasGenerationDraft(
     inputPolicy: 'all_connected',
     preference: textPreference,
   }) : null;
-}
-
-export function switchCanvasGenerationDraft(
-  keys: readonly KeyView[],
-  current: CanvasGenerationDraft,
-  mode: CanvasGenerationDraft['mode'],
-  options: { preference?: CanvasGenerationDefault; now?: string } = {},
-) {
-  if (mode === current.mode) return current;
-  return createCanvasGenerationDraft(keys, mode, {
-    prompt: current.prompt,
-    inputPolicy: current.input_policy,
-    preference: options.preference,
-    now: options.now,
-  });
 }
 
 /** 按拖拽后的顺序重排某个节点的直连输入（不含首尾帧槽位）。
@@ -1046,12 +1030,12 @@ export function reorderCanvasInputConnections(
   return { ...document, connections };
 }
 
-export function createConnectedCanvasConfig(
+export function createConnectedCanvasSurface(
   document: CanvasDocument,
   sourceNodeId: string,
   draft: CanvasGenerationDraft,
   ids: { nodeId: string; connectionId: string },
-  surfaceType: 'config' | 'image' | 'video' = 'config',
+  surfaceType: 'image' | 'video',
 ): CanvasDocument | null {
   if (
     document.nodes.some(node => node.id === ids.nodeId)
@@ -1077,12 +1061,10 @@ export function createConnectedCanvasConfig(
     z_index: 0,
   };
   const connectedDraft = { ...draft, prompt, input_policy: 'all_connected' as const };
-  const configNode: CanvasNode = surfaceType === 'config'
-    ? { ...base, type: 'config', data: { draft: connectedDraft } }
-    : { ...base, type: surfaceType, data: {
-      current_version_id: null, active_run_id: null, generation_draft: connectedDraft,
-      display: { fit: 'contain', free_resize: false },
-    } };
+  const configNode: CanvasNode = { ...base, type: surfaceType, data: {
+    current_version_id: null, active_run_id: null, generation_draft: connectedDraft,
+    display: { fit: 'contain', free_resize: false },
+  } };
   const nodes = [...document.nodes, configNode];
   if (!canCreateCanvasInputConnection({ ...document, nodes }, {
     source: source.id,

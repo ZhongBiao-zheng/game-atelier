@@ -735,11 +735,6 @@ class CanvasMediaNodeData(CanvasContentNodeData):
     display: CanvasMediaDisplay = Field(default_factory=CanvasMediaDisplay)
 
 
-class CanvasConfigNodeData(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    draft: CanvasGenerationDraft
-
-
 class CanvasGroupNodeData(BaseModel):
     model_config = ConfigDict(extra="forbid")
     member_node_ids: list[str] = Field(default_factory=list)
@@ -849,11 +844,6 @@ class CanvasAudioNode(CanvasNodeBase):
     data: CanvasContentNodeData
 
 
-class CanvasConfigNode(CanvasNodeBase):
-    type: Literal["config"]
-    data: CanvasConfigNodeData
-
-
 class CanvasGroupNode(CanvasNodeBase):
     type: Literal["group"]
     size: CanvasGroupSize | None = None
@@ -877,7 +867,7 @@ class CanvasPluginNode(CanvasNodeBase):
 
 CanvasNode = Annotated[
     CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode
-    | CanvasConfigNode | CanvasGroupNode | CanvasPluginNode | CanvasBatchMaterialNode
+    | CanvasGroupNode | CanvasPluginNode | CanvasBatchMaterialNode
     | CanvasLayerStackNode,
     Field(discriminator="type"),
 ]
@@ -1079,6 +1069,23 @@ class CanvasDocument(BaseModel):
     content_versions: dict[str, CanvasContentVersion] = Field(default_factory=dict)
     updated_at: str
 
+    @model_validator(mode="before")
+    @classmethod
+    def lift_config_nodes(cls, value: object) -> object:
+        # 5.86.0 删除「生成配置」节点：生成设置本来就能放在文本 / 图片 / 视频 / 音频节点上。
+        # 已有画布和导出包里的 config 节点按它的生成模式换成对应类型的空节点，连线不变。
+        if not isinstance(value, dict) or not isinstance(value.get("nodes"), list):
+            return value
+        if not any(isinstance(node, dict) and node.get("type") == "config" for node in value["nodes"]):
+            return value
+        nodes = []
+        for node in value["nodes"]:
+            draft = node.get("data", {}).get("draft") if isinstance(node, dict) else None
+            if isinstance(node, dict) and node.get("type") == "config" and isinstance(draft, dict):
+                node = {**node, "type": draft.get("mode"), "data": {"generation_draft": draft}}
+            nodes.append(node)
+        return {**value, "nodes": nodes}
+
     def layer_material_node_ids(self) -> set[str]:
         return {
             node_id for node in self.nodes if node.type == "layer_stack"
@@ -1249,7 +1256,7 @@ class CanvasDocument(BaseModel):
             if edge.role == "material" and (source.type != "image" or target.type != "image"):
                 raise ValueError("canvas material connections require image nodes")
             if edge.role == "input":
-                if source.type in {"config", "plugin", "layer_stack"}:
+                if source.type in {"plugin", "layer_stack"}:
                     raise ValueError("canvas input source cannot provide content")
                 if target.type == "plugin":
                     raise ValueError("canvas plugin connections require a verified capability manifest")
@@ -1261,11 +1268,7 @@ class CanvasDocument(BaseModel):
                     layer_stack_inputs[target.id] = layer_stack_inputs.get(target.id, 0) + 1
                     continue
                 if edge.slot is not None:
-                    target_draft = (
-                        target.data.draft
-                        if target.type == "config"
-                        else target.data.generation_draft
-                    )
+                    target_draft = getattr(target.data, "generation_draft", None)
                     if source.type != "image" or target_draft is None or target_draft.mode != "video":
                         raise ValueError("canvas video frame slots require an image source and video draft")
                     slot_key = (edge.target_node_id, edge.slot)

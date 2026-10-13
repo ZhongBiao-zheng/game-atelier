@@ -95,8 +95,6 @@ def document_view(document: CanvasDocument) -> dict:
             row["active_run_id"] = node.data.active_run_id
             if node.type == "text":
                 row.update(_text_of(document, node))
-        elif node.type == "config":
-            row["draft"] = _draft_view(node.data.draft)
         elif node.type == "group":
             row["member_node_ids"] = node.data.member_node_ids
         nodes.append(row)
@@ -215,17 +213,17 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
                                   and edge.source_node_id == node.id and edge.slot is None)
         elif change.op == "set_draft":
             node = _find_node(document.model_copy(update={"nodes": nodes}), change.node_id)
-            if node.type not in {"text", "image", "video", "audio", "config"}:
+            if node.type not in {"text", "image", "video", "audio"}:
                 raise WorkshopError("INVALID_TARGET", "这个节点不能承载生成配置", 422)
             # 生成面的类型决定产物落点：文本节点只能生成文本，图片 / 视频 / 音频节点模式必须与
             # 节点类型一致，否则服务端只能另建一个结果节点，画布上就多出一个无用节点。
-            if node.type != "config" and change.mode != node.type:
+            if change.mode != node.type:
                 raise WorkshopError(
                     "INVALID_TARGET",
                     f"{node.type} 节点只能承载 {node.type} 模式的生成配置；要生成 {change.mode}"
                     f" 请先用 add_surface 建一个 {change.mode} 节点", 422,
                 )
-            field = "draft" if node.type == "config" else "generation_draft"
+            field = "generation_draft"
             params = JobParams(**canvas_allowed_draft_params(
                 change.mode, JobParams(**change.params)))
             draft = CanvasGenerationDraft(mode=change.mode, prompt=change.prompt, model=change.model,
@@ -288,7 +286,7 @@ def _sync_prompt_references(
     by_id = {n.id: n for n in nodes}
     result = []
     for node in nodes:
-        field = "draft" if node.type == "config" else "generation_draft"
+        field = "generation_draft"
         draft = getattr(node.data, field, None) if node.id in touched else None
         if draft is None:
             result.append(node)

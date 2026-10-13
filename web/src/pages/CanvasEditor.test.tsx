@@ -1550,7 +1550,6 @@ it('blocks generation by name when a connected input has no content yet', async 
 
 it('accepts a first-frame pick on a config node whose draft is a video generation', async () => {
   // 面板按 draft.mode 决定要不要给首尾帧控件，处理函数以前按 node.type 收窄：配置节点的
-  // mode 是 video 但 type 是 config，于是控件显示、点了没反应。
   const videoDraft: CanvasGenerationDraft = {
     mode: 'video',
     prompt: '列车穿过隧道',
@@ -1572,10 +1571,10 @@ it('accepts a first-frame pick on a config node whose draft is a video generatio
       {
         id: 'config-one',
         title: '视频设置',
-        type: 'config',
+        type: 'video',
         position: { x: 0, y: 0 },
         z_index: 0,
-        data: { draft: videoDraft },
+        data: { current_version_id: null, active_run_id: null, display: { fit: 'contain', free_resize: false }, generation_draft: videoDraft },
       },
       { ...imageNode('frame-one', '起始帧'), data: { ...imageNode('frame-one', '起始帧').data, current_version_id: 'version-frame' } },
     ],
@@ -2140,8 +2139,9 @@ function reproducedDocument({ warnings = [] as string[], width = 100, height = 1
     revision: 8,
     nodes: [
       ...refs,
-      { id: 'config-1', title: '图片生成', type: 'config' as const, position: { x: 40 + 320 + 96, y: 40 }, z_index: 0,
-        data: { draft: { ...imageDraft, prompt: '白犬' } } },
+      { id: 'config-1', title: '图片生成', type: 'image' as const, position: { x: 40 + 320 + 96, y: 40 }, z_index: 0,
+        data: { current_version_id: null, active_run_id: null, display: { fit: 'contain' as const, free_resize: false },
+          generation_draft: { ...imageDraft, prompt: '白犬' } } },
     ],
     connections: refs.map(ref => ({ id: `connection-${ref.id}`, role: 'input' as const, source_node_id: ref.id, target_node_id: 'config-1' })),
     content_versions: Object.fromEntries(refs.map(ref => [ref.data.current_version_id, {

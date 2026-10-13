@@ -23,8 +23,8 @@ def _document(member_ids, connections):
          "position": {"x": 0, "y": 0}, "data": {"current_version_id": None}}
         for node_id in ("image-a", "image-b", "image-c")
     ]
-    nodes.append({"id": "config", "type": "config", "title": "config",
-                  "position": {"x": 0, "y": 0}, "data": {"draft": _DRAFT}})
+    nodes.append({"id": "config", "type": "image", "title": "config",
+                  "position": {"x": 0, "y": 0}, "data": {"generation_draft": _DRAFT}})
     nodes.append({"id": "group", "type": "group", "title": "分组",
                   "position": {"x": 0, "y": 0}, "data": {"member_node_ids": list(member_ids)}})
     return CanvasDocument.model_validate({
@@ -60,8 +60,8 @@ def test_group_source_is_rejected_outside_plain_input(extra):
 def test_group_expands_to_content_members_in_member_order():
     document = _document(["image-c", "image-a", "config"], [_edge("e", "group", "config")])
     surface = next(node for node in document.nodes if node.id == "config")
-    sources = canvas_input_sources(document, surface, surface.data.draft)
-    # config 不提供内容，展开时丢掉；顺序照 member_node_ids，不按节点在文档里的次序重排。
+    sources = canvas_input_sources(document, surface, surface.data.generation_draft)
+    # 目标节点自己也在组里时不当自己的参考；顺序照 member_node_ids，不按节点在文档里的次序重排。
     assert sources == [("group_member", "image-c"), ("group_member", "image-a")]
 
 
@@ -71,7 +71,7 @@ def test_direct_edge_wins_over_the_same_node_inside_a_group():
         [_edge("direct", "image-b", "config"), _edge("bundle", "group", "config")],
     )
     surface = next(node for node in document.nodes if node.id == "config")
-    sources = canvas_input_sources(document, surface, surface.data.draft)
+    sources = canvas_input_sources(document, surface, surface.data.generation_draft)
     # 同一个节点既直连又在包里时只算一次，并且记成直连——截断时优先保留画师手连的那张。
     assert sources == [("input_connection", "image-b"), ("group_member", "image-a")]
 

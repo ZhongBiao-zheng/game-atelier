@@ -312,8 +312,8 @@ schema 的文件返回 409，原字节保持不变。`PUT /api/canvas/ui-prefere
 `{ alias, model }` 与该模态白名单参数；`upscale` 为 AI高清偏好 `{ tiers: { 2K, 4K, 8K } }`，每档 `{ selection, quality, prompt }`：
 selection 为 null 时服务端自动选模（只有 2K / 4K 有自动路线），quality 只对暴露质量档的模型生效，
 prompt 留空保存即恢复内置提示词（服务端填回全文，GET 永远返回实际生效的提示词）；缺失的档位按默认值补齐。媒体引用、蒙版、本机路径、运行回写字段和跨模态参数一律 422。
-服务端在独立文件锁内校验 revision 并原子替换，冲突返回当前 revision。生成偏好只影响后续新建 Draft
-和配置节点模式切换；模型保持自动选择时仍独立应用该模态默认参数。失效的显式模型回退首个 Runner 可路由
+服务端在独立文件锁内校验 revision 并原子替换，冲突返回当前 revision。生成偏好只影响后续新建 Draft；
+模型保持自动选择时仍独立应用该模态默认参数。失效的显式模型回退首个 Runner 可路由
 模型且不继承旧参数，已有节点、Run Snapshot 与 Job
 保持不变。该偏好跨项目生效，但不进入 `CanvasDocument`、undo/redo、项目 revision、项目包 manifest/zip
 或插件私有状态；凭证、Base URL 与模型目录仍只属于 Keys。
@@ -343,7 +343,7 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 
 - `POST /canvas/projects/{id}/batch-runs/prepare`：`{scope_node_id,expected_revision}`，`scope_node_id` 是分组时 422；
   校验冻结素材、输入依赖、模型能力及单产物，返回 `ready` 计划，不调用模型。计划只有这一个节点一步，最多 2000 次生成；
-  只允许一个批量素材来源，无素材节点时固定输入为一项；不支持配置/插件节点执行。
+  只允许一个批量素材来源，无素材节点时固定输入为一项；不支持插件节点执行。
 - `POST .../batch-runs/{batch_id}/start`：确认后启动；revision 必须仍匹配，同项目只允许一份活动计划。
   同一计划重复 start 不再调度。串行执行的普通 Canvas Job 带 `canvas_run.batch`
   `{batch_id,item_id,round_index,step_index}`，两个 index 从 0 开始。
@@ -359,8 +359,7 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 首次提交事务同时展开各项、各轮的真实结果节点和输入连线：第一项第一轮使用配置链路的原节点，
 其余项/轮按行排在现有内容下方，各行的下游只连接同行上游；不在一个节点中切换批次结果。
 内容节点的可选 `data.batch_result` 保存 `{batch_id,template_node_id,source_node_id,item_id,image_version_ids,round_index}`，
-绑定本批素材的不可变版本，单独再次生成时不读取其他批次；分组再次执行只读取原配置节点，
-不把自动展开的产物节点重新当作流程步骤。所有结果仍由普通 Job/Version 保存，视频不提供候选切换。
+绑定本批素材的不可变版本，单独再次生成时不读取其他批次。所有结果仍由普通 Job/Version 保存，视频不提供候选切换。
 上次生成的输出不隐式成为下一次批量执行的自身参考。
 失败停止剩余步骤，无自动付费重试；服务重启将活动计划标为 interrupted，不自动提交剩余步骤。
 计划文件属于本机执行状态，不随项目包导入；图片素材、普通节点及已经生成的 Jobs/Versions 仍随包保存。
@@ -424,7 +423,7 @@ Draft 不读不改；停止复用普通 Run 生命周期。
 `video_url` 与 `input_audio`；Ark-compatible Responses 分别使用 `input_image`、`input_video` 与
 `input_audio`。本机媒体由 caller 编码后提交；模型虽声明能力但当前供应商协议没有对应传输格式时，
 同样在创建 Run 前拒绝。两种拒绝都只显示一条短消息，不在画布增加常驻说明组件。
-`POST .../runs/{run_id}/reverse-prompt-config` 在成功文本结果后幂等创建图片 Config Node 及文本→配置
+`POST .../runs/{run_id}/reverse-prompt-config` 在成功文本结果后幂等创建带生成设置的空图片节点（id `image-reverse-<结果节点>`）及文本→图片
 Input Connection。图片模型优先使用仍可路由的画布图片生成偏好；偏好保持自动选择或显式模型失效时，
 再按 default Key 优先、其余登记顺序选择。自动选择会应用已保存的默认参数，失效的显式模型不泄漏旧参数；
 缺模型时保留反推文本且零写。重复请求即使携带旧 revision，也返回已经存在的同一配置，不重复创建节点或连接。
@@ -889,11 +888,11 @@ FastAPI 标准 422。坏掉的 job 文件、画布存档不见了（`{code: "can
 按 500 报出，不归入 `invalid`。
 
 `POST /canvas/projects/{project_id}/creation-assets/{asset_id}/reproduce` 画布复刻：与 insert 同样携带
-`If-Match`（缺失 428，非整数 422），一次画布锁内把生成资产展开成参考输入节点 + 生成配置节点 + 连线，
+`If-Match`（缺失 428，非整数 422），一次画布锁内把生成资产展开成参考输入节点 + 带生成设置的空图片 / 视频节点 + 连线，
 不自动 Run；响应 `CanvasReproduceResponse` = `CanvasDocument` 全部字段 + `warnings: list[str]`，并回
 `ETag`。`warnings` 只在响应里，不落 `canvas.json`。只带 `role == "reference"` 的参考（`mask` / `mj_*`
 跳过并写进 `warnings`）；视频配方 `frame_mode ∈ first | last | firstlast` 时图片参考按顺序接首帧 / 尾帧槽。
-`model` 由前端匹配本机 key 后传入，传 `null` 时配置节点模型位留空。错误：revision 不符 409
+`model` 由前端匹配本机 key 后传入，传 `null` 时生成节点模型位留空。错误：revision 不符 409
 `{code: "revision_conflict", current_revision}`；画布或资产不存在 404；非生成资产、配方拼不出合法草稿 422；
 参考 blob 缺失 500 `{code: "asset_state_broken", message}`（本机数据完整性故障，重试无用）；画布存档本身坏了 500。
 

@@ -93,7 +93,7 @@ def _reproduce(project_id: str, asset_id: str, **overrides) -> CanvasReproduceRe
 
 
 def _config(document):
-    return next(node for node in document.nodes if node.type == "config")
+    return next(node for node in document.nodes if node.data.generation_draft is not None and node.data.current_version_id is None)
 
 
 def test_image_recipe_builds_inputs_config_and_ordered_connections():
@@ -105,7 +105,7 @@ def test_image_recipe_builds_inputs_config_and_ordered_connections():
     assert isinstance(document, CanvasReproduceResponse)
     assert document.warnings == []
     assert document.revision == 1
-    images = [node for node in document.nodes if node.type == "image"]
+    images = [node for node in document.nodes if node.data.current_version_id]
     config = _config(document)
     assert len(images) == 2 and len(document.nodes) == 3
     assert [(edge.source_node_id, edge.target_node_id, edge.slot) for edge in document.connections] == [
@@ -121,7 +121,7 @@ def test_image_recipe_builds_inputs_config_and_ordered_connections():
     widths = [document.content_versions[node.data.current_version_id].width for node in images]
     assert widths == [4, 2]
 
-    draft = config.data.draft
+    draft = config.data.generation_draft
     assert draft.mode == "image"
     assert draft.prompt == "一只红色的猫"
     assert draft.model == "gpt-image-2" and draft.alias == "tuzi-main"
@@ -181,13 +181,13 @@ def test_video_firstlast_recipe_connects_first_and_last_frame_slots():
 
     document = _reproduce(project.project_id, asset.asset_id, model="doubao-seedance-1-0-pro")
 
-    images = [node for node in document.nodes if node.type == "image"]
+    images = [node for node in document.nodes if node.data.current_version_id]
     config = _config(document)
     assert [(edge.source_node_id, edge.slot) for edge in document.connections] == [
         (images[0].id, "first_frame"),
         (images[1].id, "last_frame"),
     ]
-    draft = config.data.draft
+    draft = config.data.generation_draft
     assert draft.mode == "video"
     assert draft.params.model_dump(exclude_none=True) == {
         "duration": 5, "ratio": "16:9", "frame_mode": "firstlast",
@@ -232,7 +232,7 @@ def test_video_recipe_missing_frame_mode_writes_auto_for_omni_references():
 
     document = _reproduce(project.project_id, asset.asset_id, model="doubao-seedance-1-0-pro")
 
-    assert _config(document).data.draft.params.frame_mode == "auto"
+    assert _config(document).data.generation_draft.params.frame_mode == "auto"
     assert [edge.slot for edge in document.connections] == [None]
 
 
@@ -242,7 +242,7 @@ def test_video_recipe_without_inputs_keeps_frame_mode_unset():
 
     document = _reproduce(project.project_id, asset.asset_id, model="doubao-seedance-1-0-pro")
 
-    assert _config(document).data.draft.params.frame_mode is None
+    assert _config(document).data.generation_draft.params.frame_mode is None
     assert document.connections == []
 
 
@@ -266,7 +266,7 @@ def test_mask_and_mj_inputs_are_skipped_with_warnings():
 
     document = _reproduce(project.project_id, asset.asset_id)
 
-    assert len([node for node in document.nodes if node.type == "image"]) == 1
+    assert len([node for node in document.nodes if node.data.current_version_id]) == 1
     assert len(document.connections) == 1
     assert len(document.warnings) == 2
     assert any("蒙版" in warning for warning in document.warnings)
@@ -280,7 +280,7 @@ def test_missing_local_model_leaves_the_config_model_empty():
 
     document = _reproduce(project.project_id, asset.asset_id, model=None, alias=None)
 
-    draft = _config(document).data.draft
+    draft = _config(document).data.generation_draft
     assert draft.model == ""
     assert draft.alias is None
 
@@ -292,7 +292,7 @@ def test_final_prompt_is_written_verbatim():
 
     document = _reproduce(project.project_id, asset.asset_id)
 
-    assert _config(document).data.draft.prompt == prompt
+    assert _config(document).data.generation_draft.prompt == prompt
 
 
 def test_revision_mismatch_is_a_conflict_and_writes_nothing():
@@ -387,7 +387,7 @@ def test_reproduced_image_config_prepares_for_a_run():
     asset = _asset([(_REF_A, "reference"), (_REF_B, "reference")])
     _reproduce(project.project_id, asset.asset_id)
     stored = read_canvas_document(project.project_id)
-    images = [node.id for node in stored.nodes if node.type == "image"]
+    images = [node.id for node in stored.nodes if node.data.current_version_id]
 
     prepared = prepare_canvas_generation(project.project_id, stored, _config(stored))
 

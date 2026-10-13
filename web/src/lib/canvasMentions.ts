@@ -88,7 +88,8 @@ export function canvasInputSourceIds(
   // 素材包按目标收得下的类型过滤：图片生成节点连了一个带视频的分组，视频不进参考。
   return source.data.member_node_ids.filter(id => {
     const member = byId.get(id);
-    return Boolean(member && canvasTargetAcceptsSource(target, member));
+    // 目标节点自己也在这个组里时，不把自己当参考。
+    return Boolean(member && member.id !== target?.id && canvasTargetAcceptsSource(target, member));
   });
 }
 
@@ -102,8 +103,7 @@ const MEDIA_NODE_TYPES: ReadonlySet<string> = new Set(['text', 'image', 'video',
 
 export function canvasTargetAcceptsSource(target: CanvasNode | undefined, source: CanvasNode): boolean {
   if (!target || !MEDIA_NODE_TYPES.has(source.type)) return true;
-  const draft = target.type === 'config' ? target.data.draft
-    : 'generation_draft' in target.data ? target.data.generation_draft : null;
+  const draft = 'generation_draft' in target.data ? target.data.generation_draft : null;
   return !draft || canvasModeAcceptsNodeType(draft.mode, source.type);
 }
 

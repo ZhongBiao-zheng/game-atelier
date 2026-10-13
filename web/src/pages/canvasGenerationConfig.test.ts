@@ -1,13 +1,12 @@
 import { expect, it } from 'vitest';
 
 import type { KeyView } from '@/api/keys';
-import type { CanvasDocument, CanvasGenerationDraft } from '@/schema/canvas';
+import type { CanvasDocument } from '@/schema/canvas';
 import {
   createCanvasGenerationDraft,
-  createConnectedCanvasConfig,
+  createConnectedCanvasSurface,
   canvasGenerationPreferenceForModel,
   firstCanvasGenerationModel,
-  switchCanvasGenerationDraft,
   resolveCanvasGenerationDraft,
 } from './canvasEditorModel';
 
@@ -68,7 +67,7 @@ it('offers an unconfigured text draft without borrowing a media model or changin
   }, keys)).toBeNull();
 });
 
-it('creates a capability-honest config draft and preserves references while switching modes', () => {
+it('creates a capability-honest image draft', () => {
   const image = createCanvasGenerationDraft(keys, 'image', {
     now: '2026-08-25T01:00:00Z',
   });
@@ -76,39 +75,22 @@ it('creates a capability-honest config draft and preserves references while swit
     mode: 'image', alias: 'image-key', model: 'gpt-image-2',
     input_policy: 'all_connected', params: { n: 1, size_mode: 'auto', size: 'auto', ratio: '1:1' },
   });
-
-  const current: CanvasGenerationDraft = {
-    ...image,
-    prompt: '沿用 @[node:text-source] 的节奏',
-  };
-  const video = switchCanvasGenerationDraft(
-    keys,
-    current,
-    'video',
-    { now: '2026-08-25T02:00:00Z' },
-  );
-  expect(video).toMatchObject({
-    mode: 'video', alias: 'video-key', model: 'seedance-2.0',
-    prompt: current.prompt, input_policy: 'all_connected',
-    params: { duration: 5, resolution: '720p', ratio: '16:9' },
-    updated_at: '2026-08-25T02:00:00Z',
-  });
 });
 
-it('creates one connected image config to the right of a non-empty text node', () => {
+it('creates one connected image node to the right of a non-empty text node', () => {
   const draft = createCanvasGenerationDraft(keys, 'image', {
     now: '2026-08-25T01:00:00Z',
   });
-  const next = createConnectedCanvasConfig(documentWithText(), 'text-source', draft, {
+  const next = createConnectedCanvasSurface(documentWithText(), 'text-source', draft, {
     nodeId: 'config-image',
     connectionId: 'connection-text-image',
-  });
+  }, 'image');
 
   expect(next?.nodes.at(-1)).toMatchObject({
-    id: 'config-image', title: '图片生成', type: 'config',
+    id: 'config-image', title: '图片生成', type: 'image',
     position: { x: 376, y: 48 },
     data: {
-      draft: {
+      generation_draft: {
         mode: 'image', prompt: '@[node:text-source]', input_policy: 'all_connected',
       },
     },
@@ -120,12 +102,12 @@ it('creates one connected image config to the right of a non-empty text node', (
   expect(next?.revision).toBe(4);
 });
 
-it('creates a connected config from blank text because text nodes always count as sources', () => {
+it('creates a connected node from blank text because text nodes always count as sources', () => {
   const draft = createCanvasGenerationDraft(keys, 'image');
-  const next = createConnectedCanvasConfig(documentWithText('  '), 'text-source', draft, {
+  const next = createConnectedCanvasSurface(documentWithText('  '), 'text-source', draft, {
     nodeId: 'config-image',
     connectionId: 'connection-text-image',
-  });
+  }, 'image');
 
   // 空白文本节点仍是合法内容源：先连线后打字是正常画布工作流。
   expect(next).not.toBeNull();
@@ -140,7 +122,7 @@ it('creates a connected config from blank text because text nodes always count a
 it.each(['image', 'video'] as const)('creates an explicit downstream %s node without changing the source', mode => {
   const document = documentWithText();
   const original = structuredClone(document);
-  const next = createConnectedCanvasConfig(document, 'text-source', createCanvasGenerationDraft(keys, mode), {
+  const next = createConnectedCanvasSurface(document, 'text-source', createCanvasGenerationDraft(keys, mode), {
     nodeId: `downstream-${mode}`, connectionId: 'explicit-input',
   }, mode)!;
   expect(next.nodes.at(-1)).toMatchObject({

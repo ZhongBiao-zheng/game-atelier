@@ -78,8 +78,8 @@ const nodes: CanvasNode[] = [
     data: { current_version_id: null, generation_draft: null, active_run_id: null },
   },
   {
-    id: 'config', title: '配置', type: 'config', position: { x: 0, y: 0 }, z_index: 0,
-    data: { draft },
+    id: 'config', title: '配置', type: 'image', position: { x: 0, y: 0 }, z_index: 0,
+    data: { current_version_id: null, active_run_id: null, display: { fit: 'contain', free_resize: false }, generation_draft: draft },
   },
   {
     id: 'group', title: '分组', type: 'group', position: { x: 0, y: 0 }, z_index: 0,
@@ -202,7 +202,7 @@ it('keeps a text node editor mounted after the last variable is removed, without
 
 it('copies readable draft variables instead of internal tokens', () => {
   const prompt = promptVariableToken({ name: '主体', example: '猫', value: '狐狸' });
-  const config = { ...nodes[4], data: { draft: { ...draft, prompt } } } as CanvasNode;
+  const config = { ...nodes[4], data: { ...nodes[4].data, generation_draft: { ...draft, prompt } } } as CanvasNode;
   expect(copyablePromptForNode(config, new Map())).toBe('狐狸');
 });
 
