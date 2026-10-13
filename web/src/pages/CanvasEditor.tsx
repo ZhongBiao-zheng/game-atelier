@@ -4383,7 +4383,7 @@ function CanvasEditorInner({
       if (connection.role !== 'input' || connection.slot) continue;
       const sources = result.get(connection.target_node_id) ?? new Set<string>();
       // 连的是分组时，界面上的参考位要显示包里的成员——和真正发出去的那批素材保持一致。
-      for (const sourceId of current ? expandCanvasInputSource(current, connection.source_node_id) : []) {
+      for (const sourceId of current ? expandCanvasInputSource(current, connection.source_node_id, connection.target_node_id) : []) {
         sources.add(sourceId);
       }
       result.set(connection.target_node_id, sources);
@@ -4859,7 +4859,7 @@ function CanvasEditorInner({
           nodesDraggable={!activeBatch}
           nodesConnectable={!activeBatch}
           onlyRenderVisibleElements
-          className={cn('canvas-flow', connectionInProgress && 'canvas-flow-connecting')}
+          className={cn('canvas-flow', connectionInProgress && 'canvas-flow-connecting', createMenu?.sourceId && 'canvas-flow-pending-connection')}
         >
           <CanvasZoomCssVars target={editorRegionRef} />
           {background && <Background variant={background} gap={22} size={1} />}

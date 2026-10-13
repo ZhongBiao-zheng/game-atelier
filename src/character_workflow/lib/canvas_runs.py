@@ -681,6 +681,14 @@ def _uses_video_frame_slots(draft: CanvasGenerationDraft) -> bool:
     return draft.mode == "video" and draft.params.frame_mode in {"first", "last", "firstlast"}
 
 
+# 生成模式收哪几类素材节点；没列出的模式（文本、视频）由模型能力决定，这里不限。
+# 与前端 canvasMentions.ACCEPTED_INPUT_NODE_TYPES 是同一张表，改一边必须改另一边。
+_ACCEPTED_INPUT_NODE_TYPES: dict[str, set[str]] = {
+    "image": {"text", "image"},
+    "audio": {"text"},
+}
+
+
 def canvas_input_sources(
     document: CanvasDocument,
     surface: CanvasNode,
@@ -715,9 +723,12 @@ def canvas_input_sources(
                 # 分组整包供参考：就地展开成成员，顺序即 member_node_ids 的顺序（打组时按画布
                 # 阅读顺序写入）。展开后分组 id 不再出现在下游——编号、能力上限、批量依赖、
                 # 结果节点的回连全都按成员走，分组只是一次打包方式，不是素材本身。
+                # 素材包按目标收得下的类型过滤：图片生成连了一个带视频的分组，视频不进参考。
+                accepted = _ACCEPTED_INPUT_NODE_TYPES.get(
+                    draft.mode, {"text", "image", "video", "audio"})
                 for member_id in source.data.member_node_ids:
                     member = nodes_by_id.get(member_id)
-                    if member is not None and member.type in {"text", "image", "video", "audio"}:
+                    if member is not None and member.type in accepted:
                         roles.setdefault(member_id, "group_member")
                 continue
             # 同一个节点既直连又在组里时按直连算：直连是画师一笔一笔连的，截断时优先保留。

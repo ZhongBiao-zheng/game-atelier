@@ -521,14 +521,14 @@
     border-color: var(--primary);
   }
   /* 分组的连接点是框右侧外面的「+」：选中分组才出现，拖出去就是把整组连给新节点。
-     必须 !important：xyflow 的 style.css 不分层，它的 right: 0 会赢过 @layer 里的规则。 */
-  .canvas-flow .react-flow__handle.canvas-group-add-handle {
-    right: -2.25rem !important;
+     连接点本身留在框的右边线上（连线从边线出发，贴着框），往外挪的只是「+」和它的点击范围。 */
+  .canvas-flow .react-flow__handle.canvas-group-add-handle::before {
+    left: calc(50% + 2.25rem);
   }
   .canvas-flow .canvas-group-add {
     position: absolute;
     top: 50%;
-    left: 50%;
+    left: calc(50% + 2.25rem);
     display: grid;
     width: 2rem;
     height: 2rem;
@@ -549,7 +549,8 @@
     border-color: var(--primary);
   }
   /* 从分组拖线时「+」跟着指针走：原位的那个藏起来，连线层里画一个一样的。 */
-  .canvas-flow.canvas-flow-connecting .canvas-group-add-handle.connectingfrom .canvas-group-add {
+  .canvas-flow.canvas-flow-connecting .canvas-group-add-handle.connectingfrom .canvas-group-add,
+  .canvas-flow.canvas-flow-pending-connection .canvas-group-add {
     opacity: 0;
   }
   .canvas-flow .canvas-group-add-ghost circle {

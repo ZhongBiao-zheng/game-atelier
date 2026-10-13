@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.85.10',
+    date: '2026-10-13',
+    headline: '图片生成不再把视频当参考',
+    changes: [
+      { kind: 'fix', text: '图片生成节点不收视频和音频：连了带视频的分组，只有图片和文本进参考；视频、音频节点也不能直接连到图片生成节点。' },
+      { kind: 'fix', text: '分组连到节点的线从分组的边线出发，不再悬在框外。' },
+      { kind: 'fix', text: '从分组拖线松手后，创建列表开着时右侧的「+」不再冒出来。' },
+    ],
+  },
+  {
     version: '5.85.9',
     date: '2026-10-12',
     headline: '创作台记录回到上下排列',

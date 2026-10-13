@@ -1,4 +1,4 @@
-import { canvasInputSourceIds } from '@/lib/canvasMentions';
+import { canvasInputSourceIds, canvasTargetAcceptsSource } from '@/lib/canvasMentions';
 import { normalizeImageSizeParams } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import type { Job, JobParams } from '@/schema/jobs';
@@ -614,8 +614,9 @@ export function canvasNodeProvidesOutput(
  *  分组是「素材包」：连的是包，进模型的是包里的内容成员，顺序即 member_node_ids —— 与后端
  *  canvas_runs.canvas_input_sources 的展开逐条对齐。两端各展开一次是必然的（一端画界面、
  *  一端组请求），所以顺序判据只有一个：member_node_ids 本身，谁都不再自己排一遍。 */
-export function expandCanvasInputSource(document: CanvasDocument, sourceId: string): string[] {
-  return canvasInputSourceIds(document.nodes, sourceId).filter(id => {
+export function expandCanvasInputSource(document: CanvasDocument, sourceId: string, targetId?: string): string[] {
+  const target = targetId ? document.nodes.find(node => node.id === targetId) : undefined;
+  return canvasInputSourceIds(document.nodes, sourceId, target).filter(id => {
     const member = document.nodes.find(node => node.id === id);
     return Boolean(member && canvasNodeProvidesContent(member));
   });
@@ -675,7 +676,7 @@ export function canvasPendingInputNodes(
   for (const connection of document.connections) {
     if (connection.role !== 'input' || connection.slot) continue;
     // 分组按成员逐个判空：提交时服务端拒的是那个空成员，拦截文案也要指名到它。
-    for (const sourceId of expandCanvasInputSource(document, connection.source_node_id)) {
+    for (const sourceId of expandCanvasInputSource(document, connection.source_node_id, connection.target_node_id)) {
     const source = nodes.get(sourceId);
     if (!source || canvasNodeHasCurrentContent(source, document.content_versions)) continue;
     if (source.type === 'batch_material') {
@@ -709,6 +710,8 @@ export function canCreateCanvasInputConnection(
     || !target
     || !canvasNodeProvidesOutput(source)
     || !canvasNodeAcceptsInput(target)
+    // 图片生成不收视频 / 音频，音频生成只收文本：连上了也进不了模型，直接不让连。
+    || !canvasTargetAcceptsSource(target, source)
   ) {
     return false;
   }
@@ -1014,8 +1017,9 @@ export function reorderCanvasInputConnections(
   const slots = document.connections.flatMap((connection, index) => isDirectInput(connection) ? [index] : []);
   const position = new Map(orderedSourceIds.map((id, index) => [id, index]));
   // 连的是分组时按成员里排得最靠前的那个算：分组整包移动，成员之间的顺序归分组自己管。
+  const target = document.nodes.find(node => node.id === targetNodeId);
   const rank = (connection: CanvasConnection) => Math.min(
-    ...canvasInputSourceIds(document.nodes, connection.source_node_id).map(id => position.get(id) ?? Infinity),
+    ...canvasInputSourceIds(document.nodes, connection.source_node_id, target).map(id => position.get(id) ?? Infinity),
   );
   const sorted = slots
     .map(index => document.connections[index])
