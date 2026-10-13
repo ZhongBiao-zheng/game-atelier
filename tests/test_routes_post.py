@@ -160,23 +160,23 @@ def test_post_config_rejects_empty(client):
     assert r.status_code == 422
 
 
-def test_get_config_show_studio_defaults_false(client):
+def test_get_config_show_canvas_defaults_true(client):
     r = client.get("/api/config")
     assert r.status_code == 200
-    assert r.json()["show_studio_on_home"] is False
+    assert r.json()["show_canvas_on_home"] is True
 
 
-def test_post_config_show_studio_toggle_roundtrip(client, runtime):
-    r = client.post("/api/config", json={"show_studio_on_home": True})
+def test_post_config_show_canvas_toggle_roundtrip(client, runtime):
+    r = client.post("/api/config", json={"show_canvas_on_home": False})
     assert r.status_code == 200
-    assert client.get("/api/config").json()["show_studio_on_home"] is True
-    r = client.post("/api/config", json={"show_studio_on_home": False})
+    assert client.get("/api/config").json()["show_canvas_on_home"] is False
+    r = client.post("/api/config", json={"show_canvas_on_home": True})
     assert r.status_code == 200
-    assert client.get("/api/config").json()["show_studio_on_home"] is False
+    assert client.get("/api/config").json()["show_canvas_on_home"] is True
 
 
-def test_post_config_show_studio_rejects_non_bool(client):
-    r = client.post("/api/config", json={"show_studio_on_home": "yes"})
+def test_post_config_show_canvas_rejects_non_bool(client):
+    r = client.post("/api/config", json={"show_canvas_on_home": "yes"})
     assert r.status_code == 422
 
 
@@ -185,9 +185,9 @@ def test_post_config_merges_keys(client, runtime, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     client.post("/api/config", json={"image_storage_root": "~/assets"})
-    client.post("/api/config", json={"show_studio_on_home": True})
+    client.post("/api/config", json={"show_canvas_on_home": True})
     cfg = json.loads((runtime / "config.json").read_text())
-    assert cfg["show_studio_on_home"] is True
+    assert cfg["show_canvas_on_home"] is True
     assert cfg["image_storage_root"].replace("\\", "/").endswith("/assets")
 
 

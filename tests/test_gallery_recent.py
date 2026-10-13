@@ -110,7 +110,7 @@ def test_respects_limit_param(client, tmp_path):
 
 
 def test_skips_studio_namespace(client, tmp_path):
-    """默认（show_studio_on_home=false）不混入 studio 出图。"""
+    """studio 目录里没有任务登记的文件不算作品。"""
     chars = tmp_path / "characters"
     studio = tmp_path / "studio"
     _make_image(chars / "char-a" / "portrait" / "char.png", mtime_offset=-2)
@@ -123,11 +123,10 @@ def test_skips_studio_namespace(client, tmp_path):
 
 
 def test_studio_items_included_when_toggle_on(client, tmp_path):
-    """开关开启后混排任务正式登记的产物，深链使用真实 job_id。"""
+    """混排任务正式登记的 studio 产物，深链使用真实 job_id。"""
     _make_image(tmp_path / "characters" / "char-a" / "portrait" / "char.png")
     _make_image(tmp_path / "studio" / "job-x" / "v1.png")
     _studio_job(tmp_path)
-    assert client.post("/api/config", json={"show_studio_on_home": True}).status_code == 200
 
     items = client.get("/api/gallery/recent").json()["items"]
     assert len(items) == 2
@@ -142,7 +141,6 @@ def test_studio_items_respect_hidden(client, tmp_path):
     _make_image(tmp_path / "studio" / "job-x" / "v1.png")
     _make_image(tmp_path / "studio" / "job-x" / "v2.png")
     _studio_job(tmp_path, outputs=("v1.png", "v2.png"))
-    client.post("/api/config", json={"show_studio_on_home": True})
     client.post("/api/gallery/hidden", json={"path": "studio/job-x/v1.png", "hidden": True})
 
     items = client.get("/api/gallery/recent").json()["items"]
@@ -154,7 +152,6 @@ def test_studio_only_data_root_returns_studio_items(client, tmp_path):
     (tmp_path / "characters").rmdir()
     _make_image(tmp_path / "studio" / "job-x" / "v1.png")
     _studio_job(tmp_path)
-    client.post("/api/config", json={"show_studio_on_home": True})
     items = client.get("/api/gallery/recent").json()["items"]
     assert [i["path"] for i in items] == ["studio/job-x/v1.png"]
 
@@ -163,7 +160,6 @@ def test_studio_orphan_and_unregistered_files_are_not_artworks(client, tmp_path)
     _make_image(tmp_path / "studio" / "studio-zz-001" / "v1.png")
     _make_image(tmp_path / "studio" / "job-x" / "unregistered.png")
     _studio_job(tmp_path, outputs=())
-    client.post("/api/config", json={"show_studio_on_home": True})
     assert client.get("/api/gallery/recent").json()["items"] == []
 
 
@@ -171,7 +167,6 @@ def test_studio_orphan_and_unregistered_files_are_not_artworks(client, tmp_path)
 def test_studio_gallery_requires_completed_results(client, tmp_path, status):
     _make_image(tmp_path / "studio" / "job-x" / "v1.png")
     _studio_job(tmp_path, status=status)
-    client.post("/api/config", json={"show_studio_on_home": True})
     items = client.get("/api/gallery/recent").json()["items"]
     assert len(items) == (1 if status in (JobStatus.DONE, JobStatus.PARTIAL) else 0)
 
@@ -188,7 +183,6 @@ def test_studio_registered_paths_must_be_existing_contained_images(client, tmp_p
         str(good.parent / "directory.png"), str(good.parent / "escape.png"),
         str(tmp_path / "outside.png"),
     ]}))
-    client.post("/api/config", json={"show_studio_on_home": True})
     items = client.get("/api/gallery/recent").json()["items"]
     assert [i["path"] for i in items] == ["studio/job-x/v1.png"]
 
@@ -198,7 +192,6 @@ def test_studio_gallery_does_not_borrow_other_job_kinds(client, tmp_path, overri
     _make_image(tmp_path / "studio" / "job-x" / "v1.png")
     job = _studio_job(tmp_path)
     save_job(job.model_copy(update=override))
-    client.post("/api/config", json={"show_studio_on_home": True})
     assert client.get("/api/gallery/recent").json()["items"] == []
 
 

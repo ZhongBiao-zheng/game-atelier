@@ -38,8 +38,8 @@ function LocalSettingsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [keysVersion, setKeysVersion] = useState(0);
-  // 首页展示 Studio 出图开关（应用级设置，默认关）。乐观切换，失败回滚。
-  const [showStudioOnHome, setShowStudioOnHome] = useState(false);
+  // 首页展示画布出图开关（应用级设置，默认开）。乐观切换，失败回滚。
+  const [showCanvasOnHome, setShowCanvasOnHome] = useState(true);
   const [togglingStudio, setTogglingStudio] = useState(false);
 
   useEffect(() => {
@@ -48,7 +48,7 @@ function LocalSettingsPage() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
     fetchConfig()
-      .then((cfg) => setShowStudioOnHome(cfg.show_studio_on_home))
+      .then((cfg) => setShowCanvasOnHome(cfg.show_canvas_on_home))
       .catch(() => {});
   }, []);
 
@@ -59,13 +59,13 @@ function LocalSettingsPage() {
   }, [loading]);
 
   async function toggleShowStudioOnHome() {
-    const next = !showStudioOnHome;
-    setShowStudioOnHome(next);
+    const next = !showCanvasOnHome;
+    setShowCanvasOnHome(next);
     setTogglingStudio(true);
     try {
-      await updateConfig({ show_studio_on_home: next });
+      await updateConfig({ show_canvas_on_home: next });
     } catch {
-      setShowStudioOnHome(!next);
+      setShowCanvasOnHome(!next);
     } finally {
       setTogglingStudio(false);
     }
@@ -182,23 +182,23 @@ function LocalSettingsPage() {
         <div className="min-w-0">
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0">
-              <p className="text-sm text-foreground">展示 Studio 出图</p>
+              <p className="text-sm text-foreground">展示画布出图</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                开启后，出图页的作品会与角色作品在首页混排；已隐藏的图不展示。
+                画布里正在显示的生成图会出现在首页；打码的不展示。
               </p>
             </div>
             <button
               type="button"
               role="switch"
-              aria-checked={showStudioOnHome}
-              aria-label="展示 Studio 出图"
+              aria-checked={showCanvasOnHome}
+              aria-label="展示画布出图"
               disabled={togglingStudio}
               onClick={() => void toggleShowStudioOnHome()}
-              className={`relative h-6 w-11 shrink-0 rounded-full border border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 ${showStudioOnHome ? 'bg-primary' : 'bg-secondary'}`}
+              className={`relative h-6 w-11 shrink-0 rounded-full border border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 ${showCanvasOnHome ? 'bg-primary' : 'bg-secondary'}`}
             >
               <span
                 aria-hidden
-                className={`absolute top-0.5 size-[18px] rounded-full bg-background transition-[left] ${showStudioOnHome ? 'left-[22px]' : 'left-0.5'}`}
+                className={`absolute top-0.5 size-[18px] rounded-full bg-background transition-[left] ${showCanvasOnHome ? 'left-[22px]' : 'left-0.5'}`}
               />
             </button>
           </div>

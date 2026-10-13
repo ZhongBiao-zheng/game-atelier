@@ -341,7 +341,7 @@ def get_config() -> dict:
     cfg = _read_config()
     return {
         "image_storage_root": cfg.get("image_storage_root") or str(_project_root()),
-        "show_studio_on_home": bool(cfg.get("show_studio_on_home", False)),
+        "show_canvas_on_home": bool(cfg.get("show_canvas_on_home", True)),
     }
 
 
@@ -1234,15 +1234,15 @@ def post_config(payload: dict = Body(...)) -> dict:
             raise HTTPException(422, detail=f"目录不可写：{expanded}")
         cfg["image_storage_root"] = str(expanded.resolve())
         updated = True
-    if "show_studio_on_home" in payload:
-        value = payload["show_studio_on_home"]
+    if "show_canvas_on_home" in payload:
+        value = payload["show_canvas_on_home"]
         if not isinstance(value, bool):
-            raise HTTPException(422, detail="show_studio_on_home 必须是布尔值（true / false）")
-        cfg["show_studio_on_home"] = value
+            raise HTTPException(422, detail="show_canvas_on_home 必须是布尔值（true / false）")
+        cfg["show_canvas_on_home"] = value
         updated = True
     if not updated:
         raise HTTPException(
-            422, detail="没有可识别的设置项：只接受 image_storage_root / show_studio_on_home"
+            422, detail="没有可识别的设置项：只接受 image_storage_root / show_canvas_on_home"
         )
     atomic_write_json(_runtime() / "config.json", cfg)
     return {"ok": True, **cfg}
@@ -1819,8 +1819,8 @@ _GALLERY_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
     """Return random character images from portrait/promo/turnaround.
 
-    开启 show_studio_on_home 时，只混入 Studio 已完成任务登记的图片产物。
-    画布上正在显示、没打码的生成图总是混入。
+    Studio 只混入已完成任务登记的图片产物。
+    show_canvas_on_home（默认开）时混入画布上正在显示、没打码的生成图。
     """
     characters_dir = _project_root() / "characters"
     items: list[dict] = []
@@ -1856,7 +1856,7 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
                         "mtime": mtime,
                     })
     studio_dir = _project_root() / "studio"
-    if bool(_read_config().get("show_studio_on_home", False)) and studio_dir.exists():
+    if studio_dir.exists():
         studio_root = studio_dir.resolve()
         seen_studio_paths: set[str] = set()
         # 文件存在不代表生成成功：目录里可能留下测试图或落盘后未完成登记的产物。
@@ -1894,7 +1894,8 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
                     "mtime": mtime,
                 })
     from character_workflow.lib.canvas_projects import list_canvas_gallery_images
-    for canvas_project_id, canvas_job_id, f in list_canvas_gallery_images():
+    show_canvas = bool(_read_config().get("show_canvas_on_home", True))
+    for canvas_project_id, canvas_job_id, f in list_canvas_gallery_images() if show_canvas else []:
         try:
             if f.suffix.lower() not in _GALLERY_EXTS:
                 continue

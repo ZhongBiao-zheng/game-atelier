@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.87.1',
+    date: '2026-10-13',
+    headline: '首页展示开关改成「展示画布出图」',
+    changes: [
+      { kind: 'feat', text: '设置里的「展示 Studio 出图」换成「展示画布出图」，默认打开；不想让画布的图上首页就关掉它。' },
+      { kind: 'feat', text: '创作台的出图现在默认在首页展示，不再需要开关。' },
+    ],
+  },
+  {
     version: '5.87.0',
     date: '2026-10-13',
     headline: '首页作品展示加入画布里的图',

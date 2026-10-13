@@ -2,14 +2,14 @@ import { request, requestJson } from './http';
 /** 应用级设置（`.runtime/config.json`）。POST 是合并式补丁：只更新传入的键。 */
 export interface AppConfig {
   image_storage_root: string;
-  show_studio_on_home: boolean;
+  show_canvas_on_home: boolean;
 }
 
 export async function fetchConfig(): Promise<AppConfig> {
   const data = await requestJson<Partial<AppConfig>>('/api/config', '读取应用设置');
   return {
     image_storage_root: data.image_storage_root ?? '',
-    show_studio_on_home: !!data.show_studio_on_home,
+    show_canvas_on_home: data.show_canvas_on_home ?? true,
   };
 }
 
