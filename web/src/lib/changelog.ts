@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.89.0',
+    date: '2026-10-13',
+    headline: '裁剪和切分弹窗重新排版',
+    changes: [
+      { kind: 'feat', text: '两个弹窗都改成左边大图、右边控件：图片不再跟着弹窗滚动。' },
+      { kind: 'feat', text: '裁剪：选区外变暗，选区内有三分线，输出尺寸显示在选区底边；宽、高直接填像素；可以一键重置为整张图。' },
+      { kind: 'feat', text: '切分：每块有编号，右边按编号列出每块的像素尺寸；行、列用加减调整，另有 2×2、3×3、1×4、4×1 四个常用预设；拖动切线时显示它离边缘多少像素。' },
+    ],
+  },
+  {
     version: '5.88.3',
     date: '2026-10-13',
     headline: '自定义工具条改成拖动排序',
