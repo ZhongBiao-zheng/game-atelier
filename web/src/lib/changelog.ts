@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.88.1',
+    date: '2026-10-13',
+    headline: '图片节点的工具条变短',
+    changes: [
+      { kind: 'feat', text: '工具条只直接放前 4 个快捷工具、图生图、保存和隐藏；其余工具、拆分图层、分享都在「更多」里。想换哪 4 个排前面，在「更多 → 自定义工具条」里调顺序。' },
+      { kind: 'feat', text: '节点下方的生成面板去掉了标题那一行，关闭按钮在右上角。' },
+    ],
+  },
+  {
     version: '5.88.0',
     date: '2026-10-13',
     headline: '画布四角的按钮重新分组',

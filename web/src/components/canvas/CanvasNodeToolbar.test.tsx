@@ -559,13 +559,17 @@ it('omits removed actions even in saved preferences and keeps allowed tools moun
   }
   expect(within(toolbar).getByRole('button', { name: '裁剪 图片' })).toBeInTheDocument();
   expect(within(toolbar).getByRole('button', { name: '切分 图片' })).toBeInTheDocument();
-  expect(within(toolbar).getByRole('button', { name: 'AI高清 图片' })).toBeInTheDocument();
-  fireEvent.click(within(toolbar).getByRole('button', { name: '拆分 图片 的图层' }));
+  // 第 4 个之后的快捷工具、拆分图层和工具条设置都在「更多」里。
+  const moreButton = within(toolbar).getByRole('button', { name: '图片 的更多工具' });
+  expect(within(toolbar).queryByRole('button', { name: 'AI高清 图片' })).not.toBeInTheDocument();
+  fireEvent.keyDown(moreButton, { key: 'Enter' });
+  expect(await screen.findByRole('menuitem', { name: 'AI高清 图片' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('menuitem', { name: '拆分 图片 的图层' }));
   expect(context.createLayerDecomposition).toHaveBeenCalledWith(image);
   expect(screen.queryByRole('dialog', { name: '拆分图层' })).not.toBeInTheDocument();
-  const settingsButton = within(toolbar).getByRole('button', { name: '配置图片快捷工具' });
-  act(() => settingsButton.focus());
-  fireEvent.click(settingsButton);
+  act(() => moreButton.focus());
+  fireEvent.keyDown(moreButton, { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: '配置图片快捷工具' }));
   expect(await screen.findByRole('dialog', { name: '自定义图片快捷工具' })).toBeInTheDocument();
   for (const label of ['删除节点', '存入资产库', '复制提示词', '反推提示词', '替换图片', '局部编辑']) {
     expect(screen.queryByRole('checkbox', { name: `显示${label}` })).not.toBeInTheDocument();
@@ -826,7 +830,7 @@ it('hide toggles the node hidden flag and flips the button label', () => {
   expect(document.querySelector('[data-canvas-node-hidden="true"]')).not.toBeNull();
 });
 
-it('puts fixed save and share buttons before hide, sharing only generated media', () => {
+it('keeps save and hide fixed and shares generated images from the more menu', async () => {
   const generatedImage = { ...nodes[1], data: { ...nodes[1].data, current_version_id: 'generated' } } as CanvasNode;
   const uploadedVideo = { ...nodes[2], data: { ...nodes[2].data, current_version_id: 'uploaded' } } as CanvasNode;
   const writtenText = { ...nodes[0], data: { ...nodes[0].data, current_version_id: 'written' } } as CanvasNode;
@@ -850,7 +854,7 @@ it('puts fixed save and share buttons before hide, sharing only generated media'
 
   const imageButtons = within(screen.getByRole('toolbar', { name: '图片 节点工具' })).getAllByRole('button')
     .map(button => button.getAttribute('aria-label'));
-  expect(imageButtons.slice(-3)).toEqual(['保存 图片', '分享 图片', '隐藏 图片 的内容']);
+  expect(imageButtons.slice(-2)).toEqual(['保存 图片', '隐藏 图片 的内容']);
   expect(imageButtons).not.toContain('将 图片 存入资产库');
 
   const videoToolbar = screen.getByRole('toolbar', { name: '视频 节点工具' });
@@ -862,7 +866,8 @@ it('puts fixed save and share buttons before hide, sharing only generated media'
 
   fireEvent.click(screen.getByRole('button', { name: '保存 图片' }));
   expect(context.saveAsset).toHaveBeenCalledWith(generatedImage);
-  fireEvent.click(screen.getByRole('button', { name: '分享 图片' }));
+  fireEvent.keyDown(screen.getByRole('button', { name: '图片 的更多工具' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: '分享 图片' }));
   expect(context.shareResult).toHaveBeenCalledWith(generatedImage);
 });
 

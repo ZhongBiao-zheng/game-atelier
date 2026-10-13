@@ -753,7 +753,8 @@ it('creates an editable layer-decomposition node before calling the model', asyn
 
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-source-image' }));
-  fireEvent.click(screen.getByRole('button', { name: '拆分 源图 的图层' }));
+  fireEvent.keyDown(screen.getByRole('button', { name: '源图 的更多工具' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: '拆分 源图 的图层' }));
 
   expect(await screen.findByLabelText('图层拆分设置')).toBeInTheDocument();
   expect(screen.getByRole('img', { name: '待拆分图片' })).toBeInTheDocument();
@@ -2213,7 +2214,8 @@ it('opens the team share dialog for a generated canvas result', async () => {
   vi.mocked(listTeamLibraries).mockResolvedValue([]);
   await renderReadyCanvas();
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-result-image' }));
-  fireEvent.click(await screen.findByRole('button', { name: '分享 成图' }));
+  fireEvent.keyDown(await screen.findByRole('button', { name: '成图 的更多工具' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: '分享 成图' }));
   const dialog = await screen.findByRole('dialog', { name: '分享到团队库' });
   expect(dialog.querySelector('img')).toHaveAttribute('src', '/media');
 });
