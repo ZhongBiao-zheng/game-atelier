@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.86.1',
+    date: '2026-10-13',
+    headline: '画布左下角的两个资产按钮合成一个',
+    changes: [
+      { kind: 'fix', text: '画布左下角原来有「媒体资产」「提示词资产」两个按钮，打开的是同一个面板。现在只留一个「资产」，提示词、媒体、团队在面板里切换。' },
+    ],
+  },
+  {
     version: '5.86.0',
     date: '2026-10-13',
     headline: '去掉「生成配置」节点',

@@ -1272,7 +1272,7 @@ it('adopts a team asset dropped on the canvas and inserts it', async () => {
 async function openTeamTab() {
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
   await screen.findByLabelText('画布编辑器 列车短片');
-  fireEvent.click(screen.getByRole('button', { name: '媒体资产' }));
+  fireEvent.click(screen.getByRole('button', { name: '资产' }));
   fireEvent.click(await screen.findByRole('button', { name: '团队' }));
 }
 
@@ -2263,7 +2263,7 @@ it('reproduces from the asset panel and names a model this machine lacks', async
   vi.mocked(markCreationAssetUsed).mockResolvedValue(missingModel);
   vi.mocked(reproduceIntoCanvas).mockResolvedValue(reproducedDocument());
   await renderReadyCanvas();
-  fireEvent.click(screen.getByRole('button', { name: '媒体资产' }));
+  fireEvent.click(screen.getByRole('button', { name: '资产' }));
   fireEvent.click(await screen.findByRole('button', { name: '复刻' }));
   await waitFor(() => expect(reproduceIntoCanvas).toHaveBeenCalledWith(expect.objectContaining({
     assetId: 'ca-gen', alias: null, model: null,
@@ -2372,7 +2372,7 @@ it('opens the team tab from «look» even after the prompt panel it was suggeste
   vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
   vi.mocked(listTeamLibraries).mockResolvedValue([]);
   await renderReadyCanvas();
-  fireEvent.click(screen.getByRole('button', { name: '提示词资产' }));
+  fireEvent.click(screen.getByRole('button', { name: '资产' }));
   expect(await screen.findByRole('complementary', { name: '创作资产' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'simulate team asset drop' }));
   expect(await screen.findByText('有 1 条相关配方')).toBeInTheDocument();

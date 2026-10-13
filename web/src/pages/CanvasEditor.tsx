@@ -52,7 +52,6 @@ import {
   Type,
   Upload,
   Sparkles,
-  WandSparkles,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
@@ -550,7 +549,6 @@ function CanvasEditorInner({
   const editorRegionRef = useRef<HTMLElement>(null);
   const addTriggerRef = useRef<HTMLButtonElement>(null);
   const assetLibraryTriggerRef = useRef<HTMLButtonElement>(null);
-  const promptLibraryTriggerRef = useRef<HTMLButtonElement>(null);
   const creationAssetPanelRef = useRef<CreationAssetPanelHandle>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const createMenuRef = useRef<HTMLDivElement>(null);
@@ -656,15 +654,13 @@ function CanvasEditorInner({
   }, []);
 
   const closeLibrary = useCallback(() => {
-    const trigger = libraryMode === 'prompts'
-      ? promptLibraryTriggerRef.current
-      : assetLibraryTriggerRef.current;
+    const trigger = assetLibraryTriggerRef.current;
     setLibraryMode(null);
     setTeamRelatedSha256(null);
     setTeamLibraryId(null);
     if (!usedPromptAssetRef.current) requestAnimationFrame(() => trigger?.focus());
     usedPromptAssetRef.current = false;
-  }, [libraryMode]);
+  }, []);
 
   const mergeRunDocument = useCallback((
     remote: CanvasDocument,
@@ -4663,8 +4659,7 @@ function CanvasEditorInner({
           settings: { ...current.settings, show_minimap: !current.settings.show_minimap },
         }), true)}
       ><MapPinned /></button>
-      <ToolButton buttonRef={assetLibraryTriggerRef} label="媒体资产" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setAgentOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('assets'); else if (libraryMode === 'assets') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('assets')); }}><Library /></ToolButton>
-      <ToolButton buttonRef={promptLibraryTriggerRef} label="提示词资产" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setAgentOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('prompts'); else if (libraryMode === 'prompts') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('prompts')); }}><WandSparkles /></ToolButton>
+      <ToolButton buttonRef={assetLibraryTriggerRef} label="资产" active={Boolean(libraryMode)} expanded={Boolean(libraryMode)} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setAgentOpen(false); setCreateMenu(null); if (libraryMode) creationAssetPanelRef.current?.requestClose(); else setLibraryMode('assets'); }}><Library /></ToolButton>
       <ToolButton
         buttonRef={generationPreferencesTriggerRef}
         label="生成偏好"
