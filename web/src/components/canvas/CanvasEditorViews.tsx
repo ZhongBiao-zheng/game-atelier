@@ -512,6 +512,29 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     context.updateNode(node.id, candidate => ({ ...candidate, hidden: !candidate.hidden }));
   }
 
+  // 保存与隐藏是固定按钮；图片节点把它们排在「更多」之前，让「更多」落在工具条最右。
+  const fixedToolbarButtons = (
+    <>
+      {isCanvasContentNode(node) && isSavableCanvasVersion(content) && (
+        <MediaToolButton label={`保存 ${node.title}`} text="保存" onClick={() => void context.saveAsset(node)}>
+          <BookmarkPlus />
+        </MediaToolButton>
+      )}
+      {isCanvasContentNode(node) && node.type !== 'image' && context.shareResult && isShareableCanvasVersion(content) && (
+        <MediaToolButton label={`分享 ${node.title}`} text="分享" onClick={() => context.shareResult?.(node)}>
+          <Share2 />
+        </MediaToolButton>
+      )}
+      {(hasHideableContent || node.hidden) && <MediaToolButton
+        label={node.hidden ? `显示 ${node.title} 的内容` : `隐藏 ${node.title} 的内容`}
+        text={node.hidden ? '显示' : '隐藏'}
+        onClick={toggleHidden}
+      >
+        <SwapIcon swapKey={Boolean(node.hidden)}>{node.hidden ? <Eye /> : <EyeOff />}</SwapIcon>
+      </MediaToolButton>}
+    </>
+  );
+
   return (
     <div
       ref={setShellElement}
@@ -668,27 +691,30 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               <SwapIcon swapKey={Boolean(replacingMedia)}>{replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}</SwapIcon>
             </MediaToolButton>
           ) : node.type === 'image' ? (
-            <>
               <ImageNodeToolbar
                 node={node}
                 content={content}
                 replacing={replacingMedia}
                 submitting={submittingNode}
                 context={context}
+                trailing={(
+                  <>
+                    {reversePromptJob && reversePromptSucceeded && !context.reversePromptConfiguredNodeIds.has(node.id) && (
+                      <MediaToolButton
+                        label="用反推文本生成图片"
+                        text="生成图片"
+                        disabled={submittingNode}
+                        onClick={() => void context.recoverReversePromptConfig(reversePromptJob)}
+                      >
+                        <SwapIcon swapKey={Boolean(submittingNode)}>{submittingNode ? <LoaderCircle className="animate-spin" /> : <Sparkles />}</SwapIcon>
+                      </MediaToolButton>
+                    )}
+                    {fixedToolbarButtons}
+                  </>
+                )}
                 onShare={context.shareResult && isShareableCanvasVersion(content) ? () => context.shareResult?.(node) : undefined}
                 onOverlayOpenChange={setToolbarOverlayOpen}
               />
-              {reversePromptJob && reversePromptSucceeded && !context.reversePromptConfiguredNodeIds.has(node.id) && (
-                <MediaToolButton
-                  label="用反推文本生成图片"
-                  text="生成图片"
-                  disabled={submittingNode}
-                  onClick={() => void context.recoverReversePromptConfig(reversePromptJob)}
-                >
-                  <SwapIcon swapKey={Boolean(submittingNode)}>{submittingNode ? <LoaderCircle className="animate-spin" /> : <Sparkles />}</SwapIcon>
-                </MediaToolButton>
-              )}
-            </>
           ) : (
             <CanvasNodeToolbar
               node={node}
@@ -699,23 +725,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               onEditText={beginTextEditing}
             />
           )}
-          {isCanvasContentNode(node) && isSavableCanvasVersion(content) && (
-            <MediaToolButton label={`保存 ${node.title}`} text="保存" onClick={() => void context.saveAsset(node)}>
-              <BookmarkPlus />
-            </MediaToolButton>
-          )}
-          {isCanvasContentNode(node) && node.type !== 'image' && context.shareResult && isShareableCanvasVersion(content) && (
-            <MediaToolButton label={`分享 ${node.title}`} text="分享" onClick={() => context.shareResult?.(node)}>
-              <Share2 />
-            </MediaToolButton>
-          )}
-          {(hasHideableContent || node.hidden) && <MediaToolButton
-            label={node.hidden ? `显示 ${node.title} 的内容` : `隐藏 ${node.title} 的内容`}
-            text={node.hidden ? '显示' : '隐藏'}
-            onClick={toggleHidden}
-          >
-            <SwapIcon swapKey={Boolean(node.hidden)}>{node.hidden ? <Eye /> : <EyeOff />}</SwapIcon>
-          </MediaToolButton>}
+          {(emptyMediaNode || node.type !== 'image') && fixedToolbarButtons}
         </div>
       </NodeToolbar>
       {node.type === 'image' && mediaCandidates.length > 0 && (
@@ -1561,6 +1571,7 @@ function ImageNodeToolbar({
   submitting,
   context,
   onShare,
+  trailing,
   onOverlayOpenChange,
 }: {
   node: Extract<CanvasContentNode, { type: 'image' }>;
@@ -1569,6 +1580,8 @@ function ImageNodeToolbar({
   submitting: boolean;
   context: CanvasNodeContextValue;
   onShare?: () => void;
+  /** 排在「更多」之前的固定按钮。 */
+  trailing?: React.ReactNode;
   onOverlayOpenChange: (open: boolean) => void;
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1762,6 +1775,7 @@ function ImageNodeToolbar({
         disabled={!currentVersionId || submitting || replacing}
         onClick={() => context.createImageFromSource?.(node.id)}
       ><Sparkles /></MediaToolButton>
+      {trailing}
       <DropdownMenu onOpenChange={updateMenuOpen}>
         <DropdownMenuTrigger asChild>
           <MediaToolButton label={`${node.title} 的更多工具`} text="更多" onClick={() => undefined}>

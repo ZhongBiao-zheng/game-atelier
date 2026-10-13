@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, Plus } from 'lucide-react';
+import { Link } from 'wouter';
 import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
 import { cn } from '@/lib/utils';
 import type { CanvasAgentChatModel, CanvasAgentChatModelList } from '@/schema/canvas';
@@ -97,6 +98,12 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
             <p key={item.alias} className="px-2 py-1 text-xs text-destructive">{item.alias}：{item.message}</p>
           ))}
         </div>
+        <Link
+          href="/settings?section=keys"
+          className="mt-1 flex items-center gap-2 rounded-md border-t border-border px-2 py-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+        >
+          <Plus className="size-3.5 shrink-0" aria-hidden="true" />添加模型
+        </Link>
       </ToolbarPopover>
     </>
   );

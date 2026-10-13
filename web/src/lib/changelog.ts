@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.88.2',
+    date: '2026-10-13',
+    headline: '画布三处小调整',
+    changes: [
+      { kind: 'fix', text: '图片节点工具条的「更多」移到最右边，排在保存和隐藏之后。' },
+      { kind: 'fix', text: '重命名画布项目时直接在原来的名字上改，输入区域和名字一样宽。' },
+      { kind: 'feat', text: 'Agent 的模型列表底部多了「添加模型」，点它去设置里的 API 密钥。' },
+    ],
+  },
+  {
     version: '5.88.1',
     date: '2026-10-13',
     headline: '图片节点的工具条变短',

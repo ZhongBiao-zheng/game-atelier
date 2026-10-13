@@ -146,7 +146,6 @@ import { TEAM_ASSET_DRAG_TYPE, readTeamAssetDrag } from '@/schema/teamLibrary';
 import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
 import { TEAM_ASSET_ACTION_EVENT, type TeamAssetAction } from '@/lib/teamAssetActions';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -4972,12 +4971,16 @@ function CanvasEditorInner({
                 </DropdownMenu>
               </div>
             ) : (
-              <Input
+              <span className="inline-grid h-9 max-w-28 items-center overflow-hidden rounded-md bg-secondary px-2 text-sm font-medium sm:max-w-52">
+                {/* 输入框宽度跟着名字走：隐藏的同字号文本撑开格子，输入框铺满它。 */}
+                <span aria-hidden="true" className="invisible col-start-1 row-start-1 whitespace-pre">{projectRenameDraft || ' '}</span>
+                <input
+                size={1}
                 ref={projectRenameInputRef}
                 value={projectRenameDraft}
                 disabled={projectRenameBusy}
                 aria-label="画布项目名称"
-                className="h-9 w-32 sm:w-52"
+                className="col-start-1 row-start-1 w-full min-w-0 bg-transparent text-foreground outline-none disabled:opacity-50"
                 onChange={event => setProjectRenameDraft(event.target.value)}
                 onBlur={() => void commitProjectRename(false)}
                 onKeyDown={event => {
@@ -4994,6 +4997,7 @@ function CanvasEditorInner({
                   }
                 }}
               />
+              </span>
             )}
           </div>
           {/* 正常保存不打扰（飙哥 2026-09-30 去掉「已保存 · vN」）；只有失败要露出来并给重试。 */}
