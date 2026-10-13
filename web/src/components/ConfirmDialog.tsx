@@ -46,7 +46,7 @@ export function ConfirmDialog({
             <DialogTitle>{title}</DialogTitle>
             <DialogDescription>{message}</DialogDescription>
             {detail && (
-              <p className="break-all whitespace-pre-wrap font-mono text-xs text-muted-foreground/70">
+              <p className="break-all whitespace-pre-wrap font-mono text-xs text-muted-foreground">
                 {detail}
               </p>
             )}

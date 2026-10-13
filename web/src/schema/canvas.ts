@@ -182,15 +182,10 @@ export interface CanvasAudioNode extends CanvasNodeBase {
   data: CanvasContentNodeData;
 }
 
-export interface CanvasConfigNode extends CanvasNodeBase {
-  type: 'config';
-  data: { draft: CanvasGenerationDraft };
-}
-
 export interface CanvasGroupNode extends CanvasNodeBase {
   type: 'group';
   size?: CanvasGroupSize | null;
-  data: { member_node_ids: string[]; repeat_count?: number };
+  data: { member_node_ids: string[] };
 }
 
 export interface CanvasBatchMaterialItem {
@@ -251,7 +246,7 @@ export interface CanvasPluginNode extends CanvasNodeBase {
 }
 
 export type CanvasContentNode = CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode;
-export type CanvasNode = CanvasContentNode | CanvasConfigNode | CanvasGroupNode | CanvasPluginNode
+export type CanvasNode = CanvasContentNode | CanvasGroupNode | CanvasPluginNode
   | CanvasBatchMaterialNode | CanvasLayerStackNode;
 
 export type CanvasVideoFrameSlot = 'first_frame' | 'last_frame';

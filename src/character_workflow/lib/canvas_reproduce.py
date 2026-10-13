@@ -1,4 +1,4 @@
-"""画布复刻：把一条生成资产展开成「参考输入节点 + 生成配置节点 + 连线」，不自动 Run。
+"""画布复刻：把一条生成资产展开成「参考输入节点 + 带生成设置的空节点 + 连线」，不自动 Run。
 
 浏览器不能新建媒体版本（`save_canvas_document` 只放行手动文本版本），所以参考媒体由服务端
 在一次画布锁内拷进 uploads/、登记版本、建节点与连线。配方里的模型由前端匹配本机 key 后传入，
@@ -34,15 +34,16 @@ from character_workflow.lib.media_probe import mp4_track_dimensions
 from character_workflow.lib.schemas import (
     CANVAS_DRAFT_PARAM_FIELDS,
     MEDIA_SUFFIXES,
-    CanvasConfigNode,
-    CanvasConfigNodeData,
     CanvasCreationAssetSnapshotOrigin,
     CanvasDocument,
     CanvasGenerationDraft,
     CanvasInputConnection,
+    CanvasImageNode,
+    CanvasMediaNodeData,
     CanvasMediaVersion,
     CanvasPoint,
     CanvasReproduceResponse,
+    CanvasVideoNode,
     GenerationRecipe,
     JobParams,
     RecipeInput,
@@ -224,13 +225,14 @@ def reproduce_generation_asset_into_canvas(
             y += height + _NODE_GAP
 
         config_x = position.x + column_width + _COLUMN_GAP if input_nodes else position.x
-        config = CanvasConfigNode(
-            id=f"config-{secrets.token_hex(8)}",
-            type="config",
+        surface_type = CanvasVideoNode if recipe.mode == "video" else CanvasImageNode
+        config = surface_type(
+            id=f"{recipe.mode}-{secrets.token_hex(8)}",
+            type=recipe.mode,
             title=f"{_MODE_LABELS[recipe.mode]}生成",
             position=CanvasPoint(x=config_x, y=position.y),
             z_index=0,
-            data=CanvasConfigNodeData(draft=_draft(
+            data=CanvasMediaNodeData(generation_draft=_draft(
                 recipe, asset.title, model, alias, bool(input_nodes), timestamp,
             )),
         )

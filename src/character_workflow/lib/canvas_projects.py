@@ -722,6 +722,42 @@ def _cover_for_project(
     return None
 
 
+def list_canvas_gallery_images() -> list[tuple[str, str, Path]]:
+    """首页作品展示用：每张画布上「正在显示的生成图」，返回 (project_id, job_id, 文件)。
+
+    只取节点当前版本、来源是生成任务的图片：上传的参考图是素材不是作品，被换掉的候选和
+    已删除的节点也不算。打码的节点不取，判据与项目封面一致。坏项目跳过，不拖垮首页。
+    """
+    root = canvas_projects_root()
+    if not root.exists():
+        return []
+    images: list[tuple[str, str, Path]] = []
+    for path in root.glob("*/project.json"):
+        project_id = path.parent.name
+        try:
+            with file_lock(canvas_project_lock_path(project_id)):
+                _recover_canvas_transactions_unlocked(project_id)
+                document = _read_canvas_document_unlocked(project_id)
+        except (OSError, RuntimeError, ValueError, ValidationError, json.JSONDecodeError, KeyError):
+            continue
+        seen: set[str] = set()
+        for node in document.nodes:
+            version_id = node.data.current_version_id if node.type == "image" else None
+            if node.hidden or version_id is None or version_id in seen:
+                continue
+            version = document.content_versions.get(version_id)
+            if version is None or version.kind != "image" or version.origin.kind != "job_output":
+                continue
+            try:
+                target, _version = _resolve_canvas_media_version(project_id, version)
+            except (KeyError, OSError, PermissionError, ValueError):
+                continue
+            if target.is_file():
+                seen.add(version_id)
+                images.append((project_id, version.origin.job_id, target))
+    return images
+
+
 def list_canvas_projects() -> list[CanvasProjectSummary]:
     root = canvas_projects_root()
     if not root.exists():

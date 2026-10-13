@@ -52,10 +52,9 @@ import {
   Type,
   Upload,
   Sparkles,
-  WandSparkles,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { Link, useLocation } from 'wouter';
 
 import {
@@ -71,7 +70,6 @@ import {
   replaceCanvasNodeMedia,
   pasteIntoCanvas,
   reproduceIntoCanvas,
-  retryCanvasRun,
   runCanvasMediaOperation,
   getCanvasMattingModel,
   downloadCanvasMattingModel,
@@ -91,6 +89,7 @@ import { useCanvasBatchRuns } from '@/hooks/useCanvasBatchRuns';
 import { prepareCanvasBatch, startCanvasBatch, cancelCanvasBatch } from '@/api/canvasBatch';
 import { CanvasBatchConfirmation } from '@/components/canvas/CanvasBatchControls';
 import { canvasEdgeTypes } from '@/components/canvas/CanvasConnectionEdge';
+import { CanvasConnectionLine, CanvasPendingConnection } from '@/components/canvas/CanvasConnectionLine';
 import type { CanvasBatchRun } from '@/schema/canvasBatch';
 import {
   AddMenuButton,
@@ -109,7 +108,6 @@ import { CanvasLayerStackPreview } from '@/components/canvas/CanvasLayerStackPre
 import { CanvasThemeSelector } from '@/components/canvas/CanvasThemeSelector';
 import {
   CanvasGenerationMetadata,
-  canvasRetryErrorMessage,
 } from '@/components/canvas/CanvasGenerationMetadata';
 import {
   CanvasGenerationPreferencesDialog,
@@ -221,7 +219,7 @@ import {
   canvasNodeHasHideableContent,
   createCanvasGenerationDraft,
   resolveCanvasGenerationDraft,
-  createConnectedCanvasConfig,
+  createConnectedCanvasSurface,
   reorderCanvasInputConnections,
   layerStackSizeForCanvasVersion,
   normalizeCanvasVideoParams,
@@ -236,8 +234,8 @@ import {
   syncDraftLayerStackSources,
   canvasReadingOrder,
   expandCanvasInputSource,
+  canvasModesRejectingSources,
 } from './canvasEditorModel';
-import { restoreCanvasRetryConfiguration } from './canvasRetryMerge';
 import { resolveRecipeModel } from './studioRecipe';
 import {
   canvasNodeSaveRequest,
@@ -255,6 +253,8 @@ interface CreateMenuState {
   /** 从输出侧拖出时要一起连进新节点的全部来源：起点在多选里就是整组，否则只有起点。 */
   sourceIds?: string[];
   sourceHandle?: 'source' | 'target';
+  /** 拖线松手时指针的屏幕位置；列表贴着它摆，线接到列表靠来源那一侧的正中。 */
+  pointer?: XYPosition;
 }
 
 interface MaterialPickState {
@@ -354,9 +354,7 @@ function mentionNodeFragment(node: CanvasNode): string {
   const cached = mentionNodeFragments.get(node);
   if (cached !== undefined) return cached;
   const fragment = JSON.stringify(
-    node.type === 'config'
-      ? [node.id, node.title, node.type, null, node.data.draft.mode]
-      : node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio'
+    node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio'
         ? [
           node.id,
           node.title,
@@ -433,6 +431,9 @@ const TOOL_NOTICE_LONG_MS = 6000;
 const REPRODUCE_CONFLICT_MESSAGE = '画布已更新，请重试';
 
 const CANVAS_CHROME_BUTTON_CLASS = 'grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+
+// 模块级常量：xyflow 按引用比较 props，内联对象会让它每次渲染都当成变更。
+const CANVAS_PRO_OPTIONS = { hideAttribution: true };
 
 export function CanvasEditor(props: {
   projectId: string;
@@ -548,10 +549,10 @@ function CanvasEditorInner({
   const editorRegionRef = useRef<HTMLElement>(null);
   const addTriggerRef = useRef<HTMLButtonElement>(null);
   const assetLibraryTriggerRef = useRef<HTMLButtonElement>(null);
-  const promptLibraryTriggerRef = useRef<HTMLButtonElement>(null);
   const creationAssetPanelRef = useRef<CreationAssetPanelHandle>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const createMenuRef = useRef<HTMLDivElement>(null);
+  const [createMenuDock, setCreateMenuDock] = useState<{ left: number; top: number; anchor: XYPosition } | null>(null);
   const shortcutsTriggerRef = useRef<HTMLButtonElement>(null);
   const generationPreferencesTriggerRef = useRef<HTMLButtonElement>(null);
   const openGenerationPreferences = useCallback((tab: CanvasGenerationPreferencesTab) => {
@@ -653,15 +654,13 @@ function CanvasEditorInner({
   }, []);
 
   const closeLibrary = useCallback(() => {
-    const trigger = libraryMode === 'prompts'
-      ? promptLibraryTriggerRef.current
-      : assetLibraryTriggerRef.current;
+    const trigger = assetLibraryTriggerRef.current;
     setLibraryMode(null);
     setTeamRelatedSha256(null);
     setTeamLibraryId(null);
     if (!usedPromptAssetRef.current) requestAnimationFrame(() => trigger?.focus());
     usedPromptAssetRef.current = false;
-  }, [libraryMode]);
+  }, []);
 
   const mergeRunDocument = useCallback((
     remote: CanvasDocument,
@@ -889,7 +888,6 @@ function CanvasEditorInner({
     remote: CanvasDocument,
     job: Job,
     dirtyAtSubmission: number,
-    submittedDocument?: CanvasDocument | null,
   ) => {
     serverRevision.current = Math.max(serverRevision.current, remote.revision);
     const context = job.canvas_run;
@@ -898,10 +896,7 @@ function CanvasEditorInner({
       setDocument(remote);
       return;
     }
-    const restoringRetry = Boolean(job.retry_of && submittedDocument);
-    const current = restoringRetry && submittedDocument
-      ? restoreCanvasRetryConfiguration(latest, remote, submittedDocument, context.result_node_id)
-      : latest;
+    const current = latest;
     const remoteNodes = new Map(remote.nodes.map(node => [node.id, node]));
     const remoteResult = remoteNodes.get(context.result_node_id);
     const hasResult = current.nodes.some(node => node.id === context.result_node_id);
@@ -909,9 +904,7 @@ function CanvasEditorInner({
     const nodes = current.nodes.map(node => {
       if (node.id !== context.result_node_id || !remoteResult) return node;
       if (node.type === 'layer_stack' && remoteResult.type === 'layer_stack') {
-        return { ...node, data: restoringRetry
-          ? { ...node.data, active_run_id: remoteResult.data.active_run_id, error: remoteResult.data.error }
-          : remoteResult.data };
+        return { ...node, data: remoteResult.data };
       }
       if (!isContentNode(node) || !isContentNode(remoteResult)) return node;
       return {
@@ -1744,8 +1737,49 @@ function CanvasEditorInner({
       sourceId: state.fromNode.id,
       sourceIds: startedFromTarget ? undefined : sourceIds,
       sourceHandle: state.fromHandle?.type ?? 'source',
+      pointer,
     });
   }, [connectSources, connectionSourceIds, onConnect, screenToFlowPosition]);
+
+  const screenToFlowPositionRef = useRef(screenToFlowPosition);
+  screenToFlowPositionRef.current = screenToFlowPosition;
+  // 从连线拖出的创建列表：垂直居中对着松手点，线贴着列表靠来源那一侧的边、接在正中。
+  // 量的是 offset 尺寸，不受进场动效的 transform 影响。
+  useLayoutEffect(() => {
+    const menu = createMenuRef.current;
+    const pointer = createMenu?.pointer;
+    if (!menu || !pointer) { setCreateMenuDock(null); return; }
+    const toFlow = screenToFlowPositionRef.current;
+    const fromOutput = createMenu.sourceHandle !== 'target';
+    const { offsetWidth: width, offsetHeight: height } = menu;
+    const left = Math.max(12, Math.min(fromOutput ? pointer.x : pointer.x - width, window.innerWidth - width - 12));
+    const top = Math.max(12, Math.min(pointer.y - height / 2, window.innerHeight - height - 12));
+    setCreateMenuDock({
+      left, top,
+      anchor: toFlow({ x: fromOutput ? left : left + width, y: top + height / 2 }),
+    });
+  }, [createMenu]);
+
+  // 创建列表是屏幕上的浮层，但它属于画布上的一个位置：平移 / 缩放画布时跟着那个位置走，
+  // 否则列表钉在屏幕上、连线却跟着画布跑。直接改 style，不走 React（平移每帧都会触发）。
+  useEffect(() => {
+    const menu = createMenuRef.current;
+    if (!menu || !createMenu) return;
+    const [originX, originY, originZoom] = flowStore.getState().transform ?? [0, 0, 1];
+    const docked = Boolean(createMenu.pointer);
+    const attachX = docked && createMenu.sourceHandle === 'target' ? menu.offsetWidth : 0;
+    const attachY = docked ? menu.offsetHeight / 2 : 0;
+    const startX = Number.parseFloat(menu.style.left) + attachX;
+    const startY = Number.parseFloat(menu.style.top) + attachY;
+    return flowStore.subscribe((state, previous) => {
+      if (!state.transform || state.transform === previous.transform) return;
+      const frame = state.domNode?.getBoundingClientRect();
+      const [x, y, zoom] = state.transform;
+      const scale = zoom / originZoom;
+      menu.style.left = `${(startX - (frame?.left ?? 0) - originX) * scale + x + (frame?.left ?? 0) - attachX}px`;
+      menu.style.top = `${(startY - (frame?.top ?? 0) - originY) * scale + y + (frame?.top ?? 0) - attachY}px`;
+    });
+  }, [createMenu, createMenuDock, flowStore]);
 
   const sweepHits = useRef<ReadonlySet<string>>(new Set());
 
@@ -1897,7 +1931,6 @@ function CanvasEditorInner({
     ),
   );
   const selectedDraft = useMemo(() => selectedNode && !selectedIsUploadedImageMaterial
-    && !(selectedNode.type === 'config' && selectedNode.data.draft.mode === 'text')
     ? resolveCanvasGenerationDraft(selectedNode, keys, canvasUiPreferences.generation_defaults.text)
     : null, [selectedNode, selectedIsUploadedImageMaterial, keys, canvasUiPreferences.generation_defaults.text]);
   const generationPanelOpen = Boolean(
@@ -2395,13 +2428,12 @@ function CanvasEditorInner({
     const right = Math.max(...members.map(node => node.position.x + canvasNodeRenderedSize(node, current.content_versions).width)) + 24;
     const bottom = Math.max(...members.map(node => node.position.y + canvasNodeRenderedSize(node, current.content_versions).height)) + 24;
     const id = makeId('group');
-    commit(document => ({ ...document, nodes: [...document.nodes, { id, type: 'group', title: '执行分组',
+    commit(document => ({ ...document, nodes: [...document.nodes, { id, type: 'group', title: '分组',
       position: { x: left, y: top }, size: { width: right - left, height: bottom - top }, z_index: 0,
       data: {
         // 顺序按画布阅读顺序写死在数据里：它既是分组当素材包时的参考编号顺序，也是超上限时
         // 的截断依据。存成数据而不是两端各排一次，省掉一个必然漂移的判据。
         member_node_ids: canvasReadingOrder(members, current.content_versions).map(node => node.id),
-        repeat_count: 1,
       } }] }), true);
     setSelectedNodeIds(new Set([id]));
   }
@@ -2445,25 +2477,6 @@ function CanvasEditorInner({
       ...base,
       type: 'video',
       data: { ...data, display: { fit: 'contain', free_resize: false } },
-    }, menu);
-  }
-
-  function addConfigNode(menu: CreateMenuState | null = createMenu) {
-    const draft = createCanvasGenerationDraft(keys, 'image', {
-      preference: canvasUiPreferences.generation_defaults.image,
-      prompt: menu?.sourceId && menu.sourceHandle !== 'target'
-        ? (menu.sourceIds ?? [menu.sourceId]).map(id => `@[node:${id}]`).join(' ')
-        : '',
-    });
-    appendNode({
-      id: makeId('config'),
-      title: '生成配置',
-      type: 'config',
-      position: menu?.flow
-        ? placeNewNode(menu.flow, CANVAS_DEFAULT_NODE_SIZE)
-        : defaultPosition(CANVAS_DEFAULT_NODE_SIZE),
-      z_index: 0,
-      data: { draft },
     }, menu);
   }
 
@@ -2888,10 +2901,8 @@ function CanvasEditorInner({
     setError(null); setBatchError(null);
     try {
       if (!await persistNow()) return;
-      const node = latestDocument.current?.nodes.find(candidate => candidate.id === nodeId);
       const preparedEditVersion = dirtyVersion.current;
-      const plan = await prepareCanvasBatch(projectId, nodeId, serverRevision.current,
-        node?.type === 'group' ? node.data.repeat_count ?? 1 : 1);
+      const plan = await prepareCanvasBatch(projectId, nodeId, serverRevision.current);
       batchPreparedEditVersion.current = preparedEditVersion;
       setBatchConfirmation(plan);
     } catch (failure) { setError((failure as Error).message); }
@@ -3130,46 +3141,6 @@ function CanvasEditorInner({
       if (resultId) setSelectedNodeIds(new Set([resultId]));
     } catch (submitError) {
       setError((submitError as Error).message);
-    } finally {
-      runSubmissionInFlight.current = false;
-      if (saveQueued.current) void flushSave().catch(() => undefined);
-      setSubmittingNodeIds(current => {
-        const next = new Set(current);
-        next.delete(nodeId);
-        return next;
-      });
-    }
-  }, [
-    applyLocalJob,
-    flushSave,
-    mergeSubmittedRunDocument,
-    persistNow,
-    projectId,
-  ]);
-
-  const retryRun = useCallback(async (nodeId: string, runId: string) => {
-    if (batchBusyRef.current) { setError('批量执行期间请先等待或停止'); return; }
-    if (runSubmissionInFlight.current) {
-      setError('另一项生成正在提交，请稍后再试。');
-      return;
-    }
-    setSubmittingNodeIds(current => new Set(current).add(nodeId));
-    setError(null);
-    try {
-      if (!await persistNow()) return;
-      const submittedDocument = latestDocument.current;
-      const dirtyAtSubmission = dirtyVersion.current;
-      runSubmissionInFlight.current = true;
-      const run = await retryCanvasRun(projectId, runId, serverRevision.current);
-      if (run.job.canvas_run && isReversePromptJob(run.job)) {
-        reversePromptConfigEligibleRuns.current.add(run.job.canvas_run.run_id);
-      }
-      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission, submittedDocument);
-      applyLocalJob(run.job);
-      const resultId = run.job.canvas_run?.result_node_id;
-      if (resultId) setSelectedNodeIds(new Set([resultId]));
-    } catch (retryError) {
-      setError(canvasRetryErrorMessage(retryError));
     } finally {
       runSubmissionInFlight.current = false;
       if (saveQueued.current) void flushSave().catch(() => undefined);
@@ -3511,7 +3482,7 @@ function CanvasEditorInner({
     const document = mentionDocumentRef.current;
     if (!document) return configured;
     const configIds = new Set(
-      document.nodes.filter(node => node.type === 'config').map(node => node.id),
+      document.nodes.filter(node => node.type === 'image').map(node => node.id),
     );
     for (const connection of document.connections) {
       if (
@@ -3579,8 +3550,8 @@ function CanvasEditorInner({
       const concurrent = latestDocument.current ?? remote;
       const configId = reversePromptConfigNodeId(context.result_node_id);
       const remoteConfig = remote.nodes.find(node => node.id === configId);
-      if (!remoteConfig || remoteConfig.type !== 'config') {
-        throw new Error('服务端没有返回反推图片配置节点。');
+      if (!remoteConfig || remoteConfig.type !== 'image') {
+        throw new Error('服务端没有返回反推后的图片节点。');
       }
       const hadConfig = concurrent.nodes.some(node => node.id === configId);
       const connectionIds = new Set(concurrent.connections.map(connection => connection.id));
@@ -3619,13 +3590,13 @@ function CanvasEditorInner({
       flowNodeCache.current.clear();
       setDocument(merged);
       // 这是后台自动动作，不是用户点出来的：只有当选择还停在反推结果节点上（提交时留下的那个
-      // 选中态）才把焦点挪到新配置节点。用户已经去点别的东西了就别抢。
+      // 选中态）才把焦点挪到新图片节点。用户已经去点别的东西了就别抢。
       const selection = latestSelectedNodeIds.current;
       if (selection.size === 1 && selection.has(context.result_node_id)) {
         setSelectedConnectionIds(new Set());
         setSelectedNodeIds(new Set([configId]));
       }
-      announceToolNotice('已从反推文本创建图片生成配置');
+      announceToolNotice('已用反推文本创建图片节点');
     } catch (configError) {
       setError((configError as Error).message);
     } finally {
@@ -4026,7 +3997,7 @@ function CanvasEditorInner({
     setError(null);
     const newNodeId = makeId('video');
     const current = latestDocument.current;
-    const next = current && createConnectedCanvasConfig(current, node.id, draft,
+    const next = current && createConnectedCanvasSurface(current, node.id, draft,
       { nodeId: newNodeId, connectionId: makeId('connection') }, 'video');
     if (!next) { setError('无法创建视频编辑节点。'); return; }
     commit(() => next, true);
@@ -4040,7 +4011,7 @@ function CanvasEditorInner({
     const current = latestDocument.current;
     if (!current) return;
     const newNodeId = makeId('image');
-    const next = createConnectedCanvasConfig(current, nodeId,
+    const next = createConnectedCanvasSurface(current, nodeId,
       createCanvasGenerationDraft(keys, 'image', {
         preference: canvasUiPreferences.generation_defaults.image,
       }), { nodeId: newNodeId, connectionId: makeId('connection') }, 'image');
@@ -4408,7 +4379,7 @@ function CanvasEditorInner({
       if (connection.role !== 'input' || connection.slot) continue;
       const sources = result.get(connection.target_node_id) ?? new Set<string>();
       // 连的是分组时，界面上的参考位要显示包里的成员——和真正发出去的那批素材保持一致。
-      for (const sourceId of current ? expandCanvasInputSource(current, connection.source_node_id) : []) {
+      for (const sourceId of current ? expandCanvasInputSource(current, connection.source_node_id, connection.target_node_id) : []) {
         sources.add(sourceId);
       }
       result.set(connection.target_node_id, sources);
@@ -4479,7 +4450,6 @@ function CanvasEditorInner({
     focusVariableNodeId,
     consumeVariableFocus,
     batchBusy: Boolean(activeBatch),
-    prepareBatch,
     activeBatch: activeBatch ? { scopeNodeId: activeBatch.scope_node_id, stopping: activeBatch.status === 'stopping' } : undefined,
     stopActiveBatch,
     uploadBatchImages,
@@ -4518,7 +4488,6 @@ function CanvasEditorInner({
     selectCandidate,
     reportError,
     submitRun,
-    retryRun,
     cancelRun,
     dismissCandidate,
     updateNode,
@@ -4551,7 +4520,6 @@ function CanvasEditorInner({
     deleteNode,
   }), [
     activeBatch,
-    prepareBatch,
     stopActiveBatch,
     uploadBatchImages,
     beginMaterialPick,
@@ -4601,7 +4569,6 @@ function CanvasEditorInner({
     expandLayerStack,
     reversePrompt,
     reversePromptConfiguredNodeIds,
-    retryRun,
     renameNode,
     saveNodeToLibrary,
     shareCanvasResult,
@@ -4692,8 +4659,7 @@ function CanvasEditorInner({
           settings: { ...current.settings, show_minimap: !current.settings.show_minimap },
         }), true)}
       ><MapPinned /></button>
-      <ToolButton buttonRef={assetLibraryTriggerRef} label="媒体资产" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setAgentOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('assets'); else if (libraryMode === 'assets') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('assets')); }}><Library /></ToolButton>
-      <ToolButton buttonRef={promptLibraryTriggerRef} label="提示词资产" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setAgentOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('prompts'); else if (libraryMode === 'prompts') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('prompts')); }}><WandSparkles /></ToolButton>
+      <ToolButton buttonRef={assetLibraryTriggerRef} label="资产" active={Boolean(libraryMode)} expanded={Boolean(libraryMode)} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setAgentOpen(false); setCreateMenu(null); if (libraryMode) creationAssetPanelRef.current?.requestClose(); else setLibraryMode('assets'); }}><Library /></ToolButton>
       <ToolButton
         buttonRef={generationPreferencesTriggerRef}
         label="生成偏好"
@@ -4795,10 +4761,12 @@ function CanvasEditorInner({
         }}
       >
         <ReactFlow<FlowNode>
+          proOptions={CANVAS_PRO_OPTIONS}
           nodes={flowNodes}
           edges={flowEdges}
           nodeTypes={canvasNodeTypes}
           edgeTypes={canvasEdgeTypes}
+          connectionLineComponent={CanvasConnectionLine}
           attributionPosition="bottom-center"
           onSelectionStart={onSelectionStart}
           onSelectionEnd={onSelectionEnd}
@@ -4830,7 +4798,7 @@ function CanvasEditorInner({
             interruptViewportCommand();
             viewportSync.current = null;
           }}
-          onPaneClick={() => {
+          onPaneClick={event => {
             setCreateMenu(null);
             if (materialPick) {
               requestAnimationFrame(() => editorRegionRef.current?.focus());
@@ -4838,6 +4806,18 @@ function CanvasEditorInner({
             }
             setSelectedConnectionIds(new Set());
             setSelectedNodeIds(new Set());
+            // 分组框不接指针（好让框里的连线和框选照常工作），点在框内空白或边线上的
+            // 点击会落到这里：按位置找到分组并选中它。xyflow 在本回调之后还会同步清一次
+            // 它自己的选择，所以放到微任务里再写。
+            const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+            // 边线只有 1px，往外放 6 屏幕像素才点得中。
+            const slack = 6 / getZoom();
+            const group = (latestDocument.current?.nodes ?? [])
+              .filter(node => node.type === 'group' && node.size
+                && point.x >= node.position.x - slack && point.x <= node.position.x + node.size.width + slack
+                && point.y >= node.position.y - slack && point.y <= node.position.y + node.size.height + slack)
+              .sort((a, b) => a.size!.width * a.size!.height - b.size!.width * b.size!.height)[0];
+            if (group) queueMicrotask(() => setSelectedNodeIds(new Set([group.id])));
             requestAnimationFrame(() => editorRegionRef.current?.focus());
           }}
           onDragOver={event => {
@@ -4874,7 +4854,7 @@ function CanvasEditorInner({
           nodesDraggable={!activeBatch}
           nodesConnectable={!activeBatch}
           onlyRenderVisibleElements
-          className={cn('canvas-flow', connectionInProgress && 'canvas-flow-connecting')}
+          className={cn('canvas-flow', connectionInProgress && 'canvas-flow-connecting', createMenu?.sourceId && 'canvas-flow-pending-connection')}
         >
           <CanvasZoomCssVars target={editorRegionRef} />
           {background && <Background variant={background} gap={22} size={1} />}
@@ -4891,6 +4871,13 @@ function CanvasEditorInner({
                 event.stopPropagation();
                 void runViewportCommand(() => setCenter(position.x, position.y, { zoom: getZoom(), duration: 150 }));
               }}
+            />
+          )}
+          {createMenu?.sourceId && (
+            <CanvasPendingConnection
+              sourceIds={createMenu.sourceIds ?? [createMenu.sourceId]}
+              handle={createMenu.sourceHandle ?? 'source'}
+              to={createMenuDock?.anchor ?? createMenu.flow}
             />
           )}
         </ReactFlow>
@@ -5135,8 +5122,8 @@ function CanvasEditorInner({
           {narrowViewport && <div className="contents">{renderCanvasConfigControls('mobile')}</div>}
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
-              <p className="px-2 pb-2 pt-1 text-xs uppercase tracking-label text-muted-foreground">添加节点</p>
-              <CanvasCreateMenuItems allowEmptyNodes allowUpload allowConfig={false} onAddBatch={() => addBatchMaterialNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onAddConfig={() => addConfigNode(null)} onUpload={() => uploadRef.current?.click()} />
+              <p className="px-2 pb-2 pt-1 text-xs text-muted-foreground">添加节点</p>
+              <CanvasCreateMenuItems allowEmptyNodes allowUpload onAddBatch={() => addBatchMaterialNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onUpload={() => uploadRef.current?.click()} />
             </div>
           )}
           </div>
@@ -5166,9 +5153,9 @@ function CanvasEditorInner({
         />
 
         {createMenu && (
-          <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenu.screen.x, top: createMenu.screen.y }}>
-            <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs uppercase tracking-label text-muted-foreground">创建并连接</p><button type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><X className="size-4" /></button></div>
-            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddBatch={createMenu.sourceId ? undefined : () => addBatchMaterialNode(createMenu)} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onAddConfig={() => addConfigNode(createMenu)} onUpload={() => uploadRef.current?.click()} />
+          <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenuDock?.left ?? createMenu.screen.x, top: createMenuDock?.top ?? createMenu.screen.y }}>
+            <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs text-muted-foreground">创建并连接</p><button type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><X className="size-4" /></button></div>
+            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} rejectedModes={createMenu.sourceHandle === 'target' || !createMenu.sourceId ? undefined : canvasModesRejectingSources(document, createMenu.sourceIds ?? [createMenu.sourceId])} onAddBatch={createMenu.sourceId ? undefined : () => addBatchMaterialNode(createMenu)} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onUpload={() => uploadRef.current?.click()} />
           </div>
         )}
 
@@ -5408,25 +5395,24 @@ function CanvasEditorInner({
   );
 }
 
-function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, allowConfig, onAddText, onAddImage, onAddVideo, onAddAudio, onAddConfig, onUpload, onAddBatch }: {
+function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, onAddText, onAddImage, onAddVideo, onAddAudio, onUpload, onAddBatch }: {
   onAddBatch?: () => void;
+  /** 连出来的素材里有这些模式收不下的类型：对应选项置灰。 */
+  rejectedModes?: ReadonlySet<string>;
   allowEmptyNodes: boolean;
   allowUpload: boolean;
-  allowConfig: boolean;
   onAddText: () => void;
   onAddImage: () => void;
   onAddVideo: () => void;
   onAddAudio: () => void;
-  onAddConfig: () => void;
   onUpload: () => void;
 }) {
   return <>
     {onAddBatch && <AddMenuButton icon={<Layers />} title="批量素材" description="一张一项，节点内编辑" onClick={onAddBatch} />}
     {allowEmptyNodes && <AddMenuButton icon={<Type />} title="文本" description="脚本、提示词与备注" onClick={onAddText} />}
-    {allowEmptyNodes && <AddMenuButton icon={<FileImage />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} />}
+    {allowEmptyNodes && <AddMenuButton icon={<FileImage />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} disabledReason={rejectedModes?.has('image') ? '图片生成只能参考文本和图片' : undefined} />}
     {allowEmptyNodes && <AddMenuButton icon={<FileVideo />} title="视频" description="空节点可填写生成设置" onClick={onAddVideo} />}
-    {allowEmptyNodes && <AddMenuButton icon={<FileAudio />} title="音频" description="旁白、对白与语音" onClick={onAddAudio} />}
-    {allowConfig && <AddMenuButton icon={<WandSparkles />} title="生成配置" description="连接内容并选择生成类型" onClick={onAddConfig} />}
+    {allowEmptyNodes && <AddMenuButton icon={<FileAudio />} title="音频" description="旁白、对白与语音" onClick={onAddAudio} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
     {allowUpload && <AddMenuButton icon={<Upload />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
   </>;
 }
@@ -5642,7 +5628,7 @@ function isRangeAdjustmentKey(key: string) {
 
 function handleMenuNavigation(event: React.KeyboardEvent<HTMLDivElement>) {
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-  const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+  const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];
   if (!items.length) return;
   event.preventDefault();
   const current = items.indexOf(window.document.activeElement as HTMLButtonElement);
@@ -5661,7 +5647,6 @@ function isContentNode(node: CanvasNode): node is CanvasContentNode {
 }
 
 function generationDraftForNode(node: CanvasNode) {
-  if (node.type === 'config') return node.data.draft;
   if ('generation_draft' in node.data) return node.data.generation_draft;
   return null;
 }
@@ -5670,7 +5655,6 @@ function withGenerationDraftForNode(
   node: CanvasNode,
   draft: CanvasGenerationDraft,
 ): CanvasNode {
-  if (node.type === 'config') return { ...node, data: { draft } };
   if ('generation_draft' in node.data) {
     return { ...node, data: { ...node.data, generation_draft: draft } } as CanvasNode;
   }
@@ -5813,7 +5797,7 @@ function replacementAccept(kind: MediaReplaceTarget['kind']) {
 }
 
 function reversePromptConfigNodeId(resultNodeId: string) {
-  return `config-reverse-${resultNodeId}`;
+  return `image-reverse-${resultNodeId}`;
 }
 
 function cloneCanvasNode(
@@ -5843,15 +5827,6 @@ function cloneCanvasNode(
         } : null,
       },
     } as CanvasNode;
-  }
-  if (clone.type === 'config') {
-    return {
-      ...clone,
-      id: idMap.get(source.id)!,
-      position,
-      z_index: zIndex,
-      data: { draft: cloneCanvasDraft(clone.data.draft, idMap)! },
-    };
   }
   if (clone.type === 'group') {
     return {

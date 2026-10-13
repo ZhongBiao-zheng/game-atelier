@@ -14,7 +14,6 @@ import {
   listCanvasProjects,
   pasteIntoCanvas,
   reproduceIntoCanvas,
-  retryCanvasRun,
   replaceCanvasNodeMedia,
   saveCanvasDocument,
   submitCanvasLayerDecomposition,
@@ -55,6 +54,7 @@ vi.mock('@xyflow/react', () => {
   type MockInternalNode = {
     internals: { positionAbsolute: { x: number; y: number } };
     measured: { width?: number; height?: number };
+    data: unknown;
   };
   const flowTransform: [number, number, number] = [0, 0, 1];
   let flowNodeLookup = new Map<string, MockInternalNode>();
@@ -90,6 +90,8 @@ vi.mock('@xyflow/react', () => {
       nodeLookup: Map<string, MockInternalNode>;
     }) => unknown) => selector({ transform: flowTransform, nodeLookup: flowNodeLookup }),
     ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    ViewportPortal: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    getBezierPath: () => [''],
     ReactFlow: ({ children, edges, nodes, nodeTypes, onlyRenderVisibleElements, multiSelectionKeyCode, selectionKeyCode, onConnect, onConnectEnd, onEdgesChange, onNodesChange, onNodeClick, onNodeMouseEnter, onMove, onMoveEnd, onDragOver, onDrop, onSelectionStart, onSelectionEnd }: {
       children: React.ReactNode;
       edges: Array<{ id: string; selected?: boolean }>;
@@ -124,6 +126,7 @@ vi.mock('@xyflow/react', () => {
       flowNodeLookup = new Map(nodes.map(node => [node.id, {
         internals: { positionAbsolute: node.position ?? { x: 0, y: 0 } },
         measured: { width: node.style?.width, height: node.style?.height },
+        data: node.data,
       }]));
       return (
         <div data-testid="react-flow" data-node-count={nodes.length} data-visible-only={onlyRenderVisibleElements} data-multi-select-keys={(multiSelectionKeyCode ?? []).join(',')} data-selection-key={selectionKeyCode === null ? 'none' : String(selectionKeyCode)}>
@@ -329,7 +332,6 @@ vi.mock('@/api/canvas', () => ({
   replaceCanvasNodeMedia: vi.fn(),
   pasteIntoCanvas: vi.fn(),
   reproduceIntoCanvas: vi.fn(),
-  retryCanvasRun: vi.fn(),
   runCanvasMediaOperation: vi.fn(),
   saveCanvasDocument: vi.fn(),
   submitCanvasAngleRun: vi.fn(),
@@ -611,56 +613,6 @@ it('derives read-only named layer ownership lines and removes them only when the
   expect(edges()).toEqual([]);
   expect(lastSavedDocument()?.connections).toEqual([]);
   expect(lastSavedDocument()?.nodes[0]).toMatchObject({ data: { layers: [{ material_node_id: null }] } });
-});
-
-it.each(['image', 'layer_stack'] as const)('merges authoritative reused %s retry state while protecting concurrent edits', async kind => {
-  const target: CanvasNode = kind === 'image' ? imageNode('result', '重试素材', { ...imageDraft, prompt: '当前草稿' }) : {
-    id: 'result', type: 'layer_stack', title: '拆分图层', position: { x: 320, y: 0 }, z_index: 0,
-    data: { source_version_id: 'source-version', base_version_id: null, base_visible: true,
-      prompt: '当前草稿', alias: 'main', model: 'gpt-image-2', resolution: 'auto', layers: [], active_run_id: null, error: null },
-  };
-  const source = imageNode('source', '输入原图');
-  source.data.current_version_id = 'source-version';
-  const before = documentWith({ nodes: [source, target], content_versions: {
-    'source-version': { version_id: 'source-version', kind: 'image', path: 'source.png', mime_type: 'image/png',
-      width: 512, height: 512, bytes: 123, created_at: '2026-09-09T00:00:00Z', sha256: 'a'.repeat(64), origin: { kind: 'upload', upload_id: 'source-upload' } },
-  } });
-  vi.mocked(getCanvasDocument).mockResolvedValue(before);
-  const context = () => canvasContextIdentities.at(-1) as CanvasNodeContextValue;
-  const remote = documentWith({ ...before, revision: 8, nodes: [source, target.type === 'image'
-    ? { ...target, data: { ...target.data, active_run_id: 'retry', generation_draft: { ...imageDraft, prompt: '原任务草稿' } } }
-    : { ...target, data: { ...target.data, active_run_id: 'retry', prompt: '原任务草稿' } }],
-  connections: [{ id: 'restored', role: 'input', source_node_id: 'source', target_node_id: 'result' }] });
-  const job = { job_id: 'retry-job', retry_of: 'original-job', status: 'pending', kind: 'image', prompt: '原任务草稿',
-    params: { n: 1 }, output_paths: [], canvas_run: { run_id: 'retry', result_node_id: 'result', candidates: [],
-      snapshot: { surface_node_id: 'result', inputs: [], final_prompt: '原任务草稿', normalized_params: {} } },
-  } as unknown as Job;
-  let resolveResponse!: (value: Awaited<ReturnType<typeof retryCanvasRun>>) => void;
-  vi.mocked(retryCanvasRun).mockImplementation(() => new Promise(resolve => { resolveResponse = resolve; }));
-  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
-  await screen.findByLabelText('画布编辑器 列车短片');
-  let request!: Promise<void>;
-  act(() => { request = context().retryRun('result', 'original-run'); });
-  await waitFor(() => expect(retryCanvasRun).toHaveBeenCalledTimes(1));
-  await act(async () => { resolveResponse({ document: remote, job }); await request; });
-  // A subsequent unrelated edit must save the restored recipe and inputs, not the pre-retry state.
-  act(() => context().updateNode('result', node => ({ ...node, title: '第一次重试' })));
-  await waitFor(() => expect(lastSavedDocument()?.connections).toEqual(remote.connections));
-  let savedTarget = lastSavedDocument()!.nodes.find(node => node.id === 'result')!;
-  expect(savedTarget.type === 'layer_stack' ? savedTarget.data.prompt : 'generation_draft' in savedTarget.data ? savedTarget.data.generation_draft?.prompt : null).toBe('原任务草稿');
-
-  act(() => { request = context().retryRun('result', 'original-run'); });
-  await waitFor(() => expect(retryCanvasRun).toHaveBeenCalledTimes(2));
-  act(() => {
-    context().setMaterialConnected('source', 'result', false);
-    context().updateNode('result', node => node.type === 'layer_stack'
-      ? { ...node, data: { ...node.data, prompt: '请求期间新编辑' } }
-      : node.type === 'image' ? { ...node, data: { ...node.data, generation_draft: { ...imageDraft, prompt: '请求期间新编辑' } } } : node);
-  });
-  await act(async () => { resolveResponse({ document: { ...remote, revision: 9 }, job }); await request; });
-  await waitFor(() => expect(lastSavedDocument()?.connections).toEqual([]));
-  savedTarget = lastSavedDocument()!.nodes.find(node => node.id === 'result')!;
-  expect(savedTarget.type === 'layer_stack' ? savedTarget.data.prompt : 'generation_draft' in savedTarget.data ? savedTarget.data.generation_draft?.prompt : null).toBe('请求期间新编辑');
 });
 
 it.each([false, true])('configures an existing MCP text node with no draft (narrow=%s)', async narrow => {
@@ -1320,7 +1272,7 @@ it('adopts a team asset dropped on the canvas and inserts it', async () => {
 async function openTeamTab() {
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
   await screen.findByLabelText('画布编辑器 列车短片');
-  fireEvent.click(screen.getByRole('button', { name: '媒体资产' }));
+  fireEvent.click(screen.getByRole('button', { name: '资产' }));
   fireEvent.click(await screen.findByRole('button', { name: '团队' }));
 }
 
@@ -1598,7 +1550,6 @@ it('blocks generation by name when a connected input has no content yet', async 
 
 it('accepts a first-frame pick on a config node whose draft is a video generation', async () => {
   // 面板按 draft.mode 决定要不要给首尾帧控件，处理函数以前按 node.type 收窄：配置节点的
-  // mode 是 video 但 type 是 config，于是控件显示、点了没反应。
   const videoDraft: CanvasGenerationDraft = {
     mode: 'video',
     prompt: '列车穿过隧道',
@@ -1620,10 +1571,10 @@ it('accepts a first-frame pick on a config node whose draft is a video generatio
       {
         id: 'config-one',
         title: '视频设置',
-        type: 'config',
+        type: 'video',
         position: { x: 0, y: 0 },
         z_index: 0,
-        data: { draft: videoDraft },
+        data: { current_version_id: null, active_run_id: null, display: { fit: 'contain', free_resize: false }, generation_draft: videoDraft },
       },
       { ...imageNode('frame-one', '起始帧'), data: { ...imageNode('frame-one', '起始帧').data, current_version_id: 'version-frame' } },
     ],
@@ -2137,7 +2088,7 @@ it('分组成员变化会改变引用图签名，参考位不用硬刷新', () =
   const group = (memberIds: string[]) => ({
     id: 'group', title: '执行分组', type: 'group' as const,
     position: { x: 0, y: 0 }, size: { width: 400, height: 400 }, z_index: 0,
-    data: { member_node_ids: memberIds, repeat_count: 1 },
+    data: { member_node_ids: memberIds },
   });
 
   const before = canvasMentionGraphSignature({ ...base, nodes: [image, group([])] });
@@ -2188,8 +2139,9 @@ function reproducedDocument({ warnings = [] as string[], width = 100, height = 1
     revision: 8,
     nodes: [
       ...refs,
-      { id: 'config-1', title: '图片生成', type: 'config' as const, position: { x: 40 + 320 + 96, y: 40 }, z_index: 0,
-        data: { draft: { ...imageDraft, prompt: '白犬' } } },
+      { id: 'config-1', title: '图片生成', type: 'image' as const, position: { x: 40 + 320 + 96, y: 40 }, z_index: 0,
+        data: { current_version_id: null, active_run_id: null, display: { fit: 'contain' as const, free_resize: false },
+          generation_draft: { ...imageDraft, prompt: '白犬' } } },
     ],
     connections: refs.map(ref => ({ id: `connection-${ref.id}`, role: 'input' as const, source_node_id: ref.id, target_node_id: 'config-1' })),
     content_versions: Object.fromEntries(refs.map(ref => [ref.data.current_version_id, {
@@ -2311,7 +2263,7 @@ it('reproduces from the asset panel and names a model this machine lacks', async
   vi.mocked(markCreationAssetUsed).mockResolvedValue(missingModel);
   vi.mocked(reproduceIntoCanvas).mockResolvedValue(reproducedDocument());
   await renderReadyCanvas();
-  fireEvent.click(screen.getByRole('button', { name: '媒体资产' }));
+  fireEvent.click(screen.getByRole('button', { name: '资产' }));
   fireEvent.click(await screen.findByRole('button', { name: '复刻' }));
   await waitFor(() => expect(reproduceIntoCanvas).toHaveBeenCalledWith(expect.objectContaining({
     assetId: 'ca-gen', alias: null, model: null,
@@ -2420,7 +2372,7 @@ it('opens the team tab from «look» even after the prompt panel it was suggeste
   vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
   vi.mocked(listTeamLibraries).mockResolvedValue([]);
   await renderReadyCanvas();
-  fireEvent.click(screen.getByRole('button', { name: '提示词资产' }));
+  fireEvent.click(screen.getByRole('button', { name: '资产' }));
   expect(await screen.findByRole('complementary', { name: '创作资产' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'simulate team asset drop' }));
   expect(await screen.findByText('有 1 条相关配方')).toBeInTheDocument();

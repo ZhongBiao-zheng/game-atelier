@@ -30,7 +30,7 @@ export function OverviewWorkspace({
     <section aria-labelledby="project-worldview-heading" className="space-y-4" data-testid="project-overview">
       <div className="flex items-center justify-between gap-4">
         <div className="space-y-1">
-          <p className="text-xs uppercase tracking-label text-muted-foreground">项目档案</p>
+          <p className="text-xs text-muted-foreground">项目档案</p>
           <h2 id="project-worldview-heading" className="text-base font-medium text-foreground">
             项目经验 / 世界观
           </h2>

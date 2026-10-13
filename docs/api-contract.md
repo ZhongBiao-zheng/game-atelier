@@ -170,6 +170,11 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 目录内并为支持的图片扩展名。目录残留文件不自动成为作品，也不从目录名推断任务链接。
 部分成功任务保留成功产物；隐藏、收藏与评分规则继续生效，不依据图片颜色判定失败。
 
+Studio 作品总是混入。画布作品由 `/config` 的 `show_canvas_on_home` 控制（默认 true，关掉后不混入）（`source: "canvas"`，带 `canvas_project_id`，`character_id / project_id / asset_slot` 为 null）：
+只取画布上图片节点的**当前版本**且来源为生成任务（`origin.kind == "job_output"`）的图，
+上传的素材、被换掉的候选、已删除节点的图都不算；`hidden`（打码）的节点不取，判据与画布项目封面一致。
+`GET /gallery/image` 相应放行 `canvases/<project>/outputs/**` 下的图片扩展名，上传目录不放行。
+
 工坊本地请求管理为 `GET /workshop/requests?scope=awaiting|history|all`（默认只列还能批准的）、
 `POST /workshop/requests/{request_id}/approve { expected_revision }` 与
 `POST /workshop/requests/{request_id}/reject { expected_revision }`（仅本机页面；状态 `rejected`，记
@@ -206,7 +211,7 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `POST /canvas/projects/{id}/agent/sessions` `DELETE /canvas/projects/{id}/agent/sessions/{session_id}`
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
 `POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle,layer-decomposition}`
-`POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
+`POST /canvas/projects/{id}/runs/{run_id}/cancel`
 `POST /creation-assets/prompts` `POST /creation-assets/media/{upload,from-path}`
 `POST /creation-assets/generation/{from-job,from-canvas}`
 `PUT /creation-assets/{asset_id}/{prompt,media}`
@@ -312,14 +317,14 @@ schema 的文件返回 409，原字节保持不变。`PUT /api/canvas/ui-prefere
 `{ alias, model }` 与该模态白名单参数；`upscale` 为 AI高清偏好 `{ tiers: { 2K, 4K, 8K } }`，每档 `{ selection, quality, prompt }`：
 selection 为 null 时服务端自动选模（只有 2K / 4K 有自动路线），quality 只对暴露质量档的模型生效，
 prompt 留空保存即恢复内置提示词（服务端填回全文，GET 永远返回实际生效的提示词）；缺失的档位按默认值补齐。媒体引用、蒙版、本机路径、运行回写字段和跨模态参数一律 422。
-服务端在独立文件锁内校验 revision 并原子替换，冲突返回当前 revision。生成偏好只影响后续新建 Draft
-和配置节点模式切换；模型保持自动选择时仍独立应用该模态默认参数。失效的显式模型回退首个 Runner 可路由
+服务端在独立文件锁内校验 revision 并原子替换，冲突返回当前 revision。生成偏好只影响后续新建 Draft；
+模型保持自动选择时仍独立应用该模态默认参数。失效的显式模型回退首个 Runner 可路由
 模型且不继承旧参数，已有节点、Run Snapshot 与 Job
 保持不变。该偏好跨项目生效，但不进入 `CanvasDocument`、undo/redo、项目 revision、项目包 manifest/zip
 或插件私有状态；凭证、Base URL 与模型目录仍只属于 Keys。
 
 画布连接为 `role: input | material`，均以实线呈现。`Input Connection` 表示当前参考输入，不触发下游；只有 input 进入参考列表、输入解析和批量依赖。`Material Connection` 只含 `id / role / source_node_id / target_node_id`，两端须为图片节点，不带 slot，表达本地处理的素材来源，不自动追溯取图。两种角色可在同一对节点间共存。历史真源仍是 Job Snapshot 与 Content Version origin，不创建历史派生边。普通生成不引用节点自身的当前内容；基于本图生成通过下游节点与 input 明确输入。
-生成面板仅展示当前素材、提示词和生成设置，不展示“原任务输入／本轮冻结输入”重复区块；删除展示不改变 Snapshot、Job 历史或原参数重试。
+生成面板仅展示当前素材、提示词和生成设置，不展示“原任务输入／本轮冻结输入”重复区块；删除展示不改变 Snapshot 与 Job 历史。
 普通 `PUT document` 必须携带 `If-Match: <revision>`：服务端项目锁内校验后 revision + 1；冲突返回 409，不做自动合并。Web PUT 只能新增 `user_edit` 文本版本，不能写媒体版本、修改既有版本。输入连接可编辑，撤销/重做只改变画布节点与连接，必须保留全部已有内容版本；历史真实性不依赖当前连线。
 
 上传接口使用 multipart `file + expected_revision`，服务端登记不可变媒体 Content Version 并返回更新后的
@@ -335,14 +340,15 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 （`actual_size`、`warnings`、`mj_flags`）都不在名单里 —— 浏览器不能提交路径，Canvas 的参考素材只能
 来自不可变 Content Version。
 批量执行使用 `batch_material` 节点：`data.items` 为最多 200 个 `{id,image_version_ids}`，
-每项 1–16 张已登记图片；项 ID 在节点内唯一。节点仅提供输入，没有生成 Draft。`group.data.repeat_count`
-为 1–20 轮，一层显式成员关系保持不变。分组外框按成员显示边界派生，加载与实时合并使用同一规则；
+每项 1–16 张已登记图片；项 ID 在节点内唯一。节点仅提供输入，没有生成 Draft。分组不能执行；分组整包连给生成节点时按目标模式过滤成员
+（图片生成只取文本与图片，音频生成只取文本），
+`group.data` 只有 `member_node_ids`，一层显式成员关系保持不变。分组外框按成员显示边界派生，加载与实时合并使用同一规则；
 `group.size` 为正有限数的 `CanvasGroupSize`，不受普通节点 `CanvasSize` 的 4000px 上限影响，
-大批次展开后仍能包围所有成员。图片、视频等普通节点继续保留 4000px 尺寸上限。分组或单节点可以调用：
+大批次展开后仍能包围所有成员。图片、视频等普通节点继续保留 4000px 尺寸上限。单个生成节点可以调用：
 
-- `POST /canvas/projects/{id}/batch-runs/prepare`：`{scope_node_id,expected_revision,repeat_count}`；
-  校验冻结素材、输入依赖、模型能力及每步单产物，返回 `ready` 计划，不调用模型。最多 20 步、2000 次生成；
-  一个范围只允许一个批量素材来源，无素材节点时固定输入为一项；不支持循环或配置/插件节点执行。
+- `POST /canvas/projects/{id}/batch-runs/prepare`：`{scope_node_id,expected_revision}`，`scope_node_id` 是分组时 422；
+  校验冻结素材、输入依赖、模型能力及单产物，返回 `ready` 计划，不调用模型。计划只有这一个节点一步，最多 2000 次生成；
+  只允许一个批量素材来源，无素材节点时固定输入为一项；不支持插件节点执行。
 - `POST .../batch-runs/{batch_id}/start`：确认后启动；revision 必须仍匹配，同项目只允许一份活动计划。
   同一计划重复 start 不再调度。串行执行的普通 Canvas Job 带 `canvas_run.batch`
   `{batch_id,item_id,round_index,step_index}`，两个 index 从 0 开始。
@@ -358,8 +364,7 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 首次提交事务同时展开各项、各轮的真实结果节点和输入连线：第一项第一轮使用配置链路的原节点，
 其余项/轮按行排在现有内容下方，各行的下游只连接同行上游；不在一个节点中切换批次结果。
 内容节点的可选 `data.batch_result` 保存 `{batch_id,template_node_id,source_node_id,item_id,image_version_ids,round_index}`，
-绑定本批素材的不可变版本，单独再次生成时不读取其他批次；分组再次执行只读取原配置节点，
-不把自动展开的产物节点重新当作流程步骤。所有结果仍由普通 Job/Version 保存，视频不提供候选切换。
+绑定本批素材的不可变版本，单独再次生成时不读取其他批次。所有结果仍由普通 Job/Version 保存，视频不提供候选切换。
 上次生成的输出不隐式成为下一次批量执行的自身参考。
 失败停止剩余步骤，无自动付费重试；服务重启将活动计划标为 interrupted，不自动提交剩余步骤。
 计划文件属于本机执行状态，不随项目包导入；图片素材、普通节点及已经生成的 Jobs/Versions 仍随包保存。
@@ -395,9 +400,8 @@ Content Version、candidate 状态与首个成功主结果；Midjourney 原生�
 
 批量候选逐个校验：全部成功为 `done`，部分成功为 `partial`，全部失败为 `failed`，
 停止且没有有效产物为 `canceled`；部分失败不会抹掉已经成功的 Content Version。
-`POST .../runs/{run_id}/retry` 只接受 `expected_revision`：按原 Job 的不可变 Snapshot、参数和精确输入版本创建新 Job/Run，设置 retry_of，不读取当前节点草稿重建输入。缺失或摘要不符的素材、不可用模型及已失效参数明确拒绝；不自动丢参考或换模型。修改配置后的“生成”使用当前草稿和实线，与原任务重试区分。
-新 Snapshot 同时冻结 `draft_prompt` 原始可编辑稿与 `final_prompt` 厂商提示词。重试发送后者，但结果节点只恢复前者；旧任务未记录原稿时留空，不把已经展开的历史参考正文写进新草稿。原任务仍可按其完整 `final_prompt` 重试。
-本地失败不等于厂商订单已终止。原 Job 保留 `params.provider_task_ids` 时拒绝直接重试，要求先核对订单结果；当前不持有可证明厂商终态的结构化状态，因此对失败、部分成功及已停止订单均采用此保守限制，避免从不含订单号的原 Snapshot 再次下单。
+失败后没有「按原任务重试」接口（2026-10-12 移除）：再次生成一律走 `POST .../runs`，使用当前草稿和实线。
+新 Snapshot 同时冻结 `draft_prompt` 原始可编辑稿与 `final_prompt` 厂商提示词，仅作记录与复现用途。
 `POST .../runs/{run_id}/cancel` 只持久化幂等 `cancel_requested_at`。Runner 尚未认领时不调用厂商并落为
 `canceled`；同步厂商请求已发出时不伪装即时中断，UI 明示上游可能继续执行，有效返回仍登记，未返回候选
 才标记 canceled。prepared 事务在下次项目访问或命令前完成/丢弃，不能从节点当前内容重造 Snapshot。
@@ -417,14 +421,14 @@ Midjourney 异步轮询会在每个间隔和下载前检查停止请求。进程
 `input_modalities` 明确包含 image 且支持 OpenAI-compatible chat 的模型；浏览器不能传 preset、alias、
 model 或媒体路径。Snapshot 冻结完整 preset 正文/版本、真实模型与唯一图片 Version，文本 caller 用
 multimodal content 发送服务端解析的项目内图片。成功结果是独立文本节点及 实际输入连接，源图片
-Draft 不读不改；停止与 original retry 复用普通 Run 生命周期，current retry 不适用。
+Draft 不读不改；停止复用普通 Run 生命周期。
 
 普通文本 Run 可冻结并传输图片、视频和音频 Input Connection，但只认所选文本模型显式声明的
 `input_modalities`，不按模型名称猜测能力。Chat Completions 在兼容端点分别使用 `image_url`、
 `video_url` 与 `input_audio`；Ark-compatible Responses 分别使用 `input_image`、`input_video` 与
 `input_audio`。本机媒体由 caller 编码后提交；模型虽声明能力但当前供应商协议没有对应传输格式时，
 同样在创建 Run 前拒绝。两种拒绝都只显示一条短消息，不在画布增加常驻说明组件。
-`POST .../runs/{run_id}/reverse-prompt-config` 在成功文本结果后幂等创建图片 Config Node 及文本→配置
+`POST .../runs/{run_id}/reverse-prompt-config` 在成功文本结果后幂等创建带生成设置的空图片节点（id `image-reverse-<结果节点>`）及文本→图片
 Input Connection。图片模型优先使用仍可路由的画布图片生成偏好；偏好保持自动选择或显式模型失效时，
 再按 default Key 优先、其余登记顺序选择。自动选择会应用已保存的默认参数，失效的显式模型不泄漏旧参数；
 缺模型时保留反推文本且零写。重复请求即使携带旧 revision，也返回已经存在的同一配置，不重复创建节点或连接。
@@ -470,8 +474,7 @@ requested_count / mask_file`。prompt、alias、model 与参数必须先保存�
 读取后冻结；浏览器不能传媒体路径或绕过 Draft。蒙版必须是与 EXIF 归一后源图同尺寸的单帧 PNG，透明或
 灰度值 0 表示编辑、255 表示保留，空蒙版拒绝。服务端把归一灰度蒙版登记为不可变 `user_mask` Content
 Version，并与 Job、Snapshot、结果节点、实际输入连接在同一可恢复事务提交；Snapshot 记录
-`mask_version_id`，且唯一输入固定为当前源图 Version，不接收其它连接节点引用；original retry 重新校验
-源图与蒙版摘要后原样复用。首版只允许已验证走 OpenAI-compatible
+`mask_version_id`，且唯一输入固定为当前源图 Version，不接收其它连接节点引用。首版只允许已验证走 OpenAI-compatible
 `/images/edits` 的 GPT Image 模型；不支持时返回 `canvas_media_capability_missing`，绝不降级为整图生成。
 
 `POST /canvas/projects/{id}/runs/angle` 只接受 `surface_node_id / expected_revision / requested_count` 与
@@ -479,7 +482,7 @@ Version，并与 Job、Snapshot、结果节点、实际输入连接在同一可�
 default Key、再按登记顺序选择首个支持至少一张参考图的图片模型；浏览器不能传自由 prompt、alias、model
 或媒体路径。服务端固定 `canvas.angle_edit` preset v1，把当前图片 Version 作为唯一 Snapshot input，完整
 机位参数、preset、真实 provider/alias/model 和受控最终 prompt 一并冻结。结果始终是独立图片节点及一条
-实际输入连接；original retry 重新校验源图摘要并逐字段复用原 Snapshot。
+实际输入连接。
 
 `POST /canvas/projects/{id}/runs/upscale` 只接受 `surface_node_id / expected_revision / target(2K|4K|8K)`。服务端先校验
 源图长边小于目标长边（2048 / 4096 / 8192，否则 422 `canvas_upscale_not_needed`），再按 `ui-preferences.upscale.tiers[target]` 选模型：
@@ -890,11 +893,11 @@ FastAPI 标准 422。坏掉的 job 文件、画布存档不见了（`{code: "can
 按 500 报出，不归入 `invalid`。
 
 `POST /canvas/projects/{project_id}/creation-assets/{asset_id}/reproduce` 画布复刻：与 insert 同样携带
-`If-Match`（缺失 428，非整数 422），一次画布锁内把生成资产展开成参考输入节点 + 生成配置节点 + 连线，
+`If-Match`（缺失 428，非整数 422），一次画布锁内把生成资产展开成参考输入节点 + 带生成设置的空图片 / 视频节点 + 连线，
 不自动 Run；响应 `CanvasReproduceResponse` = `CanvasDocument` 全部字段 + `warnings: list[str]`，并回
 `ETag`。`warnings` 只在响应里，不落 `canvas.json`。只带 `role == "reference"` 的参考（`mask` / `mj_*`
 跳过并写进 `warnings`）；视频配方 `frame_mode ∈ first | last | firstlast` 时图片参考按顺序接首帧 / 尾帧槽。
-`model` 由前端匹配本机 key 后传入，传 `null` 时配置节点模型位留空。错误：revision 不符 409
+`model` 由前端匹配本机 key 后传入，传 `null` 时生成节点模型位留空。错误：revision 不符 409
 `{code: "revision_conflict", current_revision}`；画布或资产不存在 404；非生成资产、配方拼不出合法草稿 422；
 参考 blob 缺失 500 `{code: "asset_state_broken", message}`（本机数据完整性故障，重试无用）；画布存档本身坏了 500。
 

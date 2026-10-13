@@ -102,7 +102,6 @@ class CanvasBatchPlan(BatchModel):
 class CanvasBatchCreate(BatchModel):
     scope_node_id: str = Field(min_length=1, max_length=120)
     expected_revision: int = Field(ge=0)
-    repeat_count: int = Field(default=1, ge=1, le=20)
 
 
 def _now() -> str:
@@ -198,39 +197,17 @@ def _executable(document: CanvasDocument, node: CanvasNode) -> bool:
 
 
 def _ordered_nodes(document: CanvasDocument, scope: CanvasNode) -> list[CanvasNode]:
-    member_ids = scope.data.member_node_ids if scope.type == "group" else [scope.id]
-    selected = []
-    for node in document.nodes:
-        if node.id not in member_ids:
-            continue
-        binding = getattr(node.data, "batch_result", None)
-        if scope.type == "group" and binding and binding.template_node_id != node.id \
-                and binding.template_node_id in member_ids:
-            continue
-        node = node.model_copy(deep=True)
-        version = document.content_versions.get(_current_version_id(node) or "")
-        # Plan from the authored configuration, not an old video-edit implicit input.
-        # Only selected steps are replaced in the plan; excluded references stay intact.
-        if version and version.origin.kind == "job_output":
-            node.data.current_version_id = None
-            node.data.active_run_id = None
-        if _executable(document, node):
-            selected.append(node)
-    if not selected:
+    if scope.type == "group":
+        raise ValueError("分组不能执行，请在生成节点上发起")
+    node = scope.model_copy(deep=True)
+    version = document.content_versions.get(_current_version_id(node) or "")
+    # Plan from the authored configuration, not an old video-edit implicit input.
+    if version and version.origin.kind == "job_output":
+        node.data.current_version_id = None
+        node.data.active_run_id = None
+    if not _executable(document, node):
         raise ValueError("范围内没有可执行节点，请先填写生成设置并连接输入")
-    if len(selected) > 20:
-        raise ValueError("一次批量执行最多包含20个生成节点")
-    pending = {node.id: node for node in selected}
-    result: list[CanvasNode] = []
-    while pending:
-        ready = [node for node in pending.values()
-                 if not any(source in pending for source in _sources(document, node))]
-        if not ready:
-            raise ValueError("分组内存在循环连接，请断开循环后再执行")
-        for node in ready:
-            result.append(node)
-            del pending[node.id]
-    return result
+    return [node]
 
 
 def _model_signature(prepared: PreparedCanvasGeneration) -> str:
@@ -345,12 +322,6 @@ def _expanded_document(
                 id=f"connection-{secrets.token_hex(12)}", role="input",
                 source_node_id=source_id, target_node_id=result_id, slot=edge.slot,
             ))
-    added_ids = [_result_node_id(run, entry) for entry in run.executions]
-    for index, node in enumerate(nodes):
-        if node.type == "group" and node.id == run.scope_node_id:
-            nodes[index] = node.model_copy(update={"data": node.data.model_copy(update={
-                "member_node_ids": list(dict.fromkeys([*node.data.member_node_ids, *added_ids])),
-            })})
     return CanvasDocument.model_validate(current.model_copy(
         update={"nodes": nodes, "connections": connections,
                 "content_versions": versions}).model_dump(mode="json"))
@@ -402,8 +373,8 @@ def prepare_canvas_batch(project_id: str, payload: CanvasBatchCreate) -> CanvasB
             raise ValueError("批量素材还没有图片")
         items = ([CanvasBatchItem.model_validate(item.model_dump()) for item in source.data.items]
                  if source else [CanvasBatchItem(id="fixed")])
-        if len(items) * payload.repeat_count * len(steps) > 2000:
-            raise ValueError("一次批量执行最多2000次生成，请减少素材、轮数或节点")
+        if len(items) * len(steps) > 2000:
+            raise ValueError("一次批量执行最多2000次生成，请减少素材")
         frozen_nodes = [node for node in planning.nodes if node.id in required]
         version_ids = {_current_version_id(node) for node in frozen_nodes}
         version_ids.update(version_id for item in items for version_id in item.image_version_ids)
@@ -447,13 +418,12 @@ def prepare_canvas_batch(project_id: str, payload: CanvasBatchCreate) -> CanvasB
         run = CanvasBatchRun(
             batch_id=batch_id, project_id=project_id, scope_node_id=scope.id, title=scope.title,
             source_node_id=source.id if source else None, expected_revision=current.revision,
-            repeat_count=payload.repeat_count, items=items,
+            repeat_count=1, items=items,
             steps=[CanvasBatchStep(node_id=node.id, title=node.title,
                                    mode=node.type, model=_draft_for_node(node).model) for node in steps],
-            executions=[CanvasBatchExecution(item_index=item_index, round_index=round_index,
+            executions=[CanvasBatchExecution(item_index=item_index, round_index=0,
                          step_index=step_index, job_id=new_job_id(),
                          run_id=f"run-{secrets.token_hex(12)}")
-                        for round_index in range(payload.repeat_count)
                         for item_index in range(len(items)) for step_index in range(len(steps))],
             status="ready", created_at=timestamp, updated_at=timestamp,
         )

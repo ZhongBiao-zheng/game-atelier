@@ -74,7 +74,7 @@ from character_workflow.lib.schemas import (
     CanvasMaskEditCreate, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
     CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
-    CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse, CanvasRunRetry,
+    CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse,
     CanvasUiPreferences, CanvasUiPreferencesUpdate, CanvasUploadResponse,
     CharacterIndexResponse, CharacterWorkspaceResponse,
     CharacterDerivativeCreate,
@@ -341,7 +341,7 @@ def get_config() -> dict:
     cfg = _read_config()
     return {
         "image_storage_root": cfg.get("image_storage_root") or str(_project_root()),
-        "show_studio_on_home": bool(cfg.get("show_studio_on_home", False)),
+        "show_canvas_on_home": bool(cfg.get("show_canvas_on_home", True)),
     }
 
 
@@ -1234,15 +1234,15 @@ def post_config(payload: dict = Body(...)) -> dict:
             raise HTTPException(422, detail=f"目录不可写：{expanded}")
         cfg["image_storage_root"] = str(expanded.resolve())
         updated = True
-    if "show_studio_on_home" in payload:
-        value = payload["show_studio_on_home"]
+    if "show_canvas_on_home" in payload:
+        value = payload["show_canvas_on_home"]
         if not isinstance(value, bool):
-            raise HTTPException(422, detail="show_studio_on_home 必须是布尔值（true / false）")
-        cfg["show_studio_on_home"] = value
+            raise HTTPException(422, detail="show_canvas_on_home 必须是布尔值（true / false）")
+        cfg["show_canvas_on_home"] = value
         updated = True
     if not updated:
         raise HTTPException(
-            422, detail="没有可识别的设置项：只接受 image_storage_root / show_studio_on_home"
+            422, detail="没有可识别的设置项：只接受 image_storage_root / show_canvas_on_home"
         )
     atomic_write_json(_runtime() / "config.json", cfg)
     return {"ok": True, **cfg}
@@ -1819,7 +1819,8 @@ _GALLERY_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
     """Return random character images from portrait/promo/turnaround.
 
-    开启 show_studio_on_home 时，只混入 Studio 已完成任务登记的图片产物。
+    Studio 只混入已完成任务登记的图片产物。
+    show_canvas_on_home（默认开）时混入画布上正在显示、没打码的生成图。
     """
     characters_dir = _project_root() / "characters"
     items: list[dict] = []
@@ -1855,7 +1856,7 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
                         "mtime": mtime,
                     })
     studio_dir = _project_root() / "studio"
-    if bool(_read_config().get("show_studio_on_home", False)) and studio_dir.exists():
+    if studio_dir.exists():
         studio_root = studio_dir.resolve()
         seen_studio_paths: set[str] = set()
         # 文件存在不代表生成成功：目录里可能留下测试图或落盘后未完成登记的产物。
@@ -1892,6 +1893,29 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
                     "job_id": job.job_id,
                     "mtime": mtime,
                 })
+    from character_workflow.lib.canvas_projects import list_canvas_gallery_images
+    show_canvas = bool(_read_config().get("show_canvas_on_home", True))
+    for canvas_project_id, canvas_job_id, f in list_canvas_gallery_images() if show_canvas else []:
+        try:
+            if f.suffix.lower() not in _GALLERY_EXTS:
+                continue
+            rel = f.relative_to(_project_root().resolve()).as_posix()
+            if rel in hidden:
+                continue
+            mtime = f.stat().st_mtime
+        except (OSError, ValueError):
+            continue
+        items.append({
+            "character_id": None,
+            "project_id": None,
+            "asset_slot": None,
+            "source": "canvas",
+            "canvas_project_id": canvas_project_id,
+            "filename": f.name,
+            "path": rel,
+            "job_id": canvas_job_id,
+            "mtime": mtime,
+        })
     favorites = set(_read_gallery_favorites())
     ratings = _read_gallery_ratings()
     for it in items:
@@ -2114,10 +2138,19 @@ def gallery_image(path: str) -> FileResponse:
         and project_parts[3] == "versions"
         and target.suffix.lower() == ".mp4"
     )
+    # 画布只放行生成产物目录下的图片：canvases/<project>/outputs/**。上传的素材不从这里读。
+    canvases_dir = data_root.canvases_dir().resolve()
+    canvas_parts = target.relative_to(canvases_dir).parts if target.is_relative_to(canvases_dir) else ()
+    in_canvas_outputs = (
+        len(canvas_parts) >= 3
+        and canvas_parts[1] == "outputs"
+        and target.suffix.lower() in _GALLERY_EXTS
+    )
     if not (
         target.is_relative_to(characters_dir)
         or target.is_relative_to(studio_dir)
         or in_project_assets
+        or in_canvas_outputs
     ):
         raise HTTPException(status_code=400, detail="path outside allowed roots")
     if not target.is_file():
@@ -3523,58 +3556,6 @@ def post_canvas_run(
                 "current_revision": current_revision,
             }) from None
         raise HTTPException(409, detail=str(error)) from error
-    except ValueError as error:
-        raise HTTPException(422, detail=str(error)) from error
-    from viewer_server import routes as _self
-    background.add_task(_self._run_canvas_job_safely, job.job_id)
-    return CanvasRunResponse(job=job, document=document)
-
-
-@router.post(
-    "/canvas/projects/{project_id}/runs/{run_id}/retry",
-    response_model=CanvasRunResponse,
-    status_code=201,
-)
-def post_canvas_run_retry(
-    project_id: str,
-    run_id: str,
-    payload: CanvasRunRetry,
-    background: BackgroundTasks,
-) -> CanvasRunResponse:
-    from character_workflow.lib.canvas_runs import retry_canvas_run
-
-    try:
-        job, document = retry_canvas_run(
-            project_id,
-            run_id,
-            payload.expected_revision,
-        )
-    except KeyError:
-        raise HTTPException(404, detail="找不到这个生成记录") from None
-    except RuntimeError as error:
-        detail = str(error)
-        if detail.startswith("revision_conflict:"):
-            current_revision = int(detail.split(":", 1)[1])
-            raise HTTPException(409, detail={
-                "code": "revision_conflict",
-                "current_revision": current_revision,
-            }) from None
-        messages = {
-            "run_not_terminal": (
-                "当前生成尚未结束，不能重试",
-                "等待当前生成结束，或先停止生成。",
-            ),
-            "result_node_missing": (
-                "原结果节点已被删除，不能在原位置重试",
-                "恢复结果节点，或新建生成节点后重新提交。",
-            ),
-        }
-        message, recovery = messages.get(detail, (detail, "检查画布当前状态后重试。"))
-        raise HTTPException(409, detail={
-            "code": detail,
-            "message": message,
-            "recovery": recovery,
-        }) from error
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
     from viewer_server import routes as _self

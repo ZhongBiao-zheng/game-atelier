@@ -60,11 +60,11 @@ def _document(prompt: str, *, policy: str = "all_connected") -> CanvasDocument:
         {
             "id": "config",
             "title": "生成",
-            "type": "config",
+            "type": "image",
             "position": {"x": 0, "y": 0},
             "z_index": 0,
             "data": {
-                "draft": {
+                "generation_draft": {
                     "mode": "image",
                     "prompt": prompt,
                     "input_policy": policy,
@@ -131,7 +131,7 @@ def test_mentions_keep_connection_order_and_renumber_each_media_kind():
     )
     document = _document(prompt)
     surface = next(node for node in document.nodes if node.id == "config")
-    draft = surface.data.draft
+    draft = surface.data.generation_draft
 
     inputs = _resolve_inputs(document, surface, draft)
     final_prompt = _render_final_prompt(document, draft, inputs)
@@ -149,7 +149,7 @@ def test_canvas_resolves_variables_in_draft_and_upstream_text_without_changing_d
     document = _document(prompt)
     document.content_versions["version-text-a"].text = variable("风格", value="卡通")
     surface = next(node for node in document.nodes if node.id == "config")
-    draft = surface.data.draft
+    draft = surface.data.generation_draft
     inputs = _resolve_inputs(document, surface, draft)
     final_prompt = _render_final_prompt(document, draft, inputs)
     assert "让建筑参考 【文本1】" in final_prompt
@@ -166,7 +166,7 @@ def test_canvas_resolves_variables_in_draft_and_upstream_text_without_changing_d
 def test_all_connected_keeps_unmentioned_inputs_in_connection_order():
     document = _document("以 @[node:image-b] 为主", policy="all_connected")
     surface = next(node for node in document.nodes if node.id == "config")
-    draft = surface.data.draft
+    draft = surface.data.generation_draft
 
     inputs = _resolve_inputs(document, surface, draft)
     final_prompt = _render_final_prompt(document, draft, inputs)
@@ -185,14 +185,14 @@ def test_disconnected_mention_is_rejected_instead_of_becoming_plain_text():
     surface = next(node for node in document.nodes if node.id == "config")
 
     with pytest.raises(ValueError, match="未连接"):
-        _resolve_inputs(document, surface, surface.data.draft)
+        _resolve_inputs(document, surface, surface.data.generation_draft)
 
 
 def test_existing_text_surface_does_not_include_its_current_version():
     document = _document("把原文改成更克制的旁白")
     surface = next(node for node in document.nodes if node.id == "text-a")
     config = next(node for node in document.nodes if node.id == "config")
-    surface.data.generation_draft = config.data.draft.model_copy(update={
+    surface.data.generation_draft = config.data.generation_draft.model_copy(update={
         "mode": "text",
         "prompt": "把原文改成更克制的旁白",
         "input_policy": "all_connected",
@@ -209,7 +209,7 @@ def test_existing_image_uses_only_visible_input_when_mentioning_an_input():
     document = _document("让 @[node:image-b] 延续原图")
     surface = next(node for node in document.nodes if node.id == "image-a")
     config = next(node for node in document.nodes if node.id == "config")
-    surface.data.generation_draft = config.data.draft.model_copy(update={
+    surface.data.generation_draft = config.data.generation_draft.model_copy(update={
         "prompt": "让 @[node:image-b] 延续原图",
         "input_policy": "all_connected",
     })
@@ -231,7 +231,7 @@ def test_existing_image_uses_only_visible_input_when_mentioning_an_input():
 def test_mentions_do_not_filter_unmentioned_connected_inputs():
     document = _document("以 @[node:image-b] 为主")
     surface = next(node for node in document.nodes if node.id == "config")
-    inputs = _resolve_inputs(document, surface, surface.data.draft)
+    inputs = _resolve_inputs(document, surface, surface.data.generation_draft)
     assert [item.node_id for item in inputs] == ["image-a", "text-a", "image-b"]
 
 
@@ -239,7 +239,7 @@ def test_existing_image_without_incoming_connections_is_text_to_image():
     document = _document("画一个新场景")
     surface = next(node for node in document.nodes if node.id == "image-a")
     config = next(node for node in document.nodes if node.id == "config")
-    surface.data.generation_draft = config.data.draft
+    surface.data.generation_draft = config.data.generation_draft
     assert _resolve_inputs(document, surface, surface.data.generation_draft) == []
 
 
@@ -247,7 +247,7 @@ def test_existing_video_uses_visible_connections_instead_of_its_previous_output(
     payload = _document("以 @[node:image-b] 为参考生成视频").model_dump(mode="json")
     payload["nodes"][0]["type"] = "video"
     payload["nodes"][0]["data"]["generation_draft"] = {
-        **payload["nodes"][-1]["data"]["draft"], "mode": "video", "params": {"frame_mode": "auto"},
+        **payload["nodes"][-1]["data"]["generation_draft"], "mode": "video", "params": {"frame_mode": "auto"},
     }
     payload["content_versions"]["version-image-a"].update({
         "kind": "video", "path": "uploads/image-a.mp4", "mime_type": "video/mp4",
@@ -265,12 +265,12 @@ def test_existing_video_uses_visible_connections_instead_of_its_previous_output(
 def test_video_mode_does_not_silently_discard_incompatible_input_connections(frame_mode, slot):
     document = _document("生成视频")
     surface = document.nodes[-1]
-    surface.data.draft = surface.data.draft.model_copy(update={
+    surface.data.generation_draft = surface.data.generation_draft.model_copy(update={
         "mode": "video", "params": JobParams(frame_mode=frame_mode),
     })
     document.connections = [document.connections[0].model_copy(update={"slot": slot})]
     with pytest.raises(ValueError, match="连接"):
-        _resolve_inputs(document, surface, surface.data.draft)
+        _resolve_inputs(document, surface, surface.data.generation_draft)
 
 
 def test_submit_keeps_snapshot_labels_and_all_job_media_arrays_in_frozen_order(
@@ -412,13 +412,13 @@ def test_submit_keeps_snapshot_labels_and_all_job_media_arrays_in_frozen_order(
 def test_config_video_commit_connects_actual_inputs_to_downstream_video(monkeypatch):
     document = _document("把 @[node:text-a] 做成一段雨夜列车镜头")
     surface = next(node for node in document.nodes if node.id == "config")
-    draft = surface.data.draft.model_copy(update={
+    draft = surface.data.generation_draft.model_copy(update={
         "mode": "video",
         "model": "seedance-2.0",
         "alias": "seedance",
         "params": JobParams(duration=5, resolution="720p", ratio="16:9"),
     })
-    surface.data.draft = draft
+    surface.data.generation_draft = draft
     inputs = _resolve_inputs(document, surface, draft)
     key = KeySpec(
         alias="seedance",
@@ -480,7 +480,7 @@ def test_empty_connected_input_is_rejected_by_name_not_as_an_anonymous_error():
     surface = next(node for node in document.nodes if node.id == "config")
 
     with pytest.raises(ValueError, match="已连接的「待生成的分镜」还没有内容"):
-        _resolve_inputs(document, surface, surface.data.draft)
+        _resolve_inputs(document, surface, surface.data.generation_draft)
 
 
 def test_empty_frame_slot_input_names_the_slot_it_belongs_to():
@@ -489,7 +489,7 @@ def test_empty_frame_slot_input_names_the_slot_it_belongs_to():
     empty.title = "起始帧"
     empty.data.current_version_id = None
     surface = next(node for node in document.nodes if node.id == "config")
-    surface.data.draft = surface.data.draft.model_copy(update={
+    surface.data.generation_draft = surface.data.generation_draft.model_copy(update={
         "mode": "video",
         "model": "seedance-2.0",
         "params": JobParams(frame_mode="firstlast"),
@@ -500,4 +500,4 @@ def test_empty_frame_slot_input_names_the_slot_it_belongs_to():
     document.connections[0].slot = "first_frame"
 
     with pytest.raises(ValueError, match="首帧连接的「起始帧」还没有内容"):
-        _resolve_inputs(document, surface, surface.data.draft)
+        _resolve_inputs(document, surface, surface.data.generation_draft)

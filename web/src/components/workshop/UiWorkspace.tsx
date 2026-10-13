@@ -248,7 +248,7 @@ function ScreenDetail({
             const canonical = isCanonicalPath(image.path, entry);
             return (
               <figure key={image.path} className="w-64 shrink-0 space-y-2">
-                <div className="group relative overflow-hidden rounded-2xl">
+                <div className="group relative overflow-hidden rounded-xl">
                   <a
                     href={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(image.path)}`)}
                     target="_blank"
@@ -284,7 +284,7 @@ function ScreenDetail({
                 <figcaption className="space-y-2 px-0.5 text-xs">
                   <div className="flex items-baseline gap-2">
                     <span className="truncate text-foreground/85">{image.style_variant || image.filename}</span>
-                    {image.base_version && <span className="shrink-0 font-mono text-muted-foreground/60">← {image.base_version}</span>}
+                    {image.base_version && <span className="shrink-0 font-mono text-muted-foreground">← {image.base_version}</span>}
                   </div>
                   <GalleryVisibilityButton
                     filename={image.filename}

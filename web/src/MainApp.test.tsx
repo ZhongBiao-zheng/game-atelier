@@ -46,7 +46,6 @@ describe('MainApp', () => {
     render(<MainApp />);
 
     expect(await screen.findByRole('heading', { name: '全部项目' })).toBeInTheDocument();
-    expect(screen.getByText('每个项目保存自己的世界观与角色、UI、视频资产。')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '打开项目导航' })).not.toBeInTheDocument();
     expect(screen.queryByText(/未归档|未分类/)).not.toBeInTheDocument();
     expect(screen.queryByText('请在左栏选择角色')).not.toBeInTheDocument();

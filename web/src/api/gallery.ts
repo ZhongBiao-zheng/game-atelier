@@ -1,12 +1,14 @@
 import { requestJson } from './http';
 import type { AssetSlot, Project } from '@/schema/jobs';
 export interface GalleryItem {
-  /** studio 来源的图无角色归属，两字段为 null。 */
+  /** studio / canvas 来源的图无角色归属，两字段为 null。 */
   character_id: string | null;
   /** 角色所属游戏项目；Studio 或未分类角色为 null。 */
   project_id?: string | null;
   asset_slot: 'portrait' | 'promo' | 'turnaround' | null;
-  source?: 'character' | 'studio';
+  source?: 'character' | 'studio' | 'canvas';
+  /** canvas 来源：图所在的画布项目。 */
+  canvas_project_id?: string;
   filename: string;
   path: string;
   job_id: string | null;

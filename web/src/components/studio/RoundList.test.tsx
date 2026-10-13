@@ -38,6 +38,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** 出图参数标签的文本（不含 MJ flags 那一行）。 */
+const specChips = (testId: string) =>
+  [...screen.getByTestId(testId).querySelectorAll('span.rounded-sm')].map(chip => chip.textContent);
+
 describe('RoundList video', () => {
   it('renders a <video> element for a video round', () => {
     const { container } = render(<RoundList rounds={[videoDone]} />);
@@ -537,10 +541,10 @@ describe('RoundList progress badge', () => {
 
     render(<RoundList rounds={[round]} />);
 
-    expect(screen.getByTestId('pending-spec-meta')).toHaveTextContent('Midjourney · 3:4 · 4 张');
-    expect(screen.getByTestId('pending-run-meta')).toHaveTextContent('耗时 21s · 2026-07-08 18:00');
+    expect(specChips('pending-spec-meta')).toEqual(['Midjourney', '3:4', '4 张']);
+    expect(screen.getByTestId('pending-run-meta')).toHaveTextContent('21s · 18:00');
     act(() => vi.advanceTimersByTime(1_000));
-    expect(screen.getByTestId('pending-run-meta')).toHaveTextContent('耗时 22s');
+    expect(screen.getByTestId('pending-run-meta')).toHaveTextContent('22s · 18:00');
   });
 });
 
@@ -572,40 +576,37 @@ describe('RoundList done metadata: 耗时 + 生成时间', () => {
         resolution: undefined,
       },
     }]} />);
-    expect(screen.getByText('Nano Banana Pro 4K · 3:4')).toBeInTheDocument();
-    expect(screen.queryByText('Nano Banana Pro 4K · 3:4 · 3:4')).toBeNull();
+    expect(specChips('round-spec-meta')).toEqual(['Nano Banana Pro 4K', '3:4']);
   });
 
   it('自定义与 AUTO 摘要不显示非生效比例或分辨率', () => {
     const { rerender } = render(<RoundList rounds={[{ ...timedDone, config: {
       ...timedDone.config, sizeMode: 'custom', size: '1360x2048', ratio: '2:3', resolution: '2K',
     } }]} />);
-    expect(screen.getByText('gpt-image-2 · 1360×2048')).toBeInTheDocument();
+    expect(specChips('round-spec-meta')).toEqual(['gpt-image-2', '1360×2048']);
     rerender(<RoundList rounds={[{ ...timedDone, config: {
       ...timedDone.config, sizeMode: 'auto', size: 'auto', ratio: '2:3', resolution: '2K',
     } }]} />);
-    expect(screen.getByText('gpt-image-2 · AUTO')).toBeInTheDocument();
+    expect(specChips('round-spec-meta')).toEqual(['gpt-image-2', 'AUTO']);
   });
 
   it('显示出图耗时（completed_at − submitted_at）与北京时间生成时间', () => {
     const { container } = render(<RoundList rounds={[timedDone]} />);
-    expect(container.textContent).toContain('耗时 12s');
-    expect(container.textContent).toContain('2026-07-08 18:00');
+    // 日期在分组标题上，运行信息只留耗时与时分
+    expect(container.textContent).toContain('2026-07-08');
+    expect(container.textContent).toContain('12s · 18:00');
   });
 
   it('耗时/生成时间与出图参数分行（次行更小更淡，参数行不含耗时）', () => {
-    const { container, getByTestId } = render(<RoundList rounds={[timedDone]} />);
+    const { getByTestId } = render(<RoundList rounds={[timedDone]} />);
     const runLine = getByTestId('round-run-meta');
-    expect(runLine.textContent).toContain('耗时 12s');
-    expect(runLine.textContent).toContain('2026-07-08 18:00');
+    expect(runLine.textContent).toBe('12s · 18:00');
     expect(runLine.className).toContain('text-xs');
     // 参数行是另一个元素，不含耗时/时间
-    const specLine = Array.from(container.querySelectorAll('p')).find((p) =>
-      p.textContent?.includes('gpt-image-2'),
-    );
-    expect(specLine).toBeTruthy();
+    const specLine = getByTestId('round-spec-meta');
+    expect(specLine.textContent).toContain('gpt-image-2');
     expect(specLine).not.toBe(runLine);
-    expect(specLine!.textContent).not.toContain('耗时');
+    expect(specLine.textContent).not.toContain('12s');
   });
 
   it('可计价时在运行信息行最右侧显示费用，最多保留两位小数', () => {
@@ -616,9 +617,9 @@ describe('RoundList done metadata: 耗时 + 生成时间', () => {
 
     const runLine = screen.getByTestId('round-run-meta');
     const cost = screen.getByTestId('round-generation-cost');
-    expect(runLine).toHaveClass('flex');
+    expect(runLine).toHaveClass('flex', 'ml-auto', 'tabular-nums');
     expect(cost).toHaveTextContent('¥ 10.11');
-    expect(cost).toHaveClass('ml-auto', 'tabular-nums');
+    expect(runLine.lastElementChild).toBe(cost);
   });
 
   it('无法计价时不显示费用', () => {

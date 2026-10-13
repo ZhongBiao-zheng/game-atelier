@@ -38,8 +38,8 @@ function contentNode(id: string, type: 'text' | 'image' | 'video' | 'audio', ver
 }
 
 const config: CanvasNode = {
-  id: 'config', title: '生成', type: 'config', position: { x: 0, y: 0 }, z_index: 0,
-  data: { draft },
+  id: 'config', title: '生成', type: 'image', position: { x: 0, y: 0 }, z_index: 0,
+  data: { current_version_id: null, active_run_id: null, display: { fit: 'contain', free_resize: false }, generation_draft: draft },
 };
 
 const versions: Record<string, CanvasContentVersion> = {

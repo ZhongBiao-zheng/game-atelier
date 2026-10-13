@@ -121,7 +121,7 @@ export function ProjectNavigation({
       <section aria-labelledby="asset-library-heading" className="space-y-1">
         <h2
           id="asset-library-heading"
-          className="flex h-8 items-center gap-2 px-2.5 text-xs font-medium uppercase tracking-label text-muted-foreground/70"
+          className="flex h-8 items-center gap-2 px-2.5 text-xs font-medium text-muted-foreground"
         >
           <LibraryBig className="size-4" aria-hidden />
           资产库

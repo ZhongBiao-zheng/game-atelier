@@ -1,6 +1,5 @@
 import { AlertTriangle, Link2 } from 'lucide-react';
 
-import { ApiError } from '@/api/http';
 import type { CanvasGenerationSnapshot, Job } from '@/schema/jobs';
 
 interface CanvasNodeIdentity {
@@ -144,14 +143,6 @@ function generationRecordPrompt(finalPrompt: string): string {
   return sections.filter(Boolean).join('\n\n') || '空提示词';
 }
 
-export function canvasRetryErrorMessage(error: unknown): string {
-  if (error instanceof ApiError) {
-    return error.recovery ? `${error.message} ${error.recovery}` : error.message;
-  }
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
 export function CanvasGenerationMetadata({ snapshot, job, nodes }: {
   snapshot: CanvasGenerationSnapshot;
   job: Job;
@@ -170,7 +161,7 @@ export function CanvasGenerationMetadata({ snapshot, job, nodes }: {
   return (
     <section role="region" aria-label="生成记录" className="space-y-4 rounded-lg border border-border bg-background p-4">
       <div>
-        <p className="text-xs font-medium uppercase tracking-label text-muted-foreground/70">生成记录</p>
+        <p className="text-xs font-medium text-muted-foreground">生成记录</p>
         <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
           {generationRecordPrompt(snapshot.final_prompt)}
         </p>

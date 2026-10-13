@@ -79,12 +79,37 @@ export function missingCanvasMentionIds(
 export function canvasInputSourceIds(
   nodes: readonly CanvasNode[],
   sourceNodeId: string,
+  target?: CanvasNode,
 ): string[] {
   const source = nodes.find(node => node.id === sourceNodeId);
   if (!source) return [];
   if (source.type !== 'group') return [sourceNodeId];
-  const ids = new Set(nodes.map(node => node.id));
-  return source.data.member_node_ids.filter(id => ids.has(id));
+  const byId = new Map(nodes.map(node => [node.id, node]));
+  // 素材包按目标收得下的类型过滤：图片生成节点连了一个带视频的分组，视频不进参考。
+  return source.data.member_node_ids.filter(id => {
+    const member = byId.get(id);
+    // 目标节点自己也在这个组里时，不把自己当参考。
+    return Boolean(member && member.id !== target?.id && canvasTargetAcceptsSource(target, member));
+  });
+}
+
+/** 生成模式收哪几类素材节点；没列出的模式（文本、视频）由模型能力决定，这里不限。
+ *  与后端 canvas_runs._ACCEPTED_INPUT_NODE_TYPES 是同一张表，改一边必须改另一边。 */
+const ACCEPTED_INPUT_NODE_TYPES: Partial<Record<string, ReadonlySet<string>>> = {
+  image: new Set(['text', 'image']),
+  audio: new Set(['text']),
+};
+const MEDIA_NODE_TYPES: ReadonlySet<string> = new Set(['text', 'image', 'video', 'audio']);
+
+export function canvasTargetAcceptsSource(target: CanvasNode | undefined, source: CanvasNode): boolean {
+  if (!target || !MEDIA_NODE_TYPES.has(source.type)) return true;
+  const draft = 'generation_draft' in target.data ? target.data.generation_draft : null;
+  return !draft || canvasModeAcceptsNodeType(draft.mode, source.type);
+}
+
+export function canvasModeAcceptsNodeType(mode: string, nodeType: string): boolean {
+  const accepted = ACCEPTED_INPUT_NODE_TYPES[mode];
+  return !accepted || !MEDIA_NODE_TYPES.has(nodeType) || accepted.has(nodeType);
 }
 
 export function buildCanvasMentionReferences(
@@ -98,7 +123,7 @@ export function buildCanvasMentionReferences(
   const seen = new Set<string>();
   return labelCanvasMentionReferences(connections.flatMap(connection => {
     if (connection.role !== 'input' || connection.target_node_id !== surface.id) return [];
-    return canvasInputSourceIds(nodes, connection.source_node_id).flatMap(sourceId => {
+    return canvasInputSourceIds(nodes, connection.source_node_id, surface).flatMap(sourceId => {
       if (seen.has(sourceId)) return [];
       seen.add(sourceId);
       const node = nodesById.get(sourceId);

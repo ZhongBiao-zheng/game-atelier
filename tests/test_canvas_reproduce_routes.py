@@ -39,11 +39,11 @@ def test_reproduce_builds_nodes_and_returns_warnings(client):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert resp.headers["ETag"] == f'"{body["revision"]}"' and body["revision"] == 1
-    assert [node["type"] for node in body["nodes"]] == ["image", "image", "config"]
+    assert [node["type"] for node in body["nodes"]] == ["image", "image", "image"]
     assert len(body["connections"]) == 2
     assert len(body["warnings"]) == 1
     config = body["nodes"][-1]
-    assert config["data"]["draft"]["model"] == "gpt-image-2"
+    assert config["data"]["generation_draft"]["model"] == "gpt-image-2"
     raw = json.loads((canvas_project_dir(project.project_id) / "canvas.json").read_text("utf-8"))
     assert raw["revision"] == 1 and "warnings" not in raw
 
@@ -53,7 +53,7 @@ def test_reproduce_without_model_leaves_config_model_empty(client):
     asset = _asset([(_REF_A, "reference")])
     resp = _post(client, project.project_id, asset.asset_id, model=None, alias=None)
     assert resp.status_code == 200, resp.text
-    assert resp.json()["nodes"][-1]["data"]["draft"]["model"] in (None, "")
+    assert resp.json()["nodes"][-1]["data"]["generation_draft"]["model"] in (None, "")
 
 
 def test_reproduce_if_match_required_and_conflict(client):

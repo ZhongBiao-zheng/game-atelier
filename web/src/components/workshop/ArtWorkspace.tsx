@@ -31,7 +31,7 @@ export function ArtWorkspace({
             key={item.path}
             href={workHref(projectId, item)}
             aria-label={`查看 ${item.title} 的${SLOT_LABEL[item.target.asset_slot]}`}
-            className="group relative mb-4 block break-inside-avoid overflow-hidden rounded-2xl"
+            className="group relative mb-4 block break-inside-avoid overflow-hidden rounded-xl"
           >
             <img
               src={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(item.path)}`)}

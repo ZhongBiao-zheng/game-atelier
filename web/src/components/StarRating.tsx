@@ -64,7 +64,7 @@ export function StarRating({ value, onChange }: Props) {
       {shown > 0 ? (
         <span className="text-sm tabular-nums text-foreground">{shown.toFixed(1)}</span>
       ) : (
-        <span className="text-xs text-muted-foreground/60">点击评分</span>
+        <span className="text-xs text-muted-foreground">点击评分</span>
       )}
     </div>
   );

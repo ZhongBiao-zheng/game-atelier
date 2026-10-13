@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { mediaUrl } from '@/api/connection';
-import { FolderPlus, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { fetchProjectIndex, type ProjectIndexItem } from '@/api/gallery';
 import { createProject, deleteProject, renameProject } from '@/api/projects';
@@ -110,12 +110,16 @@ export function ProjectIndexPage({
   return (
     <section className="stable-scroll h-full overflow-y-auto bg-background">
       <div className="w-full px-4 py-8 sm:px-6 md:px-10 md:py-12">
-        <header className="mb-8 space-y-2">
-          <p className="text-xs uppercase tracking-label text-muted-foreground">项目目录</p>
+        <header className="mb-8 flex flex-wrap items-center justify-between gap-5">
           <h1 className="font-display text-display italic text-foreground">全部项目</h1>
-          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            每个项目保存自己的世界观与角色、UI、视频资产。
-          </p>
+          <Button
+            onClick={() => {
+              setEditor({ open: true, mode: 'create', name: '' });
+              setEditorError(null);
+            }}
+          >
+            <Plus aria-hidden="true" />新建项目
+          </Button>
         </header>
 
         {loadError && (
@@ -128,24 +132,10 @@ export function ProjectIndexPage({
           </div>
         )}
 
+        {!loading && !loadError && projects.length === 0 && (
+          <p className="font-display text-display italic text-foreground/70">还没有项目</p>
+        )}
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-busy={loading}>
-          <button
-            type="button"
-            onClick={() => {
-              setEditor({ open: true, mode: 'create', name: '' });
-              setEditorError(null);
-            }}
-            className="group flex min-h-72 cursor-pointer flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-border bg-card/30 px-6 text-center transition-colors hover:border-input hover:bg-card/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <span className="flex size-12 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-colors group-hover:text-foreground">
-              <Plus className="size-5" aria-hidden="true" />
-            </span>
-            <span className="space-y-1">
-              <span className="block text-base font-medium text-foreground">新建项目</span>
-              <span className="block text-xs text-muted-foreground">建立一个新的游戏资产空间</span>
-            </span>
-          </button>
-
           {loading && projects.length === 0
             ? Array.from({ length: 3 }, (_, index) => <ProjectCardSkeleton key={index} />)
             : projects.map(item => (
@@ -243,7 +233,7 @@ function ProjectCard({
         className="block w-full cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
       >
         <ProjectCover paths={item.cover_paths} projectName={item.project.name} />
-        <CardHeader className="min-h-24 pr-14">
+        <CardHeader className="pr-14">
           <CardTitle>{item.project.name}</CardTitle>
           <CardDescription>{formatActivity(item.activity_at)}</CardDescription>
         </CardHeader>
@@ -281,8 +271,8 @@ function ProjectCard({
 function ProjectCover({ paths, projectName }: { paths: string[]; projectName: string }) {
   if (paths.length === 0) {
     return (
-      <div className="grid aspect-[16/10] place-items-center border-b border-border bg-secondary/30 text-muted-foreground">
-        <FolderPlus className="size-8" aria-hidden="true" />
+      <div className="grid aspect-[16/10] place-items-center border-b border-border bg-secondary/30 px-4 text-center font-display text-display text-muted-foreground">
+        <span className="line-clamp-2">{projectName}</span>
       </div>
     );
   }

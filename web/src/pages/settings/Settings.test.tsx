@@ -57,7 +57,7 @@ beforeEach(() => {
     if (url === '/api/config') {
       return Promise.resolve({
         ok: true,
-        json: async () => ({ image_storage_root: '/Users/me/game-atelier', show_studio_on_home: false }),
+        json: async () => ({ image_storage_root: '/Users/me/game-atelier', show_canvas_on_home: false }),
       } as Response);
     }
     return Promise.resolve({ ok: true, json: async () => ({}) } as Response);
@@ -96,10 +96,10 @@ describe('SettingsPage', () => {
     expect(await screen.findByText('项目存放地址已更新，API Key 已重新读取新目录。')).toBeInTheDocument();
   });
 
-  it('renders the show-studio-on-home switch and posts the toggle', async () => {
+  it('renders the show-canvas-on-home switch and posts the toggle', async () => {
     render(<SettingsPage />);
 
-    const toggle = await screen.findByRole('switch', { name: '展示 Studio 出图' });
+    const toggle = await screen.findByRole('switch', { name: '展示画布出图' });
     expect(toggle).toHaveAttribute('aria-checked', 'false');
 
     fireEvent.click(toggle);
@@ -110,7 +110,7 @@ describe('SettingsPage', () => {
         '/api/config',
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ show_studio_on_home: true }),
+          body: JSON.stringify({ show_canvas_on_home: true }),
         }),
       );
     });
@@ -126,7 +126,7 @@ describe('SettingsPage', () => {
     }));
     render(<SettingsPage />);
 
-    const toggle = await screen.findByRole('switch', { name: '展示 Studio 出图' });
+    const toggle = await screen.findByRole('switch', { name: '展示画布出图' });
     fireEvent.click(toggle);
     await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'));
   });

@@ -35,9 +35,7 @@ export function ProfileSection() {
 
   return (
     <>
-      <div>
-        <h2 className="text-xs uppercase tracking-label text-muted-foreground/70">显示名</h2>
-      </div>
+      <h2 className="text-base font-medium text-foreground">显示名</h2>
       <div className="min-w-0 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <Input
@@ -54,7 +52,7 @@ export function ProfileSection() {
             type="button"
             onClick={() => void save()}
             disabled={saving || !name.trim()}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background"
+            className="rounded-md border border-border px-4 py-2 text-sm text-foreground transition-colors hover:bg-secondary/60 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             保存
           </button>

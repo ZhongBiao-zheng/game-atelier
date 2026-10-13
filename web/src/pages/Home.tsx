@@ -33,7 +33,7 @@ export function Home() {
     return (
       // 卡片容器本身非交互：导航链接与喜欢按钮作两个平级交互元素，
       // 不再用 <a> 套 <button>（非法嵌套交互），喜欢点击也无需 stopPropagation 兜底。
-      <div className="group relative overflow-hidden rounded-2xl">
+      <div className="group relative overflow-hidden rounded-xl">
         {/* Pinterest 式瀑布流：图片直出、无边框无放大，hover 只淡入操作按钮 */}
         <Link
           href={galleryItemHref(item)}
@@ -169,11 +169,15 @@ function isStudioItem(item: GalleryItem): boolean {
 }
 
 function galleryItemAriaLabel(item: GalleryItem): string {
+  if (item.source === 'canvas') return '查看所在画布';
   if (isStudioItem(item)) return '查看出图页';
   return `查看 ${item.character_id} 的${SLOT_LABEL[item.asset_slot!]}`;
 }
 
 function galleryItemHref(item: GalleryItem): string {
+  if (item.source === 'canvas') {
+    return item.canvas_project_id ? `/canvas/${encodeURIComponent(item.canvas_project_id)}` : '/canvas';
+  }
   // Studio 出图无角色归属：带 job_id 深链进出图页，历史列表滚动定位到该轮并高亮。
   if (isStudioItem(item)) {
     return item.job_id ? `/studio?job=${encodeURIComponent(item.job_id)}` : '/studio';

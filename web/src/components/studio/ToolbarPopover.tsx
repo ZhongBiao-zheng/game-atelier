@@ -33,6 +33,9 @@ interface Props {
   autoFocus?: boolean;
   /** 面板视觉类（宽度 / 圆角 / 背景 / 内边距），不含定位类。 */
   className?: string;
+  /** 面板高度上限（px）。定位算出的可用高度写在内联 style 上，会盖过 className 里的 max-h-*，
+   *  所以要限高必须走这个 prop；实际高度取它与可用高度的较小值。 */
+  maxHeight?: number;
   /** Dialog 的焦点陷阱必须拥有 portaled 面板，否则菜单交互会被 Radix 抢回焦点。 */
   portalContainerRef?: RefObject<HTMLElement | null>;
   role?: string;
@@ -59,6 +62,7 @@ export function ToolbarPopover({
   align = 'start',
   autoFocus = false,
   className = '',
+  maxHeight,
   portalContainerRef,
   children,
   ...rest
@@ -233,7 +237,7 @@ export function ToolbarPopover({
         top: pos.top,
         bottom: pos.bottom,
         maxWidth: pos.maxWidth,
-        maxHeight: pos.maxHeight,
+        maxHeight: maxHeight === undefined ? pos.maxHeight : Math.min(pos.maxHeight, maxHeight),
         minWidth: 0,
         minHeight: 0,
         boxSizing: 'border-box',

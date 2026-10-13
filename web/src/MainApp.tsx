@@ -288,7 +288,7 @@ function ThreeColumnLayout({
     return (
       <section className="grid h-full place-items-center bg-background px-6 text-center">
         <div className="max-w-md space-y-3">
-          <p className="text-xs uppercase tracking-label text-muted-foreground">项目不存在</p>
+          <p className="text-xs text-muted-foreground">项目不存在</p>
           <h1 className="font-display text-display italic text-foreground">找不到这个项目</h1>
           <p className="text-sm leading-relaxed text-muted-foreground">
             项目可能已经删除，或当前链接使用了失效的项目编号。

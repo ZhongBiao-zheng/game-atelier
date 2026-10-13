@@ -911,8 +911,6 @@ def insert_creation_asset_into_canvas(
             raise KeyError(target_node_id)
         if target is not None:
             draft = getattr(target.data, "generation_draft", None)
-            if getattr(target, "type", None) == "config":
-                draft = getattr(target.data, "draft", None)
             if (
                 content.kind != "media"
                 or not content.mime_type.startswith("image/")

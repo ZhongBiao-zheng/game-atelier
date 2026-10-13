@@ -27,7 +27,7 @@
 
 ## Typography
 
-- **Display / Hero**: **Instrument Serif** — 仅用于「唯一大跳跃」：页面 hero、角色名、空状态主文案。配 `text-display`（36px / 400）。serif 是签名，克制才贵。
+- **Display / Hero**: **Instrument Serif**（中文字形由 **Noto Serif SC** 承接，栈内再回落 Songti SC / SimSun，不依赖系统默认衬线）— 仅用于「唯一大跳跃」：页面 hero、角色名、空状态主文案。配 `text-display`（36px / 400）。serif 是签名，克制才贵。
 - **Body / UI**: **Geist** — 所有按钮、标签、表单、正文、区块标题
 - **Data / Tables**: **Geist** with `tabular-nums`
 - **Code / Technical**: **JetBrains Mono** — job_id、文件路径、seed、URL
@@ -44,7 +44,8 @@
 
 - ❌ **禁用** `text-lg` / `text-xl` / `text-2xl` / `text-3xl` / `text-4xl` 与一切 `text-[Npx]` 任意值。
 - 层级不够用？用字重（400/500/600）和颜色（foreground / muted-foreground），不是字号。
-- **小帽标签**：`text-xs uppercase tracking-label text-muted-foreground/70`（`tracking-label` = 0.18em，唯一字距 token）。
+- **小帽标签**：拉丁文案 `text-xs uppercase tracking-label text-muted-foreground`（`tracking-label` = 0.18em，唯一字距 token）；中文文案只写 `text-xs text-muted-foreground`，不加字距（0.18em 会把汉字拉散）。
+- **文字透明度下限**：12px 文字不得用 `text-muted-foreground/70` 及更低档——`/70` 在画布上约 3.5:1，不达 AA；要更弱的层级用字重或位置，不用透明度。图标与分隔符不受此限。
 
 **Font-weight 策略**：
 
@@ -194,14 +195,18 @@
 | 卡片 | `bg-card border border-border rounded-lg` |
 | 媒体瓦片 | `rounded-lg overflow-hidden border border-border`（框架隐形，让图说话） |
 | 选项弹窗（输入框控件 popover） | 面板 `bg-card border border-border rounded-xl`（**不透明**——内含可选项时玻璃透底会让选项难辨）；选项轨道 `bg-popover`（比面板亮一档）；选项 chip 默认透明贴轨道、左右贴紧（多行只留 `gap-y-1`），`hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60`。层级铁律：**越靠背景越深**，画布 → 输入壳 → 面板 → 轨道 → 选中/hover 单调变亮 |
+| 控件下拉面板限高 | `ToolbarPopover` 把定位算出的可用高度写在内联 style 上，会盖过 className 里的 `max-h-*`；要限高传 `maxHeight` prop（厂商 / 模型列表 400，生成模式 280） |
 | 玻璃浮层（无选项的悬浮 panel/菜单） | `bg-glass backdrop-blur-glass border border-border rounded-xl` |
 | Studio 输入壳（滚动联动收放） | 浮于历史滚动区上（wrapper `pointer-events-none`，壳 `pointer-events-auto`，两侧视觉与交互都穿透）；`rounded-xl` 收放两态一致（胶囊 `rounded-full` 试装后被否——过圆），展开 `min-h-[174px]`，距底 >160px 收成单行条：控件行 `grid-rows-[0fr] opacity-0` 折叠、textarea 单行、参考堆叠 `scale-80`，全程 `transition 300ms`；点击收缩壳展开但**不回滚**，「回到底部」独立玻璃 pill 出现在壳右上方，点击**瞬时跳底**不播滚动过程 |
+| Studio 生成记录 | 单列，一条记录上下三段，列表上限 1024px：① 信息：提示词一行（参考图在提示词左侧，多张时向右展开）+ 参数标签行 ② 结果 ③ 操作行。标签行与操作行始终从最左缘开始，有没有参考图都一样。参数标签实底 `rounded-sm bg-card px-2 py-0.5 text-xs`，来源是同一行里的描边标签，MJ flags 另起一行等宽灰字。操作按钮 `h-8 px-2 text-xs` 无底色、宽度随文字，整行 `-ml-2` 让文字贴左缘，上方不加分隔线；耗时 · 时分 · 费用等宽靠右。日期由分组标题承担（按北京日期分组，每组第一条上方一行 `font-mono text-xs`）。更多菜单向右弹。**两栏（结果左 / 信息右）试过后撤回**：右栏只有 20rem，参考图一多 hover 展开放不下 |
 | 玻璃 pill（顶栏 tab） | `bg-glass backdrop-blur-glass border border-border rounded-full` |
 | 顶栏圆形 icon 钮（主题切换 / 设置） | `h-10 w-10 rounded-full bg-glass backdrop-blur-glass text-muted-foreground hover:bg-secondary/60 hover:text-foreground`，icon 18px |
 | 遮罩层（lightbox） | `fixed inset-0 z-50 bg-scrim` |
 | 状态徽章 | `text-xs` + `text-[color:var(--status-*)]`（同字号靠颜色分语义） |
 | 输入框 | `border border-input bg-transparent rounded-md focus-visible:ring-1 focus-visible:ring-ring` |
-| 小帽标签 | `text-xs uppercase tracking-label text-muted-foreground/70` |
+| 原生下拉 `<select>` | 外观由 `tokens.css` 的 base 规则统一（去系统箭头、`--select-chevron` 发丝箭头、右内边距 2rem）；tsx 只写与输入框相同的边框 / 圆角 / 高度类，不再各自画箭头 |
+| 设置页 | 左侧 160px 分区导航（锚点，md 以上 sticky）+ 右侧单列分区；分区标题 `text-base font-medium`，不写说明句；黄铜只给开关选中态和「有未保存变更时才出现的保存」，分区内动作一律描边按钮 |
+| 小帽标签 | 拉丁 `text-xs uppercase tracking-label text-muted-foreground`；中文 `text-xs text-muted-foreground` |
 | 空状态 | `font-display text-display italic text-foreground/70` + 一行 `text-sm text-muted-foreground` 说明 |
 | 无限画布 chrome | React Flow 只占平面层；项目切换、工具条、MiniMap 与节点设置统一使用 `bg-glass backdrop-blur-glass border border-border`，节点本体用 `bg-card border-border rounded-lg`。素材名固定显示在节点左上方；节点选中后，功能工具条固定出现在节点上方，完整图片快捷工具不再按节点宽度折叠。空图片/视频/音频只在上方工具条保留一个上传入口，节点正文不重复放上传按钮；自身取得当前 Content Version 后恢复完整工具。空文本从创建起即持有真实的空 Content Version，必须保留输出连接点、出现在下游素材条与 `@` 候选中，允许先建立 Input Connection 再填写内容。选中框四边与缩放手柄均向节点外扩 1px，避免描边压住内容边缘。768px 起生成设置作为节点下方独立浮层。选中节点在渲染时临时提升到全部持久化节点之上，保证工具条与生成面板不会被其他节点遮盖，但不改写项目内 `z_index`。当前 Content Version 来源为 `upload` 的图片是纯素材节点：选中后不挂载桌面或移动端生成设置，只显示上方工具条，不额外显示替换动作。视频画面单击只选择节点并阻止浏览器切换播放状态；播放/暂停、进度、音量与全屏由节点内确定性的自有控制条操作，不猜测浏览器原生控制条几何。图片多结果在节点卡片展开，生成设置不重复预览。视频不使用候选堆叠或主结果切换，生成结果直接成为独立节点。批量执行按项与轮纵向展开普通节点链路，各行只连接本批上游；保留现有节点样式，不添加结果容器。生成设置的提示词上方使用 48px 素材缩略条展示当前 Input Connection，图片与视频分别显示图片和视频首帧；文本连接到全能参考视频时同步补入对应 `@` token，断开连接时同步移除，若只剩引用则提示词回到空字符串；其他素材连接不自动改写提示词。进入画布选材后，合法素材 hover 时点亮边框，“选择 + 节点名”以固定屏幕尺寸跟随光标；键盘聚焦时提示显示在节点起始位置。已对接素材和提示词内的 `@` token 在 hover 或键盘聚焦时复用同一固定屏幕尺寸详情，图片放大预览、视频静音循环预览、文本/音频显示摘要。两块跟随浮层都反向补偿画布缩放，保持固定屏幕尺寸，并允许随节点移出视口而被自然裁切，不做翻边或边缘钳位。文本生成设置标题只显示“文本”，提供 1–4 个结果；第一个覆盖原节点，第二个放右侧，第三个放左下，第四个放右下，新增结果均为携带相同 Draft 与输入连接的独立文本节点。文本模型可理解的图片、视频和音频先由 KEY 中的显式能力开关决定，caller 再核对当前供应商协议是否有对应传输格式；不支持时只在提交时给一条短消息，不增加常驻说明。所有模态的生成面板底部只保留生成动作，不渲染完成状态、配置状态或阻塞原因；按钮仅在提交过程中禁用，配置问题在点击后统一由画布中上方反馈，失败后按当前设置整批重新提交。生成中节点使用旋转与呼吸组合的动态指示，并尊重 `prefers-reduced-motion`；生成记录只展示解析后的用户内容，内部冻结模板的 `【文本N】` 编号不得暴露，但不得改写真实请求快照。375px 下生成设置降级为带 safe-area 的底部面板；MiniMap 与缩放 Controls 不占手机底部空间。触控板双指平移、捏合缩放，画布在 capture 阶段接管横向非 pinch wheel 并禁用 overscroll history navigation，避免手势起于 `nowheel` 节点或浮层时触发浏览器前进/后退；鼠标左键拖框选择，触屏单指平移、双指缩放。LLM 生成合并进文本节点，人工正文与生成结果共用同一 Content Version 表面；Chat Completions 显示随机性和最大输出长度，Responses 显示推理强度和最大输出长度。菜单打开后焦点进入首项，Esc 逐层关闭并回到触发器或画布。媒体双击或预览按钮进入有焦点陷阱的 Dialog。节点列表必须启用可见区域渲染、稳定对象 memo，图片原生 lazy，视频/音频接近视区后才绑定 `src` |
 
@@ -209,17 +214,16 @@
 
 节点顶部工具栏不提供删除、存资产、复制提示词、反推提示词、替换和局部编辑，图片快捷工具配置也不列出这些项；已上传图片不再额外显示替换按钮。空媒体节点仍保留唯一上传入口，分组保留“解散”。这只收敛节点入口，不删除资产或处理历史。
 
-取得图片 Content Version 的图片节点及图片候选卡片不铺底色，透明像素直接透出画布；堆叠候选的装饰卡片也不铺底色。空节点、非图片节点与状态提示保留原有可读性背景。左侧工具栏及其添加菜单不提供生成配置入口，左栏不显示撤销、重做按钮；保留历史配置节点、上下文配置操作和撤销/重做快捷键。
+取得图片 Content Version 的图片节点及图片候选卡片不铺底色，透明像素直接透出画布；堆叠候选的装饰卡片也不铺底色。空节点、非图片节点与状态提示保留原有可读性背景。左栏不显示撤销、重做按钮；保留撤销/重做快捷键。
 
 ## Motion
 
 - **Approach**: minimal-functional —— 只用帮助理解的过渡，不堆装饰动画
 - **Easing**: `ease-out`（进入） / `ease-in`（离开） / `ease-in-out`（位置移动）
 - **Duration**:
-  - micro `75ms`：按钮按下、checkbox 状态
-  - short `150ms`：hover、聚焦环
-  - medium `250ms`：卡片展开、对话框
-  - long `400ms`：页面切换（很少用）
+  - fast `150ms`（`--motion-fast` / `duration-150`）：hover、聚焦环、浮层进出
+  - base `200ms`（`--motion-base` / `duration-200`）：遮罩、展开
+  - slow `300ms`（`--motion-slow` / `duration-300`）：输入壳收放、位置移动
 - **Hover 准则**：图片卡片可以 `scale-[1.02]`（微妙提示可点击）；按钮只换颜色，不换大小
 - **不用**：自动 loop 动画、装饰性渐入、scroll-driven 效果（这是工具不是营销页）
 
@@ -265,3 +269,4 @@
 | 2026-06-12 | 新增浅色主题（飙哥要求），dark-first 不变：`.light` 类覆盖 token，黄铜压深 #8F6234；禁 `dark:`/`light:` 变体类 | 主题差异收在 tokens.css 单点，组件零改动零分叉 |
 | 2026-06-12 | 浅色从初版「暖纸画廊」(#F2EEE6 米色) 改纯白画廊：画布 #FFFFFF、卡片 #FAFAFA、纯黑字、发丝边纯黑 alpha，阶梯方向翻转（表面向灰走深） | 飙哥给参考站配色（bg #fff / card #fafafa / text #000/#404040 / border 黑 alpha），按参考调；品牌黄铜保留不跟参考站青色 |
 | 2026-08-23 | 独立无限画布沿用暖黑平面 + 玻璃 chrome，节点保持不透明卡片，窄屏节点设置转为底部面板 | 保持人工创作空间的沉浸感，同时让可编辑表单不受底图干扰 |
+| 2026-10-12 | 只读状态从顶部居中浮条改为顶栏字标右侧胶囊；12px 文字禁用 `/70` 以下透明度；中文小帽标签去字距；display 栈补 Noto Serif SC；动效时长以 token 三档为准；删 `--radius-2xl` | UI 评审（Claude Design 画布 + Mobbin 参考）：浮条在 lg 以上压住导航 tab；`/70` 约 3.5:1 不达 AA；Instrument Serif 无中文字形，原先落到系统宋体，跨平台不一致 |

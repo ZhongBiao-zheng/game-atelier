@@ -1,7 +1,7 @@
-import { type ButtonHTMLAttributes, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ButtonHTMLAttributes, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { mediaUrl } from '@/api/connection';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, BookmarkPlus, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Share2, Square, Trash2 } from 'lucide-react';
+import { AlertTriangle, Bookmark, BookmarkPlus, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Share2, Square, Trash2 } from 'lucide-react';
 
 import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
@@ -92,6 +92,15 @@ export type RoundState =
 
 /** 生成中占位框的宽高比：按目标比例（"16:9"）→ 退回尺寸（"1024x1536"）→ 退回 1:1。
  *  别再固定 aspect-square，否则出竖图/宽图时占位是方框、出图后尺寸跳变。 */
+// 一条记录上下三段：信息（提示词 + 参数标签）→ 结果 → 操作。
+const ROUND_SECTION_CLASS = 'space-y-3';
+const ROUND_HEADER_CLASS = 'flex flex-col gap-3 text-sm';
+// 参考图只占提示词这一行的左侧——标签行与操作行始终从最左缘开始，有没有参考图都一样。
+const ROUND_PROMPT_ROW_CLASS = 'flex items-start gap-3';
+const ROUND_MEDIA_CLASS = 'flex flex-wrap gap-1';
+const ROUND_ACTIONS_CLASS = '-ml-2 flex flex-wrap items-center gap-0.5';
+const ROUND_RUN_META_CLASS = 'ml-auto flex items-center gap-1.5 pl-2 font-mono text-xs tabular-nums text-muted-foreground';
+
 function aspectStyle(config: RoundConfig): { aspectRatio: string } {
   const r = !config.sizeMode || config.sizeMode === 'ratio' ? config.ratio : undefined;
   if (r && /^\d+\s*:\s*\d+$/.test(r)) return { aspectRatio: r.replace(/\s*:\s*/, ' / ') };
@@ -109,6 +118,36 @@ function specMetadata(config: RoundConfig): string[] {
     config.n && config.n > 1 ? `${config.n} 张` : undefined,
   ].filter((value): value is string => Boolean(value));
   return values.filter((value, index) => values.indexOf(value) === index);
+}
+
+/** 出图参数（模型 / 尺寸 / 比例 / 清晰度 / 张数）逐项成标签；MJ flags 这类长串作为 children 另起一行。 */
+function SpecChips({ values, testId, children }: { values: string[]; testId?: string; children?: ReactNode }) {
+  return (
+    <div data-testid={testId} className="flex flex-wrap items-center gap-1.5 text-xs text-foreground">
+      {values.map(value => (
+        <span key={value} className="rounded-sm bg-card px-2 py-0.5 tabular-nums">{value}</span>
+      ))}
+      {children}
+    </div>
+  );
+}
+
+/** 来源提示词资产：描边标签，和实底的参数标签区分开。 */
+function SourceChip({ title, testId }: { title: string; testId?: string }) {
+  return (
+    <span data-testid={testId} className="inline-flex items-center gap-1 rounded-sm border border-border px-2 py-0.5 text-muted-foreground">
+      <Bookmark className="size-3 shrink-0" aria-hidden />
+      <span className="sr-only">来源：</span>{title}
+    </span>
+  );
+}
+
+/** 记录所属的北京日期（YYYY-MM-DD），日期分组用。 */
+function roundDate(round: RoundState): string {
+  const iso = round.kind === 'pending'
+    ? new Date(round.startedAt).toISOString()
+    : round.kind === 'done' ? round.completedAt ?? round.submittedAt : round.submittedAt;
+  return formatBeijingTime(iso).slice(0, 10);
 }
 
 function shownMjMetadata(config: RoundConfig): string {
@@ -274,14 +313,19 @@ export function RoundList({
             className="h-px w-full"
           />
         )}
-        {mountedRounds.map((r) => {
+        {mountedRounds.map((r, index) => {
+          const date = roundDate(r);
+          const startsDate = index === 0 || roundDate(mountedRounds[index - 1]) !== date;
           const stableKey =
             r.kind === 'pending' && r.jobId ? `pending-${r.jobId}` :
             r.kind === 'pending' ? `pending-${r.startedAt}` :
             `${r.kind}-${r.submittedAt}`;
           return (
             // data-round-job：首页作品深链（/studio?job=）滚动定位的锚点。
-            <MediaActivationBoundary key={stableKey} jobId={r.jobId}>
+            <Fragment key={stableKey}>
+            {/* 列表的 space-y-8 给每个子项加 2rem 下边距；组标题收成 0.75rem，贴近它带起的第一条记录 */}
+            {startsDate && <h3 data-testid="round-date" className="mb-3 font-mono text-xs tabular-nums text-muted-foreground">{date}</h3>}
+            <MediaActivationBoundary jobId={r.jobId}>
               {(mediaActive) => (
               <>
               {r.kind === 'pending' && (
@@ -327,6 +371,7 @@ export function RoundList({
               </>
               )}
             </MediaActivationBoundary>
+            </Fragment>
           );
         })}
       </div>
@@ -365,41 +410,39 @@ function PendingBatch({
   const specMeta = specMetadata(round.config);
   const shownMjFlags = shownMjMetadata(round.config);
   const elapsedSec = Math.max(0, Math.floor((now - round.startedAt) / 1000));
-  const submittedAt = formatBeijingTime(new Date(round.startedAt).toISOString());
+  const submittedAt = formatBeijingTime(new Date(round.startedAt).toISOString()).slice(11);
 
   return (
     <>
       <div className="mb-3">
         <WaitingCopy startedAt={round.startedAt} now={now} />
       </div>
-      <section className="space-y-3">
-        <div className="flex items-start gap-3 text-sm">
-          <ReferenceStack
-            config={round.config}
-            jobId={round.jobId}
-            onReuse={onReuseReferences}
-            mediaActive={mediaActive}
-          />
-          <div className="min-w-0 flex-1">
-            <MentionPrompt
-              prompt={round.config.prompt}
+      <section className={ROUND_SECTION_CLASS}>
+        <div className={ROUND_HEADER_CLASS}>
+          <div className={ROUND_PROMPT_ROW_CLASS}>
+            <ReferenceStack
               config={round.config}
               jobId={round.jobId}
+              onReuse={onReuseReferences}
               mediaActive={mediaActive}
             />
-            <p data-testid="pending-spec-meta" className="mt-1 text-sm text-muted-foreground">
-              {specMeta.join(' · ')}
-              {shownMjFlags && (
-                <span className="ml-2 text-muted-foreground/60">{shownMjFlags}</span>
-              )}
-            </p>
-            <p data-testid="pending-run-meta" className="mt-0.5 text-xs text-muted-foreground/60">
-              耗时 {elapsedSec}s · {submittedAt}
-            </p>
-            {round.config.sourceAssetTitle && <p className="mt-0.5 text-xs text-muted-foreground/50">来源：{round.config.sourceAssetTitle}</p>}
+            <div className="min-w-0 flex-1">
+              <MentionPrompt
+                prompt={round.config.prompt}
+                config={round.config}
+                jobId={round.jobId}
+                mediaActive={mediaActive}
+              />
+            </div>
           </div>
+          <SpecChips testId="pending-spec-meta" values={specMeta}>
+            {round.config.sourceAssetTitle && <SourceChip title={round.config.sourceAssetTitle} />}
+            {shownMjFlags && (
+              <span className="basis-full break-words font-mono text-muted-foreground">{shownMjFlags}</span>
+            )}
+          </SpecChips>
         </div>
-        <div className="flex flex-wrap gap-1">
+        <div className={ROUND_MEDIA_CLASS}>
           {Array.from({ length: Math.max(1, round.config.n ?? 1) }, (_, i) => (
             <div
               key={i}
@@ -414,7 +457,7 @@ function PendingBatch({
             </div>
           ))}
         </div>
-        <div className="flex items-center gap-2">
+        <div className={ROUND_ACTIONS_CLASS}>
           <ActionButton onClick={() => { void onReEdit?.(round.config, round.jobId); }}>重新编辑</ActionButton>
           <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
           {round.jobId && onCancel && (
@@ -427,6 +470,9 @@ function PendingBatch({
               {round.cancelRequested ? '停止中' : '停止'}
             </ActionButton>
           )}
+          <p data-testid="pending-run-meta" title="耗时 · 提交时间" className={ROUND_RUN_META_CLASS}>
+            {elapsedSec}s · {submittedAt}
+          </p>
         </div>
       </section>
     </>
@@ -894,9 +940,10 @@ function DoneBatch({
   // 两行分层：出图参数（模型/尺寸/比例/清晰度/张数）是主元信息；耗时 + 生成时间是运行信息，
   // 降到更小更淡的次行，别和参数挤在一行。
   const specMeta = specMetadata(round.config);
+  // 日期由分组标题承担，这里只留时分。
   const runMeta = [
-    elapsedSec != null ? `耗时 ${elapsedSec}s` : undefined,
-    round.completedAt ? formatBeijingTime(round.completedAt) : undefined,
+    elapsedSec != null ? `${elapsedSec}s` : undefined,
+    round.completedAt ? formatBeijingTime(round.completedAt).slice(11) : undefined,
   ].filter(Boolean);
   const shownMjFlags = shownMjMetadata(round.config);
   const share = round.shareable ? onShareResult : undefined;
@@ -912,43 +959,33 @@ function DoneBatch({
     : undefined;
 
   return (
-    <section className="space-y-3">
-      <div className="flex items-start gap-3 text-sm">
-        <ReferenceStack
-          config={round.config}
-          jobId={round.jobId}
-          onReuse={onReuseReferences}
-          mediaActive={mediaActive}
-        />
-        <div className="min-w-0 flex-1">
-          <MentionPrompt
-            prompt={round.config.prompt}
+    <section className={ROUND_SECTION_CLASS}>
+      <div className={ROUND_HEADER_CLASS}>
+        <div className={ROUND_PROMPT_ROW_CLASS}>
+          <ReferenceStack
             config={round.config}
             jobId={round.jobId}
+            onReuse={onReuseReferences}
             mediaActive={mediaActive}
           />
-          <p className="mt-1 text-sm text-muted-foreground">
-            {specMeta.join(' · ')}
+          <div className="min-w-0 flex-1">
+            <MentionPrompt
+              prompt={round.config.prompt}
+              config={round.config}
+              jobId={round.jobId}
+              mediaActive={mediaActive}
+            />
+          </div>
+        </div>
+        <div>
+          <SpecChips testId="round-spec-meta" values={specMeta}>
+            {round.config.sourceAssetTitle && <SourceChip testId="round-asset-source" title={round.config.sourceAssetTitle} />}
             {shownMjFlags && (
-              <span data-testid="round-mj-flags" className="ml-2 text-muted-foreground/60">
+              <span data-testid="round-mj-flags" className="basis-full break-words font-mono text-muted-foreground">
                 {shownMjFlags}
               </span>
             )}
-          </p>
-          {(runMeta.length > 0 || round.generationCost != null) && (
-            <p data-testid="round-run-meta" className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground/60">
-              <span>{runMeta.join(' · ')}</span>
-              {round.generationCost != null && (
-                <span
-                  data-testid="round-generation-cost"
-                  className="ml-auto shrink-0 tabular-nums"
-                >
-                  {formatGenerationCost(round.generationCost)}
-                </span>
-              )}
-            </p>
-          )}
-          {round.config.sourceAssetTitle && <p data-testid="round-asset-source" className="mt-0.5 text-xs text-muted-foreground/50">来源：{round.config.sourceAssetTitle}</p>}
+          </SpecChips>
           {/* 后端回写的静默改写提示（尺寸归一化 / 参考图截断）——是提示不是错误，走 muted 灰不用暖红。 */}
           {(round.config.warnings?.length ?? 0) > 0 && (
             <ul data-testid="round-warnings" className="mt-1.5 space-y-1">
@@ -962,7 +999,7 @@ function DoneBatch({
           )}
         </div>
       </div>
-      <div className="flex flex-wrap gap-1">
+      <div className={ROUND_MEDIA_CLASS}>
         {round.config.kind === 'video'
           ? round.imagePaths.map((path, index) => {
               const favorited = !!favorites && isGalleryFavorited(path, favorites);
@@ -1120,7 +1157,7 @@ function DoneBatch({
               );
             })}
       </div>
-      <div className="flex items-center gap-2">
+      <div className={ROUND_ACTIONS_CLASS}>
         <ActionButton onClick={() => { void onReEdit?.(round.config, round.jobId); }}>重新编辑</ActionButton>
         <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
         {/* skill 出图（角色立绘/KV/三视图）在出图页只作溯源展示——删除会从磁盘抹掉角色资产，
@@ -1129,6 +1166,7 @@ function DoneBatch({
         <div className="relative" ref={menuWrapRef}>
           <ActionButton compact aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
           {menuOpen && (
+            // 两栏下操作在右栏贴近视口右缘，向右弹会被裁掉，xl 起改为向下、右对齐
             <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 w-[195px] rounded-xl border border-border bg-glass p-1 backdrop-blur-glass">
               {onSavePromptAsset && (
                 <button
@@ -1161,6 +1199,17 @@ function DoneBatch({
           )}
         </div>
         )}
+        {(runMeta.length > 0 || round.generationCost != null) && (
+          <p data-testid="round-run-meta" title="耗时 · 完成时间 · 费用" className={ROUND_RUN_META_CLASS}>
+            {runMeta.length > 0 && <span>{runMeta.join(' · ')}</span>}
+            {runMeta.length > 0 && round.generationCost != null && <span aria-hidden>·</span>}
+            {round.generationCost != null && (
+              <span data-testid="round-generation-cost" className="shrink-0">
+                {formatGenerationCost(round.generationCost)}
+              </span>
+            )}
+          </p>
+        )}
       </div>
     </section>
   );
@@ -1174,7 +1223,7 @@ function ActionButton({
   return (
     <button
       type="button"
-      className={`inline-flex items-center justify-center ${compact ? 'h-9 w-9 px-0' : 'h-9 w-[94px] px-3'} rounded-md bg-secondary text-sm font-medium text-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
+      className={`inline-flex items-center justify-center ${compact ? 'h-8 w-8 px-0' : 'h-8 px-2'} rounded-md text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
       {...props}
     />
   );
@@ -1199,26 +1248,26 @@ function FailedCard({
   const meta = config ? specMetadata(config) : [];
 
   return (
-    <section className="space-y-3">
+    <section className={ROUND_SECTION_CLASS}>
       {config && (
-        <div className="flex items-start gap-3 text-sm">
-          <ReferenceStack
-            config={config}
-            jobId={round.jobId}
-            onReuse={onReuseReferences}
-            mediaActive={mediaActive}
-          />
-          <div className="min-w-0 flex-1">
-            <MentionPrompt
-              prompt={config.prompt}
+        <div className={ROUND_HEADER_CLASS}>
+          <div className={ROUND_PROMPT_ROW_CLASS}>
+            <ReferenceStack
               config={config}
               jobId={round.jobId}
+              onReuse={onReuseReferences}
               mediaActive={mediaActive}
             />
-            {meta.length > 0 && (
-              <p className="mt-1 text-sm text-muted-foreground">{meta.join(' | ')}</p>
-            )}
+            <div className="min-w-0 flex-1">
+              <MentionPrompt
+                prompt={config.prompt}
+                config={config}
+                jobId={round.jobId}
+                mediaActive={mediaActive}
+              />
+            </div>
           </div>
+          {meta.length > 0 && <SpecChips values={meta} />}
         </div>
       )}
       <div
@@ -1226,7 +1275,7 @@ function FailedCard({
         className={`flex items-start gap-2 rounded-lg border px-4 py-3 text-sm ${round.canceled ? 'border-border bg-card/40' : 'border-destructive/30 bg-destructive/5'}`}
       >
         {round.canceled
-          ? <Square className="mt-1 size-3 shrink-0 fill-current text-muted-foreground/70" aria-hidden />
+          ? <Square className="mt-1 size-3 shrink-0 fill-current text-muted-foreground" aria-hidden />
           : <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive/70" aria-hidden />}
         <p className="flex-1 text-muted-foreground">{round.reason}</p>
         {round.jobId && onDeleteFailed && (
@@ -1244,7 +1293,7 @@ function FailedCard({
         )}
       </div>
       {config && (
-        <div className="flex items-center gap-2">
+        <div className={ROUND_ACTIONS_CLASS}>
           <ActionButton onClick={() => { void onReEdit?.(config, round.jobId); }}>重新编辑</ActionButton>
           <ActionButton onClick={() => { void onRegenerate?.(config); }}>再次生成</ActionButton>
         </div>

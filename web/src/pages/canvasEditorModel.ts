@@ -1,4 +1,4 @@
-import { canvasInputSourceIds } from '@/lib/canvasMentions';
+import { canvasInputSourceIds, canvasModeAcceptsNodeType, canvasTargetAcceptsSource } from '@/lib/canvasMentions';
 import { normalizeImageSizeParams } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import type { Job, JobParams } from '@/schema/jobs';
@@ -375,7 +375,7 @@ export function expandCanvasLayerStack(
   const group: CanvasGroupNode = {
     id: existingGroup?.id ?? makeId('group'), type: 'group', title: existingGroup?.title ?? `${stack.title} · 图层`,
     position: { x: left, y: top }, size: { width: groupWidth, height: groupHeight }, z_index: existingGroup?.z_index ?? 0,
-    data: { member_node_ids: images.map(node => node.id), repeat_count: existingGroup?.type === 'group' ? existingGroup.data.repeat_count : 1 },
+    data: { member_node_ids: images.map(node => node.id) },
   };
   const arranged = [...placed, group];
   if (existingGroup && arranged.every(node => {
@@ -614,8 +614,9 @@ export function canvasNodeProvidesOutput(
  *  分组是「素材包」：连的是包，进模型的是包里的内容成员，顺序即 member_node_ids —— 与后端
  *  canvas_runs.canvas_input_sources 的展开逐条对齐。两端各展开一次是必然的（一端画界面、
  *  一端组请求），所以顺序判据只有一个：member_node_ids 本身，谁都不再自己排一遍。 */
-export function expandCanvasInputSource(document: CanvasDocument, sourceId: string): string[] {
-  return canvasInputSourceIds(document.nodes, sourceId).filter(id => {
+export function expandCanvasInputSource(document: CanvasDocument, sourceId: string, targetId?: string): string[] {
+  const target = targetId ? document.nodes.find(node => node.id === targetId) : undefined;
+  return canvasInputSourceIds(document.nodes, sourceId, target).filter(id => {
     const member = document.nodes.find(node => node.id === id);
     return Boolean(member && canvasNodeProvidesContent(member));
   });
@@ -675,7 +676,7 @@ export function canvasPendingInputNodes(
   for (const connection of document.connections) {
     if (connection.role !== 'input' || connection.slot) continue;
     // 分组按成员逐个判空：提交时服务端拒的是那个空成员，拦截文案也要指名到它。
-    for (const sourceId of expandCanvasInputSource(document, connection.source_node_id)) {
+    for (const sourceId of expandCanvasInputSource(document, connection.source_node_id, connection.target_node_id)) {
     const source = nodes.get(sourceId);
     if (!source || canvasNodeHasCurrentContent(source, document.content_versions)) continue;
     if (source.type === 'batch_material') {
@@ -709,6 +710,8 @@ export function canCreateCanvasInputConnection(
     || !target
     || !canvasNodeProvidesOutput(source)
     || !canvasNodeAcceptsInput(target)
+    // 图片生成不收视频 / 音频，音频生成只收文本：连上了也进不了模型，直接不让连。
+    || !canvasTargetAcceptsSource(target, source)
   ) {
     return false;
   }
@@ -747,10 +750,26 @@ export function closestCanvasConnectionEndpoint(
   return nearest?.id ?? null;
 }
 
+/** 从这批来源拖线创建节点时，哪些生成模式收不下：来源里（分组按成员算）有它不收的素材类型。 */
+export function canvasModesRejectingSources(
+  document: CanvasDocument | null,
+  sourceIds: readonly string[],
+): Set<CanvasGenerationDraft['mode']> {
+  const rejected = new Set<CanvasGenerationDraft['mode']>();
+  if (!document) return rejected;
+  const byId = new Map(document.nodes.map(node => [node.id, node]));
+  const types = sourceIds.flatMap(id => canvasInputSourceIds(document.nodes, id))
+    .flatMap(id => byId.get(id)?.type ?? []);
+  for (const mode of ['text', 'image', 'video', 'audio'] as const) {
+    if (types.some(type => !canvasModeAcceptsNodeType(mode, type))) rejected.add(mode);
+  }
+  return rejected;
+}
+
 export function canvasConnectionCreationCapabilities(sourceHandle: 'source' | 'target') {
   return sourceHandle === 'target'
-    ? { allowEmptyNodes: false, allowUpload: true, allowConfig: false }
-    : { allowEmptyNodes: true, allowUpload: false, allowConfig: true };
+    ? { allowEmptyNodes: false, allowUpload: true }
+    : { allowEmptyNodes: true, allowUpload: false };
 }
 
 export const CANVAS_GENERATION_MODE_LABELS: Record<CanvasGenerationDraft['mode'], string> = {
@@ -973,7 +992,6 @@ export function resolveCanvasGenerationDraft(
   keys: readonly KeyView[],
   textPreference?: CanvasGenerationDefault<'text'>,
 ): CanvasGenerationDraft | null {
-  if (node.type === 'config') return node.data.draft;
   if (!('generation_draft' in node.data)) return null;
   if (node.data.generation_draft) return node.data.generation_draft;
   // 文本的生成能力由节点类型决定，MCP / 素材库创建的正文也可在首次操作时配置。
@@ -981,21 +999,6 @@ export function resolveCanvasGenerationDraft(
     inputPolicy: 'all_connected',
     preference: textPreference,
   }) : null;
-}
-
-export function switchCanvasGenerationDraft(
-  keys: readonly KeyView[],
-  current: CanvasGenerationDraft,
-  mode: CanvasGenerationDraft['mode'],
-  options: { preference?: CanvasGenerationDefault; now?: string } = {},
-) {
-  if (mode === current.mode) return current;
-  return createCanvasGenerationDraft(keys, mode, {
-    prompt: current.prompt,
-    inputPolicy: current.input_policy,
-    preference: options.preference,
-    now: options.now,
-  });
 }
 
 /** 按拖拽后的顺序重排某个节点的直连输入（不含首尾帧槽位）。
@@ -1014,8 +1017,9 @@ export function reorderCanvasInputConnections(
   const slots = document.connections.flatMap((connection, index) => isDirectInput(connection) ? [index] : []);
   const position = new Map(orderedSourceIds.map((id, index) => [id, index]));
   // 连的是分组时按成员里排得最靠前的那个算：分组整包移动，成员之间的顺序归分组自己管。
+  const target = document.nodes.find(node => node.id === targetNodeId);
   const rank = (connection: CanvasConnection) => Math.min(
-    ...canvasInputSourceIds(document.nodes, connection.source_node_id).map(id => position.get(id) ?? Infinity),
+    ...canvasInputSourceIds(document.nodes, connection.source_node_id, target).map(id => position.get(id) ?? Infinity),
   );
   const sorted = slots
     .map(index => document.connections[index])
@@ -1026,12 +1030,12 @@ export function reorderCanvasInputConnections(
   return { ...document, connections };
 }
 
-export function createConnectedCanvasConfig(
+export function createConnectedCanvasSurface(
   document: CanvasDocument,
   sourceNodeId: string,
   draft: CanvasGenerationDraft,
   ids: { nodeId: string; connectionId: string },
-  surfaceType: 'config' | 'image' | 'video' = 'config',
+  surfaceType: 'image' | 'video',
 ): CanvasDocument | null {
   if (
     document.nodes.some(node => node.id === ids.nodeId)
@@ -1057,12 +1061,10 @@ export function createConnectedCanvasConfig(
     z_index: 0,
   };
   const connectedDraft = { ...draft, prompt, input_policy: 'all_connected' as const };
-  const configNode: CanvasNode = surfaceType === 'config'
-    ? { ...base, type: 'config', data: { draft: connectedDraft } }
-    : { ...base, type: surfaceType, data: {
-      current_version_id: null, active_run_id: null, generation_draft: connectedDraft,
-      display: { fit: 'contain', free_resize: false },
-    } };
+  const configNode: CanvasNode = { ...base, type: surfaceType, data: {
+    current_version_id: null, active_run_id: null, generation_draft: connectedDraft,
+    display: { fit: 'contain', free_resize: false },
+  } };
   const nodes = [...document.nodes, configNode];
   if (!canCreateCanvasInputConnection({ ...document, nodes }, {
     source: source.id,

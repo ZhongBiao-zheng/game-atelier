@@ -228,7 +228,7 @@ export function ProjectPage({
           <>
             <div className="space-y-5">
               <div className="space-y-1">
-                <p className="text-xs uppercase tracking-label text-muted-foreground">项目首页</p>
+                <p className="text-xs text-muted-foreground">项目首页</p>
                 <h1 className="font-display text-display italic text-foreground">{data.project.name}</h1>
               </div>
             </div>

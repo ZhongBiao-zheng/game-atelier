@@ -68,9 +68,10 @@ const idleNodes: CanvasNode[] = [
     data: { current_version_id: null, generation_draft: null, active_run_id: null },
   },
   {
-    id: 'config', title: '配置', type: 'config', position: { x: 0, y: 0 }, z_index: 0,
+    id: 'config', title: '配置', type: 'image', position: { x: 0, y: 0 }, z_index: 0,
     data: {
-      draft: {
+      current_version_id: null, active_run_id: null, display: { fit: 'contain', free_resize: false },
+      generation_draft: {
         mode: 'image', prompt: '', input_policy: 'all_connected', model: '', params: {},
         updated_at: '2026-08-25T00:00:00Z',
       },
@@ -198,7 +199,6 @@ function nodeContext(job: Job): CanvasNodeContextValue {
     previewLayerStack: vi.fn(),
     selectCandidate: vi.fn(),
     submitRun: vi.fn(async () => undefined),
-    retryRun: vi.fn(async () => undefined),
     cancelRun: vi.fn(async () => undefined),
     dismissCandidate: vi.fn(async () => undefined),
     updateNode: vi.fn(),

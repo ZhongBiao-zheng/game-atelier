@@ -37,8 +37,8 @@ const providerByValue = (value: string) =>
 
 const usesNamedAlias = (provider: string) => provider === 'custom';
 
-const fieldClass = 'w-full rounded-md border border-input bg-background/35 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-primary/50';
-const capLabelClass = 'block text-xs uppercase tracking-label text-muted-foreground/70 mb-2';
+const fieldClass = 'w-full rounded-md border border-input bg-background/35 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50';
+const capLabelClass = 'block text-xs text-muted-foreground mb-2';
 const ghostButtonClass = 'rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 // 次要文本操作（全选 / 清空 / 显示全部）：不占黄铜，也不做成方块按钮抢主操作的戏。
 const textActionClass = 'rounded-sm text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:opacity-40 disabled:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
@@ -512,7 +512,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
               左轨在 md 以下隐藏，由 body 顶部的下拉兜底（同一 changeProvider 路径）。 */}
           {!editing && (
             <div className="hidden flex-col gap-1 overflow-y-auto border-r border-border bg-popover p-3 md:flex" role="group" aria-label="供应商列表">
-              <div className="px-3 pb-1 pt-2 text-xs uppercase tracking-label text-muted-foreground/70">供应商</div>
+              <div className="px-3 pb-1 pt-2 text-xs text-muted-foreground">供应商</div>
               {PROVIDER_PRESETS.map((p) => {
                 const selected = provider === p.value;
                 return (
@@ -528,7 +528,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                     }`}
                   >
                     <span className="truncate">{p.label}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground/70">{KIND_LABELS[p.kind]}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{KIND_LABELS[p.kind]}</span>
                   </button>
                 );
               })}
