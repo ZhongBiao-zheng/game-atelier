@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.85.11',
+    date: '2026-10-13',
+    headline: '拖线创建节点时，用不了的类型置灰',
+    changes: [
+      { kind: 'fix', text: '从分组或节点拖线创建节点时，连出来的素材里有某种生成用不了的类型，对应选项置灰：有视频或音频时「图片」不可选，有图片、视频或音频时「音频」不可选。' },
+    ],
+  },
+  {
     version: '5.85.10',
     date: '2026-10-13',
     headline: '图片生成不再把视频当参考',

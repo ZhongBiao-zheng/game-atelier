@@ -235,6 +235,7 @@ import {
   syncDraftLayerStackSources,
   canvasReadingOrder,
   expandCanvasInputSource,
+  canvasModesRejectingSources,
 } from './canvasEditorModel';
 import { resolveRecipeModel } from './studioRecipe';
 import {
@@ -5160,7 +5161,7 @@ function CanvasEditorInner({
         {createMenu && (
           <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenuDock?.left ?? createMenu.screen.x, top: createMenuDock?.top ?? createMenu.screen.y }}>
             <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs text-muted-foreground">创建并连接</p><button type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><X className="size-4" /></button></div>
-            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddBatch={createMenu.sourceId ? undefined : () => addBatchMaterialNode(createMenu)} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onAddConfig={() => addConfigNode(createMenu)} onUpload={() => uploadRef.current?.click()} />
+            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} rejectedModes={createMenu.sourceHandle === 'target' || !createMenu.sourceId ? undefined : canvasModesRejectingSources(document, createMenu.sourceIds ?? [createMenu.sourceId])} onAddBatch={createMenu.sourceId ? undefined : () => addBatchMaterialNode(createMenu)} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onAddConfig={() => addConfigNode(createMenu)} onUpload={() => uploadRef.current?.click()} />
           </div>
         )}
 
@@ -5400,8 +5401,10 @@ function CanvasEditorInner({
   );
 }
 
-function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, allowConfig, onAddText, onAddImage, onAddVideo, onAddAudio, onAddConfig, onUpload, onAddBatch }: {
+function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, allowConfig, rejectedModes, onAddText, onAddImage, onAddVideo, onAddAudio, onAddConfig, onUpload, onAddBatch }: {
   onAddBatch?: () => void;
+  /** 连出来的素材里有这些模式收不下的类型：对应选项置灰。 */
+  rejectedModes?: ReadonlySet<string>;
   allowEmptyNodes: boolean;
   allowUpload: boolean;
   allowConfig: boolean;
@@ -5415,9 +5418,9 @@ function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, allowConfig, onAd
   return <>
     {onAddBatch && <AddMenuButton icon={<Layers />} title="批量素材" description="一张一项，节点内编辑" onClick={onAddBatch} />}
     {allowEmptyNodes && <AddMenuButton icon={<Type />} title="文本" description="脚本、提示词与备注" onClick={onAddText} />}
-    {allowEmptyNodes && <AddMenuButton icon={<FileImage />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} />}
+    {allowEmptyNodes && <AddMenuButton icon={<FileImage />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} disabledReason={rejectedModes?.has('image') ? '图片生成只能参考文本和图片' : undefined} />}
     {allowEmptyNodes && <AddMenuButton icon={<FileVideo />} title="视频" description="空节点可填写生成设置" onClick={onAddVideo} />}
-    {allowEmptyNodes && <AddMenuButton icon={<FileAudio />} title="音频" description="旁白、对白与语音" onClick={onAddAudio} />}
+    {allowEmptyNodes && <AddMenuButton icon={<FileAudio />} title="音频" description="旁白、对白与语音" onClick={onAddAudio} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
     {allowConfig && <AddMenuButton icon={<WandSparkles />} title="生成配置" description="连接内容并选择生成类型" onClick={onAddConfig} />}
     {allowUpload && <AddMenuButton icon={<Upload />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
   </>;
@@ -5634,7 +5637,7 @@ function isRangeAdjustmentKey(key: string) {
 
 function handleMenuNavigation(event: React.KeyboardEvent<HTMLDivElement>) {
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-  const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+  const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];
   if (!items.length) return;
   event.preventDefault();
   const current = items.indexOf(window.document.activeElement as HTMLButtonElement);

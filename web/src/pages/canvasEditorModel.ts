@@ -1,4 +1,4 @@
-import { canvasInputSourceIds, canvasTargetAcceptsSource } from '@/lib/canvasMentions';
+import { canvasInputSourceIds, canvasModeAcceptsNodeType, canvasTargetAcceptsSource } from '@/lib/canvasMentions';
 import { normalizeImageSizeParams } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import type { Job, JobParams } from '@/schema/jobs';
@@ -748,6 +748,22 @@ export function closestCanvasConnectionEndpoint(
     }
   }
   return nearest?.id ?? null;
+}
+
+/** 从这批来源拖线创建节点时，哪些生成模式收不下：来源里（分组按成员算）有它不收的素材类型。 */
+export function canvasModesRejectingSources(
+  document: CanvasDocument | null,
+  sourceIds: readonly string[],
+): Set<CanvasGenerationDraft['mode']> {
+  const rejected = new Set<CanvasGenerationDraft['mode']>();
+  if (!document) return rejected;
+  const byId = new Map(document.nodes.map(node => [node.id, node]));
+  const types = sourceIds.flatMap(id => canvasInputSourceIds(document.nodes, id))
+    .flatMap(id => byId.get(id)?.type ?? []);
+  for (const mode of ['text', 'image', 'video', 'audio'] as const) {
+    if (types.some(type => !canvasModeAcceptsNodeType(mode, type))) rejected.add(mode);
+  }
+  return rejected;
 }
 
 export function canvasConnectionCreationCapabilities(sourceHandle: 'source' | 'target') {

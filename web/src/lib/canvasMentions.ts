@@ -104,8 +104,12 @@ export function canvasTargetAcceptsSource(target: CanvasNode | undefined, source
   if (!target || !MEDIA_NODE_TYPES.has(source.type)) return true;
   const draft = target.type === 'config' ? target.data.draft
     : 'generation_draft' in target.data ? target.data.generation_draft : null;
-  const accepted = draft ? ACCEPTED_INPUT_NODE_TYPES[draft.mode] : undefined;
-  return !accepted || accepted.has(source.type);
+  return !draft || canvasModeAcceptsNodeType(draft.mode, source.type);
+}
+
+export function canvasModeAcceptsNodeType(mode: string, nodeType: string): boolean {
+  const accepted = ACCEPTED_INPUT_NODE_TYPES[mode];
+  return !accepted || !MEDIA_NODE_TYPES.has(nodeType) || accepted.has(nodeType);
 }
 
 export function buildCanvasMentionReferences(
