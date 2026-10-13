@@ -2189,7 +2189,8 @@ it('saves a generated canvas result as a generation asset', async () => {
   vi.mocked(saveGenerationFromCanvas).mockResolvedValue(generationAsset);
   await renderReadyCanvas();
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-result-image' }));
-  fireEvent.click(await screen.findByRole('button', { name: '保存 成图' }));
+  fireEvent.keyDown(await screen.findByRole('button', { name: '成图 的更多工具' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: '保存 成图' }));
   fireEvent.click(await screen.findByRole('button', { name: '保存生成资产' }));
   await waitFor(() => expect(saveGenerationFromCanvas).toHaveBeenCalledWith(expect.objectContaining({
     canvas_project_id: 'canvas-one', node_id: 'result-image', version_id: 'v-generated',
@@ -2204,7 +2205,8 @@ it('saves an uploaded canvas image as a plain media asset', async () => {
   await renderReadyCanvas();
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-result-image' }));
   expect(screen.queryByRole('button', { name: '分享 成图' })).not.toBeInTheDocument();
-  fireEvent.click(await screen.findByRole('button', { name: '保存 成图' }));
+  fireEvent.keyDown(await screen.findByRole('button', { name: '成图 的更多工具' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: '保存 成图' }));
   expect(await screen.findByRole('button', { name: '保存媒体资产' })).toBeInTheDocument();
   expect(saveGenerationFromCanvas).not.toHaveBeenCalled();
 });

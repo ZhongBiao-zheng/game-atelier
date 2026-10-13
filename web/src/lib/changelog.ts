@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.88.3',
+    date: '2026-10-13',
+    headline: '自定义工具条改成拖动排序',
+    changes: [
+      { kind: 'feat', text: '「更多 → 自定义工具条」里按住每行右侧的手柄上下拖动就能换顺序；排在第 4 个之后的会标出「在更多里」。' },
+      { kind: 'fix', text: '图片节点的「保存」收进「更多」，名字是「保存到资产」。' },
+    ],
+  },
+  {
     version: '5.88.2',
     date: '2026-10-13',
     headline: '画布三处小调整',

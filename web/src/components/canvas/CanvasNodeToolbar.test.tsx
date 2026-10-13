@@ -830,7 +830,7 @@ it('hide toggles the node hidden flag and flips the button label', () => {
   expect(document.querySelector('[data-canvas-node-hidden="true"]')).not.toBeNull();
 });
 
-it('keeps save and hide fixed before a trailing more menu that holds share', async () => {
+it('keeps hide fixed before a trailing more menu that holds save and share for images', async () => {
   const generatedImage = { ...nodes[1], data: { ...nodes[1].data, current_version_id: 'generated' } } as CanvasNode;
   const uploadedVideo = { ...nodes[2], data: { ...nodes[2].data, current_version_id: 'uploaded' } } as CanvasNode;
   const writtenText = { ...nodes[0], data: { ...nodes[0].data, current_version_id: 'written' } } as CanvasNode;
@@ -854,7 +854,8 @@ it('keeps save and hide fixed before a trailing more menu that holds share', asy
 
   const imageButtons = within(screen.getByRole('toolbar', { name: '图片 节点工具' })).getAllByRole('button')
     .map(button => button.getAttribute('aria-label'));
-  expect(imageButtons.slice(-3)).toEqual(['保存 图片', '隐藏 图片 的内容', '图片 的更多工具']);
+  expect(imageButtons.slice(-2)).toEqual(['隐藏 图片 的内容', '图片 的更多工具']);
+  expect(imageButtons).not.toContain('保存 图片');
   expect(imageButtons).not.toContain('将 图片 存入资产库');
 
   const videoToolbar = screen.getByRole('toolbar', { name: '视频 节点工具' });
@@ -864,7 +865,8 @@ it('keeps save and hide fixed before a trailing more menu that holds share', asy
   expect(within(textToolbar).getByRole('button', { name: '保存 文本' })).toBeInTheDocument();
   expect(within(textToolbar).queryByRole('button', { name: '分享 文本' })).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: '保存 图片' }));
+  fireEvent.keyDown(screen.getByRole('button', { name: '图片 的更多工具' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: '保存 图片' }));
   expect(context.saveAsset).toHaveBeenCalledWith(generatedImage);
   fireEvent.keyDown(screen.getByRole('button', { name: '图片 的更多工具' }), { key: 'Enter' });
   fireEvent.click(await screen.findByRole('menuitem', { name: '分享 图片' }));

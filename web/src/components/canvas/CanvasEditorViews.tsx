@@ -64,7 +64,7 @@ import {
   isReversePromptJob,
 } from '@/components/canvas/CanvasNodeRunStatus';
 import { formatCanvasBytes, formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
-import { CANVAS_UPSCALE_TARGETS, orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
+import { CANVAS_UPSCALE_TARGETS, IMAGE_TOOLBAR_INLINE_LIMIT, orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
 import { isUploadedImageMaterialNode } from '@/components/canvas/canvasNodePanelInteraction';
 import { imageControlCaps } from '@/lib/imageControlCaps';
 import { VideoControls } from '@/components/studio/VideoControls';
@@ -512,10 +512,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     context.updateNode(node.id, candidate => ({ ...candidate, hidden: !candidate.hidden }));
   }
 
-  // 保存与隐藏是固定按钮；图片节点把它们排在「更多」之前，让「更多」落在工具条最右。
+  // 隐藏是固定按钮，排在「更多」之前，让「更多」落在工具条最右；图片节点的保存与分享收在「更多」里。
   const fixedToolbarButtons = (
     <>
-      {isCanvasContentNode(node) && isSavableCanvasVersion(content) && (
+      {isCanvasContentNode(node) && node.type !== 'image' && isSavableCanvasVersion(content) && (
         <MediaToolButton label={`保存 ${node.title}`} text="保存" onClick={() => void context.saveAsset(node)}>
           <BookmarkPlus />
         </MediaToolButton>
@@ -712,6 +712,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
                     {fixedToolbarButtons}
                   </>
                 )}
+                onSave={isSavableCanvasVersion(content) ? () => void context.saveAsset(node) : undefined}
                 onShare={context.shareResult && isShareableCanvasVersion(content) ? () => context.shareResult?.(node) : undefined}
                 onOverlayOpenChange={setToolbarOverlayOpen}
               />
@@ -1561,15 +1562,13 @@ type ImageToolbarAction = {
   menu?: Array<{ id: string; title: string; detail: string; onSelect: () => void }>;
 };
 
-/** 工具条上直接露出的快捷工具数；排在后面的收进「更多」。谁排前面由「自定义工具条」的顺序决定。 */
-const IMAGE_TOOLBAR_INLINE_LIMIT = 4;
-
 function ImageNodeToolbar({
   node,
   content,
   replacing,
   submitting,
   context,
+  onSave,
   onShare,
   trailing,
   onOverlayOpenChange,
@@ -1579,6 +1578,7 @@ function ImageNodeToolbar({
   replacing: boolean;
   submitting: boolean;
   context: CanvasNodeContextValue;
+  onSave?: () => void;
   onShare?: () => void;
   /** 排在「更多」之前的固定按钮。 */
   trailing?: React.ReactNode;
@@ -1828,6 +1828,11 @@ function ImageNodeToolbar({
           >
             <Layers3 />拆分图层
           </DropdownMenuItem>
+          {onSave && (
+            <DropdownMenuItem aria-label={`保存 ${node.title}`} className="gap-2" onSelect={onSave}>
+              <BookmarkPlus />保存到资产
+            </DropdownMenuItem>
+          )}
           {onShare && (
             <DropdownMenuItem aria-label={`分享 ${node.title}`} className="gap-2" onSelect={onShare}>
               <Share2 />分享
