@@ -170,6 +170,11 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 目录内并为支持的图片扩展名。目录残留文件不自动成为作品，也不从目录名推断任务链接。
 部分成功任务保留成功产物；隐藏、收藏与评分规则继续生效，不依据图片颜色判定失败。
 
+画布作品总是混入（`source: "canvas"`，带 `canvas_project_id`，`character_id / project_id / asset_slot` 为 null）：
+只取画布上图片节点的**当前版本**且来源为生成任务（`origin.kind == "job_output"`）的图，
+上传的素材、被换掉的候选、已删除节点的图都不算；`hidden`（打码）的节点不取，判据与画布项目封面一致。
+`GET /gallery/image` 相应放行 `canvases/<project>/outputs/**` 下的图片扩展名，上传目录不放行。
+
 工坊本地请求管理为 `GET /workshop/requests?scope=awaiting|history|all`（默认只列还能批准的）、
 `POST /workshop/requests/{request_id}/approve { expected_revision }` 与
 `POST /workshop/requests/{request_id}/reject { expected_revision }`（仅本机页面；状态 `rejected`，记

@@ -169,11 +169,15 @@ function isStudioItem(item: GalleryItem): boolean {
 }
 
 function galleryItemAriaLabel(item: GalleryItem): string {
+  if (item.source === 'canvas') return '查看所在画布';
   if (isStudioItem(item)) return '查看出图页';
   return `查看 ${item.character_id} 的${SLOT_LABEL[item.asset_slot!]}`;
 }
 
 function galleryItemHref(item: GalleryItem): string {
+  if (item.source === 'canvas') {
+    return item.canvas_project_id ? `/canvas/${encodeURIComponent(item.canvas_project_id)}` : '/canvas';
+  }
   // Studio 出图无角色归属：带 job_id 深链进出图页，历史列表滚动定位到该轮并高亮。
   if (isStudioItem(item)) {
     return item.job_id ? `/studio?job=${encodeURIComponent(item.job_id)}` : '/studio';

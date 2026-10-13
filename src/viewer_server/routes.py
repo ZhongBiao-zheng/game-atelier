@@ -1820,6 +1820,7 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
     """Return random character images from portrait/promo/turnaround.
 
     开启 show_studio_on_home 时，只混入 Studio 已完成任务登记的图片产物。
+    画布上正在显示、没打码的生成图总是混入。
     """
     characters_dir = _project_root() / "characters"
     items: list[dict] = []
@@ -1892,6 +1893,28 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
                     "job_id": job.job_id,
                     "mtime": mtime,
                 })
+    from character_workflow.lib.canvas_projects import list_canvas_gallery_images
+    for canvas_project_id, canvas_job_id, f in list_canvas_gallery_images():
+        try:
+            if f.suffix.lower() not in _GALLERY_EXTS:
+                continue
+            rel = f.relative_to(_project_root().resolve()).as_posix()
+            if rel in hidden:
+                continue
+            mtime = f.stat().st_mtime
+        except (OSError, ValueError):
+            continue
+        items.append({
+            "character_id": None,
+            "project_id": None,
+            "asset_slot": None,
+            "source": "canvas",
+            "canvas_project_id": canvas_project_id,
+            "filename": f.name,
+            "path": rel,
+            "job_id": canvas_job_id,
+            "mtime": mtime,
+        })
     favorites = set(_read_gallery_favorites())
     ratings = _read_gallery_ratings()
     for it in items:
@@ -2114,10 +2137,19 @@ def gallery_image(path: str) -> FileResponse:
         and project_parts[3] == "versions"
         and target.suffix.lower() == ".mp4"
     )
+    # 画布只放行生成产物目录下的图片：canvases/<project>/outputs/**。上传的素材不从这里读。
+    canvases_dir = data_root.canvases_dir().resolve()
+    canvas_parts = target.relative_to(canvases_dir).parts if target.is_relative_to(canvases_dir) else ()
+    in_canvas_outputs = (
+        len(canvas_parts) >= 3
+        and canvas_parts[1] == "outputs"
+        and target.suffix.lower() in _GALLERY_EXTS
+    )
     if not (
         target.is_relative_to(characters_dir)
         or target.is_relative_to(studio_dir)
         or in_project_assets
+        or in_canvas_outputs
     ):
         raise HTTPException(status_code=400, detail="path outside allowed roots")
     if not target.is_file():

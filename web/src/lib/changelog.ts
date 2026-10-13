@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.87.0',
+    date: '2026-10-13',
+    headline: '首页作品展示加入画布里的图',
+    changes: [
+      { kind: 'feat', text: '首页作品展示现在会出现画布里生成的图，点一下进入它所在的画布。只取画布上正在显示的生成图，上传的参考图不算。' },
+      { kind: 'feat', text: '在画布里打码的图不会出现在首页。工坊的作品照常展示。' },
+    ],
+  },
+  {
     version: '5.86.1',
     date: '2026-10-13',
     headline: '画布左下角的两个资产按钮合成一个',
