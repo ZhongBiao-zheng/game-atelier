@@ -11,6 +11,7 @@ import { isGalleryFavorited, isGalleryHidden } from '@/api/gallery';
 import { formatBeijingTime } from '@/lib/time';
 import { formatGenerationCost } from '@/lib/generationCost';
 import { imageSizeSummary } from '@/lib/imageSizeMode';
+import { failureSummary } from '@/lib/failureSummary';
 import {
   canonicalMentionLabel,
   createMentionTokenRegex,
@@ -1251,6 +1252,8 @@ function FailedCard({
 }) {
   const { config } = round;
   const meta = config ? specMetadata(config) : [];
+  const summary = failureSummary(round.reason);
+  const [detailOpen, setDetailOpen] = useState(false);
 
   return (
     <section className={ROUND_SECTION_CLASS}>
@@ -1282,7 +1285,22 @@ function FailedCard({
         {round.canceled
           ? <Square className="mt-1 size-3 shrink-0 fill-current text-muted-foreground" aria-hidden />
           : <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive/70" aria-hidden />}
-        <p className="min-w-0 flex-1 text-muted-foreground [overflow-wrap:anywhere]">{round.reason}</p>
+        <div className="min-w-0 flex-1 text-muted-foreground">
+          <p className="[overflow-wrap:anywhere]">{summary}</p>
+          {summary !== round.reason && (
+            <>
+              {detailOpen && <p className="mt-2 text-xs [overflow-wrap:anywhere]">{round.reason}</p>}
+              <button
+                type="button"
+                aria-expanded={detailOpen}
+                onClick={() => setDetailOpen(open => !open)}
+                className="mt-1 rounded-sm text-xs text-muted-foreground/80 underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                {detailOpen ? '收起' : '展开'}
+              </button>
+            </>
+          )}
+        </div>
         {round.jobId && onDeleteFailed && (
           <button
             type="button"

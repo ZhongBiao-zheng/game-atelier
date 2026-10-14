@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.89.3',
+    date: '2026-10-14',
+    headline: '创作台报错只显示一句话',
+    changes: [
+      { kind: 'feat', text: '失败记录只显示厂商给的那句原因，原始报错收起，点「展开」查看完整内容。' },
+    ],
+  },
+  {
     version: '5.89.2',
     date: '2026-10-14',
     headline: '网站版下载按钮修复',
