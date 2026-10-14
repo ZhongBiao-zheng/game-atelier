@@ -967,7 +967,7 @@ describe('Studio', () => {
     );
     expect(screen.getByRole('link', { name: '下载生成结果 1' })).toHaveAttribute(
       'href',
-      '/api/gallery/image?path=%2FUsers%2Fme%2Fproject%2Fstudio%2Fjob-studio-1%2Fv1.png',
+      '/api/gallery/image?path=%2FUsers%2Fme%2Fproject%2Fstudio%2Fjob-studio-1%2Fv1.png&download=1',
     );
     expect(screen.queryByTestId('round-generation-cost')).toBeNull();
   });

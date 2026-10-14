@@ -187,6 +187,10 @@ def test_raw_includes_reference_videos_and_audios_in_job_whitelist(client, runti
     }))
     assert client.get(f"/api/raw?path={vid}&job_id=vid-1").status_code == 200
     assert client.get(f"/api/raw?path={aud}&job_id=vid-1").status_code == 200
+    assert "content-disposition" not in client.get(f"/api/raw?path={vid}&job_id=vid-1").headers
+    download = client.get(f"/api/raw?path={vid}&job_id=vid-1&download=1")
+    assert download.headers["content-disposition"].startswith("attachment")
+    assert "ref.mp4" in download.headers["content-disposition"]
 
 
 def test_raw_allows_external_mj_references_only_through_job_whitelist(

@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.89.2',
+    date: '2026-10-14',
+    headline: '网站版下载按钮修复',
+    changes: [
+      { kind: 'fix', text: '通过网站连接本机时，创作台和角色页的下载按钮点了只打开图片、不下载；现在会直接保存文件。' },
+    ],
+  },
+  {
     version: '5.89.1',
     date: '2026-10-14',
     headline: '创作台报错卡片排版修复',

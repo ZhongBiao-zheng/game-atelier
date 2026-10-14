@@ -376,7 +376,7 @@ export function CharacterGallery({
                     <Heart className={cn('size-3.5', favorited && 'fill-current')} />
                   </button>
                   <a
-                    href={rawSrc}
+                    href={`${rawSrc}&download=1`}
                     download={img.path.split('/').pop() || 'image.png'}
                     onClick={(e) => e.stopPropagation()}
                     title="下载这张图"

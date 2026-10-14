@@ -561,6 +561,11 @@ function imageSrc(path: string) {
   return mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`);
 }
 
+// 托管网站跨源时 download 属性失效，由服务端附件头触发下载。
+function downloadSrc(path: string) {
+  return mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}&download=1`);
+}
+
 // 视频复用与图片相同的字节端点（output_paths 白名单内）。
 function videoSrc(path: string) {
   return mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`);
@@ -1057,7 +1062,7 @@ function DoneBatch({
                       <Heart className={`size-4 ${favorited ? 'fill-current' : ''}`} aria-hidden />
                     </button>
                     <a
-                      href={videoSrc(path)}
+                      href={downloadSrc(path)}
                       download={path.split('/').pop() || `${round.jobId}-${index + 1}.mp4`}
                       aria-label={`下载生成视频 ${index + 1}`}
                       title="下载视频"
@@ -1131,7 +1136,7 @@ function DoneBatch({
                       </button>
                     )}
                     <a
-                      href={imageSrc(path)}
+                      href={downloadSrc(path)}
                       download={path.split('/').pop() || `${round.jobId}-${index + 1}.png`}
                       onClick={(e) => e.stopPropagation()}
                       aria-label={`下载生成结果 ${index + 1}`}
