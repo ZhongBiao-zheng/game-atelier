@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.89.4',
+    date: '2026-10-14',
+    headline: 'Codex 一键连接',
+    changes: [
+      { kind: 'feat', text: '「本机连接」页的本机 Agent 卡片上点「写入 Codex」，Codex 新开会话就能用工坊和画布工具，不用再复制命令到终端。' },
+      { kind: 'feat', text: '卡片上显示连接状态：Claude Code 或 Codex 一启动，这里就变成「已连接」并显示时间。' },
+    ],
+  },
+  {
     version: '5.89.3',
     date: '2026-10-14',
     headline: '创作台报错只显示一句话',

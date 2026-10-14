@@ -182,9 +182,11 @@ _DEFAULT_BASE_URL = "http://127.0.0.1:5174"
 
 
 class WorkshopClient:
-    def __init__(self, credentials_path: Path | None = None):
+    def __init__(self, credentials_path: Path | None = None, client: str | None = None):
         # None = 默认授权（「连接本机 Agent」写的 agent.json），每次调用按当前 data root 解析。
         self._credentials_path = credentials_path
+        # 宿主名（claude-code / codex）随换会话报给本机服务，连接页据此显示谁连着。
+        self._client = client
         self._credentials: Credentials | None = None
         self._credentials_key: tuple[int, int, int] | None = None
         self._base_url = _DEFAULT_BASE_URL
@@ -280,6 +282,7 @@ class WorkshopClient:
             "grant_id": credentials.grant_id,
             "grant_token": credentials.grant_token,
             "instance_id": status.instance_id,
+            **({"client": self._client} if self._client else {}),
         })
         try:
             session = ToolSession.model_validate(result)
@@ -298,6 +301,15 @@ class WorkshopClient:
             return ServiceStatus.model_validate(self._request("GET", "/api/connection/status"))
         except ValidationError:
             raise AdapterError("PROTOCOL_MISMATCH", _ERROR_MESSAGES["PROTOCOL_MISMATCH"]) from None
+
+    def warm_up(self) -> None:
+        """启动时先换一次会话，连接页立刻显示「已连接」；失败不报，第一次工具调用会带着指引再报。"""
+        with self._lock:
+            try:
+                credentials = self._load_credentials()
+                self._connect(credentials, self._status(credentials))
+            except AdapterError:
+                pass
 
     def call(self, operation: str, payload: BaseModel) -> dict:
         if operation not in OPERATIONS:

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'wouter';
-import { Copy, Plus, Trash2 } from 'lucide-react';
-import { createAgentGrant, fetchAgentGrants, revokeAgentGrant, type AgentCapability, type AgentGrant } from '@/api/agentGrants';
+import { Check, Copy, Plus, Trash2 } from 'lucide-react';
+import { createAgentGrant, fetchAgentGrants, fetchCodexConfig, revokeAgentGrant, writeCodexConfig, type AgentCapability, type AgentClient, type AgentGrant, type CodexConfigStatus } from '@/api/agentGrants';
 import { HOSTED_SITE } from '@/api/connection';
 import { createSitePairing, fetchConnectionSessions, revokeConnectionSession, type ConnectionSession, type SitePairing } from '@/api/sitePairing';
 import { HostedManagementNotice } from '@/components/HostedManagementNotice';
@@ -19,11 +19,24 @@ const CAPABILITIES: { value: AgentCapability; label: string }[] = [
   { value: 'prepare_generation', label: '准备生成（仍需你批准）' },
   { value: 'execute_generation', label: '直接执行生成（终端确认即批准，不经页面）' },
 ];
+const CLIENT_LABEL: Record<AgentClient, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+// 适配器启动即连，连接页轮询授权列表，Agent 一开会话这里就亮。
+const GRANTS_POLL_MS = 5000;
 const CANVAS_CAPABILITIES: { value: AgentCapability; label: string }[] = [
   { value: 'canvas_read', label: '读取画布' },
   { value: 'canvas_edit', label: '编辑节点、连线与配置，导入本机文件' },
   { value: 'canvas_generate', label: '在画布上发起生成（直接扣费）' },
 ];
+
+function AgentConnectionStatus({ grant }: { grant: AgentGrant }) {
+  const entries = (Object.keys(CLIENT_LABEL) as AgentClient[]).filter(client => grant.connections[client]);
+  return <p className="flex flex-wrap items-center gap-2 text-sm">
+    <span aria-hidden className={`size-2 rounded-full ${entries.length ? 'bg-primary' : 'bg-muted-foreground/40'}`} />
+    {entries.length
+      ? <span>已连接 · {entries.map(client => `${CLIENT_LABEL[client]} ${new Date(grant.connections[client]!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`).join(' · ')}</span>
+      : <span className="text-muted-foreground">未连接</span>}
+  </p>;
+}
 
 export function ConnectionPage() {
   if (HOSTED_SITE) return <HostedManagementNotice title="本机连接" />;
@@ -44,6 +57,7 @@ function LocalConnectionPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [codexStatus, setCodexStatus] = useState<CodexConfigStatus | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -55,8 +69,18 @@ function LocalConnectionPage() {
         setCanvasProjectIds(canvasOptions.map(project => project.project_id));
       }
     }).catch(error => { if (active) setError(String(error)); });
-    return () => { active = false; };
+    fetchCodexConfig().then(result => { if (active) setCodexStatus(result.status); }).catch(error => { if (active) setError(String(error)); });
+    const timer = window.setInterval(() => {
+      fetchAgentGrants().then(result => { if (active) setGrants(result.grants); }).catch(() => {});
+    }, GRANTS_POLL_MS);
+    return () => { active = false; window.clearInterval(timer); };
   }, []);
+
+  async function connectCodex() {
+    setError(null); setBusy('codex');
+    try { setCodexStatus((await writeCodexConfig()).status); }
+    catch (error) { setError(String(error)); } finally { setBusy(null); }
+  }
 
   async function submitGrant(grantName: string, isDefault: boolean) {
     setError(null); setBusy('create');
@@ -78,7 +102,7 @@ function LocalConnectionPage() {
     catch (error) { setError(String(error)); } finally { setBusy(null); }
   }
   const quote = (value: string) => (/\s/.test(value) ? `"${value}"` : value);
-  const command = (grant: AgentGrant) => `claude mcp add --transport stdio --scope user game-atelier -- ${quote(python)} -m character_workflow.mcp --credentials ${quote(grant.credential_path)}`;
+  const command = (grant: AgentGrant) => `claude mcp add --transport stdio --scope user game-atelier -- ${quote(python)} -m character_workflow.mcp --client claude-code --credentials ${quote(grant.credential_path)}`;
   async function copy(grant: AgentGrant) {
     try {
       await navigator.clipboard.writeText(command(grant));
@@ -113,13 +137,19 @@ function LocalConnectionPage() {
         <div className="flex items-center justify-between gap-4"><h2 className="text-base font-medium">{grant.name}</h2><button type="button" aria-label={`撤销 ${grant.name}`} disabled={busy !== null} onClick={() => void revoke(grant)} className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-destructive"><Trash2 size={16} aria-hidden /></button></div>
         <p className="text-sm text-muted-foreground">{[...grant.project_ids.map(id => projects.find(project => project.id === id)?.name ?? id), ...(grant.canvas_project_ids ?? []).map(id => `画布 · ${canvasProjects.find(project => project.project_id === id)?.name ?? id}`)].join(' · ')}</p>
         <p className="text-xs text-muted-foreground">{grant.capabilities.map(value => [...CAPABILITIES, ...CANVAS_CAPABILITIES].find(item => item.value === value)?.label).filter(Boolean).join(' · ')}</p>
-        {grant.default ? <p className="text-xs text-muted-foreground">Claude Code 插件自动使用</p> : <>
+        <AgentConnectionStatus grant={grant} />
+        {grant.default ? <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="text-muted-foreground">Codex</span>
+          {codexStatus === 'current'
+            ? <span className="inline-flex items-center gap-1 text-muted-foreground"><Check size={14} aria-hidden />已写入配置</span>
+            : codexStatus && <button type="button" disabled={busy !== null} onClick={() => void connectCodex()} className="rounded-md border border-border px-3 py-1.5 hover:bg-accent disabled:opacity-50"><SwapLabel active={busy === 'codex'} on="写入中…" off={codexStatus === 'outdated' ? '更新 Codex 配置' : '写入 Codex'} /></button>}
+        </div> : <>
           <div className="flex items-start gap-2"><code className="min-w-0 flex-1 break-all rounded-md bg-background p-3 font-mono text-xs">{command(grant)}</code><button type="button" onClick={() => void copy(grant)} aria-label={`复制 ${grant.name} 注册命令`} className="shrink-0 rounded-md p-3 hover:bg-accent"><Copy size={16} aria-hidden /></button></div>
           {copied === grant.grant_id && <p role="status" className="text-xs text-muted-foreground">已复制注册命令，未复制密钥。</p>}
         </>}
       </article>)}
     </section>
-    <details className="border-t border-border pt-5 text-sm"><summary className="cursor-pointer text-muted-foreground">如何在 Agent 中使用</summary><div className="mt-3 space-y-3 text-muted-foreground"><p>Claude Code 装了 game-atelier 插件即自动使用「本机 Agent」，新开的会话里可用。Codex 执行一次 <code className="break-all font-mono text-xs">codex mcp add game-atelier -- {quote(python)} -m character_workflow.mcp</code>。</p><p>自定义授权复制卡片上的命令（Codex 把开头换成 <code className="font-mono text-xs">codex mcp add game-atelier --</code>）。授权长期有效，撤销即失效；不要粘贴凭据文件内容。</p><p>Skill 照常安装；勾选「直接执行生成」后终端确认即出图，否则在「待批准生成」页确认。</p></div></details>
+    <details className="border-t border-border pt-5 text-sm"><summary className="cursor-pointer text-muted-foreground">如何在 Agent 中使用</summary><div className="mt-3 space-y-3 text-muted-foreground"><p>Claude Code 装了 game-atelier 插件即自动使用「本机 Agent」；Codex 点「写入 Codex」。写入后新开的会话里可用。</p><p>自定义授权复制卡片上的命令（Codex 把开头换成 <code className="font-mono text-xs">codex mcp add game-atelier --</code>、<code className="font-mono text-xs">--client</code> 换成 <code className="font-mono text-xs">codex</code>）。授权长期有效，撤销即失效；不要粘贴凭据文件内容。</p><p>Skill 照常安装；勾选「直接执行生成」后终端确认即出图，否则在「待批准生成」页确认。</p></div></details>
   </div>;
 }
 

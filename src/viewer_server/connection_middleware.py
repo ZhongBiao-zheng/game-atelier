@@ -25,6 +25,8 @@ _CONTROL_ROUTES = {
     ("GET", "/api/connection/sessions"),
     ("GET", "/api/connection/agent-grants"),
     ("POST", "/api/connection/agent-grants"),
+    ("GET", "/api/connection/codex-config"),
+    ("POST", "/api/connection/codex-config"),
 }
 # 网站会话能碰的控制端点：租约、媒体令牌、撤销自己；配对管理与 Agent 授权只属本机页面。
 _SITE_CONTROL_ROUTES = {

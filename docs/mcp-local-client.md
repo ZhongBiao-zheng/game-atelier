@@ -32,17 +32,19 @@ MCP 启动命令：默认授权不带参数，自定义授权带 `--credentials 
 MCP 进程不会启动、重启或安装 viewer-server，也不扫描端口和用户目录。凭据缺失、已撤销或 viewer-server 未启动时
 照常启动，工具保持可见，调用时返回带处理指引的错误；每次调用前按文件状态判断凭据是否已被替换。
 它只读取默认或指定的受保护凭据，核验精确的 `http://127.0.0.1:<port>`（以 `.runtime/server.port` 为准）服务和协议，
-再换取 2 小时的运行会话，到期或服务重启后自动重换。
+再换取 2 小时的运行会话，到期或服务重启后自动重换。启动时会先换一次会话（失败不报，留给第一次调用），
+带 `--client claude-code|codex` 时把宿主名一并报给服务端，「本机连接」页据此在授权卡片上显示「已连接 · Codex 14:32」；
+这份记录只在服务进程内存里，服务重启后清空，等 Agent 下次启动或调用再出现。
 
 ## 配置 Claude Code / Codex
 
-插件注册和下列命令都由用户主动安装触发，Atelier 服务本身不改写 Agent 配置。
+插件注册、下列命令和页面上的「写入 Codex」都由用户主动触发；Atelier 服务不会自行改写 Agent 配置。
 MCP 配置只保存解释器、模块和可选的凭据文件位置，不包含明文凭据。
 
 Claude Code 由插件自带 MCP（`.claude-plugin/plugin.json` 的 `mcpServers.atelier`），装好插件即注册，不用执行命令；
 插件 MCP 只在会话启动时加载，新开的会话里生效（`/reload-plugins` 只重载 Skill，输出会提示 MCP 改动下个会话生效），
 服务显示为 `plugin:game-atelier:atelier`。启动命令是
-`${ATELIER_PYTHON:-python3} ${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py --run -m character_workflow.mcp`，
+`${ATELIER_PYTHON:-python3} ${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py --run -m character_workflow.mcp --client claude-code`，
 由 bootstrap 找到数据目录的 venv 再启动适配器。Windows 没有 `python3` 时，在用户环境变量里设
 `ATELIER_PYTHON=python`（尚未在 Windows 实测）。服务名用 `atelier` 是因为工具全名
 `mcp__plugin_game-atelier_<服务名>__<工具名>` 不能超过 64 个字符。
@@ -55,12 +57,16 @@ Claude Code 由插件自带 MCP（`.claude-plugin/plugin.json` 的 `mcpServers.a
 claude mcp add --transport stdio --scope user <名字> -- <python> -m character_workflow.mcp --credentials <凭据绝对路径>
 ```
 
-Codex 没有插件自带的 MCP，默认授权执行一次即可，之后重新授权不用再改；自定义授权在末尾加 `--credentials`。
-这里的 CLI 命令会写入用户的 Codex MCP 配置，执行前确认作用范围。
-参见[OpenAI 官方 MCP 文档](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)。
+Codex 没有插件自带的 MCP。默认授权在「本机连接」页的卡片上点「写入 Codex」：viewer-server 用 tomlkit 改
+`$CODEX_HOME/config.toml`（默认 `~/.codex/config.toml`），只设置 `[mcp_servers.game-atelier]` 的 `command`（当前服务的解释器）
+和 `args`，其他条目、注释和这一项里你自己加的键（如 `startup_timeout_sec`）原样保留；之后重新授权不用再写。
+解释器换了（例如 venv 重建到别处）卡片会显示「更新 Codex 配置」。文件不是合法 TOML 时报错并保持原样。
+只在本机页面可用，托管网站没有这个入口。参见[OpenAI 官方 MCP 文档](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)。
+
+自定义授权仍手动注册，在末尾加 `--credentials`：
 
 ```bash
-codex mcp add game-atelier -- <python> -m character_workflow.mcp
+codex mcp add <名字> -- <python> -m character_workflow.mcp --client codex --credentials <凭据绝对路径>
 ```
 
 路径有空格时给整个路径加引号；Windows 使用解释器和凭据文件的 Windows 绝对路径。

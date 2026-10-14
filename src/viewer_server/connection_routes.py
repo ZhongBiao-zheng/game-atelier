@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from viewer_server.codex_config import codex_config_path, codex_status, write_codex_entry
 from viewer_server.connection_auth import COOKIE_NAME, ConnectionStore, iso_time
 from viewer_server.request_boundary import development_origin
 
@@ -38,6 +39,7 @@ class AgentSessionPayload(ControlPayload):
     grant_id: TextId
     grant_token: Annotated[str, StringConstraints(min_length=32, max_length=128)]
     instance_id: TextId
+    client: Literal["claude-code", "codex"] | None = None
 
 
 class PairingPayload(ControlPayload):
@@ -128,10 +130,18 @@ def connection_router(store: ConnectionStore) -> APIRouter:
         store.revoke_grant(grant_id)
         return Response(status_code=204)
 
+    @router.get("/codex-config")
+    def codex_config() -> dict:
+        return {"status": codex_status(sys.executable), "path": str(codex_config_path())}
+
+    @router.post("/codex-config")
+    def write_codex_config(payload: ControlPayload) -> dict:
+        return {"status": write_codex_entry(sys.executable), "path": str(codex_config_path())}
+
     @router.post("/agent-sessions")
     def agent_session(payload: AgentSessionPayload) -> dict:
         session, token = store.agent_session(
-            payload.grant_id, payload.grant_token, payload.instance_id,
+            payload.grant_id, payload.grant_token, payload.instance_id, payload.client,
         )
         return {
             "session_token": token, "session_id": session.principal.session_id,

@@ -24,3 +24,6 @@ viewer-server 已在运行，5174 被占时端口顺延也会让注册的 URL �
 - 默认授权只有一条，Claude Code 与 Codex 共用；要不同范围用自定义授权，凭据仍是 `<grant_id>.json`。
 - 插件 MCP 的启动命令是 `${ATELIER_PYTHON:-python3}`，尚未在 Windows 实测；没有 `python3` 时需设 `ATELIER_PYTHON`。
 - 服务名取 `atelier`：插件工具全名 `mcp__plugin_game-atelier_<服务名>__<工具名>` 不能超过 64 个字符。
+- 2026-10-14 补充：默认授权的 Codex 注册改成页面「写入 Codex」，由 viewer-server 直接改 `config.toml` 里的
+  `[mcp_servers.game-atelier]`（`codex mcp add` 依赖 PATH 上有 codex，由启动器拉起的服务不一定有）；
+  这是服务第一次写数据根以外的用户文件，只在用户点击时发生，且只限本机页面。

@@ -71,6 +71,7 @@ def runtime(tmp_path):
             payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             if self.path == "/api/connection/agent-sessions":
                 assert self.headers.get("Origin") is None
+                state.setdefault("clients", []).append(payload.pop("client", None))
                 assert payload == {"grant_id": "grant-test", "grant_token": state["grant_token"],
                                    "instance_id": state["instance_id"]}
                 state["sessions"] += 1
@@ -133,10 +134,10 @@ def runtime(tmp_path):
         thread.join(timeout=3)
 
 
-def parameters(runtime, tmp_path):
+def parameters(runtime, tmp_path, *extra):
     return StdioServerParameters(
         command=sys.executable,
-        args=["-m", "character_workflow.mcp", "--credentials", str(runtime["credentials"])],
+        args=["-m", "character_workflow.mcp", "--credentials", str(runtime["credentials"]), *extra],
         cwd=tmp_path, env={"PYTHONPATH": str(SOURCE),
                            "GAME_ATELIER_DATA_ROOT": str(tmp_path / "unused-data")},
     )
@@ -250,8 +251,18 @@ async def test_stdio_rejects_extra_fields_types_paths_approval_and_unbounded_arg
             for name in ("workshop_approve_generation", "execute_command", "read_file"):
                 result = await client.call_tool(name, {"payload": {}})
                 assert result.is_error
-    # 会话按需建立：全部调用在输入校验层被拒，服务端不应见到任何会话或调用。
-    assert runtime["sessions"] == 0
+    # 全部调用在输入校验层被拒，服务端见不到任何调用；唯一可能的会话来自启动预连（时序决定有没有跑完）。
+    assert runtime["sessions"] <= 1
+    assert runtime["calls"] == []
+
+
+async def test_stdio_connects_at_startup_and_reports_its_host(runtime, tmp_path):
+    """连接页的「已连接」靠启动预连：不调用任何工具，服务端也要见到带宿主名的会话。"""
+    async with asyncio.timeout(20):
+        async with Client(parameters(runtime, tmp_path, "--client", "codex"), read_timeout_seconds=10):
+            while runtime["sessions"] == 0:
+                await asyncio.sleep(0.05)
+    assert runtime["clients"] == ["codex"]
     assert runtime["calls"] == []
 
 

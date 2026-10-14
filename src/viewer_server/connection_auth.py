@@ -131,6 +131,8 @@ class ConnectionStore:
         self.pairings: dict[str, Pairing] = {}
         self.media_tokens: dict[str, tuple[str, float]] = {}
         self.lease: tuple[str, str, float] | None = None
+        # grant_id → {客户端: 最近一次换到会话的时间}：页面据此显示「已连接」，服务重启即清空。
+        self.agent_connections: dict[str, dict[str, float]] = {}
         self.lock = threading.RLock()
         self._attempts: list[float] = []
         # 热路径不碰磁盘：authenticate 走在事件循环上、SSE 每 0.5s 刷一次，
@@ -366,9 +368,10 @@ class ConnectionStore:
             self._refresh()
             return [self._public_grant(value) for value in self._read_grants().values()]
 
-    @staticmethod
-    def _public_grant(value: dict) -> dict:
-        return {key: item for key, item in value.items() if key != "token_hash"}
+    def _public_grant(self, value: dict) -> dict:
+        public = {key: item for key, item in value.items() if key != "token_hash"}
+        connections = self.agent_connections.get(value["grant_id"], {})
+        return {**public, "connections": {client: iso_time(at) for client, at in connections.items()}}
 
     # Agent 授权不设有效期（用户 2026-09-26 确认）：本机自用，撤销是唯一的失效方式。
     def is_grant_active(self, grant_id: str) -> bool:
@@ -459,7 +462,9 @@ class ConnectionStore:
                 if session.principal.grant_id in grant_ids:
                     session.revoked.set()
 
-    def agent_session(self, grant_id: str, token: str, instance_id: str) -> tuple[Session, str]:
+    def agent_session(
+        self, grant_id: str, token: str, instance_id: str, client: str | None = None,
+    ) -> tuple[Session, str]:
         with self.lock:
             self._refresh()
             now = time.time()
@@ -469,6 +474,8 @@ class ConnectionStore:
             grant = self._read_grants().get(grant_id)
             if not grant or not secrets.compare_digest(grant["token_hash"], digest(token)):
                 raise ConnectionError("SESSION_REVOKED", "Agent 授权无效或已撤销")
+            if client is not None:
+                self.agent_connections.setdefault(grant_id, {})[client] = now
             return self._new_session(
                 "agent", None, now + 2 * 3600, name=grant["name"], grant_id=grant_id,
                 project_ids=frozenset(grant["project_ids"]),
