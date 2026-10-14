@@ -1277,7 +1277,7 @@ function FailedCard({
         {round.canceled
           ? <Square className="mt-1 size-3 shrink-0 fill-current text-muted-foreground" aria-hidden />
           : <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive/70" aria-hidden />}
-        <p className="flex-1 text-muted-foreground">{round.reason}</p>
+        <p className="min-w-0 flex-1 text-muted-foreground [overflow-wrap:anywhere]">{round.reason}</p>
         {round.jobId && onDeleteFailed && (
           <button
             type="button"
@@ -1285,8 +1285,8 @@ function FailedCard({
             title={round.canceled ? '删除已停止记录' : '删除失败记录'}
             onClick={() => { void onDeleteFailed(round.jobId!); }}
             className={round.canceled
-              ? 'rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
-              : 'rounded-md border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'}
+              ? 'shrink-0 whitespace-nowrap rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+              : 'shrink-0 whitespace-nowrap rounded-md border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'}
           >
             删除
           </button>

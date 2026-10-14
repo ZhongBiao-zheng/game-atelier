@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.89.1',
+    date: '2026-10-14',
+    headline: '创作台报错卡片排版修复',
+    changes: [
+      { kind: 'fix', text: '失败记录的报错很长时，文字会超出卡片、删除按钮被挤成竖排；现在报错在卡片内换行，删除按钮保持一行。' },
+    ],
+  },
+  {
     version: '5.89.0',
     date: '2026-10-13',
     headline: '裁剪和切分弹窗重新排版',
