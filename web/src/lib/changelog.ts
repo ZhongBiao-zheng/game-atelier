@@ -33,6 +33,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.89.5',
+    date: '2026-10-14',
+    headline: 'Agent 连接收进设置，一个开关',
+    changes: [
+      { kind: 'feat', text: '「本机连接」页去掉了，改成「设置 → Agent 连接」里的一个开关：打开后 Claude Code 和 Codex 都能用，装了 Codex 会自动写好它的配置。' },
+      { kind: 'feat', text: '打开后对全部项目和画布生效，之后新建的也包括在内，不用再重新授权。' },
+      { kind: 'fix', text: '升级后需要在设置里重新打开一次这个开关；以前建的自定义授权全部失效。' },
+      { kind: 'feat', text: '网站配对也移到了设置里的「网站连接」。' },
+    ],
+  },
+  {
     version: '5.89.4',
     date: '2026-10-14',
     headline: 'Codex 一键连接',

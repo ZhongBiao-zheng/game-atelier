@@ -6,9 +6,9 @@ import time
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints
 
-from viewer_server.codex_config import codex_config_path, codex_status, write_codex_entry
+from viewer_server.codex_config import write_codex_entry_if_installed
 from viewer_server.connection_auth import COOKIE_NAME, ConnectionStore, iso_time
 from viewer_server.request_boundary import development_origin
 
@@ -22,17 +22,6 @@ class ControlPayload(BaseModel):
 class EditorPayload(ControlPayload):
     client_id: TextId
     takeover: bool = False
-
-
-class GrantPayload(ControlPayload):
-    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
-    project_ids: Annotated[list[TextId], Field(max_length=32)] = []
-    canvas_project_ids: Annotated[list[TextId], Field(max_length=32)] = []
-    capabilities: Annotated[list[Literal[
-        "read", "edit_documents", "create_targets", "prepare_generation", "execute_generation",
-        "canvas_read", "canvas_edit", "canvas_generate",
-    ]], Field(min_length=1, max_length=8)]
-    default: bool = False
 
 
 class AgentSessionPayload(ControlPayload):
@@ -85,7 +74,6 @@ def connection_router(store: ConnectionStore) -> APIRouter:
             return {"sessions": [{
                 "session_id": value.principal.session_id, "kind": value.principal.kind,
                 "name": value.name, "origin": value.origin, "expires_at": iso_time(value.expires_at),
-                "project_ids": sorted(value.principal.project_ids),
                 "capabilities": sorted(value.principal.capabilities),
             } for value in store.sessions.values()]}
 
@@ -116,27 +104,21 @@ def connection_router(store: ConnectionStore) -> APIRouter:
         store.revoke_session(session_id)
         return Response(status_code=204)
 
-    @router.get("/agent-grants")
-    def grants() -> dict:
-        # 前端据此拼出可直接粘贴的 `claude mcp add` 命令：装了本项目依赖的解释器就是当前进程这一个。
-        return {"grants": store.list_grants(), "python": sys.executable}
+    @router.get("/agent")
+    def agent() -> dict:
+        return store.agent_status()
 
-    @router.post("/agent-grants", status_code=201)
-    def create_grant(payload: GrantPayload, request: Request) -> dict:
-        return store.create_grant(**payload.model_dump(), base_url=request.state.connection_base_url)
+    @router.put("/agent")
+    def enable_agent(payload: ControlPayload, request: Request) -> dict:
+        store.enable_agent(request.state.connection_base_url)
+        # Claude Code 由插件自带 MCP 读同一份凭据；Codex 没有插件，装了就顺手写进它的配置。
+        write_codex_entry_if_installed(sys.executable)
+        return store.agent_status()
 
-    @router.delete("/agent-grants/{grant_id}", status_code=204)
-    def revoke_grant(grant_id: str) -> Response:
-        store.revoke_grant(grant_id)
-        return Response(status_code=204)
-
-    @router.get("/codex-config")
-    def codex_config() -> dict:
-        return {"status": codex_status(sys.executable), "path": str(codex_config_path())}
-
-    @router.post("/codex-config")
-    def write_codex_config(payload: ControlPayload) -> dict:
-        return {"status": write_codex_entry(sys.executable), "path": str(codex_config_path())}
+    @router.delete("/agent")
+    def disable_agent(payload: ControlPayload) -> dict:
+        store.disable_agent()
+        return store.agent_status()
 
     @router.post("/agent-sessions")
     def agent_session(payload: AgentSessionPayload) -> dict:
@@ -147,8 +129,6 @@ def connection_router(store: ConnectionStore) -> APIRouter:
             "session_token": token, "session_id": session.principal.session_id,
             "instance_id": store.instance_id, "expires_at": iso_time(session.expires_at),
             "capabilities": sorted(session.principal.capabilities),
-            "project_ids": sorted(session.principal.project_ids),
-            "canvas_project_ids": sorted(session.principal.canvas_project_ids),
         }
 
     return router

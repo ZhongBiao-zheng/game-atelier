@@ -24,23 +24,21 @@
 不等于已经验收所有 Codex / Claude 客户端版本，具体限制见[本机客户端说明](../mcp-local-client.md)。
 不引入 SDK 的开发 CLI extra 或新的 Node 服务，只使用已需要的服务端协议能力。
 
-用户在本地管理页点「连接本机 Agent」一键创建默认授权（全部项目、画布与能力），或用「自定义」选择项目、画布
-以及 `read`、`edit_documents`、`create_targets`、`prepare_generation` 等能力。新增 Agent 授权只能由该页创建，
-生成一个 OS 权限保护的凭据文件：默认授权固定为 `.config/connections/agent.json`，再次创建会替换旧默认授权并覆盖
-该文件；自定义授权为 `<grant_id>.json`。MCP 配置只含固定解释器、模块和可选的凭据文件位置，不含明文 token / API Key。
+用户在本机设置页打开「Agent 连接」开关，授权全部工坊项目、全部画布与全部能力，含之后新建的（ADR-0022）。
+授权只能由本机页面打开，生成一个 OS 权限保护的凭据文件 `.config/connections/agent.json`，再次打开会替换旧授权
+并覆盖该文件。MCP 配置只含固定解释器、模块和可选的凭据文件位置，不含明文 token / API Key。
 文件在 data root 的私有配置子目录，POSIX 使用 0600，Windows 核验当前用户 ACL，不能以 chmod 成功当作 ACL 已验证。
-服务端保存凭据摘要，撤销后拒绝后续调用；授权不设有效期（ADR-0021）；凭据不会因知道 project_id 就扩大权限。
+服务端保存凭据摘要，关掉开关后拒绝后续调用；授权不设有效期（ADR-0021）。
 
-MCP 启动只读取自身的连接凭据（默认授权或 `--credentials` 指定的文件），不扫描用户目录或更改 Agent 配置。
+MCP 启动只读取自身的连接凭据（默认位置或 `--credentials` 指定的文件），不扫描用户目录或更改 Agent 配置。
 凭据缺失、失效或服务未启动时照常启动，调用时返回明确指引，不私自重启或新建不同 data root；
 每次调用前按文件状态检查凭据，被替换就重读并重换会话。连接须核对实例及协议，不使用系统代理或跟随 HTTP 重定向。
 服务重启需重新建立运行时工具会话；持久授权须未撤销，不能用过期 session ID 当授权。
 
-管理端点 `POST /api/connection/agent-grants` 接受 `{ name, project_ids, canvas_project_ids, capabilities, default? }`，
-`default: true` 创建默认授权并替换旧的；返回名称、`default` 和本机凭据文件位置，原始秘密不经网站或工具返回。
-`POST /api/connection/agent-sessions` 用该凭据换取 2 小时的运行会话，到期由适配器自动重换。
-`DELETE /api/connection/agent-grants/{id}` 同时撤销派生会话并关闭连接。
-Agent 自报的 client 名称只供显示，不作为权限证明；HTTP 请求无 Origin 时仍必须提供工具身份。
+管理端点只给本机页面：`GET /api/connection/agent` 返回 `{ enabled, connections }`（`connections` 为各宿主最近连上的时间，
+只在服务进程内存里）；`PUT` 打开并在装了 Codex 时写入其配置；`DELETE` 关闭并撤销派生会话。原始秘密不经网站或工具返回。
+`POST /api/connection/agent-sessions` 用该凭据换取 2 小时的运行会话，到期由适配器自动重换；可带
+`client: "claude-code" | "codex"`。Agent 自报的 client 名称只供显示，不作为权限证明；HTTP 请求无 Origin 时仍必须提供工具身份。
 
 **限制边界**：MCP 能约束本工具服务，不能防止外部 Agent 利用宿主另外授予的文件或 shell 权限。
 安装说明必须提示不要给 Agent 无关文件访问权，不能宣称接了 MCP 后整个 Codex / Claude 自动进入沙箱。

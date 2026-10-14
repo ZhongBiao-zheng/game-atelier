@@ -124,8 +124,6 @@ class ToolSession(BaseModel):
     expires_at: str = Field(max_length=64)
     instance_id: str = Field(min_length=1, max_length=128)
     capabilities: list[str] = Field(max_length=16)
-    project_ids: list[str] = Field(max_length=128)
-    canvas_project_ids: list[str] = Field(default_factory=list, max_length=128)
 
     @field_validator("expires_at")
     @classmethod

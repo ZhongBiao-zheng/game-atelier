@@ -12,13 +12,12 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
   const [viewOnly, setViewOnly] = useState(false);
   const [confirmTakeover, setConfirmTakeover] = useState(false);
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const management = location.startsWith('/connection');
   const immersiveCanvas = /^\/canvas\/[^/]+$/.test(location);
-  const editing = !viewOnly && !management;
+  const editing = !viewOnly;
   const ready = connection.phase === 'ready';
   const unpaired = connection.phase === 'unpaired';
   const busy = connection.phase === 'idle' || connection.phase === 'connecting' || connection.recovering;
-  const blocked = !ready || (viewOnly && !management);
+  const blocked = !ready || viewOnly;
 
   useLayoutEffect(() => { void localConnection.start({ editing }); }, [editing]);
   useEffect(() => {
@@ -114,7 +113,7 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
       {/* 只读是常驻状态而非故障：顶栏字标右侧的胶囊，不压导航。它必须留在 fieldset 之外
           （disabled fieldset 会连带禁用里面的按钮），所以用 fixed 对齐顶栏而不是渲染进顶栏。
           画布编辑器没有顶栏，仍居中。 */}
-      {activated && !unpaired && ready && viewOnly && !management && <div
+      {activated && !unpaired && ready && viewOnly && <div
         data-connection-controls
         title="另一页面正在编辑"
         className={`fixed z-50 flex h-10 items-center gap-2.5 rounded-full border border-border bg-glass pl-1.5 pr-1.5 text-sm backdrop-blur-glass sm:pl-3.5 ${immersiveCanvas ? 'inset-x-3 top-3 mx-auto w-fit' : 'left-20 top-2 sm:left-24 lg:left-32 lg:top-5'}`}
@@ -149,7 +148,7 @@ function SitePairingForm({ message }: { message: string | null }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(message);
   let localPage: string | null = null;
-  try { localPage = `${siteBaseForPort(port)}/connection?site=${encodeURIComponent(window.location.origin)}`; } catch { /* 端口未填好前不给链接。 */ }
+  try { localPage = `${siteBaseForPort(port)}/settings?section=site&site=${encodeURIComponent(window.location.origin)}`; } catch { /* 端口未填好前不给链接。 */ }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -170,9 +169,9 @@ function SitePairingForm({ message }: { message: string | null }) {
         <p className="text-sm text-muted-foreground">数据留在你的电脑上，网站只提供界面。</p>
       </div>
       <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
-        <li>在本机启动工坊，打开{localPage
-          ? <a href={localPage} target="_blank" rel="noreferrer" className="underline underline-offset-4">本机连接页</a>
-          : '本机连接页'}生成配对码。</li>
+        <li>在本机启动工坊，在{localPage
+          ? <a href={localPage} target="_blank" rel="noreferrer" className="underline underline-offset-4">本机设置</a>
+          : '本机设置'}的「网站连接」生成配对码。</li>
         <li>把配对码填到下面。</li>
       </ol>
       <label className="block space-y-2 text-sm"><span>本机端口</span>

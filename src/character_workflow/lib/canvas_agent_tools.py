@@ -1,7 +1,7 @@
 """canvas_* tool business layer: typed change sets over the same canvas library the Web uses.
 
 ADR-0017 决定 4：画布是 server 持有、带修订号的活文档，Agent 只能经这里改，不能改文件。
-授权与工坊分开（grant.canvas_project_ids + canvas_* 能力）；生成按能力分级（canvas_generate）。
+授权覆盖全部画布，按 canvas_* 能力分级（canvas_generate 才能发起生成）。
 """
 from __future__ import annotations
 
@@ -45,10 +45,7 @@ def _now() -> str:
 
 def authorize(principal: Any, project_id: str, capability: str) -> None:
     actor_id(principal)
-    if principal.kind != "local" and (
-        project_id not in getattr(principal, "canvas_project_ids", frozenset())
-        or capability not in principal.capabilities
-    ):
+    if principal.kind != "local" and capability not in principal.capabilities:
         raise WorkshopError("TARGET_NOT_AUTHORIZED", "当前授权不允许操作这个画布", 403)
     try:
         read_canvas_project(project_id)
@@ -58,10 +55,9 @@ def authorize(principal: Any, project_id: str, capability: str) -> None:
 
 def list_projects(principal: Any, payload: CanvasListProjectsInput) -> dict:
     actor_id(principal)
-    allowed = None if principal.kind == "local" else getattr(principal, "canvas_project_ids", frozenset())
     rows = [
         {"project_id": p.project_id, "name": p.name, "updated_at": p.updated_at}
-        for p in list_canvas_project_options() if allowed is None or p.project_id in allowed
+        for p in list_canvas_project_options()
     ]
     return {"projects": rows}
 

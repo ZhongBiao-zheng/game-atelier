@@ -21,6 +21,7 @@ from mcp.client.stdio import StdioServerParameters
 from pydantic import ValidationError
 from PIL import Image
 
+from character_workflow.lib import data_root
 from character_workflow.lib.private_json import write_private_json
 from character_workflow.lib.workshop_schema import ListProjectsInput
 from character_workflow.mcp.server import ALL_TOOL_INPUT_MODELS as TOOL_INPUT_MODELS, tool_name
@@ -77,8 +78,7 @@ def runtime(tmp_path):
                 state["sessions"] += 1
                 self.send_json({"session_id": f"session-{state['sessions']}",
                                 "session_token": state["session_token"], "expires_at": expires(),
-                                "instance_id": state["instance_id"], "capabilities": ["read"],
-                                "project_ids": ["project-a"]})
+                                "instance_id": state["instance_id"], "capabilities": ["read"]})
                 return
             assert self.path.startswith(("/api/workshop/", "/api/canvas-agent/"))
             assert self.headers.get("Authorization") == f"Bearer {state['session_token']}"
@@ -489,17 +489,13 @@ def actual_runtime(tmp_path):
                              json={"client_id": "mcp-integration-browser"}, timeout=5)
         assert lease.status_code == 200, lease.text
         project_ids = []
-        for name in ("MCP授权项目", "MCP未授权项目"):
+        for name in ("MCP项目甲", "MCP项目乙"):
             created = browser.post(base_url + "/api/projects", json={"name": name}, timeout=5)
             assert created.status_code == 200, created.text
             project_ids.append(next(p["id"] for p in created.json()["projects"] if p["name"] == name))
-        grant = browser.post(base_url + "/api/connection/agent-grants", json={
-            "name": "SDK业务回归", "project_ids": [project_ids[0]],
-            "capabilities": ["read", "edit_documents", "create_targets", "prepare_generation"],
-        }, timeout=5)
-        assert grant.status_code == 201, grant.text
-        yield {"credentials": Path(grant.json()["credential_path"]),
-               "grant_id": grant.json()["grant_id"], "browser": browser,
+        grant = browser.put(base_url + "/api/connection/agent", json={}, timeout=5)
+        assert grant.status_code == 200, grant.text
+        yield {"credentials": data_root.agent_credential_file(), "browser": browser,
                "base_url": base_url, "project_ids": project_ids}
     finally:
         browser.close()
@@ -512,7 +508,7 @@ def actual_runtime(tmp_path):
         assert not thread.is_alive()
 
 
-async def test_stdio_real_auth_project_scope_document_edit_conflict_and_revoke(
+async def test_stdio_real_auth_document_edit_conflict_and_revoke(
     actual_runtime, tmp_path, isolated_data_root,
 ):
     runtime = actual_runtime
@@ -520,9 +516,9 @@ async def test_stdio_real_auth_project_scope_document_edit_conflict_and_revoke(
         async with Client(parameters(runtime, tmp_path), read_timeout_seconds=10) as client:
             result = await client.call_tool("workshop_list_projects", {"payload": {}})
             assert not result.is_error
-            assert result.structured_content["projects"] == [
-                {"project_id": runtime["project_ids"][0], "name": "MCP授权项目"},
-            ]
+            # 授权覆盖全部项目，不按项目限范围。
+            listed = {item["project_id"] for item in result.structured_content["projects"]}
+            assert set(runtime["project_ids"]) <= listed
             project_target = {"type": "project", "project_id": runtime["project_ids"][0]}
             gdd = await client.call_tool("workshop_read_document", {"payload": {
                 "target": project_target, "kind": "gdd",
@@ -576,11 +572,6 @@ async def test_stdio_real_auth_project_scope_document_edit_conflict_and_revoke(
             }})
             assert not found.is_error
             assert found.structured_content["targets"] == [{"target": target, "name": "真实小鸟"}]
-            denied = await client.call_tool("workshop_get_context", {"payload": {
-                "target": {**target, "project_id": runtime["project_ids"][1]},
-            }})
-            assert denied.is_error
-            assert denied.structured_content["error"]["code"] == "TARGET_NOT_AUTHORIZED"
             read = await client.call_tool("workshop_read_document", {"payload": {
                 "target": target, "kind": "character_spec",
             }})
@@ -603,10 +594,9 @@ async def test_stdio_real_auth_project_scope_document_edit_conflict_and_revoke(
             assert conflicted.structured_content["error"]["code"] == "DOCUMENT_CONFLICT"
             assert spec.read_text(encoding="utf-8") == payload["content"]
             revoked = runtime["browser"].delete(
-                runtime["base_url"] + "/api/connection/agent-grants/" + runtime["grant_id"],
-                json={}, timeout=5,
+                runtime["base_url"] + "/api/connection/agent", json={}, timeout=5,
             )
-            assert revoked.status_code == 204
+            assert revoked.status_code == 200
             denied = await client.call_tool("workshop_read_document", {"payload": {
                 "target": target, "kind": "character_spec",
             }})

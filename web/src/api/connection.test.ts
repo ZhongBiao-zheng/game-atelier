@@ -145,7 +145,7 @@ describe('local connection', () => {
   it('refuses business writes while connected without an editor lease but allows authorization management', async () => {
     const network = server(); const connection = client(); await connection.start({ editing: false });
     await expect(connection.fetch('/api/generate', { method: 'POST' })).rejects.toBeInstanceOf(ConnectionInterrupted);
-    await connection.fetch('/api/connection/agent-grants', { method: 'POST' });
+    await connection.fetch('/api/connection/agent', { method: 'PUT' });
     expect(network.mock.calls.some(([url]) => url === '/api/generate')).toBe(false);
   });
 

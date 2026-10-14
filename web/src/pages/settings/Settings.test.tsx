@@ -18,6 +18,12 @@ beforeEach(() => {
         }),
       } as Response);
     }
+    if (url === '/api/connection/agent') {
+      return Promise.resolve({ ok: true, json: async () => ({ enabled: false, connections: {} }) } as Response);
+    }
+    if (url === '/api/connection/sessions') {
+      return Promise.resolve({ ok: true, json: async () => ({ sessions: [] }) } as Response);
+    }
     if (url === '/api/keys') {
       return Promise.resolve({
         ok: true,

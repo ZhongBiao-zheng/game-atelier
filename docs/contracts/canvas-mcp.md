@@ -7,15 +7,13 @@
 
 ## 授权
 
-Agent 授权（`POST /api/connection/agent-grants`）新增 `canvas_project_ids` 与三项能力：
+设置页「Agent 连接」开关打开即授权全部画布与下列三项能力（ADR-0022）：
 
 | 能力 | 允许 |
 | --- | --- |
-| `canvas_read` | 列授权画布、读文档、读模型列表、读生成状态、读媒体预览 |
+| `canvas_read` | 列画布、读文档、读模型列表、读生成状态、读媒体预览 |
 | `canvas_edit` | typed change set 改节点 / 连线 / 生成配置；从本机路径导入媒体 |
 | `canvas_generate` | 在 surface 节点发起生成（付费）。持有即批准，服务端记录会话来源 |
-
-工坊 `project_ids` 与画布 `canvas_project_ids` 互不继承；任一非空即可创建授权，画布授权必须含 `canvas_read`。
 
 ## 工具表
 

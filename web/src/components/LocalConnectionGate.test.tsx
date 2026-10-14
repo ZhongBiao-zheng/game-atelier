@@ -1,8 +1,6 @@
 import { StrictMode, useEffect, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { Link, Router, useLocation } from 'wouter';
-import { memoryLocation } from 'wouter/memory-location';
 vi.unmock('@/api/connection');
 import { localConnection, connectionFetch } from '@/api/connection';
 import { LocalConnectionGate } from './LocalConnectionGate';
@@ -32,12 +30,6 @@ function RouteReads({ path }: { path: string }) {
     connectionFetch(path).then(response => response.json()).then(() => setResult('读取成功')).catch(error => setResult(String(error)));
   }, [path]);
   return <p>{result}</p>;
-}
-function RoutedPages() {
-  const [location] = useLocation();
-  return location === '/connection'
-    ? <><RouteReads key="management" path="/api/connection/agent-grants" /><Link href="/settings">返回设置</Link></>
-    : <><RouteReads key="settings" path="/api/config" /><Link href="/connection">管理授权</Link></>;
 }
 afterEach(() => { act(() => localConnection.dispose()); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -178,12 +170,6 @@ describe('local connection gate', () => {
     expect(screen.getByLabelText('编辑草稿')).toHaveValue(''); expect(onMount).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('只读')).not.toBeInTheDocument();
   });
-  it('opens authorization management without stealing the editor lease', async () => {
-    const network = server(); const onMount = vi.fn(); const { hook } = memoryLocation({ path: '/connection' });
-    render(<Router hook={hook}><LocalConnectionGate><Draft onMount={onMount} /></LocalConnectionGate></Router>);
-    await waitFor(() => expect(onMount).toHaveBeenCalled()); expect(network.mock.calls.some(([url]) => url.endsWith('editor-lease'))).toBe(false);
-  });
-
   it('does not replay retained drafts when restored from the browser history cache', async () => {
     server(); const onMount = vi.fn(); render(<LocalConnectionGate><Draft onMount={onMount} /></LocalConnectionGate>);
     const editor = await screen.findByLabelText('编辑草稿'); fireEvent.change(editor, { target: { value: '历史中的手稿' } });
@@ -196,20 +182,6 @@ describe('local connection gate', () => {
     expect(editor).toHaveValue('历史中的手稿'); expect(onMount).toHaveBeenCalledTimes(1);
   });
 
-  it('waits for the mode transition before a newly mounted route reads data in either direction', async () => {
-    const network = server();
-    const { hook } = memoryLocation({ path: '/settings' });
-    render(<Router hook={hook}><LocalConnectionGate><RoutedPages /></LocalConnectionGate></Router>);
-    await screen.findByText('读取成功');
-    fireEvent.click(screen.getByRole('link', { name: '管理授权' }));
-    await screen.findByRole('link', { name: '返回设置' });
-    await screen.findByText('读取成功');
-    expect(localConnection.getSnapshot()).toMatchObject({ phase: 'ready', editing: false });
-    expect(network.mock.calls.filter(([url]) => url === '/api/connection/agent-grants')).toHaveLength(1);
-    fireEvent.click(screen.getByRole('link', { name: '返回设置' }));
-    await screen.findByRole('link', { name: '管理授权' }); await screen.findByText('读取成功');
-    expect(localConnection.getSnapshot()).toMatchObject({ phase: 'ready', editing: true });
-  });
 });
 
 describe('hosted pairing form', () => {
@@ -232,7 +204,7 @@ describe('hosted pairing form', () => {
     render(<LocalConnectionGate><Draft onMount={onMount} /></LocalConnectionGate>);
     await screen.findByRole('heading', { name: '连接本机工坊' });
     expect(network).not.toHaveBeenCalled(); expect(onMount).not.toHaveBeenCalled();
-    expect(screen.getByRole('link', { name: '本机连接页' })).toHaveAttribute('href', `${BASE}/connection?site=${encodeURIComponent(window.location.origin)}`);
+    expect(screen.getByRole('link', { name: '本机设置' })).toHaveAttribute('href', `${BASE}/settings?section=site&site=${encodeURIComponent(window.location.origin)}`);
     const code = screen.getByLabelText('配对码');
     const typed = vi.fn(); code.addEventListener('keydown', typed);
     fireEvent.keyDown(code, { key: 'a' });

@@ -17,14 +17,12 @@ from urllib.parse import urlsplit
 from character_workflow.lib import data_root
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.private_json import read_private_json, write_private_json
-from character_workflow.lib.projects import read_projects
 
 AGENT_CAPABILITIES = frozenset({
     "read", "edit_documents", "create_targets", "prepare_generation", "execute_generation",
     "canvas_read", "canvas_edit", "canvas_generate",
 })
 SESSION_LIMIT = 64
-GRANT_LIMIT = 32
 PAIRING_LIMIT = 8
 PAIRING_TTL = 5 * 60
 MEDIA_TOKEN_TTL = 30 * 60
@@ -105,9 +103,7 @@ class ConnectionPrincipal:
     kind: PrincipalKind
     session_id: str
     grant_id: str | None = None
-    project_ids: frozenset[str] = frozenset()
     capabilities: frozenset[str] = AGENT_CAPABILITIES
-    canvas_project_ids: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -184,16 +180,14 @@ class ConnectionStore:
 
     def _new_session(
         self, kind: PrincipalKind, origin: str | None, expires_at: float,
-        *, name: str, grant_id: str | None = None, project_ids: frozenset[str] = frozenset(),
+        *, name: str, grant_id: str | None = None,
         capabilities: frozenset[str] = AGENT_CAPABILITIES,
-        canvas_project_ids: frozenset[str] = frozenset(),
     ) -> tuple[Session, str]:
         self._refresh()
         if len(self.sessions) >= SESSION_LIMIT:
             raise ConnectionError("CONNECTION_RATE_LIMITED", "连接数量已达上限，请先断开旧连接", 429)
         token = secrets.token_urlsafe(32)
-        principal = ConnectionPrincipal(kind, uuid.uuid4().hex, grant_id, project_ids, capabilities,
-                                        canvas_project_ids)
+        principal = ConnectionPrincipal(kind, uuid.uuid4().hex, grant_id, capabilities)
         session = Session(principal, digest(token), origin, expires_at, name)
         self.sessions[principal.session_id] = session
         return session, token
@@ -340,7 +334,8 @@ class ConnectionStore:
 
     def _grants_path(self) -> Path:
         assert self.root is not None
-        return self.root / ".config" / "connections" / "grants.json"
+        # 旧版 grants.json（多条、按项目限范围的授权）整体作废，升级后在设置里重新打开一次开关。
+        return self.root / ".config" / "connections" / "agent-grant.json"
 
     def _read_grants(self) -> dict:
         """按 (inode, size, mtime) 缓存；命中时零文件读取，也不跑 Windows ACL 校验。"""
@@ -363,98 +358,56 @@ class ConnectionStore:
             self._grants_key, self._grants_cache = key, grants
         return grants
 
-    def list_grants(self) -> list[dict]:
+    def agent_status(self) -> dict:
         with self.lock:
             self._refresh()
-            return [self._public_grant(value) for value in self._read_grants().values()]
+            grant = next(iter(self._read_grants().values()), None)
+            connections = self.agent_connections.get(grant["grant_id"], {}) if grant else {}
+            return {
+                "enabled": grant is not None,
+                "connections": {client: iso_time(at) for client, at in connections.items()},
+            }
 
-    def _public_grant(self, value: dict) -> dict:
-        public = {key: item for key, item in value.items() if key != "token_hash"}
-        connections = self.agent_connections.get(value["grant_id"], {})
-        return {**public, "connections": {client: iso_time(at) for client, at in connections.items()}}
-
-    # Agent 授权不设有效期（用户 2026-09-26 确认）：本机自用，撤销是唯一的失效方式。
+    # Agent 授权只有一条、覆盖全部项目与画布（含以后新建的），不设有效期，撤销是唯一的失效方式。
     def is_grant_active(self, grant_id: str) -> bool:
         with self.lock:
             self._refresh()
             return grant_id in self._read_grants()
 
     def grant_allows(self, grant_id: str, project_id: str, capability: str) -> bool:
-        with self.lock:
-            self._refresh()
-            grant = self._read_grants().get(grant_id)
-            scope = "canvas_project_ids" if capability.startswith("canvas_") else "project_ids"
-            return bool(
-                grant and project_id in grant.get(scope, []) and capability in grant["capabilities"]
-            )
+        return self.is_grant_active(grant_id) and capability in AGENT_CAPABILITIES
 
-    def create_grant(
-        self, *, name: str, project_ids: list[str], capabilities: list[str],
-        base_url: str, canvas_project_ids: list[str] | None = None, default: bool = False,
-    ) -> dict:
-        canvas_project_ids = list(canvas_project_ids or [])
+    def enable_agent(self, base_url: str) -> None:
+        """打开开关：签一份新凭据写到固定位置，替换旧授权；已注册的 Agent 下一次调用自动换用。"""
         # 磁盘读写与 flock 都在 store.lock 之外：这把锁被事件循环上的 authenticate 与 SSE 刷新共用，
         # 持锁做文件 I/O（Windows 上还有 ACL 调用）会把整条事件循环拖停。
         with self.lock:
             self._refresh()
             path = self._grants_path()
-        known = {project.id for project in read_projects().projects}
-        if not set(project_ids) <= known:
-            raise ConnectionError("TARGET_NOT_AUTHORIZED", "请选择现有工坊项目")
-        if canvas_project_ids:
-            from character_workflow.lib.canvas_projects import list_canvas_project_options
-            known_canvas = {p.project_id for p in list_canvas_project_options()}
-            if not set(canvas_project_ids) <= known_canvas:
-                raise ConnectionError("TARGET_NOT_AUTHORIZED", "请选择现有画布项目")
-        if not project_ids and not canvas_project_ids:
-            raise ConnectionError("TARGET_NOT_AUTHORIZED", "请至少选择一个工坊项目或画布")
-        if not set(capabilities) <= AGENT_CAPABILITIES:
-            raise ConnectionError("CAPABILITY_DENIED", "Agent 授权包含未知能力")
-        if project_ids and "read" not in capabilities:
-            raise ConnectionError("CAPABILITY_DENIED", "工坊授权需要读取能力")
-        if canvas_project_ids and "canvas_read" not in capabilities:
-            raise ConnectionError("CAPABILITY_DENIED", "画布授权需要画布读取能力")
         with file_lock(path.with_suffix(".lock")):
-            grants = dict(self._read_grants())
-            # 默认授权只有一条：再点「连接本机 Agent」即替换旧的，凭据仍写同一个文件。
-            replaced = {key for key, value in grants.items() if default and value.get("default")}
-            for key in replaced:
-                del grants[key]
-            if len(grants) >= GRANT_LIMIT:
-                raise ConnectionError("CONNECTION_RATE_LIMITED", "授权数量已达上限，请撤销旧授权", 429)
+            replaced = set(self._read_grants())
             grant_id, token = uuid.uuid4().hex, secrets.token_urlsafe(32)
-            credential_path = path.parent / (
-                data_root.AGENT_CREDENTIAL_NAME if default else f"{grant_id}.json"
-            )
-            grant = {
-                "grant_id": grant_id, "name": name,
-                "project_ids": sorted(set(project_ids)), "capabilities": sorted(set(capabilities)),
-                "canvas_project_ids": sorted(set(canvas_project_ids)), "default": default,
-                "credential_path": str(credential_path), "token_hash": digest(token),
-            }
+            credential_path = path.parent / data_root.AGENT_CREDENTIAL_NAME
             try:
                 write_private_json(credential_path, {
                     "service": "game-atelier", "base_url": base_url, "grant_id": grant_id,
                     "grant_token": token,
                 })
-                grants[grant_id] = grant
-                write_private_json(path, grants)
+                write_private_json(path, {grant_id: {"grant_id": grant_id, "token_hash": digest(token)}})
             except (OSError, ImportError) as error:
                 raise _credential_store_error("写入 Agent 凭据文件", error) from error
         self._revoke_grant_sessions(replaced)
-        return self._public_grant(grant)
 
-    def revoke_grant(self, grant_id: str) -> None:
+    def disable_agent(self) -> None:
         with self.lock:
             self._refresh()
             path = self._grants_path()
         with file_lock(path.with_suffix(".lock")):
-            grants = dict(self._read_grants())
-            grant = grants.pop(grant_id, None)
-            if grant is not None:
-                write_private_json(path, grants)
-                # Keep the revoked credential file: revocation, not possession, is authoritative.
-        self._revoke_grant_sessions({grant_id})
+            revoked = set(self._read_grants())
+            if revoked:
+                # 凭据文件留着：撤销以授权记录为准，持有文件不等于有权。
+                write_private_json(path, {})
+        self._revoke_grant_sessions(revoked)
 
     def _revoke_grant_sessions(self, grant_ids: set[str]) -> None:
         with self.lock:
@@ -476,9 +429,4 @@ class ConnectionStore:
                 raise ConnectionError("SESSION_REVOKED", "Agent 授权无效或已撤销")
             if client is not None:
                 self.agent_connections.setdefault(grant_id, {})[client] = now
-            return self._new_session(
-                "agent", None, now + 2 * 3600, name=grant["name"], grant_id=grant_id,
-                project_ids=frozenset(grant["project_ids"]),
-                capabilities=frozenset(grant["capabilities"]),
-                canvas_project_ids=frozenset(grant.get("canvas_project_ids", [])),
-            )
+            return self._new_session("agent", None, now + 2 * 3600, name="本机 Agent", grant_id=grant_id)

@@ -23,10 +23,9 @@ _CONTROL_ROUTES = {
     ("POST", "/api/connection/editor-lease"),
     ("DELETE", "/api/connection/editor-lease"),
     ("GET", "/api/connection/sessions"),
-    ("GET", "/api/connection/agent-grants"),
-    ("POST", "/api/connection/agent-grants"),
-    ("GET", "/api/connection/codex-config"),
-    ("POST", "/api/connection/codex-config"),
+    ("GET", "/api/connection/agent"),
+    ("PUT", "/api/connection/agent"),
+    ("DELETE", "/api/connection/agent"),
 }
 # 网站会话能碰的控制端点：租约、媒体令牌、撤销自己；配对管理与 Agent 授权只属本机页面。
 _SITE_CONTROL_ROUTES = {
@@ -86,7 +85,7 @@ class ConnectionMiddleware:
                 raise ConnectionError("CAPABILITY_DENIED", "不能混用两种连接凭据")
             control = (method, path) in _CONTROL_ROUTES or (
                 method == "DELETE" and bool(re.fullmatch(
-                    r"/api/connection/(?:sessions|agent-grants)/[a-f0-9]{32}", path,
+                    r"/api/connection/sessions/[a-f0-9]{32}", path,
                 ))
             )
             bootstrap = method == "POST" and path == "/api/connection/local-session"

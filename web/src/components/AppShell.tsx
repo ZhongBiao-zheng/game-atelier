@@ -13,7 +13,6 @@ import { CanvasProjectIndex } from '@/pages/CanvasProjectIndex';
 import { CanvasEditor } from '@/pages/CanvasEditor';
 import { CharacterDetail } from '@/pages/CharacterDetail';
 import { SettingsPage } from '@/pages/settings/Settings';
-import { ConnectionPage } from '@/pages/Connection';
 import { WorkshopRequestsPage } from '@/pages/WorkshopRequests';
 import { setTheme, useTheme, type Theme } from '@/lib/theme';
 import {
@@ -144,7 +143,6 @@ export function AppShell() {
       {/* stable-scroll：本壳是首页/工坊的真·滚动容器，固定滚动槽避免滚动条增删改内宽 → 列宽 → w-full 图高 → 墙高的自激抽搐环（见 scrollbar-gutter-feedback-loop memory）*/}
       <main role="main" className={immersiveCanvas || pageOwnsScroll ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 min-h-0 overflow-y-auto stable-scroll'}>
         <Switch>
-          <Route path="/connection">{() => <ConnectionPage />}</Route>
           <Route path="/workshop/requests">{() => <WorkshopRequestsPage />}</Route>
           <Route path="/">{() => <Home />}</Route>
           <Route path="/studio">{() => <Studio />}</Route>
