@@ -1,5 +1,4 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { mediaUrl } from '@/api/connection';
 import { Check, ImagePlus, Upload, X } from 'lucide-react';
 
 import { createCharacterDerivative } from '@/api/characters';
@@ -211,7 +210,7 @@ export function CreateDerivativeDialog({
                       )}
                     >
                       <img
-                        src={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(item.path)}`)}
+                        src={`/api/gallery/image?path=${encodeURIComponent(item.path)}`}
                         alt=""
                         className="size-full object-cover"
                       />

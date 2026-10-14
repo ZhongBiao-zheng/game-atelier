@@ -257,7 +257,6 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     # Added last so untrusted requests are rejected before buffering document/upload bodies.
     app.add_middleware(
         LocalRequestBoundary, dev_origin=development_origin(),
-        site_origins=connection_store.site_origins,
     )
     app.include_router(router)
     app.include_router(connection_router(connection_store))

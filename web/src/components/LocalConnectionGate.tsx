@@ -1,9 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode, type SyntheticEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { useLocation } from 'wouter';
-import { localConnection, siteBaseForPort, useConnectionState } from '@/api/connection';
+import { localConnection, useConnectionState } from '@/api/connection';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
-import { SwapLabel } from '@/components/ui/swap-label';
 
 export function LocalConnectionGate({ children }: { children: ReactNode }) {
   const [location] = useLocation();
@@ -15,7 +14,6 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
   const immersiveCanvas = /^\/canvas\/[^/]+$/.test(location);
   const editing = !viewOnly;
   const ready = connection.phase === 'ready';
-  const unpaired = connection.phase === 'unpaired';
   const busy = connection.phase === 'idle' || connection.phase === 'connecting' || connection.recovering;
   const blocked = !ready || viewOnly;
 
@@ -87,20 +85,18 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
         onBeforeInputCapture={preventEditing} onDropCapture={preventEditing} onSubmitCapture={preventEditing}>
         {activated && children}
       </fieldset>
-      {unpaired && <SitePairingForm key={connection.generation} message={connection.message} />}
-      {!activated && !unpaired && <main data-connection-controls className="flex min-h-dvh items-center justify-center p-6">
+      {!activated && <main data-connection-controls className="flex min-h-dvh items-center justify-center p-6">
         <div className="max-w-md space-y-3 text-center">
           <p role="status" className="text-sm text-pretty">{busy ? '正在启动工坊…' : '暂时无法连接工坊服务'}</p>
           {!busy && <>
             <p className="break-words text-sm text-pretty text-muted-foreground">{connection.message}</p>
             <div className="flex justify-center gap-2">
               <Button onClick={reconnect}>重试</Button>
-              {localConnection.hosted && <Button variant="outline" onClick={() => void localConnection.disconnect()}>重新配对</Button>}
             </div>
           </>}
         </div>
       </main>}
-      {activated && !unpaired && !ready && <div
+      {activated && !ready && <div
         data-connection-controls
         className="fixed inset-x-3 top-3 z-50 mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-3 rounded-lg border border-border bg-popover px-4 py-2 text-sm"
         style={{ marginTop: 'env(safe-area-inset-top)' }}>
@@ -113,7 +109,7 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
       {/* 只读是常驻状态而非故障：顶栏字标右侧的胶囊，不压导航。它必须留在 fieldset 之外
           （disabled fieldset 会连带禁用里面的按钮），所以用 fixed 对齐顶栏而不是渲染进顶栏。
           画布编辑器没有顶栏，仍居中。 */}
-      {activated && !unpaired && ready && viewOnly && <div
+      {activated && ready && viewOnly && <div
         data-connection-controls
         title="另一页面正在编辑"
         className={`fixed z-50 flex h-10 items-center gap-2.5 rounded-full border border-border bg-glass pl-1.5 pr-1.5 text-sm backdrop-blur-glass sm:pl-3.5 ${immersiveCanvas ? 'inset-x-3 top-3 mx-auto w-fit' : 'left-20 top-2 sm:left-24 lg:left-32 lg:top-5'}`}
@@ -137,49 +133,4 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
       </Dialog>
     </>
   );
-}
-
-const PORT_KEY = 'atelier-site-port';
-
-/** 托管网站的配对页：只连用户填写的回环端口，配对码来自本机页面，不经 URL 传递。 */
-function SitePairingForm({ message }: { message: string | null }) {
-  const [port, setPort] = useState(() => { try { return sessionStorage.getItem(PORT_KEY) ?? '5174'; } catch { return '5174'; } });
-  const [code, setCode] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(message);
-  let localPage: string | null = null;
-  try { localPage = `${siteBaseForPort(port)}/settings?section=site&site=${encodeURIComponent(window.location.origin)}`; } catch { /* 端口未填好前不给链接。 */ }
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setBusy(true); setError(null);
-    try {
-      try { sessionStorage.setItem(PORT_KEY, port); } catch { /* 存不了也不影响本次连接。 */ }
-      await localConnection.pair({ port, code });
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
-    } finally { setBusy(false); }
-  }
-
-  const field = 'block w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
-  return <main data-connection-controls className="flex min-h-dvh items-center justify-center p-6">
-    <form onSubmit={event => void submit(event)} className="w-full max-w-sm space-y-5">
-      <div className="space-y-1">
-        <h1 className="font-display text-display">连接本机工坊</h1>
-        <p className="text-sm text-muted-foreground">数据留在你的电脑上，网站只提供界面。</p>
-      </div>
-      <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
-        <li>在本机启动工坊，在{localPage
-          ? <a href={localPage} target="_blank" rel="noreferrer" className="underline underline-offset-4">本机设置</a>
-          : '本机设置'}的「网站连接」生成配对码。</li>
-        <li>把配对码填到下面。</li>
-      </ol>
-      <label className="block space-y-2 text-sm"><span>本机端口</span>
-        <input inputMode="numeric" autoComplete="off" value={port} onChange={event => setPort(event.target.value.trim())} className={field} /></label>
-      <label className="block space-y-2 text-sm"><span>配对码</span>
-        <input autoFocus autoComplete="off" spellCheck={false} value={code} onChange={event => setCode(event.target.value)} className={`${field} font-mono`} /></label>
-      {error && <p role="alert" className="text-sm text-pretty text-destructive">{error}</p>}
-      <Button type="submit" disabled={busy || !code.trim()}><SwapLabel active={Boolean(busy)} on="连接中…" off="连接" /></Button>
-    </form>
-  </main>;
 }

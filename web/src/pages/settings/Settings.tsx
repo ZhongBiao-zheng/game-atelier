@@ -8,9 +8,6 @@ import { KeysPage } from './Keys';
 import { ProfileSection } from './ProfileSection';
 import { TeamLibrariesSection } from './TeamLibrariesSection';
 import { AgentSection } from './AgentSection';
-import { SitePairingSection } from './SitePairingSection';
-import { HOSTED_SITE } from '@/api/connection';
-import { HostedManagementNotice } from '@/components/HostedManagementNotice';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { Switch } from '@/components/ui/switch';
 
@@ -23,17 +20,11 @@ const SECTIONS = [
   { id: 'settings-team', label: '团队库' },
   { id: 'settings-keys', label: 'API 密钥' },
   { id: 'settings-agent', label: 'Agent 连接' },
-  { id: 'settings-site', label: '网站连接' },
 ];
 const navItemClass = 'rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 const sectionClass = 'scroll-mt-6 space-y-4';
 
 export function SettingsPage() {
-  if (HOSTED_SITE) return <HostedManagementNotice title="设置" />;
-  return <LocalSettingsPage />;
-}
-
-function LocalSettingsPage() {
   const [savedRoot, setSavedRoot] = useState('');
   const [pendingRoot, setPendingRoot] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -56,7 +47,7 @@ function LocalSettingsPage() {
       .catch(() => {});
   }, []);
 
-  // 从别处跳过来：?section=keys（画布 Agent 缺对话模型）/ agent / site（托管网站配对）滚到对应区块。
+  // 从别处跳过来：?section=keys（画布 Agent 缺对话模型）/ agent 滚到对应区块。
   useEffect(() => {
     const section = new URLSearchParams(window.location.search).get('section');
     if (loading || !section) return;
@@ -213,10 +204,6 @@ function LocalSettingsPage() {
 
       <section id="settings-agent" className={`${sectionClass} border-t border-border py-10`}>
         <AgentSection />
-      </section>
-
-      <section id="settings-site" className={`${sectionClass} border-t border-border py-10`}>
-        <SitePairingSection />
       </section>
       </div>
       </div>

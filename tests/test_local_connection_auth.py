@@ -143,8 +143,7 @@ def test_lease_expiry_and_session_revocation(client):
         store.lease = (*store.lease[:2], time.time() - 1)
     assert client.post("/api/projects", json={"name": "过期"}).status_code == 409
     session = store.sessions[result["session_id"]]
-    assert client.request("DELETE", f"/api/connection/sessions/{result['session_id']}", json={},
-                          headers={"Content-Type": "application/json"}).status_code == 204
+    store.revoke_session(result["session_id"])
     assert session.revoked.is_set()
     assert client.get("/api/projects").status_code == 401
 

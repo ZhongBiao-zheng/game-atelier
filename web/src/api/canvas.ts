@@ -1,5 +1,4 @@
 import { request, requestJson } from './http';
-import { mediaUrl } from '@/api/connection';
 import type { Job } from '@/schema/jobs';
 import type {
   CanvasAgentApprovalDecision,
@@ -325,16 +324,16 @@ export function canvasMediaUrl(
   displayWidth?: number,
 ): string {
   const base = `/api/canvas/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/media`;
-  if (displayWidth === undefined || displayWidth <= 0) return mediaUrl(base);
+  if (displayWidth === undefined || displayWidth <= 0) return base;
   const width = canvasThumbnailWidth(displayWidth);
-  return mediaUrl(width === null ? base : `${base}?w=${width}`);
+  return width === null ? base : `${base}?w=${width}`;
 }
 
 export function canvasDownloadUrl(
   projectId: string,
   versionId: string,
 ): string {
-  return mediaUrl(`/api/canvas/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/download`);
+  return `/api/canvas/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/download`;
 }
 
 export function runCanvasMediaOperation(

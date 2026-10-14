@@ -516,7 +516,7 @@ def post_clipboard_attempt(attempt: ClipboardAttempt) -> dict:
 
 
 @router.get("/raw")
-def get_raw_image(path: str, job_id: str | None = None, download: bool = False) -> FileResponse:
+def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
     """两条鉴权路径：
     - `job_id` 在场：以 job.output_paths / params 参考路径 / source_image 作为白名单
     - 否则只放行 .runtime/uploads/ 下的文件（画师刚上传，还没绑到 job 上时的 preview 用）
@@ -565,8 +565,7 @@ def get_raw_image(path: str, job_id: str | None = None, download: bool = False) 
         }
         if str(target) not in normalized_whitelist:
             raise HTTPException(403, detail="读图被拒：这个路径不在该 job 登记的产物列表里")
-        # 托管网站跨源访问本机，浏览器会忽略 <a download>；下载靠附件头。
-        return FileResponse(str(target), filename=target.name if download else None)
+        return FileResponse(str(target))
     uploads_dir = (_runtime() / "uploads").resolve()
     if not target.is_relative_to(uploads_dir) or target == uploads_dir:
         raise HTTPException(403, detail="读图被拒：不带 job_id 只能读取刚上传的参考文件")
@@ -2120,7 +2119,7 @@ def _gallery_job_ids_by_path() -> dict[str, str]:
 
 
 @router.get("/gallery/image")
-def gallery_image(path: str, download: bool = False) -> FileResponse:
+def gallery_image(path: str) -> FileResponse:
     """Serve gallery media from the explicit asset roots. Reject traversal."""
     root = _project_root()
     target = (root / path).resolve()
@@ -2156,8 +2155,7 @@ def gallery_image(path: str, download: bool = False) -> FileResponse:
         raise HTTPException(status_code=400, detail="path outside allowed roots")
     if not target.is_file():
         raise HTTPException(status_code=404)
-    # 托管网站跨源访问本机，浏览器会忽略 <a download>；下载靠附件头。
-    return FileResponse(target, filename=target.name if download else None)
+    return FileResponse(target)
 
 
 class _StudioJobCreate(BaseModel):

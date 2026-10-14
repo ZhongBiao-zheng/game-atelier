@@ -284,16 +284,6 @@ def test_gallery_image_endpoint_serves_valid_path(client, tmp_path):
     assert resp.status_code == 200
 
 
-def test_gallery_image_download_sets_attachment(client, tmp_path):
-    _make_image(tmp_path / "studio" / "job-x" / "v1.png")
-    inline = client.get("/api/gallery/image?path=studio/job-x/v1.png")
-    assert "content-disposition" not in inline.headers
-    resp = client.get("/api/gallery/image?path=studio/job-x/v1.png&download=1")
-    assert resp.status_code == 200
-    assert resp.headers["content-disposition"].startswith("attachment")
-    assert "v1.png" in resp.headers["content-disposition"]
-
-
 def test_gallery_image_endpoint_serves_studio(client, tmp_path):
     _make_image(tmp_path / "studio" / "job-x" / "v1.png")
     resp = client.get("/api/gallery/image?path=studio/job-x/v1.png")

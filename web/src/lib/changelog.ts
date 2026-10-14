@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.89.6',
+    date: '2026-10-14',
+    headline: '去掉网站版',
+    changes: [
+      { kind: 'fix', text: '网站版（在浏览器里打开线上地址再连本机）不再提供，设置里的「网站连接」也去掉了；请直接打开本机地址 http://127.0.0.1:5174 使用。' },
+    ],
+  },
+  {
     version: '5.89.5',
     date: '2026-10-14',
     headline: 'Agent 连接收进设置，一个开关',
