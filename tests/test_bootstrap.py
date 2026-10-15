@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 import shutil
@@ -32,12 +31,7 @@ def run_bootstrap(args, env_overrides=None):
 
 
 def _venv_signature() -> str:
-    """镜像 bootstrap._venv_signature：pyproject.toml + PLUGIN_DIR(子进程里 = REPO_ROOT)。"""
-    h = hashlib.sha256()
-    h.update((REPO_ROOT / "pyproject.toml").read_bytes())
-    h.update(b"\n")
-    h.update(str(REPO_ROOT).encode("utf-8"))
-    return h.hexdigest()
+    return _load_bootstrap_module()._venv_signature()
 
 
 def _make_fake_venv(data_root: Path, hash_matches: bool = True) -> None:
@@ -387,6 +381,8 @@ def test_venv_signature_changes_with_plugin_dir(tmp_path, monkeypatch):
     for d in (v_old, v_new):
         d.mkdir()
         (d / "pyproject.toml").write_bytes(same_pyproject)
+        (d / "uv.lock").write_text("version = 1\n")
+        (d / ".python-version").write_text("3.11\n")
 
     monkeypatch.setattr(mod, "PLUGIN_DIR", v_old)
     sig_old = mod._venv_signature()
@@ -397,6 +393,123 @@ def test_venv_signature_changes_with_plugin_dir(tmp_path, monkeypatch):
     # 幂等：同一 PLUGIN_DIR 重复调用必须稳定，否则每次 check 都误判要重建。
     monkeypatch.setattr(mod, "PLUGIN_DIR", v_old)
     assert mod._venv_signature() == sig_old
+
+
+@pytest.mark.parametrize("changed", ["pyproject.toml", "uv.lock", ".python-version"])
+def test_ensure_syncs_once_and_only_repeats_after_dependency_change(
+    tmp_path, monkeypatch, isolated_data_root, changed,
+):
+    mod = _load_bootstrap()
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    for name in ("pyproject.toml", "uv.lock", ".python-version"):
+        shutil.copy2(REPO_ROOT / name, plugin / name)
+    monkeypatch.setattr(mod, "PLUGIN_DIR", plugin)
+    monkeypatch.setattr(mod.shutil, "which", lambda name: "uv")
+    calls = []
+
+    def sync(cmd, **kwargs):
+        calls.append(cmd)
+        py = mod._venv_python(isolated_data_root)
+        py.parent.mkdir(parents=True, exist_ok=True)
+        py.touch()
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(mod.subprocess, "run", sync)
+    assert mod.ensure_venv() == 0
+    assert mod.ensure_venv() == 0
+    assert len(calls) == 1
+    # 普通源码变化走 editable 安装，不需要重新同步。
+    (plugin / "src").mkdir()
+    (plugin / "src" / "new_module.py").write_text("value = 1\n")
+    assert mod.ensure_venv() == 0
+    assert len(calls) == 1
+    with (plugin / changed).open("a", encoding="utf-8") as f:
+        f.write("\n")
+    assert mod.ensure_venv() == 0
+    assert len(calls) == 2
+
+
+def test_ensure_uses_locked_runtime_and_clears_foreign_virtual_env(monkeypatch, isolated_data_root):
+    mod = _load_bootstrap()
+    monkeypatch.setenv("VIRTUAL_ENV", "/foreign/.venv")
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", "/foreign/.venv")
+    monkeypatch.setattr(mod.shutil, "which", lambda name: "uv")
+
+    def sync(cmd, **kwargs):
+        assert cmd == ["uv", "sync", "--locked", "--no-dev", "--project", str(REPO_ROOT)]
+        assert "VIRTUAL_ENV" not in kwargs["env"]
+        assert kwargs["env"]["UV_PROJECT_ENVIRONMENT"] == str(isolated_data_root / ".venv")
+        assert kwargs["env"]["UV_PYTHON_INSTALL_MIRROR"]
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(mod.subprocess, "run", sync)
+    assert mod.ensure_venv() == 0
+
+
+def test_failed_sync_invalidates_marker_and_does_not_stop_server(monkeypatch, isolated_data_root):
+    mod = _load_bootstrap()
+    _make_fake_venv(isolated_data_root, hash_matches=False)
+    monkeypatch.setattr(mod.shutil, "which", lambda name: "uv")
+    calls = []
+
+    def fail(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1, "", "tls handshake eof")
+
+    monkeypatch.setattr(mod.subprocess, "run", fail)
+    monkeypatch.setattr(mod, "run_in_venv", lambda args: pytest.fail("must not stop service"))
+    assert mod.launch() == 3
+    assert not mod._venv_hash_file(isolated_data_root).exists()
+    assert mod.launch() == 3
+    assert len(calls) == 2
+
+
+def test_launch_reuses_same_environment_for_stop_and_start(monkeypatch, isolated_data_root):
+    mod = _load_bootstrap()
+    _make_fake_venv(isolated_data_root)
+    monkeypatch.setenv("VIRTUAL_ENV", "/foreign/.venv")
+    calls = []
+
+    def run(cmd, **kwargs):
+        assert cmd[0] == str(mod._venv_python(isolated_data_root))
+        assert kwargs["env"]["VIRTUAL_ENV"] == str(isolated_data_root / ".venv")
+        assert kwargs["env"]["UV_PROJECT_ENVIRONMENT"] == str(isolated_data_root / ".venv")
+        calls.append(cmd[1:])
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(mod.subprocess, "run", run)
+    for _ in range(2):
+        assert mod.launch() == 0
+    assert calls == [
+        ["-m", "viewer_server.server", "stop"],
+        ["-m", "viewer_server.server", "start", "--background"],
+    ] * 2
+
+
+def test_launch_initializes_default_data_root(tmp_path, monkeypatch):
+    mod = _load_bootstrap()
+    monkeypatch.delenv("GAME_ATELIER_DATA_ROOT", raising=False)
+    monkeypatch.setattr(mod, "global_config_file", lambda: tmp_path / "config" / "data-root")
+    monkeypatch.setattr(mod.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(mod, "ensure_venv", lambda **kwargs: 3)
+    assert mod.launch() == 3
+    assert mod.resolve_data_root() == tmp_path / "game-atelier"
+    assert (tmp_path / "game-atelier" / ".runtime").is_dir()
+
+
+def test_launch_does_not_start_after_stop_failure(monkeypatch, isolated_data_root):
+    mod = _load_bootstrap()
+    _make_fake_venv(isolated_data_root)
+    calls = []
+
+    def stop(args):
+        calls.append(args)
+        return 1
+
+    monkeypatch.setattr(mod, "run_in_venv", stop)
+    assert mod.launch() == 1
+    assert calls == [["-m", "viewer_server.server", "stop"]]
 
 
 def test_user_config_dir_matches_platformdirs_when_present():

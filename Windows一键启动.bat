@@ -4,6 +4,9 @@ setlocal enabledelayedexpansion
 set "PYTHONUTF8=1"
 set "GIT_TERMINAL_PROMPT=0"
 set "UV_HTTP_TIMEOUT=20"
+rem 不继承别的项目的虚拟环境；业务运行环境统一由 bootstrap 选择。
+set "VIRTUAL_ENV="
+set "UV_PROJECT_ENVIRONMENT="
 rem uv 找不到本机 Python 3.11+ 时要下载一份；默认源是 GitHub，国内基本下不动。
 if not defined UV_PYTHON_INSTALL_MIRROR set "UV_PYTHON_INSTALL_MIRROR=https://registry.npmmirror.com/-/binary/python-build-standalone"
 cd /d "%~dp0"
@@ -36,6 +39,8 @@ pause
 exit /b 1
 
 :uv_ready
+rem uv 可能刚装好、尚未进入当前窗口 PATH；bootstrap 也需要找到它。
+set "PATH=%USERPROFILE%\.local\bin;%PATH%"
 if /i "%~1"=="--skip-update" goto :update_done
 rem 更新逻辑在 scripts\self_update.py（与 Mac / Linux 共用）；退出码 10 = 已更新，重跑新版启动器。
 "!UV!" run --no-project python scripts\self_update.py
@@ -48,29 +53,13 @@ if exist "%~dp0install.ps1" (
     if errorlevel 1 (set "MSG=Skill 同步失败，可稍后运行 install.ps1" & call :warn)
 )
 
-if not exist ".venv\" (
-    echo 首次启动，安装依赖（约 1-2 分钟）...
-    "!UV!" sync
-    if errorlevel 1 (set "MSG=依赖安装失败，检查网络后重试" & call :err & pause & exit /b 1)
-) else (
-    echo 检查依赖...
-    "!UV!" sync --frozen
-    if errorlevel 1 (set "MSG=依赖未能更新（离线？），沿用现有环境" & call :warn)
-)
-echo.
-
-echo 停止旧实例...
-"!UV!" run --no-sync python src\viewer_server\server.py stop
-timeout /t 1 >nul
-
 if not exist "web\dist\index.html" (
     set "MSG=前端文件 web\dist 缺失，请双击「Windows一键修复.bat」" & call :err
     pause
     exit /b 1
 )
 
-echo 启动工坊...
-"!UV!" run --no-sync python src\viewer_server\server.py start --background
+"!UV!" run --no-project python scripts\bootstrap.py --launch
 if errorlevel 1 (
     echo.
     set "MSG=启动失败。原因见上方或数据目录 .runtime\server.log" & call :err
@@ -78,7 +67,7 @@ if errorlevel 1 (
     exit /b 1
 )
 echo.
-echo 已启动 http://127.0.0.1:5174/ ，本窗口可关闭。
+echo 工坊已启动，本窗口可关闭。
 timeout /t 2 >nul
 exit /b 0
 

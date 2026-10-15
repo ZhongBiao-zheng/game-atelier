@@ -57,6 +57,7 @@ from character_workflow.lib.schemas import (
     CanvasAudioNode,
     CanvasContentNodeData,
     CanvasImageNode,
+    CanvasImageEditOptions,
     CanvasInputConnection,
     CanvasJobContext,
     CanvasJobOutputOrigin,
@@ -1228,7 +1229,8 @@ def _commit_frozen_run(
     timestamp = _now()
     job_id = job_id or new_job_id()
     run_id = run_id or f"run-{secrets.token_hex(12)}"
-    edits_layer = mode == "image" and surface.id in current.layer_material_node_ids()
+    edits_layer = (mode == "image" and transaction_kind != "mask_edit"
+                   and surface.id in current.layer_material_node_ids())
     if edits_layer and canvas_node_has_pending_run(current, surface):
         raise CanvasRunCommandError("canvas_layer_material_busy", "这个图层素材正在生成，请稍后再试。")
     use_surface = (surface.type == "layer_stack" and job_params.layer_decomposition) or edits_layer or (
@@ -1688,10 +1690,19 @@ def submit_mask_edit_run(
     expected_revision: int,
     requested_count: int,
     mask_body: bytes,
+    options: CanvasImageEditOptions | None = None,
 ) -> tuple[Job, CanvasDocument]:
     """Freeze a user mask and its persisted image Draft into one recoverable Run."""
-    from character_workflow.lib.callers.openai_image import supports_image_mask
-    from character_workflow.lib.canvas_masks import normalize_canvas_mask
+    import io
+    from PIL import Image
+    from character_workflow.lib.callers import _effective_protocol
+    from character_workflow.lib.callers.image_edit import edit_transport, expanded_source
+    from character_workflow.lib.canvas_image_edits import edit_size_params, mj_source
+    from character_workflow.lib.canvas_masks import (
+        normalize_canvas_mask, _source_display_size, NormalizedCanvasMask,
+    )
+
+    options = options or CanvasImageEditOptions()
 
     if requested_count < 1 or requested_count > 4:
         raise CanvasRunCommandError(
@@ -1722,17 +1733,35 @@ def submit_mask_edit_run(
                     "图片节点当前没有可读取的项目内版本。",
                 )
             draft = _draft_for_node(surface)
+            if options.source_version_id and options.source_version_id != source.version_id:
+                raise ValueError("源图版本已经变化，请重新打开编辑器")
             if draft is None or draft.mode != "image":
                 raise CanvasRunCommandError(
                     "canvas_mask_draft_missing",
                     "请先填写局部编辑提示词并选择图片模型。",
                 )
+            if not draft.prompt.strip():
+                draft = draft.model_copy(update={"prompt": (
+                    "自然延展画面" if options.mode == "outpaint" else "自然修复选区内容"
+                )})
             key, model, kind = _resolve_key_and_model(draft)
-            if not supports_image_mask(key.provider, model.id, model.protocol):
+            transport = edit_transport(key.provider, model.id, _effective_protocol(key, model.id))
+            if not transport:
                 raise CanvasRunCommandError(
                     "canvas_media_capability_missing",
-                    "当前模型不支持局部蒙版编辑，请选择 GPT Image 兼容模型。",
+                    "当前模型不支持图片编辑，请选择兼容模型。",
                 )
+            edit = options.model_dump(exclude_none=True)
+            if transport == "mj":
+                native = mj_source(source)
+                if (not native or native["alias"] != key.alias or native["model"] != model.id
+                        or not options.custom_id):
+                    raise ValueError("MJ 编辑必须使用原任务所属渠道与可用动作")
+                if options.reference_node_id:
+                    raise ValueError("MJ 原生编辑不支持替换参考素材")
+                edit.update(native)
+            elif options.mode == "prepare":
+                raise ValueError("准备单图只适用于 MJ")
             normalized, job_params, effective_count = _normalized_params(
                 draft,
                 requested_count,
@@ -1755,6 +1784,16 @@ def submit_mask_edit_run(
                 version_id=source.version_id,
                 kind="image",
             )]
+            if options.reference_node_id:
+                reference = next((node for node in current.nodes
+                                  if node.id == options.reference_node_id), None)
+                if (not isinstance(reference, CanvasImageNode) or reference.id == surface.id
+                        or not reference.data.current_version_id):
+                    raise ValueError("替换参考素材不可用")
+                inputs.append(CanvasSnapshotInput(
+                    order=1, source="explicit_source", node_id=reference.id,
+                    version_id=reference.data.current_version_id, kind="image",
+                ))
             _validate_input_capabilities(model, kind, inputs, job_params, key.provider)
             final_prompt = _render_final_prompt(current, draft, inputs)
             media_paths = _input_paths(project_id, current, inputs)
@@ -1763,11 +1802,36 @@ def submit_mask_edit_run(
                     "canvas_mask_source_missing",
                     "源图片文件不存在，无法创建局部编辑。",
                 )
-            normalized_mask = normalize_canvas_mask(
-                Path(media_paths["image"][0]),
-                source,
-                mask_body,
-            )
+            source_path = Path(media_paths["image"][0])
+            width, height = _source_display_size(source_path, source)
+            if options.mode == "inpaint":
+                normalized_mask = normalize_canvas_mask(source_path, source, mask_body)
+            else:
+                if transport == "mj":
+                    mask = Image.new("L", (width, height), 255)
+                else:
+                    if options.width is None or options.height is None:
+                        raise ValueError("扩图需要目标宽高")
+                    _base, mask = expanded_source(source_path, edit)
+                    width, height = mask.size
+                buffer = io.BytesIO()
+                mask.save(buffer, format="PNG")
+                body = buffer.getvalue()
+                normalized_mask = NormalizedCanvasMask(
+                    body, width, height, hashlib.sha256(body).hexdigest(),
+                )
+            edit.update(source_version_id=source.version_id)
+            if transport != "mj":
+                size_params = edit_size_params(key, model.id, width, height)
+                job_params = job_params.model_copy(update={
+                    "ratio": None, "resolution": None, **size_params,
+                })
+                normalized.update(size_params)
+            else:
+                effective_count = 1 if options.mode == "prepare" else 4
+                job_params.n = effective_count
+            job_params.image_edit = edit
+            normalized["image_edit"] = edit
             mask_id = f"mask-{secrets.token_hex(12)}"
             version_id = f"version-{secrets.token_hex(12)}"
             staged_path = canvas_project_dir(project_id) / ".runtime" / "run-inputs" / f"{run_id}.png"
@@ -1812,7 +1876,7 @@ def submit_mask_edit_run(
                 job_params=job_params,
                 inputs=inputs,
                 requested_count=effective_count,
-                result_title="局部编辑",
+                result_title={"inpaint": "局部修改", "outpaint": "扩图", "prepare": "MJ 单图"}[options.mode],
                 result_draft=draft,
                 allow_surface_reuse=False,
                 transaction_kind="mask_edit",

@@ -479,18 +479,47 @@ export function submitCanvasLayerDecomposition(
   );
 }
 
+export interface CanvasImageEditOptions {
+  mode: 'inpaint' | 'outpaint' | 'prepare';
+  source_version_id: string;
+  width?: number;
+  height?: number;
+  x?: number;
+  y?: number;
+  reference_node_id?: string;
+  custom_id?: string;
+  zoom?: number;
+}
+
+export interface CanvasImageEditSource {
+  source_version_id: string;
+  mj: { alias: string; model: string; actions: Array<{
+    custom_id: string; kind: CanvasImageEditOptions['mode']; label: string;
+  }> } | null;
+  reason: string | null;
+}
+
+export function getCanvasImageEditSource(projectId: string, nodeId: string) {
+  return requestJson<CanvasImageEditSource>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(nodeId)}/image-edit`,
+    '读取图片编辑动作',
+  );
+}
+
 export function submitCanvasMaskEdit(
   projectId: string,
   surfaceNodeId: string,
   expectedRevision: number,
   requestedCount: number,
   mask: Blob,
+  options: CanvasImageEditOptions,
 ): Promise<CanvasRun> {
   const form = new FormData();
   form.append('surface_node_id', surfaceNodeId);
   form.append('expected_revision', String(expectedRevision));
   form.append('requested_count', String(requestedCount));
   form.append('mask_file', mask, 'mask.png');
+  form.append('edit_options', JSON.stringify(options));
   return requestJson<CanvasRun>(
     `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/mask-edit`,
     '提交局部编辑',

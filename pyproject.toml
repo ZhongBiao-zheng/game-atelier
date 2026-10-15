@@ -29,6 +29,12 @@ dependencies = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# 索引和 uv.lock 中的包文件一起走国内镜像，首次安装无需配置代理。
+[[tool.uv.index]]
+name = "tuna"
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
+default = true
+
 [tool.hatch.build.targets.wheel]
 packages = [
   "src/character_workflow",

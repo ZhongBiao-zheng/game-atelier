@@ -7,6 +7,33 @@ from .jobs import read_job
 from .schemas import CanvasJobOutputOrigin, CanvasMediaVersion
 
 
+def edit_size_params(key, model: str, width: int, height: int) -> dict:
+    from .image_size import normalize_image_size_params
+    from .image_size_catalog import image_size_options, is_nano_image_size_model
+
+    if key.provider == "openrouter" or is_nano_image_size_model(model):
+        ratios = [r for r in image_size_options(key.provider, key.base_url, model)["ratios"]
+                  if r != "auto" and ":" in r]
+        def value(r):
+            a, b = r.split(":")
+            return float(a) / float(b)
+        if not ratios:
+            raise ValueError("当前渠道未声明可用的编辑比例")
+        ratio = min(ratios, key=lambda r: abs(value(r) / (width / height) - 1))
+        if abs(value(ratio) / (width / height) - 1) > .02:
+            raise ValueError("当前模型不支持这个画框比例，请调整画框或切换模型")
+        params = {"size_mode": "ratio", "ratio": ratio, "size": ratio}
+    else:
+        params = {"size_mode": "custom", "size": f"{width}x{height}"}
+    normalized = normalize_image_size_params(key, model, params)
+    size = normalized.get("size", "")
+    if "x" in size:
+        a, b = map(int, size.split("x"))
+        if abs((a / b) / (width / height) - 1) > .02:
+            raise ValueError("当前模型无法匹配编辑画框比例，请调整画框或切换模型")
+    return normalized
+
+
 def mj_source(version: CanvasMediaVersion) -> dict | None:
     origin = version.origin
     if not isinstance(origin, CanvasJobOutputOrigin):

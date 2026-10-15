@@ -71,7 +71,7 @@ from character_workflow.lib.schemas import (
     CanvasReproduceResponse,
     CanvasLayerDecompositionCreate,
     CanvasPackageCommitRequest, CanvasPackageImportResponse,
-    CanvasMaskEditCreate, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
+    CanvasMaskEditCreate, CanvasImageEditOptions, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
     CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
     CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse,
@@ -2244,6 +2244,11 @@ def _create_user_job(
     params.provider_task_ids = None
     params.video_submission_attempts = None
     params.mask_image = None
+    params.image_edit = None
+    params.mj_submission_ids = None
+    params.mj_submit_uncertain = None
+    params.mj_edit_state = None
+    params.mj_outputs = None
     # 改写值与原值同类型（str / list[str]），model_copy 不需要重新校验。
     params = params.model_copy(update=_gate_browser_refs(params.model_dump()))
     if body.kind == JobKind.IMAGE:
@@ -3481,6 +3486,15 @@ def post_canvas_upscale_run(
     return CanvasRunResponse(job=job, document=document)
 
 
+@router.get("/canvas/projects/{project_id}/nodes/{node_id}/image-edit")
+async def get_canvas_image_edit_source(project_id: str, node_id: str) -> dict:
+    from character_workflow.lib.canvas_image_edits import editing_source
+    try:
+        return await run_in_threadpool(editing_source, project_id, node_id)
+    except (KeyError, ValueError) as error:
+        raise HTTPException(404, detail=str(error)) from error
+
+
 @router.post(
     "/canvas/projects/{project_id}/runs/mask-edit",
     response_model=CanvasRunResponse,
@@ -3493,6 +3507,7 @@ async def post_canvas_mask_edit(
     expected_revision: int = Form(...),
     requested_count: int = Form(1),
     mask_file: UploadFile = File(...),
+    edit_options: str = Form("{}"),
 ) -> CanvasRunResponse:
     from character_workflow.lib.canvas_masks import CanvasMaskError
     from character_workflow.lib.canvas_runs import CanvasRunCommandError, submit_mask_edit_run
@@ -3511,6 +3526,7 @@ async def post_canvas_mask_edit(
             payload.expected_revision,
             payload.requested_count,
             body,
+            CanvasImageEditOptions.model_validate_json(edit_options),
         )
     except ValidationError as error:
         raise HTTPException(422, detail=error.errors()) from error

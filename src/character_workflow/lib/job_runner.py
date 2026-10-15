@@ -590,7 +590,10 @@ def _run_once(
                 # Callers own provider-specific params; the runner only persists their mutation.
                 update_job_params(job.job_id, params)
 
-            paths = dispatch(
+            render = dispatch
+            if params.get("image_edit"):
+                from character_workflow.lib.callers.image_edit import render
+            paths = render(
                 prompt=_with_reference_numbering(job.prompt, params),
                 model=job.model,
                 alias=job.alias,
