@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { ArrowUp, BookmarkPlus, Box, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Building2, Video, X } from 'lucide-react';
 import { modelModality, type KeyView } from '@/api/keys';
 import { hasImageSizeSelection, imageSizeMode, imageSizeSummary, imageSizeError, normalizeImageSizeParams } from '@/lib/imageSizeMode';
+import { isAutoProvider, sizeContext } from '@/lib/modelRoutes';
 import { normalizeImagePixelSize } from '@/lib/studioSize';
 import { ImageSizeFields } from './ImageSizeFields';
 import { providerLabel } from '@/lib/providerLabels';
@@ -11,7 +12,6 @@ import { focusEmptyVariable, syncVariableInput, variableInput, variablePromptNod
 import { maxReferenceImages } from '@/lib/referenceLimits';
 import { imageFamily } from '@/lib/modelFamily';
 import {
-  imageControlCaps,
   MJ_IMAGES_PER_TASK,
   QUALITY_LABELS,
   type Quality,
@@ -576,12 +576,9 @@ export function PromptInput({
     ro.observe(el);
     return () => ro.disconnect();
   }, [updateScroll, isVideo, videoMode, model, providerAlias, providers, collapsed]);
-  // 能力四项按模型族判（provider 只决定端点/协议，openrouter 另外改 size 语义）。
-  const caps = imageControlCaps(
-    selectedModel?.id,
-    provider?.provider,
-    provider?.base_url,
-  );
+  // 能力四项按模型族判（provider 只决定端点/协议，openrouter 另外改 size 语义）；「自动」取成员交集。
+  const size = sizeContext(providers, provider, selectedModel?.id ?? '');
+  const caps = size.caps;
   const sizeModelRef = useRef<string | null>(null);
   useEffect(() => {
     if (isVideo || !selectedModel || !provider) return;
@@ -589,15 +586,16 @@ export function PromptInput({
     const changedModel = sizeModelRef.current !== null && sizeModelRef.current !== identity;
     const initialize = sizeModelRef.current === null;
     sizeModelRef.current = identity;
-    const normalized = normalizeImageSizeParams(selectedModel.id, provider.provider, provider.base_url, sizeParams);
+    const context = sizeContext(providers, provider, selectedModel.id);
+    const normalized = normalizeImageSizeParams(context.modelId, context.provider, context.baseUrl, sizeParams, context.caps);
     const modeChanged = hasImageSizeSelection(sizeParams) && imageSizeMode(normalized) !== imageSizeMode(sizeParams);
-    if (!modeChanged && (changedModel || initialize) && imageSizeMode(normalized) === 'custom' && !imageSizeError(normalized, selectedModel.id)) {
-      const size = normalizeImagePixelSize(normalized.size!, selectedModel.id, provider.base_url);
-      normalized.size = size;
-      normalized.custom_size = size;
+    if (!modeChanged && (changedModel || initialize) && imageSizeMode(normalized) === 'custom' && !imageSizeError(normalized, context.modelId)) {
+      const pixels = normalizeImagePixelSize(normalized.size!, context.modelId, context.baseUrl);
+      normalized.size = pixels;
+      normalized.custom_size = pixels;
     }
     if (JSON.stringify(normalized) !== JSON.stringify(sizeParams)) onSizeParamsChange?.(normalized);
-  }, [isVideo, selectedModel, provider, sizeParams, onSizeParamsChange]);
+  }, [isVideo, selectedModel, provider, providers, sizeParams, onSizeParamsChange]);
   const sizeControlDetail = caps.showResolution && imageSizeMode(sizeParams) === 'ratio'
     ? (sizeParams.resolution ?? (caps.sizeKind === 'ratio' ? null : '2K'))
     : caps.qualities?.length
@@ -1155,7 +1153,7 @@ export function PromptInput({
                     <Building2 size={20} aria-hidden />
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-medium">{providerName(item)}</span>
-                      <span className="block truncate text-xs text-muted-foreground">{item.alias} · {item.models.length} models</span>
+                      <span className="block truncate text-xs text-muted-foreground">{isAutoProvider(item) ? '' : `${item.alias} · `}{item.models.length} models</span>
                     </span>
                   </button>
                 ))}
@@ -1197,7 +1195,7 @@ export function PromptInput({
                     <Box size={22} aria-hidden />
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-medium">{item.name}</span>
-                      <span className="block truncate text-xs text-muted-foreground">{item.id}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{item.members ? item.members.map(member => member.alias).join(' · ') : item.id}</span>
                     </span>
                   </button>
                 ))}
@@ -1231,7 +1229,7 @@ export function PromptInput({
               className="w-[320px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-card p-3"
             >
                 <div className="space-y-4">
-                  <ImageSizeFields caps={caps} model={selectedModel?.id ?? ''} baseUrl={provider?.base_url} params={sizeParams} onPatch={patch => onSizeParamsChange?.(patch)} />
+                  <ImageSizeFields caps={caps} model={size.modelId} baseUrl={size.baseUrl} params={sizeParams} onPatch={patch => onSizeParamsChange?.(patch)} />
 
                   {caps.qualities && (
                     <section className="w-[296px]">

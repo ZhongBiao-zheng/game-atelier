@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.90.0',
+    date: '2026-10-15',
+    headline: '创作台可以按模型自动选供应商',
+    changes: [
+      { kind: 'feat', text: '厂商列表第一项「自动」：只选模型，同一模型挂在多家时按设定顺序选供应商；仍可选具体厂商。' },
+      { kind: 'feat', text: '选「自动」时尺寸、质量只显示各家都支持的选项。' },
+    ],
+  },
+  {
     version: '5.89.9',
     date: '2026-10-15',
     headline: '音频波形两端补齐',

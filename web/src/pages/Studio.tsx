@@ -7,6 +7,7 @@ import { ChevronsDown, Library } from 'lucide-react';
 import { createStudioJob, getStudioJob, listStudioJobs, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
 import { apiError } from '@/api/http';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
+import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
 import { PromptInput } from '@/components/studio/PromptInput';
 import {
@@ -30,6 +31,7 @@ import { hasSrefCode, MJ_DEFAULTS, mjParamsToJob, type MjParams } from '@/lib/mj
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
+import { isAutoProvider, resolveChannel, sizeContext, withAutoProvider } from '@/lib/modelRoutes';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { StudioCompact } from './StudioCompact';
@@ -118,10 +120,14 @@ function StudioFull() {
   const [persistedJobs, setPersistedJobs] = useState<Job[]>([]);
   const [pending, setPending] = useState(false);
   const [keys, setKeys] = useState<KeyView[]>([]);
+  const [routes, setRoutes] = useState<ModelRoute[]>([]);
+  // 厂商列表 =「自动」+ 真实 KEY；选择、能力、收敛都在这份列表上做，实际渠道用 resolveChannel 取。
+  const providers = useMemo(() => withAutoProvider(keys, routes), [keys, routes]);
   // 公告「快速添加」等别处改了密钥的模型列表：只刷新列表，不动当前选中的供应商 / 模型。
   useEffect(() => {
     const refresh = () => {
       void listKeys().then(resp => setKeys(resp.keys.filter(key => key.models.length > 0))).catch(() => undefined);
+      void listModelRoutes().then(setRoutes).catch(() => undefined);
     };
     window.addEventListener(KEYS_CHANGED_EVENT, refresh);
     return () => window.removeEventListener(KEYS_CHANGED_EVENT, refresh);
@@ -226,24 +232,26 @@ function StudioFull() {
   }, [assetPanelOpen]);
   // 重新编辑会异步拉取历史参考素材；只允许最后一次点击的结果回填，避免慢请求覆盖新选择。
   const reEditSequence = useRef(0);
-  const selectedModelObj = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
-  const videoCaps = videoControlCaps(model, selectedModelObj?.protocol);
+  const channel = resolveChannel(keys, providers.find((k) => k.alias === providerAlias), model);
+  const selectedModelObj = channel.key?.models.find((m) => m.id === channel.modelId);
+  const videoCaps = videoControlCaps(channel.modelId, selectedModelObj?.protocol);
   // 切换生成类型 / keys 加载时把 alias、model 收敛到本类模型（规则见 convergeModelSelection）：
   // 界面显示的模型就是提交的模型；复刻缺模型（model 为空）时只换 key，模型位留空。
   useEffect(() => {
-    const next = convergeModelSelection(keys, kind, providerAlias, model);
+    const next = convergeModelSelection(providers, kind, providerAlias, model);
     if (!next) return;
     setProviderAlias(next.alias);
     setModel(next.model);
     // 仅在切换类型 / keys 加载时触发；alias / model 不入依赖，避免用户改选时被反复抢回成死循环。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, keys]);
+  }, [kind, providers]);
   // 切换视频模型族时把超出 caps 的选择拉回合法值（如 seedance 21:9 → kling 没有；kling 档位 ↔ seedance 无档位）。
   useEffect(() => {
     // 模型未定（复刻缺模型）时不按兜底 caps 钳制：配方的时长 / 分辨率 / 比例留到用户选了模型再按它收。
     if (kind !== 'video' || !model) return;
-    const selModel = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
-    const caps = videoControlCaps(model, selModel?.protocol);
+    const selected = resolveChannel(keys, providers.find((k) => k.alias === providerAlias), model);
+    const selModel = selected.key?.models.find((m) => m.id === selected.modelId);
+    const caps = videoControlCaps(selected.modelId, selModel?.protocol);
     if (!caps.modes.includes(videoMode)) setVideoMode(caps.modes[0]);
     if (caps.ratios.length > 0 && !caps.ratios.includes(videoRatio)) setVideoRatio(caps.ratios[0]);
     if (caps.durations.length > 0 && !caps.durations.includes(duration)) setDuration(caps.durations[0]);
@@ -251,13 +259,13 @@ function StudioFull() {
       setVideoResolution(caps.resolutions[0]);
     }
     if (caps.qualities && !caps.qualities.includes(videoQuality)) setVideoQuality(caps.qualities[0]);
-  }, [kind, keys, providerAlias, model, videoMode, videoRatio, duration, videoResolution, videoQuality]);
+  }, [kind, keys, providers, providerAlias, model, videoMode, videoRatio, duration, videoResolution, videoQuality]);
   const handleSizeParamsChange = useCallback((patch: JobParams) => {
     setSizeParams(previous => {
-      const selected = keys.find(key => key.alias === providerAlias);
-      return normalizeImageSizeParams(model, selected?.provider, selected?.base_url, { ...previous, ...patch });
+      const size = sizeContext(providers, providers.find(key => key.alias === providerAlias), model);
+      return normalizeImageSizeParams(size.modelId, size.provider, size.baseUrl, { ...previous, ...patch }, size.caps);
     });
-  }, [keys, providerAlias, model]);
+  }, [providers, providerAlias, model]);
 
   // 点击历史记录里的参考图 → 把这批参考图（服务器路径）拉回成 File[]，整组塞进输入框复用出图。
   const handleReuseReferences = useCallback(async (config: RoundConfig, jobId?: string) => {
@@ -434,18 +442,21 @@ function StudioFull() {
           setPersistedJobs([]);
         }
       });
-    listKeys()
-      .then((resp) => {
+    // 路由列表读失败只是没有「自动」项，不影响按 KEY 选模型。
+    Promise.all([listKeys(), listModelRoutes().catch(() => [] as ModelRoute[])])
+      .then(([resp, loadedRoutes]) => {
         if (cancelled) return;
         const usable = resp.keys.filter((key) => key.models.length > 0);
         setKeys(usable);
-        // 优先恢复上次保存的供应商/模型（校验仍存在），否则回落到第一个可用 key。
+        setRoutes(loadedRoutes);
+        const choices = withAutoProvider(usable, loadedRoutes);
+        // 优先恢复上次保存的供应商/模型（校验仍存在），否则回落到第一项（有路由时是「自动」）。
         const wantedAlias = draft?.providerAlias || saved.providerAlias;
         const wantedModel = draft?.model || saved.model;
         const savedKey = wantedAlias
-          ? usable.find((key) => key.alias === wantedAlias)
+          ? choices.find((key) => key.alias === wantedAlias)
           : undefined;
-        const selected = savedKey ?? usable[0];
+        const selected = savedKey ?? choices[0];
         setProviderAlias(selected?.alias ?? '');
         const savedModelValid = wantedModel && selected?.models.some((m) => m.id === wantedModel);
         // 没有可恢复的模型时取本类第一个；该 key 没有本类模型就先占一个，交给收敛 effect 换 key。
@@ -483,11 +494,11 @@ function StudioFull() {
   useEffect(() => {
     setRounds((items) =>
       mergePersistedRounds(
-        items.map((item) => hydrateRoundModelName(item, keys)),
+        items.map((item) => hydrateRoundModelName(item, providers)),
         studioJobsToRounds(persistedJobs, keys),
       ),
     );
-  }, [keys, persistedJobs]);
+  }, [keys, providers, persistedJobs]);
 
   const onSubmit = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
     const wantVideo = overrideConfig ? overrideConfig.kind === 'video' : kind === 'video';
@@ -497,14 +508,13 @@ function StudioFull() {
     }
     const effectiveAlias = overrideConfig?.alias ?? providerAlias;
     const effectiveModel = overrideConfig?.model ?? model;
-    const selectedKey = keys.find((item) => item.alias === effectiveAlias);
-    const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
+    const selectedKey = providers.find((item) => item.alias === effectiveAlias);
+    // 「自动」按组内第一个成员归一尺寸、估价；能力取全部成员的交集。
+    const channel = resolveChannel(keys, selectedKey, effectiveModel);
+    const size = sizeContext(providers, selectedKey, effectiveModel);
+    const effectiveProvider = channel.key?.provider ?? overrideConfig?.provider;
     // 能力按模型族判；provider 只在 openrouter 上改 size 语义（比例串而非像素）。
-    const caps = imageControlCaps(
-      effectiveModel,
-      effectiveProvider,
-      selectedKey?.base_url,
-    );
+    const caps = selectedKey ? size.caps : imageControlCaps(effectiveModel, effectiveProvider, undefined);
     // MJ 一次 imagine 固定回 4 张方案，张数不由画师定（见 MJ_IMAGES_PER_TASK）。
     const effectiveCount = caps.family === 'midjourney'
       ? MJ_IMAGES_PER_TASK
@@ -512,7 +522,7 @@ function StudioFull() {
     const rawSizeParams: JobParams = overrideConfig
       ? { size_mode: overrideConfig.sizeMode ?? 'ratio', size: overrideConfig.size, ratio: overrideConfig.ratio, resolution: overrideConfig.resolution }
       : sizeParams;
-    const preparedSize = prepareImageSizeSubmission(effectiveModel, effectiveProvider, selectedKey?.base_url, rawSizeParams);
+    const preparedSize = prepareImageSizeSubmission(size.modelId, effectiveProvider, size.baseUrl, rawSizeParams, caps);
     if (preparedSize.error) {
       alert(preparedSize.error);
       return;
@@ -597,8 +607,8 @@ function StudioFull() {
         : {}),
     };
     const estimatedCost = estimateGenerationCostForSubmission(
-      selectedKey,
-      effectiveModel,
+      channel.key,
+      channel.modelId,
       'image',
       jobParams,
     );
@@ -615,7 +625,7 @@ function StudioFull() {
       job = await createStudioJob({
         prompt,
         ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
-        alias: effectiveAlias ?? undefined,
+        alias: isAutoProvider({ alias: effectiveAlias }) ? undefined : effectiveAlias ?? undefined,
         model: effectiveModel,
         params: jobParams,
       });
@@ -647,9 +657,9 @@ function StudioFull() {
   const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
     // 切到视频后 PromptInput 只是按模型分类过滤显示，父级 providerAlias/model 不一定已是视频 key——这里收敛。
     const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
-    const videoKeys = keys.filter((item) => videoModelsOf(item).length > 0);
+    const videoKeys = providers.filter((item) => videoModelsOf(item).length > 0);
     const selectedKey =
-      (overrideConfig?.alias ? keys.find((item) => item.alias === overrideConfig.alias) : undefined)
+      (overrideConfig?.alias ? providers.find((item) => item.alias === overrideConfig.alias) : undefined)
       ?? videoKeys.find((item) => item.alias === providerAlias)
       ?? videoKeys[0];
     const selectedVideoModels = selectedKey ? videoModelsOf(selectedKey) : [];
@@ -657,10 +667,11 @@ function StudioFull() {
     const effectiveModel = overrideConfig?.model
       ?? (selectedVideoModels.some((m) => m.id === model) ? model : selectedVideoModels[0]?.id)
       ?? model;
-    const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
+    const channel = resolveChannel(keys, selectedKey, effectiveModel);
+    const effectiveProvider = channel.key?.provider ?? overrideConfig?.provider;
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
     // 协议由后端按模型 id/供应商自动判定（read_keys_db 回填）；前端只在已知时用它精化 caps。
-    const effectiveCaps = videoControlCaps(effectiveModel, selectedModel?.protocol);
+    const effectiveCaps = videoControlCaps(channel.modelId, selectedModel?.protocol);
 
     setPending(true);
     // 视频/音频参考图复用通用文件上传端点（Task 1 已放开 video/audio）。override 携带的已是服务器路径，直接复用。
@@ -737,8 +748,8 @@ function StudioFull() {
         : {}),
     };
     const estimatedCost = estimateGenerationCostForSubmission(
-      selectedKey,
-      effectiveModel,
+      channel.key,
+      channel.modelId,
       'video',
       videoParams,
     );
@@ -775,7 +786,7 @@ function StudioFull() {
       job = await createStudioJob({
         prompt,
         ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
-        alias: effectiveAlias ?? undefined,
+        alias: isAutoProvider({ alias: effectiveAlias }) ? undefined : effectiveAlias ?? undefined,
         model: effectiveModel,
         params: videoParams,
         kind: 'video',
@@ -928,7 +939,7 @@ function StudioFull() {
             setAssetPanelOpen(true);
             setAssetSaveRequest({ requestId: crypto.randomUUID(), kind: 'media', file });
           }}
-          providers={keys}
+          providers={providers}
           providerAlias={providerAlias}
           model={model}
           sizeParams={sizeParams}

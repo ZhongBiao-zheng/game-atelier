@@ -60,7 +60,7 @@ def test_single_provider_models_are_routes_too(isolated_data_root):
 def test_video_routes_with_different_protocols_stay_apart(isolated_data_root):
     _seed()
     ids = {route.id for route in model_routes.list_routes("video")}
-    assert ids == {"openrouter:seedance-2-0", "seedance:seedance-2-0"}
+    assert ids == {"openrouter:seedance-2.0", "seedance:seedance-2.0"}
 
 
 def test_saved_order_wins_and_new_members_go_last(isolated_data_root):

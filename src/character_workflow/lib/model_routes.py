@@ -1,8 +1,8 @@
 """模型路由：同一模型的多个供应商成员组成路由组，选「自动」时按组内顺序解析 KEY。
 
-成员 = 某个 KEY 下的某个模型。路由 id 取 `normalized_model_id`（去厂商前缀、小写、
-`_` / `.` 归一为 `-`），所以 OpenRouter 的 `openai/gpt-image-2` 与 Tuzi 的 `gpt-image-2`
-是同一组。视频模型的参数随协议变化，协议不同的成员不进同一组：路由 id 前缀协议名。
+成员 = 某个 KEY 下的某个模型。路由 id = 去掉厂商前缀后转小写，所以 OpenRouter 的
+`openai/gpt-image-2` 与 Tuzi 的 `gpt-image-2` 是同一组。只做这两步，路由 id 与无前缀渠道的
+模型 id 保持一致，前端按模型 id 查的能力 / 价目表可以直接用。视频模型的参数随协议变化，协议不同的成员不进同一组：路由 id 前缀协议名。
 图片的能力族由模型 id 决定，同一路由 id 必然同族，不需要额外区分。
 
 组内默认顺序：`default_alias` 第一，其余按 keys.json 顺序；`model_order` 只存调整过的组。
@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from character_workflow.lib.callers.openai_image import normalized_model_id
 from character_workflow.lib.keys import (
     KeysDB,
     KeySpec,
@@ -56,7 +55,7 @@ class ModelRoute:
 
 
 def route_id(model: ModelSpec, key: KeySpec) -> str:
-    base = normalized_model_id(model.id)
+    base = model.id.rsplit("/", 1)[-1].lower()
     if model_modality(model, key) == "video" and model.protocol:
         return f"{model.protocol}:{base}"
     return base
