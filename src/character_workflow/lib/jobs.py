@@ -338,6 +338,7 @@ def clone_job_for_retry(job_id: str) -> Job:
         "mj_submit_uncertain": None,
         "mj_outputs": None,
         "mj_edit_state": None,
+        "regional_edit": None,
         # 「自动」重试从组内顺序重新开始，不沿用上一单已经换掉的供应商。
         "route_tried": None,
     })

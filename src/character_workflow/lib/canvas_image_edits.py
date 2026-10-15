@@ -7,6 +7,63 @@ from .jobs import read_job
 from .schemas import CanvasJobOutputOrigin, CanvasMediaVersion
 
 
+def regional_plan(mask_body, key, model, options):
+    """One planner for preview and paid submission; no browser-supplied crop geometry."""
+    import hashlib
+    import io
+    import json
+    from PIL import Image
+    from .regional_image_edit import plan_regions
+
+    with Image.open(io.BytesIO(mask_body)) as mask:
+        regions = plan_regions(mask, key, model, context=options.context,
+                               feather=options.feather, groups=options.groups)
+    descriptors = [region.descriptor() for region in regions]
+    fingerprint = json.dumps({"source": options.source_version_id, "alias": key.alias,
+                              "model": model, "regions": descriptors}, sort_keys=True).encode()
+    plan_id = hashlib.sha256(mask_body + fingerprint).hexdigest()
+    if options.plan_id and options.plan_id != plan_id:
+        raise ValueError("区域规划已变化，请确认最新预览后生成")
+    if set(options.region_prompts) - {r.id for r in regions}:
+        raise ValueError("区域提示词对应的分组已变化，请重新确认")
+    return plan_id, regions
+
+
+def preview_regional_edit(project_id, node_id, alias, model, body, options):
+    import base64
+    import io
+    from PIL import Image
+    from .canvas_projects import read_canvas_document, canvas_project_dir
+    from .canvas_masks import normalize_canvas_mask
+    from .keys import find_by_alias
+    from .callers.image_edit import edit_transport
+    from .callers.openai_image import _effective_image_protocol
+
+    document = read_canvas_document(project_id)
+    node = next((n for n in document.nodes if n.id == node_id), None)
+    version = document.content_versions.get(getattr(getattr(node, "data", None),
+                                                     "current_version_id", None))
+    if (not isinstance(version, CanvasMediaVersion) or version.kind != "image"
+            or version.version_id != options.source_version_id):
+        raise ValueError("源图版本已经变化，请重新打开编辑器")
+    key = find_by_alias(alias)
+    if (not key or not any(m.id == model for m in key.models)
+            or edit_transport(key.provider, model, _effective_image_protocol(key, model))
+            not in {"mask", "guide"} or options.mode != "inpaint"):
+        raise ValueError("请选择可用的通用编辑模型")
+    mask = normalize_canvas_mask(canvas_project_dir(project_id) / version.path, version, body)
+    plan_id, regions = regional_plan(mask.body, key, model, options)
+    result = []
+    for region in regions:
+        overlay = Image.new("RGBA", region.weight.size, (212, 165, 116, 0))
+        overlay.putalpha(region.weight.point(lambda p: round(p * .45)))
+        buffer = io.BytesIO()
+        overlay.save(buffer, format="PNG")
+        result.append({**region.descriptor(), "preview": "data:image/png;base64," +
+                       base64.b64encode(buffer.getvalue()).decode()})
+    return {"plan_id": plan_id, "regions": result}
+
+
 def has_resumable_mj_task(job) -> bool:
     from .callers.openai_image import image_family
     if image_family(job.model) != "midjourney":

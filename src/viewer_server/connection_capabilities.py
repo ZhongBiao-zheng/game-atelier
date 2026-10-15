@@ -148,6 +148,8 @@ POST /api/canvas/projects/{project_id}/runs/reverse-prompt
 POST /api/canvas/projects/{project_id}/runs/angle
 POST /api/canvas/projects/{project_id}/runs/upscale
 POST /api/canvas/projects/{project_id}/runs/mask-edit
+POST /api/canvas/projects/{project_id}/nodes/{node_id}/edit-plan
+POST /api/canvas/projects/{project_id}/runs/{run_id}/resume-regions
 POST /api/canvas/projects/{project_id}/runs/layer-decomposition
 GET /api/canvas/projects/{project_id}/batch-runs
 POST /api/canvas/projects/{project_id}/batch-runs/prepare

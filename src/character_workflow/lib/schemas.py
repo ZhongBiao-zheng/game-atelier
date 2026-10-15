@@ -165,6 +165,7 @@ class JobParams(BaseModel):
     # Canvas 局部编辑专用：服务端从不可变 mask Content Version 解析，浏览器不能传路径。
     mask_image: str | None = None
     image_edit: dict[str, Any] | None = None
+    regional_edit: dict[str, Any] | None = None
     mj_submission_ids: list[str] | None = None
     mj_submit_uncertain: bool | None = None
     mj_outputs: list[dict[str, Any]] | None = None
@@ -1673,6 +1674,18 @@ class CanvasImageEditOptions(BaseModel):
     reference_node_id: str | None = Field(default=None, max_length=120)
     custom_id: str | None = Field(default=None, max_length=500)
     zoom: float = Field(default=1.5, ge=1, le=2)
+    context: float = Field(default=.25, ge=0, le=2)
+    feather: int | None = Field(default=None, ge=0, le=32)
+    groups: list[list[int]] | None = Field(default=None, max_length=16)
+    region_prompts: dict[str, str] = Field(default_factory=dict, max_length=16)
+    plan_id: str | None = Field(default=None, max_length=64)
+
+    @field_validator("region_prompts")
+    @classmethod
+    def validate_region_prompts(cls, value):
+        if any(len(k) > 512 or len(v) > 10000 for k, v in value.items()):
+            raise ValueError("区域提示词过长")
+        return value
 
 
 class CanvasMaskEditCreate(BaseModel):

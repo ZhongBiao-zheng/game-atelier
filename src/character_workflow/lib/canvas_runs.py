@@ -1824,7 +1824,23 @@ def submit_mask_edit_run(
                     body, width, height, hashlib.sha256(body).hexdigest(),
                 )
             edit.update(source_version_id=source.version_id)
-            if transport != "mj":
+            if transport != "mj" and options.mode == "inpaint":
+                from .canvas_image_edits import regional_plan
+                plan_id, regions = regional_plan(normalized_mask.body, key, model.id, options)
+                edit.update(plan_id=plan_id, regions=[r.descriptor() for r in regions])
+                job_params.regional_edit = {"tasks": [
+                    {"region_id": r.id, "candidate": candidate, "status": "pending"}
+                    for candidate in range(effective_count) for r in regions
+                ]}
+                # The first crop supplies the neutral draft size; each actual call uses its own.
+                size_params = regions[0].params
+                job_params = job_params.model_copy(update={
+                    "ratio": None, "resolution": None, **size_params,
+                })
+                for field in ("ratio", "resolution", "custom_size"):
+                    normalized.pop(field, None)
+                normalized.update(size_params)
+            elif transport != "mj":
                 size_params = edit_size_params(key, model.id, width, height)
                 job_params = job_params.model_copy(update={
                     "ratio": None, "resolution": None, **size_params,
@@ -2421,6 +2437,61 @@ def resume_mj_edit_run(project_id: str, run_id: str, expected_revision: int) -> 
             return updated_job, updated_document
 
 
+def resume_regional_edit_run(project_id: str, run_id: str,
+                             expected_revision: int) -> tuple[Job, CanvasDocument]:
+    """Explicitly retry failed crops; retain successful patches and known provider orders."""
+    from .callers.tuzi_async import TASK_PROTOCOL
+    original = _job_for_run(project_id, run_id)
+    with file_lock(canvas_project_lock_path(project_id)):
+        recover_canvas_transactions_unlocked(project_id)
+        current = _read_document_unlocked(project_id)
+        if current.revision != expected_revision:
+            raise RuntimeError(f"revision_conflict:{current.revision}")
+        with job_lock(original.job_id):
+            job = read_job(original.job_id)
+            context = job.canvas_run
+            if (job.status not in {JobStatus.PARTIAL, JobStatus.FAILED} or not context
+                    or not job.params.regional_edit or job.cancel_requested_at):
+                raise ValueError("这个任务没有可继续的区域")
+            result = next((n for n in current.nodes if n.id == context.result_node_id), None)
+            previous_versions = {c.version_id for c in context.candidates if c.version_id}
+            if (not isinstance(result, CanvasImageNode) or canvas_node_has_pending_run(current, result)
+                    or (result.data.current_version_id
+                        and result.data.current_version_id not in previous_versions)):
+                raise ValueError("结果节点已删除、更换内容或正在生成，不能继续")
+            params = job.params.model_copy(deep=True)
+            tasks = params.regional_edit["tasks"]
+            for task in tasks:
+                provider = task.get("provider") or {}
+                if task["status"] == "running":
+                    task["status"] = ("paused" if provider.get("provider_task_ids") and
+                                      provider.get("provider_task_protocol") == TASK_PROTOCOL
+                                      else "uncertain")
+                if task["status"] == "failed":
+                    task.update(status="pending", provider={}, error=None,
+                                past_cost_usd=task.get("past_cost_usd", 0) +
+                                task.pop("cost_usd", 0))
+            if not any(t["status"] in {"pending", "paused"} for t in tasks):
+                raise ValueError("剩余区域提交结果未确认，请先核对厂商订单；未重复下单")
+            updated_job = job.model_copy(update={
+                "status": JobStatus.PENDING, "params": params, "output_paths": [], "error": None,
+                "completed_at": None, "progress_phase": None,
+                "canvas_run": context.model_copy(update={"candidates": [
+                    c.model_copy(update={"status": "pending", "version_id": None, "error": None})
+                    for c in context.candidates
+                ]}),
+            })
+            updated_document = current.model_copy(update={
+                "revision": current.revision + 1, "updated_at": _now(),
+                "nodes": [n.model_copy(update={"data": n.data.model_copy(update={
+                    "active_run_id": run_id,
+                })}) if n.id == result.id else n for n in current.nodes],
+            })
+            _commit_transaction_unlocked(project_id, run_id, "resume_regions", current.revision,
+                                         updated_job, updated_document, job_locked=True)
+            return updated_job, updated_document
+
+
 def request_canvas_run_cancel(project_id: str, run_id: str) -> Job:
     """Persist an idempotent stop request without pretending the provider already stopped."""
     original = _job_for_run(project_id, run_id)
@@ -2607,7 +2678,8 @@ def _candidate_aggregate(
 
 def _uses_incremental_candidates(job: Job) -> bool:
     context = job.canvas_run
-    if context is None or len(context.candidates) <= 1 or job.kind != JobKind.IMAGE:
+    if (context is None or len(context.candidates) <= 1 or job.kind != JobKind.IMAGE
+            or job.params.regional_edit):
         return False
     from character_workflow.lib.callers.openai_image import image_family
 
@@ -3150,10 +3222,12 @@ def _finalize_canvas_run_under_locks(
         })
         return _release_result_node(project_id, current, context, terminal)
 
-    partial = any(candidate.status != "succeeded" for candidate in candidates)
+    regional_partial = bool((job.params.regional_edit or {}).get("partial"))
+    partial = regional_partial or any(candidate.status != "succeeded" for candidate in candidates)
     updated_job = job.model_copy(update={
         "status": JobStatus.PARTIAL if partial else JobStatus.DONE,
-        "error": "部分候选没有生成成功" if partial else None,
+        "error": ("部分区域未完成，未完成处保留原图" if regional_partial else
+                  "部分候选没有生成成功" if partial else None),
         "progress_phase": None,
         "completed_at": job.completed_at or _now(),
         "canvas_run": context.model_copy(update={"candidates": candidates})

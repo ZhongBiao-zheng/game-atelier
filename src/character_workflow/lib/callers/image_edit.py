@@ -71,6 +71,11 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path,
     from .openai_image import _effective_image_protocol
 
     options = params["image_edit"]
+    if params.get("regional_edit"):
+        from .regional_edit import render as render_regions
+        return render_regions(prompt=prompt, model=model, alias=alias, output_dir=output_dir,
+                              params=params, **kwargs)
+    kwargs.pop("durable_dir", None)
     key = keys.find_by_alias(alias)
     if key is None:
         raise ValueError("编辑模型的密钥已经不存在")
