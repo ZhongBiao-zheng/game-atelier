@@ -40,6 +40,12 @@ OpenRouter出站仍使用aspect_ratio冒号。OpenRouter新增分辨率档位默
 VIP、固定1K等别名不由基础型号推断能力。Seedream/MJ/未知渠道暂不展示AUTO。
 AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单或有依据的固定单价。
 
+### 模型路由（5.90.0）
+
+- `GET /api/models` → `{models: [{id, name, modality, members: [{alias, provider, base_url, model_id, name, protocol}]}]}`；`members` 按出图顺序，第一个就是「自动」实际使用的。
+- `PUT /api/models/order`，body `{modality, id, aliases}`：`aliases` 必须恰好是该组现有成员的一个排列，否则 422；组不存在 404。属管理权限。
+- 创作台 `POST /api/studio/jobs`、画布草稿 / 生成偏好 `selection`、Agent `CanvasAgentModelRef`、工坊 `prepare_generation`：`alias` 为空即「自动」，`model` 为路由 id；Job 与运行快照里的 `alias` 始终是实际使用的 KEY。
+
 ### 图层栈显示顺序（5.44.0）
 
 `layer_stack.data.base_z_index` 默认 0，背景与 `layers[].z_index` 共用 0–16 范围；存在背景时所有层级值必须唯一。
@@ -116,6 +122,7 @@ server 启动建好监听后对每个库各起一条后台线程补扫一次（�
 | 工坊目标 / 生成请求 | `lib/workshop_schema.py` + `lib/workshop_generation.py` | `web/src/api/workshopRequests.ts` | `tests/test_workshop_runtime.py` + `tests/test_workshop_mcp.py` |
 | Job / JobParams | `lib/schemas.py` | `web/src/schema/jobs.ts` | 无 —— 靠人 |
 | Key / ModelSpec | `lib/keys.py` | `web/src/api/keys.ts` | 无 —— 靠人 |
+| ModelRoute | `lib/model_routes.py` | `web/src/api/models.ts` | `tests/test_model_routes.py` + `lib/modelRoutes.test.ts` |
 | CharacterDerivative / CharacterEntry | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_derivatives.py` + `LeftSidebar.test.tsx` |
 | CharacterAssociationTarget / CharacterAssociationItem | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_workspace.py` + `CharacterAssociationPicker.test.tsx` |
 | CharacterWorkspaceResponse / CharacterIndexResponse | `lib/schemas.py` | `web/src/api/characters.ts` | `tests/test_character_workspace.py` + `CharacterWorkspace.test.tsx` + `CharacterIndex.test.tsx` |
