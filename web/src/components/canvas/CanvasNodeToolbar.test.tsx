@@ -436,8 +436,9 @@ it('keeps populated media playable inside the node without opening preview from 
   expect(screen.getByRole('button', { name: '静音 视频' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '全屏播放 视频' })).toBeInTheDocument();
   expect(audio).toBeInTheDocument();
-  // 音频播放器只有按钮是 nodrag，波形区域拖动照常移动节点。
+  // 音频播放器外层可拖动节点；波形区是进度条，不拖节点。
   expect(audio!.closest('.nodrag')).toBeNull();
+  expect(container.querySelector('.canvas-audio-wave')).toHaveClass('nodrag');
   const audioPlay = screen.getByRole('button', { name: '播放 音频' });
   expect(audioPlay).toHaveClass('nodrag');
   const audioPlaySpy = vi.spyOn(audio!, 'play').mockResolvedValue();

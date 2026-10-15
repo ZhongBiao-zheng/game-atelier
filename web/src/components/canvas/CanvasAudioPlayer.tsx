@@ -10,7 +10,10 @@ const MAX_BARS = 1500;
 const BAR_WIDTH = 6;
 const BAR_GAP = 4;
 const BAR_PITCH = BAR_WIDTH + BAR_GAP;
-const SKIP_SECONDS = 5;
+/** 指针移动不超过这个距离（布局像素）算单击，跳到点中的位置；超过算拖动。 */
+const SCRUB_CLICK_SLOP = 3;
+/** 前进 / 后退按钮把音频分成三段：开头、中间、结尾。 */
+const SEGMENT_EPSILON = 0.05;
 
 type Waveform = { peaks: number[]; secondsPerBar: number };
 
@@ -61,7 +64,8 @@ function formatClock(seconds: number) {
 
 /**
  * 画布音频节点的播放器：播放头固定在中间，波形随播放向左走。
- * 只有按钮是 nodrag，其余区域拖动照常移动节点；单击波形跳到对应位置。
+ * 波形区与按钮是 nodrag（拖波形调进度），其余边缘区域拖动移动节点。
+ * 前进 / 后退在开头、中间、结尾三处之间跳。
  */
 export function CanvasAudioPlayer({
   src,
@@ -74,6 +78,7 @@ export function CanvasAudioPlayer({
 }) {
   const audioElement = useRef<HTMLAudioElement | null>(null);
   const waveElement = useRef<HTMLDivElement | null>(null);
+  const scrub = useRef<{ pointerId: number; startX: number; startTime: number; scale: number; moved: boolean } | null>(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -96,7 +101,8 @@ export function CanvasAudioPlayer({
     let frame = 0;
     const tick = () => {
       const audio = audioElement.current;
-      if (audio) setCurrentTime(audio.currentTime);
+      // 拖动波形期间以指针位置为准；audio 的 seek 落地有延迟，读回来会让波形来回抖。
+      if (audio && !scrub.current?.moved) setCurrentTime(audio.currentTime);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -117,6 +123,9 @@ export function CanvasAudioPlayer({
     else audio.pause();
   };
   const stop = (event: React.SyntheticEvent) => event.stopPropagation();
+  const stops = [0, duration / 2, duration];
+  const nextStop = stops.find(time => time > currentTime + SEGMENT_EPSILON) ?? duration;
+  const previousStop = [...stops].reverse().find(time => time < currentTime - SEGMENT_EPSILON) ?? 0;
 
   const secondsPerBar = waveform?.secondsPerBar ?? MIN_SECONDS_PER_BAR;
   const barCount = waveform?.peaks.length ?? Math.ceil(duration / secondsPerBar);
@@ -144,19 +153,48 @@ export function CanvasAudioPlayer({
           setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0);
           setCurrentTime(event.currentTarget.currentTime);
         }}
-        onTimeUpdate={event => setCurrentTime(event.currentTarget.currentTime)}
+        onTimeUpdate={event => { if (!scrub.current?.moved) setCurrentTime(event.currentTarget.currentTime); }}
       />
       <div className="relative min-h-0 flex-1">
         <div
           ref={waveElement}
-          className="canvas-audio-wave absolute inset-0 overflow-hidden"
-          onClick={event => {
+          // 波形区是播放器自己的进度条：nodrag 不让画布拖节点，左右拖动波形调进度，单击跳到点中的位置。
+          className="canvas-audio-wave nodrag nowheel absolute inset-0 cursor-grab touch-none overflow-hidden active:cursor-grabbing"
+          onPointerDown={event => {
+            if (event.button !== 0) return;
+            event.stopPropagation();
+            event.currentTarget.setPointerCapture(event.pointerId);
             const rect = event.currentTarget.getBoundingClientRect();
-            // 节点随画布缩放，按渲染宽度与布局宽度的比例换回布局像素。
-            const scale = rect.width / (event.currentTarget.offsetWidth || rect.width);
-            const offset = (event.clientX - rect.left - rect.width / 2) / scale;
-            seek(currentTime + (offset / BAR_PITCH) * secondsPerBar);
+            scrub.current = {
+              pointerId: event.pointerId,
+              startX: event.clientX,
+              startTime: currentTime,
+              // 节点随画布缩放，按渲染宽度与布局宽度的比例换回布局像素。
+              scale: rect.width / (event.currentTarget.offsetWidth || rect.width),
+              moved: false,
+            };
           }}
+          onPointerMove={event => {
+            const active = scrub.current;
+            if (!active || active.pointerId !== event.pointerId) return;
+            const offset = (event.clientX - active.startX) / active.scale;
+            if (!active.moved && Math.abs(offset) <= SCRUB_CLICK_SLOP) return;
+            active.moved = true;
+            // 播放头固定在中间，波形跟着指针走：往左拖是往后听。
+            seek(active.startTime - (offset / BAR_PITCH) * secondsPerBar);
+          }}
+          onPointerUp={event => {
+            const active = scrub.current;
+            if (!active || active.pointerId !== event.pointerId) return;
+            scrub.current = null;
+            if (active.moved) return;
+            const rect = event.currentTarget.getBoundingClientRect();
+            const offset = (event.clientX - rect.left - rect.width / 2) / active.scale;
+            seek(active.startTime + (offset / BAR_PITCH) * secondsPerBar);
+          }}
+          onPointerCancel={() => { scrub.current = null; }}
+          onClick={stop}
+          onDoubleClick={stop}
         >
           {bars.map(({ index, peak }) => (
             <span
@@ -190,11 +228,11 @@ export function CanvasAudioPlayer({
       <div className="flex shrink-0 items-center justify-center gap-6 pt-4">
         <button
           type="button"
-          aria-label={`后退 ${SKIP_SECONDS} 秒 ${label}`}
+          aria-label={`跳到上一段 ${label}`}
           className="nodrag grid size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           onPointerDown={stop}
           onDoubleClick={stop}
-          onClick={event => { stop(event); seek(currentTime - SKIP_SECONDS); }}
+          onClick={event => { stop(event); seek(previousStop); }}
         >
           <Rewind className="size-4 fill-current" aria-hidden="true" />
         </button>
@@ -214,11 +252,11 @@ export function CanvasAudioPlayer({
         </button>
         <button
           type="button"
-          aria-label={`前进 ${SKIP_SECONDS} 秒 ${label}`}
+          aria-label={`跳到下一段 ${label}`}
           className="nodrag grid size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           onPointerDown={stop}
           onDoubleClick={stop}
-          onClick={event => { stop(event); seek(currentTime + SKIP_SECONDS); }}
+          onClick={event => { stop(event); seek(nextStop); }}
         >
           <FastForward className="size-4 fill-current" aria-hidden="true" />
         </button>

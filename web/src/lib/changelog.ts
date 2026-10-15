@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.89.8',
+    date: '2026-10-15',
+    headline: '音频节点可拖波形调进度',
+    changes: [
+      { kind: 'feat', text: '音频节点的波形区变成进度条：左右拖动波形顺滑调整进度，单击跳到点中的位置；拖节点请按住波形以外的边缘。' },
+      { kind: 'feat', text: '音频节点的前进 / 后退按钮改为在开头、中间、结尾三处之间跳。' },
+    ],
+  },
+  {
     version: '5.89.7',
     date: '2026-10-15',
     headline: '画布音频节点重做，拖动更清爽',
