@@ -76,6 +76,22 @@ def test_manual_separate_overlapping_bands_are_order_independent():
     assert ImageChops.difference(a, b).getbbox() is None
 
 
+def test_failed_region_core_is_not_modified_by_neighbor_feather():
+    selected = mask((400, 300), ((100, 100, 120, 120), (125, 100, 145, 120)))
+    regions = plan_regions(selected, key(), "gpt-image-2", groups=[[1], [2]], feather=12)
+    source = Image.new("RGBA", selected.size, "green")
+    output = stitch_regions(source, regions, [Image.new("RGBA", regions[0].work_size, "red"), None])
+    assert output.getpixel((110, 110)) == (255, 0, 0, 255)
+    assert output.getpixel((125, 110)) == source.getpixel((125, 110))
+
+
+def test_nearby_chain_does_not_merge_into_whole_image():
+    selected = mask((1200, 300), tuple((i * 25, 100, i * 25 + 20, 120) for i in range(40)))
+    regions = plan_regions(selected, key(), "gpt-image-2")
+    assert 1 < len(regions) <= 16
+    assert max(r.crop[2] for r in regions) < 600
+
+
 def test_edge_padding_and_model_specific_sizes_do_not_distort_coordinates():
     selected = mask((90, 70), ((0, 0, 10, 10),))
     for model in ("gpt-image-2", "doubao-seedream-4-5", "nano-banana-pro"):

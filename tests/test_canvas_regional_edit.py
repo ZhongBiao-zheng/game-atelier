@@ -91,12 +91,29 @@ def test_partial_failure_keeps_patches_and_retries_only_failed_region(isolated_d
         assert output.getpixel((110, 110)) == (0, 0, 255, 255)
         assert output.getpixel((810, 810)) == (255, 0, 0, 255)
     document = read_canvas_document(pid)
+    from character_workflow.lib.canvas_projects import resolve_canvas_media
+    old_version = result.canvas_run.candidates[0].version_id
     resumed, _ = resume_regional_edit_run(pid, job.canvas_run.run_id, document.revision)
     assert resumed.job_id == job.job_id
+    assert resolve_canvas_media(pid, old_version)[0].is_file()
     complete = run_canvas_job(job.job_id)
     assert complete.status == JobStatus.DONE
     assert len(calls) == 3
     assert read_job(job.job_id).params.regional_edit["tasks"][0]["path"] == tasks[0]["path"]
+    assert resolve_canvas_media(pid, old_version)[0].is_file()
+
+
+def test_raw_output_dimensions_are_validated_before_resizing(isolated_data_root, monkeypatch):
+    _pid, _source, job, _doc, _ = prepare()
+    def generate(**kwargs):
+        path = kwargs["output_dir"] / "result.png"
+        Image.new("RGBA", (16, 16), "blue").save(path)
+        return [str(path)]
+    monkeypatch.setattr(callers, "dispatch", generate)
+    with pytest.raises(Exception):
+        run_canvas_job(job.job_id)
+    tasks = read_job(job.job_id).params.regional_edit["tasks"]
+    assert all(t["status"] == "failed" and t["actual_size"] == [16, 16] for t in tasks)
 
 
 def test_unknown_submission_is_never_automatically_reposted(isolated_data_root, monkeypatch):
