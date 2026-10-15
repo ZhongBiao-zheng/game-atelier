@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.89.10',
+    date: '2026-10-15',
+    headline: '修复 Windows 启动时反复安装依赖失败',
+    changes: [
+      { kind: 'fix', text: '一键启动与 Skill 共用运行环境，依赖未变化时直接启动。' },
+      { kind: 'fix', text: '依赖下载统一使用国内镜像，更新前自动处理旧进程占用。' },
+    ],
+  },
+  {
     version: '5.89.9',
     date: '2026-10-15',
     headline: '音频波形两端补齐',
