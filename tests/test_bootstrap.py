@@ -487,6 +487,33 @@ def test_launch_reuses_same_environment_for_stop_and_start(monkeypatch, isolated
     ] * 2
 
 
+@pytest.mark.parametrize("stop_code", [0, 1])
+def test_dependency_update_stops_environment_owner_before_sync(
+    monkeypatch, isolated_data_root, stop_code,
+):
+    mod = _load_bootstrap()
+    _make_fake_venv(isolated_data_root, hash_matches=False)
+    (isolated_data_root / ".runtime" / "server.pid").write_text("123\n")
+    monkeypatch.setattr(mod.shutil, "which", lambda name: "uv")
+    calls = []
+
+    def stop(args, **kwargs):
+        calls.append("stop")
+        assert args == [str(REPO_ROOT / "src" / "viewer_server" / "server.py"), "stop"]
+        assert kwargs["stdout"] is sys.stderr
+        return stop_code
+
+    def sync(cmd, **kwargs):
+        calls.append("sync")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(mod, "run_in_venv", stop)
+    monkeypatch.setattr(mod.subprocess, "run", sync)
+    assert mod.ensure_venv() == (4 if stop_code else 0)
+    assert calls == (["stop"] if stop_code else ["stop", "sync"])
+    assert mod._venv_is_current(isolated_data_root) is (not stop_code)
+
+
 def test_launch_initializes_default_data_root(tmp_path, monkeypatch):
     mod = _load_bootstrap()
     monkeypatch.delenv("GAME_ATELIER_DATA_ROOT", raising=False)

@@ -334,6 +334,15 @@ def ensure_venv(*, quiet: bool = False) -> int:
         }, ensure_ascii=False))
         return 2
 
+    # Windows 无法替换仍被服务加载的 .pyd / DLL；只有需要同步时才提前停止占用者。
+    if _venv_python(data_root).exists() and (data_root / ".runtime" / "server.pid").exists():
+        print("更新运行依赖前停止旧实例…", file=sys.stderr, flush=True)
+        # 从新代码路径运行 stop，旧插件缓存可能已移除、editable 尚未重新指向新目录。
+        stop_args = [str(PLUGIN_DIR / "src" / "viewer_server" / "server.py"), "stop"]
+        if run_in_venv(stop_args, stdout=sys.stderr):
+            print("旧实例未停止，未修改运行环境。", file=sys.stderr)
+            return 4
+
     venv = data_root / ".venv"
     venv.parent.mkdir(parents=True, exist_ok=True)
     env = {
@@ -409,7 +418,7 @@ def init_data_root(target: Path) -> int:
     return 0
 
 
-def run_in_venv(forward_args: list[str]) -> int:
+def run_in_venv(forward_args: list[str], *, stdout=None) -> int:
     """Forward `forward_args` to <data_root>/.venv/python. Use from SKILL.md so
     installed-Plugin invocations don't depend on system python."""
     data_root = resolve_data_root()
@@ -431,12 +440,12 @@ def run_in_venv(forward_args: list[str]) -> int:
         "VIRTUAL_ENV": str(data_root / ".venv"),
         "UV_PROJECT_ENVIRONMENT": str(data_root / ".venv"),
     }
-    proc = subprocess.run([str(venv_py), *forward_args], env=env)
+    proc = subprocess.run([str(venv_py), *forward_args], env=env, stdout=stdout)
     return proc.returncode
 
 
 def launch() -> int:
-    """一键启动：准备同一套依赖后，才停止旧服务并用该环境启动新版。"""
+    """一键启动：按需准备共享运行环境，再用该环境重启服务。"""
     if not _web_dist_ok():
         print("前端文件 web/dist 缺失，请运行一键修复。", file=sys.stderr)
         return 1
