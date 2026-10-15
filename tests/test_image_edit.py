@@ -64,3 +64,38 @@ def test_capabilities_distinguish_masks_guides_and_native_mj():
     assert image_edit.edit_transport("custom", "nano-banana-pro", "openai") == "guide"
     assert image_edit.edit_transport("midjourney", "midjourney", None) == "mj"
     assert image_edit.edit_transport("custom", "unknown-image", None) is None
+    assert image_edit.edit_transport("custom", "gpt-image-2", "seedance") is None
+
+
+@pytest.mark.parametrize("model,transport", [("gpt-image-2", "mask"), ("nano-banana-pro", "guide")])
+def test_render_uses_real_dispatch_and_never_persists_temp_references(tmp_path, monkeypatch, model, transport):
+    from character_workflow.lib import keys
+    from character_workflow.lib import callers
+    key = keys.KeySpec(alias="test", provider="custom", access_key="fake",
+                       base_url="https://api.tu-zi.com", created_at="2026-10-15")
+    monkeypatch.setattr(keys, "find_by_alias", lambda _: key)
+    source, mask = tmp_path / "source.png", tmp_path / "mask.png"
+    Image.new("RGBA", (32, 32), (1, 2, 3, 0)).save(source)
+    m = Image.new("L", (32, 32), 255)
+    m.paste(0, (8, 8, 16, 16))
+    m.save(mask)
+    params = {"image_edit": {"mode": "inpaint"}, "reference_images": [str(source)],
+              "mask_image": str(mask)}
+    def dispatch(**kwargs):
+        request = kwargs["params"]
+        assert len(request["reference_images"]) == (1 if transport == "mask" else 2)
+        assert ("mask_image" in request) == (transport == "mask")
+        assert "image_edit" not in request
+        request["provider_task_ids"] = ["accepted"]
+        kwargs["on_params_changed"]()
+        output = tmp_path / "generated.png"
+        Image.new("RGB", (32, 32), "red").save(output)
+        return [str(output)]
+    monkeypatch.setattr(callers, "dispatch", dispatch)
+    paths = image_edit.render(prompt="red", model=model, alias="test", output_dir=tmp_path,
+                              params=params)
+    assert params["reference_images"] == [str(source)]
+    assert params["provider_task_ids"] == ["accepted"]
+    with Image.open(paths[0]) as output:
+        assert output.getpixel((0, 0)) == (1, 2, 3, 0)
+        assert output.getpixel((10, 10)) == (255, 0, 0, 255)

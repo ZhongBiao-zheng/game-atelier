@@ -129,6 +129,7 @@ def test_imagine_persists_task_and_exact_output_mapping(mj_key, tmp_path, monkey
     assert changes[1]["mj_submission_ids"] == ["t-1"]
     assert params["mj_outputs"][2] == {
         "task_id": "t-1", "image_index": 3, "single": False,
+        "channel": mj.channel_fingerprint(_keys.find_by_alias("mj")),
         "sha256": hashlib.sha256(b"PNG").hexdigest(),
     }
 

@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.92.0',
+    date: '2026-10-15',
+    headline: '画布扩图与局部修改',
+    changes: [
+      { kind: 'feat', text: '图片更多菜单新增扩图和局部修改，共用编辑器，支持画笔、矩形选区、缩放平移和扩展画框。' },
+      { kind: 'feat', text: '通用模型编辑保留原图和保护区，结果另建节点；有完整来源的 MJ 图片可使用原任务开放的原生动作。' },
+    ],
+  },
+  {
     version: '5.91.0',
     date: '2026-10-15',
     headline: '「自动」遇到供应商不可用时换下一家',

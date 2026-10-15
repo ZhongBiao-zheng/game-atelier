@@ -473,13 +473,28 @@ ZIP 文件名带顺序号及安全化图层名，保留原始图片字节。PSD�
 Version 不可变、历史保留；分组只管理布局。删除编辑入口保留父图层最后版本并清除绑定，删除父节点
 不会删除素材图片。原图层显隐不影响编辑入口可见性，下载始终读取同步后的当前版本。
 
-`POST /canvas/projects/{id}/runs/mask-edit` 使用 multipart，只接受 `surface_node_id / expected_revision /
-requested_count / mask_file`。prompt、alias、model 与参数必须先保存为源图片节点的 image Draft，服务端
-读取后冻结；浏览器不能传媒体路径或绕过 Draft。蒙版必须是与 EXIF 归一后源图同尺寸的单帧 PNG，透明或
-灰度值 0 表示编辑、255 表示保留，空蒙版拒绝。服务端把归一灰度蒙版登记为不可变 `user_mask` Content
-Version，并与 Job、Snapshot、结果节点、实际输入连接在同一可恢复事务提交；Snapshot 记录
-`mask_version_id`，且唯一输入固定为当前源图 Version，不接收其它连接节点引用。首版只允许已验证走 OpenAI-compatible
-`/images/edits` 的 GPT Image 模型；不支持时返回 `canvas_media_capability_missing`，绝不降级为整图生成。
+`POST /canvas/projects/{id}/runs/mask-edit` 使用 multipart，接受 `surface_node_id / expected_revision /
+requested_count / mask_file / edit_options`。`edit_options` 为 JSON：`mode`（inpaint/outpaint/prepare）、
+`source_version_id`、扩图 `width/height/x/y`、可选 `reference_node_id` 或 MJ 的 `custom_id/zoom`。
+prompt、alias、model 与参数先保存为源图片节点的 image Draft，服务端读取后冻结；浏览器不能传媒体路径、
+MJ task ID 或渠道凭证。空提示词采用自然修复/延展。源版本变化拒绝提交。
+
+局部蒙版为与 EXIF 归一后源图同尺寸的单帧 PNG，透明或灰度 0 表示编辑、255 保留，空选区拒绝。
+扩图由服务端生成新区域蒙版，目标框必须完整包含原图，不把源图透明区域当作新增区域。
+归一蒙版登记为内部不可变 `user_mask` Version；Job、Snapshot、结果节点及实际输入实线在同一可恢复事务提交。
+Snapshot 保存 `mask_version_id`、源版本、可选替换参考和 `normalized_params.image_edit` 几何参数。
+结果始终另建节点（包括图层素材），不覆盖源版本，不创建蒙版节点或历史关系线。
+
+通用编辑按供应商/协议/型号筛选：支持原生 mask 的 GPT Image 使用 edits；兼容的 Seedream、Nano Banana
+等使用干净底图与独立区域引导图，不伪装成原生 mask。最终合成 PNG 保留保护区解码 RGBA；输出比例偏差超过
+2% 拒绝，同一比例的分辨率差异等比映射。编辑尺寸以画框为准，禁止 AUTO 改变编辑边界；蒙版保护只能保证
+改动范围，不能证明生成内容和接缝质量。未做计费渠道质量验收。
+
+`GET /canvas/projects/{id}/nodes/{node_id}/image-edit` 返回源版本与 MJ 可用动作，不提交任务。
+MJ 原生操作要求输出 task/单图序号、文件 SHA256、原授权渠道指纹匹配；仅开放 fetch.buttons 中实际动作。
+需要单图时显式准备一次，不自动追加计费任务。Action 受理后仅在查询状态为 MODAL 时发送 Modal；code=21
+不等于需要弹窗。已受理任务 ID 与不确定提交状态持久化，服务重启后可续查已知订单，不自动重发不确定订单。
+MJ 尺寸和保护能力以厂商动作为准，不套用通用像素保护承诺。内部来源字段由服务端独占，普通 Studio 请求不能注入。
 
 `POST /canvas/projects/{id}/runs/angle` 只接受 `surface_node_id / expected_revision / requested_count` 与
 `horizontal_angle(-60..60) / pitch_angle(-45..45) / camera_distance(1..10) / wide_angle`。服务端优先全局

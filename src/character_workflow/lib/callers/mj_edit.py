@@ -20,8 +20,10 @@ def actions(buttons: list[dict], image_index: int, single: bool) -> list[dict]:
         label = str(button.get("label") or "")
         lower = custom_id.lower()
         kind = None
-        if not single and f"::upsample::{image_index}::" in lower:
-            kind, label = "prepare", "准备单图"
+        if not single and "::upsample::" in lower and (
+            image_index == 0 or f"::upsample::{image_index}::" in lower
+        ):
+            kind, label = "prepare", f"准备单图 {label}".strip()
         elif single:
             if "::inpaint::" in lower:
                 kind, label = "inpaint", "局部修改"
@@ -60,6 +62,8 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path, params: dic
     if key is None:
         raise ValueError("原 MJ 任务的密钥已不存在")
     root = mj._api_root(key)
+    if options.get("channel") and options["channel"] != mj.channel_fingerprint(key):
+        raise mj.MidjourneyError("原 MJ 任务的授权已变化，不能跨渠道编辑")
     headers = {"Authorization": f"Bearer {key.access_key}", "Content-Type": "application/json"}
     state = params.setdefault("mj_edit_state", {})
 
@@ -81,6 +85,8 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path, params: dic
         if not task_id:
             raise mj.MidjourneyError("MJ 未返回任务 ID，请核对订单；不会自动重复提交")
         state.update(task_id=task_id, uncertain=False)
+        if endpoint == "modal":
+            state["modal_sent"] = True
         save()
         return task_id
 
@@ -109,8 +115,6 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path, params: dic
         submitted_id = submit("modal", body)
         if submitted_id != modal_id:
             raise mj.MidjourneyError("MJ 弹窗返回了不同的任务 ID，请核对供应商订单")
-        state["modal_sent"] = True
-        save()
     if on_phase:
         on_phase("sent")
     result = {}
@@ -127,6 +131,7 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path, params: dic
             len(urls) == 1 and any("::inpaint::" in str(button.get("customId", "")).lower()
                                   for button in result.get("buttons", [])))
         outputs.append({"task_id": task_id, "image_index": index, "single": single,
+                        "channel": mj.channel_fingerprint(key),
                         "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()})
     params["mj_outputs"] = outputs
     mj._publish_actual_n(params, params.get("n", 4), len(paths))

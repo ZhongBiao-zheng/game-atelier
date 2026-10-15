@@ -215,7 +215,7 @@ export interface CanvasNodeContextValue {
   toggleFreeResize: (node: CanvasContentNode) => void;
   openMediaOperation: (node: CanvasContentNode, tool: CanvasMediaTool) => void;
   removeBackground: (node: CanvasContentNode) => void;
-  openMaskEdit: (node: CanvasContentNode) => void;
+  openMaskEdit: (node: CanvasContentNode, mode?: 'inpaint' | 'outpaint') => void;
   openAngle: (node: CanvasContentNode) => void;
   upscaleImage: (node: CanvasContentNode, target: CanvasUpscaleTarget) => void;
   editVideo: (node: CanvasContentNode) => void;
@@ -1808,6 +1808,8 @@ function ImageNodeToolbar({
           className="nodrag min-w-40 [&_svg]:size-4"
           onPointerDown={event => event.stopPropagation()}
         >
+          <DropdownMenuItem disabled={!currentVersionId || submitting || replacing} onSelect={() => context.openMaskEdit(node, 'inpaint')} className="gap-2"><Pencil />局部修改</DropdownMenuItem>
+          <DropdownMenuItem disabled={!currentVersionId || submitting || replacing} onSelect={() => context.openMaskEdit(node, 'outpaint')} className="gap-2"><Maximize2 />扩图</DropdownMenuItem>
           {overflowActions.map(action => action.menu ? (
             <DropdownMenuSub key={action.id}>
               <DropdownMenuSubTrigger disabled={action.disabled} aria-label={action.label} className="gap-2">

@@ -1695,7 +1695,7 @@ def submit_mask_edit_run(
     """Freeze a user mask and its persisted image Draft into one recoverable Run."""
     import io
     from PIL import Image
-    from character_workflow.lib.callers import _effective_protocol
+    from character_workflow.lib.callers.openai_image import _effective_image_protocol
     from character_workflow.lib.callers.image_edit import edit_transport, expanded_source
     from character_workflow.lib.canvas_image_edits import edit_size_params, mj_source
     from character_workflow.lib.canvas_masks import (
@@ -1745,7 +1745,7 @@ def submit_mask_edit_run(
                     "自然延展画面" if options.mode == "outpaint" else "自然修复选区内容"
                 )})
             key, model, kind = _resolve_key_and_model(draft)
-            transport = edit_transport(key.provider, model.id, _effective_protocol(key, model.id))
+            transport = edit_transport(key.provider, model.id, _effective_image_protocol(key, model.id))
             if not transport:
                 raise CanvasRunCommandError(
                     "canvas_media_capability_missing",
@@ -1804,6 +1804,7 @@ def submit_mask_edit_run(
                 )
             source_path = Path(media_paths["image"][0])
             width, height = _source_display_size(source_path, source)
+            edit.update(source_width=width, source_height=height)
             if options.mode == "inpaint":
                 normalized_mask = normalize_canvas_mask(source_path, source, mask_body)
             else:
@@ -1826,10 +1827,13 @@ def submit_mask_edit_run(
                 job_params = job_params.model_copy(update={
                     "ratio": None, "resolution": None, **size_params,
                 })
+                for field in ("ratio", "resolution", "custom_size"):
+                    normalized.pop(field, None)
                 normalized.update(size_params)
             else:
                 effective_count = 1 if options.mode == "prepare" else 4
                 job_params.n = effective_count
+                normalized["n"] = effective_count
             job_params.image_edit = edit
             normalized["image_edit"] = edit
             mask_id = f"mask-{secrets.token_hex(12)}"
@@ -3064,6 +3068,11 @@ def _finalize_canvas_run_under_locks(
     if all(candidate.status != "pending" for candidate in context.candidates):
         return job, current
 
+    if job.params.image_edit and job.params.mj_outputs and job.output_paths:
+        # Native actions decide their own candidate count (single upscale / 4-way variation).
+        context = context.model_copy(update={
+            "candidates": context.candidates[:len(job.output_paths)],
+        })
     versions: list[CanvasContentVersion] = []
     candidates: list[CanvasResultCandidate] = []
     for index, candidate in enumerate(context.candidates):
@@ -3322,6 +3331,7 @@ def reconcile_canvas_jobs(
     解析一遍（全仓所有角色、Studio、画布的 job 都在同一个目录），而画布轮询原来一次请求要跑
     两遍：这里一遍，路由拼列表时又一遍。
     """
+    from character_workflow.lib.canvas_image_edits import has_resumable_mj_task
     reconciled: list[str] = []
     for job in (list_jobs() if jobs is None else jobs):
         if job.namespace != "canvas" or not job.canvas_project_id:
@@ -3344,6 +3354,10 @@ def reconcile_canvas_jobs(
                     continue
             if job.cancel_requested_at:
                 _cancel_pending_canvas_candidates(job.canvas_project_id, job.job_id)
+                reconciled.append(job.job_id)
+                continue
+            elif has_resumable_mj_task(job):
+                # Only resume a known order. The caller reuses its durable task ID.
                 reconciled.append(job.job_id)
                 continue
             elif job.runner_started_at is None:

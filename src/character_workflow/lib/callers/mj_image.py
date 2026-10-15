@@ -75,6 +75,10 @@ class MidjourneyError(RuntimeError):
     pass
 
 
+def channel_fingerprint(key) -> str:
+    return hashlib.sha256(f"{_api_root(key)}\0{key.access_key}".encode()).hexdigest()
+
+
 def _api_root(key) -> str:
     """MJ 通道挂在站点根（/mj/...），而 key 的 base_url 可能带 OpenAI 兼容后缀（/v1），
     所以只取 scheme://host。与 kling_video._api_root 同构。"""
@@ -528,10 +532,12 @@ def render(
     outputs: list[dict] = []
     downloading = False
     for task_id in task_ids:
+        result = {}
         urls = _poll_task(
             root=root, headers=headers, task_id=task_id,
             max_polls=max_polls, poll_interval=poll_interval,
             should_cancel=should_cancel,
+            on_result=result.update,
         )
         # UI 的 Midjourney 一次任务固定返回 4 张，共享同一个 seed。多任务（n>4）会有多个
         # seed，现有 JobParams 没有可准确表达它们的字段，因此只在单任务时回填。
@@ -549,8 +555,10 @@ def render(
                 on_phase("downloading")
             path = _download_png(url, out_dir, len(paths) + 1, task_ref=task_id)
             paths.append(path)
-            outputs.append({"task_id": task_id, "image_index": image_index,
+            outputs.append({"task_id": task_id,
+                            "image_index": image_index if result.get("imageUrls") else 0,
                             "single": False,
+                            "channel": channel_fingerprint(key),
                             "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()})
     if params_in is not None:
         params_in["mj_outputs"] = outputs

@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KeyView } from '@/api/keys';
 import type { CanvasMediaVersion } from '@/schema/canvas';
 import { CanvasMaskEditDialog } from './CanvasMaskEditDialog';
+import { getCanvasImageEditSource } from '@/api/canvas';
+
+vi.mock('@/api/canvas', () => ({ getCanvasImageEditSource: vi.fn() }));
 
 const version: CanvasMediaVersion = {
   version_id: 'source', kind: 'image', path: 'source.png', mime_type: 'image/png',
@@ -63,6 +66,29 @@ describe('image editor', () => {
     fireEvent.change(screen.getByLabelText('扩图比例'), { target: { value: '21:9' } });
     expect(Number((screen.getByLabelText('目标宽度') as HTMLInputElement).value)).toBeGreaterThan(1024);
     fireEvent.change(screen.getByLabelText('目标宽度'), { target: { value: '100' } });
+    expect(screen.getByLabelText('扩图比例')).toHaveValue('');
     expect(screen.getByRole('button', { name: '生成' })).toBeDisabled();
+  });
+
+  it('uses actual MJ buttons and makes preparation an explicit single task', async () => {
+    vi.mocked(getCanvasImageEditSource).mockResolvedValue({ source_version_id: 'source', reason: null,
+      mj: { alias: 'MJ 原渠道', model: 'midjourney', actions: [
+        { kind: 'prepare', custom_id: 'MJ::JOB::upsample::2::source', label: '准备单图 U2' },
+      ] } });
+    const onSubmit = vi.fn();
+    render(<CanvasMaskEditDialog open title="原图" version={version} mediaUrl="/source.png"
+      keys={keys} projectId="p" nodeId="n" initialDraft={null} busy={false} error={null}
+      onOpenChange={vi.fn()} onSubmit={onSubmit} />);
+    const image = screen.getByRole('img', { name: '原图' });
+    Object.defineProperties(image, { naturalWidth: { value: 1024 }, naturalHeight: { value: 1024 } });
+    fireEvent.load(image);
+    fireEvent.change(await screen.findByLabelText('编辑方式'), { target: { value: 'mj' } });
+    expect(screen.queryByLabelText('候选数')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '准备单图' }));
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ requestedCount: 1,
+      options: { mode: 'prepare', custom_id: 'MJ::JOB::upsample::2::source' },
+      draft: { alias: 'MJ 原渠道', model: 'midjourney', params: { n: 1 } },
+    });
   });
 });

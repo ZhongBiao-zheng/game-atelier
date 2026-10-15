@@ -9,6 +9,7 @@ interface CanvasNodeIdentity {
 
 const PARAM_LABELS: Record<string, string> = {
   size: '尺寸',
+  image_edit: '图片编辑',
   size_mode: '尺寸模式',
   ratio: '比例',
   quality: '质量',
@@ -101,6 +102,12 @@ function sanitizeParameter(value: unknown, key = ''): unknown {
 }
 
 function formatParameter(value: unknown, key: string): string {
+  if (key === 'image_edit' && value && typeof value === 'object') {
+    const edit = value as Record<string, unknown>;
+    const label = ({ inpaint: '局部修改', outpaint: '扩图', prepare: 'MJ 单图准备' } as Record<string, string>)[String(edit.mode)] ?? '图片编辑';
+    return edit.mode === 'outpaint' && edit.width && edit.height
+      ? `${label} · ${edit.width} × ${edit.height} · 原图位置 ${edit.x}, ${edit.y}` : label;
+  }
   if (key === 'size_mode') return ({ auto: 'AUTO', ratio: '比例', custom: '自定义' } as Record<string, string>)[String(value)] ?? String(value);
   const sanitized = sanitizeParameter(value, key);
   if (typeof sanitized === 'boolean') return sanitized ? '开启' : '关闭';

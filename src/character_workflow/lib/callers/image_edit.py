@@ -13,6 +13,8 @@ def edit_transport(provider: str, model: str, protocol: str | None) -> str | Non
     family = image_family(model)
     if family == "midjourney":
         return "mj"
+    if protocol not in {None, "openai", "ark", "seedream", "openrouter"}:
+        return None
     if supports_image_mask(provider, model, protocol):
         return "mask"
     if family in {"seedream", "nano-banana", "gpt-image"} and provider in {
@@ -64,13 +66,14 @@ def composite_result(source: Path, mask_path: Path, result: Path, options: dict)
 def render(*, prompt: str, model: str, alias: str, output_dir: Path,
            params: dict[str, Any], **kwargs) -> list[str]:
     from character_workflow.lib import keys
-    from . import dispatch, _effective_protocol
+    from . import dispatch
+    from .openai_image import _effective_image_protocol
 
     options = params["image_edit"]
     key = keys.find_by_alias(alias)
     if key is None:
         raise ValueError("编辑模型的密钥已经不存在")
-    transport = edit_transport(key.provider, model, _effective_protocol(key, model))
+    transport = edit_transport(key.provider, model, _effective_image_protocol(key, model))
     if transport == "mj":
         from .mj_edit import render as render_mj
         return render_mj(prompt=prompt, model=model, alias=alias, output_dir=output_dir,

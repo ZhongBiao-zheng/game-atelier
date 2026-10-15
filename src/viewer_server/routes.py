@@ -478,7 +478,8 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                 # mask_image 同理只由服务端写。
                 for owned in (
                     "provider_task_protocol", "provider_task_ids", "video_submission_attempts",
-                    "mask_image",
+                    "mask_image", "image_edit", "mj_submission_ids", "mj_submit_uncertain",
+                    "mj_edit_state", "mj_outputs",
                 ):
                     if owned in existing_params:
                         value[owned] = existing_params[owned]

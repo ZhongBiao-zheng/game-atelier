@@ -7,6 +7,16 @@ from .jobs import read_job
 from .schemas import CanvasJobOutputOrigin, CanvasMediaVersion
 
 
+def has_resumable_mj_task(job) -> bool:
+    from .callers.openai_image import image_family
+    if image_family(job.model) != "midjourney":
+        return False
+    if job.params.image_edit:
+        state = job.params.mj_edit_state or {}
+        return bool(state.get("task_id") and not state.get("uncertain"))
+    return bool(job.params.mj_submission_ids and not job.params.mj_submit_uncertain)
+
+
 def edit_size_params(key, model: str, width: int, height: int) -> dict:
     from .image_size import normalize_image_size_params
     from .image_size_catalog import image_size_options, is_nano_image_size_model
@@ -35,6 +45,8 @@ def edit_size_params(key, model: str, width: int, height: int) -> dict:
 
 
 def mj_source(version: CanvasMediaVersion) -> dict | None:
+    from .keys import find_by_alias
+    from .callers.mj_image import channel_fingerprint
     origin = version.origin
     if not isinstance(origin, CanvasJobOutputOrigin):
         return None
@@ -51,6 +63,13 @@ def mj_source(version: CanvasMediaVersion) -> dict | None:
         return None
     output = outputs[candidate.index]
     if output.get("sha256") != version.sha256:
+        return None
+    key = find_by_alias(job.alias)
+    try:
+        channel = channel_fingerprint(key) if key else None
+    except RuntimeError:
+        return None
+    if not channel or output.get("channel") != channel:
         return None
     return {**output, "alias": job.alias, "model": job.model}
 

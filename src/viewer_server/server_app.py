@@ -156,11 +156,12 @@ async def lifespan(app: FastAPI):
 
     for project in canvas_projects:
         interrupt_canvas_batch_after_restart(project.project_id)
+    from character_workflow.lib.canvas_image_edits import has_resumable_mj_task
     resumable = [
         job_id for job_id in reconciled
         if (
             (job := read_job(job_id)).status.value in {"pending", "pending_confirm"}
-            and job.runner_started_at is None
+            and (job.runner_started_at is None or has_resumable_mj_task(job))
         )
     ]
     if reconciled:

@@ -286,6 +286,8 @@ interface MattingPromptState {
 }
 
 interface MaskEditState {
+  open: boolean;
+  mode: 'inpaint' | 'outpaint';
   nodeId: string;
   title: string;
   version: CanvasMediaVersion;
@@ -3787,7 +3789,7 @@ function CanvasEditorInner({
     setMediaOperation({ nodeId: node.id, title: node.title, tool, version });
   }, []);
 
-  const openMaskEdit = useCallback((node: CanvasContentNode) => {
+  const openMaskEdit = useCallback((node: CanvasContentNode, mode: 'inpaint' | 'outpaint' = 'inpaint') => {
     const versionId = node.data.current_version_id;
     const version = versionId ? latestDocument.current?.content_versions[versionId] : null;
     if (node.type !== 'image' || !version || version.kind !== 'image' || !version.width || !version.height) {
@@ -3797,7 +3799,7 @@ function CanvasEditorInner({
     setPreview(null);
     setMediaOperation(null);
     setMaskEditError(null);
-    setMaskEdit({ nodeId: node.id, title: node.title, version });
+    setMaskEdit({ nodeId: node.id, title: node.title, version, mode, open: true });
   }, []);
 
   const submitMaskEdit = useCallback(async (submission: CanvasMaskEditSubmission) => {
@@ -3815,6 +3817,10 @@ function CanvasEditorInner({
       const sourceNode = before.nodes.find(node => node.id === maskEdit.nodeId);
       if (!sourceNode || sourceNode.type !== 'image') {
         setMaskEditError('源图片节点已经不存在。');
+        return;
+      }
+      if (sourceNode.data.current_version_id !== submission.options.source_version_id) {
+        setMaskEditError('源图版本已经变化，请重新打开编辑器。');
         return;
       }
       history.current.past.push(before);
@@ -3846,13 +3852,14 @@ function CanvasEditorInner({
         serverRevision.current,
         submission.requestedCount,
         submission.mask,
+        submission.options,
       );
       mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
       applyLocalJob(run.job);
       const resultId = run.job.canvas_run?.result_node_id;
       if (resultId) setSelectedNodeIds(new Set([resultId]));
       setMaskEdit(null);
-      announceToolNotice(`已提交“${maskEdit.title}”的局部编辑`);
+      announceToolNotice(`已提交“${maskEdit.title}”的图片编辑`);
     } catch (submitError) {
       setMaskEditError((submitError as Error).message);
     } finally {
@@ -5238,7 +5245,12 @@ function CanvasEditorInner({
 
         {maskEdit && (
           <CanvasMaskEditDialog
-            open
+            key={`${projectId}:${maskEdit.nodeId}:${maskEdit.version.version_id}`}
+            open={maskEdit.open}
+            projectId={projectId}
+            nodeId={maskEdit.nodeId}
+            initialMode={maskEdit.mode}
+            references={document.nodes.filter(node => node.type === 'image' && node.id !== maskEdit.nodeId && node.data.current_version_id).map(node => ({ id: node.id, title: node.title }))}
             title={maskEdit.title}
             version={maskEdit.version}
             mediaUrl={canvasMediaUrl(projectId, maskEdit.version.version_id)}
@@ -5248,7 +5260,7 @@ function CanvasEditorInner({
             error={maskEditError}
             onOpenChange={open => {
               if (!open && !maskEditBusy) {
-                setMaskEdit(null);
+                setMaskEdit(current => current ? { ...current, open: false } : null);
                 setMaskEditError(null);
               }
             }}
@@ -5441,6 +5453,11 @@ function CanvasPreview({
   onCopyPrompt?: () => void;
 }) {
   const { version } = preview;
+  const [showSource, setShowSource] = useState(false);
+  const edit = job?.canvas_run?.snapshot.normalized_params.image_edit as {
+    source_version_id?: string; mode?: string; width?: number; height?: number; x?: number; y?: number;
+    source_width?: number; source_height?: number;
+  } | undefined;
   const src = version.kind === 'text' ? null : canvasMediaUrl(projectId, version.version_id);
   return (
     <div className="space-y-4">
@@ -5450,7 +5467,16 @@ function CanvasPreview({
         </p>
       )}
       {version.kind === 'image' && src && (
-        <img src={src} alt={preview.title} decoding="async" className="max-h-[58dvh] w-full rounded-lg object-contain" />
+        <div className="flex flex-col items-center gap-2">
+          <div className="relative inline-block max-w-full">
+            <img src={src} alt={preview.title} decoding="async" className={`block max-h-[58dvh] max-w-full rounded-lg object-contain ${showSource ? 'invisible' : ''}`} />
+            {showSource && edit?.source_version_id && <img src={canvasMediaUrl(projectId, edit.source_version_id)} alt="编辑原图" className="absolute object-contain" style={edit.mode === 'outpaint' && edit.width && edit.height ? {
+              left: `${(edit.x || 0) / edit.width * 100}%`, top: `${(edit.y || 0) / edit.height * 100}%`,
+              width: `${(edit.source_width || edit.width) / edit.width * 100}%`, height: `${(edit.source_height || edit.height) / edit.height * 100}%`,
+            } : { inset: 0, width: '100%', height: '100%' }} />}
+          </div>
+          {edit?.source_version_id && <Button size="sm" variant="ghost" onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); setShowSource(true); }} onPointerUp={() => setShowSource(false)} onPointerCancel={() => setShowSource(false)} onKeyDown={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); setShowSource(true); } }} onKeyUp={() => setShowSource(false)} onBlur={() => setShowSource(false)}>按住查看原图</Button>}
+        </div>
       )}
       {version.kind === 'video' && src && (
         <video src={src} controls playsInline preload="metadata" className="max-h-[58dvh] w-full rounded-lg object-contain" />
