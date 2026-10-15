@@ -106,3 +106,22 @@ def test_antialias_pixels_and_holes_are_not_lost():
     x, y, _, _ = region.crop
     assert region.weight.getpixel((99 - x, 100 - y)) > 0
     assert region.weight.getpixel((125 - x, 125 - y)) == 0
+
+
+def test_detects_confident_context_translation_but_does_not_guess_on_flat_floor():
+    import random
+    from PIL import ImageDraw
+    from character_workflow.lib.regional_image_edit import validate_context_alignment
+    source = Image.new("RGBA", (512, 512), "white")
+    draw = ImageDraw.Draw(source)
+    randomizer = random.Random(5)
+    for _ in range(100):
+        x, y = randomizer.randrange(480), randomizer.randrange(480)
+        draw.rectangle((x, y, x + 20, y + 30), fill=(30, 40, 50, 255))
+    protected = Image.new("L", source.size, 255)
+    protected.paste(0, (200, 200, 300, 300))
+    with pytest.raises(ValueError, match="位移"):
+        validate_context_alignment(source, ImageChops.offset(source, 16, 0), protected)
+    validate_context_alignment(source, source, protected)
+    validate_context_alignment(Image.new("RGBA", source.size, "white"),
+                               Image.new("RGBA", source.size, "gray"), protected)
