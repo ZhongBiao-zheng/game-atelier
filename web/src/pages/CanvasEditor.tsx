@@ -3176,10 +3176,13 @@ function CanvasEditorInner({
 
   const resumeMjEdit = useCallback(async (runId: string) => {
     if (runSubmissionInFlight.current) return;
-    runSubmissionInFlight.current = true;
+    let claimed = false;
     setError(null);
     try {
       if (!await persistNow()) return;
+      if (runSubmissionInFlight.current || latestDocument.current?.project_id !== projectId) return;
+      runSubmissionInFlight.current = true;
+      claimed = true;
       const dirty = dirtyVersion.current;
       const result = await resumeCanvasMjEdit(projectId, runId, serverRevision.current);
       if (latestDocument.current?.project_id !== projectId) return;
@@ -3188,16 +3191,22 @@ function CanvasEditorInner({
     } catch (resumeError) {
       if (latestDocument.current?.project_id === projectId) setError((resumeError as Error).message);
     } finally {
-      runSubmissionInFlight.current = false;
-      if (saveQueued.current) void flushSave().catch(() => undefined);
+      if (claimed) {
+        runSubmissionInFlight.current = false;
+        if (saveQueued.current) void flushSave().catch(() => undefined);
+      }
     }
   }, [projectId, persistNow, mergeSubmittedRunDocument, applyLocalJob, flushSave]);
 
   async function confirmResumeRegions() {
     if (!resumeRegionsId || runSubmissionInFlight.current) return;
-    runSubmissionInFlight.current = true; setResumingRegions(true); setError(null);
+    let claimed = false;
+    setResumingRegions(true); setError(null);
     try {
       if (!await persistNow()) return;
+      if (runSubmissionInFlight.current || latestDocument.current?.project_id !== projectId) return;
+      runSubmissionInFlight.current = true;
+      claimed = true;
       const dirty = dirtyVersion.current;
       const result = await resumeCanvasRegions(projectId, resumeRegionsId, serverRevision.current);
       if (latestDocument.current?.project_id !== projectId) return;
@@ -3206,8 +3215,11 @@ function CanvasEditorInner({
     } catch (resumeError) {
       if (latestDocument.current?.project_id === projectId) setError((resumeError as Error).message);
     } finally {
-      runSubmissionInFlight.current = false; setResumingRegions(false);
-      if (saveQueued.current) void flushSave().catch(() => undefined);
+      setResumingRegions(false);
+      if (claimed) {
+        runSubmissionInFlight.current = false;
+        if (saveQueued.current) void flushSave().catch(() => undefined);
+      }
     }
   }
 

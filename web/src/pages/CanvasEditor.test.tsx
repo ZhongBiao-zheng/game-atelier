@@ -521,7 +521,7 @@ it.each(['regional', 'mj'] as const)('resumes %s editing after saving without bl
   const trigger = await screen.findByRole('button', { name: kind === 'regional' ? '继续未完成区域' : '继续查询 MJ 原任务（不重新下单）' });
   fireEvent.click(trigger);
   if (kind === 'regional') fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '继续' }));
-  await waitFor(() => expect(resume).toHaveBeenCalledExactlyOnceWith('canvas-one', 'run-edit', 7));
+  await waitFor(() => expect(resume).toHaveBeenCalledWith('canvas-one', 'run-edit', 7));
   if (kind === 'regional') expect(screen.getByRole('button', { name: '提交中…' })).toBeDisabled();
   else fireEvent.click(trigger);
   expect(resume).toHaveBeenCalledTimes(1);
