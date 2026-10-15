@@ -5,13 +5,15 @@ import requests
 from PIL import Image, ImageOps
 
 from ..atomic_io import atomic_write_bytes
-from ..regional_image_edit import plan_regions, resize_rgba, stitch_regions
+from ..regional_image_edit import (
+    plan_regions, resize_rgba, stitch_regions, validate_context_alignment,
+)
 
 
 def render(*, prompt, model, alias, output_dir, durable_dir, params, **kwargs):
     from ..keys import find_by_alias
     from .image_edit import render as render_crop
-    from .tuzi_async import TuziAsyncPendingError
+    from .tuzi_async import TASK_PROTOCOL, TuziAsyncFailedError, TuziAsyncPendingError
 
     import io
     options = params["image_edit"]
@@ -53,7 +55,8 @@ def render(*, prompt, model, alias, output_dir, durable_dir, params, **kwargs):
         crop = resize_rgba(source.crop((x, y, x + width, y + height)), region.work_size)
         crop_path, mask_path = directory / "source.png", directory / "mask.png"
         crop.save(crop_path)
-        region.mask.resize(region.work_size, Image.Resampling.NEAREST).save(mask_path)
+        generation_mask = region.mask.resize(region.work_size, Image.Resampling.NEAREST)
+        generation_mask.save(mask_path)
         region.weight.save(directory / "blend.png")
         request = {k: v for k, v in params.items() if k not in {
             "image_edit", "regional_edit", "reference_images", "mask_image", "n", "size",
@@ -87,6 +90,7 @@ def render(*, prompt, model, alias, output_dir, durable_dir, params, **kwargs):
                 prompt=options.get("region_prompts", {}).get(region.id, "").strip() or prompt,
                 model=model, alias=alias, output_dir=directory, n=1,
                 size=region.params["size"], params=request,
+                validate_result=lambda result: validate_context_alignment(crop, result, generation_mask),
                 on_params_changed=changed, on_cost_usd=cost, **kwargs,
             )
             changed()
@@ -105,15 +109,22 @@ def render(*, prompt, model, alias, output_dir, durable_dir, params, **kwargs):
         except TuziAsyncPendingError as error:
             changed()
             task.update(status="paused", error=str(error))
-        except requests.RequestException as error:
-            changed()
-            response = getattr(error, "response", None)
-            known_rejection = response is not None and 400 <= response.status_code < 500
-            task.update(status="failed" if known_rejection else "uncertain", error=str(error))
-        except Exception as error:
+        except (ValueError, TuziAsyncFailedError) as error:
             changed()
             task.update(status="failed", error=str(error))
+        except Exception as error:
+            changed()
+            response = getattr(error, "response", None)
+            known_rejection = (isinstance(error, requests.RequestException)
+                               and response is not None and 400 <= response.status_code < 500)
+            provider = task.get("provider") or {}
+            resumable = (provider.get("provider_task_ids")
+                         and provider.get("provider_task_protocol") == TASK_PROTOCOL)
+            status = "failed" if known_rejection else "paused" if resumable else "uncertain"
+            task.update(status=status, error=str(error))
         persist()
+    if should_cancel():
+        raise RuntimeError("已停止区域编辑；成功裁片已保存")
     successful = [t for t in state["tasks"] if t["status"] == "succeeded"]
     state["partial"] = len(successful) != len(state["tasks"])
     persist()

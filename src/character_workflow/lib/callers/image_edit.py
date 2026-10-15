@@ -76,6 +76,7 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path,
         return render_regions(prompt=prompt, model=model, alias=alias, output_dir=output_dir,
                               params=params, **kwargs)
     kwargs.pop("durable_dir", None)
+    validate_result = kwargs.pop("validate_result", None)
     key = keys.find_by_alias(alias)
     if key is None:
         raise ValueError("编辑模型的密钥已经不存在")
@@ -139,4 +140,8 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path,
     paths = dispatch(prompt=instruction + "\n" + prompt, model=model, alias=alias,
                      output_dir=output_dir, params=request, on_params_changed=changed, **kwargs)
     changed()
+    if validate_result:
+        for path in paths:
+            with Image.open(path) as opened:
+                validate_result(ImageOps.exif_transpose(opened).convert("RGBA"))
     return [str(composite_result(source, mask_path, Path(path), options)) for path in paths]

@@ -106,7 +106,8 @@ function formatParameter(value: unknown, key: string): string {
     const edit = value as Record<string, unknown>;
     const label = ({ inpaint: '局部修改', outpaint: '扩图', prepare: 'MJ 单图准备' } as Record<string, string>)[String(edit.mode)] ?? '图片编辑';
     return edit.mode === 'outpaint' && edit.width && edit.height
-      ? `${label} · ${edit.width} × ${edit.height} · 原图位置 ${edit.x}, ${edit.y}` : label;
+      ? `${label} · ${edit.width} × ${edit.height} · 原图位置 ${edit.x}, ${edit.y}`
+      : Array.isArray(edit.regions) ? `${label} · ${edit.regions.length} 区 · 融合范围外不变` : label;
   }
   if (key === 'size_mode') return ({ auto: 'AUTO', ratio: '比例', custom: '自定义' } as Record<string, string>)[String(value)] ?? String(value);
   const sanitized = sanitizeParameter(value, key);
@@ -181,6 +182,13 @@ export function CanvasGenerationMetadata({ snapshot, job, nodes }: {
         <RecordItem label="生成类型" value={kindLabel(snapshot.mode)} />
         {parameters.map(item => <RecordItem key={item.key} label={item.label} value={item.value} />)}
       </dl>
+
+      {job.params.regional_edit && <div className="space-y-2 text-xs" aria-label="区域执行详情">
+        {job.params.regional_edit.tasks.map((task, index) => <div key={index} className="rounded-md border border-border p-2">
+          <p>候选 {task.candidate + 1} · 区域 {task.region_id} · {({ pending: '待生成', running: '执行中', succeeded: '完成', failed: '失败', paused: '等待续查', uncertain: '提交结果待核对' })[task.status]}</p>
+          {task.error && <p className="mt-1 break-words text-muted-foreground">{String(sanitizeParameter(task.error))}</p>}
+        </div>)}
+      </div>}
 
       <div>
         <p className="text-xs text-muted-foreground">冻结引用</p>

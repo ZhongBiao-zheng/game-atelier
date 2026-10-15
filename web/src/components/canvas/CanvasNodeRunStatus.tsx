@@ -54,7 +54,8 @@ export function canvasNodeRunStateForJob(job: Job): CanvasNodeRunState {
     return {
       status: 'loading',
       label: job.cancel_requested_at ? '正在停止…' : reversePrompt ? '正在分析提示词' : '正在生成',
-      detail: job.cancel_requested_at ? '已请求停止，上游可能仍在执行' : null,
+      detail: job.cancel_requested_at ? '已请求停止，上游可能仍在执行' : job.params.regional_edit
+        ? `区域进度 ${job.params.regional_edit.tasks.filter(task => task.status === 'succeeded').length} / ${job.params.regional_edit.tasks.length}` : null,
       job,
       reversePrompt,
     };

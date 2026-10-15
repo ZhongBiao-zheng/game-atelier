@@ -57,3 +57,21 @@ export function drawEditStrokes(canvas: HTMLCanvasElement, strokes: EditStroke[]
     }
   }
 }
+
+export async function editMaskBlob(width: number, height: number, strokes: EditStroke[]): Promise<Blob> {
+  const selection = document.createElement('canvas');
+  selection.width = width; selection.height = height;
+  drawEditStrokes(selection, strokes);
+  const ctx = selection.getContext('2d');
+  if (!ctx || !ctx.getImageData(0, 0, width, height).data.some((v, i) => i % 4 === 3 && v > 0)) {
+    throw new Error('请先选择需要修改的区域');
+  }
+  const mask = document.createElement('canvas');
+  mask.width = width; mask.height = height;
+  const out = mask.getContext('2d')!;
+  out.fillStyle = 'white'; out.fillRect(0, 0, width, height);
+  out.globalCompositeOperation = 'destination-out'; out.drawImage(selection, 0, 0);
+  const blob = await new Promise<Blob | null>(resolve => mask.toBlob(resolve, 'image/png'));
+  if (!blob) throw new Error('无法读取选区，请重新打开编辑器');
+  return blob;
+}

@@ -491,6 +491,24 @@ Snapshot 保存 `mask_version_id`、源版本、可选替换参考和 `normalize
 2% 拒绝，同一比例的分辨率差异等比映射。编辑尺寸以画框为准，禁止 AUTO 改变编辑边界；蒙版保护只能保证
 改动范围，不能证明生成内容和接缝质量。未做计费渠道质量验收。
 
+通用局部修改采用分区裁剪回贴，扩图及 MJ 原生操作不使用此流程。
+`POST /canvas/projects/{id}/nodes/{node_id}/edit-plan` 接受 multipart `alias/model/mask_file/edit_options`，
+只做本地规划，不创建订单。选区按连通块聚类，最多 16 区；`groups` 可显式合并或拆开，必须完整覆盖所有块。
+返回 `plan_id` 和 `regions`：原像素 `bounds/crop`、工作图 `work_size/params`、`feather` 及羽化预览。
+裁片起始短边 256px（产品默认，非厂商下限），工作尺寸按模型能力选择；边缘不足时透明 padding，逆变换去除。
+`edit_options` 另支持 `context`（默认 .25，0–2）、`feather`（默认自动 4–24px，可设 0–32）、
+`region_prompts`（按区域 ID 覆盖统一提示词）、`plan_id`。规划摘要绑定源版本/蒙版/模型/几何参数，
+过期规划在提交前拒绝。结果为每个候选一张全图，一个结果节点；请求数为区域数×候选数，提交前显示费用。
+只有核心及可见羽化带可变化，其外 RGBA 逐像素保持。回贴使用预乘 alpha 和顺序无关的重叠权重。
+有纹理上下文的明显平移会拒绝回贴；此检查不保证语义或透视正确，不能替代真实效果验收。
+
+`params.regional_edit` 为服务端独占状态：每个区域/候选分别存状态、裁片路径、实际尺寸、费用和厂商订单。
+成功裁片持久化在 Job 输出目录 `.regional/{job_id}/`，不依赖临时目录；同一父任务使用现有密钥槽，
+内部依次处理各区，不额外超额并发。部分失败生成部分完成结果，失败区保留原图。
+`POST /canvas/projects/{id}/runs/{run_id}/resume-regions` 接收 `expected_revision`，仅接受未取消且结果节点未改动
+的失败/部分完成任务。成功区复用，失败区显式新下单，已知 Tuzi 订单仅续查，未知提交不重发；
+全部裁片已完成但合成中断时仅重新合成。普通 Job 克隆重试不得绕过此规则。
+
 `GET /canvas/projects/{id}/nodes/{node_id}/image-edit` 返回源版本与 MJ 可用动作，不提交任务。
 MJ 原生操作要求输出 task/单图序号、文件 SHA256、原授权渠道指纹匹配；仅开放 fetch.buttons 中实际动作。
 需要单图时显式准备一次，不自动追加计费任务。Action 受理后仅在查询状态为 MODAL 时发送 Modal；code=21

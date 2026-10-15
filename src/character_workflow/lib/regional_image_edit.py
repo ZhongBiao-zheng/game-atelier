@@ -5,7 +5,7 @@ import math
 import re
 from dataclasses import dataclass
 
-from PIL import Image, ImageChops, ImageFilter, ImageMath, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageMath, ImageOps, ImageStat
 
 from .canvas_image_edits import edit_size_params
 from .image_size_catalog import image_size_options
@@ -189,6 +189,39 @@ def resize_rgba(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     return image.convert("RGBA").convert("RGBa").resize(
         size, Image.Resampling.LANCZOS,
     ).convert("RGBA")
+
+
+def validate_context_alignment(source: Image.Image, generated: Image.Image,
+                               protected: Image.Image) -> None:
+    """Reject only confident translation in textured protected context; no semantic claims."""
+    size = (128, max(32, round(128 * source.height / source.width)))
+    a = source.convert("L").resize(size, Image.Resampling.BILINEAR)
+    b = generated.convert("L").resize(size, Image.Resampling.BILINEAR)
+    mask = ImageChops.multiply(protected, source.getchannel("A")).resize(
+        size, Image.Resampling.NEAREST,
+    ).point(lambda p: 255 if p == 255 else 0)
+    # Exclude padding and wrap-around introduced by the diagnostic offset.
+    inside = Image.new("L", size)
+    ImageDraw.Draw(inside).rectangle((9, 9, size[0] - 10, size[1] - 10), fill=255)
+    mask = ImageChops.multiply(mask, inside)
+    if sum(mask.histogram()[1:]) < size[0] * size[1] * .15:
+        return
+    if ImageStat.Stat(a, mask).stddev[0] < 12:
+        return
+    a, b = a.filter(ImageFilter.FIND_EDGES), b.filter(ImageFilter.FIND_EDGES)
+    if ImageStat.Stat(a, mask).mean[0] < 4:
+        return
+    baseline = ImageStat.Stat(ImageChops.difference(a, b), mask).mean[0]
+    if baseline < 2:
+        return
+    best = (baseline, 0, 0)
+    for dx in range(-8, 9):
+        for dy in range(-8, 9):
+            score = ImageStat.Stat(ImageChops.difference(a, ImageChops.offset(b, dx, dy)), mask).mean[0]
+            if score < best[0]:
+                best = (score, dx, dy)
+    if best[0] < baseline * .55 and max(abs(best[1]), abs(best[2])) >= 3:
+        raise ValueError("模型返回裁片的上下文出现明显位移；未回贴，请调整选区后重试")
 
 
 def stitch_regions(source: Image.Image, regions: list[Region],

@@ -60,6 +60,7 @@ import { Link, useLocation } from 'wouter';
 import {
   cancelCanvasRun,
   resumeCanvasMjEdit,
+  resumeCanvasRegions,
   canvasDownloadUrl,
   canvasMediaUrl,
   createCanvasReversePromptConfig,
@@ -556,6 +557,8 @@ function CanvasEditorInner({
   const [toolNotice, setToolNotice] = useState<string | null>(null);
   const [toolNoticeAction, setToolNoticeAction] = useState<CanvasNoticeAction | null>(null);
   const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
+  const [resumeRegionsId, setResumeRegionsId] = useState<string | null>(null);
+  const [resumingRegions, setResumingRegions] = useState(false);
   const [teamRelatedSha256, setTeamRelatedSha256] = useState<string | null>(null);
   const [teamLibraryId, setTeamLibraryId] = useState<string | null>(null);
   const [libraryPanelKey, setLibraryPanelKey] = useState(0);
@@ -791,6 +794,7 @@ function CanvasEditorInner({
     setGenerationPreferencesSaving(false);
     setProjectRenameDraft(null);
     setProjectRenameBusy(false);
+    setResumeRegionsId(null);
     setLibraryMode(null);
     setCreationAssetSaveRequest(null);
     setCanvasUiPreferences(DEFAULT_CANVAS_UI_PREFERENCES);
@@ -3189,6 +3193,24 @@ function CanvasEditorInner({
     }
   }, [projectId, persistNow, mergeSubmittedRunDocument, applyLocalJob, flushSave]);
 
+  async function confirmResumeRegions() {
+    if (!resumeRegionsId || runSubmissionInFlight.current) return;
+    runSubmissionInFlight.current = true; setResumingRegions(true); setError(null);
+    try {
+      if (!await persistNow()) return;
+      const dirty = dirtyVersion.current;
+      const result = await resumeCanvasRegions(projectId, resumeRegionsId, serverRevision.current);
+      if (latestDocument.current?.project_id !== projectId) return;
+      mergeSubmittedRunDocument(result.document, result.job, dirty);
+      applyLocalJob(result.job); setResumeRegionsId(null);
+    } catch (resumeError) {
+      if (latestDocument.current?.project_id === projectId) setError((resumeError as Error).message);
+    } finally {
+      runSubmissionInFlight.current = false; setResumingRegions(false);
+      if (saveQueued.current) void flushSave().catch(() => undefined);
+    }
+  }
+
   const dismissCandidate = useCallback(async (runId: string, candidateId: string) => {
     setError(null);
     try {
@@ -4459,6 +4481,7 @@ function CanvasEditorInner({
     submitRun,
     cancelRun,
     resumeMjEdit,
+    resumeRegions: setResumeRegionsId,
     dismissCandidate,
     updateNode,
     previewNodeResize,
@@ -5307,6 +5330,17 @@ function CanvasEditorInner({
           />
         )}
 
+        <Dialog open={Boolean(resumeRegionsId)} onOpenChange={open => { if (!open && !resumingRegions) setResumeRegionsId(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader><DialogTitle>继续未完成区域</DialogTitle><DialogDescription>
+              已完成区域不会重新生成。待生成和失败区域将重新计费；有订单号的暂停区域只继续查询。
+              提交结果不明的区域暂不重发。
+            </DialogDescription></DialogHeader>
+            <p className="text-sm">新增请求：{(jobsByRunId.get(resumeRegionsId ?? '')?.params.regional_edit?.tasks ?? []).filter(task => ['failed', 'pending'].includes(task.status)).length} 次 · 费用以供应商结算为准</p>
+            <DialogFooter><Button variant="ghost" disabled={resumingRegions} onClick={() => setResumeRegionsId(null)}>取消</Button>
+              <Button disabled={resumingRegions} onClick={() => void confirmResumeRegions()}>{resumingRegions ? '提交中…' : '继续'}</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
         <Dialog open={shortcutsOpen} onOpenChange={open => {
           setShortcutsOpen(open);
           if (!open) requestAnimationFrame(() => canvasMenuTriggerRef.current?.focus());

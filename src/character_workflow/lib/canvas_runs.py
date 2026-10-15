@@ -2471,7 +2471,9 @@ def resume_regional_edit_run(project_id: str, run_id: str,
                     task.update(status="pending", provider={}, error=None,
                                 past_cost_usd=task.get("past_cost_usd", 0) +
                                 task.pop("cost_usd", 0))
-            if not any(t["status"] in {"pending", "paused"} for t in tasks):
+            compose_only = (not job.output_paths
+                            and any(t["status"] == "succeeded" for t in tasks))
+            if not compose_only and not any(t["status"] in {"pending", "paused"} for t in tasks):
                 raise ValueError("剩余区域提交结果未确认，请先核对厂商订单；未重复下单")
             updated_job = job.model_copy(update={
                 "status": JobStatus.PENDING, "params": params, "output_paths": [], "error": None,

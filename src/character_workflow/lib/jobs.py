@@ -320,6 +320,8 @@ def clone_job_for_retry(job_id: str) -> Job:
     （output_paths / error / params.actual_size / params.warnings），
     其余参数原样复制，并以 retry_of 指回原 job。"""
     src = read_job(job_id)
+    if src.params.regional_edit:
+        raise ValueError("分区编辑请在画布中继续区域任务，不能复制整单重试")
     if src.workshop_request_id:
         raise ValueError("工坊请求任务重试需要新建生成请求并重新批准")
     if src.status != JobStatus.FAILED:
@@ -338,7 +340,6 @@ def clone_job_for_retry(job_id: str) -> Job:
         "mj_submit_uncertain": None,
         "mj_outputs": None,
         "mj_edit_state": None,
-        "regional_edit": None,
         # 「自动」重试从组内顺序重新开始，不沿用上一单已经换掉的供应商。
         "route_tried": None,
     })
