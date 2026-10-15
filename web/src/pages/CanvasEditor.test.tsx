@@ -15,6 +15,8 @@ import {
   pasteIntoCanvas,
   reproduceIntoCanvas,
   replaceCanvasNodeMedia,
+  resumeCanvasMjEdit,
+  resumeCanvasRegions,
   saveCanvasDocument,
   submitCanvasLayerDecomposition,
   submitCanvasRun,
@@ -330,6 +332,8 @@ vi.mock('@/api/canvas', () => ({
   listCanvasProjects: vi.fn(),
   renameCanvasProject: vi.fn(),
   replaceCanvasNodeMedia: vi.fn(),
+  resumeCanvasMjEdit: vi.fn(),
+  resumeCanvasRegions: vi.fn(),
   pasteIntoCanvas: vi.fn(),
   reproduceIntoCanvas: vi.fn(),
   runCanvasMediaOperation: vi.fn(),
@@ -488,6 +492,42 @@ beforeEach(() => {
 function lastSavedDocument() {
   return vi.mocked(saveCanvasDocument).mock.calls.at(-1)?.[1];
 }
+
+it.each(['regional', 'mj'] as const)('resumes %s editing after saving without blocking its own request', async kind => {
+  const node = imageNode('result', '局部修改');
+  node.data.active_run_id = 'run-edit';
+  const initial = documentWith({ nodes: [node] });
+  const job = {
+    job_id: 'job-edit', character_id: 'main', prompt: '修改选区', model: 'gpt-image-2',
+    submitted_at: '2026-10-15T00:00:00Z', status: 'failed', kind: 'image', namespace: 'canvas',
+    canvas_project_id: 'canvas-one', alias: 'main', provider: 'openai', output_paths: [], error: '暂停',
+    params: kind === 'regional' ? { regional_edit: { tasks: [{ region_id: '0', candidate: 0, status: 'failed' }] } }
+      : { mj_edit_state: { poll_paused: true } },
+    canvas_run: { run_id: 'run-edit', result_node_id: 'result', candidates: [], snapshot: {
+      snapshot_version: 1, surface_node_id: 'result', result_node_id: 'result', mode: 'image',
+      final_prompt: '修改选区', input_policy: 'all_connected', model: 'gpt-image-2', provider: 'openai',
+      alias: 'main', normalized_params: {}, inputs: [], mask_version_id: null,
+      submitted_at: '2026-10-15T00:00:00Z', submitted_by: { kind: 'user', actor_id: null }, request_fingerprint: 'f',
+    } },
+  } as unknown as Job;
+  vi.mocked(getCanvasDocument).mockResolvedValue(initial);
+  vi.mocked(listCanvasJobs).mockResolvedValue([job]);
+  const resume = vi.mocked(kind === 'regional' ? resumeCanvasRegions : resumeCanvasMjEdit);
+  let complete: (result: Awaited<ReturnType<typeof resumeCanvasRegions>>) => void = () => undefined;
+  resume.mockReturnValueOnce(new Promise(resolve => { complete = resolve; }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByLabelText('simulate node select'));
+  const trigger = await screen.findByRole('button', { name: kind === 'regional' ? '继续未完成区域' : '继续查询 MJ 原任务（不重新下单）' });
+  fireEvent.click(trigger);
+  if (kind === 'regional') fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '继续' }));
+  await waitFor(() => expect(resume).toHaveBeenCalledExactlyOnceWith('canvas-one', 'run-edit', 7));
+  if (kind === 'regional') expect(screen.getByRole('button', { name: '提交中…' })).toBeDisabled();
+  else fireEvent.click(trigger);
+  expect(resume).toHaveBeenCalledTimes(1);
+  await act(async () => complete({ document: { ...initial, revision: 8 }, job: { ...job, status: 'pending' } }));
+  expect(screen.queryByText('画布命令正在提交，请等待完成后再离开或执行其他操作。')).not.toBeInTheDocument();
+});
 
 it('opens layer-stack details and inspects hidden layers without changing the canvas', async () => {
   const base = mockFileUpload(new File(['x'], 'base.png'), 7).version;
