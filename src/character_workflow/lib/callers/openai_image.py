@@ -368,7 +368,7 @@ def render(
 
 
 def resolve_image_protocol(provider: str, base_url: str | None, model: str) -> str | None:
-    """图片调用协议启发式 —— 返回 "ark" / "openai" / None（None = 走默认 OpenAI 兼容入口）。
+    """图片调用协议启发式 —— 返回 "ark" / "evolink" / None（默认 OpenAI 兼容入口）。
 
     权威来源是网关 `GET /models` 的 `supported_protocols`（models-preview 解析后存进
     ModelSpec.protocol）；这里只兜底两种情况：旧 key 没存过 protocol、用户手填了不在
@@ -380,6 +380,8 @@ def resolve_image_protocol(provider: str, base_url: str | None, model: str) -> s
     判据同时看 provider 名与 base_url 的 host：把词元跳动配成 provider=custom（UI 完全
     允许）时，只看 provider 名会漏判，又回到那个 503。
     """
+    if provider == "evolink" and model == "mj-v8.2":
+        return "evolink"
     if (provider == "tokendance" or _is_tokendance_gateway(base_url)) and (
         image_family(model) == "seedream"
     ):

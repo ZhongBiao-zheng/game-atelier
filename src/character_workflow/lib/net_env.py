@@ -26,6 +26,7 @@ DIRECT_HOST_SUFFIXES: tuple[str, ...] = (
     "addmao.com",
     "aiproxy.vip",
     "tu-zi.com",
+    "evolink.ai",  # API、免费文件上传与结果 CDN 均支持国内直连。
     "hf-mirror.com",  # 抠图模型下载（国内 Hugging Face 镜像）  # 兔子 API（国内聚合商）；实测：未放行时小火箭代理 1082 隧道不通 → ProxyError。
 )
 

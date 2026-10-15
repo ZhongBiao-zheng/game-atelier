@@ -340,6 +340,7 @@ def clone_job_for_retry(job_id: str) -> Job:
         "mj_submit_uncertain": None,
         "mj_outputs": None,
         "mj_edit_state": None,
+        "evolink_state": None,
         # 「自动」重试从组内顺序重新开始，不沿用上一单已经换掉的供应商。
         "route_tried": None,
     })
@@ -372,6 +373,10 @@ def fail_orphan_studio_jobs(error: str = "server restarted, job interrupted") ->
 
 
 def is_resumable_studio_job(job: Job) -> bool:
+    if job.provider == "evolink":
+        from .canvas_image_edits import has_resumable_mj_task
+        return (job.namespace == "studio" and job.status == JobStatus.PENDING
+                and has_resumable_mj_task(job))
     return bool(
         job.namespace == "studio"
         and job.status == JobStatus.PENDING

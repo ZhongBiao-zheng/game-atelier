@@ -518,6 +518,8 @@ def _supports_canvas_image_generation(key: KeySpec, model: ModelSpec) -> bool:
 
     if model_modality(model, key) != "image" or key.provider == "nano_banana":
         return False
+    if key.provider == "evolink":
+        return model.id == "mj-v8.2" and model.protocol in {None, "evolink"}
     if image_family(model.id) == "midjourney" or key.provider == "openrouter":
         return True
     if key.provider not in {"openai", "midjourney", "seedream", "tokendance", "custom"}:
@@ -552,6 +554,8 @@ def _normalized_image_preference_params(
 
     if params.get("size_mode") in {"auto", "custom"}:
         draft_params = normalize_image_size_params(key, model.id, params)
+        if key.provider == "evolink":
+            return JobParams.model_validate({**draft_params, "n": 4})
         for field in ("ratio", "resolution", "custom_size"):
             if params.get(field) is not None and draft_params.get("size_mode"):
                 draft_params[field] = params[field]
@@ -1764,6 +1768,8 @@ def submit_mask_edit_run(
                 edit.update(native)
             elif options.mode == "prepare":
                 raise ValueError("准备单图只适用于 MJ")
+            if transport == "evolink" and options.reference_node_id:
+                raise ValueError("EvoLink MJ 编辑只接受当前源图与选区，不支持额外参考素材")
             normalized, job_params, effective_count = _normalized_params(
                 draft,
                 requested_count,
@@ -1810,7 +1816,13 @@ def submit_mask_edit_run(
             if options.mode == "inpaint":
                 normalized_mask = normalize_canvas_mask(source_path, source, mask_body)
             else:
-                if transport == "mj":
+                if transport in {"mj", "evolink"}:
+                    if transport == "evolink":
+                        if options.width is None or options.height is None:
+                            raise ValueError("扩图需要目标宽高")
+                        # Reuse the canvas bounds validation; native MJ receives the unexpanded
+                        # source and source-sized mask, with placement in img_pos.
+                        expanded_source(source_path, edit)
                     mask = Image.new("L", (width, height), 255)
                 else:
                     if options.width is None or options.height is None:
@@ -1824,7 +1836,7 @@ def submit_mask_edit_run(
                     body, width, height, hashlib.sha256(body).hexdigest(),
                 )
             edit.update(source_version_id=source.version_id)
-            if transport != "mj" and options.mode == "inpaint":
+            if transport not in {"mj", "evolink"} and options.mode == "inpaint":
                 from .canvas_image_edits import regional_plan
                 plan_id, regions = regional_plan(normalized_mask.body, key, model.id, options)
                 edit.update(plan_id=plan_id, regions=[r.descriptor() for r in regions])
@@ -1840,7 +1852,7 @@ def submit_mask_edit_run(
                 for field in ("ratio", "resolution", "custom_size"):
                     normalized.pop(field, None)
                 normalized.update(size_params)
-            elif transport != "mj":
+            elif transport not in {"mj", "evolink"}:
                 size_params = edit_size_params(key, model.id, width, height)
                 job_params = job_params.model_copy(update={
                     "ratio": None, "resolution": None, **size_params,
@@ -1866,7 +1878,7 @@ def submit_mask_edit_run(
                 origin=CanvasUserMaskOrigin(
                     kind="user_mask",
                     source_version_id=source.version_id,
-                    expanded_canvas=options.mode == "outpaint" and transport != "mj",
+                    expanded_canvas=options.mode == "outpaint" and transport not in {"mj", "evolink"},
                 ),
                 kind="image",
                 path=final_path.relative_to(canvas_project_dir(project_id)).as_posix(),
@@ -2410,9 +2422,11 @@ def resume_mj_edit_run(project_id: str, run_id: str, expected_revision: int) -> 
         with job_lock(original.job_id):
             job = read_job(original.job_id)
             context = job.canvas_run
+            native_state = (job.params.evolink_state if job.provider == "evolink"
+                            else job.params.mj_edit_state) or {}
             if (job.status != JobStatus.FAILED or not context or job.cancel_requested_at
-                    or not job.params.image_edit or not has_resumable_mj_task(job)
-                    or not (job.params.mj_edit_state or {}).get("poll_paused")):
+                    or not has_resumable_mj_task(job)
+                    or not native_state.get("poll_paused")):
                 raise ValueError("这个任务没有可续查的 MJ 订单")
             result = next((node for node in current.nodes if node.id == context.result_node_id), None)
             if (not isinstance(result, CanvasImageNode) or result.data.current_version_id

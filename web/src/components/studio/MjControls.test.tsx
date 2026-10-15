@@ -6,6 +6,20 @@ import { MJ_DEFAULTS } from '@/lib/mjParams';
 import { MjControls } from './MjControls';
 
 describe('MjControls', () => {
+  it('EvoLink 固定 Fast Standard，仅展示已支持的参数', () => {
+    render(<MjControls value={MJ_DEFAULTS} onChange={vi.fn()} evolink
+      filledRefs={{ image: true, sref: true, cref: true, oref: true }} />);
+    expect(screen.getByRole('button', { name: 'Midjourney 参数' })).toHaveTextContent('Fast · Standard');
+    fireEvent.click(screen.getByRole('button', { name: 'Midjourney 参数' }));
+    expect(screen.queryByLabelText('选择 Midjourney 模型')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('选择版本')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('选择速度档')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('选择角色权重')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('选择 Omni 权重')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('profile')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'sref 编号' })).toBeInTheDocument();
+    expect(screen.getByRole('listbox', { name: '选择风格权重' })).toBeInTheDocument();
+  });
   it('chaos 下方依次是 sref 与 profile，且粘贴完整 flag 时只保留参数值', () => {
     const onChange = vi.fn();
     render(<MjControls value={MJ_DEFAULTS} onChange={onChange} menuDirection="down" />);

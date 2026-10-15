@@ -10,13 +10,13 @@ import { providerLabel } from '@/lib/providerLabels';
 import { promptVariableError, promptVariableParts, readablePromptVariables, resolvePromptVariables } from '@/lib/promptVariables';
 import { focusEmptyVariable, syncVariableInput, variableInput, variablePromptNodes } from '@/lib/promptVariableEditor';
 import { maxReferenceImages } from '@/lib/referenceLimits';
-import { imageFamily } from '@/lib/modelFamily';
+import { imageFamily, isEvolinkMidjourney } from '@/lib/modelFamily';
 import {
   MJ_IMAGES_PER_TASK,
   QUALITY_LABELS,
   type Quality,
 } from '@/lib/imageControlCaps';
-import { hasSrefCode, MJ_DEFAULTS, type MjParams } from '@/lib/mjParams';
+import { evolinkMjParams, hasSrefCode, MJ_DEFAULTS, type MjParams } from '@/lib/mjParams';
 import { MjControls } from './MjControls';
 import { EMPTY_MJ_REFS, MjReferenceSlots, type MjRefSlots } from './MjReferenceSlots';
 import { captureVideoFrame } from '@/lib/videoFrame';
@@ -295,12 +295,14 @@ export function PromptInput({
   const [chipHover, setChipHover] = useState<{ label: string; left: number; top: number } | null>(null);
   // 厂商/模型列表按当前生成类型过滤：模型级 modality 标注优先，未标注按 key 级 modalities 兜底。
   const wantedModality = isVideo ? 'video' : 'image';
+  const visibleModel = (m: KeyView['models'][number], p: KeyView) => modelModality(m, p) === wantedModality
+    && (p.provider !== 'evolink' || (isEvolinkMidjourney(m.id, p.provider) && (!m.protocol || m.protocol === 'evolink')));
   const visibleProviders = providers.filter(
-    (p) => (p.models ?? []).some((m) => modelModality(m, p) === wantedModality),
+    (p) => (p.models ?? []).some((m) => visibleModel(m, p)),
   );
   const provider = visibleProviders.find((item) => item.alias === providerAlias) ?? visibleProviders[0];
   const providerDisplayName = providerName(provider);
-  const models = (provider?.models ?? []).filter((m) => modelModality(m, provider) === wantedModality);
+  const models = provider?.models.filter((m) => visibleModel(m, provider)) ?? [];
   // 模型不在当前列表时模型位空着、不能生成，不偷偷换成第一个模型：换类型后的收敛由上层做。
   const selectedModel = models.find((item) => item.id === model);
   const isOmni = isVideo && videoMode === 'omni' && Boolean(videoCaps);
@@ -603,6 +605,7 @@ export function PromptInput({
       : null;
   // MJ 的比例/版本/stylize 由渠道固定注入，张数也固定 4 —— 这些控件不能装作可选。
   const isMj = caps.family === 'midjourney';
+  const isEvoMj = isEvolinkMidjourney(size.modelId, size.provider);
   const maxRef = maxReferenceImages(selectedModel?.id);
   // omni 参考上限：按族覆盖（happyhorse video-edit = 5 图 + 1 视频），缺省 9/3/3。
   const maxRefImgs = videoCaps?.maxRefImages ?? MAX_REF_IMAGES;
@@ -938,6 +941,7 @@ export function PromptInput({
               onChange={onMjRefsChange}
               version={mjParams.version}
               srefCodeActive={hasSrefCode(mjParams)}
+              evolink={isEvoMj}
             />
           </div>
         )}
@@ -1263,7 +1267,7 @@ export function PromptInput({
 
           {isMj && (
             <MjControls
-              value={mjParams}
+              value={isEvoMj ? evolinkMjParams(mjParams) : mjParams}
               onChange={(patch) => onMjParamsChange?.(patch)}
               filledRefs={{
                 image: mjRefs.image.length > 0,
@@ -1272,6 +1276,7 @@ export function PromptInput({
                 oref: mjRefs.oref.length > 0,
               }}
               menuDirection={menuDirection}
+              evolink={isEvoMj}
             />
           )}
 

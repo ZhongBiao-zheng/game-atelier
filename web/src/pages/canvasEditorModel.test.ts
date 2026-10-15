@@ -18,6 +18,7 @@ import {
 } from './canvasEditorModel';
 import type { CanvasDocument, CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
+import type { KeyView } from '@/api/keys';
 
 it('expands every layer into compact owned material views and reuses the existing group', () => {
   const stack = {
@@ -133,6 +134,27 @@ it('locks Midjourney jobs to the four paid outputs from one task', () => {
   );
 
   expect(params).toEqual({ n: 4, ratio: '16:9', size_mode: 'ratio' });
+});
+
+it('locks EvoLink to four outputs and clears unsupported inherited MJ settings', () => {
+  expect(normalizeCanvasImageParams('mj-v8.2', 'evolink', {
+    n: 1, ratio: '16:9', quality: 'high', mode: 'TURBO', bot_type: 'NIJI_JOURNEY',
+    mj_version: '6', mj_profile: 'abc123', mj_cref: ['cref.png'], mj_cw: 100,
+    mj_oref: ['oref.png'], mj_ow: 250, mj_sref_code: '12345',
+  })).toEqual({ n: 4, ratio: '16:9', size_mode: 'ratio', mj_sref_code: '12345' });
+});
+
+it('offers only the implemented EvoLink generation model in Canvas', async () => {
+  const { canvasGenerationModelSupportsMode, createCanvasGenerationDraft } = await import('./canvasEditorModel');
+  const key: KeyView = { alias: 'evolink', provider: 'evolink', base_url: 'https://api.evolink.ai/v1',
+    access_key: '', secret_key: null, capabilities: [], notes: '', created_at: '',
+    models: [{ id: 'mj-v8.2', name: 'Midjourney V8.2', modality: 'image', protocol: 'evolink' }],
+  };
+  const supported = key.models[0];
+  expect(canvasGenerationModelSupportsMode(key, supported, 'image')).toBe(true);
+  expect(canvasGenerationModelSupportsMode(key, { ...supported, id: 'mj-v8.2-upload-paint' }, 'image')).toBe(false);
+  expect(canvasGenerationModelSupportsMode(key, { ...supported, protocol: 'mj' }, 'image')).toBe(false);
+  expect(createCanvasGenerationDraft([key], 'image').params.n).toBe(4);
 });
 
 

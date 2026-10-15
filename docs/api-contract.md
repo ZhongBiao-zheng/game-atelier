@@ -519,6 +519,19 @@ MJ 原生操作要求输出 task/单图序号、文件 SHA256、原授权渠道�
 MJ 尺寸和保护能力以厂商动作为准，不套用通用像素保护承诺。内部来源字段由服务端独占，普通 Studio 请求不能注入。
 
 MJ 原生编辑查询超时/网络中断记录 `mj_edit_state.poll_paused`，不假定厂商任务失败；结果节点显示“继续查询”。
+
+#### EvoLink MJ V8.2
+
+Key `provider=evolink`、模型 `mj-v8.2`、协议 `evolink`，API 根地址为 `https://api.evolink.ai/v1`。
+普通生图使用 `POST /v1/images/generations`，固定 Fast / Standard，每次返回最多 4 张；不把派生动作 ID 当作普通模型。
+画布同一 mask-edit 命令选择该模型时，使用 `mj-v8.2-upload-paint`，接受任意项目内原图，无需既有 MJ 订单。
+不启用通用模型的分区裁剪或回贴，也不接收额外替换参考图；原图保持不变，输出登记为关联结果节点的候选版本。
+源图经 EXIF 转正后通过 EvoLink 临时文件服务上传；源尺寸蒙版从内部白保留/黑编辑转换为不透明黑保留/白重绘 PNG data URI。
+扩图用目标 `canvas` 和原图尺寸 `img_pos`，允许改变画布比例，不拉伸原图；内部仍保存源图尺寸的全白保留蒙版。
+`evolink_state` 是 runner 独占状态，保存渠道指纹、提交不确定标记、订单、终态结果地址与查询暂停信息。
+收费 POST 前先落盘 uncertain，取得 ID 后立即记录 `provider_task_protocol=evolink` / `provider_task_ids`。
+不确定提交绝不自动重发；已知 ID 只续查 GET，已完成但下载失败只恢复下载。画布暂停时沿用“继续查询”入口。
+新订单与配方复用必须去掉 `evolink_state`，浏览器不能伪造或改写。
 `POST /canvas/projects/{id}/runs/{run_id}/resume-mj-edit` 接收 `expected_revision`，只恢复未取消、已有可靠订单 ID
 且结果节点未改动的中断任务；复用原 Job/选区/动作，仅续查，不创建新订单。显式 CLI retry 则是新的待确认任务，
 清空 MJ 订单、输出映射、不确定提交与续查状态。详情可按住对比原图，并按需显示选区。

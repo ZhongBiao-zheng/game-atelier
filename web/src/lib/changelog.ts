@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.94.0',
+    date: '2026-10-15',
+    headline: 'EvoLink Midjourney 图片编辑',
+    changes: [
+      { kind: 'feat', text: '新增 EvoLink Key 与 Midjourney V8.2，支持普通生图，以及现成图片的蒙版修改和扩图。' },
+      { kind: 'fix', text: '编辑一次提交最多四个候选；查询或下载中断可继续原订单，不重复下单。' },
+    ],
+  },
+  {
     version: '5.93.0',
     date: '2026-10-15',
     headline: '局部修改支持分区裁剪',

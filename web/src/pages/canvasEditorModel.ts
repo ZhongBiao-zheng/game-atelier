@@ -4,7 +4,7 @@ import { imageControlCaps, MJ_IMAGES_PER_TASK, type ImageControlCaps, type Quali
 import { isAutoProvider, providerForAlias, routeChannel, routeMemberChoices, selectionImageCaps, storedAlias } from '@/lib/modelRoutes';
 import type { Job, JobParams } from '@/schema/jobs';
 import { modelModality, type KeyView } from '@/api/keys';
-import { imageFamily, supportsImageQuality } from '@/lib/modelFamily';
+import { imageFamily, isEvolinkMidjourney, supportsImageQuality } from '@/lib/modelFamily';
 import { maxReferenceImages } from '@/lib/referenceLimits';
 import {
   normalizeAudioFormat,
@@ -785,6 +785,8 @@ function isOpenAiHkBaseUrl(baseUrl: string | null | undefined) {
 }
 
 function canvasImageModelIsRoutable(key: KeyView, model: KeyView['models'][number]) {
+  if (key.provider === 'evolink') return isEvolinkMidjourney(model.id, key.provider)
+    && (!model.protocol || model.protocol === 'evolink');
   if (key.provider === 'nano_banana') return false;
   const family = imageControlCaps(model.id, key.provider).family;
   if (family === 'midjourney' || key.provider === 'openrouter') return true;
@@ -1118,6 +1120,9 @@ export function normalizeCanvasImageParams(
   const caps = capsOverride ?? imageControlCaps(model, provider, baseUrl);
   const { reference_images: _images, reference_videos: _videos, reference_audios: _audios, quality, ...retained } = current;
   const params = normalizeImageSizeParams(model, provider, baseUrl, retained, capsOverride);
+  if (isEvolinkMidjourney(model, provider)) {
+    for (const field of ['bot_type', 'mode', 'mj_version', 'mj_profile', 'mj_cref', 'mj_cw', 'mj_oref', 'mj_ow']) delete params[field];
+  }
   params.n = caps.family === 'midjourney' ? MJ_IMAGES_PER_TASK : Math.max(1, Math.min(4, Number(current.n) || 1));
   if (caps.qualities?.length) {
     params.quality = caps.qualities.includes(quality as Quality) ? quality : caps.qualities[0];

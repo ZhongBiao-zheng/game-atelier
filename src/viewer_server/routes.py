@@ -479,7 +479,7 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                 for owned in (
                     "provider_task_protocol", "provider_task_ids", "video_submission_attempts",
                     "mask_image", "image_edit", "regional_edit", "mj_submission_ids", "mj_submit_uncertain",
-                    "mj_edit_state", "mj_outputs",
+                    "mj_edit_state", "mj_outputs", "evolink_state",
                 ):
                     if owned in existing_params:
                         value[owned] = existing_params[owned]
@@ -1807,6 +1807,7 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
     seen_ids: set[str] = set()
     excluded = 0
     total = 0
+    evolink = preview_provider == "evolink"
     for item in rows:
         if not isinstance(item, dict) or not item.get("id"):
             continue
@@ -1815,7 +1816,12 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
             continue
         seen_ids.add(mid)
         total += 1
-        category = _classify_model(item)
+        # EvoLink shares /models across many endpoint contracts. Only the implemented
+        # base model belongs in the generator; derivative IDs are internal edit actions.
+        if evolink and mid != "mj-v8.2":
+            excluded += 1
+            continue
+        category = "image" if evolink else _classify_model(item)
         # 明确不能生成内容的模型不入列表；include_all 是逃生舱：
         # deny 词表哪天判过头了，画师能自己看到全量，不至于变成死路。
         if category == "excluded" and not payload.include_all:
@@ -1824,7 +1830,9 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
         modality = category if category in ("text", "image", "video", "audio") else None
         # 视频：协议 guess（resolve 不中 → None，交后端 dispatch 时判定 / 诚实报错）。
         # 图片：直接读上游协议标注（决定走 Ark 原生端点还是 OpenAI 兼容入口）。
-        if modality == "video":
+        if evolink:
+            protocol = "evolink"
+        elif modality == "video":
             protocol = resolve_protocol(preview_provider, base_url, mid)
         elif modality == "image":
             protocol = _image_protocol(item)
@@ -2251,6 +2259,7 @@ def _create_user_job(
     params.mj_submit_uncertain = None
     params.mj_edit_state = None
     params.mj_outputs = None
+    params.evolink_state = None
     # 改写值与原值同类型（str / list[str]），model_copy 不需要重新校验。
     params = params.model_copy(update=_gate_browser_refs(params.model_dump()))
     if body.kind == JobKind.IMAGE:

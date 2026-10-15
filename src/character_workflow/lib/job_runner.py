@@ -66,6 +66,8 @@ def _switch_route(job_id: str, error: BaseException) -> bool:
     params = job.params
     if not params.route_id or not job.alias or params.provider_task_ids:
         return False
+    if (params.evolink_state or {}).get("uncertain"):
+        return False
     if any(item.get("outcome") == "unconfirmed" for item in params.video_submission_attempts or []):
         return False
     reason = model_routes.failover_reason(error)
@@ -646,13 +648,17 @@ def _run_once(
                 error=None,
             )
     except Exception as e:
+        from character_workflow.lib.callers.evolink import EvoLinkPendingError
         from character_workflow.lib.callers.tuzi_async import TuziAsyncPendingError
 
         # 停止请求压过一切：Tuzi 轮询被打断时抛的也是 PendingError，不能让它把 job 留在 PENDING。
         if should_cancel():
             update_job_status(job.job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
             raise JobCanceled("已按请求停止") from e
-        provider_task_pending = isinstance(e, TuziAsyncPendingError)
+        # Canvas settles to FAILED + explicit "continue query"; Studio owns a polling worker.
+        provider_task_pending = (isinstance(e, TuziAsyncPendingError)
+                                 or (isinstance(e, EvoLinkPendingError)
+                                     and job.namespace != "canvas"))
         if not provider_task_pending and _switch_route(job.job_id, e):
             raise _RouteSwitched() from e
         saved = update_job_status(

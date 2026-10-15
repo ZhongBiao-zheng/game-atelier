@@ -4,7 +4,8 @@ import { getCanvasImageEditSource, type CanvasImageEditOptions, type CanvasImage
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { imageControlCaps } from '@/lib/imageControlCaps';
+import { imageControlCaps, MJ_IMAGES_PER_TASK } from '@/lib/imageControlCaps';
+import { isEvolinkMidjourney } from '@/lib/modelFamily';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import type { CanvasGenerationDraft, CanvasMediaVersion } from '@/schema/canvas';
 import { drawEditStrokes, editSize, isEditModel, type EditFrame, type EditPoint, type EditStroke, type EditTool } from './imageEditGeometry';
@@ -75,8 +76,9 @@ export function CanvasMaskEditDialog({ open, title, version, mediaUrl, keys, pro
   const [model, setModel] = useState(firstKey?.models.find(model => model.id === initialDraft?.model && isEditModel(model, firstKey))?.id ?? firstKey?.models.find(model => isEditModel(model, firstKey))?.id ?? '');
   const selectedKey = availableKeys.find(key => key.alias === alias);
   const caps = imageControlCaps(model, selectedKey?.provider, selectedKey?.base_url);
+  const uploadPaint = !native && isEvolinkMidjourney(model, selectedKey?.provider);
   const expanded = mode === 'outpaint' && !native;
-  const regional = mode === 'inpaint' && !native;
+  const regional = mode === 'inpaint' && !native && !uploadPaint;
   const planned = useRegionalEditPlan({ enabled: open && ready && regional, projectId, nodeId,
     versionId: version.version_id, alias, model, ...dimensions, strokes, context, feather, groups });
   const regions = planned.plan?.regions ?? [];
@@ -92,7 +94,7 @@ export function CanvasMaskEditDialog({ open, title, version, mediaUrl, keys, pro
   const validation = native ? (!action ? '这个原任务没有可用动作' : null) : regional ? planned.error ?? (!selectedKey || !model ? '请选择编辑模型' : null) : invalidFrame ? '画框必须向外扩展并完整包含原图' : size.error;
   const effectiveQuality = caps.qualities?.includes(quality as never) ? quality : caps.qualities?.[0];
   const costs = (regional ? regions.map(region => region.params) : [size.params]).map(params =>
-    estimateGenerationCostForSubmission(selectedKey, model, 'image', { ...params, n: count, quality: effectiveQuality }));
+    estimateGenerationCostForSubmission(selectedKey, model, 'image', { ...params, n: uploadPaint ? MJ_IMAGES_PER_TASK : count, quality: effectiveQuality, ...(uploadPaint ? { image_edit: { mode } } : {}) }));
   const estimatedCost = native || !costs.length || costs.some(cost => cost == null) ? null : costs.reduce<number>((sum, cost) => sum + (cost ?? 0), 0);
 
   useEffect(() => { if (open) setMode(initialMode); }, [open, initialMode]);
@@ -109,6 +111,7 @@ export function CanvasMaskEditDialog({ open, title, version, mediaUrl, keys, pro
   function initialize(image: HTMLImageElement) {
     if (!image.naturalWidth || !image.naturalHeight) return;
     setDimensions({ width: image.naturalWidth, height: image.naturalHeight });
+    if (!ready) setFrame({ width: Math.round(image.naturalWidth * 1.5), height: Math.round(image.naturalHeight * 1.5), x: Math.round(image.naturalWidth / 4), y: Math.round(image.naturalHeight / 4) });
     if (overlay.current) { overlay.current.width = image.naturalWidth; overlay.current.height = image.naturalHeight; drawEditStrokes(overlay.current, strokes); }
     setReady(true);
   }
@@ -198,12 +201,12 @@ export function CanvasMaskEditDialog({ open, title, version, mediaUrl, keys, pro
     if (needsMask && overlay.current) { ctx.globalCompositeOperation = 'destination-out'; ctx.drawImage(overlay.current, 0, 0); }
     const mask = regional ? planned.mask : await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
     if (!mask) { setLocalError('无法读取选区，请重新打开编辑器'); return; }
-    const requestedCount = native ? preparing ? 1 : 4 : count;
-    const options: CanvasImageEditOptions = { mode: preparing ? 'prepare' : mode, source_version_id: version.version_id, ...(expanded ? frame : {}), ...(reference && !native && !expanded ? { reference_node_id: reference } : {}), ...(native && action ? { custom_id: action.custom_id, zoom: nativeZoom } : {}), ...(regional ? { context, feather, groups, region_prompts: regionPrompts, plan_id: planned.plan!.plan_id } : {}) };
+    const requestedCount = native ? preparing ? 1 : MJ_IMAGES_PER_TASK : uploadPaint ? MJ_IMAGES_PER_TASK : count;
+    const options: CanvasImageEditOptions = { mode: preparing ? 'prepare' : mode, source_version_id: version.version_id, ...(expanded ? frame : {}), ...(reference && !native && !uploadPaint && !expanded ? { reference_node_id: reference } : {}), ...(native && action ? { custom_id: action.custom_id, zoom: nativeZoom } : {}), ...(regional ? { context, feather, groups, region_prompts: regionPrompts, plan_id: planned.plan!.plan_id } : {}) };
     onSubmit({ mask, requestedCount, options, draft: {
       mode: 'image', prompt: prompt.trim(), input_policy: 'all_connected',
       alias: native ? source!.mj!.alias : alias, model: native ? source!.mj!.model : model,
-      params: native ? { n: requestedCount } : { ...(regional ? regions[0].params : size.params), n: count, ...(caps.qualities ? { quality: caps.qualities.includes(quality as never) ? quality : caps.qualities[0] } : {}) },
+      params: native || uploadPaint ? { n: requestedCount } : { ...(regional ? regions[0].params : size.params), n: count, ...(caps.qualities ? { quality: caps.qualities.includes(quality as never) ? quality : caps.qualities[0] } : {}) },
       updated_at: new Date().toISOString(),
     } });
   }
@@ -214,7 +217,7 @@ export function CanvasMaskEditDialog({ open, title, version, mediaUrl, keys, pro
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" aria-pressed={mode === 'inpaint'} variant={mode === 'inpaint' ? 'secondary' : 'ghost'} onClick={() => setMode('inpaint')}>局部修改</Button>
         <Button size="sm" aria-pressed={mode === 'outpaint'} variant={mode === 'outpaint' ? 'secondary' : 'ghost'} onClick={() => setMode('outpaint')}>扩图</Button>
-        {source?.mj && <select aria-label="编辑方式" className="canvas-input ml-auto w-auto" value={native ? 'mj' : 'common'} onChange={event => { setNative(event.target.value === 'mj'); setActionId(''); }}><option value="common">通用模型</option><option value="mj">MJ 原生</option></select>}
+        {source?.mj && <select aria-label="编辑方式" className="canvas-input ml-auto w-auto" value={native ? 'mj' : 'common'} onChange={event => { setNative(event.target.value === 'mj'); setActionId(''); }}><option value="common">选择模型</option><option value="mj">MJ 原生</option></select>}
       </div>
       <div className="grid shrink-0 gap-4 lg:grid-cols-[minmax(0,1fr)_16rem]">
         <div className="min-w-0 space-y-3">
@@ -276,16 +279,16 @@ export function CanvasMaskEditDialog({ open, title, version, mediaUrl, keys, pro
           </> : <>
             <select aria-label="编辑密钥" className="canvas-input" value={alias} onChange={event => { const key = availableKeys.find(k => k.alias === event.target.value); setAlias(event.target.value); setModel(key?.models.find(m => isEditModel(m, key))?.id ?? ''); }}><option value="">选择密钥</option>{availableKeys.map(key => <option key={key.alias}>{key.alias}</option>)}</select>
             <select aria-label="编辑模型" className="canvas-input" value={model} onChange={event => setModel(event.target.value)}><option value="">选择模型</option>{selectedKey?.models.filter(m => isEditModel(m, selectedKey)).map(m => <option key={m.id} value={m.id}>{m.name || m.id}</option>)}</select>
-            <div className="flex gap-2">{caps.qualities && <select aria-label="编辑质量" className="canvas-input" value={caps.qualities.includes(quality as never) ? quality : caps.qualities[0]} onChange={event => setQuality(event.target.value)}>{caps.qualities.map(q => <option key={q} value={q}>{({ auto: '自动', low: '低', medium: '中', high: '高' })[q]}</option>)}</select>}<select aria-label="候选数" className="canvas-input" value={count} onChange={event => setCount(Number(event.target.value))}>{[1, 2, 3, 4].map(n => <option key={n} value={n}>{n} 张</option>)}</select></div>
-            {!expanded && references.length > 0 && <select aria-label="替换参考素材" className="canvas-input" value={reference} onChange={event => setReference(event.target.value)}><option value="">替换参考素材（可选）</option>{references.map(ref => <option key={ref.id} value={ref.id}>{ref.title}</option>)}</select>}
-            <p className="text-xs text-muted-foreground" aria-label="编辑输出尺寸">{target.width} × {target.height} · {expanded ? '保护原图' : '融合范围外不变'}</p>
+            {!uploadPaint && <div className="flex gap-2">{caps.qualities && <select aria-label="编辑质量" className="canvas-input" value={caps.qualities.includes(quality as never) ? quality : caps.qualities[0]} onChange={event => setQuality(event.target.value)}>{caps.qualities.map(q => <option key={q} value={q}>{({ auto: '自动', low: '低', medium: '中', high: '高' })[q]}</option>)}</select>}<select aria-label="候选数" className="canvas-input" value={count} onChange={event => setCount(Number(event.target.value))}>{[1, 2, 3, 4].map(n => <option key={n} value={n}>{n} 张</option>)}</select></div>}
+            {!uploadPaint && !expanded && references.length > 0 && <select aria-label="替换参考素材" className="canvas-input" value={reference} onChange={event => setReference(event.target.value)}><option value="">替换参考素材（可选）</option>{references.map(ref => <option key={ref.id} value={ref.id}>{ref.title}</option>)}</select>}
+            <p className="text-xs text-muted-foreground" aria-label="编辑输出尺寸">{target.width} × {target.height} · {uploadPaint ? '4 张 · Fast' : expanded ? '保护原图' : '融合范围外不变'}</p>
           </>}
           <textarea aria-label="编辑提示词" className="canvas-input min-h-28 resize-y" value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={mode === 'outpaint' ? '留空自然延展；或描述新增画面' : '留空自然修复；或描述修改内容'} />
           {regional && regions.length > 0 && <RegionalEditControls regions={regions} activeId={active?.id ?? ''} onActive={setActiveRegion}
             context={context} feather={feather} onContext={setContext} onFeather={setFeather}
             prompts={regionPrompts} defaultPrompt={prompt} onPrompt={(id, text) => setRegionPrompts({ ...regionPrompts, [id]: text })} onGroups={changeGroups} />}
           {(error || localError || validation) && <p role="alert" className="text-xs text-destructive">{error || localError || validation}</p>}
-          {sourceError && <p className="text-xs text-muted-foreground">{sourceError}</p>}
+          {sourceError && !uploadPaint && <p className="text-xs text-muted-foreground">{sourceError}</p>}
         </div>
       </div>
       <DialogFooter><span role="status" className="mr-auto self-center text-xs text-muted-foreground">{regional && (planned.planning ? '规划中…' : regions.length ? `${regions.reduce((sum, r) => sum + r.components.length, 0)} 个选区 · ${regions.length} 区 · ${regions.length * count} 次生成 · ` : '涂抹需要修改的位置 · ')}{!planned.planning && (estimatedCost == null ? '费用以供应商结算为准' : `预计 ¥${Number(estimatedCost.toFixed(4))}`)}</span><Button variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>关闭</Button><Button disabled={busy || !ready || !!validation || (needsMask && !strokes.length) || (regional && !planned.plan)} onClick={() => void submit()}>{busy ? <LoaderCircle className="animate-spin" /> : <Sparkles />}{busy ? '提交中…' : preparing ? '准备单图' : '生成'}</Button></DialogFooter>

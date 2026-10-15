@@ -170,6 +170,8 @@ class JobParams(BaseModel):
     mj_submit_uncertain: bool | None = None
     mj_outputs: list[dict[str, Any]] | None = None
     mj_edit_state: dict[str, Any] | None = None
+    # EvoLink 的提交边界、原订单与下载进度；仅 runner 可写，不能复用到新订单。
+    evolink_state: dict[str, Any] | None = None
     # Canvas 多角度生成专用：结构化相机参数进入 Snapshot，caller 只消费最终 prompt。
     angle_horizontal: int | None = Field(default=None, ge=-60, le=60)
     angle_pitch: int | None = Field(default=None, ge=-45, le=45)
@@ -184,7 +186,7 @@ class JobParams(BaseModel):
     route_tried: list[str] | None = None
     # 厂商订单首次获取立即落盘。Tuzi 支持续查；Seedance 留供核对，不自动恢复或重提。
     # tuzi_async is a historical ownership tag, never a supported submission protocol.
-    provider_task_protocol: Literal["tuzi_async", "tuzi_images", "seedance"] | None = None
+    provider_task_protocol: Literal["tuzi_async", "tuzi_images", "seedance", "evolink"] | None = None
     provider_task_ids: list[ProviderTaskId] | None = Field(default=None, max_length=4)
     video_submission_attempts: list[VideoSubmissionAttempt] | None = Field(default=None, max_length=4)
     # 图片参数 —— 前端实际在发（Studio 提交链路），显式声明保证双端类型对齐

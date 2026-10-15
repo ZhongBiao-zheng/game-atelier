@@ -65,6 +65,10 @@ def preview_regional_edit(project_id, node_id, alias, model, body, options):
 
 
 def has_resumable_mj_task(job) -> bool:
+    if job.provider == "evolink":
+        state = job.params.evolink_state or {}
+        return bool(state.get("task_id") and not state.get("uncertain")
+                    and state.get("terminal") not in {"failed", "rejected"})
     from .callers.openai_image import image_family
     if image_family(job.model) != "midjourney":
         return False

@@ -1,6 +1,7 @@
 import type { KeyView } from '@/api/keys';
 import { modelModality } from '@/api/keys';
 import { imageControlCaps } from '@/lib/imageControlCaps';
+import { isEvolinkMidjourney } from '@/lib/modelFamily';
 import { normalizeImagePixelSize } from '@/lib/studioSize';
 import type { JobParams } from '@/schema/jobs';
 
@@ -10,6 +11,9 @@ export type EditTool = 'brush' | 'eraser' | 'rectangle' | 'hand';
 export type EditStroke = { tool: EditTool; size: number; points: EditPoint[] };
 
 export function isEditModel(model: KeyView['models'][number], key: KeyView) {
+  if (isEvolinkMidjourney(model.id, key.provider)) {
+    return (!model.protocol || model.protocol === 'evolink') && modelModality(model, key) === 'image';
+  }
   return ['openai', 'custom', 'seedream', 'tokendance', 'openrouter'].includes(key.provider)
     && (!model.protocol || (key.provider === 'openrouter' ? ['openai', 'openrouter'] : ['openai', 'ark']).includes(model.protocol))
     && modelModality(model, key) === 'image'
@@ -20,6 +24,8 @@ export function editSize(key: KeyView | undefined, model: string, width: number,
   const fail = (error: string) => ({ params: {}, error });
   if (!key || !model) return fail('请选择编辑模型');
   if (width < 1 || height < 1 || Math.max(width, height) > 16384 || width * height > 16_777_216) return fail('画框不能超过 16384px 或 1600 万像素');
+  // 原图与目标画框按实际像素提交，EvoLink 由 img_pos 定义位置，不使用生图尺寸参数。
+  if (isEvolinkMidjourney(model, key.provider)) return { params: {}, error: null };
   const caps = imageControlCaps(model, key.provider, key.base_url);
   if (caps.sizeKind === 'ratio' || key.provider === 'openrouter') {
     const value = (ratio: string) => { const [a, b] = ratio.split(':').map(Number); return a / b; };

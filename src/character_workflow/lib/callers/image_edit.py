@@ -10,6 +10,8 @@ from .openai_image import image_family, supports_image_mask
 
 
 def edit_transport(provider: str, model: str, protocol: str | None) -> str | None:
+    if provider == "evolink":
+        return "evolink" if model == "mj-v8.2" and protocol in {None, "evolink"} else None
     family = image_family(model)
     if family == "midjourney":
         return "mj"
@@ -81,6 +83,10 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path,
     if key is None:
         raise ValueError("编辑模型的密钥已经不存在")
     transport = edit_transport(key.provider, model, _effective_image_protocol(key, model))
+    if transport == "evolink":
+        from .evolink import render as render_evolink
+        return render_evolink(prompt=prompt, model=model, alias=alias, output_dir=output_dir,
+                             params=params, **kwargs)
     if transport == "mj":
         from .mj_edit import render as render_mj
         return render_mj(prompt=prompt, model=model, alias=alias, output_dir=output_dir,

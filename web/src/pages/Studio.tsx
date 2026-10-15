@@ -25,9 +25,9 @@ import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studi
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
-import { imageFamily } from '@/lib/modelFamily';
+import { imageFamily, isEvolinkMidjourney } from '@/lib/modelFamily';
 import { promptToAssetSegments } from '@/lib/promptVariables';
-import { hasSrefCode, MJ_DEFAULTS, mjParamsToJob, type MjParams } from '@/lib/mjParams';
+import { evolinkMjParams, hasSrefCode, MJ_DEFAULTS, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
@@ -539,7 +539,9 @@ function StudioFull() {
     const rawQuality = overrideConfig?.quality ?? quality;
     const effectiveQuality = caps.qualities?.includes(rawQuality) ? rawQuality : undefined;
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
-    const effectiveMjParams = overrideConfig?.mjParams ?? mjParams;
+    const evoMj = isEvolinkMidjourney(channel.modelId, effectiveProvider);
+    const rawMjParams = overrideConfig?.mjParams ?? mjParams;
+    const effectiveMjParams = evoMj ? evolinkMjParams(rawMjParams) : rawMjParams;
     const effectiveSourceAssetTitle = overrideConfig
       ? overrideConfig.sourceAssetTitle
       : promptAssetSourceTitle ?? undefined;
@@ -551,9 +553,11 @@ function StudioFull() {
     let mjRefPaths: { sref?: string[]; cref?: string[]; oref?: string[] } = {};
     try {
       ({ referenceImages: refPaths, mjRefPaths } = await resolveImageReferencePaths({
-        midjourney: caps.family === 'midjourney', referenceImages, mjRefs,
+        midjourney: caps.family === 'midjourney', referenceImages,
+        mjRefs: evoMj ? { ...mjRefs, cref: [], oref: [] } : mjRefs,
         overrideReferenceImages: overrideConfig?.referenceImages,
-        overrideMjRefPaths: overrideConfig?.mjRefPaths,
+        overrideMjRefPaths: evoMj && overrideConfig?.mjRefPaths
+          ? { sref: overrideConfig.mjRefPaths.sref } : overrideConfig?.mjRefPaths,
         srefCodeActive: hasSrefCode(effectiveMjParams),
       }));
     } catch (e: any) {

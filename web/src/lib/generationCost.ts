@@ -4,6 +4,8 @@ import type { JobParams } from '@/schema/jobs';
 import {
   ARK_SEEDANCE_YUAN_PER_MILLION_TOKENS,
   ARK_SEEDREAM_YUAN_PER_IMAGE,
+  EVOLINK_MIDJOURNEY_USD_PER_REQUEST,
+  GENERATION_USD_TO_CNY,
   HAPPYHORSE_1_0_YUAN_PER_SECOND,
   HAPPYHORSE_1_1_YUAN_PER_SECOND,
   OPENAI_HK_FIXED_YUAN_PER_IMAGE,
@@ -35,6 +37,7 @@ export interface GenerationCostRequest {
   ratio?: string;
   generateAudio?: boolean;
   hasReferenceVideo?: boolean;
+  imageEdit?: boolean;
 }
 
 const TUZI_GEMINI_3_PRO_MODELS = new Set([
@@ -259,6 +262,13 @@ function estimateDashScopeVideo(request: GenerationCostRequest): number | null {
 export function estimateGenerationCost(request: GenerationCostRequest): number | null {
   if (!request.model?.id || !request.provider) return null;
 
+  if (request.kind === 'image' && request.provider.provider === 'evolink') {
+    const host = hostname(request.provider.baseUrl);
+    if ((host && host !== 'api.evolink.ai') || request.model.id !== 'mj-v8.2'
+      || !protocolMatches(request.model.protocol, 'evolink')) return null;
+    const route = request.imageEdit ? 'imageEdit' : 'generation';
+    return priced(EVOLINK_MIDJOURNEY_USD_PER_REQUEST[route] * GENERATION_USD_TO_CNY);
+  }
   if (request.kind === 'image' && isTuzi(request.provider.baseUrl)) {
     return estimateTuziImage(request);
   }
@@ -329,6 +339,7 @@ export function estimateGenerationCostForSubmission(
     generateAudio: params.generate_audio === true,
     hasReferenceVideo: Array.isArray(params.reference_videos)
       && params.reference_videos.length > 0,
+    imageEdit: params.image_edit != null,
   });
 }
 

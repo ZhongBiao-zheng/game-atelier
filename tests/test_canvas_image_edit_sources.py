@@ -125,4 +125,4 @@ def test_edit_sizes_reject_provider_normalization_that_changes_ratio(monkeypatch
 ])
 def test_resumability_requires_a_known_confirmed_mj_order(model, options, state, ids, uncertain, expected):
     params = SimpleNamespace(image_edit=options, mj_edit_state=state, mj_submission_ids=ids, mj_submit_uncertain=uncertain)
-    assert edits.has_resumable_mj_task(SimpleNamespace(model=model, params=params)) is expected
+    assert edits.has_resumable_mj_task(SimpleNamespace(model=model, provider="custom", params=params)) is expected
