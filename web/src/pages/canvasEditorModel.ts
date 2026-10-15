@@ -879,7 +879,7 @@ function defaultCanvasGenerationParams(mode: CanvasGenerationDraft['mode']): Job
       duration: 5,
       ratio: '16:9',
       resolution: '720p',
-      frame_mode: 'firstlast',
+      frame_mode: 'auto',
       generate_audio: true,
     };
   }
@@ -917,23 +917,31 @@ export function canvasGenerationPreferenceForModel<M extends CanvasGenerationMod
   if (!canvasGenerationModelSupportsMode(key, model, mode)) return null;
   return {
     selection: { alias: key.alias, model: model.id },
-    params: normalizedCanvasGenerationParams(
+    params: withoutUnrememberedParams(mode, normalizedCanvasGenerationParams(
       key,
       model,
       mode,
       { ...defaultCanvasGenerationParams(mode), ...current },
-    ) as CanvasGenerationParamsByMode[M],
+    )) as CanvasGenerationParamsByMode[M],
   };
 }
 
 /** 生成偏好里能记住的参数（与服务端 Canvas*DefaultParams 逐字段对应，多一个键整份偏好 422）。
- *  张数 n 不在里面：每次出几张是当次的决定，不跟着上一次走。 */
+ *  张数 n 不在里面：每次出几张是当次的决定，不跟着上一次走。
+ *  视频生成方式 frame_mode 也不在里面：新视频节点一律从全能参考开始，首尾帧是当次的选择。 */
 const CANVAS_REMEMBERED_PARAM_KEYS: Record<CanvasGenerationMode, readonly string[]> = {
   text: ['temperature', 'max_tokens', 'reasoning_effort'],
   image: ['ratio', 'resolution', 'size', 'size_mode', 'custom_size', 'quality'],
-  video: ['duration', 'ratio', 'resolution', 'frame_mode', 'mode', 'generate_audio', 'watermark'],
+  video: ['duration', 'ratio', 'resolution', 'mode', 'generate_audio', 'watermark'],
   audio: ['voice', 'response_format', 'speed', 'instructions'],
 };
+
+/** 偏好文件里旧版本记下的 frame_mode 不再生效，读写两头都去掉。 */
+function withoutUnrememberedParams(mode: CanvasGenerationMode, params: JobParams): JobParams {
+  if (mode !== 'video') return params;
+  const { frame_mode: _frameMode, ...rest } = params;
+  return rest;
+}
 
 /** 出图后把这次的模型和参数记成该类型的生成偏好，之后新建的节点从它开始。
  *  张数保留偏好里原来的值。和当前偏好相同时返回 null，不必写回。 */
@@ -971,7 +979,10 @@ export function createCanvasGenerationDraft(
   const model = selected?.model.id ?? '';
   const mayApplyPreferenceParams = preferred || options.preference?.selection === null;
   const sourceParams = mayApplyPreferenceParams
-    ? { ...defaultCanvasGenerationParams(mode), ...options.preference?.params }
+    ? {
+      ...defaultCanvasGenerationParams(mode),
+      ...withoutUnrememberedParams(mode, (options.preference?.params ?? {}) as JobParams),
+    }
     : defaultCanvasGenerationParams(mode);
   const params = !selected
     ? {}
@@ -1255,7 +1266,7 @@ export function normalizeCanvasVideoParams(
   } else if (usesFrameSlots || currentFrameMode === 'auto') {
     params.frame_mode = currentFrameMode;
   } else {
-    params.frame_mode = caps.modes[0] === 'omni' ? 'auto' : 'firstlast';
+    params.frame_mode = supportsOmni ? 'auto' : 'firstlast';
   }
   return params;
 }

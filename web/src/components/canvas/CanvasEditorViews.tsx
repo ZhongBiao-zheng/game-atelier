@@ -26,6 +26,7 @@ import { Link } from 'wouter';
 
 import { canvasDownloadUrl, canvasMediaUrl, downloadCanvasLayers, type CanvasLayerExportFormat } from '@/api/canvas';
 import { CanvasBatchMaterialEditor, CanvasGroupFrame } from './CanvasBatchControls';
+import { CanvasAudioPlayer } from './CanvasAudioPlayer';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
 import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
 import type { KeyView } from '@/api/keys';
@@ -257,7 +258,7 @@ export function CanvasPlaceholderCard({ data }: NodeProps<CanvasPlaceholderFlowN
   );
 }
 
-export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
+export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<CanvasFlowNode>) {
   const context = useContext(CanvasNodeContext);
   const setTextEditing = context?.setTextEditing;
   const node = data.domain;
@@ -649,7 +650,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
           role="toolbar"
           aria-label={`${node.title} 节点工具`}
           data-canvas-node-toolbar={node.id}
-          className="flex items-center gap-1 rounded-xl border border-border bg-glass p-1 backdrop-blur-glass shell-glow"
+          className={cn(
+            'flex items-center gap-1 rounded-xl border border-border bg-glass p-1 backdrop-blur-glass shell-glow',
+            canvasDragChromeClass(dragging, chromeBelow ? 'up' : 'down'),
+          )}
           onFocusCapture={event => {
             const focused = (event.target as HTMLElement).closest<HTMLElement>('button, a[href]');
             updateToolbarTabStops(toolbarControls(event.currentTarget), focused);
@@ -947,6 +951,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
           anchor={shellElement}
           surfaceRef={context.generationPanel.surfaceRef}
           onSideChange={setPanelSide}
+          hiddenWhileDragging={dragging}
         >
           <CanvasGenerationComposer
             node={node}
@@ -1068,15 +1073,26 @@ function samePlacement(a: CanvasPanelPlacement | null, b: CanvasPanelPlacement) 
  *
  *  位置状态留在本组件内：children 由父级 render 传进来，本组件因平移重新定位时 children 仍是
  *  同一个 element 引用，React 会跳过整棵子树，面板内容不会跟着每帧重渲染。 */
+/** 拖动节点时工具条与生成面板朝节点方向收起，松手再浮现；进出动画同创作台的「回到底部」。
+ *  静止时不留 translate / opacity：祖先上残留的 translate 会让面板里的 backdrop-blur 失效。 */
+function canvasDragChromeClass(dragging: boolean, toward: 'up' | 'down') {
+  return cn(
+    'transition-[opacity,translate] duration-300 motion-reduce:transition-none',
+    dragging && cn('pointer-events-none opacity-0', toward === 'down' ? 'translate-y-2' : '-translate-y-2'),
+  );
+}
+
 function CanvasNodeFloatingPanel({
   nodeId,
   anchor,
   surfaceRef,
   onSideChange,
+  hiddenWhileDragging = false,
   children,
 }: {
   nodeId: string;
   onSideChange?: (side: CanvasPanelSide) => void;
+  hiddenWhileDragging?: boolean;
   /** 节点外壳的 DOM 节点。传元素而不是 ref：子组件的 layout effect 在父级 ref 挂上之前就跑，
    *  用 ref 会拿到 null，首帧永远定位不上。父级用 callback ref 把它变成 state 传下来。 */
   anchor: HTMLElement | null;
@@ -1145,6 +1161,8 @@ function CanvasNodeFloatingPanel({
     <div
       ref={panelRef}
       data-canvas-node-panel-anchor={nodeId}
+      // 进场动画由 gsap 写内联 transform 并在结束时清掉，与这里的拖动收起不重叠。
+      className={canvasDragChromeClass(hiddenWhileDragging, side === 'above' ? 'down' : 'up')}
       style={{
         position: surface ? 'absolute' : 'fixed',
         left: placement?.left ?? 0,
@@ -3434,23 +3452,7 @@ function MediaPreview({
       </div>
     );
   }
-  return (
-    <div data-canvas-media className="nodrag nowheel grid size-full place-items-center gap-3 p-4 text-xs text-muted-foreground">
-      {!compact && <span className="flex items-center gap-2"><FileAudio className="size-5" aria-hidden="true" />音频素材</span>}
-      <audio
-        ref={mediaRef}
-        src={resolvedSrc}
-        controls
-        preload={resolvedSrc ? 'metadata' : 'none'}
-        data-canvas-media-controls="audio"
-        className="w-full"
-        onClick={stopCanvasInteraction}
-        onDoubleClick={stopCanvasInteraction}
-        onPointerDown={stopCanvasInteraction}
-        onKeyDown={stopCanvasInteraction}
-      />
-    </div>
-  );
+  return <CanvasAudioPlayer src={resolvedSrc} title={title} mediaRef={mediaRef} />;
 }
 
 /** 提示词超过约 3 行才进摘要态；短提示词直接给编辑器，少一次点击。 */
@@ -3504,6 +3506,7 @@ function useLazyMedia(src: string) {
 export const canvasNodeTypes = {
   canvasNode: memo(CanvasNodeCard, (previous, next) => (
     previous.selected === next.selected
+    && previous.dragging === next.dragging
     && previous.data.domain === next.data.domain
   )),
   canvasPlaceholder: CanvasPlaceholderCard,

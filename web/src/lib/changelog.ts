@@ -33,6 +33,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.89.7',
+    date: '2026-10-15',
+    headline: '画布音频节点重做，拖动更清爽',
+    changes: [
+      { kind: 'feat', text: '音频节点改成波形播放器：播放头固定在中间，波形随播放走，可前进后退 5 秒，点波形跳到对应位置；节点也能正常拖动了。' },
+      { kind: 'feat', text: '拖动节点时，上方工具条、下方生成面板和两侧连接点会收起，松手再出现。' },
+      { kind: 'fix', text: '新建或连线出来的视频节点默认用全能参考，不再沿用上次的首尾帧。' },
+      { kind: 'fix', text: '框选后的选区框贴着节点边缘，不再留一大圈空白。' },
+    ],
+  },
+  {
     version: '5.89.6',
     date: '2026-10-14',
     headline: '去掉网站版',

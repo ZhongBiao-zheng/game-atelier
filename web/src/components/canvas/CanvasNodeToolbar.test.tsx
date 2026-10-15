@@ -428,7 +428,7 @@ it('keeps populated media playable inside the node without opening preview from 
   expect(imageSurface.querySelector(':scope > div.h-full')).toHaveClass('bg-transparent');
   expect(container.querySelector('video')!.closest('article')).toHaveClass('bg-card/95');
   const video = container.querySelector<HTMLVideoElement>('video[data-canvas-media-controls="video"]');
-  const audio = container.querySelector<HTMLAudioElement>('audio[controls]');
+  const audio = container.querySelector<HTMLAudioElement>('audio[data-canvas-media-controls="audio"]');
   expect(video).toBeInTheDocument();
   expect(video).toHaveClass('object-cover');
   expect(screen.getByRole('slider', { name: '视频播放进度' })).toBeInTheDocument();
@@ -436,6 +436,13 @@ it('keeps populated media playable inside the node without opening preview from 
   expect(screen.getByRole('button', { name: '静音 视频' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '全屏播放 视频' })).toBeInTheDocument();
   expect(audio).toBeInTheDocument();
+  // 音频播放器只有按钮是 nodrag，波形区域拖动照常移动节点。
+  expect(audio!.closest('.nodrag')).toBeNull();
+  const audioPlay = screen.getByRole('button', { name: '播放 音频' });
+  expect(audioPlay).toHaveClass('nodrag');
+  const audioPlaySpy = vi.spyOn(audio!, 'play').mockResolvedValue();
+  fireEvent.click(audioPlay);
+  expect(audioPlaySpy).toHaveBeenCalledOnce();
   expect(fireEvent.click(video!, { clientY: 80 })).toBe(false);
   expect(context.selectNode).toHaveBeenCalledWith(populated[1].id);
   vi.mocked(context.selectNode).mockClear();
@@ -462,7 +469,7 @@ it('keeps populated media playable inside the node without opening preview from 
   expect(pause).toHaveBeenCalledOnce();
   expect(context.selectNode).not.toHaveBeenCalled();
   fireEvent.doubleClick(video!);
-  fireEvent.doubleClick(audio!);
+  fireEvent.doubleClick(audioPlay);
   expect(context.previewContent).not.toHaveBeenCalled();
 });
 
