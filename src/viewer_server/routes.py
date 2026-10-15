@@ -2235,6 +2235,9 @@ def _create_user_job(
         model_id = model_spec.id
     alias = key_row.alias
     params = body.params.model_copy(deep=True)
+    # 「自动」记下路由 id，运行时遇到确定没执行的失败才能换下一家；指定厂商不换。
+    params.route_id = None if body.alias else body.model
+    params.route_tried = None
     # Provider task handles are runner-owned.  A Studio create request always represents a new
     # order and may not attach itself to an arbitrary existing Tuzi task.
     params.provider_task_protocol = None

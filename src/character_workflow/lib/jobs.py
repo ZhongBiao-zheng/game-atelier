@@ -334,6 +334,8 @@ def clone_job_for_retry(job_id: str) -> Job:
         "provider_task_protocol": None,
         "provider_task_ids": None,
         "video_submission_attempts": None,
+        # 「自动」重试从组内顺序重新开始，不沿用上一单已经换掉的供应商。
+        "route_tried": None,
     })
     clone = src.model_copy(update={
         "job_id": new_job_id(),

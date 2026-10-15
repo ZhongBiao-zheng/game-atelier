@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.91.0',
+    date: '2026-10-15',
+    headline: '「自动」遇到供应商不可用时换下一家',
+    changes: [
+      { kind: 'feat', text: '选「自动」生成时，供应商连不上、密钥无效、没开通模型或额度不足，会按顺序换下一家，卡片上注明换了哪家。' },
+      { kind: 'feat', text: '超时和服务器错误不换（上游可能已经在出图，换了会重复扣费）；指定厂商的任务也不换。' },
+    ],
+  },
+  {
     version: '5.90.2',
     date: '2026-10-15',
     headline: '设置里调整模型的供应商顺序',

@@ -9,7 +9,13 @@
 """
 from __future__ import annotations
 
+import re
+import threading
+import time
 from dataclasses import dataclass
+from typing import Literal
+
+import requests
 
 from character_workflow.lib.keys import (
     KeysDB,
@@ -107,12 +113,108 @@ def find_route(modality: ModelModality, identifier: str) -> ModelRoute:
 
 
 def resolve_auto(modality: ModelModality, identifier: str) -> tuple[KeySpec, ModelSpec]:
-    """「自动」选择：返回组内第一个成员对应的 KEY 与模型。"""
-    member = find_route(modality, identifier).members[0]
+    """「自动」选择：组内第一个不在冷却中的成员；全都在冷却时仍用第一个。"""
+    route = find_route(modality, identifier)
+    member = next((m for m in route.members if not _cooling(modality, m.alias)), route.members[0])
+    return _member_key_and_model(member)
+
+
+def next_member(
+    modality: ModelModality, identifier: str, exclude: list[str],
+) -> tuple[KeySpec, ModelSpec] | None:
+    """失败切换用：组内下一个没试过、不在冷却中的成员；没有就返回 None（不再换）。"""
+    try:
+        route = find_route(modality, identifier)
+    except NoSuchRouteError:
+        return None
+    member = next((m for m in route.members
+                   if m.alias not in exclude and not _cooling(modality, m.alias)), None)
+    return _member_key_and_model(member) if member else None
+
+
+def _member_key_and_model(member: RouteMember) -> tuple[KeySpec, ModelSpec]:
     database = read_keys_db()
     key = next(item for item in database.keys if item.alias == member.alias)
     model = next(item for item in key.models if item.id == member.model_id)
     return key, model
+
+
+# ---- 失败切换：只认「请求确定没被执行」的失败 ----
+#
+# 换下一家的前提是上一家没出图也没开始出图，否则就是付两次钱拿一张图（被拒的请求照样
+# 计费，但那笔钱换不换都花了）。超时、5xx、连上后被掐、响应解析失败一律不换：上游可能
+# 已经在跑。参数错误、内容审核（多为 400）也不换：换哪家都一样会失败，只会多花钱。
+
+FailoverReason = Literal["unreachable", "auth", "unavailable", "quota"]
+
+FAILOVER_LABELS: dict[FailoverReason, str] = {
+    "unreachable": "连不上",
+    "auth": "密钥无效或没有权限",
+    "unavailable": "没有开通这个模型",
+    "quota": "额度不足或被限流",
+}
+
+_COOLDOWN_SECONDS: dict[FailoverReason, float] = {
+    "unreachable": 120,
+    "quota": 300,
+    "auth": 1800,
+    "unavailable": 1800,
+}
+
+_STATUS = re.compile(r"(?:\bapi|\bHTTP)\s*(\d{3})\b")
+_UNAVAILABLE_MARKERS = (
+    "no_endpoints_available", "model_not_found", "no available channel", "无可用渠道",
+    "模型不存在", "not support model",
+)
+_QUOTA_MARKERS = ("insufficient_quota", "insufficient balance", "余额不足", "额度不足", "quota exceeded")
+
+
+def failover_reason(error: BaseException) -> FailoverReason | None:
+    """这次失败能不能换下一家；能就返回原因，不能返回 None。"""
+    from character_workflow.lib.callers.openai_image import _is_pre_flight_failure
+
+    chain: list[BaseException] = []
+    current: BaseException | None = error
+    while current is not None and current not in chain:
+        chain.append(current)
+        current = current.__cause__
+    if any(isinstance(item, requests.RequestException) for item in chain):
+        network = next(item for item in chain if isinstance(item, requests.RequestException))
+        return "unreachable" if _is_pre_flight_failure(network) else None
+    text = " ".join(str(item) for item in chain)
+    low = text.lower()
+    if "未确认" in text:
+        return None
+    match = _STATUS.search(text)
+    status = int(match.group(1)) if match else None
+    if status in (401, 403):
+        return "auth"
+    if status == 404 or (status == 503 and any(marker in low for marker in _UNAVAILABLE_MARKERS)):
+        return "unavailable"
+    if status in (402, 429) or (status is not None and any(marker in low for marker in _QUOTA_MARKERS)):
+        return "quota"
+    return None
+
+
+_cooldowns: dict[tuple[str, str], float] = {}
+_cooldowns_lock = threading.Lock()
+
+
+def cool_down(modality: str, alias: str, reason: FailoverReason) -> None:
+    """失败过的供应商暂时不作为「自动」的首选；按进程内存记，重启即清。"""
+    with _cooldowns_lock:
+        _cooldowns[(modality, alias)] = time.monotonic() + _COOLDOWN_SECONDS[reason]
+
+
+def _cooling(modality: str, alias: str) -> bool:
+    with _cooldowns_lock:
+        until = _cooldowns.get((modality, alias))
+        if until is None:
+            return False
+        if until <= time.monotonic():
+            del _cooldowns[(modality, alias)]
+            return False
+        return True
 
 
 def set_route_order(modality: ModelModality, identifier: str, aliases: list[str]) -> ModelRoute:

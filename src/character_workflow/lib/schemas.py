@@ -172,6 +172,10 @@ class JobParams(BaseModel):
     requested_size: str | None = None
     actual_size: str | None = None
     warnings: list[str] | None = None
+    # 选「自动」提交时的路由 id；有它才允许在确定没执行的失败上换下一家（见 model_routes）。
+    route_id: str | None = Field(default=None, max_length=200)
+    # 本次已经试过、因确定没执行的失败被换掉的供应商别名，按顺序。
+    route_tried: list[str] | None = None
     # 厂商订单首次获取立即落盘。Tuzi 支持续查；Seedance 留供核对，不自动恢复或重提。
     # tuzi_async is a historical ownership tag, never a supported submission protocol.
     provider_task_protocol: Literal["tuzi_async", "tuzi_images", "seedance"] | None = None

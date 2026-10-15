@@ -33,6 +33,10 @@ export interface JobParams {
   requested_size?: string;
   actual_size?: string;
   warnings?: string[];
+  /** 选「自动」提交时的路由 id；有它才会在确定没执行的失败上换下一家。 */
+  route_id?: string;
+  /** 已经试过并被换掉的供应商别名。 */
+  route_tried?: string[];
   /** 厂商订单；Web 只读。Tuzi 支持续查，Seedance 留供核对，不自动重提。 */
   provider_task_protocol?: 'tuzi_async' | 'tuzi_images' | 'seedance';
   provider_task_ids?: string[];

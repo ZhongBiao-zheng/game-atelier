@@ -1079,7 +1079,9 @@ def _normalized_params(
             and draft.params.watermark is not None
         ):
             normalized["watermark"] = draft.params.watermark
-    return normalized, JobParams(**normalized), effective_count
+    # 「自动」记下路由 id，运行时遇到确定没执行的失败才能换下一家；不进快照 normalized_params。
+    route = {"route_id": draft.model} if draft.alias is None else {}
+    return normalized, JobParams(**normalized, **route), effective_count
 
 
 def _with_active_run(node: CanvasNode, run_id: str) -> CanvasNode:
