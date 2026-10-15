@@ -84,3 +84,33 @@ def test_resume_native_edit_reuses_frozen_job_and_checks_revision(isolated_data_
     assert result.nodes[0].data.current_version_id == version.version_id
     with pytest.raises(ValueError, match="没有可续查"):
         resume_mj_edit_run(pid, job.canvas_run.run_id, result.revision)
+
+
+def test_complete_outpaint_run_registers_candidates_without_modifying_source(isolated_data_root, monkeypatch):
+    from character_workflow.lib import callers
+    from character_workflow.lib.canvas_projects import read_canvas_document
+    from character_workflow.lib.canvas_runs import run_canvas_job
+    from character_workflow.lib.schemas import JobStatus
+
+    pid, version, doc = setup_source()
+    options = CanvasImageEditOptions(mode="outpaint", source_version_id=version.version_id,
+                                    width=1536, height=1024, x=256, y=0)
+    job, _ = submit_mask_edit_run(pid, "source", doc.revision, 2, b"", options)
+    calls = []
+    def generate(**kwargs):
+        calls.append(kwargs["params"])
+        path = kwargs["output_dir"] / "mock-output.png"
+        Image.new("RGBA", (1536, 1024), "blue").save(path)
+        return [str(path)]
+    monkeypatch.setattr(callers, "dispatch", generate)
+    result = run_canvas_job(job.job_id)
+    assert result.status == JobStatus.DONE
+    assert len(calls) == len(result.output_paths) == 2
+    assert all(candidate.status == "succeeded" for candidate in result.canvas_run.candidates)
+    saved = read_canvas_document(pid)
+    assert saved.nodes[0].data.current_version_id == version.version_id
+    for path in result.output_paths:
+        with Image.open(path) as image:
+            assert image.size == (1536, 1024)
+            assert image.getpixel((0, 0)) == (0, 0, 255, 255)
+            assert image.getpixel((256, 0)) == (255, 0, 0, 255)

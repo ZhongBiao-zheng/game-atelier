@@ -87,3 +87,17 @@ def test_poll_timeout_can_resume_without_post_and_keeps_grid_mapping(mj_key, mon
     assert params["mj_edit_state"]["poll_paused"] is False
     assert params["mj_outputs"][0]["image_index"] == 0
     assert len(mj_edit.actions(buttons, 0, False)) == 4
+
+
+def test_resumed_terminal_failure_clears_recovery_flag(mj_key, monkeypatch):
+    params = {"image_edit": {"mode": "outpaint", "custom_id": "MJ::JOB::zoom::50::source"},
+              "mj_edit_state": {"task_id": "accepted", "uncertain": False, "poll_paused": True}}
+    monkeypatch.setattr(mj_edit.mj.video_poll, "poll_responses", lambda **_: iter([
+        _FakeResp(200, {"status": "FAILURE", "failReason": "failed"})
+    ]))
+    saved = []
+    with pytest.raises(mj_edit.mj.MidjourneyError):
+        mj_edit.render(prompt="p", model="midjourney", alias="mj", output_dir=mj_key,
+                       params=params, on_params_changed=lambda: saved.append(dict(params["mj_edit_state"])))
+    assert params["mj_edit_state"]["poll_paused"] is False
+    assert saved[-1]["poll_paused"] is False

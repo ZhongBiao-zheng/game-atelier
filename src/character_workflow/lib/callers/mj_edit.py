@@ -119,6 +119,8 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path, params: dic
     if on_phase:
         on_phase("sent")
     result = {}
+    state["poll_paused"] = False
+    save()
     try:
         urls = mj._poll_task(root=root, headers=headers, task_id=task_id,
                              max_polls=max_polls, poll_interval=poll_interval,
@@ -127,7 +129,6 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path, params: dic
         state["poll_paused"] = True
         save()
         raise
-    state["poll_paused"] = False
     if on_phase:
         on_phase("downloading")
     paths, outputs = [], []

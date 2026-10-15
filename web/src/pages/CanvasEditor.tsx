@@ -5477,6 +5477,7 @@ function CanvasPreview({
   const { version } = preview;
   const [showSource, setShowSource] = useState(false);
   const [showMask, setShowMask] = useState(false);
+  useEffect(() => { setShowMask(false); setShowSource(false); }, [version.version_id]);
   const maskId = job?.canvas_run?.snapshot.mask_version_id;
   const edit = job?.canvas_run?.snapshot.normalized_params.image_edit as {
     source_version_id?: string; mode?: string; width?: number; height?: number; x?: number; y?: number;
