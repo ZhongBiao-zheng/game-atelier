@@ -40,6 +40,7 @@ from character_workflow.lib.schemas import (
     CanvasDocument,
     CanvasPluginState,
     CanvasProject,
+    CanvasResultCandidate,
     Job,
     JobStatus,
 )
@@ -328,7 +329,10 @@ def _output_versions_for_job(
     if job.canvas_run is None:
         raise CanvasPackageError(f"画布任务 {job.job_id} 缺少运行快照")
     candidate_versions: list[CanvasContentVersion] = []
-    for candidate in job.canvas_run.candidates:
+    candidates = [CanvasResultCandidate.model_validate(c)
+                  for c in (job.params.regional_edit or {}).get("history", [])]
+    candidates.extend(job.canvas_run.candidates)
+    for candidate in candidates:
         if candidate.version_id is None:
             continue
         version = document.content_versions.get(candidate.version_id)
@@ -369,7 +373,7 @@ def _output_versions_for_job(
     return ordered
 
 
-def _portable_job(job: Job, document: CanvasDocument) -> bytes:
+def _portable_job(job: Job, document: CanvasDocument, patches: dict[str, str]) -> bytes:
     if job.canvas_run is None:
         raise CanvasPackageError(f"画布任务 {job.job_id} 缺少运行快照")
     versions = document.content_versions
@@ -392,7 +396,7 @@ def _portable_job(job: Job, document: CanvasDocument) -> bytes:
         if mask is None or mask.kind != "image" or mask.origin.kind != "user_mask":
             raise CanvasPackageError(f"任务 {job.job_id} 的遮罩版本已损坏")
         mask_path = mask.path
-    params = job.params.model_copy(
+    params = job.params.model_copy(deep=True,
         update={
             "reference_images": references["image"] or None,
             "reference_videos": references["video"] or None,
@@ -400,6 +404,10 @@ def _portable_job(job: Job, document: CanvasDocument) -> bytes:
             "mask_image": mask_path,
         }
     )
+    if params.regional_edit:
+        for task in params.regional_edit["tasks"]:
+            if task.get("path"):
+                task["path"] = patches[task["path"]]
     portable = job.model_copy(
         update={
             "params": params,
@@ -477,7 +485,21 @@ def export_canvas_projects(
             }
             project_dir = canvas_project_dir(project_id)
             for job in jobs:
-                metadata[f"{prefix}/jobs/{job.job_id}.json"] = _portable_job(job, document)
+                patches = {}
+                for task in (job.params.regional_edit or {}).get("tasks", []):
+                    if not task.get("path"):
+                        continue
+                    raw = Path(task["path"])
+                    source = (raw if raw.is_absolute() else data_root.resolve_data_root() / raw).resolve()
+                    owned = (project_dir / "outputs" / job.job_id / ".regional").resolve()
+                    if not source.is_relative_to(owned) or source.suffix != ".png" or not source.is_file():
+                        raise CanvasPackageError("区域裁片缺失或不属于当前任务")
+                    digest = _sha256_file(source)
+                    blob_path = f"blobs/sha256/{digest[:2]}/{digest}.png"
+                    entries[blob_path] = (source, "image/png", "blob")
+                    paths.append(blob_path)
+                    patches[task["path"]] = blob_path
+                metadata[f"{prefix}/jobs/{job.job_id}.json"] = _portable_job(job, document, patches)
             for source in _metadata_files(project_dir):
                 relative = source.relative_to(project_dir).as_posix()
                 metadata[f"{prefix}/{relative}"] = source.read_bytes()
@@ -808,6 +830,15 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
                 raise CanvasPackageError(f"任务 {job.job_id} 的 retry_of 无法解析")
             if job.canvas_run is None:
                 raise CanvasPackageError(f"任务 {job.job_id} 缺少运行记录")
+            for task in (job.params.regional_edit or {}).get("tasks", []):
+                path = task.get("path")
+                if task.get("status") == "succeeded" and not path:
+                    raise CanvasPackageError("成功区域缺少裁片")
+                if path:
+                    entry = entry_by_path.get(path)
+                    if (path not in row.entry_paths or not entry or entry.role != "blob"
+                            or entry.mime_type != "image/png" or not _BLOB_PATH.fullmatch(path)):
+                        raise CanvasPackageError("区域裁片未登记为项目 PNG blob")
             for candidate in job.canvas_run.candidates:
                 if (
                     candidate.version_id is not None
@@ -855,7 +886,11 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
                         ),
                         None,
                     )
-                if candidate is None or candidate.version_id != version.version_id:
+                historical = any(c.get("candidate_id") == version.origin.candidate_id
+                                 and c.get("version_id") == version.version_id
+                                 for c in ((owner.params.regional_edit or {}).get("history", [])
+                                           if owner else []))
+                if not historical and (candidate is None or candidate.version_id != version.version_id):
                     raise CanvasPackageError(
                         f"内容版本 {version.version_id} 的 Job candidate 血缘无法解析"
                     )
@@ -1103,6 +1138,19 @@ def _import_project(
         (target / "uploads").mkdir()
         (target / "outputs").mkdir()
         (target / "derived").mkdir()
+        for new_job in remapped_jobs:
+            if not new_job.params.regional_edit:
+                continue
+            for index, task in enumerate(new_job.params.regional_edit["tasks"]):
+                blob = task.get("path")
+                if not blob:
+                    continue
+                relative = f"outputs/{new_job.job_id}/.regional/restored-{index}.png"
+                destination = target / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(blob) as source, destination.open("wb") as output:
+                    shutil.copyfileobj(source, output, length=1024 * 1024)
+                task["path"] = f"canvases/{project_id}/{relative}"
         atomic_write_json(target / "project.json", project.model_dump(mode="json"))
         atomic_write_json(target / "canvas.json", document.model_dump(mode="json"))
         for path in sorted(row.entry_paths):

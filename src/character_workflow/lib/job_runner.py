@@ -635,7 +635,7 @@ def _run_once(
             for output_path in output_paths:
                 _write_sidecar(Path(output_path), job, params)
             persisted_paths = output_paths
-            if defer_terminal:
+            if defer_terminal or params.get("regional_edit"):
                 persisted_paths = list(dict.fromkeys([*job.output_paths, *output_paths]))
             return update_job_status(
                 job.job_id,

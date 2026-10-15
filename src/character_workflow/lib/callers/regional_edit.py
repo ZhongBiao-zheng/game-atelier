@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import requests
+from pathlib import Path
 from PIL import Image, ImageOps
 
 from ..atomic_io import atomic_write_bytes
+from ..data_root import resolve_data_root
 from ..regional_image_edit import (
     plan_regions, resize_rgba, stitch_regions, validate_context_alignment,
 )
@@ -23,9 +25,13 @@ def render(*, prompt, model, alias, output_dir, durable_dir, params, **kwargs):
     should_cancel = kwargs.get("should_cancel", lambda: False)
     kwargs.pop("n", None)
     kwargs.pop("size", None)
-    with Image.open(params["reference_images"][0]) as opened:
+    def local_path(value):
+        path = Path(value)
+        return path if path.is_absolute() else resolve_data_root() / path
+
+    with Image.open(local_path(params["reference_images"][0])) as opened:
         source = ImageOps.exif_transpose(opened).convert("RGBA")
-    with Image.open(params["mask_image"]) as mask:
+    with Image.open(local_path(params["mask_image"])) as mask:
         regions = plan_regions(mask, find_by_alias(alias), model,
                                context=options.get("context", .25),
                                feather=options.get("feather"), groups=options.get("groups"))
@@ -85,12 +91,21 @@ def render(*, prompt, model, alias, output_dir, durable_dir, params, **kwargs):
                                   for t in state["tasks"]))
             persist()
 
+        def validate(result):
+            task["actual_size"] = list(result.size)
+            persist()
+            # Ignore small rounding differences, but reject undersized/mismatched artifacts.
+            if (min(result.size) < min(region.work_size) * .9
+                    or result.width * result.height < region.work_size[0] * region.work_size[1] * .8):
+                raise ValueError("模型返回裁片分辨率低于工作尺寸；未回贴")
+            validate_context_alignment(crop, result, generation_mask)
+
         try:
             outputs = render_crop(
                 prompt=options.get("region_prompts", {}).get(region.id, "").strip() or prompt,
                 model=model, alias=alias, output_dir=directory, n=1,
                 size=region.params["size"], params=request,
-                validate_result=lambda result: validate_context_alignment(crop, result, generation_mask),
+                validate_result=validate,
                 on_params_changed=changed, on_cost_usd=cost, **kwargs,
             )
             changed()
@@ -105,7 +120,7 @@ def render(*, prompt, model, alias, output_dir, durable_dir, params, **kwargs):
             patch.save(buffer, format="PNG")
             path = directory / "patch.png"
             atomic_write_bytes(path, buffer.getvalue())
-            task.update(status="succeeded", path=str(path), actual_size=list(patch.size))
+            task.update(status="succeeded", path=str(path))
         except TuziAsyncPendingError as error:
             changed()
             task.update(status="paused", error=str(error))
@@ -138,7 +153,7 @@ def render(*, prompt, model, alias, output_dir, durable_dir, params, **kwargs):
                         if t["region_id"] == region.id and t["candidate"] == candidate)
             patch = None
             if task["status"] == "succeeded":
-                with Image.open(task["path"]) as opened:
+                with Image.open(local_path(task["path"])) as opened:
                     patch = opened.convert("RGBA")
             patches.append(patch)
         path = output_dir / f"composite-{candidate}.png"

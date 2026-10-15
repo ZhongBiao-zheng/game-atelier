@@ -91,7 +91,12 @@ def _auto_groups(components):
                 distance = math.hypot(max(a - g, e - c, 0), max(b - h, f - d, 0))
                 threshold = max(12, min(c - a, d - b, g - e, h - f) * .25)
                 union_area = (max(c, g) - min(a, e)) * (max(d, h) - min(b, f))
+                members = [_bounds(components[k - 1]) for k in first + groups[j]]
+                # Bound total span against original components, not the ever-growing group.
+                max_span = max(max(right - left, bottom - top)
+                               for left, top, right, bottom in members)
                 if (distance <= threshold
+                        and max(max(c, g) - min(a, e), max(d, h) - min(b, f)) <= 4 * max_span
                         and union_area <= 1.6 * ((c - a) * (d - b) + (g - e) * (h - f))):
                     groups[i] = sorted(first + groups.pop(j))
                     changed = True
@@ -257,12 +262,21 @@ def stitch_regions(source: Image.Image, regions: list[Region],
         sums = [Image.new("F", size) for _ in range(4)]
         total = Image.new("F", size)
         union = Image.new("L", size)
+        failed_core = Image.new("L", size)
+        for region, patch in zip(regions, patches):
+            if patch is None:
+                x, y, _, _ = region.crop
+                local = (box[0] - x, box[1] - y, box[2] - x, box[3] - y)
+                failed_core = ImageChops.lighter(failed_core, region.weight.crop(local).point(
+                    lambda p: 255 if p == 255 else 0,
+                ))
         for region, patch in prepared:
             x, y, w, h = region.crop
             if x >= box[2] or y >= box[3] or x + w <= box[0] or y + h <= box[1]:
                 continue
             local = (box[0] - x, box[1] - y, box[2] - x, box[3] - y)
             weight = region.weight.crop(local)
+            weight = ImageChops.subtract(weight, failed_core)
             union = ImageChops.lighter(union, weight)
             total = ImageMath.lambda_eval(lambda v: v["a"] + v["w"], a=total, w=weight)
             channels = patch.crop(local).split()

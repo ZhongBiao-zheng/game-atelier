@@ -2475,8 +2475,13 @@ def resume_regional_edit_run(project_id: str, run_id: str,
                             and any(t["status"] == "succeeded" for t in tasks))
             if not compose_only and not any(t["status"] in {"pending", "paused"} for t in tasks):
                 raise ValueError("剩余区域提交结果未确认，请先核对厂商订单；未重复下单")
+            state = params.regional_edit
+            state.setdefault("history", []).extend(
+                c.model_dump(mode="json") for c in context.candidates if c.version_id
+            )
+            state["output_offset"] = len(job.output_paths)
             updated_job = job.model_copy(update={
-                "status": JobStatus.PENDING, "params": params, "output_paths": [], "error": None,
+                "status": JobStatus.PENDING, "params": params, "error": None,
                 "completed_at": None, "progress_phase": None,
                 "canvas_run": context.model_copy(update={"candidates": [
                     c.model_copy(update={"status": "pending", "version_id": None, "error": None})
@@ -3192,15 +3197,16 @@ def _finalize_canvas_run_under_locks(
         })
     versions: list[CanvasContentVersion] = []
     candidates: list[CanvasResultCandidate] = []
+    output_offset = int((job.params.regional_edit or {}).get("output_offset", 0))
     for index, candidate in enumerate(context.candidates):
-        if index >= len(job.output_paths):
+        if index + output_offset >= len(job.output_paths):
             candidates.append(candidate.model_copy(update={
                 "status": "canceled" if job.cancel_requested_at else "failed",
                 "error": None if job.cancel_requested_at else "厂商没有返回这个候选结果",
             }))
             continue
         try:
-            version = _output_version(project_id, job, candidate, job.output_paths[index])
+            version = _output_version(project_id, job, candidate, job.output_paths[index + output_offset])
             versions.append(version)
             candidates.append(candidate.model_copy(update={
                 "status": "succeeded",

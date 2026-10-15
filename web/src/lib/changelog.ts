@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.93.0',
+    date: '2026-10-15',
+    headline: '局部修改支持分区裁剪',
+    changes: [
+      { kind: 'feat', text: '局部选区自动分组、裁剪放大生成，再按原位置羽化回贴；可调整周围范围、合并拆分及区域提示词。' },
+      { kind: 'feat', text: '提交前显示分区调用次数与费用，部分失败保留成功区域，可继续失败区域或查询已有订单。' },
+      { kind: 'fix', text: '区域重试保留旧结果和引用，项目导出包含成功裁片；MJ 原生编辑保持原图坐标。' },
+    ],
+  },
+  {
     version: '5.92.0',
     date: '2026-10-15',
     headline: '画布扩图与局部修改',

@@ -508,6 +508,9 @@ Snapshot 保存 `mask_version_id`、源版本、可选替换参考和 `normalize
 `POST /canvas/projects/{id}/runs/{run_id}/resume-regions` 接收 `expected_revision`，仅接受未取消且结果节点未改动
 的失败/部分完成任务。成功区复用，失败区显式新下单，已知 Tuzi 订单仅续查，未知提交不重发；
 全部裁片已完成但合成中断时仅重新合成。普通 Job 克隆重试不得绕过此规则。
+继续区域保留同一 Job 的既有输出授权，历史候选归档在 `regional_edit.history`，新合成从 `output_offset`
+起登记；旧 Version、复制节点及下游冻结参考不失效。项目包将成功裁片纳入校验后的 PNG blob，
+导入时重写到新项目所属 Job，历史候选血缘一并验证，不依赖导出机器的绝对路径。
 
 `GET /canvas/projects/{id}/nodes/{node_id}/image-edit` 返回源版本与 MJ 可用动作，不提交任务。
 MJ 原生操作要求输出 task/单图序号、文件 SHA256、原授权渠道指纹匹配；仅开放 fetch.buttons 中实际动作。
