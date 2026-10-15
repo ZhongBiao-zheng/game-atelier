@@ -456,3 +456,20 @@ it('keeps old content visible after failure', () => {
   expect(container.querySelector('img')).toBeInTheDocument();
   expect(screen.getByRole('alert')).toHaveTextContent('上游服务暂时不可用');
 });
+
+it('resumes a paused MJ order instead of creating a new generation', () => {
+  const job = canvasJob('failed', { params: { mj_edit_state: { task_id: 'existing', poll_paused: true } } });
+  const context = nodeContext(job);
+  context.resumeMjEdit = vi.fn(async () => undefined);
+  const { rerender } = render(<CanvasNodeContext.Provider value={context}>
+    <NodeCard data={{ domain: imageNode }} selected />
+  </CanvasNodeContext.Provider>);
+  fireEvent.click(screen.getByRole('button', { name: '继续查询 MJ 原任务（不重新下单）' }));
+  expect(context.resumeMjEdit).toHaveBeenCalledWith('run-1');
+  expect(context.submitRun).not.toHaveBeenCalled();
+  const terminalContext = nodeContext(canvasJob('failed'));
+  rerender(<CanvasNodeContext.Provider value={terminalContext}>
+    <NodeCard data={{ domain: imageNode }} selected />
+  </CanvasNodeContext.Provider>);
+  expect(screen.queryByRole('button', { name: '继续查询 MJ 原任务（不重新下单）' })).not.toBeInTheDocument();
+});
