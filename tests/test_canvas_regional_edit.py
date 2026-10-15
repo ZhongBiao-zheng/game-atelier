@@ -113,3 +113,65 @@ def test_unknown_submission_is_never_automatically_reposted(isolated_data_root, 
     assert all(t["status"] == "uncertain" for t in latest.params.regional_edit["tasks"])
     run_canvas_job(job.job_id)
     assert len(calls) == 2
+
+
+def test_completed_patches_resume_after_composition_crash_without_new_calls(isolated_data_root, monkeypatch):
+    from character_workflow.lib.callers import regional_edit
+    pid, _source, job, _doc, _ = prepare()
+    calls = []
+    def generate(**kwargs):
+        calls.append(kwargs)
+        path = kwargs["output_dir"] / "result.png"
+        Image.new("RGBA", (1024, 1024), "blue").save(path)
+        return [str(path)]
+    monkeypatch.setattr(callers, "dispatch", generate)
+    stitch = regional_edit.stitch_regions
+    monkeypatch.setattr(regional_edit, "stitch_regions", lambda *_: (_ for _ in ()).throw(OSError("disk error")))
+    with pytest.raises(Exception):
+        run_canvas_job(job.job_id)
+    assert all(t["status"] == "succeeded" for t in read_job(job.job_id).params.regional_edit["tasks"])
+    monkeypatch.setattr(regional_edit, "stitch_regions", stitch)
+    resume_regional_edit_run(pid, job.canvas_run.run_id, read_canvas_document(pid).revision)
+    assert run_canvas_job(job.job_id).status == JobStatus.DONE
+    assert len(calls) == 2
+
+
+def test_region_jobs_cannot_bypass_resume_via_generic_retry(isolated_data_root, monkeypatch):
+    from character_workflow.lib.jobs import clone_job_for_retry
+    _pid, _source, job, _doc, _ = prepare()
+    monkeypatch.setattr(callers, "dispatch", lambda **_: (_ for _ in ()).throw(ValueError("rejected")))
+    with pytest.raises(Exception):
+        run_canvas_job(job.job_id)
+    with pytest.raises(ValueError, match="区域"):
+        clone_job_for_retry(job.job_id)
+
+
+def test_known_order_resumes_query_and_unknown_provider_errors_do_not_repost(isolated_data_root, monkeypatch):
+    from character_workflow.lib.callers.tuzi_async import TASK_PROTOCOL, TuziAsyncPendingError
+    pid, _source, job, _doc, _ = prepare()
+    submitted = []
+    def generate(**kwargs):
+        request = kwargs["params"]
+        if not request.get("provider_task_ids"):
+            submitted.append(True)
+            request.update(provider_task_ids=["accepted"], provider_task_protocol=TASK_PROTOCOL)
+            kwargs["on_params_changed"]()
+            raise TuziAsyncPendingError("query paused")
+        path = kwargs["output_dir"] / "result.png"
+        Image.new("RGBA", (1024, 1024), "blue").save(path)
+        return [str(path)]
+    monkeypatch.setattr(callers, "dispatch", generate)
+    with pytest.raises(Exception):
+        run_canvas_job(job.job_id)
+    resume_regional_edit_run(pid, job.canvas_run.run_id, read_canvas_document(pid).revision)
+    assert run_canvas_job(job.job_id).status == JobStatus.DONE
+    assert len(submitted) == 2
+
+
+def test_unclassified_provider_error_is_uncertain(isolated_data_root, monkeypatch):
+    from character_workflow.lib.callers.openai_image import OpenAIImageError
+    _pid, _source, job, _doc, _ = prepare()
+    monkeypatch.setattr(callers, "dispatch", lambda **_: (_ for _ in ()).throw(OpenAIImageError("invalid response")))
+    with pytest.raises(Exception):
+        run_canvas_job(job.job_id)
+    assert all(t["status"] == "uncertain" for t in read_job(job.job_id).params.regional_edit["tasks"])
