@@ -118,6 +118,20 @@ def test_submits_polls_and_downloads_four_images(mj_key, tmp_path, monkeypatch):
     assert all(Path(p).read_bytes() == b"PNG" for p in out)
 
 
+def test_imagine_persists_task_and_exact_output_mapping(mj_key, tmp_path, monkeypatch):
+    import hashlib
+    _wire(monkeypatch, submit={"code": 1, "result": "t-1"})
+    params = {}
+    changes = []
+    _render(tmp_path, n=4, params=params,
+            on_params_changed=lambda: changes.append(dict(params)))
+    assert changes[0]["mj_submission_ids"] == ["t-1"]
+    assert params["mj_outputs"][2] == {
+        "task_id": "t-1", "image_index": 3, "single": False,
+        "sha256": hashlib.sha256(b"PNG").hexdigest(),
+    }
+
+
 def test_transient_cdn_failure_on_download_is_retried(mj_key, tmp_path, monkeypatch):
     """产物下载发生在任务已成功、已计费之后：CDN 一次 502 不能把这单判死。"""
     monkeypatch.setattr(mj.time, "sleep", lambda _s: None)
