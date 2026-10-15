@@ -28,6 +28,7 @@ SUCCESS 后取 imageUrls[].url，并通过 GET /mj/task/{id}/image-seed 取回�
 from __future__ import annotations
 
 import time
+import hashlib
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -389,6 +390,7 @@ def _download_png(url: str, output_dir: Path, index: int, *, task_ref: str = "")
 def _poll_task(
     *, root: str, headers: dict[str, str], task_id: str,
     max_polls: int, poll_interval: float, should_cancel: Callable[[], bool] | None = None,
+    on_modal=None, on_result=None,
 ) -> list[str]:
     """轮询到终态，返回产物地址列表。
 
@@ -407,7 +409,11 @@ def _poll_task(
                 video_poll.with_task_ref(_err(payload, resp.status_code), task_id)
             )
         status = str(payload.get("status") or "").strip().upper()
+        if status == "MODAL" and on_modal:
+            on_modal(task_id)
         if status == _TERMINAL_SUCCESS:
+            if on_result:
+                on_result(payload)
             urls = _image_urls(payload)
             if urls:
                 return urls
@@ -488,7 +494,18 @@ def render(
     submissions = -(-wanted // 4)  # ceil：一次 imagine 出 4 张
 
     task_ids: list[str] = []
+    persist = _kwargs.get("on_params_changed")
+    saved_ids = list(params.get("mj_submission_ids") or [])
+    if params.get("mj_submit_uncertain"):
+        raise MidjourneyError("MJ 上次提交结果未确认，请先核对供应商订单；不会重复提交")
     for _ in range(submissions):
+        if len(task_ids) < len(saved_ids):
+            task_ids.append(saved_ids[len(task_ids)])
+            continue
+        if params_in is not None:
+            params_in["mj_submit_uncertain"] = True
+            if persist:
+                persist()
         resp = requests.post(f"{root}/mj/submit/imagine", headers=headers, json=body, timeout=120)
         payload = _json(resp)
         code = payload.get("code")
@@ -498,11 +515,17 @@ def render(
         if not task_id:
             raise MidjourneyError(f"Midjourney 提交后未返回任务 ID: {payload!r}")
         task_ids.append(task_id)
+        if params_in is not None:
+            params_in["mj_submission_ids"] = list(task_ids)
+            params_in["mj_submit_uncertain"] = False
+            if persist:
+                persist()
     if on_phase:
         on_phase("sent")
 
     out_dir = Path(output_dir)
     paths: list[str] = []
+    outputs: list[dict] = []
     downloading = False
     for task_id in task_ids:
         urls = _poll_task(
@@ -520,10 +543,18 @@ def render(
                 params["mj_seed"] = generated_seed
                 if params_in is not None:
                     params_in["mj_seed"] = generated_seed
-        for url in urls:
+        for image_index, url in enumerate(urls, 1):
             if on_phase and not downloading:
                 downloading = True
                 on_phase("downloading")
-            paths.append(_download_png(url, out_dir, len(paths) + 1, task_ref=task_id))
+            path = _download_png(url, out_dir, len(paths) + 1, task_ref=task_id)
+            paths.append(path)
+            outputs.append({"task_id": task_id, "image_index": image_index,
+                            "single": False,
+                            "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()})
+    if params_in is not None:
+        params_in["mj_outputs"] = outputs
+        if persist:
+            persist()
     _publish_actual_n(params_in, wanted, len(paths))
     return paths

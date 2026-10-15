@@ -16,7 +16,7 @@ def edit_transport(provider: str, model: str, protocol: str | None) -> str | Non
     if supports_image_mask(provider, model, protocol):
         return "mask"
     if family in {"seedream", "nano-banana", "gpt-image"} and provider in {
-        "openai", "custom", "seedream", "nano_banana", "tokendance", "openrouter",
+        "openai", "custom", "seedream", "tokendance", "openrouter",
     }:
         return "guide"
     return None

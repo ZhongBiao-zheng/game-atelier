@@ -164,6 +164,11 @@ class JobParams(BaseModel):
     reference_images: list[str] | None = None
     # Canvas 局部编辑专用：服务端从不可变 mask Content Version 解析，浏览器不能传路径。
     mask_image: str | None = None
+    image_edit: dict[str, Any] | None = None
+    mj_submission_ids: list[str] | None = None
+    mj_submit_uncertain: bool | None = None
+    mj_outputs: list[dict[str, Any]] | None = None
+    mj_edit_state: dict[str, Any] | None = None
     # Canvas 多角度生成专用：结构化相机参数进入 Snapshot，caller 只消费最终 prompt。
     angle_horizontal: int | None = Field(default=None, ge=-60, le=60)
     angle_pitch: int | None = Field(default=None, ge=-45, le=45)
@@ -1652,6 +1657,19 @@ class CanvasLayerDecompositionCreate(BaseModel):
     expected_revision: int = Field(ge=0)
     alias: str = Field(min_length=1, max_length=120)
     model: str = Field(min_length=1, max_length=240)
+
+
+class CanvasImageEditOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["inpaint", "outpaint", "prepare"] = "inpaint"
+    source_version_id: str | None = Field(default=None, max_length=120)
+    width: int | None = Field(default=None, ge=1, le=16384)
+    height: int | None = Field(default=None, ge=1, le=16384)
+    x: int = Field(default=0, ge=0, le=16384)
+    y: int = Field(default=0, ge=0, le=16384)
+    reference_node_id: str | None = Field(default=None, max_length=120)
+    custom_id: str | None = Field(default=None, max_length=500)
+    zoom: float = Field(default=1.5, ge=1, le=2)
 
 
 class CanvasMaskEditCreate(BaseModel):

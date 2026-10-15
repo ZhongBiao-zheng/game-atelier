@@ -125,7 +125,8 @@ def test_imagine_persists_task_and_exact_output_mapping(mj_key, tmp_path, monkey
     changes = []
     _render(tmp_path, n=4, params=params,
             on_params_changed=lambda: changes.append(dict(params)))
-    assert changes[0]["mj_submission_ids"] == ["t-1"]
+    assert changes[0]["mj_submit_uncertain"] is True
+    assert changes[1]["mj_submission_ids"] == ["t-1"]
     assert params["mj_outputs"][2] == {
         "task_id": "t-1", "image_index": 3, "single": False,
         "sha256": hashlib.sha256(b"PNG").hexdigest(),
