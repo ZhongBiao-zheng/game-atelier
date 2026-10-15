@@ -8,7 +8,7 @@ from PIL import Image, ImageOps
 from ..atomic_io import atomic_write_bytes
 from ..data_root import resolve_data_root
 from ..regional_image_edit import (
-    plan_regions, resize_rgba, stitch_regions, validate_context_alignment,
+    plan_regions, resize_rgba, stitch_regions, validate_context_alignment, validate_regional_tasks,
 )
 
 
@@ -41,6 +41,7 @@ def render(*, prompt, model, alias, output_dir, durable_dir, params, **kwargs):
         options["regions"], sort_keys=True,
     ):
         raise ValueError("区域规划与提交快照不一致，请重新打开编辑器")
+    validate_regional_tasks(state, [r.id for r in regions], params.get("n") or 1)
     durable_dir.mkdir(parents=True, exist_ok=True)
     region_map = {r.id: r for r in regions}
     for task in state["tasks"]:
@@ -55,6 +56,8 @@ def render(*, prompt, model, alias, output_dir, durable_dir, params, **kwargs):
             continue
         region = region_map[task["region_id"]]
         directory = durable_dir / f"{task['candidate']}-{region.id}"
+        if not directory.resolve().is_relative_to(durable_dir.resolve()):
+            raise ValueError("区域裁片目录越界")
         directory.mkdir(parents=True, exist_ok=True)
         x, y, width, height = region.crop
         # Out-of-image context is transparent padding, and the inverse crop records it exactly.
@@ -71,7 +74,7 @@ def render(*, prompt, model, alias, output_dir, durable_dir, params, **kwargs):
         }}
         request.update(region.params)
         request.update(task.get("provider") or {})
-        request.update(n=1, reference_images=[str(crop_path), *params["reference_images"][1:]],
+        request.update(n=1, reference_images=[str(crop_path), *[str(local_path(p)) for p in params["reference_images"][1:]]],
                        mask_image=str(mask_path), image_edit={"mode": "inpaint"})
         task.update(status="running", error=None)
         persist()  # claim precedes the first external operation
@@ -153,7 +156,10 @@ def render(*, prompt, model, alias, output_dir, durable_dir, params, **kwargs):
                         if t["region_id"] == region.id and t["candidate"] == candidate)
             patch = None
             if task["status"] == "succeeded":
-                with Image.open(local_path(task["path"])) as opened:
+                cached = local_path(task["path"]).resolve()
+                if not cached.is_relative_to(durable_dir.parent.resolve()):
+                    raise ValueError("成功裁片不属于当前区域任务")
+                with Image.open(cached) as opened:
                     patch = opened.convert("RGBA")
             patches.append(patch)
         path = output_dir / f"composite-{candidate}.png"

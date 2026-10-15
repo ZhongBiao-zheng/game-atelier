@@ -24,9 +24,16 @@ def selection():
     return buffer.getvalue()
 
 
-def prepare(count=1):
+def prepare(count=1, replacement=False):
     pid, version, doc = setup_source()
     options = CanvasImageEditOptions(source_version_id=version.version_id, feather=8)
+    if replacement:
+        from tests.test_generation_recipe import _save_nodes
+        extra = doc.nodes[0].model_dump(mode="json")
+        extra["id"] = "replacement"
+        doc = _save_nodes(pid, [doc.nodes[0].model_dump(mode="json"), extra], [],
+                          {k: v.model_dump(mode="json") for k, v in doc.content_versions.items()})
+        options.reference_node_id = "replacement"
     preview = preview_regional_edit(pid, "source", "openai", "gpt-image-1", selection(), options)
     options.plan_id = preview["plan_id"]
     job, saved = submit_mask_edit_run(pid, "source", doc.revision, count, selection(), options)
@@ -198,9 +205,11 @@ def test_package_roundtrip_preserves_patches_and_historical_results(isolated_dat
     from character_workflow.lib.canvas_packages import export_canvas_projects, inspect_canvas_package, commit_canvas_package
     from character_workflow.lib.canvas_projects import resolve_canvas_media
     from character_workflow.lib.jobs import list_jobs
-    pid, _source, job, _doc, _ = prepare()
+    pid, _source, job, _doc, _ = prepare(replacement=True)
     calls = []
     def generate(**kwargs):
+        assert len(kwargs["params"]["reference_images"]) == 2
+        assert all(Path(p).is_file() for p in kwargs["params"]["reference_images"])
         calls.append(True)
         if len(calls) == 2:
             raise ValueError("rejected")
@@ -257,3 +266,21 @@ def test_region_task_state_rejects_untrusted_candidate_paths():
     for candidate in ("/tmp/escape", "../../outside", -1, 4, True):
         with pytest.raises(ValueError, match="区域"):
             validate_regional_tasks({"tasks": [{"candidate": candidate, "region_id": "1", "status": "pending"}]}, ["1"], 1)
+
+
+def test_package_validation_rejects_tampered_regional_candidate(isolated_data_root, monkeypatch):
+    import json
+    from character_workflow.lib import canvas_packages
+    pid, _source, _job, _doc, _ = prepare()
+    monkeypatch.setattr(callers, "dispatch", lambda **_: (_ for _ in ()).throw(ValueError("rejected")))
+    with pytest.raises(Exception):
+        run_canvas_job(_job.job_id)
+    original = canvas_packages._portable_job
+    def tamper(*args):
+        data = json.loads(original(*args))
+        data["params"]["regional_edit"]["tasks"][0]["candidate"] = "/tmp/escape"
+        return json.dumps(data).encode()
+    monkeypatch.setattr(canvas_packages, "_portable_job", tamper)
+    with pytest.raises(canvas_packages.CanvasPackageError, match="区域"):
+        path, _ = canvas_packages.export_canvas_projects([pid])
+        canvas_packages.inspect_canvas_package(path)

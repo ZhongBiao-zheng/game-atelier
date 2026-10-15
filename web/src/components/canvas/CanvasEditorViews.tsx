@@ -696,7 +696,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           )}
           {nodeJob && ['failed', 'partial'].includes(nodeJob.status) && nodeJob.canvas_run
             && nodeJob.params.regional_edit?.tasks.some(task => ['failed', 'pending', 'paused', 'running'].includes(task.status)
-              || (task.status === 'succeeded' && !nodeJob.output_paths.length)) && (
+              || (task.status === 'succeeded' && nodeJob.output_paths.length === (nodeJob.params.regional_edit?.output_offset ?? 0))) && (
             <MediaToolButton label="继续未完成区域" text="继续区域" onClick={() => context.resumeRegions?.(nodeJob.canvas_run!.run_id)}><RotateCcw /></MediaToolButton>
           )}
           {emptyMediaNode ? (

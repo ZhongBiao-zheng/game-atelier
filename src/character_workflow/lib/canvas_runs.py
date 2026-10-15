@@ -2455,6 +2455,8 @@ def resume_regional_edit_run(project_id: str, run_id: str,
                 raise ValueError("这个任务没有可继续的区域")
             result = next((n for n in current.nodes if n.id == context.result_node_id), None)
             previous_versions = {c.version_id for c in context.candidates if c.version_id}
+            previous_versions.update(c["version_id"] for c in job.params.regional_edit.get("history", [])
+                                     if c.get("version_id"))
             if (not isinstance(result, CanvasImageNode) or canvas_node_has_pending_run(current, result)
                     or (result.data.current_version_id
                         and result.data.current_version_id not in previous_versions)):
@@ -2471,7 +2473,7 @@ def resume_regional_edit_run(project_id: str, run_id: str,
                     task.update(status="pending", provider={}, error=None,
                                 past_cost_usd=task.get("past_cost_usd", 0) +
                                 task.pop("cost_usd", 0))
-            compose_only = (not job.output_paths
+            compose_only = (len(job.output_paths) == job.params.regional_edit.get("output_offset", 0)
                             and any(t["status"] == "succeeded" for t in tasks))
             if not compose_only and not any(t["status"] in {"pending", "paused"} for t in tasks):
                 raise ValueError("剩余区域提交结果未确认，请先核对厂商订单；未重复下单")

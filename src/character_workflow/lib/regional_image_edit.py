@@ -116,7 +116,7 @@ def _work_options(key, model):
     for ratio in ratios:
         if ":" not in ratio:
             continue
-        a, b = map(int, ratio.split(":"))
+        a, b = map(float, ratio.split(":"))
         if image_family(model) == "gpt-image" and max(a / b, b / a) > 3:
             continue
         side = 2048 if image_family(model) == "seedream" else 1024
@@ -194,6 +194,35 @@ def resize_rgba(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     return image.convert("RGBA").convert("RGBa").resize(
         size, Image.Resampling.LANCZOS,
     ).convert("RGBA")
+
+
+def validate_regional_tasks(state: dict, region_ids: list[str], count: int) -> None:
+    """Validate imported/durable state before it can address files or submit orders."""
+    error = "区域任务状态无效，请重新创建局部编辑"
+    if (type(count) is not int or not 1 <= count <= 4 or not 1 <= len(region_ids) <= 16
+            or len(set(region_ids)) != len(region_ids)
+            or any(not isinstance(r, str) or not re.fullmatch(r"[0-9]+(?:-[0-9]+)*", r)
+                   for r in region_ids)):
+        raise ValueError(error)
+    tasks = state.get("tasks")
+    if not isinstance(tasks, list) or len(tasks) != len(region_ids) * count:
+        raise ValueError(error)
+    pairs = set()
+    for task in tasks:
+        if (not isinstance(task, dict) or type(task.get("candidate")) is not int
+                or not 0 <= task["candidate"] < count or task.get("region_id") not in region_ids
+                or task.get("status") not in {"pending", "running", "succeeded", "failed", "paused", "uncertain"}):
+            raise ValueError(error)
+        pair = (task["candidate"], task["region_id"])
+        if pair in pairs:
+            raise ValueError(error)
+        pairs.add(pair)
+        provider = task.get("provider") or {}
+        if not isinstance(provider, dict) or set(provider) - {"provider_task_ids", "provider_task_protocol", "warnings"}:
+            raise ValueError(error)
+    offset = state.get("output_offset", 0)
+    if type(offset) is not int or offset < 0:
+        raise ValueError(error)
 
 
 def validate_context_alignment(source: Image.Image, generated: Image.Image,

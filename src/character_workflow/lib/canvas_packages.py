@@ -830,6 +830,16 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
                 raise CanvasPackageError(f"任务 {job.job_id} 的 retry_of 无法解析")
             if job.canvas_run is None:
                 raise CanvasPackageError(f"任务 {job.job_id} 缺少运行记录")
+            if job.params.regional_edit:
+                from .regional_image_edit import validate_regional_tasks
+                try:
+                    validate_regional_tasks(job.params.regional_edit,
+                                            [r["id"] for r in (job.params.image_edit or {})["regions"]],
+                                            job.params.n or 1)
+                    if job.params.regional_edit.get("output_offset", 0) > len(job.output_paths):
+                        raise ValueError("区域输出偏移无效")
+                except (KeyError, TypeError, ValueError) as error:
+                    raise CanvasPackageError("区域任务状态无效") from error
             for task in (job.params.regional_edit or {}).get("tasks", []):
                 path = task.get("path")
                 if task.get("status") == "succeeded" and not path:
