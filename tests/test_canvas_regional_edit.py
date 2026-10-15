@@ -192,3 +192,37 @@ def test_unclassified_provider_error_is_uncertain(isolated_data_root, monkeypatc
     with pytest.raises(Exception):
         run_canvas_job(job.job_id)
     assert all(t["status"] == "uncertain" for t in read_job(job.job_id).params.regional_edit["tasks"])
+
+
+def test_package_roundtrip_preserves_patches_and_historical_results(isolated_data_root, monkeypatch):
+    from character_workflow.lib.canvas_packages import export_canvas_projects, inspect_canvas_package, commit_canvas_package
+    from character_workflow.lib.canvas_projects import resolve_canvas_media
+    from character_workflow.lib.jobs import list_jobs
+    pid, _source, job, _doc, _ = prepare()
+    calls = []
+    def generate(**kwargs):
+        calls.append(True)
+        if len(calls) == 2:
+            raise ValueError("rejected")
+        path = kwargs["output_dir"] / "result.png"
+        Image.new("RGBA", (1024, 1024), "blue").save(path)
+        return [str(path)]
+    monkeypatch.setattr(callers, "dispatch", generate)
+    partial = run_canvas_job(job.job_id)
+    path, _ = export_canvas_projects([pid])
+    imported = commit_canvas_package(inspect_canvas_package(path).token)[0]
+    restored = next(j for j in list_jobs() if j.canvas_project_id == imported.project_id)
+    # Removing the original proves the new project is self-contained.
+    Path(partial.params.regional_edit["tasks"][0]["path"]).unlink()
+    resume_regional_edit_run(imported.project_id, restored.canvas_run.run_id,
+                             read_canvas_document(imported.project_id).revision)
+    complete = run_canvas_job(restored.job_id)
+    assert complete.status == JobStatus.DONE
+    assert len(calls) == 3
+    versions = read_canvas_document(imported.project_id).content_versions
+    results = [v for v in versions.values() if v.origin.kind == "job_output"]
+    assert len(results) == 2
+    for version in results:
+        assert resolve_canvas_media(imported.project_id, version.version_id)[0].is_file()
+    second, _ = export_canvas_projects([imported.project_id])
+    assert inspect_canvas_package(second).projects
