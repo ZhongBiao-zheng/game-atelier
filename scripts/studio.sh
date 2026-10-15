@@ -14,6 +14,8 @@ cd "$PROJECT_ROOT"
 
 export GIT_TERMINAL_PROMPT=0
 export UV_HTTP_TIMEOUT=20
+# 不继承别的项目的虚拟环境；业务运行环境统一由 bootstrap 选择。
+unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT
 # uv 找不到本机 Python 3.11+ 时要下载一份；默认源是 GitHub，国内基本下不动。
 export UV_PYTHON_INSTALL_MIRROR="${UV_PYTHON_INSTALL_MIRROR:-https://registry.npmmirror.com/-/binary/python-build-standalone}"
 
@@ -57,6 +59,8 @@ if [ -z "$UV" ]; then
   fi
 fi
 
+export PATH="$(dirname "$UV"):$PATH"
+
 if [ "${1:-}" != "--skip-update" ]; then
   # 更新逻辑在 self_update.py（与 Windows 共用）；退出码 10 = 已更新，重跑新版启动器。
   "$UV" run --no-project python scripts/self_update.py
@@ -66,33 +70,16 @@ echo
 
 sync_local_skills
 
-if [ ! -d ".venv" ]; then
-  echo "首次启动，安装依赖（约 1-2 分钟）..."
-  if ! "$UV" sync; then
-    err "依赖安装失败，检查网络后重试"
-    pause_exit 1
-  fi
-else
-  echo "检查依赖..."
-  "$UV" sync --frozen || warn "依赖未能更新（离线？），沿用现有环境"
-fi
-echo
-
-echo "停止旧实例..."
-"$UV" run --no-sync python src/viewer_server/server.py stop || true
-sleep 1
-
 if [ ! -f "web/dist/index.html" ]; then
   err "前端文件 web/dist 缺失，请双击「Mac一键修复.command」"
   pause_exit 1
 fi
 
-echo "启动工坊..."
-if ! "$UV" run --no-sync python src/viewer_server/server.py start --background; then
+if ! "$UV" run --no-project python scripts/bootstrap.py --launch; then
   echo
   err "启动失败。原因见上方或数据目录 .runtime/server.log"
   pause_exit 1
 fi
 echo
-echo "已启动 http://127.0.0.1:5174/ ，本窗口可关闭。"
+echo "工坊已启动，本窗口可关闭。"
 sleep 2

@@ -75,20 +75,23 @@ def _venv_hash_file(data_root: Path) -> Path:
 
 
 def _venv_signature() -> str:
-    """venv 重建信号：必须同时反映依赖(pyproject.toml)和**代码根目录**(PLUGIN_DIR)。
-
-    版本号在 .claude-plugin/plugin.json，不在 pyproject.toml（常年 0.1.0、依赖很少变）；
-    而 `uv sync` 是 editable 安装，把 venv 的 import 绑死在「建它时的版本目录」(.../<ver>/src)。
-    若签名只 hash pyproject，插件更新(.../5.1.0/ → .../5.1.8/)后 hash 不变 → check() 返回
-    ready → venv 不重建 → 旧代码照跑（旧版本目录被插件 GC 后更会直接 ImportError）。
-    把 PLUGIN_DIR 纳入签名：版本目录一变签名就变 → 强制 rebuild 并把 editable 重指向新 /src，
-    `claude plugin update` 才真正生效。dev 软链与 marketplace 互切（PLUGIN_DIR 不同）同理强制重建。
-    """
+    """只在依赖、锁定版本、Python 要求或 editable 源码位置变化时同步环境。"""
     h = hashlib.sha256()
-    h.update((PLUGIN_DIR / "pyproject.toml").read_bytes())
-    h.update(b"\n")
+    for name in ("pyproject.toml", "uv.lock", ".python-version"):
+        h.update(name.encode("utf-8") + b"\0")
+        h.update((PLUGIN_DIR / name).read_bytes())
+        h.update(b"\0")
     h.update(str(PLUGIN_DIR).encode("utf-8"))
     return h.hexdigest()
+
+
+def _venv_is_current(data_root: Path) -> bool:
+    hash_file = _venv_hash_file(data_root)
+    return (
+        _venv_python(data_root).is_file()
+        and hash_file.is_file()
+        and hash_file.read_text(encoding="utf-8").strip() == _venv_signature()
+    )
 
 
 # ---------- 版本更新检查 ----------
@@ -248,11 +251,7 @@ def check() -> dict:
         }
 
     venv_py = _venv_python(data_root)
-    hash_file = _venv_hash_file(data_root)
-    expected_hash = _venv_signature()
-    venv_hash = hash_file.read_text().strip() if hash_file.exists() else None
-
-    if (not venv_py.exists()) or (venv_hash is None) or (venv_hash != expected_hash):
+    if not _venv_is_current(data_root):
         return {
             "status": "needs_venv",
             "data_root": str(data_root),
@@ -307,8 +306,8 @@ def check() -> dict:
     }
 
 
-def ensure_venv() -> int:
-    """Run `uv sync` against PLUGIN_DIR into <data_root>/.venv, then write venv-hash."""
+def ensure_venv(*, quiet: bool = False) -> int:
+    """按签名同步唯一运行环境；普通启动不执行 uv，不访问包源。"""
     data_root = resolve_data_root()
     if data_root is None:
         print(json.dumps({
@@ -316,6 +315,16 @@ def ensure_venv() -> int:
             "error": "data_root not configured — run --init-data-root first",
         }, ensure_ascii=False))
         return 1
+
+    if _venv_is_current(data_root):
+        if not quiet:
+            print(json.dumps({
+                "status": "ok",
+                "data_root": str(data_root),
+                "venv_python": str(_venv_python(data_root)),
+                "venv_hash": _venv_signature(),
+            }, ensure_ascii=False))
+        return 0
 
     uv_path = shutil.which("uv")
     if uv_path is None:
@@ -325,6 +334,15 @@ def ensure_venv() -> int:
         }, ensure_ascii=False))
         return 2
 
+    # Windows 无法替换仍被服务加载的 .pyd / DLL；只有需要同步时才提前停止占用者。
+    if _venv_python(data_root).exists() and (data_root / ".runtime" / "server.pid").exists():
+        print("更新运行依赖前停止旧实例…", file=sys.stderr, flush=True)
+        # 从新代码路径运行 stop，旧插件缓存可能已移除、editable 尚未重新指向新目录。
+        stop_args = [str(PLUGIN_DIR / "src" / "viewer_server" / "server.py"), "stop"]
+        if run_in_venv(stop_args, stdout=sys.stderr):
+            print("旧实例未停止，未修改运行环境。", file=sys.stderr)
+            return 4
+
     venv = data_root / ".venv"
     venv.parent.mkdir(parents=True, exist_ok=True)
     env = {
@@ -332,29 +350,38 @@ def ensure_venv() -> int:
         **os.environ,
         "UV_PROJECT_ENVIRONMENT": str(venv),
     }
+    # 启动器 / Agent 可能带着另一个 venv；同步目标只由数据目录决定。
+    env.pop("VIRTUAL_ENV", None)
+    hash_file = _venv_hash_file(data_root)
+    hash_file.unlink(missing_ok=True)
+    print("正在安装运行依赖…", file=sys.stderr, flush=True)
     proc = subprocess.run(
-        [uv_path, "sync", "--project", str(PLUGIN_DIR)],
+        [uv_path, "sync", "--locked", "--no-dev", "--project", str(PLUGIN_DIR)],
         env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:
-        print(json.dumps({
-            "status": "error",
-            "error": "uv sync failed",
-            "stderr": proc.stderr or "",
-            "stdout": proc.stdout or "",
-        }, ensure_ascii=False))
+        if quiet:
+            print("运行依赖安装失败，请检查网络后重新启动。", file=sys.stderr)
+            print(proc.stderr or proc.stdout or "uv sync failed", file=sys.stderr)
+        else:
+            print(json.dumps({
+                "status": "error",
+                "error": "uv sync failed",
+                "stderr": proc.stderr or "",
+                "stdout": proc.stdout or "",
+            }, ensure_ascii=False))
         return 3
 
-    hash_file = _venv_hash_file(data_root)
     hash_file.parent.mkdir(parents=True, exist_ok=True)
-    hash_file.write_text(_venv_signature())
+    hash_file.write_text(_venv_signature(), encoding="utf-8")
 
-    print(json.dumps({
-        "status": "ok",
-        "data_root": str(data_root),
-        "venv_python": str(_venv_python(data_root)),
-        "venv_hash": _venv_signature(),
-    }, ensure_ascii=False))
+    if not quiet:
+        print(json.dumps({
+            "status": "ok",
+            "data_root": str(data_root),
+            "venv_python": str(_venv_python(data_root)),
+            "venv_hash": _venv_signature(),
+        }, ensure_ascii=False))
     return 0
 
 
@@ -391,7 +418,7 @@ def init_data_root(target: Path) -> int:
     return 0
 
 
-def run_in_venv(forward_args: list[str]) -> int:
+def run_in_venv(forward_args: list[str], *, stdout=None) -> int:
     """Forward `forward_args` to <data_root>/.venv/python. Use from SKILL.md so
     installed-Plugin invocations don't depend on system python."""
     data_root = resolve_data_root()
@@ -408,8 +435,31 @@ def run_in_venv(forward_args: list[str]) -> int:
             "error": "venv not built — run bootstrap.py --ensure-venv",
         }, ensure_ascii=False))
         return 2
-    proc = subprocess.run([str(venv_py), *forward_args])
+    env = {
+        **os.environ,
+        "VIRTUAL_ENV": str(data_root / ".venv"),
+        "UV_PROJECT_ENVIRONMENT": str(data_root / ".venv"),
+    }
+    proc = subprocess.run([str(venv_py), *forward_args], env=env, stdout=stdout)
     return proc.returncode
+
+
+def launch() -> int:
+    """一键启动：按需准备共享运行环境，再用该环境重启服务。"""
+    if not _web_dist_ok():
+        print("前端文件 web/dist 缺失，请运行一键修复。", file=sys.stderr)
+        return 1
+    if resolve_data_root() is None:
+        init_data_root(Path.home() / APP_NAME)
+    result = ensure_venv(quiet=True)
+    if result:
+        return result
+    print("停止旧实例…", flush=True)
+    result = run_in_venv(["-m", "viewer_server.server", "stop"])
+    if result:
+        return result
+    print("启动工坊…", flush=True)
+    return run_in_venv(["-m", "viewer_server.server", "start", "--background"])
 
 
 def _force_utf8_stdio() -> None:
@@ -430,6 +480,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Bootstrap the game-atelier plugin.")
     parser.add_argument("--check", action="store_true", help="Report current bootstrap state.")
     parser.add_argument(
+        "--launch", action="store_true", help="Prepare the shared runtime and launch the viewer.",
+    )
+    parser.add_argument(
         "--init-data-root",
         metavar="PATH",
         help="Create data-root skeleton at PATH and write global config pointer.",
@@ -437,7 +490,7 @@ def main() -> int:
     parser.add_argument(
         "--ensure-venv",
         action="store_true",
-        help="Run `uv sync` into <data_root>/.venv and write venv-hash.",
+        help="Sync <data_root>/.venv only when its dependency signature changes.",
     )
     parser.add_argument(
         "--dismiss-update",
@@ -465,6 +518,9 @@ def main() -> int:
 
     if args.ensure_venv:
         return ensure_venv()
+
+    if args.launch:
+        return launch()
 
     parser.print_help()
     return 1

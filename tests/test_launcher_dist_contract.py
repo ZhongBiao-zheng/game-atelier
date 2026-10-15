@@ -1,7 +1,9 @@
 import os
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -23,6 +25,31 @@ def test_one_click_launchers_only_consume_committed_dist():
         assert "pnpm install" not in launcher
         assert "web/dist/index.html" in launcher or "web\\dist\\index.html" in launcher
         assert "一键修复" in launcher
+
+
+def test_one_click_launchers_delegate_runtime_to_bootstrap():
+    for path in ("scripts/studio.sh", "Windows一键启动.bat"):
+        launcher = _read(path, "utf-8-sig")
+        assert "run --no-project python scripts" in launcher
+        assert "bootstrap.py --launch" in launcher
+        assert " sync --frozen" not in launcher
+        assert "run --no-sync" not in launcher
+        assert "沿用现有环境" not in launcher
+
+
+def test_package_index_and_locked_downloads_use_domestic_mirror():
+    project = tomllib.loads(_read("pyproject.toml"))
+    index = next(i for i in project["tool"]["uv"]["index"] if i.get("default"))
+    mirror = urlsplit(index["url"]).hostname
+    assert mirror == "mirrors.tuna.tsinghua.edu.cn"
+    lock = tomllib.loads(_read("uv.lock"))
+    for package in lock["package"]:
+        if "registry" in package["source"]:
+            assert package["source"]["registry"] == index["url"]
+        artifacts = package.get("wheels", []) + ([package["sdist"]] if "sdist" in package else [])
+        for artifact in artifacts:
+            assert urlsplit(artifact["url"]).hostname == mirror
+            assert artifact["hash"].startswith("sha256:")
 
 
 def test_repair_scripts_are_scoped_to_dist_and_never_hard_reset():
