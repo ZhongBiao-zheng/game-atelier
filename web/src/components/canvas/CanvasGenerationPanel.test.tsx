@@ -310,8 +310,6 @@ it('renders the generation composer as an independent panel below the selected n
   expect(panel.closest('article')).toBeNull();
   expect(panel.parentElement).toHaveAttribute('data-canvas-node-panel-anchor', 'config-one');
   expect(screen.queryByText(/\d+×/)).not.toBeInTheDocument();
-  expect(within(panel).getByText('图片生成')).toBeInTheDocument();
-  expect(within(panel).getByText('· 分镜出图')).toBeInTheDocument();
   expect(within(panel).queryByRole('button', { name: '图片设置' })).not.toBeInTheDocument();
   const generate = within(panel).getByRole('button', { name: '开始生成' });
   expect(generate).toBeEnabled();

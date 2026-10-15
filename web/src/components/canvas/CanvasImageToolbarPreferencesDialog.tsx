@@ -1,9 +1,12 @@
-import { ChevronDown, ChevronUp, Ellipsis, Image as ImageIcon } from 'lucide-react';
+import { Ellipsis, GripVertical, Image as ImageIcon } from 'lucide-react';
+import { Reorder, useDragControls } from 'motion/react';
 import { useEffect, useMemo, useState } from 'react';
 
 import {
   CANVAS_IMAGE_TOOLS,
+  IMAGE_TOOLBAR_INLINE_LIMIT,
   orderedCanvasImageTools,
+  type CanvasImageToolDefinition,
 } from '@/components/canvas/canvasImageToolbar';
 import { Button } from '@/components/ui/button';
 import {
@@ -36,11 +39,11 @@ export function CanvasImageToolbarPreferencesDialog({
   onSave: (value: CanvasImageToolbarPreferences) => void;
 }) {
   const [draft, setDraft] = useState(value);
-  const selected = useMemo(() => new Set(draft.tool_ids), [draft.tool_ids]);
-  const rows = useMemo(() => {
-    const visible = orderedCanvasImageTools(draft.tool_ids);
-    return [...visible, ...CANVAS_IMAGE_TOOLS.filter(tool => !selected.has(tool.id))];
-  }, [draft.tool_ids, selected]);
+  const visibleTools = useMemo(() => orderedCanvasImageTools(draft.tool_ids), [draft.tool_ids]);
+  const hiddenTools = useMemo(() => {
+    const selected = new Set(draft.tool_ids);
+    return CANVAS_IMAGE_TOOLS.filter(tool => !selected.has(tool.id));
+  }, [draft.tool_ids]);
 
   useEffect(() => {
     if (open) setDraft({ ...value, tool_ids: orderedCanvasImageTools(value.tool_ids).map(tool => tool.id) });
@@ -66,14 +69,14 @@ export function CanvasImageToolbarPreferencesDialog({
     });
   }
 
-  const preview = orderedCanvasImageTools(draft.tool_ids);
+  const preview = visibleTools.slice(0, IMAGE_TOOLBAR_INLINE_LIMIT);
 
   return (
     <Dialog open={open} onOpenChange={next => { if (!saving) onOpenChange(next); }}>
       <DialogContent className="max-h-[92dvh] min-w-0 max-w-3xl grid-cols-1 overflow-x-hidden overflow-y-auto">
         <DialogHeader>
           <DialogTitle>自定义图片快捷工具</DialogTitle>
-          <DialogDescription>选择节点上方显示的工具并调整顺序。设置会应用到所有画布项目。</DialogDescription>
+          <DialogDescription>勾选要用的工具，拖动调整顺序。前 4 个直接显示在节点上方，其余在「更多」里。设置会应用到所有画布项目。</DialogDescription>
         </DialogHeader>
 
         <section aria-label="工具栏预览" className="rounded-lg border border-border bg-card p-4">
@@ -104,41 +107,36 @@ export function CanvasImageToolbarPreferencesDialog({
             <p className="text-sm font-medium">快捷工具</p>
             <p className="text-xs tabular-nums text-muted-foreground">已显示 {draft.tool_ids.length}/{CANVAS_IMAGE_TOOLS.length}</p>
           </div>
-          {rows.map(tool => {
+          <Reorder.Group
+            as="div"
+            axis="y"
+            values={draft.tool_ids}
+            onReorder={toolIds => setDraft(current => ({ ...current, tool_ids: toolIds }))}
+            className="space-y-2"
+          >
+            {visibleTools.map((tool, index) => (
+              <VisibleToolRow
+                key={tool.id}
+                tool={tool}
+                inMore={index >= IMAGE_TOOLBAR_INLINE_LIMIT}
+                onHide={() => setVisible(tool.id, false)}
+                onMove={delta => move(tool.id, delta)}
+              />
+            ))}
+          </Reorder.Group>
+          {hiddenTools.map(tool => {
             const Icon = tool.icon;
-            const index = draft.tool_ids.indexOf(tool.id);
-            const visible = index >= 0;
             return (
-              <div key={tool.id} className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2">
+              <div key={tool.id} className={TOOL_ROW_CLASS}>
                 <input
                   type="checkbox"
                   aria-label={`显示${tool.label}`}
-                  checked={visible}
-                  onChange={event => setVisible(tool.id, event.target.checked)}
+                  checked={false}
+                  onChange={() => setVisible(tool.id, true)}
                   className="size-4 accent-primary"
                 />
                 <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                <span className="min-w-0 flex-1 text-sm">{tool.label}</span>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  aria-label={`上移${tool.label}`}
-                  disabled={!visible || index === 0}
-                  onClick={() => move(tool.id, -1)}
-                >
-                  <ChevronUp aria-hidden="true" />
-                </Button>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  aria-label={`下移${tool.label}`}
-                  disabled={!visible || index === draft.tool_ids.length - 1}
-                  onClick={() => move(tool.id, 1)}
-                >
-                  <ChevronDown aria-hidden="true" />
-                </Button>
+                <span className="min-w-0 flex-1 text-sm text-muted-foreground">{tool.label}</span>
               </div>
             );
           })}
@@ -152,5 +150,52 @@ export function CanvasImageToolbarPreferencesDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const TOOL_ROW_CLASS = 'flex h-12 items-center gap-3 rounded-lg border border-border bg-card px-3';
+
+function VisibleToolRow({ tool, inMore, onHide, onMove }: {
+  tool: CanvasImageToolDefinition;
+  inMore: boolean;
+  onHide: () => void;
+  onMove: (delta: -1 | 1) => void;
+}) {
+  const dragControls = useDragControls();
+  const Icon = tool.icon;
+  return (
+    <Reorder.Item
+      as="div"
+      value={tool.id}
+      dragListener={false}
+      dragControls={dragControls}
+      whileDrag={{ zIndex: 20 }}
+      className={TOOL_ROW_CLASS}
+    >
+      <input
+        type="checkbox"
+        aria-label={`显示${tool.label}`}
+        checked
+        onChange={onHide}
+        className="size-4 accent-primary"
+      />
+      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <span className="min-w-0 flex-1 text-sm">{tool.label}</span>
+      {inMore && <span className="text-xs text-muted-foreground">在「更多」里</span>}
+      <button
+        type="button"
+        aria-label={`拖动调整${tool.label}的顺序`}
+        title="拖动排序，或按上下方向键"
+        className="grid size-8 cursor-grab touch-none place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary active:cursor-grabbing"
+        onPointerDown={event => dragControls.start(event)}
+        onKeyDown={event => {
+          if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+          event.preventDefault();
+          onMove(event.key === 'ArrowUp' ? -1 : 1);
+        }}
+      >
+        <GripVertical className="size-4" aria-hidden="true" />
+      </button>
+    </Reorder.Item>
   );
 }

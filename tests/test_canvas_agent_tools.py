@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
+
+from character_workflow.lib import data_root
 from PIL import Image
 from pydantic import ValidationError
 
@@ -36,18 +38,16 @@ def canvas(isolated_data_root):
     )]))
     local = SimpleNamespace(kind="local", session_id="human", grant_id=None)
     agent = SimpleNamespace(kind="agent", session_id="agent", grant_id="grant-one",
-                            project_ids=frozenset(), canvas_project_ids=frozenset([project.project_id]),
                             capabilities=frozenset(["canvas_read", "canvas_edit"]))
     return SimpleNamespace(project=project, other=other, local=local, agent=agent)
 
 
-def test_list_and_read_are_scoped_to_granted_canvases(canvas):
+def test_agent_lists_and_reads_every_canvas(canvas):
     listed = tools.list_projects(canvas.agent, CanvasListProjectsInput())
-    assert [row["project_id"] for row in listed["projects"]] == [canvas.project.project_id]
-    assert len(tools.list_projects(canvas.local, CanvasListProjectsInput())["projects"]) == 2
-    with pytest.raises(WorkshopError) as error:
-        tools.get_document(canvas.agent, CanvasProjectInput(project_id=canvas.other.project_id))
-    assert error.value.code == "TARGET_NOT_AUTHORIZED"
+    assert {row["project_id"] for row in listed["projects"]} == {
+        canvas.project.project_id, canvas.other.project_id,
+    }
+    assert tools.get_document(canvas.agent, CanvasProjectInput(project_id=canvas.other.project_id))
     with pytest.raises(WorkshopError):
         tools.get_document(canvas.agent, CanvasProjectInput(project_id="canvas-missing-000000"))
 
@@ -194,28 +194,21 @@ def test_run_requires_generate_capability_and_a_prepared_draft(canvas):
     assert error.value.code in {"INVALID_PARAMETERS", "INVALID_TARGET"}
 
 
-def test_http_agent_session_reaches_canvas_tools_only_within_grant(canvas, tmp_path):
+def test_http_agent_session_reaches_every_canvas(canvas, tmp_path):
     client = LocalTestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=tmp_path / "dist"))
     store = client.app.state.connection_store
-    grant = store.create_grant(name="画布助手", project_ids=[], capabilities=["canvas_read", "canvas_edit"],
-                               base_url="http://127.0.0.1", canvas_project_ids=[canvas.project.project_id])
-    token = read_private_json(grant["credential_path"])["grant_token"]
+    store.enable_agent("http://127.0.0.1")
+    credential = read_private_json(data_root.agent_credential_file())
     anonymous = LocalTestClient.__mro__[1](client.app, base_url="http://127.0.0.1")
     session = anonymous.post("/api/connection/agent-sessions", json={
-        "grant_id": grant["grant_id"], "grant_token": token, "instance_id": store.instance_id})
+        "grant_id": credential["grant_id"], "grant_token": credential["grant_token"],
+        "instance_id": store.instance_id})
     assert session.status_code == 200, session.text
-    assert session.json()["canvas_project_ids"] == [canvas.project.project_id]
     headers = {"Authorization": f"Bearer {session.json()['session_token']}", "Content-Type": "application/json"}
-    ok = anonymous.post("/api/canvas-agent/get-document", json={"project_id": canvas.project.project_id}, headers=headers)
-    assert ok.status_code == 200 and ok.json()["revision"] == 0
-    denied = anonymous.post("/api/canvas-agent/get-document", json={"project_id": canvas.other.project_id}, headers=headers)
-    assert denied.status_code == 403 and denied.json()["error"]["code"] == "TARGET_NOT_AUTHORIZED"
-    no_generate = anonymous.post("/api/canvas-agent/run", json={
-        "project_id": canvas.project.project_id, "surface_node_id": "x", "expected_revision": 0}, headers=headers)
-    assert no_generate.status_code == 403
-    # 画布授权不继承工坊读取能力。
-    workshop = anonymous.post("/api/workshop/list-projects", json={}, headers=headers)
-    assert workshop.status_code == 403
+    for project_id in (canvas.project.project_id, canvas.other.project_id):
+        ok = anonymous.post("/api/canvas-agent/get-document", json={"project_id": project_id}, headers=headers)
+        assert ok.status_code == 200 and ok.json()["revision"] == 0
+    assert anonymous.post("/api/workshop/list-projects", json={}, headers=headers).status_code == 200
 
 
 def test_draft_mode_must_match_surface_type_and_mentions_follow_connections(canvas):

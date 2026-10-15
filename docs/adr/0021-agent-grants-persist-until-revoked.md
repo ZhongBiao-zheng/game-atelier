@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: partially superseded by ADR-0022
 ---
 
 # Agent 授权长期有效，默认授权凭据固定路径，插件自带 MCP
@@ -24,3 +24,4 @@ viewer-server 已在运行，5174 被占时端口顺延也会让注册的 URL �
 - 默认授权只有一条，Claude Code 与 Codex 共用；要不同范围用自定义授权，凭据仍是 `<grant_id>.json`。
 - 插件 MCP 的启动命令是 `${ATELIER_PYTHON:-python3}`，尚未在 Windows 实测；没有 `python3` 时需设 `ATELIER_PYTHON`。
 - 服务名取 `atelier`：插件工具全名 `mcp__plugin_game-atelier_<服务名>__<工具名>` 不能超过 64 个字符。
+- 2026-10-14：默认授权 / 自定义授权之分与按项目授权已被 [ADR-0022](0022-single-agent-switch-covers-everything.md) 取代，本 ADR 只剩「不设有效期、撤销是唯一失效方式」仍有效。

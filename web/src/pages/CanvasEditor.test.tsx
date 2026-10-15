@@ -753,7 +753,8 @@ it('creates an editable layer-decomposition node before calling the model', asyn
 
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-source-image' }));
-  fireEvent.click(screen.getByRole('button', { name: '拆分 源图 的图层' }));
+  fireEvent.keyDown(screen.getByRole('button', { name: '源图 的更多工具' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: '拆分 源图 的图层' }));
 
   expect(await screen.findByLabelText('图层拆分设置')).toBeInTheDocument();
   expect(screen.getByRole('img', { name: '待拆分图片' })).toBeInTheDocument();
@@ -1759,7 +1760,9 @@ it('offers a way in on an empty canvas and a settings entry the immersive chrome
 
   await screen.findByLabelText('画布编辑器 列车短片');
   expect(screen.getByText('画布还是空的')).toBeTruthy();
-  expect(screen.getByRole('link', { name: '设置' }).getAttribute('href')).toBe('/settings');
+  fireEvent.keyDown(screen.getByRole('button', { name: '画布菜单' }), { key: 'Enter' });
+  expect((await screen.findByRole('menuitem', { name: '设置' })).getAttribute('href')).toBe('/settings');
+  fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
 
   fireEvent.click(screen.getByRole('button', { name: '文本节点' }));
   expect(screen.queryByText('画布还是空的')).toBeNull();
@@ -2186,7 +2189,8 @@ it('saves a generated canvas result as a generation asset', async () => {
   vi.mocked(saveGenerationFromCanvas).mockResolvedValue(generationAsset);
   await renderReadyCanvas();
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-result-image' }));
-  fireEvent.click(await screen.findByRole('button', { name: '保存 成图' }));
+  fireEvent.keyDown(await screen.findByRole('button', { name: '成图 的更多工具' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: '保存 成图' }));
   fireEvent.click(await screen.findByRole('button', { name: '保存生成资产' }));
   await waitFor(() => expect(saveGenerationFromCanvas).toHaveBeenCalledWith(expect.objectContaining({
     canvas_project_id: 'canvas-one', node_id: 'result-image', version_id: 'v-generated',
@@ -2201,7 +2205,8 @@ it('saves an uploaded canvas image as a plain media asset', async () => {
   await renderReadyCanvas();
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-result-image' }));
   expect(screen.queryByRole('button', { name: '分享 成图' })).not.toBeInTheDocument();
-  fireEvent.click(await screen.findByRole('button', { name: '保存 成图' }));
+  fireEvent.keyDown(await screen.findByRole('button', { name: '成图 的更多工具' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: '保存 成图' }));
   expect(await screen.findByRole('button', { name: '保存媒体资产' })).toBeInTheDocument();
   expect(saveGenerationFromCanvas).not.toHaveBeenCalled();
 });
@@ -2211,7 +2216,8 @@ it('opens the team share dialog for a generated canvas result', async () => {
   vi.mocked(listTeamLibraries).mockResolvedValue([]);
   await renderReadyCanvas();
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-result-image' }));
-  fireEvent.click(await screen.findByRole('button', { name: '分享 成图' }));
+  fireEvent.keyDown(await screen.findByRole('button', { name: '成图 的更多工具' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: '分享 成图' }));
   const dialog = await screen.findByRole('dialog', { name: '分享到团队库' });
   expect(dialog.querySelector('img')).toHaveAttribute('src', '/media');
 });

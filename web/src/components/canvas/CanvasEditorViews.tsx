@@ -13,7 +13,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, BookmarkPlus, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Pause, Pencil, Play, Plus, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, BookmarkPlus, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Pause, Pencil, Play, Plus, Settings2, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
   useRef, useState,
@@ -26,6 +26,7 @@ import { Link } from 'wouter';
 
 import { canvasDownloadUrl, canvasMediaUrl, downloadCanvasLayers, type CanvasLayerExportFormat } from '@/api/canvas';
 import { CanvasBatchMaterialEditor, CanvasGroupFrame } from './CanvasBatchControls';
+import { CanvasAudioPlayer } from './CanvasAudioPlayer';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
 import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
 import type { KeyView } from '@/api/keys';
@@ -34,6 +35,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { CanvasImageToolbarPreferencesDialog } from '@/components/canvas/CanvasImageToolbarPreferencesDialog';
@@ -60,7 +65,7 @@ import {
   isReversePromptJob,
 } from '@/components/canvas/CanvasNodeRunStatus';
 import { formatCanvasBytes, formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
-import { CANVAS_UPSCALE_TARGETS, orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
+import { CANVAS_UPSCALE_TARGETS, IMAGE_TOOLBAR_INLINE_LIMIT, orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
 import { isUploadedImageMaterialNode } from '@/components/canvas/canvasNodePanelInteraction';
 import { imageControlCaps } from '@/lib/imageControlCaps';
 import { VideoControls } from '@/components/studio/VideoControls';
@@ -253,7 +258,7 @@ export function CanvasPlaceholderCard({ data }: NodeProps<CanvasPlaceholderFlowN
   );
 }
 
-export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
+export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<CanvasFlowNode>) {
   const context = useContext(CanvasNodeContext);
   const setTextEditing = context?.setTextEditing;
   const node = data.domain;
@@ -508,6 +513,29 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     context.updateNode(node.id, candidate => ({ ...candidate, hidden: !candidate.hidden }));
   }
 
+  // 隐藏是固定按钮，排在「更多」之前，让「更多」落在工具条最右；图片节点的保存与分享收在「更多」里。
+  const fixedToolbarButtons = (
+    <>
+      {isCanvasContentNode(node) && node.type !== 'image' && isSavableCanvasVersion(content) && (
+        <MediaToolButton label={`保存 ${node.title}`} text="保存" onClick={() => void context.saveAsset(node)}>
+          <BookmarkPlus />
+        </MediaToolButton>
+      )}
+      {isCanvasContentNode(node) && node.type !== 'image' && context.shareResult && isShareableCanvasVersion(content) && (
+        <MediaToolButton label={`分享 ${node.title}`} text="分享" onClick={() => context.shareResult?.(node)}>
+          <Share2 />
+        </MediaToolButton>
+      )}
+      {(hasHideableContent || node.hidden) && <MediaToolButton
+        label={node.hidden ? `显示 ${node.title} 的内容` : `隐藏 ${node.title} 的内容`}
+        text={node.hidden ? '显示' : '隐藏'}
+        onClick={toggleHidden}
+      >
+        <SwapIcon swapKey={Boolean(node.hidden)}>{node.hidden ? <Eye /> : <EyeOff />}</SwapIcon>
+      </MediaToolButton>}
+    </>
+  );
+
   return (
     <div
       ref={setShellElement}
@@ -622,7 +650,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
           role="toolbar"
           aria-label={`${node.title} 节点工具`}
           data-canvas-node-toolbar={node.id}
-          className="flex items-center gap-1 rounded-xl border border-border bg-glass p-1 backdrop-blur-glass shell-glow"
+          className={cn(
+            'flex items-center gap-1 rounded-xl border border-border bg-glass p-1 backdrop-blur-glass shell-glow',
+            canvasDragChromeClass(dragging, chromeBelow ? 'up' : 'down'),
+          )}
           onFocusCapture={event => {
             const focused = (event.target as HTMLElement).closest<HTMLElement>('button, a[href]');
             updateToolbarTabStops(toolbarControls(event.currentTarget), focused);
@@ -664,26 +695,31 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               <SwapIcon swapKey={Boolean(replacingMedia)}>{replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}</SwapIcon>
             </MediaToolButton>
           ) : node.type === 'image' ? (
-            <>
               <ImageNodeToolbar
                 node={node}
                 content={content}
                 replacing={replacingMedia}
                 submitting={submittingNode}
                 context={context}
+                trailing={(
+                  <>
+                    {reversePromptJob && reversePromptSucceeded && !context.reversePromptConfiguredNodeIds.has(node.id) && (
+                      <MediaToolButton
+                        label="用反推文本生成图片"
+                        text="生成图片"
+                        disabled={submittingNode}
+                        onClick={() => void context.recoverReversePromptConfig(reversePromptJob)}
+                      >
+                        <SwapIcon swapKey={Boolean(submittingNode)}>{submittingNode ? <LoaderCircle className="animate-spin" /> : <Sparkles />}</SwapIcon>
+                      </MediaToolButton>
+                    )}
+                    {fixedToolbarButtons}
+                  </>
+                )}
+                onSave={isSavableCanvasVersion(content) ? () => void context.saveAsset(node) : undefined}
+                onShare={context.shareResult && isShareableCanvasVersion(content) ? () => context.shareResult?.(node) : undefined}
                 onOverlayOpenChange={setToolbarOverlayOpen}
               />
-              {reversePromptJob && reversePromptSucceeded && !context.reversePromptConfiguredNodeIds.has(node.id) && (
-                <MediaToolButton
-                  label="用反推文本生成图片"
-                  text="生成图片"
-                  disabled={submittingNode}
-                  onClick={() => void context.recoverReversePromptConfig(reversePromptJob)}
-                >
-                  <SwapIcon swapKey={Boolean(submittingNode)}>{submittingNode ? <LoaderCircle className="animate-spin" /> : <Sparkles />}</SwapIcon>
-                </MediaToolButton>
-              )}
-            </>
           ) : (
             <CanvasNodeToolbar
               node={node}
@@ -694,23 +730,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               onEditText={beginTextEditing}
             />
           )}
-          {isCanvasContentNode(node) && isSavableCanvasVersion(content) && (
-            <MediaToolButton label={`保存 ${node.title}`} text="保存" onClick={() => void context.saveAsset(node)}>
-              <BookmarkPlus />
-            </MediaToolButton>
-          )}
-          {isCanvasContentNode(node) && context.shareResult && isShareableCanvasVersion(content) && (
-            <MediaToolButton label={`分享 ${node.title}`} text="分享" onClick={() => context.shareResult?.(node)}>
-              <Share2 />
-            </MediaToolButton>
-          )}
-          {(hasHideableContent || node.hidden) && <MediaToolButton
-            label={node.hidden ? `显示 ${node.title} 的内容` : `隐藏 ${node.title} 的内容`}
-            text={node.hidden ? '显示' : '隐藏'}
-            onClick={toggleHidden}
-          >
-            <SwapIcon swapKey={Boolean(node.hidden)}>{node.hidden ? <Eye /> : <EyeOff />}</SwapIcon>
-          </MediaToolButton>}
+          {(emptyMediaNode || node.type !== 'image') && fixedToolbarButtons}
         </div>
       </NodeToolbar>
       {node.type === 'image' && mediaCandidates.length > 0 && (
@@ -931,6 +951,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
           anchor={shellElement}
           surfaceRef={context.generationPanel.surfaceRef}
           onSideChange={setPanelSide}
+          hiddenWhileDragging={dragging}
         >
           <CanvasGenerationComposer
             node={node}
@@ -1052,15 +1073,26 @@ function samePlacement(a: CanvasPanelPlacement | null, b: CanvasPanelPlacement) 
  *
  *  位置状态留在本组件内：children 由父级 render 传进来，本组件因平移重新定位时 children 仍是
  *  同一个 element 引用，React 会跳过整棵子树，面板内容不会跟着每帧重渲染。 */
+/** 拖动节点时工具条与生成面板朝节点方向收起，松手再浮现；进出动画同创作台的「回到底部」。
+ *  静止时不留 translate / opacity：祖先上残留的 translate 会让面板里的 backdrop-blur 失效。 */
+function canvasDragChromeClass(dragging: boolean, toward: 'up' | 'down') {
+  return cn(
+    'transition-[opacity,translate] duration-300 motion-reduce:transition-none',
+    dragging && cn('pointer-events-none opacity-0', toward === 'down' ? 'translate-y-2' : '-translate-y-2'),
+  );
+}
+
 function CanvasNodeFloatingPanel({
   nodeId,
   anchor,
   surfaceRef,
   onSideChange,
+  hiddenWhileDragging = false,
   children,
 }: {
   nodeId: string;
   onSideChange?: (side: CanvasPanelSide) => void;
+  hiddenWhileDragging?: boolean;
   /** 节点外壳的 DOM 节点。传元素而不是 ref：子组件的 layout effect 在父级 ref 挂上之前就跑，
    *  用 ref 会拿到 null，首帧永远定位不上。父级用 callback ref 把它变成 state 传下来。 */
   anchor: HTMLElement | null;
@@ -1129,6 +1161,8 @@ function CanvasNodeFloatingPanel({
     <div
       ref={panelRef}
       data-canvas-node-panel-anchor={nodeId}
+      // 进场动画由 gsap 写内联 transform 并在结束时清掉，与这里的拖动收起不重叠。
+      className={canvasDragChromeClass(hiddenWhileDragging, side === 'above' ? 'down' : 'up')}
       style={{
         position: surface ? 'absolute' : 'fixed',
         left: placement?.left ?? 0,
@@ -1552,6 +1586,9 @@ function ImageNodeToolbar({
   replacing,
   submitting,
   context,
+  onSave,
+  onShare,
+  trailing,
   onOverlayOpenChange,
 }: {
   node: Extract<CanvasContentNode, { type: 'image' }>;
@@ -1559,9 +1596,15 @@ function ImageNodeToolbar({
   replacing: boolean;
   submitting: boolean;
   context: CanvasNodeContextValue;
+  onSave?: () => void;
+  onShare?: () => void;
+  /** 排在「更多」之前的固定按钮。 */
+  trailing?: React.ReactNode;
   onOverlayOpenChange: (open: boolean) => void;
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 「自定义工具条」从更多菜单里打开：菜单随后收起，不能把弹窗还开着的工具条一起收掉。
+  const settingsOpenRef = useRef(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const onOverlayOpenChangeRef = useRef(onOverlayOpenChange);
@@ -1660,14 +1703,19 @@ function ImageNodeToolbar({
   });
 
   function updateSettingsOpen(open: boolean) {
+    settingsOpenRef.current = open;
     setSettingsOpen(open);
     onOverlayOpenChange(open);
   }
 
   // 菜单展开期间节点可能失去选中，工具栏要像设置弹窗一样保持可见。
   function updateMenuOpen(open: boolean) {
-    onOverlayOpenChange(open);
+    onOverlayOpenChange(open || settingsOpenRef.current);
   }
+
+  const layerActionDisabled = !currentVersionId || submitting || replacing;
+  const inlineActions = actions.slice(0, IMAGE_TOOLBAR_INLINE_LIMIT);
+  const overflowActions = actions.slice(IMAGE_TOOLBAR_INLINE_LIMIT);
 
   function openSettings() {
     setSettingsError(context.canvasUiPreferencesError);
@@ -1689,7 +1737,7 @@ function ImageNodeToolbar({
 
   return (
     <>
-      {actions.map(action => action.href ? (
+      {inlineActions.map(action => action.href ? (
         <MediaToolLink
           key={action.id}
           label={action.label}
@@ -1745,21 +1793,75 @@ function ImageNodeToolbar({
         disabled={!currentVersionId || submitting || replacing}
         onClick={() => context.createImageFromSource?.(node.id)}
       ><Sparkles /></MediaToolButton>
-      <MediaToolButton
-        label={`拆分 ${node.title} 的图层`}
-        text="拆分图层"
-        disabled={!currentVersionId || submitting || replacing}
-        onClick={() => context.createLayerDecomposition(node)}
-      >
-        <Layers3 />
-      </MediaToolButton>
-      <MediaToolButton
-        label="配置图片快捷工具"
-        text="更多"
-        onClick={openSettings}
-      >
-        <Ellipsis />
-      </MediaToolButton>
+      {trailing}
+      <DropdownMenu onOpenChange={updateMenuOpen}>
+        <DropdownMenuTrigger asChild>
+          <MediaToolButton label={`${node.title} 的更多工具`} text="更多" onClick={() => undefined}>
+            <Ellipsis />
+          </MediaToolButton>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="center"
+          className="nodrag min-w-40 [&_svg]:size-4"
+          onPointerDown={event => event.stopPropagation()}
+        >
+          {overflowActions.map(action => action.menu ? (
+            <DropdownMenuSub key={action.id}>
+              <DropdownMenuSubTrigger disabled={action.disabled} aria-label={action.label} className="gap-2">
+                {action.icon}{action.text}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="min-w-36" onPointerDown={event => event.stopPropagation()}>
+                {action.menu.map(item => (
+                  <DropdownMenuItem
+                    key={item.id}
+                    className="justify-between gap-4 tabular-nums"
+                    onSelect={item.onSelect}
+                  >
+                    <span>{item.title}</span>
+                    <span className="text-xs text-muted-foreground">{item.detail}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          ) : action.href ? (
+            <DropdownMenuItem key={action.id} asChild className="gap-2">
+              <a href={action.href} aria-label={action.label}>{action.icon}{action.text}</a>
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem
+              key={action.id}
+              aria-label={action.label}
+              disabled={action.disabled}
+              className="gap-2"
+              onSelect={action.run}
+            >
+              {action.icon}{action.text}
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuItem
+            aria-label={`拆分 ${node.title} 的图层`}
+            disabled={layerActionDisabled}
+            className="gap-2"
+            onSelect={() => context.createLayerDecomposition(node)}
+          >
+            <Layers3 />拆分图层
+          </DropdownMenuItem>
+          {onSave && (
+            <DropdownMenuItem aria-label={`保存 ${node.title}`} className="gap-2" onSelect={onSave}>
+              <BookmarkPlus />保存到资产
+            </DropdownMenuItem>
+          )}
+          {onShare && (
+            <DropdownMenuItem aria-label={`分享 ${node.title}`} className="gap-2" onSelect={onShare}>
+              <Share2 />分享
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem aria-label="配置图片快捷工具" className="gap-2" onSelect={openSettings}>
+            <Settings2 />自定义工具条
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <CanvasImageToolbarPreferencesDialog
         open={settingsOpen}
         value={context.canvasUiPreferences.image_toolbar}
@@ -1977,7 +2079,7 @@ export function CanvasGenerationComposer({
       aria-label={panelLabel}
       data-floating-node-panel="true"
       className={cn(
-        'nodrag',
+        'nodrag relative',
         embedded && 'nowheel',
         embedded ? 'canvas-mobile-generation' : 'overflow-hidden rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow',
       )}
@@ -1991,25 +2093,18 @@ export function CanvasGenerationComposer({
         (document.activeElement as HTMLElement | null)?.blur();
       }}
     >
-      <div className="mb-1 flex min-w-0 items-center justify-between gap-2 px-1">
-        <p className="flex min-w-0 items-center gap-2 text-xs font-medium text-foreground">
-          <Sparkles className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <span className="shrink-0">{textMode ? '文本' : `${modeLabel}生成`}</span>
-          {!textMode && <span className="truncate text-muted-foreground">· {node.title}</span>}
-        </p>
-        {onClose && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-7 shrink-0 rounded-full"
-            aria-label={`关闭${panelLabel}`}
-            onClick={onClose}
-          >
-            <X aria-hidden="true" />
-          </Button>
-        )}
-      </div>
+      {onClose && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="absolute right-2 top-2 z-10 size-7 rounded-full"
+          aria-label={`关闭${panelLabel}`}
+          onClick={onClose}
+        >
+          <X aria-hidden="true" />
+        </Button>
+      )}
       {usesVideoFrameSlots && videoCaps ? (
         <CanvasVideoFrameConnections
           node={node}
@@ -3357,23 +3452,7 @@ function MediaPreview({
       </div>
     );
   }
-  return (
-    <div data-canvas-media className="nodrag nowheel grid size-full place-items-center gap-3 p-4 text-xs text-muted-foreground">
-      {!compact && <span className="flex items-center gap-2"><FileAudio className="size-5" aria-hidden="true" />音频素材</span>}
-      <audio
-        ref={mediaRef}
-        src={resolvedSrc}
-        controls
-        preload={resolvedSrc ? 'metadata' : 'none'}
-        data-canvas-media-controls="audio"
-        className="w-full"
-        onClick={stopCanvasInteraction}
-        onDoubleClick={stopCanvasInteraction}
-        onPointerDown={stopCanvasInteraction}
-        onKeyDown={stopCanvasInteraction}
-      />
-    </div>
-  );
+  return <CanvasAudioPlayer src={resolvedSrc} title={title} mediaRef={mediaRef} />;
 }
 
 /** 提示词超过约 3 行才进摘要态；短提示词直接给编辑器，少一次点击。 */
@@ -3427,6 +3506,7 @@ function useLazyMedia(src: string) {
 export const canvasNodeTypes = {
   canvasNode: memo(CanvasNodeCard, (previous, next) => (
     previous.selected === next.selected
+    && previous.dragging === next.dragging
     && previous.data.domain === next.data.domain
   )),
   canvasPlaceholder: CanvasPlaceholderCard,

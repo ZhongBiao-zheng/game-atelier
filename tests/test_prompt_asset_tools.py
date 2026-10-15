@@ -66,28 +66,23 @@ def test_read_returns_prompt_variables_and_marks_used(isolated_data_root):
         read_prompt_asset("creation-asset-missing")
 
 
-def _agent(capabilities, project_ids=(), canvas_project_ids=()):
+def _agent(capabilities):
     return SimpleNamespace(kind="agent", grant_id="grant-1", session_id="s1",
-                           capabilities=frozenset(capabilities), project_ids=frozenset(project_ids),
-                           canvas_project_ids=frozenset(canvas_project_ids))
+                           capabilities=frozenset(capabilities))
 
 
-def test_workshop_tools_accept_workshop_or_canvas_read_and_scope_project(isolated_data_root):
+def test_workshop_tools_accept_workshop_or_canvas_read(isolated_data_root):
     hd, _, _ = _seed()
     listing = workshop.list_prompt_assets(_agent({"canvas_read"}), ListPromptAssetsInput(tags=["高清"]))
     assert listing["total"] == 2
     detail = workshop.read_prompt_asset(
-        _agent({"read"}, project_ids={"project-a"}),
+        _agent({"read"}),
         ReadPromptAssetInput(asset_id=hd.asset_id, project_id="project-a"),
     )
     assert detail["title"] == "通用高清-写实"
     with pytest.raises(workshop.WorkshopError) as denied:
         workshop.list_prompt_assets(_agent({"edit_documents"}), ListPromptAssetsInput())
     assert denied.value.code == "CAPABILITY_DENIED"
-    with pytest.raises(workshop.WorkshopError) as foreign:
-        workshop.list_prompt_assets(_agent({"read"}, project_ids={"project-a"}),
-                                    ListPromptAssetsInput(project_id="project-z"))
-    assert foreign.value.code == "TARGET_NOT_AUTHORIZED"
     with pytest.raises(workshop.WorkshopError) as missing:
         workshop.read_prompt_asset(_agent({"read"}), ReadPromptAssetInput(asset_id="creation-asset-x"))
     assert missing.value.status == 404

@@ -141,17 +141,18 @@ def test_context_reads_without_consuming_feedback_and_document_cas(setup):
     assert not (drafts / "bird.md").exists() and (drafts / "other.md").is_file()
 
 
-def test_authorization_checks_project_and_each_object(setup):
+def test_authorization_covers_every_project_but_checks_each_object(setup):
     other = projects.create_project("其他项目", "other")
-    initialize_character_directory("secret", "# 私密角色")
+    initialize_character_directory("secret", "# 别的项目的角色")
     projects.assign_character("secret", other.id)
     listed = ws.list_projects(setup.agent, ListProjectsInput())
-    assert listed["projects"] == [{"project_id": setup.project.id, "name": setup.project.name}]
-    for target in [dict(setup.target, character_id="secret"),
-                   dict(setup.target, project_id=other.id, character_id="secret")]:
-        with pytest.raises(ws.WorkshopError) as error:
-            ws.get_context(setup.agent, TargetInput(target=target))
-        assert error.value.status == 403
+    assert {item["project_id"] for item in listed["projects"]} == {setup.project.id, other.id}
+    # 授权不限项目，但目标必须真属于它声明的项目。
+    with pytest.raises(ws.WorkshopError) as error:
+        ws.get_context(setup.agent, TargetInput(target=dict(setup.target, character_id="secret")))
+    assert error.value.status == 403
+    assert ws.get_context(setup.agent, TargetInput(
+        target=dict(setup.target, project_id=other.id, character_id="secret")))
     read_only = SimpleNamespace(**{**vars(setup.agent), "capabilities": frozenset(["read"])})
     with pytest.raises(ws.WorkshopError):
         generation.prepare_generation(read_only, PrepareGenerationInput(

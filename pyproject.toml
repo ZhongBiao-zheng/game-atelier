@@ -22,6 +22,7 @@ dependencies = [
   # Agent Skill 的 SKILL.md frontmatter 是 YAML（description 常用多行写法）。
   "pyyaml>=6",
   "openai-agents>=0.4",
+  "tomlkit>=0.15.1",
 ]
 
 [build-system]

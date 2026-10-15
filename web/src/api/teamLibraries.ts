@@ -1,4 +1,4 @@
-import { connectionFetch, mediaUrl } from '@/api/connection';
+import { connectionFetch } from '@/api/connection';
 import { apiError, requestError, requestJson } from './http';
 import type {
   TeamAssetAdoptResponse,
@@ -107,11 +107,11 @@ export function listTeamAssets(
 
 /** 媒体地址经 mediaUrl：托管页面要拼本机地址与媒体令牌（`<img>` / `<video>` 带不了 Authorization）。 */
 export function teamAssetContentUrl(libraryId: string, entryId: string): string {
-  return mediaUrl(`${lib(libraryId)}/assets/${encodeURIComponent(entryId)}/content`);
+  return `${lib(libraryId)}/assets/${encodeURIComponent(entryId)}/content`;
 }
 
 export function teamAssetThumbUrl(libraryId: string, entryId: string, width: number): string {
-  return mediaUrl(`${lib(libraryId)}/assets/${encodeURIComponent(entryId)}/thumb?w=${width}`);
+  return `${lib(libraryId)}/assets/${encodeURIComponent(entryId)}/thumb?w=${width}`;
 }
 
 export function adoptTeamAsset(

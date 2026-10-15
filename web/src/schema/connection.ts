@@ -1,4 +1,4 @@
-/** Local authenticated runtime protocol. Hosted pairing is not implied by discovery. */
+/** Local authenticated runtime protocol. */
 export interface LocalConnectionStatus {
   service: 'game-atelier'
   instance_id: string

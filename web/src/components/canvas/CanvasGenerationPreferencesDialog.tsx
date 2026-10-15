@@ -1,4 +1,5 @@
 import { Link } from 'wouter';
+import type { VideoMode } from '@/lib/videoControlCaps';
 import { AudioLines, Clapperboard, Image as ImageIcon, RotateCcw, Type, ZoomIn } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -262,12 +263,12 @@ export function CanvasGenerationPreferencesDialog({
         effectiveChoice.key.base_url,
       )
     : null;
-  const videoCaps = activeMode === 'video' && effectiveChoice
+  // 生成方式不是偏好（新节点一律全能参考），这里只留模型支持的那一种，不显示切换。
+  const rawVideoCaps = activeMode === 'video' && effectiveChoice
     ? canvasVideoEditCaps(effectiveChoice.model.id, effectiveChoice.model.protocol)
     : null;
-  const videoMode = videoCaps?.modes.includes('omni') && params.frame_mode === 'auto'
-    ? 'omni'
-    : videoCaps?.modes[0] ?? 'firstlast';
+  const videoMode: VideoMode = rawVideoCaps?.modes.includes('omni') ? 'omni' : 'firstlast';
+  const videoCaps = rawVideoCaps ? { ...rawVideoCaps, modes: [videoMode] } : null;
 
   return (
     <Dialog open={open} onOpenChange={next => { if (!saving) onOpenChange(next); }}>
@@ -505,7 +506,7 @@ export function CanvasGenerationPreferencesDialog({
                     watermark={params.watermark === true}
                     menuDirection="up"
                     portalContainerRef={dialogContentRef}
-                    onModeChange={mode => patchParams({ frame_mode: mode === 'omni' ? 'auto' : 'firstlast' })}
+                    onModeChange={() => undefined}
                     onDurationChange={duration => patchParams({ duration })}
                     onResolutionChange={resolution => patchParams({ resolution })}
                     onRatioChange={ratio => patchParams({ ratio })}

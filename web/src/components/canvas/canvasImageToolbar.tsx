@@ -25,6 +25,9 @@ export interface CanvasImageToolDefinition {
   defaultVisible: boolean;
 }
 
+/** 工具条上直接露出的快捷工具数；排在后面的收进「更多」。谁排前面由「自定义工具条」的顺序决定。 */
+export const IMAGE_TOOLBAR_INLINE_LIMIT = 4;
+
 export const CANVAS_IMAGE_TOOLS: CanvasImageToolDefinition[] = [
   { id: 'info', label: '查看详情', icon: Eye, defaultVisible: true },
   { id: 'download', label: '下载图片', icon: Download, defaultVisible: true },

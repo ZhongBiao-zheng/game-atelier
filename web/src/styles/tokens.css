@@ -504,6 +504,11 @@
   .canvas-flow.canvas-flow-connecting .canvas-node-handle {
     pointer-events: auto !important;
   }
+  /* 拖动中的节点收起连接点，松手后按上面的规则重新出现（opacity 过渡沿用基础规则）。 */
+  .canvas-flow .react-flow__node.dragging .canvas-node-handle {
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
   .canvas-flow .canvas-node-handle-dot {
     position: absolute;
     top: 50%;
@@ -602,18 +607,22 @@
   .canvas-flow .react-flow__resize-control.canvas-node-resize-handle.bottom {
     top: calc(100% + 1px);
   }
-  /* 框选后的选区框往外让 12px，不贴着节点边缘。React Flow 用内联 width/height 定尺寸，
+  /* 框选后的选区框只往外让 2px，几乎贴着节点边缘。React Flow 用内联 width/height 定尺寸，
      所以外扩靠 content-box + padding，负 margin 把左上角挪回去。 */
   .canvas-flow .react-flow__nodesselection-rect {
     box-sizing: content-box;
-    padding: 12px;
-    margin: -12px;
+    padding: 2px;
+    margin: -2px;
     border-radius: 1rem;
     /* 选区框只是视觉框：它叠在节点之上，接了指针就把节点边上的连接把手全盖住，框选后
        只能整组拖、连不了线。拖任意一个选中节点本来就会带着整组走，所以框自己不必接事件。
        必须 !important：本文件的规则在 @layer 里，xyflow 的 style.css 不分层，不分层的
        `pointer-events: all` 无论选择器多具体都会赢。 */
     pointer-events: none !important;
+  }
+  /* 音频波形两端淡出：播放头固定在中间，两侧的条从边缘渐隐进出。 */
+  .canvas-audio-wave {
+    mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
   }
   .canvas-flow .react-flow__edge-path {
     stroke-width: 1.5 !important;

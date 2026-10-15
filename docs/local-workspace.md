@@ -1,3 +1,6 @@
+> **2026-10-14：托管网站方案已弃用并删除**（[ADR-0023](adr/0023-drop-hosted-website.md)）。下文网站相关内容只作历史记录；
+> 本机数据与工坊 MCP 部分以 [本机连接契约](contracts/local-connection.md) 与 [ADR-0022](adr/0022-single-agent-switch-covers-everything.md) 为准。
+
 # 网站、本机数据与工坊 MCP
 
 > 状态：本地整合分支已实现会话、编辑租约、Agent 项目授权、工坊批准执行、stdio MCP 与 Skill 接线；本机页面、SDK 与隔离生成回归已验证。

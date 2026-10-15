@@ -46,9 +46,7 @@ def actor_id(principal: Any) -> str:
 
 def authorize(principal: Any, project_id: str, capability: str) -> Any:
     actor_id(principal)
-    if principal.kind != "local" and (
-        project_id not in principal.project_ids or capability not in principal.capabilities
-    ):
+    if principal.kind != "local" and capability not in principal.capabilities:
         raise WorkshopError("TARGET_NOT_AUTHORIZED", "当前授权不允许操作这个项目", 403)
     project = next((p for p in projects.read_projects().projects if p.id == project_id), None)
     if project is None:
@@ -156,34 +154,29 @@ def list_projects(principal: Any, payload: ListProjectsInput) -> dict:
     actor_id(principal)
     if principal.kind != "local" and "read" not in principal.capabilities:
         raise WorkshopError("CAPABILITY_DENIED", "当前授权没有读取能力", 403)
-    values = [{"project_id": p.id, "name": p.name} for p in projects.read_projects().projects
-              if principal.kind == "local" or p.id in principal.project_ids]
+    values = [{"project_id": p.id, "name": p.name} for p in projects.read_projects().projects]
     return paginate(values, payload.page, payload.page_size, "projects")
 
 
-def _authorize_prompt_assets(principal: Any, project_id: str | None) -> None:
-    """提示词资产是应用级的：工坊或画布任一读能力即可；带 project_id 时该项目必须在授权内。"""
+def _authorize_prompt_assets(principal: Any) -> None:
+    """提示词资产是应用级的：工坊或画布任一读能力即可。"""
     actor_id(principal)
     if principal.kind == "local":
         return
     if not ({"read", "canvas_read"} & set(principal.capabilities)):
         raise WorkshopError("CAPABILITY_DENIED", "当前授权没有读取能力", 403)
-    if project_id and project_id not in (
-        set(principal.project_ids) | set(getattr(principal, "canvas_project_ids", ()))
-    ):
-        raise WorkshopError("TARGET_NOT_AUTHORIZED", "当前授权不允许操作这个项目", 403)
 
 
 def list_prompt_assets(principal: Any, payload: ListPromptAssetsInput) -> dict:
     from character_workflow.lib.creation_assets import list_prompt_asset_index
-    _authorize_prompt_assets(principal, payload.project_id)
+    _authorize_prompt_assets(principal)
     return list_prompt_asset_index(tags=payload.tags, query=payload.query,
                                    project_id=payload.project_id, limit=payload.limit)
 
 
 def read_prompt_asset(principal: Any, payload: ReadPromptAssetInput) -> dict:
     from character_workflow.lib.creation_assets import read_prompt_asset as _read
-    _authorize_prompt_assets(principal, payload.project_id)
+    _authorize_prompt_assets(principal)
     try:
         return _read(payload.asset_id, payload.project_id)
     except KeyError:

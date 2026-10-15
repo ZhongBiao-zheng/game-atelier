@@ -128,7 +128,7 @@ function expectExistingContent(node: CanvasNode, container: HTMLElement) {
   if (node.type === 'text') expect(screen.getByText('保留的文本内容')).toBeInTheDocument();
   if (node.type === 'image') expect(container.querySelector('img')).toBeInTheDocument();
   if (node.type === 'video') expect(container.querySelector('video')).toBeInTheDocument();
-  if (node.type === 'audio') expect(screen.getByText('音频素材')).toBeInTheDocument();
+  if (node.type === 'audio') expect(container.querySelector('audio')).toBeInTheDocument();
 }
 
 function canvasJob(status: JobStatus, overrides: Partial<Job> = {}, resultNodeId = imageNode.id): Job {

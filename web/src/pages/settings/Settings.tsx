@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { FolderOpen } from 'lucide-react';
-import { Link } from 'wouter';
 
 import { chooseFolder } from '@/api/folders';
 import { fetchConfig, updateConfig } from '@/api/config';
@@ -8,9 +7,9 @@ import { fetchOnboardingStatus, setDataRoot } from '@/api/onboarding';
 import { KeysPage } from './Keys';
 import { ProfileSection } from './ProfileSection';
 import { TeamLibrariesSection } from './TeamLibrariesSection';
-import { HOSTED_SITE } from '@/api/connection';
-import { HostedManagementNotice } from '@/components/HostedManagementNotice';
+import { AgentSection } from './AgentSection';
 import { SwapLabel } from '@/components/ui/swap-label';
+import { Switch } from '@/components/ui/switch';
 
 const DEFAULT_ROOT = '~/game-atelier';
 
@@ -20,16 +19,12 @@ const SECTIONS = [
   { id: 'settings-profile', label: '显示名' },
   { id: 'settings-team', label: '团队库' },
   { id: 'settings-keys', label: 'API 密钥' },
+  { id: 'settings-agent', label: 'Agent 连接' },
 ];
 const navItemClass = 'rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 const sectionClass = 'scroll-mt-6 space-y-4';
 
 export function SettingsPage() {
-  if (HOSTED_SITE) return <HostedManagementNotice title="设置" />;
-  return <LocalSettingsPage />;
-}
-
-function LocalSettingsPage() {
   const [savedRoot, setSavedRoot] = useState('');
   const [pendingRoot, setPendingRoot] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -52,10 +47,11 @@ function LocalSettingsPage() {
       .catch(() => {});
   }, []);
 
-  // 从别处「去设置」跳过来配 Key（如画布 Agent 没有对话模型）：?section=keys 时滚到密钥区块。
+  // 从别处跳过来：?section=keys（画布 Agent 缺对话模型）/ agent 滚到对应区块。
   useEffect(() => {
-    if (loading || new URLSearchParams(window.location.search).get('section') !== 'keys') return;
-    window.document.getElementById('settings-keys')?.scrollIntoView({ block: 'start' });
+    const section = new URLSearchParams(window.location.search).get('section');
+    if (loading || !section) return;
+    window.document.getElementById(`settings-${section}`)?.scrollIntoView({ block: 'start' });
   }, [loading]);
 
   async function toggleShowStudioOnHome() {
@@ -116,7 +112,6 @@ function LocalSettingsPage() {
           {SECTIONS.map(section => (
             <a key={section.id} href={`#${section.id}`} className={navItemClass}>{section.label}</a>
           ))}
-          <Link href="/connection" className={navItemClass}>本机连接</Link>
         </div>
       </nav>
       <div className="min-w-0">
@@ -187,20 +182,7 @@ function LocalSettingsPage() {
                 画布里正在显示的生成图会出现在首页；打码的不展示。
               </p>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={showCanvasOnHome}
-              aria-label="展示画布出图"
-              disabled={togglingStudio}
-              onClick={() => void toggleShowStudioOnHome()}
-              className={`relative h-6 w-11 shrink-0 rounded-full border border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 ${showCanvasOnHome ? 'bg-primary' : 'bg-secondary'}`}
-            >
-              <span
-                aria-hidden
-                className={`absolute top-0.5 size-[18px] rounded-full bg-background transition-[left] ${showCanvasOnHome ? 'left-[22px]' : 'left-0.5'}`}
-              />
-            </button>
+            <Switch checked={showCanvasOnHome} label="展示画布出图" disabled={togglingStudio} onChange={() => void toggleShowStudioOnHome()} />
           </div>
         </div>
       </section>
@@ -218,6 +200,10 @@ function LocalSettingsPage() {
         <div className="min-w-0">
           <KeysPage key={keysVersion} embedded />
         </div>
+      </section>
+
+      <section id="settings-agent" className={`${sectionClass} border-t border-border py-10`}>
+        <AgentSection />
       </section>
       </div>
       </div>

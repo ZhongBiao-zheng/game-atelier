@@ -24,10 +24,11 @@ import {
 import {
   ArrowLeft,
   ChevronDown,
-  CircleHelp,
   CircleDot,
+  CircleHelp,
   ClipboardCopy,
   Download,
+  Ellipsis,
   Eye,
   EyeOff,
   FileAudio,
@@ -44,14 +45,13 @@ import {
   MousePointer2,
   Pencil,
   Plus,
-  Scan,
   Settings,
   Settings2,
+  Sparkles,
   Square,
   Trash2,
   Type,
   Upload,
-  Sparkles,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
@@ -102,7 +102,7 @@ import {
   type CanvasNodeContextValue,
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
-import { canvasNodeRunDisplayError, isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
+import { canvasNodeRunDisplayError, canvasNodeRunState, isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
 import { layerDecompositionModelChoices } from '@/components/canvas/canvasLayerDecomposition';
 import { CanvasLayerStackPreview } from '@/components/canvas/CanvasLayerStackPreview';
 import { CanvasThemeSelector } from '@/components/canvas/CanvasThemeSelector';
@@ -146,11 +146,11 @@ import { TEAM_ASSET_DRAG_TYPE, readTeamAssetDrag } from '@/schema/teamLibrary';
 import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
 import { TEAM_ASSET_ACTION_EVENT, type TeamAssetAction } from '@/lib/teamAssetActions';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -553,8 +553,6 @@ function CanvasEditorInner({
   const addMenuRef = useRef<HTMLDivElement>(null);
   const createMenuRef = useRef<HTMLDivElement>(null);
   const [createMenuDock, setCreateMenuDock] = useState<{ left: number; top: number; anchor: XYPosition } | null>(null);
-  const shortcutsTriggerRef = useRef<HTMLButtonElement>(null);
-  const generationPreferencesTriggerRef = useRef<HTMLButtonElement>(null);
   const openGenerationPreferences = useCallback((tab: CanvasGenerationPreferencesTab) => {
     setGenerationPreferencesTab(tab);
     setGenerationPreferencesOpen(true);
@@ -615,15 +613,11 @@ function CanvasEditorInner({
   const viewportSync = useRef<ViewportSyncToken | null>(null);
   const nodeClipboard = useRef<CanvasClipboardPayload | null>(null);
   const pasteSequence = useRef(0);
-  const zoomSliderActive = useRef(false);
-  const zoomSliderCommitTimer = useRef<number | null>(null);
-  const zoomSliderMove = useRef<Promise<boolean> | null>(null);
   const pendingViewportCommand = useRef<Promise<void> | null>(null);
   const viewportCommandEpoch = useRef(0);
   const cancelViewportCommand = useRef<(() => void) | null>(null);
-  const finishZoomSliderRef = useRef<() => void>(() => undefined);
   const projectRenameInputRef = useRef<HTMLInputElement>(null);
-  const projectRenameTriggerRef = useRef<HTMLButtonElement>(null);
+  const canvasMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const projectRenameInFlight = useRef(false);
   const cancelProjectRename = useRef(false);
   const {
@@ -633,7 +627,6 @@ function CanvasEditorInner({
     getViewport,
     getZoom,
     setCenter,
-    setViewport,
     zoomIn,
     zoomOut,
     zoomTo,
@@ -815,10 +808,6 @@ function CanvasEditorInner({
     viewportSync.current = null;
     nodeClipboard.current = null;
     pasteSequence.current = 0;
-    zoomSliderActive.current = false;
-    if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
-    zoomSliderCommitTimer.current = null;
-    zoomSliderMove.current = null;
     viewportCommandEpoch.current += 1;
     cancelViewportCommand.current?.();
     cancelViewportCommand.current = null;
@@ -879,7 +868,6 @@ function CanvasEditorInner({
     return () => {
       cancelled = true;
       if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
-      if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
       if (resizePreviewFrame.current !== null) window.cancelAnimationFrame(resizePreviewFrame.current);
     };
   }, [acceptJobs, projectId, resetJobSync]);
@@ -1251,7 +1239,6 @@ function CanvasEditorInner({
       return false;
     }
     if (libraryInsertCommand.current) await libraryInsertCommand.current;
-    if (zoomSliderActive.current) finishZoomSliderRef.current();
     while (pendingViewportCommand.current) {
       const pending = pendingViewportCommand.current;
       try {
@@ -1956,7 +1943,7 @@ function CanvasEditorInner({
     }
     if (name === projectName) {
       setProjectRenameDraft(null);
-      if (restoreFocus) requestAnimationFrame(() => projectRenameTriggerRef.current?.focus());
+      if (restoreFocus) requestAnimationFrame(() => canvasMenuTriggerRef.current?.focus());
       return;
     }
     projectRenameInFlight.current = true;
@@ -1969,7 +1956,7 @@ function CanvasEditorInner({
       )));
       setProjectRenameDraft(null);
       announceToolNotice(`已重命名为“${renamed.name}”`);
-      if (restoreFocus) requestAnimationFrame(() => projectRenameTriggerRef.current?.focus());
+      if (restoreFocus) requestAnimationFrame(() => canvasMenuTriggerRef.current?.focus());
     } catch (renameError) {
       setError((renameError as Error).message);
       requestAnimationFrame(() => projectRenameInputRef.current?.focus());
@@ -3214,65 +3201,7 @@ function CanvasEditorInner({
     cancelViewportCommand.current?.();
     cancelViewportCommand.current = null;
     pendingViewportCommand.current = null;
-    if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
-    zoomSliderCommitTimer.current = null;
-    zoomSliderActive.current = false;
-    zoomSliderMove.current = null;
   }, []);
-
-  const beginZoomSlider = useCallback(() => {
-    interruptViewportCommand();
-    if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
-    zoomSliderCommitTimer.current = null;
-    zoomSliderActive.current = true;
-    const viewport = getViewport();
-    zoomSliderMove.current = setViewport(viewport).then(() => true, () => true);
-  }, [getViewport, interruptViewportCommand, setViewport]);
-
-  const commitZoomSliderViewport = useCallback(() => {
-    if (latestDocument.current?.project_id !== projectId) return;
-    const viewport = getViewport();
-    viewportSync.current = { projectId, viewport };
-    if (!commitViewportDocument(viewport)) viewportSync.current = null;
-  }, [commitViewportDocument, getViewport, projectId]);
-
-  const finishZoomSlider = useCallback(() => {
-    if (!zoomSliderActive.current) return;
-    if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
-    zoomSliderCommitTimer.current = null;
-    const finalize = () => {
-      if (!zoomSliderActive.current) return;
-      zoomSliderActive.current = false;
-      commitZoomSliderViewport();
-    };
-    const move = zoomSliderMove.current;
-    let timeoutId: number | null = null;
-    const moveSettled = move
-      ? Promise.race([
-          move.then(() => undefined, () => undefined),
-          new Promise<void>(resolve => {
-            timeoutId = window.setTimeout(resolve, 250);
-          }),
-        ])
-      : Promise.resolve();
-    const pending = moveSettled.then(finalize).finally(() => {
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
-    });
-    pendingViewportCommand.current = pending;
-    const clearPending = () => {
-      if (pendingViewportCommand.current === pending) pendingViewportCommand.current = null;
-    };
-    void pending.then(clearPending, clearPending);
-  }, [commitZoomSliderViewport]);
-  finishZoomSliderRef.current = finishZoomSlider;
-
-  const scheduleZoomSliderCommit = useCallback(() => {
-    if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
-    zoomSliderCommitTimer.current = window.setTimeout(() => {
-      zoomSliderCommitTimer.current = null;
-      finishZoomSlider();
-    }, 120);
-  }, [finishZoomSlider]);
 
   const runViewportCommand = useCallback((command: () => Promise<boolean>) => {
     const previous = pendingViewportCommand.current;
@@ -4342,7 +4271,7 @@ function CanvasEditorInner({
         '生成偏好已更新',
       );
       setGenerationPreferencesOpen(false);
-      requestAnimationFrame(() => generationPreferencesTriggerRef.current?.focus());
+      requestAnimationFrame(() => canvasMenuTriggerRef.current?.focus());
     } catch {
       // 保存函数已重新读取冲突版本并写入明确错误；保留弹窗让用户核对。
     } finally {
@@ -4643,104 +4572,35 @@ function CanvasEditorInner({
     : null;
   const maskEditDraft = maskEditNode ? generationDraftForNode(maskEditNode) : null;
 
-  const renderCanvasConfigControls = (placement: 'mobile' | 'desktop') => (
-    <>
-      <button
-        type="button"
-        title={document.settings.show_minimap ? '关闭小地图' : '打开小地图'}
-        aria-label={document.settings.show_minimap ? '关闭小地图' : '打开小地图'}
-        aria-pressed={document.settings.show_minimap}
-        className={cn(
-          CANVAS_CHROME_BUTTON_CLASS,
-          document.settings.show_minimap && 'bg-secondary text-foreground',
-        )}
-        onClick={() => commit(current => ({
-          ...current,
-          settings: { ...current.settings, show_minimap: !current.settings.show_minimap },
-        }), true)}
-      ><MapPinned /></button>
-      <ToolButton buttonRef={assetLibraryTriggerRef} label="资产" active={Boolean(libraryMode)} expanded={Boolean(libraryMode)} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setAgentOpen(false); setCreateMenu(null); if (libraryMode) creationAssetPanelRef.current?.requestClose(); else setLibraryMode('assets'); }}><Library /></ToolButton>
-      <ToolButton
-        buttonRef={generationPreferencesTriggerRef}
-        label="生成偏好"
-        active={generationPreferencesOpen}
-        expanded={generationPreferencesOpen}
-        controlsId="canvas-generation-preferences-dialog"
-        popup="dialog"
-        onClick={() => {
-          setAddOpen(false);
-          setCreateMenu(null);
-          openGenerationPreferences('image');
-        }}
-      ><Settings2 /></ToolButton>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            title="画布外观"
-            aria-label="画布外观"
-            className={cn(CANVAS_CHROME_BUTTON_CLASS, 'data-[state=open]:bg-primary data-[state=open]:text-primary-foreground')}
-          >
-            <Grid2X2 aria-hidden="true" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side={placement === 'mobile' ? 'right' : 'top'} align="start" className="w-48 rounded-xl">
-          <DropdownMenuLabel>主题</DropdownMenuLabel>
-          <CanvasThemeSelector />
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel>画布背景</DropdownMenuLabel>
-          <DropdownMenuRadioGroup
-            value={document.settings.background}
-            onValueChange={value => {
-              if (value !== 'none' && value !== 'dots' && value !== 'lines') return;
-              if (value === document.settings.background) return;
-              commit(current => ({
-                ...current,
-                settings: { ...current.settings, background: value },
-              }), true);
-            }}
-          >
-            {([
-              ['none', '空白', Square],
-              ['dots', '点阵', CircleDot],
-              ['lines', '线框', Grid2X2],
-            ] as const).map(([value, label, Icon]) => (
-              <DropdownMenuRadioItem key={value} value={value} className="gap-2">
-                <Icon className="size-4" aria-hidden="true" />{label}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuCheckboxItem
-            checked={document.settings.show_image_info}
-            className="gap-2"
-            onCheckedChange={checked => commit(current => ({
-              ...current,
-              settings: { ...current.settings, show_image_info: checked },
-            }), true)}
-          >
-            <Info className="size-4" aria-hidden="true" />显示图片信息
-          </DropdownMenuCheckboxItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {/* 沉浸式画布把整条顶栏（含设置入口）藏了：没有密钥的新用户在画布里点不动「生成」，
-          也没有任何地方能去配置。这颗按钮是画布内唯一的全局设置出口。 */}
-      <Link
-        href="/settings"
-        title="设置"
-        aria-label="设置"
-        className={CANVAS_CHROME_BUTTON_CLASS}
-      ><Settings aria-hidden="true" /></Link>
-      <ToolButton
-        buttonRef={shortcutsTriggerRef}
-        label="快捷键"
-        expanded={shortcutsOpen}
-        controlsId="canvas-shortcuts-dialog"
-        popup="dialog"
-        onClick={() => setShortcutsOpen(true)}
-      ><CircleHelp /></ToolButton>
-    </>
+  const minimapToggle = (
+    <button
+      type="button"
+      title={document.settings.show_minimap ? '关闭小地图' : '打开小地图'}
+      aria-label={document.settings.show_minimap ? '关闭小地图' : '打开小地图'}
+      aria-pressed={document.settings.show_minimap}
+      className={cn(
+        CANVAS_CHROME_BUTTON_CLASS,
+        document.settings.show_minimap && 'bg-secondary text-foreground',
+      )}
+      onClick={() => commit(current => ({
+        ...current,
+        settings: { ...current.settings, show_minimap: !current.settings.show_minimap },
+      }), true)}
+    ><MapPinned /></button>
   );
+  const toggleAssetLibrary = () => {
+    setAddOpen(false);
+    setAgentOpen(false);
+    setCreateMenu(null);
+    if (libraryMode) creationAssetPanelRef.current?.requestClose();
+    else setLibraryMode('assets');
+  };
+  const fitAllNodes = () => {
+    void runViewportCommand(() => fitView({ duration: 150, padding: 0.12 }));
+  };
+  const runningNodeIds = document.nodes
+    .filter(node => canvasNodeRunState(node, jobsByRunId, jobsByResultNodeId).status === 'loading')
+    .map(node => node.id);
 
   const canvasFeedbackVisible = !preview && !layerPreviewNode && !mediaOperation && !maskEdit && !angleState
     && !shortcutsOpen && !generationPreferencesOpen;
@@ -4831,7 +4691,7 @@ function CanvasEditorInner({
           onDrop={handleCanvasDrop}
           onMoveEnd={(_, viewport: Viewport) => {
             if (latestDocument.current?.project_id !== projectId) return;
-            if (zoomSliderActive.current || pendingViewportCommand.current) return;
+            if (pendingViewportCommand.current) return;
             const sync = viewportSync.current;
             if (sync?.projectId === projectId && sameViewport(sync.viewport, viewport)) {
               viewportSync.current = null;
@@ -4956,7 +4816,21 @@ function CanvasEditorInner({
 
         {!materialPick && (
           <CanvasZoomDock
-            configControls={narrowViewport ? null : renderCanvasConfigControls('desktop')}
+            assetControl={narrowViewport ? null : (
+              <button
+                ref={assetLibraryTriggerRef}
+                type="button"
+                aria-pressed={Boolean(libraryMode)}
+                aria-expanded={Boolean(libraryMode)}
+                aria-controls="canvas-library-panel"
+                className={cn(
+                  'flex h-10 items-center gap-2 rounded-full pl-3 pr-4 text-sm text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary [&_svg]:size-4 [&_svg]:text-muted-foreground',
+                  libraryMode && 'bg-secondary',
+                )}
+                onClick={toggleAssetLibrary}
+              ><Library aria-hidden="true" />资产</button>
+            )}
+            minimapToggle={minimapToggle}
             onZoomOut={() => {
               if (getZoom() <= CANVAS_MIN_ZOOM + 0.0005) return;
               void runViewportCommand(() => zoomOut({ duration: 150 }));
@@ -4969,18 +4843,7 @@ function CanvasEditorInner({
               if (Math.abs(getZoom() - 1) < 0.001) return;
               void runViewportCommand(() => zoomTo(1, { duration: 150 }));
             }}
-            onSliderBegin={beginZoomSlider}
-            onSliderFinish={finishZoomSlider}
-            onSliderChange={zoom => {
-              const shouldScheduleCommit = !zoomSliderActive.current
-                || zoomSliderCommitTimer.current !== null;
-              if (!zoomSliderActive.current) beginZoomSlider();
-              const previousMove = zoomSliderMove.current;
-              zoomSliderMove.current = previousMove
-                ? previousMove.then(() => zoomTo(zoom), () => zoomTo(zoom))
-                : zoomTo(zoom);
-              if (shouldScheduleCommit) scheduleZoomSliderCommit();
-            }}
+            onFitView={fitAllNodes}
           />
         )}
 
@@ -5039,17 +4902,85 @@ function CanvasEditorInner({
                     </DropdownMenuRadioGroup>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <Button ref={projectRenameTriggerRef} variant="ghost" size="icon" className="size-8 shrink-0" aria-label={`重命名画布项目 ${projectName}`} onClick={beginProjectRename}>
-                  <Pencil className="size-3.5" aria-hidden="true" />
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button ref={canvasMenuTriggerRef} variant="ghost" size="icon" className="size-8 shrink-0 data-[state=open]:bg-secondary" aria-label="画布菜单">
+                      <Ellipsis aria-hidden="true" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="bottom" align="start" className="w-48 rounded-xl">
+                    <DropdownMenuItem className="gap-2" onSelect={beginProjectRename}>
+                      <Pencil className="size-4" aria-hidden="true" />重命名
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="gap-2"
+                      onSelect={() => {
+                        setAddOpen(false);
+                        setCreateMenu(null);
+                        openGenerationPreferences('image');
+                      }}
+                    >
+                      <Settings2 className="size-4" aria-hidden="true" />生成偏好
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="gap-2" onSelect={() => setShortcutsOpen(true)}>
+                      <CircleHelp className="size-4" aria-hidden="true" />快捷键
+                    </DropdownMenuItem>
+                    {/* 沉浸式画布把整条顶栏（含设置入口）藏了：没有密钥的新用户在画布里点不动「生成」，
+                        也没有任何地方能去配置。这一项是画布内唯一的全局设置出口。 */}
+                    <DropdownMenuItem asChild className="gap-2">
+                      <Link href="/settings"><Settings className="size-4" aria-hidden="true" />设置</Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel>主题</DropdownMenuLabel>
+                    <CanvasThemeSelector />
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel>画布背景</DropdownMenuLabel>
+                    <DropdownMenuRadioGroup
+                      value={document.settings.background}
+                      onValueChange={value => {
+                        if (value !== 'none' && value !== 'dots' && value !== 'lines') return;
+                        if (value === document.settings.background) return;
+                        commit(current => ({
+                          ...current,
+                          settings: { ...current.settings, background: value },
+                        }), true);
+                      }}
+                    >
+                      {([
+                        ['none', '空白', Square],
+                        ['dots', '点阵', CircleDot],
+                        ['lines', '线框', Grid2X2],
+                      ] as const).map(([value, label, Icon]) => (
+                        <DropdownMenuRadioItem key={value} value={value} className="gap-2">
+                          <Icon className="size-4" aria-hidden="true" />{label}
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuCheckboxItem
+                      checked={document.settings.show_image_info}
+                      className="gap-2"
+                      onCheckedChange={checked => commit(current => ({
+                        ...current,
+                        settings: { ...current.settings, show_image_info: checked },
+                      }), true)}
+                    >
+                      <Info className="size-4" aria-hidden="true" />显示图片信息
+                    </DropdownMenuCheckboxItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             ) : (
-              <Input
+              <span className="inline-grid h-9 max-w-28 items-center overflow-hidden rounded-md bg-secondary px-2 text-sm font-medium sm:max-w-52">
+                {/* 输入框宽度跟着名字走：隐藏的同字号文本撑开格子，输入框铺满它。 */}
+                <span aria-hidden="true" className="invisible col-start-1 row-start-1 whitespace-pre">{projectRenameDraft || ' '}</span>
+                <input
+                size={1}
                 ref={projectRenameInputRef}
                 value={projectRenameDraft}
                 disabled={projectRenameBusy}
                 aria-label="画布项目名称"
-                className="h-9 w-32 sm:w-52"
+                className="col-start-1 row-start-1 w-full min-w-0 bg-transparent text-foreground outline-none disabled:opacity-50"
                 onChange={event => setProjectRenameDraft(event.target.value)}
                 onBlur={() => void commitProjectRename(false)}
                 onKeyDown={event => {
@@ -5062,10 +4993,11 @@ function CanvasEditorInner({
                     event.stopPropagation();
                     cancelProjectRename.current = true;
                     setProjectRenameDraft(null);
-                    requestAnimationFrame(() => projectRenameTriggerRef.current?.focus());
+                    requestAnimationFrame(() => canvasMenuTriggerRef.current?.focus());
                   }
                 }}
               />
+              </span>
             )}
           </div>
           {/* 正常保存不打扰（飙哥 2026-09-30 去掉「已保存 · vN」）；只有失败要露出来并给重试。 */}
@@ -5086,7 +5018,28 @@ function CanvasEditorInner({
               </button>
             </div>
           )}
-          <div className="pointer-events-auto ml-auto shrink-0 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
+          {runningNodeIds.length > 0 && (
+            <div className="pointer-events-auto ml-auto shrink-0 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
+              <Button
+                variant="ghost"
+                title="定位到生成中的节点"
+                className="h-9 gap-2 px-3 font-normal"
+                onClick={() => {
+                  void runViewportCommand(() => fitView({
+                    nodes: runningNodeIds.map(id => ({ id })),
+                    duration: 150,
+                    padding: 0.4,
+                    maxZoom: 1,
+                  }));
+                }}
+              >
+                <span aria-hidden="true" className="size-1.5 rounded-full bg-primary" />
+                生成中
+                <span className="font-mono text-xs tabular-nums text-muted-foreground">{runningNodeIds.length}</span>
+              </Button>
+            </div>
+          )}
+          <div className={cn('pointer-events-auto shrink-0 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow', runningNodeIds.length === 0 && 'ml-auto')}>
             <Button
               variant="ghost"
               aria-label="Agent"
@@ -5113,13 +5066,16 @@ function CanvasEditorInner({
               <ToolButton label="添加视频节点" onClick={() => addGenerationNode('video', null)}><FileVideo /></ToolButton>
               <ToolButton label="添加音频节点" onClick={() => addGenerationNode('audio', null)}><FileAudio /></ToolButton>
               <ToolButton label="上传素材" onClick={() => uploadRef.current?.click()}><Upload /></ToolButton>
-              <div className="my-1 h-px w-7 bg-border" />
             </div>
-            <ToolButton label="适应全部节点" onClick={() => {
-              void runViewportCommand(() => fitView({ duration: 150, padding: 0.12 }));
-            }}><Maximize2 /></ToolButton>
           </div>
-          {narrowViewport && <div className="contents">{renderCanvasConfigControls('mobile')}</div>}
+          {/* 窄屏没有底部两组浮条，视图与资产入口并进这条工具栏。 */}
+          {narrowViewport && (
+            <div className="contents">
+              <ToolButton label="适应全部节点" onClick={fitAllNodes}><Maximize2 /></ToolButton>
+              {minimapToggle}
+              <ToolButton buttonRef={assetLibraryTriggerRef} label="资产" active={Boolean(libraryMode)} expanded={Boolean(libraryMode)} controlsId="canvas-library-panel" popup={false} onClick={toggleAssetLibrary}><Library /></ToolButton>
+            </div>
+          )}
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs text-muted-foreground">添加节点</p>
@@ -5305,7 +5261,7 @@ function CanvasEditorInner({
 
         <Dialog open={shortcutsOpen} onOpenChange={open => {
           setShortcutsOpen(open);
-          if (!open) requestAnimationFrame(() => shortcutsTriggerRef.current?.focus());
+          if (!open) requestAnimationFrame(() => canvasMenuTriggerRef.current?.focus());
         }}>
           <DialogContent id="canvas-shortcuts-dialog" className="max-h-[88dvh] max-w-xl overflow-y-auto">
             <DialogHeader>
@@ -5326,7 +5282,7 @@ function CanvasEditorInner({
           error={canvasUiPreferencesError}
           onOpenChange={open => {
             setGenerationPreferencesOpen(open);
-            if (!open) requestAnimationFrame(() => generationPreferencesTriggerRef.current?.focus());
+            if (!open) requestAnimationFrame(() => canvasMenuTriggerRef.current?.focus());
           }}
           onSave={(value, upscale) => void persistGenerationPreferences(value, upscale)}
         />
@@ -5622,10 +5578,6 @@ function isCanvasShortcutBlockedTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"]'));
 }
 
-function isRangeAdjustmentKey(key: string) {
-  return ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(key);
-}
-
 function handleMenuNavigation(event: React.KeyboardEvent<HTMLDivElement>) {
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
   const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];
@@ -5912,35 +5864,35 @@ function CanvasZoomCssVars({ target }: { target: RefObject<HTMLElement> }) {
   return null;
 }
 
-const zoomDockButtonClass = 'grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40';
+const zoomDockButtonClass = 'grid size-8 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40';
 
 function CanvasZoomDock({
-  configControls,
+  assetControl,
+  minimapToggle,
   onZoomOut,
   onZoomIn,
   onResetZoom,
-  onSliderBegin,
-  onSliderFinish,
-  onSliderChange,
+  onFitView,
 }: {
-  configControls: ReactNode;
+  assetControl: ReactNode;
+  minimapToggle: ReactNode;
   onZoomOut: () => void;
   onZoomIn: () => void;
   onResetZoom: () => void;
-  onSliderBegin: () => void;
-  onSliderFinish: () => void;
-  onSliderChange: (zoom: number) => void;
+  onFitView: () => void;
 }) {
   const zoom = useStore(canvasFlowZoom);
   const percent = Math.round(zoom * 100);
   return (
     <>
-    {configControls && (
-      <div className="canvas-config-dock absolute bottom-3 left-3 z-20 hidden items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
-        {configControls}
+    {assetControl && (
+      <div className="canvas-config-dock absolute bottom-3 left-3 z-20 hidden items-center rounded-full border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
+        {assetControl}
       </div>
     )}
-    <div className="canvas-zoom-dock absolute bottom-3 right-3 z-20 hidden items-center gap-1 rounded-xl border border-border bg-glass px-2 py-2.5 backdrop-blur-glass shell-glow md:flex">
+    <div className="canvas-zoom-dock absolute bottom-3 right-3 z-20 hidden items-center gap-1 rounded-full border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
+      {minimapToggle}
+      <div className="mx-1 h-5 w-px bg-border" />
       <button
         type="button"
         aria-label="缩小画布"
@@ -5948,28 +5900,19 @@ function CanvasZoomDock({
         className={zoomDockButtonClass}
         onClick={onZoomOut}
       ><Minus className="size-4" aria-hidden="true" /></button>
-      <input
-        type="range"
-        min={Math.round(CANVAS_MIN_ZOOM * 100)}
-        max={Math.round(CANVAS_MAX_ZOOM * 100)}
-        step="1"
-        value={percent}
-        aria-label="画布缩放百分比"
-        aria-valuetext={`${percent}%`}
-        className="h-1 w-24 cursor-pointer accent-primary sm:w-32"
-        onPointerDown={onSliderBegin}
-        onPointerUp={onSliderFinish}
-        onPointerCancel={onSliderFinish}
-        onKeyDown={event => {
-          if (isRangeAdjustmentKey(event.key)) onSliderBegin();
-        }}
-        onKeyUp={event => {
-          if (isRangeAdjustmentKey(event.key)) onSliderFinish();
-        }}
-        onBlur={onSliderFinish}
-        onChange={event => onSliderChange(Number(event.target.value) / 100)}
-      />
-      <span aria-live="polite" className="w-11 text-right text-xs tabular-nums text-muted-foreground">{percent}%</span>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={`画布缩放 ${percent}%`}
+            className="h-8 w-14 rounded-md font-mono text-xs tabular-nums text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary data-[state=open]:bg-secondary"
+          >{percent}%</button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="center" className="min-w-36 rounded-xl">
+          <DropdownMenuItem onSelect={onFitView}>适应全部</DropdownMenuItem>
+          <DropdownMenuItem onSelect={onResetZoom}>100%</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <button
         type="button"
         aria-label="放大画布"
@@ -5977,12 +5920,14 @@ function CanvasZoomDock({
         className={zoomDockButtonClass}
         onClick={onZoomIn}
       ><Plus className="size-4" aria-hidden="true" /></button>
+      <div className="mx-1 h-5 w-px bg-border" />
       <button
         type="button"
-        aria-label="复位画布缩放到 100%"
+        title="适应全部节点"
+        aria-label="适应全部节点"
         className={zoomDockButtonClass}
-        onClick={onResetZoom}
-      ><Scan className="size-4" aria-hidden="true" /></button>
+        onClick={onFitView}
+      ><Maximize2 className="size-4" aria-hidden="true" /></button>
     </div>
     </>
   );

@@ -1,5 +1,4 @@
 import { requestJson } from '@/api/http';
-import { mediaUrl } from '@/api/connection';
 
 export type WorkshopGenerationTarget =
   | { type: 'character'; project_id: string; character_id: string; asset_slot: 'portrait' | 'promo' | 'turnaround' }
@@ -39,7 +38,7 @@ export function workshopTargetUrl(target: WorkshopGenerationTarget) {
   return `/workshop/${project}/video/${encodeURIComponent(target.production_id)}`;
 }
 export function workshopReferenceUrl(requestId: string, mediaId: string) {
-  return mediaUrl(`/api/workshop/requests/${encodeURIComponent(requestId)}/references/${encodeURIComponent(mediaId)}`);
+  return `/api/workshop/requests/${encodeURIComponent(requestId)}/references/${encodeURIComponent(mediaId)}`;
 }
 export function fetchWorkshopRequest(requestId: string) {
   return requestJson<WorkshopRequest>(`/api/workshop/requests/${encodeURIComponent(requestId)}`, '读取生成请求');

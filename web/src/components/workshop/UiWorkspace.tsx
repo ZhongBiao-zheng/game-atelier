@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { mediaUrl } from '@/api/connection';
 import { BadgeCheck, PanelsTopLeft } from 'lucide-react';
 import { Link } from 'wouter';
 
@@ -121,7 +120,7 @@ function UiWorksGallery({
             className="group w-52 shrink-0 space-y-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             <span className="relative block overflow-hidden rounded-lg border border-border bg-card">
-              <img src={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(image.path)}`)} alt="" className="aspect-[9/16] w-full object-cover transition-transform group-hover:scale-[1.02]" />
+              <img src={`/api/gallery/image?path=${encodeURIComponent(image.path)}`} alt="" className="aspect-[9/16] w-full object-cover transition-transform group-hover:scale-[1.02]" />
               {canonical && <span className="absolute left-2 top-2 rounded-sm bg-glass px-2 py-1 text-xs text-primary backdrop-blur-glass">定稿</span>}
             </span>
             <span className="block truncate text-sm text-foreground">{screenId}</span>
@@ -250,14 +249,14 @@ function ScreenDetail({
               <figure key={image.path} className="w-64 shrink-0 space-y-2">
                 <div className="group relative overflow-hidden rounded-xl">
                   <a
-                    href={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(image.path)}`)}
+                    href={`/api/gallery/image?path=${encodeURIComponent(image.path)}`}
                     target="_blank"
                     rel="noreferrer"
                     aria-label={`查看页面 ${screenId} 的 ${image.filename}`}
                     className="block"
                   >
                     <img
-                      src={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(image.path)}`)}
+                      src={`/api/gallery/image?path=${encodeURIComponent(image.path)}`}
                       alt=""
                       className="block w-full"
                       loading="lazy"

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 import secrets
 import threading
 import time
@@ -12,26 +11,18 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlsplit
 
 from character_workflow.lib import data_root
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.private_json import read_private_json, write_private_json
-from character_workflow.lib.projects import read_projects
 
 AGENT_CAPABILITIES = frozenset({
     "read", "edit_documents", "create_targets", "prepare_generation", "execute_generation",
     "canvas_read", "canvas_edit", "canvas_generate",
 })
 SESSION_LIMIT = 64
-GRANT_LIMIT = 32
-PAIRING_LIMIT = 8
-PAIRING_TTL = 5 * 60
-MEDIA_TOKEN_TTL = 30 * 60
-MEDIA_TOKENS_PER_SESSION = 4
-SITE_CAPABILITIES = frozenset({"read", "edit"})
 COOKIE_NAME = "atelier_local_session"
-PrincipalKind = Literal["local", "agent", "site"]
+PrincipalKind = Literal["local", "agent"]
 
 
 def iso_time(timestamp: float) -> str:
@@ -62,52 +53,12 @@ def _credential_store_error(action: str, error: Exception) -> ConnectionError:
     )
 
 
-def validate_site_origin(origin: str, reserved: frozenset[str] = frozenset()) -> str:
-    """网站配对只接受精确 Origin：HTTPS 任意主机，HTTP 仅 localhost:<port>（本地 vite preview 验证托管模式）。
-
-    `http://127.0.0.1:*` 是本机页面自己的来源空间，登记成网站会让本地页面的引导被当成跨源拒绝；
-    `reserved`（服务自身地址、Vite 开发来源）同理一律拒绝。
-    """
-    try:
-        url = urlsplit(origin)
-    except ValueError:
-        url = None
-    if url is None or url.hostname is None or url.username or url.password or url.path \
-            or url.query or url.fragment or not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?",
-                                                             url.hostname):
-        raise ConnectionError("ORIGIN_DENIED", "网站地址必须是精确的 https 来源", 422)
-    if url.scheme == "https":
-        default_port = 443
-    elif url.scheme == "http" and url.hostname == "localhost" and url.port:
-        default_port = 80
-    else:
-        raise ConnectionError("ORIGIN_DENIED", "网站地址必须是精确的 https 来源", 422)
-    port = url.port
-    if port is not None and not 1 <= port <= 65535:
-        raise ConnectionError("ORIGIN_DENIED", "网站地址必须是精确的 https 来源", 422)
-    authority = url.hostname if port in {None, default_port} else f"{url.hostname}:{port}"
-    normalized = f"{url.scheme}://{authority}"
-    if normalized != origin:
-        raise ConnectionError("ORIGIN_DENIED", "网站地址必须是精确的 https 来源", 422)
-    if normalized in reserved:
-        raise ConnectionError("ORIGIN_DENIED", "网站地址不能是本机页面自己的地址", 422)
-    return normalized
-
-
-@dataclass
-class Pairing:
-    origin: str
-    expires_at: float
-
-
 @dataclass(frozen=True)
 class ConnectionPrincipal:
     kind: PrincipalKind
     session_id: str
     grant_id: str | None = None
-    project_ids: frozenset[str] = frozenset()
     capabilities: frozenset[str] = AGENT_CAPABILITIES
-    canvas_project_ids: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -127,10 +78,9 @@ class ConnectionStore:
         # Discovery is public and must not resolve or read user configuration.
         self.root: Path | None = None
         self.sessions: dict[str, Session] = {}
-        # 配对码摘要 → 待配对网站；媒体令牌摘要 → (session_id, expires_at)。都只活在本进程。
-        self.pairings: dict[str, Pairing] = {}
-        self.media_tokens: dict[str, tuple[str, float]] = {}
         self.lease: tuple[str, str, float] | None = None
+        # grant_id → {客户端: 最近一次换到会话的时间}：页面据此显示「已连接」，服务重启即清空。
+        self.agent_connections: dict[str, dict[str, float]] = {}
         self.lock = threading.RLock()
         self._attempts: list[float] = []
         # 热路径不碰磁盘：authenticate 走在事件循环上、SSE 每 0.5s 刷一次，
@@ -162,8 +112,6 @@ class ConnectionStore:
             for session in self.sessions.values():
                 session.revoked.set()
             self.sessions.clear()
-            self.pairings.clear()
-            self.media_tokens.clear()
             self.lease = None
             self.root = root
         now = time.time()
@@ -171,27 +119,19 @@ class ConnectionStore:
             if session.expires_at <= now or session.revoked.is_set():
                 session.revoked.set()
                 del self.sessions[key]
-        for key, pairing in list(self.pairings.items()):
-            if pairing.expires_at <= now:
-                del self.pairings[key]
-        for key, (session_id, expires_at) in list(self.media_tokens.items()):
-            if expires_at <= now or session_id not in self.sessions:
-                del self.media_tokens[key]
         if self.lease and self.lease[2] <= now:
             self.lease = None
 
     def _new_session(
         self, kind: PrincipalKind, origin: str | None, expires_at: float,
-        *, name: str, grant_id: str | None = None, project_ids: frozenset[str] = frozenset(),
+        *, name: str, grant_id: str | None = None,
         capabilities: frozenset[str] = AGENT_CAPABILITIES,
-        canvas_project_ids: frozenset[str] = frozenset(),
     ) -> tuple[Session, str]:
         self._refresh()
         if len(self.sessions) >= SESSION_LIMIT:
             raise ConnectionError("CONNECTION_RATE_LIMITED", "连接数量已达上限，请先断开旧连接", 429)
         token = secrets.token_urlsafe(32)
-        principal = ConnectionPrincipal(kind, uuid.uuid4().hex, grant_id, project_ids, capabilities,
-                                        canvas_project_ids)
+        principal = ConnectionPrincipal(kind, uuid.uuid4().hex, grant_id, capabilities)
         session = Session(principal, digest(token), origin, expires_at, name)
         self.sessions[principal.session_id] = session
         return session, token
@@ -226,7 +166,7 @@ class ConnectionStore:
     def editor_lease(self, session: Session, client_id: str, *, takeover: bool = False) -> dict:
         with self.lock:
             self._refresh()
-            if session.revoked.is_set() or session.principal.kind not in {"local", "site"}:
+            if session.revoked.is_set() or session.principal.kind != "local":
                 raise ConnectionError("CAPABILITY_DENIED", "此连接不能编辑页面")
             identity = (session.principal.session_id, client_id)
             if self.lease and self.lease[:2] != identity and not takeover:
@@ -251,36 +191,6 @@ class ConnectionStore:
                 session.revoked.set()
             if self.lease and self.lease[0] == session_id:
                 self.lease = None
-            for key, (owner, _) in list(self.media_tokens.items()):
-                if owner == session_id:
-                    del self.media_tokens[key]
-
-    # ---- 网站配对 ----------------------------------------------------------------
-
-    def site_origins(self) -> frozenset[str]:
-        """已登记的网站来源 = 待配对 + 已配对；边界层只对它们放行跨源请求与 CORS。"""
-        with self.lock:
-            self._refresh()
-            return frozenset(
-                {pairing.origin for pairing in self.pairings.values()}
-                | {s.origin for s in self.sessions.values()
-                   if s.principal.kind == "site" and s.origin}
-            )
-
-    def create_pairing(self, origin: str, reserved: frozenset[str] = frozenset()) -> tuple[str, Pairing]:
-        normalized = validate_site_origin(origin, reserved)
-        with self.lock:
-            self._refresh()
-            if len(self.pairings) >= PAIRING_LIMIT:
-                raise ConnectionError("CONNECTION_RATE_LIMITED", "待配对的网站过多，请稍后再试", 429)
-            # 同一来源只保留最新一枚码，旧码立即作废。
-            for key, pairing in list(self.pairings.items()):
-                if pairing.origin == normalized:
-                    del self.pairings[key]
-            code = secrets.token_urlsafe(24)
-            pairing = Pairing(normalized, time.time() + PAIRING_TTL)
-            self.pairings[digest(code)] = pairing
-            return code, pairing
 
     def _throttle_attempt(self, now: float) -> None:
         self._attempts = [timestamp for timestamp in self._attempts if timestamp > now - 60]
@@ -288,57 +198,10 @@ class ConnectionStore:
             raise ConnectionError("CONNECTION_RATE_LIMITED", "连接尝试过于频繁，请稍后再试", 429)
         self._attempts.append(now)
 
-    def pair(self, code: str, instance_id: str, origin: str) -> tuple[Session, str]:
-        with self.lock:
-            self._refresh()
-            now = time.time()
-            self._throttle_attempt(now)
-            if instance_id != self.instance_id:
-                raise ConnectionError("INSTANCE_CHANGED", "本机服务已变化，请重新连接", 409)
-            hashed = digest(code)
-            matched = next((key for key in self.pairings
-                            if secrets.compare_digest(key, hashed)), None)
-            # 码不存在 / 已用 / 来源不符共用一条错误，不暴露码是否存在。
-            if matched is None or self.pairings[matched].origin != origin:
-                raise ConnectionError("SESSION_REVOKED", "配对码无效或已过期，请在本机重新生成")
-            pairing = self.pairings.pop(matched)
-            session, token = self._new_session(
-                "site", pairing.origin, now + 12 * 3600, name=pairing.origin,
-                capabilities=SITE_CAPABILITIES,
-            )
-            return session, token
-
-    def issue_media_token(self, session: Session) -> tuple[str, float]:
-        with self.lock:
-            self._refresh()
-            if session.revoked.is_set() or session.principal.kind != "site":
-                raise ConnectionError("CAPABILITY_DENIED", "此连接不需要媒体令牌")
-            # 按签发顺序淘汰（dict 保持插入序）；Windows 的 time.time() 粒度 ~15ms，
-            # 连发的令牌 expires_at 相同，按到期时间排序会随机淘汰。
-            owned = [key for key, (owner, _) in self.media_tokens.items()
-                     if owner == session.principal.session_id]
-            for key in owned[: max(0, len(owned) + 1 - MEDIA_TOKENS_PER_SESSION)]:
-                del self.media_tokens[key]
-            token = secrets.token_urlsafe(32)
-            expires_at = min(time.time() + MEDIA_TOKEN_TTL, session.expires_at)
-            self.media_tokens[digest(token)] = (session.principal.session_id, expires_at)
-            return token, expires_at
-
-    def authenticate_media(self, token: str) -> Session:
-        with self.lock:
-            self._refresh()
-            hashed = digest(token)
-            for key, (session_id, _) in self.media_tokens.items():
-                if secrets.compare_digest(key, hashed):
-                    session = self.sessions.get(session_id)
-                    if session is None or session.revoked.is_set():
-                        break
-                    return session
-        raise ConnectionError("SESSION_EXPIRED", "媒体令牌已过期，请刷新页面", 401)
-
     def _grants_path(self) -> Path:
         assert self.root is not None
-        return self.root / ".config" / "connections" / "grants.json"
+        # 旧版 grants.json（多条、按项目限范围的授权）整体作废，升级后在设置里重新打开一次开关。
+        return self.root / ".config" / "connections" / "agent-grant.json"
 
     def _read_grants(self) -> dict:
         """按 (inode, size, mtime) 缓存；命中时零文件读取，也不跑 Windows ACL 校验。"""
@@ -361,97 +224,56 @@ class ConnectionStore:
             self._grants_key, self._grants_cache = key, grants
         return grants
 
-    def list_grants(self) -> list[dict]:
+    def agent_status(self) -> dict:
         with self.lock:
             self._refresh()
-            return [self._public_grant(value) for value in self._read_grants().values()]
+            grant = next(iter(self._read_grants().values()), None)
+            connections = self.agent_connections.get(grant["grant_id"], {}) if grant else {}
+            return {
+                "enabled": grant is not None,
+                "connections": {client: iso_time(at) for client, at in connections.items()},
+            }
 
-    @staticmethod
-    def _public_grant(value: dict) -> dict:
-        return {key: item for key, item in value.items() if key != "token_hash"}
-
-    # Agent 授权不设有效期（用户 2026-09-26 确认）：本机自用，撤销是唯一的失效方式。
+    # Agent 授权只有一条、覆盖全部项目与画布（含以后新建的），不设有效期，撤销是唯一的失效方式。
     def is_grant_active(self, grant_id: str) -> bool:
         with self.lock:
             self._refresh()
             return grant_id in self._read_grants()
 
     def grant_allows(self, grant_id: str, project_id: str, capability: str) -> bool:
-        with self.lock:
-            self._refresh()
-            grant = self._read_grants().get(grant_id)
-            scope = "canvas_project_ids" if capability.startswith("canvas_") else "project_ids"
-            return bool(
-                grant and project_id in grant.get(scope, []) and capability in grant["capabilities"]
-            )
+        return self.is_grant_active(grant_id) and capability in AGENT_CAPABILITIES
 
-    def create_grant(
-        self, *, name: str, project_ids: list[str], capabilities: list[str],
-        base_url: str, canvas_project_ids: list[str] | None = None, default: bool = False,
-    ) -> dict:
-        canvas_project_ids = list(canvas_project_ids or [])
+    def enable_agent(self, base_url: str) -> None:
+        """打开开关：签一份新凭据写到固定位置，替换旧授权；已注册的 Agent 下一次调用自动换用。"""
         # 磁盘读写与 flock 都在 store.lock 之外：这把锁被事件循环上的 authenticate 与 SSE 刷新共用，
         # 持锁做文件 I/O（Windows 上还有 ACL 调用）会把整条事件循环拖停。
         with self.lock:
             self._refresh()
             path = self._grants_path()
-        known = {project.id for project in read_projects().projects}
-        if not set(project_ids) <= known:
-            raise ConnectionError("TARGET_NOT_AUTHORIZED", "请选择现有工坊项目")
-        if canvas_project_ids:
-            from character_workflow.lib.canvas_projects import list_canvas_project_options
-            known_canvas = {p.project_id for p in list_canvas_project_options()}
-            if not set(canvas_project_ids) <= known_canvas:
-                raise ConnectionError("TARGET_NOT_AUTHORIZED", "请选择现有画布项目")
-        if not project_ids and not canvas_project_ids:
-            raise ConnectionError("TARGET_NOT_AUTHORIZED", "请至少选择一个工坊项目或画布")
-        if not set(capabilities) <= AGENT_CAPABILITIES:
-            raise ConnectionError("CAPABILITY_DENIED", "Agent 授权包含未知能力")
-        if project_ids and "read" not in capabilities:
-            raise ConnectionError("CAPABILITY_DENIED", "工坊授权需要读取能力")
-        if canvas_project_ids and "canvas_read" not in capabilities:
-            raise ConnectionError("CAPABILITY_DENIED", "画布授权需要画布读取能力")
         with file_lock(path.with_suffix(".lock")):
-            grants = dict(self._read_grants())
-            # 默认授权只有一条：再点「连接本机 Agent」即替换旧的，凭据仍写同一个文件。
-            replaced = {key for key, value in grants.items() if default and value.get("default")}
-            for key in replaced:
-                del grants[key]
-            if len(grants) >= GRANT_LIMIT:
-                raise ConnectionError("CONNECTION_RATE_LIMITED", "授权数量已达上限，请撤销旧授权", 429)
+            replaced = set(self._read_grants())
             grant_id, token = uuid.uuid4().hex, secrets.token_urlsafe(32)
-            credential_path = path.parent / (
-                data_root.AGENT_CREDENTIAL_NAME if default else f"{grant_id}.json"
-            )
-            grant = {
-                "grant_id": grant_id, "name": name,
-                "project_ids": sorted(set(project_ids)), "capabilities": sorted(set(capabilities)),
-                "canvas_project_ids": sorted(set(canvas_project_ids)), "default": default,
-                "credential_path": str(credential_path), "token_hash": digest(token),
-            }
+            credential_path = path.parent / data_root.AGENT_CREDENTIAL_NAME
             try:
                 write_private_json(credential_path, {
                     "service": "game-atelier", "base_url": base_url, "grant_id": grant_id,
                     "grant_token": token,
                 })
-                grants[grant_id] = grant
-                write_private_json(path, grants)
+                write_private_json(path, {grant_id: {"grant_id": grant_id, "token_hash": digest(token)}})
             except (OSError, ImportError) as error:
                 raise _credential_store_error("写入 Agent 凭据文件", error) from error
         self._revoke_grant_sessions(replaced)
-        return self._public_grant(grant)
 
-    def revoke_grant(self, grant_id: str) -> None:
+    def disable_agent(self) -> None:
         with self.lock:
             self._refresh()
             path = self._grants_path()
         with file_lock(path.with_suffix(".lock")):
-            grants = dict(self._read_grants())
-            grant = grants.pop(grant_id, None)
-            if grant is not None:
-                write_private_json(path, grants)
-                # Keep the revoked credential file: revocation, not possession, is authoritative.
-        self._revoke_grant_sessions({grant_id})
+            revoked = set(self._read_grants())
+            if revoked:
+                # 凭据文件留着：撤销以授权记录为准，持有文件不等于有权。
+                write_private_json(path, {})
+        self._revoke_grant_sessions(revoked)
 
     def _revoke_grant_sessions(self, grant_ids: set[str]) -> None:
         with self.lock:
@@ -459,7 +281,9 @@ class ConnectionStore:
                 if session.principal.grant_id in grant_ids:
                     session.revoked.set()
 
-    def agent_session(self, grant_id: str, token: str, instance_id: str) -> tuple[Session, str]:
+    def agent_session(
+        self, grant_id: str, token: str, instance_id: str, client: str | None = None,
+    ) -> tuple[Session, str]:
         with self.lock:
             self._refresh()
             now = time.time()
@@ -469,9 +293,6 @@ class ConnectionStore:
             grant = self._read_grants().get(grant_id)
             if not grant or not secrets.compare_digest(grant["token_hash"], digest(token)):
                 raise ConnectionError("SESSION_REVOKED", "Agent 授权无效或已撤销")
-            return self._new_session(
-                "agent", None, now + 2 * 3600, name=grant["name"], grant_id=grant_id,
-                project_ids=frozenset(grant["project_ids"]),
-                capabilities=frozenset(grant["capabilities"]),
-                canvas_project_ids=frozenset(grant.get("canvas_project_ids", [])),
-            )
+            if client is not None:
+                self.agent_connections.setdefault(grant_id, {})[client] = now
+            return self._new_session("agent", None, now + 2 * 3600, name="本机 Agent", grant_id=grant_id)

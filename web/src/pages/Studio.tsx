@@ -1,6 +1,5 @@
 import { connectionFetch } from '@/api/connection';
 import { useHeicAsJpeg } from '@/lib/heicImages';
-import { mediaUrl } from '@/api/connection';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useSearch } from 'wouter';
 import { ChevronsDown, Library } from 'lucide-react';
@@ -1349,10 +1348,10 @@ async function fetchAssetAsFile(path: string, baseName: string, jobId?: string):
   const url = path.startsWith('http')
     ? path
     : jobId
-      ? mediaUrl(`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`)
+      ? `/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`
       : /^(characters|studio)\//.test(path) || /\/(characters|studio)\//.test(path)
-        ? mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`)
-        : mediaUrl(`/api/raw?path=${encodeURIComponent(path)}`);
+        ? `/api/gallery/image?path=${encodeURIComponent(path)}`
+        : `/api/raw?path=${encodeURIComponent(path)}`;
   const resp = await (url.startsWith('http') ? fetch(url, { credentials: 'omit' }) : connectionFetch(url));
   if (!resp.ok) throw await apiError(resp, `取回参考图（${path}）`);
   const blob = await resp.blob();
@@ -1361,7 +1360,7 @@ async function fetchAssetAsFile(path: string, baseName: string, jobId?: string):
 }
 
 function galleryMediaUrl(path: string): string {
-  return mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`);
+  return `/api/gallery/image?path=${encodeURIComponent(path)}`;
 }
 
 /** 生成资产冻结快照里的一份参考内容 → File（按快照登记的 mime 命名，不信任响应头）。 */

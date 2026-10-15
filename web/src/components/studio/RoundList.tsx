@@ -1,5 +1,4 @@
 import { type ButtonHTMLAttributes, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { mediaUrl } from '@/api/connection';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, Bookmark, BookmarkPlus, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Share2, Square, Trash2 } from 'lucide-react';
 
@@ -11,6 +10,7 @@ import { isGalleryFavorited, isGalleryHidden } from '@/api/gallery';
 import { formatBeijingTime } from '@/lib/time';
 import { formatGenerationCost } from '@/lib/generationCost';
 import { imageSizeSummary } from '@/lib/imageSizeMode';
+import { failureSummary } from '@/lib/failureSummary';
 import {
   canonicalMentionLabel,
   createMentionTokenRegex,
@@ -558,12 +558,12 @@ function ProgressBadge({
 }
 
 function imageSrc(path: string) {
-  return mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`);
+  return `/api/gallery/image?path=${encodeURIComponent(path)}`;
 }
 
 // 视频复用与图片相同的字节端点（output_paths 白名单内）。
 function videoSrc(path: string) {
-  return mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`);
+  return `/api/gallery/image?path=${encodeURIComponent(path)}`;
 }
 
 function isImagePath(path: string): boolean {
@@ -581,11 +581,11 @@ function isAudioPath(path: string): boolean {
 // - 其余（.runtime/uploads/ 的画师临时上传）：走 /api/raw
 function refImageSrc(path: string, jobId?: string) {
   if (path.startsWith('http')) return path;
-  if (jobId) return mediaUrl(`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`);
+  if (jobId) return `/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`;
   if (/^(characters|studio)\//.test(path)) {
-    return mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`);
+    return `/api/gallery/image?path=${encodeURIComponent(path)}`;
   }
-  return mediaUrl(`/api/raw?path=${encodeURIComponent(path)}`);
+  return `/api/raw?path=${encodeURIComponent(path)}`;
 }
 
 // 历史参考堆叠合并三类素材（视频 round 常只有视频/音频参考，单看图片会整组消失）。
@@ -1246,6 +1246,8 @@ function FailedCard({
 }) {
   const { config } = round;
   const meta = config ? specMetadata(config) : [];
+  const summary = failureSummary(round.reason);
+  const [detailOpen, setDetailOpen] = useState(false);
 
   return (
     <section className={ROUND_SECTION_CLASS}>
@@ -1277,7 +1279,22 @@ function FailedCard({
         {round.canceled
           ? <Square className="mt-1 size-3 shrink-0 fill-current text-muted-foreground" aria-hidden />
           : <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive/70" aria-hidden />}
-        <p className="flex-1 text-muted-foreground">{round.reason}</p>
+        <div className="min-w-0 flex-1 text-muted-foreground">
+          <p className="[overflow-wrap:anywhere]">{summary}</p>
+          {summary !== round.reason && (
+            <>
+              {detailOpen && <p className="mt-2 text-xs [overflow-wrap:anywhere]">{round.reason}</p>}
+              <button
+                type="button"
+                aria-expanded={detailOpen}
+                onClick={() => setDetailOpen(open => !open)}
+                className="mt-1 rounded-sm text-xs text-muted-foreground/80 underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                {detailOpen ? '收起' : '展开'}
+              </button>
+            </>
+          )}
+        </div>
         {round.jobId && onDeleteFailed && (
           <button
             type="button"
@@ -1285,8 +1302,8 @@ function FailedCard({
             title={round.canceled ? '删除已停止记录' : '删除失败记录'}
             onClick={() => { void onDeleteFailed(round.jobId!); }}
             className={round.canceled
-              ? 'rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
-              : 'rounded-md border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'}
+              ? 'shrink-0 whitespace-nowrap rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+              : 'shrink-0 whitespace-nowrap rounded-md border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'}
           >
             删除
           </button>

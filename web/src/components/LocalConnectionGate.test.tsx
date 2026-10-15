@@ -1,8 +1,6 @@
 import { StrictMode, useEffect, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { Link, Router, useLocation } from 'wouter';
-import { memoryLocation } from 'wouter/memory-location';
 vi.unmock('@/api/connection');
 import { localConnection, connectionFetch } from '@/api/connection';
 import { LocalConnectionGate } from './LocalConnectionGate';
@@ -32,12 +30,6 @@ function RouteReads({ path }: { path: string }) {
     connectionFetch(path).then(response => response.json()).then(() => setResult('读取成功')).catch(error => setResult(String(error)));
   }, [path]);
   return <p>{result}</p>;
-}
-function RoutedPages() {
-  const [location] = useLocation();
-  return location === '/connection'
-    ? <><RouteReads key="management" path="/api/connection/agent-grants" /><Link href="/settings">返回设置</Link></>
-    : <><RouteReads key="settings" path="/api/config" /><Link href="/connection">管理授权</Link></>;
 }
 afterEach(() => { act(() => localConnection.dispose()); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -178,12 +170,6 @@ describe('local connection gate', () => {
     expect(screen.getByLabelText('编辑草稿')).toHaveValue(''); expect(onMount).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('只读')).not.toBeInTheDocument();
   });
-  it('opens authorization management without stealing the editor lease', async () => {
-    const network = server(); const onMount = vi.fn(); const { hook } = memoryLocation({ path: '/connection' });
-    render(<Router hook={hook}><LocalConnectionGate><Draft onMount={onMount} /></LocalConnectionGate></Router>);
-    await waitFor(() => expect(onMount).toHaveBeenCalled()); expect(network.mock.calls.some(([url]) => url.endsWith('editor-lease'))).toBe(false);
-  });
-
   it('does not replay retained drafts when restored from the browser history cache', async () => {
     server(); const onMount = vi.fn(); render(<LocalConnectionGate><Draft onMount={onMount} /></LocalConnectionGate>);
     const editor = await screen.findByLabelText('编辑草稿'); fireEvent.change(editor, { target: { value: '历史中的手稿' } });
@@ -196,64 +182,4 @@ describe('local connection gate', () => {
     expect(editor).toHaveValue('历史中的手稿'); expect(onMount).toHaveBeenCalledTimes(1);
   });
 
-  it('waits for the mode transition before a newly mounted route reads data in either direction', async () => {
-    const network = server();
-    const { hook } = memoryLocation({ path: '/settings' });
-    render(<Router hook={hook}><LocalConnectionGate><RoutedPages /></LocalConnectionGate></Router>);
-    await screen.findByText('读取成功');
-    fireEvent.click(screen.getByRole('link', { name: '管理授权' }));
-    await screen.findByRole('link', { name: '返回设置' });
-    await screen.findByText('读取成功');
-    expect(localConnection.getSnapshot()).toMatchObject({ phase: 'ready', editing: false });
-    expect(network.mock.calls.filter(([url]) => url === '/api/connection/agent-grants')).toHaveLength(1);
-    fireEvent.click(screen.getByRole('link', { name: '返回设置' }));
-    await screen.findByRole('link', { name: '管理授权' }); await screen.findByText('读取成功');
-    expect(localConnection.getSnapshot()).toMatchObject({ phase: 'ready', editing: true });
-  });
-});
-
-describe('hosted pairing form', () => {
-  const BASE = 'http://127.0.0.1:5174';
-  function hostedServer() {
-    const network = vi.fn(async (url: string, init: RequestInit) => {
-      if (url === `${BASE}/api/connection/status`) return response({ service: 'game-atelier', instance_id: 'i1', app_version: '1', protocol: 'atelier-local/2' });
-      if (url === `${BASE}/api/connection/pair`) return response({ session_token: 'tok-1', session_id: 's1', instance_id: 'i1', expires_at: '2099-01-01T00:00:00Z', capabilities: ['edit', 'read'] });
-      if (url === `${BASE}/api/connection/editor-lease`) return response({ client_id: JSON.parse(String(init.body)).client_id, expires_at: '2099-01-01T00:00:00Z' });
-      if (url === `${BASE}/api/connection/media-token`) return response({ media_token: 'media-1', expires_at: '2099-01-01T00:00:00Z' });
-      return response({});
-    });
-    vi.stubGlobal('fetch', network); return network;
-  }
-  afterEach(() => { Object.defineProperty(localConnection, 'hosted', { value: false, configurable: true }); sessionStorage.clear(); });
-
-  it('asks for a port and code, links to the local pairing page and mounts the app after pairing', async () => {
-    Object.defineProperty(localConnection, 'hosted', { value: true, configurable: true });
-    const network = hostedServer(); const onMount = vi.fn();
-    render(<LocalConnectionGate><Draft onMount={onMount} /></LocalConnectionGate>);
-    await screen.findByRole('heading', { name: '连接本机工坊' });
-    expect(network).not.toHaveBeenCalled(); expect(onMount).not.toHaveBeenCalled();
-    expect(screen.getByRole('link', { name: '本机连接页' })).toHaveAttribute('href', `${BASE}/connection?site=${encodeURIComponent(window.location.origin)}`);
-    const code = screen.getByLabelText('配对码');
-    const typed = vi.fn(); code.addEventListener('keydown', typed);
-    fireEvent.keyDown(code, { key: 'a' });
-    expect(typed).toHaveBeenCalledTimes(1);
-    fireEvent.change(code, { target: { value: 'code-1' } });
-    fireEvent.click(screen.getByRole('button', { name: '连接' }));
-    await screen.findByLabelText('编辑草稿');
-    expect(JSON.parse(String(network.mock.calls.find(([url]) => url.endsWith('/pair'))![1].body))).toEqual({ pairing_code: 'code-1', instance_id: 'i1' });
-    expect(localConnection.getSnapshot()).toMatchObject({ phase: 'ready', target: BASE });
-    expect(sessionStorage.getItem('atelier-site-port')).toBe('5174');
-  });
-
-  it('shows the pairing error inline and stays on the form', async () => {
-    Object.defineProperty(localConnection, 'hosted', { value: true, configurable: true });
-    const network = hostedServer();
-    network.mockImplementation(async () => response({ error: { code: 'ORIGIN_DENIED', message: '此来源尚未获准连接本机' } }, 403));
-    render(<LocalConnectionGate><Draft onMount={vi.fn()} /></LocalConnectionGate>);
-    fireEvent.change(await screen.findByLabelText('配对码'), { target: { value: 'code-1' } });
-    fireEvent.click(screen.getByRole('button', { name: '连接' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('本机尚未为这个网站生成配对码');
-    expect(screen.getByLabelText('配对码')).toHaveValue('code-1');
-    expect(localConnection.getSnapshot().phase).toBe('unpaired');
-  });
 });

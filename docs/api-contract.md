@@ -70,17 +70,13 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 - 5.43.3：候选失败的非空原因去重后汇总到 Job.error；部分成功保留部分成功提示与具体原因，
   全部失败仅在缺少任何原因时使用“没有可登记的结果”，不覆盖真实厂商状态与订单号。
 
-网站连接本机与外部 Agent 工坊入口已进入分阶段开发：
-[开发范围与验收](local-workspace.md)、[本机连接](contracts/local-connection.md)、
-[工坊 MCP 与生成批准](contracts/workshop-mcp.md)。本地整合分支已实现状态、鉴权、授权、编辑租约、
-工坊 typed 工具与批准执行；网站配对 / CORS / 媒体票据仍是未开放的目标，不得混称上线。
-
-改造不把项目改存浏览器、不把 Key 发给网站、不扩张 Canvas Agent 权限，也不增加第二条供应商执行路径。
+本机连接与外部 Agent 工坊入口见 [本机连接](contracts/local-connection.md) 与
+[工坊 MCP 与生成批准](contracts/workshop-mcp.md)：状态、鉴权、Agent 授权、编辑租约、工坊 typed 工具与批准执行。
+托管网站方案已弃用（ADR-0023），只有本机页面与本机 Agent 两种访问方式。
 
 `GET /api/connection/status` 返回 `{ service: "game-atelier", instance_id, app_version, protocol: "atelier-local/2" }`。
 instance 是每次启动的 32 位小写十六进制标识，不是访问凭据；app_version 从插件 manifest 读取。
-响应 `Cache-Control: no-store`，不读取用户配置或数据。本地协议就绪不代表网站已配对，
-不能据此开放跨源调用或跳过鉴权；旧 null 协议不被新前端继续使用。
+响应 `Cache-Control: no-store`，不读取用户配置或数据；不能据此跳过鉴权，旧 null 协议不被新前端继续使用。
 
 P1b 对全部路由先校验实际监听 Host、精确 Origin 与浏览器 Fetch Metadata；地址不符返回 421
 `HOST_DENIED`，来源不符返回 403 `ORIGIN_DENIED`。错误为
@@ -815,7 +811,7 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 `GET /team-libraries` 带 `project_id` 时只列该画布的挂载；不带时列本机全部挂载，按 `library_id` 去重，
 每个库取库级端点选中的那条记录（见下）。分享对话框用不带参数的形式。
 
-挂载（`POST /team-libraries`）与 `/folder-picker` 同属本机管理能力，网站会话 403；列表、卸载、重扫、
+挂载（`POST /team-libraries`）与 `/folder-picker` 同属本机管理能力；列表、卸载、重扫、
 读条目、采用照常按读 / 编辑能力放行。同一个库可以挂在多个画布上，库级端点取可达记录中最近挂载的那条
 （全不可达时取最近挂载的），目录监听也跟着这条走。删画布时一并删掉它的挂载记录。
 
@@ -901,8 +897,7 @@ FastAPI 标准 422。坏掉的 job 文件、画布存档不见了（`{code: "can
 `{code: "revision_conflict", current_revision}`；画布或资产不存在 404；非生成资产、配方拼不出合法草稿 422；
 参考 blob 缺失 500 `{code: "asset_state_broken", message}`（本机数据完整性故障，重试无用）；画布存档本身坏了 500。
 
-`GET /team-libraries/{library_id}/assets/{entry_id}/content` 与 `thumb` 同属媒体路由：网站会话可凭媒体令牌
-读取（`<img>` / `<video>` 不带 Origin）。
+`GET /team-libraries/{library_id}/assets/{entry_id}/content` 与 `thumb` 同属媒体路由（缓存策略由路由自带）。
 
 `TeamLibraryIndexEntry.kind` 为 `generation | media | prompt | raw`：前三种来自
 `shared/<作者>/<asset_id>/asset.json`，`raw` 是库内直接摆着的媒体文件（`id` 为

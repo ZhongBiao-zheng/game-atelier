@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from character_workflow.lib import data_root
 from character_workflow.lib.private_json import read_private_json, write_private_json
 from character_workflow.lib.projects import create_project
 from viewer_server.connection_auth import COOKIE_NAME, ConnectionError, ConnectionStore
@@ -108,15 +109,13 @@ def test_duplicate_or_mixed_credentials_fail_closed(client):
     ]).status_code == 401
 
 
-def test_readonly_agent_cannot_create_grants_or_bootstrap_a_browser(client):
+def test_agent_cannot_reissue_its_grant_or_bootstrap_a_browser(client):
     bootstrap(client)
     native, _, _, credential = create_grant(client)
     response = native.post("/api/connection/local-session", json={}, headers=LOCAL_HEADERS)
     assert response.status_code == 403
-    response = native.post("/api/connection/agent-grants", json={
-        "name": "逃逸", "project_ids": ["other"], "capabilities": ["read"],
-    })
-    assert response.status_code == 403
+    assert native.put("/api/connection/agent", json={}).status_code == 403
+    assert native.request("DELETE", "/api/connection/agent", json={}).status_code == 403
     credential_path = client.app.state.connection_store._grants_path()
     persisted = read_private_json(credential_path, 128 * 1024)
     assert credential["grant_token"] not in json.dumps(persisted)
@@ -131,7 +130,7 @@ def test_explicit_takeover_blocks_old_tab_without_revoking_management(client):
         "client_id": "page-two", "takeover": True,
     }).status_code == 200
     assert client.post("/api/projects", json={"name": "旧页"}).status_code == 409
-    assert client.get("/api/connection/agent-grants").status_code == 200
+    assert client.get("/api/connection/agent").status_code == 200
     assert client.post("/api/projects", json={"name": "新页"}, headers={
         "X-Atelier-Client": "page-two",
     }).status_code == 200
@@ -144,8 +143,7 @@ def test_lease_expiry_and_session_revocation(client):
         store.lease = (*store.lease[:2], time.time() - 1)
     assert client.post("/api/projects", json={"name": "过期"}).status_code == 409
     session = store.sessions[result["session_id"]]
-    assert client.request("DELETE", f"/api/connection/sessions/{result['session_id']}", json={},
-                          headers={"Content-Type": "application/json"}).status_code == 204
+    store.revoke_session(result["session_id"])
     assert session.revoked.is_set()
     assert client.get("/api/projects").status_code == 401
 
@@ -162,13 +160,12 @@ def test_control_size_content_type_and_extra_fields(client):
 
 def create_grant(client):
     project = create_project("本机授权测试")
-    response = client.post("/api/connection/agent-grants", json={
-        "name": "Codex 测试", "project_ids": [project.id], "capabilities": ["read"],
-    })
-    assert response.status_code == 201, response.text
-    grant = response.json()
-    assert "token" not in json.dumps(grant)
-    credential = read_private_json(Path(grant["credential_path"]))
+    response = client.put("/api/connection/agent", json={})
+    assert response.status_code == 200, response.text
+    assert "token" not in response.text
+    credential_path = data_root.agent_credential_file()
+    credential = read_private_json(credential_path)
+    grant = {"grant_id": credential["grant_id"], "credential_path": str(credential_path)}
     native = TestClient(client.app, base_url=ORIGIN)
     exchange = native.post("/api/connection/agent-sessions", json={
         "grant_id": credential["grant_id"], "grant_token": credential["grant_token"],
@@ -182,21 +179,18 @@ def create_grant(client):
 def test_credential_store_failure_is_reported_with_reason(client, monkeypatch):
     """Windows ACL / pywin32 / 磁盘不支持权限时写凭据会抛 OSError；页面要看到原因，不是裸 500。"""
     bootstrap(client)
-    project = create_project("凭据失败")
     from viewer_server import connection_auth
 
     def broken(path, value):
         raise PermissionError("Credential ACL grants another principal access")
 
     monkeypatch.setattr(connection_auth, "write_private_json", broken)
-    response = client.post("/api/connection/agent-grants", json={
-        "name": "坏盘", "project_ids": [project.id], "capabilities": ["read"],
-    })
+    response = client.put("/api/connection/agent", json={})
     assert response.status_code == 500
     body = response.json()["error"]
     assert body["code"] == "CREDENTIAL_STORE_FAILED"
     assert "PermissionError" in body["message"] and "pywin32" in body["message"]
-    assert client.get("/api/connection/agent-grants").json()["grants"] == []
+    assert client.get("/api/connection/agent").json()["enabled"] is False
 
 
 def test_grant_exchange_tool_scoping_and_immediate_revocation(client):
@@ -207,13 +201,12 @@ def test_grant_exchange_tool_scoping_and_immediate_revocation(client):
     assert project.id in response.text
     for method, path in [
         ("GET", "/api/projects"), ("GET", "/api/keys"), ("GET", "/api/raw"),
-        ("GET", "/events"), ("GET", "/api/connection/agent-grants"),
+        ("GET", "/events"), ("GET", "/api/connection/agent"),
         ("POST", "/api/workshop/requests/unknown/approve"), ("POST", "/api/studio/jobs"),
     ]:
         assert native.request(method, path, json={}).status_code == 403
     assert credential["grant_token"] not in client.get("/api/connection/sessions").text
-    assert client.request("DELETE", f"/api/connection/agent-grants/{grant['grant_id']}",
-                          json={}).status_code == 204
+    assert client.request("DELETE", "/api/connection/agent", json={}).json()["enabled"] is False
     assert native.post("/api/workshop/list-projects", json={}).status_code in {401, 403}
 
 
@@ -236,29 +229,19 @@ def test_grants_survive_restart_but_runtime_sessions_do_not(client, tmp_path):
         "grant_id": grant["grant_id"], "grant_token": credential["grant_token"],
         "instance_id": status["instance_id"],
     })
-    assert exchange.status_code == 200 and exchange.json()["project_ids"] == [project.id]
+    assert exchange.status_code == 200
 
 
-def test_default_grant_never_expires_and_replaces_the_previous_default(client):
+def test_agent_grant_never_expires_and_reenabling_replaces_it(client):
     bootstrap(client)
-    project = create_project("默认授权")
-    body = {"name": "本机 Agent", "project_ids": [project.id], "capabilities": ["read"],
-            "default": True}
-    # 有效期参数已删除：旧页面带 days 会被拒，而不是悄悄忽略。
-    assert client.post("/api/connection/agent-grants", json={**body, "days": 7}).status_code == 422
-    first = client.post("/api/connection/agent-grants", json=body).json()
-    old_credential = read_private_json(Path(first["credential_path"]))
-    custom = client.post("/api/connection/agent-grants",
-                         json={**body, "name": "Codex", "default": False}).json()
-    second = client.post("/api/connection/agent-grants", json=body).json()
-    assert second["default"] is True and custom["default"] is False
-    assert second["credential_path"] == first["credential_path"]
-    assert Path(second["credential_path"]).name == "agent.json"
-    assert "expires_at" not in second
-    new_credential = read_private_json(Path(second["credential_path"]))
+    # 范围、能力、有效期参数都已删除：旧页面带它们会被拒，而不是悄悄忽略。
+    assert client.put("/api/connection/agent", json={"days": 7}).status_code == 422
+    assert client.put("/api/connection/agent", json={}).json()["enabled"] is True
+    credential_path = data_root.agent_credential_file()
+    old_credential = read_private_json(credential_path)
+    client.put("/api/connection/agent", json={})
+    new_credential = read_private_json(credential_path)
     assert set(new_credential) == {"service", "base_url", "grant_id", "grant_token"}
-    listed = client.get("/api/connection/agent-grants").json()["grants"]
-    assert {grant["grant_id"] for grant in listed} == {custom["grant_id"], second["grant_id"]}
     instance_id = client.get("/api/connection/status").json()["instance_id"]
     native = TestClient(client.app, base_url=ORIGIN)
 
@@ -270,6 +253,23 @@ def test_default_grant_never_expires_and_replaces_the_previous_default(client):
 
     assert exchange(old_credential) == 403
     assert exchange(new_credential) == 200
+
+
+def test_agent_sees_projects_created_after_enabling(client):
+    bootstrap(client)
+    native, first, _grant, _credential = create_grant(client)
+    later = create_project("开关打开之后新建")
+    listed = native.post("/api/workshop/list-projects", json={}).json()
+    assert {first.id, later.id} <= {item["project_id"] for item in listed["projects"]}
+
+
+def test_legacy_multi_grant_file_is_ignored(client):
+    """旧版 grants.json 里的授权（含按项目限范围的自定义授权）升级后一律失效。"""
+    bootstrap(client)
+    legacy = data_root.agent_credential_file().parent / "grants.json"
+    write_private_json(legacy, {"g-old": {"grant_id": "g-old", "token_hash": "0" * 64,
+                                          "project_ids": [], "capabilities": ["read"]}})
+    assert client.get("/api/connection/agent").json() == {"enabled": False, "connections": {}}
 
 
 def test_change_data_root_revokes_existing_sessions(client, monkeypatch, tmp_path):
@@ -363,9 +363,9 @@ def test_hot_path_reads_grants_file_only_when_it_changes(client, monkeypatch):
     monkeypatch.setattr(auth, "read_private_json", lambda path, *a, **k: reads.append(path) or original(path, *a, **k))
     for _ in range(5):
         assert native.post("/api/workshop/list-projects", json={}).status_code == 200
-        assert client.get("/api/connection/agent-grants").status_code == 200
+        assert client.get("/api/connection/agent").status_code == 200
     assert len(reads) <= 1
-    grants_path = Path(grant["credential_path"]).parent / "grants.json"
+    grants_path = Path(grant["credential_path"]).parent / "agent-grant.json"
     write_private_json(grants_path, read_private_json(grants_path, 128 * 1024))
     before = len(reads)
     assert native.post("/api/workshop/list-projects", json={}).status_code == 200
