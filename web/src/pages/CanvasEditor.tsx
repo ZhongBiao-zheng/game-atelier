@@ -59,6 +59,7 @@ import { Link, useLocation } from 'wouter';
 
 import {
   cancelCanvasRun,
+  resumeCanvasMjEdit,
   canvasDownloadUrl,
   canvasMediaUrl,
   createCanvasReversePromptConfig,
@@ -3169,6 +3170,25 @@ function CanvasEditorInner({
     }
   }, [applyLocalJob, projectId]);
 
+  const resumeMjEdit = useCallback(async (runId: string) => {
+    if (runSubmissionInFlight.current) return;
+    runSubmissionInFlight.current = true;
+    setError(null);
+    try {
+      if (!await persistNow()) return;
+      const dirty = dirtyVersion.current;
+      const result = await resumeCanvasMjEdit(projectId, runId, serverRevision.current);
+      if (latestDocument.current?.project_id !== projectId) return;
+      mergeSubmittedRunDocument(result.document, result.job, dirty);
+      applyLocalJob(result.job);
+    } catch (resumeError) {
+      if (latestDocument.current?.project_id === projectId) setError((resumeError as Error).message);
+    } finally {
+      runSubmissionInFlight.current = false;
+      if (saveQueued.current) void flushSave().catch(() => undefined);
+    }
+  }, [projectId, persistNow, mergeSubmittedRunDocument, applyLocalJob, flushSave]);
+
   const dismissCandidate = useCallback(async (runId: string, candidateId: string) => {
     setError(null);
     try {
@@ -4438,6 +4458,7 @@ function CanvasEditorInner({
     reportError,
     submitRun,
     cancelRun,
+    resumeMjEdit,
     dismissCandidate,
     updateNode,
     previewNodeResize,
@@ -4473,6 +4494,7 @@ function CanvasEditorInner({
     uploadBatchImages,
     beginMaterialPick,
     cancelRun,
+    resumeMjEdit,
     canvasUiPreferences,
     canvasUiPreferencesError,
     connectedMaterialNodeIdsByNodeId,
@@ -5454,9 +5476,11 @@ function CanvasPreview({
 }) {
   const { version } = preview;
   const [showSource, setShowSource] = useState(false);
+  const [showMask, setShowMask] = useState(false);
+  const maskId = job?.canvas_run?.snapshot.mask_version_id;
   const edit = job?.canvas_run?.snapshot.normalized_params.image_edit as {
     source_version_id?: string; mode?: string; width?: number; height?: number; x?: number; y?: number;
-    source_width?: number; source_height?: number;
+    source_width?: number; source_height?: number; custom_id?: string;
   } | undefined;
   const src = version.kind === 'text' ? null : canvasMediaUrl(projectId, version.version_id);
   return (
@@ -5470,12 +5494,14 @@ function CanvasPreview({
         <div className="flex flex-col items-center gap-2">
           <div className="relative inline-block max-w-full">
             <img src={src} alt={preview.title} decoding="async" className={`block max-h-[58dvh] max-w-full rounded-lg object-contain ${showSource ? 'invisible' : ''}`} />
+            {showMask && maskId && <div aria-label="可编辑区域" className="pointer-events-none absolute inset-0 bg-primary/50" style={{ maskImage: `linear-gradient(white, white), url("${canvasMediaUrl(projectId, maskId)}")`, maskMode: 'luminance', maskComposite: 'subtract', maskSize: '100% 100%' }} />}
             {showSource && edit?.source_version_id && <img src={canvasMediaUrl(projectId, edit.source_version_id)} alt="编辑原图" className="absolute object-contain" style={edit.mode === 'outpaint' && edit.width && edit.height ? {
               left: `${(edit.x || 0) / edit.width * 100}%`, top: `${(edit.y || 0) / edit.height * 100}%`,
               width: `${(edit.source_width || edit.width) / edit.width * 100}%`, height: `${(edit.source_height || edit.height) / edit.height * 100}%`,
             } : { inset: 0, width: '100%', height: '100%' }} />}
           </div>
           {edit?.source_version_id && <Button size="sm" variant="ghost" onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); setShowSource(true); }} onPointerUp={() => setShowSource(false)} onPointerCancel={() => setShowSource(false)} onKeyDown={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); setShowSource(true); } }} onKeyUp={() => setShowSource(false)} onBlur={() => setShowSource(false)}>按住查看原图</Button>}
+          {edit && maskId && (edit.mode === 'inpaint' || (edit.mode === 'outpaint' && !edit.custom_id)) && <Button size="sm" variant="ghost" aria-pressed={showMask} onClick={() => setShowMask(value => !value)}>查看选区</Button>}
         </div>
       )}
       {version.kind === 'video' && src && (

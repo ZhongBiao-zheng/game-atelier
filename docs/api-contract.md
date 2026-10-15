@@ -477,10 +477,11 @@ Version 不可变、历史保留；分组只管理布局。删除编辑入口保
 requested_count / mask_file / edit_options`。`edit_options` 为 JSON：`mode`（inpaint/outpaint/prepare）、
 `source_version_id`、扩图 `width/height/x/y`、可选 `reference_node_id` 或 MJ 的 `custom_id/zoom`。
 prompt、alias、model 与参数先保存为源图片节点的 image Draft，服务端读取后冻结；浏览器不能传媒体路径、
-MJ task ID 或渠道凭证。空提示词采用自然修复/延展。源版本变化拒绝提交。
+MJ task ID 或渠道凭证。编辑必须指定渠道，不使用自动路由。空提示词采用自然修复/延展。源版本变化拒绝提交。
 
 局部蒙版为与 EXIF 归一后源图同尺寸的单帧 PNG，透明或灰度 0 表示编辑、255 保留，空选区拒绝。
 扩图由服务端生成新区域蒙版，目标框必须完整包含原图，不把源图透明区域当作新增区域。
+扩图蒙版的 origin 标记 `expanded_canvas=true`，宽高不得小于源图；普通局部蒙版仍要求源图同尺寸。
 归一蒙版登记为内部不可变 `user_mask` Version；Job、Snapshot、结果节点及实际输入实线在同一可恢复事务提交。
 Snapshot 保存 `mask_version_id`、源版本、可选替换参考和 `normalized_params.image_edit` 几何参数。
 结果始终另建节点（包括图层素材），不覆盖源版本，不创建蒙版节点或历史关系线。
@@ -495,6 +496,11 @@ MJ 原生操作要求输出 task/单图序号、文件 SHA256、原授权渠道�
 需要单图时显式准备一次，不自动追加计费任务。Action 受理后仅在查询状态为 MODAL 时发送 Modal；code=21
 不等于需要弹窗。已受理任务 ID 与不确定提交状态持久化，服务重启后可续查已知订单，不自动重发不确定订单。
 MJ 尺寸和保护能力以厂商动作为准，不套用通用像素保护承诺。内部来源字段由服务端独占，普通 Studio 请求不能注入。
+
+MJ 原生编辑查询超时/网络中断记录 `mj_edit_state.poll_paused`，不假定厂商任务失败；结果节点显示“继续查询”。
+`POST /canvas/projects/{id}/runs/{run_id}/resume-mj-edit` 接收 `expected_revision`，只恢复未取消、已有可靠订单 ID
+且结果节点未改动的中断任务；复用原 Job/选区/动作，仅续查，不创建新订单。显式 CLI retry 则是新的待确认任务，
+清空 MJ 订单、输出映射、不确定提交与续查状态。详情可按住对比原图，并按需显示选区。
 
 `POST /canvas/projects/{id}/runs/angle` 只接受 `surface_node_id / expected_revision / requested_count` 与
 `horizontal_angle(-60..60) / pitch_angle(-45..45) / camera_distance(1..10) / wide_angle`。服务端优先全局

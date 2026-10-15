@@ -31,6 +31,10 @@ function mount(mode: 'inpaint' | 'outpaint' = 'inpaint') {
 
 describe('image editor', () => {
   beforeEach(() => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      disconnect() {}
+    });
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
       clearRect: vi.fn(), fillRect: vi.fn(), drawImage: vi.fn(),
       getImageData: () => ({ data: new Uint8ClampedArray([0, 0, 0, 255]) }),
@@ -39,7 +43,7 @@ describe('image editor', () => {
       callback(new Blob(['mask'], { type: 'image/png' }));
     });
   });
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   it('shows exact source dimensions instead of AUTO and blocks an empty selection', () => {
     mount();

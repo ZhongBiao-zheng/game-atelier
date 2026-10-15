@@ -13,7 +13,8 @@ def edit_transport(provider: str, model: str, protocol: str | None) -> str | Non
     family = image_family(model)
     if family == "midjourney":
         return "mj"
-    if protocol not in {None, "openai", "ark", "seedream", "openrouter"}:
+    protocols = {None, "openai", "openrouter"} if provider == "openrouter" else {None, "openai", "ark"}
+    if protocol not in protocols:
         return None
     if supports_image_mask(provider, model, protocol):
         return "mask"

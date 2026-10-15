@@ -573,6 +573,14 @@ export function submitCanvasUpscaleRun(
   );
 }
 
+export function resumeCanvasMjEdit(projectId: string, runId: string, expectedRevision: number): Promise<CanvasRun> {
+  return requestJson<CanvasRun>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/resume-mj-edit`,
+    '继续查询 MJ 原任务',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: expectedRevision }) },
+  );
+}
+
 export function createCanvasReversePromptConfig(
   projectId: string,
   runId: string,

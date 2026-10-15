@@ -79,7 +79,8 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path, params: dic
         response = mj.requests.post(f"{root}/mj/submit/{endpoint}", headers=headers,
                                     json=body, timeout=120)
         payload = mj._json(response)
-        if not response.ok or payload.get("code") not in {1, 21, 22}:
+        accepted_codes = {1, 21, 22} if endpoint == "action" else {1, 22}
+        if not response.ok or payload.get("code") not in accepted_codes:
             raise mj.MidjourneyError(mj._err(payload, response.status_code))
         task_id = mj._extract_task_id(payload)
         if not task_id:
@@ -118,9 +119,15 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path, params: dic
     if on_phase:
         on_phase("sent")
     result = {}
-    urls = mj._poll_task(root=root, headers=headers, task_id=task_id,
-                         max_polls=max_polls, poll_interval=poll_interval,
-                         should_cancel=should_cancel, on_modal=on_modal, on_result=result.update)
+    try:
+        urls = mj._poll_task(root=root, headers=headers, task_id=task_id,
+                             max_polls=max_polls, poll_interval=poll_interval,
+                             should_cancel=should_cancel, on_modal=on_modal, on_result=result.update)
+    except mj.MidjourneyPendingError:
+        state["poll_paused"] = True
+        save()
+        raise
+    state["poll_paused"] = False
     if on_phase:
         on_phase("downloading")
     paths, outputs = [], []
@@ -130,7 +137,9 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path, params: dic
         single = options["mode"] == "prepare" or (
             len(urls) == 1 and any("::inpaint::" in str(button.get("customId", "")).lower()
                                   for button in result.get("buttons", [])))
-        outputs.append({"task_id": task_id, "image_index": index, "single": single,
+        outputs.append({"task_id": task_id,
+                        "image_index": index if single or result.get("imageUrls") else 0,
+                        "single": single,
                         "channel": mj.channel_fingerprint(key),
                         "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()})
     params["mj_outputs"] = outputs

@@ -142,6 +142,7 @@ POST /api/canvas/matting-model
 GET /api/canvas/projects/{project_id}/versions/{version_id}/media
 GET /api/canvas/projects/{project_id}/versions/{version_id}/download
 GET /api/canvas/projects/{project_id}/nodes/{node_id}/layers/download
+GET /api/canvas/projects/{project_id}/nodes/{node_id}/image-edit
 GET /api/canvas/projects/{project_id}/jobs
 POST /api/canvas/projects/{project_id}/runs/reverse-prompt
 POST /api/canvas/projects/{project_id}/runs/angle
@@ -156,6 +157,7 @@ POST /api/canvas/projects/{project_id}/batch-runs/{batch_id}/cancel
 POST /api/canvas/projects/{project_id}/runs/{run_id}/reverse-prompt-config
 POST /api/canvas/projects/{project_id}/runs
 POST /api/canvas/projects/{project_id}/runs/{run_id}/cancel
+POST /api/canvas/projects/{project_id}/runs/{run_id}/resume-mj-edit
 POST /api/canvas/projects/{project_id}/runs/{run_id}/candidates/{candidate_id}/dismiss
 GET /api/projects/{project_id}/studio-archive-targets
 POST /api/studio/jobs/{job_id}/archive

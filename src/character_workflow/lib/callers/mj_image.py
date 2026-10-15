@@ -75,6 +75,10 @@ class MidjourneyError(RuntimeError):
     pass
 
 
+class MidjourneyPendingError(MidjourneyError):
+    """A known order lost its polling window, not a provider-declared failure."""
+
+
 def channel_fingerprint(key) -> str:
     return hashlib.sha256(f"{_api_root(key)}\0{key.access_key}".encode()).hexdigest()
 
@@ -404,7 +408,7 @@ def _poll_task(
     url = f"{root}/mj/task/{task_id}/fetch"
     for resp in video_poll.poll_responses(
         url=url, headers=headers, timeout=60, max_polls=max_polls,
-        poll_interval=poll_interval, task_ref=task_id, error_cls=MidjourneyError,
+        poll_interval=poll_interval, task_ref=task_id, error_cls=MidjourneyPendingError,
         should_cancel=should_cancel,
     ):
         payload = _json(resp)
@@ -428,7 +432,7 @@ def _poll_task(
             raise MidjourneyError(
                 video_poll.with_task_ref(_err(payload, resp.status_code), task_id)
             )
-    raise MidjourneyError(f"Midjourney 任务轮询超时: {task_id}")
+    raise MidjourneyPendingError(f"MJ 查询暂时中断，可继续查询原任务，不会重新下单（task_id={task_id}）")
 
 
 def _fetch_image_seed(*, root: str, headers: dict[str, str], task_id: str) -> int | None:

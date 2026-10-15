@@ -1740,6 +1740,8 @@ def submit_mask_edit_run(
                     "canvas_mask_draft_missing",
                     "请先填写局部编辑提示词并选择图片模型。",
                 )
+            if draft.alias is None:
+                raise ValueError("图片编辑需要明确选择模型渠道，不能使用自动路由")
             if not draft.prompt.strip():
                 draft = draft.model_copy(update={"prompt": (
                     "自然延展画面" if options.mode == "outpaint" else "自然修复选区内容"
@@ -1848,6 +1850,7 @@ def submit_mask_edit_run(
                 origin=CanvasUserMaskOrigin(
                     kind="user_mask",
                     source_version_id=source.version_id,
+                    expanded_canvas=options.mode == "outpaint" and transport != "mj",
                 ),
                 kind="image",
                 path=final_path.relative_to(canvas_project_dir(project_id)).as_posix(),
@@ -2376,6 +2379,46 @@ def _job_for_run(project_id: str, run_id: str) -> Job:
     if job is None:
         raise KeyError(run_id)
     return job
+
+
+def resume_mj_edit_run(project_id: str, run_id: str, expected_revision: int) -> tuple[Job, CanvasDocument]:
+    """Resume polling a paused native edit; never clone or create a provider order."""
+    from .canvas_image_edits import has_resumable_mj_task
+
+    original = _job_for_run(project_id, run_id)
+    with file_lock(canvas_project_lock_path(project_id)):
+        recover_canvas_transactions_unlocked(project_id)
+        current = _read_document_unlocked(project_id)
+        if current.revision != expected_revision:
+            raise RuntimeError(f"revision_conflict:{current.revision}")
+        with job_lock(original.job_id):
+            job = read_job(original.job_id)
+            context = job.canvas_run
+            if (job.status != JobStatus.FAILED or not context or job.cancel_requested_at
+                    or not job.params.image_edit or not has_resumable_mj_task(job)
+                    or not (job.params.mj_edit_state or {}).get("poll_paused")):
+                raise ValueError("这个任务没有可续查的 MJ 订单")
+            result = next((node for node in current.nodes if node.id == context.result_node_id), None)
+            if (not isinstance(result, CanvasImageNode) or result.data.current_version_id
+                    or canvas_node_has_pending_run(current, result)):
+                raise ValueError("原结果节点已删除、已有内容或正在生成，不能继续查询")
+            context = context.model_copy(update={"candidates": [
+                candidate.model_copy(update={"status": "pending", "error": None})
+                for candidate in context.candidates
+            ]})
+            updated_job = job.model_copy(update={
+                "status": JobStatus.PENDING, "error": None, "completed_at": None,
+                "progress_phase": "sent", "canvas_run": context,
+            })
+            updated_document = current.model_copy(update={
+                "revision": current.revision + 1, "updated_at": _now(),
+                "nodes": [node.model_copy(update={"data": node.data.model_copy(update={
+                    "active_run_id": run_id,
+                })}) if node.id == result.id else node for node in current.nodes],
+            })
+            _commit_transaction_unlocked(project_id, run_id, "resume_mj_edit", current.revision,
+                                         updated_job, updated_document, job_locked=True)
+            return updated_job, updated_document
 
 
 def request_canvas_run_cancel(project_id: str, run_id: str) -> Job:

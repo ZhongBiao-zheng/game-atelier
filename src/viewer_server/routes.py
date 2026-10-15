@@ -3638,6 +3638,23 @@ def post_canvas_run_cancel(project_id: str, run_id: str) -> Job:
         raise HTTPException(422, detail=str(error)) from error
 
 
+@router.post("/canvas/projects/{project_id}/runs/{run_id}/resume-mj-edit", response_model=CanvasRunResponse)
+def post_canvas_resume_mj_edit(project_id: str, run_id: str, payload: CanvasCandidateDismiss,
+                             background: BackgroundTasks) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_runs import resume_mj_edit_run
+
+    try:
+        job, document = resume_mj_edit_run(project_id, run_id, payload.expected_revision)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布生成记录") from None
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    except RuntimeError as error:
+        raise _canvas_run_revision_conflict(error) or HTTPException(409, detail=str(error)) from error
+    background.add_task(_run_canvas_job_safely, job.job_id)
+    return CanvasRunResponse(job=job, document=document)
+
+
 @router.post(
     "/canvas/projects/{project_id}/runs/{run_id}/candidates/{candidate_id}/dismiss",
     response_model=CanvasRunResponse,

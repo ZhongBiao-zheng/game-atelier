@@ -11,7 +11,7 @@ export type EditStroke = { tool: EditTool; size: number; points: EditPoint[] };
 
 export function isEditModel(model: KeyView['models'][number], key: KeyView) {
   return ['openai', 'custom', 'seedream', 'tokendance', 'openrouter'].includes(key.provider)
-    && (!model.protocol || ['openai', 'ark', 'seedream', 'openrouter'].includes(model.protocol))
+    && (!model.protocol || (key.provider === 'openrouter' ? ['openai', 'openrouter'] : ['openai', 'ark']).includes(model.protocol))
     && modelModality(model, key) === 'image'
     && ['gpt-image', 'seedream', 'nano-banana'].includes(imageControlCaps(model.id, key.provider).family);
 }

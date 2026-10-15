@@ -191,6 +191,7 @@ export interface CanvasNodeContextValue {
   reportError?: (message: string) => void;
   submitRun: (id: string) => Promise<void>;
   cancelRun: (runId: string) => Promise<void>;
+  resumeMjEdit?: (runId: string) => Promise<void>;
   dismissCandidate: (runId: string, candidateId: string) => Promise<void>;
   updateNode: (id: string, updater: (node: CanvasNode) => CanvasNode) => void;
   previewNodeResize?: (id: string, layout: { position: CanvasPoint; size: CanvasSize }) => void;
@@ -687,6 +688,9 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
             >
               <SwapIcon swapKey={Boolean(context.activeBatch.stopping)}>{context.activeBatch.stopping ? <LoaderCircle /> : <Square />}</SwapIcon>
             </MediaToolButton>
+          )}
+          {nodeJob?.status === 'failed' && Boolean(nodeJob.params.mj_edit_state?.poll_paused) && nodeJob.canvas_run && (
+            <MediaToolButton label="继续查询 MJ 原任务（不重新下单）" text="继续查询" onClick={() => void context.resumeMjEdit?.(nodeJob.canvas_run!.run_id)}><Eye /></MediaToolButton>
           )}
           {emptyMediaNode ? (
             <MediaToolButton

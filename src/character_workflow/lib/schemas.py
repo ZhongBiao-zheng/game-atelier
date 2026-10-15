@@ -920,6 +920,7 @@ class CanvasUserMaskOrigin(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["user_mask"]
     source_version_id: str
+    expanded_canvas: bool = False
 
 
 class CanvasJobOutputOrigin(BaseModel):
@@ -1190,12 +1191,14 @@ class CanvasDocument(BaseModel):
                     or (
                         version.width is not None
                         and source.width is not None
-                        and version.width != source.width
+                        and (version.width < source.width if version.origin.expanded_canvas
+                             else version.width != source.width)
                     )
                     or (
                         version.height is not None
                         and source.height is not None
-                        and version.height != source.height
+                        and (version.height < source.height if version.origin.expanded_canvas
+                             else version.height != source.height)
                     )
                 ):
                     raise ValueError("canvas user mask references an incompatible source version")

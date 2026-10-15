@@ -272,7 +272,7 @@ export type CanvasConnection = CanvasInputConnection | CanvasMaterialConnection;
 export type CanvasContentOrigin =
   | { kind: 'user_edit' }
   | { kind: 'upload'; upload_id: string }
-  | { kind: 'user_mask'; source_version_id: string }
+  | { kind: 'user_mask'; source_version_id: string; expanded_canvas?: boolean }
   | { kind: 'job_output'; job_id: string; candidate_id: string }
   | { kind: 'layer_decomposition'; job_id: string; output_index: number }
   | {

@@ -5,7 +5,7 @@ from PIL import Image
 import pytest
 
 from character_workflow.lib.callers import mj_edit
-from tests.test_mj_image import mj_key, _FakeResp  # noqa: F401
+from tests.test_mj_image import mj_key as mj_key, _FakeResp
 
 
 def test_actions_are_filtered_by_single_image_and_actual_buttons():
@@ -38,7 +38,9 @@ def test_action_waits_for_modal_and_does_not_repeat_submit_on_resume(mj_key, mon
     })
     posts = []
     monkeypatch.setattr(mj_edit.mj.requests, "post", lambda url, **kwargs: (
-        posts.append((url, kwargs["json"])) or _FakeResp(200, {"code": 21, "result": "child"})
+        posts.append((url, kwargs["json"])) or _FakeResp(200, {
+            "code": 21 if url.endswith("/action") else 1, "result": "child",
+        })
     ))
     def responses(**kwargs):
         for status in ["SUBMITTED", "MODAL", "IN_PROGRESS", "SUCCESS"]:
@@ -61,3 +63,27 @@ def test_uncertain_mj_submission_never_posts_again(mj_key, monkeypatch):
     with pytest.raises(mj_edit.mj.MidjourneyError, match="不会重复"):
         mj_edit.render(prompt="p", model="midjourney", alias="mj", output_dir=mj_key,
                        params={"image_edit": {}, "mj_edit_state": {"uncertain": True}})
+
+
+def test_poll_timeout_can_resume_without_post_and_keeps_grid_mapping(mj_key, monkeypatch):
+    path = mj_key / "output.png"
+    Image.new("RGBA", (32, 32)).save(path)
+    params = {"image_edit": {"mode": "outpaint", "custom_id": "MJ::JOB::zoom::50::source"},
+              "mj_edit_state": {"task_id": "accepted", "uncertain": False}}
+    def forbidden(*args, **kwargs):
+        pytest.fail("known order must not POST")
+    monkeypatch.setattr(mj_edit.mj.requests, "post", forbidden)
+    monkeypatch.setattr(mj_edit.mj.video_poll, "poll_responses", lambda **_: iter([]))
+    with pytest.raises(mj_edit.mj.MidjourneyPendingError):
+        mj_edit.render(prompt="p", model="midjourney", alias="mj", output_dir=mj_key, params=params)
+    assert params["mj_edit_state"]["poll_paused"] is True
+    buttons = [{"customId": f"MJ::JOB::upsample::{i}::accepted", "label": f"U{i}"}
+               for i in range(1, 5)]
+    monkeypatch.setattr(mj_edit.mj.video_poll, "poll_responses", lambda **_: iter([
+        _FakeResp(200, {"status": "SUCCESS", "imageUrl": "https://cdn.test/grid.png", "buttons": buttons})
+    ]))
+    monkeypatch.setattr(mj_edit.mj, "_download_png", lambda *args, **kw: str(path))
+    mj_edit.render(prompt="p", model="midjourney", alias="mj", output_dir=mj_key, params=params)
+    assert params["mj_edit_state"]["poll_paused"] is False
+    assert params["mj_outputs"][0]["image_index"] == 0
+    assert len(mj_edit.actions(buttons, 0, False)) == 4
