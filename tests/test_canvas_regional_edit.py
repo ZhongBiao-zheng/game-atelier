@@ -226,3 +226,34 @@ def test_package_roundtrip_preserves_patches_and_historical_results(isolated_dat
         assert resolve_canvas_media(imported.project_id, version.version_id)[0].is_file()
     second, _ = export_canvas_projects([imported.project_id])
     assert inspect_canvas_package(second).projects
+
+
+def test_repeat_resume_after_partial_result_and_compose_failure(isolated_data_root, monkeypatch):
+    from character_workflow.lib.callers import regional_edit
+    pid, _source, job, _doc, _ = prepare()
+    calls = []
+    def generate(**kwargs):
+        calls.append(True)
+        if len(calls) == 2:
+            raise ValueError("rejected")
+        path = kwargs["output_dir"] / "result.png"
+        Image.new("RGBA", (1024, 1024), "blue").save(path)
+        return [str(path)]
+    monkeypatch.setattr(callers, "dispatch", generate)
+    assert run_canvas_job(job.job_id).status == JobStatus.PARTIAL
+    resume_regional_edit_run(pid, job.canvas_run.run_id, read_canvas_document(pid).revision)
+    stitch = regional_edit.stitch_regions
+    monkeypatch.setattr(regional_edit, "stitch_regions", lambda *_: (_ for _ in ()).throw(OSError("disk")))
+    with pytest.raises(Exception):
+        run_canvas_job(job.job_id)
+    monkeypatch.setattr(regional_edit, "stitch_regions", stitch)
+    resume_regional_edit_run(pid, job.canvas_run.run_id, read_canvas_document(pid).revision)
+    assert run_canvas_job(job.job_id).status == JobStatus.DONE
+    assert len(calls) == 3
+
+
+def test_region_task_state_rejects_untrusted_candidate_paths():
+    from character_workflow.lib.regional_image_edit import validate_regional_tasks
+    for candidate in ("/tmp/escape", "../../outside", -1, 4, True):
+        with pytest.raises(ValueError, match="区域"):
+            validate_regional_tasks({"tasks": [{"candidate": candidate, "region_id": "1", "status": "pending"}]}, ["1"], 1)

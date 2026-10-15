@@ -92,6 +92,12 @@ def test_nearby_chain_does_not_merge_into_whole_image():
     assert max(r.crop[2] for r in regions) < 600
 
 
+def test_openrouter_decimal_ratios_are_supported():
+    router = key().model_copy(update={"provider": "openrouter", "base_url": "https://openrouter.ai/api/v1"})
+    for model in ("bytedance-seed/seedream-4.5", "seedream-5-0-pro"):
+        assert plan_regions(mask(), router, model)
+
+
 def test_edge_padding_and_model_specific_sizes_do_not_distort_coordinates():
     selected = mask((90, 70), ((0, 0, 10, 10),))
     for model in ("gpt-image-2", "doubao-seedream-4-5", "nano-banana-pro"):
