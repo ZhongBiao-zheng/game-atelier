@@ -4,11 +4,40 @@ import { imageControlCaps } from '@/lib/imageControlCaps';
 import { isEvolinkMidjourney } from '@/lib/modelFamily';
 import { normalizeImagePixelSize } from '@/lib/studioSize';
 import type { JobParams } from '@/schema/jobs';
+import type { CanvasImageEditNode, CanvasContentVersion } from '@/schema/canvas';
 
 export type EditFrame = { width: number; height: number; x: number; y: number };
 export type EditPoint = { x: number; y: number };
 export type EditTool = 'brush' | 'eraser' | 'rectangle' | 'hand';
-export type EditStroke = { tool: EditTool; size: number; points: EditPoint[] };
+export type EditStroke = { tool: Exclude<EditTool, 'hand'>; size: number; points: EditPoint[] };
+
+export function initialEditFrame(width: number, height: number, mode: 'inpaint' | 'outpaint'): EditFrame {
+  const scale = mode === 'outpaint' ? Math.max(1, Math.min(1.5, 16384 / Math.max(width, height),
+    Math.sqrt(16_777_216 / (width * height)))) : 1;
+  const frameWidth = Math.floor(width * scale);
+  const frameHeight = Math.floor(height * scale);
+  return { width: frameWidth, height: frameHeight,
+    x: Math.floor((frameWidth - width) / 2), y: Math.floor((frameHeight - height) / 2) };
+}
+
+export function savedImageEditError(node: CanvasImageEditNode, source: CanvasContentVersion | undefined,
+  keys: readonly KeyView[]): string | null {
+  if (source?.kind !== 'image' || !source.width || !source.height) return '编辑源图片不存在。';
+  const draft = node.data.generation_draft;
+  const key = keys.find(item => item.alias === draft?.alias);
+  if (!draft?.model || !key || !key.models.some(model => model.id === draft.model)) return '请先编辑并选择可用模型。';
+  const { options, editor_state: editor } = node.data;
+  if (options.mode === 'inpaint' && !node.data.mask_version_id) return '请先编辑并保存需要修改的区域。';
+  if (editor.native) return options.custom_id ? null : '请先选择可用的 MJ 动作。';
+  if (!key.models.some(model => model.id === draft.model && isEditModel(model, key))) return '请选择可用的编辑模型。';
+  if (options.mode === 'outpaint') {
+    const { width = 0, height = 0, x = -1, y = -1 } = options;
+    if (x < 0 || y < 0 || x + source.width > width || y + source.height > height
+      || (width === source.width && height === source.height)) return '画框必须向外扩展并完整包含原图';
+    return editSize(key, draft.model, width, height).error;
+  }
+  return null;
+}
 
 export function isEditModel(model: KeyView['models'][number], key: KeyView) {
   if (isEvolinkMidjourney(model.id, key.provider)) {
@@ -53,6 +82,8 @@ export function drawEditStrokes(canvas: HTMLCanvasElement, strokes: EditStroke[]
     ctx.fillStyle = ctx.strokeStyle = '#D4A574';
     if (stroke.tool === 'rectangle') {
       ctx.fillRect(Math.min(first.x, last.x), Math.min(first.y, last.y), Math.abs(last.x - first.x), Math.abs(last.y - first.y));
+    } else if (stroke.points.length === 1) {
+      ctx.beginPath(); ctx.arc(first.x, first.y, stroke.size / 2, 0, Math.PI * 2); ctx.fill();
     } else {
       ctx.lineWidth = stroke.size;
       ctx.lineCap = ctx.lineJoin = 'round';

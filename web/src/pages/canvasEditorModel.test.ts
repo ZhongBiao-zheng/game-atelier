@@ -15,10 +15,85 @@ import {
   placeCanvasNodeWithoutOverlap,
   syncDraftLayerStackSources,
   syncLayerMaterials,
+  canvasNodeAcceptsInput,
+  canvasNodeProvidesOutput,
+  detachMissingImageEditNodes,
+  resolveCanvasGenerationDraft,
+  restoreImageEditRunState,
+  retainNewImageEditResults,
 } from './canvasEditorModel';
 import type { CanvasDocument, CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 import type { KeyView } from '@/api/keys';
+
+it('keeps image edit settings out of normal generation and retains fixed versions after source deletion', () => {
+  const node: CanvasNode = { id: 'edit', type: 'image_edit', title: '编辑', position: { x: 0, y: 0 }, z_index: 0,
+    data: { source_node_id: 'source', source_version_id: 'source-v', mask_version_id: 'mask-v',
+      reference_node_id: 'reference', reference_version_id: 'reference-v', active_run_id: null,
+      generation_draft: { mode: 'image', model: 'mj-v8.2', alias: 'evo', prompt: 'flower', params: { n: 4 },
+        input_policy: 'all_connected', updated_at: '' }, options: { mode: 'inpaint' },
+      editor_state: { native: false, strokes: [], frame_ratio: '', frame: { width: 1024, height: 1024, x: 0, y: 0 } },
+    } };
+  expect(canvasNodeAcceptsInput(node)).toBe(false);
+  expect(canvasNodeProvidesOutput(node)).toBe(false);
+  expect(resolveCanvasGenerationDraft(node, [])).toBeNull();
+  const detached = detachMissingImageEditNodes(documentWithNodes([node], []));
+  expect(detached.nodes[0].data).toMatchObject({ source_node_id: null, reference_node_id: null,
+    source_version_id: 'source-v', mask_version_id: 'mask-v', reference_version_id: 'reference-v' });
+  expect(node.data.source_node_id).toBe('source');
+});
+
+it('retains results created after a configuration snapshot without blocking result deletion or candidate undo', () => {
+  const edit: CanvasNode = { id: 'edit', type: 'image_edit', title: '编辑', position: { x: 0, y: 0 }, z_index: 0,
+    data: { source_node_id: null, source_version_id: 'source', mask_version_id: null,
+      reference_node_id: null, reference_version_id: null, active_run_id: null,
+      generation_draft: { mode: 'image', model: 'model', prompt: 'new', params: {}, input_policy: 'all_connected', updated_at: '' },
+      options: { mode: 'inpaint' }, editor_state: { native: false, strokes: [], frame_ratio: '', frame: { width: 10, height: 10, x: 0, y: 0 } },
+    } };
+  const result: CanvasNode = { id: 'result', type: 'image', title: '结果', position: { x: 100, y: 0 }, z_index: 1,
+    data: { current_version_id: 'completed', active_run_id: null, generation_draft: null, display: { fit: 'contain', free_resize: false } } };
+  const current = documentWithNodes([edit, result], []);
+  current.connections = [{ id: 'provenance', source_node_id: 'edit', target_node_id: 'result', role: 'material' }];
+  const oldEdit = { ...edit, data: { ...edit.data, generation_draft: { ...edit.data.generation_draft!, prompt: 'old' } } };
+  const jobs = new Map([['run', { canvas_run: { result_node_id: 'result', snapshot: {
+    surface_node_id: 'edit', normalized_params: { image_edit: { mode: 'inpaint' } },
+  } } } as unknown as Job]]);
+  const beforeGeneration = retainNewImageEditResults(documentWithNodes([oldEdit], []), current, new Set(['result']));
+  const restored = restoreImageEditRunState(beforeGeneration, current, jobs);
+  expect(restored.nodes).toEqual([oldEdit, result]);
+  expect(restored.connections).toEqual(current.connections);
+  const deleted = restoreImageEditRunState(documentWithNodes([edit], []), current, jobs);
+  expect(deleted.nodes).toEqual([edit]);
+  const priorCandidate = { ...result, data: { ...result.data, current_version_id: 'other-candidate' } };
+  expect(restoreImageEditRunState(documentWithNodes([edit, priorCandidate], []), current, jobs).nodes[1]).toEqual(priorCandidate);
+});
+
+it('retains completed results when consecutive undo and redo snapshots no longer contain the edit node', () => {
+  const source: CanvasNode = { id: 'source', type: 'image', title: '原图', position: { x: 0, y: 0 }, z_index: 0,
+    data: { current_version_id: 'source-v', active_run_id: null, generation_draft: null, display: { fit: 'contain', free_resize: false } } };
+  const moved = { ...source, position: { x: 100, y: 0 } };
+  const edit: CanvasNode = { id: 'edit', type: 'image_edit', title: '编辑', position: { x: 200, y: 0 }, z_index: 1,
+    data: { source_node_id: 'source', source_version_id: 'source-v', mask_version_id: 'mask',
+      reference_node_id: null, reference_version_id: null, active_run_id: 'run', generation_draft: null,
+      options: { mode: 'inpaint' }, editor_state: { native: false, strokes: [], frame_ratio: '', frame: { width: 10, height: 10, x: 0, y: 0 } },
+    } };
+  const result: CanvasNode = { ...source, id: 'result', title: '结果', position: { x: 300, y: 0 },
+    data: { ...source.data, current_version_id: null, active_run_id: 'run' } };
+  const running = documentWithNodes([moved, edit, result], []);
+  running.connections = [{ id: 'edit-result', role: 'material', source_node_id: 'edit', target_node_id: 'result' }];
+  const beforeMove = retainNewImageEditResults(documentWithNodes([source], []), running, new Set(['result']));
+  const beforeCreate = retainNewImageEditResults(documentWithNodes([moved], []), running, new Set(['result']));
+  const completedResult = { ...result, data: { ...result.data, active_run_id: null, current_version_id: 'completed' } };
+  const completed = documentWithNodes([moved, { ...edit, data: { ...edit.data, active_run_id: null } }, completedResult], []);
+  const jobs = new Map([['run', { canvas_run: { result_node_id: 'result', snapshot: {
+    surface_node_id: 'edit', normalized_params: { image_edit: { mode: 'inpaint' } },
+  } } } as unknown as Job]]);
+  const undoCreate = restoreImageEditRunState(beforeCreate, completed, jobs);
+  const undoMove = restoreImageEditRunState(beforeMove, undoCreate, jobs);
+  expect(undoCreate.nodes).toEqual([moved, completedResult]);
+  expect(undoMove.nodes).toEqual([source, completedResult]);
+  expect(restoreImageEditRunState(beforeCreate, undoMove, jobs).nodes).toEqual([moved, completedResult]);
+});
 
 it('expands every layer into compact owned material views and reuses the existing group', () => {
   const stack = {

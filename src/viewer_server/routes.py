@@ -71,7 +71,8 @@ from character_workflow.lib.schemas import (
     CanvasReproduceResponse,
     CanvasLayerDecompositionCreate,
     CanvasPackageCommitRequest, CanvasPackageImportResponse,
-    CanvasMaskEditCreate, CanvasImageEditOptions, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
+    CanvasImageEditRunCreate, CanvasImageEditSave, CanvasImageEditSaveResponse,
+    CanvasImageEditOptions, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
     CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
     CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse,
@@ -3520,37 +3521,55 @@ async def post_canvas_edit_plan(project_id: str, node_id: str, alias: str = Form
 
 
 @router.post(
-    "/canvas/projects/{project_id}/runs/mask-edit",
+    "/canvas/projects/{project_id}/image-edits",
+    response_model=CanvasImageEditSaveResponse,
+    status_code=201,
+)
+async def post_canvas_image_edit_save(
+    project_id: str,
+    payload: str = Form(...),
+    mask_file: UploadFile | None = File(None),
+) -> CanvasImageEditSaveResponse:
+    from character_workflow.lib.canvas_image_edits import save_image_edit
+    from character_workflow.lib.canvas_masks import CanvasMaskError
+    try:
+        command = CanvasImageEditSave.model_validate_json(payload)
+        body = await mask_file.read(25 * 1024 * 1024 + 1) if mask_file else None
+        document, node_id = await run_in_threadpool(save_image_edit, project_id, command, body)
+        return CanvasImageEditSaveResponse(document=document, node_id=node_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目或图片节点") from None
+    except CanvasMaskError as error:
+        raise HTTPException(422, detail={"code": error.code, "message": error.message}) from error
+    except RuntimeError as error:
+        conflict = _canvas_run_revision_conflict(error)
+        if conflict is not None:
+            raise conflict from None
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/image-edit",
     response_model=CanvasRunResponse,
     status_code=201,
 )
-async def post_canvas_mask_edit(
+async def post_canvas_image_edit_run(
     project_id: str,
     background: BackgroundTasks,
-    surface_node_id: str = Form(...),
-    expected_revision: int = Form(...),
-    requested_count: int = Form(1),
-    mask_file: UploadFile = File(...),
-    edit_options: str = Form("{}"),
+    payload: CanvasImageEditRunCreate,
 ) -> CanvasRunResponse:
     from character_workflow.lib.canvas_masks import CanvasMaskError
-    from character_workflow.lib.canvas_runs import CanvasRunCommandError, submit_mask_edit_run
+    from character_workflow.lib.canvas_runs import CanvasRunCommandError, submit_image_edit_run
 
     try:
-        payload = CanvasMaskEditCreate(
-            surface_node_id=surface_node_id,
-            expected_revision=expected_revision,
-            requested_count=requested_count,
-        )
-        body = await mask_file.read(25 * 1024 * 1024 + 1)
         job, document = await run_in_threadpool(
-            submit_mask_edit_run,
+            submit_image_edit_run,
             project_id,
             payload.surface_node_id,
             payload.expected_revision,
             payload.requested_count,
-            body,
-            CanvasImageEditOptions.model_validate_json(edit_options),
         )
     except ValidationError as error:
         raise HTTPException(422, detail=error.errors()) from error

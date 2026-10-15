@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { canvasMediaUrl, downloadCanvasLayers, reproduceIntoCanvas } from './canvas';
+import { canvasMediaUrl, downloadCanvasLayers, reproduceIntoCanvas, saveCanvasImageEdit, submitCanvasImageEdit } from './canvas';
 
 const BASE = '/api/canvas/projects/canvas-1/versions/v-1/media';
 
@@ -8,6 +8,26 @@ function setDevicePixelRatio(value: number) {
 }
 
 afterEach(() => setDevicePixelRatio(1));
+
+it('separates local image-edit saves from runs and omits cleared masks', async () => {
+  const fetchMock = vi.fn().mockImplementation(async () => new Response('{}', { headers: { 'content-type': 'application/json' } }));
+  vi.stubGlobal('fetch', fetchMock);
+  try {
+    const payload = { expected_revision: 7, node_id: 'edit', generation_draft: null,
+      options: { mode: 'inpaint' as const }, reference_node_id: null, reference_version_id: null,
+      editor_state: { native: false, strokes: [], frame_ratio: '', frame: { width: 100, height: 100, x: 0, y: 0 } } };
+    await saveCanvasImageEdit('p', payload, null);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/canvas/projects/p/image-edits');
+    const form = fetchMock.mock.calls[0][1].body as FormData;
+    expect(JSON.parse(String(form.get('payload')))).toEqual(payload);
+    expect(form.has('mask_file')).toBe(false);
+    await saveCanvasImageEdit('p', payload, new Blob(['mask'], { type: 'image/png' }));
+    expect((fetchMock.mock.calls[1][1].body as FormData).has('mask_file')).toBe(true);
+    await submitCanvasImageEdit('p', 'edit', 8, 4);
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/canvas/projects/p/runs/image-edit');
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ surface_node_id: 'edit', expected_revision: 8, requested_count: 4 });
+  } finally { vi.unstubAllGlobals(); }
+});
 
 it('downloads a named ZIP and does not create a download on server error', async () => {
   vi.useFakeTimers();

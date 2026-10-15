@@ -11,6 +11,7 @@ import type {
   CanvasAgentTurnCreate,
   CanvasConnection,
   CanvasDocument,
+  CanvasImageEditNode,
   CanvasMattingModelStatus,
   CanvasMediaOperation,
   CanvasMediaOperationResult,
@@ -533,25 +534,35 @@ export function getCanvasImageEditSource(projectId: string, nodeId: string) {
   );
 }
 
-export function submitCanvasMaskEdit(
+export type CanvasImageEditSavePayload = Pick<CanvasImageEditNode['data'],
+  'generation_draft' | 'options' | 'editor_state' | 'reference_node_id' | 'reference_version_id'> & {
+    expected_revision: number;
+    node_id?: string;
+    source_node_id?: string | null;
+    source_version_id?: string;
+  };
+
+export function saveCanvasImageEdit(
   projectId: string,
-  surfaceNodeId: string,
-  expectedRevision: number,
-  requestedCount: number,
-  mask: Blob,
-  options: CanvasImageEditOptions,
-): Promise<CanvasRun> {
+  payload: CanvasImageEditSavePayload,
+  mask: Blob | null,
+): Promise<{ document: CanvasDocument; node_id: string }> {
   const form = new FormData();
-  form.append('surface_node_id', surfaceNodeId);
-  form.append('expected_revision', String(expectedRevision));
-  form.append('requested_count', String(requestedCount));
-  form.append('mask_file', mask, 'mask.png');
-  form.append('edit_options', JSON.stringify(options));
-  return requestJson<CanvasRun>(
-    `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/mask-edit`,
-    '提交局部编辑',
+  form.append('payload', JSON.stringify(payload));
+  if (mask) form.append('mask_file', mask, 'mask.png');
+  return requestJson(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/image-edits`,
+    '保存图片编辑',
     { method: 'POST', body: form },
   );
+}
+
+export function submitCanvasImageEdit(projectId: string, surfaceNodeId: string,
+  expectedRevision: number, requestedCount: number): Promise<CanvasRun> {
+  return requestJson(`/api/canvas/projects/${encodeURIComponent(projectId)}/runs/image-edit`,
+    '提交图片编辑', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ surface_node_id: surfaceNodeId, expected_revision: expectedRevision,
+        requested_count: requestedCount }) });
 }
 
 export interface CanvasAngleRunPayload {

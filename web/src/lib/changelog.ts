@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.95.0',
+    date: '2026-10-15',
+    headline: '可重复编辑的局部修改节点',
+    changes: [
+      { kind: 'feat', text: '局部修改与扩图拥有独立节点，保存原图、参考图、蒙版、提示词和参数，重新打开可继续编辑。' },
+      { kind: 'feat', text: '保存不出图、不扣费；每次生成新增结果图片，保留旧结果，复制和项目包也会保留编辑配置。' },
+    ],
+  },
+  {
     version: '5.94.0',
     date: '2026-10-15',
     headline: 'EvoLink Midjourney 图片编辑',

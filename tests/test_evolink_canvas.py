@@ -8,12 +8,13 @@ from character_workflow.lib.canvas_projects import (
     create_canvas_project, read_canvas_document, replace_canvas_node_media,
 )
 from character_workflow.lib.canvas_runs import (
-    finalize_canvas_run, resume_mj_edit_run, run_canvas_job, submit_mask_edit_run,
+    finalize_canvas_run, resume_mj_edit_run, run_canvas_job,
 )
 from character_workflow.lib.keys import KeysDB, KeySpec, ModelSpec, write_keys_db
 from character_workflow.lib.jobs import read_job, save_job
 from character_workflow.lib.schemas import CanvasImageEditOptions, JobStatus
 from tests.test_generation_recipe import NOW, _media_node, _save_nodes, png
+from tests.canvas_edit_helpers import submit_saved_edit
 
 
 def source():
@@ -40,7 +41,7 @@ def test_external_source_creates_one_native_job_and_four_materials(monkeypatch, 
     pid, version, doc, mask = source()
     options = CanvasImageEditOptions(mode=mode, source_version_id=version.version_id,
         **({"width": 192, "height": 80, "x": 48, "y": 8} if mode == "outpaint" else {}))
-    job, _ = submit_mask_edit_run(pid, "source", doc.revision, 1, mask, options)
+    job, _ = submit_saved_edit(pid, "source", doc.revision, 1, mask, options)
     assert job.params.n == 4
     assert job.params.regional_edit is None
     assert len(job.params.reference_images) == 1
@@ -70,8 +71,8 @@ def test_external_source_creates_one_native_job_and_four_materials(monkeypatch, 
     assert read_job(job.job_id).params.evolink_state["task_id"] == "one-order"
     saved = read_canvas_document(pid)
     assert saved.nodes[0].data.current_version_id == version.version_id
-    assert len(saved.connections) == 1
-    assert all(c.role == "input" for c in saved.connections)
+    assert len(saved.connections) == 2
+    assert all(c.role == "material" for c in saved.connections)
     assert len(result.canvas_run.candidates) == 4
     assert all(c.version_id in saved.content_versions for c in result.canvas_run.candidates)
     # Native results are not overwritten by the common-model compositor.
@@ -82,7 +83,7 @@ def test_external_source_creates_one_native_job_and_four_materials(monkeypatch, 
 @pytest.mark.parametrize("terminal", [None, "completed"])
 def test_paused_native_order_resumes_same_job_without_new_order(terminal):
     pid, version, doc, mask = source()
-    job, _ = submit_mask_edit_run(pid, "source", doc.revision, 4, mask,
+    job, _ = submit_saved_edit(pid, "source", doc.revision, 4, mask,
                                  CanvasImageEditOptions(source_version_id=version.version_id))
     job.status = JobStatus.FAILED
     job.params.evolink_state = {"task_id": "accepted", "poll_paused": True, "terminal": terminal}
@@ -101,7 +102,7 @@ def test_paused_native_order_resumes_same_job_without_new_order(terminal):
 ])
 def test_uncertain_or_terminal_failure_cannot_resume(state):
     pid, version, doc, mask = source()
-    job, _ = submit_mask_edit_run(pid, "source", doc.revision, 4, mask,
+    job, _ = submit_saved_edit(pid, "source", doc.revision, 4, mask,
                                  CanvasImageEditOptions(source_version_id=version.version_id))
     job.status = JobStatus.FAILED
     job.params.evolink_state = state
@@ -114,5 +115,5 @@ def test_uncertain_or_terminal_failure_cannot_resume(state):
 def test_unsupported_reference_rejected_before_order():
     pid, version, doc, mask = source()
     with pytest.raises(ValueError, match="额外参考"):
-        submit_mask_edit_run(pid, "source", doc.revision, 4, mask,
-            CanvasImageEditOptions(source_version_id=version.version_id, reference_node_id="ref"))
+        submit_saved_edit(pid, "source", doc.revision, 4, mask,
+            CanvasImageEditOptions(source_version_id=version.version_id, reference_node_id="source"))

@@ -246,8 +246,38 @@ export interface CanvasPluginNode extends CanvasNodeBase {
   };
 }
 
+export interface CanvasImageEditSettings {
+  mode: 'inpaint' | 'outpaint' | 'prepare';
+  width?: number; height?: number; x?: number; y?: number;
+  custom_id?: string; zoom?: number; context?: number;
+  feather?: number | null; groups?: number[][] | null;
+  region_prompts?: Record<string, string>;
+}
+
+export interface CanvasImageEditEditorState {
+  native: boolean;
+  strokes: Array<{ tool: 'brush' | 'eraser' | 'rectangle'; size: number; points: CanvasPoint[] }>;
+  frame: CanvasSize & CanvasPoint;
+  frame_ratio: string;
+}
+
+export interface CanvasImageEditNode extends CanvasNodeBase {
+  type: 'image_edit';
+  data: {
+    source_node_id: string | null;
+    source_version_id: string;
+    mask_version_id: string | null;
+    reference_node_id: string | null;
+    reference_version_id: string | null;
+    generation_draft: CanvasGenerationDraft | null;
+    options: CanvasImageEditSettings;
+    editor_state: CanvasImageEditEditorState;
+    active_run_id: string | null;
+  };
+}
+
 export type CanvasContentNode = CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode;
-export type CanvasNode = CanvasContentNode | CanvasGroupNode | CanvasPluginNode
+export type CanvasNode = CanvasContentNode | CanvasGroupNode | CanvasPluginNode | CanvasImageEditNode
   | CanvasBatchMaterialNode | CanvasLayerStackNode;
 
 export type CanvasVideoFrameSlot = 'first_frame' | 'last_frame';

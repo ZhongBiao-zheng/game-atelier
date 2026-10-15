@@ -32,9 +32,12 @@ export function canvasNodeRunState(
   // 「生成完成 / 失败原因」的角标改从 jobsByResultNodeId 反查该节点最近一次 job。
   const runId = activeRunId(node);
   const mappedJob = runId ? jobsByRunId.get(runId) : undefined;
-  const activeJob = mappedJob?.canvas_run?.result_node_id === node.id ? mappedJob : undefined;
-  const history = (jobsByResultNodeId?.get(node.id) ?? [])
-    .filter(candidate => candidate.canvas_run?.result_node_id === node.id);
+  const belongsToNode = (candidate: Job) => node.type === 'image_edit'
+    ? candidate.canvas_run?.snapshot.surface_node_id === node.id
+    : candidate.canvas_run?.result_node_id === node.id;
+  const activeJob = mappedJob && belongsToNode(mappedJob) ? mappedJob : undefined;
+  const history = (node.type === 'image_edit' ? [...jobsByRunId.values()] : jobsByResultNodeId?.get(node.id) ?? [])
+    .filter(belongsToNode).sort((a, b) => (a.submitted_at ?? '').localeCompare(b.submitted_at ?? ''));
   const job = activeJob ?? history[history.length - 1];
   if (!job) {
     return { status: 'idle', label: '待编辑', detail: null, job: undefined, reversePrompt: false };
@@ -189,6 +192,7 @@ function activeRunId(node: CanvasNode): string | null {
     || node.type === 'video'
     || node.type === 'audio'
     || node.type === 'layer_stack'
+    || node.type === 'image_edit'
   ) {
     return node.data.active_run_id;
   }

@@ -30,6 +30,8 @@ import { CanvasBatchMaterialEditor, CanvasGroupFrame } from './CanvasBatchContro
 import { CanvasAudioPlayer } from './CanvasAudioPlayer';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
 import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
+import { CanvasImageEditSurface } from './CanvasImageEditSurface';
+import type { CanvasMediaVersion } from '@/schema/canvas';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import {
@@ -219,6 +221,8 @@ export interface CanvasNodeContextValue {
   openMediaOperation: (node: CanvasContentNode, tool: CanvasMediaTool) => void;
   removeBackground: (node: CanvasContentNode) => void;
   openMaskEdit: (node: CanvasContentNode, mode?: 'inpaint' | 'outpaint') => void;
+  openImageEdit?: (nodeId: string) => void;
+  submitImageEdit?: (nodeId: string) => Promise<boolean>;
   openAngle: (node: CanvasContentNode) => void;
   upscaleImage: (node: CanvasContentNode, target: CanvasUpscaleTarget) => void;
   editVideo: (node: CanvasContentNode) => void;
@@ -691,10 +695,10 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
               <SwapIcon swapKey={Boolean(context.activeBatch.stopping)}>{context.activeBatch.stopping ? <LoaderCircle /> : <Square />}</SwapIcon>
             </MediaToolButton>
           )}
-          {nodeJob?.status === 'failed' && Boolean(nodeJob.params.mj_edit_state?.poll_paused || nodeJob.params.evolink_state?.poll_paused) && nodeJob.canvas_run && (
+          {node.type !== 'image_edit' && nodeJob?.status === 'failed' && Boolean(nodeJob.params.mj_edit_state?.poll_paused || nodeJob.params.evolink_state?.poll_paused) && nodeJob.canvas_run && (
             <MediaToolButton label="继续查询 MJ 原任务（不重新下单）" text="继续查询" onClick={() => void context.resumeMjEdit?.(nodeJob.canvas_run!.run_id)}><Eye /></MediaToolButton>
           )}
-          {nodeJob && ['failed', 'partial'].includes(nodeJob.status) && nodeJob.canvas_run
+          {node.type !== 'image_edit' && nodeJob && ['failed', 'partial'].includes(nodeJob.status) && nodeJob.canvas_run
             && nodeJob.params.regional_edit?.tasks.some(task => ['failed', 'pending', 'paused', 'running'].includes(task.status)
               || (task.status === 'succeeded' && nodeJob.output_paths.length === (nodeJob.params.regional_edit?.output_offset ?? 0))) && (
             <MediaToolButton label="继续未完成区域" text="继续区域" onClick={() => context.resumeRegions?.(nodeJob.canvas_run!.run_id)}><RotateCcw /></MediaToolButton>
@@ -802,6 +806,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
             return;
           }
           if (node.type === 'layer_stack') context.previewLayerStack(node.id);
+          else if (node.type === 'image_edit') context.openImageEdit?.(node.id);
           else if (content) context.previewContent(content.version_id, node.title, node.id);
         }}
         onKeyDown={event => {
@@ -930,6 +935,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           {node.type === 'layer_stack' && (
             <CanvasLayerStackSurface node={node} context={context} />
           )}
+          {node.type === 'image_edit' && <CanvasImageEditSurface node={node} projectId={context.projectId}
+            source={context.resolveVersion(node.data.source_version_id) as CanvasMediaVersion | undefined} />}
           {node.type === 'plugin' && !content && (
             <div className="grid min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">
               插件节点
@@ -940,18 +947,18 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
       <CanvasNodeRunLiveRegion state={nodeRunState} />
       <CanvasNodeRunOverlay
         state={nodeRunState}
-        hasContent={Boolean(content || (node.type === 'layer_stack' && node.data.base_version_id))}
+        hasContent={Boolean(content || node.type === 'image_edit' || (node.type === 'layer_stack' && node.data.base_version_id))}
       />
-      {(canvasNodeAcceptsInput(node) || node.type === 'layer_stack') && (
-        <Handle type="target" position={Position.Left} className="canvas-node-handle" aria-label="连接到此节点">
+      {(canvasNodeAcceptsInput(node) || node.type === 'layer_stack' || node.type === 'image_edit') && (
+        <Handle type="target" isConnectable={node.type !== 'image_edit'} position={Position.Left} className="canvas-node-handle" aria-label="连接到此节点">
           <span className="canvas-node-handle-dot" aria-hidden="true" />
         </Handle>
       )}
-      {(canvasNodeProvidesOutput(node) || (node.type === 'layer_stack'
+      {(canvasNodeProvidesOutput(node) || node.type === 'image_edit' || (node.type === 'layer_stack'
         && (node.data.base_material_node_id || node.data.layers.some(layer => layer.material_node_id)))) && (
         <Handle
           type="source"
-          isConnectable={node.type !== 'layer_stack'}
+          isConnectable={node.type !== 'layer_stack' && node.type !== 'image_edit'}
           position={Position.Right}
           className="canvas-node-handle"
           aria-label="从此节点连接"
@@ -1411,6 +1418,12 @@ function CanvasNodeToolbar({
   const [downloadingLayers, setDownloadingLayers] = useState<CanvasLayerExportFormat | null>(null);
   const layersReady = node.type === 'layer_stack' && Boolean(node.data.base_version_id)
     && !node.data.active_run_id && !submitting;
+
+  if (node.type === 'image_edit') return <>
+    <MediaToolButton label={`编辑 ${node.title}`} text="编辑" onClick={() => context.openImageEdit?.(node.id)}><Pencil /></MediaToolButton>
+    <MediaToolButton label={`生成 ${node.title}`} text="生成" disabled={submitting || !!node.data.active_run_id}
+      onClick={() => { void context.submitImageEdit?.(node.id); }}><Sparkles /></MediaToolButton>
+  </>;
 
   return (
     <>
@@ -3052,6 +3065,7 @@ function withGenerationDraft(node: CanvasNode, draft: CanvasGenerationDraft): Ca
 }
 
 function nodeIcon(node: CanvasNode) {
+  if (node.type === 'image_edit') return <Pencil className="size-3.5 shrink-0" />;
   if (node.type === 'text') return <Type className="size-3.5 shrink-0" />;
   if (node.type === 'image') return <FileImage className="size-3.5 shrink-0" />;
   if (node.type === 'video') return <FileVideo className="size-3.5 shrink-0" />;

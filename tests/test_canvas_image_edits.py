@@ -4,7 +4,7 @@ import pytest
 from PIL import Image
 
 from character_workflow.lib.canvas_projects import create_canvas_project, replace_canvas_node_media
-from character_workflow.lib.canvas_runs import submit_mask_edit_run
+from tests.canvas_edit_helpers import submit_saved_edit
 from character_workflow.lib.schemas import CanvasImageEditOptions
 from tests.test_generation_recipe import NOW, _media_node, _save_nodes, _write_keys, png
 
@@ -24,14 +24,14 @@ def test_outpaint_freezes_geometry_and_keeps_source_untouched(isolated_data_root
     pid, version, doc = setup_source()
     options = CanvasImageEditOptions(mode="outpaint", source_version_id=version.version_id,
                                     width=1536, height=1024, x=256, y=0)
-    job, saved = submit_mask_edit_run(pid, "source", doc.revision, 1, b"", options)
+    job, saved = submit_saved_edit(pid, "source", doc.revision, 1, b"", options)
     assert job.params.image_edit["width"] == 1536
     assert job.params.size == "1536x1024"
     assert job.prompt
     assert saved.nodes[0].data.current_version_id == version.version_id
     assert job.canvas_run.result_node_id != "source"
-    assert len(saved.connections) == 1
-    assert saved.connections[0].role == "input"
+    assert len(saved.connections) == 2
+    assert all(edge.role == "material" for edge in saved.connections)
     # Round-trip the persisted document, not just the unvalidated model_copy response.
     from character_workflow.lib.canvas_projects import read_canvas_document
     assert read_canvas_document(pid).revision == saved.revision
@@ -44,7 +44,7 @@ def test_outpaint_freezes_geometry_and_keeps_source_untouched(isolated_data_root
 def test_edit_rejects_stale_source_before_submit(isolated_data_root):
     pid, _version, doc = setup_source()
     with pytest.raises(ValueError, match="源图版本"):
-        submit_mask_edit_run(pid, "source", doc.revision, 1, b"",
+        submit_saved_edit(pid, "source", doc.revision, 1, b"",
                              CanvasImageEditOptions(source_version_id="stale"))
 
 
@@ -52,7 +52,7 @@ def test_local_edit_sets_fixed_source_dimensions(isolated_data_root):
     pid, version, doc = setup_source()
     buffer = io.BytesIO()
     Image.new("L", (1024, 1024), 0).save(buffer, format="PNG")
-    job, _ = submit_mask_edit_run(pid, "source", doc.revision, 1, buffer.getvalue(),
+    job, _ = submit_saved_edit(pid, "source", doc.revision, 1, buffer.getvalue(),
                                   CanvasImageEditOptions(source_version_id=version.version_id))
     assert job.params.size_mode == "custom"
     assert job.params.size == "1024x1024"
@@ -67,7 +67,7 @@ def test_resume_native_edit_reuses_frozen_job_and_checks_revision(isolated_data_
     pid, version, doc = setup_source()
     options = CanvasImageEditOptions(mode="outpaint", source_version_id=version.version_id,
                                     width=1536, height=1024, x=256, y=0)
-    job, _ = submit_mask_edit_run(pid, "source", doc.revision, 1, b"", options)
+    job, _ = submit_saved_edit(pid, "source", doc.revision, 1, b"", options)
     job = job.model_copy(update={"model": "midjourney", "status": JobStatus.FAILED,
                                  "error": "查询中断"})
     job.params.mj_edit_state = {"task_id": "accepted", "uncertain": False, "poll_paused": True}
@@ -95,7 +95,7 @@ def test_complete_outpaint_run_registers_candidates_without_modifying_source(iso
     pid, version, doc = setup_source()
     options = CanvasImageEditOptions(mode="outpaint", source_version_id=version.version_id,
                                     width=1536, height=1024, x=256, y=0)
-    job, _ = submit_mask_edit_run(pid, "source", doc.revision, 2, b"", options)
+    job, _ = submit_saved_edit(pid, "source", doc.revision, 2, b"", options)
     calls = []
     def generate(**kwargs):
         calls.append(kwargs["params"])

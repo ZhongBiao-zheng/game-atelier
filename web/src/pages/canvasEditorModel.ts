@@ -563,7 +563,60 @@ export function canvasNodeAcceptsInput(node: CanvasNode) {
   return node.type !== 'group'
     && node.type !== 'plugin'
     && node.type !== 'batch_material'
-    && node.type !== 'layer_stack';
+    && node.type !== 'layer_stack'
+    && node.type !== 'image_edit';
+}
+
+/** 删除关系节点不删除固定图片版本；仅断开可选的画布定位引用。 */
+export function detachMissingImageEditNodes(document: CanvasDocument): CanvasDocument {
+  const ids = new Set(document.nodes.map(node => node.id));
+  return { ...document, nodes: document.nodes.map(node => {
+    if (node.type !== 'image_edit') return node;
+    const source = ids.has(node.data.source_node_id ?? '') ? node.data.source_node_id : null;
+    const reference = ids.has(node.data.reference_node_id ?? '') ? node.data.reference_node_id : null;
+    return source === node.data.source_node_id && reference === node.data.reference_node_id ? node
+      : { ...node, data: { ...node.data, source_node_id: source, reference_node_id: reference } };
+  }) };
+}
+
+/** 生成不是可撤销的画布操作：新结果进入当时已有的历史快照，之后显式删除仍可撤销/重做。 */
+export function retainNewImageEditResults(snapshot: CanvasDocument, current: CanvasDocument,
+  insertedIds: ReadonlySet<string>): CanvasDocument {
+  const editIds = new Set(current.nodes.filter(node => node.type === 'image_edit').map(node => node.id));
+  const resultIds = new Set(current.connections.filter(edge => edge.role === 'material'
+    && editIds.has(edge.source_node_id) && insertedIds.has(edge.target_node_id)).map(edge => edge.target_node_id));
+  const snapshotIds = new Set(snapshot.nodes.map(node => node.id));
+  const additions = current.nodes.filter(node => resultIds.has(node.id) && !snapshotIds.has(node.id));
+  if (!additions.length) return snapshot;
+  const addedIds = new Set(additions.map(node => node.id));
+  return { ...snapshot, nodes: [...snapshot.nodes, ...additions], connections: [
+    ...snapshot.connections,
+    ...current.connections.filter(edge => edge.role === 'material' && addedIds.has(edge.target_node_id)
+      && snapshotIds.has(edge.source_node_id)),
+  ] };
+}
+
+/** 编辑配置可撤销，运行态与运行期间新到达的产物不属于配置历史。 */
+export function restoreImageEditRunState(snapshot: CanvasDocument, current: CanvasDocument,
+  jobs: ReadonlyMap<string, Job>): CanvasDocument {
+  const liveNodes = new Map(current.nodes.map(node => [node.id, node]));
+  const resultIds = new Set([...jobs.values()].flatMap(job => {
+    const run = job.canvas_run;
+    return run?.snapshot.normalized_params.image_edit ? [run.result_node_id] : [];
+  }));
+  const nodes = snapshot.nodes.map(node => {
+    const live = liveNodes.get(node.id);
+    if (node.type === 'image_edit') return { ...node, data: { ...node.data,
+      active_run_id: live?.type === 'image_edit' ? live.data.active_run_id : null,
+    } };
+    if (node.type !== 'image' || live?.type !== 'image' || !resultIds.has(node.id)) return node;
+    const pendingSnapshot = node.data.active_run_id
+      && (node.data.active_run_id !== live.data.active_run_id || !node.data.current_version_id);
+    return { ...node, data: { ...node.data, active_run_id: live.data.active_run_id,
+      current_version_id: pendingSnapshot ? live.data.current_version_id : node.data.current_version_id,
+    } };
+  });
+  return { ...snapshot, nodes };
 }
 
 export function canvasNodeProvidesContent(node: CanvasNode): node is CanvasContentNode {
@@ -1020,7 +1073,7 @@ export function resolveCanvasGenerationDraft(
   keys: readonly KeyView[],
   textPreference?: CanvasGenerationDefault<'text'>,
 ): CanvasGenerationDraft | null {
-  if (!('generation_draft' in node.data)) return null;
+  if (node.type === 'image_edit' || !('generation_draft' in node.data)) return null;
   if (node.data.generation_draft) return node.data.generation_draft;
   // 文本的生成能力由节点类型决定，MCP / 素材库创建的正文也可在首次操作时配置。
   return node.type === 'text' ? createCanvasGenerationDraft(keys, 'text', {

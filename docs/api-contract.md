@@ -214,7 +214,8 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `POST /canvas/projects` `PATCH /canvas/projects/{id}` `PUT /canvas/projects/{id}/document`
 `POST /canvas/projects/{id}/agent/sessions` `DELETE /canvas/projects/{id}/agent/sessions/{session_id}`
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
-`POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle,layer-decomposition}`
+`POST /canvas/projects/{id}/image-edits`
+`POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,image-edit,angle,layer-decomposition}`
 `POST /canvas/projects/{id}/runs/{run_id}/cancel`
 `POST /creation-assets/prompts` `POST /creation-assets/media/{upload,from-path}`
 `POST /creation-assets/generation/{from-job,from-canvas}`
@@ -473,16 +474,29 @@ ZIP 文件名带顺序号及安全化图层名，保留原始图片字节。PSD�
 Version 不可变、历史保留；分组只管理布局。删除编辑入口保留父图层最后版本并清除绑定，删除父节点
 不会删除素材图片。原图层显隐不影响编辑入口可见性，下载始终读取同步后的当前版本。
 
-`POST /canvas/projects/{id}/runs/mask-edit` 使用 multipart，接受 `surface_node_id / expected_revision /
-requested_count / mask_file / edit_options`。`edit_options` 为 JSON：`mode`（inpaint/outpaint/prepare）、
-`source_version_id`、扩图 `width/height/x/y`、可选 `reference_node_id` 或 MJ 的 `custom_id/zoom`。
-prompt、alias、model 与参数先保存为源图片节点的 image Draft，服务端读取后冻结；浏览器不能传媒体路径、
-MJ task ID 或渠道凭证。编辑必须指定渠道，不使用自动路由。空提示词采用自然修复/延展。源版本变化拒绝提交。
+图片局部修改与扩图使用独立 `image_edit` 节点：原图 → 编辑节点 → 结果图片，均为 `material` 实线。
+额外参考图只保存在编辑配置中，不增加画布连线；新节点在源图右侧避开已有节点排列。
+它不是 Content Node，不参与普通参考输入解析或普通生成浮层，也不会隐式把原图传给下游。
+`POST /canvas/projects/{id}/image-edits` 使用 multipart `payload` JSON + 可选 `mask_file` 保存配置，
+返回 `{document,node_id}`。payload 包含 `expected_revision`、更新时的 `node_id`、创建时的
+`source_node_id/source_version_id`、`generation_draft`、`options`、`editor_state` 和可选
+`reference_node_id/reference_version_id`。保存允许未选择模型、未绘制选区，不创建 Job、不调用厂商。
+节点固定源图/参考图 Version；原节点换版或删除不改变已保存内容，删除后关联节点 ID 可为空。
+`editor_state` 保存源图像素坐标下的画笔/橡皮/矩形笔迹、画框与比例、原生编辑开关；不保存视图缩放和撤销栈。
+`options` 保存模式、扩框几何、MJ 动作、上下文/羽化、分组与区域提示词，不重复保存源版本或临时规划 ID。
+蒙版为不可变项目 Version，内容相同时可复用；不传蒙版表示清空选区。不得传媒体绝对路径、凭证或订单状态。
+
+`POST /canvas/projects/{id}/runs/image-edit` 使用 JSON `surface_node_id / expected_revision / requested_count`，
+只从已保存的编辑节点冻结 Job 与 Snapshot。编辑必须指定渠道，不使用自动路由；空提示词采用自然修复/延展。
+运行前重新校验选区、固定媒体版本与模型能力，分区计划重新计算。每次生成新增结果节点，不覆盖旧结果。
+运行中保存草稿不改已提交快照；`active_run_id` 为服务端独占。普通文档 PUT 不得伪造编辑运行状态或源版本绑定。
+项目包包含尚未生成的编辑节点及全部源图/蒙版；跨画布粘贴复制固定媒体版本并重写蒙版来源，清空运行状态。
+旧 `runs/mask-edit` 接口移除，不保留即时提交旁路。
 
 局部蒙版为与 EXIF 归一后源图同尺寸的单帧 PNG，透明或灰度 0 表示编辑、255 保留，空选区拒绝。
 扩图由服务端生成新区域蒙版，目标框必须完整包含原图，不把源图透明区域当作新增区域。
 扩图蒙版的 origin 标记 `expanded_canvas=true`，宽高不得小于源图；普通局部蒙版仍要求源图同尺寸。
-归一蒙版登记为内部不可变 `user_mask` Version；Job、Snapshot、结果节点及实际输入实线在同一可恢复事务提交。
+归一蒙版登记为内部不可变 `user_mask` Version；Job、Snapshot、结果节点及编辑→结果素材实线在同一可恢复事务提交。
 Snapshot 保存 `mask_version_id`、源版本、可选替换参考和 `normalized_params.image_edit` 几何参数。
 结果始终另建节点（包括图层素材），不覆盖源版本，不创建蒙版节点或历史关系线。
 
@@ -524,7 +538,7 @@ MJ 原生编辑查询超时/网络中断记录 `mj_edit_state.poll_paused`，不
 
 Key `provider=evolink`、模型 `mj-v8.2`、协议 `evolink`，API 根地址为 `https://api.evolink.ai/v1`。
 普通生图使用 `POST /v1/images/generations`，固定 Fast / Standard，每次返回最多 4 张；不把派生动作 ID 当作普通模型。
-画布同一 mask-edit 命令选择该模型时，使用 `mj-v8.2-upload-paint`，接受任意项目内原图，无需既有 MJ 订单。
+画布编辑节点选择该模型时，使用 `mj-v8.2-upload-paint`，接受任意项目内原图，无需既有 MJ 订单。
 不启用通用模型的分区裁剪或回贴，也不接收额外替换参考图；原图保持不变，输出登记为关联结果节点的候选版本。
 源图经 EXIF 转正后通过 EvoLink 临时文件服务上传；源尺寸蒙版从内部白保留/黑编辑转换为不透明黑保留/白重绘 PNG data URI。
 扩图用目标 `canvas` 和原图尺寸 `img_pos`，允许改变画布比例，不拉伸原图；内部仍保存源图尺寸的全白保留蒙版。

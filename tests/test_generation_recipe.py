@@ -205,7 +205,8 @@ def canvas_mask_run(source: bytes, output: bytes):
                                              saved.revision)
     mask = io.BytesIO()
     Image.new("RGBA", Image.open(io.BytesIO(source)).size, (0, 0, 0, 0)).save(mask, format="PNG")
-    job, _submitted = canvas_runs.submit_mask_edit_run(pid, "image-src", saved.revision, 1,
+    from tests.canvas_edit_helpers import submit_saved_edit
+    job, _submitted = submit_saved_edit(pid, "image-src", saved.revision, 1,
                                                        mask.getvalue())
     finalized, document = _complete_run(pid, job, output)
     return pid, finalized, document

@@ -12,10 +12,10 @@ from tests.test_canvas_image_edits import setup_source
 
 @pytest.fixture
 def native_source(monkeypatch):
-    from character_workflow.lib.canvas_runs import submit_mask_edit_run
+    from tests.canvas_edit_helpers import submit_saved_edit
 
     pid, version, doc = setup_source()
-    job, _ = submit_mask_edit_run(pid, "source", doc.revision, 1, b"", CanvasImageEditOptions(
+    job, _ = submit_saved_edit(pid, "source", doc.revision, 1, b"", CanvasImageEditOptions(
         mode="outpaint", source_version_id=version.version_id, width=1536, height=1024, x=256,
     ))
     key = keys.find_by_alias("openai").model_copy(update={"base_url": "https://mj.example/v1"})
@@ -91,7 +91,7 @@ def test_editor_capabilities_use_fetched_buttons_or_show_unavailability(monkeypa
         assert result["mj"] is None
         assert result["reason"] == {"network": "offline", "expired": "原 MJ 任务已不可用", "uploaded": None}[state]
     assert calls == ([] if state == "uploaded" else [("mj", "task")])
-    with pytest.raises(ValueError, match="请选择已有图片"):
+    with pytest.raises(ValueError, match="请选择图片"):
         edits.editing_source(pid, "missing-node")
 
 

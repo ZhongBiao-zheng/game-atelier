@@ -8,11 +8,12 @@ from character_workflow.lib import callers
 from character_workflow.lib.canvas_image_edits import preview_regional_edit
 from character_workflow.lib.canvas_projects import read_canvas_document
 from character_workflow.lib.canvas_runs import (
-    resume_regional_edit_run, run_canvas_job, submit_mask_edit_run,
+    resume_regional_edit_run, run_canvas_job,
 )
 from character_workflow.lib.jobs import read_job
 from character_workflow.lib.schemas import CanvasImageEditOptions, JobStatus
 from tests.test_canvas_image_edits import setup_source
+from tests.canvas_edit_helpers import submit_saved_edit
 
 
 def selection():
@@ -36,7 +37,7 @@ def prepare(count=1, replacement=False):
         options.reference_node_id = "replacement"
     preview = preview_regional_edit(pid, "source", "openai", "gpt-image-1", selection(), options)
     options.plan_id = preview["plan_id"]
-    job, saved = submit_mask_edit_run(pid, "source", doc.revision, count, selection(), options)
+    job, saved = submit_saved_edit(pid, "source", doc.revision, count, selection(), options)
     return pid, version, job, saved, preview
 
 
@@ -49,7 +50,7 @@ def test_preview_freezes_plan_and_rejects_stale_settings_before_provider_call(is
     options.plan_id = preview["plan_id"]
     options.feather = 16
     with pytest.raises(ValueError, match="规划"):
-        submit_mask_edit_run(pid, "source", doc.revision, 1, selection(), options)
+        preview_regional_edit(pid, "source", "openai", "gpt-image-1", selection(), options)
 
 
 def test_regions_times_candidates_no_cartesian_explosion_and_one_result_node(isolated_data_root, monkeypatch):
@@ -68,7 +69,7 @@ def test_regions_times_candidates_no_cartesian_explosion_and_one_result_node(iso
     assert result.status == JobStatus.DONE
     assert len(calls) == len(preview["regions"]) * 2 == 4
     assert len(result.output_paths) == 2
-    assert len(read_canvas_document(pid).nodes) == 2
+    assert len(read_canvas_document(pid).nodes) == 3
     assert all(t["status"] == "succeeded" for t in result.params.regional_edit["tasks"])
     for path in result.output_paths:
         with Image.open(path) as output:

@@ -80,7 +80,9 @@ import {
   submitCanvasLayerDecomposition,
   submitCanvasUpscaleRun,
   submitCanvasRun,
-  submitCanvasMaskEdit,
+  saveCanvasImageEdit,
+  submitCanvasImageEdit,
+  type CanvasImageEditSavePayload,
   submitCanvasReversePrompt,
   uploadCanvasMedia,
 } from '@/api/canvas';
@@ -122,6 +124,7 @@ import {
   CanvasMaskEditDialog,
   type CanvasMaskEditSubmission,
 } from '@/components/canvas/CanvasMaskEditDialog';
+import { initialEditFrame, savedImageEditError } from '@/components/canvas/imageEditGeometry';
 import {
   CanvasAngleDialog,
   type CanvasAngleParams,
@@ -236,6 +239,9 @@ import {
   sizeLockedToCanvasVersion,
   supportsCanvasVideoEdit,
   syncDraftLayerStackSources,
+  detachMissingImageEditNodes,
+  restoreImageEditRunState,
+  retainNewImageEditResults,
   canvasReadingOrder,
   expandCanvasInputSource,
   canvasModesRejectingSources,
@@ -673,6 +679,12 @@ function CanvasEditorInner({
     usedPromptAssetRef.current = false;
   }, []);
 
+  const preserveImageEditResultHistory = useCallback((current: CanvasDocument, insertedIds: ReadonlySet<string>) => {
+    if (!insertedIds.size) return;
+    history.current.past = history.current.past.map(snapshot => retainNewImageEditResults(snapshot, current, insertedIds));
+    history.current.future = history.current.future.map(snapshot => retainNewImageEditResults(snapshot, current, insertedIds));
+  }, []);
+
   const mergeRunDocument = useCallback((
     remote: CanvasDocument,
     runIds: ReadonlySet<string>,
@@ -703,6 +715,9 @@ function CanvasEditorInner({
           && resultNodeIds.has(node.id)
         ) {
           return { ...node, data: serverNode.data };
+        }
+        if (node.type === 'image_edit' && serverNode?.type === 'image_edit') {
+          return { ...node, data: { ...node.data, active_run_id: serverNode.data.active_run_id } };
         }
         if (!serverNode || !isContentNode(node) || !isContentNode(serverNode)) return node;
         if (!resultNodeIds.has(node.id) && !runIds.has(serverNode.data.active_run_id ?? '')) return node;
@@ -740,10 +755,11 @@ function CanvasEditorInner({
           remote.content_versions,
         ),
       });
+      preserveImageEditResultHistory(merged, serverAddedNodeIds);
       if (saveQueued.current) saveQueued.current = merged;
       return merged;
     });
-  }, []);
+  }, [preserveImageEditResultHistory]);
 
   // 出图记录的同步整体在 useCanvasJobSync 里：epoch 记账、兜底轮询、SSE 订阅都归它，
   // 这里只把「结果并回文档」这一半交出去。必须声明在下面那个切项目的 effect 之前——
@@ -909,6 +925,11 @@ function CanvasEditorInner({
     const hasResult = current.nodes.some(node => node.id === context.result_node_id);
     const resultReusesSurface = context.result_node_id === context.snapshot.surface_node_id;
     const nodes = current.nodes.map(node => {
+      const remoteNode = remoteNodes.get(node.id);
+      if (node.type === 'image_edit' && remoteNode?.type === 'image_edit'
+        && node.id === context.snapshot.surface_node_id) {
+        return { ...node, data: { ...node.data, active_run_id: remoteNode.data.active_run_id } };
+      }
       if (node.id !== context.result_node_id || !remoteResult) return node;
       if (node.type === 'layer_stack' && remoteResult.type === 'layer_stack') {
         return { ...node, data: remoteResult.data };
@@ -946,8 +967,9 @@ function CanvasEditorInner({
     if (saveQueued.current || dirtyVersion.current > dirtyAtSubmission) {
       saveQueued.current = merged;
     }
+    if (!hasResult && !resultReusesSurface) preserveImageEditResultHistory(merged, new Set([context.result_node_id]));
     setDocument(merged);
-  }, []);
+  }, [preserveImageEditResultHistory]);
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
@@ -1296,7 +1318,7 @@ function CanvasEditorInner({
       }
       return {
         // 传 current 进去当「谁动过」的判据：只有自己刚动过的节点会被分组吞进去。
-        ...normalizeCanvasGroups(syncDraftLayerStackSources(updater(current)), current),
+        ...normalizeCanvasGroups(detachMissingImageEditNodes(syncDraftLayerStackSources(updater(current))), current),
         updated_at: new Date().toISOString(),
       };
     });
@@ -2639,11 +2661,13 @@ function CanvasEditorInner({
     const idMap = new Map(payload.nodes.map(node => [node.id, makeId(node.type)]));
     const topZ = Math.max(0, ...(document?.nodes.map(node => node.z_index) ?? []));
     const nodes = payload.nodes.map((source, index) => cloneCanvasNode(
-      source, idMap, source.position, topZ + index + 1,
+      source, idMap, source.position, topZ + index + 1, false,
     ));
     const connections = payload.connections.flatMap(connection => {
       const sourceId = idMap.get(connection.source_node_id);
       const targetId = idMap.get(connection.target_node_id);
+      const target = nodes.find(node => node.id === targetId);
+      if (target?.type === 'image_edit' && sourceId !== target.data.source_node_id) return [];
       return sourceId && targetId
         ? [{ ...structuredClone(connection), id: makeId('connection'), source_node_id: sourceId, target_node_id: targetId }]
         : [];
@@ -2687,10 +2711,19 @@ function CanvasEditorInner({
     const connections = payload.connections.flatMap(connection => {
       const sourceId = idMap.get(connection.source_node_id);
       const targetId = idMap.get(connection.target_node_id);
+      const target = nodes.find(node => node.id === targetId);
+      if (target?.type === 'image_edit' && sourceId !== target.data.source_node_id) return [];
       return sourceId && targetId
         ? [{ ...structuredClone(connection), id: makeId('connection'), source_node_id: sourceId, target_node_id: targetId }]
         : [];
     });
+    for (const node of nodes) {
+      if (node.type !== 'image_edit') continue;
+      const sourceId = node.data.source_node_id;
+      if (sourceId && !connections.some(edge => edge.source_node_id === sourceId && edge.target_node_id === node.id)) {
+        connections.push({ id: makeId('connection'), source_node_id: sourceId, target_node_id: node.id, role: 'material' });
+      }
+    }
     commit(current => ({
       ...current,
       nodes: [...current.nodes, ...nodes],
@@ -3342,9 +3375,13 @@ function CanvasEditorInner({
     if (batchBusyRef.current) return;
     const previous = history.current.past.pop();
     if (!previous || !document) return;
+    if (document.nodes.some(node => node.type === 'image_edit' && node.data.active_run_id
+      && !previous.nodes.some(item => item.id === node.id))) {
+      history.current.past.push(previous); setError('请先停止编辑节点的生成，再撤销创建。'); return;
+    }
     history.current.future.push(document);
     const restored = syncDraftLayerStackSources({
-      ...previous,
+      ...restoreImageEditRunState(previous, document, jobsByRunId),
       revision: document.revision,
       updated_at: new Date().toISOString(),
       // 镜头既不进撤销栈也不被撤销还原：撤销时把用户当前的取景留住，不要把画布甩回快照拍下时
@@ -3358,7 +3395,7 @@ function CanvasEditorInner({
     setDocument(restored);
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
-  }, [document]);
+  }, [document, jobsByRunId]);
 
   const redo = useCallback(() => {
     if (batchBusyRef.current) return;
@@ -3366,7 +3403,7 @@ function CanvasEditorInner({
     if (!next || !document) return;
     history.current.past.push(document);
     const restored = syncDraftLayerStackSources({
-      ...next,
+      ...restoreImageEditRunState(next, document, jobsByRunId),
       revision: document.revision,
       updated_at: new Date().toISOString(),
       viewport: document.viewport,
@@ -3378,7 +3415,7 @@ function CanvasEditorInner({
     setDocument(restored);
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
-  }, [document]);
+  }, [document, jobsByRunId]);
 
   const groupSelectionRef = useRef(groupSelection);
   groupSelectionRef.current = groupSelection;
@@ -3843,97 +3880,112 @@ function CanvasEditorInner({
     setMediaOperation({ nodeId: node.id, title: node.title, tool, version });
   }, []);
 
-  const openMaskEdit = useCallback((node: CanvasContentNode, mode: 'inpaint' | 'outpaint' = 'inpaint') => {
-    const versionId = node.data.current_version_id;
-    const version = versionId ? latestDocument.current?.content_versions[versionId] : null;
-    if (node.type !== 'image' || !version || version.kind !== 'image' || !version.width || !version.height) {
-      setError('这个节点没有可局部编辑的图片版本。');
-      return;
-    }
-    setPreview(null);
-    setMediaOperation(null);
-    setMaskEditError(null);
-    setMaskEdit({ nodeId: node.id, title: node.title, version, mode, open: true });
-  }, []);
-
-  const submitMaskEdit = useCallback(async (submission: CanvasMaskEditSubmission) => {
-    if (!maskEdit || runSubmissionInFlight.current) return;
-    setMaskEditBusy(true);
-    setMaskEditError(null);
-    setSubmittingNodeIds(current => new Set(current).add(maskEdit.nodeId));
+  const persistImageEdit = useCallback(async (
+    payload: Omit<CanvasImageEditSavePayload, 'expected_revision'>, mask: Blob | null,
+  ) => {
+    if (!await persistNow()) throw new Error('画布尚未保存，请重试。');
+    const before = latestDocument.current;
+    if (!before) throw new Error('画布尚未加载。');
+    const dirtyAtSave = dirtyVersion.current;
+    documentCommandInFlight.current = true;
     try {
-      if (documentCommandInFlight.current) {
-        setMaskEditError('另一个媒体操作正在处理，请稍后重试。');
-        return;
-      }
-      const before = latestDocument.current;
-      if (!before) return;
-      const sourceNode = before.nodes.find(node => node.id === maskEdit.nodeId);
-      if (!sourceNode || sourceNode.type !== 'image') {
-        setMaskEditError('源图片节点已经不存在。');
-        return;
-      }
-      if (sourceNode.data.current_version_id !== submission.options.source_version_id) {
-        setMaskEditError('源图版本已经变化，请重新打开编辑器。');
-        return;
-      }
-      history.current.past.push(before);
+      const result = await saveCanvasImageEdit(projectId, { ...payload, expected_revision: serverRevision.current }, mask);
+      const current = latestDocument.current ?? before;
+      const savedNode = result.document.nodes.find(node => node.id === result.node_id);
+      if (savedNode?.type !== 'image_edit') throw new Error('编辑节点保存失败。');
+      const exists = current.nodes.some(node => node.id === savedNode.id);
+      const nodes = exists ? current.nodes.map(node => node.id === savedNode.id
+        ? { ...node, data: savedNode.data } as CanvasNode : node) : [...current.nodes, savedNode];
+      const nodeIds = new Set(nodes.map(node => node.id));
+      const merged: CanvasDocument = detachMissingImageEditNodes({ ...current, revision: Math.max(serverRevision.current, result.document.revision),
+        updated_at: result.document.updated_at, nodes,
+        connections: [
+          ...current.connections.filter(edge => !(edge.role === 'material' && edge.target_node_id === savedNode.id)),
+          ...result.document.connections.filter(edge => edge.role === 'material' && edge.target_node_id === savedNode.id
+            && nodeIds.has(edge.source_node_id)),
+        ],
+        content_versions: acceptServerContentVersions(current.content_versions, result.document.content_versions),
+      });
+      history.current.past.push(current);
       history.current.past = history.current.past.slice(-50);
       history.current.future = [];
-      const withDraft: CanvasDocument = {
-        ...before,
-        updated_at: new Date().toISOString(),
-        nodes: before.nodes.map(node => node.id === maskEdit.nodeId && node.type === 'image'
-          ? { ...node, data: { ...node.data, generation_draft: submission.draft } }
-          : node),
-      };
-      latestDocument.current = withDraft;
-      setDocument(withDraft);
-      dirtyVersion.current += 1;
-      setDirtySignal(dirtyVersion.current);
-      saveQueued.current = withDraft;
-      try {
-        await flushSave();
-      } catch {
-        setMaskEditError('自动保存失败，局部编辑尚未提交。请检查服务后重试。');
-        return;
-      }
-      const dirtyAtSubmission = dirtyVersion.current;
-      runSubmissionInFlight.current = true;
-      const run = await submitCanvasMaskEdit(
-        projectId,
-        maskEdit.nodeId,
-        serverRevision.current,
-        submission.requestedCount,
-        submission.mask,
-        submission.options,
-      );
-      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
-      applyLocalJob(run.job);
-      const resultId = run.job.canvas_run?.result_node_id;
-      if (resultId) setSelectedNodeIds(new Set([resultId]));
-      setMaskEdit(null);
-      announceToolNotice(`已提交“${maskEdit.title}”的图片编辑`);
-    } catch (submitError) {
-      setMaskEditError((submitError as Error).message);
+      serverRevision.current = Math.max(serverRevision.current, result.document.revision);
+      latestDocument.current = merged;
+      setDocument(merged);
+      saveQueued.current = dirtyVersion.current > dirtyAtSave ? merged : null;
+      setSaveState(saveQueued.current ? 'saving' : 'saved');
+      return savedNode;
     } finally {
-      runSubmissionInFlight.current = false;
-      setMaskEditBusy(false);
-      setSubmittingNodeIds(current => {
-        const next = new Set(current);
-        next.delete(maskEdit.nodeId);
-        return next;
-      });
+      documentCommandInFlight.current = false;
       if (saveQueued.current) void flushSave().catch(() => undefined);
     }
-  }, [
-    announceToolNotice,
-    applyLocalJob,
-    flushSave,
-    maskEdit,
-    mergeSubmittedRunDocument,
-    projectId,
-  ]);
+  }, [flushSave, persistNow, projectId]);
+
+  const openImageEdit = useCallback((nodeId: string) => {
+    const node = latestDocument.current?.nodes.find(item => item.id === nodeId);
+    if (node?.type !== 'image_edit') return;
+    const version = latestDocument.current?.content_versions[node.data.source_version_id];
+    if (!version || version.kind !== 'image') { setError('编辑源图片不存在。'); return; }
+    setPreview(null); setMediaOperation(null); setMaskEditError(null);
+    setMaskEdit({ nodeId, title: node.title, version,
+      mode: node.data.options.mode === 'outpaint' ? 'outpaint' : 'inpaint', open: true });
+  }, []);
+
+  const openMaskEdit = useCallback((node: CanvasContentNode, mode: 'inpaint' | 'outpaint' = 'inpaint') => {
+    const version = node.data.current_version_id ? latestDocument.current?.content_versions[node.data.current_version_id] : null;
+    if (node.type !== 'image' || !version || version.kind !== 'image' || !version.width || !version.height) {
+      setError('这个节点没有可局部编辑的图片版本。'); return;
+    }
+    const { width, height } = version;
+    void persistImageEdit({ source_node_id: node.id, source_version_id: version.version_id,
+      generation_draft: null, options: { mode }, reference_node_id: null, reference_version_id: null,
+      editor_state: { native: false, strokes: [], frame_ratio: '', frame: initialEditFrame(width, height, mode) },
+    }, null).then(saved => { setSelectedNodeIds(new Set([saved.id])); openImageEdit(saved.id); })
+      .catch(error => setError((error as Error).message));
+  }, [openImageEdit, persistImageEdit]);
+
+  const submitImageEdit = useCallback(async (nodeId: string): Promise<boolean> => {
+    if (runSubmissionInFlight.current || !await persistNow()) return false;
+    const node = latestDocument.current?.nodes.find(item => item.id === nodeId);
+    if (node?.type !== 'image_edit' || node.data.active_run_id) return false;
+    const validation = savedImageEditError(node, latestDocument.current?.content_versions[node.data.source_version_id], keys);
+    if (validation) { setError(validation); setMaskEditError(validation); return false; }
+    setSubmittingNodeIds(current => new Set(current).add(nodeId));
+    runSubmissionInFlight.current = true;
+    try {
+      const dirtyAtSubmission = dirtyVersion.current;
+      const run = await submitCanvasImageEdit(projectId, nodeId, serverRevision.current, node.data.generation_draft?.params.n ?? 1);
+      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
+      applyLocalJob(run.job);
+      announceToolNotice(`已提交“${node.title}”的图片编辑`);
+      return true;
+    } catch (error) {
+      setError((error as Error).message); setMaskEditError((error as Error).message);
+      return false;
+    } finally {
+      runSubmissionInFlight.current = false;
+      setSubmittingNodeIds(current => { const next = new Set(current); next.delete(nodeId); return next; });
+      if (saveQueued.current) void flushSave().catch(() => undefined);
+    }
+  }, [announceToolNotice, applyLocalJob, flushSave, keys, mergeSubmittedRunDocument, persistNow, projectId]);
+
+  const saveMaskEdit = useCallback(async (submission: CanvasMaskEditSubmission, generate = false): Promise<boolean> => {
+    if (!maskEdit || maskEditBusy) return false;
+    setMaskEditBusy(true); setMaskEditError(null);
+    try {
+      const saved = await persistImageEdit({ node_id: maskEdit.nodeId,
+        generation_draft: submission.draft, options: submission.options, editor_state: submission.editorState,
+        reference_node_id: submission.referenceNodeId, reference_version_id: submission.referenceVersionId,
+      }, submission.mask);
+      if (generate) {
+        if (!await submitImageEdit(saved.id)) return true;
+        setMaskEdit(null);
+      } else announceToolNotice('编辑已保存');
+      return true;
+    } catch (error) {
+      setMaskEditError((error as Error).message); return false;
+    } finally { setMaskEditBusy(false); }
+  }, [announceToolNotice, maskEdit, maskEditBusy, persistImageEdit, submitImageEdit]);
 
   const openAngle = useCallback((node: CanvasContentNode) => {
     const versionId = node.data.current_version_id;
@@ -4518,6 +4570,8 @@ function CanvasEditorInner({
     openMediaOperation,
     removeBackground,
     openMaskEdit,
+    openImageEdit,
+    submitImageEdit,
     openAngle,
     upscaleImage,
     editVideo,
@@ -4562,6 +4616,8 @@ function CanvasEditorInner({
     openAngle,
     upscaleImage,
     openMaskEdit,
+    openImageEdit,
+    submitImageEdit,
     openMediaOperation,
     removeBackground,
     previewContent,
@@ -4648,7 +4704,7 @@ function CanvasEditorInner({
   const maskEditNode = maskEdit
     ? document.nodes.find(node => node.id === maskEdit.nodeId) ?? null
     : null;
-  const maskEditDraft = maskEditNode ? generationDraftForNode(maskEditNode) : null;
+  const maskEditData = maskEditNode?.type === 'image_edit' ? maskEditNode.data : undefined;
 
   const minimapToggle = (
     <button
@@ -5307,21 +5363,24 @@ function CanvasEditorInner({
             projectId={projectId}
             nodeId={maskEdit.nodeId}
             initialMode={maskEdit.mode}
-            references={document.nodes.filter(node => node.type === 'image' && node.id !== maskEdit.nodeId && node.data.current_version_id).map(node => ({ id: node.id, title: node.title }))}
+            references={document.nodes.flatMap(node => node.type === 'image' && node.id !== maskEditData?.source_node_id && node.data.current_version_id
+              ? [{ id: node.id, title: node.title, versionId: node.data.current_version_id }] : [])}
             title={maskEdit.title}
             version={maskEdit.version}
             mediaUrl={canvasMediaUrl(projectId, maskEdit.version.version_id)}
             keys={keys}
-            initialDraft={maskEditDraft}
+            initialDraft={maskEditData?.generation_draft ?? null}
+            initialData={maskEditData}
             busy={maskEditBusy}
             error={maskEditError}
             onOpenChange={open => {
               if (!open && !maskEditBusy) {
-                setMaskEdit(current => current ? { ...current, open: false } : null);
+                setMaskEdit(null);
                 setMaskEditError(null);
               }
             }}
-            onSubmit={submission => void submitMaskEdit(submission)}
+            onSave={submission => saveMaskEdit(submission)}
+            onSubmit={submission => saveMaskEdit(submission, true)}
           />
         )}
 
@@ -5713,6 +5772,7 @@ function isContentNode(node: CanvasNode): node is CanvasContentNode {
 }
 
 function generationDraftForNode(node: CanvasNode) {
+  if (node.type === 'image_edit') return null;
   if ('generation_draft' in node.data) return node.data.generation_draft;
   return null;
 }
@@ -5871,6 +5931,7 @@ function cloneCanvasNode(
   idMap: ReadonlyMap<string, string>,
   position: XYPosition,
   zIndex: number,
+  preserveExternalReferences = true,
 ): CanvasNode {
   const clone = structuredClone(source);
   if (isContentNode(clone)) {
@@ -5910,6 +5971,12 @@ function cloneCanvasNode(
     };
   }
   if (clone.type === 'batch_material') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex };
+  if (clone.type === 'image_edit') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex,
+    data: { ...clone.data, active_run_id: null,
+      source_node_id: idMap.get(clone.data.source_node_id ?? '') ?? (preserveExternalReferences ? clone.data.source_node_id : null),
+      reference_node_id: idMap.get(clone.data.reference_node_id ?? '') ?? (preserveExternalReferences ? clone.data.reference_node_id : null),
+      generation_draft: cloneCanvasDraft(clone.data.generation_draft, idMap),
+    } };
   if (clone.type === 'layer_stack') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex,
     data: { ...clone.data, base_material_node_id: idMap.get(clone.data.base_material_node_id ?? '') ?? null,
       layers: clone.data.layers.map(layer => ({ ...layer, material_node_id: idMap.get(layer.material_node_id ?? '') ?? null })) } };

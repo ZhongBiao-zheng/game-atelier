@@ -748,6 +748,87 @@ class CanvasMediaNodeData(CanvasContentNodeData):
     display: CanvasMediaDisplay = Field(default_factory=CanvasMediaDisplay)
 
 
+class CanvasImageEditSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    mode: Literal["inpaint", "outpaint", "prepare"] = "inpaint"
+    width: int | None = Field(default=None, ge=1, le=16384)
+    height: int | None = Field(default=None, ge=1, le=16384)
+    x: int = Field(default=0, ge=0, le=16384)
+    y: int = Field(default=0, ge=0, le=16384)
+    custom_id: str | None = Field(default=None, max_length=500)
+    zoom: float = Field(default=1.5, ge=1, le=2)
+    context: float = Field(default=.25, ge=0, le=2)
+    feather: int | None = Field(default=None, ge=0, le=32)
+    groups: list[list[int]] | None = Field(default=None, max_length=16)
+    region_prompts: dict[str, str] = Field(default_factory=dict, max_length=16)
+
+    @field_validator("region_prompts")
+    @classmethod
+    def validate_region_prompts(cls, value):
+        if any(len(k) > 512 or len(v) > 10000 for k, v in value.items()):
+            raise ValueError("区域提示词过长")
+        return value
+
+
+# Source decoding accepts up to 64M pixels, so a legal one-pixel-high source can
+# have this many pixels on one axis. Editor metadata is not an execution canvas.
+_CANVAS_EDITOR_MAX_AXIS = 64_000_000
+
+
+class CanvasImageEditPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    x: float = Field(ge=-_CANVAS_EDITOR_MAX_AXIS, le=2 * _CANVAS_EDITOR_MAX_AXIS)
+    y: float = Field(ge=-_CANVAS_EDITOR_MAX_AXIS, le=2 * _CANVAS_EDITOR_MAX_AXIS)
+
+
+class CanvasImageEditStroke(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    tool: Literal["brush", "eraser", "rectangle"]
+    size: float = Field(gt=0, le=_CANVAS_EDITOR_MAX_AXIS)
+    points: list[CanvasImageEditPoint] = Field(default_factory=list, max_length=10000)
+
+
+class CanvasImageEditFrame(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    width: int = Field(default=1, ge=1, le=_CANVAS_EDITOR_MAX_AXIS)
+    height: int = Field(default=1, ge=1, le=_CANVAS_EDITOR_MAX_AXIS)
+    x: int = Field(default=0, ge=0, le=_CANVAS_EDITOR_MAX_AXIS)
+    y: int = Field(default=0, ge=0, le=_CANVAS_EDITOR_MAX_AXIS)
+
+
+class CanvasImageEditEditorState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    native: bool = False
+    strokes: list[CanvasImageEditStroke] = Field(default_factory=list, max_length=1000)
+    frame: CanvasImageEditFrame = Field(default_factory=CanvasImageEditFrame)
+    frame_ratio: str = Field(default="original", max_length=40)
+
+    @model_validator(mode="after")
+    def bounded_points(self):
+        if sum(len(stroke.points) for stroke in self.strokes) > 100000:
+            raise ValueError("编辑笔迹超过 100000 个点")
+        return self
+
+
+class CanvasImageEditNodeData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_node_id: str | None = Field(default=None, max_length=120)
+    source_version_id: str = Field(min_length=1, max_length=160)
+    mask_version_id: str | None = Field(default=None, max_length=160)
+    reference_node_id: str | None = Field(default=None, max_length=120)
+    reference_version_id: str | None = Field(default=None, max_length=160)
+    generation_draft: CanvasGenerationDraft | None = None
+    options: CanvasImageEditSettings = Field(default_factory=CanvasImageEditSettings)
+    editor_state: CanvasImageEditEditorState = Field(default_factory=CanvasImageEditEditorState)
+    active_run_id: str | None = Field(default=None, max_length=160)
+
+    @model_validator(mode="after")
+    def image_draft_only(self):
+        if self.generation_draft is not None and self.generation_draft.mode != "image":
+            raise ValueError("image edit node requires an image generation draft")
+        return self
+
+
 class CanvasGroupNodeData(BaseModel):
     model_config = ConfigDict(extra="forbid")
     member_node_ids: list[str] = Field(default_factory=list)
@@ -873,6 +954,11 @@ class CanvasLayerStackNode(CanvasNodeBase):
     data: CanvasLayerStackData
 
 
+class CanvasImageEditNode(CanvasNodeBase):
+    type: Literal["image_edit"]
+    data: CanvasImageEditNodeData
+
+
 class CanvasPluginNode(CanvasNodeBase):
     type: Literal["plugin"]
     data: CanvasPluginNodeData
@@ -881,7 +967,7 @@ class CanvasPluginNode(CanvasNodeBase):
 CanvasNode = Annotated[
     CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode
     | CanvasGroupNode | CanvasPluginNode | CanvasBatchMaterialNode
-    | CanvasLayerStackNode,
+    | CanvasLayerStackNode | CanvasImageEditNode,
     Field(discriminator="type"),
 ]
 
@@ -1207,6 +1293,26 @@ class CanvasDocument(BaseModel):
                     raise ValueError("canvas user mask references an incompatible source version")
         group_members: set[str] = set()
         for node in self.nodes:
+            if node.type == "image_edit":
+                for linked_id in (node.data.source_node_id, node.data.reference_node_id):
+                    linked = nodes_by_id.get(linked_id)
+                    if linked is not None and linked.type != "image":
+                        raise ValueError("image edit source and reference nodes must be images")
+                if node.data.reference_node_id and not node.data.reference_version_id:
+                    raise ValueError("image edit reference requires a fixed version")
+                source = self.content_versions.get(node.data.source_version_id)
+                if source is None or source.kind != "image":
+                    raise ValueError("image edit node requires an owned source image version")
+                if node.data.reference_version_id is not None:
+                    reference = self.content_versions.get(node.data.reference_version_id)
+                    if reference is None or reference.kind != "image":
+                        raise ValueError("image edit reference must be an owned image version")
+                if node.data.mask_version_id is not None:
+                    mask = self.content_versions.get(node.data.mask_version_id)
+                    if (mask is None or mask.kind != "image" or mask.origin.kind != "user_mask"
+                            or mask.origin.source_version_id != source.version_id
+                            or mask.origin.expanded_canvas):
+                        raise ValueError("image edit mask must belong to its fixed source version")
             if node.type == "batch_material":
                 for item in node.data.items:
                     for version_id in item.image_version_ids:
@@ -1269,11 +1375,15 @@ class CanvasDocument(BaseModel):
                 raise ValueError("canvas group nodes cannot receive connections")
             if source.type == "group" and (edge.role != "input" or edge.slot is not None):
                 raise ValueError("canvas group can only be an unslotted input source")
-            if edge.role == "material" and (source.type != "image" or target.type != "image"):
-                raise ValueError("canvas material connections require image nodes")
+            if edge.role == "material" and (source.type, target.type) not in {
+                ("image", "image"), ("image", "image_edit"), ("image_edit", "image"),
+            }:
+                raise ValueError("canvas material connections require images or image edit nodes")
             if edge.role == "input":
-                if source.type in {"plugin", "layer_stack"}:
+                if source.type in {"plugin", "layer_stack", "image_edit"}:
                     raise ValueError("canvas input source cannot provide content")
+                if target.type == "image_edit":
+                    raise ValueError("image edit nodes only accept material connections")
                 if target.type == "plugin":
                     raise ValueError("canvas plugin connections require a verified capability manifest")
                 if target.type == "batch_material":
@@ -1665,32 +1775,32 @@ class CanvasLayerDecompositionCreate(BaseModel):
     model: str = Field(min_length=1, max_length=240)
 
 
-class CanvasImageEditOptions(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    mode: Literal["inpaint", "outpaint", "prepare"] = "inpaint"
+class CanvasImageEditOptions(CanvasImageEditSettings):
     source_version_id: str | None = Field(default=None, max_length=120)
-    width: int | None = Field(default=None, ge=1, le=16384)
-    height: int | None = Field(default=None, ge=1, le=16384)
-    x: int = Field(default=0, ge=0, le=16384)
-    y: int = Field(default=0, ge=0, le=16384)
     reference_node_id: str | None = Field(default=None, max_length=120)
-    custom_id: str | None = Field(default=None, max_length=500)
-    zoom: float = Field(default=1.5, ge=1, le=2)
-    context: float = Field(default=.25, ge=0, le=2)
-    feather: int | None = Field(default=None, ge=0, le=32)
-    groups: list[list[int]] | None = Field(default=None, max_length=16)
-    region_prompts: dict[str, str] = Field(default_factory=dict, max_length=16)
     plan_id: str | None = Field(default=None, max_length=64)
 
-    @field_validator("region_prompts")
-    @classmethod
-    def validate_region_prompts(cls, value):
-        if any(len(k) > 512 or len(v) > 10000 for k, v in value.items()):
-            raise ValueError("区域提示词过长")
-        return value
+
+class CanvasImageEditSave(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=0)
+    node_id: str | None = Field(default=None, max_length=120)
+    source_node_id: str | None = Field(default=None, max_length=120)
+    source_version_id: str | None = Field(default=None, max_length=160)
+    reference_node_id: str | None = Field(default=None, max_length=120)
+    reference_version_id: str | None = Field(default=None, max_length=160)
+    generation_draft: CanvasGenerationDraft | None = None
+    options: CanvasImageEditSettings = Field(default_factory=CanvasImageEditSettings)
+    editor_state: CanvasImageEditEditorState = Field(default_factory=CanvasImageEditEditorState)
 
 
-class CanvasMaskEditCreate(BaseModel):
+class CanvasImageEditSaveResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    document: CanvasDocument
+    node_id: str
+
+
+class CanvasImageEditRunCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     surface_node_id: str = Field(min_length=1, max_length=120)
     expected_revision: int = Field(ge=0)

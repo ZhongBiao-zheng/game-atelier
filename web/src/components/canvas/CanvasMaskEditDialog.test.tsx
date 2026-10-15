@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KeyView } from '@/api/keys';
-import type { CanvasMediaVersion } from '@/schema/canvas';
+import type { CanvasImageEditNode, CanvasMediaVersion } from '@/schema/canvas';
 import { CanvasMaskEditDialog } from './CanvasMaskEditDialog';
 import { getCanvasImageEditSource, previewCanvasEdit } from '@/api/canvas';
 import { editSize, isEditModel } from './imageEditGeometry';
@@ -26,7 +26,7 @@ function mount(mode: 'inpaint' | 'outpaint' = 'inpaint') {
   const onSubmit = vi.fn();
   render(<CanvasMaskEditDialog open title="原图" version={version} mediaUrl="/source.png"
     keys={keys} initialDraft={null} initialMode={mode} busy={false} error={null}
-    onOpenChange={vi.fn()} onSubmit={onSubmit} />);
+    onOpenChange={vi.fn()} onSave={vi.fn()} onSubmit={onSubmit} />);
   const image = screen.getByRole('img', { name: '原图' });
   Object.defineProperties(image, { naturalWidth: { value: 1024 }, naturalHeight: { value: 1024 } });
   fireEvent.load(image);
@@ -37,6 +37,7 @@ describe('image editor', () => {
   beforeEach(() => {
     vi.stubGlobal('PointerEvent', MouseEvent);
     vi.mocked(getCanvasImageEditSource).mockResolvedValue({ source_version_id: 'source', reason: null, mj: null });
+    vi.mocked(previewCanvasEdit).mockResolvedValue({ plan_id: 'plan', regions: [] });
     vi.stubGlobal('ResizeObserver', class {
       observe() {}
       disconnect() {}
@@ -63,11 +64,11 @@ describe('image editor', () => {
     const onSubmit = vi.fn();
     render(<CanvasMaskEditDialog open title="原图" version={version} mediaUrl="/source.png"
       keys={[...keys, evoKey]} projectId="p" nodeId="n" initialDraft={null} busy={false} error={null}
-      references={[{ id: 'ref', title: '参考图' }]} onOpenChange={vi.fn()} onSubmit={onSubmit} />);
+      references={[{ id: 'ref', title: '参考图', versionId: 'ref-version' }]} onOpenChange={vi.fn()} onSave={vi.fn()} onSubmit={onSubmit} />);
     const image = screen.getByRole('img', { name: '原图' });
     Object.defineProperties(image, { naturalWidth: { value: 1024 }, naturalHeight: { value: 1024 } });
     fireEvent.load(image);
-    fireEvent.change(screen.getByLabelText('替换参考素材'), { target: { value: 'ref' } });
+    fireEvent.change(screen.getByLabelText('替换参考素材'), { target: { value: 'ref:ref-version' } });
     fireEvent.change(screen.getByLabelText('编辑密钥'), { target: { value: 'EvoLink' } });
     expect(screen.getByLabelText('编辑模型')).toHaveValue('mj-v8.2');
     expect(screen.queryByLabelText('编辑方式')).not.toBeInTheDocument();
@@ -87,7 +88,7 @@ describe('image editor', () => {
     expect(previewCanvasEdit).not.toHaveBeenCalled();
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ requestedCount: 4,
       draft: { alias: 'EvoLink', model: 'mj-v8.2', params: { n: 4 } },
-      options: { mode: 'inpaint', source_version_id: 'source' },
+      options: { mode: 'inpaint' }, referenceNodeId: null, referenceVersionId: null,
     });
     expect(onSubmit.mock.calls[0][0].options).not.toHaveProperty('reference_node_id');
     expect(onSubmit.mock.calls[0][0].options).not.toHaveProperty('plan_id');
@@ -97,7 +98,7 @@ describe('image editor', () => {
     const onSubmit = vi.fn();
     render(<CanvasMaskEditDialog open title="原图" version={version} mediaUrl="/source.png"
       keys={[evoKey]} initialDraft={null} initialMode="outpaint" busy={false} error={null}
-      onOpenChange={vi.fn()} onSubmit={onSubmit} />);
+      onOpenChange={vi.fn()} onSave={vi.fn()} onSubmit={onSubmit} />);
     const image = screen.getByRole('img', { name: '原图' });
     Object.defineProperties(image, { naturalWidth: { value: 1024 }, naturalHeight: { value: 1024 } });
     fireEvent.load(image);
@@ -106,7 +107,7 @@ describe('image editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '生成' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
     expect(onSubmit.mock.calls[0][0].options).toEqual({
-      mode: 'outpaint', width: 4096, height: 1024, x: 1536, y: 0, source_version_id: 'source',
+      mode: 'outpaint', width: 4096, height: 1024, x: 1536, y: 0,
     });
     expect(onSubmit.mock.calls[0][0].draft.params).toEqual({ n: 4 });
     expect(onSubmit.mock.calls[0][0].requestedCount).toBe(4);
@@ -126,7 +127,7 @@ describe('image editor', () => {
     fireEvent.click(screen.getByRole('button', { name: '生成' }));
     await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
     expect(onSubmit.mock.calls[0][0].options).toMatchObject({
-      mode: 'outpaint', width: 1536, height: 1024, source_version_id: 'source',
+      mode: 'outpaint', width: 1536, height: 1024,
     });
     expect(onSubmit.mock.calls[0][0].draft.prompt).toBe('');
     expect(onSubmit.mock.calls[0][0].draft.params.size_mode).not.toBe('auto');
@@ -149,7 +150,7 @@ describe('image editor', () => {
     const onSubmit = vi.fn();
     render(<CanvasMaskEditDialog open title="原图" version={version} mediaUrl="/source.png"
       keys={keys} projectId="p" nodeId="n" initialDraft={null} busy={false} error={null}
-      onOpenChange={vi.fn()} onSubmit={onSubmit} />);
+      onOpenChange={vi.fn()} onSave={vi.fn()} onSubmit={onSubmit} />);
     const image = screen.getByRole('img', { name: '原图' });
     Object.defineProperties(image, { naturalWidth: { value: 1024 }, naturalHeight: { value: 1024 } });
     fireEvent.load(image);
@@ -161,5 +162,69 @@ describe('image editor', () => {
       options: { mode: 'prepare', custom_id: 'MJ::JOB::upsample::2::source' },
       draft: { alias: 'MJ 原渠道', model: 'midjourney', params: { n: 1 } },
     });
+  });
+
+  it('saves an incomplete draft without a model, selection or generation and closes cleanly', async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    const onSubmit = vi.fn();
+    const onOpenChange = vi.fn();
+    render(<CanvasMaskEditDialog open title="编辑" version={version} mediaUrl="/source.png" keys={[]}
+      initialDraft={null} busy={false} error={null} onSave={onSave} onSubmit={onSubmit} onOpenChange={onOpenChange} />);
+    fireEvent.change(screen.getByLabelText('编辑提示词'), { target: { value: '先保存这个想法' } });
+    expect(screen.getByRole('button', { name: '生成' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0][0]).toMatchObject({ mask: null, draft: { model: '', prompt: '先保存这个想法' },
+      editorState: { native: false, strokes: [] }, referenceVersionId: null });
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('关闭', { selector: 'button' }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(screen.queryByText('尚未保存')).not.toBeInTheDocument();
+  });
+
+  it('requires an explicit discard when closing unsaved changes', () => {
+    const onOpenChange = vi.fn();
+    render(<CanvasMaskEditDialog open title="编辑" version={version} mediaUrl="/source.png" keys={[]}
+      initialDraft={null} busy={false} error={null} onSave={vi.fn()} onSubmit={vi.fn()} onOpenChange={onOpenChange} />);
+    fireEvent.change(screen.getByLabelText('编辑提示词'), { target: { value: '未保存' } });
+    fireEvent.click(screen.getByText('关闭', { selector: 'button' }));
+    expect(screen.getByText('尚未保存')).toBeInTheDocument();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '继续编辑' }));
+    expect(screen.getByLabelText('编辑提示词')).toHaveValue('未保存');
+    fireEvent.click(screen.getByText('关闭', { selector: 'button' }));
+    fireEvent.click(screen.getByRole('button', { name: '放弃修改' }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('restores strokes and regional settings with the saved reference version after its node changes', async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    const data: CanvasImageEditNode['data'] = {
+      source_node_id: null, source_version_id: 'source', mask_version_id: 'mask', active_run_id: null,
+      reference_node_id: 'ref', reference_version_id: 'ref-old',
+      generation_draft: { mode: 'image', model: 'gpt-image-2', alias: 'Tuzi', prompt: '替换花朵',
+        input_policy: 'all_connected', params: { n: 3, quality: 'high' }, updated_at: version.created_at },
+      options: { mode: 'inpaint', context: .5, feather: 12, groups: [[0, 1]], region_prompts: { '0-1': '红花' } },
+      editor_state: { native: false, frame_ratio: '3:2', frame: { width: 1800, height: 1200, x: 300, y: 80 },
+        strokes: [{ tool: 'rectangle', size: 20, points: [{ x: 10, y: 20 }, { x: 50, y: 60 }] }] },
+    };
+    render(<CanvasMaskEditDialog open title="编辑" version={version} mediaUrl="/source.png" keys={keys}
+      initialData={data} initialDraft={data.generation_draft} references={[{ id: 'ref', versionId: 'ref-new', title: '参考' }]}
+      busy={false} error={null} onSave={onSave} onSubmit={vi.fn()} onOpenChange={vi.fn()} />);
+    const image = screen.getByRole('img', { name: '编辑' });
+    Object.defineProperties(image, { naturalWidth: { value: 1024 }, naturalHeight: { value: 1024 } });
+    fireEvent.load(image);
+    expect(screen.getByLabelText('候选数')).toHaveValue('3');
+    expect(screen.getByLabelText('编辑质量')).toHaveValue('high');
+    expect(screen.getByLabelText('替换参考素材')).toHaveValue('ref:ref-old');
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0][0]).toMatchObject({ mask: expect.any(Blob), options: data.options,
+      editorState: data.editor_state, referenceNodeId: 'ref', referenceVersionId: 'ref-old',
+      draft: { prompt: '替换花朵', params: { n: 3, quality: 'high' } } });
+    fireEvent.click(screen.getByRole('button', { name: '扩图' }));
+    expect(screen.getByLabelText('目标宽度')).toHaveValue(1800);
+    expect(screen.getByLabelText('目标高度')).toHaveValue(1200);
+    expect(screen.getByLabelText('扩图比例')).toHaveValue('3:2');
   });
 });

@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, onTestFinished, vi } from 'vitest';
 import { useContext } from 'react';
 import * as connection from '@/api/connection';
 import { useReactFlow } from '@xyflow/react';
@@ -10,6 +10,7 @@ import { CanvasNodeContext, type CanvasNodeContextValue } from '@/components/can
 import {
   createCanvasReversePromptConfig,
   getCanvasDocument,
+  getCanvasImageEditSource,
   listCanvasJobs,
   listCanvasProjects,
   pasteIntoCanvas,
@@ -18,6 +19,8 @@ import {
   resumeCanvasMjEdit,
   resumeCanvasRegions,
   saveCanvasDocument,
+  saveCanvasImageEdit,
+  submitCanvasImageEdit,
   submitCanvasLayerDecomposition,
   submitCanvasRun,
   uploadCanvasMedia,
@@ -40,6 +43,7 @@ import type {
   CanvasDocument,
   CanvasGenerationDraft,
   CanvasImageNode,
+  CanvasImageEditNode,
   CanvasNode,
   CanvasProject,
   CanvasProjectSummary,
@@ -328,6 +332,8 @@ vi.mock('@/api/canvas', () => ({
   createCanvasReversePromptConfig: vi.fn(),
   dismissCanvasCandidate: vi.fn(),
   getCanvasDocument: vi.fn(),
+  getCanvasImageEditSource: vi.fn(),
+  previewCanvasEdit: vi.fn(),
   listCanvasJobs: vi.fn(),
   listCanvasProjects: vi.fn(),
   renameCanvasProject: vi.fn(),
@@ -340,7 +346,8 @@ vi.mock('@/api/canvas', () => ({
   saveCanvasDocument: vi.fn(),
   submitCanvasAngleRun: vi.fn(),
   submitCanvasLayerDecomposition: vi.fn(),
-  submitCanvasMaskEdit: vi.fn(),
+  saveCanvasImageEdit: vi.fn(),
+  submitCanvasImageEdit: vi.fn(),
   submitCanvasReversePrompt: vi.fn(),
   submitCanvasRun: vi.fn(),
   uploadCanvasMedia: vi.fn(),
@@ -477,6 +484,7 @@ beforeEach(() => {
     updated_at: '2026-08-23T00:00:00Z',
   } satisfies CanvasProject] as unknown as CanvasProjectSummary[]);
   vi.mocked(getCanvasDocument).mockResolvedValue(emptyDocument);
+  vi.mocked(getCanvasImageEditSource).mockResolvedValue({ source_version_id: 'source-v', mj: null, reason: null });
   vi.mocked(listCanvasJobs).mockResolvedValue([]);
   vi.mocked(getCanvasUiPreferences).mockResolvedValue(DEFAULT_CANVAS_UI_PREFERENCES);
   vi.mocked(saveCanvasDocument).mockImplementation(async (_id, payload) => payload);
@@ -558,6 +566,278 @@ it('opens layer-stack details and inspects hidden layers without changing the ca
   fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(saveCanvasDocument).not.toHaveBeenCalled();
+});
+
+function savedEditNode(): CanvasImageEditNode {
+  return { id: 'edit', type: 'image_edit', title: '图片编辑', position: { x: 700, y: 0 }, z_index: 1,
+    data: { source_node_id: 'original', source_version_id: 'source-v', mask_version_id: 'mask-v',
+      reference_node_id: 'reference', reference_version_id: 'reference-v', active_run_id: null,
+      generation_draft: imageDraft, options: { mode: 'inpaint' },
+      editor_state: { native: false, frame_ratio: '', strokes: [], frame: { width: 768, height: 768, x: 128, y: 128 } },
+    } };
+}
+const editSourceVersion = { version_id: 'source-v', kind: 'image' as const, path: 'source.png', mime_type: 'image/png',
+  width: 512, height: 512, bytes: 123, created_at: '2026-09-09T00:00:00Z', sha256: 'a'.repeat(64), origin: { kind: 'upload' as const, upload_id: 'source-upload' } };
+
+it('creates a saved edit node before opening it and saves without a run or changing the source draft', async ({ onTestFinished }) => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  onTestFinished(() => { vi.unstubAllGlobals(); });
+  const original = imageNode('original', '原图', imageDraft);
+  original.data.current_version_id = 'source-v';
+  const initial = documentWith({ nodes: [original], content_versions: { 'source-v': editSourceVersion } });
+  const edit = savedEditNode();
+  edit.data.generation_draft = null; edit.data.mask_version_id = null;
+  edit.data.reference_node_id = null; edit.data.reference_version_id = null;
+  vi.mocked(getCanvasDocument).mockResolvedValue(initial);
+  vi.mocked(saveCanvasImageEdit).mockImplementation(async (_project, payload) => ({ node_id: 'edit',
+    document: { ...initial, revision: payload.expected_revision + 1,
+      nodes: [original, { ...edit, data: { ...edit.data, generation_draft: payload.generation_draft,
+        options: payload.options, editor_state: payload.editor_state } }],
+      connections: [{ id: 'origin-edit', role: 'material', source_node_id: 'original', target_node_id: 'edit' }],
+    } }));
+  await renderReadyCanvas();
+  act(() => (canvasContextIdentities.at(-1) as CanvasNodeContextValue).openMaskEdit(original));
+  await screen.findByRole('dialog', { name: '编辑图片 · 图片编辑' });
+  expect(saveCanvasImageEdit).toHaveBeenCalledWith('canvas-one', expect.objectContaining({ source_node_id: 'original',
+    source_version_id: 'source-v', generation_draft: null }), null);
+  expect(getCanvasImageEditSource).toHaveBeenCalledWith('canvas-one', 'edit');
+  expect(submitCanvasImageEdit).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('编辑提示词'), { target: { value: '保留到下次' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(saveCanvasImageEdit).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(saveCanvasImageEdit).mock.calls[1][1]).toMatchObject({ node_id: 'edit', generation_draft: { prompt: '保留到下次' } });
+  expect(submitCanvasRun).not.toHaveBeenCalled();
+  expect(submitCanvasImageEdit).not.toHaveBeenCalled();
+  expect(original.data.generation_draft).toEqual(imageDraft);
+});
+
+it('preserves fixed versions when copying edit nodes within and across canvases', async () => {
+  const edit = savedEditNode();
+  const original = imageNode('original', '原图');
+  const reference = imageNode('reference', '参考');
+  const initial = documentWith({ nodes: [original, reference, edit], content_versions: { 'source-v': editSourceVersion } });
+  vi.mocked(getCanvasDocument).mockResolvedValue(initial);
+  await renderReadyCanvas();
+  const serialized = (projectId: string) => JSON.stringify({ schema_version: 1, source_project_id: projectId,
+    nodes: [edit], connections: [] });
+  fireEvent.paste(window, { clipboardData: { getData: (type: string) => type === 'application/x-game-atelier-canvas-nodes' ? serialized('canvas-one') : '', items: [] } });
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(4));
+  const copied = lastSavedDocument()!.nodes.find(node => node.type === 'image_edit' && node.id !== 'edit')!;
+  expect(copied.data).toMatchObject({ source_node_id: 'original', reference_node_id: 'reference',
+    source_version_id: 'source-v', mask_version_id: 'mask-v', reference_version_id: 'reference-v', active_run_id: null });
+  expect(lastSavedDocument()!.connections.filter(edge => edge.target_node_id === copied.id)).toEqual([
+    expect.objectContaining({ source_node_id: 'original', role: 'material' }),
+  ]);
+  vi.mocked(pasteIntoCanvas).mockImplementation(async input => ({ ...lastSavedDocument()!, revision: input.documentRevision + 1,
+    nodes: [...lastSavedDocument()!.nodes, ...input.nodes], connections: [...lastSavedDocument()!.connections, ...input.connections] }));
+  fireEvent.paste(window, { clipboardData: { getData: (type: string) => type === 'application/x-game-atelier-canvas-nodes' ? serialized('other') : '', items: [] } });
+  await waitFor(() => expect(pasteIntoCanvas).toHaveBeenCalledOnce());
+  expect(vi.mocked(pasteIntoCanvas).mock.calls[0][0].nodes[0].data).toMatchObject({ source_node_id: null, reference_node_id: null,
+    source_version_id: 'source-v', mask_version_id: 'mask-v', reference_version_id: 'reference-v', active_run_id: null });
+});
+
+it('copies edit references as fixed data without adding a reference provenance line', async () => {
+  const nodes = [imageNode('original', '原图'), imageNode('reference', '参考'), savedEditNode()];
+  const connections = ['original', 'reference'].map(id => ({ id: `${id}-edit`, role: 'material' as const,
+    source_node_id: id, target_node_id: 'edit' }));
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes, connections }));
+  await renderReadyCanvas();
+  const serialized = JSON.stringify({ schema_version: 1, source_project_id: 'canvas-one', nodes, connections });
+  fireEvent.paste(window, { clipboardData: { getData: (type: string) => type === 'application/x-game-atelier-canvas-nodes' ? serialized : '', items: [] } });
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(6));
+  const copied = lastSavedDocument()!.nodes.find(node => node.type === 'image_edit' && node.id !== 'edit')!;
+  const source = lastSavedDocument()!.nodes.find(node => node.title === '原图' && node.id !== 'original')!;
+  const reference = lastSavedDocument()!.nodes.find(node => node.title === '参考' && node.id !== 'reference')!;
+  expect(copied.data).toMatchObject({ source_node_id: source.id, reference_node_id: reference.id, reference_version_id: 'reference-v' });
+  expect(lastSavedDocument()!.connections.filter(edge => edge.target_node_id === copied.id)).toEqual([
+    expect.objectContaining({ source_node_id: source.id, role: 'material' }),
+  ]);
+});
+
+it('merges a new edit result without overwriting newer edit settings or old results', async () => {
+  const edit = savedEditNode();
+  const oldResult = imageNode('old-result', '旧结果');
+  const initial = documentWith({ nodes: [edit, oldResult], content_versions: { 'source-v': editSourceVersion } });
+  vi.mocked(getCanvasDocument).mockResolvedValue(initial);
+  let complete: (value: Awaited<ReturnType<typeof submitCanvasImageEdit>>) => void = () => undefined;
+  vi.mocked(submitCanvasImageEdit).mockReturnValueOnce(new Promise(resolve => { complete = resolve; }));
+  await renderReadyCanvas();
+  let request: Promise<boolean> | undefined;
+  act(() => { request = (canvasContextIdentities.at(-1) as CanvasNodeContextValue).submitImageEdit?.('edit'); });
+  await waitFor(() => expect(submitCanvasImageEdit).toHaveBeenCalledWith('canvas-one', 'edit', 7, 1));
+  act(() => (canvasContextIdentities.at(-1) as CanvasNodeContextValue).updateNode('edit', node => node.type === 'image_edit'
+    ? { ...node, data: { ...node.data, generation_draft: { ...imageDraft, prompt: '下一轮的新修改' } } } : node));
+  const result = imageNode('new-result', '新结果');
+  result.data.active_run_id = 'run-edit';
+  const job = {
+    job_id: 'job-edit', character_id: 'main', prompt: '', model: 'gpt-image-2', params: {},
+    submitted_at: '2026-10-15T00:00:00Z', status: 'pending', kind: 'image', namespace: 'canvas',
+    canvas_project_id: 'canvas-one', alias: 'main', provider: 'openai', output_paths: [], error: null,
+    canvas_run: { run_id: 'run-edit', result_node_id: 'new-result', candidates: [], snapshot: {
+      snapshot_version: 1, surface_node_id: 'edit', result_node_id: 'new-result', mode: 'image',
+      final_prompt: '', input_policy: 'all_connected', model: 'gpt-image-2', provider: 'openai', alias: 'main',
+      normalized_params: { image_edit: { mode: 'inpaint' } }, inputs: [], mask_version_id: 'mask-v', submitted_at: '2026-10-15T00:00:00Z',
+      submitted_by: { kind: 'user', actor_id: null }, request_fingerprint: 'f',
+    } },
+  } as Job;
+  await act(async () => {
+    complete({ job, document: { ...initial, revision: 8, nodes: [
+      { ...edit, data: { ...edit.data, active_run_id: 'run-edit' } }, oldResult, result,
+    ], connections: [{ id: 'new-edge', role: 'material', source_node_id: 'edit', target_node_id: 'new-result' }] } });
+    await request;
+  });
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(3));
+  expect(lastSavedDocument()!.nodes.find(node => node.id === 'edit')!.data).toMatchObject({
+    active_run_id: 'run-edit', generation_draft: { prompt: '下一轮的新修改' },
+  });
+  expect(lastSavedDocument()!.nodes.find(node => node.id === 'old-result')).toEqual(oldResult);
+  expect(lastSavedDocument()!.connections).toContainEqual({ id: 'new-edge', role: 'material', source_node_id: 'edit', target_node_id: 'new-result' });
+});
+
+it('undoes and redoes a configuration saved during an edit run without reverting completed results', async ({ onTestFinished }) => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  const state = vi.spyOn(connection, 'useConnectionState').mockReturnValue({ phase: 'ready', generation: 1, editing: true, message: null });
+  const events = createTestEventStream();
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(events.open())));
+  onTestFinished(() => { vi.unstubAllGlobals(); state.mockRestore(); });
+  const edit = savedEditNode();
+  edit.data.active_run_id = 'run-edit';
+  const result = imageNode('result', '结果');
+  result.data.active_run_id = 'run-edit';
+  const pending = {
+    job_id: 'job-edit', character_id: 'main', prompt: '', model: 'gpt-image-2', params: {},
+    submitted_at: '2026-10-15T00:00:00Z', status: 'pending', kind: 'image', namespace: 'canvas',
+    canvas_project_id: 'canvas-one', alias: 'main', provider: 'openai', output_paths: [], error: null,
+    canvas_run: { run_id: 'run-edit', result_node_id: 'result',
+      candidates: [{ candidate_id: 'candidate', status: 'pending', index: 0, version_id: null, error: null }],
+      snapshot: { snapshot_version: 1, surface_node_id: 'edit', result_node_id: 'result', mode: 'image',
+        final_prompt: '', input_policy: 'all_connected', model: 'gpt-image-2', provider: 'openai', alias: 'main',
+        normalized_params: { image_edit: { mode: 'inpaint' } }, inputs: [], mask_version_id: 'mask-v', submitted_at: '2026-10-15T00:00:00Z',
+        submitted_by: { kind: 'user', actor_id: null }, request_fingerprint: 'f',
+      } },
+  } as Job;
+  const initial = documentWith({ nodes: [edit, result], content_versions: { 'source-v': editSourceVersion },
+    connections: [{ id: 'edit-result', role: 'material', source_node_id: 'edit', target_node_id: 'result' }] });
+  let savedEdit = edit;
+  vi.mocked(getCanvasDocument).mockResolvedValue(initial);
+  vi.mocked(listCanvasJobs).mockResolvedValue([pending]);
+  vi.mocked(saveCanvasImageEdit).mockImplementation(async (_project, payload) => {
+    savedEdit = { ...edit, data: { ...edit.data, generation_draft: payload.generation_draft,
+      options: payload.options, editor_state: payload.editor_state } };
+    return { node_id: 'edit', document: { ...initial, revision: 8, nodes: [savedEdit, result] } };
+  });
+  await renderReadyCanvas();
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith('/events', expect.anything()));
+  act(() => (canvasContextIdentities.at(-1) as CanvasNodeContextValue).openImageEdit?.('edit'));
+  await screen.findByRole('dialog', { name: '编辑图片 · 图片编辑' });
+  fireEvent.change(screen.getByLabelText('编辑提示词'), { target: { value: '下一轮配置' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeEnabled());
+  expect(saveCanvasImageEdit).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByText('关闭', { selector: 'button' }));
+  const completedVersion = { ...editSourceVersion, version_id: 'completed-v',
+    origin: { kind: 'job_output' as const, job_id: 'job-edit', candidate_id: 'candidate' } };
+  const completed: Job = { ...pending, status: 'done', output_paths: ['result.png'], canvas_run: { ...pending.canvas_run!,
+    candidates: [{ candidate_id: 'candidate', status: 'succeeded', index: 0, version_id: 'completed-v', error: null }] } };
+  vi.mocked(listCanvasJobs).mockResolvedValue([completed]);
+  vi.mocked(getCanvasDocument).mockResolvedValue({ ...initial, revision: 9,
+    nodes: [{ ...savedEdit, data: { ...savedEdit.data, active_run_id: null } },
+      { ...result, data: { ...result.data, active_run_id: null, current_version_id: 'completed-v' } }],
+    content_versions: { ...initial.content_versions, 'completed-v': completedVersion },
+  });
+  await act(async () => { events.emit('job-changed', { job_id: 'job-edit', status: 'done' }); });
+  await waitFor(() => expect((canvasContextIdentities.at(-1) as CanvasNodeContextValue).resolveVersion('completed-v')).toEqual(completedVersion));
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+  await waitFor(() => expect(lastSavedDocument()?.nodes.find(node => node.id === 'edit')?.data).toMatchObject({
+    generation_draft: { prompt: '' }, active_run_id: null,
+  }));
+  expect(lastSavedDocument()!.nodes.find(node => node.id === 'result')!.data).toMatchObject({ active_run_id: null, current_version_id: 'completed-v' });
+  expect(lastSavedDocument()!.content_versions['completed-v']).toEqual(completedVersion);
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true });
+  await waitFor(() => expect(lastSavedDocument()?.nodes.find(node => node.id === 'edit')?.data).toMatchObject({
+    generation_draft: { prompt: '下一轮配置' }, active_run_id: null,
+  }));
+  expect(lastSavedDocument()!.nodes.find(node => node.id === 'result')!.data).toMatchObject({ active_run_id: null, current_version_id: 'completed-v' });
+  expect(lastSavedDocument()!.connections).toEqual(initial.connections);
+});
+
+it.each([
+  { completed: false, historySide: 'past' }, { completed: true, historySide: 'past' },
+  { completed: false, historySide: 'future' }, { completed: true, historySide: 'future' },
+])('retains newly generated edit results across movement history ($historySide, completed=$completed)', async ({ completed, historySide }) => {
+  const state = vi.spyOn(connection, 'useConnectionState').mockReturnValue({ phase: 'ready', generation: 1, editing: true, message: null });
+  const events = createTestEventStream();
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(events.open())));
+  onTestFinished(() => { vi.unstubAllGlobals(); state.mockRestore(); });
+  const edit = savedEditNode();
+  const initial = documentWith({ nodes: [edit], content_versions: { 'source-v': editSourceVersion } });
+  vi.mocked(getCanvasDocument).mockResolvedValue(initial);
+  await renderReadyCanvas();
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith('/events', expect.anything()));
+  act(() => (canvasContextIdentities.at(-1) as CanvasNodeContextValue).recordHistory());
+  act(() => flowHandlers.nodesChange?.([{ id: 'edit', type: 'position', position: { x: 960, y: 40 } }]));
+  await waitFor(() => expect(lastSavedDocument()?.nodes[0].position).toEqual({ x: 960, y: 40 }));
+  if (historySide === 'future') {
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+    await waitFor(() => expect(lastSavedDocument()?.nodes[0].position).toEqual(edit.position));
+  }
+  const beforeRun = lastSavedDocument()!;
+  const result = imageNode('result', '新结果');
+  result.data.active_run_id = 'run-edit';
+  const pending = {
+    job_id: 'job-edit', character_id: 'main', prompt: '', model: 'gpt-image-2', params: {},
+    submitted_at: '2026-10-15T00:00:00Z', status: 'pending', kind: 'image', namespace: 'canvas',
+    canvas_project_id: 'canvas-one', alias: 'main', provider: 'openai', output_paths: [], error: null,
+    canvas_run: { run_id: 'run-edit', result_node_id: 'result',
+      candidates: [{ candidate_id: 'candidate', status: 'pending', index: 0, version_id: null, error: null }],
+      snapshot: { snapshot_version: 1, surface_node_id: 'edit', result_node_id: 'result', mode: 'image',
+        final_prompt: '', input_policy: 'all_connected', model: 'gpt-image-2', provider: 'openai', alias: 'main',
+        normalized_params: { image_edit: { mode: 'inpaint' } }, inputs: [], mask_version_id: 'mask-v', submitted_at: '2026-10-15T00:00:00Z',
+        submitted_by: { kind: 'user', actor_id: null }, request_fingerprint: 'f',
+      } },
+  } as Job;
+  const material = { id: 'edit-result', role: 'material' as const, source_node_id: 'edit', target_node_id: 'result' };
+  const running = { ...beforeRun, revision: 8, nodes: [
+    { ...edit, position: beforeRun.nodes[0].position, data: { ...edit.data, active_run_id: 'run-edit' } }, result,
+  ], connections: [material] };
+  vi.mocked(listCanvasJobs).mockResolvedValue([pending]);
+  vi.mocked(submitCanvasImageEdit).mockResolvedValue({ job: pending, document: running });
+  await act(async () => {
+    expect(await (canvasContextIdentities.at(-1) as CanvasNodeContextValue).submitImageEdit?.('edit')).toBe(true);
+  });
+  const completedVersion = { ...editSourceVersion, version_id: 'completed-v',
+    origin: { kind: 'job_output' as const, job_id: 'job-edit', candidate_id: 'candidate' } };
+  if (completed) {
+    vi.mocked(listCanvasJobs).mockResolvedValue([{ ...pending, status: 'done', output_paths: ['result.png'], canvas_run: {
+      ...pending.canvas_run!, candidates: [{ candidate_id: 'candidate', status: 'succeeded', index: 0, version_id: 'completed-v', error: null }],
+    } }]);
+    vi.mocked(getCanvasDocument).mockResolvedValue({ ...running, revision: 9, nodes: [
+      { ...edit, position: beforeRun.nodes[0].position, data: { ...edit.data, active_run_id: null } },
+      { ...result, data: { ...result.data, active_run_id: null, current_version_id: 'completed-v' } },
+    ], content_versions: { ...initial.content_versions, 'completed-v': completedVersion } });
+    await act(async () => { events.emit('job-changed', { job_id: 'job-edit', status: 'done' }); });
+    await waitFor(() => expect((canvasContextIdentities.at(-1) as CanvasNodeContextValue).resolveVersion('completed-v')).toEqual(completedVersion));
+  }
+  for (const redo of [historySide === 'future', historySide !== 'future']) {
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: redo });
+    await waitFor(() => expect(lastSavedDocument()?.nodes.find(node => node.id === 'edit')?.position)
+      .toEqual(redo ? { x: 960, y: 40 } : edit.position));
+    expect(lastSavedDocument()!.nodes.find(node => node.id === 'result')?.data).toMatchObject({
+      active_run_id: completed ? null : 'run-edit', current_version_id: completed ? 'completed-v' : null,
+    });
+    expect(lastSavedDocument()!.connections).toEqual([material]);
+    if (completed) expect(lastSavedDocument()!.content_versions['completed-v']).toEqual(completedVersion);
+  }
+  if (completed) {
+    act(() => flowHandlers.nodesChange?.([{ id: 'result', type: 'remove' }]));
+    await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(1));
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+    await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(2));
+    expect(lastSavedDocument()!.nodes.find(node => node.id === 'result')?.data).toMatchObject({ current_version_id: 'completed-v', active_run_id: null });
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(1));
+    expect(lastSavedDocument()!.connections).toEqual([]);
+  }
 });
 
 it('renders solid material links without counting upstream originals and preserves their role when copied', async () => {
