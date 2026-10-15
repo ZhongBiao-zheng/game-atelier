@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Boxes, Check, Settings2 } from 'lucide-react';
 
 import type { KeyView } from '@/api/keys';
+import { AUTO_PROVIDER_ALIAS, isAutoProvider } from '@/lib/modelRoutes';
 import { ImageSizeFields } from '@/components/studio/ImageSizeFields';
 import { defaultResolution } from '@/lib/studioSize';
 import { imageSizeMode, imageSizeSummary } from '@/lib/imageSizeMode';
@@ -63,7 +64,9 @@ export function CanvasModelPicker({
 } & ToolbarPopoverMenuProps) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
-  const selected = choices.find(choice => choice.key.alias === alias && choice.model.id === model);
+  // 存进草稿的 alias 为 null 即「自动」。
+  const selectedAlias = alias ?? AUTO_PROVIDER_ALIAS;
+  const selected = choices.find(choice => choice.key.alias === selectedAlias && choice.model.id === model);
   const grouped = choices.reduce<Array<{ key: KeyView; models: CanvasModelChoice[] }>>((groups, choice) => {
     const group = groups.find(item => item.key.alias === choice.key.alias);
     if (group) group.models.push(choice);
@@ -86,7 +89,7 @@ export function CanvasModelPicker({
         <Boxes className="size-3.5 shrink-0" aria-hidden="true" />
         <span className="truncate">{selected?.model.name || selected?.model.id || '选择模型'}</span>
         {/* shrink-0 会让 alias 在 375px 下按自然宽画到父盒外面，压住下一个控件。 */}
-        {selected && <span className="ml-auto min-w-0 truncate text-muted-foreground">{selected.key.alias}</span>}
+        {selected && <span className="ml-auto min-w-0 truncate text-muted-foreground">{groupLabel(selected.key)}</span>}
       </button>
       <ToolbarPopover
         open={open}
@@ -106,11 +109,11 @@ export function CanvasModelPicker({
             {grouped.map(group => (
               <section key={group.key.alias}>
                 <div className="px-1 py-1 text-xs text-muted-foreground">
-                  {group.key.alias} · {group.key.provider}
+                  {isAutoProvider(group.key) ? groupLabel(group.key) : `${group.key.alias} · ${group.key.provider}`}
                 </div>
-                <div role="listbox" aria-label={`${group.key.alias} 可用模型`} className="rounded-lg bg-popover p-1">
+                <div role="listbox" aria-label={`${groupLabel(group.key)} 可用模型`} className="rounded-lg bg-popover p-1">
                   {group.models.map(choice => {
-                    const active = choice.key.alias === alias && choice.model.id === model;
+                    const active = choice.key.alias === selectedAlias && choice.model.id === model;
                     return (
                       <button
                         key={`${choice.key.alias}:${choice.model.id}`}
@@ -126,6 +129,11 @@ export function CanvasModelPicker({
                         className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60"
                       >
                         <span className="min-w-0 flex-1 truncate">{choice.model.name || choice.model.id}</span>
+                        {choice.model.members && (
+                          <span className="min-w-0 max-w-[45%] truncate text-xs text-muted-foreground">
+                            {choice.model.members.map(member => member.alias).join(' · ')}
+                          </span>
+                        )}
                         {active && <Check className="size-3.5 shrink-0" aria-hidden="true" />}
                       </button>
                     );
@@ -557,4 +565,8 @@ function OptionGrid<T extends string>({
       ))}
     </div>
   );
+}
+
+function groupLabel(key: KeyView) {
+  return isAutoProvider(key) ? '自动' : key.alias;
 }

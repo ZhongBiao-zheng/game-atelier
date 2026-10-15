@@ -5,7 +5,7 @@
  * 「按实际渠道算」的逻辑用第一个成员（一期就是它出图）。
  */
 import type { KeyModel, KeyView } from '@/api/keys';
-import type { ModelRoute } from '@/api/models';
+import type { ModelRoute, ModelRouteMember } from '@/api/models';
 import { imageControlCaps, type ImageControlCaps } from '@/lib/imageControlCaps';
 
 export const AUTO_PROVIDER_ALIAS = '@auto';
@@ -85,5 +85,37 @@ export function sizeContext(providers: KeyView[], key: KeyView | undefined, mode
     provider: channel.key?.provider,
     baseUrl: channel.key?.base_url,
     caps: selectionImageCaps(key, modelId),
+  };
+}
+
+/** 存进草稿 / 偏好的 alias：「自动」存 null（服务端按路由解析），其余存 KEY 别名。 */
+export function storedAlias(key: Pick<KeyView, 'alias'>): string | null {
+  return isAutoProvider(key) ? null : key.alias;
+}
+
+/** 按草稿 / 偏好里存的 alias 找厂商：null 即「自动」（没有路由时找不到，等同未选）。 */
+export function providerForAlias<K extends Pick<KeyView, 'alias'>>(
+  providers: readonly K[], alias: string | null | undefined,
+): K | undefined {
+  return providers.find(key => key.alias === (alias ?? AUTO_PROVIDER_ALIAS));
+}
+
+/** 一个选择实际落到的渠道：「自动」取组内第一个成员（只带 provider / base_url / 模型 id / 协议），其余原样。
+ *  参数归一、能力判断按它算；不需要真实 KEY 列表。 */
+export function routeChannel(key: KeyView, model: KeyModel): { key: KeyView; model: KeyModel } {
+  const member = isAutoProvider(key) ? model.members?.[0] : undefined;
+  if (!member) return { key, model };
+  return memberChoice(key, model, member);
+}
+
+/** 「自动」模型的全部成员，各自包装成一个 KEY + 模型。 */
+export function routeMemberChoices(key: KeyView, model: KeyModel): Array<{ key: KeyView; model: KeyModel }> {
+  return (model.members ?? []).map(member => memberChoice(key, model, member));
+}
+
+function memberChoice(auto: KeyView, model: KeyModel, member: ModelRouteMember) {
+  return {
+    key: { ...auto, alias: member.alias, provider: member.provider, base_url: member.base_url, models: [] },
+    model: { id: member.model_id, name: member.name, modality: model.modality, protocol: member.protocol },
   };
 }

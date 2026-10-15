@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.90.1',
+    date: '2026-10-15',
+    headline: '画布生成节点也能选「自动」',
+    changes: [
+      { kind: 'feat', text: '画布生成节点和生成偏好的模型列表顶部是「自动」，新建节点默认选它；每个模型后面显示供应商顺序。' },
+    ],
+  },
+  {
     version: '5.90.0',
     date: '2026-10-15',
     headline: '创作台可以按模型自动选供应商',

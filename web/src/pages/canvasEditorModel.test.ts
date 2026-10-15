@@ -446,3 +446,38 @@ it('成员顺序按画布阅读顺序：先上下行，行内从左到右', () =
   });
   expect(members(normalizeCanvasGroups(before, before))).toEqual(['b', 'a', 'c']);
 });
+
+test('「自动」：新节点默认选它，草稿存 alias=null 和路由 id；偏好照样记住', async () => {
+  const { createCanvasGenerationDraft, canvasGenerationDefaultFromDraft, canvasGenerationModelSupportsMode } = await import('./canvasEditorModel');
+  const { withAutoProvider } = await import('@/lib/modelRoutes');
+  const key = (alias: string, provider: string, baseUrl: string | null, id: string) => ({
+    alias, provider, base_url: baseUrl, access_key: '', secret_key: null, capabilities: [], notes: '',
+    created_at: '', models: [{ id, name: id, modality: 'image' as const }],
+  });
+  const keys = [
+    key('Tuzi', 'custom', 'https://api.tu-zi.com/v1', 'gpt-image-2'),
+    key('OpenRouter', 'openrouter', null, 'openai/gpt-image-2'),
+  ];
+  const member = (item: typeof keys[number]) => ({
+    alias: item.alias, provider: item.provider, base_url: item.base_url,
+    model_id: item.models[0].id, name: item.models[0].name, protocol: null,
+  });
+  const providers = withAutoProvider(keys, [
+    { id: 'gpt-image-2', name: 'gpt-image-2', modality: 'image', members: keys.map(member) },
+  ]);
+
+  const draft = createCanvasGenerationDraft(providers, 'image');
+  expect(draft.alias).toBeNull();
+  expect(draft.model).toBe('gpt-image-2');
+  expect(canvasGenerationDefaultFromDraft(draft, { selection: null, params: {} })?.selection)
+    .toEqual({ alias: null, model: 'gpt-image-2' });
+  expect(createCanvasGenerationDraft(providers, 'image', {
+    preference: { selection: { alias: 'OpenRouter', model: 'openai/gpt-image-2' }, params: {} },
+  }).alias).toBe('OpenRouter');
+
+  // 组里有一个成员不能跑画布图片生成，整组都不出现在「自动」里。
+  const unroutable = withAutoProvider(keys, [{ id: 'gpt-image-2', name: 'gpt-image-2', modality: 'image', members: [
+    member(keys[0]), { ...member(keys[0]), alias: 'NB', provider: 'nano_banana' },
+  ] }]);
+  expect(canvasGenerationModelSupportsMode(unroutable[0], unroutable[0].models[0], 'image')).toBe(false);
+});

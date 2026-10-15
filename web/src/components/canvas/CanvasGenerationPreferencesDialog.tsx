@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/dialog';
 import { VideoControls } from '@/components/studio/VideoControls';
 import { imageControlCaps, QUALITY_LABELS, type Quality } from '@/lib/imageControlCaps';
+import { isAutoProvider, providerForAlias, routeChannel, selectionImageCaps } from '@/lib/modelRoutes';
 import { cn } from '@/lib/utils';
 import {
   CANVAS_GENERATION_MODE_LABELS,
@@ -121,7 +122,7 @@ function defaultsForSave(
       );
       return { selection: null, params: normalized?.params ?? current.params };
     }
-    const key = keys.find(candidate => candidate.alias === current.selection?.alias);
+    const key = providerForAlias(keys, current.selection.alias);
     const model = key?.models.find(candidate => candidate.id === current.selection?.model);
     if (!key || !model || !canvasGenerationModelSupportsMode(key, model, mode)) {
       return { selection: null, params: {} };
@@ -142,6 +143,7 @@ export function CanvasGenerationPreferencesDialog({
   value,
   upscale,
   keys,
+  generationProviders,
   saving,
   error,
   initialTab = 'image',
@@ -152,6 +154,8 @@ export function CanvasGenerationPreferencesDialog({
   value: CanvasGenerationDefaults;
   upscale: CanvasUpscalePreferences;
   keys: KeyView[];
+  /** 各生成类型的默认模型可选「自动」；AI高清仍只用真实 KEY。缺省时同 keys。 */
+  generationProviders?: KeyView[];
   saving: boolean;
   error: string | null;
   /** 从「前往配置」进来时直接落在 AI高清 页签。 */
@@ -204,13 +208,14 @@ export function CanvasGenerationPreferencesDialog({
     }));
   }
 
-  const choices = useMemo<CanvasModelChoice[]>(() => keys.flatMap(key => key.models
+  const providers = generationProviders ?? keys;
+  const choices = useMemo<CanvasModelChoice[]>(() => providers.flatMap(key => key.models
     .filter(model => canvasGenerationModelSupportsMode(key, model, activeMode))
-    .map(model => ({ key, model }))), [activeMode, keys]);
+    .map(model => ({ key, model }))), [activeMode, providers]);
   const selectedChoice = preference.selection
     ? choices.find(choice => (
-        choice.key.alias === preference.selection?.alias
-        && choice.model.id === preference.selection.model
+        choice.key === providerForAlias(providers, preference.selection?.alias)
+        && choice.model.id === preference.selection?.model
       )) ?? null
     : null;
   const effectiveChoice = selectedChoice ?? choices[0] ?? null;
@@ -256,16 +261,20 @@ export function CanvasGenerationPreferencesDialog({
     }
   }
 
+  // 「自动」按组内第一个成员算参数控件；图片可选范围取成员交集。
+  const effectiveChannel = effectiveChoice ? routeChannel(effectiveChoice.key, effectiveChoice.model) : null;
   const imageCaps = activeMode === 'image' && effectiveChoice
-    ? imageControlCaps(
-        effectiveChoice.model.id,
-        effectiveChoice.key.provider,
-        effectiveChoice.key.base_url,
-      )
+    ? isAutoProvider(effectiveChoice.key)
+      ? selectionImageCaps(effectiveChoice.key, effectiveChoice.model.id)
+      : imageControlCaps(
+          effectiveChoice.model.id,
+          effectiveChoice.key.provider,
+          effectiveChoice.key.base_url,
+        )
     : null;
   // 生成方式不是偏好（新节点一律全能参考），这里只留模型支持的那一种，不显示切换。
-  const rawVideoCaps = activeMode === 'video' && effectiveChoice
-    ? canvasVideoEditCaps(effectiveChoice.model.id, effectiveChoice.model.protocol)
+  const rawVideoCaps = activeMode === 'video' && effectiveChannel
+    ? canvasVideoEditCaps(effectiveChannel.model.id, effectiveChannel.model.protocol)
     : null;
   const videoMode: VideoMode = rawVideoCaps?.modes.includes('omni') ? 'omni' : 'firstlast';
   const videoCaps = rawVideoCaps ? { ...rawVideoCaps, modes: [videoMode] } : null;
@@ -486,8 +495,8 @@ export function CanvasGenerationPreferencesDialog({
                 {activeMode === 'image' && imageCaps && (
                   <CanvasImageSettings
                     caps={imageCaps}
-                    model={effectiveChoice.model.id}
-                    baseUrl={effectiveChoice.key.base_url}
+                    model={effectiveChannel!.model.id}
+                    baseUrl={effectiveChannel!.key.base_url}
                     params={params}
                     menuDirection="up"
                     portalContainerRef={dialogContentRef}
@@ -545,7 +554,7 @@ export function CanvasGenerationPreferencesDialog({
           <Button
             type="button"
             disabled={saving}
-            onClick={() => onSave(defaultsForSave(draft, keys), upscaleForSave(upscaleDraft, keys))}
+            onClick={() => onSave(defaultsForSave(draft, providers), upscaleForSave(upscaleDraft, keys))}
           >
             <SwapLabel active={Boolean(saving)} on="保存中…" off="保存偏好" />
           </Button>

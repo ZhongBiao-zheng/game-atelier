@@ -84,6 +84,8 @@ import {
 } from '@/api/canvas';
 import { getCanvasUiPreferences, saveCanvasUiPreferences } from '@/api/canvasUi';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
+import { listModelRoutes, type ModelRoute } from '@/api/models';
+import { withAutoProvider } from '@/lib/modelRoutes';
 import { useCanvasJobSync } from '@/hooks/useCanvasJobSync';
 import { useCanvasBatchRuns } from '@/hooks/useCanvasBatchRuns';
 import { prepareCanvasBatch, startCanvasBatch, cancelCanvasBatch } from '@/api/canvasBatch';
@@ -457,15 +459,25 @@ function CanvasEditorInner({
   const [document, setDocument] = useState<CanvasDocument | null>(null);
   const [projects, setProjects] = useState<Array<{ project_id: string; name: string }>>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
+  const [routes, setRoutes] = useState<ModelRoute[]>([]);
+  // 生成节点选模型用的厂商列表 =「自动」+ 真实 KEY；局部编辑、分层、AI高清等单项工具仍只用真实 KEY。
+  const providers = useMemo(() => withAutoProvider(keys, routes), [keys, routes]);
   // 公告「快速添加」等别处改了密钥的模型列表：只刷新列表，不动节点上已选的模型。
   useEffect(() => {
     const refresh = () => {
       void listKeys().then(resp => setKeys([...resp.keys].sort((left, right) => (
         Number(Boolean(right.is_default)) - Number(Boolean(left.is_default))
       )))).catch(() => undefined);
+      void listModelRoutes().then(setRoutes).catch(() => undefined);
     };
     window.addEventListener(KEYS_CHANGED_EVENT, refresh);
     return () => window.removeEventListener(KEYS_CHANGED_EVENT, refresh);
+  }, []);
+  // 路由列表单独读：只决定有没有「自动」项，读不到或慢都不挡画布打开。
+  useEffect(() => {
+    let cancelled = false;
+    void listModelRoutes().then(rows => { if (!cancelled) setRoutes(rows); }).catch(() => undefined);
+    return () => { cancelled = true; };
   }, []);
   const [canvasUiPreferences, setCanvasUiPreferences] = useState<CanvasUiPreferences>(DEFAULT_CANVAS_UI_PREFERENCES);
   const [canvasUiPreferencesError, setCanvasUiPreferencesError] = useState<string | null>(null);
@@ -1918,8 +1930,8 @@ function CanvasEditorInner({
     ),
   );
   const selectedDraft = useMemo(() => selectedNode && !selectedIsUploadedImageMaterial
-    ? resolveCanvasGenerationDraft(selectedNode, keys, canvasUiPreferences.generation_defaults.text)
-    : null, [selectedNode, selectedIsUploadedImageMaterial, keys, canvasUiPreferences.generation_defaults.text]);
+    ? resolveCanvasGenerationDraft(selectedNode, providers, canvasUiPreferences.generation_defaults.text)
+    : null, [selectedNode, selectedIsUploadedImageMaterial, providers, canvasUiPreferences.generation_defaults.text]);
   const generationPanelOpen = Boolean(
     selectedNode
     && selectedDraft
@@ -2426,7 +2438,7 @@ function CanvasEditorInner({
   }
 
   function addGenerationNode(kind: JobKind, menu: CreateMenuState | null = createMenu) {
-    const draft = createCanvasGenerationDraft(keys, kind, {
+    const draft = createCanvasGenerationDraft(providers, kind, {
       inputPolicy: 'all_connected',
       preference: canvasUiPreferences.generation_defaults[kind],
     });
@@ -3941,7 +3953,7 @@ function CanvasEditorInner({
     if (!current) return;
     const newNodeId = makeId('image');
     const next = createConnectedCanvasSurface(current, nodeId,
-      createCanvasGenerationDraft(keys, 'image', {
+      createCanvasGenerationDraft(providers, 'image', {
         preference: canvasUiPreferences.generation_defaults.image,
       }), { nodeId: newNodeId, connectionId: makeId('connection') }, 'image');
     if (!next) { setError('这个节点没有可用的内容。'); return; }
@@ -3950,7 +3962,7 @@ function CanvasEditorInner({
     setDismissedGenerationPanelNodeId(null);
     setSelectedConnectionIds(new Set());
     setSelectedNodeIds(new Set([newNodeId]));
-  }, [canvasUiPreferences.generation_defaults.image, commit, keys]);
+  }, [canvasUiPreferences.generation_defaults.image, commit, providers]);
 
   const submitAngle = useCallback(async (params: CanvasAngleParams) => {
     if (!angleState || runSubmissionInFlight.current) return;
@@ -4390,6 +4402,7 @@ function CanvasEditorInner({
     mentionReferencesByNodeId,
     resolveVersion,
     keys,
+    generationProviders: providers,
     jobsByRunId,
     jobsByResultNodeId,
     submittingNodeIds,
@@ -4473,6 +4486,7 @@ function CanvasEditorInner({
     jobsByResultNodeId,
     jobsByRunId,
     keys,
+    providers,
     mediaReplaceBusyNodeIds,
     mediaReplaceError,
     materialReferences,
@@ -5134,7 +5148,7 @@ function CanvasEditorInner({
                   ...current,
                   nodes: current.nodes.map(node => {
                     if (node.id !== selectedNode.id) return node;
-                    const draft = resolveCanvasGenerationDraft(node, keys, canvasUiPreferences.generation_defaults.text);
+                    const draft = resolveCanvasGenerationDraft(node, providers, canvasUiPreferences.generation_defaults.text);
                     if (!draft) return node;
                     const params = {
                       ...draft.params,
@@ -5278,6 +5292,7 @@ function CanvasEditorInner({
           upscale={canvasUiPreferences.upscale}
           initialTab={generationPreferencesTab}
           keys={keys}
+          generationProviders={providers}
           saving={generationPreferencesSaving}
           error={canvasUiPreferencesError}
           onOpenChange={open => {

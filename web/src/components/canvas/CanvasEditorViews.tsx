@@ -68,6 +68,7 @@ import { formatCanvasBytes, formatCanvasImageInfo } from '@/components/canvas/ca
 import { CANVAS_UPSCALE_TARGETS, IMAGE_TOOLBAR_INLINE_LIMIT, orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
 import { isUploadedImageMaterialNode } from '@/components/canvas/canvasNodePanelInteraction';
 import { imageControlCaps } from '@/lib/imageControlCaps';
+import { isAutoProvider, providerForAlias, routeChannel, selectionImageCaps, storedAlias } from '@/lib/modelRoutes';
 import { VideoControls } from '@/components/studio/VideoControls';
 import {
   videoReferenceLimitLabel,
@@ -154,6 +155,8 @@ export interface CanvasNodeContextValue {
   /** 按 version_id 取内容。常量引用，不随版本表变化——原因见 CanvasEditor 里的说明。 */
   resolveVersion: (versionId: string | null | undefined) => CanvasContentVersion | undefined;
   keys: KeyView[];
+  /** 生成节点选模型用：「自动」+ 真实 KEY。缺省时只有真实 KEY。 */
+  generationProviders?: KeyView[];
   jobsByRunId: ReadonlyMap<string, Job>;
   jobsByResultNodeId: ReadonlyMap<string, Job[]>;
   submittingNodeIds: ReadonlySet<string>;
@@ -1892,28 +1895,35 @@ export function CanvasGenerationComposer({
   const acceptsModel = (model: KeyView['models'][number], key: KeyView) => (
     canvasGenerationModelSupportsMode(key, model, draft.mode, { editingExistingVideo })
   );
-  const availableKeys = context.keys.filter(key => key.models.some(model => acceptsModel(model, key)));
+  const providers = context.generationProviders ?? context.keys;
+  const availableKeys = providers.filter(key => key.models.some(model => acceptsModel(model, key)));
   const modelChoices: CanvasModelChoice[] = availableKeys.flatMap(key => key.models
     .filter(model => acceptsModel(model, key))
     .map(model => ({ key, model })));
-  const selectedKey = context.keys.find(key => key.alias === draft.alias);
+  const selectedKey = providerForAlias(providers, draft.alias);
   const models = (selectedKey?.models ?? []).filter(model => acceptsModel(model, selectedKey!));
   const selectedModel = models.find(model => model.id === draft.model);
+  // 「自动」按组内第一个成员算参数（一期就是它出图）；图片可选范围取成员交集。
+  const channel = selectedKey && selectedModel ? routeChannel(selectedKey, selectedModel) : null;
+  const channelModelId = channel?.model.id ?? draft.model;
+  const channelProtocol = channel?.model.protocol;
   const imageCaps = draft.mode === 'image' && selectedModel
-    ? imageControlCaps(
-        draft.model,
-        selectedKey?.provider,
-        selectedKey?.base_url,
-      )
+    ? isAutoProvider(selectedKey)
+      ? selectionImageCaps(selectedKey, draft.model)
+      : imageControlCaps(
+          draft.model,
+          selectedKey?.provider,
+          selectedKey?.base_url,
+        )
     : null;
   // 两层都要 memo：canvasVideoEditCaps 每次调用都返回新对象，展开一层又造一个新对象。
   // 下面那条纠偏 effect 依赖 videoCaps，不 memo 的话它每一次 render 都重跑，而它会 commit
   // 首尾帧连接。selectedModel 取自 context.keys 里的元素，引用本身是稳的。
   const rawVideoCaps = useMemo(
     () => draft.mode === 'video' && selectedModel
-      ? canvasVideoEditCaps(draft.model, selectedModel.protocol)
+      ? canvasVideoEditCaps(channelModelId, channelProtocol)
       : null,
-    [draft.mode, draft.model, selectedModel],
+    [draft.mode, channelModelId, channelProtocol, selectedModel],
   );
   const videoCaps = useMemo(
     () => rawVideoCaps && editingExistingVideo
@@ -2020,7 +2030,7 @@ export function CanvasGenerationComposer({
     mode: draft.mode,
     modelChoiceCount: modelChoices.length,
     keyCount: context.keys.length,
-    alias: draft.alias,
+    alias: selectedKey?.alias ?? draft.alias,
     modelSelected: Boolean(selectedModel),
     prompt: draft.prompt,
   });
@@ -2219,9 +2229,13 @@ export function CanvasGenerationComposer({
           choices={modelChoices}
           alias={draft.alias ?? null}
           model={draft.model}
-          onSelect={({ key, model }) => {
+          onSelect={({ key: chosenKey, model: chosenModel }) => {
+            const { key, model } = routeChannel(chosenKey, chosenModel);
             const nextImageParams = draft.mode === 'image'
-              ? normalizeCanvasImageParams(model.id, key.provider, draft.params, key.base_url) : null;
+              ? normalizeCanvasImageParams(
+                  model.id, key.provider, draft.params, key.base_url,
+                  isAutoProvider(chosenKey) ? selectionImageCaps(chosenKey, chosenModel.id) : undefined,
+                ) : null;
             if (draft.mode === 'image') {
               const next = nextImageParams!;
               const modeChanged = hasImageSizeSelection(draft.params) && imageSizeMode(next) !== imageSizeMode(draft.params);
@@ -2250,8 +2264,8 @@ export function CanvasGenerationComposer({
             }
             updateDraftWithHistory(current => ({
               ...current,
-              alias: key.alias,
-              model: model.id,
+              alias: storedAlias(chosenKey),
+              model: chosenModel.id,
               params: draft.mode === 'image'
                 ? nextImageParams!
                 : draft.mode === 'text'
@@ -2288,18 +2302,23 @@ export function CanvasGenerationComposer({
           {draft.mode === 'image' && imageCaps && (
           <CanvasImageSettings
             caps={imageCaps}
-            model={draft.model}
-            baseUrl={selectedKey?.base_url}
+            model={channelModelId}
+            baseUrl={channel?.key.base_url}
             params={draft.params}
             onPatch={patch => updateDraftWithHistory(current => {
               const merged = { ...current.params, ...patch };
+              const currentKey = providerForAlias(providers, current.alias);
+              const currentModel = currentKey?.models.find(model => model.id === current.model);
+              const target = currentKey && currentModel ? routeChannel(currentKey, currentModel) : null;
               return {
                 ...current,
                 params: normalizeCanvasImageParams(
-                  current.model,
-                  context.keys.find(key => key.alias === current.alias)?.provider,
+                  target?.model.id ?? current.model,
+                  target?.key.provider,
                   merged,
-                  context.keys.find(key => key.alias === current.alias)?.base_url,
+                  target?.key.base_url,
+                  currentKey && currentModel && isAutoProvider(currentKey)
+                    ? selectionImageCaps(currentKey, currentModel.id) : undefined,
                 ),
               };
             })}
@@ -2356,15 +2375,15 @@ export function CanvasGenerationComposer({
             }))}
           />
         )}
-          {draft.mode === 'audio' && selectedKey && selectedModel && (
+          {draft.mode === 'audio' && channel && (
           <CanvasAudioSettings
             params={draft.params}
             onPatch={patch => updateDraftWithHistory(current => ({
               ...current,
               params: normalizeCanvasAudioParams(
-                current.model,
-                selectedKey.provider,
-                selectedModel.protocol,
+                channel.model.id,
+                channel.key.provider,
+                channel.model.protocol,
                 { ...current.params, ...patch },
               ),
             }))}
