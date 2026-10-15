@@ -152,3 +152,34 @@ def test_preference_selection_without_alias_routes(isolated_data_root):
     assert _selected_key_and_model(
         CanvasGenerationModelSelection(alias="HK", model="nano-banana"), "image",
     )[0].alias == "HK"
+
+
+def test_workshop_lists_auto_row_and_prepare_pins_the_resolved_key(isolated_data_root):
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from character_workflow.lib import data_root, projects
+    from character_workflow.lib.workshop_generation import model_rows, prepare_generation, read_request
+    from character_workflow.lib.workshop_schema import PrepareGenerationInput, TargetInput
+
+    for alias in ("A", "B"):
+        keys.add_key(keys.KeySpec(
+            alias=alias, provider="openai", access_key="test-only", modalities=["image"],
+            models=[keys.ModelSpec(id="gpt-image-2", name="gpt-image-2", modality="image")],
+            created_at="test"))
+    keys.set_default_alias("B")
+    auto = [row for row in model_rows("image") if row["alias"] is None]
+    assert [(row["model"], row["route_members"]) for row in auto] == [("gpt-image-2", ["B", "A"])]
+
+    project = projects.create_project("测试")
+    projects.assign_character("holy", project.id)
+    spec = data_root.characters_dir() / "holy" / "spec.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text("# 测试角色", encoding="utf-8")
+    local = SimpleNamespace(kind="local", session_id="test-human", grant_id=None)
+    target = TargetInput(target={"type": "character", "project_id": project.id,
+                                 "character_id": "holy", "asset_slot": "portrait"}).target
+    prepared = prepare_generation(local, PrepareGenerationInput(
+        target=target, prompt="x", model="gpt-image-2", params={"type": "image"},
+        idempotency_key=uuid4().hex))
+    assert read_request(prepared["request_id"]).input.alias == "B"

@@ -1426,9 +1426,10 @@ CanvasAgentCreationMode = Literal["all", "image", "video"]
 
 
 class CanvasAgentModelRef(BaseModel):
-    """模型偏好里的一项生成模型；同名模型可能挂在多个 Key 下，按别名 + 模型成对记。"""
+    """模型偏好里的一项生成模型；同名模型可能挂在多个 Key 下，按别名 + 模型成对记。
+    alias 为 None =「自动」：model 是路由 id，生成时按组内顺序解析 KEY。"""
     model_config = ConfigDict(extra="forbid")
-    alias: str = Field(min_length=1, max_length=120)
+    alias: str | None = Field(default=None, min_length=1, max_length=120)
     model: str = Field(min_length=1, max_length=200)
 
 

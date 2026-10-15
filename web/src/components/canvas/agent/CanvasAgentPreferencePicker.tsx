@@ -34,8 +34,12 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, dis
   const chosenCount = (kind: Kind) => (models ?? []).filter(item => item.kind === kind && isChosen(item)).length;
   const rows = useMemo(() => (models ?? []).filter(item => item.kind === activeKind), [models, activeKind]);
   const groups = useMemo(() => {
+    // alias 为 null 的是「自动」组。
     const byAlias = new Map<string, CanvasAgentGenerationModel[]>();
-    for (const item of rows) byAlias.set(item.alias, [...(byAlias.get(item.alias) ?? []), item]);
+    for (const item of rows) {
+      const label = item.alias ?? '自动';
+      byAlias.set(label, [...(byAlias.get(label) ?? []), item]);
+    }
     return [...byAlias.entries()];
   }, [rows]);
 

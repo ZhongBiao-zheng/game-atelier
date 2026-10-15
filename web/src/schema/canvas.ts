@@ -378,8 +378,9 @@ export type CanvasAgentPermissionMode = 'review' | 'auto';
 export type CanvasAgentCreationMode = 'all' | 'image' | 'video';
 
 /** 模型偏好里的一项生成模型（别名 + 模型成对）。 */
+/** alias 为 null =「自动」：model 是路由 id，生成时按组内顺序解析 KEY。 */
 export interface CanvasAgentModelRef {
-  alias: string;
+  alias: string | null;
   model: string;
 }
 export type CanvasAgentEffort = 'low' | 'medium' | 'high' | 'xhigh';

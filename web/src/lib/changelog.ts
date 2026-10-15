@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.90.2',
+    date: '2026-10-15',
+    headline: '设置里调整模型的供应商顺序',
+    changes: [
+      { kind: 'feat', text: '设置 → API 密钥下新增「模型路由」：多家共有的模型可以调整供应商顺序，「自动」按这个顺序选。' },
+      { kind: 'feat', text: '画布 Agent 与工坊也能选「自动」；工坊在准备生成时就定下供应商，批准的就是这一家。' },
+    ],
+  },
+  {
     version: '5.90.1',
     date: '2026-10-15',
     headline: '画布生成节点也能选「自动」',
