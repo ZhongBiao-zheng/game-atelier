@@ -57,6 +57,12 @@ function useWaveform(src: string): Waveform | null {
   return waveform;
 }
 
+/** 静音条高度 2–6px，按序号取伪随机值：同一位置每次渲染一样，拖动时不闪。 */
+function silenceBarHeight(index: number) {
+  const noise = Math.abs(Math.sin(index * 12.9898) * 43758.5453) % 1;
+  return 2 + Math.round(noise * 4);
+}
+
 function formatClock(seconds: number) {
   const safe = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
   return `${String(Math.floor(safe / 60)).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`;
@@ -131,11 +137,13 @@ export function CanvasAudioPlayer({
   const barCount = waveform?.peaks.length ?? Math.ceil(duration / secondsPerBar);
   const playheadBar = currentTime / secondsPerBar;
   const halfVisible = Math.ceil(waveWidth / 2 / BAR_PITCH) + 1;
-  const firstBar = Math.max(0, Math.floor(playheadBar) - halfVisible);
-  const lastBar = Math.min(barCount, Math.ceil(playheadBar) + halfVisible);
-  const bars: { index: number; peak: number }[] = [];
+  // 开头之前、结尾之后也铺满：用低矮的静音条补齐，播放头在两端时两侧不会空着。
+  const firstBar = Math.floor(playheadBar) - halfVisible;
+  const lastBar = Math.ceil(playheadBar) + halfVisible;
+  const bars: { index: number; peak: number | null }[] = [];
   for (let index = firstBar; index < lastBar; index += 1) {
-    bars.push({ index, peak: waveform?.peaks[index] ?? 0 });
+    const inside = index >= 0 && index < barCount;
+    bars.push({ index, peak: inside ? waveform?.peaks[index] ?? 0 : null });
   }
 
   return (
@@ -202,12 +210,14 @@ export function CanvasAudioPlayer({
               aria-hidden="true"
               className={cn(
                 'absolute top-1/2 -translate-y-1/2 rounded-full',
-                index < playheadBar ? 'bg-foreground/80' : 'bg-foreground/25',
+                peak === null
+                  ? 'bg-foreground/15'
+                  : index < playheadBar ? 'bg-foreground/80' : 'bg-foreground/25',
               )}
               style={{
                 left: `calc(50% + ${(index - playheadBar) * BAR_PITCH}px)`,
                 width: BAR_WIDTH,
-                height: `max(3px, ${Math.round(peak * 80)}%)`,
+                height: peak === null ? silenceBarHeight(index) : `max(3px, ${Math.round(peak * 80)}%)`,
               }}
             />
           ))}

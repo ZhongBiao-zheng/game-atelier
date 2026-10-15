@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.89.9',
+    date: '2026-10-15',
+    headline: '音频波形两端补齐',
+    changes: [
+      { kind: 'fix', text: '音频节点在开头或结尾时，播放头两侧用低矮的静音条补满，不再一半空着。' },
+    ],
+  },
+  {
     version: '5.89.8',
     date: '2026-10-15',
     headline: '音频节点可拖波形调进度',
