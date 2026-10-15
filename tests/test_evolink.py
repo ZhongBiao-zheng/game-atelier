@@ -47,6 +47,7 @@ def no_network(monkeypatch):
         pytest.fail("Every EvoLink HTTP call must be mocked")
     monkeypatch.setattr(evolink.requests, "get", forbidden)
     monkeypatch.setattr(evolink.requests, "post", forbidden)
+    monkeypatch.setattr(evolink, "_get_public_image", forbidden)
     monkeypatch.setattr(evolink.time, "sleep", lambda _seconds: None)
 
 
@@ -89,6 +90,8 @@ def wire(monkeypatch, *, submit=None, polls=None, downloads=None, observer=None)
 
     monkeypatch.setattr(evolink.requests, "post", post)
     monkeypatch.setattr(evolink.requests, "get", get)
+    monkeypatch.setattr(evolink, "_get_public_image", lambda url, **kwargs: get(
+        url, headers=evolink._IMAGE_HEADERS, allow_redirects=False))
     return posted, fetched
 
 
@@ -449,7 +452,7 @@ def test_download_redirect_cannot_reach_loopback(key, monkeypatch, tmp_path):
 
 
 def test_oversized_download_is_bounded(key, monkeypatch, tmp_path):
-    monkeypatch.setattr(evolink.requests, "get", lambda *args, **kwargs: Response(content=b"12345"))
+    monkeypatch.setattr(evolink, "_get_public_image", lambda url, **kwargs: Response(content=b"12345"))
     with pytest.raises(evolink.EvoLinkError, match="文件大小"):
         evolink._download("https://cdn.example.com/large.png", limit=4)
 

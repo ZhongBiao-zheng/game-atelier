@@ -66,7 +66,9 @@ def _switch_route(job_id: str, error: BaseException) -> bool:
     params = job.params
     if not params.route_id or not job.alias or params.provider_task_ids:
         return False
-    if (params.evolink_state or {}).get("uncertain"):
+    evo_state = params.evolink_state or {}
+    if (evo_state.get("uncertain") or evo_state.get("task_id")
+            or evo_state.get("terminal") in ("completed", "failed")):
         return False
     if any(item.get("outcome") == "unconfirmed" for item in params.video_submission_attempts or []):
         return False
@@ -79,6 +81,9 @@ def _switch_route(job_id: str, error: BaseException) -> bool:
     while (candidate := model_routes.next_member(modality, params.route_id, tried)) is not None:
         key, model = candidate
         next_params = params.model_dump(exclude_none=True)
+        if evo_state.get("terminal") == "rejected":
+            # Only a definite refusal can discard the previous channel's submission state.
+            next_params.pop("evolink_state", None)
         if modality == "image":
             from character_workflow.lib.image_size import normalize_image_size_params
             try:

@@ -12,12 +12,14 @@ import io
 import ipaddress
 import math
 import re
+import socket
 import time
 import warnings
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urljoin, urlsplit
+from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 import requests
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -31,6 +33,9 @@ _INPUT_LIMIT = 20 * 1024 * 1024
 _OUTPUT_LIMIT = 50 * 1024 * 1024
 _TRIES = 3
 _IMAGE_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "image/*"}
+_FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+# EvoLink's observed MJ output host. Only authenticated vendor HTTPS may use Clash Fake-IP.
+_VENDOR_IMAGE_HOSTS = {"openapi-youchuan.oss-cn-shanghai.aliyuncs.com"}
 _FORMATS = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp", "GIF": "image/gif"}
 _TASK_ID = re.compile(r"^[A-Za-z0-9._:-]{1,200}$")
 _FLAGS = re.compile(r"(?<!\S)--([A-Za-z][A-Za-z0-9_-]*)(?=\s|$)")
@@ -76,19 +81,71 @@ def channel_fingerprint(key) -> str:
 def _public_url(value: Any) -> str:
     if not isinstance(value, str) or len(value) > 1024:
         raise EvoLinkError("EvoLink 图片地址必须是 1024 字符以内的公网 HTTP(S) URL")
-    parts = urlsplit(value)
-    host = parts.hostname or ""
+    try:
+        parts = urlsplit(value)
+        host = (parts.hostname or "").rstrip(".")
+        parts.port
+    except ValueError:
+        raise EvoLinkError("EvoLink 图片地址无效") from None
     if (parts.scheme not in ("http", "https") or not host or parts.username or parts.password
-            or host == "localhost" or host.endswith((".localhost", ".local"))):
+            or "%" in host or host == "localhost" or host.endswith((".localhost", ".local"))):
         raise EvoLinkError("EvoLink 图片地址必须是公网 HTTP(S) URL")
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
-        pass
-    else:
-        if not address.is_global:
-            raise EvoLinkError("EvoLink 图片地址不能指向本机或私有网络")
+        try:
+            # libc also accepts abbreviated, integer and hexadecimal IPv4 spellings.
+            address = ipaddress.ip_address(socket.inet_aton(host))
+        except OSError:
+            return value
+    if not address.is_global or address.is_multicast:
+        raise EvoLinkError("EvoLink 图片地址不能指向本机或私有网络")
     return value
+
+
+class _ImageTLSAdapter(requests.adapters.HTTPAdapter):
+    """Connect to a checked IP while authenticating the original HTTPS hostname."""
+
+    def __init__(self, hostname: str):
+        self.hostname = hostname
+        super().__init__(max_retries=0)
+
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        super().init_poolmanager(connections, maxsize, block,
+                                 server_hostname=self.hostname, assert_hostname=self.hostname,
+                                 **pool_kwargs)
+
+
+@contextmanager
+def _get_public_image(url: str, *, address_index: int = 0):
+    parts = urlsplit(_public_url(url))
+    hostname = parts.hostname.encode("idna").decode("ascii")
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    try:
+        answers = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    except OSError:
+        raise requests.ConnectionError("EvoLink 图片域名无法解析") from None
+    addresses = list(dict.fromkeys(ipaddress.ip_address(answer[4][0]) for answer in answers))
+    vendor_https = parts.scheme == "https" and (
+        hostname in _VENDOR_IMAGE_HOSTS or hostname.endswith(".evolink.ai")
+    )
+    if not addresses or any(ip.is_multicast or (not ip.is_global and not (
+        vendor_https and ip in _FAKE_IP_NETWORK
+    )) for ip in addresses):
+        raise EvoLinkError("EvoLink 图片地址不能指向本机或私有网络")
+    # Rotate validated addresses within the caller's bounded retry budget (IPv6/IPv4).
+    address = str(addresses[address_index % len(addresses)])
+    if ":" in address:
+        address = f"[{address}]"
+    pinned_url = urlunsplit((parts.scheme, f"{address}:{port}", parts.path, parts.query, ""))
+    with requests.Session() as session:
+        # No ambient proxy/netrc credentials; a proxy would resolve the hostname again.
+        session.trust_env = False
+        if parts.scheme == "https":
+            session.mount("https://", _ImageTLSAdapter(hostname))
+        with session.get(pinned_url, headers={**_IMAGE_HEADERS, "Host": parts.netloc},
+                         timeout=(10, 60), stream=True, allow_redirects=False) as response:
+            yield response
 
 
 def _json(response) -> dict[str, Any]:
@@ -110,7 +167,7 @@ def _error(payload: dict, status: int, secret: str) -> str:
     message = re.sub(r"(?i)Bearer\s+\S+", "Bearer [已隐藏]", message)
     labels = {401: "密钥无效或已过期", 402: "额度不足", 403: "没有访问权限",
               429: "请求频率受限"}
-    label = "任务失败" if status == 200 else labels.get(status, f"HTTP {status}")
+    label = "任务失败" if status == 200 else f"HTTP {status} {labels.get(status, '')}".rstrip()
     return f"EvoLink {label}：{message[:600]}"
 
 
@@ -137,8 +194,7 @@ def _download(url: str, *, limit: int = _OUTPUT_LIMIT) -> bytes:
     status = None
     for attempt in range(_TRIES):
         try:
-            with requests.get(url, headers=_IMAGE_HEADERS, timeout=(10, 60), stream=True,
-                              allow_redirects=False) as resp:
+            with _get_public_image(url, address_index=attempt) as resp:
                 status = resp.status_code
                 if status in (301, 302, 303, 307, 308):
                     url = _public_url(urljoin(url, resp.headers.get("Location", "")))

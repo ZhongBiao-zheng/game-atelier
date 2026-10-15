@@ -139,3 +139,40 @@ def test_switch_stops_when_every_provider_failed(isolated_data_root, monkeypatch
     failed = read_job(job.job_id)
     assert calls == ["A", "B"]
     assert (failed.status, failed.alias, failed.params.route_tried) == (JobStatus.FAILED, "B", ["A"])
+
+
+@pytest.mark.parametrize(("status", "reason"), [
+    (401, "auth"), (403, "auth"), (404, "unavailable"), (402, "quota"), (429, "quota"),
+])
+def test_evolink_rejection_keeps_classifiable_status(status, reason):
+    from character_workflow.lib.callers.evolink import EvoLinkError, _error
+
+    assert model_routes.failover_reason(EvoLinkError(_error({}, status, ""))) == reason
+
+
+@pytest.mark.parametrize("state", [
+    {"channel": "previous-channel", "terminal": "rejected", "uncertain": False},
+    {"channel": "previous-channel", "uncertain": True},
+    {"channel": "previous-channel", "task_id": "accepted-order"},
+    {"channel": "previous-channel", "terminal": "completed"},
+])
+def test_evolink_route_switch_only_clears_definitely_rejected_state(
+    isolated_data_root, monkeypatch, state,
+):
+    from character_workflow.lib.callers.evolink import EvoLinkError
+
+    _seed_keys()
+    job = _job("gpt-image-2")
+    save_job(job.model_copy(update={
+        "params": job.params.model_copy(update={"evolink_state": state}),
+    }))
+    switched = job_runner._switch_route(job.job_id, EvoLinkError("EvoLink HTTP 401: invalid"))
+    current = read_job(job.job_id)
+    if state.get("terminal") == "rejected":
+        assert switched
+        assert current.alias == "B"
+        assert current.params.evolink_state is None
+    else:
+        assert not switched
+        assert current.alias == "A"
+        assert current.params.evolink_state == state
