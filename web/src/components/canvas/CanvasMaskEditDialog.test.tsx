@@ -1,39 +1,36 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import type { KeyView } from '@/api/keys';
 import type { CanvasMediaVersion } from '@/schema/canvas';
 import { CanvasMaskEditDialog } from './CanvasMaskEditDialog';
 
 const version: CanvasMediaVersion = {
   version_id: 'source', kind: 'image', path: 'source.png', mime_type: 'image/png',
-  bytes: 1024, width: 512, height: 512, sha256: 'a'.repeat(64),
+  bytes: 1024, width: 1024, height: 1024, sha256: 'a'.repeat(64),
   created_at: '2026-09-09T00:00:00Z', origin: { kind: 'upload', upload_id: 'source' },
 };
+const keys: KeyView[] = [{
+  alias: 'Tuzi', provider: 'custom', base_url: 'https://api.tu-zi.com/v1', access_key: 'masked',
+  secret_key: null, capabilities: [], notes: '', created_at: version.created_at,
+  models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image', protocol: 'openai' }],
+}];
 
-function key(alias: string, baseUrl: string): KeyView {
-  return {
-    alias, provider: 'custom', base_url: baseUrl, access_key: 'masked', secret_key: null,
-    capabilities: [], notes: '', created_at: '2026-09-09T00:00:00Z',
-    models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image', protocol: 'openai' }],
-  };
-}
-
-function openDialog(keys: KeyView[], width = 1360, height = 2048) {
+function mount(mode: 'inpaint' | 'outpaint' = 'inpaint') {
   const onSubmit = vi.fn();
   render(<CanvasMaskEditDialog open title="原图" version={version} mediaUrl="/source.png"
-    keys={keys} initialDraft={null} busy={false} error={null} onOpenChange={vi.fn()} onSubmit={onSubmit} />);
+    keys={keys} initialDraft={null} initialMode={mode} busy={false} error={null}
+    onOpenChange={vi.fn()} onSubmit={onSubmit} />);
   const image = screen.getByRole('img', { name: '原图' });
-  Object.defineProperties(image, { naturalWidth: { value: width }, naturalHeight: { value: height } });
+  Object.defineProperties(image, { naturalWidth: { value: 1024 }, naturalHeight: { value: 1024 } });
   fireEvent.load(image);
-  fireEvent.change(screen.getByLabelText('局部编辑提示词'), { target: { value: '换成木质建筑' } });
   return onSubmit;
 }
 
-describe('mask edit output size', () => {
+describe('image editor', () => {
   beforeEach(() => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
       clearRect: vi.fn(), fillRect: vi.fn(), drawImage: vi.fn(),
+      getImageData: () => ({ data: new Uint8ClampedArray([0, 0, 0, 255]) }),
     } as unknown as CanvasRenderingContext2D);
     vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(callback => {
       callback(new Blob(['mask'], { type: 'image/png' }));
@@ -41,38 +38,31 @@ describe('mask edit output size', () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it('uses real source pixels for a channel without verified AUTO support', async () => {
-    const onSubmit = openDialog([key('Unknown', 'https://unknown.example/v1')]);
-    expect(screen.getByLabelText('局部编辑输出尺寸')).toHaveTextContent('1360×2048');
-    fireEvent.click(screen.getByRole('button', { name: '生成局部编辑' }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
-    expect(onSubmit.mock.calls[0][0].draft.params).toMatchObject({
-      size_mode: 'custom', size: '1360x2048', custom_size: '1360x2048',
+  it('shows exact source dimensions instead of AUTO and blocks an empty selection', () => {
+    mount();
+    expect(screen.getByLabelText('编辑输出尺寸')).toHaveTextContent('1024 × 1024');
+    expect(screen.getByRole('button', { name: '生成' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '矩形' })).toBeInTheDocument();
+  });
+
+  it('permits empty prompts for an expanded frame and freezes its geometry', async () => {
+    const onSubmit = mount('outpaint');
+    fireEvent.change(screen.getByLabelText('目标宽度'), { target: { value: '1536' } });
+    fireEvent.change(screen.getByLabelText('目标高度'), { target: { value: '1024' } });
+    fireEvent.click(screen.getByRole('button', { name: '生成' }));
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+    expect(onSubmit.mock.calls[0][0].options).toMatchObject({
+      mode: 'outpaint', width: 1536, height: 1024, source_version_id: 'source',
     });
+    expect(onSubmit.mock.calls[0][0].draft.prompt).toBe('');
+    expect(onSubmit.mock.calls[0][0].draft.params.size_mode).not.toBe('auto');
   });
 
-  it.each(['https://api.openai-hk.com', 'https://api.tu-zi.com/v1'])('uses AUTO for verified channel %s and updates the summary when switching keys', async (baseUrl) => {
-    const onSubmit = openDialog([key('Unknown', 'https://unknown.example/v1'), key('Verified', baseUrl)]);
-    fireEvent.change(screen.getByLabelText('局部编辑密钥'), { target: { value: 'Verified' } });
-    expect(screen.getByLabelText('局部编辑输出尺寸')).toHaveTextContent('AUTO');
-    fireEvent.click(screen.getByRole('button', { name: '生成局部编辑' }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
-    expect(onSubmit.mock.calls[0][0].draft.params).toMatchObject({ size_mode: 'auto', size: 'auto' });
-  });
-
-  it('previews normalized pixels before submitting custom source dimensions', async () => {
-    const onSubmit = openDialog([key('Unknown', 'https://unknown.example/v1')], 1361, 2049);
-    expect(screen.getByLabelText('局部编辑输出尺寸')).toHaveTextContent('1360×2048');
-    fireEvent.click(screen.getByRole('button', { name: '生成局部编辑' }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
-    expect(onSubmit.mock.calls[0][0].draft.params.size).toBe('1360x2048');
-  });
-
-  it('blocks unsupported source aspect ratios instead of silently changing the image', () => {
-    const onSubmit = openDialog([key('Unknown', 'https://unknown.example/v1')], 4000, 1000);
-    expect(screen.getByRole('alert')).toHaveTextContent('不能超过 3:1');
-    expect(screen.getByRole('button', { name: '生成局部编辑' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: '生成局部编辑' }));
-    expect(onSubmit).not.toHaveBeenCalled();
+  it('includes a 21:9 preset without allowing a frame to crop the original', () => {
+    mount('outpaint');
+    fireEvent.change(screen.getByLabelText('扩图比例'), { target: { value: '21:9' } });
+    expect(Number((screen.getByLabelText('目标宽度') as HTMLInputElement).value)).toBeGreaterThan(1024);
+    fireEvent.change(screen.getByLabelText('目标宽度'), { target: { value: '100' } });
+    expect(screen.getByRole('button', { name: '生成' })).toBeDisabled();
   });
 });
