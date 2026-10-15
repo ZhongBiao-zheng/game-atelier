@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, Response
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from character_workflow.lib import data_root, keys
+from character_workflow.lib import data_root, keys, model_routes
 from character_workflow.lib.active_character import read_active, write_active
 from character_workflow.lib.character_derivatives import (
     character_display_name,
@@ -1417,6 +1417,40 @@ def list_keys() -> dict:
     return {"keys": keys.keys_for_api(), "default_alias": db.default_alias}
 
 
+def _route_payload(route: model_routes.ModelRoute) -> dict:
+    return {
+        "id": route.id, "name": route.name, "modality": route.modality,
+        "members": [
+            {"alias": m.alias, "provider": m.provider, "base_url": m.base_url,
+             "model_id": m.model_id, "name": m.name, "protocol": m.protocol}
+            for m in route.members
+        ],
+    }
+
+
+@router.get("/models")
+def list_model_routes() -> dict:
+    return {"models": [_route_payload(route) for route in model_routes.list_routes()]}
+
+
+class _ModelOrderPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    modality: Literal["text", "image", "video", "audio"]
+    id: str = Field(min_length=1, max_length=200)
+    aliases: list[str] = Field(min_length=1)
+
+
+@router.put("/models/order")
+def set_model_route_order(payload: _ModelOrderPayload) -> dict:
+    try:
+        route = model_routes.set_route_order(payload.modality, payload.id, payload.aliases)
+    except model_routes.NoSuchRouteError as error:
+        raise HTTPException(404, str(error)) from None
+    except model_routes.InvalidRouteOrderError as error:
+        raise HTTPException(422, str(error)) from None
+    return _route_payload(route)
+
+
 @router.post("/keys", status_code=201)
 def create_key(payload: _KeyCreatePayload) -> dict:
     from datetime import datetime, timezone
@@ -2187,13 +2221,19 @@ def _create_user_job(
         raise HTTPException(status_code=422, detail="生成提示词不能为空")
     if body.kind not in {JobKind.IMAGE, JobKind.VIDEO}:
         raise HTTPException(422, detail="创作台目前只接受图片或视频任务")
-    db = keys.read_keys_db()
-    alias = body.alias or db.default_alias
-    if not alias:
-        raise HTTPException(status_code=400, detail="no default key configured")
-    key_row = next((k for k in db.keys if k.alias == alias), None)
-    if not key_row:
-        raise HTTPException(status_code=400, detail=f"unknown alias {alias}")
+    if body.alias:
+        key_row = keys.find_by_alias(body.alias)
+        if not key_row:
+            raise HTTPException(status_code=400, detail=f"unknown alias {body.alias}")
+        model_id = body.model
+    else:
+        # 不指定厂商 =「自动」：body.model 是路由 id，按组内顺序解析出实际 KEY 与模型。
+        try:
+            key_row, model_spec = model_routes.resolve_auto(body.kind.value, body.model)
+        except model_routes.NoSuchRouteError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        model_id = model_spec.id
+    alias = key_row.alias
     params = body.params.model_copy(deep=True)
     # Provider task handles are runner-owned.  A Studio create request always represents a new
     # order and may not attach itself to an arbitrary existing Tuzi task.
@@ -2208,7 +2248,7 @@ def _create_user_job(
 
         try:
             params = JobParams(**normalize_image_size_params(
-                key_row, body.model, params.model_dump(exclude_none=True),
+                key_row, model_id, params.model_dump(exclude_none=True),
             ))
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
@@ -2222,7 +2262,7 @@ def _create_user_job(
         character_id=alias,
         prompt=prompt,
         submitted_at=datetime.now(timezone.utc).isoformat(),
-        model=body.model,
+        model=model_id,
         params=params,
         output_paths=[],
         status=JobStatus.PENDING,

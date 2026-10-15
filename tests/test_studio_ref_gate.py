@@ -23,7 +23,8 @@ def client(isolated_data_root, monkeypatch):
         "default_alias": "default",
         "keys": [{
             "alias": "default", "provider": "openai", "access_key": "sk-fake",
-            "secret_key": None, "capabilities": [], "models": [], "notes": "",
+            "secret_key": None, "capabilities": [],
+            "models": [{"id": "gpt-image-2", "name": "gpt-image-2", "modality": "image"}], "notes": "",
             "created_at": "2026-05-25T00:00:00+00:00",
         }],
     }))

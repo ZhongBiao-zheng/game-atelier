@@ -88,6 +88,8 @@ class KeysDB(BaseModel):
     default_alias: str | None = None
     keys: list[KeySpec] = Field(default_factory=list)
     oss: OssConfig | None = None
+    # 模型路由组内的供应商顺序覆盖：{模态: {路由 id: [alias, ...]}}，只存调整过的组。
+    model_order: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
 
 
 class DuplicateAliasError(Exception):
@@ -125,6 +127,20 @@ def _migrate_legacy_providers(raw: object) -> None:
     for row in rows:
         if isinstance(row, dict) and row.get("provider") == "zhenzhen":
             row["provider"] = "custom"
+
+
+def model_modality(spec: ModelSpec, key: KeySpec) -> ModelModality:
+    """模型级标注优先；未标注时按 key 级 modalities 兜底（与前端 modelModality 同义）。"""
+    if spec.modality is not None:
+        return spec.modality
+    modalities = set(key.modalities)
+    if modalities == {"video"}:
+        return "video"
+    if modalities == {"audio"}:
+        return "audio"
+    if modalities == {"llm"}:
+        return "text"
+    return "image"
 
 
 def _is_video_model(spec: "ModelSpec", key: "KeySpec") -> bool:
@@ -213,6 +229,15 @@ def delete_key(alias: str) -> None:
     db.keys = [k for k in db.keys if k.alias != alias]
     if db.default_alias == alias:
         db.default_alias = None
+    db.model_order = {
+        modality: kept
+        for modality, routes in db.model_order.items()
+        if (kept := {
+            route_id: [item for item in aliases if item != alias]
+            for route_id, aliases in routes.items()
+            if any(item != alias for item in aliases)
+        })
+    }
     write_keys_db(db)
 
 

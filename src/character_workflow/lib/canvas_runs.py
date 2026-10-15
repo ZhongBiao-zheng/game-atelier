@@ -42,7 +42,8 @@ from character_workflow.lib.jobs import (
     update_job_status,
     write_job_under_lock,
 )
-from character_workflow.lib.keys import KeySpec, ModelSpec, read_keys_db
+from character_workflow.lib.keys import KeySpec, ModelSpec, model_modality, read_keys_db
+from character_workflow.lib.model_routes import NoSuchRouteError, resolve_auto
 from character_workflow.lib.prompt_variables import resolve_prompt_variables
 from character_workflow.lib.schemas import (
     AssetSlot,
@@ -50,6 +51,7 @@ from character_workflow.lib.schemas import (
     CanvasBatchJobOrigin,
     CanvasContentVersion,
     CanvasDocument,
+    CanvasGenerationModelSelection,
     CanvasGenerationDraft,
     CanvasGenerationSnapshot,
     CanvasAudioNode,
@@ -443,17 +445,18 @@ def recover_canvas_transactions_unlocked(project_id: str) -> None:
             raise RuntimeError(f"invalid canvas transaction {path.name}") from error
 
 
-def _model_modality(model: ModelSpec, key: KeySpec) -> str:
-    if model.modality is not None:
-        return model.modality
-    modalities = set(key.modalities)
-    if modalities == {"video"}:
-        return "video"
-    if modalities == {"audio"}:
-        return "audio"
-    if modalities == {"llm"}:
-        return "text"
-    return "image"
+def _selected_key_and_model(
+    selection: CanvasGenerationModelSelection, modality: str,
+) -> tuple[KeySpec, ModelSpec] | None:
+    """偏好里的模型选择：指定厂商按 alias 找；alias 为空即「自动」，按路由解析。"""
+    if selection.alias is None:
+        try:
+            return resolve_auto(modality, selection.model)
+        except NoSuchRouteError:
+            return None
+    key = next((item for item in read_keys_db().keys if item.alias == selection.alias), None)
+    model = next((item for item in key.models if item.id == selection.model), None) if key else None
+    return (key, model) if key and model else None
 
 
 def _keys_default_first() -> list[KeySpec]:
@@ -480,7 +483,7 @@ def _resolve_reverse_prompt_model() -> tuple[KeySpec, ModelSpec]:
     for key in _keys_default_first():
         for model in key.models:
             if (
-                _model_modality(model, key) == "text"
+                model_modality(model, key) == "text"
                 and "image" in model.input_modalities
                 and _supports_openai_text(key, model)
             ):
@@ -499,7 +502,7 @@ def _resolve_layer_decomposition_model(alias: str, model_id: str) -> tuple[KeySp
     if (
         key
         and model
-        and _model_modality(model, key) == "image"
+        and model_modality(model, key) == "image"
         and supports_layer_decomposition(key, model.id)
     ):
         return key, model
@@ -512,7 +515,7 @@ def _resolve_layer_decomposition_model(alias: str, model_id: str) -> tuple[KeySp
 def _supports_canvas_image_generation(key: KeySpec, model: ModelSpec) -> bool:
     from character_workflow.lib.callers.openai_image import image_family, resolve_image_protocol
 
-    if _model_modality(model, key) != "image" or key.provider == "nano_banana":
+    if model_modality(model, key) != "image" or key.provider == "nano_banana":
         return False
     if image_family(model.id) == "midjourney" or key.provider == "openrouter":
         return True
@@ -602,19 +605,10 @@ def _resolve_default_image_model() -> tuple[KeySpec, ModelSpec, JobParams]:
             "画布生成偏好文件损坏，请先在画布中重新保存生成偏好。",
         ) from error
     if preference.selection is not None:
-        for key in keys:
-            if key.alias != preference.selection.alias:
-                continue
-            for model in key.models:
-                if (
-                    model.id == preference.selection.model
-                    and _supports_canvas_image_generation(key, model)
-                ):
-                    return key, model, _normalized_image_preference_params(
-                        key,
-                        model,
-                        preference.params,
-                    )
+        selected = _selected_key_and_model(preference.selection, "image")
+        if selected is not None and _supports_canvas_image_generation(*selected):
+            key, model = selected
+            return key, model, _normalized_image_preference_params(key, model, preference.params)
     for key in keys:
         for model in key.models:
             if _supports_canvas_image_generation(key, model):
@@ -632,7 +626,7 @@ def _resolve_default_image_edit_model() -> tuple[KeySpec, ModelSpec]:
     for key in _keys_default_first():
         for model in key.models:
             if (
-                _model_modality(model, key) == "image"
+                model_modality(model, key) == "image"
                 and max_reference_images(model.id) >= 1
             ):
                 return key, model
@@ -645,17 +639,20 @@ def _resolve_default_image_edit_model() -> tuple[KeySpec, ModelSpec]:
 def _resolve_key_and_model(
     draft: CanvasGenerationDraft,
 ) -> tuple[KeySpec, ModelSpec, JobKind]:
-    database = read_keys_db()
-    alias = draft.alias or database.default_alias
-    if not alias:
-        raise ValueError("请先选择生成密钥")
-    key = next((item for item in database.keys if item.alias == alias), None)
-    if key is None:
-        raise ValueError(f"找不到生成密钥 {alias}")
-    model = next((item for item in key.models if item.id == draft.model), None)
-    if model is None:
-        raise ValueError("所选模型不属于当前密钥")
-    kind = JobKind(_model_modality(model, key))
+    if draft.alias is None:
+        # 不指定厂商 =「自动」：draft.model 是路由 id，按组内顺序解析出实际 KEY 与模型。
+        try:
+            key, model = resolve_auto(draft.mode, draft.model)
+        except NoSuchRouteError as error:
+            raise ValueError(str(error)) from None
+    else:
+        key = next((item for item in read_keys_db().keys if item.alias == draft.alias), None)
+        if key is None:
+            raise ValueError(f"找不到生成密钥 {draft.alias}")
+        model = next((item for item in key.models if item.id == draft.model), None)
+        if model is None:
+            raise ValueError("所选模型不属于当前密钥")
+    kind = JobKind(model_modality(model, key))
     if kind.value != draft.mode:
         raise ValueError("所选模型与节点生成类型不匹配")
     return key, model, kind
@@ -2036,12 +2033,9 @@ def _resolve_upscale_model(target: str) -> tuple[KeySpec, ModelSpec, str | None,
         ) from error
     keys = _keys_default_first()
     if tier.selection is not None:
-        for key in keys:
-            if key.alias != tier.selection.alias:
-                continue
-            for model in key.models:
-                if model.id == tier.selection.model and _upscale_model_eligible(key, model):
-                    return key, model, tier.quality, tier.prompt
+        selected = _selected_key_and_model(tier.selection, "image")
+        if selected is not None and _upscale_model_eligible(*selected):
+            return *selected, tier.quality, tier.prompt
         raise CanvasRunCommandError(
             "canvas_upscale_model_stale",
             f"已保存的 {target} 档 AI高清模型不再可用，请在生成偏好里重新选择。",

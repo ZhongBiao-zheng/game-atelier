@@ -43,8 +43,9 @@ export interface CanvasUiPreferences {
   updated_at: string | null;
 }
 
+/** alias 为 null =「自动」：model 是路由 id，提交时服务端按组内顺序解析 KEY。 */
 export interface CanvasGenerationModelSelection {
-  alias: string;
+  alias: string | null;
   model: string;
 }
 

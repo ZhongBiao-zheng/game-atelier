@@ -450,7 +450,8 @@ class CanvasImageToolbarPreferences(BaseModel):
 
 class CanvasGenerationModelSelection(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    alias: str = Field(min_length=1, max_length=120)
+    # None =「自动」：model 是路由 id，提交时按组内顺序解析 KEY（见 model_routes）。
+    alias: str | None = Field(default=None, min_length=1, max_length=120)
     model: str = Field(min_length=1, max_length=200)
 
 

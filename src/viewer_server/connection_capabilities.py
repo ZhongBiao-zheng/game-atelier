@@ -66,6 +66,8 @@ PATCH /api/keys/{alias}
 DELETE /api/keys/{alias}
 GET /api/keys/{alias}/reveal
 POST /api/keys/models-preview
+GET /api/models
+PUT /api/models/order
 GET /api/gallery/recent
 GET /api/gallery/screens
 GET /api/gallery/hidden
@@ -169,7 +171,7 @@ GET /api/workshop/requests/{request_id}/references/{media_id}
 
 LOCAL_MANAGEMENT = frozenset({
     "/api/config", "/api/keys", "/api/keys/{alias}", "/api/keys/{alias}/reveal",
-    "/api/keys/models-preview", "/api/folder-picker", "/api/onboarding/status",
+    "/api/keys/models-preview", "/api/models/order", "/api/folder-picker", "/api/onboarding/status",
     "/api/onboarding/data-root",
     # 挂载团队库 = 往本机任意目录写清单并整棵扫描，同 folder-picker 只给本机页面。
     "/api/team-libraries",
