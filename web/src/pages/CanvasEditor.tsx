@@ -3950,12 +3950,12 @@ function CanvasEditorInner({
       if (generate) {
         if (!await submitImageEdit(saved.id)) return true;
         setMaskEdit(null);
-      } else announceToolNotice('编辑已保存');
+      }
       return true;
     } catch (error) {
       setMaskEditError((error as Error).message); return false;
     } finally { setMaskEditBusy(false); }
-  }, [announceToolNotice, maskEdit, maskEditBusy, persistImageEdit, submitImageEdit]);
+  }, [maskEdit, maskEditBusy, persistImageEdit, submitImageEdit]);
 
   const openAngle = useCallback((node: CanvasContentNode) => {
     const versionId = node.data.current_version_id;

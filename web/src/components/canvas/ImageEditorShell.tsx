@@ -1,7 +1,6 @@
 import { LoaderCircle, Maximize, Minus, Plus, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import type { KeyView } from '@/api/keys';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import type { CanvasGenerationDraft, CanvasImageEditEditorState, CanvasImageEditNode, CanvasImageEditSettings, CanvasMediaVersion } from '@/schema/canvas';
 
@@ -71,31 +70,32 @@ const glass = 'border border-border bg-glass backdrop-blur-glass';
 export const editorIconButton = 'inline-flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4';
 export const editorChip = 'inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-3 text-xs text-foreground';
 
-export function ImageEditorShell({ open, heading, icon: Icon, subtitle, viewport, busy, dirty, onClose, onKeyDown, onKeyUp,
+export function ImageEditorShell({ open, heading, icon: Icon, viewport, busy, dirty, onClose, onAutoSave, onKeyDown, onKeyUp,
   toolbar, stage, composer, stageBottom = 'bottom-44' }: {
-  open: boolean; heading: string; icon: LucideIcon; subtitle: string; viewport: EditorViewport;
+  open: boolean; heading: string; icon: LucideIcon; viewport: EditorViewport;
   busy: boolean; dirty: boolean; onClose: () => void;
+  /** 关闭前自动保存未保存的修改；失败时留在编辑器里显示错误。 */
+  onAutoSave: () => Promise<boolean>;
   onKeyDown?: (event: KeyboardEvent) => void; onKeyUp?: (event: KeyboardEvent) => void;
   toolbar?: ReactNode; stage: ReactNode; composer: ReactNode;
   /** 舞台底边，需要让出底部输入栏的高度。 */
   stageBottom?: string;
 }) {
-  const [confirming, setConfirming] = useState(false);
-  function requestClose() {
+  async function requestClose() {
     if (busy) return;
-    if (dirty) setConfirming(true); else onClose();
+    if (dirty && !await onAutoSave()) return;
+    onClose();
   }
   return <>
-    <Dialog open={open} onOpenChange={next => { if (!next) requestClose(); }}>
+    <Dialog open={open} onOpenChange={next => { if (!next) void requestClose(); }}>
       <DialogContent hideClose onKeyDown={onKeyDown} onKeyUp={onKeyUp}
         className="edit-dot-grid left-0 top-0 block h-dvh w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden rounded-none border-0 bg-background p-0">
         <DialogDescription className="sr-only">{heading}：编辑完成后生成新的图片节点。</DialogDescription>
         <div ref={viewport.measure} className={`absolute inset-x-0 top-20 touch-none ${stageBottom}`}>{stage}</div>
         <div className={`absolute left-4 top-4 flex h-11 items-center gap-1.5 rounded-full pl-1 pr-4 ${glass}`}>
-          <button type="button" aria-label="关闭编辑器" className={editorIconButton} disabled={busy} onClick={requestClose}><X /></button>
+          <button type="button" aria-label="关闭编辑器" className={editorIconButton} disabled={busy} onClick={() => void requestClose()}><X /></button>
           <Icon className="size-4 text-primary" aria-hidden />
           <DialogTitle className="text-sm font-medium">{heading}</DialogTitle>
-          <span className="ml-1.5 hidden whitespace-nowrap font-mono text-xs text-muted-foreground xl:inline">{subtitle}</span>
         </div>
         {toolbar && <div role="toolbar" aria-label={`${heading}工具`}
           className={`absolute left-1/2 top-4 flex h-11 -translate-x-1/2 items-center gap-0.5 whitespace-nowrap rounded-xl px-1 ${glass}`}>{toolbar}</div>}
@@ -112,17 +112,15 @@ export function ImageEditorShell({ open, heading, icon: Icon, subtitle, viewport
         </section>
       </DialogContent>
     </Dialog>
-    <ConfirmDialog open={confirming} title="尚未保存" message="关闭会丢弃本次未保存的修改。" confirmText="放弃修改" cancelText="继续编辑"
-      variant="destructive" onConfirm={() => { setConfirming(false); onClose(); }} onCancel={() => setConfirming(false)} />
   </>;
 }
 
 /** 提示词 + 操作行；blocker 非空时生成置灰，并在按钮左侧写出缺什么。 */
-export function EditorComposer({ prompt, onPrompt, placeholder, chips, blocker, error, cost, busy, canSave, generateLabel,
-  onSave, onGenerate, children }: {
+export function EditorComposer({ prompt, onPrompt, placeholder, chips, blocker, error, cost, busy, generateLabel,
+  onGenerate, children }: {
   prompt: string; onPrompt: (value: string) => void; placeholder: string; chips: ReactNode;
-  blocker: string | null; error: string | null; cost: number | null; busy: boolean; canSave: boolean; generateLabel: string;
-  onSave: () => void; onGenerate: () => void; children?: ReactNode;
+  blocker: string | null; error: string | null; cost: number | null; busy: boolean; generateLabel: string;
+  onGenerate: () => void; children?: ReactNode;
 }) {
   return <fieldset disabled={busy} className="contents">
     {children}
@@ -134,8 +132,6 @@ export function EditorComposer({ prompt, onPrompt, placeholder, chips, blocker, 
     <div className="flex flex-wrap items-center gap-2">
       {chips}
       <span role="status" className="ml-auto text-xs text-muted-foreground">{blocker ?? (cost == null ? '费用以供应商结算为准' : `预计 ¥${Number(cost.toFixed(4))}`)}</span>
-      <button type="button" disabled={!canSave} onClick={onSave}
-        className="h-9 rounded-full border border-border px-3.5 text-sm text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40">保存</button>
       <button type="button" disabled={Boolean(blocker)} onClick={onGenerate}
         className="inline-flex h-9 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40">
         {busy && <LoaderCircle className="size-4 animate-spin" aria-hidden />}{busy ? '提交中…' : generateLabel}

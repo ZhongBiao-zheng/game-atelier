@@ -66,13 +66,13 @@ it('switches MJ and normal models without losing strokes or sending stale size f
   await select(/Midjourney/);
   expect(screen.queryByRole('combobox', { name: '候选数' })).not.toBeInTheDocument();
   expect(screen.getByText('4 张 · Fast')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  fireEvent.click(screen.getByRole('button', { name: '关闭编辑器' }));
   await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
   expect(save.mock.calls[0][0]).toMatchObject({ requestedCount: 4, draft: { alias: 'Evo', params: { n: 4 } } });
   expect(save.mock.calls[0][0].draft.params).toEqual({ n: 4 });
   await select(/Nano Banana Pro/);
   expect(screen.getByRole('combobox', { name: '候选数' })).toHaveValue('2');
-  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  fireEvent.click(screen.getByRole('button', { name: '关闭编辑器' }));
   await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
   expect(save.mock.calls[1][0]).toMatchObject({ requestedCount: 2,
     draft: { model: 'nano-banana-pro', prompt: '改成蓝色', params: { size: '1:1', size_mode: 'ratio' } },

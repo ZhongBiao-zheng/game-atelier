@@ -29,8 +29,8 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
   const busy = parentBusy || serializing;
   const [ready, setReady] = useState(false);
   const [ratio, setRatio] = useState<ExpandRatio | ''>((EXPAND_RATIOS as readonly string[]).includes(savedRatio) ? savedRatio as ExpandRatio : '');
-  const [scaleStep, setScaleStep] = useState<number | null>(savedFrame ? presetScale(source.width, source.height, savedRatio, savedFrame) : 1.5);
-  const [frame, setFrame] = useState<EditFrame>(savedFrame ?? presetFrame(source.width, source.height, 'original', 1.5));
+  const [scaleStep, setScaleStep] = useState<number | null>(savedFrame ? presetScale(source.width, source.height, savedRatio, savedFrame) : 1);
+  const [frame, setFrame] = useState<EditFrame>(savedFrame ?? presetFrame(source.width, source.height, 'original', 1));
   const [prompt, setPrompt] = useState(initialDraft?.prompt ?? '');
   const [localError, setLocalError] = useState<string | null>(null);
   const choices = useMemo(() => editModelChoices(keys), [keys]);
@@ -94,8 +94,8 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
   }
   function endDrag() { drag.current = null; viewport.endPan(); }
 
-  async function submit(generate: boolean) {
-    if (busy || (generate && blocker)) return;
+  async function submit(generate: boolean): Promise<boolean> {
+    if (busy || (generate && blocker)) return false;
     setSerializing(true); setLocalError(null);
     try {
       const submission: CanvasMaskEditSubmission = {
@@ -106,9 +106,12 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
           model: choice?.model ?? '', updated_at: new Date().toISOString(),
           params: mj ? { n: MJ_IMAGES_PER_TASK } : { ...size.params, n: count, ...(quality ? { quality } : {}) } },
       };
-      if (await (generate ? onSubmit(submission) : onSave(submission))) savedFingerprint.current = fingerprint;
+      const ok = await (generate ? onSubmit(submission) : onSave(submission));
+      if (ok) savedFingerprint.current = fingerprint;
+      return ok;
     } catch (error) {
       setLocalError((error as Error).message);
+      return false;
     } finally { setSerializing(false); }
   }
 
@@ -118,8 +121,9 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
     cursor: `${direction}-resize`,
   });
 
-  return <ImageEditorShell open={open} heading="扩图" icon={Expand} subtitle={`${title} · ${source.width} × ${source.height}`}
+  return <ImageEditorShell open={open} heading="扩图" icon={Expand}
     viewport={viewport} busy={busy} dirty={fingerprint !== savedFingerprint.current} onClose={() => onOpenChange(false)}
+    onAutoSave={() => submit(false)}
     stageBottom="bottom-56"
     stage={<div className="relative size-full"
       onPointerDown={event => { if (event.target === event.currentTarget) viewport.startPan(event); }}
@@ -155,8 +159,8 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
     </div>}
     composer={<EditorComposer prompt={prompt} onPrompt={setPrompt}
       placeholder={mj ? '描述扩出来的画面（必填）' : '留空自然延展；或描述新增画面'}
-      blocker={blocker} error={error || localError} cost={cost} busy={busy} canSave={!busy}
-      generateLabel={`生成 ${candidates} 张`} onSave={() => void submit(false)} onGenerate={() => void submit(true)}
+      blocker={blocker} error={error || localError} cost={cost} busy={busy}
+      generateLabel={`生成 ${candidates} 张`} onGenerate={() => void submit(true)}
       chips={<>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -181,7 +185,7 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
       <div className="flex flex-wrap items-center gap-2">
         <div role="radiogroup" aria-label="画框比例" className="flex flex-wrap items-center gap-0.5">
           {EXPAND_RATIOS.map(item => <button key={item} type="button" role="radio" aria-checked={ratio === item}
-            onClick={() => applyPreset(item, item === 'original' && (scaleStep ?? 1.5) === 1 ? 1.5 : scaleStep ?? 1.5)}
+            onClick={() => applyPreset(item, item === 'original' ? 1 : scaleStep ?? 1)}
             className={`inline-flex h-8 items-center gap-2 rounded-lg px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${ratio === item ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
             <RatioIcon ratio={item} width={source.width} height={source.height} />{item === 'original' ? '原比例' : item}
           </button>)}

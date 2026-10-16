@@ -12,7 +12,7 @@ export type EditTool = 'brush' | 'eraser' | 'rectangle' | 'hand';
 export type EditStroke = { tool: Exclude<EditTool, 'hand'>; size: number; points: EditPoint[] };
 
 export function initialEditFrame(width: number, height: number, mode: 'inpaint' | 'outpaint'): EditFrame {
-  return mode === 'outpaint' ? presetFrame(width, height, 'original', 1.5) : { width, height, x: 0, y: 0 };
+  return mode === 'outpaint' ? presetFrame(width, height, 'original', 1) : { width, height, x: 0, y: 0 };
 }
 
 export function savedImageEditError(node: CanvasImageEditNode, source: CanvasContentVersion | undefined,

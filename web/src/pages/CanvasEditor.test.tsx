@@ -593,7 +593,7 @@ it('creates a saved edit node before opening it and saves without a run or chang
     source_version_id: 'source-v', generation_draft: null }), null);
   expect(submitCanvasImageEdit).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('编辑提示词'), { target: { value: '保留到下次' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  fireEvent.click(screen.getByRole('button', { name: '关闭编辑器' }));
   await waitFor(() => expect(saveCanvasImageEdit).toHaveBeenCalledTimes(2));
   expect(vi.mocked(saveCanvasImageEdit).mock.calls[1][1]).toMatchObject({ node_id: 'edit', generation_draft: { prompt: '保留到下次' } });
   expect(submitCanvasRun).not.toHaveBeenCalled();
@@ -721,10 +721,9 @@ it('undoes and redoes a configuration saved during an edit run without reverting
   act(() => (canvasContextIdentities.at(-1) as CanvasNodeContextValue).openImageEdit?.('edit'));
   await screen.findByRole('dialog', { name: '扩图' });
   fireEvent.change(screen.getByLabelText('编辑提示词'), { target: { value: '下一轮配置' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeEnabled());
-  expect(saveCanvasImageEdit).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByRole('button', { name: '关闭编辑器' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '扩图' })).not.toBeInTheDocument());
+  expect(saveCanvasImageEdit).toHaveBeenCalledOnce();
   const completedVersion = { ...editSourceVersion, version_id: 'completed-v',
     origin: { kind: 'job_output' as const, job_id: 'job-edit', candidate_id: 'candidate' } };
   const completed: Job = { ...pending, status: 'done', output_paths: ['result.png'], canvas_run: { ...pending.canvas_run!,

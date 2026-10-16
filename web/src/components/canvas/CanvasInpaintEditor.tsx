@@ -121,8 +121,8 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
     else if (event.key === ']') setBrushSize(size => Math.min(BRUSH_MAX, size + 8));
   }
 
-  async function submit(generate: boolean) {
-    if (busy || (generate && blocker)) return;
+  async function submit(generate: boolean): Promise<boolean> {
+    if (busy || (generate && blocker)) return false;
     setSerializing(true); setLocalError(null);
     try {
       let mask: Blob | null = null;
@@ -138,9 +138,12 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
         draft: { mode: 'image', prompt: prompt.trim(), input_policy: 'all_connected', alias: choice?.key.alias ?? '',
           model: choice?.model ?? '', params, updated_at: new Date().toISOString() },
       };
-      if (await (generate ? onSubmit(submission) : onSave(submission))) savedFingerprint.current = fingerprint;
+      const ok = await (generate ? onSubmit(submission) : onSave(submission));
+      if (ok) savedFingerprint.current = fingerprint;
+      return ok;
     } catch (error) {
       setLocalError((error as Error).message);
+      return false;
     } finally { setSerializing(false); }
   }
 
@@ -151,8 +154,9 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
     </button>
   );
 
-  return <ImageEditorShell open={open} heading="局部修改" icon={Paintbrush} subtitle={`${title} · ${dimensions.width} × ${dimensions.height}`}
+  return <ImageEditorShell open={open} heading="局部修改" icon={Paintbrush}
     viewport={viewport} busy={busy} dirty={fingerprint !== savedFingerprint.current} onClose={() => onOpenChange(false)}
+    onAutoSave={() => submit(false)}
     onKeyDown={handleKey} onKeyUp={event => { if (event.key === ' ') setSpacePan(false); }}
     toolbar={<>
       {toolButton('brush', '涂抹', 'B', Paintbrush)}
@@ -188,8 +192,8 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
       </div>
     </div>}
     composer={<EditorComposer prompt={prompt} onPrompt={setPrompt} placeholder={mj ? '描述选区要改成什么（必填）' : '描述选区要改成什么；留空自然修复'}
-      blocker={blocker} error={error || localError} cost={cost} busy={busy} canSave={!busy && (ready || !strokes.length)}
-      generateLabel={`生成 ${candidates} 张`} onSave={() => void submit(false)} onGenerate={() => void submit(true)}
+      blocker={blocker} error={error || localError} cost={cost} busy={busy}
+      generateLabel={`生成 ${candidates} 张`} onGenerate={() => void submit(true)}
       chips={<>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
