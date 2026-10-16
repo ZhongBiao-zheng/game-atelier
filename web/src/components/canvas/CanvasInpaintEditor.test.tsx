@@ -17,7 +17,7 @@ const keys = [
   { alias: 'HK', provider: 'custom', base_url: 'https://api.openai-hk.com',
     models: [{ id: 'gpt-image-2.5-flare', name: 'GPT Flare', modality: 'image' }] },
   { alias: 'Tuzi', provider: 'custom', base_url: 'https://api.tu-zi.com',
-    models: [{ id: 'nano-banana-pro', name: 'Nano Banana Pro', modality: 'image' }] },
+    models: [{ id: 'nano-banana-2', name: 'Nano Banana 2', modality: 'image' }] },
 ] as KeyView[];
 const source = { version_id: 'source', kind: 'image', width: 1024, height: 1024 } as CanvasMediaVersion;
 const initial: CanvasImageEditNode['data'] = {
@@ -70,12 +70,12 @@ it('switches MJ and normal models without losing strokes or sending stale size f
   await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
   expect(save.mock.calls[0][0]).toMatchObject({ requestedCount: 4, draft: { alias: 'Evo', params: { n: 4 } } });
   expect(save.mock.calls[0][0].draft.params).toEqual({ n: 4 });
-  await select(/Nano Banana Pro/);
+  await select(/Nano Banana 2/);
   expect(screen.getByRole('combobox', { name: '候选数' })).toHaveValue('2');
   fireEvent.click(screen.getByRole('button', { name: '关闭编辑器' }));
   await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
   expect(save.mock.calls[1][0]).toMatchObject({ requestedCount: 2,
-    draft: { model: 'nano-banana-pro', prompt: '改成蓝色', params: { size: '1:1', size_mode: 'ratio' } },
+    draft: { model: 'nano-banana-2', prompt: '改成蓝色', params: { size: '1:1', size_mode: 'ratio' } },
     editorState: { strokes: initial.editor_state.strokes } });
 });
 

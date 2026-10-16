@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.98.4',
+    date: '2026-10-16',
+    headline: '局部修改与扩图只开放实测模型',
+    changes: [
+      { kind: 'fix', text: '局部修改和扩图的模型列表只保留 GPT Image 2.5 系列、Nano Banana 2 / 2.1 和 EvoLink MJ；其它型号提交时也会被拒绝。' },
+    ],
+  },
+  {
     version: '5.98.3',
     date: '2026-10-16',
     headline: '编辑过程参考图可悬停预览',

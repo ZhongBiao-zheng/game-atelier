@@ -6,13 +6,18 @@ from PIL import Image
 from character_workflow.lib.canvas_projects import create_canvas_project, replace_canvas_node_media
 from tests.canvas_edit_helpers import submit_saved_edit
 from character_workflow.lib.schemas import CanvasImageEditOptions
+from character_workflow.lib.keys import ModelSpec, read_keys_db, write_keys_db
 from tests.test_generation_recipe import NOW, _media_node, _save_nodes, _write_keys, png
 
 
 def setup_source():
     _write_keys()
+    db = read_keys_db()
+    key = db.keys[0]
+    write_keys_db(db.model_copy(update={"keys": [key.model_copy(update={"models": [
+        *key.models, ModelSpec(name="GPT 2.5", id="gpt-image-2.5", modality="image")]})]}))
     pid = create_canvas_project("编辑测试").project_id
-    draft = {"mode": "image", "prompt": "", "model": "gpt-image-1", "alias": "openai",
+    draft = {"mode": "image", "prompt": "", "model": "gpt-image-2.5", "alias": "openai",
              "updated_at": NOW, "params": {}}
     doc = _save_nodes(pid, [_media_node("source", draft)], [])
     version, doc, _ = replace_canvas_node_media(pid, "source", "s.png", ".png",

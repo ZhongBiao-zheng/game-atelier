@@ -59,16 +59,16 @@ def test_expansion_rejects_crop_and_excessive_canvas(tmp_path, options):
 
 
 def test_capabilities_distinguish_masks_and_guides():
-    assert image_edit.edit_transport("custom", "gpt-image-2", "openai") == "mask"
-    assert image_edit.edit_transport("seedream", "doubao-seedream-5-0-pro", "ark") == "guide"
-    assert image_edit.edit_transport("custom", "nano-banana-pro", "openai") == "guide"
+    assert image_edit.edit_transport("custom", "gpt-image-2.5", "openai") == "mask"
+    assert image_edit.edit_transport("seedream", "doubao-seedream-5-0-pro", "ark") is None
+    assert image_edit.edit_transport("custom", "nano-banana-2", "openai") == "guide"
     assert image_edit.edit_transport("midjourney", "midjourney", None) is None
     assert image_edit.edit_transport("custom", "unknown-image", None) is None
-    assert image_edit.edit_transport("custom", "gpt-image-2", "seedance") is None
-    assert image_edit.edit_transport("custom", "gpt-image-2", "openrouter") is None
+    assert image_edit.edit_transport("custom", "gpt-image-2.5", "seedance") is None
+    assert image_edit.edit_transport("custom", "gpt-image-2.5", "openrouter") is None
 
 
-@pytest.mark.parametrize("model,transport", [("gpt-image-2", "mask"), ("nano-banana-pro", "guide")])
+@pytest.mark.parametrize("model,transport", [("gpt-image-2.5", "mask"), ("nano-banana-2", "guide")])
 def test_render_uses_real_dispatch_and_never_persists_temp_references(tmp_path, monkeypatch, model, transport):
     from character_workflow.lib import keys
     from character_workflow.lib import callers

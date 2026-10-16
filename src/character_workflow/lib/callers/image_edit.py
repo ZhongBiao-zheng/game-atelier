@@ -1,6 +1,7 @@
 """Bounded image editing, independent of the provider's mask fidelity."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -9,9 +10,16 @@ from PIL import Image, ImageChops, ImageFilter, ImageOps
 from .openai_image import image_family, supports_image_mask
 
 
+# 局部修改 / 扩图目前只开放实测过的型号：GPT Image 2.5 系列、Nano Banana 2 / 2.1（另加 EvoLink MJ）。
+# 与前端 imageEditGeometry.ts 的 EDIT_MODEL_PATTERN 保持一致。
+EDIT_MODEL_PATTERN = re.compile(r"^(gpt-image-2\.5(-[a-z0-9]+)?|(gemini-)?nano-banana-2(\.1)?(-[24]k)?)$")
+
+
 def edit_transport(provider: str, model: str, protocol: str | None) -> str | None:
     if provider == "evolink":
         return "evolink" if model == "mj-v8.2" and protocol in {None, "evolink"} else None
+    if not EDIT_MODEL_PATTERN.match(model.lower().rsplit("/", 1)[-1]):
+        return None
     family = image_family(model)
     if family == "midjourney":
         return None

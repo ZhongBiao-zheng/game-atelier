@@ -486,7 +486,8 @@ beforeEach(() => {
     keys: [{
       alias: 'main', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
       capabilities: [], modalities: ['image'], notes: '', created_at: '2026-08-23T00:00:00Z',
-      models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image' }],
+      models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image' },
+        { id: 'gpt-image-2.5', name: 'GPT Image 2.5', modality: 'image' }],
     }],
   });
 });
@@ -563,7 +564,7 @@ function savedEditNode(): CanvasImageEditNode {
   return { id: 'edit', type: 'image_edit', title: '图片编辑', position: { x: 700, y: 0 }, z_index: 1,
     data: { source_node_id: 'original', source_version_id: 'source-v', mask_version_id: 'mask-v',
       reference_node_id: 'reference', reference_version_id: 'reference-v', active_run_id: null,
-      generation_draft: imageDraft, options: { mode: 'outpaint', width: 768, height: 768, x: 128, y: 128 },
+      generation_draft: { ...imageDraft, model: 'gpt-image-2.5' }, options: { mode: 'outpaint', width: 768, height: 768, x: 128, y: 128 },
       editor_state: { frame_ratio: '', strokes: [], frame: { width: 768, height: 768, x: 128, y: 128 } },
     } };
 }
