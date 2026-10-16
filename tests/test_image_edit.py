@@ -34,7 +34,7 @@ def test_expansion_preserves_source_transparency_and_position(tmp_path):
     image_edit.composite_result(tmp_path / "source.png", tmp_path / "mask.png",
                                 tmp_path / "result.png", options)
     with Image.open(tmp_path / "result.png") as result:
-        assert result.getpixel((20, 4)) == (1, 2, 3, 0)
+        assert result.getpixel((36, 16)) == (1, 2, 3, 0)
         assert result.getpixel((0, 0)) == (255, 0, 0, 255)
 
 

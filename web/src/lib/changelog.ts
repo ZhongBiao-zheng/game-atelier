@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.96.2',
+    date: '2026-10-16',
+    headline: '扩图接缝过渡',
+    changes: [
+      { kind: 'fix', text: '通用模型扩图在原图边缘加一段渐变过渡，不再出现明显的分界线。' },
+    ],
+  },
+  {
     version: '5.96.1',
     date: '2026-10-16',
     headline: '编辑器关闭即保存',

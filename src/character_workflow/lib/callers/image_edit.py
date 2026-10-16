@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageFilter, ImageOps
 
 from .openai_image import image_family, supports_image_mask
 
@@ -45,6 +45,35 @@ def expanded_source(source: Path, options: dict) -> tuple[Image.Image, Image.Ima
     return base, mask
 
 
+# Seam band as a share of the source's short side: wide enough that a model's global tone
+# shift fades out instead of showing as a hard line.
+OUTPAINT_SEAM_RATIO = .03
+OUTPAINT_SEAM_MAX = 64
+
+
+def outpaint_seam_mask(options: dict, source_size: tuple[int, int]) -> Image.Image:
+    """Keep the source, ramping into generated pixels only along edges that were extended."""
+    width, height = int(options["width"]), int(options["height"])
+    x, y = int(options["x"]), int(options["y"])
+    w, h = source_size
+    band = min(OUTPAINT_SEAM_MAX, max(1, round(min(w, h) * OUTPAINT_SEAM_RATIO)))
+    ramp = [min(255, round(255 * (i + 1) / (band + 1))) for i in range(max(w, h))]
+    alpha = Image.new("L", source_size, 255)
+    for extended, length, vertical, reverse in [
+        (x > 0, w, False, False), (x + w < width, w, False, True),
+        (y > 0, h, True, False), (y + h < height, h, True, True),
+    ]:
+        if not extended:
+            continue
+        values = ramp[:length][::-1] if reverse else ramp[:length]
+        strip = Image.new("L", (1, length) if vertical else (length, 1))
+        strip.putdata(values)
+        alpha = ImageChops.multiply(alpha, strip.resize(source_size, Image.Resampling.NEAREST))
+    mask = Image.new("L", (width, height), 0)
+    mask.paste(alpha, (x, y))
+    return mask
+
+
 def composite_result(source: Path, mask_path: Path, result: Path, options: dict) -> Path:
     if options.get("mode") == "outpaint":
         base, _ = expanded_source(source, options)
@@ -61,7 +90,10 @@ def composite_result(source: Path, mask_path: Path, result: Path, options: dict)
         raise ValueError("模型返回图片比例与编辑画框不一致，请调整尺寸后重试；原图未修改")
     if generated.size != base.size:
         generated = generated.resize(base.size, Image.Resampling.LANCZOS)
-    if options.get("mode") == "inpaint":
+    if options.get("mode") == "outpaint":
+        with Image.open(source) as opened:
+            mask = outpaint_seam_mask(options, ImageOps.exif_transpose(opened).size)
+    elif options.get("mode") == "inpaint":
         # Average inward erosions: a short transition wholly inside the selection.
         # Unlike Gaussian blur this cannot leak generated pixels into protected RGBA.
         selection = ImageOps.invert(mask)

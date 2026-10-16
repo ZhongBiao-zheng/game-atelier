@@ -109,4 +109,4 @@ def test_complete_outpaint_run_registers_candidates_without_modifying_source(iso
         with Image.open(path) as image:
             assert image.size == (1536, 1024)
             assert image.getpixel((0, 0)) == (0, 0, 255, 255)
-            assert image.getpixel((256, 0)) == (255, 0, 0, 255)
+            assert image.getpixel((768, 512)) == (255, 0, 0, 255)
