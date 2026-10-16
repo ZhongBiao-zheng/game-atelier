@@ -65,6 +65,11 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   与 `provider_task_ids` 记录网关任务 id，重启后只查询既有任务。caller 把网关结果映射为：401 → `gateway api 401`，
   429 → `gateway api 429`，`error_kind=unavailable` → `gateway api 503: unavailable`（三者触发接入端失败切换），
   其余不带状态码；`unconfirmed` 的文案含「未确认」。
+- 本机管理（管理权限）：`GET/PUT /api/gateway`（开关 / 端口 / 名称 + 运行状态）、`POST /api/gateway/keys`（返回一次性明文 `token`）、
+  `PATCH /api/gateway/keys/{id}`（每日张数）、`POST /api/gateway/keys/{id}/revoke`、`GET /api/gateway/usage?month=YYYY-MM`（使用记录行）。
+  接入端：`POST /api/gateway/check {base_url, access_key | alias}` → `{info, models}`（models 为带 `via` 的 ModelSpec）；
+  `POST /api/gateway/providers/{alias}/sync` 整体替换该 KEY 的模型。新建 `provider="atelier"` 的 KEY 时排到所在每个路由组第一位，
+  同步出的新模型同样排第一（已调整过顺序的组不动）。
 
 ### 图层栈显示顺序（5.44.0）
 

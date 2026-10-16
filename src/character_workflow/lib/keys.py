@@ -222,6 +222,22 @@ def _restrict_permissions(path: Path) -> None:
         os.chmod(path, 0o600)
 
 
+def size_channel(key: KeySpec, model: ModelSpec) -> tuple[KeySpec, ModelSpec]:
+    """尺寸、能力按实际渠道判断：网关供应商取网关那边第一个成员，其余原样返回。
+
+    网关端会按实际成员再归一一次；这里只决定接入端界面与提交时的参数形状。
+    """
+    via = model.via[0] if key.provider == "atelier" and model.via else None
+    if via is None:
+        return key, model
+    channel_model = ModelSpec(id=via.model_id, name=via.name, modality=model.modality,
+                              protocol=via.protocol)
+    channel_key = key.model_copy(update={
+        "provider": via.provider, "base_url": via.base_url, "models": [channel_model],
+    })
+    return channel_key, channel_model
+
+
 def find_by_alias(alias: str) -> KeySpec | None:
     for k in read_keys_db().keys:
         if k.alias == alias:

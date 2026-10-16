@@ -164,7 +164,7 @@ _COOLDOWN_SECONDS: dict[FailoverReason, float] = {
 _STATUS = re.compile(r"(?:\bapi|\bHTTP)\s*(\d{3})\b")
 _UNAVAILABLE_MARKERS = (
     "no_endpoints_available", "model_not_found", "no available channel", "无可用渠道",
-    "模型不存在", "not support model",
+    "模型不存在", "not support model", "gateway_unavailable",
 )
 _QUOTA_MARKERS = ("insufficient_quota", "insufficient balance", "余额不足", "额度不足", "quota exceeded")
 
@@ -215,6 +215,28 @@ def _cooling(modality: str, alias: str) -> bool:
             del _cooldowns[(modality, alias)]
             return False
         return True
+
+
+def put_alias_first(alias: str, *, only_unordered: bool = False) -> None:
+    """把某个 KEY 排到它所在每个路由组的第一位（新加网关供应商时用）。
+
+    only_unordered=True 时只处理保存的顺序里还没有它的组（同步后新出现的模型），
+    不覆盖用户调整过的顺序。
+    """
+    database = read_keys_db()
+    changed = False
+    for route in _routes(database):
+        aliases = [member.alias for member in route.members]
+        if alias not in aliases or aliases[0] == alias:
+            continue
+        saved = database.model_order.get(route.modality, {}).get(route.id, [])
+        if only_unordered and alias in saved:
+            continue
+        database.model_order.setdefault(route.modality, {})[route.id] = [
+            alias, *(item for item in aliases if item != alias)]
+        changed = True
+    if changed:
+        write_keys_db(database)
 
 
 def set_route_order(modality: ModelModality, identifier: str, aliases: list[str]) -> ModelRoute:

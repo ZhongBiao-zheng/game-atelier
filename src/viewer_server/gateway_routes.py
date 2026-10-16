@@ -9,10 +9,12 @@ import socket
 from datetime import datetime
 from typing import Annotated
 
+import requests
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from character_workflow.lib import gateway_keys, gateway_tasks
+from character_workflow.lib import gateway_keys, gateway_tasks, keys
+from character_workflow.lib.callers import atelier_gateway
 from viewer_server.gateway_app import gateway_server
 
 gateway_router = APIRouter(prefix="/api/gateway")
@@ -97,3 +99,50 @@ def gateway_usage(month: str | None = Query(default=None)) -> dict:
     if not _MONTH.fullmatch(month):
         raise HTTPException(422, "month 格式应为 YYYY-MM")
     return {"month": month, "rows": gateway_tasks.read_usage(month)}
+
+
+# ---- 接入端：局域网 Atelier 供应商 ----
+
+class GatewayCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    base_url: Annotated[str, Field(min_length=1, max_length=300)]
+    access_key: str | None = Field(default=None, max_length=300)
+    # 编辑已存的网关供应商时前端只有掩码：按别名取存储的密钥，地址必须和存储的一致。
+    alias: str | None = Field(default=None, max_length=120)
+
+
+def _gateway_failure(error: Exception) -> HTTPException:
+    if isinstance(error, requests.RequestException):
+        return HTTPException(502, "连不上网关：请确认地址、端口，以及网关机器已开启局域网共享")
+    return HTTPException(502, str(error))
+
+
+@gateway_router.post("/check")
+def check_gateway(body: GatewayCheck) -> dict:
+    base_url, token = body.base_url.strip().rstrip("/"), (body.access_key or "").strip()
+    if not re.fullmatch(r"https?://[^/\s]+", base_url):
+        raise HTTPException(422, "网关地址格式应为 http://IP:端口")
+    if not token and body.alias:
+        stored = keys.find_by_alias(body.alias)
+        if stored is None or stored.provider != "atelier":
+            raise HTTPException(404, "找不到这个网关供应商")
+        if (stored.base_url or "").rstrip("/") != base_url:
+            raise HTTPException(400, "网关地址改了，请重新填写网关密钥")
+        token = stored.access_key
+    if not token:
+        raise HTTPException(422, "缺少网关密钥")
+    try:
+        result = atelier_gateway.check_gateway(base_url, token)
+    except (requests.RequestException, atelier_gateway.GatewayError) as error:
+        raise _gateway_failure(error) from error
+    models = atelier_gateway.gateway_models(result["models"])
+    return {"info": result["info"], "models": [model.model_dump(mode="json") for model in models]}
+
+
+@gateway_router.post("/providers/{alias}/sync")
+def sync_gateway_provider(alias: str) -> dict:
+    try:
+        models = atelier_gateway.sync_gateway_key(alias)
+    except (requests.RequestException, atelier_gateway.GatewayError) as error:
+        raise _gateway_failure(error) from error
+    return {"models": [model.model_dump(mode="json") for model in models]}

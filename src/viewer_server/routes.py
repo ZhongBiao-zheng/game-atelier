@@ -1479,6 +1479,9 @@ def create_key(payload: _KeyCreatePayload) -> dict:
         raise HTTPException(
             409, f"别名「{payload.alias}」已经存在：换个别名，或直接改那条已有的密钥"
         ) from None
+    if spec.provider == "atelier":
+        # 局域网网关接进来就排在每个路由组的第一位，本机 KEY 作兜底（ADR-0025）。
+        model_routes.put_alias_first(spec.alias)
     return {"alias": payload.alias}
 
 

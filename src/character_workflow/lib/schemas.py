@@ -193,7 +193,11 @@ class JobParams(BaseModel):
     route_tried: list[str] | None = None
     # 厂商订单首次获取立即落盘。Tuzi 支持续查；Seedance 留供核对，不自动恢复或重提。
     # tuzi_async is a historical ownership tag, never a supported submission protocol.
-    provider_task_protocol: Literal["tuzi_async", "tuzi_images", "seedance", "evolink"] | None = None
+    # 局域网 Atelier：网关那边实际出图的成员别名（ADR-0025）。
+    gateway_member: str | None = Field(default=None, max_length=120)
+    provider_task_protocol: Literal[
+        "tuzi_async", "tuzi_images", "seedance", "evolink", "atelier_gateway",
+    ] | None = None
     provider_task_ids: list[ProviderTaskId] | None = Field(default=None, max_length=4)
     video_submission_attempts: list[VideoSubmissionAttempt] | None = Field(default=None, max_length=4)
     # 图片参数 —— 前端实际在发（Studio 提交链路），显式声明保证双端类型对齐

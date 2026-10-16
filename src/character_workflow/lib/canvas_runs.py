@@ -42,7 +42,7 @@ from character_workflow.lib.jobs import (
     update_job_status,
     write_job_under_lock,
 )
-from character_workflow.lib.keys import KeySpec, ModelSpec, model_modality, read_keys_db
+from character_workflow.lib.keys import KeySpec, ModelSpec, model_modality, read_keys_db, size_channel
 from character_workflow.lib.model_routes import NoSuchRouteError, resolve_auto
 from character_workflow.lib.prompt_variables import resolve_prompt_variables
 from character_workflow.lib.schemas import (
@@ -518,6 +518,8 @@ def _resolve_layer_decomposition_model(alias: str, model_id: str) -> tuple[KeySp
 def _supports_canvas_image_generation(key: KeySpec, model: ModelSpec) -> bool:
     from character_workflow.lib.callers.openai_image import image_family, resolve_image_protocol
 
+    key, model = size_channel(key, model)
+
     if model_modality(model, key) != "image" or key.provider == "nano_banana":
         return False
     if key.provider == "evolink":
@@ -547,6 +549,8 @@ def _normalized_image_preference_params(
         image_size_options,
         is_nano_image_size_model,
     )
+
+    key, model = size_channel(key, model)
 
     if not any(params.get(field) is not None for field in (
         "size_mode", "size", "ratio", "resolution", "custom_size",
@@ -2172,6 +2176,7 @@ def _upscale_size_params(
     from character_workflow.lib.callers.openai_image import supports_image_quality
     from character_workflow.lib.image_size_catalog import image_size_options, is_nano_image_size_model
 
+    key, model = size_channel(key, model)
     options = image_size_options(key.provider, key.base_url, model.id)
     params: dict[str, Any] = {"n": 1, "ratio": _nearest_ratio(width, height, options["ratios"])}
     if quality and supports_image_quality(model.id):

@@ -30,6 +30,9 @@ def _provider_render(key: _keys.KeySpec, model: str = ""):
     if key.provider == "evolink":
         from .evolink import render
         return render
+    if key.provider == "atelier":
+        from .atelier_gateway import render
+        return render
     # MJ 走任务代理协议（异步 submit + 轮询），判据挂模型族不挂 provider：Tuzi 这类聚合商
     # provider=custom，只按 provider 判会落到 openai_image 的同步 images 端点，打错入口。
     from character_workflow.lib.callers.openai_image import image_family

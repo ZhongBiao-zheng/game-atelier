@@ -175,6 +175,10 @@ async def lifespan(app: FastAPI):
     from character_workflow.lib.gateway_keys import read_config as read_gateway_config
 
     await asyncio.to_thread(gateway_server.apply, read_gateway_config())
+    # 接入端：网关供应商的模型列表随网关变化，启动时尽力同步一次（连不上就保留旧快照）。
+    from character_workflow.lib.callers.atelier_gateway import sync_all_gateway_keys
+
+    gateway_sync = asyncio.create_task(asyncio.to_thread(sync_all_gateway_keys))
     resume_tasks: set[asyncio.Task[None]] = set()
 
     async def maintain_canvas_lifecycle() -> None:
@@ -213,6 +217,7 @@ async def lifespan(app: FastAPI):
         maintenance_task.cancel()
         for task in resume_tasks:
             task.cancel()
+        gateway_sync.cancel()
         await asyncio.to_thread(gateway_server.stop)
         stop_team_library_watches()
         observer.stop()
