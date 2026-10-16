@@ -91,7 +91,7 @@ function canvasPlacementDirectionRank({ x, y }: { x: number; y: number }) {
 
 export function sizeLockedToCanvasVersion(
   current: CanvasNode['size'],
-  version: CanvasMediaVersion,
+  version: Pick<CanvasMediaVersion, 'width' | 'height'>,
 ) {
   if (!version.width || !version.height) return current ?? CANVAS_DEFAULT_NODE_SIZE;
   const ratio = version.width / version.height;
@@ -171,6 +171,14 @@ export function canvasNodeRenderedSize(
   versions: Readonly<Record<string, CanvasContentVersion>>,
 ): CanvasSize {
   if (node.type === 'text') return node.size ?? CANVAS_TEXT_NODE_DEFAULT_SIZE;
+  if (node.type === 'image_edit') {
+    // 编辑节点按输出画框比例显示：扩图 16:9 节点就是 16:9，局部修改与源图同比例。
+    const { frame } = node.data.editor_state;
+    const source = versions[node.data.source_version_id];
+    const target = frame.width > 0 && frame.height > 0 ? frame
+      : source?.kind === 'image' ? source : null;
+    return target ? sizeLockedToCanvasVersion(node.size, target) : node.size ?? CANVAS_DEFAULT_NODE_SIZE;
+  }
   if ((node.type !== 'image' && node.type !== 'video') || node.data.display.free_resize || !node.data.current_version_id) {
     return node.size ?? CANVAS_DEFAULT_NODE_SIZE;
   }

@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.96.3',
+    date: '2026-10-16',
+    headline: '编辑节点跟随画框比例',
+    changes: [
+      { kind: 'fix', text: '扩图节点按输出画框比例显示（选 16:9 节点就是 16:9），局部修改节点与源图同比例，缩放时保持比例。' },
+    ],
+  },
+  {
     version: '5.96.2',
     date: '2026-10-16',
     headline: '扩图接缝过渡',

@@ -554,7 +554,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     >
       <NodeResizer
         isVisible={selected && !context.multiSelectionActive && !replacingMedia}
-        keepAspectRatio={node.type === 'image' && !node.data.display.free_resize}
+        keepAspectRatio={(node.type === 'image' && !node.data.display.free_resize) || node.type === 'image_edit'}
         minWidth={node.type === 'text' ? 220 : node.type === 'layer_stack' ? 560 : 240}
         minHeight={node.type === 'text' ? 120 : node.type === 'layer_stack' ? 320 : 150}
         maxWidth={CANVAS_MAX_NODE_SIZE}
