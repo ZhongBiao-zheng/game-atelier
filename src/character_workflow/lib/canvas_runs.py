@@ -1707,7 +1707,7 @@ def submit_image_edit_run(
     from PIL import Image
     from character_workflow.lib.callers.openai_image import _effective_image_protocol
     from character_workflow.lib.callers.image_edit import edit_transport, expanded_source
-    from character_workflow.lib.canvas_image_edits import edit_size_params, mj_source
+    from character_workflow.lib.canvas_image_edits import edit_size_params
     from character_workflow.lib.canvas_masks import (
         normalize_canvas_mask, _source_display_size, NormalizedCanvasMask,
     )
@@ -1767,17 +1767,12 @@ def submit_image_edit_run(
                     "canvas_media_capability_missing",
                     "当前模型不支持图片编辑，请选择兼容模型。",
                 )
+            if options.mode == "inpaint" and transport != "evolink":
+                raise CanvasRunCommandError(
+                    "canvas_media_capability_missing",
+                    "局部修改只支持 EvoLink Midjourney，请切换模型。",
+                )
             edit = options.model_dump(exclude_none=True)
-            if transport == "mj":
-                native = mj_source(source)
-                if (not native or native["alias"] != key.alias or native["model"] != model.id
-                        or not options.custom_id):
-                    raise ValueError("MJ 编辑必须使用原任务所属渠道与可用动作")
-                if surface.data.reference_version_id:
-                    raise ValueError("MJ 原生编辑不支持替换参考素材")
-                edit.update(native)
-            elif options.mode == "prepare":
-                raise ValueError("准备单图只适用于 MJ")
             if transport == "evolink" and surface.data.reference_version_id:
                 raise ValueError("EvoLink MJ 编辑只接受当前源图与选区，不支持额外参考素材")
             normalized, job_params, effective_count = _normalized_params(
@@ -1837,17 +1832,14 @@ def submit_image_edit_run(
                     raise ValueError("保存的蒙版文件已经变化，请重新保存选区")
                 normalized_mask = normalize_canvas_mask(source_path, source, mask_body)
             else:
-                if transport in {"mj", "evolink"}:
-                    if transport == "evolink":
-                        if options.width is None or options.height is None:
-                            raise ValueError("扩图需要目标宽高")
-                        # Reuse the canvas bounds validation; native MJ receives the unexpanded
-                        # source and source-sized mask, with placement in img_pos.
-                        expanded_source(source_path, edit)
+                if options.width is None or options.height is None:
+                    raise ValueError("扩图需要目标宽高")
+                if transport == "evolink":
+                    # Reuse the canvas bounds validation; native MJ receives the unexpanded
+                    # source and source-sized mask, with placement in img_pos.
+                    expanded_source(source_path, edit)
                     mask = Image.new("L", (width, height), 255)
                 else:
-                    if options.width is None or options.height is None:
-                        raise ValueError("扩图需要目标宽高")
                     _base, mask = expanded_source(source_path, edit)
                     width, height = mask.size
                 buffer = io.BytesIO()
@@ -1857,23 +1849,7 @@ def submit_image_edit_run(
                     body, width, height, hashlib.sha256(body).hexdigest(),
                 )
             edit.update(source_version_id=source.version_id)
-            if transport not in {"mj", "evolink"} and options.mode == "inpaint":
-                from .canvas_image_edits import regional_plan
-                plan_id, regions = regional_plan(normalized_mask.body, key, model.id, options)
-                edit.update(plan_id=plan_id, regions=[r.descriptor() for r in regions])
-                job_params.regional_edit = {"tasks": [
-                    {"region_id": r.id, "candidate": candidate, "status": "pending"}
-                    for candidate in range(effective_count) for r in regions
-                ]}
-                # The first crop supplies the neutral draft size; each actual call uses its own.
-                size_params = regions[0].params
-                job_params = job_params.model_copy(update={
-                    "ratio": None, "resolution": None, **size_params,
-                })
-                for field in ("ratio", "resolution", "custom_size"):
-                    normalized.pop(field, None)
-                normalized.update(size_params)
-            elif transport not in {"mj", "evolink"}:
+            if transport != "evolink":
                 size_params = edit_size_params(key, model.id, width, height)
                 job_params = job_params.model_copy(update={
                     "ratio": None, "resolution": None, **size_params,
@@ -1882,7 +1858,7 @@ def submit_image_edit_run(
                     normalized.pop(field, None)
                 normalized.update(size_params)
             else:
-                effective_count = 1 if options.mode == "prepare" else 4
+                effective_count = 4
                 job_params.n = effective_count
                 normalized["n"] = effective_count
             job_params.image_edit = edit
@@ -1904,7 +1880,7 @@ def submit_image_edit_run(
                     origin=CanvasUserMaskOrigin(
                         kind="user_mask",
                         source_version_id=source.version_id,
-                        expanded_canvas=options.mode == "outpaint" and transport not in {"mj", "evolink"},
+                        expanded_canvas=options.mode == "outpaint" and transport != "evolink",
                     ),
                     kind="image",
                     path=final_path.relative_to(canvas_project_dir(project_id)).as_posix(),
@@ -1937,7 +1913,7 @@ def submit_image_edit_run(
                 job_params=job_params,
                 inputs=inputs,
                 requested_count=effective_count,
-                result_title={"inpaint": "局部修改", "outpaint": "扩图", "prepare": "MJ 单图"}[options.mode],
+                result_title={"inpaint": "局部修改", "outpaint": "扩图"}[options.mode],
                 result_draft=draft,
                 allow_surface_reuse=False,
                 transaction_kind="mask_edit",
@@ -2457,7 +2433,7 @@ def _clear_edit_run(node, context):
 
 
 def resume_mj_edit_run(project_id: str, run_id: str, expected_revision: int) -> tuple[Job, CanvasDocument]:
-    """Resume polling a paused native edit; never clone or create a provider order."""
+    """Resume polling a paused EvoLink MJ edit; never clone or create a provider order."""
     from .canvas_image_edits import has_resumable_mj_task
 
     original = _job_for_run(project_id, run_id)
@@ -2469,10 +2445,9 @@ def resume_mj_edit_run(project_id: str, run_id: str, expected_revision: int) -> 
         with job_lock(original.job_id):
             job = read_job(original.job_id)
             context = job.canvas_run
-            native_state = (job.params.evolink_state if job.provider == "evolink"
-                            else job.params.mj_edit_state) or {}
+            native_state = job.params.evolink_state or {}
             if (job.status != JobStatus.FAILED or not context or job.cancel_requested_at
-                    or not has_resumable_mj_task(job)
+                    or job.provider != "evolink" or not has_resumable_mj_task(job)
                     or not native_state.get("poll_paused")):
                 raise ValueError("这个任务没有可续查的 MJ 订单")
             result = next((node for node in current.nodes if node.id == context.result_node_id), None)
@@ -2492,68 +2467,6 @@ def resume_mj_edit_run(project_id: str, run_id: str, expected_revision: int) -> 
                 "nodes": _resumed_edit_nodes(current, context),
             })
             _commit_transaction_unlocked(project_id, run_id, "resume_mj_edit", current.revision,
-                                         updated_job, updated_document, job_locked=True)
-            return updated_job, updated_document
-
-
-def resume_regional_edit_run(project_id: str, run_id: str,
-                             expected_revision: int) -> tuple[Job, CanvasDocument]:
-    """Explicitly retry failed crops; retain successful patches and known provider orders."""
-    from .callers.tuzi_async import TASK_PROTOCOL
-    original = _job_for_run(project_id, run_id)
-    with file_lock(canvas_project_lock_path(project_id)):
-        recover_canvas_transactions_unlocked(project_id)
-        current = _read_document_unlocked(project_id)
-        if current.revision != expected_revision:
-            raise RuntimeError(f"revision_conflict:{current.revision}")
-        with job_lock(original.job_id):
-            job = read_job(original.job_id)
-            context = job.canvas_run
-            if (job.status not in {JobStatus.PARTIAL, JobStatus.FAILED} or not context
-                    or not job.params.regional_edit or job.cancel_requested_at):
-                raise ValueError("这个任务没有可继续的区域")
-            result = next((n for n in current.nodes if n.id == context.result_node_id), None)
-            previous_versions = {c.version_id for c in context.candidates if c.version_id}
-            previous_versions.update(c["version_id"] for c in job.params.regional_edit.get("history", [])
-                                     if c.get("version_id"))
-            if (not isinstance(result, CanvasImageNode) or canvas_node_has_pending_run(current, result)
-                    or (result.data.current_version_id
-                        and result.data.current_version_id not in previous_versions)):
-                raise ValueError("结果节点已删除、更换内容或正在生成，不能继续")
-            params = job.params.model_copy(deep=True)
-            tasks = params.regional_edit["tasks"]
-            for task in tasks:
-                provider = task.get("provider") or {}
-                if task["status"] == "running":
-                    task["status"] = ("paused" if provider.get("provider_task_ids") and
-                                      provider.get("provider_task_protocol") == TASK_PROTOCOL
-                                      else "uncertain")
-                if task["status"] == "failed":
-                    task.update(status="pending", provider={}, error=None,
-                                past_cost_usd=task.get("past_cost_usd", 0) +
-                                task.pop("cost_usd", 0))
-            compose_only = (len(job.output_paths) == job.params.regional_edit.get("output_offset", 0)
-                            and any(t["status"] == "succeeded" for t in tasks))
-            if not compose_only and not any(t["status"] in {"pending", "paused"} for t in tasks):
-                raise ValueError("剩余区域提交结果未确认，请先核对厂商订单；未重复下单")
-            state = params.regional_edit
-            state.setdefault("history", []).extend(
-                c.model_dump(mode="json") for c in context.candidates if c.version_id
-            )
-            state["output_offset"] = len(job.output_paths)
-            updated_job = job.model_copy(update={
-                "status": JobStatus.PENDING, "params": params, "error": None,
-                "completed_at": None, "progress_phase": None,
-                "canvas_run": context.model_copy(update={"candidates": [
-                    c.model_copy(update={"status": "pending", "version_id": None, "error": None})
-                    for c in context.candidates
-                ]}),
-            })
-            updated_document = current.model_copy(update={
-                "revision": current.revision + 1, "updated_at": _now(),
-                "nodes": _resumed_edit_nodes(current, context),
-            })
-            _commit_transaction_unlocked(project_id, run_id, "resume_regions", current.revision,
                                          updated_job, updated_document, job_locked=True)
             return updated_job, updated_document
 
@@ -2744,8 +2657,7 @@ def _candidate_aggregate(
 
 def _uses_incremental_candidates(job: Job) -> bool:
     context = job.canvas_run
-    if (context is None or len(context.candidates) <= 1 or job.kind != JobKind.IMAGE
-            or job.params.regional_edit):
+    if context is None or len(context.candidates) <= 1 or job.kind != JobKind.IMAGE:
         return False
     from character_workflow.lib.callers.openai_image import image_family
 
@@ -3264,23 +3176,17 @@ def _finalize_canvas_run_under_locks(
     if all(candidate.status != "pending" for candidate in context.candidates):
         return _release_result_node(project_id, current, context, job)
 
-    if job.params.image_edit and job.params.mj_outputs and job.output_paths:
-        # Native actions decide their own candidate count (single upscale / 4-way variation).
-        context = context.model_copy(update={
-            "candidates": context.candidates[:len(job.output_paths)],
-        })
     versions: list[CanvasContentVersion] = []
     candidates: list[CanvasResultCandidate] = []
-    output_offset = int((job.params.regional_edit or {}).get("output_offset", 0))
     for index, candidate in enumerate(context.candidates):
-        if index + output_offset >= len(job.output_paths):
+        if index >= len(job.output_paths):
             candidates.append(candidate.model_copy(update={
                 "status": "canceled" if job.cancel_requested_at else "failed",
                 "error": None if job.cancel_requested_at else "厂商没有返回这个候选结果",
             }))
             continue
         try:
-            version = _output_version(project_id, job, candidate, job.output_paths[index + output_offset])
+            version = _output_version(project_id, job, candidate, job.output_paths[index])
             versions.append(version)
             candidates.append(candidate.model_copy(update={
                 "status": "succeeded",
@@ -3304,12 +3210,10 @@ def _finalize_canvas_run_under_locks(
         })
         return _release_result_node(project_id, current, context, terminal)
 
-    regional_partial = bool((job.params.regional_edit or {}).get("partial"))
-    partial = regional_partial or any(candidate.status != "succeeded" for candidate in candidates)
+    partial = any(candidate.status != "succeeded" for candidate in candidates)
     updated_job = job.model_copy(update={
         "status": JobStatus.PARTIAL if partial else JobStatus.DONE,
-        "error": ("部分区域未完成，未完成处保留原图" if regional_partial else
-                  "部分候选没有生成成功" if partial else None),
+        "error": "部分候选没有生成成功" if partial else None,
         "progress_phase": None,
         "completed_at": job.completed_at or _now(),
         "canvas_run": context.model_copy(update={"candidates": candidates})

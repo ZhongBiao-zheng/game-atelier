@@ -20,7 +20,6 @@ import {
   type FocusEvent as ReactFocusEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject,
 } from 'react';
 import { Reorder } from 'motion/react';
-import { RotateCcw } from 'lucide-react';
 import { gsap, MOTION_DURATION, MOTION_STAGGER, prefersReducedMotion, useAnimateOnChange, useGSAP } from '@/lib/motion';
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
@@ -195,7 +194,6 @@ export interface CanvasNodeContextValue {
   submitRun: (id: string) => Promise<void>;
   cancelRun: (runId: string) => Promise<void>;
   resumeMjEdit?: (runId: string) => Promise<void>;
-  resumeRegions?: (runId: string) => void;
   dismissCandidate: (runId: string, candidateId: string) => Promise<void>;
   updateNode: (id: string, updater: (node: CanvasNode) => CanvasNode) => void;
   previewNodeResize?: (id: string, layout: { position: CanvasPoint; size: CanvasSize }) => void;
@@ -695,13 +693,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
               <SwapIcon swapKey={Boolean(context.activeBatch.stopping)}>{context.activeBatch.stopping ? <LoaderCircle /> : <Square />}</SwapIcon>
             </MediaToolButton>
           )}
-          {node.type !== 'image_edit' && nodeJob?.status === 'failed' && Boolean(nodeJob.params.mj_edit_state?.poll_paused || nodeJob.params.evolink_state?.poll_paused) && nodeJob.canvas_run && (
+          {node.type !== 'image_edit' && nodeJob?.status === 'failed' && Boolean(nodeJob.params.evolink_state?.poll_paused) && nodeJob.canvas_run && (
             <MediaToolButton label="继续查询 MJ 原任务（不重新下单）" text="继续查询" onClick={() => void context.resumeMjEdit?.(nodeJob.canvas_run!.run_id)}><Eye /></MediaToolButton>
-          )}
-          {node.type !== 'image_edit' && nodeJob && ['failed', 'partial'].includes(nodeJob.status) && nodeJob.canvas_run
-            && nodeJob.params.regional_edit?.tasks.some(task => ['failed', 'pending', 'paused', 'running'].includes(task.status)
-              || (task.status === 'succeeded' && nodeJob.output_paths.length === (nodeJob.params.regional_edit?.output_offset ?? 0))) && (
-            <MediaToolButton label="继续未完成区域" text="继续区域" onClick={() => context.resumeRegions?.(nodeJob.canvas_run!.run_id)}><RotateCcw /></MediaToolButton>
           )}
           {emptyMediaNode ? (
             <MediaToolButton

@@ -7,7 +7,7 @@ export function CanvasImageEditSurface({ node, source, projectId }: {
 }) {
   const maskId = useId();
   if (!source?.width || !source.height) return null;
-  const expanded = node.data.options.mode === 'outpaint' && !node.data.editor_state.native;
+  const expanded = node.data.options.mode === 'outpaint';
   const frame = expanded ? node.data.editor_state.frame : { width: source.width, height: source.height, x: 0, y: 0 };
   const configured = Boolean(node.data.generation_draft) && (expanded || node.data.editor_state.strokes.length > 0);
   return <div className={`relative size-full ${expanded ? 'edit-dot-grid-dense' : ''}`}>

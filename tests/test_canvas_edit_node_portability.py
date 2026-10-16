@@ -34,7 +34,7 @@ def saved_edit(client):
             "source_node_id": "node-image", "source_version_id": source_version,
             "generation_draft": None, "options": {"mode": "inpaint"},
             "editor_state": {
-                "native": False, "strokes": [{"tool": "rectangle", "size": 4,
+                "strokes": [{"tool": "rectangle", "size": 4,
                     "points": [{"x": 1, "y": 1}, {"x": 3, "y": 3}]}],
                 "frame": {"width": 9, "height": 6, "x": 1, "y": 1}, "frame_ratio": "",
             },
@@ -92,10 +92,9 @@ def test_saved_but_never_generated_edit_roundtrips_in_project_package(client):
 def test_project_package_preserves_edit_config_and_multiple_result_histories():
     from character_workflow.lib.canvas_runs import submit_image_edit_run
     from character_workflow.lib.jobs import list_jobs
-    from tests.test_canvas_edit_nodes import complete, node, save_edit, selection
-    from tests.test_canvas_image_edits import setup_source
+    from tests.test_canvas_edit_nodes import complete, node, save_edit, selection, setup_mj_source
 
-    project_id, source, document = setup_source()
+    project_id, source, document = setup_mj_source()
     saved, edit_id = save_edit(project_id, document, source, mask=selection())
     first, _ = submit_image_edit_run(project_id, edit_id, saved.revision, 1)
     _, saved = complete(project_id, first)

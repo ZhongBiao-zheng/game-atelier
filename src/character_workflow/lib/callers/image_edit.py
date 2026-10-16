@@ -14,7 +14,7 @@ def edit_transport(provider: str, model: str, protocol: str | None) -> str | Non
         return "evolink" if model == "mj-v8.2" and protocol in {None, "evolink"} else None
     family = image_family(model)
     if family == "midjourney":
-        return "mj"
+        return None
     protocols = {None, "openai", "openrouter"} if provider == "openrouter" else {None, "openai", "ark"}
     if protocol not in protocols:
         return None
@@ -73,11 +73,6 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path,
     from .openai_image import _effective_image_protocol
 
     options = params["image_edit"]
-    if params.get("regional_edit"):
-        from .regional_edit import render as render_regions
-        return render_regions(prompt=prompt, model=model, alias=alias, output_dir=output_dir,
-                              params=params, **kwargs)
-    kwargs.pop("durable_dir", None)
     validate_result = kwargs.pop("validate_result", None)
     key = keys.find_by_alias(alias)
     if key is None:
@@ -87,10 +82,6 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path,
         from .evolink import render as render_evolink
         return render_evolink(prompt=prompt, model=model, alias=alias, output_dir=output_dir,
                              params=params, **kwargs)
-    if transport == "mj":
-        from .mj_edit import render as render_mj
-        return render_mj(prompt=prompt, model=model, alias=alias, output_dir=output_dir,
-                         params=params, **kwargs)
     if not transport or not params.get("mask_image") or not params.get("reference_images"):
         raise ValueError("图片编辑缺少有效源图、蒙版或兼容模型")
     source = Path(params["reference_images"][0])

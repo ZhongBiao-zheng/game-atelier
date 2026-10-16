@@ -51,7 +51,7 @@ it('shows the edit-node run by its frozen surface without treating it as a resul
   const edit: CanvasNode = { id: 'edit', type: 'image_edit', title: '编辑', position: { x: 0, y: 0 }, z_index: 0,
     data: { source_node_id: null, source_version_id: 'source', mask_version_id: null,
       reference_node_id: null, reference_version_id: null, generation_draft: null, active_run_id: 'run-1',
-      options: { mode: 'inpaint' }, editor_state: { native: false, strokes: [], frame_ratio: '', frame: { width: 100, height: 100, x: 0, y: 0 } },
+      options: { mode: 'inpaint' }, editor_state: { strokes: [], frame_ratio: '', frame: { width: 100, height: 100, x: 0, y: 0 } },
     } };
   const job = canvasJob('pending');
   job.canvas_run!.snapshot.surface_node_id = 'edit';
@@ -473,7 +473,7 @@ it('keeps old content visible after failure', () => {
 });
 
 it('resumes a paused MJ order instead of creating a new generation', () => {
-  const job = canvasJob('failed', { params: { mj_edit_state: { task_id: 'existing', poll_paused: true } } });
+  const job = canvasJob('failed', { params: { evolink_state: { task_id: 'existing', poll_paused: true } } });
   const context = nodeContext(job);
   context.resumeMjEdit = vi.fn(async () => undefined);
   const { rerender } = render(<CanvasNodeContext.Provider value={context}>

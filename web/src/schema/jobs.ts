@@ -26,13 +26,8 @@ export interface JobParams {
   /** Canvas 局部编辑的服务端解析 mask 路径；浏览器不直接写入。 */
   mask_image?: string;
   image_edit?: Record<string, unknown>;
-  regional_edit?: { output_offset?: number; tasks: Array<{ region_id: string; candidate: number;
-    status: 'pending' | 'running' | 'succeeded' | 'failed' | 'paused' | 'uncertain';
-    error?: string; path?: string; provider?: Record<string, unknown> }>; partial?: boolean };
   mj_submission_ids?: string[];
   mj_submit_uncertain?: boolean;
-  mj_outputs?: Array<{ task_id: string; image_index: number; single: boolean; sha256: string }>;
-  mj_edit_state?: Record<string, unknown>;
   evolink_state?: Record<string, unknown>;
   /** Canvas 多角度生成的服务端受控相机参数。 */
   angle_horizontal?: number;

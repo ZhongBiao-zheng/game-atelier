@@ -21,8 +21,7 @@ export function savedImageEditError(node: CanvasImageEditNode, source: CanvasCon
   const draft = node.data.generation_draft;
   const key = keys.find(item => item.alias === draft?.alias);
   if (!draft?.model || !key || !key.models.some(model => model.id === draft.model)) return '请先编辑并选择可用模型。';
-  const { options, editor_state: editor } = node.data;
-  if (editor.native || options.mode === 'prepare') return 'MJ 原生动作已移除，请重新编辑。';
+  const { options } = node.data;
   if (!key.models.some(model => model.id === draft.model && isEditModel(model, key))) return '请选择可用的编辑模型。';
   const mj = isEvolinkMidjourney(draft.model, key.provider);
   if (mj && !draft.prompt.trim()) return '请先填写修改说明。';

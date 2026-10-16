@@ -398,7 +398,6 @@ def _download_png(url: str, output_dir: Path, index: int, *, task_ref: str = "")
 def _poll_task(
     *, root: str, headers: dict[str, str], task_id: str,
     max_polls: int, poll_interval: float, should_cancel: Callable[[], bool] | None = None,
-    on_modal=None, on_result=None,
 ) -> list[str]:
     """轮询到终态，返回产物地址列表。
 
@@ -417,11 +416,7 @@ def _poll_task(
                 video_poll.with_task_ref(_err(payload, resp.status_code), task_id)
             )
         status = str(payload.get("status") or "").strip().upper()
-        if status == "MODAL" and on_modal:
-            on_modal(task_id)
         if status == _TERMINAL_SUCCESS:
-            if on_result:
-                on_result(payload)
             urls = _image_urls(payload)
             if urls:
                 return urls
@@ -533,15 +528,12 @@ def render(
 
     out_dir = Path(output_dir)
     paths: list[str] = []
-    outputs: list[dict] = []
     downloading = False
     for task_id in task_ids:
-        result = {}
         urls = _poll_task(
             root=root, headers=headers, task_id=task_id,
             max_polls=max_polls, poll_interval=poll_interval,
             should_cancel=should_cancel,
-            on_result=result.update,
         )
         # UI 的 Midjourney 一次任务固定返回 4 张，共享同一个 seed。多任务（n>4）会有多个
         # seed，现有 JobParams 没有可准确表达它们的字段，因此只在单任务时回填。
@@ -553,20 +545,11 @@ def render(
                 params["mj_seed"] = generated_seed
                 if params_in is not None:
                     params_in["mj_seed"] = generated_seed
-        for image_index, url in enumerate(urls, 1):
+        for url in urls:
             if on_phase and not downloading:
                 downloading = True
                 on_phase("downloading")
             path = _download_png(url, out_dir, len(paths) + 1, task_ref=task_id)
             paths.append(path)
-            outputs.append({"task_id": task_id,
-                            "image_index": image_index if result.get("imageUrls") else 0,
-                            "single": False,
-                            "channel": channel_fingerprint(key),
-                            "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()})
-    if params_in is not None:
-        params_in["mj_outputs"] = outputs
-        if persist:
-            persist()
     _publish_actual_n(params_in, wanted, len(paths))
     return paths

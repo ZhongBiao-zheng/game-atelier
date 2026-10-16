@@ -32,7 +32,7 @@ it('keeps image edit settings out of normal generation and retains fixed version
       reference_node_id: 'reference', reference_version_id: 'reference-v', active_run_id: null,
       generation_draft: { mode: 'image', model: 'mj-v8.2', alias: 'evo', prompt: 'flower', params: { n: 4 },
         input_policy: 'all_connected', updated_at: '' }, options: { mode: 'inpaint' },
-      editor_state: { native: false, strokes: [], frame_ratio: '', frame: { width: 1024, height: 1024, x: 0, y: 0 } },
+      editor_state: { strokes: [], frame_ratio: '', frame: { width: 1024, height: 1024, x: 0, y: 0 } },
     } };
   expect(canvasNodeAcceptsInput(node)).toBe(false);
   expect(canvasNodeProvidesOutput(node)).toBe(false);
@@ -48,7 +48,7 @@ it('retains results created after a configuration snapshot without blocking resu
     data: { source_node_id: null, source_version_id: 'source', mask_version_id: null,
       reference_node_id: null, reference_version_id: null, active_run_id: null,
       generation_draft: { mode: 'image', model: 'model', prompt: 'new', params: {}, input_policy: 'all_connected', updated_at: '' },
-      options: { mode: 'inpaint' }, editor_state: { native: false, strokes: [], frame_ratio: '', frame: { width: 10, height: 10, x: 0, y: 0 } },
+      options: { mode: 'inpaint' }, editor_state: { strokes: [], frame_ratio: '', frame: { width: 10, height: 10, x: 0, y: 0 } },
     } };
   const result: CanvasNode = { id: 'result', type: 'image', title: '结果', position: { x: 100, y: 0 }, z_index: 1,
     data: { current_version_id: 'completed', active_run_id: null, generation_draft: null, display: { fit: 'contain', free_resize: false } } };
@@ -75,7 +75,7 @@ it('retains completed results when consecutive undo and redo snapshots no longer
   const edit: CanvasNode = { id: 'edit', type: 'image_edit', title: '编辑', position: { x: 200, y: 0 }, z_index: 1,
     data: { source_node_id: 'source', source_version_id: 'source-v', mask_version_id: 'mask',
       reference_node_id: null, reference_version_id: null, active_run_id: 'run', generation_draft: null,
-      options: { mode: 'inpaint' }, editor_state: { native: false, strokes: [], frame_ratio: '', frame: { width: 10, height: 10, x: 0, y: 0 } },
+      options: { mode: 'inpaint' }, editor_state: { strokes: [], frame_ratio: '', frame: { width: 10, height: 10, x: 0, y: 0 } },
     } };
   const result: CanvasNode = { ...source, id: 'result', title: '结果', position: { x: 300, y: 0 },
     data: { ...source.data, current_version_id: null, active_run_id: 'run' } };

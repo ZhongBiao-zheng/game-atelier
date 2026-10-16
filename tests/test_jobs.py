@@ -177,8 +177,6 @@ def test_clone_job_for_retry(runtime):
             "provider_task_ids": ["already-billed-task"],
             "mj_submission_ids": ["old-mj-task"],
             "mj_submit_uncertain": True,
-            "mj_outputs": [{"task_id": "old-mj-task"}],
-            "mj_edit_state": {"task_id": "old-edit", "poll_paused": True},
         },
     )
     update_job_status("job-001", status=JobStatus.FAILED, error="API timeout")
@@ -199,8 +197,6 @@ def test_clone_job_for_retry(runtime):
     assert clone.params.provider_task_ids is None
     assert clone.params.mj_submission_ids is None
     assert clone.params.mj_submit_uncertain is None
-    assert clone.params.mj_outputs is None
-    assert clone.params.mj_edit_state is None
     # 原 job 与错误记录原样保留
     original = read_job("job-001")
     assert original.status == JobStatus.FAILED

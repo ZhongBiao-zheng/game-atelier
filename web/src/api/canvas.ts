@@ -480,12 +480,6 @@ export function submitCanvasLayerDecomposition(
   );
 }
 
-export function resumeCanvasRegions(projectId: string, runId: string, expectedRevision: number): Promise<CanvasRun> {
-  return requestJson(`/api/canvas/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/resume-regions`,
-    '继续未完成区域', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ expected_revision: expectedRevision }) });
-}
-
 export type CanvasImageEditSavePayload = Pick<CanvasImageEditNode['data'],
   'generation_draft' | 'options' | 'editor_state' | 'reference_node_id' | 'reference_version_id'> & {
     expected_revision: number;

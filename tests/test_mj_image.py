@@ -118,8 +118,7 @@ def test_submits_polls_and_downloads_four_images(mj_key, tmp_path, monkeypatch):
     assert all(Path(p).read_bytes() == b"PNG" for p in out)
 
 
-def test_imagine_persists_task_and_exact_output_mapping(mj_key, tmp_path, monkeypatch):
-    import hashlib
+def test_imagine_persists_task(mj_key, tmp_path, monkeypatch):
     _wire(monkeypatch, submit={"code": 1, "result": "t-1"})
     params = {}
     changes = []
@@ -127,11 +126,6 @@ def test_imagine_persists_task_and_exact_output_mapping(mj_key, tmp_path, monkey
             on_params_changed=lambda: changes.append(dict(params)))
     assert changes[0]["mj_submit_uncertain"] is True
     assert changes[1]["mj_submission_ids"] == ["t-1"]
-    assert params["mj_outputs"][2] == {
-        "task_id": "t-1", "image_index": 3, "single": False,
-        "channel": mj.channel_fingerprint(_keys.find_by_alias("mj")),
-        "sha256": hashlib.sha256(b"PNG").hexdigest(),
-    }
 
 
 def test_transient_cdn_failure_on_download_is_retried(mj_key, tmp_path, monkeypatch):

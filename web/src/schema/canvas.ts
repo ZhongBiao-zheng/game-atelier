@@ -247,15 +247,11 @@ export interface CanvasPluginNode extends CanvasNodeBase {
 }
 
 export interface CanvasImageEditSettings {
-  mode: 'inpaint' | 'outpaint' | 'prepare';
+  mode: 'inpaint' | 'outpaint';
   width?: number; height?: number; x?: number; y?: number;
-  custom_id?: string; zoom?: number; context?: number;
-  feather?: number | null; groups?: number[][] | null;
-  region_prompts?: Record<string, string>;
 }
 
 export interface CanvasImageEditEditorState {
-  native: boolean;
   strokes: Array<{ tool: 'brush' | 'eraser' | 'rectangle'; size: number; points: CanvasPoint[] }>;
   frame: CanvasSize & CanvasPoint;
   frame_ratio: string;

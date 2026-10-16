@@ -60,7 +60,6 @@ import { Link, useLocation } from 'wouter';
 import {
   cancelCanvasRun,
   resumeCanvasMjEdit,
-  resumeCanvasRegions,
   canvasDownloadUrl,
   canvasMediaUrl,
   createCanvasReversePromptConfig,
@@ -562,8 +561,6 @@ function CanvasEditorInner({
   const [toolNotice, setToolNotice] = useState<string | null>(null);
   const [toolNoticeAction, setToolNoticeAction] = useState<CanvasNoticeAction | null>(null);
   const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
-  const [resumeRegionsId, setResumeRegionsId] = useState<string | null>(null);
-  const [resumingRegions, setResumingRegions] = useState(false);
   const [teamRelatedSha256, setTeamRelatedSha256] = useState<string | null>(null);
   const [teamLibraryId, setTeamLibraryId] = useState<string | null>(null);
   const [libraryPanelKey, setLibraryPanelKey] = useState(0);
@@ -809,7 +806,6 @@ function CanvasEditorInner({
     setGenerationPreferencesSaving(false);
     setProjectRenameDraft(null);
     setProjectRenameBusy(false);
-    setResumeRegionsId(null);
     setLibraryMode(null);
     setCreationAssetSaveRequest(null);
     setCanvasUiPreferences(DEFAULT_CANVAS_UI_PREFERENCES);
@@ -3230,31 +3226,6 @@ function CanvasEditorInner({
     }
   }, [projectId, persistNow, mergeSubmittedRunDocument, applyLocalJob, flushSave]);
 
-  async function confirmResumeRegions() {
-    if (!resumeRegionsId || runSubmissionInFlight.current) return;
-    let claimed = false;
-    setResumingRegions(true); setError(null);
-    try {
-      if (!await persistNow()) return;
-      if (runSubmissionInFlight.current || latestDocument.current?.project_id !== projectId) return;
-      runSubmissionInFlight.current = true;
-      claimed = true;
-      const dirty = dirtyVersion.current;
-      const result = await resumeCanvasRegions(projectId, resumeRegionsId, serverRevision.current);
-      if (latestDocument.current?.project_id !== projectId) return;
-      mergeSubmittedRunDocument(result.document, result.job, dirty);
-      applyLocalJob(result.job); setResumeRegionsId(null);
-    } catch (resumeError) {
-      if (latestDocument.current?.project_id === projectId) setError((resumeError as Error).message);
-    } finally {
-      setResumingRegions(false);
-      if (claimed) {
-        runSubmissionInFlight.current = false;
-        if (saveQueued.current) void flushSave().catch(() => undefined);
-      }
-    }
-  }
-
   const dismissCandidate = useCallback(async (runId: string, candidateId: string) => {
     setError(null);
     try {
@@ -3938,7 +3909,7 @@ function CanvasEditorInner({
     const { width, height } = version;
     void persistImageEdit({ source_node_id: node.id, source_version_id: version.version_id,
       generation_draft: null, options: { mode }, reference_node_id: null, reference_version_id: null,
-      editor_state: { native: false, strokes: [], frame_ratio: mode === 'outpaint' ? 'original' : '', frame: initialEditFrame(width, height, mode) },
+      editor_state: { strokes: [], frame_ratio: mode === 'outpaint' ? 'original' : '', frame: initialEditFrame(width, height, mode) },
     }, null).then(saved => { setSelectedNodeIds(new Set([saved.id])); openImageEdit(saved.id); })
       .catch(error => setError((error as Error).message));
   }, [openImageEdit, persistImageEdit]);
@@ -4544,7 +4515,6 @@ function CanvasEditorInner({
     submitRun,
     cancelRun,
     resumeMjEdit,
-    resumeRegions: setResumeRegionsId,
     dismissCandidate,
     updateNode,
     previewNodeResize,
@@ -5396,17 +5366,6 @@ function CanvasEditorInner({
           />
         )}
 
-        <Dialog open={Boolean(resumeRegionsId)} onOpenChange={open => { if (!open && !resumingRegions) setResumeRegionsId(null); }}>
-          <DialogContent className="max-w-md">
-            <DialogHeader><DialogTitle>继续未完成区域</DialogTitle><DialogDescription>
-              已完成区域不会重新生成。待生成和失败区域将重新计费；有订单号的暂停区域只继续查询。
-              提交结果不明的区域暂不重发。
-            </DialogDescription></DialogHeader>
-            <p className="text-sm">新增请求：{(jobsByRunId.get(resumeRegionsId ?? '')?.params.regional_edit?.tasks ?? []).filter(task => ['failed', 'pending'].includes(task.status)).length} 次 · 费用以供应商结算为准</p>
-            <DialogFooter><Button variant="ghost" disabled={resumingRegions} onClick={() => setResumeRegionsId(null)}>取消</Button>
-              <Button disabled={resumingRegions} onClick={() => void confirmResumeRegions()}>{resumingRegions ? '提交中…' : '继续'}</Button></DialogFooter>
-          </DialogContent>
-        </Dialog>
         <Dialog open={shortcutsOpen} onOpenChange={open => {
           setShortcutsOpen(open);
           if (!open) requestAnimationFrame(() => canvasMenuTriggerRef.current?.focus());
@@ -5581,7 +5540,7 @@ function CanvasPreview({
   const maskId = job?.canvas_run?.snapshot.mask_version_id;
   const edit = job?.canvas_run?.snapshot.normalized_params.image_edit as {
     source_version_id?: string; mode?: string; width?: number; height?: number; x?: number; y?: number;
-    source_width?: number; source_height?: number; custom_id?: string;
+    source_width?: number; source_height?: number;
   } | undefined;
   const src = version.kind === 'text' ? null : canvasMediaUrl(projectId, version.version_id);
   return (
@@ -5602,7 +5561,7 @@ function CanvasPreview({
             } : { inset: 0, width: '100%', height: '100%' }} />}
           </div>
           {edit?.source_version_id && <Button size="sm" variant="ghost" onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); setShowSource(true); }} onPointerUp={() => setShowSource(false)} onPointerCancel={() => setShowSource(false)} onKeyDown={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); setShowSource(true); } }} onKeyUp={() => setShowSource(false)} onBlur={() => setShowSource(false)}>按住查看原图</Button>}
-          {edit && maskId && (edit.mode === 'inpaint' || (edit.mode === 'outpaint' && !edit.custom_id)) && <Button size="sm" variant="ghost" aria-pressed={showMask} onClick={() => setShowMask(value => !value)}>查看选区</Button>}
+          {edit && maskId && (edit.mode === 'inpaint' || edit.mode === 'outpaint') && <Button size="sm" variant="ghost" aria-pressed={showMask} onClick={() => setShowMask(value => !value)}>查看选区</Button>}
         </div>
       )}
       {version.kind === 'video' && src && (

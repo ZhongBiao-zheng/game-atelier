@@ -614,8 +614,6 @@ def _run_once(
                 on_params_changed=on_params_changed,
                 on_cost_usd=_actual_cost_recorder(job.job_id, params),
                 should_cancel=should_cancel,
-                **({"durable_dir": job_output_dir_for(job) / ".regional" / job.job_id}
-                   if params.get("regional_edit") else {}),
             )
             selected = [(Path(p), dims) for p in paths if (dims := image_dimensions(Path(p)))]
             if not selected:
@@ -642,13 +640,11 @@ def _run_once(
             for output_path in output_paths:
                 _write_sidecar(Path(output_path), job, params)
             persisted_paths = output_paths
-            if defer_terminal or params.get("regional_edit"):
+            if defer_terminal:
                 persisted_paths = list(dict.fromkeys([*job.output_paths, *output_paths]))
             return update_job_status(
                 job.job_id,
-                status=(JobStatus.PENDING if defer_terminal else
-                        JobStatus.PARTIAL if (params.get("regional_edit") or {}).get("partial")
-                        else JobStatus.DONE),
+                status=JobStatus.PENDING if defer_terminal else JobStatus.DONE,
                 output_paths=persisted_paths,
                 error=None,
             )

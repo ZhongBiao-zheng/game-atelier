@@ -6,7 +6,7 @@ from PIL import Image
 from pydantic import ValidationError
 
 from character_workflow.lib import callers, keys
-from character_workflow.lib.canvas_image_edits import save_image_edit, editing_source, preview_regional_edit
+from character_workflow.lib.canvas_image_edits import fixed_edit_source, save_image_edit
 from character_workflow.lib.canvas_projects import (
     read_canvas_document, replace_canvas_node_media, save_canvas_document, canvas_output_dir,
 )
@@ -20,13 +20,33 @@ from character_workflow.lib.schemas import (
     CanvasDocument, CanvasImageEditSave, CanvasImageEditEditorState, CanvasImageEditOptions, JobStatus,
 )
 from tests.test_canvas_image_edits import setup_source
-from tests.test_generation_recipe import png
+from tests.test_generation_recipe import NOW, png
+
+OUTPAINT = {"mode": "outpaint", "width": 1536, "height": 1024, "x": 256, "y": 0}
 
 
 def selection(value=0):
     body = io.BytesIO()
     Image.new("L", (1024, 1024), value).save(body, format="PNG")
     return body.getvalue()
+
+
+def setup_mj_source():
+    """局部修改只走 EvoLink Midjourney：源图草稿切到它。"""
+    from character_workflow.lib.keys import KeySpec, ModelSpec, read_keys_db, write_keys_db
+
+    pid, source, document = setup_source()
+    db = read_keys_db()
+    write_keys_db(db.model_copy(update={"keys": [*db.keys, KeySpec(
+        alias="Evo", provider="evolink", access_key="test", base_url="https://api.evolink.ai/v1",
+        created_at=NOW, models=[ModelSpec(id="mj-v8.2", name="MJ", modality="image", protocol="evolink")],
+    )]}))
+    updated = document.model_copy(deep=True)
+    image = node(updated, "source")
+    image.data.generation_draft = image.data.generation_draft.model_copy(update={
+        "alias": "Evo", "model": "mj-v8.2",
+    })
+    return pid, source, save_canvas_document(pid, updated, document.revision)
 
 
 def save_edit(pid, document, version, *, node_id=None, mask=None, **changes):
@@ -61,7 +81,7 @@ def test_save_empty_draft_is_local_and_restores_editor_state(monkeypatch):
     draft = node(document, "source").data.generation_draft.model_copy(update={
         "model": "", "alias": None, "prompt": "later",
     })
-    editor = {"native": False, "strokes": [{"tool": "brush", "size": 12,
+    editor = {"strokes": [{"tool": "brush", "size": 12,
               "points": [{"x": 40, "y": 50}]}],
               "frame": {"width": 1024, "height": 1024, "x": 0, "y": 0}, "frame_ratio": "1:1"}
     saved, edit_id = save_edit(pid, document, source, generation_draft=draft, editor_state=editor)
@@ -93,7 +113,7 @@ def test_reference_is_frozen_without_adding_a_reference_edge():
     document = save_canvas_document(pid, document.model_copy(update={
         "nodes": [*document.nodes, reference],
     }), document.revision)
-    saved, edit_id = save_edit(pid, document, source, mask=selection(),
+    saved, edit_id = save_edit(pid, document, source, options=OUTPAINT,
                               reference_node_id="reference", reference_version_id=source.version_id)
     assert node(saved, edit_id).data.reference_node_id == "reference"
     assert node(saved, edit_id).data.reference_version_id == source.version_id
@@ -158,7 +178,7 @@ def test_editor_coordinates_support_legal_source_axes_without_relaxing_execution
 
 
 def test_empty_mask_can_save_but_not_generate():
-    pid, source, document = setup_source()
+    pid, source, document = setup_mj_source()
     saved, edit_id = save_edit(pid, document, source, mask=selection(255))
     with pytest.raises(ValueError, match="没有需要编辑"):
         submit_image_edit_run(pid, edit_id, saved.revision, 1)
@@ -167,30 +187,29 @@ def test_empty_mask_can_save_but_not_generate():
 
 def test_source_reference_versions_survive_replacement_and_source_deletion():
     pid, source, document = setup_source()
-    saved, edit_id = save_edit(pid, document, source, mask=selection(),
+    saved, edit_id = save_edit(pid, document, source, options=OUTPAINT,
                               reference_node_id="source", reference_version_id=source.version_id)
     newer, replaced, _ = replace_canvas_node_media(pid, "source", "new.png", ".png",
         png((0, 255, 0), (1024, 1024)), "image", saved.revision)
     assert newer.version_id != source.version_id
-    assert editing_source(pid, edit_id)["source_version_id"] == source.version_id
+    assert fixed_edit_source(read_canvas_document(pid), edit_id)[1].version_id == source.version_id
     without = replaced.model_copy(update={
         "nodes": [n for n in replaced.nodes if n.id != "source"], "connections": [],
     })
     deleted = save_canvas_document(pid, CanvasDocument.model_validate(without.model_dump()), replaced.revision)
     assert node(deleted, edit_id).data.source_node_id is None
     assert node(deleted, edit_id).data.reference_node_id is None
-    deleted, _ = save_edit(pid, deleted, source, node_id=edit_id, mask=selection(),
+    deleted, _ = save_edit(pid, deleted, source, node_id=edit_id, options=OUTPAINT,
                           generation_draft=node(saved, edit_id).data.generation_draft,
                           reference_version_id=source.version_id)
     job, saved = submit_image_edit_run(pid, edit_id, deleted.revision, 1)
     assert [i.version_id for i in job.canvas_run.snapshot.inputs] == [source.version_id] * 2
-    assert job.canvas_run.snapshot.mask_version_id == node(deleted, edit_id).data.mask_version_id
     assert [(e.source_node_id, e.target_node_id) for e in saved.connections] == [
         (edit_id, job.canvas_run.result_node_id)]
 
 
 def test_undo_source_deletion_after_replacement_keeps_fixed_edit_version():
-    pid, original, document = setup_source()
+    pid, original, document = setup_mj_source()
     saved, edit_id = save_edit(pid, document, original, mask=selection())
     replacement, replaced, _ = replace_canvas_node_media(pid, "source", "new.png", ".png",
         png((0, 255, 0), (500, 500)), "image", saved.revision)
@@ -217,7 +236,7 @@ def test_undo_source_deletion_after_replacement_keeps_fixed_edit_version():
 
 
 def test_inflight_snapshot_and_new_draft_are_independent_and_each_run_creates_new_result():
-    pid, source, document = setup_source()
+    pid, source, document = setup_mj_source()
     saved, edit_id = save_edit(pid, document, source, mask=selection())
     first, running = submit_image_edit_run(pid, edit_id, saved.revision, 1)
     frozen = first.canvas_run.snapshot.model_dump(mode="json")
@@ -225,7 +244,7 @@ def test_inflight_snapshot_and_new_draft_are_independent_and_each_run_creates_ne
         submit_image_edit_run(pid, edit_id, running.revision, 1)
     draft = node(running, edit_id).data.generation_draft.model_copy(update={"prompt": "new prompt"})
     changed, _ = save_edit(pid, running, source, node_id=edit_id, mask=selection(128),
-                          generation_draft=draft, options={"feather": 4})
+                          generation_draft=draft, options={"x": 4})
     assert node(changed, edit_id).data.active_run_id == first.canvas_run.run_id
     assert read_job(first.job_id).canvas_run.snapshot.model_dump(mode="json") == frozen
     first_done, finished = complete(pid, first)
@@ -243,7 +262,7 @@ def test_inflight_snapshot_and_new_draft_are_independent_and_each_run_creates_ne
 
 @pytest.mark.parametrize("value", ["forged", None])
 def test_document_put_cannot_forge_or_clear_active_edit_run(value):
-    pid, source, document = setup_source()
+    pid, source, document = setup_mj_source()
     saved, edit_id = save_edit(pid, document, source, mask=selection())
     _job, running = submit_image_edit_run(pid, edit_id, saved.revision, 1)
     forged = running.model_copy(deep=True)
@@ -254,7 +273,7 @@ def test_document_put_cannot_forge_or_clear_active_edit_run(value):
 
 @pytest.mark.parametrize("value", ["forged", None])
 def test_document_put_cannot_forge_or_clear_edit_result_status_even_without_edges(value):
-    pid, source, document = setup_source()
+    pid, source, document = setup_mj_source()
     saved, edit_id = save_edit(pid, document, source, mask=selection())
     job, running = submit_image_edit_run(pid, edit_id, saved.revision, 1)
     disconnected = running.model_copy(update={"connections": []})
@@ -267,7 +286,7 @@ def test_document_put_cannot_forge_or_clear_edit_result_status_even_without_edge
 
 @pytest.mark.parametrize("terminal", [False, True])
 def test_delete_and_undo_restores_only_server_owned_run_state(terminal):
-    pid, source, document = setup_source()
+    pid, source, document = setup_mj_source()
     saved, edit_id = save_edit(pid, document, source, mask=selection())
     job, running = submit_image_edit_run(pid, edit_id, saved.revision, 1)
     removed_ids = {edit_id, job.canvas_run.result_node_id}
@@ -317,7 +336,7 @@ def test_new_material_result_cannot_claim_a_fake_run():
 
 
 def test_existing_run_result_cannot_be_converted_to_configuration():
-    pid, source, document = setup_source()
+    pid, source, document = setup_mj_source()
     saved, edit_id = save_edit(pid, document, source, mask=selection())
     job, running = submit_image_edit_run(pid, edit_id, saved.revision, 1)
     impostor = node(running, edit_id).model_copy(update={"id": job.canvas_run.result_node_id})
@@ -329,7 +348,7 @@ def test_existing_run_result_cannot_be_converted_to_configuration():
 
 
 def test_cancel_before_execution_clears_edit_and_result_status(monkeypatch):
-    pid, source, document = setup_source()
+    pid, source, document = setup_mj_source()
     saved, edit_id = save_edit(pid, document, source, mask=selection())
     job, _ = submit_image_edit_run(pid, edit_id, saved.revision, 1)
     request_canvas_run_cancel(pid, job.canvas_run.run_id)
@@ -342,7 +361,7 @@ def test_cancel_before_execution_clears_edit_and_result_status(monkeypatch):
 
 def test_startup_reconciliation_clears_canceled_edit_status():
     from character_workflow.lib.canvas_runs import reconcile_canvas_jobs
-    pid, source, document = setup_source()
+    pid, source, document = setup_mj_source()
     saved, edit_id = save_edit(pid, document, source, mask=selection())
     job, _ = submit_image_edit_run(pid, edit_id, saved.revision, 1)
     request_canvas_run_cancel(pid, job.canvas_run.run_id)
@@ -369,16 +388,6 @@ def test_edit_cannot_use_generic_generation_or_input_connections():
         CanvasDocument.model_validate(payload)
 
 
-def test_preview_uses_saved_fixed_source():
-    pid, source, document = setup_source()
-    saved, edit_id = save_edit(pid, document, source, mask=selection())
-    replace_canvas_node_media(pid, "source", "new.png", ".png",
-        png((0, 255, 0), (500, 500)), "image", saved.revision)
-    preview = preview_regional_edit(pid, edit_id, "openai", "gpt-image-1", selection(),
-        CanvasImageEditOptions(source_version_id=source.version_id))
-    assert preview["regions"]
-
-
 @pytest.mark.parametrize("point", [{"x": float("nan"), "y": 0}, {"x": 0, "y": float("inf")}])
 def test_editor_state_rejects_nonfinite_coordinates(point):
     with pytest.raises(ValidationError):
@@ -396,34 +405,3 @@ def test_save_strips_provider_orders_and_local_paths_from_draft():
     assert params.evolink_state is None
     assert params.reference_images is None
     assert params.mask_image is None
-
-
-@pytest.mark.parametrize("native_available", [True, False])
-def test_tuzi_native_edit_keeps_verified_task_affinity_or_rejects_upload(monkeypatch, native_available):
-    from character_workflow.lib import canvas_image_edits
-    from character_workflow.lib.keys import KeysDB, KeySpec, ModelSpec, write_keys_db
-    from tests.test_generation_recipe import NOW
-
-    pid, source, document = setup_source()
-    write_keys_db(KeysDB(keys=[KeySpec(alias="tuzi", provider="custom", access_key="test-only",
-        base_url="https://api.tu-zi.com/v1", created_at=NOW,
-        models=[ModelSpec(id="midjourney", name="MJ", modality="image")])]))
-    draft = node(document, "source").data.generation_draft.model_copy(update={
-        "alias": "tuzi", "model": "midjourney",
-    })
-    native = {"alias": "tuzi", "model": "midjourney", "task_id": "original-task",
-              "image_index": 1, "single": True, "channel": "verified-affinity"}
-    monkeypatch.setattr(canvas_image_edits, "mj_source", lambda _: native if native_available else None)
-    saved, edit_id = save_edit(pid, document, source, mask=selection(), generation_draft=draft,
-                              options={"mode": "inpaint", "custom_id": "MJ::JOB::inpaint::task"})
-    assert "task_id" not in node(saved, edit_id).data.model_dump_json(exclude_none=True)
-    if not native_available:
-        with pytest.raises(ValueError, match="原任务所属渠道"):
-            submit_image_edit_run(pid, edit_id, saved.revision, 4)
-        assert list_jobs() == []
-        return
-    job, _ = submit_image_edit_run(pid, edit_id, saved.revision, 1)
-    assert job.params.image_edit["task_id"] == "original-task"
-    assert job.params.image_edit["channel"] == "verified-affinity"
-    assert job.params.regional_edit is None
-    assert job.params.n == 4

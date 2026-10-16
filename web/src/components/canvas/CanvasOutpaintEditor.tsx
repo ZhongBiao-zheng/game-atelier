@@ -100,7 +100,7 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
     try {
       const submission: CanvasMaskEditSubmission = {
         mask: null, requestedCount: candidates, options: { mode: 'outpaint', ...frame },
-        editorState: { native: false, strokes: [], frame, frame_ratio: ratio },
+        editorState: { strokes: [], frame, frame_ratio: ratio },
         referenceNodeId: null, referenceVersionId: null,
         draft: { mode: 'image', prompt: prompt.trim(), input_policy: 'all_connected', alias: choice?.key.alias ?? '',
           model: choice?.model ?? '', updated_at: new Date().toISOString(),

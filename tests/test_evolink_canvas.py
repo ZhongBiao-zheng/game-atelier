@@ -43,7 +43,6 @@ def test_external_source_creates_one_native_job_and_four_materials(monkeypatch, 
         **({"width": 192, "height": 80, "x": 48, "y": 8} if mode == "outpaint" else {}))
     job, _ = submit_saved_edit(pid, "source", doc.revision, 1, mask, options)
     assert job.params.n == 4
-    assert job.params.regional_edit is None
     assert len(job.params.reference_images) == 1
     assert "task_id" not in job.params.image_edit
     with Image.open(job.params.mask_image) as frozen_mask:

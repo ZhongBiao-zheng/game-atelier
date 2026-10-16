@@ -183,13 +183,6 @@ export function CanvasGenerationMetadata({ snapshot, job, nodes }: {
         {parameters.map(item => <RecordItem key={item.key} label={item.label} value={item.value} />)}
       </dl>
 
-      {job.params.regional_edit && <div className="space-y-2 text-xs" aria-label="区域执行详情">
-        {job.params.regional_edit.tasks.map((task, index) => <div key={index} className="rounded-md border border-border p-2">
-          <p>候选 {task.candidate + 1} · 区域 {task.region_id} · {({ pending: '待生成', running: '执行中', succeeded: '完成', failed: '失败', paused: '等待续查', uncertain: '提交结果待核对' })[task.status]}</p>
-          {task.error && <p className="mt-1 break-words text-muted-foreground">{String(sanitizeParameter(task.error))}</p>}
-        </div>)}
-      </div>}
-
       <div>
         <p className="text-xs text-muted-foreground">冻结引用</p>
         {snapshot.inputs.length === 0 && !snapshot.mask_version_id ? (

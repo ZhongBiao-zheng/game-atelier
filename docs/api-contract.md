@@ -482,13 +482,14 @@ Version 不可变、历史保留；分组只管理布局。删除编辑入口保
 `source_node_id/source_version_id`、`generation_draft`、`options`、`editor_state` 和可选
 `reference_node_id/reference_version_id`。保存允许未选择模型、未绘制选区，不创建 Job、不调用厂商。
 节点固定源图/参考图 Version；原节点换版或删除不改变已保存内容，删除后关联节点 ID 可为空。
-`editor_state` 保存源图像素坐标下的画笔/橡皮/矩形笔迹、画框与比例、原生编辑开关；不保存视图缩放和撤销栈。
-`options` 保存模式、扩框几何、MJ 动作、上下文/羽化、分组与区域提示词，不重复保存源版本或临时规划 ID。
+`editor_state` 保存源图像素坐标下的画笔/橡皮/矩形笔迹、画框与比例；不保存视图缩放和撤销栈。
+`options` 保存模式（`inpaint` / `outpaint`）与扩框几何，不重复保存源版本。
 蒙版为不可变项目 Version，内容相同时可复用；不传蒙版表示清空选区。不得传媒体绝对路径、凭证或订单状态。
 
 `POST /canvas/projects/{id}/runs/image-edit` 使用 JSON `surface_node_id / expected_revision / requested_count`，
 只从已保存的编辑节点冻结 Job 与 Snapshot。编辑必须指定渠道，不使用自动路由；空提示词采用自然修复/延展。
-运行前重新校验选区、固定媒体版本与模型能力，分区计划重新计算。每次生成新增结果节点，不覆盖旧结果。
+运行前重新校验选区、固定媒体版本与模型能力。局部修改只接受 EvoLink MJ，其它模型 422；扩图接受 EvoLink MJ 与通用编辑模型。
+每次生成新增结果节点，不覆盖旧结果。
 运行中保存草稿不改已提交快照；`active_run_id` 为服务端独占。普通文档 PUT 不得伪造编辑运行状态或源版本绑定。
 项目包包含尚未生成的编辑节点及全部源图/蒙版；跨画布粘贴复制固定媒体版本并重写蒙版来源，清空运行状态。
 旧 `runs/mask-edit` 接口移除，不保留即时提交旁路。
@@ -500,51 +501,24 @@ Version 不可变、历史保留；分组只管理布局。删除编辑入口保
 Snapshot 保存 `mask_version_id`、源版本、可选替换参考和 `normalized_params.image_edit` 几何参数。
 结果始终另建节点（包括图层素材），不覆盖源版本，不创建蒙版节点或历史关系线。
 
-通用编辑按供应商/协议/型号筛选：支持原生 mask 的 GPT Image 使用 edits；兼容的 Seedream、Nano Banana
+通用编辑模型只用于扩图，按供应商/协议/型号筛选：支持原生 mask 的 GPT Image 使用 edits；兼容的 Seedream、Nano Banana
 等使用干净底图与独立区域引导图，不伪装成原生 mask。最终合成 PNG 保留保护区解码 RGBA；输出比例偏差超过
 2% 拒绝，同一比例的分辨率差异等比映射。编辑尺寸以画框为准，禁止 AUTO 改变编辑边界；蒙版保护只能保证
 改动范围，不能证明生成内容和接缝质量。未做计费渠道质量验收。
-
-通用局部修改采用分区裁剪回贴，扩图及 MJ 原生操作不使用此流程。
-`POST /canvas/projects/{id}/nodes/{node_id}/edit-plan` 接受 multipart `alias/model/mask_file/edit_options`，
-只做本地规划，不创建订单。选区按连通块聚类，最多 16 区；`groups` 可显式合并或拆开，必须完整覆盖所有块。
-返回 `plan_id` 和 `regions`：原像素 `bounds/crop`、工作图 `work_size/params`、`feather` 及羽化预览。
-裁片起始短边 256px（产品默认，非厂商下限），工作尺寸按模型能力选择；边缘不足时透明 padding，逆变换去除。
-`edit_options` 另支持 `context`（默认 .25，0–2）、`feather`（默认自动 4–24px，可设 0–32）、
-`region_prompts`（按区域 ID 覆盖统一提示词）、`plan_id`。规划摘要绑定源版本/蒙版/模型/几何参数，
-过期规划在提交前拒绝。结果为每个候选一张全图，一个结果节点；请求数为区域数×候选数，提交前显示费用。
-只有核心及可见羽化带可变化，其外 RGBA 逐像素保持。回贴使用预乘 alpha 和顺序无关的重叠权重。
-有纹理上下文的明显平移会拒绝回贴；此检查不保证语义或透视正确，不能替代真实效果验收。
-
-`params.regional_edit` 为服务端独占状态：每个区域/候选分别存状态、裁片路径、实际尺寸、费用和厂商订单。
-成功裁片持久化在 Job 输出目录 `.regional/{job_id}/`，不依赖临时目录；同一父任务使用现有密钥槽，
-内部依次处理各区，不额外超额并发。部分失败生成部分完成结果，失败区保留原图。
-`POST /canvas/projects/{id}/runs/{run_id}/resume-regions` 接收 `expected_revision`，仅接受未取消且结果节点未改动
-的失败/部分完成任务。成功区复用，失败区显式新下单，已知 Tuzi 订单仅续查，未知提交不重发；
-全部裁片已完成但合成中断时仅重新合成。普通 Job 克隆重试不得绕过此规则。
-继续区域保留同一 Job 的既有输出授权，历史候选归档在 `regional_edit.history`，新合成从 `output_offset`
-起登记；旧 Version、复制节点及下游冻结参考不失效。项目包将成功裁片纳入校验后的 PNG blob，
-导入时重写到新项目所属 Job，历史候选血缘一并验证，不依赖导出机器的绝对路径。
-
-`GET /canvas/projects/{id}/nodes/{node_id}/image-edit` 返回源版本与 MJ 可用动作，不提交任务。
-MJ 原生操作要求输出 task/单图序号、文件 SHA256、原授权渠道指纹匹配；仅开放 fetch.buttons 中实际动作。
-需要单图时显式准备一次，不自动追加计费任务。Action 受理后仅在查询状态为 MODAL 时发送 Modal；code=21
-不等于需要弹窗。已受理任务 ID 与不确定提交状态持久化，服务重启后可续查已知订单，不自动重发不确定订单。
-MJ 尺寸和保护能力以厂商动作为准，不套用通用像素保护承诺。内部来源字段由服务端独占，普通 Studio 请求不能注入。
-
-MJ 原生编辑查询超时/网络中断记录 `mj_edit_state.poll_paused`，不假定厂商任务失败；结果节点显示“继续查询”。
 
 #### EvoLink MJ V8.2
 
 Key `provider=evolink`、模型 `mj-v8.2`、协议 `evolink`，API 根地址为 `https://api.evolink.ai/v1`。
 普通生图使用 `POST /v1/images/generations`，固定 Fast / Standard，每次返回最多 4 张；不把派生动作 ID 当作普通模型。
 画布编辑节点选择该模型时，使用 `mj-v8.2-upload-paint`，接受任意项目内原图，无需既有 MJ 订单。
-不启用通用模型的分区裁剪或回贴，也不接收额外替换参考图；原图保持不变，输出登记为关联结果节点的候选版本。
+不接收额外替换参考图；原图保持不变，输出登记为关联结果节点的候选版本。
 源图经 EXIF 转正后通过 EvoLink 临时文件服务上传；源尺寸蒙版从内部白保留/黑编辑转换为不透明黑保留/白重绘 PNG data URI。
 扩图用目标 `canvas` 和原图尺寸 `img_pos`，允许改变画布比例，不拉伸原图；内部仍保存源图尺寸的全白保留蒙版。
 `evolink_state` 是 runner 独占状态，保存渠道指纹、提交不确定标记、订单、终态结果地址与查询暂停信息。
 收费 POST 前先落盘 uncertain，取得 ID 后立即记录 `provider_task_protocol=evolink` / `provider_task_ids`。
-不确定提交绝不自动重发；已知 ID 只续查 GET，已完成但下载失败只恢复下载。画布暂停时沿用“继续查询”入口。
+不确定提交绝不自动重发；已知 ID 只续查 GET，已完成但下载失败只恢复下载。
+查询暂停记录 `evolink_state.poll_paused`，结果节点显示“继续查询”：
+`POST /canvas/projects/{id}/runs/{run_id}/resume-mj-edit` 接收 `expected_revision`，只续查已知订单，不重新下单。
 新订单与配方复用必须去掉 `evolink_state`，浏览器不能伪造或改写。
 `POST /canvas/projects/{id}/runs/{run_id}/resume-mj-edit` 接收 `expected_revision`，只恢复未取消、已有可靠订单 ID
 且结果节点未改动的中断任务；复用原 Job/选区/动作，仅续查，不创建新订单。显式 CLI retry 则是新的待确认任务，

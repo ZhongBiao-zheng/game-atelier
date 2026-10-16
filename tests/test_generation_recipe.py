@@ -192,13 +192,16 @@ def canvas_video_run(media: list[tuple[str, str, bytes, str | None]], prompt: st
 
 
 def canvas_mask_run(source: bytes, output: bytes):
-    """一张源图 + 用户蒙版的局部编辑，跑完。返回 (project_id, job, document)。"""
-    _write_keys()
+    """一张源图 + 用户蒙版的局部编辑（EvoLink MJ），跑完。返回 (project_id, job, document)。"""
+    write_keys_db(KeysDB(keys=[KeySpec(
+        alias="Evo", provider="evolink", access_key="test", base_url="https://api.evolink.ai/v1",
+        created_at=NOW, models=[ModelSpec(id="mj-v8.2", name="MJ", modality="image", protocol="evolink")],
+    )]))
     project = create_canvas_project("局部编辑")
     pid = project.project_id
     draft = CanvasGenerationDraft(
-        mode="image", prompt="只改蒙版区域", model="gpt-image-1", alias="openai",
-        params=JobParams(n=1, ratio="1:1"), updated_at=NOW,
+        mode="image", prompt="只改蒙版区域", model="mj-v8.2", alias="Evo",
+        params=JobParams(n=4), updated_at=NOW,
     ).model_dump(mode="json")
     saved = _save_nodes(pid, [_media_node("image-src", draft)], [])
     _v, saved, _ = replace_canvas_node_media(pid, "image-src", "s.png", ".png", source, "image",

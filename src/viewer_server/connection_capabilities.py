@@ -142,15 +142,12 @@ POST /api/canvas/matting-model
 GET /api/canvas/projects/{project_id}/versions/{version_id}/media
 GET /api/canvas/projects/{project_id}/versions/{version_id}/download
 GET /api/canvas/projects/{project_id}/nodes/{node_id}/layers/download
-GET /api/canvas/projects/{project_id}/nodes/{node_id}/image-edit
 GET /api/canvas/projects/{project_id}/jobs
 POST /api/canvas/projects/{project_id}/runs/reverse-prompt
 POST /api/canvas/projects/{project_id}/runs/angle
 POST /api/canvas/projects/{project_id}/runs/upscale
 POST /api/canvas/projects/{project_id}/image-edits
 POST /api/canvas/projects/{project_id}/runs/image-edit
-POST /api/canvas/projects/{project_id}/nodes/{node_id}/edit-plan
-POST /api/canvas/projects/{project_id}/runs/{run_id}/resume-regions
 POST /api/canvas/projects/{project_id}/runs/layer-decomposition
 GET /api/canvas/projects/{project_id}/batch-runs
 POST /api/canvas/projects/{project_id}/batch-runs/prepare

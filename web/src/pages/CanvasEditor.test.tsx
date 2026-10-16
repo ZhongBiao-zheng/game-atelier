@@ -16,7 +16,6 @@ import {
   reproduceIntoCanvas,
   replaceCanvasNodeMedia,
   resumeCanvasMjEdit,
-  resumeCanvasRegions,
   saveCanvasDocument,
   saveCanvasImageEdit,
   submitCanvasImageEdit,
@@ -336,7 +335,6 @@ vi.mock('@/api/canvas', () => ({
   renameCanvasProject: vi.fn(),
   replaceCanvasNodeMedia: vi.fn(),
   resumeCanvasMjEdit: vi.fn(),
-  resumeCanvasRegions: vi.fn(),
   pasteIntoCanvas: vi.fn(),
   reproduceIntoCanvas: vi.fn(),
   runCanvasMediaOperation: vi.fn(),
@@ -497,7 +495,7 @@ function lastSavedDocument() {
   return vi.mocked(saveCanvasDocument).mock.calls.at(-1)?.[1];
 }
 
-it.each(['regional', 'mj'] as const)('resumes %s editing after saving without blocking its own request', async kind => {
+it('resumes MJ editing after saving without blocking its own request', async () => {
   const node = imageNode('result', '局部修改');
   node.data.active_run_id = 'run-edit';
   const initial = documentWith({ nodes: [node] });
@@ -505,8 +503,7 @@ it.each(['regional', 'mj'] as const)('resumes %s editing after saving without bl
     job_id: 'job-edit', character_id: 'main', prompt: '修改选区', model: 'gpt-image-2',
     submitted_at: '2026-10-15T00:00:00Z', status: 'failed', kind: 'image', namespace: 'canvas',
     canvas_project_id: 'canvas-one', alias: 'main', provider: 'openai', output_paths: [], error: '暂停',
-    params: kind === 'regional' ? { regional_edit: { tasks: [{ region_id: '0', candidate: 0, status: 'failed' }] } }
-      : { mj_edit_state: { poll_paused: true } },
+    params: { evolink_state: { poll_paused: true } },
     canvas_run: { run_id: 'run-edit', result_node_id: 'result', candidates: [], snapshot: {
       snapshot_version: 1, surface_node_id: 'result', result_node_id: 'result', mode: 'image',
       final_prompt: '修改选区', input_policy: 'all_connected', model: 'gpt-image-2', provider: 'openai',
@@ -516,18 +513,16 @@ it.each(['regional', 'mj'] as const)('resumes %s editing after saving without bl
   } as unknown as Job;
   vi.mocked(getCanvasDocument).mockResolvedValue(initial);
   vi.mocked(listCanvasJobs).mockResolvedValue([job]);
-  const resume = vi.mocked(kind === 'regional' ? resumeCanvasRegions : resumeCanvasMjEdit);
-  let complete: (result: Awaited<ReturnType<typeof resumeCanvasRegions>>) => void = () => undefined;
+  const resume = vi.mocked(resumeCanvasMjEdit);
+  let complete: (result: Awaited<ReturnType<typeof resumeCanvasMjEdit>>) => void = () => undefined;
   resume.mockReturnValueOnce(new Promise(resolve => { complete = resolve; }));
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByLabelText('simulate node select'));
-  const trigger = await screen.findByRole('button', { name: kind === 'regional' ? '继续未完成区域' : '继续查询 MJ 原任务（不重新下单）' });
+  const trigger = await screen.findByRole('button', { name: '继续查询 MJ 原任务（不重新下单）' });
   fireEvent.click(trigger);
-  if (kind === 'regional') fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '继续' }));
   await waitFor(() => expect(resume).toHaveBeenCalledWith('canvas-one', 'run-edit', 7));
-  if (kind === 'regional') expect(screen.getByRole('button', { name: '提交中…' })).toBeDisabled();
-  else fireEvent.click(trigger);
+  fireEvent.click(trigger);
   expect(resume).toHaveBeenCalledTimes(1);
   await act(async () => complete({ document: { ...initial, revision: 8 }, job: { ...job, status: 'pending' } }));
   expect(screen.queryByText('画布命令正在提交，请等待完成后再离开或执行其他操作。')).not.toBeInTheDocument();
@@ -569,7 +564,7 @@ function savedEditNode(): CanvasImageEditNode {
     data: { source_node_id: 'original', source_version_id: 'source-v', mask_version_id: 'mask-v',
       reference_node_id: 'reference', reference_version_id: 'reference-v', active_run_id: null,
       generation_draft: imageDraft, options: { mode: 'outpaint', width: 768, height: 768, x: 128, y: 128 },
-      editor_state: { native: false, frame_ratio: '', strokes: [], frame: { width: 768, height: 768, x: 128, y: 128 } },
+      editor_state: { frame_ratio: '', strokes: [], frame: { width: 768, height: 768, x: 128, y: 128 } },
     } };
 }
 const editSourceVersion = { version_id: 'source-v', kind: 'image' as const, path: 'source.png', mime_type: 'image/png',

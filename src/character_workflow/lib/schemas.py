@@ -165,11 +165,8 @@ class JobParams(BaseModel):
     # Canvas 局部编辑专用：服务端从不可变 mask Content Version 解析，浏览器不能传路径。
     mask_image: str | None = None
     image_edit: dict[str, Any] | None = None
-    regional_edit: dict[str, Any] | None = None
     mj_submission_ids: list[str] | None = None
     mj_submit_uncertain: bool | None = None
-    mj_outputs: list[dict[str, Any]] | None = None
-    mj_edit_state: dict[str, Any] | None = None
     # EvoLink 的提交边界、原订单与下载进度；仅 runner 可写，不能复用到新订单。
     evolink_state: dict[str, Any] | None = None
     # Canvas 多角度生成专用：结构化相机参数进入 Snapshot，caller 只消费最终 prompt。
@@ -750,24 +747,11 @@ class CanvasMediaNodeData(CanvasContentNodeData):
 
 class CanvasImageEditSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    mode: Literal["inpaint", "outpaint", "prepare"] = "inpaint"
+    mode: Literal["inpaint", "outpaint"] = "inpaint"
     width: int | None = Field(default=None, ge=1, le=16384)
     height: int | None = Field(default=None, ge=1, le=16384)
     x: int = Field(default=0, ge=0, le=16384)
     y: int = Field(default=0, ge=0, le=16384)
-    custom_id: str | None = Field(default=None, max_length=500)
-    zoom: float = Field(default=1.5, ge=1, le=2)
-    context: float = Field(default=.25, ge=0, le=2)
-    feather: int | None = Field(default=None, ge=0, le=32)
-    groups: list[list[int]] | None = Field(default=None, max_length=16)
-    region_prompts: dict[str, str] = Field(default_factory=dict, max_length=16)
-
-    @field_validator("region_prompts")
-    @classmethod
-    def validate_region_prompts(cls, value):
-        if any(len(k) > 512 or len(v) > 10000 for k, v in value.items()):
-            raise ValueError("区域提示词过长")
-        return value
 
 
 # Source decoding accepts up to 64M pixels, so a legal one-pixel-high source can
@@ -798,7 +782,6 @@ class CanvasImageEditFrame(BaseModel):
 
 class CanvasImageEditEditorState(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    native: bool = False
     strokes: list[CanvasImageEditStroke] = Field(default_factory=list, max_length=1000)
     frame: CanvasImageEditFrame = Field(default_factory=CanvasImageEditFrame)
     frame_ratio: str = Field(default="original", max_length=40)
@@ -1778,7 +1761,6 @@ class CanvasLayerDecompositionCreate(BaseModel):
 class CanvasImageEditOptions(CanvasImageEditSettings):
     source_version_id: str | None = Field(default=None, max_length=120)
     reference_node_id: str | None = Field(default=None, max_length=120)
-    plan_id: str | None = Field(default=None, max_length=64)
 
 
 class CanvasImageEditSave(BaseModel):

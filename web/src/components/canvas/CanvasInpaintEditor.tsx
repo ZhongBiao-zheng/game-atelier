@@ -112,7 +112,7 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
       }
       const submission: CanvasMaskEditSubmission = {
         mask, requestedCount: MJ_IMAGES_PER_TASK, options: { mode: 'inpaint' },
-        editorState: { native: false, strokes, frame: { ...dimensions, x: 0, y: 0 }, frame_ratio: '' },
+        editorState: { strokes, frame: { ...dimensions, x: 0, y: 0 }, frame_ratio: '' },
         referenceNodeId: null, referenceVersionId: null,
         draft: { mode: 'image', prompt: prompt.trim(), input_policy: 'all_connected', alias: choice?.key.alias ?? '',
           model: choice?.model ?? '', params: { n: MJ_IMAGES_PER_TASK }, updated_at: new Date().toISOString() },

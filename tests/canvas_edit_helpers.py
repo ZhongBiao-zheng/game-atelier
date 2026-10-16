@@ -14,7 +14,7 @@ def submit_saved_edit(project_id, source_id, revision, count, mask, options=None
         expected_revision=revision, source_node_id=source_id,
         source_version_id=options.source_version_id or source.data.current_version_id,
         generation_draft=source.data.generation_draft,
-        options=options.model_dump(exclude={"source_version_id", "reference_node_id", "plan_id"}),
+        options=options.model_dump(exclude={"source_version_id", "reference_node_id"}),
         reference_node_id=options.reference_node_id,
         reference_version_id=reference.data.current_version_id if reference else None,
     )

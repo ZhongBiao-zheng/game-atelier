@@ -15,7 +15,7 @@ it('separates local image-edit saves from runs and omits cleared masks', async (
   try {
     const payload = { expected_revision: 7, node_id: 'edit', generation_draft: null,
       options: { mode: 'inpaint' as const }, reference_node_id: null, reference_version_id: null,
-      editor_state: { native: false, strokes: [], frame_ratio: '', frame: { width: 100, height: 100, x: 0, y: 0 } } };
+      editor_state: { strokes: [], frame_ratio: '', frame: { width: 100, height: 100, x: 0, y: 0 } } };
     await saveCanvasImageEdit('p', payload, null);
     expect(fetchMock.mock.calls[0][0]).toBe('/api/canvas/projects/p/image-edits');
     const form = fetchMock.mock.calls[0][1].body as FormData;

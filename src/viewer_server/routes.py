@@ -72,7 +72,7 @@ from character_workflow.lib.schemas import (
     CanvasLayerDecompositionCreate,
     CanvasPackageCommitRequest, CanvasPackageImportResponse,
     CanvasImageEditRunCreate, CanvasImageEditSave, CanvasImageEditSaveResponse,
-    CanvasImageEditOptions, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
+    CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
     CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
     CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse,
@@ -479,8 +479,8 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                 # mask_image 同理只由服务端写。
                 for owned in (
                     "provider_task_protocol", "provider_task_ids", "video_submission_attempts",
-                    "mask_image", "image_edit", "regional_edit", "mj_submission_ids", "mj_submit_uncertain",
-                    "mj_edit_state", "mj_outputs", "evolink_state",
+                    "mask_image", "image_edit", "mj_submission_ids", "mj_submit_uncertain",
+                    "evolink_state",
                 ):
                     if owned in existing_params:
                         value[owned] = existing_params[owned]
@@ -2255,11 +2255,8 @@ def _create_user_job(
     params.video_submission_attempts = None
     params.mask_image = None
     params.image_edit = None
-    params.regional_edit = None
     params.mj_submission_ids = None
     params.mj_submit_uncertain = None
-    params.mj_edit_state = None
-    params.mj_outputs = None
     params.evolink_state = None
     # 改写值与原值同类型（str / list[str]），model_copy 不需要重新校验。
     params = params.model_copy(update=_gate_browser_refs(params.model_dump()))
@@ -3498,28 +3495,6 @@ def post_canvas_upscale_run(
     return CanvasRunResponse(job=job, document=document)
 
 
-@router.get("/canvas/projects/{project_id}/nodes/{node_id}/image-edit")
-async def get_canvas_image_edit_source(project_id: str, node_id: str) -> dict:
-    from character_workflow.lib.canvas_image_edits import editing_source
-    try:
-        return await run_in_threadpool(editing_source, project_id, node_id)
-    except (KeyError, ValueError) as error:
-        raise HTTPException(404, detail=str(error)) from error
-
-
-@router.post("/canvas/projects/{project_id}/nodes/{node_id}/edit-plan")
-async def post_canvas_edit_plan(project_id: str, node_id: str, alias: str = Form(...),
-                                model: str = Form(...), edit_options: str = Form(...),
-                                mask_file: UploadFile = File(...)) -> dict:
-    from character_workflow.lib.canvas_image_edits import preview_regional_edit
-    try:
-        body = await mask_file.read(25 * 1024 * 1024 + 1)
-        return await run_in_threadpool(preview_regional_edit, project_id, node_id, alias, model,
-                                      body, CanvasImageEditOptions.model_validate_json(edit_options))
-    except (ValueError, KeyError) as error:
-        raise HTTPException(422, detail=str(error)) from error
-
-
 @router.post(
     "/canvas/projects/{project_id}/image-edits",
     response_model=CanvasImageEditSaveResponse,
@@ -3678,22 +3653,6 @@ def post_canvas_run_cancel(project_id: str, run_id: str) -> Job:
         raise HTTPException(404, detail="找不到这个画布生成记录") from None
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
-
-
-@router.post("/canvas/projects/{project_id}/runs/{run_id}/resume-regions", response_model=CanvasRunResponse)
-def post_canvas_resume_regions(project_id: str, run_id: str, payload: CanvasCandidateDismiss,
-                               background: BackgroundTasks) -> CanvasRunResponse:
-    from character_workflow.lib.canvas_runs import resume_regional_edit_run
-    try:
-        job, document = resume_regional_edit_run(project_id, run_id, payload.expected_revision)
-    except KeyError:
-        raise HTTPException(404, detail="找不到这个画布生成记录") from None
-    except ValueError as error:
-        raise HTTPException(422, detail=str(error)) from error
-    except RuntimeError as error:
-        raise _canvas_run_revision_conflict(error) or HTTPException(409, detail=str(error)) from error
-    background.add_task(_run_canvas_job_safely, job.job_id)
-    return CanvasRunResponse(job=job, document=document)
 
 
 @router.post("/canvas/projects/{project_id}/runs/{run_id}/resume-mj-edit", response_model=CanvasRunResponse)
