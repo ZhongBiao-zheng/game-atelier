@@ -1829,6 +1829,18 @@ function ImageNodeToolbar({
         disabled={!currentVersionId || submitting || replacing}
         onClick={() => context.createImageFromSource?.(node.id)}
       ><Sparkles /></MediaToolButton>
+      <MediaToolButton
+        label={`局部修改 ${node.title}`}
+        text="局部修改"
+        disabled={!currentVersionId || submitting || replacing}
+        onClick={() => context.openMaskEdit(node, 'inpaint')}
+      ><Paintbrush /></MediaToolButton>
+      <MediaToolButton
+        label={`扩图 ${node.title}`}
+        text="扩图"
+        disabled={!currentVersionId || submitting || replacing}
+        onClick={() => context.openMaskEdit(node, 'outpaint')}
+      ><Expand /></MediaToolButton>
       {trailing}
       <DropdownMenu onOpenChange={updateMenuOpen}>
         <DropdownMenuTrigger asChild>
@@ -1841,8 +1853,6 @@ function ImageNodeToolbar({
           className="nodrag min-w-40 [&_svg]:size-4"
           onPointerDown={event => event.stopPropagation()}
         >
-          <DropdownMenuItem disabled={!currentVersionId || submitting || replacing} onSelect={() => context.openMaskEdit(node, 'inpaint')} className="gap-2"><Paintbrush />局部修改</DropdownMenuItem>
-          <DropdownMenuItem disabled={!currentVersionId || submitting || replacing} onSelect={() => context.openMaskEdit(node, 'outpaint')} className="gap-2"><Expand />扩图</DropdownMenuItem>
           {overflowActions.map(action => action.menu ? (
             <DropdownMenuSub key={action.id}>
               <DropdownMenuSubTrigger disabled={action.disabled} aria-label={action.label} className="gap-2">

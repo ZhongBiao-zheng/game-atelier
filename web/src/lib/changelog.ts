@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.98.5',
+    date: '2026-10-16',
+    headline: '局部修改与扩图上工具条',
+    changes: [
+      { kind: 'feat', text: '图片节点工具条直接放「局部修改」「扩图」，位于「图生图」和「隐藏」之间，不再收在「更多」里。' },
+    ],
+  },
+  {
     version: '5.98.4',
     date: '2026-10-16',
     headline: '局部修改与扩图只开放实测模型',
