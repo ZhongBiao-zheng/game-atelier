@@ -636,6 +636,16 @@ def _run_once(
                     first_dims = first_dims or dims
             if first_dims:
                 params["actual_size"] = f"{first_dims[0]}x{first_dims[1]}"
+            if params.get("edit_inputs"):
+                # 编辑 caller 把发给厂商的图写在临时目录；跟产物放一起，结果节点才能展示过程。
+                inputs_dir = output_dir / "edit-inputs"
+                inputs_dir.mkdir(parents=True, exist_ok=True)
+                kept = []
+                for item in params["edit_inputs"]:
+                    target = inputs_dir / f"{Path(output_paths[0]).stem}-{Path(item['path']).name}"
+                    shutil.move(item["path"], target)
+                    kept.append({**item, "path": str(target)})
+                params["edit_inputs"] = kept
             job = _save_params(read_job(job.job_id), params)
             for output_path in output_paths:
                 _write_sidecar(Path(output_path), job, params)

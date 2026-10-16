@@ -496,6 +496,7 @@ Version 不可变、历史保留；分组只管理布局。删除编辑入口保
 
 局部蒙版为与 EXIF 归一后源图同尺寸的单帧 PNG，透明或灰度 0 表示编辑、255 保留，空选区拒绝。
 扩图由服务端生成新区域蒙版，目标框必须完整包含原图，不把源图透明区域当作新增区域。
+图片编辑任务完成后 `params.edit_inputs`（`role`: source / mask / guide / reference，`path`）记录实际发给厂商的图片，`params.edit_prompt` 记录完整提示词；两者只由服务端写，`/api/raw?job_id=` 放行这些路径。
 扩图蒙版的 origin 标记 `expanded_canvas=true`，宽高不得小于源图；普通局部蒙版仍要求源图同尺寸。
 归一蒙版登记为内部不可变 `user_mask` Version；Job、Snapshot、结果节点及编辑→结果素材实线在同一可恢复事务提交。
 Snapshot 保存 `mask_version_id`、源版本、可选替换参考和 `normalized_params.image_edit` 几何参数。

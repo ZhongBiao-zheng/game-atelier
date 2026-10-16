@@ -2,25 +2,48 @@ import { Expand, LoaderCircle, Paintbrush, Settings2, Sparkles, X } from 'lucide
 import { useState } from 'react';
 import { canvasMediaUrl } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
-import type { CanvasImageEditNode, CanvasMediaVersion } from '@/schema/canvas';
-import { CanvasImageEditSurface } from './CanvasImageEditSurface';
+import type { CanvasImageEditNode, CanvasMediaVersion, CanvasNode } from '@/schema/canvas';
+import type { Job } from '@/schema/jobs';
 import type { CanvasNodeContextValue } from './CanvasEditorViews';
 
-/** 局部修改 / 扩图结果节点的面板：只读展示这次编辑用到的原图、选区或画框、提示词与模型。
- *  再次生成与修改设置都回到编辑节点，结果节点自身不带生成配置。 */
-export function CanvasEditResultPanel({ edit, context, onClose }: {
-  edit: CanvasImageEditNode; context: CanvasNodeContextValue; onClose: () => void;
+type EditInput = NonNullable<Job['params']['edit_inputs']>[number];
+
+const rawUrl = (job: Job, path: string) =>
+  `/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(job.job_id)}`;
+
+function inputLabel(role: EditInput['role'], outpaint: boolean) {
+  if (role === 'source') return '原图';
+  if (role === 'mask') return '蒙版';
+  if (role === 'guide') return outpaint ? '扩图区' : '蒙版';
+  return '参考';
+}
+
+const chip = 'inline-flex h-9 min-w-0 items-center gap-2 rounded-lg border border-border bg-background/40 px-3 text-sm text-foreground';
+
+/** 局部修改 / 扩图结果节点的面板：外观与生成面板一致，内容只读。
+ *  参考图位放这次真正发给厂商的文件（原图、蒙版、引导图，透明处显示棋盘格），提示词是发出去的完整内容。
+ *  再次生成与修改设置都回到编辑节点。 */
+export function CanvasEditResultPanel({ node, edit, context, onClose }: {
+  node: CanvasNode; edit: CanvasImageEditNode; context: CanvasNodeContextValue; onClose: () => void;
 }) {
   const [submitting, setSubmitting] = useState(false);
+  const [promptExpanded, setPromptExpanded] = useState(false);
   const outpaint = edit.data.options.mode === 'outpaint';
+  const job = (context.jobsByResultNodeId.get(node.id) ?? []).filter(item => item.params.image_edit).at(-1);
+  const inputs = job?.params.edit_inputs ?? [];
   const source = context.resolveVersion(edit.data.source_version_id) as CanvasMediaVersion | undefined;
   const draft = edit.data.generation_draft;
-  const key = context.keys.find(item => item.alias === draft?.alias);
-  const modelName = key?.models.find(model => model.id === draft?.model)?.name || draft?.model;
+  const prompt = job?.params.edit_prompt ?? job?.prompt ?? draft?.prompt ?? '';
+  const alias = job?.alias ?? draft?.alias;
+  const modelId = job?.model ?? draft?.model;
+  const modelName = context.keys.find(key => key.alias === alias)?.models.find(model => model.id === modelId)?.name || modelId;
+  const size = job?.params.actual_size ?? job?.params.size;
   const running = Boolean(edit.data.active_run_id) || context.submittingNodeIds.has(edit.id);
   const Icon = outpaint ? Expand : Paintbrush;
   const label = outpaint ? '扩图' : '局部修改';
-  const thumb = 'relative grid h-24 w-full place-items-center overflow-hidden rounded-lg border border-border bg-secondary/40';
+  const tiles = job && inputs.length
+    ? inputs.map(input => ({ key: input.path, label: inputLabel(input.role, outpaint), url: rawUrl(job, input.path) }))
+    : source ? [{ key: source.version_id, label: '原图', url: canvasMediaUrl(context.projectId, source.version_id) }] : [];
 
   async function regenerate() {
     if (!context.submitImageEdit || running) return;
@@ -30,38 +53,34 @@ export function CanvasEditResultPanel({ edit, context, onClose }: {
 
   return (
     <section aria-label={`${label}过程`}
-      className="nodrag relative flex flex-col gap-3 overflow-hidden rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow"
+      className="nodrag relative overflow-hidden rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow"
       onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-      <Button type="button" variant="ghost" size="icon" className="absolute right-2 top-2 size-7 rounded-full"
+      <Button type="button" variant="ghost" size="icon" className="absolute right-2 top-2 z-10 size-7 rounded-full"
         aria-label={`关闭${label}过程`} onClick={onClose}><X aria-hidden="true" /></Button>
-      <div className="flex items-center gap-1.5 text-sm font-medium">
-        <Icon className="size-4 text-primary" aria-hidden="true" />{label}
+      <div className="mb-1 flex min-h-12 min-w-0 items-center gap-2 overflow-x-auto px-1 py-1 pr-9">
+        {tiles.map(tile => (
+          <a key={tile.key} href={tile.url} target="_blank" rel="noreferrer" title={`查看${tile.label}`}
+            className="edit-checker relative grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-border transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+            <img src={tile.url} alt={tile.label} loading="lazy" draggable={false} className="size-full object-contain" />
+            <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-center text-xs text-foreground">{tile.label}</span>
+          </a>
+        ))}
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <figure className="flex flex-col gap-1">
-          <button type="button" className={thumb} aria-label="查看原图" disabled={!source}
-            onClick={() => source && context.previewContent(source.version_id, '原图', edit.id)}>
-            {source && <img src={canvasMediaUrl(context.projectId, source.version_id, 320)} alt="原图"
-              className="absolute inset-0 size-full object-contain" draggable={false} />}
-          </button>
-          <figcaption className="text-xs text-muted-foreground">原图</figcaption>
-        </figure>
-        <figure className="flex flex-col gap-1">
-          <button type="button" className={thumb} aria-label={outpaint ? '查看画框' : '查看选区'}
-            onClick={() => context.openImageEdit?.(edit.id)}>
-            <CanvasImageEditSurface node={edit} source={source} projectId={context.projectId} />
-          </button>
-          <figcaption className="text-xs text-muted-foreground">{outpaint ? '画框' : '选区'}</figcaption>
-        </figure>
-      </div>
-      <p className="line-clamp-3 whitespace-pre-wrap text-sm text-foreground">
-        {draft?.prompt.trim() || <span className="text-muted-foreground">未填写提示词</span>}
-      </p>
-      <div className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={draft?.alias ?? undefined}>
-          {modelName ? `${modelName}${draft?.alias ? ` · ${draft.alias}` : ''}` : '未选择模型'}
+      <button type="button" aria-expanded={promptExpanded} onClick={() => setPromptExpanded(value => !value)}
+        className="block w-full rounded-md px-3 pb-1 pt-2 text-left transition-colors hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+        <p className={`whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground ${promptExpanded ? 'max-h-60 overflow-y-auto' : 'line-clamp-3'}`}>
+          {prompt.trim() || <span className="text-muted-foreground">未填写提示词</span>}
+        </p>
+        <span className="block text-right text-xs text-muted-foreground">{promptExpanded ? '收起' : '展开'}</span>
+      </button>
+      <div className="mt-2 flex items-center gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
+        <span className={`${chip} flex-1`} title={alias ?? undefined}>
+          <Icon className="size-4 shrink-0 text-primary" aria-hidden="true" />
+          <span className="truncate">{modelName ?? '未选择模型'}</span>
+          {alias && <span className="ml-auto shrink-0 text-muted-foreground">{alias}</span>}
         </span>
-        <Button type="button" variant="outline" size="sm" className="shrink-0"
+        {size && <span className={`${chip} shrink-0 font-mono`}>{size.replace('x', '×')}</span>}
+        <Button type="button" variant="ghost" size="sm" className="shrink-0"
           onClick={() => context.openImageEdit?.(edit.id)}><Settings2 aria-hidden="true" />修改设置</Button>
         <Button type="button" size="sm" className="shrink-0" disabled={running || submitting || !draft}
           onClick={() => void regenerate()}>

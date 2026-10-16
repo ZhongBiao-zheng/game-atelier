@@ -144,6 +144,13 @@ class VideoSubmissionAttempt(BaseModel):
     request_ids: dict[str, str] = Field(default_factory=dict)
 
 
+class EditInput(BaseModel):
+    """图片编辑实际发给厂商的一张图；路径只由服务端写。"""
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["source", "mask", "guide", "reference"]
+    path: str
+
+
 class JobParams(BaseModel):
     model_config = ConfigDict(extra="allow")
     size: str | None = None
@@ -176,6 +183,9 @@ class JobParams(BaseModel):
     angle_wide: bool | None = None
     requested_size: str | None = None
     actual_size: str | None = None
+    # 图片编辑实际发给厂商的图片与完整提示词，结果节点据此展示过程。
+    edit_inputs: list[EditInput] | None = None
+    edit_prompt: str | None = None
     warnings: list[str] | None = None
     # 选「自动」提交时的路由 id；有它才允许在确定没执行的失败上换下一家（见 model_routes）。
     route_id: str | None = Field(default=None, max_length=200)

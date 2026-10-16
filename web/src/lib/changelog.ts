@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.98.0',
+    date: '2026-10-16',
+    headline: '编辑结果展示发给厂商的原图与蒙版',
+    changes: [
+      { kind: 'feat', text: '局部修改 / 扩图结果节点的面板与生成面板同款，参考图位放这次实际发给厂商的原图、蒙版或引导图（透明处显示棋盘格），提示词显示发出去的完整内容。' },
+    ],
+  },
+  {
     version: '5.97.0',
     date: '2026-10-16',
     headline: '编辑结果显示过程',

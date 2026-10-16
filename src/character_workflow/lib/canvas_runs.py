@@ -2721,6 +2721,9 @@ def _commit_canvas_candidate_attempt(
             restored_params = original_params.model_copy(update={
                 "actual_size": job.params.actual_size or original_params.actual_size,
                 "warnings": job.params.warnings or original_params.warnings,
+                # 每个候选发出的编辑输入相同，保留第一份记录。
+                "edit_inputs": original_params.edit_inputs or job.params.edit_inputs,
+                "edit_prompt": original_params.edit_prompt or job.params.edit_prompt,
             })
             updated_job = job.model_copy(update={
                 "status": status,

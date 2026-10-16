@@ -480,7 +480,7 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                 for owned in (
                     "provider_task_protocol", "provider_task_ids", "video_submission_attempts",
                     "mask_image", "image_edit", "mj_submission_ids", "mj_submit_uncertain",
-                    "evolink_state",
+                    "evolink_state", "edit_inputs", "edit_prompt",
                 ):
                     if owned in existing_params:
                         value[owned] = existing_params[owned]
@@ -559,6 +559,7 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
                 whitelist.update(item for item in value if isinstance(item, str))
         if job.source_image:
             whitelist.add(job.source_image)
+        whitelist.update(item["path"] for item in params.get("edit_inputs") or [])
         # 网络直链不是本机文件；当路径解析会把 "http://../../etc/x" 拼成数据根外的真实路径。
         normalized_whitelist = {
             str((Path(p) if Path(p).is_absolute() else _project_root() / p).resolve())
@@ -2258,6 +2259,8 @@ def _create_user_job(
     params.mj_submission_ids = None
     params.mj_submit_uncertain = None
     params.evolink_state = None
+    params.edit_inputs = None
+    params.edit_prompt = None
     # 改写值与原值同类型（str / list[str]），model_copy 不需要重新校验。
     params = params.model_copy(update=_gate_browser_refs(params.model_dump()))
     if body.kind == JobKind.IMAGE:

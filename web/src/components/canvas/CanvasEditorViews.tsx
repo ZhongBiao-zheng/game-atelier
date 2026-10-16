@@ -987,7 +987,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           onSideChange={setPanelSide}
           hiddenWhileDragging={dragging}
         >
-          <CanvasEditResultPanel edit={editSource} context={context}
+          <CanvasEditResultPanel node={node} edit={editSource} context={context}
             onClose={() => context.generationPanel.dismiss(node.id)} />
         </CanvasNodeFloatingPanel>
       )}

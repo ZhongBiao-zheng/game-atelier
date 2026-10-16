@@ -108,6 +108,18 @@ def composite_result(source: Path, mask_path: Path, result: Path, options: dict)
     return target
 
 
+def _record_inputs(params: dict, work: Path, prompt: str, files: list[tuple[str, bytes]]) -> None:
+    """Keep the exact provider payload images and prompt; the runner moves them next to outputs."""
+    work.mkdir(parents=True, exist_ok=True)
+    entries = []
+    for index, (role, content) in enumerate(files):
+        path = work / f"{index + 1}-{role}.png"
+        path.write_bytes(content)
+        entries.append({"role": role, "path": str(path)})
+    params["edit_inputs"] = entries
+    params["edit_prompt"] = prompt
+
+
 def render(*, prompt: str, model: str, alias: str, output_dir: Path,
            params: dict[str, Any], **kwargs) -> list[str]:
     from character_workflow.lib import keys
@@ -121,7 +133,15 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path,
         raise ValueError("编辑模型的密钥已经不存在")
     transport = edit_transport(key.provider, model, _effective_image_protocol(key, model))
     if transport == "evolink":
+        import base64
+
+        from .evolink import _edit_source, mask_data_uri
         from .evolink import render as render_evolink
+        if params.get("reference_images") and params.get("mask_image"):
+            content, size = _edit_source(str(params["reference_images"][0]))
+            mask = mask_data_uri(params["mask_image"], size).split(",", 1)[1]
+            _record_inputs(params, output_dir / "edit-inputs", prompt.strip(),
+                           [("source", content), ("mask", base64.b64decode(mask))])
         return render_evolink(prompt=prompt, model=model, alias=alias, output_dir=output_dir,
                              params=params, **kwargs)
     if not transport or not params.get("mask_image") or not params.get("reference_images"):
@@ -183,7 +203,17 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path,
         if persist:
             persist()
 
-    paths = dispatch(prompt=instruction + "\n" + prompt, model=model, alias=alias,
+    final_prompt = instruction + "\n" + prompt
+    if transport == "mask":
+        from .openai_image import _normalized_edit_image, _normalized_edit_mask
+        sent, size = _normalized_edit_image(input_path)
+        sent_files = [("source", sent), ("mask", _normalized_edit_mask(mask_path, size))]
+        sent_files += [("reference", _normalized_edit_image(Path(ref))[0]) for ref in refs[1:]]
+    else:
+        sent_files = [("source", input_path.read_bytes()), ("guide", guide_path.read_bytes())]
+        sent_files += [("reference", Path(ref).read_bytes()) for ref in refs[2:]]
+    _record_inputs(params, work / "sent", final_prompt, sent_files)
+    paths = dispatch(prompt=final_prompt, model=model, alias=alias,
                      output_dir=output_dir, params=request, on_params_changed=changed, **kwargs)
     changed()
     if validate_result:
