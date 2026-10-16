@@ -12,12 +12,7 @@ export type EditTool = 'brush' | 'eraser' | 'rectangle' | 'hand';
 export type EditStroke = { tool: Exclude<EditTool, 'hand'>; size: number; points: EditPoint[] };
 
 export function initialEditFrame(width: number, height: number, mode: 'inpaint' | 'outpaint'): EditFrame {
-  const scale = mode === 'outpaint' ? Math.max(1, Math.min(1.5, 16384 / Math.max(width, height),
-    Math.sqrt(16_777_216 / (width * height)))) : 1;
-  const frameWidth = Math.floor(width * scale);
-  const frameHeight = Math.floor(height * scale);
-  return { width: frameWidth, height: frameHeight,
-    x: Math.floor((frameWidth - width) / 2), y: Math.floor((frameHeight - height) / 2) };
+  return mode === 'outpaint' ? presetFrame(width, height, 'original', 1.5) : { width, height, x: 0, y: 0 };
 }
 
 export function savedImageEditError(node: CanvasImageEditNode, source: CanvasContentVersion | undefined,
@@ -27,9 +22,14 @@ export function savedImageEditError(node: CanvasImageEditNode, source: CanvasCon
   const key = keys.find(item => item.alias === draft?.alias);
   if (!draft?.model || !key || !key.models.some(model => model.id === draft.model)) return '请先编辑并选择可用模型。';
   const { options, editor_state: editor } = node.data;
-  if (options.mode === 'inpaint' && !node.data.mask_version_id) return '请先编辑并保存需要修改的区域。';
-  if (editor.native) return options.custom_id ? null : '请先选择可用的 MJ 动作。';
+  if (editor.native || options.mode === 'prepare') return 'MJ 原生动作已移除，请重新编辑。';
   if (!key.models.some(model => model.id === draft.model && isEditModel(model, key))) return '请选择可用的编辑模型。';
+  const mj = isEvolinkMidjourney(draft.model, key.provider);
+  if (mj && !draft.prompt.trim()) return '请先填写修改说明。';
+  if (options.mode === 'inpaint') {
+    if (!mj) return '局部修改需要 Midjourney 模型，请重新编辑。';
+    return node.data.mask_version_id ? null : '请先编辑并保存需要修改的区域。';
+  }
   if (options.mode === 'outpaint') {
     const { width = 0, height = 0, x = -1, y = -1 } = options;
     if (x < 0 || y < 0 || x + source.width > width || y + source.height > height
@@ -111,4 +111,48 @@ export async function editMaskBlob(width: number, height: number, strokes: EditS
   const blob = await new Promise<Blob | null>(resolve => mask.toBlob(resolve, 'image/png'));
   if (!blob) throw new Error('无法读取选区，请重新打开编辑器');
   return blob;
+}
+
+export interface EditModelChoice { key: KeyView; model: string; name: string; mj: boolean }
+
+/** 所有可用于图片编辑的「密钥 × 模型」，Midjourney 排在前面（扩图默认 MJ）。 */
+export function editModelChoices(keys: readonly KeyView[]): EditModelChoice[] {
+  const choices = keys.flatMap(key => key.models.filter(model => isEditModel(model, key)).map(model => ({
+    key, model: model.id, name: model.name || model.id, mj: isEvolinkMidjourney(model.id, key.provider),
+  })));
+  return [...choices.filter(choice => choice.mj), ...choices.filter(choice => !choice.mj)];
+}
+
+export const EXPAND_RATIOS = ['original', '1:1', '4:3', '3:4', '16:9', '9:16'] as const;
+export type ExpandRatio = typeof EXPAND_RATIOS[number];
+export const EXPAND_SCALES = [1, 1.25, 1.5, 2, 2.5, 3] as const;
+const MAX_FRAME_SIDE = 16000;
+const MAX_FRAME_PIXELS = 16_777_216;
+
+function ratioValue(ratio: ExpandRatio, width: number, height: number) {
+  if (ratio === 'original') return width / height;
+  const [a, b] = ratio.split(':').map(Number);
+  return a / b;
+}
+
+/** 能完整装下原图的最小比例画框 × 倍数，原图居中；超过尺寸上限时整体缩回上限内。 */
+export function presetFrame(width: number, height: number, ratio: ExpandRatio, scale: number): EditFrame {
+  const value = ratioValue(ratio, width, height);
+  let frameWidth = Math.max(width, height * value);
+  let frameHeight = frameWidth / value;
+  if (frameHeight < height) { frameHeight = height; frameWidth = height * value; }
+  frameWidth *= scale; frameHeight *= scale;
+  const limit = Math.min(1, MAX_FRAME_SIDE / Math.max(frameWidth, frameHeight), Math.sqrt(MAX_FRAME_PIXELS / (frameWidth * frameHeight)));
+  const finalWidth = Math.max(width, Math.round(frameWidth * limit));
+  const finalHeight = Math.max(height, Math.round(frameHeight * limit));
+  return { width: finalWidth, height: finalHeight,
+    x: Math.floor((finalWidth - width) / 2), y: Math.floor((finalHeight - height) / 2) };
+}
+
+/** 从已保存的画框反推最接近的倍数；比例不是预设时返回 null（自定义画框）。 */
+export function presetScale(width: number, height: number, ratio: string, frame: EditFrame): number | null {
+  if (!(EXPAND_RATIOS as readonly string[]).includes(ratio)) return null;
+  const base = presetFrame(width, height, ratio as ExpandRatio, 1);
+  const value = frame.width / base.width;
+  return [...EXPAND_SCALES].sort((a, b) => Math.abs(a - value) - Math.abs(b - value))[0];
 }

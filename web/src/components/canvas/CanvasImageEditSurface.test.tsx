@@ -9,7 +9,7 @@ const source: CanvasMediaVersion = { version_id: 'fixed', kind: 'image', path: '
   bytes: 100, width: 200, height: 100, sha256: 'a'.repeat(64), created_at: '', origin: { kind: 'upload', upload_id: 'source' } };
 const node: CanvasImageEditNode = { id: 'edit', type: 'image_edit', title: '局部编辑', position: { x: 0, y: 0 }, z_index: 0,
   data: { source_node_id: null, source_version_id: 'fixed', reference_node_id: null, reference_version_id: null,
-    mask_version_id: 'mask', active_run_id: null, generation_draft: { mode: 'image', alias: 'evo', model: 'mj-v8.2', prompt: '',
+    mask_version_id: 'mask', active_run_id: null, generation_draft: { mode: 'image', alias: 'evo', model: 'mj-v8.2', prompt: '换成法杖',
       input_policy: 'all_connected', params: { n: 4 }, updated_at: '' }, options: { mode: 'inpaint' },
     editor_state: { native: false, frame_ratio: '', frame: { width: 400, height: 300, x: 70, y: 80 }, strokes: [
       { tool: 'brush', size: 20, points: [{ x: 20, y: 30 }] },

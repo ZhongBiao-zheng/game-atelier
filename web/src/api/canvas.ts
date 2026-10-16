@@ -480,58 +480,10 @@ export function submitCanvasLayerDecomposition(
   );
 }
 
-export interface CanvasImageEditOptions {
-  mode: 'inpaint' | 'outpaint' | 'prepare';
-  source_version_id: string;
-  width?: number;
-  height?: number;
-  x?: number;
-  y?: number;
-  reference_node_id?: string;
-  custom_id?: string;
-  zoom?: number;
-  context?: number;
-  feather?: number | null;
-  groups?: number[][] | null;
-  region_prompts?: Record<string, string>;
-  plan_id?: string;
-}
-
-export interface CanvasEditRegion {
-  id: string; components: number[]; bounds: number[]; crop: number[]; work_size: number[];
-  params: Record<string, string>; feather: number; preview: string;
-}
-export interface CanvasEditPlan { plan_id: string; regions: CanvasEditRegion[] }
-
-export function previewCanvasEdit(projectId: string, nodeId: string, alias: string, model: string,
-  mask: Blob, options: CanvasImageEditOptions, signal?: AbortSignal): Promise<CanvasEditPlan> {
-  const form = new FormData();
-  form.append('alias', alias); form.append('model', model);
-  form.append('edit_options', JSON.stringify(options));
-  form.append('mask_file', mask, 'mask.png');
-  return requestJson(`/api/canvas/projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(nodeId)}/edit-plan`,
-    '规划局部选区', { method: 'POST', body: form, signal });
-}
-
 export function resumeCanvasRegions(projectId: string, runId: string, expectedRevision: number): Promise<CanvasRun> {
   return requestJson(`/api/canvas/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/resume-regions`,
     '继续未完成区域', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ expected_revision: expectedRevision }) });
-}
-
-export interface CanvasImageEditSource {
-  source_version_id: string;
-  mj: { alias: string; model: string; actions: Array<{
-    custom_id: string; kind: CanvasImageEditOptions['mode']; label: string;
-  }> } | null;
-  reason: string | null;
-}
-
-export function getCanvasImageEditSource(projectId: string, nodeId: string) {
-  return requestJson<CanvasImageEditSource>(
-    `/api/canvas/projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(nodeId)}/image-edit`,
-    '读取图片编辑动作',
-  );
 }
 
 export type CanvasImageEditSavePayload = Pick<CanvasImageEditNode['data'],

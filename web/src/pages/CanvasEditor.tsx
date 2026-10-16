@@ -120,10 +120,9 @@ import {
   type CanvasGenerationPreferencesTab,
 } from '@/components/canvas/CanvasGenerationPreferencesDialog';
 import { ApiError } from '@/api/http';
-import {
-  CanvasMaskEditDialog,
-  type CanvasMaskEditSubmission,
-} from '@/components/canvas/CanvasMaskEditDialog';
+import type { CanvasMaskEditSubmission } from '@/components/canvas/ImageEditorShell';
+import { CanvasInpaintEditor } from '@/components/canvas/CanvasInpaintEditor';
+import { CanvasOutpaintEditor } from '@/components/canvas/CanvasOutpaintEditor';
 import { initialEditFrame, savedImageEditError } from '@/components/canvas/imageEditGeometry';
 import {
   CanvasAngleDialog,
@@ -3939,7 +3938,7 @@ function CanvasEditorInner({
     const { width, height } = version;
     void persistImageEdit({ source_node_id: node.id, source_version_id: version.version_id,
       generation_draft: null, options: { mode }, reference_node_id: null, reference_version_id: null,
-      editor_state: { native: false, strokes: [], frame_ratio: '', frame: initialEditFrame(width, height, mode) },
+      editor_state: { native: false, strokes: [], frame_ratio: mode === 'outpaint' ? 'original' : '', frame: initialEditFrame(width, height, mode) },
     }, null).then(saved => { setSelectedNodeIds(new Set([saved.id])); openImageEdit(saved.id); })
       .catch(error => setError((error as Error).message));
   }, [openImageEdit, persistImageEdit]);
@@ -4705,6 +4704,8 @@ function CanvasEditorInner({
     ? document.nodes.find(node => node.id === maskEdit.nodeId) ?? null
     : null;
   const maskEditData = maskEditNode?.type === 'image_edit' ? maskEditNode.data : undefined;
+  const MaskEditor = maskEdit?.mode === 'outpaint' ? CanvasOutpaintEditor : CanvasInpaintEditor;
+  const maskEditSourceTitle = document.nodes.find(node => node.id === maskEditData?.source_node_id)?.title;
 
   const minimapToggle = (
     <button
@@ -5357,19 +5358,13 @@ function CanvasEditorInner({
         )}
 
         {maskEdit && (
-          <CanvasMaskEditDialog
+          <MaskEditor
             key={`${projectId}:${maskEdit.nodeId}:${maskEdit.version.version_id}`}
             open={maskEdit.open}
-            projectId={projectId}
-            nodeId={maskEdit.nodeId}
-            initialMode={maskEdit.mode}
-            references={document.nodes.flatMap(node => node.type === 'image' && node.id !== maskEditData?.source_node_id && node.data.current_version_id
-              ? [{ id: node.id, title: node.title, versionId: node.data.current_version_id }] : [])}
-            title={maskEdit.title}
+            title={maskEditSourceTitle ?? maskEdit.title}
             version={maskEdit.version}
             mediaUrl={canvasMediaUrl(projectId, maskEdit.version.version_id)}
             keys={keys}
-            initialDraft={maskEditData?.generation_draft ?? null}
             initialData={maskEditData}
             busy={maskEditBusy}
             error={maskEditError}

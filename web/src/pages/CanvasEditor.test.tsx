@@ -10,7 +10,6 @@ import { CanvasNodeContext, type CanvasNodeContextValue } from '@/components/can
 import {
   createCanvasReversePromptConfig,
   getCanvasDocument,
-  getCanvasImageEditSource,
   listCanvasJobs,
   listCanvasProjects,
   pasteIntoCanvas,
@@ -332,8 +331,6 @@ vi.mock('@/api/canvas', () => ({
   createCanvasReversePromptConfig: vi.fn(),
   dismissCanvasCandidate: vi.fn(),
   getCanvasDocument: vi.fn(),
-  getCanvasImageEditSource: vi.fn(),
-  previewCanvasEdit: vi.fn(),
   listCanvasJobs: vi.fn(),
   listCanvasProjects: vi.fn(),
   renameCanvasProject: vi.fn(),
@@ -484,7 +481,6 @@ beforeEach(() => {
     updated_at: '2026-08-23T00:00:00Z',
   } satisfies CanvasProject] as unknown as CanvasProjectSummary[]);
   vi.mocked(getCanvasDocument).mockResolvedValue(emptyDocument);
-  vi.mocked(getCanvasImageEditSource).mockResolvedValue({ source_version_id: 'source-v', mj: null, reason: null });
   vi.mocked(listCanvasJobs).mockResolvedValue([]);
   vi.mocked(getCanvasUiPreferences).mockResolvedValue(DEFAULT_CANVAS_UI_PREFERENCES);
   vi.mocked(saveCanvasDocument).mockImplementation(async (_id, payload) => payload);
@@ -572,7 +568,7 @@ function savedEditNode(): CanvasImageEditNode {
   return { id: 'edit', type: 'image_edit', title: '图片编辑', position: { x: 700, y: 0 }, z_index: 1,
     data: { source_node_id: 'original', source_version_id: 'source-v', mask_version_id: 'mask-v',
       reference_node_id: 'reference', reference_version_id: 'reference-v', active_run_id: null,
-      generation_draft: imageDraft, options: { mode: 'inpaint' },
+      generation_draft: imageDraft, options: { mode: 'outpaint', width: 768, height: 768, x: 128, y: 128 },
       editor_state: { native: false, frame_ratio: '', strokes: [], frame: { width: 768, height: 768, x: 128, y: 128 } },
     } };
 }
@@ -597,10 +593,9 @@ it('creates a saved edit node before opening it and saves without a run or chang
     } }));
   await renderReadyCanvas();
   act(() => (canvasContextIdentities.at(-1) as CanvasNodeContextValue).openMaskEdit(original));
-  await screen.findByRole('dialog', { name: '编辑图片 · 图片编辑' });
+  await screen.findByRole('dialog', { name: '局部修改' });
   expect(saveCanvasImageEdit).toHaveBeenCalledWith('canvas-one', expect.objectContaining({ source_node_id: 'original',
     source_version_id: 'source-v', generation_draft: null }), null);
-  expect(getCanvasImageEditSource).toHaveBeenCalledWith('canvas-one', 'edit');
   expect(submitCanvasImageEdit).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('编辑提示词'), { target: { value: '保留到下次' } });
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -729,12 +724,12 @@ it('undoes and redoes a configuration saved during an edit run without reverting
   await renderReadyCanvas();
   await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith('/events', expect.anything()));
   act(() => (canvasContextIdentities.at(-1) as CanvasNodeContextValue).openImageEdit?.('edit'));
-  await screen.findByRole('dialog', { name: '编辑图片 · 图片编辑' });
+  await screen.findByRole('dialog', { name: '扩图' });
   fireEvent.change(screen.getByLabelText('编辑提示词'), { target: { value: '下一轮配置' } });
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeEnabled());
   expect(saveCanvasImageEdit).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByText('关闭', { selector: 'button' }));
+  fireEvent.click(screen.getByRole('button', { name: '关闭编辑器' }));
   const completedVersion = { ...editSourceVersion, version_id: 'completed-v',
     origin: { kind: 'job_output' as const, job_id: 'job-edit', candidate_id: 'candidate' } };
   const completed: Job = { ...pending, status: 'done', output_paths: ['result.png'], canvas_run: { ...pending.canvas_run!,

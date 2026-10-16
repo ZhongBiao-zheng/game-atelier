@@ -13,7 +13,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, BookmarkPlus, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Pause, Pencil, Play, Plus, Settings2, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, BookmarkPlus, Check, ChevronRight, CircleHelp, Download, Ellipsis, Expand, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Paintbrush, Pause, Pencil, Play, Plus, Settings2, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
   useRef, useState,
@@ -1420,7 +1420,7 @@ function CanvasNodeToolbar({
     && !node.data.active_run_id && !submitting;
 
   if (node.type === 'image_edit') return <>
-    <MediaToolButton label={`编辑 ${node.title}`} text="编辑" onClick={() => context.openImageEdit?.(node.id)}><Pencil /></MediaToolButton>
+    <MediaToolButton label={`编辑 ${node.title}`} text="编辑" onClick={() => context.openImageEdit?.(node.id)}>{node.data.options.mode === 'outpaint' ? <Expand /> : <Paintbrush />}</MediaToolButton>
     <MediaToolButton label={`生成 ${node.title}`} text="生成" disabled={submitting || !!node.data.active_run_id}
       onClick={() => { void context.submitImageEdit?.(node.id); }}><Sparkles /></MediaToolButton>
   </>;
@@ -1832,8 +1832,8 @@ function ImageNodeToolbar({
           className="nodrag min-w-40 [&_svg]:size-4"
           onPointerDown={event => event.stopPropagation()}
         >
-          <DropdownMenuItem disabled={!currentVersionId || submitting || replacing} onSelect={() => context.openMaskEdit(node, 'inpaint')} className="gap-2"><Pencil />局部修改</DropdownMenuItem>
-          <DropdownMenuItem disabled={!currentVersionId || submitting || replacing} onSelect={() => context.openMaskEdit(node, 'outpaint')} className="gap-2"><Maximize2 />扩图</DropdownMenuItem>
+          <DropdownMenuItem disabled={!currentVersionId || submitting || replacing} onSelect={() => context.openMaskEdit(node, 'inpaint')} className="gap-2"><Paintbrush />局部修改</DropdownMenuItem>
+          <DropdownMenuItem disabled={!currentVersionId || submitting || replacing} onSelect={() => context.openMaskEdit(node, 'outpaint')} className="gap-2"><Expand />扩图</DropdownMenuItem>
           {overflowActions.map(action => action.menu ? (
             <DropdownMenuSub key={action.id}>
               <DropdownMenuSubTrigger disabled={action.disabled} aria-label={action.label} className="gap-2">
@@ -3065,7 +3065,8 @@ function withGenerationDraft(node: CanvasNode, draft: CanvasGenerationDraft): Ca
 }
 
 function nodeIcon(node: CanvasNode) {
-  if (node.type === 'image_edit') return <Pencil className="size-3.5 shrink-0" />;
+  if (node.type === 'image_edit') return node.data.options.mode === 'outpaint'
+    ? <Expand className="size-3.5 shrink-0" /> : <Paintbrush className="size-3.5 shrink-0" />;
   if (node.type === 'text') return <Type className="size-3.5 shrink-0" />;
   if (node.type === 'image') return <FileImage className="size-3.5 shrink-0" />;
   if (node.type === 'video') return <FileVideo className="size-3.5 shrink-0" />;

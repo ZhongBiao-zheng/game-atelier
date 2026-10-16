@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.96.0',
+    date: '2026-10-16',
+    headline: '局部修改与扩图拆成两个编辑器',
+    changes: [
+      { kind: 'feat', text: '局部修改和扩图各有独立节点与全屏编辑器：画笔工具在上，提示词和生成在下，节点直接预览选区或扩展画框。' },
+      { kind: 'feat', text: '局部修改统一用 Midjourney 局部重绘，一次 4 张；扩图用比例和倍数定画框，原图可拖动，默认 Midjourney，也能换其它图片模型。' },
+      { kind: 'fix', text: '暂停通用模型的分区局部修改和 MJ 原生动作入口；Midjourney 编辑必须填写提示词，避免提交后才被拒。' },
+    ],
+  },
+  {
     version: '5.95.0',
     date: '2026-10-15',
     headline: '可重复编辑的局部修改节点',
