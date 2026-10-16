@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_serializer
 
 from character_workflow.lib import data_root
 
@@ -28,10 +28,22 @@ Provider = Literal[
     "openrouter",
     "evolink",
     "custom",
+    # 局域网 Atelier（ADR-0025）：base_url 是网关地址，access_key 是网关密钥。
+    "atelier",
 ]
 Kind = Literal["portrait", "promo", "turnaround"]
 ModelModality = Literal["text", "image", "video", "audio"]
 ModelInputModality = Literal["text", "image", "video", "audio"]
+
+
+class ViaMember(BaseModel):
+    """网关供应商的模型背后、网关那边路由组的一个成员（快照，不含任何密钥）。"""
+    alias: str
+    provider: str
+    base_url: str | None = None
+    model_id: str
+    name: str
+    protocol: str | None = None
 
 
 class ModelSpec(BaseModel):
@@ -45,6 +57,16 @@ class ModelSpec(BaseModel):
     protocol: str | None = None
     # 模型可理解的输入模态。反推提示词等多模态文本能力只认明确声明，不按模型名猜。
     input_modalities: list[ModelInputModality] = Field(default_factory=list)
+    # 只有局域网 Atelier 供应商有：网关那边的成员快照，能力取交集、估价取第一个（ADR-0025）。
+    via: list[ViaMember] | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_via(self, handler):
+        # 普通 KEY 没有 via：不写进 keys.json / API，旧数据与旧断言保持原样。
+        data = handler(self)
+        if data.get("via") is None:
+            data.pop("via", None)
+        return data
 
 
 class KeySpec(BaseModel):

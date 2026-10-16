@@ -141,7 +141,7 @@ uv run python src/viewer_server/server.py open-browser
 
 ## 安全 / 部署约束
 
-- viewer-server **必须绑 `127.0.0.1`**，绝不 `0.0.0.0`（共享 WiFi attack surface）。
+- viewer-server **必须绑 `127.0.0.1`**，绝不 `0.0.0.0`（共享 WiFi attack surface）。唯一例外是局域网网关（ADR-0025）：独立端口、只挂 `/gateway/v1/*`、必须带网关密钥、默认关闭，不接受任何本机路径参数。
 - `/api/raw` 媒体读取用 job_id 白名单（只读 `output_paths`、`params` 三组参考素材、MJ 三组参考素材与 `source_image` 中登记的路径）。
 - 同一时间只支持一个 Web tab（多 tab 行为未定义）。
 

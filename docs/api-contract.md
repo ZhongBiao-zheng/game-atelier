@@ -47,6 +47,25 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 - 创作台 `POST /api/studio/jobs`、画布草稿 / 生成偏好 `selection`、Agent `CanvasAgentModelRef`、工坊 `prepare_generation`：`alias` 为空即「自动」，`model` 为路由 id；Job 与运行快照里的 `alias` 始终是实际使用的 KEY。
 - `JobParams.route_id`：「自动」提交时由服务端写入（浏览器传入的会被覆盖）；`route_tried`：失败切换时换掉的别名。运行快照的 `alias` 是提交时解析的那家，失败切换后以 Job 的 `alias` 为准。
 
+### 局域网网关协议 v1（ADR-0025）
+
+网关服务在独立端口（默认 5180）只提供下列接口，全部要求 `Authorization: Bearer <网关密钥>`，不认 cookie；其他路径 404。
+
+- `GET /gateway/v1/info` → `{name, version, protocol: 1}`。协议版本不一致时接入端直接报错，不做兼容。
+- `GET /gateway/v1/models` → 与 `GET /api/models` 同形，一期只含图片。
+- `POST /gateway/v1/tasks`：multipart，字段 `request`（JSON：`model` 路由 id、`prompt`、`n`、`size`、`params`）+ 参考图文件
+  `ref_0`…`ref_15`；请求头 `Idempotency-Key` 必填（同一把密钥下同一个 key 返回同一个任务）。返回 202 `{task_id}`。
+  `params` 只收白名单控制字段，出现路径类字段 422；当日张数超限 429（`今日额度已用完`）。
+- `GET /gateway/v1/tasks/{id}` → `{task_id, status: pending|running|done|failed|canceled, phase, member_alias,
+  warnings, actual_size, actual_cost_cny, outputs: 张数, error, error_kind}`。`error_kind`：`unavailable`（全部成员都因
+  确定没执行的原因失败）、`unconfirmed`（网关重启等，可能已执行）、`failed`（其他）。
+- `GET /gateway/v1/tasks/{id}/outputs/{i}` → 第 i 张图的字节；`POST /gateway/v1/tasks/{id}/cancel` → 取消。
+- 任务只对创建它的密钥可见（其他密钥 404）；任务与文件保留 24 小时。
+- 接入端：`provider="atelier"` 的 KEY，`ModelSpec.via` 是网关成员快照；Job 用 `provider_task_protocol=atelier_gateway`
+  与 `provider_task_ids` 记录网关任务 id，重启后只查询既有任务。caller 把网关结果映射为：401 → `gateway api 401`，
+  429 → `gateway api 429`，`error_kind=unavailable` → `gateway api 503: unavailable`（三者触发接入端失败切换），
+  其余不带状态码；`unconfirmed` 的文案含「未确认」。
+
 ### 图层栈显示顺序（5.44.0）
 
 `layer_stack.data.base_z_index` 默认 0，背景与 `layers[].z_index` 共用 0–16 范围；存在背景时所有层级值必须唯一。

@@ -19,6 +19,8 @@ from viewer_server.connection_status import (
 from viewer_server.connection_auth import ConnectionError, ConnectionStore
 from viewer_server.connection_middleware import ConnectionMiddleware, connection_error
 from viewer_server.connection_routes import connection_router
+from viewer_server.gateway_app import gateway_server
+from viewer_server.gateway_routes import gateway_router
 from viewer_server.routes import router
 from viewer_server.request_boundary import LocalRequestBoundary, development_origin
 from viewer_server.routes_canvas_batches import router as canvas_batches_router
@@ -169,6 +171,10 @@ async def lifespan(app: FastAPI):
             "reconciled %d canvas job(s): %s", len(reconciled), ", ".join(reconciled)
         )
     observer = start_watchers()
+    # 局域网共享（ADR-0025）：默认关闭；开着的话随主服务一起起来。
+    from character_workflow.lib.gateway_keys import read_config as read_gateway_config
+
+    await asyncio.to_thread(gateway_server.apply, read_gateway_config())
     resume_tasks: set[asyncio.Task[None]] = set()
 
     async def maintain_canvas_lifecycle() -> None:
@@ -207,6 +213,7 @@ async def lifespan(app: FastAPI):
         maintenance_task.cancel()
         for task in resume_tasks:
             task.cancel()
+        await asyncio.to_thread(gateway_server.stop)
         stop_team_library_watches()
         observer.stop()
         observer.join(timeout=2)
@@ -263,6 +270,7 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(connection_router(connection_store))
     app.include_router(canvas_batches_router)
     app.include_router(team_library_router)
+    app.include_router(gateway_router)
     app.include_router(sse_router)
     from viewer_server.workshop_routes import register_workshop_routes
 

@@ -68,6 +68,12 @@ GET /api/keys/{alias}/reveal
 POST /api/keys/models-preview
 GET /api/models
 PUT /api/models/order
+GET /api/gateway
+PUT /api/gateway
+POST /api/gateway/keys
+PATCH /api/gateway/keys/{key_id}
+POST /api/gateway/keys/{key_id}/revoke
+GET /api/gateway/usage
 GET /api/gallery/recent
 GET /api/gallery/screens
 GET /api/gallery/hidden
@@ -175,6 +181,9 @@ LOCAL_MANAGEMENT = frozenset({
     "/api/config", "/api/keys", "/api/keys/{alias}", "/api/keys/{alias}/reveal",
     "/api/keys/models-preview", "/api/models/order", "/api/folder-picker", "/api/onboarding/status",
     "/api/onboarding/data-root",
+    # 局域网共享：开关会让本机对局域网开端口，密钥与用量也只给本机页面（ADR-0025）。
+    "/api/gateway", "/api/gateway/keys", "/api/gateway/keys/{key_id}",
+    "/api/gateway/keys/{key_id}/revoke", "/api/gateway/usage",
     # 挂载团队库 = 往本机任意目录写清单并整棵扫描，同 folder-picker 只给本机页面。
     "/api/team-libraries",
     # 导入 / 删除 Agent Skill 改写数据目录里的说明文件，Agent 每轮都会读，只给本机页面。
