@@ -183,6 +183,7 @@ import type {
   CanvasMattingModelStatus,
   CanvasMediaOperation,
   CanvasMediaVersion,
+  CanvasImageEditNode,
   CanvasNode,
   CanvasPoint,
   CanvasSize,
@@ -4438,6 +4439,18 @@ function CanvasEditorInner({
   const layerParentByNodeId = useMemo(() => new Map<string, { nodeId: string; title: string }>(
     JSON.parse(layerParentSignature),
   ), [layerParentSignature]);
+  // 结果节点 → 编辑节点：编辑节点到结果是 material 连线。签名带上编辑节点本身，
+  // 提示词 / 画框改了面板跟着变，其余编辑不换 Map 引用。
+  const editSourceSignature = JSON.stringify((() => {
+    const editNodes = new Map((document?.nodes ?? []).flatMap(node => node.type === 'image_edit' ? [[node.id, node] as const] : []));
+    return (document?.connections ?? []).flatMap(connection => {
+      const edit = connection.role === 'material' ? editNodes.get(connection.source_node_id) : undefined;
+      return edit ? [[connection.target_node_id, edit] as const] : [];
+    });
+  })());
+  const editSourceByResultNodeId = useMemo(() => new Map<string, CanvasImageEditNode>(
+    JSON.parse(editSourceSignature),
+  ), [editSourceSignature]);
   const locateNodeHandler = useRef<(id: string) => void>(() => undefined);
   locateNodeHandler.current = (nodeId: string) => {
     const current = latestDocument.current;
@@ -4470,6 +4483,7 @@ function CanvasEditorInner({
   const multiSelectionActive = selectedNodeIds.size > 1;
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
     layerParentByNodeId,
+    editSourceByResultNodeId,
     locateNode,
     focusVariableNodeId,
     consumeVariableFocus,
@@ -4560,6 +4574,7 @@ function CanvasEditorInner({
     copyPrompt,
     createImageFromSource,
     layerParentByNodeId,
+    editSourceByResultNodeId,
     locateNode,
     createLayerDecomposition,
     deleteNode,

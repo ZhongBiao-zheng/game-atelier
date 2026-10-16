@@ -1312,7 +1312,9 @@ def _commit_frozen_run(
             surface,
             nodes,
             mode,
-            result_draft,
+            # 编辑结果的过程（原图、选区、提示词）留在编辑节点上；复制成普通生成配置会让
+            # 结果节点上的「开始生成」变成不带原图和蒙版的文生图。
+            None if surface.type == "image_edit" else result_draft,
             run_id,
             result_id,
             result_title,

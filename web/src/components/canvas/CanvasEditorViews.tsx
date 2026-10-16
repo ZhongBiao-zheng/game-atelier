@@ -29,8 +29,9 @@ import { CanvasBatchMaterialEditor, CanvasGroupFrame } from './CanvasBatchContro
 import { CanvasAudioPlayer } from './CanvasAudioPlayer';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
 import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
+import { CanvasEditResultPanel } from './CanvasEditResultPanel';
 import { CanvasImageEditSurface } from './CanvasImageEditSurface';
-import type { CanvasMediaVersion } from '@/schema/canvas';
+import type { CanvasImageEditNode, CanvasMediaVersion } from '@/schema/canvas';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import {
@@ -146,6 +147,8 @@ export interface CanvasNodeContextValue {
   uploadBatchImages?: (nodeId: string, files: File[], itemId?: string) => Promise<void>;
   projectId: string;
   layerParentByNodeId?: ReadonlyMap<string, { nodeId: string; title: string }>;
+  /** 局部修改 / 扩图结果节点 → 产生它的编辑节点。 */
+  editSourceByResultNodeId?: ReadonlyMap<string, CanvasImageEditNode>;
   locateNode?: (id: string) => void;
   focusVariableNodeId?: string | null;
   consumeVariableFocus?: () => void;
@@ -301,18 +304,19 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const uploadedImageMaterial = Boolean(
     context && isUploadedImageMaterialNode(node, nodeContent),
   );
-  const generationPanelVisible = Boolean(
+  const editSource = context?.editSourceByResultNodeId?.get(node.id);
+  const nodePanelAllowed = Boolean(
     context
     && !context.batchBusy
     && selected
     && !context.multiSelectionActive
-    && draft
-    && !uploadedImageMaterial
     && !context.generationPanel.narrowViewport
     && context.generationPanel.dismissedNodeId !== node.id,
   );
+  const editResultPanelVisible = nodePanelAllowed && Boolean(editSource);
+  const generationPanelVisible = nodePanelAllowed && !editSource && Boolean(draft) && !uploadedImageMaterial;
   // 生成面板落在节点上方时会盖住标题栏与工具栏（含「上传附件」），这两样翻到节点下方去。
-  const chromeBelow = generationPanelVisible && panelSide === 'above';
+  const chromeBelow = (generationPanelVisible || editResultPanelVisible) && panelSide === 'above';
   const materialPickEligible = Boolean(context?.materialPick?.selectableNodeIds.has(node.id));
   const [shellElement, setShellElement] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -973,6 +977,18 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
             context={context}
             onClose={() => context.generationPanel.dismiss(node.id)}
           />
+        </CanvasNodeFloatingPanel>
+      )}
+      {editResultPanelVisible && editSource && context && (
+        <CanvasNodeFloatingPanel
+          nodeId={node.id}
+          anchor={shellElement}
+          surfaceRef={context.generationPanel.surfaceRef}
+          onSideChange={setPanelSide}
+          hiddenWhileDragging={dragging}
+        >
+          <CanvasEditResultPanel edit={editSource} context={context}
+            onClose={() => context.generationPanel.dismiss(node.id)} />
         </CanvasNodeFloatingPanel>
       )}
     </div>

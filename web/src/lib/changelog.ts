@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.97.0',
+    date: '2026-10-16',
+    headline: '编辑结果显示过程',
+    changes: [
+      { kind: 'feat', text: '局部修改 / 扩图的结果节点显示这次用到的原图、选区或画框、提示词和模型，可一键再次生成或回到编辑器修改。' },
+      { kind: 'fix', text: '结果节点不再带一份普通生成配置，避免点「开始生成」变成不带原图和蒙版的文生图。' },
+    ],
+  },
+  {
     version: '5.96.3',
     date: '2026-10-16',
     headline: '编辑节点跟随画框比例',
