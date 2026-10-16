@@ -800,7 +800,16 @@ def test_invalid_update_metadata_leaves_file_untouched(isolated_data_root, mount
 # ------------------------------------------------ M2 编辑保留未知字段
 
 
-def test_update_preserves_unknown_fields(isolated_data_root, mount):
+def test_update_preserves_unknown_fields(isolated_data_root, mount, monkeypatch):
+    # 断言 updated_at 有变化；Windows 上两次 datetime.now() 可能同一个时钟刻度，换成递增时钟。
+    import itertools
+    from datetime import datetime, timedelta, timezone
+
+    import character_workflow.lib.team_library_share as team_library_share
+    ticks = itertools.count()
+    monkeypatch.setattr(team_library_share, "_now", lambda: (
+        datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=next(ticks))
+    ).isoformat())
     original = _shared(mount)
     manifest = _asset_dir(mount, original.asset_id) / "asset.json"
     raw = json.loads(manifest.read_text(encoding="utf-8"))
