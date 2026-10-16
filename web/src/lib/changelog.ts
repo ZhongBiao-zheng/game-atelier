@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.98.3',
+    date: '2026-10-16',
+    headline: '编辑过程参考图可悬停预览',
+    changes: [
+      { kind: 'fix', text: '结果图面板里的原图、蒙版悬停显示大图预览，点击在页面内打开大图，不再新开标签页。' },
+    ],
+  },
+  {
     version: '5.98.2',
     date: '2026-10-16',
     headline: '编辑过程面板回到结果节点',

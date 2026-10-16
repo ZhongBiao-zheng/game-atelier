@@ -1,10 +1,12 @@
 import { Expand, LoaderCircle, Paintbrush, Sparkles, X } from 'lucide-react';
 import { useState } from 'react';
 import { canvasMediaUrl } from '@/api/canvas';
+import { Lightbox } from '@/components/Lightbox';
 import { Button } from '@/components/ui/button';
 import type { CanvasImageEditNode, CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 import type { CanvasNodeContextValue } from './CanvasEditorViews';
+import { CanvasMaterialHoverDetail, type CanvasMaterialHoverState } from './CanvasMaterialHoverDetail';
 
 type EditInput = NonNullable<Job['params']['edit_inputs']>[number];
 
@@ -28,6 +30,8 @@ export function CanvasImageEditPanel({ node, edit, context, onClose }: {
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [promptExpanded, setPromptExpanded] = useState(false);
+  const [hovered, setHovered] = useState<CanvasMaterialHoverState | null>(null);
+  const [zoomed, setZoomed] = useState<number | null>(null);
   const outpaint = edit.data.options.mode === 'outpaint';
   const draft = edit.data.generation_draft;
   const job = (context.jobsByResultNodeId.get(node.id) ?? []).filter(item => item.params.edit_inputs?.length).at(-1);
@@ -60,14 +64,28 @@ export function CanvasImageEditPanel({ node, edit, context, onClose }: {
       <Button type="button" variant="ghost" size="icon" className="absolute right-2 top-2 z-10 size-7 rounded-full"
         aria-label={`关闭${label}设置`} onClick={onClose}><X aria-hidden="true" /></Button>
       <div className="mb-1 flex min-h-12 min-w-0 items-center gap-2 overflow-x-auto px-1 py-1 pr-9">
-        {tiles.map(tile => (
-          <a key={tile.key} href={tile.url} target="_blank" rel="noreferrer" title={`查看${tile.label}`}
-            className="edit-checker relative grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-border transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-            <img src={tile.url} alt={tile.label} loading="lazy" draggable={false} className="size-full object-contain" />
-            <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-center text-xs text-foreground">{tile.label}</span>
-          </a>
-        ))}
+        {tiles.map((tile, index) => {
+          const showDetail = (target: HTMLElement) => {
+            const bounds = target.getBoundingClientRect();
+            setHovered({ reference: { nodeId: tile.key, versionId: tile.key, kind: 'image', title: tile.label, previewUrl: tile.url },
+              left: bounds.left + bounds.width / 2, top: bounds.top - 8 });
+          };
+          return (
+            <button key={tile.key} type="button" aria-label={`查看${tile.label}`}
+              className="edit-checker relative grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-border transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              onMouseEnter={event => showDetail(event.currentTarget)} onMouseLeave={() => setHovered(null)}
+              onFocus={event => showDetail(event.currentTarget)} onBlur={() => setHovered(null)}
+              onClick={() => { setHovered(null); setZoomed(index); }}>
+              <img src={tile.url} alt={tile.label} loading="lazy" draggable={false} className="size-full object-contain" />
+              <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-center text-xs text-foreground">{tile.label}</span>
+            </button>
+          );
+        })}
       </div>
+      {hovered && <CanvasMaterialHoverDetail {...hovered} />}
+      {zoomed !== null && tiles[zoomed] && <Lightbox src={tiles[zoomed].url} onClose={() => setZoomed(null)}
+        onPrevious={zoomed > 0 ? () => setZoomed(zoomed - 1) : undefined}
+        onNext={zoomed < tiles.length - 1 ? () => setZoomed(zoomed + 1) : undefined} />}
       <button type="button" aria-expanded={promptExpanded} onClick={() => setPromptExpanded(value => !value)}
         className="block w-full rounded-md px-3 pb-1 pt-2 text-left transition-colors hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
         <p className={`whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground ${promptExpanded ? 'max-h-60 overflow-y-auto' : 'line-clamp-3'}`}>
