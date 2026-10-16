@@ -388,7 +388,7 @@ MJ：EvoLink MJ V8.2 上传编辑，任意项目图片均可用，不要求原�
 不经过常规本地合成，不承诺蒙版外像素保真。模型切换不丢弃笔迹与提示词，保存后可继续编辑。
 两条路径都不覆盖源版本，结果另建节点。
 
-局部修改与扩图目前只开放实测过的型号：GPT Image 2.5 系列、Nano Banana 2 / 2.1、EvoLink MJ V8.2；前后端共用同一条型号白名单（`EDIT_MODEL_PATTERN`）。
+局部修改与扩图目前只开放实测过的型号：GPT Image 2.5 系列、Nano Banana 2 / 2.1、Seedream 5.0 pro、EvoLink MJ V8.2；前后端共用同一条型号白名单（`EDIT_MODEL_PATTERN`）。
 
 **扩图(Outpaint)**:
 图片编辑节点的另一种模式：按目标画框向外延展原图。默认 EvoLink MJ（目标 `canvas` + 原图 `img_pos`），

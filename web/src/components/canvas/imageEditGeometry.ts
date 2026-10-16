@@ -38,9 +38,9 @@ export function savedImageEditError(node: CanvasImageEditNode, source: CanvasCon
   return null;
 }
 
-/** 局部修改 / 扩图目前只开放实测过的型号：GPT Image 2.5 系列、Nano Banana 2 / 2.1（另加 EvoLink MJ）。
+/** 局部修改 / 扩图目前只开放实测过的型号：GPT Image 2.5 系列、Nano Banana 2 / 2.1、Seedream 5.0 pro（另加 EvoLink MJ）。
  *  与后端 callers/image_edit.py 的 EDIT_MODEL_PATTERN 保持一致。 */
-const EDIT_MODEL_PATTERN = /^(gpt-image-2\.5(-[a-z0-9]+)?|(gemini-)?nano-banana-2(\.1)?(-[24]k)?)$/;
+const EDIT_MODEL_PATTERN = /^(gpt-image-2\.5(-[a-z0-9]+)?|(gemini-)?nano-banana-2(\.1)?(-[24]k)?|seedream-5\.0-pro|doubao-seedream-5-0-pro(-\d+)?)$/;
 
 export function isEditModel(model: KeyView['models'][number], key: KeyView) {
   if (isEvolinkMidjourney(model.id, key.provider)) {

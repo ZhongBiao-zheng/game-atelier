@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.98.7',
+    date: '2026-10-16',
+    headline: '编辑支持 Seedream 5.0 pro',
+    changes: [
+      { kind: 'feat', text: '局部修改和扩图新增 Seedream 5.0 pro（走原图 + 引导图，本地回贴原图），已实测去花草与 16:9 扩图。' },
+    ],
+  },
+  {
     version: '5.98.6',
     date: '2026-10-16',
     headline: '编辑器底栏改用生成面板控件',

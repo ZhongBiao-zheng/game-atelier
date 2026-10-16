@@ -60,7 +60,7 @@ def test_expansion_rejects_crop_and_excessive_canvas(tmp_path, options):
 
 def test_capabilities_distinguish_masks_and_guides():
     assert image_edit.edit_transport("custom", "gpt-image-2.5", "openai") == "mask"
-    assert image_edit.edit_transport("seedream", "doubao-seedream-5-0-pro", "ark") is None
+    assert image_edit.edit_transport("seedream", "doubao-seedream-5-0-pro", "ark") == "guide"
     assert image_edit.edit_transport("custom", "nano-banana-2", "openai") == "guide"
     assert image_edit.edit_transport("midjourney", "midjourney", None) is None
     assert image_edit.edit_transport("custom", "unknown-image", None) is None

@@ -10,9 +10,9 @@ from PIL import Image, ImageChops, ImageFilter, ImageOps
 from .openai_image import image_family, supports_image_mask
 
 
-# 局部修改 / 扩图目前只开放实测过的型号：GPT Image 2.5 系列、Nano Banana 2 / 2.1（另加 EvoLink MJ）。
+# 局部修改 / 扩图目前只开放实测过的型号：GPT Image 2.5 系列、Nano Banana 2 / 2.1、Seedream 5.0 pro（另加 EvoLink MJ）。
 # 与前端 imageEditGeometry.ts 的 EDIT_MODEL_PATTERN 保持一致。
-EDIT_MODEL_PATTERN = re.compile(r"^(gpt-image-2\.5(-[a-z0-9]+)?|(gemini-)?nano-banana-2(\.1)?(-[24]k)?)$")
+EDIT_MODEL_PATTERN = re.compile(r"^(gpt-image-2\.5(-[a-z0-9]+)?|(gemini-)?nano-banana-2(\.1)?(-[24]k)?|seedream-5\.0-pro|doubao-seedream-5-0-pro(-\d+)?)$")
 
 
 def edit_transport(provider: str, model: str, protocol: str | None) -> str | None:
