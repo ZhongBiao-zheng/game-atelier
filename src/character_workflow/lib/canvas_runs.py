@@ -1767,11 +1767,6 @@ def submit_image_edit_run(
                     "canvas_media_capability_missing",
                     "当前模型不支持图片编辑，请选择兼容模型。",
                 )
-            if options.mode == "inpaint" and transport != "evolink":
-                raise CanvasRunCommandError(
-                    "canvas_media_capability_missing",
-                    "局部修改只支持 EvoLink Midjourney，请切换模型。",
-                )
             edit = options.model_dump(exclude_none=True)
             if transport == "evolink" and surface.data.reference_version_id:
                 raise ValueError("EvoLink MJ 编辑只接受当前源图与选区，不支持额外参考素材")

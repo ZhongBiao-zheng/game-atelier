@@ -1,16 +1,18 @@
-import { Eraser, Paintbrush, Redo2, Sparkles, Undo2 } from 'lucide-react';
+import { ChevronDown, Eraser, Paintbrush, Redo2, Sparkles, Undo2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
-import { MJ_IMAGES_PER_TASK } from '@/lib/imageControlCaps';
-import { drawEditStrokes, editMaskBlob, editModelChoices, type EditPoint, type EditStroke } from './imageEditGeometry';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { imageControlCaps, MJ_IMAGES_PER_TASK } from '@/lib/imageControlCaps';
+import { drawEditStrokes, editMaskBlob, editModelChoices, editSize, type EditPoint, type EditStroke } from './imageEditGeometry';
 import { EditorComposer, ImageEditorShell, editorChip, editorIconButton, isTypingTarget, useEditorViewport,
   type CanvasMaskEditSubmission, type ImageEditorProps } from './ImageEditorShell';
 
 type BrushTool = 'brush' | 'eraser';
 const BRUSH_MIN = 8;
 const BRUSH_MAX = 200;
+const choiceId = (alias: string, model: string) => `${alias}\u0000${model}`;
 
-/** 局部修改：只走 Midjourney 局部重绘（EvoLink upload-paint），一次 4 张，提示词必填。 */
+/** 同一选区编辑器，按模型分流常规蒙版编辑与 MJ 原生重绘。 */
 export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, initialData, busy: parentBusy, error,
   onOpenChange, onSave, onSubmit }: ImageEditorProps) {
   const initialDraft = initialData?.generation_draft ?? null;
@@ -29,16 +31,34 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
   const [cursor, setCursor] = useState<EditPoint | null>(null);
   const [prompt, setPrompt] = useState(initialDraft?.prompt ?? '');
   const [localError, setLocalError] = useState<string | null>(null);
-  const choices = useMemo(() => editModelChoices(keys).filter(choice => choice.mj), [keys]);
-  const choice = choices.find(item => item.key.alias === initialDraft?.alias && item.model === initialDraft?.model) ?? choices[0];
+  const choices = useMemo(() => editModelChoices(keys), [keys]);
+  const [selected, setSelected] = useState(() => {
+    const saved = choices.find(item => item.key.alias === initialDraft?.alias && item.model === initialDraft?.model);
+    // A missing saved model requires an explicit choice, never a silent channel switch.
+    return saved ? choiceId(saved.key.alias, saved.model) : initialDraft?.model ? ''
+      : choices[0] ? choiceId(choices[0].key.alias, choices[0].model) : '';
+  });
+  const choice = choices.find(item => choiceId(item.key.alias, item.model) === selected);
+  const mj = Boolean(choice?.mj);
+  const [count, setCount] = useState(() => initialDraft?.model === 'mj-v8.2' ? 1
+    : Math.min(4, Math.max(1, initialDraft?.params.n ?? 1)));
+  const candidates = mj ? MJ_IMAGES_PER_TASK : count;
+  const caps = imageControlCaps(choice?.model ?? '', choice?.key.provider, choice?.key.base_url);
+  const savedQuality = choice?.key.alias === initialDraft?.alias && choice?.model === initialDraft?.model
+    ? initialDraft?.params.quality : undefined;
+  const quality = caps.qualities?.includes(savedQuality as never) ? savedQuality
+    : caps.qualities?.includes('low' as never) ? 'low' : caps.qualities?.[0];
+  const size = editSize(choice?.key, choice?.model ?? '', dimensions.width, dimensions.height);
+  const params = mj ? { n: MJ_IMAGES_PER_TASK }
+    : { ...size.params, n: count, ...(quality ? { quality } : {}) };
   const viewport = useEditorViewport(dimensions);
   const { scale, origin } = viewport;
-  const fingerprint = JSON.stringify({ strokes, prompt });
+  const fingerprint = JSON.stringify({ strokes, prompt, selected, count });
   const savedFingerprint = useRef(fingerprint);
   const cost = estimateGenerationCostForSubmission(choice?.key, choice?.model ?? '', 'image',
-    { n: MJ_IMAGES_PER_TASK, image_edit: { mode: 'inpaint' } });
-  const blocker = !choice ? '需要可用的 Midjourney 模型' : !ready ? '图片加载中' : initialData?.active_run_id ? '正在生成'
-    : !strokes.length ? '先涂抹要修改的区域' : !prompt.trim() ? '写下要改成什么' : null;
+    { ...params, ...(mj ? { image_edit: { mode: 'inpaint' } } : {}) });
+  const blocker = !choice ? '请选择可用的编辑模型' : !ready ? '图片加载中' : initialData?.active_run_id ? '正在生成'
+    : size.error ? size.error : !strokes.length ? '先涂抹要修改的区域' : mj && !prompt.trim() ? '写下要改成什么' : null;
 
   useEffect(() => { if (overlay.current && ready) drawEditStrokes(overlay.current, strokes); }, [strokes, ready]);
 
@@ -111,11 +131,12 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
         catch (error) { if (generate) throw error; }
       }
       const submission: CanvasMaskEditSubmission = {
-        mask, requestedCount: MJ_IMAGES_PER_TASK, options: { mode: 'inpaint' },
+        mask, requestedCount: candidates, options: { mode: 'inpaint' },
         editorState: { strokes, frame: { ...dimensions, x: 0, y: 0 }, frame_ratio: '' },
-        referenceNodeId: null, referenceVersionId: null,
+        referenceNodeId: mj ? null : initialData?.reference_node_id ?? null,
+        referenceVersionId: mj ? null : initialData?.reference_version_id ?? null,
         draft: { mode: 'image', prompt: prompt.trim(), input_policy: 'all_connected', alias: choice?.key.alias ?? '',
-          model: choice?.model ?? '', params: { n: MJ_IMAGES_PER_TASK }, updated_at: new Date().toISOString() },
+          model: choice?.model ?? '', params, updated_at: new Date().toISOString() },
       };
       if (await (generate ? onSubmit(submission) : onSave(submission))) savedFingerprint.current = fingerprint;
     } catch (error) {
@@ -166,11 +187,30 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
           style={{ left: cursor.x - brushSize / 2, top: cursor.y - brushSize / 2, width: brushSize, height: brushSize }} />}
       </div>
     </div>}
-    composer={<EditorComposer prompt={prompt} onPrompt={setPrompt} placeholder="描述选区要改成什么（必填）"
+    composer={<EditorComposer prompt={prompt} onPrompt={setPrompt} placeholder={mj ? '描述选区要改成什么（必填）' : '描述选区要改成什么；留空自然修复'}
       blocker={blocker} error={error || localError} cost={cost} busy={busy} canSave={!busy && (ready || !strokes.length)}
-      generateLabel={`生成 ${MJ_IMAGES_PER_TASK} 张`} onSave={() => void submit(false)} onGenerate={() => void submit(true)}
+      generateLabel={`生成 ${candidates} 张`} onSave={() => void submit(false)} onGenerate={() => void submit(true)}
       chips={<>
-        <span className={editorChip} title={choice?.key.alias}><Sparkles className="size-3.5 text-muted-foreground" aria-hidden />Midjourney 局部重绘</span>
-        <span className={`${editorChip} font-mono`}>{MJ_IMAGES_PER_TASK} 张 · Fast</span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button type="button" aria-label="编辑模型" title={choice?.key.alias}
+              className={`${editorChip} max-w-64 hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}>
+              <Sparkles className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="truncate">{choice ? (mj ? 'Midjourney 局部重绘' : choice.name) : '选择模型'}</span>
+              <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="z-50 max-h-80 max-w-[calc(100vw-2rem)] overflow-y-auto">
+            <DropdownMenuRadioGroup value={selected} onValueChange={setSelected}>
+              {choices.map(item => <DropdownMenuRadioItem key={choiceId(item.key.alias, item.model)} value={choiceId(item.key.alias, item.model)}>
+                <span className="flex-1">{item.mj ? 'Midjourney 局部重绘' : item.name}</span>
+                <span className="ml-3 text-xs text-muted-foreground">{item.key.alias}</span>
+              </DropdownMenuRadioItem>)}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {mj ? <span className={`${editorChip} font-mono`}>{MJ_IMAGES_PER_TASK} 张 · Fast</span>
+          : <select aria-label="候选数" value={count} onChange={event => setCount(Number(event.target.value))}
+            className={`${editorChip} bg-transparent font-mono`}>{[1, 2, 3, 4].map(n => <option key={n} value={n}>{n} 张</option>)}</select>}
       </>} />} />;
 }

@@ -1,5 +1,6 @@
 
 import pytest
+import io
 from PIL import Image
 
 from character_workflow.lib.canvas_projects import create_canvas_project, replace_canvas_node_media
@@ -45,6 +46,40 @@ def test_edit_rejects_stale_source_before_submit(isolated_data_root):
     with pytest.raises(ValueError, match="源图版本"):
         submit_saved_edit(pid, "source", doc.revision, 1, b"",
                              CanvasImageEditOptions(source_version_id="stale"))
+
+
+def test_regular_inpaint_runs_through_saved_node_and_preserves_source(isolated_data_root, monkeypatch):
+    from character_workflow.lib import callers
+    from character_workflow.lib.canvas_projects import read_canvas_document
+    from character_workflow.lib.canvas_runs import run_canvas_job
+    from character_workflow.lib.schemas import JobStatus
+
+    pid, version, doc = setup_source()
+    mask = Image.new("L", (1024, 1024), 255)
+    mask.paste(0, (300, 300, 700, 700))
+    buffer = io.BytesIO()
+    mask.save(buffer, format="PNG")
+    job, saved = submit_saved_edit(pid, "source", doc.revision, 1, buffer.getvalue())
+    assert job.params.image_edit["mode"] == "inpaint"
+    assert job.params.size == "1024x1024"
+    assert job.params.n == 1
+    edit_node = next(n for n in saved.nodes if n.type == "image_edit")
+    assert [(e.source_node_id, e.target_node_id) for e in saved.connections] == [
+        ("source", edit_node.id), (edit_node.id, job.canvas_run.result_node_id),
+    ]
+    def generate(**kwargs):
+        assert kwargs["params"]["mask_image"]
+        output = kwargs["output_dir"] / "mock.png"
+        Image.new("RGB", (1024, 1024), "blue").save(output)
+        return [str(output)]
+    monkeypatch.setattr(callers, "dispatch", generate)
+    result = run_canvas_job(job.job_id)
+    assert result.status == JobStatus.DONE
+    assert read_canvas_document(pid).nodes[0].data.current_version_id == version.version_id
+    with Image.open(result.output_paths[0]) as output:
+        assert output.getpixel((0, 0)) == (255, 0, 0, 255)
+        assert output.getpixel((500, 500)) == (0, 0, 255, 255)
+        assert 0 < output.getpixel((300, 500))[2] < 255
 
 
 def test_complete_outpaint_run_registers_candidates_without_modifying_source(isolated_data_root, monkeypatch):

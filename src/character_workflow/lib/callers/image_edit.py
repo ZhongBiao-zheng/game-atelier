@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageFilter, ImageOps
 
 from .openai_image import image_family, supports_image_mask
 
@@ -61,6 +61,16 @@ def composite_result(source: Path, mask_path: Path, result: Path, options: dict)
         raise ValueError("模型返回图片比例与编辑画框不一致，请调整尺寸后重试；原图未修改")
     if generated.size != base.size:
         generated = generated.resize(base.size, Image.Resampling.LANCZOS)
+    if options.get("mode") == "inpaint":
+        # Average inward erosions: a short transition wholly inside the selection.
+        # Unlike Gaussian blur this cannot leak generated pixels into protected RGBA.
+        selection = ImageOps.invert(mask)
+        feathered = selection.copy()
+        radius = min(8, max(1, round(min(base.size) / 256)))
+        for step in range(1, radius + 1):
+            selection = selection.filter(ImageFilter.MinFilter(3))
+            feathered = Image.blend(feathered, selection, 1 / (step + 1))
+        mask = ImageOps.invert(feathered)
     target = result.with_suffix(".png")
     Image.composite(base, generated, mask).save(target, format="PNG")
     return target
@@ -107,17 +117,24 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path,
     if transport == "guide":
         with Image.open(mask_path) as opened:
             edit_mask = ImageOps.invert(opened.convert("L"))
-        guide = base.copy()
-        overlay = Image.new("RGBA", base.size, (212, 165, 116, 255))
-        guide = Image.composite(overlay, guide, edit_mask.point(lambda value: value // 2))
+        if options["mode"] == "inpaint":
+            guide = edit_mask
+            instruction += (
+                "Image 1 is the clean source. Image 2 is a selection mask: white marks "
+                "the area to edit and black marks areas to preserve. Return the edited "
+                "original only; do NOT reproduce the mask. "
+            )
+        else:
+            overlay = Image.new("RGBA", base.size, (212, 165, 116, 255))
+            guide = Image.composite(overlay, base, edit_mask.point(lambda value: value // 2))
+            instruction += (
+                "Image 1 is the clean source. Image 2 marks the editable region in amber; "
+                "the marking is guidance only and must NOT appear in the result. "
+            )
         guide_path = work / "selection.png"
         guide.save(guide_path)
         refs.insert(1, str(guide_path))
         request.pop("mask_image", None)
-        instruction += (
-            "Image 1 is the clean source. Image 2 marks the editable region in amber; "
-            "the marking is guidance only and must NOT appear in the result. "
-        )
     else:
         instruction += "The supplied mask identifies the editable region. "
     if len(params["reference_images"]) > 1:

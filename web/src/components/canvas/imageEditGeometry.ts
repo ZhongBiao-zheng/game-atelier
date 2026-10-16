@@ -26,8 +26,8 @@ export function savedImageEditError(node: CanvasImageEditNode, source: CanvasCon
   const mj = isEvolinkMidjourney(draft.model, key.provider);
   if (mj && !draft.prompt.trim()) return '请先填写修改说明。';
   if (options.mode === 'inpaint') {
-    if (!mj) return '局部修改需要 Midjourney 模型，请重新编辑。';
-    return node.data.mask_version_id ? null : '请先编辑并保存需要修改的区域。';
+    return node.data.mask_version_id ? editSize(key, draft.model, source.width, source.height).error
+      : '请先编辑并保存需要修改的区域。';
   }
   if (options.mode === 'outpaint') {
     const { width = 0, height = 0, x = -1, y = -1 } = options;

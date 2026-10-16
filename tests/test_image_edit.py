@@ -87,6 +87,12 @@ def test_render_uses_real_dispatch_and_never_persists_temp_references(tmp_path, 
         assert len(request["reference_images"]) == (1 if transport == "mask" else 2)
         assert ("mask_image" in request) == (transport == "mask")
         assert "image_edit" not in request
+        if transport == "guide":
+            with Image.open(request["reference_images"][1]) as guide:
+                assert guide.mode == "L"
+                assert guide.getpixel((0, 0)) == 0
+                assert guide.getpixel((10, 10)) == 255
+            assert "white" in kwargs["prompt"] and "black" in kwargs["prompt"]
         request["provider_task_ids"] = ["accepted"]
         kwargs["on_params_changed"]()
         output = tmp_path / "generated.png"
@@ -100,3 +106,40 @@ def test_render_uses_real_dispatch_and_never_persists_temp_references(tmp_path, 
     with Image.open(paths[0]) as output:
         assert output.getpixel((0, 0)) == (1, 2, 3, 0)
         assert output.getpixel((10, 10)) == (255, 0, 0, 255)
+
+
+def test_inpaint_feathers_only_inside_selection_and_preserves_every_protected_pixel(tmp_path):
+    source = Image.new("RGBA", (128, 128), (10, 20, 30, 80))
+    source.save(tmp_path / "source.png")
+    mask = Image.new("L", source.size, 255)
+    mask.paste(0, (32, 32, 96, 96))
+    mask.save(tmp_path / "mask.png")
+    Image.new("RGBA", (256, 256), (240, 220, 200, 255)).save(tmp_path / "result.png")
+    path = image_edit.composite_result(tmp_path / "source.png", tmp_path / "mask.png",
+                                       tmp_path / "result.png", {"mode": "inpaint"})
+    with Image.open(path) as result:
+        assert result.size == source.size
+        assert result.getpixel((64, 64)) == (240, 220, 200, 255)
+        assert 10 < result.getpixel((32, 64))[0] < 240
+        for y in range(128):
+            for x in range(128):
+                if mask.getpixel((x, y)) == 255:
+                    assert result.getpixel((x, y)) == source.getpixel((x, y))
+
+
+def test_mj_bypasses_regular_compositing(tmp_path, monkeypatch):
+    from character_workflow.lib import keys
+    from character_workflow.lib.callers import evolink
+    key = keys.KeySpec(alias="Evo", provider="evolink", access_key="fake",
+                       base_url="https://api.evolink.ai/v1", created_at="2026-10-16")
+    monkeypatch.setattr(keys, "find_by_alias", lambda _: key)
+    params = {"image_edit": {"mode": "inpaint"}}
+    def render(**kwargs):
+        assert kwargs["params"] is params
+        return ["native-mj-output"]
+    def forbidden(*args, **kwargs):
+        raise AssertionError("MJ must not enter regular compositing")
+    monkeypatch.setattr(evolink, "render", render)
+    monkeypatch.setattr(image_edit, "composite_result", forbidden)
+    assert image_edit.render(prompt="edit", model="mj-v8.2", alias="Evo",
+                              output_dir=tmp_path, params=params) == ["native-mj-output"]
