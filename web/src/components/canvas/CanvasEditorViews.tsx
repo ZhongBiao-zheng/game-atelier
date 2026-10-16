@@ -31,7 +31,7 @@ import { CanvasLayerStackList } from './CanvasLayerStackList';
 import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
 import { CanvasImageEditPanel } from './CanvasImageEditPanel';
 import { CanvasImageEditSurface } from './CanvasImageEditSurface';
-import type { CanvasMediaVersion } from '@/schema/canvas';
+import type { CanvasImageEditNode, CanvasMediaVersion } from '@/schema/canvas';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import {
@@ -147,6 +147,8 @@ export interface CanvasNodeContextValue {
   uploadBatchImages?: (nodeId: string, files: File[], itemId?: string) => Promise<void>;
   projectId: string;
   layerParentByNodeId?: ReadonlyMap<string, { nodeId: string; title: string }>;
+  /** 局部修改 / 扩图结果节点 → 产生它的编辑节点。 */
+  editSourceByResultNodeId?: ReadonlyMap<string, CanvasImageEditNode>;
   locateNode?: (id: string) => void;
   focusVariableNodeId?: string | null;
   consumeVariableFocus?: () => void;
@@ -310,8 +312,9 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     && !context.generationPanel.narrowViewport
     && context.generationPanel.dismissedNodeId !== node.id,
   );
-  const editPanelVisible = nodePanelAllowed && node.type === 'image_edit';
-  const generationPanelVisible = nodePanelAllowed && Boolean(draft) && !uploadedImageMaterial;
+  const editSource = context?.editSourceByResultNodeId?.get(node.id);
+  const editPanelVisible = nodePanelAllowed && Boolean(editSource);
+  const generationPanelVisible = nodePanelAllowed && !editSource && Boolean(draft) && !uploadedImageMaterial;
   // 生成面板落在节点上方时会盖住标题栏与工具栏（含「上传附件」），这两样翻到节点下方去。
   const chromeBelow = (generationPanelVisible || editPanelVisible) && panelSide === 'above';
   const materialPickEligible = Boolean(context?.materialPick?.selectableNodeIds.has(node.id));
@@ -976,7 +979,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           />
         </CanvasNodeFloatingPanel>
       )}
-      {editPanelVisible && node.type === 'image_edit' && context && (
+      {editPanelVisible && editSource && context && (
         <CanvasNodeFloatingPanel
           nodeId={node.id}
           anchor={shellElement}
@@ -984,7 +987,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           onSideChange={setPanelSide}
           hiddenWhileDragging={dragging}
         >
-          <CanvasImageEditPanel edit={node} context={context}
+          <CanvasImageEditPanel node={node} edit={editSource} context={context}
             onClose={() => context.generationPanel.dismiss(node.id)} />
         </CanvasNodeFloatingPanel>
       )}
