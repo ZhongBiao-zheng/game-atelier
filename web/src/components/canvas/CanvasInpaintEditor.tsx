@@ -1,10 +1,11 @@
-import { ChevronDown, Eraser, Paintbrush, Redo2, Sparkles, Undo2 } from 'lucide-react';
+import { Eraser, Paintbrush, Redo2, Undo2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { defaultResolution } from '@/lib/studioSize';
+import { EditGenerationControls } from './EditGenerationControls';
 import { imageControlCaps, MJ_IMAGES_PER_TASK } from '@/lib/imageControlCaps';
 import { drawEditStrokes, editMaskBlob, editModelChoices, editSize, type EditPoint, type EditStroke } from './imageEditGeometry';
-import { EditorComposer, ImageEditorShell, editorChip, editorIconButton, isTypingTarget, useEditorViewport,
+import { EditorComposer, ImageEditorShell, editorIconButton, isTypingTarget, useEditorViewport,
   type CanvasMaskEditSubmission, type ImageEditorProps } from './ImageEditorShell';
 
 type BrushTool = 'brush' | 'eraser';
@@ -44,16 +45,18 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
     : Math.min(4, Math.max(1, initialDraft?.params.n ?? 1)));
   const candidates = mj ? MJ_IMAGES_PER_TASK : count;
   const caps = imageControlCaps(choice?.model ?? '', choice?.key.provider, choice?.key.base_url);
-  const savedQuality = choice?.key.alias === initialDraft?.alias && choice?.model === initialDraft?.model
-    ? initialDraft?.params.quality : undefined;
-  const quality = caps.qualities?.includes(savedQuality as never) ? savedQuality
+  const [qualityChoice, setQualityChoice] = useState(initialDraft?.params.quality);
+  const [resolutionChoice, setResolutionChoice] = useState(initialDraft?.params.resolution);
+  const quality = caps.qualities?.includes(qualityChoice as never) ? qualityChoice
     : caps.qualities?.includes('low' as never) ? 'low' : caps.qualities?.[0];
+  const resolution = !caps.showResolution ? undefined
+    : caps.resolutions.includes(resolutionChoice as never) ? resolutionChoice : defaultResolution(caps.resolutions);
   const size = editSize(choice?.key, choice?.model ?? '', dimensions.width, dimensions.height);
   const params = mj ? { n: MJ_IMAGES_PER_TASK }
-    : { ...size.params, n: count, ...(quality ? { quality } : {}) };
+    : { ...size.params, n: count, ...(quality ? { quality } : {}), ...(resolution ? { resolution } : {}) };
   const viewport = useEditorViewport(dimensions);
   const { scale, origin } = viewport;
-  const fingerprint = JSON.stringify({ strokes, prompt, selected, count });
+  const fingerprint = JSON.stringify({ strokes, prompt, selected, count, quality, resolution });
   const savedFingerprint = useRef(fingerprint);
   const cost = estimateGenerationCostForSubmission(choice?.key, choice?.model ?? '', 'image',
     { ...params, ...(mj ? { image_edit: { mode: 'inpaint' } } : {}) });
@@ -194,27 +197,8 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
     composer={<EditorComposer prompt={prompt} onPrompt={setPrompt} placeholder={mj ? '描述选区要改成什么（必填）' : '描述选区要改成什么；留空自然修复'}
       blocker={blocker} error={error || localError} cost={cost} busy={busy}
       generateLabel={`生成 ${candidates} 张`} onGenerate={() => void submit(true)}
-      chips={<>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button type="button" aria-label="编辑模型" title={choice?.key.alias}
-              className={`${editorChip} max-w-64 hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}>
-              <Sparkles className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-              <span className="truncate">{choice ? (mj ? 'Midjourney 局部重绘' : choice.name) : '选择模型'}</span>
-              <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="z-50 max-h-80 max-w-[calc(100vw-2rem)] overflow-y-auto">
-            <DropdownMenuRadioGroup value={selected} onValueChange={setSelected}>
-              {choices.map(item => <DropdownMenuRadioItem key={choiceId(item.key.alias, item.model)} value={choiceId(item.key.alias, item.model)}>
-                <span className="flex-1">{item.mj ? 'Midjourney 局部重绘' : item.name}</span>
-                <span className="ml-3 text-xs text-muted-foreground">{item.key.alias}</span>
-              </DropdownMenuRadioItem>)}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        {mj ? <span className={`${editorChip} font-mono`}>{MJ_IMAGES_PER_TASK} 张 · Fast</span>
-          : <select aria-label="候选数" value={count} onChange={event => setCount(Number(event.target.value))}
-            className={`${editorChip} bg-transparent font-mono`}>{[1, 2, 3, 4].map(n => <option key={n} value={n}>{n} 张</option>)}</select>}
-      </>} />} />;
+      chips={<EditGenerationControls choices={choices} choice={choice}
+        onChoice={next => setSelected(choiceId(next.key.alias, next.model))} caps={caps}
+        resolution={resolution} onResolution={setResolutionChoice} quality={quality} onQuality={setQualityChoice}
+        count={count} onCount={setCount} />} />} />;
 }

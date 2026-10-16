@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.98.6',
+    date: '2026-10-16',
+    headline: '编辑器底栏改用生成面板控件',
+    changes: [
+      { kind: 'feat', text: '局部修改 / 扩图编辑器底栏改成模型、分辨率（或质量）、张数三项：模型按供应商分组，同一模型的 2K / 4K 版本合成一项，在分辨率里切换。' },
+    ],
+  },
+  {
     version: '5.98.5',
     date: '2026-10-16',
     headline: '局部修改与扩图上工具条',

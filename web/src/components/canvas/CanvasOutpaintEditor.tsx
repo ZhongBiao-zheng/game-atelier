@@ -1,11 +1,12 @@
-import { ChevronDown, Expand, Minus, Move, Plus, Sparkles } from 'lucide-react';
+import { Expand, Minus, Move, Plus } from 'lucide-react';
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import { imageControlCaps, MJ_IMAGES_PER_TASK } from '@/lib/imageControlCaps';
+import { defaultResolution } from '@/lib/studioSize';
+import { EditGenerationControls } from './EditGenerationControls';
 import { editModelChoices, editSize, EXPAND_RATIOS, EXPAND_SCALES, presetFrame, presetScale,
   type EditFrame, type ExpandRatio } from './imageEditGeometry';
-import { EditorComposer, ImageEditorShell, editorChip, editorIconButton, useEditorViewport,
+import { EditorComposer, ImageEditorShell, editorIconButton, useEditorViewport,
   type CanvasMaskEditSubmission, type ImageEditorProps } from './ImageEditorShell';
 
 type DragKind = 'image' | 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
@@ -41,8 +42,12 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
   const choice = choices.find(item => choiceId(item.key.alias, item.model) === selected);
   const [count, setCount] = useState(initialDraft?.params.n ?? 1);
   const caps = imageControlCaps(choice?.model ?? '', choice?.key.provider, choice?.key.base_url);
-  const quality = caps.qualities?.includes(initialDraft?.params.quality as never) ? initialDraft?.params.quality
+  const [qualityChoice, setQualityChoice] = useState(initialDraft?.params.quality);
+  const [resolutionChoice, setResolutionChoice] = useState(initialDraft?.params.resolution);
+  const quality = caps.qualities?.includes(qualityChoice as never) ? qualityChoice
     : caps.qualities?.includes('auto' as never) ? 'auto' : caps.qualities?.[0];
+  const resolution = !caps.showResolution ? undefined
+    : caps.resolutions.includes(resolutionChoice as never) ? resolutionChoice : defaultResolution(caps.resolutions);
   const mj = Boolean(choice?.mj);
   const candidates = mj ? MJ_IMAGES_PER_TASK : count;
   const viewport = useEditorViewport(frame);
@@ -51,10 +56,10 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
   const size = editSize(choice?.key, choice?.model ?? '', frame.width, frame.height);
   const contains = frame.x >= 0 && frame.y >= 0 && frame.x + source.width <= frame.width && frame.y + source.height <= frame.height;
   const expanded = frame.width > source.width || frame.height > source.height;
-  const fingerprint = JSON.stringify({ frame, ratio, prompt, selected, count });
+  const fingerprint = JSON.stringify({ frame, ratio, prompt, selected, count, quality, resolution });
   const savedFingerprint = useRef(fingerprint);
   const cost = estimateGenerationCostForSubmission(choice?.key, choice?.model ?? '', 'image',
-    { ...size.params, n: candidates, quality, ...(mj ? { image_edit: { mode: 'outpaint' } } : {}) });
+    { ...size.params, n: candidates, quality, resolution, ...(mj ? { image_edit: { mode: 'outpaint' } } : {}) });
   const blocker = !choice ? '需要可用的图片编辑模型' : !ready ? '图片加载中' : initialData?.active_run_id ? '正在生成'
     : !contains || !expanded ? '画框需要比原图大' : size.error ? size.error : mj && !prompt.trim() ? '写下扩出来的画面' : null;
 
@@ -104,7 +109,7 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
         referenceNodeId: null, referenceVersionId: null,
         draft: { mode: 'image', prompt: prompt.trim(), input_policy: 'all_connected', alias: choice?.key.alias ?? '',
           model: choice?.model ?? '', updated_at: new Date().toISOString(),
-          params: mj ? { n: MJ_IMAGES_PER_TASK } : { ...size.params, n: count, ...(quality ? { quality } : {}) } },
+          params: mj ? { n: MJ_IMAGES_PER_TASK } : { ...size.params, n: count, ...(quality ? { quality } : {}), ...(resolution ? { resolution } : {}) } },
       };
       const ok = await (generate ? onSubmit(submission) : onSave(submission));
       if (ok) savedFingerprint.current = fingerprint;
@@ -161,27 +166,10 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
       placeholder={mj ? '描述扩出来的画面（必填）' : '留空自然延展；或描述新增画面'}
       blocker={blocker} error={error || localError} cost={cost} busy={busy}
       generateLabel={`生成 ${candidates} 张`} onGenerate={() => void submit(true)}
-      chips={<>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button type="button" aria-label="编辑模型" className={`${editorChip} hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}>
-              <Sparkles className="size-3.5 text-muted-foreground" aria-hidden />{choice ? (choice.mj ? 'Midjourney' : choice.name) : '选择模型'}
-              <ChevronDown className="size-3 text-muted-foreground" aria-hidden />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="z-50 max-h-80 overflow-y-auto">
-            <DropdownMenuRadioGroup value={selected} onValueChange={setSelected}>
-              {choices.map(item => <DropdownMenuRadioItem key={choiceId(item.key.alias, item.model)} value={choiceId(item.key.alias, item.model)}>
-                <span className="flex-1">{item.mj ? 'Midjourney' : item.name}</span>
-                <span className="ml-3 text-xs text-muted-foreground">{item.key.alias}</span>
-              </DropdownMenuRadioItem>)}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        {mj ? <span className={`${editorChip} font-mono`}>{MJ_IMAGES_PER_TASK} 张 · Fast</span>
-          : <select aria-label="候选数" value={count} onChange={event => setCount(Number(event.target.value))}
-            className={`${editorChip} bg-transparent font-mono`}>{[1, 2, 3, 4].map(n => <option key={n} value={n}>{n} 张</option>)}</select>}
-      </>}>
+      chips={<EditGenerationControls choices={choices} choice={choice}
+        onChoice={next => setSelected(choiceId(next.key.alias, next.model))} caps={caps}
+        resolution={resolution} onResolution={setResolutionChoice} quality={quality} onQuality={setQualityChoice}
+        count={count} onCount={setCount} />}>
       <div className="flex flex-wrap items-center gap-2">
         <div role="radiogroup" aria-label="画框比例" className="flex flex-wrap items-center gap-0.5">
           {EXPAND_RATIOS.map(item => <button key={item} type="button" role="radio" aria-checked={ratio === item}

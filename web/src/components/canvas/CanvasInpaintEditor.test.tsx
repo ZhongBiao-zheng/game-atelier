@@ -47,13 +47,13 @@ function mount(data = initial, available = keys) {
   return { save, submit };
 }
 async function select(name: RegExp) {
-  fireEvent.keyDown(screen.getByRole('button', { name: '编辑模型' }), { key: 'Enter' });
-  fireEvent.click(await screen.findByRole('menuitemradio', { name }));
+  fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
+  fireEvent.click(await screen.findByRole('option', { name }));
 }
 
 it('restores and submits regular editing with fixed source size and mask', async () => {
   const { submit } = mount();
-  expect(screen.getByRole('button', { name: '编辑模型' })).toHaveTextContent('GPT Flare');
+  expect(screen.getByRole('button', { name: '选择生成模型' })).toHaveTextContent('GPT Flare');
   fireEvent.click(screen.getByRole('button', { name: /生成 2 张/ }));
   await waitFor(() => expect(submit).toHaveBeenCalledOnce());
   expect(submit.mock.calls[0][0]).toMatchObject({ requestedCount: 2, options: { mode: 'inpaint' },
@@ -63,15 +63,15 @@ it('restores and submits regular editing with fixed source size and mask', async
 
 it('switches MJ and normal models without losing strokes or sending stale size fields', async () => {
   const { save } = mount();
-  await select(/Midjourney/);
-  expect(screen.queryByRole('combobox', { name: '候选数' })).not.toBeInTheDocument();
+  await select(/mj-v8\.2/);
+  expect(screen.queryByRole('button', { name: '生成数量' })).not.toBeInTheDocument();
   expect(screen.getByText('4 张 · Fast')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '关闭编辑器' }));
   await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
   expect(save.mock.calls[0][0]).toMatchObject({ requestedCount: 4, draft: { alias: 'Evo', params: { n: 4 } } });
   expect(save.mock.calls[0][0].draft.params).toEqual({ n: 4 });
   await select(/Nano Banana 2/);
-  expect(screen.getByRole('combobox', { name: '候选数' })).toHaveValue('2');
+  expect(screen.getByRole('button', { name: '生成数量' })).toHaveTextContent('2 张');
   fireEvent.click(screen.getByRole('button', { name: '关闭编辑器' }));
   await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
   expect(save.mock.calls[1][0]).toMatchObject({ requestedCount: 2,
@@ -82,13 +82,13 @@ it('switches MJ and normal models without losing strokes or sending stale size f
 it('allows natural repair for normal models but requires MJ prompt', async () => {
   mount({ ...initial, generation_draft: { ...initial.generation_draft!, prompt: '' } });
   expect(screen.getByRole('button', { name: /生成 2 张/ })).toBeEnabled();
-  await select(/Midjourney/);
+  await select(/mj-v8\.2/);
   expect(screen.getByRole('button', { name: /生成 4 张/ })).toBeDisabled();
 });
 
 it('never silently substitutes a missing saved model', () => {
   mount(initial, [keys[0]]);
-  expect(screen.getByRole('button', { name: '编辑模型' })).toHaveTextContent('选择模型');
+  expect(screen.getByRole('button', { name: '选择生成模型' })).toHaveTextContent('选择模型');
   expect(screen.getByRole('button', { name: /生成 2 张/ })).toBeDisabled();
 });
 
