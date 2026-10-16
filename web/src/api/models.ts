@@ -8,6 +8,8 @@ export interface ModelRouteMember {
   model_id: string;
   name: string;
   protocol: string | null;
+  /** 成员是局域网 Atelier 时：网关那边的成员快照。 */
+  via?: ModelRouteMember[];
 }
 
 /** 路由组：同一模型在多个 KEY 下的成员，按出图顺序排列（第一个就是「自动」时实际使用的）。 */

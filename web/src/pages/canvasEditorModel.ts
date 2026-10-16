@@ -1,7 +1,7 @@
 import { canvasInputSourceIds, canvasModeAcceptsNodeType, canvasTargetAcceptsSource } from '@/lib/canvasMentions';
 import { normalizeImageSizeParams } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type ImageControlCaps, type Quality } from '@/lib/imageControlCaps';
-import { isAutoProvider, providerForAlias, routeChannel, routeMemberChoices, selectionImageCaps, storedAlias } from '@/lib/modelRoutes';
+import { hasChannelMembers, providerForAlias, routeChannel, routeMemberChoices, selectionImageCaps, storedAlias } from '@/lib/modelRoutes';
 import type { Job, JobParams } from '@/schema/jobs';
 import { modelModality, type KeyView } from '@/api/keys';
 import { imageFamily, isEvolinkMidjourney, supportsImageQuality } from '@/lib/modelFamily';
@@ -901,8 +901,8 @@ export function canvasGenerationModelSupportsMode(
   mode: CanvasGenerationDraft['mode'],
   options: { editingExistingVideo?: boolean } = {},
 ): boolean {
-  // 「自动」的模型要组内每个成员都能跑：换到任何一家都不会因为能力不够失败。
-  if (isAutoProvider(key)) {
+  // 「自动」与局域网 Atelier 的模型要每个成员都能跑：换到任何一家都不会因为能力不够失败。
+  if (hasChannelMembers(key, model.id)) {
     const members = routeMemberChoices(key, model);
     return members.length > 0
       && members.every(member => canvasGenerationModelSupportsMode(member.key, member.model, mode, options));
@@ -963,8 +963,8 @@ function normalizedCanvasGenerationParams(
   mode: CanvasGenerationDraft['mode'],
   current: JobParams,
 ): JobParams {
-  // 「自动」按组内第一个成员归一（一期就是它出图），图片尺寸 / 质量的可选范围取成员交集。
-  if (isAutoProvider(key)) {
+  // 「自动」与局域网 Atelier 按第一个成员归一，图片尺寸 / 质量的可选范围取成员交集。
+  if (hasChannelMembers(key, model.id)) {
     const channel = routeChannel(key, model);
     if (mode !== 'image') return normalizedCanvasGenerationParams(channel.key, channel.model, mode, current);
     return normalizeCanvasImageParams(

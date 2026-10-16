@@ -1425,7 +1425,8 @@ def _route_payload(route: model_routes.ModelRoute) -> dict:
         "id": route.id, "name": route.name, "modality": route.modality,
         "members": [
             {"alias": m.alias, "provider": m.provider, "base_url": m.base_url,
-             "model_id": m.model_id, "name": m.name, "protocol": m.protocol}
+             "model_id": m.model_id, "name": m.name, "protocol": m.protocol,
+             **({"via": list(m.via)} if m.via else {})}
             for m in route.members
         ],
     }

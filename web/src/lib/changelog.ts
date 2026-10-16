@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.99.0',
+    date: '2026-10-16',
+    headline: '局域网共享：同事用一台机器的 KEY 出图',
+    changes: [
+      { kind: 'feat', text: '设置新增「局域网共享」：开启后给每位同事发一把网关密钥，可设每日张数上限，按人看今日与本月用量；撤销立即失效。' },
+      { kind: 'feat', text: 'API 密钥新增「局域网 Atelier」：填网关地址和网关密钥，连接后自动带回网关的模型；排在每个模型的第一位，网关连不上、密钥失效或额度用完时自动改用本机 KEY。' },
+      { kind: 'feat', text: '网关那边换了供应商时，卡片提示「网关：…已改用…」；一期支持图片生成（含参考图），局部修改、扩图和视频仍走本机 KEY。' },
+    ],
+  },
+  {
     version: '5.98.7',
     date: '2026-10-16',
     headline: '编辑支持 Seedream 5.0 pro',

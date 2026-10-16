@@ -9,6 +9,8 @@ import type { ModelRoute, ModelRouteMember } from '@/api/models';
 import { imageControlCaps, type ImageControlCaps } from '@/lib/imageControlCaps';
 
 export const AUTO_PROVIDER_ALIAS = '@auto';
+/** 局域网 Atelier（ADR-0025）：模型带网关那边的成员快照 `via`，能力与估价按它算。 */
+export const GATEWAY_PROVIDER = 'atelier';
 
 export function isAutoProvider(key?: Pick<KeyView, 'alias'> | null): boolean {
   return key?.alias === AUTO_PROVIDER_ALIAS;
@@ -41,21 +43,63 @@ export function withAutoProvider(keys: KeyView[], routes: ModelRoute[]): KeyView
   return auto ? [auto, ...keys] : keys;
 }
 
-/** 选择落到的实际渠道：「自动」取组内第一个成员对应的 KEY 与模型 id，其余原样返回。 */
+/** 选择背后的成员：「自动」是路由组成员；局域网 Atelier 是它自己（带网关成员快照）；其余没有。 */
+export function selectionMembers(key: KeyView | undefined, model: KeyModel | undefined): ModelRouteMember[] | undefined {
+  if (!key || !model) return undefined;
+  if (isAutoProvider(key)) return model.members;
+  if (key.provider === GATEWAY_PROVIDER && model.via?.length) {
+    return [{
+      alias: key.alias, provider: key.provider, base_url: key.base_url, model_id: model.id,
+      name: model.name, protocol: model.protocol ?? null, via: model.via,
+    }];
+  }
+  return undefined;
+}
+
+/** 成员实际出图的渠道：局域网 Atelier 取网关那边第一个成员。 */
+function memberChannel(member: ModelRouteMember): ModelRouteMember {
+  return member.provider === GATEWAY_PROVIDER && member.via?.length ? member.via[0] : member;
+}
+
+/** 成员的能力：局域网 Atelier 取网关那边全部成员的交集。 */
+function memberCaps(member: ModelRouteMember): ImageControlCaps {
+  if (member.provider === GATEWAY_PROVIDER && member.via?.length) {
+    return intersectImageCaps(member.via.map(item => imageControlCaps(item.model_id, item.provider, item.base_url)));
+  }
+  return imageControlCaps(member.model_id, member.provider, member.base_url);
+}
+
+/** 选择落到的实际渠道：「自动」取组内第一个成员；局域网 Atelier 再取网关那边第一个成员；其余原样返回。
+ *  只用于能力、尺寸、估价判断，提交仍用原来的别名与模型 id。 */
 export function resolveChannel(
   keys: KeyView[], key: KeyView | undefined, modelId: string,
 ): { key: KeyView | undefined; modelId: string } {
-  if (!isAutoProvider(key)) return { key, modelId };
-  const member = key?.models.find(model => model.id === modelId)?.members?.[0];
-  if (!member) return { key: undefined, modelId };
-  return { key: keys.find(item => item.alias === member.alias), modelId: member.model_id };
+  const members = selectionMembers(key, key?.models.find(model => model.id === modelId));
+  if (!members) return { key, modelId };
+  const first = members[0];
+  const real = first && (keys.find(item => item.alias === first.alias) ?? (first.alias === key?.alias ? key : undefined));
+  if (!first || !real) return { key: undefined, modelId };
+  const channel = memberChannel(first);
+  if (channel === first) return { key: real, modelId: first.model_id };
+  return {
+    key: {
+      ...real, provider: channel.provider, base_url: channel.base_url,
+      models: [{ id: channel.model_id, name: channel.name, modality: 'image', protocol: channel.protocol }],
+    },
+    modelId: channel.model_id,
+  };
 }
 
-/** 「自动」时取全部成员能力的交集；其余就是该 KEY 自己的能力。 */
+/** 有成员时取全部成员能力的交集（「自动」、局域网 Atelier）；其余就是该 KEY 自己的能力。 */
 export function selectionImageCaps(key: KeyView | undefined, modelId: string): ImageControlCaps {
-  const members = isAutoProvider(key) ? key?.models.find(model => model.id === modelId)?.members : undefined;
+  const members = selectionMembers(key, key?.models.find(model => model.id === modelId));
   if (!members?.length) return imageControlCaps(modelId, key?.provider, key?.base_url);
-  return intersectImageCaps(members.map(member => imageControlCaps(member.model_id, member.provider, member.base_url)));
+  return intersectImageCaps(members.map(memberCaps));
+}
+
+/** 这个选择的能力需要按成员算（「自动」或局域网 Atelier）。 */
+export function hasChannelMembers(key: KeyView | undefined, modelId: string): boolean {
+  return Boolean(selectionMembers(key, key?.models.find(model => model.id === modelId))?.length);
 }
 
 export function intersectImageCaps(all: ImageControlCaps[]): ImageControlCaps {
@@ -103,14 +147,16 @@ export function providerForAlias<K extends Pick<KeyView, 'alias'>>(
 /** 一个选择实际落到的渠道：「自动」取组内第一个成员（只带 provider / base_url / 模型 id / 协议），其余原样。
  *  参数归一、能力判断按它算；不需要真实 KEY 列表。 */
 export function routeChannel(key: KeyView, model: KeyModel): { key: KeyView; model: KeyModel } {
-  const member = isAutoProvider(key) ? model.members?.[0] : undefined;
+  const member = selectionMembers(key, model)?.[0];
   if (!member) return { key, model };
-  return memberChoice(key, model, member);
+  return memberChoice(key, model, memberChannel(member));
 }
 
-/** 「自动」模型的全部成员，各自包装成一个 KEY + 模型。 */
+/** 「自动」或局域网 Atelier 模型背后的全部实际渠道（网关成员展开成网关那边的成员），各自包装成一个 KEY + 模型。 */
 export function routeMemberChoices(key: KeyView, model: KeyModel): Array<{ key: KeyView; model: KeyModel }> {
-  return (model.members ?? []).map(member => memberChoice(key, model, member));
+  return (selectionMembers(key, model) ?? []).flatMap(member => (
+    member.provider === GATEWAY_PROVIDER && member.via?.length ? member.via : [member]
+  )).map(member => memberChoice(key, model, member));
 }
 
 function memberChoice(auto: KeyView, model: KeyModel, member: ModelRouteMember) {

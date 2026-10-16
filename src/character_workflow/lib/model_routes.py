@@ -47,6 +47,8 @@ class RouteMember:
     model_id: str
     name: str
     protocol: str | None
+    # 成员是局域网 Atelier 时：网关那边的成员快照（能力、估价按它算）。
+    via: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,7 @@ def _routes(database: KeysDB) -> list[ModelRoute]:
             members.append(RouteMember(
                 alias=key.alias, provider=key.provider, base_url=key.base_url,
                 model_id=model.id, name=model.name or model.id, protocol=model.protocol,
+                via=tuple(item.model_dump() for item in model.via or ()),
             ))
     return [
         ModelRoute(

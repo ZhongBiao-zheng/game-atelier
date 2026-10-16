@@ -8,6 +8,7 @@ import { KeysPage } from './Keys';
 import { ProfileSection } from './ProfileSection';
 import { TeamLibrariesSection } from './TeamLibrariesSection';
 import { AgentSection } from './AgentSection';
+import { LanSharingSection } from './LanSharingSection';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { Switch } from '@/components/ui/switch';
 
@@ -19,6 +20,7 @@ const SECTIONS = [
   { id: 'settings-profile', label: '显示名' },
   { id: 'settings-team', label: '团队库' },
   { id: 'settings-keys', label: 'API 密钥' },
+  { id: 'settings-lan', label: '局域网共享' },
   { id: 'settings-agent', label: 'Agent 连接' },
 ];
 const navItemClass = 'rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
@@ -200,6 +202,10 @@ export function SettingsPage() {
         <div className="min-w-0">
           <KeysPage key={keysVersion} embedded />
         </div>
+      </section>
+
+      <section id="settings-lan" className={`${sectionClass} border-t border-border py-10`}>
+        <LanSharingSection />
       </section>
 
       <section id="settings-agent" className={`${sectionClass} border-t border-border py-10`}>

@@ -70,8 +70,7 @@ import {
 import { formatCanvasBytes, formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
 import { CANVAS_UPSCALE_TARGETS, IMAGE_TOOLBAR_INLINE_LIMIT, orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
 import { isUploadedImageMaterialNode } from '@/components/canvas/canvasNodePanelInteraction';
-import { imageControlCaps } from '@/lib/imageControlCaps';
-import { isAutoProvider, providerForAlias, routeChannel, selectionImageCaps, storedAlias } from '@/lib/modelRoutes';
+import { hasChannelMembers, providerForAlias, routeChannel, selectionImageCaps, storedAlias } from '@/lib/modelRoutes';
 import { VideoControls } from '@/components/studio/VideoControls';
 import {
   videoReferenceLimitLabel,
@@ -1953,13 +1952,7 @@ export function CanvasGenerationComposer({
   const channelModelId = channel?.model.id ?? draft.model;
   const channelProtocol = channel?.model.protocol;
   const imageCaps = draft.mode === 'image' && selectedModel
-    ? isAutoProvider(selectedKey)
-      ? selectionImageCaps(selectedKey, draft.model)
-      : imageControlCaps(
-          draft.model,
-          selectedKey?.provider,
-          selectedKey?.base_url,
-        )
+    ? selectionImageCaps(selectedKey, draft.model)
     : null;
   // 两层都要 memo：canvasVideoEditCaps 每次调用都返回新对象，展开一层又造一个新对象。
   // 下面那条纠偏 effect 依赖 videoCaps，不 memo 的话它每一次 render 都重跑，而它会 commit
@@ -2279,7 +2272,7 @@ export function CanvasGenerationComposer({
             const nextImageParams = draft.mode === 'image'
               ? normalizeCanvasImageParams(
                   model.id, key.provider, draft.params, key.base_url,
-                  isAutoProvider(chosenKey) ? selectionImageCaps(chosenKey, chosenModel.id) : undefined,
+                  hasChannelMembers(chosenKey, chosenModel.id) ? selectionImageCaps(chosenKey, chosenModel.id) : undefined,
                 ) : null;
             if (draft.mode === 'image') {
               const next = nextImageParams!;
@@ -2362,7 +2355,7 @@ export function CanvasGenerationComposer({
                   target?.key.provider,
                   merged,
                   target?.key.base_url,
-                  currentKey && currentModel && isAutoProvider(currentKey)
+                  currentKey && currentModel && hasChannelMembers(currentKey, currentModel.id)
                     ? selectionImageCaps(currentKey, currentModel.id) : undefined,
                 ),
               };

@@ -49,6 +49,8 @@ export interface KeyModel {
   input_modalities?: ModelInputModality[];
   /** 只出现在「自动」虚拟供应商上：该模型路由组的成员，按出图顺序。 */
   members?: ModelRouteMember[];
+  /** 只出现在局域网 Atelier 供应商上：网关那边该模型的成员快照，能力取交集、估价取第一个。 */
+  via?: ModelRouteMember[];
 }
 
 /** 模型分类的统一判定：模型级标注优先，未标注按 key 级 modalities 兜底。 */

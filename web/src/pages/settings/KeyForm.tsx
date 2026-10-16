@@ -2,8 +2,9 @@ import { useRef, useState } from 'react';
 import { ArrowLeft, Eye, EyeOff, X } from 'lucide-react';
 import { createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelInputModality, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
 import { SwapIcon } from '@/components/ui/swap-icon';
+import { checkGateway } from '@/api/gateway';
 
-type ProviderKind = 'official' | 'third_party' | 'custom';
+type ProviderKind = 'official' | 'third_party' | 'custom' | 'lan';
 type ApiModality = 'image' | 'video' | 'audio' | 'llm';
 
 interface ProviderPreset {
@@ -25,18 +26,22 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
   { value: 'openrouter', label: 'OpenRouter', kind: 'official', modalities: ['image', 'video'], homepageUrl: 'https://openrouter.ai', docsUrl: 'https://openrouter.ai/docs/quickstart', apiKeyUrl: 'https://openrouter.ai/settings/keys', defaultBaseUrl: 'https://openrouter.ai/api/v1', defaultModels: [{ name: 'GPT Image 2', id: 'openai/gpt-image-2', modality: 'image' }, { name: 'Google: Veo 3.1', id: 'google/veo-3.1', modality: 'video' }] },
   { value: 'evolink', label: 'EvoLink', kind: 'third_party', modalities: ['image'], homepageUrl: 'https://evolink.ai', docsUrl: 'https://docs.evolink.ai', defaultBaseUrl: 'https://api.evolink.ai/v1', defaultModels: [{ name: 'Midjourney V8.2', id: 'mj-v8.2', modality: 'image', protocol: 'evolink' }] },
   { value: 'custom', label: '自定义', kind: 'custom', modalities: ['image'], defaultBaseUrl: '', defaultModels: [{ name: '', id: '' }] },
+  // 局域网里另一台开了「局域网共享」的 Atelier（ADR-0025）：模型由网关决定，连接后自动带回。
+  { value: 'atelier', label: '局域网 Atelier', kind: 'lan', modalities: ['image'], defaultBaseUrl: '', defaultModels: [] },
 ];
+const GATEWAY_PROVIDER = 'atelier';
 
 const KIND_LABELS: Record<ProviderKind, string> = {
   official: '官方',
   third_party: '第三方',
   custom: '自定义',
+  lan: '局域网',
 };
 
 const providerByValue = (value: string) =>
   PROVIDER_PRESETS.find((preset) => preset.value === value) ?? PROVIDER_PRESETS[0];
 
-const usesNamedAlias = (provider: string) => provider === 'custom';
+const usesNamedAlias = (provider: string) => provider === 'custom' || provider === GATEWAY_PROVIDER;
 
 const fieldClass = 'w-full rounded-md border border-input bg-background/35 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50';
 const capLabelClass = 'block text-xs text-muted-foreground mb-2';
@@ -109,6 +114,33 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
   const [keyRevealed, setKeyRevealed] = useState(mode !== 'edit');
   const editing = mode === 'edit';
   const preset = providerByValue(provider);
+  const isGateway = provider === GATEWAY_PROVIDER;
+  // 网关供应商的模型只来自网关（带 via 成员快照），不手填。
+  const [gatewayModels, setGatewayModels] = useState<KeyModel[]>(
+    initial?.provider === GATEWAY_PROVIDER ? initial.models ?? [] : [],
+  );
+  const [gatewayInfo, setGatewayInfo] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [gatewayError, setGatewayError] = useState<string | null>(null);
+
+  const connectGateway = async () => {
+    setConnecting(true);
+    setGatewayError(null);
+    try {
+      const keyChanged = accessKey.trim() && accessKey !== initial?.access_key;
+      const result = await checkGateway({
+        base_url: baseUrl.trim(),
+        ...(keyChanged ? { access_key: accessKey.trim() } : {}),
+        ...(editing && initial?.alias ? { alias: initial.alias } : {}),
+      });
+      setGatewayModels(result.models);
+      setGatewayInfo(`${result.info.name} · ${result.info.version}`);
+    } catch (e) {
+      setGatewayError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setConnecting(false);
+    }
+  };
   const isLocked = (model: EditableModel) => model._locked === true;
 
   const changeProvider = (nextProvider: string) => {
@@ -124,6 +156,9 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     setPreview(null);
     setModalityPick({});
     setFetchError(null);
+    setGatewayModels([]);
+    setGatewayInfo(null);
+    setGatewayError(null);
   };
 
   // 模型映射：服务端代理拉上游 /models（CORS + 编辑态前端只有掩码密钥，见 models-preview）。
@@ -236,7 +271,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     setSaving(true);
     setError(null);
     try {
-      const cleanModels = models
+      const cleanModels = isGateway ? gatewayModels : models
         .map((model) => {
           const modality = model.modality ?? 'image' as ModelModality;
           const inputModalities = modality === 'text'
@@ -253,7 +288,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
         .filter((model) => model.name && model.id);
       // key 级 modalities 由模型标注派生；存量契约用 llm 表示文本生成能力。
       const derivedModalities = Array.from(new Set([
-        ...cleanModels.map((m) => m.modality === 'text' ? 'llm' : m.modality),
+        ...cleanModels.map((m) => m.modality === 'text' ? 'llm' : m.modality ?? 'image'),
       ]));
       const payload: KeyCreatePayload = {
         alias: usesNamedAlias(provider) ? alias.trim() : provider,
@@ -301,6 +336,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     (editing || accessKey.trim())
     && (!usesNamedAlias(provider) || alias.trim())
     && (provider !== 'custom' || baseUrl.trim())
+    && (!isGateway || (baseUrl.trim() && gatewayModels.length > 0))
     && !saving,
   );
 
@@ -651,8 +687,34 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                   </div>
                 </>
               )}
+              {isGateway && (
+                <>
+                  <div>
+                    <label htmlFor="key-gateway-name" className={capLabelClass}>名称</label>
+                    <input
+                      id="key-gateway-name"
+                      value={alias}
+                      onChange={(e) => setAlias(e.target.value)}
+                      className={fieldClass}
+                      placeholder="例如：美术组网关"
+                      readOnly={editing}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="key-gateway-url" className={capLabelClass}>网关地址</label>
+                    <input
+                      id="key-gateway-url"
+                      value={baseUrl}
+                      onChange={(e) => { setBaseUrl(e.target.value); setGatewayInfo(null); }}
+                      className={`${fieldClass} font-mono`}
+                      placeholder="http://192.168.1.20:5180"
+                      autoComplete="off"
+                    />
+                  </div>
+                </>
+              )}
               <div>
-                <label htmlFor="key-access" className={capLabelClass}>API Key</label>
+                <label htmlFor="key-access" className={capLabelClass}>{isGateway ? '网关密钥' : 'API Key'}</label>
                 <div className="relative">
                   <input
                     id="key-access"
@@ -660,7 +722,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                     value={accessKey}
                     onChange={(e) => { setAccessKey(e.target.value); setKeyRevealed(true); }}
                     className={`${fieldClass} pr-10 font-mono`}
-                    placeholder={editing ? '留空或保持原值表示不修改密钥' : '粘贴 API Key，例如 sk-...'}
+                    placeholder={editing ? '留空或保持原值表示不修改密钥' : isGateway ? '粘贴网关密钥，atg_...' : '粘贴 API Key，例如 sk-...'}
                     autoComplete="off"
                   />
                   <button
@@ -674,6 +736,36 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                   </button>
                 </div>
               </div>
+              {isGateway ? (
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className={`${capLabelClass} mb-0`}>模型</span>
+                    <button
+                      type="button"
+                      onClick={() => void connectGateway()}
+                      disabled={!baseUrl.trim() || (!editing && !accessKey.trim()) || connecting}
+                      className={ghostButtonClass}
+                    >
+                      {connecting ? '连接中...' : gatewayModels.length ? '重新同步' : '连接网关'}
+                    </button>
+                  </div>
+                  {gatewayInfo && (
+                    <p role="status" className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
+                      <span className="size-1.5 rounded-full bg-[color:var(--status-done)]" aria-hidden />
+                      {gatewayInfo}
+                    </p>
+                  )}
+                  {gatewayError && <p role="alert" className="mb-2 text-sm text-destructive">{gatewayError}</p>}
+                  <ul aria-label="网关模型" className="space-y-1">
+                    {gatewayModels.map((model) => (
+                      <li key={model.id} className="flex items-baseline justify-between gap-3 rounded-md border border-border px-3 py-2">
+                        <span className="truncate text-sm text-foreground">{model.name}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">{(model.via ?? []).map((item) => item.alias).join(' · ')}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
               <div>
                 <div className="mb-2 flex items-center justify-between">
                   <span className={`${capLabelClass} mb-0`}>模型</span>
@@ -813,6 +905,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                   ))}
                 </div>
               </div>
+              )}
             </div>
             <div className="flex items-center gap-3 border-t border-border px-6 py-4">
               <button

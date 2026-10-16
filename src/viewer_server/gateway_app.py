@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import socket
 import threading
@@ -140,23 +141,27 @@ def create_gateway_app() -> FastAPI:
     return app
 
 
+_LAN_NETWORKS = tuple(ipaddress.ip_network(net) for net in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
+
+
 def lan_addresses() -> list[str]:
-    """本机在局域网里的 IPv4 地址（不发包，只借路由表选出口）。"""
-    addresses: list[str] = []
+    """本机在局域网里的 IPv4 地址，只留 10/8、172.16/12、192.168/16。
+
+    路由表的出口不可靠：开着 Clash TUN 时出口是 198.18.0.1 这类虚拟网卡，同事连不上。
+    """
+    candidates: list[str] = []
+    try:
+        candidates += [info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)]
+    except OSError:
+        pass
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
-            probe.connect(("10.255.255.255", 1))
-            addresses.append(probe.getsockname()[0])
+            probe.connect(("10.255.255.255", 1))  # 不发包，只借路由表选出口
+            candidates.append(probe.getsockname()[0])
     except OSError:
         pass
-    try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            address = info[4][0]
-            if not address.startswith("127.") and address not in addresses:
-                addresses.append(address)
-    except OSError:
-        pass
-    return addresses
+    return [address for address in dict.fromkeys(candidates)
+            if any(ipaddress.ip_address(address) in network for network in _LAN_NETWORKS)]
 
 
 class GatewayServer:
