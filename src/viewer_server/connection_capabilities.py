@@ -66,6 +66,8 @@ PATCH /api/keys/{alias}
 DELETE /api/keys/{alias}
 GET /api/keys/{alias}/reveal
 POST /api/keys/models-preview
+GET /api/models
+PUT /api/models/order
 GET /api/gallery/recent
 GET /api/gallery/screens
 GET /api/gallery/hidden
@@ -144,7 +146,8 @@ GET /api/canvas/projects/{project_id}/jobs
 POST /api/canvas/projects/{project_id}/runs/reverse-prompt
 POST /api/canvas/projects/{project_id}/runs/angle
 POST /api/canvas/projects/{project_id}/runs/upscale
-POST /api/canvas/projects/{project_id}/runs/mask-edit
+POST /api/canvas/projects/{project_id}/image-edits
+POST /api/canvas/projects/{project_id}/runs/image-edit
 POST /api/canvas/projects/{project_id}/runs/layer-decomposition
 GET /api/canvas/projects/{project_id}/batch-runs
 POST /api/canvas/projects/{project_id}/batch-runs/prepare
@@ -154,6 +157,7 @@ POST /api/canvas/projects/{project_id}/batch-runs/{batch_id}/cancel
 POST /api/canvas/projects/{project_id}/runs/{run_id}/reverse-prompt-config
 POST /api/canvas/projects/{project_id}/runs
 POST /api/canvas/projects/{project_id}/runs/{run_id}/cancel
+POST /api/canvas/projects/{project_id}/runs/{run_id}/resume-mj-edit
 POST /api/canvas/projects/{project_id}/runs/{run_id}/candidates/{candidate_id}/dismiss
 GET /api/projects/{project_id}/studio-archive-targets
 POST /api/studio/jobs/{job_id}/archive
@@ -169,7 +173,7 @@ GET /api/workshop/requests/{request_id}/references/{media_id}
 
 LOCAL_MANAGEMENT = frozenset({
     "/api/config", "/api/keys", "/api/keys/{alias}", "/api/keys/{alias}/reveal",
-    "/api/keys/models-preview", "/api/folder-picker", "/api/onboarding/status",
+    "/api/keys/models-preview", "/api/models/order", "/api/folder-picker", "/api/onboarding/status",
     "/api/onboarding/data-root",
     # 挂载团队库 = 往本机任意目录写清单并整棵扫描，同 folder-picker 只给本机页面。
     "/api/team-libraries",

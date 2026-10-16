@@ -42,7 +42,8 @@ from character_workflow.lib.jobs import (
     update_job_status,
     write_job_under_lock,
 )
-from character_workflow.lib.keys import KeySpec, ModelSpec, read_keys_db
+from character_workflow.lib.keys import KeySpec, ModelSpec, model_modality, read_keys_db
+from character_workflow.lib.model_routes import NoSuchRouteError, resolve_auto
 from character_workflow.lib.prompt_variables import resolve_prompt_variables
 from character_workflow.lib.schemas import (
     AssetSlot,
@@ -50,12 +51,16 @@ from character_workflow.lib.schemas import (
     CanvasBatchJobOrigin,
     CanvasContentVersion,
     CanvasDocument,
+    CanvasGenerationModelSelection,
     CanvasGenerationDraft,
     CanvasGenerationSnapshot,
     CanvasAudioNode,
     CanvasContentNodeData,
     CanvasImageNode,
+    CanvasImageEditNode,
+    CanvasImageEditOptions,
     CanvasInputConnection,
+    CanvasMaterialConnection,
     CanvasJobContext,
     CanvasJobOutputOrigin,
     CanvasLayerDecompositionOrigin,
@@ -313,7 +318,7 @@ def _remove_transaction_artifacts(
 def _document_has_run(document: CanvasDocument, run_id: str, job_id: str) -> bool:
     # active_run_id 只覆盖进行中的 run；已 finalize 的靠 content_versions 的来源 job 判。
     for node in document.nodes:
-        if node.type in {"text", "image", "video", "audio", "layer_stack"}:
+        if node.type in {"text", "image", "video", "audio", "layer_stack", "image_edit"}:
             if node.data.active_run_id == run_id:
                 return True
     return any(
@@ -443,17 +448,18 @@ def recover_canvas_transactions_unlocked(project_id: str) -> None:
             raise RuntimeError(f"invalid canvas transaction {path.name}") from error
 
 
-def _model_modality(model: ModelSpec, key: KeySpec) -> str:
-    if model.modality is not None:
-        return model.modality
-    modalities = set(key.modalities)
-    if modalities == {"video"}:
-        return "video"
-    if modalities == {"audio"}:
-        return "audio"
-    if modalities == {"llm"}:
-        return "text"
-    return "image"
+def _selected_key_and_model(
+    selection: CanvasGenerationModelSelection, modality: str,
+) -> tuple[KeySpec, ModelSpec] | None:
+    """偏好里的模型选择：指定厂商按 alias 找；alias 为空即「自动」，按路由解析。"""
+    if selection.alias is None:
+        try:
+            return resolve_auto(modality, selection.model)
+        except NoSuchRouteError:
+            return None
+    key = next((item for item in read_keys_db().keys if item.alias == selection.alias), None)
+    model = next((item for item in key.models if item.id == selection.model), None) if key else None
+    return (key, model) if key and model else None
 
 
 def _keys_default_first() -> list[KeySpec]:
@@ -480,7 +486,7 @@ def _resolve_reverse_prompt_model() -> tuple[KeySpec, ModelSpec]:
     for key in _keys_default_first():
         for model in key.models:
             if (
-                _model_modality(model, key) == "text"
+                model_modality(model, key) == "text"
                 and "image" in model.input_modalities
                 and _supports_openai_text(key, model)
             ):
@@ -499,7 +505,7 @@ def _resolve_layer_decomposition_model(alias: str, model_id: str) -> tuple[KeySp
     if (
         key
         and model
-        and _model_modality(model, key) == "image"
+        and model_modality(model, key) == "image"
         and supports_layer_decomposition(key, model.id)
     ):
         return key, model
@@ -512,8 +518,10 @@ def _resolve_layer_decomposition_model(alias: str, model_id: str) -> tuple[KeySp
 def _supports_canvas_image_generation(key: KeySpec, model: ModelSpec) -> bool:
     from character_workflow.lib.callers.openai_image import image_family, resolve_image_protocol
 
-    if _model_modality(model, key) != "image" or key.provider == "nano_banana":
+    if model_modality(model, key) != "image" or key.provider == "nano_banana":
         return False
+    if key.provider == "evolink":
+        return model.id == "mj-v8.2" and model.protocol in {None, "evolink"}
     if image_family(model.id) == "midjourney" or key.provider == "openrouter":
         return True
     if key.provider not in {"openai", "midjourney", "seedream", "tokendance", "custom"}:
@@ -548,6 +556,8 @@ def _normalized_image_preference_params(
 
     if params.get("size_mode") in {"auto", "custom"}:
         draft_params = normalize_image_size_params(key, model.id, params)
+        if key.provider == "evolink":
+            return JobParams.model_validate({**draft_params, "n": 4})
         for field in ("ratio", "resolution", "custom_size"):
             if params.get(field) is not None and draft_params.get("size_mode"):
                 draft_params[field] = params[field]
@@ -602,19 +612,10 @@ def _resolve_default_image_model() -> tuple[KeySpec, ModelSpec, JobParams]:
             "画布生成偏好文件损坏，请先在画布中重新保存生成偏好。",
         ) from error
     if preference.selection is not None:
-        for key in keys:
-            if key.alias != preference.selection.alias:
-                continue
-            for model in key.models:
-                if (
-                    model.id == preference.selection.model
-                    and _supports_canvas_image_generation(key, model)
-                ):
-                    return key, model, _normalized_image_preference_params(
-                        key,
-                        model,
-                        preference.params,
-                    )
+        selected = _selected_key_and_model(preference.selection, "image")
+        if selected is not None and _supports_canvas_image_generation(*selected):
+            key, model = selected
+            return key, model, _normalized_image_preference_params(key, model, preference.params)
     for key in keys:
         for model in key.models:
             if _supports_canvas_image_generation(key, model):
@@ -632,7 +633,7 @@ def _resolve_default_image_edit_model() -> tuple[KeySpec, ModelSpec]:
     for key in _keys_default_first():
         for model in key.models:
             if (
-                _model_modality(model, key) == "image"
+                model_modality(model, key) == "image"
                 and max_reference_images(model.id) >= 1
             ):
                 return key, model
@@ -645,17 +646,20 @@ def _resolve_default_image_edit_model() -> tuple[KeySpec, ModelSpec]:
 def _resolve_key_and_model(
     draft: CanvasGenerationDraft,
 ) -> tuple[KeySpec, ModelSpec, JobKind]:
-    database = read_keys_db()
-    alias = draft.alias or database.default_alias
-    if not alias:
-        raise ValueError("请先选择生成密钥")
-    key = next((item for item in database.keys if item.alias == alias), None)
-    if key is None:
-        raise ValueError(f"找不到生成密钥 {alias}")
-    model = next((item for item in key.models if item.id == draft.model), None)
-    if model is None:
-        raise ValueError("所选模型不属于当前密钥")
-    kind = JobKind(_model_modality(model, key))
+    if draft.alias is None:
+        # 不指定厂商 =「自动」：draft.model 是路由 id，按组内顺序解析出实际 KEY 与模型。
+        try:
+            key, model = resolve_auto(draft.mode, draft.model)
+        except NoSuchRouteError as error:
+            raise ValueError(str(error)) from None
+    else:
+        key = next((item for item in read_keys_db().keys if item.alias == draft.alias), None)
+        if key is None:
+            raise ValueError(f"找不到生成密钥 {draft.alias}")
+        model = next((item for item in key.models if item.id == draft.model), None)
+        if model is None:
+            raise ValueError("所选模型不属于当前密钥")
+    kind = JobKind(model_modality(model, key))
     if kind.value != draft.mode:
         raise ValueError("所选模型与节点生成类型不匹配")
     return key, model, kind
@@ -1082,11 +1086,13 @@ def _normalized_params(
             and draft.params.watermark is not None
         ):
             normalized["watermark"] = draft.params.watermark
-    return normalized, JobParams(**normalized), effective_count
+    # 「自动」记下路由 id，运行时遇到确定没执行的失败才能换下一家；不进快照 normalized_params。
+    route = {"route_id": draft.model} if draft.alias is None else {}
+    return normalized, JobParams(**normalized, **route), effective_count
 
 
 def _with_active_run(node: CanvasNode, run_id: str) -> CanvasNode:
-    if node.type not in {"text", "image", "video", "audio", "layer_stack"}:
+    if node.type not in {"text", "image", "video", "audio", "layer_stack", "image_edit"}:
         return node
     return node.model_copy(update={
         "data": node.data.model_copy(update={"active_run_id": run_id})
@@ -1229,7 +1235,8 @@ def _commit_frozen_run(
     timestamp = _now()
     job_id = job_id or new_job_id()
     run_id = run_id or f"run-{secrets.token_hex(12)}"
-    edits_layer = mode == "image" and surface.id in current.layer_material_node_ids()
+    edits_layer = (mode == "image" and transaction_kind != "mask_edit"
+                   and surface.id in current.layer_material_node_ids())
     if edits_layer and canvas_node_has_pending_run(current, surface):
         raise CanvasRunCommandError("canvas_layer_material_busy", "这个图层素材正在生成，请稍后再试。")
     use_surface = (surface.type == "layer_stack" and job_params.layer_decomposition) or edits_layer or (
@@ -1295,7 +1302,8 @@ def _commit_frozen_run(
     )
 
     nodes = [
-        _with_active_run(node, run_id) if node.id == result_id else node
+        _with_active_run(node, run_id)
+        if node.id == result_id or (surface.type == "image_edit" and node.id == surface.id) else node
         for node in current.nodes
     ]
     connections = list(current.connections)
@@ -1304,13 +1312,20 @@ def _commit_frozen_run(
             surface,
             nodes,
             mode,
-            result_draft,
+            # 编辑结果的过程（原图、选区、提示词）留在编辑节点上；复制成普通生成配置会让
+            # 结果节点上的「开始生成」变成不带原图和蒙版的文生图。
+            None if surface.type == "image_edit" else result_draft,
             run_id,
             result_id,
             result_title,
             job_params,
         ))
-    if result_id != surface.id:
+    if result_id != surface.id and surface.type == "image_edit":
+        connections.append(CanvasMaterialConnection(
+            id=f"connection-{secrets.token_hex(12)}", role="material",
+            source_node_id=surface.id, target_node_id=result_id,
+        ))
+    elif result_id != surface.id:
         for item in inputs:
             if item.node_id == result_id:
                 continue  # Dedicated edits expose their fixed source through the Snapshot.
@@ -1683,16 +1698,21 @@ def submit_layer_decomposition_run(
         return job, updated
 
 
-def submit_mask_edit_run(
+def submit_image_edit_run(
     project_id: str,
     surface_node_id: str,
     expected_revision: int,
     requested_count: int,
-    mask_body: bytes,
 ) -> tuple[Job, CanvasDocument]:
-    """Freeze a user mask and its persisted image Draft into one recoverable Run."""
-    from character_workflow.lib.callers.openai_image import supports_image_mask
-    from character_workflow.lib.canvas_masks import normalize_canvas_mask
+    """Freeze only a saved edit configuration into a fresh, recoverable result Run."""
+    import io
+    from PIL import Image
+    from character_workflow.lib.callers.openai_image import _effective_image_protocol
+    from character_workflow.lib.callers.image_edit import edit_transport, expanded_source
+    from character_workflow.lib.canvas_image_edits import edit_size_params
+    from character_workflow.lib.canvas_masks import (
+        normalize_canvas_mask, _source_display_size, NormalizedCanvasMask,
+    )
 
     if requested_count < 1 or requested_count > 4:
         raise CanvasRunCommandError(
@@ -1711,29 +1731,47 @@ def submit_mask_edit_run(
                 (node for node in current.nodes if node.id == surface_node_id),
                 None,
             )
-            if not isinstance(surface, CanvasImageNode) or not surface.data.current_version_id:
+            if not isinstance(surface, CanvasImageEditNode):
                 raise CanvasRunCommandError(
                     "canvas_mask_source_missing",
-                    "请选择一个已有内容的图片节点再进行局部编辑。",
+                    "请先保存图片编辑节点再生成。",
                 )
-            source = current.content_versions.get(surface.data.current_version_id)
+            if surface.data.active_run_id:
+                raise CanvasRunCommandError("canvas_image_edit_busy", "这个编辑节点正在生成，请稍后再试。")
+            options = CanvasImageEditOptions(
+                **surface.data.options.model_dump(), source_version_id=surface.data.source_version_id,
+                reference_node_id=surface.data.reference_node_id,
+            )
+            source = current.content_versions.get(surface.data.source_version_id)
             if not isinstance(source, CanvasMediaVersion) or source.kind != "image":
                 raise CanvasRunCommandError(
                     "canvas_mask_source_missing",
                     "图片节点当前没有可读取的项目内版本。",
                 )
-            draft = _draft_for_node(surface)
+            draft = surface.data.generation_draft
+            if options.source_version_id and options.source_version_id != source.version_id:
+                raise ValueError("源图版本已经变化，请重新打开编辑器")
             if draft is None or draft.mode != "image":
                 raise CanvasRunCommandError(
                     "canvas_mask_draft_missing",
                     "请先填写局部编辑提示词并选择图片模型。",
                 )
+            if draft.alias is None:
+                raise ValueError("图片编辑需要明确选择模型渠道，不能使用自动路由")
+            if not draft.prompt.strip():
+                draft = draft.model_copy(update={"prompt": (
+                    "自然延展画面" if options.mode == "outpaint" else "自然修复选区内容"
+                )})
             key, model, kind = _resolve_key_and_model(draft)
-            if not supports_image_mask(key.provider, model.id, model.protocol):
+            transport = edit_transport(key.provider, model.id, _effective_image_protocol(key, model.id))
+            if not transport:
                 raise CanvasRunCommandError(
                     "canvas_media_capability_missing",
-                    "当前模型不支持局部蒙版编辑，请选择 GPT Image 兼容模型。",
+                    "当前模型不支持图片编辑，请选择兼容模型。",
                 )
+            edit = options.model_dump(exclude_none=True)
+            if transport == "evolink" and surface.data.reference_version_id:
+                raise ValueError("EvoLink MJ 编辑只接受当前源图与选区，不支持额外参考素材")
             normalized, job_params, effective_count = _normalized_params(
                 draft,
                 requested_count,
@@ -1742,7 +1780,7 @@ def submit_mask_edit_run(
             )
             unsupported_mentions = [
                 node_id for node_id in _MENTION.findall(draft.prompt)
-                if node_id != surface.id
+                if node_id not in {surface.id, surface.data.source_node_id}
             ]
             if unsupported_mentions:
                 raise CanvasRunCommandError(
@@ -1752,10 +1790,19 @@ def submit_mask_edit_run(
             inputs = [CanvasSnapshotInput(
                 order=0,
                 source="explicit_source",
-                node_id=surface.id,
+                node_id=surface.data.source_node_id or surface.id,
                 version_id=source.version_id,
                 kind="image",
             )]
+            if surface.data.reference_version_id:
+                reference = current.content_versions.get(surface.data.reference_version_id)
+                if not isinstance(reference, CanvasMediaVersion) or reference.kind != "image":
+                    raise ValueError("替换参考素材不可用")
+                inputs.append(CanvasSnapshotInput(
+                    order=1, source="explicit_source",
+                    node_id=surface.data.reference_node_id or surface.id,
+                    version_id=reference.version_id, kind="image",
+                ))
             _validate_input_capabilities(model, kind, inputs, job_params, key.provider)
             final_prompt = _render_final_prompt(current, draft, inputs)
             media_paths = _input_paths(project_id, current, inputs)
@@ -1764,41 +1811,91 @@ def submit_mask_edit_run(
                     "canvas_mask_source_missing",
                     "源图片文件不存在，无法创建局部编辑。",
                 )
-            normalized_mask = normalize_canvas_mask(
-                Path(media_paths["image"][0]),
-                source,
-                mask_body,
+            source_path = Path(media_paths["image"][0])
+            width, height = _source_display_size(source_path, source)
+            if surface.data.reference_version_id:
+                _source_display_size(Path(media_paths["image"][1]), reference)
+            edit.update(source_width=width, source_height=height)
+            if options.mode == "inpaint":
+                saved_mask = current.content_versions.get(surface.data.mask_version_id)
+                if not isinstance(saved_mask, CanvasMediaVersion):
+                    raise ValueError("请先绘制并保存需要编辑的选区")
+                mask_path = canvas_project_dir(project_id) / saved_mask.path
+                try:
+                    mask_body = mask_path.read_bytes()
+                except OSError as error:
+                    raise ValueError("保存的蒙版文件不可读取，请重新保存选区") from error
+                if hashlib.sha256(mask_body).hexdigest() != saved_mask.sha256:
+                    raise ValueError("保存的蒙版文件已经变化，请重新保存选区")
+                normalized_mask = normalize_canvas_mask(source_path, source, mask_body)
+            else:
+                if options.width is None or options.height is None:
+                    raise ValueError("扩图需要目标宽高")
+                if transport == "evolink":
+                    # Reuse the canvas bounds validation; native MJ receives the unexpanded
+                    # source and source-sized mask, with placement in img_pos.
+                    expanded_source(source_path, edit)
+                    mask = Image.new("L", (width, height), 255)
+                else:
+                    _base, mask = expanded_source(source_path, edit)
+                    width, height = mask.size
+                buffer = io.BytesIO()
+                mask.save(buffer, format="PNG")
+                body = buffer.getvalue()
+                normalized_mask = NormalizedCanvasMask(
+                    body, width, height, hashlib.sha256(body).hexdigest(),
+                )
+            edit.update(source_version_id=source.version_id)
+            if transport != "evolink":
+                size_params = edit_size_params(key, model.id, width, height)
+                job_params = job_params.model_copy(update={
+                    "ratio": None, "resolution": None, **size_params,
+                })
+                for field in ("ratio", "resolution", "custom_size"):
+                    normalized.pop(field, None)
+                normalized.update(size_params)
+            else:
+                effective_count = 4
+                job_params.n = effective_count
+                normalized["n"] = effective_count
+            job_params.image_edit = edit
+            normalized["image_edit"] = edit
+            version_id = (surface.data.mask_version_id if options.mode == "inpaint"
+                          else f"version-{secrets.token_hex(12)}")
+            final_path = mask_path if options.mode == "inpaint" else (
+                canvas_project_dir(project_id) / "uploads" / f"mask-{secrets.token_hex(12)}.png"
             )
-            mask_id = f"mask-{secrets.token_hex(12)}"
-            version_id = f"version-{secrets.token_hex(12)}"
-            staged_path = canvas_project_dir(project_id) / ".runtime" / "run-inputs" / f"{run_id}.png"
-            final_path = canvas_project_dir(project_id) / "uploads" / f"{mask_id}.png"
-            atomic_write_bytes(staged_path, normalized_mask.body)
-            mask_version = CanvasMediaVersion(
-                version_id=version_id,
-                created_at=_now(),
-                sha256=normalized_mask.sha256,
-                origin=CanvasUserMaskOrigin(
-                    kind="user_mask",
-                    source_version_id=source.version_id,
-                ),
-                kind="image",
-                path=final_path.relative_to(canvas_project_dir(project_id)).as_posix(),
-                mime_type="image/png",
-                bytes=len(normalized_mask.body),
-                width=normalized_mask.width,
-                height=normalized_mask.height,
-            )
+            additional_versions = []
+            artifacts = []
+            if options.mode != "inpaint":
+                staged_path = canvas_project_dir(project_id) / ".runtime" / "run-inputs" / f"{run_id}.png"
+                atomic_write_bytes(staged_path, normalized_mask.body)
+                additional_versions.append(CanvasMediaVersion(
+                    version_id=version_id,
+                    created_at=_now(),
+                    sha256=normalized_mask.sha256,
+                    origin=CanvasUserMaskOrigin(
+                        kind="user_mask",
+                        source_version_id=source.version_id,
+                        expanded_canvas=options.mode == "outpaint" and transport != "evolink",
+                    ),
+                    kind="image",
+                    path=final_path.relative_to(canvas_project_dir(project_id)).as_posix(),
+                    mime_type="image/png",
+                    bytes=len(normalized_mask.body),
+                    width=normalized_mask.width,
+                    height=normalized_mask.height,
+                ))
+                artifacts.append({
+                    "staged_path": staged_path.relative_to(canvas_project_dir(project_id)).as_posix(),
+                    "final_path": final_path.relative_to(canvas_project_dir(project_id)).as_posix(),
+                    "bytes": len(normalized_mask.body),
+                    "sha256": normalized_mask.sha256,
+                })
             job_params.reference_images = media_paths["image"]
             job_params.reference_videos = None
             job_params.reference_audios = None
             job_params.mask_image = str(final_path.resolve())
-            artifact = {
-                "staged_path": staged_path.relative_to(canvas_project_dir(project_id)).as_posix(),
-                "final_path": final_path.relative_to(canvas_project_dir(project_id)).as_posix(),
-                "bytes": len(normalized_mask.body),
-                "sha256": normalized_mask.sha256,
-            }
             return _commit_frozen_run(
                 project_id,
                 current,
@@ -1813,14 +1910,14 @@ def submit_mask_edit_run(
                 job_params=job_params,
                 inputs=inputs,
                 requested_count=effective_count,
-                result_title="局部编辑",
+                result_title={"inpaint": "局部修改", "outpaint": "扩图"}[options.mode],
                 result_draft=draft,
                 allow_surface_reuse=False,
                 transaction_kind="mask_edit",
                 mask_version_id=version_id,
                 run_id=run_id,
-                additional_versions=[mask_version],
-                artifacts=[artifact],
+                additional_versions=additional_versions,
+                artifacts=artifacts,
             )
     except BaseException:
         if staged_path is not None and not _transaction_path(project_id, run_id).exists():
@@ -2036,12 +2133,9 @@ def _resolve_upscale_model(target: str) -> tuple[KeySpec, ModelSpec, str | None,
         ) from error
     keys = _keys_default_first()
     if tier.selection is not None:
-        for key in keys:
-            if key.alias != tier.selection.alias:
-                continue
-            for model in key.models:
-                if model.id == tier.selection.model and _upscale_model_eligible(key, model):
-                    return key, model, tier.quality, tier.prompt
+        selected = _selected_key_and_model(tier.selection, "image")
+        if selected is not None and _upscale_model_eligible(*selected):
+            return *selected, tier.quality, tier.prompt
         raise CanvasRunCommandError(
             "canvas_upscale_model_stale",
             f"已保存的 {target} 档 AI高清模型不再可用，请在生成偏好里重新选择。",
@@ -2314,6 +2408,66 @@ def _job_for_run(project_id: str, run_id: str) -> Job:
     return job
 
 
+def _resumed_edit_nodes(current, context):
+    """Resume the old result without replacing a newly saved configuration."""
+    nodes = []
+    for node in current.nodes:
+        if isinstance(node, CanvasImageEditNode) and node.id == context.snapshot.surface_node_id:
+            if node.data.active_run_id not in {None, context.run_id}:
+                raise ValueError("编辑节点正在执行另一任务，请稍后再续查")
+            node = _with_active_run(node, context.run_id)
+        elif node.id == context.result_node_id:
+            node = _with_active_run(node, context.run_id)
+        nodes.append(node)
+    return nodes
+
+
+def _clear_edit_run(node, context):
+    if (isinstance(node, CanvasImageEditNode) and node.id == context.snapshot.surface_node_id
+            and node.data.active_run_id == context.run_id):
+        return node.model_copy(update={"data": node.data.model_copy(update={"active_run_id": None})})
+    return node
+
+
+def resume_mj_edit_run(project_id: str, run_id: str, expected_revision: int) -> tuple[Job, CanvasDocument]:
+    """Resume polling a paused EvoLink MJ edit; never clone or create a provider order."""
+    from .canvas_image_edits import has_resumable_mj_task
+
+    original = _job_for_run(project_id, run_id)
+    with file_lock(canvas_project_lock_path(project_id)):
+        recover_canvas_transactions_unlocked(project_id)
+        current = _read_document_unlocked(project_id)
+        if current.revision != expected_revision:
+            raise RuntimeError(f"revision_conflict:{current.revision}")
+        with job_lock(original.job_id):
+            job = read_job(original.job_id)
+            context = job.canvas_run
+            native_state = job.params.evolink_state or {}
+            if (job.status != JobStatus.FAILED or not context or job.cancel_requested_at
+                    or job.provider != "evolink" or not has_resumable_mj_task(job)
+                    or not native_state.get("poll_paused")):
+                raise ValueError("这个任务没有可续查的 MJ 订单")
+            result = next((node for node in current.nodes if node.id == context.result_node_id), None)
+            if (not isinstance(result, CanvasImageNode) or result.data.current_version_id
+                    or canvas_node_has_pending_run(current, result)):
+                raise ValueError("原结果节点已删除、已有内容或正在生成，不能继续查询")
+            context = context.model_copy(update={"candidates": [
+                candidate.model_copy(update={"status": "pending", "error": None})
+                for candidate in context.candidates
+            ]})
+            updated_job = job.model_copy(update={
+                "status": JobStatus.PENDING, "error": None, "completed_at": None,
+                "progress_phase": "sent", "canvas_run": context,
+            })
+            updated_document = current.model_copy(update={
+                "revision": current.revision + 1, "updated_at": _now(),
+                "nodes": _resumed_edit_nodes(current, context),
+            })
+            _commit_transaction_unlocked(project_id, run_id, "resume_mj_edit", current.revision,
+                                         updated_job, updated_document, job_locked=True)
+            return updated_job, updated_document
+
+
 def request_canvas_run_cancel(project_id: str, run_id: str) -> Job:
     """Persist an idempotent stop request without pretending the provider already stopped."""
     original = _job_for_run(project_id, run_id)
@@ -2567,6 +2721,9 @@ def _commit_canvas_candidate_attempt(
             restored_params = original_params.model_copy(update={
                 "actual_size": job.params.actual_size or original_params.actual_size,
                 "warnings": job.params.warnings or original_params.warnings,
+                # 每个候选发出的编辑输入相同，保留第一份记录。
+                "edit_inputs": original_params.edit_inputs or job.params.edit_inputs,
+                "edit_prompt": original_params.edit_prompt or job.params.edit_prompt,
             })
             updated_job = job.model_copy(update={
                 "status": status,
@@ -2582,7 +2739,8 @@ def _commit_canvas_candidate_attempt(
                 } else None,
                 "canvas_run": context.model_copy(update={"candidates": candidates}),
             })
-            if version is None:
+            terminal = status != JobStatus.PENDING
+            if version is None and not terminal:
                 write_job_under_lock(updated_job)
                 return updated_job
 
@@ -2592,13 +2750,18 @@ def _commit_canvas_candidate_attempt(
                     node.id == context.result_node_id
                     and node.type in {"text", "image", "video", "audio"}
                     and node.data.active_run_id == context.run_id
-                    and not had_success
+                    and version is not None and not had_success
                 ):
                     node = node.model_copy(update={
                         "data": node.data.model_copy(update={
                             "current_version_id": version.version_id,
                         })
                     })
+                if terminal:
+                    node = _clear_edit_run(node, context)
+                    if (node.id == context.result_node_id and node.type == "image"
+                            and node.data.active_run_id == context.run_id):
+                        node = node.model_copy(update={"data": node.data.model_copy(update={"active_run_id": None})})
                 nodes.append(node)
             timestamp = _now()
             updated_document = current.model_copy(update={
@@ -2607,7 +2770,7 @@ def _commit_canvas_candidate_attempt(
                 "nodes": nodes,
                 "content_versions": {
                     **current.content_versions,
-                    version.version_id: version,
+                    **({version.version_id: version} if version is not None else {}),
                 },
             })
             _commit_transaction_unlocked(
@@ -2652,6 +2815,11 @@ def _settle_pending_canvas_candidates(
                 "completed_at": _now(),
                 "canvas_run": context.model_copy(update={"candidates": candidates}),
             })
+            if job.params.image_edit:
+                terminal, _document = _release_result_node(
+                    project_id, _read_document_unlocked(project_id), context, updated,
+                )
+                return terminal
             write_job_under_lock(updated)
             return updated
 
@@ -2948,6 +3116,10 @@ def _release_result_node(
     nodes: list[CanvasNode] = []
     changed = False
     for node in current.nodes:
+        cleared = _clear_edit_run(node, context)
+        if cleared is not node:
+            changed = True
+            node = cleared
         if (
             node.id == context.result_node_id
             and node.type in {"text", "image", "video", "audio"}
@@ -3002,7 +3174,7 @@ def _finalize_canvas_run_under_locks(
     if job.status not in {JobStatus.DONE, JobStatus.PARTIAL}:
         return job, None
     if all(candidate.status != "pending" for candidate in context.candidates):
-        return job, current
+        return _release_result_node(project_id, current, context, job)
 
     versions: list[CanvasContentVersion] = []
     candidates: list[CanvasResultCandidate] = []
@@ -3054,6 +3226,7 @@ def _finalize_canvas_run_under_locks(
     nodes: list[CanvasNode] = []
     result_node: CanvasTextNode | None = None
     for node in current.nodes:
+        node = _clear_edit_run(node, context)
         if (
             node.id == context.result_node_id
             and node.type in {"text", "image", "video", "audio"}
@@ -3181,21 +3354,28 @@ def run_canvas_job(job_id: str) -> Job:
                 "completed_at": _now(),
             })
             write_job_under_lock(canceled)
-            return canceled
-        job = job.model_copy(update={"runner_started_at": _now()})
-        write_job_under_lock(job)
+            job = canceled
+        else:
+            job = job.model_copy(update={"runner_started_at": _now()})
+            write_job_under_lock(job)
+    if job.status == JobStatus.CANCELED:
+        finalized, _document = finalize_canvas_run(job.canvas_project_id, job_id)
+        return finalized
     try:
         if _uses_incremental_candidates(job):
-            return _run_canvas_candidates_incrementally(job)
-        run_job(job_id)
+            _run_canvas_candidates_incrementally(job)
+        else:
+            run_job(job_id)
     except JobExecutionBusy:
         # A duplicate scheduler must never mark the lock owner's in-flight Job as failed.
         return read_job(job_id)
     except TuziAsyncPendingError as error:
-        return _fail_pending_canvas_candidates(
+        _fail_pending_canvas_candidates(
             job.canvas_project_id, job_id,
             f"已停止本地等待：{error}。请核对厂商订单，重新生成可能重复计费。",
         )
+        finalized, _document = finalize_canvas_run(job.canvas_project_id, job_id)
+        return finalized
     except Exception as error:
         latest = read_job(job_id)
         if latest.status not in {
@@ -3262,6 +3442,7 @@ def reconcile_canvas_jobs(
     解析一遍（全仓所有角色、Studio、画布的 job 都在同一个目录），而画布轮询原来一次请求要跑
     两遍：这里一遍，路由拼列表时又一遍。
     """
+    from character_workflow.lib.canvas_image_edits import has_resumable_mj_task
     reconciled: list[str] = []
     for job in (list_jobs() if jobs is None else jobs):
         if job.namespace != "canvas" or not job.canvas_project_id:
@@ -3284,6 +3465,10 @@ def reconcile_canvas_jobs(
                     continue
             if job.cancel_requested_at:
                 _cancel_pending_canvas_candidates(job.canvas_project_id, job.job_id)
+                reconciled.append(job.job_id)
+                continue
+            elif has_resumable_mj_task(job):
+                # Only resume a known order. The caller reuses its durable task ID.
                 reconciled.append(job.job_id)
                 continue
             elif job.runner_started_at is None:

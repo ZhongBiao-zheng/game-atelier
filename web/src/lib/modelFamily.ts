@@ -28,6 +28,11 @@ export function imageFamily(modelId?: string | null): ImageFamily {
   return 'standard';
 }
 
+/** EvoLink 的上传编辑由普通 V8.2 模型选择进入，派生动作不作为模型选项。 */
+export function isEvolinkMidjourney(modelId?: string | null, provider?: string | null): boolean {
+  return provider === 'evolink' && modelId === 'mj-v8.2';
+}
+
 /** 图片 API 是否接受独立 quality 参数。
  *
  * Nano Banana 的无后缀型号用 low/medium/high 选档；Tuzi 等网关提供的 `-2k` / `-4k`

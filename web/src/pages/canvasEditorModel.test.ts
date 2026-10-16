@@ -15,9 +15,85 @@ import {
   placeCanvasNodeWithoutOverlap,
   syncDraftLayerStackSources,
   syncLayerMaterials,
+  canvasNodeAcceptsInput,
+  canvasNodeProvidesOutput,
+  detachMissingImageEditNodes,
+  resolveCanvasGenerationDraft,
+  restoreImageEditRunState,
+  retainNewImageEditResults,
 } from './canvasEditorModel';
 import type { CanvasDocument, CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
+import type { KeyView } from '@/api/keys';
+
+it('keeps image edit settings out of normal generation and retains fixed versions after source deletion', () => {
+  const node: CanvasNode = { id: 'edit', type: 'image_edit', title: '编辑', position: { x: 0, y: 0 }, z_index: 0,
+    data: { source_node_id: 'source', source_version_id: 'source-v', mask_version_id: 'mask-v',
+      reference_node_id: 'reference', reference_version_id: 'reference-v', active_run_id: null,
+      generation_draft: { mode: 'image', model: 'mj-v8.2', alias: 'evo', prompt: 'flower', params: { n: 4 },
+        input_policy: 'all_connected', updated_at: '' }, options: { mode: 'inpaint' },
+      editor_state: { strokes: [], frame_ratio: '', frame: { width: 1024, height: 1024, x: 0, y: 0 } },
+    } };
+  expect(canvasNodeAcceptsInput(node)).toBe(false);
+  expect(canvasNodeProvidesOutput(node)).toBe(false);
+  expect(resolveCanvasGenerationDraft(node, [])).toBeNull();
+  const detached = detachMissingImageEditNodes(documentWithNodes([node], []));
+  expect(detached.nodes[0].data).toMatchObject({ source_node_id: null, reference_node_id: null,
+    source_version_id: 'source-v', mask_version_id: 'mask-v', reference_version_id: 'reference-v' });
+  expect(node.data.source_node_id).toBe('source');
+});
+
+it('retains results created after a configuration snapshot without blocking result deletion or candidate undo', () => {
+  const edit: CanvasNode = { id: 'edit', type: 'image_edit', title: '编辑', position: { x: 0, y: 0 }, z_index: 0,
+    data: { source_node_id: null, source_version_id: 'source', mask_version_id: null,
+      reference_node_id: null, reference_version_id: null, active_run_id: null,
+      generation_draft: { mode: 'image', model: 'model', prompt: 'new', params: {}, input_policy: 'all_connected', updated_at: '' },
+      options: { mode: 'inpaint' }, editor_state: { strokes: [], frame_ratio: '', frame: { width: 10, height: 10, x: 0, y: 0 } },
+    } };
+  const result: CanvasNode = { id: 'result', type: 'image', title: '结果', position: { x: 100, y: 0 }, z_index: 1,
+    data: { current_version_id: 'completed', active_run_id: null, generation_draft: null, display: { fit: 'contain', free_resize: false } } };
+  const current = documentWithNodes([edit, result], []);
+  current.connections = [{ id: 'provenance', source_node_id: 'edit', target_node_id: 'result', role: 'material' }];
+  const oldEdit = { ...edit, data: { ...edit.data, generation_draft: { ...edit.data.generation_draft!, prompt: 'old' } } };
+  const jobs = new Map([['run', { canvas_run: { result_node_id: 'result', snapshot: {
+    surface_node_id: 'edit', normalized_params: { image_edit: { mode: 'inpaint' } },
+  } } } as unknown as Job]]);
+  const beforeGeneration = retainNewImageEditResults(documentWithNodes([oldEdit], []), current, new Set(['result']));
+  const restored = restoreImageEditRunState(beforeGeneration, current, jobs);
+  expect(restored.nodes).toEqual([oldEdit, result]);
+  expect(restored.connections).toEqual(current.connections);
+  const deleted = restoreImageEditRunState(documentWithNodes([edit], []), current, jobs);
+  expect(deleted.nodes).toEqual([edit]);
+  const priorCandidate = { ...result, data: { ...result.data, current_version_id: 'other-candidate' } };
+  expect(restoreImageEditRunState(documentWithNodes([edit, priorCandidate], []), current, jobs).nodes[1]).toEqual(priorCandidate);
+});
+
+it('retains completed results when consecutive undo and redo snapshots no longer contain the edit node', () => {
+  const source: CanvasNode = { id: 'source', type: 'image', title: '原图', position: { x: 0, y: 0 }, z_index: 0,
+    data: { current_version_id: 'source-v', active_run_id: null, generation_draft: null, display: { fit: 'contain', free_resize: false } } };
+  const moved = { ...source, position: { x: 100, y: 0 } };
+  const edit: CanvasNode = { id: 'edit', type: 'image_edit', title: '编辑', position: { x: 200, y: 0 }, z_index: 1,
+    data: { source_node_id: 'source', source_version_id: 'source-v', mask_version_id: 'mask',
+      reference_node_id: null, reference_version_id: null, active_run_id: 'run', generation_draft: null,
+      options: { mode: 'inpaint' }, editor_state: { strokes: [], frame_ratio: '', frame: { width: 10, height: 10, x: 0, y: 0 } },
+    } };
+  const result: CanvasNode = { ...source, id: 'result', title: '结果', position: { x: 300, y: 0 },
+    data: { ...source.data, current_version_id: null, active_run_id: 'run' } };
+  const running = documentWithNodes([moved, edit, result], []);
+  running.connections = [{ id: 'edit-result', role: 'material', source_node_id: 'edit', target_node_id: 'result' }];
+  const beforeMove = retainNewImageEditResults(documentWithNodes([source], []), running, new Set(['result']));
+  const beforeCreate = retainNewImageEditResults(documentWithNodes([moved], []), running, new Set(['result']));
+  const completedResult = { ...result, data: { ...result.data, active_run_id: null, current_version_id: 'completed' } };
+  const completed = documentWithNodes([moved, { ...edit, data: { ...edit.data, active_run_id: null } }, completedResult], []);
+  const jobs = new Map([['run', { canvas_run: { result_node_id: 'result', snapshot: {
+    surface_node_id: 'edit', normalized_params: { image_edit: { mode: 'inpaint' } },
+  } } } as unknown as Job]]);
+  const undoCreate = restoreImageEditRunState(beforeCreate, completed, jobs);
+  const undoMove = restoreImageEditRunState(beforeMove, undoCreate, jobs);
+  expect(undoCreate.nodes).toEqual([moved, completedResult]);
+  expect(undoMove.nodes).toEqual([source, completedResult]);
+  expect(restoreImageEditRunState(beforeCreate, undoMove, jobs).nodes).toEqual([moved, completedResult]);
+});
 
 it('expands every layer into compact owned material views and reuses the existing group', () => {
   const stack = {
@@ -133,6 +209,27 @@ it('locks Midjourney jobs to the four paid outputs from one task', () => {
   );
 
   expect(params).toEqual({ n: 4, ratio: '16:9', size_mode: 'ratio' });
+});
+
+it('locks EvoLink to four outputs and clears unsupported inherited MJ settings', () => {
+  expect(normalizeCanvasImageParams('mj-v8.2', 'evolink', {
+    n: 1, ratio: '16:9', quality: 'high', mode: 'TURBO', bot_type: 'NIJI_JOURNEY',
+    mj_version: '6', mj_profile: 'abc123', mj_cref: ['cref.png'], mj_cw: 100,
+    mj_oref: ['oref.png'], mj_ow: 250, mj_sref_code: '12345',
+  })).toEqual({ n: 4, ratio: '16:9', size_mode: 'ratio', mj_sref_code: '12345' });
+});
+
+it('offers only the implemented EvoLink generation model in Canvas', async () => {
+  const { canvasGenerationModelSupportsMode, createCanvasGenerationDraft } = await import('./canvasEditorModel');
+  const key: KeyView = { alias: 'evolink', provider: 'evolink', base_url: 'https://api.evolink.ai/v1',
+    access_key: '', secret_key: null, capabilities: [], notes: '', created_at: '',
+    models: [{ id: 'mj-v8.2', name: 'Midjourney V8.2', modality: 'image', protocol: 'evolink' }],
+  };
+  const supported = key.models[0];
+  expect(canvasGenerationModelSupportsMode(key, supported, 'image')).toBe(true);
+  expect(canvasGenerationModelSupportsMode(key, { ...supported, id: 'mj-v8.2-upload-paint' }, 'image')).toBe(false);
+  expect(canvasGenerationModelSupportsMode(key, { ...supported, protocol: 'mj' }, 'image')).toBe(false);
+  expect(createCanvasGenerationDraft([key], 'image').params.n).toBe(4);
 });
 
 
@@ -445,4 +542,39 @@ it('成员顺序按画布阅读顺序：先上下行，行内从左到右', () =
     a: { x: 200, y: 0 }, b: { x: 0, y: 0 }, c: { x: 0, y: 200 },
   });
   expect(members(normalizeCanvasGroups(before, before))).toEqual(['b', 'a', 'c']);
+});
+
+test('「自动」：新节点默认选它，草稿存 alias=null 和路由 id；偏好照样记住', async () => {
+  const { createCanvasGenerationDraft, canvasGenerationDefaultFromDraft, canvasGenerationModelSupportsMode } = await import('./canvasEditorModel');
+  const { withAutoProvider } = await import('@/lib/modelRoutes');
+  const key = (alias: string, provider: string, baseUrl: string | null, id: string) => ({
+    alias, provider, base_url: baseUrl, access_key: '', secret_key: null, capabilities: [], notes: '',
+    created_at: '', models: [{ id, name: id, modality: 'image' as const }],
+  });
+  const keys = [
+    key('Tuzi', 'custom', 'https://api.tu-zi.com/v1', 'gpt-image-2'),
+    key('OpenRouter', 'openrouter', null, 'openai/gpt-image-2'),
+  ];
+  const member = (item: typeof keys[number]) => ({
+    alias: item.alias, provider: item.provider, base_url: item.base_url,
+    model_id: item.models[0].id, name: item.models[0].name, protocol: null,
+  });
+  const providers = withAutoProvider(keys, [
+    { id: 'gpt-image-2', name: 'gpt-image-2', modality: 'image', members: keys.map(member) },
+  ]);
+
+  const draft = createCanvasGenerationDraft(providers, 'image');
+  expect(draft.alias).toBeNull();
+  expect(draft.model).toBe('gpt-image-2');
+  expect(canvasGenerationDefaultFromDraft(draft, { selection: null, params: {} })?.selection)
+    .toEqual({ alias: null, model: 'gpt-image-2' });
+  expect(createCanvasGenerationDraft(providers, 'image', {
+    preference: { selection: { alias: 'OpenRouter', model: 'openai/gpt-image-2' }, params: {} },
+  }).alias).toBe('OpenRouter');
+
+  // 组里有一个成员不能跑画布图片生成，整组都不出现在「自动」里。
+  const unroutable = withAutoProvider(keys, [{ id: 'gpt-image-2', name: 'gpt-image-2', modality: 'image', members: [
+    member(keys[0]), { ...member(keys[0]), alias: 'NB', provider: 'nano_banana' },
+  ] }]);
+  expect(canvasGenerationModelSupportsMode(unroutable[0], unroutable[0].models[0], 'image')).toBe(false);
 });

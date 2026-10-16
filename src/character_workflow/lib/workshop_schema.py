@@ -151,7 +151,8 @@ GenerationParams = Annotated[
 class PrepareGenerationInput(TargetInput):
     target: GenerationTarget
     prompt: str = Field(min_length=1, max_length=40000)
-    alias: str = Field(min_length=1, max_length=120)
+    # None =「自动」：model 是路由 id，prepare 时解析成具体 KEY 写回请求，批准针对的是这家。
+    alias: str | None = Field(default=None, min_length=1, max_length=120)
     model: str = Field(min_length=1, max_length=240)
     params: GenerationParams
     media_ids: list[Identifier] = Field(default_factory=list, max_length=12)

@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, Response
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from character_workflow.lib import data_root, keys
+from character_workflow.lib import data_root, keys, model_routes
 from character_workflow.lib.active_character import read_active, write_active
 from character_workflow.lib.character_derivatives import (
     character_display_name,
@@ -71,7 +71,8 @@ from character_workflow.lib.schemas import (
     CanvasReproduceResponse,
     CanvasLayerDecompositionCreate,
     CanvasPackageCommitRequest, CanvasPackageImportResponse,
-    CanvasMaskEditCreate, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
+    CanvasImageEditRunCreate, CanvasImageEditSave, CanvasImageEditSaveResponse,
+    CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
     CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
     CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse,
@@ -478,7 +479,8 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                 # mask_image 同理只由服务端写。
                 for owned in (
                     "provider_task_protocol", "provider_task_ids", "video_submission_attempts",
-                    "mask_image",
+                    "mask_image", "image_edit", "mj_submission_ids", "mj_submit_uncertain",
+                    "evolink_state", "edit_inputs", "edit_prompt",
                 ):
                     if owned in existing_params:
                         value[owned] = existing_params[owned]
@@ -557,6 +559,7 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
                 whitelist.update(item for item in value if isinstance(item, str))
         if job.source_image:
             whitelist.add(job.source_image)
+        whitelist.update(item["path"] for item in params.get("edit_inputs") or [])
         # 网络直链不是本机文件；当路径解析会把 "http://../../etc/x" 拼成数据根外的真实路径。
         normalized_whitelist = {
             str((Path(p) if Path(p).is_absolute() else _project_root() / p).resolve())
@@ -1417,6 +1420,40 @@ def list_keys() -> dict:
     return {"keys": keys.keys_for_api(), "default_alias": db.default_alias}
 
 
+def _route_payload(route: model_routes.ModelRoute) -> dict:
+    return {
+        "id": route.id, "name": route.name, "modality": route.modality,
+        "members": [
+            {"alias": m.alias, "provider": m.provider, "base_url": m.base_url,
+             "model_id": m.model_id, "name": m.name, "protocol": m.protocol}
+            for m in route.members
+        ],
+    }
+
+
+@router.get("/models")
+def list_model_routes() -> dict:
+    return {"models": [_route_payload(route) for route in model_routes.list_routes()]}
+
+
+class _ModelOrderPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    modality: Literal["text", "image", "video", "audio"]
+    id: str = Field(min_length=1, max_length=200)
+    aliases: list[str] = Field(min_length=1)
+
+
+@router.put("/models/order")
+def set_model_route_order(payload: _ModelOrderPayload) -> dict:
+    try:
+        route = model_routes.set_route_order(payload.modality, payload.id, payload.aliases)
+    except model_routes.NoSuchRouteError as error:
+        raise HTTPException(404, str(error)) from None
+    except model_routes.InvalidRouteOrderError as error:
+        raise HTTPException(422, str(error)) from None
+    return _route_payload(route)
+
+
 @router.post("/keys", status_code=201)
 def create_key(payload: _KeyCreatePayload) -> dict:
     from datetime import datetime, timezone
@@ -1772,6 +1809,7 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
     seen_ids: set[str] = set()
     excluded = 0
     total = 0
+    evolink = preview_provider == "evolink"
     for item in rows:
         if not isinstance(item, dict) or not item.get("id"):
             continue
@@ -1780,7 +1818,12 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
             continue
         seen_ids.add(mid)
         total += 1
-        category = _classify_model(item)
+        # EvoLink shares /models across many endpoint contracts. Only the implemented
+        # base model belongs in the generator; derivative IDs are internal edit actions.
+        if evolink and mid != "mj-v8.2":
+            excluded += 1
+            continue
+        category = "image" if evolink else _classify_model(item)
         # 明确不能生成内容的模型不入列表；include_all 是逃生舱：
         # deny 词表哪天判过头了，画师能自己看到全量，不至于变成死路。
         if category == "excluded" and not payload.include_all:
@@ -1789,7 +1832,9 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
         modality = category if category in ("text", "image", "video", "audio") else None
         # 视频：协议 guess（resolve 不中 → None，交后端 dispatch 时判定 / 诚实报错）。
         # 图片：直接读上游协议标注（决定走 Ark 原生端点还是 OpenAI 兼容入口）。
-        if modality == "video":
+        if evolink:
+            protocol = "evolink"
+        elif modality == "video":
             protocol = resolve_protocol(preview_provider, base_url, mid)
         elif modality == "image":
             protocol = _image_protocol(item)
@@ -2187,20 +2232,35 @@ def _create_user_job(
         raise HTTPException(status_code=422, detail="生成提示词不能为空")
     if body.kind not in {JobKind.IMAGE, JobKind.VIDEO}:
         raise HTTPException(422, detail="创作台目前只接受图片或视频任务")
-    db = keys.read_keys_db()
-    alias = body.alias or db.default_alias
-    if not alias:
-        raise HTTPException(status_code=400, detail="no default key configured")
-    key_row = next((k for k in db.keys if k.alias == alias), None)
-    if not key_row:
-        raise HTTPException(status_code=400, detail=f"unknown alias {alias}")
+    if body.alias:
+        key_row = keys.find_by_alias(body.alias)
+        if not key_row:
+            raise HTTPException(status_code=400, detail=f"unknown alias {body.alias}")
+        model_id = body.model
+    else:
+        # 不指定厂商 =「自动」：body.model 是路由 id，按组内顺序解析出实际 KEY 与模型。
+        try:
+            key_row, model_spec = model_routes.resolve_auto(body.kind.value, body.model)
+        except model_routes.NoSuchRouteError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        model_id = model_spec.id
+    alias = key_row.alias
     params = body.params.model_copy(deep=True)
+    # 「自动」记下路由 id，运行时遇到确定没执行的失败才能换下一家；指定厂商不换。
+    params.route_id = None if body.alias else body.model
+    params.route_tried = None
     # Provider task handles are runner-owned.  A Studio create request always represents a new
     # order and may not attach itself to an arbitrary existing Tuzi task.
     params.provider_task_protocol = None
     params.provider_task_ids = None
     params.video_submission_attempts = None
     params.mask_image = None
+    params.image_edit = None
+    params.mj_submission_ids = None
+    params.mj_submit_uncertain = None
+    params.evolink_state = None
+    params.edit_inputs = None
+    params.edit_prompt = None
     # 改写值与原值同类型（str / list[str]），model_copy 不需要重新校验。
     params = params.model_copy(update=_gate_browser_refs(params.model_dump()))
     if body.kind == JobKind.IMAGE:
@@ -2208,7 +2268,7 @@ def _create_user_job(
 
         try:
             params = JobParams(**normalize_image_size_params(
-                key_row, body.model, params.model_dump(exclude_none=True),
+                key_row, model_id, params.model_dump(exclude_none=True),
             ))
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
@@ -2222,7 +2282,7 @@ def _create_user_job(
         character_id=alias,
         prompt=prompt,
         submitted_at=datetime.now(timezone.utc).isoformat(),
-        model=body.model,
+        model=model_id,
         params=params,
         output_paths=[],
         status=JobStatus.PENDING,
@@ -3439,35 +3499,55 @@ def post_canvas_upscale_run(
 
 
 @router.post(
-    "/canvas/projects/{project_id}/runs/mask-edit",
+    "/canvas/projects/{project_id}/image-edits",
+    response_model=CanvasImageEditSaveResponse,
+    status_code=201,
+)
+async def post_canvas_image_edit_save(
+    project_id: str,
+    payload: str = Form(...),
+    mask_file: UploadFile | None = File(None),
+) -> CanvasImageEditSaveResponse:
+    from character_workflow.lib.canvas_image_edits import save_image_edit
+    from character_workflow.lib.canvas_masks import CanvasMaskError
+    try:
+        command = CanvasImageEditSave.model_validate_json(payload)
+        body = await mask_file.read(25 * 1024 * 1024 + 1) if mask_file else None
+        document, node_id = await run_in_threadpool(save_image_edit, project_id, command, body)
+        return CanvasImageEditSaveResponse(document=document, node_id=node_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目或图片节点") from None
+    except CanvasMaskError as error:
+        raise HTTPException(422, detail={"code": error.code, "message": error.message}) from error
+    except RuntimeError as error:
+        conflict = _canvas_run_revision_conflict(error)
+        if conflict is not None:
+            raise conflict from None
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/image-edit",
     response_model=CanvasRunResponse,
     status_code=201,
 )
-async def post_canvas_mask_edit(
+async def post_canvas_image_edit_run(
     project_id: str,
     background: BackgroundTasks,
-    surface_node_id: str = Form(...),
-    expected_revision: int = Form(...),
-    requested_count: int = Form(1),
-    mask_file: UploadFile = File(...),
+    payload: CanvasImageEditRunCreate,
 ) -> CanvasRunResponse:
     from character_workflow.lib.canvas_masks import CanvasMaskError
-    from character_workflow.lib.canvas_runs import CanvasRunCommandError, submit_mask_edit_run
+    from character_workflow.lib.canvas_runs import CanvasRunCommandError, submit_image_edit_run
 
     try:
-        payload = CanvasMaskEditCreate(
-            surface_node_id=surface_node_id,
-            expected_revision=expected_revision,
-            requested_count=requested_count,
-        )
-        body = await mask_file.read(25 * 1024 * 1024 + 1)
         job, document = await run_in_threadpool(
-            submit_mask_edit_run,
+            submit_image_edit_run,
             project_id,
             payload.surface_node_id,
             payload.expected_revision,
             payload.requested_count,
-            body,
         )
     except ValidationError as error:
         raise HTTPException(422, detail=error.errors()) from error
@@ -3576,6 +3656,23 @@ def post_canvas_run_cancel(project_id: str, run_id: str) -> Job:
         raise HTTPException(404, detail="找不到这个画布生成记录") from None
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
+
+
+@router.post("/canvas/projects/{project_id}/runs/{run_id}/resume-mj-edit", response_model=CanvasRunResponse)
+def post_canvas_resume_mj_edit(project_id: str, run_id: str, payload: CanvasCandidateDismiss,
+                             background: BackgroundTasks) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_runs import resume_mj_edit_run
+
+    try:
+        job, document = resume_mj_edit_run(project_id, run_id, payload.expected_revision)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布生成记录") from None
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    except RuntimeError as error:
+        raise _canvas_run_revision_conflict(error) or HTTPException(409, detail=str(error)) from error
+    background.add_task(_run_canvas_job_safely, job.job_id)
+    return CanvasRunResponse(job=job, document=document)
 
 
 @router.post(

@@ -153,6 +153,20 @@ def model_configuration(alias: str, model_id: str, kind: str):
     return key, model, fingerprint
 
 
+def _with_resolved_alias(payload: PrepareGenerationInput) -> PrepareGenerationInput:
+    """「自动」在 prepare 时就落到具体 KEY：请求里记的、给人批准的、最后出图的都是这一家。"""
+    if payload.alias is not None:
+        return payload
+    from character_workflow.lib.model_routes import NoSuchRouteError, resolve_auto
+
+    try:
+        key, model = resolve_auto(payload.params.type, payload.model)
+    except NoSuchRouteError as error:
+        raise WorkshopError("MODEL_UNAVAILABLE", str(error), 422) from None
+    return PrepareGenerationInput.model_validate(
+        {**payload.model_dump(), "alias": key.alias, "model": model.id})
+
+
 def list_models(principal: Any, payload: TargetInput) -> dict:
     resolve_target(principal, payload.target)
     return {"models": model_rows("video" if payload.target.type == "video" else "image")}
@@ -202,7 +216,22 @@ def model_rows(kind: str) -> list[dict]:
                          "request_limits": {"max_references": 12},
                          "capability_basis": "当前本地适配器约束；null 表示未确认，prepare 会校验已知限制",
                          "price_basis": "费用待确认；以供应商实际账单为准"})
-    return rows
+    return _auto_rows(kind, rows) + rows
+
+
+def _auto_rows(kind: str, rows: list[dict]) -> list[dict]:
+    """多家共有的模型加一行「自动」（alias 为 None，model 是路由 id）；组内每家都可用才给。"""
+    from character_workflow.lib.model_routes import list_routes
+
+    by_member = {(row["alias"], row["model"]): row for row in rows}
+    auto = []
+    for route in list_routes(kind):
+        members = [by_member.get((m.alias, m.model_id)) for m in route.members]
+        if len(members) < 2 or any(row is None for row in members):
+            continue
+        auto.append({**members[0], "alias": None, "provider": None, "model": route.id,
+                     "name": route.name, "route_members": [m.alias for m in route.members]})
+    return auto
 
 
 def _normalized(payload: PrepareGenerationInput, entries: list[dict], model, key) -> dict:
@@ -262,6 +291,7 @@ def prepare_generation(principal: Any, payload: PrepareGenerationInput) -> dict:
             if existing.fingerprint != fingerprint:
                 raise WorkshopError("IDEMPOTENCY_CONFLICT", "同一幂等键的参数或参考内容已改变")
             return request_view(existing, agent=principal.kind == "agent")
+        payload = _with_resolved_alias(payload)
         key, model, config_fingerprint = model_configuration(
             payload.alias, payload.model, payload.params.type)
         params = _normalized(payload, [item[0] for item in frozen], model, key)

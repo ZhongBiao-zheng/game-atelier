@@ -25,6 +25,10 @@ export interface JobParams {
   reference_images?: string[];
   /** Canvas 局部编辑的服务端解析 mask 路径；浏览器不直接写入。 */
   mask_image?: string;
+  image_edit?: Record<string, unknown>;
+  mj_submission_ids?: string[];
+  mj_submit_uncertain?: boolean;
+  evolink_state?: Record<string, unknown>;
   /** Canvas 多角度生成的服务端受控相机参数。 */
   angle_horizontal?: number;
   angle_pitch?: number;
@@ -32,9 +36,17 @@ export interface JobParams {
   angle_wide?: boolean;
   requested_size?: string;
   actual_size?: string;
+  /** 图片编辑实际发给厂商的图片（服务端写）。 */
+  edit_inputs?: { role: 'source' | 'mask' | 'guide' | 'reference'; path: string }[];
+  /** 图片编辑实际发给厂商的完整提示词。 */
+  edit_prompt?: string;
   warnings?: string[];
+  /** 选「自动」提交时的路由 id；有它才会在确定没执行的失败上换下一家。 */
+  route_id?: string;
+  /** 已经试过并被换掉的供应商别名。 */
+  route_tried?: string[];
   /** 厂商订单；Web 只读。Tuzi 支持续查，Seedance 留供核对，不自动重提。 */
-  provider_task_protocol?: 'tuzi_async' | 'tuzi_images' | 'seedance';
+  provider_task_protocol?: 'tuzi_async' | 'tuzi_images' | 'seedance' | 'evolink';
   provider_task_ids?: string[];
   video_submission_attempts?: Array<{
     attempt: number;

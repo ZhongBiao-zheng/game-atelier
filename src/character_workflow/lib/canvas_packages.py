@@ -392,7 +392,7 @@ def _portable_job(job: Job, document: CanvasDocument) -> bytes:
         if mask is None or mask.kind != "image" or mask.origin.kind != "user_mask":
             raise CanvasPackageError(f"任务 {job.job_id} 的遮罩版本已损坏")
         mask_path = mask.path
-    params = job.params.model_copy(
+    params = job.params.model_copy(deep=True,
         update={
             "reference_images": references["image"] or None,
             "reference_videos": references["video"] or None,

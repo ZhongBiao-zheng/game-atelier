@@ -4,6 +4,9 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { KeysPage } from './Keys';
 import { KeyForm } from './KeyForm';
 
+// 模型路由区块有自己的测试；这里按顺序喂 fetch 响应，不让它多吃一条。
+vi.mock('@/api/models', () => ({ listModelRoutes: vi.fn().mockResolvedValue([]), setModelRouteOrder: vi.fn() }));
+
 const originalScrollIntoView = Element.prototype.scrollIntoView;
 
 const mockKey = {

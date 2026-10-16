@@ -9,6 +9,7 @@ from character_workflow.lib.callers.openai_image import (
     _snap_hk_gpt_image_size,
     image_family,
     normalize_image_pixel_size,
+    resolve_image_protocol,
 )
 from character_workflow.lib.keys import KeySpec
 from character_workflow.lib.image_size_catalog import image_size_options, is_nano_image_size_model
@@ -57,6 +58,24 @@ def normalize_image_size_params(key: KeySpec, model: str, params: dict[str, Any]
     result.pop("custom_size", None)
     mode = result.get("size_mode")
     options = image_size_options(key.provider, key.base_url, model)
+    if resolve_image_protocol(key.provider, key.base_url, model) == "evolink":
+        # Midjourney owns pixel dimensions. Explicit ratio is passed by the caller as --ar;
+        # AUTO leaves that choice to its native prompt and discards stale pixel settings.
+        result.pop("size", None)
+        result.pop("resolution", None)
+        if mode == "custom":
+            raise ValueError("当前模型不支持自定义像素尺寸")
+        if mode == "auto":
+            result["size"] = "auto"
+            result.pop("ratio", None)
+        elif mode == "ratio":
+            ratio = result.get("ratio") or params.get("size") or options["ratios"][0]
+            if ratio not in options["ratios"]:
+                raise ValueError("当前模型或渠道不支持该图片比例")
+            result["ratio"] = ratio
+        elif mode is not None:
+            raise ValueError("未知图片尺寸模式")
+        return result
     if not options["ratios"]:
         for field in ("size_mode", "size", "ratio", "resolution"):
             result.pop(field, None)

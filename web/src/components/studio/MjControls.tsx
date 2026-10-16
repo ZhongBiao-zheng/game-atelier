@@ -27,6 +27,7 @@ interface Props {
   /** 哪几个参考槽有图 —— 权重控件只在对应槽上传后出现（没有图的权重毫无意义）。 */
   filledRefs?: { image?: boolean; sref?: boolean; cref?: boolean; oref?: boolean };
   menuDirection?: 'up' | 'down';
+  evolink?: boolean;
 }
 
 /** Midjourney 专属参数面板：收起态是一颗摘要按钮（v7 · 快速 · s100），点开是分区面板。
@@ -39,6 +40,7 @@ export function MjControls({
   onChange,
   filledRefs = {},
   menuDirection = 'up',
+  evolink = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -55,7 +57,7 @@ export function MjControls({
         }`}
       >
         <Sparkles size={14} aria-hidden />
-        <span className="truncate">{mjSummary(value)}</span>
+        <span className="truncate">{evolink ? 'Fast · Standard' : mjSummary(value)}</span>
       </button>
 
       <ToolbarPopover
@@ -67,7 +69,7 @@ export function MjControls({
         className="w-[320px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-card p-3"
       >
         <div className="space-y-4">
-          <Section title="模型">
+          {!evolink && <Section title="模型">
             <div role="listbox" aria-label="选择 Midjourney 模型" className="relative isolate grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
               <SelectionHighlight />
               {MJ_BOT_TYPES.map((item) => (
@@ -85,9 +87,9 @@ export function MjControls({
                 </SegmentButton>
               ))}
             </div>
-          </Section>
+          </Section>}
 
-          <Section
+          {!evolink && <Section
             title="版本"
             hint={value.botType === 'NIJI_JOURNEY' ? 'niji 自己的版本号，与 Midjourney 不通用' : undefined}
           >
@@ -103,9 +105,9 @@ export function MjControls({
                 </option>
               ))}
             </select>
-          </Section>
+          </Section>}
 
-          <Section title="速度档">
+          {!evolink && <Section title="速度档">
             <div role="listbox" aria-label="选择速度档" className="relative isolate grid h-9 grid-cols-3 rounded-lg bg-popover p-0.5">
               <SelectionHighlight />
               {MJ_MODES.map((item) => (
@@ -114,7 +116,7 @@ export function MjControls({
                 </SegmentButton>
               ))}
             </div>
-          </Section>
+          </Section>}
 
           <Section title="风格化 stylize" hint="越高越有 MJ 自己的美术判断，越低越贴着 prompt">
             <div role="listbox" aria-label="选择风格化强度" className="relative isolate grid grid-cols-6 gap-0.5 rounded-lg bg-popover p-0.5">
@@ -155,7 +157,7 @@ export function MjControls({
             </Section>
           )}
 
-          {filledRefs.cref && (
+          {!evolink && filledRefs.cref && (
             <Section title="角色权重 cw" hint="角色参考图的影响强度（0-100）">
               <div role="listbox" aria-label="选择角色权重" className="relative isolate grid h-9 grid-cols-5 rounded-lg bg-popover p-0.5">
                 <SelectionHighlight />
@@ -169,7 +171,7 @@ export function MjControls({
             </Section>
           )}
 
-          {filledRefs.oref && (
+          {!evolink && filledRefs.oref && (
             <Section title="Omni 权重 ow" hint="Omni 参考图的影响强度（0-1000）">
               <div role="listbox" aria-label="选择 Omni 权重" className="relative isolate grid h-9 grid-cols-6 rounded-lg bg-popover p-0.5">
                 <SelectionHighlight />
@@ -207,7 +209,7 @@ export function MjControls({
             />
           </Section>
 
-          <Section title="个性化 profile" hint="填写 Midjourney Profile code 或 ID">
+          {!evolink && <Section title="个性化 profile" hint="填写 Midjourney Profile code 或 ID">
             <input
               type="text"
               value={value.profile}
@@ -222,7 +224,7 @@ export function MjControls({
               spellCheck={false}
               className="h-9 w-full rounded-lg border border-input bg-popover px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60"
             />
-          </Section>
+          </Section>}
 
           <Section title="排除词 no" hint="不想出现的东西，逗号分隔">
             <input

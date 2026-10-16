@@ -22,6 +22,10 @@ class TuziAsyncPendingError(TuziAsyncError):
     """Polling stopped without a provider terminal state; the billed task remains resumable."""
 
 
+class TuziAsyncFailedError(TuziAsyncError):
+    """The provider explicitly reported a terminal failure for a known order."""
+
+
 _SUCCESS = frozenset({"completed", "success", "succeeded", "done"})
 _FAILURE = frozenset({"failure", "failed", "error", "expired", "cancelled", "canceled"})
 _PENDING = frozenset({"queued", "not_start", "submitted", "in_progress", "processing", "pending"})
@@ -135,7 +139,7 @@ def _execute(
                 on_phase("downloading")
             return _result_json(payload, current)
         if status in _FAILURE:
-            raise TuziAsyncError(
+            raise TuziAsyncFailedError(
                 video_poll.with_task_ref(
                     f"Tuzi 异步任务失败：{payload.get('error') or payload.get('message') or status}",
                     current,

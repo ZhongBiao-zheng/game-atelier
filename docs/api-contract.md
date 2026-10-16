@@ -40,6 +40,13 @@ OpenRouter出站仍使用aspect_ratio冒号。OpenRouter新增分辨率档位默
 VIP、固定1K等别名不由基础型号推断能力。Seedream/MJ/未知渠道暂不展示AUTO。
 AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单或有依据的固定单价。
 
+### 模型路由（5.90.0）
+
+- `GET /api/models` → `{models: [{id, name, modality, members: [{alias, provider, base_url, model_id, name, protocol}]}]}`；`members` 按出图顺序，第一个就是「自动」实际使用的。
+- `PUT /api/models/order`，body `{modality, id, aliases}`：`aliases` 必须恰好是该组现有成员的一个排列，否则 422；组不存在 404。属管理权限。
+- 创作台 `POST /api/studio/jobs`、画布草稿 / 生成偏好 `selection`、Agent `CanvasAgentModelRef`、工坊 `prepare_generation`：`alias` 为空即「自动」，`model` 为路由 id；Job 与运行快照里的 `alias` 始终是实际使用的 KEY。
+- `JobParams.route_id`：「自动」提交时由服务端写入（浏览器传入的会被覆盖）；`route_tried`：失败切换时换掉的别名。运行快照的 `alias` 是提交时解析的那家，失败切换后以 Job 的 `alias` 为准。
+
 ### 图层栈显示顺序（5.44.0）
 
 `layer_stack.data.base_z_index` 默认 0，背景与 `layers[].z_index` 共用 0–16 范围；存在背景时所有层级值必须唯一。
@@ -116,6 +123,7 @@ server 启动建好监听后对每个库各起一条后台线程补扫一次（�
 | 工坊目标 / 生成请求 | `lib/workshop_schema.py` + `lib/workshop_generation.py` | `web/src/api/workshopRequests.ts` | `tests/test_workshop_runtime.py` + `tests/test_workshop_mcp.py` |
 | Job / JobParams | `lib/schemas.py` | `web/src/schema/jobs.ts` | 无 —— 靠人 |
 | Key / ModelSpec | `lib/keys.py` | `web/src/api/keys.ts` | 无 —— 靠人 |
+| ModelRoute | `lib/model_routes.py` | `web/src/api/models.ts` | `tests/test_model_routes.py` + `lib/modelRoutes.test.ts` |
 | CharacterDerivative / CharacterEntry | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_derivatives.py` + `LeftSidebar.test.tsx` |
 | CharacterAssociationTarget / CharacterAssociationItem | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_workspace.py` + `CharacterAssociationPicker.test.tsx` |
 | CharacterWorkspaceResponse / CharacterIndexResponse | `lib/schemas.py` | `web/src/api/characters.ts` | `tests/test_character_workspace.py` + `CharacterWorkspace.test.tsx` + `CharacterIndex.test.tsx` |
@@ -206,7 +214,8 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `POST /canvas/projects` `PATCH /canvas/projects/{id}` `PUT /canvas/projects/{id}/document`
 `POST /canvas/projects/{id}/agent/sessions` `DELETE /canvas/projects/{id}/agent/sessions/{session_id}`
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
-`POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle,layer-decomposition}`
+`POST /canvas/projects/{id}/image-edits`
+`POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,image-edit,angle,layer-decomposition}`
 `POST /canvas/projects/{id}/runs/{run_id}/cancel`
 `POST /creation-assets/prompts` `POST /creation-assets/media/{upload,from-path}`
 `POST /creation-assets/generation/{from-job,from-canvas}`
@@ -465,13 +474,58 @@ ZIP 文件名带顺序号及安全化图层名，保留原始图片字节。PSD�
 Version 不可变、历史保留；分组只管理布局。删除编辑入口保留父图层最后版本并清除绑定，删除父节点
 不会删除素材图片。原图层显隐不影响编辑入口可见性，下载始终读取同步后的当前版本。
 
-`POST /canvas/projects/{id}/runs/mask-edit` 使用 multipart，只接受 `surface_node_id / expected_revision /
-requested_count / mask_file`。prompt、alias、model 与参数必须先保存为源图片节点的 image Draft，服务端
-读取后冻结；浏览器不能传媒体路径或绕过 Draft。蒙版必须是与 EXIF 归一后源图同尺寸的单帧 PNG，透明或
-灰度值 0 表示编辑、255 表示保留，空蒙版拒绝。服务端把归一灰度蒙版登记为不可变 `user_mask` Content
-Version，并与 Job、Snapshot、结果节点、实际输入连接在同一可恢复事务提交；Snapshot 记录
-`mask_version_id`，且唯一输入固定为当前源图 Version，不接收其它连接节点引用。首版只允许已验证走 OpenAI-compatible
-`/images/edits` 的 GPT Image 模型；不支持时返回 `canvas_media_capability_missing`，绝不降级为整图生成。
+图片局部修改与扩图使用独立 `image_edit` 节点：原图 → 编辑节点 → 结果图片，均为 `material` 实线。
+额外参考图只保存在编辑配置中，不增加画布连线；新节点在源图右侧避开已有节点排列。
+它不是 Content Node，不参与普通参考输入解析或普通生成浮层，也不会隐式把原图传给下游。
+`POST /canvas/projects/{id}/image-edits` 使用 multipart `payload` JSON + 可选 `mask_file` 保存配置，
+返回 `{document,node_id}`。payload 包含 `expected_revision`、更新时的 `node_id`、创建时的
+`source_node_id/source_version_id`、`generation_draft`、`options`、`editor_state` 和可选
+`reference_node_id/reference_version_id`。保存允许未选择模型、未绘制选区，不创建 Job、不调用厂商。
+节点固定源图/参考图 Version；原节点换版或删除不改变已保存内容，删除后关联节点 ID 可为空。
+`editor_state` 保存源图像素坐标下的画笔/橡皮/矩形笔迹、画框与比例；不保存视图缩放和撤销栈。
+`options` 保存模式（`inpaint` / `outpaint`）与扩框几何，不重复保存源版本。
+蒙版为不可变项目 Version，内容相同时可复用；不传蒙版表示清空选区。不得传媒体绝对路径、凭证或订单状态。
+
+`POST /canvas/projects/{id}/runs/image-edit` 使用 JSON `surface_node_id / expected_revision / requested_count`，
+只从已保存的编辑节点冻结 Job 与 Snapshot。编辑必须指定渠道，不使用自动路由；空提示词采用自然修复/延展。
+运行前重新校验选区、固定媒体版本与模型能力。局部修改和扩图均接受 EvoLink MJ 与兼容通用编辑模型，按渠道/协议/型号分流；不支持的模型返回 422。
+每次生成新增结果节点，不覆盖旧结果。
+运行中保存草稿不改已提交快照；`active_run_id` 为服务端独占。普通文档 PUT 不得伪造编辑运行状态或源版本绑定。
+项目包包含尚未生成的编辑节点及全部源图/蒙版；跨画布粘贴复制固定媒体版本并重写蒙版来源，清空运行状态。
+旧 `runs/mask-edit` 接口移除，不保留即时提交旁路。
+
+局部蒙版为与 EXIF 归一后源图同尺寸的单帧 PNG，透明或灰度 0 表示编辑、255 保留，空选区拒绝。
+扩图由服务端生成新区域蒙版，目标框必须完整包含原图，不把源图透明区域当作新增区域。
+图片编辑任务完成后 `params.edit_inputs`（`role`: source / mask / guide / reference，`path`）记录实际发给厂商的图片，`params.edit_prompt` 记录完整提示词；两者只由服务端写，`/api/raw?job_id=` 放行这些路径。
+扩图蒙版的 origin 标记 `expanded_canvas=true`，宽高不得小于源图；普通局部蒙版仍要求源图同尺寸。
+归一蒙版登记为内部不可变 `user_mask` Version；Job、Snapshot、结果节点及编辑→结果素材实线在同一可恢复事务提交。
+Snapshot 保存 `mask_version_id`、源版本、可选替换参考和 `normalized_params.image_edit` 几何参数。
+结果始终另建节点（包括图层素材），不覆盖源版本，不创建蒙版节点或历史关系线。
+
+通用编辑模型用于局部修改与扩图，按供应商/协议/型号筛选：支持独立 mask 协议的 GPT Image 使用 edits；兼容的 Seedream、Nano Banana
+等使用干净底图与独立区域引导图，不伪装成原生 mask。局部修改引导图为白编辑/黑保留蒙版，扩图保持新增区域着色引导。
+通用局部修改对选区做向内 1–8px（按源图短边自适应）的羽化，不扩大编辑范围；最终合成 PNG 保留保护区解码 RGBA；输出比例偏差超过
+2% 拒绝，同一比例的分辨率差异等比映射。编辑尺寸以画框为准，禁止 AUTO 改变编辑边界；蒙版保护只能保证
+改动范围，不能证明生成内容和接缝质量。2026-10-16 HK GPT 2.5 Flare 与 Tuzi Nano Banana Pro 各一个简单样例通过，
+不能推断所有渠道/复杂场景均已验收。MJ 原生编辑不经过通用合成，不使用通用羽化策略。
+
+#### EvoLink MJ V8.2
+
+Key `provider=evolink`、模型 `mj-v8.2`、协议 `evolink`，API 根地址为 `https://api.evolink.ai/v1`。
+普通生图使用 `POST /v1/images/generations`，固定 Fast / Standard，每次返回最多 4 张；不把派生动作 ID 当作普通模型。
+画布编辑节点选择该模型时，使用 `mj-v8.2-upload-paint`，接受任意项目内原图，无需既有 MJ 订单。
+不接收额外替换参考图；原图保持不变，输出登记为关联结果节点的候选版本。
+源图经 EXIF 转正后通过 EvoLink 临时文件服务上传；源尺寸蒙版从内部白保留/黑编辑转换为不透明黑保留/白重绘 PNG data URI。
+扩图用目标 `canvas` 和原图尺寸 `img_pos`，允许改变画布比例，不拉伸原图；内部仍保存源图尺寸的全白保留蒙版。
+`evolink_state` 是 runner 独占状态，保存渠道指纹、提交不确定标记、订单、终态结果地址与查询暂停信息。
+收费 POST 前先落盘 uncertain，取得 ID 后立即记录 `provider_task_protocol=evolink` / `provider_task_ids`。
+不确定提交绝不自动重发；已知 ID 只续查 GET，已完成但下载失败只恢复下载。
+查询暂停记录 `evolink_state.poll_paused`，结果节点显示“继续查询”：
+`POST /canvas/projects/{id}/runs/{run_id}/resume-mj-edit` 接收 `expected_revision`，只续查已知订单，不重新下单。
+新订单与配方复用必须去掉 `evolink_state`，浏览器不能伪造或改写。
+`POST /canvas/projects/{id}/runs/{run_id}/resume-mj-edit` 接收 `expected_revision`，只恢复未取消、已有可靠订单 ID
+且结果节点未改动的中断任务；复用原 Job/选区/动作，仅续查，不创建新订单。显式 CLI retry 则是新的待确认任务，
+清空 MJ 订单、输出映射、不确定提交与续查状态。详情可按住对比原图，并按需显示选区。
 
 `POST /canvas/projects/{id}/runs/angle` 只接受 `surface_node_id / expected_revision / requested_count` 与
 `horizontal_angle(-60..60) / pitch_angle(-45..45) / camera_distance(1..10) / wide_angle`。服务端优先全局

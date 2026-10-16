@@ -2865,3 +2865,62 @@ describe('Studio 响应团队资产动作', () => {
     expect(history).toEqual(['/studio?team_asset=bad&team_action=reproduce']);
   });
 });
+
+describe('Studio「自动」供应商', () => {
+  const routes = [
+    { id: 'doubao-seedream-5-0-260128', name: '图片 5.0 Lite', modality: 'image', members: [
+      { alias: 'volc', provider: 'seedream', base_url: null, model_id: 'doubao-seedream-5-0-260128', name: '图片 5.0 Lite', protocol: null },
+    ] },
+    { id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image', members: [
+      { alias: 'oa', provider: 'openai', base_url: null, model_id: 'gpt-image-2', name: 'GPT Image 2', protocol: null },
+      { alias: 'volc', provider: 'seedream', base_url: null, model_id: 'gpt-image-2', name: 'GPT Image 2', protocol: null },
+    ] },
+  ];
+
+  function withRoutes() {
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => (
+      url === '/api/models'
+        ? Promise.resolve({ ok: true, json: async () => ({ models: routes }) } as any)
+        : fallback(url, init)
+    ));
+    return fetchMock;
+  }
+
+  it.each([false, true])('没有存档时默认选「自动」，提交不带 alias，compact=%s', async (compact) => {
+    const fetchMock = withRoutes();
+    const { hook } = memoryLocation({ path: compact ? '/' : '/studio', static: true });
+    render(<Router hook={hook}><Studio compact={compact} /></Router>);
+    expect(await screen.findByRole('button', { name: '选择厂商' })).toHaveTextContent('自动');
+    typePrompt(screen.getByLabelText('生图 prompt'), '城堡');
+    await waitFor(() => expect(screen.getByLabelText('提交生成')).not.toBeDisabled());
+    fireEvent.click(screen.getByLabelText('提交生成'));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
+    const payload = JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs')![1]!.body));
+    expect(payload.alias).toBeUndefined();
+    expect(payload.model).toBe('doubao-seedream-5-0-260128');
+  });
+
+  it('「自动」的模型列表显示全部模型和它们的供应商', async () => {
+    withRoutes();
+    renderStudio();
+    fireEvent.click(await screen.findByRole('button', { name: '选择模型' }));
+    const list = await screen.findByRole('listbox', { name: '选择模型列表' });
+    expect(list).toHaveTextContent('GPT Image 2');
+    expect(list).toHaveTextContent('oa · volc');
+  });
+
+  it('选了具体厂商仍按该 KEY 提交', async () => {
+    localStorage.setItem('studio:selection', JSON.stringify({ providerAlias: 'oa', model: 'gpt-image-2' }));
+    const fetchMock = withRoutes();
+    renderStudio();
+    expect(await screen.findByRole('button', { name: '选择厂商' })).not.toHaveTextContent('自动');
+    typePrompt(screen.getByLabelText('生图 prompt'), '城堡');
+    await waitFor(() => expect(screen.getByLabelText('提交生成')).not.toBeDisabled());
+    fireEvent.click(screen.getByLabelText('提交生成'));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
+    const payload = JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs')![1]!.body));
+    expect(payload.alias).toBe('oa');
+  });
+});

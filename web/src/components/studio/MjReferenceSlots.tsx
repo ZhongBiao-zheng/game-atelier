@@ -189,6 +189,7 @@ export function MjReferenceSlots({
   onChange,
   version,
   srefCodeActive = false,
+  evolink = false,
 }: {
   refs: MjRefSlots;
   onChange: (refs: MjRefSlots) => void;
@@ -196,6 +197,7 @@ export function MjReferenceSlots({
   version: string;
   /** 编号式 sref 与图片式 sref 互斥；只禁用槽，不删画师已选文件。 */
   srefCodeActive?: boolean;
+  evolink?: boolean;
 }) {
   const [limitNotice, setLimitNotice] = useState(false);
   useEffect(() => {
@@ -214,7 +216,7 @@ export function MjReferenceSlots({
           每个参考槽最多 4 张
         </span>
       )}
-      {SLOTS.map(({ key, label, caption }, index) => {
+      {SLOTS.filter(slot => !evolink || slot.key === 'image' || slot.key === 'sref').map(({ key, label, caption }, index) => {
         const gated = key === 'cref' || key === 'oref';
         const versionOff = gated && !refSlotSupported(key, version);
         const codeOff = key === 'sref' && srefCodeActive;

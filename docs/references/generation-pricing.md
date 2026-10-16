@@ -14,10 +14,22 @@
 | Tuzi default GPT Image 2 固定 1K 型号 | `TUZI_GPT_IMAGE_2_1K_YUAN_PER_IMAGE` | 元 / 张 |
 | Tuzi 其他已核实型号／分组 | `TUZI_GROUP_YUAN_PER_IMAGE` | 元 / 张 |
 | Tuzi default Midjourney | `TUZI_MIDJOURNEY_YUAN_PER_TASK` | 元 / 任务，拆成四张仍只计一次 |
+| EvoLink Midjourney V8.2 | `EVOLINK_MIDJOURNEY_USD_PER_REQUEST` | 美元 / 请求，最多四张结果仍只计一次 |
 | TokenDance Seedream | `TOKEN_DANCE_YUAN_PER_IMAGE` | 元 / 张 |
 | 火山 Ark Seedream | `ARK_SEEDREAM_YUAN_PER_IMAGE` | 元 / 张 |
 | 火山 Ark Seedance | `ARK_SEEDANCE_YUAN_PER_MILLION_TOKENS` | 元 / 百万输出 token |
 | 阿里 DashScope HappyHorse | `HAPPYHORSE_1_0_YUAN_PER_SECOND`、`HAPPYHORSE_1_1_YUAN_PER_SECOND` | 元 / 秒 |
+
+## EvoLink Midjourney V8.2：2026-10-15 核实
+
+来源为 EvoLink [Midjourney V8.2 模型页](https://evolink.ai/zh/midjourney-v8-2)。
+本次仅接入 `mj-v8.2`：普通生成固定 Fast / Standard，外图局部编辑由
+`params.image_edit` 切换到 `mj-v8.2-upload-paint`，固定 Fast。具体美元金额维护于价格表，
+对应 5.4 / 8.1 credits；两条路由都按请求计费，一次最多四张，`n` 不参与费用倍乘。
+
+估价仅匹配 EvoLink 官方 API 地址及精确模型，沿用现有 USD × 7 的人民币展示规则，
+该换算仅为估算。EvoLink 不使用 Tuzi `billing_group`。其他 EvoLink 型号、HD、Draft
+及尚未接入的派生操作不在本次价格承诺内。实际费用和历史快照仍遵循下文规则。
 
 ## Tuzi 香蕉 Pro：2026-10-12 更新
 

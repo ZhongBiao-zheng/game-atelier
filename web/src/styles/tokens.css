@@ -242,6 +242,22 @@
       0 4px 16px 0 var(--scrim-soft);
   }
 
+  /* 图片编辑器底板与扩图的待生成区域：点阵表示「这里会被生成」。 */
+  .edit-dot-grid {
+    background-image: radial-gradient(color-mix(in srgb, var(--foreground) 9%, transparent) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  .edit-dot-grid-dense {
+    background-image: radial-gradient(color-mix(in srgb, var(--foreground) 22%, transparent) 1px, transparent 1px);
+    background-size: 12px 12px;
+  }
+  /* 透明像素用棋盘格显示，看得出发给厂商的图哪里是透明的。 */
+  .edit-checker {
+    background-color: #fff;
+    background-image: conic-gradient(#d4d4d4 25%, transparent 0 50%, #d4d4d4 0 75%, transparent 0);
+    background-size: 10px 10px;
+  }
+
   /* 导航选中态金属描边环：conic 渐变只显在 1px 边框环上（mask 镂空中心）——复刻 tapnow header。
      不强设 position：宿主（滑动药丸）自带 absolute 定位，强加 relative 反而会覆盖它的 absolute
      （同 layer 同特异性，源序靠后会赢）；absolute 宿主本身就是 ::before 的包含块。 */

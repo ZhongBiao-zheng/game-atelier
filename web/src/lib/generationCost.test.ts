@@ -8,6 +8,55 @@ import {
 import { normalizeStudioSizeForModel } from './studioSize';
 
 describe('estimateGenerationCost', () => {
+  it.each([1, 2, 4])('prices EvoLink MJ V8.2 once for %s outputs', (count) => {
+    const request = {
+      provider: { provider: 'evolink', baseUrl: 'https://api.evolink.ai/v1' },
+      model: { id: 'mj-v8.2', protocol: 'evolink' }, kind: 'image' as const, count,
+    };
+    expect(estimateGenerationCost(request)).toBe(0.56);
+    expect(estimateGenerationCost({ ...request, imageEdit: true })).toBe(0.84);
+    expect(estimateGenerationCost({
+      ...request, provider: { ...request.provider, billingGroup: 'default' },
+    })).toBe(0.56);
+  });
+
+  it('keeps unimplemented EvoLink models and other channels unpriced', () => {
+    const request = {
+      provider: { provider: 'evolink', baseUrl: 'https://api.evolink.ai/v1' },
+      model: { id: 'mj-v8.2', protocol: 'evolink' }, kind: 'image' as const,
+    };
+    for (const id of ['mj-v8.1', 'mj-v8.2-upload-paint', 'mj-v8.2-remix', 'gpt-image-2']) {
+      expect(estimateGenerationCost({ ...request, model: { id } })).toBeNull();
+    }
+    expect(estimateGenerationCost({
+      ...request, model: { ...request.model, protocol: 'openai' },
+    })).toBeNull();
+    expect(estimateGenerationCost({
+      ...request, provider: { provider: 'evolink', baseUrl: 'https://other.example/v1' },
+    })).toBeNull();
+    expect(estimateGenerationCost({
+      ...request, provider: { provider: 'custom', baseUrl: 'https://api.evolink.ai/v1' },
+    })).toBeNull();
+    expect(estimateGenerationCost({
+      ...request, provider: { provider: 'custom', baseUrl: 'https://api.tu-zi.com/v1',
+        billingGroup: 'default' },
+    })).toBeNull();
+  });
+
+  it('uses the upload-paint request price when freezing an EvoLink image edit', () => {
+    const key = {
+      alias: 'EvoLink', provider: 'evolink', base_url: 'https://api.evolink.ai/v1',
+      access_key: 'masked', secret_key: null, capabilities: [], notes: '',
+      created_at: '2026-10-15T00:00:00Z',
+      models: [{ id: 'mj-v8.2', name: 'Midjourney V8.2', modality: 'image' as const,
+        protocol: 'evolink' }],
+    };
+    expect(estimateGenerationCostForSubmission(key, 'mj-v8.2', 'image', { n: 4 })).toBe(0.56);
+    expect(estimateGenerationCostForSubmission(key, 'mj-v8.2', 'image', {
+      n: 4, image_edit: { mode: 'outpaint' },
+    })).toBe(0.84);
+  });
+
   it.each(['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare'])(
     'prices OpenAI-HK %s at the confirmed per-image rate for every quality', (id) => {
       for (const quality of ['low', 'medium', 'high', 'auto', undefined] as const) {

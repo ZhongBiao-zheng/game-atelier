@@ -93,6 +93,18 @@ def paste_nodes_into_canvas(
     referenced = {
         value for node in raw_nodes for value in _strings(node) if value in source.content_versions
     }
+    # A saved edit's mask remains tied to its frozen source even when only the edit is copied.
+    pending = list(referenced)
+    while pending:
+        version = source.content_versions[pending.pop()]
+        if version.origin.kind != "user_mask":
+            continue
+        source_id = version.origin.source_version_id
+        if source_id not in source.content_versions:
+            raise CanvasDocumentError("canvas_paste_source_missing", "蒙版的源图版本不存在。")
+        if source_id not in referenced:
+            referenced.add(source_id)
+            pending.append(source_id)
     timestamp = _now()
     mapping: dict[str, str] = {}
     versions: list[CanvasContentVersion] = []
@@ -105,10 +117,19 @@ def paste_nodes_into_canvas(
         versions.append(copied)
         if write is not None:
             writes.append(write)
+    copied_by_id = {version.version_id: version for version in versions}
+    for old_id, new_id in mapping.items():
+        origin = source.content_versions[old_id].origin
+        if origin.kind == "user_mask":
+            copied_by_id[new_id] = copied_by_id[new_id].model_copy(update={
+                "origin": origin.model_copy(update={
+                    "source_version_id": mapping[origin.source_version_id],
+                }),
+            })
+    pasted_ids = {node.id for node in nodes}
     pasted = _NODES.validate_python([
-        _detached(_rewritten(node, mapping)) for node in raw_nodes
+        _detached(_rewritten(node, mapping), pasted_ids) for node in raw_nodes
     ])
-    pasted_ids = {node.id for node in pasted}
     kept_connections = [
         connection for connection in connections
         if connection.source_node_id in pasted_ids and connection.target_node_id in pasted_ids
@@ -131,7 +152,7 @@ def paste_nodes_into_canvas(
             "connections": [*current.connections, *kept_connections],
             "content_versions": {
                 **current.content_versions,
-                **{version.version_id: version for version in versions},
+                **copied_by_id,
             },
         })
         # model_copy 不跑校验：落盘前按 CanvasDocument 整体校验一次。
@@ -151,7 +172,7 @@ def _strings(value: Any):
             yield from _strings(item)
 
 
-def _detached(node: dict[str, Any]) -> dict[str, Any]:
+def _detached(node: dict[str, Any], pasted_ids: set[str]) -> dict[str, Any]:
     """运行态与批次归属留在源画布：进行中的 run 和批次绑定在目标画布里没有对应的 job。"""
     data = node.get("data")
     if isinstance(data, dict):
@@ -160,4 +181,8 @@ def _detached(node: dict[str, Any]) -> dict[str, Any]:
             **({"active_run_id": None} if "active_run_id" in data else {}),
             **({"batch_result": None} if "batch_result" in data else {}),
         }}
+        if node.get("type") == "image_edit":
+            for field in ("source_node_id", "reference_node_id"):
+                if node["data"].get(field) not in pasted_ids:
+                    node["data"][field] = None
     return node

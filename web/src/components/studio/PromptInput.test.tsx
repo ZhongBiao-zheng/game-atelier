@@ -34,6 +34,21 @@ function renderWith(model: string) {
 }
 
 describe('PromptInput 编辑区', () => {
+  it('EvoLink 隐藏角色和 Omni 参考槽并固定四张，保留图片与风格参考', () => {
+    const evoKey: KeyView = { ...hkKey, alias: 'EvoLink', provider: 'evolink',
+      base_url: 'https://api.evolink.ai/v1', models: [{ name: 'Midjourney V8.2', id: 'mj-v8.2', modality: 'image', protocol: 'evolink' }] };
+    render(<PromptInput onSubmit={vi.fn()} providers={[evoKey]} providerAlias="EvoLink"
+      model="mj-v8.2" onMjRefsChange={vi.fn()} count={1} />);
+    expect(screen.queryByLabelText('上传角色参考图')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('上传 Omni 参考图')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('上传垫图')).toBeInTheDocument();
+    expect(screen.getByLabelText('上传风格参考图')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '选择出图数量' })).toHaveTextContent('4 张');
+    fireEvent.click(screen.getByRole('button', { name: 'Midjourney 参数' }));
+    expect(screen.queryByLabelText('选择版本')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('profile')).not.toBeInTheDocument();
+    cleanup();
+  });
   it('隐藏原生滚动条并保留纵向滚动', () => {
     renderWith('gpt-image-2');
     const editor = screen.getByRole('textbox', { name: '生图 prompt' });

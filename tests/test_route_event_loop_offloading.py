@@ -144,16 +144,32 @@ def test_canvas_package_inspection_runs_off_the_event_loop(client, monkeypatch):
     assert on_loop == [False]
 
 
-def test_canvas_mask_edit_submits_off_the_event_loop(client, monkeypatch):
+def test_canvas_image_edit_submits_off_the_event_loop(client, monkeypatch):
     project_id = _create_project(client)
     on_loop = _patch(
-        monkeypatch, "character_workflow.lib.canvas_runs", "submit_mask_edit_run",
+        monkeypatch, "character_workflow.lib.canvas_runs", "submit_image_edit_run",
         short_circuit=lambda: KeyError("short-circuited by the test"),
     )
     response = client.post(
-        f"/api/canvas/projects/{project_id}/runs/mask-edit",
+        f"/api/canvas/projects/{project_id}/runs/image-edit",
+        json={"surface_node_id": "image-edit-1", "expected_revision": 0, "requested_count": 1},
+    )
+    assert response.status_code == 404, response.text
+    assert on_loop == [False]
+
+
+def test_canvas_image_edit_save_runs_off_the_event_loop(client, monkeypatch):
+    import json
+    project_id = _create_project(client)
+    on_loop = _patch(
+        monkeypatch, "character_workflow.lib.canvas_image_edits", "save_image_edit",
+        short_circuit=lambda: KeyError("short-circuited by the test"),
+    )
+    response = client.post(
+        f"/api/canvas/projects/{project_id}/image-edits",
+        data={"payload": json.dumps({"expected_revision": 0, "source_node_id": "source",
+                                      "source_version_id": "version"})},
         files={"mask_file": ("mask.png", _PNG, "image/png")},
-        data={"surface_node_id": "image-1", "expected_revision": "0", "requested_count": "1"},
     )
     assert response.status_code == 404, response.text
     assert on_loop == [False]

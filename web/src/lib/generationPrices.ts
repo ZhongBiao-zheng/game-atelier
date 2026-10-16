@@ -1,5 +1,5 @@
 /**
- * 生成费用价目表（人民币）——所有本地估价单价的唯一维护入口。
+ * 生成费用价目表——所有本地估价单价的唯一维护入口，币种随各表声明。
  *
  * 调价只改此文件的数字；渠道匹配与计费公式在 generationCost.ts。
  * 型号 key 使用小写，`.` / `_` 统一为 `-`。未知型号或分组不要填推测价格。
@@ -63,6 +63,11 @@ export const TUZI_GROUP_YUAN_PER_IMAGE: Record<string, Record<string, number>> =
 };
 // 元 / 任务：一次 imagine 拆出四张图仍只计一次。
 export const TUZI_MIDJOURNEY_YUAN_PER_TASK = 0.1505;
+
+// EvoLink MJ V8.2：美元 / 请求，2026-10-15 官方模型页核实；每次最多四张，不按 n 倍乘。
+// 人民币展示沿用 job_runner.USD_TO_CNY = 7，属于估算汇率。
+export const EVOLINK_MIDJOURNEY_USD_PER_REQUEST = { generation: 0.08, imageEdit: 0.12 };
+export const GENERATION_USD_TO_CNY = 7;
 
 // TokenDance：元 / 张。
 export const TOKEN_DANCE_YUAN_PER_IMAGE: Record<string, number> = {

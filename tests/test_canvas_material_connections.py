@@ -27,7 +27,7 @@ def test_material_connection_is_distinct_from_an_explicit_input_between_same_ima
 
 @pytest.mark.parametrize("source_type,target_type", [("text", "image"), ("image", "text")])
 def test_processing_material_connections_require_image_endpoints(source_type, target_type):
-    with pytest.raises(ValidationError, match="material connections require image nodes"):
+    with pytest.raises(ValidationError, match="material connections require images or image edit nodes"):
         CanvasDocument.model_validate(_document(source_type, target_type))
 
 

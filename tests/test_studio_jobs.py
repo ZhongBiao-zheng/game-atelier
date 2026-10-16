@@ -26,7 +26,10 @@ def client(tmp_path, monkeypatch):
             "access_key": "sk-fake",
             "secret_key": None,
             "capabilities": [],
-            "models": [],
+            "models": [
+                {"id": "gpt-image-2", "name": "gpt-image-2", "modality": "image"},
+                {"id": "doubao-seedance-2-0-fast-260128", "name": "seedance", "modality": "video"},
+            ],
             "notes": "",
             "created_at": _FAKE_CREATED_AT,
         }],
@@ -128,7 +131,7 @@ def test_post_studio_job_strips_forged_provider_task_ids(client):
     assert resp.json()["params"].get("provider_task_ids") is None
 
 
-def test_post_studio_job_uses_default_alias_when_omitted(client):
+def test_post_studio_job_routes_to_first_provider_when_alias_omitted(client):
     resp = client.post("/api/studio/jobs", json={
         "prompt": "x",
         "model": "gpt-image-2",
@@ -141,6 +144,7 @@ def test_post_studio_job_accepts_video_kind(client):
     resp = client.post("/api/studio/jobs", json={
         "prompt": "a calm sea, slow pan",
         "model": "doubao-seedance-2-0-fast-260128",
+        "alias": "default",
         "params": {"duration": 5, "resolution": "720p", "frame_mode": "auto"},
         "kind": "video",
     })
@@ -156,6 +160,7 @@ def test_post_studio_video_job_skips_n_gate(client):
     resp = client.post("/api/studio/jobs", json={
         "prompt": "x",
         "model": "doubao-seedance-2-0-fast-260128",
+        "alias": "default",
         "params": {},
         "kind": "video",
     })

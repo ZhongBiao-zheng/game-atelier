@@ -51,6 +51,11 @@ export const MJ_DEFAULTS: MjParams = {
   ow: null,
 };
 
+/** EvoLink V8.2 固定模型与速度，切换渠道时不继承 Tuzi 的专属参数。 */
+export function evolinkMjParams(params: MjParams): MjParams {
+  return { ...params, botType: 'MID_JOURNEY', mode: 'FAST', version: '8.2', profile: '', cw: null, ow: null };
+}
+
 export const MJ_BOT_TYPES: { value: MjBotType; label: string }[] = [
   { value: 'MID_JOURNEY', label: 'Midjourney' },
   { value: 'NIJI_JOURNEY', label: 'Niji（动漫）' },

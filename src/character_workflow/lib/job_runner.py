@@ -17,14 +17,16 @@ from character_workflow.lib.callers import dispatch, dispatch_audio, dispatch_te
 from character_workflow.lib.active_character import read_active
 from character_workflow.lib.jobs import (
     job_execution_lock,
+    job_lock,
     job_output_dir_for,
     list_jobs,
     read_job,
     update_job_params,
     update_job_phase,
     update_job_status,
+    write_job_under_lock,
 )
-from character_workflow.lib.schemas import AssetSlot, Job, JobStatus
+from character_workflow.lib.schemas import AssetSlot, Job, JobParams, JobStatus
 
 
 class JobRunnerError(RuntimeError):
@@ -46,6 +48,63 @@ def _actual_cost_recorder(job_id: str, params: dict[str, Any]) -> Callable[[floa
         update_job_params(job_id, params)
 
     return record
+
+
+class _RouteSwitched(Exception):
+    """「自动」任务换到了下一家供应商：不落 FAILED，由外层用新供应商重跑。"""
+
+
+def _switch_route(job_id: str, error: BaseException) -> bool:
+    """确定没执行的失败上把「自动」任务换到组内下一家；换了返回 True。
+
+    只看 params.route_id（选「自动」提交时写入）；厂商已经拿到订单号、或视频提交结果未确认的，
+    上游可能已经在跑，一律不换。图片尺寸按新供应商重新归一，归一失败的供应商跳过。
+    """
+    from character_workflow.lib import model_routes
+
+    job = read_job(job_id)
+    params = job.params
+    if not params.route_id or not job.alias or params.provider_task_ids:
+        return False
+    evo_state = params.evolink_state or {}
+    if (evo_state.get("uncertain") or evo_state.get("task_id")
+            or evo_state.get("terminal") in ("completed", "failed")):
+        return False
+    if any(item.get("outcome") == "unconfirmed" for item in params.video_submission_attempts or []):
+        return False
+    reason = model_routes.failover_reason(error)
+    if reason is None:
+        return False
+    modality = job.kind.value
+    model_routes.cool_down(modality, job.alias, reason)
+    tried = [*(params.route_tried or []), job.alias]
+    while (candidate := model_routes.next_member(modality, params.route_id, tried)) is not None:
+        key, model = candidate
+        next_params = params.model_dump(exclude_none=True)
+        if evo_state.get("terminal") == "rejected":
+            # Only a definite refusal can discard the previous channel's submission state.
+            next_params.pop("evolink_state", None)
+        if modality == "image":
+            from character_workflow.lib.image_size import normalize_image_size_params
+            try:
+                next_params = normalize_image_size_params(key, model.id, next_params)
+            except ValueError:
+                tried.append(key.alias)
+                continue
+        warning = f"{job.alias}{model_routes.FAILOVER_LABELS[reason]}，已改用 {key.alias}"
+        next_params.update(
+            route_tried=tried,
+            warnings=[*(params.warnings or []), warning],
+            video_submission_attempts=None,
+        )
+        with job_lock(job_id):
+            current = read_job(job_id)
+            write_job_under_lock(current.model_copy(update={
+                "alias": key.alias, "provider": key.provider, "model": model.id,
+                "params": JobParams(**next_params), "error": None,
+            }))
+        return True
+    return False
 
 
 class JobCanceled(JobRunnerError):
@@ -485,7 +544,6 @@ def _run_job_claimed(
     should_cancel_external: Callable[[], bool] | None = None,
     workshop_grant_is_active: Callable[[str, str, str], bool] | None = None,
 ) -> Job:
-    from character_workflow.lib.schemas import JobKind
     # 国产厂商 host 绕过系统/坏代理（NO_PROXY），覆盖 skill（run-job）与 Studio（后台任务）两条路。
     net_env.configure_proxy_bypass()
     job = read_job(job_id)
@@ -503,6 +561,23 @@ def _run_job_claimed(
         claim_execution(job, workshop_grant_is_active)
     if job.status == JobStatus.PENDING_CONFIRM:
         job = update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
+    # 「自动」任务在确定没执行的失败上换下一家：分支不落 FAILED，抛 _RouteSwitched 回到这里重跑。
+    while True:
+        try:
+            return _run_once(job, defer_terminal=defer_terminal, should_cancel=should_cancel,
+                             on_phase=on_phase)
+        except _RouteSwitched:
+            job = read_job(job_id)
+
+
+def _run_once(
+    job: Job,
+    *,
+    defer_terminal: bool,
+    should_cancel: Callable[[], bool],
+    on_phase: Callable[[str], None],
+) -> Job:
+    from character_workflow.lib.schemas import JobKind
     if job.kind == JobKind.TEXT:
         return _run_text_job(job)
     if job.kind == JobKind.VIDEO:
@@ -522,7 +597,10 @@ def _run_job_claimed(
                 # Callers own provider-specific params; the runner only persists their mutation.
                 update_job_params(job.job_id, params)
 
-            paths = dispatch(
+            render = dispatch
+            if params.get("image_edit"):
+                from character_workflow.lib.callers.image_edit import render
+            paths = render(
                 prompt=_with_reference_numbering(job.prompt, params),
                 model=job.model,
                 alias=job.alias,
@@ -558,6 +636,16 @@ def _run_job_claimed(
                     first_dims = first_dims or dims
             if first_dims:
                 params["actual_size"] = f"{first_dims[0]}x{first_dims[1]}"
+            if params.get("edit_inputs"):
+                # 编辑 caller 把发给厂商的图写在临时目录；跟产物放一起，结果节点才能展示过程。
+                inputs_dir = output_dir / "edit-inputs"
+                inputs_dir.mkdir(parents=True, exist_ok=True)
+                kept = []
+                for item in params["edit_inputs"]:
+                    target = inputs_dir / f"{Path(output_paths[0]).stem}-{Path(item['path']).name}"
+                    shutil.move(item["path"], target)
+                    kept.append({**item, "path": str(target)})
+                params["edit_inputs"] = kept
             job = _save_params(read_job(job.job_id), params)
             for output_path in output_paths:
                 _write_sidecar(Path(output_path), job, params)
@@ -571,13 +659,19 @@ def _run_job_claimed(
                 error=None,
             )
     except Exception as e:
+        from character_workflow.lib.callers.evolink import EvoLinkPendingError
         from character_workflow.lib.callers.tuzi_async import TuziAsyncPendingError
 
         # 停止请求压过一切：Tuzi 轮询被打断时抛的也是 PendingError，不能让它把 job 留在 PENDING。
         if should_cancel():
             update_job_status(job.job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
             raise JobCanceled("已按请求停止") from e
-        provider_task_pending = isinstance(e, TuziAsyncPendingError)
+        # Canvas settles to FAILED + explicit "continue query"; Studio owns a polling worker.
+        provider_task_pending = (isinstance(e, TuziAsyncPendingError)
+                                 or (isinstance(e, EvoLinkPendingError)
+                                     and job.namespace != "canvas"))
+        if not provider_task_pending and _switch_route(job.job_id, e):
+            raise _RouteSwitched() from e
         saved = update_job_status(
             job.job_id,
             status=(
@@ -651,6 +745,8 @@ def _run_text_job(job: Job) -> Job:
             error=None,
         )
     except Exception as error:
+        if _switch_route(job.job_id, error):
+            raise _RouteSwitched() from error
         update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(error))
         if isinstance(error, JobRunnerError):
             raise
@@ -690,6 +786,8 @@ def _run_audio_job(job: Job) -> Job:
             error=None,
         )
     except Exception as error:
+        if _switch_route(job.job_id, error):
+            raise _RouteSwitched() from error
         update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(error))
         if isinstance(error, JobRunnerError):
             raise
@@ -766,6 +864,8 @@ def _run_video_job(job: Job) -> Job:
         if should_cancel():
             update_job_status(job.job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
             raise JobCanceled("已按请求停止") from e
+        if _switch_route(job.job_id, e):
+            raise _RouteSwitched() from e
         update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(e))
         if isinstance(e, JobRunnerError):
             raise

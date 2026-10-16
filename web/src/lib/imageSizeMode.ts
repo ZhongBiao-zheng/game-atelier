@@ -1,5 +1,5 @@
 import type { JobParams } from '@/schema/jobs';
-import { imageControlCaps } from './imageControlCaps';
+import { imageControlCaps, type ImageControlCaps } from './imageControlCaps';
 import { imageFamily } from './modelFamily';
 import { defaultResolution, normalizeImagePixelSize, studioSizeFor, type Resolution } from './studioSize';
 
@@ -34,10 +34,11 @@ export function imageSizeError(params: JobParams, model?: string): string | null
 export function prepareImageSizeSubmission(
   model: string, provider: string | null | undefined, baseUrl: string | null | undefined,
   draft: JobParams,
+  caps?: ImageControlCaps,
 ): { params: JobParams; error?: never } | { params?: never; error: string } {
   const error = imageSizeError(draft, model);
   if (error) return { error };
-  const params = normalizeImageSizeParams(model, provider, baseUrl, draft);
+  const params = normalizeImageSizeParams(model, provider, baseUrl, draft, caps);
   const mode = imageSizeMode(params);
   if (hasImageSizeSelection(draft) && mode !== imageSizeMode(draft)) return { error: '当前模型不支持原尺寸模式，请重新选择' };
   if (mode === 'custom' && params.size) params.size = normalizeImagePixelSize(params.size, model, baseUrl);
@@ -49,12 +50,14 @@ export function prepareImageSizeSubmission(
   return { params };
 }
 
-/** Drafts retain inactive choices; the server freezes only the active sizing rule. */
+/** Drafts retain inactive choices; the server freezes only the active sizing rule.
+ *  `caps` 由「自动」传入路由组的能力交集；不传时按该渠道自己的能力。 */
 export function normalizeImageSizeParams(
   model: string, provider: string | null | undefined, baseUrl: string | null | undefined,
   current: JobParams,
+  capsOverride?: ImageControlCaps,
 ): JobParams {
-  const caps = imageControlCaps(model, provider, baseUrl);
+  const caps = capsOverride ?? imageControlCaps(model, provider, baseUrl);
   const { size: _size, resolution: _resolution, ...retained } = current;
   let mode = !hasImageSizeSelection(current) && caps.showAutoSize ? 'auto' as const : imageSizeMode(current);
   if ((mode === 'auto' && !caps.showAutoSize) || (mode === 'custom' && !caps.showCustomSize)) mode = 'ratio';

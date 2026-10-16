@@ -43,8 +43,9 @@ export interface CanvasUiPreferences {
   updated_at: string | null;
 }
 
+/** alias 为 null =「自动」：model 是路由 id，提交时服务端按组内顺序解析 KEY。 */
 export interface CanvasGenerationModelSelection {
-  alias: string;
+  alias: string | null;
   model: string;
 }
 
@@ -245,8 +246,34 @@ export interface CanvasPluginNode extends CanvasNodeBase {
   };
 }
 
+export interface CanvasImageEditSettings {
+  mode: 'inpaint' | 'outpaint';
+  width?: number; height?: number; x?: number; y?: number;
+}
+
+export interface CanvasImageEditEditorState {
+  strokes: Array<{ tool: 'brush' | 'eraser' | 'rectangle'; size: number; points: CanvasPoint[] }>;
+  frame: CanvasSize & CanvasPoint;
+  frame_ratio: string;
+}
+
+export interface CanvasImageEditNode extends CanvasNodeBase {
+  type: 'image_edit';
+  data: {
+    source_node_id: string | null;
+    source_version_id: string;
+    mask_version_id: string | null;
+    reference_node_id: string | null;
+    reference_version_id: string | null;
+    generation_draft: CanvasGenerationDraft | null;
+    options: CanvasImageEditSettings;
+    editor_state: CanvasImageEditEditorState;
+    active_run_id: string | null;
+  };
+}
+
 export type CanvasContentNode = CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode;
-export type CanvasNode = CanvasContentNode | CanvasGroupNode | CanvasPluginNode
+export type CanvasNode = CanvasContentNode | CanvasGroupNode | CanvasPluginNode | CanvasImageEditNode
   | CanvasBatchMaterialNode | CanvasLayerStackNode;
 
 export type CanvasVideoFrameSlot = 'first_frame' | 'last_frame';
@@ -271,7 +298,7 @@ export type CanvasConnection = CanvasInputConnection | CanvasMaterialConnection;
 export type CanvasContentOrigin =
   | { kind: 'user_edit' }
   | { kind: 'upload'; upload_id: string }
-  | { kind: 'user_mask'; source_version_id: string }
+  | { kind: 'user_mask'; source_version_id: string; expanded_canvas?: boolean }
   | { kind: 'job_output'; job_id: string; candidate_id: string }
   | { kind: 'layer_decomposition'; job_id: string; output_index: number }
   | {
@@ -377,8 +404,9 @@ export type CanvasAgentPermissionMode = 'review' | 'auto';
 export type CanvasAgentCreationMode = 'all' | 'image' | 'video';
 
 /** 模型偏好里的一项生成模型（别名 + 模型成对）。 */
+/** alias 为 null =「自动」：model 是路由 id，生成时按组内顺序解析 KEY。 */
 export interface CanvasAgentModelRef {
-  alias: string;
+  alias: string | null;
   model: string;
 }
 export type CanvasAgentEffort = 'low' | 'medium' | 'high' | 'xhigh';

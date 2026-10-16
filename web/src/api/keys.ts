@@ -1,4 +1,5 @@
 import { request, requestJson } from './http';
+import type { ModelRouteMember } from './models';
 export type ApiModality = 'image' | 'video' | 'audio' | 'llm' | string;
 export type ModelModality = 'text' | 'image' | 'video' | 'audio';
 export type ModelInputModality = 'text' | 'image' | 'video' | 'audio';
@@ -46,6 +47,8 @@ export interface KeyModel {
   protocol?: string | null;
   /** 模型可理解的输入模态；多模态文本能力只认明确声明。 */
   input_modalities?: ModelInputModality[];
+  /** 只出现在「自动」虚拟供应商上：该模型路由组的成员，按出图顺序。 */
+  members?: ModelRouteMember[];
 }
 
 /** 模型分类的统一判定：模型级标注优先，未标注按 key 级 modalities 兜底。 */

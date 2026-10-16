@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   MJ_DEFAULTS,
+  evolinkMjParams,
   mjParamsFromJob,
   mjParamsToJob,
   mjSummary,
@@ -13,6 +14,17 @@ import {
 } from './mjParams';
 
 describe('mjParamsToJob', () => {
+  it('EvoLink 切换渠道后固定 V8.2 Fast，清除个人 profile 与角色参考权重', () => {
+    const params = evolinkMjParams({ ...MJ_DEFAULTS, botType: 'NIJI_JOURNEY', mode: 'TURBO',
+      version: '6', profile: 'profile1', cw: 100, ow: 250, srefCode: '12345', sw: 250, chaos: 10 });
+    expect(params).toMatchObject({ botType: 'MID_JOURNEY', mode: 'FAST', version: '8.2',
+      profile: '', cw: null, ow: null, srefCode: '12345', sw: 250, chaos: 10 });
+    const out = mjParamsToJob(params);
+    expect(out).not.toHaveProperty('mj_profile');
+    expect(out).not.toHaveProperty('mj_cw');
+    expect(out).not.toHaveProperty('mj_ow');
+    expect(out).toMatchObject({ mj_sref_code: '12345', mj_sw: 250, mode: 'FAST', mj_version: '8.2' });
+  });
   it('决定产物外观的参数一律显式发，即使等于厂商默认值', () => {
     // 「省略等于默认」会在厂商改默认值那天静默改掉所有出图（本仓在 Ark 的 watermark 上踩过）。
     const out = mjParamsToJob(MJ_DEFAULTS);

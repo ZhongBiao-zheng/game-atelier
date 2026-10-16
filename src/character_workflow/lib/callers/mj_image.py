@@ -28,6 +28,7 @@ SUCCESS 后取 imageUrls[].url，并通过 GET /mj/task/{id}/image-seed 取回�
 from __future__ import annotations
 
 import time
+import hashlib
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,14 @@ _UPSTREAM_MESSAGES = {
 
 class MidjourneyError(RuntimeError):
     pass
+
+
+class MidjourneyPendingError(MidjourneyError):
+    """A known order lost its polling window, not a provider-declared failure."""
+
+
+def channel_fingerprint(key) -> str:
+    return hashlib.sha256(f"{_api_root(key)}\0{key.access_key}".encode()).hexdigest()
 
 
 def _api_root(key) -> str:
@@ -398,7 +407,7 @@ def _poll_task(
     url = f"{root}/mj/task/{task_id}/fetch"
     for resp in video_poll.poll_responses(
         url=url, headers=headers, timeout=60, max_polls=max_polls,
-        poll_interval=poll_interval, task_ref=task_id, error_cls=MidjourneyError,
+        poll_interval=poll_interval, task_ref=task_id, error_cls=MidjourneyPendingError,
         should_cancel=should_cancel,
     ):
         payload = _json(resp)
@@ -418,7 +427,7 @@ def _poll_task(
             raise MidjourneyError(
                 video_poll.with_task_ref(_err(payload, resp.status_code), task_id)
             )
-    raise MidjourneyError(f"Midjourney 任务轮询超时: {task_id}")
+    raise MidjourneyPendingError(f"MJ 查询暂时中断，可继续查询原任务，不会重新下单（task_id={task_id}）")
 
 
 def _fetch_image_seed(*, root: str, headers: dict[str, str], task_id: str) -> int | None:
@@ -488,7 +497,18 @@ def render(
     submissions = -(-wanted // 4)  # ceil：一次 imagine 出 4 张
 
     task_ids: list[str] = []
+    persist = _kwargs.get("on_params_changed")
+    saved_ids = list(params.get("mj_submission_ids") or [])
+    if params.get("mj_submit_uncertain"):
+        raise MidjourneyError("MJ 上次提交结果未确认，请先核对供应商订单；不会重复提交")
     for _ in range(submissions):
+        if len(task_ids) < len(saved_ids):
+            task_ids.append(saved_ids[len(task_ids)])
+            continue
+        if params_in is not None:
+            params_in["mj_submit_uncertain"] = True
+            if persist:
+                persist()
         resp = requests.post(f"{root}/mj/submit/imagine", headers=headers, json=body, timeout=120)
         payload = _json(resp)
         code = payload.get("code")
@@ -498,6 +518,11 @@ def render(
         if not task_id:
             raise MidjourneyError(f"Midjourney 提交后未返回任务 ID: {payload!r}")
         task_ids.append(task_id)
+        if params_in is not None:
+            params_in["mj_submission_ids"] = list(task_ids)
+            params_in["mj_submit_uncertain"] = False
+            if persist:
+                persist()
     if on_phase:
         on_phase("sent")
 
@@ -524,6 +549,7 @@ def render(
             if on_phase and not downloading:
                 downloading = True
                 on_phase("downloading")
-            paths.append(_download_png(url, out_dir, len(paths) + 1, task_ref=task_id))
+            path = _download_png(url, out_dir, len(paths) + 1, task_ref=task_id)
+            paths.append(path)
     _publish_actual_n(params_in, wanted, len(paths))
     return paths

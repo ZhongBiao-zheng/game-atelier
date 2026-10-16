@@ -23,6 +23,7 @@ from character_workflow.lib.schemas import (
     CanvasAudioNode,
     CanvasDocument,
     CanvasImageNode,
+    CanvasImageEditNode,
     CanvasMediaVersion,
     CanvasProject,
     CanvasProjectCover,
@@ -327,6 +328,98 @@ def _normalized_web_document(
 
     assert_batch_document_change(current, submitted)
 
+    previous_nodes = {node.id: node for node in current.nodes}
+    submitted_ids = {node.id for node in submitted.nodes}
+    edit_node_ids = {node.id for node in [*current.nodes, *submitted.nodes]
+                     if isinstance(node, CanvasImageEditNode)}
+    edit_result_ids = {edge.target_node_id for edge in [*current.connections, *submitted.connections]
+                       if edge.role == "material" and edge.source_node_id in edit_node_ids}
+    edit_runs = None
+
+    def runs_for(node_id):
+        nonlocal edit_runs
+        if edit_runs is None:
+            edit_runs = {}
+            for job in list_jobs():
+                if (job.canvas_project_id != current.project_id or not job.canvas_run
+                        or not job.params.image_edit):
+                    continue
+                context = job.canvas_run
+                for owner_id in (context.snapshot.surface_node_id, context.result_node_id):
+                    edit_runs.setdefault(owner_id, []).append(job)
+        return edit_runs.get(node_id, [])
+
+    nodes = []
+    for node in submitted.nodes:
+        previous = previous_nodes.get(node.id)
+        submitted_run = getattr(node.data, "active_run_id", None)
+        previous_run = getattr(previous.data, "active_run_id", None) if previous else None
+        # The Job is authoritative after a node was deleted and restored by undo. Restore
+        # only its real pending Run; a stale terminal Run from undo never becomes active.
+        related_runs = runs_for(node.id) if (
+            previous is None or submitted_run != previous_run or previous.type != node.type
+        ) else []
+        if related_runs and any(job.canvas_run.result_node_id == node.id for job in related_runs):
+            if not isinstance(node, CanvasImageNode):
+                raise CanvasDocumentError("canvas_run_server_owned", "运行节点不能更换类型")
+        if node.id in edit_result_ids and submitted_run != previous_run and not related_runs:
+            raise CanvasDocumentError("canvas_run_server_owned", "运行状态只能由服务端更新")
+        if related_runs and previous is None:
+            known_runs = {job.canvas_run.run_id for job in related_runs}
+            if submitted_run is not None and submitted_run not in known_runs:
+                raise CanvasDocumentError("canvas_run_server_owned", "运行状态只能由服务端更新")
+            pending = [job for job in related_runs if job.status == JobStatus.PENDING]
+            restored_run = pending[-1].canvas_run.run_id if pending else None
+            if not hasattr(node.data, "active_run_id"):
+                raise CanvasDocumentError("canvas_run_server_owned", "运行节点不能更换类型")
+            restored_data = {"active_run_id": restored_run}
+            result_runs = [job for job in related_runs if job.canvas_run.result_node_id == node.id]
+            if result_runs:
+                if not isinstance(node, CanvasImageNode):
+                    raise CanvasDocumentError("canvas_run_server_owned", "运行节点不能更换类型")
+                if not node.data.current_version_id:
+                    restored_versions = [candidate.version_id for job in result_runs
+                                         for candidate in job.canvas_run.candidates
+                                         if candidate.status == "succeeded"
+                                         and candidate.version_id in current.content_versions]
+                    if restored_versions:
+                        restored_data["current_version_id"] = restored_versions[0]
+            elif not isinstance(node, CanvasImageEditNode):
+                raise CanvasDocumentError("canvas_run_server_owned", "运行节点不能更换类型")
+            node = node.model_copy(update={"data": node.data.model_copy(update=restored_data)})
+            submitted_run = restored_run
+            if isinstance(node, CanvasImageEditNode) and any(
+                job.canvas_run.snapshot.inputs
+                and job.canvas_run.snapshot.inputs[0].version_id != node.data.source_version_id
+                for job in related_runs
+            ):
+                raise CanvasDocumentError("canvas_edit_source_immutable", "编辑节点的源图版本不可更换")
+        elif related_runs and submitted_run != previous_run:
+            raise CanvasDocumentError("canvas_run_server_owned", "运行状态只能由服务端更新")
+        if isinstance(node, CanvasImageEditNode):
+            if (not related_runs or previous is not None) and submitted_run != previous_run:
+                raise CanvasDocumentError("canvas_run_server_owned", "运行状态只能由服务端更新")
+            if (isinstance(previous, CanvasImageEditNode)
+                    and node.data.source_version_id != previous.data.source_version_id):
+                raise CanvasDocumentError("canvas_edit_source_immutable", "编辑节点的源图版本不可更换")
+            if isinstance(previous, CanvasImageEditNode) and node.data.source_node_id not in {
+                None, previous.data.source_node_id,
+            }:
+                restored_source = next((n for n in submitted.nodes if n.id == node.data.source_node_id), None)
+                # Restoring a deleted image node restores its identity, not its current
+                # pixels: it may already show B while this edit still owns fixed version A.
+                if (previous.data.source_node_id is not None
+                        or not isinstance(restored_source, CanvasImageNode)):
+                    raise CanvasDocumentError("canvas_edit_source_immutable", "编辑节点的源图关联不可更换")
+            data = node.data.model_copy(update={
+                "source_node_id": node.data.source_node_id if node.data.source_node_id in submitted_ids else None,
+                "reference_node_id": node.data.reference_node_id if node.data.reference_node_id in submitted_ids else None,
+            })
+            node = node.model_copy(update={"data": data})
+        elif isinstance(previous, CanvasImageEditNode):
+            raise CanvasDocumentError("canvas_edit_type_immutable", "图片编辑节点不能更换类型")
+        nodes.append(node)
+
     versions = dict(submitted.content_versions)
     for version_id, existing in current.content_versions.items():
         if versions.get(version_id) != existing:
@@ -353,7 +446,7 @@ def _normalized_web_document(
         "revision": current.revision + 1,
         "updated_at": timestamp,
         "content_versions": versions,
-        "nodes": _draft_sanitized_nodes(submitted.nodes),
+        "nodes": _draft_sanitized_nodes(nodes),
     })
     # 只动了视口（滚轮 / 缩放 / fitView）不算改文档：revision 是并发版本号，浏览器空闲时
     # 每滚一下都 +1 会让 Agent 的 expected_revision 连续撞 DOCUMENT_CONFLICT。视口照样落盘。
@@ -429,7 +522,7 @@ def save_canvas_upload(
 
 
 def canvas_node_has_pending_run(document: CanvasDocument, node: CanvasNode) -> bool:
-    run_id = node.data.active_run_id if node.type in {"image", "video", "audio", "text"} else None
+    run_id = node.data.active_run_id if node.type in {"image", "video", "audio", "text", "image_edit"} else None
     return bool(run_id) and any(
         job.canvas_project_id == document.project_id and job.canvas_run is not None
         and job.canvas_run.run_id == run_id

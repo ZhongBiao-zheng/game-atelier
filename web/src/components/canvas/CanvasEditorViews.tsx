@@ -13,7 +13,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, BookmarkPlus, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Pause, Pencil, Play, Plus, Settings2, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, BookmarkPlus, Check, ChevronRight, CircleHelp, Download, Ellipsis, Expand, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Paintbrush, Pause, Pencil, Play, Plus, Settings2, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
   useRef, useState,
@@ -29,6 +29,9 @@ import { CanvasBatchMaterialEditor, CanvasGroupFrame } from './CanvasBatchContro
 import { CanvasAudioPlayer } from './CanvasAudioPlayer';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
 import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
+import { CanvasImageEditPanel } from './CanvasImageEditPanel';
+import { CanvasImageEditSurface } from './CanvasImageEditSurface';
+import type { CanvasImageEditNode, CanvasMediaVersion } from '@/schema/canvas';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import {
@@ -68,6 +71,7 @@ import { formatCanvasBytes, formatCanvasImageInfo } from '@/components/canvas/ca
 import { CANVAS_UPSCALE_TARGETS, IMAGE_TOOLBAR_INLINE_LIMIT, orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
 import { isUploadedImageMaterialNode } from '@/components/canvas/canvasNodePanelInteraction';
 import { imageControlCaps } from '@/lib/imageControlCaps';
+import { isAutoProvider, providerForAlias, routeChannel, selectionImageCaps, storedAlias } from '@/lib/modelRoutes';
 import { VideoControls } from '@/components/studio/VideoControls';
 import {
   videoReferenceLimitLabel,
@@ -143,6 +147,8 @@ export interface CanvasNodeContextValue {
   uploadBatchImages?: (nodeId: string, files: File[], itemId?: string) => Promise<void>;
   projectId: string;
   layerParentByNodeId?: ReadonlyMap<string, { nodeId: string; title: string }>;
+  /** 局部修改 / 扩图结果节点 → 产生它的编辑节点。 */
+  editSourceByResultNodeId?: ReadonlyMap<string, CanvasImageEditNode>;
   locateNode?: (id: string) => void;
   focusVariableNodeId?: string | null;
   consumeVariableFocus?: () => void;
@@ -154,6 +160,8 @@ export interface CanvasNodeContextValue {
   /** 按 version_id 取内容。常量引用，不随版本表变化——原因见 CanvasEditor 里的说明。 */
   resolveVersion: (versionId: string | null | undefined) => CanvasContentVersion | undefined;
   keys: KeyView[];
+  /** 生成节点选模型用：「自动」+ 真实 KEY。缺省时只有真实 KEY。 */
+  generationProviders?: KeyView[];
   jobsByRunId: ReadonlyMap<string, Job>;
   jobsByResultNodeId: ReadonlyMap<string, Job[]>;
   submittingNodeIds: ReadonlySet<string>;
@@ -188,6 +196,7 @@ export interface CanvasNodeContextValue {
   reportError?: (message: string) => void;
   submitRun: (id: string) => Promise<void>;
   cancelRun: (runId: string) => Promise<void>;
+  resumeMjEdit?: (runId: string) => Promise<void>;
   dismissCandidate: (runId: string, candidateId: string) => Promise<void>;
   updateNode: (id: string, updater: (node: CanvasNode) => CanvasNode) => void;
   previewNodeResize?: (id: string, layout: { position: CanvasPoint; size: CanvasSize }) => void;
@@ -212,7 +221,9 @@ export interface CanvasNodeContextValue {
   toggleFreeResize: (node: CanvasContentNode) => void;
   openMediaOperation: (node: CanvasContentNode, tool: CanvasMediaTool) => void;
   removeBackground: (node: CanvasContentNode) => void;
-  openMaskEdit: (node: CanvasContentNode) => void;
+  openMaskEdit: (node: CanvasContentNode, mode?: 'inpaint' | 'outpaint') => void;
+  openImageEdit?: (nodeId: string) => void;
+  submitImageEdit?: (nodeId: string) => Promise<boolean>;
   openAngle: (node: CanvasContentNode) => void;
   upscaleImage: (node: CanvasContentNode, target: CanvasUpscaleTarget) => void;
   editVideo: (node: CanvasContentNode) => void;
@@ -293,18 +304,19 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const uploadedImageMaterial = Boolean(
     context && isUploadedImageMaterialNode(node, nodeContent),
   );
-  const generationPanelVisible = Boolean(
+  const nodePanelAllowed = Boolean(
     context
     && !context.batchBusy
     && selected
     && !context.multiSelectionActive
-    && draft
-    && !uploadedImageMaterial
     && !context.generationPanel.narrowViewport
     && context.generationPanel.dismissedNodeId !== node.id,
   );
+  const editSource = context?.editSourceByResultNodeId?.get(node.id);
+  const editPanelVisible = nodePanelAllowed && Boolean(editSource);
+  const generationPanelVisible = nodePanelAllowed && !editSource && Boolean(draft) && !uploadedImageMaterial;
   // 生成面板落在节点上方时会盖住标题栏与工具栏（含「上传附件」），这两样翻到节点下方去。
-  const chromeBelow = generationPanelVisible && panelSide === 'above';
+  const chromeBelow = (generationPanelVisible || editPanelVisible) && panelSide === 'above';
   const materialPickEligible = Boolean(context?.materialPick?.selectableNodeIds.has(node.id));
   const [shellElement, setShellElement] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -546,7 +558,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     >
       <NodeResizer
         isVisible={selected && !context.multiSelectionActive && !replacingMedia}
-        keepAspectRatio={node.type === 'image' && !node.data.display.free_resize}
+        keepAspectRatio={(node.type === 'image' && !node.data.display.free_resize) || node.type === 'image_edit'}
         minWidth={node.type === 'text' ? 220 : node.type === 'layer_stack' ? 560 : 240}
         minHeight={node.type === 'text' ? 120 : node.type === 'layer_stack' ? 320 : 150}
         maxWidth={CANVAS_MAX_NODE_SIZE}
@@ -685,6 +697,9 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
               <SwapIcon swapKey={Boolean(context.activeBatch.stopping)}>{context.activeBatch.stopping ? <LoaderCircle /> : <Square />}</SwapIcon>
             </MediaToolButton>
           )}
+          {node.type !== 'image_edit' && nodeJob?.status === 'failed' && Boolean(nodeJob.params.evolink_state?.poll_paused) && nodeJob.canvas_run && (
+            <MediaToolButton label="继续查询 MJ 原任务（不重新下单）" text="继续查询" onClick={() => void context.resumeMjEdit?.(nodeJob.canvas_run!.run_id)}><Eye /></MediaToolButton>
+          )}
           {emptyMediaNode ? (
             <MediaToolButton
               label={`上传${CANVAS_GENERATION_MODE_LABELS[emptyMediaNode.type]}`}
@@ -788,6 +803,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
             return;
           }
           if (node.type === 'layer_stack') context.previewLayerStack(node.id);
+          else if (node.type === 'image_edit') context.openImageEdit?.(node.id);
           else if (content) context.previewContent(content.version_id, node.title, node.id);
         }}
         onKeyDown={event => {
@@ -916,6 +932,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           {node.type === 'layer_stack' && (
             <CanvasLayerStackSurface node={node} context={context} />
           )}
+          {node.type === 'image_edit' && <CanvasImageEditSurface node={node} projectId={context.projectId}
+            source={context.resolveVersion(node.data.source_version_id) as CanvasMediaVersion | undefined} />}
           {node.type === 'plugin' && !content && (
             <div className="grid min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">
               插件节点
@@ -926,18 +944,18 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
       <CanvasNodeRunLiveRegion state={nodeRunState} />
       <CanvasNodeRunOverlay
         state={nodeRunState}
-        hasContent={Boolean(content || (node.type === 'layer_stack' && node.data.base_version_id))}
+        hasContent={Boolean(content || node.type === 'image_edit' || (node.type === 'layer_stack' && node.data.base_version_id))}
       />
-      {(canvasNodeAcceptsInput(node) || node.type === 'layer_stack') && (
-        <Handle type="target" position={Position.Left} className="canvas-node-handle" aria-label="连接到此节点">
+      {(canvasNodeAcceptsInput(node) || node.type === 'layer_stack' || node.type === 'image_edit') && (
+        <Handle type="target" isConnectable={node.type !== 'image_edit'} position={Position.Left} className="canvas-node-handle" aria-label="连接到此节点">
           <span className="canvas-node-handle-dot" aria-hidden="true" />
         </Handle>
       )}
-      {(canvasNodeProvidesOutput(node) || (node.type === 'layer_stack'
+      {(canvasNodeProvidesOutput(node) || node.type === 'image_edit' || (node.type === 'layer_stack'
         && (node.data.base_material_node_id || node.data.layers.some(layer => layer.material_node_id)))) && (
         <Handle
           type="source"
-          isConnectable={node.type !== 'layer_stack'}
+          isConnectable={node.type !== 'layer_stack' && node.type !== 'image_edit'}
           position={Position.Right}
           className="canvas-node-handle"
           aria-label="从此节点连接"
@@ -959,6 +977,18 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
             context={context}
             onClose={() => context.generationPanel.dismiss(node.id)}
           />
+        </CanvasNodeFloatingPanel>
+      )}
+      {editPanelVisible && editSource && context && (
+        <CanvasNodeFloatingPanel
+          nodeId={node.id}
+          anchor={shellElement}
+          surfaceRef={context.generationPanel.surfaceRef}
+          onSideChange={setPanelSide}
+          hiddenWhileDragging={dragging}
+        >
+          <CanvasImageEditPanel node={node} edit={editSource} context={context}
+            onClose={() => context.generationPanel.dismiss(node.id)} />
         </CanvasNodeFloatingPanel>
       )}
     </div>
@@ -1398,6 +1428,12 @@ function CanvasNodeToolbar({
   const layersReady = node.type === 'layer_stack' && Boolean(node.data.base_version_id)
     && !node.data.active_run_id && !submitting;
 
+  if (node.type === 'image_edit') return <>
+    <MediaToolButton label={`编辑 ${node.title}`} text="编辑" onClick={() => context.openImageEdit?.(node.id)}>{node.data.options.mode === 'outpaint' ? <Expand /> : <Paintbrush />}</MediaToolButton>
+    <MediaToolButton label={`生成 ${node.title}`} text="生成" disabled={submitting || !!node.data.active_run_id}
+      onClick={() => { void context.submitImageEdit?.(node.id); }}><Sparkles /></MediaToolButton>
+  </>;
+
   return (
     <>
       {node.type === 'text' && (
@@ -1793,6 +1829,18 @@ function ImageNodeToolbar({
         disabled={!currentVersionId || submitting || replacing}
         onClick={() => context.createImageFromSource?.(node.id)}
       ><Sparkles /></MediaToolButton>
+      <MediaToolButton
+        label={`局部修改 ${node.title}`}
+        text="局部修改"
+        disabled={!currentVersionId || submitting || replacing}
+        onClick={() => context.openMaskEdit(node, 'inpaint')}
+      ><Paintbrush /></MediaToolButton>
+      <MediaToolButton
+        label={`扩图 ${node.title}`}
+        text="扩图"
+        disabled={!currentVersionId || submitting || replacing}
+        onClick={() => context.openMaskEdit(node, 'outpaint')}
+      ><Expand /></MediaToolButton>
       {trailing}
       <DropdownMenu onOpenChange={updateMenuOpen}>
         <DropdownMenuTrigger asChild>
@@ -1892,28 +1940,35 @@ export function CanvasGenerationComposer({
   const acceptsModel = (model: KeyView['models'][number], key: KeyView) => (
     canvasGenerationModelSupportsMode(key, model, draft.mode, { editingExistingVideo })
   );
-  const availableKeys = context.keys.filter(key => key.models.some(model => acceptsModel(model, key)));
+  const providers = context.generationProviders ?? context.keys;
+  const availableKeys = providers.filter(key => key.models.some(model => acceptsModel(model, key)));
   const modelChoices: CanvasModelChoice[] = availableKeys.flatMap(key => key.models
     .filter(model => acceptsModel(model, key))
     .map(model => ({ key, model })));
-  const selectedKey = context.keys.find(key => key.alias === draft.alias);
+  const selectedKey = providerForAlias(providers, draft.alias);
   const models = (selectedKey?.models ?? []).filter(model => acceptsModel(model, selectedKey!));
   const selectedModel = models.find(model => model.id === draft.model);
+  // 「自动」按组内第一个成员算参数（一期就是它出图）；图片可选范围取成员交集。
+  const channel = selectedKey && selectedModel ? routeChannel(selectedKey, selectedModel) : null;
+  const channelModelId = channel?.model.id ?? draft.model;
+  const channelProtocol = channel?.model.protocol;
   const imageCaps = draft.mode === 'image' && selectedModel
-    ? imageControlCaps(
-        draft.model,
-        selectedKey?.provider,
-        selectedKey?.base_url,
-      )
+    ? isAutoProvider(selectedKey)
+      ? selectionImageCaps(selectedKey, draft.model)
+      : imageControlCaps(
+          draft.model,
+          selectedKey?.provider,
+          selectedKey?.base_url,
+        )
     : null;
   // 两层都要 memo：canvasVideoEditCaps 每次调用都返回新对象，展开一层又造一个新对象。
   // 下面那条纠偏 effect 依赖 videoCaps，不 memo 的话它每一次 render 都重跑，而它会 commit
   // 首尾帧连接。selectedModel 取自 context.keys 里的元素，引用本身是稳的。
   const rawVideoCaps = useMemo(
     () => draft.mode === 'video' && selectedModel
-      ? canvasVideoEditCaps(draft.model, selectedModel.protocol)
+      ? canvasVideoEditCaps(channelModelId, channelProtocol)
       : null,
-    [draft.mode, draft.model, selectedModel],
+    [draft.mode, channelModelId, channelProtocol, selectedModel],
   );
   const videoCaps = useMemo(
     () => rawVideoCaps && editingExistingVideo
@@ -2020,7 +2075,7 @@ export function CanvasGenerationComposer({
     mode: draft.mode,
     modelChoiceCount: modelChoices.length,
     keyCount: context.keys.length,
-    alias: draft.alias,
+    alias: selectedKey?.alias ?? draft.alias,
     modelSelected: Boolean(selectedModel),
     prompt: draft.prompt,
   });
@@ -2219,9 +2274,13 @@ export function CanvasGenerationComposer({
           choices={modelChoices}
           alias={draft.alias ?? null}
           model={draft.model}
-          onSelect={({ key, model }) => {
+          onSelect={({ key: chosenKey, model: chosenModel }) => {
+            const { key, model } = routeChannel(chosenKey, chosenModel);
             const nextImageParams = draft.mode === 'image'
-              ? normalizeCanvasImageParams(model.id, key.provider, draft.params, key.base_url) : null;
+              ? normalizeCanvasImageParams(
+                  model.id, key.provider, draft.params, key.base_url,
+                  isAutoProvider(chosenKey) ? selectionImageCaps(chosenKey, chosenModel.id) : undefined,
+                ) : null;
             if (draft.mode === 'image') {
               const next = nextImageParams!;
               const modeChanged = hasImageSizeSelection(draft.params) && imageSizeMode(next) !== imageSizeMode(draft.params);
@@ -2250,8 +2309,8 @@ export function CanvasGenerationComposer({
             }
             updateDraftWithHistory(current => ({
               ...current,
-              alias: key.alias,
-              model: model.id,
+              alias: storedAlias(chosenKey),
+              model: chosenModel.id,
               params: draft.mode === 'image'
                 ? nextImageParams!
                 : draft.mode === 'text'
@@ -2288,18 +2347,23 @@ export function CanvasGenerationComposer({
           {draft.mode === 'image' && imageCaps && (
           <CanvasImageSettings
             caps={imageCaps}
-            model={draft.model}
-            baseUrl={selectedKey?.base_url}
+            model={channelModelId}
+            baseUrl={channel?.key.base_url}
             params={draft.params}
             onPatch={patch => updateDraftWithHistory(current => {
               const merged = { ...current.params, ...patch };
+              const currentKey = providerForAlias(providers, current.alias);
+              const currentModel = currentKey?.models.find(model => model.id === current.model);
+              const target = currentKey && currentModel ? routeChannel(currentKey, currentModel) : null;
               return {
                 ...current,
                 params: normalizeCanvasImageParams(
-                  current.model,
-                  context.keys.find(key => key.alias === current.alias)?.provider,
+                  target?.model.id ?? current.model,
+                  target?.key.provider,
                   merged,
-                  context.keys.find(key => key.alias === current.alias)?.base_url,
+                  target?.key.base_url,
+                  currentKey && currentModel && isAutoProvider(currentKey)
+                    ? selectionImageCaps(currentKey, currentModel.id) : undefined,
                 ),
               };
             })}
@@ -2356,15 +2420,15 @@ export function CanvasGenerationComposer({
             }))}
           />
         )}
-          {draft.mode === 'audio' && selectedKey && selectedModel && (
+          {draft.mode === 'audio' && channel && (
           <CanvasAudioSettings
             params={draft.params}
             onPatch={patch => updateDraftWithHistory(current => ({
               ...current,
               params: normalizeCanvasAudioParams(
-                current.model,
-                selectedKey.provider,
-                selectedModel.protocol,
+                channel.model.id,
+                channel.key.provider,
+                channel.model.protocol,
                 { ...current.params, ...patch },
               ),
             }))}
@@ -3020,6 +3084,8 @@ function withGenerationDraft(node: CanvasNode, draft: CanvasGenerationDraft): Ca
 }
 
 function nodeIcon(node: CanvasNode) {
+  if (node.type === 'image_edit') return node.data.options.mode === 'outpaint'
+    ? <Expand className="size-3.5 shrink-0" /> : <Paintbrush className="size-3.5 shrink-0" />;
   if (node.type === 'text') return <Type className="size-3.5 shrink-0" />;
   if (node.type === 'image') return <FileImage className="size-3.5 shrink-0" />;
   if (node.type === 'video') return <FileVideo className="size-3.5 shrink-0" />;

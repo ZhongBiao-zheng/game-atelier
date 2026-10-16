@@ -1,9 +1,10 @@
 import { canvasInputSourceIds, canvasModeAcceptsNodeType, canvasTargetAcceptsSource } from '@/lib/canvasMentions';
 import { normalizeImageSizeParams } from '@/lib/imageSizeMode';
-import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
+import { imageControlCaps, MJ_IMAGES_PER_TASK, type ImageControlCaps, type Quality } from '@/lib/imageControlCaps';
+import { isAutoProvider, providerForAlias, routeChannel, routeMemberChoices, selectionImageCaps, storedAlias } from '@/lib/modelRoutes';
 import type { Job, JobParams } from '@/schema/jobs';
 import { modelModality, type KeyView } from '@/api/keys';
-import { imageFamily, supportsImageQuality } from '@/lib/modelFamily';
+import { imageFamily, isEvolinkMidjourney, supportsImageQuality } from '@/lib/modelFamily';
 import { maxReferenceImages } from '@/lib/referenceLimits';
 import {
   normalizeAudioFormat,
@@ -90,7 +91,7 @@ function canvasPlacementDirectionRank({ x, y }: { x: number; y: number }) {
 
 export function sizeLockedToCanvasVersion(
   current: CanvasNode['size'],
-  version: CanvasMediaVersion,
+  version: Pick<CanvasMediaVersion, 'width' | 'height'>,
 ) {
   if (!version.width || !version.height) return current ?? CANVAS_DEFAULT_NODE_SIZE;
   const ratio = version.width / version.height;
@@ -170,6 +171,14 @@ export function canvasNodeRenderedSize(
   versions: Readonly<Record<string, CanvasContentVersion>>,
 ): CanvasSize {
   if (node.type === 'text') return node.size ?? CANVAS_TEXT_NODE_DEFAULT_SIZE;
+  if (node.type === 'image_edit') {
+    // 编辑节点按输出画框比例显示：扩图 16:9 节点就是 16:9，局部修改与源图同比例。
+    const { frame } = node.data.editor_state;
+    const source = versions[node.data.source_version_id];
+    const target = frame.width > 0 && frame.height > 0 ? frame
+      : source?.kind === 'image' ? source : null;
+    return target ? sizeLockedToCanvasVersion(node.size, target) : node.size ?? CANVAS_DEFAULT_NODE_SIZE;
+  }
   if ((node.type !== 'image' && node.type !== 'video') || node.data.display.free_resize || !node.data.current_version_id) {
     return node.size ?? CANVAS_DEFAULT_NODE_SIZE;
   }
@@ -562,7 +571,60 @@ export function canvasNodeAcceptsInput(node: CanvasNode) {
   return node.type !== 'group'
     && node.type !== 'plugin'
     && node.type !== 'batch_material'
-    && node.type !== 'layer_stack';
+    && node.type !== 'layer_stack'
+    && node.type !== 'image_edit';
+}
+
+/** 删除关系节点不删除固定图片版本；仅断开可选的画布定位引用。 */
+export function detachMissingImageEditNodes(document: CanvasDocument): CanvasDocument {
+  const ids = new Set(document.nodes.map(node => node.id));
+  return { ...document, nodes: document.nodes.map(node => {
+    if (node.type !== 'image_edit') return node;
+    const source = ids.has(node.data.source_node_id ?? '') ? node.data.source_node_id : null;
+    const reference = ids.has(node.data.reference_node_id ?? '') ? node.data.reference_node_id : null;
+    return source === node.data.source_node_id && reference === node.data.reference_node_id ? node
+      : { ...node, data: { ...node.data, source_node_id: source, reference_node_id: reference } };
+  }) };
+}
+
+/** 生成不是可撤销的画布操作：新结果进入当时已有的历史快照，之后显式删除仍可撤销/重做。 */
+export function retainNewImageEditResults(snapshot: CanvasDocument, current: CanvasDocument,
+  insertedIds: ReadonlySet<string>): CanvasDocument {
+  const editIds = new Set(current.nodes.filter(node => node.type === 'image_edit').map(node => node.id));
+  const resultIds = new Set(current.connections.filter(edge => edge.role === 'material'
+    && editIds.has(edge.source_node_id) && insertedIds.has(edge.target_node_id)).map(edge => edge.target_node_id));
+  const snapshotIds = new Set(snapshot.nodes.map(node => node.id));
+  const additions = current.nodes.filter(node => resultIds.has(node.id) && !snapshotIds.has(node.id));
+  if (!additions.length) return snapshot;
+  const addedIds = new Set(additions.map(node => node.id));
+  return { ...snapshot, nodes: [...snapshot.nodes, ...additions], connections: [
+    ...snapshot.connections,
+    ...current.connections.filter(edge => edge.role === 'material' && addedIds.has(edge.target_node_id)
+      && snapshotIds.has(edge.source_node_id)),
+  ] };
+}
+
+/** 编辑配置可撤销，运行态与运行期间新到达的产物不属于配置历史。 */
+export function restoreImageEditRunState(snapshot: CanvasDocument, current: CanvasDocument,
+  jobs: ReadonlyMap<string, Job>): CanvasDocument {
+  const liveNodes = new Map(current.nodes.map(node => [node.id, node]));
+  const resultIds = new Set([...jobs.values()].flatMap(job => {
+    const run = job.canvas_run;
+    return run?.snapshot.normalized_params.image_edit ? [run.result_node_id] : [];
+  }));
+  const nodes = snapshot.nodes.map(node => {
+    const live = liveNodes.get(node.id);
+    if (node.type === 'image_edit') return { ...node, data: { ...node.data,
+      active_run_id: live?.type === 'image_edit' ? live.data.active_run_id : null,
+    } };
+    if (node.type !== 'image' || live?.type !== 'image' || !resultIds.has(node.id)) return node;
+    const pendingSnapshot = node.data.active_run_id
+      && (node.data.active_run_id !== live.data.active_run_id || !node.data.current_version_id);
+    return { ...node, data: { ...node.data, active_run_id: live.data.active_run_id,
+      current_version_id: pendingSnapshot ? live.data.current_version_id : node.data.current_version_id,
+    } };
+  });
+  return { ...snapshot, nodes };
 }
 
 export function canvasNodeProvidesContent(node: CanvasNode): node is CanvasContentNode {
@@ -784,6 +846,8 @@ function isOpenAiHkBaseUrl(baseUrl: string | null | undefined) {
 }
 
 function canvasImageModelIsRoutable(key: KeyView, model: KeyView['models'][number]) {
+  if (key.provider === 'evolink') return isEvolinkMidjourney(model.id, key.provider)
+    && (!model.protocol || model.protocol === 'evolink');
   if (key.provider === 'nano_banana') return false;
   const family = imageControlCaps(model.id, key.provider).family;
   if (family === 'midjourney' || key.provider === 'openrouter') return true;
@@ -836,7 +900,13 @@ export function canvasGenerationModelSupportsMode(
   model: KeyView['models'][number],
   mode: CanvasGenerationDraft['mode'],
   options: { editingExistingVideo?: boolean } = {},
-) {
+): boolean {
+  // 「自动」的模型要组内每个成员都能跑：换到任何一家都不会因为能力不够失败。
+  if (isAutoProvider(key)) {
+    const members = routeMemberChoices(key, model);
+    return members.length > 0
+      && members.every(member => canvasGenerationModelSupportsMode(member.key, member.model, mode, options));
+  }
   return modelModality(model, key) === mode
     && (mode !== 'image' || canvasImageModelIsRoutable(key, model))
     && (mode !== 'video' || canvasVideoModelIsRoutable(key, model))
@@ -865,7 +935,7 @@ function preferredCanvasGenerationModel(
 ) {
   const selection = preference?.selection;
   if (!selection) return null;
-  const key = keys.find(candidate => candidate.alias === selection.alias);
+  const key = providerForAlias(keys, selection.alias);
   const model = key?.models.find(candidate => candidate.id === selection.model);
   return key && model && canvasGenerationModelSupportsMode(key, model, mode)
     ? { key, model }
@@ -892,7 +962,15 @@ function normalizedCanvasGenerationParams(
   model: KeyView['models'][number],
   mode: CanvasGenerationDraft['mode'],
   current: JobParams,
-) {
+): JobParams {
+  // 「自动」按组内第一个成员归一（一期就是它出图），图片尺寸 / 质量的可选范围取成员交集。
+  if (isAutoProvider(key)) {
+    const channel = routeChannel(key, model);
+    if (mode !== 'image') return normalizedCanvasGenerationParams(channel.key, channel.model, mode, current);
+    return normalizeCanvasImageParams(
+      channel.model.id, channel.key.provider, current, channel.key.base_url, selectionImageCaps(key, model.id),
+    );
+  }
   if (mode === 'image') {
     return normalizeCanvasImageParams(
       model.id,
@@ -916,7 +994,7 @@ export function canvasGenerationPreferenceForModel<M extends CanvasGenerationMod
 ): CanvasGenerationDefault<M> | null {
   if (!canvasGenerationModelSupportsMode(key, model, mode)) return null;
   return {
-    selection: { alias: key.alias, model: model.id },
+    selection: { alias: storedAlias(key), model: model.id },
     params: withoutUnrememberedParams(mode, normalizedCanvasGenerationParams(
       key,
       model,
@@ -949,7 +1027,7 @@ export function canvasGenerationDefaultFromDraft(
   draft: CanvasGenerationDraft,
   current: CanvasGenerationDefault,
 ): CanvasGenerationDefault | null {
-  if (!draft.alias || !draft.model) return null;
+  if (!draft.model) return null;
   const params: Record<string, unknown> = Object.fromEntries(
     CANVAS_REMEMBERED_PARAM_KEYS[draft.mode].flatMap(key => (
       draft.params[key] === undefined || draft.params[key] === null ? [] : [[key, draft.params[key]]]
@@ -992,7 +1070,7 @@ export function createCanvasGenerationDraft(
     prompt: options.prompt ?? '',
     input_policy: 'all_connected',
     model,
-    alias: selected?.key.alias ?? null,
+    alias: selected ? storedAlias(selected.key) : null,
     params,
     updated_at: options.now ?? new Date().toISOString(),
   };
@@ -1003,7 +1081,7 @@ export function resolveCanvasGenerationDraft(
   keys: readonly KeyView[],
   textPreference?: CanvasGenerationDefault<'text'>,
 ): CanvasGenerationDraft | null {
-  if (!('generation_draft' in node.data)) return null;
+  if (node.type === 'image_edit' || !('generation_draft' in node.data)) return null;
   if (node.data.generation_draft) return node.data.generation_draft;
   // 文本的生成能力由节点类型决定，MCP / 素材库创建的正文也可在首次操作时配置。
   return node.type === 'text' ? createCanvasGenerationDraft(keys, 'text', {
@@ -1098,10 +1176,14 @@ export function normalizeCanvasImageParams(
   provider: string | null | undefined,
   current: JobParams,
   baseUrl?: string | null,
+  capsOverride?: ImageControlCaps,
 ): JobParams {
-  const caps = imageControlCaps(model, provider, baseUrl);
+  const caps = capsOverride ?? imageControlCaps(model, provider, baseUrl);
   const { reference_images: _images, reference_videos: _videos, reference_audios: _audios, quality, ...retained } = current;
-  const params = normalizeImageSizeParams(model, provider, baseUrl, retained);
+  const params = normalizeImageSizeParams(model, provider, baseUrl, retained, capsOverride);
+  if (isEvolinkMidjourney(model, provider)) {
+    for (const field of ['bot_type', 'mode', 'mj_version', 'mj_profile', 'mj_cref', 'mj_cw', 'mj_oref', 'mj_ow']) delete params[field];
+  }
   params.n = caps.family === 'midjourney' ? MJ_IMAGES_PER_TASK : Math.max(1, Math.min(4, Number(current.n) || 1));
   if (caps.qualities?.length) {
     params.quality = caps.qualities.includes(quality as Quality) ? quality : caps.qualities[0];

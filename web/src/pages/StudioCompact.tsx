@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useHeicAsJpeg } from '@/lib/heicImages';
 import { useLocation } from 'wouter';
 
 import { createStudioJob, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
+import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { PromptInput } from '@/components/studio/PromptInput';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import type { RoundConfig } from '@/components/studio/RoundList';
@@ -13,6 +14,7 @@ import { hasSrefCode, MJ_DEFAULTS, mjParamsToJob, type MjParams } from '@/lib/mj
 import { EMPTY_MJ_REFS, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
+import { isAutoProvider, resolveChannel, sizeContext, withAutoProvider } from '@/lib/modelRoutes';
 import type { JobKind, JobParams } from '@/schema/jobs';
 import { readStudioDraft, writeStudioDraft } from './studioDraft';
 import { convergeModelSelection, modelsForKind } from './studioModelSelection';
@@ -59,10 +61,14 @@ export function StudioCompact() {
   const [pending, setPending] = useState(false);
   const [compactError, setCompactError] = useState<string | null>(null);
   const [keys, setKeys] = useState<KeyView[]>([]);
+  const [routes, setRoutes] = useState<ModelRoute[]>([]);
+  // 厂商列表 =「自动」+ 真实 KEY（同 Studio）。
+  const providers = useMemo(() => withAutoProvider(keys, routes), [keys, routes]);
   // 公告「快速添加」等别处改了密钥的模型列表：只刷新列表，不动当前选中的供应商 / 模型。
   useEffect(() => {
     const refresh = () => {
       void listKeys().then(resp => setKeys(resp.keys.filter(key => key.models.length > 0))).catch(() => undefined);
+      void listModelRoutes().then(setRoutes).catch(() => undefined);
     };
     window.addEventListener(KEYS_CHANGED_EVENT, refresh);
     return () => window.removeEventListener(KEYS_CHANGED_EVENT, refresh);
@@ -107,22 +113,25 @@ export function StudioCompact() {
     sizeParams, count, quality,
     videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
   ]);
-  const selectedModelObj = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
-  const videoCaps = videoControlCaps(model, selectedModelObj?.protocol);
+  const channel = resolveChannel(keys, providers.find((k) => k.alias === providerAlias), model);
+  const selectedModelObj = channel.key?.models.find((m) => m.id === channel.modelId);
+  const videoCaps = videoControlCaps(channel.modelId, selectedModelObj?.protocol);
 
   useEffect(() => {
     let cancelled = false;
-    listKeys()
-      .then((resp) => {
+    Promise.all([listKeys(), listModelRoutes().catch(() => [] as ModelRoute[])])
+      .then(([resp, loadedRoutes]) => {
         if (cancelled) return;
         const usable = resp.keys.filter((key) => key.models.length > 0);
         setKeys(usable);
+        setRoutes(loadedRoutes);
+        const choices = withAutoProvider(usable, loadedRoutes);
         const wantedAlias = draft?.providerAlias || saved.providerAlias;
         const wantedModel = draft?.model || saved.model;
         const savedKey = wantedAlias
-          ? usable.find((key) => key.alias === wantedAlias)
+          ? choices.find((key) => key.alias === wantedAlias)
           : undefined;
-        const selected = savedKey ?? usable[0];
+        const selected = savedKey ?? choices[0];
         setProviderAlias(selected?.alias ?? '');
         const savedModelValid = wantedModel && selected?.models.some((m) => m.id === wantedModel);
         // 没有可恢复的模型时取本类第一个；该 key 没有本类模型就先占一个，交给收敛 effect 换 key。
@@ -142,18 +151,19 @@ export function StudioCompact() {
 
   // 只在切换生成类型 / keys 加载时收敛；alias / model 不入依赖，用户手动改选不被抢回。
   useEffect(() => {
-    const next = convergeModelSelection(keys, kind, providerAlias, model);
+    const next = convergeModelSelection(providers, kind, providerAlias, model);
     if (!next) return;
     setProviderAlias(next.alias);
     setModel(next.model);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, keys]);
+  }, [kind, providers]);
 
   useEffect(() => {
     // 模型未定时不按兜底 caps 钳制，选了模型再按它的能力收。
     if (kind !== 'video' || !model) return;
-    const selModel = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
-    const caps = videoControlCaps(model, selModel?.protocol);
+    const selected = resolveChannel(keys, providers.find((k) => k.alias === providerAlias), model);
+    const selModel = selected.key?.models.find((m) => m.id === selected.modelId);
+    const caps = videoControlCaps(selected.modelId, selModel?.protocol);
     if (!caps.modes.includes(videoMode)) setVideoMode(caps.modes[0]);
     if (caps.ratios.length > 0 && !caps.ratios.includes(videoRatio)) setVideoRatio(caps.ratios[0]);
     if (caps.durations.length > 0 && !caps.durations.includes(duration)) setDuration(caps.durations[0]);
@@ -161,7 +171,7 @@ export function StudioCompact() {
       setVideoResolution(caps.resolutions[0]);
     }
     if (caps.qualities && !caps.qualities.includes(videoQuality)) setVideoQuality(caps.qualities[0]);
-  }, [kind, model, videoMode, videoRatio, duration, videoResolution, videoQuality, keys, providerAlias]);
+  }, [kind, model, videoMode, videoRatio, duration, videoResolution, videoQuality, keys, providers, providerAlias]);
 
   useEffect(() => {
     if (!providerAlias) return;
@@ -176,10 +186,10 @@ export function StudioCompact() {
 
   const handleSizeParamsChange = useCallback((patch: JobParams) => {
     setSizeParams(previous => {
-      const selected = keys.find(key => key.alias === providerAlias);
-      return normalizeImageSizeParams(model, selected?.provider, selected?.base_url, { ...previous, ...patch });
+      const size = sizeContext(providers, providers.find(key => key.alias === providerAlias), model);
+      return normalizeImageSizeParams(size.modelId, size.provider, size.baseUrl, { ...previous, ...patch }, size.caps);
     });
-  }, [keys, providerAlias, model]);
+  }, [providers, providerAlias, model]);
 
   const onSubmit = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
     const wantVideo = overrideConfig ? overrideConfig.kind === 'video' : kind === 'video';
@@ -189,14 +199,13 @@ export function StudioCompact() {
     }
     const effectiveAlias = overrideConfig?.alias ?? providerAlias;
     const effectiveModel = overrideConfig?.model ?? model;
-    const selectedKey = keys.find((item) => item.alias === effectiveAlias);
-    const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
+    const selectedKey = providers.find((item) => item.alias === effectiveAlias);
+    // 「自动」按组内第一个成员归一尺寸、估价；能力取全部成员的交集（同 Studio.onSubmit）。
+    const channel = resolveChannel(keys, selectedKey, effectiveModel);
+    const size = sizeContext(providers, selectedKey, effectiveModel);
+    const effectiveProvider = channel.key?.provider ?? overrideConfig?.provider;
     // 与 Studio.onSubmit 同一套判据：能力按模型族，provider 只在 openrouter 上改 size 语义。
-    const caps = imageControlCaps(
-      effectiveModel,
-      effectiveProvider,
-      selectedKey?.base_url,
-    );
+    const caps = selectedKey ? size.caps : imageControlCaps(effectiveModel, effectiveProvider, undefined);
     // MJ 一次 imagine 固定回 4 张方案（同 Studio.onSubmit）。
     const effectiveCount = caps.family === 'midjourney'
       ? MJ_IMAGES_PER_TASK
@@ -204,7 +213,7 @@ export function StudioCompact() {
     const rawSizeParams: JobParams = overrideConfig
       ? { size_mode: overrideConfig.sizeMode ?? 'ratio', size: overrideConfig.size, ratio: overrideConfig.ratio, resolution: overrideConfig.resolution }
       : sizeParams;
-    const preparedSize = prepareImageSizeSubmission(effectiveModel, effectiveProvider, selectedKey?.base_url, rawSizeParams);
+    const preparedSize = prepareImageSizeSubmission(size.modelId, effectiveProvider, size.baseUrl, rawSizeParams, caps);
     if (preparedSize.error) {
       setCompactError(preparedSize.error);
       return;
@@ -258,8 +267,8 @@ export function StudioCompact() {
         : {}),
     };
     const estimatedCost = estimateGenerationCostForSubmission(
-      selectedKey,
-      effectiveModel,
+      channel.key,
+      channel.modelId,
       'image',
       jobParams,
     );
@@ -269,7 +278,7 @@ export function StudioCompact() {
       await createStudioJob({
         prompt,
         ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
-        alias: effectiveAlias ?? undefined,
+        alias: isAutoProvider({ alias: effectiveAlias }) ? undefined : effectiveAlias ?? undefined,
         model: effectiveModel,
         params: jobParams,
       });
@@ -283,9 +292,9 @@ export function StudioCompact() {
 
   const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
     const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
-    const videoKeys = keys.filter((item) => videoModelsOf(item).length > 0);
+    const videoKeys = providers.filter((item) => videoModelsOf(item).length > 0);
     const selectedKey =
-      (overrideConfig?.alias ? keys.find((item) => item.alias === overrideConfig.alias) : undefined)
+      (overrideConfig?.alias ? providers.find((item) => item.alias === overrideConfig.alias) : undefined)
       ?? videoKeys.find((item) => item.alias === providerAlias)
       ?? videoKeys[0];
     const selectedVideoModels = selectedKey ? videoModelsOf(selectedKey) : [];
@@ -294,7 +303,8 @@ export function StudioCompact() {
       ?? (selectedVideoModels.some((m) => m.id === model) ? model : selectedVideoModels[0]?.id)
       ?? model;
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
-    const effectiveCaps = videoControlCaps(effectiveModel, selectedModel?.protocol);
+    const channel = resolveChannel(keys, selectedKey, effectiveModel);
+    const effectiveCaps = videoControlCaps(channel.modelId, selectedModel?.protocol);
 
     setPending(true);
     setCompactError(null);
@@ -353,8 +363,8 @@ export function StudioCompact() {
       ...(audPaths.length ? { reference_audios: audPaths } : {}),
     };
     const estimatedCost = estimateGenerationCostForSubmission(
-      selectedKey,
-      effectiveModel,
+      channel.key,
+      channel.modelId,
       'video',
       videoParams,
     );
@@ -364,7 +374,7 @@ export function StudioCompact() {
       await createStudioJob({
         prompt,
         ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
-        alias: effectiveAlias ?? undefined,
+        alias: isAutoProvider({ alias: effectiveAlias }) ? undefined : effectiveAlias ?? undefined,
         model: effectiveModel,
         params: videoParams,
         kind: 'video',
@@ -387,7 +397,7 @@ export function StudioCompact() {
         disabled={pending}
         value={promptText}
         onValueChange={setPromptText}
-        providers={keys}
+        providers={providers}
         providerAlias={providerAlias}
         model={model}
         sizeParams={sizeParams}

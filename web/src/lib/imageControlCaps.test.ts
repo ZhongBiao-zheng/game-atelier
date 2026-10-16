@@ -1,9 +1,20 @@
 import { describe, it, expect } from 'vitest';
 
 import { imageControlCaps } from './imageControlCaps';
+import { isEvolinkMidjourney } from './modelFamily';
 import { normalizeGptImagePixelSize, normalizeStudioPixelSizeForModel } from './studioSize';
 
 describe('imageControlCaps', () => {
+  it('EvoLink V8.2 保留比例，不开放通用质量、AUTO 或像素尺寸', () => {
+    expect(imageControlCaps('mj-v8.2', 'evolink', 'https://api.evolink.ai/v1')).toMatchObject({
+      family: 'midjourney', qualities: null, sizeKind: 'none',
+      showResolution: false, showCustomSize: false, showAutoSize: false,
+    });
+    expect(imageControlCaps('mj-v8.2', 'evolink').ratios).toContain('16:9');
+    expect(isEvolinkMidjourney('mj-v8.2', 'evolink')).toBe(true);
+    expect(isEvolinkMidjourney('mj-v8.2', 'custom')).toBe(false);
+    expect(isEvolinkMidjourney('mj-v8.2-upload-paint', 'evolink')).toBe(false);
+  });
   it('nano-banana: 仅比例 + 质量，无分辨率/自定义尺寸，size 传比例', () => {
     const c = imageControlCaps('nano-banana');
     expect(c.family).toBe('nano-banana');
