@@ -1,8 +1,8 @@
-import { Expand, LoaderCircle, Paintbrush, Settings2, Sparkles, X } from 'lucide-react';
+import { Expand, LoaderCircle, Paintbrush, Sparkles, X } from 'lucide-react';
 import { useState } from 'react';
 import { canvasMediaUrl } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
-import type { CanvasImageEditNode, CanvasMediaVersion, CanvasNode } from '@/schema/canvas';
+import type { CanvasImageEditNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 import type { CanvasNodeContextValue } from './CanvasEditorViews';
 
@@ -20,43 +20,49 @@ function inputLabel(role: EditInput['role'], outpaint: boolean) {
 
 const chip = 'inline-flex h-9 min-w-0 items-center gap-2 rounded-lg border border-border bg-background/40 px-3 text-sm text-foreground';
 
-/** 局部修改 / 扩图结果节点的面板：外观与生成面板一致，内容只读。
- *  参考图位放这次真正发给厂商的文件（原图、蒙版、引导图，透明处显示棋盘格），提示词是发出去的完整内容。
- *  再次生成与修改设置都回到编辑节点。 */
-export function CanvasEditResultPanel({ node, edit, context, onClose }: {
-  node: CanvasNode; edit: CanvasImageEditNode; context: CanvasNodeContextValue; onClose: () => void;
+/** 局部修改 / 扩图节点单击后的面板，沿用生成面板的框架。
+ *  参考图位：生成过且之后没改设置时，放上一次真正发给厂商的文件（原图、蒙版、引导图，透明处棋盘格），
+ *  提示词是发出去的完整内容；否则放源图与已保存的蒙版、当前提示词。 */
+export function CanvasImageEditPanel({ edit, context, onClose }: {
+  edit: CanvasImageEditNode; context: CanvasNodeContextValue; onClose: () => void;
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [promptExpanded, setPromptExpanded] = useState(false);
   const outpaint = edit.data.options.mode === 'outpaint';
-  const job = (context.jobsByResultNodeId.get(node.id) ?? []).filter(item => item.params.image_edit).at(-1);
-  const inputs = job?.params.edit_inputs ?? [];
-  const source = context.resolveVersion(edit.data.source_version_id) as CanvasMediaVersion | undefined;
   const draft = edit.data.generation_draft;
-  const prompt = job?.params.edit_prompt ?? job?.prompt ?? draft?.prompt ?? '';
+  const lastJob = [...context.jobsByRunId.values()]
+    .filter(job => job.canvas_run?.snapshot.surface_node_id === edit.id && job.params.edit_inputs?.length)
+    .sort((a, b) => a.submitted_at.localeCompare(b.submitted_at)).at(-1);
+  // 编辑器保存会刷新 draft.updated_at；晚于上次提交就说明设置已改，展示当前设置。
+  const job = lastJob && (!draft || Date.parse(draft.updated_at) <= Date.parse(lastJob.submitted_at)) ? lastJob : undefined;
+  const source = context.resolveVersion(edit.data.source_version_id);
+  const mask = edit.data.mask_version_id ? context.resolveVersion(edit.data.mask_version_id) : undefined;
+  const tiles = job
+    ? (job.params.edit_inputs ?? []).map(input => ({ key: input.path, label: inputLabel(input.role, outpaint), url: rawUrl(job, input.path) }))
+    : [source, mask].flatMap((version, index) => version
+      ? [{ key: version.version_id, label: index ? '蒙版' : '原图', url: canvasMediaUrl(context.projectId, version.version_id) }]
+      : []);
+  const prompt = job?.params.edit_prompt ?? draft?.prompt ?? '';
   const alias = job?.alias ?? draft?.alias;
   const modelId = job?.model ?? draft?.model;
   const modelName = context.keys.find(key => key.alias === alias)?.models.find(model => model.id === modelId)?.name || modelId;
-  const size = job?.params.actual_size ?? job?.params.size;
+  const size = job ? job.params.actual_size ?? job.params.size : draft?.params.size;
   const running = Boolean(edit.data.active_run_id) || context.submittingNodeIds.has(edit.id);
   const Icon = outpaint ? Expand : Paintbrush;
   const label = outpaint ? '扩图' : '局部修改';
-  const tiles = job && inputs.length
-    ? inputs.map(input => ({ key: input.path, label: inputLabel(input.role, outpaint), url: rawUrl(job, input.path) }))
-    : source ? [{ key: source.version_id, label: '原图', url: canvasMediaUrl(context.projectId, source.version_id) }] : [];
 
-  async function regenerate() {
+  async function generate() {
     if (!context.submitImageEdit || running) return;
     setSubmitting(true);
     try { await context.submitImageEdit(edit.id); } finally { setSubmitting(false); }
   }
 
   return (
-    <section aria-label={`${label}过程`}
+    <section aria-label={`${label}设置`}
       className="nodrag relative overflow-hidden rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow"
       onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
       <Button type="button" variant="ghost" size="icon" className="absolute right-2 top-2 z-10 size-7 rounded-full"
-        aria-label={`关闭${label}过程`} onClick={onClose}><X aria-hidden="true" /></Button>
+        aria-label={`关闭${label}设置`} onClick={onClose}><X aria-hidden="true" /></Button>
       <div className="mb-1 flex min-h-12 min-w-0 items-center gap-2 overflow-x-auto px-1 py-1 pr-9">
         {tiles.map(tile => (
           <a key={tile.key} href={tile.url} target="_blank" rel="noreferrer" title={`查看${tile.label}`}
@@ -69,7 +75,7 @@ export function CanvasEditResultPanel({ node, edit, context, onClose }: {
       <button type="button" aria-expanded={promptExpanded} onClick={() => setPromptExpanded(value => !value)}
         className="block w-full rounded-md px-3 pb-1 pt-2 text-left transition-colors hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
         <p className={`whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground ${promptExpanded ? 'max-h-60 overflow-y-auto' : 'line-clamp-3'}`}>
-          {prompt.trim() || <span className="text-muted-foreground">未填写提示词</span>}
+          {prompt.trim() || <span className="text-muted-foreground">双击节点填写提示词</span>}
         </p>
         <span className="block text-right text-xs text-muted-foreground">{promptExpanded ? '收起' : '展开'}</span>
       </button>
@@ -80,12 +86,10 @@ export function CanvasEditResultPanel({ node, edit, context, onClose }: {
           {alias && <span className="ml-auto shrink-0 text-muted-foreground">{alias}</span>}
         </span>
         {size && <span className={`${chip} shrink-0 font-mono`}>{size.replace('x', '×')}</span>}
-        <Button type="button" variant="ghost" size="sm" className="shrink-0"
-          onClick={() => context.openImageEdit?.(edit.id)}><Settings2 aria-hidden="true" />修改设置</Button>
         <Button type="button" size="sm" className="shrink-0" disabled={running || submitting || !draft}
-          onClick={() => void regenerate()}>
+          onClick={() => void generate()}>
           {running || submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
-          {running || submitting ? '生成中…' : '再次生成'}
+          {running || submitting ? '生成中…' : '开始生成'}
         </Button>
       </div>
     </section>

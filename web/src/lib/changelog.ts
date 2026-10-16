@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.98.1',
+    date: '2026-10-16',
+    headline: '编辑面板挪到编辑节点',
+    changes: [
+      { kind: 'fix', text: '单击局部修改 / 扩图节点显示原图、蒙版与提示词面板，双击进入编辑器；结果节点恢复为普通图片节点。' },
+    ],
+  },
+  {
     version: '5.98.0',
     date: '2026-10-16',
     headline: '编辑结果展示发给厂商的原图与蒙版',
