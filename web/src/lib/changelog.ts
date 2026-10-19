@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.98.8',
+    date: '2026-10-19',
+    headline: '微信图片能上传，拆分图层提示词好用了',
+    changes: [
+      { kind: 'fix', text: '微信下载的图片（后缀 .jpg、实际是 PNG / WebP / GIF）能上传了；GIF 上传后转成静态 PNG。' },
+      { kind: 'fix', text: '拆分图层：双击提示词框是编辑、不再打开详情，提示词保存与图片节点一致；鼠标在图层列表上滚轮滚动的是列表。' },
+    ],
+  },
+  {
     version: '5.98.7',
     date: '2026-10-16',
     headline: '编辑支持 Seedream 5.0 pro',

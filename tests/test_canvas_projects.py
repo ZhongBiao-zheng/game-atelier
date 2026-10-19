@@ -301,15 +301,18 @@ def test_upload_accepts_mp4_with_quicktime_brand_or_leading_free_box(client):
     assert response.json()["version"]["mime_type"] == "video/mp4"
 
 
-def test_upload_mismatch_names_the_detected_type(client):
+def test_image_upload_with_wrong_image_extension_is_stored_by_content(client):
+    # 微信下载的 .jpg 实际常是 PNG：图片之间后缀不符按内容落盘，不拒收。
     project_id = _create_project(client)["project_id"]
     response = client.post(
         f"/api/canvas/projects/{project_id}/uploads",
         files={"file": ("photo.jpg", _PNG, "image/jpeg")},
         data={"expected_revision": "0"},
     )
-    assert response.status_code == 422, response.text
-    assert response.json()["detail"]["message"] == "文件的实际内容（image/png）和扩展名 .jpg 不一致，没有上传。"
+    assert response.status_code == 201, response.text
+    version = response.json()["version"]
+    assert version["mime_type"] == "image/png"
+    assert version["path"].endswith(".png")
 
 
 def test_canvas_upload_and_media_endpoint_stay_inside_project(client, isolated_data_root):

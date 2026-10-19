@@ -2589,7 +2589,7 @@ function CanvasEditorInner({
               if (id) added.push(id);
             }
           } catch (error) {
-            failures.push(`${file.name}：${(error as Error).message}`);
+            failures.push(`${shortFileName(file.name)}：${(error as Error).message}`);
           }
         }
       } finally {
@@ -5692,6 +5692,14 @@ function contentOriginLabel(version: CanvasContentVersion, job?: Job) {
   if (origin.operation.kind === 'crop') return '本地裁剪';
   if (origin.operation.kind === 'split') return '本地切图';
   return '本地放大';
+}
+
+// 微信等来源的文件名能有上百字符，报错里只留头尾，原因才看得见。
+function shortFileName(name: string, limit = 32) {
+  if (name.length <= limit) return name;
+  const dot = name.lastIndexOf('.');
+  const ext = dot > 0 && name.length - dot <= 6 ? name.slice(dot) : '';
+  return `${name.slice(0, limit - ext.length - 1)}…${ext}`;
 }
 
 function formatCanvasTimestamp(value: string) {

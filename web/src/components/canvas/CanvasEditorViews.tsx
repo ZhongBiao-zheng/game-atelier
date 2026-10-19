@@ -3102,7 +3102,6 @@ export function CanvasLayerStackSurface({
   context: CanvasNodeContextValue;
 }) {
   const [hoveredLayerId, setHoveredLayerId] = useState<string | null>(null);
-  const [promptDraft, setPromptDraft] = useState(node.data.prompt);
   const helpId = useId();
   const choices = useMemo(() => layerDecompositionModelChoices(context.keys), [context.keys]);
   const source = context.resolveVersion(node.data.source_version_id);
@@ -3119,10 +3118,6 @@ export function CanvasLayerStackSurface({
   const replacingSource = Boolean(
     sourceNodeId && context.mediaReplaceBusyNodeIds.has(sourceNodeId),
   );
-
-  useEffect(() => {
-    setPromptDraft(node.data.prompt);
-  }, [node.data.prompt]);
 
   function updateDraft(patch: Partial<Pick<CanvasLayerStackNode['data'], 'alias' | 'model' | 'prompt' | 'resolution'>>) {
     context.updateNode(node.id, candidate => candidate.type === 'layer_stack'
@@ -3225,22 +3220,29 @@ export function CanvasLayerStackSurface({
                 />
               </span>
             </label>
-            <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+            <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
               <span>提示词</span>
-              <textarea
-                aria-label="提示词"
-                value={promptDraft}
-                disabled={busy}
-                maxLength={4000}
-                placeholder="上传单张图片，分离图中元素，最高支持17张输出"
-                className="nodrag h-16 resize-none rounded-md border border-border bg-transparent p-3 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary"
-                onFocus={() => context.recordHistory()}
-                onChange={event => {
-                  setPromptDraft(event.target.value);
-                  updateDraft({ prompt: event.target.value });
-                }}
-              />
-            </label>
+              {busy ? (
+                <p className="max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border p-3 text-sm leading-relaxed text-muted-foreground">
+                  {node.data.prompt || '未填写提示词'}
+                </p>
+              ) : (
+                // 与生成面板共用编辑器：编辑会话期间不自动保存、不被远端合并覆盖，双击不冒泡到节点。
+                <div className="nodrag nowheel max-h-40 overflow-y-auto rounded-md border border-border text-foreground"
+                  onPointerDown={event => event.stopPropagation()}
+                  onDoubleClick={event => event.stopPropagation()}>
+                  <CanvasPromptInput
+                    value={node.data.prompt}
+                    references={EMPTY_CANVAS_MENTION_REFERENCES}
+                    mentionsEnabled={false}
+                    placeholder="上传单张图片，分离图中元素，最高支持17张输出"
+                    onFocus={context.recordHistory}
+                    onEditingChange={editing => context.setTextEditing?.(`prompt:${node.id}`, editing)}
+                    onChange={prompt => updateDraft({ prompt: prompt.slice(0, 4000) })}
+                  />
+                </div>
+              )}
+            </div>
             <div className="space-y-1.5 text-xs text-muted-foreground">
               <span>图片比例</span>
               <div aria-label="图片比例" className="flex h-8 items-center justify-center rounded-md bg-popover text-sm text-foreground">
