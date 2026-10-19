@@ -585,10 +585,14 @@ from character_workflow.lib.canvas_projects import (  # noqa: E402
 from character_workflow.lib.heic_upload import (  # noqa: E402
     HEIC_UPLOAD_EXTS as _HEIC_UPLOAD_EXTS, HeicConversionError, convert_heic_to_jpeg,
 )
+from character_workflow.lib.gif_upload import (  # noqa: E402
+    GIF_UPLOAD_EXTS as _GIF_UPLOAD_EXTS, GifConversionError, convert_gif_to_png, is_gif_content,
+)
 
 _UPLOAD_ALLOWED_EXTS = _IMAGE_UPLOAD_EXTS | _VIDEO_UPLOAD_EXTS | _AUDIO_UPLOAD_EXTS
-# 画师能选的图片格式：HEIC / HEIF 在入口转成 JPEG，库里只存 _IMAGE_UPLOAD_EXTS。
-_IMAGE_PICKABLE_EXTS = _IMAGE_UPLOAD_EXTS | _HEIC_UPLOAD_EXTS
+# 画师能选的图片格式：HEIC / HEIF 在入口转成 JPEG、GIF 转成 PNG，库里只存 _IMAGE_UPLOAD_EXTS。
+_CONVERTED_IMAGE_EXTS = _HEIC_UPLOAD_EXTS | _GIF_UPLOAD_EXTS
+_IMAGE_PICKABLE_EXTS = _IMAGE_UPLOAD_EXTS | _CONVERTED_IMAGE_EXTS
 
 
 
@@ -624,10 +628,10 @@ async def _read_media_upload(
 ) -> tuple[str, str, bytes, Literal["image", "video", "audio"]]:
     raw_name = file.filename or fallback_name
     ext = Path(raw_name).suffix.lower()
-    allowed = _UPLOAD_ALLOWED_EXTS | _HEIC_UPLOAD_EXTS
+    allowed = _UPLOAD_ALLOWED_EXTS | _CONVERTED_IMAGE_EXTS
     if ext not in allowed:
         raise HTTPException(422, detail=_ext_reject_detail(raw_name, ext, allowed))
-    raw_name, body = await _jpeg_if_heic(raw_name, await file.read())
+    raw_name, body = await _convert_image_upload(raw_name, await file.read())
     ext = Path(raw_name).suffix.lower()
     limit = _upload_max_bytes(ext)
     if len(body) > limit:
@@ -638,9 +642,19 @@ async def _read_media_upload(
     return raw_name, ext, body, media_kind
 
 
-async def _jpeg_if_heic(raw_name: str, body: bytes) -> tuple[str, bytes]:
-    """iPhone 的 HEIC / HEIF 照片在入口转成 JPEG（文件名改 .jpg）；其他格式原样返回。"""
-    if Path(raw_name).suffix.lower() not in _HEIC_UPLOAD_EXTS:
+async def _convert_image_upload(raw_name: str, body: bytes) -> tuple[str, bytes]:
+    """HEIC / HEIF 转 JPEG、GIF 转 PNG（文件名跟着改后缀）；其他格式原样返回。
+
+    GIF 按内容认：微信下载的表情图常是 GIF 内容配 .jpg 后缀。"""
+    ext = Path(raw_name).suffix.lower()
+    if ext in _GIF_UPLOAD_EXTS or (ext in _IMAGE_UPLOAD_EXTS and is_gif_content(body)):
+        if len(body) > _MEDIA_UPLOAD_MAX_BYTES:
+            raise HTTPException(413, detail=_size_reject_detail(raw_name, body, _MEDIA_UPLOAD_MAX_BYTES))
+        try:
+            return await run_in_threadpool(convert_gif_to_png, raw_name, body)
+        except GifConversionError as error:
+            raise HTTPException(422, detail=str(error)) from None
+    if ext not in _HEIC_UPLOAD_EXTS:
         return raw_name, body
     # 转码要整张解进内存，先挡住异常大的源文件；转出来的 JPEG 再按图片上限检查。
     if len(body) > _MEDIA_UPLOAD_MAX_BYTES:
@@ -649,6 +663,10 @@ async def _jpeg_if_heic(raw_name: str, body: bytes) -> tuple[str, bytes]:
         return await run_in_threadpool(convert_heic_to_jpeg, raw_name, body)
     except HeicConversionError as error:
         raise HTTPException(422, detail=str(error)) from None
+
+
+def _converted_mime(name: str) -> str:
+    return "image/png" if name.lower().endswith(".png") else "image/jpeg"
 
 
 @router.post("/uploads")
@@ -689,7 +707,7 @@ async def post_gallery_image(
     if ext not in _IMAGE_PICKABLE_EXTS:
         raise HTTPException(422, detail=_ext_reject_detail(raw_name, ext, _IMAGE_PICKABLE_EXTS))
 
-    raw_name, body = await _jpeg_if_heic(raw_name, await file.read())
+    raw_name, body = await _convert_image_upload(raw_name, await file.read())
     ext = Path(raw_name).suffix.lower()
     if len(body) > _IMAGE_UPLOAD_MAX_BYTES:
         raise HTTPException(
@@ -2717,14 +2735,14 @@ async def post_creation_media_upload(
         if not isinstance(parsed_tags, list) or not all(isinstance(tag, str) for tag in parsed_tags):
             raise ValueError("tags 必须是字符串数组")
         filename = file.filename or "media"
-        converted_name, body = await _jpeg_if_heic(filename, await file.read())
+        converted_name, body = await _convert_image_upload(filename, await file.read())
         # 抢 catalog 文件锁 + sha256 + 落盘（视频上限 500 MiB）：留在事件循环里会连 SSE 一起卡住。
         return await asyncio.to_thread(
             create_media_asset_from_bytes,
             title=title,
             body=body,
             filename=converted_name,
-            mime_type="image/jpeg" if converted_name != filename else file.content_type,
+            mime_type=_converted_mime(converted_name) if converted_name != filename else file.content_type,
             tags=parsed_tags,
             project_id=project_id,
             allow_existing=allow_existing,
@@ -2827,9 +2845,9 @@ async def put_creation_media_asset(
         body: bytes | None = None
         mime_type = file.content_type if file is not None else None
         if file is not None:
-            converted_name, body = await _jpeg_if_heic(filename, await file.read())
+            converted_name, body = await _convert_image_upload(filename, await file.read())
             if converted_name != filename:
-                filename, mime_type = converted_name, "image/jpeg"
+                filename, mime_type = converted_name, _converted_mime(converted_name)
         return await asyncio.to_thread(
             update_media_asset_from_bytes,
             asset_id,
