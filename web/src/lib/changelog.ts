@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.98.9',
+    date: '2026-10-19',
+    headline: '拆分图层能改提示词重拆，图片工具条更顺手',
+    changes: [
+      { kind: 'feat', text: '拆分好的图层节点，单击左侧图片弹出提示词面板，改完提示词点「开始拆分」生成一个新的拆分节点；双击不再进详情。' },
+      { kind: 'feat', text: '图片工具条「拆分图层」从「更多」里拿出来，替换原来的「图生图」；「查看详情」「下载图片」改叫「查看」「下载」。' },
+      { kind: 'fix', text: '鼠标停在视频播放条上时，触控板双指也能平移画布。' },
+    ],
+  },
+  {
     version: '5.98.8',
     date: '2026-10-19',
     headline: '微信图片能上传，拆分图层提示词好用了',

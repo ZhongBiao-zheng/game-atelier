@@ -29,8 +29,8 @@ export interface CanvasImageToolDefinition {
 export const IMAGE_TOOLBAR_INLINE_LIMIT = 4;
 
 export const CANVAS_IMAGE_TOOLS: CanvasImageToolDefinition[] = [
-  { id: 'info', label: '查看详情', icon: Eye, defaultVisible: true },
-  { id: 'download', label: '下载图片', icon: Download, defaultVisible: true },
+  { id: 'info', label: '查看', icon: Eye, defaultVisible: true },
+  { id: 'download', label: '下载', icon: Download, defaultVisible: true },
   { id: 'resize', label: '比例缩放', icon: Lock, defaultVisible: false },
   { id: 'crop', label: '裁剪', icon: Crop, defaultVisible: true },
   { id: 'split', label: '切分', icon: Grid2X2, defaultVisible: true },

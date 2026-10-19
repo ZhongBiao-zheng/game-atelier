@@ -213,6 +213,8 @@ export interface CanvasNodeContextValue {
   reversePrompt: (node: CanvasContentNode) => Promise<void>;
   createLayerDecomposition: (node: Extract<CanvasContentNode, { type: 'image' }>) => void;
   submitLayerDecomposition: (nodeId: string) => Promise<void>;
+  /** 已完成的拆分节点改提示词重拆：新建一个拆分节点并提交。 */
+  rerunLayerDecomposition?: (nodeId: string, settings: { alias: string; model: string; prompt: string }) => Promise<void>;
   replaceLayerStackSource: (nodeId: string) => void;
   expandLayerStack: (nodeId: string) => void;
   recoverReversePromptConfig: (job: Job) => Promise<void>;
@@ -315,8 +317,15 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const editSource = context?.editSourceByResultNodeId?.get(node.id);
   const editPanelVisible = nodePanelAllowed && Boolean(editSource);
   const generationPanelVisible = nodePanelAllowed && !editSource && Boolean(draft) && !uploadedImageMaterial;
+  // 已完成的拆分节点：单击左侧图片区才弹重拆面板，取消选中即收起。
+  const [layerComposerOpen, setLayerComposerOpen] = useState(false);
+  useEffect(() => {
+    if (!selected) setLayerComposerOpen(false);
+  }, [selected]);
+  const layerComposerVisible = nodePanelAllowed && layerComposerOpen
+    && node.type === 'layer_stack' && Boolean(node.data.base_version_id);
   // 生成面板落在节点上方时会盖住标题栏与工具栏（含「上传附件」），这两样翻到节点下方去。
-  const chromeBelow = (generationPanelVisible || editPanelVisible) && panelSide === 'above';
+  const chromeBelow = (generationPanelVisible || editPanelVisible || layerComposerVisible) && panelSide === 'above';
   const materialPickEligible = Boolean(context?.materialPick?.selectableNodeIds.has(node.id));
   const [shellElement, setShellElement] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -802,8 +811,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
             beginTextEditing();
             return;
           }
-          if (node.type === 'layer_stack') context.previewLayerStack(node.id);
-          else if (node.type === 'image_edit') context.openImageEdit?.(node.id);
+          if (node.type === 'layer_stack') return;
+          if (node.type === 'image_edit') context.openImageEdit?.(node.id);
           else if (content) context.previewContent(content.version_id, node.title, node.id);
         }}
         onKeyDown={event => {
@@ -930,7 +939,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           )}
           {node.type === 'batch_material' && <CanvasBatchMaterialEditor node={node} context={context} />}
           {node.type === 'layer_stack' && (
-            <CanvasLayerStackSurface node={node} context={context} />
+            <CanvasLayerStackSurface node={node} context={context} onOpenComposer={() => setLayerComposerOpen(true)} />
           )}
           {node.type === 'image_edit' && <CanvasImageEditSurface node={node} projectId={context.projectId}
             source={context.resolveVersion(node.data.source_version_id) as CanvasMediaVersion | undefined} />}
@@ -989,6 +998,17 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         >
           <CanvasImageEditPanel node={node} edit={editSource} context={context}
             onClose={() => context.generationPanel.dismiss(node.id)} />
+        </CanvasNodeFloatingPanel>
+      )}
+      {layerComposerVisible && node.type === 'layer_stack' && context && (
+        <CanvasNodeFloatingPanel
+          nodeId={node.id}
+          anchor={shellElement}
+          surfaceRef={context.generationPanel.surfaceRef}
+          onSideChange={setPanelSide}
+          hiddenWhileDragging={dragging}
+        >
+          <CanvasLayerStackComposer node={node} context={context} onClose={() => setLayerComposerOpen(false)} />
         </CanvasNodeFloatingPanel>
       )}
     </div>
@@ -1483,7 +1503,7 @@ function CanvasNodeToolbar({
       )}
       <MediaToolButton
         label={content || node.type === 'layer_stack' ? `查看 ${node.title} 详情` : `查看 ${node.title} 设置`}
-        text={content || node.type === 'layer_stack' ? '查看详情' : '查看设置'}
+        text={content || node.type === 'layer_stack' ? '查看' : '查看设置'}
         onClick={() => {
           if (node.type === 'layer_stack') context.previewLayerStack(node.id);
           else if (content) context.previewContent(content.version_id, node.title, node.id);
@@ -1824,11 +1844,11 @@ function ImageNodeToolbar({
         </MediaToolButton>
       ))}
       <MediaToolButton
-        label={`基于 ${node.title} 生成`}
-        text="图生图"
-        disabled={!currentVersionId || submitting || replacing}
-        onClick={() => context.createImageFromSource?.(node.id)}
-      ><Sparkles /></MediaToolButton>
+        label={`拆分 ${node.title} 的图层`}
+        text="拆分图层"
+        disabled={layerActionDisabled}
+        onClick={() => context.createLayerDecomposition(node)}
+      ><Layers3 /></MediaToolButton>
       <MediaToolButton
         label={`局部修改 ${node.title}`}
         text="局部修改"
@@ -1886,14 +1906,6 @@ function ImageNodeToolbar({
               {action.icon}{action.text}
             </DropdownMenuItem>
           ))}
-          <DropdownMenuItem
-            aria-label={`拆分 ${node.title} 的图层`}
-            disabled={layerActionDisabled}
-            className="gap-2"
-            onSelect={() => context.createLayerDecomposition(node)}
-          >
-            <Layers3 />拆分图层
-          </DropdownMenuItem>
           {onSave && (
             <DropdownMenuItem aria-label={`保存 ${node.title}`} className="gap-2" onSelect={onSave}>
               <BookmarkPlus />保存到资产
@@ -3097,9 +3109,11 @@ function nodeIcon(node: CanvasNode) {
 export function CanvasLayerStackSurface({
   node,
   context,
+  onOpenComposer,
 }: {
   node: CanvasLayerStackNode;
   context: CanvasNodeContextValue;
+  onOpenComposer?: () => void;
 }) {
   const [hoveredLayerId, setHoveredLayerId] = useState<string | null>(null);
   const helpId = useId();
@@ -3146,7 +3160,8 @@ export function CanvasLayerStackSurface({
 
   return (
     <div className="flex h-full min-h-0">
-      <div className="relative flex min-w-0 flex-1 items-center justify-center p-3">
+      <div className="relative flex min-w-0 flex-1 items-center justify-center p-3"
+        onClick={baseImage ? onOpenComposer : undefined}>
         {baseImage && layoutWidth && layoutHeight ? (
           <CanvasLayerStackComposite node={node} projectId={context.projectId}
             resolveVersion={context.resolveVersion} hoveredLayerId={hoveredLayerId} />
@@ -3301,6 +3316,88 @@ export function CanvasLayerStackSurface({
   );
 }
 
+/** 已完成拆分节点的重拆面板：提示词与模型只存在面板里，提交时新建一个拆分节点，原节点的记录不动。 */
+function CanvasLayerStackComposer({
+  node,
+  context,
+  onClose,
+}: {
+  node: CanvasLayerStackNode;
+  context: CanvasNodeContextValue;
+  onClose: () => void;
+}) {
+  const choices = useMemo(() => layerDecompositionModelChoices(context.keys), [context.keys]);
+  const [prompt, setPrompt] = useState(node.data.prompt);
+  const [selection, setSelection] = useState({ alias: node.data.alias, model: node.data.model });
+  const [submitting, setSubmitting] = useState(false);
+  const selectedChoice = choices.find(choice => (
+    choice.key.alias === selection.alias && choice.model.id === selection.model
+  )) ?? choices[0];
+
+  async function submit() {
+    if (!selectedChoice || !context.rerunLayerDecomposition) return;
+    setSubmitting(true);
+    try {
+      await context.rerunLayerDecomposition(node.id, {
+        alias: selectedChoice.key.alias,
+        model: selectedChoice.model.id,
+        prompt: prompt.slice(0, 4000),
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <section
+      aria-label="重新拆分图层"
+      data-floating-node-panel="true"
+      className="nodrag relative overflow-hidden rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow"
+      onClick={event => event.stopPropagation()}
+      onKeyDown={event => event.stopPropagation()}
+    >
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="absolute right-2 top-2 z-10 size-7 rounded-full"
+        aria-label="关闭重新拆分图层"
+        onClick={onClose}
+      >
+        <X aria-hidden="true" />
+      </Button>
+      <CanvasPromptInput
+        value={prompt}
+        references={EMPTY_CANVAS_MENTION_REFERENCES}
+        mentionsEnabled={false}
+        className="max-h-[50vh]"
+        placeholder="上传单张图片，分离图中元素，最高支持17张输出"
+        onChange={setPrompt}
+      />
+      <div className="mt-2 flex items-end gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+          <CanvasModelPicker
+            choices={choices}
+            alias={selectedChoice?.key.alias ?? null}
+            model={selectedChoice?.model.id ?? ''}
+            onSelect={choice => setSelection({ alias: choice.key.alias, model: choice.model.id })}
+          />
+        </div>
+        {choices.length ? (
+          <Button type="button" size="sm" className="shrink-0" disabled={submitting} onClick={() => void submit()}>
+            <SwapIcon swapKey={submitting}>{submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Layers3 aria-hidden="true" />}</SwapIcon>
+            {submitting ? '提交中…' : '开始拆分'}
+          </Button>
+        ) : (
+          <Button asChild variant="outline" size="sm" className="shrink-0">
+            <Link href="/settings/keys">配置模型</Link>
+          </Button>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function textScaleClass(scale: 'xs' | 'sm' | 'base') {
   if (scale === 'xs') return 'text-xs';
   if (scale === 'base') return 'text-base';
@@ -3445,7 +3542,7 @@ function MediaPreview({
           }}
         />
         <div
-          className="nodrag nowheel absolute bottom-2 left-2 right-2 z-10 flex items-center gap-1 rounded-lg border border-border bg-glass px-1.5 py-1 text-foreground backdrop-blur-glass"
+          className="nodrag absolute bottom-2 left-2 right-2 z-10 flex items-center gap-1 rounded-lg border border-border bg-glass px-1.5 py-1 text-foreground backdrop-blur-glass"
           onPointerDown={stopCanvasInteraction}
           onDoubleClick={stopCanvasInteraction}
           onClick={stopCanvasInteraction}
