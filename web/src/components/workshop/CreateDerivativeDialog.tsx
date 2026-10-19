@@ -169,7 +169,7 @@ export function CreateDerivativeDialog({
                 id={fileId}
                 className="sr-only"
                 type="file"
-                accept="image/png,image/jpeg,image/webp,image/heic,image/heif,.heic,.heif"
+                accept="image/png,image/jpeg,image/webp,image/gif,image/heic,image/heif,.heic,.heif"
                 multiple
                 onChange={event => addLocalSources(event.target.files)}
               />
