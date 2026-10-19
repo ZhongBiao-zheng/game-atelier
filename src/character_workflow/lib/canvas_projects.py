@@ -163,6 +163,7 @@ _ACCEPTED_MIMES = {
     ".mp4": {"video/mp4", "video/quicktime"},
     ".mov": {"video/mp4", "video/quicktime"},
 }
+_IMAGE_EXT_BY_MIME = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
 
 
 def _now() -> str:
@@ -609,8 +610,11 @@ def _new_upload_version(
     timestamp: str,
 ) -> tuple[CanvasMediaVersion, Path]:
     upload_id = secrets.token_hex(16)
-    target = canvas_project_dir(project_id) / "uploads" / f"{upload_id}{ext}"
     detected_mime = _sniff_media_mime(body)
+    if media_kind == "image" and detected_mime in _IMAGE_EXT_BY_MIME:
+        # 图片后缀和内容对不上很常见（微信下载的 .jpg 实际是 PNG / WebP），按内容落盘。
+        ext = _IMAGE_EXT_BY_MIME[detected_mime]
+    target = canvas_project_dir(project_id) / "uploads" / f"{upload_id}{ext}"
     if detected_mime is None or detected_mime not in _ACCEPTED_MIMES[ext]:
         detected = detected_mime or "未识别的格式"
         raise CanvasDocumentError(

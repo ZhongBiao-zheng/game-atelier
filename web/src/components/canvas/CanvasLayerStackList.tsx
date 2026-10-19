@@ -30,7 +30,7 @@ export function CanvasLayerStackList({ node, context, disabled, onVisibility, on
     const rect = event.currentTarget.getBoundingClientRect();
     return event.clientY >= rect.top + rect.height / 2;
   }
-  return <div role="list" aria-label="图层列表" className="nodrag nopan h-full overflow-y-auto p-2"
+  return <div role="list" aria-label="图层列表" className="nodrag nopan nowheel h-full overflow-y-auto p-2"
     onPointerDown={event => event.stopPropagation()}
     onDragOver={event => {
       event.preventDefault(); event.stopPropagation();

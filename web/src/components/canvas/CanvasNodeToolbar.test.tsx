@@ -136,6 +136,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     expandLayerStack: vi.fn(),
     submitLayerDecomposition: vi.fn(async () => undefined),
     replaceLayerStackSource: vi.fn(),
+    setTextEditing: vi.fn(),
     recoverReversePromptConfig: vi.fn(async () => undefined),
     reversePromptConfiguredNodeIds: new Set(),
     replaceMedia: vi.fn(),
@@ -704,7 +705,9 @@ it('configures and starts layer decomposition inside the new node', () => {
     resolveVersion: versionResolver({ source }),
   });
 
-  render(<CanvasLayerStackSurface node={layerStack} context={context} />);
+  // 双击提示词是在编辑，不能冒泡成「打开节点详情」。
+  const nodeDoubleClick = vi.fn();
+  render(<div onDoubleClick={nodeDoubleClick}><CanvasLayerStackSurface node={layerStack} context={context} /></div>);
 
   expect(screen.getByRole('img', { name: '待拆分图片' })).toHaveAttribute(
     'src',
@@ -714,10 +717,7 @@ it('configures and starts layer decomposition inside the new node', () => {
   expect(screen.getByRole('button', { name: '选择生成模型' })).toHaveTextContent('Seedream 5.0 Pro');
   expect(screen.queryByText('保持原图比例 · PNG')).not.toBeInTheDocument();
   expect(screen.getByLabelText('图片比例')).toHaveTextContent('智能');
-  expect(screen.getByRole('textbox', { name: '提示词' })).toHaveAttribute(
-    'placeholder',
-    '上传单张图片，分离图中元素，最高支持17张输出',
-  );
+  expect(screen.getByText('上传单张图片，分离图中元素，最高支持17张输出')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '图层拆分使用说明' })).toBeInTheDocument();
   expect(screen.getByRole('tooltip')).toHaveTextContent('留空会自动识别主要图层');
   expect(screen.getByLabelText('图层拆分设置')).not.toHaveClass('nowheel');
@@ -725,10 +725,16 @@ it('configures and starts layer decomposition inside the new node', () => {
   fireEvent.click(screen.getByRole('option', { name: '1.5K' }));
   const resolutionUpdate = vi.mocked(context.updateNode).mock.calls.at(-1)?.[1];
   expect(resolutionUpdate?.(layerStack)).toMatchObject({ data: { resolution: '1.5K' } });
-  fireEvent.focus(screen.getByRole('textbox', { name: '提示词' }));
-  fireEvent.change(screen.getByRole('textbox', { name: '提示词' }), { target: { value: '拆出主体' } });
+  const promptEditor = screen.getByRole('combobox', { name: '提示词' });
+  fireEvent.doubleClick(promptEditor);
+  expect(nodeDoubleClick).not.toHaveBeenCalled();
+  fireEvent.focus(promptEditor);
+  promptEditor.textContent = '拆出主体';
+  fireEvent.input(promptEditor);
   expect(context.recordHistory).toHaveBeenCalledTimes(2);
-  expect(context.updateNode).toHaveBeenCalled();
+  expect(context.setTextEditing).toHaveBeenCalledWith('prompt:layer-stack-draft', true);
+  const promptUpdate = vi.mocked(context.updateNode).mock.calls.at(-1)?.[1];
+  expect(promptUpdate?.(layerStack)).toMatchObject({ data: { prompt: '拆出主体' } });
   fireEvent.click(screen.getByRole('button', { name: '替换待拆分图片' }));
   expect(context.replaceLayerStackSource).toHaveBeenCalledWith('layer-stack-draft');
   fireEvent.click(screen.getByRole('button', { name: '开始拆分' }));
