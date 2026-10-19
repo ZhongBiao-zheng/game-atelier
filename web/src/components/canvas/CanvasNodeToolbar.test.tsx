@@ -158,7 +158,7 @@ const NodeCard = CanvasNodeCard as React.ComponentType<{
   selected: boolean;
 }>;
 
-it('locates a material parent from its title and explicitly creates downstream image work', () => {
+it('locates a material parent from its title', () => {
   const source = { ...nodes[1], data: { ...nodes[1].data, current_version_id: 'source-image' } } as CanvasNode;
   const version: CanvasContentVersion = {
     kind: 'image', version_id: 'source-image', path: 'source.png', mime_type: 'image/png', bytes: 20,
@@ -166,15 +166,13 @@ it('locates a material parent from its title and explicitly creates downstream i
   };
   const context = nodeContext({
     layerParentByNodeId: new Map([[source.id, { nodeId: 'parent-stack', title: '拆分图层' }]]),
-    locateNode: vi.fn(), createImageFromSource: vi.fn(), resolveVersion: () => version,
+    locateNode: vi.fn(), resolveVersion: () => version,
   });
   render(<CanvasNodeContext.Provider value={context}><NodeCard data={{ domain: source }} selected /></CanvasNodeContext.Provider>);
   const parent = screen.getByRole('button', { name: '定位父图层：拆分图层' });
   expect(parent.closest('header')).toBeTruthy();
   fireEvent.click(parent);
   expect(context.locateNode).toHaveBeenCalledWith('parent-stack');
-  fireEvent.click(screen.getByRole('button', { name: '基于 图片 生成' }));
-  expect(context.createImageFromSource).toHaveBeenCalledWith(source.id);
 });
 
 it('keeps a text node editor mounted after the last variable is removed, without stealing focus on load', () => {
@@ -493,8 +491,9 @@ it('offers bulk layer actions only after completion and reports download failure
   rerender(view(ready));
   fireEvent.click(screen.getByRole('button', { name: '查看 拆分图层 详情' }));
   expect(context.previewLayerStack).toHaveBeenCalledWith(stack.id);
+  // 双击拆分节点不进详情，详情只从工具条「查看」进。
   fireEvent.doubleClick(screen.getByRole('group', { name: /选择节点 拆分图层/ }));
-  expect(context.previewLayerStack).toHaveBeenCalledTimes(2);
+  expect(context.previewLayerStack).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button', { name: '展开图层到画布并分组' }));
   expect(context.expandLayerStack).toHaveBeenCalledWith(stack.id);
   let rejectDownload!: (error: Error) => void;
@@ -568,14 +567,16 @@ it('omits removed actions even in saved preferences and keeps allowed tools moun
   }
   expect(within(toolbar).getByRole('button', { name: '裁剪 图片' })).toBeInTheDocument();
   expect(within(toolbar).getByRole('button', { name: '切分 图片' })).toBeInTheDocument();
-  // 第 4 个之后的快捷工具、拆分图层和工具条设置都在「更多」里。
+  // 拆分图层占原「图生图」的位置，常驻工具条。
+  fireEvent.click(within(toolbar).getByRole('button', { name: '拆分 图片 的图层' }));
+  expect(context.createLayerDecomposition).toHaveBeenCalledWith(image);
+  // 第 4 个之后的快捷工具和工具条设置都在「更多」里。
   const moreButton = within(toolbar).getByRole('button', { name: '图片 的更多工具' });
   expect(within(toolbar).queryByRole('button', { name: 'AI高清 图片' })).not.toBeInTheDocument();
   fireEvent.keyDown(moreButton, { key: 'Enter' });
   expect(await screen.findByRole('menuitem', { name: 'AI高清 图片' })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('menuitem', { name: '拆分 图片 的图层' }));
-  expect(context.createLayerDecomposition).toHaveBeenCalledWith(image);
-  expect(screen.queryByRole('dialog', { name: '拆分图层' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('menuitem', { name: '拆分 图片 的图层' })).not.toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
   act(() => moreButton.focus());
   fireEvent.keyDown(moreButton, { key: 'Enter' });
   fireEvent.click(await screen.findByRole('menuitem', { name: '配置图片快捷工具' }));
@@ -960,6 +961,7 @@ it('treats a double-click on a button inside a node as two clicks, not a node pr
   fireEvent.doubleClick(screen.getByRole('link', { name: '下载主体' }));
   expect(context.previewLayerStack).not.toHaveBeenCalled();
 
+  // 拆分节点本身双击也不进详情。
   fireEvent.doubleClick(screen.getByRole('group', { name: /选择节点 拆分图层/ }));
-  expect(context.previewLayerStack).toHaveBeenCalledWith(stack.id);
+  expect(context.previewLayerStack).not.toHaveBeenCalled();
 });
