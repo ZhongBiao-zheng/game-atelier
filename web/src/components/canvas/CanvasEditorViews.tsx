@@ -24,7 +24,14 @@ import { gsap, MOTION_DURATION, MOTION_STAGGER, prefersReducedMotion, useAnimate
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
 
-import { canvasDownloadUrl, canvasMediaUrl, downloadCanvasLayers, type CanvasLayerExportFormat } from '@/api/canvas';
+import {
+  canvasDownloadUrl,
+  canvasMediaUrl,
+  canvasMediaUrlAtWidth,
+  canvasThumbnailWidth,
+  downloadCanvasLayers,
+  type CanvasLayerExportFormat,
+} from '@/api/canvas';
 import { CanvasBatchMaterialEditor, CanvasGroupFrame } from './CanvasBatchControls';
 import { CanvasAudioPlayer } from './CanvasAudioPlayer';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
@@ -303,6 +310,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     ? resolveCanvasGenerationDraft(node, draftKeys, textPreference)
     : null, [node, draftKeys, textPreference]);
   const nodeContent = context ? contentForNode(node, context.resolveVersion) : undefined;
+  const imageBitmapWidth = useCanvasImageBitmapWidth(node.size?.width ?? 320);
   const uploadedImageMaterial = Boolean(
     context && isUploadedImageMaterialNode(node, nodeContent),
   );
@@ -916,13 +924,11 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           {content && content.kind !== 'text' && (
             <MediaPreview
               kind={content.kind}
-              // 节点卡上的图按卡片宽度取缩略图。画布上一屏能有几十上百个节点，
-              // 发原图等于让浏览器同时解出同样多张满分辨率位图。
-              src={canvasMediaUrl(
-                context.projectId,
-                content.version_id,
-                content.kind === 'image' ? node.size?.width ?? 320 : undefined,
-              )}
+              // 节点卡上的图按屏幕上的显示宽度取缩略图。画布上一屏能有几十上百个节点，
+              // 发原图等于让浏览器同时解出同样多张满分辨率位图；放大到超过档位时才换原图。
+              src={content.kind === 'image'
+                ? canvasMediaUrlAtWidth(context.projectId, content.version_id, imageBitmapWidth)
+                : canvasMediaUrl(context.projectId, content.version_id)}
               title={node.title}
               fit={node.type === 'image' || node.type === 'video' ? node.data.display.fit : 'contain'}
               freeResize={(node.type === 'image' || node.type === 'video') && node.data.display.free_resize}
@@ -1087,6 +1093,18 @@ function canvasChromeInsetBounds(surface: HTMLElement): CanvasPanelRect {
 }
 
 const canvasFlowTransform = (state: ReactFlowState) => state.transform;
+
+/** 节点卡上的图要向服务端申请多宽的位图：卡片宽 × 画布缩放，缩小时按 100% 算。
+ *
+ *  selector 只返回档位，滚轮缩放时只有跨档的节点重渲染；缩小不降档，拉远一整片画布不会再
+ *  补发一批小图请求。放大超过最大档位返回 null＝原图，所以只有放大看的那几张会解满分辨率。 */
+function useCanvasImageBitmapWidth(cardWidth: number): number | null {
+  const selector = useCallback(
+    (state: ReactFlowState) => canvasThumbnailWidth(cardWidth * Math.max(state.transform[2], 1)),
+    [cardWidth],
+  );
+  return useStore(selector);
+}
 
 /** 锚点节点自己的位置与尺寸，拼成字符串。
  *
@@ -1331,6 +1349,7 @@ function MediaCandidateCard({
   const horizontalOffset = index + 1;
   const version = context.resolveVersion(candidate.version_id);
   const terminalFailure = candidate.status === 'failed' || candidate.status === 'canceled';
+  const imageBitmapWidth = useCanvasImageBitmapWidth(node.size?.width ?? 320);
   return (
     <section
       role="group"
@@ -1352,11 +1371,9 @@ function MediaCandidateCard({
         ? (
           <MediaPreview
             kind={version.kind}
-            src={canvasMediaUrl(
-              context.projectId,
-              version.version_id,
-              version.kind === 'image' ? node.size?.width ?? 320 : undefined,
-            )}
+            src={version.kind === 'image'
+              ? canvasMediaUrlAtWidth(context.projectId, version.version_id, imageBitmapWidth)
+              : canvasMediaUrl(context.projectId, version.version_id)}
             title={`${node.title} · 候选 ${number}`}
             fit={node.data.display.fit}
             freeResize={node.data.display.free_resize}

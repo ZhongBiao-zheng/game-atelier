@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.98.10',
+    date: '2026-10-19',
+    headline: '画布放大看图更清楚',
+    changes: [
+      { kind: 'fix', text: '画布放大看图不再模糊：放大到缩略图不够清楚时自动换成原图。' },
+    ],
+  },
+  {
     version: '5.98.9',
     date: '2026-10-19',
     headline: '拆分图层能改提示词重拆，图片工具条更顺手',
