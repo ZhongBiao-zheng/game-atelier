@@ -1312,11 +1312,7 @@ function CanvasEditorInner({
       } else if (history.current.future.length) {
         history.current.future = [];
       }
-      return {
-        // 传 current 进去当「谁动过」的判据：只有自己刚动过的节点会被分组吞进去。
-        ...normalizeCanvasGroups(detachMissingImageEditNodes(syncDraftLayerStackSources(updater(current))), current),
-        updated_at: new Date().toISOString(),
-      };
+      return normalizeCommittedDocument(updater(current), current);
     });
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
@@ -3098,50 +3094,19 @@ function CanvasEditorInner({
       setError('图片节点当前没有可读取的项目内版本。');
       return;
     }
-    const stackId = makeId('layer-stack');
-    const size = layerStackSizeForCanvasVersion(sourceVersion);
     const sourceSize = canvasNodeRenderedSize(source, current.content_versions);
-    const position = placeCanvasNodeWithoutOverlap(
-      { x: source.position.x + sourceSize.width + 72, y: source.position.y },
-      current.nodes,
-      size,
-      undefined,
-      node => canvasNodeRenderedSize(node, current.content_versions),
-    );
     const choice = layerDecompositionModelChoices(keys)[0];
-    const stack: CanvasLayerStackNode = {
-      id: stackId,
-      title: '拆分图层',
-      type: 'layer_stack',
-      position,
-      size,
-      z_index: source.z_index,
-      data: {
-        source_version_id: sourceVersion.version_id,
-        alias: choice?.key.alias ?? null,
-        model: choice?.model.id ?? null,
-        prompt: '',
-        resolution: 'auto',
-        base_version_id: null,
-        base_visible: true,
-        layers: [],
-        active_run_id: null,
-        error: null,
-      },
-    };
+    const stack = newLayerStackNode(
+      current,
+      source,
+      sourceVersion,
+      { x: source.position.x + sourceSize.width + 72, y: source.position.y },
+      { alias: choice?.key.alias ?? null, model: choice?.model.id ?? null, prompt: '', resolution: 'auto' },
+    );
     setError(null);
-    commit(document => ({
-      ...document,
-      nodes: [...document.nodes, stack],
-      connections: [...document.connections, {
-        id: makeId('connection'),
-        role: 'input',
-        source_node_id: source.id,
-        target_node_id: stack.id,
-      }],
-    }), true);
+    commit(document => withLayerStackFromSource(document, stack, source.id), true);
     setSelectedConnectionIds(new Set());
-    setSelectedNodeIds(new Set([stackId]));
+    setSelectedNodeIds(new Set([stack.id]));
   }, [commit, keys]);
 
   const submitLayerDecomposition = useCallback(async (nodeId: string) => {
@@ -3192,6 +3157,51 @@ function CanvasEditorInner({
     persistNow,
     projectId,
   ]);
+
+  // 已完成的拆分节点不能再提交：改提示词重拆 = 从同一张来源图新建一个拆分节点放在下方并立即提交。
+  const rerunLayerDecomposition = useCallback(async (
+    stackId: string,
+    settings: { alias: string; model: string; prompt: string },
+  ) => {
+    if (batchBusyRef.current) {
+      setError('批量执行期间暂时锁定画布编辑，请先停止或等待完成。');
+      return;
+    }
+    const current = latestDocument.current;
+    const previous = current?.nodes.find(node => node.id === stackId);
+    if (!current || previous?.type !== 'layer_stack') return;
+    const edge = current.connections.find(connection => (
+      connection.role === 'input' && connection.target_node_id === stackId
+    ));
+    const source = current.nodes.find(node => node.id === edge?.source_node_id);
+    const sourceVersion = source?.type === 'image' && source.data.current_version_id
+      ? current.content_versions[source.data.current_version_id]
+      : undefined;
+    if (source?.type !== 'image' || sourceVersion?.kind !== 'image') {
+      setError('拆分节点与来源图片的连接已断开。');
+      return;
+    }
+    const previousSize = canvasNodeRenderedSize(previous, current.content_versions);
+    const stack = newLayerStackNode(
+      current,
+      source,
+      sourceVersion,
+      { x: previous.position.x, y: previous.position.y + previousSize.height + 72 },
+      { ...settings, resolution: previous.data.resolution },
+    );
+    history.current.past.push(current);
+    history.current.past = history.current.past.slice(-50);
+    history.current.future = [];
+    const next = normalizeCommittedDocument(withLayerStackFromSource(current, stack, source.id), current);
+    latestDocument.current = next;
+    setDocument(next);
+    dirtyVersion.current += 1;
+    setDirtySignal(dirtyVersion.current);
+    setError(null);
+    setSelectedConnectionIds(new Set());
+    setSelectedNodeIds(new Set([stack.id]));
+    await submitLayerDecomposition(stack.id);
+  }, [submitLayerDecomposition]);
 
   const cancelRun = useCallback(async (runId: string) => {
     setError(null);
@@ -4544,6 +4554,7 @@ function CanvasEditorInner({
     reversePrompt,
     createLayerDecomposition,
     submitLayerDecomposition,
+    rerunLayerDecomposition,
     recoverReversePromptConfig,
     reversePromptConfiguredNodeIds,
     replaceMedia,
@@ -4627,6 +4638,7 @@ function CanvasEditorInner({
     setTextEditing,
     setVideoFrameConnections,
     submitLayerDecomposition,
+    rerunLayerDecomposition,
     submitRun,
     submittingNodeIds,
     toggleFreeResize,
@@ -5981,6 +5993,64 @@ function cloneCanvasDraft(
       return clonedId ? `@[node:${clonedId}]` : '';
     }),
     updated_at: new Date().toISOString(),
+  };
+}
+
+/** 所有本地编辑的统一收尾：传 previous 进去当「谁动过」的判据，只有自己刚动过的节点会被分组吞进去。 */
+function normalizeCommittedDocument(next: CanvasDocument, previous: CanvasDocument): CanvasDocument {
+  return {
+    ...normalizeCanvasGroups(detachMissingImageEditNodes(syncDraftLayerStackSources(next)), previous),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function newLayerStackNode(
+  document: CanvasDocument,
+  source: Extract<CanvasContentNode, { type: 'image' }>,
+  sourceVersion: CanvasMediaVersion,
+  preferred: XYPosition,
+  settings: Pick<CanvasLayerStackNode['data'], 'alias' | 'model' | 'prompt' | 'resolution'>,
+): CanvasLayerStackNode {
+  const size = layerStackSizeForCanvasVersion(sourceVersion);
+  return {
+    id: makeId('layer-stack'),
+    title: '拆分图层',
+    type: 'layer_stack',
+    position: placeCanvasNodeWithoutOverlap(
+      preferred,
+      document.nodes,
+      size,
+      undefined,
+      node => canvasNodeRenderedSize(node, document.content_versions),
+    ),
+    size,
+    z_index: source.z_index,
+    data: {
+      ...settings,
+      source_version_id: sourceVersion.version_id,
+      base_version_id: null,
+      base_visible: true,
+      layers: [],
+      active_run_id: null,
+      error: null,
+    },
+  };
+}
+
+function withLayerStackFromSource(
+  document: CanvasDocument,
+  stack: CanvasLayerStackNode,
+  sourceNodeId: string,
+): CanvasDocument {
+  return {
+    ...document,
+    nodes: [...document.nodes, stack],
+    connections: [...document.connections, {
+      id: makeId('connection'),
+      role: 'input',
+      source_node_id: sourceNodeId,
+      target_node_id: stack.id,
+    }],
   };
 }
 
