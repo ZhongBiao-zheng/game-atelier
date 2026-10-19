@@ -326,6 +326,8 @@ vi.mock('@xyflow/react', () => {
 vi.mock('@/api/canvas', () => ({
   canvasDownloadUrl: vi.fn(() => '/download'),
   canvasMediaUrl: vi.fn(() => '/media'),
+  canvasMediaUrlAtWidth: vi.fn(() => '/media'),
+  canvasThumbnailWidth: vi.fn(() => 1024),
   cancelCanvasRun: vi.fn(),
   createCanvasReversePromptConfig: vi.fn(),
   dismissCanvasCandidate: vi.fn(),
