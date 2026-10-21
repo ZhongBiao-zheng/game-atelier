@@ -311,7 +311,7 @@ export async function replaceCanvasNodeMedia(
 const CANVAS_THUMBNAIL_WIDTHS = [256, 512, 1024];
 
 /** 把「这张图会显示成多宽」换算成要向服务端申请的位图宽度；超过最大档位返回 null＝要原图。 */
-function canvasThumbnailWidth(displayWidth: number): number | null {
+export function canvasThumbnailWidth(displayWidth: number): number | null {
   const ratio = typeof window === 'undefined' ? 1 : Math.min(window.devicePixelRatio || 1, 2);
   const needed = displayWidth * ratio;
   return CANVAS_THUMBNAIL_WIDTHS.find(candidate => needed <= candidate) ?? null;
@@ -326,8 +326,17 @@ export function canvasMediaUrl(
 ): string {
   const base = `/api/canvas/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/media`;
   if (displayWidth === undefined || displayWidth <= 0) return base;
-  const width = canvasThumbnailWidth(displayWidth);
-  return width === null ? base : `${base}?w=${width}`;
+  return canvasMediaUrlAtWidth(projectId, versionId, canvasThumbnailWidth(displayWidth));
+}
+
+/** 已经取好档的位图宽度（canvasThumbnailWidth 的返回值）直接拼 URL；null＝原图。 */
+export function canvasMediaUrlAtWidth(
+  projectId: string,
+  versionId: string,
+  bitmapWidth: number | null,
+): string {
+  const base = `/api/canvas/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/media`;
+  return bitmapWidth === null ? base : `${base}?w=${bitmapWidth}`;
 }
 
 export function canvasDownloadUrl(
