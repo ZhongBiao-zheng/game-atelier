@@ -87,6 +87,7 @@ export function imageControlCaps(
   modelId?: string | null,
   provider?: string | null,
   baseUrl?: string | null,
+  billingGroup?: string | null,
 ): ImageControlCaps {
   const family = imageFamily(modelId);
   const base = FAMILY_CAPS[family];
@@ -110,16 +111,15 @@ export function imageControlCaps(
     || ((provider === 'openai' || provider === 'custom') && isTuzi && tuziAutoModels.includes(modelId ?? ''))
     || (provider === 'openrouter' && host === 'openrouter.ai' && sizeOptions.ratios.includes('auto'));
   // Tuzi 的 nano-banana 只有 Pro 与 2 的基础型号接收独立 quality；HD/NT/VIP 与固定 2K/4K
-  // 的档位都编码在 model id。这条限制只属于 nano-banana 族——原先写成整个 Tuzi 网关的闸门，
-  // 把 gpt-image 的质量控件一起关掉了。2026-09-17 实测 Tuzi 的 gpt-image-2 / 2.5 /
-  // 2.5-flare / 2.5-sunburst 都按 quality 改计费（output_tokens：low 272 / 缺省 1056 / high 4160）。
-  // Tuzi 的 gpt-image 用 1K / 2K 档位代替自定义像素框：quality 只改渲染消耗、不改尺寸，
-  // 尺寸得自己有档位可选。不给 4K —— 2026-09-17 实测单边封顶 2880（发 3840 或 4096 都回
-  // 2880²），而且超限请求比按 2880 发多花一倍 token（1483 vs 659）。
+  // 的档位都编码在 model id。其余 GPT 路由保留已验证的 1K/2K 尺寸与质量控件。
+  // 2026-10-21：default GPT 2.5 分组计费改为 1K/2K/4K；服务端将 resolution
+  // 映射为 quality 档位，界面不再重复提供 low/medium/high。
   const tuziGptImageTiers = isTuzi && family === 'gpt-image';
+  const tuziGpt25Tiers = isTuzi && billingGroup === 'default'
+    && ['gpt-image-2.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-vip'].includes(modelId ?? '');
   const tuziNanoWithoutQuality = isTuzi && family === 'nano-banana'
     && !['nano-banana-pro', 'nano-banana-2', 'gemini-nano-banana-2.1', 'nano-banana-2.1'].includes(normalized);
-  const qualities = supportsImageQuality(modelId) && !tuziNanoWithoutQuality
+  const qualities = supportsImageQuality(modelId) && !tuziNanoWithoutQuality && !tuziGpt25Tiers
     ? base.qualities
     : null;
   // OpenRouter 的尺寸以精确型号能力目录为准，不把模型交集当全集。
@@ -143,7 +143,7 @@ export function imageControlCaps(
     ratios: sizeOptions.ratios,
     showAutoSize,
     qualities,
-    resolutions: tuziGptImageTiers ? TUZI_GPT_IMAGE_RESOLUTIONS
+    resolutions: tuziGpt25Tiers ? ['1K', '2K', '4K'] : tuziGptImageTiers ? TUZI_GPT_IMAGE_RESOLUTIONS
       : base.showResolution && !isNanoImageSizeModel(modelId) ? availableResolutions(modelId) : [],
   };
 }

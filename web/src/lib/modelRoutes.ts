@@ -54,8 +54,8 @@ export function resolveChannel(
 /** 「自动」时取全部成员能力的交集；其余就是该 KEY 自己的能力。 */
 export function selectionImageCaps(key: KeyView | undefined, modelId: string): ImageControlCaps {
   const members = isAutoProvider(key) ? key?.models.find(model => model.id === modelId)?.members : undefined;
-  if (!members?.length) return imageControlCaps(modelId, key?.provider, key?.base_url);
-  return intersectImageCaps(members.map(member => imageControlCaps(member.model_id, member.provider, member.base_url)));
+  if (!members?.length) return imageControlCaps(modelId, key?.provider, key?.base_url, key?.billing_group);
+  return intersectImageCaps(members.map(member => imageControlCaps(member.model_id, member.provider, member.base_url, member.billing_group)));
 }
 
 export function intersectImageCaps(all: ImageControlCaps[]): ImageControlCaps {
@@ -115,7 +115,7 @@ export function routeMemberChoices(key: KeyView, model: KeyModel): Array<{ key: 
 
 function memberChoice(auto: KeyView, model: KeyModel, member: ModelRouteMember) {
   return {
-    key: { ...auto, alias: member.alias, provider: member.provider, base_url: member.base_url, models: [] },
+    key: { ...auto, alias: member.alias, provider: member.provider, base_url: member.base_url, billing_group: member.billing_group, models: [] },
     model: { id: member.model_id, name: member.name, modality: model.modality, protocol: member.protocol },
   };
 }

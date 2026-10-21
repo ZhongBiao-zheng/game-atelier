@@ -47,6 +47,7 @@ class RouteMember:
     model_id: str
     name: str
     protocol: str | None
+    billing_group: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,7 @@ def _routes(database: KeysDB) -> list[ModelRoute]:
             members.append(RouteMember(
                 alias=key.alias, provider=key.provider, base_url=key.base_url,
                 model_id=model.id, name=model.name or model.id, protocol=model.protocol,
+                billing_group=key.billing_group,
             ))
     return [
         ModelRoute(

@@ -26,7 +26,7 @@ from character_workflow.lib import net_env
 from character_workflow.lib.callers.openrouter_usage import cost_usd
 from character_workflow.lib.callers.image_output import write_image
 
-from .openai_image import OpenAIImageError, _post_json
+from .openai_image import OpenAIImageError, _post_json, normalize_image_pixel_size
 
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -101,7 +101,18 @@ def _image_payload(*, prompt: str, model: str, n: int, kwargs: dict) -> dict:
             payload["aspect_ratio"] = ratio.strip()
         resolution = params.get("resolution")
         if isinstance(resolution, str) and resolution.strip():
-            payload["resolution"] = resolution.strip().upper()
+            resolution = resolution.strip().upper()
+            if model == "openai/gpt-image-2.5-sunburst" and resolution in {"2K", "4K"}:
+                # Sunburst's catalog omits resolution, but explicit pixels were verified
+                # at 2048² and 3840×2160. Do not send the unsupported tier parameter.
+                a, b = map(float, payload.pop("aspect_ratio", "1:1").split(":"))
+                edge = 2048 if resolution == "2K" else 4096
+                width, height = (edge, round(edge * b / a)) if a >= b else (
+                    round(edge * a / b), edge,
+                )
+                payload["size"] = normalize_image_pixel_size(model, f"{width}x{height}")
+            else:
+                payload["resolution"] = resolution
 
     quality = kwargs.get("quality") or params.get("quality")
     if _is_gpt_image(model) and quality in ("low", "medium", "high", "auto"):

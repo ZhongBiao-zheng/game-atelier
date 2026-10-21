@@ -16,6 +16,9 @@ import {
   TUZI_GPT_IMAGE_2_1K_YUAN_PER_IMAGE,
   TUZI_GPT_IMAGE_2_PIXEL_LIMITS,
   TUZI_GPT_IMAGE_2_YUAN_PER_IMAGE,
+  TUZI_GPT_IMAGE_25_YUAN_PER_IMAGE,
+  TUZI_GPT_IMAGE_25_PIXEL_LIMITS,
+  TUZI_GPT_IMAGE_25_1K_YUAN_PER_IMAGE,
   TUZI_GROUP_YUAN_PER_IMAGE,
   TUZI_MIDJOURNEY_YUAN_PER_TASK,
 } from '@/lib/generationPrices';
@@ -31,7 +34,8 @@ export interface GenerationCostRequest {
   kind: 'image' | 'video';
   count?: number;
   size?: string;
-  quality?: Quality;
+  quality?: Quality | '1k' | '2k' | '4k';
+  sizeMode?: JobParams['size_mode'];
   duration?: number;
   resolution?: string;
   ratio?: string;
@@ -140,7 +144,8 @@ function protocolMatches(protocol: string | null | undefined, expected: string):
 function estimateOpenAiHkImage(request: GenerationCostRequest): number | null {
   const model = normalize(request.model?.id);
   const unitPrice = model === 'nano-banana-2'
-    ? (request.quality ? OPENAI_HK_NANO_BANANA_2_YUAN[request.quality] : undefined)
+    ? (request.quality && ['low', 'medium', 'high', 'auto'].includes(request.quality)
+      ? OPENAI_HK_NANO_BANANA_2_YUAN[request.quality as Quality] : undefined)
     : OPENAI_HK_FIXED_YUAN_PER_IMAGE[model];
   if (unitPrice == null) return null;
   return priced(unitPrice * safeCount(request.count));
@@ -151,6 +156,25 @@ function estimateTuziImage(request: GenerationCostRequest): number | null {
   if (!group) return null;
   const model = normalize(request.model?.id);
   const exactModel = request.model?.id?.trim();
+  if (group === 'default' && exactModel === 'gpt-image-2.5-1k') {
+    return priced(TUZI_GPT_IMAGE_25_1K_YUAN_PER_IMAGE * safeCount(request.count));
+  }
+  const gpt25Prices = exactModel && TUZI_GPT_IMAGE_25_YUAN_PER_IMAGE[exactModel];
+  if (group === 'default' && gpt25Prices) {
+    const explicit = request.sizeMode === 'auto' ? undefined
+      : request.resolution ?? request.quality?.toUpperCase();
+    let tier: '1K' | '2K' | '4K';
+    if (explicit === '1K' || explicit === '2K' || explicit === '4K') tier = explicit;
+    else {
+      const size = parsePixelSize(request.size ?? '');
+      const pixels = size ? size.w * size.h : 0;
+      const whitelisted = ['gpt-image-2.5', 'gpt-image-2.5-vip'].includes(exactModel!)
+        && TUZI_GPT_IMAGE_2_1K_SIZES.has(request.size?.toLowerCase() ?? '');
+      tier = whitelisted ? '1K' : pixels > TUZI_GPT_IMAGE_25_PIXEL_LIMITS['2K'] ? '4K'
+        : pixels > TUZI_GPT_IMAGE_25_PIXEL_LIMITS['1K'] ? '2K' : '1K';
+    }
+    return priced(gpt25Prices[tier] * safeCount(request.count));
+  }
   if (group === 'default' && model === 'mj-imagine') return TUZI_MIDJOURNEY_YUAN_PER_TASK;
   if (group === 'default' && TUZI_GEMINI_3_PRO_MODELS.has(model)) {
     // 与 Tuzi caller 一致：固定型号优先，其余 low / medium / high → 1K / 2K / 4K；
@@ -319,7 +343,8 @@ export function estimateGenerationCostForSubmission(
   if (!selectedKey) return null;
   const selectedModel = selectedKey.models.find((item) => item.id === modelId);
   const quality = (params.quality === 'low' || params.quality === 'medium'
-    || params.quality === 'high' || params.quality === 'auto')
+    || params.quality === 'high' || params.quality === 'auto'
+    || params.quality === '1k' || params.quality === '2k' || params.quality === '4k')
     ? params.quality
     : undefined;
   return estimateGenerationCost({
@@ -332,6 +357,7 @@ export function estimateGenerationCostForSubmission(
     kind,
     count: typeof params.n === 'number' ? params.n : undefined,
     size: typeof params.size === 'string' ? params.size : undefined,
+    sizeMode: params.size_mode,
     quality,
     duration: typeof params.duration === 'number' ? params.duration : undefined,
     resolution: typeof params.resolution === 'string' ? params.resolution : undefined,

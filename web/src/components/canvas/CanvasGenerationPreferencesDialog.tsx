@@ -93,7 +93,7 @@ function upscaleForSave(value: CanvasUpscalePreferences, keys: KeyView[]): Canva
       : null;
     const effective = selected ?? (target.autoQuality ? automatic : null);
     const qualities = effective
-      ? imageControlCaps(effective.model.id, effective.key.provider, effective.key.base_url).qualities
+      ? imageControlCaps(effective.model.id, effective.key.provider, effective.key.base_url, effective.key.billing_group).qualities
       : null;
     tiers[target.id] = {
       selection: selected ? tier.selection : null,
@@ -194,7 +194,7 @@ export function CanvasGenerationPreferencesDialog({
   const effectiveUpscaleChoice = selectedUpscaleChoice ?? (upscaleTargetSpec.autoQuality ? upscaleAutoChoice : null);
   const upscaleStale = upscaleTier.selection !== null && selectedUpscaleChoice === null;
   const upscaleQualities = effectiveUpscaleChoice
-    ? imageControlCaps(effectiveUpscaleChoice.model.id, effectiveUpscaleChoice.key.provider, effectiveUpscaleChoice.key.base_url).qualities
+    ? imageControlCaps(effectiveUpscaleChoice.model.id, effectiveUpscaleChoice.key.provider, effectiveUpscaleChoice.key.base_url, effectiveUpscaleChoice.key.billing_group).qualities
     : null;
   const upscaleQuality = upscaleQualities?.includes(upscaleTier.quality as Quality)
     ? upscaleTier.quality as Quality

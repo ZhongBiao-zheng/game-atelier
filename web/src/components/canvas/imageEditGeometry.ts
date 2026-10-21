@@ -59,7 +59,7 @@ export function editSize(key: KeyView | undefined, model: string, width: number,
   if (width < 1 || height < 1 || Math.max(width, height) > 16384 || width * height > 16_777_216) return fail('画框不能超过 16384px 或 1600 万像素');
   // 原图与目标画框按实际像素提交，EvoLink 由 img_pos 定义位置，不使用生图尺寸参数。
   if (isEvolinkMidjourney(model, key.provider)) return { params: {}, error: null };
-  const caps = imageControlCaps(model, key.provider, key.base_url);
+  const caps = imageControlCaps(model, key.provider, key.base_url, key.billing_group);
   if (caps.sizeKind === 'ratio' || key.provider === 'openrouter') {
     const value = (ratio: string) => { const [a, b] = ratio.split(':').map(Number); return a / b; };
     const ratios = caps.ratios.filter(ratio => ratio !== 'auto');

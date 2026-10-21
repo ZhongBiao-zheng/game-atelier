@@ -977,6 +977,7 @@ function normalizedCanvasGenerationParams(
       key.provider,
       current,
       key.base_url,
+      selectionImageCaps(key, model.id),
     );
   }
   if (mode === 'video') return normalizeCanvasVideoParams(model.id, model.protocol, current);
