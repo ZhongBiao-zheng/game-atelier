@@ -42,7 +42,7 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 
 ### 模型路由（5.90.0）
 
-- `GET /api/models` → `{models: [{id, name, modality, members: [{alias, provider, base_url, model_id, name, protocol}]}]}`；`members` 按出图顺序，第一个就是「自动」实际使用的。
+- `GET /api/models` → `{models: [{id, name, modality, members: [{alias, provider, base_url, billing_group, model_id, name, protocol}]}]}`；`members` 按出图顺序，第一个就是「自动」实际使用的。`billing_group` 同步进网关 `via`，能力和估价按成员分组判断。
 - `PUT /api/models/order`，body `{modality, id, aliases}`：`aliases` 必须恰好是该组现有成员的一个排列，否则 422；组不存在 404。属管理权限。
 - 创作台 `POST /api/studio/jobs`、画布草稿 / 生成偏好 `selection`、Agent `CanvasAgentModelRef`、工坊 `prepare_generation`：`alias` 为空即「自动」，`model` 为路由 id；Job 与运行快照里的 `alias` 始终是实际使用的 KEY。
 - `JobParams.route_id`：「自动」提交时由服务端写入（浏览器传入的会被覆盖）；`route_tried`：失败切换时换掉的别名。运行快照的 `alias` 是提交时解析的那家，失败切换后以 Job 的 `alias` 为准。

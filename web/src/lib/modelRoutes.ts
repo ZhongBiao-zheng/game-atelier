@@ -64,9 +64,9 @@ function memberChannel(member: ModelRouteMember): ModelRouteMember {
 /** 成员的能力：局域网 Atelier 取网关那边全部成员的交集。 */
 function memberCaps(member: ModelRouteMember): ImageControlCaps {
   if (member.provider === GATEWAY_PROVIDER && member.via?.length) {
-    return intersectImageCaps(member.via.map(item => imageControlCaps(item.model_id, item.provider, item.base_url)));
+    return intersectImageCaps(member.via.map(item => imageControlCaps(item.model_id, item.provider, item.base_url, item.billing_group)));
   }
-  return imageControlCaps(member.model_id, member.provider, member.base_url);
+  return imageControlCaps(member.model_id, member.provider, member.base_url, member.billing_group);
 }
 
 /** 选择落到的实际渠道：「自动」取组内第一个成员；局域网 Atelier 再取网关那边第一个成员；其余原样返回。
@@ -83,7 +83,7 @@ export function resolveChannel(
   if (channel === first) return { key: real, modelId: first.model_id };
   return {
     key: {
-      ...real, provider: channel.provider, base_url: channel.base_url,
+      ...real, provider: channel.provider, base_url: channel.base_url, billing_group: channel.billing_group,
       models: [{ id: channel.model_id, name: channel.name, modality: 'image', protocol: channel.protocol }],
     },
     modelId: channel.model_id,
@@ -93,7 +93,7 @@ export function resolveChannel(
 /** 有成员时取全部成员能力的交集（「自动」、局域网 Atelier）；其余就是该 KEY 自己的能力。 */
 export function selectionImageCaps(key: KeyView | undefined, modelId: string): ImageControlCaps {
   const members = selectionMembers(key, key?.models.find(model => model.id === modelId));
-  if (!members?.length) return imageControlCaps(modelId, key?.provider, key?.base_url);
+  if (!members?.length) return imageControlCaps(modelId, key?.provider, key?.base_url, key?.billing_group);
   return intersectImageCaps(members.map(memberCaps));
 }
 
@@ -161,7 +161,7 @@ export function routeMemberChoices(key: KeyView, model: KeyModel): Array<{ key: 
 
 function memberChoice(auto: KeyView, model: KeyModel, member: ModelRouteMember) {
   return {
-    key: { ...auto, alias: member.alias, provider: member.provider, base_url: member.base_url, models: [] },
+    key: { ...auto, alias: member.alias, provider: member.provider, base_url: member.base_url, billing_group: member.billing_group, models: [] },
     model: { id: member.model_id, name: member.name, modality: model.modality, protocol: member.protocol },
   };
 }

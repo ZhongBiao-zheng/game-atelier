@@ -55,6 +55,7 @@ def _route_view(route: model_routes.ModelRoute) -> dict[str, Any]:
         "id": route.id, "name": members[0].name, "modality": route.modality,
         "members": [{
             "alias": m.alias, "provider": m.provider, "base_url": m.base_url,
+            "billing_group": m.billing_group,
             "model_id": m.model_id, "name": m.name, "protocol": m.protocol,
         } for m in members],
     }

@@ -44,6 +44,7 @@ class ViaMember(BaseModel):
     model_id: str
     name: str
     protocol: str | None = None
+    billing_group: str | None = None
 
 
 class ModelSpec(BaseModel):
@@ -233,7 +234,8 @@ def size_channel(key: KeySpec, model: ModelSpec) -> tuple[KeySpec, ModelSpec]:
     channel_model = ModelSpec(id=via.model_id, name=via.name, modality=model.modality,
                               protocol=via.protocol)
     channel_key = key.model_copy(update={
-        "provider": via.provider, "base_url": via.base_url, "models": [channel_model],
+        "provider": via.provider, "base_url": via.base_url, "billing_group": via.billing_group,
+        "models": [channel_model],
     })
     return channel_key, channel_model
 

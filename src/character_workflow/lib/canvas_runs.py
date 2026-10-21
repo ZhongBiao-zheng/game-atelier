@@ -548,6 +548,7 @@ def _normalized_image_preference_params(
     from character_workflow.lib.image_size_catalog import (
         image_size_options,
         is_nano_image_size_model,
+        uses_tuzi_gpt25_tiers,
     )
 
     key, model = size_channel(key, model)
@@ -603,6 +604,12 @@ def _normalized_image_preference_params(
         resolutions = options["resolutions"]
         resolution = str(params.get("resolution") or "2K").upper()
         normalized["resolution"] = resolution if resolution in resolutions else "2K"
+    if uses_tuzi_gpt25_tiers(key.base_url, key.billing_group, model.id):
+        normalized.pop("quality", None)
+        resolution = str(params.get("resolution") or "2K").upper()
+        if resolution not in {"1K", "2K", "4K"}:
+            raise ValueError("当前模型或渠道不支持该图片分辨率")
+        normalized["resolution"] = resolution
     return JobParams.model_validate(normalized)
 
 

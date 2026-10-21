@@ -24,6 +24,17 @@ const routes: ModelRoute[] = [{
 }];
 
 describe('「自动」供应商', () => {
+  it('preserves Tuzi billing groups when deriving automatic route controls', () => {
+    const model = 'gpt-image-2.5-flare';
+    const tuzi = { ...key('Tuzi', 'custom', 'https://api.tu-zi.com', [model]), billing_group: 'default' };
+    const route: ModelRoute = { id: model, name: model, modality: 'image', members: [{
+      alias: tuzi.alias, provider: tuzi.provider, base_url: tuzi.base_url, billing_group: tuzi.billing_group,
+      model_id: model, name: model, protocol: null,
+    }] };
+    const auto = withAutoProvider([tuzi], [route])[0];
+    expect(selectionImageCaps(auto, model)).toMatchObject({ resolutions: ['1K', '2K', '4K'], qualities: null });
+    expect(selectionImageCaps(tuzi, model)).toEqual(selectionImageCaps(auto, model));
+  });
   const providers = withAutoProvider(keys, routes);
   const auto = providers[0];
 

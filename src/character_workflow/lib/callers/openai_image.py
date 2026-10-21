@@ -19,7 +19,9 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from character_workflow.lib import net_env
 from character_workflow.lib.callers import tuzi_async
 from character_workflow.lib.callers.image_output import write_image
-from character_workflow.lib.image_size_catalog import image_size_options, is_nano_image_size_model
+from character_workflow.lib.image_size_catalog import (
+    image_size_options, is_nano_image_size_model, uses_tuzi_gpt25_tiers,
+)
 
 DEFAULT_SEEDREAM_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
@@ -242,6 +244,9 @@ def render(
             requested_size = str(requested_size).replace(":", "x")
     outbound_model = tuzi_outbound_image_model(model) if is_tuzi else model
     quality = _quality_param(kwargs) if supports_image_quality(model) else None
+    if uses_tuzi_gpt25_tiers(base_url, key.billing_group, model):
+        tier = kwargs.get("quality") or (kwargs.get("params") or {}).get("quality")
+        quality = tier if tier in {"1k", "2k", "4k"} else None
     if is_tuzi and family == "nano-banana":
         quality = tuzi_image_quality(model, quality)
     image_protocol = _effective_image_protocol(key, model)

@@ -47,6 +47,19 @@
 - VIP、HD、其他分组与未知后缀没有核实价格，不能自动套用该公告。
 - 其他型号与渠道沿用原有核价；提取为独立表不代表重新核实了全部厂商价格。
 
+## Tuzi GPT Image 2.5：2026-10-21 更新
+
+来源：公开 `/api/pricing` 的 `group_model_pricing.default.billing_expr`，乘 `/api/status`
+人民币系数 0.7。金额维护于 `TUZI_GPT_IMAGE_25_YUAN_PER_IMAGE`。
+
+- 精确匹配 Tuzi default 的 `gpt-image-2.5`、`-flare`、`-sunburst`、`-vip`。
+- 界面仅提供 1K/2K/4K 分辨率，取消这几个型号的通用质量选项。服务端把显式分辨率写为
+  `quality=1k/2k/4k`，该参数在计费表达式中优先于像素；AUTO 不发送残留档位或质量。
+- 未指定档位时，≤1,048,576 像素算 1K，≤3,686,400 算 2K，再大为 4K；缺省和 AUTO
+  按表达式默认 1K 估价。裸型号及 VIP 另接受 GPT Image 2 的 11 个精确 1K 尺寸；Flare/Sunburst 不接受这份白名单。
+- `gpt-image-2.5-1k` 仅补固定单价，不锁定或改变现有尺寸控件；其他分组和渠道不套用此规则。
+- 这是当前分组计费契约；未进行收费测试，不承诺各路由实际输出像素与请求完全一致。
+
 ## Tuzi GPT Image 2：2026-09-04 更新
 
 来源为用户提供的 Tuzi 调价公告，并核对了 Tuzi [公开价表 API](https://api.tu-zi.com/api/pricing)

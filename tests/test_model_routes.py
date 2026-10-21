@@ -25,7 +25,7 @@ def _seed(default_alias: str | None = "Tuzi", model_order: dict | None = None) -
             _key("Tuzi", "custom", [
                 {"id": "gpt-image-2", "name": "gpt-image-2", "modality": "image"},
                 {"id": "claude-sonnet-5-5", "name": "Sonnet", "modality": "text"},
-            ], base_url="https://api.tu-zi.com/v1"),
+            ], base_url="https://api.tu-zi.com/v1", billing_group="default"),
             _key("OpenRouter", "openrouter", [
                 {"id": "openai/gpt-image-2", "name": "OR GPT Image 2", "modality": "image"},
                 {"id": "bytedance/seedance-2.0", "name": "Seedance OR", "modality": "video",
@@ -47,6 +47,7 @@ def test_same_model_across_providers_forms_one_route_with_default_key_first(isol
     _seed()
     route = _route("image", "gpt-image-2")
     assert [m.alias for m in route.members] == ["Tuzi", "HK", "OpenRouter"]
+    assert route.members[0].billing_group == "default"
     assert [m.model_id for m in route.members] == ["gpt-image-2", "gpt-image-2", "openai/gpt-image-2"]
     assert route.name == "gpt-image-2"
 
@@ -105,6 +106,7 @@ def test_models_api_lists_routes_and_reorders(client):
     body = client.get("/api/models").json()
     gpt = next(row for row in body["models"] if row["id"] == "gpt-image-2")
     assert [m["alias"] for m in gpt["members"]] == ["Tuzi", "HK", "OpenRouter"]
+    assert gpt["members"][0]["billing_group"] == "default"
     assert all("access_key" not in m for row in body["models"] for m in row["members"])
 
     response = client.put("/api/models/order", json={

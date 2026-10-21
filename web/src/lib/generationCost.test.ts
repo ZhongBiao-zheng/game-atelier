@@ -8,6 +8,26 @@ import {
 import { normalizeStudioSizeForModel } from './studioSize';
 
 describe('estimateGenerationCost', () => {
+  it('matches Tuzi default GPT 2.5 explicit tiers, pixel thresholds and AUTO', () => {
+    const provider = { provider: 'custom', baseUrl: 'https://api.tu-zi.com', billingGroup: 'default' };
+    for (const id of ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst']) {
+      const request = { provider, model: { id }, kind: 'image' as const, count: 1, size: '2048x2048' };
+      expect(estimateGenerationCost(request)).toBe(0.21);
+      for (const sizeMode of ['ratio', 'custom'] as const) {
+        expect(estimateGenerationCost({ ...request, sizeMode, resolution: '2K' })).toBe(0.16);
+        expect(estimateGenerationCost({ ...request, sizeMode, resolution: '4K' })).toBe(0.21);
+      }
+      expect(estimateGenerationCost({ ...request, quality: '1k' })).toBe(0.12);
+      expect(estimateGenerationCost({ ...request, size: '1920x1920' })).toBe(0.16);
+      expect(estimateGenerationCost({ ...request, size: '1920x1921' })).toBe(0.21);
+      expect(estimateGenerationCost({ ...request, size: '1024x1536' })).toBe(0.16);
+      expect(estimateGenerationCost({ ...request, sizeMode: 'auto', size: 'auto', resolution: '4K', quality: 'high' })).toBe(0.12);
+      expect(estimateGenerationCost({ ...request, provider: { ...provider, billingGroup: 'image' } })).toBeNull();
+    }
+    expect(estimateGenerationCost({ provider, model: { id: 'gpt-image-2.5' }, kind: 'image', size: '1024x1536' })).toBe(0.028);
+    expect(estimateGenerationCost({ provider, model: { id: 'gpt-image-2.5-vip' }, kind: 'image', resolution: '4K' })).toBe(0.28);
+    expect(estimateGenerationCost({ provider, model: { id: 'gpt-image-2.5-1k' }, kind: 'image', resolution: '4K', count: 2 })).toBe(0.04);
+  });
   it.each([1, 2, 4])('prices EvoLink MJ V8.2 once for %s outputs', (count) => {
     const request = {
       provider: { provider: 'evolink', baseUrl: 'https://api.evolink.ai/v1' },

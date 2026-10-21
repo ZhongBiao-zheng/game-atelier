@@ -5,6 +5,7 @@ export interface ModelRouteMember {
   alias: string;
   provider: string;
   base_url: string | null;
+  billing_group?: string | null;
   model_id: string;
   name: string;
   protocol: string | null;
