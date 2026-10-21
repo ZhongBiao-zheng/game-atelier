@@ -148,8 +148,6 @@ def normalize_image_size_params(key: KeySpec, model: str, params: dict[str, Any]
                 result.pop("resolution", None)
             else:
                 result["resolution"] = resolution
-                if tuzi_tiers:
-                    result["quality"] = resolution.lower()
         if isinstance(result.get("size"), str):
             result["size"] = normalized_image_submission_size(key, model, result["size"])
     else:
