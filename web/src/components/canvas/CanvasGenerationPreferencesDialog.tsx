@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/dialog';
 import { VideoControls } from '@/components/studio/VideoControls';
 import { imageControlCaps, QUALITY_LABELS, type Quality } from '@/lib/imageControlCaps';
-import { isAutoProvider, providerForAlias, routeChannel, selectionImageCaps } from '@/lib/modelRoutes';
+import { providerForAlias, routeChannel, selectionImageCaps } from '@/lib/modelRoutes';
 import { cn } from '@/lib/utils';
 import {
   CANVAS_GENERATION_MODE_LABELS,
@@ -264,13 +264,7 @@ export function CanvasGenerationPreferencesDialog({
   // 「自动」按组内第一个成员算参数控件；图片可选范围取成员交集。
   const effectiveChannel = effectiveChoice ? routeChannel(effectiveChoice.key, effectiveChoice.model) : null;
   const imageCaps = activeMode === 'image' && effectiveChoice
-    ? isAutoProvider(effectiveChoice.key)
-      ? selectionImageCaps(effectiveChoice.key, effectiveChoice.model.id)
-      : imageControlCaps(
-          effectiveChoice.model.id,
-          effectiveChoice.key.provider,
-          effectiveChoice.key.base_url,
-        )
+    ? selectionImageCaps(effectiveChoice.key, effectiveChoice.model.id)
     : null;
   // 生成方式不是偏好（新节点一律全能参考），这里只留模型支持的那一种，不显示切换。
   const rawVideoCaps = activeMode === 'video' && effectiveChannel

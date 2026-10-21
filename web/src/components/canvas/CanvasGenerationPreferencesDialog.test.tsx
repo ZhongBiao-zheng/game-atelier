@@ -64,6 +64,16 @@ function setup(overrides: Partial<Parameters<typeof CanvasGenerationPreferencesD
 }
 
 describe('CanvasGenerationPreferencesDialog', () => {
+  it('uses the billing group for directly selected image tiers', () => {
+    const model = 'gpt-image-2.5-sunburst';
+    setup({
+      keys: [{ ...key('图片渠道', 'custom', [{ id: model, name: model, modality: 'image' }]), base_url: 'https://api.tu-zi.com/v1', billing_group: 'default' }],
+      value: { ...EMPTY_DEFAULTS, image: { selection: { alias: '图片渠道', model }, params: { size_mode: 'ratio', ratio: '1:1' } } },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '图片设置' }));
+    expect(screen.getByRole('option', { name: '4K' })).toBeInTheDocument();
+    expect(screen.queryByText('质量')).not.toBeInTheDocument();
+  });
   it('lists only Runner-routable models and saves a selected model with its params', async () => {
     const user = userEvent.setup();
     const props = setup();
