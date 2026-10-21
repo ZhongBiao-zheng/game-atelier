@@ -1196,6 +1196,9 @@ def normalize_image_pixel_size(model: str, size: str) -> str:
         height *= scale
     rounded_width = max(16, int(width / 16 + 0.5) * 16)
     rounded_height = max(16, int(height / 16 + 0.5) * 16)
+    if rounded_width * rounded_height > max_pixels:
+        rounded_width = max(16, int(width / 16) * 16)
+        rounded_height = max(16, int(height / 16) * 16)
     return f"{rounded_width}x{rounded_height}"
 
 

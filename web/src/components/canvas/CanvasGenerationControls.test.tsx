@@ -183,6 +183,17 @@ describe('CanvasAudioSettings', () => {
 });
 
 describe('CanvasImageSettings', () => {
+  it('does not label the default OpenRouter tier as 2K', () => {
+    const props = {
+      caps: imageControlCaps('openai/gpt-image-2.5-sunburst', 'openrouter'),
+      model: 'openai/gpt-image-2.5-sunburst',
+      onPatch: vi.fn(),
+    };
+    const { rerender } = render(<CanvasImageSettings {...props} params={{ size_mode: 'ratio', ratio: '16:9' }} />);
+    expect(screen.getByRole('button', { name: '图片设置' })).not.toHaveTextContent('2K');
+    rerender(<CanvasImageSettings {...props} params={{ size_mode: 'ratio', ratio: '16:9', resolution: '4K' }} />);
+    expect(screen.getByRole('button', { name: '图片设置' })).toHaveTextContent('4K');
+  });
   it('shows only direct GPT Image controls, including editable count', () => {
     render(
       <CanvasImageSettings

@@ -52,6 +52,8 @@ def test_image_payload_ratio_maps_to_aspect_ratio():
     ("16:9", "4K", "3840x2160"),
     ("9:16", "4K", "2160x3840"),
     ("1:1", "4K", "2880x2880"),
+    ("4:3", "4K", "3312x2480"),
+    ("3:4", "4K", "2480x3312"),
 ])
 def test_sunburst_tiers_submit_pixels(openrouter_key, tmp_path, monkeypatch,
                                     ratio, resolution, expected):

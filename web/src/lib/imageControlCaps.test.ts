@@ -70,6 +70,10 @@ describe('imageControlCaps', () => {
 });
 
 describe('normalizeGptImagePixelSize', () => {
+  it('4K 取整后仍不超过最大像素数', () => {
+    expect(normalizeGptImagePixelSize({ w: 4096, h: 3072 })).toEqual({ w: 3312, h: 2480 });
+    expect(normalizeGptImagePixelSize({ w: 3072, h: 4096 })).toEqual({ w: 2480, h: 3312 });
+  });
   it('双边取 16 的倍数', () => {
     expect(normalizeGptImagePixelSize({ w: 1000, h: 1000 })).toEqual({ w: 1008, h: 1008 });
   });
