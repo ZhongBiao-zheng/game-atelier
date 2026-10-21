@@ -32,6 +32,8 @@ AUTO能力依据（2026-09-09）：[OpenAI Images](https://developers.openai.com
 Tuzi Nano的21:9、4:5、5:4在偏好与冻结Job中保留冒号，已有Images请求出站使用21x9等格式；
 OpenRouter出站仍使用aspect_ratio冒号。OpenRouter新增分辨率档位默认不指定，只有显式选择才发送；
 未声明尺寸能力的型号不发尺寸字段。各模型常用预设不等于连续像素模型的全部可能尺寸。
+OpenRouter Sunburst（`openai/gpt-image-2.5-sunburst`）例外：经实测支持显式像素，提供2K/4K；
+出站转换为`size`，不同时发送`aspect_ratio`或`resolution`。沿用GPT像素约束（16对齐、最长3840、最多8294400像素）；默认与AUTO不变。
 5.42.1补齐Tuzi的精确型号 `gpt-image-2`、`gpt-image-1.5`、`gpt-image-1`：
 [default文生图](https://tuzi-api.apifox.cn/343646952e0)、
 [官方兼容文生图](https://tuzi-api.apifox.cn/448333922e0)、
@@ -42,7 +44,7 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 
 ### 模型路由（5.90.0）
 
-- `GET /api/models` → `{models: [{id, name, modality, members: [{alias, provider, base_url, model_id, name, protocol}]}]}`；`members` 按出图顺序，第一个就是「自动」实际使用的。
+- `GET /api/models` → `{models: [{id, name, modality, members: [{alias, provider, base_url, billing_group, model_id, name, protocol}]}]}`；`members` 按出图顺序，第一个就是「自动」实际使用的。能力和估价按成员的 `billing_group` 判断。
 - `PUT /api/models/order`，body `{modality, id, aliases}`：`aliases` 必须恰好是该组现有成员的一个排列，否则 422；组不存在 404。属管理权限。
 - 创作台 `POST /api/studio/jobs`、画布草稿 / 生成偏好 `selection`、Agent `CanvasAgentModelRef`、工坊 `prepare_generation`：`alias` 为空即「自动」，`model` 为路由 id；Job 与运行快照里的 `alias` 始终是实际使用的 KEY。
 - `JobParams.route_id`：「自动」提交时由服务端写入（浏览器传入的会被覆盖）；`route_tried`：失败切换时换掉的别名。运行快照的 `alias` 是提交时解析的那家，失败切换后以 Job 的 `alias` 为准。

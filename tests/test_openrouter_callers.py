@@ -47,6 +47,41 @@ def test_image_payload_ratio_maps_to_aspect_ratio():
     assert "quality" not in payload  # 非 gpt-image 族不发 quality
 
 
+@pytest.mark.parametrize("ratio,resolution,expected", [
+    ("1:1", "2K", "2048x2048"),
+    ("16:9", "4K", "3840x2160"),
+    ("9:16", "4K", "2160x3840"),
+    ("1:1", "4K", "2880x2880"),
+    ("4:3", "4K", "3312x2480"),
+    ("3:4", "4K", "2480x3312"),
+])
+def test_sunburst_tiers_submit_pixels(openrouter_key, tmp_path, monkeypatch,
+                                    ratio, resolution, expected):
+    seen = []
+    def post(url, api_key, payload, *, timeout):
+        seen.append(payload)
+        return {"data": [{"b64_json": base64.b64encode(_PNG).decode()}]}
+    monkeypatch.setattr(openrouter_image, "_post_json", post)
+    dispatch(prompt="p", model="openai/gpt-image-2.5-sunburst", alias="OpenRouter",
+             output_dir=tmp_path / "out", params={"size_mode": "ratio", "size": ratio,
+                 "ratio": ratio, "resolution": resolution, "quality": "low"})
+    assert seen == [{"model": "openai/gpt-image-2.5-sunburst", "prompt": "p", "n": 1,
+                     "size": expected, "quality": "low"}]
+
+
+def test_sunburst_default_auto_and_explicit_pixels_ignore_tiers():
+    for params, expected in [
+        ({"size": "16:9"}, {"aspect_ratio": "16:9"}),
+        ({"size": "auto", "resolution": "4K"}, {"aspect_ratio": "auto"}),
+        ({"size": "2048x2048", "resolution": "4K"}, {"size": "2048x2048"}),
+    ]:
+        payload = openrouter_image._image_payload(
+            prompt="p", model="openai/gpt-image-2.5-sunburst", n=1, kwargs={"params": params},
+        )
+        assert payload == {"model": "openai/gpt-image-2.5-sunburst", "prompt": "p", "n": 1,
+                           **expected}
+
+
 def test_image_payload_pixel_size_is_authoritative():
     # 显式 WxH 透传 size，且不与 aspect_ratio/resolution 同发（OpenRouter 同发 400）。
     payload = openrouter_image._image_payload(

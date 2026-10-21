@@ -1,5 +1,11 @@
 # 图片尺寸能力核查
 
+## 2026-10-21：OpenRouter Sunburst显式像素
+
+`openai/gpt-image-2.5-sunburst` 的公开目录未声明resolution，但已实测 `/images` 的 `size: 2048x2048`、`size: 3840x2160`，返回原始PNG分别为对应尺寸（quality=low，无本地放大）。因此仅此精确型号增加“默认 / 2K / 4K”；Flare未实测，不扩大能力。
+
+Job保留比例与档位，出站转换为单一size，不混发aspect_ratio/resolution。2K/4K按2048/4096长边计算后，沿用现有GPT约束：16像素对齐、最长3840、总像素最多8294400。因此4K横屏为3840×2160，方图为2880×2880，不保证所有比例均有4096长边。默认省略档位，AUTO忽略残留档位，自定义像素优先。其他比例的映射通过自动化测试，未逐项付费验证。
+
 核查日期：2026-09-09。生产目录：`src/character_workflow/image_size_catalog.json`，Python与前端同读；不要在组件或Canvas偏好另写白名单。
 
 ## 当前已接入范围

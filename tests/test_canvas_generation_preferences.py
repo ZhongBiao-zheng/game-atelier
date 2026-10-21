@@ -4,13 +4,27 @@ from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib import data_root
 from character_workflow.lib.schemas import CANVAS_UPSCALE_DEFAULT_PROMPT
-from character_workflow.lib.canvas_runs import _resolve_default_image_model
+from character_workflow.lib.canvas_runs import (
+    _normalized_image_preference_params, _resolve_default_image_model,
+)
 from character_workflow.lib.keys import KeySpec, KeysDB, ModelSpec, write_keys_db
 from viewer_server.server_app import build_app
 
 
 def _client(isolated_data_root) -> TestClient:
     return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
+
+
+def test_tuzi_default_gpt25_preferences_retain_resolution_without_old_quality():
+    key = KeySpec(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com",
+                  billing_group="default", access_key="fake", created_at="2026-10-21")
+    model = ModelSpec(id="gpt-image-2.5-flare", name="Flare")
+    params = _normalized_image_preference_params(key, model, {
+        "size_mode": "ratio", "ratio": "1:1", "size": "2048x2048",
+        "resolution": "4K", "quality": "high",
+    })
+    assert params.resolution == "4K"
+    assert params.quality is None
 
 
 def _payload(revision: int = 0) -> dict:

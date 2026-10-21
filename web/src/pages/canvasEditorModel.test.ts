@@ -5,6 +5,7 @@ import {
   canvasDeletionBlockedMessage,
   canvasMediaOperationPlaceholder,
   canvasNodeRenderZIndex,
+  canvasGenerationPreferenceForModel,
   canvasPendingInputNodes,
   clampCanvasNodeSize,
   expandCanvasLayerStack,
@@ -25,6 +26,18 @@ import {
 import type { CanvasDocument, CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 import type { KeyView } from '@/api/keys';
+
+it('preserves the selected 4K tier for a direct Tuzi default key', () => {
+  const model = { id: 'gpt-image-2.5-flare', name: 'Flare', modality: 'image' as const };
+  const key: KeyView = { alias: 'Tuzi', provider: 'custom', base_url: 'https://api.tu-zi.com',
+    billing_group: 'default', models: [model], access_key: '', secret_key: null,
+    capabilities: [], notes: '', created_at: '' };
+  const preference = canvasGenerationPreferenceForModel(key, model, 'image', {
+    size_mode: 'ratio', ratio: '1:1', resolution: '4K', quality: 'high',
+  });
+  expect(preference?.params.resolution).toBe('4K');
+  expect(preference?.params.quality).toBeUndefined();
+});
 
 it('keeps image edit settings out of normal generation and retains fixed versions after source deletion', () => {
   const node: CanvasNode = { id: 'edit', type: 'image_edit', title: '编辑', position: { x: 0, y: 0 }, z_index: 0,

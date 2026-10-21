@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.98.11',
+    date: '2026-10-21',
+    headline: '相关供应商的接口参数调整',
+    changes: [
+      { kind: 'fix', text: '相关供应商的接口参数调整。' },
+    ],
+  },
+  {
     version: '5.98.10',
     date: '2026-10-19',
     headline: '画布放大看图更清楚',

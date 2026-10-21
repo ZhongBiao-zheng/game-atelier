@@ -19,6 +19,15 @@ def is_nano_image_size_model(model: str) -> bool:
     )
 
 
+def uses_tuzi_gpt25_tiers(base_url: str | None, billing_group: str | None, model: str) -> bool:
+    host = (urlsplit(base_url or "").hostname or "").lower()
+    return billing_group == "default" and (
+        host == "tu-zi.com" or host.endswith(".tu-zi.com")
+    ) and model in {
+        "gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.5-vip",
+    }
+
+
 def image_size_options(provider: str, base_url: str | None, model: str) -> dict[str, list[str]]:
     if provider == "openrouter":
         options = _CATALOG["openrouter"].get(model)

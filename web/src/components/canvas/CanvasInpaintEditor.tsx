@@ -44,7 +44,7 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
   const [count, setCount] = useState(() => initialDraft?.model === 'mj-v8.2' ? 1
     : Math.min(4, Math.max(1, initialDraft?.params.n ?? 1)));
   const candidates = mj ? MJ_IMAGES_PER_TASK : count;
-  const caps = imageControlCaps(choice?.model ?? '', choice?.key.provider, choice?.key.base_url);
+  const caps = imageControlCaps(choice?.model ?? '', choice?.key.provider, choice?.key.base_url, choice?.key.billing_group);
   const [qualityChoice, setQualityChoice] = useState(initialDraft?.params.quality);
   const [resolutionChoice, setResolutionChoice] = useState(initialDraft?.params.resolution);
   const quality = caps.qualities?.includes(qualityChoice as never) ? qualityChoice

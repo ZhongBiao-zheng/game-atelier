@@ -172,7 +172,9 @@ export function CanvasImageSettings({
     : Math.max(1, Math.min(4, Number(params.n) || 1));
   const summary = [
     imageSizeSummary(params),
-    caps.showResolution && imageSizeMode(params) === 'ratio' ? String(params.resolution ?? defaultResolution(caps.resolutions)) : null,
+    caps.showResolution && imageSizeMode(params) === 'ratio'
+      ? params.resolution ?? (caps.sizeKind === 'ratio' ? null : defaultResolution(caps.resolutions))
+      : null,
     caps.qualities ? QUALITY_LABELS[(params.quality as Quality) ?? caps.qualities[0]] : null,
     `${count} 张`,
   ].filter(Boolean).join(' · ');

@@ -155,6 +155,9 @@ export function normalizeGptImagePixelSize(size: { w: number; h: number }): { w:
     w *= s;
     h *= s;
   }
+  if (round16(w) * round16(h) > GPT_MAX_PIXELS) {
+    return { w: Math.max(16, Math.floor(w / 16) * 16), h: Math.max(16, Math.floor(h / 16) * 16) };
+  }
   return { w: round16(w), h: round16(h) };
 }
 

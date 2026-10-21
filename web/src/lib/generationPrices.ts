@@ -47,6 +47,17 @@ export const TUZI_GPT_IMAGE_2_1K_SIZES: ReadonlySet<string> = new Set([
 // 独立固定价型号，不因用户传入的 size / quality 改价；厂商负责匹配最近比例。
 export const TUZI_GPT_IMAGE_2_1K_YUAN_PER_IMAGE = 0.028;
 
+// Tuzi default，2026-10-21 /api/pricing 分组表达式 × /api/status 人民币系数 0.7。
+// 显式 quality=1k/2k/4k 优先于像素；未指定档位时按最终 size 判定。
+export const TUZI_GPT_IMAGE_25_YUAN_PER_IMAGE: Record<string, Record<'1K' | '2K' | '4K', number>> = {
+  'gpt-image-2.5': { '1K': 0.028, '2K': 0.12, '4K': 0.21 },
+  'gpt-image-2.5-flare': { '1K': 0.12, '2K': 0.16, '4K': 0.21 },
+  'gpt-image-2.5-sunburst': { '1K': 0.12, '2K': 0.16, '4K': 0.21 },
+  'gpt-image-2.5-vip': { '1K': 0.07, '2K': 0.18, '4K': 0.28 },
+};
+export const TUZI_GPT_IMAGE_25_PIXEL_LIMITS = { '1K': 1048576, '2K': 3686400 };
+export const TUZI_GPT_IMAGE_25_1K_YUAN_PER_IMAGE = 0.02;
+
 // Tuzi：元 / 张；其他模型与分组沿用已有核价。
 export const TUZI_GROUP_YUAN_PER_IMAGE: Record<string, Record<string, number>> = {
   default: {

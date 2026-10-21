@@ -9,7 +9,7 @@ from character_workflow.lib import canvas_image_edits as edits
 def test_ratio_only_edit_sizes_reject_unsupported_geometry(monkeypatch):
     from character_workflow.lib import image_size_catalog
 
-    key = SimpleNamespace(provider="openrouter", base_url="https://openrouter.ai/api/v1")
+    key = SimpleNamespace(provider="openrouter", base_url="https://openrouter.ai/api/v1", billing_group=None)
     assert edits.edit_size_params(key, "google/gemini-3-pro-image-preview", 2100, 900)["ratio"] == "21:9"
     with pytest.raises(ValueError, match="不支持这个画框比例"):
         edits.edit_size_params(key, "google/gemini-3-pro-image-preview", 100, 500)

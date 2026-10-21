@@ -41,7 +41,7 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
   });
   const choice = choices.find(item => choiceId(item.key.alias, item.model) === selected);
   const [count, setCount] = useState(initialDraft?.params.n ?? 1);
-  const caps = imageControlCaps(choice?.model ?? '', choice?.key.provider, choice?.key.base_url);
+  const caps = imageControlCaps(choice?.model ?? '', choice?.key.provider, choice?.key.base_url, choice?.key.billing_group);
   const [qualityChoice, setQualityChoice] = useState(initialDraft?.params.quality);
   const [resolutionChoice, setResolutionChoice] = useState(initialDraft?.params.resolution);
   const quality = caps.qualities?.includes(qualityChoice as never) ? qualityChoice

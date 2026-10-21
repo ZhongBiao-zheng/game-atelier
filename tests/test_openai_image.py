@@ -1680,6 +1680,32 @@ def test_custom_gpt_image_sends_quality(tmp_path, monkeypatch):
     assert posted["body"]["quality"] == "high"  # custom gpt-image 也发 quality
 
 
+@pytest.mark.parametrize("edit", [False, True])
+@pytest.mark.parametrize("tier", ["1K", "2K", "4K"])
+def test_tuzi_default_gpt25_sends_selected_tier(tmp_path, monkeypatch, tier, edit):
+    keys.add_key(KeySpec(alias="tuzi", provider="custom", base_url="https://api.tu-zi.com",
+                         billing_group="default", access_key="fake", created_at="2026-10-21"))
+    seen = {}
+
+    def post_json(url, key, payload, **kwargs):
+        seen.update(payload)
+        return {"data": [{"b64_json": "aGk="}]}
+
+    def post_multipart(url, key, *, fields, **kwargs):
+        return post_json(url, key, fields)
+
+    monkeypatch.setattr(openai_image, "_post_json", post_json)
+    monkeypatch.setattr(openai_image, "_post_multipart", post_multipart)
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(b"png")
+    dispatch(prompt="test", model="gpt-image-2.5-flare", alias="tuzi", output_dir=tmp_path / "out",
+             params={"size_mode": "ratio", "ratio": "1:1", "size": "2048x2048",
+                     "resolution": tier, "quality": "high"},
+             reference_images=[str(ref)] if edit else [])
+    assert seen["quality"] == tier.lower()
+    assert seen["size"] == "2048x2048"
+
+
 def test_custom_gpt_image_reference_uses_official_edits(tmp_path, monkeypatch):
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     from character_workflow.lib import keys as _keys
