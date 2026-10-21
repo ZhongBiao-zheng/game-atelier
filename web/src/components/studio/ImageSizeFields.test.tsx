@@ -15,6 +15,24 @@ function Harness({ baseUrl }: { baseUrl?: string } = {}) {
 }
 
 describe('image size intent', () => {
+  it('offers Sunburst 2K/4K while preserving default and AUTO', () => {
+    const model = 'openai/gpt-image-2.5-sunburst';
+    const caps = imageControlCaps(model, 'openrouter', 'https://openrouter.ai/api/v1');
+    const onPatch = vi.fn();
+    render(<ImageSizeFields caps={caps} model={model} params={{ size_mode: 'ratio', ratio: '16:9' }} onPatch={onPatch} />);
+    expect(screen.getByRole('option', { name: '默认' })).toHaveAttribute('aria-selected', 'true');
+    for (const resolution of ['2K', '4K']) {
+      fireEvent.click(screen.getByRole('option', { name: resolution }));
+      expect(onPatch).toHaveBeenLastCalledWith({ resolution, size: undefined });
+      expect(prepareImageSizeSubmission(model, 'openrouter', 'https://openrouter.ai/api/v1', {
+        size_mode: 'ratio', ratio: '16:9', resolution,
+      }).params).toMatchObject({ size: '16:9', ratio: '16:9', resolution });
+    }
+    expect(prepareImageSizeSubmission(model, 'openrouter', 'https://openrouter.ai/api/v1', {
+      size_mode: 'auto', size: 'auto', ratio: '16:9', resolution: '4K',
+    }).params).toEqual({ size_mode: 'auto', size: 'auto' });
+    expect(imageControlCaps('openai/gpt-image-2.5-flare', 'openrouter').resolutions).toEqual([]);
+  });
   it('keeps AUTO and all three Tuzi default GPT 2.5 tiers without extra copy', () => {
     const caps = imageControlCaps('gpt-image-2.5-flare', 'custom', 'https://api.tu-zi.com', 'default');
     const onPatch = vi.fn();

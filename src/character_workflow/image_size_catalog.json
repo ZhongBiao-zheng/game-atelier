@@ -51,7 +51,7 @@
         "21:9",
         "auto"
       ],
-      "resolutions": []
+      "resolutions": ["2K", "4K"]
     },
     "openai/gpt-image-2.5-flare": {
       "ratios": [

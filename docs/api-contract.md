@@ -32,6 +32,8 @@ AUTO能力依据（2026-09-09）：[OpenAI Images](https://developers.openai.com
 Tuzi Nano的21:9、4:5、5:4在偏好与冻结Job中保留冒号，已有Images请求出站使用21x9等格式；
 OpenRouter出站仍使用aspect_ratio冒号。OpenRouter新增分辨率档位默认不指定，只有显式选择才发送；
 未声明尺寸能力的型号不发尺寸字段。各模型常用预设不等于连续像素模型的全部可能尺寸。
+OpenRouter Sunburst（`openai/gpt-image-2.5-sunburst`）例外：经实测支持显式像素，提供2K/4K；
+出站转换为`size`，不同时发送`aspect_ratio`或`resolution`。沿用GPT像素约束（16对齐、最长3840、最多8294400像素）；默认与AUTO不变。
 5.42.1补齐Tuzi的精确型号 `gpt-image-2`、`gpt-image-1.5`、`gpt-image-1`：
 [default文生图](https://tuzi-api.apifox.cn/343646952e0)、
 [官方兼容文生图](https://tuzi-api.apifox.cn/448333922e0)、
