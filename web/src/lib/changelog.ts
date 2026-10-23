@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.100.0',
+    date: '2026-10-23',
+    headline: '图片标注与按标注改图',
+    changes: [
+      { kind: 'feat', text: '图片节点新增「标注」：手绘、矩形、椭圆、菱形、箭头、线条、文字与橡皮擦，支持颜色、线宽、透明度、选择变换和撤销重做。' },
+      { kind: 'feat', text: '标注另存为图片节点，保留原图与可编辑笔迹；「去改图」连接标注图并填入修改提示词，确认后再生成。支持原尺寸下载与离线字体。' },
+    ],
+  },
+  {
     version: '5.99.0',
     date: '2026-10-16',
     headline: '局域网共享：同事用一台机器的 KEY 出图',

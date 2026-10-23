@@ -1,0 +1,56 @@
+.annotation-stage .excalidraw,
+.annotation-stage .excalidraw.theme--dark {
+  --color-primary: var(--primary);
+  --color-primary-darker: var(--primary);
+  --color-primary-darkest: var(--primary-foreground);
+  --color-primary-light: var(--secondary);
+  --color-primary-hover: var(--primary);
+  --color-primary-light-darker: var(--secondary);
+  --color-surface-primary-container: var(--secondary);
+  --color-on-primary-container: var(--primary);
+  --color-selection: var(--primary);
+  --color-slider-track: var(--primary);
+  --color-slider-thumb: var(--muted-foreground);
+  --color-surface-lowest: var(--background);
+  --color-surface-low: var(--card);
+  --color-surface-mid: var(--secondary);
+  --color-surface-high: var(--accent);
+  --color-on-surface: var(--foreground);
+  --color-brand-active: var(--primary);
+  --color-brand-hover: var(--secondary);
+  --color-border-outline: var(--border);
+  --island-bg-color: var(--card);
+  --popup-bg-color: var(--card);
+  --text-primary-color: var(--foreground);
+  --default-bg-color: var(--background);
+  --default-border-color: var(--border);
+  --shadow-island: none;
+  --shadow-modal: none;
+  --ui-font: var(--font-sans);
+}
+
+.annotation-stage .excalidraw .Island {
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.annotation-stage .excalidraw .layer-ui__wrapper__top-right,
+.annotation-stage .excalidraw .library-button,
+.annotation-stage .excalidraw .sidebar-trigger__label-element,
+.annotation-stage .excalidraw .App-toolbar__extra-tools-trigger,
+.annotation-stage .excalidraw .context-menu,
+.annotation-stage .excalidraw .hyperlink-popup {
+  display: none;
+}
+
+.annotation-stage .excalidraw .HintViewer {
+  color: var(--muted-foreground);
+}
+
+.annotation-dialog > footer {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+.annotation-stage .excalidraw .App-menu_top .buttonList {
+  max-height: 100%;
+}

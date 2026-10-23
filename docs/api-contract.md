@@ -323,6 +323,14 @@ Canvas 媒体只按项目内不可变 `version_id` 读取，不接受裸路径�
 文本节点的 `data.display.scale` 只接受 Atelier 字阶 token `xs/sm/base`，缺省为 `sm`；字号切换属于
 Document 显示状态并参与 revision 与 undo/redo，不修改文本 Content Version。图片/视频继续使用
 `data.display.fit/free_resize`；视频和音频播放进度、音量与控件焦点只属于浏览器呈现状态，不落盘。
+图片节点可保存 `data.annotation`：`source_version_id` 固定原图、`rendered_version_id` 固定标注合成图、
+`elements` 保存 Excalidraw 图形、`prompt` 保存补充要求。两份版本必须为本项目拥有且尺寸相同的图片；
+仅当当前版本等于 `rendered_version_id` 时恢复编辑，否则以当前图片新建标注。
+图形限手绘、矩形、椭圆、菱形、箭头、线条和文本，最多 2000 个、JSON 不超过 2 MiB；提示词最多 20000 字。
+底图由版本媒体接口重新加载，不把图片字节或外部资源写进标注 JSON。上传合成 PNG 后通过现有 Document
+revision 保存标注节点；首次保存建立原图到标注图的 `material` 连接，再次保存新增不可变版本并更新该节点。
+「去改图」新增图片生成节点，以标注图为唯一 `input` 连接并预填去除标记的提示词，不提交 Job。
+画布内复制、跨画布粘贴与项目包保留标注；收藏或分享图片时仍采用现有图片资产语义，仅保存合成后的图片。
 画布外观属于作者可撤销的项目设置：`settings.background` 明确选择空白、点阵或线框，
 `settings.show_image_info` 控制图片节点是否展示当前不可变 Content Version 的真实宽高与文件体积。
 `settings.show_minimap` 控制中等及桌面视口的小地图；手机端始终隐藏。三者随普通 Document revision 保存并

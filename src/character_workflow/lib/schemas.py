@@ -757,6 +757,24 @@ class CanvasMediaDisplay(BaseModel):
 
 class CanvasMediaNodeData(CanvasContentNodeData):
     display: CanvasMediaDisplay = Field(default_factory=CanvasMediaDisplay)
+    annotation: CanvasImageAnnotation | None = None
+
+
+class CanvasImageAnnotation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_version_id: str = Field(min_length=1, max_length=160)
+    rendered_version_id: str = Field(min_length=1, max_length=160)
+    elements: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=2000)
+    prompt: str = Field(default="", max_length=20000)
+
+    @model_validator(mode="after")
+    def validate_scene(self) -> "CanvasImageAnnotation":
+        allowed = {"freedraw", "rectangle", "ellipse", "diamond", "arrow", "line", "text"}
+        if any(element.get("type") not in allowed for element in self.elements):
+            raise ValueError("annotation contains unsupported elements")
+        if len(json.dumps(self.elements, ensure_ascii=False).encode("utf-8")) > 2 * 1024 * 1024:
+            raise ValueError("annotation exceeds 2 MiB")
+        return self
 
 
 class CanvasImageEditSettings(BaseModel):
@@ -1290,6 +1308,16 @@ class CanvasDocument(BaseModel):
                     raise ValueError("canvas user mask references an incompatible source version")
         group_members: set[str] = set()
         for node in self.nodes:
+            if node.type == "video" and node.data.annotation:
+                raise ValueError("annotations are only supported on image nodes")
+            if node.type == "image" and node.data.annotation:
+                annotation = node.data.annotation
+                source = self.content_versions.get(annotation.source_version_id)
+                rendered = self.content_versions.get(annotation.rendered_version_id)
+                if source is None or source.kind != "image" or rendered is None or rendered.kind != "image":
+                    raise ValueError("annotation requires owned source and rendered image versions")
+                if (source.width, source.height) != (rendered.width, rendered.height):
+                    raise ValueError("annotation must preserve source image dimensions")
             if node.type == "image_edit":
                 for linked_id in (node.data.source_node_id, node.data.reference_node_id):
                     linked = nodes_by_id.get(linked_id)

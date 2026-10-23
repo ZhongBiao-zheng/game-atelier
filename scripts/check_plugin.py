@@ -12,7 +12,8 @@ import json
 import sys
 from pathlib import Path
 
-MAX_SIZE_MB = 10
+# Excalidraw and its self-hosted CJK fonts add ~21 MiB to the offline editor.
+MAX_SIZE_MB = 35
 REQUIRED_TOP_FIELDS = ("name", "version", "description")
 EXCLUDED_TOP_LEVEL = {
     ".claude",

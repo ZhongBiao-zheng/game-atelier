@@ -170,7 +170,14 @@ export interface CanvasTextNode extends CanvasNodeBase {
 
 export interface CanvasImageNode extends CanvasNodeBase {
   type: 'image';
-  data: CanvasContentNodeData & { display: CanvasMediaDisplay };
+  data: CanvasContentNodeData & { display: CanvasMediaDisplay; annotation?: CanvasImageAnnotation | null };
+}
+
+export interface CanvasImageAnnotation {
+  source_version_id: string;
+  rendered_version_id: string;
+  elements: Record<string, JsonValue>[];
+  prompt: string;
 }
 
 export interface CanvasVideoNode extends CanvasNodeBase {
