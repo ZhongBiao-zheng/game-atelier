@@ -1,2 +1,0 @@
-import{c as e,b6 as s,bx as o,T as i}from"./index2.js";import{p as g}from"./cynefin-OW5HDTMX.js";import"./index.js";var p={parse:e(async r=>{const a=await g("info",r);s.debug(a)},"parse")},v={version:"11.17.2"},d=e(()=>v.version,"getVersion"),m={getVersion:d},c=e((r,a,n)=>{s.debug(`rendering info diagram
-`+r);const t=o(a);i(t,100,400,!0),t.append("g").append("text").attr("x",100).attr("y",40).attr("class","version").attr("font-size",32).style("text-anchor","middle").text(`v${n}`)},"draw"),f={draw:c},_={parser:p,db:m,renderer:f};export{_ as diagram};

@@ -2,34 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
-import fs from 'node:fs'
-
-// Bundle the editor fonts locally: annotation must also work without CDN access.
-const annotationFonts = path.resolve(__dirname, 'node_modules/@excalidraw/excalidraw/dist/prod/fonts')
-function fontFiles(dir: string): string[] {
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
-    const file = path.join(dir, entry.name)
-    return entry.isDirectory() ? fontFiles(file) : [file]
-  })
-}
-
 export default defineConfig({
-  plugins: [react(), tailwindcss(), {
-    name: 'annotation-fonts',
-    generateBundle() {
-      for (const file of fontFiles(annotationFonts)) {
-        this.emitFile({ type: 'asset', fileName: `excalidraw/fonts/${path.relative(annotationFonts, file).split(path.sep).join('/')}`, source: fs.readFileSync(file) })
-      }
-    },
-    configureServer(server) {
-      server.middlewares.use('/excalidraw/fonts', (request, response, next) => {
-        const file = path.resolve(annotationFonts, `.${decodeURIComponent(request.url?.split('?')[0] ?? '/')}`)
-        if (!file.startsWith(`${annotationFonts}${path.sep}`) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return next()
-        response.setHeader('Content-Type', 'font/woff2')
-        fs.createReadStream(file).pipe(response)
-      })
-    },
-  }],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: { '@': path.resolve(__dirname, 'src') },
   },

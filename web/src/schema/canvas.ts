@@ -176,6 +176,7 @@ export interface CanvasImageNode extends CanvasNodeBase {
 export interface CanvasImageAnnotation {
   source_version_id: string;
   rendered_version_id: string;
+  /** Image-space marks: shapes, lines, brush, marker, text, mosaic/blur and erasure. */
   elements: Record<string, JsonValue>[];
   prompt: string;
 }

@@ -769,7 +769,10 @@ class CanvasImageAnnotation(BaseModel):
 
     @model_validator(mode="after")
     def validate_scene(self) -> "CanvasImageAnnotation":
-        allowed = {"freedraw", "rectangle", "ellipse", "diamond", "arrow", "line", "text"}
+        allowed = {
+            "freedraw", "rectangle", "ellipse", "diamond", "arrow", "line", "text",
+            "marker", "mosaic", "erase",
+        }
         if any(element.get("type") not in allowed for element in self.elements):
             raise ValueError("annotation contains unsupported elements")
         if len(json.dumps(self.elements, ensure_ascii=False).encode("utf-8")) > 2 * 1024 * 1024:

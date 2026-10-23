@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.101.0',
+    date: '2026-10-23',
+    headline: '标注工具收敛为七组',
+    changes: [
+      { kind: 'feat', text: '矩形/椭圆、折线、画笔、记号笔、马赛克/模糊、文本和橡皮擦集中在一条工具栏，只显示当前工具参数，滚轮即可调粗细。' },
+      { kind: 'feat', text: '新增宽箭头、空心箭头和曲线控制点，支持记号笔填充、涂抹或框选马赛克/模糊、框选擦除，以及文本粗体、斜体和描边。' },
+      { kind: 'feat', text: '统一颜色面板，支持色调、饱和度、亮度、RGBA、HTML、屏幕取色和保存自定义预设。' },
+    ],
+  },
+  {
     version: '5.100.0',
     date: '2026-10-23',
     headline: '图片标注与按标注改图',

@@ -324,9 +324,13 @@ Canvas 媒体只按项目内不可变 `version_id` 读取，不接受裸路径�
 Document 显示状态并参与 revision 与 undo/redo，不修改文本 Content Version。图片/视频继续使用
 `data.display.fit/free_resize`；视频和音频播放进度、音量与控件焦点只属于浏览器呈现状态，不落盘。
 图片节点可保存 `data.annotation`：`source_version_id` 固定原图、`rendered_version_id` 固定标注合成图、
-`elements` 保存 Excalidraw 图形、`prompt` 保存补充要求。两份版本必须为本项目拥有且尺寸相同的图片；
+`elements` 保存图片坐标系中的标注、`prompt` 保存补充要求。两份版本必须为本项目拥有且尺寸相同的图片；
 仅当当前版本等于 `rendered_version_id` 时恢复编辑，否则以当前图片新建标注。
-图形限手绘、矩形、椭圆、菱形、箭头、线条和文本，最多 2000 个、JSON 不超过 2 MiB；提示词最多 20000 字。
+图形类型为 `freedraw/rectangle/ellipse/diamond/arrow/line/text/marker/mosaic/erase`，最多 2000 个、JSON 不超过 2 MiB；提示词最多 20000 字。
+标注使用 `x/y/width/height` 和局部 `points` 定位，`strokeColor/strokeWidth/backgroundColor/opacity` 保存外观。
+线段的 `lineStyle` 为 `line/arrow/wide/hollow`，`controls` 保存每段的二次贝塞尔控制点；文本保存
+`text/fontFamily/fontSize/bold/italic/outline`。`mosaic` 的 `effect` 为 `pixelate/blur`，`blockSize` 为原图像素尺度；
+`mosaic/erase` 的 `region` 区分矩形框选与笔刷路径。擦除只作用于标注层，保留原图和图片尺寸。
 底图由版本媒体接口重新加载，不把图片字节或外部资源写进标注 JSON。上传合成 PNG 后通过现有 Document
 revision 保存标注节点；首次保存建立原图到标注图的 `material` 连接，再次保存新增不可变版本并更新该节点。
 「去改图」新增图片生成节点，以标注图为唯一 `input` 连接并预填去除标记的提示词，不提交 Job。
