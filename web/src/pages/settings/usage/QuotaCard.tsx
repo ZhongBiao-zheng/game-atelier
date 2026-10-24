@@ -16,7 +16,7 @@ export function QuotaCard() {
   }, []);
   if (!aliases.length) return null;
   return (
-    <div className="space-y-3 rounded-lg border border-border p-5" aria-label="局域网额度">
+    <div className="space-y-3 rounded-xl border border-border bg-card p-5" aria-label="局域网额度">
       <h2 className="text-xs text-muted-foreground">局域网额度</h2>
       {aliases.map((alias) => (
         <div key={alias} className="space-y-2 text-xs">

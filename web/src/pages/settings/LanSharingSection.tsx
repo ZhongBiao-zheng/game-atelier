@@ -58,35 +58,26 @@ export function LanSharingSection() {
       : null;
   return (
     <>
-      <div className="flex items-center">
-        <div className="flex items-center gap-2">
-          <span className="text-sm">共享本机供应商</span>
-          <Switch
-            label="开启局域网共享"
-            checked={Boolean(state?.enabled)}
-            disabled={!state || busy}
-            onChange={(enabled) => void run(() => updateGateway({ enabled }))}
-          />
-        </div>
-      </div>
-      <div className="min-w-0 space-y-6">
-        <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0 space-y-1">
-            {address && (
-              <div role="status" className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <span className="font-mono">{address}</span>
-                <button
-                  aria-label="复制地址"
-                  className={button}
-                  onClick={() => void navigator.clipboard.writeText(address)}
-                >
-                  <Copy className="size-3.5" />
-                </button>
-              </div>
-            )}
-            {state?.status.error && <p className="text-sm text-destructive">{state.status.error}</p>}
+      <section aria-label="网关状态" className="flex flex-wrap items-center gap-4 rounded-xl border border-border bg-card p-5">
+        <span aria-hidden className={`size-2 shrink-0 rounded-full ${state?.status.running ? 'bg-status-done' : 'bg-subtle-foreground'}`} />
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-semibold">共享本机供应商</h2>
+            <span className={`rounded-full px-2 py-0.5 text-xs ${state?.status.running ? 'gateway-running' : 'bg-secondary text-muted-foreground'}`}>
+              {!state ? '读取中…' : state.status.running ? '运行中' : state.status.error ? '启动失败' : '已关闭'}
+            </span>
           </div>
+          {state && <p className="text-xs text-muted-foreground">{options.models.length} 个模型 · {state.keys.filter(key => !key.revoked_at).length} 位在用成员 · 本月全员花费 {formatGenerationCost(state.keys.reduce((sum, key) => sum + key.month_charged_cny, 0))}</p>}
+          {state?.status.error && <p className="text-sm text-destructive">{state.status.error}</p>}
         </div>
+        {address && <div role="status" className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <span className="break-all font-mono">{address}</span>
+          <button aria-label="复制地址" className={button} onClick={() => void navigator.clipboard.writeText(address)}><Copy className="size-3.5" /></button>
+        </div>}
+        <Switch label="开启局域网共享" checked={Boolean(state?.enabled)} disabled={!state || busy}
+          onChange={enabled => void run(() => updateGateway({ enabled }))} />
+      </section>
+      <div className="min-w-0 space-y-6">
         {state?.enabled && (
           <>
             <div className="flex items-center gap-2">
@@ -113,7 +104,7 @@ export function LanSharingSection() {
             <section aria-label="网关密钥" className="space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium">密钥</h3>
-                <button className={button} disabled={!state || busy} onClick={() => setEditing(null)}>
+                <button className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50" disabled={!state || busy} onClick={() => setEditing(null)}>
                   新建密钥
                 </button>
               </div>
@@ -148,7 +139,7 @@ export function LanSharingSection() {
                                     <div
                                       key={limit.period}
                                       className={
-                                        used / limit.cap_cny > 0.9 ? 'text-[color:var(--status-running)]' : ''
+                                        used / limit.cap_cny > 0.85 ? 'text-status-running' : 'text-primary'
                                       }
                                     >
                                       <p className="whitespace-nowrap tabular-nums">
@@ -159,7 +150,7 @@ export function LanSharingSection() {
                                         aria-label={`${key.name}${PERIODS[limit.period]}额度`}
                                         max={limit.cap_cny}
                                         value={Math.min(used, limit.cap_cny)}
-                                        className="h-1 w-full accent-current"
+                                        className="gateway-quota h-1.5 w-full"
                                       />
                                     </div>
                                   );

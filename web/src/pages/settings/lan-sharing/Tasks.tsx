@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchGatewayTasks, gatewayOutputUrl, type GatewayTask } from '@/api/gateway';
 import { subscribeGatewayEvents } from '@/api/gatewayEvents';
-import { KINDS, date } from './shared';
+import { date } from './shared';
+
+import { KindBadge } from '../usage/KindBadge';
 
 export const isActive = (task: GatewayTask) => task.status === 'pending' || task.status === 'running';
 export function mergeTask(rows: GatewayTask[], next: GatewayTask) {
@@ -50,10 +52,10 @@ export function Tasks({ onFinished }: { onFinished: () => void }) {
   function row(task: GatewayTask, preview = false) {
     return <li key={task.task_id} className="space-y-2 border-t border-border py-3 text-xs">
       <div className="flex flex-wrap gap-x-3 gap-y-1">
-        <span>{task.key_name}</span><span>{KINDS[task.kind]}</span><span className="max-w-64 truncate" title={task.route_id}>{task.route_id}</span>
+        <KindBadge kind={task.kind} /><span>{task.key_name}</span><span className="max-w-64 truncate" title={task.route_id}>{task.route_id}</span>
         <span>{task.member_trail.length ? task.member_trail.join(' → ') : task.member_alias ?? '—'}</span>
         <span className="text-muted-foreground">{PHASES[task.phase ?? task.status] ?? task.phase}</span>
-        <span className="tabular-nums text-muted-foreground">{preview ? date(task.updated_at) : `${Math.max(0, Math.floor((now - Date.parse(task.created_at)) / 1000))} 秒`}</span>
+        <span className={`tabular-nums ${preview ? 'text-muted-foreground' : 'text-primary'}`}>{preview ? date(task.updated_at) : `${Math.max(0, Math.floor((now - Date.parse(task.created_at)) / 1000))} 秒`}</span>
       </div>
       {task.kind !== 'text' && task.prompt && <details><summary className="cursor-pointer truncate text-muted-foreground">{task.prompt}</summary><p className="whitespace-pre-wrap break-words pt-2">{task.prompt}</p></details>}
       {task.error && <p className="break-words text-destructive">{task.error}</p>}

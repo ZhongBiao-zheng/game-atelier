@@ -18,7 +18,7 @@ export function Switch({ checked, label, disabled, onChange }: SwitchProps) {
     >
       <span
         aria-hidden
-        className={`absolute top-0.5 size-[18px] rounded-full bg-background transition-[left] ${checked ? 'left-[22px]' : 'left-0.5'}`}
+        className={`absolute top-0.5 size-[18px] rounded-full transition-[left] ${checked ? 'left-[22px] bg-primary-foreground' : 'left-0.5 bg-background'}`}
       />
     </button>
   );

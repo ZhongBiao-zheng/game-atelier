@@ -83,14 +83,14 @@ export function UsagePage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         {enabled && <div className="flex rounded-lg border border-border p-1" aria-label="用量范围">
           <button
-            className={`${chip} ${scope === 'mine' ? 'bg-secondary' : ''}`}
+            className={`${chip} ${scope === 'mine' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''}`}
             aria-pressed={scope === 'mine'}
             onClick={() => change('scope', 'mine')}
           >
             我的
           </button>
           <button
-            className={`${chip} ${scope === 'team' ? 'bg-secondary' : ''}`}
+            className={`${chip} ${scope === 'team' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''}`}
             aria-pressed={scope === 'team'}
             onClick={() => change('scope', 'team')}
           >

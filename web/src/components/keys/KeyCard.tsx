@@ -52,7 +52,7 @@ export function KeyCard({ row, onEdit, onDelete, table = false }: Props) {
         <span
           aria-label={recentlyUsed ? '近 7 天用过' : '近 7 天未用'}
           className={`size-1.5 rounded-full ${recentlyUsed
-            ? 'bg-[color:var(--status-done)]' : 'bg-[color:var(--status-pending)]'}`}
+            ? 'bg-[color:var(--status-done)]' : 'bg-subtle-foreground'}`}
         />
         <span>{row.alias}</span>
         <span className="rounded-sm bg-secondary px-1.5 py-0.5 text-xs text-muted-foreground">{vendorName}</span>
@@ -100,22 +100,22 @@ export function KeyCard({ row, onEdit, onDelete, table = false }: Props) {
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         {textCount > 0 && (
-          <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+          <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
             文本 {textCount}
           </span>
         )}
         {imageCount > 0 && (
-          <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+          <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
             图 {imageCount}
           </span>
         )}
         {videoCount > 0 && (
-          <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+          <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
             视频 {videoCount}
           </span>
         )}
         {audioCount > 0 && (
-          <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+          <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
             音频 {audioCount}
           </span>
         )}

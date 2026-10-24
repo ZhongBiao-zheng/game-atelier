@@ -112,10 +112,9 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
         <button
           type="button"
           onClick={openCreate}
-          // 设置页里它只是分区内的一个动作，黄铜留给全屏独占的首启引导
           className={
             embedded
-              ? 'rounded-md border border-border px-3 py-2 text-sm text-foreground transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+              ? 'rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
               : 'text-sm bg-primary text-primary-foreground rounded-md px-3 py-2 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background'
           }
         >
