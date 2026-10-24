@@ -162,3 +162,50 @@ def test_threaded_broadcast_to_full_queue_does_not_raise_in_loop(runtime, caplog
             hub.set_loop(None)
     asyncio.run(run())
     assert any("team-library-changed" in r.getMessage() for r in caplog.records)
+
+
+def test_gateway_event_loop_delivers_on_main_loop(runtime):
+    """Gateway uvicorn has its own asyncio loop; it must not touch the main loop's queue."""
+    import threading
+
+    async def run():
+        main_loop = asyncio.get_running_loop()
+        local_hub = sse_mod.SSEHub()
+        local_hub.set_loop(main_loop)
+        queue = await local_hub.subscribe()
+        offered_on = []
+        original_put = queue.put_nowait
+
+        def checked_put(value):
+            offered_on.append(asyncio.get_running_loop())
+            original_put(value)
+
+        queue.put_nowait = checked_put
+
+        async def gateway():
+            local_hub.broadcast('gateway_task', {'task_id': 'remote-loop'})
+
+        thread = threading.Thread(target=lambda: asyncio.run(gateway()))
+        thread.start()
+        await asyncio.to_thread(thread.join, 2)
+        message = await asyncio.wait_for(queue.get(), 1)
+        assert 'remote-loop' in message
+        assert offered_on == [main_loop]
+
+    asyncio.run(run())
+
+
+def test_first_subscription_rebinds_after_server_loop_closes(runtime):
+    local_hub = sse_mod.SSEHub()
+    previous = asyncio.new_event_loop()
+    local_hub.set_loop(previous)
+    previous.close()
+
+    async def run():
+        queue = await local_hub.subscribe()
+        local_hub.broadcast('gateway_task', {'task_id': 'new-loop'})
+        assert 'new-loop' in await asyncio.wait_for(queue.get(), 1)
+        assert local_hub._loop is asyncio.get_running_loop()
+        local_hub.unsubscribe(queue)
+
+    asyncio.run(run())

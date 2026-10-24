@@ -73,20 +73,27 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 - `GET /gateway/v1/tasks/{id}/extras/{i}` → 编辑过程图；layer_result 为无路径的图层元数据，图层产物不按 n 截断。
 - 视频上游订单号/提交诊断仅存在网关；已获订单号或提交未确认后禁止换供应商重发。
 - 任务只对创建它的密钥可见（其他密钥 404）；任务与文件保留 24 小时。
+- 任务参数补充：`prompt` 最多 32,000 字符，除 layer_split 外不能为空；`n` 为 1–8。生成任务最多同时运行 8 个、每把密钥最多 4 个，剩余已受理任务排队。
+  各类型允许的文件组：image 为 ref/mj_sref/mj_cref/mj_oref，image_edit 为 ref/mask，layer_split 为 ref，video 为 ref/video/audio，audio 不接受文件。
+  图片控制字段白名单为 size/size_mode/custom_size/ratio/resolution/quality/background/steps/cfg_scale/requested_size、
+  bot_type/mj_version/mj_stylize/mj_chaos/mj_weird/mj_seed/mj_no/mj_tile/mj_iw/mj_sref_code/mj_profile/mj_sw/mj_cw/mj_ow/mj_flags；
+  image_edit 额外接收 image_edit 对象，layer_split 额外接收 layer_decomposition。未声明字段返回 422。
+  `layer_result.outputs` 以 output_index 关联产物，包含 z_index、size、output_format 和前景 bounding_box（absolute 像素坐标 / normalized 千分坐标）；不含本机路径。
 - 密钥策略：`limits: [{period: day|week|month, cap_cny}]`（最多三条且 period 唯一，金额 >0 且 ≤1,000,000）；
   `allowed_models` / `allowed_aliases` 为 null 表示全部、空数组表示无权限；模型支持精确匹配和尾部 `*` 前缀匹配，alias 精确匹配。
   按网关本地日历零点、周一和月初重置；受理时按首个可选成员估价预占，与限额判断共用锁。
   终态优先结算实际费用，否则成功用估价、失败或取消记零；无价预占零。失败切换中各次已报告实际费用累加。
 - 接入端：`provider="atelier"` 的 KEY，`ModelSpec.via` 是网关成员快照；Job 用 `provider_task_protocol=atelier_gateway`
   与 `provider_task_ids` 记录网关任务 id，重启后只查询既有任务。caller 把网关结果映射为：401 → `gateway api 401`，
-  429 → `gateway api 429`，`error_kind=unavailable` → `gateway api 503: unavailable`（三者触发接入端失败切换），
+  403 → `gateway api 403`，429 → `gateway api 429`，`error_kind=unavailable` → `gateway api 503: unavailable`（均可触发接入端自动路由失败切换），
   其余不带状态码；`unconfirmed` 的文案含「未确认」。
 - 接入端收到网关 429 时保留中文 detail，按 Retry-After 秒数冷却对应模态的 atelier alias；文本 OpenAI 前缀的 error.message 同样处理。
 - `GET /api/gateway/providers/{alias}/me`：本机代查该 KEY 的本人额度，按地址和凭证缓存 30 秒（含失败）；失败返回 null，页面静默隐藏。
 - `GET /api/gateway/tasks?scope=active|recent`（管理权限）：返回 `{tasks}`。active 含进行中的生成与文本调用；recent 为 24 小时内终态，倒序最多 200。
   字段 `task_id, kind, key_name, route_id, member_alias, member_trail, phase, status, created_at, updated_at, prompt, n, outputs, output_types, error`；文本 prompt 固定 null。
 - `GET /api/gateway/tasks/{task_id}/outputs/{index}`：本机 cookie 会话预览，要求管理权限；无文件或任务返回 404。
-- SSE `gateway_task` 携带同形快照，仅发给 manage 会话；任务落盘、文本登记和结束均通知。页面合并快照，有运行中任务时每 4 秒刷新，空闲时停轮询，重连后重新拉取。
+- SSE `gateway_task` 携带同形快照，仅发给拥有本机管理入口的 local 会话，不发给 agent；任务落盘、文本登记和结束均通知。页面合并快照，有运行中任务时每 4 秒刷新，空闲时停轮询，重连后重新拉取。
+  设置页复用 AppShell 现有 SSE 连接；文本结束事件只用于即时通知，文本调用不持久化为生成任务，刷新后的 recent 列表只含落盘的生成任务。
 - 本机管理（管理权限）：`GET/PUT /api/gateway`（开关 / 端口 / 名称 + 运行状态）、`POST /api/gateway/keys`（返回一次性明文 `token`）、
   `PATCH /api/gateway/keys/{id}`（名称、金额窗口、模型与 alias 权限）、`POST /api/gateway/keys/{id}/revoke`、`GET /api/gateway/usage?month=YYYY-MM`（使用记录行）。
   创建 body 为 `{name, limits, allowed_models, allowed_aliases}`，PATCH 接受任意字段子集（省略保持原值，权限 null 取消限制）。

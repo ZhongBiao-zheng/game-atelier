@@ -33,6 +33,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.103.0',
+    date: '2026-10-24',
+    headline: '局域网共享支持团队额度与多模态任务',
+    changes: [
+      { kind: 'feat', text: '按人设置日、周、月金额限额，限定可用模型和供应商，按人或模型查看用量。' },
+      { kind: 'feat', text: '图片、局部修改、扩图、图层拆分、视频、音频与 Agent 对话都可经局域网网关调用。' },
+      { kind: 'feat', text: '设置页实时查看任务和最近产物；接入端显示自己的额度用量与重置日期。' },
+      { kind: 'fix', text: '欠费供应商自动跳过，充值后可手动恢复；中转额度用完时自动改用本机供应商。' },
+    ],
+  },
+  {
     version: '5.102.4',
     date: '2026-10-24',
     headline: '标注像截图工具一样直接调整',

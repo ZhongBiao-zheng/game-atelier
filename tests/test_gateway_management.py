@@ -138,9 +138,10 @@ def test_gateway_events_are_only_sent_to_management_sessions(setup):
     from types import SimpleNamespace
     from viewer_server.sse import events, hub
 
-    async def check(capabilities):
+    async def check(kind):
+        from viewer_server.connection_auth import ConnectionPrincipal
         session = SimpleNamespace(event_connections=0, revoked=threading.Event(),
-            expires_at=time.time() + 60, principal=SimpleNamespace(capabilities=capabilities))
+            expires_at=time.time() + 60, principal=ConnectionPrincipal(kind, 'test-session'))
         store = SimpleNamespace(lock=threading.Lock(), _refresh=lambda: None)
         request = SimpleNamespace(state=SimpleNamespace(connection_session=session),
                                   app=SimpleNamespace(state=SimpleNamespace(connection_store=store)))
@@ -150,10 +151,10 @@ def test_gateway_events_are_only_sent_to_management_sessions(setup):
         hub.broadcast('gateway_task', {'prompt': 'private'})
         hub.broadcast('job-changed', {'job_id': 'local'})
         event = await anext(stream)
-        assert ('gateway_task' in event) == ('manage' in capabilities)
+        assert ('gateway_task' in event) == (kind == 'local')
         await stream.aclose()
-    asyncio.run(check({'read'}))
-    asyncio.run(check({'manage'}))
+    asyncio.run(check('agent'))
+    asyncio.run(check('local'))
 
 
 def test_text_gateway_quota_error_uses_retry_after(setup, monkeypatch):
