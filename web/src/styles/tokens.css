@@ -11,6 +11,7 @@
 
 @theme inline {
   --color-panel: var(--panel);
+  --color-sidebar: var(--sidebar);
   --color-subtle-foreground: var(--subtle-foreground);
   --color-brand-2: var(--brand-2);
   --color-brand-3: var(--brand-3);
@@ -72,6 +73,8 @@
 :root {
   color-scheme: dark;
   --panel: #111113;
+  /* 控制台侧栏底：暗色与页面同色，浅色压一档灰，让白色内容面板浮起来 */
+  --sidebar: #0A0A0B;
   --subtle-foreground: #5C5C61;
   --brand-2: #6FD6F0;
   --brand-3: #F5D06A;
@@ -139,6 +142,7 @@
 :root.light {
   color-scheme: light;
   --panel: #FFFFFF;
+  --sidebar: #F4F4F5;
   --subtle-foreground: #707075;
   --brand-2: oklch(from #6FD6F0 0.55 c h);
   --brand-3: oklch(from #F5D06A 0.55 c h);

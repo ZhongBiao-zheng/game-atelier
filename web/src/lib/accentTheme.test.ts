@@ -28,13 +28,15 @@ describe('主题色存储与应用', () => {
     expect(primaryForeground('#333333')).toBe('#FFFFFF');
     expect(accentCardContrast('#333333', 'dark')).toBeLessThan(3);
   });
-  it('浅色所有预设的 L 为 0.5，主副色对卡片均达到 3:1', () => {
+  it('浅色只压到对卡片刚好 3:1，不再一刀切到 0.5', () => {
     for (const preset of ACCENT_PRESETS) {
       for (const color of [preset.primary, preset.brand2, preset.brand3, preset.brand4]) {
-        expect(lightAccentColor(color)).toMatch(/^oklch\(0\.5 /);
         expect(accentCardContrast(color, 'light')).toBeGreaterThanOrEqual(3);
       }
     }
+    const limeL = Number(lightAccentColor('#D4F53C').match(/^oklch\(([\d.]+) /)![1]);
+    expect(limeL).toBeGreaterThanOrEqual(0.6);
+    expect(lightAccentColor('#333333')).toMatch(/^oklch\(0\.3\d* /);
   });
   it('亮暗切换重新应用派生值，不改保存的颜色', () => {
     setAccent({ preset: 'blue' });

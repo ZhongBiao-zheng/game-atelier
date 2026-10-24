@@ -17,7 +17,7 @@ export function TrendChart({ data }: { data: UsageResponse }) {
                   role="img"
                   aria-label={`${row.start} ${formatGenerationCost(row.cost_cny)}`}
                   title={`${row.start} · ${formatGenerationCost(row.cost_cny)}`}
-                  className={`w-full rounded-sm ${row.cost_cny === 0 ? 'bg-border' : isCurrentBucket(row.start, data.bucket) ? 'bg-primary' : 'trend-history'}`}
+                  className={`w-full rounded-sm ${isCurrentBucket(row.start, data.bucket) ? 'bg-primary' : row.cost_cny === 0 ? 'bg-border' : 'trend-history'}`}
                   style={{ height: `${(row.cost_cny / max) * 100}%`, minHeight: 2 }}
                 />
               </div>

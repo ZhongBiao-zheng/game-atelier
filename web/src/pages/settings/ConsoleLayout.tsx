@@ -66,7 +66,7 @@ export function ConsoleLayout() {
   if (!current) return <Redirect to="/settings/providers" replace />;
   const Page = current.page;
   const groupLabel = CONSOLE_NAV.find(group => group.items.includes(current))?.group;
-  return <div className="flex min-h-full min-w-0 flex-col md:flex-row">
+  return <div className="flex min-h-full min-w-0 flex-col bg-sidebar md:flex-row">
     <aside className="flex min-w-0 shrink-0 flex-col gap-6 border-b border-border p-4 md:sticky md:top-0 md:h-[calc(100dvh-80px)] md:w-[220px] md:border-b-0">
       <Link href={lastCreativeLocation} className="flex items-center gap-2 px-3 text-sm text-muted-foreground">
         <ArrowLeft className="size-4" aria-hidden />返回创作

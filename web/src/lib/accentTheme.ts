@@ -41,30 +41,44 @@ const luminance = ([r, g, b]: number[]) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 const ratio = (a: number, b: number) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 export const contrastRatio = (a: string, b: string) => ratio(luminance(linearRgb(a)), luminance(linearRgb(b)));
 
-// OKLab 的标准矩阵：保持 a/b（即 C/h），只将浅色模式的 L 设为 0.5。
-function lightLab(hex: string) {
+// OKLab 的标准矩阵：浅色模式保持 C/h，只压低 L。
+function oklab(hex: string) {
   const [r, g, b] = linearRgb(hex);
   const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
   const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
   const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
-  return { a: 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+  return { L: 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    a: 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
     b: 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s };
 }
-export function lightAccentColor(hex: string): string {
-  const { a, b } = lightLab(hex);
-  return `oklch(0.5 ${Math.hypot(a, b)} ${Math.atan2(b, a) * 180 / Math.PI})`;
-}
-function accentLuminance(hex: string, mode: 'dark' | 'light') {
-  if (mode === 'dark') return luminance(linearRgb(hex));
-  const { a, b } = lightLab(hex);
-  const l = (0.5 + 0.3963377774 * a + 0.2158037573 * b) ** 3;
-  const m = (0.5 - 0.1055613458 * a - 0.0638541728 * b) ** 3;
-  const s = (0.5 - 0.0894841775 * a - 1.291485548 * b) ** 3;
+function labLuminance(L: number, a: number, b: number) {
+  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
   return luminance([
     4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
     -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
     -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
   ].map(channel => Math.max(0, Math.min(1, channel))));
+}
+const LIGHT_CARD = luminance(linearRgb('#FAFAFA'));
+// 浅色只压到「对浅色卡片刚好 3:1」为止：一刀切到 0.5 会把青柠这类高明度色压成橄榄绿。
+const LIGHT_MIN_CONTRAST = 3;
+function lightL(hex: string) {
+  const { L, a, b } = oklab(hex);
+  for (let next = Math.round(L * 100) / 100; next > 0.2; next = Math.round((next - 0.01) * 100) / 100) {
+    if (ratio(labLuminance(next, a, b), LIGHT_CARD) >= LIGHT_MIN_CONTRAST) return next;
+  }
+  return 0.2;
+}
+export function lightAccentColor(hex: string): string {
+  const { a, b } = oklab(hex);
+  return `oklch(${lightL(hex)} ${Math.hypot(a, b)} ${Math.atan2(b, a) * 180 / Math.PI})`;
+}
+function accentLuminance(hex: string, mode: 'dark' | 'light') {
+  if (mode === 'dark') return luminance(linearRgb(hex));
+  const { a, b } = oklab(hex);
+  return labLuminance(lightL(hex), a, b);
 }
 export function primaryForeground(hex: string, mode: 'dark' | 'light' = 'dark') {
   const value = accentLuminance(hex, mode);

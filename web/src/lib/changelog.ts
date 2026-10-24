@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.105.1',
+    date: '2026-10-24',
+    headline: '浅色模式主题色更通透',
+    changes: [
+      { kind: 'fix', text: '浅色模式下主题色只压到看得清为止，青柠不再发橄榄绿。' },
+      { kind: 'fix', text: '浅色模式控制台侧栏改为浅灰，白色内容面板重新浮起来。' },
+      { kind: 'fix', text: '今天还没有花费时，趋势图仍用主色标出今天。' },
+    ],
+  },
+  {
     version: '5.105.0',
     date: '2026-10-24',
     headline: '界面换新：石墨底与可选主题色',
