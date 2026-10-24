@@ -1,3 +1,5 @@
+import { flushSync } from 'react-dom';
+import { createAnnotatedGeneration, ensureAnnotatedInputs, type AnnotationDocumentBridge } from '@/components/canvas/annotation/annotationRendering';
 import { useCanvasAnnotation } from '@/components/canvas/annotation/useCanvasAnnotation';
 import '@xyflow/react/dist/style.css';
 import { readablePromptVariables } from '@/lib/promptVariables';
@@ -375,6 +377,7 @@ function mentionNodeFragment(node: CanvasNode): string {
           node.data.current_version_id,
           node.data.generation_draft?.mode ?? null,
           node.data.batch_result ?? null,
+          node.type === 'image' ? node.data.annotation?.rendered_version_id ?? null : null,
         ]
         // 分组的成员表必须进签名：它决定面板上看到哪几张参考图。漏了的话把节点拖进 / 拖出
         // 分组只换了分组这一个对象，签名值不变，下游 memo 一个都不重算，参考位要硬刷新才更新。
@@ -391,6 +394,7 @@ function mentionConnectionFragment(connection: CanvasConnection): string {
   if (cached !== undefined) return cached;
   const fragment = JSON.stringify([
     connection.id, connection.source_node_id, connection.target_node_id,
+    connection.role === 'input' && connection.annotated === true,
   ]);
   mentionConnectionFragments.set(connection, fragment);
   return fragment;
@@ -1445,6 +1449,7 @@ function CanvasEditorInner({
         source: connection.source_node_id,
         target: connection.target_node_id,
         type: 'canvasConnection',
+        data: { annotated: connection.role === 'input' && connection.annotated === true },
         className: cn(
           'canvas-input-edge',
           active && 'canvas-active-edge',
@@ -2928,19 +2933,31 @@ function CanvasEditorInner({
     }
   }, [persistNow, projectId, flushSave]);
 
+  const annotationBridge = useMemo<AnnotationDocumentBridge>(() => ({
+    projectId, current: () => latestDocument.current, revision: () => serverRevision.current,
+    setRevision: revision => { serverRevision.current = revision; },
+    apply: (next, record) => {
+      flushSync(() => commit(() => next, record));
+      latestDocument.current = next;
+    },
+    persist: persistNow,
+    busy: () => documentCommandInFlight.current || runSubmissionInFlight.current || batchBusyRef.current,
+    lock: locked => { documentCommandInFlight.current = locked; },
+  }), [projectId, commit, persistNow]);
   const prepareBatch = useCallback(async (nodeId: string) => {
     if (batchBusyRef.current || runSubmissionInFlight.current) { setError('请先等待当前执行完成'); return; }
     setSubmittingNodeIds(current => new Set(current).add(nodeId));
     setError(null); setBatchError(null);
     try {
       if (!await persistNow()) return;
+      await ensureAnnotatedInputs(annotationBridge, nodeId, true);
       const preparedEditVersion = dirtyVersion.current;
       const plan = await prepareCanvasBatch(projectId, nodeId, serverRevision.current);
       batchPreparedEditVersion.current = preparedEditVersion;
       setBatchConfirmation(plan);
     } catch (failure) { setError((failure as Error).message); }
     finally { setSubmittingNodeIds(current => { const next = new Set(current); next.delete(nodeId); return next; }); }
-  }, [projectId, persistNow]);
+  }, [projectId, persistNow, annotationBridge]);
 
   async function confirmBatch() {
     if (!batchConfirmation || runSubmissionInFlight.current) return;
@@ -2999,6 +3016,7 @@ function CanvasEditorInner({
     setError(null);
     try {
       if (!await persistNow()) return;
+      await ensureAnnotatedInputs(annotationBridge, nodeId);
       const current = latestDocument.current;
       const node = current?.nodes.find(candidate => candidate.id === nodeId);
       const draft = node ? generationDraftForNode(node) : null;
@@ -3030,7 +3048,7 @@ function CanvasEditorInner({
         return next;
       });
     }
-  }, [
+  }, [annotationBridge, 
     applyLocalJob,
     flushSave,
     mergeSubmittedRunDocument,
@@ -4494,7 +4512,22 @@ function CanvasEditorInner({
   // 框选时选中数每帧在变；context 只关心「是否多选」，依赖写成 size 会让所有节点跟着每帧重渲染。
   const multiSelectionActive = selectedNodeIds.size > 1;
   const annotationController = useCanvasAnnotation(document, selectedNodeIds, commit, undo, redo, history.current.past.length > 0, history.current.future.length > 0);
+  const editWithAnnotation = useCallback(async (nodeId: string) => {
+    setError(null);
+    setSubmittingNodeIds(current => new Set(current).add(nodeId));
+    try {
+      const draft = createCanvasGenerationDraft(providers, 'image', { preference: canvasUiPreferences.generation_defaults.image });
+      const id = await createAnnotatedGeneration(annotationBridge, nodeId, draft);
+      annotationController.exit();
+      setDismissedGenerationPanelNodeId(null);
+      setSelectedConnectionIds(new Set());
+      setSelectedNodeIds(new Set([id]));
+      locateNode(id);
+    } catch (error) { setError((error as Error).message); }
+    finally { setSubmittingNodeIds(current => { const next = new Set(current); next.delete(nodeId); return next; }); }
+  }, [annotationBridge, annotationController, providers, canvasUiPreferences.generation_defaults.image, locateNode]);
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
+    editWithAnnotation,
     annotationController,
     layerParentByNodeId,
     editSourceByResultNodeId,
@@ -4576,6 +4609,7 @@ function CanvasEditorInner({
     saveImageToolbarPreferences: persistImageToolbarPreferences,
     deleteNode,
   }), [
+    editWithAnnotation,
     annotationController,
     activeBatch,
     stopActiveBatch,

@@ -1126,6 +1126,7 @@ export function createConnectedCanvasSurface(
   draft: CanvasGenerationDraft,
   ids: { nodeId: string; connectionId: string },
   surfaceType: 'image' | 'video',
+  annotated = false,
 ): CanvasDocument | null {
   if (
     document.nodes.some(node => node.id === ids.nodeId)
@@ -1166,6 +1167,7 @@ export function createConnectedCanvasSurface(
     connections: [...document.connections, {
       id: ids.connectionId,
       role: 'input',
+      ...(annotated ? { annotated: true } : {}),
       source_node_id: source.id,
       target_node_id: configNode.id,
     }],

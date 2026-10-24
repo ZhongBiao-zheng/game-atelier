@@ -7,6 +7,7 @@ import { canvasEdgeTypes } from './CanvasConnectionEdge';
 const { deleteElements } = vi.hoisted(() => ({ deleteElements: vi.fn() }));
 vi.mock('@xyflow/react', () => ({
   BaseEdge: () => null,
+  EdgeLabelRenderer: ({ children }: { children: ReactNode }) => children,
   EdgeToolbar: ({ isVisible, children }: { isVisible: boolean; children: ReactNode }) => isVisible ? children : null,
   getBezierPath: () => ['M0,0', 0, 0],
   useReactFlow: () => ({ deleteElements }),
@@ -23,4 +24,11 @@ it('keeps stored material associations independently disconnectable', () => {
   render(<Edge {...{ id: 'material-link', selected: true, deletable: true } as EdgeProps} />);
   fireEvent.click(screen.getByRole('button', { name: '断开连接' }));
   expect(deleteElements).toHaveBeenCalledWith({ edges: [{ id: 'material-link' }] });
+});
+
+it('marks annotated inputs while keeping the disconnect action available', () => {
+  const Edge = canvasEdgeTypes.canvasConnection;
+  render(<Edge {...{ id: 'annotated-link', data: { annotated: true }, selected: true, deletable: true } as EdgeProps} />);
+  expect(screen.getByTitle('带标注')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '断开连接' })).toBeEnabled();
 });

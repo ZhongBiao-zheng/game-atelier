@@ -152,6 +152,7 @@ export interface CanvasGenerationPanelContextValue {
 
 export interface CanvasNodeContextValue {
   annotationController?: CanvasAnnotationController;
+  editWithAnnotation?: (id: string) => Promise<void>;
   batchBusy?: boolean;
   /** 正在跑的批量执行：只有它的分组节点显示「停止」，停止中不重复发取消。 */
   activeBatch?: { scopeNodeId: string; stopping: boolean };
@@ -692,7 +693,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
       >
         {annotating && context.annotationController ? <AnnotationToolbar editor={annotationEditor}
           undo={context.annotationController.undo} redo={context.annotationController.redo}
-          canUndo={context.annotationController.canUndo} canRedo={context.annotationController.canRedo} /> : <div
+          canUndo={context.annotationController.canUndo} canRedo={context.annotationController.canRedo}
+          onEdit={context.editWithAnnotation ? () => void context.editWithAnnotation?.(node.id) : undefined} busy={submittingNode} /> : <div
           ref={toolbarRef}
           role="toolbar"
           aria-label={`${node.title} 节点工具`}
@@ -2809,6 +2811,7 @@ function CanvasMaterialConnections({
                 onClick={() => { if (!draggedRef.current) onPreview(reference); }}
               >
                 <CanvasMaterialPreview reference={reference} />
+                {reference.annotated && <span title="带标注" className="absolute bottom-0 right-0 z-10 grid size-3.5 place-items-center rounded-full border border-primary bg-popover text-primary"><Pencil size={10} /></span>}
                 <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-xs text-foreground">
                   {reference.label}
                 </span>

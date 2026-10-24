@@ -1,3 +1,4 @@
+import { composeAnnotatedImage } from '@/components/canvas/annotation/composeAnnotatedImage';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, onTestFinished, vi } from 'vitest';
 import { useContext } from 'react';
@@ -47,6 +48,8 @@ import type {
   CanvasProjectSummary,
   CanvasTextNode,
 } from '@/schema/canvas';
+
+vi.mock('@/components/canvas/annotation/composeAnnotatedImage', () => ({ composeAnnotatedImage: vi.fn() }));
 
 vi.mock('@xyflow/react', () => {
   // 生成面板按「画布 transform」和「锚点节点自己的几何」两路重新定位，所以 mock 的 store
@@ -2697,4 +2700,38 @@ it('suggests related recipes after dropping a raw team asset and opens them', as
   fireEvent.click(screen.getByRole('button', { name: '看看' }));
   expect(await screen.findByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true');
   await waitFor(() => expect(listRelatedTeamAssets).toHaveBeenCalledWith('canvas-one', sha));
+});
+
+it('edits annotations in place, creates an annotated input and refreshes its composite before submitting', async ({ onTestFinished }) => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  onTestFinished(() => { vi.unstubAllGlobals(); });
+  const source = imageNode('annotation-source', '标注原图'); source.data.current_version_id = 'source-v';
+  const initial = documentWith({ nodes: [source], content_versions: { 'source-v': editSourceVersion } });
+  vi.mocked(getCanvasDocument).mockResolvedValue(initial);
+  vi.mocked(composeAnnotatedImage).mockResolvedValue(new File(['png'], 'annotation.png', { type: 'image/png' }));
+  let uploads = 0;
+  vi.mocked(uploadCanvasMedia).mockImplementation(async (_project, _file, revision) => {
+    const version = { ...editSourceVersion, version_id: `annotation-rendered-${++uploads}` };
+    return { version, document: { ...initial, revision: revision + 1, content_versions: { ...initial.content_versions, [version.version_id]: version } } } as Awaited<ReturnType<typeof uploadCanvasMedia>>;
+  });
+  await renderReadyCanvas();
+  const context = () => canvasContextIdentities.at(-1) as CanvasNodeContextValue;
+  act(() => { context().selectNode(source.id); context().annotationController!.start(source); });
+  expect(await screen.findByRole('toolbar', { name: '标注工具' })).toBeInTheDocument();
+  const elements = [{ id: 'rect', type: 'rect' as const, color: '#F04438' as const, x: 10, y: 20, width: 100, height: 100, stroke_width: 4 }];
+  act(() => context().annotationController!.write(source.id, elements));
+  await act(async () => context().editWithAnnotation!(source.id));
+  expect(uploadCanvasMedia).toHaveBeenCalledTimes(1);
+  expect(submitCanvasRun).not.toHaveBeenCalled();
+  const saved = vi.mocked(saveCanvasDocument).mock.lastCall![1];
+  expect(saved.nodes).toHaveLength(2);
+  const edge = saved.connections.find(edge => edge.role === 'input')!;
+  expect(edge).toMatchObject({ source_node_id: source.id, annotated: true });
+  expect((saved.nodes.find(node => node.id === edge.target_node_id) as CanvasImageNode).data.generation_draft?.prompt).toBe('按图中标注修改，输出不保留标注。');
+  act(() => context().annotationController!.write(source.id, [{ ...elements[0], color: '#3B82F6' }]));
+  vi.mocked(submitCanvasRun).mockRejectedValue(new Error('测试拦截提交'));
+  await act(async () => context().submitRun(edge.target_node_id));
+  expect(uploadCanvasMedia).toHaveBeenCalledTimes(2);
+  expect(submitCanvasRun).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(uploadCanvasMedia).mock.invocationCallOrder.at(-1)).toBeLessThan(vi.mocked(submitCanvasRun).mock.invocationCallOrder[0]);
 });
