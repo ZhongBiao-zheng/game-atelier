@@ -42,6 +42,10 @@ class GatewayError(RuntimeError):
 
 
 
+# 文本 / Agent 这类不走 _session() 的请求也要直连网关：把环境代理逐个置空（requests 合并时删除）。
+DIRECT_PROXIES = {"http": None, "https": None}
+
+
 def _session() -> requests.Session:
     # 网关在局域网里：不走系统代理（本机 Clash / VPN 会把 192.168.x.x 的请求拖死）。
     session = requests.Session()

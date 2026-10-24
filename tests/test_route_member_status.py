@@ -184,3 +184,26 @@ def test_studio_all_balance_error_is_user_visible():
     })
     assert response.status_code == 422
     assert '供应商都欠费了' in response.json()['detail']
+
+
+def _gateway_balance_error(prefix: str) -> RuntimeError:
+    inner = job_runner._friendly_error(RuntimeError('image api 402: insufficient balance'))
+    return RuntimeError(f'{prefix}网关的供应商都不可用：{inner}')
+
+
+@pytest.mark.parametrize('prefix', [
+    'gateway api 503: gateway_unavailable — ',  # 任务协议（图片 / 视频 / 音频）
+    'text api 503: {"error": {"type": "gateway_unavailable", "message": "',  # 文本透传
+])
+def test_gateway_relayed_balance_error_is_unavailable_not_balance(prefix):
+    assert model_routes.failover_reason(_gateway_balance_error(prefix)) == 'unavailable'
+
+
+def test_gateway_alias_is_never_persisted_as_insolvent():
+    from character_workflow.lib import keys
+    keys.add_key(keys.KeySpec(alias='Hub', provider='atelier', access_key='atg_test',
+                              base_url='http://192.168.0.2:5180', modalities=['image'],
+                              models=[], created_at='test'))
+    model_routes.cool_down('image', 'Hub', 'insufficient_balance')
+    assert model_routes.member_statuses() == []
+    assert model_routes._cooling('image', 'Hub')

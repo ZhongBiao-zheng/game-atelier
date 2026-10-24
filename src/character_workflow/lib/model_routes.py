@@ -209,6 +209,9 @@ def failover_reason(error: BaseException) -> FailoverReason | None:
     low = text.lower()
     if "未确认" in text or "gateway_upstream_error" in low:
         return None
+    # 网关已在内部换过家：错误文案里转述的上游欠费属于网关成员，不能让接入端把整个网关标成欠费。
+    if "gateway_unavailable" in low:
+        return "unavailable"
     match = _STATUS.search(text)
     status = int(match.group(1)) if match else None
     if status == 402 or any(marker in low for marker in _BALANCE_MARKERS):
@@ -228,6 +231,9 @@ _cooldowns_lock = threading.Lock()
 
 def cool_down(modality: str, alias: str, reason: FailoverReason, seconds: float | None = None) -> None:
     """欠费跨进程持久化；其他失败保留短期内存冷却。"""
+    if reason == "insufficient_balance" and _is_gateway_alias(alias):
+        # 欠费由网关按自己的成员记；网关本身只会「暂时不可用」。
+        reason = "unavailable"
     if reason == "insufficient_balance":
         with file_lock(_status_file().with_suffix(".lock")):
             members = member_statuses()
@@ -289,6 +295,10 @@ def balance_blocked(modality: str, alias: str) -> bool:
     return any(row["modality"] == modality and row["alias"] == alias
                and _now() < datetime.fromisoformat(row["next_probe_at"])
                for row in member_statuses())
+
+
+def _is_gateway_alias(alias: str) -> bool:
+    return any(key.alias == alias and key.provider == "atelier" for key in read_keys_db().keys)
 
 
 def mark_healthy(modality: str, alias: str) -> None:

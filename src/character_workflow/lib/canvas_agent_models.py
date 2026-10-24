@@ -81,10 +81,13 @@ def enabled_text_models(key: keys.KeySpec) -> list[keys.ModelSpec]:
 
 def _fetch(key: keys.KeySpec) -> dict[str, dict]:
     """上游 /models 里每个模型的能力：{id: {"agent": bool, "reasoning": bool | None}}。"""
+    from character_workflow.lib.callers.atelier_gateway import DIRECT_PROXIES
+
     response = requests.get(
         f"{chat_base_url(key)}/models",
         headers={"Authorization": f"Bearer {key.access_key}"},
         timeout=FETCH_TIMEOUT,
+        **({"proxies": DIRECT_PROXIES} if key.provider == "atelier" else {}),
     )
     response.raise_for_status()
     data = response.json().get("data") or []

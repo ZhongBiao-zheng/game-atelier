@@ -562,13 +562,16 @@ def display_messages(items: list[dict], turn_id: str) -> list[CanvasAgentMessage
 
 def build_agent(session: CanvasAgentSession):
     from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, set_tracing_disabled
-    from openai import AsyncOpenAI
+    from openai import AsyncOpenAI, DefaultAsyncHttpxClient
     from openai.types.shared import Reasoning
     set_tracing_disabled(True)  # 否则 SDK 会把对话轨迹上传到 OpenAI
     key = keys.find_by_alias(session.model_alias or "")
     if key is None or not session.model:
         raise WorkshopError("INVALID_PARAMETERS", "请先选择对话模型", 422)
-    client = AsyncOpenAI(base_url=chat_base_url(key), api_key=key.access_key, max_retries=2)
+    # 局域网网关直连，不读本机代理环境（与图片 caller 一致）。
+    http_client = DefaultAsyncHttpxClient(trust_env=False) if key.provider == "atelier" else None
+    client = AsyncOpenAI(base_url=chat_base_url(key), api_key=key.access_key, max_retries=2,
+                         http_client=http_client)
     settings = ModelSettings(reasoning=Reasoning(effort=session.effort)) if session.effort \
         else ModelSettings()
     return Agent(

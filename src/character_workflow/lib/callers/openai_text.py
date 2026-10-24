@@ -203,6 +203,8 @@ def _post_json(
     timeout: float | tuple[float, float],
     gateway_alias: str | None = None,
 ) -> object:
+    from .atelier_gateway import DIRECT_PROXIES
+
     try:
         response = requests.post(
             url,
@@ -212,6 +214,8 @@ def _post_json(
             },
             json=payload,
             timeout=timeout,
+            # 局域网网关不走本机代理（Clash / VPN 会拖死 192.168.x.x），与图片 caller 一致。
+            **({"proxies": DIRECT_PROXIES} if gateway_alias else {}),
         )
     except requests.RequestException as error:
         raise OpenAITextError(str(error)) from error

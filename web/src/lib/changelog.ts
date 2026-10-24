@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.103.1',
+    date: '2026-10-24',
+    headline: '局域网网关接入更稳',
+    changes: [
+      { kind: 'fix', text: '网关的某个上游欠费时，接入端不再把整个网关当成欠费停用一小时。' },
+      { kind: 'fix', text: '经网关的文本生成与 Agent 对话不再走本机代理，与出图一致。' },
+      { kind: 'fix', text: '局域网共享的说明补充 Windows 与 macOS 的防火墙放行方法。' },
+    ],
+  },
+  {
     version: '5.103.0',
     date: '2026-10-24',
     headline: '局域网共享支持团队额度与多模态任务',

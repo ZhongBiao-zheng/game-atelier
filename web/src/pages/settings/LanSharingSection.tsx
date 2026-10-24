@@ -11,7 +11,7 @@ import { Tasks } from './lan-sharing/Tasks';
 import { Members } from './lan-sharing/Members';
 import { button, date, PERIODS } from './lan-sharing/shared';
 
-const HINT = '同事在 API 密钥中添加局域网 Atelier，填写地址和网关密钥。连接使用明文 HTTP；首次开启可能需要允许传入连接。';
+const HINT = '同事在 API 密钥中添加局域网 Atelier，填写地址和网关密钥。连接使用明文 HTTP。同事连不上时检查防火墙：Windows 把当前网络设为「专用网络」，并在防火墙中允许 Atelier（Python）入站；macOS 首次开启时在弹窗中点「允许」。';
 export function LanSharingSection() {
   const [state, setState] = useState<GatewayState | null>(null);
   const [options, setOptions] = useState<GatewayOptions>({ models: [], aliases: [] });
