@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { ACCENT_PRESETS } from './accentPresets';
 import { accentColors, applyAccent, lightAccentColor, loadAccent, primaryForeground, setAccent, useAccent, accentCardContrast } from './accentTheme';
 import { setTheme, startThemeSync } from './theme';
 
-beforeEach(() => { localStorage.clear(); document.documentElement.style.cssText = ''; });
-afterEach(() => { localStorage.clear(); document.documentElement.classList.remove('light'); });
+beforeEach(() => { vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })); localStorage.clear(); document.documentElement.style.cssText = ''; });
+afterEach(() => { vi.unstubAllGlobals(); localStorage.clear(); document.documentElement.classList.remove('light'); });
 describe('主题色存储与应用', () => {
   it.each(['{', 'null', '{}', '{"preset":"brass"}', '{"custom":{"primary":"red"}}'])('无效存储回到青柠：%s', raw => {
     localStorage.setItem('atelier:accent', raw);

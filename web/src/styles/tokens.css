@@ -847,3 +847,14 @@
     scale: none;
   }
 }
+
+/* 主题预设只在色卡内使用原始色；实际界面由当前模式派生。 */
+.accent-swatch {
+  background: conic-gradient(var(--preset-2) 0deg 60deg, var(--preset-3) 60deg 120deg,
+    var(--preset-4) 120deg 180deg, var(--preset-primary) 180deg 360deg);
+}
+.accent-preset[aria-pressed='true'] { border-color: var(--preset-primary); color: var(--foreground); }
+.accent-pill { background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary); }
+.type-image { background: color-mix(in srgb, var(--brand-2) 14%, transparent); color: var(--brand-2); }
+.type-video { background: color-mix(in srgb, var(--brand-3) 14%, transparent); color: var(--brand-3); }
+.type-text { background: color-mix(in srgb, var(--brand-4) 14%, transparent); color: var(--brand-4); }

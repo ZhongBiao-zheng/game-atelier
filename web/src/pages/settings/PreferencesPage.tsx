@@ -8,6 +8,8 @@ import { ProfileSection } from './ProfileSection';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { Switch } from '@/components/ui/switch';
 
+import { AppearanceSection } from './appearance/AppearanceSection';
+
 const DEFAULT_ROOT = '~/game-atelier';
 
 const sectionClass = 'scroll-mt-6 space-y-4';
@@ -83,6 +85,7 @@ export function PreferencesPage() {
 
   return (
     <div>
+      <AppearanceSection />
       <section className={`${sectionClass} pb-10`}>
         <h2 className="text-base font-medium text-foreground">项目存放</h2>
         <div className="min-w-0 space-y-3">
