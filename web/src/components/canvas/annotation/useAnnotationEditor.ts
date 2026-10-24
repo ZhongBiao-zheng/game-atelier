@@ -29,7 +29,7 @@ export function useAnnotationEditor(options: Options) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composing = useRef(false);
-  const gesture = useRef<{ start: AnnotationPoint; pixel: number; element: AnnotationElement; moving: boolean; changed: boolean; resize?: { corner: number[]; anchor: AnnotationPoint; vector: AnnotationPoint } } | null>(null);
+  const gesture = useRef<{ start: AnnotationPoint; pixel: number; element: AnnotationElement; moving: boolean; changed: boolean; endpoint?: 'start' | 'end'; resize?: { corner: number[]; anchor: AnnotationPoint; vector: AnnotationPoint } } | null>(null);
   const latest = useRef({ options, prefs, selectedId, preview, text });
   latest.current = { options, prefs, selectedId, preview, text };
   const unit = annotationUnitScale(options.width, options.height);
@@ -89,6 +89,13 @@ export function useAnnotationEditor(options: Options) {
     event.stopPropagation(); event.preventDefault();
     if (text) { finishText(); return; }
     const { point, pixel } = at;
+    const endpointHandle = event.target instanceof Element ? event.target.closest('[data-annotation-endpoint]') : null;
+    const endpoint = endpointHandle?.getAttribute('data-annotation-endpoint');
+    if (selected?.type === 'arrow' && (endpoint === 'start' || endpoint === 'end')) {
+      gesture.current = { start: point, pixel, element: selected, moving: true, changed: false, endpoint };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
     const handle = event.target instanceof Element ? event.target.closest('[data-annotation-resize]') : null;
     if ((selected?.type === 'text' || selected?.type === 'rect') && handle) {
       const corner = handle.getAttribute('data-annotation-resize')!.split('-').map(Number);
@@ -127,7 +134,10 @@ export function useAnnotationEditor(options: Options) {
     event.stopPropagation();
     const p = at.point;
     let element = g.element;
-    if (g.resize && element.type === 'rect') {
+    if (g.endpoint && element.type === 'arrow') {
+      const original = element[g.endpoint];
+      element = { ...element, [g.endpoint]: [original[0] + p[0] - g.start[0], original[1] + p[1] - g.start[1]] };
+    } else if (g.resize && element.type === 'rect') {
       const { anchor, corner } = g.resize;
       const width = Math.max(4 * g.pixel, element.width + (corner[0] ? 1 : -1) * (p[0] - g.start[0]));
       const height = Math.max(4 * g.pixel, element.height + (corner[1] ? 1 : -1) * (p[1] - g.start[1]));
@@ -158,7 +168,7 @@ export function useAnnotationEditor(options: Options) {
     event.stopPropagation();
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     const drawn = next?.find(element => element.id === g.element.id);
-    if (next && g.changed && drawn && (g.moving || validElement(drawn, g.pixel))) {
+    if (next && g.changed && drawn && ((g.moving && !g.endpoint) || validElement(drawn, g.pixel))) {
       commit(next.map(element => element.id === g.element.id && element.type === 'freedraw'
         ? { ...element, points: simplifyPoints(element.points, .75 * g.pixel) } : element));
       setSelectedId(drawn.id);

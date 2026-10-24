@@ -46,7 +46,10 @@ export function AnnotationLayer({ elements, imageWidth, imageHeight, fit = 'cont
       </g>;
     })}
     {box && <g pointerEvents="none" stroke={ANNOTATION_SELECTION} strokeWidth={screenPixel}>
-      <rect x={box.x - pad} y={box.y - pad} width={box.width + pad * 2} height={box.height + pad * 2} fill="none" strokeDasharray={`${4 * screenPixel} ${3 * screenPixel}`} />
+      {selected?.type !== 'arrow' && <rect x={box.x - pad} y={box.y - pad} width={box.width + pad * 2} height={box.height + pad * 2} fill="none" strokeDasharray={`${4 * screenPixel} ${3 * screenPixel}`} />}
+      {selected?.type === 'arrow' && (['start', 'end'] as const).map(endpoint => <circle key={endpoint}
+        data-annotation-endpoint={endpoint} pointerEvents="all" style={{ cursor: 'move' }}
+        cx={selected[endpoint][0]} cy={selected[endpoint][1]} r={4 * screenPixel} fill={ANNOTATION_WHITE} />)}
       {(selected?.type === 'text' || selected?.type === 'rect') && [0, 1].flatMap(x => [0, 1].map(y => <rect key={`${x}-${y}`} data-annotation-resize={`${x}-${y}`} pointerEvents="all" style={{ cursor: x === y ? 'nwse-resize' : 'nesw-resize' }} x={box.x - pad + x * (box.width + pad * 2) - pad}
         y={box.y - pad + y * (box.height + pad * 2) - pad} width={8 * screenPixel} height={8 * screenPixel} fill={ANNOTATION_WHITE} />))}
     </g>}

@@ -121,3 +121,32 @@ it.each([[0, 0], [0, 1], [1, 0], [1, 1]])('resizes a rectangle from corner %i,%i
   expect(commit).toHaveBeenCalledTimes(1);
   expect(commit.mock.lastCall?.[0][0]).toMatchObject({ x: cx ? 10 : -10, y: cy ? 10 : -20, width: 110, height: 120, stroke_width: 4 });
 });
+
+it.each(['start', 'end'] as const)('drags the arrow %s independently and commits once', endpoint => {
+  const { container } = render(<Harness />); const svg = container.querySelector('[data-annotation-surface] svg')!;
+  fireEvent.click(screen.getByRole('button', { name: '箭头 A' }));
+  draw(svg, 10, 100);
+  const handle = svg.querySelector(`[data-annotation-endpoint="${endpoint}"]`)!;
+  expect(handle).not.toBeNull();
+  const start = endpoint === 'start' ? 10 : 100;
+  commit.mockClear();
+  fireEvent.pointerDown(handle, { clientX: start, clientY: start, button: 0 });
+  fireEvent.pointerMove(svg, { clientX: 180, clientY: 40, button: 0 });
+  expect(commit).not.toHaveBeenCalled();
+  fireEvent.pointerUp(svg, { clientX: 180, clientY: 40, button: 0 });
+  expect(commit).toHaveBeenCalledTimes(1);
+  expect(commit.mock.lastCall?.[0][0]).toMatchObject({
+    start: endpoint === 'start' ? [180, 40] : [10, 10],
+    end: endpoint === 'end' ? [180, 40] : [100, 100], stroke_width: 4,
+  });
+});
+it('does not collapse an arrow to a zero-length endpoint edit', () => {
+  const { container } = render(<Harness />); const svg = container.querySelector('[data-annotation-surface] svg')!;
+  fireEvent.click(screen.getByRole('button', { name: '箭头 A' })); draw(svg, 10, 100);
+  const handle = svg.querySelector('[data-annotation-endpoint="end"]')!;
+  expect(handle).not.toBeNull(); commit.mockClear();
+  fireEvent.pointerDown(handle, { clientX: 100, clientY: 100, button: 0 });
+  fireEvent.pointerUp(svg, { clientX: 10, clientY: 10, button: 0 });
+  expect(commit).not.toHaveBeenCalled();
+  expect(svg.querySelector('[data-annotation-endpoint="end"]')).toHaveAttribute('cx', '100');
+});
