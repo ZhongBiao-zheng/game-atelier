@@ -231,7 +231,6 @@ export interface CanvasNodeContextValue {
   removeBackground: (node: CanvasContentNode) => void;
   openMaskEdit: (node: CanvasContentNode, mode?: 'inpaint' | 'outpaint') => void;
   openImageEdit?: (nodeId: string) => void;
-  openAnnotation?: (node: CanvasContentNode) => void;
   submitImageEdit?: (nodeId: string) => Promise<boolean>;
   openAngle: (node: CanvasContentNode) => void;
   upscaleImage: (node: CanvasContentNode, target: CanvasUpscaleTarget) => void;
@@ -1872,9 +1871,6 @@ function ImageNodeToolbar({
         disabled={!currentVersionId || submitting || replacing}
         onClick={() => context.openMaskEdit(node, 'inpaint')}
       ><Paintbrush /></MediaToolButton>
-      <MediaToolButton label={`标注 ${node.title}`} text="标注"
-        disabled={!currentVersionId || submitting || replacing}
-        onClick={() => context.openAnnotation?.(node)}><Pencil /></MediaToolButton>
       <MediaToolButton
         label={`扩图 ${node.title}`}
         text="扩图"

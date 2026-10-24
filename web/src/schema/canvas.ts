@@ -173,12 +173,27 @@ export interface CanvasImageNode extends CanvasNodeBase {
   data: CanvasContentNodeData & { display: CanvasMediaDisplay; annotation?: CanvasImageAnnotation | null };
 }
 
+export type AnnotationColor = '#F04438' | '#FACC15' | '#22C55E' | '#3B82F6' | '#FFFFFF';
+export type AnnotationPoint = [number, number];
+interface AnnotationElementBase { id: string; color: AnnotationColor }
+export interface AnnotationRect extends AnnotationElementBase {
+  type: 'rect'; x: number; y: number; width: number; height: number; stroke_width: number;
+}
+export interface AnnotationArrow extends AnnotationElementBase {
+  type: 'arrow'; start: AnnotationPoint; end: AnnotationPoint; stroke_width: number;
+}
+export interface AnnotationFreedraw extends AnnotationElementBase {
+  type: 'freedraw'; points: AnnotationPoint[]; stroke_width: number;
+}
+export interface AnnotationText extends AnnotationElementBase {
+  type: 'text'; x: number; y: number; text: string; font_size: number; background: boolean;
+}
+export type AnnotationElement = AnnotationRect | AnnotationArrow | AnnotationFreedraw | AnnotationText;
 export interface CanvasImageAnnotation {
-  source_version_id: string;
-  rendered_version_id: string;
-  /** Image-space marks: shapes, lines, brush, marker, text, mosaic/blur and erasure. */
-  elements: Record<string, JsonValue>[];
-  prompt: string;
+  version_id: string;
+  elements: AnnotationElement[];
+  visible: boolean;
+  rendered_version_id: string | null;
 }
 
 export interface CanvasVideoNode extends CanvasNodeBase {
@@ -292,6 +307,7 @@ export interface CanvasInputConnection {
   source_node_id: string;
   target_node_id: string;
   slot?: CanvasVideoFrameSlot | null;
+  annotated?: boolean;
 }
 
 export interface CanvasMaterialConnection {

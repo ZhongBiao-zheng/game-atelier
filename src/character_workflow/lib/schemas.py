@@ -760,22 +760,70 @@ class CanvasMediaNodeData(CanvasContentNodeData):
     annotation: CanvasImageAnnotation | None = None
 
 
+AnnotationColor = Literal["#F04438", "#FACC15", "#22C55E", "#3B82F6", "#FFFFFF"]
+FinitePx = Annotated[float, Field(ge=-100_000, le=100_000, allow_inf_nan=False)]
+AnnotationPoint = tuple[FinitePx, FinitePx]
+ANNOTATION_UNIT_BASE = 1024
+
+
+def annotation_unit_scale(width: float, height: float) -> float:
+    return max(width, height) / ANNOTATION_UNIT_BASE
+
+
+class _AnnotationElementBase(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    id: str = Field(min_length=1, max_length=64)
+    color: AnnotationColor
+
+
+class AnnotationRect(_AnnotationElementBase):
+    type: Literal["rect"]
+    x: FinitePx
+    y: FinitePx
+    width: float = Field(ge=0, le=100_000)
+    height: float = Field(ge=0, le=100_000)
+    stroke_width: float = Field(ge=1, le=24)
+
+
+class AnnotationArrow(_AnnotationElementBase):
+    type: Literal["arrow"]
+    start: AnnotationPoint
+    end: AnnotationPoint
+    stroke_width: float = Field(ge=1, le=24)
+
+
+class AnnotationFreedraw(_AnnotationElementBase):
+    type: Literal["freedraw"]
+    points: list[AnnotationPoint] = Field(min_length=2, max_length=10_000)
+    stroke_width: float = Field(ge=1, le=24)
+
+
+class AnnotationText(_AnnotationElementBase):
+    type: Literal["text"]
+    x: FinitePx
+    y: FinitePx
+    text: str = Field(min_length=1, max_length=500)
+    font_size: float = Field(ge=12, le=72)
+    background: bool = False
+
+
+AnnotationElement = Annotated[
+    AnnotationRect | AnnotationArrow | AnnotationFreedraw | AnnotationText,
+    Field(discriminator="type"),
+]
+
+
 class CanvasImageAnnotation(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    source_version_id: str = Field(min_length=1, max_length=160)
-    rendered_version_id: str = Field(min_length=1, max_length=160)
-    elements: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=2000)
-    prompt: str = Field(default="", max_length=20000)
+    version_id: str = Field(min_length=1, max_length=160)
+    elements: list[AnnotationElement] = Field(default_factory=list, max_length=500)
+    visible: bool = True
+    rendered_version_id: str | None = Field(default=None, min_length=1, max_length=160)
 
     @model_validator(mode="after")
     def validate_scene(self) -> "CanvasImageAnnotation":
-        allowed = {
-            "freedraw", "rectangle", "ellipse", "diamond", "arrow", "line", "text",
-            "marker", "mosaic", "erase",
-        }
-        if any(element.get("type") not in allowed for element in self.elements):
-            raise ValueError("annotation contains unsupported elements")
-        if len(json.dumps(self.elements, ensure_ascii=False).encode("utf-8")) > 2 * 1024 * 1024:
+        elements = [element.model_dump(mode="json") for element in self.elements]
+        if len(json.dumps(elements, ensure_ascii=False).encode("utf-8")) > 2 * 1024 * 1024:
             raise ValueError("annotation exceeds 2 MiB")
         return self
 
@@ -997,6 +1045,7 @@ class CanvasInputConnection(BaseModel):
     source_node_id: str = Field(min_length=1)
     target_node_id: str = Field(min_length=1)
     slot: Literal["first_frame", "last_frame"] | None = None
+    annotated: bool = False
 
 
 class CanvasMaterialConnection(BaseModel):
@@ -1315,12 +1364,15 @@ class CanvasDocument(BaseModel):
                 raise ValueError("annotations are only supported on image nodes")
             if node.type == "image" and node.data.annotation:
                 annotation = node.data.annotation
-                source = self.content_versions.get(annotation.source_version_id)
-                rendered = self.content_versions.get(annotation.rendered_version_id)
-                if source is None or source.kind != "image" or rendered is None or rendered.kind != "image":
-                    raise ValueError("annotation requires owned source and rendered image versions")
-                if (source.width, source.height) != (rendered.width, rendered.height):
-                    raise ValueError("annotation must preserve source image dimensions")
+                source = self.content_versions.get(annotation.version_id)
+                rendered = self.content_versions.get(annotation.rendered_version_id or "")
+                if source is None or source.kind != "image":
+                    raise ValueError("annotation requires an owned source image version")
+                if annotation.rendered_version_id is not None:
+                    if rendered is None or rendered.kind != "image":
+                        raise ValueError("annotation requires an owned rendered image version")
+                    if (source.width, source.height) != (rendered.width, rendered.height):
+                        raise ValueError("annotation must preserve source image dimensions")
             if node.type == "image_edit":
                 for linked_id in (node.data.source_node_id, node.data.reference_node_id):
                     linked = nodes_by_id.get(linked_id)
@@ -1408,6 +1460,8 @@ class CanvasDocument(BaseModel):
             }:
                 raise ValueError("canvas material connections require images or image edit nodes")
             if edge.role == "input":
+                if edge.annotated and (edge.slot is not None or source.type != "image"):
+                    raise ValueError("annotated connections require an unslotted image source")
                 if source.type in {"plugin", "layer_stack", "image_edit"}:
                     raise ValueError("canvas input source cannot provide content")
                 if target.type == "image_edit":

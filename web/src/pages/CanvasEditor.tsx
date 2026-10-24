@@ -54,7 +54,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { Link, useLocation } from 'wouter';
 
 import {
@@ -121,8 +121,6 @@ import {
 import { ApiError } from '@/api/http';
 import type { CanvasMaskEditSubmission } from '@/components/canvas/ImageEditorShell';
 import { CanvasInpaintEditor } from '@/components/canvas/CanvasInpaintEditor';
-import type { AnnotationSubmission } from '@/components/canvas/CanvasAnnotationEditor';
-import type { CanvasImageAnnotation, CanvasImageNode } from '@/schema/canvas';
 import { CanvasOutpaintEditor } from '@/components/canvas/CanvasOutpaintEditor';
 import { initialEditFrame, savedImageEditError } from '@/components/canvas/imageEditGeometry';
 import {
@@ -199,7 +197,6 @@ import type { CreationAsset } from '@/schema/creationAssets';
 import type { Job, JobKind } from '@/schema/jobs';
 import { cn } from '@/lib/utils';
 
-const CanvasAnnotationEditor = lazy(() => import('@/components/canvas/CanvasAnnotationEditor'));
 import {
   appendCanvasMentionToken,
   buildCanvasMaterialReferences,
@@ -536,11 +533,6 @@ function CanvasEditorInner({
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [layerPreviewId, setLayerPreviewId] = useState<string | null>(null);
   const [mediaOperation, setMediaOperation] = useState<MediaOperationState | null>(null);
-  const [annotation, setAnnotation] = useState<{
-    nodeId: string; title: string; source: CanvasMediaVersion; initial?: CanvasImageAnnotation | null;
-  } | null>(null);
-  const annotationSavedNodeId = useRef<string | null>(null);
-  const annotationEditNodeId = useRef<string | null>(null);
   const [mediaOperationBusy, setMediaOperationBusy] = useState(false);
   const [mediaPlaceholder, setMediaPlaceholder] = useState<CanvasMediaOperationPlaceholder | null>(null);
   // 占位节点允许拖动；结果节点落地时按占位被拖走的位移搬过去。ref 供异步回调读最新位置。
@@ -4067,88 +4059,6 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set([newNodeId]));
   }, [canvasUiPreferences.generation_defaults.image, commit, providers]);
 
-  const openAnnotation = useCallback((node: CanvasContentNode) => {
-    const current = latestDocument.current;
-    if (!current || node.type !== 'image' || !node.data.current_version_id) return;
-    if (batchBusyRef.current) { setError('请先停止或等待批量执行完成。'); return; }
-    const initial = node.data.annotation?.rendered_version_id === node.data.current_version_id ? node.data.annotation : null;
-    const source = current.content_versions[initial?.source_version_id ?? node.data.current_version_id];
-    if (source?.kind !== 'image') { setError('找不到标注原图。'); return; }
-    annotationSavedNodeId.current = initial ? node.id : null;
-    annotationEditNodeId.current = null;
-    setAnnotation({ nodeId: node.id, title: node.title, source, initial });
-  }, []);
-
-  const saveAnnotation = useCallback(async (submission: AnnotationSubmission, edit: boolean) => {
-    if (!annotation) return false;
-    if (documentCommandInFlight.current || runSubmissionInFlight.current || batchBusyRef.current) {
-      throw new Error('请等待当前画布操作完成后再保存标注。');
-    }
-    if (!await persistNow()) throw new Error('画布保存失败，请重试。');
-    const before = latestDocument.current;
-    const sourceNode = before?.nodes.find(node => node.id === annotation.nodeId);
-    if (!before || sourceNode?.type !== 'image') throw new Error('源节点已不存在。');
-    documentCommandInFlight.current = true;
-    let selectedId = '';
-    try {
-      const uploaded = await uploadCanvasMedia(projectId, new File([submission.image], 'annotation.png', { type: 'image/png' }), serverRevision.current);
-      serverRevision.current = Math.max(serverRevision.current, uploaded.document.revision);
-      const current = latestDocument.current ?? before;
-      const existing = current.nodes.find(node => node.id === annotationSavedNodeId.current);
-      const nodeId = existing?.id ?? makeId('image');
-      const sourceSize = canvasNodeRenderedSize(sourceNode, current.content_versions);
-      const node: CanvasImageNode = {
-        ...(existing?.type === 'image' ? existing : {}),
-        id: nodeId, type: 'image', title: existing?.title ?? `${sourceNode.title.slice(0, 115)} · 标注`,
-        position: existing?.position ?? { x: sourceNode.position.x + sourceSize.width + 80, y: sourceNode.position.y },
-        size: existing?.size ?? sizeLockedToCanvasVersion(null, uploaded.version), z_index: existing?.z_index ?? 0,
-        data: { generation_draft: null, active_run_id: null,
-          display: { fit: 'contain', free_resize: false },
-          ...(existing?.type === 'image' ? existing.data : {}), current_version_id: uploaded.version.version_id,
-          annotation: { source_version_id: annotation.source.version_id, rendered_version_id: uploaded.version.version_id,
-            elements: submission.elements, prompt: submission.prompt } },
-      };
-      let next: CanvasDocument = { ...current, revision: serverRevision.current,
-        content_versions: acceptServerContentVersions(current.content_versions, uploaded.document.content_versions),
-        nodes: existing ? current.nodes.map(item => item.id === nodeId ? node : item) : [...current.nodes, node],
-        connections: existing ? current.connections : [...current.connections, {
-          id: makeId('connection'), role: 'material', source_node_id: sourceNode.id, target_node_id: nodeId,
-        }],
-      };
-      selectedId = nodeId;
-      if (edit) {
-        selectedId = annotationEditNodeId.current ?? makeId('image');
-        const draft = createCanvasGenerationDraft(providers, 'image', { preference: canvasUiPreferences.generation_defaults.image });
-        draft.prompt = ['根据参考图中的手绘、图形、箭头和文字标注修改图片。标注表示修改要求和位置。',
-          '输出干净的成品图，移除所有标注笔迹、箭头、图形和标注文字；保留未要求修改的内容、构图与画幅。', submission.prompt].filter(Boolean).join('\n');
-        if (next.nodes.some(item => item.id === selectedId)) {
-          next = { ...next, nodes: next.nodes.map(item => item.id === selectedId && item.type === 'image'
-            ? { ...item, data: { ...item.data, generation_draft: draft } } : item) };
-        } else {
-          next = createConnectedCanvasSurface(next, nodeId, draft,
-            { nodeId: selectedId, connectionId: makeId('connection') }, 'image') ?? next;
-        }
-        annotationEditNodeId.current = selectedId;
-      }
-      history.current.past.push(current);
-      history.current.past = history.current.past.slice(-50);
-      history.current.future = [];
-      const normalized = normalizeCommittedDocument(next, current);
-      latestDocument.current = normalized;
-      setDocument(normalized);
-      dirtyVersion.current += 1;
-      setDirtySignal(dirtyVersion.current);
-      annotationSavedNodeId.current = nodeId;
-    } finally {
-      documentCommandInFlight.current = false;
-    }
-    if (!await persistNow()) throw new Error('标注已保留在当前画布，写入失败，请重试保存。');
-    setDismissedGenerationPanelNodeId(null);
-    setSelectedConnectionIds(new Set());
-    setSelectedNodeIds(new Set([selectedId]));
-    return true;
-  }, [annotation, canvasUiPreferences.generation_defaults.image, persistNow, projectId, providers]);
-
   const submitAngle = useCallback(async (params: CanvasAngleParams) => {
     if (!angleState || runSubmissionInFlight.current) return;
     setAngleBusy(true);
@@ -4638,7 +4548,6 @@ function CanvasEditorInner({
     updateText,
     setTextEditing,
     createImageFromSource,
-    openAnnotation,
     recordHistory: recordHistorySnapshot,
     saveAsset: saveNodeToLibrary,
     shareResult: shareCanvasResult,
@@ -4676,7 +4585,6 @@ function CanvasEditorInner({
     completeNodeResize,
     copyPrompt,
     createImageFromSource,
-    openAnnotation,
     layerParentByNodeId,
     editSourceByResultNodeId,
     locateNode,
@@ -5514,12 +5422,6 @@ function CanvasEditorInner({
           }}
           onSave={(value, upscale) => void persistGenerationPreferences(value, upscale)}
         />
-
-        {annotation && <Suspense fallback={<div role="status" className="fixed inset-0 z-50 grid place-items-center bg-background text-sm">正在加载标注工具…</div>}>
-          <CanvasAnnotationEditor key={annotation.nodeId} projectId={projectId} title={annotation.title}
-            source={annotation.source} initial={annotation.initial} onSave={saveAnnotation}
-            onClose={() => { setAnnotation(null); restoreCanvasNodeFocus(annotation.nodeId); }} />
-        </Suspense>}
 
         {mediaOperation && (
           <CanvasMediaOperationDialog
