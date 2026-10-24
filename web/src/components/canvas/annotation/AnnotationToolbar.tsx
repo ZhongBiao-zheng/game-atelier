@@ -12,8 +12,12 @@ export interface AnnotationToolbarProps {
   onExpand?: () => void; onEdit?: () => void; busy?: boolean;
 }
 export function AnnotationToolbar({ editor, undo, redo, canUndo, canRedo, onExpand, onEdit, busy }: AnnotationToolbarProps) {
-  const text = editor.selected?.type === 'text' || editor.prefs.tool === 'text';
-  const value = text ? editor.prefs.font_size : editor.prefs.stroke_width;
+  const target = editor.text ?? editor.selected;
+  const text = target ? target.type === 'text' : editor.prefs.tool === 'text';
+  const value = target ? (target.type === 'text' ? target.font_size : target.stroke_width)
+    : text ? editor.prefs.font_size : editor.prefs.stroke_width;
+  const activeColor = target?.color ?? editor.prefs.color;
+  const background = target?.type === 'text' ? target.background : editor.prefs.background;
   return <div role="toolbar" aria-label="标注工具" data-annotation-controls
     className="nodrag nopan flex items-center gap-1 whitespace-nowrap rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass"
     onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
@@ -22,12 +26,12 @@ export function AnnotationToolbar({ editor, undo, redo, canUndo, canRedo, onExpa
       onClick={() => editor.chooseTool(tool as AnnotationTool)}><Icon size={18} strokeWidth={1.8} /></button>)}
     {separator}
     {ANNOTATION_COLORS.map((color, i) => <button key={color} type="button" title={ANNOTATION_COLOR_NAMES[i]} aria-label={ANNOTATION_COLOR_NAMES[i]}
-      aria-pressed={editor.prefs.color === color} className={cn('grid size-7 shrink-0 place-items-center rounded-full border border-transparent', editor.prefs.color === color && 'border-foreground')}
+      aria-pressed={activeColor === color} className={cn('grid size-7 shrink-0 place-items-center rounded-full border border-transparent', activeColor === color && 'border-foreground')}
       onClick={() => editor.changeStyle({ color })}><span className="size-5 rounded-full" style={{ backgroundColor: color }} /></button>)}
     <AnnotationSizePopover text={text} value={value} onChange={(n, preview) => editor.changeStyle(text ? { font_size: n } : { stroke_width: n }, preview)} />
-    {text && <button type="button" title="文字底色" aria-label="文字底色" aria-pressed={editor.prefs.background}
-      className={cn(button, editor.prefs.background && 'bg-foreground text-background')}
-      onClick={() => editor.changeStyle({ background: !editor.prefs.background })}>
+    {text && <button type="button" title="文字底色" aria-label="文字底色" aria-pressed={background}
+      className={cn(button, background && 'bg-foreground text-background')}
+      onClick={() => editor.changeStyle({ background: !background })}>
       <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><rect x={2} y={3} width={20} height={18} rx={3} /><path d="M7 8h10M12 8v9" /></svg>
     </button>}
     {separator}

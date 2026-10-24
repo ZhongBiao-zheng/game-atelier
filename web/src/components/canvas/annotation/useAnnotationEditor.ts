@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { ANNOTATION_COLORS, annotationUnitScale, distance, hitElement, serializeElements, simplifyPoints,
+import { ANNOTATION_COLORS, annotationUnitScale, distance, elementBounds, hitElement, serializeElements, simplifyPoints,
   translateElement, validElement, type AnnotationColor, type AnnotationElement, type AnnotationPoint,
   type AnnotationText, type AnnotationTool } from './annotationModel';
 interface Preferences { tool: AnnotationTool; color: AnnotationColor; stroke_width: number; font_size: number; background: boolean }
@@ -29,7 +29,7 @@ export function useAnnotationEditor(options: Options) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const composing = useRef(false);
-  const gesture = useRef<{ start: AnnotationPoint; pixel: number; element: AnnotationElement; moving: boolean; changed: boolean } | null>(null);
+  const gesture = useRef<{ start: AnnotationPoint; pixel: number; element: AnnotationElement; moving: boolean; changed: boolean; resize?: { corner: number[]; anchor: AnnotationPoint; vector: AnnotationPoint } } | null>(null);
   const latest = useRef({ options, prefs, selectedId, preview, text });
   latest.current = { options, prefs, selectedId, preview, text };
   const unit = annotationUnitScale(options.width, options.height);
@@ -50,6 +50,8 @@ export function useAnnotationEditor(options: Options) {
     if (!cancel && current.text.text.trim()) {
       const others = current.options.elements.filter(element => element.id !== current.text!.id);
       commit([...others, { ...current.text, text: current.text.text.slice(0, 500) }]);
+      setPrefs(p => ({ ...p, tool: 'select' }));
+      setSelectedId(null);
     }
     setText(null);
     latest.current.text = null;
@@ -87,6 +89,16 @@ export function useAnnotationEditor(options: Options) {
     event.stopPropagation(); event.preventDefault();
     if (text) { finishText(); return; }
     const { point, pixel } = at;
+    const handle = event.target instanceof Element ? event.target.closest('[data-annotation-resize]') : null;
+    if (selected?.type === 'text' && handle) {
+      const corner = handle.getAttribute('data-annotation-resize')!.split('-').map(Number);
+      const box = elementBounds(selected, unit);
+      const anchor: AnnotationPoint = [box.x + (1 - corner[0]) * box.width, box.y + (1 - corner[1]) * box.height];
+      const vector: AnnotationPoint = [(corner[0] * 2 - 1) * box.width, (corner[1] * 2 - 1) * box.height];
+      gesture.current = { start: point, pixel, element: selected, moving: true, changed: false, resize: { corner, anchor, vector } };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
     const id = crypto.randomUUID();
     if (prefs.tool === 'text') {
       setText({ id, type: 'text', color: prefs.color, x: point[0], y: point[1], text: '', font_size: prefs.font_size, background: prefs.background });
@@ -115,7 +127,14 @@ export function useAnnotationEditor(options: Options) {
     event.stopPropagation();
     const p = at.point;
     let element = g.element;
-    if (g.moving) element = translateElement(g.element, p[0] - g.start[0], p[1] - g.start[1]);
+    if (g.resize && element.type === 'text') {
+      const { anchor, vector, corner } = g.resize;
+      const factor = 1 + ((p[0] - g.start[0]) * vector[0] + (p[1] - g.start[1]) * vector[1]) / (vector[0] ** 2 + vector[1] ** 2 || 1);
+      const font_size = Math.min(72, Math.max(12, Math.round(g.element.type === 'text' ? g.element.font_size * factor : 18)));
+      const resized = { ...element, font_size };
+      const bounds = elementBounds(resized, unit);
+      element = { ...resized, x: anchor[0] - (1 - corner[0]) * bounds.width, y: anchor[1] - (1 - corner[1]) * bounds.height };
+    } else if (g.moving) element = translateElement(g.element, p[0] - g.start[0], p[1] - g.start[1]);
     else if (element.type === 'rect') element = { ...element, x: Math.min(p[0], g.start[0]), y: Math.min(p[1], g.start[1]), width: Math.abs(p[0] - g.start[0]), height: Math.abs(p[1] - g.start[1]) };
     else if (element.type === 'arrow') element = { ...element, end: p };
     else if (element.type === 'freedraw') {
@@ -134,9 +153,12 @@ export function useAnnotationEditor(options: Options) {
     event.stopPropagation();
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     const drawn = next?.find(element => element.id === g.element.id);
-    if (next && g.changed && drawn && (g.moving || validElement(drawn, g.pixel))) commit(next.map(element =>
-      element.id === g.element.id && element.type === 'freedraw' ? { ...element, points: simplifyPoints(element.points, .75 * g.pixel) } : element));
-    else setPreview(null);
+    if (next && g.changed && drawn && (g.moving || validElement(drawn, g.pixel))) {
+      commit(next.map(element => element.id === g.element.id && element.type === 'freedraw'
+        ? { ...element, points: simplifyPoints(element.points, .75 * g.pixel) } : element));
+      setSelectedId(drawn.id);
+      setPrefs(p => ({ ...p, tool: 'select', ...(drawn.type === 'text' ? { font_size: drawn.font_size } : { stroke_width: drawn.stroke_width }) }));
+    } else setPreview(null);
   }
   function doubleClick(event: React.MouseEvent<SVGSVGElement>) {
     event.stopPropagation();

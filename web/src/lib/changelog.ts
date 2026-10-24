@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.102.1',
+    date: '2026-10-24',
+    headline: '标注画完即可调整',
+    changes: [
+      { kind: 'fix', text: '进入标注时收起生成面板；图形画完自动选中，可直接移动，并通过带数值的线宽按钮调整粗细。' },
+      { kind: 'fix', text: '文字输入时不显示边框，结束后选中文字可拖动四角缩放，字号同步变化。' },
+    ],
+  },
+  {
     version: '5.102.0',
     date: '2026-10-24',
     headline: '标注改为画布上直接画',

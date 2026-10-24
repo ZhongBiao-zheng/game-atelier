@@ -2735,3 +2735,21 @@ it('edits annotations in place, creates an annotated input and refreshes its com
   expect(submitCanvasRun).toHaveBeenCalledTimes(1);
   expect(vi.mocked(uploadCanvasMedia).mock.invocationCallOrder.at(-1)).toBeLessThan(vi.mocked(submitCanvasRun).mock.invocationCallOrder[0]);
 });
+
+it('hides the generation composer throughout annotation and restores the draft afterwards', async ({ onTestFinished }) => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  onTestFinished(() => { vi.unstubAllGlobals(); });
+  const source = imageNode('annotation-result', '生成图片', { ...imageDraft, prompt: '保留我的提示词' });
+  source.data.current_version_id = 'source-v';
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [source], content_versions: { 'source-v': { ...editSourceVersion, origin: { kind: 'job_output', job_id: 'job-source', candidate_id: 'candidate' } } } }));
+  await renderReadyCanvas();
+  fireEvent.click(screen.getByRole('button', { name: 'flow-node-annotation-result' }));
+  expect(await screen.findByRole('button', { name: '开始生成' })).toBeInTheDocument();
+  const context = () => canvasContextIdentities.at(-1) as CanvasNodeContextValue;
+  act(() => context().annotationController!.start(source));
+  expect(screen.queryByRole('button', { name: '开始生成' })).not.toBeInTheDocument();
+  expect(screen.getByRole('toolbar', { name: '标注工具' })).toBeInTheDocument();
+  act(() => context().annotationController!.exit());
+  expect(await screen.findByRole('button', { name: '开始生成' })).toBeInTheDocument();
+  expect(screen.getByRole('combobox', { name: '提示词' })).toHaveTextContent('保留我的提示词');
+});

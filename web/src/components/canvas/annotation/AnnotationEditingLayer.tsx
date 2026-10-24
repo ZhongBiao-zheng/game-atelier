@@ -28,7 +28,7 @@ export function AnnotationEditingLayer({ editor, width, height, fit }: {
       onPointerDown={editor.pointerDown} onPointerMove={editor.pointerMove} onPointerUp={editor.pointerUp}
       onPointerCancel={editor.cancelGesture} onDoubleClick={editor.doubleClick} onClick={event => event.stopPropagation()} />
     {text && <textarea data-annotation-text ref={editor.textareaRef} value={text.text} maxLength={500}
-      aria-label="标注文字" wrap="off" className="nodrag nopan pointer-events-auto absolute min-w-32 resize-none border border-dashed border-primary bg-transparent p-0 outline-none"
+      aria-label="标注文字" wrap="off" className="nodrag nopan pointer-events-auto absolute min-w-32 resize-none border-0 bg-transparent p-0 outline-none"
       style={{ left: (size.width - width * xscale) / 2 + text.x * xscale,
         top: (size.height - height * yscale) / 2 + text.y * yscale,
         color: text.background ? (text.color === ANNOTATION_WHITE || text.color === ANNOTATION_COLORS[1] ? ANNOTATION_INK : ANNOTATION_WHITE) : text.color,

@@ -324,6 +324,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const nodePanelAllowed = Boolean(
     context
     && !context.batchBusy
+    && !context.annotationController?.nodeId
     && selected
     && !context.multiSelectionActive
     && !context.generationPanel.narrowViewport
