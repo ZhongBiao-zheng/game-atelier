@@ -133,7 +133,8 @@ export function useAnnotationEditor(options: Options) {
     gesture.current = null;
     event.stopPropagation();
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    if (next && g.changed) commit(next.filter(element => g.moving || element.id !== g.element.id || validElement(element, g.pixel)).map(element =>
+    const drawn = next?.find(element => element.id === g.element.id);
+    if (next && g.changed && drawn && (g.moving || validElement(drawn, g.pixel))) commit(next.map(element =>
       element.id === g.element.id && element.type === 'freedraw' ? { ...element, points: simplifyPoints(element.points, .75 * g.pixel) } : element));
     else setPreview(null);
   }

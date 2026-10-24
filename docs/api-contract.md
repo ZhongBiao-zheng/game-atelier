@@ -323,18 +323,23 @@ Canvas 媒体只按项目内不可变 `version_id` 读取，不接受裸路径�
 文本节点的 `data.display.scale` 只接受 Atelier 字阶 token `xs/sm/base`，缺省为 `sm`；字号切换属于
 Document 显示状态并参与 revision 与 undo/redo，不修改文本 Content Version。图片/视频继续使用
 `data.display.fit/free_resize`；视频和音频播放进度、音量与控件焦点只属于浏览器呈现状态，不落盘。
-图片节点可保存 `data.annotation`：`source_version_id` 固定原图、`rendered_version_id` 固定标注合成图、
-`elements` 保存图片坐标系中的标注、`prompt` 保存补充要求。两份版本必须为本项目拥有且尺寸相同的图片；
-仅当当前版本等于 `rendered_version_id` 时恢复编辑，否则以当前图片新建标注。
-图形类型为 `freedraw/rectangle/ellipse/diamond/arrow/line/text/marker/mosaic/erase`，最多 2000 个、JSON 不超过 2 MiB；提示词最多 20000 字。
-标注使用 `x/y/width/height` 和局部 `points` 定位，`strokeColor/strokeWidth/backgroundColor/opacity` 保存外观。
-线段的 `lineStyle` 为 `line/arrow/wide/hollow`，`controls` 保存每段的二次贝塞尔控制点；文本保存
-`text/fontFamily/fontSize/bold/italic/outline`。`mosaic` 的 `effect` 为 `pixelate/blur`，`blockSize` 为原图像素尺度；
-`mosaic/erase` 的 `region` 区分矩形框选与笔刷路径。擦除只作用于标注层，保留原图和图片尺寸。
-底图由版本媒体接口重新加载，不把图片字节或外部资源写进标注 JSON。上传合成 PNG 后通过现有 Document
-revision 保存标注节点；首次保存建立原图到标注图的 `material` 连接，再次保存新增不可变版本并更新该节点。
-「去改图」新增图片生成节点，以标注图为唯一 `input` 连接并预填去除标记的提示词，不提交 Job。
-画布内复制、跨画布粘贴与项目包保留标注；收藏或分享图片时仍采用现有图片资产语义，仅保存合成后的图片。
+图片节点可保存 `data.annotation = { version_id, elements, visible, rendered_version_id }`，无提示词字段。
+`version_id` 固定原图；`rendered_version_id` 可空，非空时必须是本项目拥有且尺寸与原图一致的图片。
+`visible` 默认 true；显示还要求 `version_id == current_version_id`，切版本仅隐藏。标注修改使合成版本失效，
+删除全部元素写 null。视频及其他节点不得带 annotation。原图不被覆盖，也不创建独立标注节点。
+元素类型为 `rect/arrow/freedraw/text`，共用 `id`、`color`，拒绝未知字段。最多 500 个、JSON 不超过 2 MiB。
+颜色限定 `#F04438/#FACC15/#22C55E/#3B82F6/#FFFFFF`。矩形保存 `x/y/width/height/stroke_width`，
+箭头保存 `start/end/stroke_width`，画笔保存 `points/stroke_width`（2–10000 点），文字保存
+`x/y/text/font_size/background`（1–500 字，background 默认 false）。坐标为有限原图像素，绝对值不超过 100000。
+线宽 1–24、字号 12–72 使用基准单位：实际像素 = 值 × max(原图宽, 原图高) / 1024。
+节点、全屏和 PNG 合成共用 SVG 渲染器，原尺寸原图从版本媒体接口读取，不把图片字节写入 JSON。
+Input Connection 新增 `annotated: boolean = false`，仅允许图片来源且 `slot` 必须为空。
+带标注输入解析为来源的 `annotation.rendered_version_id`，不同时发送原图；显隐不影响输入。
+来源标注清空、切换到无标注版本或合成图缺失时拒绝提交。普通输入仍解析当前版本，分组展开保持普通输入，
+同一来源既直连又在组内时以直连标记为准。Snapshot Input 同样保存 annotated，结果回连接续标记。
+「去改图」仅上传隐藏合成版本、创建图片生成节点与 annotated 输入，预填「按图中标注修改，输出不保留标注。」；
+不提交 Job。普通和批量提交前自动重新合成失效标注；合成版本派生写入不占撤回历史。
+跨画布粘贴同时复制并重映射 version_id/rendered_version_id，项目包保留两份图片与标注关系。
 画布外观属于作者可撤销的项目设置：`settings.background` 明确选择空白、点阵或线框，
 `settings.show_image_info` 控制图片节点是否展示当前不可变 Content Version 的真实宽高与文件体积。
 `settings.show_minimap` 控制中等及桌面视口的小地图；手机端始终隐藏。三者随普通 Document revision 保存并

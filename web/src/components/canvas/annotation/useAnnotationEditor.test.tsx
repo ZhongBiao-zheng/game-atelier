@@ -54,3 +54,9 @@ it('keeps IME composition and app blur separate from explicit text commit', () =
   fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
   expect(commit).toHaveBeenCalledTimes(1);
 });
+
+it('discards tiny new shapes without adding undo history', () => {
+  const { container } = render(<Harness />);
+  draw(container.querySelector('svg')!, 10, 10.5);
+  expect(commit).not.toHaveBeenCalled();
+});

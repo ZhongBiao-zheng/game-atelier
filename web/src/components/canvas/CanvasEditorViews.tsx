@@ -692,11 +692,11 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         offset={annotating ? 12 : 32}
         className="nodrag"
       >
-        {annotating && context.annotationController ? <AnnotationToolbar editor={annotationEditor}
+        {annotating && context.annotationController ? <CanvasAnnotationToolbarBounds nodeId={node.id}><AnnotationToolbar editor={annotationEditor}
           undo={context.annotationController.undo} redo={context.annotationController.redo}
           canUndo={context.annotationController.canUndo} canRedo={context.annotationController.canRedo}
           onExpand={context.annotationController.expand}
-          onEdit={context.editWithAnnotation ? () => void context.editWithAnnotation?.(node.id) : undefined} busy={submittingNode} /> : <div
+          onEdit={context.editWithAnnotation ? () => void context.editWithAnnotation?.(node.id) : undefined} busy={submittingNode} /></CanvasAnnotationToolbarBounds> : <div
           ref={toolbarRef}
           role="toolbar"
           aria-label={`${node.title} 节点工具`}
@@ -1144,6 +1144,32 @@ function canvasChromeInsetBounds(surface: HTMLElement): CanvasPanelRect {
 }
 
 const canvasFlowTransform = (state: ReactFlowState) => state.transform;
+
+/** NodeToolbar keeps a fixed screen size; keep its controls reachable at the viewport edges. */
+function CanvasAnnotationToolbarBounds({ nodeId, children }: { nodeId: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const transform = useStore(canvasFlowTransform);
+  const geometrySelector = useCallback((state: ReactFlowState) => canvasNodeGeometry(state, nodeId), [nodeId]);
+  const geometry = useStore(geometrySelector);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const place = () => {
+      element.style.translate = 'none';
+      const rect = element.getBoundingClientRect();
+      const dx = Math.max(16 - rect.left, Math.min(0, window.innerWidth - 16 - rect.right));
+      const dy = Math.max(16 - rect.top, Math.min(0, window.innerHeight - 16 - rect.bottom));
+      element.style.translate = dx || dy ? `${dx}px ${dy}px` : 'none';
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(element);
+    window.addEventListener('resize', place);
+    return () => { observer.disconnect(); window.removeEventListener('resize', place); };
+  }, [geometry, transform]);
+  return <div ref={ref} className="max-w-[calc(100vw-32px)] overflow-x-auto rounded-xl">{children}</div>;
+}
+
 
 /** 节点卡上的图要向服务端申请多宽的位图：卡片宽 × 画布缩放，缩小时按 100% 算。
  *
