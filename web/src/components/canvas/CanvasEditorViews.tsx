@@ -1,3 +1,4 @@
+import { AnnotationLayer } from './annotation/AnnotationLayer';
 import { hasImageSizeSelection, imageSizeError, imageSizeMode } from '@/lib/imageSizeMode';
 import { normalizeImagePixelSize } from '@/lib/studioSize';
 import { promptVariableError, promptVariableParts, readablePromptVariables } from '@/lib/promptVariables';
@@ -933,6 +934,25 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
               freeResize={(node.type === 'image' || node.type === 'video') && node.data.display.free_resize}
             />
           )}
+          {node.type === 'image' && content?.kind === 'image' && node.data.annotation
+            && node.data.annotation.version_id === node.data.current_version_id && node.data.annotation.elements.length > 0 && <>
+            {node.data.annotation.visible && <AnnotationLayer elements={node.data.annotation.elements}
+              imageWidth={content.width ?? 1024} imageHeight={content.height ?? 1024}
+              fit={node.data.display.free_resize ? 'fill' : node.data.display.fit}
+              className="pointer-events-none absolute inset-0 size-full" />}
+            <button type="button" aria-label="显示标注" aria-pressed={node.data.annotation.visible}
+              className={cn('nodrag nopan absolute right-2.5 top-2.5 z-10 flex h-7 items-center gap-1.5 rounded-md border border-border bg-glass px-2 text-xs backdrop-blur-glass',
+                node.data.annotation.visible ? 'text-foreground' : 'text-muted-foreground')}
+              onPointerDown={event => event.stopPropagation()}
+              onClick={event => {
+                event.stopPropagation();
+                context.recordHistory();
+                context.updateNode(node.id, current => current.type === 'image' && current.data.annotation
+                  ? { ...current, data: { ...current.data, annotation: { ...current.data.annotation, visible: !current.data.annotation.visible } } } : current);
+              }}>
+              <Pencil size={14} /><span>标注 {node.data.annotation.elements.length}</span>
+            </button>
+          </>}
           {node.type === 'image' && content?.kind === 'image' && context.showImageInfo
             && (node.size?.height ?? 176) >= 96 && (node.size?.width ?? 320) >= 160 && (
             <span className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-[calc(100%-1.5rem)] truncate rounded-md border border-border bg-glass px-2 py-1 text-xs font-medium tabular-nums text-foreground backdrop-blur-glass">
