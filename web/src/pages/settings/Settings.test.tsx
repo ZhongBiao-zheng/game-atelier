@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-import { SettingsPage } from './Settings';
+import { PreferencesPage as SettingsPage } from './PreferencesPage';
 
 // These page tests exercise shell/settings behavior; gateway interactions have their own suite.
 vi.mock('@/api/gateway', async importOriginal => ({

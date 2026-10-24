@@ -13,7 +13,7 @@ import { Studio } from '@/pages/Studio';
 import { CanvasProjectIndex } from '@/pages/CanvasProjectIndex';
 import { CanvasEditor } from '@/pages/CanvasEditor';
 import { CharacterDetail } from '@/pages/CharacterDetail';
-import { SettingsPage } from '@/pages/settings/Settings';
+import { ConsoleLayout, rememberCreativeLocation } from '@/pages/settings/ConsoleLayout';
 import { WorkshopRequestsPage } from '@/pages/WorkshopRequests';
 import { setTheme, useTheme, type Theme } from '@/lib/theme';
 import {
@@ -96,6 +96,7 @@ export function AppShell() {
   const onStudio = loc === '/studio';
   const onCanvas = loc.startsWith('/canvas');
   const onHome = loc === '/';
+  useEffect(() => { rememberCreativeLocation(loc + window.location.search); }, [loc]);
   const onSettings = loc.startsWith('/settings');
   const immersiveCanvas = /^\/canvas\/[^/]+$/.test(loc);
   // 这些页面自带滚动容器；外层再留一条滚动槽会让内容右侧多出 10px 空白。
@@ -129,11 +130,11 @@ export function AppShell() {
             <ChangelogButton />
             <ThemeToggle />
             <Link
-              href="/settings"
+              href="/settings/providers"
               aria-label="设置"
               className={[
                 'inline-flex h-10 w-10 items-center justify-center rounded-full bg-glass backdrop-blur-glass transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                onSettings ? 'text-primary ring-1 ring-border' : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
+                onSettings ? 'text-foreground ring-1 ring-border' : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
               ].join(' ')}
             >
               <Settings size={18} aria-hidden />
@@ -255,8 +256,8 @@ export function AppShell() {
             {(params) => <Redirect to={`/workshop/${encodeURIComponent(params.projectId)}/overview`} replace />}
           </Route>
           <Route path="/workshop">{() => <CharacterDetail />}</Route>
-          <Route path="/settings">{() => <SettingsPage />}</Route>
-          <Route path="/settings/keys">{() => <SettingsPage />}</Route>
+          <Route path="/settings">{() => <Redirect to="/settings/providers" replace />}</Route>
+          <Route path="/settings/:page">{() => <ConsoleLayout />}</Route>
           <Route>
             <Redirect to="/" replace />
           </Route>

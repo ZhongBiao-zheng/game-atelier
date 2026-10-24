@@ -1039,7 +1039,7 @@ function StudioFull() {
           }}
           onUseMedia={(asset, content) => { void addCreationAssetReference(asset, content); }}
           onReproduce={requestReproduce}
-          onOpenSettings={canvasId => setLocation(`/settings?canvas=${encodeURIComponent(canvasId)}`)}
+          onOpenSettings={canvasId => setLocation(`/settings/libraries?canvas=${encodeURIComponent(canvasId)}`)}
           onTeamAssetAdopted={result => setAssetNotice(result.created ? '已加入资产库' : '已在你的资产库')}
         />
       )}
@@ -1050,7 +1050,7 @@ function StudioFull() {
         onShared={(_entry, libraryName) => setAssetNotice(`已分享到 ${libraryName}`)}
         onOpenSettings={() => {
           setShareRequest(null);
-          setLocation('/settings');
+          setLocation('/settings/providers');
         }}
       />
       <ConfirmDialog

@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 
 import { KeyCard, type KeyRow } from '@/components/keys/KeyCard';
 import { KeyForm } from './KeyForm';
-import { ModelRoutesSection } from './ModelRoutesSection';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { listKeys, deleteKey } from '@/api/keys';
 import type { KeyCreatePayload } from '@/api/keys';
@@ -21,8 +20,6 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   const [showForm, setShowForm] = useState(mode === 'onboarding');
   const [editingKey, setEditingKey] = useState<KeyRow | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  // 增删改 KEY 都会改变路由组成员，跟着 refresh 一起重读顺序。
-  const [routesReload, setRoutesReload] = useState(0);
   const [dialog, setDialog] = useState<{
     open: boolean;
     title: string;
@@ -37,7 +34,6 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     try {
       const resp = await listKeys();
       setKeys(resp.keys.map(toKeyRow));
-      setRoutesReload(value => value + 1);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -148,7 +144,6 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
         </div>
       )}
 
-      {!loading && !error && mode !== 'onboarding' && <ModelRoutesSection reloadToken={routesReload} />}
 
       {showForm && (
         <KeyForm

@@ -5100,7 +5100,7 @@ function CanvasEditorInner({
                     {/* 沉浸式画布把整条顶栏（含设置入口）藏了：没有密钥的新用户在画布里点不动「生成」，
                         也没有任何地方能去配置。这一项是画布内唯一的全局设置出口。 */}
                     <DropdownMenuItem asChild className="gap-2">
-                      <Link href="/settings"><Settings className="size-4" aria-hidden="true" />设置</Link>
+                      <Link href="/settings/providers"><Settings className="size-4" aria-hidden="true" />设置</Link>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuLabel>主题</DropdownMenuLabel>
@@ -5331,7 +5331,7 @@ function CanvasEditorInner({
                 selectedNode && selectedDraft ? selectedNode.id : undefined,
               );
             }}
-            onOpenSettings={canvasId => setLocation(`/settings?canvas=${encodeURIComponent(canvasId)}`)}
+            onOpenSettings={canvasId => setLocation(`/settings/libraries?canvas=${encodeURIComponent(canvasId)}`)}
             onTeamAssetAdopted={result => announceToolNotice(result.created ? '已加入资产库' : '已在你的资产库')}
             onReproduce={asset => void reproduceGenerationAsset(asset)}
             teamRelatedSha256={teamRelatedSha256}
@@ -5352,7 +5352,7 @@ function CanvasEditorInner({
               }))}
             onClose={() => setAgentOpen(false)}
             onUpload={() => uploadRef.current?.click()}
-            onOpenKeySettings={() => void persistNow().then(saved => { if (saved) setLocation('/settings?section=keys'); })}
+            onOpenKeySettings={() => void persistNow().then(saved => { if (saved) setLocation('/settings/providers'); })}
           />
         )}
 
@@ -5363,7 +5363,7 @@ function CanvasEditorInner({
           onShared={(_entry, libraryName) => announceToolNotice(`已分享到 ${libraryName}`)}
           onOpenSettings={() => {
             setShareRequest(null);
-            setLocation(`/settings?canvas=${encodeURIComponent(projectId)}`);
+            setLocation(`/settings/libraries?canvas=${encodeURIComponent(projectId)}`);
           }}
         />
 

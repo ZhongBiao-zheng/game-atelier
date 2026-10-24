@@ -536,7 +536,7 @@ export function CanvasGenerationPreferencesDialog({
           <p className="text-xs text-muted-foreground">密钥、渠道和模型清单仍由全局设置统一管理。</p>
           <Button asChild type="button" variant="outline" size="sm">
             {/* 原生 <a> 会整页刷新，把画布上还没落盘的编辑一起带走。 */}
-            <Link href="/settings">管理供应商</Link>
+            <Link href="/settings/providers">管理供应商</Link>
           </Button>
         </div>
 

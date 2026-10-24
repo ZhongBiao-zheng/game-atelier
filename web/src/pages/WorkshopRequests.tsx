@@ -61,7 +61,7 @@ export function WorkshopRequestsPage() {
   );
 
   return <div className="mx-auto max-w-4xl space-y-6 px-6 py-8">
-    <header className="flex flex-wrap items-center justify-between gap-4"><h1 className="flex items-center gap-2 font-display text-display">待批准生成<span title="未获「直接执行」授权的 Agent 发起的生成，要在这里批准后才会调用供应商并计费。" className="inline-flex"><CircleHelp className="size-4 text-muted-foreground" aria-label="说明" /></span></h1><Link href="/settings?section=agent" className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent">Agent 连接</Link></header>
+    <header className="flex flex-wrap items-center justify-between gap-4"><h1 className="flex items-center gap-2 font-display text-display">待批准生成<span title="未获「直接执行」授权的 Agent 发起的生成，要在这里批准后才会调用供应商并计费。" className="inline-flex"><CircleHelp className="size-4 text-muted-foreground" aria-label="说明" /></span></h1><Link href="/settings/agent" className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent">Agent 连接</Link></header>
     <div role="group" aria-label="请求范围" className="flex items-center gap-1 rounded-md border border-border p-1 w-fit">{scopeButton('awaiting', '待批准')}{scopeButton('history', '历史')}</div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {loading && requests.length === 0 && <p role="status" className="text-sm text-muted-foreground">读取中…</p>}

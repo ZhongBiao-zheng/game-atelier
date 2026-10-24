@@ -4,29 +4,15 @@ import { FolderOpen } from 'lucide-react';
 import { chooseFolder } from '@/api/folders';
 import { fetchConfig, updateConfig } from '@/api/config';
 import { fetchOnboardingStatus, setDataRoot } from '@/api/onboarding';
-import { KeysPage } from './Keys';
 import { ProfileSection } from './ProfileSection';
-import { TeamLibrariesSection } from './TeamLibrariesSection';
-import { AgentSection } from './AgentSection';
-import { LanSharingSection } from './LanSharingSection';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { Switch } from '@/components/ui/switch';
 
 const DEFAULT_ROOT = '~/game-atelier';
 
-const SECTIONS = [
-  { id: 'settings-storage', label: '项目存放' },
-  { id: 'settings-home', label: '首页展示' },
-  { id: 'settings-profile', label: '显示名' },
-  { id: 'settings-team', label: '团队库' },
-  { id: 'settings-keys', label: 'API 密钥' },
-  { id: 'settings-lan', label: '局域网共享' },
-  { id: 'settings-agent', label: 'Agent 连接' },
-];
-const navItemClass = 'rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 const sectionClass = 'scroll-mt-6 space-y-4';
 
-export function SettingsPage() {
+export function PreferencesPage() {
   const [savedRoot, setSavedRoot] = useState('');
   const [pendingRoot, setPendingRoot] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -34,7 +20,6 @@ export function SettingsPage() {
   const [choosing, setChoosing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [keysVersion, setKeysVersion] = useState(0);
   // 首页展示画布出图开关（应用级设置，默认开）。乐观切换，失败回滚。
   const [showCanvasOnHome, setShowCanvasOnHome] = useState(true);
   const [togglingStudio, setTogglingStudio] = useState(false);
@@ -48,13 +33,6 @@ export function SettingsPage() {
       .then((cfg) => setShowCanvasOnHome(cfg.show_canvas_on_home))
       .catch(() => {});
   }, []);
-
-  // 从别处跳过来：?section=keys（画布 Agent 缺对话模型）/ agent 滚到对应区块。
-  useEffect(() => {
-    const section = new URLSearchParams(window.location.search).get('section');
-    if (loading || !section) return;
-    window.document.getElementById(`settings-${section}`)?.scrollIntoView({ block: 'start' });
-  }, [loading]);
 
   async function toggleShowStudioOnHome() {
     const next = !showCanvasOnHome;
@@ -81,7 +59,6 @@ export function SettingsPage() {
       const saved = await setDataRoot(pendingRoot);
       setSavedRoot(saved.data_root);
       setPendingRoot(null);
-      setKeysVersion((version) => version + 1);
       setMessage('项目存放地址已更新，API Key 已重新读取新目录。');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -105,19 +82,8 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="px-6 py-8 max-w-5xl mx-auto">
-      <h1 className="font-display text-display text-foreground">设置</h1>
-
-      <div className="mt-6 md:grid md:grid-cols-[160px_minmax(0,1fr)] md:gap-12">
-      <nav aria-label="设置分区" className="mb-8 md:mb-0">
-        <div className="-mx-3 flex flex-wrap gap-0.5 md:sticky md:top-6 md:flex-col">
-          {SECTIONS.map(section => (
-            <a key={section.id} href={`#${section.id}`} className={navItemClass}>{section.label}</a>
-          ))}
-        </div>
-      </nav>
-      <div className="min-w-0">
-      <section id="settings-storage" className={`${sectionClass} pb-10`}>
+    <div>
+      <section className={`${sectionClass} pb-10`}>
         <h2 className="text-base font-medium text-foreground">项目存放</h2>
         <div className="min-w-0 space-y-3">
           <div className="flex flex-wrap items-center gap-3">
@@ -174,7 +140,7 @@ export function SettingsPage() {
         </div>
       </section>
 
-      <section id="settings-home" className={`${sectionClass} border-t border-border py-10`}>
+      <section className={`${sectionClass} border-t border-border py-10`}>
         <h2 className="text-base font-medium text-foreground">首页展示</h2>
         <div className="min-w-0">
           <div className="flex items-center justify-between gap-4">
@@ -189,30 +155,10 @@ export function SettingsPage() {
         </div>
       </section>
 
-      <section id="settings-profile" className={`${sectionClass} border-t border-border py-10`}>
+      <section className={`${sectionClass} border-t border-border py-10`}>
         <ProfileSection />
       </section>
 
-      <section id="settings-team" className={`${sectionClass} border-t border-border py-10`}>
-        <TeamLibrariesSection />
-      </section>
-
-      <section id="settings-keys" className={`${sectionClass} border-t border-border py-10`}>
-        <h2 className="text-base font-medium text-foreground">API 密钥</h2>
-        <div className="min-w-0">
-          <KeysPage key={keysVersion} embedded />
-        </div>
-      </section>
-
-      <section id="settings-lan" className={`${sectionClass} border-t border-border py-10`}>
-        <LanSharingSection />
-      </section>
-
-      <section id="settings-agent" className={`${sectionClass} border-t border-border py-10`}>
-        <AgentSection />
-      </section>
-      </div>
-      </div>
     </div>
   );
 }

@@ -3397,7 +3397,7 @@ export function CanvasLayerStackSurface({
                 </Button>
               ) : (
                 <Button asChild variant="outline" size="sm" className="nodrag">
-                  <Link href="/settings/keys">配置模型</Link>
+                  <Link href="/settings/providers">配置模型</Link>
                 </Button>
               )}
             </div>
@@ -3482,7 +3482,7 @@ function CanvasLayerStackComposer({
           </Button>
         ) : (
           <Button asChild variant="outline" size="sm" className="shrink-0">
-            <Link href="/settings/keys">配置模型</Link>
+            <Link href="/settings/providers">配置模型</Link>
           </Button>
         )}
       </div>
