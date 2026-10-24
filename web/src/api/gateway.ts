@@ -45,30 +45,6 @@ export interface GatewayState {
   status: { running: boolean; port: number | null; error: string | null; addresses: string[] };
 }
 
-export interface GatewayUsageRow {
-  kind: 'image' | 'image_edit' | 'layer_split' | 'video' | 'audio' | 'text';
-  estimated_cny: number | null;
-  charged_cny: number;
-  input_tokens: number | null;
-  output_tokens: number | null;
-  duration: number | null;
-  member_trail: string[];
-  time: string;
-  key_id: string;
-  key_name: string;
-  route_id: string;
-  member_alias: string | null;
-  provider: string | null;
-  base_url: string | null;
-  model_id: string | null;
-  n: number;
-  size: string | null;
-  quality: string | null;
-  resolution: string | null;
-  status: 'done' | 'failed' | 'canceled';
-  actual_cost_cny: number | null;
-}
-
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 function parseState(value: unknown): GatewayState {
@@ -131,7 +107,7 @@ export async function syncGatewayProvider(alias: string) {
 
 
 export interface GatewayTask {
-  task_id: string; kind: GatewayUsageRow['kind']; key_name: string; route_id: string;
+  task_id: string; kind: 'image' | 'image_edit' | 'layer_split' | 'video' | 'audio' | 'text'; key_name: string; route_id: string;
   member_alias: string | null; member_trail: string[]; phase: string | null;
   status: 'pending' | 'running' | 'done' | 'failed' | 'canceled';
   created_at: string; updated_at: string; prompt: string | null; n: number;

@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.104.0',
+    date: '2026-10-24',
+    headline: '设置改成控制台，新增用量页',
+    changes: [
+      { kind: 'feat', text: '供应商、路由、网关、团队库和 Agent 连接各有独立页面。' },
+      { kind: 'feat', text: '用量页查看个人和团队花费、趋势、排行与最贵任务，局域网额度集中展示。' },
+      { kind: 'feat', text: '路由页直接查看欠费成员并恢复，网关花费可跳转查看成员用量。' },
+    ],
+  },
+  {
     version: '5.103.1',
     date: '2026-10-24',
     headline: '局域网网关接入更稳',

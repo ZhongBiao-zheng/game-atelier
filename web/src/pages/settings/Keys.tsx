@@ -33,7 +33,11 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     setError(null);
     try {
       const resp = await listKeys();
-      setKeys(resp.keys.map(toKeyRow).sort((a, b) => Number(b.provider === 'atelier') - Number(a.provider === 'atelier')));
+      setKeys(
+        resp.keys
+          .map(toKeyRow)
+          .sort((a, b) => Number(b.provider === 'atelier') - Number(a.provider === 'atelier')),
+      );
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -41,7 +45,9 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     }
   };
 
-  useEffect(() => { void refresh(); }, []);
+  useEffect(() => {
+    void refresh();
+  }, []);
 
   const onCreated = () => {
     setShowForm(false);
@@ -68,19 +74,44 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     setEditingKey(null);
   };
 
+  const keyRows = keys.map((k) => (
+    <KeyCard
+      key={k.alias}
+      row={k}
+      table={embedded}
+      onEdit={() => {
+        setEditingKey(k);
+        setShowForm(true);
+      }}
+      onDelete={() => {
+        setDialog({
+          open: true,
+          title: '确认删除？',
+          message: `"${k.alias}" 将被永久删除`,
+          variant: 'destructive',
+          onConfirm: async () => {
+            setDialog(null);
+            await deleteKey(k.alias);
+            void refresh();
+          },
+        });
+      }}
+    />
+  ));
+
   const content = (
     <>
       <div className={`mb-4 flex items-baseline ${embedded ? 'justify-start' : 'justify-between'}`}>
-        {!embedded && (
-          <h1 className="font-display text-display text-foreground">API 密钥</h1>
-        )}
+        {!embedded && <h1 className="font-display text-display text-foreground">API 密钥</h1>}
         <button
           type="button"
           onClick={openCreate}
           // 设置页里它只是分区内的一个动作，黄铜留给全屏独占的首启引导
-          className={embedded
-            ? 'rounded-md border border-border px-3 py-2 text-sm text-foreground transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
-            : 'text-sm bg-primary text-primary-foreground rounded-md px-3 py-2 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background'}
+          className={
+            embedded
+              ? 'rounded-md border border-border px-3 py-2 text-sm text-foreground transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+              : 'text-sm bg-primary text-primary-foreground rounded-md px-3 py-2 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background'
+          }
         >
           + 新建供应商
         </button>
@@ -101,9 +132,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
         </div>
       )}
 
-      {!loading && error && (
-        <div className="text-sm text-destructive">{error}</div>
-      )}
+      {!loading && error && <div className="text-sm text-destructive">{error}</div>}
 
       {!loading && !error && (
         <div className="overflow-hidden rounded-lg border border-border">
@@ -113,64 +142,27 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {embedded ? <div className="overflow-x-auto"><table className="w-full text-left">
-                <thead><tr>{['名称', '地址', '模型数', '最近使用', '编辑'].map(label => (
-                  <th key={label} className="whitespace-nowrap px-4 py-3 text-xs font-normal text-muted-foreground">
-                    {label}
-                  </th>
-                ))}</tr></thead>
-                <tbody>
-              {keys.map((k) => (
-                <KeyCard
-                  key={k.alias}
-                  row={k}
-                  table={embedded}
-                  onEdit={() => {
-                    setEditingKey(k);
-                    setShowForm(true);
-                  }}
-                  onDelete={() => {
-                    setDialog({
-                      open: true,
-                      title: '确认删除？',
-                      message: `"${k.alias}" 将被永久删除`,
-                      variant: 'destructive',
-                      onConfirm: async () => {
-                        setDialog(null);
-                        await deleteKey(k.alias);
-                        void refresh();
-                      },
-                    });
-                  }}
-                />
-              ))}
-                </tbody>
-              </table></div> : <>
-              {keys.map((k) => (
-                <KeyCard
-                  key={k.alias}
-                  row={k}
-                  table={embedded}
-                  onEdit={() => {
-                    setEditingKey(k);
-                    setShowForm(true);
-                  }}
-                  onDelete={() => {
-                    setDialog({
-                      open: true,
-                      title: '确认删除？',
-                      message: `"${k.alias}" 将被永久删除`,
-                      variant: 'destructive',
-                      onConfirm: async () => {
-                        setDialog(null);
-                        await deleteKey(k.alias);
-                        void refresh();
-                      },
-                    });
-                  }}
-                />
-              ))}</>}
-
+              {embedded ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr>
+                        {['名称', '地址', '模型数', '最近使用', '编辑'].map((label) => (
+                          <th
+                            key={label}
+                            className="whitespace-nowrap px-4 py-3 text-xs font-normal text-muted-foreground"
+                          >
+                            {label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>{keyRows}</tbody>
+                  </table>
+                </div>
+              ) : (
+                <>{keyRows}</>
+              )}
             </div>
           )}
           <div className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
@@ -178,7 +170,6 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
           </div>
         </div>
       )}
-
 
       {showForm && (
         <KeyForm

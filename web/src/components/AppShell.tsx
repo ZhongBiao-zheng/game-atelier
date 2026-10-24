@@ -112,6 +112,7 @@ export function AppShell() {
   });
   const awaiting = useAwaitingWorkshopRequests(signal);
 
+  const ContentTag = onSettings ? 'div' : 'main';
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
       {!immersiveCanvas && <header className="sticky top-0 z-30 shrink-0">
@@ -144,7 +145,7 @@ export function AppShell() {
       </header>}
 
       {/* stable-scroll：本壳是首页/工坊的真·滚动容器，固定滚动槽避免滚动条增删改内宽 → 列宽 → w-full 图高 → 墙高的自激抽搐环（见 scrollbar-gutter-feedback-loop memory）*/}
-      <main role="main" className={immersiveCanvas || pageOwnsScroll ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 min-h-0 overflow-y-auto stable-scroll'}>
+      <ContentTag className={immersiveCanvas || pageOwnsScroll ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 min-h-0 overflow-y-auto stable-scroll'}>
         <Switch>
           <Route path="/workshop/requests">{() => <WorkshopRequestsPage />}</Route>
           <Route path="/">{() => <Home />}</Route>
@@ -262,7 +263,7 @@ export function AppShell() {
             <Redirect to="/" replace />
           </Route>
         </Switch>
-      </main>
+      </ContentTag>
       <TeamShareReminder ref={reminderRef} />
       <AnnouncementHost />
     </div>

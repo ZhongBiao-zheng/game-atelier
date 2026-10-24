@@ -28,7 +28,7 @@ MCP 进程不会启动、重启或安装 viewer-server，也不扫描端口和�
 照常启动，工具保持可见，调用时返回带处理指引的错误；每次调用前按文件状态判断凭据是否已被替换。
 它只读取默认或指定的受保护凭据，核验精确的 `http://127.0.0.1:<port>`（以 `.runtime/server.port` 为准）服务和协议，
 再换取 2 小时的运行会话，到期或服务重启后自动重换。启动时会先换一次会话（失败不报，留给第一次调用），
-带 `--client claude-code|codex` 时把宿主名一并报给服务端，设置页据此显示「已连接 · Codex 14:32」；
+带 `--client claude-code|codex` 时把宿主名一并报给服务端，控制台 Agent 连接页据此显示「已连接 · Codex 14:32」；
 这份记录只在服务进程内存里，服务重启后清空，等 Agent 下次启动或调用再出现。
 
 ## 配置 Claude Code / Codex
@@ -94,7 +94,7 @@ Codex 或手动注册 MCP 的客户端，Skill 需要另外安装。
 | `CREDENTIALS_INVALID` | 在「设置 → Agent 连接」打开开关后直接重试；不放宽文件权限 |
 | `LOCAL_SERVICE_UNAVAILABLE` | 先正常启动本机 Atelier；写请求可能已提交时先查询状态，不能盲目重复 |
 | `PROTOCOL_MISMATCH` | 更新本机服务后重新连接，不退回匿名接口 |
-| `SESSION_REVOKED` / `CAPABILITY_DENIED` | 开关已关闭或被重新打开，在设置页确认开关状态 |
+| `SESSION_REVOKED` / `CAPABILITY_DENIED` | 开关已关闭或被重新打开，在控制台 Agent 连接页确认开关状态 |
 | `DOCUMENT_CONFLICT` | 重新读取最新完整文档再修改，不能强制覆盖 |
 | `EXECUTION_NEEDS_REVIEW` | 在 Atelier 人工核对上游结果，不自动重提付费生成 |
 

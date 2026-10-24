@@ -93,7 +93,7 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   字段 `task_id, kind, key_name, route_id, member_alias, member_trail, phase, status, created_at, updated_at, prompt, n, outputs, output_types, error`；文本 prompt 固定 null。
 - `GET /api/gateway/tasks/{task_id}/outputs/{index}`：本机 cookie 会话预览，要求管理权限；无文件或任务返回 404。
 - SSE `gateway_task` 携带同形快照，仅发给拥有本机管理入口的 local 会话，不发给 agent；任务落盘、文本登记和结束均通知。页面合并快照，有运行中任务时每 4 秒刷新，空闲时停轮询，重连后重新拉取。
-  设置页复用 AppShell 现有 SSE 连接；文本结束事件只用于即时通知，文本调用不持久化为生成任务，刷新后的 recent 列表只含落盘的生成任务。
+  控制台复用 AppShell 现有 SSE 连接；文本结束事件只用于即时通知，文本调用不持久化为生成任务，刷新后的 recent 列表只含落盘的生成任务。
 - 本机管理（管理权限）：`GET/PUT /api/gateway`（开关 / 端口 / 名称 + 运行状态）、`POST /api/gateway/keys`（返回一次性明文 `token`）、
   `PATCH /api/gateway/keys/{id}`（名称、金额窗口、模型与 alias 权限）、`POST /api/gateway/keys/{id}/revoke`；使用记录见 `GET /api/usage?scope=team`。
   创建 body 为 `{name, limits, allowed_models, allowed_aliases}`，PATCH 接受任意字段子集（省略保持原值，权限 null 取消限制）。

@@ -24,7 +24,7 @@
 不等于已经验收所有 Codex / Claude 客户端版本，具体限制见[本机客户端说明](../mcp-local-client.md)。
 不引入 SDK 的开发 CLI extra 或新的 Node 服务，只使用已需要的服务端协议能力。
 
-用户在本机设置页打开「Agent 连接」开关，授权全部工坊项目、全部画布与全部能力，含之后新建的（ADR-0022）。
+用户在本机控制台的 Agent 连接页打开开关，授权全部工坊项目、全部画布与全部能力，含之后新建的（ADR-0022）。
 授权只能由本机页面打开，生成一个 OS 权限保护的凭据文件 `.config/connections/agent.json`，再次打开会替换旧授权
 并覆盖该文件。MCP 配置只含固定解释器、模块和可选的凭据文件位置，不含明文 token / API Key。
 文件在 data root 的私有配置子目录，POSIX 使用 0600，Windows 核验当前用户 ACL，不能以 chmod 成功当作 ACL 已验证。

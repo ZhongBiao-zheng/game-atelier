@@ -207,3 +207,17 @@ def test_gateway_alias_is_never_persisted_as_insolvent():
     model_routes.cool_down('image', 'Hub', 'insufficient_balance')
     assert model_routes.member_statuses() == []
     assert model_routes._cooling('image', 'Hub')
+
+
+def test_temporary_failure_is_not_reported_as_balance_failure():
+    owner()
+    model_routes.cool_down('image', 'A', 'unavailable')
+    client = LocalTestClient(base_url='http://127.0.0.1', app=build_app())
+    result = client.get('/api/model-routes/member-status').json()
+    assert result['members'][0]['reason'] == 'unavailable'
+    assert result['members'][0]['since'] is None
+    assert result['unavailable_routes'] == []
+    paths = {route.path for route in client.app.routes}
+    assert '/api/gateway/members' not in paths
+    assert '/api/gateway/members/restore' not in paths
+    assert '/api/gateway/usage' not in paths

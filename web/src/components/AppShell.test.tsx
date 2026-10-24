@@ -399,10 +399,10 @@ describe('AppShell', () => {
     expect(pill.className).toContain('nav-active-ring');
   });
 
-  it('settings icon turns primary on /settings', () => {
+  it('settings icon is selected with neutral color on /settings', () => {
     renderAt('/settings');
     const link = screen.getByLabelText('设置');
-    expect(link.className).toContain('text-primary');
+    expect(link.className).toContain('text-foreground');
   });
 
   it('theme toggle sits left of settings and flips html class + localStorage', () => {
@@ -428,10 +428,13 @@ describe('AppShell', () => {
   it('hosts the team share reminder on the shell SSE connection', async () => {
     const fetchMock = vi.fn(async (url: RequestInfo | URL) => ({
       ok: true,
-      json: async () => (String(url) === '/api/profile' ? { display_name: '我' } : {}),
+      json: async () => (String(url) === '/api/gateway'
+        ? { enabled: true, port: 5180, keys: [], status: { running: false, addresses: [] } }
+        : String(url) === '/api/gateway/options' ? { models: [], aliases: [] }
+        : String(url) === '/api/profile' ? { display_name: '我' } : {}),
     }));
     vi.stubGlobal('fetch', fetchMock);
-    renderAt('/settings');
+    renderAt('/settings/gateway');
     const profileCalls = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/api/profile').length;
     await waitFor(() => expect(profileCalls()).toBeGreaterThan(0));
 

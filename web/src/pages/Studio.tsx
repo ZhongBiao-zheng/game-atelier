@@ -1050,7 +1050,7 @@ function StudioFull() {
         onShared={(_entry, libraryName) => setAssetNotice(`已分享到 ${libraryName}`)}
         onOpenSettings={() => {
           setShareRequest(null);
-          setLocation('/settings/providers');
+          setLocation('/settings/libraries');
         }}
       />
       <ConfirmDialog

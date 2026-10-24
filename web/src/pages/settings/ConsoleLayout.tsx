@@ -61,12 +61,13 @@ export function ConsoleLayout() {
   if (!current) return <Redirect to="/settings/providers" replace />;
   const Page = current.page;
   return <div className="flex min-h-full min-w-0 flex-col md:flex-row">
-    <aside className="flex shrink-0 flex-col gap-6 border-b border-border p-4 md:w-[220px] md:border-b-0 md:border-r">
+    <aside className="flex min-w-0 shrink-0 flex-col gap-6 border-b border-border p-4 md:sticky md:top-0 md:h-[calc(100dvh-80px)] md:w-[220px] md:border-b-0 md:border-r">
       <Link href={lastCreativeLocation} className="flex items-center gap-2 px-3 text-sm text-muted-foreground">
         <ArrowLeft className="size-4" aria-hidden />返回创作
       </Link>
       <nav aria-label="控制台" className="flex gap-2 overflow-x-auto md:flex-1 md:flex-col md:gap-6">
         {CONSOLE_NAV.map(group => <div key={group.group} className={group.group ? 'shrink-0' : 'md:mt-auto'}>
+          {!group.group && <GatewayConnection />}
           {group.group && <p className="mb-2 hidden px-3 text-xs text-muted-foreground md:block">{group.group}</p>}
           <div className="flex gap-1 md:flex-col">
             {group.items.map(item => <Link key={item.path} href={item.path}
@@ -79,7 +80,6 @@ export function ConsoleLayout() {
           </div>
         </div>)}
       </nav>
-      <GatewayConnection />
     </aside>
     <main className="min-w-0 flex-1 space-y-6 p-4 md:p-8">
       <h1 className="text-base font-medium">{current.label}</h1>

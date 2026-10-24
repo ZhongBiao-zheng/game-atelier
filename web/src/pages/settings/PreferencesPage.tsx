@@ -90,7 +90,7 @@ export function PreferencesPage() {
             <div className="flex min-w-0 flex-wrap items-center gap-3">
               <span
                 aria-label="数据目录"
-                className={`min-w-0 break-all font-mono text-sm ${changed ? 'text-primary' : 'text-foreground'}`}
+                className={`min-w-0 break-all font-mono text-sm text-foreground`}
               >
                 {loading ? '读取中...' : displayRoot || '尚未选择数据目录'}
               </span>

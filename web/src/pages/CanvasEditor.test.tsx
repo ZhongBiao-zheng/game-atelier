@@ -1573,7 +1573,7 @@ it('team tab mount exit opens settings on the current canvas', async () => {
   try {
     await openTeamTab();
     fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
-    await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe('/settings?canvas=canvas-one'));
+    await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe('/settings/libraries?canvas=canvas-one'));
   } finally {
     window.history.replaceState(null, '', '/');
   }
@@ -2051,7 +2051,7 @@ it('offers a way in on an empty canvas and a settings entry the immersive chrome
   await screen.findByLabelText('画布编辑器 列车短片');
   expect(screen.getByText('画布还是空的')).toBeTruthy();
   fireEvent.keyDown(screen.getByRole('button', { name: '画布菜单' }), { key: 'Enter' });
-  expect((await screen.findByRole('menuitem', { name: '设置' })).getAttribute('href')).toBe('/settings');
+  expect((await screen.findByRole('menuitem', { name: '设置' })).getAttribute('href')).toBe('/settings/providers');
   fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
 
   fireEvent.click(screen.getByRole('button', { name: '文本节点' }));

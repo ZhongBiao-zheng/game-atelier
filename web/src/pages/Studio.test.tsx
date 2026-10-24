@@ -2465,7 +2465,7 @@ describe('Studio 分享：边界', () => {
     render(<Router hook={hook}><Studio /></Router>);
     fireEvent.click(await screen.findByLabelText('分享生成结果 1'));
     fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
-    expect(history).toContain('/settings');
+    expect(history).toContain('/settings/libraries');
   });
 
   it('视频结果分享时对话框里没有预览图', async () => {

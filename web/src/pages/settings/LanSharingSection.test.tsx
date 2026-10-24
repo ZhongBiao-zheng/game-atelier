@@ -42,3 +42,18 @@ describe('LAN sharing', () => {
     await waitFor(() => expect(api.revokeGatewayKey).toHaveBeenCalledWith('k1'));
   });
 });
+
+it('网关只保留密钥和运行中任务，花费链接定位团队成员', async () => {
+  render(<LanSharingSection />);
+  const link = await screen.findByRole('link', { name: '¥ 0.5' });
+  expect(link).toHaveAttribute('href', '/settings/usage?scope=team&member=k1');
+  expect(screen.queryByRole('region', { name: '供应商状态' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: '用量' })).not.toBeInTheDocument();
+});
+it('网关关闭时隐藏密钥和端口', async () => {
+  vi.mocked(api.fetchGateway).mockResolvedValue({ ...state, enabled: false });
+  render(<LanSharingSection />);
+  await waitFor(() => expect(screen.getByRole('switch', { name: '开启局域网共享' })).not.toBeDisabled());
+  expect(screen.queryByRole('button', { name: '新建密钥' })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('端口')).not.toBeInTheDocument();
+});
