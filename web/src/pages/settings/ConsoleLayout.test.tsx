@@ -8,7 +8,7 @@ vi.mock('@/api/keys', () => ({ listKeys: async () => ({ keys: [] }) }));
 vi.mock('./ProvidersPage', () => ({ ProvidersPage: () => <p>providers-content</p> }));
 vi.mock('./RoutesPage', () => ({ RoutesPage: () => <p>routes-content</p> }));
 vi.mock('./GatewayPage', () => ({ GatewayPage: () => <p>gateway-content</p> }));
-vi.mock('./UsagePage', () => ({ UsagePage: () => <p>usage-content</p> }));
+vi.mock('./usage/UsagePage', () => ({ UsagePage: () => <p>usage-content</p> }));
 vi.mock('./LibrariesPage', () => ({ LibrariesPage: () => <p>libraries-content</p> }));
 vi.mock('./AgentPage', () => ({ AgentPage: () => <p>agent-content</p> }));
 vi.mock('./PreferencesPage', () => ({ PreferencesPage: () => <p>preferences-content</p> }));

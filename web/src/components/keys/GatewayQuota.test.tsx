@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { fetchGatewayProviderMe } from '@/api/gateway';
-import { GatewayQuota } from './GatewayQuota';
+import { GatewayQuota } from '@/pages/settings/usage/GatewayQuota';
 vi.mock('@/api/gateway', () => ({ fetchGatewayProviderMe: vi.fn() }));
 it('shows each limit and silently hides unavailable quota', async () => {
   vi.mocked(fetchGatewayProviderMe).mockResolvedValue({ name: 'A', month_calls: 1, month_charged_cny: 12.4,

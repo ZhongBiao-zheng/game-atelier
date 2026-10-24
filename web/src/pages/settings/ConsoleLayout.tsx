@@ -7,7 +7,7 @@ import { subscribeGatewayEvents } from '@/api/gatewayEvents';
 import { ProvidersPage } from './ProvidersPage';
 import { RoutesPage } from './RoutesPage';
 import { GatewayPage } from './GatewayPage';
-import { UsagePage } from './UsagePage';
+import { UsagePage } from './usage/UsagePage';
 import { LibrariesPage } from './LibrariesPage';
 import { AgentPage } from './AgentPage';
 import { PreferencesPage } from './PreferencesPage';
