@@ -1,3 +1,4 @@
+import { flushSync } from 'react-dom';
 import { MousePointer2, Square, MoveUpRight, PenLine, Type, Undo2, Redo2, Trash2, Maximize2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ANNOTATION_COLORS, ANNOTATION_COLOR_NAMES, type AnnotationTool } from './annotationModel';
@@ -35,6 +36,6 @@ export function AnnotationToolbar({ editor, undo, redo, canUndo, canRedo, onExpa
     <button type="button" title="删除所选 Delete" aria-label="删除所选" className={button} disabled={!editor.selected} onClick={editor.removeSelected}><Trash2 size={18} strokeWidth={1.8} /></button>
     {onExpand && <button type="button" title="展开" aria-label="展开" className={button} onClick={onExpand}><Maximize2 size={18} strokeWidth={1.8} /></button>}
     {separator}
-    <button type="button" disabled={!editor.elements.length || !onEdit || busy} className="h-9 shrink-0 rounded-md bg-primary px-3.5 text-sm font-medium text-primary-foreground disabled:opacity-40" onClick={() => { editor.finishText(); onEdit?.(); }}>去改图</button>
+    <button type="button" disabled={(!editor.elements.length && !editor.text?.text.trim()) || !onEdit || busy} className="h-9 shrink-0 rounded-md bg-primary px-3.5 text-sm font-medium text-primary-foreground disabled:opacity-40" onClick={() => { flushSync(() => editor.finishText()); onEdit?.(); }}>去改图</button>
   </div>;
 }

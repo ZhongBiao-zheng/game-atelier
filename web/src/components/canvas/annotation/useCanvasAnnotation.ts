@@ -8,12 +8,16 @@ export function useCanvasAnnotation(document: CanvasDocument | null, selectedIds
   const undoAnnotation = useCallback(() => historyActions.current.undo(), []);
   const redoAnnotation = useCallback(() => historyActions.current.redo(), []);
   const [nodeId, setNodeId] = useState<string | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const expand = useCallback(() => setFullscreen(true), []);
+  const collapse = useCallback(() => setFullscreen(false), []);
   const version = useRef<string | null>(null);
   const start = useCallback((node: CanvasImageNode) => {
     version.current = node.data.current_version_id;
     setNodeId(node.id);
+    setFullscreen(false);
   }, []);
-  const exit = useCallback(() => setNodeId(null), []);
+  const exit = useCallback(() => { if (fullscreen) setFullscreen(false); else setNodeId(null); }, [fullscreen]);
   useEffect(() => {
     if (!nodeId) return;
     const node = document?.nodes.find(node => node.id === nodeId);
@@ -27,7 +31,7 @@ export function useCanvasAnnotation(document: CanvasDocument | null, selectedIds
       } : null } };
     }) }), true);
   }, [commit]);
-  return useMemo(() => ({ nodeId, start, exit, write, undo: undoAnnotation, redo: redoAnnotation, canUndo, canRedo }),
-    [nodeId, start, exit, write, undoAnnotation, redoAnnotation, canUndo, canRedo]);
+  return useMemo(() => ({ nodeId, fullscreen, expand, collapse, start, exit, write, undo: undoAnnotation, redo: redoAnnotation, canUndo, canRedo }),
+    [nodeId, fullscreen, expand, collapse, start, exit, write, undoAnnotation, redoAnnotation, canUndo, canRedo]);
 }
 export type CanvasAnnotationController = ReturnType<typeof useCanvasAnnotation>;

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { useAnnotationEditor } from './useAnnotationEditor';
-import { AnnotationSurfaceView } from './AnnotationSurfaceView';
+import { AnnotationEditingLayer } from './AnnotationEditingLayer';
 import type { AnnotationElement } from './annotationModel';
 const commit = vi.fn();
 function Harness() {
@@ -11,7 +11,7 @@ function Harness() {
     onCommit: next => { commit(next); setElements(next); }, onExit: vi.fn(), undo: vi.fn(), redo: vi.fn(), onError: vi.fn() });
   return <><button onClick={() => editor.chooseTool('text')}>文字</button><button onClick={() => editor.chooseTool('select')}>选择</button>
     <button onClick={() => editor.changeStyle({ color: '#3B82F6' })}>蓝</button>
-    <AnnotationSurfaceView editor={editor} width={1024} height={768} fit="contain" /></>;
+    <AnnotationEditingLayer editor={editor} width={1024} height={768} fit="contain" /></>;
 }
 beforeEach(() => {
   commit.mockClear(); localStorage.clear();

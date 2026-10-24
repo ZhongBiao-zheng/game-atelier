@@ -28,7 +28,7 @@ it('keeps stored material associations independently disconnectable', () => {
 
 it('marks annotated inputs while keeping the disconnect action available', () => {
   const Edge = canvasEdgeTypes.canvasConnection;
-  render(<Edge {...{ id: 'annotated-link', data: { annotated: true }, selected: true, deletable: true } as EdgeProps} />);
+  render(<Edge {...{ id: 'annotated-link', data: { annotated: true }, selected: true, deletable: true } as unknown as EdgeProps} />);
   expect(screen.getByTitle('带标注')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '断开连接' })).toBeEnabled();
 });

@@ -1,8 +1,8 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { AnnotationLayer } from './AnnotationLayer';
 import type { AnnotationEditor } from './useAnnotationEditor';
-import { ANNOTATION_FONT, annotationUnitScale } from './annotationModel';
-export function AnnotationSurfaceView({ editor, width, height, fit }: {
+import { ANNOTATION_FONT, ANNOTATION_COLORS, ANNOTATION_WHITE, ANNOTATION_INK, ANNOTATION_DARK, annotationUnitScale } from './annotationModel';
+export function AnnotationEditingLayer({ editor, width, height, fit }: {
   editor: AnnotationEditor; width: number; height: number; fit: 'contain' | 'cover' | 'fill';
 }) {
   const host = useRef<HTMLDivElement>(null);
@@ -28,10 +28,14 @@ export function AnnotationSurfaceView({ editor, width, height, fit }: {
       onPointerDown={editor.pointerDown} onPointerMove={editor.pointerMove} onPointerUp={editor.pointerUp}
       onPointerCancel={editor.cancelGesture} onDoubleClick={editor.doubleClick} onClick={event => event.stopPropagation()} />
     {text && <textarea data-annotation-text ref={editor.textareaRef} value={text.text} maxLength={500}
-      aria-label="标注文字" className="nodrag nopan pointer-events-auto absolute min-w-32 resize-none border border-dashed border-primary bg-transparent p-0 outline-none"
+      aria-label="标注文字" wrap="off" className="nodrag nopan pointer-events-auto absolute min-w-32 resize-none border border-dashed border-primary bg-transparent p-0 outline-none"
       style={{ left: (size.width - width * xscale) / 2 + text.x * xscale,
         top: (size.height - height * yscale) / 2 + text.y * yscale,
-        color: text.color, fontFamily: ANNOTATION_FONT, fontWeight: 600,
+        color: text.background ? (text.color === ANNOTATION_WHITE || text.color === ANNOTATION_COLORS[1] ? ANNOTATION_INK : ANNOTATION_WHITE) : text.color,
+        backgroundColor: text.background ? text.color : undefined,
+        padding: text.background ? `${text.font_size * annotationUnitScale(width, height) * yscale * .25}px ${text.font_size * annotationUnitScale(width, height) * xscale * .5}px` : 0,
+        WebkitTextStroke: text.background ? undefined : `${text.font_size * annotationUnitScale(width, height) * yscale * .18}px ${ANNOTATION_DARK}`,
+        paintOrder: 'stroke', fontFamily: ANNOTATION_FONT, fontWeight: 600,
         fontSize: text.font_size * annotationUnitScale(width, height) * yscale, lineHeight: 1.3,
         width: Math.max(160, (text.text.length + 2) * text.font_size * annotationUnitScale(width, height) * xscale),
         height: Math.max(40, (text.text.split('\n').length + 1) * text.font_size * annotationUnitScale(width, height) * yscale * 1.3) }}

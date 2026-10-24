@@ -1,6 +1,7 @@
+import { AnnotationFullscreen } from './annotation/AnnotationFullscreen';
 import { useAnnotationEditor } from './annotation/useAnnotationEditor';
 import { AnnotationToolbar } from './annotation/AnnotationToolbar';
-import { AnnotationSurfaceView } from './annotation/AnnotationSurfaceView';
+import { AnnotationEditingLayer } from './annotation/AnnotationEditingLayer';
 import type { CanvasAnnotationController } from './annotation/useCanvasAnnotation';
 import { AnnotationLayer } from './annotation/AnnotationLayer';
 import { hasImageSizeSelection, imageSizeError, imageSizeMode } from '@/lib/imageSizeMode';
@@ -683,7 +684,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
       </header>
       <NodeToolbar
         isVisible={
-          !context.multiSelectionActive
+          !context.multiSelectionActive && !(annotating && context.annotationController?.fullscreen)
           && (selected || toolbarOverlayOpen)
         }
         position={annotating ? Position.Bottom : chromeBelow ? Position.Bottom : Position.Top}
@@ -694,6 +695,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         {annotating && context.annotationController ? <AnnotationToolbar editor={annotationEditor}
           undo={context.annotationController.undo} redo={context.annotationController.redo}
           canUndo={context.annotationController.canUndo} canRedo={context.annotationController.canRedo}
+          onExpand={context.annotationController.expand}
           onEdit={context.editWithAnnotation ? () => void context.editWithAnnotation?.(node.id) : undefined} busy={submittingNode} /> : <div
           ref={toolbarRef}
           role="toolbar"
@@ -785,6 +787,12 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           {(emptyMediaNode || node.type !== 'image') && fixedToolbarButtons}
         </div>}
       </NodeToolbar>
+      {annotating && context.annotationController?.fullscreen && content?.kind === 'image' && <AnnotationFullscreen
+        title={node.title} src={canvasMediaUrl(context.projectId, content.version_id)} width={content.width ?? 1024} height={content.height ?? 1024}
+        editor={annotationEditor} onCollapse={context.annotationController.collapse}
+        undo={context.annotationController.undo} redo={context.annotationController.redo}
+        canUndo={context.annotationController.canUndo} canRedo={context.annotationController.canRedo}
+        onEdit={context.editWithAnnotation ? () => void context.editWithAnnotation?.(node.id) : undefined} busy={submittingNode} />}
       {node.type === 'image' && mediaCandidates.length > 0 && (
         <MediaCandidateBatch
           node={node}
@@ -955,12 +963,12 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
               freeResize={(node.type === 'image' || node.type === 'video') && node.data.display.free_resize}
             />
           )}
-          {annotating && node.type === 'image' && content?.kind === 'image' && <AnnotationSurfaceView
+          {annotating && !context.annotationController?.fullscreen && node.type === 'image' && content?.kind === 'image' && <AnnotationEditingLayer
             editor={annotationEditor} width={content.width ?? 1024} height={content.height ?? 1024}
             fit={node.data.display.free_resize ? 'fill' : node.data.display.fit} />}
           {node.type === 'image' && content?.kind === 'image' && node.data.annotation
             && node.data.annotation.version_id === node.data.current_version_id && node.data.annotation.elements.length > 0 && <>
-            {!annotating && node.data.annotation.visible && <AnnotationLayer elements={node.data.annotation.elements}
+            {(!annotating || context.annotationController?.fullscreen) && node.data.annotation.visible && <AnnotationLayer elements={node.data.annotation.elements}
               imageWidth={content.width ?? 1024} imageHeight={content.height ?? 1024}
               fit={node.data.display.free_resize ? 'fill' : node.data.display.fit}
               className="pointer-events-none absolute inset-0 size-full" />}
