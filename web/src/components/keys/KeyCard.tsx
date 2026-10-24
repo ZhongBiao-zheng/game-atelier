@@ -1,4 +1,3 @@
-import { GatewayQuota } from './GatewayQuota';
 import { Pencil, Trash2 } from 'lucide-react';
 import { modelModality } from '@/api/keys';
 import { providerLabel } from '@/lib/providerLabels';
@@ -30,10 +29,11 @@ interface Props {
   row: KeyRow;
   onEdit: () => void;
   onDelete: () => void;
+  table?: boolean;
 }
 
 /** 档案柜的一行：厂商名 + 掩码/链接第二行，右侧模型摘要 chip 与 ghost 操作。 */
-export function KeyCard({ row, onEdit, onDelete }: Props) {
+export function KeyCard({ row, onEdit, onDelete, table = false }: Props) {
   const linkUrl = row.homepage_url || row.base_url;
   const vendorName = providerLabel(row.provider, row.alias);
   const models = row.models ?? [];
@@ -41,6 +41,29 @@ export function KeyCard({ row, onEdit, onDelete }: Props) {
   const imageCount = models.filter((m) => modelModality(m, row) === 'image').length;
   const videoCount = models.filter((m) => modelModality(m, row) === 'video').length;
   const audioCount = models.filter((m) => modelModality(m, row) === 'audio').length;
+
+  if (table) return <tr className="border-t border-border text-sm">
+    <td className="px-4 py-3">
+      <div className="flex items-center gap-2 whitespace-nowrap">
+        <span className="size-1.5 rounded-full bg-[color:var(--status-pending)]" />
+        <span>{row.alias}</span>
+        <span className="rounded-sm bg-secondary px-1.5 py-0.5 text-xs text-muted-foreground">{vendorName}</span>
+      </div>
+    </td>
+    <td className="max-w-64 truncate px-4 font-mono text-xs text-muted-foreground" title={row.base_url ?? ''}>
+      {row.base_url ?? '—'}
+    </td>
+    <td className="px-4 tabular-nums">{models.length}</td>
+    <td className="whitespace-nowrap px-4 text-xs text-muted-foreground">
+      {row.last_used_at ? new Date(row.last_used_at).toLocaleString('zh-CN') : '—'}
+    </td>
+    <td className="px-4"><div className="flex gap-2">
+      <button type="button" aria-label={`编辑 ${row.alias}`} onClick={onEdit}
+        className="rounded-md border border-border p-2"><Pencil size={14} aria-hidden /></button>
+      <button type="button" aria-label={`删除 ${row.alias}`} onClick={onDelete}
+        className="rounded-md border border-border p-2"><Trash2 size={14} aria-hidden /></button>
+    </div></td>
+  </tr>;
 
   return (
     <div className="flex items-center gap-4 px-4 py-3 transition-colors hover:bg-secondary/30">
@@ -66,7 +89,6 @@ export function KeyCard({ row, onEdit, onDelete }: Props) {
             </a>
           )}
         </div>
-        {row.provider === 'atelier' && <GatewayQuota key={`${row.alias}:${row.base_url}:${row.masked_secret}`} alias={row.alias} />}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         {textCount > 0 && (

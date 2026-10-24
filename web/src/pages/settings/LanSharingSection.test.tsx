@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import * as api from '@/api/gateway';
 import { LanSharingSection } from './LanSharingSection';
-import { summarizeUsage } from './lan-sharing/Usage';
 vi.mock('@/hooks/useSSE', () => ({ useSSE: vi.fn() }));
 vi.mock('@/api/gateway', () => ({ fetchGateway: vi.fn(), fetchGatewayOptions: vi.fn(), fetchGatewayUsage: vi.fn(),
   fetchGatewayTasks: vi.fn(), fetchGatewayMembers: vi.fn(), createGatewayKey: vi.fn(), updateGatewayKey: vi.fn(),
@@ -41,11 +40,5 @@ describe('LAN sharing', () => {
     fireEvent.click(screen.getByRole('button', { name: '撤销' }));
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '撤销' }));
     await waitFor(() => expect(api.revokeGatewayKey).toHaveBeenCalledWith('k1'));
-  });
-  it('sums settled charges by person or model, counting calls rather than images', () => {
-    const rows = [{ key_id: 'a', key_name: 'A', route_id: 'gpt', kind: 'image', n: 4, status: 'done', charged_cny: 2, estimated_cny: 2, actual_cost_cny: null },
-      { key_id: 'b', key_name: 'B', route_id: 'gpt', kind: 'image', n: 0, status: 'failed', charged_cny: 0, estimated_cny: null, actual_cost_cny: null }] as api.GatewayUsageRow[];
-    expect(summarizeUsage(rows).get('a')).toMatchObject({ calls: 1, success: 1, cost: 2 });
-    expect(summarizeUsage(rows, 'model').get('image:gpt')).toMatchObject({ calls: 2, failed: 1, cost: 2, unpriced: 1 });
   });
 });

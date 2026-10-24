@@ -145,21 +145,21 @@ def test_management_restore_and_boundaries():
     for alias in ['A', 'B']:
         model_routes.cool_down('image', alias, 'insufficient_balance')
     client = LocalTestClient(base_url='http://127.0.0.1', app=build_app())
-    result = client.get('/api/gateway/members').json()
+    result = client.get('/api/model-routes/member-status').json()
     assert len(result['members']) == 2
     assert result['members'][0]['route_ids'] == ['gpt-image-2']
     assert result['unavailable_routes'][0]['id'] == 'gpt-image-2'
     assert 'test-only' not in json.dumps(result)
-    result = client.post('/api/gateway/members/restore', json={
+    result = client.post('/api/model-routes/member-status/restore', json={
         'modality': 'image', 'alias': 'A',
     }).json()
     assert [r['alias'] for r in result['members']] == ['B']
     assert result['unavailable_routes'] == []
-    assert client.post('/api/gateway/members/restore', json={
+    assert client.post('/api/model-routes/member-status/restore', json={
         'modality': 'invalid', 'alias': 'A',
     }).status_code == 422
-    assert local_capability('GET', '/api/gateway/members') == 'manage'
-    assert local_capability('POST', '/api/gateway/members/restore') == 'manage'
+    assert local_capability('GET', '/api/model-routes/member-status') == 'manage'
+    assert local_capability('POST', '/api/model-routes/member-status/restore') == 'manage'
 
 
 def test_queued_gateway_task_releases_reservation_when_members_become_insolvent():

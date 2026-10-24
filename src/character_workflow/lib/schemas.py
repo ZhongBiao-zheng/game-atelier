@@ -3143,3 +3143,23 @@ class TeamLibraryChangeEvent(BaseModel):
     title: str | None = None
     status: Literal["ready", "incomplete"] | None = None
     mime_type: str | None = None
+
+
+class ModelRouteMemberStatus(BaseModel):
+    modality: str
+    alias: str
+    reason: str = "insufficient_balance"
+    since: str | None
+    next_probe_at: str
+    route_ids: list[str]
+
+
+class UnavailableModelRoute(BaseModel):
+    id: str
+    name: str
+    modality: str
+
+
+class ModelRouteMemberStatusResponse(BaseModel):
+    members: list[ModelRouteMemberStatus]
+    unavailable_routes: list[UnavailableModelRoute]

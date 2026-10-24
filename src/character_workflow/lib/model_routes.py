@@ -346,3 +346,15 @@ def set_route_order(modality: ModelModality, identifier: str, aliases: list[str]
     database.model_order.setdefault(modality, {})[identifier] = list(aliases)
     write_keys_db(database)
     return find_route(modality, identifier)
+
+
+def temporary_member_statuses() -> list[dict]:
+    """公开当前进程的短期冷却快照，不把临时故障写成欠费。"""
+    now = _now()
+    tick = time.monotonic()
+    with _cooldowns_lock:
+        return [
+            {"modality": modality, "alias": alias, "reason": "unavailable",
+             "since": None, "next_probe_at": (now + timedelta(seconds=until - tick)).isoformat()}
+            for (modality, alias), until in _cooldowns.items() if until > tick
+        ]

@@ -77,8 +77,8 @@ GET /api/gateway/tasks
 GET /api/gateway/tasks/{task_id}/outputs/{index}
 GET /api/gateway/providers/{alias}/me
 GET /api/gateway/options
-GET /api/gateway/members
-POST /api/gateway/members/restore
+GET /api/model-routes/member-status
+POST /api/model-routes/member-status/restore
 GET /api/gateway/usage
 POST /api/gateway/check
 POST /api/gateway/providers/{alias}/sync
@@ -195,7 +195,7 @@ LOCAL_MANAGEMENT = frozenset({
     "/api/gateway/providers/{alias}/sync", "/api/gateway/options",
     "/api/gateway/tasks", "/api/gateway/tasks/{task_id}/outputs/{index}",
     "/api/gateway/providers/{alias}/me",
-    "/api/gateway/members", "/api/gateway/members/restore",
+    "/api/model-routes/member-status", "/api/model-routes/member-status/restore",
     # 挂载团队库 = 往本机任意目录写清单并整棵扫描，同 folder-picker 只给本机页面。
     "/api/team-libraries",
     # 导入 / 删除 Agent Skill 改写数据目录里的说明文件，Agent 每轮都会读，只给本机页面。

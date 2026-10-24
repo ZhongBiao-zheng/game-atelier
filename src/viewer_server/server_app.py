@@ -21,6 +21,7 @@ from viewer_server.connection_middleware import ConnectionMiddleware, connection
 from viewer_server.connection_routes import connection_router
 from viewer_server.gateway_app import gateway_server
 from viewer_server.gateway_routes import gateway_router
+from viewer_server.model_route_status import member_status_router
 from viewer_server.routes import router
 from viewer_server.request_boundary import LocalRequestBoundary, development_origin
 from viewer_server.routes_canvas_batches import router as canvas_batches_router
@@ -283,6 +284,7 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(canvas_batches_router)
     app.include_router(team_library_router)
     app.include_router(gateway_router)
+    app.include_router(member_status_router)
     app.include_router(sse_router)
     from viewer_server.workshop_routes import register_workshop_routes
 

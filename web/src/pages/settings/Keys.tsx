@@ -33,7 +33,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     setError(null);
     try {
       const resp = await listKeys();
-      setKeys(resp.keys.map(toKeyRow));
+      setKeys(resp.keys.map(toKeyRow).sort((a, b) => Number(b.provider === 'atelier') - Number(a.provider === 'atelier')));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -113,10 +113,18 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
             </div>
           ) : (
             <div className="divide-y divide-border">
+              {embedded ? <div className="overflow-x-auto"><table className="w-full text-left">
+                <thead><tr>{['名称', '地址', '模型数', '最近使用', '编辑'].map(label => (
+                  <th key={label} className="whitespace-nowrap px-4 py-3 text-xs font-normal text-muted-foreground">
+                    {label}
+                  </th>
+                ))}</tr></thead>
+                <tbody>
               {keys.map((k) => (
                 <KeyCard
                   key={k.alias}
                   row={k}
+                  table={embedded}
                   onEdit={() => {
                     setEditingKey(k);
                     setShowForm(true);
@@ -136,6 +144,33 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
                   }}
                 />
               ))}
+                </tbody>
+              </table></div> : <>
+              {keys.map((k) => (
+                <KeyCard
+                  key={k.alias}
+                  row={k}
+                  table={embedded}
+                  onEdit={() => {
+                    setEditingKey(k);
+                    setShowForm(true);
+                  }}
+                  onDelete={() => {
+                    setDialog({
+                      open: true,
+                      title: '确认删除？',
+                      message: `"${k.alias}" 将被永久删除`,
+                      variant: 'destructive',
+                      onConfirm: async () => {
+                        setDialog(null);
+                        await deleteKey(k.alias);
+                        void refresh();
+                      },
+                    });
+                  }}
+                />
+              ))}</>}
+
             </div>
           )}
           <div className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">

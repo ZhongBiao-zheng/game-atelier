@@ -144,10 +144,7 @@ export interface GatewayTask {
   created_at: string; updated_at: string; prompt: string | null; n: number;
   outputs: number; output_types: string[]; error: string | null;
 }
-export interface GatewayMembers {
-  members: { modality: string; alias: string; since: string; next_probe_at: string; route_ids: string[] }[];
-  unavailable_routes: { id: string; name: string; modality: string }[];
-}
+export type GatewayMembers = import('@/schema/modelRouteStatus').ModelRouteMemberStatusResponse;
 export async function fetchGatewayTasks(scope: 'active' | 'recent') {
   const body = await requestJson<{ tasks: GatewayTask[] }>(`/api/gateway/tasks?scope=${scope}`, '读取网关任务');
   return body.tasks;
@@ -156,10 +153,10 @@ export function gatewayOutputUrl(id: string, index: number) {
   return `/api/gateway/tasks/${encodeURIComponent(id)}/outputs/${index}`;
 }
 export function fetchGatewayMembers() {
-  return requestJson<GatewayMembers>('/api/gateway/members', '读取供应商状态');
+  return requestJson<GatewayMembers>('/api/model-routes/member-status', '读取供应商状态');
 }
 export function restoreGatewayMember(modality: string, alias: string) {
-  return requestJson<GatewayMembers>('/api/gateway/members/restore', '恢复供应商', {
+  return requestJson<GatewayMembers>('/api/model-routes/member-status/restore', '恢复供应商', {
     method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ modality, alias }),
   });
 }

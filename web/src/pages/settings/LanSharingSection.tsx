@@ -1,3 +1,4 @@
+import { Link } from 'wouter';
 import { useCallback, useEffect, useState } from 'react';
 import { Copy, HelpCircle } from 'lucide-react';
 import { fetchGateway, fetchGatewayOptions, revokeGatewayKey, updateGateway, type GatewayKey, type GatewayOptions, type GatewayState } from '@/api/gateway';
@@ -6,9 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { formatGenerationCost } from '@/lib/generationCost';
 import { KeyForm } from './lan-sharing/KeyForm';
-import { Usage } from './lan-sharing/Usage';
 import { Tasks } from './lan-sharing/Tasks';
-import { Members } from './lan-sharing/Members';
 import { button, date, PERIODS } from './lan-sharing/shared';
 
 const HINT = '同事在 API 密钥中添加局域网 Atelier，填写地址和网关密钥。连接使用明文 HTTP。同事连不上时检查防火墙：Windows 把当前网络设为「专用网络」，并在防火墙中允许 Atelier（Python）入站；macOS 首次开启时在弹窗中点「允许」。';
@@ -18,12 +17,11 @@ export function LanSharingSection() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [port, setPort] = useState('');
-  const [revision, setRevision] = useState(0);
   const [editing, setEditing] = useState<GatewayKey | null | undefined>(undefined);
   const [pendingRevoke, setPendingRevoke] = useState<GatewayKey | null>(null);
   const reload = useCallback(async () => {
     const [next, choices] = await Promise.all([fetchGateway(), fetchGatewayOptions()]);
-    setState(next); setOptions(choices); setPort(String(next.port)); setRevision(v => v + 1);
+    setState(next); setOptions(choices); setPort(String(next.port));
   }, []);
   useEffect(() => { void reload().catch(e => setError(String(e))); }, [reload]);
   async function run(action: () => Promise<unknown>) {
@@ -42,6 +40,7 @@ export function LanSharingSection() {
         {address && <div role="status" className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span className="font-mono">{address}</span><button aria-label="复制地址" className={button} onClick={() => void navigator.clipboard.writeText(address)}><Copy className="size-3.5" /></button></div>}
         {state?.status.error && <p className="text-sm text-destructive">{state.status.error}</p>}
       </div><Switch label="开启局域网共享" checked={Boolean(state?.enabled)} disabled={!state || busy} onChange={enabled => void run(() => updateGateway({ enabled }))} /></div>
+      {state?.enabled && <>
       <div className="flex items-center gap-2"><label className="flex items-center gap-2 text-sm">端口<Input aria-label="端口" value={port} inputMode="numeric" onChange={e => setPort(e.target.value.replace(/\D/g, ''))} className="h-8 w-24" /></label>
         {state && port !== String(state.port) && <button className={button} disabled={busy || !(Number(port) >= 1024 && Number(port) <= 65535)} onClick={() => void run(() => updateGateway({ port: Number(port) }))}>保存端口</button>}
       </div>
@@ -56,12 +55,13 @@ export function LanSharingSection() {
                 <p className="whitespace-nowrap tabular-nums">{PERIODS[limit.period]} {formatGenerationCost(used)} / {formatGenerationCost(limit.cap_cny)}</p>
                 <progress aria-label={`${key.name}${PERIODS[limit.period]}额度`} max={limit.cap_cny} value={Math.min(used, limit.cap_cny)} className="h-1 w-full accent-current" />
               </div>;
-            })}</td><td className="whitespace-nowrap px-2 tabular-nums">{formatGenerationCost(key.month_charged_cny)}</td><td className="whitespace-nowrap px-2 text-muted-foreground">{date(key.last_used_at)}</td>
+            })}</td><td className="whitespace-nowrap px-2 tabular-nums"><Link href={`/settings/usage?scope=team&member=${encodeURIComponent(key.id)}`}>{formatGenerationCost(key.month_charged_cny)}</Link></td><td className="whitespace-nowrap px-2 text-muted-foreground">{date(key.last_used_at)}</td>
             <td className="px-2">{key.revoked_at ? '已撤销' : <div className="flex gap-1"><button className={button} disabled={busy} onClick={() => setEditing(key)}>编辑</button><button className={button} disabled={busy} onClick={() => setPendingRevoke(key)}>撤销</button></div>}</td>
           </tr>)}</tbody>
         </table></div>
       </section>
-      <Usage revision={revision} /><Tasks onFinished={finished} /><Members revision={revision} />
+      <Tasks onFinished={finished} />
+      </>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     </div>
     {editing !== undefined && <KeyForm record={editing} options={options} onClose={() => setEditing(undefined)} onSaved={finished} />}

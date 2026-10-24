@@ -100,9 +100,9 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   `GET /api/gateway` 的密钥含 `limits_status`、`month_charged_cny`、`month_calls`、`last_used_at`；不含哈希。
   `GET /api/gateway/options` → `{models: [{id, name, modality}], aliases: [{alias, provider, name}]}`，alias 排除 atelier。
   用量行新增 `kind`、`estimated_cny`、`charged_cny`、`input_tokens`、`output_tokens`、`duration`、`resolution`、`member_trail`；不存 prompt，前端直接汇总结算金额。
-  `GET /api/gateway/members` → `{members: [{modality, alias, reason, since, next_probe_at, route_ids}], unavailable_routes: [{id, name, modality}]}`。
+  `GET /api/model-routes/member-status` → `{members: [{modality, alias, reason, since, next_probe_at, route_ids}], unavailable_routes: [{id, name, modality}]}`。
   欠费状态跨重启保留；`unavailable_routes` 只计非 atelier 成员且均在欠费冷却期的路由。
-  `POST /api/gateway/members/restore {modality, alias}` 清除该成员欠费及内存冷却，返回同一状态视图；两接口仅本机管理权限可用。
+  `POST /api/model-routes/member-status/restore {modality, alias}` 清除该成员欠费及内存冷却，返回同一状态视图；两接口仅本机管理权限可用。
   接入端：`POST /api/gateway/check {base_url, access_key | alias}` → `{info, models}`（models 为带 `via` 的 ModelSpec）；
   `POST /api/gateway/providers/{alias}/sync` 整体替换该 KEY 的模型。新建 `provider="atelier"` 的 KEY 时排到所在每个路由组第一位，
   同步出的新模型同样排第一（已调整过顺序的组不动）。
@@ -1105,3 +1105,11 @@ resolve 后的绝对路径（落盘值就是闸门判过的那个）。`mask_ima
 - job JSON 禁止手写：`/api/jobs` 全量 Pydantic 校验，一条 schema 错会让整个列表 500（表现为「角色里没内容」）。用 `lib/jobs.py` 的 `Job`/`save_job()` 生成。
 - `params.warnings` 是数组不是字符串；`status`/`kind`/`asset_slot` 必须用 schema 枚举值。
 - 改后端 lib 后 viewer-server 必须重启：长驻进程缓存旧模块，症状是「X object has no attribute Y」而 pytest 全绿。
+
+### 模型路由成员状态
+
+- `GET /api/model-routes/member-status`：仅限本机管理，返回 `ModelRouteMemberStatusResponse`。
+  `members` 包含 modality、alias、reason、since、next_probe_at、route_ids；reason 为
+  insufficient_balance（欠费）或 unavailable（临时不可用，since 为 null）。
+  `unavailable_routes` 为所有本机成员欠费的路由（id、name、modality）。
+- `POST /api/model-routes/member-status/restore`：请求 `{modality, alias}`，恢复后返回同一状态结构。
