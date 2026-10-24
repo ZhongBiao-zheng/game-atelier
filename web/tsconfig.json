@@ -12,7 +12,8 @@
     "isolatedModules": true,
     "skipLibCheck": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@pricing": ["../src/character_workflow/data/generation_prices.json"]
     }
   },
   "include": ["src"]

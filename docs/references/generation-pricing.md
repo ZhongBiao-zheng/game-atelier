@@ -1,6 +1,6 @@
 # 生成价格清单维护
 
-**唯一单价源：[generationPrices.ts](../../web/src/lib/generationPrices.ts)。**
+**唯一单价源：[generation_prices.json](../../src/character_workflow/data/generation_prices.json)。**
 它是一份按渠道与计费单位分组的数据表，界面估价直接引用，不需要再维护一份副本。
 `generationCost.ts` 仅负责渠道、分组、型号和参数匹配，以及按张数／时长／token 计算总价。
 
@@ -99,7 +99,7 @@
 ## 下次调价
 
 1. 核对渠道、分组、模型、档位和单位；同一模型的别名共用单价，不重复填数。
-2. 在 `generationPrices.ts` 改对应数字，并更新附近的日期与来源说明。
+2. 只在 `generation_prices.json` 改对应数字，并在本文更新日期与来源说明。前后端共同读取此文件；两端估价公式由共享用例校验。
 3. 更新已有 `generationCost.test.ts` 中对应价格断言。新增计费维度或模型路由时，才需改计算逻辑。
 4. 清理并重建前端（`make build`），暂存预期的 `web/dist`，运行 `make verify`；发布后刷新页面。
 

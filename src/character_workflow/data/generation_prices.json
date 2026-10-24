@@ -1,0 +1,119 @@
+{
+  "OPENAI_HK_FIXED_YUAN_PER_IMAGE": {
+    "gpt-image-2": 0.08,
+    "gpt-image-2-5-sunburst": 0.24,
+    "gpt-image-2-5-flare": 0.24,
+    "nano-banana": 0.2,
+    "nano-banana-hd": 0.32
+  },
+  "OPENAI_HK_NANO_BANANA_2_YUAN": {
+    "low": 0.48,
+    "medium": 0.72,
+    "high": 1
+  },
+  "TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE": {
+    "1k": 0.099,
+    "2k": 0.105,
+    "4k": 0.126
+  },
+  "TUZI_GPT_IMAGE_2_YUAN_PER_IMAGE": {
+    "1k": 0.028,
+    "2k": 0.12,
+    "4k": 0.21
+  },
+  "TUZI_GPT_IMAGE_2_PIXEL_LIMITS": {
+    "1k": 1048576,
+    "2k": 4194304
+  },
+  "TUZI_GPT_IMAGE_2_1K_SIZES": [
+    "1254x1254",
+    "1024x1536",
+    "1536x1024",
+    "1086x1448",
+    "1448x1086",
+    "1122x1402",
+    "1402x1122",
+    "1672x941",
+    "941x1672",
+    "1915x821",
+    "821x1915"
+  ],
+  "TUZI_GPT_IMAGE_2_1K_YUAN_PER_IMAGE": 0.028,
+  "TUZI_GPT_IMAGE_25_YUAN_PER_IMAGE": {
+    "gpt-image-2.5": {
+      "1K": 0.028,
+      "2K": 0.12,
+      "4K": 0.21
+    },
+    "gpt-image-2.5-flare": {
+      "1K": 0.12,
+      "2K": 0.16,
+      "4K": 0.21
+    },
+    "gpt-image-2.5-sunburst": {
+      "1K": 0.12,
+      "2K": 0.16,
+      "4K": 0.21
+    },
+    "gpt-image-2.5-vip": {
+      "1K": 0.07,
+      "2K": 0.18,
+      "4K": 0.28
+    }
+  },
+  "TUZI_GPT_IMAGE_25_PIXEL_LIMITS": {
+    "1K": 1048576,
+    "2K": 3686400
+  },
+  "TUZI_GPT_IMAGE_25_1K_YUAN_PER_IMAGE": 0.02,
+  "TUZI_GROUP_YUAN_PER_IMAGE": {
+    "default": {
+      "doubao-seedream-4-5-251128": 0.12,
+      "seedream-4-5": 0.12,
+      "seedream-5-0-pro": 0.6,
+      "nano-banana-2": 0.3,
+      "nano-banana-2-2k": 0.48,
+      "nano-banana-2-4k": 0.82,
+      "flux-3-image": 0.15
+    },
+    "绘画": {
+      "gpt-image-2": 0.21
+    }
+  },
+  "TUZI_MIDJOURNEY_YUAN_PER_TASK": 0.1505,
+  "EVOLINK_MIDJOURNEY_USD_PER_REQUEST": {
+    "generation": 0.08,
+    "imageEdit": 0.12
+  },
+  "GENERATION_USD_TO_CNY": 7,
+  "TOKEN_DANCE_YUAN_PER_IMAGE": {
+    "seedream-5-0-lite": 0.22,
+    "seedream-5-0-pro": 0.3
+  },
+  "ARK_SEEDREAM_YUAN_PER_IMAGE": {
+    "doubao-seedream-5-0-260128": 0.22,
+    "doubao-seedream-4-5-251128": 0.25
+  },
+  "ARK_SEEDANCE_YUAN_PER_MILLION_TOKENS": {
+    "doubao-seedance-2-0-fast-260128": 37,
+    "doubao-seedance-2-0-260128": {
+      "standard": 46,
+      "1080p": 51
+    },
+    "doubao-seedance-1-5-pro-260428": {
+      "silent": 8,
+      "audio": 16
+    },
+    "doubao-seedance-1-0-pro-250528": 15
+  },
+  "HAPPYHORSE_1_1_YUAN_PER_SECOND": {
+    "480p": 0.45,
+    "720p": 0.9,
+    "1080p": 1.2
+  },
+  "HAPPYHORSE_1_0_YUAN_PER_SECOND": {
+    "720p": 0.9,
+    "1080p": 1.6
+  },
+  "text_yuan_per_million_tokens": {}
+}
