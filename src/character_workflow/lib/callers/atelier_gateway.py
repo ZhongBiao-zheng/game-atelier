@@ -20,7 +20,7 @@ import requests
 from character_workflow.lib import keys as _keys
 
 PROTOCOL = "atelier_gateway"
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 SUBMIT_ATTEMPTS = 3
 POLL_INTERVAL_SECONDS = 2.0
 POLL_GIVE_UP_SECONDS = 600.0

@@ -73,6 +73,7 @@ PUT /api/gateway
 POST /api/gateway/keys
 PATCH /api/gateway/keys/{key_id}
 POST /api/gateway/keys/{key_id}/revoke
+GET /api/gateway/options
 GET /api/gateway/usage
 POST /api/gateway/check
 POST /api/gateway/providers/{alias}/sync
@@ -186,7 +187,7 @@ LOCAL_MANAGEMENT = frozenset({
     # 局域网共享：开关会让本机对局域网开端口，密钥与用量也只给本机页面（ADR-0025）。
     "/api/gateway", "/api/gateway/keys", "/api/gateway/keys/{key_id}",
     "/api/gateway/keys/{key_id}/revoke", "/api/gateway/usage", "/api/gateway/check",
-    "/api/gateway/providers/{alias}/sync",
+    "/api/gateway/providers/{alias}/sync", "/api/gateway/options",
     # 挂载团队库 = 往本机任意目录写清单并整棵扫描，同 folder-picker 只给本机页面。
     "/api/team-libraries",
     # 导入 / 删除 Agent Skill 改写数据目录里的说明文件，Agent 每轮都会读，只给本机页面。

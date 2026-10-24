@@ -10,8 +10,9 @@ import secrets
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from character_workflow.lib import data_root
 from character_workflow.lib.file_lock import file_lock
@@ -22,12 +23,36 @@ TOKEN_PREFIX = "atg_"
 _MAX_FILE_BYTES = 256 * 1024
 
 
-class GatewayKeyRecord(BaseModel):
+LimitPeriod = Literal["day", "week", "month"]
+_UNSET = object()
+
+
+class GatewayLimit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    period: LimitPeriod
+    cap_cny: float = Field(gt=0, le=1_000_000)
+
+
+class GatewayPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    limits: list[GatewayLimit] = Field(default_factory=list, max_length=3)
+    allowed_models: list[str] | None = None
+    allowed_aliases: list[str] | None = None
+
+    @field_validator("limits")
+    @classmethod
+    def unique_periods(cls, limits):
+        if len({limit.period for limit in limits}) != len(limits):
+            raise ValueError("同一限额窗口只能设置一次")
+        return limits
+
+
+class GatewayKeyRecord(GatewayPolicy):
+    # 本机旧配置中的 daily_image_limit 读入即丢弃，不迁移、不保留旧协议。
+    model_config = ConfigDict(extra="ignore")
     id: str
     name: str = Field(min_length=1, max_length=40)
     token_sha256: str
-    # None = 不限张数。
-    daily_image_limit: int | None = Field(default=None, ge=0)
     created_at: str
     revoked_at: str | None = None
 
@@ -82,12 +107,16 @@ def update_settings(
         return updated
 
 
-def create_key(name: str, daily_image_limit: int | None) -> tuple[GatewayKeyRecord, str]:
+def create_key(
+    name: str, limits: list[GatewayLimit] | None = None,
+    allowed_models: list[str] | None = None, allowed_aliases: list[str] | None = None,
+) -> tuple[GatewayKeyRecord, str]:
     """新建网关密钥；返回 (记录, 明文)。明文之后再也拿不到。"""
     token = TOKEN_PREFIX + secrets.token_urlsafe(32)
     record = GatewayKeyRecord(
         id=uuid.uuid4().hex[:12], name=name.strip(), token_sha256=digest(token),
-        daily_image_limit=daily_image_limit, created_at=_now(),
+        limits=limits or [], allowed_models=allowed_models, allowed_aliases=allowed_aliases,
+        created_at=_now(),
     )
     with _lock():
         config = read_config()
@@ -95,9 +124,18 @@ def create_key(name: str, daily_image_limit: int | None) -> tuple[GatewayKeyReco
     return record, token
 
 
-def set_daily_limit(key_id: str, daily_image_limit: int | None) -> GatewayKeyRecord:
+def update_key(
+    key_id: str, *, name=_UNSET, limits=_UNSET,
+    allowed_models=_UNSET, allowed_aliases=_UNSET,
+) -> GatewayKeyRecord:
+    patch = {k: v for k, v in {
+        "name": name, "limits": limits, "allowed_models": allowed_models,
+        "allowed_aliases": allowed_aliases,
+    }.items() if v is not _UNSET}
+    if isinstance(patch.get("name"), str):
+        patch["name"] = patch["name"].strip()
     return _replace(key_id, lambda record: GatewayKeyRecord.model_validate(
-        {**record.model_dump(), "daily_image_limit": daily_image_limit}))
+        {**record.model_dump(), **patch}))
 
 
 def revoke_key(key_id: str) -> GatewayKeyRecord:

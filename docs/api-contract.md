@@ -49,26 +49,35 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 - 创作台 `POST /api/studio/jobs`、画布草稿 / 生成偏好 `selection`、Agent `CanvasAgentModelRef`、工坊 `prepare_generation`：`alias` 为空即「自动」，`model` 为路由 id；Job 与运行快照里的 `alias` 始终是实际使用的 KEY。
 - `JobParams.route_id`：「自动」提交时由服务端写入（浏览器传入的会被覆盖）；`route_tried`：失败切换时换掉的别名。运行快照的 `alias` 是提交时解析的那家，失败切换后以 Job 的 `alias` 为准。
 
-### 局域网网关协议 v1（ADR-0025）
+### 局域网网关协议 v2（ADR-0025）
 
 网关服务在独立端口（默认 5180）只提供下列接口，全部要求 `Authorization: Bearer <网关密钥>`，不认 cookie；其他路径 404。
 
-- `GET /gateway/v1/info` → `{name, version, protocol: 1}`。协议版本不一致时接入端直接报错，不做兼容。
-- `GET /gateway/v1/models` → 与 `GET /api/models` 同形，一期只含图片。
+- `GET /gateway/v1/info` → `{name, version, protocol: 2}`。协议版本不一致时接入端直接报错，不做兼容。
+- `GET /gateway/v1/models` → 与 `GET /api/models` 同形，含全部模态；按当前密钥的模型与 alias 权限过滤，排除 atelier 成员，视频成员保留 `protocol`。
+- `GET /gateway/v1/me` → `{name, limits: [{period, cap_cny, used_cny, reserved_cny, left_cny, resets_at}], month_charged_cny, month_calls}`，只读当前密钥。
 - `POST /gateway/v1/tasks`：multipart，字段 `request`（JSON：`model` 路由 id、`prompt`、`n`、`size`、`params`）+ 参考图文件
   `ref_0`…`ref_15`；请求头 `Idempotency-Key` 必填（同一把密钥下同一个 key 返回同一个任务）。返回 202 `{task_id}`。
-  `params` 只收白名单控制字段，出现路径类字段 422；当日张数超限 429（`今日额度已用完`）。
+  模型不存在 404、无权使用 403；`params` 只收白名单控制字段，出现路径类字段 422；金额窗口超限 429（`中转额度已用完`），`Retry-After` 为最晚重置时间距现在的秒数。当前任务接口仍只受理图片。
 - `GET /gateway/v1/tasks/{id}` → `{task_id, status: pending|running|done|failed|canceled, phase, member_alias,
   warnings, actual_size, actual_cost_cny, outputs: 张数, error, error_kind}`。`error_kind`：`unavailable`（全部成员都因
   确定没执行的原因失败）、`unconfirmed`（网关重启等，可能已执行）、`failed`（其他）。
 - `GET /gateway/v1/tasks/{id}/outputs/{i}` → 第 i 张图的字节；`POST /gateway/v1/tasks/{id}/cancel` → 取消。
 - 任务只对创建它的密钥可见（其他密钥 404）；任务与文件保留 24 小时。
+- 密钥策略：`limits: [{period: day|week|month, cap_cny}]`（最多三条且 period 唯一，金额 >0 且 ≤1,000,000）；
+  `allowed_models` / `allowed_aliases` 为 null 表示全部、空数组表示无权限；模型支持精确匹配和尾部 `*` 前缀匹配，alias 精确匹配。
+  按网关本地日历零点、周一和月初重置；受理时按首个可选成员估价预占，与限额判断共用锁。
+  终态优先结算实际费用，否则成功用估价、失败或取消记零；无价预占零。失败切换中各次已报告实际费用累加。
 - 接入端：`provider="atelier"` 的 KEY，`ModelSpec.via` 是网关成员快照；Job 用 `provider_task_protocol=atelier_gateway`
   与 `provider_task_ids` 记录网关任务 id，重启后只查询既有任务。caller 把网关结果映射为：401 → `gateway api 401`，
   429 → `gateway api 429`，`error_kind=unavailable` → `gateway api 503: unavailable`（三者触发接入端失败切换），
   其余不带状态码；`unconfirmed` 的文案含「未确认」。
 - 本机管理（管理权限）：`GET/PUT /api/gateway`（开关 / 端口 / 名称 + 运行状态）、`POST /api/gateway/keys`（返回一次性明文 `token`）、
-  `PATCH /api/gateway/keys/{id}`（每日张数）、`POST /api/gateway/keys/{id}/revoke`、`GET /api/gateway/usage?month=YYYY-MM`（使用记录行）。
+  `PATCH /api/gateway/keys/{id}`（名称、金额窗口、模型与 alias 权限）、`POST /api/gateway/keys/{id}/revoke`、`GET /api/gateway/usage?month=YYYY-MM`（使用记录行）。
+  创建 body 为 `{name, limits, allowed_models, allowed_aliases}`，PATCH 接受任意字段子集（省略保持原值，权限 null 取消限制）。
+  `GET /api/gateway` 的密钥含 `limits_status`、`month_charged_cny`、`month_calls`、`last_used_at`；不含哈希。
+  `GET /api/gateway/options` → `{models: [{id, name, modality}], aliases: [{alias, provider, name}]}`，alias 排除 atelier。
+  用量行新增 `kind`、`estimated_cny`、`charged_cny`、`input_tokens`、`output_tokens`、`duration`、`resolution`、`member_trail`；不存 prompt，前端直接汇总结算金额。
   接入端：`POST /api/gateway/check {base_url, access_key | alias}` → `{info, models}`（models 为带 `via` 的 ModelSpec）；
   `POST /api/gateway/providers/{alias}/sync` 整体替换该 KEY 的模型。新建 `provider="atelier"` 的 KEY 时排到所在每个路由组第一位，
   同步出的新模型同样排第一（已调整过顺序的组不动）。

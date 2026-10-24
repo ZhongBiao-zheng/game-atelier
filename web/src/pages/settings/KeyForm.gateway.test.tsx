@@ -15,7 +15,7 @@ const via = [{ alias: 'HK', provider: 'custom', base_url: 'https://api.openai-hk
 describe('局域网 Atelier 供应商', () => {
   it('连接网关后带回模型（含 via），保存时原样提交', async () => {
     vi.mocked(checkGateway).mockResolvedValue({
-      info: { name: '美术组', version: '5.99.0', protocol: 1 },
+      info: { name: '美术组', version: '5.99.0', protocol: 2 },
       models: [{ id: 'gpt-image-2', name: 'gpt-image-2', modality: 'image', via }],
     });
     vi.mocked(createKey).mockResolvedValue({ alias: '美术组网关' });

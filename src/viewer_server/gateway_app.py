@@ -16,11 +16,11 @@ import uvicorn
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from character_workflow.lib import gateway_keys, gateway_tasks, model_routes
+from character_workflow.lib import gateway_access, gateway_keys, gateway_quota, gateway_tasks, model_routes
 from character_workflow.lib.gateway_keys import GatewayKeyRecord
 from character_workflow.lib.gateway_tasks import GatewayRequestError
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 MAX_BODY_BYTES = 200 * 1024 * 1024
 CLEANUP_INTERVAL_SECONDS = 3600
 
@@ -49,8 +49,9 @@ def _task_view(task: gateway_tasks.GatewayTask) -> dict[str, Any]:
     }
 
 
-def _route_view(route: model_routes.ModelRoute) -> dict[str, Any]:
-    members = [m for m in route.members if m.provider != gateway_tasks.GATEWAY_PROVIDER]
+def _route_view(route: model_routes.ModelRoute, key: GatewayKeyRecord) -> dict[str, Any]:
+    members = [m for m in route.members if m.provider != gateway_tasks.GATEWAY_PROVIDER
+               and gateway_access.member_allowed(key, m.alias)]
     return {
         "id": route.id, "name": members[0].name, "modality": route.modality,
         "members": [{
@@ -75,7 +76,11 @@ def create_gateway_app() -> FastAPI:
 
     @app.exception_handler(GatewayRequestError)
     async def _rejected(_request: Request, error: GatewayRequestError) -> JSONResponse:
-        return JSONResponse({"detail": error.message}, status_code=error.status)
+        from character_workflow.lib.job_runner import _redact_local_paths
+
+        headers = {"Retry-After": str(error.retry_after)} if error.retry_after is not None else None
+        return JSONResponse({"detail": _redact_local_paths(error.message)},
+                            status_code=error.status, headers=headers)
 
     @app.get("/gateway/v1/info")
     def info(_key: GatewayKeyRecord = Depends(_require_key)) -> dict[str, Any]:
@@ -83,10 +88,14 @@ def create_gateway_app() -> FastAPI:
                 "version": _app_version(), "protocol": PROTOCOL_VERSION}
 
     @app.get("/gateway/v1/models")
-    def models(_key: GatewayKeyRecord = Depends(_require_key)) -> dict[str, Any]:
-        routes = [route for route in model_routes.list_routes("image")
-                  if any(m.provider != gateway_tasks.GATEWAY_PROVIDER for m in route.members)]
-        return {"models": [_route_view(route) for route in routes]}
+    def models(key: GatewayKeyRecord = Depends(_require_key)) -> dict[str, Any]:
+        routes = [route for route in model_routes.list_routes()
+                  if gateway_access.route_visible(key, route)]
+        return {"models": [_route_view(route, key) for route in routes]}
+
+    @app.get("/gateway/v1/me")
+    def me(key: GatewayKeyRecord = Depends(_require_key)) -> dict[str, Any]:
+        return gateway_quota.me(key)
 
     @app.post("/gateway/v1/tasks", status_code=202)
     async def submit(request: Request, key: GatewayKeyRecord = Depends(_require_key)) -> dict:

@@ -2,7 +2,7 @@
 
 网关任务不写进 `.runtime/jobs/`：网关主人的出图历史里不出现同事的图。任务文件与图片在
 `.runtime/gateway/{tasks,files}/` 保留 24 小时供接入端下载；每个任务结束时向
-`.runtime/gateway/usage/YYYY-MM.jsonl` 追加一行使用记录（估价输入，费用由前端按价表算）。
+`.runtime/gateway/usage/YYYY-MM.jsonl` 追加一行使用记录（估价、结算金额与用量）。
 
 失败切换规则与 Job 完全一样（`model_routes.failover_reason`）：只在确定没执行的失败上换下一家。
 网关不转发给另一个网关（成员里 `provider="atelier"` 的一律跳过），避免两台网关互相转发。
@@ -18,9 +18,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
-from character_workflow.lib import data_root, keys, model_routes
+from character_workflow.lib import (
+    data_root, gateway_access, gateway_keys, gateway_quota, keys, model_routes,
+)
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.gateway_keys import GatewayKeyRecord
@@ -54,6 +56,12 @@ class GatewayTask(BaseModel):
     key_name: str
     idempotency_key: str = Field(max_length=200)
     route_id: str
+    kind: Literal["image", "image_edit", "layer_split", "video", "audio", "text"] = "image"
+    estimated_cny: float | None = None
+    reserved_cny: float = 0
+    charged_cny: float = 0
+    input_tokens: int | None = None
+    output_tokens: int | None = None
     prompt: str
     n: int
     size: str | None = None
@@ -80,10 +88,11 @@ class GatewayTask(BaseModel):
 class GatewayRequestError(Exception):
     """接入端请求不合法或不能受理；status 直接作为 HTTP 状态码。"""
 
-    def __init__(self, status: int, message: str) -> None:
+    def __init__(self, status: int, message: str, *, retry_after: int | None = None) -> None:
         super().__init__(message)
         self.status = status
         self.message = message
+        self.retry_after = retry_after
 
 
 # ---- 存储 ----
@@ -142,15 +151,6 @@ def _update(task_id: str, **changes: Any) -> GatewayTask:
 
 # ---- 受理 ----
 
-def images_used_today(key_id: str) -> int:
-    today = datetime.now().astimezone().date()
-    return sum(
-        task.n for task in _all_tasks()
-        if task.key_id == key_id and task.status in ("pending", "running", "done")
-        and datetime.fromisoformat(task.created_at).astimezone().date() == today
-    )
-
-
 def _gateway_members(route: model_routes.ModelRoute) -> list[model_routes.RouteMember]:
     return [member for member in route.members if member.provider != GATEWAY_PROVIDER]
 
@@ -159,11 +159,18 @@ def submit(
     key: GatewayKeyRecord, *, idempotency_key: str, model: str, prompt: str, n: int,
     size: str | None, params: dict[str, Any], references: list[tuple[str, bytes]],
 ) -> GatewayTask:
+    from character_workflow.lib.schemas import JobParams
+
+    gateway_access.check_route(key, "image", model)
     if not idempotency_key or len(idempotency_key) > 200:
         raise GatewayRequestError(422, "缺少 Idempotency-Key")
     unknown = sorted(set(params) - ALLOWED_PARAMS)
     if unknown:
         raise GatewayRequestError(422, f"网关不接受这些参数：{', '.join(unknown)}")
+    try:
+        params = JobParams.model_validate(params).model_dump(exclude_unset=True)
+    except ValidationError as error:
+        raise GatewayRequestError(422, "网关任务参数格式不对") from error
     if not prompt.strip() or len(prompt) > MAX_PROMPT_CHARS:
         raise GatewayRequestError(422, "提示词为空或过长")
     if not 1 <= n <= MAX_IMAGES_PER_TASK:
@@ -172,21 +179,17 @@ def submit(
         raise GatewayRequestError(422, f"参考图最多 {MAX_REFERENCE_IMAGES} 张")
     if any(len(data) > MAX_REFERENCE_BYTES for _name, data in references):
         raise GatewayRequestError(422, "单张参考图不能超过 20 MB")
-    try:
-        route = model_routes.find_route("image", model)
-    except model_routes.NoSuchRouteError as error:
-        raise GatewayRequestError(404, f"网关没有模型 {model}") from error
-    if not _gateway_members(route):
-        raise GatewayRequestError(404, f"网关没有模型 {model}")
 
     with _lock:
         existing = next((task for task in _all_tasks()
                          if task.key_id == key.id and task.idempotency_key == idempotency_key), None)
         if existing:
             return existing
-        if key.daily_image_limit is not None and \
-                images_used_today(key.id) + n > key.daily_image_limit:
-            raise GatewayRequestError(429, "今日额度已用完")
+        picked = _pick_member(model, [], key)
+        if picked is None:
+            raise GatewayRequestError(503, "网关没有可用的供应商")
+        estimate = _estimate(picked, n, size, params)
+        gateway_quota.admit(key, estimate or 0)
         task_id = uuid.uuid4().hex
         stored = []
         for index, (name, data) in enumerate(references):
@@ -199,10 +202,31 @@ def submit(
         task = _save(GatewayTask(
             task_id=task_id, key_id=key.id, key_name=key.name, idempotency_key=idempotency_key,
             route_id=model, prompt=prompt, n=n, size=size, params=params, references=stored,
-            created_at=now, updated_at=now,
+            created_at=now, updated_at=now, estimated_cny=estimate, reserved_cny=estimate or 0,
         ))
     pump()
     return task
+
+
+def _estimate(picked, n: int, size: str | None, params: dict) -> float | None:
+    from character_workflow.lib.generation_pricing import estimate_cost_cny
+    from character_workflow.lib.image_size import normalize_image_size_params
+
+    member, model = picked
+    effective = {**params, "n": n}
+    if size is not None:
+        effective["size"] = size
+    if effective.get("size_mode") is not None:
+        try:
+            effective = normalize_image_size_params(member, model.id, effective)
+        except ValueError as error:
+            raise GatewayRequestError(422, str(error)) from error
+    return estimate_cost_cny(
+        kind="image", provider=member.provider, base_url=member.base_url,
+        billing_group=member.billing_group, model_id=model.id, protocol=model.protocol, n=n,
+        size=effective.get("size"), size_mode=effective.get("size_mode"),
+        quality=effective.get("quality"), resolution=effective.get("resolution"),
+    )
 
 
 def get_task(key_id: str, task_id: str) -> GatewayTask:
@@ -267,7 +291,7 @@ def run_task(task: GatewayTask) -> GatewayTask:
     """执行一个网关任务直到终态；同步调用，测试直接用它。"""
     from character_workflow.lib.callers import dispatch
     from character_workflow.lib.image_size import normalize_image_size_params
-    from character_workflow.lib.job_runner import JobCanceled, _friendly_error
+    from character_workflow.lib.job_runner import JobCanceled
 
     task_id = task.task_id
     tried: list[str] = []
@@ -280,7 +304,15 @@ def run_task(task: GatewayTask) -> GatewayTask:
         return bool(current and current.cancel_requested)
 
     while True:
-        picked = _pick_member(task.route_id, tried)
+        owner = next((item for item in gateway_keys.read_config().keys
+                      if item.id == task.key_id and item.revoked_at is None), None)
+        if owner is None:
+            return _finish(_read(task_id), status="failed", error="网关密钥无效或已撤销")
+        try:
+            gateway_access.check_route(owner, "image", task.route_id)
+        except GatewayRequestError as error:
+            return _finish(_read(task_id), status="failed", error=error.message)
+        picked = _pick_member(task.route_id, tried, owner)
         if picked is None:
             return _exhausted(task_id, tried, warnings, switched_from, last_error)
         key, model = picked
@@ -315,11 +347,12 @@ def run_task(task: GatewayTask) -> GatewayTask:
                     should_cancel=should_cancel,
                 )
             except Exception as error:  # noqa: BLE001 — 每种失败都要落成终态
+                _record_cost(task_id, cost.get("usd"))
                 if isinstance(error, JobCanceled) or should_cancel():
                     return _finish(_read(task_id), status="canceled", error="已停止")
                 reason = model_routes.failover_reason(error)
                 if reason is None:
-                    message = _friendly_error(error)
+                    message = _safe_error(error)
                     kind: ErrorKind = "unconfirmed" if "未确认" in message else "failed"
                     return _finish(_read(task_id), status="failed", error=message, error_kind=kind)
                 model_routes.cool_down("image", key.alias, reason)
@@ -330,14 +363,15 @@ def run_task(task: GatewayTask) -> GatewayTask:
             return _store_outputs(task_id, [Path(path) for path in paths], cost.get("usd"))
 
 
-def _pick_member(route_id: str, tried: list[str]):
+def _pick_member(route_id: str, tried: list[str], owner: GatewayKeyRecord):
     try:
         route = model_routes.find_route("image", route_id)
     except model_routes.NoSuchRouteError:
         return None
-    gateways = [m.alias for m in route.members if m.provider == GATEWAY_PROVIDER]
+    gateways = [m.alias for m in route.members
+                if m.provider == GATEWAY_PROVIDER or not gateway_access.member_allowed(owner, m.alias)]
     picked = model_routes.next_member("image", route_id, exclude=[*gateways, *tried])
-    members = _gateway_members(route)
+    members = [m for m in _gateway_members(route) if gateway_access.member_allowed(owner, m.alias)]
     if picked is not None or tried or not members:
         return picked
     # 第一次选择时全组都在冷却：和「自动」一样仍用第一家。
@@ -347,18 +381,29 @@ def _pick_member(route_id: str, tried: list[str]):
 
 
 def _exhausted(task_id, tried, warnings, switched_from, last_error) -> GatewayTask:
-    from character_workflow.lib.job_runner import _friendly_error
-
-    detail = _friendly_error(last_error) if last_error else "网关没有可用的供应商"
+    detail = _safe_error(last_error) if last_error else "网关没有可用的供应商"
     # 只要最后一次是「确定没执行」的失败，接入端就可以换自己的 KEY。
     kind: ErrorKind = "unavailable" if switched_from else "failed"
     return _finish(_read(task_id), status="failed", error=f"网关的供应商都不可用：{detail}",
                    error_kind=kind, route_tried=list(tried), warnings=list(warnings))
 
 
-def _store_outputs(task_id: str, paths: list[Path], cost_usd: float | None) -> GatewayTask:
-    from character_workflow.lib.job_runner import USD_TO_CNY, image_dimensions
+def _record_cost(task_id: str, cost_usd: float | None) -> None:
+    if cost_usd is None:
+        return
+    from character_workflow.lib.job_runner import USD_TO_CNY
 
+    with _lock:
+        task = _read(task_id)
+        _update(task_id, actual_cost_cny=round(
+            (task.actual_cost_cny or 0) + cost_usd * USD_TO_CNY, 6,
+        ))
+
+
+def _store_outputs(task_id: str, paths: list[Path], cost_usd: float | None) -> GatewayTask:
+    from character_workflow.lib.job_runner import image_dimensions
+
+    _record_cost(task_id, cost_usd)
     task = _read(task_id)
     valid = [(path, dims) for path in paths if (dims := image_dimensions(path))][: task.n]
     if not valid:
@@ -372,16 +417,32 @@ def _store_outputs(task_id: str, paths: list[Path], cost_usd: float | None) -> G
         shutil.move(str(path), out / name)
         names.append(name)
     width, height = valid[0][1]
-    cost = round(cost_usd * USD_TO_CNY, 6) if cost_usd is not None else None
-    return _finish(task, status="done", outputs=names, actual_size=f"{width}x{height}",
-                   actual_cost_cny=cost)
+    return _finish(task, status="done", outputs=names, actual_size=f"{width}x{height}")
+
+
+def _safe_error(error: BaseException) -> str:
+    from character_workflow.lib.job_runner import _friendly_error
+
+    message = _friendly_error(error)
+    for key in keys.read_keys_db().keys:
+        for secret in (key.access_key, key.secret_key):
+            if secret:
+                message = message.replace(secret, "<redacted>")
+    return message
 
 
 def _finish(task: GatewayTask, **changes: Any) -> GatewayTask:
     with _lock:
-        done = _save(task.model_copy(update={**changes, "phase": None}))
-    _append_usage(done)
-    return done
+        current = _read(task.task_id)
+        if current is not None and current.status in TERMINAL:
+            return current
+        done = task.model_copy(update={**changes, "phase": None})
+        done.charged_cny = done.actual_cost_cny if done.actual_cost_cny is not None else (
+            (done.estimated_cny or 0) if done.status == "done" else 0
+        )
+        # Keep reservation -> settlement atomic to admission and /me readers.
+        _append_usage(done)
+        return _save(done)
 
 
 def _append_usage(task: GatewayTask) -> None:
@@ -394,11 +455,20 @@ def _append_usage(task: GatewayTask) -> None:
         "requested_n": task.n, "size": task.actual_size or task.params.get("size") or task.size,
         "quality": task.params.get("quality"), "resolution": task.params.get("resolution"),
         "status": task.status, "actual_cost_cny": task.actual_cost_cny,
-        "error_kind": task.error_kind,
+        "error_kind": task.error_kind, "kind": task.kind,
+        "estimated_cny": task.estimated_cny, "charged_cny": task.charged_cny,
+        "input_tokens": task.input_tokens, "output_tokens": task.output_tokens,
+        "duration": task.params.get("duration"),
+        "member_trail": list(dict.fromkeys([
+            *task.route_tried, *([task.member_alias] if task.member_alias else []),
+        ])),
     }
     path = usage_file(now.astimezone().strftime("%Y-%m"))
     path.parent.mkdir(parents=True, exist_ok=True)
     with file_lock(path.with_suffix(".lock")):
+        # A retry after writing usage but before saving terminal state must not double-charge.
+        if any(row.get("task_id") == task.task_id for row in read_usage(path.stem)):
+            return
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
@@ -414,6 +484,34 @@ def read_usage(month: str) -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             continue
     return rows
+
+
+def read_usage_range(start: datetime, end: datetime) -> list[dict[str, Any]]:
+    """Read all intersecting local-calendar month files, including cross-month weeks."""
+    rows = []
+    month = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    while month <= end:
+        for row in read_usage(month.strftime("%Y-%m")):
+            try:
+                at = datetime.fromisoformat(row["time"])
+                if start <= at <= end:
+                    rows.append(row)
+            except (KeyError, ValueError, TypeError):
+                continue
+        month = month.replace(year=month.year + 1, month=1) if month.month == 12 else (
+            month.replace(month=month.month + 1)
+        )
+    return rows
+
+
+def last_used_at(key_id: str) -> str | None:
+    times = [task.created_at for task in _all_tasks() if task.key_id == key_id]
+    for path in sorted((_root() / "usage").glob("*.jsonl"), reverse=True):
+        found = [row["time"] for row in read_usage(path.stem) if row.get("key_id") == key_id]
+        if found:
+            times.extend(found)
+            break
+    return max(times, key=datetime.fromisoformat) if times else None
 
 
 # ---- 启动恢复与清理 ----

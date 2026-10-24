@@ -13,7 +13,7 @@ import {
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { estimateGenerationCost, formatGenerationCost } from '@/lib/generationCost';
+import { formatGenerationCost } from '@/lib/generationCost';
 
 const HINT = '同一局域网的同事在「API 密钥」里添加「局域网 Atelier」，填这里的地址和对应的网关密钥。'
   + '连接是明文 HTTP；首次开启时系统可能询问是否允许传入连接。';
@@ -22,28 +22,18 @@ const rowButton =
 const primaryButton =
   'rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
-interface PersonUsage { images: number; failed: number; cost: number; priced: boolean }
+const PERIOD_LABELS = { day: '今日', week: '本周', month: '本月' };
+interface PersonUsage { images: number; failed: number; cost: number; unpriced: number }
 
-/** 本月按网关密钥汇总：费用优先用网关回传的实际费用，没有就按价表估；估不出的标「约」。 */
+/** 只汇总网关的结算金额；无价调用单独计数。 */
 export function summarizeUsage(rows: GatewayUsageRow[]): Map<string, PersonUsage> {
   const people = new Map<string, PersonUsage>();
   for (const row of rows) {
-    const person = people.get(row.key_id) ?? { images: 0, failed: 0, cost: 0, priced: true };
+    const person = people.get(row.key_id) ?? { images: 0, failed: 0, cost: 0, unpriced: 0 };
     person.images += row.n;
     if (row.status === 'failed') person.failed += 1;
-    if (row.status === 'done') {
-      const cost = row.actual_cost_cny ?? (row.provider && row.model_id ? estimateGenerationCost({
-        provider: { provider: row.provider, baseUrl: row.base_url },
-        model: { id: row.model_id },
-        kind: 'image',
-        count: row.n,
-        size: row.size ?? undefined,
-        quality: (row.quality ?? undefined) as 'low' | 'medium' | 'high' | 'auto' | undefined,
-        resolution: row.resolution ?? undefined,
-      }) : null);
-      if (cost == null) person.priced = false;
-      else person.cost += cost;
-    }
+    person.cost = Math.round((person.cost + row.charged_cny) * 1_000_000) / 1_000_000;
+    if (row.estimated_cny == null && row.actual_cost_cny == null) person.unpriced += 1;
     people.set(row.key_id, person);
   }
   return people;
@@ -89,7 +79,10 @@ export function LanSharingSection() {
     if (!name) return;
     const limit = newLimit.trim() === '' ? null : Number(newLimit);
     await run(async () => {
-      const result = await createGatewayKey(name, limit);
+      const result = await createGatewayKey({
+        name, limits: limit === null ? [] : [{ period: 'day', cap_cny: limit }],
+        allowed_models: null, allowed_aliases: null,
+      });
       setCreated({ name, token: result.token });
       setNewName('');
       setNewLimit('');
@@ -175,9 +168,12 @@ export function LanSharingSection() {
                   <div className="min-w-0">
                     <span className={`text-sm ${key.revoked_at ? 'text-muted-foreground line-through' : 'text-foreground'}`}>{key.name}</span>
                     <p className="text-xs text-muted-foreground">
-                      今日 {key.used_today}{key.daily_image_limit === null ? '' : ` / ${key.daily_image_limit}`} 张
+                      {key.limits_status.length === 0 ? '不限额' : key.limits_status.map(limit =>
+                        `${PERIOD_LABELS[limit.period]} ${formatGenerationCost(limit.used_cny + limit.reserved_cny)} / ${formatGenerationCost(limit.cap_cny)}`,
+                      ).join(' · ')}
                       {person && ` · 本月 ${person.images} 张`}
-                      {person && person.cost > 0 && ` · ${person.priced ? '' : '约 '}${formatGenerationCost(person.cost)}`}
+                      {` · 本月 ${formatGenerationCost(key.month_charged_cny)}`}
+                      {person && person.unpriced > 0 && ` · 未计价 ${person.unpriced} 次`}
                       {person && person.failed > 0 && ` · 失败 ${person.failed}`}
                     </p>
                   </div>
@@ -217,9 +213,9 @@ export function LanSharingSection() {
         >
           <Input aria-label="使用人" placeholder="使用人" value={newName} maxLength={40}
             onChange={event => setNewName(event.target.value)} className="h-9 w-36" />
-          <Input aria-label="每日上限（张）" placeholder="每日上限，留空不限" inputMode="numeric" value={newLimit}
-            onChange={event => setNewLimit(event.target.value.replace(/\D/g, ''))} className="h-9 w-44" />
-          <button type="submit" disabled={busy || !newName.trim()} className={primaryButton}>新建密钥</button>
+          <Input aria-label="每日上限（元）" placeholder="每日金额，留空不限" inputMode="decimal" type="number" min="0.000001" max="1000000" step="any" value={newLimit}
+            onChange={event => setNewLimit(event.target.value)} className="h-9 w-44" />
+          <button type="submit" disabled={busy || !newName.trim() || (newLimit !== '' && !(Number(newLimit) > 0 && Number(newLimit) <= 1_000_000))} className={primaryButton}>新建密钥</button>
         </form>
 
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

@@ -38,7 +38,7 @@ def _seed_keys() -> None:
     for alias, provider in (("A", "openai"), ("B", "openai"), ("Hub", "atelier")):
         keys.add_key(keys.KeySpec(
             alias=alias, provider=provider, access_key="test-only", modalities=["image"],
-            base_url="http://192.0.2.1:5180" if provider == "atelier" else None,
+            base_url="http://192.0.2.1:5180" if provider == "atelier" else "https://api.openai-hk.com",
             models=[keys.ModelSpec(id="gpt-image-2", name="gpt-image-2", modality="image")],
             created_at="test"))
     keys.set_default_alias("Hub")
@@ -58,7 +58,7 @@ def _dispatch(calls: list[dict], fail: dict[str, BaseException] | None = None):
 @pytest.fixture
 def client(isolated_data_root):
     _seed_keys()
-    record, token = gateway_keys.create_key("小王", daily_image_limit=3)
+    record, token = gateway_keys.create_key("小王", limits=[{"period": "day", "cap_cny": 0.24}])
     test_client = TestClient(create_gateway_app())
     test_client.headers["Authorization"] = f"Bearer {token}"
     test_client.record = record  # type: ignore[attr-defined]
@@ -92,7 +92,7 @@ def test_gateway_app_only_serves_gateway_routes_with_a_key(client):
     wrong = anonymous.get("/gateway/v1/info", headers={"Authorization": "Bearer atg_nope"})
     assert wrong.status_code == 401
     info = client.get("/gateway/v1/info").json()
-    assert info["protocol"] == 1 and info["version"]
+    assert info["protocol"] == 2 and info["version"]
 
 
 def test_models_hide_other_gateways_and_never_include_secrets(client):
@@ -123,10 +123,11 @@ def test_same_idempotency_key_returns_the_same_task(client):
     assert _submit(client, key="job-1:1").json()["task_id"] != first
 
 
-def test_daily_image_limit_returns_429(client):
+def test_money_limit_returns_429(client):
     assert _submit(client, key="a", n=2).status_code == 202
     response = _submit(client, key="b", n=2)
-    assert response.status_code == 429 and response.json()["detail"] == "今日额度已用完"
+    assert response.status_code == 429 and "中转额度已用完：今日" in response.json()["detail"]
+    assert int(response.headers["retry-after"]) > 0
 
 
 def test_tasks_are_private_to_their_key(client):
@@ -227,16 +228,17 @@ def test_management_api_creates_keys_toggles_and_reports_usage(isolated_data_roo
     monkeypatch.setattr(gateway_routes.gateway_server, "apply",
                         lambda config: applied.append(config.enabled))
     local = LocalTestClient(base_url="http://127.0.0.1", app=build_app())
-    created = local.post("/api/gateway/keys", json={"name": "小王", "daily_image_limit": 50})
+    created = local.post("/api/gateway/keys", json={"name": "小王", "limits": [{"period": "day", "cap_cny": 50}]})
     assert created.status_code == 201
     token, key_id = created.json()["token"], created.json()["key"]["id"]
     view = local.get("/api/gateway").json()
     assert token not in json.dumps(view)
-    assert view["keys"][0] == {**view["keys"][0], "name": "小王", "used_today": 0}
+    assert view["keys"][0] == {**view["keys"][0], "name": "小王", "month_charged_cny": 0}
     assert local.put("/api/gateway", json={"enabled": True}).json()["enabled"] is True
     assert applied == [True]
     assert local.patch(f"/api/gateway/keys/{key_id}",
-                       json={"daily_image_limit": 10}).json()["daily_image_limit"] == 10
+                       json={"limits": [{"period": "week", "cap_cny": 10}]}).json()["limits"] == [
+                           {"period": "week", "cap_cny": 10}]
     assert local.post(f"/api/gateway/keys/{key_id}/revoke").json()["revoked_at"]
     assert local.get("/api/gateway/usage").json()["rows"] == []
     assert local.get("/api/gateway/usage?month=bad").status_code == 422

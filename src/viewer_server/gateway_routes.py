@@ -11,9 +11,9 @@ from typing import Annotated
 
 import requests
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from character_workflow.lib import gateway_keys, gateway_tasks, keys
+from character_workflow.lib import gateway_keys, gateway_quota, gateway_tasks, keys, model_routes
 from character_workflow.lib.callers import atelier_gateway
 from viewer_server.gateway_app import gateway_server
 
@@ -27,23 +27,26 @@ class GatewaySettingsPatch(BaseModel):
     name: str | None = Field(default=None, max_length=40)
 
 
-class GatewayKeyCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class GatewayKeyCreate(gateway_keys.GatewayPolicy):
     name: Annotated[str, Field(min_length=1, max_length=40)]
-    daily_image_limit: int | None = Field(default=None, ge=0, le=100_000)
 
 
-class GatewayKeyLimit(BaseModel):
+class GatewayKeyPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    daily_image_limit: int | None = Field(default=None, ge=0, le=100_000)
+    name: str | None = Field(default=None, min_length=1, max_length=40)
+    limits: list[gateway_keys.GatewayLimit] | None = Field(default=None, max_length=3)
+    allowed_models: list[str] | None = None
+    allowed_aliases: list[str] | None = None
 
 
 def _key_view(record: gateway_keys.GatewayKeyRecord) -> dict:
-    return {
-        "id": record.id, "name": record.name, "daily_image_limit": record.daily_image_limit,
-        "created_at": record.created_at, "revoked_at": record.revoked_at,
-        "used_today": gateway_tasks.images_used_today(record.id),
-    }
+    with gateway_tasks._lock:
+        return {
+            **record.model_dump(mode="json", exclude={"token_sha256"}),
+            "limits_status": gateway_quota.usage_summary(record),
+            **gateway_quota.month_summary(record),
+            "last_used_at": gateway_tasks.last_used_at(record.id),
+        }
 
 
 def _view() -> dict:
@@ -70,16 +73,21 @@ def update_gateway(body: GatewaySettingsPatch) -> dict:
 
 @gateway_router.post("/keys", status_code=201)
 def create_gateway_key(body: GatewayKeyCreate) -> dict:
-    record, token = gateway_keys.create_key(body.name, body.daily_image_limit)
+    try:
+        record, token = gateway_keys.create_key(**body.model_dump())
+    except ValidationError as error:
+        raise HTTPException(422, "网关密钥配置不合法") from error
     return {"key": _key_view(record), "token": token}
 
 
 @gateway_router.patch("/keys/{key_id}")
-def set_gateway_key_limit(key_id: str, body: GatewayKeyLimit) -> dict:
+def update_gateway_key(key_id: str, body: GatewayKeyPatch) -> dict:
     try:
-        return _key_view(gateway_keys.set_daily_limit(key_id, body.daily_image_limit))
+        return _key_view(gateway_keys.update_key(key_id, **body.model_dump(exclude_unset=True)))
     except gateway_keys.NoSuchGatewayKeyError as error:
         raise HTTPException(404, "网关密钥不存在") from error
+    except ValidationError as error:
+        raise HTTPException(422, "网关密钥配置不合法（限额窗口不能重复）") from error
 
 
 @gateway_router.post("/keys/{key_id}/revoke")
@@ -99,6 +107,16 @@ def gateway_usage(month: str | None = Query(default=None)) -> dict:
     if not _MONTH.fullmatch(month):
         raise HTTPException(422, "month 格式应为 YYYY-MM")
     return {"month": month, "rows": gateway_tasks.read_usage(month)}
+
+
+@gateway_router.get("/options")
+def gateway_options() -> dict:
+    return {
+        "models": [{"id": route.id, "name": route.name, "modality": route.modality}
+                   for route in model_routes.list_routes()],
+        "aliases": [{"alias": key.alias, "provider": key.provider, "name": key.alias}
+                    for key in keys.read_keys_db().keys if key.provider != "atelier"],
+    }
 
 
 # ---- 接入端：局域网 Atelier 供应商 ----

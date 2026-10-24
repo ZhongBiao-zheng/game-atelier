@@ -2,14 +2,38 @@ import { requestJson } from './http';
 import type { KeyModel } from './keys';
 
 /** 局域网共享（ADR-0025）：本机作为网关的设置、网关密钥与用量；接入端测试连接与同步模型。 */
-export interface GatewayKey {
-  id: string;
+export type LimitPeriod = 'day' | 'week' | 'month';
+export interface GatewayLimit { period: LimitPeriod; cap_cny: number }
+export interface LimitStatus extends GatewayLimit {
+  used_cny: number;
+  reserved_cny: number;
+  left_cny: number;
+  resets_at: string;
+}
+export interface GatewayKeyInput {
   name: string;
-  /** null = 不限张数。 */
-  daily_image_limit: number | null;
+  limits: GatewayLimit[];
+  allowed_models: string[] | null;
+  allowed_aliases: string[] | null;
+}
+export interface GatewayKey extends GatewayKeyInput {
+  id: string;
   created_at: string;
   revoked_at: string | null;
-  used_today: number;
+  limits_status: LimitStatus[];
+  month_charged_cny: number;
+  month_calls: number;
+  last_used_at: string | null;
+}
+export interface GatewayMe {
+  name: string;
+  limits: LimitStatus[];
+  month_charged_cny: number;
+  month_calls: number;
+}
+export interface GatewayOptions {
+  models: { id: string; name: string; modality: 'image' | 'video' | 'audio' | 'text' }[];
+  aliases: { alias: string; provider: string; name: string }[];
 }
 
 export interface GatewayState {
@@ -22,6 +46,13 @@ export interface GatewayState {
 }
 
 export interface GatewayUsageRow {
+  kind: 'image' | 'image_edit' | 'layer_split' | 'video' | 'audio' | 'text';
+  estimated_cny: number | null;
+  charged_cny: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  duration: number | null;
+  member_trail: string[];
   time: string;
   key_id: string;
   key_name: string;
@@ -58,16 +89,20 @@ export async function updateGateway(patch: { enabled?: boolean; port?: number; n
   }));
 }
 
-export async function createGatewayKey(name: string, dailyImageLimit: number | null) {
+export async function createGatewayKey(payload: GatewayKeyInput) {
   return requestJson<{ key: GatewayKey; token: string }>('/api/gateway/keys', '新建网关密钥', {
-    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ name, daily_image_limit: dailyImageLimit }),
+    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(payload),
   });
 }
 
-export async function setGatewayKeyLimit(id: string, dailyImageLimit: number | null) {
-  return requestJson<GatewayKey>(`/api/gateway/keys/${encodeURIComponent(id)}`, '修改每日上限', {
-    method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ daily_image_limit: dailyImageLimit }),
+export async function updateGatewayKey(id: string, patch: Partial<GatewayKeyInput>) {
+  return requestJson<GatewayKey>(`/api/gateway/keys/${encodeURIComponent(id)}`, '修改网关密钥', {
+    method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(patch),
   });
+}
+
+export async function fetchGatewayOptions() {
+  return requestJson<GatewayOptions>('/api/gateway/options', '读取网关模型与供应商');
 }
 
 export async function revokeGatewayKey(id: string) {
