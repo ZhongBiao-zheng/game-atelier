@@ -33,6 +33,12 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.105.0',
+    date: '2026-10-24',
+    headline: '界面换新：石墨底与可选主题色',
+    changes: [{ kind: 'feat', text: '新增七套主题色、自定义配色与跟随系统，控制台导航、用量图表和网关页面同步换新。' }],
+  },
+  {
     version: '5.104.1',
     date: '2026-10-24',
     headline: '用量页与供应商列表修正',
