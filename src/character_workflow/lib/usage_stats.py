@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from urllib.parse import quote, urlencode
 
+from .canvas_runs import canvas_numbering_prefix
 from .schemas import Job
 
 
@@ -37,6 +38,13 @@ def job_location(job: Job, assignments: dict[str, str]) -> str | None:
     return None
 
 
+def user_prompt(job: Job) -> str:
+    """画布冻结时补在开头的参考素材编号是内部模板，展示时只留画师自己写的内容。"""
+    if job.canvas_run is None:
+        return job.prompt
+    return job.prompt.removeprefix(canvas_numbering_prefix(job.canvas_run.snapshot.inputs))
+
+
 def mine_records(
     jobs: list[Job], canvas_names: dict[str, str], project_names: dict[str, str],
     assignments: dict[str, str],
@@ -61,7 +69,7 @@ def mine_records(
             "id": job.job_id, "cost_cny": cost or 0, "at": job.submitted_at,
             "kind": job.kind.value, "model": job.model, "label": label,
             "project": project_key, "source": "lan" if job.provider == "atelier" else "local",
-            "failed": job.status == "failed", "prompt": job.prompt[:120],
+            "failed": job.status == "failed", "prompt": user_prompt(job)[:120],
             "thumb_url": "/api/raw?" + urlencode({"job_id": job.job_id, "path": job.output_paths[0]})
             if job.output_paths else None,
             "href": job_location(job, assignments),
@@ -96,7 +104,7 @@ def aggregate_usage(
                 and (scope != "team" or not member or row.get("member") == member)]
     current = [(row, at) for row, at in selected if start <= at <= now]
     previous = sum(row["cost_cny"] for row, at in selected if previous_start <= at < start)
-    bucket = "day" if period in {"today", "7d"} else "week"
+    bucket = "day" if period in {"today", "7d", "30d"} else "week"
 
     def bucket_start(at):
         day = at.replace(hour=0, minute=0, second=0, microsecond=0)

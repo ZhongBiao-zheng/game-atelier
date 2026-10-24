@@ -1,6 +1,6 @@
 import { Link } from 'wouter';
 import { useCallback, useEffect, useState } from 'react';
-import { Copy, HelpCircle } from 'lucide-react';
+import { Copy } from 'lucide-react';
 import {
   fetchGateway,
   fetchGatewayOptions,
@@ -18,7 +18,7 @@ import { KeyForm } from './lan-sharing/KeyForm';
 import { Tasks } from './lan-sharing/Tasks';
 import { button, date, PERIODS } from './lan-sharing/shared';
 
-const HINT =
+export const GATEWAY_HINT =
   '同事在 API 密钥中添加局域网 Atelier，填写地址和网关密钥。连接使用明文 HTTP。同事连不上时检查防火墙：Windows 把当前网络设为「专用网络」，并在防火墙中允许 Atelier（Python）入站；macOS 首次开启时在弹窗中点「允许」。';
 export function LanSharingSection() {
   const [state, setState] = useState<GatewayState | null>(null);
@@ -58,16 +58,8 @@ export function LanSharingSection() {
       : null;
   return (
     <>
-      <div className="flex items-center gap-1.5">
-        <h2 className="text-base font-medium">局域网共享</h2>
-        <button
-          title={HINT}
-          aria-label={HINT}
-          className="text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        >
-          <HelpCircle className="size-3.5" aria-hidden />
-        </button>
-        <div className="ml-auto flex items-center gap-2">
+      <div className="flex items-center">
+        <div className="flex items-center gap-2">
           <span className="text-sm">共享本机供应商</span>
           <Switch
             label="开启局域网共享"

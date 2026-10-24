@@ -5,3 +5,6 @@ export function fetchUsage(params: {
 }): Promise<UsageResponse> {
   return requestJson<UsageResponse>(`/api/usage?${new URLSearchParams(params)}`, '读取用量');
 }
+export function fetchKeyLastUsed(): Promise<Record<string, string>> {
+  return requestJson<Record<string, string>>('/api/usage/key-last-used', '读取最近使用');
+}

@@ -81,7 +81,7 @@ export function UsagePage() {
   return (
     <div className="min-w-0 space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex rounded-lg border border-border p-1" aria-label="用量范围">
+        {enabled && <div className="flex rounded-lg border border-border p-1" aria-label="用量范围">
           <button
             className={`${chip} ${scope === 'mine' ? 'bg-secondary' : ''}`}
             aria-pressed={scope === 'mine'}
@@ -89,16 +89,14 @@ export function UsagePage() {
           >
             我的
           </button>
-          {enabled && (
-            <button
-              className={`${chip} ${scope === 'team' ? 'bg-secondary' : ''}`}
-              aria-pressed={scope === 'team'}
-              onClick={() => change('scope', 'team')}
-            >
-              团队
-            </button>
-          )}
-        </div>
+          <button
+            className={`${chip} ${scope === 'team' ? 'bg-secondary' : ''}`}
+            aria-pressed={scope === 'team'}
+            onClick={() => change('scope', 'team')}
+          >
+            团队
+          </button>
+        </div>}
         <div
           className="flex max-w-full overflow-x-auto rounded-lg border border-border p-1"
           aria-label="时间范围"

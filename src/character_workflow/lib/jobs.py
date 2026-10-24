@@ -172,6 +172,26 @@ def list_jobs() -> list[Job]:
     return jobs
 
 
+def last_used_by_alias() -> dict[str, str]:
+    """每把 KEY 最近一次提交生成的时间。只读 alias / submitted_at 两个字段，不做整条校验。"""
+    jobs_dir = _runtime_dir() / "jobs"
+    latest: dict[str, tuple[datetime, str]] = {}
+    for p in jobs_dir.glob("*.json") if jobs_dir.exists() else []:
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+            alias, submitted = raw.get("alias"), raw.get("submitted_at")
+            if not alias or not submitted:
+                continue
+            at = datetime.fromisoformat(submitted)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError, AttributeError):
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        if alias not in latest or at > latest[alias][0]:
+            latest[alias] = (at, submitted)
+    return {alias: submitted for alias, (_, submitted) in latest.items()}
+
+
 def write_job(
     *, job_id: str, character_id: str, prompt: str, model: str,
     params: dict[str, Any],

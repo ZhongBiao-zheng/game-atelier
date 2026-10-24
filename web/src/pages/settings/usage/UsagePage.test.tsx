@@ -53,6 +53,13 @@ describe('用量筛选', () => {
     await waitFor(() => expect(location.history.at(-1)).toContain('range=7d'));
     expect(fetchUsage).toHaveBeenLastCalledWith(expect.objectContaining({ scope: 'team', range: '7d' }));
   });
+  it('网关未开启时不显示只剩「我的」的分段', async () => {
+    vi.mocked(fetchGateway).mockResolvedValue({ enabled: false } as Awaited<ReturnType<typeof fetchGateway>>);
+    setup();
+    await waitFor(() => expect(fetchUsage).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: '我的' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '团队' })).toBeNull();
+  });
   it('来源根据区间内 sources 显示', async () => {
     vi.mocked(fetchUsage).mockResolvedValue({ ...empty, sources: ['local', 'lan'] });
     setup();

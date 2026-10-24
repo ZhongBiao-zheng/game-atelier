@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.104.1',
+    date: '2026-10-24',
+    headline: '用量页与供应商列表修正',
+    changes: [
+      { kind: 'fix', text: '最贵的任务只显示自己写的提示词，不再带画布补上的参考素材编号。' },
+      { kind: 'fix', text: '供应商列表显示最近使用时间，近 7 天用过的亮绿点。' },
+      { kind: 'fix', text: '30 天趋势按日显示；没开局域网共享时不再显示只有「我的」的切换。' },
+    ],
+  },
+  {
     version: '5.104.0',
     date: '2026-10-24',
     headline: '设置改成控制台，新增用量页',

@@ -18,13 +18,16 @@ export function TrendChart({ data }: { data: UsageResponse }) {
                   style={{ height: `${(row.cost_cny / max) * 100}%`, minHeight: 2 }}
                 />
               </div>
-              <span className="mt-2 truncate text-center text-xs text-muted-foreground">
-                {index === 0 || index === data.trend.length - 1 ? row.start.slice(5) : ''}
-              </span>
             </div>
           ))}
         </div>
       </div>
+      {data.trend.length > 0 && (
+        <div className="flex justify-between text-xs text-muted-foreground">
+          <span>{data.trend[0].start.slice(5)}</span>
+          <span>{data.trend[data.trend.length - 1].start.slice(5)}</span>
+        </div>
+      )}
     </section>
   );
 }

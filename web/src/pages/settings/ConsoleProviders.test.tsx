@@ -10,6 +10,9 @@ vi.mock('@/api/keys', async original => ({
     { alias: 'lan', provider: 'atelier', access_key: '***', models: [] },
   ] }),
 }));
+vi.mock('@/api/usage', () => ({
+  fetchKeyLastUsed: async () => ({ local: new Date().toISOString() }),
+}));
 vi.mock('@/api/models', () => ({
   listModelRoutes: async () => [{ id: 'gpt', name: 'GPT', modality: 'image', members: [
     { alias: 'A', provider: 'custom' }, { alias: 'B', provider: 'custom' },
@@ -29,6 +32,9 @@ it('局域网排第一且不显示额度', async () => {
   expect(rows[1]).toHaveTextContent('lan');
   expect(rows[2]).toHaveTextContent('local');
   expect(screen.queryByLabelText('中转额度')).not.toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.getAllByRole('row')[2].querySelector('[aria-label="近 7 天用过"]')).not.toBeNull());
+  expect(screen.getAllByRole('row')[1].querySelector('[aria-label="近 7 天未用"]')).not.toBeNull();
 });
 describe('路由成员', () => {
   it('显示欠费时间与全部欠费，恢复后移除状态', async () => {

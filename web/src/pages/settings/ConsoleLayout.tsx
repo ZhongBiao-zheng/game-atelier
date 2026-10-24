@@ -1,25 +1,30 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ComponentType } from 'react';
 import { Link, Redirect, useLocation } from 'wouter';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, HelpCircle } from 'lucide-react';
 import { listKeys, type KeyView } from '@/api/keys';
 import { fetchGatewayProviderMe } from '@/api/gateway';
 import { subscribeGatewayEvents } from '@/api/gatewayEvents';
 import { ProvidersPage } from './ProvidersPage';
 import { RoutesPage } from './RoutesPage';
 import { GatewayPage } from './GatewayPage';
+import { GATEWAY_HINT } from './LanSharingSection';
+import { SYNC_HINT } from './TeamLibrariesSection';
 import { UsagePage } from './usage/UsagePage';
 import { LibrariesPage } from './LibrariesPage';
 import { AgentPage } from './AgentPage';
 import { PreferencesPage } from './PreferencesPage';
 
-export const CONSOLE_NAV = [
+export const CONSOLE_NAV: {
+  group: string;
+  items: { path: string; label: string; page: ComponentType; hint?: string }[];
+}[] = [
   { group: '模型', items: [
     { path: '/settings/providers', label: '供应商', page: ProvidersPage },
     { path: '/settings/routes', label: '路由', page: RoutesPage },
-    { path: '/settings/gateway', label: '网关', page: GatewayPage },
+    { path: '/settings/gateway', label: '网关', page: GatewayPage, hint: GATEWAY_HINT },
   ] },
   { group: '观测', items: [{ path: '/settings/usage', label: '用量', page: UsagePage }] },
-  { group: '资源', items: [{ path: '/settings/libraries', label: '团队库', page: LibrariesPage }] },
+  { group: '资源', items: [{ path: '/settings/libraries', label: '团队库', page: LibrariesPage, hint: SYNC_HINT }] },
   { group: '扩展', items: [{ path: '/settings/agent', label: 'Agent 连接', page: AgentPage }] },
   { group: '', items: [{ path: '/settings/preferences', label: '设置', page: PreferencesPage }] },
 ];
@@ -82,7 +87,13 @@ export function ConsoleLayout() {
       </nav>
     </aside>
     <main className="min-w-0 flex-1 space-y-6 p-4 md:p-8">
-      <h1 className="text-base font-medium">{current.label}</h1>
+      <div className="flex items-center gap-1.5">
+        <h1 className="text-base font-medium">{current.label}</h1>
+        {current.hint && <button type="button" title={current.hint} aria-label={current.hint}
+          className="text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          <HelpCircle className="size-3.5" aria-hidden />
+        </button>}
+      </div>
       <Page />
     </main>
   </div>;

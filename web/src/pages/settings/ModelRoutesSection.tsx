@@ -58,8 +58,7 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
   }
 
   return (
-    <section aria-label="模型路由" className="mt-6">
-      <h2 className="mb-2 text-sm font-medium text-foreground">模型路由</h2>
+    <section aria-label="模型路由">
       {error && <p role="alert" className="mb-2 text-sm text-destructive">{error}</p>}
       <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
         {shared.map(route => (

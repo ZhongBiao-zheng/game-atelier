@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { KeyCard, type KeyRow } from '@/components/keys/KeyCard';
 import { KeyForm } from './KeyForm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { listKeys, deleteKey } from '@/api/keys';
+import { fetchKeyLastUsed } from '@/api/usage';
 import type { KeyCreatePayload } from '@/api/keys';
 
 interface Props {
@@ -28,14 +29,19 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     onConfirm: () => void;
   } | null>(null);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const resp = await listKeys();
+      // 「最近使用」只是辅助列：读不到时显示「—」，不挡住供应商列表本身。
+      const none: Record<string, string> = {};
+      const [resp, lastUsed] = await Promise.all([
+        listKeys(),
+        embedded ? fetchKeyLastUsed().catch(() => none) : none,
+      ]);
       setKeys(
         resp.keys
-          .map(toKeyRow)
+          .map((k) => toKeyRow({ ...k, last_used_at: lastUsed[k.alias] ?? null }))
           .sort((a, b) => Number(b.provider === 'atelier') - Number(a.provider === 'atelier')),
       );
     } catch (e: unknown) {
@@ -43,11 +49,11 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [embedded]);
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [refresh]);
 
   const onCreated = () => {
     setShowForm(false);

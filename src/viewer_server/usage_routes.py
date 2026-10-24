@@ -13,6 +13,12 @@ from character_workflow.lib.usage_stats import (
 usage_router = APIRouter(prefix="/api")
 
 
+@usage_router.get("/usage/key-last-used")
+def key_last_used() -> dict[str, str]:
+    """供应商列表的「最近使用」：alias → 最近一次提交时间。"""
+    return jobs.last_used_by_alias()
+
+
 @usage_router.get("/usage", response_model=UsageResponse, response_model_exclude_unset=True)
 def get_usage(
     scope: Literal["mine", "team"] = "mine",

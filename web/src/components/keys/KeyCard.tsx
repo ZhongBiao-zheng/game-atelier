@@ -32,6 +32,8 @@ interface Props {
   table?: boolean;
 }
 
+const RECENT_USE_MS = 7 * 24 * 60 * 60 * 1000;
+
 /** 档案柜的一行：厂商名 + 掩码/链接第二行，右侧模型摘要 chip 与 ghost 操作。 */
 export function KeyCard({ row, onEdit, onDelete, table = false }: Props) {
   const linkUrl = row.homepage_url || row.base_url;
@@ -42,10 +44,16 @@ export function KeyCard({ row, onEdit, onDelete, table = false }: Props) {
   const videoCount = models.filter((m) => modelModality(m, row) === 'video').length;
   const audioCount = models.filter((m) => modelModality(m, row) === 'audio').length;
 
+  const recentlyUsed = row.last_used_at
+    ? Date.now() - new Date(row.last_used_at).getTime() < RECENT_USE_MS : false;
   if (table) return <tr className="border-t border-border text-sm">
     <td className="px-4 py-3">
       <div className="flex items-center gap-2 whitespace-nowrap">
-        <span className="size-1.5 rounded-full bg-[color:var(--status-pending)]" />
+        <span
+          aria-label={recentlyUsed ? '近 7 天用过' : '近 7 天未用'}
+          className={`size-1.5 rounded-full ${recentlyUsed
+            ? 'bg-[color:var(--status-done)]' : 'bg-[color:var(--status-pending)]'}`}
+        />
         <span>{row.alias}</span>
         <span className="rounded-sm bg-secondary px-1.5 py-0.5 text-xs text-muted-foreground">{vendorName}</span>
       </div>

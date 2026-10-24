@@ -1,8 +1,11 @@
+import json
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
 from character_workflow.lib import gateway_keys, gateway_tasks
+from character_workflow.lib.canvas_runs import canvas_numbering_prefix
 from character_workflow.lib.schemas import Job, JobParams
 from character_workflow.lib.usage_stats import aggregate_usage, job_location, mine_records, team_records
 from tests.local_client import LocalTestClient
@@ -40,6 +43,15 @@ def test_cost_rules(status, actual, estimated, expected):
     assert len(result["top"][0]["prompt"]) == 120
 
 
+def test_canvas_numbering_prefix_is_not_shown():
+    inputs = [SimpleNamespace(source="connection", kind="image"), SimpleNamespace(source="connection", kind="text")]
+    prompt = canvas_numbering_prefix(inputs) + "雨夜集市"
+    canvas = job(prompt=prompt).model_copy(update={
+        "canvas_run": SimpleNamespace(snapshot=SimpleNamespace(inputs=inputs))})
+    assert prompt.startswith("参考素材编号")
+    assert mine([canvas])[0]["prompt"] == "雨夜集市"
+
+
 def test_unsubmitted_canceled_and_text_are_excluded():
     assert mine([job(status="pending_confirm"), job(status="canceled"), job(kind="text")]) == []
 
@@ -62,7 +74,7 @@ def test_project_labels_and_distinct_ids():
 
 @pytest.mark.parametrize("period,bucket,first,length", [
     ("today", "day", "2026-10-24", 1), ("7d", "day", "2026-10-18", 7),
-    ("30d", "week", "2026-09-21", 5), ("90d", "week", "2026-07-27", 13),
+    ("30d", "day", "2026-09-25", 30), ("90d", "week", "2026-07-27", 13),
 ])
 def test_empty_buckets_cross_month(period, bucket, first, length):
     result = aggregate_usage([], scope="mine", period=period, now=NOW)
@@ -132,6 +144,21 @@ def test_usage_api_local_access_and_team_disabled(monkeypatch):
     assert result["members"] == [{"id": key.id, "name": "同事"}]
 
 
+def test_key_last_used_takes_latest_per_alias():
+    from character_workflow.lib import jobs
+    jobs_dir = jobs._runtime_dir() / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    rows = {"a": ("hk", "2026-10-20T10:00:00+08:00"), "b": ("hk", "2026-10-22T09:00:00+08:00"),
+            "c": ("tuzi", "2026-10-01T09:00:00+08:00"), "d": (None, "2026-10-23T09:00:00+08:00")}
+    for name, (alias, at) in rows.items():
+        (jobs_dir / f"{name}.json").write_text(json.dumps({"alias": alias, "submitted_at": at}))
+    (jobs_dir / "broken.json").write_text("{")
+    expected = {"hk": "2026-10-22T09:00:00+08:00", "tuzi": "2026-10-01T09:00:00+08:00"}
+    assert jobs.last_used_by_alias() == expected
+    client = LocalTestClient(app=build_app(), base_url="http://127.0.0.1")
+    assert client.get("/api/usage/key-last-used").json() == expected
+
+
 def test_agent_cannot_read_usage(tmp_path):
     from fastapi.testclient import TestClient
     from tests.test_local_connection_auth import bootstrap, create_grant, ORIGIN
@@ -139,3 +166,4 @@ def test_agent_cannot_read_usage(tmp_path):
     bootstrap(client)
     agent, *_ = create_grant(client)
     assert agent.get("/api/usage").status_code == 403
+    assert agent.get("/api/usage/key-last-used").status_code == 403

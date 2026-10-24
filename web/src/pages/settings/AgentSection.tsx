@@ -41,7 +41,6 @@ export function AgentSection() {
 
   return (
     <>
-      <h2 className="text-base font-medium text-foreground">Agent 连接</h2>
       <div className="min-w-0 space-y-3">
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">

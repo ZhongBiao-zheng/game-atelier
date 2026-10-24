@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { HelpCircle } from 'lucide-react';
 import { useSearch } from 'wouter';
 
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -15,7 +14,7 @@ import {
 import type { CanvasProject } from '@/schema/canvas';
 import type { TeamLibraryView } from '@/schema/teamLibrary';
 
-const SYNC_HINT = '目录由团队自己的 SVN / Git / 网盘同步；这里只登记本机路径';
+export const SYNC_HINT = '目录由团队自己的 SVN / Git / 网盘同步；这里只登记本机路径';
 
 const BAD_PAYLOAD = '读取列表失败：返回格式不对';
 
@@ -104,19 +103,6 @@ export function TeamLibrariesSection() {
 
   return (
     <>
-      <div>
-        <div className="flex items-center gap-1.5">
-          <h2 className="text-base font-medium text-foreground">团队库</h2>
-          <button
-            type="button"
-            title={SYNC_HINT}
-            aria-label={SYNC_HINT}
-            className="text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <HelpCircle className="size-3.5" aria-hidden />
-          </button>
-        </div>
-      </div>
       <div className="min-w-0 space-y-3">
         <select
           aria-label="画布项目"
