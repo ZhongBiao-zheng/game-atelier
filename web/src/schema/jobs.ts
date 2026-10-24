@@ -150,6 +150,7 @@ export interface CanvasGenerationSnapshot {
   normalized_params: Record<string, unknown>;
   inputs: Array<{
     order: number;
+    annotated?: boolean;
     source: 'implicit_self' | 'explicit_source' | 'input_connection' | 'first_frame' | 'last_frame';
     node_id: string;
     version_id: string;

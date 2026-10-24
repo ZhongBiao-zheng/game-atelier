@@ -131,7 +131,7 @@ def test_image_recipe_builds_inputs_config_and_ordered_connections():
     }
 
     sources = canvas_input_sources(document, config, draft)
-    assert [node_id for _, node_id in sources] == [images[0].id, images[1].id]
+    assert [node_id for _, node_id, _annotated in sources] == [images[0].id, images[1].id]
 
     # 输入节点在配置节点左侧纵向排开，互不重叠
     assert all(node.position.x < config.position.x for node in images)
@@ -194,8 +194,8 @@ def test_video_firstlast_recipe_connects_first_and_last_frame_slots():
         "creation_asset_source_title": "红猫",
     }
     assert canvas_input_sources(document, config, draft) == [
-        ("first_frame", images[0].id),
-        ("last_frame", images[1].id),
+        ("first_frame", images[0].id, False),
+        ("last_frame", images[1].id, False),
     ]
 
 

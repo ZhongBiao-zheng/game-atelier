@@ -62,7 +62,7 @@ def test_group_expands_to_content_members_in_member_order():
     surface = next(node for node in document.nodes if node.id == "config")
     sources = canvas_input_sources(document, surface, surface.data.generation_draft)
     # 目标节点自己也在组里时不当自己的参考；顺序照 member_node_ids，不按节点在文档里的次序重排。
-    assert sources == [("group_member", "image-c"), ("group_member", "image-a")]
+    assert sources == [("group_member", "image-c", False), ("group_member", "image-a", False)]
 
 
 def test_direct_edge_wins_over_the_same_node_inside_a_group():
@@ -73,7 +73,7 @@ def test_direct_edge_wins_over_the_same_node_inside_a_group():
     surface = next(node for node in document.nodes if node.id == "config")
     sources = canvas_input_sources(document, surface, surface.data.generation_draft)
     # 同一个节点既直连又在包里时只算一次，并且记成直连——截断时优先保留画师手连的那张。
-    assert sources == [("input_connection", "image-b"), ("group_member", "image-a")]
+    assert sources == [("input_connection", "image-b", False), ("group_member", "image-a", False)]
 
 
 def _image_input(order, source, node_id):

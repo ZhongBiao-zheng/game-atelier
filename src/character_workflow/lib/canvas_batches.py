@@ -181,7 +181,7 @@ def _sources(document: CanvasDocument, node: CanvasNode) -> list[str]:
     draft = _draft_for_node(node)
     if draft is None:
         return []
-    return list(dict.fromkeys(source for _role, source in canvas_input_sources(document, node, draft)))
+    return list(dict.fromkeys(source for _role, source, _annotated in canvas_input_sources(document, node, draft)))
 
 
 def _executable(document: CanvasDocument, node: CanvasNode) -> bool:
@@ -321,6 +321,7 @@ def _expanded_document(
             connections.append(CanvasInputConnection(
                 id=f"connection-{secrets.token_hex(12)}", role="input",
                 source_node_id=source_id, target_node_id=result_id, slot=edge.slot,
+                annotated=edge.annotated,
             ))
     return CanvasDocument.model_validate(current.model_copy(
         update={"nodes": nodes, "connections": connections,
@@ -377,6 +378,10 @@ def prepare_canvas_batch(project_id: str, payload: CanvasBatchCreate) -> CanvasB
             raise ValueError("一次批量执行最多2000次生成，请减少素材")
         frozen_nodes = [node for node in planning.nodes if node.id in required]
         version_ids = {_current_version_id(node) for node in frozen_nodes}
+        for node in frozen_nodes:
+            annotation = getattr(node.data, "annotation", None)
+            if annotation:
+                version_ids.update([annotation.version_id, annotation.rendered_version_id])
         version_ids.update(version_id for item in items for version_id in item.image_version_ids)
         version_ids.update(version_id for node in frozen_nodes
                            if getattr(node.data, "batch_result", None)

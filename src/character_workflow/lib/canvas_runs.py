@@ -704,9 +704,9 @@ def canvas_input_sources(
     document: CanvasDocument,
     surface: CanvasNode,
     draft: CanvasGenerationDraft,
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, str, bool]]:
     """Select source nodes once, shared by batch dependency planning and input freezing."""
-    candidates: list[tuple[str, str]] = []
+    candidates: list[tuple[str, str, bool]] = []
     incoming = [
         edge for edge in document.connections
         if edge.role == "input" and edge.target_node_id == surface.id
@@ -722,12 +722,13 @@ def canvas_input_sources(
             if len(edges) > 1:
                 raise ValueError("首帧或尾帧只能连接一个图片素材")
             if edges:
-                candidates.append((slot, edges[0].source_node_id))
+                candidates.append((slot, edges[0].source_node_id, False))
     else:
         if any(edge.slot is not None for edge in incoming):
             raise ValueError("当前模式不接受首尾帧连接，请调整输入连接或生成模式")
         nodes_by_id = {node.id: node for node in document.nodes}
         roles: dict[str, str] = {}
+        annotated_ids: set[str] = set()
         for edge in incoming:
             source = nodes_by_id.get(edge.source_node_id)
             if source is not None and source.type == "group":
@@ -746,12 +747,15 @@ def canvas_input_sources(
                 continue
             # 同一个节点既直连又在组里时按直连算：直连是画师一笔一笔连的，截断时优先保留。
             roles[edge.source_node_id] = "input_connection"
+            if edge.annotated:
+                annotated_ids.add(edge.source_node_id)
         connected_ids = list(roles)
         mentioned_ids = list(dict.fromkeys(_MENTION.findall(draft.prompt)))
         unknown_mentions = [node_id for node_id in mentioned_ids if node_id not in connected_ids]
         if unknown_mentions:
             raise ValueError("提示词引用了未连接到当前节点的内容")
-        candidates.extend((roles[node_id], node_id) for node_id in connected_ids)
+        candidates.extend((roles[node_id], node_id, node_id in annotated_ids)
+                          for node_id in connected_ids)
 
     return candidates
 
@@ -769,12 +773,22 @@ def _resolve_inputs(
 
     nodes = {node.id: node for node in document.nodes}
     resolved: list[CanvasSnapshotInput] = []
-    for source, node_id in candidates:
+    for source, node_id, annotated in candidates:
         node = nodes.get(node_id)
         if node is not None and node.type == "batch_material" and version_bindings is None:
             raise ValueError("批量素材需要通过批量执行提交")
         version_id = _current_version_id(node) if node is not None else None
         version_ids = (version_bindings or {}).get(node_id, [version_id] if version_id else [])
+        if annotated:
+            title = node.title if node is not None else node_id
+            annotation = node.data.annotation if isinstance(node, CanvasImageNode) else None
+            if annotation is None or not annotation.elements:
+                raise ValueError(f"「{title}」的标注已被清除，请断开这条连接或重新标注")
+            if annotation.version_id != version_id:
+                raise ValueError(f"「{title}」当前版本没有标注，切回标注所在版本或断开连接")
+            if not annotation.rendered_version_id or annotation.rendered_version_id not in document.content_versions:
+                raise ValueError(f"「{title}」的标注图还没生成，请重新提交")
+            version_ids = [annotation.rendered_version_id]
         if node is None or not version_ids or any(
             item not in document.content_versions for item in version_ids
         ):
@@ -799,6 +813,7 @@ def _resolve_inputs(
                 node_id=node_id,
                 version_id=version.version_id,
                 kind=version.kind,
+                annotated=annotated,
             ))
     return resolved
 
@@ -1350,6 +1365,7 @@ def _commit_frozen_run(
             connections.append(CanvasInputConnection(
                 id=f"connection-{secrets.token_hex(12)}", role="input",
                 source_node_id=item.node_id, target_node_id=result_id, slot=slot,
+                annotated=item.annotated,
             ))
     content_versions = dict(current.content_versions)
     for version in additional_versions or []:

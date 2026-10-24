@@ -102,7 +102,8 @@ def document_view(document: CanvasDocument) -> dict:
     connections = [
         {"id": edge.id, "role": edge.role, "source_node_id": edge.source_node_id,
          "target_node_id": edge.target_node_id,
-         "slot": edge.slot if edge.role == "input" else None}
+         "slot": edge.slot if edge.role == "input" else None,
+         "annotated": edge.annotated if edge.role == "input" else False}
         for edge in document.connections
     ]
     return {"project_id": document.project_id, "revision": document.revision, "nodes": nodes,

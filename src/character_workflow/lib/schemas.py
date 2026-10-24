@@ -268,6 +268,7 @@ class CanvasActor(BaseModel):
 
 class CanvasSnapshotInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    annotated: bool = False
     order: int = Field(ge=0)
     source: Literal[
         "implicit_self", "explicit_source", "input_connection",
