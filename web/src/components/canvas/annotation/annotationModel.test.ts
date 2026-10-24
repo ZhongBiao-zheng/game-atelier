@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { annotationUnitScale, hitElement, simplifyPoints, translateElement, validElement, serializeElements, type AnnotationElement } from './annotationModel';
 export const elements: AnnotationElement[] = [
   { id: 'r', type: 'rect', color: '#F04438', x: 10, y: 10, width: 50, height: 30, stroke_width: 4 },
@@ -25,3 +25,5 @@ describe('annotation geometry', () => {
     expect(() => serializeElements([{ ...elements[3], text: 'a'.repeat(2 * 1024 * 1024) } as AnnotationElement])).toThrow('2 MiB');
   });
 });
+
+beforeEach(() => { vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ measureText: () => ({ width: 40 }) } as unknown as CanvasRenderingContext2D); });

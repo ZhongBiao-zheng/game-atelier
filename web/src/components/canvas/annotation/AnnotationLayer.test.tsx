@@ -1,5 +1,5 @@
 import { render } from '@testing-library/react';
-import { expect, it } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import { AnnotationLayer } from './AnnotationLayer';
 import type { AnnotationElement } from './annotationModel';
 it('renders the shared SVG with scaled outlines and optional text background', () => {
@@ -22,3 +22,5 @@ it('renders the shared SVG with scaled outlines and optional text background', (
   expect(view.container.querySelector('text')).toHaveAttribute('stroke', 'none');
   expect(view.container.querySelector('foreignObject')).toBeNull();
 });
+
+beforeEach(() => { vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ measureText: () => ({ width: 40 }) } as unknown as CanvasRenderingContext2D); });

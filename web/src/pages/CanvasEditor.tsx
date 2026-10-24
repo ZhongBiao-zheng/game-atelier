@@ -1,3 +1,4 @@
+import { useCanvasAnnotation } from '@/components/canvas/annotation/useCanvasAnnotation';
 import '@xyflow/react/dist/style.css';
 import { readablePromptVariables } from '@/lib/promptVariables';
 
@@ -4492,7 +4493,9 @@ function CanvasEditorInner({
 
   // 框选时选中数每帧在变；context 只关心「是否多选」，依赖写成 size 会让所有节点跟着每帧重渲染。
   const multiSelectionActive = selectedNodeIds.size > 1;
+  const annotationController = useCanvasAnnotation(document, selectedNodeIds, commit, undo, redo, history.current.past.length > 0, history.current.future.length > 0);
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
+    annotationController,
     layerParentByNodeId,
     editSourceByResultNodeId,
     locateNode,
@@ -4573,6 +4576,7 @@ function CanvasEditorInner({
     saveImageToolbarPreferences: persistImageToolbarPreferences,
     deleteNode,
   }), [
+    annotationController,
     activeBatch,
     stopActiveBatch,
     uploadBatchImages,
@@ -4792,6 +4796,7 @@ function CanvasEditorInner({
             viewportSync.current = null;
           }}
           onPaneClick={event => {
+            annotationController.exit();
             setCreateMenu(null);
             if (materialPick) {
               requestAnimationFrame(() => editorRegionRef.current?.focus());

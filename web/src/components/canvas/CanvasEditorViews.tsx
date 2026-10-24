@@ -1,3 +1,7 @@
+import { useAnnotationEditor } from './annotation/useAnnotationEditor';
+import { AnnotationToolbar } from './annotation/AnnotationToolbar';
+import { AnnotationSurfaceView } from './annotation/AnnotationSurfaceView';
+import type { CanvasAnnotationController } from './annotation/useCanvasAnnotation';
 import { AnnotationLayer } from './annotation/AnnotationLayer';
 import { hasImageSizeSelection, imageSizeError, imageSizeMode } from '@/lib/imageSizeMode';
 import { normalizeImagePixelSize } from '@/lib/studioSize';
@@ -147,6 +151,7 @@ export interface CanvasGenerationPanelContextValue {
 }
 
 export interface CanvasNodeContextValue {
+  annotationController?: CanvasAnnotationController;
   batchBusy?: boolean;
   /** 正在跑的批量执行：只有它的分组节点显示「停止」，停止中不重复发取消。 */
   activeBatch?: { scopeNodeId: string; stopping: boolean };
@@ -426,6 +431,17 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
       top: clientY + 14,
     });
   }
+  const annotating = context?.annotationController?.nodeId === node.id;
+  const annotation = node.type === 'image' && node.data.annotation?.version_id === node.data.current_version_id ? node.data.annotation : null;
+  const annotationEditor = useAnnotationEditor({
+    enabled: annotating, elements: annotation?.elements ?? [],
+    width: nodeContent?.kind === 'image' ? nodeContent.width ?? 1024 : 1024,
+    height: nodeContent?.kind === 'image' ? nodeContent.height ?? 1024 : 1024,
+    onCommit: elements => context?.annotationController?.write(node.id, elements),
+    onExit: () => context?.annotationController?.exit(),
+    undo: () => context?.annotationController?.undo(), redo: () => context?.annotationController?.redo(),
+    onError: message => context?.reportError?.(message),
+  });
   if (!context) return null;
   if (node.type === 'group') return <CanvasGroupFrame node={node} context={context} selected={Boolean(selected)} />;
   const renameNode = context.renameNode;
@@ -574,7 +590,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
       onPointerLeave={hideHoverHandles}
     >
       <NodeResizer
-        isVisible={selected && !context.multiSelectionActive && !replacingMedia}
+        isVisible={selected && !annotating && !context.multiSelectionActive && !replacingMedia}
         keepAspectRatio={(node.type === 'image' && !node.data.display.free_resize) || node.type === 'image_edit'}
         minWidth={node.type === 'text' ? 220 : node.type === 'layer_stack' ? 560 : 240}
         minHeight={node.type === 'text' ? 120 : node.type === 'layer_stack' ? 320 : 150}
@@ -669,12 +685,14 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           !context.multiSelectionActive
           && (selected || toolbarOverlayOpen)
         }
-        position={chromeBelow ? Position.Bottom : Position.Top}
+        position={annotating ? Position.Bottom : chromeBelow ? Position.Bottom : Position.Top}
         align="center"
-        offset={32}
+        offset={annotating ? 12 : 32}
         className="nodrag"
       >
-        <div
+        {annotating && context.annotationController ? <AnnotationToolbar editor={annotationEditor}
+          undo={context.annotationController.undo} redo={context.annotationController.redo}
+          canUndo={context.annotationController.canUndo} canRedo={context.annotationController.canRedo} /> : <div
           ref={toolbarRef}
           role="toolbar"
           aria-label={`${node.title} 节点工具`}
@@ -763,7 +781,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
             />
           )}
           {(emptyMediaNode || node.type !== 'image') && fixedToolbarButtons}
-        </div>
+        </div>}
       </NodeToolbar>
       {node.type === 'image' && mediaCandidates.length > 0 && (
         <MediaCandidateBatch
@@ -788,6 +806,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           'relative h-full overflow-hidden rounded-lg border text-foreground transition-colors shell-glow',
           node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-card/95',
           selected ? 'border-primary' : 'border-border',
+          annotating && 'annotation-active',
           context.materialPick && materialPickEligible && 'cursor-copy hover:border-primary focus-visible:border-primary',
           context.materialPick && !materialPickEligible && 'cursor-default',
         )}
@@ -934,9 +953,12 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
               freeResize={(node.type === 'image' || node.type === 'video') && node.data.display.free_resize}
             />
           )}
+          {annotating && node.type === 'image' && content?.kind === 'image' && <AnnotationSurfaceView
+            editor={annotationEditor} width={content.width ?? 1024} height={content.height ?? 1024}
+            fit={node.data.display.free_resize ? 'fill' : node.data.display.fit} />}
           {node.type === 'image' && content?.kind === 'image' && node.data.annotation
             && node.data.annotation.version_id === node.data.current_version_id && node.data.annotation.elements.length > 0 && <>
-            {node.data.annotation.visible && <AnnotationLayer elements={node.data.annotation.elements}
+            {!annotating && node.data.annotation.visible && <AnnotationLayer elements={node.data.annotation.elements}
               imageWidth={content.width ?? 1024} imageHeight={content.height ?? 1024}
               fit={node.data.display.free_resize ? 'fill' : node.data.display.fit}
               className="pointer-events-none absolute inset-0 size-full" />}
@@ -1879,6 +1901,8 @@ function ImageNodeToolbar({
           <SwapIcon swapKey={action.text}>{action.icon}</SwapIcon>
         </MediaToolButton>
       ))}
+      <MediaToolButton label={`标注 ${node.title}`} text="标注" disabled={!currentVersionId || submitting || replacing}
+        onClick={() => context.annotationController?.start(node)}><Pencil /></MediaToolButton>
       <MediaToolButton
         label={`拆分 ${node.title} 的图层`}
         text="拆分图层"
