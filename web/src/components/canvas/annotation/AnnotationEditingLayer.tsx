@@ -16,6 +16,19 @@ export function AnnotationEditingLayer({ editor, width, height, fit }: {
   const textId = editor.text?.id;
   const textareaRef = editor.textareaRef;
   useLayoutEffect(() => { if (textId) textareaRef.current?.focus(); }, [textId, textareaRef]);
+  const wheel = useRef(editor.wheel);
+  wheel.current = editor.wheel;
+  useLayoutEffect(() => {
+    const element = host.current; if (!element) return;
+    // React registers wheel as passive; a native listener can claim the scroll before the canvas zooms.
+    const listener = (event: WheelEvent) => {
+      const svg = element.querySelector<SVGSVGElement>(':scope > svg');
+      if (svg && event.target instanceof Element && svg.contains(event.target)) wheel.current(event, svg);
+    };
+    element.addEventListener('wheel', listener, { passive: false });
+    return () => element.removeEventListener('wheel', listener);
+  }, []);
+  const cursor = editor.hoveredId ? 'move' : editor.prefs.tool === 'text' ? 'text' : editor.prefs.tool === 'select' ? 'default' : 'crosshair';
   const sx = size.width / width, sy = size.height / height;
   const scale = fit === 'cover' ? Math.max(sx, sy) : Math.min(sx, sy);
   const xscale = fit === 'fill' ? sx : scale, yscale = fit === 'fill' ? sy : scale;
@@ -24,8 +37,9 @@ export function AnnotationEditingLayer({ editor, width, height, fit }: {
     <AnnotationLayer elements={editor.elements.filter(item => item.id !== text?.id)}
       imageWidth={width} imageHeight={height} fit={fit} selectedId={editor.selectedId} screenPixel={editor.screenPixel}
       className="nodrag nopan absolute inset-0 size-full"
-      style={{ pointerEvents: editor.panning ? 'none' : 'auto', cursor: editor.prefs.tool === 'select' ? 'move' : editor.prefs.tool === 'text' ? 'text' : 'crosshair', touchAction: 'none' }}
+      style={{ pointerEvents: editor.panning ? 'none' : 'auto', cursor, touchAction: 'none' }}
       onPointerDown={editor.pointerDown} onPointerMove={editor.pointerMove} onPointerUp={editor.pointerUp}
+      onPointerLeave={editor.pointerLeave}
       onPointerCancel={editor.cancelGesture} onDoubleClick={editor.doubleClick} onClick={event => event.stopPropagation()} />
     {text && <textarea data-annotation-text ref={editor.textareaRef} value={text.text} maxLength={500}
       aria-label="标注文字" wrap="off" className="nodrag nopan pointer-events-auto absolute min-w-32 resize-none border-0 bg-transparent p-0 outline-none"

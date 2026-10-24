@@ -9,10 +9,11 @@ export const elements: AnnotationElement[] = [
 describe('annotation geometry', () => {
   it('uses image units and hits all four types, from top to bottom', () => {
     expect(annotationUnitScale(2048, 1024)).toBe(2);
-    for (const [index, point] of [[0, [30, 20]], [1, [120, 103]], [2, [225, 205]], [3, [301, 301]]] as const) {
+    for (const [index, point] of [[0, [10, 20]], [1, [120, 103]], [2, [225, 205]], [3, [301, 301]]] as const) {
       expect(hitElement(elements, [...point], 1, 1)?.id).toBe(elements[index].id);
     }
     expect(hitElement(elements, [999, 999], 1, 1)).toBeUndefined();
+    expect(hitElement(elements, [35, 25], 1, 1)).toBeUndefined();
     expect(translateElement(elements[1], 10, 20)).toMatchObject({ start: [110, 120], end: [160, 120] });
   });
   it('simplifies sampled points and rejects tiny shapes', () => {

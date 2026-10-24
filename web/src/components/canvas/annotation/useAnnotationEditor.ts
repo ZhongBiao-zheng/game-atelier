@@ -1,27 +1,51 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react';
 import { ANNOTATION_COLORS, annotationUnitScale, distance, elementBounds, hitElement, serializeElements, simplifyPoints,
   translateElement, validElement, type AnnotationColor, type AnnotationElement, type AnnotationPoint,
   type AnnotationText, type AnnotationTool } from './annotationModel';
 interface Preferences { tool: AnnotationTool; color: AnnotationColor; stroke_width: number; font_size: number; background: boolean }
 const DEFAULTS: Preferences = { tool: 'rect', color: ANNOTATION_COLORS[0], stroke_width: 4, font_size: 18, background: false };
 const KEY = 'atelier:annotation-tools';
-function preferences(): Preferences {
+function parsePreferences(raw: string | null): Preferences {
   try {
-    const p = JSON.parse(localStorage.getItem(KEY) ?? '{}');
+    const p = JSON.parse(raw ?? '{}');
     return { tool: ['select', 'rect', 'arrow', 'freedraw', 'text'].includes(p.tool) ? p.tool : DEFAULTS.tool,
       color: ANNOTATION_COLORS.includes(p.color) ? p.color : DEFAULTS.color,
       stroke_width: Math.min(24, Math.max(1, Number(p.stroke_width) || 4)),
       font_size: Math.min(72, Math.max(12, Number(p.font_size) || 18)), background: p.background === true };
   } catch { return DEFAULTS; }
 }
+function storedPreferences() { try { return localStorage.getItem(KEY); } catch { return null; } }
+// Every node mounts its own editor; one shared store keeps tool and style in step across nodes.
+let preferenceCache: { raw: string | null; value: Preferences } | null = null;
+const preferenceListeners = new Set<() => void>();
+function readPreferences() {
+  const raw = storedPreferences();
+  if (!preferenceCache || preferenceCache.raw !== raw) preferenceCache = { raw, value: parsePreferences(raw) };
+  return preferenceCache.value;
+}
+function writePreferences(update: Preferences | ((current: Preferences) => Preferences)) {
+  const value = typeof update === 'function' ? update(readPreferences()) : update;
+  try { localStorage.setItem(KEY, JSON.stringify(value)); } catch { /* local preference only */ }
+  preferenceCache = { raw: storedPreferences(), value };
+  preferenceListeners.forEach(listener => listener());
+}
+function subscribePreferences(listener: () => void) {
+  preferenceListeners.add(listener);
+  return () => { preferenceListeners.delete(listener); };
+}
+const WHEEL_STEP = 40;
+const WHEEL_COMMIT_DELAY = 350;
 interface Options {
   enabled: boolean; elements: AnnotationElement[]; width: number; height: number;
   onCommit: (elements: AnnotationElement[]) => void; onExit: () => void;
   undo: () => void; redo: () => void; onError: (message: string) => void;
 }
 export function useAnnotationEditor(options: Options) {
-  const [prefs, setPrefs] = useState(preferences);
+  const prefs = useSyncExternalStore(subscribePreferences, readPreferences);
+  const setPrefs = writePreferences;
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const wheelState = useRef<{ id: string; remainder: number; timer: ReturnType<typeof setTimeout> } | null>(null);
   const [preview, setPreview] = useState<AnnotationElement[] | null>(null);
   const [text, setText] = useState<AnnotationText | null>(null);
   const [panning, setPanning] = useState(false);
@@ -35,9 +59,11 @@ export function useAnnotationEditor(options: Options) {
   const unit = annotationUnitScale(options.width, options.height);
   const elements = preview ?? options.elements;
   const selected = elements.find(element => element.id === selectedId);
-  useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify(prefs)); } catch { /* local preference only */ } }, [prefs]);
   useEffect(() => {
-    if (!options.enabled) { setPreview(null); setText(null); setSelectedId(null); gesture.current = null; }
+    if (!options.enabled) {
+      actions.current.flushWheel();
+      setPreview(null); setText(null); setSelectedId(null); setHoveredId(null); gesture.current = null;
+    }
   }, [options.enabled]);
   function commit(next: AnnotationElement[]) {
     try { serializeElements(next); latest.current.options.onCommit(next); }
@@ -50,19 +76,33 @@ export function useAnnotationEditor(options: Options) {
     if (!cancel && current.text.text.trim()) {
       const others = current.options.elements.filter(element => element.id !== current.text!.id);
       commit([...others, { ...current.text, text: current.text.text.slice(0, 500) }]);
-      setPrefs(p => ({ ...p, tool: 'select' }));
       setSelectedId(null);
     }
     setText(null);
     latest.current.text = null;
   }
+  /** Commits a pending wheel adjustment so the next edit builds on it. */
+  function flushWheel() {
+    const pending = wheelState.current;
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    wheelState.current = null;
+    if (latest.current.preview) commit(latest.current.preview);
+  }
   function removeSelected() {
+    flushWheel();
     const current = latest.current;
     if (current.selectedId) commit(current.options.elements.filter(element => element.id !== current.selectedId));
     setSelectedId(null);
   }
-  function chooseTool(tool: AnnotationTool) { finishText(); setPrefs(p => ({ ...p, tool })); setSelectedId(null); }
+  function chooseTool(tool: AnnotationTool) { flushWheel(); finishText(); setPrefs(p => ({ ...p, tool })); setSelectedId(null); }
+  function pickUp(element: AnnotationElement) {
+    setSelectedId(element.id);
+    setPrefs(p => ({ ...p, color: element.color, ...(element.type === 'text'
+      ? { font_size: element.font_size, background: element.background } : { stroke_width: element.stroke_width }) }));
+  }
   function changeStyle(patch: Partial<Omit<Preferences, 'tool'>>, transient = false) {
+    flushWheel();
     setPrefs(p => ({ ...p, ...patch }));
     const current = latest.current;
     if (current.text) setText({ ...current.text, ...patch });
@@ -88,6 +128,7 @@ export function useAnnotationEditor(options: Options) {
     const at = position(event); if (!at) return;
     event.stopPropagation(); event.preventDefault();
     if (text) { finishText(); return; }
+    flushWheel();
     const { point, pixel } = at;
     const endpointHandle = event.target instanceof Element ? event.target.closest('[data-annotation-endpoint]') : null;
     const endpoint = endpointHandle?.getAttribute('data-annotation-endpoint');
@@ -106,31 +147,68 @@ export function useAnnotationEditor(options: Options) {
       event.currentTarget.setPointerCapture(event.pointerId);
       return;
     }
+    // Like screenshot markup tools: pressing on an existing mark moves it whatever the tool; empty space draws.
+    const hit = hitElement(options.elements, point, unit, pixel);
+    if (hit) {
+      pickUp(hit);
+      event.currentTarget.setPointerCapture(event.pointerId);
+      gesture.current = { start: point, pixel, element: hit, moving: true, changed: false };
+      return;
+    }
+    setSelectedId(null);
+    if (prefs.tool === 'select') return;
     const id = crypto.randomUUID();
     if (prefs.tool === 'text') {
       setText({ id, type: 'text', color: prefs.color, x: point[0], y: point[1], text: '', font_size: prefs.font_size, background: prefs.background });
       return;
     }
-    let element: AnnotationElement;
-    if (prefs.tool === 'select') {
-      const hit = hitElement(options.elements, point, unit, pixel);
-      setSelectedId(hit?.id ?? null);
-      if (!hit) return;
-      element = hit;
-      setPrefs(p => ({ ...p, color: hit.color, ...(hit.type === 'text' ? { font_size: hit.font_size, background: hit.background } : { stroke_width: hit.stroke_width }) }));
-    } else {
-      setSelectedId(null);
-      const base = { id, color: prefs.color, stroke_width: prefs.stroke_width };
-      element = prefs.tool === 'rect' ? { ...base, type: 'rect', x: point[0], y: point[1], width: 0, height: 0 }
-        : prefs.tool === 'arrow' ? { ...base, type: 'arrow', start: point, end: point }
-        : { ...base, type: 'freedraw', points: [point] };
-    }
+    const base = { id, color: prefs.color, stroke_width: prefs.stroke_width };
+    const element: AnnotationElement = prefs.tool === 'rect' ? { ...base, type: 'rect', x: point[0], y: point[1], width: 0, height: 0 }
+      : prefs.tool === 'arrow' ? { ...base, type: 'arrow', start: point, end: point }
+      : { ...base, type: 'freedraw', points: [point] };
     event.currentTarget.setPointerCapture(event.pointerId);
-    gesture.current = { start: point, pixel, element, moving: prefs.tool === 'select', changed: false };
+    gesture.current = { start: point, pixel, element, moving: false, changed: false };
+  }
+  function hover(event: ReactPointerEvent<SVGSVGElement>) {
+    const at = position(event); if (!at) return;
+    const hit = hitElement(latest.current.options.elements, at.point, unit, at.pixel);
+    setHoveredId(hit?.id ?? null);
+  }
+  /** Wheel or two-finger scroll over a mark changes its line width (or text size); pinch still zooms. */
+  function wheel(event: WheelEvent, svg: SVGSVGElement) {
+    if (event.ctrlKey || event.metaKey || latest.current.text || gesture.current) return;
+    const matrix = svg.getScreenCTM(); if (!matrix) return;
+    const p = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
+    const pixel = 1 / Math.max(.0001, Math.hypot(matrix.a, matrix.b));
+    const current = latest.current.preview ?? latest.current.options.elements;
+    const target = hitElement(current, [p.x, p.y], unit, pixel);
+    if (!target) return;
+    event.preventDefault(); event.stopPropagation();
+    const pending = wheelState.current;
+    if (pending && pending.id !== target.id) flushWheel();
+    const delta = event.deltaMode === 1 ? event.deltaY * 33 : event.deltaMode === 2 ? event.deltaY * 400 : event.deltaY;
+    const remainder = (wheelState.current?.remainder ?? 0) - delta;
+    const steps = Math.trunc(remainder / WHEEL_STEP);
+    if (wheelState.current) clearTimeout(wheelState.current.timer);
+    wheelState.current = { id: target.id, remainder: remainder - steps * WHEEL_STEP,
+      timer: setTimeout(flushWheel, WHEEL_COMMIT_DELAY) };
+    setSelectedId(target.id);
+    if (!steps) return;
+    const base = latest.current.preview ?? latest.current.options.elements;
+    const next = base.map(element => {
+      if (element.id !== target.id) return element;
+      if (element.type === 'text') return { ...element, font_size: Math.min(72, Math.max(12, element.font_size + steps * 2)) };
+      return { ...element, stroke_width: Math.min(24, Math.max(1, element.stroke_width + steps)) };
+    });
+    const changed = next.find(element => element.id === target.id)!;
+    setPrefs(prefs => ({ ...prefs, ...(changed.type === 'text' ? { font_size: changed.font_size } : { stroke_width: changed.stroke_width }) }));
+    latest.current.preview = next; setPreview(next);
   }
   function pointerMove(event: ReactPointerEvent<SVGSVGElement>) {
-    const g = gesture.current, at = position(event);
-    if (!g || !at) return;
+    const g = gesture.current;
+    if (!g) { if (!panning) hover(event); return; }
+    const at = position(event);
+    if (!at) return;
     event.stopPropagation();
     const p = at.point;
     let element = g.element;
@@ -172,19 +250,17 @@ export function useAnnotationEditor(options: Options) {
       commit(next.map(element => element.id === g.element.id && element.type === 'freedraw'
         ? { ...element, points: simplifyPoints(element.points, .75 * g.pixel) } : element));
       setSelectedId(drawn.id);
-      setPrefs(p => ({ ...p, tool: 'select', ...(drawn.type === 'text' ? { font_size: drawn.font_size } : { stroke_width: drawn.stroke_width }) }));
     } else setPreview(null);
   }
   function doubleClick(event: React.MouseEvent<SVGSVGElement>) {
     event.stopPropagation();
-    if (prefs.tool !== 'select') return;
     const matrix = event.currentTarget.getScreenCTM(); if (!matrix) return;
     const p = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
     const hit = hitElement(options.elements, [p.x, p.y], unit, screenPixel);
     if (hit?.type === 'text') { setText(hit); setSelectedId(hit.id); }
   }
-  const actions = useRef({ chooseTool, finishText, removeSelected });
-  actions.current = { chooseTool, finishText, removeSelected };
+  const actions = useRef({ chooseTool, finishText, removeSelected, flushWheel });
+  actions.current = { chooseTool, finishText, removeSelected, flushWheel };
   useEffect(() => {
     if (!options.enabled) return;
     function keyDown(event: KeyboardEvent) {
@@ -220,9 +296,10 @@ export function useAnnotationEditor(options: Options) {
       window.removeEventListener('blur', blur); document.removeEventListener('pointerdown', outside, true);
     };
   }, [options.enabled]);
-  return { prefs, elements, selected, selectedId, text, setText, composing, finishText, panning, screenPixel,
+  return { prefs, elements, selected, selectedId, hoveredId, text, setText, composing, finishText, panning, screenPixel,
     svgRef, textareaRef, chooseTool, changeStyle, removeSelected,
-    pointerDown, pointerMove, pointerUp, doubleClick,
+    pointerDown, pointerMove, pointerUp, doubleClick, wheel,
+    pointerLeave: () => setHoveredId(null),
     cancelGesture: () => { gesture.current = null; setPreview(null); } };
 }
 export type AnnotationEditor = ReturnType<typeof useAnnotationEditor>;

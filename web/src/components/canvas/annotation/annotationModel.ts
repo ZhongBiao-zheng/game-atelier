@@ -58,11 +58,15 @@ export function elementBounds(element: AnnotationElement, unit: number) {
 }
 export function hitElement(elements: AnnotationElement[], point: AnnotationPoint, unit: number, pixel: number) {
   return [...elements].reverse().find(element => {
-    if (element.type === 'rect' || element.type === 'text') {
+    if (element.type === 'text') {
       const b = elementBounds(element, unit);
       return point[0] >= b.x && point[0] <= b.x + b.width && point[1] >= b.y && point[1] <= b.y + b.height;
     }
-    const points = element.type === 'arrow' ? [element.start, element.end] : element.points;
+    // A box only answers on its outline, so marks inside it stay reachable and new boxes can start inside it.
+    const points: AnnotationPoint[] = element.type === 'rect'
+      ? [[element.x, element.y], [element.x + element.width, element.y], [element.x + element.width, element.y + element.height],
+        [element.x, element.y + element.height], [element.x, element.y]]
+      : element.type === 'arrow' ? [element.start, element.end] : element.points;
     return points.slice(1).some((p, i) => segmentDistance(point, points[i], p) <= element.stroke_width * unit * 1.5 + 6 * pixel);
   });
 }

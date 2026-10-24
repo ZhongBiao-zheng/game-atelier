@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.102.4',
+    date: '2026-10-24',
+    headline: '标注像截图工具一样直接调整',
+    changes: [
+      { kind: 'feat', text: '画完一个框后仍停在当前工具，可以连续画；指到已有标注就能拖动或拖角缩放。' },
+      { kind: 'feat', text: '指到标注上滚动鼠标滚轮或双指滑动，可直接调粗细或字号。' },
+      { kind: 'fix', text: '大框里面的标注也能点中；颜色和工具在不同图片之间保持一致。' },
+    ],
+  },
+  {
     version: '5.102.3',
     date: '2026-10-24',
     headline: '箭头标注支持两端调整',

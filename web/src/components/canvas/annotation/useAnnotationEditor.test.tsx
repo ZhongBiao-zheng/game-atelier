@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { useAnnotationEditor } from './useAnnotationEditor';
 import { AnnotationEditingLayer } from './AnnotationEditingLayer';
@@ -38,8 +38,8 @@ it('commits each completed stroke once and selected style/delete affect only tha
   draw(svg, 10, 100); expect(commit).toHaveBeenCalledTimes(1);
   commit.mockClear(); fireEvent.click(screen.getByText('矩形')); draw(svg, 200, 300); expect(commit).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByText('选择'));
-  fireEvent.pointerDown(svg, { clientX: 30, clientY: 30, pointerId: 1, button: 0 });
-  fireEvent.pointerUp(svg, { clientX: 30, clientY: 30, pointerId: 1, button: 0 });
+  fireEvent.pointerDown(svg, { clientX: 10, clientY: 50, pointerId: 1, button: 0 });
+  fireEvent.pointerUp(svg, { clientX: 10, clientY: 50, pointerId: 1, button: 0 });
   fireEvent.click(screen.getByText('蓝'));
   expect(commit.mock.lastCall?.[0].map((e: AnnotationElement) => e.color)).toEqual(['#3B82F6', '#F04438']);
   fireEvent.keyDown(window, { key: 'Delete' });
@@ -55,7 +55,7 @@ it('keeps IME composition and app blur separate from explicit text commit', () =
   fireEvent.compositionEnd(input); fireEvent.keyDown(input, { key: 'Enter' });
   expect(commit).toHaveBeenCalledTimes(1); expect(commit.mock.lastCall?.[0][0].text).toBe('帽子改红');
   fireEvent.click(screen.getByText('文字'));
-  fireEvent.pointerDown(container.querySelector('[data-annotation-surface] svg')!, { clientX: 50, clientY: 50, button: 0 });
+  fireEvent.pointerDown(container.querySelector('[data-annotation-surface] svg')!, { clientX: 200, clientY: 200, button: 0 });
   fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
   expect(commit).toHaveBeenCalledTimes(1);
 });
@@ -66,19 +66,19 @@ it('discards tiny new shapes without adding undo history', () => {
   expect(commit).not.toHaveBeenCalled();
 });
 
-it('selects the completed shape immediately for width changes and movement', () => {
+it('keeps the drawing tool and selects the completed shape for width changes and movement', () => {
   const { container } = render(<Harness />); const svg = container.querySelector('[data-annotation-surface] svg')!;
   draw(svg, 10, 100);
-  expect(screen.getByRole('button', { name: '选择 V' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: '框选 R' })).toHaveAttribute('aria-pressed', 'true');
   fireEvent.click(screen.getByRole('button', { name: '线宽' }));
   fireEvent.click(screen.getByRole('button', { name: '线宽 8' }));
   expect(commit.mock.lastCall?.[0][0].stroke_width).toBe(8);
   fireEvent.click(screen.getByRole('button', { name: '线宽' }));
   commit.mockClear();
-  fireEvent.pointerDown(svg, { clientX: 30, clientY: 30, button: 0 });
-  fireEvent.pointerMove(svg, { clientX: 50, clientY: 60, button: 0 });
+  fireEvent.pointerDown(svg, { clientX: 10, clientY: 40, button: 0 });
+  fireEvent.pointerMove(svg, { clientX: 30, clientY: 70, button: 0 });
   expect(commit).not.toHaveBeenCalled();
-  fireEvent.pointerUp(svg, { clientX: 50, clientY: 60, button: 0 });
+  fireEvent.pointerUp(svg, { clientX: 30, clientY: 70, button: 0 });
   expect(commit).toHaveBeenCalledTimes(1);
   expect(commit.mock.lastCall?.[0][0]).toMatchObject({ x: 30, y: 40, stroke_width: 8 });
   fireEvent.click(screen.getByText('还原线宽'));
@@ -149,4 +149,50 @@ it('does not collapse an arrow to a zero-length endpoint edit', () => {
   fireEvent.pointerUp(svg, { clientX: 10, clientY: 10, button: 0 });
   expect(commit).not.toHaveBeenCalled();
   expect(svg.querySelector('[data-annotation-endpoint="end"]')).toHaveAttribute('cx', '100');
+});
+
+it('moves an existing mark when pressed with a drawing tool and draws a new box inside another', () => {
+  const { container } = render(<Harness />); const svg = container.querySelector('[data-annotation-surface] svg')!;
+  draw(svg, 10, 100); commit.mockClear();
+  fireEvent.pointerDown(svg, { clientX: 100, clientY: 50, button: 0 });
+  fireEvent.pointerMove(svg, { clientX: 120, clientY: 60, button: 0 });
+  fireEvent.pointerUp(svg, { clientX: 120, clientY: 60, button: 0 });
+  expect(commit.mock.lastCall?.[0]).toHaveLength(1);
+  expect(commit.mock.lastCall?.[0][0]).toMatchObject({ x: 30, y: 20, width: 90, height: 90 });
+  commit.mockClear(); draw(svg, 50, 80);
+  expect(commit.mock.lastCall?.[0]).toHaveLength(2);
+  expect(screen.getByRole('button', { name: '框选 R' })).toHaveAttribute('aria-pressed', 'true');
+});
+
+it('shows a move cursor over a mark and adjusts its width with the wheel in one commit', () => {
+  vi.useFakeTimers();
+  try {
+    const { container } = render(<Harness />); const svg = container.querySelector('[data-annotation-surface] svg')! as SVGSVGElement;
+    draw(svg, 10, 100); commit.mockClear();
+    fireEvent.pointerMove(svg, { clientX: 10, clientY: 50 });
+    expect(svg.style.cursor).toBe('move');
+    fireEvent.pointerMove(svg, { clientX: 50, clientY: 50 });
+    expect(svg.style.cursor).toBe('crosshair');
+    fireEvent.wheel(svg, { clientX: 50, clientY: 50, deltaY: -200 });
+    fireEvent.wheel(svg, { clientX: 50, clientY: 50, deltaY: -200, ctrlKey: true });
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(commit).not.toHaveBeenCalled();
+    const scroll = new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 10, clientY: 50, deltaY: -40 });
+    act(() => { svg.dispatchEvent(scroll); });
+    expect(scroll.defaultPrevented).toBe(true);
+    act(() => { svg.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 10, clientY: 50, deltaY: -80 })); });
+    expect(commit).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '线宽' })).toHaveTextContent('线宽7');
+    act(() => { vi.advanceTimersByTime(400); });
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(commit.mock.lastCall?.[0][0].stroke_width).toBe(7);
+  } finally { vi.useRealTimers(); }
+});
+
+it('shares tool and style choices between node editors', () => {
+  render(<><Harness /><Harness /></>);
+  fireEvent.click(screen.getAllByRole('button', { name: '黄' })[0]);
+  fireEvent.click(screen.getAllByRole('button', { name: '箭头 A' })[0]);
+  expect(screen.getAllByRole('button', { name: '黄' })[1]).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getAllByRole('button', { name: '箭头 A' })[1]).toHaveAttribute('aria-pressed', 'true');
 });
