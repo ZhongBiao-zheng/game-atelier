@@ -103,6 +103,10 @@ def _install_secret_filter() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     hub.set_loop(asyncio.get_running_loop())
+    from character_workflow.lib import gateway_live
+    def gateway_listener(snapshot):
+        hub.broadcast("gateway_task", snapshot)
+    gateway_live.listeners.append(gateway_listener)
     await asyncio.to_thread(app.state.workshop_runtime.recover)
     from viewer_server.routes import _reset_studio_recovery_workers
 
@@ -219,6 +223,7 @@ async def lifespan(app: FastAPI):
         maintenance_task.cancel()
         for task in resume_tasks:
             task.cancel()
+        gateway_live.listeners.remove(gateway_listener)
         gateway_sync.cancel()
         await asyncio.to_thread(gateway_server.stop)
         stop_team_library_watches()

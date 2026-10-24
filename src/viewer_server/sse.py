@@ -102,6 +102,8 @@ async def events(request: Request) -> StreamingResponse:
                         yield ": ping\n\n"
                         heartbeat_at = time.monotonic()
                     continue
+                if msg.startswith("event: gateway_task\n") and "manage" not in session.principal.capabilities:
+                    continue
                 yield msg
         finally:
             hub.unsubscribe(q)

@@ -1,0 +1,36 @@
+import { act, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { Tasks, mergeTask } from './Tasks';
+import { fetchGatewayTasks, type GatewayTask } from '@/api/gateway';
+import { publishGatewayTask as listener } from '@/api/gatewayEvents';
+vi.mock('@/api/gateway', () => ({ fetchGatewayTasks: vi.fn(), gatewayOutputUrl: (id: string, i: number) => `/preview/${id}/${i}` }));
+const task = (patch: Partial<GatewayTask> = {}): GatewayTask => ({ task_id: 't', kind: 'image', key_name: 'A', route_id: 'gpt', member_alias: 'HK', member_trail: ['Tuzi', 'HK'], phase: 'sent', status: 'running', created_at: new Date().toISOString(), updated_at: '2026-10-24T00:00:00Z', prompt: '完整提示词', n: 1, outputs: 0, output_types: [], error: null, ...patch });
+afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
+it('merges SSE and stops polling when the last task ends', async () => {
+  vi.mocked(fetchGatewayTasks).mockResolvedValue([]);
+  render(<Tasks onFinished={vi.fn()} />);
+  await waitFor(() => expect(fetchGatewayTasks).toHaveBeenCalledTimes(2));
+  vi.useFakeTimers();
+  await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
+  expect(fetchGatewayTasks).toHaveBeenCalledTimes(2);
+  act(() => listener(task()));
+  expect(screen.getByText('Tuzi → HK')).toBeInTheDocument();
+  vi.mocked(fetchGatewayTasks).mockImplementation(async scope => scope === 'active' ? [task()] : []);
+  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+  expect(fetchGatewayTasks).toHaveBeenCalledTimes(4);
+  act(() => listener(task({ status: 'done', outputs: 1, output_types: ['image/png'], updated_at: '2026-10-24T00:01:00Z' })));
+  act(() => listener(task()));
+  await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
+  expect(fetchGatewayTasks).toHaveBeenCalledTimes(4);
+  expect(screen.getByText('暂无运行中任务')).toBeInTheDocument();
+  expect(screen.getByAltText('A 的产物 1')).toHaveAttribute('loading', 'lazy');
+});
+it('ignores stale events and never renders a text prompt', async () => {
+  const done = task({ status: 'done', updated_at: '2026-10-24T00:01:00Z' });
+  expect(mergeTask([done], task())).toEqual([done]);
+  vi.mocked(fetchGatewayTasks).mockResolvedValue([]);
+  render(<Tasks onFinished={vi.fn()} />);
+  await waitFor(() => expect(fetchGatewayTasks).toHaveBeenCalledTimes(2));
+  act(() => listener(task({ kind: 'text', prompt: 'private text prompt' })));
+  expect(screen.queryByText('private text prompt')).not.toBeInTheDocument();
+});

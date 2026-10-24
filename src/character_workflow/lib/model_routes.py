@@ -226,7 +226,7 @@ _cooldowns: dict[tuple[str, str], float] = {}
 _cooldowns_lock = threading.Lock()
 
 
-def cool_down(modality: str, alias: str, reason: FailoverReason) -> None:
+def cool_down(modality: str, alias: str, reason: FailoverReason, seconds: float | None = None) -> None:
     """欠费跨进程持久化；其他失败保留短期内存冷却。"""
     if reason == "insufficient_balance":
         with file_lock(_status_file().with_suffix(".lock")):
@@ -241,7 +241,7 @@ def cool_down(modality: str, alias: str, reason: FailoverReason) -> None:
             atomic_write_json(_status_file(), {"members": [*members, row]})
         return
     with _cooldowns_lock:
-        _cooldowns[(modality, alias)] = time.monotonic() + _COOLDOWN_SECONDS[reason]
+        _cooldowns[(modality, alias)] = time.monotonic() + (seconds if seconds is not None else _COOLDOWN_SECONDS[reason])
 
 
 def _cooling(modality: str, alias: str) -> bool:

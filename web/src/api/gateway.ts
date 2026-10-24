@@ -135,3 +135,35 @@ export async function syncGatewayProvider(alias: string) {
     method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({}),
   });
 }
+
+
+export interface GatewayTask {
+  task_id: string; kind: GatewayUsageRow['kind']; key_name: string; route_id: string;
+  member_alias: string | null; member_trail: string[]; phase: string | null;
+  status: 'pending' | 'running' | 'done' | 'failed' | 'canceled';
+  created_at: string; updated_at: string; prompt: string | null; n: number;
+  outputs: number; output_types: string[]; error: string | null;
+}
+export interface GatewayMembers {
+  members: { modality: string; alias: string; since: string; next_probe_at: string; route_ids: string[] }[];
+  unavailable_routes: { id: string; name: string; modality: string }[];
+}
+export async function fetchGatewayTasks(scope: 'active' | 'recent') {
+  const body = await requestJson<{ tasks: GatewayTask[] }>(`/api/gateway/tasks?scope=${scope}`, '读取网关任务');
+  return body.tasks;
+}
+export function gatewayOutputUrl(id: string, index: number) {
+  return `/api/gateway/tasks/${encodeURIComponent(id)}/outputs/${index}`;
+}
+export function fetchGatewayMembers() {
+  return requestJson<GatewayMembers>('/api/gateway/members', '读取供应商状态');
+}
+export function restoreGatewayMember(modality: string, alias: string) {
+  return requestJson<GatewayMembers>('/api/gateway/members/restore', '恢复供应商', {
+    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ modality, alias }),
+  });
+}
+export async function fetchGatewayProviderMe(alias: string): Promise<GatewayMe | null> {
+  try { return await requestJson<GatewayMe | null>(`/api/gateway/providers/${encodeURIComponent(alias)}/me`, '读取额度'); }
+  catch { return null; }
+}

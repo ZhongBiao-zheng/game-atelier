@@ -83,7 +83,7 @@ def _switch_route(job_id: str, error: BaseException) -> bool:
     if reason is None:
         return False
     modality = job.kind.value
-    model_routes.cool_down(modality, job.alias, reason)
+    model_routes.cool_down(modality, job.alias, reason, seconds=getattr(error, "retry_after", None))
     tried = [*(params.route_tried or []), job.alias]
     while (candidate := model_routes.next_member(modality, params.route_id, tried)) is not None:
         key, model = candidate
@@ -146,6 +146,8 @@ def _friendly_error(err: BaseException) -> str:
     **永远保留原始报错**：视频侧会把 task_id 挂在报错里（产物已计费、要靠它人工找回），
     整条替换会把这类关键标识一起冲掉。所以分支只负责给中文提示，原文由这里统一附加。
     """
+    if getattr(err, "detail", None) and str(err).startswith("gateway api 429:"):
+        return _redact_local_paths(err.detail)
     raw = _redact_local_paths(str(err))
     if str(err).startswith("视频提交结果未确认"):
         return raw

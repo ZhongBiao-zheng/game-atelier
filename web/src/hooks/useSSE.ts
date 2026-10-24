@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { connectionFetch, useConnectionState } from '@/api/connection';
 import { readServerEvents } from '@/api/sse';
+import type { GatewayTask } from '@/api/gateway';
 import type { TeamLibraryChangeEvent } from '@/schema/teamLibrary';
 
 export interface JobChangedPayload {
@@ -22,6 +23,7 @@ export interface CanvasAgentEventPayload {
 }
 
 interface UseSSEOptions {
+  onGatewayTask?: (data: GatewayTask) => void;
   /** false 时整个 hook 不建连（compact 模式 / 不需要推送的页面）。 */
   enabled?: boolean;
   /** job-changed 事件携带 {job_id, status}（watcher 已在广播），定向更新用，不再扔掉 payload。 */
@@ -49,6 +51,8 @@ export function useSSE(options?: UseSSEOptions): number {
   onTeamLibraryChangedRef.current = options?.onTeamLibraryChanged;
   const onCanvasAgentRef = useRef(options?.onCanvasAgent);
   onCanvasAgentRef.current = options?.onCanvasAgent;
+  const onGatewayTaskRef = useRef(options?.onGatewayTask);
+  onGatewayTaskRef.current = options?.onGatewayTask;
   const onConnectRef = useRef(options?.onConnect);
   onConnectRef.current = options?.onConnect;
 
@@ -74,6 +78,9 @@ export function useSSE(options?: UseSSEOptions): number {
         await readServerEvents(response.body, ({ event, data }) => {
           if (closed) return;
           if (['job-changed', 'image-added', 'spec-changed', 'active-character-changed', 'projects-changed', 'workshop-request-changed'].includes(event)) bump();
+          if (event === 'gateway_task') {
+            try { onGatewayTaskRef.current?.(JSON.parse(data) as GatewayTask); } catch { /* Polling resyncs. */ }
+          }
           if (event === 'job-changed') {
             try { onJobChangedRef.current?.(JSON.parse(data) as JobChangedPayload); } catch { /* Index invalidation already ran. */ }
           }

@@ -3,6 +3,13 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 
 import { SettingsPage } from './Settings';
 
+// These page tests exercise shell/settings behavior; gateway interactions have their own suite.
+vi.mock('@/api/gateway', async importOriginal => ({
+  ...await importOriginal<typeof import('@/api/gateway')>(),
+  fetchGatewayTasks: async () => [],
+  fetchGatewayMembers: async () => ({ members: [], unavailable_routes: [] }),
+}));
+
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn((url: RequestInfo | URL) => {
     if (url === '/api/onboarding/status') {

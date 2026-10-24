@@ -1,3 +1,4 @@
+import { GatewayQuota } from './GatewayQuota';
 import { Pencil, Trash2 } from 'lucide-react';
 import { modelModality } from '@/api/keys';
 import { providerLabel } from '@/lib/providerLabels';
@@ -65,6 +66,7 @@ export function KeyCard({ row, onEdit, onDelete }: Props) {
             </a>
           )}
         </div>
+        {row.provider === 'atelier' && <GatewayQuota key={`${row.alias}:${row.base_url}:${row.masked_secret}`} alias={row.alias} />}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         {textCount > 0 && (

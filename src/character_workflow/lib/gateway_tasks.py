@@ -166,9 +166,17 @@ _lock = threading.RLock()
 _running: dict[str, str] = {}  # task_id → key_id
 
 
+def task_snapshot(task: GatewayTask) -> dict:
+    return {**task.model_dump(include={"task_id", "kind", "key_name", "route_id", "member_alias",
+            "member_trail", "phase", "status", "created_at", "updated_at", "n", "output_types", "error"}),
+            "prompt": task.prompt if task.kind != "text" else None, "outputs": len(task.outputs)}
+
+
 def _save(task: GatewayTask) -> GatewayTask:
     task = task.model_copy(update={"updated_at": _now().isoformat()})
     atomic_write_json(_task_file(task.task_id), task.model_dump(mode="json"))
+    from . import gateway_live
+    gateway_live.notify(task_snapshot(task))
     return task
 
 

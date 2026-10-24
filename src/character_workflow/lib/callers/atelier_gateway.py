@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 import uuid
 from collections.abc import Callable
@@ -34,7 +35,11 @@ _SUFFIX = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
 
 
 class GatewayError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, retry_after: float | None = None, detail: str | None = None):
+        super().__init__(message)
+        self.retry_after = retry_after
+        self.detail = detail
+
 
 
 def _session() -> requests.Session:
@@ -48,10 +53,19 @@ def _raise_for_status(response: requests.Response) -> None:
     if response.status_code < 400:
         return
     try:
-        detail = response.json().get("detail")
+        body = response.json()
+        detail = body.get("detail") or (body.get("error", {}).get("message") if isinstance(body.get("error"), dict) else None)
     except ValueError:
         detail = None
-    raise GatewayError(f"gateway api {response.status_code}: {detail or response.reason}")
+    retry_after = None
+    if response.status_code == 429:
+        try:
+            value = float(response.headers.get("Retry-After", ""))
+            retry_after = max(0, value) if math.isfinite(value) else None
+        except ValueError:
+            pass
+    raise GatewayError(f"gateway api {response.status_code}: {detail or response.reason}",
+                       retry_after=retry_after, detail=detail if response.status_code == 429 else None)
 
 
 def check_gateway(base_url: str, token: str) -> dict[str, Any]:
@@ -163,7 +177,7 @@ def _run_task(
             if kind == "image_edit":
                 wire_params["image_edit"] = {k: v for k, v in params.get("image_edit", {}).items()
                                              if k in {"mode", "x", "y", "width", "height"}}
-            task_id = _submit(session, base, headers, kind=kind, model=model, prompt=prompt, n=n,
+            task_id = _submit(session, base, headers, alias=alias, kind=kind, model=model, prompt=prompt, n=n,
                               params=wire_params,
                               uploads={group: ([params[FILE_PARAMS[group]]] if group == "mask"
                                                else params[FILE_PARAMS[group]])
@@ -225,7 +239,7 @@ def _run_task(
         return paths
 
 
-def _submit(session, base, headers, *, kind, model, prompt, n, params, uploads) -> str:
+def _submit(session, base, headers, *, alias, kind, model, prompt, n, params, uploads) -> str:
     from character_workflow.lib.callers.openai_image import _is_pre_flight_failure
 
     files = [("mask" if group == "mask" else f"{group}_{index}",
@@ -245,7 +259,14 @@ def _submit(session, base, headers, *, kind, model, prompt, n, params, uploads) 
                 raise  # 连接都没建立：网关没收到，接入端可以换家
             last_error = error
             continue
-        _raise_for_status(response)
+        try:
+            _raise_for_status(response)
+        except GatewayError as error:
+            if response.status_code == 429:
+                from character_workflow.lib import model_routes
+                from character_workflow.lib.gateway_tasks import modality_for
+                model_routes.cool_down(modality_for(kind), alias, "rate_limited", seconds=error.retry_after)
+            raise
         return str(response.json()["task_id"])
     raise GatewayError("网关提交结果未确认，未自动重新提交") from last_error
 

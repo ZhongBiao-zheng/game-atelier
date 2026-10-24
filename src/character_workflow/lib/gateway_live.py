@@ -19,16 +19,26 @@ def notify(snapshot: dict) -> None:
 def register(snapshot: dict) -> None:
     with _lock:
         _calls[snapshot["call_id"]] = dict(snapshot)
-    notify(snapshot)
+    notify(text_snapshot(snapshot))
 
 
 def finish(call_id: str, status: str) -> None:
     with _lock:
         snapshot = _calls.pop(call_id, None)
     if snapshot:
-        notify({**snapshot, "status": status})
+        notify(text_snapshot({**snapshot, "status": status}))
 
 
 def active() -> list[dict]:
     with _lock:
         return [dict(call) for call in _calls.values()]
+
+
+def text_snapshot(call: dict) -> dict:
+    from datetime import datetime, timezone
+    return {"task_id": call["call_id"], "kind": "text", "key_name": call["key_name"],
+            "route_id": call["route_id"], "member_alias": call["member_alias"],
+            "member_trail": [call["member_alias"]], "phase": None,
+            "status": call.get("status", "running"), "created_at": call["started_at"],
+            "updated_at": datetime.now(timezone.utc).isoformat(), "prompt": None,
+            "n": 0, "outputs": 0, "output_types": [], "error": None}

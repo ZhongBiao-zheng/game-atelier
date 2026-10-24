@@ -81,6 +81,12 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   与 `provider_task_ids` 记录网关任务 id，重启后只查询既有任务。caller 把网关结果映射为：401 → `gateway api 401`，
   429 → `gateway api 429`，`error_kind=unavailable` → `gateway api 503: unavailable`（三者触发接入端失败切换），
   其余不带状态码；`unconfirmed` 的文案含「未确认」。
+- 接入端收到网关 429 时保留中文 detail，按 Retry-After 秒数冷却对应模态的 atelier alias；文本 OpenAI 前缀的 error.message 同样处理。
+- `GET /api/gateway/providers/{alias}/me`：本机代查该 KEY 的本人额度，按地址和凭证缓存 30 秒（含失败）；失败返回 null，页面静默隐藏。
+- `GET /api/gateway/tasks?scope=active|recent`（管理权限）：返回 `{tasks}`。active 含进行中的生成与文本调用；recent 为 24 小时内终态，倒序最多 200。
+  字段 `task_id, kind, key_name, route_id, member_alias, member_trail, phase, status, created_at, updated_at, prompt, n, outputs, output_types, error`；文本 prompt 固定 null。
+- `GET /api/gateway/tasks/{task_id}/outputs/{index}`：本机 cookie 会话预览，要求管理权限；无文件或任务返回 404。
+- SSE `gateway_task` 携带同形快照，仅发给 manage 会话；任务落盘、文本登记和结束均通知。页面合并快照，有运行中任务时每 4 秒刷新，空闲时停轮询，重连后重新拉取。
 - 本机管理（管理权限）：`GET/PUT /api/gateway`（开关 / 端口 / 名称 + 运行状态）、`POST /api/gateway/keys`（返回一次性明文 `token`）、
   `PATCH /api/gateway/keys/{id}`（名称、金额窗口、模型与 alias 权限）、`POST /api/gateway/keys/{id}/revoke`、`GET /api/gateway/usage?month=YYYY-MM`（使用记录行）。
   创建 body 为 `{name, limits, allowed_models, allowed_aliases}`，PATCH 接受任意字段子集（省略保持原值，权限 null 取消限制）。

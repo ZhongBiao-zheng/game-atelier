@@ -201,6 +201,7 @@ def _post_json(
     access_key: str,
     payload: dict[str, Any],
     timeout: float | tuple[float, float],
+    gateway_alias: str | None = None,
 ) -> object:
     try:
         response = requests.post(
@@ -214,6 +215,14 @@ def _post_json(
         )
     except requests.RequestException as error:
         raise OpenAITextError(str(error)) from error
+    if gateway_alias and response.status_code == 429:
+        from .atelier_gateway import GatewayError, _raise_for_status
+        from character_workflow.lib import model_routes
+        try:
+            _raise_for_status(response)
+        except GatewayError as error:
+            model_routes.cool_down("text", gateway_alias, "rate_limited", seconds=error.retry_after)
+            raise
     if response.status_code >= 400:
         raise OpenAITextError(f"text api {response.status_code}: {response.text[:500]}")
     try:
@@ -318,6 +327,7 @@ def generate(
                 access_key=key.access_key,
                 payload=response_payload,
                 timeout=timeout,
+                gateway_alias=alias if key.provider == "atelier" else None,
             )
             text = _response_text(body)
             if not text:
@@ -340,6 +350,7 @@ def generate(
         access_key=key.access_key,
         payload=payload,
         timeout=timeout,
+        gateway_alias=alias if key.provider == "atelier" else None,
     )
     choices = body.get("choices") if isinstance(body, dict) else None
     outputs = [_content_text(choice) for choice in choices] if isinstance(choices, list) else []

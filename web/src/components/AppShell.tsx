@@ -7,6 +7,7 @@ import { ChangelogButton } from '@/components/ChangelogButton';
 import { TeamShareReminder, type TeamShareReminderHandle } from '@/components/team/TeamShareReminder';
 import { fetchWorkshopRequests } from '@/api/workshopRequests';
 import { useSSE } from '@/hooks/useSSE';
+import { publishGatewayTask, publishGatewayConnected } from '@/api/gatewayEvents';
 import { Home } from '@/pages/Home';
 import { Studio } from '@/pages/Studio';
 import { CanvasProjectIndex } from '@/pages/CanvasProjectIndex';
@@ -105,7 +106,8 @@ export function AppShell() {
   // 全壳唯一一条 SSE（服务端每会话限 4 条）：顺带把团队库变更交给分享提醒，重连时让它重取显示名。
   const signal = useSSE({
     onTeamLibraryChanged: event => reminderRef.current?.notify(event),
-    onConnect: () => reminderRef.current?.refreshProfile(),
+    onGatewayTask: publishGatewayTask,
+    onConnect: () => { reminderRef.current?.refreshProfile(); publishGatewayConnected(); },
   });
   const awaiting = useAwaitingWorkshopRequests(signal);
 

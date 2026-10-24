@@ -35,6 +35,13 @@ vi.mock('@/hooks/useSSE', async importOriginal => {
   };
 });
 
+// These page tests exercise shell/settings behavior; gateway interactions have their own suite.
+vi.mock('@/api/gateway', async importOriginal => ({
+  ...await importOriginal<typeof import('@/api/gateway')>(),
+  fetchGatewayTasks: async () => [],
+  fetchGatewayMembers: async () => ({ members: [], unavailable_routes: [] }),
+}));
+
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: true,
@@ -432,6 +439,13 @@ describe('AppShell', () => {
     expect(hosts.length).toBeGreaterThan(0);
     const shell = hosts.at(-1)!;
     expect(shell.onConnect).toBeInstanceOf(Function);
+    act(() => shell.onGatewayTask?.({
+      task_id: 'gateway-live', kind: 'text', key_name: '网关同事', route_id: 'text-model',
+      member_alias: 'Local', member_trail: ['Local'], phase: null, status: 'running',
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      prompt: null, n: 0, outputs: 0, output_types: [], error: null,
+    }));
+    expect(screen.getByText('网关同事')).toBeInTheDocument();
 
     act(() => {
       shell.onTeamLibraryChanged?.({

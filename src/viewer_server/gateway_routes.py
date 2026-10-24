@@ -6,11 +6,14 @@ from __future__ import annotations
 
 import re
 import socket
-from datetime import datetime
-from typing import Annotated
+import threading
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Literal
 
 import requests
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from character_workflow.lib import gateway_keys, gateway_quota, gateway_tasks, keys, model_routes
@@ -193,3 +196,62 @@ def sync_gateway_provider(alias: str) -> dict:
     except (requests.RequestException, atelier_gateway.GatewayError) as error:
         raise _gateway_failure(error) from error
     return {"models": [model.model_dump(mode="json") for model in models]}
+
+
+@gateway_router.get("/tasks")
+def gateway_task_list(scope: Literal["active", "recent"] = "active") -> dict:
+    from character_workflow.lib import gateway_live
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    with gateway_tasks._lock:
+        tasks = [t for t in gateway_tasks._all_tasks()
+                 if (t.status not in gateway_tasks.TERMINAL if scope == "active"
+                     else t.status in gateway_tasks.TERMINAL and datetime.fromisoformat(t.updated_at) >= cutoff)]
+        rows = {t.task_id: gateway_tasks.task_snapshot(t) for t in tasks}
+    if scope == "active":
+        rows.update({c["call_id"]: gateway_live.text_snapshot(c) for c in gateway_live.active()})
+    ordered = sorted(rows.values(), key=lambda row: row["updated_at"], reverse=True)
+    return {"tasks": ordered[:200] if scope == "recent" else ordered}
+
+
+@gateway_router.get("/tasks/{task_id}/outputs/{index}")
+def gateway_task_output(task_id: str, index: int) -> FileResponse:
+    if not re.fullmatch(r"[a-f0-9]{32}", task_id):
+        raise HTTPException(404, "任务不存在")
+    task = gateway_tasks._read(task_id)
+    if task is None:
+        raise HTTPException(404, "任务不存在")
+    try:
+        path = gateway_tasks.output_file(task.key_id, task_id, index)
+    except gateway_tasks.GatewayRequestError as error:
+        raise HTTPException(error.status, error.message) from error
+    return FileResponse(path, media_type=task.output_types[index])
+
+
+_me_cache: dict[str, tuple[tuple, float, dict | None]] = {}
+_me_lock = threading.Lock()
+
+
+@gateway_router.get("/providers/{alias}/me")
+def gateway_provider_me(alias: str) -> dict | None:
+    key = keys.find_by_alias(alias)
+    if key is None or key.provider != "atelier" or not key.base_url:
+        return None
+    identity = (key.base_url, key.access_key)
+    with _me_lock:
+        cached = _me_cache.get(alias)
+        if cached and cached[0] == identity and cached[1] > time.monotonic():
+            return cached[2]
+    result = None
+    try:
+        with atelier_gateway._session() as session:
+            response = session.get(key.base_url.rstrip("/") + "/gateway/v1/me",
+                headers={"Authorization": f"Bearer {key.access_key}"}, timeout=(3, 5))
+            response.raise_for_status()
+            body = response.json()
+            if isinstance(body, dict) and isinstance(body.get("limits"), list):
+                result = body
+    except (requests.RequestException, ValueError):
+        pass
+    with _me_lock:
+        _me_cache[alias] = (identity, time.monotonic() + 30, result)
+    return result
