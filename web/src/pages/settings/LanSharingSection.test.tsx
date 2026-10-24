@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import * as api from '@/api/gateway';
 import { LanSharingSection } from './LanSharingSection';
 vi.mock('@/hooks/useSSE', () => ({ useSSE: vi.fn() }));
-vi.mock('@/api/gateway', () => ({ fetchGateway: vi.fn(), fetchGatewayOptions: vi.fn(), fetchGatewayUsage: vi.fn(),
+vi.mock('@/api/gateway', () => ({ fetchGateway: vi.fn(), fetchGatewayOptions: vi.fn(),
   fetchGatewayTasks: vi.fn(), fetchGatewayMembers: vi.fn(), createGatewayKey: vi.fn(), updateGatewayKey: vi.fn(),
   revokeGatewayKey: vi.fn(), updateGateway: vi.fn(), gatewayOutputUrl: vi.fn() }));
 const key: api.GatewayKey = { id: 'k1', name: '小王', limits: [], allowed_models: null, allowed_aliases: null,
@@ -12,7 +12,7 @@ const state: api.GatewayState = { enabled: true, port: 5180, name: '', default_n
 beforeEach(() => { vi.clearAllMocks();
   vi.mocked(api.fetchGateway).mockResolvedValue(state);
   vi.mocked(api.fetchGatewayOptions).mockResolvedValue({ models: [{ id: 'gpt', name: 'GPT', modality: 'image' }], aliases: [{ alias: 'HK', name: 'HK', provider: 'custom' }] });
-  vi.mocked(api.fetchGatewayUsage).mockResolvedValue([]); vi.mocked(api.fetchGatewayTasks).mockResolvedValue([]);
+  vi.mocked(api.fetchGatewayTasks).mockResolvedValue([]);
   vi.mocked(api.fetchGatewayMembers).mockResolvedValue({ members: [], unavailable_routes: [] });
 });
 describe('LAN sharing', () => {

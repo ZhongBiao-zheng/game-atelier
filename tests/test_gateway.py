@@ -240,10 +240,10 @@ def test_management_api_creates_keys_toggles_and_reports_usage(isolated_data_roo
                        json={"limits": [{"period": "week", "cap_cny": 10}]}).json()["limits"] == [
                            {"period": "week", "cap_cny": 10}]
     assert local.post(f"/api/gateway/keys/{key_id}/revoke").json()["revoked_at"]
-    assert local.get("/api/gateway/usage").json()["rows"] == []
-    assert local.get("/api/gateway/usage?month=bad").status_code == 422
+    assert local.get("/api/usage?scope=team").json()["totals"]["count"] == 0
+    assert local.get("/api/usage?range=bad").status_code == 422
     assert local_capability("PUT", "/api/gateway") == "manage"
-    assert local_capability("GET", "/api/gateway/usage") == "manage"
+    assert local_capability("GET", "/api/usage") == "manage"
 
 
 def test_gateway_server_starts_and_stops_in_a_thread(isolated_data_root):

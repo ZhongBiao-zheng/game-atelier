@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 
 import requests
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -99,17 +99,6 @@ def revoke_gateway_key(key_id: str) -> dict:
         return _key_view(gateway_keys.revoke_key(key_id))
     except gateway_keys.NoSuchGatewayKeyError as error:
         raise HTTPException(404, "网关密钥不存在") from error
-
-
-_MONTH = re.compile(r"^\d{4}-\d{2}$")
-
-
-@gateway_router.get("/usage")
-def gateway_usage(month: str | None = Query(default=None)) -> dict:
-    month = month or datetime.now().astimezone().strftime("%Y-%m")
-    if not _MONTH.fullmatch(month):
-        raise HTTPException(422, "month 格式应为 YYYY-MM")
-    return {"month": month, "rows": gateway_tasks.read_usage(month)}
 
 
 @gateway_router.get("/options")

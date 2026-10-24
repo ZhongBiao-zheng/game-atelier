@@ -79,7 +79,7 @@ GET /api/gateway/providers/{alias}/me
 GET /api/gateway/options
 GET /api/model-routes/member-status
 POST /api/model-routes/member-status/restore
-GET /api/gateway/usage
+GET /api/usage
 POST /api/gateway/check
 POST /api/gateway/providers/{alias}/sync
 GET /api/gallery/recent
@@ -191,7 +191,7 @@ LOCAL_MANAGEMENT = frozenset({
     "/api/onboarding/data-root",
     # 局域网共享：开关会让本机对局域网开端口，密钥与用量也只给本机页面（ADR-0025）。
     "/api/gateway", "/api/gateway/keys", "/api/gateway/keys/{key_id}",
-    "/api/gateway/keys/{key_id}/revoke", "/api/gateway/usage", "/api/gateway/check",
+    "/api/gateway/keys/{key_id}/revoke", "/api/usage", "/api/gateway/check",
     "/api/gateway/providers/{alias}/sync", "/api/gateway/options",
     "/api/gateway/tasks", "/api/gateway/tasks/{task_id}/outputs/{index}",
     "/api/gateway/providers/{alias}/me",

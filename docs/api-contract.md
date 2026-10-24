@@ -95,7 +95,7 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 - SSE `gateway_task` 携带同形快照，仅发给拥有本机管理入口的 local 会话，不发给 agent；任务落盘、文本登记和结束均通知。页面合并快照，有运行中任务时每 4 秒刷新，空闲时停轮询，重连后重新拉取。
   设置页复用 AppShell 现有 SSE 连接；文本结束事件只用于即时通知，文本调用不持久化为生成任务，刷新后的 recent 列表只含落盘的生成任务。
 - 本机管理（管理权限）：`GET/PUT /api/gateway`（开关 / 端口 / 名称 + 运行状态）、`POST /api/gateway/keys`（返回一次性明文 `token`）、
-  `PATCH /api/gateway/keys/{id}`（名称、金额窗口、模型与 alias 权限）、`POST /api/gateway/keys/{id}/revoke`、`GET /api/gateway/usage?month=YYYY-MM`（使用记录行）。
+  `PATCH /api/gateway/keys/{id}`（名称、金额窗口、模型与 alias 权限）、`POST /api/gateway/keys/{id}/revoke`；使用记录见 `GET /api/usage?scope=team`。
   创建 body 为 `{name, limits, allowed_models, allowed_aliases}`，PATCH 接受任意字段子集（省略保持原值，权限 null 取消限制）。
   `GET /api/gateway` 的密钥含 `limits_status`、`month_charged_cny`、`month_calls`、`last_used_at`；不含哈希。
   `GET /api/gateway/options` → `{models: [{id, name, modality}], aliases: [{alias, provider, name}]}`，alias 排除 atelier。
@@ -1113,3 +1113,13 @@ resolve 后的绝对路径（落盘值就是闸门判过的那个）。`mask_ima
   insufficient_balance（欠费）或 unavailable（临时不可用，since 为 null）。
   `unavailable_routes` 为所有本机成员欠费的路由（id、name、modality）。
 - `POST /api/model-routes/member-status/restore`：请求 `{modality, alias}`，恢复后返回同一状态结构。
+
+### 用量
+
+`GET /api/usage` 仅限本机管理会话（Agent 无权读取）。参数 scope=mine|team（默认 mine）、
+range=today|7d|30d|90d|all（默认 30d）、source=all|local|lan（默认 all，仅 mine）、
+member=网关密钥 ID（仅 team）。网关未开启时 team 返回 404。响应 `UsageResponse` 双端 schema
+定义 totals、trend、rankings、top、sources、members；team 的 top 不返回 prompt。
+mine 每条 image/video job 计一次，排除 pending_confirm/canceled；actual 优先于 estimated，
+failed 只计 actual。team 以账本 charged_cny 为准。时间按本机时区，从 N 天前的日界线
+（包含今天）至现在；previous 为紧邻的等长区间，all 时为 null。today/7d 按日，其余周一分桶并补零。

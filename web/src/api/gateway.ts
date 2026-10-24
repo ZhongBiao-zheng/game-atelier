@@ -111,13 +111,6 @@ export async function revokeGatewayKey(id: string) {
   });
 }
 
-export async function fetchGatewayUsage(month?: string): Promise<GatewayUsageRow[]> {
-  const query = month ? `?month=${encodeURIComponent(month)}` : '';
-  const body = await requestJson<{ rows?: GatewayUsageRow[] }>(`/api/gateway/usage${query}`, '读取网关用量');
-  if (!Array.isArray(body.rows)) throw new Error('读取网关用量失败：返回格式不对');
-  return body.rows;
-}
-
 export interface GatewayCheckResult {
   info: { name: string; version: string; protocol: number };
   models: KeyModel[];

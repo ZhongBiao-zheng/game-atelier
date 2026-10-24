@@ -3163,3 +3163,60 @@ class UnavailableModelRoute(BaseModel):
 class ModelRouteMemberStatusResponse(BaseModel):
     members: list[ModelRouteMemberStatus]
     unavailable_routes: list[UnavailableModelRoute]
+
+
+class UsageTotals(BaseModel):
+    cost_cny: float
+    previous_cost_cny: float | None
+    count: int
+    by_kind: dict[str, int]
+    failed: int
+    active_members: int | None
+    member_count: int | None
+
+
+class UsageTrend(BaseModel):
+    start: str
+    cost_cny: float
+
+
+class UsageRankingRow(BaseModel):
+    key: str
+    label: str
+    cost_cny: float
+    count: int
+
+
+class UsageRanking(BaseModel):
+    by: Literal["model", "project", "member"]
+    rows: list[UsageRankingRow]
+
+
+class UsageTask(BaseModel):
+    id: str
+    cost_cny: float
+    at: str
+    kind: str
+    model: str
+    label: str
+    source: Literal["local", "lan"]
+    prompt: str | None = None
+    thumb_url: str | None
+    href: str | None
+
+
+class UsageMember(BaseModel):
+    id: str
+    name: str
+
+
+class UsageResponse(BaseModel):
+    scope: Literal["mine", "team"]
+    range: Literal["today", "7d", "30d", "90d", "all"]
+    bucket: Literal["day", "week"]
+    totals: UsageTotals
+    trend: list[UsageTrend]
+    rankings: list[UsageRanking]
+    top: list[UsageTask]
+    sources: list[Literal["local", "lan"]]
+    members: list[UsageMember]
