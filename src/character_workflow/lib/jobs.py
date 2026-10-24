@@ -368,6 +368,12 @@ def fail_orphan_studio_jobs(error: str = "server restarted, job interrupted") ->
     return reclaimed
 
 
+def has_resumable_gateway_task(job: Job) -> bool:
+    return bool(job.provider == "atelier"
+                and job.params.provider_task_protocol == "atelier_gateway"
+                and job.params.provider_task_ids)
+
+
 def is_resumable_studio_job(job: Job) -> bool:
     if job.provider == "evolink":
         from .canvas_image_edits import has_resumable_mj_task

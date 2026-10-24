@@ -192,3 +192,101 @@ def test_size_is_normalized_for_the_gateway_member(isolated_data_root):
     direct = normalize_image_size_params(channel_key, channel_model.id,
                                          {"size_mode": "ratio", "ratio": "1:1"})
     assert params == direct
+
+
+def test_edit_downloads_process_inputs(gateway, monkeypatch, tmp_path):
+    from character_workflow.lib.callers import image_edit
+
+    def render(*, params, output_dir, **kwargs):
+        assert params["image_edit"] == {"mode": "inpaint", "x": 0, "y": 0}
+        assert Path(params["mask_image"]).is_file()
+        out, guide = output_dir / "out.png", output_dir / "guide.png"
+        _png(out)
+        _png(guide)
+        params["edit_inputs"] = [{"role": "guide", "path": str(guide)}]
+        return [str(out)]
+
+    monkeypatch.setattr(image_edit, "render", render)
+    source = tmp_path / "source.png"
+    _png(source)
+    params = dict(reference_images=[str(source)], mask_image=str(source),
+                  image_edit={"mode": "inpaint", "source_version_id": "local-only"})
+    outputs = atelier_gateway.render_edit(prompt="edit", model="gpt-image-2", alias="Hub",
+                                          output_dir=tmp_path / "download", params=params)
+    assert Path(outputs[0]).is_file()
+    assert params["edit_inputs"][0]["role"] == "guide"
+    assert Path(params["edit_inputs"][0]["path"]).parent == tmp_path / "download/edit-inputs"
+    assert Path(params["edit_inputs"][0]["path"]).read_bytes() == source.read_bytes()
+
+
+def test_video_sync_groups_with_local_and_job_restart_only_polls(gateway, monkeypatch):
+    from character_workflow.lib import callers, gateway_tasks
+    from character_workflow.lib.jobs import fail_orphan_studio_jobs, resumable_studio_jobs
+
+    local = keys.ModelSpec(id="seedance-test", name="Video", modality="video", protocol="seedance")
+    _add("Video", "seedream", local)
+    atelier_gateway.sync_gateway_key("Hub")
+    model = next(m for m in keys.find_by_alias("Hub").models if m.modality == "video")
+    assert model.protocol == "seedance"
+    routes = model_routes.list_routes("video")
+    assert len(routes) == 1
+    assert {m.alias for m in routes[0].members} == {"Video", "Hub"}
+    calls = []
+    original = callers.dispatch_video
+
+    def render(**kwargs):
+        if kwargs["alias"] == "Hub":
+            return original(**kwargs)
+        calls.append(kwargs)
+        assert kwargs["params"]["n"] == 2
+        kwargs["on_task_id"]("upstream-private-id")
+        out = kwargs["output_dir"] / "video.mp4"
+        out.write_bytes(b"\x00\x00\x00\x18ftypisom")
+        return [str(out)]
+
+    monkeypatch.setattr(callers, "dispatch_video", render)
+    first = _job("video-first", route_id=routes[0].id).model_copy(update={
+        "model": model.id, "kind": JobKind.VIDEO,
+        "params": JobParams(n=2, route_id=routes[0].id),
+    })
+    save_job(first)
+    done = job_runner.run_job(first.job_id)
+    assert done.status == JobStatus.DONE
+    assert done.params.provider_task_protocol == "atelier_gateway"
+    assert done.params.provider_task_ids != ["upstream-private-id"]
+    task = gateway_tasks._read(done.params.provider_task_ids[0])
+    assert task.upstream_task_ids == ["upstream-private-id"]
+    resumed = done.model_copy(update={"job_id": "video-resume", "status": JobStatus.PENDING,
+                                     "output_paths": [], "runner_started_at": None})
+    save_job(resumed)
+    assert resumed.job_id in resumable_studio_jobs()
+    assert resumed.job_id not in fail_orphan_studio_jobs()
+    again = job_runner.run_job(resumed.job_id)
+    assert again.status == JobStatus.DONE
+    assert len(calls) == 1
+
+
+def test_audio_job_and_canvas_capability_use_gateway(gateway, monkeypatch):
+    from character_workflow.lib.callers import openai_audio
+    from character_workflow.lib.canvas_runs import _supports_openai_speech
+
+    _add("Speech", "openai", keys.ModelSpec(id="tts-1", name="Speech", modality="audio"))
+    atelier_gateway.sync_gateway_key("Hub")
+    key = keys.find_by_alias("Hub")
+    model = next(m for m in key.models if m.modality == "audio")
+    assert _supports_openai_speech(key, model)
+
+    def render(*, output_dir, params, **kwargs):
+        assert params["voice"] == "alloy"
+        out = output_dir / "speech.mp3"
+        out.write_bytes(b"ID3audio")
+        return [str(out)]
+    monkeypatch.setattr(openai_audio, "render", render)
+    job = _job("audio", route_id="tts-1", voice="alloy").model_copy(update={
+        "model": "tts-1", "kind": JobKind.AUDIO,
+    })
+    save_job(job)
+    done = job_runner.run_job(job.job_id)
+    assert done.status == JobStatus.DONE
+    assert done.params.provider_task_protocol == "atelier_gateway"
+    assert Path(done.output_paths[0]).read_bytes() == b"ID3audio"

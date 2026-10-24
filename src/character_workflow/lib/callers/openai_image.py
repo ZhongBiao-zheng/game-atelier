@@ -405,6 +405,13 @@ def supports_layer_decomposition(key, model: str) -> bool:
     canvas_runs 的模型筛选与 render 的出站门禁都调这里，不各写一份。前端
     web/src/components/canvas/canvasLayerDecomposition.ts 是同一真值表的 TS 版。
     """
+    if key.provider == "atelier":
+        from types import SimpleNamespace
+        spec = next((item for item in key.models if item.id == model), None)
+        return bool(spec and spec.via) and all(supports_layer_decomposition(
+            SimpleNamespace(provider=m.provider, base_url=m.base_url,
+                            models=[SimpleNamespace(id=m.model_id, protocol=m.protocol)]), m.model_id,
+        ) for m in spec.via)
     if "seedream-5-0-pro" not in normalized_model_id(model):
         return False
     return key.provider == "seedream" or _effective_image_protocol(key, model) == "ark"

@@ -606,7 +606,12 @@ def _run_once(
 
             render = dispatch
             if params.get("image_edit"):
-                from character_workflow.lib.callers.image_edit import render
+                from character_workflow.lib.keys import find_by_alias
+                edit_key = find_by_alias(job.alias)
+                if edit_key and edit_key.provider == "atelier":
+                    from character_workflow.lib.callers.atelier_gateway import render_edit as render
+                else:
+                    from character_workflow.lib.callers.image_edit import render
             paths = render(
                 prompt=_with_reference_numbering(job.prompt, params),
                 model=job.model,
@@ -764,6 +769,7 @@ def _run_text_job(job: Job) -> Job:
 
 def _run_audio_job(job: Job) -> Job:
     params = _params(job)
+    should_cancel = _cancel_checker(job)
     try:
         if not job.alias:
             raise JobRunnerError("audio job requires an alias to route to a provider")
@@ -774,6 +780,10 @@ def _run_audio_job(job: Job) -> Job:
                 alias=job.alias,
                 output_dir=Path(tmp),
                 params=params,
+                on_params_changed=lambda: update_job_params(job.job_id, params),
+                on_phase=lambda phase: update_job_phase(job.job_id, phase),
+                on_cost_usd=_actual_cost_recorder(job.job_id, params),
+                should_cancel=should_cancel,
             )
             valid = [Path(path) for path in outputs if is_valid_audio(Path(path))]
             if not valid:
@@ -796,6 +806,9 @@ def _run_audio_job(job: Job) -> Job:
             error=None,
         )
     except Exception as error:
+        if should_cancel():
+            update_job_status(job.job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
+            raise JobCanceled("已按请求停止") from error
         if _switch_route(job.job_id, error):
             raise _RouteSwitched() from error
         update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(error))
@@ -818,7 +831,8 @@ def _run_video_job(job: Job) -> Job:
         if task_id not in ids:
             ids.append(task_id)
         params["provider_task_ids"] = ids
-        params["provider_task_protocol"] = "seedance"
+        if params.get("provider_task_protocol") != "atelier_gateway":
+            params["provider_task_protocol"] = "seedance"
         update_job_params(job.job_id, params)
 
     def on_submission(attempt: dict[str, Any]) -> None:

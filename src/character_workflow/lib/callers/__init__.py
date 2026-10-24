@@ -122,6 +122,10 @@ def dispatch_video(
     key = _keys.find_by_alias(alias)
     if key is None:
         raise NoSuchKeyError(alias)
+    if key.provider == "atelier":
+        from .atelier_gateway import render_video
+        return render_video(prompt=prompt, model=model, alias=alias,
+                            output_dir=output_dir, params=params, **kwargs)
     protocol = _effective_protocol(key, model)
     if not protocol:
         raise WrongProviderError(
@@ -162,7 +166,13 @@ def dispatch_audio(
     params: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> list[str]:
-    from .openai_audio import render
+    key = _keys.find_by_alias(alias)
+    if key is None:
+        raise NoSuchKeyError(alias)
+    if key.provider == "atelier":
+        from .atelier_gateway import render_audio as render
+    else:
+        from .openai_audio import render
 
     return render(
         prompt=prompt, model=model, alias=alias, output_dir=output_dir,

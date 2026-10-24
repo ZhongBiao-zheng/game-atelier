@@ -1,4 +1,5 @@
 import type { KeyView } from '@/api/keys';
+import { routeChannel, routeMemberChoices } from '@/lib/modelRoutes';
 import { modelModality } from '@/api/keys';
 import { imageControlCaps } from '@/lib/imageControlCaps';
 import { isEvolinkMidjourney } from '@/lib/modelFamily';
@@ -23,7 +24,9 @@ export function savedImageEditError(node: CanvasImageEditNode, source: CanvasCon
   if (!draft?.model || !key || !key.models.some(model => model.id === draft.model)) return '请先编辑并选择可用模型。';
   const { options } = node.data;
   if (!key.models.some(model => model.id === draft.model && isEditModel(model, key))) return '请选择可用的编辑模型。';
-  const mj = isEvolinkMidjourney(draft.model, key.provider);
+  const selected = key.models.find(model => model.id === draft.model)!;
+  const channel = routeChannel(key, selected);
+  const mj = isEvolinkMidjourney(channel.model.id, channel.key.provider);
   if (mj && !draft.prompt.trim()) return '请先填写修改说明。';
   if (options.mode === 'inpaint') {
     return node.data.mask_version_id ? editSize(key, draft.model, source.width, source.height).error
@@ -42,7 +45,11 @@ export function savedImageEditError(node: CanvasImageEditNode, source: CanvasCon
  *  与后端 callers/image_edit.py 的 EDIT_MODEL_PATTERN 保持一致。 */
 const EDIT_MODEL_PATTERN = /^(gpt-image-2\.5(-[a-z0-9]+)?|(gemini-)?nano-banana-2(\.1)?(-[24]k)?|seedream-5\.0-pro|doubao-seedream-5-0-pro(-\d+)?)$/;
 
-export function isEditModel(model: KeyView['models'][number], key: KeyView) {
+export function isEditModel(model: KeyView['models'][number], key: KeyView): boolean {
+  if (key.provider === 'atelier') {
+    const members = routeMemberChoices(key, model);
+    return Boolean(model.via?.length) && members.every(member => isEditModel(member.model, member.key));
+  }
   if (isEvolinkMidjourney(model.id, key.provider)) {
     return (!model.protocol || model.protocol === 'evolink') && modelModality(model, key) === 'image';
   }
@@ -57,6 +64,10 @@ export function editSize(key: KeyView | undefined, model: string, width: number,
   const fail = (error: string) => ({ params: {}, error });
   if (!key || !model) return fail('请选择编辑模型');
   if (width < 1 || height < 1 || Math.max(width, height) > 16384 || width * height > 16_777_216) return fail('画框不能超过 16384px 或 1600 万像素');
+  const spec = key.models.find(item => item.id === model);
+  const channel = spec ? routeChannel(key, spec) : { key, model: { id: model } };
+  key = channel.key ?? key;
+  model = channel.model.id;
   // 原图与目标画框按实际像素提交，EvoLink 由 img_pos 定义位置，不使用生图尺寸参数。
   if (isEvolinkMidjourney(model, key.provider)) return { params: {}, error: null };
   const caps = imageControlCaps(model, key.provider, key.base_url, key.billing_group);
@@ -122,7 +133,7 @@ export interface EditModelChoice { key: KeyView; model: string; name: string; mj
 /** 所有可用于图片编辑的「密钥 × 模型」，Midjourney 排在前面（扩图默认 MJ）。 */
 export function editModelChoices(keys: readonly KeyView[]): EditModelChoice[] {
   const choices = keys.flatMap(key => key.models.filter(model => isEditModel(model, key)).map(model => ({
-    key, model: model.id, name: model.name || model.id, mj: isEvolinkMidjourney(model.id, key.provider),
+    key, model: model.id, name: model.name || model.id, mj: isEvolinkMidjourney(routeChannel(key, model).model.id, routeChannel(key, model).key.provider),
   })));
   return [...choices.filter(choice => choice.mj), ...choices.filter(choice => !choice.mj)];
 }

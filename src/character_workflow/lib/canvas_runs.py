@@ -1734,8 +1734,7 @@ def submit_image_edit_run(
     """Freeze only a saved edit configuration into a fresh, recoverable result Run."""
     import io
     from PIL import Image
-    from character_workflow.lib.callers.openai_image import _effective_image_protocol
-    from character_workflow.lib.callers.image_edit import edit_transport, expanded_source
+    from character_workflow.lib.callers.image_edit import edit_transport_for_key, expanded_source
     from character_workflow.lib.canvas_image_edits import edit_size_params
     from character_workflow.lib.canvas_masks import (
         normalize_canvas_mask, _source_display_size, NormalizedCanvasMask,
@@ -1790,7 +1789,7 @@ def submit_image_edit_run(
                     "自然延展画面" if options.mode == "outpaint" else "自然修复选区内容"
                 )})
             key, model, kind = _resolve_key_and_model(draft)
-            transport = edit_transport(key.provider, model.id, _effective_image_protocol(key, model.id))
+            transport = edit_transport_for_key(key, model.id)
             if not transport:
                 raise CanvasRunCommandError(
                     "canvas_media_capability_missing",
@@ -3471,6 +3470,7 @@ def reconcile_canvas_jobs(
     两遍：这里一遍，路由拼列表时又一遍。
     """
     from character_workflow.lib.canvas_image_edits import has_resumable_mj_task
+    from character_workflow.lib.jobs import has_resumable_gateway_task
     reconciled: list[str] = []
     for job in (list_jobs() if jobs is None else jobs):
         if job.namespace != "canvas" or not job.canvas_project_id:
@@ -3495,7 +3495,7 @@ def reconcile_canvas_jobs(
                 _cancel_pending_canvas_candidates(job.canvas_project_id, job.job_id)
                 reconciled.append(job.job_id)
                 continue
-            elif has_resumable_mj_task(job):
+            elif has_resumable_mj_task(job) or has_resumable_gateway_task(job):
                 # Only resume a known order. The caller reuses its durable task ID.
                 reconciled.append(job.job_id)
                 continue

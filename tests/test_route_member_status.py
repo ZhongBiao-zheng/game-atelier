@@ -94,7 +94,7 @@ def owner():
 
 def submit(key):
     return gateway_tasks.submit(key, idempotency_key='test', model='gpt-image-2',
-                                prompt='x', n=1, size=None, params={}, references=[])
+                                prompt='x', n=1, size=None, params={}, files={})
 
 
 def test_gateway_fallback_excludes_balance_and_keeps_permission():

@@ -77,6 +77,8 @@ class ModelRoute:
 def route_id(model: ModelSpec, key: KeySpec) -> str:
     base = model.id.rsplit("/", 1)[-1].lower()
     if model_modality(model, key) == "video" and model.protocol:
+        if key.provider == "atelier":
+            return base
         return f"{model.protocol}:{base}"
     return base
 

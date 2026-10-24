@@ -66,7 +66,7 @@ def client(isolated_data_root):
 
 
 def _submit(client, *, key="k1", params=None, n=1, model="gpt-image-2", files=None):
-    body = {"model": model, "prompt": "一只猫", "n": n, "params": params or {}}
+    body = {"kind": "image", "model": model, "prompt": "一只猫", "n": n, "params": params or {}}
     return client.post("/gateway/v1/tasks", data={"request": json.dumps(body)},
                        files=files or {}, headers={"Idempotency-Key": key})
 

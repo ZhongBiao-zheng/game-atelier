@@ -1,3 +1,4 @@
+import { routeChannel } from '@/lib/modelRoutes';
 import type { Quality } from '@/lib/imageControlCaps';
 import type { KeyView } from '@/api/keys';
 import type { JobParams } from '@/schema/jobs';
@@ -342,6 +343,9 @@ export function estimateGenerationCostForSubmission(
 ): number | null {
   if (!selectedKey) return null;
   const selectedModel = selectedKey.models.find((item) => item.id === modelId);
+  const channel = selectedModel ? routeChannel(selectedKey, selectedModel) : null;
+  const key = channel?.key ?? selectedKey;
+  const model = channel?.model ?? selectedModel;
   const quality = (params.quality === 'low' || params.quality === 'medium'
     || params.quality === 'high' || params.quality === 'auto'
     || params.quality === '1k' || params.quality === '2k' || params.quality === '4k')
@@ -349,11 +353,11 @@ export function estimateGenerationCostForSubmission(
     : undefined;
   return estimateGenerationCost({
     provider: {
-      provider: selectedKey.provider,
-      baseUrl: selectedKey.base_url,
-      billingGroup: selectedKey.billing_group,
+      provider: key.provider,
+      baseUrl: key.base_url,
+      billingGroup: key.billing_group,
     },
-    model: { id: modelId, protocol: selectedModel?.protocol },
+    model: { id: model?.id ?? modelId, protocol: model?.protocol },
     kind,
     count: typeof params.n === 'number' ? params.n : undefined,
     size: typeof params.size === 'string' ? params.size : undefined,

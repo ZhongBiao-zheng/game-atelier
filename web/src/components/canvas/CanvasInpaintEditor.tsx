@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerE
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import { defaultResolution } from '@/lib/studioSize';
 import { EditGenerationControls } from './EditGenerationControls';
-import { imageControlCaps, MJ_IMAGES_PER_TASK } from '@/lib/imageControlCaps';
+import { selectionImageCaps } from '@/lib/modelRoutes';
+import { MJ_IMAGES_PER_TASK } from '@/lib/imageControlCaps';
 import { drawEditStrokes, editMaskBlob, editModelChoices, editSize, type EditPoint, type EditStroke } from './imageEditGeometry';
 import { EditorComposer, ImageEditorShell, editorIconButton, isTypingTarget, useEditorViewport,
   type CanvasMaskEditSubmission, type ImageEditorProps } from './ImageEditorShell';
@@ -44,7 +45,7 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
   const [count, setCount] = useState(() => initialDraft?.model === 'mj-v8.2' ? 1
     : Math.min(4, Math.max(1, initialDraft?.params.n ?? 1)));
   const candidates = mj ? MJ_IMAGES_PER_TASK : count;
-  const caps = imageControlCaps(choice?.model ?? '', choice?.key.provider, choice?.key.base_url, choice?.key.billing_group);
+  const caps = selectionImageCaps(choice?.key, choice?.model ?? '');
   const [qualityChoice, setQualityChoice] = useState(initialDraft?.params.quality);
   const [resolutionChoice, setResolutionChoice] = useState(initialDraft?.params.resolution);
   const quality = caps.qualities?.includes(qualityChoice as never) ? qualityChoice

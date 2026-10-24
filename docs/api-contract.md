@@ -56,13 +56,22 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 - `GET /gateway/v1/info` → `{name, version, protocol: 2}`。协议版本不一致时接入端直接报错，不做兼容。
 - `GET /gateway/v1/models` → 与 `GET /api/models` 同形，含全部模态；按当前密钥的模型与 alias 权限过滤，排除 atelier 成员，视频成员保留 `protocol`。
 - `GET /gateway/v1/me` → `{name, limits: [{period, cap_cny, used_cny, reserved_cny, left_cny, resets_at}], month_charged_cny, month_calls}`，只读当前密钥。
-- `POST /gateway/v1/tasks`：multipart，字段 `request`（JSON：`model` 路由 id、`prompt`、`n`、`size`、`params`）+ 参考图文件
-  `ref_0`…`ref_15`；请求头 `Idempotency-Key` 必填（同一把密钥下同一个 key 返回同一个任务）。返回 202 `{task_id}`。
-  模型不存在 404、无权使用 403；`params` 只收白名单控制字段，出现路径类字段 422；金额窗口超限 429（`中转额度已用完`），`Retry-After` 为最晚重置时间距现在的秒数。当前任务接口仍只受理图片。
+- `POST /gateway/v1/tasks`：multipart，字段 `request`（JSON：`kind`、`model` 路由 id、`prompt`、`n`、`size`、`params`）+ 素材文件。
+  `kind` 为 image / image_edit / layer_split / video / audio；文件组 `ref_0`…`ref_15`、`mask`、
+  `mj_sref_0`…`mj_sref_7` / `mj_cref_0`…`mj_cref_7` / `mj_oref_0`…`mj_oref_7`、
+  `video_0`…`video_3`、`audio_0`…`audio_3`，各组编号连续且不允许重复字段。
+  图片/蒙版/音频单文件 20 MiB，视频 200 MiB，请求体 400 MiB、最多 49 文件；
+  请求头 `Idempotency-Key` 必填（同一把密钥下同一个 key 返回同一个任务）。返回 202 `{task_id}`。
+  模型不存在 404、无权使用 403；`params` 只收白名单控制字段，出现路径类字段 422；金额窗口超限 429（`中转额度已用完`），`Retry-After` 为最晚重置时间距现在的秒数。编辑仅收 mode/x/y/width/height，inpaint/outpaint 都要求源图和蒙版，outpaint 必须给宽高；
+  layer_split 要求 layer_decomposition=true 和一张源图。视频仅收 duration/resolution/ratio/mode/frame_mode/generate_audio/watermark；
+  音频仅收 voice/speed/response_format/instructions。
 - `GET /gateway/v1/tasks/{id}` → `{task_id, status: pending|running|done|failed|canceled, phase, member_alias,
-  warnings, actual_size, actual_cost_cny, outputs: 张数, error, error_kind}`。`error_kind`：`unavailable`（全部成员都因
+  warnings, actual_size, actual_cost_cny, outputs: 产物数量, error, error_kind, kind, output_types: MIME[],
+  extras: [{role, index}], layer_result}`。`error_kind`：`unavailable`（全部成员都因
   确定没执行的原因失败）、`unconfirmed`（网关重启等，可能已执行）、`failed`（其他）。
-- `GET /gateway/v1/tasks/{id}/outputs/{i}` → 第 i 张图的字节；`POST /gateway/v1/tasks/{id}/cancel` → 取消。
+- `GET /gateway/v1/tasks/{id}/outputs/{i}` → 第 i 个产物的字节（对应 MIME）；`POST /gateway/v1/tasks/{id}/cancel` → 取消。
+- `GET /gateway/v1/tasks/{id}/extras/{i}` → 编辑过程图；layer_result 为无路径的图层元数据，图层产物不按 n 截断。
+- 视频上游订单号/提交诊断仅存在网关；已获订单号或提交未确认后禁止换供应商重发。
 - 任务只对创建它的密钥可见（其他密钥 404）；任务与文件保留 24 小时。
 - 密钥策略：`limits: [{period: day|week|month, cap_cny}]`（最多三条且 period 唯一，金额 >0 且 ≤1,000,000）；
   `allowed_models` / `allowed_aliases` 为 null 表示全部、空数组表示无权限；模型支持精确匹配和尾部 `*` 前缀匹配，alias 精确匹配。

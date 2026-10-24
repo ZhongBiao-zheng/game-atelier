@@ -21,7 +21,7 @@ from character_workflow.lib.gateway_keys import GatewayKeyRecord
 from character_workflow.lib.gateway_tasks import GatewayRequestError
 
 PROTOCOL_VERSION = 2
-MAX_BODY_BYTES = 200 * 1024 * 1024
+MAX_BODY_BYTES = 400 * 1024 * 1024
 CLEANUP_INTERVAL_SECONDS = 3600
 
 
@@ -40,6 +40,9 @@ def _require_key(request: Request) -> GatewayKeyRecord:
 
 def _task_view(task: gateway_tasks.GatewayTask) -> dict[str, Any]:
     return {
+        "kind": task.kind, "output_types": task.output_types,
+        "extras": [{"role": item.role, "index": i} for i, item in enumerate(task.extras)],
+        "layer_result": task.layer_result,
         "task_id": task.task_id, "status": task.status, "phase": task.phase,
         "member_alias": task.member_alias, "member_provider": task.member_provider,
         "member_model_id": task.member_model_id, "route_tried": task.route_tried,
@@ -109,37 +112,61 @@ def create_gateway_app() -> FastAPI:
         length = request.headers.get("content-length")
         if length and length.isdigit() and int(length) > MAX_BODY_BYTES:
             raise GatewayRequestError(413, "请求体过大")
-        form = await request.form(
-            max_files=gateway_tasks.MAX_REFERENCE_IMAGES, max_fields=4,
-            max_part_size=1024 * 1024,
-        )
-        try:
-            payload = json.loads(str(form.get("request") or ""))
-        except json.JSONDecodeError as error:
-            raise GatewayRequestError(422, "request 字段不是合法 JSON") from error
-        if not isinstance(payload, dict) or not isinstance(payload.get("params", {}), dict):
-            raise GatewayRequestError(422, "request 字段格式不对")
-        references: list[tuple[str, bytes]] = []
-        for index in range(gateway_tasks.MAX_REFERENCE_IMAGES + 1):
-            upload = form.get(f"ref_{index}")
-            if upload is None:
-                break
-            if isinstance(upload, str):
-                raise GatewayRequestError(422, f"ref_{index} 必须是文件")
-            data = await upload.read(gateway_tasks.MAX_REFERENCE_BYTES + 1)
-            references.append((upload.filename or f"ref-{index}.png", data))
-        try:
-            n = int(payload.get("n") or 1)
-        except (TypeError, ValueError) as error:
-            raise GatewayRequestError(422, "张数不对") from error
-        size = payload.get("size")
-        task = await asyncio.to_thread(
-            gateway_tasks.submit, key,
-            idempotency_key=request.headers.get("idempotency-key", ""),
-            model=str(payload.get("model") or ""), prompt=str(payload.get("prompt") or ""),
-            n=n, size=str(size) if size is not None else None,
-            params=payload.get("params") or {}, references=references,
-        )
+        receive = request._receive
+        received = 0
+
+        async def bounded_receive():
+            nonlocal received
+            message = await receive()
+            received += len(message.get("body", b""))
+            if received > MAX_BODY_BYTES:
+                raise GatewayRequestError(413, "请求体过大")
+            return message
+
+        request._receive = bounded_receive
+        async with request.form(max_files=49, max_fields=1, max_part_size=1024 * 1024) as form:
+            try:
+                payload = json.loads(str(form.get("request") or ""))
+            except json.JSONDecodeError as error:
+                raise GatewayRequestError(422, "request 字段不是合法 JSON") from error
+            if not isinstance(payload, dict) or not isinstance(payload.get("params", {}), dict):
+                raise GatewayRequestError(422, "request 字段格式不对")
+            uploads = {}
+            seen = set()
+            for name, upload in form.multi_items():
+                if name in seen:
+                    raise GatewayRequestError(422, "重复的上传字段")
+                seen.add(name)
+                if name == "request":
+                    continue
+                group, _, index = name.rpartition("_")
+                if name == "mask":
+                    group, index = "mask", "0"
+                if (group not in gateway_tasks.FILE_GROUPS or (group == "mask" and name != "mask")
+                        or not index.isdigit()
+                        or str(int(index)) != index
+                        or int(index) >= gateway_tasks.FILE_GROUPS[group]
+                        or isinstance(upload, str)):
+                    raise GatewayRequestError(422, "上传字段不合法")
+                data = await upload.read(gateway_tasks.file_limit(group) + 1)
+                uploads.setdefault(group, {})[int(index)] = (upload.filename or "upload.bin", data)
+            files = {}
+            for group, items in uploads.items():
+                if sorted(items) != list(range(len(items))):
+                    raise GatewayRequestError(422, "上传文件编号必须连续")
+                files[group] = [items[i] for i in sorted(items)]
+            n = payload.get("n", 1)
+            if type(n) is not int:
+                raise GatewayRequestError(422, "张数不对")
+            size = payload.get("size")
+            task = await asyncio.to_thread(
+                gateway_tasks.submit, key,
+                idempotency_key=request.headers.get("idempotency-key", ""),
+                kind=payload.get("kind", ""),
+                model=str(payload.get("model") or ""), prompt=str(payload.get("prompt") or ""),
+                n=n, size=str(size) if size is not None else None,
+                params=payload.get("params") or {}, files=files,
+            )
         return {"task_id": task.task_id}
 
     @app.get("/gateway/v1/tasks/{task_id}")
@@ -149,7 +176,14 @@ def create_gateway_app() -> FastAPI:
     @app.get("/gateway/v1/tasks/{task_id}/outputs/{index}")
     def task_output(task_id: str, index: int,
                     key: GatewayKeyRecord = Depends(_require_key)) -> FileResponse:
-        return FileResponse(gateway_tasks.output_file(key.id, task_id, index))
+        path = gateway_tasks.output_file(key.id, task_id, index)
+        task = gateway_tasks.get_task(key.id, task_id)
+        return FileResponse(path, media_type=task.output_types[index])
+
+    @app.get("/gateway/v1/tasks/{task_id}/extras/{index}")
+    def task_extra(task_id: str, index: int,
+                   key: GatewayKeyRecord = Depends(_require_key)) -> FileResponse:
+        return FileResponse(gateway_tasks.extra_file(key.id, task_id, index))
 
     @app.post("/gateway/v1/tasks/{task_id}/cancel")
     def task_cancel(task_id: str, key: GatewayKeyRecord = Depends(_require_key)) -> dict:

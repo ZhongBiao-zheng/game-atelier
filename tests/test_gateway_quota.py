@@ -44,7 +44,7 @@ def owner():
 def submit(owner, nonce="one", **kwargs):
     return gateway_tasks.submit(owner, idempotency_key=nonce, model="gpt-image-2",
                                 prompt="private prompt", n=1, size=None, params={},
-                                references=[], **kwargs)
+                                files={}, **kwargs)
 
 
 def client_for(owner):

@@ -26,7 +26,11 @@ POLL_INTERVAL_SECONDS = 2.0
 POLL_GIVE_UP_SECONDS = 600.0
 _TIMEOUT = (5.0, 60.0)
 _TERMINAL = {"done", "failed", "canceled"}
-_SUFFIX = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
+_SUFFIX = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
+           "video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm",
+           "audio/mpeg": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav",
+           "audio/flac": ".flac", "audio/ogg": ".opus", "audio/aac": ".aac",
+           "audio/pcm": ".pcm"}
 
 
 class GatewayError(RuntimeError):
@@ -70,7 +74,7 @@ def gateway_models(routes: list[dict[str, Any]]) -> list[_keys.ModelSpec]:
     return [
         _keys.ModelSpec(
             id=route["id"], name=route["name"], modality=route["modality"],
-            protocol=(route["members"][0].get("protocol") if route["modality"] == "text" else None),
+            protocol=(route["members"][0].get("protocol") if route["modality"] in {"text", "video"} else None),
             via=[_keys.ViaMember(**member) for member in route["members"]],
         )
         for route in routes if route.get("members")
@@ -103,8 +107,27 @@ def sync_all_gateway_keys() -> None:
             logging.getLogger(__name__).info("gateway sync skipped for %s: %s", key.alias, error)
 
 
-def render(
+def render(**kwargs) -> list[str]:
+    kind = "layer_split" if (kwargs.get("params") or {}).get("layer_decomposition") else "image"
+    return _run_task(kind=kind, **kwargs)
+
+
+def render_edit(**kwargs) -> list[str]:
+    return _run_task(kind="image_edit", **kwargs)
+
+
+def render_video(**kwargs) -> list[str]:
+    kwargs.setdefault("n", (kwargs.get("params") or {}).get("n") or 1)
+    return _run_task(kind="video", **kwargs)
+
+
+def render_audio(**kwargs) -> list[str]:
+    return _run_task(kind="audio", **kwargs)
+
+
+def _run_task(
     *,
+    kind: str,
     prompt: str,
     model: str,
     alias: str,
@@ -113,19 +136,18 @@ def render(
     params: dict[str, Any] | None = None,
     on_phase: Callable[[str], None] | None = None,
     on_params_changed: Callable[[], None] | None = None,
+    on_task_id: Callable[[str], None] | None = None,
     on_cost_usd: Callable[[float], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
     **_kwargs: Any,
 ) -> list[str]:
-    from character_workflow.lib.gateway_tasks import ALLOWED_PARAMS
+    from character_workflow.lib.gateway_tasks import ALLOWED_PARAMS_BY_KIND, FILE_PARAMS, FILES_BY_KIND
     from character_workflow.lib.job_runner import USD_TO_CNY, JobCanceled
 
     key = _keys.find_by_alias(alias)
     if key is None or key.provider != "atelier" or not key.base_url:
         raise GatewayError(f"{alias} 不是局域网 Atelier 供应商")
     params = params if params is not None else {}
-    if any(params.get(field) for field in ("mj_sref", "mj_cref", "mj_oref", "mask_image", "image_edit")):
-        raise GatewayError("网关暂不支持 MJ 参考图、局部修改与扩图，请改选本机供应商")
     base = key.base_url.rstrip("/")
     headers = {"Authorization": f"Bearer {key.access_key}"}
     phase = on_phase or (lambda _phase: None)
@@ -136,14 +158,23 @@ def render(
         if params.get("provider_task_protocol") == PROTOCOL and existing:
             task_id = str(existing[0])
         else:
-            task_id = _submit(session, base, headers, model=model, prompt=prompt, n=n,
-                              params={k: v for k, v in params.items()
-                                      if k in ALLOWED_PARAMS and v is not None},
-                              references=params.get("reference_images") or [])
+            wire_params = {k: v for k, v in params.items()
+                           if k in ALLOWED_PARAMS_BY_KIND[kind] and v is not None}
+            if kind == "image_edit":
+                wire_params["image_edit"] = {k: v for k, v in params.get("image_edit", {}).items()
+                                             if k in {"mode", "x", "y", "width", "height"}}
+            task_id = _submit(session, base, headers, kind=kind, model=model, prompt=prompt, n=n,
+                              params=wire_params,
+                              uploads={group: ([params[FILE_PARAMS[group]]] if group == "mask"
+                                               else params[FILE_PARAMS[group]])
+                                       for group in FILES_BY_KIND[kind]
+                                       if params.get(FILE_PARAMS[group])})
             params["provider_task_protocol"] = PROTOCOL
             params["provider_task_ids"] = [task_id]
             if on_params_changed:
                 on_params_changed()
+            if on_task_id:
+                on_task_id(task_id)
         phase("sent")
         status = _poll(session, base, headers, task_id, phase, cancelled)
         if status["status"] == "canceled" or cancelled():
@@ -164,6 +195,7 @@ def render(
 
         phase("downloading")
         out_dir = Path(output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
         paths = []
         for index in range(int(status.get("outputs") or 0)):
             response = session.get(f"{base}/gateway/v1/tasks/{task_id}/outputs/{index}",
@@ -173,15 +205,33 @@ def render(
             target = out_dir / f"gateway-{index}{suffix}"
             target.write_bytes(response.content)
             paths.append(str(target))
+        if status.get("layer_result") is not None:
+            params["layer_decomposition_result"] = status["layer_result"]
+        if status.get("extras"):
+            inputs = []
+            folder = out_dir / "edit-inputs"
+            folder.mkdir(parents=True, exist_ok=True)
+            for item in status["extras"]:
+                index = int(item["index"])
+                response = session.get(f"{base}/gateway/v1/tasks/{task_id}/extras/{index}",
+                                       headers=headers, timeout=_TIMEOUT)
+                _raise_for_status(response)
+                target = folder / f"{index}.png"
+                target.write_bytes(response.content)
+                inputs.append({"role": item["role"], "path": str(target)})
+            params["edit_inputs"] = inputs
+        if on_params_changed:
+            on_params_changed()
         return paths
 
 
-def _submit(session, base, headers, *, model, prompt, n, params, references) -> str:
+def _submit(session, base, headers, *, kind, model, prompt, n, params, uploads) -> str:
     from character_workflow.lib.callers.openai_image import _is_pre_flight_failure
 
-    files = [(f"ref_{index}", (Path(path).name, Path(path).read_bytes()))
-             for index, path in enumerate(references)]
-    body = {"request": json.dumps({"model": model, "prompt": prompt, "n": n,
+    files = [("mask" if group == "mask" else f"{group}_{index}",
+              (Path(path).name, Path(path).read_bytes()))
+             for group, paths in uploads.items() for index, path in enumerate(paths)]
+    body = {"request": json.dumps({"kind": kind, "model": model, "prompt": prompt, "n": n,
                                    "size": params.get("size"), "params": params})}
     # 同一次提交的重试用同一个 Idempotency-Key：网关只会建一个任务。
     request_headers = {**headers, "Idempotency-Key": uuid.uuid4().hex}

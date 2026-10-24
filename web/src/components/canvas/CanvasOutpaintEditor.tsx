@@ -1,7 +1,8 @@
 import { Expand, Minus, Move, Plus } from 'lucide-react';
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
-import { imageControlCaps, MJ_IMAGES_PER_TASK } from '@/lib/imageControlCaps';
+import { selectionImageCaps } from '@/lib/modelRoutes';
+import { MJ_IMAGES_PER_TASK } from '@/lib/imageControlCaps';
 import { defaultResolution } from '@/lib/studioSize';
 import { EditGenerationControls } from './EditGenerationControls';
 import { editModelChoices, editSize, EXPAND_RATIOS, EXPAND_SCALES, presetFrame, presetScale,
@@ -41,7 +42,7 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
   });
   const choice = choices.find(item => choiceId(item.key.alias, item.model) === selected);
   const [count, setCount] = useState(initialDraft?.params.n ?? 1);
-  const caps = imageControlCaps(choice?.model ?? '', choice?.key.provider, choice?.key.base_url, choice?.key.billing_group);
+  const caps = selectionImageCaps(choice?.key, choice?.model ?? '');
   const [qualityChoice, setQualityChoice] = useState(initialDraft?.params.quality);
   const [resolutionChoice, setResolutionChoice] = useState(initialDraft?.params.resolution);
   const quality = caps.qualities?.includes(qualityChoice as never) ? qualityChoice

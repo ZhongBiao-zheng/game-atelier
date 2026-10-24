@@ -17,8 +17,14 @@ function isTokendanceGateway(baseUrl: string | null | undefined): boolean {
  * 或未登记 protocol 但入口是词元跳动网关（后端 resolve_image_protocol 会把 seedream 族解析成 ark）。 */
 export function supportsLayerDecomposition(
   key: Pick<KeyView, 'provider' | 'base_url'>,
-  model: Pick<KeyView['models'][number], 'id' | 'protocol'>,
+  model: Pick<KeyView['models'][number], 'id' | 'protocol' | 'via'>,
 ): boolean {
+  if (key.provider === 'atelier') {
+    return Boolean(model.via?.length) && model.via!.every(member => supportsLayerDecomposition(
+      { provider: member.provider, base_url: member.base_url },
+      { id: member.model_id, protocol: member.protocol },
+    ));
+  }
   const normalized = model.id.toLowerCase().replace(/[._]/g, '-');
   if (!normalized.includes('seedream-5-0-pro')) return false;
   if (key.provider === 'seedream') return true;

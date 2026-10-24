@@ -35,6 +35,17 @@ def edit_transport(provider: str, model: str, protocol: str | None) -> str | Non
     return None
 
 
+def edit_transport_for_key(key, model: str) -> str | None:
+    from .openai_image import _effective_image_protocol
+
+    if key.provider == "atelier":
+        spec = next((item for item in key.models if item.id == model), None)
+        transports = [edit_transport(m.provider, m.model_id, m.protocol)
+                      for m in (spec.via or [])] if spec else []
+        return transports[0] if transports and all(transports) else None
+    return edit_transport(key.provider, model, _effective_image_protocol(key, model))
+
+
 def expanded_source(source: Path, options: dict) -> tuple[Image.Image, Image.Image]:
     with Image.open(source) as opened:
         original = ImageOps.exif_transpose(opened).convert("RGBA")
