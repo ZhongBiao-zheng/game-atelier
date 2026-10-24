@@ -858,7 +858,8 @@
   position: relative;
   overflow: hidden;
   isolation: isolate;
-  border: 0.5px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+  /* 发丝描边用淡黑：浅色描边叠在底部深色上会显出一道白边。 */
+  border: 0.5px solid color-mix(in srgb, black 18%, transparent);
   background: linear-gradient(180deg,
     color-mix(in oklab, var(--preset-primary) 70%, white),
     var(--preset-primary) 45%,
