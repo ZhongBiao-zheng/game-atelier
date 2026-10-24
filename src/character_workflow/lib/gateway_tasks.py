@@ -312,7 +312,11 @@ def run_task(task: GatewayTask) -> GatewayTask:
             gateway_access.check_route(owner, "image", task.route_id)
         except GatewayRequestError as error:
             return _finish(_read(task_id), status="failed", error=error.message)
-        picked = _pick_member(task.route_id, tried, owner)
+        try:
+            picked = _pick_member(task.route_id, tried, owner)
+        except GatewayRequestError as error:
+            return _finish(_read(task_id), status="failed", error=error.message,
+                           error_kind="unavailable")
         if picked is None:
             return _exhausted(task_id, tried, warnings, switched_from, last_error)
         key, model = picked
@@ -374,7 +378,10 @@ def _pick_member(route_id: str, tried: list[str], owner: GatewayKeyRecord):
     members = [m for m in _gateway_members(route) if gateway_access.member_allowed(owner, m.alias)]
     if picked is not None or tried or not members:
         return picked
-    # 第一次选择时全组都在冷却：和「自动」一样仍用第一家。
+    members = [m for m in members if not model_routes.balance_blocked("image", m.alias)]
+    if not members:
+        raise GatewayRequestError(503, f"{route_id} 的供应商都欠费了")
+    # 第一次选择时全组都在冷却：只兜底非欠费成员。
     key = keys.find_by_alias(members[0].alias)
     model = next((item for item in key.models if item.id == members[0].model_id), None) if key else None
     return (key, model) if key and model else None
@@ -417,6 +424,7 @@ def _store_outputs(task_id: str, paths: list[Path], cost_usd: float | None) -> G
         shutil.move(str(path), out / name)
         names.append(name)
     width, height = valid[0][1]
+    model_routes.mark_healthy("image", task.member_alias)
     return _finish(task, status="done", outputs=names, actual_size=f"{width}x{height}")
 
 

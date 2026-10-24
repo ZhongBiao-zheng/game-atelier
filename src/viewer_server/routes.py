@@ -2264,7 +2264,7 @@ def _create_user_job(
         # 不指定厂商 =「自动」：body.model 是路由 id，按组内顺序解析出实际 KEY 与模型。
         try:
             key_row, model_spec = model_routes.resolve_auto(body.kind.value, body.model)
-        except model_routes.NoSuchRouteError as error:
+        except (model_routes.NoSuchRouteError, model_routes.InsufficientBalanceError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         model_id = model_spec.id
     alias = key_row.alias

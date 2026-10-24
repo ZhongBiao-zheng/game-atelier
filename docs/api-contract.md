@@ -78,6 +78,9 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   `GET /api/gateway` 的密钥含 `limits_status`、`month_charged_cny`、`month_calls`、`last_used_at`；不含哈希。
   `GET /api/gateway/options` → `{models: [{id, name, modality}], aliases: [{alias, provider, name}]}`，alias 排除 atelier。
   用量行新增 `kind`、`estimated_cny`、`charged_cny`、`input_tokens`、`output_tokens`、`duration`、`resolution`、`member_trail`；不存 prompt，前端直接汇总结算金额。
+  `GET /api/gateway/members` → `{members: [{modality, alias, reason, since, next_probe_at, route_ids}], unavailable_routes: [{id, name, modality}]}`。
+  欠费状态跨重启保留；`unavailable_routes` 只计非 atelier 成员且均在欠费冷却期的路由。
+  `POST /api/gateway/members/restore {modality, alias}` 清除该成员欠费及内存冷却，返回同一状态视图；两接口仅本机管理权限可用。
   接入端：`POST /api/gateway/check {base_url, access_key | alias}` → `{info, models}`（models 为带 `via` 的 ModelSpec）；
   `POST /api/gateway/providers/{alias}/sync` 整体替换该 KEY 的模型。新建 `provider="atelier"` 的 KEY 时排到所在每个路由组第一位，
   同步出的新模型同样排第一（已调整过顺序的组不动）。

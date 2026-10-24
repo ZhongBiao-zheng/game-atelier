@@ -157,11 +157,13 @@ def _with_resolved_alias(payload: PrepareGenerationInput) -> PrepareGenerationIn
     """「自动」在 prepare 时就落到具体 KEY：请求里记的、给人批准的、最后出图的都是这一家。"""
     if payload.alias is not None:
         return payload
-    from character_workflow.lib.model_routes import NoSuchRouteError, resolve_auto
+    from character_workflow.lib.model_routes import (
+        InsufficientBalanceError, NoSuchRouteError, resolve_auto,
+    )
 
     try:
         key, model = resolve_auto(payload.params.type, payload.model)
-    except NoSuchRouteError as error:
+    except (NoSuchRouteError, InsufficientBalanceError) as error:
         raise WorkshopError("MODEL_UNAVAILABLE", str(error), 422) from None
     return PrepareGenerationInput.model_validate(
         {**payload.model_dump(), "alias": key.alias, "model": model.id})

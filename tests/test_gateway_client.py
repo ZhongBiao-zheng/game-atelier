@@ -150,7 +150,7 @@ def test_gateway_quota_switches_to_the_local_key(gateway, upstream):
     keys.patch_key("Local", {"base_url": "https://api.openai-hk.com"})
     done = job_runner.run_job(_job("job-quota").job_id)
     assert (done.status, done.alias) == (JobStatus.DONE, "Local")
-    assert done.params.warnings == ["Hub额度不足或被限流，已改用 Local"]
+    assert done.params.warnings == ["Hub限流，已改用 Local"]
 
 
 def test_revoked_key_switches_to_the_local_key(gateway, upstream):

@@ -33,8 +33,8 @@ def _wrapped(message: str, cause: BaseException) -> OpenAIImageError:
     (OpenAIImageError("image api 403: 该令牌无权访问模型"), "auth"),
     (OpenAIImageError("image api 404: model not found"), "unavailable"),
     (OpenAIImageError('image api 503: {"error":"no_endpoints_available"}'), "unavailable"),
-    (OpenAIImageError("image api 429: rate limited"), "quota"),
-    (OpenAIImageError("text api 402: insufficient_quota"), "quota"),
+    (OpenAIImageError("image api 429: rate limited"), "rate_limited"),
+    (OpenAIImageError("text api 402: insufficient_quota"), "insufficient_balance"),
     (_wrapped("connect timeout", requests.ConnectTimeout("timed out")), "unreachable"),
     # 上游可能已经在跑或换哪家都一样失败：一律不换。
     (OpenAIImageError("image api 503: upstream timeout"), None),
@@ -142,7 +142,7 @@ def test_switch_stops_when_every_provider_failed(isolated_data_root, monkeypatch
 
 
 @pytest.mark.parametrize(("status", "reason"), [
-    (401, "auth"), (403, "auth"), (404, "unavailable"), (402, "quota"), (429, "quota"),
+    (401, "auth"), (403, "auth"), (404, "unavailable"), (402, "insufficient_balance"), (429, "rate_limited"),
 ])
 def test_evolink_rejection_keeps_classifiable_status(status, reason):
     from character_workflow.lib.callers.evolink import EvoLinkError, _error

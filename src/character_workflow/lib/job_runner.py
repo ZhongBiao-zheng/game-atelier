@@ -54,6 +54,13 @@ class _RouteSwitched(Exception):
     """「自动」任务换到了下一家供应商：不落 FAILED，由外层用新供应商重跑。"""
 
 
+def _mark_member_healthy(job: Job) -> None:
+    from character_workflow.lib import model_routes
+
+    if job.alias:
+        model_routes.mark_healthy(job.kind.value, job.alias)
+
+
 def _switch_route(job_id: str, error: BaseException) -> bool:
     """确定没执行的失败上把「自动」任务换到组内下一家；换了返回 True。
 
@@ -652,6 +659,7 @@ def _run_once(
             persisted_paths = output_paths
             if defer_terminal:
                 persisted_paths = list(dict.fromkeys([*job.output_paths, *output_paths]))
+            _mark_member_healthy(job)
             return update_job_status(
                 job.job_id,
                 status=JobStatus.PENDING if defer_terminal else JobStatus.DONE,
@@ -738,6 +746,7 @@ def _run_text_job(job: Job) -> Job:
         job = _save_params(read_job(job.job_id), params)
         for output_path in output_paths:
             _write_sidecar(Path(output_path), job, params)
+        _mark_member_healthy(job)
         return update_job_status(
             job.job_id,
             status=JobStatus.DONE,
@@ -779,6 +788,7 @@ def _run_audio_job(job: Job) -> Job:
         job = _save_params(read_job(job.job_id), params)
         for output_path in output_paths:
             _write_sidecar(Path(output_path), job, params)
+        _mark_member_healthy(job)
         return update_job_status(
             job.job_id,
             status=JobStatus.DONE,
@@ -854,6 +864,7 @@ def _run_video_job(job: Job) -> Job:
             job = _save_params(read_job(job.job_id), params)
             for output_path in output_paths:
                 _write_sidecar(Path(output_path), job, params)
+            _mark_member_healthy(job)
             return update_job_status(
                 job.job_id,
                 status=JobStatus.DONE,

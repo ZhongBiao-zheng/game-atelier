@@ -121,6 +121,35 @@ def gateway_options() -> dict:
 
 # ---- 接入端：局域网 Atelier 供应商 ----
 
+@gateway_router.get("/members")
+def gateway_members() -> dict:
+    routes = model_routes.list_routes()
+    statuses = model_routes.member_statuses()
+    return {
+        "members": [{**row, "route_ids": [route.id for route in routes
+                     if route.modality == row["modality"]
+                     and any(m.alias == row["alias"] and m.provider != "atelier"
+                             for m in route.members)]} for row in statuses],
+        "unavailable_routes": [{"id": route.id, "name": route.name, "modality": route.modality}
+                               for route in routes
+                               if (members := [m for m in route.members if m.provider != "atelier"])
+                               and all(model_routes.balance_blocked(route.modality, m.alias)
+                                       for m in members)],
+    }
+
+
+class GatewayMemberRestore(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    modality: keys.ModelModality
+    alias: str = Field(min_length=1)
+
+
+@gateway_router.post("/members/restore")
+def restore_gateway_member(body: GatewayMemberRestore) -> dict:
+    model_routes.clear_member_status(body.modality, body.alias)
+    return gateway_members()
+
+
 class GatewayCheck(BaseModel):
     model_config = ConfigDict(extra="forbid")
     base_url: Annotated[str, Field(min_length=1, max_length=300)]

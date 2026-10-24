@@ -74,6 +74,8 @@ POST /api/gateway/keys
 PATCH /api/gateway/keys/{key_id}
 POST /api/gateway/keys/{key_id}/revoke
 GET /api/gateway/options
+GET /api/gateway/members
+POST /api/gateway/members/restore
 GET /api/gateway/usage
 POST /api/gateway/check
 POST /api/gateway/providers/{alias}/sync
@@ -188,6 +190,7 @@ LOCAL_MANAGEMENT = frozenset({
     "/api/gateway", "/api/gateway/keys", "/api/gateway/keys/{key_id}",
     "/api/gateway/keys/{key_id}/revoke", "/api/gateway/usage", "/api/gateway/check",
     "/api/gateway/providers/{alias}/sync", "/api/gateway/options",
+    "/api/gateway/members", "/api/gateway/members/restore",
     # 挂载团队库 = 往本机任意目录写清单并整棵扫描，同 folder-picker 只给本机页面。
     "/api/team-libraries",
     # 导入 / 删除 Agent Skill 改写数据目录里的说明文件，Agent 每轮都会读，只给本机页面。

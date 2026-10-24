@@ -10,6 +10,9 @@
 from __future__ import annotations
 
 import re
+import json
+import logging
+from datetime import datetime, timedelta, timezone
 import threading
 import time
 from dataclasses import dataclass
@@ -17,6 +20,9 @@ from typing import Literal
 
 import requests
 
+from character_workflow.lib import data_root
+from character_workflow.lib.atomic_io import atomic_write_json
+from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.keys import (
     KeysDB,
     KeySpec,
@@ -33,6 +39,11 @@ class NoSuchRouteError(LookupError):
         super().__init__(f"未配置模型 {route_id}，请在设置中接入")
         self.modality = modality
         self.route_id = route_id
+
+
+class InsufficientBalanceError(ValueError):
+    def __init__(self, identifier: str) -> None:
+        super().__init__(f"{identifier} 的供应商都欠费了")
 
 
 class InvalidRouteOrderError(ValueError):
@@ -118,9 +129,13 @@ def find_route(modality: ModelModality, identifier: str) -> ModelRoute:
 
 
 def resolve_auto(modality: ModelModality, identifier: str) -> tuple[KeySpec, ModelSpec]:
-    """「自动」选择：组内第一个不在冷却中的成员；全都在冷却时仍用第一个。"""
+    """「自动」选择：组内第一个不在冷却中的成员；全都在冷却时只兜底非欠费成员。"""
     route = find_route(modality, identifier)
-    member = next((m for m in route.members if not _cooling(modality, m.alias)), route.members[0])
+    member = next((m for m in route.members if not _cooling(modality, m.alias)), None)
+    if member is None:
+        member = next((m for m in route.members if not balance_blocked(modality, m.alias)), None)
+    if member is None:
+        raise InsufficientBalanceError(identifier)
     return _member_key_and_model(member)
 
 
@@ -150,18 +165,20 @@ def _member_key_and_model(member: RouteMember) -> tuple[KeySpec, ModelSpec]:
 # 计费，但那笔钱换不换都花了）。超时、5xx、连上后被掐、响应解析失败一律不换：上游可能
 # 已经在跑。参数错误、内容审核（多为 400）也不换：换哪家都一样会失败，只会多花钱。
 
-FailoverReason = Literal["unreachable", "auth", "unavailable", "quota"]
+FailoverReason = Literal["unreachable", "auth", "unavailable", "rate_limited", "insufficient_balance"]
 
 FAILOVER_LABELS: dict[FailoverReason, str] = {
     "unreachable": "连不上",
     "auth": "密钥无效或没有权限",
     "unavailable": "没有开通这个模型",
-    "quota": "额度不足或被限流",
+    "rate_limited": "限流",
+    "insufficient_balance": "欠费",
 }
 
 _COOLDOWN_SECONDS: dict[FailoverReason, float] = {
     "unreachable": 120,
-    "quota": 300,
+    "rate_limited": 300,
+    "insufficient_balance": 3600,
     "auth": 1800,
     "unavailable": 1800,
 }
@@ -171,7 +188,7 @@ _UNAVAILABLE_MARKERS = (
     "no_endpoints_available", "model_not_found", "no available channel", "无可用渠道",
     "模型不存在", "not support model", "gateway_unavailable",
 )
-_QUOTA_MARKERS = ("insufficient_quota", "insufficient balance", "余额不足", "额度不足", "quota exceeded")
+_BALANCE_MARKERS = ("insufficient_quota", "insufficient balance", "余额不足", "额度不足")
 
 
 def failover_reason(error: BaseException) -> FailoverReason | None:
@@ -192,12 +209,14 @@ def failover_reason(error: BaseException) -> FailoverReason | None:
         return None
     match = _STATUS.search(text)
     status = int(match.group(1)) if match else None
+    if status == 402 or any(marker in low for marker in _BALANCE_MARKERS):
+        return "insufficient_balance"
+    if status == 429 or "quota exceeded" in low:
+        return "rate_limited"
     if status in (401, 403):
         return "auth"
     if status == 404 or (status == 503 and any(marker in low for marker in _UNAVAILABLE_MARKERS)):
         return "unavailable"
-    if status in (402, 429) or (status is not None and any(marker in low for marker in _QUOTA_MARKERS)):
-        return "quota"
     return None
 
 
@@ -206,7 +225,19 @@ _cooldowns_lock = threading.Lock()
 
 
 def cool_down(modality: str, alias: str, reason: FailoverReason) -> None:
-    """失败过的供应商暂时不作为「自动」的首选；按进程内存记，重启即清。"""
+    """欠费跨进程持久化；其他失败保留短期内存冷却。"""
+    if reason == "insufficient_balance":
+        with file_lock(_status_file().with_suffix(".lock")):
+            members = member_statuses()
+            previous = next((m for m in members
+                             if m["modality"] == modality and m["alias"] == alias), None)
+            now = _now()
+            row = {"modality": modality, "alias": alias, "reason": reason,
+                   "since": previous["since"] if previous else now.isoformat(),
+                   "next_probe_at": (now + timedelta(seconds=_COOLDOWN_SECONDS[reason])).isoformat()}
+            members = [m for m in members if (m["modality"], m["alias"]) != (modality, alias)]
+            atomic_write_json(_status_file(), {"members": [*members, row]})
+        return
     with _cooldowns_lock:
         _cooldowns[(modality, alias)] = time.monotonic() + _COOLDOWN_SECONDS[reason]
 
@@ -214,12 +245,63 @@ def cool_down(modality: str, alias: str, reason: FailoverReason) -> None:
 def _cooling(modality: str, alias: str) -> bool:
     with _cooldowns_lock:
         until = _cooldowns.get((modality, alias))
-        if until is None:
-            return False
-        if until <= time.monotonic():
+        if until is not None:
+            if until > time.monotonic():
+                return True
             del _cooldowns[(modality, alias)]
-            return False
-        return True
+    return balance_blocked(modality, alias)
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _status_file():
+    return data_root.runtime_dir() / "route-member-status.json"
+
+
+def member_statuses() -> list[dict]:
+    path = _status_file()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        members = payload["members"]
+        if not isinstance(members, list):
+            raise ValueError("members must be a list")
+        for row in members:
+            if (row["modality"] not in ("image", "video", "audio", "text")
+                    or not isinstance(row["alias"], str)
+                    or row["reason"] != "insufficient_balance"):
+                raise ValueError("invalid member status")
+            for field in ("since", "next_probe_at"):
+                if datetime.fromisoformat(row[field]).tzinfo is None:
+                    raise ValueError("status timestamp must have timezone")
+        return members
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError, TypeError, KeyError):
+        logging.getLogger(__name__).warning("成员欠费状态文件损坏或不可读，按空状态处理")
+        return []
+
+
+def balance_blocked(modality: str, alias: str) -> bool:
+    return any(row["modality"] == modality and row["alias"] == alias
+               and _now() < datetime.fromisoformat(row["next_probe_at"])
+               for row in member_statuses())
+
+
+def mark_healthy(modality: str, alias: str) -> None:
+    """成功后清除该成员欠费状态；没有记录时不写盘。"""
+    with file_lock(_status_file().with_suffix(".lock")):
+        members = member_statuses()
+        kept = [m for m in members if (m["modality"], m["alias"]) != (modality, alias)]
+        if len(kept) != len(members):
+            atomic_write_json(_status_file(), {"members": kept})
+
+
+def clear_member_status(modality: str, alias: str) -> None:
+    mark_healthy(modality, alias)
+    with _cooldowns_lock:
+        _cooldowns.pop((modality, alias), None)
 
 
 def put_alias_first(alias: str, *, only_unordered: bool = False) -> None:
