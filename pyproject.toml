@@ -9,6 +9,8 @@ dependencies = [
   "pydantic>=2.9",
   "python-multipart>=0.0.9",
   "requests>=2.32",
+  # Async streaming for the OpenAI-compatible LAN gateway relay.
+  "httpx>=0.27",
   "pypinyin>=0.53",
   "platformdirs>=4",
   'pywin32>=308; sys_platform == "win32"',
@@ -47,7 +49,6 @@ packages = [
 dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
-  "httpx>=0.27",
   "ruff>=0.7",
 ]
 

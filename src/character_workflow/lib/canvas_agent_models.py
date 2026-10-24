@@ -18,12 +18,11 @@ from typing import Any
 import requests
 
 from character_workflow.lib import keys
-from character_workflow.lib.callers.openai_compat import api_root
+from character_workflow.lib.callers.openai_compat import key_api_root
 
 logger = logging.getLogger(__name__)
 
-CHAT_PROVIDERS = frozenset({"openai", "openrouter", "custom", "seedream", "tokendance"})
-OPENAI_BASE_URL = "https://api.openai.com/v1"
+CHAT_PROVIDERS = frozenset({"openai", "openrouter", "custom", "seedream", "tokendance", "atelier"})
 CACHE_SECONDS = 600
 FETCH_TIMEOUT = (5, 20)
 
@@ -40,7 +39,7 @@ _cache_lock = threading.Lock()
 
 
 def chat_base_url(key: keys.KeySpec) -> str:
-    return api_root(key.base_url or OPENAI_BASE_URL)
+    return key_api_root(key)
 
 
 def is_chat_model(item: dict[str, Any]) -> bool:

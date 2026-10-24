@@ -85,6 +85,15 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   `POST /api/gateway/providers/{alias}/sync` 整体替换该 KEY 的模型。新建 `provider="atelier"` 的 KEY 时排到所在每个路由组第一位，
   同步出的新模型同样排第一（已调整过顺序的组不动）。
 
+### 网关文本透传（协议 v2）
+
+- `GET /gateway/v1/openai/models` → OpenAI `{object: "list", data: [{id, object: "model", owned_by: "atelier", ...能力字段}]}`。只列获准的文本路由，能力取首个获准成员的上游 `/models`，取不到则声明 `supported_parameters: ["tools"]`。
+- `POST /gateway/v1/openai/chat/completions`、`POST /gateway/v1/openai/responses`：Bearer 鉴权；JSON 请求体最多 32 MiB。model 为路由 id，上游改为实际成员 id；非流式响应的 model 改回路由 id，流式 SSE 字节不改写。
+- 仅生成上游 Authorization、Content-Type、Accept 头，不转发接入端 cookie 或其他请求头。chat 流缺少 `stream_options.include_usage` 时自动设 true；旁路提取 chat 或 Responses 用量。
+- 按请求字节数 / 3 和该密钥最近 50 次文本输出平均 token（无历史 1000）估价预占。结束按已收到的实际 token 估价结算；无价记零，断流也结算已知用量，取消/结束释放预占。用量行 kind=text，不存 prompt；进行中调用在 gateway_live 登记。
+- 只在发出首字节之前对确定可切换的错误换成员；已转发后的中断结束当前流、记 failed，不重发请求。流前错误形状统一为 `{error: {message, type, code}}`；全部成员不可用为 503 / gateway_unavailable，限额为 429 并带 Retry-After。上游可能已执行的错误为 503 / gateway_upstream_error，接入端不得切换本机 KEY 重发。
+- 接入端 `key_api_root` 将 atelier 的文本/Agent URL 指向上述前缀；同步文本模型保留协议。文本 Job 收到 503 gateway_unavailable 时可按自动路由切回本机 KEY。
+
 ### 图层栈显示顺序（5.44.0）
 
 `layer_stack.data.base_z_index` 默认 0，背景与 `layers[].z_index` 共用 0–16 范围；存在背景时所有层级值必须唯一。

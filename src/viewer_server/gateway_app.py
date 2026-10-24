@@ -68,16 +68,23 @@ def _app_version() -> str:
 
 
 def create_gateway_app() -> FastAPI:
+    from viewer_server.gateway_openai import create_router, error_response
+
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    app.include_router(create_router(_require_key))
 
     @app.exception_handler(_Unauthorized)
     async def _unauthorized(_request: Request, _error: _Unauthorized) -> JSONResponse:
+        if _request.url.path.startswith("/gateway/v1/openai/"):
+            return error_response(GatewayRequestError(401, "网关密钥无效或已撤销"))
         return JSONResponse({"detail": "网关密钥无效或已撤销"}, status_code=401)
 
     @app.exception_handler(GatewayRequestError)
     async def _rejected(_request: Request, error: GatewayRequestError) -> JSONResponse:
         from character_workflow.lib.job_runner import _redact_local_paths
 
+        if _request.url.path.startswith("/gateway/v1/openai/"):
+            return error_response(error)
         headers = {"Retry-After": str(error.retry_after)} if error.retry_after is not None else None
         return JSONResponse({"detail": _redact_local_paths(error.message)},
                             status_code=error.status, headers=headers)

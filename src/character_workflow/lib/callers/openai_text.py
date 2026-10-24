@@ -9,7 +9,7 @@ from typing import Any
 import requests
 
 from character_workflow.lib import net_env
-from character_workflow.lib.callers.openai_compat import api_root
+from character_workflow.lib.callers.openai_compat import key_api_root
 
 
 class OpenAITextError(RuntimeError):
@@ -55,7 +55,7 @@ def supports_model(key: Any, model: Any) -> bool:
     return (
         protocol in _SUPPORTED_PROTOCOLS
         and (
-            key.provider in {"openai", "openrouter", "seedream", "tokendance", "custom"}
+            key.provider in {"openai", "openrouter", "seedream", "tokendance", "custom", "atelier"}
             or declared
         )
     )
@@ -66,7 +66,7 @@ def supports_input_modality(provider: str, protocol: str | None, modality: str) 
     if modality == "image":
         return True
     if protocol == "openai-responses":
-        return provider in {"seedream", "tokendance", "custom"}
+        return provider in {"seedream", "tokendance", "custom", "atelier"}
     if modality == "video" and provider == "openai":
         return False
     return modality in {"video", "audio"}
@@ -314,7 +314,7 @@ def generate(
         generated: list[str] = []
         for _ in range(max(1, int(n))):
             body = _post_json(
-                url=f"{api_root(base_url)}/responses",
+                url=f"{key_api_root(key)}/responses",
                 access_key=key.access_key,
                 payload=response_payload,
                 timeout=timeout,
@@ -336,7 +336,7 @@ def generate(
     if options.get("max_tokens") is not None:
         payload["max_tokens"] = int(options["max_tokens"])
     body = _post_json(
-        url=f"{api_root(base_url)}/chat/completions",
+        url=f"{key_api_root(key)}/chat/completions",
         access_key=key.access_key,
         payload=payload,
         timeout=timeout,

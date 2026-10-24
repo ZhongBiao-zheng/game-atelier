@@ -205,7 +205,7 @@ def failover_reason(error: BaseException) -> FailoverReason | None:
         return "unreachable" if _is_pre_flight_failure(network) else None
     text = " ".join(str(item) for item in chain)
     low = text.lower()
-    if "未确认" in text:
+    if "未确认" in text or "gateway_upstream_error" in low:
         return None
     match = _STATUS.search(text)
     status = int(match.group(1)) if match else None
