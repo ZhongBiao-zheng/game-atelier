@@ -90,7 +90,7 @@ export function useAnnotationEditor(options: Options) {
     if (text) { finishText(); return; }
     const { point, pixel } = at;
     const handle = event.target instanceof Element ? event.target.closest('[data-annotation-resize]') : null;
-    if (selected?.type === 'text' && handle) {
+    if ((selected?.type === 'text' || selected?.type === 'rect') && handle) {
       const corner = handle.getAttribute('data-annotation-resize')!.split('-').map(Number);
       const box = elementBounds(selected, unit);
       const anchor: AnnotationPoint = [box.x + (1 - corner[0]) * box.width, box.y + (1 - corner[1]) * box.height];
@@ -127,7 +127,12 @@ export function useAnnotationEditor(options: Options) {
     event.stopPropagation();
     const p = at.point;
     let element = g.element;
-    if (g.resize && element.type === 'text') {
+    if (g.resize && element.type === 'rect') {
+      const { anchor, corner } = g.resize;
+      const width = Math.max(4 * g.pixel, element.width + (corner[0] ? 1 : -1) * (p[0] - g.start[0]));
+      const height = Math.max(4 * g.pixel, element.height + (corner[1] ? 1 : -1) * (p[1] - g.start[1]));
+      element = { ...element, x: anchor[0] - (corner[0] ? 0 : width), y: anchor[1] - (corner[1] ? 0 : height), width, height };
+    } else if (g.resize && element.type === 'text') {
       const { anchor, vector, corner } = g.resize;
       const factor = 1 + ((p[0] - g.start[0]) * vector[0] + (p[1] - g.start[1]) * vector[1]) / (vector[0] ** 2 + vector[1] ** 2 || 1);
       const font_size = Math.min(72, Math.max(12, Math.round(g.element.type === 'text' ? g.element.font_size * factor : 18)));

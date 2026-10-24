@@ -33,6 +33,12 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.102.2',
+    date: '2026-10-24',
+    headline: '矩形标注支持四角调整大小',
+    changes: [{ kind: 'fix', text: '选中矩形后可拖动四角独立调整宽高，保持线宽；一次拖动可一次撤回。' }],
+  },
+  {
     version: '5.102.1',
     date: '2026-10-24',
     headline: '标注画完即可调整',

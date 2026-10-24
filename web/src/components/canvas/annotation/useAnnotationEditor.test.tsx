@@ -105,3 +105,19 @@ it('shows no input frame and scales selected text from a corner in one commit', 
   expect(commit).toHaveBeenCalledTimes(1);
   expect(commit.mock.lastCall?.[0][0]).toMatchObject({ x: 100, y: 100, font_size: 36 });
 });
+
+it.each([[0, 0], [0, 1], [1, 0], [1, 1]])('resizes a rectangle from corner %i,%i, preserving stroke and committing once', (cx, cy) => {
+  const { container } = render(<Harness />); const svg = container.querySelector('[data-annotation-surface] svg')!;
+  draw(svg, 10, 100);
+  const handle = svg.querySelector(`[data-annotation-resize="${cx}-${cy}"]`)!;
+  expect(handle).not.toBeNull();
+  commit.mockClear();
+  const x = cx ? 104 : 6, y = cy ? 104 : 6;
+  const end = { clientX: x + (cx ? 20 : -20), clientY: y + (cy ? 30 : -30), button: 0 };
+  fireEvent.pointerDown(handle, { clientX: x, clientY: y, button: 0 });
+  fireEvent.pointerMove(svg, end);
+  expect(commit).not.toHaveBeenCalled();
+  fireEvent.pointerUp(svg, end);
+  expect(commit).toHaveBeenCalledTimes(1);
+  expect(commit.mock.lastCall?.[0][0]).toMatchObject({ x: cx ? 10 : -10, y: cy ? 10 : -20, width: 110, height: 120, stroke_width: 4 });
+});

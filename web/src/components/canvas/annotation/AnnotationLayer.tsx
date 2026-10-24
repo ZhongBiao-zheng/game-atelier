@@ -47,7 +47,7 @@ export function AnnotationLayer({ elements, imageWidth, imageHeight, fit = 'cont
     })}
     {box && <g pointerEvents="none" stroke={ANNOTATION_SELECTION} strokeWidth={screenPixel}>
       <rect x={box.x - pad} y={box.y - pad} width={box.width + pad * 2} height={box.height + pad * 2} fill="none" strokeDasharray={`${4 * screenPixel} ${3 * screenPixel}`} />
-      {selected?.type === 'text' && [0, 1].flatMap(x => [0, 1].map(y => <rect key={`${x}-${y}`} data-annotation-resize={`${x}-${y}`} pointerEvents="all" style={{ cursor: x === y ? 'nwse-resize' : 'nesw-resize' }} x={box.x - pad + x * (box.width + pad * 2) - pad}
+      {(selected?.type === 'text' || selected?.type === 'rect') && [0, 1].flatMap(x => [0, 1].map(y => <rect key={`${x}-${y}`} data-annotation-resize={`${x}-${y}`} pointerEvents="all" style={{ cursor: x === y ? 'nwse-resize' : 'nesw-resize' }} x={box.x - pad + x * (box.width + pad * 2) - pad}
         y={box.y - pad + y * (box.height + pad * 2) - pad} width={8 * screenPixel} height={8 * screenPixel} fill={ANNOTATION_WHITE} />))}
     </g>}
   </svg>;
