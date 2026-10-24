@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.105.2',
+    date: '2026-10-24',
+    headline: '主题色卡换成磨砂渐变',
+    changes: [
+      { kind: 'feat', text: '外观设置里的主题色改为磨砂渐变卡片，色团缓慢漂移，悬停时轻微偏移。' },
+    ],
+  },
+  {
     version: '5.105.1',
     date: '2026-10-24',
     headline: '浅色模式主题色更通透',
