@@ -10,6 +10,17 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
+  --color-panel: var(--panel);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-brand-2: var(--brand-2);
+  --color-brand-3: var(--brand-3);
+  --color-brand-4: var(--brand-4);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -60,45 +71,56 @@
 
 :root {
   color-scheme: dark;
-  /* Atelier — warm dark palette (see DESIGN.md) */
+  --panel: #111113;
+  --subtle-foreground: #5C5C61;
+  --brand-2: #6FD6F0;
+  --brand-3: #F5D06A;
+  --brand-4: #A99FF5;
+  --chart-1: #6FD6F0;
+  --chart-2: #F58FBD;
+  --chart-3: #CDEB4A;
+  --chart-4: #A99FF5;
+  --chart-5: #F5D06A;
 
-  /* 表面阶梯（暖中性，R≥G≥B）：画布 → 卡片 → 弹层 → hover */
-  --background: #0F0E0D;
-  --foreground: #EDEAE3;
-  --card: #1B1917;
-  --card-foreground: #EDEAE3;
-  --popover: #221F1C;
-  --popover-foreground: #EDEAE3;
-  --primary: #D4A574;
-  --primary-foreground: #1B1917;
-  --secondary: #2A2725;
-  --secondary-foreground: #EDEAE3;
-  --muted: #1B1917;
-  --muted-foreground: #94908B;
-  --accent: #2A2725;
-  --accent-foreground: #EDEAE3;
-  --destructive: #C95C5C;
+  /* Atelier — graphite dark palette (see DESIGN.md) */
+
+  /* 表面阶梯（冷调石墨）：画布 → 卡片 → 弹层 → hover */
+  --background: #0A0A0B;
+  --foreground: #EDEDEF;
+  --card: #18181B;
+  --card-foreground: #EDEDEF;
+  --popover: #1C1C1F;
+  --popover-foreground: #EDEDEF;
+  --primary: #D4F53C;
+  --primary-foreground: #0A0A0B;
+  --secondary: #26262A;
+  --secondary-foreground: #EDEDEF;
+  --muted: #18181B;
+  --muted-foreground: #8E8E93;
+  --accent: #26262A;
+  --accent-foreground: #EDEDEF;
+  --destructive: #E5534B;
   --destructive-foreground: #FFFFFF;
 
   /* 玻璃与遮罩：深度靠玻璃不靠阴影（DESIGN.md Elevation） */
-  --glass: rgba(27, 25, 23, 0.66);
-  --scrim: rgba(8, 7, 6, 0.62);
+  --glass: rgba(17, 17, 19, 0.66);
+  --scrim: rgba(0, 0, 0, 0.62);
 
-  /* 发丝边界：暖白 alpha，10% 默认 / 16% 输入框 */
-  --border: rgba(237, 234, 227, 0.10);
-  --input: rgba(237, 234, 227, 0.16);
-  --ring: #D4A574;
+  /* 发丝边界：白色 alpha，8% 默认 / 14% 输入框 */
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.14);
+  --ring: #D4F53C;
 
   /* tapnow 玻璃卡配方料：顶部 inset 发丝高光 + 一层极淡软投影 + 导航金属描边环 */
-  --hairline-inset: rgba(237, 234, 227, 0.16);
+  --hairline-inset: rgba(255, 255, 255, 0.12);
   --scrim-soft: rgba(0, 0, 0, 0.16);
-  --nav-ring-stroke: rgba(237, 234, 227, 0.5);
+  --nav-ring-stroke: rgba(255, 255, 255, 0.45);
 
-  /* Status colors — warm-aligned semantic palette */
-  --status-pending: #6B6967;
-  --status-running: #E5B570;
-  --status-done: #7FB069;
-  --status-failed: #C95C5C;
+  /* Status colors — fixed semantic palette */
+  --status-pending: #5C5C61;
+  --status-running: #F2A33A;
+  --status-done: #52AB69;
+  --status-failed: #E5534B;
 
   /* 动效：时长三档与缓动，与 lib/motion.ts 同值（GSAP 侧）；Tailwind 类侧对应 duration-150/200/300 */
   --motion-fast: 150ms;
@@ -108,21 +130,32 @@
   --ease-atelier-in: cubic-bezier(0.55, 0.055, 0.675, 0.19); /* = GSAP power2.in */
 
   /* 原生 select 的展开箭头：data URI 里拿不到 CSS 变量，描边色只能写死成 muted-foreground 的值 */
-  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394908B' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238E8E93' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 /* Atelier — clean light palette（浅色主题，<html class="light"> 时生效）
    纯白画廊（按飙哥给的参考站调）：画布纯白，表面向灰走深（与暗色阶梯方向相反），
-   文字纯黑系，发丝边纯黑 alpha；黄铜压深到 #8F6234 保证白底对比（AA 验证见 DESIGN.md § Color） */
+   文字纯黑系，发丝边纯黑 alpha；主题色压低明度，保证白底对比 */
 :root.light {
   color-scheme: light;
+  --panel: #FFFFFF;
+  --subtle-foreground: #707075;
+  --brand-2: oklch(from #6FD6F0 0.55 c h);
+  --brand-3: oklch(from #F5D06A 0.55 c h);
+  --brand-4: oklch(from #A99FF5 0.55 c h);
+  --chart-1: oklch(from #6FD6F0 0.55 c h);
+  --chart-2: oklch(from #F58FBD 0.55 c h);
+  --chart-3: oklch(from #CDEB4A 0.55 c h);
+  --chart-4: oklch(from #A99FF5 0.55 c h);
+  --chart-5: oklch(from #F5D06A 0.55 c h);
+
   --background: #FFFFFF;
   --foreground: #000000;
   --card: #FAFAFA;
   --card-foreground: #000000;
   --popover: #FFFFFF;
   --popover-foreground: #000000;
-  --primary: #8F6234;
+  --primary: oklch(from #D4F53C 0.5 c h);
   --primary-foreground: #FFFFFF;
   --secondary: #F0F0F0;
   --secondary-foreground: #000000;
@@ -139,7 +172,7 @@
   /* 发丝边界翻转为纯黑 alpha */
   --border: rgba(0, 0, 0, 0.12);
   --input: rgba(0, 0, 0, 0.2);
-  --ring: #8F6234;
+  --ring: oklch(from #D4F53C 0.5 c h);
 
   /* 白底上 inset 白高光不可见 → 深度改由软投影承载，inset 收一道极淡内线；描边环转黑 */
   --hairline-inset: rgba(0, 0, 0, 0.04);
