@@ -65,6 +65,58 @@ def _rate(value: Any) -> float | None:
     return rate if math.isfinite(rate) and rate >= 0 else None
 
 
+def _pricing_item(items: list[dict], suffixes: tuple[str, ...]) -> dict | None:
+    return next((item for item in items if str(item.get("id", "")).endswith(suffixes)), None)
+
+
+def _plan_rate(item: dict | None, dimensions: tuple[int, int] | None) -> float | None:
+    """按张计价项的单价；带 `range` 的按输出千像素分段。不知道尺寸时只有各档同价才能定价。"""
+    plans = [plan for plan in (item or {}).get("plans") or []
+             if isinstance(plan, dict) and plan.get("unit") == "images"]
+    kpixels = dimensions[0] * dimensions[1] / 1000 if dimensions else None
+
+    def fits(plan: dict) -> bool:
+        bounds = plan.get("range")
+        if not isinstance(bounds, dict) or kpixels is None:
+            return True
+        return (float(bounds.get("lower", 0)) <= kpixels
+                and ("upper" not in bounds or kpixels < float(bounds["upper"])))
+
+    rates = {_rate(plan.get("rate")) for plan in plans if fits(plan)}
+    return rates.pop() if len(rates) == 1 and None not in rates else None
+
+
+def layer_decomposition_cost_cny(provider: str | None, model_id: str, result: dict) -> float | None:
+    """图层拆分完成后按厂商回传结算：每层按其输出尺寸计一张生成图，另加输入图费用。
+
+    拆分前不知道层数，只能事后算。目前只有 TokenDance 有可核对的价格快照，其他渠道返回 None。
+    """
+    if _normalize(provider) != "tokendance":
+        return None
+    from character_workflow.lib.tokendance_prices import model_pricing
+
+    items = [item for item in (model_pricing(model_id) or {}).get("items") or []
+             if isinstance(item, dict)]
+    outputs = result.get("outputs") or []
+    usage = result.get("usage") or {}
+    if not outputs or usage.get("generated_images") not in (None, len(outputs)):
+        return None
+    generated = _pricing_item(items, ("generated_images", ":images"))
+    total = 0.0
+    for output in outputs:
+        rate = _plan_rate(generated, _pixels(output.get("size")))
+        if rate is None or _pixels(output.get("size")) is None:
+            return None
+        total += rate
+    inputs = usage.get("input_images") or 0
+    if inputs:
+        rate = _plan_rate(_pricing_item(items, ("input_images",)), None)
+        if rate is None:
+            return None
+        total += rate * inputs
+    return _priced(total)
+
+
 def _tokendance(*, kind, model_id, n, size, duration, resolution, ratio, has_reference_video):
     """按 TokenDance 价格快照估价：图片按张（可按输出千像素分段），视频按输出 token 或按秒。"""
     from character_workflow.lib.tokendance_prices import model_pricing
@@ -72,25 +124,8 @@ def _tokendance(*, kind, model_id, n, size, duration, resolution, ratio, has_ref
     pricing = model_pricing(model_id)
     items = [item for item in (pricing or {}).get("items") or [] if isinstance(item, dict)]
     if kind == "image":
-        item = next((item for item in items
-                     if str(item.get("id", "")).endswith(("generated_images", ":images"))), None)
-        plans = [plan for plan in (item or {}).get("plans") or []
-                 if isinstance(plan, dict) and plan.get("unit") == "images"]
-        dimensions = _pixels(size)
-        kpixels = dimensions[0] * dimensions[1] / 1000 if dimensions else None
-
-        def fits(plan: dict) -> bool:
-            bounds = plan.get("range")
-            if not isinstance(bounds, dict) or kpixels is None:
-                return True
-            return (float(bounds.get("lower", 0)) <= kpixels
-                    and ("upper" not in bounds or kpixels < float(bounds["upper"])))
-
-        # 不知道输出尺寸时，只有各档同价才能估。
-        rates = {_rate(plan.get("rate")) for plan in plans if fits(plan)}
-        if len(rates) != 1 or None in rates:
-            return None
-        return _priced(rates.pop() * n)
+        rate = _plan_rate(_pricing_item(items, ("generated_images", ":images")), _pixels(size))
+        return None if rate is None else _priced(rate * n)
     if duration is None or not math.isfinite(duration) or duration <= 0:
         return None
     res = (resolution or "").strip().lower()

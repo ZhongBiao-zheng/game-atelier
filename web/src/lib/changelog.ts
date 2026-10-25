@@ -33,6 +33,10 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.116.3', date: '2026-10-25', headline: '图层拆分记录费用',
+    changes: [{ kind: 'fix', text: 'TokenDance 图层拆分完成后按实际层数记录费用，用量页不再漏算。' }],
+  },
+  {
     version: '5.116.2', date: '2026-10-25', headline: 'Tuzi 香蕉多张估价修正',
     changes: [{ kind: 'fix', text: 'Tuzi Nano Banana 一次出多张时按实际请求次数估价，不再只算一张。' }],
   },

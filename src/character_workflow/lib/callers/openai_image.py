@@ -336,6 +336,12 @@ def render(
             data, out_dir, _source_image_size(_collect_ref_paths(kwargs, key.provider, model)[0]),
         )
         params["layer_decomposition_result"] = result
+        from character_workflow.lib.generation_pricing import layer_decomposition_cost_cny
+
+        # 拆分按实际生成层数计费：完成时按厂商回传的层数与尺寸记实际费用。
+        cost = layer_decomposition_cost_cny(key.provider, model, result)
+        if cost is not None:
+            params["actual_cost_cny"] = cost
         callback = kwargs.get("on_params_changed")
         if callable(callback):
             callback()

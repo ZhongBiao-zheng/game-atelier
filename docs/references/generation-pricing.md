@@ -29,6 +29,7 @@ TokenDance 模型请求公开接口 `GET https://tokendance.space/portal/api/mod
   `unit=seconds` 按时长，`unit=millionTokens` 按 `时长 × 宽 × 高 × 24 / 1024` 输出 token，宽高沿用方舟 Seedance 尺寸表。
 - 接口不标币种；不含视频的 Seedance 档与火山方舟官方价一致，按人民币处理。
 - 没有快照的模型返回 null（未计价）。任务的预计在执行前冻结，快照之后变化不影响历史。
+- 图层拆分（seedream-5.0-pro，`layer_decomposition`）拆前不知道层数，不做预估；完成时按厂商回传的 `usage` 与每层 `size` 结算写入 `actual_cost_cny`：每层按自身输出千像素选档计一张生成图，另加 `input_images` × 输入图单价（`generation_pricing.layer_decomposition_cost_cny`）。2026-10-25 按此规则回填了此前 7 次成功拆分（合计 ¥24.44）。
 
 ## EvoLink Midjourney V8.2：2026-10-15 核实
 
