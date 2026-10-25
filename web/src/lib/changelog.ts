@@ -33,6 +33,13 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.115.0', date: '2026-10-25', headline: 'TokenDance 价格自动同步',
+    changes: [
+      { kind: 'feat', text: 'TokenDance 的图片与视频价格在启动时自动同步，Seedance 视频也能显示预计费用。' },
+      { kind: 'fix', text: 'TokenDance Seedream 5.0 Pro 的 2K 图按实际档位计价（每张 0.6 元）。' },
+    ],
+  },
+  {
     version: '5.114.3', date: '2026-10-25', headline: 'Agent 图片尺寸显示修正',
     changes: [{ kind: 'fix', text: 'Agent 写入的像素尺寸在生成面板里如实显示，不再误显示为默认比例。' }],
   },

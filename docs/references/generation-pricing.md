@@ -15,10 +15,25 @@
 | Tuzi 其他已核实型号／分组 | `TUZI_GROUP_YUAN_PER_IMAGE` | 元 / 张 |
 | Tuzi default Midjourney | `TUZI_MIDJOURNEY_YUAN_PER_TASK` | 元 / 任务，拆成四张仍只计一次 |
 | EvoLink Midjourney V8.2 | `EVOLINK_MIDJOURNEY_USD_PER_REQUEST` | 美元 / 请求，最多四张结果仍只计一次 |
-| TokenDance Seedream | `TOKEN_DANCE_YUAN_PER_IMAGE` | 元 / 张 |
+| TokenDance（全部模型） | 不入价格表，见下方「TokenDance 实时同步」 | 按其接口：元 / 张、元 / 百万输出 token、元 / 秒 |
 | 火山 Ark Seedream | `ARK_SEEDREAM_YUAN_PER_IMAGE` | 元 / 张 |
 | 火山 Ark Seedance | `ARK_SEEDANCE_YUAN_PER_MILLION_TOKENS` | 元 / 百万输出 token |
 | 阿里 DashScope HappyHorse | `HAPPYHORSE_1_0_YUAN_PER_SECOND`、`HAPPYHORSE_1_1_YUAN_PER_SECOND` | 元 / 秒 |
+
+## TokenDance 实时同步：2026-10-25 起
+
+TokenDance 的价格不进 `generation_prices.json`。viewer-server 启动时（之后每 6 小时）对 keys 里配置的
+TokenDance 模型请求公开接口 `GET https://tokendance.space/portal/api/models/{slug}`（`a:b` 变体按冒号前的 slug 查），
+把返回的 `pricing` 存成 `<data_root>/.runtime/prices/tokendance.json`；单个模型拉取失败保留旧价格。
+前端经 `GET /api/pricing/tokendance` 读同一份快照，服务端估价（`generation_pricing._tokendance`）与界面估价
+（`generationCost.ts`）解析规则相同：
+
+- 图片：`*generated_images` / `*:images` 项按张计价；带 `range` 的按输出千像素分段，不知道输出尺寸且各档不同价时不估。
+  输入图片的附加费（如 seedream-5.0-pro 每张参考图 0.02）不计入预计。
+- 视频：`skus` 按 `resolution`（`*` 为通配，指定分辨率优先）与 `has_video`（有参考视频为 true）匹配；
+  `unit=seconds` 按时长，`unit=millionTokens` 按 `时长 × 宽 × 高 × 24 / 1024` 输出 token，宽高沿用方舟 Seedance 尺寸表。
+- 接口不标币种；不含视频的 Seedance 档与火山方舟官方价一致，按人民币处理。
+- 没有快照的模型返回 null（未计价）。任务的预计在执行前冻结，快照之后变化不影响历史。
 
 ## EvoLink Midjourney V8.2：2026-10-15 核实
 

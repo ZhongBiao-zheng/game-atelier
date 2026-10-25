@@ -11,7 +11,6 @@ import {
   HAPPYHORSE_1_1_YUAN_PER_SECOND,
   OPENAI_HK_FIXED_YUAN_PER_IMAGE,
   OPENAI_HK_NANO_BANANA_2_YUAN,
-  TOKEN_DANCE_YUAN_PER_IMAGE,
   TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE,
   TUZI_GPT_IMAGE_2_1K_SIZES,
   TUZI_GPT_IMAGE_2_1K_YUAN_PER_IMAGE,
@@ -209,9 +208,63 @@ function estimateTuziImage(request: GenerationCostRequest): number | null {
   return unitPrice == null ? null : priced(unitPrice * safeCount(request.count));
 }
 
+/** TokenDance 价格快照（服务启动时从其公开接口同步，`GET /api/pricing/tokendance`）。
+ *  与服务端 generation_pricing._tokendance 同一套解析；没有快照的模型不估价。 */
+export interface TokenDancePricing {
+  items?: {
+    id?: string;
+    plans?: { unit?: string; rate?: string | number; range?: { lower?: number; upper?: number } }[];
+    skus?: { specs?: Record<string, string>; rate?: string | number; unit?: string }[];
+  }[];
+}
+
+let tokenDancePricing: Record<string, TokenDancePricing> = {};
+
+export function setTokenDancePrices(models: Record<string, TokenDancePricing>): void {
+  tokenDancePricing = models;
+}
+
+function pricingRate(value: unknown): number | null {
+  const rate = Number(value);
+  return Number.isFinite(rate) && rate >= 0 ? rate : null;
+}
+
 function estimateTokenDanceImage(request: GenerationCostRequest): number | null {
-  const unitPrice = TOKEN_DANCE_YUAN_PER_IMAGE[normalize(request.model?.id)];
-  return unitPrice == null ? null : priced(unitPrice * safeCount(request.count));
+  const items = tokenDancePricing[request.model?.id ?? '']?.items ?? [];
+  const item = items.find(entry => /(generated_images|:images)$/.test(entry.id ?? ''));
+  const plans = (item?.plans ?? []).filter(plan => plan.unit === 'images');
+  const size = request.size ? parsePixelSize(request.size) : null;
+  const kpixels = size ? size.w * size.h / 1000 : null;
+  // 不知道输出尺寸时，只有各档同价才能估。
+  const rates = new Set(plans.filter(plan => !plan.range || kpixels == null
+    || ((plan.range.lower ?? 0) <= kpixels && (plan.range.upper == null || kpixels < plan.range.upper)))
+    .map(plan => pricingRate(plan.rate)));
+  if (rates.size !== 1) return null;
+  const [rate] = [...rates];
+  return rate == null ? null : priced(rate * safeCount(request.count));
+}
+
+function estimateTokenDanceVideo(request: GenerationCostRequest): number | null {
+  const duration = request.duration;
+  if (!Number.isFinite(duration) || (duration ?? 0) <= 0) return null;
+  const resolution = (request.resolution ?? '').trim().toLowerCase();
+  const video = request.hasReferenceVideo ? 'true' : 'false';
+  const skus = (tokenDancePricing[request.model?.id ?? '']?.items ?? []).flatMap(item => item.skus ?? [])
+    .filter(sku => {
+      const skuResolution = (sku.specs?.resolution ?? '*').toLowerCase();
+      return (skuResolution === '*' || skuResolution === resolution)
+        && (sku.specs?.has_video ?? video) === video;
+    });
+  // 指定分辨率的价格优先于通配。
+  const sku = skus.find(entry => (entry.specs?.resolution ?? '*') !== '*') ?? skus[0];
+  const rate = pricingRate(sku?.rate);
+  if (!sku || rate == null) return null;
+  const count = safeCount(request.count);
+  if (sku.unit === 'seconds') return priced(rate * duration! * count);
+  if (sku.unit !== 'millionTokens') return null;
+  const dimensions = MODERN_SEEDANCE_DIMENSIONS[resolution]?.[request.ratio?.trim() ?? ''];
+  if (!dimensions) return null;
+  return priced(duration! * dimensions[0] * dimensions[1] * 24 / 1024 * rate * count / 1_000_000);
 }
 
 function estimateArkImage(request: GenerationCostRequest): number | null {
@@ -313,6 +366,9 @@ export function estimateGenerationCost(request: GenerationCostRequest): number |
     && protocolMatches(request.model.protocol, 'ark')
   ) {
     return estimateArkImage(request);
+  }
+  if (request.kind === 'video' && normalize(request.provider.provider) === 'tokendance') {
+    return estimateTokenDanceVideo(request);
   }
   if (
     request.kind === 'video'

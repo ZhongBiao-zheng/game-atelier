@@ -86,10 +86,6 @@
     "imageEdit": 0.12
   },
   "GENERATION_USD_TO_CNY": 7,
-  "TOKEN_DANCE_YUAN_PER_IMAGE": {
-    "seedream-5-0-lite": 0.22,
-    "seedream-5-0-pro": 0.3
-  },
   "ARK_SEEDREAM_YUAN_PER_IMAGE": {
     "doubao-seedream-5-0-260128": 0.22,
     "doubao-seedream-4-5-251128": 0.25

@@ -2354,7 +2354,7 @@
       "model_id": "seedream-5.0-lite",
       "protocol": "openai"
     },
-    "expected": 0.44
+    "expected": null
   },
   {
     "request": {
@@ -2365,7 +2365,7 @@
       "model_id": "seedream-5.0-pro",
       "protocol": "ark"
     },
-    "expected": 0.6
+    "expected": null
   },
   {
     "request": {

@@ -92,6 +92,7 @@ import {
 } from '@/api/canvas';
 import { getCanvasUiPreferences, saveCanvasUiPreferences } from '@/api/canvasUi';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
+import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { withAutoProvider } from '@/lib/modelRoutes';
 import { useCanvasJobSync } from '@/hooks/useCanvasJobSync';
@@ -884,6 +885,8 @@ function CanvasEditorInner({
       .catch(preferencesError => {
         if (!cancelled) setCanvasUiPreferencesError((preferencesError as Error).message);
       });
+    // 局部修改 / 扩图面板的费用预估要用 TokenDance 价格快照；单独取，不阻塞画布加载。
+    void loadTokenDancePrices();
     Promise.all([
       listCanvasProjects(true),
       getCanvasDocument(projectId),

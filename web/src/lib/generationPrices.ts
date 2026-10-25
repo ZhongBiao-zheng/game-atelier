@@ -42,9 +42,6 @@ export const TUZI_MIDJOURNEY_YUAN_PER_TASK = prices.TUZI_MIDJOURNEY_YUAN_PER_TAS
 export const EVOLINK_MIDJOURNEY_USD_PER_REQUEST = prices.EVOLINK_MIDJOURNEY_USD_PER_REQUEST;
 export const GENERATION_USD_TO_CNY = prices.GENERATION_USD_TO_CNY;
 
-// TokenDance：元 / 张。
-export const TOKEN_DANCE_YUAN_PER_IMAGE: Record<string, number> = prices.TOKEN_DANCE_YUAN_PER_IMAGE;
-
 // 火山 Ark 直连：元 / 张。
 export const ARK_SEEDREAM_YUAN_PER_IMAGE: Record<string, number> = prices.ARK_SEEDREAM_YUAN_PER_IMAGE;
 

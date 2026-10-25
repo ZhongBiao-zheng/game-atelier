@@ -19,4 +19,7 @@ def isolated_data_root(tmp_path, monkeypatch):
     monkeypatch.delenv("GAME_ATELIER_DEV_ORIGIN", raising=False)
     # 打开 Agent 开关会写 Codex 配置：指到不存在的目录，测试绝不碰真实的 ~/.codex/config.toml。
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home-absent"))
+    # 服务启动会起 TokenDance 价格同步线程：测试里关掉，绝不联外网。
+    from character_workflow.lib import tokendance_prices
+    monkeypatch.setattr(tokendance_prices, "start_background_sync", lambda: None)
     return root

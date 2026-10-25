@@ -4,6 +4,7 @@ import {
   estimateGenerationCost,
   estimateGenerationCostForSubmission,
   formatGenerationCost,
+  setTokenDancePrices,
 } from './generationCost';
 import { normalizeStudioSizeForModel } from './studioSize';
 
@@ -344,15 +345,23 @@ describe('estimateGenerationCost', () => {
     })).toBe(0.1505);
   });
 
-  it('prices verified TokenDance Seedream image models', () => {
+  it('prices TokenDance Seedream image models from the synced snapshot', () => {
+    setTokenDancePrices({
+      'seedream-5.0-lite': { items: [{ id: 'ark:image-generations:generated_images', plans: [{ unit: 'images', rate: '0.22' }] }] },
+      'seedream-5.0-pro': { items: [{ id: 'ark:image-generations:generated_images', plans: [
+        { unit: 'images', rate: '0.3', range: { upper: 2610 } },
+        { unit: 'images', rate: '0.6', range: { lower: 2610 } },
+      ] }] },
+    });
     expect(estimateGenerationCost({
       provider: { provider: 'tokendance', baseUrl: 'https://tokendance.space/gateway/v1' },
       model: { id: 'seedream-5.0-lite', protocol: 'openai' }, kind: 'image', count: 2,
     })).toBe(0.44);
     expect(estimateGenerationCost({
       provider: { provider: 'tokendance', baseUrl: 'https://tokendance.space/gateway/v1' },
-      model: { id: 'seedream-5.0-pro', protocol: 'ark' }, kind: 'image', count: 2,
-    })).toBe(0.6);
+      model: { id: 'seedream-5.0-pro', protocol: 'ark' }, kind: 'image', count: 2, size: '2048x2048',
+    })).toBe(1.2);
+    setTokenDancePrices({});
   });
 
   it('calculates Ark Seedream per-image pricing', () => {

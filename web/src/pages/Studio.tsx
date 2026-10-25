@@ -7,6 +7,7 @@ import { ChevronsDown, Library } from 'lucide-react';
 import { createStudioJob, getStudioJob, listStudioJobs, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
 import { apiError } from '@/api/http';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
+import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
 import { PromptInput } from '@/components/studio/PromptInput';
@@ -441,7 +442,8 @@ function StudioFull() {
         }
       });
     // 路由列表读失败只是没有「自动」项，不影响按 KEY 选模型。
-    Promise.all([listKeys(), listModelRoutes().catch(() => [] as ModelRoute[])])
+    // TokenDance 价格快照与密钥一起就绪，首屏费用预估才不会先显示未计价。
+    Promise.all([listKeys(), listModelRoutes().catch(() => [] as ModelRoute[]), loadTokenDancePrices()])
       .then(([resp, loadedRoutes]) => {
         if (cancelled) return;
         const usable = resp.keys.filter((key) => key.models.length > 0);

@@ -9,6 +9,7 @@ import json
 import math
 import re
 from importlib.resources import files
+from typing import Any
 from urllib.parse import urlsplit
 
 _PRICES = json.loads(
@@ -110,6 +111,69 @@ def _tuzi(*, model_id, model, billing_group, n, size, size_mode, quality, resolu
     return None if rate is None else _priced(rate * n)
 
 
+def _rate(value: Any) -> float | None:
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        return None
+    return rate if math.isfinite(rate) and rate >= 0 else None
+
+
+def _tokendance(*, kind, model_id, n, size, duration, resolution, ratio, has_reference_video):
+    """按 TokenDance 价格快照估价：图片按张（可按输出千像素分段），视频按输出 token 或按秒。"""
+    from character_workflow.lib.tokendance_prices import model_pricing
+
+    pricing = model_pricing(model_id)
+    items = [item for item in (pricing or {}).get("items") or [] if isinstance(item, dict)]
+    if kind == "image":
+        item = next((item for item in items
+                     if str(item.get("id", "")).endswith(("generated_images", ":images"))), None)
+        plans = [plan for plan in (item or {}).get("plans") or []
+                 if isinstance(plan, dict) and plan.get("unit") == "images"]
+        dimensions = _pixels(size)
+        kpixels = dimensions[0] * dimensions[1] / 1000 if dimensions else None
+
+        def fits(plan: dict) -> bool:
+            bounds = plan.get("range")
+            if not isinstance(bounds, dict) or kpixels is None:
+                return True
+            return (float(bounds.get("lower", 0)) <= kpixels
+                    and ("upper" not in bounds or kpixels < float(bounds["upper"])))
+
+        # 不知道输出尺寸时，只有各档同价才能估。
+        rates = {_rate(plan.get("rate")) for plan in plans if fits(plan)}
+        if len(rates) != 1 or None in rates:
+            return None
+        return _priced(rates.pop() * n)
+    if duration is None or not math.isfinite(duration) or duration <= 0:
+        return None
+    res = (resolution or "").strip().lower()
+    video = "true" if has_reference_video else "false"
+    candidates = []
+    for item in items:
+        for sku in item.get("skus") or []:
+            specs = sku.get("specs") or {} if isinstance(sku, dict) else {}
+            sku_res = str(specs.get("resolution", "*")).lower()
+            if sku_res not in ("*", res) or specs.get("has_video", video) != video:
+                continue
+            candidates.append((sku_res != "*", sku))
+    if not candidates:
+        return None
+    sku = max(candidates, key=lambda pair: pair[0])[1]  # 指定分辨率的价格优先于通配
+    rate = _rate(sku.get("rate"))
+    if rate is None:
+        return None
+    if sku.get("unit") == "seconds":
+        return _priced(rate * duration * n)
+    if sku.get("unit") == "millionTokens":
+        aspect = (ratio or "").strip()
+        if res not in _MODERN_DIMENSIONS or aspect not in _RATIOS:
+            return None
+        width, height = _MODERN_DIMENSIONS[res][_RATIOS.index(aspect)]
+        return _priced(duration * width * height * 24 / 1024 * rate * n / 1_000_000)
+    return None
+
+
 def estimate_cost_cny(
     *, kind: str, provider: str | None = None, base_url: str | None = None,
     billing_group: str | None = None, model_id: str | None = None,
@@ -147,7 +211,9 @@ def estimate_cost_cny(
                 p["OPENAI_HK_FIXED_YUAN_PER_IMAGE"].get(model)
             )
         elif _normalize(provider) == "tokendance":
-            rate = p["TOKEN_DANCE_YUAN_PER_IMAGE"].get(model)
+            return _tokendance(kind=kind, model_id=model_id, n=count, size=size, duration=duration,
+                               resolution=resolution, ratio=ratio,
+                               has_reference_video=has_reference_video)
         elif ark and proto in ("", "ark"):
             rate = p["ARK_SEEDREAM_YUAN_PER_IMAGE"].get(model)
         else:
@@ -156,6 +222,10 @@ def estimate_cost_cny(
     if kind != "video" or duration is None or not math.isfinite(duration) or duration <= 0:
         return None
     res = _normalize(resolution)
+    if _normalize(provider) == "tokendance":
+        return _tokendance(kind=kind, model_id=model_id, n=count, size=size, duration=duration,
+                           resolution=resolution, ratio=ratio,
+                           has_reference_video=has_reference_video)
     if ark and proto in ("", "seedance"):
         if has_reference_video:
             return None

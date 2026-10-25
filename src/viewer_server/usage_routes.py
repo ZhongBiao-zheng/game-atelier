@@ -13,6 +13,14 @@ from character_workflow.lib.usage_stats import (
 usage_router = APIRouter(prefix="/api")
 
 
+@usage_router.get("/pricing/tokendance")
+def tokendance_pricing() -> dict:
+    """TokenDance 价格快照（服务启动时同步），前端估价与服务端冻结共用这一份。"""
+    from character_workflow.lib.tokendance_prices import load_snapshot
+
+    return load_snapshot()
+
+
 @usage_router.get("/usage/key-last-used")
 def key_last_used() -> dict[str, str]:
     """供应商列表的「最近使用」：alias → 最近一次提交时间。"""

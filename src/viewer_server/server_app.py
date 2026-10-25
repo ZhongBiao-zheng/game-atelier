@@ -207,6 +207,9 @@ async def lifespan(app: FastAPI):
         task = asyncio.create_task(resume_canvas_job(job_id))
         resume_tasks.add(task)
         task.add_done_callback(resume_tasks.discard)
+    from character_workflow.lib.tokendance_prices import start_background_sync
+
+    start_background_sync()
     try:
         yield
     finally:

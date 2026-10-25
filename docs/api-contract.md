@@ -893,6 +893,8 @@ resolve 后的绝对路径（落盘值就是闸门判过的那个）。`mask_ima
 
 ### 用量
 
+`GET /api/pricing/tokendance` 返回 TokenDance 价格快照 `{synced_at: string | null, models: {model_id: pricing}}`，`pricing` 原样保存 TokenDance 公开模型接口的同名字段；规则见 [生成价格清单维护](references/generation-pricing.md)。
+
 `GET /api/usage` 仅限本机管理会话（Agent 无权读取）。参数 scope=mine|team（默认 mine）、
 range=today|7d|30d|90d|all（默认 30d）、source=all|local|lan（默认 all，仅 mine）、
 member=网关密钥 ID（仅 team）。网关未开启时 team 返回 404。响应 `UsageResponse` 双端 schema
