@@ -1,13 +1,13 @@
 # 生成价格清单维护
 
 静态渠道的单价维护在 [generation_prices.json](../../src/character_workflow/data/generation_prices.json)。
-Tuzi 与 TokenDance 使用本机同步快照；Tuzi 表达式仅在服务端执行，前端不保存第二套公式。
+Tuzi、OpenAI-HK 与 TokenDance 使用本机同步快照；Tuzi 和 OpenAI-HK 仅在服务端估价。
 
 ## 价格表索引
 
 | 渠道 | 表项 | 单位 |
 |---|---|---|
-| OpenAI-HK | `OPENAI_HK_FIXED_YUAN_PER_IMAGE`、`OPENAI_HK_NANO_BANANA_2_YUAN` | 元 / 张 |
+| OpenAI-HK | `.runtime/prices/openai-hk.json` | 元 / 次，目前仅核实单张 |
 | EvoLink Midjourney V8.2 | `EVOLINK_MIDJOURNEY_USD_PER_REQUEST` | 美元 / 请求，最多四张结果仍只计一次 |
 | Tuzi | `.runtime/prices/tuzi.json` | 公开表达式或固定请求价，经人民币系数换算 |
 | TokenDance（全部模型） | 不入价格表，见下方「TokenDance 实时同步」 | 按其接口：元 / 张、元 / 百万输出 token、元 / 秒 |
@@ -85,16 +85,30 @@ Tuzi扩展已由[官方定价计算器源码](https://api.tu-zi.com/assets/index
 - 共享用例179组、近30天77条任务去重41组，合计220组逐条对账记录在本地任务日志。
   额外差异按用户裁决记录，已知公式采用公开快照，未核实表达式保留未计价。
 
-## OpenAI-HK GPT Image 2.5：2026-09-09 补录
+## OpenAI-HK 实时同步：2026-10-25 起
 
-来源为用户确认的厂商消耗：`gpt-image-2.5-sunburst` 和 `gpt-image-2.5-flare`
-均为每张 2400 积分，即 ¥0.24。金额维护于 `OPENAI_HK_FIXED_YUAN_PER_IMAGE`，
-仅匹配 `openai-hk.com` 及其子域名与这两个精确型号，按张数计算，不随 quality 分档。
-不套用到其他渠道、相近后缀或历史任务；旧型号价格不变。
+服务启动及每6小时 GET [官网价格接口](https://www.openai-hk.com/ccapi/pricing)，仅保留已配置模型，
+原子写入 `.runtime/prices/openai-hk.json`；失败保留旧快照。接口固定使用www域名，不从生成base_url推导。
+HK caller保留模型ID，仅传递支持的quality与归一化尺寸，未把Nano Banana 2质量映射为另一个型号。
+
+官网前端按次 `quota_type=1` 展示 `model_price×10000` 积分；[积分说明](https://openai-hk.com/docs/price.html)
+为1元=10000积分。2026-10-25用户提供的已有账单支持以下裁决：
+
+- default单张：`gpt-image-2`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、
+  `nano-banana`、`nano-banana-hd` 读取精确型号的 `model_price`，不乘分组倍率7。
+- GPT Image 2的269条记录均800积分；Flare的41条中40条800、1条2400；Sunburst的176条中
+  174条800、1条2400、1条3200；Nano Banana六条2000，HD一条3200。
+- 9月9日Flare/Sunburst单张2400积分的历史记录真实存在，之后对应本机单张任务已扣800积分；
+  新估价采用当前公开价（样本0.08），不重算历史。Sunburst的3200积分记录缺少数量，原因未查明。
+- Nano Banana 2的质量分档、所有多张请求和其他型号/分组暂未核实，返回null；按token的
+  `quota_type=0`、缺失快照或价格无效同样返回null。不得据名称推测别名或费率。
+
+局部修改/扩图复用 `POST /api/pricing/estimate`；创作台前端返回null，由runner执行前冻结费用。
+本次仅用已有账单与本地估价核对，无真实生成。完整对账留在本地 `.scratch/openai-hk-pricing/`。
 
 ## 下次调价
 
-Tuzi已支持规则内的单价、系数与阈值调整会在下次同步生效，无须发版；新增函数或请求模式
+OpenAI-HK上述已核实型号的单价、Tuzi已支持规则内的单价、系数与阈值调整会在下次同步生效，无须发版；新增函数或请求模式
 需要先核实并更新解释器。同步失败保留旧快照。以下手工步骤仅适用于静态价格渠道。
 
 1. 核对渠道、分组、模型、档位和单位；同一模型的别名共用单价，不重复填数。

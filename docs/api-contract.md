@@ -19,6 +19,12 @@ Tuzi快照位于 `<data_root>/.runtime/prices/tuzi.json`，字段为 `synced_at`
 缺失价格、未核实函数/字段、MJ及动态拆层均返回null。固定价不额外乘n；
 表达式output_image_count为n，input_image_count为参考图数。费用是预计值，不是实际账单。
 
+OpenAI-HK快照（5.116.4）位于 `<data_root>/.runtime/prices/openai-hk.json`，字段为
+`synced_at`、`group_ratio`、`models[model].{quota_type,model_price,model_ratio,completion_ratio,enable_groups}`。
+启动及每6小时同步固定官网 `https://www.openai-hk.com/ccapi/pricing`，只留配置模型，失败保留旧快照。
+估价接口仅对已核实五个型号的default单张请求按 `quota_type=1` 的 `model_price`（元）返回金额，
+不乘分组倍率。Nano Banana 2、多张、其他型号/分组及按token计费返回null；前端不保存HK价格表。
+
 ### 图片尺寸意图（5.42.0）
 
 `JobParams`、`CanvasImageDefaultParams` 增加 `size_mode?: auto | ratio | custom`、

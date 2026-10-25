@@ -286,7 +286,7 @@ describe('estimateGenerationCost', () => {
     expect(estimateGenerationCost({
       provider: { baseUrl: 'https://api.openai-hk.com', billingGroup: 'default' },
       model: { id: 'gpt-image-2' }, kind: 'image', size: '3840x2160', count: 2,
-    })).toBe(0.16);
+    })).toBeNull();
     for (const model of ['gpt-image-2-preview', 'GPT_IMAGE_2', 'gpt.image.2']) {
       expect(estimateGenerationCost({
         provider: { baseUrl: 'https://api.tu-zi.com', billingGroup: 'default' },

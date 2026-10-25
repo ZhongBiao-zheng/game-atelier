@@ -33,6 +33,13 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.116.4', date: '2026-10-25', headline: 'OpenAI-HK 价格自动同步',
+    changes: [
+      { kind: 'feat', text: 'OpenAI-HK 已核实模型的单张费用随官网价格自动同步，Flare 和 Sunburst 采用当前价格。' },
+      { kind: 'fix', text: 'Nano Banana 2 与多张请求暂不显示预计费用，等待计费规则核实。' },
+    ],
+  },
+  {
     version: '5.116.3', date: '2026-10-25', headline: '图层拆分记录费用',
     changes: [{ kind: 'fix', text: 'TokenDance 图层拆分完成后按实际层数记录费用，用量页不再漏算。' }],
   },

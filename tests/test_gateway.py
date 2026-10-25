@@ -11,6 +11,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from character_workflow.lib import callers, gateway_keys, gateway_tasks, keys, model_routes
+from character_workflow.lib import openai_hk_prices
+from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.callers.openai_image import OpenAIImageError
 from viewer_server.gateway_app import create_gateway_app
 
@@ -35,6 +37,9 @@ def _png(path: Path) -> None:
 
 
 def _seed_keys() -> None:
+    atomic_write_json(openai_hk_prices.snapshot_path(), {"models": {
+        "gpt-image-2": {"quota_type": 1, "model_price": 0.08, "enable_groups": ["default"]},
+    }})
     for alias, provider in (("A", "openai"), ("B", "openai"), ("Hub", "atelier")):
         keys.add_key(keys.KeySpec(
             alias=alias, provider=provider, access_key="test-only", modalities=["image"],
@@ -124,8 +129,9 @@ def test_same_idempotency_key_returns_the_same_task(client):
 
 
 def test_money_limit_returns_429(client):
-    assert _submit(client, key="a", n=2).status_code == 202
-    response = _submit(client, key="b", n=2)
+    gateway_keys.update_key(client.record.id, limits=[{"period": "day", "cap_cny": 0.12}])
+    assert _submit(client, key="a", n=1).status_code == 202
+    response = _submit(client, key="b", n=1)
     assert response.status_code == 429 and "中转额度已用完：今日" in response.json()["detail"]
     assert int(response.headers["retry-after"]) > 0
 

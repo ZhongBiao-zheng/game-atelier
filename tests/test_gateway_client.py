@@ -14,6 +14,8 @@ from pathlib import Path
 import pytest
 
 from character_workflow.lib import gateway_keys, job_runner, keys, model_routes
+from character_workflow.lib import openai_hk_prices
+from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.callers import atelier_gateway, openai_image
 from character_workflow.lib.callers.openai_image import OpenAIImageError
 from character_workflow.lib.jobs import read_job, save_job
@@ -69,6 +71,9 @@ def _add(alias: str, provider: str, model: keys.ModelSpec, **extra) -> None:
 
 @pytest.fixture
 def gateway(isolated_data_root, upstream):
+    atomic_write_json(openai_hk_prices.snapshot_path(), {"models": {
+        "gpt-image-2": {"quota_type": 1, "model_price": 0.08, "enable_groups": ["default"]},
+    }})
     _add("Local", "openai", keys.ModelSpec(id="gpt-image-2", name="gpt-image-2", modality="image"))
     _record, token = gateway_keys.create_key("小王", None)
     port = _free_port()
