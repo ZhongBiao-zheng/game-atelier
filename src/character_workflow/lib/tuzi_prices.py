@@ -39,6 +39,7 @@ def load_snapshot() -> dict[str, Any]:
 
 def _configured_models() -> dict[str, set[str]]:
     from character_workflow.lib import keys
+    from character_workflow.lib.callers.openai_image import tuzi_outbound_image_model
 
     configured: dict[str, set[str]] = {}
     for key in keys.read_keys_db().keys:
@@ -51,7 +52,11 @@ def _configured_models() -> dict[str, set[str]]:
             continue
         group = (key.billing_group or "").strip()
         if group:
-            configured.setdefault(group, set()).update(model.id for model in key.models)
+            ids = configured.setdefault(group, set())
+            for model in key.models:
+                ids.add(model.id)
+                if keys.model_modality(model, key) == "image":
+                    ids.add(tuzi_outbound_image_model(model.id))
     return configured
 
 
