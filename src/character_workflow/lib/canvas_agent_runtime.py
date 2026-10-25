@@ -27,7 +27,7 @@ from character_workflow.lib import keys, canvas_specs
 from character_workflow.lib.canvas_agent_models import chat_base_url
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasChange, CanvasListModelsInput, CanvasProjectInput,
-    CanvasReadMediaInput, GetRunInput, RunInput,
+    CanvasReadMediaInput, CanvasSearchLibraryInput, GetRunInput, RunInput,
 )
 from character_workflow.lib.canvas_agent_sessions import (
     mutate_canvas_agent_session, read_canvas_agent_session, with_appended_messages,
@@ -50,7 +50,7 @@ MEDIA_SCHEME = "atelier-media://"
 LOCAL = SimpleNamespace(kind="local", session_id="canvas-chat", grant_id=None)
 
 READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "read_media", "load_skill",
-                        "read_skill_file", "wait_for_run", "read_spec"})
+                        "read_skill_file", "wait_for_run", "read_spec", "search_library"})
 
 INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术和策划在无限画布上出图、出视频。
 
@@ -75,7 +75,14 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
 - list_models 返回空列表时不要建生成节点，告诉用户在输入框的「模型偏好」里选择模型。
 - 生成是付费的。不要自动重试失败的生成；失败时告诉用户原因，由用户决定。
 - 用户拒绝某个操作时，不要换个方式再做同一件事，先问用户想怎么改。
-- 出图前按需求判断类别并 read_spec 读取类别规范。
+- 用户提出出图需求时：判断类别 → read_spec(类别) → search_library(类别)，按需再搜相关类别
+  （例如弹窗需要按钮和底图）。优先挑 3–5 张同类、0–2 张相关类，总数不超过 list_models
+  中该模型的 reference_limits.image。库为空或无匹配类别时直说，按项目和类别规范继续。
+- 选好参考后，在回复里列出每张参考的标题、类别与一句选择理由。一次 apply_changes 完成：
+  add_asset_node 各参考 → add_surface → set_draft → connect 每个参考到生成节点。
+  每个参考必须成为可见节点和 input 连线，不得隐藏输入。add_asset_node 返回 asset_nodes 与
+  node_aliases；已有同一资产时复用原节点及其冻结版本，同批连线会自动改用真实节点 ID。
+  不要为已有参考创建重复节点；只有用户明确要求生成时才 run_generation。
 - 用户纠正了规律性问题时，用 append_lesson 记下经验，等用户采纳。
 - 回复用中文，简短直接。"""
 
@@ -203,6 +210,11 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
     """Run one tool call; returns (result, node ids it created). Raises WorkshopError.
 
     created_ids: 本会话已建的节点，新节点排位时用来找「上一次出图」。"""
+    if tool == "search_library":
+        from character_workflow.lib.canvas_agent_library import search_library
+        payload = CanvasSearchLibraryInput(project_id=project_id, **arguments)
+        tools.authorize(LOCAL, project_id, "canvas_read")
+        return search_library(project_id, payload.category, payload.limit), []
     if tool == "read_spec":
         return {"text": canvas_specs.read_spec(project_id, arguments["category"])}, []
     if tool == "append_lesson":
@@ -282,6 +294,10 @@ def tool_error_label(text: str) -> str:
 # ── 工具定义（给模型看的 schema）─────────────────────────────────────────────────
 
 TOOL_SPECS: dict[str, tuple[str, dict]] = {
+    "search_library": ("搜索本项目已定稿参考图，返回资产 ID、标题、类别和尺寸，并附缩略图。",
+                       {"type": "object", "properties": {
+                           "category": {"type": "string"},
+                           "limit": {"type": "integer", "minimum": 1, "maximum": 12}}}),
     "read_spec": ("读取类别规范全文，不存在返回空文本。",
                   {"type": "object", "required": ["category"],
                    "properties": {"category": {"type": "string"}}}),
@@ -294,7 +310,7 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
                     {"type": "object", "properties": {
                         "mode": {"type": "string", "enum": ["image", "video"]}}}),
     "apply_changes": (
-        "在当前画布上批量改动：add_text / add_media_node / add_surface / set_text / set_draft / "
+        "在当前画布上批量改动：add_text / add_media_node / add_asset_node / add_surface / set_text / set_draft / "
         "connect / disconnect / move / remove_node。整批原子提交。", {}),
     "run_generation": ("在已写好生成配置的图片 / 视频节点上发起生成（付费）。",
                        {"type": "object", "required": ["surface_node_id"], "properties": {
@@ -414,6 +430,12 @@ def build_tools() -> list:
 # ── 历史 ↔ 模型输入 ──────────────────────────────────────────────────────────────
 
 def _media_data_url(project_id: str, version_id: str) -> str | None:
+    from character_workflow.lib.canvas_agent_library import ASSET_IMAGE_PREFIX, preview
+    if version_id.startswith(ASSET_IMAGE_PREFIX):
+        try:
+            return preview(project_id, version_id.removeprefix(ASSET_IMAGE_PREFIX))[0]
+        except (KeyError, OSError, ValueError):
+            return None
     try:
         media = tools.read_media(LOCAL, CanvasReadMediaInput(project_id=project_id,
                                                              version_id=version_id))
@@ -505,7 +527,8 @@ def _arguments(raw: str | None) -> dict:
 
 
 READ_LABELS = {"get_canvas": "读取画布", "list_models": "查看可用模型", "get_run": "查询生成进度",
-               "read_media": "读取媒体信息", "wait_for_run": "等待生成结果"}
+               "read_media": "读取媒体信息", "wait_for_run": "等待生成结果",
+               "search_library": "查找项目参考", "read_spec": "读取类别规范"}
 
 
 def summarize_call(tool: str, arguments: dict) -> str:

@@ -187,6 +187,7 @@ def test_versioned_assets_are_backed_up_and_migrated_once(isolated_data_root):
     assert migrated_canvas["content_versions"]["version-one"]["origin"] == {
         "kind": "creation_asset_snapshot",
         "title": "旧提示词",
+        "asset_id": None,
     }
     migrated_params = migrated_canvas["nodes"][0]["data"]["generation_draft"]["params"]
     assert migrated_params["creation_asset_source_title"] == "旧提示词"

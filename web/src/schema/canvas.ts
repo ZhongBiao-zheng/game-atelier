@@ -345,7 +345,7 @@ export type CanvasContentOrigin =
         | { kind: 'remove_background'; model: string };
     }
   | { kind: 'import'; package_id: string }
-  | { kind: 'creation_asset_snapshot'; title: string };
+  | { kind: 'creation_asset_snapshot'; title: string; asset_id?: string | null };
 
 interface CanvasContentVersionBase {
   version_id: string;

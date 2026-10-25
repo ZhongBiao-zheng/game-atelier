@@ -938,7 +938,7 @@ def insert_creation_asset_into_canvas(
     variable_values: dict[str, str] | None = None,
     target_node_id: str | None = None,
 ):
-    """Copy the current asset content into Canvas with a frozen title-only provenance snapshot."""
+    """Copy current content into Canvas, retaining read-only asset identity and frozen content."""
     from character_workflow.lib.canvas_library import _content_node
     from character_workflow.lib.canvas_projects import (
         _commit_canvas_upload,
@@ -981,6 +981,7 @@ def insert_creation_asset_into_canvas(
         origin = CanvasCreationAssetSnapshotOrigin(
             kind="creation_asset_snapshot",
             title=asset.title,
+            asset_id=asset.asset_id,
         )
         write_target: Path | None = None
         if content.kind == "prompt":

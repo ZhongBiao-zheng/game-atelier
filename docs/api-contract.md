@@ -1162,3 +1162,10 @@ failed 只计 actual。team 以账本 charged_cny 为准。时间按本机时区
 - `GET .../lessons` → `{pending:string[], adopted:string[]}`；`POST .../lessons/{index}/adopt` 与 `DELETE .../lessons/{index}` 操作待审索引，返回更新后的列表。采纳追加至项目规范的 `## 项目经验`。
 - Agent `read_spec(category)` 返回类别全文；`append_lesson(text)` 记录 1–300 字待审经验，审查模式需确认。每轮 instructions 追加项目规范，超过 8000 字截断并标注。
 - 编辑器中文输入法组合期间不启保存计时；切页/关闭前完成保存，失败保留抽屉及本机草稿，意外卸载可恢复。
+
+## Agent 项目参考（5.111.0）
+
+- `CanvasCreationAssetSnapshotOrigin.asset_id?: string | null`：只读来源身份。新转入保留 ID，旧快照无 ID；内容仍冻结，资产更新/删除不改画布内容。项目包保留出处。
+- 内置 Agent `search_library(category?, limit=12)`：limit 1–12，只读本项目已定稿图片资产，返回 `{assets:[{asset_id,title,category,width,height}], attach_images:[...]}`。不存在类别或空库返回空数组；缩略图在发模型时附加，不写对话历史。
+- `apply_changes` 新增 `add_asset_node {asset_id,node_id,position?}`。只接受本项目参考库媒体/生成资产；以当前节点版本的只读 asset_id 去重，复用冻结内容。结果增加 `asset_nodes`（资产 ID → 真实节点 ID）与 `node_aliases`（请求 ID → 复用节点 ID），同批后续操作自动解析别名。
+- 资产字节、版本、节点及同批连线整批验证后提交；失败不留下半成品。参考节点位于生成节点左侧一列；参考必须通过可见 input 连线参与生成。

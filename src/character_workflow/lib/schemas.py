@@ -1119,6 +1119,7 @@ class CanvasCreationAssetSnapshotOrigin(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["creation_asset_snapshot"]
     title: str = Field(min_length=1, max_length=120)
+    asset_id: str | None = Field(default=None, min_length=1, max_length=160)
 
 
 class CanvasNormalizedRect(BaseModel):

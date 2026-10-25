@@ -326,6 +326,9 @@ def _save(project_id: str, updated: CanvasDocument, expected_revision: int) -> C
 
 def apply_changes(principal: Any, payload: ApplyChangesInput) -> dict:
     authorize(principal, payload.project_id, "canvas_edit")
+    if any(change.op == "add_asset_node" for change in payload.changes):
+        from character_workflow.lib.canvas_agent_library import apply_asset_changes
+        return apply_asset_changes(payload)
     document = read_canvas_document(payload.project_id)
     if document.revision != payload.expected_revision:
         raise WorkshopError("DOCUMENT_CONFLICT", "画布已变化，请重新读取后再改")
