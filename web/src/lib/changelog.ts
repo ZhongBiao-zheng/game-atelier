@@ -33,6 +33,10 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.114.2', date: '2026-10-25', headline: '画布生成记录预计费用',
+    changes: [{ kind: 'fix', text: '画布、Agent 与自动路由的生成按实际渠道记录预计费用，用量页不再显示为未计价。' }],
+  },
+  {
     version: '5.114.1', date: '2026-10-25', headline: '用量页修正',
     changes: [{ kind: 'fix', text: '当天只有未计价任务时，用量页不再加载失败。' }],
   },

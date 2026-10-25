@@ -86,6 +86,8 @@ def _switch_route(job_id: str, error: BaseException) -> bool:
     while (candidate := model_routes.next_member(modality, params.route_id, tried)) is not None:
         key, model = candidate
         next_params = params.model_dump(exclude_none=True)
+        # 预计费用按新渠道重算（「自动」任务的预计由 runner 补，不是提交方冻结的）。
+        next_params.pop("estimated_cost_cny", None)
         if evo_state.get("terminal") == "rejected":
             # Only a definite refusal can discard the previous channel's submission state.
             next_params.pop("evolink_state", None)
@@ -382,6 +384,32 @@ def _params(job: Job) -> dict[str, Any]:
     return job.params.model_dump()
 
 
+def _freeze_estimated_cost(job: Job, params: dict[str, Any]) -> None:
+    """提交方没冻结预计费用的任务（画布、Agent、自动路由）按实际渠道补一份，用量页才不会算成未计价。"""
+    if params.get("estimated_cost_cny") is not None or params.get("actual_cost_cny") is not None:
+        return
+    from character_workflow.lib.generation_pricing import estimate_cost_cny
+    from character_workflow.lib.keys import find_by_alias
+
+    key = find_by_alias(job.alias or "")
+    if key is None:
+        return
+    model = next((m for m in key.models if m.id == job.model), None)
+    estimate = estimate_cost_cny(
+        kind=job.kind.value, provider=key.provider, base_url=key.base_url,
+        billing_group=key.billing_group, model_id=job.model,
+        protocol=model.protocol if model else None, n=params.get("n") or 1,
+        size=params.get("size"), size_mode=params.get("size_mode"), quality=params.get("quality"),
+        resolution=params.get("resolution"), duration=params.get("duration"),
+        ratio=params.get("ratio"), generate_audio=bool(params.get("generate_audio")),
+        has_reference_video=bool(params.get("reference_videos")),
+        image_edit=bool(params.get("image_edit")),
+    )
+    if estimate is not None:
+        params["estimated_cost_cny"] = estimate
+        update_job_params(job.job_id, params)
+
+
 def _save_params(job: Job, params: dict[str, Any]) -> Job:
     return update_job_params(job.job_id, params)
 
@@ -571,6 +599,7 @@ def _run_once(
 
     job = _normalize_reference_images(job)
     params = _params(job)
+    _freeze_estimated_cost(job, params)
 
     try:
         if not job.alias:
@@ -801,6 +830,7 @@ def _run_video_job(job: Job) -> Job:
     """
     job = _normalize_reference_images(job)
     params = _params(job)
+    _freeze_estimated_cost(job, params)
     should_cancel = _cancel_checker(job)
 
     def on_task_id(task_id: str) -> None:
