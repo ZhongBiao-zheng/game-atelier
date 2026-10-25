@@ -9,8 +9,6 @@ import {
   GENERATION_USD_TO_CNY,
   HAPPYHORSE_1_0_YUAN_PER_SECOND,
   HAPPYHORSE_1_1_YUAN_PER_SECOND,
-  OPENAI_HK_FIXED_YUAN_PER_IMAGE,
-  OPENAI_HK_NANO_BANANA_2_YUAN,
 } from '@/lib/generationPrices';
 import { parsePixelSize } from '@/lib/studioSize';
 
@@ -124,16 +122,6 @@ function priced(amount: number): number {
 function protocolMatches(protocol: string | null | undefined, expected: string): boolean {
   const actual = normalize(protocol);
   return !actual || actual === expected;
-}
-
-function estimateOpenAiHkImage(request: GenerationCostRequest): number | null {
-  const model = normalize(request.model?.id);
-  const unitPrice = model === 'nano-banana-2'
-    ? (request.quality && ['low', 'medium', 'high', 'auto'].includes(request.quality)
-      ? OPENAI_HK_NANO_BANANA_2_YUAN[request.quality as Quality] : undefined)
-    : OPENAI_HK_FIXED_YUAN_PER_IMAGE[model];
-  if (unitPrice == null) return null;
-  return priced(unitPrice * safeCount(request.count));
 }
 
 /** TokenDance 价格快照（服务启动时从其公开接口同步，`GET /api/pricing/tokendance`）。
@@ -281,9 +269,8 @@ export function estimateGenerationCost(request: GenerationCostRequest): number |
   if (
     request.kind === 'image'
     && isOpenAiHk(request.provider.baseUrl)
-    && protocolMatches(request.model.protocol, 'openai')
   ) {
-    return estimateOpenAiHkImage(request);
+    return null; // OpenAI-HK prices are evaluated from the server snapshot.
   }
   if (request.kind === 'image' && normalize(request.provider.provider) === 'tokendance') {
     return estimateTokenDanceImage(request);

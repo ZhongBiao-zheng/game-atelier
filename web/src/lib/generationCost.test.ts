@@ -79,12 +79,12 @@ describe('estimateGenerationCost', () => {
   });
 
   it.each(['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare'])(
-    'prices OpenAI-HK %s at the confirmed per-image rate for every quality', (id) => {
+    'leaves OpenAI-HK %s on the server for every quality', (id) => {
       for (const quality of ['low', 'medium', 'high', 'auto', undefined] as const) {
         expect(estimateGenerationCost({
           provider: { provider: 'custom', baseUrl: 'https://api.openai-hk.com' },
           model: { id }, kind: 'image', count: 3, quality,
-        })).toBe(0.72);
+        })).toBeNull();
       }
       expect(estimateGenerationCost({
         provider: { provider: 'custom', baseUrl: 'https://api.example.com' },
@@ -100,11 +100,11 @@ describe('estimateGenerationCost', () => {
         access_key: 'masked', secret_key: null, capabilities: ['portrait'], notes: '',
         created_at: '2026-09-09T00:00:00Z',
         models: [{ id, name: id, modality: 'image' }],
-      }, id, 'image', params)).toBe(0.48);
+      }, id, 'image', params)).toBeNull();
       expect(params).toEqual({ n: 2, quality: 'low' });
     },
   );
-  it('calculates fixed OpenAI-HK GPT Image 2 pricing regardless of quality', () => {
+  it('leaves OpenAI-HK GPT Image 2 pricing to the server', () => {
     const result = estimateGenerationCost({
       provider: { provider: 'custom', baseUrl: 'https://api.openai-hk.com' },
       model: { id: 'gpt-image-2' },
@@ -113,19 +113,19 @@ describe('estimateGenerationCost', () => {
       quality: 'low',
     });
 
-    expect(result).toBe(0.24);
-    expect(formatGenerationCost(result!)).toBe('¥ 0.24');
+    expect(result).toBeNull();
+    expect(formatGenerationCost(0.24)).toBe('¥ 0.24');
   });
 
   it.each([
     ['low', 0.48],
     ['medium', 0.72],
     ['high', 1],
-  ] as const)('maps OpenAI-HK Nano Banana 2 %s to the verified tier', (quality, price) => {
+  ] as const)('leaves OpenAI-HK Nano Banana 2 %s unpriced', (quality, _price) => {
     expect(estimateGenerationCost({
       provider: { provider: 'custom', baseUrl: 'https://api.openai-hk.com' },
       model: { id: 'nano-banana-2' }, kind: 'image', count: 1, quality,
-    })).toBe(price);
+    })).toBeNull();
   });
 
   it.each([

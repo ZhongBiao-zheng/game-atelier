@@ -1,16 +1,4 @@
 {
-  "OPENAI_HK_FIXED_YUAN_PER_IMAGE": {
-    "gpt-image-2": 0.08,
-    "gpt-image-2-5-sunburst": 0.24,
-    "gpt-image-2-5-flare": 0.24,
-    "nano-banana": 0.2,
-    "nano-banana-hd": 0.32
-  },
-  "OPENAI_HK_NANO_BANANA_2_YUAN": {
-    "low": 0.48,
-    "medium": 0.72,
-    "high": 1
-  },
   "EVOLINK_MIDJOURNEY_USD_PER_REQUEST": {
     "generation": 0.08,
     "imageEdit": 0.12
