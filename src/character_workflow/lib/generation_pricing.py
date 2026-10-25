@@ -192,8 +192,10 @@ def estimate_cost_cny(
                             size=size, quality=quality, reference_image_count=reference_image_count,
                             layer_decomposition=layer_decomposition)
         if _domain(host, "openai-hk.com") and proto in ("", "openai"):
-            rate = p["OPENAI_HK_NANO_BANANA_2_YUAN"].get(quality) if model == "nano-banana-2" else (
-                p["OPENAI_HK_FIXED_YUAN_PER_IMAGE"].get(model)
+            from character_workflow.lib.openai_hk_prices import estimate
+
+            return None if layer_decomposition else estimate(
+                model_id=model_id, n=count, billing_group=billing_group,
             )
         elif _normalize(provider) == "tokendance":
             return _tokendance(kind=kind, model_id=model_id, n=count, size=size, duration=duration,

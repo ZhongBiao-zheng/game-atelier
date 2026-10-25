@@ -98,3 +98,22 @@ def start_background_sync() -> None:
             time.sleep(SYNC_INTERVAL_SECONDS)
 
     threading.Thread(target=loop, name="openai-hk-price-sync", daemon=True).start()
+
+
+def estimate(*, model_id: str, n: int, billing_group: str | None) -> float | None:
+    # Verified against existing bills; no inferred aliases, quality tiers or multi-image fees.
+    if n != 1 or model_id not in {
+        "gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
+        "nano-banana", "nano-banana-hd",
+    } or (billing_group or "default").strip() != "default":
+        return None
+    row = load_snapshot().get("models", {}).get(model_id)
+    if not isinstance(row, dict) or row.get("quota_type") != 1:
+        return None
+    if "default" not in (row.get("enable_groups") or []):
+        return None
+    amount = row.get("model_price")
+    if (isinstance(amount, bool) or not isinstance(amount, (int, float))
+            or not math.isfinite(amount) or amount <= 0):
+        return None
+    return math.floor(amount * 1_000_000 + 0.5) / 1_000_000
