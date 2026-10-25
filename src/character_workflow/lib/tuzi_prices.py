@@ -97,6 +97,10 @@ def sync() -> dict[str, Any]:
                     for field in ("quota_type", "model_price", "enable_groups")
                 }
         expressions = {}
+        from character_workflow.lib.tuzi_billing_expr import (
+            UnsupportedBillingExpr, compile_expression,
+        )
+
         for group, ids in configured.items():
             group_prices = groups.get(group, {})
             if not isinstance(group_prices, dict):
@@ -108,6 +112,11 @@ def sync() -> dict[str, Any]:
                 model_id: expression for model_id, expression in billing.items()
                 if model_id in ids
             }
+            for model_id, expression in expressions[group].items():
+                try:
+                    compile_expression(expression)
+                except UnsupportedBillingExpr as error:
+                    _log.warning("Tuzi 模型暂未计价：%s/%s：%s", group, model_id, error)
         snapshot = {
             "synced_at": datetime.now(timezone.utc).isoformat(),
             "usd_exchange_rate": rate,
