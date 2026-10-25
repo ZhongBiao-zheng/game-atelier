@@ -90,7 +90,7 @@ def test_read_returns_full_job(runtime):
     assert job.status == JobStatus.PENDING_CONFIRM
 
 
-def test_write_job_fills_alias_from_preferred_when_missing(runtime):
+def test_write_job_does_not_infer_alias_from_retired_character_slot(runtime):
     from character_workflow.lib import keys
     keys.add_key(keys.KeySpec(
         alias="lov", provider="seedream", access_key="ak", secret_key="sk",
@@ -101,8 +101,8 @@ def test_write_job_fills_alias_from_preferred_when_missing(runtime):
         job_id="job-alias-auto", character_id="c1", prompt="p",
         model="m", params={},
     )
-    assert job.alias == "lov"
-    assert job.provider == "seedream"
+    assert job.alias is None
+    assert job.provider is None
 
 
 def test_write_job_alias_null_when_no_key_matches(runtime):

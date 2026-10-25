@@ -6,7 +6,6 @@
 ## Memory
 
 - 排查厂商调用、出图失败、Windows 首启、安装与更新这类已知问题时，先查仓库根 `MEMORY.md`（本工作区跨项目经验）和全局 MEMORY（Claude Code `~/.claude/MEMORY.md`，Codex `~/.codex/MEMORY.md`）。
-- 角色和项目的经验由 Skill 的 turn-start 按出图类型注入（工作区与 `projects/<slug>/MEMORY.md` 的对应小节），走 /game-atelier:* Skill 时不必手动解析 `projects.json`。
 
 ---
 
@@ -22,7 +21,7 @@ This file provides guidance to Claude Code (claude.ai/code) and Codex when worki
 
 - **viewer-server** (`src/viewer_server/`)：FastAPI，绑死 `127.0.0.1:5174`（被占用自动 +1）。文件读写 + SSE 推送。
 - **web** (`web/`)：Vite + React，dev 在 `5173`，build 落在 `web/dist/`，由 viewer-server 直接挂载。
-- **Skill 套件** (`skills/{character,promo,turnaround,ui*,video,canvas,viewer-server}/SKILL.md` + `src/character_workflow/` Python lib)：在 CC 里被 `/game-atelier:character <名>` 等触发，读 `<data_root>/.runtime/draft/`、调 Lovart / OpenAI / ... 出图。
+- **Skill**：仅保留 `canvas`、`viewer-server`。项目操作走 Canvas MCP；生成通过共用 Job Runner。
 
 ## Dev mode
 
@@ -49,16 +48,9 @@ export GAME_ATELIER_DATA_ROOT=/tmp/test-data-root
 
 | 文件 | 谁写 | 谁读 |
 |---|---|---|
-| `characters/<id>/spec.md` | Skill（对话归档）/ Web（保存 spec） | Skill / Web |
-| `characters/<id>/{portrait,promo,turnaround,source}/` | Skill 写出图 / 画师上传源图 | Skill / Web |
-| `.runtime/jobs/<job_id>.json` | Skill（jobs.py） | Skill / Web |
-| `.runtime/draft/*.md` | Web（画师反馈） | Skill（draft_processor 消费后挪到 `draft-processed/`）|
-| `.runtime/active-character.json` | 双向 | 双向 |
-| `.runtime/projects.json` | Web (`POST /api/projects`) | Skill / Web |
+| `.runtime/jobs/<job_id>.json` | Job Runner / Web 提交 | Canvas / Studio |
+| `canvases/<project_id>/` | Web / Canvas MCP | 项目画布、规范与经验 |
 | `.runtime/gallery-hidden.json` | Web (`POST /api/gallery/hidden`) | viewer-server（`/api/gallery/recent` 过滤首页作品展示） |
-| `projects/<slug>/design/`、根 `style.md` | UI Skill / 角色 Skill | 项目共享策划锚与视觉基线 |
-| `projects/<slug>/ui/<scheme>/{style.md,screens/}` | UI Skill / Web 定稿 | UI Skill / Web 工坊 UI 方案 |
-| `projects/<slug>/videos/<production>/` | Video Skill / job_runner / Web 选版 | Video Skill / Web 工坊视频工作区 |
 | `.runtime/server.{pid,port,log}` | viewer-server CLI（log 为后台服务本次运行的 stdout/stderr，含 500 traceback） | viewer-server CLI / 排障 |
 | `.config/keys.json` | Skill / Web (`POST /api/keys`) | Skill 通过 `lib/keys.py` 读 |
 | `.config/venv-hash` | `bootstrap.py --ensure-venv` | `bootstrap.py --check` |
@@ -76,11 +68,11 @@ PY
 
 业务 API 现在要求本地会话 cookie，`curl` 匿名访问返回 401；用上面的 `list_jobs()` 全量校验即可，Web 端刷新页面看 job 列表是否正常。
 
-特别注意：`params.warnings` 是数组，不是字符串；`status` / `kind` / `asset_slot` 等字段必须使用 schema 允许的枚举值。不要让一条人工补档记录拖垮整个前端。
+特别注意：`params.warnings` 是数组，不是字符串；`status` / `kind` / `namespace` 等字段必须使用 schema 允许的枚举值。不要让一条人工补档记录拖垮整个前端。
 
 **Schema 双端同步**：`src/character_workflow/lib/schemas.py`（Pydantic）↔ `web/src/schema/jobs.ts`（TS）。改一边必须同步另一边。`docs/api-contract.md` 是契约源。
 
-**出图前必须确认**：Skill 先 `jobs.write_job(...)` 写 `PENDING_CONFIRM` 状态 + 把出图卡片打到终端 → 画师明确说"出图"或 Web 点确认 → 才推进到 `PENDING` 调 Lovart（同步阻塞期间停留在 `PENDING`，无独立 `RUNNING` 状态）。
+**出图前必须确认**：Web 显式提交或用户授权 Agent 后才创建并运行计费任务。工坊生成请求和旧 Skill 已退役，不能恢复；见 ADR-0027。
 
 **Job 落盘并发安全**：`jobs.py` 所有「读→改→写」走 `job_lock`（per-job sidecar 文件锁，Skill / viewer-server 双进程互斥）+ `atomic_io`（唯一 tmp + `os.replace`，Windows 上对 access denied 重试）。模块外直接改 job 文件必须显式持锁。
 

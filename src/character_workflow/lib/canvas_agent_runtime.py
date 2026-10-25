@@ -37,7 +37,7 @@ from character_workflow.lib.schemas import (
     CanvasAgentApproval, CanvasAgentMessageCreate, CanvasAgentReference, CanvasAgentSession,
     redact_canvas_agent_private_text as redact,
 )
-from character_workflow.lib.workshop import WorkshopError
+from character_workflow.lib.canvas_tool_common import CanvasToolError
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ class ModelScope:
         """该类型可用的生成模型。"""
         if kind not in self.kinds():
             return []
-        from character_workflow.lib.workshop_generation import model_rows
+        from character_workflow.lib.canvas_model_catalog import model_rows
         rows = model_rows(kind)
         if self.preferred is None:
             return rows
@@ -160,7 +160,7 @@ def _with_fresh_revision(project_id: str, call: Callable[[int], dict]) -> dict:
     """确认可能等了很久，画布早已被用户改过：执行时取当前修订号，撞车再读一次。"""
     try:
         return call(_current_revision(project_id))
-    except WorkshopError as error:
+    except CanvasToolError as error:
         if error.code != "DOCUMENT_CONFLICT":
             raise
         return call(_current_revision(project_id))
@@ -175,17 +175,17 @@ def _check_generation_allowed(project_id: str, node_id: str, scope: ModelScope) 
     if draft is None or draft.mode not in ("image", "video"):
         return
     if draft.mode not in scope.kinds():
-        raise WorkshopError("INVALID_PARAMETERS",
+        raise CanvasToolError("INVALID_PARAMETERS",
                             f"当前创作模式不能生成{'视频' if draft.mode == 'video' else '图片'}", 422)
     allowed = {(row["alias"], row["model"]) for row in scope.models(draft.mode)}
     if not allowed:
-        raise WorkshopError("INVALID_PARAMETERS", "模型偏好里没有可用的"
+        raise CanvasToolError("INVALID_PARAMETERS", "模型偏好里没有可用的"
                             f"{'视频' if draft.mode == 'video' else '图片'}模型，请用户先在模型偏好里选择", 422)
     if (draft.alias, draft.model) not in allowed:
         if draft.alias is None:
-            raise WorkshopError("INVALID_PARAMETERS", "set_draft 缺少 alias：alias 与 model 是两个"
+            raise CanvasToolError("INVALID_PARAMETERS", "set_draft 缺少 alias：alias 与 model 是两个"
                                 "字段，都要填 list_models 返回的值", 422)
-        raise WorkshopError("INVALID_PARAMETERS",
+        raise CanvasToolError("INVALID_PARAMETERS",
                             f"模型 {draft.alias}/{draft.model} 不在可用范围内，请从 list_models 里选", 422)
 
 
@@ -207,7 +207,7 @@ def _with_draft_aliases(changes: list, scope: ModelScope) -> list:
 
 def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope = ALL_MODELS,
                  created_ids: frozenset[str] = frozenset()) -> tuple[dict, list[str]]:
-    """Run one tool call; returns (result, node ids it created). Raises WorkshopError.
+    """Run one tool call; returns (result, node ids it created). Raises CanvasToolError.
 
     created_ids: 本会话已建的节点，新节点排位时用来找「上一次出图」。"""
     if tool == "search_library":
@@ -262,7 +262,7 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
             return result
         result = _with_fresh_revision(project_id, submit)
         return result, [result["result_node_id"]] if result.get("result_node_id") else []
-    raise WorkshopError("INVALID_TARGET", f"未知工具 {tool}", 422)
+    raise CanvasToolError("INVALID_TARGET", f"未知工具 {tool}", 422)
 
 
 def run_tool_safely(project_id: str, tool: str, arguments: dict, scope: ModelScope = ALL_MODELS,
@@ -270,7 +270,7 @@ def run_tool_safely(project_id: str, tool: str, arguments: dict, scope: ModelSco
     """Tool output text for the model; errors become text the model can react to."""
     try:
         result, created = execute_tool(project_id, tool, arguments, scope, created_ids)
-    except WorkshopError as error:
+    except CanvasToolError as error:
         return f"错误（{error.code}）：{error.message}", []
     except (KeyError, TypeError, ValueError) as error:
         return f"参数错误：{error}", []
@@ -391,7 +391,7 @@ async def _wait_for_run(project_id: str, run_id: str) -> str:
             lambda: tools.get_run(LOCAL, GetRunInput(project_id=project_id, run_id=run_id)),
             lambda version_id: _is_image_version(project_id, version_id),
         )
-    except WorkshopError as error:
+    except CanvasToolError as error:
         return f"错误（{error.code}）：{error.message}"
     return json.dumps(result, ensure_ascii=False)
 
@@ -439,7 +439,7 @@ def _media_data_url(project_id: str, version_id: str) -> str | None:
     try:
         media = tools.read_media(LOCAL, CanvasReadMediaInput(project_id=project_id,
                                                              version_id=version_id))
-    except WorkshopError:
+    except CanvasToolError:
         return None
     preview = media.get("preview")
     return f"data:{preview['mime_type']};base64,{preview['data_base64']}" if preview else None
@@ -604,7 +604,7 @@ def build_agent(session: CanvasAgentSession):
     set_tracing_disabled(True)  # 否则 SDK 会把对话轨迹上传到 OpenAI
     key = keys.find_by_alias(session.model_alias or "")
     if key is None or not session.model:
-        raise WorkshopError("INVALID_PARAMETERS", "请先选择对话模型", 422)
+        raise CanvasToolError("INVALID_PARAMETERS", "请先选择对话模型", 422)
     # 局域网网关直连，不读本机代理环境（与图片 caller 一致）。
     http_client = DefaultAsyncHttpxClient(trust_env=False) if key.provider == "atelier" else None
     client = AsyncOpenAI(base_url=chat_base_url(key), api_key=key.access_key, max_retries=2,
@@ -624,7 +624,7 @@ def build_agent(session: CanvasAgentSession):
 def friendly_error(error: BaseException) -> str:
     from agents.exceptions import MaxTurnsExceeded
     from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError
-    if isinstance(error, WorkshopError):
+    if isinstance(error, CanvasToolError):
         return error.message
     if isinstance(error, MaxTurnsExceeded):
         return "这一轮步骤太多，已停下；可以让它继续"
@@ -791,9 +791,9 @@ def begin_user_turn(project_id: str, session_id: str, text: str, node_ids: list[
 
     def update(current: CanvasAgentSession, now: str) -> dict:
         if current.status in {"running", "awaiting_approval"}:
-            raise WorkshopError("SESSION_BUSY", "上一轮还没结束", 409)
+            raise CanvasToolError("SESSION_BUSY", "上一轮还没结束", 409)
         if not current.model or not current.model_alias:
-            raise WorkshopError("INVALID_PARAMETERS", "请先选择对话模型", 422)
+            raise CanvasToolError("INVALID_PARAMETERS", "请先选择对话模型", 422)
         message = CanvasAgentMessageCreate(
             role="user", text=redact(text), title=skill,
             references=[CanvasAgentReference(**ref) for ref in references],
@@ -812,9 +812,9 @@ def resolve_approvals(project_id: str, session_id: str,
     """Execute approved calls, reject the rest, append their outputs, mark running."""
     session = read_canvas_agent_session(project_id, session_id)
     if session.status != "awaiting_approval":
-        raise WorkshopError("SESSION_BUSY", "没有待确认的操作", 409)
+        raise CanvasToolError("SESSION_BUSY", "没有待确认的操作", 409)
     if set(decisions) != {approval.call_id for approval in session.pending_approvals}:
-        raise WorkshopError("INVALID_PARAMETERS", "请对每个待确认操作都给出决定", 422)
+        raise CanvasToolError("INVALID_PARAMETERS", "请对每个待确认操作都给出决定", 422)
     outputs: list[dict] = []
     results: list[CanvasAgentMessageCreate] = []
     created: set[str] = set()
@@ -835,7 +835,7 @@ def resolve_approvals(project_id: str, session_id: str,
 
     def update(current: CanvasAgentSession, now: str) -> dict:
         if current.status != "awaiting_approval":
-            raise WorkshopError("SESSION_BUSY", "没有待确认的操作", 409)
+            raise CanvasToolError("SESSION_BUSY", "没有待确认的操作", 409)
         return {**with_appended_messages(current, results, now),
                 "history": [*current.history, *outputs], "pending_approvals": [],
                 "status": "running",

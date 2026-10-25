@@ -77,8 +77,8 @@ def main() -> int:
                 failures.append(f"skills dir not found: {skills_path_str}")
             else:
                 found = list(skills_dir.glob("*/SKILL.md"))
-                if not found:
-                    failures.append(f"no SKILL.md found under {skills_path_str}/<name>/")
+                if {path.parent.name for path in found} != {"canvas", "viewer-server"}:
+                    failures.append("skills must contain only canvas and viewer-server")
 
     bootstrap = repo / "scripts" / "bootstrap.py"
     if not bootstrap.exists():

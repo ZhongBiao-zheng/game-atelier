@@ -11,7 +11,7 @@ import requests
 from character_workflow.lib import job_runner, keys, model_routes
 from character_workflow.lib.callers.openai_image import OpenAIImageError
 from character_workflow.lib.jobs import read_job, save_job
-from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus
+from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
 
 
 @pytest.fixture(autouse=True)
@@ -74,7 +74,7 @@ def _job(route_id: str | None) -> Job:
         job_id=f"job-{route_id or 'pinned'}", character_id="A", prompt="x",
         submitted_at="2026-10-15T00:00:00+00:00", model="gpt-image-2",
         params=JobParams(n=1, route_id=route_id), output_paths=[], status=JobStatus.PENDING,
-        error=None, asset_slot=AssetSlot.PORTRAIT, kind=JobKind.IMAGE, namespace="studio",
+        error=None, kind=JobKind.IMAGE, namespace="studio",
         alias="A", provider="openai",
     ))
 

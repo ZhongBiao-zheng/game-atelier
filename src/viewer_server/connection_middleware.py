@@ -10,7 +10,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from viewer_server.connection_auth import COOKIE_NAME, ConnectionError, ConnectionStore
 from viewer_server.connection_capabilities import (
-    CANVAS_TOOLS, WORKSHOP_TOOLS, is_media_route, local_capability,
+    CANVAS_TOOLS, is_media_route, local_capability,
 )
 from viewer_server.request_boundary import _authority, _header
 
@@ -91,26 +91,17 @@ class ConnectionMiddleware:
                 elif cookie:
                     session = self.store.authenticate(cookie, kind="local", origin=origin)
                 else:
-                    raise ConnectionError("CONNECTION_REQUIRED", "请先连接本机工坊", 401)
+                    raise ConnectionError("CONNECTION_REQUIRED", "请先连接本机画布", 401)
                 state["connection_session"] = session
                 state["connection_principal"] = session.principal
-                tool = method == "POST" and (
-                    path.removeprefix("/api/workshop/") in WORKSHOP_TOOLS
-                    or path.removeprefix("/api/canvas-agent/") in CANVAS_TOOLS
-                )
-                approval = method == "POST" and bool(re.fullmatch(
-                    r"/api/workshop/requests/[A-Za-z0-9_-]+/(?:approve|reject)", path,
-                ))
-                requests = method == "GET" and path == "/api/workshop/requests"
+                tool = method == "POST" and path.removeprefix("/api/canvas-agent/") in CANVAS_TOOLS
                 if session.principal.kind == "agent":
                     if not tool:
-                        raise ConnectionError("CAPABILITY_DENIED", "此 Agent 仅可使用授权工坊工具")
+                        raise ConnectionError("CAPABILITY_DENIED", "此 Agent 仅可使用授权画布工具")
                 elif not control:
                     capability = local_capability(method, path)
-                    if tool or approval:
+                    if tool:
                         capability = "edit"
-                    elif requests:
-                        capability = "read"
                     if capability is None:
                         raise ConnectionError("CAPABILITY_DENIED", "此入口未授权")
                     if capability == "edit":
@@ -118,7 +109,7 @@ class ConnectionMiddleware:
             if method not in {"GET", "HEAD", "OPTIONS"} and _private_path(path):
                 content_type = (_header(scope, b"content-type") or "").split(";", 1)[0]
                 if content_type not in {"application/json", "multipart/form-data"} or (
-                    (control or path.startswith(("/api/workshop/", "/api/canvas-agent/")))
+                    (control or path.startswith(("/api/canvas-agent/",)))
                     and content_type != "application/json"
                 ):
                     raise ConnectionError("CONTENT_TYPE_DENIED", "请使用正确的请求格式", 415)
@@ -128,7 +119,7 @@ class ConnectionMiddleware:
                         raise ConnectionError("ORIGIN_DENIED", "本地修改需要页面来源信息")
             body_limit = 16 * 1024 if control else (
                 1024 * 1024
-                if path.startswith(("/api/workshop/", "/api/canvas-agent/")) and method == "POST"
+                if path.startswith(("/api/canvas-agent/",)) and method == "POST"
                 else None
             )
             if body_limit is not None:

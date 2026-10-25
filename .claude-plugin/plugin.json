@@ -1,7 +1,7 @@
 {
   "name": "game-atelier",
-  "version": "5.112.0",
-  "description": "Game Atelier — 游戏项目资产工坊，本地 Web UI + AI 美术 / 游戏 UI / 视频工作流",
+  "version": "5.113.0",
+  "description": "Game Atelier — 本地画布项目、创作台与 AI 资产库",
   "author": {
     "name": "zhengzhongbiao"
   },
@@ -10,7 +10,14 @@
   "mcpServers": {
     "atelier": {
       "command": "${ATELIER_PYTHON:-python3}",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py", "--run", "-m", "character_workflow.mcp", "--client", "claude-code"]
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py",
+        "--run",
+        "-m",
+        "character_workflow.mcp",
+        "--client",
+        "claude-code"
+      ]
     }
   }
 }

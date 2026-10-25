@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from character_workflow.lib import data_root, jobs, keys, projects, workshop
-from character_workflow.lib.workshop_generation import approve_generation, prepare_generation
+from character_workflow.lib.canvas_model_catalog import approve_generation, prepare_generation
 from character_workflow.lib.workshop_schema import PrepareGenerationInput, TargetInput
 
 

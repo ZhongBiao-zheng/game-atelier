@@ -8,7 +8,7 @@ import zipfile
 import pytest
 
 from character_workflow.lib import canvas_agent_skills as skills
-from character_workflow.lib.workshop import WorkshopError
+from character_workflow.lib.canvas_tool_common import CanvasToolError
 from viewer_server.server_app import build_app
 
 from tests.local_client import LocalTestClient
@@ -51,7 +51,7 @@ def test_zip_with_wrapper_folder_installs_and_reads(isolated_data_root):
     assert skills.read_skill_file("three-view", "references/pose.md") == "正面、侧面、背面"
     assert "three-view：三视图出图流程" in skills.skills_prompt()
 
-    with pytest.raises(WorkshopError) as exists:
+    with pytest.raises(CanvasToolError) as exists:
         skills.install_skill(files)
     assert exists.value.code == "SKILL_EXISTS"
     assert skills.install_skill(files, replace=True).name == "three-view"
@@ -60,29 +60,29 @@ def test_zip_with_wrapper_folder_installs_and_reads(isolated_data_root):
 @pytest.mark.parametrize("name", ["../evil/SKILL.md", "/abs/SKILL.md", "C:/x/SKILL.md",
                                   "a/../../SKILL.md"])
 def test_zip_entries_cannot_escape(isolated_data_root, name):
-    with pytest.raises(WorkshopError):
+    with pytest.raises(CanvasToolError):
         skills.files_from_zip(_zip({name: SKILL_MD}))
     assert not (isolated_data_root / "evil").exists()
 
 
 def test_symlink_and_case_collisions_are_rejected(isolated_data_root):
-    with pytest.raises(WorkshopError):
+    with pytest.raises(CanvasToolError):
         skills.files_from_zip(_zip({"SKILL.md": SKILL_MD}, symlink="link"))
-    with pytest.raises(WorkshopError):
+    with pytest.raises(CanvasToolError):
         skills.install_skill({"SKILL.md": SKILL_MD, "Readme.md": b"a", "README.md": b"b"})
 
 
 def test_read_skill_file_stays_inside_the_skill(isolated_data_root):
     skills.install_skill({"SKILL.md": SKILL_MD})
     for path in ["../../.config/keys.json", "/etc/passwd"]:
-        with pytest.raises(WorkshopError):
+        with pytest.raises(CanvasToolError):
             skills.read_skill_file("three-view", path)
-    with pytest.raises(WorkshopError):
+    with pytest.raises(CanvasToolError):
         skills.read_skill("../three-view")
 
 
 def test_missing_frontmatter_is_a_clear_error(isolated_data_root):
-    with pytest.raises(WorkshopError) as error:
+    with pytest.raises(CanvasToolError) as error:
         skills.install_skill({"SKILL.md": b"# no frontmatter"})
     assert "name / description" in error.value.message
 

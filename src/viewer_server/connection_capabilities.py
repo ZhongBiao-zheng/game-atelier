@@ -7,53 +7,13 @@ from starlette.routing import compile_path
 _LOCAL_ROUTES = """
 GET /api/jobs
 GET /api/jobs/{job_id}
-GET /api/spec/{character_id}
-GET /api/characters
-GET /api/projects/{project_id}/characters/index
-GET /api/projects/{project_id}/characters/{character_id}/workspace
-PUT /api/projects/{project_id}/character-associations
-GET /api/projects/{project_id}/character-associations
-GET /api/home
-POST /api/characters/{character_id}/rename
-GET /api/active-character
-GET /api/images
 GET /api/config
-GET /api/characters/{character_id}/canonical
-POST /api/characters/{character_id}/canonical
-GET /api/projects/{project_id}/ui-schemes/{scheme_id}/screens/canonical
-POST /api/projects/{project_id}/ui-schemes/{scheme_id}/screens/canonical
-POST /api/spec/{character_id}
 POST /api/prompt/{job_id}
-POST /api/feedback
 POST /api/clipboard-attempt
 GET /api/raw
 POST /api/uploads
-POST /api/characters/{character_id}/gallery/{kind}
-POST /api/characters
-POST /api/characters/{source_character_id}/derivatives
-DELETE /api/characters/{character_id}
 DELETE /api/jobs/{job_id}/image
 DELETE /api/jobs/{job_id}
-GET /api/projects
-GET /api/projects/{project_id}/ui-schemes
-POST /api/projects/{project_id}/ui-schemes
-POST /api/projects/{project_id}/ui-schemes/default
-GET /api/projects/{project_id}/workspaces
-GET /api/projects/{project_id}/videos
-GET /api/projects/{project_id}/videos/{production_id}
-GET /api/projects/{project_id}/video-references
-POST /api/projects/{project_id}/videos/{production_id}/references
-POST /api/projects/{project_id}/videos/{production_id}/selected
-POST /api/projects
-GET /api/projects/index
-GET /api/projects/{project_id}/gallery/media
-GET /api/projects/{project_id}/gallery
-POST /api/projects/reorder
-POST /api/projects/{project_id}/rename
-DELETE /api/projects/{project_id}
-GET /api/experience
-POST /api/experience
-POST /api/characters/{character_id}/project
 POST /api/jobs/{job_id}/confirm
 POST /api/jobs/{job_id}/cancel
 POST /api/config
@@ -84,7 +44,6 @@ GET /api/usage/key-last-used
 POST /api/gateway/check
 POST /api/gateway/providers/{alias}/sync
 GET /api/gallery/recent
-GET /api/gallery/screens
 GET /api/gallery/hidden
 POST /api/gallery/hidden
 GET /api/gallery/favorites
@@ -183,16 +142,12 @@ POST /api/canvas/projects/{project_id}/runs
 POST /api/canvas/projects/{project_id}/runs/{run_id}/cancel
 POST /api/canvas/projects/{project_id}/runs/{run_id}/resume-mj-edit
 POST /api/canvas/projects/{project_id}/runs/{run_id}/candidates/{candidate_id}/dismiss
-GET /api/projects/{project_id}/studio-archive-targets
-POST /api/studio/jobs/{job_id}/archive
 POST /api/studio/jobs
 GET /events
 GET /docs
 GET /docs/oauth2-redirect
 GET /redoc
 GET /openapi.json
-GET /api/workshop/requests/{request_id}
-GET /api/workshop/requests/{request_id}/references/{media_id}
 """.strip().splitlines()
 
 LOCAL_MANAGEMENT = frozenset({
@@ -224,15 +179,8 @@ MEDIA_ROUTES = frozenset({
     "/api/canvas/projects/{project_id}/versions/{version_id}/media",
     "/api/canvas/projects/{project_id}/versions/{version_id}/download",
     "/api/canvas/projects/{project_id}/nodes/{node_id}/layers/download",
-    "/api/workshop/requests/{request_id}/references/{media_id}",
     "/api/team-libraries/{library_id}/assets/{entry_id}/content",
     "/api/team-libraries/{library_id}/assets/{entry_id}/thumb",
-})
-WORKSHOP_TOOLS = frozenset({
-    "list-projects", "list-targets", "get-context", "list-models", "create-target", "read-document",
-    "write-document", "acknowledge-feedback", "list-media", "read-media",
-    "prepare-generation", "get-generation", "withdraw-generation", "approve-generation",
-    "read-lessons", "append-lesson", "list-prompt-assets", "read-prompt-asset",
 })
 CANVAS_TOOLS = frozenset({
     "list-projects", "get-document", "list-models", "apply-changes", "import-media", "run",

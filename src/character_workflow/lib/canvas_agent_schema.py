@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints
 
-from character_workflow.lib.workshop_schema import Identifier, StrictInput
+from character_workflow.lib.canvas_tool_common import Identifier, StrictInput
 
 NodeId = Annotated[str, StringConstraints(min_length=1, max_length=120)]
 EdgeId = Annotated[str, StringConstraints(min_length=1, max_length=160)]

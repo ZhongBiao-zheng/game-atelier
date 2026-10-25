@@ -41,30 +41,8 @@ def test_canvas_documents_handler_broadcasts_project_and_revision(tmp_path, monk
     assert events == [("canvas-document-changed", {"project_id": "cp-abc123", "revision": 7})]
 
 
-def test_active_character_handler_on_moved_and_created(tmp_path, monkeypatch):
-    events = _capture(monkeypatch)
-    dest = tmp_path / "active-character.json"
-    dest.write_text(json.dumps({"active_id": "c7"}))
-    h = watcher.ActiveCharacterHandler()
-    h.on_moved(FileMovedEvent(str(tmp_path / "active-character.json.tmp"), str(dest)))
-    h.on_created(FileCreatedEvent(str(dest)))
-    assert events == [
-        ("active-character-changed", {"active_id": "c7"}),
-        ("active-character-changed", {"active_id": "c7"}),
-    ]
 
 
-def test_start_watchers_creates_missing_characters_dir(isolated_data_root):
-    # 全新安装：characters/ 尚不存在 → 必须先建好再 schedule，否则首个角色的
-    # spec-changed 永远不广播，直到重启。
-    chars = isolated_data_root / "characters"
-    chars.rmdir()
-    obs = watcher.start_watchers()
-    try:
-        assert chars.exists()
-    finally:
-        obs.stop()
-        obs.join(timeout=5)
 
 
 def test_team_library_handler_rescans_and_broadcasts_diff(isolated_data_root, tmp_path, monkeypatch):

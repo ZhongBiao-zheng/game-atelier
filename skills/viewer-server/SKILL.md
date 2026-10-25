@@ -1,20 +1,12 @@
 ---
 name: viewer-server
-description: 用户要打开 Atelier Web 画廊、首次安装初始化，或 Web 打不开需要重启本地服务时用。出图、改图等创作请求不用，各工坊技能会自行启动服务。
+description: 用户要打开 Atelier Web 画廊、首次安装初始化，或 Web 打不开需要重启本地服务时用。用于本机服务管理；画布创作由 canvas Skill 处理。
 disable-model-invocation: true
 ---
 
-## ⚠️ 启动必读 Memory（两层，均在 data_root，turn-start 自动注入）
+## 排障经验
 
-game-atelier 的记忆全部锚定 data_root，**与代理工具无关**——不读 `~/.claude` / `~/.codex`。
-turn-start 已把这两层塞进返回 JSON，你**无需手动 Read 文件**，直接用返回字段：
-
-1. `lessons_workspace` ← `<data_root>/MEMORY.md`（跨项目通用经验）
-2. `lessons_project` ← `<data_root>/projects/<slug>/MEMORY.md` 的 `### {kind}` 段（出图经验，按 active 角色归属自动解析 slug）
-3. `project_worldview` ← `<data_root>/projects/<slug>/worldview.md`（项目经验/世界观，Web「项目经验」页可编辑）
-
-代理工具自己的项目记忆（Claude 读 `CLAUDE.md`、Codex 读 `AGENTS.md`）由代理原生加载，不归本工作流管。
-不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规。
+排查安装、启动或更新故障时，读取仓库根 MEMORY.md 对应小节；项目规范和 Agent 经验由画布管理。
 
 ## 启动自检（bootstrap）
 
@@ -33,7 +25,7 @@ python "$BOOT" --check
 
 按 status 字段分流：
 
-- `ready` → 进 turn-start，正常工作
+- `ready` → 启动或检查本机服务
 - `needs_data_root` → 用 AskUserQuestion 问数据目录路径，POST `/api/onboarding/data-root`
 - `needs_uv` → 显示 next_action 字段里的安装命令，**不要替用户跑**
 - `needs_venv` → 按当前模式跑 `<bootstrap.py> --ensure-venv`；Dev mode 前缀为 `uv run python`，Installed Plugin mode 前缀为 `python3`
@@ -47,16 +39,6 @@ python "$BOOT" --check
 - **现在更新**：Installed Plugin mode → 跑 `claude plugin update game-atelier`；Dev / Codex mode（git clone）→ 在仓库根跑 `git checkout -- web/dist && git pull --ff-only`（dist 是入库构建产物，先还原防挡 pull）。完成后告知用户：新版下次会话（重启 CC / 重进 skill）生效，本轮继续按当前版本工作。
 - **这次跳过**：跑 `<bootstrap.py> --dismiss-update`（前缀按当前模式，同 `--check`），同一版本之后不再问；出更高版本再提。
 - 更新失败（网络 / 权限）：报错原样告知，继续本轮工作，不反复重试。
-
-## API Key 选择规则
-
-turn-start 返回 `available_keys` 和 `preferred_alias`：
-
-1. **默认走 `preferred_alias`** — 不要问用户用哪个 Key
-2. **用户点名某 alias / provider** — 切到匹配的 Key，更新 spec.md 的"渲染"段
-3. **用户要求某种风格且 notes 里有匹配描述** — 可建议切换并解释理由
-4. **`preferred_alias` 是 null** — 停下来告诉用户："当前 kind=X 没有可用 Key，去 Web 加一个"
-5. **永远不要在终端 / 文档 / log 里显示 access_key / secret_key** — 你看不到，也不该看到
 
 # Viewer Server
 
@@ -91,7 +73,7 @@ Skill 调用路径必须带 `--background`，否则前台 server 会阻塞当前
 完整规则见 `docs/references/image-presentation.md`（三渲染通道：终端内联图像 / HTML 可访问本地 /
 HTML 不可访问本地——本接口只服务第三种有后端的情况；无后端时用 base64 data URI 兜底），要点：
 
-- 相对路径基准 = data root（如 `characters/<id>/portrait/v2.png`），不是 CWD。
+- 相对路径基准 = data root（如 `canvases/<id>/outputs/<job_id>/v2.png`），不是 CWD。
 - **必须带 job_id**：以该 job 的 `output_paths` / `reference_images` / `source_image` 作白名单，
   对不上 → 403。这是 job 白名单鉴权，别绕。
 - 端口读 `.runtime/server.port`（默认 5174，被占用 +1），别写死。

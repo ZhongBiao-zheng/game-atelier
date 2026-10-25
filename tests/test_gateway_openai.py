@@ -383,7 +383,7 @@ def test_alias_permission_and_cooldown_fallback_never_use_denied_member(setup):
 def test_text_job_gateway_unavailable_switches_to_local_key(setup, monkeypatch):
     from character_workflow.lib import job_runner
     from character_workflow.lib.jobs import save_job
-    from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus
+    from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
     key = keys.KeySpec(alias='Hub', provider='atelier', base_url='http://127.0.0.1:5180',
                        access_key='fake', created_at='test', models=[
                            keys.ModelSpec(id='gpt-test', name='test', modality='text')])
@@ -398,7 +398,7 @@ def test_text_job_gateway_unavailable_switches_to_local_key(setup, monkeypatch):
     job = save_job(Job(job_id='job-text-relay', character_id='x', prompt='x',
         submitted_at='2026-10-24T00:00:00+00:00', model='gpt-test',
         params=JobParams(route_id='gpt-test'), output_paths=[], status=JobStatus.PENDING,
-        error=None, asset_slot=AssetSlot.PORTRAIT, kind=JobKind.TEXT, namespace='studio',
+        error=None, kind=JobKind.TEXT, namespace='studio',
         alias='Hub', provider='atelier'))
     done = job_runner.run_job(job.job_id)
     assert done.status == JobStatus.DONE and done.alias == 'A'

@@ -46,7 +46,6 @@ from character_workflow.lib.keys import KeySpec, ModelSpec, model_modality, read
 from character_workflow.lib.model_routes import NoSuchRouteError, resolve_auto
 from character_workflow.lib.prompt_variables import resolve_prompt_variables
 from character_workflow.lib.schemas import (
-    AssetSlot,
     CanvasActor,
     CanvasBatchJobOrigin,
     CanvasContentVersion,
@@ -1318,7 +1317,6 @@ def _commit_frozen_run(
         output_paths=[],
         status=JobStatus.PENDING,
         error=None,
-        asset_slot=AssetSlot.PORTRAIT,
         kind=kind,
         namespace="canvas",
         canvas_project_id=project_id,
@@ -1691,7 +1689,6 @@ def submit_layer_decomposition_run(
             output_paths=[],
             status=JobStatus.PENDING,
             error=None,
-            asset_slot=AssetSlot.PORTRAIT,
             kind=JobKind.IMAGE,
             namespace="canvas",
             canvas_project_id=project_id,

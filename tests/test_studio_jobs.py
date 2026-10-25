@@ -185,14 +185,6 @@ def test_studio_job_writes_to_studio_namespace_path(tmp_path, monkeypatch):
     assert out == tmp_path / "studio" / "job-test-xyz"
 
 
-def test_characters_endpoint_does_not_leak_studio(client, tmp_path):
-    """GET /api/characters 不返回 studio/ 目录."""
-    (tmp_path / "studio" / "job-x").mkdir(parents=True)
-    (tmp_path / "characters" / "char-real").mkdir(parents=True)
-    resp = client.get("/api/characters")
-    chars = [c["id"] for c in resp.json()]
-    assert "job-x" not in chars
-    assert "studio" not in chars
 
 
 def test_post_studio_job_schedules_background_runner(client, monkeypatch):

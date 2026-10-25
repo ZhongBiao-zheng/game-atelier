@@ -248,7 +248,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
           <DialogContent>
             <DialogHeader>
               <DialogTitle>新建画布项目</DialogTitle>
-              <DialogDescription>画布项目独立于创作台和工坊，不会由 Skill 自动填充。</DialogDescription>
+              <DialogDescription></DialogDescription>
             </DialogHeader>
             <form className="space-y-4" onSubmit={submitEditor}>
               <div className="space-y-2">

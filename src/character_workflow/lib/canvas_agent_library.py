@@ -21,7 +21,7 @@ from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.schemas import (
     MEDIA_SUFFIXES, CanvasCreationAssetSnapshotOrigin, CanvasDocument, CanvasMediaVersion,
 )
-from character_workflow.lib.workshop import WorkshopError
+from character_workflow.lib.canvas_tool_common import CanvasToolError
 
 ASSET_IMAGE_PREFIX = "asset:"
 
@@ -103,7 +103,7 @@ def apply_asset_changes(payload) -> dict:
         _recover_canvas_transactions_unlocked(project_id)
         document = _read_canvas_document_unlocked(project_id)
         if document.revision != payload.expected_revision:
-            raise WorkshopError("DOCUMENT_CONFLICT", "画布已变化，请重新读取后再改")
+            raise CanvasToolError("DOCUMENT_CONFLICT", "画布已变化，请重新读取后再改")
         timestamp = _now()
         versions = dict(document.content_versions)
         writes = []

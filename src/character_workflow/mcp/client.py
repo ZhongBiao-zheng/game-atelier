@@ -13,31 +13,24 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 
 MAX_RESPONSE_BYTES = 1024 * 1024
-_WORKSHOP_OPERATIONS = (
-    "list-projects", "list-targets", "get-context", "list-models", "create-target", "read-document",
-    "write-document", "acknowledge-feedback", "list-media", "read-media",
-    "prepare-generation", "get-generation", "withdraw-generation", "approve-generation",
-    "read-lessons", "append-lesson", "list-prompt-assets", "read-prompt-asset",
-)
 _CANVAS_OPERATIONS = (
     "list-projects", "get-document", "list-models", "apply-changes", "import-media", "run",
     "get-run", "read-media",
 )
 # 操作名 → 本机 HTTP 路径。画布操作以 "canvas-" 前缀区分，工具名相应为 canvas_*。
 OPERATIONS: dict[str, str] = {
-    **{name: f"/api/workshop/{name}" for name in _WORKSHOP_OPERATIONS},
     **{f"canvas-{name}": f"/api/canvas-agent/{name}" for name in _CANVAS_OPERATIONS},
 }
 _ERROR_MESSAGES = {
     "CONNECTION_REQUIRED": "请在本机 Atelier 管理页重新授权 Agent。",
     "SESSION_REQUIRED": "请在本机 Atelier 管理页重新授权 Agent。",
-    "SESSION_EXPIRED": "工坊连接已过期，请重新授权后连接。",
-    "SESSION_REVOKED": "工坊授权已撤销，请在本机管理页重新授权。",
+    "SESSION_EXPIRED": "画布连接已过期，请重新授权后连接。",
+    "SESSION_REVOKED": "画布授权已撤销，请在本机管理页重新授权。",
     "CAPABILITY_DENIED": "当前 Agent 没有此操作的授权。",
     "TARGET_NOT_AUTHORIZED": "目标不在此 Agent 的授权项目范围内。",
     "DOCUMENT_CONFLICT": "文档已更新，请重新读取完整内容后再修改。",
     "REFERENCE_NOT_ALLOWED": "参考素材不属于已授权目标。",
-    "MODEL_UNAVAILABLE": "模型不可用，请重新读取工坊模型列表。",
+    "MODEL_UNAVAILABLE": "模型不可用，请重新读取画布模型列表。",
     "INVALID_PARAMETERS": "生成参数不符合模型能力，请检查数量、质量、时长和参考素材。",
     "INVALID_TARGET": "目标信息无效，请使用已授权项目和工具返回的完整目标。",
     "DOCUMENT_NOT_ALLOWED": "当前目标不支持此文档类型，请核对文档与目标归属。",
@@ -179,7 +172,7 @@ def _runtime_base_url(fallback: str) -> str:
 _DEFAULT_BASE_URL = "http://127.0.0.1:5174"
 
 
-class WorkshopClient:
+class CanvasClient:
     def __init__(self, credentials_path: Path | None = None, client: str | None = None):
         # None = 默认授权（「连接本机 Agent」写的 agent.json），每次调用按当前 data root 解析。
         self._credentials_path = credentials_path
@@ -227,7 +220,7 @@ class WorkshopClient:
 
     def _request(self, method: str, path: str, payload: dict | None = None) -> dict:
         headers = {}
-        if self._session is not None and path.startswith(("/api/workshop/", "/api/canvas-agent/")):
+        if self._session is not None and path.startswith(("/api/canvas-agent/",)):
             headers["Authorization"] = f"Bearer {self._session.session_token}"
         try:
             with self._http.request(
@@ -264,7 +257,7 @@ class WorkshopClient:
                     ):
                         request_id = None
                     raise AdapterError(
-                        code, _ERROR_MESSAGES.get(code, "工坊操作失败，请在本机页面检查。"), request_id,
+                        code, _ERROR_MESSAGES.get(code, "画布操作失败，请在本机页面检查。"), request_id,
                     )
                 return result
         except requests.RequestException:
@@ -311,7 +304,7 @@ class WorkshopClient:
 
     def call(self, operation: str, payload: BaseModel) -> dict:
         if operation not in OPERATIONS:
-            raise AdapterError("TOOL_NOT_ALLOWED", "此操作不属于工坊工具。")
+            raise AdapterError("TOOL_NOT_ALLOWED", "此操作不属于画布工具。")
         with self._lock:
             credentials = self._load_credentials()
             status = self._status(credentials)
@@ -334,5 +327,5 @@ class WorkshopClient:
                     "POST", OPERATIONS[operation], payload.model_dump(mode="json"),
                 )
             if not _safe_result(result):
-                raise AdapterError("RESPONSE_INVALID", "工坊响应包含不允许通过工具返回的字段。")
+                raise AdapterError("RESPONSE_INVALID", "画布响应包含不允许通过工具返回的字段。")
             return result

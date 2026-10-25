@@ -13,7 +13,7 @@ const TIME_OPTS: { key: TimeFilter; label: string }[] = [
 const MODE_OPTS: { key: GenMode; label: string; icon: ReactNode }[] = [
   { key: 'image', label: '图片', icon: <ImageIcon size={18} aria-hidden /> },
   { key: 'video', label: '视频', icon: <Video size={18} aria-hidden /> },
-  { key: 'skill', label: 'Skill', icon: <Wand2 size={18} aria-hidden /> },
+  { key: 'canvas', label: '画布', icon: <Wand2 size={18} aria-hidden /> },
 ];
 const OP_OPTS: { key: 'favorite' | 'hidden'; label: string; icon: ReactNode }[] = [
   { key: 'favorite', label: '喜欢', icon: <Heart size={18} aria-hidden /> },

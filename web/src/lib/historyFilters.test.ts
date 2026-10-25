@@ -15,22 +15,8 @@ function job(p: Partial<Job>): Job {
 }
 
 describe('deriveGenMode', () => {
-  it('非 studio namespace → skill（不分资产类型）', () => {
-    expect(deriveGenMode(job({ namespace: 'character', kind: 'image' }))).toBe('skill');
-    expect(deriveGenMode(job({ namespace: 'ui', kind: 'image' }))).toBe('skill');
-    expect(deriveGenMode(job({ namespace: 'video', kind: 'video' }))).toBe('skill');
-  });
-  it('Studio 归档副本沿用原媒体模式，不冒充 Skill 产物', () => {
-    expect(deriveGenMode(job({
-      namespace: 'character',
-      kind: 'image',
-      params: { archived_from_job_id: 'studio-image' },
-    }))).toBe('image');
-    expect(deriveGenMode(job({
-      namespace: 'video',
-      kind: 'video',
-      params: { archived_from_job_id: 'studio-video' },
-    }))).toBe('video');
+  it('canvas 任务按来源筛选', () => {
+    expect(deriveGenMode(job({ namespace: 'canvas', kind: 'image' }))).toBe('canvas');
   });
   it('studio video → video', () => {
     expect(deriveGenMode(job({ namespace: 'studio', kind: 'video' }))).toBe('video');
@@ -66,7 +52,7 @@ describe('filterRounds', () => {
     const rounds = [
       doneRound({ jobId: 'i', mode: 'image' }),
       doneRound({ jobId: 'v', mode: 'video' }),
-      doneRound({ jobId: 's', mode: 'skill' }),
+      doneRound({ jobId: 's', mode: 'canvas' }),
     ];
     const out = filterRounds(
       rounds,

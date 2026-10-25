@@ -128,7 +128,7 @@ export class LocalConnection {
           } catch (error) {
             release();
             if (generation === this.snapshot.generation && (timedOut || !controller.signal.aborted)) {
-              this.interrupt(timedOut ? '工坊服务响应超时。' : '工坊服务连接中断。', undefined, true);
+              this.interrupt(timedOut ? 'Atelier服务响应超时。' : 'Atelier服务连接中断。', undefined, true);
             }
             output.error(error);
           }
@@ -139,7 +139,7 @@ export class LocalConnection {
     } catch (error) {
       release();
       if (generation === this.snapshot.generation && (timedOut || !controller.signal.aborted)) {
-        this.interrupt(timedOut ? '工坊服务响应超时。' : '无法连接工坊服务，请确认工坊已启动。', undefined, true);
+        this.interrupt(timedOut ? 'Atelier服务响应超时。' : '无法连接Atelier服务，请确认Atelier已启动。', undefined, true);
       }
       throw error;
     }
@@ -211,10 +211,10 @@ export class LocalConnection {
         const retryAfterMs = retryAfter === null ? 0 : /^\d+$/.test(retryAfter)
           ? Number(retryAfter) * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now()) || 0;
         this.interrupt(response.status === 404
-          ? '工坊服务版本不匹配，请更新并重新启动工坊。'
-          : `无法建立工坊连接（HTTP ${response.status}）。`, undefined, retryable, retryAfterMs);
+          ? 'Atelier服务版本不匹配，请更新并重新启动Atelier。'
+          : `无法建立Atelier连接（HTTP ${response.status}）。`, undefined, retryable, retryAfterMs);
       }
-      throw new ConnectionInterrupted(this.snapshot.message ?? '无法建立工坊连接。');
+      throw new ConnectionInterrupted(this.snapshot.message ?? '无法建立Atelier连接。');
     }
     if (response.status === 204) return null;
     return response.json();
@@ -248,7 +248,7 @@ export class LocalConnection {
           throw new Error('本机服务版本不匹配，请更新后重新连接。');
         }
         if (options.recoveryAttempt && this.instanceId && status.instance_id !== this.instanceId) {
-          throw new Error('工坊服务已重启，请重新连接并核对最新内容。');
+          throw new Error('Atelier服务已重启，请重新连接并核对最新内容。');
         }
         const session = await this.control('/api/connection/local-session', {});
         if (session.instance_id !== status.instance_id || typeof session.session_id !== 'string') {

@@ -99,16 +99,7 @@ export function Home() {
       {/* 空状态 */}
       {state.kind === 'success' && state.items.length === 0 && (
         <div className="text-center py-12">
-          <p className="font-display text-display italic text-foreground/70">
-            工坊还空着。
-          </p>
-          <p className="mt-3 text-sm text-muted-foreground">
-            在终端跑{' '}
-            <code className="font-mono text-foreground/80 bg-card px-1.5 py-0.5 rounded">
-              /game-atelier:character &lt;名字&gt;
-            </code>{' '}
-            开始第一个角色。
-          </p>
+          <p className="text-sm text-muted-foreground">还没有作品</p>
         </div>
       )}
 
@@ -157,37 +148,15 @@ function useColumnCount(): number {
 }
 
 /** 资产槽中文名，用于卡片导航链接的无障碍名（屏幕阅读器读出图片通向哪类资产）。 */
-const SLOT_LABEL: Record<'portrait' | 'promo' | 'turnaround', string> = {
-  portrait: '立绘',
-  promo: '美宣',
-  turnaround: '三视图',
-};
 
-function isStudioItem(item: GalleryItem): boolean {
-  return item.source === 'studio' || !item.character_id || !item.asset_slot;
-}
 
 function galleryItemAriaLabel(item: GalleryItem): string {
-  if (item.source === 'canvas') return '查看所在画布';
-  if (isStudioItem(item)) return '查看出图页';
-  return `查看 ${item.character_id} 的${SLOT_LABEL[item.asset_slot!]}`;
+  return item.source === 'canvas' ? '查看所在画布' : '查看出图页';
 }
 
 function galleryItemHref(item: GalleryItem): string {
   if (item.source === 'canvas') {
     return item.canvas_project_id ? `/canvas/${encodeURIComponent(item.canvas_project_id)}` : '/canvas';
   }
-  // Studio 出图无角色归属：带 job_id 深链进出图页，历史列表滚动定位到该轮并高亮。
-  if (isStudioItem(item)) {
-    return item.job_id ? `/studio?job=${encodeURIComponent(item.job_id)}` : '/studio';
-  }
-  if (!item.character_id || !item.asset_slot) return '/workshop';
-  if (!item.job_id) {
-    return item.project_id
-      ? `/workshop/${encodeURIComponent(item.project_id)}/art/characters/${encodeURIComponent(item.character_id)}/${item.asset_slot}`
-      : `/workshop/unassigned/characters/${encodeURIComponent(item.character_id)}/${item.asset_slot}`;
-  }
-  return item.project_id
-    ? `/workshop/${encodeURIComponent(item.project_id)}/art/characters/${encodeURIComponent(item.character_id)}/${item.asset_slot}/${encodeURIComponent(item.job_id)}/${encodeURIComponent(item.path)}`
-    : `/workshop/unassigned/characters/${encodeURIComponent(item.character_id)}/${item.asset_slot}/${encodeURIComponent(item.job_id)}/${encodeURIComponent(item.path)}`;
+  return item.job_id ? `/studio?job=${encodeURIComponent(item.job_id)}` : '/studio';
 }

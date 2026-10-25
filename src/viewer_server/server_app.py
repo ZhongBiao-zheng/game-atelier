@@ -109,7 +109,6 @@ async def lifespan(app: FastAPI):
     def gateway_listener(snapshot):
         hub.broadcast("gateway_task", snapshot)
     gateway_live.listeners.append(gateway_listener)
-    await asyncio.to_thread(app.state.workshop_runtime.recover)
     from viewer_server.routes import _reset_studio_recovery_workers
 
     _reset_studio_recovery_workers()
@@ -129,14 +128,6 @@ async def lifespan(app: FastAPI):
         logging.getLogger(__name__).info(
             "migrated creation asset catalog to v4; backup: %s",
             media_migration["backup_path"],
-        )
-    # 插件升级入口：旧项目只在 server 启动阶段一次性改成 V1；正常 GET/Skill 读路径不做迁移。
-    from character_workflow.lib.ui_schemes import migrate_legacy_projects
-
-    migrated = migrate_legacy_projects()
-    if migrated:
-        logging.getLogger(__name__).info(
-            "migrated %d project(s) to UI schemes: %s", len(migrated), ", ".join(migrated)
         )
     # 孤儿回收：studio job 只在本进程跑，重启时还 pending 的必然已死（一键启动脚本
     # 每次双击都是 stop→start）。不回收 = Web 永久转圈 + 永久轮询。
@@ -231,7 +222,6 @@ async def lifespan(app: FastAPI):
         stop_team_library_watches()
         observer.stop()
         observer.join(timeout=2)
-        app.state.workshop_runtime.close()
 
 
 # 发布产物用固定文件名（去哈希，见 web/vite.config.ts），所以必须显式要求浏览器每次验证。
@@ -288,9 +278,10 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(member_status_router)
     app.include_router(usage_router)
     app.include_router(sse_router)
-    from viewer_server.workshop_routes import register_workshop_routes
 
-    app.state.workshop_runtime = register_workshop_routes(app, connection_store.grant_allows)
+    from viewer_server.canvas_agent_routes import handle_canvas_tool_error
+    from character_workflow.lib.canvas_tool_common import CanvasToolError
+    app.add_exception_handler(CanvasToolError, handle_canvas_tool_error)
     from viewer_server.canvas_agent_routes import register_canvas_agent_routes
 
     register_canvas_agent_routes(app)

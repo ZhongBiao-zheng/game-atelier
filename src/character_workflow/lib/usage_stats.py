@@ -20,21 +20,13 @@ def range_start(period: str, now: datetime) -> datetime | None:
     return now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
 
 
-def job_location(job: Job, assignments: dict[str, str]) -> str | None:
+def job_location(job: Job) -> str | None:
     def q(value: str) -> str:
         return quote(value, safe="")
     if job.canvas_project_id:
         return f"/canvas/{q(job.canvas_project_id)}"
     if job.namespace == "studio":
         return "/studio"
-    project = job.project_id or assignments.get(job.character_id)
-    if job.namespace == "ui" and project:
-        return f"/workshop/{q(project)}/ui/{q(job.ui_scheme_id)}/screens/{q(job.screen_id)}"
-    if job.namespace == "video" and project:
-        return f"/workshop/{q(project)}/video/{q(job.production_id)}"
-    if job.character_id:
-        base = f"{q(project)}/art" if project else "unassigned"
-        return f"/workshop/{base}/characters/{q(job.character_id)}"
     return None
 
 
@@ -46,8 +38,7 @@ def user_prompt(job: Job) -> str:
 
 
 def mine_records(
-    jobs: list[Job], canvas_names: dict[str, str], project_names: dict[str, str],
-    assignments: dict[str, str],
+    jobs: list[Job], canvas_names: dict[str, str],
 ) -> list[dict]:
     records = []
     for job in jobs:
@@ -56,13 +47,9 @@ def mine_records(
         cost = job.params.actual_cost_cny
         if cost is None and job.status != "failed":
             cost = job.params.estimated_cost_cny
-        project_id = job.project_id or assignments.get(job.character_id)
         if job.canvas_project_id:
             project_key = f"canvas:{job.canvas_project_id}"
             label = canvas_names.get(job.canvas_project_id, "未归档")
-        elif project_id:
-            project_key = f"workshop:{project_id}"
-            label = project_names.get(project_id, "未归档")
         else:
             project_key, label = "unassigned", "未归档"
         records.append({
@@ -72,7 +59,7 @@ def mine_records(
             "failed": job.status == "failed", "prompt": user_prompt(job)[:120],
             "thumb_url": "/api/raw?" + urlencode({"job_id": job.job_id, "path": job.output_paths[0]})
             if job.output_paths else None,
-            "href": job_location(job, assignments),
+            "href": job_location(job),
         })
     return records
 

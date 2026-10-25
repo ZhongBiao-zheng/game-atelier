@@ -20,7 +20,6 @@ import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import { EMPTY_MJ_REFS, routeReusedImageFiles, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
 import { RoundList, type RoundConfig, type RoundState, type SaveResultAssetRequest } from '@/components/studio/RoundList';
 import { StudioQueryBar } from '@/components/studio/StudioQueryBar';
-import { StudioArchiveDialog, type StudioArchiveRequest } from '@/components/studio/StudioArchiveDialog';
 import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
@@ -144,7 +143,6 @@ function StudioFull() {
   const [reuseLimitNotice, setReuseLimitNotice] = useState(false);
   const [assetNotice, setAssetNotice] = useState<string | null>(null);
   const [location, setLocation] = useLocation();
-  const [archiveRequest, setArchiveRequest] = useState<StudioArchiveRequest | null>(null);
   const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
   const [reproduceConfirm, setReproduceConfirm] = useState<CreationAsset | null>(null);
   const [recipeNotice, setRecipeNotice] = useState<RecipeNotice | null>(null);
@@ -852,7 +850,6 @@ function StudioFull() {
           onDeleteBatch={deleteDoneBatch}
           onReuseReferences={handleReuseReferences}
           onEditAsReference={handleEditAsReference}
-          onArchive={(jobId, path, mediaKind) => setArchiveRequest({ jobId, path, mediaKind })}
           onShareResult={(jobId, index, path, config) => setShareRequest({
             source: { kind: 'job_output', job_id: jobId, output_index: index },
             defaultTitle: assetTitleFromPrompt(config.prompt),
@@ -1043,7 +1040,6 @@ function StudioFull() {
           onTeamAssetAdopted={result => setAssetNotice(result.created ? '已加入资产库' : '已在你的资产库')}
         />
       )}
-      <StudioArchiveDialog request={archiveRequest} onClose={() => setArchiveRequest(null)} />
       <TeamShareDialog
         request={shareRequest}
         onClose={() => setShareRequest(null)}

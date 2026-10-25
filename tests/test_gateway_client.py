@@ -17,7 +17,7 @@ from character_workflow.lib import gateway_keys, job_runner, keys, model_routes
 from character_workflow.lib.callers import atelier_gateway, openai_image
 from character_workflow.lib.callers.openai_image import OpenAIImageError
 from character_workflow.lib.jobs import read_job, save_job
-from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus
+from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
 from viewer_server.gateway_app import GatewayServer
 
 
@@ -93,7 +93,7 @@ def _job(job_id: str, alias: str = "Hub", route_id: str | None = "gpt-image-2", 
     return save_job(Job(
         job_id=job_id, character_id="A", prompt="一只猫", submitted_at="2026-10-16T00:00:00+00:00",
         model="gpt-image-2", params=JobParams(n=1, route_id=route_id, **params), output_paths=[],
-        status=JobStatus.PENDING, error=None, asset_slot=AssetSlot.PORTRAIT, kind=JobKind.IMAGE,
+        status=JobStatus.PENDING, error=None, kind=JobKind.IMAGE,
         namespace="studio", alias=alias, provider="atelier" if alias == "Hub" else "openai",
     ))
 

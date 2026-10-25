@@ -77,7 +77,7 @@ export function useSSE(options?: UseSSEOptions): number {
         onConnectRef.current?.();
         await readServerEvents(response.body, ({ event, data }) => {
           if (closed) return;
-          if (['job-changed', 'image-added', 'spec-changed', 'active-character-changed', 'projects-changed', 'workshop-request-changed'].includes(event)) bump();
+          if (['job-changed', 'image-added'].includes(event)) bump();
           if (event === 'gateway_task') {
             try { onGatewayTaskRef.current?.(JSON.parse(data) as GatewayTask); } catch { /* Polling resyncs. */ }
           }

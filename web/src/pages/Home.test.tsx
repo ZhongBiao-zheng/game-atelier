@@ -82,7 +82,7 @@ describe('Home', () => {
   it('shows EMPTY copy when 0 characters', async () => {
     renderHome();
     await waitFor(() => {
-      expect(screen.getByText(/工坊还空着/)).toBeInTheDocument();
+      expect(screen.getByText(/还没有作品/)).toBeInTheDocument();
     });
   });
 
@@ -159,10 +159,10 @@ describe('Home', () => {
     });
     const hrefs = [...container.querySelectorAll('a')].map(link => link.getAttribute('href'));
     expect(hrefs).toContain(
-      '/workshop/p1/art/characters/char-a/promo/job-promo-1/characters%2Fchar-a%2Fpromo%2Fkv.png',
+      '/studio?job=job-promo-1',
     );
     expect(hrefs).toContain(
-      '/workshop/unassigned/characters/char-b/portrait/job-portrait-2/characters%2Fchar-b%2Fportrait%2Fportrait.png',
+      '/studio?job=job-portrait-2',
     );
   });
 

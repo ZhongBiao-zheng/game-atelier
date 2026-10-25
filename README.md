@@ -1,8 +1,8 @@
 # Game Atelier
 
-**游戏角色资产工作流 Plugin，让 Claude Code 成为你的游戏美术助手。**
+**本地创作画布、项目参考库与 AI 生成工具。**
 
-通过对话描述角色概念，AI 整理 spec 与出图 prompt；你在本地页面批准后，由工坊提交到自己配置的图像服务，结果回到本地画廊。
+在画布中组织素材与生成任务，用项目规范和参考库约束创作；模型调用使用自己配置的服务，资产保存在本地。
 
 ---
 
@@ -54,67 +54,36 @@ claude --plugin-dir .
 3. **API Key** — 打开本地 Web UI，在设置页添加图像服务 Key
 4. **Agent 授权** — 设置 → 本机 Agent 连接，选择项目与能力；按[本机 MCP 说明](docs/mcp-local-client.md)配置 Codex / Claude
 
-已有 Skill 名称不变；Skill 按可用性选手：有 `workshop_*` / `canvas_*` 工具就走 MCP，否则走原有 CLI。注册 MCP 不会自动安装 Skill；
-凭据只保存在 OS 权限保护的本地文件里，不粘贴 token，不给 Agent 默认开放整个数据目录。
-
-> 数据目录（角色档案、图片、API Key）与插件完全分离，卸载插件不会影响你的资产。
-
----
+外部 Agent 通过 `canvas_*` MCP 工具操作项目；计费生成前需明确确认。凭据只保存在本地受保护的文件中。
 
 ## 命令列表
 
 | 命令 | 用途 |
 |---|---|
-| `/game-atelier:game-atelier` | **工坊总控**：诊断当前进度 + 路由到下面的技能。不确定下一步做什么就用它 |
-| `/game-atelier:viewer-server` | 启动本地 Web UI，查看角色画廊 |
-| `/game-atelier:character <角色名>` | 创建或继续某个角色的工作流 |
-| `/game-atelier:promo` | 给当前角色出宣传图（海报 / KV） |
-| `/game-atelier:turnaround` | 给当前角色出三视图 |
-| `/game-atelier:ui` | UI 设计总控：策划锚 → 视觉规范 → 页面 → 风格定稿 → 延展 |
-| `/game-atelier:ui-anchor` | 写策划三锚文档（gdd / prd / interaction） |
-| `/game-atelier:ui-page` | 生成 UI 单页 / 出风格候选 |
-| `/game-atelier:ui-screens` | 审计玩家旅程，产出页面清单（screen-map） |
-
----
+| `/game-atelier:viewer-server` | 启动本地 Atelier |
+| `/game-atelier:canvas` | 通过已授权工具编辑项目画布 |
 
 ## 典型工作循环
 
-不确定从哪开始：
-
-```
-/game-atelier:game-atelier   → 诊断进度，给一句「建议下一步」+ 可直接复制的话
-```
-
-已经知道要做什么：
-
-```
-1. /game-atelier:viewer-server     → 打开 Web 画廊
-2. /game-atelier:character 暗影刺客  → 开始或继续角色
-3. 描述你想要的形象 → AI 整理 spec，生成 prompt 预览
-4. 终端确认卡上说「出图」→ 出图 → 结果回到 Web 工坊（未授予「直接执行生成」的 Agent 走本地“待批准生成”页）
-5. 在 Web 上查看、编辑 spec、留下反馈
-6. 回到 Claude Code 继续迭代
-```
-
----
+1. 打开 Atelier，在画布入口创建项目。
+2. 添加项目规范、参考素材和生成节点。
+3. 在画布或创作台确认生成，查看结果并将合适的作品定稿到参考库。
+4. 通过内置 Agent 或已授权的外部 Agent 继续编辑。
 
 ## 数据目录结构
 
-插件在数据目录（默认 `~/game-atelier/`）中写入：
+数据与插件分离，卸载插件不会删除资产。
 
 ```
 ~/game-atelier/
-├── characters/<id>/          # 角色档案
-│   ├── spec.md               # 角色定义（可在 Web 编辑）
-│   ├── portrait/             # 立绘图片
-│   ├── promo/                # 宣传图
-│   └── turnaround/           # 三视图
-├── projects/                 # 项目分组
-├── .runtime/                 # 运行时状态（server PID / job 队列）
-└── .config/keys.json         # API Key 配置
+├── canvases/<project_id>/    # 项目文档、规范、经验与媒体
+├── studio/<job_id>/          # 创作台结果
+├── creation-assets/         # 创作资产库
+├── .runtime/jobs/           # 当前任务
+└── .config/keys.json        # 模型服务配置
 ```
 
----
+旧工坊的 characters/、projects/ 原文件保留，可手动归档。退役说明见 [ADR-0027](docs/adr/0027-canvas-project-is-the-project.md)。
 
 ## 支持的图像服务
 
@@ -146,11 +115,11 @@ claude --plugin-dir .
 
 源码版仓库会保留一份已经构建好的 `web/dist`，因此新下载或 `git clone` 的用户不需要安装 Node / pnpm；一键启动只读取这份发布文件，不会在启动时重新构建或改写它。
 
-一键启动与 Skill 共用数据目录内的 `.venv`（默认 `~/game-atelier/.venv`）。首次启动自动准备环境；之后只有 `pyproject.toml`、`uv.lock`、`.python-version` 或源码安装路径变化才同步依赖，普通源码更新和重复启动不会重新安装。需要同步时会先停止占用该环境的工坊，避免 Windows 文件锁阻止安装；安装失败会中止启动，不再提示“沿用现有环境”。
+一键启动与 Skill 共用数据目录内的 `.venv`（默认 `~/game-atelier/.venv`）。首次启动自动准备环境；之后只有 `pyproject.toml`、`uv.lock`、`.python-version` 或源码安装路径变化才同步依赖，普通源码更新和重复启动不会重新安装。需要同步时会先停止占用该环境的本机服务，避免 Windows 文件锁阻止安装；安装失败会中止启动，不再提示“沿用现有环境”。
 
 Python 安装包默认走 npmmirror，Python 依赖包及构建工具默认走清华镜像；`uv.lock` 中的下载地址也使用该镜像，按锁定版本安装，启动时不改写锁文件。已有环境升级到这套启动流程后会同步一次。
 
-如果旧版一键启动曾经留下 `web/dist` 改动，直接双击对应系统的“一键修复”脚本。脚本会先自检，只还原可再生成的 `web/dist`，再执行 fast-forward 更新；角色资产、配置和其他源码改动都不会被清理。
+如果旧版一键启动曾经留下 `web/dist` 改动，直接双击对应系统的“一键修复”脚本。脚本会先自检，只还原可再生成的 `web/dist`，再执行 fast-forward 更新；项目资产、配置和其他源码改动都不会被清理。
 
 也可以在项目根目录手动执行同样的安全恢复：
 
@@ -160,7 +129,7 @@ git clean -fd -- web/dist
 git pull --ff-only
 ```
 
-旧版 Git 没有 `git restore` 时，第一行改用 `git checkout HEAD -- web/dist`。ZIP 下载版不含 Git 历史，不能原地更新；请重新下载最新版，已有角色资产仍保存在独立的数据目录中。
+旧版 Git 没有 `git restore` 时，第一行改用 `git checkout HEAD -- web/dist`。ZIP 下载版不含 Git 历史，不能原地更新；请重新下载最新版，已有项目资产仍保存在独立的数据目录中。
 
 ---
 
@@ -194,6 +163,6 @@ claude plugin validate .
 ## 安全说明
 
 - viewer-server **仅绑定 `127.0.0.1`**，不对外网暴露
-- 项目、媒体、下载和 SSE 必须有本机会话；Agent 仅能使用授权项目的工坊工具；只有授予 `execute_generation` 的 Agent 才能在你确认后批准自己的生成请求
+- 项目、媒体、下载和 SSE 必须有本机会话；Agent 仅使用 canvas_* 工具及 canvas_read/canvas_edit/canvas_generate 授权，计费操作前须人工确认。
 - API Key 存储在本地 `.config/keys.json`，不写入任何日志或对话记录
 - 图片读取接口使用 job_id 白名单，只能访问已登记的输出文件

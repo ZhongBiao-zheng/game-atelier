@@ -14,19 +14,17 @@ from character_workflow.lib import data_root
 from character_workflow.lib import net_env
 from character_workflow.lib.asset_versions import asset_output_lock, next_asset_path
 from character_workflow.lib.callers import dispatch, dispatch_audio, dispatch_text, dispatch_video
-from character_workflow.lib.active_character import read_active
 from character_workflow.lib.jobs import (
     job_execution_lock,
     job_lock,
     job_output_dir_for,
-    list_jobs,
     read_job,
     update_job_params,
     update_job_phase,
     update_job_status,
     write_job_under_lock,
 )
-from character_workflow.lib.schemas import AssetSlot, Job, JobParams, JobStatus
+from character_workflow.lib.schemas import Job, JobParams, JobStatus
 
 
 class JobRunnerError(RuntimeError):
@@ -502,7 +500,6 @@ def _write_sidecar(path: Path, job: Job, params: dict[str, Any]) -> None:
     lines = [
         f"# {path.stem}",
         "",
-        f"- asset_slot: {job.asset_slot.value}",
         f"- job_id: {job.job_id}",
         f"- created_at: {created_at}",
         f"- source_image: {job.source_image or ''}",
@@ -510,8 +507,6 @@ def _write_sidecar(path: Path, job: Job, params: dict[str, Any]) -> None:
         f"- actual_size: {params.get('actual_size') or ''}",
         f"- model: {job.model}",
     ]
-    if job.screen_id:
-        lines.insert(3, f"- screen_id: {job.screen_id}")
     path.with_suffix(".md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -520,30 +515,14 @@ def run_job(
     *,
     defer_terminal: bool = False,
     should_cancel: Callable[[], bool] | None = None,
-    workshop_grant_is_active: Callable[[str, str, str], bool] | None = None,
 ) -> Job:
     """Run at most one provider worker for a Job across threads and viewer-server processes."""
     with job_execution_lock(job_id) as acquired:
         if not acquired:
             raise JobExecutionBusy(f"job {job_id} is already running")
-        from character_workflow.lib.workshop import WorkshopError
-        try:
-            return _run_job_claimed(
-                job_id,
-                defer_terminal=defer_terminal,
-                should_cancel_external=should_cancel,
-                workshop_grant_is_active=workshop_grant_is_active,
-            )
-        except WorkshopError as error:
-            from character_workflow.lib.workshop_generation import record_execution_rejection
-            record_execution_rejection(job_id, error.message)
-            raise JobRunnerError(error.message) from error
-        except Exception:
-            job = read_job(job_id)
-            if job.workshop_request_id and job.status == JobStatus.PENDING:
-                from character_workflow.lib.workshop_generation import record_execution_rejection
-                record_execution_rejection(job_id, "执行意外中断，请核对任务和供应商订单；不会自动重试")
-            raise
+        return _run_job_claimed(
+            job_id, defer_terminal=defer_terminal, should_cancel_external=should_cancel,
+        )
 
 
 def _run_job_claimed(
@@ -551,7 +530,6 @@ def _run_job_claimed(
     *,
     defer_terminal: bool = False,
     should_cancel_external: Callable[[], bool] | None = None,
-    workshop_grant_is_active: Callable[[str, str, str], bool] | None = None,
 ) -> Job:
     # 国产厂商 host 绕过系统/坏代理（NO_PROXY），覆盖 skill（run-job）与 Studio（后台任务）两条路。
     net_env.configure_proxy_bypass()
@@ -565,9 +543,6 @@ def _run_job_claimed(
     # CLI 路径：终端确认即批准，PENDING_CONFIRM 在此推进；工坊请求路径的批准记录在 request 上。
     if job.status not in (JobStatus.PENDING_CONFIRM, JobStatus.PENDING):
         raise JobRunnerError(f"job not in a runnable status (current: {job.status.value})")
-    if job.workshop_request_id:
-        from character_workflow.lib.workshop_generation import claim_execution
-        claim_execution(job, workshop_grant_is_active)
     if job.status == JobStatus.PENDING_CONFIRM:
         job = update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
     # 「自动」任务在确定没执行的失败上换下一家：分支不落 FAILED，抛 _RouteSwitched 回到这里重跑。
@@ -897,29 +872,3 @@ def _run_video_job(job: Job) -> Job:
         if isinstance(e, JobRunnerError):
             raise
         raise JobRunnerError(str(e)) from e
-
-
-def run_latest(
-    *,
-    kind: AssetSlot | None = None,
-    character_id: str | None = None,
-) -> Job:
-    if character_id is None:
-        active = read_active()
-        character_id = active.active_id
-    if not character_id:
-        raise JobRunnerError("no active character")
-
-    candidates = [
-        job for job in list_jobs()
-        if (
-            job.character_id == character_id
-            and job.status == JobStatus.PENDING_CONFIRM
-            and (kind is None or job.asset_slot == kind)
-        )
-    ]
-    if not candidates:
-        suffix = f" asset_slot={kind.value}" if kind else ""
-        raise JobRunnerError(f"no pending_confirm job for {character_id}{suffix}")
-    candidates.sort(key=lambda j: (j.submitted_at, j.job_id))
-    return run_job(candidates[-1].job_id)

@@ -4,7 +4,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 
-from character_workflow.lib import canvas_projects, gateway_keys, gateway_tasks, jobs, projects
+from character_workflow.lib import canvas_projects, gateway_keys, gateway_tasks, jobs
 from character_workflow.lib.schemas import UsageResponse
 from character_workflow.lib.usage_stats import (
     aggregate_usage, mine_records, range_start, team_records,
@@ -28,11 +28,9 @@ def get_usage(
     now = datetime.now().astimezone()
     members = []
     if scope == "mine":
-        project_file = projects.read_projects()
         records = mine_records(
             jobs.list_jobs(),
             {project.project_id: project.name for project in canvas_projects.list_canvas_projects()},
-            {project.id: project.name for project in project_file.projects}, project_file.assignments,
         )
     else:
         config = gateway_keys.read_config()

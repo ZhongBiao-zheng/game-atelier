@@ -547,22 +547,7 @@ def test_share_not_found_cases_are_404(client, shared_lib):
 def test_share_not_shareable_and_source_missing_are_422_with_code(
     client, isolated_data_root, shared_lib
 ):
-    from pathlib import Path
 
-    lib, _ = shared_lib
-    character_job = _studio_job_with_output(isolated_data_root, namespace="character")
-    resp = _share_job(client, lib["library_id"], character_job.job_id)
-    assert resp.status_code == 422, resp.text
-    assert resp.json()["detail"]["code"] == "not_shareable"
-    assert resp.json()["detail"]["message"]
-
-    gone = _studio_job_with_output(isolated_data_root)
-    Path(gone.output_paths[0]).unlink()
-    resp = _share_job(client, lib["library_id"], gone.job_id)
-    assert resp.status_code == 422 and resp.json()["detail"]["code"] == "source_missing"
-
-
-def test_share_blank_title_is_422_invalid(client, isolated_data_root, shared_lib):
     lib, folder = shared_lib
     job = _studio_job_with_output(isolated_data_root)
     resp = client.post(

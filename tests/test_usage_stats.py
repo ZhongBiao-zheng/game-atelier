@@ -23,7 +23,7 @@ def job(**changes):
 
 
 def mine(items):
-    return mine_records(items, {"c1": "画布"}, {"p1": "工坊"}, {"hero": "p1"})
+    return mine_records(items, {"c1": "画布"})
 
 
 def stats(rows, **kwargs):
@@ -65,11 +65,8 @@ def test_sources_filter_preserves_available_sources():
 
 
 def test_project_labels_and_distinct_ids():
-    # model_copy isolates attribution from namespace validation, which has its own schema tests.
-    rows = mine([job().model_copy(update={"canvas_project_id": "c1"}),
-                 job(project_id="p1"), job(), job(character_id="other")])
-    assert [row["label"] for row in rows] == ["画布", "工坊", "工坊", "未归档"]
-    assert stats(rows)["rankings"][1]["rows"][0]["count"] == 1  # tie sorted by key
+    rows = mine([job().model_copy(update={"canvas_project_id": "c1"}), job()])
+    assert [row["label"] for row in rows] == ["画布", "未归档"]
 
 
 @pytest.mark.parametrize("period,bucket,first,length", [
@@ -95,16 +92,8 @@ def test_previous_same_length_and_all():
 
 
 def test_href_rules():
-    base = job()
-    assert job_location(base.model_copy(update={"canvas_project_id": "c1"}), {}) == "/canvas/c1"
-    assert job_location(job(namespace="studio"), {}) == "/studio"
-    assert job_location(base, {"hero": "p1"}) == "/workshop/p1/art/characters/hero"
-    assert job_location(base, {}) == "/workshop/unassigned/characters/hero"
-    assert job_location(job(character_id=""), {}) is None
-    assert job_location(base.model_copy(update={"namespace": "ui", "project_id": "p1",
-        "ui_scheme_id": "s1", "screen_id": "s2"}), {}) == "/workshop/p1/ui/s1/screens/s2"
-    assert job_location(base.model_copy(update={"namespace": "video", "project_id": "p1",
-        "production_id": "v1"}), {}) == "/workshop/p1/video/v1"
+    assert job_location(job().model_copy(update={"canvas_project_id": "c1"})) == "/canvas/c1"
+    assert job_location(job(namespace="studio")) == "/studio"
 
 
 def test_team_filter_privacy_and_rankings():
