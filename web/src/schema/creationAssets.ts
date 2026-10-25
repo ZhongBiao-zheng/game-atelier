@@ -119,3 +119,9 @@ export function renderCreationPrompt(
     return value?.trim() ? value : segment.default_value;
   }).join('');
 }
+
+export interface CategorySuggestion {
+  asset_id: string;
+  category: string | null;
+  confidence: number;
+}

@@ -74,7 +74,7 @@ from character_workflow.lib.schemas import (
     CanvasImageEditRunCreate, CanvasImageEditSave, CanvasImageEditSaveResponse,
     CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
-    CanvasCategoriesUpdate, CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
+    CanvasCategoriesUpdate, CanvasClassifyRequest, CanvasCategorySuggestion, CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
     CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse,
     CanvasUiPreferences, CanvasUiPreferencesUpdate, CanvasUploadResponse,
     CharacterIndexResponse, CharacterWorkspaceResponse,
@@ -2674,6 +2674,17 @@ def _raise_creation_asset_error(error: Exception) -> None:
     if isinstance(error, ValueError):
         raise HTTPException(422, detail=str(error)) from error
     raise error
+
+
+@router.post("/canvas/projects/{project_id}/classify", response_model=list[CanvasCategorySuggestion])
+def post_canvas_classify(project_id: str, payload: CanvasClassifyRequest):
+    from character_workflow.lib.canvas_classification import ClassificationError, classify_assets
+    try:
+        return classify_assets(project_id, payload)
+    except ClassificationError as error:
+        raise HTTPException(error.status, detail={"code": error.code, "message": str(error)}) from error
+    except (FileNotFoundError, KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
 
 
 @router.put("/canvas/projects/{project_id}/categories", response_model=CanvasProject)

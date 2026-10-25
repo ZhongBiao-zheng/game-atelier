@@ -120,6 +120,7 @@ DELETE /api/canvas/agent/skills/{name}
 GET /api/creation-assets
 PATCH /api/creation-assets/{asset_id}
 PUT /api/canvas/projects/{project_id}/categories
+POST /api/canvas/projects/{project_id}/classify
 POST /api/creation-assets/staleness
 POST /api/creation-assets/generation/from-job
 POST /api/creation-assets/generation/from-canvas

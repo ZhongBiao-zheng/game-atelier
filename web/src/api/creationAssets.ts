@@ -2,6 +2,7 @@ import { connectionFetch } from '@/api/connection';
 import { apiError, ApiError, requestJson } from './http';
 import type {
   CreationAsset,
+  CategorySuggestion,
   CreationAssetKind,
   CreationAssetList,
   CreationAssetStaleness,
@@ -301,5 +302,12 @@ export function updateCreationAssetCategory(assetId: string, category: string | 
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ category }),
+  });
+}
+
+export function classifyCreationAssets(projectId: string, assetIds: string[], selection: { alias: string; model: string } | null): Promise<CategorySuggestion[]> {
+  return requestJson<CategorySuggestion[]>(`/api/canvas/projects/${encodeURIComponent(projectId)}/classify`, '自动分类', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ asset_ids: assetIds, model_alias: selection?.alias, model: selection?.model }),
   });
 }

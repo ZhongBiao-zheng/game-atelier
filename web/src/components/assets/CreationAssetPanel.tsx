@@ -1,3 +1,4 @@
+import { ProjectReferenceLibrary } from './ProjectReferenceLibrary';
 import { promptFromAsset } from '@/lib/promptVariables';
 import { ChevronLeft, FileImage, FileText, Plus, Search, Users, X } from 'lucide-react';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
@@ -308,9 +309,10 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
 
       {!selected && !isEditing && (
         <>
-          <div className={cn('grid border-b border-border p-1.5', teamProjectId ? 'grid-cols-3' : 'grid-cols-2')} role="group" aria-label="资产类型">
+          <div className={cn('grid border-b border-border p-1.5', projectId ? 'grid-cols-4' : teamProjectId ? 'grid-cols-3' : 'grid-cols-2')} role="group" aria-label="资产类型">
             <PanelTab active={kind === 'prompt'} onClick={() => setKind('prompt')}><FileText />提示词</PanelTab>
             <PanelTab active={kind === 'media'} onClick={() => setKind('media')}><FileImage />媒体</PanelTab>
+            {projectId && <PanelTab active={kind === 'reference'} onClick={() => setKind('reference')}><FileImage />参考库</PanelTab>}
             {teamProjectId && <PanelTab active={kind === 'team'} onClick={() => setKind('team')}><Users />团队</PanelTab>}
           </div>
           {kind === 'team' && teamProjectId && teamProjectChoices.length > 1 && (
@@ -339,7 +341,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
               className="min-h-0 flex-1"
             />
           )}
-          {kind !== 'team' && (
+          {kind !== 'team' && kind !== 'reference' && (
           <div className="space-y-2 border-b border-border p-3">
             {projectId && <div className="flex gap-1" role="group" aria-label="资产范围"><ScopeButton active={scope === 'all'} onClick={() => setScope('all')}>全部资产</ScopeButton><ScopeButton active={scope === 'project'} onClick={() => setScope('project')}>本项目</ScopeButton></div>}
             <label className="relative block">
@@ -350,7 +352,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
             {kind === 'prompt' && <Button variant="outline" size="sm" className="w-full" onClick={() => beginPromptEdit()}><Plus />新建提示词资产</Button>}
           </div>
           )}
-          {kind !== 'team' && (
+          {kind !== 'team' && kind !== 'reference' && (
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
             {adoption.stalenessError && <p className="mb-2 text-xs text-muted-foreground">来源状态读取失败</p>}
             {visibleAssets.length ? visibleAssets.map(asset => <AssetCard key={asset.asset_id} asset={asset} busy={busy} staleness={adoption.staleness[asset.asset_id]} onOpen={() => openAsset(asset)} onReproduce={onReproduce && asset.kind === 'generation' ? () => void reproduceAsset(asset) : undefined} onReadopt={() => adoption.requestReadopt(asset)} />) : (
@@ -360,6 +362,10 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           )}
         </>
       )}
+
+      {projectId && <div className={kind === 'reference' && !selected && !isEditing ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+        <ProjectReferenceLibrary key={projectId} projectId={projectId} visible={kind === 'reference' && !selected && !isEditing} refreshKey={refreshKey} onAssetsChanged={onAssetsChanged} onUse={asset => void applyAsset(asset)} />
+      </div>}
 
       {promptEditor && (
         <PromptEditor

@@ -2167,6 +2167,20 @@ class AdoptionOrigin(BaseModel):
     raw_path: str | None = None
 
 
+class CanvasClassifyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    asset_ids: list[Annotated[str, Field(min_length=1, max_length=160)]] = Field(min_length=1, max_length=48)
+    model_alias: str | None = Field(default=None, max_length=120)
+    model: str | None = Field(default=None, max_length=200)
+
+
+class CanvasCategorySuggestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    asset_id: str
+    category: CategoryName | None
+    confidence: float = Field(ge=0, le=1)
+
+
 class CreationAssetMetadataUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     category: OptionalCategory
