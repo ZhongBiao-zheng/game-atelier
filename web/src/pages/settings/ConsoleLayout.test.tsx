@@ -6,6 +6,7 @@ import { CONSOLE_NAV, ConsoleLayout, rememberCreativeLocation } from './ConsoleL
 
 vi.mock('@/api/keys', () => ({ listKeys: async () => ({ keys: [] }) }));
 vi.mock('./ProvidersPage', () => ({ ProvidersPage: () => <><h1>供应商</h1><p>providers-content</p></> }));
+vi.mock('./ProviderAddPage', () => ({ ProviderAddPage: () => <><h1>添加</h1><p>provider-add-content</p></> }));
 vi.mock('./RoutesPage', () => ({ RoutesPage: () => <p>routes-content</p> }));
 vi.mock('./GatewayPage', () => ({ GatewayPage: () => <p>gateway-content</p> }));
 vi.mock('./usage/UsagePage', () => ({ UsagePage: () => <p>usage-content</p> }));
@@ -14,6 +15,13 @@ vi.mock('./AgentPage', () => ({ AgentPage: () => <p>agent-content</p> }));
 vi.mock('./PreferencesPage', () => ({ PreferencesPage: () => <p>preferences-content</p> }));
 
 describe('控制台路由', () => {
+  it('添加页仍选中供应商导航', () => {
+    const { hook } = memoryLocation({ path: '/settings/providers/new' });
+    render(<Router hook={hook}><ConsoleLayout /></Router>);
+    expect(screen.getByRole('heading', { name: '添加' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '供应商' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByText('provider-add-content')).toBeInTheDocument();
+  });
   it.each(CONSOLE_NAV.flatMap(group => group.items))('$path 渲染对应页和选中态', item => {
     const { hook } = memoryLocation({ path: item.path });
     render(<Router hook={hook}><ConsoleLayout /></Router>);

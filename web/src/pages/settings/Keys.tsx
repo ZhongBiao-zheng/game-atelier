@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Plus, Search } from 'lucide-react';
+import { Link } from 'wouter';
 
 import { KeyCard, type KeyRow } from '@/components/keys/KeyCard';
 import { ProviderRow, providerHost } from '@/components/keys/ProviderRow';
@@ -13,7 +14,7 @@ import { fetchKeyLastUsed } from '@/api/usage';
 import type { KeyCreatePayload } from '@/api/keys';
 
 interface Props {
-  /** Backward-compat: onboarding flow passes mode="onboarding" + onComplete */
+  /** 首启向导复用同一个供应商表单。 */
   mode?: 'onboarding';
   onComplete?: () => void;
   embedded?: boolean;
@@ -66,6 +67,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   }, [refresh]);
 
   const onCreated = () => {
+    window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
     setShowForm(false);
     setEditingKey(null);
     setSuccessMessage('创建成功');
@@ -74,6 +76,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   };
 
   const onUpdated = () => {
+    window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
     setShowForm(false);
     setEditingKey(null);
     setSuccessMessage('已更新');
@@ -146,17 +149,16 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
             onChange={event => setQuery(event.target.value)}
             className="w-44 min-w-0 bg-transparent text-sm text-foreground outline-none" />
         </label>}
-        <button
+        {embedded ? <Link href="/settings/providers/new"
+          className="flex h-9 items-center gap-1.5 rounded-md border border-input px-3.5 text-sm hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          <Plus className="size-3.5" aria-hidden />添加供应商
+        </Link> : <button
           type="button"
           onClick={openCreate}
-          className={
-            embedded
-              ? 'flex h-9 items-center gap-1.5 rounded-md border border-input px-3.5 text-sm transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
-              : 'text-sm bg-primary text-primary-foreground rounded-md px-3 py-2 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background'
-          }
+          className="text-sm bg-primary text-primary-foreground rounded-md px-3 py-2 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background"
         >
-          {embedded && <Plus className="size-3.5" aria-hidden />}{embedded ? '添加供应商' : '+ 新建供应商'}
-        </button>
+          + 新建供应商
+        </button>}
         </div>
       </div>
 
@@ -310,6 +312,7 @@ function toKeyRow(k: {
 function toKeyFormInitial(row: KeyRow): Partial<KeyCreatePayload> {
   return {
     alias: row.alias,
+    enabled: row.enabled !== false,
     provider: row.provider,
     base_url: row.base_url ?? null,
     billing_group: row.billing_group ?? null,

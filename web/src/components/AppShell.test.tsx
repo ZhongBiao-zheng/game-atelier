@@ -73,6 +73,13 @@ function renderAt(path: string) {
 }
 
 describe('AppShell', () => {
+  it('renders the provider add route inside the console', async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ keys: [] }) } as Response);
+    renderAt('/settings/providers/new');
+    expect(await screen.findByRole('heading', { name: '添加' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '供应商' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: /Tuzi/ })).toBeInTheDocument();
+  });
   it('renders Atelier logo on every route', () => {
     renderAt('/studio');
     expect(screen.getByText('Atelier')).toBeInTheDocument();

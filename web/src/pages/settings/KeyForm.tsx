@@ -1,45 +1,23 @@
 import { useRef, useState } from 'react';
-import { ArrowLeft, Eye, EyeOff, X } from 'lucide-react';
+import { Eye, EyeOff, X } from 'lucide-react';
 import { createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelInputModality, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { checkGateway } from '@/api/gateway';
 
-type ProviderKind = 'official' | 'third_party' | 'custom' | 'lan';
-type ApiModality = 'image' | 'video' | 'audio' | 'llm';
-
-interface ProviderPreset {
-  value: string;
-  label: string;
-  kind: ProviderKind;
-  modalities: ApiModality[];
-  homepageUrl?: string;
-  docsUrl?: string;
-  apiKeyUrl?: string;
-  defaultBaseUrl?: string | null;
-  defaultModels: KeyModel[];
-}
-
-const PROVIDER_PRESETS: ProviderPreset[] = [
-  { value: 'openai', label: 'OpenAI', kind: 'official', modalities: ['image', 'llm'], homepageUrl: 'https://platform.openai.com', docsUrl: 'https://platform.openai.com/docs', apiKeyUrl: 'https://platform.openai.com/api-keys', defaultBaseUrl: 'https://api.openai.com/v1', defaultModels: [{ name: 'GPT Image 1', id: 'gpt-image-1' }, { name: 'GPT 5', id: 'gpt-5', modality: 'text', protocol: 'openai-responses', input_modalities: ['text'] }] },
-  { value: 'seedream', label: 'Volcengine Ark', kind: 'official', modalities: ['image', 'llm'], homepageUrl: 'https://www.volcengine.com', docsUrl: 'https://www.volcengine.com/docs/82379/1399008', apiKeyUrl: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModels: [{ name: '图片 5.0', id: 'doubao-seedream-5-0-260128' }, { name: '豆包 Seed 1.8', id: 'doubao-seed-1-8-251228', modality: 'text', protocol: 'openai-chat', input_modalities: ['text'] }] },
-  { value: 'tokendance', label: 'TokenDance', kind: 'official', modalities: ['image', 'video'], homepageUrl: 'https://tokendance.space', docsUrl: 'https://tokendance.space/docs/quickstart', apiKeyUrl: 'https://tokendance.space/keys', defaultBaseUrl: 'https://tokendance.space/gateway/v1', defaultModels: [{ name: 'Seedream 5.0 Lite', id: 'seedream-5.0-lite', modality: 'image', protocol: 'openai' }, { name: 'Seedream 5.0 Pro', id: 'seedream-5.0-pro', modality: 'image', protocol: 'ark' }, { name: 'Seedance 2.0', id: 'seedance-2.0', modality: 'video', protocol: 'seedance' }] },
-  { value: 'openrouter', label: 'OpenRouter', kind: 'official', modalities: ['image', 'video'], homepageUrl: 'https://openrouter.ai', docsUrl: 'https://openrouter.ai/docs/quickstart', apiKeyUrl: 'https://openrouter.ai/settings/keys', defaultBaseUrl: 'https://openrouter.ai/api/v1', defaultModels: [{ name: 'GPT Image 2', id: 'openai/gpt-image-2', modality: 'image' }, { name: 'Google: Veo 3.1', id: 'google/veo-3.1', modality: 'video' }] },
-  { value: 'evolink', label: 'EvoLink', kind: 'third_party', modalities: ['image'], homepageUrl: 'https://evolink.ai', docsUrl: 'https://docs.evolink.ai', defaultBaseUrl: 'https://api.evolink.ai/v1', defaultModels: [{ name: 'Midjourney V8.2', id: 'mj-v8.2', modality: 'image', protocol: 'evolink' }] },
-  { value: 'custom', label: '自定义', kind: 'custom', modalities: ['image'], defaultBaseUrl: '', defaultModels: [{ name: '', id: '' }] },
-  // 局域网里另一台开了「局域网共享」的 Atelier（ADR-0025）：模型由网关决定，连接后自动带回。
-  { value: 'atelier', label: '局域网 Atelier', kind: 'lan', modalities: ['image'], defaultBaseUrl: '', defaultModels: [] },
-];
+import { PROVIDER_MONOGRAMS, PROVIDER_PRESETS, type ProviderKind } from './providerPresets';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
 const GATEWAY_PROVIDER = 'atelier';
 
 const KIND_LABELS: Record<ProviderKind, string> = {
   official: '官方',
-  third_party: '第三方',
+  relay: '中转',
   custom: '自定义',
-  lan: '局域网',
+  team: '团队',
 };
 
 const providerByValue = (value: string) =>
-  PROVIDER_PRESETS.find((preset) => preset.value === value) ?? PROVIDER_PRESETS[0];
+  PROVIDER_PRESETS.find((preset) => preset.id === value) ?? PROVIDER_PRESETS[0];
 
 const usesNamedAlias = (provider: string) => provider === 'custom' || provider === GATEWAY_PROVIDER;
 
@@ -74,6 +52,7 @@ type EditableModel = KeyModel & { _locked?: boolean };
 
 interface Props {
   initial?: Partial<KeyCreatePayload>;
+  presetId?: string;
   onCreated: () => void;
   onCancel: () => void;
   onDelete?: () => void;
@@ -81,20 +60,32 @@ interface Props {
   mode?: 'create' | 'edit';
 }
 
-export function KeyForm({ initial, onCreated, onCancel, onDelete, submitLabel = '保存', mode = 'create' }: Props) {
-  const [alias, setAlias] = useState(initial?.alias ?? (initial?.provider ? providerByValue(initial.provider).label : 'OpenAI'));
-  const [provider, setProvider] = useState(initial?.provider ?? 'openai');
-  const [baseUrl, setBaseUrl] = useState(initial?.base_url ?? '');
+export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, submitLabel = '保存', mode = 'create' }: Props) {
+  const initialPreset = PROVIDER_PRESETS.find(p => p.id === presetId) ?? PROVIDER_PRESETS.find(p => {
+    if (initial?.provider !== 'custom' || p.value !== 'custom' || !p.defaultBaseUrl || !initial.base_url) return false;
+    try { return new URL(p.defaultBaseUrl).hostname === new URL(initial.base_url).hostname; } catch { return false; }
+  }) ?? providerByValue(initial?.provider ?? 'openai');
+  const [activePresetId, setActivePresetId] = useState(initialPreset.id);
+  const [enabled, setEnabled] = useState(initial?.enabled !== false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [modelQuery, setModelQuery] = useState('');
+  const [manualId, setManualId] = useState('');
+  const [manualType, setManualType] = useState<ModelModality>('image');
+  const [testing, setTesting] = useState(false);
+  const [connectionTest, setConnectionTest] = useState<{ ok: boolean; message: string } | null>(null);
+  const [alias, setAlias] = useState(initial?.alias ?? initialPreset.label);
+  const [provider, setProvider] = useState(initial?.provider ?? initialPreset.value);
+  const [baseUrl, setBaseUrl] = useState(initial?.base_url ?? initialPreset.defaultBaseUrl ?? '');
   const [billingGroup, setBillingGroup] = useState(initial?.billing_group ?? '');
-  const [homepage, setHomepage] = useState(initial?.homepage_url ?? providerByValue(initial?.provider ?? 'openai').homepageUrl ?? '');
+  const [homepage, setHomepage] = useState(initial?.homepage_url ?? initialPreset.homepageUrl ?? '');
   const [accessKey, setAccessKey] = useState(initial?.access_key ?? '');
   // 编辑旧 Key 时模型可能没标注分类——载入即用 key 级 modalities 兜底值固化进每行，
   // 保存后 key 级 modalities 改为由模型标注派生，老 key 的视频可见性不丢。
   // 编辑态打开时已存在的行打 _locked，分类锁死为只读；新增行不带标记，仍可选分类。
   const [models, setModels] = useState<EditableModel[]>(
-    initial?.models?.length
+    initial?.models !== undefined
       ? initial.models.map((m) => ({ ...m, modality: modelModality(m, initial), _locked: mode === 'edit' }))
-      : providerByValue(initial?.provider ?? 'openai').defaultModels,
+      : initialPreset.defaultModels,
   );
   const pendingModelFocus = useRef<number | null>(null);
   const [urlTest, setUrlTest] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
@@ -114,7 +105,7 @@ export function KeyForm({ initial, onCreated, onCancel, onDelete, submitLabel = 
   // 编辑态打开时密钥框是掩码（前端只有掩码）；create 态字段值即用户实输的真值。
   const [keyRevealed, setKeyRevealed] = useState(mode !== 'edit');
   const editing = mode === 'edit';
-  const preset = providerByValue(provider);
+  const preset = providerByValue(activePresetId);
   const isGateway = provider === GATEWAY_PROVIDER;
   // 网关供应商的模型只来自网关（带 via 成员快照），不手填。
   const [gatewayModels, setGatewayModels] = useState<KeyModel[]>(
@@ -147,8 +138,9 @@ export function KeyForm({ initial, onCreated, onCancel, onDelete, submitLabel = 
   const changeProvider = (nextProvider: string) => {
     if (editing) return;
     const nextPreset = providerByValue(nextProvider);
-    setProvider(nextProvider);
-    setAlias(usesNamedAlias(nextProvider) ? '' : nextPreset.label);
+    setActivePresetId(nextProvider);
+    setProvider(nextPreset.value);
+    setAlias(nextPreset.kind === 'custom' || nextPreset.kind === 'team' ? '' : nextPreset.label);
     setBaseUrl(nextPreset.defaultBaseUrl ?? '');
     setBillingGroup('');
     setHomepage(nextPreset.homepageUrl ?? '');
@@ -160,10 +152,11 @@ export function KeyForm({ initial, onCreated, onCancel, onDelete, submitLabel = 
     setGatewayModels([]);
     setGatewayInfo(null);
     setGatewayError(null);
+    setConnectionTest(null);
   };
 
   // 模型映射：服务端代理拉上游 /models（CORS + 编辑态前端只有掩码密钥，见 models-preview）。
-  const fetchModelsBaseUrl = baseUrl.trim() || providerByValue(provider).defaultBaseUrl || '';
+  const fetchModelsBaseUrl = baseUrl.trim() || preset.defaultBaseUrl || '';
   /** includeAll = 逃生舱重拉：把后端判定「不可生成」的条目也一并列出来。 */
   const fetchModels = async (includeAll = false) => {
     setFetching(true);
@@ -191,7 +184,7 @@ export function KeyForm({ initial, onCreated, onCancel, onDelete, submitLabel = 
       setPickerQuery('');
       setPreview({ ...remote, models: sorted, includeAll });
       setFetchedChecked(new Set(
-        sorted.filter((m) => enabledIds.has(m.id) || carried.includes(m.id)).map((m) => m.id),
+        sorted.filter((m) => preview ? carried.includes(m.id) : enabledIds.has(m.id)).map((m) => m.id),
       ));
       setModalityPick({ ...enabledPicks, ...(preview ? modalityPick : {}) });
     } catch (e) {
@@ -207,8 +200,8 @@ export function KeyForm({ initial, onCreated, onCancel, onDelete, submitLabel = 
   const unresolvedChecked = (preview?.models ?? []).filter((m) => fetchedChecked.has(m.id) && !resolvedModality(m));
 
   /** 勾选状态同步回模型行：新勾的加入、列表内被取消勾选的移除、手填且不在列表的不动。 */
-  const applyFetchedSelection = () => {
-    if (!preview || unresolvedChecked.length) return; // 按钮已禁用，这里是双保险
+  const mergedModels = (): EditableModel[] => {
+    if (!preview) return models;
     const upstream = new Map(preview.models.map((m) => [m.id, m]));
     const kept = models
       .filter((m) => !upstream.has(m.id.trim()) || fetchedChecked.has(m.id.trim()))
@@ -220,7 +213,7 @@ export function KeyForm({ initial, onCreated, onCancel, onDelete, submitLabel = 
           // 「重拉一次列表来修协议」必须真的有效：protocol 是纯机器字段（表单里没有输入口），
           // 命中上游就用上游值覆盖，否则存错 / 存空的行永远修不回来。
           protocol: hit.protocol,
-          input_modalities: hit.input_modalities,
+          input_modalities: hit.input_modalities ?? m.input_modalities,
           // name 有输入框、可能被改成自己的叫法，只在空着或还等于 id 时补上游名。
           name: !m.name.trim() || m.name.trim() === m.id.trim() ? hit.name : m.name,
           // 分类归表单管（编辑态已存行是只读徽标）；只有未识别行的显式二选一才回写。
@@ -232,9 +225,19 @@ export function KeyForm({ initial, onCreated, onCancel, onDelete, submitLabel = 
       .filter((m) => fetchedChecked.has(m.id) && !keptIds.has(m.id))
       // protocol 必须随模型一起存：它是上游协议标注的解析结果（图片 ark/openai、视频
       // seedance/kling/…），丢了就得靠 caller 端启发式猜端点。
-      .map((m) => ({ name: m.name, id: m.id, modality: resolvedModality(m) as ModelModality, protocol: m.protocol, input_modalities: m.input_modalities }));
-    const next = [...kept, ...added];
-    setModels(next.length ? next : [{ name: '', id: '' }]);
+      .map((m): EditableModel => {
+        const stored = editing ? initial?.models?.find(model => model.id === m.id) : undefined;
+        return stored ? { ...stored, _locked: true, modality: modelModality(stored, initial),
+          protocol: m.protocol, input_modalities: stored.input_modalities ?? m.input_modalities }
+          : { name: m.name, id: m.id, modality: resolvedModality(m) as ModelModality,
+            protocol: m.protocol, input_modalities: m.input_modalities };
+      });
+    return [...kept, ...added];
+  };
+
+  const applyFetchedSelection = () => {
+    if (unresolvedChecked.length) return;
+    setModels(mergedModels());
     setPreview(null);
   };
 
@@ -269,10 +272,11 @@ export function KeyForm({ initial, onCreated, onCancel, onDelete, submitLabel = 
   };
 
   const submit = async () => {
+    if (unresolvedChecked.length) return;
     setSaving(true);
     setError(null);
     try {
-      const cleanModels = isGateway ? gatewayModels : models
+      const cleanModels = isGateway ? gatewayModels : mergedModels()
         .map((model) => {
           const modality = model.modality ?? 'image' as ModelModality;
           const inputModalities = modality === 'text'
@@ -294,6 +298,7 @@ export function KeyForm({ initial, onCreated, onCancel, onDelete, submitLabel = 
       const payload: KeyCreatePayload = {
         alias: usesNamedAlias(provider) ? alias.trim() : provider,
         provider,
+        enabled,
         base_url: baseUrl.trim() || null,
         billing_group: billingGroup.trim() || null,
         access_key: accessKey.trim(),
@@ -301,13 +306,14 @@ export function KeyForm({ initial, onCreated, onCancel, onDelete, submitLabel = 
         capabilities: ['portrait', 'promo', 'turnaround'],
         models: cleanModels,
         homepage_url: homepage.trim() || preset.homepageUrl || null,
-        docs_url: preset.docsUrl ?? null,
-        api_key_url: preset.apiKeyUrl ?? null,
+        docs_url: initial?.docs_url ?? preset.docsUrl ?? null,
+        api_key_url: initial?.api_key_url ?? preset.apiKeyUrl ?? null,
         modalities: derivedModalities,
         notes: '',
       };
       if (editing && initial?.alias) {
         const patch: Partial<KeyCreatePayload> = {
+          enabled: payload.enabled,
           base_url: payload.base_url,
           billing_group: payload.billing_group,
           access_key: payload.access_key,
@@ -338,6 +344,7 @@ export function KeyForm({ initial, onCreated, onCancel, onDelete, submitLabel = 
     && (!usesNamedAlias(provider) || alias.trim())
     && (provider !== 'custom' || baseUrl.trim())
     && (!isGateway || (baseUrl.trim() && gatewayModels.length > 0))
+    && unresolvedChecked.length === 0
     && !saving,
   );
 
@@ -363,436 +370,136 @@ export function KeyForm({ initial, onCreated, onCancel, onDelete, submitLabel = 
     setFetchedChecked(next);
   };
 
-  const linkRow = [
-    preset.homepageUrl ? { label: '官网', url: preset.homepageUrl } : null,
-    preset.docsUrl ? { label: '文档', url: preset.docsUrl } : null,
-    preset.apiKeyUrl ? { label: '获取 Key', url: preset.apiKeyUrl } : null,
-  ].filter((l): l is { label: string; url: string } => l !== null);
+  const testConnection = async () => {
+    setTesting(true);
+    setConnectionTest(null);
+    const started = performance.now();
+    try {
+      try {
+        const parsed = new URL(fetchModelsBaseUrl);
+        if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error();
+      } catch { throw new Error('请输入完整的 HTTP(S) API 请求地址'); }
+      const keyChanged = accessKey.trim() && accessKey !== initial?.access_key;
+      await previewModels({ alias: editing ? initial?.alias ?? null : null, provider,
+        base_url: fetchModelsBaseUrl, access_key: !editing || keyChanged ? accessKey.trim() || null : null,
+        include_all: false });
+      setConnectionTest({ ok: true, message: `可用 · ${Math.round(performance.now() - started)} ms` });
+    } catch (error) {
+      setConnectionTest({ ok: false, message: error instanceof Error ? error.message : String(error) });
+    } finally { setTesting(false); }
+  };
+  const typeDot = (modality?: ModelModality | null) => ({ image: 'bg-brand-2', video: 'bg-brand-3', text: 'bg-brand-4', audio: 'bg-muted-foreground' }[modality ?? 'image']);
+  const title = editing ? `编辑 ${usesNamedAlias(provider) ? alias : (PROVIDER_PRESETS.find(p => p.value === provider)?.label ?? alias)}` : preset.label;
+  const addManualModel = () => {
+    const id = manualId.trim();
+    if (!id || models.some(model => model.id === id)) return;
+    setModels([...models.filter(model => model.id.trim()), { name: id, id, modality: manualType }]);
+    if (preview?.models.some(model => model.id === id)) {
+      setFetchedChecked(new Set([...fetchedChecked, id]));
+      setModalityPick({ ...modalityPick, [id]: manualType });
+    }
+    setManualId('');
+  };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={editing ? '编辑供应商' : '新增供应商'}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim backdrop-blur-glass p-4"
-      onClick={() => { if (!saving) onCancel(); }}
-    >
-      {preview ? (
-        /* —— 模型选择子视图：独占整个弹窗，列表拿全高，brass 只有「启用所选」一处 —— */
-        <div
-          className="flex h-[min(640px,86vh)] w-[860px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-border bg-card"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="space-y-3 px-6 pb-3 pt-5">
-            <button
-              type="button"
-              onClick={() => setPreview(null)}
-              className="inline-flex items-center gap-1.5 rounded-md py-1 pr-2 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <ArrowLeft size={14} aria-hidden />
-              返回表单
-            </button>
-            <div className="truncate font-mono text-xs text-muted-foreground">
-              GET {fetchModelsBaseUrl}/models · 上游 {preview.total} 个
-            </div>
-            {/* 过滤情况诚实上墙 + 逃生舱：deny 词表哪天判过头，画师能自己看到全量。
-                一条都没过滤（且没在全量态）时这段是纯噪音，不渲染。 */}
-            {(preview.excluded > 0 || preview.includeAll) && (
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <span>
-                  {preview.includeAll
-                    ? '已显示全部，含不可生成模型'
-                    : `已过滤 ${preview.excluded} 个不可生成模型`}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => fetchModels(!preview.includeAll)}
-                  disabled={fetching}
-                  className={textActionClass}
-                >
-                  {fetching ? '获取中...' : preview.includeAll ? '只看可生成模型' : '显示全部'}
-                </button>
-              </div>
-            )}
+    <Dialog open onOpenChange={open => { if (!open && !saving) onCancel(); }}>
+      <DialogContent hideClose aria-describedby={undefined} className="flex max-h-[90dvh] max-w-[680px] flex-col gap-0 overflow-hidden p-0">
+        <header className="flex shrink-0 items-center gap-3 border-b border-border px-6 py-4">
+          <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary font-mono text-xs">{PROVIDER_MONOGRAMS[preset.id]}</span>
+          <DialogTitle className="min-w-0 flex-1 truncate">{title}</DialogTitle>
+          {homepage && <a href={homepage} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:text-primary">官网 ↗</a>}
+          <Switch compact checked={enabled} onChange={setEnabled} label={`启用 ${alias || preset.label}`} />
+        </header>
+        <div className="min-h-0 overflow-y-auto px-4 py-5 sm:px-6">
+          {!editing && !presetId && <div className="mb-5 space-y-2">
+            <label htmlFor="key-provider" className={capLabelClass}>供应商选择</label>
+            <select id="key-provider" value={activePresetId} disabled={fetching || testing || connecting} onChange={e => changeProvider(e.target.value)} className={fieldClass}>
+              {PROVIDER_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label} · {KIND_LABELS[p.kind]}</option>)}
+            </select>
+          </div>}
+          <div className="grid grid-cols-1 items-start gap-x-4 gap-y-3 sm:grid-cols-[88px_minmax(0,1fr)]">
+            <label htmlFor="key-provider-name" className="pt-2 text-xs text-muted-foreground">名称</label>
+            <input id="key-provider-name" placeholder={provider === 'custom' ? '例如：openrouter-image-main' : undefined} value={alias} readOnly={editing || !usesNamedAlias(provider)} onChange={e => setAlias(e.target.value)} className={fieldClass} />
+            {isGateway && <>
+              <label htmlFor="key-gateway-url" className="pt-2 text-xs text-muted-foreground">网关地址</label>
+              <input id="key-gateway-url" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setGatewayModels([]); setGatewayInfo(null); }} className={`${fieldClass} font-mono`} placeholder="http://192.168.1.20:5180" />
+            </>}
+            <label htmlFor="key-access" className="pt-2 text-xs text-muted-foreground">{isGateway ? '网关密钥' : 'API 密钥'}</label>
             <div className="flex flex-wrap items-center gap-2">
-              {pickerFilters.map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setPickerFilter(f)}
-                  className={`rounded-full px-3 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                    pickerFilter === f
-                      ? 'bg-secondary text-foreground ring-1 ring-primary/60'
-                      : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
-                  }`}
-                >
-                  {f === 'all' ? '全部' : CATEGORY_LABELS[f]} {pickerCounts(f)}
+              <div className="relative min-w-0 flex-1">
+                <input id="key-access" type={showKey ? 'text' : 'password'} value={accessKey} onChange={e => { setAccessKey(e.target.value); setKeyRevealed(true); setConnectionTest(null); }} autoComplete="off" className={`${fieldClass} pr-10 font-mono`} placeholder={editing ? '留空则保留原密钥' : '粘贴密钥'} />
+                <button type="button" aria-label={showKey ? '隐藏密钥' : '显示密钥'} disabled={revealing} onClick={toggleShowKey} className="absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-md text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary">
+                  <SwapIcon swapKey={showKey}>{showKey ? <EyeOff size={16} /> : <Eye size={16} />}</SwapIcon>
                 </button>
-              ))}
-              <input
-                value={pickerQuery}
-                onChange={(e) => setPickerQuery(e.target.value)}
-                placeholder="搜索模型名或 ID"
-                aria-label="搜索模型"
-                className={`${fieldClass} ml-auto w-56`}
-              />
-            </div>
-          </div>
-          <div className="min-h-0 flex-1 space-y-1 overflow-y-auto border-t border-border px-3 py-2">
-            {pickerVisible.map((m) => (
-              <div
-                key={m.id}
-                className={`flex items-center gap-3 rounded-md px-2 py-1.5 ${
-                  fetchedChecked.has(m.id) ? 'bg-secondary/40' : 'hover:bg-secondary/60'
-                }`}
-              >
-                {/* label 只包住勾选区——分类二选一是按钮，被 label 激活行为顺带切勾选就乱了。 */}
-                <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={fetchedChecked.has(m.id)}
-                    onChange={(e) => {
-                      const next = new Set(fetchedChecked);
-                      if (e.target.checked) next.add(m.id); else next.delete(m.id);
-                      setFetchedChecked(next);
-                    }}
-                    className="shrink-0 accent-primary"
-                  />
-                  <span className="min-w-0 truncate text-sm text-foreground">{m.name}</span>
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{m.id}</span>
-                </label>
-                {m.modality ? (
-                  <span
-                    className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${
-                      m.modality === 'image' ? 'border-primary/40 text-primary' : 'border-border text-foreground'
-                    }`}
-                  >
-                    {CATEGORY_LABELS[m.modality]}
-                  </span>
-                ) : (
-                  /* 上游认不出分类的行：就地选择四模态，不做静默兜底。 */
-                  <div role="group" aria-label={`分类 ${m.id}`} className="flex shrink-0 items-center gap-2">
-                    <span className="text-xs text-muted-foreground">{CATEGORY_LABELS[m.category]}</span>
-                    <div className="flex items-center rounded-md border border-border p-0.5">
-                      {GENERATION_MODALITIES.map((mod) => {
-                        const active = modalityPick[m.id] === mod;
-                        return (
-                          <button
-                            key={mod}
-                            type="button"
-                            aria-pressed={active}
-                            onClick={() => setModalityPick({ ...modalityPick, [m.id]: mod })}
-                            className={`rounded-sm px-2 py-0.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                              active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
-                            }`}
-                          >
-                            {CATEGORY_LABELS[mod]}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
               </div>
-            ))}
-            {pickerVisible.length === 0 && (
-              <div className="px-2 py-8 text-center text-sm text-muted-foreground">没有匹配的模型</div>
-            )}
-          </div>
-          <div className="flex items-center justify-between gap-4 border-t border-border px-6 py-3">
-            {/* 78 条里挑 15 个视频要点 15 次 checkbox——批量入口跟「已选」计数放一起。 */}
-            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-              <span className="text-xs text-muted-foreground">已选 {fetchedChecked.size} 个模型</span>
-              <button
-                type="button"
-                onClick={selectAllVisible}
-                disabled={pickerVisible.length === 0}
-                className={textActionClass}
-              >
-                全选当前 {pickerVisible.length} 个
-              </button>
-              <button
-                type="button"
-                onClick={() => setFetchedChecked(new Set())}
-                disabled={fetchedChecked.size === 0}
-                className={textActionClass}
-              >
-                清空选择
-              </button>
-              {unresolvedChecked.length > 0 && (
-                <span className="text-xs text-destructive">
-                  {unresolvedChecked.length} 个未识别模型待指定分类
-                </span>
-              )}
+              {(initial?.api_key_url || preset.apiKeyUrl) && <a href={initial?.api_key_url || preset.apiKeyUrl} target="_blank" rel="noreferrer" className="whitespace-nowrap text-xs text-primary">获取密钥 ↗</a>}
             </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <button type="button" onClick={() => setPreview(null)} className={ghostButtonClass}>
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={applyFetchedSelection}
-                disabled={unresolvedChecked.length > 0}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                启用所选（{fetchedChecked.size}）
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : (
-        /* —— 表单主视图：左轨供应商选项列表（不透明 popover 轨道），右 pane 字段 —— */
-        <div
-          className={`grid max-h-[86vh] w-[860px] max-w-[92vw] grid-rows-[minmax(0,1fr)] overflow-hidden rounded-xl border border-border bg-card ${editing ? '' : 'md:grid-cols-[240px_1fr]'}`}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* 左轨仅新建态出现——编辑态只聚焦当前供应商，不再渲染选择列表（避免误导性 hover）。
-              左轨在 md 以下隐藏，由 body 顶部的下拉兜底（同一 changeProvider 路径）。 */}
-          {!editing && (
-            <div className="hidden flex-col gap-1 overflow-y-auto border-r border-border bg-popover p-3 md:flex" role="group" aria-label="供应商列表">
-              <div className="px-3 pb-1 pt-2 text-xs text-muted-foreground">供应商</div>
-              {PROVIDER_PRESETS.map((p) => {
-                const selected = provider === p.value;
-                return (
-                  <button
-                    key={p.value}
-                    type="button"
-                    onClick={() => changeProvider(p.value)}
-                    aria-pressed={selected}
-                    className={`flex items-center justify-between rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                      selected
-                        ? 'bg-secondary text-foreground ring-1 ring-primary/60'
-                        : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
-                    }`}
-                  >
-                    <span className="truncate">{p.label}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{KIND_LABELS[p.kind]}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          <div className="flex min-h-0 flex-col">
-            <div className="flex items-start justify-between gap-4 px-6 pb-4 pt-5">
-              <div className="min-w-0 space-y-1">
-                <h2 className="font-display italic text-base text-foreground">
-                  {/* 非预设供应商（kling/veo 等后端允许但前端无 preset）回落到 alias，
-                      避免 providerByValue 静默回落 OpenAI 把标题误标成「编辑 OpenAI」。 */}
-                  {editing
-                    ? `编辑 ${usesNamedAlias(provider) ? alias : (PROVIDER_PRESETS.find((p) => p.value === provider)?.label ?? alias)}`
-                    : '新增供应商'}
-                </h2>
-                {linkRow.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
-                    {linkRow.map((l) => (
-                      <a key={l.label} href={l.url} target="_blank" rel="noreferrer" className="hover:text-primary">
-                        {l.label} ↗
-                      </a>
-                    ))}
+            <span className="pt-2 text-xs text-muted-foreground">模型</span>
+            <div className="min-w-0 space-y-3">
+              {isGateway ? <>
+                <button type="button" onClick={connectGateway} disabled={!baseUrl.trim() || (!editing && !accessKey.trim()) || connecting} className={ghostButtonClass}>{connecting ? '连接中...' : gatewayModels.length ? '重新同步' : '连接网关'}</button>
+                {gatewayInfo && <p role="status" className="text-sm text-muted-foreground">{gatewayInfo}</p>}
+                {gatewayError && <p role="alert" className="text-sm text-destructive">{gatewayError}</p>}
+                <ul aria-label="网关模型" className="flex flex-wrap gap-2">{gatewayModels.map(model => <li key={model.id} className="rounded-full border border-border px-3 py-1 text-xs">{model.name}<span className="ml-2 text-muted-foreground">{(model.via ?? []).map(item => item.alias).join(' · ')}</span></li>)}</ul>
+              </> : <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div role="group" aria-label="模型范围" className="flex shrink-0 rounded-md border border-border p-0.5">
+                    <button type="button" aria-pressed={!preview} disabled={unresolvedChecked.length > 0} onClick={applyFetchedSelection} className={`rounded-sm px-3 py-1 text-xs ${!preview ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}>已选 {mergedModels().filter(m => m.id.trim()).length}</button>
+                    <button type="button" aria-pressed={Boolean(preview)} onClick={() => void fetchModels()} className={`rounded-sm px-3 py-1 text-xs ${preview ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}>全部</button>
                   </div>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={onCancel}
-                aria-label="关闭"
-                className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                <X size={16} aria-hidden />
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 pb-5">
-              {!editing && (
-                <div className="md:hidden">
-                  <label htmlFor="key-provider" className={capLabelClass}>供应商选择</label>
-                  <select
-                    id="key-provider"
-                    value={provider}
-                    onChange={(e) => changeProvider(e.target.value)}
-                    className={fieldClass}
-                  >
-                    {PROVIDER_PRESETS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-                  </select>
+                  {!preview && <input aria-label="筛选模型" placeholder="筛选模型" value={modelQuery} onChange={e => setModelQuery(e.target.value)} className={`${fieldClass} min-w-0 flex-1 basis-28`} />}
+                  <button type="button" disabled={fetching || !fetchModelsBaseUrl} onClick={() => void fetchModels()} className={ghostButtonClass}>{fetching ? '获取中...' : '重新获取'}</button>
                 </div>
-              )}
-              {provider === 'custom' && (
-                <>
-                  <div>
-                    <label htmlFor="key-provider-name" className={capLabelClass}>配置名称</label>
-                    <input
-                      id="key-provider-name"
-                      value={alias}
-                      onChange={(e) => setAlias(e.target.value)}
-                      className={fieldClass}
-                      placeholder="例如：openrouter-image-main"
-                      readOnly={editing}
-                    />
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      自定义供应商可以创建多个配置，请用不同配置名称区分额度、用途或上游。
-                    </p>
+                {fetchError && <p role="alert" className="text-sm text-destructive">{fetchError}</p>}
+                {preview ? <div className="min-w-0 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span>上游 {preview.total} 个模型</span>
+                    {(preview.excluded > 0 || preview.includeAll) && <>
+                      <span>{preview.includeAll ? '已显示全部，含不可生成模型' : `已过滤 ${preview.excluded} 个不可生成模型`}</span>
+                      <button type="button" disabled={fetching} onClick={() => fetchModels(!preview.includeAll)} className={textActionClass}>{preview.includeAll ? '只看可生成模型' : '显示全部'}</button>
+                    </>}
                   </div>
-                  <div>
-                    <label htmlFor="key-homepage" className={capLabelClass}>官网链接</label>
-                    <input
-                      id="key-homepage"
-                      value={homepage}
-                      onChange={(e) => setHomepage(e.target.value)}
-                      className={fieldClass}
-                      placeholder="例如：https://platform.openai.com"
-                      autoComplete="off"
-                    />
+                  <input aria-label="搜索模型" placeholder="筛选模型" value={pickerQuery} onChange={e => setPickerQuery(e.target.value)} className={fieldClass} />
+                  <div className="flex flex-wrap gap-1">
+                    {pickerFilters.map(filter => <button type="button" key={filter} aria-pressed={pickerFilter === filter} onClick={() => setPickerFilter(filter)} className={`rounded-md px-2 py-1 text-xs ${pickerFilter === filter ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}>{filter === 'all' ? '全部' : CATEGORY_LABELS[filter]} {pickerCounts(filter)}</button>)}
                   </div>
-                  <div>
-                    <label htmlFor="key-base-url" className={capLabelClass}>API 请求地址</label>
-                    <div className="flex gap-2">
-                      <input
-                        id="key-base-url"
-                        value={baseUrl}
-                        onChange={(e) => {
-                          setBaseUrl(e.target.value);
-                          setUrlTest(null);
-                        }}
-                        className={fieldClass}
-                        placeholder="例如：https://ark.cn-beijing.volces.com/api/v3"
-                        autoComplete="off"
-                      />
-                      <button type="button" onClick={testBaseUrl} className={`${ghostButtonClass} shrink-0`}>
-                        测试
+                  <div className="flex max-h-56 flex-wrap content-start items-start gap-2 overflow-auto">
+                    {pickerVisible.map(model => <div key={model.id} className="max-w-full space-y-2">
+                      <button type="button" role="checkbox" aria-checked={fetchedChecked.has(model.id)} aria-label={`${model.name} ${model.id}`} title={model.name} onClick={() => {
+                        const next = new Set(fetchedChecked);
+                        if (next.has(model.id)) next.delete(model.id); else next.add(model.id);
+                        setFetchedChecked(next);
+                      }} className={`flex max-w-full items-center gap-2 rounded-full border px-3 py-1.5 font-mono text-xs ${fetchedChecked.has(model.id) ? 'border-primary/40 bg-secondary text-foreground' : 'border-border text-muted-foreground'}`}>
+                        <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${typeDot(resolvedModality(model))}`} /><span className="truncate">{model.id}</span>
                       </button>
-                    </div>
-                    {urlTest && (
-                      <div className={`mt-2 flex items-center gap-2 text-sm ${urlTest.kind === 'ok' ? 'text-muted-foreground' : 'text-destructive'}`}>
-                        {urlTest.kind === 'ok' && (
-                          <span className="size-1.5 rounded-full bg-[color:var(--status-done)]" aria-hidden />
-                        )}
-                        {urlTest.message}
-                      </div>
-                    )}
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      请求时会自动拼接图片接口；根域名会补 /v1/images/generations，填完整路径也会直接使用。
-                    </p>
+                      {!model.modality && fetchedChecked.has(model.id) && <div role="group" aria-label={`分类 ${model.id}`} className="flex flex-wrap gap-1">
+                        {GENERATION_MODALITIES.map(modality => <button type="button" key={modality} aria-pressed={modalityPick[model.id] === modality} onClick={() => setModalityPick({ ...modalityPick, [model.id]: modality })} className={`rounded-sm px-2 py-1 text-xs ${modalityPick[model.id] === modality ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}>{CATEGORY_LABELS[modality]}</button>)}
+                      </div>}
+                    </div>)}
+                    {pickerVisible.length === 0 && <p className="text-xs text-muted-foreground">没有匹配的模型</p>}
                   </div>
-                  <div>
-                    <label htmlFor="key-billing-group" className={capLabelClass}>计费分组（可选）</label>
-                    <input
-                      id="key-billing-group"
-                      value={billingGroup}
-                      onChange={(e) => setBillingGroup(e.target.value)}
-                      className={fieldClass}
-                      placeholder="例如：default"
-                      autoComplete="off"
-                    />
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      仅用于按账号分组定价的聚合商；留空时不显示无法确认的价格。
-                    </p>
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                    <span>已选 {fetchedChecked.size} 个模型</span>
+                    <button type="button" onClick={selectAllVisible} disabled={!pickerVisible.length} className={textActionClass}>全选当前 {pickerVisible.length} 个</button>
+                    <button type="button" onClick={() => setFetchedChecked(new Set())} disabled={!fetchedChecked.size} className={textActionClass}>清空选择</button>
+                    <button type="button" onClick={applyFetchedSelection} disabled={unresolvedChecked.length > 0} className={textActionClass}>启用所选（{fetchedChecked.size}）</button>
+                    {unresolvedChecked.length > 0 && <span className="text-destructive">{unresolvedChecked.length} 个未识别模型待指定分类</span>}
                   </div>
-                </>
-              )}
-              {isGateway && (
-                <>
-                  <div>
-                    <label htmlFor="key-gateway-name" className={capLabelClass}>名称</label>
-                    <input
-                      id="key-gateway-name"
-                      value={alias}
-                      onChange={(e) => setAlias(e.target.value)}
-                      className={fieldClass}
-                      placeholder="例如：美术组网关"
-                      readOnly={editing}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="key-gateway-url" className={capLabelClass}>网关地址</label>
-                    <input
-                      id="key-gateway-url"
-                      value={baseUrl}
-                      onChange={(e) => { setBaseUrl(e.target.value); setGatewayInfo(null); }}
-                      className={`${fieldClass} font-mono`}
-                      placeholder="http://192.168.1.20:5180"
-                      autoComplete="off"
-                    />
-                  </div>
-                </>
-              )}
-              <div>
-                <label htmlFor="key-access" className={capLabelClass}>{isGateway ? '网关密钥' : 'API Key'}</label>
-                <div className="relative">
-                  <input
-                    id="key-access"
-                    type={showKey ? 'text' : 'password'}
-                    value={accessKey}
-                    onChange={(e) => { setAccessKey(e.target.value); setKeyRevealed(true); }}
-                    className={`${fieldClass} pr-10 font-mono`}
-                    placeholder={editing ? '留空或保持原值表示不修改密钥' : isGateway ? '粘贴网关密钥，atg_...' : '粘贴 API Key，例如 sk-...'}
-                    autoComplete="off"
-                  />
-                  <button
-                    type="button"
-                    onClick={toggleShowKey}
-                    disabled={revealing}
-                    aria-label={showKey ? '隐藏密钥' : '显示密钥'}
-                    className="absolute inset-y-0 right-0 inline-flex w-10 items-center justify-center rounded-r-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                  >
-                    <SwapIcon swapKey={Boolean(showKey)}>{showKey ? <EyeOff size={16} aria-hidden /> : <Eye size={16} aria-hidden />}</SwapIcon>
-                  </button>
-                </div>
-              </div>
-              {isGateway ? (
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className={`${capLabelClass} mb-0`}>模型</span>
-                    <button
-                      type="button"
-                      onClick={() => void connectGateway()}
-                      disabled={!baseUrl.trim() || (!editing && !accessKey.trim()) || connecting}
-                      className={ghostButtonClass}
-                    >
-                      {connecting ? '连接中...' : gatewayModels.length ? '重新同步' : '连接网关'}
-                    </button>
-                  </div>
-                  {gatewayInfo && (
-                    <p role="status" className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
-                      <span className="size-1.5 rounded-full bg-[color:var(--status-done)]" aria-hidden />
-                      {gatewayInfo}
-                    </p>
-                  )}
-                  {gatewayError && <p role="alert" className="mb-2 text-sm text-destructive">{gatewayError}</p>}
-                  <ul aria-label="网关模型" className="space-y-1">
-                    {gatewayModels.map((model) => (
-                      <li key={model.id} className="flex items-baseline justify-between gap-3 rounded-md border border-border px-3 py-2">
-                        <span className="truncate text-sm text-foreground">{model.name}</span>
-                        <span className="shrink-0 text-xs text-muted-foreground">{(model.via ?? []).map((item) => item.alias).join(' · ')}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : (
-              <div>
-                <div className="mb-2 flex items-center justify-between">
-                  <span className={`${capLabelClass} mb-0`}>模型</span>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => fetchModels()}
-                      disabled={!fetchModelsBaseUrl || fetching}
-                      className={ghostButtonClass}
-                    >
-                      {fetching ? '获取中...' : '获取模型列表'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        pendingModelFocus.current = models.length;
-                        setModels([...models, { name: '', id: '' }]);
-                      }}
-                      className={ghostButtonClass}
-                    >
-                      添加模型
-                    </button>
-                  </div>
-                </div>
-                {fetchError && <div className="mb-2 text-sm text-destructive">{fetchError}</div>}
-                <div className="mb-2 grid grid-cols-[1fr_1fr_15rem_auto] gap-2 text-xs text-muted-foreground">
+                </div> : <div className="flex max-h-56 flex-wrap gap-2 overflow-auto">
+                  {models.filter(m => m.id.trim() && `${m.id} ${m.name}`.toLowerCase().includes(modelQuery.toLowerCase())).map((model, index) => <button key={`${model.id}-${index}`} type="button" aria-pressed="true" onClick={() => setModels(models.filter(m => m !== model))} className="flex max-w-full items-center gap-2 rounded-full border border-primary/40 bg-secondary px-3 py-1.5 font-mono text-xs">
+                    <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${typeDot(model.modality)}`} /><span className="truncate">{model.id}</span><X size={12} aria-hidden />
+                  </button>)}
+                </div>}
+                {provider === 'custom' && <div className="flex flex-wrap gap-2">
+                  <input aria-label="添加模型 ID" placeholder="添加模型 ID" value={manualId} onChange={e => setManualId(e.target.value)} className={`${fieldClass} min-w-0 flex-1 basis-28 font-mono`} />
+                  <select aria-label="新增模型类型" value={manualType} onChange={e => setManualType(e.target.value as ModelModality)} className="rounded-md border border-input bg-transparent px-2 text-xs">{GENERATION_MODALITIES.map(type => <option key={type} value={type}>{CATEGORY_LABELS[type]}</option>)}</select>
+                  <button type="button" disabled={!manualId.trim() || models.some(m => m.id === manualId.trim())} onClick={addManualModel} className={ghostButtonClass}>添加</button>
+                </div>}
+                <details open={detailsOpen} onToggle={e => setDetailsOpen(e.currentTarget.open)}>
+                  <summary className="cursor-pointer text-xs text-muted-foreground">模型详情</summary>
+                  <div className="mt-3 space-y-3">
+                    <button type="button" onClick={() => { setDetailsOpen(true); pendingModelFocus.current = models.length; setModels([...models, { name: '', id: '' }]); }} className={ghostButtonClass}>添加模型</button>
+                <div className="mb-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                   <span>模型别名</span>
                   <span>模型 ID</span>
                   <span>分类 / 输入</span>
@@ -800,7 +507,7 @@ export function KeyForm({ initial, onCreated, onCancel, onDelete, submitLabel = 
                 </div>
                 <div className="space-y-2">
                   {models.map((model, index) => (
-                    <div key={index} className="grid grid-cols-[1fr_1fr_15rem_auto] items-center gap-2">
+                    <div key={index} className="grid grid-cols-2 items-start gap-2">
                       <label className="sr-only" htmlFor={`key-model-name-${index}`}>模型名称 {index + 1}</label>
                       <input
                         ref={(input) => {
@@ -905,28 +612,39 @@ export function KeyForm({ initial, onCreated, onCancel, onDelete, submitLabel = 
                     </div>
                   ))}
                 </div>
+
+                  </div>
+                </details>
+              </>}
+            </div>
+            {!isGateway && <>
+              <span className="pt-2 text-xs text-muted-foreground">连接</span>
+              <div className="flex flex-wrap items-center gap-3">
+                <button type="button" onClick={testConnection} disabled={testing || !fetchModelsBaseUrl || (!editing && !accessKey.trim())} className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50">{testing ? '测试中...' : '测试连接'}</button>
+                {connectionTest && <span role={connectionTest.ok ? 'status' : 'alert'} className={`text-xs ${connectionTest.ok ? 'text-[color:var(--status-done)]' : 'text-destructive'}`}>{connectionTest.message}</span>}
               </div>
-              )}
-            </div>
-            <div className="flex items-center gap-3 border-t border-border px-6 py-4">
-              {onDelete && <button type="button" onClick={onDelete} disabled={saving}
-                className="mr-auto rounded-md px-3 py-2 text-sm text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive">删除</button>}
-              <button
-                type="button"
-                onClick={submit}
-                disabled={!canSubmit}
-                className="rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                {saving ? '保存中...' : submitLabel}
-              </button>
-              <button type="button" onClick={onCancel} className={ghostButtonClass}>
-                取消
-              </button>
-              {error && <div className="min-w-0 truncate text-sm text-destructive">{error}</div>}
-            </div>
+              <details className="col-span-full border-t border-border pt-3">
+                <summary className="cursor-pointer text-xs text-muted-foreground">高级：请求地址 · 计费分组</summary>
+                <div className="mt-3 grid grid-cols-1 items-center gap-3 sm:grid-cols-[88px_minmax(0,1fr)]">
+                  <label htmlFor="key-base-url" className="text-xs text-muted-foreground">API 请求地址</label>
+                  <div className="flex gap-2"><input id="key-base-url" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setUrlTest(null); setConnectionTest(null); }} className={`${fieldClass} font-mono`} /><button type="button" onClick={testBaseUrl} className={ghostButtonClass}>测试</button></div>
+                  {urlTest && <p className="col-span-full text-xs text-muted-foreground">{urlTest.message}</p>}
+                  <label htmlFor="key-billing-group" className="text-xs text-muted-foreground">计费分组（可选）</label>
+                  <input id="key-billing-group" value={billingGroup} onChange={e => setBillingGroup(e.target.value)} className={fieldClass} placeholder="default" />
+                  {provider === 'custom' && <><p className="col-span-full text-xs text-muted-foreground">自定义供应商可以创建多个配置，请用不同配置名称区分额度、用途或上游。</p><label htmlFor="key-homepage" className="text-xs text-muted-foreground">官网链接</label><input id="key-homepage" value={homepage} onChange={e => setHomepage(e.target.value)} className={fieldClass} /></>}
+                </div>
+              </details>
+            </>}
           </div>
         </div>
-      )}
-    </div>
+        {error && <p role="alert" className="px-6 pb-3 text-sm text-destructive">{error}</p>}
+        <footer className="flex shrink-0 items-center gap-2 border-t border-border px-6 py-4">
+          {onDelete && <button type="button" onClick={onDelete} disabled={saving} className="rounded-md px-3 py-2 text-sm text-destructive">删除</button>}
+          <span className="flex-1" />
+          <button type="button" onClick={onCancel} disabled={saving} className={ghostButtonClass}>取消</button>
+          <button type="button" onClick={submit} disabled={!canSubmit} className="rounded-md bg-primary px-5 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">{saving ? '保存中...' : submitLabel}</button>
+        </footer>
+      </DialogContent>
+    </Dialog>
   );
 }

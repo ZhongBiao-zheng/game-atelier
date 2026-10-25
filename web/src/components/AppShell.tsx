@@ -140,6 +140,7 @@ export function AppShell() {
             />
           )}</Route>
           <Route path="/settings">{() => <Redirect to="/settings/providers" replace />}</Route>
+          <Route path="/settings/providers/new">{() => <ConsoleLayout />}</Route>
           <Route path="/settings/:page">{() => <ConsoleLayout />}</Route>
           <Route>
             <Redirect to="/" replace />

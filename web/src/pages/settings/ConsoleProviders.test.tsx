@@ -1,8 +1,9 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { ProviderRow } from '@/components/keys/ProviderRow';
 import { KeysPage } from './Keys';
 import { ModelRoutesSection } from './ModelRoutesSection';
+import { ProviderAddPage } from './ProviderAddPage';
 import * as keys from '@/api/keys';
 import * as gateway from '@/api/gateway';
 vi.mock('@/api/keys', async original => ({
@@ -37,6 +38,30 @@ it('局域网排第一且不显示额度', async () => {
   expect(screen.queryByLabelText('中转额度')).not.toBeInTheDocument();
   expect(rows[1]).toHaveTextContent('正常');
   expect(rows[0]).toHaveTextContent('未用过');
+  expect(screen.getByRole('link', { name: '添加供应商' })).toHaveAttribute('href', '/settings/providers/new');
+});
+it('添加页按供应商、中转和团队分组，支持查找与地址校验', async () => {
+  render(<ProviderAddPage />);
+  expect(await screen.findByText('已添加')).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: '供应商' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: '中转' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: '团队' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Tuzi/ })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /OpenAI-HK/ })).toBeInTheDocument();
+  fireEvent.change(screen.getByRole('textbox', { name: '查找供应商' }), { target: { value: 'Tuzi' } });
+  expect(screen.getByRole('button', { name: /Tuzi/ })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /OpenAI-HK/ })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole('textbox', { name: '自定义供应商地址' }), { target: { value: 'invalid' } });
+  fireEvent.click(screen.getByRole('button', { name: '继续' }));
+  expect(screen.getByRole('alert')).toHaveTextContent('请输入完整的 HTTP(S) API 请求地址');
+});
+it('custom 预设按域名识别已添加，不把所有中转都标为已添加', async () => {
+  vi.spyOn(keys, 'listKeys').mockResolvedValueOnce({ keys: [{ alias: '我的兔子', provider: 'custom',
+    base_url: 'https://api.tu-zi.com/v1', access_key: '***', secret_key: null, models: [], capabilities: [], notes: '', created_at: '' }] });
+  render(<ProviderAddPage />);
+  const tuzi = screen.getByRole('button', { name: /Tuzi/ });
+  await waitFor(() => expect(within(tuzi).getByText('已添加')).toBeInTheDocument());
+  expect(within(screen.getByRole('button', { name: /OpenAI-HK/ })).queryByText('已添加')).not.toBeInTheDocument();
 });
 describe('路由成员', () => {
   it('显示欠费时间与全部欠费，恢复后移除状态', async () => {

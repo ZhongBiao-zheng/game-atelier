@@ -33,6 +33,13 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.118.0', date: '2026-10-25', headline: '供应商添加与编辑更集中',
+    changes: [
+      { kind: 'feat', text: '新增供应商选择页，按供应商、中转和团队分组，提供 Tuzi 与 OpenAI-HK 预设' },
+      { kind: 'feat', text: '统一编辑弹窗，支持模型标签筛选、测试连接及高级配置' },
+    ],
+  },
+  {
     version: '5.117.0', date: '2026-10-25', headline: '供应商管理更清晰',
     changes: [
       { kind: 'feat', text: '供应商支持停用，保留配置并从模型选择和自动路由中移除' },

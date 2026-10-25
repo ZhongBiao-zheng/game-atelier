@@ -21,7 +21,7 @@ describe('局域网 Atelier 供应商', () => {
     vi.mocked(createKey).mockResolvedValue({ alias: '美术组网关' });
     render(<KeyForm onCreated={vi.fn()} onCancel={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '局域网 Atelier 局域网' }));
+    fireEvent.change(screen.getByLabelText('供应商选择'), { target: { value: 'atelier' } });
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: '美术组网关' } });
     fireEvent.change(screen.getByLabelText('网关地址'), { target: { value: 'http://192.168.1.20:5180' } });
     fireEvent.change(screen.getByLabelText('网关密钥'), { target: { value: 'atg_x' } });
