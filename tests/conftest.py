@@ -20,7 +20,8 @@ def isolated_data_root(tmp_path, monkeypatch):
     # 打开 Agent 开关会写 Codex 配置：指到不存在的目录，测试绝不碰真实的 ~/.codex/config.toml。
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home-absent"))
     # 服务启动会起价格同步线程：测试里关掉，绝不联外网。
-    from character_workflow.lib import tokendance_prices, tuzi_prices
+    from character_workflow.lib import openai_hk_prices, tokendance_prices, tuzi_prices
     monkeypatch.setattr(tokendance_prices, "start_background_sync", lambda: None)
     monkeypatch.setattr(tuzi_prices, "start_background_sync", lambda: None)
+    monkeypatch.setattr(openai_hk_prices, "start_background_sync", lambda: None)
     return root
