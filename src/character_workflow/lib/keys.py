@@ -36,6 +36,7 @@ Provider = Literal[
 ]
 Kind = Literal["portrait", "promo", "turnaround"]
 ModelModality = Literal["text", "image", "video", "audio"]
+RouteMode = Literal["order", "cheap", "round_robin"]
 ModelInputModality = Literal["text", "image", "video", "audio"]
 
 
@@ -118,6 +119,7 @@ class KeysDB(BaseModel):
     oss: OssConfig | None = None
     # 模型路由组内的供应商顺序覆盖：{模态: {路由 id: [alias, ...]}}，只存调整过的组。
     model_order: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
+    route_mode: dict[str, dict[str, RouteMode]] = Field(default_factory=dict)
 
 
 class DuplicateAliasError(Exception):
@@ -296,6 +298,14 @@ def delete_key(alias: str) -> None:
                 if any(item != alias for item in aliases)
             })
         }
+        from character_workflow.lib.model_routes import _routes
+        identities = db.model_copy(update={"keys": [
+            key.model_copy(update={"enabled": True}) for key in db.keys
+        ]})
+        active = {(route.modality, route.id) for route in _routes(identities)}
+        db.route_mode = {modality: modes for modality, routes in db.route_mode.items()
+                         if (modes := {identifier: mode for identifier, mode in routes.items()
+                                      if (modality, identifier) in active})}
         write_keys_db(db)
 
 

@@ -16,7 +16,7 @@ const keys = [
 ];
 
 const routes: ModelRoute[] = [{
-  id: 'gpt-image-2', name: 'gpt-image-2', modality: 'image',
+  id: 'gpt-image-2', name: 'gpt-image-2', modality: 'image', mode: 'order', candidate_alias: 'Tuzi',
   members: keys.map(item => ({
     alias: item.alias, provider: item.provider, base_url: item.base_url,
     model_id: item.models[0].id, name: item.models[0].name, protocol: null,
@@ -27,7 +27,7 @@ describe('「自动」供应商', () => {
   it('preserves Tuzi billing groups when deriving automatic route controls', () => {
     const model = 'gpt-image-2.5-flare';
     const tuzi = { ...key('Tuzi', 'custom', 'https://api.tu-zi.com', [model]), billing_group: 'default' };
-    const route: ModelRoute = { id: model, name: model, modality: 'image', members: [{
+    const route: ModelRoute = { id: model, name: model, modality: 'image', mode: 'order', candidate_alias: 'Tuzi', members: [{
       alias: tuzi.alias, provider: tuzi.provider, base_url: tuzi.base_url, billing_group: tuzi.billing_group,
       model_id: model, name: model, protocol: null,
     }] };

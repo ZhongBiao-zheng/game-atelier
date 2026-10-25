@@ -7,7 +7,7 @@ import { CONSOLE_NAV, ConsoleLayout, rememberCreativeLocation } from './ConsoleL
 vi.mock('@/api/keys', () => ({ listKeys: async () => ({ keys: [] }) }));
 vi.mock('./ProvidersPage', () => ({ ProvidersPage: () => <><h1>供应商</h1><p>providers-content</p></> }));
 vi.mock('./ProviderAddPage', () => ({ ProviderAddPage: () => <><h1>添加</h1><p>provider-add-content</p></> }));
-vi.mock('./RoutesPage', () => ({ RoutesPage: () => <p>routes-content</p> }));
+vi.mock('./RoutesPage', () => ({ RoutesPage: () => <><h1>路由</h1><p>routes-content</p></> }));
 vi.mock('./GatewayPage', () => ({ GatewayPage: () => <p>gateway-content</p> }));
 vi.mock('./usage/UsagePage', () => ({ UsagePage: () => <p>usage-content</p> }));
 vi.mock('./LibrariesPage', () => ({ LibrariesPage: () => <p>libraries-content</p> }));

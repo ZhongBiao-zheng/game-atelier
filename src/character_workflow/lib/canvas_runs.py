@@ -448,12 +448,13 @@ def recover_canvas_transactions_unlocked(project_id: str) -> None:
 
 
 def _selected_key_and_model(
-    selection: CanvasGenerationModelSelection, modality: str,
+    selection: CanvasGenerationModelSelection, modality: str, *, params: dict | None = None,
+    route_order: list[str] | None = None, consume: bool = False,
 ) -> tuple[KeySpec, ModelSpec] | None:
     """偏好里的模型选择：指定厂商按 alias 找；alias 为空即「自动」，按路由解析。"""
     if selection.alias is None:
         try:
-            return resolve_auto(modality, selection.model)
+            return resolve_auto(modality, selection.model, params=params, route_order=route_order, consume=consume)
         except NoSuchRouteError:
             return None
     key = next((item for item in read_keys_db().keys if item.alias == selection.alias), None)
@@ -626,7 +627,7 @@ def _resolve_default_image_model() -> tuple[KeySpec, ModelSpec, JobParams]:
             "画布生成偏好文件损坏，请先在画布中重新保存生成偏好。",
         ) from error
     if preference.selection is not None:
-        selected = _selected_key_and_model(preference.selection, "image")
+        selected = _selected_key_and_model(preference.selection, "image", params=preference.params)
         if selected is not None and _supports_canvas_image_generation(*selected):
             key, model = selected
             return key, model, _normalized_image_preference_params(key, model, preference.params)
@@ -658,12 +659,16 @@ def _resolve_default_image_edit_model() -> tuple[KeySpec, ModelSpec]:
 
 
 def _resolve_key_and_model(
-    draft: CanvasGenerationDraft,
+    draft: CanvasGenerationDraft, *, selection_params: dict | None = None,
+    route_order: list[str] | None = None, consume_route: bool = True,
 ) -> tuple[KeySpec, ModelSpec, JobKind]:
     if draft.alias is None:
         # 不指定厂商 =「自动」：draft.model 是路由 id，按组内顺序解析出实际 KEY 与模型。
         try:
-            key, model = resolve_auto(draft.mode, draft.model)
+            key, model = resolve_auto(
+                draft.mode, draft.model, params=selection_params or draft.params.model_dump(exclude_none=True),
+                route_order=route_order, consume=consume_route,
+            )
         except NoSuchRouteError as error:
             raise ValueError(str(error)) from None
     else:
@@ -1416,14 +1421,28 @@ def prepare_canvas_generation(
     *,
     version_bindings: dict[str, list[str]] | None = None,
     resolve_media_paths: bool = True,
+    consume_route: bool = False,
 ) -> PreparedCanvasGeneration:
     """Resolve one draft without writing a Job or making a provider request."""
     draft = _draft_for_node(surface)
     if draft is None:
         raise ValueError("当前节点没有可提交的生成设置")
-    key, model, kind = _resolve_key_and_model(draft)
-    normalized, job_params, effective_count = _normalized_params(draft, requested_count, key, model)
     inputs = _resolve_inputs(document, surface, draft, version_bindings)
+    # 图片上限按模型族定义；在选路估价前使用与实际提交一致的分组裁剪结果。
+    pricing_inputs = _trim_group_images_to_limit(
+        ModelSpec(id=draft.model, name=draft.model, modality=draft.mode),
+        JobKind(draft.mode), inputs, draft.params.model_copy(deep=True),
+    )
+    selection_params = {**draft.params.model_dump(exclude_none=True), "n": requested_count}
+    for modality, field in (("image", "reference_images"), ("video", "reference_videos"),
+                            ("audio", "reference_audios")):
+        selection_params[field] = [item.version_id for item in pricing_inputs if item.kind == modality]
+    route_order: list[str] = []
+    key, model, kind = _resolve_key_and_model(
+        draft, selection_params=selection_params, route_order=route_order, consume_route=consume_route,
+    )
+    normalized, job_params, effective_count = _normalized_params(draft, requested_count, key, model)
+    job_params.route_order = route_order or None
     if _uses_video_frame_slots(draft) or any(
         item.source in {"first_frame", "last_frame"} for item in inputs
     ):
@@ -1501,7 +1520,9 @@ def submit_canvas_run(
         surface = next((node for node in current.nodes if node.id == surface_node_id), None)
         if surface is None:
             raise KeyError(surface_node_id)
-        prepared = prepare_canvas_generation(project_id, current, surface, requested_count)
+        prepared = prepare_canvas_generation(
+            project_id, current, surface, requested_count, consume_route=True,
+        )
         return commit_canvas_generation_under_lock(project_id, current, surface, prepared)
 
 
@@ -2146,7 +2167,10 @@ def _upscale_auto_candidate(key: KeySpec, model: ModelSpec) -> bool:
     )
 
 
-def _resolve_upscale_model(target: str) -> tuple[KeySpec, ModelSpec, str | None, str]:
+def _resolve_upscale_model(
+    target: str, *, width: int = 1024, height: int = 1024,
+    route_order: list[str] | None = None, consume: bool = False,
+) -> tuple[KeySpec, ModelSpec, str | None, str]:
     """Key / model / quality / prompt for an AI 高清 run, following that tier's preference.
 
     档位固定了模型就只用它，失效报 stale；没固定则自动挑：默认 Key 优先、同一 Key 内 Pro 优先。
@@ -2162,7 +2186,15 @@ def _resolve_upscale_model(target: str) -> tuple[KeySpec, ModelSpec, str | None,
         ) from error
     keys = _keys_default_first()
     if tier.selection is not None:
-        selected = _selected_key_and_model(tier.selection, "image")
+        preview = _selected_key_and_model(tier.selection, "image", params={
+            "n": 1, "quality": tier.quality, "resolution": target, "reference_images": ["source"],
+        })
+        params = {"n": 1, "quality": tier.quality, "resolution": target}
+        if preview is not None:
+            params.update(_upscale_size_params(*preview, target, width, height, tier.quality))
+        params["reference_images"] = ["source"]
+        selected = _selected_key_and_model(tier.selection, "image", params=params,
+                                          route_order=route_order, consume=consume)
         if selected is not None and _upscale_model_eligible(*selected):
             return *selected, tier.quality, tier.prompt
         raise CanvasRunCommandError(
@@ -2264,7 +2296,10 @@ def submit_upscale_run(
                 "canvas_upscale_not_needed",
                 f"原图长边已达到 {max(width, height)}px，不需要放大到 {target}。",
             )
-        key, model, quality, prompt = _resolve_upscale_model(target)
+        route_order: list[str] = []
+        key, model, quality, prompt = _resolve_upscale_model(
+            target, width=width, height=height, route_order=route_order, consume=True,
+        )
         try:
             job_params = _normalized_image_preference_params(
                 key, model, _upscale_size_params(key, model, target, width, height, quality),
@@ -2275,6 +2310,10 @@ def submit_upscale_run(
         job_params.reference_images = paths["image"]
         normalized = job_params.model_dump(mode="json", exclude_none=True)
         normalized.pop("reference_images", None)
+        if route_order:
+            selection = read_canvas_ui_preferences().upscale.tiers[target].selection
+            job_params.route_id = selection.model
+            job_params.route_order = route_order
         normalized.update({
             "preset_id": _UPSCALE_PROMPT_PRESET_ID,
             "preset_version": _UPSCALE_PROMPT_PRESET_VERSION,

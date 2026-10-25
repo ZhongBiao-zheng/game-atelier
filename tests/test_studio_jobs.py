@@ -226,3 +226,23 @@ def test_studio_rejects_explicit_disabled_provider_before_creating_job(client):
     assert response.status_code == 422
     assert response.json()["detail"] == "供应商已停用"
     assert jobs.list_jobs() == []
+
+
+def test_auto_route_snapshot_is_server_owned_and_survives_prompt_param_replacement(client):
+    from character_workflow.lib import jobs
+    response = client.post("/api/studio/jobs", json={
+        "prompt": "猫", "model": "gpt-image-2", "params": {"n": 1,
+            "route_id": "forged", "route_order": ["forged"], "route_tried": ["forged"]},
+    })
+    assert response.status_code == 201
+    job = response.json()
+    assert job["params"]["route_id"] == "gpt-image-2"
+    assert job["params"]["route_order"] == ["default"]
+    assert job["params"].get("route_tried") is None
+    for params in ({"n": 2}, {"n": 1, "route_id": "other", "route_order": ["other"], "route_tried": ["other"]}):
+        patched = client.post(f"/api/prompt/{job['job_id']}", json={"params": params})
+        assert patched.status_code == 200
+        stored = jobs.read_job(job["job_id"])
+        assert stored.params.route_id == "gpt-image-2"
+        assert stored.params.route_order == ["default"]
+        assert stored.params.route_tried is None

@@ -28,6 +28,7 @@ GET /api/keys/{alias}/reveal
 POST /api/keys/models-preview
 GET /api/models
 PUT /api/models/order
+PUT /api/models/mode
 GET /api/gateway
 PUT /api/gateway
 POST /api/gateway/keys
@@ -154,7 +155,7 @@ GET /openapi.json
 
 LOCAL_MANAGEMENT = frozenset({
     "/api/config", "/api/keys", "/api/keys/{alias}", "/api/keys/{alias}/reveal",
-    "/api/keys/models-preview", "/api/models/order", "/api/folder-picker", "/api/onboarding/status",
+    "/api/keys/models-preview", "/api/models/order", "/api/models/mode", "/api/folder-picker", "/api/onboarding/status",
     "/api/onboarding/data-root",
     # 局域网共享：开关会让本机对局域网开端口，密钥与用量也只给本机页面（ADR-0025）。
     "/api/gateway", "/api/gateway/keys", "/api/gateway/keys/{key_id}",

@@ -184,6 +184,8 @@ class JobParams(BaseModel):
     route_id: str | None = Field(default=None, max_length=200)
     # 本次已经试过、因确定没执行的失败被换掉的供应商别名，按顺序。
     route_tried: list[str] | None = None
+    # 提交时冻结的供应商顺序；失败切换不受后续路由设置与其它任务影响。
+    route_order: list[str] | None = None
     # 厂商订单首次获取立即落盘。Tuzi 支持续查；Seedance 留供核对，不自动恢复或重提。
     # tuzi_async is a historical ownership tag, never a supported submission protocol.
     # 局域网 Atelier：网关那边实际出图的成员别名（ADR-0025）。

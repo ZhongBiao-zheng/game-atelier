@@ -83,7 +83,10 @@ def _switch_route(job_id: str, error: BaseException) -> bool:
     modality = job.kind.value
     model_routes.cool_down(modality, job.alias, reason, seconds=getattr(error, "retry_after", None))
     tried = [*(params.route_tried or []), job.alias]
-    while (candidate := model_routes.next_member(modality, params.route_id, tried)) is not None:
+    while (candidate := model_routes.next_member(
+        modality, params.route_id, tried, route_order=params.route_order,
+        params=params.model_dump(exclude_none=True),
+    )) is not None:
         key, model = candidate
         next_params = params.model_dump(exclude_none=True)
         # 预计费用按新渠道重算（「自动」任务的预计由 runner 补，不是提交方冻结的）。

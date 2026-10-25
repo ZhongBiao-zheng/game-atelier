@@ -348,3 +348,14 @@ def test_concurrent_key_patches_preserve_both_changes(isolated_data_root, monkey
         first.result(timeout=5)
         second.result(timeout=5)
     assert [key.enabled for key in original_read().keys] == [False, False]
+
+
+def test_delete_key_keeps_disabled_route_mode_and_cleans_removed_route():
+    from character_workflow.lib import model_routes
+    for alias, model in (("disabled", "gpt-image-2"), ("removed", "nano-banana")):
+        keys.add_key(keys.KeySpec(alias=alias, provider="openai", access_key="test",
+            created_at="2026-10-25", models=[keys.ModelSpec(id=model, name=model, modality="image")]))
+        model_routes.set_route_mode("image", model, "cheap")
+    keys.patch_key("disabled", {"enabled": False})
+    keys.delete_key("removed")
+    assert keys.read_keys_db().route_mode == {"image": {"gpt-image-2": "cheap"}}

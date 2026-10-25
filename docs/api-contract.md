@@ -66,17 +66,18 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 
 ### 模型路由（5.90.0）
 
-- `GET /api/models` → `{models: [{id, name, modality, members: [{alias, provider, base_url, billing_group, model_id, name, protocol}]}]}`；`members` 按出图顺序，第一个就是「自动」实际使用的。`billing_group` 同步进网关 `via`，能力和估价按成员分组判断。
+- `GET /api/models` → `{models: [{id, name, modality, mode, candidate_alias, members: [{alias, provider, base_url, billing_group, model_id, name, protocol, estimate_cny}]}]}`；`members` 按当前方式排序，`candidate_alias` 是跳过欠费/冷却后的实际候选（无可用成员为 null；仅短时冷却可兜底）。`mode` 为 `order | cheap | round_robin`。只有 cheap 返回默认参数的人民币预估，未知或其他方式为 null；实际提交按本次参数估价。列表预览不推进轮流游标。`billing_group` 同步进网关 `via`，能力和估价按成员分组判断。
 - `PUT /api/models/order`，body `{modality, id, aliases}`：`aliases` 必须恰好是该组现有成员的一个排列，否则 422；组不存在 404。属管理权限。
 - 创作台 `POST /api/studio/jobs`、画布草稿 / 生成偏好 `selection`、Agent `CanvasAgentModelRef`：`alias` 为空即「自动」，`model` 为路由 id；Job 与运行快照里的 `alias` 始终是实际使用的 KEY。
-- `JobParams.route_id`：「自动」提交时由服务端写入（浏览器传入的会被覆盖）；`route_tried`：失败切换时换掉的别名。运行快照的 `alias` 是提交时解析的那家，失败切换后以 Job 的 `alias` 为准。
+- `PUT /api/models/mode`，body `{modality, id, mode}`：返回更新后的路由对象；非法方式 422、组不存在 404。属管理权限。非默认方式存 `keys.json.route_mode[modality][id]`，order 删除覆盖；停用保留，删除最后一个成员才清理。
+- `JobParams.route_id`：「自动」提交时由服务端写入（浏览器传入的会被覆盖）；`route_order`：本次自动选择冻结的候选 alias 顺序；`route_tried`：失败切换时换掉的别名。三项都由服务端写入并在通用参数编辑时保留；失败切换只沿快照实时过滤，不重新排序或消费轮流。运行快照的 `alias` 是提交时解析的那家，失败切换后以 Job 的 `alias` 为准。
 
 ### 局域网网关协议 v2（ADR-0025）
 
 网关服务在独立端口（默认 5180）只提供下列接口，全部要求 `Authorization: Bearer <网关密钥>`，不认 cookie；其他路径 404。
 
 - `GET /gateway/v1/info` → `{name, version, protocol: 2}`。协议版本不一致时接入端直接报错，不做兼容。
-- `GET /gateway/v1/models` → 与 `GET /api/models` 同形，含全部模态；按当前密钥的模型与 alias 权限过滤，排除 atelier 成员，视频成员保留 `protocol`。
+- `GET /gateway/v1/models` → 返回 `{models: [{id, name, modality, members}]}`，成员为供应商公开信息，含全部模态；控制台专用的 `mode / candidate_alias / estimate_cny` 不属于此目录协议；按当前密钥的模型与 alias 权限过滤，排除 atelier 成员，视频成员保留 `protocol`。
 - `GET /gateway/v1/me` → `{name, limits: [{period, cap_cny, used_cny, reserved_cny, left_cny, resets_at}], month_charged_cny, month_calls}`，只读当前密钥。
 - `POST /gateway/v1/tasks`：multipart，字段 `request`（JSON：`kind`、`model` 路由 id、`prompt`、`n`、`size`、`params`）+ 素材文件。
   `kind` 为 image / image_edit / layer_split / video / audio；文件组 `ref_0`…`ref_15`、`mask`、

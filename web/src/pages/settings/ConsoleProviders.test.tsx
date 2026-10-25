@@ -18,9 +18,9 @@ vi.mock('@/api/usage', () => ({
   fetchKeyLastUsed: async () => ({ local: new Date().toISOString() }),
 }));
 vi.mock('@/api/models', () => ({
-  listModelRoutes: async () => [{ id: 'gpt', name: 'GPT', modality: 'image', members: [
+  listModelRoutes: async () => [{ id: 'gpt', name: 'GPT', modality: 'image', mode: 'order', candidate_alias: 'B', members: [
     { alias: 'A', provider: 'custom' }, { alias: 'B', provider: 'custom' },
-  ] }], setModelRouteOrder: vi.fn(),
+  ] }], setModelRouteOrder: vi.fn(), setModelRouteMode: vi.fn(),
 }));
 vi.mock('@/api/gateway', () => ({
   fetchGatewayMembers: async () => ({

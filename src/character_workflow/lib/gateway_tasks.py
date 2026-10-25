@@ -119,6 +119,7 @@ class GatewayTask(BaseModel):
     member_base_url: str | None = None
     member_model_id: str | None = None
     route_tried: list[str] = Field(default_factory=list)
+    route_order: list[str] | None = None
     warnings: list[str] = Field(default_factory=list)
     actual_size: str | None = None
     actual_cost_cny: float | None = None
@@ -255,7 +256,13 @@ def submit(
                          if task.key_id == key.id and task.idempotency_key == idempotency_key), None)
         if existing:
             return existing
-        picked = _pick_member(model, [], key, modality_for(kind))
+        route_order: list[str] = []
+        selection_params = {**params, "n": n, "size": size}
+        for group, field in (("ref", "reference_images"), ("video", "reference_videos"),
+                             ("audio", "reference_audios")):
+            selection_params[field] = [name for name, _ in files.get(group, [])]
+        picked = _pick_member(model, [], key, modality_for(kind), params=selection_params,
+                              freeze_order=route_order, consume=True)
         if picked is None:
             raise GatewayRequestError(503, "网关没有可用的供应商")
         estimate = _estimate(picked, n, size, params, kind, bool(files.get("video")))
@@ -275,6 +282,9 @@ def submit(
             task_id=task_id, key_id=key.id, key_name=key.name, idempotency_key=idempotency_key,
             route_id=model, kind=kind, prompt=prompt, n=n, size=size, params=params, files=stored,
             created_at=now, updated_at=now, estimated_cny=estimate, reserved_cny=estimate or 0,
+            route_order=route_order, member_alias=picked[0].alias,
+            member_provider=picked[0].provider, member_base_url=picked[0].base_url,
+            member_model_id=picked[1].id,
         ))
     pump()
     return task
@@ -397,7 +407,8 @@ def run_task(task: GatewayTask) -> GatewayTask:
         except GatewayRequestError as error:
             return _finish(_read(task_id), status="failed", error=error.message)
         try:
-            picked = _pick_member(task.route_id, tried, owner, modality)
+            picked = _pick_member(task.route_id, tried, owner, modality,
+                                  route_order=task.route_order, params=task.params)
         except GatewayRequestError as error:
             return _finish(_read(task_id), status="failed", error=error.message,
                            error_kind="unavailable")
@@ -477,24 +488,30 @@ def run_task(task: GatewayTask) -> GatewayTask:
                 continue
 
 
-def _pick_member(route_id: str, tried: list[str], owner: GatewayKeyRecord, modality="image"):
+def _pick_member(
+    route_id: str, tried: list[str], owner: GatewayKeyRecord, modality="image", *,
+    params: dict | None = None, route_order: list[str] | None = None,
+    freeze_order: list[str] | None = None, consume: bool = False,
+):
     try:
         route = model_routes.find_route(modality, route_id)
     except model_routes.NoSuchRouteError:
         return None
-    gateways = [m.alias for m in route.members
+    excluded = [m.alias for m in route.members
                 if m.provider == GATEWAY_PROVIDER or not gateway_access.member_allowed(owner, m.alias)]
-    picked = model_routes.next_member(modality, route_id, exclude=[*gateways, *tried])
-    members = [m for m in _gateway_members(route) if gateway_access.member_allowed(owner, m.alias)]
-    if picked is not None or tried or not members:
-        return picked
-    members = [m for m in members if not model_routes.balance_blocked(modality, m.alias)]
-    if not members:
-        raise GatewayRequestError(503, f"{route_id} 的供应商都欠费了")
-    # 第一次选择时全组都在冷却：只兜底非欠费成员。
-    key = keys.find_by_alias(members[0].alias)
-    model = next((item for item in key.models if item.id == members[0].model_id), None) if key else None
-    return (key, model) if key and model else None
+    if len(excluded) == len(route.members):
+        return None
+    if route_order is None and not tried:
+        try:
+            return model_routes.resolve_auto(modality, route_id, params=params, exclude=excluded,
+                                             route_order=freeze_order, consume=consume)
+        except model_routes.InsufficientBalanceError as error:
+            raise GatewayRequestError(503, str(error)) from error
+    selected = model_routes.next_member(modality, route_id, [*excluded, *tried],
+                                        route_order=route_order, params=params, fallback=not tried)
+    if selected is None and not tried:
+        raise GatewayRequestError(503, str(model_routes.InsufficientBalanceError(route_id)))
+    return selected
 
 
 def _exhausted(task_id, tried, warnings, switched_from, last_error) -> GatewayTask:

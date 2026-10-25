@@ -18,7 +18,7 @@ def average_output_tokens(key_id: str) -> int:
 
 
 class TextCall:
-    def __init__(self, owner, route_id, picked, body_size: int, stream: bool):
+    def __init__(self, owner, route_id, picked, body_size: int, stream: bool, *, route_order=None):
         key, model = picked
         now = gateway_tasks._now().isoformat()
         with gateway_tasks._lock:
@@ -28,7 +28,7 @@ class TextCall:
             gateway_quota.admit(owner, estimate or 0)
             self.task = gateway_tasks.GatewayTask(
                 task_id=uuid.uuid4().hex, idempotency_key="", key_id=owner.id, key_name=owner.name,
-                kind="text", route_id=route_id, prompt="", n=0, status="running",
+                kind="text", route_id=route_id, route_order=route_order, prompt="", n=0, status="running",
                 created_at=now, updated_at=now, estimated_cny=estimate, reserved_cny=estimate or 0,
             )
             gateway_quota._inflight[self.task.task_id] = (owner.id, estimate or 0)

@@ -92,7 +92,7 @@ export function ConsoleLayout() {
       </nav>
     </aside>
     <main className="console-panel m-2 min-w-0 flex-1 space-y-6 rounded-2xl border border-border bg-panel p-4 md:p-6">
-      {current.path !== '/settings/providers' && <div aria-label="面包屑" className="flex items-center gap-1.5 text-sm">
+      {!['/settings/providers', '/settings/routes'].includes(current.path) && <div aria-label="面包屑" className="flex items-center gap-1.5 text-sm">
         {groupLabel && <span className="text-subtle-foreground">{groupLabel} /</span>}
         <h1 className="text-sm font-semibold">{current.label}</h1>
         {current.hint && <button type="button" title={current.hint} aria-label={current.hint}

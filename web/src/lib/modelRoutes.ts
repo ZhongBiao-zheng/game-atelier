@@ -1,8 +1,8 @@
 /** 「自动」供应商：把路由组包装成一个虚拟 KeyView，放在厂商列表第一项。
  *
- * 选它时模型 id 就是路由 id，提交不带 alias，由服务端按组内顺序解析实际 KEY。
+ * 选它时模型 id 就是路由 id，提交不带 alias，由服务端按路由方式解析实际 KEY。
  * 能力面板取组内全部成员的交集，保证换到任何成员时参数都合法；尺寸归一、估价等
- * 「按实际渠道算」的逻辑用第一个成员（一期就是它出图）。
+ * 「按渠道算」的预览用当前排序的第一个成员；最终选择取决于本次提交参数与可用状态。
  */
 import type { KeyModel, KeyView } from '@/api/keys';
 import type { ModelRoute, ModelRouteMember } from '@/api/models';

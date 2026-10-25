@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 import requests
@@ -28,6 +28,7 @@ from character_workflow.lib.keys import (
     keys_lock,
     KeySpec,
     ModelModality,
+    RouteMode,
     ModelSpec,
     model_modality,
     read_keys_db,
@@ -69,6 +70,7 @@ class ModelRoute:
     id: str
     modality: ModelModality
     members: tuple[RouteMember, ...]
+    mode: RouteMode = "order"
 
     @property
     def name(self) -> str:
@@ -113,6 +115,7 @@ def _routes(database: KeysDB) -> list[ModelRoute]:
     return [
         ModelRoute(
             id=identifier, modality=modality,
+            mode=database.route_mode.get(modality, {}).get(identifier, "order"),
             members=_ordered(members, database.model_order.get(modality, {}).get(identifier, [])),
         )
         for (modality, identifier), members in grouped.items()
@@ -133,28 +136,122 @@ def find_route(modality: ModelModality, identifier: str) -> ModelRoute:
     raise NoSuchRouteError(modality, identifier)
 
 
-def resolve_auto(modality: ModelModality, identifier: str) -> tuple[KeySpec, ModelSpec]:
-    """「自动」选择：组内第一个不在冷却中的成员；全都在冷却时只兜底非欠费成员。"""
-    route = find_route(modality, identifier)
-    member = next((m for m in route.members if not _cooling(modality, m.alias)), None)
-    if member is None:
-        member = next((m for m in route.members if not balance_blocked(modality, m.alias)), None)
-    if member is None:
-        raise InsufficientBalanceError(identifier)
-    return _member_key_and_model(member)
+_round_robin: dict[tuple[str, str, str], int] = {}
+_selection_lock = threading.RLock()
+
+
+def _cursor_key(route: ModelRoute) -> tuple[str, str, str]:
+    return str(data_root.keys_file()), route.modality, route.id
+
+
+def member_estimate(member: RouteMember, modality: ModelModality, params: dict) -> float | None:
+    from character_workflow.lib.generation_pricing import estimate_submission
+
+    key, model = _member_key_and_model(member)
+    return estimate_submission(key, model.id, modality, params)
+
+
+def ordered_members(route: ModelRoute, *, params: dict | None = None) -> tuple[RouteMember, ...]:
+    """只预览排序，不消费轮流游标；未知价格保持自定义顺序。"""
+    if route.mode == "cheap":
+        estimates = {m.alias: member_estimate(m, route.modality, params or {}) for m in route.members}
+        return tuple(sorted(route.members, key=lambda m: (
+            estimates[m.alias] is None, estimates[m.alias] or 0,
+        )))
+    if route.mode == "round_robin" and route.members:
+        with _selection_lock:
+            cursor = _round_robin.get(_cursor_key(route), 0) % len(route.members)
+            return route.members[cursor:] + route.members[:cursor]
+    return route.members
+
+
+def _candidate(modality: ModelModality, members: tuple[RouteMember, ...], *, fallback: bool):
+    member = next((m for m in members if not _cooling(modality, m.alias)), None)
+    if member is None and fallback:
+        member = next((m for m in members if not balance_blocked(modality, m.alias)), None)
+    return member
+
+
+def resolve_auto(
+    modality: ModelModality, identifier: str, *, params: dict | None = None,
+    route_order: list[str] | None = None, consume: bool = True,
+    exclude: list[str] | None = None,
+) -> tuple[KeySpec, ModelSpec]:
+    """选择并可选地写出本次冻结顺序；选择与轮流游标递增在同一个锁内。"""
+    with _selection_lock:
+        route = find_route(modality, identifier)
+        route = replace(route, members=tuple(m for m in route.members if m.alias not in (exclude or [])))
+        members = ordered_members(route, params=params)
+        member = _candidate(modality, members, fallback=True)
+        if member is None:
+            raise InsufficientBalanceError(identifier)
+        selected = _member_key_and_model(member)
+        if route_order is not None:
+            index = members.index(member)
+            route_order[:] = [m.alias for m in members[index:] + members[:index]]
+        if consume and route.mode == "round_robin":
+            _round_robin[_cursor_key(route)] = _round_robin.get(_cursor_key(route), 0) + 1
+        return selected
+
+
+def consume_frozen_route(modality: ModelModality, identifier: str, mode: RouteMode) -> None:
+    """批量确认消费一次选择；执行内容保持预检时已确认的首选和顺序。"""
+    with _selection_lock:
+        route = find_route(modality, identifier)
+        if mode == "round_robin":
+            _round_robin[_cursor_key(route)] = _round_robin.get(_cursor_key(route), 0) + 1
 
 
 def next_member(
-    modality: ModelModality, identifier: str, exclude: list[str],
+    modality: ModelModality, identifier: str, exclude: list[str], *,
+    route_order: list[str] | None = None, params: dict | None = None, fallback: bool = False,
 ) -> tuple[KeySpec, ModelSpec] | None:
-    """失败切换用：组内下一个没试过、不在冷却中的成员；没有就返回 None（不再换）。"""
+    """冻结顺序优先；只过滤当前有效成员，不重排已有任务、不消费轮流游标。"""
     try:
         route = find_route(modality, identifier)
     except NoSuchRouteError:
         return None
-    member = next((m for m in route.members
-                   if m.alias not in exclude and not _cooling(modality, m.alias)), None)
+    if route_order is None:
+        members = ordered_members(route, params=params)
+    else:
+        current = {member.alias: member for member in route.members}
+        members = tuple(current[alias] for alias in route_order if alias in current)
+    members = tuple(member for member in members if member.alias not in exclude)
+    member = _candidate(modality, members, fallback=fallback)
     return _member_key_and_model(member) if member else None
+
+
+def route_preview(route: ModelRoute) -> tuple[tuple[RouteMember, ...], str | None, dict[str, float | None]]:
+    # 页面估价采用统一默认提交意图；真正提交始终使用本次参数。
+    params = {"n": 1} if route.modality != "video" else {
+        "n": 1, "duration": 5, "resolution": "720p", "ratio": "16:9",
+    }
+    with _selection_lock:
+        members = ordered_members(route, params=params)
+        candidate = _candidate(route.modality, members, fallback=True)
+        estimates = {m.alias: member_estimate(m, route.modality, params)
+                     if route.mode == "cheap" else None for m in members}
+        return members, candidate.alias if candidate else None, estimates
+
+
+def set_route_mode(modality: ModelModality, identifier: str, mode: RouteMode) -> ModelRoute:
+    if mode not in ("order", "cheap", "round_robin"):
+        raise ValueError("未知路由方式")
+    with keys_lock():
+        route = find_route(modality, identifier)
+        database = read_keys_db()
+        modes = database.route_mode.setdefault(modality, {})
+        if mode == "order":
+            modes.pop(identifier, None)
+            if not modes:
+                database.route_mode.pop(modality, None)
+        else:
+            modes[identifier] = mode
+        write_keys_db(database)
+        if route.mode != mode:
+            with _selection_lock:
+                _round_robin.pop(_cursor_key(route), None)
+        return find_route(modality, identifier)
 
 
 def _member_key_and_model(member: RouteMember) -> tuple[KeySpec, ModelSpec]:

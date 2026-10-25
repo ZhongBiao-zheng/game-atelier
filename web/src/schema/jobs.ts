@@ -44,6 +44,7 @@ export interface JobParams {
   route_id?: string;
   /** 已经试过并被换掉的供应商别名。 */
   route_tried?: string[];
+  route_order?: string[];
   /** 局域网 Atelier：网关那边实际出图的成员别名。 */
   gateway_member?: string | null;
   /** 厂商订单；Web 只读。Tuzi 支持续查，Seedance 留供核对，不自动重提。 */

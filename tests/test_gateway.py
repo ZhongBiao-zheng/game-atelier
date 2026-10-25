@@ -278,3 +278,19 @@ def test_gateway_server_starts_and_stops_in_a_thread(isolated_data_root):
     finally:
         server.stop()
     assert not server.running
+
+
+def test_round_robin_submit_freezes_once_and_run_and_idempotence_do_not_advance(client, monkeypatch):
+    model_routes.set_route_mode("image", "gpt-image-2", "round_robin")
+    calls = []
+    monkeypatch.setattr(callers, "dispatch", _dispatch(calls))
+    first = _submit(client, key="round-one").json()["task_id"]
+    assert _submit(client, key="round-one").json()["task_id"] == first
+    task = gateway_tasks.get_task(client.record.id, first)
+    assert task.member_alias == "A" and task.route_order == ["A", "B"]
+    gateway_tasks.run_task(task)
+    second = _submit(client, key="round-two").json()["task_id"]
+    task = gateway_tasks.get_task(client.record.id, second)
+    assert task.member_alias == "B" and task.route_order == ["B", "A"]
+    gateway_tasks.run_task(task)
+    assert [call["alias"] for call in calls] == ["A", "B"]

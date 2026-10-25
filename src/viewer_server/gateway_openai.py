@@ -50,20 +50,14 @@ def error_response(error: gateway_tasks.GatewayRequestError) -> JSONResponse:
                         status_code=error.status, headers=headers)
 
 
-def _pick(owner, route_id, tried):
-    route = gateway_access.check_route(owner, "text", route_id)
-    members = [m for m in route.members if m.provider != "atelier"
-               and gateway_access.member_allowed(owner, m.alias)]
-    excluded = [m.alias for m in route.members if m not in members]
-    candidate = model_routes.next_member("text", route_id, [*excluded, *tried])
-    if candidate is not None:
-        return candidate
-    eligible = [m for m in members if not model_routes.balance_blocked("text", m.alias)]
-    if not eligible:
-        raise gateway_tasks.GatewayRequestError(503, f"{route_id} 的供应商都欠费了")
-    if not tried:
-        return model_routes._member_key_and_model(eligible[0])
-    raise gateway_tasks.GatewayRequestError(503, "网关的供应商都不可用")
+def _pick(owner, route_id, tried, *, params=None, route_order=None, freeze_order=None, consume=False):
+    gateway_access.check_route(owner, "text", route_id)
+    picked = gateway_tasks._pick_member(route_id, tried, owner, "text", params=params,
+                                        route_order=route_order, freeze_order=freeze_order,
+                                        consume=consume)
+    if picked is None:
+        raise gateway_tasks.GatewayRequestError(503, "网关的供应商都不可用")
+    return picked
 
 
 def _reason(error):
@@ -147,8 +141,9 @@ def _check_media_urls(value):
 async def _relay(request, owner, endpoint):
     payload, body_size = await _body(request)
     route_id, streaming = payload["model"], payload.get("stream", False)
-    picked = _pick(owner, route_id, [])
-    call = TextCall(owner, route_id, picked, body_size, streaming)
+    route_order: list[str] = []
+    picked = _pick(owner, route_id, [], params=payload, freeze_order=route_order, consume=True)
+    call = TextCall(owner, route_id, picked, body_size, streaming, route_order=route_order)
     if streaming and endpoint == "chat/completions":
         payload["stream_options"] = {"include_usage": True, **payload.get("stream_options", {})}
     handed_off = False
@@ -200,7 +195,7 @@ async def _relay(request, owner, endpoint):
                         503, gateway_tasks._safe_error(error),
                     ) from error
                 model_routes.cool_down("text", key.alias, reason)
-                picked = _pick(owner, route_id, call.task.route_tried)
+                picked = _pick(owner, route_id, call.task.route_tried, route_order=route_order, params=payload)
                 continue
             except BaseException:
                 await stack.aclose()

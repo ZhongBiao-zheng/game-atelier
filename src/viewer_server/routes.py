@@ -227,6 +227,7 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                     "provider_task_protocol", "provider_task_ids", "video_submission_attempts",
                     "mask_image", "image_edit", "mj_submission_ids", "mj_submit_uncertain",
                     "evolink_state", "edit_inputs", "edit_prompt",
+                    "route_id", "route_order", "route_tried",
                 ):
                     if owned in existing_params:
                         value[owned] = existing_params[owned]
@@ -805,14 +806,16 @@ def list_keys() -> dict:
 
 
 def _route_payload(route: model_routes.ModelRoute) -> dict:
+    members, candidate_alias, estimates = model_routes.route_preview(route)
     return {
+        "mode": route.mode, "candidate_alias": candidate_alias,
         "id": route.id, "name": route.name, "modality": route.modality,
         "members": [
             {"alias": m.alias, "provider": m.provider, "base_url": m.base_url,
-             "billing_group": m.billing_group,
+             "billing_group": m.billing_group, "estimate_cny": estimates[m.alias],
              "model_id": m.model_id, "name": m.name, "protocol": m.protocol,
              **({"via": list(m.via)} if m.via else {})}
-            for m in route.members
+            for m in members
         ],
     }
 
@@ -838,6 +841,21 @@ def set_model_route_order(payload: _ModelOrderPayload) -> dict:
     except model_routes.InvalidRouteOrderError as error:
         raise HTTPException(422, str(error)) from None
     return _route_payload(route)
+
+
+class _ModelModePayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    modality: keys.ModelModality
+    id: str = Field(min_length=1, max_length=200)
+    mode: keys.RouteMode
+
+
+@router.put("/models/mode")
+def set_model_route_mode(payload: _ModelModePayload) -> dict:
+    try:
+        return _route_payload(model_routes.set_route_mode(payload.modality, payload.id, payload.mode))
+    except model_routes.NoSuchRouteError as error:
+        raise HTTPException(404, str(error)) from None
 
 
 @router.post("/keys", status_code=201)
@@ -1529,25 +1547,7 @@ def _create_user_job(
         raise HTTPException(status_code=422, detail="生成提示词不能为空")
     if body.kind not in {JobKind.IMAGE, JobKind.VIDEO}:
         raise HTTPException(422, detail="创作台目前只接受图片或视频任务")
-    if body.alias:
-        key_row = keys.find_by_alias(body.alias)
-        if not key_row:
-            raise HTTPException(status_code=400, detail=f"unknown alias {body.alias}")
-        if not key_row.enabled:
-            raise HTTPException(status_code=422, detail="供应商已停用")
-        model_id = body.model
-    else:
-        # 不指定厂商 =「自动」：body.model 是路由 id，按组内顺序解析出实际 KEY 与模型。
-        try:
-            key_row, model_spec = model_routes.resolve_auto(body.kind.value, body.model)
-        except (model_routes.NoSuchRouteError, model_routes.InsufficientBalanceError) as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
-        model_id = model_spec.id
-    alias = key_row.alias
     params = body.params.model_copy(deep=True)
-    # 「自动」记下路由 id，运行时遇到确定没执行的失败才能换下一家；指定厂商不换。
-    params.route_id = None if body.alias else body.model
-    params.route_tried = None
     # Provider task handles are runner-owned.  A Studio create request always represents a new
     # order and may not attach itself to an arbitrary existing Tuzi task.
     params.provider_task_protocol = None
@@ -1562,6 +1562,29 @@ def _create_user_job(
     params.edit_prompt = None
     # 改写值与原值同类型（str / list[str]），model_copy 不需要重新校验。
     params = params.model_copy(update=_gate_browser_refs(params.model_dump()))
+    route_order: list[str] = []
+    if body.alias:
+        key_row = keys.find_by_alias(body.alias)
+        if not key_row:
+            raise HTTPException(status_code=400, detail=f"unknown alias {body.alias}")
+        if not key_row.enabled:
+            raise HTTPException(status_code=422, detail="供应商已停用")
+        model_id = body.model
+    else:
+        # 不指定厂商 =「自动」：body.model 是路由 id，按组内顺序解析出实际 KEY 与模型。
+        try:
+            key_row, model_spec = model_routes.resolve_auto(
+                body.kind.value, body.model, params=params.model_dump(exclude_none=True),
+                route_order=route_order,
+            )
+        except (model_routes.NoSuchRouteError, model_routes.InsufficientBalanceError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        model_id = model_spec.id
+    alias = key_row.alias
+    # 「自动」记下路由 id，运行时遇到确定没执行的失败才能换下一家；指定厂商不换。
+    params.route_id = None if body.alias else body.model
+    params.route_tried = None
+    params.route_order = route_order or None
     if body.kind == JobKind.IMAGE:
         from character_workflow.lib.image_size import normalize_image_size_params
 
