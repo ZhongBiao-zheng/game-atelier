@@ -55,7 +55,11 @@ def mine_records(
         records.append({
             # 没有价格的成功任务记 None（未计价），不能当成免费；失败且无实际账单按 0 计。
             "id": job.job_id, "cost_cny": cost if cost is not None or job.status != "failed" else 0,
-            "at": job.submitted_at,
+            "at": job.submitted_at, "alias": job.alias, "status": job.status.value,
+            "duration_s": max(0, (datetime.fromisoformat(job.completed_at)
+                - datetime.fromisoformat(job.submitted_at)).total_seconds())
+            if job.completed_at and job.status in {"done", "failed"} else None,
+            "project_label": label, "member_label": None,
             "kind": job.kind.value, "model": job.model, "label": label,
             "project": project_key, "source": "lan" if job.provider == "atelier" else "local",
             "failed": job.status == "failed", "prompt": user_prompt(job)[:120],
@@ -73,25 +77,60 @@ def team_records(rows: list[dict], available_outputs: set[str]) -> list[dict]:
         "model": row.get("model_id") or row.get("route_id") or "未知模型",
         "label": row.get("key_name", "未知成员"), "member": row.get("key_id", ""),
         "source": "lan", "failed": row.get("status") == "failed",
+        "alias": row.get("member_alias"), "status": row.get("status", "done"),
+        "duration_s": row.get("duration_s"), "project_label": None,
+        "member_label": row.get("key_name", "未知成员"),
         "thumb_url": f"/api/gateway/tasks/{quote(row['task_id'], safe='')}/outputs/0"
         if row.get("task_id") in available_outputs else None, "href": None,
     } for row in rows]
+
+
+def select_usage(
+    records: list[dict], *, scope: str, period: str, now: datetime,
+    source: str = "all", member: str | None = None,
+) -> tuple:
+    start = range_start(period, now)
+    dated = [(row, local_time(row["at"], now)) for row in records]
+    start = start or min((at for _, at in dated if at <= now), default=now).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    sources = sorted({row["source"] for row, at in dated if start <= at <= now})
+    selected = [(row, at) for row, at in dated
+                if (scope != "mine" or source == "all" or row["source"] == source)
+                and (scope != "team" or not member or row.get("member") == member)]
+    current = [(row, at) for row, at in selected if start <= at <= now]
+
+    return start, sources, selected, current
+
+
+def usage_tasks(
+    records: list[dict], *, scope: str, period: str, now: datetime,
+    source: str = "all", member: str | None = None, status: str = "all",
+    offset: int = 0, limit: int = 50,
+) -> dict:
+    _, _, _, current = select_usage(records, scope=scope, period=period, now=now,
+                                     source=source, member=member)
+    filtered = [(row, at) for row, at in current if status == "all"
+                or (status == "unpriced" and row["cost_cny"] is None)
+                or row["status"] == status]
+    filtered.sort(key=lambda pair: (-pair[1].timestamp(), pair[0]["id"]))
+    rows = []
+    for row, at in filtered[offset:offset + limit]:
+        item = {key: value for key, value in row.items() if key not in {"project", "member", "failed"}}
+        item["at"] = at.isoformat()
+        rows.append(item)
+    end = offset + len(rows)
+    return {"rows": rows, "total": len(filtered),
+            "next_offset": end if end < len(filtered) else None}
 
 
 def aggregate_usage(
     records: list[dict], *, scope: str, period: str, now: datetime,
     source: str = "all", member: str | None = None, members: list[dict] | None = None,
 ) -> dict:
-    start = range_start(period, now)
-    dated = [(row, local_time(row["at"], now)) for row in records]
-    start = start or min((at for _, at in dated if at <= now), default=now).replace(
-        hour=0, minute=0, second=0, microsecond=0)
+    start, sources, selected, current = select_usage(
+        records, scope=scope, period=period, now=now, source=source, member=member,
+    )
     previous_start = start - (now - start)
-    sources = sorted({row["source"] for row, at in dated if start <= at <= now})
-    selected = [(row, at) for row, at in dated
-                if (scope != "mine" or source == "all" or row["source"] == source)
-                and (scope != "team" or not member or row.get("member") == member)]
-    current = [(row, at) for row, at in selected if start <= at <= now]
 
     def cost(row: dict) -> float:
         return row["cost_cny"] or 0
@@ -127,11 +166,6 @@ def aggregate_usage(
             item["unpriced"] += row["cost_cny"] is None
         rankings.append({"by": by, "rows": sorted(
             grouped.values(), key=lambda item: (-item["cost_cny"], item["key"]))[:5]})
-    top = []
-    for row, at in sorted(current, key=lambda pair: (-cost(pair[0]), pair[0]["id"]))[:10]:
-        item = {key: value for key, value in row.items() if key not in {"project", "member", "failed"}}
-        item["at"] = at.isoformat()
-        top.append(item)
     return {
         "scope": scope, "range": period, "bucket": bucket,
         "totals": {
@@ -144,5 +178,5 @@ def aggregate_usage(
             "member_count": len(members or []) if scope == "team" else None,
         },
         "trend": [{"start": day, "cost_cny": cost} for day, cost in trend.items()],
-        "rankings": rankings, "top": top, "sources": sources, "members": members or [],
+        "rankings": rankings, "sources": sources, "members": members or [],
     }

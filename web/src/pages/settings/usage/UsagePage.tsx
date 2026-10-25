@@ -6,7 +6,7 @@ import type { UsageRange, UsageResponse, UsageScope, UsageSource } from '@/schem
 import { KpiRow } from './KpiRow';
 import { TrendChart } from './TrendChart';
 import { RankingCard } from './RankingCard';
-import { TopTasks } from './TopTasks';
+import { TaskTable } from './TaskTable';
 import { QuotaCard } from './QuotaCard';
 const ranges: { value: UsageRange; label: string }[] = [
   { value: 'today', label: '今天' },
@@ -169,7 +169,7 @@ export function UsagePage() {
                   <RankingCard key={ranking.by} ranking={ranking} />
                 ))}
               </div>
-              <TopTasks tasks={data.top} />
+              <TaskTable key={`${scope}:${range}:${source}:${member}`} scope={scope} range={range} source={source} member={member} />
             </>
           )}
         </div>

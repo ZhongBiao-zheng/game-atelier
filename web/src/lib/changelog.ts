@@ -32,6 +32,10 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.120.0', date: '2026-10-25', headline: '用量任务可筛选与翻页', changes: [
+    { kind: 'feat', text: '用量概览独立显示未计价次数和占比，任务按时间排列，支持成功、失败和未计价筛选。' },
+    { kind: 'feat', text: '任务表显示供应商、耗时和费用，每次加载50条；团队视图按成员查看。' },
+  ] },
   { version: '5.119.0', date: '2026-10-25', headline: '模型路由支持最便宜和轮流', changes: [
     { kind: 'feat', text: '同一模型可按自定义顺序、实际参数估价或轮流选择供应商；失败时沿本次任务的顺序切换。' },
     { kind: 'feat', text: '路由页按图片、视频和文本分组，显示当前候选与估价，支持一键恢复欠费成员。' },

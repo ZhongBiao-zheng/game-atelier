@@ -923,10 +923,22 @@ resolve 后的绝对路径（落盘值就是闸门判过的那个）。`mask_ima
 `GET /api/usage` 仅限本机管理会话（Agent 无权读取）。参数 scope=mine|team（默认 mine）、
 range=today|7d|30d|90d|all（默认 30d）、source=all|local|lan（默认 all，仅 mine）、
 member=网关密钥 ID（仅 team）。网关未开启时 team 返回 404。响应 `UsageResponse` 双端 schema
-定义 totals、trend、rankings、top、sources、members；team 的 top 不返回 prompt。
-mine 每条 image/video job 计一次，排除 pending_confirm/canceled；actual 优先于 estimated，
-failed 只计 actual。成功但无价格的任务 `cost_cny=null`（未计价），不计入金额，另计 `totals.unpriced` 与排行行 `unpriced`。team 以账本 charged_cny 为准。时间按本机时区，从 N 天前的日界线
-（包含今天）至现在；previous 为紧邻的等长区间，all 时为 null。today/7d 按日，其余周一分桶并补零。
+定义 totals、trend、rankings、sources、members；已删除 top。
+mine 每条 image/video job 计一次，排除 pending_confirm/canceled，保留 pending 等进行中状态；actual 优先于 estimated，
+failed 只计 actual。非失败且无价格的任务 `cost_cny=null`（未计价，含尚无估价的进行中任务），不计入金额，另计 `totals.unpriced` 与排行行 `unpriced`。team 以账本 charged_cny 为准。时间按本机时区，从 N 天前的日界线
+（包含今天）至现在；previous 为紧邻的等长区间，all 时为 null。today/7d/30d 按日，其余周一分桶并补零。
+
+
+`GET /api/usage/tasks` 同样只限本机管理会话，复用以上 scope/range/source/member 筛选，
+增加 `status=all|done|failed|unpriced`（默认 all）、`offset>=0`（默认 0）、`limit=1..200`（默认 50）。
+返回 `{rows: UsageTask[], total: number, next_offset: number | null}`；先筛选再分页，按提交/账本时间的真实时刻倒序、同刻按 id 升序，越界 offset 返回空 rows、原 total 和 null。
+`all.total` 与同口径 `totals.count` 一致；unpriced 严格等于 cost_cny=null，不把真实 0 元或失败无账单视为未计价。
+
+行字段为 `id, at, kind, model, label, source, cost_cny, alias, status, duration_s, project_label, member_label, thumb_url, href`，本机可带截断后的 prompt，团队不返回 prompt。
+status 保留真实状态（含 pending、done、failed，以及团队 canceled 等）；成功筛选只匹配 done，不把取消算成功。
+本机 duration_s 为终态 completed_at−submitted_at 的秒数，未完成或无完成时间为 null；项目沿用画布名称/未归档，member_label=null。
+团队 project_label=null、member_label 为成员名，cost_cny 始终使用账本 charged_cny（空值按既有账务记 0）；旧账本无执行耗时则 duration_s=null，账本视频 duration 是素材时长，不能当作耗时。
+任务表不为团队全量读取产物或 prompt。
 
 
 ## 图片定稿与项目类别（5.107.0）

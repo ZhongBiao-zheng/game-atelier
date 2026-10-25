@@ -2672,9 +2672,20 @@ class UsageTask(BaseModel):
     model: str
     label: str
     source: Literal["local", "lan"]
+    alias: str | None
+    status: str
+    duration_s: float | None
+    project_label: str | None
+    member_label: str | None
     prompt: str | None = None
     thumb_url: str | None
     href: str | None
+
+
+class UsageTasksResponse(BaseModel):
+    rows: list[UsageTask]
+    total: int
+    next_offset: int | None
 
 
 class UsageMember(BaseModel):
@@ -2689,6 +2700,5 @@ class UsageResponse(BaseModel):
     totals: UsageTotals
     trend: list[UsageTrend]
     rankings: list[UsageRanking]
-    top: list[UsageTask]
     sources: list[Literal["local", "lan"]]
     members: list[UsageMember]

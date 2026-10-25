@@ -2,13 +2,13 @@
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from character_workflow.lib import canvas_projects, gateway_keys, gateway_tasks, jobs
-from character_workflow.lib.schemas import JobParams, UsageResponse
+from character_workflow.lib.schemas import JobParams, UsageResponse, UsageTasksResponse
 from character_workflow.lib.usage_stats import (
-    aggregate_usage, mine_records, range_start, team_records,
+    aggregate_usage, mine_records, range_start, team_records, usage_tasks,
 )
 
 usage_router = APIRouter(prefix="/api")
@@ -48,13 +48,7 @@ def key_last_used() -> dict[str, str]:
     return jobs.last_used_by_alias()
 
 
-@usage_router.get("/usage", response_model=UsageResponse, response_model_exclude_unset=True)
-def get_usage(
-    scope: Literal["mine", "team"] = "mine",
-    range: Literal["today", "7d", "30d", "90d", "all"] = "30d",
-    source: Literal["all", "local", "lan"] = "all", member: str | None = None,
-) -> dict:
-    now = datetime.now().astimezone()
+def _usage_records(scope: str, period: str, now: datetime) -> tuple[list[dict], list[dict]]:
     members = []
     if scope == "mine":
         records = mine_records(
@@ -66,27 +60,39 @@ def get_usage(
         if not config.enabled:
             raise HTTPException(404, "网关未开启")
         members = [{"id": key.id, "name": key.name} for key in config.keys if not key.revoked_at]
-        start = range_start(range, now)
+        start = range_start(period, now)
         if start is None:
             months = sorted(path.stem for path in gateway_tasks.usage_file("_").parent.glob("*.jsonl"))
             start = datetime.strptime(months[0], "%Y-%m").astimezone() if months else now
         else:
             start -= now - start
         rows = gateway_tasks.read_usage_range(start, now)
-        available = set()
-        # 只为最贵候选检查产物；聚合仍保留完整账本，不会读取 prompt。
-        candidates = [row for row in rows if not member or row.get("key_id") == member]
-        current_start = range_start(range, now)
-        if current_start:
-            candidates = [row for row in candidates
-                          if datetime.fromisoformat(row["time"]) >= current_start]
-        for row in sorted(candidates, key=lambda row: -(row.get("charged_cny") or 0))[:10]:
-            try:
-                if gateway_tasks.output_file(row["key_id"], row["task_id"], 0).is_file():
-                    available.add(row["task_id"])
-            except (gateway_tasks.GatewayRequestError, KeyError):
-                pass
-        records = team_records(rows, available)
+        records = team_records(rows, set())
+    return records, members
+
+
+@usage_router.get("/usage", response_model=UsageResponse, response_model_exclude_unset=True)
+def get_usage(
+    scope: Literal["mine", "team"] = "mine",
+    range: Literal["today", "7d", "30d", "90d", "all"] = "30d",
+    source: Literal["all", "local", "lan"] = "all", member: str | None = None,
+) -> dict:
+    now = datetime.now().astimezone()
+    records, members = _usage_records(scope, range, now)
     return aggregate_usage(
         records, scope=scope, period=range, now=now, source=source, member=member, members=members,
     )
+
+
+@usage_router.get("/usage/tasks", response_model=UsageTasksResponse, response_model_exclude_unset=True)
+def get_usage_tasks(
+    scope: Literal["mine", "team"] = "mine",
+    range: Literal["today", "7d", "30d", "90d", "all"] = "30d",
+    source: Literal["all", "local", "lan"] = "all", member: str | None = None,
+    status: Literal["all", "done", "failed", "unpriced"] = "all",
+    offset: int = Query(default=0, ge=0), limit: int = Query(default=50, ge=1, le=200),
+) -> dict:
+    now = datetime.now().astimezone()
+    records, _ = _usage_records(scope, range, now)
+    return usage_tasks(records, scope=scope, period=range, now=now, source=source,
+                       member=member, status=status, offset=offset, limit=limit)
