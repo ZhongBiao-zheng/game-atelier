@@ -33,6 +33,10 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.114.3', date: '2026-10-25', headline: 'Agent 图片尺寸显示修正',
+    changes: [{ kind: 'fix', text: 'Agent 写入的像素尺寸在生成面板里如实显示，不再误显示为默认比例。' }],
+  },
+  {
     version: '5.114.2', date: '2026-10-25', headline: '画布生成记录预计费用',
     changes: [{ kind: 'fix', text: '画布、Agent 与自动路由的生成按实际渠道记录预计费用，用量页不再显示为未计价。' }],
   },

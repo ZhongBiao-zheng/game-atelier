@@ -70,7 +70,7 @@ def test_change_set_edits_document_at_expected_revision(canvas):
     assert image["type"] == "image" and image["version_id"] is None
     assert image["draft"]["prompt"] == ""  # 普通生成使用全部实线，不自动改提示词。
     assert image["draft"]["input_policy"] == "all_connected"
-    assert image["draft"]["params"] == {"n": 2, "size": "1024x1024"}  # 路径类字段被丢弃
+    assert image["draft"]["params"] == {"n": 2, "size": "1024x1024", "size_mode": "custom"}  # 路径类字段被丢弃
     assert view["connections"][0]["source_node_id"] == "prompt-1"
 
     with pytest.raises(CanvasToolError) as error:

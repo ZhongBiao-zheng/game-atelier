@@ -9,6 +9,7 @@
 `JobParams`、`CanvasImageDefaultParams` 增加 `size_mode?: auto | ratio | custom`、
 `custom_size?: string`。后者只是编辑器回切缓存；草稿允许暂不完整的数字输入，提交才严格验证。
 缺模式保留既有比例行为，不根据近似像素反推用户意图，不迁移旧记录。
+画布 Agent / MCP 的 `set_draft`（图片）未传 `size_mode` 时按写入的字段补齐：`size=auto`→auto，`size=WxH`→custom，有 `ratio` 或 `size` 含冒号→ratio；这是调用方显式写入的意图，不是对旧记录的反推。
 5.42.2起，首页、Studio、Canvas新建草稿及服务端新建默认配置，在所有尺寸字段
 （size_mode/size/ratio/resolution/custom_size）均未指定时，按当前模型能力默认AUTO；
 不支持AUTO时使用受支持的默认比例。已有尺寸选择、历史任务和重试不重置。

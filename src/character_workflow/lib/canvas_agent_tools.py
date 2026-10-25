@@ -69,6 +69,21 @@ def _text_of(document: CanvasDocument, node: CanvasNode, limit: int = 4000) -> d
     return {"text": version.text[:limit], "text_truncated": len(version.text) > limit}
 
 
+def _with_size_mode(mode: str, params: dict) -> dict:
+    """Agent 只写了尺寸时补上它表达的尺寸模式：缺模式的草稿在界面按默认比例显示，
+    服务端却按 size 原样提交，两边对不上。"""
+    if mode != "image" or "size_mode" in params:
+        return params
+    size = str(params.get("size") or "").strip()
+    if size == "auto":
+        return {**params, "size_mode": "auto"}
+    if re.fullmatch(r"[1-9]\d*x[1-9]\d*", size):
+        return {**params, "size_mode": "custom"}
+    if params.get("ratio") or ":" in size:
+        return {**params, "size_mode": "ratio"}
+    return params
+
+
 def _draft_view(draft: CanvasGenerationDraft | None) -> dict | None:
     if draft is None:
         return None
@@ -222,7 +237,7 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
                 )
             field = "generation_draft"
             params = JobParams(**canvas_allowed_draft_params(
-                change.mode, JobParams(**change.params)))
+                change.mode, JobParams(**_with_size_mode(change.mode, change.params))))
             draft = CanvasGenerationDraft(mode=change.mode, prompt=change.prompt, model=change.model,
                                           alias=change.alias, input_policy="all_connected", params=params,
                                           updated_at=timestamp)
