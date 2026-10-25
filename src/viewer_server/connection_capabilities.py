@@ -42,6 +42,7 @@ POST /api/model-routes/member-status/restore
 GET /api/usage
 GET /api/usage/key-last-used
 GET /api/pricing/tokendance
+POST /api/pricing/estimate
 POST /api/gateway/check
 POST /api/gateway/providers/{alias}/sync
 GET /api/gallery/recent

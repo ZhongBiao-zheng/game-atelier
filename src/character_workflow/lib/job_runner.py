@@ -404,6 +404,8 @@ def _freeze_estimated_cost(job: Job, params: dict[str, Any]) -> None:
         ratio=params.get("ratio"), generate_audio=bool(params.get("generate_audio")),
         has_reference_video=bool(params.get("reference_videos")),
         image_edit=bool(params.get("image_edit")),
+        reference_image_count=len(params.get("reference_images") or []),
+        layer_decomposition=bool(params.get("layer_decomposition")),
     )
     if estimate is not None:
         params["estimated_cost_cny"] = estimate

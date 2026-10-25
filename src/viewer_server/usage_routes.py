@@ -3,14 +3,35 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from character_workflow.lib import canvas_projects, gateway_keys, gateway_tasks, jobs
-from character_workflow.lib.schemas import UsageResponse
+from character_workflow.lib.schemas import JobParams, UsageResponse
 from character_workflow.lib.usage_stats import (
     aggregate_usage, mine_records, range_start, team_records,
 )
 
 usage_router = APIRouter(prefix="/api")
+
+
+class PricingEstimateRequest(BaseModel):
+    alias: str
+    model: str
+    kind: Literal["image", "video"]
+    params: JobParams = Field(default_factory=JobParams)
+
+
+@usage_router.post("/pricing/estimate")
+def pricing_estimate(body: PricingEstimateRequest) -> dict:
+    from character_workflow.lib.generation_pricing import estimate_submission
+    from character_workflow.lib.keys import find_by_alias
+
+    key = find_by_alias(body.alias)
+    if key is None:
+        raise HTTPException(404, "渠道不存在")
+    return {"estimated_cost_cny": estimate_submission(
+        key, body.model, body.kind, body.params.model_dump(exclude_none=True),
+    )}
 
 
 @usage_router.get("/pricing/tokendance")

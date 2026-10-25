@@ -183,6 +183,10 @@ def evaluate(expression: str, *, params: dict, variables: dict,
         if name in ("upper", "lower"):
             return value.upper() if name == "upper" else value.lower()
         if name == "param":
+            if value.strip() not in {"model", "size", "quality", "n", "image.#",
+                                    "generationConfig.imageConfig.imageSize",
+                                    "layer_decomposition"}:
+                raise UnsupportedBillingExpr(f"unverified request field: {value}")
             current = params
             for part in value.strip().split("."):
                 if part == "#" and isinstance(current, list):

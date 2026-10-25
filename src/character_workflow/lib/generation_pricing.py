@@ -27,10 +27,6 @@ _LEGACY_DIMENSIONS = {
     "1080p": [(1920, 1088), (1664, 1248), (1440, 1440), (1248, 1664), (1088, 1920), (2176, 928)],
 }
 _RATIOS = ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]
-_GEMINI_PRO = {
-    "gemini-3-pro-image", "gemini-3-pro-image-preview", "nano-banana-pro",
-    "nano-banana-pro-2k", "nano-banana-pro-4k",
-}
 
 
 def _normalize(value: str | None) -> str:
@@ -59,56 +55,6 @@ def _pixels(size: str | None) -> tuple[int, int] | None:
     return (int(match[1]), int(match[2])) if match else None
 
 
-def _tuzi(*, model_id, model, billing_group, n, size, size_mode, quality, resolution):
-    group = (billing_group or "").strip()
-    if not group:
-        return None
-    exact = model_id.strip()
-    p = _PRICES
-    if group == "default":
-        if exact == "gpt-image-2.5-1k":
-            return _priced(p["TUZI_GPT_IMAGE_25_1K_YUAN_PER_IMAGE"] * n)
-        prices = p["TUZI_GPT_IMAGE_25_YUAN_PER_IMAGE"].get(exact)
-        if prices:
-            explicit = None if size_mode == "auto" else (
-                resolution if resolution is not None else (quality or "").upper()
-            )
-            if explicit in ("1K", "2K", "4K"):
-                tier = explicit
-            else:
-                dimensions = _pixels(size)
-                pixels = dimensions[0] * dimensions[1] if dimensions else 0
-                whitelisted = exact in ("gpt-image-2.5", "gpt-image-2.5-vip") and (
-                    (size or "").lower() in p["TUZI_GPT_IMAGE_2_1K_SIZES"]
-                )
-                limits = p["TUZI_GPT_IMAGE_25_PIXEL_LIMITS"]
-                tier = "1K" if whitelisted else (
-                    "4K" if pixels > limits["2K"] else "2K" if pixels > limits["1K"] else "1K"
-                )
-            return _priced(prices[tier] * n)
-        if model == "mj-imagine":
-            return p["TUZI_MIDJOURNEY_YUAN_PER_TASK"]
-        if model in _GEMINI_PRO:
-            tier = "4k" if model.endswith("-4k") else "2k" if model.endswith("-2k") else (
-                "4k" if quality == "high" else "2k" if quality == "medium" else "1k"
-            )
-            return _priced(p["TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE"][tier] * n)
-        if exact == "gpt-image-2-1k":
-            return _priced(p["TUZI_GPT_IMAGE_2_1K_YUAN_PER_IMAGE"] * n)
-        if exact == "gpt-image-2":
-            raw = (size or "").lower()
-            dimensions = _pixels(raw)
-            if not dimensions or any(x < 1 or x > 2**53 - 1 for x in dimensions):
-                return None
-            pixels = dimensions[0] * dimensions[1]
-            if pixels > 2**53 - 1:
-                return None
-            limits = p["TUZI_GPT_IMAGE_2_PIXEL_LIMITS"]
-            low = raw in p["TUZI_GPT_IMAGE_2_1K_SIZES"] or pixels <= limits["1k"]
-            tier = "1k" if low else "2k" if pixels <= limits["2k"] else "4k"
-            return _priced(p["TUZI_GPT_IMAGE_2_YUAN_PER_IMAGE"][tier] * n)
-    rate = p["TUZI_GROUP_YUAN_PER_IMAGE"].get(group, {}).get(model)
-    return None if rate is None else _priced(rate * n)
 
 
 def _rate(value: Any) -> float | None:
@@ -181,6 +127,7 @@ def estimate_cost_cny(
     size_mode: str | None = None, quality: str | None = None, duration: float | None = None,
     resolution: str | None = None, ratio: str | None = None, generate_audio: bool = False,
     has_reference_video: bool = False, image_edit: bool = False,
+    reference_image_count: int = 0, layer_decomposition: bool = False,
 ) -> float | None:
     """Estimate one generation request; None means no verified price."""
     if not model_id:
@@ -203,9 +150,12 @@ def estimate_cost_cny(
             return _priced(p["EVOLINK_MIDJOURNEY_USD_PER_REQUEST"][route]
                            * p["GENERATION_USD_TO_CNY"])
         if _domain(host, "tu-zi.com"):
-            return _tuzi(model_id=model_id, model=model, billing_group=billing_group,
-                         n=count, size=size, size_mode=size_mode, quality=quality,
-                         resolution=resolution)
+            from character_workflow.lib.tuzi_estimate import estimate
+
+            return estimate(model_id=model_id, provider=provider, base_url=base_url,
+                            billing_group=billing_group, protocol=protocol, n=count,
+                            size=size, quality=quality, reference_image_count=reference_image_count,
+                            layer_decomposition=layer_decomposition)
         if _domain(host, "openai-hk.com") and proto in ("", "openai"):
             rate = p["OPENAI_HK_NANO_BANANA_2_YUAN"].get(quality) if model == "nano-banana-2" else (
                 p["OPENAI_HK_FIXED_YUAN_PER_IMAGE"].get(model)
@@ -260,3 +210,27 @@ def estimate_text_cost_cny(
     if rate is None:
         return None
     return _priced((input_tokens * rate["input"] + output_tokens * rate["output"]) / 1_000_000)
+
+
+def estimate_submission(key, model_id: str, kind: str, params: dict) -> float | None:
+    """Use the same frozen size intent as submission, without creating a job."""
+    from character_workflow.lib.image_size import normalize_image_size_params
+
+    model = next((item for item in key.models if item.id == model_id), None)
+    if model is None:
+        return None
+    try:
+        values = normalize_image_size_params(key, model_id, params) if kind == "image" else params
+    except ValueError:
+        return None
+    return estimate_cost_cny(
+        kind=kind, provider=key.provider, base_url=key.base_url, billing_group=key.billing_group,
+        model_id=model_id, protocol=model.protocol, n=values.get("n") or 1,
+        size=values.get("size"), size_mode=values.get("size_mode"), quality=values.get("quality"),
+        resolution=values.get("resolution"), duration=values.get("duration"), ratio=values.get("ratio"),
+        generate_audio=bool(values.get("generate_audio")),
+        has_reference_video=bool(values.get("reference_videos")),
+        image_edit=bool(values.get("image_edit")),
+        reference_image_count=len(values.get("reference_images") or []),
+        layer_decomposition=bool(values.get("layer_decomposition")),
+    )
