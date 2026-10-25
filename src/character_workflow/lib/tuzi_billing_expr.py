@@ -1,7 +1,7 @@
-"""Restricted Tuzi expressions. Unverified provider extensions fail closed.
+"""Restricted Tuzi expressions, verified against its public pricing calculator.
 
-Semantics: QuantumNous/new-api pkg/billingexpr/run.go. Tuzi's imagePixels and
-imageSizeTier are not in that source; expressions using them remain unpriced.
+Source: api.tu-zi.com/assets/index-DMNydVyD.js (2026-10-25), tF/nF/sF.
+Unknown provider extensions fail closed; no expression is dynamically executed.
 """
 from __future__ import annotations
 
@@ -19,7 +19,8 @@ class UnsupportedBillingExpr(ValueError):
 _TOKEN = re.compile(r'\s*("(?:[^"\\]|\\.)*"|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|'
                     r'[A-Za-z_][A-Za-z_0-9]*|\|\||&&|==|!=|<=|>=|[?:()+*/<>,\-])')
 _FUNCTIONS = {"param": 1, "upper": 1, "lower": 1, "has": 2, "max": 2,
-              "tier": 2, "hour": 1, "minute": 1, "weekday": 1}
+              "tier": 2, "hour": 1, "minute": 1, "weekday": 1,
+              "imagePixels": 1, "imageSizeTier": 1}
 _VARIABLES = {"output_image_count", "input_image_count", "output_image_type", "nil", "true"}
 _LEVELS = [("||",), ("&&",), ("==", "!="), ("<", "<=", ">", ">="),
            ("+", "-"), ("*", "/")]
@@ -117,6 +118,62 @@ def _boolean(value):
     return value
 
 
+def _string(value):
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float)) and math.isfinite(value):
+        return str(int(value)) if value == int(value) else str(value)
+    raise UnsupportedBillingExpr("unsupported string conversion")
+
+
+def image_size_tier(value):
+    """Official tF uses parseInt and longest edge, not total pixels."""
+    size = _string(value).strip().upper()
+    if size in {"1K", "2K", "4K"}:
+        return size
+    parts = re.split(r"[X*×]", size)
+    if len(parts) != 2:
+        return "default"
+    matches = [re.match(r"^[+-]?[0-9]+", part.strip()) for part in parts]
+    if not all(matches):
+        return "default"
+    edges = [int(match[0]) for match in matches]
+    if min(edges) <= 0:
+        return "default"
+    longest = max(edges)
+    return "4K" if longest >= 3840 else "2K" if longest >= 2048 else (
+        "1K" if longest >= 1024 else "default"
+    )
+
+
+def image_pixels(value):
+    """Official nF accepts positive integer dimensions after JS Number conversion."""
+    size = _string(value).strip().upper()
+    if size in {"1K", "2K", "4K"}:
+        return {"1K": 1024**2, "2K": 2048**2, "4K": 4096**2}[size]
+    parts = re.split(r"[X*×]", size)
+    if len(parts) != 2:
+        return 0
+    if any(not re.fullmatch(
+        r"(?:0B[01]+|0O[0-7]+|0X[0-9A-F]+|[+-]?(?:[0-9]+(?:\.[0-9]*)?|"
+        r"\.[0-9]+)(?:E[+-]?[0-9]+)?)", part.strip(),
+    ) for part in parts):
+        return 0
+    try:
+        edges = [float(int(part.strip(), 0)) if re.fullmatch(
+            r"0[Bb][01]+|0[Oo][0-7]+|0[Xx][0-9A-Fa-f]+", part.strip(),
+        ) else float(part.strip()) for part in parts]
+    except (ValueError, OverflowError):
+        return 0
+    if any(not math.isfinite(edge) or not edge.is_integer() or edge <= 0 for edge in edges):
+        return 0
+    return edges[0] * edges[1]
+
+
 def evaluate(expression: str, *, params: dict, variables: dict,
              now: datetime | None = None) -> tuple[float, str | None]:
     """Return the formula amount and selected tier, without currency conversion."""
@@ -173,15 +230,18 @@ def evaluate(expression: str, *, params: dict, variables: dict,
             tier = args[0]
             return _number(args[1])
         if name == "has":
-            if not isinstance(args[1], str) or (args[0] is not None
-                                               and not isinstance(args[0], str)):
-                raise UnsupportedBillingExpr("unsupported has argument")
-            return bool(args[0] is not None and args[1] and args[1] in args[0])
+            needle = "null" if args[1] is None else _string(args[1])
+            return args[0] is not None and needle in _string(args[0])
+        if name in ("upper", "lower"):
+            value = _string(args[0]).strip()
+            return value.upper() if name == "upper" else value.lower()
+        if name == "imagePixels":
+            return image_pixels(args[0])
+        if name == "imageSizeTier":
+            return image_size_tier(args[0])
         if not isinstance(args[0], str):
             raise UnsupportedBillingExpr(f"unsupported {name} argument")
         value = args[0]
-        if name in ("upper", "lower"):
-            return value.upper() if name == "upper" else value.lower()
         if name == "param":
             if value.strip() not in {"model", "size", "quality", "n", "image.#",
                                     "generationConfig.imageConfig.imageSize",
@@ -199,7 +259,7 @@ def evaluate(expression: str, *, params: dict, variables: dict,
         try:
             zone = ZoneInfo(value.strip() or "UTC")
         except ZoneInfoNotFoundError:
-            zone = timezone.utc
+            raise UnsupportedBillingExpr("invalid timezone") from None
         local = instant.astimezone(zone)
         return {"hour": local.hour, "minute": local.minute,
                 "weekday": (local.weekday() + 1) % 7}[name]
