@@ -33,6 +33,10 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.114.1', date: '2026-10-25', headline: '用量页修正',
+    changes: [{ kind: 'fix', text: '当天只有未计价任务时，用量页不再加载失败。' }],
+  },
+  {
     version: '5.114.0', date: '2026-10-25', headline: '参考库与 Agent 修正',
     changes: [
       { kind: 'fix', text: 'Agent 可以把两张图连到对比节点的 Before / After。' },

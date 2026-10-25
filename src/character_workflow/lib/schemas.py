@@ -2635,6 +2635,7 @@ class ModelRouteMemberStatusResponse(BaseModel):
 
 class UsageTotals(BaseModel):
     cost_cny: float
+    unpriced: int
     previous_cost_cny: float | None
     count: int
     by_kind: dict[str, int]
@@ -2653,6 +2654,7 @@ class UsageRankingRow(BaseModel):
     label: str
     cost_cny: float
     count: int
+    unpriced: int
 
 
 class UsageRanking(BaseModel):
@@ -2662,7 +2664,7 @@ class UsageRanking(BaseModel):
 
 class UsageTask(BaseModel):
     id: str
-    cost_cny: float
+    cost_cny: float | None  # None = 未计价
     at: str
     kind: str
     model: str
