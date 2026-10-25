@@ -1538,6 +1538,7 @@ class CanvasCategoriesUpdate(BaseModel):
 
 
 class CanvasProject(CanvasCategoriesUpdate):
+    migrated_from_workshop: str | None = Field(default=None, min_length=1, max_length=120)
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal[2] = 2
     project_id: str

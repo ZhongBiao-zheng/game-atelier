@@ -1169,3 +1169,9 @@ failed 只计 actual。team 以账本 charged_cny 为准。时间按本机时区
 - 内置 Agent `search_library(category?, limit=12)`：limit 1–12，只读本项目已定稿图片资产，返回 `{assets:[{asset_id,title,category,width,height}], attach_images:[...]}`。不存在类别或空库返回空数组；缩略图在发模型时附加，不写对话历史。
 - `apply_changes` 新增 `add_asset_node {asset_id,node_id,position?}`。只接受本项目参考库媒体/生成资产；以当前节点版本的只读 asset_id 去重，复用冻结内容。结果增加 `asset_nodes`（资产 ID → 真实节点 ID）与 `node_aliases`（请求 ID → 复用节点 ID），同批后续操作自动解析别名。
 - 资产字节、版本、节点及同批连线整批验证后提交；失败不留下半成品。参考节点位于生成节点左侧一列；参考必须通过可见 input 连线参与生成。
+
+## 工坊迁移来源（5.112.0）
+
+`CanvasProject.migrated_from_workshop: string | null` 记录完成迁移的工坊 slug，普通新建项目为空，项目包保留此字段。
+
+一次性 CLI：`uv run python scripts/migrate_workshop_to_canvas.py --data-root <目录> [--dry-run] [--project <slug>]`。dry-run 只读，输出项目节点/分组/媒体/文本/定稿数、来源指纹及跳过角色。缺失/未登记的档案归属或分配表冲突不自动推断。媒体复制到 uploads，文本及分组经文档校验保存；项目和 UI 规范合并到 specs/project.md，MEMORY 置于已采纳经验。全部完成后才写 migrated_from_workshop；完成项目跳过，未完成项目通过 `.runtime/workshop-migrations/<slug>.json` 恢复，来源变化或已迁内容被修改则拒绝恢复。原工坊文件不改、不删。

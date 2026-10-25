@@ -386,6 +386,7 @@ export interface CanvasDocument {
 export const DEFAULT_CANVAS_CATEGORIES = ['弹窗', '角色', '底图', '按钮', '图标', '字效'];
 
 export interface CanvasProject {
+  migrated_from_workshop: string | null;
   schema_version: 2;
   project_id: string;
   name: string;

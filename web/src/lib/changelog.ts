@@ -33,6 +33,10 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.112.0', date: '2026-10-25', headline: '工坊迁移预演',
+    changes: [{ kind: 'feat', text: '支持预演工坊到画布的迁移，保留原文件并报告跳过项。' }],
+  },
+  {
     version: '5.111.0', date: '2026-10-25', headline: 'Agent 查找项目参考',
     changes: [{ kind: 'feat', text: 'Agent 按类别挑参考图，在画布上摆好参考节点与生成连线。' }],
   },
