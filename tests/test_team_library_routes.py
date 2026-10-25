@@ -678,6 +678,16 @@ def test_list_without_project_id_dedupes_by_library(client, tmp_path):
     # get_mount 选中的是最近挂载的可达记录：画布 2 那条。
     assert same["project_id"] == "canvas-2" and same["mount_path"] == str(new.resolve())
     assert len(client.get("/api/team-libraries", params={"project_id": "canvas-1"}).json()) == 1
+    mounts = client.get("/api/team-libraries?all_mounts=true").json()
+    assert len(mounts) == 3
+    assert {(row["project_id"], row["mount_path"]) for row in mounts
+            if row["library_id"] == first["library_id"]} == {
+        ("canvas-1", str(old.resolve())), ("canvas-2", str(new.resolve())),
+    }
+    scoped = client.get("/api/team-libraries", params={"project_id": "canvas-1", "all_mounts": True}).json()
+    assert len(scoped) == 1 and scoped[0]["project_id"] == "canvas-1"
+    assert client.get("/api/team-libraries?all_mounts=invalid").status_code == 422
+
 
 
 def test_related_merges_libraries_sorted_and_capped(client, isolated_data_root, tmp_path):

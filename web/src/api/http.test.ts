@@ -1,4 +1,8 @@
-import { expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
+import * as http from './http';
+import { fetchAgentStatus, enableAgent, disableAgent } from './agentConnection';
+
+afterEach(() => vi.restoreAllMocks());
 
 import { ApiError, apiError } from './http';
 
@@ -38,4 +42,26 @@ it('shows connection boundary failures without leaking diagnostic metadata', asy
   });
   expect(error.message).not.toContain('request-for-local-diagnostics');
   expect(error.message).not.toContain('{');
+});
+
+
+it('parses actual Agent paths and tool metadata on read, enable and disable', async () => {
+  const status = { enabled: true, connections: { codex: '2026-10-25' },
+    config_paths: { 'claude-code': '/data/.config/connections/agent.json', codex: '/custom/config.toml' },
+    tools: [{ name: 'canvas_run', billable: true }, { name: 'canvas_get_document', billable: false }] };
+  vi.spyOn(http, 'requestJson').mockResolvedValue(status);
+  for (const request of [fetchAgentStatus, enableAgent, disableAgent]) {
+    expect(await request()).toEqual(status);
+  }
+});
+
+it.each([
+  { enabled: true, connections: {} },
+  { enabled: true, connections: [], config_paths: {}, tools: [] },
+  { enabled: true, connections: {}, config_paths: { codex: 1 }, tools: [] },
+  { enabled: true, connections: {}, config_paths: {}, tools: [{ name: 'canvas_run', billable: 'yes' }] },
+  { enabled: true, connections: {}, config_paths: {}, tools: [null] },
+])('rejects malformed Agent status without crashing the page', async status => {
+  vi.spyOn(http, 'requestJson').mockResolvedValue(status);
+  await expect(fetchAgentStatus()).rejects.toThrow('读取 Agent 连接失败：返回格式不对');
 });

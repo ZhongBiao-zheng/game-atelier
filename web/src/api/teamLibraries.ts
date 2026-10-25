@@ -53,9 +53,12 @@ export function saveProfile(displayName: string): Promise<UserProfile> {
   });
 }
 
-/** 省略 projectId = 本机全部挂载（按库去重）。 */
-export function listTeamLibraries(projectId?: string): Promise<TeamLibraryView[]> {
-  const query = projectId !== undefined ? `?project_id=${encodeURIComponent(projectId)}` : '';
+/** 省略 projectId 默认按库去重；allMounts 为控制台保留每个项目的挂载。 */
+export function listTeamLibraries(projectId?: string, allMounts = false): Promise<TeamLibraryView[]> {
+  const params = new URLSearchParams();
+  if (projectId !== undefined) params.set('project_id', projectId);
+  if (allMounts) params.set('all_mounts', 'true');
+  const query = params.size ? `?${params}` : '';
   return requestJson<TeamLibraryView[]>(`${base}${query}`, '读取团队库');
 }
 

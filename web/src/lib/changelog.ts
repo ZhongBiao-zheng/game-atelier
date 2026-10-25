@@ -32,6 +32,10 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.122.0', date: '2026-10-25', headline: '团队库与 Agent 连接信息更完整', changes: [
+    { kind: 'feat', text: '按项目查看团队库挂载数量、路径与最近扫描状态。' },
+    { kind: 'feat', text: 'Agent 连接页显示各客户端状态、实际配置路径与可用工具，标明计费工具。' },
+  ] },
   { version: '5.121.0', date: '2026-10-25', headline: '网关共享状态更清楚', changes: [
     { kind: 'feat', text: '网关状态卡集中显示共享地址与端口，成员额度、花费和管理操作放在同一张表里。' },
   ] },

@@ -186,6 +186,15 @@ compare 节点不提供任何连线、不参与生成。显示的是来源节点
 [画布 MCP](contracts/canvas-mcp.md)：状态、鉴权、Agent 授权、编辑租约与 typed 工具。
 托管网站方案已弃用（ADR-0023），只有本机页面与本机 Agent 两种访问方式。
 
+`GET /api/connection/agent`、`PUT /api/connection/agent`、`DELETE /api/connection/agent`
+统一返回 `{enabled, connections, config_paths, tools}`，仅本机管理会话可读。
+`connections` 为各宿主本次进程内最近连接时间；`config_paths` 为宿主到实际配置/凭据路径的映射：
+`claude-code` 使用 `<data_root>/.config/connections/agent.json`（插件直接读取的凭据文件，不写 `.claude.json`），
+`codex` 使用 `CODEX_HOME/config.toml` 或默认 `~/.codex/config.toml`；路径只表示目标位置，不保证文件已创建。
+`tools` 为 `{name: string, billable: boolean}[]`，与 MCP 注册共享工具元数据，使用真实的 `canvas_*` 工具名；
+只有生成工具标为计费。该字段是展示信息，不改变授权机制：计费工具需先获得用户授权。
+响应只返回路径和元数据，不包含凭据内容或 token。
+
 `GET /api/connection/status` 返回 `{ service: "game-atelier", instance_id, app_version, protocol: "atelier-local/2" }`。
 instance 是每次启动的 32 位小写十六进制标识，不是访问凭据；app_version 从插件 manifest 读取。
 响应 `Cache-Control: no-store`，不读取用户配置或数据；不能据此跳过鉴权，旧 null 协议不被新前端继续使用。
@@ -317,6 +326,11 @@ Studio 作品总是混入。画布作品由 `/config` 的 `show_canvas_on_home` 
 `GET /team-libraries/{library_id}/assets/{entry_id}/{content,thumb?w=}`
 `GET /canvas/projects/{id}/agent/sessions` `/canvas/projects/{id}/agent/sessions/{session_id}`
 `GET /canvas/ui-preferences`
+
+`GET /api/team-libraries?all_mounts=true` 返回全部 `TeamLibraryView` 挂载记录，不按库去重，
+保留每条记录的 `project_id` 与 `mount_path`，供控制台按画布统计。默认 `all_mounts=false` 且省略
+`project_id` 时继续按 library_id 去重；传入 `project_id` 时只返回该项目挂载（即使同时传 all_mounts）。
+空字符串 project_id 仍为项目过滤，不扩大为全局查询；无效布尔值返回 422。
 
 `GET /canvas/projects` 的 `CanvasProjectSummary` 在项目元数据之外返回派生的 `cover`、`node_count` 与
 `connection_count`；这些字段不进入 `project.json`，必须与当前 `canvas.json` 一致。

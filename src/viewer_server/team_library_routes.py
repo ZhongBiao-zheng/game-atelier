@@ -245,8 +245,10 @@ def put_profile(payload: UserProfile) -> UserProfile:
 
 
 @team_library_router.get("/team-libraries", response_model=list[TeamLibraryView])
-def get_team_libraries(project_id: str | None = None) -> list[TeamLibraryView]:
-    if project_id is not None:
+def get_team_libraries(
+    project_id: str | None = None, all_mounts: bool = False,
+) -> list[TeamLibraryView]:
+    if project_id is not None or all_mounts:
         return [_view(mount) for mount in _mounts(project_id)]
     # 不限画布（分享对话框）：同一个库挂在多个画布上只列一次，取库级端点会用的那条记录。
     library_ids = list(dict.fromkeys(mount.library_id for mount in _mounts()))

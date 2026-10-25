@@ -69,6 +69,14 @@ describe('teamLibraries api', () => {
     expect(String(fetchMock.mock.calls[0][0])).toBe('/api/team-libraries?project_id=canvas-a');
   });
 
+  it('lists every mount when requested and preserves project filtering', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(json([], 200)));
+    await listTeamLibraries(undefined, true);
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/team-libraries?all_mounts=true');
+    await listTeamLibraries('canvas a', true);
+    expect(String(fetchMock.mock.calls[1][0])).toBe('/api/team-libraries?project_id=canvas+a&all_mounts=true');
+  });
+
   it('keeps an empty project id scoped instead of listing all libraries', async () => {
     fetchMock.mockResolvedValue(json([], 200));
     await listTeamLibraries('');
