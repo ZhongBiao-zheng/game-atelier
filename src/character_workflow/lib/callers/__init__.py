@@ -76,6 +76,8 @@ def dispatch(
     key = _keys.find_by_alias(alias)
     if key is None:
         raise NoSuchKeyError(alias)
+    if not key.enabled:
+        raise ValueError("供应商已停用")
     fn = _provider_render(key, model)
     if fn is None:
         raise WrongProviderError(f"unknown provider {key.provider!r}")
@@ -122,6 +124,8 @@ def dispatch_video(
     key = _keys.find_by_alias(alias)
     if key is None:
         raise NoSuchKeyError(alias)
+    if not key.enabled:
+        raise ValueError("供应商已停用")
     if key.provider == "atelier":
         from .atelier_gateway import render_video
         return render_video(prompt=prompt, model=model, alias=alias,
@@ -169,6 +173,8 @@ def dispatch_audio(
     key = _keys.find_by_alias(alias)
     if key is None:
         raise NoSuchKeyError(alias)
+    if not key.enabled:
+        raise ValueError("供应商已停用")
     if key.provider == "atelier":
         from .atelier_gateway import render_audio as render
     else:

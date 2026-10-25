@@ -39,8 +39,12 @@ export function autoProviderView(routes: ModelRoute[]): KeyView | null {
 
 /** 有路由组时把「自动」放在第一项；没有可用模型就只有真实 KEY。 */
 export function withAutoProvider(keys: KeyView[], routes: ModelRoute[]): KeyView[] {
-  const auto = autoProviderView(routes);
-  return auto ? [auto, ...keys] : keys;
+  const available = keys.filter(key => key.enabled !== false);
+  const aliases = new Set(available.map(key => key.alias));
+  const auto = autoProviderView(routes.map(route => ({
+    ...route, members: route.members.filter(member => aliases.has(member.alias)),
+  })).filter(route => route.members.length > 0));
+  return auto ? [auto, ...available] : available;
 }
 
 /** 选择背后的成员：「自动」是路由组成员；局域网 Atelier 是它自己（带网关成员快照）；其余没有。 */

@@ -401,7 +401,7 @@ describe('Home', () => {
     globalThis.fetch = fetchMock as any;
     const { location } = renderNavigableHome();
 
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
     typePrompt(screen.getByLabelText('生图 prompt'), '首页提交跳转');
     fireEvent.click(screen.getByLabelText('提交生成'));
 

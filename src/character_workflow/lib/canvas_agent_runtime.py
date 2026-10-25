@@ -649,6 +649,8 @@ def build_agent(session: CanvasAgentSession):
     key = keys.find_by_alias(session.model_alias or "")
     if key is None or not session.model:
         raise CanvasToolError("INVALID_PARAMETERS", "请先选择对话模型", 422)
+    if not key.enabled:
+        raise CanvasToolError("MODEL_UNAVAILABLE", "供应商已停用", 422)
     # 局域网网关直连，不读本机代理环境（与图片 caller 一致）。
     http_client = DefaultAsyncHttpxClient(trust_env=False) if key.provider == "atelier" else None
     client = AsyncOpenAI(base_url=chat_base_url(key), api_key=key.access_key, max_retries=2,

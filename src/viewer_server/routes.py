@@ -541,6 +541,9 @@ def post_job_confirm(job_id: str) -> dict:
                 f"（当前状态：{_status_cn(job.status.value)}）"
             ),
         )
+    key = keys.find_by_alias(job.alias) if job.alias else None
+    if key is not None and not key.enabled:
+        raise HTTPException(422, detail="供应商已停用")
     update_job_status(job_id, status=JobStatus.PENDING)
     return {"ok": True, "job_id": job_id, "status": JobStatus.PENDING.value}
 
@@ -743,6 +746,7 @@ def set_data_root(payload: _DataRootPayload) -> dict:
 
 
 class _KeyCreatePayload(BaseModel):
+    enabled: bool = True
     alias: str
     provider: str
     base_url: str | None = None
@@ -770,6 +774,7 @@ class _KeyCreatePayload(BaseModel):
 
 
 class _KeyPatchPayload(BaseModel):
+    enabled: bool | None = None
     base_url: str | None = None
     billing_group: str | None = None
     access_key: str | None = None
@@ -840,7 +845,7 @@ def create_key(payload: _KeyCreatePayload) -> dict:
     from datetime import datetime, timezone
     try:
         spec = keys.KeySpec(
-            alias=payload.alias, provider=payload.provider,
+            alias=payload.alias, provider=payload.provider, enabled=payload.enabled,
             base_url=payload.base_url,
             billing_group=payload.billing_group,
             access_key=payload.access_key, secret_key=payload.secret_key,
@@ -1528,6 +1533,8 @@ def _create_user_job(
         key_row = keys.find_by_alias(body.alias)
         if not key_row:
             raise HTTPException(status_code=400, detail=f"unknown alias {body.alias}")
+        if not key_row.enabled:
+            raise HTTPException(status_code=422, detail="供应商已停用")
         model_id = body.model
     else:
         # 不指定厂商 =「自动」：body.model 是路由 id，按组内顺序解析出实际 KEY 与模型。

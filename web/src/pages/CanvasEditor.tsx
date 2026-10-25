@@ -492,7 +492,7 @@ function CanvasEditorInner({
   // 公告「快速添加」等别处改了密钥的模型列表：只刷新列表，不动节点上已选的模型。
   useEffect(() => {
     const refresh = () => {
-      void listKeys().then(resp => setKeys([...resp.keys].sort((left, right) => (
+      void listKeys().then(resp => setKeys(resp.keys.filter(key => key.enabled !== false).sort((left, right) => (
         Number(Boolean(right.is_default)) - Number(Boolean(left.is_default))
       )))).catch(() => undefined);
       void listModelRoutes().then(setRoutes).catch(() => undefined);
@@ -906,7 +906,7 @@ function CanvasEditorInner({
           dirtyVersion.current += 1;
           setDirtySignal(dirtyVersion.current);
         }
-        setKeys([...keyRows.keys].sort((left, right) => (
+        setKeys(keyRows.keys.filter(key => key.enabled !== false).sort((left, right) => (
           Number(Boolean(right.is_default)) - Number(Boolean(left.is_default))
         )));
         acceptJobs(canvasJobs);

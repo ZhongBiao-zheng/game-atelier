@@ -117,7 +117,7 @@ def sync_all_gateway_keys() -> None:
     import logging
 
     for key in _keys.read_keys_db().keys:
-        if key.provider != "atelier":
+        if not key.enabled or key.provider != "atelier":
             continue
         try:
             sync_gateway_key(key.alias)
@@ -165,6 +165,8 @@ def _run_task(
     key = _keys.find_by_alias(alias)
     if key is None or key.provider != "atelier" or not key.base_url:
         raise GatewayError(f"{alias} 不是局域网 Atelier 供应商")
+    if not key.enabled:
+        raise GatewayError("供应商已停用")
     params = params if params is not None else {}
     base = key.base_url.rstrip("/")
     headers = {"Authorization": f"Bearer {key.access_key}"}

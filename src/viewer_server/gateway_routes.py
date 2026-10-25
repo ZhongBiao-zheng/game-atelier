@@ -107,7 +107,7 @@ def gateway_options() -> dict:
         "models": [{"id": route.id, "name": route.name, "modality": route.modality}
                    for route in model_routes.list_routes()],
         "aliases": [{"alias": key.alias, "provider": key.provider, "name": key.alias}
-                    for key in keys.read_keys_db().keys if key.provider != "atelier"],
+                    for key in keys.read_keys_db().keys if key.enabled and key.provider != "atelier"],
     }
 
 

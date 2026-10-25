@@ -893,6 +893,9 @@ detail 形如 `params.<字段> 第 N 项：<原因>`，`/prompt` 违规时 job �
 resolve 后的绝对路径（落盘值就是闸门判过的那个）。`mask_image` 浏览器不能传：两个入口都先丢掉浏览器给的值
 （`/prompt` 保留已有值），只由服务端（画布局部编辑）写。
 
+`KeySpec.enabled` 为布尔值，默认 `true`；`POST /keys` 与 `PATCH /keys/{alias}` 接受该字段。
+`GET /keys` 保留停用供应商及其模型供管理，模型选择器必须过滤 `enabled=false`。停用供应商不参与模型路由、默认选择、Canvas 与 Agent 模型目录；显式指定停用供应商提交生成返回 422「供应商已停用」。停用保留密钥、模型配置与历史任务。
+
 `GET /keys/{alias}/reveal`：唯一回明文密钥的接口。按显式 alias、按需返回；列表接口一律掩码。
 
 `POST /keys/models-preview`：形状与分类瀑布见 [references/provider-config.md](references/provider-config.md) 的「models-preview 契约」一节。两条硬约束——① 用存储密钥时 `base_url` 只能与存储值同 host；② 默认 `/models` 未必是全集（OpenRouter 的视频模型要额外拉 `?output_modalities=video`）。

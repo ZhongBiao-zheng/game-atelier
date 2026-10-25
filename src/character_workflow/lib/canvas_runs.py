@@ -457,6 +457,8 @@ def _selected_key_and_model(
         except NoSuchRouteError:
             return None
     key = next((item for item in read_keys_db().keys if item.alias == selection.alias), None)
+    if key is not None and not key.enabled:
+        raise ValueError("供应商已停用")
     model = next((item for item in key.models if item.id == selection.model), None) if key else None
     return (key, model) if key and model else None
 
@@ -464,7 +466,7 @@ def _selected_key_and_model(
 def _keys_default_first() -> list[KeySpec]:
     database = read_keys_db()
     return sorted(
-        database.keys,
+        [key for key in database.keys if key.enabled],
         key=lambda key: 0 if key.alias == database.default_alias else 1,
     )
 
@@ -499,7 +501,9 @@ def _resolve_reverse_prompt_model() -> tuple[KeySpec, ModelSpec]:
 def _resolve_layer_decomposition_model(alias: str, model_id: str) -> tuple[KeySpec, ModelSpec]:
     from character_workflow.lib.callers.openai_image import supports_layer_decomposition
 
-    key = next((item for item in _keys_default_first() if item.alias == alias), None)
+    key = next((item for item in read_keys_db().keys if item.alias == alias), None)
+    if key is not None and not key.enabled:
+        raise ValueError("供应商已停用")
     model = next((item for item in key.models if item.id == model_id), None) if key else None
     if (
         key
@@ -666,6 +670,8 @@ def _resolve_key_and_model(
         key = next((item for item in read_keys_db().keys if item.alias == draft.alias), None)
         if key is None:
             raise ValueError(f"找不到生成密钥 {draft.alias}")
+        if not key.enabled:
+            raise ValueError("供应商已停用")
         model = next((item for item in key.models if item.id == draft.model), None)
         if model is None:
             raise ValueError("所选模型不属于当前密钥")

@@ -586,7 +586,7 @@ test('「自动」：新节点默认选它，草稿存 alias=null 和路由 id�
   }).alias).toBe('OpenRouter');
 
   // 组里有一个成员不能跑画布图片生成，整组都不出现在「自动」里。
-  const unroutable = withAutoProvider(keys, [{ id: 'gpt-image-2', name: 'gpt-image-2', modality: 'image', members: [
+  const unroutable = withAutoProvider([...keys, key('NB', 'nano_banana', null, 'gpt-image-2')], [{ id: 'gpt-image-2', name: 'gpt-image-2', modality: 'image', members: [
     member(keys[0]), { ...member(keys[0]), alias: 'NB', provider: 'nano_banana' },
   ] }]);
   expect(canvasGenerationModelSupportsMode(unroutable[0], unroutable[0].models[0], 'image')).toBe(false);

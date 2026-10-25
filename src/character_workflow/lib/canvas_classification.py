@@ -34,6 +34,8 @@ def classify_assets(project_id: str, payload: CanvasClassifyRequest) -> list[Can
         if project_id not in asset.project_ids or not media or not media.mime_type.startswith("image/"):
             raise ClassificationError("INVALID_CLASSIFICATION_ASSET", "只能分类本项目的图片资产")
     key = keys.find_by_alias(payload.model_alias or "")
+    if key is not None and not key.enabled:
+        raise ClassificationError("MODEL_UNAVAILABLE", "供应商已停用")
     spec = next((model for model in enabled_text_models(key) if model.id == payload.model), None) if key else None
     if not key or key.provider not in CHAT_PROVIDERS or not spec or not openai_text.supports_model(key, spec):
         raise ClassificationError("CLASSIFICATION_MODEL_REQUIRED", "请先在 Agent 选择已配置的对话模型")

@@ -250,6 +250,8 @@ def generate(
     key = keys.find_by_alias(alias)
     if key is None:
         raise OpenAITextError(f"alias not found: {alias}")
+    if not key.enabled:
+        raise OpenAITextError("供应商已停用")
     spec = next((item for item in key.models if item.id == model), None)
     protocol = spec.protocol if spec is not None else None
     if not supports_model(key, spec):

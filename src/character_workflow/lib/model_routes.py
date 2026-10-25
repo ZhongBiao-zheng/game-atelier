@@ -25,6 +25,7 @@ from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.keys import (
     KeysDB,
+    keys_lock,
     KeySpec,
     ModelModality,
     ModelSpec,
@@ -95,6 +96,8 @@ def _ordered(members: list[RouteMember], preferred: list[str]) -> tuple[RouteMem
 def _routes(database: KeysDB) -> list[ModelRoute]:
     grouped: dict[tuple[ModelModality, str], list[RouteMember]] = {}
     for key in _default_key_order(database):
+        if not key.enabled:
+            continue
         for model in key.models:
             modality = model_modality(model, key)
             members = grouped.setdefault((modality, route_id(model, key)), [])
@@ -322,30 +325,32 @@ def put_alias_first(alias: str, *, only_unordered: bool = False) -> None:
     only_unordered=True 时只处理保存的顺序里还没有它的组（同步后新出现的模型），
     不覆盖用户调整过的顺序。
     """
-    database = read_keys_db()
-    changed = False
-    for route in _routes(database):
-        aliases = [member.alias for member in route.members]
-        if alias not in aliases or aliases[0] == alias:
-            continue
-        saved = database.model_order.get(route.modality, {}).get(route.id, [])
-        if only_unordered and alias in saved:
-            continue
-        database.model_order.setdefault(route.modality, {})[route.id] = [
-            alias, *(item for item in aliases if item != alias)]
-        changed = True
-    if changed:
-        write_keys_db(database)
+    with keys_lock():
+        database = read_keys_db()
+        changed = False
+        for route in _routes(database):
+            aliases = [member.alias for member in route.members]
+            if alias not in aliases or aliases[0] == alias:
+                continue
+            saved = database.model_order.get(route.modality, {}).get(route.id, [])
+            if only_unordered and alias in saved:
+                continue
+            database.model_order.setdefault(route.modality, {})[route.id] = [
+                alias, *(item for item in aliases if item != alias)]
+            changed = True
+        if changed:
+            write_keys_db(database)
 
 
 def set_route_order(modality: ModelModality, identifier: str, aliases: list[str]) -> ModelRoute:
-    route = find_route(modality, identifier)
-    if sorted(aliases) != sorted(member.alias for member in route.members):
-        raise InvalidRouteOrderError("顺序必须恰好包含该模型的全部供应商")
-    database = read_keys_db()
-    database.model_order.setdefault(modality, {})[identifier] = list(aliases)
-    write_keys_db(database)
-    return find_route(modality, identifier)
+    with keys_lock():
+        route = find_route(modality, identifier)
+        if sorted(aliases) != sorted(member.alias for member in route.members):
+            raise InvalidRouteOrderError("顺序必须恰好包含该模型的全部供应商")
+        database = read_keys_db()
+        database.model_order.setdefault(modality, {})[identifier] = list(aliases)
+        write_keys_db(database)
+        return find_route(modality, identifier)
 
 
 def temporary_member_statuses() -> list[dict]:

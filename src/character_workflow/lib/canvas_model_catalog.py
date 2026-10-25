@@ -4,6 +4,8 @@ from character_workflow.lib.canvas_tool_common import CanvasToolError
 
 def model_configuration(alias: str, model_id: str, kind: str):
     key = keys.find_by_alias(alias)
+    if key is not None and not key.enabled:
+        raise CanvasToolError("MODEL_UNAVAILABLE", "供应商已停用", 422)
     model = next((m for m in key.models if m.id == model_id), None) if key else None
     if key is None or model is None or not key.access_key:
         raise CanvasToolError("MODEL_UNAVAILABLE", "模型没有在本机配置，请先在设置中配置", 422)

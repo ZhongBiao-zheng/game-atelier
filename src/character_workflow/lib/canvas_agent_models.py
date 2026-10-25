@@ -128,7 +128,7 @@ def list_chat_models() -> dict:
     """Every configured key's enabled agent-capable text models; failures are reported per key."""
     candidates = [
         key for key in keys.read_keys_db().keys
-        if key.provider in CHAT_PROVIDERS and (key.base_url or key.provider == "openai")
+        if key.enabled and key.provider in CHAT_PROVIDERS and (key.base_url or key.provider == "openai")
         and enabled_text_models(key)
     ]
     if not candidates:

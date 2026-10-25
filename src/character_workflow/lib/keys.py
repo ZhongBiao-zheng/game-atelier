@@ -8,12 +8,15 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_serializer
 
 from character_workflow.lib import data_root
+from character_workflow.lib.atomic_io import _replace_with_retry
+from character_workflow.lib.file_lock import file_lock
 
 Provider = Literal[
     "openai",
@@ -73,6 +76,7 @@ class ModelSpec(BaseModel):
 class KeySpec(BaseModel):
     alias: str
     provider: Provider
+    enabled: bool = True
     base_url: str | None = None
     # 聚合商可按账号分组采用不同价目；未配置时计价器必须保持未知，不能猜 default。
     billing_group: str | None = None
@@ -202,14 +206,24 @@ def _backfill_model_protocols(db: KeysDB) -> None:
                 spec.protocol = resolve_image_protocol(key.provider, key.base_url, spec.id)
 
 
+def keys_lock():
+    """所有配置读改写共用 sidecar 锁；write_keys_db 不重复加锁。"""
+    return file_lock(data_root.keys_file().with_suffix(".lock"))
+
+
 def write_keys_db(db: KeysDB) -> None:
     path = data_root.keys_file()
     path.parent.mkdir(parents=True, exist_ok=True)
-    # O_CREAT 直接带 0o600 创建，堵住「先 write 后 chmod」首次落盘的 umask 窗口。
-    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(json.dumps(db.model_dump(), ensure_ascii=False, indent=2))
-    _restrict_permissions(path)
+    # mkstemp 创建时即为 0600，原子替换让不持锁的模型目录读取也只看到完整配置。
+    fd, temporary = tempfile.mkstemp(prefix=".keys-", suffix=".tmp", dir=path.parent)
+    tmp = Path(temporary)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(db.model_dump(), ensure_ascii=False, indent=2))
+        _restrict_permissions(tmp)
+        _replace_with_retry(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _restrict_permissions(path: Path) -> None:
@@ -248,46 +262,50 @@ def find_by_alias(alias: str) -> KeySpec | None:
 
 
 def add_key(spec: KeySpec) -> None:
-    db = read_keys_db()
-    if any(k.alias == spec.alias for k in db.keys):
-        raise DuplicateAliasError(spec.alias)
-    db.keys.append(spec)
-    write_keys_db(db)
+    with keys_lock():
+        db = read_keys_db()
+        if any(k.alias == spec.alias for k in db.keys):
+            raise DuplicateAliasError(spec.alias)
+        db.keys.append(spec)
+        write_keys_db(db)
 
 
 def patch_key(alias: str, patch: dict) -> None:
-    db = read_keys_db()
-    for i, k in enumerate(db.keys):
-        if k.alias == alias:
-            db.keys[i] = k.model_copy(update=patch)
-            write_keys_db(db)
-            return
-    raise NoSuchAliasError(alias)
+    with keys_lock():
+        db = read_keys_db()
+        for i, k in enumerate(db.keys):
+            if k.alias == alias:
+                db.keys[i] = k.model_copy(update=patch)
+                write_keys_db(db)
+                return
+        raise NoSuchAliasError(alias)
 
 
 def delete_key(alias: str) -> None:
-    db = read_keys_db()
-    db.keys = [k for k in db.keys if k.alias != alias]
-    if db.default_alias == alias:
-        db.default_alias = None
-    db.model_order = {
-        modality: kept
-        for modality, routes in db.model_order.items()
-        if (kept := {
-            route_id: [item for item in aliases if item != alias]
-            for route_id, aliases in routes.items()
-            if any(item != alias for item in aliases)
-        })
-    }
-    write_keys_db(db)
+    with keys_lock():
+        db = read_keys_db()
+        db.keys = [k for k in db.keys if k.alias != alias]
+        if db.default_alias == alias:
+            db.default_alias = None
+        db.model_order = {
+            modality: kept
+            for modality, routes in db.model_order.items()
+            if (kept := {
+                route_id: [item for item in aliases if item != alias]
+                for route_id, aliases in routes.items()
+                if any(item != alias for item in aliases)
+            })
+        }
+        write_keys_db(db)
 
 
 def set_default_alias(alias: str) -> None:
-    db = read_keys_db()
-    if not any(k.alias == alias for k in db.keys):
-        raise NoSuchAliasError(alias)
-    db.default_alias = alias
-    write_keys_db(db)
+    with keys_lock():
+        db = read_keys_db()
+        if not any(k.alias == alias for k in db.keys):
+            raise NoSuchAliasError(alias)
+        db.default_alias = alias
+        write_keys_db(db)
 
 
 def is_openai_hk(base_url: str | None) -> bool:
@@ -299,10 +317,10 @@ def preferred_alias_for_kind(kind: Kind) -> str | None:
     db = read_keys_db()
     if db.default_alias:
         for k in db.keys:
-            if k.alias == db.default_alias and kind in k.capabilities:
+            if k.enabled and k.alias == db.default_alias and kind in k.capabilities:
                 return k.alias
     for k in db.keys:
-        if kind in k.capabilities:
+        if k.enabled and kind in k.capabilities:
             return k.alias
     return None
 
@@ -330,7 +348,7 @@ def keys_for_turn_start() -> list[dict]:
             "notes": k.notes,
             "is_default": k.alias == db.default_alias,
         }
-        for k in db.keys
+        for k in db.keys if k.enabled
     ]
 
 

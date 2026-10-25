@@ -296,3 +296,16 @@ def test_missing_draft_alias_is_filled_only_when_unique(monkeypatch):
     assert filled[0]["alias"] == "Tuzi"
     assert "alias" not in filled[1]  # 两家都有：不猜，交给生成前的校验报错
     assert filled[2] == changes[2]
+
+
+def test_disabled_chat_provider_is_not_fetched_or_listed(isolated_data_root, monkeypatch):
+    from character_workflow.lib import canvas_agent_models
+
+    keys.write_keys_db(keys.KeysDB(keys=[keys.KeySpec(
+        alias="disabled", provider="openai", enabled=False, access_key="test",
+        created_at="2026-10-25", models=[keys.ModelSpec(id="gpt-5", name="GPT 5", modality="text")],
+    )]))
+    def unexpected_fetch(_key):
+        raise AssertionError("disabled provider must not be contacted")
+    monkeypatch.setattr(canvas_agent_models, "_fetch", unexpected_fetch)
+    assert canvas_agent_models.list_chat_models() == {"models": [], "errors": []}

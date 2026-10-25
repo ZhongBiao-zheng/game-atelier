@@ -306,3 +306,45 @@ def test_backfill_skips_unresolvable_custom_video(tmp_path, monkeypatch):
     ))
     db = keys.read_keys_db()
     assert db.keys[0].models[0].protocol is None  # 无法解析 → 待用户显式选
+
+
+def test_concurrent_key_patches_preserve_both_changes(isolated_data_root, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    for alias in ("first", "second"):
+        keys.add_key(keys.KeySpec(alias=alias, provider="openai", access_key="test",
+                                  created_at="2026-10-25"))
+    first_writing, release_first, second_started, second_read = (Event() for _ in range(4))
+    original_read, original_write = keys.read_keys_db, keys.write_keys_db
+
+    def delayed_write(database):
+        if not first_writing.is_set():
+            first_writing.set()
+            assert release_first.wait(5)
+        original_write(database)
+
+    def observed_read():
+        if second_started.is_set():
+            second_read.set()
+        return original_read()
+
+    def patch_second():
+        second_started.set()
+        keys.patch_key("second", {"enabled": False})
+
+    monkeypatch.setattr(keys, "write_keys_db", delayed_write)
+    monkeypatch.setattr(keys, "read_keys_db", observed_read)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(keys.patch_key, "first", {"enabled": False})
+        assert first_writing.wait(5)
+        second = pool.submit(patch_second)
+        try:
+            assert second_started.wait(5)
+            # 第二次修改必须在锁外等待，不能读取第一次修改尚未写回的旧快照。
+            assert not second_read.wait(0.1)
+        finally:
+            release_first.set()
+        first.result(timeout=5)
+        second.result(timeout=5)
+    assert [key.enabled for key in original_read().keys] == [False, False]

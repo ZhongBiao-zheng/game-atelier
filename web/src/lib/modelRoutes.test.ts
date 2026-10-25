@@ -44,6 +44,23 @@ describe('「自动」供应商', () => {
     expect(withAutoProvider(keys, [])).toEqual(keys);
   });
 
+  it('停用供应商退出手动选择和自动成员，空路由消失', () => {
+    const available = withAutoProvider([{ ...keys[0], enabled: false }, keys[1]], [
+      { ...routes[0], members: routes[0].members.slice(0, 2) },
+      { ...routes[0], id: 'disabled-only', members: [routes[0].members[0]] },
+    ]);
+    expect(available.map(item => item.alias)).toEqual([AUTO_PROVIDER_ALIAS, 'HK']);
+    expect(available[0].models.map(model => model.id)).toEqual(['gpt-image-2']);
+    expect(available[0].models[0].members?.map(member => member.alias)).toEqual(['HK']);
+    expect(withAutoProvider([{ ...keys[0], enabled: false }], [])).toEqual([]);
+  });
+
+  it('路由刷新失败时，旧快照不能重新引入已从可用密钥列表移除的成员', () => {
+    const available = withAutoProvider([keys[1]], routes);
+    expect(available[0].models[0].members?.map(member => member.alias)).toEqual(['HK']);
+    expect(withAutoProvider([], routes)).toEqual([]);
+  });
+
   it('实际渠道取组内第一个成员，指定厂商原样返回', () => {
     expect(resolveChannel(providers, auto, 'gpt-image-2')).toEqual({ key: keys[0], modelId: 'gpt-image-2' });
     expect(resolveChannel(providers, keys[2], 'openai/gpt-image-2')).toEqual({ key: keys[2], modelId: 'openai/gpt-image-2' });

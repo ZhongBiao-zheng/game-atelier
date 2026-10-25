@@ -214,3 +214,15 @@ def test_get_single_job(client):
     r2 = client.get(f"/api/jobs/{job_id}")
     assert r2.status_code == 200
     assert r2.json()["job_id"] == job_id
+
+
+def test_studio_rejects_explicit_disabled_provider_before_creating_job(client):
+    from character_workflow.lib import keys, jobs
+
+    keys.patch_key("default", {"enabled": False})
+    response = client.post("/api/studio/jobs", json={
+        "alias": "default", "prompt": "test", "model": "gpt-image-2", "params": {},
+    })
+    assert response.status_code == 422
+    assert response.json()["detail"] == "供应商已停用"
+    assert jobs.list_jobs() == []

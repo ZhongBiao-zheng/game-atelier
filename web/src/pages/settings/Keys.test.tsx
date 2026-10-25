@@ -62,8 +62,8 @@ describe('KeysPage', () => {
       }),
     });
     render(<KeysPage />);
-    // provider=seedream → 标题显示官方中文名「火山引擎」，alias 作为小标签保留
-    await waitFor(() => expect(screen.getByText('火山引擎')).toBeInTheDocument());
+    // provider=seedream → 标题显示官方中文名「Volcengine Ark」，alias 作为小标签保留
+    await waitFor(() => expect(screen.getByText('Volcengine Ark')).toBeInTheDocument());
     expect(screen.getByText('seedream')).toBeInTheDocument();
   });
 
@@ -459,7 +459,7 @@ describe('KeyForm', () => {
     // 编辑态不渲染供应商选择轨道 / 移动端下拉——避免误导性 hover
     expect(screen.queryByRole('group', { name: '供应商列表' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('供应商选择')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('编辑 火山引擎');
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('编辑 Volcengine Ark');
   });
 
   it('edit mode titles a custom provider by its config alias, not OpenAI', () => {

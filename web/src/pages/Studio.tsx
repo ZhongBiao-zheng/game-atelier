@@ -126,7 +126,7 @@ function StudioFull() {
   // 公告「快速添加」等别处改了密钥的模型列表：只刷新列表，不动当前选中的供应商 / 模型。
   useEffect(() => {
     const refresh = () => {
-      void listKeys().then(resp => setKeys(resp.keys.filter(key => key.models.length > 0))).catch(() => undefined);
+      void listKeys().then(resp => setKeys(resp.keys.filter(key => key.enabled !== false && key.models.length > 0))).catch(() => undefined);
       void listModelRoutes().then(setRoutes).catch(() => undefined);
     };
     window.addEventListener(KEYS_CHANGED_EVENT, refresh);
@@ -446,7 +446,7 @@ function StudioFull() {
     Promise.all([listKeys(), listModelRoutes().catch(() => [] as ModelRoute[]), loadTokenDancePrices()])
       .then(([resp, loadedRoutes]) => {
         if (cancelled) return;
-        const usable = resp.keys.filter((key) => key.models.length > 0);
+        const usable = resp.keys.filter((key) => key.enabled !== false && key.models.length > 0);
         setKeys(usable);
         setRoutes(loadedRoutes);
         const choices = withAutoProvider(usable, loadedRoutes);

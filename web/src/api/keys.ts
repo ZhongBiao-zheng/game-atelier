@@ -6,6 +6,7 @@ export type ModelInputModality = 'text' | 'image' | 'video' | 'audio';
 
 export interface KeyView {
   alias: string;
+  enabled?: boolean;
   is_default?: boolean;
   provider: string;
   base_url: string | null;
@@ -24,6 +25,7 @@ export interface KeyView {
 
 export interface KeyCreatePayload {
   alias: string;
+  enabled?: boolean;
   provider: string;
   base_url?: string | null;
   billing_group?: string | null;

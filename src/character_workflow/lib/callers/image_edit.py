@@ -150,6 +150,8 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path,
     key = keys.find_by_alias(alias)
     if key is None:
         raise ValueError("编辑模型的密钥已经不存在")
+    if not key.enabled:
+        raise ValueError("供应商已停用")
     transport = edit_transport(key.provider, model, _effective_image_protocol(key, model))
     if transport == "evolink":
         import base64

@@ -154,3 +154,38 @@ def test_preference_selection_without_alias_routes(isolated_data_root):
     assert _selected_key_and_model(
         CanvasGenerationModelSelection(alias="HK", model="nano-banana"), "image",
     )[0].alias == "HK"
+
+
+def test_disabled_provider_is_excluded_from_routes_and_canvas_catalog(isolated_data_root):
+    from character_workflow.lib.canvas_model_catalog import model_configuration, model_rows
+    from character_workflow.lib.canvas_tool_common import CanvasToolError
+    from character_workflow.lib.canvas_runs import _resolve_key_and_model, _resolve_layer_decomposition_model
+    from character_workflow.lib.schemas import CanvasGenerationDraft
+
+    _seed()
+    keys.patch_key("Tuzi", {"enabled": False})
+    assert [member.alias for member in _route("image", "gpt-image-2").members] == ["HK", "OpenRouter"]
+    assert model_routes.resolve_auto("image", "gpt-image-2")[0].alias == "HK"
+    assert all(route.id != "claude-sonnet-5-5" for route in model_routes.list_routes())
+    assert all(row["alias"] != "Tuzi" for row in model_rows("image"))
+    with pytest.raises(CanvasToolError, match="供应商已停用"):
+        model_configuration("Tuzi", "gpt-image-2", "image")
+    with pytest.raises(ValueError, match="供应商已停用"):
+        _resolve_key_and_model(CanvasGenerationDraft(
+            mode="image", alias="Tuzi", model="gpt-image-2", prompt="test",
+            updated_at="2026-10-25T00:00:00Z",
+        ))
+    with pytest.raises(ValueError, match="供应商已停用"):
+        _resolve_layer_decomposition_model("Tuzi", "gpt-image-2")
+    keys.patch_key("Tuzi", {"enabled": True})
+    assert model_routes.resolve_auto("image", "gpt-image-2")[0].alias == "Tuzi"
+
+
+@pytest.mark.parametrize("dispatch_name", ["dispatch", "dispatch_video", "dispatch_audio", "dispatch_text"])
+def test_disabled_provider_cannot_be_dispatched(isolated_data_root, dispatch_name, tmp_path):
+    from character_workflow.lib import callers
+
+    _seed()
+    keys.patch_key("Tuzi", {"enabled": False})
+    with pytest.raises(Exception, match="供应商已停用"):
+        getattr(callers, dispatch_name)(prompt="test", model="gpt-image-2", alias="Tuzi", output_dir=tmp_path)

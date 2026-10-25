@@ -33,6 +33,13 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.117.0', date: '2026-10-25', headline: '供应商管理更清晰',
+    changes: [
+      { kind: 'feat', text: '供应商支持停用，保留配置并从模型选择和自动路由中移除' },
+      { kind: 'feat', text: '供应商列表支持搜索，集中显示使用状态、模型数量和最近使用时间' },
+    ],
+  },
+  {
     version: '5.116.4', date: '2026-10-25', headline: 'OpenAI-HK 价格自动同步',
     changes: [
       { kind: 'feat', text: 'OpenAI-HK 已核实模型的单张费用随官网价格自动同步，Flare 和 Sunburst 采用当前价格。' },

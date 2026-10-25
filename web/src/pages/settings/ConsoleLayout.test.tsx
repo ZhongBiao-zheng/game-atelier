@@ -5,7 +5,7 @@ import { memoryLocation } from 'wouter/memory-location';
 import { CONSOLE_NAV, ConsoleLayout, rememberCreativeLocation } from './ConsoleLayout';
 
 vi.mock('@/api/keys', () => ({ listKeys: async () => ({ keys: [] }) }));
-vi.mock('./ProvidersPage', () => ({ ProvidersPage: () => <p>providers-content</p> }));
+vi.mock('./ProvidersPage', () => ({ ProvidersPage: () => <><h1>供应商</h1><p>providers-content</p></> }));
 vi.mock('./RoutesPage', () => ({ RoutesPage: () => <p>routes-content</p> }));
 vi.mock('./GatewayPage', () => ({ GatewayPage: () => <p>gateway-content</p> }));
 vi.mock('./usage/UsagePage', () => ({ UsagePage: () => <p>usage-content</p> }));

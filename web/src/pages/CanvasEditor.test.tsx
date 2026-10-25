@@ -2757,3 +2757,22 @@ it('hides the generation composer throughout annotation and restores the draft a
   expect(await screen.findByRole('button', { name: '开始生成' })).toBeInTheDocument();
   expect(screen.getByRole('combobox', { name: '提示词' })).toHaveTextContent('保留我的提示词');
 });
+
+it('停用供应商退出画布模型列表，刷新后仍不可选', async () => {
+  const { keys } = await listKeys();
+  const disabled = { ...keys[0], alias: 'disabled', enabled: false, is_default: true,
+    models: [{ id: 'gpt-image-2.5', name: 'Disabled model', modality: 'image' as const }] };
+  vi.mocked(listKeys).mockResolvedValue({ keys: [disabled, ...keys] });
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [imageNode('image-one', '图片', imageDraft)],
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'flow-node-image-one' }));
+  fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
+  expect(await screen.findByRole('option', { name: 'GPT Image 2' })).toBeInTheDocument();
+  expect(screen.queryByRole('option', { name: 'Disabled model' })).not.toBeInTheDocument();
+  const before = vi.mocked(listKeys).mock.calls.length;
+  act(() => window.dispatchEvent(new Event('atelier:keys-changed')));
+  await waitFor(() => expect(listKeys).toHaveBeenCalledTimes(before + 1));
+  expect(screen.queryByRole('option', { name: 'Disabled model' })).not.toBeInTheDocument();
+});
