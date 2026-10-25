@@ -74,7 +74,7 @@ from character_workflow.lib.schemas import (
     CanvasImageEditRunCreate, CanvasImageEditSave, CanvasImageEditSaveResponse,
     CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
-    CanvasCategoriesUpdate, CanvasClassifyRequest, CanvasCategorySuggestion, CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
+    CanvasCategoriesUpdate, CanvasSpecUpdate, CanvasClassifyRequest, CanvasCategorySuggestion, CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
     CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse,
     CanvasUiPreferences, CanvasUiPreferencesUpdate, CanvasUploadResponse,
     CharacterIndexResponse, CharacterWorkspaceResponse,
@@ -2674,6 +2674,61 @@ def _raise_creation_asset_error(error: Exception) -> None:
     if isinstance(error, ValueError):
         raise HTTPException(422, detail=str(error)) from error
     raise error
+
+
+@router.get("/canvas/projects/{project_id}/specs")
+def get_canvas_specs(project_id: str):
+    from character_workflow.lib.canvas_specs import read_specs
+    try:
+        return read_specs(project_id)
+    except (FileNotFoundError, KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.put("/canvas/projects/{project_id}/specs/project")
+def put_canvas_project_spec(project_id: str, payload: CanvasSpecUpdate):
+    return _put_canvas_spec(project_id, payload)
+
+
+@router.put("/canvas/projects/{project_id}/specs/categories/{name:path}")
+def put_canvas_category_spec(project_id: str, name: str, payload: CanvasSpecUpdate):
+    return _put_canvas_spec(project_id, payload, name)
+
+
+def _put_canvas_spec(project_id: str, payload: CanvasSpecUpdate, name: str | None = None):
+    from character_workflow.lib.canvas_specs import write_spec
+    try:
+        write_spec(project_id, payload.text, name)
+        return {"saved": True}
+    except (FileNotFoundError, KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.get("/canvas/projects/{project_id}/lessons")
+def get_canvas_lessons(project_id: str):
+    from character_workflow.lib.canvas_specs import read_lessons
+    try:
+        return read_lessons(project_id)
+    except (FileNotFoundError, KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.post("/canvas/projects/{project_id}/lessons/{index}/adopt")
+def adopt_canvas_lesson(project_id: str, index: int):
+    return _review_canvas_lesson(project_id, index, True)
+
+
+@router.delete("/canvas/projects/{project_id}/lessons/{index}")
+def delete_canvas_lesson(project_id: str, index: int):
+    return _review_canvas_lesson(project_id, index, False)
+
+
+def _review_canvas_lesson(project_id: str, index: int, adopt: bool):
+    from character_workflow.lib.canvas_specs import review_lesson
+    try:
+        return review_lesson(project_id, index, adopt)
+    except (FileNotFoundError, KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
 
 
 @router.post("/canvas/projects/{project_id}/classify", response_model=list[CanvasCategorySuggestion])

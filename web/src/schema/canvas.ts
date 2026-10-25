@@ -393,6 +393,7 @@ export interface CanvasProject {
   project_id: string;
   name: string;
   categories: string[];
+  category_spec_files: Record<string, string>;
   created_at: string;
   updated_at: string;
 }

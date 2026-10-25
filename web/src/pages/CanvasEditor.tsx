@@ -149,6 +149,7 @@ import {
   type CreationAssetPanelHandle,
   type CreationAssetSaveRequest,
 } from '@/components/assets/CreationAssetPanel';
+import { ProjectSpecsDrawer } from '@/components/canvas/ProjectSpecsDrawer';
 import { CanvasAgentPanel } from '@/components/canvas/agent/CanvasAgentPanel';
 import { insertCreationAssetIntoCanvas, listCreationAssets, saveMediaCreationAssetFromPath, updateCreationAssetCategory } from '@/api/creationAssets';
 import { adoptTeamAsset, listRelatedTeamAssets } from '@/api/teamLibraries';
@@ -475,6 +476,7 @@ function CanvasEditorInner({
   const narrowViewport = useNarrowCanvasViewport();
   const [, setLocation] = useLocation();
   const [document, setDocument] = useState<CanvasDocument | null>(null);
+  const [specsOpen, setSpecsOpen] = useState(false);
   const [projects, setProjects] = useState<CanvasProject[]>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [routes, setRoutes] = useState<ModelRoute[]>([]);
@@ -5151,6 +5153,8 @@ function CanvasEditorInner({
                         </DropdownMenuRadioItem>
                       ))}
                     </DropdownMenuRadioGroup>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={() => setSpecsOpen(true)}>项目规范</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <DropdownMenu>
@@ -5419,6 +5423,8 @@ function CanvasEditorInner({
             initialTeamLibraryId={teamLibraryId}
           />
         )}
+
+        {specsOpen && <ProjectSpecsDrawer key={projectId} projectId={projectId} onClose={() => setSpecsOpen(false)} />}
 
         {agentOpen && !libraryMode && (
           <CanvasAgentPanel

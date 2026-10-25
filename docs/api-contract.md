@@ -1146,3 +1146,13 @@ failed 只计 actual。team 以账本 charged_cny 为准。时间按本机时区
 ## 参考库自动分类（5.108.0）
 
 `POST /api/canvas/projects/{project_id}/classify` 接收 `{asset_ids: string[], model_alias?: string, model?: string}`。每次 1–48 个不重复的本项目图片资产，每 8 张调用一次模型，发送最长边 512 的缩略图。模型沿用前端 Agent 已记住的对话模型，显式传入别名与模型（Agent 未发首条消息时设置仅在浏览器中，故补充这两个请求字段）。模型必须配置图片输入。响应为 `[{asset_id, category: string | null, confidence: number}]`，置信度 0–1；仅给建议、不写资产。类别必须在项目列表中，非法 JSON、遗漏/重复/额外 ID、越界类别返回 502 `CLASSIFICATION_INVALID_RESPONSE`；模型失败返回 502 `CLASSIFICATION_MODEL_FAILED`。未配置模型、图片输入、项目类别分别返回 422 的 `CLASSIFICATION_MODEL_REQUIRED`、`CLASSIFICATION_VISION_REQUIRED`、`CLASSIFICATION_CATEGORIES_REQUIRED`。只由用户点击触发计费；待分类列表及建议为前端本次面板会话状态，确认后才逐项 PATCH category。
+
+## 项目规范与经验（5.109.0）
+
+`CanvasProject.category_spec_files` 记录类别到唯一 ASCII Markdown 文件名的映射，保留 `project.md`。规范位于 `specs/project.md` 与 `specs/<slug>.md`，每文件最多 40000 字符，项目锁内原子写入。项目包包含规范及 `agent/lessons.md`，校验 UTF-8、长度、清单 MIME 和映射文件完整性。
+
+- `GET /api/canvas/projects/{project_id}/specs` → `{project: string, categories: Record<string,string>}`；未写类别返回空串。
+- `PUT .../specs/project` 与 `PUT .../specs/categories/{name}` body `{text: string}` → `{saved:true}`。
+- `GET .../lessons` → `{pending:string[], adopted:string[]}`；`POST .../lessons/{index}/adopt` 与 `DELETE .../lessons/{index}` 操作待审索引，返回更新后的列表。采纳追加至项目规范的 `## 项目经验`。
+- Agent `read_spec(category)` 返回类别全文；`append_lesson(text)` 记录 1–300 字待审经验，审查模式需确认。每轮 instructions 追加项目规范，超过 8000 字截断并标注。
+- 编辑器中文输入法组合期间不启保存计时；切页/关闭前完成保存，失败保留抽屉及本机草稿，意外卸载可恢复。

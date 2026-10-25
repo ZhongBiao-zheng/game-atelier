@@ -121,6 +121,12 @@ GET /api/creation-assets
 PATCH /api/creation-assets/{asset_id}
 PUT /api/canvas/projects/{project_id}/categories
 POST /api/canvas/projects/{project_id}/classify
+GET /api/canvas/projects/{project_id}/specs
+PUT /api/canvas/projects/{project_id}/specs/project
+PUT /api/canvas/projects/{project_id}/specs/categories/{name:path}
+GET /api/canvas/projects/{project_id}/lessons
+POST /api/canvas/projects/{project_id}/lessons/{index}/adopt
+DELETE /api/canvas/projects/{project_id}/lessons/{index}
 POST /api/creation-assets/staleness
 POST /api/creation-assets/generation/from-job
 POST /api/creation-assets/generation/from-canvas

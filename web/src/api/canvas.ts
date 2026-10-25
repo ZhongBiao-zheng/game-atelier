@@ -622,3 +622,23 @@ export function updateCanvasCategories(projectId: string, categories: string[]):
     body: JSON.stringify({ categories }),
   });
 }
+
+export interface CanvasSpecs { project: string; categories: Record<string, string> }
+export interface CanvasLessons { pending: string[]; adopted: string[] }
+export function getCanvasSpecs(projectId: string): Promise<CanvasSpecs> {
+  return requestJson(`/api/canvas/projects/${encodeURIComponent(projectId)}/specs`, '读取项目规范');
+}
+export function saveCanvasSpec(projectId: string, text: string, category?: string): Promise<{saved: boolean}> {
+  const target = category === undefined ? 'project' : `categories/${encodeURIComponent(category)}`;
+  return requestJson(`/api/canvas/projects/${encodeURIComponent(projectId)}/specs/${target}`, '保存项目规范', {
+    method: 'PUT', headers: {'content-type': 'application/json'}, body: JSON.stringify({text}),
+  });
+}
+export function getCanvasLessons(projectId: string): Promise<CanvasLessons> {
+  return requestJson(`/api/canvas/projects/${encodeURIComponent(projectId)}/lessons`, '读取项目经验');
+}
+export function reviewCanvasLesson(projectId: string, index: number, adopt: boolean): Promise<CanvasLessons> {
+  return requestJson(`/api/canvas/projects/${encodeURIComponent(projectId)}/lessons/${index}${adopt ? '/adopt' : ''}`, '处理项目经验', {
+    method: adopt ? 'POST' : 'DELETE',
+  });
+}

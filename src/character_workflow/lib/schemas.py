@@ -1534,8 +1534,21 @@ class CanvasProject(CanvasCategoriesUpdate):
     project_id: str
     name: CanvasProjectName
     categories: list[CategoryName] = Field(default_factory=lambda: DEFAULT_CANVAS_CATEGORIES.copy(), max_length=40)
+    category_spec_files: dict[CategoryName, Annotated[str, Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*\.md$")]] = Field(default_factory=dict)
     created_at: str
     updated_at: str
+
+    @model_validator(mode="after")
+    def unique_spec_files(self):
+        filenames = list(self.category_spec_files.values())
+        if "project.md" in filenames or len(set(filenames)) != len(filenames):
+            raise ValueError("类别规范文件名必须唯一且不能为 project.md")
+        return self
+
+
+class CanvasSpecUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(max_length=40_000)
 
 
 class CanvasProjectCover(BaseModel):

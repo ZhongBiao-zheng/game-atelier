@@ -58,7 +58,9 @@ def test_agent_client_ignores_proxy_environment_for_gateway(isolated_data_root, 
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7890")
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:7890")
     _gateway_key()
+    from character_workflow.lib.canvas_projects import create_canvas_project
+    project = create_canvas_project("Gateway")
     agent = canvas_agent_runtime.build_agent(SimpleNamespace(
-        model_alias="Hub", model="chat", effort=None, creation_mode="all"))
+        project_id=project.project_id, model_alias="Hub", model="chat", effort=None, creation_mode="all"))
     http_client = agent.model._client._client
     assert http_client._trust_env is False

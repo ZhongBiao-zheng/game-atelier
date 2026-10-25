@@ -481,6 +481,7 @@ beforeEach(() => {
     schema_version: 2,
     project_id: 'canvas-one',
     categories: ['弹窗', '角色', '底图', '按钮', '图标', '字效'],
+    category_spec_files: {},
     name: '列车短片',
     created_at: '2026-08-23T00:00:00Z',
     updated_at: '2026-08-23T00:00:00Z',

@@ -33,6 +33,10 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.109.0', date: '2026-10-25', headline: '项目规范与经验',
+    changes: [{ kind: 'feat', text: '编辑项目和类别规范，采纳 Agent 经验，随项目包一起保存。' }],
+  },
+  {
     version: '5.108.0', date: '2026-10-25', headline: '项目参考库',
     changes: [{ kind: 'feat', text: '参考图按类别浏览，支持批量导入、自动分类建议与人工确认。' }],
   },

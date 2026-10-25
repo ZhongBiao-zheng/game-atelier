@@ -23,7 +23,7 @@ from character_workflow.lib import canvas_agent_layout as layout
 from character_workflow.lib import canvas_agent_skills as skills
 from character_workflow.lib import canvas_agent_tools as tools
 from character_workflow.lib import canvas_agent_vision as vision
-from character_workflow.lib import keys
+from character_workflow.lib import keys, canvas_specs
 from character_workflow.lib.canvas_agent_models import chat_base_url
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasChange, CanvasListModelsInput, CanvasProjectInput,
@@ -50,7 +50,7 @@ MEDIA_SCHEME = "atelier-media://"
 LOCAL = SimpleNamespace(kind="local", session_id="canvas-chat", grant_id=None)
 
 READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "read_media", "load_skill",
-                        "read_skill_file", "wait_for_run"})
+                        "read_skill_file", "wait_for_run", "read_spec"})
 
 INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术和策划在无限画布上出图、出视频。
 
@@ -75,6 +75,8 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
 - list_models 返回空列表时不要建生成节点，告诉用户在输入框的「模型偏好」里选择模型。
 - 生成是付费的。不要自动重试失败的生成；失败时告诉用户原因，由用户决定。
 - 用户拒绝某个操作时，不要换个方式再做同一件事，先问用户想怎么改。
+- 出图前按需求判断类别并 read_spec 读取类别规范。
+- 用户纠正了规律性问题时，用 append_lesson 记下经验，等用户采纳。
 - 回复用中文，简短直接。"""
 
 
@@ -201,6 +203,10 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
     """Run one tool call; returns (result, node ids it created). Raises WorkshopError.
 
     created_ids: 本会话已建的节点，新节点排位时用来找「上一次出图」。"""
+    if tool == "read_spec":
+        return {"text": canvas_specs.read_spec(project_id, arguments["category"])}, []
+    if tool == "append_lesson":
+        return canvas_specs.append_lesson(project_id, arguments["text"]), []
     if tool == "get_canvas":
         return tools.get_document(LOCAL, CanvasProjectInput(project_id=project_id)), []
     if tool == "list_models":
@@ -257,7 +263,7 @@ def run_tool_safely(project_id: str, tool: str, arguments: dict, scope: ModelSco
     except (KeyError, TypeError, ValueError) as error:
         return f"参数错误：{error}", []
     text = json.dumps(result, ensure_ascii=False)
-    if len(text) > TOOL_OUTPUT_LIMIT:
+    if tool != "read_spec" and len(text) > TOOL_OUTPUT_LIMIT:
         text = text[:TOOL_OUTPUT_LIMIT] + "…（已截断）"
     return text, created
 
@@ -276,6 +282,12 @@ def tool_error_label(text: str) -> str:
 # ── 工具定义（给模型看的 schema）─────────────────────────────────────────────────
 
 TOOL_SPECS: dict[str, tuple[str, dict]] = {
+    "read_spec": ("读取类别规范全文，不存在返回空文本。",
+                  {"type": "object", "required": ["category"],
+                   "properties": {"category": {"type": "string"}}}),
+    "append_lesson": ("记录一条待审项目经验，用户采纳后才生效。",
+                      {"type": "object", "required": ["text"],
+                       "properties": {"text": {"type": "string", "minLength": 1, "maxLength": 300}}}),
     "get_canvas": ("读取当前画布：节点、文本、生成配置、连线、媒体版本。",
                    {"type": "object", "properties": {}}),
     "list_models": ("列出可用于生成配置的图片 / 视频模型（alias + model + 参数能力）。",
@@ -337,6 +349,8 @@ def arguments_valid(project_id: str, tool: str, arguments: dict) -> bool:
     """写操作的参数先按真实入参模型校验：不合格的调用不打扰用户，直接把校验错误回给模型去改。"""
     from pydantic import ValidationError
     try:
+        if tool == "append_lesson":
+            canvas_specs.validate_lesson(arguments.get("text"))
         if tool == "apply_changes":
             ApplyChangesInput(project_id=project_id, expected_revision=0,
                               changes=arguments.get("changes") or [])
@@ -344,7 +358,7 @@ def arguments_valid(project_id: str, tool: str, arguments: dict) -> bool:
             RunInput(project_id=project_id, expected_revision=0,
                      surface_node_id=arguments.get("surface_node_id", ""),
                      requested_count=arguments.get("count", 1))
-    except (ValidationError, TypeError):
+    except (ValidationError, TypeError, ValueError):
         return False
     return True
 
@@ -577,7 +591,7 @@ def build_agent(session: CanvasAgentSession):
     return Agent(
         name="canvas-agent",
         instructions=INSTRUCTIONS + CREATION_MODE_PROMPTS[session.creation_mode]
-        + skills.skills_prompt(),
+        + skills.skills_prompt() + canvas_specs.instructions(session.project_id),
         tools=build_tools(),
         model=OpenAIChatCompletionsModel(model=session.model, openai_client=client),
         model_settings=settings,
