@@ -208,8 +208,10 @@ async def lifespan(app: FastAPI):
         resume_tasks.add(task)
         task.add_done_callback(resume_tasks.discard)
     from character_workflow.lib.tokendance_prices import start_background_sync
+    from character_workflow.lib.tuzi_prices import start_background_sync as start_tuzi_sync
 
     start_background_sync()
+    start_tuzi_sync()
     try:
         yield
     finally:
