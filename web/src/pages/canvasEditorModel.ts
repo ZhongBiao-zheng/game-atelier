@@ -14,7 +14,10 @@ import {
 import type {
   CanvasContentNode,
   CanvasBatchMaterialNode,
+  CanvasCompareSlot,
   CanvasConnection,
+  CanvasInputConnection,
+  CanvasVideoFrameSlot,
   CanvasContentVersion,
   CanvasGenerationDefault,
   CanvasGenerationMode,
@@ -178,11 +181,6 @@ export function canvasNodeRenderedSize(
     const target = frame.width > 0 && frame.height > 0 ? frame
       : source?.kind === 'image' ? source : null;
     return target ? sizeLockedToCanvasVersion(node.size, target) : node.size ?? CANVAS_DEFAULT_NODE_SIZE;
-  }
-  if (node.type === 'compare') {
-    // 对比节点按结果图比例显示：扩图的原图只占画框一部分。
-    const after = versions[node.data.after_version_id];
-    return after?.kind === 'image' ? sizeLockedToCanvasVersion(node.size, after) : node.size ?? CANVAS_DEFAULT_NODE_SIZE;
   }
   if ((node.type !== 'image' && node.type !== 'video') || node.data.display.free_resize || !node.data.current_version_id) {
     return node.size ?? CANVAS_DEFAULT_NODE_SIZE;
@@ -764,6 +762,60 @@ export function canvasPendingInputNodes(
   return result;
 }
 
+export function isCanvasVideoFrameSlot(slot: CanvasInputConnection['slot']): slot is CanvasVideoFrameSlot {
+  return slot === 'first_frame' || slot === 'last_frame';
+}
+
+export const CANVAS_COMPARE_SLOTS: readonly CanvasCompareSlot[] = ['before', 'after'];
+
+export function isCanvasCompareSlot(value: unknown): value is CanvasCompareSlot {
+  return value === 'before' || value === 'after';
+}
+
+/** 对比节点的输入连线收敛成最多两条：before / after 各一张图。
+ *
+ *  建线入口很多（拖到接口、拖到节点身上、多选连线、从菜单新建），只有拖到接口时知道槽位。
+ *  所以在提交时统一收口：只认图片来源；同一来源只留最新一条；指定槽位的后来者顶替先来者；
+ *  没有槽位的按 before → after 填空位，两边都占了就丢弃。 */
+export function normalizeCanvasCompareConnections(document: CanvasDocument): CanvasDocument {
+  const nodes = new Map(document.nodes.map(node => [node.id, node]));
+  const incoming = new Map<string, CanvasInputConnection[]>();
+  for (const connection of document.connections) {
+    if (connection.role !== 'input' || nodes.get(connection.target_node_id)?.type !== 'compare') continue;
+    incoming.set(connection.target_node_id, [...incoming.get(connection.target_node_id) ?? [], connection]);
+  }
+  if (incoming.size === 0) return document;
+  const resolved = new Map<string, CanvasInputConnection | null>();
+  for (const edges of incoming.values()) {
+    const bySource = new Map<string, CanvasInputConnection>();
+    for (const edge of edges) {
+      if (nodes.get(edge.source_node_id)?.type !== 'image' || edge.annotated) continue;
+      bySource.delete(edge.source_node_id);
+      bySource.set(edge.source_node_id, edge);
+    }
+    const slots = new Map<CanvasCompareSlot, CanvasInputConnection>();
+    const unslotted: CanvasInputConnection[] = [];
+    for (const edge of bySource.values()) {
+      if (isCanvasCompareSlot(edge.slot)) slots.set(edge.slot, edge);
+      else unslotted.push(edge);
+    }
+    for (const edge of unslotted) {
+      const free = CANVAS_COMPARE_SLOTS.find(slot => !slots.has(slot));
+      if (free) slots.set(free, { ...edge, slot: free });
+    }
+    const kept = new Map([...slots.values()].map(edge => [edge.id, edge]));
+    for (const edge of edges) resolved.set(edge.id, kept.get(edge.id) ?? null);
+  }
+  let changed = false;
+  const connections = document.connections.flatMap(connection => {
+    if (!resolved.has(connection.id)) return [connection];
+    const next = resolved.get(connection.id);
+    if (next !== connection) changed = true;
+    return next ? [next] : [];
+  });
+  return changed ? { ...document, connections } : document;
+}
+
 export function canCreateCanvasInputConnection(
   document: CanvasDocument | null,
   connection: { source: string | null; target: string | null },
@@ -773,6 +825,8 @@ export function canCreateCanvasInputConnection(
   }
   const source = document.nodes.find(node => node.id === connection.source);
   const target = document.nodes.find(node => node.id === connection.target);
+  // 对比节点：任意图片都能连；同一来源改连另一侧、或顶替已占的一侧，由提交时的收口处理。
+  if (target?.type === 'compare') return source?.type === 'image';
   if (
     !source
     || !target

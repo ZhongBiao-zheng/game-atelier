@@ -45,9 +45,9 @@ import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
 import { CanvasImageEditPanel } from './CanvasImageEditPanel';
 import { CanvasFinalizationMenu } from './CanvasFinalizationMenu';
 import { CanvasCompareSurface } from './CanvasCompareSurface';
-import { canvasCompareSource, type CanvasCompareSource } from './canvasCompare';
+import { canvasCompareFrame, canvasCompareSource, type CanvasCompareInputs, type CanvasCompareSource } from './canvasCompare';
 import { CanvasImageEditSurface } from './CanvasImageEditSurface';
-import type { CanvasImageEditNode, CanvasMediaVersion } from '@/schema/canvas';
+import type { CanvasCompareNode, CanvasImageEditNode, CanvasMediaVersion } from '@/schema/canvas';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import {
@@ -121,6 +121,7 @@ import type {
 import type { Job } from '@/schema/jobs';
 import {
   canvasNodeAcceptsInput,
+  CANVAS_COMPARE_SLOTS,
   canvasNodeProvidesOutput,
   CANVAS_GENERATION_MODE_LABELS,
   CANVAS_MAX_NODE_SIZE,
@@ -251,6 +252,10 @@ export interface CanvasNodeContextValue {
   openAngle: (node: CanvasContentNode) => void;
   upscaleImage: (node: CanvasContentNode, target: CanvasUpscaleTarget) => void;
   createCompareNode?: (node: CanvasContentNode, source: CanvasCompareSource) => void;
+  /** 对比节点 → before / after 两侧当前接入的图。按图签名重算，引用稳定。 */
+  compareInputsByNodeId?: ReadonlyMap<string, CanvasCompareInputs>;
+  swapCompareInputs?: (nodeId: string) => void;
+  openCompare?: (nodeId: string) => void;
   editVideo: (node: CanvasContentNode) => void;
   saveImageToolbarPreferences: (value: CanvasImageToolbarPreferences) => Promise<void>;
   deleteNode: (id: string) => void;
@@ -859,7 +864,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
             return;
           }
           if (node.type === 'layer_stack') return;
-          if (node.type === 'image_edit') context.openImageEdit?.(node.id);
+          if (node.type === 'compare') context.openCompare?.(node.id);
+          else if (node.type === 'image_edit') context.openImageEdit?.(node.id);
           else if (content) context.previewContent(content.version_id, node.title, node.id);
         }}
         onKeyDown={event => {
@@ -1013,7 +1019,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           {node.type === 'layer_stack' && (
             <CanvasLayerStackSurface node={node} context={context} onOpenComposer={() => setLayerComposerOpen(true)} />
           )}
-          {node.type === 'compare' && <CanvasCompareSurface node={node} projectId={context.projectId} bitmapWidth={imageBitmapWidth} />}
+          {node.type === 'compare' && <CanvasCompareNodeBody node={node} context={context} bitmapWidth={imageBitmapWidth} />}
           {node.type === 'image_edit' && <CanvasImageEditSurface node={node} projectId={context.projectId}
             source={context.resolveVersion(node.data.source_version_id) as CanvasMediaVersion | undefined} />}
           {node.type === 'plugin' && !content && (
@@ -1028,6 +1034,12 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         state={nodeRunState}
         hasContent={Boolean(content || node.type === 'image_edit' || (node.type === 'layer_stack' && node.data.base_version_id))}
       />
+      {node.type === 'compare' && CANVAS_COMPARE_SLOTS.map(slot => (
+        <Handle key={slot} id={slot} type="target" position={Position.Left} className="canvas-node-handle"
+          style={{ top: slot === 'before' ? '35%' : '65%' }} aria-label={`连接到 ${slot === 'before' ? 'Before' : 'After'}`}>
+          <span className="canvas-node-handle-dot" aria-hidden="true" />
+        </Handle>
+      ))}
       {(canvasNodeAcceptsInput(node) || node.type === 'layer_stack' || node.type === 'image_edit') && (
         <Handle type="target" isConnectable={node.type !== 'image_edit'} position={Position.Left} className="canvas-node-handle" aria-label="连接到此节点">
           <span className="canvas-node-handle-dot" aria-hidden="true" />
@@ -1608,6 +1620,16 @@ function CanvasNodeToolbar({
             onClick={() => context.expandLayerStack(node.id)}
           >
             <Layers3 />
+          </MediaToolButton>
+        </>
+      )}
+      {node.type === 'compare' && (
+        <>
+          <MediaToolButton label={`交换 ${node.title} 的前后`} text="交换" onClick={() => context.swapCompareInputs?.(node.id)}>
+            <ArrowLeftRight />
+          </MediaToolButton>
+          <MediaToolButton label={`全屏对比 ${node.title}`} text="全屏" onClick={() => context.openCompare?.(node.id)}>
+            <Maximize2 />
           </MediaToolButton>
         </>
       )}
@@ -3806,4 +3828,21 @@ function showHandleOnHoveredSide(event: ReactPointerEvent<HTMLDivElement>) {
 
 function hideHoverHandles(event: ReactPointerEvent<HTMLDivElement>) {
   delete event.currentTarget.dataset.hoverSide;
+}
+
+function CanvasCompareNodeBody({ node, context, bitmapWidth }: {
+  node: CanvasCompareNode; context: CanvasNodeContextValue; bitmapWidth: number | null;
+}) {
+  const inputs = context.compareInputsByNodeId?.get(node.id);
+  const beforeVersionId = inputs?.before?.versionId ?? null;
+  const afterVersionId = inputs?.after?.versionId ?? null;
+  const frame = inputs?.after && afterVersionId
+    ? canvasCompareFrame(beforeVersionId, context.resolveVersion(afterVersionId),
+      context.jobsByResultNodeId.get(inputs.after.nodeId), versionId => context.resolveVersion(versionId))
+    : null;
+  const afterVersion = afterVersionId ? context.resolveVersion(afterVersionId) : undefined;
+  const afterSize = afterVersion?.kind === 'image' && afterVersion.width && afterVersion.height
+    ? { width: afterVersion.width, height: afterVersion.height } : null;
+  return <CanvasCompareSurface projectId={context.projectId} title={node.title} beforeVersionId={beforeVersionId}
+    afterVersionId={afterVersionId} afterSize={afterSize} frame={frame} bitmapWidth={bitmapWidth} />;
 }

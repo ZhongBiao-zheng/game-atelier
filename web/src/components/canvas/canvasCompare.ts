@@ -1,8 +1,19 @@
-import type { CanvasContentVersion, CanvasNormalizedFrame } from '@/schema/canvas';
+import type { CanvasCompareSlot, CanvasContentVersion, CanvasNormalizedFrame } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
+
+/** 对比节点一侧当前接入的图：来源节点与它此刻显示的版本。 */
+export interface CanvasCompareSide {
+  nodeId: string;
+  title: string;
+  versionId: string | null;
+}
+
+export type CanvasCompareInputs = Partial<Record<CanvasCompareSlot, CanvasCompareSide>>;
 
 export interface CanvasCompareSource {
   beforeVersionId: string;
+  /** 生成快照里登记的原图节点；节点可能已被删除或换了图，使用前要再核对。 */
+  beforeNodeId: string | null;
   beforeFrame: CanvasNormalizedFrame | null;
 }
 
@@ -39,5 +50,19 @@ export function canvasCompareSource(
     beforeVersionId = snapshot.inputs.find(input => input.kind === 'image')?.version_id;
   }
   if (!beforeVersionId || beforeVersionId === version.version_id) return null;
-  return resolveVersion(beforeVersionId)?.kind === 'image' ? { beforeVersionId, beforeFrame } : null;
+  if (resolveVersion(beforeVersionId)?.kind !== 'image') return null;
+  const beforeNodeId = snapshot.inputs.find(input => input.version_id === beforeVersionId)?.node_id ?? null;
+  return { beforeVersionId, beforeNodeId, beforeFrame };
+}
+
+/** 扩图结果对比它自己的原图时，原图要放回扩图时的位置；其他组合两张图各自完整放进画框。 */
+export function canvasCompareFrame(
+  beforeVersionId: string | null | undefined,
+  afterVersion: CanvasContentVersion | undefined,
+  jobs: readonly Job[] | undefined,
+  resolveVersion: (versionId: string) => CanvasContentVersion | undefined,
+): CanvasNormalizedFrame | null {
+  if (!beforeVersionId) return null;
+  const source = canvasCompareSource(afterVersion, jobs, resolveVersion);
+  return source?.beforeVersionId === beforeVersionId ? source.beforeFrame : null;
 }

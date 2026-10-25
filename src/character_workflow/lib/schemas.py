@@ -976,11 +976,9 @@ class CanvasPluginNodeData(BaseModel):
 
 
 class CanvasCompareNodeData(BaseModel):
+    """对比的两张图由 before / after 两条输入连线决定，节点自身不存内容。"""
+
     model_config = ConfigDict(extra="forbid")
-    before_version_id: str = Field(min_length=1, max_length=160)
-    after_version_id: str = Field(min_length=1, max_length=160)
-    # 扩图：原图在结果画面里的位置（归一化）；为空时两张图铺满同一画框。
-    before_frame: CanvasNormalizedRect | None = None
 
 
 class CanvasNodeBase(BaseModel):
@@ -1059,7 +1057,8 @@ class CanvasInputConnection(BaseModel):
     role: Literal["input"]
     source_node_id: str = Field(min_length=1)
     target_node_id: str = Field(min_length=1)
-    slot: Literal["first_frame", "last_frame"] | None = None
+    # first_frame / last_frame：视频首尾帧；before / after：对比节点的两侧。
+    slot: Literal["first_frame", "last_frame", "before", "after"] | None = None
     annotated: bool = False
 
 
@@ -1408,11 +1407,6 @@ class CanvasDocument(BaseModel):
                             or mask.origin.source_version_id != source.version_id
                             or mask.origin.expanded_canvas):
                         raise ValueError("image edit mask must belong to its fixed source version")
-            if node.type == "compare":
-                for version_id in (node.data.before_version_id, node.data.after_version_id):
-                    version = self.content_versions.get(version_id)
-                    if version is None or version.kind != "image":
-                        raise ValueError("compare node must reference project image versions")
             if node.type == "batch_material":
                 for item in node.data.items:
                     for version_id in item.image_version_ids:
@@ -1473,6 +1467,20 @@ class CanvasDocument(BaseModel):
             # 一张确定的图，一个包给不出这个承诺。
             if target.type == "group":
                 raise ValueError("canvas group nodes cannot receive connections")
+            if source.type == "compare":
+                raise ValueError("canvas compare nodes cannot provide connections")
+            if target.type == "compare":
+                # 对比连线只决定显示哪两张图，不是生成参考。
+                if (edge.role != "input" or source.type != "image" or edge.annotated
+                        or edge.slot not in {"before", "after"}):
+                    raise ValueError("canvas compare input must be an image on the before or after slot")
+                slot_key = (edge.target_node_id, edge.slot)
+                if slot_key in occupied_frame_slots:
+                    raise ValueError("canvas compare slot can only have one source")
+                occupied_frame_slots.add(slot_key)
+                continue
+            if edge.role == "input" and edge.slot in {"before", "after"}:
+                raise ValueError("before / after slots only connect into compare nodes")
             if source.type == "group" and (edge.role != "input" or edge.slot is not None):
                 raise ValueError("canvas group can only be an unslotted input source")
             if edge.role == "material" and (source.type, target.type) not in {

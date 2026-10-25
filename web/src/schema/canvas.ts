@@ -297,14 +297,10 @@ export interface CanvasImageEditNode extends CanvasNodeBase {
 
 export interface CanvasNormalizedFrame { x: number; y: number; width: number; height: number }
 
+/** 对比的两张图由 before / after 两条输入连线决定，节点自身不存内容。 */
 export interface CanvasCompareNode extends CanvasNodeBase {
   type: 'compare';
-  data: {
-    before_version_id: string;
-    after_version_id: string;
-    /** 扩图：原图在结果画面里的位置（归一化）；为空时两张图铺满同一画框。 */
-    before_frame?: CanvasNormalizedFrame | null;
-  };
+  data: Record<string, never>;
 }
 
 export type CanvasContentNode = CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode;
@@ -312,13 +308,14 @@ export type CanvasNode = CanvasContentNode | CanvasGroupNode | CanvasPluginNode 
   | CanvasBatchMaterialNode | CanvasLayerStackNode | CanvasCompareNode;
 
 export type CanvasVideoFrameSlot = 'first_frame' | 'last_frame';
+export type CanvasCompareSlot = 'before' | 'after';
 
 export interface CanvasInputConnection {
   id: string;
   role: 'input';
   source_node_id: string;
   target_node_id: string;
-  slot?: CanvasVideoFrameSlot | null;
+  slot?: CanvasVideoFrameSlot | CanvasCompareSlot | null;
   annotated?: boolean;
 }
 

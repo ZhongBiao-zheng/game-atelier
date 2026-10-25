@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.110.0',
+    date: '2026-10-25',
+    headline: '对比节点可以连任意两张图',
+    changes: [
+      { kind: 'feat', text: '对比节点改为 Before / After 两个接口，可以连任意两张图，换图后自动跟着变。' },
+      { kind: 'feat', text: '对比节点支持交换前后、双击全屏查看。' },
+    ],
+  },
+  {
     version: '5.109.0', date: '2026-10-25', headline: '项目规范与经验',
     changes: [{ kind: 'feat', text: '编辑项目和类别规范，采纳 Agent 经验，随项目包一起保存。' }],
   },
