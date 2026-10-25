@@ -1130,3 +1130,14 @@ member=网关密钥 ID（仅 team）。网关未开启时 team 返回 404。响�
 mine 每条 image/video job 计一次，排除 pending_confirm/canceled；actual 优先于 estimated，
 failed 只计 actual。team 以账本 charged_cny 为准。时间按本机时区，从 N 天前的日界线
 （包含今天）至现在；previous 为紧邻的等长区间，all 时为 null。today/7d 按日，其余周一分桶并补零。
+
+
+## 图片定稿与项目类别（5.107.0）
+
+- `CreationAsset.category: string | null`：单一应用级类别，去首尾空白、空串归 null、最长 24 字。不新增内容版本；关联项目共享类别与取消定稿。使用资产建立 `project_ids` 关系后，已定稿资产自动进入该项目参考库。
+- `PATCH /api/creation-assets/{asset_id}`，JSON `{category: string | null}`，返回更新后的资产。仅 media/generation 可定稿；不存在返回 404，非法字段或类别返回 422。
+- `POST /api/creation-assets/media/from-path` 增加可选 `category`。`allow_existing=true` 时按媒体 sha256 复用、合并项目关系；传非空类别时更新已有资产类别。
+- `GET /api/creation-assets` 支持 `project_id` 过滤关联项目，以及 `has_category=true|false` 过滤类别是否非空。参考库还需限定 media/generation。
+- `CanvasProject.categories: string[]`：默认六类，去首尾空白并去重，每项 1–24 字，最多 40 项。旧项目缺字段时读默认值。
+- `PUT /api/canvas/projects/{project_id}/categories`，JSON `{categories: string[]}`，返回完整项目。项目锁与资产锁内检查使用数量、原子写入；删除仍被本项目资产使用的类别返回 409，detail 为 `{code: "category_in_use", message, count, usage: {类别: 数量}}`。
+- 类别列表按项目维护，关联资产可携带其他项目的类别，不自动新增到可选类别列表。

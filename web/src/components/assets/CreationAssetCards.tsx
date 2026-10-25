@@ -28,6 +28,7 @@ export function AssetCard({ asset, busy, staleness, onOpen, onReproduce, onReado
         {media && <MediaPreview assetId={asset.asset_id} content={media} alt="" className="mb-3 aspect-[4/3] w-full rounded-md bg-secondary object-cover" />}
         <p className="truncate text-sm font-medium">{asset.title}</p>
         {asset.content.kind === 'prompt' ? <PromptPreview segments={asset.content.segments} /> : <p className="mt-1 truncate text-xs text-muted-foreground">{media?.filename}</p>}
+        {asset.category && <span className="mt-2 inline-block rounded-md border border-border px-2 py-0.5 text-xs">{asset.category}</span>}
         <TagList tags={asset.tags} />
         <StalenessBadge staleness={staleness} className="mt-2" />
       </button>

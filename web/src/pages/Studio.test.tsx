@@ -247,7 +247,7 @@ describe('Studio', () => {
 
   it('媒体资产按类型分流：图片模式点「使用」音频不进参考图，给一句提示', async () => {
     const audio = {
-      asset_id: 'asset-bgm', kind: 'media', title: '战鼓', tags: [], project_ids: [],
+      asset_id: 'asset-bgm', kind: 'media', title: '战鼓', tags: [], project_ids: [], category: null,
       created_at: '2026-09-20T00:00:00Z', updated_at: '2026-09-20T00:00:00Z', last_used_at: null,
       content: { kind: 'media', path: 'creation-assets/blobs/a.mp3', mime_type: 'audio/mpeg', bytes: 3, sha256: 'a'.repeat(64), filename: 'drum.mp3' },
     };
@@ -2229,7 +2229,7 @@ function recipe(overrides: Partial<GenerationRecipe> = {}): GenerationRecipe {
 
 function generationAsset(snapshot: GenerationRecipe): CreationAsset {
   return {
-    asset_id: 'gen-1', kind: 'generation', title: '窗台橘猫', tags: [], project_ids: [],
+    asset_id: 'gen-1', kind: 'generation', title: '窗台橘猫', tags: [], project_ids: [], category: null,
     created_at: '2026-09-20T00:00:00Z', updated_at: '2026-09-20T00:00:00Z', last_used_at: null,
     content: {
       kind: 'generation',

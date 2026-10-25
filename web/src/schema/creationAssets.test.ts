@@ -45,7 +45,7 @@ describe('assetMediaContent', () => {
     created_at: '2026-09-23T00:00:00Z',
     updated_at: '2026-09-23T00:00:00Z',
     last_used_at: null,
-    project_ids: [],
+    project_ids: [], category: null,
   };
 
   it('returns the media content of a media asset', () => {

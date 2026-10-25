@@ -468,6 +468,7 @@ function documentWith(overrides: Partial<CanvasDocument>): CanvasDocument {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(listCreationAssets).mockResolvedValue({ revision: 0, assets: [] });
   canvasContextIdentities.length = 0;
   flowEdgeIdentities.length = 0;
   flowHandlers.nodesChange = undefined;
@@ -479,6 +480,7 @@ beforeEach(() => {
   vi.mocked(listCanvasProjects).mockResolvedValue([{
     schema_version: 2,
     project_id: 'canvas-one',
+    categories: ['弹窗', '角色', '底图', '按钮', '图标', '字效'],
     name: '列车短片',
     created_at: '2026-08-23T00:00:00Z',
     updated_at: '2026-08-23T00:00:00Z',
@@ -2406,7 +2408,7 @@ function canvasWithImage(version: CanvasDocument['content_versions'][string]) {
 
 const generationAsset: CreationAsset = {
   asset_id: 'ca-gen', kind: 'generation', title: '雪山白犬', tags: [], created_at: '2026-09-24T00:00:00Z',
-  updated_at: '2026-09-24T00:00:00Z', last_used_at: null, project_ids: [],
+  updated_at: '2026-09-24T00:00:00Z', last_used_at: null, project_ids: [], category: null,
   content: {
     kind: 'generation',
     media: { kind: 'media', path: 'creation-assets/blobs/dog.png', mime_type: 'image/png', bytes: 3, sha256: 'b'.repeat(64), filename: 'dog.png' },
@@ -2642,7 +2644,7 @@ it('does not look up related recipes when inserting the dropped asset fails', as
   vi.mocked(adoptTeamAsset).mockResolvedValue({
     asset: {
       asset_id: 'ca-raw', kind: 'media', title: 'castle', tags: [], created_at: '', updated_at: '', last_used_at: null,
-      project_ids: [], content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: 'f'.repeat(64), filename: 'x.png' },
+      project_ids: [], category: null, content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: 'f'.repeat(64), filename: 'x.png' },
     },
     created: true,
   });
@@ -2658,7 +2660,7 @@ it('opens the team tab from «look» even after the prompt panel it was suggeste
   vi.mocked(adoptTeamAsset).mockResolvedValue({
     asset: {
       asset_id: 'ca-raw', kind: 'media', title: 'castle', tags: [], created_at: '', updated_at: '', last_used_at: null,
-      project_ids: [], content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: sha, filename: 'x.png' },
+      project_ids: [], category: null, content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: sha, filename: 'x.png' },
     },
     created: true,
   });
@@ -2683,7 +2685,7 @@ it('suggests related recipes after dropping a raw team asset and opens them', as
   vi.mocked(adoptTeamAsset).mockResolvedValue({
     asset: {
       asset_id: 'ca-raw', kind: 'media', title: 'castle', tags: [], created_at: '', updated_at: '', last_used_at: null,
-      project_ids: [], content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: sha, filename: 'x.png' },
+      project_ids: [], category: null, content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: sha, filename: 'x.png' },
     },
     created: true,
   });

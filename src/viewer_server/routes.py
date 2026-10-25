@@ -74,13 +74,13 @@ from character_workflow.lib.schemas import (
     CanvasImageEditRunCreate, CanvasImageEditSave, CanvasImageEditSaveResponse,
     CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
-    CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
+    CanvasCategoriesUpdate, CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
     CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse,
     CanvasUiPreferences, CanvasUiPreferencesUpdate, CanvasUploadResponse,
     CharacterIndexResponse, CharacterWorkspaceResponse,
     CharacterDerivativeCreate,
     CharacterProjectAssign, ClipboardAttempt,
-    CreationAsset, CreationAssetList, CreationAssetUseRequest,
+    CreationAsset, CreationAssetMetadataUpdate, CreationAssetList, CreationAssetUseRequest,
     CreationGenerationFromCanvas, CreationGenerationFromJob,
     CreationMediaPathCreate, CreationPromptAssetCreate, CreationPromptAssetUpdate,
     FeedbackPost, GalleryMedia, Job, JobKind, JobParams, JobStatus, ProjectCreate,
@@ -2676,11 +2676,35 @@ def _raise_creation_asset_error(error: Exception) -> None:
     raise error
 
 
+@router.put("/canvas/projects/{project_id}/categories", response_model=CanvasProject)
+def put_canvas_categories(project_id: str, payload: CanvasCategoriesUpdate):
+    from character_workflow.lib.creation_assets import CategoryInUseError, update_canvas_categories
+    try:
+        return update_canvas_categories(project_id, payload.categories)
+    except CategoryInUseError as error:
+        raise HTTPException(409, detail={
+            "code": "category_in_use", "message": str(error), "usage": error.usage,
+            "count": sum(error.usage.values()),
+        }) from error
+    except (FileNotFoundError, KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.patch("/creation-assets/{asset_id}", response_model=CreationAsset)
+def patch_creation_asset(asset_id: str, payload: CreationAssetMetadataUpdate):
+    from character_workflow.lib.creation_assets import update_creation_asset_category
+    try:
+        return update_creation_asset_category(asset_id, payload.category)
+    except (KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
 @router.get("/creation-assets", response_model=CreationAssetList)
 def get_creation_assets(
     kind: Literal["prompt", "media", "generation"] | None = Query(default=None),
     scope: Literal["all", "project"] = Query(default="all"),
     project_id: str | None = Query(default=None),
+    has_category: bool | None = Query(default=None),
 ):
     from character_workflow.lib.creation_assets import list_creation_assets
     try:
@@ -2688,6 +2712,7 @@ def get_creation_assets(
             kind=kind,
             scope=scope,
             project_id=project_id,
+            has_category=has_category,
         )
     except (KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
@@ -2717,6 +2742,7 @@ def post_creation_media_from_path(payload: CreationMediaPathCreate):
             tags=payload.tags,
             project_id=payload.project_id,
             allow_existing=payload.allow_existing,
+            category=payload.category,
         )
     except (FileNotFoundError, KeyError, ValueError) as error:
         _raise_creation_asset_error(error)

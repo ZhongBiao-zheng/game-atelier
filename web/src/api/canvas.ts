@@ -614,3 +614,11 @@ export function dismissCanvasCandidate(
     },
   );
 }
+
+export function updateCanvasCategories(projectId: string, categories: string[]): Promise<CanvasProject> {
+  return requestJson<CanvasProject>(`/api/canvas/projects/${encodeURIComponent(projectId)}/categories`, '保存类别', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ categories }),
+  });
+}

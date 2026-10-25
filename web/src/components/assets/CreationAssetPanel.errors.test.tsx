@@ -24,7 +24,7 @@ const adopted: CreationAsset = {
   created_at: '2026-09-20T00:00:00Z',
   updated_at: '2026-09-20T00:00:00Z',
   last_used_at: null,
-  project_ids: [],
+  project_ids: [], category: null,
   content: {
     kind: 'media',
     path: 'creation-assets/blobs/dog.png',

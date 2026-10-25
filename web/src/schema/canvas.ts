@@ -386,10 +386,13 @@ export interface CanvasDocument {
   updated_at: string;
 }
 
+export const DEFAULT_CANVAS_CATEGORIES = ['弹窗', '角色', '底图', '按钮', '图标', '字效'];
+
 export interface CanvasProject {
   schema_version: 2;
   project_id: string;
   name: string;
+  categories: string[];
   created_at: string;
   updated_at: string;
 }

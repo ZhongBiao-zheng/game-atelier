@@ -43,6 +43,7 @@ import { CanvasAudioPlayer } from './CanvasAudioPlayer';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
 import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
 import { CanvasImageEditPanel } from './CanvasImageEditPanel';
+import { CanvasFinalizationMenu } from './CanvasFinalizationMenu';
 import { CanvasCompareSurface } from './CanvasCompareSurface';
 import { canvasCompareSource, type CanvasCompareSource } from './canvasCompare';
 import { CanvasImageEditSurface } from './CanvasImageEditSurface';
@@ -154,6 +155,11 @@ export interface CanvasGenerationPanelContextValue {
 }
 
 export interface CanvasNodeContextValue {
+  projectCategories?: readonly string[];
+  resolveFinalCategory?: (sha256: string) => string | null;
+  finalizationRevision?: string;
+  finalizeNode?: (node: CanvasContentNode, category: string | null) => Promise<void>;
+  saveCategories?: (categories: string[]) => Promise<void>;
   annotationController?: CanvasAnnotationController;
   editWithAnnotation?: (id: string) => Promise<void>;
   batchBusy?: boolean;
@@ -966,6 +972,11 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
               fit={node.type === 'image' || node.type === 'video' ? node.data.display.fit : 'contain'}
               freeResize={(node.type === 'image' || node.type === 'video') && node.data.display.free_resize}
             />
+          )}
+          {node.type === 'image' && content?.kind === 'image' && context.resolveFinalCategory?.(content.sha256) && (
+            <span className="pointer-events-none absolute left-2.5 top-2.5 z-10 max-w-[calc(100%-1.25rem)] truncate rounded-md border border-border bg-glass px-2 py-1 text-xs backdrop-blur-glass">
+              定稿 · {context.resolveFinalCategory(content.sha256)}
+            </span>
           )}
           {annotating && !context.annotationController?.fullscreen && node.type === 'image' && content?.kind === 'image' && <AnnotationEditingLayer
             editor={annotationEditor} width={content.width ?? 1024} height={content.height ?? 1024}
@@ -1969,6 +1980,11 @@ function ImageNodeToolbar({
         disabled={replacing}
         onClick={() => context.createCompareNode?.(node, compareSource)}
       ><Columns2 /></MediaToolButton>}
+      {context.finalizeNode && <CanvasFinalizationMenu
+        node={node} content={imageContent} context={context}
+        disabled={!currentVersionId || replacing || submitting}
+        onOverlayOpenChange={updateMenuOpen}
+      />}
       {trailing}
       <DropdownMenu onOpenChange={updateMenuOpen}>
         <DropdownMenuTrigger asChild>

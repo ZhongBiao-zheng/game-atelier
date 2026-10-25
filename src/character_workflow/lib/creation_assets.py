@@ -111,6 +111,7 @@ def _write_catalog_unlocked(
             else current.migrated_canvas_project_ids
         ),
     })
+    updated = CreationAssetCatalog.model_validate(updated.model_dump(mode="json"))
     atomic_write_json(_catalog_path(), updated.model_dump(mode="json"))
     return updated
 
@@ -423,6 +424,7 @@ def create_media_asset_from_bytes(
     tags: list[str],
     project_id: str | None = None,
     allow_existing: bool = False,
+    category: str | None = None,
 ) -> CreationAsset:
     content = store_media_blob(body, filename, mime_type)
     with file_lock(_catalog_lock_path()):
@@ -435,11 +437,13 @@ def create_media_asset_from_bytes(
                 *duplicate.project_ids,
                 *([project_id] if project_id else []),
             ])
-            if project_ids == duplicate.project_ids:
+            if project_ids == duplicate.project_ids and (category is None or category == duplicate.category):
                 return duplicate
             timestamp = _now()
-            reused = duplicate.model_copy(update={
+            reused = CreationAsset.model_validate({
+                **duplicate.model_dump(),
                 "project_ids": project_ids,
+                "category": category if category is not None else duplicate.category,
                 "updated_at": timestamp,
             })
             _write_catalog_unlocked(
@@ -454,6 +458,7 @@ def create_media_asset_from_bytes(
             content=content,
             project_id=project_id,
         )
+        asset = CreationAsset.model_validate({**asset.model_dump(), "category": category})
         _write_catalog_unlocked(current, [asset, *current.assets])
         return asset
 
@@ -465,6 +470,7 @@ def create_media_asset_from_path(
     tags: list[str],
     project_id: str | None = None,
     allow_existing: bool = False,
+    category: str | None = None,
 ) -> CreationAsset:
     root = data_root.resolve_data_root().resolve()
     source = Path(source_path)
@@ -483,6 +489,7 @@ def create_media_asset_from_path(
         tags=tags,
         project_id=project_id,
         allow_existing=allow_existing,
+        category=category,
     )
 
 
@@ -511,6 +518,7 @@ def list_creation_assets(
     kind: Literal["prompt", "media", "generation"] | None = None,
     scope: Literal["all", "project"] = "all",
     project_id: str | None = None,
+    has_category: bool | None = None,
 ) -> CreationAssetList:
     migrate_legacy_canvas_libraries()
     if scope == "project" and not project_id:
@@ -521,7 +529,8 @@ def list_creation_assets(
             asset
             for asset in current.assets
             if (kind is None or asset.kind == kind)
-            and (scope != "project" or project_id in asset.project_ids)
+            and (project_id is None or project_id in asset.project_ids)
+            and (has_category is None or bool(asset.category) == has_category)
         ]
         rows.sort(key=lambda asset: asset.last_used_at or asset.created_at, reverse=True)
         return CreationAssetList(revision=current.revision, assets=rows)
@@ -589,6 +598,54 @@ def read_prompt_asset(asset_id: str, project_id: str | None = None) -> dict:
                       for segment in segments if segment.kind == "variable"],
         "prompt": render_prompt_segments(segments, {}),
     }
+
+
+def update_creation_asset_category(asset_id: str, category: str | None) -> CreationAsset:
+    with file_lock(_catalog_lock_path()):
+        current = _read_catalog_unlocked()
+        asset = next((row for row in current.assets if row.asset_id == asset_id), None)
+        if asset is None:
+            raise KeyError(asset_id)
+        if asset.kind not in {"media", "generation"}:
+            raise ValueError("只有媒体与生成资产可以定稿")
+        updated = CreationAsset.model_validate({
+            **asset.model_dump(), "category": category, "updated_at": _now(),
+        })
+        _replace_asset(current, updated)
+        return updated
+
+
+class CategoryInUseError(ValueError):
+    def __init__(self, usage: dict[str, int]):
+        self.usage = usage
+        super().__init__(f"类别仍有 {sum(usage.values())} 个资产在用，请先修改资产类别")
+
+
+def update_canvas_categories(project_id: str, categories: list[str]):
+    from character_workflow.lib.canvas_projects import (
+        canvas_project_dir, canvas_project_lock_path, read_canvas_project,
+    )
+    from character_workflow.lib.schemas import CanvasCategoriesUpdate, CanvasProject
+
+    categories = CanvasCategoriesUpdate(categories=categories).categories
+    # 与画布插入一致：先项目锁，再资产锁；检查使用数量和写盘不可被资产更新插入。
+    with file_lock(canvas_project_lock_path(project_id)), file_lock(_catalog_lock_path()):
+        project = read_canvas_project(project_id)
+        removed = set(project.categories) - set(categories)
+        assets = _read_catalog_unlocked().assets
+        usage = {
+            category: sum(1 for asset in assets
+                          if project_id in asset.project_ids and asset.category == category)
+            for category in removed
+        }
+        usage = {category: count for category, count in usage.items() if count}
+        if usage:
+            raise CategoryInUseError(usage)
+        updated = CanvasProject.model_validate({
+            **project.model_dump(), "categories": categories, "updated_at": _now(),
+        })
+        atomic_write_json(canvas_project_dir(project_id) / "project.json", updated.model_dump(mode="json"))
+        return updated
 
 
 def update_prompt_asset(

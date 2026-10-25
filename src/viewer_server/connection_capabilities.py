@@ -118,6 +118,8 @@ GET /api/canvas/agent/skills
 POST /api/canvas/agent/skills/import
 DELETE /api/canvas/agent/skills/{name}
 GET /api/creation-assets
+PATCH /api/creation-assets/{asset_id}
+PUT /api/canvas/projects/{project_id}/categories
 POST /api/creation-assets/staleness
 POST /api/creation-assets/generation/from-job
 POST /api/creation-assets/generation/from-canvas

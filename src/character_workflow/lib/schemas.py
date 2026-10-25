@@ -11,6 +11,7 @@ from typing import Annotated, Any, Generic, Literal, TypeVar
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     JsonValue,
@@ -1509,11 +1510,30 @@ class CanvasDocument(BaseModel):
         return self
 
 
-class CanvasProject(BaseModel):
+CategoryName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=24)]
+OptionalCategory = Annotated[
+    CategoryName | None,
+    BeforeValidator(lambda value: None if isinstance(value, str) and not value.strip() else value),
+]
+DEFAULT_CANVAS_CATEGORIES = ["弹窗", "角色", "底图", "按钮", "图标", "字效"]
+
+
+class CanvasCategoriesUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    categories: list[CategoryName] = Field(max_length=40)
+
+    @field_validator("categories")
+    @classmethod
+    def unique_categories(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(value))
+
+
+class CanvasProject(CanvasCategoriesUpdate):
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal[2] = 2
     project_id: str
     name: CanvasProjectName
+    categories: list[CategoryName] = Field(default_factory=lambda: DEFAULT_CANVAS_CATEGORIES.copy(), max_length=40)
     created_at: str
     updated_at: str
 
@@ -2147,6 +2167,11 @@ class AdoptionOrigin(BaseModel):
     raw_path: str | None = None
 
 
+class CreationAssetMetadataUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    category: OptionalCategory
+
+
 class CreationAsset(BaseModel):
     model_config = ConfigDict(extra="forbid")
     asset_id: str = Field(min_length=1, max_length=160)
@@ -2157,6 +2182,7 @@ class CreationAsset(BaseModel):
     updated_at: str
     last_used_at: str | None = None
     content: CreationAssetContent
+    category: OptionalCategory = None
     project_ids: list[str] = Field(default_factory=list)
     adopted_from: AdoptionOrigin | None = None
 
@@ -2213,6 +2239,7 @@ class CreationMediaPathCreate(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=20)
     project_id: str | None = Field(default=None, min_length=1, max_length=160)
     allow_existing: bool = False
+    category: OptionalCategory = None
 
 
 class CreationAssetUseRequest(BaseModel):

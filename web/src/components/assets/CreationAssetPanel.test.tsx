@@ -18,7 +18,7 @@ const promptAsset: CreationAsset = {
   created_at: '2026-08-29T00:00:00Z',
   updated_at: '2026-08-29T00:00:00Z',
   last_used_at: null,
-  project_ids: [],
+  project_ids: [], category: null,
   content: {
     kind: 'prompt',
     segments: [

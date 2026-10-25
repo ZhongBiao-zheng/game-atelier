@@ -20,6 +20,8 @@ import type { TeamAssetAdoptResponse, TeamLibraryIndexEntry } from '@/schema/tea
 export type { CreationAssetPanelMode, CreationAssetSaveRequest, CreationGenerationSource, CreationMediaKind } from '@/components/assets/creationAssetPanelModel';
 
 export interface CreationAssetPanelProps {
+  refreshKey?: number;
+  onAssetsChanged?: () => Promise<void>;
   className?: string;
   projectId?: string;
   canvasTargets?: { projectId: string; name: string }[];
@@ -52,6 +54,8 @@ export interface CreationAssetPanelHandle {
 
 export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationAssetPanelProps>(function CreationAssetPanel({
   className,
+  refreshKey,
+  onAssetsChanged,
   projectId,
   canvasTargets = [],
   initialKind = 'prompt',
@@ -108,12 +112,13 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
       const response = await listCreationAssets({
         kind: kind === 'prompt' ? 'prompt' : undefined,
         scope: projectId ? scope : 'all',
-        projectId,
+        projectId: scope === 'project' ? projectId : undefined,
       });
       const rows = kind === 'prompt'
         ? response.assets
         : response.assets.filter(asset => assetMediaContent(asset) !== null);
       setAssets(rows);
+      void onAssetsChanged?.().catch(caught => setError(errorMessage(caught)));
       setSelectedId(current => {
         const target = preferredId ?? current;
         return rows.some(asset => asset.asset_id === target) ? target : null;
@@ -126,7 +131,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
 
   useEffect(() => {
     void refresh();
-  }, [kind, projectId, scope]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [kind, projectId, scope, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => setKind(initialKind), [initialKind]);
 
@@ -198,6 +203,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     setError(null);
     try {
       const updated = await markCreationAssetUsed(asset.asset_id, projectId);
+      await onAssetsChanged?.();
       const media = assetMediaContent(updated);
       if (updated.content.kind === 'prompt') {
         onUsePrompt(updated, promptFromAsset(updated.content.segments));

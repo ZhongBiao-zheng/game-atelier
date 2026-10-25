@@ -73,6 +73,7 @@ export interface CreationAsset {
   last_used_at: string | null;
   content: CreationAssetContent;
   project_ids: string[];
+  category: string | null;
   adopted_from?: AdoptionOrigin | null;
 }
 

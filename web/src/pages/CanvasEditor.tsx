@@ -71,6 +71,7 @@ import {
   listCanvasJobs,
   listCanvasProjects,
   renameCanvasProject,
+  updateCanvasCategories,
   replaceCanvasNodeMedia,
   pasteIntoCanvas,
   reproduceIntoCanvas,
@@ -149,7 +150,7 @@ import {
   type CreationAssetSaveRequest,
 } from '@/components/assets/CreationAssetPanel';
 import { CanvasAgentPanel } from '@/components/canvas/agent/CanvasAgentPanel';
-import { insertCreationAssetIntoCanvas } from '@/api/creationAssets';
+import { insertCreationAssetIntoCanvas, listCreationAssets, saveMediaCreationAssetFromPath, updateCreationAssetCategory } from '@/api/creationAssets';
 import { adoptTeamAsset, listRelatedTeamAssets } from '@/api/teamLibraries';
 import { TEAM_ASSET_DRAG_TYPE, readTeamAssetDrag } from '@/schema/teamLibrary';
 import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
@@ -197,7 +198,8 @@ import type {
   CanvasUpscaleTarget,
   CanvasVideoFrameSlot,
 } from '@/schema/canvas';
-import type { CreationAsset } from '@/schema/creationAssets';
+import { assetMediaContent, type CreationAsset } from '@/schema/creationAssets';
+import { DEFAULT_CANVAS_CATEGORIES, type CanvasProject } from '@/schema/canvas';
 import type { Job, JobKind } from '@/schema/jobs';
 import { cn } from '@/lib/utils';
 
@@ -473,7 +475,7 @@ function CanvasEditorInner({
   const narrowViewport = useNarrowCanvasViewport();
   const [, setLocation] = useLocation();
   const [document, setDocument] = useState<CanvasDocument | null>(null);
-  const [projects, setProjects] = useState<Array<{ project_id: string; name: string }>>([]);
+  const [projects, setProjects] = useState<CanvasProject[]>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [routes, setRoutes] = useState<ModelRoute[]>([]);
   // 生成节点选模型用的厂商列表 =「自动」+ 真实 KEY；局部编辑、分层、AI高清等单项工具仍只用真实 KEY。
@@ -4493,6 +4495,62 @@ function CanvasEditorInner({
       node.position.y + size.height / 2, { zoom: getZoom(), duration: 0 }));
   };
   const locateNode = useCallback((nodeId: string) => locateNodeHandler.current(nodeId), []);
+  const [projectAssets, setProjectAssets] = useState<CreationAsset[]>([]);
+  const [assetsRevision, setAssetsRevision] = useState(0);
+  const refreshProjectAssets = useCallback(async () => {
+    const response = await listCreationAssets({ projectId, scope: 'project' });
+    setProjectAssets(current => JSON.stringify(current) === JSON.stringify(response.assets) ? current : response.assets);
+  }, [projectId]);
+  useEffect(() => {
+    let active = true;
+    setProjectAssets([]);
+    const refresh = () => { void listCreationAssets({ projectId, scope: 'project' }).then(response => {
+      if (active) setProjectAssets(current => JSON.stringify(current) === JSON.stringify(response.assets) ? current : response.assets);
+    }).catch(error => { if (active) setError((error as Error).message); }); };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => { active = false; window.removeEventListener('focus', refresh); };
+  }, [projectId, assetsRevision]);
+  const assetsByDigest = useMemo(() => {
+    const result = new Map<string, CreationAsset>();
+    for (const asset of projectAssets) {
+      const media = assetMediaContent(asset);
+      if (media && (!result.has(media.sha256) || asset.category)) result.set(media.sha256, asset);
+    }
+    return result;
+  }, [projectAssets]);
+  const assetsByDigestRef = useRef(assetsByDigest);
+  assetsByDigestRef.current = assetsByDigest;
+  const resolveFinalCategory = useCallback((sha256: string) => assetsByDigestRef.current.get(sha256)?.category ?? null, []);
+  const finalizationRevision = useMemo(() => JSON.stringify([...assetsByDigest].map(([digest, asset]) => [digest, asset.category])), [assetsByDigest]);
+  const projectCategories = projects.find(project => project.project_id === projectId)?.categories ?? DEFAULT_CANVAS_CATEGORIES;
+  const finalizeHandler = useRef<(node: CanvasContentNode, category: string | null) => Promise<void>>(async () => undefined);
+  finalizeHandler.current = async (node, category) => {
+    const version = await persistedCurrentVersion(node);
+    if (version?.kind !== 'image') return;
+    // 先刷新再按本项目摘要匹配，避免资产面板刚编辑后用旧缓存覆盖。
+    const response = await listCreationAssets({ projectId, scope: 'project' });
+    const matches = response.assets.filter(asset => assetMediaContent(asset)?.sha256 === version.sha256);
+    const existing = matches.find(asset => asset.category) ?? matches[0];
+    if (existing) {
+      // 同一图片可能同时保存过媒体与生成资产；取消定稿须清空所有命中的条目。
+      for (const asset of matches.filter(asset => asset.category !== category)) {
+        await updateCreationAssetCategory(asset.asset_id, category);
+      }
+    } else if (category) {
+      await saveMediaCreationAssetFromPath({
+        sourcePath: `canvases/${projectId}/${version.path}`, title: node.title,
+        tags: [], projectId, category, allowExisting: true,
+      });
+    }
+    await refreshProjectAssets();
+    setAssetsRevision(value => value + 1);
+  };
+  const finalizeNode = useCallback((node: CanvasContentNode, category: string | null) => finalizeHandler.current(node, category), []);
+  const saveCategories = useCallback(async (categories: string[]) => {
+    const updated = await updateCanvasCategories(projectId, categories);
+    setProjects(current => current.map(project => project.project_id === projectId ? updated : project));
+  }, [projectId]);
   const createCompareNodeHandler = useRef<(node: CanvasContentNode, source: CanvasCompareSource) => void>(() => undefined);
   createCompareNodeHandler.current = (node, source) => {
     const current = latestDocument.current;
@@ -4544,6 +4602,7 @@ function CanvasEditorInner({
     finally { setSubmittingNodeIds(current => { const next = new Set(current); next.delete(nodeId); return next; }); }
   }, [annotationBridge, annotationController, providers, canvasUiPreferences.generation_defaults.image, locateNode]);
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
+    projectCategories, resolveFinalCategory, finalizationRevision, finalizeNode, saveCategories,
     editWithAnnotation,
     annotationController,
     layerParentByNodeId,
@@ -4627,6 +4686,7 @@ function CanvasEditorInner({
     saveImageToolbarPreferences: persistImageToolbarPreferences,
     deleteNode,
   }), [
+    projectCategories, resolveFinalCategory, finalizationRevision, finalizeNode, saveCategories,
     editWithAnnotation,
     annotationController,
     activeBatch,
@@ -5310,6 +5370,8 @@ function CanvasEditorInner({
           <CreationAssetPanel
             key={libraryPanelKey}
             ref={creationAssetPanelRef}
+            refreshKey={assetsRevision}
+            onAssetsChanged={refreshProjectAssets}
             className="canvas-library-panel"
             projectId={projectId}
             initialKind={libraryMode === 'prompts' ? 'prompt' : libraryMode === 'team' ? 'team' : 'media'}
