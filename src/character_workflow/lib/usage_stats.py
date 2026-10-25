@@ -53,7 +53,9 @@ def mine_records(
         else:
             project_key, label = "unassigned", "未归档"
         records.append({
-            "id": job.job_id, "cost_cny": cost or 0, "at": job.submitted_at,
+            # 没有价格的成功任务记 None（未计价），不能当成免费；失败且无实际账单按 0 计。
+            "id": job.job_id, "cost_cny": cost if cost is not None or job.status != "failed" else 0,
+            "at": job.submitted_at,
             "kind": job.kind.value, "model": job.model, "label": label,
             "project": project_key, "source": "lan" if job.provider == "atelier" else "local",
             "failed": job.status == "failed", "prompt": user_prompt(job)[:120],
@@ -90,7 +92,11 @@ def aggregate_usage(
                 if (scope != "mine" or source == "all" or row["source"] == source)
                 and (scope != "team" or not member or row.get("member") == member)]
     current = [(row, at) for row, at in selected if start <= at <= now]
-    previous = sum(row["cost_cny"] for row, at in selected if previous_start <= at < start)
+
+    def cost(row: dict) -> float:
+        return row["cost_cny"] or 0
+
+    previous = sum(cost(row) for row, at in selected if previous_start <= at < start)
     bucket = "day" if period in {"today", "7d", "30d"} else "week"
 
     def bucket_start(at):
@@ -105,7 +111,7 @@ def aggregate_usage(
     kinds: dict[str, int] = defaultdict(int)
     rankings = []
     for row, at in current:
-        trend[bucket_start(at).date().isoformat()] += row["cost_cny"]
+        trend[bucket_start(at).date().isoformat()] += cost(row)
         kind = "image" if row["kind"] in {"image_edit", "layer_split"} else row["kind"]
         kinds[kind] += 1
     for by in (["model", "project"] if scope == "mine" else ["member", "model"]):
@@ -114,21 +120,23 @@ def aggregate_usage(
             key = row[by]
             item = grouped.setdefault(key, {
                 "key": key, "label": row["model"] if by == "model" else row["label"],
-                "cost_cny": 0, "count": 0,
+                "cost_cny": 0, "count": 0, "unpriced": 0,
             })
-            item["cost_cny"] += row["cost_cny"]
+            item["cost_cny"] += cost(row)
             item["count"] += 1
+            item["unpriced"] += row["cost_cny"] is None
         rankings.append({"by": by, "rows": sorted(
             grouped.values(), key=lambda item: (-item["cost_cny"], item["key"]))[:5]})
     top = []
-    for row, at in sorted(current, key=lambda pair: (-pair[0]["cost_cny"], pair[0]["id"]))[:10]:
+    for row, at in sorted(current, key=lambda pair: (-cost(pair[0]), pair[0]["id"]))[:10]:
         item = {key: value for key, value in row.items() if key not in {"project", "member", "failed"}}
         item["at"] = at.isoformat()
         top.append(item)
     return {
         "scope": scope, "range": period, "bucket": bucket,
         "totals": {
-            "cost_cny": sum(row["cost_cny"] for row, _ in current),
+            "cost_cny": sum(cost(row) for row, _ in current),
+            "unpriced": sum(row["cost_cny"] is None for row, _ in current),
             "previous_cost_cny": previous if period != "all" else None,
             "count": len(current), "by_kind": dict(kinds),
             "failed": sum(row["failed"] for row, _ in current),

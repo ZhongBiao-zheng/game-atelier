@@ -21,7 +21,7 @@ function TaskContent({ task, color }: { task: UsageTask; color: string }) {
         </div>
         <p className="text-xs text-muted-foreground">{new Date(task.at).toLocaleString('zh-CN')}</p>
       </div>
-      <span className="shrink-0 text-sm tabular-nums">{formatGenerationCost(task.cost_cny)}</span>
+      <span className="shrink-0 text-sm tabular-nums">{task.cost_cny === null ? '未计价' : formatGenerationCost(task.cost_cny)}</span>
     </>
   );
 }

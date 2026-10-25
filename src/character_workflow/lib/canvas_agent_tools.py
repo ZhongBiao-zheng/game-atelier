@@ -231,10 +231,20 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
         elif change.op == "connect":
             scratch = document.model_copy(update={"nodes": nodes})
             _find_node(scratch, change.source_node_id)
-            _find_node(scratch, change.target_node_id)
+            target = _find_node(scratch, change.target_node_id)
+            slot = change.slot
+            if target.type == "compare":
+                # 与画布里拖线一致：未指定时先填 Before 再填 After；指定的一路已有图就替换它。
+                occupied = {e.slot for e in connections if e.target_node_id == target.id}
+                slot = slot or next((s for s in ("before", "after") if s not in occupied), None)
+                if slot is None:
+                    raise CanvasToolError("INVALID_TARGET", "对比节点两路都已接入，请指定 before 或 after 替换", 422)
+                for old in [e for e in connections if e.target_node_id == target.id and e.slot == slot]:
+                    disconnected(old)
+                    connections = [e for e in connections if e.id != old.id]
             edge = CanvasInputConnection(id=f"edge-{uuid.uuid4().hex[:12]}", role="input",
                                          source_node_id=change.source_node_id,
-                                         target_node_id=change.target_node_id, slot=change.slot)
+                                         target_node_id=change.target_node_id, slot=slot)
             connections.append(edge)
             created["connection_ids"].append(edge.id)
             touched_drafts.add(change.target_node_id)

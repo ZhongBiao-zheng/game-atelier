@@ -17,6 +17,7 @@ const empty: UsageResponse = {
   bucket: 'week',
   totals: {
     cost_cny: 0,
+    unpriced: 0,
     previous_cost_cny: 0,
     count: 0,
     by_kind: {},

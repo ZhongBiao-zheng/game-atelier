@@ -7,6 +7,29 @@ import { rememberedModel } from '@/components/canvas/agent/useCanvasAgent';
 import { Button } from '@/components/ui/button';
 import { assetMediaContent, type CreationAsset, type CategorySuggestion } from '@/schema/creationAssets';
 
+interface PendingQueue { ids: string[]; suggestions: Record<string, CategorySuggestion> }
+
+// 待分类队列与已付费拿到的分类建议跟着项目存在本机，关掉面板、刷新页面都不丢。
+function pendingKey(projectId: string) { return `atelier.reference-pending.${projectId}`; }
+
+function readPending(projectId: string): PendingQueue {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(pendingKey(projectId)) || '{}');
+    const row = value && typeof value === 'object' ? value as Partial<PendingQueue> : {};
+    return {
+      ids: Array.isArray(row.ids) ? row.ids.filter((id): id is string => typeof id === 'string') : [],
+      suggestions: row.suggestions && typeof row.suggestions === 'object' ? row.suggestions : {},
+    };
+  } catch { return { ids: [], suggestions: {} }; }
+}
+
+function writePending(projectId: string, queue: PendingQueue) {
+  try {
+    if (queue.ids.length) localStorage.setItem(pendingKey(projectId), JSON.stringify(queue));
+    else localStorage.removeItem(pendingKey(projectId));
+  } catch { /* 存不了就只在本次面板里保留 */ }
+}
+
 export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse, onAssetsChanged }: {
   projectId: string;
   visible: boolean;
@@ -16,8 +39,8 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
 }) {
   const [assets, setAssets] = useState<CreationAsset[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
-  const [pendingIds, setPendingIds] = useState<string[]>([]);
-  const [suggestions, setSuggestions] = useState<Record<string, CategorySuggestion>>({});
+  const [pendingIds, setPendingIds] = useState<string[]>(() => readPending(projectId).ids);
+  const [suggestions, setSuggestions] = useState<Record<string, CategorySuggestion>>(() => readPending(projectId).suggestions);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -28,10 +51,18 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
       listCreationAssets({ projectId, scope: 'project' }), listCanvasProjects(true),
     ]);
     if (!active.current) return;
-    setAssets(list.assets.filter(asset => assetMediaContent(asset) !== null));
+    const media = list.assets.filter(asset => assetMediaContent(asset) !== null);
+    setAssets(media);
     setCategories(projects.find(project => project.project_id === projectId)?.categories ?? []);
+    // 已定稿或已不在本项目的资产移出队列，存档不无限增长。
+    const waiting = new Set(media.filter(asset => !asset.category).map(asset => asset.asset_id));
+    setPendingIds(current => current.every(id => waiting.has(id)) ? current : current.filter(id => waiting.has(id)));
   }, [projectId]);
   useEffect(() => { if (visible) void refresh().catch(error => setError((error as Error).message)); }, [refresh, refreshKey, visible]);
+  useEffect(() => {
+    const kept = new Set(pendingIds);
+    writePending(projectId, { ids: pendingIds, suggestions: Object.fromEntries(Object.entries(suggestions).filter(([id]) => kept.has(id))) });
+  }, [projectId, pendingIds, suggestions]);
   const pending = assets.filter(asset => pendingIds.includes(asset.asset_id) && !asset.category);
   const groups = [...new Set([...categories, ...assets.flatMap(asset => asset.category ? [asset.category] : [])])];
 

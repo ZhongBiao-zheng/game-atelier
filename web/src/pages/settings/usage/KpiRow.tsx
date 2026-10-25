@@ -16,6 +16,11 @@ export function KpiRow({ data, children }: { data: UsageResponse; children?: Rea
             {change !== null ? `较上期 ${change >= 0 ? '+' : ''}${change.toFixed(1)}%` : '上期无花费'}
           </p>
         )}
+        {totals.unpriced > 0 && (
+          <p className="ml-1.5 inline-flex rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground" title="这些任务的渠道或模型没有价格，未计入花费">
+            {totals.unpriced} 次未计价
+          </p>
+        )}
       </div>
       <div className="space-y-2 rounded-xl border border-border bg-card p-5">
         <p className="text-xs text-muted-foreground">生成次数</p>

@@ -85,7 +85,7 @@ class ConnectChange(StrictInput):
     op: Literal["connect"]
     source_node_id: NodeId
     target_node_id: NodeId
-    slot: Literal["first_frame", "last_frame"] | None = None
+    slot: Literal["first_frame", "last_frame", "before", "after"] | None = None
 
 
 class DisconnectChange(StrictInput):

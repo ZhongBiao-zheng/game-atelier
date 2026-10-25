@@ -441,6 +441,8 @@ voice/format、0.25–4 的 speed 与去除首尾空白后的非空 instructions
 普通生成不存在隐式自身输入。专用编辑使用 `explicit_source` 标记明确的操作源；历史 `implicit_self` 仍可读取但不参与当前输入推断。非原生批量的图片候选按槽位执行，每个成功槽位立即通过短事务登记
 Content Version、candidate 状态与首个成功主结果；Midjourney 原生四宫格仍保留单次请求再逐槽登记。
 
+画布 Agent / MCP 的 `connect` 的 `slot` 还可为 `before` / `after`（仅对比节点）：未指定时先填 before 后填 after，指定已占用的一路则替换原连线。画布 Agent 的 `get_canvas` 在完整结果超过工具输出上限时返回概览（`overview: true`，按 `node_columns` 给出每个节点的 id/type/title/has_content/has_draft/group），仍超限时列出最新节点并给 `omitted_nodes`；可传 `node_ids`（1–20）读取指定节点的完整信息。
+
 视频 Draft 的 `frame_mode=first|last|firstlast` 使用语义化 Input Connection：可选 `slot` 只能是
 `first_frame` 或 `last_frame`，源节点必须是已有图片 Content Version，目标必须是视频生成节点，且同一
 目标的每个槽位最多一条连接；同一图片允许同时占用首帧和尾帧。首尾帧模式拒绝普通素材连接，也禁止
@@ -895,7 +897,7 @@ range=today|7d|30d|90d|all（默认 30d）、source=all|local|lan（默认 all�
 member=网关密钥 ID（仅 team）。网关未开启时 team 返回 404。响应 `UsageResponse` 双端 schema
 定义 totals、trend、rankings、top、sources、members；team 的 top 不返回 prompt。
 mine 每条 image/video job 计一次，排除 pending_confirm/canceled；actual 优先于 estimated，
-failed 只计 actual。team 以账本 charged_cny 为准。时间按本机时区，从 N 天前的日界线
+failed 只计 actual。成功但无价格的任务 `cost_cny=null`（未计价），不计入金额，另计 `totals.unpriced` 与排行行 `unpriced`。team 以账本 charged_cny 为准。时间按本机时区，从 N 天前的日界线
 （包含今天）至现在；previous 为紧邻的等长区间，all 时为 null。today/7d 按日，其余周一分桶并补零。
 
 

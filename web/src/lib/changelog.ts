@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.114.0', date: '2026-10-25', headline: '参考库与 Agent 修正',
+    changes: [
+      { kind: 'fix', text: 'Agent 可以把两张图连到对比节点的 Before / After。' },
+      { kind: 'fix', text: '节点很多的画布上，Agent 不再把读不到的节点当成没有内容。' },
+      { kind: 'fix', text: '关掉资产面板或刷新后，参考库的待分类图片和分类建议仍在。' },
+      { kind: 'fix', text: '用量页对没有价格的任务显示「未计价」，不再算作 ¥0。' },
+    ],
+  },
+  {
     version: '5.113.0', date: '2026-10-25', headline: '项目统一到画布',
     changes: [{ kind: 'feat', text: '工坊项目已迁入画布，移除旧工坊入口与工作流，项目规范、参考库和 Agent 集中在画布中。' }],
   },

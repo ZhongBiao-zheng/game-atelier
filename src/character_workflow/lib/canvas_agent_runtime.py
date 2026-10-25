@@ -72,6 +72,8 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
 - 发起生成后调用 wait_for_run 等结果，结果图会附在工具结果后面给你看。看完向用户简短汇报：
   画面是否符合要求、哪里需要改。只有用户明确让你「多试几次 / 迭代到满意」时才自己改提示词重跑。
 - 想看画布上已有的某张图，用 read_media，图片同样会附给你。
+- 对比节点（type=compare）只接两张图：connect 时 slot 填 before 或 after；不填则先 before 后 after，
+  指定的一路已有图会被替换。
 - list_models 返回空列表时不要建生成节点，告诉用户在输入框的「模型偏好」里选择模型。
 - 生成是付费的。不要自动重试失败的生成；失败时告诉用户原因，由用户决定。
 - 用户拒绝某个操作时，不要换个方式再做同一件事，先问用户想怎么改。
@@ -220,7 +222,7 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
     if tool == "append_lesson":
         return canvas_specs.append_lesson(project_id, arguments["text"]), []
     if tool == "get_canvas":
-        return tools.get_document(LOCAL, CanvasProjectInput(project_id=project_id)), []
+        return canvas_view(project_id, arguments.get("node_ids")), []
     if tool == "list_models":
         payload = CanvasListModelsInput(project_id=project_id, mode=arguments.get("mode", "image"))
         tools.authorize(LOCAL, payload.project_id, "canvas_read")
@@ -265,6 +267,43 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
     raise CanvasToolError("INVALID_TARGET", f"未知工具 {tool}", 422)
 
 
+def canvas_view(project_id: str, node_ids: list[str] | None) -> dict:
+    """完整画布超过工具输出上限时改回概览，而不是按字符截断：截断会让模型把读不到的节点当成不存在。"""
+    view = tools.get_document(LOCAL, CanvasProjectInput(project_id=project_id))
+    if node_ids:
+        wanted = set(node_ids)
+        missing = wanted - {node["id"] for node in view["nodes"]}
+        if missing:
+            raise CanvasToolError("INVALID_TARGET", f"画布里没有节点 {'、'.join(sorted(missing))}", 422)
+        nodes = [node for node in view["nodes"] if node["id"] in wanted]
+        version_ids = {node.get("version_id") for node in nodes}
+        return {**view, "nodes": nodes,
+                "connections": [edge for edge in view["connections"]
+                                if wanted & {edge["source_node_id"], edge["target_node_id"]}],
+                "media_versions": [m for m in view["media_versions"] if m["version_id"] in version_ids]}
+    if len(json.dumps(view, ensure_ascii=False)) <= TOOL_OUTPUT_LIMIT:
+        return view
+    group_of = {member: node["id"] for node in view["nodes"] for member in node.get("member_node_ids", [])}
+    rows = [[node["id"], node["type"], node["title"],
+             node["version_id"] is not None if "version_id" in node else None,
+             node["draft"] is not None if "draft" in node else None,
+             group_of.get(node["id"])] for node in view["nodes"]]
+    overview = {"project_id": view["project_id"], "revision": view["revision"], "overview": True,
+                "hint": "画布较大，这是概览：省略了版本 ID、文本正文、生成配置、位置和连线 ID。"
+                        "has_content 为 false 才表示节点没有内容（分组为 null）；要引用或修改节点前，"
+                        "先用 get_canvas 的 node_ids 读取这些节点的完整信息。",
+                "node_columns": ["id", "type", "title", "has_content", "has_draft", "group"],
+                "nodes": rows,
+                "connections": [[edge["source_node_id"], edge["target_node_id"], edge["slot"]]
+                                for edge in view["connections"]]}
+    # 仍超限时只列最新的节点，并明说省略了多少，避免模型把没列出的节点当成不存在。
+    while len(json.dumps(overview, ensure_ascii=False)) > TOOL_OUTPUT_LIMIT and overview["nodes"]:
+        keep = len(overview["nodes"]) * 3 // 4
+        overview["nodes"] = overview["nodes"][-keep:] if keep else []
+        overview["omitted_nodes"] = len(rows) - len(overview["nodes"])
+    return overview
+
+
 def run_tool_safely(project_id: str, tool: str, arguments: dict, scope: ModelScope = ALL_MODELS,
                     created_ids: frozenset[str] = frozenset()) -> tuple[str, list[str]]:
     """Tool output text for the model; errors become text the model can react to."""
@@ -304,8 +343,11 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
     "append_lesson": ("记录一条待审项目经验，用户采纳后才生效。",
                       {"type": "object", "required": ["text"],
                        "properties": {"text": {"type": "string", "minLength": 1, "maxLength": 300}}}),
-    "get_canvas": ("读取当前画布：节点、文本、生成配置、连线、媒体版本。",
-                   {"type": "object", "properties": {}}),
+    "get_canvas": ("读取当前画布：节点、文本、生成配置、连线、媒体版本。画布较大时返回概览，"
+                   "再用 node_ids 读取具体节点。",
+                   {"type": "object", "properties": {
+                       "node_ids": {"type": "array", "items": {"type": "string"},
+                                    "minItems": 1, "maxItems": 20}}}),
     "list_models": ("列出可用于生成配置的图片 / 视频模型（alias + model + 参数能力）。",
                     {"type": "object", "properties": {
                         "mode": {"type": "string", "enum": ["image", "video"]}}}),
