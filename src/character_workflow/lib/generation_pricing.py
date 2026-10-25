@@ -215,10 +215,13 @@ def estimate_text_cost_cny(
 def estimate_submission(key, model_id: str, kind: str, params: dict) -> float | None:
     """Use the same frozen size intent as submission, without creating a job."""
     from character_workflow.lib.image_size import normalize_image_size_params
+    from character_workflow.lib.keys import size_channel
 
     model = next((item for item in key.models if item.id == model_id), None)
     if model is None:
         return None
+    key, model = size_channel(key, model)
+    model_id = model.id
     try:
         values = normalize_image_size_params(key, model_id, params) if kind == "image" else params
     except ValueError:
@@ -231,6 +234,7 @@ def estimate_submission(key, model_id: str, kind: str, params: dict) -> float | 
         generate_audio=bool(values.get("generate_audio")),
         has_reference_video=bool(values.get("reference_videos")),
         image_edit=bool(values.get("image_edit")),
-        reference_image_count=len(values.get("reference_images") or []),
+        reference_image_count=max(len(values.get("reference_images") or []),
+                                  1 if values.get("image_edit") else 0),
         layer_decomposition=bool(values.get("layer_decomposition")),
     )

@@ -234,7 +234,7 @@ def test_alias_exclusion_applies_to_cooldown_fallback_and_estimate(owner):
     keys.patch_key("B", {"base_url": "https://api.tu-zi.com", "billing_group": "绘画"})
     model_routes.cool_down("image", "B", "auth")
     assert gateway_tasks._pick_member("gpt-image-2", [], owner)[0].alias == "B"
-    assert submit(owner).estimated_cny == .21
+    assert submit(owner).estimated_cny is None
     owner = gateway_keys.update_key(owner.id, allowed_aliases=[])
     client, _ = client_for(owner)
     response = _submit(client)

@@ -11,16 +11,6 @@ import {
   HAPPYHORSE_1_1_YUAN_PER_SECOND,
   OPENAI_HK_FIXED_YUAN_PER_IMAGE,
   OPENAI_HK_NANO_BANANA_2_YUAN,
-  TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE,
-  TUZI_GPT_IMAGE_2_1K_SIZES,
-  TUZI_GPT_IMAGE_2_1K_YUAN_PER_IMAGE,
-  TUZI_GPT_IMAGE_2_PIXEL_LIMITS,
-  TUZI_GPT_IMAGE_2_YUAN_PER_IMAGE,
-  TUZI_GPT_IMAGE_25_YUAN_PER_IMAGE,
-  TUZI_GPT_IMAGE_25_PIXEL_LIMITS,
-  TUZI_GPT_IMAGE_25_1K_YUAN_PER_IMAGE,
-  TUZI_GROUP_YUAN_PER_IMAGE,
-  TUZI_MIDJOURNEY_YUAN_PER_TASK,
 } from '@/lib/generationPrices';
 import { parsePixelSize } from '@/lib/studioSize';
 
@@ -43,11 +33,6 @@ export interface GenerationCostRequest {
   hasReferenceVideo?: boolean;
   imageEdit?: boolean;
 }
-
-const TUZI_GEMINI_3_PRO_MODELS = new Set([
-  'gemini-3-pro-image', 'gemini-3-pro-image-preview',
-  'nano-banana-pro', 'nano-banana-pro-2k', 'nano-banana-pro-4k',
-]);
 
 const HAPPYHORSE_1_1_MODELS = new Set([
   'happyhorse-1-1-t2v',
@@ -149,63 +134,6 @@ function estimateOpenAiHkImage(request: GenerationCostRequest): number | null {
     : OPENAI_HK_FIXED_YUAN_PER_IMAGE[model];
   if (unitPrice == null) return null;
   return priced(unitPrice * safeCount(request.count));
-}
-
-function estimateTuziImage(request: GenerationCostRequest): number | null {
-  const group = request.provider?.billingGroup?.trim();
-  if (!group) return null;
-  const model = normalize(request.model?.id);
-  const exactModel = request.model?.id?.trim();
-  if (group === 'default' && exactModel === 'gpt-image-2.5-1k') {
-    return priced(TUZI_GPT_IMAGE_25_1K_YUAN_PER_IMAGE * safeCount(request.count));
-  }
-  const gpt25Prices = exactModel && TUZI_GPT_IMAGE_25_YUAN_PER_IMAGE[exactModel];
-  if (group === 'default' && gpt25Prices) {
-    const explicit = request.sizeMode === 'auto' ? undefined
-      : request.resolution ?? request.quality?.toUpperCase();
-    let tier: '1K' | '2K' | '4K';
-    if (explicit === '1K' || explicit === '2K' || explicit === '4K') tier = explicit;
-    else {
-      const size = parsePixelSize(request.size ?? '');
-      const pixels = size ? size.w * size.h : 0;
-      const whitelisted = ['gpt-image-2.5', 'gpt-image-2.5-vip'].includes(exactModel!)
-        && TUZI_GPT_IMAGE_2_1K_SIZES.has(request.size?.toLowerCase() ?? '');
-      tier = whitelisted ? '1K' : pixels > TUZI_GPT_IMAGE_25_PIXEL_LIMITS['2K'] ? '4K'
-        : pixels > TUZI_GPT_IMAGE_25_PIXEL_LIMITS['1K'] ? '2K' : '1K';
-    }
-    return priced(gpt25Prices[tier] * safeCount(request.count));
-  }
-  if (group === 'default' && model === 'mj-imagine') return TUZI_MIDJOURNEY_YUAN_PER_TASK;
-  if (group === 'default' && TUZI_GEMINI_3_PRO_MODELS.has(model)) {
-    // 与 Tuzi caller 一致：固定型号优先，其余 low / medium / high → 1K / 2K / 4K；
-    // 缺省或 auto 走 1K，不从无关的像素 size / resolution 猜测计费档位。
-    const tier = model.endsWith('-4k') ? '4k' : model.endsWith('-2k') ? '2k'
-      : request.quality === 'high' ? '4k' : request.quality === 'medium' ? '2k' : '1k';
-    return priced(TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE[tier] * safeCount(request.count));
-  }
-  if (group === 'default' && exactModel === 'gpt-image-2-1k') {
-    return priced(TUZI_GPT_IMAGE_2_1K_YUAN_PER_IMAGE * safeCount(request.count));
-  }
-  if (group === 'default' && exactModel === 'gpt-image-2') {
-    const rawSize = request.size?.toLowerCase() ?? '';
-    const size = rawSize ? parsePixelSize(rawSize) : null;
-    if (
-      !size
-      || !Number.isSafeInteger(size.w)
-      || !Number.isSafeInteger(size.h)
-      || size.w < 1
-      || size.h < 1
-    ) return null;
-    const pixels = size.w * size.h;
-    if (!Number.isSafeInteger(pixels)) return null;
-    // 上游 upper(size) 做字符串精确匹配：不把近似比例、邻近尺寸或补零串扩成低价范围。
-    const is1k = TUZI_GPT_IMAGE_2_1K_SIZES.has(rawSize)
-      || pixels <= TUZI_GPT_IMAGE_2_PIXEL_LIMITS['1k'];
-    const tier = is1k ? '1k' : pixels <= TUZI_GPT_IMAGE_2_PIXEL_LIMITS['2k'] ? '2k' : '4k';
-    return priced(TUZI_GPT_IMAGE_2_YUAN_PER_IMAGE[tier] * safeCount(request.count));
-  }
-  const unitPrice = TUZI_GROUP_YUAN_PER_IMAGE[group]?.[model];
-  return unitPrice == null ? null : priced(unitPrice * safeCount(request.count));
 }
 
 /** TokenDance 价格快照（服务启动时从其公开接口同步，`GET /api/pricing/tokendance`）。
@@ -348,7 +276,7 @@ export function estimateGenerationCost(request: GenerationCostRequest): number |
     return priced(EVOLINK_MIDJOURNEY_USD_PER_REQUEST[route] * GENERATION_USD_TO_CNY);
   }
   if (request.kind === 'image' && isTuzi(request.provider.baseUrl)) {
-    return estimateTuziImage(request);
+    return null; // Tuzi prices are evaluated by the server from its current snapshot.
   }
   if (
     request.kind === 'image'

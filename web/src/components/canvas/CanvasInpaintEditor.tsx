@@ -1,6 +1,6 @@
 import { Eraser, Paintbrush, Redo2, Undo2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
+import { useGenerationEstimate } from '@/lib/useGenerationEstimate';
 import { defaultResolution } from '@/lib/studioSize';
 import { EditGenerationControls } from './EditGenerationControls';
 import { selectionImageCaps } from '@/lib/modelRoutes';
@@ -59,8 +59,8 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
   const { scale, origin } = viewport;
   const fingerprint = JSON.stringify({ strokes, prompt, selected, count, quality, resolution });
   const savedFingerprint = useRef(fingerprint);
-  const cost = estimateGenerationCostForSubmission(choice?.key, choice?.model ?? '', 'image',
-    { ...params, ...(mj ? { image_edit: { mode: 'inpaint' } } : {}) });
+  const cost = useGenerationEstimate(choice?.key.alias, choice?.model ?? '',
+    { ...params, image_edit: { mode: 'inpaint' } }, open);
   const blocker = !choice ? '请选择可用的编辑模型' : !ready ? '图片加载中' : initialData?.active_run_id ? '正在生成'
     : size.error ? size.error : !strokes.length ? '先涂抹要修改的区域' : mj && !prompt.trim() ? '写下要改成什么' : null;
 
