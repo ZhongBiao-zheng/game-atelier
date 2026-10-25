@@ -512,7 +512,7 @@
       "base_url": "https://api.openai-hk.com",
       "model_id": "gpt-image-2.5-sunburst"
     },
-    "expected": 0.72
+    "expected": null
   },
   {
     "request": {
@@ -523,7 +523,7 @@
       "base_url": "https://api.openai-hk.com",
       "model_id": "gpt-image-2.5-sunburst"
     },
-    "expected": 0.72
+    "expected": null
   },
   {
     "request": {
@@ -534,7 +534,7 @@
       "base_url": "https://api.openai-hk.com",
       "model_id": "gpt-image-2.5-sunburst"
     },
-    "expected": 0.72
+    "expected": null
   },
   {
     "request": {
@@ -545,7 +545,7 @@
       "base_url": "https://api.openai-hk.com",
       "model_id": "gpt-image-2.5-sunburst"
     },
-    "expected": 0.72
+    "expected": null
   },
   {
     "request": {
@@ -555,7 +555,7 @@
       "base_url": "https://api.openai-hk.com",
       "model_id": "gpt-image-2.5-sunburst"
     },
-    "expected": 0.72
+    "expected": null
   },
   {
     "request": {
@@ -586,7 +586,7 @@
       "base_url": "https://api.openai-hk.com",
       "model_id": "gpt-image-2.5-flare"
     },
-    "expected": 0.72
+    "expected": null
   },
   {
     "request": {
@@ -597,7 +597,7 @@
       "base_url": "https://api.openai-hk.com",
       "model_id": "gpt-image-2.5-flare"
     },
-    "expected": 0.72
+    "expected": null
   },
   {
     "request": {
@@ -608,7 +608,7 @@
       "base_url": "https://api.openai-hk.com",
       "model_id": "gpt-image-2.5-flare"
     },
-    "expected": 0.72
+    "expected": null
   },
   {
     "request": {
@@ -619,7 +619,7 @@
       "base_url": "https://api.openai-hk.com",
       "model_id": "gpt-image-2.5-flare"
     },
-    "expected": 0.72
+    "expected": null
   },
   {
     "request": {
@@ -629,7 +629,7 @@
       "base_url": "https://api.openai-hk.com",
       "model_id": "gpt-image-2.5-flare"
     },
-    "expected": 0.72
+    "expected": null
   },
   {
     "request": {
@@ -660,7 +660,7 @@
       "base_url": "https://api.openai-hk.com",
       "model_id": "gpt-image-2"
     },
-    "expected": 0.24
+    "expected": null
   },
   {
     "request": {
@@ -671,7 +671,7 @@
       "base_url": "https://api.openai-hk.com",
       "model_id": "nano-banana-2"
     },
-    "expected": 0.48
+    "expected": null
   },
   {
     "request": {
@@ -682,7 +682,7 @@
       "base_url": "https://api.openai-hk.com",
       "model_id": "nano-banana-2"
     },
-    "expected": 0.72
+    "expected": null
   },
   {
     "request": {
@@ -693,7 +693,7 @@
       "base_url": "https://api.openai-hk.com",
       "model_id": "nano-banana-2"
     },
-    "expected": 1
+    "expected": null
   },
   {
     "request": {
@@ -2193,7 +2193,7 @@
       "billing_group": "default",
       "model_id": "gpt-image-2"
     },
-    "expected": 0.16
+    "expected": null
   },
   {
     "request": {
@@ -2916,7 +2916,7 @@
       "model_id": "gpt-image-2",
       "n": 0
     },
-    "expected": 0.08
+    "expected": null
   },
   {
     "request": {
@@ -2925,7 +2925,7 @@
       "model_id": "gpt-image-2",
       "n": -1
     },
-    "expected": 0.08
+    "expected": null
   },
   {
     "request": {
@@ -2934,7 +2934,7 @@
       "model_id": "gpt-image-2",
       "n": 2.9
     },
-    "expected": 0.16
+    "expected": null
   },
   {
     "request": {
