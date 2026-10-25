@@ -1,6 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import * as http from './http';
 import { fetchAgentStatus, enableAgent, disableAgent } from './agentConnection';
+import { fetchGateway, updateGateway } from './gateway';
+import { subscribeGatewayEvents } from './gatewayEvents';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -64,4 +66,23 @@ it.each([
 ])('rejects malformed Agent status without crashing the page', async status => {
   vi.spyOn(http, 'requestJson').mockResolvedValue(status);
   await expect(fetchAgentStatus()).rejects.toThrow('读取 Agent 连接失败：返回格式不对');
+});
+
+
+it('only successful gateway updates publish a refresh, reads and failures do not', async () => {
+  const state = { enabled: true, keys: [], port: 5180, status: { running: true } };
+  const request = vi.spyOn(http, 'requestJson').mockResolvedValue(state);
+  const onConnect = vi.fn();
+  const unsubscribe = subscribeGatewayEvents({ onConnect, onTask: vi.fn() });
+  try {
+    expect(await fetchGateway()).toEqual(state);
+    expect(onConnect).not.toHaveBeenCalled();
+    expect(await updateGateway({ enabled: true })).toEqual(state);
+    expect(onConnect).toHaveBeenCalledTimes(1);
+    request.mockRejectedValueOnce(new Error('port unavailable'));
+    await expect(updateGateway({ port: 5190 })).rejects.toThrow('port unavailable');
+    request.mockResolvedValueOnce({});
+    await expect(updateGateway({ enabled: false })).rejects.toThrow('返回格式不对');
+    expect(onConnect).toHaveBeenCalledTimes(1);
+  } finally { unsubscribe(); }
 });

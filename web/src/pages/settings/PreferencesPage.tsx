@@ -12,7 +12,6 @@ import { AppearanceSection } from './appearance/AppearanceSection';
 
 const DEFAULT_ROOT = '~/game-atelier';
 
-const sectionClass = 'scroll-mt-6 space-y-4';
 
 export function PreferencesPage() {
   const [savedRoot, setSavedRoot] = useState('');
@@ -83,85 +82,42 @@ export function PreferencesPage() {
     }
   }
 
-  return (
-    <div>
-      <AppearanceSection />
-      <section className={`${sectionClass} pb-10`}>
-        <h2 className="text-base font-medium text-foreground">项目存放</h2>
-        <div className="min-w-0 space-y-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex min-w-0 flex-wrap items-center gap-3">
-              <span
-                aria-label="数据目录"
-                className={`min-w-0 break-all font-mono text-sm text-foreground`}
-              >
-                {loading ? '读取中...' : displayRoot || '尚未选择数据目录'}
-              </span>
-              {changed && (
-                <span className="text-xs text-muted-foreground">未保存</span>
-              )}
-            </div>
+  return <div className="w-full max-w-[880px] space-y-6">
+    <AppearanceSection />
+    <section id="storage" aria-labelledby="storage-title" className="scroll-mt-6 space-y-2">
+      <h2 id="storage-title" className="px-1 text-xs font-normal text-muted-foreground">存储</h2>
+      <div className="divide-y divide-border rounded-xl border border-border bg-card">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4.5 py-3.5">
+          <span className="text-sm">项目存放</span>
+          <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+            <span aria-label="数据目录" className="min-w-0 break-all font-mono text-sm text-muted-foreground">
+              {loading ? '读取中…' : displayRoot || '尚未选择数据目录'}
+            </span>
+            {changed && <span className="text-xs text-muted-foreground">未保存</span>}
             <div className="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                onClick={pickDataRoot}
-                disabled={loading || saving || choosing}
-                className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                <FolderOpen className="size-4" aria-hidden />
-                {choosing ? '选择中...' : '更换文件夹'}
+              <button type="button" onClick={pickDataRoot} disabled={loading || saving || choosing}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary/60 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                <FolderOpen className="size-3.5" aria-hidden />{choosing ? '选择中…' : '更换文件夹'}
               </button>
-              {changed && (
-                <>
-                  <button
-                    type="button"
-                    onClick={saveDataRoot}
-                    disabled={saving}
-                    className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background"
-                  >
-                    <SwapLabel active={Boolean(saving)} on="保存中..." off="保存" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPendingRoot(null)}
-                    disabled={saving}
-                    className="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                  >
-                    撤销
-                  </button>
-                </>
-              )}
+              {changed && <>
+                <button type="button" onClick={saveDataRoot} disabled={saving}
+                  className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                  <SwapLabel active={saving} on="保存中..." off="保存" />
+                </button>
+                <button type="button" onClick={() => setPendingRoot(null)} disabled={saving}
+                  className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-secondary/60 disabled:opacity-50">撤销</button>
+              </>}
             </div>
           </div>
-          {message && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <span className="size-1.5 rounded-full bg-[color:var(--status-done)]" aria-hidden />
-              {message}
-            </div>
-          )}
-          {error && <div className="text-sm text-destructive">{error}</div>}
         </div>
-      </section>
-
-      <section className={`${sectionClass} border-t border-border py-10`}>
-        <h2 className="text-base font-medium text-foreground">首页展示</h2>
-        <div className="min-w-0">
-          <div className="flex items-center justify-between gap-4">
-            <div className="min-w-0">
-              <p className="text-sm text-foreground">展示画布出图</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                画布里正在显示的生成图会出现在首页；打码的不展示。
-              </p>
-            </div>
-            <Switch checked={showCanvasOnHome} label="展示画布出图" disabled={togglingStudio} onChange={() => void toggleShowStudioOnHome()} />
-          </div>
+        <div className="flex items-center justify-between gap-3 px-4.5 py-3.5">
+          <span className="text-sm">首页展示画布出图</span>
+          <Switch checked={showCanvasOnHome} label="首页展示画布出图" disabled={togglingStudio} onChange={() => void toggleShowStudioOnHome()} />
         </div>
-      </section>
-
-      <section className={`${sectionClass} border-t border-border py-10`}>
-        <ProfileSection />
-      </section>
-
-    </div>
-  );
+      </div>
+      {message && <p role="status" className="text-sm text-muted-foreground">{message}</p>}
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    </section>
+    <ProfileSection />
+  </div>;
 }

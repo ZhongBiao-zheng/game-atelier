@@ -1,5 +1,6 @@
 import { requestJson } from './http';
 import type { KeyModel } from './keys';
+import { publishGatewayConnected } from './gatewayEvents';
 
 /** 局域网共享（ADR-0025）：本机作为网关的设置、网关密钥与用量；接入端测试连接与同步模型。 */
 export type LimitPeriod = 'day' | 'week' | 'month';
@@ -60,9 +61,11 @@ export async function fetchGateway(): Promise<GatewayState> {
 }
 
 export async function updateGateway(patch: { enabled?: boolean; port?: number; name?: string }) {
-  return parseState(await requestJson<unknown>('/api/gateway', '保存局域网共享', {
+  const state = parseState(await requestJson<unknown>('/api/gateway', '保存局域网共享', {
     method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(patch),
   }));
+  publishGatewayConnected();
+  return state;
 }
 
 export async function createGatewayKey(payload: GatewayKeyInput) {

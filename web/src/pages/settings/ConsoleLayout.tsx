@@ -2,7 +2,7 @@ import { useEffect, useState, type ComponentType } from 'react';
 import { Link, Redirect, useLocation } from 'wouter';
 import { ArrowLeft, HelpCircle, KeyRound, Split, Server, BarChart3, LibraryBig, Bot, SlidersHorizontal, type LucideIcon } from 'lucide-react';
 import { listKeys, type KeyView } from '@/api/keys';
-import { fetchGatewayProviderMe } from '@/api/gateway';
+import { fetchGateway, fetchGatewayProviderMe, type GatewayState } from '@/api/gateway';
 import { subscribeGatewayEvents } from '@/api/gatewayEvents';
 import { ProvidersPage } from './ProvidersPage';
 import { ProviderAddPage } from './ProviderAddPage';
@@ -32,6 +32,49 @@ export const CONSOLE_NAV: {
 let lastCreativeLocation = '/';
 export function rememberCreativeLocation(path: string) {
   if (!path.split('?')[0].startsWith('/settings')) lastCreativeLocation = path;
+}
+
+function LocalGatewayStatus() {
+  const [state, setState] = useState<GatewayState | null>(null);
+  useEffect(() => {
+    let sequence = 0;
+    const refresh = () => {
+      const request = ++sequence;
+      void fetchGateway().then(next => {
+        if (request === sequence) setState(next);
+      }).catch(() => { if (request === sequence) setState(null); });
+    };
+    refresh();
+    const unsubscribe = subscribeGatewayEvents({ onTask: () => {}, onConnect: refresh });
+    return () => { sequence++; unsubscribe(); };
+  }, []);
+  if (!state?.enabled) return null;
+  return <Link href="/settings/gateway" title={state.status.error ?? undefined}
+    className="mb-1 flex shrink-0 items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground">
+    <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${state.status.running
+      ? 'bg-status-done' : state.status.error ? 'bg-destructive' : 'bg-status-pending'}`} />
+    <span>局域网共享 · {state.status.running ? '运行中' : state.status.error ? '启动失败' : '未运行'}</span>
+  </Link>;
+}
+
+const PREFERENCE_SECTIONS = [['appearance', '外观'], ['storage', '存储'], ['profile', '个人']] as const;
+function PreferenceLinks() {
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const update = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', update);
+    return () => window.removeEventListener('hashchange', update);
+  }, []);
+  const selected = PREFERENCE_SECTIONS.some(([id]) => hash === `#${id}`) ? hash : '#appearance';
+  return <div aria-label="设置分组" className="flex shrink-0 gap-1 md:ml-5 md:flex-col md:border-l md:border-border md:pl-3">
+    {PREFERENCE_SECTIONS.map(([id, label]) => <a key={id} href={`#${id}`}
+      aria-current={selected === `#${id}` ? 'location' : undefined}
+      onClick={() => setHash(`#${id}`)}
+      className={`rounded-md px-3 py-2 text-xs whitespace-nowrap ${selected === `#${id}`
+        ? 'bg-popover text-foreground' : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'}`}>
+      {label}
+    </a>)}
+  </div>;
 }
 
 function GatewayConnection() {
@@ -74,8 +117,8 @@ export function ConsoleLayout() {
         <ArrowLeft className="size-4" aria-hidden />返回创作
       </Link>
       <nav aria-label="控制台" className="flex gap-2 overflow-x-auto md:flex-1 md:flex-col md:gap-[18px]">
-        {CONSOLE_NAV.map(group => <div key={group.group} className={group.group ? 'shrink-0' : 'md:mt-auto'}>
-          {!group.group && <GatewayConnection />}
+        {CONSOLE_NAV.map(group => <div key={group.group} className={group.group ? 'shrink-0' : 'flex shrink-0 gap-1 md:mt-auto md:block'}>
+          {!group.group && <><GatewayConnection /><LocalGatewayStatus /></>}
           {group.group && <p className="mb-2 hidden px-3 text-xs text-subtle-foreground md:block">{group.group}</p>}
           <div className="flex gap-1 md:flex-col">
             {group.items.map(item => <Link key={item.path} href={item.path}
@@ -87,6 +130,7 @@ export function ConsoleLayout() {
                 <item.icon className="size-3.5" aria-hidden />
               </span>{item.label}
             </Link>)}
+            {!group.group && current.path === '/settings/preferences' && <PreferenceLinks />}
           </div>
         </div>)}
       </nav>

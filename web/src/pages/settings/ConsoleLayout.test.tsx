@@ -1,8 +1,16 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fetchGateway, type GatewayState } from '@/api/gateway';
+import { publishGatewayConnected } from '@/api/gatewayEvents';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { CONSOLE_NAV, ConsoleLayout, rememberCreativeLocation } from './ConsoleLayout';
+
+vi.mock('@/api/gateway', () => ({ fetchGateway: vi.fn(), fetchGatewayProviderMe: vi.fn() }));
+const gateway: GatewayState = { enabled: true, port: 5180, name: '', default_name: 'mac', keys: [],
+  status: { running: true, port: 5180, addresses: [], error: null } };
+beforeEach(() => { vi.mocked(fetchGateway).mockReset().mockResolvedValue({ ...gateway, enabled: false }); });
+afterEach(() => { window.history.replaceState({}, '', '/'); });
 
 vi.mock('@/api/keys', () => ({ listKeys: async () => ({ keys: [] }) }));
 vi.mock('./ProvidersPage', () => ({ ProvidersPage: () => <><h1>供应商</h1><p>providers-content</p></> }));
@@ -49,4 +57,46 @@ describe('控制台路由', () => {
       expect(String(content), path).not.toMatch(/section=|["'`]\/settings\/keys|#settings-/);
     }
   });
+});
+
+
+it('设置展开三个原生锚点，并跟随hash选中', async () => {
+  window.history.replaceState({}, '', '/settings/preferences#storage');
+  const { hook } = memoryLocation({ path: '/settings/preferences' });
+  render(<Router hook={hook}><ConsoleLayout /></Router>);
+  expect(screen.getByRole('link', { name: '存储' })).toHaveAttribute('aria-current', 'location');
+  expect(screen.getByRole('link', { name: '外观' })).toHaveAttribute('href', '#appearance');
+  expect(screen.getByRole('link', { name: '个人' })).toHaveAttribute('href', '#profile');
+  fireEvent.click(screen.getByRole('link', { name: '个人' }));
+  expect(screen.getByRole('link', { name: '个人' })).toHaveAttribute('aria-current', 'location');
+  act(() => { window.history.replaceState({}, '', '/settings/preferences#appearance'); window.dispatchEvent(new HashChangeEvent('hashchange')); });
+  expect(screen.getByRole('link', { name: '外观' })).toHaveAttribute('aria-current', 'location');
+  await waitFor(() => expect(fetchGateway).toHaveBeenCalledTimes(1));
+});
+
+it('非设置页不展开分组，未开启不显示本机网关行', async () => {
+  const { hook } = memoryLocation({ path: '/settings/providers' });
+  render(<Router hook={hook}><ConsoleLayout /></Router>);
+  await waitFor(() => expect(fetchGateway).toHaveBeenCalledTimes(1));
+  expect(screen.queryByRole('link', { name: '外观' })).not.toBeInTheDocument();
+  expect(screen.queryByText(/局域网共享 ·/)).not.toBeInTheDocument();
+});
+
+it('本机网关响应事件刷新且旧慢响应不能覆盖更新状态', async () => {
+  let resolveOld!: (value: GatewayState) => void;
+  vi.mocked(fetchGateway).mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; }));
+  const { hook } = memoryLocation({ path: '/settings/providers' });
+  render(<Router hook={hook}><ConsoleLayout /></Router>);
+  vi.mocked(fetchGateway).mockResolvedValue(gateway);
+  act(() => publishGatewayConnected());
+  expect(await screen.findByRole('link', { name: '局域网共享 · 运行中' })).toHaveAttribute('href', '/settings/gateway');
+  await act(async () => resolveOld({ ...gateway, enabled: false }));
+  expect(screen.getByText('局域网共享 · 运行中')).toBeInTheDocument();
+  vi.mocked(fetchGateway).mockResolvedValue({ ...gateway, status: { ...gateway.status, running: false, error: '端口占用' } });
+  act(() => publishGatewayConnected());
+  expect(await screen.findByRole('link', { name: '局域网共享 · 启动失败' })).toHaveAttribute('title', '端口占用');
+  expect(screen.queryByText('局域网共享 · 运行中')).not.toBeInTheDocument();
+  vi.mocked(fetchGateway).mockRejectedValue(new Error('offline'));
+  act(() => publishGatewayConnected());
+  await waitFor(() => expect(screen.queryByText(/局域网共享 ·/)).not.toBeInTheDocument());
 });

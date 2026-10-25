@@ -112,7 +112,7 @@ describe('SettingsPage', () => {
   it('renders the show-canvas-on-home switch and posts the toggle', async () => {
     render(<SettingsPage />);
 
-    const toggle = await screen.findByRole('switch', { name: '展示画布出图' });
+    const toggle = await screen.findByRole('switch', { name: '首页展示画布出图' });
     expect(toggle).toHaveAttribute('aria-checked', 'false');
 
     fireEvent.click(toggle);
@@ -139,7 +139,7 @@ describe('SettingsPage', () => {
     }));
     render(<SettingsPage />);
 
-    const toggle = await screen.findByRole('switch', { name: '展示画布出图' });
+    const toggle = await screen.findByRole('switch', { name: '首页展示画布出图' });
     fireEvent.click(toggle);
     await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'));
   });

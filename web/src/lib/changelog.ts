@@ -32,6 +32,10 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.123.0', date: '2026-10-25', headline: '设置分组与侧栏联动', changes: [
+    { kind: 'feat', text: '设置按外观、存储和个人分组，侧栏可直达分区；显示名修改后才出现保存。' },
+    { kind: 'feat', text: '侧栏显示本机局域网共享状态，网关开关变化即时更新。' },
+  ] },
   { version: '5.122.0', date: '2026-10-25', headline: '团队库与 Agent 连接信息更完整', changes: [
     { kind: 'feat', text: '按项目查看团队库挂载数量、路径与最近扫描状态。' },
     { kind: 'feat', text: 'Agent 连接页显示各客户端状态、实际配置路径与可用工具，标明计费工具。' },

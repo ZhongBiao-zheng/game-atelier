@@ -10,6 +10,7 @@ it('预设、自定义草稿、对比度提示和恢复默认即时生效', () =
   render(<AppearanceSection />);
   fireEvent.click(screen.getByRole('button', { name: '钴蓝' }));
   expect(loadAccent()).toEqual({ preset: 'blue' });
+  fireEvent.click(screen.getByText('自定义颜色'));
   fireEvent.change(screen.getByLabelText('主色'), { target: { value: '#33' } });
   expect(loadAccent()).toEqual({ preset: 'blue' });
   expect(screen.getByLabelText('主色')).toHaveValue('#33');
