@@ -66,7 +66,7 @@ export function TaskTable(filters: Filters) {
       <td className={`${cell} max-w-48 truncate`} title={task.project_label ?? undefined}>{scope === 'team' ? '—' : task.project_label || '—'}</td>
       <td className={`${cell} max-w-64 truncate font-mono text-xs`} title={task.model}>{task.model}</td>
       <td className={`${cell} max-w-40 truncate`}>{(scope === 'team' ? task.member_label : task.alias) || '—'}</td>
-      <td className={cell}><KindBadge kind={task.kind} /></td>
+      <td className={`${cell} whitespace-nowrap`}><KindBadge kind={task.kind} /></td>
       <td className={`${cell} whitespace-nowrap text-right tabular-nums ${slow ? warning : 'text-muted-foreground'}`}>{duration(task.duration_s)}</td>
       <td className={`${cell} whitespace-nowrap text-right tabular-nums ${task.cost_cny === null ? warning : ''}`}>{task.cost_cny === null ? '未计价' : formatGenerationCost(task.cost_cny)}</td>
       <td className={`${cell} whitespace-nowrap`}><span className={`flex items-center gap-1.5 ${task.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
