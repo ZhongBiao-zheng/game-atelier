@@ -64,6 +64,10 @@ def estimate(*, model_id, provider, base_url, billing_group, protocol, n, size, 
             amount, _tier = evaluate(expression, params=params, variables={
                 "output_image_count": n, "input_image_count": reference_image_count,
             })
+            # Tuzi 按请求扣费（2026-10-25 账单：每次 generations 请求 quantity=1、与张数无关），
+            # Nano Banana 一次只回 1 张，caller 补足循环按张再请求：出 n 张 = n 次扣费。
+            if image_family(model_id) == "nano-banana" and "output_image_count" not in expression:
+                amount *= max(1, int(n or 1))
         else:
             amount = pricing.get("model_price")
             ratio = snapshot.get("group_ratio", {}).get(group)

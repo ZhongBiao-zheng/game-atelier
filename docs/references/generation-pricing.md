@@ -51,6 +51,7 @@ TokenDance 模型请求公开接口 `GET https://tokendance.space/portal/api/mod
 `quota_type=0` 且 `model_price>0`，按 `model_price × group_ratio × usd_exchange_rate` 计算。
 固定价按方案以一次请求计，不额外乘 n；表达式中的 `output_image_count` 使用请求 n，
 `input_image_count` 使用参考图数量。不估计重试、补图与动态拆层的额外费用。
+例外：Nano Banana 系列（实际请求 Gemini 3 Pro 等）一次只回 1 张，caller 按张补请求；Tuzi 账单（2026-10-25 只读核对 44 条）显示每次 generations 请求按表达式扣 1 次、`quantity=1`、与张数无关，因此表达式不含 `output_image_count` 时按 n 次请求计。GPT Image 2 一次请求能否回多张未核实，仍按一次请求计。
 请求参数沿用caller的质量及型号转换；局部修改与扩图通过 `POST /api/pricing/estimate` 获取费用。
 创作台的Tuzi前端估价返回null，由runner执行前冻结，历史费用不重算。
 

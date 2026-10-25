@@ -33,6 +33,10 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.116.2', date: '2026-10-25', headline: 'Tuzi 香蕉多张估价修正',
+    changes: [{ kind: 'fix', text: 'Tuzi Nano Banana 一次出多张时按实际请求次数估价，不再只算一张。' }],
+  },
+  {
     version: '5.116.1', date: '2026-10-25', headline: '补全 Tuzi 图片估价',
     changes: [
       { kind: 'fix', text: '核实并接入 Tuzi 的像素与尺寸档位规则，恢复相关图片模型的预计费用；Midjourney 仍待核实。' },
