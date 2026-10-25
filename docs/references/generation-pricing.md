@@ -1,20 +1,15 @@
 # 生成价格清单维护
 
-**唯一单价源：[generation_prices.json](../../src/character_workflow/data/generation_prices.json)。**
-它是一份按渠道与计费单位分组的数据表，界面估价直接引用，不需要再维护一份副本。
-`generationCost.ts` 仅负责渠道、分组、型号和参数匹配，以及按张数／时长／token 计算总价。
+静态渠道的单价维护在 [generation_prices.json](../../src/character_workflow/data/generation_prices.json)。
+Tuzi 与 TokenDance 使用本机同步快照；Tuzi 表达式仅在服务端执行，前端不保存第二套公式。
 
 ## 价格表索引
 
 | 渠道 | 表项 | 单位 |
 |---|---|---|
 | OpenAI-HK | `OPENAI_HK_FIXED_YUAN_PER_IMAGE`、`OPENAI_HK_NANO_BANANA_2_YUAN` | 元 / 张 |
-| Tuzi default 香蕉 Pro | `TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE`，按 1k / 2k / 4k | 元 / 次（一张） |
-| Tuzi default GPT Image 2 | `TUZI_GPT_IMAGE_2_YUAN_PER_IMAGE`，按最终 size 的精确白名单与总像素分 1k / 2k / 4k | 元 / 次（一张） |
-| Tuzi default GPT Image 2 固定 1K 型号 | `TUZI_GPT_IMAGE_2_1K_YUAN_PER_IMAGE` | 元 / 张 |
-| Tuzi 其他已核实型号／分组 | `TUZI_GROUP_YUAN_PER_IMAGE` | 元 / 张 |
-| Tuzi default Midjourney | `TUZI_MIDJOURNEY_YUAN_PER_TASK` | 元 / 任务，拆成四张仍只计一次 |
 | EvoLink Midjourney V8.2 | `EVOLINK_MIDJOURNEY_USD_PER_REQUEST` | 美元 / 请求，最多四张结果仍只计一次 |
+| Tuzi | `.runtime/prices/tuzi.json` | 公开表达式或固定请求价，经人民币系数换算 |
 | TokenDance（全部模型） | 不入价格表，见下方「TokenDance 实时同步」 | 按其接口：元 / 张、元 / 百万输出 token、元 / 秒 |
 | 火山 Ark Seedream | `ARK_SEEDREAM_YUAN_PER_IMAGE` | 元 / 张 |
 | 火山 Ark Seedance | `ARK_SEEDANCE_YUAN_PER_MILLION_TOKENS` | 元 / 百万输出 token |
@@ -46,63 +41,36 @@ TokenDance 模型请求公开接口 `GET https://tokendance.space/portal/api/mod
 该换算仅为估算。EvoLink 不使用 Tuzi `billing_group`。其他 EvoLink 型号、HD、Draft
 及尚未接入的派生操作不在本次价格承诺内。实际费用和历史快照仍遵循下文规则。
 
-## Tuzi 香蕉 Pro：2026-10-12 更新
+## Tuzi 实时同步：2026-10-25 起
 
-来源为用户提供的 Tuzi 降价公告（default 分组三档同时下调），并核对了 Tuzi
-[公开价表 API](https://api.tu-zi.com/api/pricing) 的
-`group_model_pricing.default.billing_expr["gemini-3-pro-image-preview"]`。公开价表的挂牌数字乘 0.7
-才是公告里的人民币单价（GPT Image 2、flux-3-image 同样成立），核对时按这个系数换算。
-`gemini-3-pro-image` 与 `gemini-3-pro-image-preview` 是同一模型，按 1K / 2K / 4K 三档计价
-（2026-08-31 起）。具体金额只维护在上表对应的数据项，不在本文复制。
+服务启动及每6小时请求 [公开价格接口](https://api.tu-zi.com/api/pricing) 与
+[状态接口](https://api.tu-zi.com/api/status)。仅保留已配置的Tuzi分组、模型及caller转换后的实际请求模型，
+写入 `.runtime/prices/tuzi.json`。任一接口失败或人民币系数无效时保留旧快照。
 
-- 仅用于 `tu-zi.com` 及其子域名、明确配置 `billing_group=default` 的 Key。
-- 工坊的 `nano-banana-pro` 展示别名共用该表；`quality=low/medium/high` 分别对应 1K/2K/4K。
-- `nano-banana-pro-2k` / `nano-banana-pro-4k` 按型号固定档位，忽略残留 quality。
-- 无 quality 或 auto 时沿用 caller 的 1K 默认值；不从其他模型遗留的 resolution 推断。
-- VIP、HD、其他分组与未知后缀没有核实价格，不能自动套用该公告。
-- 其他型号与渠道沿用原有核价；提取为独立表不代表重新核实了全部厂商价格。
+按实际请求模型查分组表达式，计算后乘 `usd_exchange_rate`；无表达式时仅接受
+`quota_type=0` 且 `model_price>0`，按 `model_price × group_ratio × usd_exchange_rate` 计算。
+固定价按方案以一次请求计，不额外乘 n；表达式中的 `output_image_count` 使用请求 n，
+`input_image_count` 使用参考图数量。不估计重试、补图与动态拆层的额外费用。
+请求参数沿用caller的质量及型号转换；局部修改与扩图通过 `POST /api/pricing/estimate` 获取费用。
+创作台的Tuzi前端估价返回null，由runner执行前冻结，历史费用不重算。
 
-## Tuzi GPT Image 2.5：2026-10-21 更新
+解释器使用分词器和递归下降解析，只执行核实过的函数和运算。上游
+[源码](https://github.com/QuantumNous/new-api/blob/9823ebc7ea4ac7102d5d8478d395c7d7eaf6c285/pkg/billingexpr/run.go)
+核实了tier、param、has及时间函数；时区由表达式参数指定，周日为0。
+Tuzi扩展 `imageSizeTier` / `imagePixels` 未找到定义，用户裁决为：含这些函数的整个表达式
+返回未计价并在同步日志报警，不猜尺寸算法。因此当前多种GPT Image及香蕉模型暂不显示预计费用。
+未知变量、未核实参数、缺失快照或不支持协议同样不估价。
 
-来源：公开 `/api/pricing` 的 `group_model_pricing.default.billing_expr`，乘 `/api/status`
-人民币系数 0.7。金额维护于 `TUZI_GPT_IMAGE_25_YUAN_PER_IMAGE`。
+2026-10-25 对账结论（公开样本，不发起收费生成）：
 
-- 精确匹配 Tuzi default 的 `gpt-image-2.5`、`-flare`、`-sunburst`、`-vip`。
-- 界面仅提供 1K/2K/4K 分辨率，取消这几个型号的通用质量选项。服务端把显式分辨率写为
-  `quality=1k/2k/4k`，该参数在计费表达式中优先于像素；AUTO 不发送残留档位或质量。
-- 未指定档位时，≤1,048,576 像素算 1K，≤3,686,400 算 2K，再大为 4K；缺省和 AUTO
-  按表达式默认 1K 估价。裸型号及 VIP 另接受 GPT Image 2 的 11 个精确 1K 尺寸；Flare/Sunburst 不接受这份白名单。
-- `gpt-image-2.5-1k` 仅补固定单价，不锁定或改变现有尺寸控件；其他分组和渠道不套用此规则。
-- 这是当前分组计费契约；未进行收费测试，不承诺各路由实际输出像素与请求完全一致。
-
-## Tuzi GPT Image 2：2026-09-04 更新
-
-来源为用户提供的 Tuzi 调价公告，并核对了 Tuzi [公开价表 API](https://api.tu-zi.com/api/pricing)
-的 `group_model_pricing.default.billing_expr["gpt-image-2"]`。2K 下调，1K 与 4K 保持不变，
-另增独立固定价型号 `gpt-image-2-1k`；具体金额只维护在对应数据项。
-
-- 仅对 `tu-zi.com` 及其子域名、`billing_group=default`、精确型号 `gpt-image-2` 生效。
-- 最终提交并冻结到 Job 的 `size` 精确命中 `TUZI_GPT_IMAGE_2_1K_SIZES` 中 11 个尺寸时按 1K
-  计费（`x` 大小写不敏感）：`1254x1254`、`1024x1536` / `1536x1024`、`1086x1448` /
-  `1448x1086`、`1122x1402` / `1402x1122`、`1672x941` / `941x1672`、`1915x821` / `821x1915`。
-- 其他尺寸按**总像素数**：≤1,048,576 为 1K，≤4,194,304 为 2K，再大为 4K。
-  不再按最长边，也不能把 11 个精确尺寸扩展成邻近尺寸范围或统一的约 157 万像素阈值。
-- 界面现有 `quality=low/medium/high/auto` 不参与该分组计价；缺失或非法 size 不展示估价。
-  上游计费表达式还支持原始 `quality=1K/2K/4K` 或 `generationConfig.imageConfig.imageSize`
-  优先指定档位，工坊当前的 GPT Image 参数不发送这些值，不能把 high 猜成 4K。
-- 界面的 GPT Image 自定义尺寸仍按 16 的倍数对齐；按对齐后的最终 size 计价。例如输入
-  `1254x1254` 会变成 `1248x1248`，不再命中精确白名单，应算 2K。
-- 同渠道、同 default 分组的精确型号 `gpt-image-2-1k` 按独立固定价 × 张数估算，不看 size
-  或 quality；提交时保留该型号 ID，厂商负责映射到最近比例的 1K 尺寸，不保证请求的 2K/4K 输出。
-  此次不自动修改用户的 Key 模型列表，可在设置中拉取或添加该模型。
-- 公告另列 Tier 5 账号的 1K 优惠价为 ¥0.024 / 张；当前 Key 配置没有账号等级字段，
-  估价器不自动套用该优惠，仍按普通 default 单价计算。
-- `绘画` 分组仍使用自己的固定单价；OpenAI-HK 与其他渠道不套用这张表。
-- 这次只记录 Tuzi 在服务端按参数选择内部渠道的事实；工坊仍把最终 size 原样发给 Tuzi，
-  不在本地复制其内部路由。
-
-核对时公开模型描述中出现“表外即使小于 1K 也按 2K”的冲突文字；实际计费表达式与用户公告
-均把 ≤1,048,576 像素归为 1K，因此采用计费表达式，不采用该冲突描述。
+- `nano-banana-pro` 实际发出 `gemini-3-pro-image-preview`，样本1K公式为0.142×0.7=0.0994；
+  别名公式的0.1197不适用于该请求。因表达式含未核实函数，当前返回未计价。
+- GPT Image 2样本2K上界为3,686,400像素，旧文档为4,194,304；2048²按样本公式推算由0.12变0.21。
+  这是价表差异记录，不代表已经验证通用图片函数。
+- `mj_imagine`为0.5×0.7=0.35；`mj_fast_imagine`为0.215×0.7=0.1505。
+  两者不能混用。用户裁决：MJ暂未计价，生成路由不变。
+- 共享用例179组、近30天77条任务去重41组，合计220组逐条对账记录在本地任务日志。
+  额外差异按用户裁决记录，已知公式采用公开快照，未核实表达式保留未计价。
 
 ## OpenAI-HK GPT Image 2.5：2026-09-09 补录
 

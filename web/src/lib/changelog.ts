@@ -33,6 +33,13 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.116.0', date: '2026-10-25', headline: 'Tuzi 价格自动同步',
+    changes: [
+      { kind: 'feat', text: 'Tuzi 价格在启动时自动同步，按实际请求模型估价；局部修改和扩图使用同一份服务端价格。' },
+      { kind: 'fix', text: '尚未核实的图片计费公式及 Midjourney 暂不显示预计费用，避免沿用旧价。' },
+    ],
+  },
+  {
     version: '5.115.0', date: '2026-10-25', headline: 'TokenDance 价格自动同步',
     changes: [
       { kind: 'feat', text: 'TokenDance 的图片与视频价格在启动时自动同步，Seedance 视频也能显示预计费用。' },

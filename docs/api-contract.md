@@ -4,6 +4,21 @@
 
 ## 开发中的扩展契约
 
+### 服务端预计费用（5.116.0）
+
+`POST /api/pricing/estimate`，本机会话授权；沿用本地POST路由规则，需持有编辑租约。
+入参 `{alias: string, model: string, kind: "image" | "video", params: JobParams}`；
+出参 `{estimated_cost_cny: number | null}`。渠道不存在返回404，非法参数返回422。
+读取已配置渠道及价格，按提交时相同的尺寸归一化估价，不创建任务、不访问生成接口。
+画布局部修改/扩图在参数变化300ms后请求，等待期间与失败时不展示旧金额。
+
+Tuzi快照位于 `<data_root>/.runtime/prices/tuzi.json`，字段为 `synced_at`、
+`usd_exchange_rate`、`group_ratio`、`billing_expr[group][model]`、
+`models[model].{quota_type,model_price,enable_groups}`。启动及每6小时自动同步公开价格和状态接口，
+仅保留已配置分组、模型及实际请求模型。失败保留旧快照。表达式仅服务端执行，
+缺失价格、未核实函数/字段、MJ及动态拆层均返回null。固定价不额外乘n；
+表达式output_image_count为n，input_image_count为参考图数。费用是预计值，不是实际账单。
+
 ### 图片尺寸意图（5.42.0）
 
 `JobParams`、`CanvasImageDefaultParams` 增加 `size_mode?: auto | ratio | custom`、
