@@ -1,6 +1,5 @@
 import { Link } from 'wouter';
 import { useCallback, useEffect, useState } from 'react';
-import { Copy } from 'lucide-react';
 import {
   fetchGateway,
   fetchGatewayOptions,
@@ -19,20 +18,21 @@ import { Tasks } from './lan-sharing/Tasks';
 import { button, date, PERIODS } from './lan-sharing/shared';
 
 export const GATEWAY_HINT =
-  '同事在 API 密钥中添加局域网 Atelier，填写地址和网关密钥。连接使用明文 HTTP。同事连不上时检查防火墙：Windows 把当前网络设为「专用网络」，并在防火墙中允许 Atelier（Python）入站；macOS 首次开启时在弹窗中点「允许」。';
+  '同事在「添加供应商 → 局域网 Atelier」填写地址和网关密钥。连接使用明文 HTTP。同事连不上时检查防火墙：Windows 把当前网络设为「专用网络」，并在防火墙中允许 Atelier（Python）入站；macOS 首次开启时在弹窗中点「允许」。';
 export function LanSharingSection() {
   const [state, setState] = useState<GatewayState | null>(null);
   const [options, setOptions] = useState<GatewayOptions>({ models: [], aliases: [] });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [port, setPort] = useState('');
+  const [editingPort, setEditingPort] = useState(false);
+  const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   const [editing, setEditing] = useState<GatewayKey | null | undefined>(undefined);
   const [pendingRevoke, setPendingRevoke] = useState<GatewayKey | null>(null);
   const reload = useCallback(async () => {
     const [next, choices] = await Promise.all([fetchGateway(), fetchGatewayOptions()]);
     setState(next);
     setOptions(choices);
-    setPort(String(next.port));
   }, []);
   useEffect(() => {
     void reload().catch((e) => setError(String(e)));
@@ -43,8 +43,10 @@ export function LanSharingSection() {
     try {
       await action();
       await reload();
+      return true;
     } catch (e) {
       setError(String(e));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -53,67 +55,81 @@ export function LanSharingSection() {
     void reload().catch((e) => setError(String(e)));
   }, [reload]);
   const address =
-    state?.status.running && state.status.addresses[0]
+    state?.enabled && state.status.running && state.status.addresses[0]
       ? `http://${state.status.addresses[0]}:${state.status.port}`
       : null;
   return (
     <>
       <section aria-label="网关状态" className="flex flex-wrap items-center gap-4 rounded-xl border border-border bg-card p-5">
-        <span aria-hidden className={`size-2 shrink-0 rounded-full ${state?.status.running ? 'bg-status-done' : 'bg-subtle-foreground'}`} />
-        <div className="min-w-0 flex-1 space-y-2">
+        <div className="flex min-w-0 flex-1 basis-64 items-center gap-4">
+          <span aria-hidden className={`size-2 shrink-0 rounded-full ${state?.enabled && state.status.running ? 'bg-status-done' : 'bg-subtle-foreground'}`} />
+          <div className="min-w-0 flex-1 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-sm font-semibold">共享本机供应商</h2>
-            <span className={`rounded-full px-2 py-0.5 text-xs ${state?.status.running ? 'gateway-running' : 'bg-secondary text-muted-foreground'}`}>
-              {!state ? '读取中…' : state.status.running ? '运行中' : state.status.error ? '启动失败' : '已关闭'}
+            <span className={`rounded-full px-2 py-0.5 text-xs ${state?.enabled && state.status.running ? 'gateway-running' : 'bg-secondary text-muted-foreground'}`}>
+              {!state ? '读取中…' : !state.enabled ? '已关闭' : state.status.running ? '运行中' : state.status.error ? '启动失败' : '已关闭'}
             </span>
           </div>
-          {state && <p className="text-xs text-muted-foreground">{options.models.length} 个模型 · {state.keys.filter(key => !key.revoked_at).length} 位在用成员 · 本月全员花费 {formatGenerationCost(state.keys.reduce((sum, key) => sum + key.month_charged_cny, 0))}</p>}
-          {state?.status.error && <p className="text-sm text-destructive">{state.status.error}</p>}
+          {state && <p className="text-xs text-muted-foreground">{state.enabled
+            ? <>{options.models.length} 个模型 · {state.keys.filter(key => !key.revoked_at).length} 位在用成员 · 本月全员花费 {formatGenerationCost(state.keys.reduce((sum, key) => sum + key.month_charged_cny, 0))}</>
+            : '开启后，同事可以用你的供应商出图，按成员限额记账'}</p>}
+          {state?.enabled && state.status.error && <p className="text-sm text-destructive">{state.status.error}</p>}
+          </div>
         </div>
-        {address && <div role="status" className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+        {address && <div role="status" className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-xs">
           <span className="break-all font-mono">{address}</span>
-          <button aria-label="复制地址" className={button} onClick={() => void navigator.clipboard.writeText(address)}><Copy className="size-3.5" /></button>
+          <button aria-label="复制地址" className={`${button} shrink-0`} onClick={async () => {
+            setError('');
+            try {
+              await navigator.clipboard.writeText(address);
+              setCopiedAddress(address);
+            } catch {
+              setCopiedAddress(null);
+              setError('复制失败，请手动复制地址');
+            }
+          }}>{copiedAddress === address ? '已复制' : '复制'}</button>
         </div>}
-        <Switch label="开启局域网共享" checked={Boolean(state?.enabled)} disabled={!state || busy}
-          onChange={enabled => void run(() => updateGateway({ enabled }))} />
+        {state?.enabled && (editingPort ? (
+          <form className="flex flex-wrap items-center gap-2" onSubmit={event => {
+            event.preventDefault();
+            if (busy || !(Number(port) >= 1024 && Number(port) <= 65535)) return;
+            void run(() => updateGateway({ port: Number(port) })).then(saved => {
+              if (saved) setEditingPort(false);
+            });
+          }}>
+            <Input aria-label="端口" value={port} inputMode="numeric" autoFocus disabled={busy}
+              onChange={event => setPort(event.target.value.replace(/\D/g, ''))} className="h-8 w-24" />
+            <button type="submit" className={button}
+              disabled={busy || !(Number(port) >= 1024 && Number(port) <= 65535)}>保存端口</button>
+            <button type="button" className={button} disabled={busy} onClick={() => setEditingPort(false)}>取消</button>
+          </form>
+        ) : (
+          <button className={button} disabled={busy} onClick={() => {
+            setPort(String(state.port));
+            setEditingPort(true);
+          }}>改端口</button>
+        ))}
+        <Switch compact label="开启局域网共享" checked={Boolean(state?.enabled)} disabled={!state || busy}
+          onChange={enabled => void run(() => updateGateway({ enabled })).then(saved => {
+            if (saved) setEditingPort(false);
+          })} />
       </section>
       <div className="min-w-0 space-y-6">
         {state?.enabled && (
           <>
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-2 text-sm">
-                端口
-                <Input
-                  aria-label="端口"
-                  value={port}
-                  inputMode="numeric"
-                  onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))}
-                  className="h-8 w-24"
-                />
-              </label>
-              {state && port !== String(state.port) && (
-                <button
-                  className={button}
-                  disabled={busy || !(Number(port) >= 1024 && Number(port) <= 65535)}
-                  onClick={() => void run(() => updateGateway({ port: Number(port) }))}
-                >
-                  保存端口
-                </button>
-              )}
-            </div>
-            <section aria-label="网关密钥" className="space-y-3">
+            <section aria-label="成员" className="space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium">密钥</h3>
-                <button className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50" disabled={!state || busy} onClick={() => setEditing(null)}>
-                  新建密钥
+                <h3 className="text-sm font-medium">成员 <span className="font-normal text-muted-foreground">{state.keys.length}</span></h3>
+                <button className={button} disabled={!state || busy} onClick={() => setEditing(null)}>
+                  新建成员密钥
                 </button>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
+              <div className="overflow-x-auto rounded-xl border border-border bg-card">
+                <table className="w-full min-w-160 text-left text-xs">
                   <thead className="text-muted-foreground">
                     <tr>
                       {['名称', '本月额度', '本月花费', '最近使用', '操作'].map((h) => (
-                        <th key={h} className="px-2 py-2 font-normal">
+                        <th key={h} className="px-4 py-3 font-normal">
                           {h}
                         </th>
                       ))}
@@ -121,14 +137,14 @@ export function LanSharingSection() {
                   </thead>
                   <tbody>
                     {state?.keys.map((key) => (
-                      <tr key={key.id} className="border-t border-border">
+                      <tr key={key.id} className={`border-t border-border ${key.revoked_at ? 'opacity-50' : ''}`}>
                         <td
-                          className={`max-w-32 truncate px-2 py-3 ${key.revoked_at ? 'text-muted-foreground line-through' : ''}`}
+                          className={`max-w-32 truncate px-4 py-3 ${key.revoked_at ? 'text-muted-foreground' : ''}`}
                           title={key.name}
                         >
                           {key.name}
                         </td>
-                        <td className="min-w-40 space-y-2 px-2 py-3">
+                        <td className="min-w-40 space-y-2 px-4 py-3">
                           {!key.limits_status.some((limit) => limit.period === 'month')
                             ? '不限额'
                             : key.limits_status
@@ -156,24 +172,25 @@ export function LanSharingSection() {
                                   );
                                 })}
                         </td>
-                        <td className="whitespace-nowrap px-2 tabular-nums">
-                          <Link href={`/settings/usage?scope=team&member=${encodeURIComponent(key.id)}`}>
+                        <td className="whitespace-nowrap px-4 tabular-nums">
+                          <Link className="underline decoration-border underline-offset-4 hover:text-primary" href={`/settings/usage?scope=team&member=${encodeURIComponent(key.id)}`}>
                             {formatGenerationCost(key.month_charged_cny)}
                           </Link>
                         </td>
-                        <td className="whitespace-nowrap px-2 text-muted-foreground">
+                        <td className="whitespace-nowrap px-4 text-muted-foreground">
                           {date(key.last_used_at)}
                         </td>
-                        <td className="px-2">
+                        <td className="px-4">
                           {key.revoked_at ? (
                             '已撤销'
                           ) : (
-                            <div className="flex gap-1">
-                              <button className={button} disabled={busy} onClick={() => setEditing(key)}>
+                            <div className="flex items-center gap-2 whitespace-nowrap text-muted-foreground">
+                              <button className="rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50" disabled={busy} onClick={() => setEditing(key)}>
                                 编辑
                               </button>
+                              <span aria-hidden>·</span>
                               <button
-                                className={button}
+                                className="rounded-sm hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
                                 disabled={busy}
                                 onClick={() => setPendingRevoke(key)}
                               >

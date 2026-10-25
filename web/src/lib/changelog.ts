@@ -32,6 +32,9 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.121.0', date: '2026-10-25', headline: '网关共享状态更清楚', changes: [
+    { kind: 'feat', text: '网关状态卡集中显示共享地址与端口，成员额度、花费和管理操作放在同一张表里。' },
+  ] },
   { version: '5.120.0', date: '2026-10-25', headline: '用量任务可筛选与翻页', changes: [
     { kind: 'feat', text: '用量概览独立显示未计价次数和占比，任务按时间排列，支持成功、失败和未计价筛选。' },
     { kind: 'feat', text: '任务表显示供应商、耗时和费用，每次加载50条；团队视图按成员查看。' },
