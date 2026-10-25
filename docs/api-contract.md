@@ -122,6 +122,13 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 左侧合成按 z 升序绘制，右侧列表按 z 降序展示。拖拽后统一编号 0..N-1，通过原 Document 保存与撤销链路持久化。
 层 id、version_id、bounding_box、可见性、material_node_id 不随排序改变；Job 中的原始输出层号仍表示不可变来源，不是编辑后的显示顺序。
 
+### 对比节点（5.106.0）
+
+`compare` 节点固定一对图片版本：`before_version_id`（原图）、`after_version_id`（结果），可选 `before_frame`
+（归一化 x / y / width / height，扩图时原图在结果画面里的位置）。两个版本都必须是本画布 image 版本；节点不接受也不提供连线，
+不参与生成。图片工具栏只在局部修改 / 扩图 / AI高清 结果上露出“对比”：原图取自生成快照（`normalized_params.image_edit`
+或 AI高清 的首个图片输入），由前端创建节点并走普通 Document 保存。分界位置只是本地显示状态，不持久化。
+
 ### Tuzi 图片任务（5.42.3）
 
 - 精确 `gpt-image-2`、`gpt-image-2-vip`、`gpt-image-1.5`、`gpt-image-1` 普通出图走

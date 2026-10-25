@@ -136,6 +136,7 @@ import {
   type CanvasMediaTool,
 } from '@/components/canvas/CanvasMediaOperationDialog';
 import { DEFAULT_CANVAS_UI_PREFERENCES } from '@/components/canvas/canvasImageToolbar';
+import type { CanvasCompareSource } from '@/components/canvas/canvasCompare';
 import { formatCanvasBytes } from '@/components/canvas/canvasMediaFormatting';
 import {
   generationPanelDismissalAfterNodeSelection,
@@ -4492,6 +4493,22 @@ function CanvasEditorInner({
       node.position.y + size.height / 2, { zoom: getZoom(), duration: 0 }));
   };
   const locateNode = useCallback((nodeId: string) => locateNodeHandler.current(nodeId), []);
+  const createCompareNodeHandler = useRef<(node: CanvasContentNode, source: CanvasCompareSource) => void>(() => undefined);
+  createCompareNodeHandler.current = (node, source) => {
+    const current = latestDocument.current;
+    const afterVersionId = node.data.current_version_id;
+    if (!current || !afterVersionId) return;
+    const size = canvasNodeRenderedSize(node, current.content_versions);
+    const id = makeId('compare');
+    appendNode({ id, type: 'compare', title: `${node.title} 对比`,
+      position: placeNewNode({ x: node.position.x + size.width + 96, y: node.position.y }, size),
+      size, z_index: 0,
+      data: { before_version_id: source.beforeVersionId, after_version_id: afterVersionId, before_frame: source.beforeFrame },
+    }, null);
+    setSelectedNodeIds(new Set([id]));
+  };
+  const createCompareNode = useCallback(
+    (node: CanvasContentNode, source: CanvasCompareSource) => createCompareNodeHandler.current(node, source), []);
   // 新建节点：只平移到新节点（多个时取包围盒）的中心，保持当前缩放（飙哥 2026-10-09，
   // 取代 09-14 的「放大到占视口大部分」）。一批新节点只算一次、只动一次视口。
   focusNewNodesHandler.current = (nodes: readonly CanvasNode[]) => {
@@ -4605,6 +4622,7 @@ function CanvasEditorInner({
     submitImageEdit,
     openAngle,
     upscaleImage,
+    createCompareNode,
     editVideo,
     saveImageToolbarPreferences: persistImageToolbarPreferences,
     deleteNode,
@@ -4649,6 +4667,7 @@ function CanvasEditorInner({
     narrowViewport,
     openAngle,
     upscaleImage,
+    createCompareNode,
     openMaskEdit,
     openImageEdit,
     submitImageEdit,
@@ -5999,7 +6018,7 @@ function cloneCanvasNode(
       },
     };
   }
-  if (clone.type === 'batch_material') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex };
+  if (clone.type === 'batch_material' || clone.type === 'compare') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex };
   if (clone.type === 'image_edit') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex,
     data: { ...clone.data, active_run_id: null,
       source_node_id: idMap.get(clone.data.source_node_id ?? '') ?? (preserveExternalReferences ? clone.data.source_node_id : null),

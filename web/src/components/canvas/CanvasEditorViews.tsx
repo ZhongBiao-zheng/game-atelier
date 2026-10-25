@@ -19,7 +19,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, BookmarkPlus, Check, ChevronRight, CircleHelp, Download, Ellipsis, Expand, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Paintbrush, Pause, Pencil, Play, Plus, Settings2, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, BookmarkPlus, Columns2, Check, ChevronRight, CircleHelp, Download, Ellipsis, Expand, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Paintbrush, Pause, Pencil, Play, Plus, Settings2, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
   useRef, useState,
@@ -43,6 +43,8 @@ import { CanvasAudioPlayer } from './CanvasAudioPlayer';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
 import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
 import { CanvasImageEditPanel } from './CanvasImageEditPanel';
+import { CanvasCompareSurface } from './CanvasCompareSurface';
+import { canvasCompareSource, type CanvasCompareSource } from './canvasCompare';
 import { CanvasImageEditSurface } from './CanvasImageEditSurface';
 import type { CanvasImageEditNode, CanvasMediaVersion } from '@/schema/canvas';
 import type { KeyView } from '@/api/keys';
@@ -242,6 +244,7 @@ export interface CanvasNodeContextValue {
   submitImageEdit?: (nodeId: string) => Promise<boolean>;
   openAngle: (node: CanvasContentNode) => void;
   upscaleImage: (node: CanvasContentNode, target: CanvasUpscaleTarget) => void;
+  createCompareNode?: (node: CanvasContentNode, source: CanvasCompareSource) => void;
   editVideo: (node: CanvasContentNode) => void;
   saveImageToolbarPreferences: (value: CanvasImageToolbarPreferences) => Promise<void>;
   deleteNode: (id: string) => void;
@@ -999,6 +1002,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           {node.type === 'layer_stack' && (
             <CanvasLayerStackSurface node={node} context={context} onOpenComposer={() => setLayerComposerOpen(true)} />
           )}
+          {node.type === 'compare' && <CanvasCompareSurface node={node} projectId={context.projectId} bitmapWidth={imageBitmapWidth} />}
           {node.type === 'image_edit' && <CanvasImageEditSurface node={node} projectId={context.projectId}
             source={context.resolveVersion(node.data.source_version_id) as CanvasMediaVersion | undefined} />}
           {node.type === 'plugin' && !content && (
@@ -1596,7 +1600,7 @@ function CanvasNodeToolbar({
           </MediaToolButton>
         </>
       )}
-      <MediaToolButton
+      {node.type !== 'compare' && <MediaToolButton
         label={content || node.type === 'layer_stack' ? `查看 ${node.title} 详情` : `查看 ${node.title} 设置`}
         text={content || node.type === 'layer_stack' ? '查看' : '查看设置'}
         onClick={() => {
@@ -1606,7 +1610,7 @@ function CanvasNodeToolbar({
         }}
       >
         <Eye />
-      </MediaToolButton>
+      </MediaToolButton>}
       {content && content.kind !== 'text' ? (
         <MediaToolLink
           label={`下载 ${node.title}`}
@@ -1865,6 +1869,7 @@ function ImageNodeToolbar({
   }
 
   const layerActionDisabled = !currentVersionId || submitting || replacing;
+  const compareSource = canvasCompareSource(imageContent, context.jobsByResultNodeId.get(node.id), context.resolveVersion);
   const inlineActions = actions.slice(0, IMAGE_TOOLBAR_INLINE_LIMIT);
   const overflowActions = actions.slice(IMAGE_TOOLBAR_INLINE_LIMIT);
 
@@ -1958,6 +1963,12 @@ function ImageNodeToolbar({
         disabled={!currentVersionId || submitting || replacing}
         onClick={() => context.openMaskEdit(node, 'outpaint')}
       ><Expand /></MediaToolButton>
+      {compareSource && context.createCompareNode && <MediaToolButton
+        label={`对比 ${node.title} 与原图`}
+        text="对比"
+        disabled={replacing}
+        onClick={() => context.createCompareNode?.(node, compareSource)}
+      ><Columns2 /></MediaToolButton>}
       {trailing}
       <DropdownMenu onOpenChange={updateMenuOpen}>
         <DropdownMenuTrigger asChild>

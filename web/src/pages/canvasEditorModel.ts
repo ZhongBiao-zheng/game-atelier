@@ -179,6 +179,11 @@ export function canvasNodeRenderedSize(
       : source?.kind === 'image' ? source : null;
     return target ? sizeLockedToCanvasVersion(node.size, target) : node.size ?? CANVAS_DEFAULT_NODE_SIZE;
   }
+  if (node.type === 'compare') {
+    // 对比节点按结果图比例显示：扩图的原图只占画框一部分。
+    const after = versions[node.data.after_version_id];
+    return after?.kind === 'image' ? sizeLockedToCanvasVersion(node.size, after) : node.size ?? CANVAS_DEFAULT_NODE_SIZE;
+  }
   if ((node.type !== 'image' && node.type !== 'video') || node.data.display.free_resize || !node.data.current_version_id) {
     return node.size ?? CANVAS_DEFAULT_NODE_SIZE;
   }
@@ -572,7 +577,8 @@ export function canvasNodeAcceptsInput(node: CanvasNode) {
     && node.type !== 'plugin'
     && node.type !== 'batch_material'
     && node.type !== 'layer_stack'
-    && node.type !== 'image_edit';
+    && node.type !== 'image_edit'
+    && node.type !== 'compare';
 }
 
 /** 删除关系节点不删除固定图片版本；仅断开可选的画布定位引用。 */

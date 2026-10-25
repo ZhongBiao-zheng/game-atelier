@@ -974,6 +974,14 @@ class CanvasPluginNodeData(BaseModel):
         return self
 
 
+class CanvasCompareNodeData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    before_version_id: str = Field(min_length=1, max_length=160)
+    after_version_id: str = Field(min_length=1, max_length=160)
+    # 扩图：原图在结果画面里的位置（归一化）；为空时两张图铺满同一画框。
+    before_frame: CanvasNormalizedRect | None = None
+
+
 class CanvasNodeBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=120)
@@ -1031,10 +1039,15 @@ class CanvasPluginNode(CanvasNodeBase):
     data: CanvasPluginNodeData
 
 
+class CanvasCompareNode(CanvasNodeBase):
+    type: Literal["compare"]
+    data: CanvasCompareNodeData
+
+
 CanvasNode = Annotated[
     CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode
     | CanvasGroupNode | CanvasPluginNode | CanvasBatchMaterialNode
-    | CanvasLayerStackNode | CanvasImageEditNode,
+    | CanvasLayerStackNode | CanvasImageEditNode | CanvasCompareNode,
     Field(discriminator="type"),
 ]
 
@@ -1394,6 +1407,11 @@ class CanvasDocument(BaseModel):
                             or mask.origin.source_version_id != source.version_id
                             or mask.origin.expanded_canvas):
                         raise ValueError("image edit mask must belong to its fixed source version")
+            if node.type == "compare":
+                for version_id in (node.data.before_version_id, node.data.after_version_id):
+                    version = self.content_versions.get(version_id)
+                    if version is None or version.kind != "image":
+                        raise ValueError("compare node must reference project image versions")
             if node.type == "batch_material":
                 for item in node.data.items:
                     for version_id in item.image_version_ids:

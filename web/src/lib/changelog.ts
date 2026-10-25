@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.106.0',
+    date: '2026-10-25',
+    headline: '画布新增前后对比节点',
+    changes: [
+      { kind: 'feat', text: '局部修改、扩图、AI高清的结果图上多了「对比」，生成一个 Before / After 滑块节点，左右拖动对照原图。' },
+    ],
+  },
+  {
     version: '5.105.2',
     date: '2026-10-24',
     headline: '主题色卡换成磨砂渐变',
