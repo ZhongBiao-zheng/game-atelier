@@ -35,6 +35,17 @@ def edit_transport(provider: str, model: str, protocol: str | None) -> str | Non
     return None
 
 
+def edit_transport_for_key(key, model: str) -> str | None:
+    from .openai_image import _effective_image_protocol
+
+    if key.provider == "atelier":
+        spec = next((item for item in key.models if item.id == model), None)
+        transports = [edit_transport(m.provider, m.model_id, m.protocol)
+                      for m in (spec.via or [])] if spec else []
+        return transports[0] if transports and all(transports) else None
+    return edit_transport(key.provider, model, _effective_image_protocol(key, model))
+
+
 def expanded_source(source: Path, options: dict) -> tuple[Image.Image, Image.Image]:
     with Image.open(source) as opened:
         original = ImageOps.exif_transpose(opened).convert("RGBA")
@@ -139,6 +150,8 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path,
     key = keys.find_by_alias(alias)
     if key is None:
         raise ValueError("编辑模型的密钥已经不存在")
+    if not key.enabled:
+        raise ValueError("供应商已停用")
     transport = edit_transport(key.provider, model, _effective_image_protocol(key, model))
     if transport == "evolink":
         import base64

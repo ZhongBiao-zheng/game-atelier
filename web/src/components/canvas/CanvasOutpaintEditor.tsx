@@ -1,7 +1,8 @@
 import { Expand, Minus, Move, Plus } from 'lucide-react';
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
-import { imageControlCaps, MJ_IMAGES_PER_TASK } from '@/lib/imageControlCaps';
+import { useGenerationEstimate } from '@/lib/useGenerationEstimate';
+import { selectionImageCaps } from '@/lib/modelRoutes';
+import { MJ_IMAGES_PER_TASK } from '@/lib/imageControlCaps';
 import { defaultResolution } from '@/lib/studioSize';
 import { EditGenerationControls } from './EditGenerationControls';
 import { editModelChoices, editSize, EXPAND_RATIOS, EXPAND_SCALES, presetFrame, presetScale,
@@ -41,7 +42,7 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
   });
   const choice = choices.find(item => choiceId(item.key.alias, item.model) === selected);
   const [count, setCount] = useState(initialDraft?.params.n ?? 1);
-  const caps = imageControlCaps(choice?.model ?? '', choice?.key.provider, choice?.key.base_url, choice?.key.billing_group);
+  const caps = selectionImageCaps(choice?.key, choice?.model ?? '');
   const [qualityChoice, setQualityChoice] = useState(initialDraft?.params.quality);
   const [resolutionChoice, setResolutionChoice] = useState(initialDraft?.params.resolution);
   const quality = caps.qualities?.includes(qualityChoice as never) ? qualityChoice
@@ -58,8 +59,8 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
   const expanded = frame.width > source.width || frame.height > source.height;
   const fingerprint = JSON.stringify({ frame, ratio, prompt, selected, count, quality, resolution });
   const savedFingerprint = useRef(fingerprint);
-  const cost = estimateGenerationCostForSubmission(choice?.key, choice?.model ?? '', 'image',
-    { ...size.params, n: candidates, quality, resolution, ...(mj ? { image_edit: { mode: 'outpaint' } } : {}) });
+  const cost = useGenerationEstimate(choice?.key.alias, choice?.model ?? '',
+    { ...size.params, n: candidates, quality, resolution, image_edit: { mode: 'outpaint' } }, open);
   const blocker = !choice ? '需要可用的图片编辑模型' : !ready ? '图片加载中' : initialData?.active_run_id ? '正在生成'
     : !contains || !expanded ? '画框需要比原图大' : size.error ? size.error : mj && !prompt.trim() ? '写下扩出来的画面' : null;
 

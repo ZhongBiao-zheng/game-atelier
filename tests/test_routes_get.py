@@ -58,74 +58,18 @@ def test_get_jobs_skips_bad_file(client, runtime):
     assert [j["job_id"] for j in r.json()] == ["good"]
 
 
-def test_get_images_skips_bad_file(client, runtime):
-    (runtime / "jobs" / "ok.json").write_text(json.dumps({
-        "job_id": "ok", "character_id": "c9", "prompt": "p",
-        "submitted_at": "2026-06-10T10:00:00Z", "model": "m",
-        "params": {}, "seed": None, "output_paths": ["/x/a.png"],
-        "status": "done", "error": None,
-    }))
-    (runtime / "jobs" / "corrupt.json").write_text("{")
-    r = client.get("/api/images?character=c9")
-    assert r.status_code == 200
-    assert r.json()["output_paths"] == ["/x/a.png"]
 
 
-def test_get_spec_returns_content(client):
-    r = client.get("/api/spec/shadow")
-    assert r.status_code == 200
-    assert "暗影刺客女" in r.json()["content"]
 
 
-def test_get_spec_404(client):
-    r = client.get("/api/spec/nonexistent")
-    assert r.status_code == 404
 
 
-def test_get_characters_lists_character_dirs(client):
-    r = client.get("/api/characters")
-    assert r.status_code == 200
-    entries = r.json()
-    ids = [c["id"] for c in entries]
-    assert "shadow" in ids
-    # Display name comes from first `# heading`, not directory name.
-    by_id = {c["id"]: c for c in entries}
-    assert by_id["shadow"]["name"] == "暗影刺客女"
-    # 无立绘 → thumbnail 为 None
-    assert by_id["shadow"]["thumbnail"] is None
 
 
-def test_get_characters_thumbnail_is_latest_portrait(client, isolated_data_root):
-    import os
-
-    portrait = isolated_data_root / "characters" / "shadow" / "portrait"
-    portrait.mkdir(parents=True, exist_ok=True)
-    old = portrait / "v1.png"
-    new = portrait / "v2.png"
-    old.write_bytes(b"old")
-    new.write_bytes(b"new")
-    (portrait / "prompt-v1.md").write_text("not an image")
-    # mtime 决定最新，与文件名无关
-    os.utime(old, (1_000_000_000, 1_000_000_000))
-    os.utime(new, (2_000_000_000, 2_000_000_000))
-
-    r = client.get("/api/characters")
-    assert r.status_code == 200
-    by_id = {c["id"]: c for c in r.json()}
-    assert by_id["shadow"]["thumbnail"] == "characters/shadow/portrait/v2.png"
 
 
-def test_get_home_returns_user_home(client):
-    r = client.get("/api/home")
-    assert r.status_code == 200
-    from pathlib import Path
-    assert r.json()["home"] == str(Path.home())
 
 
-def test_get_active_character_default_null(client):
-    r = client.get("/api/active-character")
-    assert r.status_code == 200
-    assert r.json()["active_id"] is None
 
 
 def test_matting_model_status_reports_missing_runtime(client, monkeypatch):

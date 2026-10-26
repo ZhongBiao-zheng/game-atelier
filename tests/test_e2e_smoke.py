@@ -2,7 +2,6 @@
 不跑前端（用 httpx 直接打 API），覆盖核心数据流。
 """
 import json
-import hashlib
 import os
 import socket
 import time
@@ -70,23 +69,10 @@ def server(tmp_path):
 
 
 def test_full_round_trip(server):
-    assert server.get("/api/spec/test_char").status_code == 404
-    revision = hashlib.sha256(b"").hexdigest()
-    r = server.post("/api/spec/test_char", json={
-        "content": "# test", "expected_revision": revision,
-    })
-    assert r.status_code == 200
-
-    active = server.get("/api/active-character").json()
-    assert active["active_id"] == "test_char"
-
-    r = server.post("/api/feedback", json={"text": "make it darker", "character_id": "test_char"})
-    assert r.status_code == 200
-
-    r = server.post("/api/clipboard-attempt", json={
-        "ts": "2026-05-18T10:00:00Z", "success": True,
-    })
-    assert r.status_code == 200
-
-    chars = server.get("/api/characters").json()
-    assert any(c["id"] == "test_char" for c in chars)
+    response = server.post("/api/canvas/projects", json={"name": "Round trip"})
+    assert response.status_code == 201
+    project_id = response.json()["project_id"]
+    response = server.put(f"/api/canvas/projects/{project_id}/specs/project", json={"text": "# test"})
+    assert response.status_code == 200
+    assert "# test" in server.get(f"/api/canvas/projects/{project_id}/specs").text
+    assert server.get("/api/jobs").json() == []

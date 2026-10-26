@@ -99,7 +99,7 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
           ))}
         </div>
         <Link
-          href="/settings?section=keys"
+          href="/settings/providers"
           className="mt-1 flex items-center gap-2 rounded-md border-t border-border px-2 py-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
         >
           <Plus className="size-3.5 shrink-0" aria-hidden="true" />添加模型

@@ -19,6 +19,10 @@ from viewer_server.connection_status import (
 from viewer_server.connection_auth import ConnectionError, ConnectionStore
 from viewer_server.connection_middleware import ConnectionMiddleware, connection_error
 from viewer_server.connection_routes import connection_router
+from viewer_server.gateway_app import gateway_server
+from viewer_server.gateway_routes import gateway_router
+from viewer_server.model_route_status import member_status_router
+from viewer_server.usage_routes import usage_router
 from viewer_server.routes import router
 from viewer_server.request_boundary import LocalRequestBoundary, development_origin
 from viewer_server.routes_canvas_batches import router as canvas_batches_router
@@ -101,7 +105,10 @@ def _install_secret_filter() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     hub.set_loop(asyncio.get_running_loop())
-    await asyncio.to_thread(app.state.workshop_runtime.recover)
+    from character_workflow.lib import gateway_live
+    def gateway_listener(snapshot):
+        hub.broadcast("gateway_task", snapshot)
+    gateway_live.listeners.append(gateway_listener)
     from viewer_server.routes import _reset_studio_recovery_workers
 
     _reset_studio_recovery_workers()
@@ -121,14 +128,6 @@ async def lifespan(app: FastAPI):
         logging.getLogger(__name__).info(
             "migrated creation asset catalog to v4; backup: %s",
             media_migration["backup_path"],
-        )
-    # 插件升级入口：旧项目只在 server 启动阶段一次性改成 V1；正常 GET/Skill 读路径不做迁移。
-    from character_workflow.lib.ui_schemes import migrate_legacy_projects
-
-    migrated = migrate_legacy_projects()
-    if migrated:
-        logging.getLogger(__name__).info(
-            "migrated %d project(s) to UI schemes: %s", len(migrated), ", ".join(migrated)
         )
     # 孤儿回收：studio job 只在本进程跑，重启时还 pending 的必然已死（一键启动脚本
     # 每次双击都是 stop→start）。不回收 = Web 永久转圈 + 永久轮询。
@@ -157,11 +156,13 @@ async def lifespan(app: FastAPI):
     for project in canvas_projects:
         interrupt_canvas_batch_after_restart(project.project_id)
     from character_workflow.lib.canvas_image_edits import has_resumable_mj_task
+    from character_workflow.lib.jobs import has_resumable_gateway_task
     resumable = [
         job_id for job_id in reconciled
         if (
             (job := read_job(job_id)).status.value in {"pending", "pending_confirm"}
-            and (job.runner_started_at is None or has_resumable_mj_task(job))
+            and (job.runner_started_at is None or has_resumable_mj_task(job)
+                 or has_resumable_gateway_task(job))
         )
     ]
     if reconciled:
@@ -169,6 +170,14 @@ async def lifespan(app: FastAPI):
             "reconciled %d canvas job(s): %s", len(reconciled), ", ".join(reconciled)
         )
     observer = start_watchers()
+    # 局域网共享（ADR-0025）：默认关闭；开着的话随主服务一起起来。
+    from character_workflow.lib.gateway_keys import read_config as read_gateway_config
+
+    await asyncio.to_thread(gateway_server.apply, read_gateway_config())
+    # 接入端：网关供应商的模型列表随网关变化，启动时尽力同步一次（连不上就保留旧快照）。
+    from character_workflow.lib.callers.atelier_gateway import sync_all_gateway_keys
+
+    gateway_sync = asyncio.create_task(asyncio.to_thread(sync_all_gateway_keys))
     resume_tasks: set[asyncio.Task[None]] = set()
 
     async def maintain_canvas_lifecycle() -> None:
@@ -198,6 +207,13 @@ async def lifespan(app: FastAPI):
         task = asyncio.create_task(resume_canvas_job(job_id))
         resume_tasks.add(task)
         task.add_done_callback(resume_tasks.discard)
+    from character_workflow.lib.tokendance_prices import start_background_sync
+    from character_workflow.lib.tuzi_prices import start_background_sync as start_tuzi_sync
+    from character_workflow.lib.openai_hk_prices import start_background_sync as start_hk_sync
+
+    start_background_sync()
+    start_tuzi_sync()
+    start_hk_sync()
     try:
         yield
     finally:
@@ -207,10 +223,12 @@ async def lifespan(app: FastAPI):
         maintenance_task.cancel()
         for task in resume_tasks:
             task.cancel()
+        gateway_live.listeners.remove(gateway_listener)
+        gateway_sync.cancel()
+        await asyncio.to_thread(gateway_server.stop)
         stop_team_library_watches()
         observer.stop()
         observer.join(timeout=2)
-        app.state.workshop_runtime.close()
 
 
 # 发布产物用固定文件名（去哈希，见 web/vite.config.ts），所以必须显式要求浏览器每次验证。
@@ -263,10 +281,16 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(connection_router(connection_store))
     app.include_router(canvas_batches_router)
     app.include_router(team_library_router)
+    app.include_router(gateway_router)
+    from viewer_server.gateway_admin_proxy import router as gateway_admin_proxy
+    app.include_router(gateway_admin_proxy)
+    app.include_router(member_status_router)
+    app.include_router(usage_router)
     app.include_router(sse_router)
-    from viewer_server.workshop_routes import register_workshop_routes
 
-    app.state.workshop_runtime = register_workshop_routes(app, connection_store.grant_allows)
+    from viewer_server.canvas_agent_routes import handle_canvas_tool_error
+    from character_workflow.lib.canvas_tool_common import CanvasToolError
+    app.add_exception_handler(CanvasToolError, handle_canvas_tool_error)
     from viewer_server.canvas_agent_routes import register_canvas_agent_routes
 
     register_canvas_agent_routes(app)

@@ -34,7 +34,7 @@ from character_workflow.lib.schemas import (
     CanvasPoint, CanvasTextNode, CanvasTextNodeData, CanvasTextVersion, CanvasUserEditOrigin, Job,
     JobParams, canvas_allowed_draft_params,
 )
-from character_workflow.lib.workshop import WorkshopError, actor_id
+from character_workflow.lib.canvas_tool_common import CanvasToolError, actor_id
 
 CANVAS_CAPABILITIES = frozenset({"canvas_read", "canvas_edit", "canvas_generate"})
 
@@ -46,11 +46,11 @@ def _now() -> str:
 def authorize(principal: Any, project_id: str, capability: str) -> None:
     actor_id(principal)
     if principal.kind != "local" and capability not in principal.capabilities:
-        raise WorkshopError("TARGET_NOT_AUTHORIZED", "当前授权不允许操作这个画布", 403)
+        raise CanvasToolError("TARGET_NOT_AUTHORIZED", "当前授权不允许操作这个画布", 403)
     try:
         read_canvas_project(project_id)
     except (KeyError, ValueError, OSError):
-        raise WorkshopError("TARGET_NOT_AUTHORIZED", "画布不存在或不在当前授权中", 404) from None
+        raise CanvasToolError("TARGET_NOT_AUTHORIZED", "画布不存在或不在当前授权中", 404) from None
 
 
 def list_projects(principal: Any, payload: CanvasListProjectsInput) -> dict:
@@ -67,6 +67,21 @@ def _text_of(document: CanvasDocument, node: CanvasNode, limit: int = 4000) -> d
     if version is None or version.kind != "text":
         return {"text": None, "text_truncated": False}
     return {"text": version.text[:limit], "text_truncated": len(version.text) > limit}
+
+
+def _with_size_mode(mode: str, params: dict) -> dict:
+    """Agent 只写了尺寸时补上它表达的尺寸模式：缺模式的草稿在界面按默认比例显示，
+    服务端却按 size 原样提交，两边对不上。"""
+    if mode != "image" or "size_mode" in params:
+        return params
+    size = str(params.get("size") or "").strip()
+    if size == "auto":
+        return {**params, "size_mode": "auto"}
+    if re.fullmatch(r"[1-9]\d*x[1-9]\d*", size):
+        return {**params, "size_mode": "custom"}
+    if params.get("ratio") or ":" in size:
+        return {**params, "size_mode": "ratio"}
+    return params
 
 
 def _draft_view(draft: CanvasGenerationDraft | None) -> dict | None:
@@ -102,7 +117,8 @@ def document_view(document: CanvasDocument) -> dict:
     connections = [
         {"id": edge.id, "role": edge.role, "source_node_id": edge.source_node_id,
          "target_node_id": edge.target_node_id,
-         "slot": edge.slot if edge.role == "input" else None}
+         "slot": edge.slot if edge.role == "input" else None,
+         "annotated": edge.annotated if edge.role == "input" else False}
         for edge in document.connections
     ]
     return {"project_id": document.project_id, "revision": document.revision, "nodes": nodes,
@@ -115,7 +131,7 @@ def get_document(principal: Any, payload: CanvasProjectInput) -> dict:
 
 
 def list_models(principal: Any, payload: CanvasListModelsInput) -> dict:
-    from character_workflow.lib.workshop_generation import model_rows
+    from character_workflow.lib.canvas_model_catalog import model_rows
     authorize(principal, payload.project_id, "canvas_read")
     return {"models": model_rows(payload.mode)}
 
@@ -123,7 +139,7 @@ def list_models(principal: Any, payload: CanvasListModelsInput) -> dict:
 def _find_node(document: CanvasDocument, node_id: str) -> CanvasNode:
     node = next((n for n in document.nodes if n.id == node_id), None)
     if node is None:
-        raise WorkshopError("INVALID_TARGET", f"画布里没有节点 {node_id}", 422)
+        raise CanvasToolError("INVALID_TARGET", f"画布里没有节点 {node_id}", 422)
     return node
 
 
@@ -160,7 +176,7 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
     def new_node_id(requested: str | None) -> str:
         node_id = requested or f"mcp-{uuid.uuid4().hex[:12]}"
         if node_id in existing_ids:
-            raise WorkshopError("INVALID_TARGET", f"节点 {node_id} 已存在", 422)
+            raise CanvasToolError("INVALID_TARGET", f"节点 {node_id} 已存在", 422)
         existing_ids.add(node_id)
         created["node_ids"].append(node_id)
         return node_id
@@ -187,7 +203,7 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
         elif change.op == "add_media_node":
             version = versions.get(change.version_id)
             if version is None or version.kind == "text":
-                raise WorkshopError("REFERENCE_NOT_ALLOWED", "媒体版本不属于这个画布", 403)
+                raise CanvasToolError("REFERENCE_NOT_ALLOWED", "媒体版本不属于这个画布", 403)
             nodes.append(_media_node(version.kind, new_node_id(change.node_id), change.title,
                                      CanvasPoint(**change.position.model_dump()), version.version_id))
         elif change.op == "add_surface":
@@ -196,7 +212,7 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
         elif change.op == "set_text":
             node = _find_node(document.model_copy(update={"nodes": nodes}), change.node_id)
             if node.type != "text":
-                raise WorkshopError("INVALID_TARGET", "只能改写文本节点的内容", 422)
+                raise CanvasToolError("INVALID_TARGET", "只能改写文本节点的内容", 422)
             version = _text_version(change.text, timestamp)
             versions[version.version_id] = version
             created["version_ids"].append(version.version_id)
@@ -210,18 +226,18 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
         elif change.op == "set_draft":
             node = _find_node(document.model_copy(update={"nodes": nodes}), change.node_id)
             if node.type not in {"text", "image", "video", "audio"}:
-                raise WorkshopError("INVALID_TARGET", "这个节点不能承载生成配置", 422)
+                raise CanvasToolError("INVALID_TARGET", "这个节点不能承载生成配置", 422)
             # 生成面的类型决定产物落点：文本节点只能生成文本，图片 / 视频 / 音频节点模式必须与
             # 节点类型一致，否则服务端只能另建一个结果节点，画布上就多出一个无用节点。
             if change.mode != node.type:
-                raise WorkshopError(
+                raise CanvasToolError(
                     "INVALID_TARGET",
                     f"{node.type} 节点只能承载 {node.type} 模式的生成配置；要生成 {change.mode}"
                     f" 请先用 add_surface 建一个 {change.mode} 节点", 422,
                 )
             field = "generation_draft"
             params = JobParams(**canvas_allowed_draft_params(
-                change.mode, JobParams(**change.params)))
+                change.mode, JobParams(**_with_size_mode(change.mode, change.params))))
             draft = CanvasGenerationDraft(mode=change.mode, prompt=change.prompt, model=change.model,
                                           alias=change.alias, input_policy="all_connected", params=params,
                                           updated_at=timestamp)
@@ -230,17 +246,27 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
         elif change.op == "connect":
             scratch = document.model_copy(update={"nodes": nodes})
             _find_node(scratch, change.source_node_id)
-            _find_node(scratch, change.target_node_id)
+            target = _find_node(scratch, change.target_node_id)
+            slot = change.slot
+            if target.type == "compare":
+                # 与画布里拖线一致：未指定时先填 Before 再填 After；指定的一路已有图就替换它。
+                occupied = {e.slot for e in connections if e.target_node_id == target.id}
+                slot = slot or next((s for s in ("before", "after") if s not in occupied), None)
+                if slot is None:
+                    raise CanvasToolError("INVALID_TARGET", "对比节点两路都已接入，请指定 before 或 after 替换", 422)
+                for old in [e for e in connections if e.target_node_id == target.id and e.slot == slot]:
+                    disconnected(old)
+                    connections = [e for e in connections if e.id != old.id]
             edge = CanvasInputConnection(id=f"edge-{uuid.uuid4().hex[:12]}", role="input",
                                          source_node_id=change.source_node_id,
-                                         target_node_id=change.target_node_id, slot=change.slot)
+                                         target_node_id=change.target_node_id, slot=slot)
             connections.append(edge)
             created["connection_ids"].append(edge.id)
             touched_drafts.add(change.target_node_id)
         elif change.op == "disconnect":
             edge = next((e for e in connections if e.id == change.connection_id), None)
             if edge is None or edge.role != "input":
-                raise WorkshopError("INVALID_TARGET", "只能断开输入连线", 422)
+                raise CanvasToolError("INVALID_TARGET", "只能断开输入连线", 422)
             disconnected(edge)
             connections = [e for e in connections if e.id != edge.id]
         elif change.op == "move":
@@ -269,7 +295,7 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
     except ValidationError as error:
         first = error.errors()[0]
         location = ".".join(str(part) for part in first.get("loc", ()))
-        raise WorkshopError("INVALID_PARAMETERS",
+        raise CanvasToolError("INVALID_PARAMETERS",
                             f"改动后的画布不合法（{location}：{first.get('msg')}）", 422) from None
     return updated, created
 
@@ -315,19 +341,22 @@ def _save(project_id: str, updated: CanvasDocument, expected_revision: int) -> C
         return save_canvas_document(project_id, updated, expected_revision)
     except RuntimeError as error:
         if str(error).startswith("revision_conflict:"):
-            raise WorkshopError("DOCUMENT_CONFLICT", "画布已变化，请重新读取后再改") from None
+            raise CanvasToolError("DOCUMENT_CONFLICT", "画布已变化，请重新读取后再改") from None
         raise
     except CanvasDocumentError as error:
-        raise WorkshopError("INVALID_PARAMETERS", error.message, 422) from None
+        raise CanvasToolError("INVALID_PARAMETERS", error.message, 422) from None
     except ValueError as error:
-        raise WorkshopError("INVALID_PARAMETERS", str(error), 422) from None
+        raise CanvasToolError("INVALID_PARAMETERS", str(error), 422) from None
 
 
 def apply_changes(principal: Any, payload: ApplyChangesInput) -> dict:
     authorize(principal, payload.project_id, "canvas_edit")
+    if any(change.op == "add_asset_node" for change in payload.changes):
+        from character_workflow.lib.canvas_agent_library import apply_asset_changes
+        return apply_asset_changes(payload)
     document = read_canvas_document(payload.project_id)
     if document.revision != payload.expected_revision:
-        raise WorkshopError("DOCUMENT_CONFLICT", "画布已变化，请重新读取后再改")
+        raise CanvasToolError("DOCUMENT_CONFLICT", "画布已变化，请重新读取后再改")
     updated, created = _apply(document, payload.changes, _now())
     saved = _save(payload.project_id, updated, payload.expected_revision)
     return {"project_id": saved.project_id, "revision": saved.revision, **created}
@@ -337,13 +366,13 @@ def import_media(principal: Any, payload: ImportMediaInput) -> dict:
     authorize(principal, payload.project_id, "canvas_edit")
     source = Path(payload.path).expanduser()
     if not source.is_absolute():
-        raise WorkshopError("REFERENCE_NOT_ALLOWED", "请提供本机绝对路径", 422)
+        raise CanvasToolError("REFERENCE_NOT_ALLOWED", "请提供本机绝对路径", 422)
     try:
         real = source.resolve(strict=True)  # 跟到符号链接终点再判边界
     except (FileNotFoundError, RuntimeError):
-        raise WorkshopError("REFERENCE_NOT_ALLOWED", "文件不存在或不是普通文件", 404) from None
+        raise CanvasToolError("REFERENCE_NOT_ALLOWED", "文件不存在或不是普通文件", 404) from None
     if not real.is_file():
-        raise WorkshopError("REFERENCE_NOT_ALLOWED", "文件不存在或不是普通文件", 404)
+        raise CanvasToolError("REFERENCE_NOT_ALLOWED", "文件不存在或不是普通文件", 404)
     _check_import_boundary(real, payload.project_id)
     source = real
     ext = source.suffix.lower()
@@ -354,9 +383,9 @@ def import_media(principal: Any, payload: ImportMediaInput) -> dict:
     elif ext in AUDIO_UPLOAD_EXTS:
         kind = "audio"
     else:
-        raise WorkshopError("REFERENCE_NOT_ALLOWED", f"不支持的文件类型 {ext or '(无后缀)'}", 422)
+        raise CanvasToolError("REFERENCE_NOT_ALLOWED", f"不支持的文件类型 {ext or '(无后缀)'}", 422)
     if source.stat().st_size > upload_max_bytes(ext):
-        raise WorkshopError("CONTENT_TOO_LARGE", "文件超过画布导入大小上限", 413)
+        raise CanvasToolError("CONTENT_TOO_LARGE", "文件超过画布导入大小上限", 413)
     body = source.read_bytes()
     node_id = f"mcp-{uuid.uuid4().hex[:12]}"
     position = CanvasPoint(**(payload.position.model_dump() if payload.position else {"x": 0, "y": 0}))
@@ -369,10 +398,10 @@ def import_media(principal: Any, payload: ImportMediaInput) -> dict:
         )
     except RuntimeError as error:
         if str(error).startswith("revision_conflict:"):
-            raise WorkshopError("DOCUMENT_CONFLICT", "画布已变化，请重新读取后再改") from None
+            raise CanvasToolError("DOCUMENT_CONFLICT", "画布已变化，请重新读取后再改") from None
         raise
     except (ValueError, CanvasDocumentError) as error:
-        raise WorkshopError("INVALID_PARAMETERS", str(error), 422) from None
+        raise CanvasToolError("INVALID_PARAMETERS", str(error), 422) from None
     return {"project_id": saved.project_id, "revision": saved.revision, "node_id": node_id,
             "version_id": version.version_id, "kind": kind, "filename": filename}
 
@@ -384,10 +413,10 @@ def _check_import_boundary(real: Path, project_id: str) -> None:
     工坊侧同类读取全部走 safe_path，画布侧要同一标准。符号链接按终点判。"""
     roots = [Path.home().resolve(), data_root.resolve_data_root().resolve()]
     if not any(real.is_relative_to(root) for root in roots):
-        raise WorkshopError("REFERENCE_NOT_ALLOWED", "只能导入家目录或工作区内的文件", 403)
+        raise CanvasToolError("REFERENCE_NOT_ALLOWED", "只能导入家目录或工作区内的文件", 403)
     canvases = data_root.canvases_dir().resolve()
     if real.is_relative_to(canvases) and real.relative_to(canvases).parts[:1] != (project_id,):
-        raise WorkshopError("REFERENCE_NOT_ALLOWED", "不能读取其他画布的文件", 403)
+        raise CanvasToolError("REFERENCE_NOT_ALLOWED", "不能读取其他画布的文件", 403)
 
 
 def _job_view(job: Job, *, agent: bool) -> dict:
@@ -414,15 +443,15 @@ def run(principal: Any, payload: RunInput) -> tuple[dict, Job]:
         job, document = submit_canvas_run(payload.project_id, payload.surface_node_id,
                                           payload.expected_revision, payload.requested_count)
     except KeyError:
-        raise WorkshopError("INVALID_TARGET", "找不到这个生成节点", 404) from None
+        raise CanvasToolError("INVALID_TARGET", "找不到这个生成节点", 404) from None
     except CanvasRunCommandError as error:
-        raise WorkshopError("INVALID_PARAMETERS", error.message, 422) from None
+        raise CanvasToolError("INVALID_PARAMETERS", error.message, 422) from None
     except RuntimeError as error:
         if str(error).startswith("revision_conflict:"):
-            raise WorkshopError("DOCUMENT_CONFLICT", "画布已变化，请重新读取后再改") from None
+            raise CanvasToolError("DOCUMENT_CONFLICT", "画布已变化，请重新读取后再改") from None
         raise  # 锁 / IO / 事务恢复失败是服务端问题，不能翻成「参数错」让调用方改参数重试
     except ValueError as error:
-        raise WorkshopError("INVALID_PARAMETERS", str(error), 422) from None
+        raise CanvasToolError("INVALID_PARAMETERS", str(error), 422) from None
     return {"revision": document.revision, **_job_view(job, agent=principal.kind == "agent")}, job
 
 
@@ -432,7 +461,7 @@ def get_run(principal: Any, payload: GetRunInput) -> dict:
                 and j.canvas_project_id == payload.project_id
                 and j.canvas_run and j.canvas_run.run_id == payload.run_id), None)
     if job is None:
-        raise WorkshopError("INVALID_TARGET", "找不到这次生成", 404)
+        raise CanvasToolError("INVALID_TARGET", "找不到这次生成", 404)
     return _job_view(job, agent=principal.kind == "agent")
 
 
@@ -441,7 +470,7 @@ def read_media(principal: Any, payload: CanvasReadMediaInput) -> dict:
     try:
         path, version = resolve_canvas_media(payload.project_id, payload.version_id)
     except (FileNotFoundError, PermissionError, KeyError):
-        raise WorkshopError("REFERENCE_NOT_ALLOWED", "媒体版本不属于这个画布", 403) from None
+        raise CanvasToolError("REFERENCE_NOT_ALLOWED", "媒体版本不属于这个画布", 403) from None
     result: dict[str, Any] = {
         "version_id": version.version_id, "kind": version.kind, "mime_type": version.mime_type,
         "width": version.width, "height": version.height, "duration_ms": version.duration_ms,
@@ -450,10 +479,10 @@ def read_media(principal: Any, payload: CanvasReadMediaInput) -> dict:
     if version.kind == "image":
         from PIL import Image, ImageOps
         if version.bytes > 25 * 1024 * 1024:
-            raise WorkshopError("CONTENT_TOO_LARGE", "图片超过安全预览大小", 413)
+            raise CanvasToolError("CONTENT_TOO_LARGE", "图片超过安全预览大小", 413)
         with Image.open(io.BytesIO(path.read_bytes())) as opened:
             if opened.width * opened.height > 40_000_000:
-                raise WorkshopError("CONTENT_TOO_LARGE", "图片超过安全预览像素限制", 413)
+                raise CanvasToolError("CONTENT_TOO_LARGE", "图片超过安全预览像素限制", 413)
             preview = ImageOps.exif_transpose(opened).convert("RGB")
             preview.thumbnail((1024, 1024))
             buffer = io.BytesIO()

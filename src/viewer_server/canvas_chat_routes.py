@@ -20,7 +20,7 @@ from character_workflow.lib.schemas import (
     CanvasAgentApprovalsSubmit, CanvasAgentSession, CanvasAgentSessionUpdate,
     CanvasAgentTurnCreate,
 )
-from character_workflow.lib.workshop import WorkshopError
+from character_workflow.lib.canvas_tool_common import CanvasToolError
 from viewer_server.sse import hub
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ async def _call(function, *args):
     try:
         return await asyncio.to_thread(function, *args)
     except KeyError:
-        raise WorkshopError("INVALID_TARGET", "找不到这个画布项目或 Agent 会话", 404) from None
+        raise CanvasToolError("INVALID_TARGET", "找不到这个画布项目或 Agent 会话", 404) from None
 
 
 @router.get("/agent/models")
@@ -77,7 +77,7 @@ async def get_chat_models() -> dict:
 
 
 def _generation_models() -> dict:
-    from character_workflow.lib.workshop_generation import model_rows
+    from character_workflow.lib.canvas_model_catalog import model_rows
     return {"models": [{"alias": row["alias"], "model": row["model"], "name": row["name"],
                         "kind": kind}
                        for kind in ("image", "video") for row in model_rows(kind)]}
@@ -98,7 +98,7 @@ async def patch_session(project_id: str, session_id: str,
 
     def update(current: CanvasAgentSession, _now: str) -> dict:
         if current.status == "running":
-            raise WorkshopError("SESSION_BUSY", "这一轮结束后才能修改设置", 409)
+            raise CanvasToolError("SESSION_BUSY", "这一轮结束后才能修改设置", 409)
         return fields
 
     return await _call(mutate_canvas_agent_session, project_id, session_id, update)
@@ -108,7 +108,7 @@ async def patch_session(project_id: str, session_id: str,
 async def post_message(project_id: str, session_id: str,
                        payload: CanvasAgentTurnCreate) -> CanvasAgentSession:
     if is_running(project_id, session_id):
-        raise WorkshopError("SESSION_BUSY", "上一轮还没结束", 409)
+        raise CanvasToolError("SESSION_BUSY", "上一轮还没结束", 409)
     await _call(recover_if_stale, await _call(read_canvas_agent_session, project_id, session_id))
     session = await _call(runtime.begin_user_turn, project_id, session_id, payload.text,
                           payload.node_ids, payload.skill)
@@ -120,7 +120,7 @@ async def post_message(project_id: str, session_id: str,
 async def post_approvals(project_id: str, session_id: str,
                          payload: CanvasAgentApprovalsSubmit) -> CanvasAgentSession:
     if is_running(project_id, session_id):
-        raise WorkshopError("SESSION_BUSY", "上一轮还没结束", 409)
+        raise CanvasToolError("SESSION_BUSY", "上一轮还没结束", 409)
     decisions = {decision.call_id: decision.approve for decision in payload.decisions}
     session = await _call(runtime.resolve_approvals, project_id, session_id, decisions)
     _schedule(project_id, session_id)
@@ -162,7 +162,7 @@ async def get_skills() -> dict:
 async def _read_upload(upload: UploadFile, budget: int) -> bytes:
     data = await upload.read(budget + 1)
     if len(data) > budget:
-        raise WorkshopError("CONTENT_TOO_LARGE", skills.TOO_LARGE, 413)
+        raise CanvasToolError("CONTENT_TOO_LARGE", skills.TOO_LARGE, 413)
     return data
 
 
@@ -174,13 +174,13 @@ async def import_skill(
 ) -> dict:
     """zip（单个 .zip 文件）、文件夹（paths 与 files 一一对应的相对路径）或单个 SKILL.md。"""
     if len(files) > skills.MAX_FILES:
-        raise WorkshopError("CONTENT_TOO_LARGE", skills.TOO_LARGE, 413)
+        raise CanvasToolError("CONTENT_TOO_LARGE", skills.TOO_LARGE, 413)
     if len(files) == 1 and (files[0].filename or "").lower().endswith(".zip"):
         payload = await _read_upload(files[0], skills.MAX_TOTAL_BYTES)
         contents = await asyncio.to_thread(skills.files_from_zip, payload)
     else:
         if paths and len(paths) != len(files):
-            raise WorkshopError("INVALID_PARAMETERS", "文件与路径数量不一致", 422)
+            raise CanvasToolError("INVALID_PARAMETERS", "文件与路径数量不一致", 422)
         contents, budget = {}, skills.MAX_TOTAL_BYTES
         for index, upload in enumerate(files):
             data = await _read_upload(upload, budget)

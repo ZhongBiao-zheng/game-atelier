@@ -9,7 +9,7 @@ from typing import Any
 import requests
 
 from character_workflow.lib import net_env
-from character_workflow.lib.callers.openai_compat import api_root
+from character_workflow.lib.callers.openai_compat import key_api_root
 
 
 class OpenAITextError(RuntimeError):
@@ -55,7 +55,7 @@ def supports_model(key: Any, model: Any) -> bool:
     return (
         protocol in _SUPPORTED_PROTOCOLS
         and (
-            key.provider in {"openai", "openrouter", "seedream", "tokendance", "custom"}
+            key.provider in {"openai", "openrouter", "seedream", "tokendance", "custom", "atelier"}
             or declared
         )
     )
@@ -66,7 +66,7 @@ def supports_input_modality(provider: str, protocol: str | None, modality: str) 
     if modality == "image":
         return True
     if protocol == "openai-responses":
-        return provider in {"seedream", "tokendance", "custom"}
+        return provider in {"seedream", "tokendance", "custom", "atelier"}
     if modality == "video" and provider == "openai":
         return False
     return modality in {"video", "audio"}
@@ -201,7 +201,10 @@ def _post_json(
     access_key: str,
     payload: dict[str, Any],
     timeout: float | tuple[float, float],
+    gateway_alias: str | None = None,
 ) -> object:
+    from .atelier_gateway import DIRECT_PROXIES
+
     try:
         response = requests.post(
             url,
@@ -211,9 +214,19 @@ def _post_json(
             },
             json=payload,
             timeout=timeout,
+            # 局域网网关不走本机代理（Clash / VPN 会拖死 192.168.x.x），与图片 caller 一致。
+            **({"proxies": DIRECT_PROXIES} if gateway_alias else {}),
         )
     except requests.RequestException as error:
         raise OpenAITextError(str(error)) from error
+    if gateway_alias and response.status_code == 429:
+        from .atelier_gateway import GatewayError, _raise_for_status
+        from character_workflow.lib import model_routes
+        try:
+            _raise_for_status(response)
+        except GatewayError as error:
+            model_routes.cool_down("text", gateway_alias, "rate_limited", seconds=error.retry_after)
+            raise
     if response.status_code >= 400:
         raise OpenAITextError(f"text api {response.status_code}: {response.text[:500]}")
     try:
@@ -237,6 +250,8 @@ def generate(
     key = keys.find_by_alias(alias)
     if key is None:
         raise OpenAITextError(f"alias not found: {alias}")
+    if not key.enabled:
+        raise OpenAITextError("供应商已停用")
     spec = next((item for item in key.models if item.id == model), None)
     protocol = spec.protocol if spec is not None else None
     if not supports_model(key, spec):
@@ -314,10 +329,11 @@ def generate(
         generated: list[str] = []
         for _ in range(max(1, int(n))):
             body = _post_json(
-                url=f"{api_root(base_url)}/responses",
+                url=f"{key_api_root(key)}/responses",
                 access_key=key.access_key,
                 payload=response_payload,
                 timeout=timeout,
+                gateway_alias=alias if key.provider == "atelier" else None,
             )
             text = _response_text(body)
             if not text:
@@ -336,10 +352,11 @@ def generate(
     if options.get("max_tokens") is not None:
         payload["max_tokens"] = int(options["max_tokens"])
     body = _post_json(
-        url=f"{api_root(base_url)}/chat/completions",
+        url=f"{key_api_root(key)}/chat/completions",
         access_key=key.access_key,
         payload=payload,
         timeout=timeout,
+        gateway_alias=alias if key.provider == "atelier" else None,
     )
     choices = body.get("choices") if isinstance(body, dict) else None
     outputs = [_content_text(choice) for choice in choices] if isinstance(choices, list) else []

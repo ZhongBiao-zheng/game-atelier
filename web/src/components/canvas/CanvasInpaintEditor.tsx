@@ -1,9 +1,10 @@
 import { Eraser, Paintbrush, Redo2, Undo2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
+import { useGenerationEstimate } from '@/lib/useGenerationEstimate';
 import { defaultResolution } from '@/lib/studioSize';
 import { EditGenerationControls } from './EditGenerationControls';
-import { imageControlCaps, MJ_IMAGES_PER_TASK } from '@/lib/imageControlCaps';
+import { selectionImageCaps } from '@/lib/modelRoutes';
+import { MJ_IMAGES_PER_TASK } from '@/lib/imageControlCaps';
 import { drawEditStrokes, editMaskBlob, editModelChoices, editSize, type EditPoint, type EditStroke } from './imageEditGeometry';
 import { EditorComposer, ImageEditorShell, editorIconButton, isTypingTarget, useEditorViewport,
   type CanvasMaskEditSubmission, type ImageEditorProps } from './ImageEditorShell';
@@ -44,7 +45,7 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
   const [count, setCount] = useState(() => initialDraft?.model === 'mj-v8.2' ? 1
     : Math.min(4, Math.max(1, initialDraft?.params.n ?? 1)));
   const candidates = mj ? MJ_IMAGES_PER_TASK : count;
-  const caps = imageControlCaps(choice?.model ?? '', choice?.key.provider, choice?.key.base_url, choice?.key.billing_group);
+  const caps = selectionImageCaps(choice?.key, choice?.model ?? '');
   const [qualityChoice, setQualityChoice] = useState(initialDraft?.params.quality);
   const [resolutionChoice, setResolutionChoice] = useState(initialDraft?.params.resolution);
   const quality = caps.qualities?.includes(qualityChoice as never) ? qualityChoice
@@ -58,8 +59,8 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
   const { scale, origin } = viewport;
   const fingerprint = JSON.stringify({ strokes, prompt, selected, count, quality, resolution });
   const savedFingerprint = useRef(fingerprint);
-  const cost = estimateGenerationCostForSubmission(choice?.key, choice?.model ?? '', 'image',
-    { ...params, ...(mj ? { image_edit: { mode: 'inpaint' } } : {}) });
+  const cost = useGenerationEstimate(choice?.key.alias, choice?.model ?? '',
+    { ...params, image_edit: { mode: 'inpaint' } }, open);
   const blocker = !choice ? '请选择可用的编辑模型' : !ready ? '图片加载中' : initialData?.active_run_id ? '正在生成'
     : size.error ? size.error : !strokes.length ? '先涂抹要修改的区域' : mj && !prompt.trim() ? '写下要改成什么' : null;
 

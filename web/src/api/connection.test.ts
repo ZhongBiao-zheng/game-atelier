@@ -78,7 +78,7 @@ describe('local connection', () => {
     }));
     const connection = client(); const pending = connection.start();
     await vi.advanceTimersByTimeAsync(8000); await pending;
-    expect(connection.getSnapshot()).toMatchObject({ phase: 'interrupted', recovering: true, message: '工坊服务响应超时。' });
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'interrupted', recovering: true, message: 'Atelier服务响应超时。' });
     await vi.advanceTimersByTimeAsync(1000);
     expect(network).toHaveBeenCalledTimes(2);
   });

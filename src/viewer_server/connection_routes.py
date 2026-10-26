@@ -8,7 +8,9 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
-from viewer_server.codex_config import write_codex_entry_if_installed
+from character_workflow.lib import data_root
+from character_workflow.mcp.tool_catalog import TOOL_DEFINITIONS
+from viewer_server.codex_config import codex_config_path, write_codex_entry_if_installed
 from viewer_server.connection_auth import COOKIE_NAME, ConnectionStore, iso_time
 
 TextId = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")]
@@ -57,21 +59,31 @@ def connection_router(store: ConnectionStore) -> APIRouter:
         store.release_editor(request.state.connection_session, payload.client_id)
         return Response(status_code=204)
 
+    def agent_status() -> dict:
+        return {
+            **store.agent_status(),
+            "config_paths": {
+                "claude-code": str(data_root.agent_credential_file()),
+                "codex": str(codex_config_path()),
+            },
+            "tools": [{"name": tool.name, "billable": tool.billable} for tool in TOOL_DEFINITIONS],
+        }
+
     @router.get("/agent")
     def agent() -> dict:
-        return store.agent_status()
+        return agent_status()
 
     @router.put("/agent")
     def enable_agent(payload: ControlPayload, request: Request) -> dict:
         store.enable_agent(request.state.connection_base_url)
         # Claude Code 由插件自带 MCP 读同一份凭据；Codex 没有插件，装了就顺手写进它的配置。
         write_codex_entry_if_installed(sys.executable)
-        return store.agent_status()
+        return agent_status()
 
     @router.delete("/agent")
     def disable_agent(payload: ControlPayload) -> dict:
         store.disable_agent()
-        return store.agent_status()
+        return agent_status()
 
     @router.post("/agent-sessions")
     def agent_session(payload: AgentSessionPayload) -> dict:

@@ -11,7 +11,7 @@ from character_workflow.lib.callers.openai_image import (
     normalize_image_pixel_size,
     resolve_image_protocol,
 )
-from character_workflow.lib.keys import KeySpec
+from character_workflow.lib.keys import KeySpec, ModelSpec, size_channel
 from character_workflow.lib.image_size_catalog import (
     image_size_options, is_nano_image_size_model, uses_tuzi_gpt25_tiers,
 )
@@ -56,6 +56,10 @@ def supports_auto_image_size(provider: str, base_url: str | None, model: str) ->
 
 def normalize_image_size_params(key: KeySpec, model: str, params: dict[str, Any]) -> dict[str, Any]:
     """Freeze only the active intent; inactive editor drafts never reach a Job or caller."""
+    if key.provider == "atelier":
+        key, channel_model = size_channel(key, next(
+            (item for item in key.models if item.id == model), ModelSpec(id=model, name=model)))
+        model = channel_model.id
     result = {name: value for name, value in params.items() if value is not None}
     result.pop("custom_size", None)
     mode = result.get("size_mode")

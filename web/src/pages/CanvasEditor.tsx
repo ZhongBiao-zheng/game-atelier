@@ -1,3 +1,6 @@
+import { flushSync } from 'react-dom';
+import { createAnnotatedGeneration, ensureAnnotatedInputs, type AnnotationDocumentBridge } from '@/components/canvas/annotation/annotationRendering';
+import { useCanvasAnnotation } from '@/components/canvas/annotation/useCanvasAnnotation';
 import '@xyflow/react/dist/style.css';
 import { readablePromptVariables } from '@/lib/promptVariables';
 
@@ -36,6 +39,7 @@ import {
   FileVideo,
   Grid2X2,
   Info,
+  Columns2,
   Layers,
   Library,
   LoaderCircle,
@@ -68,6 +72,7 @@ import {
   listCanvasJobs,
   listCanvasProjects,
   renameCanvasProject,
+  updateCanvasCategories,
   replaceCanvasNodeMedia,
   pasteIntoCanvas,
   reproduceIntoCanvas,
@@ -87,6 +92,7 @@ import {
 } from '@/api/canvas';
 import { getCanvasUiPreferences, saveCanvasUiPreferences } from '@/api/canvasUi';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
+import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { withAutoProvider } from '@/lib/modelRoutes';
 import { useCanvasJobSync } from '@/hooks/useCanvasJobSync';
@@ -133,6 +139,8 @@ import {
   type CanvasMediaTool,
 } from '@/components/canvas/CanvasMediaOperationDialog';
 import { DEFAULT_CANVAS_UI_PREFERENCES } from '@/components/canvas/canvasImageToolbar';
+import { canvasCompareFrame, type CanvasCompareInputs, type CanvasCompareSource } from '@/components/canvas/canvasCompare';
+import { CanvasCompareSurface } from '@/components/canvas/CanvasCompareSurface';
 import { formatCanvasBytes } from '@/components/canvas/canvasMediaFormatting';
 import {
   generationPanelDismissalAfterNodeSelection,
@@ -144,8 +152,9 @@ import {
   type CreationAssetPanelHandle,
   type CreationAssetSaveRequest,
 } from '@/components/assets/CreationAssetPanel';
+import { ProjectSpecsDrawer } from '@/components/canvas/ProjectSpecsDrawer';
 import { CanvasAgentPanel } from '@/components/canvas/agent/CanvasAgentPanel';
-import { insertCreationAssetIntoCanvas } from '@/api/creationAssets';
+import { insertCreationAssetIntoCanvas, listCreationAssets, saveMediaCreationAssetFromPath, updateCreationAssetCategory } from '@/api/creationAssets';
 import { adoptTeamAsset, listRelatedTeamAssets } from '@/api/teamLibraries';
 import { TEAM_ASSET_DRAG_TYPE, readTeamAssetDrag } from '@/schema/teamLibrary';
 import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
@@ -193,9 +202,11 @@ import type {
   CanvasUpscaleTarget,
   CanvasVideoFrameSlot,
 } from '@/schema/canvas';
-import type { CreationAsset } from '@/schema/creationAssets';
+import { assetMediaContent, type CreationAsset } from '@/schema/creationAssets';
+import { DEFAULT_CANVAS_CATEGORIES, type CanvasProject } from '@/schema/canvas';
 import type { Job, JobKind } from '@/schema/jobs';
 import { cn } from '@/lib/utils';
+
 import {
   appendCanvasMentionToken,
   buildCanvasMaterialReferences,
@@ -217,6 +228,9 @@ import {
   canvasNodeProvidesOutput,
   canvasNodeRenderedSize,
   canCreateCanvasInputConnection,
+  isCanvasCompareSlot,
+  isCanvasVideoFrameSlot,
+  normalizeCanvasCompareConnections,
   clampCanvasNodeSize,
   canvasPendingInputNodes,
   canvasRequiresBatchRun,
@@ -373,6 +387,7 @@ function mentionNodeFragment(node: CanvasNode): string {
           node.data.current_version_id,
           node.data.generation_draft?.mode ?? null,
           node.data.batch_result ?? null,
+          node.type === 'image' ? node.data.annotation?.rendered_version_id ?? null : null,
         ]
         // 分组的成员表必须进签名：它决定面板上看到哪几张参考图。漏了的话把节点拖进 / 拖出
         // 分组只换了分组这一个对象，签名值不变，下游 memo 一个都不重算，参考位要硬刷新才更新。
@@ -389,6 +404,8 @@ function mentionConnectionFragment(connection: CanvasConnection): string {
   if (cached !== undefined) return cached;
   const fragment = JSON.stringify([
     connection.id, connection.source_node_id, connection.target_node_id,
+    connection.role === 'input' && connection.annotated === true,
+    connection.role === 'input' ? connection.slot ?? null : null,
   ]);
   mentionConnectionFragments.set(connection, fragment);
   return fragment;
@@ -466,7 +483,8 @@ function CanvasEditorInner({
   const narrowViewport = useNarrowCanvasViewport();
   const [, setLocation] = useLocation();
   const [document, setDocument] = useState<CanvasDocument | null>(null);
-  const [projects, setProjects] = useState<Array<{ project_id: string; name: string }>>([]);
+  const [specsOpen, setSpecsOpen] = useState(false);
+  const [projects, setProjects] = useState<CanvasProject[]>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [routes, setRoutes] = useState<ModelRoute[]>([]);
   // 生成节点选模型用的厂商列表 =「自动」+ 真实 KEY；局部编辑、分层、AI高清等单项工具仍只用真实 KEY。
@@ -474,7 +492,7 @@ function CanvasEditorInner({
   // 公告「快速添加」等别处改了密钥的模型列表：只刷新列表，不动节点上已选的模型。
   useEffect(() => {
     const refresh = () => {
-      void listKeys().then(resp => setKeys([...resp.keys].sort((left, right) => (
+      void listKeys().then(resp => setKeys(resp.keys.filter(key => key.enabled !== false).sort((left, right) => (
         Number(Boolean(right.is_default)) - Number(Boolean(left.is_default))
       )))).catch(() => undefined);
       void listModelRoutes().then(setRoutes).catch(() => undefined);
@@ -530,6 +548,7 @@ function CanvasEditorInner({
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [saveErrorDetail, setSaveErrorDetail] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [compareViewId, setCompareViewId] = useState<string | null>(null);
   const [layerPreviewId, setLayerPreviewId] = useState<string | null>(null);
   const [mediaOperation, setMediaOperation] = useState<MediaOperationState | null>(null);
   const [mediaOperationBusy, setMediaOperationBusy] = useState(false);
@@ -866,6 +885,8 @@ function CanvasEditorInner({
       .catch(preferencesError => {
         if (!cancelled) setCanvasUiPreferencesError((preferencesError as Error).message);
       });
+    // 局部修改 / 扩图面板的费用预估要用 TokenDance 价格快照；单独取，不阻塞画布加载。
+    void loadTokenDancePrices();
     Promise.all([
       listCanvasProjects(true),
       getCanvasDocument(projectId),
@@ -885,7 +906,7 @@ function CanvasEditorInner({
           dirtyVersion.current += 1;
           setDirtySignal(dirtyVersion.current);
         }
-        setKeys([...keyRows.keys].sort((left, right) => (
+        setKeys(keyRows.keys.filter(key => key.enabled !== false).sort((left, right) => (
           Number(Boolean(right.is_default)) - Number(Boolean(left.is_default))
         )));
         acceptJobs(canvasJobs);
@@ -1442,7 +1463,9 @@ function CanvasEditorInner({
         id: connection.id,
         source: connection.source_node_id,
         target: connection.target_node_id,
+        targetHandle: connection.role === 'input' && isCanvasCompareSlot(connection.slot) ? connection.slot : undefined,
         type: 'canvasConnection',
+        data: { annotated: connection.role === 'input' && connection.annotated === true },
         className: cn(
           'canvas-input-edge',
           active && 'canvas-active-edge',
@@ -1567,6 +1590,8 @@ function CanvasEditorInner({
           role: 'input',
           source_node_id: connection.source!,
           target_node_id: connection.target!,
+          // 拖到对比节点的 Before / After 接口上时，接口 id 就是槽位。
+          ...(isCanvasCompareSlot(connection.targetHandle) ? { slot: connection.targetHandle } : {}),
         }],
       };
       return syncCanvasPromptReferences(next, new Set([connection.target!]));
@@ -2428,6 +2453,13 @@ function CanvasEditorInner({
     addGenerationNode('text', menu);
   }
 
+  function addCompareNode(menu: CreateMenuState | null = createMenu) {
+    const size = { width: 320, height: 320 };
+    appendNode({ id: makeId('compare'), type: 'compare', title: '对比',
+      position: menu?.flow ? placeNewNode(menu.flow, size) : defaultPosition(size),
+      size, z_index: 0, data: {} }, menu);
+  }
+
   function addBatchMaterialNode(menu: CreateMenuState | null = createMenu) {
     const size = { width: 360, height: 360 };
     appendNode({ id: makeId('batch-material'), type: 'batch_material', title: '批量素材',
@@ -2926,19 +2958,31 @@ function CanvasEditorInner({
     }
   }, [persistNow, projectId, flushSave]);
 
+  const annotationBridge = useMemo<AnnotationDocumentBridge>(() => ({
+    projectId, current: () => latestDocument.current, revision: () => serverRevision.current,
+    setRevision: revision => { serverRevision.current = revision; },
+    apply: (next, record) => {
+      flushSync(() => commit(() => next, record));
+      latestDocument.current = next;
+    },
+    persist: persistNow,
+    busy: () => documentCommandInFlight.current || runSubmissionInFlight.current || batchBusyRef.current,
+    lock: locked => { documentCommandInFlight.current = locked; },
+  }), [projectId, commit, persistNow]);
   const prepareBatch = useCallback(async (nodeId: string) => {
     if (batchBusyRef.current || runSubmissionInFlight.current) { setError('请先等待当前执行完成'); return; }
     setSubmittingNodeIds(current => new Set(current).add(nodeId));
     setError(null); setBatchError(null);
     try {
       if (!await persistNow()) return;
+      await ensureAnnotatedInputs(annotationBridge, nodeId, true);
       const preparedEditVersion = dirtyVersion.current;
       const plan = await prepareCanvasBatch(projectId, nodeId, serverRevision.current);
       batchPreparedEditVersion.current = preparedEditVersion;
       setBatchConfirmation(plan);
     } catch (failure) { setError((failure as Error).message); }
     finally { setSubmittingNodeIds(current => { const next = new Set(current); next.delete(nodeId); return next; }); }
-  }, [projectId, persistNow]);
+  }, [projectId, persistNow, annotationBridge]);
 
   async function confirmBatch() {
     if (!batchConfirmation || runSubmissionInFlight.current) return;
@@ -2997,6 +3041,7 @@ function CanvasEditorInner({
     setError(null);
     try {
       if (!await persistNow()) return;
+      await ensureAnnotatedInputs(annotationBridge, nodeId);
       const current = latestDocument.current;
       const node = current?.nodes.find(candidate => candidate.id === nodeId);
       const draft = node ? generationDraftForNode(node) : null;
@@ -3028,7 +3073,7 @@ function CanvasEditorInner({
         return next;
       });
     }
-  }, [
+  }, [annotationBridge, 
     applyLocalJob,
     flushSave,
     mergeSubmittedRunDocument,
@@ -3440,7 +3485,7 @@ function CanvasEditorInner({
           if (
             connection.role === 'input'
             && connection.target_node_id === materialPick.targetNodeId
-            && connection.slot
+            && isCanvasVideoFrameSlot(connection.slot)
           ) frames[connection.slot] = connection.source_node_id;
           return frames;
         }, { first_frame: null, last_frame: null }) ?? {
@@ -4431,10 +4476,28 @@ function CanvasEditorInner({
     const current = mentionDocumentRef.current;
     const result = new Map<string, Partial<Record<CanvasVideoFrameSlot, string>>>();
     for (const connection of current?.connections ?? []) {
-      if (connection.role !== 'input' || !connection.slot) continue;
+      if (connection.role !== 'input' || !isCanvasVideoFrameSlot(connection.slot)) continue;
       const frames = result.get(connection.target_node_id) ?? {};
       frames[connection.slot] = connection.source_node_id;
       result.set(connection.target_node_id, frames);
+    }
+    return result;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方图签名说明
+  }, [mentionGraphSignature]);
+  const compareInputsByNodeId = useMemo(() => {
+    const current = mentionDocumentRef.current;
+    const nodes = new Map((current?.nodes ?? []).map(node => [node.id, node]));
+    const result = new Map<string, CanvasCompareInputs>();
+    for (const connection of current?.connections ?? []) {
+      if (connection.role !== 'input' || !isCanvasCompareSlot(connection.slot)) continue;
+      const source = nodes.get(connection.source_node_id);
+      const sides = result.get(connection.target_node_id) ?? {};
+      sides[connection.slot] = {
+        nodeId: connection.source_node_id,
+        title: source?.title ?? '',
+        versionId: source?.type === 'image' ? source.data.current_version_id : null,
+      };
+      result.set(connection.target_node_id, sides);
     }
     return result;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方图签名说明
@@ -4472,6 +4535,110 @@ function CanvasEditorInner({
       node.position.y + size.height / 2, { zoom: getZoom(), duration: 0 }));
   };
   const locateNode = useCallback((nodeId: string) => locateNodeHandler.current(nodeId), []);
+  const [projectAssets, setProjectAssets] = useState<CreationAsset[]>([]);
+  const [assetsRevision, setAssetsRevision] = useState(0);
+  const refreshProjectAssets = useCallback(async () => {
+    const response = await listCreationAssets({ projectId, scope: 'project' });
+    setProjectAssets(current => JSON.stringify(current) === JSON.stringify(response.assets) ? current : response.assets);
+  }, [projectId]);
+  useEffect(() => {
+    let active = true;
+    setProjectAssets([]);
+    const refresh = () => { void listCreationAssets({ projectId, scope: 'project' }).then(response => {
+      if (active) setProjectAssets(current => JSON.stringify(current) === JSON.stringify(response.assets) ? current : response.assets);
+    }).catch(error => { if (active) setError((error as Error).message); }); };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => { active = false; window.removeEventListener('focus', refresh); };
+  }, [projectId, assetsRevision]);
+  const assetsByDigest = useMemo(() => {
+    const result = new Map<string, CreationAsset>();
+    for (const asset of projectAssets) {
+      const media = assetMediaContent(asset);
+      if (media && (!result.has(media.sha256) || asset.category)) result.set(media.sha256, asset);
+    }
+    return result;
+  }, [projectAssets]);
+  const assetsByDigestRef = useRef(assetsByDigest);
+  assetsByDigestRef.current = assetsByDigest;
+  const resolveFinalCategory = useCallback((sha256: string) => assetsByDigestRef.current.get(sha256)?.category ?? null, []);
+  const finalizationRevision = useMemo(() => JSON.stringify([...assetsByDigest].map(([digest, asset]) => [digest, asset.category])), [assetsByDigest]);
+  const projectCategories = projects.find(project => project.project_id === projectId)?.categories ?? DEFAULT_CANVAS_CATEGORIES;
+  const finalizeHandler = useRef<(node: CanvasContentNode, category: string | null) => Promise<void>>(async () => undefined);
+  finalizeHandler.current = async (node, category) => {
+    const version = await persistedCurrentVersion(node);
+    if (version?.kind !== 'image') return;
+    // 先刷新再按本项目摘要匹配，避免资产面板刚编辑后用旧缓存覆盖。
+    const response = await listCreationAssets({ projectId, scope: 'project' });
+    const matches = response.assets.filter(asset => assetMediaContent(asset)?.sha256 === version.sha256);
+    const existing = matches.find(asset => asset.category) ?? matches[0];
+    if (existing) {
+      // 同一图片可能同时保存过媒体与生成资产；取消定稿须清空所有命中的条目。
+      for (const asset of matches.filter(asset => asset.category !== category)) {
+        await updateCreationAssetCategory(asset.asset_id, category);
+      }
+    } else if (category) {
+      await saveMediaCreationAssetFromPath({
+        sourcePath: `canvases/${projectId}/${version.path}`, title: node.title,
+        tags: [], projectId, category, allowExisting: true,
+      });
+    }
+    await refreshProjectAssets();
+    setAssetsRevision(value => value + 1);
+  };
+  const finalizeNode = useCallback((node: CanvasContentNode, category: string | null) => finalizeHandler.current(node, category), []);
+  const saveCategories = useCallback(async (categories: string[]) => {
+    const updated = await updateCanvasCategories(projectId, categories);
+    setProjects(current => current.map(project => project.project_id === projectId ? updated : project));
+  }, [projectId]);
+  const createCompareNodeHandler = useRef<(node: CanvasContentNode, source: CanvasCompareSource) => void>(() => undefined);
+  // 结果图上的「对比」：建对比节点，原图连 Before、结果连 After。原图优先用快照里登记的那个节点；
+  // 它被删了或已换成别的图，就在旁边补一张固定原图版本的图片节点，保证对比的是生成时真正用的原图。
+  createCompareNodeHandler.current = (node, source) => {
+    const current = latestDocument.current;
+    if (!current || !node.data.current_version_id) return;
+    const holdsOriginal = (candidate: CanvasNode | undefined) => candidate?.type === 'image'
+      && candidate.data.current_version_id === source.beforeVersionId;
+    const listed = current.nodes.find(candidate => candidate.id === source.beforeNodeId);
+    const existing = holdsOriginal(listed) ? listed : current.nodes.find(holdsOriginal);
+    const size = canvasNodeRenderedSize(node, current.content_versions);
+    const compareId = makeId('compare');
+    const compare: CanvasNode = { id: compareId, type: 'compare', title: `${node.title} 对比`,
+      position: placeNewNode({ x: node.position.x + size.width + 96, y: node.position.y }, size),
+      size, z_index: 0, data: {} };
+    const original: CanvasNode | null = existing ? null : {
+      id: makeId('image'), type: 'image', title: `${node.title} 原图`,
+      position: placeNewNode({ x: node.position.x, y: node.position.y + size.height + 96 }, size),
+      size, z_index: 0,
+      data: { current_version_id: source.beforeVersionId, generation_draft: null, active_run_id: null,
+        display: { fit: 'contain', free_resize: false } },
+    };
+    const beforeNodeId = existing?.id ?? original!.id;
+    commit(document => ({
+      ...document,
+      nodes: [...document.nodes, ...(original ? [original] : []), compare],
+      connections: [...document.connections,
+        { id: makeId('connection'), role: 'input', source_node_id: beforeNodeId, target_node_id: compareId, slot: 'before' },
+        { id: makeId('connection'), role: 'input', source_node_id: node.id, target_node_id: compareId, slot: 'after' },
+      ],
+    }), true);
+    setSelectedConnectionIds(new Set());
+    setSelectedNodeIds(new Set([compareId]));
+    focusNewNodesHandler.current([compare]);
+  };
+  const createCompareNode = useCallback(
+    (node: CanvasContentNode, source: CanvasCompareSource) => createCompareNodeHandler.current(node, source), []);
+  const swapCompareInputs = useCallback((nodeId: string) => {
+    commit(current => ({
+      ...current,
+      connections: current.connections.map(connection => (
+        connection.role === 'input' && connection.target_node_id === nodeId && isCanvasCompareSlot(connection.slot)
+          ? { ...connection, slot: connection.slot === 'before' ? 'after' as const : 'before' as const }
+          : connection
+      )),
+    }), true);
+  }, [commit]);
+  const openCompare = useCallback((nodeId: string) => setCompareViewId(nodeId), []);
   // 新建节点：只平移到新节点（多个时取包围盒）的中心，保持当前缩放（飙哥 2026-10-09，
   // 取代 09-14 的「放大到占视口大部分」）。一批新节点只算一次、只动一次视口。
   focusNewNodesHandler.current = (nodes: readonly CanvasNode[]) => {
@@ -4491,7 +4658,25 @@ function CanvasEditorInner({
 
   // 框选时选中数每帧在变；context 只关心「是否多选」，依赖写成 size 会让所有节点跟着每帧重渲染。
   const multiSelectionActive = selectedNodeIds.size > 1;
+  const annotationController = useCanvasAnnotation(document, selectedNodeIds, commit, undo, redo, history.current.past.length > 0, history.current.future.length > 0);
+  const editWithAnnotation = useCallback(async (nodeId: string) => {
+    setError(null);
+    setSubmittingNodeIds(current => new Set(current).add(nodeId));
+    try {
+      const draft = createCanvasGenerationDraft(providers, 'image', { preference: canvasUiPreferences.generation_defaults.image });
+      const id = await createAnnotatedGeneration(annotationBridge, nodeId, draft);
+      annotationController.exit();
+      setDismissedGenerationPanelNodeId(null);
+      setSelectedConnectionIds(new Set());
+      setSelectedNodeIds(new Set([id]));
+      locateNode(id);
+    } catch (error) { setError((error as Error).message); }
+    finally { setSubmittingNodeIds(current => { const next = new Set(current); next.delete(nodeId); return next; }); }
+  }, [annotationBridge, annotationController, providers, canvasUiPreferences.generation_defaults.image, locateNode]);
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
+    projectCategories, resolveFinalCategory, finalizationRevision, finalizeNode, saveCategories,
+    editWithAnnotation,
+    annotationController,
     layerParentByNodeId,
     editSourceByResultNodeId,
     locateNode,
@@ -4568,10 +4753,17 @@ function CanvasEditorInner({
     submitImageEdit,
     openAngle,
     upscaleImage,
+    createCompareNode,
+    compareInputsByNodeId,
+    swapCompareInputs,
+    openCompare,
     editVideo,
     saveImageToolbarPreferences: persistImageToolbarPreferences,
     deleteNode,
   }), [
+    projectCategories, resolveFinalCategory, finalizationRevision, finalizeNode, saveCategories,
+    editWithAnnotation,
+    annotationController,
     activeBatch,
     stopActiveBatch,
     uploadBatchImages,
@@ -4610,6 +4802,10 @@ function CanvasEditorInner({
     narrowViewport,
     openAngle,
     upscaleImage,
+    createCompareNode,
+    compareInputsByNodeId,
+    swapCompareInputs,
+    openCompare,
     openMaskEdit,
     openImageEdit,
     submitImageEdit,
@@ -4687,6 +4883,18 @@ function CanvasEditorInner({
     : null;
   const previewPrompt = previewNode
     ? copyablePromptForNode(previewNode, jobsByResultNodeId)
+    : null;
+  // 从图片的输出端拖出来的新建菜单才给「对比」：新节点会把这张图接到 Before。
+  const createMenuFromImage = Boolean(createMenu?.sourceId && createMenu.sourceHandle !== 'target'
+    && (createMenu.sourceIds ?? [createMenu.sourceId]).every(id => document?.nodes.find(node => node.id === id)?.type === 'image'));
+  const compareViewNode = compareViewId ? document?.nodes.find(node => node.id === compareViewId) : undefined;
+  const compareViewInputs = compareViewNode ? compareInputsByNodeId.get(compareViewNode.id) : undefined;
+  const compareViewAfter = compareViewInputs?.after?.versionId ? resolveVersion(compareViewInputs.after.versionId) : undefined;
+  const compareViewAfterSize = compareViewAfter?.kind === 'image' && compareViewAfter.width && compareViewAfter.height
+    ? { width: compareViewAfter.width, height: compareViewAfter.height } : null;
+  const compareViewFrame = compareViewInputs?.after?.versionId
+    ? canvasCompareFrame(compareViewInputs.before?.versionId, resolveVersion(compareViewInputs.after.versionId),
+      jobsByResultNodeId.get(compareViewInputs.after.nodeId), versionId => resolveVersion(versionId))
     : null;
   const previewJobId = preview && (
     preview.version.origin.kind === 'job_output'
@@ -4791,6 +4999,7 @@ function CanvasEditorInner({
             viewportSync.current = null;
           }}
           onPaneClick={event => {
+            annotationController.exit();
             setCreateMenu(null);
             if (materialPick) {
               requestAnimationFrame(() => editorRegionRef.current?.focus());
@@ -5032,6 +5241,8 @@ function CanvasEditorInner({
                         </DropdownMenuRadioItem>
                       ))}
                     </DropdownMenuRadioGroup>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={() => setSpecsOpen(true)}>项目规范</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <DropdownMenu>
@@ -5060,7 +5271,7 @@ function CanvasEditorInner({
                     {/* 沉浸式画布把整条顶栏（含设置入口）藏了：没有密钥的新用户在画布里点不动「生成」，
                         也没有任何地方能去配置。这一项是画布内唯一的全局设置出口。 */}
                     <DropdownMenuItem asChild className="gap-2">
-                      <Link href="/settings"><Settings className="size-4" aria-hidden="true" />设置</Link>
+                      <Link href="/settings/providers"><Settings className="size-4" aria-hidden="true" />设置</Link>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuLabel>主题</DropdownMenuLabel>
@@ -5193,6 +5404,7 @@ function CanvasEditorInner({
             <div className="my-1 h-px w-7 bg-border" />
             <div className="hidden xl:contents">
               <ToolButton label="添加批量素材节点" onClick={() => addBatchMaterialNode(null)}><Layers /></ToolButton>
+              <ToolButton label="添加对比节点" onClick={() => addCompareNode(null)}><Columns2 /></ToolButton>
               <ToolButton label="添加文本节点" onClick={() => addTextNode(null)}><Type /></ToolButton>
               <ToolButton label="添加图片节点" onClick={() => addGenerationNode('image', null)}><FileImage /></ToolButton>
               <ToolButton label="添加视频节点" onClick={() => addGenerationNode('video', null)}><FileVideo /></ToolButton>
@@ -5211,7 +5423,7 @@ function CanvasEditorInner({
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs text-muted-foreground">添加节点</p>
-              <CanvasCreateMenuItems allowEmptyNodes allowUpload onAddBatch={() => addBatchMaterialNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onUpload={() => uploadRef.current?.click()} />
+              <CanvasCreateMenuItems allowEmptyNodes allowUpload onAddBatch={() => addBatchMaterialNode(null)} onAddCompare={() => addCompareNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onUpload={() => uploadRef.current?.click()} />
             </div>
           )}
           </div>
@@ -5243,7 +5455,7 @@ function CanvasEditorInner({
         {createMenu && (
           <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenuDock?.left ?? createMenu.screen.x, top: createMenuDock?.top ?? createMenu.screen.y }}>
             <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs text-muted-foreground">创建并连接</p><button type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><X className="size-4" /></button></div>
-            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} rejectedModes={createMenu.sourceHandle === 'target' || !createMenu.sourceId ? undefined : canvasModesRejectingSources(document, createMenu.sourceIds ?? [createMenu.sourceId])} onAddBatch={createMenu.sourceId ? undefined : () => addBatchMaterialNode(createMenu)} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onUpload={() => uploadRef.current?.click()} />
+            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddCompare={createMenuFromImage ? () => addCompareNode(createMenu) : undefined} rejectedModes={createMenu.sourceHandle === 'target' || !createMenu.sourceId ? undefined : canvasModesRejectingSources(document, createMenu.sourceIds ?? [createMenu.sourceId])} onAddBatch={createMenu.sourceId ? undefined : () => addBatchMaterialNode(createMenu)} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onUpload={() => uploadRef.current?.click()} />
           </div>
         )}
 
@@ -5251,6 +5463,8 @@ function CanvasEditorInner({
           <CreationAssetPanel
             key={libraryPanelKey}
             ref={creationAssetPanelRef}
+            refreshKey={assetsRevision}
+            onAssetsChanged={refreshProjectAssets}
             className="canvas-library-panel"
             projectId={projectId}
             initialKind={libraryMode === 'prompts' ? 'prompt' : libraryMode === 'team' ? 'team' : 'media'}
@@ -5291,13 +5505,15 @@ function CanvasEditorInner({
                 selectedNode && selectedDraft ? selectedNode.id : undefined,
               );
             }}
-            onOpenSettings={canvasId => setLocation(`/settings?canvas=${encodeURIComponent(canvasId)}`)}
+            onOpenSettings={canvasId => setLocation(`/settings/libraries?canvas=${encodeURIComponent(canvasId)}`)}
             onTeamAssetAdopted={result => announceToolNotice(result.created ? '已加入资产库' : '已在你的资产库')}
             onReproduce={asset => void reproduceGenerationAsset(asset)}
             teamRelatedSha256={teamRelatedSha256}
             initialTeamLibraryId={teamLibraryId}
           />
         )}
+
+        {specsOpen && <ProjectSpecsDrawer key={projectId} projectId={projectId} onClose={() => setSpecsOpen(false)} />}
 
         {agentOpen && !libraryMode && (
           <CanvasAgentPanel
@@ -5312,7 +5528,7 @@ function CanvasEditorInner({
               }))}
             onClose={() => setAgentOpen(false)}
             onUpload={() => uploadRef.current?.click()}
-            onOpenKeySettings={() => void persistNow().then(saved => { if (saved) setLocation('/settings?section=keys'); })}
+            onOpenKeySettings={() => void persistNow().then(saved => { if (saved) setLocation('/settings/providers'); })}
           />
         )}
 
@@ -5323,7 +5539,7 @@ function CanvasEditorInner({
           onShared={(_entry, libraryName) => announceToolNotice(`已分享到 ${libraryName}`)}
           onOpenSettings={() => {
             setShareRequest(null);
-            setLocation(`/settings?canvas=${encodeURIComponent(projectId)}`);
+            setLocation(`/settings/libraries?canvas=${encodeURIComponent(projectId)}`);
           }}
         />
 
@@ -5461,6 +5677,23 @@ function CanvasEditorInner({
             node={layerPreviewNode} projectId={projectId} resolveVersion={resolveVersion}
             onCloseAutoFocus={event => { event.preventDefault(); restoreCanvasNodeFocus(layerPreviewNode.id); }} />}
         </Dialog>
+        <Dialog open={compareViewNode?.type === 'compare'} onOpenChange={open => { if (!open) setCompareViewId(null); }}>
+          {compareViewNode?.type === 'compare' && (
+            <DialogContent className="max-w-[min(92vw,96rem)] gap-3 p-3"
+              onCloseAutoFocus={event => { event.preventDefault(); restoreCanvasNodeFocus(compareViewNode.id); }}>
+              <DialogHeader className="px-1">
+                <DialogTitle>{compareViewNode.title}</DialogTitle>
+                <DialogDescription className="sr-only">拖动分界对照原图与结果</DialogDescription>
+              </DialogHeader>
+              <div className="h-[80dvh] overflow-hidden rounded-md">
+                <CanvasCompareSurface projectId={projectId} title={compareViewNode.title}
+                  beforeVersionId={compareViewInputs?.before?.versionId ?? null}
+                  afterVersionId={compareViewInputs?.after?.versionId ?? null}
+                  afterSize={compareViewAfterSize} frame={compareViewFrame} bitmapWidth={null} />
+              </div>
+            </DialogContent>
+          )}
+        </Dialog>
         <Dialog open={Boolean(preview)} onOpenChange={open => { if (!open) setPreview(null); }}>
           {preview && (
             <DialogContent className="max-h-[90dvh] max-w-4xl overflow-y-auto">
@@ -5486,8 +5719,9 @@ function CanvasEditorInner({
   );
 }
 
-function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, onAddText, onAddImage, onAddVideo, onAddAudio, onUpload, onAddBatch }: {
+function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, onAddText, onAddImage, onAddVideo, onAddAudio, onUpload, onAddBatch, onAddCompare }: {
   onAddBatch?: () => void;
+  onAddCompare?: () => void;
   /** 连出来的素材里有这些模式收不下的类型：对应选项置灰。 */
   rejectedModes?: ReadonlySet<string>;
   allowEmptyNodes: boolean;
@@ -5504,6 +5738,7 @@ function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, on
     {allowEmptyNodes && <AddMenuButton icon={<FileImage />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} disabledReason={rejectedModes?.has('image') ? '图片生成只能参考文本和图片' : undefined} />}
     {allowEmptyNodes && <AddMenuButton icon={<FileVideo />} title="视频" description="空节点可填写生成设置" onClick={onAddVideo} />}
     {allowEmptyNodes && <AddMenuButton icon={<FileAudio />} title="音频" description="旁白、对白与语音" onClick={onAddAudio} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
+    {onAddCompare && <AddMenuButton icon={<Columns2 />} title="对比" description="左右拖动对照两张图" onClick={onAddCompare} />}
     {allowUpload && <AddMenuButton icon={<Upload />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
   </>;
 }
@@ -5959,7 +6194,7 @@ function cloneCanvasNode(
       },
     };
   }
-  if (clone.type === 'batch_material') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex };
+  if (clone.type === 'batch_material' || clone.type === 'compare') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex };
   if (clone.type === 'image_edit') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex,
     data: { ...clone.data, active_run_id: null,
       source_node_id: idMap.get(clone.data.source_node_id ?? '') ?? (preserveExternalReferences ? clone.data.source_node_id : null),
@@ -5999,7 +6234,7 @@ function cloneCanvasDraft(
 /** 所有本地编辑的统一收尾：传 previous 进去当「谁动过」的判据，只有自己刚动过的节点会被分组吞进去。 */
 function normalizeCommittedDocument(next: CanvasDocument, previous: CanvasDocument): CanvasDocument {
   return {
-    ...normalizeCanvasGroups(detachMissingImageEditNodes(syncDraftLayerStackSources(next)), previous),
+    ...normalizeCanvasGroups(normalizeCanvasCompareConnections(detachMissingImageEditNodes(syncDraftLayerStackSources(next))), previous),
     updated_at: new Date().toISOString(),
   };
 }

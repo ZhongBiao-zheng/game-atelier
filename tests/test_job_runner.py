@@ -10,9 +10,8 @@ from pathlib import Path
 import pytest
 
 from character_workflow.lib import job_runner
-from character_workflow.lib.active_character import write_active
 from character_workflow.lib.jobs import read_job, save_job, write_job
-from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus
+from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
 
 
 @pytest.fixture
@@ -76,7 +75,6 @@ def test_run_job_normalizes_refs_clears_error_and_skips_invalid_artifact(
         model="generate_image_gpt_image_2",
         params={"size": "2048x1152", "n": 1, "reference_images": []},
         status=JobStatus.PENDING_CONFIRM,
-        asset_slot=AssetSlot.PROMO,
         source_image=str(src),
         alias="oai",
     )
@@ -105,7 +103,7 @@ def test_run_job_normalizes_refs_clears_error_and_skips_invalid_artifact(
 
     final = job_runner.run_job("promo-001")
 
-    expected_path = project / "characters" / "holy" / "promo" / "v1.png"
+    expected_path = project / "studio" / "promo-001" / "v1.png"
     assert final.status == JobStatus.DONE
     assert final.error is None
     assert final.output_paths == [str(expected_path)]
@@ -123,33 +121,6 @@ def test_run_job_normalizes_refs_clears_error_and_skips_invalid_artifact(
     assert read_job("promo-001").output_paths == [str(expected_path)]
 
 
-def test_run_latest_uses_active_character_kind_and_newest_pending_job(project, monkeypatch):
-    write_active("holy")
-    write_job(
-        job_id="portrait-001", character_id="holy", prompt="old",
-        model="m", params={}, asset_slot=AssetSlot.PORTRAIT,
-    )
-    write_job(
-        job_id="promo-001", character_id="holy", prompt="old",
-        model="m", params={}, asset_slot=AssetSlot.PROMO,
-    )
-    write_job(
-        job_id="promo-002", character_id="holy", prompt="new",
-        model="m", params={}, asset_slot=AssetSlot.PROMO,
-    )
-
-    captured: list[str] = []
-
-    def fake_run_job(job_id: str):
-        captured.append(job_id)
-        return read_job(job_id)
-
-    monkeypatch.setattr(job_runner, "run_job", fake_run_job)
-
-    selected = job_runner.run_latest(kind=AssetSlot.PROMO)
-
-    assert selected.job_id == "promo-002"
-    assert captured == ["promo-002"]
 
 
 def test_run_job_routes_custom_provider_through_dispatch(project, monkeypatch):
@@ -163,7 +134,6 @@ def test_run_job_routes_custom_provider_through_dispatch(project, monkeypatch):
         output_paths=[],
         status=JobStatus.PENDING,
         error=None,
-        asset_slot=AssetSlot.PORTRAIT,
         kind=JobKind.IMAGE,
         namespace="studio",
         alias="zz-main",
@@ -388,7 +358,6 @@ def test_deferred_image_attempt_keeps_job_pending_and_appends_new_output(project
         output_paths=[str(existing)],
         status=JobStatus.PENDING,
         error=None,
-        asset_slot=AssetSlot.PORTRAIT,
         kind=JobKind.IMAGE,
         namespace="studio",
         alias="zz-main",
@@ -878,7 +847,7 @@ def test_run_job_keeps_real_jpeg_extension(project, monkeypatch):
         job_id="studio-jpeg-001", character_id="zz-main", prompt="fox",
         submitted_at="2026-10-09T00:00:00+08:00", model="doubao-seedream-4-5-251128",
         params=JobParams(size="2048x2048", n=1), output_paths=[], status=JobStatus.PENDING,
-        error=None, asset_slot=AssetSlot.PORTRAIT, kind=JobKind.IMAGE, namespace="studio",
+        error=None, kind=JobKind.IMAGE, namespace="studio",
         alias="zz-main", provider="custom",
     ))
 

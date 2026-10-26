@@ -12,6 +12,8 @@ export interface OnboardingState {
   venv_python: string | null;
   platform: 'darwin' | 'linux' | 'win32';
   next_action: string;
+  runtime_mode?: 'source' | 'bundle';
+  update?: { current: string; latest: string | null; update_available: boolean } | null;
 }
 
 export async function fetchOnboardingStatus(): Promise<OnboardingState> {

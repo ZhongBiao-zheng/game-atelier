@@ -1,13 +1,12 @@
 # 画布 MCP 契约
 
-> 与[工坊 MCP](workshop-mcp.md) 共用同一个 stdio 进程、同一份凭据文件，但授权与工具分开
-> （ADR-0017 决定 4；沿用 [ADR-0011](../adr/0011-restrict-canvas-agent-to-approved-change-sets.md) 的
+> stdio 进程只暴露画布工具（[ADR-0027](../adr/0027-canvas-project-is-the-project.md)）；沿用 [ADR-0011](../adr/0011-restrict-canvas-agent-to-approved-change-sets.md) 的
 > typed change set 与 revision 原则，批准粒度为授权级：持有 `canvas_edit` / `canvas_generate` 即批准，
-> 无 change-set 逐次确认）。画布是 server 持有、带 revision 的活文档，Agent 只能经这些工具改，不能改文件。
+> 无 change-set 逐次确认。画布是 server 持有、带 revision 的活文档，Agent 只能经这些工具改，不能改文件。
 
 ## 授权
 
-设置页「Agent 连接」开关打开即授权全部画布与下列三项能力（ADR-0022）：
+控制台 Agent 连接页开关打开即授权全部画布与下列三项能力（ADR-0022）：
 
 | 能力 | 允许 |
 | --- | --- |
@@ -23,7 +22,7 @@ HTTP 端点 `POST /api/canvas-agent/<op>`，请求体 JSON ≤ 1 MiB，参数包
 | --- | --- | --- |
 | `canvas_list_projects` | `{}` → 授权画布 id / 名称 | canvas_read |
 | `canvas_get_document` | project_id → revision、节点（类型 / 标题 / 位置 / 文本 ≤4000 字 / draft / 版本）、输入与派生连线、媒体版本 | canvas_read |
-| `canvas_list_models` | project_id、mode(image/video) → 可用 alias / model / 能力（同工坊 `list_models` 行） | canvas_read |
+| `canvas_list_models` | project_id、mode(image/video) → 可用 alias / model / 能力 | canvas_read |
 | `canvas_apply_changes` | project_id、expected_revision、changes[] → 新 revision、新建 id | canvas_edit |
 | `canvas_import_media` | project_id、expected_revision、本机绝对路径、title?、position? → version_id、node_id、revision | canvas_edit |
 | `canvas_run` | project_id、surface_node_id、expected_revision、requested_count → job / run 摘要 | canvas_generate |
@@ -55,13 +54,8 @@ revision 不符返回 `DOCUMENT_CONFLICT`，重读后再改。生成产物、派
 文件，工作区里其他画布的目录不算——画布授权是按项目给的，不能借它读走本机任意图片。越界返回
 `REFERENCE_NOT_ALLOWED` 403。
 
-## 提示词资产
-
-画师存的提示词模板经工坊命名空间读取：`workshop_list_prompt_assets` / `workshop_read_prompt_asset`，
-授权含 `canvas_read` 即可调用（见 [工坊 MCP](workshop-mcp.md) 工具表与 `docs/references/prompt-assets.md`）。
-
 ## 错误
 
-复用工坊错误形状与 code：`TARGET_NOT_AUTHORIZED`（画布不在授权内）、`DOCUMENT_CONFLICT`、
+错误包含 code、message 与 request_id：`TARGET_NOT_AUTHORIZED`（画布不在授权内）、`DOCUMENT_CONFLICT`、
 `INVALID_TARGET`（节点 / run 不存在）、`INVALID_PARAMETERS`、`REFERENCE_NOT_ALLOWED`、`CONTENT_TOO_LARGE`。
 Agent 看到的失败摘要去除供应商原始报错与本机路径。

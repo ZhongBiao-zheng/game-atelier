@@ -547,22 +547,7 @@ def test_share_not_found_cases_are_404(client, shared_lib):
 def test_share_not_shareable_and_source_missing_are_422_with_code(
     client, isolated_data_root, shared_lib
 ):
-    from pathlib import Path
 
-    lib, _ = shared_lib
-    character_job = _studio_job_with_output(isolated_data_root, namespace="character")
-    resp = _share_job(client, lib["library_id"], character_job.job_id)
-    assert resp.status_code == 422, resp.text
-    assert resp.json()["detail"]["code"] == "not_shareable"
-    assert resp.json()["detail"]["message"]
-
-    gone = _studio_job_with_output(isolated_data_root)
-    Path(gone.output_paths[0]).unlink()
-    resp = _share_job(client, lib["library_id"], gone.job_id)
-    assert resp.status_code == 422 and resp.json()["detail"]["code"] == "source_missing"
-
-
-def test_share_blank_title_is_422_invalid(client, isolated_data_root, shared_lib):
     lib, folder = shared_lib
     job = _studio_job_with_output(isolated_data_root)
     resp = client.post(
@@ -693,6 +678,16 @@ def test_list_without_project_id_dedupes_by_library(client, tmp_path):
     # get_mount 选中的是最近挂载的可达记录：画布 2 那条。
     assert same["project_id"] == "canvas-2" and same["mount_path"] == str(new.resolve())
     assert len(client.get("/api/team-libraries", params={"project_id": "canvas-1"}).json()) == 1
+    mounts = client.get("/api/team-libraries?all_mounts=true").json()
+    assert len(mounts) == 3
+    assert {(row["project_id"], row["mount_path"]) for row in mounts
+            if row["library_id"] == first["library_id"]} == {
+        ("canvas-1", str(old.resolve())), ("canvas-2", str(new.resolve())),
+    }
+    scoped = client.get("/api/team-libraries", params={"project_id": "canvas-1", "all_mounts": True}).json()
+    assert len(scoped) == 1 and scoped[0]["project_id"] == "canvas-1"
+    assert client.get("/api/team-libraries?all_mounts=invalid").status_code == 422
+
 
 
 def test_related_merges_libraries_sorted_and_capped(client, isolated_data_root, tmp_path):

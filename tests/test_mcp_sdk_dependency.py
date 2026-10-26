@@ -39,3 +39,18 @@ async def test_sdk_stdio_subprocess_discovery_and_typed_tool_call(tmp_path, mode
             resources = await client.list_resources()
             assert resources.resources == []
     assert not (tmp_path / "unused-data").exists()
+
+
+async def test_canvas_registered_tools_share_catalog_with_management_status():
+    from types import SimpleNamespace
+    from character_workflow.mcp.server import create_server
+    from character_workflow.mcp.tool_catalog import TOOL_DEFINITIONS
+
+    server = create_server(SimpleNamespace(close=lambda: None))
+    registered = await server.list_tools()
+    assert {tool.name for tool in registered} == {tool.name for tool in TOOL_DEFINITIONS}
+    for definition in TOOL_DEFINITIONS:
+        tool = next(tool for tool in registered if tool.name == definition.name)
+        assert tool.description == definition.description
+        assert tool.annotations.read_only_hint == definition.read_only
+        assert "payload" in tool.input_schema["properties"]

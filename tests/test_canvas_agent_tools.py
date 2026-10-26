@@ -20,7 +20,7 @@ from character_workflow.lib.canvas_projects import (
 )
 from character_workflow.lib.schemas import CanvasMaterialConnection
 from character_workflow.lib.private_json import read_private_json
-from character_workflow.lib.workshop import WorkshopError
+from character_workflow.lib.canvas_tool_common import CanvasToolError
 from viewer_server.server_app import build_app
 
 from tests.local_client import LocalTestClient
@@ -48,7 +48,7 @@ def test_agent_lists_and_reads_every_canvas(canvas):
         canvas.project.project_id, canvas.other.project_id,
     }
     assert tools.get_document(canvas.agent, CanvasProjectInput(project_id=canvas.other.project_id))
-    with pytest.raises(WorkshopError):
+    with pytest.raises(CanvasToolError):
         tools.get_document(canvas.agent, CanvasProjectInput(project_id="canvas-missing-000000"))
 
 
@@ -70,10 +70,10 @@ def test_change_set_edits_document_at_expected_revision(canvas):
     assert image["type"] == "image" and image["version_id"] is None
     assert image["draft"]["prompt"] == ""  # 普通生成使用全部实线，不自动改提示词。
     assert image["draft"]["input_policy"] == "all_connected"
-    assert image["draft"]["params"] == {"n": 2, "size": "1024x1024"}  # 路径类字段被丢弃
+    assert image["draft"]["params"] == {"n": 2, "size": "1024x1024", "size_mode": "custom"}  # 路径类字段被丢弃
     assert view["connections"][0]["source_node_id"] == "prompt-1"
 
-    with pytest.raises(WorkshopError) as error:
+    with pytest.raises(CanvasToolError) as error:
         tools.apply_changes(canvas.agent, ApplyChangesInput(project_id=pid, expected_revision=0, changes=[
             {"op": "move", "node_id": "prompt-1", "position": {"x": 1, "y": 1}}]))
     assert error.value.code == "DOCUMENT_CONFLICT"
@@ -148,34 +148,34 @@ def test_import_media_copies_local_file_and_rejects_unknown_types(canvas, tmp_pa
     assert preview["preview"]["mime_type"] == "image/jpeg"
 
     (inbox / "notes.txt").write_text("x")
-    with pytest.raises(WorkshopError) as error:
+    with pytest.raises(CanvasToolError) as error:
         tools.import_media(canvas.agent, ImportMediaInput(project_id=pid, expected_revision=1,
                                                          path=str(inbox / "notes.txt")))
     assert error.value.code == "REFERENCE_NOT_ALLOWED"
-    with pytest.raises(WorkshopError):
+    with pytest.raises(CanvasToolError):
         tools.import_media(canvas.agent, ImportMediaInput(project_id=pid, expected_revision=1, path="ref.png"))
 
     # 边界：家目录 / 工作区之外、别的画布目录、指向外面的符号链接，都不能导。
     outside = tmp_path / "outside.png"
     Image.new("RGB", (4, 4), "blue").save(outside)
-    with pytest.raises(WorkshopError) as denied:
+    with pytest.raises(CanvasToolError) as denied:
         tools.import_media(canvas.agent, ImportMediaInput(project_id=pid, expected_revision=1, path=str(outside)))
     assert (denied.value.code, denied.value.status) == ("REFERENCE_NOT_ALLOWED", 403)
     link = inbox / "link.png"
     link.symlink_to(outside)
-    with pytest.raises(WorkshopError) as via_link:
+    with pytest.raises(CanvasToolError) as via_link:
         tools.import_media(canvas.agent, ImportMediaInput(project_id=pid, expected_revision=1, path=str(link)))
     assert via_link.value.code == "REFERENCE_NOT_ALLOWED"
     foreign = canvas_project_dir(canvas.other.project_id) / "media"
     foreign.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (4, 4), "green").save(foreign / "secret.png")
-    with pytest.raises(WorkshopError) as other_canvas:
+    with pytest.raises(CanvasToolError) as other_canvas:
         tools.import_media(canvas.agent, ImportMediaInput(project_id=pid, expected_revision=1,
                                                          path=str(foreign / "secret.png")))
     assert other_canvas.value.message == "不能读取其他画布的文件"
     # 冲突时不留孤儿版本
     before = len(read_canvas_document(pid).content_versions)
-    with pytest.raises(WorkshopError) as conflict:
+    with pytest.raises(CanvasToolError) as conflict:
         tools.import_media(canvas.agent, ImportMediaInput(project_id=pid, expected_revision=0, path=str(source)))
     assert conflict.value.code == "DOCUMENT_CONFLICT"
     assert len(read_canvas_document(pid).content_versions) == before
@@ -185,11 +185,11 @@ def test_run_requires_generate_capability_and_a_prepared_draft(canvas):
     pid = canvas.project.project_id
     tools.apply_changes(canvas.local, ApplyChangesInput(project_id=pid, expected_revision=0, changes=[
         {"op": "add_text", "node_id": "surface", "title": "图", "text": "", "position": {"x": 0, "y": 0}}]))
-    with pytest.raises(WorkshopError) as error:
+    with pytest.raises(CanvasToolError) as error:
         tools.run(canvas.agent, RunInput(project_id=pid, surface_node_id="surface", expected_revision=1))
     assert error.value.code == "TARGET_NOT_AUTHORIZED"
     generator = SimpleNamespace(**{**vars(canvas.agent), "capabilities": frozenset(["canvas_read", "canvas_generate"])})
-    with pytest.raises(WorkshopError) as error:
+    with pytest.raises(CanvasToolError) as error:
         tools.run(generator, RunInput(project_id=pid, surface_node_id="surface", expected_revision=1))
     assert error.value.code in {"INVALID_PARAMETERS", "INVALID_TARGET"}
 
@@ -208,12 +208,12 @@ def test_http_agent_session_reaches_every_canvas(canvas, tmp_path):
     for project_id in (canvas.project.project_id, canvas.other.project_id):
         ok = anonymous.post("/api/canvas-agent/get-document", json={"project_id": project_id}, headers=headers)
         assert ok.status_code == 200 and ok.json()["revision"] == 0
-    assert anonymous.post("/api/workshop/list-projects", json={}, headers=headers).status_code == 200
+    assert anonymous.post("/api/workshop/list-projects", json={}, headers=headers).status_code == 403
 
 
 def test_draft_mode_must_match_surface_type_and_mentions_follow_connections(canvas):
     pid = canvas.project.project_id
-    with pytest.raises(WorkshopError) as error:
+    with pytest.raises(CanvasToolError) as error:
         tools.apply_changes(canvas.agent, ApplyChangesInput(project_id=pid, expected_revision=0, changes=[
             {"op": "add_text", "node_id": "note", "title": "文本", "text": "x", "position": {"x": 0, "y": 0}},
             {"op": "set_draft", "node_id": "note", "mode": "image", "prompt": "p", "model": "gpt-image-1", "alias": "fake"},

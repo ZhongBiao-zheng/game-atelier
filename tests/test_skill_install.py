@@ -66,6 +66,15 @@ def test_install_links_every_current_skill(tmp_path: Path):
     }
     assert links == _skill_names()
 
+    unchanged = _run_install(tmp_path, "--sync")
+    assert unchanged.returncode == 0, unchanged.stderr
+    assert "Skill 无变化，跳过" in unchanged.stdout
+    missing = tmp_path / ".codex/skills/game-atelier-viewer-server"
+    missing.unlink()
+    repaired = _run_install(tmp_path, "--sync")
+    assert repaired.returncode == 0, repaired.stderr
+    assert missing.resolve() == REPO_ROOT / "skills/viewer-server"
+
 
 @posix_only
 def test_sync_does_not_create_a_new_local_install(tmp_path: Path):
@@ -84,10 +93,10 @@ def test_sync_does_not_create_a_new_local_install(tmp_path: Path):
 def test_sync_adds_new_links_prunes_retired_links_and_warns_on_duplicates(tmp_path: Path):
     codex_dir = tmp_path / ".codex/skills"
     codex_dir.mkdir(parents=True)
-    (codex_dir / "game-atelier-character").symlink_to(REPO_ROOT / "skills/character")
+    (codex_dir / "game-atelier-canvas").symlink_to(REPO_ROOT / "skills/canvas")
     (codex_dir / "game-atelier-retired").symlink_to(REPO_ROOT / "skills/retired")
     legacy = codex_dir / "character-workflow"
-    legacy.symlink_to(REPO_ROOT / "skills/character")
+    legacy.symlink_to(REPO_ROOT / "skills/canvas")
 
     result = _run_install(tmp_path, "--sync")
 
@@ -99,19 +108,19 @@ def test_sync_adds_new_links_prunes_retired_links_and_warns_on_duplicates(tmp_pa
         for path in codex_dir.glob("game-atelier-*")
     }
     assert links == _skill_names()
-    assert "Skill 'character' 重复注册" in result.stdout
+    assert "Skill 'canvas' 重复注册" in result.stdout
 
 
 @posix_only
 def test_sync_preserves_foreign_canonical_and_sibling_prefix_links(tmp_path: Path):
     codex_dir = tmp_path / ".codex/skills"
     codex_dir.mkdir(parents=True)
-    (codex_dir / "game-atelier-character").symlink_to(REPO_ROOT / "skills/character")
+    (codex_dir / "game-atelier-canvas").symlink_to(REPO_ROOT / "skills/canvas")
 
-    foreign_skill = tmp_path / "foreign/promo"
+    foreign_skill = tmp_path / "foreign/viewer-server"
     foreign_skill.mkdir(parents=True)
     (foreign_skill / "SKILL.md").write_text("---\nname: promo\n---\n", encoding="utf-8")
-    foreign_canonical = codex_dir / "game-atelier-promo"
+    foreign_canonical = codex_dir / "game-atelier-viewer-server"
     foreign_canonical.symlink_to(foreign_skill)
 
     sibling_prefix = codex_dir / "game-atelier-retired"
@@ -142,7 +151,7 @@ def test_powershell_sync_preserves_foreign_canonical_and_sibling_prefix_links(tm
     fake_repo = tmp_path / "checkout/game-atelier"
     fake_repo.mkdir(parents=True)
     shutil.copy2(REPO_ROOT / "install.ps1", fake_repo / "install.ps1")
-    for name in ("character", "promo"):
+    for name in ("canvas", "viewer-server"):
         skill_dir = fake_repo / "skills" / name
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(f"---\nname: {name}\n---\n", encoding="utf-8")
@@ -154,12 +163,12 @@ def test_powershell_sync_preserves_foreign_canonical_and_sibling_prefix_links(tm
     assert first_install.returncode == 0, first_install.stderr
 
     codex_dir = home / ".codex/skills"
-    foreign_skill = tmp_path / "foreign/promo"
+    foreign_skill = tmp_path / "foreign/viewer-server"
     foreign_skill.mkdir(parents=True)
     (foreign_skill / "SKILL.md").write_text("---\nname: promo\n---\n", encoding="utf-8")
     sibling_skill = tmp_path / "checkout/game-atelier-backup/skills/retired"
     sibling_skill.mkdir(parents=True)
-    foreign_canonical = codex_dir / "game-atelier-promo"
+    foreign_canonical = codex_dir / "game-atelier-viewer-server"
     sibling_prefix = codex_dir / "game-atelier-retired"
     setup_links = subprocess.run(
         [

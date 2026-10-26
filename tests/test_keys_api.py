@@ -575,3 +575,15 @@ def test_models_preview_reports_failed_complete_catalog(tmp_path, monkeypatch):
 def test_model_list_url(base, provider, expected):
     from viewer_server.routes import _model_list_url
     assert _model_list_url(base, provider) == expected
+
+
+def test_key_enabled_round_trip_retains_management_data(client):
+    assert client.post("/api/keys", json=_make_payload()).status_code == 201
+    assert client.get("/api/keys").json()["keys"][0]["enabled"] is True
+    for enabled in (False, True):
+        response = client.patch("/api/keys/lov", json={"enabled": enabled})
+        assert response.status_code == 200
+        row = client.get("/api/keys").json()["keys"][0]
+        assert row["enabled"] is enabled
+        assert row["models"]
+        assert keys.find_by_alias("lov").access_key == "ak"

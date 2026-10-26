@@ -32,6 +32,273 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.127.1', date: '2026-10-26', headline: '安装包与更新检查修正', changes: [
+    { kind: 'fix', text: 'Mac 安装包从浏览器下载后也能打开，启动器会清除本包的下载隔离标记。' },
+    { kind: 'fix', text: '读不到最新版本号时改用 git 检查更新，不再丢掉「这次不更新」的选择。' },
+    { kind: 'fix', text: '局域网共享设置页只在打开时读取一次常驻服务状态，操作不再变慢。' },
+  ] },
+  { version: '5.127.0', date: '2026-10-26', headline: '成员角色与远程中转管理', changes: [
+    { kind: 'feat', text: '管理员可在自己的 Atelier 管理中转成员与额度、查看全队用量和实时任务。' },
+    { kind: 'feat', text: '支持远程恢复上游、调整路由顺序，成员管理操作可查日志。' },
+  ] },
+  { version: '5.126.0', date: '2026-10-26', headline: 'Windows 中转常驻', changes: [
+    { kind: 'feat', text: '提供开机运行与每分钟恢复的任务安装脚本，凭据由系统界面保存。' },
+    { kind: 'feat', text: '共享设置显示常驻状态，中转提供健康检查，服务日志按天保留。' },
+  ] },
+  { version: '5.125.0', date: '2026-10-26', headline: '离线安装包', changes: [
+    { kind: 'feat', text: '支持自带 Python 与依赖的安装包，解压后即可启动，用户数据独立保存。' },
+    { kind: 'feat', text: '安装包发现新版本时显示下载入口。' },
+  ] },
+  { version: '5.124.0', date: '2026-10-26', headline: '日常启动提速', changes: [
+    { kind: 'fix', text: '没有新版本时跳过源码拉取，Skill 链接未变时跳过同步。' },
+    { kind: 'feat', text: '启动器显示各阶段耗时，更新检查失败时显示原因。' },
+  ] },
+  { version: '5.123.0', date: '2026-10-25', headline: '设置分组与侧栏联动', changes: [
+    { kind: 'feat', text: '设置按外观、存储和个人分组，侧栏可直达分区；显示名修改后才出现保存。' },
+    { kind: 'feat', text: '侧栏显示本机局域网共享状态，网关开关变化即时更新。' },
+  ] },
+  { version: '5.122.0', date: '2026-10-25', headline: '团队库与 Agent 连接信息更完整', changes: [
+    { kind: 'feat', text: '按项目查看团队库挂载数量、路径与最近扫描状态。' },
+    { kind: 'feat', text: 'Agent 连接页显示各客户端状态、实际配置路径与可用工具，标明计费工具。' },
+  ] },
+  { version: '5.121.0', date: '2026-10-25', headline: '网关共享状态更清楚', changes: [
+    { kind: 'feat', text: '网关状态卡集中显示共享地址与端口，成员额度、花费和管理操作放在同一张表里。' },
+  ] },
+  { version: '5.120.0', date: '2026-10-25', headline: '用量任务可筛选与翻页', changes: [
+    { kind: 'feat', text: '用量概览独立显示未计价次数和占比，任务按时间排列，支持成功、失败和未计价筛选。' },
+    { kind: 'feat', text: '任务表显示供应商、耗时和费用，每次加载50条；团队视图按成员查看。' },
+  ] },
+  { version: '5.119.0', date: '2026-10-25', headline: '模型路由支持最便宜和轮流', changes: [
+    { kind: 'feat', text: '同一模型可按自定义顺序、实际参数估价或轮流选择供应商；失败时沿本次任务的顺序切换。' },
+    { kind: 'feat', text: '路由页按图片、视频和文本分组，显示当前候选与估价，支持一键恢复欠费成员。' },
+  ] },
+  {
+    version: '5.118.0', date: '2026-10-25', headline: '供应商添加与编辑更集中',
+    changes: [
+      { kind: 'feat', text: '新增供应商选择页，按供应商、中转和团队分组，提供 Tuzi 与 OpenAI-HK 预设' },
+      { kind: 'feat', text: '统一编辑弹窗，支持模型标签筛选、测试连接及高级配置' },
+    ],
+  },
+  {
+    version: '5.117.0', date: '2026-10-25', headline: '供应商管理更清晰',
+    changes: [
+      { kind: 'feat', text: '供应商支持停用，保留配置并从模型选择和自动路由中移除' },
+      { kind: 'feat', text: '供应商列表支持搜索，集中显示使用状态、模型数量和最近使用时间' },
+    ],
+  },
+  {
+    version: '5.116.4', date: '2026-10-25', headline: 'OpenAI-HK 价格自动同步',
+    changes: [
+      { kind: 'feat', text: 'OpenAI-HK 已核实模型的单张费用随官网价格自动同步，Flare 和 Sunburst 采用当前价格。' },
+      { kind: 'fix', text: 'Nano Banana 2 与多张请求暂不显示预计费用，等待计费规则核实。' },
+    ],
+  },
+  {
+    version: '5.116.3', date: '2026-10-25', headline: '图层拆分记录费用',
+    changes: [{ kind: 'fix', text: 'TokenDance 图层拆分完成后按实际层数记录费用，用量页不再漏算。' }],
+  },
+  {
+    version: '5.116.2', date: '2026-10-25', headline: 'Tuzi 香蕉多张估价修正',
+    changes: [{ kind: 'fix', text: 'Tuzi Nano Banana 一次出多张时按实际请求次数估价，不再只算一张。' }],
+  },
+  {
+    version: '5.116.1', date: '2026-10-25', headline: '补全 Tuzi 图片估价',
+    changes: [
+      { kind: 'fix', text: '核实并接入 Tuzi 的像素与尺寸档位规则，恢复相关图片模型的预计费用；Midjourney 仍待核实。' },
+    ],
+  },
+  {
+    version: '5.116.0', date: '2026-10-25', headline: 'Tuzi 价格自动同步',
+    changes: [
+      { kind: 'feat', text: 'Tuzi 价格在启动时自动同步，按实际请求模型估价；局部修改和扩图使用同一份服务端价格。' },
+      { kind: 'fix', text: '尚未核实的图片计费公式及 Midjourney 暂不显示预计费用，避免沿用旧价。' },
+    ],
+  },
+  {
+    version: '5.115.0', date: '2026-10-25', headline: 'TokenDance 价格自动同步',
+    changes: [
+      { kind: 'feat', text: 'TokenDance 的图片与视频价格在启动时自动同步，Seedance 视频也能显示预计费用。' },
+      { kind: 'fix', text: 'TokenDance Seedream 5.0 Pro 的 2K 图按实际档位计价（每张 0.6 元）。' },
+    ],
+  },
+  {
+    version: '5.114.3', date: '2026-10-25', headline: 'Agent 图片尺寸显示修正',
+    changes: [{ kind: 'fix', text: 'Agent 写入的像素尺寸在生成面板里如实显示，不再误显示为默认比例。' }],
+  },
+  {
+    version: '5.114.2', date: '2026-10-25', headline: '画布生成记录预计费用',
+    changes: [{ kind: 'fix', text: '画布、Agent 与自动路由的生成按实际渠道记录预计费用，用量页不再显示为未计价。' }],
+  },
+  {
+    version: '5.114.1', date: '2026-10-25', headline: '用量页修正',
+    changes: [{ kind: 'fix', text: '当天只有未计价任务时，用量页不再加载失败。' }],
+  },
+  {
+    version: '5.114.0', date: '2026-10-25', headline: '参考库与 Agent 修正',
+    changes: [
+      { kind: 'fix', text: 'Agent 可以把两张图连到对比节点的 Before / After。' },
+      { kind: 'fix', text: '节点很多的画布上，Agent 不再把读不到的节点当成没有内容。' },
+      { kind: 'fix', text: '关掉资产面板或刷新后，参考库的待分类图片和分类建议仍在。' },
+      { kind: 'fix', text: '用量页对没有价格的任务显示「未计价」，不再算作 ¥0。' },
+    ],
+  },
+  {
+    version: '5.113.0', date: '2026-10-25', headline: '项目统一到画布',
+    changes: [{ kind: 'feat', text: '工坊项目已迁入画布，移除旧工坊入口与工作流，项目规范、参考库和 Agent 集中在画布中。' }],
+  },
+  {
+    version: '5.112.0', date: '2026-10-25', headline: '工坊迁移预演',
+    changes: [{ kind: 'feat', text: '支持预演工坊到画布的迁移，保留原文件并报告跳过项。' }],
+  },
+  {
+    version: '5.111.0', date: '2026-10-25', headline: 'Agent 查找项目参考',
+    changes: [{ kind: 'feat', text: 'Agent 按类别挑参考图，在画布上摆好参考节点与生成连线。' }],
+  },
+  {
+    version: '5.110.0',
+    date: '2026-10-25',
+    headline: '对比节点可以连任意两张图',
+    changes: [
+      { kind: 'feat', text: '对比节点改为 Before / After 两个接口，可以连任意两张图，换图后自动跟着变。' },
+      { kind: 'feat', text: '对比节点支持交换前后、双击全屏查看。' },
+    ],
+  },
+  {
+    version: '5.109.0', date: '2026-10-25', headline: '项目规范与经验',
+    changes: [{ kind: 'feat', text: '编辑项目和类别规范，采纳 Agent 经验，随项目包一起保存。' }],
+  },
+  {
+    version: '5.108.0', date: '2026-10-25', headline: '项目参考库',
+    changes: [{ kind: 'feat', text: '参考图按类别浏览，支持批量导入、自动分类建议与人工确认。' }],
+  },
+  {
+    version: '5.107.0', date: '2026-10-25', headline: '图片定稿',
+    changes: [{ kind: 'feat', text: '图片可按类别定稿，画布和资产卡同步显示，可随时取消。' }],
+  },
+  {
+    version: '5.106.0',
+    date: '2026-10-25',
+    headline: '画布新增前后对比节点',
+    changes: [
+      { kind: 'feat', text: '局部修改、扩图、AI高清的结果图上多了「对比」，生成一个 Before / After 滑块节点，左右拖动对照原图。' },
+    ],
+  },
+  {
+    version: '5.105.2',
+    date: '2026-10-24',
+    headline: '主题色卡换成磨砂渐变',
+    changes: [
+      { kind: 'feat', text: '外观设置里的主题色改为磨砂渐变卡片，色团缓慢漂移，悬停时轻微偏移。' },
+    ],
+  },
+  {
+    version: '5.105.1',
+    date: '2026-10-24',
+    headline: '浅色模式主题色更通透',
+    changes: [
+      { kind: 'fix', text: '浅色模式下主题色只压到看得清为止，青柠不再发橄榄绿。' },
+      { kind: 'fix', text: '浅色模式控制台侧栏改为浅灰，白色内容面板重新浮起来。' },
+      { kind: 'fix', text: '今天还没有花费时，趋势图仍用主色标出今天。' },
+    ],
+  },
+  {
+    version: '5.105.0',
+    date: '2026-10-24',
+    headline: '界面换新：石墨底与可选主题色',
+    changes: [{ kind: 'feat', text: '新增七套主题色、自定义配色与跟随系统，控制台导航、用量图表和网关页面同步换新。' }],
+  },
+  {
+    version: '5.104.1',
+    date: '2026-10-24',
+    headline: '用量页与供应商列表修正',
+    changes: [
+      { kind: 'fix', text: '最贵的任务只显示自己写的提示词，不再带画布补上的参考素材编号。' },
+      { kind: 'fix', text: '供应商列表显示最近使用时间，近 7 天用过的亮绿点。' },
+      { kind: 'fix', text: '30 天趋势按日显示；没开局域网共享时不再显示只有「我的」的切换。' },
+    ],
+  },
+  {
+    version: '5.104.0',
+    date: '2026-10-24',
+    headline: '设置改成控制台，新增用量页',
+    changes: [
+      { kind: 'feat', text: '供应商、路由、网关、团队库和 Agent 连接各有独立页面。' },
+      { kind: 'feat', text: '用量页查看个人和团队花费、趋势、排行与最贵任务，局域网额度集中展示。' },
+      { kind: 'feat', text: '路由页直接查看欠费成员并恢复，网关花费可跳转查看成员用量。' },
+    ],
+  },
+  {
+    version: '5.103.1',
+    date: '2026-10-24',
+    headline: '局域网网关接入更稳',
+    changes: [
+      { kind: 'fix', text: '网关的某个上游欠费时，接入端不再把整个网关当成欠费停用一小时。' },
+      { kind: 'fix', text: '经网关的文本生成与 Agent 对话不再走本机代理，与出图一致。' },
+      { kind: 'fix', text: '局域网共享的说明补充 Windows 与 macOS 的防火墙放行方法。' },
+    ],
+  },
+  {
+    version: '5.103.0',
+    date: '2026-10-24',
+    headline: '局域网共享支持团队额度与多模态任务',
+    changes: [
+      { kind: 'feat', text: '按人设置日、周、月金额限额，限定可用模型和供应商，按人或模型查看用量。' },
+      { kind: 'feat', text: '图片、局部修改、扩图、图层拆分、视频、音频与 Agent 对话都可经局域网网关调用。' },
+      { kind: 'feat', text: '设置页实时查看任务和最近产物；接入端显示自己的额度用量与重置日期。' },
+      { kind: 'fix', text: '欠费供应商自动跳过，充值后可手动恢复；中转额度用完时自动改用本机供应商。' },
+    ],
+  },
+  {
+    version: '5.102.4',
+    date: '2026-10-24',
+    headline: '标注像截图工具一样直接调整',
+    changes: [
+      { kind: 'feat', text: '画完一个框后仍停在当前工具，可以连续画；指到已有标注就能拖动或拖角缩放。' },
+      { kind: 'feat', text: '指到标注上滚动鼠标滚轮或双指滑动，可直接调粗细或字号。' },
+      { kind: 'fix', text: '大框里面的标注也能点中；颜色和工具在不同图片之间保持一致。' },
+    ],
+  },
+  {
+    version: '5.102.3',
+    date: '2026-10-24',
+    headline: '箭头标注支持两端调整',
+    changes: [{ kind: 'fix', text: '选中箭头后可独立拖动起点和终点，调整方向与长度，保留线宽并支持撤回。' }],
+  },
+  {
+    version: '5.102.2',
+    date: '2026-10-24',
+    headline: '矩形标注支持四角调整大小',
+    changes: [{ kind: 'fix', text: '选中矩形后可拖动四角独立调整宽高，保持线宽；一次拖动可一次撤回。' }],
+  },
+  {
+    version: '5.102.1',
+    date: '2026-10-24',
+    headline: '标注画完即可调整',
+    changes: [
+      { kind: 'fix', text: '进入标注时收起生成面板；图形画完自动选中，可直接移动，并通过带数值的线宽按钮调整粗细。' },
+      { kind: 'fix', text: '文字输入时不显示边框，结束后选中文字可拖动四角缩放，字号同步变化。' },
+    ],
+  },
+  {
+    version: '5.102.0',
+    date: '2026-10-24',
+    headline: '标注改为画布上直接画',
+    changes: [
+      { kind: 'feat', text: '直接在图片节点上画框、箭头、笔迹和文字，一条工具栏完成操作；可展开全屏，收起后继续编辑。' },
+      { kind: 'feat', text: '标注自动保存，支持撤回重做、线宽字号调节和文字底色；切换图片版本时隐藏，切回来恢复。' },
+      { kind: 'feat', text: '「去改图」通过带画笔标记的连线传入标注图，保留原图；再次修改标注后，生成前自动更新参考图。' },
+    ],
+  },
+  {
+    version: '5.99.0',
+    date: '2026-10-16',
+    headline: '局域网共享：同事用一台机器的 KEY 出图',
+    changes: [
+      { kind: 'feat', text: '设置新增「局域网共享」：开启后给每位同事发一把网关密钥，可设每日张数上限，按人看今日与本月用量；撤销立即失效。' },
+      { kind: 'feat', text: 'API 密钥新增「局域网 Atelier」：填网关地址和网关密钥，连接后自动带回网关的模型；排在每个模型的第一位，网关连不上、密钥失效或额度用完时自动改用本机 KEY。' },
+      { kind: 'feat', text: '网关那边换了供应商时，卡片提示「网关：…已改用…」；一期支持图片生成（含参考图），局部修改、扩图和视频仍走本机 KEY。' },
+    ],
+  },
   {
     version: '5.98.11',
     date: '2026-10-21',

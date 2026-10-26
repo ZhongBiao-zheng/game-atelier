@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.atomic_io import atomic_write_text
-from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus, Namespace
+from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus, Namespace
 
 from character_workflow.lib.file_lock import file_lock, try_file_lock
 
@@ -32,30 +32,12 @@ def _path(job_id: str) -> Path:
     return _runtime_dir() / "jobs" / f"{job_id}.json"
 
 
-def job_output_dir(character_id: str, kind: AssetSlot, project_root: Path | None = None) -> Path:
-    """按 asset_slot 决定出图输出落到 characters/<id>/<portrait|promo|turnaround>/。"""
-    root = project_root if project_root is not None else data_root.resolve_data_root()
-    return root / "characters" / character_id / kind.value
-
-
 def job_output_dir_for(job: "Job") -> Path:
-    """Namespace-aware output dir dispatcher.
-    Studio jobs → <data_root>/studio/<job_id>/
-    Character jobs → <data_root>/characters/<character_id>/<asset_slot>/
-    """
     if job.namespace == "studio":
         from character_workflow.lib.studio_jobs import studio_output_dir
         return studio_output_dir(job.job_id)
-    if job.namespace == "canvas":
-        from character_workflow.lib.canvas_projects import canvas_output_dir
-        return canvas_output_dir(job.canvas_project_id, job.job_id)
-    if job.namespace == "ui":
-        from character_workflow.lib.ui_jobs import screen_output_dir
-        return screen_output_dir(job.project_id, job.ui_scheme_id, job.screen_id)
-    if job.namespace == "video":
-        from character_workflow.lib.video_jobs import production_output_dir
-        return production_output_dir(job.project_id, job.production_id)
-    return job_output_dir(job.character_id, job.asset_slot)
+    from character_workflow.lib.canvas_projects import canvas_output_dir
+    return canvas_output_dir(job.canvas_project_id, job.job_id)
 
 
 @contextmanager
@@ -112,41 +94,6 @@ def write_job_under_lock(job: Job) -> Job:
     return _write(job)
 
 
-def migrate_ui_job_to_scheme(
-    job_id: str,
-    project_id: str,
-    scheme_id: str,
-    old_path_prefix: str,
-    new_path_prefix: str,
-) -> Job | None:
-    """One-time structured upgrade for a pre-scheme UI job.
-
-    The raw document cannot validate until ``ui_scheme_id`` is added, so this upgrade lives beside
-    the normal Job IO, holds the same per-job lock, validates the complete model, then persists it.
-    """
-    with job_lock(job_id):
-        path = _path(job_id)
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if data.get("namespace") != "ui" or data.get("project_id") != project_id:
-            return None
-        data["ui_scheme_id"] = scheme_id
-        data["output_paths"] = [
-            _replace_path_prefix(value, old_path_prefix, new_path_prefix)
-            if isinstance(value, str) else value
-            for value in data.get("output_paths", [])
-        ]
-        return _write(_load_job(data))
-
-
-def _replace_path_prefix(value: str, old_prefix: str, new_prefix: str) -> str:
-    """Rewrite stored relative or absolute paths regardless of their platform separator."""
-    rewritten = value.replace(old_prefix, new_prefix)
-    return rewritten.replace(
-        old_prefix.replace("/", "\\"),
-        new_prefix.replace("/", "\\"),
-    )
-
-
 def _load_job(data: Any) -> Job:
     """读盘构造 Job：先剥离已废弃字段（seed），存量 JSON 不触发 extra=forbid。
 
@@ -172,29 +119,37 @@ def list_jobs() -> list[Job]:
     return jobs
 
 
+def last_used_by_alias() -> dict[str, str]:
+    """每把 KEY 最近一次提交生成的时间。只读 alias / submitted_at 两个字段，不做整条校验。"""
+    jobs_dir = _runtime_dir() / "jobs"
+    latest: dict[str, tuple[datetime, str]] = {}
+    for p in jobs_dir.glob("*.json") if jobs_dir.exists() else []:
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+            alias, submitted = raw.get("alias"), raw.get("submitted_at")
+            if not alias or not submitted:
+                continue
+            at = datetime.fromisoformat(submitted)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError, AttributeError):
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        if alias not in latest or at > latest[alias][0]:
+            latest[alias] = (at, submitted)
+    return {alias: submitted for alias, (_, submitted) in latest.items()}
+
+
 def write_job(
     *, job_id: str, character_id: str, prompt: str, model: str,
     params: dict[str, Any],
     status: JobStatus = JobStatus.PENDING_CONFIRM,
-    asset_slot: AssetSlot = AssetSlot.PORTRAIT,
     source_image: str | None = None,
     alias: str | None = None,
-    namespace: Namespace = "character",
-    project_id: str | None = None,
-    ui_scheme_id: str | None = None,
-    screen_id: str | None = None,
-    production_id: str | None = None,
+    namespace: Namespace = "studio",
     canvas_project_id: str | None = None,
     kind: JobKind = JobKind.IMAGE,
 ) -> Job:
-    """落盘一条 job 文件。默认 PENDING_CONFIRM —— Skill 先写好调用细节，
-    UI 渲染"出图卡片"，画师在终端或 Web 点确认后才推进到 PENDING 调图像服务。
-
-    asset_slot 决定出图输出目录（characters/<id>/<slot>/），由 job_output_dir() 计算。
-    source_image 给 promo / turnaround Skill 传画师上传的参考图绝对路径。
-    alias 不传时，按 keys.preferred_alias_for_kind(asset_slot) 自动解析；同步从 keys.json 拿 provider。"""
-    if alias is None:
-        alias = keys.preferred_alias_for_kind(asset_slot.value)
+    """Persist a Studio or Canvas generation job."""
     provider: str | None = None
     if alias is not None:
         k = keys.find_by_alias(alias)
@@ -209,12 +164,7 @@ def write_job(
         output_paths=[],
         status=status,
         error=None,
-        asset_slot=asset_slot,
         namespace=namespace,
-        project_id=project_id,
-        ui_scheme_id=ui_scheme_id,
-        screen_id=screen_id,
-        production_id=production_id,
         canvas_project_id=canvas_project_id,
         kind=kind,
         source_image=source_image,
@@ -320,8 +270,6 @@ def clone_job_for_retry(job_id: str) -> Job:
     （output_paths / error / params.actual_size / params.warnings），
     其余参数原样复制，并以 retry_of 指回原 job。"""
     src = read_job(job_id)
-    if src.workshop_request_id:
-        raise ValueError("工坊请求任务重试需要新建生成请求并重新批准")
     if src.status != JobStatus.FAILED:
         raise ValueError(
             f"job {job_id} is {src.status.value}, not failed —— 只有 failed job 可重试"
@@ -368,6 +316,12 @@ def fail_orphan_studio_jobs(error: str = "server restarted, job interrupted") ->
     return reclaimed
 
 
+def has_resumable_gateway_task(job: Job) -> bool:
+    return bool(job.provider == "atelier"
+                and job.params.provider_task_protocol == "atelier_gateway"
+                and job.params.provider_task_ids)
+
+
 def is_resumable_studio_job(job: Job) -> bool:
     if job.provider == "evolink":
         from .canvas_image_edits import has_resumable_mj_task
@@ -376,7 +330,7 @@ def is_resumable_studio_job(job: Job) -> bool:
     return bool(
         job.namespace == "studio"
         and job.status == JobStatus.PENDING
-        and job.params.provider_task_protocol == "tuzi_images"
+        and job.params.provider_task_protocol in ("tuzi_images", "atelier_gateway")
         and job.params.provider_task_ids
     )
 

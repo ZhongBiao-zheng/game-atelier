@@ -170,7 +170,30 @@ export interface CanvasTextNode extends CanvasNodeBase {
 
 export interface CanvasImageNode extends CanvasNodeBase {
   type: 'image';
-  data: CanvasContentNodeData & { display: CanvasMediaDisplay };
+  data: CanvasContentNodeData & { display: CanvasMediaDisplay; annotation?: CanvasImageAnnotation | null };
+}
+
+export type AnnotationColor = '#F04438' | '#FACC15' | '#22C55E' | '#3B82F6' | '#FFFFFF';
+export type AnnotationPoint = [number, number];
+interface AnnotationElementBase { id: string; color: AnnotationColor }
+export interface AnnotationRect extends AnnotationElementBase {
+  type: 'rect'; x: number; y: number; width: number; height: number; stroke_width: number;
+}
+export interface AnnotationArrow extends AnnotationElementBase {
+  type: 'arrow'; start: AnnotationPoint; end: AnnotationPoint; stroke_width: number;
+}
+export interface AnnotationFreedraw extends AnnotationElementBase {
+  type: 'freedraw'; points: AnnotationPoint[]; stroke_width: number;
+}
+export interface AnnotationText extends AnnotationElementBase {
+  type: 'text'; x: number; y: number; text: string; font_size: number; background: boolean;
+}
+export type AnnotationElement = AnnotationRect | AnnotationArrow | AnnotationFreedraw | AnnotationText;
+export interface CanvasImageAnnotation {
+  version_id: string;
+  elements: AnnotationElement[];
+  visible: boolean;
+  rendered_version_id: string | null;
 }
 
 export interface CanvasVideoNode extends CanvasNodeBase {
@@ -272,18 +295,28 @@ export interface CanvasImageEditNode extends CanvasNodeBase {
   };
 }
 
+export interface CanvasNormalizedFrame { x: number; y: number; width: number; height: number }
+
+/** 对比的两张图由 before / after 两条输入连线决定，节点自身不存内容。 */
+export interface CanvasCompareNode extends CanvasNodeBase {
+  type: 'compare';
+  data: Record<string, never>;
+}
+
 export type CanvasContentNode = CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode;
 export type CanvasNode = CanvasContentNode | CanvasGroupNode | CanvasPluginNode | CanvasImageEditNode
-  | CanvasBatchMaterialNode | CanvasLayerStackNode;
+  | CanvasBatchMaterialNode | CanvasLayerStackNode | CanvasCompareNode;
 
 export type CanvasVideoFrameSlot = 'first_frame' | 'last_frame';
+export type CanvasCompareSlot = 'before' | 'after';
 
 export interface CanvasInputConnection {
   id: string;
   role: 'input';
   source_node_id: string;
   target_node_id: string;
-  slot?: CanvasVideoFrameSlot | null;
+  slot?: CanvasVideoFrameSlot | CanvasCompareSlot | null;
+  annotated?: boolean;
 }
 
 export interface CanvasMaterialConnection {
@@ -312,7 +345,7 @@ export type CanvasContentOrigin =
         | { kind: 'remove_background'; model: string };
     }
   | { kind: 'import'; package_id: string }
-  | { kind: 'creation_asset_snapshot'; title: string };
+  | { kind: 'creation_asset_snapshot'; title: string; asset_id?: string | null };
 
 interface CanvasContentVersionBase {
   version_id: string;
@@ -350,10 +383,15 @@ export interface CanvasDocument {
   updated_at: string;
 }
 
+export const DEFAULT_CANVAS_CATEGORIES = ['弹窗', '角色', '底图', '按钮', '图标', '字效'];
+
 export interface CanvasProject {
+  migrated_from_workshop: string | null;
   schema_version: 2;
   project_id: string;
   name: string;
+  categories: string[];
+  category_spec_files: Record<string, string>;
   created_at: string;
   updated_at: string;
 }

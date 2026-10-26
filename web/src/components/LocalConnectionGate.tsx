@@ -87,7 +87,7 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
       </fieldset>
       {!activated && <main data-connection-controls className="flex min-h-dvh items-center justify-center p-6">
         <div className="max-w-md space-y-3 text-center">
-          <p role="status" className="text-sm text-pretty">{busy ? '正在启动工坊…' : '暂时无法连接工坊服务'}</p>
+          <p role="status" className="text-sm text-pretty">{busy ? '正在启动Atelier…' : '暂时无法连接Atelier服务'}</p>
           {!busy && <>
             <p className="break-words text-sm text-pretty text-muted-foreground">{connection.message}</p>
             <div className="flex justify-center gap-2">
@@ -101,7 +101,7 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
         className="fixed inset-x-3 top-3 z-50 mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-3 rounded-lg border border-border bg-popover px-4 py-2 text-sm"
         style={{ marginTop: 'env(safe-area-inset-top)' }}>
         <div role="status" className="min-w-0 flex-1">
-          <p className="text-pretty">{busy ? '正在恢复工坊连接…' : '工坊服务连接已暂停'}</p>
+          <p className="text-pretty">{busy ? '正在恢复Atelier连接…' : 'Atelier服务连接已暂停'}</p>
           <p className="text-xs text-pretty text-muted-foreground">{busy ? '暂时无法保存，请勿关闭页面。' : connection.message}</p>
         </div>
         {!busy && <Button variant="outline" size="sm" onClick={reconnect}>重新连接</Button>}

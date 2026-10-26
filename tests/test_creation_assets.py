@@ -271,7 +271,7 @@ def test_canvas_receives_disconnected_content_and_title_snapshot(client: TestCli
     assert frozen["text"] == build_prompt_variable_template(
         prompt.content.segments, {"主体": "机械犬"},
     )
-    assert frozen["origin"] == {"kind": "creation_asset_snapshot", "title": "镜头"}
+    assert frozen["origin"] == {"kind": "creation_asset_snapshot", "title": "镜头", "asset_id": prompt.asset_id}
 
     update_prompt_asset(
         prompt.asset_id,
@@ -325,7 +325,7 @@ def test_media_asset_can_become_reference_for_active_canvas_generation(client: T
     inserted = next(node for node in document["nodes"] if node["id"] != target.id)
     assert document["connections"][0]["source_node_id"] == inserted["id"]
     version = document["content_versions"][inserted["data"]["current_version_id"]]
-    assert version["origin"] == {"kind": "creation_asset_snapshot", "title": "参考图"}
+    assert version["origin"] == {"kind": "creation_asset_snapshot", "title": "参考图", "asset_id": asset.asset_id}
 
 
 def test_media_asset_accepts_mp4(client):

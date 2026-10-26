@@ -51,12 +51,10 @@ def test_favorite_accepts_absolute_path(client, tmp_path):
 
 
 def test_favorite_does_not_filter_recent(client, tmp_path):
-    """收藏只是标记——不像 hidden 那样从首页作品展示剔除。"""
-    _make_image(tmp_path / "characters" / "char-a" / "portrait" / "v1.png")
-    client.post(
-        "/api/gallery/favorites",
-        json={"path": "characters/char-a/portrait/v1.png", "favorite": True},
-    )
+    from tests.test_gallery_recent import _make_image, _studio_job
+    _make_image(tmp_path / "studio" / "job-x" / "v1.png")
+    _studio_job(tmp_path)
+    client.post("/api/gallery/favorites", json={"path": "studio/job-x/v1.png", "favorite": True})
     items = client.get("/api/gallery/recent").json()["items"]
     assert [i["filename"] for i in items] == ["v1.png"]
 

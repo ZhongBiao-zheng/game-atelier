@@ -1,7 +1,7 @@
 import type { CreationPromptSegment } from '@/schema/creationAssets';
 
-/** 面板的三个模式：前两个是本机创作资产，第三个是只读的团队库。 */
-export type CreationAssetPanelMode = 'prompt' | 'media' | 'team';
+/** 本机创作资产、团队库与项目参考库视图。 */
+export type CreationAssetPanelMode = 'prompt' | 'media' | 'team' | 'reference';
 
 /** 生成结果的来源：有它时保存为带配方的生成资产，而不是普通媒体。 */
 export type CreationGenerationSource =

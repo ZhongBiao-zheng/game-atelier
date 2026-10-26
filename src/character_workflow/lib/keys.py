@@ -8,12 +8,15 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_serializer
 
 from character_workflow.lib import data_root
+from character_workflow.lib.atomic_io import _replace_with_retry
+from character_workflow.lib.file_lock import file_lock
 
 Provider = Literal[
     "openai",
@@ -28,10 +31,24 @@ Provider = Literal[
     "openrouter",
     "evolink",
     "custom",
+    # 局域网 Atelier（ADR-0025）：base_url 是网关地址，access_key 是网关密钥。
+    "atelier",
 ]
 Kind = Literal["portrait", "promo", "turnaround"]
 ModelModality = Literal["text", "image", "video", "audio"]
+RouteMode = Literal["order", "cheap", "round_robin"]
 ModelInputModality = Literal["text", "image", "video", "audio"]
+
+
+class ViaMember(BaseModel):
+    """网关供应商的模型背后、网关那边路由组的一个成员（快照，不含任何密钥）。"""
+    alias: str
+    provider: str
+    base_url: str | None = None
+    model_id: str
+    name: str
+    protocol: str | None = None
+    billing_group: str | None = None
 
 
 class ModelSpec(BaseModel):
@@ -45,11 +62,22 @@ class ModelSpec(BaseModel):
     protocol: str | None = None
     # 模型可理解的输入模态。反推提示词等多模态文本能力只认明确声明，不按模型名猜。
     input_modalities: list[ModelInputModality] = Field(default_factory=list)
+    # 只有局域网 Atelier 供应商有：网关那边的成员快照，能力取交集、估价取第一个（ADR-0025）。
+    via: list[ViaMember] | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_via(self, handler):
+        # 普通 KEY 没有 via：不写进 keys.json / API，旧数据与旧断言保持原样。
+        data = handler(self)
+        if data.get("via") is None:
+            data.pop("via", None)
+        return data
 
 
 class KeySpec(BaseModel):
     alias: str
     provider: Provider
+    enabled: bool = True
     base_url: str | None = None
     # 聚合商可按账号分组采用不同价目；未配置时计价器必须保持未知，不能猜 default。
     billing_group: str | None = None
@@ -91,6 +119,7 @@ class KeysDB(BaseModel):
     oss: OssConfig | None = None
     # 模型路由组内的供应商顺序覆盖：{模态: {路由 id: [alias, ...]}}，只存调整过的组。
     model_order: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
+    route_mode: dict[str, dict[str, RouteMode]] = Field(default_factory=dict)
 
 
 class DuplicateAliasError(Exception):
@@ -179,14 +208,24 @@ def _backfill_model_protocols(db: KeysDB) -> None:
                 spec.protocol = resolve_image_protocol(key.provider, key.base_url, spec.id)
 
 
+def keys_lock():
+    """所有配置读改写共用 sidecar 锁；write_keys_db 不重复加锁。"""
+    return file_lock(data_root.keys_file().with_suffix(".lock"))
+
+
 def write_keys_db(db: KeysDB) -> None:
     path = data_root.keys_file()
     path.parent.mkdir(parents=True, exist_ok=True)
-    # O_CREAT 直接带 0o600 创建，堵住「先 write 后 chmod」首次落盘的 umask 窗口。
-    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(json.dumps(db.model_dump(), ensure_ascii=False, indent=2))
-    _restrict_permissions(path)
+    # mkstemp 创建时即为 0600，原子替换让不持锁的模型目录读取也只看到完整配置。
+    fd, temporary = tempfile.mkstemp(prefix=".keys-", suffix=".tmp", dir=path.parent)
+    tmp = Path(temporary)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(db.model_dump(), ensure_ascii=False, indent=2))
+        _restrict_permissions(tmp)
+        _replace_with_retry(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _restrict_permissions(path: Path) -> None:
@@ -200,6 +239,23 @@ def _restrict_permissions(path: Path) -> None:
         os.chmod(path, 0o600)
 
 
+def size_channel(key: KeySpec, model: ModelSpec) -> tuple[KeySpec, ModelSpec]:
+    """尺寸、能力按实际渠道判断：网关供应商取网关那边第一个成员，其余原样返回。
+
+    网关端会按实际成员再归一一次；这里只决定接入端界面与提交时的参数形状。
+    """
+    via = model.via[0] if key.provider == "atelier" and model.via else None
+    if via is None:
+        return key, model
+    channel_model = ModelSpec(id=via.model_id, name=via.name, modality=model.modality,
+                              protocol=via.protocol)
+    channel_key = key.model_copy(update={
+        "provider": via.provider, "base_url": via.base_url, "billing_group": via.billing_group,
+        "models": [channel_model],
+    })
+    return channel_key, channel_model
+
+
 def find_by_alias(alias: str) -> KeySpec | None:
     for k in read_keys_db().keys:
         if k.alias == alias:
@@ -208,46 +264,58 @@ def find_by_alias(alias: str) -> KeySpec | None:
 
 
 def add_key(spec: KeySpec) -> None:
-    db = read_keys_db()
-    if any(k.alias == spec.alias for k in db.keys):
-        raise DuplicateAliasError(spec.alias)
-    db.keys.append(spec)
-    write_keys_db(db)
+    with keys_lock():
+        db = read_keys_db()
+        if any(k.alias == spec.alias for k in db.keys):
+            raise DuplicateAliasError(spec.alias)
+        db.keys.append(spec)
+        write_keys_db(db)
 
 
 def patch_key(alias: str, patch: dict) -> None:
-    db = read_keys_db()
-    for i, k in enumerate(db.keys):
-        if k.alias == alias:
-            db.keys[i] = k.model_copy(update=patch)
-            write_keys_db(db)
-            return
-    raise NoSuchAliasError(alias)
+    with keys_lock():
+        db = read_keys_db()
+        for i, k in enumerate(db.keys):
+            if k.alias == alias:
+                db.keys[i] = k.model_copy(update=patch)
+                write_keys_db(db)
+                return
+        raise NoSuchAliasError(alias)
 
 
 def delete_key(alias: str) -> None:
-    db = read_keys_db()
-    db.keys = [k for k in db.keys if k.alias != alias]
-    if db.default_alias == alias:
-        db.default_alias = None
-    db.model_order = {
-        modality: kept
-        for modality, routes in db.model_order.items()
-        if (kept := {
-            route_id: [item for item in aliases if item != alias]
-            for route_id, aliases in routes.items()
-            if any(item != alias for item in aliases)
-        })
-    }
-    write_keys_db(db)
+    with keys_lock():
+        db = read_keys_db()
+        db.keys = [k for k in db.keys if k.alias != alias]
+        if db.default_alias == alias:
+            db.default_alias = None
+        db.model_order = {
+            modality: kept
+            for modality, routes in db.model_order.items()
+            if (kept := {
+                route_id: [item for item in aliases if item != alias]
+                for route_id, aliases in routes.items()
+                if any(item != alias for item in aliases)
+            })
+        }
+        from character_workflow.lib.model_routes import _routes
+        identities = db.model_copy(update={"keys": [
+            key.model_copy(update={"enabled": True}) for key in db.keys
+        ]})
+        active = {(route.modality, route.id) for route in _routes(identities)}
+        db.route_mode = {modality: modes for modality, routes in db.route_mode.items()
+                         if (modes := {identifier: mode for identifier, mode in routes.items()
+                                      if (modality, identifier) in active})}
+        write_keys_db(db)
 
 
 def set_default_alias(alias: str) -> None:
-    db = read_keys_db()
-    if not any(k.alias == alias for k in db.keys):
-        raise NoSuchAliasError(alias)
-    db.default_alias = alias
-    write_keys_db(db)
+    with keys_lock():
+        db = read_keys_db()
+        if not any(k.alias == alias for k in db.keys):
+            raise NoSuchAliasError(alias)
+        db.default_alias = alias
+        write_keys_db(db)
 
 
 def is_openai_hk(base_url: str | None) -> bool:
@@ -259,10 +327,10 @@ def preferred_alias_for_kind(kind: Kind) -> str | None:
     db = read_keys_db()
     if db.default_alias:
         for k in db.keys:
-            if k.alias == db.default_alias and kind in k.capabilities:
+            if k.enabled and k.alias == db.default_alias and kind in k.capabilities:
                 return k.alias
     for k in db.keys:
-        if kind in k.capabilities:
+        if k.enabled and kind in k.capabilities:
             return k.alias
     return None
 
@@ -290,7 +358,7 @@ def keys_for_turn_start() -> list[dict]:
             "notes": k.notes,
             "is_default": k.alias == db.default_alias,
         }
-        for k in db.keys
+        for k in db.keys if k.enabled
     ]
 
 

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { AgentSection } from './AgentSection';
 
 function server(initial: { enabled: boolean; connections: Record<string, string> }, failEnable = false) {
-  let state = initial;
+  let state = { ...initial, config_paths: { 'claude-code': '/data/connections/agent.json', codex: '/custom/codex/config.toml' }, tools: [{ name: 'canvas_list_projects', billable: false }, { name: 'canvas_run', billable: true }] };
   const network = vi.fn(async (url: string, init?: RequestInit) => {
     expect(url).toBe('/api/connection/agent');
     if (init?.method === 'PUT') {
@@ -14,7 +14,7 @@ function server(initial: { enabled: boolean; connections: Record<string, string>
       }
       state = { ...state, enabled: true };
     }
-    if (init?.method === 'DELETE') state = { enabled: false, connections: {} };
+    if (init?.method === 'DELETE') state = { ...state, enabled: false, connections: {} };
     return new Response(JSON.stringify(state));
   });
   vi.stubGlobal('fetch', network); return network;
@@ -28,17 +28,20 @@ describe('Agent connection setting', () => {
     const toggle = await screen.findByRole('switch', { name: '允许 Agent 操作本机' });
     await waitFor(() => expect(toggle).toBeEnabled());
     expect(toggle).toHaveAttribute('aria-checked', 'false');
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('关闭后');
+    expect(screen.queryByRole('region', { name: '可用工具' })).not.toBeInTheDocument();
     fireEvent.click(toggle);
     await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
-    expect(screen.getByRole('status')).toHaveTextContent('等待 Agent 连接');
+    expect(screen.getByRole('status')).toHaveTextContent('0 个已连接');
+    expect(screen.getAllByText('等待连接')).toHaveLength(2);
     expect(network.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true);
   });
 
   it('shows connected hosts and turns off', async () => {
     const network = server({ enabled: true, connections: { codex: '2026-10-14T06:35:00Z' } });
     render(<AgentSection />);
-    expect(await screen.findByRole('status')).toHaveTextContent(/已连接 · Codex/);
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('1 个已连接'));
+    expect(within(screen.getByRole('region', { name: 'Codex' })).getByText(/已连接 ·/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('switch', { name: '允许 Agent 操作本机' }));
     await waitFor(() => expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'false'));
     expect(network.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(true);
@@ -60,4 +63,14 @@ describe('Agent connection setting', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('返回格式不对');
     expect(screen.getByRole('switch')).toBeDisabled();
   });
+});
+
+it('使用服务端路径与工具列表，标注计费工具并保留授权文案', async () => {
+  server({ enabled: true, connections: {} });
+  render(<AgentSection />);
+  expect(await screen.findByText('/custom/codex/config.toml')).toBeInTheDocument();
+  expect(screen.getByText('/data/connections/agent.json')).toBeInTheDocument();
+  expect(screen.getByText('canvas_run').parentElement).toHaveAttribute('title', '计费工具');
+  expect(screen.getByText('计费工具需先获得你的授权')).toBeInTheDocument();
+  expect(screen.getByText('canvas_list_projects')).toBeInTheDocument();
 });

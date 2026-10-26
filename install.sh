@@ -120,6 +120,34 @@ if [ "${1:-}" = "--uninstall" ]; then
 fi
 
 if [ "$SYNC_ONLY" = 1 ]; then
+  # 内容通过链接即时生效；只有链接集合或目标发生变化才需同步。
+  links_current=1
+  has_install=0
+  if is_our_link "$CLAUDE_LINK"; then
+    has_install=1
+    [ "$(readlink "$CLAUDE_LINK")" = "$REPO_ROOT" ] || links_current=0
+    for t in "$HOME/.claude/skills/"*; do
+      [ "$t" = "$CLAUDE_LINK" ] || ! is_our_link "$t" || links_current=0
+    done
+  fi
+  if has_codex_install; then
+    has_install=1
+    for s in "${SKILLS[@]}"; do
+      t="$CODEX_DIR/$PLUGIN_NAME-$s"
+      if [ ! -L "$t" ] || [ "$(readlink "$t")" != "$REPO_ROOT/skills/$s" ]; then
+        links_current=0
+      fi
+    done
+    for t in "$CODEX_DIR/$PLUGIN_NAME-"*; do
+      is_our_link "$t" || continue
+      s="${t##*/$PLUGIN_NAME-}"
+      [ -f "$REPO_ROOT/skills/$s/SKILL.md" ] || links_current=0
+    done
+  fi
+  if [ "$has_install" = 1 ] && [ "$links_current" = 1 ]; then
+    echo "Skill 无变化，跳过"
+    exit 0
+  fi
   echo "=== game-atelier 本地同步（源码：${REPO_ROOT}）==="
 else
   echo "=== game-atelier 本地安装（源码：${REPO_ROOT}）==="

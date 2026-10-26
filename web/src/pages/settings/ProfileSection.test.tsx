@@ -27,6 +27,7 @@ describe('ProfileSection', () => {
     render(<ProfileSection />);
     const input = await screen.findByLabelText('显示名');
     await waitFor(() => expect(input).toHaveValue('老王'));
+    expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument();
   });
 
   it('改名后点保存调用 saveProfile', async () => {
@@ -48,4 +49,30 @@ describe('ProfileSection', () => {
     fireEvent.change(input, { target: { value: '  ' } });
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
   });
+});
+
+it('保存成功隐藏按钮，撤回改动或仅空白变化也不显示', async () => {
+  render(<ProfileSection />);
+  const input = await screen.findByLabelText('显示名');
+  await waitFor(() => expect(input).toHaveValue('老王'));
+  fireEvent.change(input, { target: { value: ' 老王 ' } });
+  expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument();
+  fireEvent.change(input, { target: { value: '小李' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: /保存/ })).not.toBeInTheDocument());
+  expect(input).toHaveValue('小李');
+  fireEvent.change(input, { target: { value: '临时' } });
+  fireEvent.change(input, { target: { value: '小李' } });
+  expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument();
+});
+it('保存失败保留编辑值和重试入口', async () => {
+  mockSaveProfile.mockRejectedValueOnce(new Error('保存失败'));
+  render(<ProfileSection />);
+  const input = await screen.findByLabelText('显示名');
+  await waitFor(() => expect(input).toHaveValue('老王'));
+  fireEvent.change(input, { target: { value: '小李' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('保存失败');
+  expect(input).toHaveValue('小李');
+  expect(screen.getByRole('button', { name: '保存' })).toBeEnabled();
 });

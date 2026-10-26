@@ -20,7 +20,8 @@ from typing import Callable, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from character_workflow.lib import data_root
-from character_workflow.lib.atomic_io import atomic_write_json
+from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
+from character_workflow.lib.canvas_specs import SPEC_FILENAME, validate_text
 from character_workflow.lib.canvas_agent_sessions import canvas_agent_sessions_lock_path
 from character_workflow.lib.canvas_projects import (
     _project_dir_unchecked,
@@ -413,7 +414,7 @@ def _portable_job(job: Job, document: CanvasDocument) -> bytes:
 def _metadata_files(project_dir: Path) -> list[Path]:
     files: list[Path] = []
     project_root = project_dir.resolve()
-    for pattern in ("agent/sessions/*.json", "plugins/*/state.json"):
+    for pattern in ("agent/sessions/*.json", "plugins/*/state.json", "specs/*.md", "agent/lessons.md"):
         for path in sorted(project_dir.glob(pattern)):
             resolved = path.resolve()
             if (
@@ -482,6 +483,14 @@ def export_canvas_projects(
                 relative = source.relative_to(project_dir).as_posix()
                 metadata[f"{prefix}/{relative}"] = source.read_bytes()
             for path, body in metadata.items():
+                if path.endswith(".md"):
+                    try:
+                        validate_text(body.decode("utf-8"))
+                    except (UnicodeDecodeError, ValueError) as error:
+                        raise CanvasPackageError(f"规范文件不合法：{path}") from error
+                    entries[path] = (body, "text/markdown", "metadata")
+                    paths.append(path)
+                    continue
                 try:
                     payload = json.loads(body)
                 except json.JSONDecodeError as error:
@@ -729,11 +738,18 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
         job_paths: set[str] = set()
         agent_paths: set[str] = set()
         plugin_paths: set[str] = set()
+        markdown_paths: set[str] = set()
         for path in row.entry_paths:
             if not path.startswith(f"{prefix}/"):
                 continue
             parts = PurePosixPath(path).relative_to(prefix).parts
-            if len(parts) == 2 and parts[0] == "jobs" and parts[1].endswith(".json"):
+            if (len(parts) == 2 and parts[0] == "specs" and re.fullmatch(SPEC_FILENAME, parts[1])) or parts == ("agent", "lessons.md"):
+                markdown_paths.add(path)
+                try:
+                    validate_text(archive.read(path).decode("utf-8"))
+                except (UnicodeDecodeError, ValueError) as error:
+                    raise CanvasPackageError(f"规范文件不合法：{path}") from error
+            elif len(parts) == 2 and parts[0] == "jobs" and parts[1].endswith(".json"):
                 job_paths.add(path)
             elif (
                 len(parts) == 3
@@ -743,13 +759,13 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
                 agent_paths.add(path)
             elif len(parts) == 3 and parts[0] == "plugins" and parts[2] == "state.json":
                 plugin_paths.add(path)
-        allowed_metadata.update(job_paths | agent_paths | plugin_paths)
+        allowed_metadata.update(job_paths | agent_paths | plugin_paths | markdown_paths)
         project_metadata = {path for path in row.entry_paths if path.startswith(f"{prefix}/")}
         if project_metadata != allowed_metadata:
             raise CanvasPackageError(f"项目 {row.package_project_id} 包含未知元数据路径")
         if any(
             entry_by_path[path].role != "metadata"
-            or entry_by_path[path].mime_type != "application/json"
+            or entry_by_path[path].mime_type != ("text/markdown" if path in markdown_paths else "application/json")
             for path in project_metadata
         ):
             raise CanvasPackageError(f"项目 {row.package_project_id} 的元数据角色不正确")
@@ -763,6 +779,10 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
             or document.project_id != project.project_id
         ):
             raise CanvasPackageError("项目包 original_project_id 与文档不一致")
+
+        if any(f"{prefix}/specs/{filename}" not in markdown_paths
+               for filename in project.category_spec_files.values()):
+            raise CanvasPackageError("项目包缺少类别规范文件")
 
         jobs: list[Job] = []
         for path in row.entry_paths:
@@ -1106,13 +1126,16 @@ def _import_project(
         atomic_write_json(target / "project.json", project.model_dump(mode="json"))
         atomic_write_json(target / "canvas.json", document.model_dump(mode="json"))
         for path in sorted(row.entry_paths):
-            if path.startswith(f"{prefix}/agent/"):
+            if path.startswith(f"{prefix}/agent/sessions/"):
                 relative = PurePosixPath(path).relative_to(prefix)
                 destination = target.joinpath(*relative.parts)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 session = CanvasAgentSession.model_validate_json(archive.read(path))
                 remapped_session = session.model_copy(update={"project_id": project_id})
                 atomic_write_json(destination, remapped_session.model_dump(mode="json"))
+            elif path.startswith(f"{prefix}/specs/") or path == f"{prefix}/agent/lessons.md":
+                relative = PurePosixPath(path).relative_to(prefix)
+                atomic_write_bytes(target.joinpath(*relative.parts), archive.read(path))
             elif path.startswith(f"{prefix}/plugins/"):
                 relative = PurePosixPath(path).relative_to(prefix)
                 destination = target.joinpath(*relative.parts)

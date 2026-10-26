@@ -68,8 +68,15 @@ def test_invalid_codex_config_is_reported_and_left_untouched(client, tmp_path, m
 def test_status_reports_which_hosts_connected(client, tmp_path, monkeypatch):  # noqa: F811
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "absent"))
     bootstrap(client)
-    assert client.get("/api/connection/agent").json() == {"enabled": False, "connections": {}}
-    assert client.put("/api/connection/agent", json={}).json() == {"enabled": True, "connections": {}}
+    from character_workflow.mcp.tool_catalog import TOOL_DEFINITIONS
+
+    metadata = {
+        "config_paths": {"claude-code": str(data_root.agent_credential_file()),
+                         "codex": str(tmp_path / "absent" / "config.toml")},
+        "tools": [{"name": tool.name, "billable": tool.billable} for tool in TOOL_DEFINITIONS],
+    }
+    assert client.get("/api/connection/agent").json() == {"enabled": False, "connections": {}, **metadata}
+    assert client.put("/api/connection/agent", json={}).json() == {"enabled": True, "connections": {}, **metadata}
     credential = read_private_json(data_root.agent_credential_file())
     native = TestClient(client.app, base_url=ORIGIN)
     payload = {"grant_id": credential["grant_id"], "grant_token": credential["grant_token"],
@@ -81,6 +88,6 @@ def test_status_reports_which_hosts_connected(client, tmp_path, monkeypatch):  #
                        json={**payload, "client": "cursor"}).status_code == 422
     # 关掉开关：状态清空，旧凭据换不到会话。
     assert client.request("DELETE", "/api/connection/agent", json={}).json() == {
-        "enabled": False, "connections": {},
+        "enabled": False, "connections": {}, **metadata,
     }
     assert native.post("/api/connection/agent-sessions", json=payload).status_code == 403

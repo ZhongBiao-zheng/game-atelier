@@ -23,11 +23,11 @@ from character_workflow.lib import canvas_agent_layout as layout
 from character_workflow.lib import canvas_agent_skills as skills
 from character_workflow.lib import canvas_agent_tools as tools
 from character_workflow.lib import canvas_agent_vision as vision
-from character_workflow.lib import keys
+from character_workflow.lib import keys, canvas_specs
 from character_workflow.lib.canvas_agent_models import chat_base_url
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasChange, CanvasListModelsInput, CanvasProjectInput,
-    CanvasReadMediaInput, GetRunInput, RunInput,
+    CanvasReadMediaInput, CanvasSearchLibraryInput, GetRunInput, RunInput,
 )
 from character_workflow.lib.canvas_agent_sessions import (
     mutate_canvas_agent_session, read_canvas_agent_session, with_appended_messages,
@@ -37,7 +37,7 @@ from character_workflow.lib.schemas import (
     CanvasAgentApproval, CanvasAgentMessageCreate, CanvasAgentReference, CanvasAgentSession,
     redact_canvas_agent_private_text as redact,
 )
-from character_workflow.lib.workshop import WorkshopError
+from character_workflow.lib.canvas_tool_common import CanvasToolError
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ MEDIA_SCHEME = "atelier-media://"
 LOCAL = SimpleNamespace(kind="local", session_id="canvas-chat", grant_id=None)
 
 READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "read_media", "load_skill",
-                        "read_skill_file", "wait_for_run"})
+                        "read_skill_file", "wait_for_run", "read_spec", "search_library"})
 
 INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术和策划在无限画布上出图、出视频。
 
@@ -72,9 +72,22 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
 - 发起生成后调用 wait_for_run 等结果，结果图会附在工具结果后面给你看。看完向用户简短汇报：
   画面是否符合要求、哪里需要改。只有用户明确让你「多试几次 / 迭代到满意」时才自己改提示词重跑。
 - 想看画布上已有的某张图，用 read_media，图片同样会附给你。
+- 图片尺寸：要固定像素写 size（如 1024x1536），按比例写 ratio（可加 resolution），二选一；
+  不要同时写，界面按你写的那种显示。
+- 对比节点（type=compare）只接两张图：connect 时 slot 填 before 或 after；不填则先 before 后 after，
+  指定的一路已有图会被替换。
 - list_models 返回空列表时不要建生成节点，告诉用户在输入框的「模型偏好」里选择模型。
 - 生成是付费的。不要自动重试失败的生成；失败时告诉用户原因，由用户决定。
 - 用户拒绝某个操作时，不要换个方式再做同一件事，先问用户想怎么改。
+- 用户提出出图需求时：判断类别 → read_spec(类别) → search_library(类别)，按需再搜相关类别
+  （例如弹窗需要按钮和底图）。优先挑 3–5 张同类、0–2 张相关类，总数不超过 list_models
+  中该模型的 reference_limits.image。库为空或无匹配类别时直说，按项目和类别规范继续。
+- 选好参考后，在回复里列出每张参考的标题、类别与一句选择理由。一次 apply_changes 完成：
+  add_asset_node 各参考 → add_surface → set_draft → connect 每个参考到生成节点。
+  每个参考必须成为可见节点和 input 连线，不得隐藏输入。add_asset_node 返回 asset_nodes 与
+  node_aliases；已有同一资产时复用原节点及其冻结版本，同批连线会自动改用真实节点 ID。
+  不要为已有参考创建重复节点；只有用户明确要求生成时才 run_generation。
+- 用户纠正了规律性问题时，用 append_lesson 记下经验，等用户采纳。
 - 回复用中文，简短直接。"""
 
 
@@ -98,7 +111,7 @@ class ModelScope:
         """该类型可用的生成模型。"""
         if kind not in self.kinds():
             return []
-        from character_workflow.lib.workshop_generation import model_rows
+        from character_workflow.lib.canvas_model_catalog import model_rows
         rows = model_rows(kind)
         if self.preferred is None:
             return rows
@@ -151,7 +164,7 @@ def _with_fresh_revision(project_id: str, call: Callable[[int], dict]) -> dict:
     """确认可能等了很久，画布早已被用户改过：执行时取当前修订号，撞车再读一次。"""
     try:
         return call(_current_revision(project_id))
-    except WorkshopError as error:
+    except CanvasToolError as error:
         if error.code != "DOCUMENT_CONFLICT":
             raise
         return call(_current_revision(project_id))
@@ -166,17 +179,17 @@ def _check_generation_allowed(project_id: str, node_id: str, scope: ModelScope) 
     if draft is None or draft.mode not in ("image", "video"):
         return
     if draft.mode not in scope.kinds():
-        raise WorkshopError("INVALID_PARAMETERS",
+        raise CanvasToolError("INVALID_PARAMETERS",
                             f"当前创作模式不能生成{'视频' if draft.mode == 'video' else '图片'}", 422)
     allowed = {(row["alias"], row["model"]) for row in scope.models(draft.mode)}
     if not allowed:
-        raise WorkshopError("INVALID_PARAMETERS", "模型偏好里没有可用的"
+        raise CanvasToolError("INVALID_PARAMETERS", "模型偏好里没有可用的"
                             f"{'视频' if draft.mode == 'video' else '图片'}模型，请用户先在模型偏好里选择", 422)
     if (draft.alias, draft.model) not in allowed:
         if draft.alias is None:
-            raise WorkshopError("INVALID_PARAMETERS", "set_draft 缺少 alias：alias 与 model 是两个"
+            raise CanvasToolError("INVALID_PARAMETERS", "set_draft 缺少 alias：alias 与 model 是两个"
                                 "字段，都要填 list_models 返回的值", 422)
-        raise WorkshopError("INVALID_PARAMETERS",
+        raise CanvasToolError("INVALID_PARAMETERS",
                             f"模型 {draft.alias}/{draft.model} 不在可用范围内，请从 list_models 里选", 422)
 
 
@@ -198,11 +211,20 @@ def _with_draft_aliases(changes: list, scope: ModelScope) -> list:
 
 def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope = ALL_MODELS,
                  created_ids: frozenset[str] = frozenset()) -> tuple[dict, list[str]]:
-    """Run one tool call; returns (result, node ids it created). Raises WorkshopError.
+    """Run one tool call; returns (result, node ids it created). Raises CanvasToolError.
 
     created_ids: 本会话已建的节点，新节点排位时用来找「上一次出图」。"""
+    if tool == "search_library":
+        from character_workflow.lib.canvas_agent_library import search_library
+        payload = CanvasSearchLibraryInput(project_id=project_id, **arguments)
+        tools.authorize(LOCAL, project_id, "canvas_read")
+        return search_library(project_id, payload.category, payload.limit), []
+    if tool == "read_spec":
+        return {"text": canvas_specs.read_spec(project_id, arguments["category"])}, []
+    if tool == "append_lesson":
+        return canvas_specs.append_lesson(project_id, arguments["text"]), []
     if tool == "get_canvas":
-        return tools.get_document(LOCAL, CanvasProjectInput(project_id=project_id)), []
+        return canvas_view(project_id, arguments.get("node_ids")), []
     if tool == "list_models":
         payload = CanvasListModelsInput(project_id=project_id, mode=arguments.get("mode", "image"))
         tools.authorize(LOCAL, payload.project_id, "canvas_read")
@@ -244,7 +266,44 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
             return result
         result = _with_fresh_revision(project_id, submit)
         return result, [result["result_node_id"]] if result.get("result_node_id") else []
-    raise WorkshopError("INVALID_TARGET", f"未知工具 {tool}", 422)
+    raise CanvasToolError("INVALID_TARGET", f"未知工具 {tool}", 422)
+
+
+def canvas_view(project_id: str, node_ids: list[str] | None) -> dict:
+    """完整画布超过工具输出上限时改回概览，而不是按字符截断：截断会让模型把读不到的节点当成不存在。"""
+    view = tools.get_document(LOCAL, CanvasProjectInput(project_id=project_id))
+    if node_ids:
+        wanted = set(node_ids)
+        missing = wanted - {node["id"] for node in view["nodes"]}
+        if missing:
+            raise CanvasToolError("INVALID_TARGET", f"画布里没有节点 {'、'.join(sorted(missing))}", 422)
+        nodes = [node for node in view["nodes"] if node["id"] in wanted]
+        version_ids = {node.get("version_id") for node in nodes}
+        return {**view, "nodes": nodes,
+                "connections": [edge for edge in view["connections"]
+                                if wanted & {edge["source_node_id"], edge["target_node_id"]}],
+                "media_versions": [m for m in view["media_versions"] if m["version_id"] in version_ids]}
+    if len(json.dumps(view, ensure_ascii=False)) <= TOOL_OUTPUT_LIMIT:
+        return view
+    group_of = {member: node["id"] for node in view["nodes"] for member in node.get("member_node_ids", [])}
+    rows = [[node["id"], node["type"], node["title"],
+             node["version_id"] is not None if "version_id" in node else None,
+             node["draft"] is not None if "draft" in node else None,
+             group_of.get(node["id"])] for node in view["nodes"]]
+    overview = {"project_id": view["project_id"], "revision": view["revision"], "overview": True,
+                "hint": "画布较大，这是概览：省略了版本 ID、文本正文、生成配置、位置和连线 ID。"
+                        "has_content 为 false 才表示节点没有内容（分组为 null）；要引用或修改节点前，"
+                        "先用 get_canvas 的 node_ids 读取这些节点的完整信息。",
+                "node_columns": ["id", "type", "title", "has_content", "has_draft", "group"],
+                "nodes": rows,
+                "connections": [[edge["source_node_id"], edge["target_node_id"], edge["slot"]]
+                                for edge in view["connections"]]}
+    # 仍超限时只列最新的节点，并明说省略了多少，避免模型把没列出的节点当成不存在。
+    while len(json.dumps(overview, ensure_ascii=False)) > TOOL_OUTPUT_LIMIT and overview["nodes"]:
+        keep = len(overview["nodes"]) * 3 // 4
+        overview["nodes"] = overview["nodes"][-keep:] if keep else []
+        overview["omitted_nodes"] = len(rows) - len(overview["nodes"])
+    return overview
 
 
 def run_tool_safely(project_id: str, tool: str, arguments: dict, scope: ModelScope = ALL_MODELS,
@@ -252,12 +311,12 @@ def run_tool_safely(project_id: str, tool: str, arguments: dict, scope: ModelSco
     """Tool output text for the model; errors become text the model can react to."""
     try:
         result, created = execute_tool(project_id, tool, arguments, scope, created_ids)
-    except WorkshopError as error:
+    except CanvasToolError as error:
         return f"错误（{error.code}）：{error.message}", []
     except (KeyError, TypeError, ValueError) as error:
         return f"参数错误：{error}", []
     text = json.dumps(result, ensure_ascii=False)
-    if len(text) > TOOL_OUTPUT_LIMIT:
+    if tool != "read_spec" and len(text) > TOOL_OUTPUT_LIMIT:
         text = text[:TOOL_OUTPUT_LIMIT] + "…（已截断）"
     return text, created
 
@@ -276,13 +335,26 @@ def tool_error_label(text: str) -> str:
 # ── 工具定义（给模型看的 schema）─────────────────────────────────────────────────
 
 TOOL_SPECS: dict[str, tuple[str, dict]] = {
-    "get_canvas": ("读取当前画布：节点、文本、生成配置、连线、媒体版本。",
-                   {"type": "object", "properties": {}}),
+    "search_library": ("搜索本项目已定稿参考图，返回资产 ID、标题、类别和尺寸，并附缩略图。",
+                       {"type": "object", "properties": {
+                           "category": {"type": "string"},
+                           "limit": {"type": "integer", "minimum": 1, "maximum": 12}}}),
+    "read_spec": ("读取类别规范全文，不存在返回空文本。",
+                  {"type": "object", "required": ["category"],
+                   "properties": {"category": {"type": "string"}}}),
+    "append_lesson": ("记录一条待审项目经验，用户采纳后才生效。",
+                      {"type": "object", "required": ["text"],
+                       "properties": {"text": {"type": "string", "minLength": 1, "maxLength": 300}}}),
+    "get_canvas": ("读取当前画布：节点、文本、生成配置、连线、媒体版本。画布较大时返回概览，"
+                   "再用 node_ids 读取具体节点。",
+                   {"type": "object", "properties": {
+                       "node_ids": {"type": "array", "items": {"type": "string"},
+                                    "minItems": 1, "maxItems": 20}}}),
     "list_models": ("列出可用于生成配置的图片 / 视频模型（alias + model + 参数能力）。",
                     {"type": "object", "properties": {
                         "mode": {"type": "string", "enum": ["image", "video"]}}}),
     "apply_changes": (
-        "在当前画布上批量改动：add_text / add_media_node / add_surface / set_text / set_draft / "
+        "在当前画布上批量改动：add_text / add_media_node / add_asset_node / add_surface / set_text / set_draft / "
         "connect / disconnect / move / remove_node。整批原子提交。", {}),
     "run_generation": ("在已写好生成配置的图片 / 视频节点上发起生成（付费）。",
                        {"type": "object", "required": ["surface_node_id"], "properties": {
@@ -337,6 +409,8 @@ def arguments_valid(project_id: str, tool: str, arguments: dict) -> bool:
     """写操作的参数先按真实入参模型校验：不合格的调用不打扰用户，直接把校验错误回给模型去改。"""
     from pydantic import ValidationError
     try:
+        if tool == "append_lesson":
+            canvas_specs.validate_lesson(arguments.get("text"))
         if tool == "apply_changes":
             ApplyChangesInput(project_id=project_id, expected_revision=0,
                               changes=arguments.get("changes") or [])
@@ -344,7 +418,7 @@ def arguments_valid(project_id: str, tool: str, arguments: dict) -> bool:
             RunInput(project_id=project_id, expected_revision=0,
                      surface_node_id=arguments.get("surface_node_id", ""),
                      requested_count=arguments.get("count", 1))
-    except (ValidationError, TypeError):
+    except (ValidationError, TypeError, ValueError):
         return False
     return True
 
@@ -361,7 +435,7 @@ async def _wait_for_run(project_id: str, run_id: str) -> str:
             lambda: tools.get_run(LOCAL, GetRunInput(project_id=project_id, run_id=run_id)),
             lambda version_id: _is_image_version(project_id, version_id),
         )
-    except WorkshopError as error:
+    except CanvasToolError as error:
         return f"错误（{error.code}）：{error.message}"
     return json.dumps(result, ensure_ascii=False)
 
@@ -400,10 +474,16 @@ def build_tools() -> list:
 # ── 历史 ↔ 模型输入 ──────────────────────────────────────────────────────────────
 
 def _media_data_url(project_id: str, version_id: str) -> str | None:
+    from character_workflow.lib.canvas_agent_library import ASSET_IMAGE_PREFIX, preview
+    if version_id.startswith(ASSET_IMAGE_PREFIX):
+        try:
+            return preview(project_id, version_id.removeprefix(ASSET_IMAGE_PREFIX))[0]
+        except (KeyError, OSError, ValueError):
+            return None
     try:
         media = tools.read_media(LOCAL, CanvasReadMediaInput(project_id=project_id,
                                                              version_id=version_id))
-    except WorkshopError:
+    except CanvasToolError:
         return None
     preview = media.get("preview")
     return f"data:{preview['mime_type']};base64,{preview['data_base64']}" if preview else None
@@ -491,7 +571,8 @@ def _arguments(raw: str | None) -> dict:
 
 
 READ_LABELS = {"get_canvas": "读取画布", "list_models": "查看可用模型", "get_run": "查询生成进度",
-               "read_media": "读取媒体信息", "wait_for_run": "等待生成结果"}
+               "read_media": "读取媒体信息", "wait_for_run": "等待生成结果",
+               "search_library": "查找项目参考", "read_spec": "读取类别规范"}
 
 
 def summarize_call(tool: str, arguments: dict) -> str:
@@ -562,19 +643,24 @@ def display_messages(items: list[dict], turn_id: str) -> list[CanvasAgentMessage
 
 def build_agent(session: CanvasAgentSession):
     from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, set_tracing_disabled
-    from openai import AsyncOpenAI
+    from openai import AsyncOpenAI, DefaultAsyncHttpxClient
     from openai.types.shared import Reasoning
     set_tracing_disabled(True)  # 否则 SDK 会把对话轨迹上传到 OpenAI
     key = keys.find_by_alias(session.model_alias or "")
     if key is None or not session.model:
-        raise WorkshopError("INVALID_PARAMETERS", "请先选择对话模型", 422)
-    client = AsyncOpenAI(base_url=chat_base_url(key), api_key=key.access_key, max_retries=2)
+        raise CanvasToolError("INVALID_PARAMETERS", "请先选择对话模型", 422)
+    if not key.enabled:
+        raise CanvasToolError("MODEL_UNAVAILABLE", "供应商已停用", 422)
+    # 局域网网关直连，不读本机代理环境（与图片 caller 一致）。
+    http_client = DefaultAsyncHttpxClient(trust_env=False) if key.provider == "atelier" else None
+    client = AsyncOpenAI(base_url=chat_base_url(key), api_key=key.access_key, max_retries=2,
+                         http_client=http_client)
     settings = ModelSettings(reasoning=Reasoning(effort=session.effort)) if session.effort \
         else ModelSettings()
     return Agent(
         name="canvas-agent",
         instructions=INSTRUCTIONS + CREATION_MODE_PROMPTS[session.creation_mode]
-        + skills.skills_prompt(),
+        + skills.skills_prompt() + canvas_specs.instructions(session.project_id),
         tools=build_tools(),
         model=OpenAIChatCompletionsModel(model=session.model, openai_client=client),
         model_settings=settings,
@@ -584,7 +670,7 @@ def build_agent(session: CanvasAgentSession):
 def friendly_error(error: BaseException) -> str:
     from agents.exceptions import MaxTurnsExceeded
     from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError
-    if isinstance(error, WorkshopError):
+    if isinstance(error, CanvasToolError):
         return error.message
     if isinstance(error, MaxTurnsExceeded):
         return "这一轮步骤太多，已停下；可以让它继续"
@@ -751,9 +837,9 @@ def begin_user_turn(project_id: str, session_id: str, text: str, node_ids: list[
 
     def update(current: CanvasAgentSession, now: str) -> dict:
         if current.status in {"running", "awaiting_approval"}:
-            raise WorkshopError("SESSION_BUSY", "上一轮还没结束", 409)
+            raise CanvasToolError("SESSION_BUSY", "上一轮还没结束", 409)
         if not current.model or not current.model_alias:
-            raise WorkshopError("INVALID_PARAMETERS", "请先选择对话模型", 422)
+            raise CanvasToolError("INVALID_PARAMETERS", "请先选择对话模型", 422)
         message = CanvasAgentMessageCreate(
             role="user", text=redact(text), title=skill,
             references=[CanvasAgentReference(**ref) for ref in references],
@@ -772,9 +858,9 @@ def resolve_approvals(project_id: str, session_id: str,
     """Execute approved calls, reject the rest, append their outputs, mark running."""
     session = read_canvas_agent_session(project_id, session_id)
     if session.status != "awaiting_approval":
-        raise WorkshopError("SESSION_BUSY", "没有待确认的操作", 409)
+        raise CanvasToolError("SESSION_BUSY", "没有待确认的操作", 409)
     if set(decisions) != {approval.call_id for approval in session.pending_approvals}:
-        raise WorkshopError("INVALID_PARAMETERS", "请对每个待确认操作都给出决定", 422)
+        raise CanvasToolError("INVALID_PARAMETERS", "请对每个待确认操作都给出决定", 422)
     outputs: list[dict] = []
     results: list[CanvasAgentMessageCreate] = []
     created: set[str] = set()
@@ -795,7 +881,7 @@ def resolve_approvals(project_id: str, session_id: str,
 
     def update(current: CanvasAgentSession, now: str) -> dict:
         if current.status != "awaiting_approval":
-            raise WorkshopError("SESSION_BUSY", "没有待确认的操作", 409)
+            raise CanvasToolError("SESSION_BUSY", "没有待确认的操作", 409)
         return {**with_appended_messages(current, results, now),
                 "history": [*current.history, *outputs], "pending_approvals": [],
                 "status": "running",

@@ -1,6 +1,6 @@
 import { type ButtonHTMLAttributes, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Bookmark, BookmarkPlus, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Share2, Square, Trash2 } from 'lucide-react';
+import { AlertTriangle, Bookmark, BookmarkPlus, Download, Eye, EyeOff, Film, Heart, Info, Music, Pencil, Share2, Square, Trash2 } from 'lucide-react';
 
 import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
@@ -183,7 +183,6 @@ export function RoundList({
   onDeleteBatch,
   onReuseReferences,
   onEditAsReference,
-  onArchive,
   onSavePromptAsset,
   onSaveResultAsset,
   onShareResult,
@@ -201,7 +200,6 @@ export function RoundList({
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onEditAsReference?: (path: string) => void | Promise<void>;
-  onArchive?: (jobId: string, path: string, kind: 'image' | 'video') => void;
   onSavePromptAsset?: (config: RoundConfig) => void;
   onSaveResultAsset?: SaveResultAssetHandler;
   /** index 是 imagePaths 下标（= Job.output_paths 下标），分享来源的 output_index 直接用它。 */
@@ -351,7 +349,6 @@ export function RoundList({
                   onLightbox={setLightboxSrc}
                   onReuseReferences={onReuseReferences}
                   onEditAsReference={onEditAsReference}
-                  onArchive={onArchive}
                   onSavePromptAsset={onSavePromptAsset}
                   onSaveResultAsset={onSaveResultAsset}
                   onShareResult={onShareResult}
@@ -898,7 +895,6 @@ function DoneBatch({
   onLightbox,
   onReuseReferences,
   onEditAsReference,
-  onArchive,
   onSavePromptAsset,
   onSaveResultAsset,
   onShareResult,
@@ -915,7 +911,6 @@ function DoneBatch({
   onLightbox?: (src: string) => void;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onEditAsReference?: (path: string) => void | Promise<void>;
-  onArchive?: (jobId: string, path: string, kind: 'image' | 'video') => void;
   onSavePromptAsset?: (config: RoundConfig) => void;
   onSaveResultAsset?: SaveResultAssetHandler;
   onShareResult?: ShareResultHandler;
@@ -1036,17 +1031,7 @@ function DoneBatch({
                         onClick={() => saveResult(index, path, 'video')}
                       />
                     )}
-                    {round.mode !== 'skill' && onArchive && (
-                      <button
-                        type="button"
-                        onClick={() => onArchive(round.jobId, path, 'video')}
-                        aria-label={`归档生成视频 ${index + 1} 到项目`}
-                        title="归档到项目"
-                        className="grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                      >
-                        <FolderInput className="size-4" aria-hidden />
-                      </button>
-                    )}
+
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); void onToggleFavorite?.(path); }}
@@ -1096,20 +1081,7 @@ function DoneBatch({
                         onClick={() => saveResult(index, path, 'image')}
                       />
                     )}
-                    {round.mode !== 'skill' && onArchive && (
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onArchive(round.jobId, path, 'image');
-                        }}
-                        aria-label={`归档生成结果 ${index + 1} 到项目`}
-                        title="归档到项目"
-                        className="grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                      >
-                        <FolderInput className="size-4" aria-hidden />
-                      </button>
-                    )}
+
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); void onToggleFavorite?.(path); }}
@@ -1162,7 +1134,7 @@ function DoneBatch({
         <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
         {/* skill 出图（角色立绘/KV/三视图）在出图页只作溯源展示——删除会从磁盘抹掉角色资产，
             该操作只留在工坊页。这里仅对 studio 自家出图开放「删除该批次结果」。 */}
-        {(onSavePromptAsset || round.mode !== 'skill') && (
+        {(onSavePromptAsset || round.mode !== 'canvas') && (
         <div className="relative" ref={menuWrapRef}>
           <ActionButton compact aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
           {menuOpen && (
@@ -1181,7 +1153,7 @@ function DoneBatch({
                   保存提示词资产
                 </button>
               )}
-              {round.mode !== 'skill' && (
+              {round.mode !== 'canvas' && (
                 <button
                   type="button"
                   aria-label="删除该批次结果"

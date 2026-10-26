@@ -19,12 +19,6 @@ def _studio_job(job_id: str, status: JobStatus) -> Job:
 def test_fail_orphan_studio_jobs_only_touches_pending_studio(isolated_data_root):
     jobs_lib.save_job(_studio_job("studio-pending", JobStatus.PENDING))
     jobs_lib.save_job(_studio_job("studio-done", JobStatus.DONE))
-    # character job 由独立 Skill 进程跑，server 重启不代表它死了 —— 不能动。
-    jobs_lib.write_job(
-        job_id="char-pending", character_id="c1", prompt="p",
-        model="m", params={}, status=JobStatus.PENDING,
-    )
-
     reclaimed = jobs_lib.fail_orphan_studio_jobs()
 
     assert reclaimed == ["studio-pending"]
@@ -32,7 +26,6 @@ def test_fail_orphan_studio_jobs_only_touches_pending_studio(isolated_data_root)
     assert orphan.status == JobStatus.FAILED
     assert "interrupted" in (orphan.error or "")
     assert jobs_lib.read_job("studio-done").status == JobStatus.DONE
-    assert jobs_lib.read_job("char-pending").status == JobStatus.PENDING
 
 
 def test_recoverable_tuzi_async_job_is_resumed_instead_of_failed(isolated_data_root):

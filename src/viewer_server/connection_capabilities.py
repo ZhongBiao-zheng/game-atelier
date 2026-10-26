@@ -7,53 +7,13 @@ from starlette.routing import compile_path
 _LOCAL_ROUTES = """
 GET /api/jobs
 GET /api/jobs/{job_id}
-GET /api/spec/{character_id}
-GET /api/characters
-GET /api/projects/{project_id}/characters/index
-GET /api/projects/{project_id}/characters/{character_id}/workspace
-PUT /api/projects/{project_id}/character-associations
-GET /api/projects/{project_id}/character-associations
-GET /api/home
-POST /api/characters/{character_id}/rename
-GET /api/active-character
-GET /api/images
 GET /api/config
-GET /api/characters/{character_id}/canonical
-POST /api/characters/{character_id}/canonical
-GET /api/projects/{project_id}/ui-schemes/{scheme_id}/screens/canonical
-POST /api/projects/{project_id}/ui-schemes/{scheme_id}/screens/canonical
-POST /api/spec/{character_id}
 POST /api/prompt/{job_id}
-POST /api/feedback
 POST /api/clipboard-attempt
 GET /api/raw
 POST /api/uploads
-POST /api/characters/{character_id}/gallery/{kind}
-POST /api/characters
-POST /api/characters/{source_character_id}/derivatives
-DELETE /api/characters/{character_id}
 DELETE /api/jobs/{job_id}/image
 DELETE /api/jobs/{job_id}
-GET /api/projects
-GET /api/projects/{project_id}/ui-schemes
-POST /api/projects/{project_id}/ui-schemes
-POST /api/projects/{project_id}/ui-schemes/default
-GET /api/projects/{project_id}/workspaces
-GET /api/projects/{project_id}/videos
-GET /api/projects/{project_id}/videos/{production_id}
-GET /api/projects/{project_id}/video-references
-POST /api/projects/{project_id}/videos/{production_id}/references
-POST /api/projects/{project_id}/videos/{production_id}/selected
-POST /api/projects
-GET /api/projects/index
-GET /api/projects/{project_id}/gallery/media
-GET /api/projects/{project_id}/gallery
-POST /api/projects/reorder
-POST /api/projects/{project_id}/rename
-DELETE /api/projects/{project_id}
-GET /api/experience
-POST /api/experience
-POST /api/characters/{character_id}/project
 POST /api/jobs/{job_id}/confirm
 POST /api/jobs/{job_id}/cancel
 POST /api/config
@@ -68,8 +28,42 @@ GET /api/keys/{alias}/reveal
 POST /api/keys/models-preview
 GET /api/models
 PUT /api/models/order
+PUT /api/models/mode
+GET /api/gateway/audit
+GET /api/gateway/providers/{alias}/admin/keys
+POST /api/gateway/providers/{alias}/admin/keys
+PATCH /api/gateway/providers/{alias}/admin/keys/{key_id}
+POST /api/gateway/providers/{alias}/admin/keys/{key_id}/revoke
+GET /api/gateway/providers/{alias}/admin/options
+GET /api/gateway/providers/{alias}/admin/usage
+GET /api/gateway/providers/{alias}/admin/usage/tasks
+GET /api/gateway/providers/{alias}/admin/tasks
+GET /api/gateway/providers/{alias}/admin/live
+GET /api/gateway/providers/{alias}/admin/members
+POST /api/gateway/providers/{alias}/admin/members/{member_alias}/restore
+GET /api/gateway/providers/{alias}/admin/routes
+PUT /api/gateway/providers/{alias}/admin/routes/order
+GET /api/gateway/providers/{alias}/admin/audit
+GET /api/gateway
+GET /api/gateway/service
+PUT /api/gateway
+POST /api/gateway/keys
+PATCH /api/gateway/keys/{key_id}
+POST /api/gateway/keys/{key_id}/revoke
+GET /api/gateway/tasks
+GET /api/gateway/tasks/{task_id}/outputs/{index}
+GET /api/gateway/providers/{alias}/me
+GET /api/gateway/options
+GET /api/model-routes/member-status
+POST /api/model-routes/member-status/restore
+GET /api/usage
+GET /api/usage/tasks
+GET /api/usage/key-last-used
+GET /api/pricing/tokendance
+POST /api/pricing/estimate
+POST /api/gateway/check
+POST /api/gateway/providers/{alias}/sync
 GET /api/gallery/recent
-GET /api/gallery/screens
 GET /api/gallery/hidden
 POST /api/gallery/hidden
 GET /api/gallery/favorites
@@ -103,6 +97,15 @@ GET /api/canvas/agent/skills
 POST /api/canvas/agent/skills/import
 DELETE /api/canvas/agent/skills/{name}
 GET /api/creation-assets
+PATCH /api/creation-assets/{asset_id}
+PUT /api/canvas/projects/{project_id}/categories
+POST /api/canvas/projects/{project_id}/classify
+GET /api/canvas/projects/{project_id}/specs
+PUT /api/canvas/projects/{project_id}/specs/project
+PUT /api/canvas/projects/{project_id}/specs/categories/{name:path}
+GET /api/canvas/projects/{project_id}/lessons
+POST /api/canvas/projects/{project_id}/lessons/{index}/adopt
+DELETE /api/canvas/projects/{project_id}/lessons/{index}
 POST /api/creation-assets/staleness
 POST /api/creation-assets/generation/from-job
 POST /api/creation-assets/generation/from-canvas
@@ -159,22 +162,41 @@ POST /api/canvas/projects/{project_id}/runs
 POST /api/canvas/projects/{project_id}/runs/{run_id}/cancel
 POST /api/canvas/projects/{project_id}/runs/{run_id}/resume-mj-edit
 POST /api/canvas/projects/{project_id}/runs/{run_id}/candidates/{candidate_id}/dismiss
-GET /api/projects/{project_id}/studio-archive-targets
-POST /api/studio/jobs/{job_id}/archive
 POST /api/studio/jobs
 GET /events
 GET /docs
 GET /docs/oauth2-redirect
 GET /redoc
 GET /openapi.json
-GET /api/workshop/requests/{request_id}
-GET /api/workshop/requests/{request_id}/references/{media_id}
 """.strip().splitlines()
 
 LOCAL_MANAGEMENT = frozenset({
+    "/api/gateway/audit",
+    "/api/gateway/providers/{alias}/admin/audit",
+    "/api/gateway/providers/{alias}/admin/keys",
+    "/api/gateway/providers/{alias}/admin/keys/{key_id}",
+    "/api/gateway/providers/{alias}/admin/keys/{key_id}/revoke",
+    "/api/gateway/providers/{alias}/admin/live",
+    "/api/gateway/providers/{alias}/admin/members",
+    "/api/gateway/providers/{alias}/admin/members/{member_alias}/restore",
+    "/api/gateway/providers/{alias}/admin/options",
+    "/api/gateway/providers/{alias}/admin/routes",
+    "/api/gateway/providers/{alias}/admin/routes/order",
+    "/api/gateway/providers/{alias}/admin/tasks",
+    "/api/gateway/providers/{alias}/admin/usage",
+    "/api/gateway/providers/{alias}/admin/usage/tasks",
+
     "/api/config", "/api/keys", "/api/keys/{alias}", "/api/keys/{alias}/reveal",
-    "/api/keys/models-preview", "/api/models/order", "/api/folder-picker", "/api/onboarding/status",
+    "/api/keys/models-preview", "/api/models/order", "/api/models/mode", "/api/folder-picker", "/api/onboarding/status",
     "/api/onboarding/data-root",
+    # 局域网共享：开关会让本机对局域网开端口，密钥与用量也只给本机页面（ADR-0025）。
+    "/api/gateway", "/api/gateway/service", "/api/gateway/keys", "/api/gateway/keys/{key_id}",
+    "/api/gateway/keys/{key_id}/revoke", "/api/usage", "/api/usage/tasks", "/api/usage/key-last-used",
+    "/api/gateway/check",
+    "/api/gateway/providers/{alias}/sync", "/api/gateway/options",
+    "/api/gateway/tasks", "/api/gateway/tasks/{task_id}/outputs/{index}",
+    "/api/gateway/providers/{alias}/me",
+    "/api/model-routes/member-status", "/api/model-routes/member-status/restore",
     # 挂载团队库 = 往本机任意目录写清单并整棵扫描，同 folder-picker 只给本机页面。
     "/api/team-libraries",
     # 导入 / 删除 Agent Skill 改写数据目录里的说明文件，Agent 每轮都会读，只给本机页面。
@@ -192,15 +214,8 @@ MEDIA_ROUTES = frozenset({
     "/api/canvas/projects/{project_id}/versions/{version_id}/media",
     "/api/canvas/projects/{project_id}/versions/{version_id}/download",
     "/api/canvas/projects/{project_id}/nodes/{node_id}/layers/download",
-    "/api/workshop/requests/{request_id}/references/{media_id}",
     "/api/team-libraries/{library_id}/assets/{entry_id}/content",
     "/api/team-libraries/{library_id}/assets/{entry_id}/thumb",
-})
-WORKSHOP_TOOLS = frozenset({
-    "list-projects", "list-targets", "get-context", "list-models", "create-target", "read-document",
-    "write-document", "acknowledge-feedback", "list-media", "read-media",
-    "prepare-generation", "get-generation", "withdraw-generation", "approve-generation",
-    "read-lessons", "append-lesson", "list-prompt-assets", "read-prompt-asset",
 })
 CANVAS_TOOLS = frozenset({
     "list-projects", "get-document", "list-models", "apply-changes", "import-media", "run",

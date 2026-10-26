@@ -31,6 +31,12 @@ def _looks_like_speech_model(model: str) -> bool:
 def supports_model(key: Any, model: Any) -> bool:
     if model is None:
         return False
+    if key.provider == "atelier":
+        from types import SimpleNamespace
+        return bool(model.via) and all(supports_model(
+            SimpleNamespace(provider=member.provider),
+            SimpleNamespace(id=member.model_id, protocol=member.protocol),
+        ) for member in model.via)
     if model.protocol in {"openai", "openai-speech", "tts", "speech"}:
         return True
     return (

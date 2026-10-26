@@ -172,6 +172,12 @@ def has_resumable_mj_task(job) -> bool:
 
 def edit_size_params(key, model: str, width: int, height: int) -> dict:
     from .image_size import normalize_image_size_params
+    from .keys import size_channel
+
+    if key.provider == "atelier":
+        spec = next(item for item in key.models if item.id == model)
+        key, spec = size_channel(key, spec)
+        model = spec.id
     from .image_size_catalog import image_size_options, is_nano_image_size_model
 
     if key.provider == "openrouter" or is_nano_image_size_model(model):

@@ -2,11 +2,13 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
-
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
-    alias: { '@': path.resolve(__dirname, 'src') },
+    alias: {
+      '@': path.resolve(__dirname, 'src'),
+      '@pricing': path.resolve(__dirname, '../src/character_workflow/data/generation_prices.json'),
+    },
   },
   build: {
     outDir: 'dist',
@@ -23,6 +25,7 @@ export default defineConfig({
     },
   },
   server: {
+    fs: { allow: [__dirname, path.resolve(__dirname, '../src/character_workflow/data')] },
     port: 5173,
     proxy: {
       '/api': { target: 'http://127.0.0.1:5174', changeOrigin: true },

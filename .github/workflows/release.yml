@@ -1,0 +1,70 @@
+name: Release bundles
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            platform: windows-x64
+          - runner: macos-14
+            platform: macos-arm64
+          - runner: ubuntu-22.04
+            platform: linux-x64
+    runs-on: ${{ matrix.runner }}
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Build from locked dependencies and committed UI
+        run: uv run --no-project python scripts/build_release.py --output release-build --platform ${{ matrix.platform }}
+      - name: Smoke relocated archive without system tools
+        shell: bash
+        run: |
+          export ATELIER_BUNDLE_ARCHIVE="$(find release-build -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)"
+          uv run pytest -v -s tests/test_release_bundle.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GameAtelier-${{ matrix.platform }}
+          path: |
+            release-build/*.zip
+            release-build/*.tar.gz
+            release-build/*.sha256
+          if-no-files-found: error
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: bundles
+          merge-multiple: true
+      - name: Publish approved tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python -c 'import json, os; assert os.environ["RELEASE_TAG"] == "v" + json.load(open(".claude-plugin/plugin.json"))["version"]'
+          gh release create "$RELEASE_TAG" bundles/* --verify-tag --title "Game Atelier $RELEASE_TAG" --notes-file docs/release-notes.md
+  mirror:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: publish
+    uses: ./.github/workflows/sync-cnb.yml
+    with:
+      release_tag: ${{ github.ref_name }}
+    secrets: inherit

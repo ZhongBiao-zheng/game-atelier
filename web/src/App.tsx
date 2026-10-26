@@ -44,6 +44,6 @@ function ConnectedApp() {
     case 'needs_first_key':
     case 'ready':
     default:
-      return <AppShell />;
+      return <AppShell latestRelease={state.runtime_mode === 'bundle' && state.update?.update_available ? state.update.latest : null} />;
   }
 }

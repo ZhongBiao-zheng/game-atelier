@@ -14,6 +14,7 @@ title Game Atelier
 
 echo Game Atelier
 echo.
+call :timer_start
 
 set "UV=uv"
 where uv >nul 2>nul
@@ -39,19 +40,25 @@ pause
 exit /b 1
 
 :uv_ready
+call :timer_end "[1/6] 检查运行工具"
+call :timer_start
 rem uv 可能刚装好、尚未进入当前窗口 PATH；bootstrap 也需要找到它。
 set "PATH=%USERPROFILE%\.local\bin;%PATH%"
 if /i "%~1"=="--skip-update" goto :update_done
 rem 更新逻辑在 scripts\self_update.py（与 Mac / Linux 共用）；退出码 10 = 已更新，重跑新版启动器。
 "!UV!" run --no-project python scripts\self_update.py
-if !errorlevel! equ 10 (start "" cmd /c ""%~f0" --skip-update" & exit /b 0)
+set "UPDATE_STATUS=!errorlevel!"
+call :timer_end "[2/6] 检查更新"
+if !UPDATE_STATUS! equ 10 (start "" cmd /c ""%~f0" --skip-update" & exit /b 0)
 
 :update_done
 echo.
+call :timer_start
 if exist "%~dp0install.ps1" (
     powershell -ExecutionPolicy Bypass -File "%~dp0install.ps1" -Sync
     if errorlevel 1 (set "MSG=Skill 同步失败，可稍后运行 install.ps1" & call :warn)
 )
+call :timer_end "[3/6] 同步 Skill"
 
 if not exist "web\dist\index.html" (
     set "MSG=前端文件 web\dist 缺失，请双击「Windows一键修复.bat」" & call :err
@@ -73,6 +80,18 @@ exit /b 0
 
 :warn
 powershell -NoProfile -Command "Write-Host ('[警告] ' + $env:MSG) -ForegroundColor Yellow"
+exit /b 0
+
+:timer_start
+set "STEP_TIME=%TIME: =0%"
+exit /b 0
+
+:timer_end
+set "END_TIME=%TIME: =0%"
+set /a "ELAPSED=(1%END_TIME:~0,2%-100)*360000+(1%END_TIME:~3,2%-100)*6000+(1%END_TIME:~6,2%-100)*100+(1%END_TIME:~9,2%-100)-(1%STEP_TIME:~0,2%-100)*360000-(1%STEP_TIME:~3,2%-100)*6000-(1%STEP_TIME:~6,2%-100)*100-(1%STEP_TIME:~9,2%-100)"
+if !ELAPSED! lss 0 set /a ELAPSED+=8640000
+set /a "WHOLE=ELAPSED/100, TENTH=(ELAPSED%%100)/10"
+echo %~1 … !WHOLE!.!TENTH!s
 exit /b 0
 
 :err

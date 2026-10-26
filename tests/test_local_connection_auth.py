@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from character_workflow.lib import data_root
 from character_workflow.lib.private_json import read_private_json, write_private_json
-from character_workflow.lib.projects import create_project
+from character_workflow.lib.canvas_projects import create_canvas_project as create_project
 from viewer_server.connection_auth import COOKIE_NAME, ConnectionError, ConnectionStore
 from viewer_server.connection_capabilities import local_capability
 from viewer_server.connection_middleware import ConnectionMiddleware
@@ -35,7 +35,7 @@ def bootstrap(client, client_id="page-one"):
 
 
 @pytest.mark.parametrize("path", [
-    "/api/projects", "/api/config", "/api/keys", "/api/keys/example/reveal", "/api/jobs",
+    "/api/canvas/projects", "/api/config", "/api/keys", "/api/keys/example/reveal", "/api/jobs",
     "/api/raw?path=private.png", "/api/gallery/image?path=private.png", "/events",
     "/docs", "/openapi.json", "/api/canvas/projects/example/document", "/api/unknown",
 ])
@@ -64,20 +64,20 @@ def test_local_bootstrap_is_idempotent_and_cookie_is_private(client):
     again = client.post("/api/connection/local-session", json={})
     assert again.json() == response.json()
     assert "set-cookie" not in again.headers
-    assert client.get("/api/projects").status_code == 200
-    assert client.post("/api/projects", json={"name": "授权项目"}).status_code == 200
+    assert client.get("/api/canvas/projects").status_code == 200
+    assert client.post("/api/canvas/projects", json={"name": "授权项目"}).status_code == 201
 
 
 def test_workshop_body_is_bounded_before_parsing_and_accepts_only_json(client):
     bootstrap(client)
-    oversized = client.post("/api/workshop/list-projects", content=b" " * (1024 * 1024 + 1),
+    oversized = client.post("/api/canvas-agent/list-projects", content=b" " * (1024 * 1024 + 1),
                             headers={"Content-Type": "application/json"})
     assert oversized.status_code == 413
     assert oversized.json()["error"]["code"] == "REQUEST_TOO_LARGE"
-    streamed = client.post("/api/workshop/list-projects", content=iter([b" " * 600000] * 2),
+    streamed = client.post("/api/canvas-agent/list-projects", content=iter([b" " * 600000] * 2),
                            headers={"Content-Type": "application/json"})
     assert streamed.status_code == 413
-    multipart = client.post("/api/workshop/list-projects", files={"file": ("x", b"x")})
+    multipart = client.post("/api/canvas-agent/list-projects", files={"file": ("x", b"x")})
     assert multipart.status_code == 415
 
 
@@ -92,19 +92,19 @@ def test_business_write_requires_lease_and_origin(client):
     bootstrap(client)
     for header in ("X-Atelier-Client", "Origin"):
         value = client.headers.pop(header)
-        response = client.post("/api/projects", json={"name": "不应写入"})
+        response = client.post("/api/canvas/projects", json={"name": "不应写入"})
         assert response.status_code in {403, 409}
         client.headers[header] = value
-    assert client.get("/api/projects").json()["projects"] == []
+    assert client.get("/api/canvas/projects").json()["projects"] == []
 
 
 def test_duplicate_or_mixed_credentials_fail_closed(client):
     bootstrap(client)
     token = client.cookies.get(COOKIE_NAME)
-    assert client.get("/api/projects", headers={
+    assert client.get("/api/canvas/projects", headers={
         "Cookie": f"{COOKIE_NAME}={token}; {COOKIE_NAME}={token}",
     }).status_code == 401
-    assert client.get("/api/projects", headers=[
+    assert client.get("/api/canvas/projects", headers=[
         ("Authorization", "Bearer one"), ("Authorization", "Bearer two"),
     ]).status_code == 401
 
@@ -129,11 +129,11 @@ def test_explicit_takeover_blocks_old_tab_without_revoking_management(client):
     assert client.post("/api/connection/editor-lease", json={
         "client_id": "page-two", "takeover": True,
     }).status_code == 200
-    assert client.post("/api/projects", json={"name": "旧页"}).status_code == 409
+    assert client.post("/api/canvas/projects", json={"name": "旧页"}).status_code == 409
     assert client.get("/api/connection/agent").status_code == 200
-    assert client.post("/api/projects", json={"name": "新页"}, headers={
+    assert client.post("/api/canvas/projects", json={"name": "新页"}, headers={
         "X-Atelier-Client": "page-two",
-    }).status_code == 200
+    }).status_code == 201
 
 
 def test_lease_expiry_and_session_revocation(client):
@@ -141,11 +141,11 @@ def test_lease_expiry_and_session_revocation(client):
     store = client.app.state.connection_store
     with store.lock:
         store.lease = (*store.lease[:2], time.time() - 1)
-    assert client.post("/api/projects", json={"name": "过期"}).status_code == 409
+    assert client.post("/api/canvas/projects", json={"name": "过期"}).status_code == 409
     session = store.sessions[result["session_id"]]
     store.revoke_session(result["session_id"])
     assert session.revoked.is_set()
-    assert client.get("/api/projects").status_code == 401
+    assert client.get("/api/canvas/projects").status_code == 401
 
 
 def test_control_size_content_type_and_extra_fields(client):
@@ -196,25 +196,25 @@ def test_credential_store_failure_is_reported_with_reason(client, monkeypatch):
 def test_grant_exchange_tool_scoping_and_immediate_revocation(client):
     bootstrap(client)
     native, project, grant, credential = create_grant(client)
-    response = native.post("/api/workshop/list-projects", json={})
+    response = native.post("/api/canvas-agent/list-projects", json={})
     assert response.status_code == 200, response.text
-    assert project.id in response.text
+    assert project.project_id in response.text
     for method, path in [
-        ("GET", "/api/projects"), ("GET", "/api/keys"), ("GET", "/api/raw"),
+        ("GET", "/api/canvas/projects"), ("GET", "/api/keys"), ("GET", "/api/raw"),
         ("GET", "/events"), ("GET", "/api/connection/agent"),
         ("POST", "/api/workshop/requests/unknown/approve"), ("POST", "/api/studio/jobs"),
     ]:
         assert native.request(method, path, json={}).status_code == 403
     assert credential["grant_token"] not in client.get("/api/connection/sessions").text
     assert client.request("DELETE", "/api/connection/agent", json={}).json()["enabled"] is False
-    assert native.post("/api/workshop/list-projects", json={}).status_code in {401, 403}
+    assert native.post("/api/canvas-agent/list-projects", json={}).status_code in {401, 403}
 
 
 def test_agent_credentials_never_become_browser_or_local_management_identity(client):
     bootstrap(client)
     native, _, _, _ = create_grant(client)
-    assert native.get("/api/projects", headers=LOCAL_HEADERS).status_code == 403
-    assert client.get("/api/projects", headers={
+    assert native.get("/api/canvas/projects", headers=LOCAL_HEADERS).status_code == 403
+    assert client.get("/api/canvas/projects", headers={
         "Authorization": native.headers["Authorization"],
     }).status_code == 403
 
@@ -223,7 +223,7 @@ def test_grants_survive_restart_but_runtime_sessions_do_not(client, tmp_path):
     bootstrap(client)
     native, project, grant, credential = create_grant(client)
     restarted = TestClient(build_app(dist_dir=tmp_path), base_url=ORIGIN)
-    assert restarted.get("/api/projects", headers=native.headers).status_code == 401
+    assert restarted.get("/api/canvas/projects", headers=native.headers).status_code == 401
     status = restarted.get("/api/connection/status").json()
     exchange = restarted.post("/api/connection/agent-sessions", json={
         "grant_id": grant["grant_id"], "grant_token": credential["grant_token"],
@@ -259,8 +259,8 @@ def test_agent_sees_projects_created_after_enabling(client):
     bootstrap(client)
     native, first, _grant, _credential = create_grant(client)
     later = create_project("开关打开之后新建")
-    listed = native.post("/api/workshop/list-projects", json={}).json()
-    assert {first.id, later.id} <= {item["project_id"] for item in listed["projects"]}
+    listed = native.post("/api/canvas-agent/list-projects", json={}).json()
+    assert {first.project_id, later.project_id} <= {item["project_id"] for item in listed["projects"]}
 
 
 def test_legacy_multi_grant_file_is_ignored(client):
@@ -269,7 +269,8 @@ def test_legacy_multi_grant_file_is_ignored(client):
     legacy = data_root.agent_credential_file().parent / "grants.json"
     write_private_json(legacy, {"g-old": {"grant_id": "g-old", "token_hash": "0" * 64,
                                           "project_ids": [], "capabilities": ["read"]}})
-    assert client.get("/api/connection/agent").json() == {"enabled": False, "connections": {}}
+    status = client.get("/api/connection/agent").json()
+    assert status["enabled"] is False and status["connections"] == {}
 
 
 def test_change_data_root_revokes_existing_sessions(client, monkeypatch, tmp_path):
@@ -277,7 +278,7 @@ def test_change_data_root_revokes_existing_sessions(client, monkeypatch, tmp_pat
     root = tmp_path / "another-root"
     root.mkdir()
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(root))
-    assert client.get("/api/projects").status_code == 401
+    assert client.get("/api/canvas/projects").status_code == 401
 
 
 def test_unknown_registered_app_route_fails_closed(client):
@@ -362,11 +363,35 @@ def test_hot_path_reads_grants_file_only_when_it_changes(client, monkeypatch):
     original = auth.read_private_json
     monkeypatch.setattr(auth, "read_private_json", lambda path, *a, **k: reads.append(path) or original(path, *a, **k))
     for _ in range(5):
-        assert native.post("/api/workshop/list-projects", json={}).status_code == 200
+        assert native.post("/api/canvas-agent/list-projects", json={}).status_code == 200
         assert client.get("/api/connection/agent").status_code == 200
     assert len(reads) <= 1
     grants_path = Path(grant["credential_path"]).parent / "agent-grant.json"
     write_private_json(grants_path, read_private_json(grants_path, 128 * 1024))
     before = len(reads)
-    assert native.post("/api/workshop/list-projects", json={}).status_code == 200
+    assert native.post("/api/canvas-agent/list-projects", json={}).status_code == 200
     assert len(reads) == before + 1
+
+
+def test_agent_status_paths_and_tool_catalog_for_all_control_responses(client, tmp_path, monkeypatch):
+    from viewer_server.codex_config import codex_config_path
+    from character_workflow.mcp.tool_catalog import TOOL_DEFINITIONS
+
+    codex_home = tmp_path / "codex-config"
+    codex_home.mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    bootstrap(client)
+    expected_paths = {"claude-code": str(data_root.agent_credential_file()), "codex": str(codex_config_path())}
+    expected_tools = [{"name": tool.name, "billable": tool.billable} for tool in TOOL_DEFINITIONS]
+    for method, enabled in (("GET", False), ("PUT", True), ("DELETE", False)):
+        response = client.request(method, "/api/connection/agent", **({} if method == "GET" else {"json": {}}))
+        assert response.status_code == 200
+        status = response.json()
+        assert status["enabled"] is enabled
+        assert status["config_paths"] == expected_paths
+        assert status["tools"] == expected_tools
+        assert [tool["name"] for tool in status["tools"] if tool["billable"]] == ["canvas_run"]
+        assert "grant_token" not in response.text and ".claude.json" not in response.text
+        if enabled:
+            assert data_root.agent_credential_file().exists()
+            assert codex_config_path().exists()

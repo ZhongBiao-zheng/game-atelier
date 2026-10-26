@@ -42,11 +42,10 @@ from character_workflow.lib.jobs import (
     update_job_status,
     write_job_under_lock,
 )
-from character_workflow.lib.keys import KeySpec, ModelSpec, model_modality, read_keys_db
+from character_workflow.lib.keys import KeySpec, ModelSpec, model_modality, read_keys_db, size_channel
 from character_workflow.lib.model_routes import NoSuchRouteError, resolve_auto
 from character_workflow.lib.prompt_variables import resolve_prompt_variables
 from character_workflow.lib.schemas import (
-    AssetSlot,
     CanvasActor,
     CanvasBatchJobOrigin,
     CanvasContentVersion,
@@ -449,15 +448,18 @@ def recover_canvas_transactions_unlocked(project_id: str) -> None:
 
 
 def _selected_key_and_model(
-    selection: CanvasGenerationModelSelection, modality: str,
+    selection: CanvasGenerationModelSelection, modality: str, *, params: dict | None = None,
+    route_order: list[str] | None = None, consume: bool = False,
 ) -> tuple[KeySpec, ModelSpec] | None:
     """偏好里的模型选择：指定厂商按 alias 找；alias 为空即「自动」，按路由解析。"""
     if selection.alias is None:
         try:
-            return resolve_auto(modality, selection.model)
+            return resolve_auto(modality, selection.model, params=params, route_order=route_order, consume=consume)
         except NoSuchRouteError:
             return None
     key = next((item for item in read_keys_db().keys if item.alias == selection.alias), None)
+    if key is not None and not key.enabled:
+        raise ValueError("供应商已停用")
     model = next((item for item in key.models if item.id == selection.model), None) if key else None
     return (key, model) if key and model else None
 
@@ -465,7 +467,7 @@ def _selected_key_and_model(
 def _keys_default_first() -> list[KeySpec]:
     database = read_keys_db()
     return sorted(
-        database.keys,
+        [key for key in database.keys if key.enabled],
         key=lambda key: 0 if key.alias == database.default_alias else 1,
     )
 
@@ -500,7 +502,9 @@ def _resolve_reverse_prompt_model() -> tuple[KeySpec, ModelSpec]:
 def _resolve_layer_decomposition_model(alias: str, model_id: str) -> tuple[KeySpec, ModelSpec]:
     from character_workflow.lib.callers.openai_image import supports_layer_decomposition
 
-    key = next((item for item in _keys_default_first() if item.alias == alias), None)
+    key = next((item for item in read_keys_db().keys if item.alias == alias), None)
+    if key is not None and not key.enabled:
+        raise ValueError("供应商已停用")
     model = next((item for item in key.models if item.id == model_id), None) if key else None
     if (
         key
@@ -517,6 +521,8 @@ def _resolve_layer_decomposition_model(alias: str, model_id: str) -> tuple[KeySp
 
 def _supports_canvas_image_generation(key: KeySpec, model: ModelSpec) -> bool:
     from character_workflow.lib.callers.openai_image import image_family, resolve_image_protocol
+
+    key, model = size_channel(key, model)
 
     if model_modality(model, key) != "image" or key.provider == "nano_banana":
         return False
@@ -548,6 +554,8 @@ def _normalized_image_preference_params(
         is_nano_image_size_model,
         uses_tuzi_gpt25_tiers,
     )
+
+    key, model = size_channel(key, model)
 
     if not any(params.get(field) is not None for field in (
         "size_mode", "size", "ratio", "resolution", "custom_size",
@@ -619,7 +627,7 @@ def _resolve_default_image_model() -> tuple[KeySpec, ModelSpec, JobParams]:
             "画布生成偏好文件损坏，请先在画布中重新保存生成偏好。",
         ) from error
     if preference.selection is not None:
-        selected = _selected_key_and_model(preference.selection, "image")
+        selected = _selected_key_and_model(preference.selection, "image", params=preference.params)
         if selected is not None and _supports_canvas_image_generation(*selected):
             key, model = selected
             return key, model, _normalized_image_preference_params(key, model, preference.params)
@@ -651,18 +659,24 @@ def _resolve_default_image_edit_model() -> tuple[KeySpec, ModelSpec]:
 
 
 def _resolve_key_and_model(
-    draft: CanvasGenerationDraft,
+    draft: CanvasGenerationDraft, *, selection_params: dict | None = None,
+    route_order: list[str] | None = None, consume_route: bool = True,
 ) -> tuple[KeySpec, ModelSpec, JobKind]:
     if draft.alias is None:
         # 不指定厂商 =「自动」：draft.model 是路由 id，按组内顺序解析出实际 KEY 与模型。
         try:
-            key, model = resolve_auto(draft.mode, draft.model)
+            key, model = resolve_auto(
+                draft.mode, draft.model, params=selection_params or draft.params.model_dump(exclude_none=True),
+                route_order=route_order, consume=consume_route,
+            )
         except NoSuchRouteError as error:
             raise ValueError(str(error)) from None
     else:
         key = next((item for item in read_keys_db().keys if item.alias == draft.alias), None)
         if key is None:
             raise ValueError(f"找不到生成密钥 {draft.alias}")
+        if not key.enabled:
+            raise ValueError("供应商已停用")
         model = next((item for item in key.models if item.id == draft.model), None)
         if model is None:
             raise ValueError("所选模型不属于当前密钥")
@@ -700,9 +714,9 @@ def canvas_input_sources(
     document: CanvasDocument,
     surface: CanvasNode,
     draft: CanvasGenerationDraft,
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, str, bool]]:
     """Select source nodes once, shared by batch dependency planning and input freezing."""
-    candidates: list[tuple[str, str]] = []
+    candidates: list[tuple[str, str, bool]] = []
     incoming = [
         edge for edge in document.connections
         if edge.role == "input" and edge.target_node_id == surface.id
@@ -718,12 +732,13 @@ def canvas_input_sources(
             if len(edges) > 1:
                 raise ValueError("首帧或尾帧只能连接一个图片素材")
             if edges:
-                candidates.append((slot, edges[0].source_node_id))
+                candidates.append((slot, edges[0].source_node_id, False))
     else:
         if any(edge.slot is not None for edge in incoming):
             raise ValueError("当前模式不接受首尾帧连接，请调整输入连接或生成模式")
         nodes_by_id = {node.id: node for node in document.nodes}
         roles: dict[str, str] = {}
+        annotated_ids: set[str] = set()
         for edge in incoming:
             source = nodes_by_id.get(edge.source_node_id)
             if source is not None and source.type == "group":
@@ -742,12 +757,15 @@ def canvas_input_sources(
                 continue
             # 同一个节点既直连又在组里时按直连算：直连是画师一笔一笔连的，截断时优先保留。
             roles[edge.source_node_id] = "input_connection"
+            if edge.annotated:
+                annotated_ids.add(edge.source_node_id)
         connected_ids = list(roles)
         mentioned_ids = list(dict.fromkeys(_MENTION.findall(draft.prompt)))
         unknown_mentions = [node_id for node_id in mentioned_ids if node_id not in connected_ids]
         if unknown_mentions:
             raise ValueError("提示词引用了未连接到当前节点的内容")
-        candidates.extend((roles[node_id], node_id) for node_id in connected_ids)
+        candidates.extend((roles[node_id], node_id, node_id in annotated_ids)
+                          for node_id in connected_ids)
 
     return candidates
 
@@ -765,12 +783,22 @@ def _resolve_inputs(
 
     nodes = {node.id: node for node in document.nodes}
     resolved: list[CanvasSnapshotInput] = []
-    for source, node_id in candidates:
+    for source, node_id, annotated in candidates:
         node = nodes.get(node_id)
         if node is not None and node.type == "batch_material" and version_bindings is None:
             raise ValueError("批量素材需要通过批量执行提交")
         version_id = _current_version_id(node) if node is not None else None
         version_ids = (version_bindings or {}).get(node_id, [version_id] if version_id else [])
+        if annotated:
+            title = node.title if node is not None else node_id
+            annotation = node.data.annotation if isinstance(node, CanvasImageNode) else None
+            if annotation is None or not annotation.elements:
+                raise ValueError(f"「{title}」的标注已被清除，请断开这条连接或重新标注")
+            if annotation.version_id != version_id:
+                raise ValueError(f"「{title}」当前版本没有标注，切回标注所在版本或断开连接")
+            if not annotation.rendered_version_id or annotation.rendered_version_id not in document.content_versions:
+                raise ValueError(f"「{title}」的标注图还没生成，请重新提交")
+            version_ids = [annotation.rendered_version_id]
         if node is None or not version_ids or any(
             item not in document.content_versions for item in version_ids
         ):
@@ -795,6 +823,7 @@ def _resolve_inputs(
                 node_id=node_id,
                 version_id=version.version_id,
                 kind=version.kind,
+                annotated=annotated,
             ))
     return resolved
 
@@ -1299,7 +1328,6 @@ def _commit_frozen_run(
         output_paths=[],
         status=JobStatus.PENDING,
         error=None,
-        asset_slot=AssetSlot.PORTRAIT,
         kind=kind,
         namespace="canvas",
         canvas_project_id=project_id,
@@ -1346,6 +1374,7 @@ def _commit_frozen_run(
             connections.append(CanvasInputConnection(
                 id=f"connection-{secrets.token_hex(12)}", role="input",
                 source_node_id=item.node_id, target_node_id=result_id, slot=slot,
+                annotated=item.annotated,
             ))
     content_versions = dict(current.content_versions)
     for version in additional_versions or []:
@@ -1392,14 +1421,28 @@ def prepare_canvas_generation(
     *,
     version_bindings: dict[str, list[str]] | None = None,
     resolve_media_paths: bool = True,
+    consume_route: bool = False,
 ) -> PreparedCanvasGeneration:
     """Resolve one draft without writing a Job or making a provider request."""
     draft = _draft_for_node(surface)
     if draft is None:
         raise ValueError("当前节点没有可提交的生成设置")
-    key, model, kind = _resolve_key_and_model(draft)
-    normalized, job_params, effective_count = _normalized_params(draft, requested_count, key, model)
     inputs = _resolve_inputs(document, surface, draft, version_bindings)
+    # 图片上限按模型族定义；在选路估价前使用与实际提交一致的分组裁剪结果。
+    pricing_inputs = _trim_group_images_to_limit(
+        ModelSpec(id=draft.model, name=draft.model, modality=draft.mode),
+        JobKind(draft.mode), inputs, draft.params.model_copy(deep=True),
+    )
+    selection_params = {**draft.params.model_dump(exclude_none=True), "n": requested_count}
+    for modality, field in (("image", "reference_images"), ("video", "reference_videos"),
+                            ("audio", "reference_audios")):
+        selection_params[field] = [item.version_id for item in pricing_inputs if item.kind == modality]
+    route_order: list[str] = []
+    key, model, kind = _resolve_key_and_model(
+        draft, selection_params=selection_params, route_order=route_order, consume_route=consume_route,
+    )
+    normalized, job_params, effective_count = _normalized_params(draft, requested_count, key, model)
+    job_params.route_order = route_order or None
     if _uses_video_frame_slots(draft) or any(
         item.source in {"first_frame", "last_frame"} for item in inputs
     ):
@@ -1477,7 +1520,9 @@ def submit_canvas_run(
         surface = next((node for node in current.nodes if node.id == surface_node_id), None)
         if surface is None:
             raise KeyError(surface_node_id)
-        prepared = prepare_canvas_generation(project_id, current, surface, requested_count)
+        prepared = prepare_canvas_generation(
+            project_id, current, surface, requested_count, consume_route=True,
+        )
         return commit_canvas_generation_under_lock(project_id, current, surface, prepared)
 
 
@@ -1671,7 +1716,6 @@ def submit_layer_decomposition_run(
             output_paths=[],
             status=JobStatus.PENDING,
             error=None,
-            asset_slot=AssetSlot.PORTRAIT,
             kind=JobKind.IMAGE,
             namespace="canvas",
             canvas_project_id=project_id,
@@ -1714,8 +1758,7 @@ def submit_image_edit_run(
     """Freeze only a saved edit configuration into a fresh, recoverable result Run."""
     import io
     from PIL import Image
-    from character_workflow.lib.callers.openai_image import _effective_image_protocol
-    from character_workflow.lib.callers.image_edit import edit_transport, expanded_source
+    from character_workflow.lib.callers.image_edit import edit_transport_for_key, expanded_source
     from character_workflow.lib.canvas_image_edits import edit_size_params
     from character_workflow.lib.canvas_masks import (
         normalize_canvas_mask, _source_display_size, NormalizedCanvasMask,
@@ -1770,7 +1813,7 @@ def submit_image_edit_run(
                     "自然延展画面" if options.mode == "outpaint" else "自然修复选区内容"
                 )})
             key, model, kind = _resolve_key_and_model(draft)
-            transport = edit_transport(key.provider, model.id, _effective_image_protocol(key, model.id))
+            transport = edit_transport_for_key(key, model.id)
             if not transport:
                 raise CanvasRunCommandError(
                     "canvas_media_capability_missing",
@@ -2124,7 +2167,10 @@ def _upscale_auto_candidate(key: KeySpec, model: ModelSpec) -> bool:
     )
 
 
-def _resolve_upscale_model(target: str) -> tuple[KeySpec, ModelSpec, str | None, str]:
+def _resolve_upscale_model(
+    target: str, *, width: int = 1024, height: int = 1024,
+    route_order: list[str] | None = None, consume: bool = False,
+) -> tuple[KeySpec, ModelSpec, str | None, str]:
     """Key / model / quality / prompt for an AI 高清 run, following that tier's preference.
 
     档位固定了模型就只用它，失效报 stale；没固定则自动挑：默认 Key 优先、同一 Key 内 Pro 优先。
@@ -2140,7 +2186,15 @@ def _resolve_upscale_model(target: str) -> tuple[KeySpec, ModelSpec, str | None,
         ) from error
     keys = _keys_default_first()
     if tier.selection is not None:
-        selected = _selected_key_and_model(tier.selection, "image")
+        preview = _selected_key_and_model(tier.selection, "image", params={
+            "n": 1, "quality": tier.quality, "resolution": target, "reference_images": ["source"],
+        })
+        params = {"n": 1, "quality": tier.quality, "resolution": target}
+        if preview is not None:
+            params.update(_upscale_size_params(*preview, target, width, height, tier.quality))
+        params["reference_images"] = ["source"]
+        selected = _selected_key_and_model(tier.selection, "image", params=params,
+                                          route_order=route_order, consume=consume)
         if selected is not None and _upscale_model_eligible(*selected):
             return *selected, tier.quality, tier.prompt
         raise CanvasRunCommandError(
@@ -2179,6 +2233,7 @@ def _upscale_size_params(
     from character_workflow.lib.callers.openai_image import supports_image_quality
     from character_workflow.lib.image_size_catalog import image_size_options, is_nano_image_size_model
 
+    key, model = size_channel(key, model)
     options = image_size_options(key.provider, key.base_url, model.id)
     params: dict[str, Any] = {"n": 1, "ratio": _nearest_ratio(width, height, options["ratios"])}
     if quality and supports_image_quality(model.id):
@@ -2241,7 +2296,10 @@ def submit_upscale_run(
                 "canvas_upscale_not_needed",
                 f"原图长边已达到 {max(width, height)}px，不需要放大到 {target}。",
             )
-        key, model, quality, prompt = _resolve_upscale_model(target)
+        route_order: list[str] = []
+        key, model, quality, prompt = _resolve_upscale_model(
+            target, width=width, height=height, route_order=route_order, consume=True,
+        )
         try:
             job_params = _normalized_image_preference_params(
                 key, model, _upscale_size_params(key, model, target, width, height, quality),
@@ -2252,6 +2310,10 @@ def submit_upscale_run(
         job_params.reference_images = paths["image"]
         normalized = job_params.model_dump(mode="json", exclude_none=True)
         normalized.pop("reference_images", None)
+        if route_order:
+            selection = read_canvas_ui_preferences().upscale.tiers[target].selection
+            job_params.route_id = selection.model
+            job_params.route_order = route_order
         normalized.update({
             "preset_id": _UPSCALE_PROMPT_PRESET_ID,
             "preset_version": _UPSCALE_PROMPT_PRESET_VERSION,
@@ -3450,6 +3512,7 @@ def reconcile_canvas_jobs(
     两遍：这里一遍，路由拼列表时又一遍。
     """
     from character_workflow.lib.canvas_image_edits import has_resumable_mj_task
+    from character_workflow.lib.jobs import has_resumable_gateway_task
     reconciled: list[str] = []
     for job in (list_jobs() if jobs is None else jobs):
         if job.namespace != "canvas" or not job.canvas_project_id:
@@ -3474,7 +3537,7 @@ def reconcile_canvas_jobs(
                 _cancel_pending_canvas_candidates(job.canvas_project_id, job.job_id)
                 reconciled.append(job.job_id)
                 continue
-            elif has_resumable_mj_task(job):
+            elif has_resumable_mj_task(job) or has_resumable_gateway_task(job):
                 # Only resume a known order. The caller reuses its durable task ID.
                 reconciled.append(job.job_id)
                 continue

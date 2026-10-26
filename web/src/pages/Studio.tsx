@@ -7,6 +7,7 @@ import { ChevronsDown, Library } from 'lucide-react';
 import { createStudioJob, getStudioJob, listStudioJobs, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
 import { apiError } from '@/api/http';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
+import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
 import { PromptInput } from '@/components/studio/PromptInput';
@@ -20,7 +21,6 @@ import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import { EMPTY_MJ_REFS, routeReusedImageFiles, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
 import { RoundList, type RoundConfig, type RoundState, type SaveResultAssetRequest } from '@/components/studio/RoundList';
 import { StudioQueryBar } from '@/components/studio/StudioQueryBar';
-import { StudioArchiveDialog, type StudioArchiveRequest } from '@/components/studio/StudioArchiveDialog';
 import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
@@ -126,7 +126,7 @@ function StudioFull() {
   // 公告「快速添加」等别处改了密钥的模型列表：只刷新列表，不动当前选中的供应商 / 模型。
   useEffect(() => {
     const refresh = () => {
-      void listKeys().then(resp => setKeys(resp.keys.filter(key => key.models.length > 0))).catch(() => undefined);
+      void listKeys().then(resp => setKeys(resp.keys.filter(key => key.enabled !== false && key.models.length > 0))).catch(() => undefined);
       void listModelRoutes().then(setRoutes).catch(() => undefined);
     };
     window.addEventListener(KEYS_CHANGED_EVENT, refresh);
@@ -144,7 +144,6 @@ function StudioFull() {
   const [reuseLimitNotice, setReuseLimitNotice] = useState(false);
   const [assetNotice, setAssetNotice] = useState<string | null>(null);
   const [location, setLocation] = useLocation();
-  const [archiveRequest, setArchiveRequest] = useState<StudioArchiveRequest | null>(null);
   const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
   const [reproduceConfirm, setReproduceConfirm] = useState<CreationAsset | null>(null);
   const [recipeNotice, setRecipeNotice] = useState<RecipeNotice | null>(null);
@@ -443,10 +442,11 @@ function StudioFull() {
         }
       });
     // 路由列表读失败只是没有「自动」项，不影响按 KEY 选模型。
-    Promise.all([listKeys(), listModelRoutes().catch(() => [] as ModelRoute[])])
+    // TokenDance 价格快照与密钥一起就绪，首屏费用预估才不会先显示未计价。
+    Promise.all([listKeys(), listModelRoutes().catch(() => [] as ModelRoute[]), loadTokenDancePrices()])
       .then(([resp, loadedRoutes]) => {
         if (cancelled) return;
-        const usable = resp.keys.filter((key) => key.models.length > 0);
+        const usable = resp.keys.filter((key) => key.enabled !== false && key.models.length > 0);
         setKeys(usable);
         setRoutes(loadedRoutes);
         const choices = withAutoProvider(usable, loadedRoutes);
@@ -852,7 +852,6 @@ function StudioFull() {
           onDeleteBatch={deleteDoneBatch}
           onReuseReferences={handleReuseReferences}
           onEditAsReference={handleEditAsReference}
-          onArchive={(jobId, path, mediaKind) => setArchiveRequest({ jobId, path, mediaKind })}
           onShareResult={(jobId, index, path, config) => setShareRequest({
             source: { kind: 'job_output', job_id: jobId, output_index: index },
             defaultTitle: assetTitleFromPrompt(config.prompt),
@@ -1039,18 +1038,17 @@ function StudioFull() {
           }}
           onUseMedia={(asset, content) => { void addCreationAssetReference(asset, content); }}
           onReproduce={requestReproduce}
-          onOpenSettings={canvasId => setLocation(`/settings?canvas=${encodeURIComponent(canvasId)}`)}
+          onOpenSettings={canvasId => setLocation(`/settings/libraries?canvas=${encodeURIComponent(canvasId)}`)}
           onTeamAssetAdopted={result => setAssetNotice(result.created ? '已加入资产库' : '已在你的资产库')}
         />
       )}
-      <StudioArchiveDialog request={archiveRequest} onClose={() => setArchiveRequest(null)} />
       <TeamShareDialog
         request={shareRequest}
         onClose={() => setShareRequest(null)}
         onShared={(_entry, libraryName) => setAssetNotice(`已分享到 ${libraryName}`)}
         onOpenSettings={() => {
           setShareRequest(null);
-          setLocation('/settings');
+          setLocation('/settings/libraries');
         }}
       />
       <ConfirmDialog

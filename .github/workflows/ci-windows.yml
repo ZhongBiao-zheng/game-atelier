@@ -4,8 +4,21 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      build_bundles:
+        description: Also validate the three release bundles (no publishing)
+        type: boolean
+        default: false
 
 jobs:
+  bundles:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_bundles
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    secrets: inherit
+
   test-windows:
     runs-on: windows-latest
     continue-on-error: true   # 仍非阻塞；本次修复跑绿后再单独翻成必过门
@@ -25,6 +38,22 @@ jobs:
 
       - name: Install Python deps
         run: uv sync
+
+      - name: Measure first and daily startup (informational)
+        shell: pwsh
+        run: |
+          $env:GAME_ATELIER_DATA_ROOT = Join-Path $env:RUNNER_TEMP "atelier-startup"
+          $env:GAME_ATELIER_NO_UPDATE_CHECK = "1"
+          $env:BROWSER = "true"
+          try {
+            foreach ($label in @("first", "daily")) {
+              $timer = [Diagnostics.Stopwatch]::StartNew()
+              uv run --no-project python scripts/bootstrap.py --launch
+              Write-Host "$label startup: $($timer.Elapsed.TotalSeconds.ToString('F1'))s (exit=$LASTEXITCODE)"
+            }
+          } finally {
+            uv run --no-project python scripts/bootstrap.py --run -m viewer_server.server stop
+          }
 
       - name: Run pytest
         run: uv run pytest -v

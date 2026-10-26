@@ -35,6 +35,13 @@ vi.mock('@/hooks/useSSE', async importOriginal => {
   };
 });
 
+// These page tests exercise shell/settings behavior; gateway interactions have their own suite.
+vi.mock('@/api/gateway', async importOriginal => ({
+  ...await importOriginal<typeof import('@/api/gateway')>(),
+  fetchGatewayTasks: async () => [],
+  fetchGatewayMembers: async () => ({ members: [], unavailable_routes: [] }),
+}));
+
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: true,
@@ -66,6 +73,13 @@ function renderAt(path: string) {
 }
 
 describe('AppShell', () => {
+  it('renders the provider add route inside the console', async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ keys: [] }) } as Response);
+    renderAt('/settings/providers/new');
+    expect(await screen.findByRole('heading', { name: '添加' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '供应商' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: /Tuzi/ })).toBeInTheDocument();
+  });
   it('renders Atelier logo on every route', () => {
     renderAt('/studio');
     expect(screen.getByText('Atelier')).toBeInTheDocument();
@@ -76,306 +90,18 @@ describe('AppShell', () => {
     expect(screen.getByText('创作台')).toHaveAttribute('aria-current', 'page');
   });
 
-  it('places 画布 between 创作台 and 工坊 and highlights it on /canvas', () => {
+  it('shows only current navigation and highlights 画布', () => {
     renderAt('/canvas');
     const nav = screen.getByRole('navigation');
     const labels = within(nav).getAllByRole('link').map(link => link.textContent);
-    expect(labels).toEqual(['主页', '创作台', '画布', '工坊']);
+    expect(labels).toEqual(['主页', '创作台', '画布']);
     expect(screen.getByText('画布')).toHaveAttribute('aria-current', 'page');
-  });
-
-  it('highlights 工坊 tab on /workshop/p1/ui', () => {
-    renderAt('/workshop/p1/ui');
-    expect(screen.getByText('工坊')).toHaveAttribute('aria-current', 'page');
-  });
-
-  it('keeps the project shell on an image deep link and returns through the URL', async () => {
-    vi.stubGlobal('EventSource', class {
-      addEventListener = vi.fn();
-      close = vi.fn();
-      onerror: (() => void) | null = null;
-    });
-    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
-      if (url === '/api/config') {
-        return { ok: true, json: async () => ({ image_storage_root: '/tmp/game-atelier' }) };
-      }
-      if (url === '/api/active-character') {
-        return { ok: true, json: async () => ({ active_id: null, updated_at: '2026-05-29T00:00:00Z' }) };
-      }
-      if (url === '/api/characters') {
-        return { ok: true, json: async () => [{ id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null }] };
-      }
-      if (url === '/api/projects') {
-        return {
-          ok: true,
-          json: async () => ({
-            projects: [{ id: 'p1', slug: 'one', name: '项目一', created_at: '2026-08-20T00:00:00Z' }],
-            assignments: { 'cao-cao': 'p1' },
-          }),
-        };
-      }
-      if (url === '/api/jobs/job-promo-1') {
-        return {
-          ok: true,
-          json: async () => ({
-            job_id: 'job-promo-1',
-            character_id: 'cao-cao',
-            prompt: '路由详情 prompt',
-            submitted_at: '2026-05-29T00:00:00Z',
-            model: 'gpt-image-2',
-            params: { n: 1 },
-            output_paths: ['/tmp/game-atelier/characters/cao-cao/promo/kv.png'],
-            status: 'done',
-            error: null,
-            asset_slot: 'promo',
-            kind: 'image',
-            namespace: 'character',
-          }),
-        };
-      }
-      if (url === '/api/jobs') {
-        return { ok: true, json: async () => [] };
-      }
-      return { ok: true, json: async () => ({}) };
-    }));
-
-    const location = memoryLocation({
-      path: '/workshop/p1/art/characters/cao-cao/promo/job-promo-1/%2Ftmp%2Fgame-atelier%2Fcharacters%2Fcao-cao%2Fpromo%2Fkv.png',
-      static: false,
-      record: true,
-    });
-    render(
-      <Router hook={location.hook}>
-        <AppShell />
-      </Router>,
-    );
-
-    expect(await screen.findByDisplayValue('路由详情 prompt')).toBeInTheDocument();
-    const breadcrumbs = screen.getByRole('navigation', { name: '面包屑' });
-    expect(within(breadcrumbs).getByRole('link', { name: '全部项目' })).toHaveAttribute('href', '/workshop');
-    expect(within(breadcrumbs).getByRole('link', { name: '项目一' })).toHaveAttribute(
-      'href', '/workshop/p1/overview',
-    );
-    expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '角色' })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.queryByText('返回工坊')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '返回' }));
-    await waitFor(() => expect(location.history.at(-1)).toBe(
-      '/workshop/p1/art/characters/cao-cao/promo',
-    ));
-  });
-
-  it('redirects a character deep link to its owning project', async () => {
-    vi.stubGlobal('EventSource', class {
-      addEventListener = vi.fn();
-      close = vi.fn();
-      onerror: (() => void) | null = null;
-    });
-    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
-      if (url === '/api/config') {
-        return { ok: true, json: async () => ({ image_storage_root: '/tmp/game-atelier' }) };
-      }
-      if (url === '/api/active-character') {
-        return { ok: true, json: async () => ({ active_id: null }) };
-      }
-      if (url === '/api/characters') {
-        return { ok: true, json: async () => [{ id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null }] };
-      }
-      if (url === '/api/projects') {
-        return {
-          ok: true,
-          json: async () => ({
-            projects: [
-              { id: 'p1', slug: 'one', name: '项目一', created_at: '2026-08-20T00:00:00Z' },
-              { id: 'p2', slug: 'two', name: '项目二', created_at: '2026-08-20T00:00:00Z' },
-            ],
-            assignments: { 'cao-cao': 'p2' },
-          }),
-        };
-      }
-      if (url === '/api/jobs') return { ok: true, json: async () => [] };
-      return { ok: true, json: async () => ({}) };
-    }));
-
-    const encodedPath = '%2Ftmp%2Fgame-atelier%2Fcharacters%2Fcao-cao%2Fpromo%2Fkv.png';
-    const location = memoryLocation({
-      path: `/workshop/p1/art/characters/cao-cao/promo/job-promo-1/${encodedPath}?fromFolder=summer&fromView=art`,
-      static: false,
-      record: true,
-    });
-    render(
-      <Router hook={location.hook}>
-        <AppShell />
-      </Router>,
-    );
-
-    await waitFor(() => expect(location.history.at(-1)).toBe(
-      `/workshop/p2/art/characters/cao-cao/promo/job-promo-1/${encodedPath}`,
-    ));
-    expect(location.history).toHaveLength(1);
-  });
-
-  it('redirects an unassigned image deep link to the character owning project', async () => {
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
-    vi.stubGlobal('EventSource', class {
-      addEventListener = vi.fn();
-      close = vi.fn();
-      onerror: (() => void) | null = null;
-    });
-    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
-      if (url === '/api/config') {
-        return { ok: true, json: async () => ({ image_storage_root: '/tmp/game-atelier' }) };
-      }
-      if (url === '/api/characters') {
-        return { ok: true, json: async () => [{ id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null }] };
-      }
-      if (url === '/api/projects') {
-        return {
-          ok: true,
-          json: async () => ({
-            projects: [{ id: 'p2', slug: 'two', name: '项目二', created_at: '2026-08-20T00:00:00Z' }],
-            assignments: { 'cao-cao': 'p2' },
-          }),
-        };
-      }
-      if (url === '/api/jobs') return { ok: true, json: async () => [] };
-      return { ok: true, json: async () => ({}) };
-    }));
-
-    const encodedPath = '%2Ftmp%2Fgame-atelier%2Fcharacters%2Fcao-cao%2Fpromo%2Fkv.png';
-    const location = memoryLocation({
-      path: `/workshop/unassigned/characters/cao-cao/promo/job-promo-1/${encodedPath}`,
-      static: false,
-      record: true,
-    });
-    render(
-      <Router hook={location.hook}>
-        <AppShell />
-      </Router>,
-    );
-
-    await waitFor(() => expect(location.history.at(-1)).toBe(
-      `/workshop/p2/art/characters/cao-cao/promo/job-promo-1/${encodedPath}`,
-    ));
-    expect(location.history).toHaveLength(1);
-  });
-
-  it('restores the project route from mobile workspace history and a fresh mount', async () => {
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
-    vi.stubGlobal('EventSource', class {
-      addEventListener = vi.fn();
-      close = vi.fn();
-      onerror: (() => void) | null = null;
-    });
-    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
-      if (url === '/api/config') {
-        return { ok: true, json: async () => ({ image_storage_root: '/tmp/game-atelier' }) };
-      }
-      if (url === '/api/characters') {
-        return { ok: true, json: async () => [{ id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null }] };
-      }
-      if (url === '/api/projects') {
-        return {
-          ok: true,
-          json: async () => ({
-            projects: [{ id: 'p1', slug: 'one', name: '项目一', created_at: '2026-08-20T00:00:00Z' }],
-            assignments: { 'cao-cao': 'p1' },
-          }),
-        };
-      }
-      if (url === '/api/jobs') return { ok: true, json: async () => [] };
-      if (url === '/api/experience?project=p1') {
-        return {
-          ok: true,
-          json: async () => ({
-            project: { id: 'p1', slug: 'one', name: '项目一', created_at: '2026-08-20T00:00:00Z', character_count: 1 },
-            worldview_md: '',
-          }),
-        };
-      }
-      if (url === '/api/projects/p1/ui-schemes' || url === '/api/projects/p1/ui-schemes?visible_only=true') {
-        return {
-          ok: true,
-          json: async () => ({
-            default_scheme_id: 'v1',
-            schemes: [{ id: 'v1', name: 'V1', created_at: '' }],
-          }),
-        };
-      }
-      if (String(url).startsWith('/api/projects/p1/workspaces')) {
-        return {
-          ok: true,
-          json: async () => ({
-            project_id: 'p1',
-            art: { characters: 1, canonical: 0, stale: 0 },
-            ui: {
-              scheme_id: 'v1',
-              anchors: { gdd: 'missing', prd: 'missing', interaction: 'missing' },
-              anchors_approved: 0,
-              style_status: 'missing',
-              has_ui_style: false,
-              screen_map_status: 'missing',
-              screens: 0,
-              versions: 0,
-              canonical: 0,
-              stale: 0,
-              screen_items: [],
-              next_action: '建立 UI 锚点',
-              next_command: '/game-atelier:ui',
-            },
-            video: { productions: 0, versions: 0, selected: 0, next_action: '建立视频企划' },
-          }),
-        };
-      }
-      if (url === '/api/gallery/screens?project=p1&scheme=v1') {
-        return { ok: true, json: async () => ({ items: [] }) };
-      }
-      if (url === '/api/projects/p1/ui-schemes/v1/screens/canonical') {
-        return { ok: true, json: async () => ({ screens: {} }) };
-      }
-      return { ok: true, json: async () => ({}) };
-    }));
-
-    const artPath = '/workshop/p1/art/characters/cao-cao/promo';
-    const location = memoryLocation({ path: artPath, static: false, record: true });
-    const view = render(
-      <Router hook={location.hook}>
-        <AppShell />
-      </Router>,
-    );
-
-    fireEvent.click(await screen.findByRole('link', { name: 'UI' }));
-    await waitFor(() => expect(location.history.at(-1)).toBe('/workshop/p1/ui/v1'));
-    const activeUiLink = await screen.findByRole('link', { name: 'UI' });
-    expect(activeUiLink).toHaveAttribute('aria-expanded', 'true');
-    fireEvent.click(activeUiLink);
-    expect(activeUiLink).toHaveAttribute('aria-expanded', 'false');
-    expect(location.history.at(-1)).toBe('/workshop/p1/ui/v1');
-    expect(screen.getByRole('link', { name: 'UI' })).toHaveAttribute('aria-current', 'page');
-
-    // 浏览器 Back 会把 URL 恢复到上一项；页面只依赖 URL，因此对象与工作区同时恢复。
-    act(() => location.navigate(artPath));
-    await waitFor(() => expect(
-      screen.getByRole('link', { name: '角色' }),
-    ).toHaveAttribute('aria-expanded', 'true'));
-    expect(within(screen.getByRole('navigation', { name: '面包屑' })).getByText('曹操')).toBeInTheDocument();
-
-    view.unmount();
-    render(
-      <Router hook={memoryLocation({ path: artPath, static: true }).hook}>
-        <AppShell />
-      </Router>,
-    );
-    expect(await screen.findByRole('link', { name: '角色' })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
-    expect(within(screen.getByRole('navigation', { name: '面包屑' })).getByText('曹操')).toBeInTheDocument();
   });
 
   it('does not highlight either tab on /', () => {
     renderAt('/');
     expect(screen.getByText('创作台')).not.toHaveAttribute('aria-current');
-    expect(screen.getByText('工坊')).not.toHaveAttribute('aria-current');
+    expect(screen.queryByText('工坊')).toBeNull();
     expect(screen.getByText('主页')).toHaveAttribute('aria-current', 'page');
   });
 
@@ -392,10 +118,10 @@ describe('AppShell', () => {
     expect(pill.className).toContain('nav-active-ring');
   });
 
-  it('settings icon turns primary on /settings', () => {
+  it('settings icon is selected with neutral color on /settings', () => {
     renderAt('/settings');
     const link = screen.getByLabelText('设置');
-    expect(link.className).toContain('text-primary');
+    expect(link.className).toContain('text-foreground');
   });
 
   it('theme toggle sits left of settings and flips html class + localStorage', () => {
@@ -421,10 +147,13 @@ describe('AppShell', () => {
   it('hosts the team share reminder on the shell SSE connection', async () => {
     const fetchMock = vi.fn(async (url: RequestInfo | URL) => ({
       ok: true,
-      json: async () => (String(url) === '/api/profile' ? { display_name: '我' } : {}),
+      json: async () => (String(url) === '/api/gateway'
+        ? { enabled: true, port: 5180, keys: [], status: { running: false, addresses: [] } }
+        : String(url) === '/api/gateway/options' ? { models: [], aliases: [] }
+        : String(url) === '/api/profile' ? { display_name: '我' } : {}),
     }));
     vi.stubGlobal('fetch', fetchMock);
-    renderAt('/settings');
+    renderAt('/settings/gateway');
     const profileCalls = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/api/profile').length;
     await waitFor(() => expect(profileCalls()).toBeGreaterThan(0));
 
@@ -432,6 +161,13 @@ describe('AppShell', () => {
     expect(hosts.length).toBeGreaterThan(0);
     const shell = hosts.at(-1)!;
     expect(shell.onConnect).toBeInstanceOf(Function);
+    act(() => shell.onGatewayTask?.({
+      task_id: 'gateway-live', kind: 'text', key_name: '网关同事', route_id: 'text-model',
+      member_alias: 'Local', member_trail: ['Local'], phase: null, status: 'running',
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      prompt: null, n: 0, outputs: 0, output_types: [], error: null,
+    }));
+    expect(screen.getByText('网关同事')).toBeInTheDocument();
 
     act(() => {
       shell.onTeamLibraryChanged?.({

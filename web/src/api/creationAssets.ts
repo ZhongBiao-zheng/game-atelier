@@ -2,6 +2,7 @@ import { connectionFetch } from '@/api/connection';
 import { apiError, ApiError, requestJson } from './http';
 import type {
   CreationAsset,
+  CategorySuggestion,
   CreationAssetKind,
   CreationAssetList,
   CreationAssetStaleness,
@@ -37,12 +38,14 @@ export class DuplicateCreationAssetError extends Error {
 export function listCreationAssets(options: {
   kind?: CreationAssetKind;
   scope?: 'all' | 'project';
+  hasCategory?: boolean;
   projectId?: string;
 } = {}): Promise<CreationAssetList> {
   const params = new URLSearchParams();
   if (options.kind) params.set('kind', options.kind);
   if (options.scope) params.set('scope', options.scope);
   if (options.projectId) params.set('project_id', options.projectId);
+  if (options.hasCategory !== undefined) params.set('has_category', String(options.hasCategory));
   const query = params.size ? `?${params.toString()}` : '';
   return requestJson<CreationAssetList>(`/api/creation-assets${query}`, '读取创作资产');
 }
@@ -102,6 +105,7 @@ export async function saveMediaCreationAssetFromPath(input: {
   tags: string[];
   projectId?: string;
   allowExisting?: boolean;
+  category?: string | null;
 }): Promise<CreationAsset> {
   let response: Response;
   try {
@@ -114,6 +118,7 @@ export async function saveMediaCreationAssetFromPath(input: {
         tags: input.tags,
         project_id: input.projectId,
         allow_existing: Boolean(input.allowExisting),
+        category: input.category,
       }),
     });
   } catch (error) {
@@ -290,4 +295,19 @@ export function insertCreationAssetIntoCanvas(input: {
       }),
     },
   );
+}
+
+export function updateCreationAssetCategory(assetId: string, category: string | null): Promise<CreationAsset> {
+  return requestJson<CreationAsset>(`/api/creation-assets/${encodeURIComponent(assetId)}`, '更新定稿', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ category }),
+  });
+}
+
+export function classifyCreationAssets(projectId: string, assetIds: string[], selection: { alias: string; model: string } | null): Promise<CategorySuggestion[]> {
+  return requestJson<CategorySuggestion[]>(`/api/canvas/projects/${encodeURIComponent(projectId)}/classify`, '自动分类', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ asset_ids: assetIds, model_alias: selection?.alias, model: selection?.model }),
+  });
 }

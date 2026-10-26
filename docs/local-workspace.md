@@ -1,3 +1,5 @@
+> 历史设计记录：工坊部分已在 5.113.0 退役，当前实现以 [ADR-0027](adr/0027-canvas-project-is-the-project.md) 与 [画布 MCP](contracts/canvas-mcp.md) 为准。下文保留原阶段的验证记录。
+
 > **2026-10-14：托管网站方案已弃用并删除**（[ADR-0023](adr/0023-drop-hosted-website.md)）。下文网站相关内容只作历史记录；
 > 本机数据与工坊 MCP 部分以 [本机连接契约](contracts/local-connection.md) 与 [ADR-0022](adr/0022-single-agent-switch-covers-everything.md) 为准。
 

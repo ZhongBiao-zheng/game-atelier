@@ -1,11 +1,12 @@
 /** 厂商 provider → 官方中文/品牌名。未知 provider 回退到 alias。 */
 export const PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
-  seedream: '火山引擎',
-  tokendance: '词元跳动',
+  seedream: 'Volcengine Ark',
+  tokendance: 'TokenDance',
   openrouter: 'OpenRouter',
   evolink: 'EvoLink',
   auto: '自动',
+  atelier: '局域网',
 };
 
 export function providerLabel(provider?: string | null, alias?: string | null): string {

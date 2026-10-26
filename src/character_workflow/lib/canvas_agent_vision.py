@@ -70,7 +70,9 @@ def with_attached_images(items: list[Any], data_url: Callable[[str], str | None]
                           and following.get("type") == "function_call_output")
         if pending and block_ends:
             content: list[dict] = [{"type": "input_text", "text": "上面工具结果里的图片："}]
-            for version_id in pending[:MAX_ATTACH_IMAGES]:
+            # Library search returns up to 12 candidates; show all so the model can compare.
+            limit = 12 if any(value.startswith("asset:") for value in pending) else MAX_ATTACH_IMAGES
+            for version_id in list(dict.fromkeys(pending))[:limit]:
                 url = data_url(version_id)
                 if url:
                     content.append({"type": "input_text", "text": version_id})

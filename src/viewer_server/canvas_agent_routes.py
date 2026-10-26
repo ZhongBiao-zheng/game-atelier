@@ -1,6 +1,10 @@
 """Authenticated typed canvas tool endpoints; a run schedules the same canvas job worker as the Web."""
 from __future__ import annotations
 
+from uuid import uuid4
+from fastapi.responses import JSONResponse
+from character_workflow.lib.canvas_tool_common import CanvasToolError
+
 from fastapi import APIRouter, BackgroundTasks, FastAPI, Request
 
 from character_workflow.lib import canvas_agent_tools as tools
@@ -61,3 +65,8 @@ def read_media(request: Request, payload: CanvasReadMediaInput):
 
 def register_canvas_agent_routes(app: FastAPI) -> None:
     app.include_router(router)
+
+
+async def handle_canvas_tool_error(_request: Request, error: CanvasToolError):
+    return JSONResponse({"error": {"code": error.code, "message": error.message,
+                                   "request_id": str(uuid4())}}, status_code=error.status)

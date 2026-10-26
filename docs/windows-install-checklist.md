@@ -35,12 +35,12 @@ claude
 #    /game-atelier:viewer-server
 #  按向导走三步：① 选数据目录（默认 ~\game-atelier 直接回车）
 #               ② 自动建 .venv（等它跑完）
-#               ③ 打开本地 Web 设置页，加一把图像服务 API Key
+#               ③ 打开本地 Web 控制台的供应商页，加一把图像服务 API Key
 ```
 
 - [ ] `claude plugin list` 能看到 game-atelier
 - [ ] `/game-atelier:viewer-server` 能打开本地 Web 画廊（浏览器 `127.0.0.1:5174`）
-- [ ] Web 设置页加好了 API Key
+- [ ] Web 控制台的供应商页加好了 API Key
 
 **以后更新**（我发新版本后）：
 
@@ -91,7 +91,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Sync
 | `install.ps1` 被拦：禁止运行脚本 | 命令前加 `powershell -ExecutionPolicy Bypass -File .\install.ps1` |
 | 端口 5174 被占 | 插件会自动顺延到下一个空闲端口，见数据目录 `.runtime\server.port` |
 | Web 没自动打开 | 重新运行 `/game-atelier:viewer-server` |
-| API Key 填错 | Web 设置页删掉重加 |
+| API Key 填错 | Web 控制台的供应商页删掉重加 |
 | 更新后数据没了？ | 不会。数据在 `~\game-atelier`，和插件代码分离；如担心可先备份该目录 |
 
 ---

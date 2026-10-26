@@ -247,7 +247,7 @@ describe('Studio', () => {
 
   it('媒体资产按类型分流：图片模式点「使用」音频不进参考图，给一句提示', async () => {
     const audio = {
-      asset_id: 'asset-bgm', kind: 'media', title: '战鼓', tags: [], project_ids: [],
+      asset_id: 'asset-bgm', kind: 'media', title: '战鼓', tags: [], project_ids: [], category: null,
       created_at: '2026-09-20T00:00:00Z', updated_at: '2026-09-20T00:00:00Z', last_used_at: null,
       content: { kind: 'media', path: 'creation-assets/blobs/a.mp3', mime_type: 'audio/mpeg', bytes: 3, sha256: 'a'.repeat(64), filename: 'drum.mp3' },
     };
@@ -264,7 +264,7 @@ describe('Studio', () => {
       return fallback(url, init);
     });
     renderStudio();
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
 
     fireEvent.click(screen.getByLabelText('打开创作资产'));
     fireEvent.click(await screen.findByRole('button', { name: /媒体/ }));
@@ -302,7 +302,7 @@ describe('Studio', () => {
 
   it('Cmd+Enter submits the prompt', async () => {
     renderStudio();
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
     const textarea = screen.getByLabelText('生图 prompt');
     typePrompt(textarea, 'test prompt');
     fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
@@ -484,7 +484,7 @@ describe('Studio', () => {
     const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
     const body = JSON.parse(String(studioCall![1]!.body));
     expect(body.model).toBe('nano-banana-pro-4k');
-    expect(body.params.estimated_cost_cny).toBe(0.126);
+    expect(body.params).not.toHaveProperty('estimated_cost_cny');
     expect(body.params.size).toBe('1:1');
     expect(body.params).not.toHaveProperty('resolution');
     expect(body.params).not.toHaveProperty('quality');
@@ -2229,7 +2229,7 @@ function recipe(overrides: Partial<GenerationRecipe> = {}): GenerationRecipe {
 
 function generationAsset(snapshot: GenerationRecipe): CreationAsset {
   return {
-    asset_id: 'gen-1', kind: 'generation', title: '窗台橘猫', tags: [], project_ids: [],
+    asset_id: 'gen-1', kind: 'generation', title: '窗台橘猫', tags: [], project_ids: [], category: null,
     created_at: '2026-09-20T00:00:00Z', updated_at: '2026-09-20T00:00:00Z', last_used_at: null,
     content: {
       kind: 'generation',
@@ -2271,7 +2271,7 @@ describe('Studio 复刻生成资产', () => {
   it('输入框为空时直接填入提示词、模型、参数与参考图，来源记为资产标题', async () => {
     const fetchMock = mockPanelEndpoints();
     renderStudio();
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
 
     await openPanelAndReproduce(generationAsset(recipe()));
 
@@ -2289,7 +2289,7 @@ describe('Studio 复刻生成资产', () => {
   it('已有输入时先确认覆盖；取消不动，确认后覆盖', async () => {
     const fetchMock = mockPanelEndpoints();
     renderStudio();
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
     const editor = screen.getByLabelText('生图 prompt');
     typePrompt(editor, '我正在写的');
 
@@ -2309,7 +2309,7 @@ describe('Studio 复刻生成资产', () => {
   it('本机没有配方模型：模型位空着、生成禁用、常驻提示连同配方提示；选了模型后提示消失', async () => {
     mockPanelEndpoints();
     renderStudio();
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
 
     await openPanelAndReproduce(generationAsset(recipe({
       model: 'seedream-9',
@@ -2465,7 +2465,7 @@ describe('Studio 分享：边界', () => {
     render(<Router hook={hook}><Studio /></Router>);
     fireEvent.click(await screen.findByLabelText('分享生成结果 1'));
     fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
-    expect(history).toContain('/settings');
+    expect(history).toContain('/settings/libraries');
   });
 
   it('视频结果分享时对话框里没有预览图', async () => {
@@ -2511,7 +2511,7 @@ describe('Studio 复刻：边界', () => {
       return fallback(url, init);
     });
     renderStudio();
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
     await openPanelAndReproduce(generationAsset(recipe({
       inputs: [
         { order: 0, role: 'reference', kind: 'image', sha256: 'a'.repeat(64), mime_type: 'image/png' },
@@ -2530,7 +2530,7 @@ describe('Studio 复刻：边界', () => {
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
     mockPanelEndpoints(undefined, async () => new Response('', { status: 404 }));
     renderStudio();
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
     const editor = screen.getByLabelText('生图 prompt');
     typePrompt(editor, '我正在写的');
 
@@ -2593,7 +2593,7 @@ describe('Studio 复刻：边界', () => {
   it('缺模型的视频配方：alias 收敛到视频 key、模型留空，配方参数保留到选模型之后', async () => {
     mockPanelEndpoints(IMAGE_AND_VIDEO_KEYS);
     renderStudio();
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
 
     await openPanelAndReproduce(generationAsset(recipe({
       mode: 'video',
@@ -2720,7 +2720,7 @@ describe('Studio 响应团队资产动作', () => {
   it('「复刻」：认领事件，先采用再按配方填入输入框', async () => {
     const fetchMock = mockTeamEndpoints();
     renderStudio();
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
 
     let claimed = false;
     act(() => { claimed = dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'reproduce' }); });
@@ -2736,7 +2736,7 @@ describe('Studio 响应团队资产动作', () => {
   it('「看看」：打开资产面板的团队栏', async () => {
     mockTeamEndpoints();
     renderStudio();
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
 
     let claimed = false;
     act(() => { claimed = dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' }); });
@@ -2749,7 +2749,7 @@ describe('Studio 响应团队资产动作', () => {
   it('「看看」：团队栏落在挂载该库的画布和该库上', async () => {
     mockTeamEndpoints();
     renderStudio();
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
 
     act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' }); });
 
@@ -2760,7 +2760,7 @@ describe('Studio 响应团队资产动作', () => {
   it('「看看」：没有画布挂着这个库时只给一行提示', async () => {
     mockTeamEndpoints([libraryView('lib-other', 'canvas-1', '场景库')]);
     renderStudio();
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
 
     act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' }); });
 
@@ -2771,7 +2771,7 @@ describe('Studio 响应团队资产动作', () => {
   it('「复刻」：采用后先记一次使用再填入', async () => {
     const fetchMock = mockTeamEndpoints();
     renderStudio();
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
 
     act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'reproduce' }); });
 
@@ -2814,7 +2814,7 @@ describe('Studio 响应团队资产动作', () => {
       return fallback(url, init);
     });
     renderStudio();
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
 
     act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'reproduce' }); });
     expect(await screen.findByText(/这条资产还没同步完整/)).toBeInTheDocument();
@@ -2824,7 +2824,7 @@ describe('Studio 响应团队资产动作', () => {
   it('卸载后不再认领', async () => {
     mockTeamEndpoints();
     const { unmount } = renderStudio();
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
     unmount();
     expect(dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' })).toBe(false);
   });
@@ -2860,7 +2860,7 @@ describe('Studio 响应团队资产动作', () => {
     const fetchMock = mockTeamEndpoints();
     const { hook, searchHook, history } = memoryLocation({ path: '/studio?team_asset=bad&team_action=reproduce', record: true });
     render(<Router hook={hook} searchHook={searchHook}><Studio /></Router>);
-    await screen.findByText('火山引擎');
+    await screen.findByText('Volcengine Ark');
     expect(adoptCalls(fetchMock)).toHaveLength(0);
     expect(history).toEqual(['/studio?team_asset=bad&team_action=reproduce']);
   });
@@ -2923,4 +2923,28 @@ describe('Studio「自动」供应商', () => {
     const payload = JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs')![1]!.body));
     expect(payload.alias).toBe('oa');
   });
+});
+
+it.each([false, true])('停用供应商不进入创作台，启用后刷新可用，compact=%s', async compact => {
+  let enabled = false;
+  const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+  const fallback = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (url: RequestInfo | URL, init?: RequestInit) => {
+    const response = await fallback(url, init);
+    if (url !== '/api/keys') return response;
+    const payload = await response.json();
+    return { ok: true, json: async () => ({ ...payload,
+      keys: payload.keys.map((key: { alias: string }) => key.alias === 'volc' ? { ...key, enabled } : key),
+    }) };
+  });
+  const { hook } = memoryLocation({ path: compact ? '/' : '/studio', static: true });
+  render(<Router hook={hook}><Studio compact={compact} /></Router>);
+  await waitFor(() => expect(screen.getByRole('button', { name: '选择厂商' })).toHaveTextContent('OpenAI'));
+  fireEvent.click(screen.getByRole('button', { name: '选择厂商' }));
+  expect(screen.queryByRole('option', { name: /volc ·/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '选择厂商' }));
+  enabled = true;
+  act(() => window.dispatchEvent(new Event('atelier:keys-changed')));
+  fireEvent.click(screen.getByRole('button', { name: '选择厂商' }));
+  expect(await screen.findByRole('option', { name: /volc ·/ })).toBeInTheDocument();
 });

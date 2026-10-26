@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { TeamLibrariesSection } from './TeamLibrariesSection';
 import {
@@ -60,27 +60,26 @@ describe('TeamLibrariesSection', () => {
   it('渲染项目选择与该项目的库列表', async () => {
     render(<TeamLibrariesSection />);
 
-    const select = await screen.findByLabelText('画布项目');
-    await waitFor(() => expect(select).toHaveValue('p1'));
-    expect(screen.getByRole('option', { name: '买牌三国' })).toBeInTheDocument();
+    const project = await screen.findByRole('button', { name: /买牌三国/ });
+    expect(project).toHaveAttribute('aria-pressed', 'true');
 
     expect(await screen.findByText('美术共享盘')).toBeInTheDocument();
     expect(screen.getByText('/Volumes/team/art')).toBeInTheDocument();
-    expect(screen.getByText('12 项')).toBeInTheDocument();
-    await waitFor(() => expect(mockList).toHaveBeenCalledWith('p1'));
+    expect(screen.getByText(/12 项 ·/)).toBeInTheDocument();
+    await waitFor(() => expect(mockList).toHaveBeenCalledWith(undefined, true));
   });
 
   it('不可达的库打标记', async () => {
     mockList.mockResolvedValue([{ ...view, reachable: false }]);
     render(<TeamLibrariesSection />);
-    expect(await screen.findByText('不可达')).toBeInTheDocument();
+    expect(await screen.findByText('路径不可达')).toBeInTheDocument();
   });
 
   it('点挂载先选目录再挂载', async () => {
     render(<TeamLibrariesSection />);
     await screen.findByText('美术共享盘');
 
-    fireEvent.click(screen.getByRole('button', { name: '挂载' }));
+    fireEvent.click(screen.getByRole('button', { name: '挂载文件夹' }));
 
     await waitFor(() => expect(mockChooseFolder).toHaveBeenCalled());
     await waitFor(() =>
@@ -93,7 +92,7 @@ describe('TeamLibrariesSection', () => {
     render(<TeamLibrariesSection />);
     await screen.findByText('美术共享盘');
 
-    fireEvent.click(screen.getByRole('button', { name: '挂载' }));
+    fireEvent.click(screen.getByRole('button', { name: '挂载文件夹' }));
 
     expect(await screen.findByText('先设置显示名')).toBeInTheDocument();
   });
@@ -135,7 +134,7 @@ describe('TeamLibrariesSection', () => {
     render(<TeamLibrariesSection />);
     await screen.findByText('美术共享盘');
 
-    fireEvent.click(screen.getByRole('button', { name: '扫描' }));
+    fireEvent.click(screen.getByRole('button', { name: '重新扫描' }));
     await waitFor(() => expect(mockRescan).toHaveBeenCalledWith('lib_0123456789abcdef'));
   });
 
@@ -147,16 +146,55 @@ describe('TeamLibrariesSection', () => {
     try {
       window.history.replaceState(null, '', '/settings?canvas=p2');
       const first = render(<TeamLibrariesSection />);
-      await waitFor(() => expect(screen.getByLabelText('画布项目')).toHaveValue('p2'));
-      await waitFor(() => expect(mockList).toHaveBeenCalledWith('p2'));
-      expect(mockList).not.toHaveBeenCalledWith('p1');
+      await waitFor(() => expect(screen.getByRole('button', { name: /列车短片/ })).toHaveAttribute('aria-pressed', 'true'));
+      await waitFor(() => expect(mockList).toHaveBeenCalledWith(undefined, true));
       first.unmount();
 
       window.history.replaceState(null, '', '/settings?canvas=gone');
       render(<TeamLibrariesSection />);
-      await waitFor(() => expect(screen.getByLabelText('画布项目')).toHaveValue('p1'));
+      await waitFor(() => expect(screen.getByRole('button', { name: /买牌三国/ })).toHaveAttribute('aria-pressed', 'true'));
     } finally {
       window.history.replaceState(null, '', '/');
     }
   });
+});
+
+it('跨项目同库分别计数，切换空项目显示挂载入口，卸载后更新数量', async () => {
+  mockProjects.mockResolvedValue([
+    { project_id: 'p1', name: '项目一' }, { project_id: 'p2', name: '项目二' }, { project_id: 'p3', name: '空项目' },
+  ] as never);
+  mockList.mockResolvedValue([view, { ...view, project_id: 'p2' }]);
+  render(<TeamLibrariesSection />);
+  const first = await screen.findByRole('button', { name: '项目一 1 个' });
+  expect(screen.getByRole('button', { name: '项目二 1 个' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '空项目' }));
+  expect(screen.getByText('这个项目还没挂载团队库')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '选择文件夹' })).toBeInTheDocument();
+  fireEvent.click(first);
+  fireEvent.click(screen.getByRole('button', { name: '卸载' }));
+  mockList.mockResolvedValue([{ ...view, project_id: 'p2' }]);
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '确认' }));
+  await waitFor(() => expect(first).toHaveTextContent('项目一'));
+  await waitFor(() => expect(first).not.toHaveTextContent('1 个'));
+  expect(screen.getByRole('button', { name: '项目二 1 个' })).toBeInTheDocument();
+});
+
+it('显示相对扫描时间和未扫描状态', async () => {
+  mockList.mockResolvedValue([{ ...view, scanned_at: new Date(Date.now() - 600000).toISOString() },
+    { ...view, library_id: 'lib_other', name: '其他', scanned_at: null }]);
+  render(<TeamLibrariesSection />);
+  expect(await screen.findByText('12 项 · 10 分钟前扫描')).toBeInTheDocument();
+  expect(screen.getByText('12 项 · 尚未扫描')).toBeInTheDocument();
+});
+
+it('挂载后的新列表不会被初始慢响应覆盖', async () => {
+  let resolveInitial!: (value: TeamLibraryView[]) => void;
+  mockList.mockImplementationOnce(() => new Promise(resolve => { resolveInitial = resolve; }));
+  mockList.mockResolvedValue([view]);
+  render(<TeamLibrariesSection />);
+  fireEvent.click(await screen.findByRole('button', { name: '挂载文件夹' }));
+  await screen.findByText('美术共享盘');
+  await act(async () => { resolveInitial([]); });
+  expect(screen.getByRole('button', { name: '买牌三国 1 个' })).toBeInTheDocument();
+  expect(screen.getByText('美术共享盘')).toBeInTheDocument();
 });

@@ -30,6 +30,9 @@ def _provider_render(key: _keys.KeySpec, model: str = ""):
     if key.provider == "evolink":
         from .evolink import render
         return render
+    if key.provider == "atelier":
+        from .atelier_gateway import render
+        return render
     # MJ 走任务代理协议（异步 submit + 轮询），判据挂模型族不挂 provider：Tuzi 这类聚合商
     # provider=custom，只按 provider 判会落到 openai_image 的同步 images 端点，打错入口。
     from character_workflow.lib.callers.openai_image import image_family
@@ -73,6 +76,8 @@ def dispatch(
     key = _keys.find_by_alias(alias)
     if key is None:
         raise NoSuchKeyError(alias)
+    if not key.enabled:
+        raise ValueError("供应商已停用")
     fn = _provider_render(key, model)
     if fn is None:
         raise WrongProviderError(f"unknown provider {key.provider!r}")
@@ -119,6 +124,12 @@ def dispatch_video(
     key = _keys.find_by_alias(alias)
     if key is None:
         raise NoSuchKeyError(alias)
+    if not key.enabled:
+        raise ValueError("供应商已停用")
+    if key.provider == "atelier":
+        from .atelier_gateway import render_video
+        return render_video(prompt=prompt, model=model, alias=alias,
+                            output_dir=output_dir, params=params, **kwargs)
     protocol = _effective_protocol(key, model)
     if not protocol:
         raise WrongProviderError(
@@ -159,7 +170,15 @@ def dispatch_audio(
     params: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> list[str]:
-    from .openai_audio import render
+    key = _keys.find_by_alias(alias)
+    if key is None:
+        raise NoSuchKeyError(alias)
+    if not key.enabled:
+        raise ValueError("供应商已停用")
+    if key.provider == "atelier":
+        from .atelier_gateway import render_audio as render
+    else:
+        from .openai_audio import render
 
     return render(
         prompt=prompt, model=model, alias=alias, output_dir=output_dir,

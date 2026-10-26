@@ -1,70 +1,48 @@
 import { useEffect, useState } from 'react';
-
 import { Input } from '@/components/ui/input';
 import { fetchProfile, saveProfile } from '@/api/teamLibraries';
 
 /** 显示名：分享到团队库的资产用它署名。 */
 export function ProfileSection() {
   const [name, setName] = useState('');
+  const [savedName, setSavedName] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   useEffect(() => {
-    fetchProfile()
-      .then(profile => setName(profile.display_name ?? ''))
-      .catch(e => setError(e instanceof Error ? e.message : String(e)));
+    let active = true;
+    fetchProfile().then(profile => {
+      if (!active) return;
+      setName(profile.display_name ?? '');
+      setSavedName(profile.display_name ?? '');
+    }).catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); });
+    return () => { active = false; };
   }, []);
-
+  const changed = savedName !== null && name.trim() !== savedName;
   async function save() {
     const value = name.trim();
-    if (!value) return;
+    if (!changed || !value || saving) return;
     setSaving(true);
-    setSaved(false);
     setError(null);
     try {
       const profile = await saveProfile(value);
       setName(profile.display_name ?? value);
-      setSaved(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
+      setSavedName(profile.display_name ?? value);
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
   }
-
-  return (
-    <>
-      <h2 className="text-base font-medium text-foreground">显示名</h2>
-      <div className="min-w-0 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            aria-label="显示名"
-            value={name}
-            maxLength={40}
-            onChange={event => {
-              setName(event.target.value);
-              setSaved(false);
-            }}
-            className="max-w-xs"
-          />
-          <button
-            type="button"
-            onClick={() => void save()}
-            disabled={saving || !name.trim()}
-            className="rounded-md border border-border px-4 py-2 text-sm text-foreground transition-colors hover:bg-secondary/60 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            保存
-          </button>
+  return <section id="profile" aria-labelledby="profile-title" className="scroll-mt-6 space-y-2">
+    <h2 id="profile-title" className="px-1 text-xs font-normal text-muted-foreground">个人</h2>
+    <div className="rounded-xl border border-border bg-card px-4.5 py-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label htmlFor="profile-name" className="text-sm">显示名 <span className="ml-2 text-xs text-muted-foreground">分享到团队库时署名</span></label>
+        <div className="flex min-w-0 items-center gap-2">
+          <Input id="profile-name" aria-label="显示名" value={name} maxLength={40} disabled={savedName === null || saving}
+            onChange={event => setName(event.target.value)} className="h-8 w-50 min-w-0" />
+          {changed && <button type="button" onClick={() => void save()} disabled={saving || !name.trim()}
+            className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{saving ? '保存中…' : '保存'}</button>}
         </div>
-        {saved && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="size-1.5 rounded-full bg-[color:var(--status-done)]" aria-hidden />
-            已保存
-          </div>
-        )}
-        {error && <div className="text-sm text-destructive">{error}</div>}
       </div>
-    </>
-  );
+      {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
+    </div>
+  </section>;
 }

@@ -19,7 +19,7 @@ from pathlib import Path, PurePosixPath
 import yaml
 
 from character_workflow.lib import data_root
-from character_workflow.lib.workshop import WorkshopError
+from character_workflow.lib.canvas_tool_common import CanvasToolError
 
 SKILL_FILE = "SKILL.md"
 NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -48,25 +48,25 @@ def skills_dir() -> Path:
 
 
 def parse_skill_md(text: str) -> tuple[dict, str]:
-    """(frontmatter, body). Raises WorkshopError if the frontmatter is missing or malformed."""
+    """(frontmatter, body). Raises CanvasToolError if the frontmatter is missing or malformed."""
     text = text.lstrip("﻿")
     match = _FRONTMATTER.match(text)
     if match is None:
-        raise WorkshopError("INVALID_PARAMETERS",
+        raise CanvasToolError("INVALID_PARAMETERS",
                             "SKILL.md 开头缺少用 --- 包起来的 name / description", 422)
     try:
         meta = yaml.safe_load(match.group(1)) or {}
     except yaml.YAMLError:
-        raise WorkshopError("INVALID_PARAMETERS", "SKILL.md 的 frontmatter 不是合法的 YAML", 422) from None
+        raise CanvasToolError("INVALID_PARAMETERS", "SKILL.md 的 frontmatter 不是合法的 YAML", 422) from None
     if not isinstance(meta, dict):
-        raise WorkshopError("INVALID_PARAMETERS", "SKILL.md 的 frontmatter 格式不对", 422)
+        raise CanvasToolError("INVALID_PARAMETERS", "SKILL.md 的 frontmatter 格式不对", 422)
     return meta, text[match.end():]
 
 
 def _normalize_name(raw: object) -> str:
     name = str(raw or "").strip().lower().replace("_", "-").replace(" ", "-")
     if not NAME_PATTERN.fullmatch(name):
-        raise WorkshopError("INVALID_PARAMETERS",
+        raise CanvasToolError("INVALID_PARAMETERS",
                             "Skill 名称只能用小写字母、数字和短横线（最多 64 个字符）", 422)
     return name
 
@@ -75,10 +75,10 @@ def clean_relative(raw: str) -> str:
     """相对 posix 路径；Windows 打的 zip 可能用反斜杠，先统一再判。"""
     path = raw.replace("\\", "/")
     if path.startswith("/") or re.match(r"^[A-Za-z]:", path):
-        raise WorkshopError("INVALID_PARAMETERS", f"不允许的路径 {raw}", 422)
+        raise CanvasToolError("INVALID_PARAMETERS", f"不允许的路径 {raw}", 422)
     parts = [part for part in path.split("/") if part not in ("", ".")]
     if not parts or ".." in parts:
-        raise WorkshopError("INVALID_PARAMETERS", f"不允许的路径 {raw}", 422)
+        raise CanvasToolError("INVALID_PARAMETERS", f"不允许的路径 {raw}", 422)
     return "/".join(parts)
 
 
@@ -96,7 +96,7 @@ def _info(directory: Path) -> SkillInfo | None:
         return None
     try:
         meta, _ = parse_skill_md(skill_md.read_text(encoding="utf-8"))
-    except (WorkshopError, OSError, UnicodeDecodeError):
+    except (CanvasToolError, OSError, UnicodeDecodeError):
         return None
     files = [p.relative_to(directory).as_posix() for p in directory.rglob("*") if p.is_file()]
     return SkillInfo(name=directory.name, description=str(meta.get("description") or "").strip(),
@@ -114,10 +114,10 @@ def list_skills() -> list[SkillInfo]:
 
 def _skill_path(name: str) -> Path:
     if not NAME_PATTERN.fullmatch(name or ""):
-        raise WorkshopError("INVALID_TARGET", f"没有名为 {name} 的 Skill", 404)
+        raise CanvasToolError("INVALID_TARGET", f"没有名为 {name} 的 Skill", 404)
     path = skills_dir() / name
     if not (path / SKILL_FILE).is_file():
-        raise WorkshopError("INVALID_TARGET", f"没有名为 {name} 的 Skill", 404)
+        raise CanvasToolError("INVALID_TARGET", f"没有名为 {name} 的 Skill", 404)
     return path
 
 
@@ -136,11 +136,11 @@ def read_skill_file(name: str, relative: str) -> str:
     root = _skill_path(name).resolve()
     target = (root / clean_relative(relative)).resolve()
     if not target.is_relative_to(root) or not target.is_file():
-        raise WorkshopError("INVALID_TARGET", f"Skill {name} 里没有文件 {relative}", 404)
+        raise CanvasToolError("INVALID_TARGET", f"Skill {name} 里没有文件 {relative}", 404)
     try:
         return target.read_bytes().decode("utf-8")[:MAX_READ_CHARS]
     except UnicodeDecodeError:
-        raise WorkshopError("INVALID_PARAMETERS", "只能读取文本文件", 422) from None
+        raise CanvasToolError("INVALID_PARAMETERS", "只能读取文本文件", 422) from None
 
 
 def _strip_common_root(files: dict[str, bytes]) -> dict[str, bytes]:
@@ -148,7 +148,7 @@ def _strip_common_root(files: dict[str, bytes]) -> dict[str, bytes]:
     candidates = sorted((p for p in files if PurePosixPath(p).name == SKILL_FILE),
                         key=lambda p: len(PurePosixPath(p).parts))
     if not candidates:
-        raise WorkshopError("INVALID_PARAMETERS", "没有找到 SKILL.md", 422)
+        raise CanvasToolError("INVALID_PARAMETERS", "没有找到 SKILL.md", 422)
     root = PurePosixPath(candidates[0]).parent.as_posix()
     if root == ".":
         return files
@@ -160,7 +160,7 @@ def files_from_zip(payload: bytes) -> dict[str, bytes]:
     try:
         archive = zipfile.ZipFile(io.BytesIO(payload))
     except zipfile.BadZipFile:
-        raise WorkshopError("INVALID_PARAMETERS", "不是有效的 zip 文件", 422) from None
+        raise CanvasToolError("INVALID_PARAMETERS", "不是有效的 zip 文件", 422) from None
     files: dict[str, bytes] = {}
     total = 0
     with archive:
@@ -168,14 +168,14 @@ def files_from_zip(payload: bytes) -> dict[str, bytes]:
             if entry.is_dir() or entry.filename.startswith("__MACOSX/"):
                 continue
             if stat.S_ISLNK(entry.external_attr >> 16):
-                raise WorkshopError("INVALID_PARAMETERS", f"zip 里有符号链接 {entry.filename}", 422)
+                raise CanvasToolError("INVALID_PARAMETERS", f"zip 里有符号链接 {entry.filename}", 422)
             total += entry.file_size  # 先按声明大小拦，再按实际读出的字节数拦（防 zip 炸弹）
             if total > MAX_TOTAL_BYTES or len(files) >= MAX_FILES:
-                raise WorkshopError("CONTENT_TOO_LARGE", TOO_LARGE, 413)
+                raise CanvasToolError("CONTENT_TOO_LARGE", TOO_LARGE, 413)
             with archive.open(entry) as handle:
                 data = handle.read(MAX_TOTAL_BYTES + 1)
             if len(data) > entry.file_size:
-                raise WorkshopError("CONTENT_TOO_LARGE", TOO_LARGE, 413)
+                raise CanvasToolError("CONTENT_TOO_LARGE", TOO_LARGE, 413)
             files[clean_relative(entry.filename)] = data
     return files
 
@@ -188,24 +188,24 @@ def install_skill(files: dict[str, bytes], *, replace: bool = False) -> SkillInf
         and not raw.replace("\\", "/").startswith("__MACOSX/")
     }
     if len(cleaned) > MAX_FILES or sum(len(d) for d in cleaned.values()) > MAX_TOTAL_BYTES:
-        raise WorkshopError("CONTENT_TOO_LARGE", TOO_LARGE, 413)
+        raise CanvasToolError("CONTENT_TOO_LARGE", TOO_LARGE, 413)
     cleaned = _strip_common_root(cleaned)
     # 大小写不敏感的文件系统上 Readme.md 与 README.md 会写到同一个文件。
     if len({path.casefold() for path in cleaned}) != len(cleaned):
-        raise WorkshopError("INVALID_PARAMETERS", "有只差大小写的同名文件", 422)
+        raise CanvasToolError("INVALID_PARAMETERS", "有只差大小写的同名文件", 422)
     try:
         meta, _ = parse_skill_md(cleaned[SKILL_FILE].decode("utf-8"))
     except UnicodeDecodeError:
-        raise WorkshopError("INVALID_PARAMETERS", "SKILL.md 不是 UTF-8 文本", 422) from None
+        raise CanvasToolError("INVALID_PARAMETERS", "SKILL.md 不是 UTF-8 文本", 422) from None
     name = _normalize_name(meta.get("name"))
     if not str(meta.get("description") or "").strip():
-        raise WorkshopError("INVALID_PARAMETERS", "SKILL.md 缺少 description", 422)
+        raise CanvasToolError("INVALID_PARAMETERS", "SKILL.md 缺少 description", 422)
 
     root = skills_dir()
     root.mkdir(parents=True, exist_ok=True)
     target = root / name
     if target.exists() and not replace:
-        raise WorkshopError("SKILL_EXISTS", f"已经有名为 {name} 的 Skill", 409)
+        raise CanvasToolError("SKILL_EXISTS", f"已经有名为 {name} 的 Skill", 409)
     staging = root / f".import-{uuid.uuid4().hex}"
     try:
         for path, data in cleaned.items():
@@ -220,7 +220,7 @@ def install_skill(files: dict[str, bytes], *, replace: bool = False) -> SkillInf
             shutil.rmtree(staging, ignore_errors=True)
     info = _info(target)
     if info is None:  # pragma: no cover - 刚校验过 SKILL.md
-        raise WorkshopError("INVALID_PARAMETERS", "SKILL.md 无法读取", 422)
+        raise CanvasToolError("INVALID_PARAMETERS", "SKILL.md 无法读取", 422)
     return info
 
 

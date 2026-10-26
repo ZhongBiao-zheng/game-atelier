@@ -1,3 +1,4 @@
+import { routeChannel } from '@/lib/modelRoutes';
 import type { Quality } from '@/lib/imageControlCaps';
 import type { KeyView } from '@/api/keys';
 import type { JobParams } from '@/schema/jobs';
@@ -8,19 +9,6 @@ import {
   GENERATION_USD_TO_CNY,
   HAPPYHORSE_1_0_YUAN_PER_SECOND,
   HAPPYHORSE_1_1_YUAN_PER_SECOND,
-  OPENAI_HK_FIXED_YUAN_PER_IMAGE,
-  OPENAI_HK_NANO_BANANA_2_YUAN,
-  TOKEN_DANCE_YUAN_PER_IMAGE,
-  TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE,
-  TUZI_GPT_IMAGE_2_1K_SIZES,
-  TUZI_GPT_IMAGE_2_1K_YUAN_PER_IMAGE,
-  TUZI_GPT_IMAGE_2_PIXEL_LIMITS,
-  TUZI_GPT_IMAGE_2_YUAN_PER_IMAGE,
-  TUZI_GPT_IMAGE_25_YUAN_PER_IMAGE,
-  TUZI_GPT_IMAGE_25_PIXEL_LIMITS,
-  TUZI_GPT_IMAGE_25_1K_YUAN_PER_IMAGE,
-  TUZI_GROUP_YUAN_PER_IMAGE,
-  TUZI_MIDJOURNEY_YUAN_PER_TASK,
 } from '@/lib/generationPrices';
 import { parsePixelSize } from '@/lib/studioSize';
 
@@ -43,11 +31,6 @@ export interface GenerationCostRequest {
   hasReferenceVideo?: boolean;
   imageEdit?: boolean;
 }
-
-const TUZI_GEMINI_3_PRO_MODELS = new Set([
-  'gemini-3-pro-image', 'gemini-3-pro-image-preview',
-  'nano-banana-pro', 'nano-banana-pro-2k', 'nano-banana-pro-4k',
-]);
 
 const HAPPYHORSE_1_1_MODELS = new Set([
   'happyhorse-1-1-t2v',
@@ -141,76 +124,63 @@ function protocolMatches(protocol: string | null | undefined, expected: string):
   return !actual || actual === expected;
 }
 
-function estimateOpenAiHkImage(request: GenerationCostRequest): number | null {
-  const model = normalize(request.model?.id);
-  const unitPrice = model === 'nano-banana-2'
-    ? (request.quality && ['low', 'medium', 'high', 'auto'].includes(request.quality)
-      ? OPENAI_HK_NANO_BANANA_2_YUAN[request.quality as Quality] : undefined)
-    : OPENAI_HK_FIXED_YUAN_PER_IMAGE[model];
-  if (unitPrice == null) return null;
-  return priced(unitPrice * safeCount(request.count));
+/** TokenDance 价格快照（服务启动时从其公开接口同步，`GET /api/pricing/tokendance`）。
+ *  与服务端 generation_pricing._tokendance 同一套解析；没有快照的模型不估价。 */
+export interface TokenDancePricing {
+  items?: {
+    id?: string;
+    plans?: { unit?: string; rate?: string | number; range?: { lower?: number; upper?: number } }[];
+    skus?: { specs?: Record<string, string>; rate?: string | number; unit?: string }[];
+  }[];
 }
 
-function estimateTuziImage(request: GenerationCostRequest): number | null {
-  const group = request.provider?.billingGroup?.trim();
-  if (!group) return null;
-  const model = normalize(request.model?.id);
-  const exactModel = request.model?.id?.trim();
-  if (group === 'default' && exactModel === 'gpt-image-2.5-1k') {
-    return priced(TUZI_GPT_IMAGE_25_1K_YUAN_PER_IMAGE * safeCount(request.count));
-  }
-  const gpt25Prices = exactModel && TUZI_GPT_IMAGE_25_YUAN_PER_IMAGE[exactModel];
-  if (group === 'default' && gpt25Prices) {
-    const explicit = request.sizeMode === 'auto' ? undefined
-      : request.resolution ?? request.quality?.toUpperCase();
-    let tier: '1K' | '2K' | '4K';
-    if (explicit === '1K' || explicit === '2K' || explicit === '4K') tier = explicit;
-    else {
-      const size = parsePixelSize(request.size ?? '');
-      const pixels = size ? size.w * size.h : 0;
-      const whitelisted = ['gpt-image-2.5', 'gpt-image-2.5-vip'].includes(exactModel!)
-        && TUZI_GPT_IMAGE_2_1K_SIZES.has(request.size?.toLowerCase() ?? '');
-      tier = whitelisted ? '1K' : pixels > TUZI_GPT_IMAGE_25_PIXEL_LIMITS['2K'] ? '4K'
-        : pixels > TUZI_GPT_IMAGE_25_PIXEL_LIMITS['1K'] ? '2K' : '1K';
-    }
-    return priced(gpt25Prices[tier] * safeCount(request.count));
-  }
-  if (group === 'default' && model === 'mj-imagine') return TUZI_MIDJOURNEY_YUAN_PER_TASK;
-  if (group === 'default' && TUZI_GEMINI_3_PRO_MODELS.has(model)) {
-    // 与 Tuzi caller 一致：固定型号优先，其余 low / medium / high → 1K / 2K / 4K；
-    // 缺省或 auto 走 1K，不从无关的像素 size / resolution 猜测计费档位。
-    const tier = model.endsWith('-4k') ? '4k' : model.endsWith('-2k') ? '2k'
-      : request.quality === 'high' ? '4k' : request.quality === 'medium' ? '2k' : '1k';
-    return priced(TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE[tier] * safeCount(request.count));
-  }
-  if (group === 'default' && exactModel === 'gpt-image-2-1k') {
-    return priced(TUZI_GPT_IMAGE_2_1K_YUAN_PER_IMAGE * safeCount(request.count));
-  }
-  if (group === 'default' && exactModel === 'gpt-image-2') {
-    const rawSize = request.size?.toLowerCase() ?? '';
-    const size = rawSize ? parsePixelSize(rawSize) : null;
-    if (
-      !size
-      || !Number.isSafeInteger(size.w)
-      || !Number.isSafeInteger(size.h)
-      || size.w < 1
-      || size.h < 1
-    ) return null;
-    const pixels = size.w * size.h;
-    if (!Number.isSafeInteger(pixels)) return null;
-    // 上游 upper(size) 做字符串精确匹配：不把近似比例、邻近尺寸或补零串扩成低价范围。
-    const is1k = TUZI_GPT_IMAGE_2_1K_SIZES.has(rawSize)
-      || pixels <= TUZI_GPT_IMAGE_2_PIXEL_LIMITS['1k'];
-    const tier = is1k ? '1k' : pixels <= TUZI_GPT_IMAGE_2_PIXEL_LIMITS['2k'] ? '2k' : '4k';
-    return priced(TUZI_GPT_IMAGE_2_YUAN_PER_IMAGE[tier] * safeCount(request.count));
-  }
-  const unitPrice = TUZI_GROUP_YUAN_PER_IMAGE[group]?.[model];
-  return unitPrice == null ? null : priced(unitPrice * safeCount(request.count));
+let tokenDancePricing: Record<string, TokenDancePricing> = {};
+
+export function setTokenDancePrices(models: Record<string, TokenDancePricing>): void {
+  tokenDancePricing = models;
+}
+
+function pricingRate(value: unknown): number | null {
+  const rate = Number(value);
+  return Number.isFinite(rate) && rate >= 0 ? rate : null;
 }
 
 function estimateTokenDanceImage(request: GenerationCostRequest): number | null {
-  const unitPrice = TOKEN_DANCE_YUAN_PER_IMAGE[normalize(request.model?.id)];
-  return unitPrice == null ? null : priced(unitPrice * safeCount(request.count));
+  const items = tokenDancePricing[request.model?.id ?? '']?.items ?? [];
+  const item = items.find(entry => /(generated_images|:images)$/.test(entry.id ?? ''));
+  const plans = (item?.plans ?? []).filter(plan => plan.unit === 'images');
+  const size = request.size ? parsePixelSize(request.size) : null;
+  const kpixels = size ? size.w * size.h / 1000 : null;
+  // 不知道输出尺寸时，只有各档同价才能估。
+  const rates = new Set(plans.filter(plan => !plan.range || kpixels == null
+    || ((plan.range.lower ?? 0) <= kpixels && (plan.range.upper == null || kpixels < plan.range.upper)))
+    .map(plan => pricingRate(plan.rate)));
+  if (rates.size !== 1) return null;
+  const [rate] = [...rates];
+  return rate == null ? null : priced(rate * safeCount(request.count));
+}
+
+function estimateTokenDanceVideo(request: GenerationCostRequest): number | null {
+  const duration = request.duration;
+  if (!Number.isFinite(duration) || (duration ?? 0) <= 0) return null;
+  const resolution = (request.resolution ?? '').trim().toLowerCase();
+  const video = request.hasReferenceVideo ? 'true' : 'false';
+  const skus = (tokenDancePricing[request.model?.id ?? '']?.items ?? []).flatMap(item => item.skus ?? [])
+    .filter(sku => {
+      const skuResolution = (sku.specs?.resolution ?? '*').toLowerCase();
+      return (skuResolution === '*' || skuResolution === resolution)
+        && (sku.specs?.has_video ?? video) === video;
+    });
+  // 指定分辨率的价格优先于通配。
+  const sku = skus.find(entry => (entry.specs?.resolution ?? '*') !== '*') ?? skus[0];
+  const rate = pricingRate(sku?.rate);
+  if (!sku || rate == null) return null;
+  const count = safeCount(request.count);
+  if (sku.unit === 'seconds') return priced(rate * duration! * count);
+  if (sku.unit !== 'millionTokens') return null;
+  const dimensions = MODERN_SEEDANCE_DIMENSIONS[resolution]?.[request.ratio?.trim() ?? ''];
+  if (!dimensions) return null;
+  return priced(duration! * dimensions[0] * dimensions[1] * 24 / 1024 * rate * count / 1_000_000);
 }
 
 function estimateArkImage(request: GenerationCostRequest): number | null {
@@ -294,14 +264,13 @@ export function estimateGenerationCost(request: GenerationCostRequest): number |
     return priced(EVOLINK_MIDJOURNEY_USD_PER_REQUEST[route] * GENERATION_USD_TO_CNY);
   }
   if (request.kind === 'image' && isTuzi(request.provider.baseUrl)) {
-    return estimateTuziImage(request);
+    return null; // Tuzi prices are evaluated by the server from its current snapshot.
   }
   if (
     request.kind === 'image'
     && isOpenAiHk(request.provider.baseUrl)
-    && protocolMatches(request.model.protocol, 'openai')
   ) {
-    return estimateOpenAiHkImage(request);
+    return null; // OpenAI-HK prices are evaluated from the server snapshot.
   }
   if (request.kind === 'image' && normalize(request.provider.provider) === 'tokendance') {
     return estimateTokenDanceImage(request);
@@ -312,6 +281,9 @@ export function estimateGenerationCost(request: GenerationCostRequest): number |
     && protocolMatches(request.model.protocol, 'ark')
   ) {
     return estimateArkImage(request);
+  }
+  if (request.kind === 'video' && normalize(request.provider.provider) === 'tokendance') {
+    return estimateTokenDanceVideo(request);
   }
   if (
     request.kind === 'video'
@@ -342,6 +314,9 @@ export function estimateGenerationCostForSubmission(
 ): number | null {
   if (!selectedKey) return null;
   const selectedModel = selectedKey.models.find((item) => item.id === modelId);
+  const channel = selectedModel ? routeChannel(selectedKey, selectedModel) : null;
+  const key = channel?.key ?? selectedKey;
+  const model = channel?.model ?? selectedModel;
   const quality = (params.quality === 'low' || params.quality === 'medium'
     || params.quality === 'high' || params.quality === 'auto'
     || params.quality === '1k' || params.quality === '2k' || params.quality === '4k')
@@ -349,11 +324,11 @@ export function estimateGenerationCostForSubmission(
     : undefined;
   return estimateGenerationCost({
     provider: {
-      provider: selectedKey.provider,
-      baseUrl: selectedKey.base_url,
-      billingGroup: selectedKey.billing_group,
+      provider: key.provider,
+      baseUrl: key.base_url,
+      billingGroup: key.billing_group,
     },
-    model: { id: modelId, protocol: selectedModel?.protocol },
+    model: { id: model?.id ?? modelId, protocol: model?.protocol },
     kind,
     count: typeof params.n === 'number' ? params.n : undefined,
     size: typeof params.size === 'string' ? params.size : undefined,

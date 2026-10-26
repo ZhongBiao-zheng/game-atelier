@@ -17,6 +17,7 @@ export interface CanvasMaterialReference {
   text?: string;
   previewUrl?: string;
   inputCount?: number;
+  annotated?: boolean;
 }
 
 export interface CanvasMentionReference extends CanvasMaterialReference {
@@ -129,7 +130,7 @@ export function buildCanvasMentionReferences(
       const node = nodesById.get(sourceId);
       const material = node
         ? canvasMaterialReference(projectId, node, contentVersions, isMentionContentNode(surface)
-          ? surface.data.batch_result : null)
+          ? surface.data.batch_result : null, connections.some(edge => edge.role === 'input' && edge.target_node_id === surface.id && edge.source_node_id === sourceId && edge.annotated))
         : null;
       return material ? [material] : [];
     });
@@ -178,6 +179,7 @@ function canvasMaterialReference(
   node: CanvasNode,
   contentVersions: Readonly<Record<string, CanvasContentVersion>>,
   binding?: CanvasContentNode['data']['batch_result'],
+  annotated = false,
 ): CanvasMaterialReference | null {
   if (node.type === 'batch_material') {
     const bound = binding?.source_node_id === node.id ? binding : null;
@@ -188,11 +190,13 @@ function canvasMaterialReference(
       previewUrl: canvasMediaUrl(projectId, versionId, 256) };
   }
   if (!isMentionContentNode(node)) return null;
-  const versionId = node.data.current_version_id;
+  const versionId = annotated && node.type === 'image' && node.data.annotation?.rendered_version_id
+    ? node.data.annotation.rendered_version_id : node.data.current_version_id;
   const version = versionId ? contentVersions[versionId] : undefined;
   if (!version || version.kind !== node.type) return null;
   return {
     nodeId: node.id,
+    ...(annotated ? { annotated: true } : {}),
     versionId: version.version_id,
     kind: version.kind,
     title: node.title,

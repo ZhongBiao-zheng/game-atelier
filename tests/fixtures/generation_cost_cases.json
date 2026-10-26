@@ -1,0 +1,2960 @@
+[
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "2048x2048",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "2048x2048",
+      "size_mode": "ratio",
+      "resolution": "2K",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "2048x2048",
+      "size_mode": "ratio",
+      "resolution": "4K",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "2048x2048",
+      "size_mode": "custom",
+      "resolution": "2K",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "2048x2048",
+      "size_mode": "custom",
+      "resolution": "4K",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "2048x2048",
+      "quality": "1k",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "1920x1920",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "1920x1921",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "1024x1536",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "auto",
+      "size_mode": "auto",
+      "resolution": "4K",
+      "quality": "high",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "2048x2048",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "image",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "2048x2048",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "2048x2048",
+      "size_mode": "ratio",
+      "resolution": "2K",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "2048x2048",
+      "size_mode": "ratio",
+      "resolution": "4K",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "2048x2048",
+      "size_mode": "custom",
+      "resolution": "2K",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "2048x2048",
+      "size_mode": "custom",
+      "resolution": "4K",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "2048x2048",
+      "quality": "1k",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "1920x1920",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "1920x1921",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "1024x1536",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "auto",
+      "size_mode": "auto",
+      "resolution": "4K",
+      "quality": "high",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "size": "2048x2048",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "image",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1536",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "resolution": "4K",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-vip"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "resolution": "4K",
+      "n": 2,
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2.5-1k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "provider": "evolink",
+      "base_url": "https://api.evolink.ai/v1",
+      "model_id": "mj-v8.2",
+      "protocol": "evolink"
+    },
+    "expected": 0.56
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "image_edit": true,
+      "provider": "evolink",
+      "base_url": "https://api.evolink.ai/v1",
+      "model_id": "mj-v8.2",
+      "protocol": "evolink"
+    },
+    "expected": 0.84
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "provider": "evolink",
+      "base_url": "https://api.evolink.ai/v1",
+      "billing_group": "default",
+      "model_id": "mj-v8.2",
+      "protocol": "evolink"
+    },
+    "expected": 0.56
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "provider": "evolink",
+      "base_url": "https://api.evolink.ai/v1",
+      "model_id": "mj-v8.2",
+      "protocol": "evolink"
+    },
+    "expected": 0.56
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "image_edit": true,
+      "provider": "evolink",
+      "base_url": "https://api.evolink.ai/v1",
+      "model_id": "mj-v8.2",
+      "protocol": "evolink"
+    },
+    "expected": 0.84
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "provider": "evolink",
+      "base_url": "https://api.evolink.ai/v1",
+      "billing_group": "default",
+      "model_id": "mj-v8.2",
+      "protocol": "evolink"
+    },
+    "expected": 0.56
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 4,
+      "provider": "evolink",
+      "base_url": "https://api.evolink.ai/v1",
+      "model_id": "mj-v8.2",
+      "protocol": "evolink"
+    },
+    "expected": 0.56
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 4,
+      "image_edit": true,
+      "provider": "evolink",
+      "base_url": "https://api.evolink.ai/v1",
+      "model_id": "mj-v8.2",
+      "protocol": "evolink"
+    },
+    "expected": 0.84
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 4,
+      "provider": "evolink",
+      "base_url": "https://api.evolink.ai/v1",
+      "billing_group": "default",
+      "model_id": "mj-v8.2",
+      "protocol": "evolink"
+    },
+    "expected": 0.56
+  },
+  {
+    "request": {
+      "kind": "image",
+      "provider": "evolink",
+      "base_url": "https://api.evolink.ai/v1",
+      "model_id": "mj-v8.1"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "provider": "evolink",
+      "base_url": "https://api.evolink.ai/v1",
+      "model_id": "mj-v8.2-upload-paint"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "provider": "evolink",
+      "base_url": "https://api.evolink.ai/v1",
+      "model_id": "mj-v8.2-remix"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "provider": "evolink",
+      "base_url": "https://api.evolink.ai/v1",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "provider": "evolink",
+      "base_url": "https://api.evolink.ai/v1",
+      "model_id": "mj-v8.2",
+      "protocol": "openai"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "provider": "evolink",
+      "base_url": "https://other.example/v1",
+      "model_id": "mj-v8.2",
+      "protocol": "evolink"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "provider": "custom",
+      "base_url": "https://api.evolink.ai/v1",
+      "model_id": "mj-v8.2",
+      "protocol": "evolink"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "mj-v8.2",
+      "protocol": "evolink"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 3,
+      "quality": "low",
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 3,
+      "quality": "medium",
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 3,
+      "quality": "high",
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 3,
+      "quality": "auto",
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 3,
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "provider": "custom",
+      "base_url": "https://api.example.com",
+      "model_id": "gpt-image-2.5-sunburst"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2.5-sunburst-unknown"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 3,
+      "quality": "low",
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 3,
+      "quality": "medium",
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 3,
+      "quality": "high",
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 3,
+      "quality": "auto",
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 3,
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "provider": "custom",
+      "base_url": "https://api.example.com",
+      "model_id": "gpt-image-2.5-flare"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2.5-flare-unknown"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 3,
+      "quality": "low",
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "quality": "low",
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "nano-banana-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "quality": "medium",
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "nano-banana-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "quality": "high",
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "nano-banana-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "low",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gemini-3-pro-image"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "low",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gemini-3-pro-image-preview"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "low",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "medium",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gemini-3-pro-image"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "medium",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gemini-3-pro-image-preview"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "medium",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "high",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gemini-3-pro-image"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "high",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gemini-3-pro-image-preview"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "high",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "auto",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gemini-3-pro-image"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "auto",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gemini-3-pro-image-preview"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "auto",
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gemini-3-pro-image"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gemini-3-pro-image-preview"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "low",
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro-2k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "medium",
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro-2k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "high",
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro-2k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "auto",
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro-2k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro-2k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "low",
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro-4k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "medium",
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro-4k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "high",
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro-4k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "quality": "auto",
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro-4k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro-4k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "quality": "high",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "seedream-4-5"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "quality": "high",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "seedream-5-0-pro"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "quality": "high",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "nano-banana-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "quality": "high",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "nano-banana-2-2k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "quality": "high",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "nano-banana-2-4k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "绘画",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1024",
+      "quality": "low",
+      "n": 1,
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "768x1024",
+      "quality": "high",
+      "n": 2,
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1025x1024",
+      "quality": "low",
+      "n": 1,
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "2048x1152",
+      "quality": "auto",
+      "n": 1,
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "2049x1024",
+      "quality": "low",
+      "n": 1,
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "2048x512",
+      "quality": "auto",
+      "n": 1,
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "2048x513",
+      "quality": "auto",
+      "n": 1,
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "2048x2048",
+      "quality": "auto",
+      "n": 1,
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "2048x2049",
+      "quality": "auto",
+      "n": 1,
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "3840x2160",
+      "quality": "high",
+      "n": 2,
+      "base_url": "https://api.tu-zi.com/v1",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1254x1254",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1254X1254",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1253x1254",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1255x1254",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1254x1253",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1254x1255",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "01254x1254",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1536",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024X1536",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1023x1536",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1025x1536",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1535",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1537",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "01024x1536",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1536x1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1536X1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1535x1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1537x1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1536x1023",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1536x1025",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "01536x1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1086x1448",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1086X1448",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1085x1448",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1087x1448",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1086x1447",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1086x1449",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "01086x1448",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1448x1086",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1448X1086",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1447x1086",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1449x1086",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1448x1085",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1448x1087",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "01448x1086",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1122x1402",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1122X1402",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1121x1402",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1123x1402",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1122x1401",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1122x1403",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "01122x1402",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1402x1122",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1402X1122",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1401x1122",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1403x1122",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1402x1121",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1402x1123",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "01402x1122",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1672x941",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1672X941",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1671x941",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1673x941",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1672x940",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1672x942",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "01672x941",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "941x1672",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "941X1672",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "940x1672",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "942x1672",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "941x1671",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "941x1673",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "0941x1672",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1915x821",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1915X821",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1914x821",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1916x821",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1915x820",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1915x822",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "01915x821",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "821x1915",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "821X1915",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "820x1915",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "822x1915",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "821x1914",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "821x1916",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "0821x1915",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "quality": "high",
+      "n": 3,
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2-1k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "auto",
+      "quality": "high",
+      "n": 3,
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2-1k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1024",
+      "quality": "high",
+      "n": 3,
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2-1k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "2048x2048",
+      "quality": "high",
+      "n": 3,
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2-1k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "3840x2160",
+      "quality": "high",
+      "n": 3,
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2-1k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1024",
+      "base_url": "https://api.tu-zi.com",
+      "model_id": "gpt-image-2-1k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "绘画",
+      "model_id": "gpt-image-2-1k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "unknown",
+      "model_id": "gpt-image-2-1k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1024",
+      "base_url": "https://api.openai-hk.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2-1k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1024",
+      "base_url": "https://api.tu-zi.com.example.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2-1k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2-1k-vip"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2-2k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "GPT_IMAGE_2_1K"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024:1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "0x1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x-1",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "foo",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "9007199254740992x1",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "9007199254740991x2",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1248x1248",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1024",
+      "n": 2,
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "绘画",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "3840x2160",
+      "n": 2,
+      "base_url": "https://api.openai-hk.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt-image-2-preview"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "GPT_IMAGE_2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "size": "1024x1024",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gpt.image.2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "quality": "high",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro-vip"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "quality": "high",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro-4k-vip"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "quality": "high",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro-hd"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "quality": "high",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gemini-3-pro-image-preview-4k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "quality": "high",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "gemini-3-pro-image-new"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "quality": "high",
+      "base_url": "https://api.tu-zi.com",
+      "model_id": "nano-banana-pro"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "quality": "high",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "绘画",
+      "model_id": "nano-banana-pro"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "quality": "high",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "unknown",
+      "model_id": "nano-banana-pro"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "quality": "high",
+      "base_url": "https://tu-zi.com.example.org",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "quality": "high",
+      "base_url": "https://api.openai-hk.com",
+      "billing_group": "default",
+      "model_id": "nano-banana-pro"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 4,
+      "provider": "custom",
+      "base_url": "https://api.tu-zi.com",
+      "billing_group": "default",
+      "model_id": "mj_imagine"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "provider": "tokendance",
+      "base_url": "https://tokendance.space/gateway/v1",
+      "model_id": "seedream-5.0-lite",
+      "protocol": "openai"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "provider": "tokendance",
+      "base_url": "https://tokendance.space/gateway/v1",
+      "model_id": "seedream-5.0-pro",
+      "protocol": "ark"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "provider": "seedream",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "model_id": "doubao-seedream-5-0-260128",
+      "protocol": "ark"
+    },
+    "expected": 0.44
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "provider": "tokendance",
+      "base_url": "https://tokendance.space/gateway/v1",
+      "model_id": "seedream-unknown",
+      "protocol": "ark"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "n": 2,
+      "duration": 5,
+      "resolution": "720p",
+      "ratio": "16:9",
+      "generate_audio": true,
+      "has_reference_video": false,
+      "provider": "volcengine_video",
+      "base_url": null,
+      "model_id": "doubao-seedance-2-0-fast-260128",
+      "protocol": "seedance"
+    },
+    "expected": 7.992
+  },
+  {
+    "request": {
+      "kind": "video",
+      "n": 1,
+      "duration": 5,
+      "resolution": "720p",
+      "ratio": "16:9",
+      "has_reference_video": true,
+      "provider": "seedance",
+      "base_url": null,
+      "model_id": "seedance-2.0",
+      "protocol": "seedance"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "duration": 5,
+      "resolution": "720p",
+      "provider": "seedance",
+      "base_url": null,
+      "model_id": "seedance-2.0",
+      "protocol": "seedance"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "duration": 5,
+      "resolution": "720p",
+      "ratio": "4:3",
+      "provider": "seedance",
+      "base_url": null,
+      "model_id": "doubao-seedance-2-0-fast-260128",
+      "protocol": "seedance"
+    },
+    "expected": 4.021183
+  },
+  {
+    "request": {
+      "kind": "video",
+      "duration": 5,
+      "resolution": "720p",
+      "ratio": "16:9",
+      "provider": "seedance",
+      "base_url": null,
+      "model_id": "seedance-2.0",
+      "protocol": "dashscope"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "n": 1,
+      "duration": 6,
+      "resolution": "1080P",
+      "provider": "custom",
+      "base_url": "https://dashscope.aliyuncs.com/api/v1",
+      "model_id": "happyhorse-1.1-t2v",
+      "protocol": "dashscope"
+    },
+    "expected": 7.2
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "quality": "low",
+      "provider": "custom",
+      "base_url": "https://api.example.com",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "quality": "low",
+      "provider": "custom",
+      "base_url": "https://proxy.example/openai-hk",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "provider": "seedream",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "model_id": "doubao-seedream-5-0-260128-pro",
+      "protocol": "ark"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "provider": "seedance",
+      "protocol": "seedance",
+      "duration": 5,
+      "resolution": "720p",
+      "ratio": "16:9",
+      "model_id": "doubao-seedance-2-0-260128"
+    },
+    "expected": 4.968
+  },
+  {
+    "request": {
+      "kind": "video",
+      "provider": "seedance",
+      "protocol": "seedance",
+      "duration": 5,
+      "resolution": "720p",
+      "ratio": "16:9",
+      "model_id": "doubao-seedance-1-5-pro-260428"
+    },
+    "expected": 0.864
+  },
+  {
+    "request": {
+      "kind": "video",
+      "provider": "seedance",
+      "protocol": "seedance",
+      "duration": 5,
+      "resolution": "720p",
+      "ratio": "16:9",
+      "model_id": "doubao-seedance-1-0-pro-250528"
+    },
+    "expected": 1.5444
+  },
+  {
+    "request": {
+      "kind": "video",
+      "provider": "seedance",
+      "protocol": "seedance",
+      "duration": 5,
+      "resolution": "1080p",
+      "ratio": "16:9",
+      "model_id": "doubao-seedance-2-0-260128"
+    },
+    "expected": 12.393
+  },
+  {
+    "request": {
+      "kind": "video",
+      "provider": "seedance",
+      "protocol": "seedance",
+      "duration": 5,
+      "resolution": "720p",
+      "ratio": "16:9",
+      "model_id": "doubao-seedance-1-5-pro-260428",
+      "generate_audio": true
+    },
+    "expected": 1.728
+  },
+  {
+    "request": {
+      "kind": "video",
+      "provider": "seedance",
+      "protocol": "seedance",
+      "duration": 0,
+      "resolution": "720p",
+      "ratio": "16:9",
+      "model_id": "doubao-seedance-2-0-fast-260128"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "provider": "seedance",
+      "protocol": "seedance",
+      "duration": -1,
+      "resolution": "720p",
+      "ratio": "16:9",
+      "model_id": "doubao-seedance-2-0-fast-260128"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "provider": "seedance",
+      "protocol": "seedance",
+      "duration": 5,
+      "resolution": "invalid",
+      "ratio": "16:9",
+      "model_id": "doubao-seedance-2-0-fast-260128"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "provider": "seedance",
+      "protocol": "seedance",
+      "duration": 5,
+      "resolution": "720p",
+      "ratio": "auto",
+      "model_id": "doubao-seedance-2-0-fast-260128"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "provider": "seedance",
+      "protocol": "seedance",
+      "duration": 5,
+      "resolution": "720p",
+      "ratio": "16:9",
+      "model_id": "unknown"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "provider": "seedance",
+      "protocol": "seedance",
+      "duration": 5,
+      "resolution": "720p",
+      "ratio": "16:9",
+      "model_id": "doubao-seedance-2-0-fast-260128",
+      "has_reference_video": true
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "provider": "seedance",
+      "protocol": "seedance",
+      "duration": 5,
+      "resolution": "720p",
+      "ratio": "16:9",
+      "model_id": "doubao-seedance-2-0-fast-260128",
+      "base_url": "https://proxy.example"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "provider": "seedance",
+      "protocol": "seedance",
+      "duration": 5,
+      "resolution": "720p",
+      "ratio": "16:9",
+      "model_id": "doubao-seedance-2-0-fast-260128",
+      "base_url": "invalid"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "provider": "seedance",
+      "protocol": "openai",
+      "duration": 5,
+      "resolution": "720p",
+      "ratio": "16:9",
+      "model_id": "doubao-seedance-2-0-fast-260128"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.0-t2v",
+      "resolution": "720p",
+      "duration": 4,
+      "n": 2
+    },
+    "expected": 7.2
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.0-i2v",
+      "resolution": "720p",
+      "duration": 4,
+      "n": 2
+    },
+    "expected": 7.2
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.0-r2v",
+      "resolution": "720p",
+      "duration": 4,
+      "n": 2
+    },
+    "expected": 7.2
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.0-t2v",
+      "resolution": "1080p",
+      "duration": 4,
+      "n": 2
+    },
+    "expected": 12.8
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.0-i2v",
+      "resolution": "1080p",
+      "duration": 4,
+      "n": 2
+    },
+    "expected": 12.8
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.0-r2v",
+      "resolution": "1080p",
+      "duration": 4,
+      "n": 2
+    },
+    "expected": 12.8
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.1-t2v",
+      "resolution": "480p",
+      "duration": 4,
+      "n": 2
+    },
+    "expected": 3.6
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.1-i2v",
+      "resolution": "480p",
+      "duration": 4,
+      "n": 2
+    },
+    "expected": 3.6
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.1-r2v",
+      "resolution": "480p",
+      "duration": 4,
+      "n": 2
+    },
+    "expected": 3.6
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.1-t2v",
+      "resolution": "720p",
+      "duration": 4,
+      "n": 2
+    },
+    "expected": 7.2
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.1-i2v",
+      "resolution": "720p",
+      "duration": 4,
+      "n": 2
+    },
+    "expected": 7.2
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.1-r2v",
+      "resolution": "720p",
+      "duration": 4,
+      "n": 2
+    },
+    "expected": 7.2
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.1-t2v",
+      "resolution": "1080p",
+      "duration": 4,
+      "n": 2
+    },
+    "expected": 9.6
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.1-i2v",
+      "resolution": "1080p",
+      "duration": 4,
+      "n": 2
+    },
+    "expected": 9.6
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.1-r2v",
+      "resolution": "1080p",
+      "duration": 4,
+      "n": 2
+    },
+    "expected": 9.6
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "unknown",
+      "duration": 5,
+      "resolution": "720p"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.0-t2v",
+      "duration": 5,
+      "resolution": "480p"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.0-t2v",
+      "duration": 0,
+      "resolution": "720p"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "video",
+      "base_url": "https://dashscope.aliyuncs.com",
+      "model_id": "happyhorse-1.0-t2v",
+      "duration": 5,
+      "resolution": "720p",
+      "protocol": "openai"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "nano-banana-2",
+      "quality": "auto"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "nano-banana-2",
+      "quality": null
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "nano-banana-2",
+      "quality": "1k"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2",
+      "n": 0
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2",
+      "n": -1
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "gpt-image-2",
+      "n": 2.9
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "model_id": "gpt-image-2"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "audio",
+      "provider": "seedance",
+      "model_id": "unknown"
+    },
+    "expected": null
+  }
+]

@@ -73,6 +73,7 @@ export interface CreationAsset {
   last_used_at: string | null;
   content: CreationAssetContent;
   project_ids: string[];
+  category: string | null;
   adopted_from?: AdoptionOrigin | null;
 }
 
@@ -117,4 +118,10 @@ export function renderCreationPrompt(
     const value = values[segment.name];
     return value?.trim() ? value : segment.default_value;
   }).join('');
+}
+
+export interface CategorySuggestion {
+  asset_id: string;
+  category: string | null;
+  confidence: number;
 }

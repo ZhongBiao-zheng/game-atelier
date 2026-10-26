@@ -4,11 +4,33 @@
 
 ## 开发中的扩展契约
 
+### 服务端预计费用（5.116.0）
+
+`POST /api/pricing/estimate`，本机会话授权；沿用本地POST路由规则，需持有编辑租约。
+入参 `{alias: string, model: string, kind: "image" | "video", params: JobParams}`；
+出参 `{estimated_cost_cny: number | null}`。渠道不存在返回404，非法参数返回422。
+读取已配置渠道及价格，按提交时相同的尺寸归一化估价，不创建任务、不访问生成接口。
+画布局部修改/扩图在参数变化300ms后请求，等待期间与失败时不展示旧金额。
+
+Tuzi快照位于 `<data_root>/.runtime/prices/tuzi.json`，字段为 `synced_at`、
+`usd_exchange_rate`、`group_ratio`、`billing_expr[group][model]`、
+`models[model].{quota_type,model_price,enable_groups}`。启动及每6小时自动同步公开价格和状态接口，
+仅保留已配置分组、模型及实际请求模型。失败保留旧快照。表达式仅服务端执行，
+缺失价格、未核实函数/字段、MJ及动态拆层均返回null。固定价不额外乘n；
+表达式output_image_count为n，input_image_count为参考图数。费用是预计值，不是实际账单。
+
+OpenAI-HK快照（5.116.4）位于 `<data_root>/.runtime/prices/openai-hk.json`，字段为
+`synced_at`、`group_ratio`、`models[model].{quota_type,model_price,model_ratio,completion_ratio,enable_groups}`。
+启动及每6小时同步固定官网 `https://www.openai-hk.com/ccapi/pricing`，只留配置模型，失败保留旧快照。
+估价接口仅对已核实五个型号的default单张请求按 `quota_type=1` 的 `model_price`（元）返回金额，
+不乘分组倍率。Nano Banana 2、多张、其他型号/分组及按token计费返回null；前端不保存HK价格表。
+
 ### 图片尺寸意图（5.42.0）
 
 `JobParams`、`CanvasImageDefaultParams` 增加 `size_mode?: auto | ratio | custom`、
 `custom_size?: string`。后者只是编辑器回切缓存；草稿允许暂不完整的数字输入，提交才严格验证。
 缺模式保留既有比例行为，不根据近似像素反推用户意图，不迁移旧记录。
+画布 Agent / MCP 的 `set_draft`（图片）未传 `size_mode` 时按写入的字段补齐：`size=auto`→auto，`size=WxH`→custom，有 `ratio` 或 `size` 含冒号→ratio；这是调用方显式写入的意图，不是对旧记录的反推。
 5.42.2起，首页、Studio、Canvas新建草稿及服务端新建默认配置，在所有尺寸字段
 （size_mode/size/ratio/resolution/custom_size）均未指定时，按当前模型能力默认AUTO；
 不支持AUTO时使用受支持的默认比例。已有尺寸选择、历史任务和重试不重置。
@@ -44,16 +66,99 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 
 ### 模型路由（5.90.0）
 
-- `GET /api/models` → `{models: [{id, name, modality, members: [{alias, provider, base_url, billing_group, model_id, name, protocol}]}]}`；`members` 按出图顺序，第一个就是「自动」实际使用的。能力和估价按成员的 `billing_group` 判断。
+- `GET /api/models` → `{models: [{id, name, modality, mode, candidate_alias, members: [{alias, provider, base_url, billing_group, model_id, name, protocol, estimate_cny}]}]}`；`members` 按当前方式排序，`candidate_alias` 是跳过欠费/冷却后的实际候选（无可用成员为 null；仅短时冷却可兜底）。`mode` 为 `order | cheap | round_robin`。只有 cheap 返回默认参数的人民币预估，未知或其他方式为 null；实际提交按本次参数估价。列表预览不推进轮流游标。`billing_group` 同步进网关 `via`，能力和估价按成员分组判断。
 - `PUT /api/models/order`，body `{modality, id, aliases}`：`aliases` 必须恰好是该组现有成员的一个排列，否则 422；组不存在 404。属管理权限。
-- 创作台 `POST /api/studio/jobs`、画布草稿 / 生成偏好 `selection`、Agent `CanvasAgentModelRef`、工坊 `prepare_generation`：`alias` 为空即「自动」，`model` 为路由 id；Job 与运行快照里的 `alias` 始终是实际使用的 KEY。
-- `JobParams.route_id`：「自动」提交时由服务端写入（浏览器传入的会被覆盖）；`route_tried`：失败切换时换掉的别名。运行快照的 `alias` 是提交时解析的那家，失败切换后以 Job 的 `alias` 为准。
+- 创作台 `POST /api/studio/jobs`、画布草稿 / 生成偏好 `selection`、Agent `CanvasAgentModelRef`：`alias` 为空即「自动」，`model` 为路由 id；Job 与运行快照里的 `alias` 始终是实际使用的 KEY。
+- `PUT /api/models/mode`，body `{modality, id, mode}`：返回更新后的路由对象；非法方式 422、组不存在 404。属管理权限。非默认方式存 `keys.json.route_mode[modality][id]`，order 删除覆盖；停用保留，删除最后一个成员才清理。
+- `JobParams.route_id`：「自动」提交时由服务端写入（浏览器传入的会被覆盖）；`route_order`：本次自动选择冻结的候选 alias 顺序；`route_tried`：失败切换时换掉的别名。三项都由服务端写入并在通用参数编辑时保留；失败切换只沿快照实时过滤，不重新排序或消费轮流。运行快照的 `alias` 是提交时解析的那家，失败切换后以 Job 的 `alias` 为准。
+
+### 局域网网关协议 v2（ADR-0025）
+
+网关服务在独立端口（默认 5180）只提供下列接口；除 health 外全部要求 `Authorization: Bearer <网关密钥>`，不认 cookie；其他路径 404。
+
+- `GET /gateway/v1/health` 无需密钥，只返回 `{ok: true, version: string}`，不包含任何配置或用量。
+
+- `GET /gateway/v1/info` → `{name, version, protocol: 2}`。协议版本不一致时接入端直接报错，不做兼容。
+- `GET /gateway/v1/models` → 返回 `{models: [{id, name, modality, members}]}`，成员为供应商公开信息，含全部模态；控制台专用的 `mode / candidate_alias / estimate_cny` 不属于此目录协议；按当前密钥的模型与 alias 权限过滤，排除 atelier 成员，视频成员保留 `protocol`。
+- `GET /gateway/v1/me` → `{id, role, name, limits: [{period, cap_cny, used_cny, reserved_cny, left_cny, resets_at}], month_charged_cny, month_calls}`，只读当前密钥。
+- `POST /gateway/v1/tasks`：multipart，字段 `request`（JSON：`kind`、`model` 路由 id、`prompt`、`n`、`size`、`params`）+ 素材文件。
+  `kind` 为 image / image_edit / layer_split / video / audio；文件组 `ref_0`…`ref_15`、`mask`、
+  `mj_sref_0`…`mj_sref_7` / `mj_cref_0`…`mj_cref_7` / `mj_oref_0`…`mj_oref_7`、
+  `video_0`…`video_3`、`audio_0`…`audio_3`，各组编号连续且不允许重复字段。
+  图片/蒙版/音频单文件 20 MiB，视频 200 MiB，请求体 400 MiB、最多 49 文件；
+  请求头 `Idempotency-Key` 必填（同一把密钥下同一个 key 返回同一个任务）。返回 202 `{task_id}`。
+  模型不存在 404、无权使用 403；`params` 只收白名单控制字段，出现路径类字段 422；金额窗口超限 429（`中转额度已用完`），`Retry-After` 为最晚重置时间距现在的秒数。编辑仅收 mode/x/y/width/height，inpaint/outpaint 都要求源图和蒙版，outpaint 必须给宽高；
+  layer_split 要求 layer_decomposition=true 和一张源图。视频仅收 duration/resolution/ratio/mode/frame_mode/generate_audio/watermark；
+  音频仅收 voice/speed/response_format/instructions。
+- `GET /gateway/v1/tasks/{id}` → `{task_id, status: pending|running|done|failed|canceled, phase, member_alias,
+  warnings, actual_size, actual_cost_cny, outputs: 产物数量, error, error_kind, kind, output_types: MIME[],
+  extras: [{role, index}], layer_result}`。`error_kind`：`unavailable`（全部成员都因
+  确定没执行的原因失败）、`unconfirmed`（网关重启等，可能已执行）、`failed`（其他）。
+- `GET /gateway/v1/tasks/{id}/outputs/{i}` → 第 i 个产物的字节（对应 MIME）；`POST /gateway/v1/tasks/{id}/cancel` → 取消。
+- `GET /gateway/v1/tasks/{id}/extras/{i}` → 编辑过程图；layer_result 为无路径的图层元数据，图层产物不按 n 截断。
+- 视频上游订单号/提交诊断仅存在网关；已获订单号或提交未确认后禁止换供应商重发。
+- 任务只对创建它的密钥可见（其他密钥 404）；任务与文件保留 24 小时。
+- 任务参数补充：`prompt` 最多 32,000 字符，除 layer_split 外不能为空；`n` 为 1–8。生成任务最多同时运行 8 个、每把密钥最多 4 个，剩余已受理任务排队。
+  各类型允许的文件组：image 为 ref/mj_sref/mj_cref/mj_oref，image_edit 为 ref/mask，layer_split 为 ref，video 为 ref/video/audio，audio 不接受文件。
+  图片控制字段白名单为 size/size_mode/custom_size/ratio/resolution/quality/background/steps/cfg_scale/requested_size、
+  bot_type/mj_version/mj_stylize/mj_chaos/mj_weird/mj_seed/mj_no/mj_tile/mj_iw/mj_sref_code/mj_profile/mj_sw/mj_cw/mj_ow/mj_flags；
+  image_edit 额外接收 image_edit 对象，layer_split 额外接收 layer_decomposition。未声明字段返回 422。
+  `layer_result.outputs` 以 output_index 关联产物，包含 z_index、size、output_format 和前景 bounding_box（absolute 像素坐标 / normalized 千分坐标）；不含本机路径。
+- 密钥策略：`limits: [{period: day|week|month, cap_cny}]`（最多三条且 period 唯一，金额 >0 且 ≤1,000,000）；
+  `allowed_models` / `allowed_aliases` 为 null 表示全部、空数组表示无权限；模型支持精确匹配和尾部 `*` 前缀匹配，alias 精确匹配。
+  按网关本地日历零点、周一和月初重置；受理时按首个可选成员估价预占，与限额判断共用锁。
+  终态优先结算实际费用，否则成功用估价、失败或取消记零；无价预占零。失败切换中各次已报告实际费用累加。
+- 接入端：`provider="atelier"` 的 KEY，`ModelSpec.via` 是网关成员快照；Job 用 `provider_task_protocol=atelier_gateway`
+  与 `provider_task_ids` 记录网关任务 id，重启后只查询既有任务。caller 把网关结果映射为：401 → `gateway api 401`，
+  403 → `gateway api 403`，429 → `gateway api 429`，`error_kind=unavailable` → `gateway api 503: unavailable`（均可触发接入端自动路由失败切换），
+  其余不带状态码；`unconfirmed` 的文案含「未确认」。
+- 接入端收到网关 429 时保留中文 detail，按 Retry-After 秒数冷却对应模态的 atelier alias；文本 OpenAI 前缀的 error.message 同样处理。
+- `GET /api/gateway/providers/{alias}/me`：本机代查该 KEY 的本人额度，按地址和凭证缓存 30 秒（含失败）；失败返回 null，页面静默隐藏。
+- `GET /api/gateway/tasks?scope=active|recent`（管理权限）：返回 `{tasks}`。active 含进行中的生成与文本调用；recent 为 24 小时内终态，倒序最多 200。
+  字段 `task_id, kind, key_name, route_id, member_alias, member_trail, phase, status, created_at, updated_at, prompt, n, outputs, output_types, error`；文本 prompt 固定 null。
+- `GET /api/gateway/tasks/{task_id}/outputs/{index}`：本机 cookie 会话预览，要求管理权限；无文件或任务返回 404。
+- SSE `gateway_task` 携带同形快照，仅发给拥有本机管理入口的 local 会话，不发给 agent；任务落盘、文本登记和结束均通知。页面合并快照，有运行中任务时每 4 秒刷新，空闲时停轮询，重连后重新拉取。
+  控制台复用 AppShell 现有 SSE 连接；文本结束事件只用于即时通知，文本调用不持久化为生成任务，刷新后的 recent 列表只含落盘的生成任务。
+- 本机管理（管理权限）：`GET/PUT /api/gateway`（开关 / 端口 / 名称 + 运行状态）、`POST /api/gateway/keys`（返回一次性明文 `token`）、
+  `PATCH /api/gateway/keys/{id}`（名称、金额窗口、模型与 alias 权限）、`POST /api/gateway/keys/{id}/revoke`；使用记录见 `GET /api/usage?scope=team`。
+  创建 body 为 `{name, limits, allowed_models, allowed_aliases}`，PATCH 接受任意字段子集（省略保持原值，权限 null 取消限制）。
+  `GET /api/gateway` 的密钥含 `limits_status`、`month_charged_cny`、`month_calls`、`last_used_at`；不含哈希。
+  `GET /api/gateway/options` → `{models: [{id, name, modality}], aliases: [{alias, provider, name}]}`，alias 排除 atelier。
+  用量行新增 `kind`、`estimated_cny`、`charged_cny`、`input_tokens`、`output_tokens`、`duration`、`resolution`、`member_trail`；不存 prompt，前端直接汇总结算金额。
+  `GET /api/model-routes/member-status` → `{members: [{modality, alias, reason, since, next_probe_at, route_ids}], unavailable_routes: [{id, name, modality}]}`。
+  欠费状态跨重启保留；`unavailable_routes` 只计非 atelier 成员且均在欠费冷却期的路由。
+  `POST /api/model-routes/member-status/restore {modality, alias}` 清除该成员欠费及内存冷却，返回同一状态视图；两接口仅本机管理权限可用。
+  接入端：`POST /api/gateway/check {base_url, access_key | alias}` → `{info, models}`（models 为带 `via` 的 ModelSpec）；
+  `POST /api/gateway/providers/{alias}/sync` 整体替换该 KEY 的模型。新建 `provider="atelier"` 的 KEY 时排到所在每个路由组第一位，
+  同步出的新模型同样排第一（已调整过顺序的组不动）。
+
+### 网关文本透传（协议 v2）
+
+- `GET /gateway/v1/openai/models` → OpenAI `{object: "list", data: [{id, object: "model", owned_by: "atelier", ...能力字段}]}`。只列获准的文本路由，能力取首个获准成员的上游 `/models`，取不到则声明 `supported_parameters: ["tools"]`。
+- `POST /gateway/v1/openai/chat/completions`、`POST /gateway/v1/openai/responses`：Bearer 鉴权；JSON 请求体最多 32 MiB。model 为路由 id，上游改为实际成员 id；非流式响应的 model 改回路由 id，流式 SSE 字节不改写。
+- 仅生成上游 Authorization、Content-Type、Accept 头，不转发接入端 cookie 或其他请求头。chat 流缺少 `stream_options.include_usage` 时自动设 true；旁路提取 chat 或 Responses 用量。
+- 按请求字节数 / 3 和该密钥最近 50 次文本输出平均 token（无历史 1000）估价预占。结束按已收到的实际 token 估价结算；无价记零，断流也结算已知用量，取消/结束释放预占。用量行 kind=text，不存 prompt；进行中调用在 gateway_live 登记。
+- 只在发出首字节之前对确定可切换的错误换成员；已转发后的中断结束当前流、记 failed，不重发请求。流前错误形状统一为 `{error: {message, type, code}}`；全部成员不可用为 503 / gateway_unavailable，限额为 429 并带 Retry-After。上游可能已执行的错误为 503 / gateway_upstream_error，接入端不得切换本机 KEY 重发。
+- 接入端 `key_api_root` 将 atelier 的文本/Agent URL 指向上述前缀；同步文本模型保留协议。文本 Job 收到 503 gateway_unavailable 时可按自动路由切回本机 KEY。
 
 ### 图层栈显示顺序（5.44.0）
 
 `layer_stack.data.base_z_index` 默认 0，背景与 `layers[].z_index` 共用 0–16 范围；存在背景时所有层级值必须唯一。
 左侧合成按 z 升序绘制，右侧列表按 z 降序展示。拖拽后统一编号 0..N-1，通过原 Document 保存与撤销链路持久化。
 层 id、version_id、bounding_box、可见性、material_node_id 不随排序改变；Job 中的原始输出层号仍表示不可变来源，不是编辑后的显示顺序。
+
+### 对比节点（5.110.0）
+
+`compare` 节点 `data` 为空对象；对比的两张图由两条 `role=input` 连线决定，`slot` 为 `before` / `after`，
+来源必须是 image 节点，每个槽位最多一条，不能带 `annotated`。`before` / `after` 只能连进 compare 节点；
+compare 节点不提供任何连线、不参与生成。显示的是来源节点**当前**版本。
+
+前端在提交时统一收口：拖到 Before / After 接口带槽位；拖到节点身上、多选连线等不带槽位的按 before → after 填空位，
+满了丢弃；同一来源只留最新一条，后来者顶替已占槽位。扩图结果对比它自己的原图时，按该结果生成快照的
+`normalized_params.image_edit` 几何把原图放回原位（实时计算，不持久化）。
+
+图片工具栏只在局部修改 / 扩图 / AI高清 结果上露出“对比”：原图取自生成快照；快照登记的原图节点仍显示该版本就直接连，
+否则新建一张固定原图版本的图片节点再连。分界位置只是本地显示状态。
 
 ### Tuzi 图片任务（5.42.3）
 
@@ -79,9 +184,18 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 - 5.43.3：候选失败的非空原因去重后汇总到 Job.error；部分成功保留部分成功提示与具体原因，
   全部失败仅在缺少任何原因时使用“没有可登记的结果”，不覆盖真实厂商状态与订单号。
 
-本机连接与外部 Agent 工坊入口见 [本机连接](contracts/local-connection.md) 与
-[工坊 MCP 与生成批准](contracts/workshop-mcp.md)：状态、鉴权、Agent 授权、编辑租约、工坊 typed 工具与批准执行。
+本机连接与外部 Agent 入口见 [本机连接](contracts/local-connection.md) 与
+[画布 MCP](contracts/canvas-mcp.md)：状态、鉴权、Agent 授权、编辑租约与 typed 工具。
 托管网站方案已弃用（ADR-0023），只有本机页面与本机 Agent 两种访问方式。
+
+`GET /api/connection/agent`、`PUT /api/connection/agent`、`DELETE /api/connection/agent`
+统一返回 `{enabled, connections, config_paths, tools}`，仅本机管理会话可读。
+`connections` 为各宿主本次进程内最近连接时间；`config_paths` 为宿主到实际配置/凭据路径的映射：
+`claude-code` 使用 `<data_root>/.config/connections/agent.json`（插件直接读取的凭据文件，不写 `.claude.json`），
+`codex` 使用 `CODEX_HOME/config.toml` 或默认 `~/.codex/config.toml`；路径只表示目标位置，不保证文件已创建。
+`tools` 为 `{name: string, billable: boolean}[]`，与 MCP 注册共享工具元数据，使用真实的 `canvas_*` 工具名；
+只有生成工具标为计费。该字段是展示信息，不改变授权机制：计费工具需先获得用户授权。
+响应只返回路径和元数据，不包含凭据内容或 token。
 
 `GET /api/connection/status` 返回 `{ service: "game-atelier", instance_id, app_version, protocol: "atelier-local/2" }`。
 instance 是每次启动的 32 位小写十六进制标识，不是访问凭据；app_version 从插件 manifest 读取。
@@ -92,8 +206,7 @@ P1b 对全部路由先校验实际监听 Host、精确 Origin 与浏览器 Fetch
 `{ error: { code, message, request_id } }`，不回显来源或密钥，并设置 `Cache-Control: no-store`。
 当前鉴权覆盖业务 API、媒体、SSE 与内部文档；本地 cookie / Agent bearer 不得混用。
 
-SSE（`GET /events`）事件：`job-changed` `image-added` `spec-changed` `active-character-changed`
-`projects-changed` `workshop-request-changed` `canvas-document-changed` `team-library-changed`。
+SSE（`GET /events`）事件：`job-changed` `image-added` `canvas-document-changed` `team-library-changed`。
 `team-library-changed` 为 `TeamLibraryChangeEvent = {library_id, asset_id, kind, author, change, title, status,
 mime_type}`，`change ∈ added | updated | removed`，`status ∈ ready | incomplete`；`removed` 事件的 `title` /
 `status` / `mime_type` 为 `null`。`added` 的语义是「这条资产第一次可用」：新出现的条目，以及已有条目从
@@ -109,7 +222,7 @@ server 启动建好监听后对每个库各起一条后台线程补扫一次（�
 `canvases/<project_id>/canvas.json` 发出（`{project_id, revision}`），浏览器保存与 Agent 经 MCP 的
 `canvas_apply_changes` / `canvas_import_media` / `canvas_run` 都会触发；画布编辑器按 `revision` 判断
 忽略 / 直接重载 / 提示「重新载入（放弃本页改动）」，保存撞 409 走同一动作。
-本地写入需要编辑租约（设置 / 授权管理除外），Agent 只可调用授权项目内的工坊工具。
+本地写入需要编辑租约（设置 / 授权管理除外），Agent 只可调用已授权的画布工具。
 未知 API 默认 `CAPABILITY_DENIED`，未认证返回 `CONNECTION_REQUIRED`；不存在匿名原生业务旁路。
 开发来源登记与导航例外见连接契约。
 
@@ -122,15 +235,9 @@ server 启动建好监听后对每个库各起一条后台线程补扫一次（�
 | LocalConnectionStatus | `viewer_server/connection_status.py` | `web/src/schema/connection.ts` | `tests/test_connection_status.py` |
 | LocalConnectionBoundaryError | `viewer_server/request_boundary.py` | `web/src/schema/connection.ts` | `tests/test_local_request_boundary.py` + `api/http.test.ts` |
 | 本地会话 / Agent grant / 编辑租约 | `viewer_server/connection_routes.py` | `web/src/api/connection.ts` + `api/agentGrants.ts` | `tests/test_local_connection_auth.py` + `api/connection.test.ts` |
-| 工坊目标 / 生成请求 | `lib/workshop_schema.py` + `lib/workshop_generation.py` | `web/src/api/workshopRequests.ts` | `tests/test_workshop_runtime.py` + `tests/test_workshop_mcp.py` |
 | Job / JobParams | `lib/schemas.py` | `web/src/schema/jobs.ts` | 无 —— 靠人 |
 | Key / ModelSpec | `lib/keys.py` | `web/src/api/keys.ts` | 无 —— 靠人 |
 | ModelRoute | `lib/model_routes.py` | `web/src/api/models.ts` | `tests/test_model_routes.py` + `lib/modelRoutes.test.ts` |
-| CharacterDerivative / CharacterEntry | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_derivatives.py` + `LeftSidebar.test.tsx` |
-| CharacterAssociationTarget / CharacterAssociationItem | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_workspace.py` + `CharacterAssociationPicker.test.tsx` |
-| CharacterWorkspaceResponse / CharacterIndexResponse | `lib/schemas.py` | `web/src/api/characters.ts` | `tests/test_character_workspace.py` + `CharacterWorkspace.test.tsx` + `CharacterIndex.test.tsx` |
-| ProjectIndexItem / GalleryMedia | `lib/schemas.py` | `web/src/api/gallery.ts` | `tests/test_gallery_project.py` + `ProjectIndexPage.test.tsx` + `ProjectPage.test.tsx` |
-| StudioArchiveTarget | `lib/studio_archive.py` | `web/src/api/studio.ts` | `tests/test_studio_archive.py` + `StudioArchiveDialog.test.tsx` |
 | CanvasProject / CanvasDocument / CanvasJobContext | `lib/schemas.py` | `web/src/schema/canvas.ts` + `schema/jobs.ts` | `tests/test_canvas_projects.py` + `CanvasEditor.test.tsx` |
 | CanvasUiPreferences | `lib/schemas.py` | `web/src/schema/canvas.ts` | issue 20 隔离 API/文件/浏览器契约核对（旧测试只读，不改） |
 | CreationAsset / CreationAssetContent | `lib/schemas.py` | `web/src/schema/creationAssets.ts` | `tests/test_creation_assets.py` + `CreationAssetPanel.test.tsx` |
@@ -145,17 +252,13 @@ server 启动建好监听后对每个库各起一条后台线程补扫一次（�
 
 - 状态机：`status` `error` `submitted_at` `completed_at` `progress_phase`
 - 产物：`output_paths`
-- 归属：`character_id` `project_id` `ui_scheme_id` `screen_id` `production_id` `canvas_project_id` `namespace` `asset_slot` `kind`
+- 归属：`character_id` `canvas_project_id` `namespace` `kind`
 - 路由：`alias` `provider` `model` —— 换模型只能新建 job（`POST /studio/jobs`），不能改已有的
 - 血缘：`retry_of` `source_image`；创作台归档血缘写在 `params.archived_from_job_id / archived_from_path`
-- 工坊批准归属：`workshop_request_id`，仅服务端绑定冻结请求；普通 prompt 编辑接口拒绝修改已冻结工坊 Job
 
-`run_job` 接受 `PENDING_CONFIRM`（CLI 路径：终端确认即批准，运行时推进为 `PENDING`）与 `PENDING`。
-带 `workshop_request_id` 的 Job 还必须与已批准请求内容匹配；批准来源为本地页面，或持有
-`execute_generation` 能力的 Agent 会话（ADR-0017）。`POST /jobs/{id}/confirm` 继续批准 CLI 草稿。
-Canvas / Studio 保留自己的人工提交路径，不要求工坊请求。旧历史记录不伪造批准或批量改写。
+`run_job` 处理 Studio / Canvas 提交的任务。外部 Agent 仅通过 Canvas 工具访问已授权项目。
 
-`JobParams` = `extra="allow"`（加字段不会被上游拒），但**双端仍要同步声明**，否则 TS 那边拿不到类型。Studio 在新建 Job 时可写 `estimated_cost_cny`，它是按当次 Key 渠道、模型与参数冻结的人民币预计总价；OpenRouter 等返回账单用量的 caller 可写 `actual_cost_cny`，历史优先实际费用、其次预计快照，缺失时不用当前 Key 重算。后端独占写入的还有 `actual_size`、`warnings`、`requested_size`、`provider_task_protocol`、`provider_task_ids`、`video_submission_attempts` —— 前端只读不写。任务 ID 必须在首次轮询前落盘；Tuzi 支持重启续查，Seedance（`provider_task_protocol=seedance`）保留订单供核对，不自动恢复或重新提交。
+`JobParams` = `extra="allow"`（加字段不会被上游拒），但**双端仍要同步声明**，否则 TS 那边拿不到类型。Studio 在新建 Job 时可写 `estimated_cost_cny`，它是按当次 Key 渠道、模型与参数冻结的人民币预计总价；OpenRouter 等返回账单用量的 caller 可写 `actual_cost_cny`，历史优先实际费用、其次预计快照，缺失时不用当前 Key 重算。提交方没写预计时（画布、Agent、创作台「自动」），job_runner 在调用厂商前按实际渠道、模型与参数用 `generation_pricing.estimate_cost_cny` 补写；「自动」换供应商时清掉旧预计按新渠道重算。后端独占写入的还有 `actual_size`、`warnings`、`requested_size`、`provider_task_protocol`、`provider_task_ids`、`video_submission_attempts` —— 前端只读不写。任务 ID 必须在首次轮询前落盘；Tuzi 支持重启续查，Seedance（`provider_task_protocol=seedance`）保留订单供核对，不自动恢复或重新提交。
 
 Seedance 提交诊断位于 `params.video_submission_attempts`（每单最多四项）：`attempt`、`method`、`url`（去掉凭证、query 与 fragment）、`started_at`（UTC）、`elapsed_ms`、`http_status`、`request_ids`（只取白名单响应头）、`error_type`（网络异常类名）与 `outcome`。提交前记录 `submitting`，收到响应记录 `response`；5xx、网络中断及无法解析的成功响应标为 `unconfirmed`。不保存请求正文、授权头、图片 Base64 或原始网络异常文本。504 等错误说明“提交结果未确认”，不自动重提。Windows 复测后提供数据目录 `.runtime/jobs/<job_id>.json` 即可核对记录；无须提供 `.config/keys.json`。这些诊断不进入复用配方，新订单不继承。
 
@@ -165,7 +268,7 @@ Canvas 节点媒体设置新增的显式参数也遵循同一契约：图片 `ba
 
 Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每组最多 4 张），分别归属风格、角色、Omni 语义槽；垫图仍写入通用的 `reference_images`。编号式风格参考写入 `mj_sref_code`（只存数字），它与图片式 `mj_sref` 互斥且优先级更高。个性化 Profile code/ID 写入 `mj_profile`（1–64 位 ASCII 字母或数字），caller 统一拼为 `--profile <value>`。Web 创建 job，caller 只负责校验结构化参数、把本地路径转公网 URL 并拼接对应 flag。
 
-`namespace` 决定产物落哪：`character` → `characters/<id>/<slot>/`，`studio` → `studio/<job_id>/`，`ui` → `projects/<slug>/ui/<ui_scheme_id>/screens/<screen_id>/`，`video` → `projects/<slug>/videos/<production_id>/versions/`，`canvas` → `canvases/<canvas_project_id>/outputs/<job_id>/`。UI job 必须同时带 `project_id / ui_scheme_id / screen_id`；项目视频 job 必须同时带 `project_id / production_id`；画布 job 必须带 `canvas_project_id`。Prompt 内的镜头段落不参与资产归属。`kind` 是媒体轴（image/video），别拿它表达归属。
+`namespace` 只含 studio / canvas，分别落在 `studio/<job_id>/` 和 `canvases/<canvas_project_id>/outputs/<job_id>/`。canvas 任务必须带项目与冻结执行上下文。
 
 ## 端点
 
@@ -181,38 +284,15 @@ Studio 作品总是混入。画布作品由 `/config` 的 `show_canvas_on_home` 
 上传的素材、被换掉的候选、已删除节点的图都不算；`hidden`（打码）的节点不取，判据与画布项目封面一致。
 `GET /gallery/image` 相应放行 `canvases/<project>/outputs/**` 下的图片扩展名，上传目录不放行。
 
-工坊本地请求管理为 `GET /workshop/requests?scope=awaiting|history|all`（默认只列还能批准的）、
-`POST /workshop/requests/{request_id}/approve { expected_revision }` 与
-`POST /workshop/requests/{request_id}/reject { expected_revision }`（仅本机页面；状态 `rejected`，记
-`rejected_by / rejected_at`；视图同时回 `approved_by / approved_at`）；Agent 身份经 `workshop_approve_generation` 批准自身请求，须持 `execute_generation`。
-其余 MCP 工具均为专用 POST 输入，详见工坊契约，不提供通用 HTTP / 文件工具。
+**本机页面写入**
+`POST /prompt/{job_id}` `POST /uploads` `POST /studio/jobs`
 
-`GET /spec/{id}` 返回 `{ content, revision }`；`POST /spec/{id}` 要求
-`{ content, expected_revision }`。项目 experience 中的 worldview 同样返回 revision 并要求
-expected_revision 写入。revision 为完整内容 SHA-256；Web 与 MCP 复用同一锁与 CAS，
-冲突返回 `DOCUMENT_CONFLICT`，不覆盖更新内容。新文档修订是空字节 SHA-256。
-UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，不是客户端权限字段。
+参考路径必须位于允许的数据根范围，否则返回 422。
 
-**Web 独占写**（Skill 不碰）
-`POST /spec/{id}` `POST /prompt/{job_id}` `POST /feedback` `POST /uploads` `POST /studio/jobs`
-`POST /characters` `POST /characters/{id}/derivatives` `POST /characters/{id}/rename` `POST /characters/{id}/gallery/{kind}` `POST /characters/{id}/project`
-`POST /projects` `/projects/reorder` `/projects/{id}/rename` `DELETE /projects/{id}`
-`POST /projects/{id}/ui-schemes` `/projects/{id}/ui-schemes/default`
-`PUT /projects/{id}/character-associations`
-
-`POST /studio/jobs` 与 `POST /prompt/{job_id}` 的参考路径字段要过数据根闸门，违规 422，见「几个要当心的」。
-
-项目内新建角色时，`POST /characters` 请求为
-`{ name: string, project_id: string }`，角色目录创建与项目归属在同一次请求内完成；
-不带 `project_id` 仅供项目外工作流建立临时角色。
-
-`POST /feedback` 必须携带 `{ text, character_id }`；turn-start 只消费当前 active 角色的反馈，
-其他角色的反馈继续留在待处理目录。
 `POST /keys` `PATCH /keys/{alias}` `DELETE /keys/{alias}` `POST /keys/models-preview`
 `POST /config` `POST /gallery/{hidden,favorites,ratings}` `POST /onboarding/data-root` `POST /folder-picker`
-`POST /clipboard-attempt` `DELETE /characters/{id}`
+`POST /clipboard-attempt`
 `POST /jobs/{id}/{confirm,cancel}` `DELETE /jobs/{id}` `DELETE /jobs/{id}/image`
-`POST /studio/jobs/{id}/archive`
 `POST /canvas/projects` `PATCH /canvas/projects/{id}` `PUT /canvas/projects/{id}/document`
 `POST /canvas/projects/{id}/agent/sessions` `DELETE /canvas/projects/{id}/agent/sessions/{session_id}`
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
@@ -234,21 +314,9 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `DELETE /canvas/projects/{id}`
 `PUT /canvas/ui-preferences`
 
-**双向**
-`POST /characters/{id}/canonical` `POST /projects/{id}/ui-schemes/{scheme_id}/screens/canonical` `POST /experience`
-`POST /projects/{id}/videos/{production_id}/selected`
-
 **只读**
-`GET /jobs` `/jobs/{id}` `/spec/{id}` `/characters` `/active-character` `/images` `/config` `/projects` `/experience` `/keys` `/onboarding/status` `/home`
-`GET /gallery/{recent,screens,hidden,favorites,ratings,image}` `GET /raw`
-`GET /projects/index` `GET /projects/{id}/gallery?category={all,art,ui,video}&limit=&cursor=`
-`GET /projects/{id}/gallery/media?path=`
-`GET /characters/{id}/canonical` `GET /projects/{id}/ui-schemes/{scheme_id}/screens/canonical`
-`GET /projects/{id}/workspaces?ui_scheme={scheme_id}` `GET /projects/{id}/videos`
-`GET /projects/{id}/ui-schemes`
-`GET /projects/{id}/characters/index` `/projects/{id}/characters/{character_id}/workspace`
-`GET /projects/{id}/character-associations`
-`GET /projects/{id}/studio-archive-targets?media_kind={image,video}`
+`GET /jobs` `/jobs/{id}` `/config` `/keys` `/onboarding/status`
+`GET /gallery/{recent,hidden,favorites,ratings,image}` `GET /raw`
 `GET /canvas/projects` `/canvas/project-options` `/canvas/projects/{id}/document` `/canvas/projects/{id}/jobs`
 `GET /canvas/projects/{id}/versions/{version_id}/media`
 `GET /canvas/projects/{id}/versions/{version_id}/download`
@@ -260,6 +328,11 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `GET /team-libraries/{library_id}/assets/{entry_id}/{content,thumb?w=}`
 `GET /canvas/projects/{id}/agent/sessions` `/canvas/projects/{id}/agent/sessions/{session_id}`
 `GET /canvas/ui-preferences`
+
+`GET /api/team-libraries?all_mounts=true` 返回全部 `TeamLibraryView` 挂载记录，不按库去重，
+保留每条记录的 `project_id` 与 `mount_path`，供控制台按画布统计。默认 `all_mounts=false` 且省略
+`project_id` 时继续按 library_id 去重；传入 `project_id` 时只返回该项目挂载（即使同时传 all_mounts）。
+空字符串 project_id 仍为项目过滤，不扩大为全局查询；无效布尔值返回 422。
 
 `GET /canvas/projects` 的 `CanvasProjectSummary` 在项目元数据之外返回派生的 `cover`、`node_count` 与
 `connection_count`；这些字段不进入 `project.json`，必须与当前 `canvas.json` 一致。
@@ -299,6 +372,23 @@ Canvas 媒体只按项目内不可变 `version_id` 读取，不接受裸路径�
 文本节点的 `data.display.scale` 只接受 Atelier 字阶 token `xs/sm/base`，缺省为 `sm`；字号切换属于
 Document 显示状态并参与 revision 与 undo/redo，不修改文本 Content Version。图片/视频继续使用
 `data.display.fit/free_resize`；视频和音频播放进度、音量与控件焦点只属于浏览器呈现状态，不落盘。
+图片节点可保存 `data.annotation = { version_id, elements, visible, rendered_version_id }`，无提示词字段。
+`version_id` 固定原图；`rendered_version_id` 可空，非空时必须是本项目拥有且尺寸与原图一致的图片。
+`visible` 默认 true；显示还要求 `version_id == current_version_id`，切版本仅隐藏。标注修改使合成版本失效，
+删除全部元素写 null。视频及其他节点不得带 annotation。原图不被覆盖，也不创建独立标注节点。
+元素类型为 `rect/arrow/freedraw/text`，共用 `id`、`color`，拒绝未知字段。最多 500 个、JSON 不超过 2 MiB。
+颜色限定 `#F04438/#FACC15/#22C55E/#3B82F6/#FFFFFF`。矩形保存 `x/y/width/height/stroke_width`，
+箭头保存 `start/end/stroke_width`，画笔保存 `points/stroke_width`（2–10000 点），文字保存
+`x/y/text/font_size/background`（1–500 字，background 默认 false）。坐标为有限原图像素，绝对值不超过 100000。
+线宽 1–24、字号 12–72 使用基准单位：实际像素 = 值 × max(原图宽, 原图高) / 1024。
+节点、全屏和 PNG 合成共用 SVG 渲染器，原尺寸原图从版本媒体接口读取，不把图片字节写入 JSON。
+Input Connection 新增 `annotated: boolean = false`，仅允许图片来源且 `slot` 必须为空。
+带标注输入解析为来源的 `annotation.rendered_version_id`，不同时发送原图；显隐不影响输入。
+来源标注清空、切换到无标注版本或合成图缺失时拒绝提交。普通输入仍解析当前版本，分组展开保持普通输入，
+同一来源既直连又在组内时以直连标记为准。Snapshot Input 同样保存 annotated，结果回连接续标记。
+「去改图」仅上传隐藏合成版本、创建图片生成节点与 annotated 输入，预填「按图中标注修改，输出不保留标注。」；
+不提交 Job。普通和批量提交前自动重新合成失效标注；合成版本派生写入不占撤回历史。
+跨画布粘贴同时复制并重映射 version_id/rendered_version_id，项目包保留两份图片与标注关系。
 画布外观属于作者可撤销的项目设置：`settings.background` 明确选择空白、点阵或线框，
 `settings.show_image_info` 控制图片节点是否展示当前不可变 Content Version 的真实宽高与文件体积。
 `settings.show_minimap` 控制中等及桌面视口的小地图；手机端始终隐藏。三者随普通 Document revision 保存并
@@ -389,6 +479,8 @@ voice/format、0.25–4 的 speed 与去除首尾空白后的非空 instructions
 同一编号；final prompt 的标签与 `reference_images/reference_videos/reference_audios` 各自数组顺序一致，
 普通生成不存在隐式自身输入。专用编辑使用 `explicit_source` 标记明确的操作源；历史 `implicit_self` 仍可读取但不参与当前输入推断。非原生批量的图片候选按槽位执行，每个成功槽位立即通过短事务登记
 Content Version、candidate 状态与首个成功主结果；Midjourney 原生四宫格仍保留单次请求再逐槽登记。
+
+画布 Agent / MCP 的 `connect` 的 `slot` 还可为 `before` / `after`（仅对比节点）：未指定时先填 before 后填 after，指定已占用的一路则替换原连线。画布 Agent 的 `get_canvas` 在完整结果超过工具输出上限时返回概览（`overview: true`，按 `node_columns` 给出每个节点的 id/type/title/has_content/has_draft/group），仍超限时列出最新节点并给 `omitted_nodes`；可传 `node_ids`（1–20）读取指定节点的完整信息。
 
 视频 Draft 的 `frame_mode=first|last|firstlast` 使用语义化 Input Connection：可选 `slot` 只能是
 `first_frame` 或 `last_frame`，源节点必须是已有图片 Content Version，目标必须是视频生成节点，且同一
@@ -641,199 +733,6 @@ v2→v3 资产种类 `image` 改名 `media`，v3→v4 删掉每条资产的 `rec
 整表校验，通过才备份（`.runtime/backups/creation-assets/<UTC timestamp>/catalog.json`）并落盘，任何一条坏记录
 都让原文原封不动。blob 文件不动。`image` 与 `recommendation` 均不保留兼容读法。
 
-### 角色衍生契约
-
-角色衍生是项目资产库中的平级角色资产，目录、Spec、三类出图、Job、反馈与定稿均独立。它只保存
-创建时的来源快照，不形成父子树或归属依赖。关系落在 `characters/<derivative_id>/derivative.json`：
-
-```ts
-type CharacterDerivative = {
-  source_character_id: string;
-  source_character_name: string;
-  source_paths: string[];
-  created_at: string;
-};
-
-type CharacterEntry = {
-  id: string;
-  name: string;
-  status: string;
-  latest_job_id: string | null;
-  thumbnail?: string | null;
-  derivative: CharacterDerivative | null;
-};
-```
-
-`POST /characters/{source_id}/derivatives` 请求为 `{ name: string, source_paths: string[] }`。
-来源角色必须已归属项目；服务端自动加入来源角色三类 canonical 图片，并接受同项目画廊图片或
-`.runtime/uploads/` 本次上传图片。所有来源图会复制到新角色 `source/`，`source_paths` 只记录复制后的
-相对路径。新角色初始继承来源角色当时的项目归属，之后可独立移动、删除或继续作为新衍生的来源；
-来源角色改名或删除不会改写快照。
-
-`turn-start` 对衍生角色额外返回 `derivative`，包含来源角色 id / 创建时显示名、冻结后的来源路径与
-当前资产槽位；`project_style` 仍是项目风格真源，Job 的 `character_id` 始终写当前衍生角色 id。
-
-### UI 方案契约
-
-方案元数据落 `projects/<slug>/ui/schemes.json`，内容为
-`{ default_scheme_id: string, schemes: Array<{ id, name, created_at }> }`。方案 id 由服务端按 `v1`、
-`v2` 递增生成；默认方案只决定 `/workshop/{project}/ui` 的打开目标，切换默认不删数据。
-
-`POST /projects/{id}/ui-schemes` 请求为
-`{ name, source_scheme_id, copy_style, copy_screen_map, screen_ids }`。复制的页面版本成为新方案起点，
-但不复制 canonical；两套方案之后独立写 `style.md / screens / canonical.json`。viewer-server 启动时
-显式执行一次旧项目升级：把旧 `screens/` 移到 `ui/v1/screens/`，把根 `style.md` 的 `ui.*` 章节
-移入 V1，并经完整 Job 模型校验修正 Job 与 canonical。正常读取只接受新路径，不做迁移或 fallback。
-`GET /projects/{id}/ui-schemes?visible_only=true` 仅返回包含实际 UI 文档、页面或作品的方案，供侧栏
-隐藏初始化产生的空 V1；不带参数时仍返回完整方案文件，供 UI 工作流使用。
-
-### 角色索引、工作台与关联
-
-`GET /projects/{id}/characters/index` 返回项目角色卡片的派生数据：每个条目包含完整
-`CharacterEntry`、单张角色封面 `cover_path` 与 `activity_at`。封面优先使用定稿立绘；未定稿时
-使用最早的立绘。它只从项目归属和角色目录聚合，不落独立索引文件。
-
-`GET /projects/{id}/characters/{character_id}/workspace` 返回角色视角的资产聚合：
-
-```ts
-type CharacterWorkspace = {
-  character: CharacterEntry;
-  assets: Array<{
-    slot: 'portrait' | 'promo' | 'turnaround';
-    count: number;
-    canonical: CanonicalEntry | null;
-    media: GalleryMedia[];
-  }>;
-  related: Array<{
-    target:
-      | { kind: 'ui'; scheme_id: string; screen_id: string }
-      | { kind: 'video'; production_id: string };
-    title: string;
-    detail: string;
-    source: 'auto' | 'manual' | 'both';
-    featured_path: string | null;
-    count: number;
-    media: GalleryMedia[];
-  }>;
-  recent_media: GalleryMedia[];
-};
-```
-
-自动关联只认 Job 与视频企划中明确登记的角色素材路径，不解析 prompt。手动关联落在
-`projects/<slug>/character-associations.json`；`PUT /projects/{id}/character-associations` 请求为
-`{ character_id, target, associated }`。角色和 UI 页面 / 视频企划必须属于同一项目，移除手动关联
-不会删除自动关联或任何作品文件。
-
-### 项目工作区响应
-
-`GET /projects/{id}/workspaces` 返回只读聚合，不落第二份进度：
-
-```ts
-{
-  project_id: string;
-  art: { characters: number; canonical: number; stale: number };
-  ui: {
-    scheme_id: string;
-    anchors: Record<'gdd' | 'prd' | 'interaction', string>;
-    anchors_approved: number; style_status: string; has_ui_style: boolean;
-    screen_map_status: string; screens: number; versions: number;
-    canonical: number; stale: number;
-    screen_items: Array<{
-      screen_id: string; name: string; category: string; priority: string;
-      status: string; dependency: string; purpose: string; brief_summary: string;
-    }>;
-    next_action: string; next_command: string;
-  };
-  video: {
-    productions: number; versions: number; selected: number; next_action: string;
-  };
-}
-```
-
-### 项目索引与项目画廊
-
-`GET /projects/index` 是项目卡片墙的派生读取模型：
-
-```ts
-type ProjectIndexItem = {
-  project: Project;
-  cover_paths: string[]; // 0..4 张最新未隐藏图片，视频不参与
-  activity_at: string;   // 项目目录与已归属角色资产树的最新 mtime
-};
-```
-
-项目重命名、角色归属和作品隐藏这类不直接改项目内容文件的写操作会触碰对应项目目录；不另存
-`updated_at`。`GET /projects/{id}/gallery` 从文件系统实时聚合全部未隐藏成品版本，使用
-`category=all|art|ui|video` 过滤，按 `produced_at` 倒序并以 opaque cursor 渐进读取。
-`GET /projects/{id}/gallery/media?path=` 只读取同一派生集合中的单个作品，用于通过首页 URL 的
-`?media=` 查询恢复预览；已隐藏、失败或不属于该项目的路径统一返回 404。
-
-```ts
-type GalleryMedia = {
-  path: string;
-  media_type: 'image' | 'video';
-  produced_at: string;
-  title: string;
-  detail: string;
-  job_id: string | null;
-  target:
-    | { kind: 'art'; character_id: string; asset_slot: AssetSlot }
-    | { kind: 'ui'; scheme_id: string; screen_id: string }
-    | {
-        kind: 'video'; production_id: string; output_kind: 'version';
-      };
-};
-```
-
-美术只扫描项目角色三类成品槽，UI 只扫描所有方案的 screen 版本目录，视频只扫描企划的完整版本。
-参考图、source、上传暂存、策划文档和失败 Job 不进入画廊。旧 `/gallery/project` 已删除；美术工作区
-使用统一画廊的 `category=art`，`/gallery/screens` 仍服务 UI 制作页的版本元数据。
-
-### 创作台归档契约
-
-`GET /projects/{id}/studio-archive-targets?media_kind=image|video` 返回
-`{ targets: StudioArchiveTargetOption[] }`。图片目标包含该项目的角色三类资产槽，以及所有 UI 方案中已规划
-或已有版本的页面；视频目标只包含该项目所有正式企划。响应中的 `label / detail` 只用于展示，
-POST 时不得回传：
-
-```ts
-type StudioArchiveTarget =
-  | { kind: 'character'; character_id: string; asset_slot: AssetSlot }
-  | { kind: 'ui'; ui_scheme_id: string; screen_id: string }
-  | { kind: 'video'; production_id: string };
-
-type StudioArchiveTargetOption = StudioArchiveTarget & { label: string; detail: string };
-```
-
-`POST /studio/jobs/{id}/archive` 请求为
-`{ source_path: string; project_id: string; target: StudioArchiveTarget }`。来源必须是该 Studio DONE Job
-的 `output_paths` 成员；图片只能进入角色或 UI，视频只能进入完整视频企划；目标必须真实属于所选项目。
-服务端在目标目录复制为下一个 `vN`，不移动或改写源文件，并用完整 Job schema 新建一个正式 DONE Job。
-新 Job 保留来源的 prompt、模型与生成参数，归属改为目标资产，且在 params 写入
-`archived_from_job_id / archived_from_path`。响应为 `{ job, path }`；重复归档只会继续递增版本，绝不覆盖。
-
-`GET /projects/{id}/videos` 返回 `{ productions: ProjectVideoProduction[] }`；
-`GET /projects/{id}/videos/{production}` 返回单个企划。每个 production
-含 `production_id / title / type / status / brief / prompt / versions / selected / planned_reference_images / history`；
-`brief` 明确返回 `goal / platform / ratio / duration / sound`。`prompt` 是一次提交的完整多镜头提示词；
-`versions` 中每个文件都是一支完整视频。
-`history` 按新到旧保存每次 Job 的 `job_id / submitted_at / completed_at / status / prompt / model / params`，
-其中 `params` 包含当次实际时长、分辨率、画幅与三组参考素材。`planned_reference_images` 是下一次生成草稿，
-不得与历史混用。`POST .../selected` 请求为
-`{ path: string | null }`（禁止额外字段），响应为 `{ path: string | null }`；path 必须是
-该企划 `versions/` 中实际存在的 `.mp4`。
-
-`GET /projects/{id}/video-references` 返回当前项目可用的角色（含角色衍生）和所有 UI 方案页面定稿：
-`{ candidates: Array<{ kind, asset_id, scheme_id, label, detail, path, stale }> }`。只返回真实存在的
-canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚未定稿”。`stale` 只提示人工判断，
-不自动替换。
-
-`POST /projects/{id}/videos/{production}/references` 请求为
-`{ paths: string[] }`（禁止重复和额外字段），只接受该项目当前候选素材或该企划已保存的明确版本，
-响应为 `{ paths: string[] }`。草稿落 `projects/<slug>/videos/<production>/references.json`；
-`submit-video-production` 创建一个完整视频 Job 时把这些路径复制进 `params.reference_images`。因此后续切换 canonical
-只改变候选，不会改写历史 Job。
-
 ### 团队库契约
 
 团队库是画师自己用 SVN / 网盘同步的共享目录，本机只读写目录、永不执行同步命令（ADR-0020）。
@@ -1011,6 +910,9 @@ detail 形如 `params.<字段> 第 N 项：<原因>`，`/prompt` 违规时 job �
 resolve 后的绝对路径（落盘值就是闸门判过的那个）。`mask_image` 浏览器不能传：两个入口都先丢掉浏览器给的值
 （`/prompt` 保留已有值），只由服务端（画布局部编辑）写。
 
+`KeySpec.enabled` 为布尔值，默认 `true`；`POST /keys` 与 `PATCH /keys/{alias}` 接受该字段。
+`GET /keys` 保留停用供应商及其模型供管理，模型选择器必须过滤 `enabled=false`。停用供应商不参与模型路由、默认选择、Canvas 与 Agent 模型目录；显式指定停用供应商提交生成返回 422「供应商已停用」。停用保留密钥、模型配置与历史任务。
+
 `GET /keys/{alias}/reveal`：唯一回明文密钥的接口。按显式 alias、按需返回；列表接口一律掩码。
 
 `POST /keys/models-preview`：形状与分类瀑布见 [references/provider-config.md](references/provider-config.md) 的「models-preview 契约」一节。两条硬约束——① 用存储密钥时 `base_url` 只能与存储值同 host；② 默认 `/models` 未必是全集（OpenRouter 的视频模型要额外拉 `?output_modalities=video`）。
@@ -1021,3 +923,102 @@ resolve 后的绝对路径（落盘值就是闸门判过的那个）。`mask_ima
 - job JSON 禁止手写：`/api/jobs` 全量 Pydantic 校验，一条 schema 错会让整个列表 500（表现为「角色里没内容」）。用 `lib/jobs.py` 的 `Job`/`save_job()` 生成。
 - `params.warnings` 是数组不是字符串；`status`/`kind`/`asset_slot` 必须用 schema 枚举值。
 - 改后端 lib 后 viewer-server 必须重启：长驻进程缓存旧模块，症状是「X object has no attribute Y」而 pytest 全绿。
+
+### 模型路由成员状态
+
+- `GET /api/model-routes/member-status`：仅限本机管理，返回 `ModelRouteMemberStatusResponse`。
+  `members` 包含 modality、alias、reason、since、next_probe_at、route_ids；reason 为
+  insufficient_balance（欠费）或 unavailable（临时不可用，since 为 null）。
+  `unavailable_routes` 为所有本机成员欠费的路由（id、name、modality）。
+- `POST /api/model-routes/member-status/restore`：请求 `{modality, alias}`，恢复后返回同一状态结构。
+
+### 用量
+
+`GET /api/pricing/tokendance` 返回 TokenDance 价格快照 `{synced_at: string | null, models: {model_id: pricing}}`，`pricing` 原样保存 TokenDance 公开模型接口的同名字段；规则见 [生成价格清单维护](references/generation-pricing.md)。
+
+`GET /api/usage` 仅限本机管理会话（Agent 无权读取）。参数 scope=mine|team（默认 mine）、
+range=today|7d|30d|90d|all（默认 30d）、source=all|local|lan（默认 all，仅 mine）、
+member=网关密钥 ID（仅 team）。网关未开启时 team 返回 404。响应 `UsageResponse` 双端 schema
+定义 totals、trend、rankings、sources、members；已删除 top。
+mine 每条 image/video job 计一次，排除 pending_confirm/canceled，保留 pending 等进行中状态；actual 优先于 estimated，
+failed 只计 actual。非失败且无价格的任务 `cost_cny=null`（未计价，含尚无估价的进行中任务），不计入金额，另计 `totals.unpriced` 与排行行 `unpriced`。team 以账本 charged_cny 为准。时间按本机时区，从 N 天前的日界线
+（包含今天）至现在；previous 为紧邻的等长区间，all 时为 null。today/7d/30d 按日，其余周一分桶并补零。
+
+
+`GET /api/usage/tasks` 同样只限本机管理会话，复用以上 scope/range/source/member 筛选，
+增加 `status=all|done|failed|unpriced`（默认 all）、`offset>=0`（默认 0）、`limit=1..200`（默认 50）。
+返回 `{rows: UsageTask[], total: number, next_offset: number | null}`；先筛选再分页，按提交/账本时间的真实时刻倒序、同刻按 id 升序，越界 offset 返回空 rows、原 total 和 null。
+`all.total` 与同口径 `totals.count` 一致；unpriced 严格等于 cost_cny=null，不把真实 0 元或失败无账单视为未计价。
+
+行字段为 `id, at, kind, model, label, source, cost_cny, alias, status, duration_s, project_label, member_label, thumb_url, href`，本机可带截断后的 prompt，团队不返回 prompt。
+status 保留真实状态（含 pending、done、failed，以及团队 canceled 等）；成功筛选只匹配 done，不把取消算成功。
+本机 duration_s 为终态 completed_at−submitted_at 的秒数，未完成或无完成时间为 null；项目沿用画布名称/未归档，member_label=null。
+团队 project_label=null、member_label 为成员名，cost_cny 始终使用账本 charged_cny（空值按既有账务记 0）；旧账本无执行耗时则 duration_s=null，账本视频 duration 是素材时长，不能当作耗时。
+任务表不为团队全量读取产物或 prompt。
+
+
+## 图片定稿与项目类别（5.107.0）
+
+- `CreationAsset.category: string | null`：单一应用级类别，去首尾空白、空串归 null、最长 24 字。不新增内容版本；关联项目共享类别与取消定稿。使用资产建立 `project_ids` 关系后，已定稿资产自动进入该项目参考库。
+- `PATCH /api/creation-assets/{asset_id}`，JSON `{category: string | null}`，返回更新后的资产。仅 media/generation 可定稿；不存在返回 404，非法字段或类别返回 422。
+- `POST /api/creation-assets/media/from-path` 增加可选 `category`。`allow_existing=true` 时按媒体 sha256 复用、合并项目关系；传非空类别时更新已有资产类别。
+- `GET /api/creation-assets` 支持 `project_id` 过滤关联项目，以及 `has_category=true|false` 过滤类别是否非空。参考库还需限定 media/generation。
+- `CanvasProject.categories: string[]`：默认六类，去首尾空白并去重，每项 1–24 字，最多 40 项。旧项目缺字段时读默认值。
+- `PUT /api/canvas/projects/{project_id}/categories`，JSON `{categories: string[]}`，返回完整项目。项目锁与资产锁内检查使用数量、原子写入；删除仍被本项目资产使用的类别返回 409，detail 为 `{code: "category_in_use", message, count, usage: {类别: 数量}}`。
+- 类别列表按项目维护，关联资产可携带其他项目的类别，不自动新增到可选类别列表。
+
+
+## 参考库自动分类（5.108.0）
+
+`POST /api/canvas/projects/{project_id}/classify` 接收 `{asset_ids: string[], model_alias?: string, model?: string}`。每次 1–48 个不重复的本项目图片资产，每 8 张调用一次模型，发送最长边 512 的缩略图。模型沿用前端 Agent 已记住的对话模型，显式传入别名与模型（Agent 未发首条消息时设置仅在浏览器中，故补充这两个请求字段）。模型必须配置图片输入。响应为 `[{asset_id, category: string | null, confidence: number}]`，置信度 0–1；仅给建议、不写资产。类别必须在项目列表中，非法 JSON、遗漏/重复/额外 ID、越界类别返回 502 `CLASSIFICATION_INVALID_RESPONSE`；模型失败返回 502 `CLASSIFICATION_MODEL_FAILED`。未配置模型、图片输入、项目类别分别返回 422 的 `CLASSIFICATION_MODEL_REQUIRED`、`CLASSIFICATION_VISION_REQUIRED`、`CLASSIFICATION_CATEGORIES_REQUIRED`。只由用户点击触发计费；待分类列表及建议为前端本次面板会话状态，确认后才逐项 PATCH category。
+
+## 项目规范与经验（5.109.0）
+
+`CanvasProject.category_spec_files` 记录类别到唯一 ASCII Markdown 文件名的映射，保留 `project.md`。规范位于 `specs/project.md` 与 `specs/<slug>.md`，每文件最多 40000 字符，项目锁内原子写入。项目包包含规范及 `agent/lessons.md`，校验 UTF-8、长度、清单 MIME 和映射文件完整性。
+
+- `GET /api/canvas/projects/{project_id}/specs` → `{project: string, categories: Record<string,string>}`；未写类别返回空串。
+- `PUT .../specs/project` 与 `PUT .../specs/categories/{name}` body `{text: string}` → `{saved:true}`。
+- `GET .../lessons` → `{pending:string[], adopted:string[]}`；`POST .../lessons/{index}/adopt` 与 `DELETE .../lessons/{index}` 操作待审索引，返回更新后的列表。采纳追加至项目规范的 `## 项目经验`。
+- Agent `read_spec(category)` 返回类别全文；`append_lesson(text)` 记录 1–300 字待审经验，审查模式需确认。每轮 instructions 追加项目规范，超过 8000 字截断并标注。
+- 编辑器中文输入法组合期间不启保存计时；切页/关闭前完成保存，失败保留抽屉及本机草稿，意外卸载可恢复。
+
+## Agent 项目参考（5.111.0）
+
+- `CanvasCreationAssetSnapshotOrigin.asset_id?: string | null`：只读来源身份。新转入保留 ID，旧快照无 ID；内容仍冻结，资产更新/删除不改画布内容。项目包保留出处。
+- 内置 Agent `search_library(category?, limit=12)`：limit 1–12，只读本项目已定稿图片资产，返回 `{assets:[{asset_id,title,category,width,height}], attach_images:[...]}`。不存在类别或空库返回空数组；缩略图在发模型时附加，不写对话历史。
+- `apply_changes` 新增 `add_asset_node {asset_id,node_id,position?}`。只接受本项目参考库媒体/生成资产；以当前节点版本的只读 asset_id 去重，复用冻结内容。结果增加 `asset_nodes`（资产 ID → 真实节点 ID）与 `node_aliases`（请求 ID → 复用节点 ID），同批后续操作自动解析别名。
+- 资产字节、版本、节点及同批连线整批验证后提交；失败不留下半成品。参考节点位于生成节点左侧一列；参考必须通过可见 input 连线参与生成。
+
+## 工坊迁移来源（5.112.0）
+
+`CanvasProject.migrated_from_workshop: string | null` 记录完成迁移的工坊 slug，普通新建项目为空，项目包保留此字段。
+
+一次性迁移已完成，脚本随工坊代码退役；原工坊文件保留，详见 [ADR-0027](adr/0027-canvas-project-is-the-project.md)。
+
+
+## 工坊退役（5.113.0）
+
+旧工坊 API、workshop_* MCP 工具和 Skill 已移除。Job 的 asset_slot/project_id/ui_scheme_id/screen_id/production_id/workshop_request_id 字段已删除；历史工坊 job 在 jobs-archive/workshop 中保留，活动任务仅支持 studio/canvas。项目数据保留 migrated_from_workshop 作为迁移来源记录。
+
+### 管理员中转接口（5.127.0）
+
+`GatewayKeyRecord.role` 为 `member | admin`，默认 `member`。本机创建/修改成员同样支持角色；`GET /api/gateway/audit` 返回最近200条 `{entries}` 操作日志。日志含 time（带时区）、actor_id/name、action、target_id、summary，不含 token 或哈希。
+
+`/gateway/v1/admin` 下所有端点每次请求校验有效 admin，成员403、无效凭据401。管理写入持锁复查；不能远程撤销/降级自己，最后管理员只能本机撤权。
+
+| 方法与后缀 | 响应与作用 |
+|---|---|
+| GET /keys | `{keys}`，成员记录不含token_sha256 |
+| POST /keys | 201 `{key, token}`，明文仅此次响应；输入name/role/limits/allowed_models/allowed_aliases |
+| PATCH /keys/{id} | 修改成员，返回脱敏记录 |
+| POST /keys/{id}/revoke | 撤销，返回脱敏记录 |
+| GET /options | 可授权的模型与上游alias |
+| GET /usage、/usage/tasks | 与本机用量结构一致，固定team；range/member/status/offset/limit筛选 |
+| GET /tasks | scope=active/recent，所有成员任务的安全快照 |
+| GET /live | SSE task事件，4秒心跳；发送前复查权限，客户端另每4秒轮询tasks |
+| GET /members | 上游alias欠费/暂不可用状态 |
+| POST /members/{alias}/restore | 输入modality，恢复后返回状态 |
+| GET /routes、PUT /routes/order | 返回`{models:[{id,name,modality,aliases}]}`；排序输入modality/id/aliases |
+| GET /audit | `{entries}`，limit默认200最大1000 |
+
+接入端仅通过 `/api/gateway/providers/{alias}/admin` 下对应白名单路由代理，全部注册 LOCAL_MANAGEMENT；服务器用已保存的中转密钥请求，不重定向，不接受任意转发目标。无上游凭据增删/查询、文件读取或本机设置接口。远程任务不提供本机产物链接。

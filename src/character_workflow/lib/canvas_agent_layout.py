@@ -16,7 +16,7 @@ from character_workflow.lib.schemas import CanvasDocument, CanvasNode, JobParams
 GAP = 48
 DEFAULT_SIZE = (320.0, 176.0)  # 与前端 CANVAS_DEFAULT_NODE_SIZE 一致
 TEXT_SIZE = (256.0, 144.0)  # 与前端 CANVAS_TEXT_NODE_DEFAULT_SIZE 一致
-ADD_OPS = frozenset({"add_text", "add_media_node", "add_surface"})
+ADD_OPS = frozenset({"add_text", "add_media_node", "add_surface", "add_asset_node"})
 
 
 @dataclass(frozen=True)
@@ -102,6 +102,18 @@ def place(obstacles: list[Rect], anchor: Rect | None, width: float, height: floa
 
 
 def _estimated_size(change: dict, drafts: dict[str, dict]) -> tuple[float, float]:
+    if change.get("op") == "add_asset_node":
+        from character_workflow.lib.creation_assets import asset_media_content, get_creation_asset, creation_asset_media_path
+        from character_workflow.lib.canvas_projects import _display_image_dimensions
+        try:
+            asset = get_creation_asset(change["asset_id"])
+            media = asset_media_content(asset)
+            if media and media.mime_type.startswith("image/"):
+                width, height = _display_image_dimensions(creation_asset_media_path(asset.asset_id).read_bytes())
+                return _locked_size(None, width, height)
+        except (KeyError, OSError, ValueError):
+            pass  # Execution returns the validation error without committing the batch.
+        return DEFAULT_SIZE
     if change.get("op") == "add_text":
         return TEXT_SIZE
     if change.get("op") == "add_surface" and change.get("kind") in {"image", "video"}:
@@ -129,9 +141,26 @@ def with_auto_positions(document: CanvasDocument, changes: list,
     drafts = {str(change.get("node_id")): change for change in changes
               if isinstance(change, dict) and change.get("op") == "set_draft"}
     result = []
-    for change in changes:
+    references = [(index, change) for index, change in enumerate(changes)
+                  if isinstance(change, dict) and change.get("op") == "add_asset_node"]
+    reference_slots: dict[int, Rect] = {}
+    if references:
+        sizes = [_estimated_size(change, drafts) for _, change in references]
+        block = place(obstacles, anchor, max(w for w, _ in sizes),
+                      sum(h for _, h in sizes) + GAP * (len(sizes) - 1))
+        top = block.y
+        for (index, _change), (width, height) in zip(references, sizes, strict=True):
+            reference_slots[index] = Rect(block.x, top, width, height)
+            top += height + GAP
+        obstacles.append(block)
+        anchor = block
+    for index, change in enumerate(changes):
         if not isinstance(change, dict) or change.get("op") not in ADD_OPS:
             result.append(change)
+            continue
+        if index in reference_slots:
+            slot = reference_slots[index]
+            result.append({**change, "position": {"x": round(slot.x), "y": round(slot.y)}})
             continue
         slot = place(obstacles, anchor, *_estimated_size(change, drafts))
         obstacles.append(slot)

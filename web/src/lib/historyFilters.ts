@@ -2,7 +2,7 @@ import type { Job } from '@/schema/jobs';
 import type { RoundState } from '@/components/studio/RoundList';
 import { isGalleryFavorited, isGalleryHidden } from '@/api/gallery';
 
-export type GenMode = 'image' | 'video' | 'skill';
+export type GenMode = 'image' | 'video' | 'canvas';
 export type TimeFilter = 'all' | '1w' | '1m' | '3m';
 
 export interface HistoryFilters {
@@ -28,8 +28,7 @@ const TIME_WINDOWS: Record<Exclude<TimeFilter, 'all'>, number> = {
 
 /** 来源优先、三档互斥：正式工作流原生产物归 Skill；Studio 直出及其归档副本按媒体分类。 */
 export function deriveGenMode(job: Job): GenMode {
-  const archivedFromStudio = typeof job.params?.archived_from_job_id === 'string';
-  if (job.namespace !== 'studio' && !archivedFromStudio) return 'skill';
+  if (job.namespace === 'canvas') return 'canvas';
   if (job.kind === 'video') return 'video';
   return 'image';
 }

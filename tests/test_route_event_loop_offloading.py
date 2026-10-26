@@ -68,14 +68,6 @@ def test_runtime_upload_writes_off_the_event_loop(client, monkeypatch):
     assert on_loop == [False]
 
 
-def test_gallery_upload_writes_its_job_off_the_event_loop(client, monkeypatch):
-    on_loop = _patch(monkeypatch, "viewer_server.routes", "write_job")
-    response = client.post(
-        "/api/characters/hero/gallery/portrait",
-        files={"file": ("a.png", _PNG, "image/png")},
-    )
-    assert response.status_code == 200, response.text
-    assert on_loop == [False]
 
 
 def test_canvas_upload_takes_the_project_lock_off_the_event_loop(client, monkeypatch):

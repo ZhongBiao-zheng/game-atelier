@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-import { SettingsPage } from './Settings';
+import { PreferencesPage as SettingsPage } from './PreferencesPage';
+
+// These page tests exercise shell/settings behavior; gateway interactions have their own suite.
+vi.mock('@/api/gateway', async importOriginal => ({
+  ...await importOriginal<typeof import('@/api/gateway')>(),
+  fetchGatewayTasks: async () => [],
+  fetchGatewayMembers: async () => ({ members: [], unavailable_routes: [] }),
+}));
 
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn((url: RequestInfo | URL) => {
@@ -105,7 +112,7 @@ describe('SettingsPage', () => {
   it('renders the show-canvas-on-home switch and posts the toggle', async () => {
     render(<SettingsPage />);
 
-    const toggle = await screen.findByRole('switch', { name: '展示画布出图' });
+    const toggle = await screen.findByRole('switch', { name: '首页展示画布出图' });
     expect(toggle).toHaveAttribute('aria-checked', 'false');
 
     fireEvent.click(toggle);
@@ -132,7 +139,7 @@ describe('SettingsPage', () => {
     }));
     render(<SettingsPage />);
 
-    const toggle = await screen.findByRole('switch', { name: '展示画布出图' });
+    const toggle = await screen.findByRole('switch', { name: '首页展示画布出图' });
     fireEvent.click(toggle);
     await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'));
   });

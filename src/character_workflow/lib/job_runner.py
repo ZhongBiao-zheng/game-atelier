@@ -14,19 +14,17 @@ from character_workflow.lib import data_root
 from character_workflow.lib import net_env
 from character_workflow.lib.asset_versions import asset_output_lock, next_asset_path
 from character_workflow.lib.callers import dispatch, dispatch_audio, dispatch_text, dispatch_video
-from character_workflow.lib.active_character import read_active
 from character_workflow.lib.jobs import (
     job_execution_lock,
     job_lock,
     job_output_dir_for,
-    list_jobs,
     read_job,
     update_job_params,
     update_job_phase,
     update_job_status,
     write_job_under_lock,
 )
-from character_workflow.lib.schemas import AssetSlot, Job, JobParams, JobStatus
+from character_workflow.lib.schemas import Job, JobParams, JobStatus
 
 
 class JobRunnerError(RuntimeError):
@@ -54,6 +52,13 @@ class _RouteSwitched(Exception):
     """「自动」任务换到了下一家供应商：不落 FAILED，由外层用新供应商重跑。"""
 
 
+def _mark_member_healthy(job: Job) -> None:
+    from character_workflow.lib import model_routes
+
+    if job.alias:
+        model_routes.mark_healthy(job.kind.value, job.alias)
+
+
 def _switch_route(job_id: str, error: BaseException) -> bool:
     """确定没执行的失败上把「自动」任务换到组内下一家；换了返回 True。
 
@@ -76,11 +81,16 @@ def _switch_route(job_id: str, error: BaseException) -> bool:
     if reason is None:
         return False
     modality = job.kind.value
-    model_routes.cool_down(modality, job.alias, reason)
+    model_routes.cool_down(modality, job.alias, reason, seconds=getattr(error, "retry_after", None))
     tried = [*(params.route_tried or []), job.alias]
-    while (candidate := model_routes.next_member(modality, params.route_id, tried)) is not None:
+    while (candidate := model_routes.next_member(
+        modality, params.route_id, tried, route_order=params.route_order,
+        params=params.model_dump(exclude_none=True),
+    )) is not None:
         key, model = candidate
         next_params = params.model_dump(exclude_none=True)
+        # 预计费用按新渠道重算（「自动」任务的预计由 runner 补，不是提交方冻结的）。
+        next_params.pop("estimated_cost_cny", None)
         if evo_state.get("terminal") == "rejected":
             # Only a definite refusal can discard the previous channel's submission state.
             next_params.pop("evolink_state", None)
@@ -139,6 +149,8 @@ def _friendly_error(err: BaseException) -> str:
     **永远保留原始报错**：视频侧会把 task_id 挂在报错里（产物已计费、要靠它人工找回），
     整条替换会把这类关键标识一起冲掉。所以分支只负责给中文提示，原文由这里统一附加。
     """
+    if getattr(err, "detail", None) and str(err).startswith("gateway api 429:"):
+        return _redact_local_paths(err.detail)
     raw = _redact_local_paths(str(err))
     if str(err).startswith("视频提交结果未确认"):
         return raw
@@ -375,6 +387,34 @@ def _params(job: Job) -> dict[str, Any]:
     return job.params.model_dump()
 
 
+def _freeze_estimated_cost(job: Job, params: dict[str, Any]) -> None:
+    """提交方没冻结预计费用的任务（画布、Agent、自动路由）按实际渠道补一份，用量页才不会算成未计价。"""
+    if params.get("estimated_cost_cny") is not None or params.get("actual_cost_cny") is not None:
+        return
+    from character_workflow.lib.generation_pricing import estimate_cost_cny
+    from character_workflow.lib.keys import find_by_alias
+
+    key = find_by_alias(job.alias or "")
+    if key is None:
+        return
+    model = next((m for m in key.models if m.id == job.model), None)
+    estimate = estimate_cost_cny(
+        kind=job.kind.value, provider=key.provider, base_url=key.base_url,
+        billing_group=key.billing_group, model_id=job.model,
+        protocol=model.protocol if model else None, n=params.get("n") or 1,
+        size=params.get("size"), size_mode=params.get("size_mode"), quality=params.get("quality"),
+        resolution=params.get("resolution"), duration=params.get("duration"),
+        ratio=params.get("ratio"), generate_audio=bool(params.get("generate_audio")),
+        has_reference_video=bool(params.get("reference_videos")),
+        image_edit=bool(params.get("image_edit")),
+        reference_image_count=len(params.get("reference_images") or []),
+        layer_decomposition=bool(params.get("layer_decomposition")),
+    )
+    if estimate is not None:
+        params["estimated_cost_cny"] = estimate
+        update_job_params(job.job_id, params)
+
+
 def _save_params(job: Job, params: dict[str, Any]) -> Job:
     return update_job_params(job.job_id, params)
 
@@ -493,7 +533,6 @@ def _write_sidecar(path: Path, job: Job, params: dict[str, Any]) -> None:
     lines = [
         f"# {path.stem}",
         "",
-        f"- asset_slot: {job.asset_slot.value}",
         f"- job_id: {job.job_id}",
         f"- created_at: {created_at}",
         f"- source_image: {job.source_image or ''}",
@@ -501,8 +540,6 @@ def _write_sidecar(path: Path, job: Job, params: dict[str, Any]) -> None:
         f"- actual_size: {params.get('actual_size') or ''}",
         f"- model: {job.model}",
     ]
-    if job.screen_id:
-        lines.insert(3, f"- screen_id: {job.screen_id}")
     path.with_suffix(".md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -511,30 +548,14 @@ def run_job(
     *,
     defer_terminal: bool = False,
     should_cancel: Callable[[], bool] | None = None,
-    workshop_grant_is_active: Callable[[str, str, str], bool] | None = None,
 ) -> Job:
     """Run at most one provider worker for a Job across threads and viewer-server processes."""
     with job_execution_lock(job_id) as acquired:
         if not acquired:
             raise JobExecutionBusy(f"job {job_id} is already running")
-        from character_workflow.lib.workshop import WorkshopError
-        try:
-            return _run_job_claimed(
-                job_id,
-                defer_terminal=defer_terminal,
-                should_cancel_external=should_cancel,
-                workshop_grant_is_active=workshop_grant_is_active,
-            )
-        except WorkshopError as error:
-            from character_workflow.lib.workshop_generation import record_execution_rejection
-            record_execution_rejection(job_id, error.message)
-            raise JobRunnerError(error.message) from error
-        except Exception:
-            job = read_job(job_id)
-            if job.workshop_request_id and job.status == JobStatus.PENDING:
-                from character_workflow.lib.workshop_generation import record_execution_rejection
-                record_execution_rejection(job_id, "执行意外中断，请核对任务和供应商订单；不会自动重试")
-            raise
+        return _run_job_claimed(
+            job_id, defer_terminal=defer_terminal, should_cancel_external=should_cancel,
+        )
 
 
 def _run_job_claimed(
@@ -542,7 +563,6 @@ def _run_job_claimed(
     *,
     defer_terminal: bool = False,
     should_cancel_external: Callable[[], bool] | None = None,
-    workshop_grant_is_active: Callable[[str, str, str], bool] | None = None,
 ) -> Job:
     # 国产厂商 host 绕过系统/坏代理（NO_PROXY），覆盖 skill（run-job）与 Studio（后台任务）两条路。
     net_env.configure_proxy_bypass()
@@ -556,9 +576,6 @@ def _run_job_claimed(
     # CLI 路径：终端确认即批准，PENDING_CONFIRM 在此推进；工坊请求路径的批准记录在 request 上。
     if job.status not in (JobStatus.PENDING_CONFIRM, JobStatus.PENDING):
         raise JobRunnerError(f"job not in a runnable status (current: {job.status.value})")
-    if job.workshop_request_id:
-        from character_workflow.lib.workshop_generation import claim_execution
-        claim_execution(job, workshop_grant_is_active)
     if job.status == JobStatus.PENDING_CONFIRM:
         job = update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
     # 「自动」任务在确定没执行的失败上换下一家：分支不落 FAILED，抛 _RouteSwitched 回到这里重跑。
@@ -587,6 +604,7 @@ def _run_once(
 
     job = _normalize_reference_images(job)
     params = _params(job)
+    _freeze_estimated_cost(job, params)
 
     try:
         if not job.alias:
@@ -599,7 +617,12 @@ def _run_once(
 
             render = dispatch
             if params.get("image_edit"):
-                from character_workflow.lib.callers.image_edit import render
+                from character_workflow.lib.keys import find_by_alias
+                edit_key = find_by_alias(job.alias)
+                if edit_key and edit_key.provider == "atelier":
+                    from character_workflow.lib.callers.atelier_gateway import render_edit as render
+                else:
+                    from character_workflow.lib.callers.image_edit import render
             paths = render(
                 prompt=_with_reference_numbering(job.prompt, params),
                 model=job.model,
@@ -652,6 +675,7 @@ def _run_once(
             persisted_paths = output_paths
             if defer_terminal:
                 persisted_paths = list(dict.fromkeys([*job.output_paths, *output_paths]))
+            _mark_member_healthy(job)
             return update_job_status(
                 job.job_id,
                 status=JobStatus.PENDING if defer_terminal else JobStatus.DONE,
@@ -738,6 +762,7 @@ def _run_text_job(job: Job) -> Job:
         job = _save_params(read_job(job.job_id), params)
         for output_path in output_paths:
             _write_sidecar(Path(output_path), job, params)
+        _mark_member_healthy(job)
         return update_job_status(
             job.job_id,
             status=JobStatus.DONE,
@@ -755,6 +780,7 @@ def _run_text_job(job: Job) -> Job:
 
 def _run_audio_job(job: Job) -> Job:
     params = _params(job)
+    should_cancel = _cancel_checker(job)
     try:
         if not job.alias:
             raise JobRunnerError("audio job requires an alias to route to a provider")
@@ -765,6 +791,10 @@ def _run_audio_job(job: Job) -> Job:
                 alias=job.alias,
                 output_dir=Path(tmp),
                 params=params,
+                on_params_changed=lambda: update_job_params(job.job_id, params),
+                on_phase=lambda phase: update_job_phase(job.job_id, phase),
+                on_cost_usd=_actual_cost_recorder(job.job_id, params),
+                should_cancel=should_cancel,
             )
             valid = [Path(path) for path in outputs if is_valid_audio(Path(path))]
             if not valid:
@@ -779,6 +809,7 @@ def _run_audio_job(job: Job) -> Job:
         job = _save_params(read_job(job.job_id), params)
         for output_path in output_paths:
             _write_sidecar(Path(output_path), job, params)
+        _mark_member_healthy(job)
         return update_job_status(
             job.job_id,
             status=JobStatus.DONE,
@@ -786,6 +817,9 @@ def _run_audio_job(job: Job) -> Job:
             error=None,
         )
     except Exception as error:
+        if should_cancel():
+            update_job_status(job.job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
+            raise JobCanceled("已按请求停止") from error
         if _switch_route(job.job_id, error):
             raise _RouteSwitched() from error
         update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(error))
@@ -801,6 +835,7 @@ def _run_video_job(job: Job) -> Job:
     """
     job = _normalize_reference_images(job)
     params = _params(job)
+    _freeze_estimated_cost(job, params)
     should_cancel = _cancel_checker(job)
 
     def on_task_id(task_id: str) -> None:
@@ -808,7 +843,8 @@ def _run_video_job(job: Job) -> Job:
         if task_id not in ids:
             ids.append(task_id)
         params["provider_task_ids"] = ids
-        params["provider_task_protocol"] = "seedance"
+        if params.get("provider_task_protocol") != "atelier_gateway":
+            params["provider_task_protocol"] = "seedance"
         update_job_params(job.job_id, params)
 
     def on_submission(attempt: dict[str, Any]) -> None:
@@ -854,6 +890,7 @@ def _run_video_job(job: Job) -> Job:
             job = _save_params(read_job(job.job_id), params)
             for output_path in output_paths:
                 _write_sidecar(Path(output_path), job, params)
+            _mark_member_healthy(job)
             return update_job_status(
                 job.job_id,
                 status=JobStatus.DONE,
@@ -870,29 +907,3 @@ def _run_video_job(job: Job) -> Job:
         if isinstance(e, JobRunnerError):
             raise
         raise JobRunnerError(str(e)) from e
-
-
-def run_latest(
-    *,
-    kind: AssetSlot | None = None,
-    character_id: str | None = None,
-) -> Job:
-    if character_id is None:
-        active = read_active()
-        character_id = active.active_id
-    if not character_id:
-        raise JobRunnerError("no active character")
-
-    candidates = [
-        job for job in list_jobs()
-        if (
-            job.character_id == character_id
-            and job.status == JobStatus.PENDING_CONFIRM
-            and (kind is None or job.asset_slot == kind)
-        )
-    ]
-    if not candidates:
-        suffix = f" asset_slot={kind.value}" if kind else ""
-        raise JobRunnerError(f"no pending_confirm job for {character_id}{suffix}")
-    candidates.sort(key=lambda j: (j.submitted_at, j.job_id))
-    return run_job(candidates[-1].job_id)

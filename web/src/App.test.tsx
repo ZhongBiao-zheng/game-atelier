@@ -18,6 +18,20 @@ afterEach(() => {
 });
 
 describe('App onboarding gate', () => {
+  it('shows a release link for bundle updates', async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ready', runtime_mode: 'bundle',
+        update: { latest: '9.0.0', update_available: true }, items: [] }),
+    });
+    render(<App />);
+    for (const link of await screen.findAllByText('有新版本 9.0.0')) {
+      expect(link).toHaveAttribute(
+        'href', 'https://github.com/ZhongBiao-zheng/game-atelier/releases/tag/v9.0.0',
+      );
+    }
+  });
+
   it('opens the home page when API keys have not been added yet', async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({

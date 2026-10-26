@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints
 
-from character_workflow.lib.workshop_schema import Identifier, StrictInput
+from character_workflow.lib.canvas_tool_common import Identifier, StrictInput
 
 NodeId = Annotated[str, StringConstraints(min_length=1, max_length=120)]
 EdgeId = Annotated[str, StringConstraints(min_length=1, max_length=160)]
@@ -42,6 +42,18 @@ class AddMediaNodeChange(StrictInput):
     node_id: NodeId | None = None
 
 
+class AddAssetNodeChange(StrictInput):
+    op: Literal["add_asset_node"]
+    asset_id: EdgeId
+    node_id: NodeId
+    position: CanvasPointInput = Field(default_factory=lambda: CanvasPointInput(x=0, y=0))
+
+
+class CanvasSearchLibraryInput(CanvasProjectInput):
+    category: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=24)] | None = None
+    limit: int = Field(default=12, ge=1, le=12)
+
+
 class AddSurfaceChange(StrictInput):
     """空的图片 / 视频 / 音频节点：Web 的生成面就是它，跑完产物直接落在同一个节点上。"""
     op: Literal["add_surface"]
@@ -73,7 +85,7 @@ class ConnectChange(StrictInput):
     op: Literal["connect"]
     source_node_id: NodeId
     target_node_id: NodeId
-    slot: Literal["first_frame", "last_frame"] | None = None
+    slot: Literal["first_frame", "last_frame", "before", "after"] | None = None
 
 
 class DisconnectChange(StrictInput):
@@ -93,7 +105,7 @@ class RemoveNodeChange(StrictInput):
 
 
 CanvasChange = Annotated[
-    AddTextChange | AddMediaNodeChange | AddSurfaceChange | SetTextChange | SetDraftChange | ConnectChange
+    AddTextChange | AddMediaNodeChange | AddAssetNodeChange | AddSurfaceChange | SetTextChange | SetDraftChange | ConnectChange
     | DisconnectChange | MoveChange | RemoveNodeChange,
     Field(discriminator="op"),
 ]

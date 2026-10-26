@@ -4,6 +4,7 @@ import { useLocation } from 'wouter';
 
 import { createStudioJob, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
+import { loadTokenDancePrices } from '@/api/usage';
 import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { PromptInput } from '@/components/studio/PromptInput';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
@@ -67,7 +68,7 @@ export function StudioCompact() {
   // 公告「快速添加」等别处改了密钥的模型列表：只刷新列表，不动当前选中的供应商 / 模型。
   useEffect(() => {
     const refresh = () => {
-      void listKeys().then(resp => setKeys(resp.keys.filter(key => key.models.length > 0))).catch(() => undefined);
+      void listKeys().then(resp => setKeys(resp.keys.filter(key => key.enabled !== false && key.models.length > 0))).catch(() => undefined);
       void listModelRoutes().then(setRoutes).catch(() => undefined);
     };
     window.addEventListener(KEYS_CHANGED_EVENT, refresh);
@@ -119,10 +120,11 @@ export function StudioCompact() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listKeys(), listModelRoutes().catch(() => [] as ModelRoute[])])
+    // TokenDance 价格快照与密钥一起就绪，首屏费用预估才不会先显示未计价。
+    Promise.all([listKeys(), listModelRoutes().catch(() => [] as ModelRoute[]), loadTokenDancePrices()])
       .then(([resp, loadedRoutes]) => {
         if (cancelled) return;
-        const usable = resp.keys.filter((key) => key.models.length > 0);
+        const usable = resp.keys.filter((key) => key.enabled !== false && key.models.length > 0);
         setKeys(usable);
         setRoutes(loadedRoutes);
         const choices = withAutoProvider(usable, loadedRoutes);

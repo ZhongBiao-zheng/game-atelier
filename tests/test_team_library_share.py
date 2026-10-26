@@ -262,14 +262,12 @@ def test_share_video_job_packs_video_and_audio_refs_without_thumbnail(isolated_d
 
 @pytest.mark.parametrize(
     "setup",
-    ["character_namespace", "pending", "failed", "index_out_of_range", "text_kind", "audio_kind"],
+    ["pending", "failed", "index_out_of_range", "text_kind", "audio_kind"],
 )
 def test_share_job_rejects_unshareable(isolated_data_root, mount, setup):
     output = [("1.png", _png((5, 5, 5)))]
     output_index = 0
-    if setup == "character_namespace":
-        job = _studio_job(outputs=output, namespace="character")
-    elif setup == "pending":
+    if setup == "pending":
         job = _studio_job(outputs=output, status=JobStatus.PENDING)
     elif setup == "failed":
         job = _studio_job(outputs=output, status=JobStatus.FAILED)

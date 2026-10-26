@@ -1,14 +1,20 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { Plus, Search } from 'lucide-react';
+import { Link } from 'wouter';
 
 import { KeyCard, type KeyRow } from '@/components/keys/KeyCard';
+import { ProviderRow, providerHost } from '@/components/keys/ProviderRow';
+import { providerLabel } from '@/lib/providerLabels';
+import { fetchGatewayMembers } from '@/api/gateway';
+import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { KeyForm } from './KeyForm';
-import { ModelRoutesSection } from './ModelRoutesSection';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { listKeys, deleteKey } from '@/api/keys';
+import { listKeys, deleteKey, patchKey } from '@/api/keys';
+import { fetchKeyLastUsed } from '@/api/usage';
 import type { KeyCreatePayload } from '@/api/keys';
 
 interface Props {
-  /** Backward-compat: onboarding flow passes mode="onboarding" + onComplete */
+  /** 首启向导复用同一个供应商表单。 */
   mode?: 'onboarding';
   onComplete?: () => void;
   embedded?: boolean;
@@ -21,8 +27,9 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   const [showForm, setShowForm] = useState(mode === 'onboarding');
   const [editingKey, setEditingKey] = useState<KeyRow | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  // 增删改 KEY 都会改变路由组成员，跟着 refresh 一起重读顺序。
-  const [routesReload, setRoutesReload] = useState(0);
+  const [query, setQuery] = useState('');
+  const [overdue, setOverdue] = useState<Set<string>>(new Set());
+  const [pending, setPending] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState<{
     open: boolean;
     title: string;
@@ -31,23 +38,36 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     onConfirm: () => void;
   } | null>(null);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const resp = await listKeys();
-      setKeys(resp.keys.map(toKeyRow));
-      setRoutesReload(value => value + 1);
+      // 「最近使用」只是辅助列：读不到时显示「—」，不挡住供应商列表本身。
+      const none: Record<string, string> = {};
+      const [resp, lastUsed, statuses] = await Promise.all([
+        listKeys(),
+        embedded ? fetchKeyLastUsed().catch(() => none) : none,
+        embedded ? fetchGatewayMembers().catch(() => null) : null,
+      ]);
+      setOverdue(new Set(statuses?.members.filter(member => member.reason === 'insufficient_balance').map(member => member.alias)));
+      setKeys(
+        resp.keys
+          .map((k) => toKeyRow({ ...k, last_used_at: lastUsed[k.alias] ?? null }))
+          .sort((a, b) => Number(b.provider === 'atelier') - Number(a.provider === 'atelier')),
+      );
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  };
+  }, [embedded]);
 
-  useEffect(() => { void refresh(); }, []);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   const onCreated = () => {
+    window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
     setShowForm(false);
     setEditingKey(null);
     setSuccessMessage('创建成功');
@@ -56,6 +76,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   };
 
   const onUpdated = () => {
+    window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
     setShowForm(false);
     setEditingKey(null);
     setSuccessMessage('已更新');
@@ -72,22 +93,73 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     setEditingKey(null);
   };
 
+  const toggleKey = async (key: KeyRow, enabled: boolean) => {
+    setPending(current => new Set(current).add(key.alias));
+    setError(null);
+    setKeys(current => current.map(row => row.alias === key.alias ? { ...row, enabled } : row));
+    try {
+      await patchKey(key.alias, { enabled });
+      window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
+    } catch (e) {
+      setKeys(current => current.map(row => row.alias === key.alias ? { ...row, enabled: key.enabled } : row));
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPending(current => { const next = new Set(current); next.delete(key.alias); return next; });
+    }
+  };
+
+  const filteredKeys = keys.filter(key => [key.alias, providerLabel(key.provider, key.alias),
+    key.provider === 'custom' ? '自定义' : '', providerHost(key)].join(' ').toLowerCase().includes(query.trim().toLowerCase()));
+
+  const keyRows = keys.map((k) => (
+    <KeyCard
+      key={k.alias}
+      row={k}
+      onEdit={() => {
+        setEditingKey(k);
+        setShowForm(true);
+      }}
+      onDelete={() => {
+        setDialog({
+          open: true,
+          title: '确认删除？',
+          message: `"${k.alias}" 将被永久删除`,
+          variant: 'destructive',
+          onConfirm: async () => {
+            setDialog(null);
+            await deleteKey(k.alias);
+            void refresh();
+          },
+        });
+      }}
+    />
+  ));
+
   const content = (
     <>
-      <div className={`mb-4 flex items-baseline ${embedded ? 'justify-start' : 'justify-between'}`}>
-        {!embedded && (
-          <h1 className="font-display text-display text-foreground">API 密钥</h1>
-        )}
-        <button
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        {!embedded && <h1 className="font-display text-display text-foreground">API 密钥</h1>}
+        {embedded && <div aria-label="面包屑" className="flex items-center gap-1.5 text-sm">
+          <span className="text-muted-foreground">模型 /</span><h1 className="text-sm font-semibold">供应商</h1>
+        </div>}
+        <div className="flex flex-wrap items-center gap-2">
+        {embedded && <label className="flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-muted-foreground focus-within:ring-1 focus-within:ring-ring">
+          <Search className="size-3.5" aria-hidden />
+          <input aria-label="查找供应商" placeholder="查找供应商" value={query}
+            onChange={event => setQuery(event.target.value)}
+            className="w-44 min-w-0 bg-transparent text-sm text-foreground outline-none" />
+        </label>}
+        {embedded ? <Link href="/settings/providers/new"
+          className="flex h-9 items-center gap-1.5 rounded-md border border-input px-3.5 text-sm hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          <Plus className="size-3.5" aria-hidden />添加供应商
+        </Link> : <button
           type="button"
           onClick={openCreate}
-          // 设置页里它只是分区内的一个动作，黄铜留给全屏独占的首启引导
-          className={embedded
-            ? 'rounded-md border border-border px-3 py-2 text-sm text-foreground transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
-            : 'text-sm bg-primary text-primary-foreground rounded-md px-3 py-2 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background'}
+          className="text-sm bg-primary text-primary-foreground rounded-md px-3 py-2 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background"
         >
           + 新建供应商
-        </button>
+        </button>}
+        </div>
       </div>
 
       {successMessage && (
@@ -105,50 +177,36 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
         </div>
       )}
 
-      {!loading && error && (
-        <div className="text-sm text-destructive">{error}</div>
-      )}
+      {!loading && error && <div className="text-sm text-destructive">{error}</div>}
 
-      {!loading && !error && (
-        <div className="overflow-hidden rounded-lg border border-border">
+      {!loading && (keys.length > 0 || !error) && (
+        <div className="space-y-4">
+        <div className="overflow-hidden rounded-xl border border-border bg-card">
           {keys.length === 0 ? (
             <div className="px-4 py-10 text-center text-sm text-muted-foreground">
-              还没有配置供应商，点「+ 新建供应商」接入第一个图像服务。
+              还没有配置供应商
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {keys.map((k) => (
-                <KeyCard
-                  key={k.alias}
-                  row={k}
-                  onEdit={() => {
-                    setEditingKey(k);
-                    setShowForm(true);
-                  }}
-                  onDelete={() => {
-                    setDialog({
-                      open: true,
-                      title: '确认删除？',
-                      message: `"${k.alias}" 将被永久删除`,
-                      variant: 'destructive',
-                      onConfirm: async () => {
-                        setDialog(null);
-                        await deleteKey(k.alias);
-                        void refresh();
-                      },
-                    });
-                  }}
-                />
-              ))}
+              {embedded ? (
+                <ul aria-label="供应商列表" className="divide-y divide-border">
+                  {filteredKeys.map(key => <ProviderRow key={key.alias} row={key}
+                    overdue={overdue.has(key.alias)} pending={pending.has(key.alias)}
+                    onToggle={enabled => { void toggleKey(key, enabled); }}
+                    onEdit={() => { setEditingKey(key); setShowForm(true); }} />)}
+                  {filteredKeys.length === 0 && <li className="px-4 py-10 text-center text-sm text-muted-foreground">没有匹配的供应商</li>}
+                </ul>
+              ) : (
+                <>{keyRows}</>
+              )}
             </div>
           )}
-          <div className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
-            密钥仅存本机 <span className="font-mono">&lt;数据目录&gt;/.config/keys.json</span>，不会上传
+          </div>
+          <div className="text-xs text-muted-foreground">
+            密钥仅存本机 <span className="font-mono">&lt;数据目录&gt;/.config/keys.json</span>
           </div>
         </div>
       )}
-
-      {!loading && !error && mode !== 'onboarding' && <ModelRoutesSection reloadToken={routesReload} />}
 
       {showForm && (
         <KeyForm
@@ -156,6 +214,18 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
           mode={editingKey ? 'edit' : 'create'}
           onCreated={editingKey ? onUpdated : onCreated}
           onCancel={closeForm}
+          onDelete={editingKey ? () => setDialog({
+            open: true, title: '确认删除？', message: `"${editingKey.alias}" 将被永久删除`, variant: 'destructive',
+            onConfirm: async () => {
+              setDialog(null);
+              try {
+                await deleteKey(editingKey.alias);
+                closeForm();
+                window.dispatchEvent(new Event(KEYS_CHANGED_EVENT));
+                void refresh();
+              } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+            },
+          }) : undefined}
           submitLabel={editingKey ? '保存修改' : mode === 'onboarding' ? '保存并开始工作' : '保存'}
         />
       )}
@@ -199,6 +269,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
 
 function toKeyRow(k: {
   alias: string;
+  enabled?: boolean;
   provider: string;
   base_url?: string | null;
   billing_group?: string | null;
@@ -221,6 +292,7 @@ function toKeyRow(k: {
 }): KeyRow {
   return {
     alias: k.alias,
+    enabled: k.enabled !== false,
     provider: k.provider,
     base_url: k.base_url ?? null,
     billing_group: k.billing_group ?? null,
@@ -240,6 +312,7 @@ function toKeyRow(k: {
 function toKeyFormInitial(row: KeyRow): Partial<KeyCreatePayload> {
   return {
     alias: row.alias,
+    enabled: row.enabled !== false,
     provider: row.provider,
     base_url: row.base_url ?? null,
     billing_group: row.billing_group ?? null,

@@ -36,7 +36,7 @@ function writeStorage(key: string, value: string): void {
   try { window.localStorage.setItem(key, value); } catch { /* 无痕模式等：只是下次不记得 */ }
 }
 
-function rememberedModel(): RememberedModel | null {
+export function rememberedModel(): RememberedModel | null {
   try {
     const value = JSON.parse(readStorage(MODEL_STORAGE_KEY) ?? 'null') as RememberedModel | null;
     return value?.alias && value.model ? value : null;

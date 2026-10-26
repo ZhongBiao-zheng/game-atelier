@@ -185,14 +185,6 @@ def test_studio_job_writes_to_studio_namespace_path(tmp_path, monkeypatch):
     assert out == tmp_path / "studio" / "job-test-xyz"
 
 
-def test_characters_endpoint_does_not_leak_studio(client, tmp_path):
-    """GET /api/characters 不返回 studio/ 目录."""
-    (tmp_path / "studio" / "job-x").mkdir(parents=True)
-    (tmp_path / "characters" / "char-real").mkdir(parents=True)
-    resp = client.get("/api/characters")
-    chars = [c["id"] for c in resp.json()]
-    assert "job-x" not in chars
-    assert "studio" not in chars
 
 
 def test_post_studio_job_schedules_background_runner(client, monkeypatch):
@@ -222,3 +214,35 @@ def test_get_single_job(client):
     r2 = client.get(f"/api/jobs/{job_id}")
     assert r2.status_code == 200
     assert r2.json()["job_id"] == job_id
+
+
+def test_studio_rejects_explicit_disabled_provider_before_creating_job(client):
+    from character_workflow.lib import keys, jobs
+
+    keys.patch_key("default", {"enabled": False})
+    response = client.post("/api/studio/jobs", json={
+        "alias": "default", "prompt": "test", "model": "gpt-image-2", "params": {},
+    })
+    assert response.status_code == 422
+    assert response.json()["detail"] == "供应商已停用"
+    assert jobs.list_jobs() == []
+
+
+def test_auto_route_snapshot_is_server_owned_and_survives_prompt_param_replacement(client):
+    from character_workflow.lib import jobs
+    response = client.post("/api/studio/jobs", json={
+        "prompt": "猫", "model": "gpt-image-2", "params": {"n": 1,
+            "route_id": "forged", "route_order": ["forged"], "route_tried": ["forged"]},
+    })
+    assert response.status_code == 201
+    job = response.json()
+    assert job["params"]["route_id"] == "gpt-image-2"
+    assert job["params"]["route_order"] == ["default"]
+    assert job["params"].get("route_tried") is None
+    for params in ({"n": 2}, {"n": 1, "route_id": "other", "route_order": ["other"], "route_tried": ["other"]}):
+        patched = client.post(f"/api/prompt/{job['job_id']}", json={"params": params})
+        assert patched.status_code == 200
+        stored = jobs.read_job(job["job_id"])
+        assert stored.params.route_id == "gpt-image-2"
+        assert stored.params.route_order == ["default"]
+        assert stored.params.route_tried is None

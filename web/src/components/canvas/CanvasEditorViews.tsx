@@ -1,3 +1,9 @@
+import { AnnotationFullscreen } from './annotation/AnnotationFullscreen';
+import { useAnnotationEditor } from './annotation/useAnnotationEditor';
+import { AnnotationToolbar } from './annotation/AnnotationToolbar';
+import { AnnotationEditingLayer } from './annotation/AnnotationEditingLayer';
+import type { CanvasAnnotationController } from './annotation/useCanvasAnnotation';
+import { AnnotationLayer } from './annotation/AnnotationLayer';
 import { hasImageSizeSelection, imageSizeError, imageSizeMode } from '@/lib/imageSizeMode';
 import { normalizeImagePixelSize } from '@/lib/studioSize';
 import { promptVariableError, promptVariableParts, readablePromptVariables } from '@/lib/promptVariables';
@@ -13,7 +19,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, BookmarkPlus, Check, ChevronRight, CircleHelp, Download, Ellipsis, Expand, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Paintbrush, Pause, Pencil, Play, Plus, Settings2, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, BookmarkPlus, Columns2, Check, ChevronRight, CircleHelp, Download, Ellipsis, Expand, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Paintbrush, Pause, Pencil, Play, Plus, Settings2, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
   useRef, useState,
@@ -37,8 +43,11 @@ import { CanvasAudioPlayer } from './CanvasAudioPlayer';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
 import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
 import { CanvasImageEditPanel } from './CanvasImageEditPanel';
+import { CanvasFinalizationMenu } from './CanvasFinalizationMenu';
+import { CanvasCompareSurface } from './CanvasCompareSurface';
+import { canvasCompareFrame, canvasCompareSource, type CanvasCompareInputs, type CanvasCompareSource } from './canvasCompare';
 import { CanvasImageEditSurface } from './CanvasImageEditSurface';
-import type { CanvasImageEditNode, CanvasMediaVersion } from '@/schema/canvas';
+import type { CanvasCompareNode, CanvasImageEditNode, CanvasMediaVersion } from '@/schema/canvas';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import {
@@ -112,6 +121,7 @@ import type {
 import type { Job } from '@/schema/jobs';
 import {
   canvasNodeAcceptsInput,
+  CANVAS_COMPARE_SLOTS,
   canvasNodeProvidesOutput,
   CANVAS_GENERATION_MODE_LABELS,
   CANVAS_MAX_NODE_SIZE,
@@ -146,6 +156,13 @@ export interface CanvasGenerationPanelContextValue {
 }
 
 export interface CanvasNodeContextValue {
+  projectCategories?: readonly string[];
+  resolveFinalCategory?: (sha256: string) => string | null;
+  finalizationRevision?: string;
+  finalizeNode?: (node: CanvasContentNode, category: string | null) => Promise<void>;
+  saveCategories?: (categories: string[]) => Promise<void>;
+  annotationController?: CanvasAnnotationController;
+  editWithAnnotation?: (id: string) => Promise<void>;
   batchBusy?: boolean;
   /** 正在跑的批量执行：只有它的分组节点显示「停止」，停止中不重复发取消。 */
   activeBatch?: { scopeNodeId: string; stopping: boolean };
@@ -234,6 +251,11 @@ export interface CanvasNodeContextValue {
   submitImageEdit?: (nodeId: string) => Promise<boolean>;
   openAngle: (node: CanvasContentNode) => void;
   upscaleImage: (node: CanvasContentNode, target: CanvasUpscaleTarget) => void;
+  createCompareNode?: (node: CanvasContentNode, source: CanvasCompareSource) => void;
+  /** 对比节点 → before / after 两侧当前接入的图。按图签名重算，引用稳定。 */
+  compareInputsByNodeId?: ReadonlyMap<string, CanvasCompareInputs>;
+  swapCompareInputs?: (nodeId: string) => void;
+  openCompare?: (nodeId: string) => void;
   editVideo: (node: CanvasContentNode) => void;
   saveImageToolbarPreferences: (value: CanvasImageToolbarPreferences) => Promise<void>;
   deleteNode: (id: string) => void;
@@ -316,6 +338,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const nodePanelAllowed = Boolean(
     context
     && !context.batchBusy
+    && !context.annotationController?.nodeId
     && selected
     && !context.multiSelectionActive
     && !context.generationPanel.narrowViewport
@@ -425,6 +448,17 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
       top: clientY + 14,
     });
   }
+  const annotating = context?.annotationController?.nodeId === node.id;
+  const annotation = node.type === 'image' && node.data.annotation?.version_id === node.data.current_version_id ? node.data.annotation : null;
+  const annotationEditor = useAnnotationEditor({
+    enabled: annotating, elements: annotation?.elements ?? [],
+    width: nodeContent?.kind === 'image' ? nodeContent.width ?? 1024 : 1024,
+    height: nodeContent?.kind === 'image' ? nodeContent.height ?? 1024 : 1024,
+    onCommit: elements => context?.annotationController?.write(node.id, elements),
+    onExit: () => context?.annotationController?.exit(),
+    undo: () => context?.annotationController?.undo(), redo: () => context?.annotationController?.redo(),
+    onError: message => context?.reportError?.(message),
+  });
   if (!context) return null;
   if (node.type === 'group') return <CanvasGroupFrame node={node} context={context} selected={Boolean(selected)} />;
   const renameNode = context.renameNode;
@@ -573,7 +607,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
       onPointerLeave={hideHoverHandles}
     >
       <NodeResizer
-        isVisible={selected && !context.multiSelectionActive && !replacingMedia}
+        isVisible={selected && !annotating && !context.multiSelectionActive && !replacingMedia}
         keepAspectRatio={(node.type === 'image' && !node.data.display.free_resize) || node.type === 'image_edit'}
         minWidth={node.type === 'text' ? 220 : node.type === 'layer_stack' ? 560 : 240}
         minHeight={node.type === 'text' ? 120 : node.type === 'layer_stack' ? 320 : 150}
@@ -665,15 +699,19 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
       </header>
       <NodeToolbar
         isVisible={
-          !context.multiSelectionActive
+          !context.multiSelectionActive && !(annotating && context.annotationController?.fullscreen)
           && (selected || toolbarOverlayOpen)
         }
-        position={chromeBelow ? Position.Bottom : Position.Top}
+        position={annotating ? Position.Bottom : chromeBelow ? Position.Bottom : Position.Top}
         align="center"
-        offset={32}
+        offset={annotating ? 12 : 32}
         className="nodrag"
       >
-        <div
+        {annotating && context.annotationController ? <CanvasAnnotationToolbarBounds nodeId={node.id}><AnnotationToolbar editor={annotationEditor}
+          undo={context.annotationController.undo} redo={context.annotationController.redo}
+          canUndo={context.annotationController.canUndo} canRedo={context.annotationController.canRedo}
+          onExpand={context.annotationController.expand}
+          onEdit={context.editWithAnnotation ? () => void context.editWithAnnotation?.(node.id) : undefined} busy={submittingNode} /></CanvasAnnotationToolbarBounds> : <div
           ref={toolbarRef}
           role="toolbar"
           aria-label={`${node.title} 节点工具`}
@@ -762,8 +800,14 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
             />
           )}
           {(emptyMediaNode || node.type !== 'image') && fixedToolbarButtons}
-        </div>
+        </div>}
       </NodeToolbar>
+      {annotating && context.annotationController?.fullscreen && content?.kind === 'image' && <AnnotationFullscreen
+        title={node.title} src={canvasMediaUrl(context.projectId, content.version_id)} width={content.width ?? 1024} height={content.height ?? 1024}
+        editor={annotationEditor} onCollapse={context.annotationController.collapse}
+        undo={context.annotationController.undo} redo={context.annotationController.redo}
+        canUndo={context.annotationController.canUndo} canRedo={context.annotationController.canRedo}
+        onEdit={context.editWithAnnotation ? () => void context.editWithAnnotation?.(node.id) : undefined} busy={submittingNode} />}
       {node.type === 'image' && mediaCandidates.length > 0 && (
         <MediaCandidateBatch
           node={node}
@@ -787,6 +831,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           'relative h-full overflow-hidden rounded-lg border text-foreground transition-colors shell-glow',
           node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-card/95',
           selected ? 'border-primary' : 'border-border',
+          annotating && 'annotation-active',
           context.materialPick && materialPickEligible && 'cursor-copy hover:border-primary focus-visible:border-primary',
           context.materialPick && !materialPickEligible && 'cursor-default',
         )}
@@ -819,7 +864,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
             return;
           }
           if (node.type === 'layer_stack') return;
-          if (node.type === 'image_edit') context.openImageEdit?.(node.id);
+          if (node.type === 'compare') context.openCompare?.(node.id);
+          else if (node.type === 'image_edit') context.openImageEdit?.(node.id);
           else if (content) context.previewContent(content.version_id, node.title, node.id);
         }}
         onKeyDown={event => {
@@ -933,6 +979,33 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
               freeResize={(node.type === 'image' || node.type === 'video') && node.data.display.free_resize}
             />
           )}
+          {node.type === 'image' && content?.kind === 'image' && context.resolveFinalCategory?.(content.sha256) && (
+            <span className="pointer-events-none absolute left-2.5 top-2.5 z-10 max-w-[calc(100%-1.25rem)] truncate rounded-md border border-border bg-glass px-2 py-1 text-xs backdrop-blur-glass">
+              定稿 · {context.resolveFinalCategory(content.sha256)}
+            </span>
+          )}
+          {annotating && !context.annotationController?.fullscreen && node.type === 'image' && content?.kind === 'image' && <AnnotationEditingLayer
+            editor={annotationEditor} width={content.width ?? 1024} height={content.height ?? 1024}
+            fit={node.data.display.free_resize ? 'fill' : node.data.display.fit} />}
+          {node.type === 'image' && content?.kind === 'image' && node.data.annotation
+            && node.data.annotation.version_id === node.data.current_version_id && node.data.annotation.elements.length > 0 && <>
+            {(!annotating || context.annotationController?.fullscreen) && node.data.annotation.visible && <AnnotationLayer elements={node.data.annotation.elements}
+              imageWidth={content.width ?? 1024} imageHeight={content.height ?? 1024}
+              fit={node.data.display.free_resize ? 'fill' : node.data.display.fit}
+              className="pointer-events-none absolute inset-0 size-full" />}
+            <button type="button" aria-label="显示标注" aria-pressed={node.data.annotation.visible}
+              className={cn('nodrag nopan absolute right-2.5 top-2.5 z-10 flex h-7 items-center gap-1.5 rounded-md border border-border bg-glass px-2 text-xs backdrop-blur-glass',
+                node.data.annotation.visible ? 'text-foreground' : 'text-muted-foreground')}
+              onPointerDown={event => event.stopPropagation()}
+              onClick={event => {
+                event.stopPropagation();
+                context.recordHistory();
+                context.updateNode(node.id, current => current.type === 'image' && current.data.annotation
+                  ? { ...current, data: { ...current.data, annotation: { ...current.data.annotation, visible: !current.data.annotation.visible } } } : current);
+              }}>
+              <Pencil size={14} /><span>标注 {node.data.annotation.elements.length}</span>
+            </button>
+          </>}
           {node.type === 'image' && content?.kind === 'image' && context.showImageInfo
             && (node.size?.height ?? 176) >= 96 && (node.size?.width ?? 320) >= 160 && (
             <span className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-[calc(100%-1.5rem)] truncate rounded-md border border-border bg-glass px-2 py-1 text-xs font-medium tabular-nums text-foreground backdrop-blur-glass">
@@ -946,6 +1019,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           {node.type === 'layer_stack' && (
             <CanvasLayerStackSurface node={node} context={context} onOpenComposer={() => setLayerComposerOpen(true)} />
           )}
+          {node.type === 'compare' && <CanvasCompareNodeBody node={node} context={context} bitmapWidth={imageBitmapWidth} />}
           {node.type === 'image_edit' && <CanvasImageEditSurface node={node} projectId={context.projectId}
             source={context.resolveVersion(node.data.source_version_id) as CanvasMediaVersion | undefined} />}
           {node.type === 'plugin' && !content && (
@@ -960,6 +1034,12 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         state={nodeRunState}
         hasContent={Boolean(content || node.type === 'image_edit' || (node.type === 'layer_stack' && node.data.base_version_id))}
       />
+      {node.type === 'compare' && CANVAS_COMPARE_SLOTS.map(slot => (
+        <Handle key={slot} id={slot} type="target" position={Position.Left} className="canvas-node-handle"
+          style={{ top: slot === 'before' ? '35%' : '65%' }} aria-label={`连接到 ${slot === 'before' ? 'Before' : 'After'}`}>
+          <span className="canvas-node-handle-dot" aria-hidden="true" />
+        </Handle>
+      ))}
       {(canvasNodeAcceptsInput(node) || node.type === 'layer_stack' || node.type === 'image_edit') && (
         <Handle type="target" isConnectable={node.type !== 'image_edit'} position={Position.Left} className="canvas-node-handle" aria-label="连接到此节点">
           <span className="canvas-node-handle-dot" aria-hidden="true" />
@@ -1092,6 +1172,32 @@ function canvasChromeInsetBounds(surface: HTMLElement): CanvasPanelRect {
 }
 
 const canvasFlowTransform = (state: ReactFlowState) => state.transform;
+
+/** NodeToolbar keeps a fixed screen size; keep its controls reachable at the viewport edges. */
+function CanvasAnnotationToolbarBounds({ nodeId, children }: { nodeId: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const transform = useStore(canvasFlowTransform);
+  const geometrySelector = useCallback((state: ReactFlowState) => canvasNodeGeometry(state, nodeId), [nodeId]);
+  const geometry = useStore(geometrySelector);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const place = () => {
+      element.style.translate = 'none';
+      const rect = element.getBoundingClientRect();
+      const dx = Math.max(16 - rect.left, Math.min(0, window.innerWidth - 16 - rect.right));
+      const dy = Math.max(16 - rect.top, Math.min(0, window.innerHeight - 16 - rect.bottom));
+      element.style.translate = dx || dy ? `${dx}px ${dy}px` : 'none';
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(element);
+    window.addEventListener('resize', place);
+    return () => { observer.disconnect(); window.removeEventListener('resize', place); };
+  }, [geometry, transform]);
+  return <div ref={ref} className="max-w-[calc(100vw-32px)] overflow-x-auto rounded-xl">{children}</div>;
+}
+
 
 /** 节点卡上的图要向服务端申请多宽的位图：卡片宽 × 画布缩放，缩小时按 100% 算。
  *
@@ -1517,7 +1623,17 @@ function CanvasNodeToolbar({
           </MediaToolButton>
         </>
       )}
-      <MediaToolButton
+      {node.type === 'compare' && (
+        <>
+          <MediaToolButton label={`交换 ${node.title} 的前后`} text="交换" onClick={() => context.swapCompareInputs?.(node.id)}>
+            <ArrowLeftRight />
+          </MediaToolButton>
+          <MediaToolButton label={`全屏对比 ${node.title}`} text="全屏" onClick={() => context.openCompare?.(node.id)}>
+            <Maximize2 />
+          </MediaToolButton>
+        </>
+      )}
+      {node.type !== 'compare' && <MediaToolButton
         label={content || node.type === 'layer_stack' ? `查看 ${node.title} 详情` : `查看 ${node.title} 设置`}
         text={content || node.type === 'layer_stack' ? '查看' : '查看设置'}
         onClick={() => {
@@ -1527,7 +1643,7 @@ function CanvasNodeToolbar({
         }}
       >
         <Eye />
-      </MediaToolButton>
+      </MediaToolButton>}
       {content && content.kind !== 'text' ? (
         <MediaToolLink
           label={`下载 ${node.title}`}
@@ -1786,6 +1902,7 @@ function ImageNodeToolbar({
   }
 
   const layerActionDisabled = !currentVersionId || submitting || replacing;
+  const compareSource = canvasCompareSource(imageContent, context.jobsByResultNodeId.get(node.id), context.resolveVersion);
   const inlineActions = actions.slice(0, IMAGE_TOOLBAR_INLINE_LIMIT);
   const overflowActions = actions.slice(IMAGE_TOOLBAR_INLINE_LIMIT);
 
@@ -1859,6 +1976,8 @@ function ImageNodeToolbar({
           <SwapIcon swapKey={action.text}>{action.icon}</SwapIcon>
         </MediaToolButton>
       ))}
+      <MediaToolButton label={`标注 ${node.title}`} text="标注" disabled={!currentVersionId || submitting || replacing}
+        onClick={() => context.annotationController?.start(node)}><Pencil /></MediaToolButton>
       <MediaToolButton
         label={`拆分 ${node.title} 的图层`}
         text="拆分图层"
@@ -1877,6 +1996,17 @@ function ImageNodeToolbar({
         disabled={!currentVersionId || submitting || replacing}
         onClick={() => context.openMaskEdit(node, 'outpaint')}
       ><Expand /></MediaToolButton>
+      {compareSource && context.createCompareNode && <MediaToolButton
+        label={`对比 ${node.title} 与原图`}
+        text="对比"
+        disabled={replacing}
+        onClick={() => context.createCompareNode?.(node, compareSource)}
+      ><Columns2 /></MediaToolButton>}
+      {context.finalizeNode && <CanvasFinalizationMenu
+        node={node} content={imageContent} context={context}
+        disabled={!currentVersionId || replacing || submitting}
+        onOverlayOpenChange={updateMenuOpen}
+      />}
       {trailing}
       <DropdownMenu onOpenChange={updateMenuOpen}>
         <DropdownMenuTrigger asChild>
@@ -2765,6 +2895,7 @@ function CanvasMaterialConnections({
                 onClick={() => { if (!draggedRef.current) onPreview(reference); }}
               >
                 <CanvasMaterialPreview reference={reference} />
+                {reference.annotated && <span title="带标注" className="absolute bottom-0 right-0 z-10 grid size-3.5 place-items-center rounded-full border border-primary bg-popover text-primary"><Pencil size={10} /></span>}
                 <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-xs text-foreground">
                   {reference.label}
                 </span>
@@ -3315,7 +3446,7 @@ export function CanvasLayerStackSurface({
                 </Button>
               ) : (
                 <Button asChild variant="outline" size="sm" className="nodrag">
-                  <Link href="/settings/keys">配置模型</Link>
+                  <Link href="/settings/providers">配置模型</Link>
                 </Button>
               )}
             </div>
@@ -3400,7 +3531,7 @@ function CanvasLayerStackComposer({
           </Button>
         ) : (
           <Button asChild variant="outline" size="sm" className="shrink-0">
-            <Link href="/settings/keys">配置模型</Link>
+            <Link href="/settings/providers">配置模型</Link>
           </Button>
         )}
       </div>
@@ -3697,4 +3828,21 @@ function showHandleOnHoveredSide(event: ReactPointerEvent<HTMLDivElement>) {
 
 function hideHoverHandles(event: ReactPointerEvent<HTMLDivElement>) {
   delete event.currentTarget.dataset.hoverSide;
+}
+
+function CanvasCompareNodeBody({ node, context, bitmapWidth }: {
+  node: CanvasCompareNode; context: CanvasNodeContextValue; bitmapWidth: number | null;
+}) {
+  const inputs = context.compareInputsByNodeId?.get(node.id);
+  const beforeVersionId = inputs?.before?.versionId ?? null;
+  const afterVersionId = inputs?.after?.versionId ?? null;
+  const frame = inputs?.after && afterVersionId
+    ? canvasCompareFrame(beforeVersionId, context.resolveVersion(afterVersionId),
+      context.jobsByResultNodeId.get(inputs.after.nodeId), versionId => context.resolveVersion(versionId))
+    : null;
+  const afterVersion = afterVersionId ? context.resolveVersion(afterVersionId) : undefined;
+  const afterSize = afterVersion?.kind === 'image' && afterVersion.width && afterVersion.height
+    ? { width: afterVersion.width, height: afterVersion.height } : null;
+  return <CanvasCompareSurface projectId={context.projectId} title={node.title} beforeVersionId={beforeVersionId}
+    afterVersionId={afterVersionId} afterSize={afterSize} frame={frame} bitmapWidth={bitmapWidth} />;
 }

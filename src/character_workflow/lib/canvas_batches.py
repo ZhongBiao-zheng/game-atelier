@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from character_workflow.lib import data_root
+from character_workflow.lib import data_root, model_routes
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.canvas_projects import (
     CanvasStorageError, canvas_project_dir, canvas_project_lock_path,
@@ -97,6 +97,7 @@ class CanvasBatchRun(BatchModel):
 class CanvasBatchPlan(BatchModel):
     document: CanvasDocument
     model_signatures: dict[str, str]
+    route_snapshots: dict[str, dict] = Field(default_factory=dict)
 
 
 class CanvasBatchCreate(BatchModel):
@@ -181,7 +182,7 @@ def _sources(document: CanvasDocument, node: CanvasNode) -> list[str]:
     draft = _draft_for_node(node)
     if draft is None:
         return []
-    return list(dict.fromkeys(source for _role, source in canvas_input_sources(document, node, draft)))
+    return list(dict.fromkeys(source for _role, source, _annotated in canvas_input_sources(document, node, draft)))
 
 
 def _executable(document: CanvasDocument, node: CanvasNode) -> bool:
@@ -321,6 +322,7 @@ def _expanded_document(
             connections.append(CanvasInputConnection(
                 id=f"connection-{secrets.token_hex(12)}", role="input",
                 source_node_id=source_id, target_node_id=result_id, slot=edge.slot,
+                annotated=edge.annotated,
             ))
     return CanvasDocument.model_validate(current.model_copy(
         update={"nodes": nodes, "connections": connections,
@@ -377,6 +379,10 @@ def prepare_canvas_batch(project_id: str, payload: CanvasBatchCreate) -> CanvasB
             raise ValueError("一次批量执行最多2000次生成，请减少素材")
         frozen_nodes = [node for node in planning.nodes if node.id in required]
         version_ids = {_current_version_id(node) for node in frozen_nodes}
+        for node in frozen_nodes:
+            annotation = getattr(node.data, "annotation", None)
+            if annotation:
+                version_ids.update([annotation.version_id, annotation.rendered_version_id])
         version_ids.update(version_id for item in items for version_id in item.image_version_ids)
         version_ids.update(version_id for node in frozen_nodes
                            if getattr(node.data, "batch_result", None)
@@ -397,6 +403,7 @@ def prepare_canvas_batch(project_id: str, payload: CanvasBatchCreate) -> CanvasB
         ) for index, (key, version) in enumerate(frozen.content_versions.items())])
         preview, possible_bindings = _preview_document(frozen, steps)
         signatures: dict[str, str] = {}
+        route_snapshots: dict[str, dict] = {}
         for item in items:
             completed: dict[str, list[str]] = {}
             if source:
@@ -410,6 +417,12 @@ def prepare_canvas_batch(project_id: str, payload: CanvasBatchCreate) -> CanvasB
                 if prepared.requested_count != 1:
                     raise ValueError(f"「{node.title}」模型固定返回多个候选，暂不支持批量链路")
                 signatures[node.id] = _model_signature(prepared)
+                if prepared.job_params.route_id:
+                    route_snapshots[node.id] = {
+                        "modality": draft.mode, "route_id": prepared.job_params.route_id,
+                        "route_order": prepared.job_params.route_order,
+                        "mode": model_routes.find_route(draft.mode, draft.model).mode,
+                    }
                 draft.alias = prepared.key.alias
                 draft.model = prepared.model.id
                 completed[node.id] = possible_bindings[node.id]
@@ -427,7 +440,8 @@ def prepare_canvas_batch(project_id: str, payload: CanvasBatchCreate) -> CanvasB
                         for item_index in range(len(items)) for step_index in range(len(steps))],
             status="ready", created_at=timestamp, updated_at=timestamp,
         )
-        plan = CanvasBatchPlan(document=frozen, model_signatures=signatures)
+        plan = CanvasBatchPlan(document=frozen, model_signatures=signatures,
+                               route_snapshots=route_snapshots)
         atomic_write_json(_path(project_id, batch_id, plan=True), plan.model_dump(mode="json"))
         _save(run)
         return run
@@ -452,6 +466,15 @@ def start_canvas_batch(project_id: str, batch_id: str) -> tuple[CanvasBatchRun, 
 
                 if _job_for_run(project_id, active_run).status == JobStatus.PENDING:
                     raise ValueError(f"「{node.title}」仍在生成，请等待完成")
+        plan = CanvasBatchPlan.model_validate_json(
+            _path(project_id, batch_id, plan=True).read_text(encoding="utf-8"))
+        try:
+            for snapshot in plan.route_snapshots.values():
+                model_routes.find_route(snapshot["modality"], snapshot["route_id"])
+        except model_routes.NoSuchRouteError as error:
+            raise ValueError("模型配置已改变，请重新确认批量执行") from error
+        for snapshot in plan.route_snapshots.values():
+            model_routes.consume_frozen_route(snapshot["modality"], snapshot["route_id"], snapshot["mode"])
         atomic_write_json(canvas_project_dir(project_id) / ".runtime" / "batch-active.json",
                           {"batch_id": batch_id})
         run.status = "running"
@@ -558,6 +581,10 @@ def _run_canvas_batch(project_id: str, batch_id: str) -> None:
                         raise ValueError("执行节点已不存在，批量执行停止")
                     prepared = prepare_canvas_generation(project_id, virtual, node,
                                                          version_bindings=bindings)
+                    snapshot = plan.route_snapshots.get(run.steps[entry.step_index].node_id)
+                    if snapshot:
+                        prepared.job_params.route_id = snapshot["route_id"]
+                        prepared.job_params.route_order = snapshot["route_order"]
                     if _model_signature(prepared) != plan.model_signatures[run.steps[entry.step_index].node_id]:
                         raise ValueError("模型配置已改变，请重新确认后执行")
                     try:

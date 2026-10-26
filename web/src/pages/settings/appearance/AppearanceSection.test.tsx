@@ -1,0 +1,42 @@
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { AppearanceSection } from './AppearanceSection';
+import { loadAccent } from '@/lib/accentTheme';
+import { loadTheme, setTheme, startThemeSync } from '@/lib/theme';
+
+beforeEach(() => { localStorage.clear(); setTheme('dark'); });
+afterEach(() => { vi.unstubAllGlobals(); });
+it('预设、自定义草稿、对比度提示和恢复默认即时生效', () => {
+  render(<AppearanceSection />);
+  fireEvent.click(screen.getByRole('button', { name: '钴蓝' }));
+  expect(loadAccent()).toEqual({ preset: 'blue' });
+  fireEvent.click(screen.getByText('自定义颜色'));
+  fireEvent.change(screen.getByLabelText('主色'), { target: { value: '#33' } });
+  expect(loadAccent()).toEqual({ preset: 'blue' });
+  expect(screen.getByLabelText('主色')).toHaveValue('#33');
+  fireEvent.change(screen.getByLabelText('主色'), { target: { value: '#333333' } });
+  expect(screen.getByText('已启用')).toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('对比度较低');
+  expect(document.documentElement.style.getPropertyValue('--primary-foreground')).toBe('#FFFFFF');
+  expect(screen.getByRole('button', { name: '钴蓝' })).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(screen.getByRole('button', { name: '恢复默认' }));
+  expect(loadAccent()).toEqual({ preset: 'lime' });
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+});
+it('跟随系统响应系统变化，手动切换后停止跟随', () => {
+  let handler = () => {};
+  const media = { matches: false, addEventListener: (_: string, cb: () => void) => { handler = cb; }, removeEventListener: vi.fn() };
+  vi.stubGlobal('matchMedia', () => media);
+  const stop = startThemeSync();
+  render(<AppearanceSection />);
+  fireEvent.click(screen.getByRole('button', { name: '跟随系统' }));
+  expect(loadTheme()).toBe('system');
+  act(() => { media.matches = true; handler(); });
+  expect(document.documentElement).toHaveClass('light');
+  expect(document.documentElement.style.getPropertyValue('--primary')).toMatch(/^oklch/);
+  act(() => setTheme('dark'));
+  act(() => handler());
+  expect(document.documentElement).not.toHaveClass('light');
+  expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true');
+  stop();
+});

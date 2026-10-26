@@ -1,23 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { LayoutGroup, motion } from 'motion/react';
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter';
-import { HomeIcon, LibraryBig, Moon, Palette, Settings, Sparkles, Sun } from 'lucide-react';
+import { HomeIcon, Moon, Palette, Settings, Sparkles, Sun } from 'lucide-react';
 
 import { ChangelogButton } from '@/components/ChangelogButton';
 import { TeamShareReminder, type TeamShareReminderHandle } from '@/components/team/TeamShareReminder';
-import { fetchWorkshopRequests } from '@/api/workshopRequests';
 import { useSSE } from '@/hooks/useSSE';
+import { publishGatewayTask, publishGatewayConnected } from '@/api/gatewayEvents';
 import { Home } from '@/pages/Home';
 import { Studio } from '@/pages/Studio';
 import { CanvasProjectIndex } from '@/pages/CanvasProjectIndex';
 import { CanvasEditor } from '@/pages/CanvasEditor';
-import { CharacterDetail } from '@/pages/CharacterDetail';
-import { SettingsPage } from '@/pages/settings/Settings';
-import { WorkshopRequestsPage } from '@/pages/WorkshopRequests';
+import { ConsoleLayout, rememberCreativeLocation } from '@/pages/settings/ConsoleLayout';
 import { setTheme, useTheme, type Theme } from '@/lib/theme';
-import {
-  isWorkshopWorkspace,
-} from '@/components/workshop/workspaces';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { AnnouncementHost } from '@/components/AnnouncementDialog';
 
@@ -41,7 +36,6 @@ const NAV_TABS: { to: string; label: string; icon: typeof HomeIcon }[] = [
   { to: '/', label: '主页', icon: HomeIcon },
   { to: '/studio', label: '创作台', icon: Sparkles },
   { to: '/canvas', label: '画布', icon: Palette },
-  { to: '/workshop', label: '工坊', icon: LibraryBig },
 ];
 
 function NavTab({ to, label, isActive, icon: Icon, badge = 0 }: { to: string; label: string; isActive: boolean; icon: typeof HomeIcon; badge?: number }) {
@@ -76,39 +70,31 @@ function NavTab({ to, label, isActive, icon: Icon, badge = 0 }: { to: string; la
   );
 }
 
-/** 待批准生成数：只在本机页面能读到；网站会话 / 未连接时接口拒绝，按 0 处理。 */
-function useAwaitingWorkshopRequests(signal: number): number {
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    let active = true;
-    fetchWorkshopRequests(1, 'awaiting')
-      .then(result => { if (active) setCount(Number(result?.total) || 0); })
-      .catch(() => { if (active) setCount(0); });
-    return () => { active = false; };
-  }, [signal]);
-  return count;
-}
-
-export function AppShell() {
+export function AppShell({ latestRelease = null }: { latestRelease?: string | null }) {
   const [loc, setLocation] = useLocation();
-  const onWorkshop = loc.startsWith('/workshop');
   const onStudio = loc === '/studio';
   const onCanvas = loc.startsWith('/canvas');
   const onHome = loc === '/';
+  useEffect(() => { rememberCreativeLocation(loc + window.location.search); }, [loc]);
   const onSettings = loc.startsWith('/settings');
   const immersiveCanvas = /^\/canvas\/[^/]+$/.test(loc);
   // 这些页面自带滚动容器；外层再留一条滚动槽会让内容右侧多出 10px 空白。
-  const pageOwnsScroll = loc === '/studio' || loc === '/canvas'
-    || (loc.startsWith('/workshop') && loc !== '/workshop/requests');
-  const activeIndex = onHome ? 0 : onStudio ? 1 : onCanvas ? 2 : onWorkshop ? 3 : -1;
+  const pageOwnsScroll = loc === '/studio' || loc === '/canvas';
+  const activeIndex = onHome ? 0 : onStudio ? 1 : onCanvas ? 2 : -1;
   const reminderRef = useRef<TeamShareReminderHandle>(null);
   // 全壳唯一一条 SSE（服务端每会话限 4 条）：顺带把团队库变更交给分享提醒，重连时让它重取显示名。
-  const signal = useSSE({
+  useSSE({
     onTeamLibraryChanged: event => reminderRef.current?.notify(event),
-    onConnect: () => reminderRef.current?.refreshProfile(),
+    onGatewayTask: publishGatewayTask,
+    onConnect: () => { reminderRef.current?.refreshProfile(); publishGatewayConnected(); },
   });
-  const awaiting = useAwaitingWorkshopRequests(signal);
 
+  const ContentTag = onSettings ? 'div' : 'main';
+  const releaseLink = latestRelease && <a
+    href={`https://github.com/ZhongBiao-zheng/game-atelier/releases/tag/v${encodeURIComponent(latestRelease)}`}
+    target="_blank" rel="noopener noreferrer"
+    className="rounded-full px-3 py-2 text-xs text-primary hover:bg-secondary/60"
+  >有新版本 {latestRelease}</a>;
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
       {!immersiveCanvas && <header className="sticky top-0 z-30 shrink-0">
@@ -119,31 +105,32 @@ export function AppShell() {
           <LayoutGroup>
             <nav className="order-last col-span-2 flex min-w-0 items-center justify-center gap-1 overflow-x-auto no-scrollbar px-2 lg:order-none lg:col-span-1 lg:gap-3 lg:px-3">
               {NAV_TABS.map((t, i) => (
-                <NavTab key={t.to} to={t.to} label={t.label} isActive={activeIndex === i} icon={t.icon} badge={t.to === '/workshop' ? awaiting : 0} />
+                <NavTab key={t.to} to={t.to} label={t.label} isActive={activeIndex === i} icon={t.icon} />
               ))}
             </nav>
           </LayoutGroup>
           <div className="flex min-w-0 shrink-0 items-center justify-end gap-1 sm:gap-2">
+            <span className="hidden sm:contents">{releaseLink}</span>
             <ChangelogButton />
             <ThemeToggle />
             <Link
-              href="/settings"
+              href="/settings/providers"
               aria-label="设置"
               className={[
                 'inline-flex h-10 w-10 items-center justify-center rounded-full bg-glass backdrop-blur-glass transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                onSettings ? 'text-primary ring-1 ring-border' : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
+                onSettings ? 'text-foreground ring-1 ring-border' : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
               ].join(' ')}
             >
               <Settings size={18} aria-hidden />
             </Link>
           </div>
         </div>
+        {latestRelease && <div className="flex justify-end px-3 pb-2 sm:hidden">{releaseLink}</div>}
       </header>}
 
       {/* stable-scroll：本壳是首页/工坊的真·滚动容器，固定滚动槽避免滚动条增删改内宽 → 列宽 → w-full 图高 → 墙高的自激抽搐环（见 scrollbar-gutter-feedback-loop memory）*/}
-      <main role="main" className={immersiveCanvas || pageOwnsScroll ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 min-h-0 overflow-y-auto stable-scroll'}>
+      <ContentTag className={immersiveCanvas || pageOwnsScroll ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 min-h-0 overflow-y-auto stable-scroll'}>
         <Switch>
-          <Route path="/workshop/requests">{() => <WorkshopRequestsPage />}</Route>
           <Route path="/">{() => <Home />}</Route>
           <Route path="/studio">{() => <Studio />}</Route>
           <Route path="/canvas/:projectId">{params => (
@@ -159,107 +146,14 @@ export function AppShell() {
               onOpenProject={projectId => setLocation(`/canvas/${encodeURIComponent(projectId)}`)}
             />
           )}</Route>
-          <Route path="/workshop/unassigned/characters/:id/:assetSlot/:jobId/:imagePath">
-            {(params) => (
-              <CharacterDetail
-                workspace="art"
-                characterId={params.id}
-                assetSlot={params.assetSlot}
-                jobId={params.jobId}
-                imagePath={params.imagePath}
-              />
-            )}
-          </Route>
-          <Route path="/workshop/unassigned/characters/:id/:assetSlot">
-            {(params) => (
-              <CharacterDetail workspace="art" characterId={params.id} assetSlot={params.assetSlot} />
-            )}
-          </Route>
-          <Route path="/workshop/unassigned/characters/:id">
-            {(params) => <CharacterDetail workspace="art" characterId={params.id} />}
-          </Route>
-          <Route path="/workshop/:projectId/video/:productionId">
-            {(params) => (
-              <CharacterDetail
-                projectId={params.projectId}
-                workspace="video"
-                productionId={params.productionId}
-              />
-            )}
-          </Route>
-          <Route path="/workshop/:projectId/ui/:schemeId/screens/:screenId">
-            {(params) => (
-              <CharacterDetail
-                projectId={params.projectId}
-                workspace="ui"
-                uiSchemeId={params.schemeId}
-                screenId={params.screenId}
-              />
-            )}
-          </Route>
-          <Route path="/workshop/:projectId/ui/:schemeId">
-            {(params) => (
-              <CharacterDetail
-                projectId={params.projectId}
-                workspace="ui"
-                uiSchemeId={params.schemeId}
-              />
-            )}
-          </Route>
-          <Route path="/workshop/:projectId/ui">
-            {(params) => (
-              <CharacterDetail
-                projectId={params.projectId}
-                workspace="ui"
-              />
-            )}
-          </Route>
-          <Route path="/workshop/:projectId/art/characters/:id/:assetSlot/:jobId/:imagePath">
-            {(params) => (
-              <CharacterDetail
-                projectId={params.projectId}
-                workspace="art"
-                characterId={params.id}
-                assetSlot={params.assetSlot}
-                jobId={params.jobId}
-                imagePath={params.imagePath}
-              />
-            )}
-          </Route>
-          <Route path="/workshop/:projectId/art/characters/:id/:assetSlot">
-            {(params) => (
-              <CharacterDetail
-                projectId={params.projectId}
-                workspace="art"
-                characterId={params.id}
-                assetSlot={params.assetSlot}
-              />
-            )}
-          </Route>
-          <Route path="/workshop/:projectId/art/characters/:id">
-            {(params) => (
-              <CharacterDetail projectId={params.projectId} workspace="art" characterId={params.id} />
-            )}
-          </Route>
-          <Route path="/workshop/:projectId/:workspace">
-            {(params) => (
-              <CharacterDetail
-                projectId={params.projectId}
-                workspace={isWorkshopWorkspace(params.workspace) ? params.workspace : 'overview'}
-              />
-            )}
-          </Route>
-          <Route path="/workshop/:projectId">
-            {(params) => <Redirect to={`/workshop/${encodeURIComponent(params.projectId)}/overview`} replace />}
-          </Route>
-          <Route path="/workshop">{() => <CharacterDetail />}</Route>
-          <Route path="/settings">{() => <SettingsPage />}</Route>
-          <Route path="/settings/keys">{() => <SettingsPage />}</Route>
+          <Route path="/settings">{() => <Redirect to="/settings/providers" replace />}</Route>
+          <Route path="/settings/providers/new">{() => <ConsoleLayout />}</Route>
+          <Route path="/settings/:page">{() => <ConsoleLayout />}</Route>
           <Route>
             <Redirect to="/" replace />
           </Route>
         </Switch>
-      </main>
+      </ContentTag>
       <TeamShareReminder ref={reminderRef} />
       <AnnouncementHost />
     </div>

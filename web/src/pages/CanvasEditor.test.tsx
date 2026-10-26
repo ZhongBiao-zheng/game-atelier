@@ -1,3 +1,4 @@
+import { composeAnnotatedImage } from '@/components/canvas/annotation/composeAnnotatedImage';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, onTestFinished, vi } from 'vitest';
 import { useContext } from 'react';
@@ -47,6 +48,8 @@ import type {
   CanvasProjectSummary,
   CanvasTextNode,
 } from '@/schema/canvas';
+
+vi.mock('@/components/canvas/annotation/composeAnnotatedImage', () => ({ composeAnnotatedImage: vi.fn() }));
 
 vi.mock('@xyflow/react', () => {
   // 生成面板按「画布 transform」和「锚点节点自己的几何」两路重新定位，所以 mock 的 store
@@ -465,6 +468,7 @@ function documentWith(overrides: Partial<CanvasDocument>): CanvasDocument {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(listCreationAssets).mockResolvedValue({ revision: 0, assets: [] });
   canvasContextIdentities.length = 0;
   flowEdgeIdentities.length = 0;
   flowHandlers.nodesChange = undefined;
@@ -476,6 +480,9 @@ beforeEach(() => {
   vi.mocked(listCanvasProjects).mockResolvedValue([{
     schema_version: 2,
     project_id: 'canvas-one',
+    categories: ['弹窗', '角色', '底图', '按钮', '图标', '字效'],
+    category_spec_files: {},
+    migrated_from_workshop: null,
     name: '列车短片',
     created_at: '2026-08-23T00:00:00Z',
     updated_at: '2026-08-23T00:00:00Z',
@@ -1570,7 +1577,7 @@ it('team tab mount exit opens settings on the current canvas', async () => {
   try {
     await openTeamTab();
     fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
-    await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe('/settings?canvas=canvas-one'));
+    await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe('/settings/libraries?canvas=canvas-one'));
   } finally {
     window.history.replaceState(null, '', '/');
   }
@@ -2048,7 +2055,7 @@ it('offers a way in on an empty canvas and a settings entry the immersive chrome
   await screen.findByLabelText('画布编辑器 列车短片');
   expect(screen.getByText('画布还是空的')).toBeTruthy();
   fireEvent.keyDown(screen.getByRole('button', { name: '画布菜单' }), { key: 'Enter' });
-  expect((await screen.findByRole('menuitem', { name: '设置' })).getAttribute('href')).toBe('/settings');
+  expect((await screen.findByRole('menuitem', { name: '设置' })).getAttribute('href')).toBe('/settings/providers');
   fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
 
   fireEvent.click(screen.getByRole('button', { name: '文本节点' }));
@@ -2403,7 +2410,7 @@ function canvasWithImage(version: CanvasDocument['content_versions'][string]) {
 
 const generationAsset: CreationAsset = {
   asset_id: 'ca-gen', kind: 'generation', title: '雪山白犬', tags: [], created_at: '2026-09-24T00:00:00Z',
-  updated_at: '2026-09-24T00:00:00Z', last_used_at: null, project_ids: [],
+  updated_at: '2026-09-24T00:00:00Z', last_used_at: null, project_ids: [], category: null,
   content: {
     kind: 'generation',
     media: { kind: 'media', path: 'creation-assets/blobs/dog.png', mime_type: 'image/png', bytes: 3, sha256: 'b'.repeat(64), filename: 'dog.png' },
@@ -2639,7 +2646,7 @@ it('does not look up related recipes when inserting the dropped asset fails', as
   vi.mocked(adoptTeamAsset).mockResolvedValue({
     asset: {
       asset_id: 'ca-raw', kind: 'media', title: 'castle', tags: [], created_at: '', updated_at: '', last_used_at: null,
-      project_ids: [], content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: 'f'.repeat(64), filename: 'x.png' },
+      project_ids: [], category: null, content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: 'f'.repeat(64), filename: 'x.png' },
     },
     created: true,
   });
@@ -2655,7 +2662,7 @@ it('opens the team tab from «look» even after the prompt panel it was suggeste
   vi.mocked(adoptTeamAsset).mockResolvedValue({
     asset: {
       asset_id: 'ca-raw', kind: 'media', title: 'castle', tags: [], created_at: '', updated_at: '', last_used_at: null,
-      project_ids: [], content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: sha, filename: 'x.png' },
+      project_ids: [], category: null, content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: sha, filename: 'x.png' },
     },
     created: true,
   });
@@ -2680,7 +2687,7 @@ it('suggests related recipes after dropping a raw team asset and opens them', as
   vi.mocked(adoptTeamAsset).mockResolvedValue({
     asset: {
       asset_id: 'ca-raw', kind: 'media', title: 'castle', tags: [], created_at: '', updated_at: '', last_used_at: null,
-      project_ids: [], content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: sha, filename: 'x.png' },
+      project_ids: [], category: null, content: { kind: 'media', path: 'x.png', mime_type: 'image/png', bytes: 1, sha256: sha, filename: 'x.png' },
     },
     created: true,
   });
@@ -2697,4 +2704,75 @@ it('suggests related recipes after dropping a raw team asset and opens them', as
   fireEvent.click(screen.getByRole('button', { name: '看看' }));
   expect(await screen.findByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true');
   await waitFor(() => expect(listRelatedTeamAssets).toHaveBeenCalledWith('canvas-one', sha));
+});
+
+it('edits annotations in place, creates an annotated input and refreshes its composite before submitting', async ({ onTestFinished }) => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  onTestFinished(() => { vi.unstubAllGlobals(); });
+  const source = imageNode('annotation-source', '标注原图'); source.data.current_version_id = 'source-v';
+  const initial = documentWith({ nodes: [source], content_versions: { 'source-v': editSourceVersion } });
+  vi.mocked(getCanvasDocument).mockResolvedValue(initial);
+  vi.mocked(composeAnnotatedImage).mockResolvedValue(new File(['png'], 'annotation.png', { type: 'image/png' }));
+  let uploads = 0;
+  vi.mocked(uploadCanvasMedia).mockImplementation(async (_project, _file, revision) => {
+    const version = { ...editSourceVersion, version_id: `annotation-rendered-${++uploads}` };
+    return { version, document: { ...initial, revision: revision + 1, content_versions: { ...initial.content_versions, [version.version_id]: version } } } as Awaited<ReturnType<typeof uploadCanvasMedia>>;
+  });
+  await renderReadyCanvas();
+  const context = () => canvasContextIdentities.at(-1) as CanvasNodeContextValue;
+  act(() => { context().selectNode(source.id); context().annotationController!.start(source); });
+  expect(await screen.findByRole('toolbar', { name: '标注工具' })).toBeInTheDocument();
+  const elements = [{ id: 'rect', type: 'rect' as const, color: '#F04438' as const, x: 10, y: 20, width: 100, height: 100, stroke_width: 4 }];
+  act(() => context().annotationController!.write(source.id, elements));
+  await act(async () => context().editWithAnnotation!(source.id));
+  expect(uploadCanvasMedia).toHaveBeenCalledTimes(1);
+  expect(submitCanvasRun).not.toHaveBeenCalled();
+  const saved = vi.mocked(saveCanvasDocument).mock.lastCall![1];
+  expect(saved.nodes).toHaveLength(2);
+  const edge = saved.connections.find(edge => edge.role === 'input')!;
+  expect(edge).toMatchObject({ source_node_id: source.id, annotated: true });
+  expect((saved.nodes.find(node => node.id === edge.target_node_id) as CanvasImageNode).data.generation_draft?.prompt).toBe('按图中标注修改，输出不保留标注。');
+  act(() => context().annotationController!.write(source.id, [{ ...elements[0], color: '#3B82F6' }]));
+  vi.mocked(submitCanvasRun).mockRejectedValue(new Error('测试拦截提交'));
+  await act(async () => context().submitRun(edge.target_node_id));
+  expect(uploadCanvasMedia).toHaveBeenCalledTimes(2);
+  expect(submitCanvasRun).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(uploadCanvasMedia).mock.invocationCallOrder.at(-1)).toBeLessThan(vi.mocked(submitCanvasRun).mock.invocationCallOrder[0]);
+});
+
+it('hides the generation composer throughout annotation and restores the draft afterwards', async ({ onTestFinished }) => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  onTestFinished(() => { vi.unstubAllGlobals(); });
+  const source = imageNode('annotation-result', '生成图片', { ...imageDraft, prompt: '保留我的提示词' });
+  source.data.current_version_id = 'source-v';
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [source], content_versions: { 'source-v': { ...editSourceVersion, origin: { kind: 'job_output', job_id: 'job-source', candidate_id: 'candidate' } } } }));
+  await renderReadyCanvas();
+  fireEvent.click(screen.getByRole('button', { name: 'flow-node-annotation-result' }));
+  expect(await screen.findByRole('button', { name: '开始生成' })).toBeInTheDocument();
+  const context = () => canvasContextIdentities.at(-1) as CanvasNodeContextValue;
+  act(() => context().annotationController!.start(source));
+  expect(screen.queryByRole('button', { name: '开始生成' })).not.toBeInTheDocument();
+  expect(screen.getByRole('toolbar', { name: '标注工具' })).toBeInTheDocument();
+  act(() => context().annotationController!.exit());
+  expect(await screen.findByRole('button', { name: '开始生成' })).toBeInTheDocument();
+  expect(screen.getByRole('combobox', { name: '提示词' })).toHaveTextContent('保留我的提示词');
+});
+
+it('停用供应商退出画布模型列表，刷新后仍不可选', async () => {
+  const { keys } = await listKeys();
+  const disabled = { ...keys[0], alias: 'disabled', enabled: false, is_default: true,
+    models: [{ id: 'gpt-image-2.5', name: 'Disabled model', modality: 'image' as const }] };
+  vi.mocked(listKeys).mockResolvedValue({ keys: [disabled, ...keys] });
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [imageNode('image-one', '图片', imageDraft)],
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'flow-node-image-one' }));
+  fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
+  expect(await screen.findByRole('option', { name: 'GPT Image 2' })).toBeInTheDocument();
+  expect(screen.queryByRole('option', { name: 'Disabled model' })).not.toBeInTheDocument();
+  const before = vi.mocked(listKeys).mock.calls.length;
+  act(() => window.dispatchEvent(new Event('atelier:keys-changed')));
+  await waitFor(() => expect(listKeys).toHaveBeenCalledTimes(before + 1));
+  expect(screen.queryByRole('option', { name: 'Disabled model' })).not.toBeInTheDocument();
 });

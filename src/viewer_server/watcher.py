@@ -1,4 +1,4 @@
-"""watchdog FSEvents handler — 监听 .runtime/jobs/ / characters/ / 图片目录 → SSE 广播。
+"""watchdog FSEvents handler — 监听 .runtime/jobs/ / 画布文档 / 图片目录 → SSE 广播。
 macOS 用 FSEvents（默认）；Linux 用 inotify；显式不用 PollingObserver。
 """
 from __future__ import annotations
@@ -49,76 +49,6 @@ class JobsHandler(FileSystemEventHandler):
             "job_id": data.get("job_id"),
             "status": data.get("status"),
         })
-
-
-class CharactersHandler(FileSystemEventHandler):
-    # Skill / routes 用 atomic replace（tmp.replace），FSEvents 可能只发
-    # on_moved 或 on_created，不补全这两个 hook 就会漏掉 spec 改动。
-    def on_modified(self, event: FileSystemEvent) -> None:
-        self._emit(event.src_path, event.is_directory)
-
-    def on_created(self, event: FileSystemEvent) -> None:
-        self._emit(event.src_path, event.is_directory)
-
-    def on_moved(self, event: FileSystemEvent) -> None:
-        dest = getattr(event, "dest_path", "") or event.src_path
-        self._emit(dest, event.is_directory)
-
-    def _emit(self, raw_path: str, is_dir: bool) -> None:
-        if is_dir:
-            return
-        p = Path(raw_path)
-        if p.name != "spec.md":
-            return
-        hub.broadcast("spec-changed", {"character_id": p.parent.name})
-
-
-class WorkshopRequestsHandler(JobsHandler):
-    def _emit(self, raw_path: str, is_dir: bool) -> None:
-        path = Path(raw_path)
-        if is_dir or path.suffix != ".json" or not path.stem.startswith("wr-"):
-            return
-        hub.broadcast("workshop-request-changed", {"request_id": path.stem})
-
-
-class ProjectsHandler(FileSystemEventHandler):
-    def on_modified(self, event: FileSystemEvent) -> None:
-        self._emit(event.src_path)
-
-    def on_created(self, event: FileSystemEvent) -> None:
-        self._emit(event.src_path)
-
-    def on_moved(self, event: FileSystemEvent) -> None:
-        dest = getattr(event, "dest_path", "") or event.src_path
-        self._emit(dest)
-
-    def _emit(self, raw_path: str) -> None:
-        if Path(raw_path).name != "projects.json":
-            return
-        hub.broadcast("projects-changed", {})
-
-
-class ActiveCharacterHandler(FileSystemEventHandler):
-    # 同 JobsHandler：原子写在 Linux 上发 moved；首次写 active 文件是 created。
-    def on_modified(self, event: FileSystemEvent) -> None:
-        self._emit(event.src_path)
-
-    def on_created(self, event: FileSystemEvent) -> None:
-        self._emit(event.src_path)
-
-    def on_moved(self, event: FileSystemEvent) -> None:
-        dest = getattr(event, "dest_path", "") or event.src_path
-        self._emit(dest)
-
-    def _emit(self, raw_path: str) -> None:
-        p = Path(raw_path)
-        if p.name != "active-character.json":
-            return
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError):
-            return
-        hub.broadcast("active-character-changed", {"active_id": data.get("active_id")})
 
 
 class CanvasDocumentsHandler(FileSystemEventHandler):
@@ -375,28 +305,12 @@ def rescan_team_libraries() -> list[threading.Thread]:
 
 def start_watchers() -> Observer:
     runtime = data_root.runtime_dir()
-    project_root = data_root.resolve_data_root()
 
     observer = Observer()
 
     jobs_dir = runtime / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     observer.schedule(JobsHandler(), str(jobs_dir), recursive=False)
-    requests_dir = runtime / "workshop" / "requests"
-    requests_dir.mkdir(parents=True, exist_ok=True)
-    observer.schedule(WorkshopRequestsHandler(), str(requests_dir), recursive=False)
-
-    runtime.mkdir(parents=True, exist_ok=True)
-    observer.schedule(ActiveCharacterHandler(), str(runtime), recursive=False)
-    observer.schedule(ProjectsHandler(), str(runtime), recursive=False)
-
-    chars_dir = project_root / "characters"
-    # 启动时目录可能尚不存在（全新安装）——不先建好就 schedule 不上，
-    # 首个角色的 spec-changed / image-added 会一直不广播，直到重启。
-    chars_dir.mkdir(parents=True, exist_ok=True)
-    # recursive=True: spec.md 现在嵌在 characters/<id>/ 下，FSEvents 不递归看不见。
-    observer.schedule(CharactersHandler(), str(chars_dir), recursive=True)
-
     canvases_dir = data_root.canvases_dir()
     canvases_dir.mkdir(parents=True, exist_ok=True)
     # recursive=True：canvas.json 在 canvases/<project_id>/ 下；媒体文件也在里面，靠文件名过滤。

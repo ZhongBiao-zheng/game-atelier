@@ -11,6 +11,7 @@ from typing import Annotated, Any, Generic, Literal, TypeVar
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     JsonValue,
@@ -31,23 +32,15 @@ class JobStatus(str, Enum):
     CANCELED = "canceled"
 
 
-class AssetSlot(str, Enum):
-    # 角色资产槽位 — 决定 characters/<id>/<slot>/ 物理路径。
-    # 老 JobKind = PORTRAIT/PROMO/TURNAROUND 改名而来（2026-05-25 重构）。
-    PORTRAIT = "portrait"
-    PROMO = "promo"
-    TURNAROUND = "turnaround"
-
-
 class JobKind(str, Enum):
-    # 产物类型 — 与 AssetSlot / namespace 解耦；Canvas 可使用四种生成 caller。
+    # 产物类型；Canvas 可使用四种生成 caller。
     TEXT = "text"
     IMAGE = "image"
     VIDEO = "video"
     AUDIO = "audio"
 
 
-Namespace = Literal["character", "studio", "ui", "video", "canvas"]
+Namespace = Literal["studio", "canvas"]
 ProviderTaskId = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=512),
@@ -191,9 +184,15 @@ class JobParams(BaseModel):
     route_id: str | None = Field(default=None, max_length=200)
     # 本次已经试过、因确定没执行的失败被换掉的供应商别名，按顺序。
     route_tried: list[str] | None = None
+    # 提交时冻结的供应商顺序；失败切换不受后续路由设置与其它任务影响。
+    route_order: list[str] | None = None
     # 厂商订单首次获取立即落盘。Tuzi 支持续查；Seedance 留供核对，不自动恢复或重提。
     # tuzi_async is a historical ownership tag, never a supported submission protocol.
-    provider_task_protocol: Literal["tuzi_async", "tuzi_images", "seedance", "evolink"] | None = None
+    # 局域网 Atelier：网关那边实际出图的成员别名（ADR-0025）。
+    gateway_member: str | None = Field(default=None, max_length=120)
+    provider_task_protocol: Literal[
+        "tuzi_async", "tuzi_images", "seedance", "evolink", "atelier_gateway",
+    ] | None = None
     provider_task_ids: list[ProviderTaskId] | None = Field(default=None, max_length=4)
     video_submission_attempts: list[VideoSubmissionAttempt] | None = Field(default=None, max_length=4)
     # 图片参数 —— 前端实际在发（Studio 提交链路），显式声明保证双端类型对齐
@@ -264,6 +263,7 @@ class CanvasActor(BaseModel):
 
 class CanvasSnapshotInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    annotated: bool = False
     order: int = Field(ge=0)
     source: Literal[
         "implicit_self", "explicit_source", "input_connection",
@@ -336,19 +336,10 @@ class Job(BaseModel):
     output_paths: list[str]
     status: JobStatus
     error: str | None
-    # 2026-05-25 重构：原 kind 拆成 asset_slot + kind + namespace。
-    asset_slot: AssetSlot = AssetSlot.PORTRAIT
     kind: JobKind = JobKind.IMAGE
-    namespace: Namespace = "character"
-    source_image: str | None = None  # promo/turnaround 用，绝对路径
-    # UI 页面 job（namespace="ui"）—— 资产归项目中的明确方案，不归角色。
-    # 三字段决定输出目录 projects/<slug>/ui/<scheme_id>/screens/<screen_id>/；Web 不能改。
-    project_id: str | None = None
-    ui_scheme_id: str | None = None
-    screen_id: str | None = None
-    # 项目视频 job（namespace="video"）—— 一次 job 产出一支完整企划视频。
-    production_id: str | None = None
-    # 人工画布 job（namespace="canvas"）—— 归独立画布项目，不属于 Studio/工坊/Skill。
+    namespace: Namespace = "studio"
+    source_image: str | None = None  # 参考素材的绝对路径
+    # Canvas 生成任务归属项目与运行快照。
     canvas_project_id: str | None = None
     canvas_run: CanvasJobContext | None = None
     # Phase 3 (2026-05-22): which Key was used. Web 不能改这两个字段。
@@ -356,7 +347,6 @@ class Job(BaseModel):
     provider: str | None = None
     # 2026-06-10: retry-job 克隆 failed job 时指回原 job_id；原 job 错误记录保留。
     retry_of: str | None = None
-    workshop_request_id: str | None = Field(default=None, pattern=r"^wr-[a-f0-9]{40}$")
     # 2026-06-12: 出图进度真实卡点（视频 caller 经 job_runner 回写；Web 不能改）。
     # sent=任务已全部提交上游；downloading=任务成功、产物下载中。终态时清空。
     progress_phase: Literal["sent", "downloading"] | None = None
@@ -371,24 +361,6 @@ class Job(BaseModel):
 
     @model_validator(mode="after")
     def validate_namespace_ownership(self) -> "Job":
-        if self.workshop_request_id and self.namespace not in {"character", "ui", "video"}:
-            raise ValueError("workshop_request_id is only valid for Workshop jobs")
-        if self.namespace == "ui":
-            if not self.project_id or not self.ui_scheme_id or not self.screen_id:
-                raise ValueError("ui job requires project_id, ui_scheme_id and screen_id")
-            if self.kind is not JobKind.IMAGE:
-                raise ValueError("ui job must use kind=image")
-        elif self.ui_scheme_id is not None or self.screen_id is not None:
-            raise ValueError("ui_scheme_id and screen_id are only valid for namespace=ui")
-
-        if self.namespace == "video":
-            if not self.project_id or not self.production_id:
-                raise ValueError("video job requires project_id and production_id")
-            if self.kind is not JobKind.VIDEO:
-                raise ValueError("video namespace must use kind=video")
-        elif self.production_id is not None:
-            raise ValueError("production_id is only valid for namespace=video")
-
         if self.namespace == "canvas":
             if not self.canvas_project_id or self.canvas_run is None:
                 raise ValueError("canvas job requires canvas_project_id and canvas_run")
@@ -753,6 +725,75 @@ class CanvasMediaDisplay(BaseModel):
 
 class CanvasMediaNodeData(CanvasContentNodeData):
     display: CanvasMediaDisplay = Field(default_factory=CanvasMediaDisplay)
+    annotation: CanvasImageAnnotation | None = None
+
+
+AnnotationColor = Literal["#F04438", "#FACC15", "#22C55E", "#3B82F6", "#FFFFFF"]
+FinitePx = Annotated[float, Field(ge=-100_000, le=100_000, allow_inf_nan=False)]
+AnnotationPoint = tuple[FinitePx, FinitePx]
+ANNOTATION_UNIT_BASE = 1024
+
+
+def annotation_unit_scale(width: float, height: float) -> float:
+    return max(width, height) / ANNOTATION_UNIT_BASE
+
+
+class _AnnotationElementBase(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    id: str = Field(min_length=1, max_length=64)
+    color: AnnotationColor
+
+
+class AnnotationRect(_AnnotationElementBase):
+    type: Literal["rect"]
+    x: FinitePx
+    y: FinitePx
+    width: float = Field(ge=0, le=100_000)
+    height: float = Field(ge=0, le=100_000)
+    stroke_width: float = Field(ge=1, le=24)
+
+
+class AnnotationArrow(_AnnotationElementBase):
+    type: Literal["arrow"]
+    start: AnnotationPoint
+    end: AnnotationPoint
+    stroke_width: float = Field(ge=1, le=24)
+
+
+class AnnotationFreedraw(_AnnotationElementBase):
+    type: Literal["freedraw"]
+    points: list[AnnotationPoint] = Field(min_length=2, max_length=10_000)
+    stroke_width: float = Field(ge=1, le=24)
+
+
+class AnnotationText(_AnnotationElementBase):
+    type: Literal["text"]
+    x: FinitePx
+    y: FinitePx
+    text: str = Field(min_length=1, max_length=500)
+    font_size: float = Field(ge=12, le=72)
+    background: bool = False
+
+
+AnnotationElement = Annotated[
+    AnnotationRect | AnnotationArrow | AnnotationFreedraw | AnnotationText,
+    Field(discriminator="type"),
+]
+
+
+class CanvasImageAnnotation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version_id: str = Field(min_length=1, max_length=160)
+    elements: list[AnnotationElement] = Field(default_factory=list, max_length=500)
+    visible: bool = True
+    rendered_version_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+    @model_validator(mode="after")
+    def validate_scene(self) -> "CanvasImageAnnotation":
+        elements = [element.model_dump(mode="json") for element in self.elements]
+        if len(json.dumps(elements, ensure_ascii=False).encode("utf-8")) > 2 * 1024 * 1024:
+            raise ValueError("annotation exceeds 2 MiB")
+        return self
 
 
 class CanvasImageEditSettings(BaseModel):
@@ -900,6 +941,12 @@ class CanvasPluginNodeData(BaseModel):
         return self
 
 
+class CanvasCompareNodeData(BaseModel):
+    """对比的两张图由 before / after 两条输入连线决定，节点自身不存内容。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class CanvasNodeBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=120)
@@ -957,10 +1004,15 @@ class CanvasPluginNode(CanvasNodeBase):
     data: CanvasPluginNodeData
 
 
+class CanvasCompareNode(CanvasNodeBase):
+    type: Literal["compare"]
+    data: CanvasCompareNodeData
+
+
 CanvasNode = Annotated[
     CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode
     | CanvasGroupNode | CanvasPluginNode | CanvasBatchMaterialNode
-    | CanvasLayerStackNode | CanvasImageEditNode,
+    | CanvasLayerStackNode | CanvasImageEditNode | CanvasCompareNode,
     Field(discriminator="type"),
 ]
 
@@ -971,7 +1023,9 @@ class CanvasInputConnection(BaseModel):
     role: Literal["input"]
     source_node_id: str = Field(min_length=1)
     target_node_id: str = Field(min_length=1)
-    slot: Literal["first_frame", "last_frame"] | None = None
+    # first_frame / last_frame：视频首尾帧；before / after：对比节点的两侧。
+    slot: Literal["first_frame", "last_frame", "before", "after"] | None = None
+    annotated: bool = False
 
 
 class CanvasMaterialConnection(BaseModel):
@@ -1031,6 +1085,7 @@ class CanvasCreationAssetSnapshotOrigin(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["creation_asset_snapshot"]
     title: str = Field(min_length=1, max_length=120)
+    asset_id: str | None = Field(default=None, min_length=1, max_length=160)
 
 
 class CanvasNormalizedRect(BaseModel):
@@ -1286,6 +1341,19 @@ class CanvasDocument(BaseModel):
                     raise ValueError("canvas user mask references an incompatible source version")
         group_members: set[str] = set()
         for node in self.nodes:
+            if node.type == "video" and node.data.annotation:
+                raise ValueError("annotations are only supported on image nodes")
+            if node.type == "image" and node.data.annotation:
+                annotation = node.data.annotation
+                source = self.content_versions.get(annotation.version_id)
+                rendered = self.content_versions.get(annotation.rendered_version_id or "")
+                if source is None or source.kind != "image":
+                    raise ValueError("annotation requires an owned source image version")
+                if annotation.rendered_version_id is not None:
+                    if rendered is None or rendered.kind != "image":
+                        raise ValueError("annotation requires an owned rendered image version")
+                    if (source.width, source.height) != (rendered.width, rendered.height):
+                        raise ValueError("annotation must preserve source image dimensions")
             if node.type == "image_edit":
                 for linked_id in (node.data.source_node_id, node.data.reference_node_id):
                     linked = nodes_by_id.get(linked_id)
@@ -1366,6 +1434,20 @@ class CanvasDocument(BaseModel):
             # 一张确定的图，一个包给不出这个承诺。
             if target.type == "group":
                 raise ValueError("canvas group nodes cannot receive connections")
+            if source.type == "compare":
+                raise ValueError("canvas compare nodes cannot provide connections")
+            if target.type == "compare":
+                # 对比连线只决定显示哪两张图，不是生成参考。
+                if (edge.role != "input" or source.type != "image" or edge.annotated
+                        or edge.slot not in {"before", "after"}):
+                    raise ValueError("canvas compare input must be an image on the before or after slot")
+                slot_key = (edge.target_node_id, edge.slot)
+                if slot_key in occupied_frame_slots:
+                    raise ValueError("canvas compare slot can only have one source")
+                occupied_frame_slots.add(slot_key)
+                continue
+            if edge.role == "input" and edge.slot in {"before", "after"}:
+                raise ValueError("before / after slots only connect into compare nodes")
             if source.type == "group" and (edge.role != "input" or edge.slot is not None):
                 raise ValueError("canvas group can only be an unslotted input source")
             if edge.role == "material" and (source.type, target.type) not in {
@@ -1373,6 +1455,8 @@ class CanvasDocument(BaseModel):
             }:
                 raise ValueError("canvas material connections require images or image edit nodes")
             if edge.role == "input":
+                if edge.annotated and (edge.slot is not None or source.type != "image"):
+                    raise ValueError("annotated connections require an unslotted image source")
                 if source.type in {"plugin", "layer_stack", "image_edit"}:
                     raise ValueError("canvas input source cannot provide content")
                 if target.type == "image_edit":
@@ -1401,13 +1485,46 @@ class CanvasDocument(BaseModel):
         return self
 
 
-class CanvasProject(BaseModel):
+CategoryName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=24)]
+OptionalCategory = Annotated[
+    CategoryName | None,
+    BeforeValidator(lambda value: None if isinstance(value, str) and not value.strip() else value),
+]
+DEFAULT_CANVAS_CATEGORIES = ["弹窗", "角色", "底图", "按钮", "图标", "字效"]
+
+
+class CanvasCategoriesUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    categories: list[CategoryName] = Field(max_length=40)
+
+    @field_validator("categories")
+    @classmethod
+    def unique_categories(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(value))
+
+
+class CanvasProject(CanvasCategoriesUpdate):
+    migrated_from_workshop: str | None = Field(default=None, min_length=1, max_length=120)
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal[2] = 2
     project_id: str
     name: CanvasProjectName
+    categories: list[CategoryName] = Field(default_factory=lambda: DEFAULT_CANVAS_CATEGORIES.copy(), max_length=40)
+    category_spec_files: dict[CategoryName, Annotated[str, Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*\.md$")]] = Field(default_factory=dict)
     created_at: str
     updated_at: str
+
+    @model_validator(mode="after")
+    def unique_spec_files(self):
+        filenames = list(self.category_spec_files.values())
+        if "project.md" in filenames or len(set(filenames)) != len(filenames):
+            raise ValueError("类别规范文件名必须唯一且不能为 project.md")
+        return self
+
+
+class CanvasSpecUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(max_length=40_000)
 
 
 class CanvasProjectCover(BaseModel):
@@ -2039,6 +2156,25 @@ class AdoptionOrigin(BaseModel):
     raw_path: str | None = None
 
 
+class CanvasClassifyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    asset_ids: list[Annotated[str, Field(min_length=1, max_length=160)]] = Field(min_length=1, max_length=48)
+    model_alias: str | None = Field(default=None, max_length=120)
+    model: str | None = Field(default=None, max_length=200)
+
+
+class CanvasCategorySuggestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    asset_id: str
+    category: CategoryName | None
+    confidence: float = Field(ge=0, le=1)
+
+
+class CreationAssetMetadataUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    category: OptionalCategory
+
+
 class CreationAsset(BaseModel):
     model_config = ConfigDict(extra="forbid")
     asset_id: str = Field(min_length=1, max_length=160)
@@ -2049,6 +2185,7 @@ class CreationAsset(BaseModel):
     updated_at: str
     last_used_at: str | None = None
     content: CreationAssetContent
+    category: OptionalCategory = None
     project_ids: list[str] = Field(default_factory=list)
     adopted_from: AdoptionOrigin | None = None
 
@@ -2105,6 +2242,7 @@ class CreationMediaPathCreate(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=20)
     project_id: str | None = Field(default=None, min_length=1, max_length=160)
     allow_existing: bool = False
+    category: OptionalCategory = None
 
 
 class CreationAssetUseRequest(BaseModel):
@@ -2185,26 +2323,6 @@ class CanvasPluginState(BaseModel):
             raise ValueError("canvas plugin state exceeds 1 MiB")
         return self
 
-    @model_validator(mode="after")
-    def validate_namespace_ownership(self) -> "Job":
-        if self.namespace == "ui":
-            if not self.project_id or not self.ui_scheme_id or not self.screen_id:
-                raise ValueError("ui job requires project_id, ui_scheme_id and screen_id")
-            if self.kind is not JobKind.IMAGE:
-                raise ValueError("ui job must use kind=image")
-        elif self.ui_scheme_id is not None or self.screen_id is not None:
-            raise ValueError("ui_scheme_id and screen_id are only valid for namespace=ui")
-
-        if self.namespace == "video":
-            if not self.project_id or not self.production_id:
-                raise ValueError("video job requires project_id and production_id")
-            if self.kind is not JobKind.VIDEO:
-                raise ValueError("video namespace must use kind=video")
-        elif self.production_id is not None:
-            raise ValueError("production_id is only valid for namespace=video")
-        return self
-
-
 class WebEditableJobPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     prompt: str | None = None
@@ -2218,568 +2336,10 @@ class WebEditableJobPatch(BaseModel):
         return value
 
 
-class ArtWorkspaceSummary(BaseModel):
-    characters: int
-    canonical: int
-    stale: int
-
-
-class UiScreenSummary(BaseModel):
-    screen_id: str
-    name: str
-    category: str
-    priority: str
-    status: str
-    dependency: str
-    purpose: str = ""
-    brief_summary: str = ""
-
-
-class UiWorkspaceSummary(BaseModel):
-    scheme_id: str
-    anchors: dict[str, str]
-    anchors_approved: int
-    style_status: str
-    has_ui_style: bool
-    screen_map_status: str
-    screens: int
-    versions: int
-    canonical: int
-    stale: int
-    screen_items: list[UiScreenSummary]
-    next_action: str
-    next_command: str
-
-
-class VideoWorkspaceSummary(BaseModel):
-    productions: int
-    versions: int
-    selected: int
-    next_action: str
-
-
-class ProjectWorkspaceSummary(BaseModel):
-    project_id: str
-    art: ArtWorkspaceSummary
-    ui: UiWorkspaceSummary
-    video: VideoWorkspaceSummary
-
-
-class ProjectVideoJobRecord(BaseModel):
-    job_id: str
-    submitted_at: str
-    completed_at: str | None = None
-    status: JobStatus
-    prompt: str
-    model: str
-    params: JobParams
-
-
-class ProjectVideoBrief(BaseModel):
-    goal: str = ""
-    platform: str = ""
-    ratio: str = ""
-    duration: str = ""
-    sound: str = ""
-
-
-class ProjectVideoProduction(BaseModel):
-    production_id: str
-    title: str
-    type: str
-    status: str
-    brief: ProjectVideoBrief
-    prompt: str = ""
-    versions: list[str]
-    selected: str | None = None
-    planned_reference_images: list[str] = Field(default_factory=list)
-    history: list[ProjectVideoJobRecord] = Field(default_factory=list)
-
-
-class ProjectVideosResponse(BaseModel):
-    productions: list[ProjectVideoProduction]
-
-
-VideoReferenceKind = Literal["character", "ui_screen"]
-
-
-class ProjectVideoReferenceCandidate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: VideoReferenceKind
-    asset_id: str
-    label: str
-    detail: str
-    path: str
-    scheme_id: str | None = None
-    stale: bool = False
-
-
-class ProjectVideoReferencesResponse(BaseModel):
-    candidates: list[ProjectVideoReferenceCandidate]
-
-
-class VideoReferencesSet(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    paths: list[str] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def paths_are_unique(self) -> "VideoReferencesSet":
-        if len(self.paths) != len(set(self.paths)):
-            raise ValueError("paths must not contain duplicates")
-        return self
-
-
-class VideoReferencesResponse(BaseModel):
-    paths: list[str]
-
-
-class VideoReferencesFile(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    paths: list[str] = Field(default_factory=list)
-
-
-class VideoSelectedResponse(BaseModel):
-    path: str | None = None
-
-
-class SpecPatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    content: str = Field(min_length=1)
-    expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
-
-
-class FeedbackPost(BaseModel):
-    text: str = Field(min_length=1)
-    character_id: str = Field(min_length=1, pattern=r"^[^\r\n]+$")
-
-
 class ClipboardAttempt(BaseModel):
     ts: str
     success: bool
     reason: str | None = None
-
-
-CharacterName = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=80, pattern=r"^[^\r\n]+$"),
-]
-class CharacterDerivative(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    source_character_id: str = Field(min_length=1)
-    source_character_name: str = Field(min_length=1)
-    source_paths: list[str] = Field(default_factory=list)
-    created_at: str
-
-
-class CharacterEntry(BaseModel):
-    id: str
-    name: str
-    status: str
-    latest_job_id: str | None
-    # 名册缩略图：characters/<id>/portrait/ 下最新图片的 data-root 相对路径（无立绘为 None）
-    thumbnail: str | None = None
-    derivative: CharacterDerivative | None
-
-
-class CharacterAssociationUiTarget(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["ui"] = "ui"
-    scheme_id: str
-    screen_id: str
-
-
-class CharacterAssociationVideoTarget(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["video"] = "video"
-    production_id: str
-
-
-CharacterAssociationTarget = Annotated[
-    CharacterAssociationUiTarget | CharacterAssociationVideoTarget,
-    Field(discriminator="kind"),
-]
-
-
-class CharacterAssociationItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    character_id: str
-    target: CharacterAssociationTarget
-
-
-class CharacterAssociationsFile(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    items: list[CharacterAssociationItem] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def items_are_unique(self) -> "CharacterAssociationsFile":
-        keys = [
-            (item.character_id, item.target.model_dump_json())
-            for item in self.items
-        ]
-        if len(keys) != len(set(keys)):
-            raise ValueError("character associations must not contain duplicates")
-        return self
-
-
-class CharacterAssociationPatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    character_id: str
-    target: CharacterAssociationTarget
-    associated: bool
-
-
-class CharacterAssetGroup(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    slot: AssetSlot
-    count: int
-    canonical: CanonicalStatusEntry | None = None
-    media: list[GalleryMedia] = Field(default_factory=list)
-
-
-class CharacterRelatedObject(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    target: CharacterAssociationTarget
-    title: str
-    detail: str
-    source: Literal["auto", "manual", "both"]
-    featured_path: str | None = None
-    count: int
-    media: list[GalleryMedia] = Field(default_factory=list)
-
-
-class CharacterWorkspaceResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    character: CharacterEntry
-    assets: list[CharacterAssetGroup]
-    related: list[CharacterRelatedObject]
-    recent_media: list[GalleryMedia]
-
-
-class CharacterIndexItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    character: CharacterEntry
-    cover_path: str | None
-    activity_at: str
-
-
-class CharacterIndexResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    items: list[CharacterIndexItem]
-
-
-class CharacterDerivativeCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    name: CharacterName
-    source_paths: list[str] = Field(default_factory=list, max_length=40)
-
-
-class CharacterDerivativeContext(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    source_character_id: str
-    source_character_name: str
-    source_paths: list[str]
-    asset_slot: str
-
-
-class ActiveCharacterFile(BaseModel):
-    active_id: str | None
-    updated_at: str
-
-
-class Project(BaseModel):
-    id: str
-    slug: str
-    name: str
-    created_at: str
-
-
-class GalleryArtTarget(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["art"] = "art"
-    character_id: str
-    asset_slot: AssetSlot
-
-
-class GalleryUiTarget(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["ui"] = "ui"
-    scheme_id: str
-    screen_id: str
-
-
-class GalleryVideoTarget(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["video"] = "video"
-    production_id: str
-    output_kind: Literal["version"] = "version"
-
-
-GalleryTarget = Annotated[
-    GalleryArtTarget | GalleryUiTarget | GalleryVideoTarget,
-    Field(discriminator="kind"),
-]
-
-
-class GalleryMedia(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    path: str
-    media_type: Literal["image", "video"]
-    produced_at: str
-    title: str
-    detail: str
-    job_id: str | None = None
-    target: GalleryTarget
-
-
-class ProjectGalleryResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    items: list[GalleryMedia]
-    next_cursor: str | None = None
-
-
-class ProjectIndexItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    project: Project
-    cover_paths: list[str]
-    activity_at: str
-
-
-class ProjectIndexResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    items: list[ProjectIndexItem]
-
-
-class ProjectsFile(BaseModel):
-    # 项目列表 + 角色 → 项目 的归属表。未归属的角色直接不在 assignments 里。
-    projects: list[Project] = []
-    assignments: dict[str, str] = {}  # character_id → project_id
-
-
-UiSchemeName = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=60),
-]
-
-
-class UiScheme(BaseModel):
-    creation_request_id: str | None = None
-    model_config = ConfigDict(extra="forbid")
-    id: str
-    name: UiSchemeName
-    created_at: str
-
-
-class UiSchemesFile(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    default_scheme_id: str
-    schemes: list[UiScheme]
-
-
-class UiSchemeCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    name: UiSchemeName
-    source_scheme_id: str | None = None
-    copy_style: bool = False
-    copy_screen_map: bool = False
-    screen_ids: list[str] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def copy_requires_source(self) -> "UiSchemeCreate":
-        if (self.copy_style or self.copy_screen_map or self.screen_ids) and not self.source_scheme_id:
-            raise ValueError("copy options require source_scheme_id")
-        if len(self.screen_ids) != len(set(self.screen_ids)):
-            raise ValueError("screen_ids must not contain duplicates")
-        return self
-
-
-class UiSchemeDefaultSet(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    scheme_id: str = Field(min_length=1)
-
-
-class ProjectCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=60)
-
-
-class ProjectRename(BaseModel):
-    name: str = Field(min_length=1, max_length=60)
-
-
-class CharacterProjectAssign(BaseModel):
-    project_id: str | None = None  # None = 取消归属
-
-
-class CanonicalEntry(BaseModel):
-    # A2（2026-08-10）：单 slot 定稿记录。path 为 data-root 相对路径。
-    # spec_fingerprint = 写入时 spec.md visual_dna+anchors 内容 hash（A3 stale 检测用）。
-    # style_fingerprint = 写入时所属项目 style.md 内容 hash（A3；未归属项目 → ""）。
-    model_config = ConfigDict(extra="forbid")
-    path: str
-    set_at: str
-    spec_fingerprint: str = ""
-    style_fingerprint: str = ""
-
-
-class CanonicalFile(BaseModel):
-    # characters/<id>/canonical.json —— 每 slot 至多一张定稿。
-    model_config = ConfigDict(extra="forbid")
-    portrait: CanonicalEntry | None = None
-    promo: CanonicalEntry | None = None
-    turnaround: CanonicalEntry | None = None
-
-
-class CanonicalStatusEntry(CanonicalEntry):
-    # A3：API 响应用的计算态 —— 存储指纹 vs 当前指纹比对结果，不落盘。
-    # 存储指纹为 ""（旧数据 / 无 spec / 未归属项目）时无从比对，按不 stale 处理。
-    spec_stale: bool = False
-    style_stale: bool = False
-
-
-class CanonicalStatusFile(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    portrait: CanonicalStatusEntry | None = None
-    promo: CanonicalStatusEntry | None = None
-    turnaround: CanonicalStatusEntry | None = None
-
-
-class CanonicalSet(BaseModel):
-    # POST /api/characters/{id}/canonical 请求体。path=None 表示取消该 slot 定稿。
-    model_config = ConfigDict(extra="forbid")
-    slot: AssetSlot
-    path: str | None = None
-
-
-class ScreenCanonicalEntry(BaseModel):
-    # B3（2026-08-10）：单个 screen 的定稿记录。path 为 data-root 相对路径。
-    # style_fingerprint = 写入时项目基线 + UI 方案 style.md 的组合 hash。
-    model_config = ConfigDict(extra="forbid")
-    path: str
-    set_at: str
-    style_variant: str = ""
-    style_fingerprint: str = ""
-
-
-class ScreenCanonicalFile(BaseModel):
-    # projects/<slug>/ui/<scheme>/screens/canonical.json —— 每页至多一张定稿。
-    model_config = ConfigDict(extra="forbid")
-    screens: dict[str, ScreenCanonicalEntry] = Field(default_factory=dict)
-
-
-class ScreenCanonicalStatusEntry(ScreenCanonicalEntry):
-    # A3：API 响应用的计算态，不落盘。存储指纹为 "" 时按不 stale 处理。
-    style_stale: bool = False
-
-
-class ScreenCanonicalStatusFile(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    screens: dict[str, ScreenCanonicalStatusEntry] = Field(default_factory=dict)
-
-
-class ScreenCanonicalSet(BaseModel):
-    # 方案 canonical 端点请求体。path=None 表示取消该 screen 定稿。
-    model_config = ConfigDict(extra="forbid")
-    screen_id: str
-    path: str | None = None
-
-
-class TurnStage(str, Enum):
-    # turn-start v4/v5：file system 探测结果
-    # A = characters/ 不存在；B = 空 characters/；C = active 缺失/失效
-    # D = 正常回流（active 完整且已归属项目）
-    # E = active 完整但未归属任何项目（Stage E 兜底）
-    A = "A"
-    B = "B"
-    C = "C"
-    D = "D"
-    E = "E"
-
-
-class IntentKind(str, Enum):
-    # 仅 stage D 时有值。null = 不在 stage D。
-    NEW = "new"
-    REVISE = "revise"
-    CREATE = "create"
-    SWITCH = "switch"
-
-
-class RecentCharacter(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: str
-    tagline: str  # spec.md 首行非空、非标题内容，≤30 字
-
-
-class PendingCharacterIdentity(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    old_id: str
-    display_name: str
-    recommended_id: str
-    spec_status: str
-    project_id: str | None = None
-    project_name: str | None = None
-    asset_counts: dict[str, int]
-    job_count: int
-    has_assets: bool
-    is_active: bool = False
-
-
-class RecommendAction(str, Enum):
-    # v4.1.0 决策表 —— 把"裸触发 default 默认出图"误推从 LLM 收回。
-    RENDER_CARD = "render_card"
-    ASK = "ask"
-    SWITCH = "switch"
-    NOOP = "noop"
-
-
-class TurnStartResult(BaseModel):
-    # v4.0.0 CLI 输出契约。Skill 端按 stage 分支。
-    # v4.1.0：新增 recommend_action / recommend_reason / active_age_minutes
-    # —— SKILL.md 按 recommend_action 分叉，intent 字段保留 debug 用。
-    # v5.0.0：新增 Stage E + 三层 lessons/worldview 字段 + project_{id,slug,name}
-    model_config = ConfigDict(extra="forbid")
-    stage: TurnStage
-    stage_reason: str
-    intent: IntentKind | None
-    intent_signal: str
-    intent_conflict: bool
-    recommend_action: RecommendAction
-    recommend_reason: str
-    active_age_minutes: int | None
-    recent_chars: list[RecentCharacter]
-    drafts: list[dict]
-    active_id: str | None
-    active_updated_at: str
-    spec: str | None
-    spec_status: str = "missing"
-    pending_identity_normalizations: list[PendingCharacterIdentity] = Field(
-        default_factory=list
-    )
-    project_id: str | None
-    project_slug: str | None
-    project_name: str | None
-    # v5.3.0：经验沉淀闭环 —— 待沉淀的高分/喜欢角色图，每条 {path, rating, kind}。
-    pending_distill: list[dict] = Field(default_factory=list)
-    # v5.2.0：characters 为空时 SKILL 据此决定先问项目还是直接问角色。
-    has_projects: bool = False
-    projects: list[dict] = Field(default_factory=list)
-    # v5.3.0：项目经验/世界观 ← projects/<slug>/worldview.md（Web「项目经验」页可编辑）。
-    # 项目级出图经验改由 lessons_project（kind 段）承载，不再返回 MEMORY.md 全文。
-    project_worldview: str = ""
-    lessons_workspace: str
-    lessons_project: str
-    lessons_kind: str
-    # v5.1.0 (Phase 3): Key 选择协议 — AI 决策时读这两个字段。
-    available_keys: list[dict] = Field(default_factory=list)
-    preferred_alias: str | None = None
-    # v5.4.0 (A1): 项目风格契约全文 ← projects/<slug>/style.md（无归属 / 无契约 → ""）。
-    project_style: str = ""
-    derivative: CharacterDerivativeContext | None = None
-    # v5.4.0 (A2): active 角色定稿 ← characters/<id>/canonical.json（promo/turnaround 选参考图用）。
-    canonical: dict = Field(default_factory=dict)
-
-
-# ---------------------------------------------------------------------------
-# 团队库（P1）：挂载目录只读共享，本机身份只有一个显示名。
-# ---------------------------------------------------------------------------
 
 
 class UserProfile(BaseModel):
@@ -3053,3 +2613,92 @@ class TeamLibraryChangeEvent(BaseModel):
     title: str | None = None
     status: Literal["ready", "incomplete"] | None = None
     mime_type: str | None = None
+
+
+class ModelRouteMemberStatus(BaseModel):
+    modality: str
+    alias: str
+    reason: str = "insufficient_balance"
+    since: str | None
+    next_probe_at: str
+    route_ids: list[str]
+
+
+class UnavailableModelRoute(BaseModel):
+    id: str
+    name: str
+    modality: str
+
+
+class ModelRouteMemberStatusResponse(BaseModel):
+    members: list[ModelRouteMemberStatus]
+    unavailable_routes: list[UnavailableModelRoute]
+
+
+class UsageTotals(BaseModel):
+    cost_cny: float
+    unpriced: int
+    previous_cost_cny: float | None
+    count: int
+    by_kind: dict[str, int]
+    failed: int
+    active_members: int | None
+    member_count: int | None
+
+
+class UsageTrend(BaseModel):
+    start: str
+    cost_cny: float
+
+
+class UsageRankingRow(BaseModel):
+    key: str
+    label: str
+    cost_cny: float
+    count: int
+    unpriced: int
+
+
+class UsageRanking(BaseModel):
+    by: Literal["model", "project", "member"]
+    rows: list[UsageRankingRow]
+
+
+class UsageTask(BaseModel):
+    id: str
+    cost_cny: float | None  # None = 未计价
+    at: str
+    kind: str
+    model: str
+    label: str
+    source: Literal["local", "lan"]
+    alias: str | None
+    status: str
+    duration_s: float | None
+    project_label: str | None
+    member_label: str | None
+    prompt: str | None = None
+    thumb_url: str | None
+    href: str | None
+
+
+class UsageTasksResponse(BaseModel):
+    rows: list[UsageTask]
+    total: int
+    next_offset: int | None
+
+
+class UsageMember(BaseModel):
+    id: str
+    name: str
+
+
+class UsageResponse(BaseModel):
+    scope: Literal["mine", "team"]
+    range: Literal["today", "7d", "30d", "90d", "all"]
+    bucket: Literal["day", "week"]
+    totals: UsageTotals
+    trend: list[UsageTrend]
+    rankings: list[UsageRanking]
+    sources: list[Literal["local", "lan"]]
+    members: list[UsageMember]

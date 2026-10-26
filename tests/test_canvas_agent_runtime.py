@@ -229,8 +229,8 @@ def _rows(kind: str) -> list[dict]:
 
 
 def test_model_scope_follows_creation_mode_and_preference(monkeypatch):
-    from character_workflow.lib import workshop_generation
-    monkeypatch.setattr(workshop_generation, "model_rows", _rows)
+    from character_workflow.lib import canvas_model_catalog
+    monkeypatch.setattr(canvas_model_catalog, "model_rows", _rows)
     image_only = runtime.ModelScope("image", frozenset({("a", "img-2")}))
     assert [row["model"] for row in image_only.models("image")] == ["img-2"]
     assert image_only.models("video") == []
@@ -257,9 +257,9 @@ def test_scope_of_session_keeps_selection_while_auto():
     (runtime.ModelScope("video"), "video", "vid-1", None),
 ])
 def test_generation_is_gated_by_scope(monkeypatch, scope, mode, model, error):
-    from character_workflow.lib import workshop_generation
-    from character_workflow.lib.workshop import WorkshopError
-    monkeypatch.setattr(workshop_generation, "model_rows", _rows)
+    from character_workflow.lib import canvas_model_catalog
+    from character_workflow.lib.canvas_tool_common import CanvasToolError
+    monkeypatch.setattr(canvas_model_catalog, "model_rows", _rows)
     draft = SimpleNamespace(mode=mode, alias="a", model=model)
     document = SimpleNamespace(nodes=[SimpleNamespace(id="n", data=SimpleNamespace(
         generation_draft=draft))])
@@ -267,7 +267,7 @@ def test_generation_is_gated_by_scope(monkeypatch, scope, mode, model, error):
     if error is None:
         runtime._check_generation_allowed("p", "n", scope)
         return
-    with pytest.raises(WorkshopError, match=error):
+    with pytest.raises(CanvasToolError, match=error):
         runtime._check_generation_allowed("p", "n", scope)
 
 
@@ -285,8 +285,8 @@ def test_session_settings_store_creation_mode_and_preference(isolated_data_root)
 
 
 def test_missing_draft_alias_is_filled_only_when_unique(monkeypatch):
-    from character_workflow.lib import workshop_generation
-    monkeypatch.setattr(workshop_generation, "model_rows", lambda kind: {
+    from character_workflow.lib import canvas_model_catalog
+    monkeypatch.setattr(canvas_model_catalog, "model_rows", lambda kind: {
         "image": [{"alias": "Tuzi", "model": "seedream"}, {"alias": "A", "model": "gpt"},
                   {"alias": "B", "model": "gpt"}], "video": []}[kind])
     changes = [{"op": "set_draft", "node_id": "n", "mode": "image", "model": "seedream"},
@@ -296,3 +296,16 @@ def test_missing_draft_alias_is_filled_only_when_unique(monkeypatch):
     assert filled[0]["alias"] == "Tuzi"
     assert "alias" not in filled[1]  # 两家都有：不猜，交给生成前的校验报错
     assert filled[2] == changes[2]
+
+
+def test_disabled_chat_provider_is_not_fetched_or_listed(isolated_data_root, monkeypatch):
+    from character_workflow.lib import canvas_agent_models
+
+    keys.write_keys_db(keys.KeysDB(keys=[keys.KeySpec(
+        alias="disabled", provider="openai", enabled=False, access_key="test",
+        created_at="2026-10-25", models=[keys.ModelSpec(id="gpt-5", name="GPT 5", modality="text")],
+    )]))
+    def unexpected_fetch(_key):
+        raise AssertionError("disabled provider must not be contacted")
+    monkeypatch.setattr(canvas_agent_models, "_fetch", unexpected_fetch)
+    assert canvas_agent_models.list_chat_models() == {"models": [], "errors": []}

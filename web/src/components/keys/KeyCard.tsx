@@ -4,6 +4,7 @@ import { providerLabel } from '@/lib/providerLabels';
 
 export interface KeyRow {
   alias: string;
+  enabled?: boolean;
   provider: string;
   base_url?: string | null;
   billing_group?: string | null;
@@ -41,6 +42,7 @@ export function KeyCard({ row, onEdit, onDelete }: Props) {
   const videoCount = models.filter((m) => modelModality(m, row) === 'video').length;
   const audioCount = models.filter((m) => modelModality(m, row) === 'audio').length;
 
+
   return (
     <div className="flex items-center gap-4 px-4 py-3 transition-colors hover:bg-secondary/30">
       <div className="min-w-0 flex-1 space-y-1">
@@ -68,22 +70,22 @@ export function KeyCard({ row, onEdit, onDelete }: Props) {
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         {textCount > 0 && (
-          <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+          <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
             文本 {textCount}
           </span>
         )}
         {imageCount > 0 && (
-          <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+          <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
             图 {imageCount}
           </span>
         )}
         {videoCount > 0 && (
-          <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+          <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
             视频 {videoCount}
           </span>
         )}
         {audioCount > 0 && (
-          <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+          <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
             音频 {audioCount}
           </span>
         )}

@@ -18,12 +18,11 @@ from typing import Any
 import requests
 
 from character_workflow.lib import keys
-from character_workflow.lib.callers.openai_compat import api_root
+from character_workflow.lib.callers.openai_compat import key_api_root
 
 logger = logging.getLogger(__name__)
 
-CHAT_PROVIDERS = frozenset({"openai", "openrouter", "custom", "seedream", "tokendance"})
-OPENAI_BASE_URL = "https://api.openai.com/v1"
+CHAT_PROVIDERS = frozenset({"openai", "openrouter", "custom", "seedream", "tokendance", "atelier"})
 CACHE_SECONDS = 600
 FETCH_TIMEOUT = (5, 20)
 
@@ -40,7 +39,7 @@ _cache_lock = threading.Lock()
 
 
 def chat_base_url(key: keys.KeySpec) -> str:
-    return api_root(key.base_url or OPENAI_BASE_URL)
+    return key_api_root(key)
 
 
 def is_chat_model(item: dict[str, Any]) -> bool:
@@ -82,10 +81,13 @@ def enabled_text_models(key: keys.KeySpec) -> list[keys.ModelSpec]:
 
 def _fetch(key: keys.KeySpec) -> dict[str, dict]:
     """上游 /models 里每个模型的能力：{id: {"agent": bool, "reasoning": bool | None}}。"""
+    from character_workflow.lib.callers.atelier_gateway import DIRECT_PROXIES
+
     response = requests.get(
         f"{chat_base_url(key)}/models",
         headers={"Authorization": f"Bearer {key.access_key}"},
         timeout=FETCH_TIMEOUT,
+        **({"proxies": DIRECT_PROXIES} if key.provider == "atelier" else {}),
     )
     response.raise_for_status()
     data = response.json().get("data") or []
@@ -126,7 +128,7 @@ def list_chat_models() -> dict:
     """Every configured key's enabled agent-capable text models; failures are reported per key."""
     candidates = [
         key for key in keys.read_keys_db().keys
-        if key.provider in CHAT_PROVIDERS and (key.base_url or key.provider == "openai")
+        if key.enabled and key.provider in CHAT_PROVIDERS and (key.base_url or key.provider == "openai")
         and enabled_text_models(key)
     ]
     if not candidates:

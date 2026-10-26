@@ -25,3 +25,9 @@ def api_root(base_url: str) -> str:
     if not path or path == "/":
         path = "/v1"
     return urlunsplit((parts.scheme, parts.netloc, path, "", "")).rstrip("/")
+
+
+def key_api_root(key) -> str:
+    if key.provider == "atelier":
+        return (key.base_url or "").rstrip("/") + "/gateway/v1/openai"
+    return api_root(key.base_url or "https://api.openai.com/v1")

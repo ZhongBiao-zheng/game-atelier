@@ -1,0 +1,33 @@
+{
+  "EVOLINK_MIDJOURNEY_USD_PER_REQUEST": {
+    "generation": 0.08,
+    "imageEdit": 0.12
+  },
+  "GENERATION_USD_TO_CNY": 7,
+  "ARK_SEEDREAM_YUAN_PER_IMAGE": {
+    "doubao-seedream-5-0-260128": 0.22,
+    "doubao-seedream-4-5-251128": 0.25
+  },
+  "ARK_SEEDANCE_YUAN_PER_MILLION_TOKENS": {
+    "doubao-seedance-2-0-fast-260128": 37,
+    "doubao-seedance-2-0-260128": {
+      "standard": 46,
+      "1080p": 51
+    },
+    "doubao-seedance-1-5-pro-260428": {
+      "silent": 8,
+      "audio": 16
+    },
+    "doubao-seedance-1-0-pro-250528": 15
+  },
+  "HAPPYHORSE_1_1_YUAN_PER_SECOND": {
+    "480p": 0.45,
+    "720p": 0.9,
+    "1080p": 1.2
+  },
+  "HAPPYHORSE_1_0_YUAN_PER_SECOND": {
+    "720p": 0.9,
+    "1080p": 1.6
+  },
+  "text_yuan_per_million_tokens": {}
+}
