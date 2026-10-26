@@ -13,9 +13,14 @@ import re
 import socket
 import subprocess
 import sys
+import json
+import urllib.request
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+
+import bootstrap
 
 REPO = Path(__file__).resolve().parent.parent
 CNB_URL = "https://cnb.cool/ZhongBiao-zheng/game-atelier.git"
@@ -158,6 +163,24 @@ def main() -> int:
     branch = out("rev-parse", "--abbrev-ref", "HEAD") or "?"
     current = version_at("HEAD")
     print(f"当前 {current}（{branch} @ {out('rev-parse', '--short', 'HEAD') or '?'}）")
+
+    # 先读小文件；开发分支可能领先 main，同版或较旧版本不值得 git fetch。
+    try:
+        with urllib.request.urlopen(
+            bootstrap.LATEST_VERSION_URL, timeout=bootstrap.UPDATE_FETCH_TIMEOUT,
+        ) as response:
+            latest = json.load(response)["version"]
+        bootstrap._version_tuple(latest)
+        cache = bootstrap._read_update_cache()
+        cache.update({"checked_at": time.time(), "latest": latest})
+        bootstrap._write_update_cache(cache)
+        if bootstrap._version_tuple(latest) <= bootstrap._version_tuple(current):
+            print("已是最新")
+            return 0
+    except Exception as exc:
+        warn(f"无法检查更新：{exc}")
+        bootstrap._write_update_cache({"checked_at": time.time(), "latest": None})
+        return 0
 
     if not fetch(probe()):
         warn("连不上更新源，跳过更新")

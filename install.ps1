@@ -120,6 +120,27 @@ if ($Uninstall) {
 }
 
 if ($Sync) {
+  # 链接内容即时生效；检查集合和精确目标，不遍历其他代理 Skill 的正文。
+  $owned = @(Get-OwnedCodexLinks)
+  $hasClaude = Test-OurLink $ClaudeLink
+  $current = $true
+  if ($hasClaude) {
+    $current = (Get-Item -LiteralPath $ClaudeLink).Target -contains $RepoRoot
+  }
+  if ($owned.Count -gt 0) {
+    foreach ($s in $Skills) {
+      $item = Get-Item -LiteralPath (Join-Path $CodexDir "$PluginName-$s") -Force -ErrorAction SilentlyContinue
+      if (($null -eq $item) -or ($item.LinkType -notin @("SymbolicLink", "Junction")) -or
+          ($item.Target -notcontains (Join-Path $RepoRoot "skills\$s"))) { $current = $false }
+    }
+    foreach ($item in $owned) {
+      if ($Skills -notcontains $item.Name.Substring("$PluginName-".Length)) { $current = $false }
+    }
+  }
+  if (($hasClaude -or $owned.Count -gt 0) -and $current) {
+    Write-Host "Skill 无变化，跳过"
+    exit 0
+  }
   Write-Host "=== game-atelier 本地同步（源码：$RepoRoot）==="
 } else {
   Write-Host "=== game-atelier 本地安装（源码：$RepoRoot）==="

@@ -35,6 +35,7 @@ sync_local_skills() {
 
 echo "Game Atelier"
 echo
+SECONDS=0
 
 UV="$(command -v uv 2>/dev/null || true)"
 if [ -z "$UV" ] && [ -x "$HOME/.local/bin/uv" ]; then
@@ -60,15 +61,23 @@ if [ -z "$UV" ]; then
 fi
 
 export PATH="$(dirname "$UV"):$PATH"
+echo "[1/6] 检查运行工具 … ${SECONDS}.0s"
+SECONDS=0
 
 if [ "${1:-}" != "--skip-update" ]; then
   # 更新逻辑在 self_update.py（与 Windows 共用）；退出码 10 = 已更新，重跑新版启动器。
   "$UV" run --no-project python scripts/self_update.py
-  [ $? -eq 10 ] && exec bash "$_self" --skip-update
+  update_status=$?
+  echo "[2/6] 检查更新 … ${SECONDS}.0s"
+  [ "$update_status" -eq 10 ] && exec bash "$_self" --skip-update
+else
+  echo "[2/6] 检查更新（已完成） … 0.0s"
 fi
 echo
 
+SECONDS=0
 sync_local_skills
+echo "[3/6] 同步 Skill … ${SECONDS}.0s"
 
 if [ ! -f "web/dist/index.html" ]; then
   err "前端文件 web/dist 缺失，请双击「Mac一键修复.command」"

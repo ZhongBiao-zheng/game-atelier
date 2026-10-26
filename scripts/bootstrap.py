@@ -451,15 +451,20 @@ def launch() -> int:
         return 1
     if resolve_data_root() is None:
         init_data_root(Path.home() / APP_NAME)
+    started = time.perf_counter()
     result = ensure_venv(quiet=True)
+    print(f"[4/6] 检查依赖 … {time.perf_counter() - started:.1f}s", flush=True)
     if result:
         return result
-    print("停止旧实例…", flush=True)
+    started = time.perf_counter()
     result = run_in_venv(["-m", "viewer_server.server", "stop"])
+    print(f"[5/6] 停止旧实例 … {time.perf_counter() - started:.1f}s", flush=True)
     if result:
         return result
-    print("启动工坊…", flush=True)
-    return run_in_venv(["-m", "viewer_server.server", "start", "--background"])
+    started = time.perf_counter()
+    result = run_in_venv(["-m", "viewer_server.server", "start", "--background"])
+    print(f"[6/6] 启动工坊 … {time.perf_counter() - started:.1f}s", flush=True)
+    return result
 
 
 def _force_utf8_stdio() -> None:

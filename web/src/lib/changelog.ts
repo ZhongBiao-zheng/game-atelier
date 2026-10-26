@@ -32,6 +32,10 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.124.0', date: '2026-10-26', headline: '日常启动提速', changes: [
+    { kind: 'fix', text: '没有新版本时跳过源码拉取，Skill 链接未变时跳过同步。' },
+    { kind: 'feat', text: '启动器显示各阶段耗时，更新检查失败时显示原因。' },
+  ] },
   { version: '5.123.0', date: '2026-10-25', headline: '设置分组与侧栏联动', changes: [
     { kind: 'feat', text: '设置按外观、存储和个人分组，侧栏可直达分区；显示名修改后才出现保存。' },
     { kind: 'feat', text: '侧栏显示本机局域网共享状态，网关开关变化即时更新。' },

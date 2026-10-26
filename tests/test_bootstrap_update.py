@@ -5,6 +5,8 @@
 import importlib.util
 import json
 import time
+import io
+import sys
 from pathlib import Path
 
 import pytest
@@ -107,3 +109,49 @@ def test_kill_switch_returns_none(update_env, monkeypatch):
 def test_malformed_latest_version_is_not_update(update_env):
     _seed_cache(update_env, checked_at=time.time(), latest="5.1.0-beta")
     assert bootstrap.update_info()["update_available"] is False
+
+
+@pytest.mark.parametrize("latest", ["5.0.0", "4.9.9", "bad", None])
+def test_source_update_skips_git_fetch_without_newer_version(tmp_path, monkeypatch, capsys, latest):
+    monkeypatch.setitem(sys.modules, "bootstrap", bootstrap)
+    monkeypatch.setattr(bootstrap, "_user_config_dir", lambda: tmp_path / "config")
+    spec = importlib.util.spec_from_file_location("self_update", REPO_ROOT / "scripts/self_update.py")
+    updater = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(updater)
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setattr(updater, "REPO", tmp_path)
+    monkeypatch.setattr(updater, "out", lambda *args: "dev")
+    monkeypatch.setattr(updater, "version_at", lambda ref: "5.0.0")
+    monkeypatch.setattr(updater, "fetch", lambda *args: pytest.fail("不应 git fetch"))
+    monkeypatch.setattr(updater.urllib.request, "urlopen", lambda *args, **kwargs:
+                        io.BytesIO(json.dumps({"version": latest}).encode()))
+    assert updater.main() == 0
+    if latest in ("bad", None):
+        assert "无法检查更新：" in capsys.readouterr().out
+
+
+def test_source_update_fetches_only_after_newer_version(tmp_path, monkeypatch, capsys):
+    monkeypatch.setitem(sys.modules, "bootstrap", bootstrap)
+    monkeypatch.setattr(bootstrap, "_user_config_dir", lambda: tmp_path / "config")
+    spec = importlib.util.spec_from_file_location("self_update", REPO_ROOT / "scripts/self_update.py")
+    updater = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(updater)
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setattr(updater, "REPO", tmp_path)
+    monkeypatch.setattr(updater, "out", lambda *args: "dev")
+    monkeypatch.setattr(updater, "version_at", lambda ref: "5.0.0")
+    monkeypatch.setattr(updater, "probe", lambda: {})
+    calls = []
+    monkeypatch.setattr(updater, "fetch", lambda *args: calls.append(1) or False)
+    monkeypatch.setattr(updater.urllib.request, "urlopen", lambda *args, **kwargs:
+                        io.BytesIO(b'{"version":"5.1.0"}'))
+    assert updater.main() == 0
+    assert calls == [1]
+
+    def offline(*args, **kwargs):
+        raise OSError("offline")
+
+    monkeypatch.setattr(updater.urllib.request, "urlopen", offline)
+    assert updater.main() == 0
+    assert calls == [1]
+    assert "无法检查更新：offline" in capsys.readouterr().out

@@ -66,6 +66,15 @@ def test_install_links_every_current_skill(tmp_path: Path):
     }
     assert links == _skill_names()
 
+    unchanged = _run_install(tmp_path, "--sync")
+    assert unchanged.returncode == 0, unchanged.stderr
+    assert "Skill 无变化，跳过" in unchanged.stdout
+    missing = tmp_path / ".codex/skills/game-atelier-viewer-server"
+    missing.unlink()
+    repaired = _run_install(tmp_path, "--sync")
+    assert repaired.returncode == 0, repaired.stderr
+    assert missing.resolve() == REPO_ROOT / "skills/viewer-server"
+
 
 @posix_only
 def test_sync_does_not_create_a_new_local_install(tmp_path: Path):
