@@ -70,7 +70,7 @@ function NavTab({ to, label, isActive, icon: Icon, badge = 0 }: { to: string; la
   );
 }
 
-export function AppShell() {
+export function AppShell({ latestRelease = null }: { latestRelease?: string | null }) {
   const [loc, setLocation] = useLocation();
   const onStudio = loc === '/studio';
   const onCanvas = loc.startsWith('/canvas');
@@ -90,6 +90,11 @@ export function AppShell() {
   });
 
   const ContentTag = onSettings ? 'div' : 'main';
+  const releaseLink = latestRelease && <a
+    href={`https://github.com/ZhongBiao-zheng/game-atelier/releases/tag/v${encodeURIComponent(latestRelease)}`}
+    target="_blank" rel="noopener noreferrer"
+    className="rounded-full px-3 py-2 text-xs text-primary hover:bg-secondary/60"
+  >有新版本 {latestRelease}</a>;
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
       {!immersiveCanvas && <header className="sticky top-0 z-30 shrink-0">
@@ -105,6 +110,7 @@ export function AppShell() {
             </nav>
           </LayoutGroup>
           <div className="flex min-w-0 shrink-0 items-center justify-end gap-1 sm:gap-2">
+            <span className="hidden sm:contents">{releaseLink}</span>
             <ChangelogButton />
             <ThemeToggle />
             <Link
@@ -119,6 +125,7 @@ export function AppShell() {
             </Link>
           </div>
         </div>
+        {latestRelease && <div className="flex justify-end px-3 pb-2 sm:hidden">{releaseLink}</div>}
       </header>}
 
       {/* stable-scroll：本壳是首页/工坊的真·滚动容器，固定滚动槽避免滚动条增删改内宽 → 列宽 → w-full 图高 → 墙高的自激抽搐环（见 scrollbar-gutter-feedback-loop memory）*/}

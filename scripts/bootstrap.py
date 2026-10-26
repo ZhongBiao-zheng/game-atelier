@@ -28,6 +28,11 @@ ENV_VAR = "GAME_ATELIER_DATA_ROOT"
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 
 
+def is_bundle() -> bool:
+    """只有包内解释器才能启用离线运行路径，目录名或环境变量不能冒充。"""
+    return Path(sys.executable).resolve().is_relative_to(PLUGIN_DIR.parent / "python")
+
+
 def _user_config_dir() -> Path:
     """等价 platformdirs.user_config_dir(APP_NAME)；platformdirs 缺失时逐平台兜底。
 
@@ -65,6 +70,8 @@ def resolve_data_root() -> Path | None:
 
 
 def _venv_python(data_root: Path) -> Path:
+    if is_bundle():
+        return Path(sys.executable)
     if sys.platform == "win32":
         return data_root / ".venv" / "Scripts" / "python.exe"
     return data_root / ".venv" / "bin" / "python"
@@ -86,6 +93,8 @@ def _venv_signature() -> str:
 
 
 def _venv_is_current(data_root: Path) -> bool:
+    if is_bundle():
+        return True
     hash_file = _venv_hash_file(data_root)
     return (
         _venv_python(data_root).is_file()
@@ -132,7 +141,8 @@ def _fetch_latest_version() -> str | None:
         with urllib.request.urlopen(LATEST_VERSION_URL, timeout=UPDATE_FETCH_TIMEOUT) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
         return payload.get("version") or None
-    except Exception:  # 网络/代理/解析任何失败都静默——更新检查绝不阻断工作流
+    except Exception as error:
+        print(f"无法检查更新：{error}", file=sys.stderr)
         return None
 
 
@@ -240,7 +250,7 @@ def check() -> dict:
         }
 
     uv_path = shutil.which("uv")
-    if uv_path is None:
+    if uv_path is None and not is_bundle():
         return {
             "status": "needs_uv",
             "data_root": str(data_root),
@@ -308,6 +318,8 @@ def check() -> dict:
 
 def ensure_venv(*, quiet: bool = False) -> int:
     """按签名同步唯一运行环境；普通启动不执行 uv，不访问包源。"""
+    if is_bundle():
+        return 0
     data_root = resolve_data_root()
     if data_root is None:
         print(json.dumps({
@@ -440,6 +452,10 @@ def run_in_venv(forward_args: list[str], *, stdout=None) -> int:
         "VIRTUAL_ENV": str(data_root / ".venv"),
         "UV_PROJECT_ENVIRONMENT": str(data_root / ".venv"),
     }
+    if is_bundle():
+        env.pop("VIRTUAL_ENV", None)
+        env.pop("UV_PROJECT_ENVIRONMENT", None)
+        env["PYTHONPATH"] = str(PLUGIN_DIR / "src")
     proc = subprocess.run([str(venv_py), *forward_args], env=env, stdout=stdout)
     return proc.returncode
 
@@ -451,6 +467,8 @@ def launch() -> int:
         return 1
     if resolve_data_root() is None:
         init_data_root(Path.home() / APP_NAME)
+    if is_bundle():
+        update_info()
     started = time.perf_counter()
     result = ensure_venv(quiet=True)
     print(f"[4/6] 检查依赖 … {time.perf_counter() - started:.1f}s", flush=True)
@@ -512,6 +530,7 @@ def main() -> int:
     if args.check:
         result = check()
         result["update"] = update_info()
+        result["runtime_mode"] = "bundle" if is_bundle() else "source"
         print(json.dumps(result, ensure_ascii=False))
         return 0
 

@@ -32,6 +32,10 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.125.0', date: '2026-10-26', headline: '离线安装包', changes: [
+    { kind: 'feat', text: '支持自带 Python 与依赖的安装包，解压后即可启动，用户数据独立保存。' },
+    { kind: 'feat', text: '安装包发现新版本时显示下载入口。' },
+  ] },
   { version: '5.124.0', date: '2026-10-26', headline: '日常启动提速', changes: [
     { kind: 'fix', text: '没有新版本时跳过源码拉取，Skill 链接未变时跳过同步。' },
     { kind: 'feat', text: '启动器显示各阶段耗时，更新检查失败时显示原因。' },

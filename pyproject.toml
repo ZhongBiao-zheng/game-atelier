@@ -14,6 +14,8 @@ dependencies = [
   "pypinyin>=0.53",
   "platformdirs>=4",
   'pywin32>=308; sys_platform == "win32"',
+  # Windows 不提供 IANA 时区库，团队额度的日/周/月周期需要它。
+  'tzdata>=2025.2; sys_platform == "win32"',
   "oss2>=2.19.1",
   "pillow>=12.3,<13",
   "mcp>=2.1.1,<3",
