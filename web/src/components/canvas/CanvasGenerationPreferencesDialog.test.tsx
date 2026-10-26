@@ -84,7 +84,7 @@ describe('CanvasGenerationPreferencesDialog', () => {
     expect(screen.getByText('自动选择')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '选择生成模型' }));
     expect(screen.getByRole('option', { name: 'GPT Image 1' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Seedream 5 Lite' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Seedream 5 Lite' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Nano Banana Pro' })).not.toBeInTheDocument();
 
     await user.keyboard('{Escape}');
@@ -92,6 +92,10 @@ describe('CanvasGenerationPreferencesDialog', () => {
     expect(screen.queryByRole('option', { name: 'Seedream 5 Lite' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '选择生成模型' }));
 
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: '选择生成供应商' }));
+    await user.click(screen.getByRole('option', { name: /备用图片/ }));
+    await user.click(screen.getByRole('button', { name: '选择生成模型' }));
     await user.click(screen.getByRole('option', { name: 'Seedream 5 Lite' }));
     await user.click(screen.getByRole('button', { name: '图片设置' }));
     await user.click(screen.getByRole('option', { name: '2 张' }));

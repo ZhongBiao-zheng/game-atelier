@@ -21,6 +21,50 @@ class PricingEstimateRequest(BaseModel):
     params: JobParams = Field(default_factory=JobParams)
 
 
+class PricingBatchItem(BaseModel):
+    alias: str
+    model: str
+
+
+class PricingBatchRequest(BaseModel):
+    kind: Literal["image", "video"]
+    params: JobParams = Field(default_factory=JobParams)
+    items: list[PricingBatchItem] = Field(max_length=500)
+
+
+@usage_router.get("/models/durations")
+def get_model_durations() -> dict[str, float]:
+    from character_workflow.lib.model_durations import model_durations
+
+    return model_durations()
+
+
+@usage_router.post("/pricing/estimate-batch")
+def pricing_estimate_batch(body: PricingBatchRequest) -> dict[str, float | None]:
+    from character_workflow.lib.generation_pricing import estimate_submission
+    from character_workflow.lib.keys import find_by_alias
+    from character_workflow.lib.model_routes import find_route, member_estimate, ordered_members
+
+    params = body.params.model_dump(exclude_none=True)
+    result = {}
+    for item in body.items:
+        cost = None
+        if item.alias == "@auto":
+            try:
+                route = find_route(body.kind, item.model)
+                members = ordered_members(route, params=params)
+                if members:
+                    cost = member_estimate(members[0], body.kind, params)
+            except LookupError:
+                pass
+        else:
+            key = find_by_alias(item.alias)
+            if key is not None:
+                cost = estimate_submission(key, item.model, body.kind, params)
+        result[f"{item.alias}:{item.model}"] = cost
+    return result
+
+
 @usage_router.post("/pricing/estimate")
 def pricing_estimate(body: PricingEstimateRequest) -> dict:
     from character_workflow.lib.generation_pricing import estimate_submission

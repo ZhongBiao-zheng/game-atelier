@@ -448,6 +448,7 @@ export function CanvasGenerationPreferencesDialog({
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-secondary/20 p-2">
               <CanvasModelPicker
                 choices={choices}
+                params={preference.params as JobParams}
                 alias={effectiveChoice?.key.alias ?? null}
                 model={effectiveChoice?.model.id ?? ''}
                 menuDirection="down"

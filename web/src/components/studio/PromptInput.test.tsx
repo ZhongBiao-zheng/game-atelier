@@ -304,21 +304,23 @@ describe('PromptInput 模型按分类过滤（模型级 modality 优先，key �
     modalities: ['image', 'video'],
   };
 
-  it('图片模式只列出图片模型', () => {
+  it('图片模式同时列出图片和视频模型', () => {
     render(
       <PromptInput onSubmit={vi.fn()} providers={[mixedKey]} providerAlias="mixed" model="gpt-image-2" />,
     );
     fireEvent.click(screen.getByLabelText('选择模型'));
     expect(screen.getByRole('option', { name: /GPT Image 2/ })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: /Sora 2/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /Sora 2/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Image' })).toHaveAttribute('aria-selected', 'true');
     cleanup();
   });
 
-  it('视频模式只列出视频模型，混挂 key 仍可见', () => {
+  it('视频模式仍显示两种模态，并高亮 Video 标签', () => {
     renderVideoMode({ providers: [mixedKey as any], providerAlias: 'mixed', model: 'sora-2' });
     fireEvent.click(screen.getByLabelText('选择模型'));
     expect(screen.getByRole('option', { name: /Sora 2/ })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: /GPT Image 2/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /GPT Image 2/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Video' })).toHaveAttribute('aria-selected', 'true');
     cleanup();
   });
 
@@ -620,6 +622,35 @@ describe('PromptInput 模型不在当前列表（复刻缺模型）', () => {
     fireEvent.click(screen.getAllByRole('option')[0]);
     expect(onProviderChange).toHaveBeenCalledWith('image-first');
     expect(onModelChange).toHaveBeenCalledWith('sora-2');
+    cleanup();
+  });
+});
+
+describe('shared model picker interactions', () => {
+  it('selects across sections, moves keyboard focus continuously and hides a single section tab', () => {
+    const onKindChange = vi.fn(), onModelChange = vi.fn();
+    const mixed: KeyView = { ...hkKey, models: [
+      { id: 'seedance-2.5', name: 'Seedance', modality: 'video' },
+      { id: 'nano-banana', name: 'Banana', modality: 'image' },
+      { id: 'gpt-image-2.5-sunburst', name: 'Sunburst', modality: 'image' },
+    ] };
+    render(<PromptInput onSubmit={vi.fn()} providers={[mixed]} providerAlias="hk" model="nano-banana"
+      onKindChange={onKindChange} onModelChange={onModelChange} />);
+    fireEvent.click(screen.getByLabelText('选择模型'));
+    expect(screen.getAllByRole('option').map(item => item.getAttribute('aria-label')))
+      .toEqual(['Sunburst', 'Banana', 'Seedance']);
+    const banana = screen.getByRole('option', { name: 'Banana' });
+    banana.focus();
+    fireEvent.keyDown(banana, { key: 'ArrowDown' });
+    expect(screen.getByRole('option', { name: 'Seedance' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('option', { name: 'Seedance' }));
+    expect(onKindChange).toHaveBeenCalledWith('video');
+    expect(onModelChange).toHaveBeenCalledWith('seedance-2.5');
+    expect(screen.queryByRole('listbox', { name: '选择模型列表' })).not.toBeInTheDocument();
+    cleanup();
+    renderWith('gpt-image-2');
+    fireEvent.click(screen.getByLabelText('选择模型'));
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
     cleanup();
   });
 });

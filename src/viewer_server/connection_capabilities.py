@@ -66,6 +66,8 @@ GET /api/usage/tasks
 GET /api/usage/key-last-used
 GET /api/pricing/tokendance
 POST /api/pricing/estimate
+POST /api/pricing/estimate-batch
+GET /api/models/durations
 POST /api/gateway/check
 POST /api/gateway/providers/{alias}/sync
 GET /api/gallery/recent
@@ -176,6 +178,7 @@ GET /openapi.json
 """.strip().splitlines()
 
 LOCAL_MANAGEMENT = frozenset({
+    "/api/models/durations", "/api/pricing/estimate-batch",
     "/api/update/state", "/api/update/result", "/api/update/check",
     "/api/update/apply", "/api/update/cancel",
     "/api/gateway/audit",

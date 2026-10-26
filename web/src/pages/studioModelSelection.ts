@@ -1,10 +1,11 @@
+import { sortModels } from '@/lib/modelCatalog';
 import { modelModality, type KeyModel, type KeyView } from '@/api/keys';
 import type { JobKind } from '@/schema/jobs';
 
 /** 该 key 下属于这个生成类型的模型（模型级 modality 优先，key 级兜底；与 PromptInput 的过滤一致）。 */
 export function modelsForKind(key: KeyView | undefined, kind: JobKind): KeyModel[] {
   const wanted = kind === 'video' ? 'video' : 'image';
-  return (key?.models ?? []).filter((m) => modelModality(m, key) === wanted);
+  return sortModels((key?.models ?? []).filter((m) => modelModality(m, key) === wanted));
 }
 
 /**

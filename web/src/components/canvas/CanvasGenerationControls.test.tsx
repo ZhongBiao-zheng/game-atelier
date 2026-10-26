@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+import * as http from '@/api/http';
 import type { KeyView } from '@/api/keys';
 import { imageControlCaps } from '@/lib/imageControlCaps';
 import {
@@ -26,28 +27,44 @@ function key(alias: string, provider: string, model: string): KeyView {
 }
 
 describe('CanvasModelPicker', () => {
-  it('opens a portal popover grouped by key and selects the whole key/model pair', () => {
+  it('selects a provider and its highest ranked model, then shows only its models', () => {
     const first = key('主力', 'openai', 'gpt-image-2');
-    const second = key('备用', 'seedream', 'seedream-5.0-lite');
+    const second = key('备用', 'custom', 'nano-banana');
+    second.models.push({ id: 'gpt-image-2.5-flare', name: 'Flare', modality: 'image' });
+    const choices = [first, second].flatMap(key => key.models.map(model => ({ key, model })));
     const onSelect = vi.fn();
-    render(
-      <CanvasModelPicker
-        choices={[
-          { key: first, model: first.models[0] },
-          { key: second, model: second.models[0] },
-        ]}
-        alias="主力"
-        model="gpt-image-2"
-        onSelect={onSelect}
-      />,
-    );
-
+    const view = render(<CanvasModelPicker choices={choices} alias="主力" model="gpt-image-2" onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole('button', { name: '选择生成供应商' }));
+    fireEvent.click(screen.getByRole('option', { name: /备用/ }));
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ key: second, model: second.models[1] }));
+    view.rerender(<CanvasModelPicker choices={choices} alias="备用" model="gpt-image-2.5-flare" onSelect={onSelect} />);
     fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
-    const popover = screen.getByTestId('canvas-model-popover');
-    expect(popover).toHaveAttribute('data-toolbar-popover');
-    expect(popover).toHaveTextContent('主力 · openai');
-    fireEvent.click(screen.getByRole('option', { name: 'seedream-5.0-lite' }));
-    expect(onSelect).toHaveBeenCalledWith({ key: second, model: second.models[0] });
+    expect(screen.getAllByRole('option').map(item => item.getAttribute('aria-label'))).toEqual(['Flare', 'nano-banana']);
+    expect(screen.queryByRole('option', { name: 'gpt-image-2' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: 'nano-banana' }));
+    expect(onSelect).toHaveBeenLastCalledWith(expect.objectContaining({ key: second, model: second.models[0] }));
+  });
+
+  it('loads metrics only while open, prices one result, and omits missing metadata', async () => {
+    const first = key('主力', 'openai', 'gpt-image-2');
+    first.models.push({ id: 'nano-banana', name: 'Banana' }, { id: 'unknown', name: 'Unknown' });
+    const request = vi.spyOn(http, 'requestJson').mockImplementation(async (url) => {
+      if (url === '/api/models/durations') return { '主力:gpt-image-2': 120 } as never;
+      return { '主力:gpt-image-2': 0.24, '主力:nano-banana': 0.1, '主力:unknown': null } as never;
+    });
+    try {
+      render(<CanvasModelPicker choices={first.models.map(model => ({ key: first, model }))}
+        alias="主力" model="gpt-image-2" params={{ n: 4, quality: 'high' }} onSelect={vi.fn()} />);
+      expect(request).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
+      await waitFor(() => expect(screen.getByRole('option', { name: 'gpt-image-2' })).toHaveTextContent('¥0.24'));
+      expect(screen.getByRole('option', { name: 'gpt-image-2' })).toHaveTextContent('≈ 2m');
+      expect(screen.getByRole('option', { name: 'Banana' })).toHaveTextContent('¥0.10');
+      expect(screen.getByRole('option', { name: 'Banana' })).not.toHaveTextContent('≈');
+      expect(screen.getByRole('option', { name: 'Unknown' })).toHaveTextContent(/^Unknown$/);
+      const batch = request.mock.calls.find(([url]) => url === '/api/pricing/estimate-batch')!;
+      expect(JSON.parse(String(batch[2]?.body))).toMatchObject({ kind: 'image', params: { n: 1, quality: 'high' } });
+    } finally { request.mockRestore(); }
   });
 
   it('moves focus into the portal and returns it to the trigger after Escape', async () => {

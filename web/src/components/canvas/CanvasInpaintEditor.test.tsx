@@ -37,16 +37,20 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 function mount(data = initial, available = keys) {
+  const onOpenChange = vi.fn();
   const save = vi.fn(async (_submission: CanvasMaskEditSubmission) => true);
   const submit = vi.fn(async (_submission: CanvasMaskEditSubmission) => true);
   render(<CanvasInpaintEditor open title="测试图" mediaUrl="/fixture.png" version={source} keys={available}
-    initialData={data} busy={false} error={null} onOpenChange={vi.fn()} onSave={save} onSubmit={submit} />);
+    initialData={data} busy={false} error={null} onOpenChange={onOpenChange} onSave={save} onSubmit={submit} />);
   const image = screen.getByAltText('测试图');
   Object.defineProperties(image, { naturalWidth: { value: 1024 }, naturalHeight: { value: 1024 } });
   fireEvent.load(image);
-  return { save, submit };
+  return { save, submit, onOpenChange };
 }
 async function select(name: RegExp) {
+  const provider = keys.find(key => key.models.some(model => name.test(model.name || model.id)))!;
+  fireEvent.click(screen.getByRole('button', { name: '选择生成供应商' }));
+  fireEvent.click(screen.getByRole('option', { name: new RegExp(provider.alias) }));
   fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
   fireEvent.click(await screen.findByRole('option', { name }));
 }
@@ -96,4 +100,17 @@ it('validates saved regular edit nodes without requiring MJ', () => {
   const node = { data: initial } as CanvasImageEditNode;
   expect(savedImageEditError(node, source, keys)).toBeNull();
   expect(savedImageEditError({ ...node, data: { ...initial, mask_version_id: null } }, source, keys)).toContain('区域');
+});
+
+
+it('Escape closes the model menu without saving or closing the editor', async () => {
+  const { save, onOpenChange } = mount();
+  fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
+  const option = await screen.findByRole('option', { name: 'GPT Flare' });
+  fireEvent.keyDown(option, { key: 'Escape' });
+  expect(screen.queryByTestId('canvas-model-popover')).not.toBeInTheDocument();
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+  expect(onOpenChange).not.toHaveBeenCalled();
+  expect(save).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: '选择生成模型' })).toHaveFocus();
 });

@@ -54,19 +54,21 @@ export function EditGenerationControls({ choices, choice, onChoice, caps, resolu
   const pickerChoices = choices.flatMap(item => {
     const representative = members(item)[0];
     if (representative !== item) return [];
-    const model = item.key.models.find(spec => spec.id === item.model);
+    const tier = choice ? variantOf(choice.model).tier : '1K';
+    const effective = members(item).find(member => variantOf(member.model).tier === tier) ?? item;
+    const model = item.key.models.find(spec => spec.id === effective.model);
     return model ? [{ key: item.key, model: { ...model, name: (model.name || model.id).replace(TIER_SUFFIX, '') } }] : [];
   });
   const tiers = choice ? members(choice) : [];
-  const representative = tiers[0];
   const showTiers = tiers.length > 1;
   const showResolution = Boolean(choice && !choice.mj && !showTiers && caps.showResolution && caps.resolutions.length > 0);
   const showQuality = Boolean(choice && !choice.mj && !showTiers && !showResolution && caps.qualities?.length);
   return <>
     <div ref={element => { portalContainerRef.current = element?.closest<HTMLElement>('[role="dialog"]') ?? null; }}
       className="min-w-0 basis-56">
-      <CanvasModelPicker choices={pickerChoices} alias={choice?.key.alias ?? null} model={representative?.model ?? ''}
+      <CanvasModelPicker choices={pickerChoices} alias={choice?.key.alias ?? null} model={choice?.model ?? ''}
         portalContainerRef={portalContainerRef}
+        params={{ resolution, quality, image_edit: { mode: 'edit' } }}
         onSelect={picked => {
           const next = choices.find(item => item.key.alias === picked.key.alias && item.model === picked.model.id);
           // 换模型时尽量保留当前分辨率档。

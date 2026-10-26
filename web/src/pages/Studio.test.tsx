@@ -854,7 +854,7 @@ describe('Studio', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /选择模型/ }));
     expect(screen.getByTestId('model-control-wrap')).toHaveClass('relative');
-    const modelPanel = screen.getByRole('listbox', { name: '选择模型列表' });
+    const modelPanel = screen.getByRole('listbox', { name: '选择模型列表' }).closest<HTMLElement>('[data-toolbar-popover]')!;
     expect(modelPanel).toHaveAttribute('data-toolbar-popover');
     expect(modelPanel.style.bottom).not.toBe('');
 
@@ -899,8 +899,8 @@ describe('Studio', () => {
     expect(screen.getByRole('option', { name: /volc/ })).toHaveClass('h-[58px]', 'text-sm');
 
     fireEvent.click(screen.getByRole('button', { name: /选择模型/ }));
-    expect(screen.getByRole('listbox', { name: '选择模型列表' })).toHaveClass('w-[280px]', 'max-h-[400px]');
-    expect(screen.getByRole('option', { name: /图片 5.0 Lite/ })).toHaveClass('h-[58px]', 'text-sm');
+    expect(screen.getByRole('listbox', { name: '选择模型列表' }).closest('[data-toolbar-popover]')).toHaveClass('w-80');
+    expect(screen.getByRole('option', { name: /图片 5.0 Lite/ })).toHaveClass('py-2.5', 'rounded-lg');
   });
 
   it('Enter without Cmd inserts newline (not submit)', () => {
@@ -2899,16 +2899,16 @@ describe('Studio「自动」供应商', () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
     const payload = JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs')![1]!.body));
     expect(payload.alias).toBeUndefined();
-    expect(payload.model).toBe('doubao-seedream-5-0-260128');
+    expect(payload.model).toBe('gpt-image-2');
   });
 
-  it('「自动」的模型列表显示全部模型和它们的供应商', async () => {
+  it('「自动」的模型列表显示模型介绍', async () => {
     withRoutes();
     renderStudio();
     fireEvent.click(await screen.findByRole('button', { name: '选择模型' }));
     const list = await screen.findByRole('listbox', { name: '选择模型列表' });
     expect(list).toHaveTextContent('GPT Image 2');
-    expect(list).toHaveTextContent('oa · volc');
+    expect(list).toHaveTextContent('Reliable all-rounder with strong text rendering.');
   });
 
   it('选了具体厂商仍按该 KEY 提交', async () => {

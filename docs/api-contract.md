@@ -1039,3 +1039,9 @@ status 保留真实状态（含 pending、done、failed，以及团队 canceled 
 ## Tuzi GPT Image 2.5 图片质量
 
 Tuzi GPT Image 2.5 系列在 Studio 与 Canvas 提供五档质量：低/中/高/超高/最高，分别传 `quality=low|medium|high|xhigh|max`。比例独立选择，不提供 K 分辨率档位，也不再将 resolution 转换为 quality。
+
+### 模型菜单元数据（本机只读）
+
+- `GET /api/models/durations` → `{ "<alias>:<model_id>": seconds }`。仅统计成功 Job；Studio 从 `submitted_at`、Canvas 从 `runner_started_at` 算至 `completed_at`，无有效起止时间跳过。每组按完成时间取最近 50 条，至少 3 条才返回中位数；`@auto:<route_id>` 合并成员记录后按同一规则计算。进程缓存有效期 60 秒，按 data root 隔离。
+- `POST /api/pricing/estimate-batch` 请求 `{ kind: "image" | "video", params: JobParams, items: [{ alias, model }] }`（最多 500 项），响应 `{ "<alias>:<model>": number | null }`，单位 CNY。复用 `estimate_submission`；未知渠道、模型或无法计价返回 null。`@auto` 只预览当前路由成员，不消费轮询游标。菜单请求设 `n: 1`，视频携带当前时长与分辨率；参数变化防抖 300ms。
+- 展示热度顺序由前端 `modelCatalog.ts` 管理，仅影响菜单及切换供应商的默认模型，不改变 `/api/models/order` 的路由优先级。Studio 的 Image/Video 标签滚动到同一列表内对应分段；Canvas 按节点模态展示供应商与模型两个控件。

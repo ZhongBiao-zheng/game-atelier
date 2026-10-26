@@ -234,3 +234,41 @@ def test_usage_tasks_api_pagination_validation_and_management(monkeypatch):
     for query in ("offset=-1", "limit=0", "limit=201", "status=running", "range=bad", "source=bad"):
         assert client.get(f"/api/usage/tasks?{query}").status_code == 422
     assert client.get("/api/usage/tasks?scope=team").status_code == 404
+
+
+def test_model_duration_medians_recent_samples_and_auto_members(monkeypatch):
+    from character_workflow.lib import model_durations as durations
+    from character_workflow.lib import jobs, model_routes
+
+    durations._cache.clear()
+    rows = [job(alias="first", model="gpt-image-2", submitted_at=NOW.isoformat(),
+                completed_at=(NOW + timedelta(seconds=seconds)).isoformat())
+            for seconds in [10, 20, 90]]
+    rows += [job(alias="second", model="gpt-image-2", submitted_at=NOW.isoformat(),
+                 completed_at=(NOW + timedelta(seconds=seconds)).isoformat())
+             for seconds in [30, 40]]
+    rows += [job(alias="failed", status="failed", completed_at=NOW.isoformat())] * 3
+    rows += [job(alias="missing", completed_at=None)] * 3
+    rows += [job(alias="canvas", completed_at=(NOW + timedelta(seconds=100)).isoformat())
+             .model_copy(update={"namespace": "canvas", "runner_started_at":
+                                 (NOW + timedelta(seconds=75)).isoformat()})] * 3
+    rows += [job(alias="old", model="recent", completed_at=(NOW + timedelta(days=i)).isoformat(),
+                 submitted_at=(NOW + timedelta(days=i, seconds=-(1 if i < 5 else 50))).isoformat())
+             for i in range(55)]
+    calls = []
+    monkeypatch.setattr(jobs, "list_jobs", lambda: calls.append(1) or rows)
+    monkeypatch.setattr(model_routes, "list_routes", lambda: [SimpleNamespace(
+        id="gpt-image-2", members=[SimpleNamespace(alias=alias, model_id="gpt-image-2")
+                                   for alias in ["first", "second"]])])
+    with LocalTestClient(app=build_app(), base_url="http://127.0.0.1") as client:
+        calls.clear()
+        response = client.get("/api/models/durations")
+        assert response.status_code == 200
+        assert response.json() == {"first:gpt-image-2": 20, "@auto:gpt-image-2": 30,
+                                   "canvas:gpt": 25, "old:recent": 50}
+        assert client.get("/api/models/durations").json() == response.json()
+    assert len(calls) == 1
+    monkeypatch.setattr(durations, "monotonic", lambda: durations._cache["expires"] + 1)
+    durations.model_durations()
+    assert len(calls) == 2
+    durations._cache.clear()

@@ -81,6 +81,7 @@ export function ImageEditorShell({ open, heading, icon: Icon, viewport, busy, di
   /** 舞台底边，需要让出底部输入栏的高度。 */
   stageBottom?: string;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   async function requestClose() {
     if (busy) return;
     if (dirty && !await onAutoSave()) return;
@@ -88,7 +89,12 @@ export function ImageEditorShell({ open, heading, icon: Icon, viewport, busy, di
   }
   return <>
     <Dialog open={open} onOpenChange={next => { if (!next) void requestClose(); }}>
-      <DialogContent hideClose onKeyDown={onKeyDown} onKeyUp={onKeyUp}
+      <DialogContent ref={dialogRef} hideClose onKeyDown={onKeyDown} onKeyUp={onKeyUp}
+        onEscapeKeyDown={event => {
+          if (dialogRef.current?.querySelector('[data-toolbar-popover]')) {
+            event.preventDefault();
+          }
+        }}
         className="edit-dot-grid left-0 top-0 block h-dvh w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden rounded-none border-0 bg-background p-0">
         <DialogDescription className="sr-only">{heading}：编辑完成后生成新的图片节点。</DialogDescription>
         <div ref={viewport.measure} className={`absolute inset-x-0 top-20 touch-none ${stageBottom}`}>{stage}</div>

@@ -2424,6 +2424,7 @@ export function CanvasGenerationComposer({
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
           <CanvasModelPicker
           choices={modelChoices}
+          params={draft.params}
           alias={draft.alias ?? null}
           model={draft.model}
           onSelect={({ key: chosenKey, model: chosenModel }) => {

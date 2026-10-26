@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Boxes, Check, Settings2 } from 'lucide-react';
+import { Box, Building2, Settings2 } from 'lucide-react';
 
-import type { KeyView } from '@/api/keys';
+import { ModelPickerList } from '@/components/ModelPickerList';
+import { sortModels } from '@/lib/modelCatalog';
+import { modelModality, type KeyView } from '@/api/keys';
 import { AUTO_PROVIDER_ALIAS, isAutoProvider } from '@/lib/modelRoutes';
 import { ImageSizeFields } from '@/components/studio/ImageSizeFields';
 import { defaultResolution } from '@/lib/studioSize';
@@ -49,105 +51,72 @@ export interface CanvasModelChoice {
   model: KeyView['models'][number];
 }
 
-export function CanvasModelPicker({
-  choices,
-  alias,
-  model,
-  onSelect,
-  menuDirection = 'up',
-  portalContainerRef,
+export function CanvasModelPicker({ choices, alias, model, onSelect, params = {},
+  menuDirection = 'up', portalContainerRef,
 }: {
   choices: CanvasModelChoice[];
   alias: string | null;
   model: string;
+  params?: JobParams;
   onSelect: (choice: CanvasModelChoice) => void;
 } & ToolbarPopoverMenuProps) {
-  const [open, setOpen] = useState(false);
-  const anchorRef = useRef<HTMLDivElement>(null);
-  // 存进草稿的 alias 为 null 即「自动」。
+  const [open, setOpen] = useState<'provider' | 'model' | null>(null);
+  const providerRef = useRef<HTMLDivElement>(null);
+  const modelRef = useRef<HTMLDivElement>(null);
   const selectedAlias = alias ?? AUTO_PROVIDER_ALIAS;
   const selected = choices.find(choice => choice.key.alias === selectedAlias && choice.model.id === model);
-  const grouped = choices.reduce<Array<{ key: KeyView; models: CanvasModelChoice[] }>>((groups, choice) => {
-    const group = groups.find(item => item.key.alias === choice.key.alias);
-    if (group) group.models.push(choice);
-    else groups.push({ key: choice.key, models: [choice] });
-    return groups;
-  }, []);
-
-  // basis 给到 12rem：所在行是 flex-wrap，basis:0 时窄屏下这一格会被压成 10px，而按钮的图标 +
-  // 内边距撑着 26px 画到父盒外面，压住右边的参数控件（375px 实测重叠 10px）。给了真实基准宽度
-  // 之后窄屏会换行、宽屏仍由 flex-1 撑满。
-  return (
-    <div ref={anchorRef} className="relative min-w-0 flex-1 basis-48">
-      <button
-        type="button"
-        aria-label="选择生成模型"
-        aria-expanded={open}
-        onClick={() => setOpen(value => !value)}
-        className="flex h-9 w-full min-w-0 items-center gap-2 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-      >
-        <Boxes className="size-3.5 shrink-0" aria-hidden="true" />
-        <span className="truncate">{selected?.model.name || selected?.model.id || '选择模型'}</span>
-        {/* shrink-0 会让 alias 在 375px 下按自然宽画到父盒外面，压住下一个控件。 */}
-        {selected && <span className="ml-auto min-w-0 truncate text-muted-foreground">{groupLabel(selected.key)}</span>}
+  const providers = [...new Map(choices.map(choice => [choice.key.alias, choice.key])).values()]
+    .sort((a, b) => Number(isAutoProvider(b)) - Number(isAutoProvider(a)));
+  const provider = providers.find(key => key.alias === selectedAlias) ?? providers[0];
+  const models = choices.filter(choice => choice.key.alias === provider?.alias);
+  const kind = selected ? modelModality(selected.model, selected.key)
+    : models[0] ? modelModality(models[0].model, models[0].key) : 'image';
+  const buttonClass = 'flex h-9 w-full min-w-0 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+  return <div className="flex min-w-0 flex-1 basis-64 flex-wrap gap-1.5">
+    <div ref={providerRef} className="min-w-0 flex-1 basis-24">
+      <button type="button" aria-label="选择生成供应商" aria-expanded={open === 'provider'}
+        onClick={() => setOpen(open === 'provider' ? null : 'provider')} className={buttonClass}>
+        <Building2 size={14} className="shrink-0" aria-hidden="true" />
+        <span className="truncate">{provider ? groupLabel(provider) : '供应商'}</span>
       </button>
-      <ToolbarPopover
-        open={open}
-        onClose={() => setOpen(false)}
-        anchorRef={anchorRef}
-        autoFocus
-        direction={menuDirection}
-        portalContainerRef={portalContainerRef}
-        data-testid="canvas-model-popover"
-        className={cn(
-          portalContainerRef ? 'max-h-[45vh]' : 'max-h-[60vh]',
-          'w-80 overflow-y-auto rounded-xl border border-border bg-card p-3',
-        )}
-      >
-        {grouped.length ? (
-          <div className="space-y-3">
-            {grouped.map(group => (
-              <section key={group.key.alias}>
-                <div className="px-1 py-1 text-xs text-muted-foreground">
-                  {isAutoProvider(group.key) ? groupLabel(group.key) : `${group.key.alias} · ${group.key.provider}`}
-                </div>
-                <div role="listbox" aria-label={`${groupLabel(group.key)} 可用模型`} className="rounded-lg bg-popover p-1">
-                  {group.models.map(choice => {
-                    const active = choice.key.alias === selectedAlias && choice.model.id === model;
-                    return (
-                      <button
-                        key={`${choice.key.alias}:${choice.model.id}`}
-                        type="button"
-                        role="option"
-                        aria-selected={active}
-                        onClick={() => {
-                          if (active) return;
-                          onSelect(choice);
-                          setOpen(false);
-                          anchorRef.current?.querySelector<HTMLElement>('button')?.focus();
-                        }}
-                        className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60"
-                      >
-                        <span className="min-w-0 flex-1 truncate">{choice.model.name || choice.model.id}</span>
-                        {choice.model.members && (
-                          <span className="min-w-0 max-w-[45%] truncate text-xs text-muted-foreground">
-                            {choice.model.members.map(member => member.alias).join(' · ')}
-                          </span>
-                        )}
-                        {active && <Check className="size-3.5 shrink-0" aria-hidden="true" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
-          </div>
-        ) : (
-          <p className="px-1 py-2 text-sm text-muted-foreground">当前没有可用模型，请先在设置中配置密钥。</p>
-        )}
+      <ToolbarPopover open={open === 'provider'} onClose={() => setOpen(null)} anchorRef={providerRef}
+        autoFocus direction={menuDirection} portalContainerRef={portalContainerRef} maxHeight={400}
+        role="listbox" aria-label="选择生成供应商列表" className="w-80 rounded-xl border border-border bg-card p-2">
+        {providers.map(key => <button key={key.alias} type="button" role="option"
+          aria-selected={key.alias === selectedAlias}
+          onClick={() => {
+            const available = sortModels(choices.filter(choice => choice.key.alias === key.alias)
+              .map(choice => ({ ...choice, id: choice.model.id })));
+            const next = available.find(choice => choice.model.id === model) ?? available[0];
+            if (next) onSelect(next);
+            setOpen(null);
+            providerRef.current?.querySelector('button')?.focus();
+          }} className="flex w-full items-center gap-3 rounded-md px-3 py-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/50">
+          <Building2 size={20} className="shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate">{groupLabel(key)}</span>
+        </button>)}
       </ToolbarPopover>
     </div>
-  );
+    <div ref={modelRef} className="min-w-0 flex-1 basis-32">
+      <button type="button" aria-label="选择生成模型" aria-expanded={open === 'model'}
+        onClick={() => setOpen(open === 'model' ? null : 'model')} className={buttonClass}>
+        <Box size={14} className="shrink-0" aria-hidden="true" />
+        <span className="truncate">{selected?.model.name || selected?.model.id || '选择模型'}</span>
+      </button>
+      <ToolbarPopover open={open === 'model'} onClose={() => setOpen(null)} anchorRef={modelRef}
+        autoFocus direction={menuDirection} portalContainerRef={portalContainerRef}
+        maxHeight={window.innerHeight * (portalContainerRef ? 0.45 : 0.6)}
+        data-testid="canvas-model-popover" className="flex w-80 flex-col rounded-xl border border-border bg-card p-2">
+        <ModelPickerList choices={models} selected={`${selectedAlias}:${model}`}
+          params={kind === 'image' || kind === 'video' ? { [kind]: params } : {}}
+          onSelect={choice => {
+            onSelect(choice);
+            setOpen(null);
+            modelRef.current?.querySelector('button')?.focus();
+          }} />
+      </ToolbarPopover>
+    </div>
+  </div>;
 }
 
 export function CanvasImageSettings({

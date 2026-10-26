@@ -1,6 +1,8 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowUp, BookmarkPlus, Box, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Building2, Video, X } from 'lucide-react';
+import { ModelPickerList } from '@/components/ModelPickerList';
+import { sortModels } from '@/lib/modelCatalog';
 import { modelModality, type KeyView } from '@/api/keys';
 import { hasImageSizeSelection, imageSizeMode, imageSizeSummary, imageSizeError, normalizeImageSizeParams } from '@/lib/imageSizeMode';
 import { isAutoProvider, sizeContext } from '@/lib/modelRoutes';
@@ -302,7 +304,11 @@ export function PromptInput({
   );
   const provider = visibleProviders.find((item) => item.alias === providerAlias) ?? visibleProviders[0];
   const providerDisplayName = providerName(provider);
-  const models = provider?.models.filter((m) => visibleModel(m, provider)) ?? [];
+  const models = sortModels(provider?.models.filter((m) => visibleModel(m, provider)) ?? []);
+  const pickerChoices = (provider?.models ?? []).filter(m =>
+    ['image', 'video'].includes(modelModality(m, provider))
+    && (provider?.provider !== 'evolink' || isEvolinkMidjourney(m.id, provider.provider))
+  ).map(model => ({ key: provider!, model }));
   // 模型不在当前列表时模型位空着、不能生成，不偷偷换成第一个模型：换类型后的收敛由上层做。
   const selectedModel = models.find((item) => item.id === model);
   const isOmni = isVideo && videoMode === 'omni' && Boolean(videoCaps);
@@ -1148,7 +1154,8 @@ export function PromptInput({
                     onClick={() => {
                       onProviderChange?.(item.alias);
                       onModelChange?.(
-                        item.models.find((m) => modelModality(m, item) === wantedModality)?.id ?? '',
+                        models.some(m => m.id === model) && item.models.some(m => m.id === model && visibleModel(m, item))
+                          ? model! : sortModels(item.models.filter(m => visibleModel(m, item)))[0]?.id ?? '',
                       );
                       setOpenPanel(null);
                     }}
@@ -1178,31 +1185,26 @@ export function PromptInput({
               onClose={() => setOpenPanel(null)}
               anchorRef={modelRef}
               direction={menuDirection}
-              role="listbox"
-              aria-label="选择模型列表"
+              autoFocus
               maxHeight={400}
-              className="flex flex-col gap-2 w-[280px] max-h-[400px] overflow-y-auto no-scrollbar rounded-xl border border-border bg-card p-2"
+              className="flex w-80 flex-col rounded-xl border border-border bg-card p-2"
             >
-                <div className="px-3 py-2 text-sm text-muted-foreground">选择模型：{providerDisplayName}</div>
-                {models.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    role="option"
-                    aria-selected={selectedModel?.id === item.id}
-                    onClick={() => {
-                      onModelChange?.(item.id);
-                      setOpenPanel(null);
-                    }}
-                    className="flex shrink-0 h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
-                  >
-                    <Box size={22} aria-hidden />
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium">{item.name}</span>
-                      <span className="block truncate text-xs text-muted-foreground">{item.members ? item.members.map(member => member.alias).join(' · ') : item.id}</span>
-                    </span>
-                  </button>
-                ))}
+              <ModelPickerList choices={pickerChoices} selected={`${provider?.alias}:${model}`}
+                initialKind={wantedModality} sections
+                params={{ image: { ...sizeParams, quality,
+                  reference_images: referenceImages.map(() => 'reference'),
+                }, video: {
+                  duration, resolution: videoResolution, ratio: videoRatio, quality: videoQuality,
+                  generate_audio: generateAudio,
+                  reference_videos: referenceVideos.length ? ['reference'] : [],
+                } }}
+                onSelect={choice => {
+                  const nextKind = modelModality(choice.model, choice.key) === 'video' ? 'video' : 'image';
+                  if (nextKind !== kind) onKindChange?.(nextKind);
+                  onModelChange?.(choice.model.id);
+                  setOpenPanel(null);
+                  modelRef.current?.querySelector('button')?.focus();
+                }} />
             </ToolbarPopover>
           </div>
 
