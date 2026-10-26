@@ -28,10 +28,10 @@
 ## Typography
 
 - **Display / Hero**: **Instrument Serif**（中文字形由 **Noto Serif SC** 承接，栈内再回落 Songti SC / SimSun，不依赖系统默认衬线）— 仅用于「唯一大跳跃」：页面 hero、角色名、空状态主文案。配 `text-display`（36px / 400）。serif 是签名，克制才贵。
-- **Body / UI**: **Geist** — 所有按钮、标签、表单、正文、区块标题
-- **Data / Tables**: **Geist** with `tabular-nums`
-- **Code / Technical**: **JetBrains Mono** — job_id、文件路径、seed、URL
-- **Loading**: Google Fonts CDN（tokens.css 顶部 @import）
+- **Body / UI**: **Inter**（中文字形由 **Noto Sans SC** 承接，不依赖系统苹方 / 雅黑）— 所有按钮、标签、表单、正文、区块标题
+- **Data / Tables**: **Inter** with `tabular-nums` —— 日期、时间、耗时、价格、数量都用它，不用等宽字体
+- **Code / Technical**: **JetBrains Mono** — 只用于 job_id、文件路径、seed、URL、代码、密钥掩码、hex 色值
+- **Loading**: 全部字体用 Fontsource 包打进 `web/dist`，**不从任何外部 CDN 加载**（国内不翻墙与离线安装包都要显示一致）
 
 **Scale（四档，守卫强制）**：
 
@@ -49,7 +49,7 @@
 
 **Font-weight 策略**：
 
-- Geist：400（正文）/ 500（按钮、强调、区块标题）/ 600（少量小标题）
+- Inter / Noto Sans SC：400（正文）/ 500（按钮、强调、区块标题）/ 600（少量小标题）
 - Instrument Serif：400 only（衬线粗体会失去优雅）
 - JetBrains Mono：400 / 500
 
@@ -147,7 +147,7 @@
 | 控件下拉面板限高 | `ToolbarPopover` 把定位算出的可用高度写在内联 style 上，会盖过 className 里的 `max-h-*`；要限高传 `maxHeight` prop（厂商 / 模型列表 400，生成模式 280） |
 | 玻璃浮层（无选项的悬浮 panel/菜单） | `bg-glass backdrop-blur-glass border border-border rounded-xl` |
 | Studio 输入壳（滚动联动收放） | 浮于历史滚动区上（wrapper `pointer-events-none`，壳 `pointer-events-auto`，两侧视觉与交互都穿透）；`rounded-xl` 收放两态一致（胶囊 `rounded-full` 试装后被否——过圆），展开 `min-h-[174px]`，距底 >160px 收成单行条：控件行 `grid-rows-[0fr] opacity-0` 折叠、textarea 单行、参考堆叠 `scale-80`，全程 `transition 300ms`；点击收缩壳展开但**不回滚**，「回到底部」独立玻璃 pill 出现在壳右上方，点击**瞬时跳底**不播滚动过程 |
-| Studio 生成记录 | 单列，一条记录上下三段，列表上限 1024px：① 信息：提示词一行（参考图在提示词左侧，多张时向右展开）+ 参数标签行 ② 结果 ③ 操作行。标签行与操作行始终从最左缘开始，有没有参考图都一样。参数标签实底 `rounded-sm bg-card px-2 py-0.5 text-xs`，来源是同一行里的描边标签，MJ flags 另起一行等宽灰字。操作按钮 `h-8 px-2 text-xs` 无底色、宽度随文字，整行 `-ml-2` 让文字贴左缘，上方不加分隔线；耗时 · 时分 · 费用等宽靠右。日期由分组标题承担（按北京日期分组，每组第一条上方一行 `font-mono text-xs`）。更多菜单向右弹。**两栏（结果左 / 信息右）试过后撤回**：右栏只有 20rem，参考图一多 hover 展开放不下 |
+| Studio 生成记录 | 单列，一条记录上下三段，列表上限 1024px：① 信息：提示词一行（参考图在提示词左侧，多张时向右展开）+ 参数标签行 ② 结果 ③ 操作行。标签行与操作行始终从最左缘开始，有没有参考图都一样。参数标签实底 `rounded-sm bg-card px-2 py-0.5 text-xs`，来源是同一行里的描边标签，MJ flags 另起一行等宽灰字。操作按钮 `h-8 px-2 text-xs` 无底色、宽度随文字，整行 `-ml-2` 让文字贴左缘，上方不加分隔线；耗时 · 时分 · 费用等宽靠右。日期由分组标题承担（按北京日期分组，每组第一条上方一行 `text-xs tabular-nums`）。更多菜单向右弹。**两栏（结果左 / 信息右）试过后撤回**：右栏只有 20rem，参考图一多 hover 展开放不下 |
 | 玻璃 pill（顶栏 tab） | `bg-glass backdrop-blur-glass border border-border rounded-full` |
 | 顶栏圆形 icon 钮（主题切换 / 设置） | `h-10 w-10 rounded-full bg-glass backdrop-blur-glass text-muted-foreground hover:bg-secondary/60 hover:text-foreground`，icon 18px |
 | 遮罩层（lightbox） | `fixed inset-0 z-50 bg-scrim` |
@@ -205,7 +205,7 @@
 - ❌ 紫色 / 蓝紫渐变（最 SaaS 的 cliché）
 - ❌ 3 列 feature grid + 彩色圆圈图标
 - ❌ 居中一切、统一 bubble border-radius
-- ❌ Inter / Roboto / Arial 作为正文字体
+- ❌ Roboto / Arial / 系统默认字体作为正文字体；从外部 CDN 加载字体
 - ❌ system-ui 作为 display 字体（"我放弃了排版"信号）
 - ❌ 渐变按钮 / `bg-gradient` ⚙
 - ❌ "Built for X" 营销文案
@@ -238,3 +238,4 @@
 | 2026-10-13 | 裁剪 / 切分弹窗改左图右栏（舞台用 container-type: size 让图片等比铺满，右栏 18rem）；裁剪框外四块遮罩压暗、三分线、L 形角手柄；尺寸只留宽高像素输入（失焦或回车提交），不做 X / Y；切分块编号 + 结果尺寸列表、行列步进、四个预设 | Mobbin 参考 Air、Telegram、Shopify、Squarespace 的裁剪器；原先竖排一列，图高时整个弹窗滚动，百分比输入不直观 |
 | 2026-10-24 | 设置拆为七个控制台地址，用量统一展示个人与团队花费 | PRD D1–D13：配置、观测、资源、扩展分组，局域网额度仅在用量页出现 |
 | 2026-10-24 | 主色改为可配置、默认青柠，底色改为石墨；推翻 2026-05-18 和 2026-06-10 两条黄铜决定 | 暖棕加黄铜显旧显脏。主副色、固定数据色与状态色分离，详见 [主题色规范](docs/design/theme.md)；历史日志中的暖黑与黄铜记录不再作为现行规则。 |
+| 2026-10-26 | 正文改用 Inter + Noto Sans SC，全部字体本地打包，等宽字体只留给技术信息；推翻 2026-06-10「Geist 留任、拒收 Inter」 | 中文原本落到系统字体，Mac 苹方与 Windows 雅黑不一致；Google Fonts 在国内不翻墙与离线安装包下加载失败；同类工具 Tapnow / Lovart / LibTV 均为 Inter + 中文网页字体（读其线上 CSS 得出）；创作台 93 处等宽字体让数据行与正文割裂 |
