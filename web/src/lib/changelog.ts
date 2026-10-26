@@ -32,6 +32,9 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.127.3', date: '2026-10-26', headline: '旧工坊一键迁移', changes: [
+    { kind: 'fix', text: 'Windows 双击「Windows迁移旧工坊.bat」，把旧工坊项目和角色迁进画布，迁移前会先预演并备份。' },
+  ] },
   { version: '5.127.2', date: '2026-10-26', headline: '找回创作台旧记录', changes: [
     { kind: 'fix', text: '从旧版本升级后，创作台的历史出图重新显示。' },
     { kind: 'fix', text: '连接 Remote Atelier 失败时直接说明原因：网关版本过旧、密钥无效或连不上。' },
