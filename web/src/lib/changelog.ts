@@ -32,6 +32,11 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.129.0', date: '2026-10-26', headline: '安装包新布局', changes: [
+    { kind: 'feat', text: '安装包使用固定启动入口，应用与运行环境按版本独立存放，为后续应用内更新做准备。' },
+    { kind: 'fix', text: '启动版本记录缺失或损坏时，自动回到上一个可用版本。' },
+    { kind: 'feat', text: 'Windows 常驻服务使用固定入口。旧安装包请手动下载更换；已安装的常驻任务需卸载后重装。' },
+  ] },
   { version: '5.128.0', date: '2026-10-26', headline: '只更新到正式发布版', changes: [
     { kind: 'feat', text: '一键启动和安装包只更新到通过三平台测试的正式版本，开发中的改动不会再被拉到你的电脑上。' },
     { kind: 'fix', text: '一键启动每次都实际检查新版，网络慢时也能找到更新。' },
