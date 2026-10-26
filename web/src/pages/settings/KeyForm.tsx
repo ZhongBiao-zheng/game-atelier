@@ -407,7 +407,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
     <Dialog open onOpenChange={open => { if (!open && !saving) onCancel(); }}>
       <DialogContent hideClose aria-describedby={undefined} className="flex max-h-[90dvh] max-w-[680px] flex-col gap-0 overflow-hidden p-0">
         <header className="flex shrink-0 items-center gap-3 border-b border-border px-6 py-4">
-          <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary font-mono text-xs">{PROVIDER_MONOGRAMS[preset.id]}</span>
+          <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-xs">{PROVIDER_MONOGRAMS[preset.id]}</span>
           <DialogTitle className="min-w-0 flex-1 truncate">{title}</DialogTitle>
           {homepage && <a href={homepage} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:text-primary">官网 ↗</a>}
           <Switch compact checked={enabled} onChange={setEnabled} label={`启用 ${alias || preset.label}`} />

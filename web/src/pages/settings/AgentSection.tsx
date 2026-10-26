@@ -51,7 +51,7 @@ export function AgentSection() {
       <div className="grid min-w-0 gap-3 md:grid-cols-2">
         {(Object.keys(CLIENT_LABEL) as AgentClient[]).map(client => <section key={client} aria-label={CLIENT_LABEL[client]} className="min-w-0 space-y-3.5 rounded-xl border border-border bg-card p-4.5">
           <div className="flex flex-wrap items-center gap-3">
-            <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary font-mono text-xs">{client === 'codex' ? 'CX' : 'CC'}</span>
+            <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-xs">{client === 'codex' ? 'CX' : 'CC'}</span>
             <h3 className="flex-1 text-sm font-medium">{CLIENT_LABEL[client]}</h3>
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${status.connections[client] ? 'bg-status-done' : 'bg-subtle-foreground'}`} />

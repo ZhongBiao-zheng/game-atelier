@@ -172,7 +172,7 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
         <input type="range" min={BRUSH_MIN} max={BRUSH_MAX} value={brushSize} className="w-28 accent-primary"
           onChange={event => setBrushSize(Number(event.target.value))} />
         <span className="size-3.5 rounded-full bg-muted-foreground" aria-hidden />
-        <span className="w-7 font-mono text-xs">{brushSize}</span>
+        <span className="w-7 tabular-nums text-xs">{brushSize}</span>
       </label>
       <span className="mx-1.5 h-5 w-px bg-border" aria-hidden />
       <button type="button" aria-label="撤销选区" className={editorIconButton} disabled={!undoStack.current.length} onClick={undo}><Undo2 /></button>

@@ -5,7 +5,7 @@ export function WaitingCopy({ startedAt, now }: { startedAt: number; now: number
   else if (elapsed >= 15) copy = '模型在画了…';
   else if (elapsed >= 5) copy = '正在调度…';
   return (
-    <div className="text-xs text-muted-foreground font-mono">
+    <div className="text-xs text-muted-foreground tabular-nums">
       {elapsed}s
       {copy && <span className="ml-2">{copy}</span>}
     </div>

@@ -99,7 +99,7 @@ export function CanvasImageEditPanel({ node, edit, context, onClose }: {
           <span className="truncate">{modelName ?? '未选择模型'}</span>
           {alias && <span className="ml-auto shrink-0 text-muted-foreground">{alias}</span>}
         </span>
-        {size && <span className={`${chip} shrink-0 font-mono`}>{size.replace('x', '×')}</span>}
+        {size && <span className={`${chip} shrink-0 tabular-nums`}>{size.replace('x', '×')}</span>}
         <Button type="button" size="sm" className="shrink-0" disabled={running || submitting || !draft}
           onClick={() => void generate()}>
           {running || submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}

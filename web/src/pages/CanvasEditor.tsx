@@ -5378,7 +5378,7 @@ function CanvasEditorInner({
               >
                 <span aria-hidden="true" className="size-1.5 rounded-full bg-primary" />
                 生成中
-                <span className="font-mono text-xs tabular-nums text-muted-foreground">{runningNodeIds.length}</span>
+                <span className="text-xs tabular-nums text-muted-foreground">{runningNodeIds.length}</span>
               </Button>
             </div>
           )}
@@ -6368,7 +6368,7 @@ function CanvasZoomDock({
           <button
             type="button"
             aria-label={`画布缩放 ${percent}%`}
-            className="h-8 w-14 rounded-md font-mono text-xs tabular-nums text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary data-[state=open]:bg-secondary"
+            className="h-8 w-14 rounded-md text-xs tabular-nums text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary data-[state=open]:bg-secondary"
           >{percent}%</button>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="center" className="min-w-36 rounded-xl">

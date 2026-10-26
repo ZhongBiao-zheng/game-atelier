@@ -158,7 +158,7 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
               : <span aria-hidden className={`rounded-sm bg-foreground ${vertical ? 'h-8 w-1' : 'h-1 w-8'}`} />}
           </button>;
         })}
-        <span aria-label="编辑输出尺寸" className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-background/85 px-2.5 py-0.5 font-mono text-xs">
+        <span aria-label="编辑输出尺寸" className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-background/85 px-2.5 py-0.5 tabular-nums text-xs">
           {frame.width} × {frame.height}
         </span>
       </div>
@@ -182,7 +182,7 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
         <div className="ml-auto flex h-8 items-center gap-0.5 rounded-full border border-border px-0.5">
           <span className="sr-only">扩展倍数</span>
           <button type="button" aria-label="减小扩展倍数" className={`${editorIconButton} size-7`} disabled={!ratio || scaleStep === EXPAND_SCALES[0]} onClick={() => stepScale(-1)}><Minus /></button>
-          <span className="w-12 text-center font-mono text-xs">{scaleStep == null ? '自定义' : `${scaleStep}×`}</span>
+          <span className="w-12 text-center tabular-nums text-xs">{scaleStep == null ? '自定义' : `${scaleStep}×`}</span>
           <button type="button" aria-label="增大扩展倍数" className={`${editorIconButton} size-7`} disabled={!ratio || scaleStep === EXPAND_SCALES.at(-1)} onClick={() => stepScale(1)}><Plus /></button>
         </div>
       </div>

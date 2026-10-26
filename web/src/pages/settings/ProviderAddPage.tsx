@@ -74,7 +74,7 @@ export function ProviderAddPage() {
               : key.provider === preset.value);
             return <button key={preset.id} type="button" onClick={() => open(preset)}
               className="flex h-14 items-center gap-3 rounded-md border border-border bg-card px-3.5 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-              <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary font-mono text-xs">{PROVIDER_MONOGRAMS[preset.id]}</span>
+              <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-xs">{PROVIDER_MONOGRAMS[preset.id]}</span>
               <span className="min-w-0 flex-1"><span className="block text-sm">{preset.label}</span>
                 <span className="block text-xs text-muted-foreground">{preset.value === 'atelier' ? '模型由对方决定' : preset.id === 'evolink' ? 'Midjourney' : preset.modalities.map(modality => MODALITIES[modality] ?? modality).join(' · ')}</span>
               </span>

@@ -107,7 +107,7 @@ export function ImageEditorShell({ open, heading, icon: Icon, viewport, busy, di
           className={`absolute left-1/2 top-4 flex h-11 -translate-x-1/2 items-center gap-0.5 whitespace-nowrap rounded-xl px-1 ${glass}`}>{toolbar}</div>}
         <div className={`absolute right-4 top-4 flex h-11 items-center gap-0.5 rounded-full px-1.5 ${glass}`}>
           <button type="button" aria-label="缩小" className={editorIconButton} onClick={() => viewport.zoomBy(1 / 1.25)}><Minus /></button>
-          <span aria-label="编辑视图缩放" className="w-12 text-center font-mono text-xs">{Math.round(viewport.scale * 100)}%</span>
+          <span aria-label="编辑视图缩放" className="w-12 text-center tabular-nums text-xs">{Math.round(viewport.scale * 100)}%</span>
           <button type="button" aria-label="放大" className={editorIconButton} onClick={() => viewport.zoomBy(1.25)}><Plus /></button>
           <span className="mx-1 h-5 w-px bg-border" aria-hidden />
           <button type="button" aria-label="适应窗口" className={editorIconButton} onClick={viewport.reset}><Maximize /></button>

@@ -6,6 +6,17 @@
  * 合理例外走 ALLOWLIST 逐条登记，不许扩大正则。
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+
+declare const process: { cwd: () => string };
+
+// Vitest stubs CSS imports, including ?raw; read CSS files to keep this guard effective.
+const CSS_SOURCES = Object.fromEntries(
+  Object.keys(import.meta.glob('../**/*.css')).map(path => [
+    path, readFileSync(`${process.cwd()}/src/${path.slice(3)}`, 'utf-8'),
+  ]),
+);
+const tokens = CSS_SOURCES['../styles/tokens.css'];
 
 // Vite 在 transform 期把全部非测试 tsx 以纯文本内联进来——不依赖 node API，
 // tsconfig 只需 vite/client 类型（src/vite-env.d.ts）。
@@ -71,6 +82,21 @@ function assertClean(rule: RegExp, designRef: string) {
 }
 
 describe('设计漂移守卫（DESIGN.md 硬约束）', () => {
+  it('字体必须本地打包，不依赖 Google Fonts CDN', () => {
+    expect(tokens).toContain('--font-sans:');
+    const violations = Object.entries({ ...RAW_SOURCES, ...CSS_SOURCES })
+      .filter(([path]) => !path.endsWith('.test.tsx'))
+      .filter(([, source]) => /fonts\.(?:googleapis|gstatic)\.com/.test(source))
+      .map(([path]) => path);
+    expect(violations).toEqual([]);
+  });
+
+  it('正文优先使用 Inter 与 Noto Sans SC，确保中英字体跨平台一致', () => {
+    const families = tokens.match(/--font-sans:\s*([^;]+);/)?.[1]
+      .split(',').map(family => family.trim().replace(/["']/g, ''));
+    expect(families?.slice(0, 2)).toEqual(['Inter Variable', 'Noto Sans SC Variable']);
+  });
+
   it('扫描器覆盖全部组件源码（glob 失效会让守卫静默空转）', () => {
     expect(FILES.length).toBeGreaterThanOrEqual(30);
   });

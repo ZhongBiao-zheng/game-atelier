@@ -99,7 +99,7 @@ const ROUND_HEADER_CLASS = 'flex flex-col gap-3 text-sm';
 const ROUND_PROMPT_ROW_CLASS = 'flex items-start gap-3';
 const ROUND_MEDIA_CLASS = 'flex flex-wrap gap-1';
 const ROUND_ACTIONS_CLASS = '-ml-2 flex flex-wrap items-center gap-0.5';
-const ROUND_RUN_META_CLASS = 'ml-auto flex items-center gap-1.5 pl-2 font-mono text-xs tabular-nums text-muted-foreground';
+const ROUND_RUN_META_CLASS = 'ml-auto flex items-center gap-1.5 pl-2 text-xs tabular-nums text-muted-foreground';
 
 function aspectStyle(config: RoundConfig): { aspectRatio: string } {
   const r = !config.sizeMode || config.sizeMode === 'ratio' ? config.ratio : undefined;
@@ -322,7 +322,7 @@ export function RoundList({
             // data-round-job：首页作品深链（/studio?job=）滚动定位的锚点。
             <Fragment key={stableKey}>
             {/* 列表的 space-y-8 给每个子项加 2rem 下边距；组标题收成 0.75rem，贴近它带起的第一条记录 */}
-            {startsDate && <h3 data-testid="round-date" className="mb-3 font-mono text-xs tabular-nums text-muted-foreground">{date}</h3>}
+            {startsDate && <h3 data-testid="round-date" className="mb-3 text-xs tabular-nums text-muted-foreground">{date}</h3>}
             <MediaActivationBoundary jobId={r.jobId}>
               {(mediaActive) => (
               <>

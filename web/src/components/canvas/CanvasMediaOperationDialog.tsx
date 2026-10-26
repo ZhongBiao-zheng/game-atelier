@@ -48,7 +48,7 @@ const OPTION_TILE_CLASS = 'flex h-14 flex-col items-center justify-center gap-1.
 const OPTION_TILE_ON_CLASS = 'border-primary bg-primary/10 text-foreground';
 const OPTION_TILE_OFF_CLASS = 'border-border text-muted-foreground hover:text-foreground';
 const PANEL_LABEL_CLASS = 'mb-2 text-xs text-muted-foreground';
-const STAGE_BADGE_CLASS = 'pointer-events-none whitespace-nowrap rounded-sm bg-background/70 px-1.5 py-0.5 font-mono text-xs tabular-nums text-foreground';
+const STAGE_BADGE_CLASS = 'pointer-events-none whitespace-nowrap rounded-sm bg-background/70 px-1.5 py-0.5 text-xs tabular-nums text-foreground';
 
 export function CanvasMediaOperationDialog({
   open,
@@ -222,7 +222,7 @@ export function CanvasMediaOperationDialog({
           )}
 
           <div className="mt-auto space-y-3">
-            <p className="font-mono text-xs tabular-nums text-muted-foreground">
+            <p className="text-xs tabular-nums text-muted-foreground">
               原图 {width} × {height}{tool === 'split' && ` · ${splitCount} 个结果`}
             </p>
             {error && <p id="canvas-media-operation-error" role="alert" className="text-sm text-destructive">{error}</p>}
@@ -463,7 +463,7 @@ function PixelField({ label, value, max, onCommit }: {
           event.preventDefault();
           commit();
         }}
-        className="w-full min-w-0 bg-transparent text-right font-mono text-sm tabular-nums text-foreground outline-none"
+        className="w-full min-w-0 bg-transparent text-right text-sm tabular-nums text-foreground outline-none"
       />
     </label>
   );
@@ -666,7 +666,7 @@ function SplitControls({
       </div>
       <div className="min-h-0">
         <p className={PANEL_LABEL_CLASS}>结果</p>
-        <ul className="grid max-h-40 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 overflow-y-auto font-mono text-xs tabular-nums">
+        <ul className="grid max-h-40 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 overflow-y-auto text-xs tabular-nums">
           {tiles.map(tile => (
             <li key={tile.number} className="contents">
               <span className="min-w-5 rounded-sm bg-secondary px-1.5 py-0.5 text-center text-muted-foreground">{tile.number}</span>
@@ -685,7 +685,7 @@ function CountStepper({ label, value, onChange }: { label: string; value: number
       <p className={PANEL_LABEL_CLASS}>{label}</p>
       <div className="flex h-9 items-center justify-between rounded-md border border-input px-1">
         <StepButton label={`减少${label}数`} disabled={value <= 1} onClick={() => onChange(value - 1)}><Minus aria-hidden="true" /></StepButton>
-        <span aria-live="polite" className="font-mono text-sm tabular-nums">{value}</span>
+        <span aria-live="polite" className="text-sm tabular-nums">{value}</span>
         <StepButton label={`增加${label}数`} disabled={value >= SPLIT_MAX_COUNT} onClick={() => onChange(value + 1)}><Plus aria-hidden="true" /></StepButton>
       </div>
     </div>

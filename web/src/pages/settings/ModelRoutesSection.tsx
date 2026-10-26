@@ -107,8 +107,8 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
               return <li key={member.alias} className="flex max-w-full items-center gap-1.5">
                 {index > 0 && <span aria-hidden className="text-subtle-foreground">{route.mode === 'round_robin' ? '·' : '→'}</span>}
                 <span className={`flex min-w-0 flex-wrap items-center gap-2 rounded-md border py-1 pl-1 pr-1.5 ${first ? 'border-primary/45 bg-primary/10' : 'border-border'} ${unavailable ? 'opacity-75' : ''}`}>
-                  {route.mode === 'order' && <span className={`flex size-5 items-center justify-center rounded font-mono text-xs ${first ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'}`}>{index + 1}</span>}
-                  {route.mode === 'cheap' && <span className="pl-1 font-mono text-xs text-muted-foreground">{member.estimate_cny == null ? '未计价' : `≈¥${member.estimate_cny.toFixed(2)}`}</span>}
+                  {route.mode === 'order' && <span className={`flex size-5 items-center justify-center rounded tabular-nums text-xs ${first ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'}`}>{index + 1}</span>}
+                  {route.mode === 'cheap' && <span className="pl-1 tabular-nums text-xs text-muted-foreground">{member.estimate_cny == null ? '未计价' : `≈¥${member.estimate_cny.toFixed(2)}`}</span>}
                   <span className="break-all text-sm">{member.alias}</span>
                   {unavailable && <span className="flex flex-wrap items-center gap-2 text-xs text-destructive">
                     {unavailable.reason === 'unavailable' ? '暂时不可用' : `欠费已摘除 · ${date(unavailable.since)}`}
@@ -126,7 +126,7 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
       {single.length > 0 && <details className="rounded-lg border border-border px-4 py-3">
         <summary className="cursor-pointer text-sm text-muted-foreground">只有一家供应商的模型 · {single.length}</summary>
         <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted-foreground">
-          {single.map(route => <li key={routeKey(route)}><span className="font-mono">{route.name}</span><span className="ml-2 text-xs">{route.members[0].alias}</span></li>)}
+          {single.map(route => <li key={routeKey(route)}><span>{route.name}</span><span className="ml-2 text-xs">{route.members[0].alias}</span></li>)}
         </ul>
       </details>}
       {visible.length === 0 && !error && <p className="text-sm text-muted-foreground">暂无{MODALITY_LABELS[modality]}模型</p>}

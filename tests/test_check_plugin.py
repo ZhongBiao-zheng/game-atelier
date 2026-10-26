@@ -40,13 +40,13 @@ def test_check_plugin_ignores_local_qa_artifacts_but_counts_release_assets(tmp_p
     (tmp_path / ".scratch").mkdir()
     large = tmp_path / ".scratch" / "qa.bin"
     with large.open("wb") as file:
-        file.truncate(11 * 1024 * 1024)
+        file.truncate(26 * 1024 * 1024)
     command = [sys.executable, str(SCRIPT), "--repo", str(tmp_path)]
     assert subprocess.run(command, capture_output=True).returncode == 0
     large.rename(tmp_path / "release.bin")
     result = subprocess.run(command, capture_output=True, text=True)
     assert result.returncode == 1
-    assert "exceeds 10MB cap" in result.stdout
+    assert "exceeds 25MB cap" in result.stdout
 
 
 def test_check_plugin_fails_on_invalid_json(tmp_path):

@@ -27,7 +27,7 @@ export function ProviderRow({ row, overdue, pending, onEdit, onToggle }: {
   const used = row.last_used_at ? new Date(row.last_used_at) : null;
   const today = used?.toDateString() === new Date().toDateString();
   return <li className={`flex flex-wrap items-center gap-3.5 px-4 py-3.5 hover:bg-secondary/30 ${enabled ? '' : 'opacity-50'}`}>
-    <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary font-mono text-xs font-medium">{initials}</span>
+    <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-xs font-medium">{initials}</span>
     <button type="button" aria-label={`编辑 ${row.alias}`} onClick={onEdit}
       className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
       <span className="block truncate text-sm font-medium">{row.alias}</span>

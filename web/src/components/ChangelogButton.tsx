@@ -33,7 +33,7 @@ function VersionBlock({
       <div className="flex items-baseline gap-2">
         {/* 未读时版本号转黄铜色：不额外加「新」标签，省一个元素也省一次阅读 */}
         <span
-          className={['font-mono text-xs', isNew ? 'text-primary' : 'text-muted-foreground'].join(
+          className={['tabular-nums text-xs', isNew ? 'text-primary' : 'text-muted-foreground'].join(
             ' ',
           )}
         >
@@ -250,7 +250,7 @@ export function ChangelogButton() {
         {/* 标题栏不跟着滚：滚到第三个版本时仍要知道自己在读什么、当前是哪一版 */}
         <div className="flex shrink-0 items-baseline justify-between gap-3 border-b border-border px-5 pb-4 pt-5">
           <h2 className="text-base font-medium text-foreground">更新日志</h2>
-          <span className="font-mono text-xs text-muted-foreground">当前 v{CURRENT_VERSION}</span>
+          <span className="tabular-nums text-xs text-muted-foreground">当前 v{CURRENT_VERSION}</span>
         </div>
         <div
           ref={measure}

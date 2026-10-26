@@ -12,7 +12,8 @@ import json
 import sys
 from pathlib import Path
 
-MAX_SIZE_MB = 10
+# Includes locally bundled Latin/CJK fonts for offline and cross-platform rendering.
+MAX_SIZE_MB = 25
 REQUIRED_TOP_FIELDS = ("name", "version", "description")
 EXCLUDED_TOP_LEVEL = {
     ".claude",
