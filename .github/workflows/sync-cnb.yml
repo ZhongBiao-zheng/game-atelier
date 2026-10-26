@@ -1,13 +1,11 @@
 name: Sync CNB mirror
 
-# main 的国内镜像 cnb.cool/ZhongBiao-zheng/game-atelier：一键启动和版本检查先读它。
+# main 保留国内代码镜像供浏览/首次安装；更新只读取经 release 门禁批准的 tag。
 # 镜像只跟随 GitHub，不在 CNB 上直接提交，所以强推覆盖。
 on:
   push:
     branches: [main]
   workflow_dispatch:
-  release:
-    types: [published]
   workflow_call:
     inputs:
       release_tag:
@@ -37,7 +35,7 @@ jobs:
           git push --force "https://cnb:${CNB_TOKEN}@cnb.cool/ZhongBiao-zheng/game-atelier.git" HEAD:refs/heads/main
 
   release:
-    if: github.event_name == 'release' || inputs.release_tag != ''
+    if: inputs.release_tag != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +45,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
-          RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           gh release download "$RELEASE_TAG" --dir bundles
           git push "https://cnb:${CNB_TOKEN}@cnb.cool/ZhongBiao-zheng/game-atelier.git" "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
@@ -70,7 +68,7 @@ jobs:
       - name: Upload using CNB official attachments plugin
         env:
           CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
-          PLUGIN_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+          PLUGIN_TAG: ${{ inputs.release_tag }}
           CNB_API_ENDPOINT: https://api.cnb.cool
           CNB_WEB_ENDPOINT: https://cnb.cool
           CNB_REPO_SLUG: ZhongBiao-zheng/game-atelier

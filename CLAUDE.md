@@ -121,8 +121,8 @@ uv run python src/viewer_server/server.py open-browser
 
 - `make test`、单个 pytest 文件、`cd web && pnpm test`、`uv run ruff check src scripts tests`、`cd web && pnpm lint` 可以直接跑、修、重跑，不必逐步请示；pytest 由 autouse fixture 隔离 data root，不碰 `~/game-atelier`。
 - `make verify` 会重建入库的 `web/dist/`，跑之前先 stage 自己的改动，方便区分产物变化。
-- 完成标准：相关测试通过，`make verify` 通过，UI 改动在真实页面验证过，已提交并推送到 `dev`。
-- 先问再做：计费出图或出视频、合入 `main`、删除用户数据。
+- 完成标准：相关测试通过，`make verify` 通过，UI 改动在真实页面验证过，已提交并推送到 `main`；ADR-0029 的首次过渡尚未获准时，提交推送 `dev`。
+- 先问再做：计费出图或出视频、推发布 tag、首次过渡合入 `main`、删除用户数据。
 
 ## 技术栈（新增依赖先说明理由）
 
@@ -145,9 +145,11 @@ uv run python src/viewer_server/server.py open-browser
 
 ### 分支流程
 
-- 日常开发统一在长期 `dev` 分支完成并推送；本地工作目录默认保持在 `dev`，不再为每项开发默认新建功能分支。
-- `main` 是稳定同步分支。只有用户明确说“同步”或指定本次合入 `main`，才通过 `dev → main` PR 同步；开发完成、测试通过、普通提交或推送都不代表同步授权。
-- 同步前核对范围与 CI；同步后保留 `dev` 和 `main` 两个长期分支，回到 `dev` 继续开发。保留既有未合并分支与工作树，不自动吸收其改动。
+- 日常开发直接在 `main` 提交并推送；`main` 是开发主干，用户更新渠道为通过门禁的正式 Release/tag。
+- 日常提交不 bump 版本。发版提交统一修改 `.claude-plugin/plugin.json` 和 `web/src/lib/changelog.ts`，验证并推送后运行 `make release`。
+- 推 `v*` tag 属于对外发布，必须获得飙哥针对本次发版的明确授权；普通开发、提交和推送不构成发布授权。
+- 发布 CI 三平台测试全部通过后才构建安装包、发布 GitHub Release、镜像到 CNB。
+- 首次过渡例外：本次发布机制改造仍在 `dev` 实施，合入 `main` 与第一个 tag 分别等飙哥确认。过渡完成后 `dev` 冻结保留，不删除；其他既有未合并工作不自动吸收。详见 ADR-0029。
 
 ### Product features
 
@@ -157,7 +159,7 @@ UI 改动需真实页面验证；用户明确授权后才合并，保留其他�
 
 ### Issue tracker
 
-任务使用本地 Markdown，存放在 `.scratch/<feature>/`；日常代码提交到 `dev`，用户要求同步时通过 GitHub PR 合入 `main`。详见 `docs/agents/issue-tracker.md`。
+任务使用本地 Markdown，存放在 `.scratch/<feature>/`；日常代码提交到 `main`，用户授权发版时推正式 tag；首次过渡按 ADR-0029 执行。详见 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 

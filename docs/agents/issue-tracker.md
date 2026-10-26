@@ -1,6 +1,6 @@
 # Issue tracker: Local Markdown
 
-任务与 PRD 在本地维护，代码日常提交到 `dev`，同步 `main` 时通过 GitHub PR 交付，不为每项任务创建 GitHub Issue。
+任务与 PRD 在本地维护，代码日常提交到 `main`，按用户授权推 tag 发布，不为每项任务创建 GitHub Issue。
 
 ## 本地任务
 
@@ -16,8 +16,8 @@ Skill 要求“发布到 issue tracker”时，在对应本地目录创建或更
 
 ## 代码交付
 
-- 日常开发统一在长期 `dev` 分支提交并推送，不默认创建功能分支、不直接更新 `main`。
-- 用户明确说“同步”时，从 `dev` 向 `main` 提交 PR；用户指定某个 PR 合入 `main` 只授权该次操作。
-- PR 必须包含独立可读的范围和验证结果，不能只引用本地任务文件。
-- 同步前确认范围与 CI，同步后保留 `dev` / `main`；已有其他未合并工作不自动并入。
+- 日常开发在 `main` 提交并推送，不默认创建功能分支。`main` 不是客户端更新渠道。
+- 日常提交不 bump；发版提交集中更新版本与日志，通过验证、推送 main 后运行 `make release`。
+- 推 tag 必须得到用户针对本次发布的明确授权；CI 门禁通过后才发布 Release 与同步 CNB。
+- ADR-0029 首次过渡仍在 `dev` 实施，合入 main 与首个 tag 等用户确认；过渡后 dev 冻结保留，不删除，不吸收其他未合并工作。
 - 共享资产与跨界面功能遵循 `docs/agents/product-feature-workflow.md`；长期结论随代码进入项目文档。

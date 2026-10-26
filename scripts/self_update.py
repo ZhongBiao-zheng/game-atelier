@@ -3,29 +3,21 @@
 只用标准库，在 `uv sync` 之前运行（项目依赖可能还没装）。
 退出码：0 = 继续启动；10 = 代码已更新，启动器应以 --skip-update 重新运行自己。
 
-更新源：先 CNB 国内镜像（只有 main，拉进 origin/main），不通再走 origin。
+更新源：CNB 已获发布门禁批准的 tag；不可达时只认 GitHub 已发布 Release。
 有新版直接 fast-forward，不询问；被本地改动挡住时，列出挡路文件并可只暂存这些文件后更新。
 """
 
 from __future__ import annotations
 
 import re
-import socket
 import subprocess
 import sys
-import json
-import urllib.request
-import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
 import bootstrap
 
 REPO = Path(__file__).resolve().parent.parent
-CNB_URL = "https://cnb.cool/ZhongBiao-zheng/game-atelier.git"
-PROBE_HOSTS = ("cnb.cool", "github.com")
-PROBE_TIMEOUT = 3  # 秒；两个源并行探测，断网时最多等这么久
 EXIT_RESTART = 10
 MAX_HEADLINES = 3
 FETCH_ARGS = ("-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=20", "fetch", "--quiet")
@@ -57,24 +49,11 @@ def ask(prompt: str, default: str) -> str:
         return default
 
 
-def reachable(host: str) -> bool:
-    try:
-        with socket.create_connection((host, 443), timeout=PROBE_TIMEOUT):
-            return True
-    except OSError:
-        return False
-
-
-def probe() -> dict[str, bool]:
-    with ThreadPoolExecutor(len(PROBE_HOSTS)) as pool:
-        return dict(zip(PROBE_HOSTS, pool.map(reachable, PROBE_HOSTS)))
-
-
-def fetch(online: dict[str, bool]) -> bool:
-    # 镜像比本地 origin/main 旧（同步还没跑完）时非 fast-forward 被拒，回落 origin。
-    if online.get("cnb.cool") and git(*FETCH_ARGS, CNB_URL, "main:refs/remotes/origin/main").returncode == 0:
-        return True
-    return bool(online.get("github.com")) and git(*FETCH_ARGS).returncode == 0
+def fetch(release: dict) -> bool:
+    tag = release["tag"]
+    source = bootstrap.CNB_URL if release["source"] == "cnb" else bootstrap.GITHUB_URL
+    # 不回退到任何分支；同名 tag 冲突由 Git 拒绝，不强制覆盖。
+    return git(*FETCH_ARGS, source, f"refs/tags/{tag}:refs/tags/{tag}").returncode == 0
 
 
 def restore_dist() -> None:
@@ -109,22 +88,19 @@ def blocking_paths(upstream: str) -> list[str]:
     return sorted(incoming & local)
 
 
-def resolve_upstream(branch: str) -> str | None:
-    upstream = out("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-    if upstream:
-        return upstream
-    warn(f"分支 {branch} 没有上游，无法自动更新")
-    if not out("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main"):
-        return None
+def ensure_main(branch: str) -> bool:
+    if branch == "main":
+        return True
+    warn(f"当前在 {branch}，自动更新需要切到 main")
     if out("status", "--porcelain"):
         print("工作区有改动，请手动 git switch main")
-        return None
-    if ask("[1] 切到 main 并更新  [2] 直接启动: ", "1") == "2":
-        return None
+        return False
+    if ask("[1] 切到 main 并更新  [2] 直接启动: ", "2") != "1":
+        return False
     if git("switch", "main").returncode != 0:
         warn("切换失败，请手动 git switch main")
-        return None
-    return "origin/main"
+        return False
+    return True
 
 
 def fast_forward(upstream: str, new_version: str) -> int:
@@ -164,42 +140,36 @@ def main() -> int:
     current = version_at("HEAD")
     print(f"当前 {current}（{branch} @ {out('rev-parse', '--short', 'HEAD') or '?'}）")
 
-    # 先读小文件；开发分支可能领先 main，同版或较旧版本不值得 git fetch。
-    # 读不到版本号（CNB 不通等）时退回 git 检查，GitHub 可达的用户照样能更新。
-    latest = None
+    release = bootstrap.latest_release(use_git=True)
+    if release is None:
+        return 0
     try:
-        with urllib.request.urlopen(
-            bootstrap.LATEST_VERSION_URL, timeout=bootstrap.UPDATE_FETCH_TIMEOUT,
-        ) as response:
-            latest = json.load(response)["version"]
-        bootstrap._version_tuple(latest)
-    except Exception as exc:
-        latest = None
-        warn(f"无法检查更新：{exc}，改用 git 检查")
-    cache = bootstrap._read_update_cache()
-    cache.update({"checked_at": time.time(), "latest": latest})
-    bootstrap._write_update_cache(cache)
-    if latest is not None and bootstrap._version_tuple(latest) <= bootstrap._version_tuple(current):
+        newer = bootstrap._version_tuple(release["version"]) > bootstrap._version_tuple(current)
+    except ValueError:
+        warn("本地版本号无效，跳过自动更新")
+        return 0
+    if not newer:
         print("已是最新")
         return 0
-
-    if not fetch(probe()):
-        warn("连不上更新源，跳过更新")
+    if not ensure_main(branch):
+        return 0
+    # 切换分支后重新比较，避免把 main 当成原来的开发分支。
+    current = version_at("HEAD")
+    if bootstrap._version_tuple(release["version"]) <= bootstrap._version_tuple(current):
+        print("已是最新")
+        return 0
+    if not fetch(release):
+        warn("无法获取发布 tag，跳过更新")
+        return 0
+    tag = release["tag"]
+    if version_at(tag) != release["version"]:
+        warn("tag 与发布版本不一致，跳过更新")
         return 0
     restore_dist()
-
-    upstream = resolve_upstream(branch)
-    if upstream is None:
-        return 0
-    if out("rev-list", "--count", f"HEAD..{upstream}") in ("", "0"):
-        print("已是最新")
-        return 0
-
-    new_version = version_at(upstream)
-    print(f"发现新版本 {current} → {new_version}")
-    for line in headlines_between(current, upstream):
+    print(f"发现新版本 {current} → {release['version']}")
+    for line in headlines_between(current, tag):
         print(f"  {line}")
-    return fast_forward(upstream, new_version)
+    return fast_forward(tag, release["version"])
 
 
 if __name__ == "__main__":

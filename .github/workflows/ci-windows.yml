@@ -5,23 +5,16 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
     inputs:
-      build_bundles:
-        description: Also validate the three release bundles (no publishing)
+      blocking:
         type: boolean
         default: false
 
 jobs:
-  bundles:
-    if: github.event_name == 'workflow_dispatch' && inputs.build_bundles
-    permissions:
-      contents: write
-    uses: ./.github/workflows/release.yml
-    secrets: inherit
-
   test-windows:
     runs-on: windows-latest
-    continue-on-error: true   # 仍非阻塞；本次修复跑绿后再单独翻成必过门
+    continue-on-error: ${{ !inputs.blocking }} # 发布调用必须阻塞；日常保持非阻塞
     env:
       # Windows 默认 stdio/文件编码非 UTF-8（cp1252/cp936），撞仓库里大量中文内容会
       # UnicodeDecode/EncodeError。UTF-8 模式让 open()/read_text()/subprocess text 一律 UTF-8，

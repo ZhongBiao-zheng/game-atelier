@@ -9,6 +9,9 @@ import argparse
 import hashlib
 import json
 import os
+import queue
+import re
+import threading
 import shutil
 import subprocess
 import sys
@@ -104,12 +107,12 @@ def _venv_is_current(data_root: Path) -> bool:
 
 
 # ---------- 版本更新检查 ----------
-# 最新版取 main 上的 plugin.json（本仓惯例：版本 bump 随 PR 合入 main，main 即最新发布）。
-# 读 CNB 国内镜像：raw.githubusercontent.com 在国内基本连不上；镜像由 GitHub Action 随 main 同步。
-LATEST_VERSION_URL = (
-    "https://cnb.cool/ZhongBiao-zheng/game-atelier"
-    "/-/git/raw/main/.claude-plugin/plugin.json"
-)
+# CNB 的 tag 只由通过发布门禁的镜像作业推送；GitHub 只读正式 Release。
+CNB_URL = "https://cnb.cool/ZhongBiao-zheng/game-atelier.git"
+GITHUB_URL = "https://github.com/ZhongBiao-zheng/game-atelier.git"
+LATEST_RELEASE_URL = "https://api.github.com/repos/ZhongBiao-zheng/game-atelier/releases/latest"
+UPDATE_CACHE_CHANNEL = "tag-releases-v1"
+RELEASE_TAG = re.compile(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
 # uv 找不到本机 Python 3.11+ 时要下载一份；默认源是 GitHub，国内基本下不动。
 PYTHON_INSTALL_MIRROR = "https://registry.npmmirror.com/-/binary/python-build-standalone"
 UPDATE_CACHE_TTL_OK = 24 * 3600  # 拉取成功后 24h 内不再联网
@@ -136,14 +139,96 @@ def _version_tuple(v: str) -> tuple[int, ...]:
     return tuple(int(p) for p in v.split("."))
 
 
-def _fetch_latest_version() -> str | None:
+def _release(tag: str, source: str) -> dict:
+    if not isinstance(tag, str) or not RELEASE_TAG.fullmatch(tag):
+        raise ValueError("不是正式版本 tag")
+    return {"tag": tag, "version": tag[1:], "source": source}
+
+
+def _query_latest_release(use_git: bool, deadline: float) -> dict:
+    errors = []
+    if use_git:
+        try:
+            result = subprocess.run(
+                ["git", "ls-remote", "--tags", "--refs", CNB_URL],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=min(1.5, max(0.01, deadline - time.monotonic())),
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            )
+            if result.returncode:
+                raise OSError("CNB tag 查询失败")
+            tags = [line.split()[1].removeprefix("refs/tags/")
+                    for line in result.stdout.splitlines()
+                    if len(line.split()) == 2 and line.split()[1].startswith("refs/tags/")]
+            tags = [tag for tag in tags if RELEASE_TAG.fullmatch(tag)]
+            if not tags:
+                raise ValueError("CNB 暂无正式 tag")
+            return _release(max(tags, key=lambda tag: _version_tuple(tag[1:])), "cnb")
+        except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+            errors.append("CNB 查询超时" if isinstance(error, subprocess.TimeoutExpired) else str(error))
+    # CNB Release API 实测匿名 401；无 git 的安装包直接查询公开 GitHub Release。
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("更新检查预算已用完")
     try:
-        with urllib.request.urlopen(LATEST_VERSION_URL, timeout=UPDATE_FETCH_TIMEOUT) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-        return payload.get("version") or None
-    except Exception as error:
-        print(f"无法检查更新：{error}", file=sys.stderr)
+        request = urllib.request.Request(LATEST_RELEASE_URL, headers={
+            "Accept": "application/vnd.github+json", "User-Agent": "GameAtelier-Updater",
+        })
+        with urllib.request.urlopen(request, timeout=remaining) as response:
+            payload = json.loads(response.read(1024 * 1024).decode("utf-8"))
+        if not isinstance(payload, dict) or payload.get("draft") is not False or payload.get("prerelease") is not False or not payload.get("published_at"):
+            raise ValueError("没有已发布的正式 Release")
+        return _release(payload.get("tag_name"), "github")
+    except (OSError, ValueError) as error:
+        errors.append(str(error))
+        raise OSError("；".join(errors)) from None
+
+
+def _fetch_latest_release(use_git: bool) -> tuple[dict | None, str | None]:
+    # socket timeout 不是总时限（DNS/慢速分块可能拖长）；主线程只等固定预算。
+    # worker 不写缓存，超时后的迟到响应不会改变本次判断，也不会阻止进程退出。
+    results = queue.Queue(maxsize=1)
+    deadline = time.monotonic() + UPDATE_FETCH_TIMEOUT
+
+    def query():
+        try:
+            results.put((_query_latest_release(use_git, deadline), None))
+        except Exception as error:
+            results.put((None, str(error)))
+
+    threading.Thread(target=query, daemon=True).start()
+    try:
+        return results.get(timeout=max(0.001, deadline - time.monotonic()))
+    except queue.Empty:
+        return None, f"更新检查超过 {UPDATE_FETCH_TIMEOUT:g} 秒预算"
+
+
+def latest_release(*, use_git: bool = False) -> dict | None:
+    """源码与安装包共用发现/缓存；HTTP 模式不读取只被 tag 确认的结果。"""
+    if os.environ.get("GAME_ATELIER_NO_UPDATE_CHECK"):
         return None
+    cache = _read_update_cache()
+    mode = "git" if use_git else "http"
+    now = time.time()
+    checked_at = cache.get("checked_at", 0)
+    release = cache.get("release")
+    valid = cache.get("channel") == UPDATE_CACHE_CHANNEL and cache.get("mode") == mode
+    if release is not None:
+        try:
+            valid = valid and release == _release(release["tag"], release["source"])
+            valid = valid and release["source"] in ({"cnb", "github"} if use_git else {"github"})
+        except (KeyError, TypeError, ValueError):
+            valid = False
+    ttl = UPDATE_CACHE_TTL_OK if release else UPDATE_CACHE_TTL_FAIL
+    if valid and isinstance(checked_at, (int, float)) and 0 <= now - checked_at < ttl:
+        return release
+    release, error = _fetch_latest_release(use_git)
+    cache.update({"channel": UPDATE_CACHE_CHANNEL, "mode": mode, "checked_at": now,
+                  "release": release, "latest": release["version"] if release else None})
+    _write_update_cache(cache)
+    if error:
+        print(f"无法检查更新：{error}", file=sys.stderr)
+    return release
 
 
 def _read_update_cache() -> dict:
@@ -177,17 +262,9 @@ def update_info() -> dict | None:
     if current is None:
         return None
 
+    release = latest_release(use_git=not is_bundle())
+    latest = release["version"] if release else None
     cache = _read_update_cache()
-    now = time.time()
-    checked_at = cache.get("checked_at", 0)
-    latest = cache.get("latest")
-    ttl = UPDATE_CACHE_TTL_OK if latest else UPDATE_CACHE_TTL_FAIL
-
-    if not isinstance(checked_at, (int, float)) or now - checked_at >= ttl:
-        latest = _fetch_latest_version()
-        cache.update({"checked_at": now, "latest": latest})
-        _write_update_cache(cache)
-
     info = {"current": current, "latest": latest, "update_available": False, "dismissed": False}
     if not latest:
         return info

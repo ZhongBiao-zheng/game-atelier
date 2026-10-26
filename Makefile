@@ -1,4 +1,4 @@
-.PHONY: install dev studio build test verify clean dev-link dev-unlink
+.PHONY: install dev studio build test verify clean dev-link dev-unlink release
 
 install:
 	uv sync
@@ -54,3 +54,63 @@ dev-link:
 dev-unlink:
 	@find .claude/skills -maxdepth 1 -type l -delete 2>/dev/null || true
 	@echo "Unlinked. Claude Code will fall back to ~/.claude/skills/ (if installed there)."
+
+# 只有获得发布授权后才运行；定义直接保存在 Makefile，避免另建发布脚本。
+PYTHON ?= python3
+define RELEASE_COMMAND
+import json, re, subprocess, sys, time
+from pathlib import Path
+
+def fail(message):
+    print("无法发布：" + message, file=sys.stderr)
+    sys.exit(1)
+
+def git(*args):
+    result = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8", timeout=30)
+    if result.returncode:
+        fail("git " + args[0] + " 失败，请检查仓库和网络")
+    return result.stdout.strip()
+
+if git("branch", "--show-current") != "main":
+    fail("当前分支必须是 main")
+if git("status", "--porcelain"):
+    fail("工作区必须干净（包括未跟踪文件）")
+version = json.loads(Path(".claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
+if not isinstance(version, str) or not re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", version):
+    fail("版本号必须是正式三段版本")
+first = re.search(r"version:\s*['\"]([^'\"]+)['\"]", Path("web/src/lib/changelog.ts").read_text(encoding="utf-8"))
+if not first or first.group(1) != version:
+    fail("更新日志最新一条必须与 plugin.json 版本一致")
+tag = "v" + version
+if git("tag", "--list", tag):
+    fail("本地已存在 " + tag)
+remote = dict(line.split()[::-1] for line in git("ls-remote", "origin", "refs/heads/main", "refs/tags/" + tag).splitlines())
+if "refs/tags/" + tag in remote:
+    fail("远端已存在 " + tag)
+if remote.get("refs/heads/main") != git("rev-parse", "HEAD"):
+    fail("HEAD 与远端 main 不一致，请先同步并推送发版提交")
+# 在所有检查后才创建 tag；不覆盖既有 tag。推送失败保留本地 tag 供人工检查。
+git("tag", tag)
+git("push", "origin", "refs/tags/" + tag)
+print("已推送 " + tag)
+# Actions 创建 run 有短暂延迟；链接查询失败不改变已成功的发布请求。
+for attempt in range(5):
+    try:
+        result = subprocess.run(["gh", "run", "list", "--workflow", "release.yml", "--branch", tag,
+                                 "--event", "push", "--limit", "1", "--json", "url"],
+                                capture_output=True, text=True, timeout=5)
+        runs = json.loads(result.stdout) if result.returncode == 0 else []
+        if runs:
+            print(runs[0]["url"])
+            break
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    if attempt < 4:
+        time.sleep(1)
+else:
+    print("发布运行尚未可查询：https://github.com/ZhongBiao-zheng/game-atelier/actions/workflows/release.yml")
+endef
+export RELEASE_COMMAND
+
+release:
+	@$(PYTHON) -c "$$RELEASE_COMMAND"
