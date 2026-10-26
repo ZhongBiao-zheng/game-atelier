@@ -28,5 +28,5 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'openai-hk', value: 'custom', label: 'OpenAI-HK', kind: 'relay', modalities: ['image', 'video', 'llm'], homepageUrl: 'https://www.openai-hk.com', apiKeyUrl: 'https://www.openai-hk.com/v3/ai', defaultBaseUrl: 'https://api.openai-hk.com', defaultModels: [{ name: 'GPT Image 2', id: 'gpt-image-2', modality: 'image' }] },
   { id: 'custom', value: 'custom', label: '自定义', kind: 'custom', modalities: ['image'], defaultBaseUrl: '', defaultModels: [{ name: '', id: '' }] },
   // 局域网里另一台开了「局域网共享」的 Atelier（ADR-0025）：模型由网关决定，连接后自动带回。
-  { id: 'atelier', value: 'atelier', label: '局域网 Atelier', kind: 'team', modalities: ['image'], defaultBaseUrl: '', defaultModels: [] },
+  { id: 'atelier', value: 'atelier', label: 'Remote Atelier', kind: 'team', modalities: ['image'], defaultBaseUrl: '', defaultModels: [] },
 ];

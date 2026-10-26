@@ -553,13 +553,15 @@ describe('KeyForm', () => {
       />,
     );
     const input = screen.getByLabelText('API 密钥') as HTMLInputElement;
-    expect(input.type).toBe('password');
+    // 不能是密码框：Chrome 会把它当登录表单弹出保存密码；遮挡靠 text-security。
+    expect(input.type).toBe('text');
+    expect(input.className).toContain('[-webkit-text-security:disc]');
 
     fireEvent.click(screen.getByRole('button', { name: '显示密钥' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/keys/zz/reveal'));
     await waitFor(() => expect(input.value).toBe('sk-full-plaintext-revealed'));
-    expect(input.type).toBe('text');
+    expect(input.className).not.toContain('[-webkit-text-security:disc]');
   });
 });
 

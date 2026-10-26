@@ -32,6 +32,11 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.127.2', date: '2026-10-26', headline: '找回创作台旧记录', changes: [
+    { kind: 'fix', text: '从旧版本升级后，创作台的历史出图重新显示。' },
+    { kind: 'fix', text: '连接 Remote Atelier 失败时直接说明原因：网关版本过旧、密钥无效或连不上。' },
+    { kind: 'fix', text: '填写密钥时浏览器不再弹出「保存密码」；局域网 Atelier 改名 Remote Atelier。' },
+  ] },
   { version: '5.127.1', date: '2026-10-26', headline: '安装包与更新检查修正', changes: [
     { kind: 'fix', text: 'Mac 安装包从浏览器下载后也能打开，启动器会清除本包的下载隔离标记。' },
     { kind: 'fix', text: '读不到最新版本号时改用 git 检查更新，不再丢掉「这次不更新」的选择。' },

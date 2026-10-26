@@ -21,7 +21,7 @@ import { Tasks } from './lan-sharing/Tasks';
 import { button, date, PERIODS } from './lan-sharing/shared';
 
 export const GATEWAY_HINT =
-  '同事在「添加供应商 → 局域网 Atelier」填写地址和网关密钥。连接使用明文 HTTP。同事连不上时检查防火墙：Windows 把当前网络设为「专用网络」，并在防火墙中允许 Atelier（Python）入站；macOS 首次开启时在弹窗中点「允许」。';
+  '同事在「添加供应商 → Remote Atelier」填写地址和网关密钥。连接使用明文 HTTP。同事连不上时检查防火墙：Windows 把当前网络设为「专用网络」，并在防火墙中允许 Atelier（Python）入站；macOS 首次开启时在弹窗中点「允许」。';
 export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
   const [tab, setTab] = useState('members');
   const [state, setState] = useState<GatewayState | null>(null);

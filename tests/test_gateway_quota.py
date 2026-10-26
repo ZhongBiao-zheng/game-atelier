@@ -404,3 +404,26 @@ def test_v1_gateway_is_rejected(monkeypatch):
     with pytest.raises(atelier_gateway.GatewayError, match="网关版本不一致"):
         atelier_gateway.check_gateway("http://127.0.0.1:5180", "test")
     assert session.get.call_count == 2
+
+
+@pytest.mark.parametrize(("health", "info", "message"), [
+    (404, 200, "网关机器的 Atelier 版本过旧"),
+    (200, 401, "网关密钥无效或已被撤销"),
+    (200, 403, "这把网关密钥没有使用权限"),
+])
+def test_check_gateway_explains_common_failures(monkeypatch, health, info, message):
+    from unittest.mock import MagicMock
+    from character_workflow.lib.callers import atelier_gateway
+
+    def response(status, body):
+        item = MagicMock(status_code=status, reason="x")
+        item.json.return_value = body
+        return item
+
+    session = MagicMock()
+    session.__enter__.return_value = session
+    session.get.side_effect = [response(health, {"ok": True}), response(info, {"detail": "raw"})]
+    monkeypatch.setattr(atelier_gateway, "_session", lambda: session)
+    with pytest.raises(atelier_gateway.GatewayError, match=message) as raised:
+        atelier_gateway.check_gateway("http://127.0.0.1:5180", "test")
+    assert "gateway api" not in str(raised.value)

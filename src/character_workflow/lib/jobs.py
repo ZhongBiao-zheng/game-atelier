@@ -94,14 +94,24 @@ def write_job_under_lock(job: Job) -> Job:
     return _write(job)
 
 
+# 已废弃字段：seed，以及工坊退役（ADR-0027）删掉的六个字段。工坊退役前的每条任务都带着它们
+# （值多为 null），只在作者本机手工清过；其他机器升级后若不剥离，extra=forbid 会让创作台历史整页消失。
+# 只在读取时忽略，不改磁盘文件。
+_RETIRED_FIELDS = (
+    "seed", "asset_slot", "project_id", "ui_scheme_id", "screen_id", "production_id",
+    "workshop_request_id",
+)
+
+
 def _load_job(data: Any) -> Job:
-    """读盘构造 Job：先剥离已废弃字段（seed），存量 JSON 不触发 extra=forbid。
+    """读盘构造 Job：先剥离已废弃字段，存量 JSON 不触发 extra=forbid。
 
     非 dict（坏文件被截断 / 手改成 `[]` 或裸值）时跳过 `.pop`，交给 model_validate
     抛 ValidationError → 上层 except 走「跳过 + 留日志」；绝不在 `.pop` 阶段抛
     Type/AttributeError 逃逸容错网，否则整个 /api/jobs 列表会 500（角色页全空）。"""
     if isinstance(data, dict):
-        data.pop("seed", None)
+        for field in _RETIRED_FIELDS:
+            data.pop(field, None)
     return Job.model_validate(data)
 
 
