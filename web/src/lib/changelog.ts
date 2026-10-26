@@ -32,6 +32,12 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.130.0', date: '2026-10-26', headline: '应用内更新与质量参数修正', changes: [
+    { kind: 'feat', text: '安装包会后台下载并校验新版，准备好后可在应用内确认更新；等待任务完成再重启，也可取消等待。' },
+    { kind: 'fix', text: '新版启动失败时自动恢复旧版，设置页可查看原因并重新检查。' },
+    { kind: 'fix', text: 'Tuzi GPT 2.5 使用低、中、高、超高、最高五档质量，创作台与画布参数保持一致。' },
+    { kind: 'feat', text: '5.129.0 及更早安装包需手动下载更换一次；源码版仍通过一键启动器更新。' },
+  ] },
   { version: '5.129.0', date: '2026-10-26', headline: '安装包新布局', changes: [
     { kind: 'feat', text: '安装包使用固定启动入口，应用与运行环境按版本独立存放，为后续应用内更新做准备。' },
     { kind: 'fix', text: '启动版本记录缺失或损坏时，自动回到上一个可用版本。' },
