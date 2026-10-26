@@ -37,31 +37,66 @@ def test_bundle_interpreter_skips_uv_and_venv(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(not os.environ.get("ATELIER_BUNDLE_ARCHIVE"), reason="requires release archive")
-def test_relocated_archive_runs_without_system_tools_and_preserves_data(tmp_path):
+@pytest.mark.parametrize("service", [False, True])
+def test_relocated_archive_runs_without_system_tools_and_preserves_data(tmp_path, service):
     archive = Path(os.environ["ATELIER_BUNDLE_ARCHIVE"])
     unpack = tmp_path / "relocated folder"
     shutil.unpack_archive(archive, unpack)
     folder = next(unpack.iterdir())
-    python = folder / "python" / ("python.exe" if os.name == "nt" else "bin/python3")
-    boot = folder / "app/scripts/bootstrap.py"
+    assert folder.name == "GameAtelier"
+    version = (folder / "last-good").read_text().strip()
+    payload = folder / "versions" / version
+    python = payload / "python" / ("python.exe" if os.name == "nt" else "bin/python3")
+    boot = payload / "app/scripts/bootstrap.py"
     data = tmp_path / "data"
     (data / ".config").mkdir(parents=True)
     sentinel = data / ".config/keep.txt"
     sentinel.write_text("persistent", encoding="utf-8")
     env = {**os.environ, "PATH": "", "GAME_ATELIER_DATA_ROOT": str(data),
            "GAME_ATELIER_NO_UPDATE_CHECK": "1", "BROWSER": "true",
-           "PYTHONPATH": str(folder / "app/src"), "PYTHONUTF8": "1"}
+           "PYTHONPATH": str(payload / "app/src"), "PYTHONUTF8": "1"}
     # Loopback remains available; outgoing HTTP is deliberately sent to an unused port.
     env.update(HTTP_PROXY="http://127.0.0.1:1", HTTPS_PROXY="http://127.0.0.1:1",
                NO_PROXY="127.0.0.1,localhost")
+    process = None
     try:
         started = time.perf_counter()
-        result = subprocess.run([str(python), str(boot), "--launch"], env=env,
-                                capture_output=True, text=True, encoding="utf-8", timeout=60)
-        assert result.returncode == 0, result.stdout + result.stderr
+        # Exercise the actual stable launcher, including recovery from a missing current.
+        (folder / "current").unlink()
+        if os.name == "nt":
+            powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+            command = [str(powershell), "-NoProfile", "-ExecutionPolicy", "Bypass",
+                       "-File", str(folder / "launch.ps1")]
+            if service:
+                command += ["-Service", "-DataRoot", str(data)]
+        else:
+            command = ([str(python), str(boot), "--select-version", "--service"] if service
+                       else [str(folder / "启动.command")])
+        if service:
+            process = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL)
+            deadline = time.monotonic() + 60
+            while not (data / ".runtime/server.port").exists() and time.monotonic() < deadline:
+                assert process.poll() is None, "foreground service exited before startup"
+                time.sleep(0.1)
+        else:
+            result = subprocess.run(command, env=env,
+                                    capture_output=True, text=True, encoding="utf-8", timeout=60)
+            assert result.returncode == 0, result.stdout + result.stderr
+        assert (folder / "current").read_text().strip() == version
         port = (data / ".runtime/server.port").read_text().strip()
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=10) as response:
-            assert response.status == 200
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=2) as response:
+                    assert response.status == 200
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.1)
+        if service:
+            assert process.poll() is None
         print(f"bundle relocated startup: {time.perf_counter() - started:.2f}s")
         assert sentinel.read_text() == "persistent"
         assert not (data / ".venv").exists()
@@ -70,8 +105,114 @@ def test_relocated_archive_runs_without_system_tools_and_preserves_data(tmp_path
         env["PATH"] = os.environ.get("PATH", "")
         subprocess.run([str(python), str(boot), "--run", "-m", "viewer_server.server", "stop"],
                        env=env, check=True, timeout=30)
+        if process is not None:
+            process.wait(timeout=30)
     shutil.rmtree(folder)
     assert sentinel.read_text() == "persistent"
+
+
+@pytest.fixture
+def versioned_bundle(tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location("layout_bootstrap", REPO / "scripts/bootstrap.py")
+    boot = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(boot)
+    root = tmp_path / "Game Atelier"
+    for version in ("5.129.0", "5.129.1"):
+        payload = root / "versions" / version
+        executable = payload / "python" / ("python.exe" if os.name == "nt" else "bin/python3")
+        executable.parent.mkdir(parents=True)
+        executable.touch()
+        (payload / "app/scripts").mkdir(parents=True)
+        (payload / "app/scripts/bootstrap.py").touch()
+        (payload / "VERSION").write_text(version, encoding="utf-8")
+    old = root / "versions/5.129.0"
+    (root / "current").write_text("5.129.0\n", encoding="utf-8")
+    (root / "last-good").write_text("5.129.0\n", encoding="utf-8")
+    monkeypatch.setattr(boot, "PLUGIN_DIR", old / "app")
+    monkeypatch.setattr(sys, "executable", str(old / "python" / (
+        "python.exe" if os.name == "nt" else "bin/python3")))
+    return boot, root
+
+
+def test_bundle_selects_current_without_promoting_a_higher_download(versioned_bundle):
+    boot, root = versioned_bundle
+    assert boot.bundle_root() == root
+    assert boot.select_bundle_version(root).name == "5.129.0"
+    (root / "current").write_text("5.129.1\n", encoding="utf-8")
+    assert boot.select_bundle_version(root).name == "5.129.1"
+    assert (root / "last-good").read_text().strip() == "5.129.0"
+
+
+@pytest.mark.parametrize("invalid", [None, "../outside", "5.130.0", "5.129.1-rc1", "\x00"])
+def test_bundle_invalid_current_restores_last_good(versioned_bundle, invalid):
+    boot, root = versioned_bundle
+    if invalid is None:
+        (root / "current").unlink()
+    else:
+        (root / "current").write_text(invalid, encoding="utf-8")
+    assert boot.select_bundle_version(root).name == "5.129.0"
+    assert (root / "current").read_text() == "5.129.0\n"
+
+
+@pytest.mark.parametrize("missing", ["VERSION", "app/scripts/bootstrap.py", "python"])
+def test_bundle_incomplete_current_uses_confirmed_version(versioned_bundle, missing):
+    boot, root = versioned_bundle
+    (root / "current").write_text("5.129.1", encoding="utf-8")
+    target = root / "versions/5.129.1" / missing
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+    assert boot.select_bundle_version(root).name == "5.129.0"
+
+
+def test_bundle_wrong_manifest_and_missing_fallback_fail_closed(versioned_bundle):
+    boot, root = versioned_bundle
+    (root / "versions/5.129.0/VERSION").write_text("5.129.1", encoding="utf-8")
+    with pytest.raises(ValueError, match="重新下载"):
+        boot.select_bundle_version(root)
+
+
+def test_bundle_invalid_manifest_encoding_restores_last_good(versioned_bundle):
+    boot, root = versioned_bundle
+    (root / "current").write_text("5.129.1", encoding="utf-8")
+    (root / "versions/5.129.1/VERSION").write_bytes(b"\xff")
+    assert boot.select_bundle_version(root).name == "5.129.0"
+
+
+def test_bundle_failed_pointer_replace_preserves_old_value(versioned_bundle, monkeypatch):
+    from character_workflow.lib import atomic_io
+    boot, root = versioned_bundle
+    (root / "current").write_text("5.130.0", encoding="utf-8")
+    def fail(*args):
+        raise PermissionError("locked")
+    monkeypatch.setattr(atomic_io, "_replace_with_retry", fail)
+    with pytest.raises(PermissionError):
+        boot.select_bundle_version(root)
+    assert (root / "current").read_text() == "5.130.0"
+    assert not list(root.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("service", [False, True])
+def test_bundle_dispatches_selected_interpreter_and_clean_environment(versioned_bundle, monkeypatch, service):
+    boot, root = versioned_bundle
+    (root / "current").write_text("5.129.1", encoding="utf-8")
+    monkeypatch.setenv("VIRTUAL_ENV", "wrong")
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", "wrong")
+    monkeypatch.setenv("GAME_ATELIER_NO_UPDATE_CHECK", "1")
+    def run(command, *, env):
+        assert "versions/5.129.1/python" in Path(command[0]).as_posix()
+        assert env["PYTHONPATH"] == str(root / "versions/5.129.1/app/src")
+        assert "VIRTUAL_ENV" not in env and "UV_PROJECT_ENVIRONMENT" not in env
+        if service:
+            assert command[-2:] == ["start", "--no-browser"]
+            assert env["GAME_ATELIER_SERVICE"] == "1"
+            assert "GAME_ATELIER_NO_UPDATE_CHECK" not in env
+        else:
+            assert command[-1] == "--launch"
+        return subprocess.CompletedProcess(command, 0)
+    monkeypatch.setattr(boot.subprocess, "run", run)
+    assert boot.launch_selected_version(service=service) == 0
 
 
 @pytest.fixture

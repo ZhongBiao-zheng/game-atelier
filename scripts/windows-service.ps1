@@ -20,7 +20,8 @@ if ($Command -eq 'run') {
   if (-not $Python -or -not $DataRoot) { throw 'Missing registered runtime' }
   $env:GAME_ATELIER_DATA_ROOT = $DataRoot
   $env:PYTHONPATH = Join-Path $AppRoot 'src'
-  $env:GAME_ATELIER_NO_UPDATE_CHECK = '1'
+  Remove-Item Env:GAME_ATELIER_NO_UPDATE_CHECK -ErrorAction SilentlyContinue
+  $env:GAME_ATELIER_SERVICE = '1'
   $env:PYTHONUTF8 = '1'
   Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue
   Remove-Item Env:UV_PROJECT_ENVIRONMENT -ErrorAction SilentlyContinue
@@ -62,7 +63,18 @@ if ($runtime.status -notin @('ready', 'needs_first_key')) {
 }
 $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run -Python "{1}" -DataRoot "{2}"' -f $PSCommandPath, $runtime.venv_python, $runtime.data_root
-$action = New-ScheduledTaskAction -Execute $powershell -Argument $arguments -WorkingDirectory $AppRoot
+$workingDirectory = $AppRoot
+if ($runtime.runtime_mode -eq 'bundle') {
+  $versions = Split-Path -Parent (Split-Path -Parent $AppRoot)
+  $installRoot = Split-Path -Parent $versions
+  $fixedEntry = Join-Path $installRoot 'launch.ps1'
+  if ((Split-Path -Leaf $versions) -ne 'versions' -or -not (Test-Path $fixedEntry)) {
+    throw '请下载并解压新布局安装包后安装常驻服务。'
+  }
+  $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Service -DataRoot "{1}"' -f $fixedEntry, $runtime.data_root
+  $workingDirectory = $installRoot
+}
+$action = New-ScheduledTaskAction -Execute $powershell -Argument $arguments -WorkingDirectory $workingDirectory
 $bootTrigger = New-ScheduledTaskTrigger -AtStartup
 # 无 RepetitionDuration 表示永久重复；IgnoreNew 防止启动第二个服务进程。
 $watchTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1)

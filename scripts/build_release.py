@@ -12,19 +12,67 @@ import subprocess
 REPO = Path(__file__).resolve().parent.parent
 
 
+def write_launchers(folder: Path, *, windows: bool) -> None:
+    """Stable entrypoints delegate version selection to the last confirmed runtime."""
+    if windows:
+        (folder / "启动.bat").write_text(
+            '@echo off\nchcp 65001 >nul\nsetlocal\n'
+            'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0launch.ps1"\n'
+            'if errorlevel 1 pause\n', encoding="utf-8", newline="\r\n",
+        )
+        (folder / "launch.ps1").write_text(
+            "param([switch]$Service, [string]$DataRoot)\n"
+            "$ErrorActionPreference = 'Stop'\n"
+            "$version = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'last-good') -Raw).Trim()\n"
+            "if ($version -notmatch '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$') {\n"
+            "  throw 'Invalid last-good version. Please download the bundle again.'\n}\n"
+            "$runtime = Join-Path $PSScriptRoot ('versions\\' + $version)\n"
+            "$env:PYTHONUTF8 = '1'\n"
+            "$env:PYTHONPATH = Join-Path $runtime 'app\\src'\n"
+            "Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue\n"
+            "Remove-Item Env:UV_PROJECT_ENVIRONMENT -ErrorAction SilentlyContinue\n"
+            "if ($DataRoot) { $env:GAME_ATELIER_DATA_ROOT = $DataRoot }\n"
+            "$arguments = @((Join-Path $runtime 'app\\scripts\\bootstrap.py'), '--select-version')\n"
+            "if ($Service) { $arguments += '--service' }\n"
+            "& (Join-Path $runtime 'python\\python.exe') @arguments\n"
+            "exit $LASTEXITCODE\n", encoding="utf-8-sig",
+        )
+    else:
+        launcher = folder / "启动.command"
+        launcher.write_text(
+            '#!/bin/sh\nset -eu\n'
+            'BUNDLE_DIR="$(CDPATH= cd -- "${0%/*}" && pwd)"\n'
+            'if command -v xattr >/dev/null 2>&1; then\n'
+            '  xattr -dr com.apple.quarantine "$BUNDLE_DIR" 2>/dev/null || true\n'
+            'fi\n'
+            'IFS= read -r VERSION < "$BUNDLE_DIR/last-good"\n'
+            'case "$VERSION" in ""|*[!0-9.]*) echo "Invalid last-good version" >&2; exit 1;; esac\n'
+            'RUNTIME="$BUNDLE_DIR/versions/$VERSION"\n'
+            'unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT\n'
+            'export PYTHONPATH="$RUNTIME/app/src"\n'
+            'exec "$RUNTIME/python/bin/python3" "$RUNTIME/app/scripts/bootstrap.py" --select-version\n',
+            encoding="utf-8",
+        )
+        launcher.chmod(0o755)
+
+
 def build(output: Path, platform: str) -> Path:
     version = json.loads((REPO / ".claude-plugin/plugin.json").read_text())["version"]
-    folder = output.resolve() / f"GameAtelier-{version}-{platform}"
-    folder.mkdir(parents=True, exist_ok=False)
+    folder = output.resolve() / "GameAtelier"
+    payload = folder / "versions" / version
+    payload.mkdir(parents=True, exist_ok=False)
+    (folder / "updates").mkdir()
+    for pointer in ("current", "last-good"):
+        (folder / pointer).write_text(version + "\n", encoding="utf-8")
     # uv downloads python-build-standalone; pin the interpreter, never copy a local venv.
     subprocess.run(["uv", "python", "install", "3.11", "--no-bin"], check=True)
     executable = Path(subprocess.check_output(
         ["uv", "python", "find", "--managed-python", "3.11"], text=True,
     ).strip()).resolve()
     runtime = executable.parent if os.name == "nt" else executable.parent.parent
-    shutil.copytree(runtime, folder / "python", symlinks=True)
-    python = folder / "python" / ("python.exe" if os.name == "nt" else "bin/python3")
-    requirements = folder / "requirements.txt"
+    shutil.copytree(runtime, payload / "python", symlinks=True)
+    python = payload / "python" / ("python.exe" if os.name == "nt" else "bin/python3")
+    requirements = payload / "requirements.txt"
     subprocess.run([
         "uv", "export", "--locked", "--no-dev", "--no-emit-project",
         "--output-file", str(requirements),
@@ -35,40 +83,18 @@ def build(output: Path, platform: str) -> Path:
         "--require-hashes",
         "-r", str(requirements),
     ], cwd=REPO, check=True)
-    app = folder / "app"
+    app = payload / "app"
     app.mkdir()
     for name in ("src", "web/dist", "scripts", "skills", ".claude-plugin"):
         shutil.copytree(REPO / name, app / name,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     for name in ("pyproject.toml", "uv.lock", ".python-version"):
         shutil.copy2(REPO / name, app / name)
-    (folder / "VERSION").write_text(version + "\n", encoding="utf-8")
-    if os.name == "nt":
-        (folder / "启动.bat").write_text(
-            '@echo off\nchcp 65001 >nul\nsetlocal\n'
-            'set "PYTHONUTF8=1"\nset "PYTHONPATH=%~dp0app\\src"\n'
-            'set "VIRTUAL_ENV="\nset "UV_PROJECT_ENVIRONMENT="\n'
-            '"%~dp0python\\python.exe" "%~dp0app\\scripts\\bootstrap.py" --launch\n'
-            'if errorlevel 1 pause\n', encoding="utf-8", newline="\r\n",
-        )
-    else:
-        launcher = folder / "启动.command"
-        launcher.write_text(
-            '#!/bin/sh\nset -eu\n'
-            'BUNDLE_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\n'
-            # 浏览器下载会给整个包打隔离标记，未签名的 Python 与动态库随后被 Gatekeeper 拦下。
-            # 用户放行本启动器即同意运行这个包，这里只清本包目录的标记。
-            'if command -v xattr >/dev/null 2>&1; then\n'
-            '  xattr -dr com.apple.quarantine "$BUNDLE_DIR" 2>/dev/null || true\n'
-            'fi\n'
-            'unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT\n'
-            'export PYTHONPATH="$BUNDLE_DIR/app/src"\n'
-            'exec "$BUNDLE_DIR/python/bin/python3" "$BUNDLE_DIR/app/scripts/bootstrap.py" --launch\n',
-            encoding="utf-8",
-        )
-        launcher.chmod(0o755)
+    (payload / "VERSION").write_text(version + "\n", encoding="utf-8")
+    write_launchers(folder, windows=os.name == "nt")
     archive = Path(shutil.make_archive(
-        str(folder), "zip" if os.name == "nt" else "gztar",
+        str(output.resolve() / f"GameAtelier-{version}-{platform}"),
+        "zip" if os.name == "nt" else "gztar",
         root_dir=folder.parent, base_dir=folder.name,
     ))
     with archive.open("rb") as source:

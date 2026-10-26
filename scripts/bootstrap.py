@@ -36,6 +36,76 @@ def is_bundle() -> bool:
     return Path(sys.executable).resolve().is_relative_to(PLUGIN_DIR.parent / "python")
 
 
+def bundle_root() -> Path | None:
+    """Only the versioned bundle layout has a stable installation root."""
+    payload = PLUGIN_DIR.parent
+    if is_bundle() and payload.parent.name == "versions":
+        return payload.parent.parent
+    return None
+
+
+def bundle_version(root: Path, version: str) -> Path | None:
+    """Do not execute incomplete versions or follow paths outside this installation."""
+    if not RELEASE_TAG.fullmatch("v" + version):
+        return None
+    payload = root / "versions" / version
+    python = payload / "python" / ("python.exe" if os.name == "nt" else "bin/python3")
+    entry = payload / "app/scripts/bootstrap.py"
+    try:
+        files = (python, entry, payload / "VERSION")
+        if not all(p.is_file() and p.resolve().is_relative_to(payload.resolve()) for p in files):
+            return None
+        if not payload.resolve().is_relative_to((root / "versions").resolve()):
+            return None
+        if (payload / "VERSION").read_text(encoding="utf-8").strip() != version:
+            return None
+    except (OSError, UnicodeError):
+        return None
+    return payload
+
+
+def select_bundle_version(root: Path) -> Path:
+    for pointer in ("current", "last-good"):
+        try:
+            version = (root / pointer).read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeError):
+            continue
+        payload = bundle_version(root, version)
+        if payload is not None:
+            if pointer == "last-good":
+                # Use the existing Windows-aware atomic replacement implementation.
+                sys.path.insert(0, str(PLUGIN_DIR / "src"))
+                from character_workflow.lib.atomic_io import atomic_write_text
+                atomic_write_text(root / "current", version + "\n")
+            return payload
+    raise ValueError("安装包版本目录不完整，请重新下载安装包。")
+
+
+def launch_selected_version(*, service: bool = False) -> int:
+    root = bundle_root()
+    if root is None:
+        print("选版本入口仅适用于新布局安装包。", file=sys.stderr)
+        return 1
+    try:
+        payload = select_bundle_version(root)
+    except (ValueError, OSError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    python = payload / "python" / ("python.exe" if os.name == "nt" else "bin/python3")
+    env = {**os.environ, "PYTHONPATH": str(payload / "app/src"), "PYTHONUTF8": "1"}
+    env.pop("VIRTUAL_ENV", None)
+    env.pop("UV_PROJECT_ENVIRONMENT", None)
+    if service:
+        env["GAME_ATELIER_SERVICE"] = "1"
+        env.pop("GAME_ATELIER_NO_UPDATE_CHECK", None)
+        command = [str(python), str(payload / "app/src/viewer_server/server.py"),
+                   "start", "--no-browser"]
+    else:
+        command = [str(python), str(payload / "app/scripts/bootstrap.py"), "--launch"]
+    # Keep the foreground child inside the scheduled task's process lifetime on Windows.
+    return subprocess.run(command, env=env).returncode
+
+
 def _user_config_dir() -> Path:
     """等价 platformdirs.user_config_dir(APP_NAME)；platformdirs 缺失时逐平台兜底。
 
@@ -588,6 +658,10 @@ def main() -> int:
         return run_in_venv(sys.argv[2:])
 
     parser = argparse.ArgumentParser(description="Bootstrap the game-atelier plugin.")
+    parser.add_argument("--select-version", action="store_true",
+                        help="Launch the selected version from a versioned bundle.")
+    parser.add_argument("--service", action="store_true",
+                        help="Run the selected bundle in the foreground for Task Scheduler.")
     parser.add_argument("--check", action="store_true", help="Report current bootstrap state.")
     parser.add_argument(
         "--launch", action="store_true", help="Prepare the shared runtime and launch the viewer.",
@@ -613,6 +687,11 @@ def main() -> int:
         help="Forward remaining args to <data_root>/.venv/python (handled before argparse).",
     )
     args = parser.parse_args()
+
+    if args.select_version:
+        return launch_selected_version(service=args.service)
+    if args.service:
+        parser.error("--service requires --select-version")
 
     if args.check:
         result = check()

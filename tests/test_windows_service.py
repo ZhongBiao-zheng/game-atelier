@@ -1,4 +1,5 @@
 import json
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -32,15 +33,20 @@ def test_status_failure_is_visible(monkeypatch):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell syntax and ScheduledTasks require Windows")
-def test_windows_script_parses_and_reads_status_without_installing():
+def test_windows_script_parses_and_reads_status_without_installing(tmp_path):
     # Parse the complete script, including the installation branches, without changing OS settings.
-    result = subprocess.run([
-        "powershell.exe", "-NoProfile", "-Command",
-        "$tokens=$null; $errors=$null; "
-        "[System.Management.Automation.Language.Parser]::ParseFile($env:ATELIER_TEST_SCRIPT, "
-        "[ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count) { throw $errors };",
-    ], capture_output=True, text=True, env={**os.environ, "ATELIER_TEST_SCRIPT": str(SCRIPT)})
-    assert result.returncode == 0, result.stderr
+    spec = importlib.util.spec_from_file_location("build_release", SCRIPT.with_name("build_release.py"))
+    builder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(builder)
+    builder.write_launchers(tmp_path, windows=True)
+    for script in (SCRIPT, tmp_path / "launch.ps1"):
+        result = subprocess.run([
+            "powershell.exe", "-NoProfile", "-Command",
+            "$tokens=$null; $errors=$null; "
+            "[System.Management.Automation.Language.Parser]::ParseFile($env:ATELIER_TEST_SCRIPT, "
+            "[ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count) { throw $errors };",
+        ], capture_output=True, text=True, env={**os.environ, "ATELIER_TEST_SCRIPT": str(script)})
+        assert result.returncode == 0, result.stderr
     status = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
                              "-File", str(SCRIPT), "status"], capture_output=True, text=True)
     assert status.returncode == 0, status.stderr
