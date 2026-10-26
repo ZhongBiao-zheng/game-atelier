@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Box, Building2, Settings2 } from 'lucide-react';
 
 import { ModelPickerList } from '@/components/ModelPickerList';
-import { sortModels } from '@/lib/modelCatalog';
+import { modelDisplayName, sortModels } from '@/lib/modelCatalog';
 import { modelModality, type KeyView } from '@/api/keys';
 import { AUTO_PROVIDER_ALIAS, isAutoProvider } from '@/lib/modelRoutes';
 import { ImageSizeFields } from '@/components/studio/ImageSizeFields';
@@ -101,7 +101,7 @@ export function CanvasModelPicker({ choices, alias, model, onSelect, params = {}
       <button type="button" aria-label="选择生成模型" aria-expanded={open === 'model'}
         onClick={() => setOpen(open === 'model' ? null : 'model')} className={buttonClass}>
         <Box size={14} className="shrink-0" aria-hidden="true" />
-        <span className="truncate">{selected?.model.name || selected?.model.id || '选择模型'}</span>
+        <span className="truncate">{selected ? modelDisplayName(selected.model) : '选择模型'}</span>
       </button>
       <ToolbarPopover open={open === 'model'} onClose={() => setOpen(null)} anchorRef={modelRef}
         autoFocus direction={menuDirection} portalContainerRef={portalContainerRef}

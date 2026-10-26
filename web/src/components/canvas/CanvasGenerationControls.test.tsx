@@ -39,9 +39,9 @@ describe('CanvasModelPicker', () => {
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ key: second, model: second.models[1] }));
     view.rerender(<CanvasModelPicker choices={choices} alias="备用" model="gpt-image-2.5-flare" onSelect={onSelect} />);
     fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
-    expect(screen.getAllByRole('option').map(item => item.getAttribute('aria-label'))).toEqual(['Flare', 'nano-banana']);
-    expect(screen.queryByRole('option', { name: 'gpt-image-2' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('option', { name: 'nano-banana' }));
+    expect(screen.getAllByRole('option').map(item => item.getAttribute('aria-label'))).toEqual(['Flare', 'Nano Banana Pro']);
+    expect(screen.queryByRole('option', { name: 'GPT Image 2' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: 'Nano Banana Pro' }));
     expect(onSelect).toHaveBeenLastCalledWith(expect.objectContaining({ key: second, model: second.models[0] }));
   });
 
@@ -57,8 +57,8 @@ describe('CanvasModelPicker', () => {
         alias="主力" model="gpt-image-2" params={{ n: 4, quality: 'high' }} onSelect={vi.fn()} />);
       expect(request).not.toHaveBeenCalled();
       fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
-      await waitFor(() => expect(screen.getByRole('option', { name: 'gpt-image-2' })).toHaveTextContent('¥0.24'));
-      expect(screen.getByRole('option', { name: 'gpt-image-2' })).toHaveTextContent('≈ 2m');
+      await waitFor(() => expect(screen.getByRole('option', { name: 'GPT Image 2' })).toHaveTextContent('¥0.24'));
+      expect(screen.getByRole('option', { name: 'GPT Image 2' })).toHaveTextContent('≈ 2m');
       expect(screen.getByRole('option', { name: 'Banana' })).toHaveTextContent('¥0.10');
       expect(screen.getByRole('option', { name: 'Banana' })).not.toHaveTextContent('≈');
       expect(screen.getByRole('option', { name: 'Unknown' })).toHaveTextContent(/^Unknown$/);
@@ -80,7 +80,7 @@ describe('CanvasModelPicker', () => {
 
     const trigger = screen.getByRole('button', { name: '选择生成模型' });
     fireEvent.click(trigger);
-    await waitFor(() => expect(screen.getByRole('option', { name: 'gpt-image-2' })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('option', { name: 'GPT Image 2' })).toHaveFocus());
 
     fireEvent.keyDown(screen.getByTestId('canvas-model-popover'), { key: 'Escape' });
     expect(screen.queryByTestId('canvas-model-popover')).not.toBeInTheDocument();
@@ -102,7 +102,7 @@ describe('CanvasModelPicker', () => {
 
     const trigger = screen.getByRole('button', { name: '选择生成模型' });
     await user.click(trigger);
-    await waitFor(() => expect(screen.getByRole('option', { name: 'gpt-image-2' })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('option', { name: 'GPT Image 2' })).toHaveFocus());
     await user.keyboard('{Enter}');
 
     expect(onSelect).toHaveBeenCalledOnce();

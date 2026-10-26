@@ -1,4 +1,4 @@
-import { modelCatalog, sortModels } from '@/lib/modelCatalog';
+import { modelCatalog, modelDisplayName, sortModels } from '@/lib/modelCatalog';
 import { describe, expect, it } from 'vitest';
 
 import type { KeyView } from '@/api/keys';
@@ -103,5 +103,16 @@ describe('model catalog', () => {
     ]);
     expect(models.map(model => model.id)).toEqual(ids);
     expect(modelCatalog('unknown-z')).toBeUndefined();
+  });
+  it.each([
+    [{ id: 'seedream-5.0-pro', name: 'ByteDance Seed: Seedream 5.0 Pro' }, 'Seedream 5.0 Pro'],
+    [{ id: 'openai/gpt-image-2.5-flare', name: 'OpenAI: GPT Image 2.5 Flare' }, 'GPT Image 2.5 Flare'],
+    [{ id: 'gemini-nano-banana-2.1', name: 'gemini-nano-banana-2.1' }, 'Nano Banana 2.1'],
+    [{ id: 'doubao-seedream-5-0-pro-260628', name: 'doubao-seedream-5-0-pro-260628' }, 'Seedream 5.0 Pro'],
+    [{ id: 'nano-banana-2-2k', name: 'Nano Banana 2 · 2K' }, 'Nano Banana 2 · 2K'],
+    [{ id: 'doubao-seedream-5-0-260128', name: '图片 5.0' }, '图片 5.0'],
+    [{ id: 'unknown-model' }, 'unknown-model'],
+  ])('displays %j as %s', (model, expected) => {
+    expect(modelDisplayName(model)).toBe(expected);
   });
 });

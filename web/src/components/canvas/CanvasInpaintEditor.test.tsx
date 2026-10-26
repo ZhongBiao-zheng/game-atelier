@@ -5,6 +5,7 @@ import type { CanvasImageEditNode, CanvasMediaVersion } from '@/schema/canvas';
 import { CanvasInpaintEditor } from './CanvasInpaintEditor';
 import type { CanvasMaskEditSubmission } from './ImageEditorShell';
 import { savedImageEditError } from './imageEditGeometry';
+import { modelDisplayName } from '@/lib/modelCatalog';
 
 vi.mock('./imageEditGeometry', async importOriginal => ({
   ...await importOriginal<typeof import('./imageEditGeometry')>(),
@@ -48,7 +49,7 @@ function mount(data = initial, available = keys) {
   return { save, submit, onOpenChange };
 }
 async function select(name: RegExp) {
-  const provider = keys.find(key => key.models.some(model => name.test(model.name || model.id)))!;
+  const provider = keys.find(key => key.models.some(model => name.test(modelDisplayName(model))))!;
   fireEvent.click(screen.getByRole('button', { name: '选择生成供应商' }));
   fireEvent.click(screen.getByRole('option', { name: new RegExp(provider.alias) }));
   fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
@@ -67,7 +68,7 @@ it('restores and submits regular editing with fixed source size and mask', async
 
 it('switches MJ and normal models without losing strokes or sending stale size fields', async () => {
   const { save } = mount();
-  await select(/mj-v8\.2/);
+  await select(/Midjourney/);
   expect(screen.queryByRole('button', { name: '生成数量' })).not.toBeInTheDocument();
   expect(screen.getByText('4 张 · Fast')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '关闭编辑器' }));
@@ -86,7 +87,7 @@ it('switches MJ and normal models without losing strokes or sending stale size f
 it('allows natural repair for normal models but requires MJ prompt', async () => {
   mount({ ...initial, generation_draft: { ...initial.generation_draft!, prompt: '' } });
   expect(screen.getByRole('button', { name: /生成 2 张/ })).toBeEnabled();
-  await select(/mj-v8\.2/);
+  await select(/Midjourney/);
   expect(screen.getByRole('button', { name: /生成 4 张/ })).toBeDisabled();
 });
 
