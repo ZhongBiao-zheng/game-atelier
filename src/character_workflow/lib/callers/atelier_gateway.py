@@ -72,22 +72,34 @@ def _raise_for_status(response: requests.Response) -> None:
                        retry_after=retry_after, detail=detail if response.status_code == 429 else None)
 
 
+# 测试连接时按状态码给出能照着做的提示；生成请求仍走 _raise_for_status 的「gateway api <码>」供路由判断切换。
+_CHECK_HEALTH_ERRORS = {404: "网关机器的 Atelier 版本过旧，请先把网关机器更新到最新版"}
+_CHECK_AUTH_ERRORS = {401: "网关密钥无效或已被撤销，请向网关管理员重新获取",
+                      403: "这把网关密钥没有使用权限，请联系网关管理员"}
+
+
+def _raise_check_status(response: requests.Response, messages: dict[int, str]) -> None:
+    if response.status_code in messages:
+        raise GatewayError(messages[response.status_code])
+    _raise_for_status(response)
+
+
 def check_gateway(base_url: str, token: str) -> dict[str, Any]:
     """测试连接：返回网关信息与模型列表；协议版本不一致直接报错。"""
     base = base_url.rstrip("/")
     headers = {"Authorization": f"Bearer {token}"}
     with _session() as session:
         health = session.get(f"{base}/gateway/v1/health", timeout=(3, 3))
-        _raise_for_status(health)
+        _raise_check_status(health, _CHECK_HEALTH_ERRORS)
         if health.json().get("ok") is not True:
             raise GatewayError("中转服务健康检查未通过")
         info = session.get(f"{base}/gateway/v1/info", headers=headers, timeout=_TIMEOUT)
-        _raise_for_status(info)
+        _raise_check_status(info, _CHECK_AUTH_ERRORS)
         body = info.json()
         if body.get("protocol") != PROTOCOL_VERSION:
             raise GatewayError("网关版本不一致，请两边更新到同一版本")
         models = session.get(f"{base}/gateway/v1/models", headers=headers, timeout=_TIMEOUT)
-        _raise_for_status(models)
+        _raise_check_status(models, _CHECK_AUTH_ERRORS)
         return {"info": body, "models": models.json().get("models", [])}
 
 
@@ -109,7 +121,7 @@ def sync_gateway_key(alias: str) -> list[_keys.ModelSpec]:
 
     key = _keys.find_by_alias(alias)
     if key is None or key.provider != "atelier" or not key.base_url:
-        raise GatewayError(f"{alias} 不是局域网 Atelier 供应商")
+        raise GatewayError(f"{alias} 不是 Remote Atelier 供应商")
     models = gateway_models(check_gateway(key.base_url, key.access_key)["models"])
     _keys.patch_key(alias, {"models": models})
     model_routes.put_alias_first(alias, only_unordered=True)
@@ -168,7 +180,7 @@ def _run_task(
 
     key = _keys.find_by_alias(alias)
     if key is None or key.provider != "atelier" or not key.base_url:
-        raise GatewayError(f"{alias} 不是局域网 Atelier 供应商")
+        raise GatewayError(f"{alias} 不是 Remote Atelier 供应商")
     if not key.enabled:
         raise GatewayError("供应商已停用")
     params = params if params is not None else {}

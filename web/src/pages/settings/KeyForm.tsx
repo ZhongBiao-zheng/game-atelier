@@ -3,6 +3,7 @@ import { Eye, EyeOff, X } from 'lucide-react';
 import { createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelInputModality, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { checkGateway } from '@/api/gateway';
+import { ApiError } from '@/api/http';
 
 import { PROVIDER_MONOGRAMS, PROVIDER_PRESETS, type ProviderKind } from './providerPresets';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -128,7 +129,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
       setGatewayModels(result.models);
       setGatewayInfo(`${result.info.name} · ${result.info.version}`);
     } catch (e) {
-      setGatewayError(e instanceof Error ? e.message : String(e));
+      // 服务端已给出能照着做的原因，不再附带「（HTTP 502）」这类状态码。
+      setGatewayError(e instanceof ApiError && e.reason ? `连接网关失败：${e.reason}` : e instanceof Error ? e.message : String(e));
     } finally {
       setConnecting(false);
     }
@@ -427,7 +429,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
             <label htmlFor="key-access" className="pt-2 text-xs text-muted-foreground">{isGateway ? '网关密钥' : 'API 密钥'}</label>
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative min-w-0 flex-1">
-                <input id="key-access" type={showKey ? 'text' : 'password'} value={accessKey} onChange={e => { setAccessKey(e.target.value); setKeyRevealed(true); setConnectionTest(null); }} autoComplete="off" className={`${fieldClass} pr-10 font-mono`} placeholder={editing ? '留空则保留原密钥' : '粘贴密钥'} />
+                {/* 不用 type="password"：Chrome 会把上一栏（网关地址）当用户名、弹出保存密码，autoComplete="off" 对密码框无效。用文本框 + text-security 遮挡。 */}
+                <input id="key-access" type="text" value={accessKey} onChange={e => { setAccessKey(e.target.value); setKeyRevealed(true); setConnectionTest(null); }} autoComplete="off" spellCheck={false} data-1p-ignore="" data-lpignore="true" data-form-type="other" className={`${fieldClass} pr-10 font-mono ${showKey ? '' : '[-webkit-text-security:disc]'}`} placeholder={editing ? '留空则保留原密钥' : '粘贴密钥'} />
                 <button type="button" aria-label={showKey ? '隐藏密钥' : '显示密钥'} disabled={revealing} onClick={toggleShowKey} className="absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-md text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary">
                   <SwapIcon swapKey={showKey}>{showKey ? <EyeOff size={16} /> : <Eye size={16} />}</SwapIcon>
                 </button>

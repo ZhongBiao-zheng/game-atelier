@@ -213,15 +213,20 @@ def test_clone_job_for_retry_rejects_non_failed(runtime):
 
 
 def test_list_jobs_tolerates_legacy_seed_field(runtime):
-    """存量 job JSON 带已废弃的 seed 字段，加载时剥离后不能被 extra=forbid 丢弃。"""
-    (runtime / "jobs" / "job-legacy.json").write_text(
+    """存量 job JSON 带已废弃字段（seed 与工坊退役的六个字段），加载时剥离后不能被 extra=forbid 丢弃，
+    且磁盘文件保持原样。"""
+    path = runtime / "jobs" / "job-legacy.json"
+    raw = (
         '{"job_id":"job-legacy","character_id":"c","prompt":"p",'
         '"submitted_at":"2026-05-29T00:00:00Z","model":"m","params":{},'
-        '"seed":123,"output_paths":[],"status":"done","error":null}',
-        encoding="utf-8",
+        '"seed":123,"asset_slot":"portrait","project_id":null,"ui_scheme_id":null,'
+        '"screen_id":null,"production_id":null,"workshop_request_id":null,'
+        '"output_paths":[],"status":"done","error":null}'
     )
+    path.write_text(raw, encoding="utf-8")
     assert "job-legacy" in [j.job_id for j in list_jobs()]
     assert read_job("job-legacy").job_id == "job-legacy"
+    assert path.read_text(encoding="utf-8") == raw
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX flock 探测；Windows 走 msvcrt 分支")
