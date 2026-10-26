@@ -6,6 +6,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 补同步已发布 GitHub Release 的 tag（例如 v5.128.0）；留空则同步 main
+        type: string
+        required: false
   workflow_call:
     inputs:
       release_tag:
@@ -21,7 +26,7 @@ concurrency:
 
 jobs:
   push:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.release_tag == ''))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +59,9 @@ jobs:
           from urllib.parse import quote
           from pathlib import Path
           base = 'https://api.cnb.cool/ZhongBiao-zheng/game-atelier/-/releases'
-          headers = {'Authorization': 'Bearer ' + os.environ['CNB_TOKEN'], 'Content-Type': 'application/json'}
+          # CNB OpenAPI 要求该 Accept，缺了返回 406。
+          headers = {'Authorization': 'Bearer ' + os.environ['CNB_TOKEN'], 'Content-Type': 'application/json',
+                     'Accept': 'application/vnd.cnb.api+json'}
           tag = os.environ['RELEASE_TAG']
           try:
               urllib.request.urlopen(urllib.request.Request(base + '/tags/' + quote(tag, safe=''), headers=headers), timeout=30).close()
