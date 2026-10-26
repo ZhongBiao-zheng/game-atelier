@@ -32,6 +32,10 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.128.0', date: '2026-10-26', headline: '只更新到正式发布版', changes: [
+    { kind: 'feat', text: '一键启动和安装包只更新到通过三平台测试的正式版本，开发中的改动不会再被拉到你的电脑上。' },
+    { kind: 'fix', text: '一键启动每次都实际检查新版，网络慢时也能找到更新。' },
+  ] },
   { version: '5.127.3', date: '2026-10-26', headline: '旧工坊一键迁移', changes: [
     { kind: 'fix', text: 'Windows 双击「Windows迁移旧工坊.bat」，把旧工坊项目和角色迁进画布，迁移前会先预演并备份。' },
   ] },
