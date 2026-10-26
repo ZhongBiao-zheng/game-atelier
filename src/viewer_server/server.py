@@ -189,7 +189,13 @@ def _wait_for_server(port: int, instance_id: str, *, timeout: float = 8.0) -> bo
 
 
 def cmd_start(background: bool = False, *, open_browser: bool = True) -> None:
-    if not _bootstrap_gate(background):
+    from viewer_server.bundle_update import start_allowed
+    if not start_allowed(data_root.runtime_dir()):
+        print("正在更新，请稍后重试。", file=sys.stderr)
+        sys.exit(1)
+    bundled = Path(sys.executable).resolve().is_relative_to(_BOOTSTRAP.parent.parent.parent / "python")
+    # Source dependency repair may stop the old server and therefore takes its own lock.
+    if not bundled and not _bootstrap_gate(background):
         sys.exit(1)
 
     # 国产厂商 host 绕过系统/坏代理（NO_PROXY）：覆盖 Studio 后台出图与 models-preview 等服务端调用。
@@ -201,6 +207,12 @@ def cmd_start(background: bool = False, *, open_browser: bool = True) -> None:
     with try_file_lock(runtime / "server.start.lock") as acquired:
         if not acquired:
             print("工坊正在启动或停止，请稍后重试。", file=sys.stderr)
+            sys.exit(1)
+        if not start_allowed(runtime):
+            print("正在更新，请稍后重试。", file=sys.stderr)
+            sys.exit(1)
+        # Bundle --check may update the shared release cache: keep it inside the start lock.
+        if bundled and not _bootstrap_gate(background):
             sys.exit(1)
         foreground = _start_locked(runtime, background=background, open_browser=open_browser)
     if foreground is not None:
@@ -302,41 +314,45 @@ def cmd_stop() -> None:
         if not acquired:
             print("工坊正在启动或停止，请稍后重试。", file=sys.stderr)
             sys.exit(1)
-        cleanup_stale_pid(runtime)
-        pid = read_pid(runtime)
-        if not pid:
-            print("viewer-server not running")
-            return
-        port = read_port(runtime) or DEFAULT_PORT
-        instance_id = read_instance(runtime)
-        # 没有 instance 记录 = 旧版本写下的 PID，无法用实例验证；这条记录是本启动器自己写的，照旧发停止信号。
-        # 有 instance 记录却验不过：端口无应答且命令行核对是自家 viewer-server（卡死）照常停止；
-        # 端口上答的是别的实例、或命令行核对不了，绝不碰记录里的 PID。
-        status = probe_connection_status(port) if instance_id is not None else None
-        verified = status is not None and status.instance_id == instance_id
-        if instance_id is not None and not verified and (
-            status is not None or is_viewer_server_process(pid) is not True
-        ):
-            print("无法验证运行实例，未向该 PID 发送停止信号。请检查原启动终端。", file=sys.stderr)
-            sys.exit(1)
-        if not _terminate(pid):
-            print(f"pid {pid} not found — cleaning stale PID")
-            cleanup_stale_pid(runtime)
-            return
-        print(f"sent terminate signal to pid {pid}")
-        # 一键启动脚本是 stop 紧接 start：不等进程真正退出，start 会读到「还活着但已不应答」的
-        # 记录并拒绝启动。等到退出再清记录，start 才能干净接手。
-        if _wait_for_exit(pid):
-            cleanup_stale_pid(runtime)
-            return
-        # 旧版本服务没有 graceful 上限，SSE 连接会拖住退出；等够优雅期就强制结束，
-        # 否则一键启动永远停在这一步。落盘都是原子写 + 锁，强杀不会留半个文件。
-        print(f"pid {pid} 在 {STOP_TIMEOUT_SECONDS:.0f} 秒内没有退出，强制结束。", file=sys.stderr)
-        if _force_kill(pid) and _wait_for_exit(pid, timeout=FORCE_KILL_WAIT_SECONDS):
-            cleanup_stale_pid(runtime)
-            return
-        print(f"pid {pid} 无法结束，启动记录保留；请手动结束该进程后再启动。", file=sys.stderr)
+        _stop_locked(runtime)
+
+
+def _stop_locked(runtime: Path) -> None:
+    cleanup_stale_pid(runtime)
+    pid = read_pid(runtime)
+    if not pid:
+        print("viewer-server not running")
+        return
+    port = read_port(runtime) or DEFAULT_PORT
+    instance_id = read_instance(runtime)
+    # 没有 instance 记录 = 旧版本写下的 PID，无法用实例验证；这条记录是本启动器自己写的，照旧发停止信号。
+    # 有 instance 记录却验不过：端口无应答且命令行核对是自家 viewer-server（卡死）照常停止；
+    # 端口上答的是别的实例、或命令行核对不了，绝不碰记录里的 PID。
+    status = probe_connection_status(port) if instance_id is not None else None
+    verified = status is not None and status.instance_id == instance_id
+    if instance_id is not None and not verified and (
+        status is not None or is_viewer_server_process(pid) is not True
+    ):
+        print("无法验证运行实例，未向该 PID 发送停止信号。请检查原启动终端。", file=sys.stderr)
         sys.exit(1)
+    if not _terminate(pid):
+        print(f"pid {pid} not found — cleaning stale PID")
+        cleanup_stale_pid(runtime)
+        return
+    print(f"sent terminate signal to pid {pid}")
+    # 一键启动脚本是 stop 紧接 start：不等进程真正退出，start 会读到「还活着但已不应答」的
+    # 记录并拒绝启动。等到退出再清记录，start 才能干净接手。
+    if _wait_for_exit(pid):
+        cleanup_stale_pid(runtime)
+        return
+    # 旧版本服务没有 graceful 上限，SSE 连接会拖住退出；等够优雅期就强制结束，
+    # 否则一键启动永远停在这一步。落盘都是原子写 + 锁，强杀不会留半个文件。
+    print(f"pid {pid} 在 {STOP_TIMEOUT_SECONDS:.0f} 秒内没有退出，强制结束。", file=sys.stderr)
+    if _force_kill(pid) and _wait_for_exit(pid, timeout=FORCE_KILL_WAIT_SECONDS):
+        cleanup_stale_pid(runtime)
+        return
+    print(f"pid {pid} 无法结束，启动记录保留；请手动结束该进程后再启动。", file=sys.stderr)
+    sys.exit(1)
 
 
 def cmd_open_browser() -> None:

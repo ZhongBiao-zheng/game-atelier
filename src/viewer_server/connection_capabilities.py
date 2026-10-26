@@ -5,6 +5,11 @@ from starlette.routing import compile_path
 
 # Local editor owns the existing personal workspace. Agent sessions never inherit these routes.
 _LOCAL_ROUTES = """
+GET /api/update/state
+GET /api/update/result
+POST /api/update/check
+POST /api/update/apply
+POST /api/update/cancel
 GET /api/jobs
 GET /api/jobs/{job_id}
 GET /api/config
@@ -171,6 +176,8 @@ GET /openapi.json
 """.strip().splitlines()
 
 LOCAL_MANAGEMENT = frozenset({
+    "/api/update/state", "/api/update/result", "/api/update/check",
+    "/api/update/apply", "/api/update/cancel",
     "/api/gateway/audit",
     "/api/gateway/providers/{alias}/admin/audit",
     "/api/gateway/providers/{alias}/admin/keys",

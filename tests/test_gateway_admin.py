@@ -160,3 +160,34 @@ def test_remote_reorder_preserves_nested_gateway_positions(admin):
     result = client.put("/gateway/v1/admin/routes/order", json={"modality": "image", "id": "gpt-image-2", "aliases": ["B", "A"]})
     assert result.status_code == 200
     assert [m.alias for m in model_routes.find_route("image", "gpt-image-2").members] == ["B", "Hub", "A"]
+
+
+@pytest.mark.parametrize("method,suffix", [
+    ("GET", "/state"), ("GET", "/result?id=anything"),
+    ("POST", "/check"), ("POST", "/apply"), ("POST", "/cancel"),
+])
+@pytest.mark.parametrize("prefix", ["/api/update", "/gateway/v1/update", "/gateway/v1/admin/update"])
+def test_remote_admin_cannot_reach_local_update_endpoints(admin, method, suffix, prefix):
+    client, _, _ = admin
+    response = client.request(method, prefix + suffix, json={})
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("path", ["/gateway/v1/tasks", "/gateway/v1/openai/chat/completions",
+                                  "/gateway/v1/openai/responses"])
+def test_gateway_maintenance_blocks_new_work_but_preserves_health_and_admin(admin, path):
+    from viewer_server.update_routes import admission
+    client, _, _ = admin
+    gate = admission()
+    with gate.lock:
+        gate.maintenance = True
+    try:
+        response = client.post(path, json={})
+        assert response.status_code == 503
+        assert "正在更新" in response.text
+        assert client.get("/gateway/v1/health").status_code == 200
+        assert client.get("/gateway/v1/admin/keys").status_code == 200
+        assert gate.requests == 0
+    finally:
+        with gate.lock:
+            gate.maintenance = False

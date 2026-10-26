@@ -16,8 +16,8 @@ export interface OnboardingState {
   update?: { current: string; latest: string | null; update_available: boolean } | null;
 }
 
-export async function fetchOnboardingStatus(): Promise<OnboardingState> {
-  return requestJson<OnboardingState>('/api/onboarding/status', '读取初始化状态');
+export async function fetchOnboardingStatus(signal?: AbortSignal): Promise<OnboardingState> {
+  return requestJson<OnboardingState>('/api/onboarding/status', '读取初始化状态', signal ? { signal } : undefined);
 }
 
 export async function setDataRoot(path: string): Promise<{ data_root: string }> {

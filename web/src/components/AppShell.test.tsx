@@ -6,6 +6,7 @@ import { memoryLocation } from 'wouter/memory-location';
 import type { useSSE as UseSSE } from '@/hooks/useSSE';
 import { AppShell } from './AppShell';
 import { markAnnouncementsSeen } from '@/lib/announcements';
+import type { UpdateState } from '@/api/update';
 
 type SSEOptions = NonNullable<Parameters<typeof UseSSE>[0]>;
 const sseCalls = vi.hoisted(() => [] as Array<SSEOptions | undefined>);
@@ -199,5 +200,160 @@ describe('AppShell', () => {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
     expect(eventStreams()).toBe(1);
     view.unmount();
+  });
+});
+
+// The updater owns one polling loop across shell and settings, including reload recovery.
+describe('in-app update controls', () => {
+  const readyUpdate: UpdateState = { runtime_mode: 'bundle', current: '5.129.0', status: 'ready', to: '5.130.0',
+    maintenance: false, waiting: 0, phase: 'idle', service_mode: false };
+  beforeEach(() => {
+    sessionStorage.removeItem('atelier:pending-update');
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    sessionStorage.removeItem('atelier:pending-update');
+    vi.restoreAllMocks();
+  });
+  function updateServer({ state = readyUpdate, applyStatus = 202, result = null as unknown } = {}) {
+    const network = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input === '/api/connection/status') return new Response(JSON.stringify({ service: 'game-atelier', instance_id: 'old' }));
+      if (input === '/api/update/apply') return new Response(JSON.stringify(applyStatus === 202 ? { update_id: 'update-one' } : { detail: '正在更新' }), { status: applyStatus });
+      if (input.startsWith('/api/update/result')) return new Response(JSON.stringify(result));
+      if (input === '/api/update/cancel') return new Response(JSON.stringify({ status: 'cancelled' }));
+      if (input === '/api/update/check' && init?.method === 'POST') return new Response(JSON.stringify({ ...state, status: 'checking' }));
+      return new Response(JSON.stringify(state));
+    });
+    vi.stubGlobal('fetch', network);
+    return network;
+  }
+  async function renderUpdater(mode: 'source' | 'bundle' = 'bundle', latest: string | null = null) {
+    const { UpdateProvider, UpdateButton, UpdateSettings } = await import('./UpdateControl');
+    let view!: ReturnType<typeof render>;
+    await act(async () => { view = render(<UpdateProvider runtimeMode={mode} latestRelease={latest}><UpdateButton /><UpdateSettings /></UpdateProvider>); });
+    return view;
+  }
+  async function startUpdate() {
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '更新' })); });
+    await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '更新' })); });
+  }
+  it('shows the ready bundle button and preserves the legacy release link', async () => {
+    updateServer();
+    const view = await renderUpdater();
+    expect(screen.getByRole('button', { name: '更新' })).toHaveAttribute('title', '更新到 5.130.0');
+    view.unmount();
+    updateServer({ state: { ...readyUpdate, runtime_mode: 'legacy_bundle' } });
+    await renderUpdater('bundle', '5.130.0');
+    expect(screen.getByRole('link', { name: '有新版本 5.130.0' })).toHaveAttribute('href', 'https://github.com/ZhongBiao-zheng/game-atelier/releases/tag/v5.130.0');
+  });
+  it('source mode opens changelog without starting an update', async () => {
+    const network = updateServer({ state: { ...readyUpdate, runtime_mode: 'source' } });
+    const show = vi.fn();
+    window.addEventListener('atelier:open-changelog', show);
+    await renderUpdater('source', '5.130.0');
+    fireEvent.click(screen.getByRole('button', { name: '新版本 5.130.0' }));
+    expect(show).toHaveBeenCalledOnce();
+    expect(network.mock.calls.some(([path]) => path === '/api/update/apply')).toBe(false);
+    window.removeEventListener('atelier:open-changelog', show);
+  });
+  it('shows a 409 reason without entering recovery', async () => {
+    updateServer({ applyStatus: 409 });
+    await renderUpdater();
+    await startUpdate();
+    expect(screen.getByRole('alert')).toHaveTextContent('正在更新');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(sessionStorage.getItem('atelier:pending-update')).toBeNull();
+  });
+  it('waits after 202, allows cancellation, and does not include job waiting in the restart budget', async () => {
+    updateServer({ state: { ...readyUpdate, waiting: 2, waiting_counts: { jobs: 1, approvals: 1 } } });
+    await renderUpdater();
+    await startUpdate();
+    expect(screen.getByRole('dialog')).toHaveTextContent('等待 2 个任务完成');
+    expect(screen.getByRole('dialog')).toHaveTextContent('1 个 Agent 操作待确认');
+    expect(JSON.parse(sessionStorage.getItem('atelier:pending-update')!).restartAt).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(6 * 60_000); });
+    expect(screen.getByRole('dialog')).toHaveTextContent('等待 2 个任务完成');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '取消更新' })); });
+    expect(sessionStorage.getItem('atelier:pending-update')).toBeNull();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+  it('restores cancellation when a transient probe failure resolves to the same waiting transaction', async () => {
+    const network = updateServer({ state: { ...readyUpdate, update_id: 'update-one', phase: 'waiting',
+      maintenance: true, waiting: 1, waiting_counts: { approvals: 1 } } });
+    await renderUpdater();
+    await startUpdate();
+    const respond = network.getMockImplementation()!;
+    let failProbe = true;
+    network.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/api/connection/status' && failProbe) {
+        failProbe = false;
+        throw new Error('temporary timeout');
+      }
+      return respond(path, init);
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(screen.getByRole('dialog')).toHaveTextContent('正在重启');
+    expect(screen.queryByRole('button', { name: '取消更新' })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(screen.getByRole('dialog')).toHaveTextContent('1 个 Agent 操作待确认');
+    expect(JSON.parse(sessionStorage.getItem('atelier:pending-update')!).restartAt).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(6 * 60_000); });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '取消更新' })); });
+    expect(sessionStorage.getItem('atelier:pending-update')).toBeNull();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+  it('reloads on a new instance without requiring an observed disconnect, then waits for its result', async () => {
+    const { updateNavigation } = await import('@/api/update');
+    const reload = vi.spyOn(updateNavigation, 'reload').mockImplementation(() => {});
+    const network = updateServer();
+    const view = await renderUpdater();
+    await startUpdate();
+    network.mockImplementation(async (path: string) => new Response(JSON.stringify(path === '/api/connection/status'
+      ? { service: 'game-atelier', instance_id: 'new' }
+      : path.startsWith('/api/update/result') ? null : readyUpdate)));
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(reload).toHaveBeenCalledOnce();
+    expect(JSON.parse(sessionStorage.getItem('atelier:pending-update')!).instance).toBe('new');
+    view.unmount();
+    await renderUpdater();
+    expect(screen.getByRole('dialog')).toHaveTextContent('正在重启');
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    network.mockImplementation(async (path: string) => new Response(JSON.stringify(path === '/api/connection/status'
+      ? { service: 'game-atelier', instance_id: 'new' }
+      : path.startsWith('/api/update/result') ? { update_id: 'update-one', status: 'failed', reason: '新版未启动，已恢复旧版' } : readyUpdate)));
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(screen.getByRole('alert')).toHaveTextContent('新版未启动，已恢复旧版');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(reload).toHaveBeenCalledOnce();
+  });
+  it('shows blocked reason and supports an explicit recheck', async () => {
+    const network = updateServer({ state: { ...readyUpdate, status: 'blocked', reason: '系统拒绝运行新版' } });
+    await renderUpdater();
+    expect(screen.queryByRole('button', { name: '更新' })).not.toBeInTheDocument();
+    expect(screen.getByText('系统拒绝运行新版')).toBeInTheDocument();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '重新检查' })); });
+    expect(network.mock.calls.some(([path, init]) => path === '/api/update/check' && init?.method === 'POST')).toBe(true);
+    expect(screen.getByText('正在检查…')).toBeInTheDocument();
+  });
+  it.each([false, true])('uses the %s service-mode restart budget, then clears persisted progress', async service => {
+    updateServer();
+    sessionStorage.setItem('atelier:pending-update', JSON.stringify({ id: 'update-one', instance: 'old', to: '5.130.0', service,
+      restartAt: Date.now() - (service ? 6 : 4) * 60_000 }));
+    await renderUpdater();
+    expect(screen.getByRole('dialog')).toHaveTextContent('正在重启');
+    await act(async () => { await vi.advanceTimersByTimeAsync(62_000); });
+    expect(screen.getByRole('alert')).toHaveTextContent('服务没有自动恢复，请双击启动器');
+    expect(sessionStorage.getItem('atelier:pending-update')).toBeNull();
+  });
+  it('clears successful results silently after page reload', async () => {
+    updateServer({ result: { update_id: 'update-one', status: 'succeeded' } });
+    sessionStorage.setItem('atelier:pending-update', JSON.stringify({ id: 'update-one', instance: 'old', to: '5.130.0', service: false, restartAt: Date.now() }));
+    await renderUpdater();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(sessionStorage.getItem('atelier:pending-update')).toBeNull();
   });
 });

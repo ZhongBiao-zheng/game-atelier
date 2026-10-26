@@ -74,6 +74,8 @@ def create_gateway_app() -> FastAPI:
     from viewer_server.gateway_openai import create_router, error_response
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    from viewer_server.update_routes import UpdateAdmissionMiddleware
+    app.add_middleware(UpdateAdmissionMiddleware)
     app.include_router(create_router(_require_key))
     from viewer_server.gateway_admin import create_router as admin_router
     app.include_router(admin_router(_require_key))

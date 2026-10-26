@@ -15,6 +15,8 @@ import {
 } from '@/lib/changelog';
 import { ANNOUNCEMENTS, OPEN_ANNOUNCEMENT_EVENT, type Announcement } from '@/lib/announcements';
 
+export const OPEN_CHANGELOG_EVENT = 'atelier:open-changelog';
+
 function VersionBlock({
   entry,
   isFirst,
@@ -155,6 +157,12 @@ export function ChangelogButton() {
     const seen = loadSeenVersion();
     setUnread(hasUnreadChangelog(seen));
     if (seen === null) saveSeenVersion(CURRENT_VERSION);
+  }, []);
+
+  useEffect(() => {
+    const show = () => { saveSeenVersion(CURRENT_VERSION); setOpen(true); };
+    window.addEventListener(OPEN_CHANGELOG_EVENT, show);
+    return () => window.removeEventListener(OPEN_CHANGELOG_EVENT, show);
   }, []);
 
   const close = useCallback((returnFocus = false) => {

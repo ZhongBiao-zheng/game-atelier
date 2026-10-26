@@ -15,6 +15,7 @@ import { ConsoleLayout, rememberCreativeLocation } from '@/pages/settings/Consol
 import { setTheme, useTheme, type Theme } from '@/lib/theme';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { AnnouncementHost } from '@/components/AnnouncementDialog';
+import { UpdateButton, UpdateProvider } from '@/components/UpdateControl';
 
 /** 深浅主题切换：图标显示目的地（暗色显太阳 = 点了去浅色） */
 function ThemeToggle() {
@@ -70,7 +71,11 @@ function NavTab({ to, label, isActive, icon: Icon, badge = 0 }: { to: string; la
   );
 }
 
-export function AppShell({ latestRelease = null }: { latestRelease?: string | null }) {
+export function AppShell({ latestRelease = null, runtimeMode = 'source' }: { latestRelease?: string | null; runtimeMode?: 'source' | 'bundle' }) {
+  return <UpdateProvider latestRelease={latestRelease} runtimeMode={runtimeMode}><AppShellContent /></UpdateProvider>;
+}
+
+function AppShellContent() {
   const [loc, setLocation] = useLocation();
   const onStudio = loc === '/studio';
   const onCanvas = loc.startsWith('/canvas');
@@ -90,11 +95,6 @@ export function AppShell({ latestRelease = null }: { latestRelease?: string | nu
   });
 
   const ContentTag = onSettings ? 'div' : 'main';
-  const releaseLink = latestRelease && <a
-    href={`https://github.com/ZhongBiao-zheng/game-atelier/releases/tag/v${encodeURIComponent(latestRelease)}`}
-    target="_blank" rel="noopener noreferrer"
-    className="rounded-full px-3 py-2 text-xs text-primary hover:bg-secondary/60"
-  >有新版本 {latestRelease}</a>;
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
       {!immersiveCanvas && <header className="sticky top-0 z-30 shrink-0">
@@ -110,7 +110,7 @@ export function AppShell({ latestRelease = null }: { latestRelease?: string | nu
             </nav>
           </LayoutGroup>
           <div className="flex min-w-0 shrink-0 items-center justify-end gap-1 sm:gap-2">
-            <span className="hidden sm:contents">{releaseLink}</span>
+            <UpdateButton />
             <ChangelogButton />
             <ThemeToggle />
             <Link
@@ -125,7 +125,7 @@ export function AppShell({ latestRelease = null }: { latestRelease?: string | nu
             </Link>
           </div>
         </div>
-        {latestRelease && <div className="flex justify-end px-3 pb-2 sm:hidden">{releaseLink}</div>}
+        <UpdateButton mobile />
       </header>}
 
       {/* stable-scroll：本壳是首页/工坊的真·滚动容器，固定滚动槽避免滚动条增删改内宽 → 列宽 → w-full 图高 → 墙高的自激抽搐环（见 scrollbar-gutter-feedback-loop memory）*/}

@@ -7,6 +7,7 @@ import { fetchOnboardingStatus, setDataRoot } from '@/api/onboarding';
 import { ProfileSection } from './ProfileSection';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { Switch } from '@/components/ui/switch';
+import { UpdateSettings } from '@/components/UpdateControl';
 
 import { AppearanceSection } from './appearance/AppearanceSection';
 
@@ -119,5 +120,6 @@ export function PreferencesPage() {
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     </section>
     <ProfileSection />
+    <UpdateSettings />
   </div>;
 }

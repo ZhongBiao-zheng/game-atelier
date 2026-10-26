@@ -81,27 +81,61 @@ def select_bundle_version(root: Path) -> Path:
     raise ValueError("安装包版本目录不完整，请重新下载安装包。")
 
 
-def launch_selected_version(*, service: bool = False) -> int:
+def launch_selected_version(
+    *, service: bool = False, to_version: str | None = None,
+    update_id: str | None = None, open_browser: bool = True,
+) -> int:
     root = bundle_root()
     if root is None:
         print("选版本入口仅适用于新布局安装包。", file=sys.stderr)
         return 1
+    sys.path.insert(0, str(PLUGIN_DIR / "src"))
+    from viewer_server import bundle_update
+    configured_data = resolve_data_root()
+    runtime = configured_data / ".runtime" if configured_data is not None else None
     try:
-        payload = select_bundle_version(root)
-    except (ValueError, OSError) as exc:
+        if runtime is not None:
+            bundle_update.recover_pending(root, runtime)
+        pending = bundle_update.pending_update(root)
+        expected = pending.get("from") if pending.get("phase") == "rollback" else pending.get("to")
+        if to_version is not None:
+            if (runtime is None or not bundle_update.update_running(runtime)
+                    or pending.get("update_id") != update_id or expected != to_version):
+                raise ValueError("更新事务不匹配，未启动指定版本。")
+            payload = bundle_version(root, to_version)
+            if payload is None:
+                raise ValueError("安装包版本目录不完整。")
+        else:
+            payload = select_bundle_version(root)
+        active = runtime is not None and bundle_update.update_running(runtime)
+        if active and (payload.name != expected or (not service and not update_id)):
+            raise ValueError("正在更新，请稍后重试。")
+        bundle_update.cleanup_versions(root)
+    except (ValueError, OSError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     python = payload / "python" / ("python.exe" if os.name == "nt" else "bin/python3")
     env = {**os.environ, "PYTHONPATH": str(payload / "app/src"), "PYTHONUTF8": "1"}
     env.pop("VIRTUAL_ENV", None)
     env.pop("UV_PROJECT_ENVIRONMENT", None)
+    env.pop(bundle_update.UPDATE_ENV, None)
+    env.pop(bundle_update.ROLLBACK_ENV, None)
+    if active and payload.name == expected:
+        token_env = (bundle_update.ROLLBACK_ENV if pending.get("phase") == "rollback"
+                     else bundle_update.UPDATE_ENV)
+        env[token_env] = pending["update_id"]
     if service:
         env["GAME_ATELIER_SERVICE"] = "1"
         env.pop("GAME_ATELIER_NO_UPDATE_CHECK", None)
         command = [str(python), str(payload / "app/src/viewer_server/server.py"),
                    "start", "--no-browser"]
+    elif active:
+        command = [str(python), str(payload / "app/src/viewer_server/server.py"),
+                   "start", "--background", "--no-browser"]
     else:
         command = [str(python), str(payload / "app/scripts/bootstrap.py"), "--launch"]
+        if not open_browser:
+            command.append("--no-browser")
     # Keep the foreground child inside the scheduled task's process lifetime on Windows.
     return subprocess.run(command, env=env).returncode
 
@@ -617,7 +651,7 @@ def run_in_venv(forward_args: list[str], *, stdout=None) -> int:
     return proc.returncode
 
 
-def launch() -> int:
+def launch(*, open_browser: bool = True) -> int:
     """一键启动：按需准备共享运行环境，再用该环境重启服务。"""
     if not _web_dist_ok():
         print("前端文件 web/dist 缺失，请运行一键修复。", file=sys.stderr)
@@ -637,7 +671,10 @@ def launch() -> int:
     if result:
         return result
     started = time.perf_counter()
-    result = run_in_venv(["-m", "viewer_server.server", "start", "--background"])
+    start_args = ["-m", "viewer_server.server", "start", "--background"]
+    if not open_browser:
+        start_args.append("--no-browser")
+    result = run_in_venv(start_args)
     print(f"[6/6] 启动工坊 … {time.perf_counter() - started:.1f}s", flush=True)
     return result
 
@@ -662,6 +699,10 @@ def main() -> int:
                         help="Launch the selected version from a versioned bundle.")
     parser.add_argument("--service", action="store_true",
                         help="Run the selected bundle in the foreground for Task Scheduler.")
+    parser.add_argument("--apply-update", action="store_true")
+    parser.add_argument("--to", dest="to_version")
+    parser.add_argument("--update-id")
+    parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--check", action="store_true", help="Report current bootstrap state.")
     parser.add_argument(
         "--launch", action="store_true", help="Prepare the shared runtime and launch the viewer.",
@@ -688,8 +729,19 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.apply_update:
+        root = bundle_root()
+        data = resolve_data_root()
+        if root is None or data is None or not args.to_version or not args.update_id:
+            parser.error("--apply-update requires a configured bundle, --to and --update-id")
+        sys.path.insert(0, str(PLUGIN_DIR / "src"))
+        from viewer_server.bundle_update import apply_update
+        return apply_update(root, data / ".runtime", args.to_version, args.update_id)
     if args.select_version:
-        return launch_selected_version(service=args.service)
+        return launch_selected_version(service=args.service, to_version=args.to_version,
+                                       update_id=args.update_id, open_browser=not args.no_browser)
+    if args.to_version or args.update_id:
+        parser.error("--to and --update-id require --select-version or --apply-update")
     if args.service:
         parser.error("--service requires --select-version")
 
@@ -710,7 +762,7 @@ def main() -> int:
         return ensure_venv()
 
     if args.launch:
-        return launch()
+        return launch(open_browser=False) if args.no_browser else launch()
 
     parser.print_help()
     return 1

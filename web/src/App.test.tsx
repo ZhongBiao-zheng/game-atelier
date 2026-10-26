@@ -9,15 +9,61 @@ vi.mock('@/components/LocalConnectionGate', () => ({
 }));
 
 beforeEach(() => {
+  sessionStorage.removeItem('atelier:pending-update');
   vi.stubGlobal('fetch', vi.fn());
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
 });
 
 afterEach(() => {
+  sessionStorage.removeItem('atelier:pending-update');
+  vi.restoreAllMocks();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe('App onboarding gate', () => {
+  it('keeps update recovery beyond 30 seconds and follows a rollback instance before onboarding is ready', async () => {
+    vi.useFakeTimers();
+    const { updateNavigation } = await import('@/api/update');
+    const reload = vi.spyOn(updateNavigation, 'reload').mockImplementation(() => {});
+    sessionStorage.setItem('atelier:pending-update', JSON.stringify({ id: 'update-one', instance: 'candidate', to: '5.130.0', service: false, restartAt: Date.now() }));
+    let instance = 'candidate';
+    const network = vi.fn(async (path: string) => path === '/api/connection/status'
+      ? new Response(JSON.stringify({ service: 'game-atelier', instance_id: instance }))
+      : new Response(JSON.stringify({ detail: '正在准备新版' }), { status: 503 }));
+    vi.stubGlobal('fetch', network);
+    const { act } = await import('@testing-library/react');
+    await act(async () => { render(<App />); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(31_000); });
+    expect(screen.getByText('正在重启…')).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+    instance = 'rollback';
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(reload).toHaveBeenCalledOnce();
+    expect(JSON.parse(sessionStorage.getItem('atelier:pending-update')!).instance).toBe('rollback');
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(reload).toHaveBeenCalledOnce();
+  });
+  it('applies the persisted update recovery deadline before onboarding completes', async () => {
+    vi.useFakeTimers();
+    sessionStorage.setItem('atelier:pending-update', JSON.stringify({ id: 'update-one', instance: 'candidate', to: '5.130.0', service: false, restartAt: Date.now() - 301_000 }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ detail: '正在准备新版' }), { status: 503 })));
+    const { act } = await import('@testing-library/react');
+    await act(async () => { render(<App />); });
+    expect(screen.getByText('服务没有自动恢复，请双击启动器')).toBeInTheDocument();
+    expect(sessionStorage.getItem('atelier:pending-update')).toBeNull();
+  });
+  it('retries onboarding while a newly started update instance is still initializing', async () => {
+    vi.useFakeTimers();
+    const network = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'ready', items: [] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: '正在准备新版' }), { status: 503 }));
+    vi.stubGlobal('fetch', network);
+    const { act } = await import('@testing-library/react');
+    await act(async () => { render(<App />); });
+    expect(screen.getByText('加载中…')).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getByLabelText('作品集首页')).toBeInTheDocument();
+  });
   it('shows a release link for bundle updates', async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,

@@ -20,6 +20,200 @@ from viewer_server.pid import (
 )
 
 
+@pytest.fixture
+def update_transaction(tmp_path, monkeypatch):
+    from viewer_server import bundle_update as update
+    from character_workflow.lib.atomic_io import atomic_write_json
+    root = tmp_path / "installation"
+    runtime = tmp_path / "data/.runtime"
+    runtime.mkdir(parents=True)
+    for version in ("5.129.0", "5.130.0"):
+        payload = root / "versions" / version
+        executable = payload / "python" / ("python.exe" if os.name == "nt" else "bin/python3")
+        executable.parent.mkdir(parents=True)
+        executable.touch()
+        (payload / "app/scripts").mkdir(parents=True)
+        (payload / "app/scripts/bootstrap.py").touch()
+        (payload / "VERSION").write_text(version)
+    for name in ("current", "last-good"):
+        (root / name).write_text("5.129.0")
+    pending = {"update_id": "a" * 32, "from": "5.129.0", "to": "5.130.0",
+               "service_mode": False, "started_at": time.time() - 1000,
+               "from_instance": "b" * 32}
+    atomic_write_json(root / "updates/pending.json", pending)
+    (runtime / "maintenance").touch()
+    actions = []
+    monkeypatch.setattr(update, "_stop", lambda *args, **kwargs: actions.append("stop"))
+    monkeypatch.setattr(update, "_start", lambda root, runtime, version, **kwargs:
+                        actions.append(("start", version, kwargs)))
+    return update, root, runtime, pending, actions
+
+
+def test_bundle_update_commits_only_after_report_without_holding_start_lock(update_transaction, monkeypatch):
+    update, root, runtime, pending, actions = update_transaction
+    def ready(runtime, version, **kwargs):
+        assert version == "5.130.0"
+        assert kwargs["update_id"] == pending["update_id"]
+        assert update.update_running(runtime)
+        with try_file_lock(runtime / "server.start.lock") as acquired:
+            assert acquired
+        assert (root / "current").read_text() == "5.129.0"
+        assert (root / "last-good").read_text() == "5.129.0"
+        activation = runtime / f"update-activate-{pending['update_id']}"
+        if kwargs.get("ready"):
+            assert activation.read_text() == pending["update_id"]
+        else:
+            assert not activation.exists()
+        return True
+    monkeypatch.setattr(update, "_wait_ready", ready)
+    assert update.apply_update(root, runtime, "5.130.0", pending["update_id"]) == 0
+    assert (root / "current").read_text().strip() == "5.130.0"
+    assert (root / "last-good").read_text().strip() == "5.130.0"
+    assert (root / "previous").read_text().strip() == "5.129.0"
+    assert update.read_json(runtime / "update-result.json")["status"] == "succeeded"
+    assert not (root / "updates/pending.json").exists()
+    assert not (runtime / "maintenance").exists()
+    assert actions[0] == "stop"
+
+
+@pytest.mark.parametrize("restored", [True, False])
+def test_bundle_update_failed_report_restores_old_pointer_and_reports_recovery(update_transaction, monkeypatch, restored):
+    update, root, runtime, pending, actions = update_transaction
+    monkeypatch.setattr(update, "_wait_ready", lambda runtime, version, **kwargs:
+                        restored if version == "5.129.0" else False)
+    assert update.apply_update(root, runtime, "5.130.0", pending["update_id"]) == 1
+    assert (root / "current").read_text().strip() == "5.129.0"
+    assert (root / "last-good").read_text().strip() == "5.129.0"
+    result = update.read_json(runtime / "update-result.json")
+    assert result["status"] == "failed"
+    assert ("旧版尚未恢复" in result["reason"]) == (not restored)
+    assert "5.130.0" in update.read_json(root / "updates/blocked.json")
+    assert [a[1] for a in actions if isinstance(a, tuple)] == ["5.130.0", "5.129.0"]
+
+
+def test_bundle_update_initialization_failure_does_not_commit_last_good(update_transaction, monkeypatch):
+    update, root, runtime, pending, actions = update_transaction
+    phases = []
+    def readiness(runtime, version, **kwargs):
+        if version == "5.129.0":
+            return True
+        phases.append(bool(kwargs.get("ready")))
+        assert (root / "last-good").read_text() == "5.129.0"
+        return not kwargs.get("ready", False)
+    monkeypatch.setattr(update, "_wait_ready", readiness)
+    assert update.apply_update(root, runtime, "5.130.0", pending["update_id"]) == 1
+    assert phases == [False, True]
+    assert (root / "last-good").read_text().strip() == "5.129.0"
+    assert (root / "current").read_text().strip() == "5.129.0"
+    assert update.read_json(runtime / "update-result.json")["reason"] == "新版初始化失败或超时"
+    assert [a[1] for a in actions if isinstance(a, tuple)] == ["5.130.0", "5.129.0"]
+
+
+def test_bundle_update_failed_initialization_marker_ends_wait_immediately(update_transaction, monkeypatch):
+    update, root, runtime, pending, actions = update_transaction
+    (runtime / f"update-start-failed-{pending['update_id']}").write_text("failed")
+    monkeypatch.setattr(update, "_status", lambda runtime: pytest.fail("must fail before probing"))
+    assert not update._wait_ready(runtime, "5.130.0", update_id=pending["update_id"],
+                                  ready=True, timeout=60)
+
+
+def test_bundle_update_crash_recovery_stops_survivor_before_restoring_pointer(update_transaction, monkeypatch):
+    update, root, runtime, pending, actions = update_transaction
+    (root / "current").write_text("5.130.0")
+    def stop(*args, **kwargs):
+        assert (root / "current").read_text() == "5.130.0"
+        actions.append("verified-stop")
+    monkeypatch.setattr(update, "_stop", stop)
+    update.recover_pending(root, runtime)
+    assert actions == ["verified-stop"]
+    assert (root / "current").read_text().strip() == "5.129.0"
+    assert update.read_json(runtime / "update-result.json")["update_id"] == pending["update_id"]
+    assert not (runtime / "maintenance").exists()
+
+
+def test_bundle_update_recovery_finishes_durable_commit_without_rollback(update_transaction):
+    update, root, runtime, pending, actions = update_transaction
+    (root / "last-good").write_text("5.130.0")
+    update.recover_pending(root, runtime)
+    assert actions == []
+    assert (root / "current").read_text().strip() == "5.130.0"
+    assert update.read_json(runtime / "update-result.json")["status"] == "succeeded"
+
+
+def test_bundle_update_recovery_does_not_race_a_live_executor(update_transaction):
+    update, root, runtime, pending, actions = update_transaction
+    with try_file_lock(runtime / "update.lock") as acquired:
+        assert acquired
+        update.recover_pending(root, runtime)
+    assert actions == []
+    assert (root / "updates/pending.json").exists()
+    assert (runtime / "maintenance").exists()
+
+
+def test_bundle_update_waiting_crash_finishes_immediately_without_stopping_or_blocking(update_transaction):
+    update, root, runtime, pending, actions = update_transaction
+    pending.update(phase="waiting", started_at=time.time())
+    update.atomic_write_json(root / "updates/pending.json", pending)
+    update.recover_pending(root, runtime)
+    result = update.read_json(runtime / "update-result.json")
+    assert result["status"] == "failed"
+    assert result["update_id"] == pending["update_id"]
+    assert actions == []
+    assert (root / "current").read_text() == "5.129.0"
+    assert not (root / "updates/blocked.json").exists()
+    assert not (root / "updates/pending.json").exists()
+    assert not (runtime / "maintenance").exists()
+
+
+@pytest.mark.parametrize("probe", ["responding", "unresponsive", "unknown_command"])
+def test_bundle_update_waiting_owner_is_not_interrupted_by_another_launcher(update_transaction, monkeypatch, probe):
+    from viewer_server import pid as pid_module
+    update, root, runtime, pending, actions = update_transaction
+    pending.update(phase="waiting", started_at=time.time() - 1000)
+    update.atomic_write_json(root / "updates/pending.json", pending)
+    write_pid(runtime, os.getpid())
+    write_instance(runtime, pending["from_instance"])
+    status = LocalConnectionStatus(service="game-atelier", instance_id=pending["from_instance"],
+                                   app_version="5.129.0", protocol="atelier-local/2")
+    monkeypatch.setattr(update, "_status", lambda runtime: status if probe == "responding" else None)
+    monkeypatch.setattr(pid_module, "is_viewer_server_process",
+                        lambda pid: None if probe == "unknown_command" else True)
+    with pytest.raises(RuntimeError, match="等待任务完成"):
+        update.recover_pending(root, runtime)
+    assert actions == []
+    assert (root / "updates/pending.json").exists()
+    assert (runtime / "maintenance").exists()
+    assert not (runtime / "update-result.json").exists()
+
+
+def test_bundle_update_waiting_dead_owner_can_be_recovered(update_transaction, monkeypatch):
+    update, root, runtime, pending, actions = update_transaction
+    pending.update(phase="waiting", started_at=time.time())
+    update.atomic_write_json(root / "updates/pending.json", pending)
+    write_pid(runtime, 123456)
+    write_instance(runtime, pending["from_instance"])
+    monkeypatch.setattr(update, "_status", lambda runtime: None)
+    monkeypatch.setattr(update, "_is_alive", lambda pid: False)
+    update.recover_pending(root, runtime)
+    assert actions == []
+    assert update.read_json(runtime / "update-result.json")["status"] == "failed"
+    assert not (root / "updates/pending.json").exists()
+    assert not (runtime / "maintenance").exists()
+
+
+def test_bundle_update_rollback_lifespan_recovery_leaves_live_transaction_intact(update_transaction):
+    update, root, runtime, pending, actions = update_transaction
+    pending["phase"] = "rollback"
+    update.atomic_write_json(root / "updates/pending.json", pending)
+    with try_file_lock(runtime / "update.lock") as acquired:
+        assert acquired
+        update.recover_pending(root, runtime)
+    assert update.pending_update(root)["phase"] == "rollback"
+    assert actions == []
+    assert (runtime / "maintenance").exists()
+    assert not (runtime / "update-result.json").exists()
+
+
 
 @pytest.fixture(autouse=True)
 def _records_belong_to_viewer_server(monkeypatch):

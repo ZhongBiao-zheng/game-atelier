@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -104,6 +105,74 @@ def _install_secret_filter() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from viewer_server import bundle_update
+    from viewer_server.update_routes import read_json
+
+    service = app.state.update_controller
+    booting_update = os.environ.get("GAME_ATELIER_UPDATE_ID")
+    service.gate.initializing = bool(booting_update)
+
+    @asynccontextmanager
+    async def initialize():
+        async with normal_lifespan(app):
+            service.gate.initializing = False
+            yield
+
+    # A candidate serves only connection/update status until the executor confirms it.
+    # Existing migration/recovery routines must not run against user data before that point.
+    async def candidate_lifecycle():
+        nonlocal checker
+        from character_workflow.lib.atomic_io import atomic_write_text
+        runtime = service.gate.runtime
+        # The executor first verifies the read-only listener, then permits initialization.
+        # last-good is committed only after the full lifespan has entered successfully.
+        while not (runtime / f"update-activate-{booting_update}").exists():
+            await asyncio.sleep(0.1)
+        try:
+            async with normal_lifespan(app):
+                atomic_write_text(runtime / f"update-ready-{booting_update}",
+                                  app.state.connection_status.instance_id)
+                while True:
+                    result = read_json(runtime / "update-result.json")
+                    if result.get("update_id") == booting_update:
+                        if result.get("status") != "succeeded":
+                            return
+                        break
+                    await asyncio.sleep(0.1)
+                service.gate.initializing = False
+                checker = asyncio.create_task(service.auto_check())
+                await asyncio.Event().wait()
+        except Exception:
+            logging.getLogger(__name__).exception("candidate initialization failed")
+            atomic_write_text(runtime / f"update-start-failed-{booting_update}", "初始化失败")
+
+    checker = None
+    candidate = None
+    try:
+        if booting_update:
+            bundle_update.report_started(app.state.connection_status.instance_id)
+            candidate = asyncio.create_task(candidate_lifecycle())
+            yield
+        else:
+            if service.root:
+                await asyncio.to_thread(bundle_update.recover_pending, service.root, service.gate.runtime)
+            async with initialize():
+                if service.downloader:
+                    checker = asyncio.create_task(service.auto_check())
+                yield
+    finally:
+        for task in (checker, candidate):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        await service.close()
+
+
+@asynccontextmanager
+async def normal_lifespan(app: FastAPI):
     hub.set_loop(asyncio.get_running_loop())
     from character_workflow.lib import gateway_live
     def gateway_listener(snapshot):
@@ -258,6 +327,9 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     connection_status = create_connection_status(instance_id)
     connection_store = ConnectionStore(connection_status.instance_id)
     app.state.connection_store = connection_store
+    app.state.connection_status = connection_status
+    from viewer_server.update_routes import UpdateController, UpdateAdmissionMiddleware, router as update_router
+    app.state.update_controller = UpdateController(connection_status.instance_id)
 
     @app.exception_handler(ConnectionError)
     async def handle_connection_error(_request, error: ConnectionError) -> JSONResponse:
@@ -270,6 +342,7 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
         return connection_status
 
     app.add_middleware(CanvasDocumentBodyLimitMiddleware)
+    app.add_middleware(UpdateAdmissionMiddleware)
     app.add_middleware(
         ConnectionMiddleware, store=connection_store, dev_origin=development_origin(),
     )
@@ -278,6 +351,7 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
         LocalRequestBoundary, dev_origin=development_origin(),
     )
     app.include_router(router)
+    app.include_router(update_router)
     app.include_router(connection_router(connection_store))
     app.include_router(canvas_batches_router)
     app.include_router(team_library_router)

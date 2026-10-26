@@ -303,3 +303,215 @@ def test_make_release_pushes_only_approved_local_tag(release_checkout):
     assert "已推送 v5.128.0" in result.stdout
     assert "https://github.com/" in result.stdout
     assert subprocess.check_output(["git", "--git-dir", str(remote), "rev-parse", "refs/tags/v5.128.0"], text=True).strip() == git("rev-parse", "HEAD")
+
+
+@pytest.fixture
+def update_feed(tmp_path, monkeypatch):
+    """Loopback-only source exercises real HTTP download/checksum boundaries."""
+    import functools
+    import hashlib
+    import http.server
+    import threading
+    from viewer_server import bundle_download as download
+
+    root = tmp_path / "installation"
+    root.mkdir()
+    (root / "current").write_text("5.129.0", encoding="utf-8")
+    (root / "last-good").write_text("5.129.0", encoding="utf-8")
+    feed = tmp_path / "feed"
+    files = feed / "download/v5.129.1"
+    files.mkdir(parents=True)
+    payload = tmp_path / "archive/GameAtelier/versions/5.129.1"
+    (payload / "app/scripts").mkdir(parents=True)
+    (payload / "app/scripts/bootstrap.py").write_text("# ready", encoding="utf-8")
+    (payload / "VERSION").write_text("5.129.1", encoding="utf-8")
+    (payload / "python/bin").mkdir(parents=True)
+    executable = payload / "python/bin/python3"
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    executable.chmod(0o755)
+    archive = Path(shutil.make_archive(str(files / "GameAtelier-5.129.1-linux-x64"), "gztar",
+                                      root_dir=tmp_path / "archive", base_dir="GameAtelier"))
+    checksum = archive.with_name(archive.name + ".sha256")
+    checksum.write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + "  " + archive.name,
+                        encoding="ascii")
+    hits = []
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            hits.append(self.path)
+            if self.path == "/latest":
+                self.send_response(307)
+                self.send_header("Location", "/tag/v5.129.1")
+                self.end_headers()
+            else:
+                super().do_GET()
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0),
+                                            functools.partial(Handler, directory=str(feed)))
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    monkeypatch.setenv("GAME_ATELIER_TESTING", "1")
+    monkeypatch.setenv("GAME_ATELIER_TEST_UPDATE_FEED", f"http://127.0.0.1:{server.server_port}")
+    monkeypatch.setattr(download, "_platform_name", lambda: "linux-x64")
+    monkeypatch.setattr(download, "probe_version", lambda *args: None)
+    try:
+        yield download, root, archive, checksum, hits
+    finally:
+        server.shutdown()
+        worker.join(timeout=5)
+        server.server_close()
+
+
+def test_bundle_downloader_prepares_verified_version_once(update_feed):
+    download, root, archive, _, hits = update_feed
+    updater = download.BundleDownloader(root, "5.129.0")
+    result = updater.check()
+    assert result["status"] == "ready"
+    assert result["to"] == "5.129.1"
+    assert result["bytes"] == archive.stat().st_size
+    assert (root / "versions/5.129.1/VERSION").read_text() == "5.129.1"
+    assert (root / "current").read_text() == "5.129.0"
+    assert (root / "last-good").read_text() == "5.129.0"
+    before = list(hits)
+    assert updater.check()["status"] == "ready"
+    assert hits[len(before):] == ["/latest"]
+    assert not list((root / "updates").glob("*.staging"))
+
+
+def test_bundle_checksum_error_is_retryable_without_blocking(update_feed):
+    import hashlib
+    download, root, archive, checksum, _ = update_feed
+    updater = download.BundleDownloader(root, "5.129.0")
+    checksum.write_text("0" * 64, encoding="ascii")
+    assert updater.check()["status"] == "error"
+    assert not (root / "updates/blocked.json").exists()
+    assert not (root / "versions/5.129.1").exists()
+    assert not list((root / "updates").glob("*.part"))
+    checksum.write_text(hashlib.sha256(archive.read_bytes()).hexdigest(), encoding="ascii")
+    assert updater.check()["status"] == "ready"
+
+
+def test_bundle_probe_failure_blocks_until_explicit_retry(update_feed, monkeypatch):
+    import json
+    download, root, _, _, hits = update_feed
+    updater = download.BundleDownloader(root, "5.129.0")
+    def fail(*args):
+        raise OSError("application policy denied interpreter")
+    monkeypatch.setattr(download, "probe_version", fail)
+    assert updater.check()["status"] == "blocked"
+    assert "5.129.1" in json.loads((root / "updates/blocked.json").read_text())
+    assert not (root / "versions/5.129.1").exists()
+    before = list(hits)
+    assert updater.check()["status"] == "blocked"
+    assert hits[len(before):] == ["/latest"]
+    monkeypatch.setattr(download, "probe_version", lambda *args: None)
+    assert updater.check(retry_blocked=True)["status"] == "ready"
+    assert json.loads((root / "updates/blocked.json").read_text()) == {}
+
+
+def test_bundle_download_lock_prevents_parallel_check(update_feed):
+    from character_workflow.lib.file_lock import try_file_lock
+    download, root, _, _, hits = update_feed
+    with try_file_lock(root / "updates/download.lock") as acquired:
+        assert acquired
+        assert download.BundleDownloader(root, "5.129.0").check()["status"] == "idle"
+    assert hits == []
+
+
+@pytest.mark.parametrize("name", ["/outside", "../outside", "GameAtelier/versions/5.129.1/../../outside",
+                                  "C:/outside", "GameAtelier\\versions\\5.129.1\\outside"])
+@pytest.mark.parametrize("kind", ["zip", "tar"])
+def test_bundle_extraction_rejects_unsafe_member_paths(tmp_path, name, kind):
+    import io
+    import tarfile
+    import zipfile
+    from viewer_server.bundle_download import extract_version
+    archive = tmp_path / ("package.zip" if kind == "zip" else "package.tar.gz")
+    if kind == "zip":
+        with zipfile.ZipFile(archive, "w") as source:
+            source.writestr(name, "bad")
+    else:
+        with tarfile.open(archive, "w:gz") as source:
+            member = tarfile.TarInfo(name)
+            member.size = 3
+            source.addfile(member, io.BytesIO(b"bad"))
+    staging = tmp_path / "staging"
+    with pytest.raises(ValueError, match="路径"):
+        extract_version(archive, staging, "5.129.1")
+    assert not staging.exists()
+    assert not (tmp_path / "outside").exists()
+
+
+def test_bundle_tar_preserves_internal_links_and_executable_mode(tmp_path):
+    import io
+    import tarfile
+    from viewer_server.bundle_download import extract_version
+    archive = tmp_path / "package.tar.gz"
+    prefix = "GameAtelier/versions/5.129.1/"
+    with tarfile.open(archive, "w:gz") as source:
+        file = tarfile.TarInfo(prefix + "python/bin/python3.11")
+        file.size, file.mode = 3, 0o755
+        source.addfile(file, io.BytesIO(b"exe"))
+        link = tarfile.TarInfo(prefix + "python/bin/python3")
+        link.type, link.linkname = tarfile.SYMTYPE, "python3.11"
+        source.addfile(link)
+    target = extract_version(archive, tmp_path / "staging", "5.129.1")
+    assert (target / "python/bin/python3").read_bytes() == b"exe"
+    if os.name != "nt":
+        assert (target / "python/bin/python3.11").stat().st_mode & 0o111
+
+
+@pytest.mark.parametrize("link_type,target", [("symlink", "../../../../outside"),
+                                             ("hardlink", "GameAtelier/other/file")])
+def test_bundle_tar_rejects_external_links(tmp_path, link_type, target):
+    import tarfile
+    from viewer_server.bundle_download import extract_version
+    archive = tmp_path / "package.tar.gz"
+    with tarfile.open(archive, "w:gz") as source:
+        link = tarfile.TarInfo("GameAtelier/versions/5.129.1/link")
+        link.type = tarfile.SYMTYPE if link_type == "symlink" else tarfile.LNKTYPE
+        link.linkname = target
+        source.addfile(link)
+    with pytest.raises(ValueError, match="目录外"):
+        extract_version(archive, tmp_path / "staging", "5.129.1")
+    assert not (tmp_path / "staging").exists()
+
+
+def test_bundle_test_feed_requires_explicit_testing_and_loopback(monkeypatch):
+    from viewer_server.bundle_download import _test_feed
+    monkeypatch.delenv("GAME_ATELIER_TESTING", raising=False)
+    monkeypatch.setenv("GAME_ATELIER_TEST_UPDATE_FEED", "http://example.com")
+    assert _test_feed() is None
+    monkeypatch.setenv("GAME_ATELIER_TESTING", "1")
+    with pytest.raises(ValueError, match="本机"):
+        _test_feed()
+
+
+def test_bundle_probe_uses_isolated_data_and_disables_update_checks(tmp_path, monkeypatch):
+    from viewer_server.bundle_download import probe_version
+    monkeypatch.setenv("GAME_ATELIER_UPDATE_ID", "previous-update")
+    monkeypatch.setenv("GAME_ATELIER_UPDATE_ROLLBACK_ID", "previous-rollback")
+    payload = tmp_path / "payload"
+    executable = payload / "python" / ("python.exe" if os.name == "nt" else "bin/python3")
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    (payload / "app/scripts").mkdir(parents=True)
+    (payload / "app/scripts/bootstrap.py").touch()
+    (payload / "VERSION").write_text("5.129.1", encoding="utf-8")
+    observed = []
+    def run(command, **kwargs):
+        data = Path(kwargs["env"]["GAME_ATELIER_DATA_ROOT"])
+        assert data.is_dir()
+        assert data != tmp_path
+        assert kwargs["env"]["GAME_ATELIER_NO_UPDATE_CHECK"] == "1"
+        assert "GAME_ATELIER_UPDATE_ID" not in kwargs["env"]
+        assert "GAME_ATELIER_UPDATE_ROLLBACK_ID" not in kwargs["env"]
+        assert kwargs["timeout"] == 60
+        assert command[-1] == "import viewer_server.server"
+        observed.append(data)
+        return subprocess.CompletedProcess(command, 0)
+    monkeypatch.setattr(subprocess, "run", run)
+    probe_version(payload, "5.129.1")
+    assert observed and not observed[0].exists()

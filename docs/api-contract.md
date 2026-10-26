@@ -1022,3 +1022,16 @@ status 保留真实状态（含 pending、done、failed，以及团队 canceled 
 | GET /audit | `{entries}`，limit默认200最大1000 |
 
 接入端仅通过 `/api/gateway/providers/{alias}/admin` 下对应白名单路由代理，全部注册 LOCAL_MANAGEMENT；服务器用已保存的中转密钥请求，不重定向，不接受任意转发目标。无上游凭据增删/查询、文件读取或本机设置接口。远程任务不提供本机产物链接。
+
+
+## 应用内更新（本机管理会话）
+
+仅新布局安装包可应用更新。网关端口和远程管理员凭据不提供这些接口；源码版只显示版本提示。
+
+- `GET /api/update/state`：运行模式 source/bundle/legacy_bundle、current、准备状态 status（idle/checking/downloading/ready/blocked/error）、to/bytes/reason、maintenance/initializing、waiting/waiting_counts、phase（idle/waiting/restarting）、update_id、restart_started_at（Unix秒）、service_mode。
+- `POST /api/update/check`：后台重新检查，允许重试被封禁版本；返回当前状态。
+- `POST /api/update/apply`：ready 后接受，202 返回 update_id；重复、维护中或未准备好返回409，非安装包返回400。先拒绝新任务再等存量，最多10分钟。
+- `POST /api/update/cancel`：仅等待阶段可取消，返回 status=cancelled；开始重启后409。
+- `GET /api/update/result?id=…`：仅返回匹配ID的终态 succeeded/failed/cancelled，含 from/to/reason/finished_at（ISO时间）；未落盘或ID不匹配返回null。
+
+维护期间新生成/Agent消息/网关生成返回503，已接入工作、审批与取消仍可完成。候选初始化期间仅放行本机会话建立、编辑租约及更新状态/结果，其他业务API暂时503。
