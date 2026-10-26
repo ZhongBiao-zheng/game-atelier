@@ -32,6 +32,11 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.127.1', date: '2026-10-26', headline: '安装包与更新检查修正', changes: [
+    { kind: 'fix', text: 'Mac 安装包从浏览器下载后也能打开，启动器会清除本包的下载隔离标记。' },
+    { kind: 'fix', text: '读不到最新版本号时改用 git 检查更新，不再丢掉「这次不更新」的选择。' },
+    { kind: 'fix', text: '局域网共享设置页只在打开时读取一次常驻服务状态，操作不再变慢。' },
+  ] },
   { version: '5.127.0', date: '2026-10-26', headline: '成员角色与远程中转管理', changes: [
     { kind: 'feat', text: '管理员可在自己的 Atelier 管理中转成员与额度、查看全队用量和实时任务。' },
     { kind: 'feat', text: '支持远程恢复上游、调整路由顺序，成员管理操作可查日志。' },

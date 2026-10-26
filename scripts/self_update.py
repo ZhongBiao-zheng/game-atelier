@@ -165,21 +165,22 @@ def main() -> int:
     print(f"当前 {current}（{branch} @ {out('rev-parse', '--short', 'HEAD') or '?'}）")
 
     # 先读小文件；开发分支可能领先 main，同版或较旧版本不值得 git fetch。
+    # 读不到版本号（CNB 不通等）时退回 git 检查，GitHub 可达的用户照样能更新。
+    latest = None
     try:
         with urllib.request.urlopen(
             bootstrap.LATEST_VERSION_URL, timeout=bootstrap.UPDATE_FETCH_TIMEOUT,
         ) as response:
             latest = json.load(response)["version"]
         bootstrap._version_tuple(latest)
-        cache = bootstrap._read_update_cache()
-        cache.update({"checked_at": time.time(), "latest": latest})
-        bootstrap._write_update_cache(cache)
-        if bootstrap._version_tuple(latest) <= bootstrap._version_tuple(current):
-            print("已是最新")
-            return 0
     except Exception as exc:
-        warn(f"无法检查更新：{exc}")
-        bootstrap._write_update_cache({"checked_at": time.time(), "latest": None})
+        latest = None
+        warn(f"无法检查更新：{exc}，改用 git 检查")
+    cache = bootstrap._read_update_cache()
+    cache.update({"checked_at": time.time(), "latest": latest})
+    bootstrap._write_update_cache(cache)
+    if latest is not None and bootstrap._version_tuple(latest) <= bootstrap._version_tuple(current):
+        print("已是最新")
         return 0
 
     if not fetch(probe()):

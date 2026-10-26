@@ -41,7 +41,6 @@ export interface GatewayOptions {
 }
 
 export interface GatewayState {
-  service?: { state: 'unsupported' | 'not_installed' | 'needs_credentials' | 'installed' | 'unknown'; install_command: string | null };
   enabled: boolean;
   port: number;
   name: string;
@@ -69,6 +68,12 @@ export async function fetchGateway(alias?: string): Promise<GatewayState> {
     return { enabled: true, port: 0, name: alias, default_name: alias, keys: data.keys, status: { running: true, port: null, error: null, addresses: [] } };
   }
   return parseState(await requestJson<unknown>('/api/gateway', '读取局域网共享'));
+}
+
+export type GatewayService = { state: 'unsupported' | 'not_installed' | 'needs_credentials' | 'installed' | 'unknown'; install_command: string | null };
+
+export async function fetchGatewayService(): Promise<GatewayService> {
+  return requestJson<GatewayService>('/api/gateway/service', '读取常驻服务状态');
 }
 
 export async function updateGateway(patch: { enabled?: boolean; port?: number; name?: string }) {

@@ -4,10 +4,12 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   fetchGateway,
   fetchGatewayOptions,
+  fetchGatewayService,
   revokeGatewayKey,
   updateGateway,
   type GatewayKey,
   type GatewayOptions,
+  type GatewayService,
   type GatewayState,
 } from '@/api/gateway';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -23,6 +25,7 @@ export const GATEWAY_HINT =
 export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
   const [tab, setTab] = useState('members');
   const [state, setState] = useState<GatewayState | null>(null);
+  const [service, setService] = useState<GatewayService | null>(null);
   const [options, setOptions] = useState<GatewayOptions>({ models: [], aliases: [] });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -39,6 +42,10 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
   useEffect(() => {
     void reload().catch((e) => setError(String(e)));
   }, [reload]);
+  useEffect(() => {
+    if (gatewayAlias) return;
+    void fetchGatewayService().then(setService).catch((e) => setError(String(e)));
+  }, [gatewayAlias]);
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
     setError('');
@@ -116,9 +123,9 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
             if (saved) setEditingPort(false);
           })} />
       </section>}
-      {state?.service && state.service.state !== 'unsupported' && <section className="space-y-2 rounded-xl border border-border bg-card p-5 text-xs">
-        <p>常驻服务：{{ installed: '已安装', not_installed: '未安装', needs_credentials: '待设置系统凭据', unknown: '状态读取失败' }[state.service.state]}</p>
-        {state.service.state !== 'installed' && <code className="block break-all select-all text-muted-foreground">{state.service.install_command}</code>}
+      {!gatewayAlias && service && service.state !== 'unsupported' && <section className="space-y-2 rounded-xl border border-border bg-card p-5 text-xs">
+        <p>常驻服务：{{ installed: '已安装', not_installed: '未安装', needs_credentials: '待设置系统凭据', unknown: '状态读取失败' }[service.state]}</p>
+        {service.state !== 'installed' && <code className="block break-all select-all text-muted-foreground">{service.install_command}</code>}
       </section>}
       {!gatewayAlias && <div className="flex gap-2" aria-label="成员管理页签">{[['members', '成员与任务'], ['audit', '操作日志']].map(([value, label]) => <button key={value} className={`${button} ${tab === value ? 'bg-secondary' : ''}`} aria-pressed={tab === value} onClick={() => setTab(value)}>{label}</button>)}</div>}
       {tab === 'audit' ? <AuditLog gatewayAlias={gatewayAlias} /> : <div className="min-w-0 space-y-6">

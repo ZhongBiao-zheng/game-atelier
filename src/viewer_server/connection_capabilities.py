@@ -45,6 +45,7 @@ GET /api/gateway/providers/{alias}/admin/routes
 PUT /api/gateway/providers/{alias}/admin/routes/order
 GET /api/gateway/providers/{alias}/admin/audit
 GET /api/gateway
+GET /api/gateway/service
 PUT /api/gateway
 POST /api/gateway/keys
 PATCH /api/gateway/keys/{key_id}
@@ -189,7 +190,7 @@ LOCAL_MANAGEMENT = frozenset({
     "/api/keys/models-preview", "/api/models/order", "/api/models/mode", "/api/folder-picker", "/api/onboarding/status",
     "/api/onboarding/data-root",
     # 局域网共享：开关会让本机对局域网开端口，密钥与用量也只给本机页面（ADR-0025）。
-    "/api/gateway", "/api/gateway/keys", "/api/gateway/keys/{key_id}",
+    "/api/gateway", "/api/gateway/service", "/api/gateway/keys", "/api/gateway/keys/{key_id}",
     "/api/gateway/keys/{key_id}/revoke", "/api/usage", "/api/usage/tasks", "/api/usage/key-last-used",
     "/api/gateway/check",
     "/api/gateway/providers/{alias}/sync", "/api/gateway/options",

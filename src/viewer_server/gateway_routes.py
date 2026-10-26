@@ -55,20 +55,25 @@ def _key_view(record: gateway_keys.GatewayKeyRecord) -> dict:
 
 
 def _view() -> dict:
-    from viewer_server.windows_service import service_status
     config = gateway_keys.read_config()
     return {
         "enabled": config.enabled, "port": config.port,
         "name": config.name, "default_name": socket.gethostname(),
         "keys": [_key_view(record) for record in config.keys],
         "status": gateway_server.status(),
-        "service": service_status(),
     }
 
 
 @gateway_router.get("")
 def get_gateway() -> dict:
     return _view()
+
+
+@gateway_router.get("/service")
+def get_gateway_service() -> dict:
+    """常驻任务状态要起一次 PowerShell，单独成接口，页面只在打开时读一次。"""
+    from viewer_server.windows_service import service_status
+    return service_status()
 
 
 @gateway_router.put("")

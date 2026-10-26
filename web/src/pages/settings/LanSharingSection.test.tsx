@@ -6,7 +6,7 @@ import { LanSharingSection } from './LanSharingSection';
 vi.mock('@/api/http', () => ({ requestJson: vi.fn() }));
 afterEach(() => vi.unstubAllGlobals());
 vi.mock('@/hooks/useSSE', () => ({ useSSE: vi.fn() }));
-vi.mock('@/api/gateway', () => ({ adminBase: (alias: string) => `/api/gateway/providers/${alias}/admin`, fetchGateway: vi.fn(), fetchGatewayOptions: vi.fn(),
+vi.mock('@/api/gateway', () => ({ adminBase: (alias: string) => `/api/gateway/providers/${alias}/admin`, fetchGateway: vi.fn(), fetchGatewayOptions: vi.fn(), fetchGatewayService: vi.fn(),
   fetchGatewayTasks: vi.fn(), fetchGatewayMembers: vi.fn(), createGatewayKey: vi.fn(), updateGatewayKey: vi.fn(),
   revokeGatewayKey: vi.fn(), updateGateway: vi.fn(), gatewayOutputUrl: vi.fn() }));
 const key: api.GatewayKey = { id: 'k1', name: '小王', limits: [], allowed_models: null, allowed_aliases: null,
@@ -17,13 +17,12 @@ beforeEach(() => { vi.clearAllMocks();
   vi.mocked(api.fetchGatewayOptions).mockResolvedValue({ models: [{ id: 'gpt', name: 'GPT', modality: 'image' }], aliases: [{ alias: 'HK', name: 'HK', provider: 'custom' }] });
   vi.mocked(api.fetchGatewayTasks).mockResolvedValue([]);
   vi.mocked(api.fetchGatewayMembers).mockResolvedValue({ members: [], unavailable_routes: [] });
+  vi.mocked(api.fetchGatewayService).mockResolvedValue({ state: 'unsupported', install_command: null });
 });
 describe('LAN sharing', () => {
   it('shows the pending system credential step without installing from the page', async () => {
-    const state = await api.fetchGateway();
-    vi.mocked(api.fetchGateway).mockResolvedValue({ ...state,
-      service: { state: 'needs_credentials', install_command: 'powershell -File scripts/windows-service.ps1 install' },
-    });
+    vi.mocked(api.fetchGatewayService).mockResolvedValue(
+      { state: 'needs_credentials', install_command: 'powershell -File scripts/windows-service.ps1 install' });
     render(<LanSharingSection />);
     expect(await screen.findByText('常驻服务：待设置系统凭据')).toBeInTheDocument();
     expect(screen.getByText('powershell -File scripts/windows-service.ps1 install')).toBeInTheDocument();

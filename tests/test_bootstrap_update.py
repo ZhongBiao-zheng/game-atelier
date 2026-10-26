@@ -111,7 +111,7 @@ def test_malformed_latest_version_is_not_update(update_env):
     assert bootstrap.update_info()["update_available"] is False
 
 
-@pytest.mark.parametrize("latest", ["5.0.0", "4.9.9", "bad", None])
+@pytest.mark.parametrize("latest", ["5.0.0", "4.9.9"])
 def test_source_update_skips_git_fetch_without_newer_version(tmp_path, monkeypatch, capsys, latest):
     monkeypatch.setitem(sys.modules, "bootstrap", bootstrap)
     monkeypatch.setattr(bootstrap, "_user_config_dir", lambda: tmp_path / "config")
@@ -126,8 +126,6 @@ def test_source_update_skips_git_fetch_without_newer_version(tmp_path, monkeypat
     monkeypatch.setattr(updater.urllib.request, "urlopen", lambda *args, **kwargs:
                         io.BytesIO(json.dumps({"version": latest}).encode()))
     assert updater.main() == 0
-    if latest in ("bad", None):
-        assert "无法检查更新：" in capsys.readouterr().out
 
 
 def test_source_update_fetches_only_after_newer_version(tmp_path, monkeypatch, capsys):
@@ -151,7 +149,16 @@ def test_source_update_fetches_only_after_newer_version(tmp_path, monkeypatch, c
     def offline(*args, **kwargs):
         raise OSError("offline")
 
+    # 版本号读不到时退回 git 检查，且不清掉用户对某个版本的「不更新」。
+    bootstrap._write_update_cache({"checked_at": 0, "latest": "5.1.0", "dismissed": "5.1.0"})
     monkeypatch.setattr(updater.urllib.request, "urlopen", offline)
     assert updater.main() == 0
-    assert calls == [1]
+    assert calls == [1, 1]
     assert "无法检查更新：offline" in capsys.readouterr().out
+    assert bootstrap._read_update_cache()["dismissed"] == "5.1.0"
+
+    for bad in ("bad", None):
+        monkeypatch.setattr(updater.urllib.request, "urlopen", lambda *args, _v=bad, **kwargs:
+                            io.BytesIO(json.dumps({"version": _v}).encode()))
+        assert updater.main() == 0
+    assert calls == [1, 1, 1, 1]

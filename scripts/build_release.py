@@ -56,6 +56,11 @@ def build(output: Path, platform: str) -> Path:
         launcher.write_text(
             '#!/bin/sh\nset -eu\n'
             'BUNDLE_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\n'
+            # 浏览器下载会给整个包打隔离标记，未签名的 Python 与动态库随后被 Gatekeeper 拦下。
+            # 用户放行本启动器即同意运行这个包，这里只清本包目录的标记。
+            'if command -v xattr >/dev/null 2>&1; then\n'
+            '  xattr -dr com.apple.quarantine "$BUNDLE_DIR" 2>/dev/null || true\n'
+            'fi\n'
             'unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT\n'
             'export PYTHONPATH="$BUNDLE_DIR/app/src"\n'
             'exec "$BUNDLE_DIR/python/bin/python3" "$BUNDLE_DIR/app/scripts/bootstrap.py" --launch\n',
