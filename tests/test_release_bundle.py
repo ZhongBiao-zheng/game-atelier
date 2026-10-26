@@ -423,7 +423,7 @@ def test_bundle_download_lock_prevents_parallel_check(update_feed):
 @pytest.mark.parametrize("name", ["/outside", "../outside", "GameAtelier/versions/5.129.1/../../outside",
                                   "C:/outside", "GameAtelier\\versions\\5.129.1\\outside"])
 @pytest.mark.parametrize("kind", ["zip", "tar"])
-def test_bundle_extraction_rejects_unsafe_member_paths(tmp_path, name, kind):
+def test_bundle_extraction_rejects_unsafe_member_paths(tmp_path, name, kind, monkeypatch):
     import io
     import tarfile
     import zipfile
@@ -436,6 +436,8 @@ def test_bundle_extraction_rejects_unsafe_member_paths(tmp_path, name, kind):
             member = zipfile.ZipInfo("placeholder")
             member.filename = name
             source.writestr(member, "bad")
+        if "\\" in name:
+            monkeypatch.setattr(zipfile.os, "sep", "\\")
     else:
         with tarfile.open(archive, "w:gz") as source:
             member = tarfile.TarInfo(name)

@@ -118,7 +118,8 @@ def latest_version() -> str:
 
 def _member_path(name: str) -> PurePosixPath:
     path = PurePosixPath(name)
-    if not name or "\\" in name or path.is_absolute() or ".." in path.parts or ":" in name:
+    if (not name or "\x00" in name or "\\" in name or path.is_absolute()
+            or ".." in path.parts or ":" in name):
         raise ValueError("安装包包含不安全的路径。")
     return path
 
@@ -150,7 +151,9 @@ def extract_version(archive: Path, staging: Path, version: str) -> Path:
         if archive.suffix == ".zip":
             with zipfile.ZipFile(archive) as source:
                 for member in source.infolist():
-                    relative = selected(member.filename, member.file_size)
+                    # ZipInfo normalizes Windows separators and truncates NULs. Validate
+                    # the original archive name before using its normalized filename.
+                    relative = selected(member.orig_filename, member.file_size)
                     if relative is None:
                         continue
                     mode = member.external_attr >> 16
