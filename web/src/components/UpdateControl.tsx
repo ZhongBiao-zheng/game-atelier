@@ -112,7 +112,11 @@ export function UpdateProvider({ children, runtimeMode, latestRelease }: {
     finally { setChecking(false); }
   }
   const mode = state?.runtime_mode ?? (runtimeMode === 'bundle' ? 'legacy_bundle' : 'source');
-  const restarting = Boolean(pending?.restartAt);
+  // 结果到达后弹窗还在退场动画里：沿用最后一次的事务，否则会闪出「等待 0 个任务 / 正在更新到 …」。
+  const shownPending = useRef(pending);
+  if (pending) shownPending.current = pending;
+  const shown = pending ?? shownPending.current;
+  const restarting = Boolean(shown?.restartAt);
   return <UpdateContext.Provider value={{ state, mode, latest: latestRelease, requestApply: () => setConfirm(true), check, checking }}>
     {children}
     <Dialog open={confirm} onOpenChange={value => { if (!submitting) setConfirm(value); }}>
@@ -126,7 +130,7 @@ export function UpdateProvider({ children, runtimeMode, latestRelease }: {
     <Dialog open={Boolean(pending)}>
       <DialogContent hideClose data-connection-controls onEscapeKeyDown={event => event.preventDefault()} onPointerDownOutside={event => event.preventDefault()}>
         <DialogTitle>{restarting ? '正在重启…' : `等待 ${state?.waiting ?? 0} 个任务完成`}</DialogTitle>
-        <DialogDescription>正在更新到 {pending?.to}…</DialogDescription>
+        <DialogDescription>正在更新到 {shown?.to}…</DialogDescription>
         {!restarting && Boolean(state?.waiting_counts?.approvals) && <p className="text-sm text-muted-foreground">{state?.waiting_counts?.approvals} 个 Agent 操作待确认</p>}
         {!restarting && <div className="flex justify-end"><Button variant="outline" onClick={() => void cancel()}>取消更新</Button></div>}
       </DialogContent>

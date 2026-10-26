@@ -491,6 +491,27 @@ def test_maintenance_rejects_new_generation_before_payload_or_provider(update_cl
     assert connection.post("/api/update/cancel", json={}).status_code == 200
 
 
+def test_every_route_that_starts_background_work_is_blocked_during_maintenance(tmp_path):
+    """work_request 是手写白名单：新增会起后台任务的 POST 路由却忘了登记，维护期间就拦不住。"""
+    import ast
+    import inspect
+    import textwrap
+    from viewer_server.update_routes import work_request
+    def starts_work(endpoint) -> bool:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(endpoint)))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+                if name == "add_task" or name.startswith("submit_"):
+                    return True
+        return False
+    starting = [route.path for route in build_app(dist_dir=tmp_path).routes
+                if "POST" in (getattr(route, "methods", None) or set()) and starts_work(route.endpoint)]
+    assert len(starting) >= 10
+    concrete = {path: path.replace("{", "x").replace("}", "x") for path in starting}
+    assert [path for path, sample in concrete.items() if not work_request(sample, "POST")] == []
+
+
 def test_maintenance_allows_existing_task_cancel_and_approval_routes(update_client):
     from viewer_server.update_routes import work_request
     connection, _ = update_client

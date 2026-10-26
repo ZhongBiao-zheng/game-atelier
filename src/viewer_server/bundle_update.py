@@ -182,6 +182,9 @@ def _finish(root: Path, runtime: Path, pending: dict, status: str, reason: str =
     })
     (root / "updates/pending.json").unlink(missing_ok=True)
     (runtime / "maintenance").unlink(missing_ok=True)
+    # 结果已落盘，握手文件不再有读者；不清理会每次更新留下三四个。
+    for phase in ("started", "activate", "ready", "start-failed"):
+        (runtime / f"update-{phase}-{pending['update_id']}").unlink(missing_ok=True)
 
 
 def _block(root: Path, version: str, reason: str) -> None:

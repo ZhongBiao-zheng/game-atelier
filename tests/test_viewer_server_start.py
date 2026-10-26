@@ -64,9 +64,12 @@ def test_bundle_update_commits_only_after_report_without_holding_start_lock(upda
             assert activation.read_text() == pending["update_id"]
         else:
             assert not activation.exists()
+        phase = "ready" if kwargs.get("ready") else "started"
+        (runtime / f"update-{phase}-{pending['update_id']}").write_text("instance")
         return True
     monkeypatch.setattr(update, "_wait_ready", ready)
     assert update.apply_update(root, runtime, "5.130.0", pending["update_id"]) == 0
+    assert not list(runtime.glob(f"update-*-{pending['update_id']}"))
     assert (root / "current").read_text().strip() == "5.130.0"
     assert (root / "last-good").read_text().strip() == "5.130.0"
     assert (root / "previous").read_text().strip() == "5.129.0"
