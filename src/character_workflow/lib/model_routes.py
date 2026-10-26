@@ -439,12 +439,20 @@ def put_alias_first(alias: str, *, only_unordered: bool = False) -> None:
             write_keys_db(database)
 
 
-def set_route_order(modality: ModelModality, identifier: str, aliases: list[str]) -> ModelRoute:
+def set_route_order(
+    modality: ModelModality, identifier: str, aliases: list[str], *, upstream_only: bool = False,
+) -> ModelRoute:
     with keys_lock():
         route = find_route(modality, identifier)
-        if sorted(aliases) != sorted(member.alias for member in route.members):
+        expected = [member.alias for member in route.members
+                    if not upstream_only or member.provider != "atelier"]
+        if sorted(aliases) != sorted(expected):
             raise InvalidRouteOrderError("顺序必须恰好包含该模型的全部供应商")
         database = read_keys_db()
+        if upstream_only:
+            ordered = iter(aliases)
+            aliases = [member.alias if member.provider == "atelier" else next(ordered)
+                       for member in route.members]
         database.model_order.setdefault(modality, {})[identifier] = list(aliases)
         write_keys_db(database)
         return find_route(modality, identifier)

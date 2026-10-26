@@ -1,10 +1,11 @@
+import { adminBase } from './gateway';
 import { requestJson } from './http';
 import type { UsageRange, UsageResponse, UsageScope, UsageSource, UsageTaskFilter, UsageTasksResponse } from '@/schema/usage';
 import { setTokenDancePrices, type TokenDancePricing } from '@/lib/generationCost';
 export function fetchUsage(params: {
   scope: UsageScope; range: UsageRange; source: UsageSource; member: string;
-}): Promise<UsageResponse> {
-  return requestJson<UsageResponse>(`/api/usage?${new URLSearchParams(params)}`, '读取用量');
+}, gatewayAlias?: string): Promise<UsageResponse> {
+  return requestJson<UsageResponse>(`${gatewayAlias ? adminBase(gatewayAlias) + '/usage' : '/api/usage'}?${new URLSearchParams(params)}`, '读取用量');
 }
 export function fetchKeyLastUsed(): Promise<Record<string, string>> {
   return requestJson<Record<string, string>>('/api/usage/key-last-used', '读取最近使用');
@@ -12,8 +13,8 @@ export function fetchKeyLastUsed(): Promise<Record<string, string>> {
 export function fetchUsageTasks(params: {
   scope: UsageScope; range: UsageRange; source: UsageSource; member: string;
   status: UsageTaskFilter; offset: number;
-}): Promise<UsageTasksResponse> {
-  return requestJson<UsageTasksResponse>(`/api/usage/tasks?${new URLSearchParams({
+}, gatewayAlias?: string): Promise<UsageTasksResponse> {
+  return requestJson<UsageTasksResponse>(`${gatewayAlias ? adminBase(gatewayAlias) + '/usage/tasks' : '/api/usage/tasks'}?${new URLSearchParams({
     ...params, offset: String(params.offset), limit: '50',
   })}`, '读取任务');
 }

@@ -32,6 +32,10 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.127.0', date: '2026-10-26', headline: '成员角色与远程中转管理', changes: [
+    { kind: 'feat', text: '管理员可在自己的 Atelier 管理中转成员与额度、查看全队用量和实时任务。' },
+    { kind: 'feat', text: '支持远程恢复上游、调整路由顺序，成员管理操作可查日志。' },
+  ] },
   { version: '5.126.0', date: '2026-10-26', headline: 'Windows 中转常驻', changes: [
     { kind: 'feat', text: '提供开机运行与每分钟恢复的任务安装脚本，凭据由系统界面保存。' },
     { kind: 'feat', text: '共享设置显示常驻状态，中转提供健康检查，服务日志按天保留。' },

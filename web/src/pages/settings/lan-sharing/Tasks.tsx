@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchGatewayTasks, gatewayOutputUrl, type GatewayTask } from '@/api/gateway';
+import { adminBase, fetchGatewayTasks, gatewayOutputUrl, type GatewayTask } from '@/api/gateway';
 import { subscribeGatewayEvents } from '@/api/gatewayEvents';
 import { date } from './shared';
 
@@ -13,7 +13,7 @@ export function mergeTask(rows: GatewayTask[], next: GatewayTask) {
 }
 const PHASES: Record<string, string> = { queued: '排队', sent: '已提交', downloading: '下载中', pending: '排队', running: '生成中', done: '完成', failed: '失败', canceled: '已停止' };
 
-export function Tasks({ onFinished }: { onFinished: () => void }) {
+export function Tasks({ onFinished, gatewayAlias }: { onFinished: () => void; gatewayAlias?: string }) {
   const [active, setActive] = useState<GatewayTask[]>([]);
   const [recent, setRecent] = useState<GatewayTask[]>([]);
   const [error, setError] = useState('');
@@ -27,28 +27,35 @@ export function Tasks({ onFinished }: { onFinished: () => void }) {
   const refresh = useCallback(async () => {
     const version = epoch.current;
     try {
-      const [running, finished] = await Promise.all([fetchGatewayTasks('active'), fetchGatewayTasks('recent')]);
+      const [running, finished] = await Promise.all([fetchGatewayTasks('active', gatewayAlias), fetchGatewayTasks('recent', gatewayAlias)]);
       if (!mounted.current || version !== epoch.current) return;
       for (const row of [...running, ...finished]) latest.current.set(row.task_id, row.updated_at);
       if (activeRef.current.some(row => !running.some(next => next.task_id === row.task_id))) finishedRef.current();
       setActive(running); setRecent(finished); setError('');
     } catch (e) { if (mounted.current) setError(String(e)); }
-  }, []);
+  }, [gatewayAlias]);
   useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => subscribeGatewayEvents({ onConnect: () => { void refresh(); }, onTask: task => {
+  useEffect(() => {
+    if (gatewayAlias) {
+      const events = new EventSource(`${adminBase(gatewayAlias)}/live`);
+      events.onopen = () => { void refresh(); };
+      events.addEventListener('task', () => { void refresh(); });
+      return () => events.close();
+    }
+    return subscribeGatewayEvents({ onConnect: () => { void refresh(); }, onTask: task => {
     if ((latest.current.get(task.task_id) ?? '') > task.updated_at) return;
     latest.current.set(task.task_id, task.updated_at);
     epoch.current++;
     setActive(rows => mergeTask(rows, task).filter(isActive));
     if (!isActive(task)) { setRecent(rows => mergeTask(rows, task).slice(0, 200)); finishedRef.current(); }
-  } }), [refresh]);
+  } }); }, [refresh, gatewayAlias]);
   const running = active.length > 0;
   useEffect(() => {
-    if (!running) return;
+    if (!running && !gatewayAlias) return;
     const clock = setInterval(() => setNow(Date.now()), 1000);
     const poll = setInterval(() => { void refresh(); }, 4000);
     return () => { clearInterval(clock); clearInterval(poll); };
-  }, [running, refresh]);
+  }, [running, refresh, gatewayAlias]);
   function row(task: GatewayTask, preview = false) {
     return <li key={task.task_id} className="space-y-2 border-t border-border py-3 text-xs">
       <div className="flex flex-wrap gap-x-3 gap-y-1">
@@ -59,7 +66,7 @@ export function Tasks({ onFinished }: { onFinished: () => void }) {
       </div>
       {task.kind !== 'text' && task.prompt && <details><summary className="cursor-pointer truncate text-muted-foreground">{task.prompt}</summary><p className="whitespace-pre-wrap break-words pt-2">{task.prompt}</p></details>}
       {task.error && <p className="break-words text-destructive">{task.error}</p>}
-      {preview && task.outputs > 0 && <div className="flex flex-wrap gap-2">{task.output_types.map((mime, i) => {
+      {preview && !gatewayAlias && task.outputs > 0 && <div className="flex flex-wrap gap-2">{task.output_types.map((mime, i) => {
         const src = gatewayOutputUrl(task.task_id, i);
         return mime.startsWith('video/') ? <video key={i} src={src} muted controls preload="metadata" className="h-24 max-w-full rounded-md" />
           : mime.startsWith('audio/') ? <audio key={i} src={src} controls preload="none" className="max-w-full" />

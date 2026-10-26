@@ -29,6 +29,21 @@ POST /api/keys/models-preview
 GET /api/models
 PUT /api/models/order
 PUT /api/models/mode
+GET /api/gateway/audit
+GET /api/gateway/providers/{alias}/admin/keys
+POST /api/gateway/providers/{alias}/admin/keys
+PATCH /api/gateway/providers/{alias}/admin/keys/{key_id}
+POST /api/gateway/providers/{alias}/admin/keys/{key_id}/revoke
+GET /api/gateway/providers/{alias}/admin/options
+GET /api/gateway/providers/{alias}/admin/usage
+GET /api/gateway/providers/{alias}/admin/usage/tasks
+GET /api/gateway/providers/{alias}/admin/tasks
+GET /api/gateway/providers/{alias}/admin/live
+GET /api/gateway/providers/{alias}/admin/members
+POST /api/gateway/providers/{alias}/admin/members/{member_alias}/restore
+GET /api/gateway/providers/{alias}/admin/routes
+PUT /api/gateway/providers/{alias}/admin/routes/order
+GET /api/gateway/providers/{alias}/admin/audit
 GET /api/gateway
 PUT /api/gateway
 POST /api/gateway/keys
@@ -155,6 +170,21 @@ GET /openapi.json
 """.strip().splitlines()
 
 LOCAL_MANAGEMENT = frozenset({
+    "/api/gateway/audit",
+    "/api/gateway/providers/{alias}/admin/audit",
+    "/api/gateway/providers/{alias}/admin/keys",
+    "/api/gateway/providers/{alias}/admin/keys/{key_id}",
+    "/api/gateway/providers/{alias}/admin/keys/{key_id}/revoke",
+    "/api/gateway/providers/{alias}/admin/live",
+    "/api/gateway/providers/{alias}/admin/members",
+    "/api/gateway/providers/{alias}/admin/members/{member_alias}/restore",
+    "/api/gateway/providers/{alias}/admin/options",
+    "/api/gateway/providers/{alias}/admin/routes",
+    "/api/gateway/providers/{alias}/admin/routes/order",
+    "/api/gateway/providers/{alias}/admin/tasks",
+    "/api/gateway/providers/{alias}/admin/usage",
+    "/api/gateway/providers/{alias}/admin/usage/tasks",
+
     "/api/config", "/api/keys", "/api/keys/{alias}", "/api/keys/{alias}/reveal",
     "/api/keys/models-preview", "/api/models/order", "/api/models/mode", "/api/folder-picker", "/api/onboarding/status",
     "/api/onboarding/data-root",

@@ -14,7 +14,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from character_workflow.lib import data_root
+from character_workflow.lib import data_root, gateway_audit
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.private_json import read_private_json, write_private_json
 
@@ -52,6 +52,7 @@ class GatewayKeyRecord(GatewayPolicy):
     model_config = ConfigDict(extra="ignore")
     id: str
     name: str = Field(min_length=1, max_length=40)
+    role: Literal["member", "admin"] = "member"
     token_sha256: str
     created_at: str
     revoked_at: str | None = None
@@ -62,6 +63,10 @@ class GatewayConfig(BaseModel):
     port: int = Field(default=DEFAULT_PORT, ge=1024, le=65535)
     name: str = Field(default="", max_length=40)
     keys: list[GatewayKeyRecord] = Field(default_factory=list)
+
+
+class GatewayAdminError(PermissionError):
+    pass
 
 
 class NoSuchGatewayKeyError(LookupError):
@@ -110,50 +115,73 @@ def update_settings(
 def create_key(
     name: str, limits: list[GatewayLimit] | None = None,
     allowed_models: list[str] | None = None, allowed_aliases: list[str] | None = None,
+    *, role: Literal["member", "admin"] = "member", actor_id: str | None = None,
 ) -> tuple[GatewayKeyRecord, str]:
     """新建网关密钥；返回 (记录, 明文)。明文之后再也拿不到。"""
     token = TOKEN_PREFIX + secrets.token_urlsafe(32)
     record = GatewayKeyRecord(
         id=uuid.uuid4().hex[:12], name=name.strip(), token_sha256=digest(token),
         limits=limits or [], allowed_models=allowed_models, allowed_aliases=allowed_aliases,
-        created_at=_now(),
+        created_at=_now(), role=role,
     )
     with _lock():
         config = read_config()
+        actor = require_admin(config, actor_id)
         _write(config.model_copy(update={"keys": [*config.keys, record]}))
+        gateway_audit.append("member.create", record.id, {"after": _summary(record)}, actor)
     return record, token
 
 
 def update_key(
     key_id: str, *, name=_UNSET, limits=_UNSET,
-    allowed_models=_UNSET, allowed_aliases=_UNSET,
+    allowed_models=_UNSET, allowed_aliases=_UNSET, role=_UNSET, actor_id: str | None = None,
 ) -> GatewayKeyRecord:
     patch = {k: v for k, v in {
         "name": name, "limits": limits, "allowed_models": allowed_models,
-        "allowed_aliases": allowed_aliases,
+        "allowed_aliases": allowed_aliases, "role": role,
     }.items() if v is not _UNSET}
     if isinstance(patch.get("name"), str):
         patch["name"] = patch["name"].strip()
     return _replace(key_id, lambda record: GatewayKeyRecord.model_validate(
-        {**record.model_dump(), **patch}))
+        {**record.model_dump(), **patch}), actor_id, "member.update")
 
 
-def revoke_key(key_id: str) -> GatewayKeyRecord:
+def revoke_key(key_id: str, *, actor_id: str | None = None) -> GatewayKeyRecord:
     return _replace(key_id, lambda record: record if record.revoked_at
-                    else record.model_copy(update={"revoked_at": _now()}))
+                    else record.model_copy(update={"revoked_at": _now()}), actor_id, "member.revoke")
 
 
-def _replace(key_id: str, change) -> GatewayKeyRecord:
+def _replace(key_id: str, change, actor_id: str | None, action: str) -> GatewayKeyRecord:
     with _lock():
         config = read_config()
         record = next((item for item in config.keys if item.id == key_id), None)
         if record is None:
             raise NoSuchGatewayKeyError(key_id)
+        actor = require_admin(config, actor_id)
         updated = change(record)
+        if actor and record.id == actor.id and (updated.revoked_at or updated.role != "admin"):
+            raise GatewayAdminError("管理员不能撤销或降级自己的密钥，请在中转机本机操作")
+        if actor and record.role == "admin" and (updated.revoked_at or updated.role != "admin"):
+            if not any(k.id != record.id and k.role == "admin" and not k.revoked_at for k in config.keys):
+                raise GatewayAdminError("最后一位管理员只能在中转机本机撤销或降级")
         _write(config.model_copy(update={
             "keys": [updated if item.id == key_id else item for item in config.keys],
         }))
+        gateway_audit.append(action, record.id, {"before": _summary(record), "after": _summary(updated)}, actor)
         return updated
+
+
+def _summary(record):
+    return record.model_dump(mode="json", include={"name", "role", "limits", "allowed_models", "allowed_aliases", "revoked_at"})
+
+
+def require_admin(config: GatewayConfig, actor_id: str | None):
+    if actor_id is None:
+        return None
+    actor = next((k for k in config.keys if k.id == actor_id and not k.revoked_at and k.role == "admin"), None)
+    if actor is None:
+        raise GatewayAdminError("管理员密钥已撤销或权限已变更")
+    return actor
 
 
 def authenticate(token: str) -> GatewayKeyRecord | None:

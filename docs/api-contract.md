@@ -80,7 +80,7 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 
 - `GET /gateway/v1/info` → `{name, version, protocol: 2}`。协议版本不一致时接入端直接报错，不做兼容。
 - `GET /gateway/v1/models` → 返回 `{models: [{id, name, modality, members}]}`，成员为供应商公开信息，含全部模态；控制台专用的 `mode / candidate_alias / estimate_cny` 不属于此目录协议；按当前密钥的模型与 alias 权限过滤，排除 atelier 成员，视频成员保留 `protocol`。
-- `GET /gateway/v1/me` → `{name, limits: [{period, cap_cny, used_cny, reserved_cny, left_cny, resets_at}], month_charged_cny, month_calls}`，只读当前密钥。
+- `GET /gateway/v1/me` → `{id, role, name, limits: [{period, cap_cny, used_cny, reserved_cny, left_cny, resets_at}], month_charged_cny, month_calls}`，只读当前密钥。
 - `POST /gateway/v1/tasks`：multipart，字段 `request`（JSON：`kind`、`model` 路由 id、`prompt`、`n`、`size`、`params`）+ 素材文件。
   `kind` 为 image / image_edit / layer_split / video / audio；文件组 `ref_0`…`ref_15`、`mask`、
   `mj_sref_0`…`mj_sref_7` / `mj_cref_0`…`mj_cref_7` / `mj_oref_0`…`mj_oref_7`、
@@ -999,3 +999,26 @@ status 保留真实状态（含 pending、done、failed，以及团队 canceled 
 ## 工坊退役（5.113.0）
 
 旧工坊 API、workshop_* MCP 工具和 Skill 已移除。Job 的 asset_slot/project_id/ui_scheme_id/screen_id/production_id/workshop_request_id 字段已删除；历史工坊 job 在 jobs-archive/workshop 中保留，活动任务仅支持 studio/canvas。项目数据保留 migrated_from_workshop 作为迁移来源记录。
+
+### 管理员中转接口（5.127.0）
+
+`GatewayKeyRecord.role` 为 `member | admin`，默认 `member`。本机创建/修改成员同样支持角色；`GET /api/gateway/audit` 返回最近200条 `{entries}` 操作日志。日志含 time（带时区）、actor_id/name、action、target_id、summary，不含 token 或哈希。
+
+`/gateway/v1/admin` 下所有端点每次请求校验有效 admin，成员403、无效凭据401。管理写入持锁复查；不能远程撤销/降级自己，最后管理员只能本机撤权。
+
+| 方法与后缀 | 响应与作用 |
+|---|---|
+| GET /keys | `{keys}`，成员记录不含token_sha256 |
+| POST /keys | 201 `{key, token}`，明文仅此次响应；输入name/role/limits/allowed_models/allowed_aliases |
+| PATCH /keys/{id} | 修改成员，返回脱敏记录 |
+| POST /keys/{id}/revoke | 撤销，返回脱敏记录 |
+| GET /options | 可授权的模型与上游alias |
+| GET /usage、/usage/tasks | 与本机用量结构一致，固定team；range/member/status/offset/limit筛选 |
+| GET /tasks | scope=active/recent，所有成员任务的安全快照 |
+| GET /live | SSE task事件，4秒心跳；发送前复查权限，客户端另每4秒轮询tasks |
+| GET /members | 上游alias欠费/暂不可用状态 |
+| POST /members/{alias}/restore | 输入modality，恢复后返回状态 |
+| GET /routes、PUT /routes/order | 返回`{models:[{id,name,modality,aliases}]}`；排序输入modality/id/aliases |
+| GET /audit | `{entries}`，limit默认200最大1000 |
+
+接入端仅通过 `/api/gateway/providers/{alias}/admin` 下对应白名单路由代理，全部注册 LOCAL_MANAGEMENT；服务器用已保存的中转密钥请求，不重定向，不接受任意转发目标。无上游凭据增删/查询、文件读取或本机设置接口。远程任务不提供本机产物链接。

@@ -834,8 +834,24 @@ class _ModelOrderPayload(BaseModel):
 
 @router.put("/models/order")
 def set_model_route_order(payload: _ModelOrderPayload) -> dict:
+    return change_route_order(payload)
+
+
+def change_route_order(payload: _ModelOrderPayload, actor=None) -> dict:
+    from character_workflow.lib import gateway_audit, gateway_keys
+    with gateway_keys._lock():
+        current = gateway_keys.require_admin(gateway_keys.read_config(), actor.id if actor else None)
+        before = next(([m.alias for m in route.members] for route in model_routes.list_routes()
+                       if route.modality == payload.modality and route.id == payload.id), [])
+        result = _apply_route_order(payload, upstream_only=actor is not None)
+        gateway_audit.append("route.reorder", payload.id, {"modality": payload.modality,
+                             "before": before, "after": payload.aliases}, current)
+        return result
+
+
+def _apply_route_order(payload: _ModelOrderPayload, *, upstream_only: bool = False) -> dict:
     try:
-        route = model_routes.set_route_order(payload.modality, payload.id, payload.aliases)
+        route = model_routes.set_route_order(payload.modality, payload.id, payload.aliases, upstream_only=upstream_only)
     except model_routes.NoSuchRouteError as error:
         raise HTTPException(404, str(error)) from None
     except model_routes.InvalidRouteOrderError as error:

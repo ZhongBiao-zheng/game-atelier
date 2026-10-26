@@ -1,7 +1,7 @@
 """模型路由成员状态，仅限本机管理会话。"""
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
-from character_workflow.lib import keys, model_routes
+from character_workflow.lib import gateway_audit, gateway_keys, keys, model_routes
 from character_workflow.lib.schemas import ModelRouteMemberStatusResponse
 
 member_status_router = APIRouter(prefix="/api/model-routes/member-status")
@@ -32,7 +32,12 @@ class GatewayMemberRestore(BaseModel):
 
 @member_status_router.post("/restore", response_model=ModelRouteMemberStatusResponse)
 def restore_gateway_member(body: GatewayMemberRestore) -> dict:
-    model_routes.clear_member_status(body.modality, body.alias)
+    restore_member(body.modality, body.alias)
     return gateway_members()
 
-
+def restore_member(modality, alias, actor=None):
+    with gateway_keys._lock():
+        current = gateway_keys.require_admin(gateway_keys.read_config(), actor.id if actor else None)
+        before = [row for row in model_routes.member_statuses() if row["alias"] == alias and row["modality"] == modality]
+        model_routes.clear_member_status(modality, alias)
+        gateway_audit.append("upstream.restore", alias, {"modality": modality, "before": before, "after": "available"}, current)

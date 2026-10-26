@@ -5,7 +5,7 @@ import type { UsageRange, UsageScope, UsageSource, UsageTask, UsageTaskFilter, U
 import { formatGenerationCost } from '@/lib/generationCost';
 import { KindBadge } from './KindBadge';
 
-type Filters = { scope: UsageScope; range: UsageRange; source: UsageSource; member: string };
+type Filters = { gatewayAlias?: string; scope: UsageScope; range: UsageRange; source: UsageSource; member: string };
 const statuses: { value: UsageTaskFilter; label: string }[] = [
   { value: 'all', label: '全部' }, { value: 'done', label: '成功' },
   { value: 'failed', label: '失败' }, { value: 'unpriced', label: '未计价' },
@@ -30,18 +30,18 @@ export function TaskTable(filters: Filters) {
   const [error, setError] = useState('');
   const request = useRef(0);
   const [, navigate] = useLocation();
-  const { scope, range, source, member } = filters;
+  const { scope, range, source, member, gatewayAlias } = filters;
   useEffect(() => {
     const current = ++request.current;
     setData(null);
     setLoading(true);
     setError('');
-    fetchUsageTasks({ scope, range, source, member, status, offset: 0 })
+    fetchUsageTasks({ scope, range, source, member, status, offset: 0 }, ...(gatewayAlias ? [gatewayAlias] as const : []))
       .then(next => { if (request.current === current) setData(next); })
       .catch(e => { if (request.current === current) setError(e instanceof Error ? e.message : String(e)); })
       .finally(() => { if (request.current === current) setLoading(false); });
     return () => { request.current = current + 1; };
-  }, [scope, range, source, member, status]);
+  }, [scope, range, source, member, status, gatewayAlias]);
 
   async function more() {
     if (loading || data?.next_offset == null) return;
@@ -49,7 +49,7 @@ export function TaskTable(filters: Filters) {
     setLoading(true);
     setError('');
     try {
-      const next = await fetchUsageTasks({ scope, range, source, member, status, offset: data.next_offset });
+      const next = await fetchUsageTasks({ scope, range, source, member, status, offset: data.next_offset }, ...(gatewayAlias ? [gatewayAlias] as const : []));
       if (current === request.current) setData(previous => ({ ...next, rows: [...(previous?.rows ?? []), ...next.rows] }));
     } catch (e) { if (current === request.current) setError(e instanceof Error ? e.message : String(e)); }
     finally { if (current === request.current) setLoading(false); }

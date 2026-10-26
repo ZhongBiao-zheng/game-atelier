@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { fetchGateway, type GatewayState } from '@/api/gateway';
+import { listKeys } from '@/api/keys';
+import { fetchGatewayProviderMe, fetchGateway, type GatewayState } from '@/api/gateway';
 import { publishGatewayConnected } from '@/api/gatewayEvents';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
@@ -9,10 +10,10 @@ import { CONSOLE_NAV, ConsoleLayout, rememberCreativeLocation } from './ConsoleL
 vi.mock('@/api/gateway', () => ({ fetchGateway: vi.fn(), fetchGatewayProviderMe: vi.fn() }));
 const gateway: GatewayState = { enabled: true, port: 5180, name: '', default_name: 'mac', keys: [],
   status: { running: true, port: 5180, addresses: [], error: null } };
-beforeEach(() => { vi.mocked(fetchGateway).mockReset().mockResolvedValue({ ...gateway, enabled: false }); });
+beforeEach(() => { vi.mocked(listKeys).mockResolvedValue({ keys: [] } as never); vi.mocked(fetchGatewayProviderMe).mockResolvedValue(null); vi.mocked(fetchGateway).mockReset().mockResolvedValue({ ...gateway, enabled: false }); });
 afterEach(() => { window.history.replaceState({}, '', '/'); });
 
-vi.mock('@/api/keys', () => ({ listKeys: async () => ({ keys: [] }) }));
+vi.mock('@/api/keys', () => ({ listKeys: vi.fn().mockResolvedValue({ keys: [] }) }));
 vi.mock('./ProvidersPage', () => ({ ProvidersPage: () => <><h1>供应商</h1><p>providers-content</p></> }));
 vi.mock('./ProviderAddPage', () => ({ ProviderAddPage: () => <><h1>添加</h1><p>provider-add-content</p></> }));
 vi.mock('./RoutesPage', () => ({ RoutesPage: () => <><h1>路由</h1><p>routes-content</p></> }));
@@ -30,7 +31,7 @@ describe('控制台路由', () => {
     expect(screen.getByRole('link', { name: '供应商' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByText('provider-add-content')).toBeInTheDocument();
   });
-  it.each(CONSOLE_NAV.flatMap(group => group.items))('$path 渲染对应页和选中态', item => {
+  it.each(CONSOLE_NAV.flatMap(group => group.items).filter(item => item.path !== '/settings/relay-admin'))('$path 渲染对应页和选中态', item => {
     const { hook } = memoryLocation({ path: item.path });
     render(<Router hook={hook}><ConsoleLayout /></Router>);
     expect(screen.getByRole('heading', { level: 1, name: item.label })).toBeInTheDocument();
@@ -99,4 +100,20 @@ it('本机网关响应事件刷新且旧慢响应不能覆盖更新状态', asyn
   vi.mocked(fetchGateway).mockRejectedValue(new Error('offline'));
   act(() => publishGatewayConnected());
   await waitFor(() => expect(screen.queryByText(/局域网共享 ·/)).not.toBeInTheDocument());
+});
+
+
+it('仅管理员连接显示中转管理，降级后隐藏', async () => {
+  vi.mocked(listKeys).mockResolvedValue({ keys: [{ alias: 'relay', provider: 'atelier', enabled: true }] } as never);
+  vi.mocked(fetchGatewayProviderMe).mockResolvedValue({ role: 'member', limits: [] } as never);
+  const { hook } = memoryLocation({ path: '/settings/providers' });
+  render(<Router hook={hook}><ConsoleLayout /></Router>);
+  await waitFor(() => expect(fetchGatewayProviderMe).toHaveBeenCalledWith('relay'));
+  expect(screen.queryByRole('link', { name: '中转管理' })).not.toBeInTheDocument();
+  vi.mocked(fetchGatewayProviderMe).mockResolvedValue({ role: 'admin', limits: [] } as never);
+  act(() => publishGatewayConnected());
+  expect(await screen.findByRole('link', { name: '中转管理' })).toBeInTheDocument();
+  vi.mocked(fetchGatewayProviderMe).mockResolvedValue({ role: 'member', limits: [] } as never);
+  act(() => publishGatewayConnected());
+  await waitFor(() => expect(screen.queryByRole('link', { name: '中转管理' })).not.toBeInTheDocument());
 });

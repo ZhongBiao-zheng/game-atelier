@@ -275,7 +275,7 @@ def test_models_all_modalities_filtered_and_me_private(owner):
     view = client.get("/gateway/v1/me").json()
     assert view["month_charged_cny"] == .2 and view["month_calls"] == 1
     assert view["name"] == "http"
-    assert set(view) == {"name", "limits", "month_charged_cny", "month_calls"}
+    assert set(view) == {"id", "role", "name", "limits", "month_charged_cny", "month_calls"}
     for secret in ["token_sha256", "upstream-secret", "access_key", "base_url"]:
         assert secret not in json.dumps(view)
     assert TestClient(create_gateway_app()).get("/gateway/v1/me").status_code == 401

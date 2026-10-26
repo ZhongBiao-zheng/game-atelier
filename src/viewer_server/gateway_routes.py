@@ -31,10 +31,12 @@ class GatewaySettingsPatch(BaseModel):
 
 
 class GatewayKeyCreate(gateway_keys.GatewayPolicy):
+    role: Literal["member", "admin"] = "member"
     name: Annotated[str, Field(min_length=1, max_length=40)]
 
 
 class GatewayKeyPatch(BaseModel):
+    role: Literal["member", "admin"] | None = None
     model_config = ConfigDict(extra="forbid")
     name: str | None = Field(default=None, min_length=1, max_length=40)
     limits: list[gateway_keys.GatewayLimit] | None = Field(default=None, max_length=3)

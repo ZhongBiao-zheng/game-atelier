@@ -106,4 +106,4 @@ def me(key: GatewayKeyRecord, now: datetime | None = None) -> dict:
 
     now = now or _local_now()
     with gateway_tasks._lock:
-        return {"name": key.name, "limits": usage_summary(key, now), **month_summary(key, now)}
+        return {"id": key.id, "role": key.role, "name": key.name, "limits": usage_summary(key, now), **month_summary(key, now)}

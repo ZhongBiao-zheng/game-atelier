@@ -1,9 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { requestJson } from '@/api/http';
 import * as api from '@/api/gateway';
 import { LanSharingSection } from './LanSharingSection';
+vi.mock('@/api/http', () => ({ requestJson: vi.fn() }));
+afterEach(() => vi.unstubAllGlobals());
 vi.mock('@/hooks/useSSE', () => ({ useSSE: vi.fn() }));
-vi.mock('@/api/gateway', () => ({ fetchGateway: vi.fn(), fetchGatewayOptions: vi.fn(),
+vi.mock('@/api/gateway', () => ({ adminBase: (alias: string) => `/api/gateway/providers/${alias}/admin`, fetchGateway: vi.fn(), fetchGatewayOptions: vi.fn(),
   fetchGatewayTasks: vi.fn(), fetchGatewayMembers: vi.fn(), createGatewayKey: vi.fn(), updateGatewayKey: vi.fn(),
   revokeGatewayKey: vi.fn(), updateGateway: vi.fn(), gatewayOutputUrl: vi.fn() }));
 const key: api.GatewayKey = { id: 'k1', name: '小王', limits: [], allowed_models: null, allowed_aliases: null,
@@ -36,7 +39,7 @@ describe('LAN sharing', () => {
     fireEvent.click(screen.getByRole('switch', { name: '全部模型' })); fireEvent.click(screen.getByLabelText('GPT'));
     fireEvent.click(screen.getByRole('switch', { name: '全部供应商' })); fireEvent.click(screen.getByLabelText('HK'));
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
-    await waitFor(() => expect(api.createGatewayKey).toHaveBeenCalledWith({ name: '小李', limits: [{ period: 'day', cap_cny: 10 }, { period: 'week', cap_cny: 50 }, { period: 'month', cap_cny: 100 }], allowed_models: ['gpt'], allowed_aliases: ['HK'] }));
+    await waitFor(() => expect(api.createGatewayKey).toHaveBeenCalledWith({ role: 'member', name: '小李', limits: [{ period: 'day', cap_cny: 10 }, { period: 'week', cap_cny: 50 }, { period: 'month', cap_cny: 100 }], allowed_models: ['gpt'], allowed_aliases: ['HK'] }));
     await screen.findByText('atg_once'); fireEvent.click(screen.getByRole('button', { name: '关闭' }));
     expect(screen.queryByText('atg_once')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '新建成员密钥' })); expect(screen.queryByText('atg_once')).not.toBeInTheDocument();
@@ -155,4 +158,27 @@ it('复制失败显示错误且允许重试', async () => {
   fireEvent.click(screen.getByRole('button', { name: '复制地址' }));
   expect(await screen.findByText('已复制')).toBeInTheDocument();
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+
+it('远程复用成员编辑且不显示本机开关，角色通过代理保存', async () => {
+  vi.stubGlobal('EventSource', class { onopen = null; addEventListener() {} close() {} });
+  vi.mocked(api.updateGatewayKey).mockResolvedValue({ ...key, role: 'admin' });
+  render(<LanSharingSection gatewayAlias="relay" />);
+  fireEvent.click(await screen.findByRole('button', { name: '编辑' }));
+  expect(api.fetchGateway).toHaveBeenCalledWith('relay');
+  expect(screen.queryByRole('switch', { name: '开启局域网共享' })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('角色'), { target: { value: 'admin' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', expect.objectContaining({ role: 'admin' }), 'relay'));
+});
+
+it('本机操作日志页签显示操作者与变更', async () => {
+  vi.mocked(requestJson).mockResolvedValue({ entries: [{ time: '2026-10-26T03:00:00+00:00', actor_name: '负责人', action: 'member.update', target_id: 'k1', summary: { before: { role: 'member' }, after: { role: 'admin' } } }] });
+  render(<LanSharingSection />);
+  await screen.findByRole('button', { name: '编辑' });
+  fireEvent.click(screen.getByRole('button', { name: '操作日志' }));
+  expect(await screen.findByText('负责人')).toBeInTheDocument();
+  expect(screen.getByText('修改成员')).toBeInTheDocument();
+  expect(requestJson).toHaveBeenCalledWith('/api/gateway/audit', '读取操作日志');
 });

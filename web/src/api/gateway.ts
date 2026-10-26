@@ -13,6 +13,7 @@ export interface LimitStatus extends GatewayLimit {
 }
 export interface GatewayKeyInput {
   name: string;
+  role?: 'member' | 'admin';
   limits: GatewayLimit[];
   allowed_models: string[] | null;
   allowed_aliases: string[] | null;
@@ -27,6 +28,8 @@ export interface GatewayKey extends GatewayKeyInput {
   last_used_at: string | null;
 }
 export interface GatewayMe {
+  id?: string;
+  role?: 'member' | 'admin';
   name: string;
   limits: LimitStatus[];
   month_charged_cny: number;
@@ -57,7 +60,14 @@ function parseState(value: unknown): GatewayState {
   return state as GatewayState;
 }
 
-export async function fetchGateway(): Promise<GatewayState> {
+export function adminBase(alias: string) { return `/api/gateway/providers/${encodeURIComponent(alias)}/admin`; }
+function gatewayBase(alias?: string) { return alias ? adminBase(alias) : '/api/gateway'; }
+
+export async function fetchGateway(alias?: string): Promise<GatewayState> {
+  if (alias) {
+    const data = await requestJson<{ keys: GatewayKey[] }>(`${adminBase(alias)}/keys`, '读取中转成员');
+    return { enabled: true, port: 0, name: alias, default_name: alias, keys: data.keys, status: { running: true, port: null, error: null, addresses: [] } };
+  }
   return parseState(await requestJson<unknown>('/api/gateway', '读取局域网共享'));
 }
 
@@ -69,24 +79,24 @@ export async function updateGateway(patch: { enabled?: boolean; port?: number; n
   return state;
 }
 
-export async function createGatewayKey(payload: GatewayKeyInput) {
-  return requestJson<{ key: GatewayKey; token: string }>('/api/gateway/keys', '新建网关密钥', {
+export async function createGatewayKey(payload: GatewayKeyInput, alias?: string) {
+  return requestJson<{ key: GatewayKey; token: string }>(`${gatewayBase(alias)}/keys`, '新建网关密钥', {
     method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(payload),
   });
 }
 
-export async function updateGatewayKey(id: string, patch: Partial<GatewayKeyInput>) {
-  return requestJson<GatewayKey>(`/api/gateway/keys/${encodeURIComponent(id)}`, '修改网关密钥', {
+export async function updateGatewayKey(id: string, patch: Partial<GatewayKeyInput>, alias?: string) {
+  return requestJson<GatewayKey>(`${gatewayBase(alias)}/keys/${encodeURIComponent(id)}`, '修改网关密钥', {
     method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(patch),
   });
 }
 
-export async function fetchGatewayOptions() {
-  return requestJson<GatewayOptions>('/api/gateway/options', '读取网关模型与供应商');
+export async function fetchGatewayOptions(alias?: string) {
+  return requestJson<GatewayOptions>(`${gatewayBase(alias)}/options`, '读取网关模型与供应商');
 }
 
-export async function revokeGatewayKey(id: string) {
-  return requestJson<GatewayKey>(`/api/gateway/keys/${encodeURIComponent(id)}/revoke`, '撤销网关密钥', {
+export async function revokeGatewayKey(id: string, alias?: string) {
+  return requestJson<GatewayKey>(`${gatewayBase(alias)}/keys/${encodeURIComponent(id)}/revoke`, '撤销网关密钥', {
     method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({}),
   });
 }
@@ -118,8 +128,8 @@ export interface GatewayTask {
   outputs: number; output_types: string[]; error: string | null;
 }
 export type GatewayMembers = import('@/schema/modelRouteStatus').ModelRouteMemberStatusResponse;
-export async function fetchGatewayTasks(scope: 'active' | 'recent') {
-  const body = await requestJson<{ tasks: GatewayTask[] }>(`/api/gateway/tasks?scope=${scope}`, '读取网关任务');
+export async function fetchGatewayTasks(scope: 'active' | 'recent', alias?: string) {
+  const body = await requestJson<{ tasks: GatewayTask[] }>(`${gatewayBase(alias)}/tasks?scope=${scope}`, '读取网关任务');
   return body.tasks;
 }
 export function gatewayOutputUrl(id: string, index: number) {

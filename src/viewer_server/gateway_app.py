@@ -75,6 +75,22 @@ def create_gateway_app() -> FastAPI:
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.include_router(create_router(_require_key))
+    from viewer_server.gateway_admin import create_router as admin_router
+    app.include_router(admin_router(_require_key))
+
+    @app.exception_handler(gateway_keys.GatewayAdminError)
+    async def admin_denied(_request, error):
+        return JSONResponse({"detail": str(error)}, status_code=403)
+
+    @app.exception_handler(gateway_keys.NoSuchGatewayKeyError)
+    async def member_missing(_request, _error):
+        return JSONResponse({"detail": "成员不存在"}, status_code=404)
+
+    from pydantic import ValidationError
+
+    @app.exception_handler(ValidationError)
+    async def invalid_member(_request, _error):
+        return JSONResponse({"detail": "成员配置不合法"}, status_code=422)
 
     @app.get("/gateway/v1/health")
     def health() -> dict:

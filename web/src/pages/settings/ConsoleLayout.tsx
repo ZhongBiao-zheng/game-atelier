@@ -4,6 +4,7 @@ import { ArrowLeft, HelpCircle, KeyRound, Split, Server, BarChart3, LibraryBig, 
 import { listKeys, type KeyView } from '@/api/keys';
 import { fetchGateway, fetchGatewayProviderMe, type GatewayState } from '@/api/gateway';
 import { subscribeGatewayEvents } from '@/api/gatewayEvents';
+import { RelayAdminPage, useAdminGateways } from './RelayAdminPage';
 import { ProvidersPage } from './ProvidersPage';
 import { ProviderAddPage } from './ProviderAddPage';
 import { RoutesPage } from './RoutesPage';
@@ -21,6 +22,7 @@ export const CONSOLE_NAV: {
 }[] = [
   { group: '模型', items: [
     { path: '/settings/providers', label: '供应商', page: ProvidersPage, icon: KeyRound },
+    { path: '/settings/relay-admin', label: '中转管理', page: RelayAdminPage, icon: Server },
     { path: '/settings/routes', label: '路由', page: RoutesPage, icon: Split },
     { path: '/settings/gateway', label: '网关', page: GatewayPage, icon: Server, hint: GATEWAY_HINT },
   ] },
@@ -105,6 +107,7 @@ function GatewayConnection() {
 }
 
 export function ConsoleLayout() {
+  const { aliases: adminAliases } = useAdminGateways();
   const [location] = useLocation();
   const addingProvider = location === '/settings/providers/new';
   const current = CONSOLE_NAV.flatMap(group => group.items).find(item => (addingProvider ? '/settings/providers' : location) === item.path);
@@ -121,7 +124,7 @@ export function ConsoleLayout() {
           {!group.group && <><GatewayConnection /><LocalGatewayStatus /></>}
           {group.group && <p className="mb-2 hidden px-3 text-xs text-subtle-foreground md:block">{group.group}</p>}
           <div className="flex gap-1 md:flex-col">
-            {group.items.map(item => <Link key={item.path} href={item.path}
+            {group.items.filter(item => item.path !== '/settings/relay-admin' || adminAliases.length > 0).map(item => <Link key={item.path} href={item.path}
               aria-current={current.path === item.path ? 'page' : undefined}
               className={`flex h-[34px] shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 text-sm ${
                 current.path === item.path ? 'bg-popover font-medium text-foreground'

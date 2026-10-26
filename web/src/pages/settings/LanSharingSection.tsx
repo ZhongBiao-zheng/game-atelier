@@ -1,3 +1,4 @@
+import { AuditLog } from './lan-sharing/AuditLog';
 import { Link } from 'wouter';
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -19,7 +20,8 @@ import { button, date, PERIODS } from './lan-sharing/shared';
 
 export const GATEWAY_HINT =
   '同事在「添加供应商 → 局域网 Atelier」填写地址和网关密钥。连接使用明文 HTTP。同事连不上时检查防火墙：Windows 把当前网络设为「专用网络」，并在防火墙中允许 Atelier（Python）入站；macOS 首次开启时在弹窗中点「允许」。';
-export function LanSharingSection() {
+export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
+  const [tab, setTab] = useState('members');
   const [state, setState] = useState<GatewayState | null>(null);
   const [options, setOptions] = useState<GatewayOptions>({ models: [], aliases: [] });
   const [busy, setBusy] = useState(false);
@@ -30,10 +32,10 @@ export function LanSharingSection() {
   const [editing, setEditing] = useState<GatewayKey | null | undefined>(undefined);
   const [pendingRevoke, setPendingRevoke] = useState<GatewayKey | null>(null);
   const reload = useCallback(async () => {
-    const [next, choices] = await Promise.all([fetchGateway(), fetchGatewayOptions()]);
+    const [next, choices] = await Promise.all([fetchGateway(gatewayAlias), fetchGatewayOptions(gatewayAlias)]);
     setState(next);
     setOptions(choices);
-  }, []);
+  }, [gatewayAlias]);
   useEffect(() => {
     void reload().catch((e) => setError(String(e)));
   }, [reload]);
@@ -60,7 +62,7 @@ export function LanSharingSection() {
       : null;
   return (
     <>
-      <section aria-label="网关状态" className="flex flex-wrap items-center gap-4 rounded-xl border border-border bg-card p-5">
+      {!gatewayAlias && <section aria-label="网关状态" className="flex flex-wrap items-center gap-4 rounded-xl border border-border bg-card p-5">
         <div className="flex min-w-0 flex-1 basis-64 items-center gap-4">
           <span aria-hidden className={`size-2 shrink-0 rounded-full ${state?.enabled && state.status.running ? 'bg-status-done' : 'bg-subtle-foreground'}`} />
           <div className="min-w-0 flex-1 space-y-2">
@@ -113,12 +115,13 @@ export function LanSharingSection() {
           onChange={enabled => void run(() => updateGateway({ enabled })).then(saved => {
             if (saved) setEditingPort(false);
           })} />
-      </section>
+      </section>}
       {state?.service && state.service.state !== 'unsupported' && <section className="space-y-2 rounded-xl border border-border bg-card p-5 text-xs">
         <p>常驻服务：{{ installed: '已安装', not_installed: '未安装', needs_credentials: '待设置系统凭据', unknown: '状态读取失败' }[state.service.state]}</p>
         {state.service.state !== 'installed' && <code className="block break-all select-all text-muted-foreground">{state.service.install_command}</code>}
       </section>}
-      <div className="min-w-0 space-y-6">
+      {!gatewayAlias && <div className="flex gap-2" aria-label="成员管理页签">{[['members', '成员与任务'], ['audit', '操作日志']].map(([value, label]) => <button key={value} className={`${button} ${tab === value ? 'bg-secondary' : ''}`} aria-pressed={tab === value} onClick={() => setTab(value)}>{label}</button>)}</div>}
+      {tab === 'audit' ? <AuditLog gatewayAlias={gatewayAlias} /> : <div className="min-w-0 space-y-6">
         {state?.enabled && (
           <>
             <section aria-label="成员" className="space-y-3">
@@ -132,7 +135,7 @@ export function LanSharingSection() {
                 <table className="w-full min-w-160 text-left text-xs">
                   <thead className="text-muted-foreground">
                     <tr>
-                      {['名称', '本月额度', '本月花费', '最近使用', '操作'].map((h) => (
+                      {['名称', '角色', '本月额度', '本月花费', '最近使用', '操作'].map((h) => (
                         <th key={h} className="px-4 py-3 font-normal">
                           {h}
                         </th>
@@ -148,6 +151,7 @@ export function LanSharingSection() {
                         >
                           {key.name}
                         </td>
+                        <td className="whitespace-nowrap px-4">{key.role === 'admin' ? '管理员' : '成员'}</td>
                         <td className="min-w-40 space-y-2 px-4 py-3">
                           {!key.limits_status.some((limit) => limit.period === 'month')
                             ? '不限额'
@@ -177,7 +181,7 @@ export function LanSharingSection() {
                                 })}
                         </td>
                         <td className="whitespace-nowrap px-4 tabular-nums">
-                          <Link className="underline decoration-border underline-offset-4 hover:text-primary" href={`/settings/usage?scope=team&member=${encodeURIComponent(key.id)}`}>
+                          <Link className="underline decoration-border underline-offset-4 hover:text-primary" href={gatewayAlias ? `/settings/relay-admin?alias=${encodeURIComponent(gatewayAlias)}&view=usage&member=${encodeURIComponent(key.id)}` : `/settings/usage?scope=team&member=${encodeURIComponent(key.id)}`}>
                             {formatGenerationCost(key.month_charged_cny)}
                           </Link>
                         </td>
@@ -209,7 +213,7 @@ export function LanSharingSection() {
                 </table>
               </div>
             </section>
-            <Tasks onFinished={finished} />
+            <Tasks onFinished={finished} gatewayAlias={gatewayAlias} />
           </>
         )}
         {error && (
@@ -217,9 +221,10 @@ export function LanSharingSection() {
             {error}
           </p>
         )}
-      </div>
+      </div>}
       {editing !== undefined && (
         <KeyForm
+          gatewayAlias={gatewayAlias}
           record={editing}
           options={options}
           onClose={() => setEditing(undefined)}
@@ -236,7 +241,7 @@ export function LanSharingSection() {
         onConfirm={() => {
           const target = pendingRevoke;
           setPendingRevoke(null);
-          if (target) void run(() => revokeGatewayKey(target.id));
+          if (target) void run(() => revokeGatewayKey(target.id, ...(gatewayAlias ? [gatewayAlias] as const : [])));
         }}
       />
     </>
