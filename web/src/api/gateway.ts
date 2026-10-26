@@ -38,6 +38,7 @@ export interface GatewayOptions {
 }
 
 export interface GatewayState {
+  service?: { state: 'unsupported' | 'not_installed' | 'needs_credentials' | 'installed' | 'unknown'; install_command: string | null };
   enabled: boolean;
   port: number;
   name: string;

@@ -13,7 +13,7 @@ status: accepted
 约束（缺一条就不成立）：
 - 网关是独立的 FastAPI app、独立端口（默认 5180），只挂 `/gateway/v1/*`；没有静态文件、没有 `/api/*`、不认 cookie。
 - 默认关闭，只能在网关机器本机控制台的网关页开启。
-- 每个请求必须带网关密钥（Bearer）；网关端只存 sha256，撤销立即生效。
+- 除只返回 `ok/version` 的 `/gateway/v1/health` 外，每个请求必须带网关密钥（Bearer）；网关端只存 sha256，撤销立即生效。
 - 网关接口不接受任何本机路径参数，参考图只能以文件上传；任务按密钥隔离。
 - 上游厂商 KEY 不出网关：模型列表只返回 provider / base_url / model_id。
 

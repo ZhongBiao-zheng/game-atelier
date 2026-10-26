@@ -399,8 +399,8 @@ def test_v1_gateway_is_rejected(monkeypatch):
     session = MagicMock()
     session.__enter__.return_value = session
     session.get.return_value.status_code = 200
-    session.get.return_value.json.return_value = {"protocol": 1}
+    session.get.return_value.json.side_effect = [{"ok": True, "version": "old"}, {"protocol": 1}]
     monkeypatch.setattr(atelier_gateway, "_session", lambda: session)
     with pytest.raises(atelier_gateway.GatewayError, match="网关版本不一致"):
         atelier_gateway.check_gateway("http://127.0.0.1:5180", "test")
-    assert session.get.call_count == 1
+    assert session.get.call_count == 2

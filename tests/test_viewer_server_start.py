@@ -1,4 +1,7 @@
 import os
+import json
+import logging
+from logging.handlers import TimedRotatingFileHandler
 import http.client
 import subprocess
 import threading
@@ -82,6 +85,26 @@ def test_start_preserves_alive_unverified_server_instead_of_starting_second_writ
     assert read_port(runtime) == 59999
 
 
+def test_daily_logs_roll_over_and_keep_fourteen_archives(tmp_path):
+    from viewer_server.server_logging import log_config
+
+    options = log_config(tmp_path)["handlers"]["daily"].copy()
+    options.pop("class")
+    options.pop("formatter")
+    options.pop("filters")
+    handler = TimedRotatingFileHandler(**options)
+    try:
+        for day in range(1, 17):
+            (tmp_path / f"server.log.2025-01-{day:02d}").write_text("history", encoding="utf-8")
+        handler.emit(logging.makeLogRecord({"msg": "before rotation", "levelno": logging.INFO}))
+        handler.doRollover()
+        handler.emit(logging.makeLogRecord({"msg": "after rotation", "levelno": logging.INFO}))
+        assert len(list(tmp_path.glob("server.log.*"))) == 14
+        assert "after rotation" in (tmp_path / "server.log").read_text()
+    finally:
+        handler.close()
+
+
 def test_start_passes_instance_to_child_and_only_opens_after_verification(tmp_path, monkeypatch):
     runtime = tmp_path / "runtime"
     captured = {}
@@ -108,7 +131,10 @@ def test_start_passes_instance_to_child_and_only_opens_after_verification(tmp_pa
     server.cmd_start(background=True)
 
     assert read_pid(runtime) == 43210
-    assert captured["log_path"] == runtime / "server.log"
+    assert captured["log_path"] == runtime / "server-startup.log"
+    config_path = captured["cmd"][captured["cmd"].index("--log-config") + 1]
+    config = json.loads(Path(config_path).read_text())
+    assert config["handlers"]["daily"]["backupCount"] == 14
     assert read_port(runtime) == 5188
     assert opened == [True]
     assert captured["cmd"][captured["cmd"].index("--host") + 1] == "127.0.0.1"

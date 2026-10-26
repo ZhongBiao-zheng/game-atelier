@@ -26,6 +26,7 @@ from viewer_server.pid import (  # noqa: E402
     _is_alive, cleanup_stale_pid, is_viewer_server_process, read_instance, read_pid, read_port,
     write_instance, write_pid, write_port,
 )
+from viewer_server.server_logging import log_config  # noqa: E402
 
 
 DEFAULT_PORT = 5174
@@ -93,8 +94,8 @@ def _run_ensure_venv() -> bool:
 def _spawn_detached(cmd: list[str], *, cwd: str, env: dict[str, str], log_path: Path) -> int:
     """Cross-platform: detach a subprocess so the parent can exit while it keeps running.
 
-    stdout / stderr 落 log_path（每次启动覆盖，只保留本次运行）：后台服务的 500 traceback
-    以前进 DEVNULL，用户只能报「失败 500」，没有任何地方能查原因。
+    原始 stdout/stderr 保留启动异常；配置成功后的应用日志独立按天轮转，
+    避免此父进程传下来的文件句柄阻止 Windows 重命名 server.log。
     """
     log = open(log_path, "wb")  # noqa: SIM115 — 句柄交给子进程，父进程随后退出
     if sys.platform == "win32":
@@ -187,7 +188,7 @@ def _wait_for_server(port: int, instance_id: str, *, timeout: float = 8.0) -> bo
     return False
 
 
-def cmd_start(background: bool = False) -> None:
+def cmd_start(background: bool = False, *, open_browser: bool = True) -> None:
     if not _bootstrap_gate(background):
         sys.exit(1)
 
@@ -201,14 +202,14 @@ def cmd_start(background: bool = False) -> None:
         if not acquired:
             print("工坊正在启动或停止，请稍后重试。", file=sys.stderr)
             sys.exit(1)
-        foreground = _start_locked(runtime, background=background)
+        foreground = _start_locked(runtime, background=background, open_browser=open_browser)
     if foreground is not None:
         app, port = foreground
-        uvicorn.run(app, host="127.0.0.1", port=port, log_level="info",
+        uvicorn.run(app, host="127.0.0.1", port=port, log_level="info", log_config=log_config(runtime),
                     timeout_graceful_shutdown=3)
 
 
-def _start_locked(runtime: Path, *, background: bool) -> tuple[FastAPI, int] | None:
+def _start_locked(runtime: Path, *, background: bool, open_browser: bool = True) -> tuple[FastAPI, int] | None:
     cleanup_stale_pid(runtime)
 
     existing_pid = read_pid(runtime)
@@ -219,7 +220,8 @@ def _start_locked(runtime: Path, *, background: bool) -> tuple[FastAPI, int] | N
         if instance_id is not None and status is not None and status.instance_id == instance_id:
             url = f"http://127.0.0.1:{port}/"
             print(f"工坊已在运行，正在打开浏览器：{url}")
-            cmd_open_browser()
+            if open_browser:
+                cmd_open_browser()
             return None
         # A living but unverified process may still be generating. Never start another writer.
         if status is None and is_viewer_server_process(existing_pid):
@@ -261,16 +263,18 @@ def _start_locked(runtime: Path, *, background: bool) -> tuple[FastAPI, int] | N
             f"{src_path}{os.pathsep}{env['PYTHONPATH']}"
             if env.get("PYTHONPATH") else src_path
         )
+        config_path = runtime / "server-logging.json"
+        config_path.write_text(json.dumps(log_config(runtime)), encoding="utf-8")
         pid = _spawn_detached(
             [sys.executable, "-m", "uvicorn",
              "viewer_server.server_app:build_app", "--factory",
              "--host", "127.0.0.1", "--port", str(port), "--log-level", "info",
              # 浏览器的 /events SSE 长连接不会自己断，不设上限 SIGTERM 后永远停在
              # "Waiting for connections to close"，一键启动的 stop→start 就卡死。
-             "--timeout-graceful-shutdown", "3"],
+             "--timeout-graceful-shutdown", "3", "--log-config", str(config_path)],
             cwd=project_root,
             env=env,
-            log_path=runtime / "server.log",
+            log_path=runtime / "server-startup.log",
         )
         write_pid(runtime, pid)
         if not _wait_for_server(port, instance_id):
@@ -281,7 +285,8 @@ def _start_locked(runtime: Path, *, background: bool) -> tuple[FastAPI, int] | N
             )
             sys.exit(1)
         print(f"viewer-server started at http://127.0.0.1:{port}/ (pid={pid})")
-        cmd_open_browser()
+        if open_browser:
+            cmd_open_browser()
         return None
     else:
         # 前台启动（终端 A 手动路径）：阻塞直到 Ctrl-C
@@ -361,7 +366,7 @@ if __name__ == "__main__":
         sys.exit(1)
     cmd = sys.argv[1]
     if cmd == "start":
-        cmd_start(background="--background" in sys.argv)
+        cmd_start(background="--background" in sys.argv, open_browser="--no-browser" not in sys.argv)
     elif cmd == "stop":
         cmd_stop()
     elif cmd == "open-browser":

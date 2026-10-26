@@ -77,6 +77,10 @@ def check_gateway(base_url: str, token: str) -> dict[str, Any]:
     base = base_url.rstrip("/")
     headers = {"Authorization": f"Bearer {token}"}
     with _session() as session:
+        health = session.get(f"{base}/gateway/v1/health", timeout=(3, 3))
+        _raise_for_status(health)
+        if health.json().get("ok") is not True:
+            raise GatewayError("中转服务健康检查未通过")
         info = session.get(f"{base}/gateway/v1/info", headers=headers, timeout=_TIMEOUT)
         _raise_for_status(info)
         body = info.json()

@@ -74,7 +74,9 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 
 ### 局域网网关协议 v2（ADR-0025）
 
-网关服务在独立端口（默认 5180）只提供下列接口，全部要求 `Authorization: Bearer <网关密钥>`，不认 cookie；其他路径 404。
+网关服务在独立端口（默认 5180）只提供下列接口；除 health 外全部要求 `Authorization: Bearer <网关密钥>`，不认 cookie；其他路径 404。
+
+- `GET /gateway/v1/health` 无需密钥，只返回 `{ok: true, version: string}`，不包含任何配置或用量。
 
 - `GET /gateway/v1/info` → `{name, version, protocol: 2}`。协议版本不一致时接入端直接报错，不做兼容。
 - `GET /gateway/v1/models` → 返回 `{models: [{id, name, modality, members}]}`，成员为供应商公开信息，含全部模态；控制台专用的 `mode / candidate_alias / estimate_cny` 不属于此目录协议；按当前密钥的模型与 alias 权限过滤，排除 atelier 成员，视频成员保留 `protocol`。

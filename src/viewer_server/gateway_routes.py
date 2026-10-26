@@ -53,12 +53,14 @@ def _key_view(record: gateway_keys.GatewayKeyRecord) -> dict:
 
 
 def _view() -> dict:
+    from viewer_server.windows_service import service_status
     config = gateway_keys.read_config()
     return {
         "enabled": config.enabled, "port": config.port,
         "name": config.name, "default_name": socket.gethostname(),
         "keys": [_key_view(record) for record in config.keys],
         "status": gateway_server.status(),
+        "service": service_status(),
     }
 
 

@@ -114,6 +114,10 @@ export function LanSharingSection() {
             if (saved) setEditingPort(false);
           })} />
       </section>
+      {state?.service && state.service.state !== 'unsupported' && <section className="space-y-2 rounded-xl border border-border bg-card p-5 text-xs">
+        <p>常驻服务：{{ installed: '已安装', not_installed: '未安装', needs_credentials: '待设置系统凭据', unknown: '状态读取失败' }[state.service.state]}</p>
+        {state.service.state !== 'installed' && <code className="block break-all select-all text-muted-foreground">{state.service.install_command}</code>}
+      </section>}
       <div className="min-w-0 space-y-6">
         {state?.enabled && (
           <>

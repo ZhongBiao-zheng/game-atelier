@@ -151,7 +151,7 @@ def test_powershell_sync_preserves_foreign_canonical_and_sibling_prefix_links(tm
     fake_repo = tmp_path / "checkout/game-atelier"
     fake_repo.mkdir(parents=True)
     shutil.copy2(REPO_ROOT / "install.ps1", fake_repo / "install.ps1")
-    for name in ("character", "promo"):
+    for name in ("canvas", "viewer-server"):
         skill_dir = fake_repo / "skills" / name
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(f"---\nname: {name}\n---\n", encoding="utf-8")

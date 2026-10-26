@@ -32,6 +32,10 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.126.0', date: '2026-10-26', headline: 'Windows 中转常驻', changes: [
+    { kind: 'feat', text: '提供开机运行与每分钟恢复的任务安装脚本，凭据由系统界面保存。' },
+    { kind: 'feat', text: '共享设置显示常驻状态，中转提供健康检查，服务日志按天保留。' },
+  ] },
   { version: '5.125.0', date: '2026-10-26', headline: '离线安装包', changes: [
     { kind: 'feat', text: '支持自带 Python 与依赖的安装包，解压后即可启动，用户数据独立保存。' },
     { kind: 'feat', text: '安装包发现新版本时显示下载入口。' },

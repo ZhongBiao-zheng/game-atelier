@@ -76,6 +76,10 @@ def create_gateway_app() -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.include_router(create_router(_require_key))
 
+    @app.get("/gateway/v1/health")
+    def health() -> dict:
+        return {"ok": True, "version": _app_version()}
+
     @app.exception_handler(_Unauthorized)
     async def _unauthorized(_request: Request, _error: _Unauthorized) -> JSONResponse:
         if _request.url.path.startswith("/gateway/v1/openai/"):

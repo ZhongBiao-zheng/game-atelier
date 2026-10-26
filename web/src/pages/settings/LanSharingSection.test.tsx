@@ -16,6 +16,16 @@ beforeEach(() => { vi.clearAllMocks();
   vi.mocked(api.fetchGatewayMembers).mockResolvedValue({ members: [], unavailable_routes: [] });
 });
 describe('LAN sharing', () => {
+  it('shows the pending system credential step without installing from the page', async () => {
+    const state = await api.fetchGateway();
+    vi.mocked(api.fetchGateway).mockResolvedValue({ ...state,
+      service: { state: 'needs_credentials', install_command: 'powershell -File scripts/windows-service.ps1 install' },
+    });
+    render(<LanSharingSection />);
+    expect(await screen.findByText('常驻服务：待设置系统凭据')).toBeInTheDocument();
+    expect(screen.getByText('powershell -File scripts/windows-service.ps1 install')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '安装' })).not.toBeInTheDocument();
+  });
   it('creates all three limits and scoped permissions; plaintext disappears when closed', async () => {
     vi.mocked(api.createGatewayKey).mockResolvedValue({ key, token: 'atg_once' });
     render(<LanSharingSection />);

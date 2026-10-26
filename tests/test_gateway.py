@@ -93,6 +93,10 @@ def test_gateway_app_only_serves_gateway_routes_with_a_key(client):
     assert client.get("/api/jobs").status_code == 404
     assert client.get("/").status_code == 404
     anonymous = TestClient(create_gateway_app())
+    health = anonymous.get("/gateway/v1/health")
+    assert health.status_code == 200
+    assert set(health.json()) == {"ok", "version"}
+    assert health.json()["ok"] is True and health.json()["version"]
     assert anonymous.get("/gateway/v1/info").status_code == 401
     wrong = anonymous.get("/gateway/v1/info", headers={"Authorization": "Bearer atg_nope"})
     assert wrong.status_code == 401
