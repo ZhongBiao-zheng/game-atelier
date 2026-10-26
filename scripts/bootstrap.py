@@ -117,7 +117,11 @@ RELEASE_TAG = re.compile(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
 PYTHON_INSTALL_MIRROR = "https://registry.npmmirror.com/-/binary/python-build-standalone"
 UPDATE_CACHE_TTL_OK = 24 * 3600  # 拉取成功后 24h 内不再联网
 UPDATE_CACHE_TTL_FAIL = 3600  # 拉取失败 1h 内不重试，避免断网时每次 --check 都等超时
-UPDATE_FETCH_TIMEOUT = 3  # 秒；检查是顺路的，绝不为它拖慢 skill 启动
+UPDATE_FETCH_TIMEOUT = 3  # 秒；应用内提示是顺路的，绝不为它拖慢 skill 启动
+UPDATE_CNB_TIMEOUT = 1.5  # 应用内提示里 CNB 的份额，余量留给 GitHub
+# 一键启动：更新正是这一步的目的，实测 CNB 列 tag 要 3–9 秒，按 3 秒预算永远查不到新版。
+LAUNCH_CNB_TIMEOUT = 8
+LAUNCH_FETCH_TIMEOUT = LAUNCH_CNB_TIMEOUT + 3
 
 
 def _update_cache_file() -> Path:
@@ -145,14 +149,14 @@ def _release(tag: str, source: str) -> dict:
     return {"tag": tag, "version": tag[1:], "source": source}
 
 
-def _query_latest_release(use_git: bool, deadline: float) -> dict:
+def _query_latest_release(use_git: bool, deadline: float, cnb_timeout: float | None = None) -> dict:
     errors = []
     if use_git:
         try:
             result = subprocess.run(
                 ["git", "ls-remote", "--tags", "--refs", CNB_URL],
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=min(1.5, max(0.01, deadline - time.monotonic())),
+                timeout=min(cnb_timeout or UPDATE_CNB_TIMEOUT, max(0.01, deadline - time.monotonic())),
                 env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
             )
             if result.returncode:
@@ -184,15 +188,18 @@ def _query_latest_release(use_git: bool, deadline: float) -> dict:
         raise OSError("；".join(errors)) from None
 
 
-def _fetch_latest_release(use_git: bool) -> tuple[dict | None, str | None]:
+def _fetch_latest_release(
+    use_git: bool, budget: float | None = None, cnb_timeout: float | None = None,
+) -> tuple[dict | None, str | None]:
     # socket timeout 不是总时限（DNS/慢速分块可能拖长）；主线程只等固定预算。
     # worker 不写缓存，超时后的迟到响应不会改变本次判断，也不会阻止进程退出。
     results = queue.Queue(maxsize=1)
-    deadline = time.monotonic() + UPDATE_FETCH_TIMEOUT
+    budget = budget or UPDATE_FETCH_TIMEOUT
+    deadline = time.monotonic() + budget
 
     def query():
         try:
-            results.put((_query_latest_release(use_git, deadline), None))
+            results.put((_query_latest_release(use_git, deadline, cnb_timeout), None))
         except Exception as error:
             results.put((None, str(error)))
 
@@ -200,11 +207,13 @@ def _fetch_latest_release(use_git: bool) -> tuple[dict | None, str | None]:
     try:
         return results.get(timeout=max(0.001, deadline - time.monotonic()))
     except queue.Empty:
-        return None, f"更新检查超过 {UPDATE_FETCH_TIMEOUT:g} 秒预算"
+        return None, f"更新检查超过 {budget:g} 秒预算"
 
 
-def latest_release(*, use_git: bool = False) -> dict | None:
-    """源码与安装包共用发现/缓存；HTTP 模式不读取只被 tag 确认的结果。"""
+def latest_release(*, use_git: bool = False, fresh: bool = False) -> dict | None:
+    """源码与安装包共用发现/缓存；HTTP 模式不读取只被 tag 确认的结果。
+
+    fresh=True 给一键启动：不读缓存、用长预算查一次，结果照样写缓存供应用内提示复用。"""
     if os.environ.get("GAME_ATELIER_NO_UPDATE_CHECK"):
         return None
     cache = _read_update_cache()
@@ -220,9 +229,10 @@ def latest_release(*, use_git: bool = False) -> dict | None:
         except (KeyError, TypeError, ValueError):
             valid = False
     ttl = UPDATE_CACHE_TTL_OK if release else UPDATE_CACHE_TTL_FAIL
-    if valid and isinstance(checked_at, (int, float)) and 0 <= now - checked_at < ttl:
+    if not fresh and valid and isinstance(checked_at, (int, float)) and 0 <= now - checked_at < ttl:
         return release
-    release, error = _fetch_latest_release(use_git)
+    release, error = (_fetch_latest_release(use_git, LAUNCH_FETCH_TIMEOUT, LAUNCH_CNB_TIMEOUT)
+                      if fresh else _fetch_latest_release(use_git))
     cache.update({"channel": UPDATE_CACHE_CHANNEL, "mode": mode, "checked_at": now,
                   "release": release, "latest": release["version"] if release else None})
     _write_update_cache(cache)

@@ -154,6 +154,11 @@ def load_updater(monkeypatch, repo):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(module, "REPO", repo)
+    # 一键启动不读缓存、每次实查：查询源固定到本地测试仓库，不碰真实网络。
+    origin = subprocess.check_output(["git", "remote", "get-url", "origin"], cwd=repo, text=True).strip()
+    monkeypatch.setattr(bootstrap, "CNB_URL", origin)
+    monkeypatch.setattr(bootstrap, "GITHUB_URL", origin)
+    monkeypatch.setattr(bootstrap, "LATEST_RELEASE_URL", "http://127.0.0.1:9/releases/latest")
     return module
 
 
@@ -194,7 +199,8 @@ def source_repos(tmp_path):
 def test_source_updates_only_to_published_tag_not_newer_main(source_repos, update_env, monkeypatch):
     local, remote, released = source_repos
     updater = load_updater(monkeypatch, local)
-    seed_cache()
+    # 缓存里是一小时前「已是最新」的结果：一键启动必须实查，不能被缓存挡住新发布的版本。
+    seed_cache(tag="v5.127.0", age=3600)
     monkeypatch.setattr(bootstrap, "CNB_URL", str(remote))
     assert updater.main() == 10
     assert git(local, "rev-parse", "HEAD") == released
@@ -207,7 +213,7 @@ def test_source_updates_only_to_published_tag_not_newer_main(source_repos, updat
 def test_source_offline_does_not_fetch_or_restore(source_repos, update_env, monkeypatch, capsys):
     local, _, _ = source_repos
     updater = load_updater(monkeypatch, local)
-    monkeypatch.setattr(bootstrap, "_fetch_latest_release", lambda use_git: (None, "offline"))
+    monkeypatch.setattr(bootstrap, "_fetch_latest_release", lambda *a: (None, "offline"))
     monkeypatch.setattr(updater, "fetch", lambda *a: pytest.fail("离线不能fetch"))
     monkeypatch.setattr(updater, "restore_dist", lambda: pytest.fail("离线不改产物"))
     assert updater.main() == 0

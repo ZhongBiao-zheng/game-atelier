@@ -140,7 +140,7 @@ def main() -> int:
     current = version_at("HEAD")
     print(f"当前 {current}（{branch} @ {out('rev-parse', '--short', 'HEAD') or '?'}）")
 
-    release = bootstrap.latest_release(use_git=True)
+    release = bootstrap.latest_release(use_git=True, fresh=True)
     if release is None:
         return 0
     try:
