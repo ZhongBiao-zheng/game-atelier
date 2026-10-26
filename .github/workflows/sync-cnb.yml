@@ -82,4 +82,6 @@ jobs:
           CNB_IS_TAG: 'true'
           PLUGIN_ATTACHMENTS: './bundles/*'
         run: |
+          # 插件结尾按 CNB 流水线语法打印 ##[set-output …]，GitHub 会把它当成非法命令判失败；上传本身已完成。
+          echo "::stop-commands::$(uuidgen)"
           docker run --rm -e CNB_TOKEN -e CNB_API_ENDPOINT -e CNB_WEB_ENDPOINT -e CNB_REPO_SLUG -e CNB_IS_TAG -e PLUGIN_TAG -e PLUGIN_ATTACHMENTS -v "$PWD:$PWD" -w "$PWD" cnbcool/attachments:v1.1.5@sha256:3112e2ee5c562dc508ed2d51706ecccb1770781a105c488cc7620b53d6bf5442
