@@ -431,7 +431,11 @@ def test_bundle_extraction_rejects_unsafe_member_paths(tmp_path, name, kind):
     archive = tmp_path / ("package.zip" if kind == "zip" else "package.tar.gz")
     if kind == "zip":
         with zipfile.ZipFile(archive, "w") as source:
-            source.writestr(name, "bad")
+            # ZipInfo normalizes backslashes on Windows. Preserve the adversarial
+            # archive name on disk so all platforms exercise the same input.
+            member = zipfile.ZipInfo("placeholder")
+            member.filename = name
+            source.writestr(member, "bad")
     else:
         with tarfile.open(archive, "w:gz") as source:
             member = tarfile.TarInfo(name)
