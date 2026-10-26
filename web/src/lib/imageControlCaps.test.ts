@@ -5,17 +5,17 @@ import { isEvolinkMidjourney } from './modelFamily';
 import { normalizeGptImagePixelSize, normalizeStudioPixelSizeForModel } from './studioSize';
 
 describe('imageControlCaps', () => {
-  it('Tuzi default GPT 2.5 exposes three resolution tiers without the old quality control', () => {
+  it('Tuzi GPT 2.5 exposes five qualities without resolution tiers', () => {
     for (const model of ['gpt-image-2.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-vip']) {
       expect(imageControlCaps(model, 'custom', 'https://api.tu-zi.com', 'default')).toMatchObject({
-        resolutions: ['1K', '2K', '4K'], qualities: null, showCustomSize: false,
+        resolutions: [], qualities: ['low', 'medium', 'high', 'xhigh', 'max'], showCustomSize: false, showResolution: false,
       });
     }
     expect(imageControlCaps('gpt-image-2.5-flare', 'custom', 'https://api.tu-zi.com', 'default').showAutoSize).toBe(true);
     for (const group of ['image', undefined]) {
       expect(imageControlCaps('gpt-image-2.5-flare', 'custom', 'https://api.tu-zi.com', group).qualities).toContain('high');
     }
-    expect(imageControlCaps('gpt-image-2.5-1k', 'custom', 'https://api.tu-zi.com', 'default').resolutions).toContain('2K');
+    expect(imageControlCaps('gpt-image-2.5-1k', 'custom', 'https://api.tu-zi.com', 'default').resolutions).toEqual([]);
   });
   it('EvoLink V8.2 保留比例，不开放通用质量、AUTO 或像素尺寸', () => {
     expect(imageControlCaps('mj-v8.2', 'evolink', 'https://api.evolink.ai/v1')).toMatchObject({

@@ -1035,3 +1035,7 @@ status 保留真实状态（含 pending、done、failed，以及团队 canceled 
 - `GET /api/update/result?id=…`：仅返回匹配ID的终态 succeeded/failed/cancelled，含 from/to/reason/finished_at（ISO时间）；未落盘或ID不匹配返回null。
 
 维护期间新生成/Agent消息/网关生成返回503，已接入工作、审批与取消仍可完成。候选初始化期间仅放行本机会话建立、编辑租约及更新状态/结果，其他业务API暂时503。
+
+## Tuzi GPT Image 2.5 图片质量
+
+Tuzi GPT Image 2.5 系列在 Studio 与 Canvas 提供五档质量：低/中/高/超高/最高，分别传 `quality=low|medium|high|xhigh|max`。比例独立选择，不提供 K 分辨率档位，也不再将 resolution 转换为 quality。

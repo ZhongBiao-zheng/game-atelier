@@ -13,7 +13,7 @@ from character_workflow.lib.callers.openai_image import (
 )
 from character_workflow.lib.keys import KeySpec, ModelSpec, size_channel
 from character_workflow.lib.image_size_catalog import (
-    image_size_options, is_nano_image_size_model, uses_tuzi_gpt25_tiers,
+    image_size_options, is_nano_image_size_model,
 )
 
 
@@ -64,19 +64,6 @@ def normalize_image_size_params(key: KeySpec, model: str, params: dict[str, Any]
     result.pop("custom_size", None)
     mode = result.get("size_mode")
     options = image_size_options(key.provider, key.base_url, model)
-    tuzi_tiers = uses_tuzi_gpt25_tiers(key.base_url, key.billing_group, model)
-    if tuzi_tiers:
-        options = {**options, "resolutions": ["1K", "2K", "4K"]}
-        # Old low/medium/high values must not compete with the selected resolution.
-        if result.get("quality") not in {"1k", "2k", "4k"}:
-            result.pop("quality", None)
-        if mode == "auto":
-            result.pop("quality", None)
-        elif result.get("resolution") is not None:
-            tier = str(result["resolution"]).upper()
-            if tier not in options["resolutions"]:
-                raise ValueError("当前模型或渠道不支持该图片分辨率")
-            result["quality"] = tier.lower()
     if resolve_image_protocol(key.provider, key.base_url, model) == "evolink":
         # Midjourney owns pixel dimensions. Explicit ratio is passed by the caller as --ar;
         # AUTO leaves that choice to its native prompt and discards stale pixel settings.

@@ -33,15 +33,13 @@ describe('image size intent', () => {
     }).params).toEqual({ size_mode: 'auto', size: 'auto' });
     expect(imageControlCaps('openai/gpt-image-2.5-flare', 'openrouter').resolutions).toEqual([]);
   });
-  it('keeps AUTO and all three Tuzi default GPT 2.5 tiers without extra copy', () => {
+  it('keeps AUTO without Tuzi GPT 2.5 resolution tiers', () => {
     const caps = imageControlCaps('gpt-image-2.5-flare', 'custom', 'https://api.tu-zi.com', 'default');
     const onPatch = vi.fn();
     render(<ImageSizeFields caps={caps} model="gpt-image-2.5-flare"
       params={{ size_mode: 'ratio', ratio: '1:1', resolution: '2K' }} onPatch={onPatch} />);
     expect(screen.getByRole('option', { name: 'AUTO' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '2K' })).toHaveAttribute('aria-selected', 'true');
-    fireEvent.click(screen.getByRole('option', { name: '4K' }));
-    expect(onPatch).toHaveBeenCalledWith({ resolution: '4K', size: undefined });
+    expect(screen.queryByText('分辨率')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('option', { name: 'AUTO' }));
     expect(onPatch).toHaveBeenLastCalledWith({ size_mode: 'auto', size: 'auto' });
     expect(screen.queryByText('自动尺寸')).not.toBeInTheDocument();
@@ -124,7 +122,7 @@ describe('image size intent', () => {
     expect(caps.showResolution).toBe(false);
     const tuzi = imageControlCaps('gpt-image-2.5-flare', 'custom', 'https://api.tu-zi.com');
     expect(tuzi.showCustomSize).toBe(false);
-    expect(tuzi.resolutions).toEqual(['1K', '2K']);
+    expect(tuzi.resolutions).toEqual([]);
     // seedream 在 Tuzi 上不受影响，仍是 2K/4K + 自定义像素。
     const seedream = imageControlCaps('doubao-seedream-4-5-251128', 'custom', 'https://api.tu-zi.com');
     expect(seedream.resolutions).toEqual(['2K', '4K']);
@@ -187,7 +185,8 @@ describe('image size intent', () => {
   it('keeps the quality control on Tuzi gpt-image; only nano-banana hides it there', () => {
     for (const model of ['gpt-image-2', 'gpt-image-2.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst']) {
       expect(imageControlCaps(model, 'custom', 'https://api.tu-zi.com').qualities)
-        .toEqual(['low', 'medium', 'high', 'auto']);
+        .toEqual(model === 'gpt-image-2' ? ['low', 'medium', 'high', 'auto']
+          : ['low', 'medium', 'high', 'xhigh', 'max']);
     }
     expect(imageControlCaps('nano-banana-pro', 'custom', 'https://api.tu-zi.com').qualities)
       .toEqual(['low', 'medium', 'high']);

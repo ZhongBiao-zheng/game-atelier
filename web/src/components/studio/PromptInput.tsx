@@ -1241,7 +1241,7 @@ export function PromptInput({
                       <div
                         role="listbox"
                         aria-label="选择质量"
-                        className={`grid h-9 ${caps.qualities.length >= 4 ? 'grid-cols-4' : 'grid-cols-3'} rounded-lg bg-popover p-0.5`}
+                        className={`grid h-9 ${caps.qualities.length === 5 ? 'grid-cols-5' : caps.qualities.length >= 4 ? 'grid-cols-4' : 'grid-cols-3'} rounded-lg bg-popover p-0.5`}
                       >
                         {caps.qualities.map((item) => (
                           <button

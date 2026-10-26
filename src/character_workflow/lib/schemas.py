@@ -197,7 +197,7 @@ class JobParams(BaseModel):
     video_submission_attempts: list[VideoSubmissionAttempt] | None = Field(default=None, max_length=4)
     # 图片参数 —— 前端实际在发（Studio 提交链路），显式声明保证双端类型对齐
     ratio: str | None = None               # e.g. "16:9"
-    quality: str | None = None             # low | medium | high | auto; Tuzi GPT2.5: 1k | 2k | 4k
+    quality: str | None = None             # low | medium | high | xhigh | max | auto
     background: Literal["auto", "opaque", "transparent"] | None = None
     # Seedream 5.0 Pro 图层拆分：caller 回写有序图层元数据，output_index 对齐 Job.output_paths。
     layer_decomposition: bool | None = None
@@ -472,7 +472,7 @@ class CanvasImageDefaultParams(BaseModel):
     size: str | None = Field(default=None, max_length=40, pattern=r"^[A-Za-z0-9_.:+-]*$")
     size_mode: Literal["auto", "ratio", "custom"] | None = None
     custom_size: str | None = Field(default=None, max_length=40, pattern=r"^[A-Za-z0-9_.:+-]*$")
-    quality: Literal["low", "medium", "high", "auto"] | None = None
+    quality: Literal["low", "medium", "high", "xhigh", "max", "auto"] | None = None
 
 
 class CanvasVideoDefaultParams(BaseModel):
@@ -577,7 +577,7 @@ class CanvasUpscaleTierPreferences(BaseModel):
     """
     model_config = ConfigDict(extra="forbid", strict=True)
     selection: CanvasGenerationModelSelection | None = None
-    quality: Literal["low", "medium", "high", "auto"] | None = None
+    quality: Literal["low", "medium", "high", "xhigh", "max", "auto"] | None = None
     prompt: str = Field(default=CANVAS_UPSCALE_DEFAULT_PROMPT, max_length=4000)
 
     @field_validator("prompt")

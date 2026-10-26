@@ -15,16 +15,16 @@ def _client(isolated_data_root) -> TestClient:
     return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
 
-def test_tuzi_default_gpt25_preferences_retain_resolution_without_old_quality():
+def test_tuzi_gpt25_preferences_retain_quality_without_resolution():
     key = KeySpec(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com",
                   billing_group="default", access_key="fake", created_at="2026-10-21")
     model = ModelSpec(id="gpt-image-2.5-flare", name="Flare")
     params = _normalized_image_preference_params(key, model, {
         "size_mode": "ratio", "ratio": "1:1", "size": "2048x2048",
-        "resolution": "4K", "quality": "high",
+        "resolution": "4K", "quality": "max",
     })
-    assert params.resolution == "4K"
-    assert params.quality is None
+    assert params.resolution is None
+    assert params.quality == "max"
 
 
 def _payload(revision: int = 0) -> dict:

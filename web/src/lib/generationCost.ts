@@ -318,7 +318,7 @@ export function estimateGenerationCostForSubmission(
   const key = channel?.key ?? selectedKey;
   const model = channel?.model ?? selectedModel;
   const quality = (params.quality === 'low' || params.quality === 'medium'
-    || params.quality === 'high' || params.quality === 'auto'
+    || params.quality === 'high' || params.quality === 'xhigh' || params.quality === 'max' || params.quality === 'auto'
     || params.quality === '1k' || params.quality === '2k' || params.quality === '4k')
     ? params.quality
     : undefined;

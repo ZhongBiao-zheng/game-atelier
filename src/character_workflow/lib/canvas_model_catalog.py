@@ -1,5 +1,6 @@
 """Configured generation models exposed to Canvas tools."""
 from character_workflow.lib import keys
+from character_workflow.lib.image_size_catalog import is_tuzi_gpt25
 from character_workflow.lib.canvas_tool_common import CanvasToolError
 
 def model_configuration(alias: str, model_id: str, kind: str):
@@ -61,6 +62,8 @@ def model_rows(kind: str) -> list[dict]:
                 count = {"min": 4, "max": 4}
             quality = (["auto", "low", "medium", "high"]
                        if kind == "image" and supports_image_quality(model.id) else None)
+            if kind == "image" and is_tuzi_gpt25(key.base_url, model.id):
+                quality = ["low", "medium", "high", "xhigh", "max"]
             rows.append({"alias": key.alias, "provider": key.provider, "model": model.id,
                          "name": model.name, "kind": kind, "protocol": configured.protocol,
                          "reference_limits": limits, "estimated_cost_cny": None,

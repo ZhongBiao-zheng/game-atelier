@@ -55,7 +55,7 @@ export type CanvasUpscaleTarget = '2K' | '4K' | '8K';
  *  quality 只对暴露质量档的模型生效，按像素出图的模型直接用档位长边；prompt 留空保存后服务端填回内置提示词。 */
 export interface CanvasUpscaleTierPreferences {
   selection: CanvasGenerationModelSelection | null;
-  quality: 'low' | 'medium' | 'high' | 'auto' | null;
+  quality: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto' | null;
   prompt: string;
 }
 
@@ -79,7 +79,7 @@ export interface CanvasImageDefaultParams {
   ratio?: string;
   resolution?: string;
   size?: string;
-  quality?: 'low' | 'medium' | 'high' | 'auto';
+  quality?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
 }
 
 export interface CanvasVideoDefaultParams {

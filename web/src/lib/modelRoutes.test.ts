@@ -32,7 +32,7 @@ describe('「自动」供应商', () => {
       model_id: model, name: model, protocol: null,
     }] };
     const auto = withAutoProvider([tuzi], [route])[0];
-    expect(selectionImageCaps(auto, model)).toMatchObject({ resolutions: ['1K', '2K', '4K'], qualities: null });
+    expect(selectionImageCaps(auto, model)).toMatchObject({ resolutions: [], qualities: ['low', 'medium', 'high', 'xhigh', 'max'] });
     expect(selectionImageCaps(tuzi, model)).toEqual(selectionImageCaps(auto, model));
   });
   const providers = withAutoProvider(keys, routes);

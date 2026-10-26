@@ -8,7 +8,7 @@ from character_workflow.lib.callers.openai_image import (
     supports_image_quality, tuzi_image_quality, tuzi_outbound_image_model,
 )
 from character_workflow.lib.image_size_catalog import (
-    image_size_options, is_nano_image_size_model, uses_tuzi_gpt25_tiers,
+    image_size_options, is_nano_image_size_model,
 )
 from character_workflow.lib.tuzi_billing_expr import UnsupportedBillingExpr, evaluate
 from character_workflow.lib.tuzi_prices import load_snapshot
@@ -23,10 +23,8 @@ def request_fields(*, model_id, provider, base_url, billing_group, n, size, qual
     )["ratios"]:
         size = str(size).replace(":", "x")
     outbound_quality = quality if supports_image_quality(model_id) and quality in {
-        "low", "medium", "high", "auto",
+        "low", "medium", "high", "xhigh", "max", "auto",
     } else None
-    if uses_tuzi_gpt25_tiers(base_url, billing_group, model_id):
-        outbound_quality = quality if quality in {"1k", "2k", "4k"} else None
     if family == "nano-banana":
         outbound_quality = tuzi_image_quality(model_id, outbound_quality)
     # Reference contents are never needed for supported pricing probes. Only the

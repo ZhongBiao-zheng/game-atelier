@@ -14,15 +14,16 @@ def _key(provider="openai", base_url=None):
 
 @pytest.mark.parametrize("model", ["gpt-image-2.5", "gpt-image-2.5-flare",
                                   "gpt-image-2.5-sunburst", "gpt-image-2.5-vip"])
-@pytest.mark.parametrize("resolution", ["1K", "2K", "4K"])
+@pytest.mark.parametrize("quality", ["low", "medium", "high", "xhigh", "max"])
 @pytest.mark.parametrize("mode", ["ratio", "custom"])
-def test_tuzi_default_gpt25_freezes_explicit_billing_tier(model, resolution, mode):
+def test_tuzi_gpt25_preserves_quality_without_resolution_tiers(model, quality, mode):
     key = _key("custom", "https://api.tu-zi.com").model_copy(update={"billing_group": "default"})
     result = normalize_image_size_params(key, model, {
         "size_mode": mode, "size": "2048x2048", "ratio": "1:1",
-        "resolution": resolution, "quality": "high",
+        "resolution": "2K", "quality": quality,
     })
-    assert result["quality"] == resolution.lower()
+    assert result["quality"] == quality
+    assert "resolution" not in result
     assert result["size"] == "2048x2048"
     assert normalize_image_size_params(key, model, result) == result
 
@@ -31,7 +32,7 @@ def test_tuzi_default_auto_ignores_inactive_tiers_and_other_groups_unchanged():
     key = _key("custom", "https://api.tu-zi.com").model_copy(update={"billing_group": "default"})
     params = {"size_mode": "auto", "size": "auto", "resolution": "4K", "quality": "high"}
     assert normalize_image_size_params(key, "gpt-image-2.5-flare", params) == {
-        "size_mode": "auto", "size": "auto",
+        "size_mode": "auto", "size": "auto", "quality": "high",
     }
     key.billing_group = "image"
     assert normalize_image_size_params(key, "gpt-image-2.5-flare", params)["quality"] == "high"

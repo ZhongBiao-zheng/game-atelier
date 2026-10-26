@@ -61,7 +61,7 @@ export interface JobParams {
     error_type?: string | null;
     request_ids: Record<string, string>;
   }>;
-  // 图片参数 —— 与 schemas.py::JobParams 同步（Tuzi default GPT 2.5 冻结档位为 quality: 1k|2k|4k）
+  // 图片参数 —— 与 schemas.py::JobParams 同步（Tuzi GPT 2.5 quality: low|medium|high|xhigh|max）
   ratio?: string;
   quality?: string;
   background?: 'auto' | 'opaque' | 'transparent';

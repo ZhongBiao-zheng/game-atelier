@@ -22,7 +22,7 @@ import {
 import { availableResolutions, type Resolution } from '@/lib/studioSize';
 import { imageSizeOptions, isNanoImageSizeModel } from './imageSizeCatalog';
 
-export type Quality = 'low' | 'medium' | 'high' | 'auto';
+export type Quality = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
 
 const TUZI_GPT_IMAGE_RESOLUTIONS: Resolution[] = ['1K', '2K'];
 
@@ -87,7 +87,7 @@ export function imageControlCaps(
   modelId?: string | null,
   provider?: string | null,
   baseUrl?: string | null,
-  billingGroup?: string | null,
+  _billingGroup?: string | null,
 ): ImageControlCaps {
   const family = imageFamily(modelId);
   const base = FAMILY_CAPS[family];
@@ -112,14 +112,12 @@ export function imageControlCaps(
     || (provider === 'openrouter' && host === 'openrouter.ai' && sizeOptions.ratios.includes('auto'));
   // Tuzi 的 nano-banana 只有 Pro 与 2 的基础型号接收独立 quality；HD/NT/VIP 与固定 2K/4K
   // 的档位都编码在 model id。其余 GPT 路由保留已验证的 1K/2K 尺寸与质量控件。
-  // 2026-10-21：default GPT 2.5 分组计费改为 1K/2K/4K；服务端将 resolution
-  // 映射为 quality 档位，界面不再重复提供 low/medium/high。
   const tuziGptImageTiers = isTuzi && family === 'gpt-image';
-  const tuziGpt25Tiers = isTuzi && billingGroup === 'default'
-    && ['gpt-image-2.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-vip'].includes(modelId ?? '');
+  const tuziGpt25 = isTuzi && (modelId === 'gpt-image-2.5' || modelId?.startsWith('gpt-image-2.5-'));
   const tuziNanoWithoutQuality = isTuzi && family === 'nano-banana'
     && !['nano-banana-pro', 'nano-banana-2', 'gemini-nano-banana-2.1', 'nano-banana-2.1'].includes(normalized);
-  const qualities = supportsImageQuality(modelId) && !tuziNanoWithoutQuality && !tuziGpt25Tiers
+  const qualities: Quality[] | null = tuziGpt25 ? ['low', 'medium', 'high', 'xhigh', 'max']
+    : supportsImageQuality(modelId) && !tuziNanoWithoutQuality
     ? base.qualities
     : null;
   // OpenRouter 的尺寸以精确型号能力目录为准，不把模型交集当全集。
@@ -139,11 +137,11 @@ export function imageControlCaps(
     family,
     ...base,
     ...(isNanoImageSizeModel(modelId) ? { showResolution: false, showCustomSize: false, sizeKind: 'ratio' as const } : {}),
-    ...(tuziGptImageTiers ? { showResolution: true, showCustomSize: false } : {}),
+    ...(tuziGptImageTiers ? { showResolution: !tuziGpt25, showCustomSize: false } : {}),
     ratios: sizeOptions.ratios,
     showAutoSize,
     qualities,
-    resolutions: tuziGpt25Tiers ? ['1K', '2K', '4K'] : tuziGptImageTiers ? TUZI_GPT_IMAGE_RESOLUTIONS
+    resolutions: tuziGpt25 ? [] : tuziGptImageTiers ? TUZI_GPT_IMAGE_RESOLUTIONS
       : base.showResolution && !isNanoImageSizeModel(modelId) ? availableResolutions(modelId) : [],
   };
 }
@@ -156,5 +154,7 @@ export const QUALITY_LABELS: Record<Quality, string> = {
   low: '低',
   medium: '中',
   high: '高',
+  xhigh: '超高',
+  max: '最高',
   auto: '自动',
 };

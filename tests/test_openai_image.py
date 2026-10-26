@@ -1681,8 +1681,8 @@ def test_custom_gpt_image_sends_quality(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("edit", [False, True])
-@pytest.mark.parametrize("tier", ["1K", "2K", "4K"])
-def test_tuzi_default_gpt25_sends_selected_tier(tmp_path, monkeypatch, tier, edit):
+@pytest.mark.parametrize("quality", ["low", "medium", "high", "xhigh", "max"])
+def test_tuzi_gpt25_sends_selected_quality(tmp_path, monkeypatch, quality, edit):
     keys.add_key(KeySpec(alias="tuzi", provider="custom", base_url="https://api.tu-zi.com",
                          billing_group="default", access_key="fake", created_at="2026-10-21"))
     seen = {}
@@ -1700,9 +1700,9 @@ def test_tuzi_default_gpt25_sends_selected_tier(tmp_path, monkeypatch, tier, edi
     ref.write_bytes(b"png")
     dispatch(prompt="test", model="gpt-image-2.5-flare", alias="tuzi", output_dir=tmp_path / "out",
              params={"size_mode": "ratio", "ratio": "1:1", "size": "2048x2048",
-                     "resolution": tier, "quality": "high"},
+                     "resolution": "2K", "quality": quality},
              reference_images=[str(ref)] if edit else [])
-    assert seen["quality"] == tier.lower()
+    assert seen["quality"] == quality
     assert seen["size"] == "2048x2048"
 
 
