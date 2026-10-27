@@ -112,3 +112,22 @@ def test_explicit_auto_rejects_unknown_channel():
 def test_custom_gpt_dimensions_reject_out_of_bounds_before_normalizing(size, message):
     with pytest.raises(ValueError, match=message):
         normalize_image_size_params(_key(), "gpt-image-2", {"size_mode": "custom", "size": size})
+
+
+@pytest.mark.parametrize(("key", "model", "params", "expected"), [
+    # Agent 写的草稿只有比例：缺像素时按浏览器同一换算补齐，不能把 size=null 发给厂商。
+    (_key("custom", "https://api.tu-zi.com"), "gpt-image-2.5-sunburst",
+     {"size_mode": "ratio", "ratio": "16:9"}, "2048x1152"),
+    (_key("custom", "https://api.tu-zi.com"), "gpt-image-2.5-sunburst",
+     {"size_mode": "ratio", "ratio": "9:16"}, "1152x2048"),
+    (_key("custom", "https://api.tu-zi.com"), "gpt-image-2",
+     {"size_mode": "ratio", "ratio": "3:2", "resolution": "1K"}, "1024x688"),
+    (_key("custom", "https://api.tu-zi.com"), "doubao-seedream-4-5-251128",
+     {"size_mode": "ratio", "ratio": "16:9", "resolution": "4K"}, "4096x2304"),
+    (_key("tokendance"), "seedream-5.0-pro",
+     {"size_mode": "ratio", "ratio": "1:1"}, "2150x2150"),
+])
+def test_ratio_mode_without_size_derives_pixels(key, model, params, expected):
+    result = normalize_image_size_params(key, model, params)
+    assert result["size"] == expected
+    assert normalize_image_size_params(key, model, result) == result

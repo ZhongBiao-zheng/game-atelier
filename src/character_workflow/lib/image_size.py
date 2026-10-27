@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from character_workflow.lib.callers.openai_image import (
+    _max_pixels_for_seedream,
     _snap_hk_gpt_image_size,
     image_family,
     normalize_image_pixel_size,
@@ -126,6 +127,12 @@ def normalize_image_size_params(key: KeySpec, model: str, params: dict[str, Any]
         if key.provider == "openrouter" or is_nano_image_size_model(model):
             result["ratio"] = ratio or options["ratios"][0]
             result["size"] = result["ratio"]
+        elif not result.get("size") and image_family(model) != "midjourney":
+            # 不经浏览器写的草稿（Agent / MCP）只有比例：size=null 发出去等于 AUTO，横竖由模型定。
+            result["ratio"] = ratio or options["ratios"][0]
+            result["size"] = ratio_pixel_size(
+                result["ratio"], result.get("resolution") or _default_resolution(options), model,
+            )
         resolution = result.get("resolution")
         if resolution is not None:
             resolution = str(resolution).upper()
@@ -140,6 +147,54 @@ def normalize_image_size_params(key: KeySpec, model: str, params: dict[str, Any]
     else:
         raise ValueError("未知图片尺寸模式")
     return result
+
+
+# 与 web/src/lib/studioSize.ts 的 SEEDREAM 尺寸表 / computeStudioPixelSize 逐项一致。
+_SEEDREAM_SIZE_TABLE: dict[str, dict[str, tuple[int, int]]] = {
+    "2K": {
+        "1:1": (2048, 2048), "4:3": (2304, 1728), "3:4": (1728, 2304),
+        "16:9": (2560, 1440), "9:16": (1440, 2560), "3:2": (2496, 1664),
+        "2:3": (1664, 2496), "21:9": (3024, 1296), "4:5": (1792, 2240), "5:4": (2240, 1792),
+    },
+    "4K": {
+        "1:1": (4096, 4096), "4:3": (4096, 3072), "3:4": (3072, 4096),
+        "16:9": (4096, 2304), "9:16": (2304, 4096), "3:2": (4096, 2731),
+        "2:3": (2731, 4096), "21:9": (4096, 1755), "4:5": (3277, 4096), "5:4": (4096, 3277),
+    },
+}
+_RESOLUTION_EDGE = {"512": 512, "1K": 1024, "2K": 2048, "4K": 4096}
+
+
+def _default_resolution(options: dict[str, list[str]]) -> str:
+    resolutions = options["resolutions"]
+    return "2K" if "2K" in resolutions or not resolutions else resolutions[0]
+
+
+def ratio_pixel_size(ratio: str, resolution: str, model: str) -> str:
+    """比例 + 档位 → 像素，浏览器 studioSizeFor 的服务端版本。"""
+    if image_family(model) == "seedream":
+        max_pixels = _max_pixels_for_seedream(model)
+        if all(w * h > max_pixels for w, h in _SEEDREAM_SIZE_TABLE["4K"].values()):
+            # 只剩 2K 一档：撑满模型上限（向下取整，多一个像素就越界）。
+            w, h = _SEEDREAM_SIZE_TABLE["2K"].get(ratio, _SEEDREAM_SIZE_TABLE["2K"]["1:1"])
+            scale = (max_pixels / (w * h)) ** 0.5
+            return f"{max(1, int(w * scale))}x{max(1, int(h * scale))}"
+        table = _SEEDREAM_SIZE_TABLE["4K" if resolution == "4K" else "2K"]
+        w, h = table.get(ratio, table["1:1"])
+        return f"{w}x{h}"
+    base = _RESOLUTION_EDGE.get(resolution, 2048)
+    a, _, b = ratio.partition(":")
+    if not (a.isdigit() and b.isdigit()) or int(a) == 0 or int(b) == 0 or a == b:
+        return f"{base}x{base}"
+    a, b = int(a), int(b)
+    if a >= b:
+        return f"{base}x{_js_round(b / a * base)}"
+    return f"{_js_round(a / b * base)}x{base}"
+
+
+def _js_round(value: float) -> int:
+    # Math.round 是 half-up；Python round 是银行家舍入。
+    return int(value + 0.5)
 
 
 def normalized_image_submission_size(key: KeySpec, model: str, size: str) -> str:
