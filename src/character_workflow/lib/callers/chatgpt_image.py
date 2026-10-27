@@ -16,6 +16,8 @@ from character_workflow.lib.callers import openai_image
 
 BASE_URL = "https://chatgpt.com/backend-api/codex"
 FORBIDDEN = "ChatGPT 拒绝了这次出图：套餐或工作区可能不支持出图"
+# Verified with subscription generation on 2026-10-27. Desktop launchers may lack CLI PATH.
+DEFAULT_CODEX_VERSION = "0.162.1"
 
 
 @lru_cache(maxsize=1)
@@ -28,7 +30,7 @@ def _codex_version() -> str:
             return match.group()
     except (OSError, subprocess.SubprocessError):
         pass
-    raise chatgpt_auth.ChatGPTAuthError("无法读取 Codex CLI 版本，请先安装 Codex CLI")
+    return DEFAULT_CODEX_VERSION
 
 
 def _headers(credentials: chatgpt_auth.Credentials) -> dict[str, str]:
@@ -46,13 +48,24 @@ def _headers(credentials: chatgpt_auth.Credentials) -> dict[str, str]:
 
 def _post(url: str, payload: dict, timeout) -> dict:
     credentials = chatgpt_auth.get_credentials()
+    auth_recovered = False
     for attempt in range(3):
         try:
-            response = requests.post(url, json=payload, headers=_headers(credentials),
-                                     timeout=timeout, allow_redirects=False)
-            if response.status_code == 401:
-                raise chatgpt_auth.ChatGPTAuthError(chatgpt_auth.LOGIN_EXPIRED) from RuntimeError(
-                    "HTTP 401")
+            while True:
+                response = requests.post(url, json=payload, headers=_headers(credentials),
+                                         timeout=timeout, allow_redirects=False)
+                if response.status_code != 401:
+                    break
+                if auth_recovered:
+                    raise chatgpt_auth.ChatGPTAuthError(chatgpt_auth.LOGIN_EXPIRED) from RuntimeError(
+                        "HTTP 401")
+                auth_recovered = True
+                try:
+                    credentials = chatgpt_auth.get_credentials(
+                        rejected_access_token=credentials.access_token)
+                except chatgpt_auth.ChatGPTAuthError:
+                    raise chatgpt_auth.ChatGPTAuthError(chatgpt_auth.LOGIN_EXPIRED) from RuntimeError(
+                        "HTTP 401")
             if response.status_code == 403:
                 raise openai_image.OpenAIImageError(FORBIDDEN) from RuntimeError("HTTP 403")
             if response.status_code >= 300:

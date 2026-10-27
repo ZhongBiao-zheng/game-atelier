@@ -117,10 +117,12 @@ def create_router(require_key):
                 yield ": connected\n\n"
                 while not await request.is_disconnected():
                     # 长连接亦实时撤权；不沿用连接建立时的角色快照。
-                    await asyncio.to_thread(gateway_keys.require_admin, gateway_keys.read_config(), actor.id)
+                    await asyncio.to_thread(
+                        lambda: gateway_keys.require_admin(gateway_keys.read_config(), actor.id))
                     try:
                         task = await asyncio.wait_for(queue.get(), timeout=4)
-                        await asyncio.to_thread(gateway_keys.require_admin, gateway_keys.read_config(), actor.id)
+                        await asyncio.to_thread(
+                            lambda: gateway_keys.require_admin(gateway_keys.read_config(), actor.id))
                         yield "event: task\ndata: " + json.dumps(task, ensure_ascii=False) + "\n\n"
                     except TimeoutError:
                         yield ": heartbeat\n\n"

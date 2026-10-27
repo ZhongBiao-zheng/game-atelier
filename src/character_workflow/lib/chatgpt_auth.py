@@ -101,17 +101,18 @@ def _write_private(path: Path, value: dict) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def get_credentials() -> Credentials:
+def get_credentials(*, rejected_access_token: str | None = None) -> Credentials:
+    """Reload credentials; refresh a rejected token only if no other process replaced it."""
     path = auth_path().resolve()
     value = _read(path)
-    if not _needs_refresh(value):
+    if not _needs_refresh(value) and value["tokens"]["access_token"] != rejected_access_token:
         return _credentials(value)
     digest = hashlib.sha256(str(path).encode()).hexdigest()[:20]
     # Serializes Atelier processes. Codex CLI does not participate in this lock;
     # re-read before writing so an observed CLI login/rotation is never overwritten.
     with file_lock(data_root.runtime_dir() / f"chatgpt-auth-{digest}.lock"):
         value = _read(path)
-        if not _needs_refresh(value):
+        if not _needs_refresh(value) and value["tokens"]["access_token"] != rejected_access_token:
             return _credentials(value)
         refresh = value["tokens"].get("refresh_token")
         if not isinstance(refresh, str) or not refresh:
@@ -120,7 +121,8 @@ def get_credentials() -> Credentials:
             response = requests.post(
                 "https://auth.openai.com/oauth/token",
                 json={"client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
-                      "grant_type": "refresh_token", "refresh_token": refresh},
+                      "grant_type": "refresh_token", "refresh_token": refresh,
+                      "scope": "openid profile email"},
                 timeout=(10, 30),
                 allow_redirects=False,
             )

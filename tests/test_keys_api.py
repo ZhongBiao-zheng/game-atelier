@@ -25,6 +25,24 @@ def test_list_keys_returns_empty_initially(client):
     assert resp.json() == {"keys": [], "default_alias": None}
 
 
+@pytest.mark.parametrize("provider", ["openai", "custom", "atelier"])
+@pytest.mark.parametrize("secret", [None, "", " \t\n"])
+def test_non_subscription_provider_requires_nonempty_key(client, provider, secret):
+    payload = {"alias": "missing-secret", "provider": provider}
+    if secret is not None:
+        payload["access_key"] = secret
+    response = client.post("/api/keys", json=payload)
+    assert response.status_code == 422
+    assert keys.find_by_alias("missing-secret") is None
+
+
+def test_cannot_clear_existing_provider_key(client):
+    assert client.post("/api/keys", json=_make_payload()).status_code == 201
+    response = client.patch("/api/keys/lov", json={"access_key": "  "})
+    assert response.status_code == 422
+    assert keys.find_by_alias("lov").access_key == "ak"
+
+
 def test_create_then_list_masks_secrets(client):
     r1 = client.post("/api/keys", json=_make_payload())
     assert r1.status_code == 201, r1.text

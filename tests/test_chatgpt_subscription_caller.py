@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import subprocess
 import time
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -69,6 +70,7 @@ def test_auth_isolates_real_home_and_refreshes_under_lock(tmp_path, monkeypatch)
         assert kwargs['allow_redirects'] is False
         assert url == 'https://auth.openai.com/oauth/token'
         assert kwargs['json']['refresh_token'] == 'refresh-old'
+        assert kwargs['json']['scope'] == 'openid profile email'
         return response(value={'access_token': new_access, 'refresh_token': 'refresh-new'})
 
     monkeypatch.setattr(auth.requests, 'post', post)
@@ -125,7 +127,7 @@ def test_refresh_failure_never_writes_tokens(monkeypatch, status):
 @pytest.fixture
 def image_setup(monkeypatch):
     monkeypatch.setattr(caller.keys, 'find_by_alias', lambda _: SimpleNamespace(provider='chatgpt'))
-    monkeypatch.setattr(auth, 'get_credentials', lambda: auth.Credentials('private-token', 'account'))
+    monkeypatch.setattr(auth, 'get_credentials', lambda **_: auth.Credentials('private-token', 'account'))
     monkeypatch.setattr(caller, '_codex_version', lambda: '0.162.1')
     monkeypatch.setattr(caller.openai_image, '_write_outputs', lambda p, d: [str(d / 'v1.png')])
     monkeypatch.setattr(caller.time, 'sleep', lambda _: None)
@@ -176,7 +178,7 @@ def test_generation_auth_errors(tmp_path, monkeypatch, image_setup, status, mess
         caller.render(prompt='x', model='gpt-image-2', alias='sub', output_dir=tmp_path)
     assert _friendly_error(error.value) == message
     assert failover_reason(error.value) == 'auth'
-    assert post.call_count == 1
+    assert post.call_count == (2 if status == 401 else 1)
 
 
 @pytest.mark.parametrize(('status', 'count'), [(502, 3), (503, 3), (504, 3), (500, 1), (429, 1)])
@@ -198,3 +200,86 @@ def test_read_timeout_never_resubmits(monkeypatch, image_setup):
         caller._post('https://example.test', {}, 30)
     assert post.call_count == 1
     assert failover_reason(error.value) is None
+
+
+@pytest.mark.parametrize('failure', [FileNotFoundError(), subprocess.TimeoutExpired('codex', 5),
+                                    subprocess.CalledProcessError(1, 'codex'), None])
+def test_codex_version_falls_back_without_cli(monkeypatch, failure):
+    caller._codex_version.cache_clear()
+    run = Mock(side_effect=failure, return_value=SimpleNamespace(stdout='unknown'))
+    monkeypatch.setattr(caller.subprocess, 'run', run)
+    try:
+        headers = caller._headers(auth.Credentials('fixture', 'account'))
+        assert headers['version'] == '0.162.1'
+        assert headers['User-Agent'].startswith('codex_cli_rs/0.162.1')
+    finally:
+        caller._codex_version.cache_clear()
+
+
+def test_401_reloads_cli_rotated_token_without_refresh(monkeypatch):
+    path, value = login()
+    previous = value['tokens']['access_token']
+    replacement = jwt(exp=time.time() + 5000)
+    sent = []
+
+    def post(url, **kwargs):
+        assert url.endswith('/images/generations')
+        sent.append(kwargs['headers']['Authorization'])
+        if len(sent) == 1:
+            value['tokens']['access_token'] = replacement
+            path.write_text(json.dumps(value))
+            return response(401)
+        return response(value={'data': []})
+
+    monkeypatch.setattr(caller, '_codex_version', lambda: '0.162.1')
+    monkeypatch.setattr(caller.requests, 'post', post)
+    assert caller._post(caller.BASE_URL + '/images/generations', {}, 30) == {'data': []}
+    assert sent == [f'Bearer {previous}', f'Bearer {replacement}']
+    assert json.loads(path.read_text()) == value
+
+
+@pytest.mark.parametrize('second_status', [200, 401])
+def test_401_refreshes_once_even_for_unexpired_token(monkeypatch, second_status):
+    path, value = login()
+    previous = value['tokens']['access_token']
+    replacement = jwt(exp=time.time() + 5000)
+    sent, refreshes = [], []
+
+    def post(url, **kwargs):
+        if url == 'https://auth.openai.com/oauth/token':
+            refreshes.append(kwargs['json'])
+            return response(value={'access_token': replacement, 'refresh_token': 'rotated'})
+        sent.append(kwargs['headers']['Authorization'])
+        return response(401 if len(sent) == 1 else second_status, value={'data': []})
+
+    monkeypatch.setattr(caller, '_codex_version', lambda: '0.162.1')
+    monkeypatch.setattr(caller.requests, 'post', post)
+    if second_status == 200:
+        assert caller._post(caller.BASE_URL + '/images/generations', {}, 30) == {'data': []}
+    else:
+        from character_workflow.lib.model_routes import failover_reason
+        with pytest.raises(auth.ChatGPTAuthError, match=auth.LOGIN_EXPIRED) as error:
+            caller._post(caller.BASE_URL + '/images/generations', {}, 30)
+        assert failover_reason(error.value) == 'auth'
+    assert len(refreshes) == 1
+    assert sent == [f'Bearer {previous}', f'Bearer {replacement}']
+    saved = json.loads(path.read_text())
+    assert saved['tokens']['refresh_token'] == 'rotated'
+    assert saved['keep'] == value['keep']
+
+
+def test_rejected_token_rechecks_rotation_after_lock(monkeypatch):
+    path, value = login()
+    rejected = value['tokens']['access_token']
+
+    @contextmanager
+    def lock(_):
+        value['tokens']['access_token'] = jwt(exp=time.time() + 5000)
+        path.write_text(json.dumps(value))
+        yield
+
+    monkeypatch.setattr(auth, 'file_lock', lock)
+    post = Mock()
+    monkeypatch.setattr(auth.requests, 'post', post)
+    assert auth.get_credentials(rejected_access_token=rejected).access_token == value['tokens']['access_token']
+    post.assert_not_called()

@@ -126,9 +126,19 @@ def test_proxy_rejects_unknown_routes_and_disabled_connections():
     assert local_capability("GET", "/api/gateway/audit") == "manage"
 
 
-def test_live_sends_events_and_ends_after_revocation(admin):
+def test_live_sends_events_and_ends_after_revocation(admin, monkeypatch):
     client, actor, token = admin
     endpoint = next(route.endpoint for route in client.app.routes if route.path == "/gateway/v1/admin/live")
+    read_config = gateway_keys.read_config
+    reads = []
+
+    def read_off_event_loop():
+        with pytest.raises(RuntimeError, match="no running event loop"):
+            asyncio.get_running_loop()
+        reads.append(True)
+        return read_config()
+
+    monkeypatch.setattr(gateway_keys, "read_config", read_off_event_loop)
 
     class Request:
         headers = {"authorization": f"Bearer {token}"}
@@ -148,6 +158,24 @@ def test_live_sends_events_and_ends_after_revocation(admin):
             await anext(stream)
     asyncio.run(exercise())
     assert not gateway_live.listeners
+    assert len(reads) == 3  # Before waiting, before emitting, and after revocation.
+
+
+def test_gateway_startup_reads_config_off_event_loop(monkeypatch):
+    from viewer_server import server_app
+    read_config = gateway_keys.read_config
+    reads = []
+
+    def read_off_event_loop():
+        with pytest.raises(RuntimeError, match="no running event loop"):
+            asyncio.get_running_loop()
+        reads.append(True)
+        return read_config()
+
+    monkeypatch.setattr(gateway_keys, "read_config", read_off_event_loop)
+    monkeypatch.setattr(server_app.gateway_server, "apply", lambda config: None)
+    with TestClient(server_app.build_app()):
+        assert reads
 
 
 def test_remote_reorder_preserves_nested_gateway_positions(admin):

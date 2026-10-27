@@ -242,7 +242,7 @@ async def normal_lifespan(app: FastAPI):
     # 局域网共享（ADR-0025）：默认关闭；开着的话随主服务一起起来。
     from character_workflow.lib.gateway_keys import read_config as read_gateway_config
 
-    await asyncio.to_thread(gateway_server.apply, read_gateway_config())
+    await asyncio.to_thread(lambda: gateway_server.apply(read_gateway_config()))
     # 接入端：网关供应商的模型列表随网关变化，启动时尽力同步一次（连不上就保留旧快照）。
     from character_workflow.lib.callers.atelier_gateway import sync_all_gateway_keys
 
