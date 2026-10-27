@@ -1,3 +1,4 @@
+import { formatGenerationCost } from '@/lib/generationCost';
 import { useEffect, useState } from 'react';
 import { ChevronLeft, HelpCircle } from 'lucide-react';
 import { fetchGatewayMembers, restoreGatewayMember, type GatewayMembers } from '@/api/gateway';
@@ -108,7 +109,7 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
                 {index > 0 && <span aria-hidden className="text-subtle-foreground">{route.mode === 'round_robin' ? '·' : '→'}</span>}
                 <span className={`flex min-w-0 flex-wrap items-center gap-2 rounded-md border py-1 pl-1 pr-1.5 ${first ? 'border-primary/45 bg-primary/10' : 'border-border'} ${unavailable ? 'opacity-75' : ''}`}>
                   {route.mode === 'order' && <span className={`flex size-5 items-center justify-center rounded tabular-nums text-xs ${first ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'}`}>{index + 1}</span>}
-                  {route.mode === 'cheap' && <span className="pl-1 tabular-nums text-xs text-muted-foreground">{member.estimate_cny == null ? '未计价' : `≈¥${member.estimate_cny.toFixed(2)}`}</span>}
+                  {route.mode === 'cheap' && <span className="pl-1 tabular-nums text-xs text-muted-foreground">{member.estimate_cny == null ? '未计价' : `≈${formatGenerationCost(member.estimate_cny)}`}</span>}
                   <span className="break-all text-sm">{member.alias}</span>
                   {unavailable && <span className="flex flex-wrap items-center gap-2 text-xs text-destructive">
                     {unavailable.reason === 'unavailable' ? '暂时不可用' : `欠费已摘除 · ${date(unavailable.since)}`}

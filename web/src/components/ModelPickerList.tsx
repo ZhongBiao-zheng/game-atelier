@@ -5,7 +5,8 @@ import { useModelPickerMetrics, type ModelPickerChoice } from '@/lib/useModelPic
 import type { JobParams } from '@/schema/jobs';
 import { ModelBrandIcon } from './ModelBrandIcon';
 import { MetaTag } from './MetaTag';
-import { formatModelDuration, formatModelPrice } from '@/lib/modelMetricFormat';
+import { formatGenerationCost } from '@/lib/generationCost';
+import { formatModelDuration } from '@/lib/modelMetricFormat';
 
 export function ModelPickerList({ choices, selected, initialKind, sections = false, params = {}, onSelect }: {
   choices: ModelPickerChoice[];
@@ -104,7 +105,7 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
               {entry && <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{entry.description}</span>}
               {(seconds != null || cost != null) && <span className="mt-2 flex justify-between gap-2 text-xs tabular-nums text-muted-foreground">
                 {seconds != null && <MetaTag>{formatModelDuration(seconds)}</MetaTag>}
-                {cost != null && <MetaTag className="ml-auto">{formatModelPrice(cost)}</MetaTag>}
+                {cost != null && <MetaTag className="ml-auto">{formatGenerationCost(cost)}</MetaTag>}
               </span>}
             </span>
           </button>;

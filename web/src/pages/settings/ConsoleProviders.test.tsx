@@ -63,6 +63,14 @@ it('custom 预设按域名识别已添加，不把所有中转都标为已添加
   await waitFor(() => expect(within(tuzi).getByText('已添加')).toBeInTheDocument());
   expect(within(screen.getByRole('button', { name: /OpenAI-HK/ })).queryByText('已添加')).not.toBeInTheDocument();
 });
+it('未知自定义供应商不把添加模板标成已添加', async () => {
+  vi.spyOn(keys, 'listKeys').mockResolvedValueOnce({ keys: [{ alias: '自己的服务', provider: 'custom',
+    base_url: 'https://models.example.com/v1', access_key: '***', secret_key: null, models: [], capabilities: [], notes: '', created_at: '' }] });
+  render(<ProviderAddPage />);
+  await waitFor(() => expect(keys.listKeys).toHaveBeenCalled());
+  expect(screen.queryByText('已添加')).not.toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: '自定义供应商地址' })).toBeInTheDocument();
+});
 describe('路由成员', () => {
   it('显示欠费时间与全部欠费，恢复后移除状态', async () => {
     render(<ModelRoutesSection reloadToken={0} />);

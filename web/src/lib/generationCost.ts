@@ -346,5 +346,5 @@ export function estimateGenerationCostForSubmission(
 
 export function formatGenerationCost(amount: number): string {
   const rounded = Math.round((amount + Number.EPSILON) * 100) / 100;
-  return `¥ ${rounded.toFixed(2).replace(/\.?0+$/, '')}`;
+  return `${Number(rounded.toFixed(2))}¥`;
 }

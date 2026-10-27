@@ -270,7 +270,11 @@ function StudioFull() {
 
   const reuseParameter = (config: RoundConfig, parameter: RoundParameter) => {
     const patch = reuseRoundParameter(config, parameter, { providers, alias: providerAlias, model, kind, sizeParams });
-    if (!patch) return undefined;
+    if (!patch) {
+      if (parameter === 'model') return '该模型已不可用';
+      if ((config.kind ?? 'image') !== kind) return `切换到${config.kind === 'video' ? '视频' : '图片'}模式后可用`;
+      return '当前模型不支持';
+    }
     return () => {
       if (patch.alias !== undefined) setProviderAlias(patch.alias);
       if (patch.model !== undefined) {

@@ -1,3 +1,4 @@
+import { formatGenerationCost } from '@/lib/generationCost';
 import {
   Copy,
   Download,
@@ -116,10 +117,6 @@ function firstPageFilters(typeFilter: TypeFilter, search: string) {
     ...(typeFilter === 'prompt' ? { kind: 'prompt' as const } : {}),
     ...(search ? { q: search } : {}),
   };
-}
-
-function formatCost(cost: number): string {
-  return `¥${cost.toFixed(2)}`;
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -388,7 +385,7 @@ export function TeamLibraryPanel({
                   {[
                     item.entry.author,
                     item.entry.model,
-                    item.entry.cost_cny != null ? formatCost(item.entry.cost_cny) : null,
+                    item.entry.cost_cny != null ? formatGenerationCost(item.entry.cost_cny) : null,
                   ].filter(part => part != null).join(' · ')}
                 </p>
               </button>

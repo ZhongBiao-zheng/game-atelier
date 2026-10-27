@@ -237,7 +237,7 @@ describe('TeamLibraryPanel', () => {
     const first = within(row).getByRole('button', { name: /雪山白犬/ });
     expect(first).toHaveTextContent('老王');
     expect(first).toHaveTextContent('gpt-image-2');
-    expect(first).toHaveTextContent('¥0.21');
+    expect(first).toHaveTextContent('0.21¥');
     const second = within(row).getByRole('button', { name: /无价配方/ });
     expect(second).toHaveTextContent('seedream-4');
     expect(second).not.toHaveTextContent('¥');

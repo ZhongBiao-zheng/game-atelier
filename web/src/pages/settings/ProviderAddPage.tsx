@@ -66,7 +66,7 @@ export function ProviderAddPage() {
           <span className="text-xs text-muted-foreground">{group.description}</span></div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(min(220px,100%),1fr))] gap-2">
           {items.map(preset => {
-            const added = keys.some(key => providerPresetId(key) === preset.id);
+            const added = preset.id !== 'custom' && keys.some(key => providerPresetId(key) === preset.id);
             return <button key={preset.id} type="button" onClick={() => open(preset)}
               className="flex h-14 items-center gap-3 rounded-md border border-border bg-card px-3.5 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
               <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-xs"><ProviderBrandIcon provider={{ provider: preset.value, base_url: preset.defaultBaseUrl }} /></span>

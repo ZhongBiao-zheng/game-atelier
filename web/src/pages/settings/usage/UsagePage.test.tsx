@@ -10,6 +10,7 @@ import { UsagePage } from './UsagePage';
 import { QuotaCard } from './QuotaCard';
 import { TaskTable } from './TaskTable';
 import { KpiRow } from './KpiRow';
+import { TrendChart } from './TrendChart';
 vi.mock('@/api/usage', () => ({ fetchUsage: vi.fn(), fetchUsageTasks: vi.fn() }));
 vi.mock('@/api/gateway', () => ({ fetchGateway: vi.fn(), fetchGatewayProviderMe: vi.fn() }));
 vi.mock('@/api/keys', () => ({ listKeys: vi.fn() }));
@@ -124,7 +125,7 @@ it('额度超过 90% 使用警告色', async () => {
     ],
   });
   render(<QuotaCard />);
-  expect(await screen.findByText(/本月 ¥ 91/)).toHaveClass('text-[color:var(--status-running)]');
+  expect(await screen.findByText(/本月 91¥/)).toHaveClass('text-[color:var(--status-running)]');
 });
 
 const task: UsageTask = {
@@ -133,6 +134,10 @@ const task: UsageTask = {
   cost_cny: null, label: '测试项目', source: 'local', thumb_url: null, href: '/canvas/test',
 };
 const filters = { scope: 'mine' as const, range: '30d' as const, source: 'all' as const, member: '' };
+it('趋势金额的无障碍标签和 tooltip 使用统一格式', () => {
+  render(<TrendChart data={{ ...empty, trend: [{ start: '2026-10-27', cost_cny: 0.3 }] }} />);
+  expect(screen.getByRole('img', { name: '2026-10-27 0.3¥' })).toHaveAttribute('title', '2026-10-27 · 0.3¥');
+});
 it('未计价独立显示次数与占比，零次隐藏', () => {
   const view = render(<KpiRow data={{ ...empty, totals: { ...empty.totals, count: 10, unpriced: 4 } }} />);
   expect(screen.getByText('未计价')).toBeInTheDocument();

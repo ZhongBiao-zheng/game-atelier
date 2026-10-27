@@ -61,12 +61,12 @@ describe('ModelRoutesSection', () => {
     const select = await screen.findByRole('combobox', { name: 'gpt-image-2 的路由方式' });
     fireEvent.change(select, { target: { value: 'cheap' } });
     expect(setModelRouteMode).toHaveBeenCalledWith('image', 'gpt-image-2', 'cheap');
-    await screen.findByText('≈¥0.21');
+    await screen.findByText('≈0.21¥');
     expect(screen.getByText('未计价')).toBeInTheDocument();
     expect(screen.queryByLabelText('把 HK 提前')).not.toBeInTheDocument();
     fireEvent.change(select, { target: { value: 'round_robin' } });
     await screen.findByText('下一次走 HK');
-    expect(screen.queryByText('≈¥0.21')).not.toBeInTheDocument();
+    expect(screen.queryByText('≈0.21¥')).not.toBeInTheDocument();
     fireEvent.change(select, { target: { value: 'order' } });
     await screen.findByText('保存失败');
     expect(select).toHaveValue('round_robin');

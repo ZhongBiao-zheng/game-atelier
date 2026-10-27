@@ -1,3 +1,4 @@
+import { formatGenerationCost } from '@/lib/generationCost';
 import { LoaderCircle, Maximize, Minus, Plus, X, type LucideIcon } from 'lucide-react';
 import { useCallback, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import type { KeyView } from '@/api/keys';
@@ -137,7 +138,7 @@ export function EditorComposer({ prompt, onPrompt, placeholder, chips, blocker, 
     {error && <p role="alert" className="px-1 text-xs text-destructive">{error}</p>}
     <div className="flex flex-wrap items-center gap-2">
       {chips}
-      <span role="status" className="ml-auto text-xs text-muted-foreground">{blocker ?? (cost == null ? '费用以供应商结算为准' : `预计 ¥${Number(cost.toFixed(4))}`)}</span>
+      <span role="status" className="ml-auto text-xs text-muted-foreground">{blocker ?? (cost == null ? '费用以供应商结算为准' : `预计 ${formatGenerationCost(cost)}`)}</span>
       <button type="button" disabled={Boolean(blocker)} onClick={onGenerate}
         className="inline-flex h-9 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40">
         {busy && <LoaderCircle className="size-4 animate-spin" aria-hidden />}{busy ? '提交中…' : generateLabel}

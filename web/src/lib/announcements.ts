@@ -28,7 +28,7 @@ export const ANNOUNCEMENTS: Announcement[] = [
     id: '2026-10-flux-3-image',
     date: '2026-10-12',
     title: 'FLUX 3 Image 上线',
-    summary: 'Black Forest Labs 新一代图像生成与编辑模型：多轮编辑时不改动没提到的部分，复杂提示词和多语言文字渲染更准，官方支持最多 10 张参考图和原生 4K。Tuzi default 分组已上线，¥0.15 / 次。',
+    summary: 'Black Forest Labs 新一代图像生成与编辑模型：多轮编辑时不改动没提到的部分，复杂提示词和多语言文字渲染更准，官方支持最多 10 张参考图和原生 4K。Tuzi default 分组已上线，0.15¥ / 次。',
     // BFL 官方模型页（bfl.ai/models/flux-3-image）的 og:image。
     imageUrl: 'https://cdn.sanity.io/images/2gpum2i6/production/486fe8dbe090c31226c868dac01a1f5d918eb756-1200x630.jpg',
     models: [{ name: 'FLUX 3 Image', ids: ['flux-3-image'] }],

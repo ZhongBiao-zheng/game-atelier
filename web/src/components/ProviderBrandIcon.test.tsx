@@ -16,12 +16,19 @@ describe('provider identity and local branding', () => {
     expect(providerPresetId({ provider, base_url })).toBe(id);
   });
 
-  it('uses packaged raster images at the requested size', () => {
-    const { container } = render(<ProviderBrandIcon provider={{ provider: 'custom', base_url: 'https://api.tu-zi.com' }} size={14} />);
-    const image = container.querySelector('img')!;
-    expect(image.getAttribute('src')).not.toMatch(/^https?:/);
-    expect(image).toHaveAttribute('width', '14');
-    expect(image).toHaveAttribute('height', '14');
+  it.each([
+    { provider: 'custom', base_url: 'https://api.tu-zi.com' },
+    { provider: 'custom', base_url: 'https://api.openai-hk.com' },
+    { provider: 'evolink' },
+    { provider: 'tokendance' },
+  ])('uses packaged monochrome masks at the requested size for $provider $base_url', provider => {
+    const { container } = render(<ProviderBrandIcon provider={provider} size={14} />);
+    const mask = container.querySelector('span')!;
+    expect(container.querySelector('img')).toBeNull();
+    expect(mask).toHaveClass('bg-current');
+    expect(mask.style.maskImage).toMatch(/^url\("(?!https?:)/);
+    expect(mask.style.width).toBe('14px');
+    expect(mask.style.height).toBe('14px');
   });
 
   it('uses currentColor SVGs and falls back to the building icon for unknown providers', () => {

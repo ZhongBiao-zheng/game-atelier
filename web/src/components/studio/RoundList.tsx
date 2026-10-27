@@ -115,7 +115,7 @@ function aspectStyle(config: RoundConfig): { aspectRatio: string } {
   return { aspectRatio: '1 / 1' };
 }
 
-type ParameterReuse = (config: RoundConfig, parameter: RoundParameter) => (() => void) | undefined;
+type ParameterReuse = (config: RoundConfig, parameter: RoundParameter) => (() => void) | string | undefined;
 
 function SpecChips({ config, reuseParameter, testId, children }: {
   config: RoundConfig; reuseParameter?: ParameterReuse; testId?: string; children?: ReactNode;
@@ -139,9 +139,10 @@ function SpecChips({ config, reuseParameter, testId, children }: {
   return (
     <div data-testid={testId} className="flex flex-wrap items-center gap-1.5 text-xs text-foreground">
       {values.map(({ parameter, label }) => {
-        const apply = reuseParameter?.(config, parameter);
+        const result = reuseParameter?.(config, parameter);
+        const apply = typeof result === 'function' ? result : undefined;
         return <MetaTag key={parameter} className="inline-flex items-center gap-1"
-          onClick={apply ?? (() => undefined)} disabled={!apply}>
+          onClick={apply ?? (() => undefined)} disabled={!apply} disabledReason={typeof result === 'string' ? result : undefined}>
           {parameter === 'model' && <ModelBrandIcon brand={modelCatalog(config.model)?.brand} size={12} />}
           {label}
         </MetaTag>;

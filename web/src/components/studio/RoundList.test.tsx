@@ -578,7 +578,7 @@ describe('RoundList done metadata: 耗时 + 生成时间', () => {
     const runLine = screen.getByTestId('round-run-meta');
     const cost = screen.getByTestId('round-generation-cost');
     expect(runLine).toHaveClass('flex', 'ml-auto', 'tabular-nums');
-    expect(cost).toHaveTextContent('¥ 10.11');
+    expect(cost).toHaveTextContent('10.11¥');
     expect(runLine.lastElementChild).toBe(cost);
   });
 
@@ -884,7 +884,7 @@ describe('RoundList 保存为创作资产', () => {
 describe('history parameter buttons', () => {
   it('shows all recorded image fields and invokes only the clicked field', () => {
     const apply = vi.fn();
-    const reuseParameter = vi.fn((_config, parameter) => parameter === 'quality' ? apply : undefined);
+    const reuseParameter = vi.fn((_config, parameter) => parameter === 'quality' ? apply : '当前模型不支持');
     render(<RoundList rounds={[{ kind: 'done', jobId: 'tags', submittedAt: new Date().toISOString(), imagePaths: [],
       config: { prompt: 'p', model: 'gpt-image-2', modelName: 'OpenAI: GPT Image 2', ratio: '16:9',
         resolution: '2K', quality: 'high', n: 1, referenceImages: [] } }]} reuseParameter={reuseParameter} />);

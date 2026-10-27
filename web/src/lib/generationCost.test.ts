@@ -114,7 +114,7 @@ describe('estimateGenerationCost', () => {
     });
 
     expect(result).toBeNull();
-    expect(formatGenerationCost(0.24)).toBe('¥ 0.24');
+    expect(formatGenerationCost(0.24)).toBe('0.24¥');
   });
 
   it.each([
@@ -403,12 +403,12 @@ describe('estimateGenerationCost', () => {
     });
 
     expect(result).toBe(7.992);
-    expect(formatGenerationCost(result!)).toBe('¥ 7.99');
+    expect(formatGenerationCost(result!)).toBe('7.99¥');
   });
 
   it('费用展示最多保留两位小数，不补无意义的零', () => {
-    expect(formatGenerationCost(10.1)).toBe('¥ 10.1');
-    expect(formatGenerationCost(10.119)).toBe('¥ 10.12');
+    expect(formatGenerationCost(10.1)).toBe('10.1¥');
+    expect(formatGenerationCost(10.119)).toBe('10.12¥');
   });
 
   it('refuses a misleading Seedance estimate when reference-video duration is unknown', () => {

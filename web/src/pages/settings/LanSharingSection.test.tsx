@@ -57,7 +57,7 @@ describe('LAN sharing', () => {
 
 it('网关只保留密钥和运行中任务，花费链接定位团队成员', async () => {
   render(<LanSharingSection />);
-  const link = await screen.findByRole('link', { name: '¥ 0.5' });
+  const link = await screen.findByRole('link', { name: '0.5¥' });
   expect(link).toHaveAttribute('href', '/settings/usage?scope=team&member=k1');
   expect(screen.queryByRole('region', { name: '供应商状态' })).not.toBeInTheDocument();
   expect(screen.queryByRole('heading', { name: '用量' })).not.toBeInTheDocument();

@@ -1235,7 +1235,7 @@ describe('Studio', () => {
     expect(screen.getAllByRole('img', { name: /生成结果/ })).toHaveLength(2);
     expect(screen.getByTestId('studio-result-thumb-1')).toHaveClass('w-[251.5px]');
     expect(screen.getByTestId('studio-result-thumb-2')).toHaveClass('w-[251.5px]');
-    expect(screen.getByTestId('round-generation-cost')).toHaveTextContent('¥ 0.63');
+    expect(screen.getByTestId('round-generation-cost')).toHaveTextContent('0.63¥');
     expect(screen.getByTestId('round-asset-source')).toHaveTextContent('来源：雨夜电影感');
     expect(screen.getByRole('button', { name: '重新编辑' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '再次生成' })).toBeInTheDocument();
@@ -2947,4 +2947,62 @@ it.each([false, true])('停用供应商不进入创作台，启用后刷新可�
   act(() => window.dispatchEvent(new Event('atelier:keys-changed')));
   fireEvent.click(screen.getByRole('button', { name: '选择厂商' }));
   expect(await screen.findByRole('option', { name: /volc ·/ })).toBeInTheDocument();
+});
+
+
+describe('历史参数不可用原因', () => {
+  it('图片模式下的视频记录提示切换到视频', async () => {
+    const fetchMock = mockCompletedBatchAndKeys();
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url, init) => {
+      const response = await original(url, init);
+      if (url !== '/api/jobs') return response;
+      const jobs = await response.json();
+      jobs[0].kind = 'video';
+      return { ...response, json: async () => jobs };
+    });
+    renderStudio();
+    expect(await screen.findByRole('button', { name: '4:3' })).toHaveAttribute('title', '切换到视频模式后可用');
+  });
+
+  it.each([
+    ['deleted', '该模型已不可用'],
+    ['disabled', '该模型已不可用'],
+    ['missing-model', '该模型已不可用'],
+  ])('区分模型不可用：%s', async (reason, title) => {
+    const fetchMock = mockCompletedBatchAndKeys();
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url, init) => {
+      const response = await original(url, init);
+      if (url !== '/api/keys') return response;
+      const db = await response.json();
+      if (reason === 'deleted') db.keys = [];
+      if (reason === 'disabled') db.keys[0].enabled = false;
+      if (reason === 'missing-model') db.keys[0].models = [];
+      return { ...response, json: async () => db };
+    });
+    renderStudio();
+    const chip = await screen.findByTitle(title);
+    expect(chip).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(chip);
+    expect(chip).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('模式不一致时提示切换模式，匹配时提示能力不支持', async () => {
+    const fetchMock = mockCompletedBatchAndKeys();
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url, init) => {
+      const response = await original(url, init);
+      if (url !== '/api/jobs') return response;
+      const jobs = await response.json();
+      jobs[0].params.quality = 'high';
+      return { ...response, json: async () => jobs };
+    });
+    renderStudio();
+    expect(await screen.findByRole('button', { name: '高' })).toHaveAttribute('title', '当前模型不支持');
+    fireEvent.click(screen.getByRole('button', { name: '选择生成模式' }));
+    fireEvent.click(screen.getByRole('option', { name: '视频' }));
+    expect(screen.getByRole('button', { name: '高' })).toHaveAttribute('title', '切换到图片模式后可用');
+    expect(screen.getByRole('button', { name: '4:3' })).toHaveAttribute('title', '切换到图片模式后可用');
+  });
 });
