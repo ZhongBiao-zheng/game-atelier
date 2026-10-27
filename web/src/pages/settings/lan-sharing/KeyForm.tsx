@@ -33,9 +33,9 @@ export function KeyForm({ record, options, onClose, onSaved, gatewayAlias }: {
     <DialogContent aria-describedby={undefined} className="max-h-[85vh] overflow-y-auto">
       <DialogTitle>{record ? '编辑密钥' : '新建密钥'}</DialogTitle>
       {token ? <div className="space-y-3">
-        <p className="text-sm">网关密钥只显示这一次</p><code className="block break-all text-xs">{token}</code>
+        <p className="text-sm">{gatewayAlias ? '网关密钥只显示这一次' : '网关密钥'}</p><code className="block break-all text-xs">{token}</code>
         <button className={button} onClick={() => void navigator.clipboard.writeText(token)}>复制网关密钥</button>
-      </div> : <form className="space-y-4" onSubmit={e => { e.preventDefault(); void save(); }}>
+      </div> : <form autoComplete="off" className="space-y-4" onSubmit={e => { e.preventDefault(); void save(); }}>
         <label className="block space-y-1 text-sm">名称<Input value={name} maxLength={40} required onChange={e => setName(e.target.value)} /></label>
         <label className="flex items-center justify-between text-sm">角色<select aria-label="角色" value={role} onChange={e => setRole(e.target.value as 'member' | 'admin')} className="rounded-md border border-input bg-background px-3 py-2"><option value="member">成员</option><option value="admin">管理员</option></select></label>
         <fieldset className="space-y-2"><legend className="mb-2 text-sm">限额 <span title="留空表示不限额；多个窗口同时生效。金额包含运行中任务的预占。" tabIndex={0}>?</span></legend>
@@ -47,13 +47,13 @@ export function KeyForm({ record, options, onClose, onSaved, gatewayAlias }: {
           <div className="flex items-center justify-between text-sm">全部<Switch label="全部模型" checked={models === null} onChange={all => setModels(all ? null : [])} /></div>
           {models !== null && (['image', 'video', 'audio', 'text'] as const).map(kind => <div key={kind} className="space-y-1">
             <p className="text-xs text-muted-foreground">{KINDS[kind]}</p>
-            {options.models.filter(m => m.modality === kind).map(m => <label key={`${kind}:${m.id}`} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={models.includes(m.id)} onChange={() => setModels(toggle(models, m.id))} />{m.name}</label>)}
+            {options.models.filter(m => m.modality === kind).map(m => <label key={`${kind}:${m.id}`} className="flex items-center gap-2 text-sm"><input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" type="checkbox" checked={models.includes(m.id)} onChange={() => setModels(toggle(models, m.id))} />{m.name}</label>)}
           </div>)}
-          {models?.filter(id => !options.models.some(m => m.id === id)).map(id => <label key={id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked onChange={() => setModels(toggle(models, id))} />{id}</label>)}
+          {models?.filter(id => !options.models.some(m => m.id === id)).map(id => <label key={id} className="flex items-center gap-2 text-sm"><input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" type="checkbox" checked onChange={() => setModels(toggle(models, id))} />{id}</label>)}
         </fieldset>
         <fieldset className="space-y-2"><legend className="mb-2 text-sm">可用供应商</legend>
           <div className="flex items-center justify-between text-sm">全部<Switch label="全部供应商" checked={aliases === null} onChange={all => setAliases(all ? null : [])} /></div>
-          {aliases !== null && [...new Set([...options.aliases.map(a => a.alias), ...aliases])].map(alias => <label key={alias} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={aliases.includes(alias)} onChange={() => setAliases(toggle(aliases, alias))} />{alias}</label>)}
+          {aliases !== null && [...new Set([...options.aliases.map(a => a.alias), ...aliases])].map(alias => <label key={alias} className="flex items-center gap-2 text-sm"><input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" type="checkbox" checked={aliases.includes(alias)} onChange={() => setAliases(toggle(aliases, alias))} />{alias}</label>)}
         </fieldset>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         <button type="submit" className={button} disabled={busy || !name.trim()}>{busy ? '保存中…' : '保存'}</button>

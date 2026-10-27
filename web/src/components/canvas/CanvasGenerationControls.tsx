@@ -429,7 +429,7 @@ export function CanvasAudioSettings({
               getLabel={value => audioSpeedLabel(value)}
               onSelect={value => onPatch({ speed: value })}
             />
-            <input
+            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
               type="number"
               aria-label="自定义语速"
               min={0.25}
@@ -445,7 +445,7 @@ export function CanvasAudioSettings({
             />
           </SettingsSection>
           <SettingsSection title="朗读指令">
-            <textarea
+            <textarea autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
               aria-label="朗读指令"
               rows={3}
               value={instructionsDraft}

@@ -99,7 +99,7 @@ export function FixedSlot({
 
   return (
     <>
-      <input id={inputId} type="file" accept={accept} className="hidden"
+      <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" id={inputId} type="file" accept={accept} className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(f); e.target.value = ''; }} />
       <label
         htmlFor={disabled ? undefined : inputId}

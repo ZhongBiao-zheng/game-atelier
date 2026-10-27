@@ -397,7 +397,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             ))}
           </div>
         )}
-        <textarea
+        <textarea autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
           ref={textareaRef}
           value={text}
           onChange={event => setText(event.target.value)}

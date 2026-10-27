@@ -1,7 +1,7 @@
 """局域网网关的配置与网关密钥（ADR-0025）。
 
-`.config/gateway.json` 存开关、端口、网关名和每个人的网关密钥。密钥只存 sha256，明文只在创建时
-返回一次；撤销即时生效（每次鉴权都读文件）。文件权限与 Agent 凭据一样只给当前用户。
+`.config/gateway.json` 存开关、端口、网关名和每个人的网关密钥。明文仅供本机管理查看，鉴权继续
+比较 sha256；撤销即时生效（每次鉴权都读文件）。文件权限只给当前用户。
 """
 from __future__ import annotations
 
@@ -54,6 +54,7 @@ class GatewayKeyRecord(GatewayPolicy):
     name: str = Field(min_length=1, max_length=40)
     role: Literal["member", "admin"] = "member"
     token_sha256: str
+    token: str = Field(default="", repr=False)
     created_at: str
     revoked_at: str | None = None
 
@@ -86,10 +87,25 @@ def digest(token: str) -> str:
 
 
 def read_config() -> GatewayConfig:
+    with _lock():
+        return _read_config_locked()
+
+
+def _read_config_locked() -> GatewayConfig:
+    """Caller holds the gateway lock, including while replacing legacy credentials."""
     path = gateway_file()
     if not path.exists():
         return GatewayConfig()
-    return GatewayConfig.model_validate(read_private_json(path, _MAX_FILE_BYTES))
+    config = GatewayConfig.model_validate(read_private_json(path, _MAX_FILE_BYTES))
+    changed = False
+    for record in config.keys:
+        if not record.revoked_at and not record.token:
+            record.token = TOKEN_PREFIX + secrets.token_urlsafe(32)
+            record.token_sha256 = digest(record.token)
+            changed = True
+    if changed:
+        _write(config)
+    return config
 
 
 def _write(config: GatewayConfig) -> None:
@@ -104,7 +120,7 @@ def update_settings(
     *, enabled: bool | None = None, port: int | None = None, name: str | None = None,
 ) -> GatewayConfig:
     with _lock():
-        config = read_config()
+        config = _read_config_locked()
         patch = {k: v for k, v in {"enabled": enabled, "port": port, "name": name}.items()
                  if v is not None}
         updated = GatewayConfig.model_validate({**config.model_dump(), **patch})
@@ -117,15 +133,15 @@ def create_key(
     allowed_models: list[str] | None = None, allowed_aliases: list[str] | None = None,
     *, role: Literal["member", "admin"] = "member", actor_id: str | None = None,
 ) -> tuple[GatewayKeyRecord, str]:
-    """新建网关密钥；返回 (记录, 明文)。明文之后再也拿不到。"""
+    """新建网关密钥；返回 (记录, 明文)。"""
     token = TOKEN_PREFIX + secrets.token_urlsafe(32)
     record = GatewayKeyRecord(
-        id=uuid.uuid4().hex[:12], name=name.strip(), token_sha256=digest(token),
+        id=uuid.uuid4().hex[:12], name=name.strip(), token_sha256=digest(token), token=token,
         limits=limits or [], allowed_models=allowed_models, allowed_aliases=allowed_aliases,
         created_at=_now(), role=role,
     )
     with _lock():
-        config = read_config()
+        config = _read_config_locked()
         actor = require_admin(config, actor_id)
         _write(config.model_copy(update={"keys": [*config.keys, record]}))
         gateway_audit.append("member.create", record.id, {"after": _summary(record)}, actor)
@@ -153,7 +169,7 @@ def revoke_key(key_id: str, *, actor_id: str | None = None) -> GatewayKeyRecord:
 
 def _replace(key_id: str, change, actor_id: str | None, action: str) -> GatewayKeyRecord:
     with _lock():
-        config = read_config()
+        config = _read_config_locked()
         record = next((item for item in config.keys if item.id == key_id), None)
         if record is None:
             raise NoSuchGatewayKeyError(key_id)
@@ -173,6 +189,13 @@ def _replace(key_id: str, change, actor_id: str | None, action: str) -> GatewayK
 
 def _summary(record):
     return record.model_dump(mode="json", include={"name", "role", "limits", "allowed_models", "allowed_aliases", "revoked_at"})
+
+
+def reveal_token(key_id: str) -> str:
+    record = next((key for key in read_config().keys if key.id == key_id), None)
+    if record is None or record.revoked_at or not record.token:
+        raise NoSuchGatewayKeyError(key_id)
+    return record.token
 
 
 def require_admin(config: GatewayConfig, actor_id: str | None):

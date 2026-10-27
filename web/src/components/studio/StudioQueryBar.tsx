@@ -85,7 +85,7 @@ export function StudioQueryBar({
         >
           <Search size={16} aria-hidden />
         </button>
-        <input
+        <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
           ref={searchInputRef}
           value={filters.search}
           placeholder="搜索提示词…"

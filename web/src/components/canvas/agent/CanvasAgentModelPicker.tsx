@@ -59,7 +59,7 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
         aria-label="对话模型"
         className="flex w-72 flex-col rounded-xl border border-border bg-popover p-1.5 shell-glow"
       >
-        <input
+        <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
           value={query}
           onChange={event => setQuery(event.target.value)}
           placeholder="搜索模型"

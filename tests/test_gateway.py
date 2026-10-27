@@ -78,10 +78,12 @@ def _submit(client, *, key="k1", params=None, n=1, model="gpt-image-2", files=No
 
 # ---- 网关密钥 ----
 
-def test_key_plaintext_is_shown_once_and_revocation_is_immediate(isolated_data_root):
+def test_key_plaintext_is_stored_privately_and_revocation_is_immediate(isolated_data_root):
     record, token = gateway_keys.create_key("小王", None)
     stored = gateway_keys.gateway_file().read_text()
-    assert token.startswith("atg_") and token not in stored and record.token_sha256 in stored
+    assert token.startswith("atg_") and token in stored and record.token_sha256 in stored
+    assert gateway_keys.reveal_token(record.id) == token
+    assert token not in repr(record)
     assert gateway_keys.authenticate(token).id == record.id
     gateway_keys.revoke_key(record.id)
     assert gateway_keys.authenticate(token) is None

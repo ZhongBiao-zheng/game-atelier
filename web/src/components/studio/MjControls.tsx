@@ -197,7 +197,7 @@ export function MjControls({
           </Section>
 
           <Section title="风格编号 sref" hint="只填数字；填写后会暂停使用上传的风格参考图">
-            <input
+            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
               type="text"
               inputMode="numeric"
               maxLength={32}
@@ -210,7 +210,7 @@ export function MjControls({
           </Section>
 
           {!evolink && <Section title="个性化 profile" hint="填写 Midjourney Profile code 或 ID">
-            <input
+            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
               type="text"
               value={value.profile}
               onChange={(e) => {
@@ -227,7 +227,7 @@ export function MjControls({
           </Section>}
 
           <Section title="排除词 no" hint="不想出现的东西，逗号分隔">
-            <input
+            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
               type="text"
               value={value.no}
               onChange={(e) => onChange({ no: e.target.value })}
@@ -238,7 +238,7 @@ export function MjControls({
           </Section>
 
           <Section title="种子 seed" hint="填同一个种子 + 同一条 prompt 可复现构图">
-            <input
+            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
               type="text"
               inputMode="numeric"
               value={value.seed}

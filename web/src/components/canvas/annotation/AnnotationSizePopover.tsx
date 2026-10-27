@@ -18,7 +18,7 @@ export function AnnotationSizePopover({ text, value, onChange }: {
     <div className="flex gap-1">{(text ? FONT_PRESETS : STROKE_PRESETS).map(n => <button key={n} type="button" aria-label={`${label} ${n}`}
       className={cn('grid h-8 flex-1 place-items-center rounded-md text-muted-foreground hover:bg-secondary', value === n && 'bg-secondary text-foreground')}
       onClick={() => onChange(n)}><span className="rounded-full bg-current" style={{ width: dot(n), height: dot(n) }} /></button>)}</div>
-    <input aria-label={`${label}调节`} className="annotation-range w-full" type="range" min={text ? 12 : 1} max={text ? 72 : 24} step={1} value={value}
+    <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" aria-label={`${label}调节`} className="annotation-range w-full" type="range" min={text ? 12 : 1} max={text ? 72 : 24} step={1} value={value}
       onChange={event => onChange(Number(event.target.value), true)}
       onPointerUp={event => onChange(Number(event.currentTarget.value))}
       onKeyUp={event => onChange(Number(event.currentTarget.value))} />

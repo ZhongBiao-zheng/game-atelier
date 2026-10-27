@@ -8,7 +8,7 @@ afterEach(() => vi.unstubAllGlobals());
 vi.mock('@/hooks/useSSE', () => ({ useSSE: vi.fn() }));
 vi.mock('@/api/gateway', () => ({ adminBase: (alias: string) => `/api/gateway/providers/${alias}/admin`, fetchGateway: vi.fn(), fetchGatewayOptions: vi.fn(), fetchGatewayService: vi.fn(),
   fetchGatewayTasks: vi.fn(), fetchGatewayMembers: vi.fn(), createGatewayKey: vi.fn(), updateGatewayKey: vi.fn(),
-  revokeGatewayKey: vi.fn(), updateGateway: vi.fn(), gatewayOutputUrl: vi.fn() }));
+  revealGatewayKey: vi.fn(), revokeGatewayKey: vi.fn(), updateGateway: vi.fn(), gatewayOutputUrl: vi.fn() }));
 const key: api.GatewayKey = { id: 'k1', name: '小王', limits: [], allowed_models: null, allowed_aliases: null,
   created_at: '', revoked_at: null, month_charged_cny: .5, month_calls: 1, last_used_at: null, limits_status: [] };
 const state: api.GatewayState = { enabled: true, port: 5180, name: '', default_name: 'mac', keys: [key], status: { running: true, port: 5180, error: null, addresses: ['192.168.1.20'] } };
@@ -180,4 +180,51 @@ it('本机操作日志页签显示操作者与变更', async () => {
   expect(await screen.findByText('负责人')).toBeInTheDocument();
   expect(screen.getByText('修改成员')).toBeInTheDocument();
   expect(requestJson).toHaveBeenCalledWith('/api/gateway/audit', '读取操作日志');
+});
+
+
+describe('member token controls', () => {
+  it('reveals only on demand, hides inline, and copies without revealing', async () => {
+    vi.mocked(api.revealGatewayKey).mockResolvedValue({ token: 'atg_test_only' });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    render(<LanSharingSection />);
+    const reveal = await screen.findByRole('button', { name: '查看 小王 的密钥' });
+    expect(api.revealGatewayKey).not.toHaveBeenCalled();
+    fireEvent.click(reveal);
+    expect(await screen.findByText('atg_test_only')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '隐藏 小王 的密钥' }));
+    expect(screen.queryByText('atg_test_only')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '复制 小王 的密钥' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('atg_test_only'));
+    expect(screen.queryByText('atg_test_only')).not.toBeInTheDocument();
+    expect(api.revealGatewayKey).toHaveBeenCalledTimes(2);
+  });
+  it('does not expose controls to remote admins or revoked members', async () => {
+    vi.stubGlobal('EventSource', class { addEventListener() {} close() {} });
+    const view = render(<LanSharingSection gatewayAlias="remote" />);
+    await screen.findByText('小王');
+    expect(screen.queryByRole('button', { name: /小王 的密钥/ })).not.toBeInTheDocument();
+    view.unmount();
+    vi.mocked(api.fetchGateway).mockResolvedValue({ ...state, keys: [{ ...key, revoked_at: '2026-10-27' }] });
+    render(<LanSharingSection />);
+    await screen.findByText('已撤销');
+    expect(screen.queryByRole('button', { name: /小王 的密钥/ })).not.toBeInTheDocument();
+    expect(api.revealGatewayKey).not.toHaveBeenCalled();
+  });
+  it('reports reveal errors without showing plaintext', async () => {
+    vi.mocked(api.revealGatewayKey).mockRejectedValue(new Error('密钥已撤销'));
+    render(<LanSharingSection />);
+    fireEvent.click(await screen.findByRole('button', { name: '查看 小王 的密钥' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('密钥已撤销');
+    expect(screen.queryByRole('button', { name: '隐藏 小王 的密钥' })).not.toBeInTheDocument();
+  });
+  it('renames inline with only a name patch', async () => {
+    vi.mocked(api.updateGatewayKey).mockResolvedValue({ ...key, name: '新名字' });
+    render(<LanSharingSection />);
+    fireEvent.click(await screen.findByRole('button', { name: '重命名 小王' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '修改 小王 的名称' }), { target: { value: '新名字' } });
+    fireEvent.keyDown(screen.getByRole('textbox', { name: '修改 小王 的名称' }), { key: 'Enter' });
+    await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { name: '新名字' }));
+  });
 });

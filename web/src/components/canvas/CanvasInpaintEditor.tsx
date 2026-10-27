@@ -169,7 +169,7 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
       <label className="flex items-center gap-2.5 px-2">
         <span className="sr-only">笔刷大小</span>
         <span className="size-1.5 rounded-full bg-muted-foreground" aria-hidden />
-        <input type="range" min={BRUSH_MIN} max={BRUSH_MAX} value={brushSize} className="w-28 accent-primary"
+        <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" type="range" min={BRUSH_MIN} max={BRUSH_MAX} value={brushSize} className="w-28 accent-primary"
           onChange={event => setBrushSize(Number(event.target.value))} />
         <span className="size-3.5 rounded-full bg-muted-foreground" aria-hidden />
         <span className="w-7 tabular-nums text-xs">{brushSize}</span>

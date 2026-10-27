@@ -31,6 +31,9 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 };
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
+// 下次发版写入新版本 changes（日常开发不改已发布条目、不提前 bump）：
+// { kind: 'feat', text: '网关成员密钥可在中转机本机随时查看和复制，点击成员名称可直接改名。' },
+// { kind: 'fix', text: '升级后，旧的未撤销网关成员密钥会自动重发，旧密钥立即失效；请在网关成员列表复制新密钥并通知对应成员更换。已撤销密钥不会重发。' },
 export const CHANGELOG: ChangelogEntry[] = [
   { version: '5.130.0', date: '2026-10-26', headline: '应用内更新与质量参数修正', changes: [
     { kind: 'feat', text: '安装包会后台下载并校验新版，准备好后可在应用内确认更新；等待任务完成再重启，也可取消等待。' },

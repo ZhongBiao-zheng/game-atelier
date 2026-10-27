@@ -5317,7 +5317,7 @@ function CanvasEditorInner({
               <span className="inline-grid h-9 max-w-28 items-center overflow-hidden rounded-md bg-secondary px-2 text-sm font-medium sm:max-w-52">
                 {/* 输入框宽度跟着名字走：隐藏的同字号文本撑开格子，输入框铺满它。 */}
                 <span aria-hidden="true" className="invisible col-start-1 row-start-1 whitespace-pre">{projectRenameDraft || ' '}</span>
-                <input
+                <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
                 size={1}
                 ref={projectRenameInputRef}
                 value={projectRenameDraft}
@@ -5429,8 +5429,8 @@ function CanvasEditorInner({
           </div>
         )}
 
-        <input ref={uploadRef} type="file" multiple aria-label="选择上传素材" className="sr-only" accept="image/*,video/*,audio/*" onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ''; handleUploads(files); }} />
-        <input
+        <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" ref={uploadRef} type="file" multiple aria-label="选择上传素材" className="sr-only" accept="image/*,video/*,audio/*" onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ''; handleUploads(files); }} />
+        <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
           ref={replaceMediaRef}
           type="file"
           className="sr-only"

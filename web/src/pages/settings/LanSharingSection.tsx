@@ -7,6 +7,7 @@ import {
   fetchGatewayService,
   revokeGatewayKey,
   updateGateway,
+  updateGatewayKey,
   type GatewayKey,
   type GatewayOptions,
   type GatewayService,
@@ -17,6 +18,8 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { formatGenerationCost } from '@/lib/generationCost';
 import { KeyForm } from './lan-sharing/KeyForm';
+import { GatewayMemberName } from './lan-sharing/GatewayMemberName';
+import { GatewayMemberToken } from './lan-sharing/GatewayMemberToken';
 import { Tasks } from './lan-sharing/Tasks';
 import { button, date, PERIODS } from './lan-sharing/shared';
 
@@ -99,7 +102,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
           }}>{copiedAddress === address ? '已复制' : '复制'}</button>
         </div>}
         {state?.enabled && (editingPort ? (
-          <form className="flex flex-wrap items-center gap-2" onSubmit={event => {
+          <form autoComplete="off" className="flex flex-wrap items-center gap-2" onSubmit={event => {
             event.preventDefault();
             if (busy || !(Number(port) >= 1024 && Number(port) <= 65535)) return;
             void run(() => updateGateway({ port: Number(port) })).then(saved => {
@@ -151,12 +154,16 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
                   </thead>
                   <tbody>
                     {state?.keys.map((key) => (
-                      <tr key={key.id} className={`border-t border-border ${key.revoked_at ? 'opacity-50' : ''}`}>
+                      <tr key={`${gatewayAlias ?? 'local'}:${key.id}`} className={`border-t border-border ${key.revoked_at ? 'opacity-50' : ''}`}>
                         <td
-                          className={`max-w-32 truncate px-4 py-3 ${key.revoked_at ? 'text-muted-foreground' : ''}`}
-                          title={key.name}
+                          className={`max-w-64 px-4 py-3 ${key.revoked_at ? 'text-muted-foreground' : ''}`}
                         >
-                          {key.name}
+                          <div className="flex flex-wrap items-center gap-1">
+                            {key.revoked_at ? <span className="truncate" title={key.name}>{key.name}</span>
+                              : <GatewayMemberName name={key.name} disabled={busy}
+                                onSave={name => run(() => updateGatewayKey(key.id, { name }, ...(gatewayAlias ? [gatewayAlias] as const : [])))} />}
+                            {!gatewayAlias && !key.revoked_at && <GatewayMemberToken id={key.id} name={key.name} onError={setError} />}
+                          </div>
                         </td>
                         <td className="whitespace-nowrap px-4">{key.role === 'admin' ? '管理员' : '成员'}</td>
                         <td className="min-w-40 space-y-2 px-4 py-3">

@@ -128,7 +128,7 @@ export function CanvasImageToolbarPreferencesDialog({
             const Icon = tool.icon;
             return (
               <div key={tool.id} className={TOOL_ROW_CLASS}>
-                <input
+                <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
                   type="checkbox"
                   aria-label={`显示${tool.label}`}
                   checked={false}
@@ -172,7 +172,7 @@ function VisibleToolRow({ tool, inMore, onHide, onMove }: {
       whileDrag={{ zIndex: 20 }}
       className={TOOL_ROW_CLASS}
     >
-      <input
+      <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
         type="checkbox"
         aria-label={`显示${tool.label}`}
         checked

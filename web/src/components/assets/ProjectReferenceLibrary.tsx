@@ -162,7 +162,7 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
   }}>
     <div className="border-b border-border p-3">
       <Button variant="outline" size="sm" disabled={busy} onClick={() => input.current?.click()}><Upload />导入</Button>
-      <input ref={input} type="file" multiple accept="image/*" aria-label="导入参考图" className="hidden" onChange={event => {
+      <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" ref={input} type="file" multiple accept="image/*" aria-label="导入参考图" className="hidden" onChange={event => {
         void importFiles(Array.from(event.target.files ?? [])); event.target.value = '';
       }} />
       {error && <p role="alert" className="mt-2 text-xs text-destructive">{error}</p>}

@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -47,7 +47,7 @@ class GatewayKeyPatch(BaseModel):
 def _key_view(record: gateway_keys.GatewayKeyRecord) -> dict:
     with gateway_tasks._lock:
         return {
-            **record.model_dump(mode="json", exclude={"token_sha256"}),
+            **record.model_dump(mode="json", exclude={"token_sha256", "token"}),
             "limits_status": gateway_quota.usage_summary(record),
             **gateway_quota.month_summary(record),
             "last_used_at": gateway_tasks.last_used_at(record.id),
@@ -100,6 +100,15 @@ def update_gateway_key(key_id: str, body: GatewayKeyPatch) -> dict:
         raise HTTPException(404, "网关密钥不存在") from error
     except ValidationError as error:
         raise HTTPException(422, "网关密钥配置不合法（限额窗口不能重复）") from error
+
+
+@gateway_router.get("/keys/{key_id}/token")
+def reveal_gateway_token(key_id: str, response: Response) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return {"token": gateway_keys.reveal_token(key_id)}
+    except gateway_keys.NoSuchGatewayKeyError as error:
+        raise HTTPException(404, "网关密钥不存在或已撤销") from error
 
 
 @gateway_router.post("/keys/{key_id}/revoke")

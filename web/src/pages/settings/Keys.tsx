@@ -145,7 +145,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
         <div className="flex flex-wrap items-center gap-2">
         {embedded && <label className="flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-muted-foreground focus-within:ring-1 focus-within:ring-ring">
           <Search className="size-3.5" aria-hidden />
-          <input aria-label="查找供应商" placeholder="查找供应商" value={query}
+          <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" aria-label="查找供应商" placeholder="查找供应商" value={query}
             onChange={event => setQuery(event.target.value)}
             className="w-44 min-w-0 bg-transparent text-sm text-foreground outline-none" />
         </label>}

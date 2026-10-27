@@ -197,7 +197,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
               <Plus aria-hidden="true" />新建项目
             </Button>
           </div>
-          <input
+          <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
             ref={importRef}
             type="file"
             accept=".zip,application/zip"
@@ -250,7 +250,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
               <DialogTitle>新建画布项目</DialogTitle>
               <DialogDescription></DialogDescription>
             </DialogHeader>
-            <form className="space-y-4" onSubmit={submitEditor}>
+            <form autoComplete="off" className="space-y-4" onSubmit={submitEditor}>
               <div className="space-y-2">
                 <Label htmlFor="canvas-project-name">画布项目名称</Label>
                 <Input
@@ -312,7 +312,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
                 项目、节点、媒体与生成记录将被永久删除，此操作无法撤销。
               </DialogDescription>
             </DialogHeader>
-            <form className="space-y-4" onSubmit={submitDelete}>
+            <form autoComplete="off" className="space-y-4" onSubmit={submitDelete}>
               {deleteError && <p role="alert" className="text-xs text-destructive">{deleteError}</p>}
               <DialogFooter>
                 <Button type="button" variant="outline" disabled={Boolean(busyProjectId)} onClick={() => setDeleteState({ open: false })}>取消</Button>

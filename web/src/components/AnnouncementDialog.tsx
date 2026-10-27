@@ -183,7 +183,7 @@ export function AnnouncementDialog({ announcement, onClose }: { announcement: An
                     const key = selectionKey(item.key.alias, candidate.model.id);
                     return (
                       <label key={candidate.model.id} className="flex items-center gap-2 rounded-md px-1 py-1 text-sm hover:bg-secondary/40">
-                        <input
+                        <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
                           type="checkbox"
                           className="accent-primary"
                           disabled={candidate.added}

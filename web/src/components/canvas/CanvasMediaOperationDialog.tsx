@@ -451,7 +451,7 @@ function PixelField({ label, value, max, onCommit }: {
   return (
     <label className="flex h-9 items-center gap-2 rounded-md border border-input px-2.5 text-xs text-muted-foreground focus-within:ring-2 focus-within:ring-primary">
       <span>{label}</span>
-      <input
+      <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
         type="text"
         inputMode="numeric"
         aria-label={`裁剪${label}度（像素）`}

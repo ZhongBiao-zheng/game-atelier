@@ -72,7 +72,7 @@ export function CanvasFinalizationMenu({ node, content, context, disabled, onOve
             <Button variant="ghost" size="icon" aria-label={`删除类别 ${value}`} disabled={busy} onClick={() => void save(categories.filter(item => item !== value))}><Trash2 className="size-4" /></Button>
           </div>)}
         </div>
-        <form className="flex gap-2" onSubmit={event => {
+        <form autoComplete="off" className="flex gap-2" onSubmit={event => {
           event.preventDefault();
           if (name.trim() && !busy) void save([...categories, name.trim()]);
         }}>

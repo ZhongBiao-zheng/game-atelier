@@ -56,7 +56,7 @@ export function DataRootPage({ onComplete }: Props) {
       <div className="space-y-2">
         {DEFAULT_PATHS.map(opt => (
           <label key={opt.value} className="flex items-center gap-3">
-            <input
+            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
               type="radio"
               name="data-root"
               checked={path === opt.value}
@@ -66,7 +66,7 @@ export function DataRootPage({ onComplete }: Props) {
           </label>
         ))}
         <label className="flex items-center gap-3">
-          <input
+          <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
             type="radio"
             name="data-root"
             checked={isCustom}
@@ -78,7 +78,7 @@ export function DataRootPage({ onComplete }: Props) {
       <div>
         <label htmlFor="path-input" className="block text-sm mb-1">数据目录路径</label>
         <div className="flex gap-2">
-          <input
+          <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
             id="path-input"
             type="text"
             value={path}

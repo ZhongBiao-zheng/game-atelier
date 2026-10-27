@@ -103,7 +103,7 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
         aria-label="Skill"
         className="flex w-72 flex-col rounded-xl border border-border bg-popover p-1.5 shell-glow"
       >
-        <input
+        <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
           value={query}
           onChange={event => setQuery(event.target.value)}
           placeholder="搜索 Skill"
@@ -147,7 +147,7 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
             <FolderOpen className="size-3.5" />导入文件夹
           </button>
         </div>
-        <input
+        <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
           ref={archiveRef}
           type="file"
           accept=".zip,.md"
@@ -159,7 +159,7 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
             void importFiles(files, []);
           }}
         />
-        <input
+        <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
           ref={folderRef}
           type="file"
           aria-label="选择 Skill 文件夹"

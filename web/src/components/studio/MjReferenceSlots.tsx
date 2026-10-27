@@ -99,7 +99,7 @@ function MjReferenceGroup({
       title={disabled ? disabledHint : undefined}
       className={`group relative h-[70px] w-[56px] shrink-0 ${disabled && files.length > 0 ? 'opacity-40' : ''}`}
     >
-      <input
+      <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
         id={inputId}
         type="file"
         accept="image/*"

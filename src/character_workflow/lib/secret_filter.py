@@ -11,6 +11,7 @@ _PATTERNS = [
 
 
 def _redact(text: str) -> str:
+    text = re.sub(r"\batg_[A-Za-z0-9_-]+", "atg_***", text)
     for pat in _PATTERNS:
         text = pat.sub(r"\1=***", text)
     return text

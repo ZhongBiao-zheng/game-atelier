@@ -1,0 +1,20 @@
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import { Input } from './input';
+import { Textarea } from './textarea';
+
+describe('shared input privacy defaults', () => {
+  it.each([Input, Textarea])('opts out by default and preserves explicit caller attributes', Component => {
+    const view = render(<Component aria-label="field" />);
+    const field = screen.getByLabelText('field');
+    expect(field).toHaveAttribute('autocomplete', 'off');
+    expect(field).toHaveAttribute('data-1p-ignore', '');
+    expect(field).toHaveAttribute('data-lpignore', 'true');
+    expect(field).toHaveAttribute('data-form-type', 'other');
+    view.rerender(<Component aria-label="field" autoComplete="on" data-1p-ignore="false" data-lpignore="false" data-form-type="custom" />);
+    expect(field).toHaveAttribute('autocomplete', 'on');
+    expect(field).toHaveAttribute('data-1p-ignore', 'false');
+    expect(field).toHaveAttribute('data-lpignore', 'false');
+    expect(field).toHaveAttribute('data-form-type', 'custom');
+  });
+});

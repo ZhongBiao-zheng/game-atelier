@@ -131,7 +131,7 @@ export function EditorComposer({ prompt, onPrompt, placeholder, chips, blocker, 
 }) {
   return <fieldset disabled={busy} className="contents">
     {children}
-    <textarea aria-label="编辑提示词" rows={2} value={prompt} placeholder={placeholder}
+    <textarea autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" aria-label="编辑提示词" rows={2} value={prompt} placeholder={placeholder}
       className="block w-full resize-none border-0 bg-transparent px-1 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground"
       onChange={event => onPrompt(event.target.value)}
       onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); if (!blocker) onGenerate(); } }} />

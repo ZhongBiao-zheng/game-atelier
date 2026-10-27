@@ -214,6 +214,7 @@ def test_agent_credentials_never_become_browser_or_local_management_identity(cli
     bootstrap(client)
     native, _, _, _ = create_grant(client)
     assert native.get("/api/canvas/projects", headers=LOCAL_HEADERS).status_code == 403
+    assert native.get("/api/gateway/keys/any-member/token", headers=LOCAL_HEADERS).status_code == 403
     assert client.get("/api/canvas/projects", headers={
         "Authorization": native.headers["Authorization"],
     }).status_code == 403

@@ -52,7 +52,7 @@ export function ProviderAddPage() {
       <div className="flex items-center gap-2">
         <label className="flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-muted-foreground focus-within:ring-1 focus-within:ring-ring">
           <Search className="size-3.5" aria-hidden />
-          <input aria-label="查找供应商" placeholder="查找供应商" value={query} onChange={e => setQuery(e.target.value)}
+          <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" aria-label="查找供应商" placeholder="查找供应商" value={query} onChange={e => setQuery(e.target.value)}
             className="w-44 min-w-0 bg-transparent text-sm text-foreground outline-none" />
         </label>
         <Link href="/settings/providers" className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-secondary">关闭</Link>
@@ -80,9 +80,9 @@ export function ProviderAddPage() {
       </section>;
     })}
     {visible.length === 0 && <p className="text-sm text-muted-foreground">没有匹配的供应商</p>}
-    <form onSubmit={e => { e.preventDefault(); custom(); }} className="mt-auto flex flex-wrap items-center gap-3 border-t border-border pt-5">
+    <form autoComplete="off" onSubmit={e => { e.preventDefault(); custom(); }} className="mt-auto flex flex-wrap items-center gap-3 border-t border-border pt-5">
       <label htmlFor="custom-provider-address" className="flex items-center gap-1.5 text-sm font-medium text-primary"><Plus className="size-3.5" aria-hidden />自定义供应商</label>
-      <input id="custom-provider-address" aria-label="自定义供应商地址" placeholder="任意 OpenAI 兼容地址，如 https://api.example.com/v1"
+      <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" id="custom-provider-address" aria-label="自定义供应商地址" placeholder="任意 OpenAI 兼容地址，如 https://api.example.com/v1"
         value={address} onChange={e => setAddress(e.target.value)}
         className="h-10 min-w-0 flex-[1_1_360px] rounded-md border border-input bg-background px-3 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" />
       <button type="submit" disabled={!address.trim()} className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50">继续</button>

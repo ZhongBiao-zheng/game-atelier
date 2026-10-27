@@ -808,7 +808,7 @@ export function PromptInput({
             className={`shrink-0 self-stretch relative overflow-visible transition-transform duration-300 origin-left ${collapsed ? 'scale-80' : ''}`}
             style={{ width: REF_W + 14 }}
           >
-            <input
+            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
               ref={refFileInputRef}
               id={refInputId}
               type="file"

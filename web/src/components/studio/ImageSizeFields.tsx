@@ -80,13 +80,13 @@ export function ImageSizeFields({ caps, model, baseUrl, params, onPatch }: {
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg bg-popover p-2"
             onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) commit(); }}>
             <label className="min-w-0 text-xs text-muted-foreground">宽
-              <input type="number" aria-label="输出宽度" min={1} max={100000} step={1} value={width}
+              <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" type="number" aria-label="输出宽度" min={1} max={100000} step={1} value={width}
                 aria-invalid={Boolean(error)} onChange={event => change(event.target.value, height)}
                 className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm tabular-nums text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring" />
             </label>
             <span className="pt-5 text-xs text-muted-foreground">×</span>
             <label className="min-w-0 text-xs text-muted-foreground">高
-              <input type="number" aria-label="输出高度" min={1} max={100000} step={1} value={height}
+              <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" type="number" aria-label="输出高度" min={1} max={100000} step={1} value={height}
                 aria-invalid={Boolean(error)} onChange={event => change(width, event.target.value)}
                 className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm tabular-nums text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring" />
             </label>

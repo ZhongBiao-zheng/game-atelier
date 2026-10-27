@@ -96,6 +96,11 @@ export async function updateGatewayKey(id: string, patch: Partial<GatewayKeyInpu
   });
 }
 
+/** Plaintext is available only on this machine, never through remote admin proxies. */
+export async function revealGatewayKey(id: string) {
+  return requestJson<{ token: string }>(`/api/gateway/keys/${encodeURIComponent(id)}/token`, '读取网关密钥');
+}
+
 export async function fetchGatewayOptions(alias?: string) {
   return requestJson<GatewayOptions>(`${gatewayBase(alias)}/options`, '读取网关模型与供应商');
 }

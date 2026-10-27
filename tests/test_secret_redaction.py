@@ -38,3 +38,11 @@ def test_does_not_alter_safe_messages():
     logger, h = _build_logger("test-redact-4")
     logger.info("hello world")
     assert "hello world" in h.getvalue()
+
+
+def test_redacts_gateway_token_in_headers_and_payloads():
+    logger, output = _build_logger("test-redact-gateway")
+    token = "atg_test-only-credential"
+    logger.info("Authorization: Bearer %s; payload: %s", token, {"token": token})
+    assert token not in output.getvalue()
+    assert output.getvalue().count("atg_***") == 2

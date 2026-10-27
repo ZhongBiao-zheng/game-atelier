@@ -640,7 +640,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         >
           {nodeIcon(node)}
           {isEditingTitle ? (
-            <input
+            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
               ref={titleInputRef}
               value={titleDraft}
               maxLength={120}
@@ -918,7 +918,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
                 />
               </div>
             ) : isEditingText ? (
-              <textarea
+              <textarea autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
                 ref={textEditorRef}
                 aria-label={`编辑 ${node.title} 正文`}
                 // 显示值取本地草稿：文档值要绕画布文档 → React Flow 节点 → 本组件一圈才回来，
@@ -3703,7 +3703,7 @@ function MediaPreview({
             </SwapIcon>
           </button>
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{formatMediaTime(videoCurrentTime)}</span>
-          <input
+          <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
             type="range"
             aria-label="视频播放进度"
             min={0}
@@ -3733,7 +3733,7 @@ function MediaPreview({
             </button>
             <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 pb-1 opacity-0 transition-opacity group-focus-within/volume:pointer-events-auto group-focus-within/volume:opacity-100 group-hover/volume:pointer-events-auto group-hover/volume:opacity-100">
               <div className="grid h-24 w-7 place-items-center rounded-lg border border-border bg-glass py-2 backdrop-blur-glass">
-                <input
+                <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
                   type="range"
                   aria-label="视频音量"
                   aria-orientation="vertical"

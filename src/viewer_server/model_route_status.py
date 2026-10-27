@@ -37,7 +37,7 @@ def restore_gateway_member(body: GatewayMemberRestore) -> dict:
 
 def restore_member(modality, alias, actor=None):
     with gateway_keys._lock():
-        current = gateway_keys.require_admin(gateway_keys.read_config(), actor.id if actor else None)
+        current = gateway_keys.require_admin(gateway_keys._read_config_locked(), actor.id if actor else None)
         before = [row for row in model_routes.member_statuses() if row["alias"] == alias and row["modality"] == modality]
         model_routes.clear_member_status(modality, alias)
         gateway_audit.append("upstream.restore", alias, {"modality": modality, "before": before, "after": "available"}, current)
