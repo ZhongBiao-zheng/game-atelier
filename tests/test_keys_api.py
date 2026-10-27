@@ -36,6 +36,23 @@ def test_non_subscription_provider_requires_nonempty_key(client, provider, secre
     assert keys.find_by_alias("missing-secret") is None
 
 
+def test_stored_keyless_provider_still_loads(client):
+    """收紧只在写入边界：旧版允许的空密钥记录读盘不能拖垮整个 keys.json。"""
+    import json
+    from character_workflow.lib import data_root
+
+    path = data_root.keys_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"keys": [{
+        "alias": "local", "provider": "custom", "base_url": "http://127.0.0.1:11434/v1",
+        "access_key": "", "created_at": "2026-10-01T00:00:00Z",
+    }]}), encoding="utf-8")
+    assert keys.find_by_alias("local").access_key == ""
+    assert client.get("/api/keys").status_code == 200
+    assert client.patch("/api/keys/local", json={"notes": "kept"}).status_code == 200
+    assert keys.find_by_alias("local").notes == "kept"
+
+
 def test_cannot_clear_existing_provider_key(client):
     assert client.post("/api/keys", json=_make_payload()).status_code == 201
     response = client.patch("/api/keys/lov", json={"access_key": "  "})

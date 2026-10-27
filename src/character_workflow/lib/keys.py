@@ -99,8 +99,7 @@ class KeySpec(BaseModel):
         if self.provider != "chatgpt":
             if self.auth_source is not None:
                 raise ValueError("只有 ChatGPT 订阅支持 Codex 登录")
-            if not self.access_key.strip():
-                raise ValueError("供应商密钥不能为空")
+            # 密钥非空只在 API 写入边界检查：这里读盘也会执行，旧版允许的空密钥记录不能拖垮整个 keys.json。
             return self
         if self.access_key or self.secret_key or self.base_url or self.billing_group:
             raise ValueError("ChatGPT 订阅读取 Codex 登录，不接受密钥或自定义地址")

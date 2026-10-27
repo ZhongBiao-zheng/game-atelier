@@ -878,6 +878,8 @@ def set_model_route_mode(payload: _ModelModePayload) -> dict:
 @router.post("/keys", status_code=201)
 def create_key(payload: _KeyCreatePayload) -> dict:
     from datetime import datetime, timezone
+    if payload.provider != "chatgpt" and not payload.access_key.strip():
+        raise HTTPException(422, "供应商密钥不能为空")
     try:
         spec = keys.KeySpec(
             alias=payload.alias, provider=payload.provider, enabled=payload.enabled,
@@ -914,6 +916,8 @@ def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
     # billing_group 留空表示明确关闭聚合商计价；不能像密钥字段一样把显式 null 当作“未传”。
     if "billing_group" in payload.model_fields_set:
         patch_data["billing_group"] = payload.billing_group
+    if "access_key" in patch_data and not str(patch_data["access_key"]).strip():
+        raise HTTPException(422, "供应商密钥不能为空")
     try:
         keys.patch_key(alias, patch_data)
     except keys.NoSuchAliasError:
