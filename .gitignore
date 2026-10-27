@@ -7,6 +7,10 @@ images/
 *.webp
 *.gif
 
+# Bundled provider marks are application assets.
+!web/src/assets/providers/*.png
+!web/dist/assets/tuzi.png
+
 # 角色数据与项目数据（每个画师本地一份，dev 模式 data root 指向仓库根时产生）
 characters/
 projects/

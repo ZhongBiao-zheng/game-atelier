@@ -57,9 +57,9 @@ describe('CanvasModelPicker', () => {
         alias="主力" model="gpt-image-2" params={{ n: 4, quality: 'high' }} onSelect={vi.fn()} />);
       expect(request).not.toHaveBeenCalled();
       fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
-      await waitFor(() => expect(screen.getByRole('option', { name: 'GPT Image 2' })).toHaveTextContent('¥0.24'));
-      expect(screen.getByRole('option', { name: 'GPT Image 2' })).toHaveTextContent('≈ 2m');
-      expect(screen.getByRole('option', { name: 'Banana' })).toHaveTextContent('¥0.10');
+      await waitFor(() => expect(screen.getByRole('option', { name: 'GPT Image 2' })).toHaveTextContent('0.24¥'));
+      expect(screen.getByRole('option', { name: 'GPT Image 2' })).toHaveTextContent('120s');
+      expect(screen.getByRole('option', { name: 'Banana' })).toHaveTextContent('0.1¥');
       expect(screen.getByRole('option', { name: 'Banana' })).not.toHaveTextContent('≈');
       expect(screen.getByRole('option', { name: 'Unknown' })).toHaveTextContent(/^Unknown$/);
       const batch = request.mock.calls.find(([url]) => url === '/api/pricing/estimate-batch')!;

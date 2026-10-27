@@ -1,8 +1,10 @@
+import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
+import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Box, Building2, Settings2 } from 'lucide-react';
+import { Settings2 } from 'lucide-react';
 
 import { ModelPickerList } from '@/components/ModelPickerList';
-import { modelDisplayName, sortModels } from '@/lib/modelCatalog';
+import { modelCatalog, modelDisplayName, sortModels } from '@/lib/modelCatalog';
 import { modelModality, type KeyView } from '@/api/keys';
 import { AUTO_PROVIDER_ALIAS, isAutoProvider } from '@/lib/modelRoutes';
 import { ImageSizeFields } from '@/components/studio/ImageSizeFields';
@@ -76,7 +78,7 @@ export function CanvasModelPicker({ choices, alias, model, onSelect, params = {}
     <div ref={providerRef} className="min-w-0 flex-1 basis-24">
       <button type="button" aria-label="选择生成供应商" aria-expanded={open === 'provider'}
         onClick={() => setOpen(open === 'provider' ? null : 'provider')} className={buttonClass}>
-        <Building2 size={14} className="shrink-0" aria-hidden="true" />
+        <ProviderBrandIcon provider={provider} size={14} />
         <span className="truncate">{provider ? groupLabel(provider) : '供应商'}</span>
       </button>
       <ToolbarPopover open={open === 'provider'} onClose={() => setOpen(null)} anchorRef={providerRef}
@@ -92,7 +94,7 @@ export function CanvasModelPicker({ choices, alias, model, onSelect, params = {}
             setOpen(null);
             providerRef.current?.querySelector('button')?.focus();
           }} className="flex w-full items-center gap-3 rounded-md px-3 py-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/50">
-          <Building2 size={20} className="shrink-0" aria-hidden="true" />
+          <ProviderBrandIcon provider={key} />
           <span className="min-w-0 truncate">{groupLabel(key)}</span>
         </button>)}
       </ToolbarPopover>
@@ -100,7 +102,7 @@ export function CanvasModelPicker({ choices, alias, model, onSelect, params = {}
     <div ref={modelRef} className="min-w-0 flex-1 basis-32">
       <button type="button" aria-label="选择生成模型" aria-expanded={open === 'model'}
         onClick={() => setOpen(open === 'model' ? null : 'model')} className={buttonClass}>
-        <Box size={14} className="shrink-0" aria-hidden="true" />
+        <ModelBrandIcon brand={modelCatalog(selected?.model.id ?? '')?.brand} size={14} />
         <span className="truncate">{selected ? modelDisplayName(selected.model) : '选择模型'}</span>
       </button>
       <ToolbarPopover open={open === 'model'} onClose={() => setOpen(null)} anchorRef={modelRef}

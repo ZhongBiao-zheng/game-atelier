@@ -3,7 +3,18 @@ import type { KeyModel } from '@/api/keys';
 export type ProviderKind = 'official' | 'relay' | 'custom' | 'team';
 type ApiModality = 'image' | 'video' | 'audio' | 'llm';
 
-export const PROVIDER_MONOGRAMS: Record<string, string> = { openai: 'AI', seedream: 'VA', openrouter: 'OR', tokendance: 'TD', tuzi: 'TZ', 'openai-hk': 'HK', evolink: 'EV', atelier: 'LAN', custom: 'API' };
+/** One identity rule for presets, settings and generation controls. */
+export function providerPresetId(key?: { provider?: string; base_url?: string | null } | null): string {
+  if (key?.provider && key.provider !== 'custom') return key.provider;
+  try {
+    const host = new URL(key?.base_url || '').hostname;
+    for (const [domain, id] of [['tu-zi.com', 'tuzi'], ['openai-hk.com', 'openai-hk']]) {
+      if (host === domain || host.endsWith(`.${domain}`)) return id;
+    }
+  } catch { /* An unconfigured or invalid address is a custom provider. */ }
+  return 'custom';
+}
+
 
 export interface ProviderPreset {
   id: string;

@@ -1,8 +1,10 @@
+import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
+import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowUp, BookmarkPlus, Box, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Building2, Video, X } from 'lucide-react';
+import { ArrowUp, BookmarkPlus, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Video, X } from 'lucide-react';
 import { ModelPickerList } from '@/components/ModelPickerList';
-import { modelDisplayName, sortModels } from '@/lib/modelCatalog';
+import { modelCatalog, modelDisplayName, sortModels } from '@/lib/modelCatalog';
 import { modelModality, type KeyView } from '@/api/keys';
 import { hasImageSizeSelection, imageSizeMode, imageSizeSummary, imageSizeError, normalizeImageSizeParams } from '@/lib/imageSizeMode';
 import { isAutoProvider, sizeContext } from '@/lib/modelRoutes';
@@ -1091,7 +1093,7 @@ export function PromptInput({
               onClick={() => setOpenPanel(openPanel === 'kind' ? null : 'kind')}
             >
               {isVideo ? <Video size={14} aria-hidden /> : <ImageIcon size={14} aria-hidden />}
-              {isVideo ? '视频生成' : '图片生成'}
+              {isVideo ? '视频' : '图片'}
             </ControlButton>
             <ToolbarPopover
               open={openPanel === 'kind'}
@@ -1104,8 +1106,8 @@ export function PromptInput({
             >
                 <div className="px-3 py-2 text-sm text-muted-foreground">生成模式</div>
                 {([
-                  { key: 'image', label: '图片生成', icon: <ImageIcon size={18} aria-hidden /> },
-                  { key: 'video', label: '视频生成', icon: <Video size={18} aria-hidden /> },
+                  { key: 'image', label: '图片', icon: <ImageIcon size={18} aria-hidden /> },
+                  { key: 'video', label: '视频', icon: <Video size={18} aria-hidden /> },
                 ] as const).map((item) => (
                   <button
                     key={item.key}
@@ -1132,7 +1134,7 @@ export function PromptInput({
               onClick={() => setOpenPanel(openPanel === 'provider' ? null : 'provider')}
               disabled={visibleProviders.length === 0}
             >
-              <Building2 size={14} aria-hidden /> {providerDisplayName}
+              <ProviderBrandIcon provider={provider} size={14} /> {providerDisplayName}
             </ControlButton>
             <ToolbarPopover
               open={openPanel === 'provider'}
@@ -1161,7 +1163,7 @@ export function PromptInput({
                     }}
                     className="flex shrink-0 h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
                   >
-                    <Building2 size={20} aria-hidden />
+                    <ProviderBrandIcon provider={item} />
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-medium">{providerName(item)}</span>
                       <span className="block truncate text-xs text-muted-foreground">{isAutoProvider(item) ? '' : `${item.alias} · `}{item.models.length} models</span>
@@ -1178,7 +1180,7 @@ export function PromptInput({
               onClick={() => setOpenPanel(openPanel === 'model' ? null : 'model')}
               disabled={!provider || models.length === 0}
             >
-              <Box size={14} aria-hidden /> {selectedModel ? modelDisplayName(selectedModel) : models.length > 0 ? '选择模型' : '未配置模型'}
+              <ModelBrandIcon brand={modelCatalog(selectedModel?.id ?? '')?.brand} size={14} /> {selectedModel ? modelDisplayName(selectedModel) : models.length > 0 ? '选择模型' : '未配置模型'}
             </ControlButton>
             <ToolbarPopover
               open={openPanel === 'model'}

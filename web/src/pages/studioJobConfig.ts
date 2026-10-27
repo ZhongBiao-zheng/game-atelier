@@ -76,7 +76,7 @@ export function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
     sizeMode: imageSizeMode({ ...p, size_mode: enumValue(p.size_mode, IMAGE_SIZE_MODES) }),
     n: typeof p.n === 'number' ? clampImageCount(p.n) : undefined,
     quality: (p.quality === 'low' || p.quality === 'medium'
-      || p.quality === 'high' || p.quality === 'auto')
+      || p.quality === 'high' || p.quality === 'xhigh' || p.quality === 'max' || p.quality === 'auto')
       ? p.quality
       : undefined,
     referenceImages: referenceImagesFor(job),
@@ -105,7 +105,7 @@ export function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
           videoResolution: typeof p.resolution === 'string' ? p.resolution : undefined,
           videoQuality: (p.mode === 'std' || p.mode === 'pro') ? p.mode : undefined,
           frameMode: enumValue(p.frame_mode, VIDEO_FRAME_MODES),
-          generateAudio: p.generate_audio === true,
+          generateAudio: typeof p.generate_audio === 'boolean' ? p.generate_audio : undefined,
           referenceVideos: stringList(p.reference_videos),
           referenceAudios: stringList(p.reference_audios),
         }

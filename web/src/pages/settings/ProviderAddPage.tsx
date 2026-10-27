@@ -1,10 +1,11 @@
+import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'wouter';
 import { Plus, Search } from 'lucide-react';
 import { listKeys, type KeyView, type KeyCreatePayload } from '@/api/keys';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { KeyForm } from './KeyForm';
-import { PROVIDER_MONOGRAMS, PROVIDER_PRESETS, type ProviderPreset } from './providerPresets';
+import { PROVIDER_PRESETS, providerPresetId, type ProviderPreset } from './providerPresets';
 
 const GROUPS = [
   { kind: 'official', title: '供应商', description: '有自己的模型' },
@@ -12,10 +13,6 @@ const GROUPS = [
   { kind: 'team', title: '团队', description: '同事开启的局域网共享' },
 ] as const;
 const MODALITIES: Record<string, string> = { image: '图片', video: '视频', audio: '音频', llm: '文本' };
-
-function host(url?: string | null) {
-  try { return new URL(url || '').host; } catch { return ''; }
-}
 
 export function ProviderAddPage() {
   const [, navigate] = useLocation();
@@ -69,12 +66,10 @@ export function ProviderAddPage() {
           <span className="text-xs text-muted-foreground">{group.description}</span></div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(min(220px,100%),1fr))] gap-2">
           {items.map(preset => {
-            const added = keys.some(key => preset.value === 'custom'
-              ? key.provider === 'custom' && host(key.base_url) === host(preset.defaultBaseUrl)
-              : key.provider === preset.value);
+            const added = keys.some(key => providerPresetId(key) === preset.id);
             return <button key={preset.id} type="button" onClick={() => open(preset)}
               className="flex h-14 items-center gap-3 rounded-md border border-border bg-card px-3.5 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-              <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-xs">{PROVIDER_MONOGRAMS[preset.id]}</span>
+              <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-xs"><ProviderBrandIcon provider={{ provider: preset.value, base_url: preset.defaultBaseUrl }} /></span>
               <span className="min-w-0 flex-1"><span className="block text-sm">{preset.label}</span>
                 <span className="block text-xs text-muted-foreground">{preset.value === 'atelier' ? '模型由对方决定' : preset.id === 'evolink' ? 'Midjourney' : preset.modalities.map(modality => MODALITIES[modality] ?? modality).join(' · ')}</span>
               </span>

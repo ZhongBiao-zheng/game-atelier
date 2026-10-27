@@ -40,7 +40,7 @@ afterEach(() => {
 
 /** 出图参数标签的文本（不含 MJ flags 那一行）。 */
 const specChips = (testId: string) =>
-  [...screen.getByTestId(testId).querySelectorAll('span.rounded-sm')].map(chip => chip.textContent);
+  [...screen.getByTestId(testId).querySelectorAll('button.rounded-sm')].map(chip => chip.textContent);
 
 describe('RoundList video', () => {
   it('renders a <video> element for a video round', () => {
@@ -539,15 +539,15 @@ describe('RoundList done metadata: 耗时 + 生成时间', () => {
     expect(specChips('round-spec-meta')).toEqual(['Nano Banana Pro 4K', '3:4']);
   });
 
-  it('自定义与 AUTO 摘要不显示非生效比例或分辨率', () => {
+  it('自定义与 AUTO 摘要使用生效尺寸并展示记录中的分辨率', () => {
     const { rerender } = render(<RoundList rounds={[{ ...timedDone, config: {
       ...timedDone.config, sizeMode: 'custom', size: '1360x2048', ratio: '2:3', resolution: '2K',
     } }]} />);
-    expect(specChips('round-spec-meta')).toEqual(['gpt-image-2', '1360×2048']);
+    expect(specChips('round-spec-meta')).toEqual(['GPT Image 2', '1360×2048', '2K']);
     rerender(<RoundList rounds={[{ ...timedDone, config: {
       ...timedDone.config, sizeMode: 'auto', size: 'auto', ratio: '2:3', resolution: '2K',
     } }]} />);
-    expect(specChips('round-spec-meta')).toEqual(['gpt-image-2', 'AUTO']);
+    expect(specChips('round-spec-meta')).toEqual(['GPT Image 2', 'AUTO', '2K']);
   });
 
   it('显示出图耗时（completed_at − submitted_at）与北京时间生成时间', () => {
@@ -564,7 +564,7 @@ describe('RoundList done metadata: 耗时 + 生成时间', () => {
     expect(runLine.className).toContain('text-xs');
     // 参数行是另一个元素，不含耗时/时间
     const specLine = getByTestId('round-spec-meta');
-    expect(specLine.textContent).toContain('gpt-image-2');
+    expect(specLine.textContent).toContain('GPT Image 2');
     expect(specLine).not.toBe(runLine);
     expect(specLine.textContent).not.toContain('12s');
   });
@@ -878,5 +878,34 @@ describe('RoundList 保存为创作资产', () => {
   it('没传回调时不显示保存按钮', () => {
     render(<RoundList rounds={[imageBatch, { ...videoDone, shareable: true } as RoundState]} />);
     expect(screen.queryByLabelText(/为资产$/)).not.toBeInTheDocument();
+  });
+});
+
+describe('history parameter buttons', () => {
+  it('shows all recorded image fields and invokes only the clicked field', () => {
+    const apply = vi.fn();
+    const reuseParameter = vi.fn((_config, parameter) => parameter === 'quality' ? apply : undefined);
+    render(<RoundList rounds={[{ kind: 'done', jobId: 'tags', submittedAt: new Date().toISOString(), imagePaths: [],
+      config: { prompt: 'p', model: 'gpt-image-2', modelName: 'OpenAI: GPT Image 2', ratio: '16:9',
+        resolution: '2K', quality: 'high', n: 1, referenceImages: [] } }]} reuseParameter={reuseParameter} />);
+    expect(specChips('round-spec-meta')).toEqual(['GPT Image 2', '16:9', '2K', '高', '1 张']);
+    const quality = screen.getByRole('button', { name: '高' });
+    fireEvent.click(quality);
+    expect(apply).toHaveBeenCalledOnce();
+    const ratio = screen.getByRole('button', { name: '16:9' });
+    expect(ratio).toHaveAttribute('aria-disabled', 'true');
+    expect(ratio).toHaveAttribute('title', '当前模型不支持');
+    fireEvent.click(ratio);
+    expect(apply).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: 'GPT Image 2' }).querySelector('svg')).toHaveAttribute('width', '12');
+  });
+  it('shows video fields in order including explicitly disabled audio', () => {
+    render(<RoundList rounds={[{ ...videoDone, config: { ...videoDone.config,
+      ratio: '16:9', videoResolution: '720p', duration: 10, videoQuality: 'pro', n: 1, generateAudio: false } }]} />);
+    expect(specChips('round-spec-meta').slice(1)).toEqual(['16:9', '720p', '10s', '专家', '1 张', '无音频']);
+  });
+  it('does not invent a ratio for a record without sizing fields', () => {
+    render(<RoundList rounds={[{ ...videoDone, config: { ...videoDone.config, kind: 'image', sizeMode: 'ratio' } }]} />);
+    expect(specChips('round-spec-meta')).toHaveLength(1);
   });
 });

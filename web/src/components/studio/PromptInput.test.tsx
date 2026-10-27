@@ -286,7 +286,7 @@ describe('PromptInput video mode', () => {
     const onKindChange = vi.fn();
     renderVideoMode({ onKindChange });
     fireEvent.click(screen.getByLabelText('选择生成模式'));
-    fireEvent.click(screen.getByRole('option', { name: /图片生成/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^图片$/ }));
     expect(onKindChange).toHaveBeenCalledWith('image');
     cleanup();
   });

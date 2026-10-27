@@ -4,6 +4,8 @@ import { modelCatalog, modelDisplayName, sortModels } from '@/lib/modelCatalog';
 import { useModelPickerMetrics, type ModelPickerChoice } from '@/lib/useModelPickerMetrics';
 import type { JobParams } from '@/schema/jobs';
 import { ModelBrandIcon } from './ModelBrandIcon';
+import { MetaTag } from './MetaTag';
+import { formatModelDuration, formatModelPrice } from '@/lib/modelMetricFormat';
 
 export function ModelPickerList({ choices, selected, initialKind, sections = false, params = {}, onSelect }: {
   choices: ModelPickerChoice[];
@@ -101,8 +103,8 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
               <span className="block truncate text-sm font-medium">{modelDisplayName(choice.model)}</span>
               {entry && <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{entry.description}</span>}
               {(seconds != null || cost != null) && <span className="mt-2 flex justify-between gap-2 text-xs tabular-nums text-muted-foreground">
-                {seconds != null && <span>{seconds > 90 ? `≈ ${Math.round(seconds / 60)}m` : `≈ ${Math.round(seconds)}s`}</span>}
-                {cost != null && <span className="ml-auto">¥{cost.toFixed(2)}</span>}
+                {seconds != null && <MetaTag>{formatModelDuration(seconds)}</MetaTag>}
+                {cost != null && <MetaTag className="ml-auto">{formatModelPrice(cost)}</MetaTag>}
               </span>}
             </span>
           </button>;

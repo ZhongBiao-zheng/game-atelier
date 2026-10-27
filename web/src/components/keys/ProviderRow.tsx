@@ -1,3 +1,4 @@
+import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { ChevronRight } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { providerLabel } from '@/lib/providerLabels';
@@ -19,15 +20,12 @@ export function ProviderRow({ row, overdue, pending, onEdit, onToggle }: {
   const status = !enabled ? '已停用' : overdue ? '欠费'
     : days === null ? '未用过' : idle ? `${days} 天未用` : '正常';
   const vendor = providerLabel(row.provider, row.alias);
-  const initials = ({ openai: 'OA', seedream: 'VA', tokendance: 'TD', openrouter: 'OR', evolink: 'EV', atelier: 'AT' } as Record<string, string>)[row.provider]
-    || (providerHost(row).includes('tu-zi.com') ? 'TZ' : providerHost(row).includes('openai-hk.com') ? 'HK'
-      : (vendor.match(/[a-z]/gi) || ['A', 'T']).slice(0, 2).join('').toUpperCase());
   const tone = !enabled ? 'text-muted-foreground' : overdue ? 'text-[color:var(--status-failed)]'
     : days === null || idle ? 'text-muted-foreground' : 'text-[color:var(--status-done)]';
   const used = row.last_used_at ? new Date(row.last_used_at) : null;
   const today = used?.toDateString() === new Date().toDateString();
   return <li className={`flex flex-wrap items-center gap-3.5 px-4 py-3.5 hover:bg-secondary/30 ${enabled ? '' : 'opacity-50'}`}>
-    <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-xs font-medium">{initials}</span>
+    <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-xs font-medium"><ProviderBrandIcon provider={row} /></span>
     <button type="button" aria-label={`编辑 ${row.alias}`} onClick={onEdit}
       className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
       <span className="block truncate text-sm font-medium">{row.alias}</span>

@@ -74,3 +74,13 @@ describe('configForJob 枚举字段', () => {
     expect(configForJob(job(bogus('auto'))).sizeMode).toBe('auto');
   });
 });
+
+describe('history metadata preserves recorded values', () => {
+  it.each(['xhigh', 'max'] as const)('keeps %s image quality', quality => {
+    expect(configForJob(job({ quality })).quality).toBe(quality);
+  });
+  it('distinguishes missing audio from explicitly disabled audio', () => {
+    expect(configForJob(job({}, { kind: 'video' })).generateAudio).toBeUndefined();
+    expect(configForJob(job({ generate_audio: false }, { kind: 'video' })).generateAudio).toBe(false);
+  });
+});

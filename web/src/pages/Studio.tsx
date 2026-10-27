@@ -49,6 +49,8 @@ import type { CreationAsset, CreationMediaAssetContent, RecipeInput } from '@/sc
 import type { CanvasProject } from '@/schema/canvas';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 
+import { reuseRoundParameter, type RoundParameter } from './studioParameterReuse';
+
 const SELECTION_STORAGE_KEY = 'studio:selection';
 const ASSET_TITLE_LENGTH = 24;
 
@@ -265,6 +267,29 @@ function StudioFull() {
       return normalizeImageSizeParams(size.modelId, size.provider, size.baseUrl, { ...previous, ...patch }, size.caps);
     });
   }, [providers, providerAlias, model]);
+
+  const reuseParameter = (config: RoundConfig, parameter: RoundParameter) => {
+    const patch = reuseRoundParameter(config, parameter, { providers, alias: providerAlias, model, kind, sizeParams });
+    if (!patch) return undefined;
+    return () => {
+      if (patch.alias !== undefined) setProviderAlias(patch.alias);
+      if (patch.model !== undefined) {
+        setModel(patch.model);
+        setRecipeNotice(current => withoutMissingModel(current));
+      }
+      if (patch.kind !== undefined) setKind(patch.kind);
+      if (patch.sizeParams !== undefined) setSizeParams(patch.sizeParams);
+      if (patch.quality !== undefined) setQuality(patch.quality);
+      if (patch.count !== undefined) setCount(patch.count);
+      if (patch.videoRatio !== undefined) setVideoRatio(patch.videoRatio);
+      if (patch.videoResolution !== undefined) setVideoResolution(patch.videoResolution);
+      if (patch.videoQuality !== undefined) setVideoQuality(patch.videoQuality);
+      if (patch.videoCount !== undefined) setVideoCount(patch.videoCount);
+      if (patch.duration !== undefined) setDuration(patch.duration);
+      if (patch.generateAudio !== undefined) setGenerateAudio(patch.generateAudio);
+      setClickPinned(true);
+    };
+  };
 
   // 点击历史记录里的参考图 → 把这批参考图（服务器路径）拉回成 File[]，整组塞进输入框复用出图。
   const handleReuseReferences = useCallback(async (config: RoundConfig, jobId?: string) => {
@@ -848,6 +873,7 @@ function StudioFull() {
           onDeleteFailed={deleteFailedRound}
           onCancel={cancelRound}
           onReEdit={reEdit}
+          reuseParameter={reuseParameter}
           onRegenerate={regenerate}
           onDeleteBatch={deleteDoneBatch}
           onReuseReferences={handleReuseReferences}

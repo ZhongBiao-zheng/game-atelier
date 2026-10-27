@@ -9,6 +9,12 @@ import type { GenMode } from '@/lib/historyFilters';
 import { isGalleryFavorited, isGalleryHidden } from '@/api/gallery';
 import { formatBeijingTime } from '@/lib/time';
 import { formatGenerationCost } from '@/lib/generationCost';
+import { MetaTag } from '@/components/MetaTag';
+import { ModelBrandIcon } from '@/components/ModelBrandIcon';
+import { modelCatalog, modelDisplayName } from '@/lib/modelCatalog';
+import { QUALITY_LABELS } from '@/lib/imageControlCaps';
+import { VIDEO_QUALITY_LABELS, ratioLabel } from '@/lib/videoControlCaps';
+import type { RoundParameter } from '@/pages/studioParameterReuse';
 import { imageSizeSummary } from '@/lib/imageSizeMode';
 import { failureSummary } from '@/lib/failureSummary';
 import {
@@ -109,24 +115,37 @@ function aspectStyle(config: RoundConfig): { aspectRatio: string } {
   return { aspectRatio: '1 / 1' };
 }
 
-function specMetadata(config: RoundConfig): string[] {
-  const values = [
-    config.modelName ?? config.model,
-    ...(config.kind === 'video' ? [config.size, config.ratio, config.resolution]
-      : [imageSizeSummary({ size_mode: config.sizeMode, size: config.size, ratio: config.ratio }),
-        !config.sizeMode || config.sizeMode === 'ratio' ? config.resolution : undefined]),
-    config.n && config.n > 1 ? `${config.n} 张` : undefined,
-  ].filter((value): value is string => Boolean(value));
-  return values.filter((value, index) => values.indexOf(value) === index);
-}
+type ParameterReuse = (config: RoundConfig, parameter: RoundParameter) => (() => void) | undefined;
 
-/** 出图参数（模型 / 尺寸 / 比例 / 清晰度 / 张数）逐项成标签；MJ flags 这类长串作为 children 另起一行。 */
-function SpecChips({ values, testId, children }: { values: string[]; testId?: string; children?: ReactNode }) {
+function SpecChips({ config, reuseParameter, testId, children }: {
+  config: RoundConfig; reuseParameter?: ParameterReuse; testId?: string; children?: ReactNode;
+}) {
+  const video = config.kind === 'video';
+  const values: Array<{ parameter: RoundParameter; label: string }> = [
+    { parameter: 'model', label: modelDisplayName({ id: config.model, name: config.modelName }) },
+  ];
+  const add = (parameter: RoundParameter, label: string | undefined) => {
+    if (label) values.push({ parameter, label });
+  };
+  add('size', video ? config.ratio && ratioLabel(config.ratio)
+    : config.sizeMode === 'auto' || config.ratio || config.size
+      ? imageSizeSummary({ size_mode: config.sizeMode ?? (!config.ratio && config.size !== 'auto' ? 'custom' : undefined), size: config.size, ratio: config.ratio }) : undefined);
+  add('resolution', video ? config.videoResolution : config.resolution);
+  if (video) add('duration', config.duration != null ? `${config.duration}s` : undefined);
+  add('quality', video ? config.videoQuality && VIDEO_QUALITY_LABELS[config.videoQuality]
+    : config.quality && QUALITY_LABELS[config.quality]);
+  add('count', config.n != null ? `${config.n} 张` : undefined);
+  if (video) add('audio', config.generateAudio != null ? config.generateAudio ? '有音频' : '无音频' : undefined);
   return (
     <div data-testid={testId} className="flex flex-wrap items-center gap-1.5 text-xs text-foreground">
-      {values.map(value => (
-        <span key={value} className="rounded-sm bg-card px-2 py-0.5 tabular-nums">{value}</span>
-      ))}
+      {values.map(({ parameter, label }) => {
+        const apply = reuseParameter?.(config, parameter);
+        return <MetaTag key={parameter} className="inline-flex items-center gap-1"
+          onClick={apply ?? (() => undefined)} disabled={!apply}>
+          {parameter === 'model' && <ModelBrandIcon brand={modelCatalog(config.model)?.brand} size={12} />}
+          {label}
+        </MetaTag>;
+      })}
       {children}
     </div>
   );
@@ -179,6 +198,7 @@ export function RoundList({
   onDeleteFailed,
   onCancel,
   onReEdit,
+  reuseParameter,
   onRegenerate,
   onDeleteBatch,
   onReuseReferences,
@@ -196,6 +216,7 @@ export function RoundList({
   onDeleteFailed?: (jobId: string) => void | Promise<void>;
   onCancel?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
+  reuseParameter?: ParameterReuse;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
@@ -331,6 +352,7 @@ export function RoundList({
                   round={r}
                   onCancel={onCancel}
                   onReEdit={onReEdit}
+                  reuseParameter={reuseParameter}
                   onRegenerate={onRegenerate}
                   onReuseReferences={onReuseReferences}
                   mediaActive={mediaActive}
@@ -344,6 +366,7 @@ export function RoundList({
                   hiddenPaths={hiddenPaths}
                   onToggleHidden={onToggleHidden}
                   onReEdit={onReEdit}
+                  reuseParameter={reuseParameter}
                   onRegenerate={onRegenerate}
                   onDeleteBatch={onDeleteBatch}
                   onLightbox={setLightboxSrc}
@@ -360,6 +383,7 @@ export function RoundList({
                   round={r}
                   onDeleteFailed={onDeleteFailed}
                   onReEdit={onReEdit}
+                  reuseParameter={reuseParameter}
                   onRegenerate={onRegenerate}
                   onReuseReferences={onReuseReferences}
                   mediaActive={mediaActive}
@@ -388,6 +412,7 @@ function PendingBatch({
   round,
   onCancel,
   onReEdit,
+  reuseParameter,
   onRegenerate,
   onReuseReferences,
   mediaActive,
@@ -395,6 +420,7 @@ function PendingBatch({
   round: Extract<RoundState, { kind: 'pending' }>;
   onCancel?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
+  reuseParameter?: ParameterReuse;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   mediaActive: boolean;
@@ -404,7 +430,6 @@ function PendingBatch({
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  const specMeta = specMetadata(round.config);
   const shownMjFlags = shownMjMetadata(round.config);
   const elapsedSec = Math.max(0, Math.floor((now - round.startedAt) / 1000));
   const submittedAt = formatBeijingTime(new Date(round.startedAt).toISOString()).slice(11);
@@ -432,7 +457,7 @@ function PendingBatch({
               />
             </div>
           </div>
-          <SpecChips testId="pending-spec-meta" values={specMeta}>
+          <SpecChips testId="pending-spec-meta" config={round.config} reuseParameter={reuseParameter}>
             {round.config.sourceAssetTitle && <SourceChip title={round.config.sourceAssetTitle} />}
             {shownMjFlags && (
               <span className="basis-full break-words font-mono text-muted-foreground">{shownMjFlags}</span>
@@ -890,6 +915,7 @@ function DoneBatch({
   hiddenPaths,
   onToggleHidden,
   onReEdit,
+  reuseParameter,
   onRegenerate,
   onDeleteBatch,
   onLightbox,
@@ -906,6 +932,7 @@ function DoneBatch({
   hiddenPaths?: string[];
   onToggleHidden?: (path: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
+  reuseParameter?: ParameterReuse;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
   onLightbox?: (src: string) => void;
@@ -934,7 +961,6 @@ function DoneBatch({
       : null;
   // 两行分层：出图参数（模型/尺寸/比例/清晰度/张数）是主元信息；耗时 + 生成时间是运行信息，
   // 降到更小更淡的次行，别和参数挤在一行。
-  const specMeta = specMetadata(round.config);
   // 日期由分组标题承担，这里只留时分。
   const runMeta = [
     elapsedSec != null ? `${elapsedSec}s` : undefined,
@@ -973,7 +999,7 @@ function DoneBatch({
           </div>
         </div>
         <div>
-          <SpecChips testId="round-spec-meta" values={specMeta}>
+          <SpecChips testId="round-spec-meta" config={round.config} reuseParameter={reuseParameter}>
             {round.config.sourceAssetTitle && <SourceChip testId="round-asset-source" title={round.config.sourceAssetTitle} />}
             {shownMjFlags && (
               <span data-testid="round-mj-flags" className="basis-full break-words font-mono text-muted-foreground">
@@ -1205,6 +1231,7 @@ function FailedCard({
   round,
   onDeleteFailed,
   onReEdit,
+  reuseParameter,
   onRegenerate,
   onReuseReferences,
   mediaActive,
@@ -1212,12 +1239,12 @@ function FailedCard({
   round: Extract<RoundState, { kind: 'failed' }>;
   onDeleteFailed?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
+  reuseParameter?: ParameterReuse;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   mediaActive: boolean;
 }) {
   const { config } = round;
-  const meta = config ? specMetadata(config) : [];
   const summary = failureSummary(round.reason);
   const [detailOpen, setDetailOpen] = useState(false);
 
@@ -1241,7 +1268,7 @@ function FailedCard({
               />
             </div>
           </div>
-          {meta.length > 0 && <SpecChips values={meta} />}
+          <SpecChips config={config} reuseParameter={reuseParameter} />
         </div>
       )}
       <div

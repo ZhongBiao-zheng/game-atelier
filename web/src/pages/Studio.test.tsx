@@ -1663,7 +1663,7 @@ describe('Studio video submission', () => {
 
     // 切到视频生成（kind 弹窗）→ provider 自动收敛到声明了 video 能力的 key（vvolc / seedance 模型）。
     fireEvent.click(await screen.findByRole('button', { name: '选择生成模式' }));
-    fireEvent.click(screen.getByRole('option', { name: /视频生成/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^视频$/ }));
 
     const textarea = screen.getByLabelText('生图 prompt');
     typePrompt(textarea, '一段电影质感的镜头');
@@ -1736,7 +1736,7 @@ describe('Studio video submission', () => {
 
     // 切到视频生成（kind 弹窗）→ 默认生成方式=首尾帧，渲染「上传首帧/尾帧」双槽。
     fireEvent.click(await screen.findByRole('button', { name: '选择生成模式' }));
-    fireEvent.click(screen.getByRole('option', { name: /视频生成/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^视频$/ }));
 
     // 通过 label htmlFor 拿到 首帧 槽的 file input，附一张参考图。
     const srcLabel = await screen.findByLabelText('上传首帧');
@@ -1808,7 +1808,7 @@ describe('Studio video submission', () => {
     renderStudio();
 
     fireEvent.click(await screen.findByRole('button', { name: '选择生成模式' }));
-    fireEvent.click(screen.getByRole('option', { name: /视频生成/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^视频$/ }));
 
     // 只填尾帧（首帧留空）—— Seedance 不支持，应被客户端拦下：提示出现 + 提交禁用 + 不发出图请求。
     const lastLabel = await screen.findByLabelText('上传尾帧');
@@ -2405,7 +2405,7 @@ function baseDraft(overrides: Partial<StudioDraft> = {}): StudioDraft {
   };
 }
 
-function pickKind(label: '图片生成' | '视频生成') {
+function pickKind(label: '图片' | '视频') {
   fireEvent.click(screen.getByLabelText('选择生成模式'));
   fireEvent.click(screen.getByRole('option', { name: label }));
 }
@@ -2425,9 +2425,9 @@ describe('Studio 模型选择按模态收敛（界面显示 = 实际提交）', 
     render(<Router hook={hook}><Studio compact={compact} /></Router>);
     await waitFor(() => expect(screen.getByLabelText('选择模型')).toHaveTextContent('图片 5.0 Lite'));
 
-    pickKind('视频生成');
+    pickKind('视频');
     await waitFor(() => expect(screen.getByLabelText('选择模型')).toHaveTextContent('Seedance 2.0'));
-    pickKind('图片生成');
+    pickKind('图片');
     await waitFor(() => expect(screen.getByLabelText('选择模型')).toHaveTextContent('图片 5.0 Lite'));
 
     typePrompt(screen.getByLabelText('生图 prompt'), '一座城堡');
