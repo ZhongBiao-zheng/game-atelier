@@ -31,11 +31,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 };
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
-// 下次发版写入新版本 changes（日常开发不改已发布条目、不提前 bump）：
-// { kind: 'feat', text: '支持使用本机 Codex 的 ChatGPT 登录添加订阅供应商，生成图片按订阅记账。' },
-// { kind: 'feat', text: '网关成员密钥可在中转机本机随时查看和复制，点击成员名称可直接改名。' },
-// { kind: 'fix', text: '升级后，旧的未撤销网关成员密钥会自动重发，旧密钥立即失效；请在网关成员列表复制新密钥并通知对应成员更换。已撤销密钥不会重发。' },
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.131.0', date: '2026-10-27', headline: 'ChatGPT 订阅出图与模型菜单改版', changes: [
+    { kind: 'feat', text: '可用本机 Codex 的 ChatGPT 登录添加订阅供应商，用 GPT Image 出图，按订阅记账不计费。' },
+    { kind: 'feat', text: '模型菜单按热度排序，带品牌图标、简介、耗时与价格；供应商也换成品牌图标。' },
+    { kind: 'feat', text: '创作台历史记录的模型、比例、质量等标签可单独点击，复用到下方出图设置。' },
+    { kind: 'feat', text: '网关成员密钥可在本机随时查看和复制，点击成员名称可直接改名。' },
+    { kind: 'feat', text: '界面中英文字体统一为 Inter 与 Noto Sans SC，随应用本地加载。' },
+    { kind: 'fix', text: '升级后旧的网关成员密钥会自动重发、旧密钥立即失效，请在网关成员列表复制新密钥发给对应成员。' },
+    { kind: 'fix', text: '画布选 16:9 等比例时按比例出图，不再随机出成竖图。' },
+    { kind: 'fix', text: '输入框不再弹出密码管理器的填充与保存提示；价格统一写成 0.3¥。' },
+  ] },
   { version: '5.130.0', date: '2026-10-26', headline: '应用内更新与质量参数修正', changes: [
     { kind: 'feat', text: '安装包会后台下载并校验新版，准备好后可在应用内确认更新；等待任务完成再重启，也可取消等待。' },
     { kind: 'fix', text: '新版启动失败时自动恢复旧版，设置页可查看原因并重新检查。' },
