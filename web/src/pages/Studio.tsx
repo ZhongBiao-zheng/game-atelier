@@ -547,7 +547,7 @@ function StudioFull() {
     // MJ 一次 imagine 固定回 4 张方案，张数不由画师定（见 MJ_IMAGES_PER_TASK）。
     const effectiveCount = caps.family === 'midjourney'
       ? MJ_IMAGES_PER_TASK
-      : clampImageCount(overrideConfig?.n ?? count);
+      : Math.min(caps.maxCount ?? 4, clampImageCount(overrideConfig?.n ?? count));
     const rawSizeParams: JobParams = overrideConfig
       ? { size_mode: overrideConfig.sizeMode ?? 'ratio', size: overrideConfig.size, ratio: overrideConfig.ratio, resolution: overrideConfig.resolution }
       : sizeParams;
@@ -619,7 +619,7 @@ function StudioFull() {
     // 控件隐藏的参数一律不写进 params（与视频侧同写法）：后端 openrouter_image 会把
     // params.resolution 原样当 API 参数发出去，在别的 key 上选过 4K 就会被带过来按 4K 计费。
     const jobParams: JobParams = {
-      size_mode: effectiveMode,
+      ...(caps.ratios.length || caps.showCustomSize || caps.showAutoSize ? { size_mode: effectiveMode } : {}),
       ...(effectiveSize ? { size: effectiveSize } : {}),
       ...(effectiveRatio ? { ratio: effectiveRatio } : {}),
       ...(effectiveResolution ? { resolution: effectiveResolution } : {}),
@@ -1228,6 +1228,7 @@ function StudioFull() {
       videoMode,
       model,
       videoCaps: kind === 'video' ? videoCaps : null,
+      maxImageReferences: sizeContext(providers, providers.find(item => item.alias === providerAlias), model).caps.maxRefImages,
       counts: {
         images: referenceImages.length,
         mj: mjRefs.image.length,

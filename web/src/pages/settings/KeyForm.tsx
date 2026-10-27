@@ -1,7 +1,7 @@
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, X } from 'lucide-react';
-import { createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelInputModality, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
+import { getChatGPTSubscription, type ChatGPTSubscriptionStatus, createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelInputModality, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { checkGateway } from '@/api/gateway';
 import { ApiError } from '@/api/http';
@@ -16,6 +16,7 @@ const KIND_LABELS: Record<ProviderKind, string> = {
   relay: '中转',
   custom: '自定义',
   team: '团队',
+  subscription: '订阅',
 };
 
 const providerByValue = (value: string) =>
@@ -106,6 +107,18 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   const editing = mode === 'edit';
   const preset = providerByValue(activePresetId);
   const isGateway = provider === GATEWAY_PROVIDER;
+  const isSubscription = provider === 'chatgpt';
+  const [subscription, setSubscription] = useState<ChatGPTSubscriptionStatus | null>(null);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isSubscription) return;
+    let active = true;
+    setSubscription(null);
+    setSubscriptionError(null);
+    void getChatGPTSubscription().then(status => { if (active) setSubscription(status); })
+      .catch(error => { if (active) setSubscriptionError(error instanceof Error ? error.message : String(error)); });
+    return () => { active = false; };
+  }, [isSubscription]);
   // 网关供应商的模型只来自网关（带 via 成员快照），不手填。
   const [gatewayModels, setGatewayModels] = useState<KeyModel[]>(
     initial?.provider === GATEWAY_PROVIDER ? initial.models ?? [] : [],
@@ -301,7 +314,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         enabled,
         base_url: baseUrl.trim() || null,
         billing_group: billingGroup.trim() || null,
-        access_key: accessKey.trim(),
+        access_key: isSubscription ? '' : accessKey.trim(),
+        ...(isSubscription ? { auth_source: 'codex-cli' as const } : {}),
         secret_key: null,
         capabilities: ['portrait', 'promo', 'turnaround'],
         models: cleanModels,
@@ -340,7 +354,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   };
 
   const canSubmit = Boolean(
-    (editing || accessKey.trim())
+    (isSubscription ? (editing || subscription?.available) : (editing || accessKey.trim()))
     && (!usesNamedAlias(provider) || alias.trim())
     && (provider !== 'custom' || baseUrl.trim())
     && (!isGateway || (baseUrl.trim() && gatewayModels.length > 0))
@@ -424,6 +438,10 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
               <label htmlFor="key-gateway-url" className="pt-2 text-xs text-muted-foreground">网关地址</label>
               <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" id="key-gateway-url" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setGatewayModels([]); setGatewayInfo(null); }} className={`${fieldClass} font-mono`} placeholder="http://192.168.1.20:5180" />
             </>}
+            {isSubscription ? <>
+              <span className="pt-2 text-xs text-muted-foreground">账号</span>
+              <div className="py-2 text-sm">{subscriptionError ? <p role="alert" className="text-destructive">{subscriptionError}</p> : !subscription ? <p role="status" className="text-muted-foreground">读取中…</p> : subscription.available ? <><p>{subscription.email}</p>{subscription.plan && <p className="mt-1 text-xs text-muted-foreground">{subscription.plan}</p>}</> : <p role="status" className="text-muted-foreground">请先在 Codex 里用 ChatGPT 登录</p>}</div>
+            </> : <>
             <label htmlFor="key-access" className="pt-2 text-xs text-muted-foreground">{isGateway ? '网关密钥' : 'API 密钥'}</label>
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative min-w-0 flex-1">
@@ -435,9 +453,10 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
               </div>
               {(initial?.api_key_url || preset.apiKeyUrl) && <a href={initial?.api_key_url || preset.apiKeyUrl} target="_blank" rel="noreferrer" className="whitespace-nowrap text-xs text-primary">获取密钥 ↗</a>}
             </div>
+            </>}
             <span className="pt-2 text-xs text-muted-foreground">模型</span>
             <div className="min-w-0 space-y-3">
-              {isGateway ? <>
+              {isSubscription ? <p className="py-2 text-sm">GPT Image</p> : isGateway ? <>
                 <button type="button" onClick={connectGateway} disabled={!baseUrl.trim() || (!editing && !accessKey.trim()) || connecting} className={ghostButtonClass}>{connecting ? '连接中...' : gatewayModels.length ? '重新同步' : '连接网关'}</button>
                 {gatewayInfo && <p role="status" className="text-sm text-muted-foreground">{gatewayInfo}</p>}
                 {gatewayError && <p role="alert" className="text-sm text-destructive">{gatewayError}</p>}
@@ -618,7 +637,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                 </details>
               </>}
             </div>
-            {!isGateway && <>
+            {!isGateway && !isSubscription && <>
               <span className="pt-2 text-xs text-muted-foreground">连接</span>
               <div className="flex flex-wrap items-center gap-3">
                 <button type="button" onClick={testConnection} disabled={testing || !fetchModelsBaseUrl || (!editing && !accessKey.trim())} className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50">{testing ? '测试中...' : '测试连接'}</button>

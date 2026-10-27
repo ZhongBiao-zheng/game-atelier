@@ -28,6 +28,8 @@ const TUZI_GPT_IMAGE_RESOLUTIONS: Resolution[] = ['1K', '2K'];
 
 export interface ImageControlCaps {
   family: ImageFamily;
+  maxCount?: number;
+  maxRefImages?: number;
   /** 比例枚举（standard 族由 PromptInput 用 1:1 + 侧比例的特殊布局，此处仍给全集）。 */
   ratios: string[];
   /** 是否显示 2K/4K 分辨率切换。 */
@@ -90,6 +92,10 @@ export function imageControlCaps(
   _billingGroup?: string | null,
 ): ImageControlCaps {
   const family = imageFamily(modelId);
+  if (provider === 'chatgpt') return {
+    family, maxCount: 1, maxRefImages: 1, ratios: [], resolutions: [], showResolution: false,
+    showCustomSize: false, showAutoSize: false, qualities: null, sizeKind: 'none',
+  };
   const base = FAMILY_CAPS[family];
   const sizeOptions = imageSizeOptions(modelId, provider, baseUrl);
   const normalized = normalizedModelId(modelId);

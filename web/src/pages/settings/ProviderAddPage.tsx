@@ -2,7 +2,7 @@ import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'wouter';
 import { Plus, Search } from 'lucide-react';
-import { listKeys, type KeyView, type KeyCreatePayload } from '@/api/keys';
+import { getChatGPTSubscription, type ChatGPTSubscriptionStatus, listKeys, type KeyView, type KeyCreatePayload } from '@/api/keys';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { KeyForm } from './KeyForm';
 import { PROVIDER_PRESETS, providerPresetId, type ProviderPreset } from './providerPresets';
@@ -10,6 +10,7 @@ import { PROVIDER_PRESETS, providerPresetId, type ProviderPreset } from './provi
 const GROUPS = [
   { kind: 'official', title: '供应商', description: '有自己的模型' },
   { kind: 'relay', title: '中转', description: '一个密钥，多家模型' },
+  { kind: 'subscription', title: '订阅', description: '' },
   { kind: 'team', title: '团队', description: '同事开启的局域网共享' },
 ] as const;
 const MODALITIES: Record<string, string> = { image: '图片', video: '视频', audio: '音频', llm: '文本' };
@@ -17,12 +18,16 @@ const MODALITIES: Record<string, string> = { image: '图片', video: '视频', a
 export function ProviderAddPage() {
   const [, navigate] = useLocation();
   const [keys, setKeys] = useState<KeyView[]>([]);
+  const [subscription, setSubscription] = useState<ChatGPTSubscriptionStatus | null>(null);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [address, setAddress] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ preset: ProviderPreset; initial: Partial<KeyCreatePayload> } | null>(null);
   useEffect(() => {
     let active = true;
+    void getChatGPTSubscription().then(data => { if (active) setSubscription(data); })
+      .catch(error => { if (active) setSubscriptionError(error instanceof Error ? error.message : String(error)); });
     void listKeys().then(data => { if (active) setKeys(data.keys); })
       .catch(e => { if (active) setError(e instanceof Error ? e.message : String(e)); });
     return () => { active = false; };
@@ -68,10 +73,10 @@ export function ProviderAddPage() {
           {items.map(preset => {
             const added = preset.id !== 'custom' && keys.some(key => providerPresetId(key) === preset.id);
             return <button key={preset.id} type="button" onClick={() => open(preset)}
-              className="flex h-14 items-center gap-3 rounded-md border border-border bg-card px-3.5 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+              className="flex min-h-14 items-center gap-3 rounded-md border border-border bg-card px-3.5 py-2 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
               <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-xs"><ProviderBrandIcon provider={{ provider: preset.value, base_url: preset.defaultBaseUrl }} /></span>
               <span className="min-w-0 flex-1"><span className="block text-sm">{preset.label}</span>
-                <span className="block text-xs text-muted-foreground">{preset.value === 'atelier' ? '模型由对方决定' : preset.id === 'evolink' ? 'Midjourney' : preset.modalities.map(modality => MODALITIES[modality] ?? modality).join(' · ')}</span>
+                <span className="block text-xs text-muted-foreground">{preset.value === 'chatgpt' ? (subscriptionError ?? (!subscription ? '读取中…' : subscription.available ? [subscription.email, subscription.plan].filter(Boolean).join(' · ') : '请先在 Codex 里用 ChatGPT 登录')) : preset.value === 'atelier' ? '模型由对方决定' : preset.id === 'evolink' ? 'Midjourney' : preset.modalities.map(modality => MODALITIES[modality] ?? modality).join(' · ')}</span>
               </span>
               {added && <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[color:var(--status-done)]" />已添加</span>}
             </button>;

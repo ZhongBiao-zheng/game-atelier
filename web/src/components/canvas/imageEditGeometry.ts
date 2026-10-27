@@ -46,6 +46,7 @@ export function savedImageEditError(node: CanvasImageEditNode, source: CanvasCon
 const EDIT_MODEL_PATTERN = /^(gpt-image-2\.5(-[a-z0-9]+)?|(gemini-)?nano-banana-2(\.1)?(-[24]k)?|seedream-5\.0-pro|doubao-seedream-5-0-pro(-\d+)?)$/;
 
 export function isEditModel(model: KeyView['models'][number], key: KeyView): boolean {
+  if (key.provider === 'chatgpt') return false;
   if (key.provider === 'atelier') {
     const members = routeMemberChoices(key, model);
     return Boolean(model.via?.length) && members.every(member => isEditModel(member.model, member.key));

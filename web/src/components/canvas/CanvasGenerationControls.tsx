@@ -140,9 +140,9 @@ export function CanvasImageSettings({
   const anchorRef = useRef<HTMLDivElement>(null);
   const count = caps.family === 'midjourney'
     ? 4
-    : Math.max(1, Math.min(4, Number(params.n) || 1));
+    : Math.max(1, Math.min(caps.maxCount ?? 4, Number(params.n) || 1));
   const summary = [
-    imageSizeSummary(params),
+    caps.ratios.length || caps.showAutoSize || caps.showCustomSize ? imageSizeSummary(params) : null,
     caps.showResolution && imageSizeMode(params) === 'ratio'
       ? params.resolution ?? (caps.sizeKind === 'ratio' ? null : defaultResolution(caps.resolutions))
       : null,
@@ -176,7 +176,7 @@ export function CanvasImageSettings({
         )}
       >
         <div className="space-y-4">
-          <ImageSizeFields caps={caps} model={model} baseUrl={baseUrl} params={params} onPatch={onPatch} />
+          {(caps.ratios.length > 0 || caps.showAutoSize || caps.showCustomSize) && <ImageSizeFields caps={caps} model={model} baseUrl={baseUrl} params={params} onPatch={onPatch} />}
 
           {caps.qualities && (
             <SettingsSection title="质量">
@@ -198,7 +198,7 @@ export function CanvasImageSettings({
             ) : (
               <OptionTrack
                 label="选择图片生成数量"
-                values={[1, 2, 3, 4]}
+                values={[1, 2, 3, 4].filter(value => value <= (caps.maxCount ?? 4))}
                 selected={String(count)}
                 getLabel={value => `${value} 张`}
                 onSelect={value => onPatch({ n: Number(value) })}

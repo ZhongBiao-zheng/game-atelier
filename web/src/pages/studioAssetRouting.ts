@@ -12,6 +12,7 @@ export interface StudioMediaSlots {
   kind: JobKind;
   videoMode: VideoMode;
   model: string;
+  maxImageReferences?: number;
   videoCaps: VideoControlCaps | null;
   counts: { images: number; mj: number; videos: number; audios: number };
 }
@@ -29,7 +30,7 @@ function routeImage(slots: StudioMediaSlots): StudioMediaRoute {
   if (imageFamily(slots.model) === 'midjourney') {
     return slots.counts.mj < MAX_MJ_REFS_PER_SLOT ? { target: 'mj' } : { notice: '参考图已满' };
   }
-  return slots.counts.images < maxReferenceImages(slots.model) ? { target: 'images' } : { notice: '参考图已满' };
+  return slots.counts.images < (slots.maxImageReferences ?? maxReferenceImages(slots.model)) ? { target: 'images' } : { notice: '参考图已满' };
 }
 
 function routeTimed(slots: StudioMediaSlots, media: 'videos' | 'audios'): StudioMediaRoute {

@@ -1,6 +1,6 @@
 import type { KeyModel } from '@/api/keys';
 
-export type ProviderKind = 'official' | 'relay' | 'custom' | 'team';
+export type ProviderKind = 'official' | 'relay' | 'custom' | 'team' | 'subscription';
 type ApiModality = 'image' | 'video' | 'audio' | 'llm';
 
 /** One identity rule for presets, settings and generation controls. */
@@ -37,6 +37,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'evolink', value: 'evolink', label: 'EvoLink', kind: 'relay', modalities: ['image'], homepageUrl: 'https://evolink.ai', docsUrl: 'https://docs.evolink.ai', defaultBaseUrl: 'https://api.evolink.ai/v1', defaultModels: [{ name: 'Midjourney V8.2', id: 'mj-v8.2', modality: 'image', protocol: 'evolink' }] },
   { id: 'tuzi', value: 'custom', label: 'Tuzi', kind: 'relay', modalities: ['image', 'video', 'llm'], homepageUrl: 'https://tu-zi.com', apiKeyUrl: 'https://api.tu-zi.com', defaultBaseUrl: 'https://api.tu-zi.com', defaultModels: [{ name: 'GPT Image 2', id: 'gpt-image-2', modality: 'image' }] },
   { id: 'openai-hk', value: 'custom', label: 'OpenAI-HK', kind: 'relay', modalities: ['image', 'video', 'llm'], homepageUrl: 'https://www.openai-hk.com', apiKeyUrl: 'https://www.openai-hk.com/v3/ai', defaultBaseUrl: 'https://api.openai-hk.com', defaultModels: [{ name: 'GPT Image 2', id: 'gpt-image-2', modality: 'image' }] },
+  { id: 'chatgpt', value: 'chatgpt', label: 'ChatGPT（Codex 登录）', kind: 'subscription', modalities: ['image'], defaultModels: [{ name: 'GPT Image', id: 'gpt-image-2', modality: 'image' }] },
   { id: 'custom', value: 'custom', label: '自定义', kind: 'custom', modalities: ['image'], defaultBaseUrl: '', defaultModels: [{ name: '', id: '' }] },
   // 局域网里另一台开了「局域网共享」的 Atelier（ADR-0025）：模型由网关决定，连接后自动带回。
   { id: 'atelier', value: 'atelier', label: 'Remote Atelier', kind: 'team', modalities: ['image'], defaultBaseUrl: '', defaultModels: [] },

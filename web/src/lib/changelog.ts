@@ -32,6 +32,7 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 // 下次发版写入新版本 changes（日常开发不改已发布条目、不提前 bump）：
+// { kind: 'feat', text: '支持使用本机 Codex 的 ChatGPT 登录添加订阅供应商，生成图片按订阅记账。' },
 // { kind: 'feat', text: '网关成员密钥可在中转机本机随时查看和复制，点击成员名称可直接改名。' },
 // { kind: 'fix', text: '升级后，旧的未撤销网关成员密钥会自动重发，旧密钥立即失效；请在网关成员列表复制新密钥并通知对应成员更换。已撤销密钥不会重发。' },
 export const CHANGELOG: ChangelogEntry[] = [

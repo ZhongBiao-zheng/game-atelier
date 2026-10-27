@@ -27,6 +27,9 @@ def _provider_render(key: _keys.KeySpec, model: str = ""):
 
     Re-read via attribute so monkeypatch on provider `render` takes effect.
     """
+    if key.provider == "chatgpt":
+        from .chatgpt_image import render
+        return render
     if key.provider == "evolink":
         from .evolink import render
         return render

@@ -122,7 +122,7 @@ function SpecChips({ config, reuseParameter, testId, children }: {
 }) {
   const video = config.kind === 'video';
   const values: Array<{ parameter: RoundParameter; label: string }> = [
-    { parameter: 'model', label: modelDisplayName({ id: config.model, name: config.modelName }) },
+    { parameter: 'model', label: config.provider === 'chatgpt' ? 'GPT Image' : modelDisplayName({ id: config.model, name: config.modelName }) },
   ];
   const add = (parameter: RoundParameter, label: string | undefined) => {
     if (label) values.push({ parameter, label });
@@ -138,6 +138,7 @@ function SpecChips({ config, reuseParameter, testId, children }: {
   if (video) add('audio', config.generateAudio != null ? config.generateAudio ? '有音频' : '无音频' : undefined);
   return (
     <div data-testid={testId} className="flex flex-wrap items-center gap-1.5 text-xs text-foreground">
+      {config.provider === 'chatgpt' && <MetaTag>ChatGPT 订阅</MetaTag>}
       {values.map(({ parameter, label }) => {
         const result = reuseParameter?.(config, parameter);
         const apply = typeof result === 'function' ? result : undefined;

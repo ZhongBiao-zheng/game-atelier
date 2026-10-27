@@ -9,6 +9,7 @@ export interface KeyView {
   enabled?: boolean;
   is_default?: boolean;
   provider: string;
+  auth_source?: 'codex-cli' | null;
   base_url: string | null;
   billing_group?: string | null;
   access_key: string; // masked
@@ -27,6 +28,7 @@ export interface KeyCreatePayload {
   alias: string;
   enabled?: boolean;
   provider: string;
+  auth_source?: 'codex-cli' | null;
   base_url?: string | null;
   billing_group?: string | null;
   access_key: string;
@@ -138,4 +140,14 @@ export async function previewModels(payload: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
+}
+
+export interface ChatGPTSubscriptionStatus {
+  available: boolean;
+  email: string | null;
+  plan: string | null;
+}
+
+export function getChatGPTSubscription(): Promise<ChatGPTSubscriptionStatus> {
+  return requestJson<ChatGPTSubscriptionStatus>('/api/subscriptions/chatgpt', '读取 Codex 登录状态');
 }

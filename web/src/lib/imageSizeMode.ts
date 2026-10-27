@@ -36,6 +36,8 @@ export function prepareImageSizeSubmission(
   draft: JobParams,
   caps?: ImageControlCaps,
 ): { params: JobParams; error?: never } | { params?: never; error: string } {
+  const effectiveCaps = caps ?? imageControlCaps(model, provider, baseUrl);
+  if (effectiveCaps.sizeKind === 'none' && !effectiveCaps.ratios.length) return { params: normalizeImageSizeParams(model, provider, baseUrl, draft, effectiveCaps) };
   const error = imageSizeError(draft, model);
   if (error) return { error };
   const params = normalizeImageSizeParams(model, provider, baseUrl, draft, caps);
@@ -58,6 +60,16 @@ export function normalizeImageSizeParams(
   capsOverride?: ImageControlCaps,
 ): JobParams {
   const caps = capsOverride ?? imageControlCaps(model, provider, baseUrl);
+  if (caps.sizeKind === 'none' && !caps.ratios.length) {
+    const params = { ...current, n: Math.min(current.n ?? 1, caps.maxCount ?? 4) };
+    delete params.size;
+    delete params.size_mode;
+    delete params.ratio;
+    delete params.resolution;
+    delete params.custom_size;
+    delete params.quality;
+    return params;
+  }
   const { size: _size, resolution: _resolution, ...retained } = current;
   let mode = !hasImageSizeSelection(current) && caps.showAutoSize ? 'auto' as const : imageSizeMode(current);
   if ((mode === 'auto' && !caps.showAutoSize) || (mode === 'custom' && !caps.showCustomSize)) mode = 'ratio';

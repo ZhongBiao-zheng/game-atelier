@@ -167,6 +167,8 @@ def estimate_cost_cny(
     """Estimate one generation request; None means no verified price."""
     if not model_id:
         return None
+    if provider == "chatgpt":
+        return 0.0 if kind == "image" and model_id == "gpt-image-2" else None
     count = max(1, math.floor(n)) if n is not None and math.isfinite(n) else 1
     model = _normalize(model_id)
     host = _hostname(base_url)

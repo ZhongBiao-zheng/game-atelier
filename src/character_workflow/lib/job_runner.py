@@ -91,6 +91,8 @@ def _switch_route(job_id: str, error: BaseException) -> bool:
         next_params = params.model_dump(exclude_none=True)
         # 预计费用按新渠道重算（「自动」任务的预计由 runner 补，不是提交方冻结的）。
         next_params.pop("estimated_cost_cny", None)
+        if job.provider == "chatgpt":
+            next_params.pop("actual_cost_cny", None)
         if evo_state.get("terminal") == "rejected":
             # Only a definite refusal can discard the previous channel's submission state.
             next_params.pop("evolink_state", None)
@@ -389,13 +391,19 @@ def _params(job: Job) -> dict[str, Any]:
 
 def _freeze_estimated_cost(job: Job, params: dict[str, Any]) -> None:
     """提交方没冻结预计费用的任务（画布、Agent、自动路由）按实际渠道补一份，用量页才不会算成未计价。"""
-    if params.get("estimated_cost_cny") is not None or params.get("actual_cost_cny") is not None:
-        return
     from character_workflow.lib.generation_pricing import estimate_cost_cny
     from character_workflow.lib.keys import find_by_alias
 
     key = find_by_alias(job.alias or "")
     if key is None:
+        return
+    if key.provider == "chatgpt":
+        # Subscription usage has no per-image charge, regardless of stale client estimates.
+        params["estimated_cost_cny"] = 0.0
+        params["actual_cost_cny"] = 0.0
+        update_job_params(job.job_id, params)
+        return
+    if params.get("estimated_cost_cny") is not None or params.get("actual_cost_cny") is not None:
         return
     model = next((m for m in key.models if m.id == job.model), None)
     estimate = estimate_cost_cny(
@@ -619,6 +627,8 @@ def _run_once(
             if params.get("image_edit"):
                 from character_workflow.lib.keys import find_by_alias
                 edit_key = find_by_alias(job.alias)
+                if edit_key and edit_key.provider == "chatgpt":
+                    raise JobRunnerError("ChatGPT 订阅尚不支持局部编辑或扩图")
                 if edit_key and edit_key.provider == "atelier":
                     from character_workflow.lib.callers.atelier_gateway import render_edit as render
                 else:

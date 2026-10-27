@@ -26,6 +26,7 @@ GET /api/onboarding/status
 POST /api/folder-picker
 POST /api/onboarding/data-root
 GET /api/keys
+GET /api/subscriptions/chatgpt
 POST /api/keys
 PATCH /api/keys/{alias}
 DELETE /api/keys/{alias}
@@ -198,6 +199,7 @@ LOCAL_MANAGEMENT = frozenset({
     "/api/gateway/providers/{alias}/admin/usage/tasks",
 
     "/api/config", "/api/keys", "/api/keys/{alias}", "/api/keys/{alias}/reveal",
+    "/api/subscriptions/chatgpt",
     "/api/keys/models-preview", "/api/models/order", "/api/models/mode", "/api/folder-picker", "/api/onboarding/status",
     "/api/onboarding/data-root",
     # 局域网共享：开关会让本机对局域网开端口，密钥与用量也只给本机页面（ADR-0025）。

@@ -8,6 +8,7 @@ import * as keys from '@/api/keys';
 import * as gateway from '@/api/gateway';
 vi.mock('@/api/keys', async original => ({
   ...await original<typeof import('@/api/keys')>(),
+  getChatGPTSubscription: vi.fn().mockResolvedValue({ available: false, email: null, plan: null }),
   patchKey: vi.fn().mockResolvedValue(undefined),
   listKeys: async () => ({ keys: [
     { alias: 'local', provider: 'custom', base_url: 'https://models.example.com/v1', access_key: '***', models: [] },
@@ -126,4 +127,27 @@ it('状态优先级为停用、欠费、长期未用，30 天以内正常', () =
   expect(screen.getByText('已停用')).toBeInTheDocument();
   view.rerender(<ProviderRow row={{ ...row, last_used_at: new Date(Date.now() - 29 * 86400000).toISOString() }} overdue={false} {...props} />);
   expect(screen.getByText('正常')).toBeInTheDocument();
+});
+
+
+it('订阅卡片展示账号和套餐', async () => {
+  vi.mocked(keys.getChatGPTSubscription).mockResolvedValueOnce({ available: true, email: 'artist@example.test', plan: 'plus' });
+  render(<ProviderAddPage />);
+  expect(screen.getByRole('heading', { name: '订阅' })).toBeInTheDocument();
+  const card = screen.getByRole('button', { name: /ChatGPT/ });
+  await waitFor(() => expect(card).toHaveTextContent('artist@example.test · plus'));
+});
+
+it('订阅状态加载失败不冒充未登录', async () => {
+  vi.mocked(keys.getChatGPTSubscription).mockRejectedValueOnce(new Error('读取登录状态失败'));
+  render(<ProviderAddPage />);
+  expect(screen.getByRole('button', { name: /ChatGPT/ })).toHaveTextContent('读取中…');
+  expect(await screen.findByText('读取登录状态失败')).toBeInTheDocument();
+  expect(screen.queryByText('请先在 Codex 里用 ChatGPT 登录')).not.toBeInTheDocument();
+});
+
+
+it('订阅供应商列表显示品牌名称', () => {
+  render(<ProviderRow row={{ alias: 'chatgpt', provider: 'chatgpt', masked_secret: '', models: [{ id: 'gpt-image-2', name: 'GPT Image' }] }} overdue={false} pending={false} onEdit={vi.fn()} onToggle={vi.fn()} />);
+  expect(screen.getByText('ChatGPT（Codex 登录）')).toBeInTheDocument();
 });

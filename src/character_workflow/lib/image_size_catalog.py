@@ -27,6 +27,9 @@ def is_tuzi_gpt25(base_url: str | None, model: str) -> bool:
 
 
 def image_size_options(provider: str, base_url: str | None, model: str) -> dict[str, list[str]]:
+    # Subscription controls stay hidden until verified against a real account.
+    if provider == "chatgpt":
+        return {"ratios": [], "resolutions": []}
     if provider == "openrouter":
         options = _CATALOG["openrouter"].get(model)
         return {

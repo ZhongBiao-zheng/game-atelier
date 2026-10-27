@@ -752,7 +752,8 @@ class _KeyCreatePayload(BaseModel):
     provider: str
     base_url: str | None = None
     billing_group: str | None = None
-    access_key: str
+    access_key: str = ""
+    auth_source: Literal["codex-cli"] | None = None
     secret_key: str | None = None
     capabilities: list[str] = []
     models: list[keys.ModelSpec] = []
@@ -883,6 +884,7 @@ def create_key(payload: _KeyCreatePayload) -> dict:
             base_url=payload.base_url,
             billing_group=payload.billing_group,
             access_key=payload.access_key, secret_key=payload.secret_key,
+            auth_source=payload.auth_source,
             capabilities=payload.capabilities, models=payload.models,
             homepage_url=payload.homepage_url,
             docs_url=payload.docs_url,
@@ -892,7 +894,8 @@ def create_key(payload: _KeyCreatePayload) -> dict:
             created_at=payload.created_at or datetime.now(timezone.utc).isoformat(),
         )
     except Exception as e:
-        raise HTTPException(422, str(e)) from e
+        detail = "ChatGPT 订阅配置无效" if payload.provider == "chatgpt" else str(e)
+        raise HTTPException(422, detail) from e
     try:
         keys.add_key(spec)
     except keys.DuplicateAliasError:
@@ -915,6 +918,8 @@ def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
         keys.patch_key(alias, patch_data)
     except keys.NoSuchAliasError:
         raise HTTPException(404, f"找不到别名「{alias}」的密钥（可能已被删除）") from None
+    except ValidationError as error:
+        raise HTTPException(422, "供应商配置无效") from error
     return {"alias": alias}
 
 
@@ -936,6 +941,14 @@ def reveal_key_endpoint(alias: str) -> dict:
     if spec is None:
         raise HTTPException(404, f"找不到别名「{alias}」的密钥（可能已被删除）")
     return {"access_key": spec.access_key}
+
+
+@router.get("/subscriptions/chatgpt")
+def chatgpt_subscription_status(response: Response) -> dict:
+    from character_workflow.lib.chatgpt_auth import get_auth_status
+
+    response.headers["Cache-Control"] = "no-store"
+    return get_auth_status()
 
 
 class _ModelsPreviewPayload(BaseModel):

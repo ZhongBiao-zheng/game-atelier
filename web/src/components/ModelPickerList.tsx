@@ -6,6 +6,7 @@ import type { JobParams } from '@/schema/jobs';
 import { ModelBrandIcon } from './ModelBrandIcon';
 import { MetaTag } from './MetaTag';
 import { formatGenerationCost } from '@/lib/generationCost';
+import { routeChannel } from '@/lib/modelRoutes';
 import { formatModelDuration } from '@/lib/modelMetricFormat';
 
 export function ModelPickerList({ choices, selected, initialKind, sections = false, params = {}, onSelect }: {
@@ -91,6 +92,7 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
         </div>}
         {group.choices.map(choice => {
           const id = `${choice.key.alias}:${choice.model.id}`;
+          const subscription = routeChannel(choice.key, choice.model).key.provider === 'chatgpt';
           const entry = modelCatalog(choice.model.id);
           const media = group.kind === 'image' || group.kind === 'video';
           const seconds = media ? durations[id] : null, cost = media ? prices[id] : null;
@@ -102,10 +104,10 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
             <span className={selected === id ? 'text-foreground' : 'text-muted-foreground'}><ModelBrandIcon brand={entry?.brand} /></span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">{modelDisplayName(choice.model)}</span>
-              {entry && <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{entry.description}</span>}
-              {(seconds != null || cost != null) && <span className="mt-2 flex justify-between gap-2 text-xs tabular-nums text-muted-foreground">
+              {entry && !subscription && <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{entry.description}</span>}
+              {(seconds != null || cost != null || subscription) && <span className="mt-2 flex justify-between gap-2 text-xs tabular-nums text-muted-foreground">
                 {seconds != null && <MetaTag>{formatModelDuration(seconds)}</MetaTag>}
-                {cost != null && <MetaTag className="ml-auto">{formatGenerationCost(cost)}</MetaTag>}
+                {subscription ? <MetaTag className="ml-auto">订阅</MetaTag> : cost != null && <MetaTag className="ml-auto">{formatGenerationCost(cost)}</MetaTag>}
               </span>}
             </span>
           </button>;

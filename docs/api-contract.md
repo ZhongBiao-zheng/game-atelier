@@ -1038,6 +1038,24 @@ status 保留真实状态（含 pending、done、failed，以及团队 canceled 
 
 维护期间新生成/Agent消息/网关生成返回503，已接入工作、审批与取消仍可完成。候选初始化期间仅放行本机会话建立、编辑租约及更新状态/结果，其他业务API暂时503。
 
+## ChatGPT 订阅供应商
+
+- `GET /api/subscriptions/chatgpt`：本机管理会话专用，响应 `{available:boolean,email:string|null,plan:string|null}`，`Cache-Control: no-store`。只读取登录状态，不刷新、不返回 token；不向网关管理员或 Agent 开放。
+- `POST /api/keys` 的订阅配置使用 `provider="chatgpt"`、`auth_source="codex-cli"`；无需 `access_key`。禁止保存密钥、自定义地址、计费分组；固定唯一图片模型 `{id:"gpt-image-2",name:"GPT Image"}`。更新同样校验。普通供应商不接受 `auth_source`。
+- 凭据源为 `$CODEX_HOME/auth.json`，未设时用 `~/.codex/auth.json`，仅支持文件中的 ChatGPT 登录。Token 不进入供应商配置、API 或 Job。过期刷新写回原文件；锁在数据目录 `.runtime`，只协调 Atelier 进程，不声称与 Codex CLI 共用锁。
+- 订阅任务保留 `provider="chatgpt"`，单次价格为 0 CNY。能力参数按实际验证白名单开放；未实测前只提供默认单张，不暴露比例、质量、背景、局部编辑或扩图。
+
+2026-10-27 经用户授权实测（Codex CLI 0.162.1），文生图与单参考图编辑各 1 次成功，真实 Job 均为 DONE、实际记账 0 CNY。
+
+| 能力 | 验证结果与开放范围 |
+|---|---|
+| 文生图 | `model=gpt-image-2`、`n=1`，其余参数省略；开放 |
+| 图生图 | JSON `images:[{image_url:dataURL}]`，单参考图、单张输出；开放 |
+| 比例 / size（含 auto） / quality / background | 未显式传参验证；不开放控件 |
+| 多张输出 / 多参考图 / mask / 局部编辑 / 扩图 / AI 高清 | 未验证；不开放 |
+
+两次调用期间 auth.json 未改变，未触发刷新；真实刷新并发仍仅有隔离测试覆盖，不能用这两次调用证明与 CLI 同时刷新安全。
+
 ## Tuzi GPT Image 2.5 图片质量
 
 Tuzi GPT Image 2.5 系列在 Studio 与 Canvas 提供五档质量：低/中/高/超高/最高，分别传 `quality=low|medium|high|xhigh|max`。比例独立选择，不提供 K 分辨率档位，也不再将 resolution 转换为 quality。

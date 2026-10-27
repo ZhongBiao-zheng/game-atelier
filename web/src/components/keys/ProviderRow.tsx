@@ -28,7 +28,7 @@ export function ProviderRow({ row, overdue, pending, onEdit, onToggle }: {
     <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-xs font-medium"><ProviderBrandIcon provider={row} /></span>
     <button type="button" aria-label={`编辑 ${row.alias}`} onClick={onEdit}
       className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-      <span className="block truncate text-sm font-medium">{row.alias}</span>
+      <span className="block truncate text-sm font-medium">{row.provider === 'chatgpt' ? vendor : row.alias}</span>
       <span className="mt-1 block truncate text-xs text-muted-foreground" title={row.base_url ?? ''}>
         {[row.provider === 'custom' ? '自定义' : vendor, providerHost(row), `${row.models?.length ?? 0} 个模型`].filter(Boolean).join(' · ')}
       </span>

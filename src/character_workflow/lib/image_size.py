@@ -63,6 +63,13 @@ def normalize_image_size_params(key: KeySpec, model: str, params: dict[str, Any]
         model = channel_model.id
     result = {name: value for name, value in params.items() if value is not None}
     result.pop("custom_size", None)
+    if key.provider == "chatgpt":
+        if result.get("image_edit") or result.get("layer_decomposition"):
+            raise ValueError("ChatGPT 订阅尚不支持局部编辑、扩图或分层")
+        for field in ("size_mode", "size", "ratio", "resolution", "quality", "background"):
+            result.pop(field, None)
+        result["n"] = 1
+        return result
     mode = result.get("size_mode")
     options = image_size_options(key.provider, key.base_url, model)
     if resolve_image_protocol(key.provider, key.base_url, model) == "evolink":

@@ -71,7 +71,7 @@ export function reuseRoundParameter(config: RoundConfig, parameter: RoundParamet
     case 'resolution': return config.resolution && caps.resolutions.includes(config.resolution)
       ? { sizeParams: normalizeImageSizeParams(size.modelId, size.provider, size.baseUrl, { ...sizeParams, resolution: config.resolution, ...(sizeParams.size_mode === 'custom' ? {} : { size: undefined }) }, caps) } : null;
     case 'quality': return config.quality && caps.qualities?.includes(config.quality) ? { quality: config.quality } : null;
-    case 'count': return config.n != null && caps.family !== 'midjourney' ? { count: clampImageCount(config.n) } : null;
+    case 'count': return config.n != null && caps.family !== 'midjourney' ? { count: Math.min(caps.maxCount ?? 4, clampImageCount(config.n)) } : null;
     default: return null;
   }
 }

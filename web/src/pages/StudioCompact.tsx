@@ -211,7 +211,7 @@ export function StudioCompact() {
     // MJ 一次 imagine 固定回 4 张方案（同 Studio.onSubmit）。
     const effectiveCount = caps.family === 'midjourney'
       ? MJ_IMAGES_PER_TASK
-      : clampImageCount(overrideConfig?.n ?? count);
+      : Math.min(caps.maxCount ?? 4, clampImageCount(overrideConfig?.n ?? count));
     const rawSizeParams: JobParams = overrideConfig
       ? { size_mode: overrideConfig.sizeMode ?? 'ratio', size: overrideConfig.size, ratio: overrideConfig.ratio, resolution: overrideConfig.resolution }
       : sizeParams;
@@ -251,7 +251,7 @@ export function StudioCompact() {
 
     // 控件隐藏的参数不写进 params（同 Studio.onSubmit）：openrouter 会把 resolution 当 API 参数发。
     const jobParams: JobParams = {
-      size_mode: effectiveMode,
+      ...(caps.ratios.length || caps.showCustomSize || caps.showAutoSize ? { size_mode: effectiveMode } : {}),
       ...(effectiveSize ? { size: effectiveSize } : {}),
       ...(effectiveRatio ? { ratio: effectiveRatio } : {}),
       ...(effectiveResolution ? { resolution: effectiveResolution } : {}),

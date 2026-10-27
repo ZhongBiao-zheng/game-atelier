@@ -1,6 +1,7 @@
 /** 厂商 provider → 官方中文/品牌名。未知 provider 回退到 alias。 */
 export const PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
+  chatgpt: 'ChatGPT（Codex 登录）',
   seedream: 'Volcengine Ark',
   tokendance: 'TokenDance',
   openrouter: 'OpenRouter',

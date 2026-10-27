@@ -2343,7 +2343,7 @@ export function CanvasGenerationComposer({
           materials={materialReferences}
           connectedReferences={mentionReferences.filter(reference => connectedMaterialNodeIds.has(reference.nodeId))}
           connectedNodeIds={context.connectedMaterialNodeIdsByNodeId.get(node.id) ?? EMPTY_CANVAS_NODE_IDS}
-          limits={draft.mode === 'video' ? selectedVideoReferenceLimits : null}
+          limits={draft.mode === 'video' ? selectedVideoReferenceLimits : imageCaps?.maxRefImages != null ? { images: imageCaps.maxRefImages, videos: 0, audios: 0 } : null}
           picking={context.materialPick?.targetNodeId === node.id
             && context.materialPick.slot === undefined}
           onPreview={reference => context.previewContent(

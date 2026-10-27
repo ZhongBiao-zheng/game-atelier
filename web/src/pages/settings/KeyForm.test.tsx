@@ -1,10 +1,11 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createKey, patchKey, previewModels } from '@/api/keys';
+import { getChatGPTSubscription, createKey, patchKey, previewModels } from '@/api/keys';
 import { KeyForm } from './KeyForm';
 
 vi.mock('@/api/keys', async importOriginal => ({
   ...await importOriginal<typeof import('@/api/keys')>(),
+  getChatGPTSubscription: vi.fn(),
   createKey: vi.fn(),
   patchKey: vi.fn(),
   previewModels: vi.fn(),
@@ -138,4 +139,42 @@ it('includes a manually added upstream model while the all segment is open', asy
   fireEvent.click(screen.getByRole('button', { name: '添加' }));
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(createKey).toHaveBeenCalledWith(expect.objectContaining({ models: [expect.objectContaining({ id: 'remote', modality: 'video' })] })));
+});
+
+
+describe('ChatGPT subscription', () => {
+  it('shows the local account and saves only the fixed model and auth source', async () => {
+    vi.mocked(getChatGPTSubscription).mockResolvedValue({ available: true, email: 'artist@example.test', plan: 'plus' });
+    vi.mocked(createKey).mockResolvedValue({ alias: 'chatgpt' });
+    render(<KeyForm presetId="chatgpt" onCreated={vi.fn()} onCancel={vi.fn()} />);
+    expect(await screen.findByText('artist@example.test')).toBeInTheDocument();
+    expect(screen.getByText('plus')).toBeInTheDocument();
+    expect(screen.queryByLabelText('API 密钥')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('API 请求地址')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '添加模型' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(createKey).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'chatgpt', auth_source: 'codex-cli', access_key: '', base_url: null,
+      models: [{ id: 'gpt-image-2', name: 'GPT Image', modality: 'image', protocol: null, input_modalities: [] }],
+    })));
+  });
+
+  it('requires Codex login before adding the subscription', async () => {
+    vi.mocked(getChatGPTSubscription).mockResolvedValue({ available: false, email: null, plan: null });
+    render(<KeyForm presetId="chatgpt" onCreated={vi.fn()} onCancel={vi.fn()} />);
+    expect(await screen.findByText('请先在 Codex 里用 ChatGPT 登录')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+  });
+});
+
+
+it('can disable an existing subscription even after Codex logout', async () => {
+  vi.mocked(getChatGPTSubscription).mockResolvedValue({ available: false, email: null, plan: null });
+  vi.mocked(patchKey).mockResolvedValue(undefined);
+  render(<KeyForm mode="edit" initial={{ alias: 'chatgpt', provider: 'chatgpt', auth_source: 'codex-cli', access_key: '', models: [{ id: 'gpt-image-2', name: 'GPT Image', modality: 'image' }] }} onCreated={vi.fn()} onCancel={vi.fn()} />);
+  expect(await screen.findByText('请先在 Codex 里用 ChatGPT 登录')).toBeInTheDocument();
+  expect(screen.queryByLabelText('API 密钥')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('switch'));
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(patchKey).toHaveBeenCalledWith('chatgpt', expect.objectContaining({ enabled: false })));
 });

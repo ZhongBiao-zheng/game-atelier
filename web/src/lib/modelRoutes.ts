@@ -116,6 +116,9 @@ export function intersectImageCaps(all: ImageControlCaps[]): ImageControlCaps {
     : null;
   return {
     ...first,
+    ...(all.some(caps => caps.maxCount != null) ? { maxCount: Math.min(...all.map(caps => caps.maxCount ?? 4)) } : {}),
+    ...(all.some(caps => caps.maxRefImages != null) ? { maxRefImages: Math.min(...all.map(caps => caps.maxRefImages ?? Infinity)) } : {}),
+    sizeKind: all.some(caps => caps.sizeKind === 'none') ? 'none' : first.sizeKind,
     ratios: keep(first.ratios, caps => caps.ratios),
     resolutions,
     showResolution: all.every(caps => caps.showResolution) && resolutions.length > 0,

@@ -906,6 +906,7 @@ function isOpenAiHkBaseUrl(baseUrl: string | null | undefined) {
 }
 
 function canvasImageModelIsRoutable(key: KeyView, model: KeyView['models'][number]) {
+  if (key.provider === 'chatgpt') return model.id === 'gpt-image-2';
   if (key.provider === 'evolink') return isEvolinkMidjourney(model.id, key.provider)
     && (!model.protocol || model.protocol === 'evolink');
   if (key.provider === 'nano_banana') return false;
@@ -938,6 +939,7 @@ function canvasVideoModelIsRoutable(key: KeyView, model: KeyView['models'][numbe
 export function canvasUpscaleModelChoices(keys: KeyView[]) {
   return keys.flatMap(key => key.models
     .filter(model => canvasGenerationModelSupportsMode(key, model, 'image')
+      && selectionImageCaps(key, model.id).sizeKind !== 'none'
       && imageFamily(model.id) !== 'midjourney'
       && maxReferenceImages(model.id) >= 1)
     .map(model => ({ key, model })));

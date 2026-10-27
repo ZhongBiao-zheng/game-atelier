@@ -614,7 +614,7 @@ export function PromptInput({
   // MJ 的比例/版本/stylize 由渠道固定注入，张数也固定 4 —— 这些控件不能装作可选。
   const isMj = caps.family === 'midjourney';
   const isEvoMj = isEvolinkMidjourney(size.modelId, size.provider);
-  const maxRef = maxReferenceImages(selectedModel?.id);
+  const maxRef = caps.maxRefImages ?? maxReferenceImages(selectedModel?.id);
   // omni 参考上限：按族覆盖（happyhorse video-edit = 5 图 + 1 视频），缺省 9/3/3。
   const maxRefImgs = videoCaps?.maxRefImages ?? MAX_REF_IMAGES;
   const maxRefVids = videoCaps?.maxRefVideos ?? MAX_REF_VIDEOS;
@@ -1212,7 +1212,7 @@ export function PromptInput({
 
           {!isVideo && (
             <>
-          <div ref={sizeRef} data-testid="size-control-wrap" className="relative shrink-0">
+          {(caps.ratios.length > 0 || caps.showAutoSize || caps.showCustomSize || caps.qualities) && <div ref={sizeRef} data-testid="size-control-wrap" className="relative shrink-0">
             <ControlButton
               active={openPanel === 'size'}
               aria-label="选择比例和分辨率"
@@ -1267,7 +1267,7 @@ export function PromptInput({
                   )}
                 </div>
             </ToolbarPopover>
-          </div>
+          </div>}
 
           {isMj && (
             <MjControls
@@ -1290,7 +1290,7 @@ export function PromptInput({
               aria-label="选择出图数量"
               onClick={() => setOpenPanel(openPanel === 'count' ? null : 'count')}
             >
-              <Images size={14} aria-hidden /> {isMj ? MJ_IMAGES_PER_TASK : count} 张
+              <Images size={14} aria-hidden /> {isMj ? MJ_IMAGES_PER_TASK : Math.min(count, caps.maxCount ?? 4)} 张
             </ControlButton>
             <ToolbarPopover
               open={openPanel === 'count'}
@@ -1307,7 +1307,8 @@ export function PromptInput({
                   </p>
                 ) : (
                   <CountOptions
-                    value={count}
+                    value={Math.min(count, caps.maxCount ?? 4)}
+                    max={caps.maxCount}
                     onSelect={(item) => {
                       onCountChange?.(item);
                       setOpenPanel(null);
@@ -1421,10 +1422,10 @@ export function PromptInput({
 }
 
 /** 数量弹窗的 1-4 选项（图片张数 / 视频条数共用同一配方）。 */
-function CountOptions({ value, onSelect }: { value: number; onSelect: (n: number) => void }) {
+function CountOptions({ value, onSelect, max = 4 }: { value: number; max?: number; onSelect: (n: number) => void }) {
   return (
     <div className="flex rounded-lg bg-popover p-1">
-      {[1, 2, 3, 4].map((item) => (
+      {[1, 2, 3, 4].filter(item => item <= max).map((item) => (
         <button
           key={item}
           type="button"

@@ -346,6 +346,14 @@ EvoLink Key 与 Tuzi Key/订单互不混用；个人 MJ Profile 不属于 EvoLin
 （原图 / 蒙版 / 引导图，存于 job 的 `params.edit_inputs`）与完整提示词（`params.edit_prompt`），「开始生成」回到编辑节点重跑。
 _避免_:整张裁片覆盖、以任务成功代替视觉质量验收。
 
+## 订阅供应商
+
+**订阅供应商(Subscription Provider)**：通过本机 Codex 的 ChatGPT 登录调用图片生成，
+供应商标记为 `chatgpt`。Atelier 配置只记录 `auth_source="codex-cli"`，不复制登录凭据。
+只有一个「GPT Image」模型，后端决定实际型号；任务以 0 元记账，菜单显示「订阅」。
+它参与现有自动路由，添加时不改变用户设置的成员顺序。
+_避免_：免费 API、GPT Image 2.5 订阅型号、把订阅额度折算成单张费用。
+
 ## 轮(Round)
 
 Studio 中一次出图提交产生的一组图(1-n 张)。删除按轮,隐藏按单图。

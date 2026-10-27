@@ -12,13 +12,14 @@ import tempfile
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_serializer
+from pydantic import BaseModel, Field, field_validator, model_serializer, model_validator
 
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import _replace_with_retry
 from character_workflow.lib.file_lock import file_lock
 
 Provider = Literal[
+    "chatgpt",
     "openai",
     "midjourney",
     "nano_banana",
@@ -81,7 +82,8 @@ class KeySpec(BaseModel):
     base_url: str | None = None
     # 聚合商可按账号分组采用不同价目；未配置时计价器必须保持未知，不能猜 default。
     billing_group: str | None = None
-    access_key: str
+    access_key: str = ""
+    auth_source: Literal["codex-cli"] | None = None
     secret_key: str | None = None
     capabilities: list[Kind] = Field(default_factory=list)
     models: list[ModelSpec] = Field(default_factory=list)
@@ -91,6 +93,30 @@ class KeySpec(BaseModel):
     modalities: list[str] = Field(default_factory=list)
     notes: str = ""
     created_at: str
+
+    @model_validator(mode="after")
+    def _subscription_contract(self):
+        if self.provider != "chatgpt":
+            if self.auth_source is not None:
+                raise ValueError("只有 ChatGPT 订阅支持 Codex 登录")
+            return self
+        if self.access_key or self.secret_key or self.base_url or self.billing_group:
+            raise ValueError("ChatGPT 订阅读取 Codex 登录，不接受密钥或自定义地址")
+        if self.auth_source != "codex-cli":
+            raise ValueError("ChatGPT 订阅必须使用 Codex 登录")
+        if any(model.id != "gpt-image-2" for model in self.models):
+            raise ValueError("ChatGPT 订阅只支持 GPT Image")
+        self.models = [ModelSpec(id="gpt-image-2", name="GPT Image", modality="image",
+                                 input_modalities=["text", "image"])]
+        self.modalities = ["image"]
+        return self
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_auth_source(self, handler):
+        data = handler(self)
+        if data.get("auth_source") is None:
+            data.pop("auth_source", None)
+        return data
 
     @field_validator("models", mode="before")
     @classmethod
@@ -195,6 +221,8 @@ def _backfill_model_protocols(db: KeysDB) -> None:
         for spec in key.models:
             if spec.protocol is not None:
                 continue
+            if key.provider == "chatgpt":
+                continue
             # 文本/音频没有图片协议回填；它们只接受上游明确标注或各 caller 自己的
             # 保守旧模型推断，不能因为共用 ModelSpec 就误走 image resolver。
             key_modalities = set(key.modalities)
@@ -277,7 +305,7 @@ def patch_key(alias: str, patch: dict) -> None:
         db = read_keys_db()
         for i, k in enumerate(db.keys):
             if k.alias == alias:
-                db.keys[i] = k.model_copy(update=patch)
+                db.keys[i] = KeySpec.model_validate({**k.model_dump(), **patch})
                 write_keys_db(db)
                 return
         raise NoSuchAliasError(alias)
