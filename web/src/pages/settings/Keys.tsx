@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { ChevronRight, Plus, Search } from 'lucide-react';
 import { Link } from 'wouter';
 
 import { KeyCard, type KeyRow } from '@/components/keys/KeyCard';
@@ -30,6 +30,9 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   const [query, setQuery] = useState('');
   const [overdue, setOverdue] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Set<string>>(new Set());
+  // 按加载时的启用状态分组：页面内刚关掉的行留在原位，开关点完不会跳走。
+  const [closedAliases, setClosedAliases] = useState<Set<string>>(new Set());
+  const [showClosed, setShowClosed] = useState(false);
   const [dialog, setDialog] = useState<{
     open: boolean;
     title: string;
@@ -50,11 +53,11 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
         embedded ? fetchGatewayMembers().catch(() => null) : null,
       ]);
       setOverdue(new Set(statuses?.members.filter(member => member.reason === 'insufficient_balance').map(member => member.alias)));
-      setKeys(
-        resp.keys
-          .map((k) => toKeyRow({ ...k, last_used_at: lastUsed[k.alias] ?? null }))
-          .sort((a, b) => Number(b.provider === 'atelier') - Number(a.provider === 'atelier')),
-      );
+      const rows = resp.keys
+        .map((k) => toKeyRow({ ...k, last_used_at: lastUsed[k.alias] ?? null }))
+        .sort((a, b) => Number(b.provider === 'atelier') - Number(a.provider === 'atelier'));
+      setKeys(rows);
+      setClosedAliases(new Set(rows.filter(row => !row.enabled).map(row => row.alias)));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -110,6 +113,13 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
 
   const filteredKeys = keys.filter(key => [key.alias, providerLabel(key.provider, key.alias),
     key.provider === 'custom' ? '自定义' : '', providerHost(key)].join(' ').toLowerCase().includes(query.trim().toLowerCase()));
+  const activeKeys = filteredKeys.filter(key => !closedAliases.has(key.alias));
+  const closedKeys = filteredKeys.filter(key => closedAliases.has(key.alias));
+  const closedOpen = showClosed || query.trim() !== '';
+  const providerRow = (key: KeyRow) => <ProviderRow key={key.alias} row={key}
+    overdue={overdue.has(key.alias)} pending={pending.has(key.alias)}
+    onToggle={enabled => { void toggleKey(key, enabled); }}
+    onEdit={() => { setEditingKey(key); setShowForm(true); }} />;
 
   const keyRows = keys.map((k) => (
     <KeyCard
@@ -181,7 +191,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
 
       {!loading && (keys.length > 0 || !error) && (
         <div className="space-y-4">
-        <div className="overflow-hidden rounded-xl border border-border bg-card">
+        {!(embedded && activeKeys.length === 0 && closedKeys.length > 0) && <div className="overflow-hidden rounded-xl border border-border bg-card">
           {keys.length === 0 ? (
             <div className="px-4 py-10 text-center text-sm text-muted-foreground">
               还没有配置供应商
@@ -190,10 +200,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
             <div className="divide-y divide-border">
               {embedded ? (
                 <ul aria-label="供应商列表" className="divide-y divide-border">
-                  {filteredKeys.map(key => <ProviderRow key={key.alias} row={key}
-                    overdue={overdue.has(key.alias)} pending={pending.has(key.alias)}
-                    onToggle={enabled => { void toggleKey(key, enabled); }}
-                    onEdit={() => { setEditingKey(key); setShowForm(true); }} />)}
+                  {activeKeys.map(providerRow)}
                   {filteredKeys.length === 0 && <li className="px-4 py-10 text-center text-sm text-muted-foreground">没有匹配的供应商</li>}
                 </ul>
               ) : (
@@ -201,7 +208,17 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
               )}
             </div>
           )}
-          </div>
+          </div>}
+          {embedded && closedKeys.length > 0 && <section>
+            <button type="button" aria-expanded={closedOpen} onClick={() => setShowClosed(open => !open)}
+              className="flex items-center gap-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+              <ChevronRight className={`size-3.5 transition-transform duration-150 ${closedOpen ? 'rotate-90' : ''}`} aria-hidden />
+              已关闭的供应商<span className="tabular-nums">{closedKeys.length}</span>
+            </button>
+            {closedOpen && <div className="mt-2 overflow-hidden rounded-xl border border-border bg-card">
+              <ul aria-label="已关闭的供应商" className="divide-y divide-border">{closedKeys.map(providerRow)}</ul>
+            </div>}
+          </section>}
           <div className="text-xs text-muted-foreground">
             密钥仅存本机 <span className="font-mono">&lt;数据目录&gt;/.config/keys.json</span>
           </div>

@@ -87,7 +87,7 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
         buttons[next]?.focus();
       }}>
       {groups.map(group => <section key={group.kind} className="flex flex-col gap-1">
-        {sections && <div ref={element => { headers.current[group.kind] = element; }} className="px-3 pb-2 pt-3 text-xs uppercase tracking-label text-muted-foreground">
+        {sections && <div ref={element => { headers.current[group.kind] = element; }} className="px-3 pb-1 pt-3 text-xs text-muted-foreground">
           {group.kind === 'image' ? 'Image' : 'Video'}
         </div>}
         {group.choices.map(choice => {
@@ -101,7 +101,7 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
             tabIndex={selected === id || (!flat.some(item => `${item.key.alias}:${item.model.id}` === selected) && flat[0] === choice) ? 0 : -1}
             onClick={() => onSelect(choice)}
             className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors duration-150 hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60">
-            <span className={selected === id ? 'text-foreground' : 'text-muted-foreground'}><ModelBrandIcon brand={entry?.brand} /></span>
+            <span className={selected === id ? 'text-foreground' : 'text-muted-foreground'}><ModelBrandIcon brand={entry?.brand} size={18} /></span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">{modelDisplayName(choice.model)}</span>
               {entry && !subscription && <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{entry.description}</span>}
