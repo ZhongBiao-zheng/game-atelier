@@ -12,7 +12,6 @@ import asyncio
 import json
 import logging
 import re
-import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -149,15 +148,14 @@ def _current_revision(project_id: str) -> int:
 
 
 def _schedule_canvas_job(job_id: str) -> None:
-    from character_workflow.lib.canvas_runs import run_canvas_job_scheduled
+    from character_workflow.lib import canvas_run_queue
 
-    def target() -> None:
-        try:
-            run_canvas_job_scheduled(job_id)
-        except Exception:  # noqa: BLE001 — run_canvas_job 已把失败写进 job 与候选
+    def report(future) -> None:
+        # run_canvas_job 已把失败写进 job 与候选
+        if future.exception() is not None:
             logger.warning("canvas agent run failed: %s", job_id)
 
-    threading.Thread(target=target, name=f"canvas-agent-run-{job_id}", daemon=True).start()
+    canvas_run_queue.submit(job_id).add_done_callback(report)
 
 
 def _with_fresh_revision(project_id: str, call: Callable[[int], dict]) -> dict:

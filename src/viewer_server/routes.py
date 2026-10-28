@@ -2762,12 +2762,17 @@ def get_canvas_jobs(project_id: str) -> list[Job]:
 
 
 def _run_canvas_job_safely(job_id: str) -> None:
-    from character_workflow.lib.canvas_runs import run_canvas_job_scheduled
+    """排进画布队列后立即返回，不在 Web 线程池里等名额或等执行。"""
+    from character_workflow.lib import canvas_run_queue
+
+    def report(future) -> None:
+        # run_canvas_job persists both the friendly Job failure and failed candidates.
+        if future.exception() is not None:
+            logger.warning("canvas run failed: %s", job_id)
 
     try:
-        run_canvas_job_scheduled(job_id)
+        canvas_run_queue.submit(job_id).add_done_callback(report)
     except Exception:  # noqa: BLE001
-        # run_canvas_job persists both the friendly Job failure and failed candidates.
         logger.warning("canvas run failed: %s", job_id)
 
 

@@ -1,4 +1,5 @@
 """The only HTTP entry points that approve and schedule a Canvas batch."""
+import threading
 from contextlib import contextmanager
 from typing import Iterator
 
@@ -61,12 +62,18 @@ def get_batch(project_id: str, batch_id: str) -> CanvasBatchRun:
         return read_canvas_batch(project_id, batch_id)
 
 
+def _start_batch_worker(project_id: str, batch_id: str) -> None:
+    """批量会跑很久：交给独立线程，不占 Web 线程池。"""
+    threading.Thread(target=run_canvas_batch, args=(project_id, batch_id), daemon=True,
+                     name=f"canvas-batch-{batch_id[:14]}").start()
+
+
 @router.post("/{batch_id}/start", response_model=CanvasBatchRun)
 def start_batch(project_id: str, batch_id: str, background: BackgroundTasks) -> CanvasBatchRun:
     with _command_errors():
         run, should_schedule = start_canvas_batch(project_id, batch_id)
     if should_schedule:
-        background.add_task(run_canvas_batch, project_id, batch_id)
+        background.add_task(_start_batch_worker, project_id, batch_id)
     return run
 
 

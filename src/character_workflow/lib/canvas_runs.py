@@ -10,7 +10,6 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import BoundedSemaphore, Lock
 from typing import Any, Literal
 
 from character_workflow.lib import data_root
@@ -102,9 +101,6 @@ _OUTPUT_MIME = {
     ".aac": "audio/aac",
     ".pcm": "audio/pcm",
 }
-_RUN_PROJECT_GATES: dict[str, BoundedSemaphore] = {}
-_RUN_ALIAS_GATES: dict[str, BoundedSemaphore] = {}
-_RUN_ALIAS_GATES_LOCK = Lock()
 _REVERSE_PROMPT_PRESET_ID = "canvas.reverse_prompt"
 _REVERSE_PROMPT_PRESET_VERSION = 1
 _ANGLE_PROMPT_PRESET_ID = "canvas.angle_edit"
@@ -3451,17 +3447,6 @@ def run_canvas_job(job_id: str) -> Job:
         raise
     finalized, _document = finalize_canvas_run(job.canvas_project_id, job_id)
     return finalized
-
-
-def run_canvas_job_scheduled(job_id: str) -> Job:
-    """Limit all media to six running jobs per key and six per Canvas project."""
-    job = read_job(job_id)
-    alias = job.alias or job.character_id
-    with _RUN_ALIAS_GATES_LOCK:
-        alias_gate = _RUN_ALIAS_GATES.setdefault(alias, BoundedSemaphore(6))
-        project_gate = _RUN_PROJECT_GATES.setdefault(job.canvas_project_id, BoundedSemaphore(6))
-    with alias_gate, project_gate:
-        return run_canvas_job(job_id)
 
 
 def _recover_incremental_candidate_output(job: Job) -> Job:

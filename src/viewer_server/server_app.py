@@ -211,8 +211,8 @@ async def normal_lifespan(app: FastAPI):
     from character_workflow.lib.canvas_runs import (
         reconcile_canvas_jobs,
         recover_canvas_transactions,
-        run_canvas_job_scheduled,
     )
+    from character_workflow.lib import canvas_run_queue
 
     maintain_canvas_package_lifecycle()
     canvas_projects = list_canvas_projects()
@@ -258,7 +258,7 @@ async def normal_lifespan(app: FastAPI):
 
     async def resume_canvas_job(job_id: str) -> None:
         try:
-            await asyncio.to_thread(run_canvas_job_scheduled, job_id)
+            await asyncio.wrap_future(await asyncio.to_thread(canvas_run_queue.submit, job_id))
         except Exception:  # noqa: BLE001
             logging.getLogger(__name__).warning("resumed canvas run failed: %s", job_id)
 

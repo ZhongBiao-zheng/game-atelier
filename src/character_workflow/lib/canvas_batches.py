@@ -16,6 +16,7 @@ from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.canvas_projects import (
     CanvasStorageError, canvas_project_dir, canvas_project_lock_path,
 )
+from character_workflow.lib import canvas_run_queue
 from character_workflow.lib.canvas_runs import (
     _current_version_id,
     _draft_for_node,
@@ -28,7 +29,6 @@ from character_workflow.lib.canvas_runs import (
     prepare_canvas_generation,
     recover_canvas_transactions_unlocked,
     request_canvas_run_cancel,
-    run_canvas_job_scheduled,
 )
 from character_workflow.lib.file_lock import file_lock, try_file_lock
 from character_workflow.lib.jobs import new_job_id, read_job
@@ -605,7 +605,7 @@ def _run_canvas_batch(project_id: str, batch_id: str) -> None:
                     _fail_remaining(run, str(error))
                     return
             try:
-                run_canvas_job_scheduled(entry.job_id)
+                canvas_run_queue.submit(entry.job_id).result()
             except Exception:
                 # The existing runner records its own failure and any paid output; never resubmit.
                 pass

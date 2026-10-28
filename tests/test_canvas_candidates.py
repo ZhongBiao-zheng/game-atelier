@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import base64
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
-from threading import Barrier, Event
+from collections import Counter
+from threading import Barrier, Event, active_count
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +14,7 @@ from character_workflow.lib.canvas_projects import (
     replace_canvas_node_media,
     save_canvas_document,
 )
-from character_workflow.lib import canvas_runs
+from character_workflow.lib import canvas_run_queue, canvas_runs
 from character_workflow.lib.canvas_runs import (
     dismiss_canvas_candidate,
     finalize_canvas_run,
@@ -59,18 +59,22 @@ def test_video_jobs_execute_concurrently(monkeypatch, assignments):
 
     monkeypatch.setattr(canvas_runs, "read_job", jobs.__getitem__)
     monkeypatch.setattr(canvas_runs, "run_canvas_job", execute)
-    monkeypatch.setattr(canvas_runs, "_RUN_PROJECT_GATES", {})
-    monkeypatch.setattr(canvas_runs, "_RUN_ALIAS_GATES", {})
-    with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
-        futures = [executor.submit(canvas_runs.run_canvas_job_scheduled, job_id) for job_id in jobs]
-        results = [future.result(timeout=10) for future in futures]
+    _fresh_queue(monkeypatch)
+    futures = [canvas_run_queue.submit(job_id) for job_id in jobs]
+    results = [future.result(timeout=10) for future in futures]
     assert [(job.job_id, job.canvas_project_id) for job in results] == [
         (job_id, job.canvas_project_id) for job_id, job in jobs.items()
     ]
 
 
+def _fresh_queue(monkeypatch):
+    monkeypatch.setattr(canvas_run_queue, "_waiting", [])
+    monkeypatch.setattr(canvas_run_queue, "_running_keys", Counter())
+    monkeypatch.setattr(canvas_run_queue, "_running_projects", Counter())
+
+
 @pytest.mark.parametrize("shared", ["key", "project"])
-def test_canvas_scheduler_queues_seventh_job_and_releases_slots(monkeypatch, shared):
+def test_canvas_scheduler_queues_seventh_job_without_a_thread(monkeypatch, shared):
     jobs = {
         str(index): SimpleNamespace(
             alias="key" if shared == "key" else f"key-{index}",
@@ -78,37 +82,33 @@ def test_canvas_scheduler_queues_seventh_job_and_releases_slots(monkeypatch, sha
         )
         for index in range(7)
     }
+    jobs["other"] = SimpleNamespace(alias="other-key", canvas_project_id="other-canvas")
     started = Barrier(7)
     release = Event()
-    seventh_submitted = Event()
-
-    def read(job_id):
-        if job_id == "6":
-            seventh_submitted.set()
-        return jobs[job_id]
 
     def execute(job_id):
-        if job_id != "6":
+        if job_id in jobs and job_id not in {"6", "other"}:
             started.wait(timeout=5)
             assert release.wait(timeout=5)
         return job_id
 
-    monkeypatch.setattr(canvas_runs, "read_job", read)
+    monkeypatch.setattr(canvas_runs, "read_job", jobs.__getitem__)
     monkeypatch.setattr(canvas_runs, "run_canvas_job", execute)
-    monkeypatch.setattr(canvas_runs, "_RUN_PROJECT_GATES", {})
-    monkeypatch.setattr(canvas_runs, "_RUN_ALIAS_GATES", {})
-    with ThreadPoolExecutor(max_workers=7) as executor:
-        futures = [executor.submit(canvas_runs.run_canvas_job_scheduled, str(i)) for i in range(6)]
-        try:
-            started.wait(timeout=5)
-            seventh = executor.submit(canvas_runs.run_canvas_job_scheduled, "6")
-            assert seventh_submitted.wait(timeout=5)
-            with pytest.raises(FutureTimeoutError):
-                seventh.result(timeout=0.1)
-        finally:
-            release.set()
-        assert [future.result(timeout=5) for future in futures] == list(map(str, range(6)))
-        assert seventh.result(timeout=5) == "6"
+    _fresh_queue(monkeypatch)
+    futures = [canvas_run_queue.submit(str(i)) for i in range(6)]
+    try:
+        started.wait(timeout=5)
+        threads = active_count()
+        seventh = canvas_run_queue.submit("6")
+        # 排队的任务不占线程，也不挡其他 KEY / 项目。
+        assert active_count() == threads
+        assert not seventh.done()
+        assert canvas_run_queue.submit("other").result(timeout=5) == "other"
+        assert not seventh.done()
+    finally:
+        release.set()
+    assert [future.result(timeout=5) for future in futures] == list(map(str, range(6)))
+    assert seventh.result(timeout=5) == "6"
 
 
 PNG = base64.b64decode(
