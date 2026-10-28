@@ -12,6 +12,16 @@ from character_workflow.lib.atomic_io import _replace_with_retry
 
 
 def _windows_acl(path: Path, *, restrict: bool = False) -> None:
+    import pywintypes
+
+    # pywintypes.error is not an OSError; callers only turn OSError into a readable message.
+    try:
+        _apply_windows_acl(path, restrict)
+    except pywintypes.error as error:
+        raise OSError(error.winerror, f"{error.funcname}: {error.strerror}") from error
+
+
+def _apply_windows_acl(path: Path, restrict: bool) -> None:
     import ntsecuritycon
     import win32api
     import win32con
@@ -25,13 +35,19 @@ def _windows_acl(path: Path, *, restrict: bool = False) -> None:
     if restrict:
         dacl = win32security.ACL()
         dacl.AddAccessAllowedAce(win32security.ACL_REVISION, ntsecuritycon.FILE_ALL_ACCESS, owner)
-        # An elevated token can default new files to the Administrators group owner.
-        # Set both owner and protected ACL on our empty temporary before writing secrets.
+        current = win32security.GetNamedSecurityInfo(
+            str(path), win32security.SE_FILE_OBJECT, win32security.OWNER_SECURITY_INFORMATION,
+        ).GetSecurityDescriptorOwner()
+        flags = (win32security.DACL_SECURITY_INFORMATION
+                 | win32security.PROTECTED_DACL_SECURITY_INFORMATION)
+        # An elevated token can default new files to the Administrators group owner; only then
+        # take ownership. Changing owner needs WRITE_OWNER, which folders granting only "Modify"
+        # (common outside the profile, e.g. D:\) deny; the owner can always rewrite the DACL.
+        if current != owner:
+            flags |= win32security.OWNER_SECURITY_INFORMATION
         win32security.SetNamedSecurityInfo(
-            str(path), win32security.SE_FILE_OBJECT,
-            win32security.OWNER_SECURITY_INFORMATION | win32security.DACL_SECURITY_INFORMATION
-            | win32security.PROTECTED_DACL_SECURITY_INFORMATION,
-            owner, None, dacl, None,
+            str(path), win32security.SE_FILE_OBJECT, flags,
+            owner if current != owner else None, None, dacl, None,
         )
     descriptor = win32security.GetNamedSecurityInfo(
         str(path), win32security.SE_FILE_OBJECT,
