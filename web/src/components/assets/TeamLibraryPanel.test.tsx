@@ -6,7 +6,7 @@ import { TEAM_ASSET_DRAG_TYPE } from '@/schema/teamLibrary';
 
 const api = vi.hoisted(() => ({
   listTeamLibraries: vi.fn(), listTeamAssets: vi.fn(), adoptTeamAsset: vi.fn(), rescanTeamLibrary: vi.fn(),
-  fetchProfile: vi.fn(), updateTeamAsset: vi.fn(), withdrawTeamAsset: vi.fn(), listRelatedTeamAssets: vi.fn(),
+  fetchProfile: vi.fn(), saveProfile: vi.fn(), mountTeamLibrary: vi.fn(), updateTeamAsset: vi.fn(), withdrawTeamAsset: vi.fn(), listRelatedTeamAssets: vi.fn(),
   teamAssetThumbUrl: (l: string, e: string, w: number) => `/thumb/${l}/${e}/${w}`,
   teamAssetContentUrl: (l: string, e: string) => `/content/${l}/${e}`,
   TeamNotAuthorError: class TeamNotAuthorError extends Error {
@@ -14,6 +14,10 @@ const api = vi.hoisted(() => ({
   },
 }));
 vi.mock('@/api/teamLibraries', () => api);
+const canvasApi = vi.hoisted(() => ({ listCanvasProjects: vi.fn() }));
+vi.mock('@/api/canvas', () => canvasApi);
+const folderApi = vi.hoisted(() => ({ chooseFolder: vi.fn() }));
+vi.mock('@/api/folders', () => folderApi);
 
 const library: TeamLibraryView = { library_id: 'lib_0123456789abcdef', project_id: 'p1', name: '角色参考', mount_path: '/x', mounted_at: '', reachable: true, asset_count: 2, scanned_at: null };
 const raw: TeamLibraryIndexEntry = { id: 'raw_a', kind: 'raw', title: 'castle.png', author: null, tags: [], mime_type: 'image/png', bytes: 1, relative_path: 'concept/castle.png', sha256: null, updated_at: '2026-09-20T00:00:00Z', reproducible: false, status: 'ready', model: null, cost_cny: null, input_sha256: [] };
@@ -30,23 +34,27 @@ beforeEach(() => {
 afterEach(() => vi.resetAllMocks());
 
 describe('TeamLibraryPanel', () => {
-  it('shows mount hint when the project has no library', async () => {
-    api.listTeamLibraries.mockResolvedValue([]);
-    const onOpenSettings = vi.fn();
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onOpenSettings={onOpenSettings} />);
-    fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
-    expect(onOpenSettings).toHaveBeenCalled();
-  });
-  it('hides the mount button when there is no mount exit', async () => {
-    api.listTeamLibraries.mockResolvedValue([]);
+  it('mounts a folder in place onto the current canvas and then lists it', async () => {
+    api.listTeamLibraries.mockResolvedValueOnce([]).mockResolvedValue([library]);
+    api.listTeamAssets.mockResolvedValue({ entries: [], next_cursor: null });
+    api.fetchProfile.mockResolvedValue({ display_name: '小李' });
+    api.mountTeamLibrary.mockResolvedValue(library);
+    canvasApi.listCanvasProjects.mockResolvedValue([{ project_id: 'p0', name: '别的画布' }, { project_id: 'p1', name: '本画布' }]);
+    folderApi.chooseFolder.mockResolvedValue('/team/art');
     render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
-    expect(await screen.findByText('这个画布还没有团队库')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '挂载' })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
+    const dialog = await screen.findByRole('dialog', { name: '挂载文件夹' });
+    expect(await within(dialog).findByRole('checkbox', { name: /本画布/ })).toBeChecked();
+    expect(within(dialog).getByRole('checkbox', { name: /别的画布/ })).not.toBeChecked();
+    fireEvent.click(within(dialog).getByRole('button', { name: '选择文件夹' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: '挂载到 1 个项目' }));
+    await waitFor(() => expect(api.mountTeamLibrary).toHaveBeenCalledWith({ projectId: 'p1', path: '/team/art' }));
+    expect(await screen.findByText('角色参考')).toBeInTheDocument();
   });
   it('lists entries grouped by tree and filters by kind and query', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [raw, shared], next_cursor: null });
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onOpenSettings={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
     expect(await screen.findByText('董卓 待机')).toBeInTheDocument();
     expect(screen.getByText('concept')).toBeInTheDocument();      // 目录树：原始文件按目录
     expect(screen.getByText('老王')).toBeInTheDocument();          // 目录树：分享内容按作者
@@ -58,7 +66,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamAssets.mockResolvedValue({ entries: [shared], next_cursor: null });
     api.adoptTeamAsset.mockResolvedValue({ asset: { asset_id: 'ca' }, created: true });
     const onAdopted = vi.fn();
-    render(<TeamLibraryPanel projectId="p1" onAdopted={onAdopted} onOpenSettings={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onAdopted={onAdopted} />);
     fireEvent.click(await screen.findByRole('button', { name: '采用' }));
     await waitFor(() => expect(onAdopted).toHaveBeenCalledWith({ asset: { asset_id: 'ca' }, created: true }, shared));
     expect(api.adoptTeamAsset).toHaveBeenCalledWith(library.library_id, shared.id, 'p1');
@@ -82,7 +90,7 @@ describe('TeamLibraryPanel', () => {
   it('sets drag payload on cards', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [raw], next_cursor: null });
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onOpenSettings={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
     const card = (await screen.findByText('castle.png')).closest('[draggable="true"]')!;
     const setData = vi.fn();
     fireEvent.dragStart(card, { dataTransfer: { setData, effectAllowed: '' } });
@@ -98,7 +106,7 @@ describe('TeamLibraryPanel', () => {
       .mockImplementationOnce(() => new Promise(resolve => { releaseRescanList = resolve; }))
       .mockResolvedValue({ entries: [shared], next_cursor: null });
 
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onOpenSettings={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
     await screen.findByText('castle.png');
 
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
@@ -118,7 +126,7 @@ describe('TeamLibraryPanel', () => {
   it('greys out incomplete entries and hides adopt', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [{ ...shared, status: 'incomplete' }], next_cursor: null });
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onOpenSettings={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
     await screen.findByText('董卓 待机');
     expect(screen.queryByRole('button', { name: '采用' })).toBeNull();
     expect(screen.getByText('同步中')).toBeInTheDocument();

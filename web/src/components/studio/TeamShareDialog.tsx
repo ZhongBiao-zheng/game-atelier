@@ -16,6 +16,7 @@ import type {
   TeamShareSource,
 } from '@/schema/teamLibrary';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { MountTeamLibraryDialog } from '@/components/team/MountTeamLibraryDialog';
 import { TagField, parseTags } from '@/components/assets/TagField';
 import { Button } from '@/components/ui/button';
 import {
@@ -44,8 +45,6 @@ export interface TeamShareDialogProps {
   request: TeamShareDialogRequest | null;
   onClose(): void;
   onShared(entry: TeamLibraryIndexEntry, libraryName: string): void;
-  /** 没有可达库时显示「挂载」。本组件只回调，离开页面或关闭对话框由调用方负责。 */
-  onOpenSettings?(): void;
   /** 画布传当前画布项目 id：只列挂在这个画布上的库。Studio 不传，列全部。 */
   projectId?: string;
 }
@@ -69,7 +68,7 @@ function errorMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error ? cause.message : fallback;
 }
 
-export function TeamShareDialog({ request, onClose, onShared, onOpenSettings, projectId }: TeamShareDialogProps) {
+export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamShareDialogProps) {
   const [libraries, setLibraries] = useState<TeamLibraryView[]>([]);
   const [libraryId, setLibraryId] = useState('');
   const [needsName, setNeedsName] = useState(false);
@@ -80,6 +79,7 @@ export function TeamShareDialog({ request, onClose, onShared, onOpenSettings, pr
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [largeRefs, setLargeRefs] = useState<TeamRefsTooLargeError | null>(null);
+  const [mountOpen, setMountOpen] = useState(false);
   // state 要等下一次渲染才生效；同一 tick 内的重复调用靠 ref 拦住。
   const submittingRef = useRef(false);
 
@@ -156,6 +156,18 @@ export function TeamShareDialog({ request, onClose, onShared, onOpenSettings, pr
 
   const noLibrary = !loading && libraries.length === 0 && !error;
 
+  // 就地挂载后只刷新库与署名，不重置已填的标题和标签。
+  function afterMount() {
+    Promise.all([fetchProfile(), listTeamLibraries(projectId)])
+      .then(([profile, views]) => {
+        const usable = reachableLibraries(views);
+        setLibraries(usable);
+        if (usable.length === 1) setLibraryId(usable[0].library_id);
+        setNeedsName(!profile.display_name);
+      })
+      .catch(cause => setError(errorMessage(cause, '读取团队库失败')));
+  }
+
   return (
     <>
       <Dialog open={Boolean(request)} onOpenChange={open => { if (!open && !submitting) onClose(); }}>
@@ -179,11 +191,9 @@ export function TeamShareDialog({ request, onClose, onShared, onOpenSettings, pr
             {noLibrary ? (
               <div className="flex items-center justify-between gap-3">
                 <p role="status" className="text-sm text-muted-foreground">没有可用的团队库</p>
-                {onOpenSettings && (
-                  <Button type="button" variant="outline" className="min-h-11" onClick={onOpenSettings}>
-                    挂载
-                  </Button>
-                )}
+                <Button type="button" variant="outline" className="min-h-11" onClick={() => setMountOpen(true)}>
+                  挂载
+                </Button>
               </div>
             ) : (
               <div className="space-y-2">
@@ -251,6 +261,8 @@ export function TeamShareDialog({ request, onClose, onShared, onOpenSettings, pr
         onConfirm={() => void share(true)}
         onCancel={() => setLargeRefs(null)}
       />
+      <MountTeamLibraryDialog open={mountOpen} currentProjectId={projectId} onClose={() => setMountOpen(false)}
+        onMounted={afterMount} />
     </>
   );
 }

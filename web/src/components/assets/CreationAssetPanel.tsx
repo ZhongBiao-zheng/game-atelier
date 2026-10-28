@@ -35,8 +35,6 @@ export interface CreationAssetPanelProps {
     renderedPrompt: string,
   ) => void;
   onUseMedia: (asset: CreationAsset, content: CreationMediaAssetContent) => void;
-  /** 团队栏「挂载」出口，参数是团队栏当前的画布项目；不给就不显示挂载按钮。 */
-  onOpenSettings?: (projectId: string) => void;
   onTeamAssetAdopted?: (result: TeamAssetAdoptResponse, entry: TeamLibraryIndexEntry) => void;
   /** 复刻生成资产（asset.kind 恒为 'generation'）；传了才显示「复刻」。 */
   onReproduce?: (asset: CreationAsset) => void;
@@ -65,7 +63,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   onClose,
   onUsePrompt,
   onUseMedia,
-  onOpenSettings,
   onTeamAssetAdopted,
   onReproduce,
   teamRelatedSha256,
@@ -334,7 +331,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
               key={teamProjectId}
               projectId={teamProjectId}
               onAdopted={(result, entry) => { void refresh(); onTeamAssetAdopted?.(result, entry); }}
-              onOpenSettings={onOpenSettings ? () => onOpenSettings(teamProjectId) : undefined}
               onReproduce={onReproduce ? asset => { onReproduce(asset); onClose(); } : undefined}
               relatedSha256={teamRelatedSha256}
               initialTeamLibraryId={initialTeamLibraryId}

@@ -1571,16 +1571,14 @@ async function openTeamTab() {
   fireEvent.click(await screen.findByRole('button', { name: '团队' }));
 }
 
-it('team tab mount exit opens settings on the current canvas', async () => {
+it('team tab mounts in place with the current canvas preselected', async () => {
   vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
   vi.mocked(listTeamLibraries).mockResolvedValue([]);
-  try {
-    await openTeamTab();
-    fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
-    await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe('/settings/libraries?canvas=canvas-one'));
-  } finally {
-    window.history.replaceState(null, '', '/');
-  }
+  await openTeamTab();
+  fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
+  const dialog = await screen.findByRole('dialog', { name: '挂载文件夹' });
+  expect(await within(dialog).findByText('当前画布')).toBeInTheDocument();
+  expect(window.location.pathname).not.toBe('/settings/libraries');
 });
 
 it('announces a team asset adopted from the panel', async () => {

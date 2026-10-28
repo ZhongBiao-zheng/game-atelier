@@ -36,6 +36,7 @@ import {
 } from '@/api/teamLibraries';
 import { TagField, parseTags } from '@/components/assets/TagField';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { MountTeamLibraryDialog } from '@/components/team/MountTeamLibraryDialog';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -59,8 +60,6 @@ export interface TeamLibraryPanelProps {
   projectId: string;
   /** 采用完成后交给调用方：由它决定提示与后续动作。 */
   onAdopted: (result: TeamAssetAdoptResponse, entry: TeamLibraryIndexEntry) => void;
-  /** 没有挂载库时的「挂载」出口；不给就不显示按钮。 */
-  onOpenSettings?: () => void;
   /** 复刻出口（Studio 与画布都传）：面板先采用成本机副本再回调。不给就不显示复刻与相关配方。 */
   onReproduce?: (asset: CreationAsset) => void;
   /** 有值时顶部「相关配方」改为参考内容命中这份 sha256 的配方。 */
@@ -134,7 +133,6 @@ function TypeIcon({ entry, className }: { entry: TeamLibraryIndexEntry; classNam
 export function TeamLibraryPanel({
   projectId,
   onAdopted,
-  onOpenSettings,
   onReproduce,
   relatedSha256,
   initialTeamLibraryId,
@@ -157,6 +155,8 @@ export function TeamLibraryPanel({
   const [relatedError, setRelatedError] = useState(false);
   const [editing, setEditing] = useState<TeamLibraryIndexEntry | null>(null);
   const [withdrawing, setWithdrawing] = useState<TeamLibraryIndexEntry | null>(null);
+  const [mountOpen, setMountOpen] = useState(false);
+  const [mountsVersion, setMountsVersion] = useState(0);
   const requestId = useRef(0);
   const mounted = useRef(true);
   const canReproduce = Boolean(onReproduce);
@@ -186,7 +186,7 @@ export function TeamLibraryPanel({
       })
       .catch(() => { if (alive) setLibraries([]); });
     return () => { alive = false; };
-  }, [projectId, initialTeamLibraryId]);
+  }, [projectId, initialTeamLibraryId, mountsVersion]);
 
   // 显示名决定哪些卡是「我分享的」：只有作者本人能编辑 / 撤回。
   useEffect(() => {
@@ -360,7 +360,9 @@ export function TeamLibraryPanel({
     return (
       <div className={cn('grid place-items-center gap-3 p-8 text-center', className)}>
         <p className="text-xs text-muted-foreground">这个画布还没有团队库</p>
-        {onOpenSettings && <Button size="sm" variant="outline" onClick={onOpenSettings}>挂载</Button>}
+        <Button size="sm" variant="outline" onClick={() => setMountOpen(true)}>挂载</Button>
+        <MountTeamLibraryDialog open={mountOpen} currentProjectId={projectId} onClose={() => setMountOpen(false)}
+          onMounted={() => setMountsVersion(version => version + 1)} />
       </div>
     );
   }

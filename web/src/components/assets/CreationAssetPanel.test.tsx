@@ -99,15 +99,13 @@ vi.mock('@/api/creationAssets', async importOriginal => {
 });
 
 vi.mock('./TeamLibraryPanel', () => ({
-  TeamLibraryPanel: ({ projectId, onOpenSettings, onReproduce, relatedSha256, initialTeamLibraryId }: {
+  TeamLibraryPanel: ({ projectId, onReproduce, relatedSha256, initialTeamLibraryId }: {
     projectId: string;
-    onOpenSettings?: () => void;
     onReproduce?: (asset: CreationAsset) => void;
     relatedSha256?: string | null;
     initialTeamLibraryId?: string | null;
   }) => (
     <div data-testid="team-panel" data-project-id={projectId} data-related-sha256={relatedSha256 ?? ''} data-library-id={initialTeamLibraryId ?? ''}>
-      {onOpenSettings && <button type="button" onClick={onOpenSettings}>挂载</button>}
       {onReproduce && <button type="button" onClick={() => onReproduce(generationAsset)}>团队复刻</button>}
     </div>
   ),
@@ -343,29 +341,6 @@ describe('CreationAssetPanel', () => {
 
     await screen.findByRole('button', { name: '提示词' });
     expect(screen.queryByRole('button', { name: '团队' })).not.toBeInTheDocument();
-  });
-
-  it('passes the team canvas to the mount exit and hides it when no exit is given', async () => {
-    mocks.list.mockResolvedValue({ revision: 1, assets: [] });
-    const onOpenSettings = vi.fn();
-    const view = render(
-      <CreationAssetPanel
-        projectId="canvas-a"
-        onClose={vi.fn()}
-        onUsePrompt={vi.fn()}
-        onUseMedia={vi.fn()}
-        onOpenSettings={onOpenSettings}
-      />,
-    );
-    fireEvent.click(await screen.findByRole('button', { name: '团队' }));
-    fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
-    expect(onOpenSettings).toHaveBeenCalledWith('canvas-a');
-
-    view.rerender(
-      <CreationAssetPanel projectId="canvas-a" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />,
-    );
-    expect(await screen.findByTestId('team-panel')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '挂载' })).not.toBeInTheDocument();
   });
 
   it('previews video and audio media with native players', async () => {

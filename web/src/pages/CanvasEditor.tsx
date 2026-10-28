@@ -5505,7 +5505,6 @@ function CanvasEditorInner({
                 selectedNode && selectedDraft ? selectedNode.id : undefined,
               );
             }}
-            onOpenSettings={canvasId => setLocation(`/settings/libraries?canvas=${encodeURIComponent(canvasId)}`)}
             onTeamAssetAdopted={result => announceToolNotice(result.created ? '已加入资产库' : '已在你的资产库')}
             onReproduce={asset => void reproduceGenerationAsset(asset)}
             teamRelatedSha256={teamRelatedSha256}
@@ -5537,10 +5536,6 @@ function CanvasEditorInner({
           projectId={projectId}
           onClose={() => setShareRequest(null)}
           onShared={(_entry, libraryName) => announceToolNotice(`已分享到 ${libraryName}`)}
-          onOpenSettings={() => {
-            setShareRequest(null);
-            setLocation(`/settings/libraries?canvas=${encodeURIComponent(projectId)}`);
-          }}
         />
 
         {narrowViewport && generationPanelOpen && selectedNode && selectedDraft && (

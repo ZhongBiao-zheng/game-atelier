@@ -2459,13 +2459,14 @@ describe('Studio 分享：边界', () => {
     ...overrides,
   });
 
-  it('没有可达团队库时点「挂载」跳到设置页', async () => {
+  it('没有可达团队库时点「挂载」就地打开挂载弹窗，不离开创作台', async () => {
     mockJobs([studioJob({})]);
     const { hook, history } = memoryLocation({ path: '/studio', record: true });
     render(<Router hook={hook}><Studio /></Router>);
     fireEvent.click(await screen.findByLabelText('分享生成结果 1'));
     fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
-    expect(history).toContain('/settings/libraries');
+    expect(await screen.findByRole('dialog', { name: '挂载文件夹' })).toBeInTheDocument();
+    expect(history).not.toContain('/settings/libraries');
   });
 
   it('视频结果分享时对话框里没有预览图', async () => {

@@ -20,8 +20,11 @@ vi.mock('@/api/teamLibraries', async importOriginal => {
     saveProfile: vi.fn(),
     listTeamLibraries: vi.fn(),
     shareToTeamLibrary: vi.fn(),
+    mountTeamLibrary: vi.fn(),
   };
 });
+vi.mock('@/api/canvas', () => ({ listCanvasProjects: vi.fn(async () => [{ project_id: 'canvas-7', name: '本画布' }]) }));
+vi.mock('@/api/folders', () => ({ chooseFolder: vi.fn() }));
 
 const mockProfile = vi.mocked(fetchProfile);
 const mockSaveProfile = vi.mocked(saveProfile);
@@ -69,17 +72,15 @@ const request: TeamShareDialogRequest = {
 function renderDialog(props: Partial<Parameters<typeof TeamShareDialog>[0]> = {}) {
   const onClose = vi.fn();
   const onShared = vi.fn();
-  const onOpenSettings = vi.fn();
   render(
     <TeamShareDialog
       request={request}
       onClose={onClose}
       onShared={onShared}
-      onOpenSettings={onOpenSettings}
       {...props}
     />,
   );
-  return { onClose, onShared, onOpenSettings };
+  return { onClose, onShared };
 }
 
 beforeEach(() => {
@@ -170,13 +171,14 @@ describe('TeamShareDialog', () => {
       .toBeLessThan(mockShare.mock.invocationCallOrder[0]);
   });
 
-  it('没有可达库时显示「挂载」并调用 onOpenSettings', async () => {
+  it('没有可达库时「挂载」就地打开挂载弹窗', async () => {
     mockList.mockResolvedValue([view({ reachable: false })]);
-    const { onOpenSettings } = renderDialog();
+    renderDialog({ projectId: 'canvas-7' });
 
     fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
-    expect(onOpenSettings).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: '分享' })).toBeDisabled();
+    const mount = await screen.findByRole('dialog', { name: '挂载文件夹' });
+    expect(await within(mount).findByRole('checkbox', { name: /本画布/ })).toBeChecked();
+    expect(screen.getByRole('button', { name: '分享', hidden: true })).toBeDisabled();
   });
 
   it('参考内容过大时确认后带 allow_large 重发', async () => {
