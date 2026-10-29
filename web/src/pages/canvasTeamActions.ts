@@ -73,17 +73,20 @@ export function canvasNodeSaveRequest({ node, version, projectId, previewUrl, re
   };
 }
 
-export function canvasNodeShareRequest({ node, version, projectId, previewUrl }: {
+export function canvasNodeShareRequest({ node, version, projectId, previewUrl, finalCategory }: {
   node: CanvasContentNode;
   version: CanvasContentVersion;
   projectId: string;
   previewUrl: string;
+  /** 这份内容在本项目已定稿时的类别。 */
+  finalCategory?: string | null;
 }): TeamShareDialogRequest | null {
   if (!isShareableCanvasVersion(version)) return null;
   return {
     source: canvasResultSource(node, version, projectId),
     defaultTitle: node.title,
     previewUrl: version.kind === 'image' ? previewUrl : null,
+    defaultCategory: finalCategory ?? null,
   };
 }
 

@@ -1588,7 +1588,7 @@ it('announces a team asset adopted from the panel', async () => {
     mounted_at: '', reachable: true, asset_count: 1, scanned_at: null,
   }]);
   vi.mocked(listTeamAssets).mockResolvedValue({ entries: [{
-    id: 'raw_a', kind: 'raw', title: 'castle.png', author: null, tags: [], mime_type: 'image/png', bytes: 1,
+    id: 'raw_a', kind: 'raw', title: 'castle.png', author: null, tags: [], category: null, mime_type: 'image/png', bytes: 1,
     relative_path: 'concept/castle.png', sha256: null, updated_at: '2026-09-20T00:00:00Z', reproducible: false, status: 'ready', model: null, cost_cny: null,
     input_sha256: [],
   }], next_cursor: null });

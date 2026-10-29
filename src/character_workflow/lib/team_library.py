@@ -88,6 +88,17 @@ def list_mounts(project_id: str | None = None) -> list[TeamLibraryMount]:
     return [m for m in rows if project_id is None or m.project_id == project_id]
 
 
+def reachable_mounts(project_id: str) -> list[TeamLibraryMount]:
+    """本画布挂载且可达的团队库，同一个库只取一次：挂载决定 Agent 能看到哪些库。"""
+    seen: set[str] = set()
+    mounts = []
+    for mount in list_mounts(project_id):
+        if mount.library_id not in seen and library_reachable(mount):
+            seen.add(mount.library_id)
+            mounts.append(mount)
+    return mounts
+
+
 def get_mount(library_id: str) -> TeamLibraryMount:
     """同一个库可以挂在多个画布上：可达的优先，其中取最近挂载的；全不可达时取最近挂载的。
 

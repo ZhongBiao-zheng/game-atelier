@@ -3,14 +3,39 @@ import ReactMarkdown from 'react-markdown';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { getCanvasSpecs, saveCanvasSpec, getCanvasLessons, reviewCanvasLesson, type CanvasLessons } from '@/api/canvas';
+import { getTeamSpecs, listTeamLibraries, saveTeamSpec } from '@/api/teamLibraries';
+import type { TeamLibraryView } from '@/schema/teamLibrary';
+import { cn } from '@/lib/utils';
 
 const PROJECT = 'project';
 const LESSONS = 'lessons';
+// 团队规范的键：team:<库> 是团队整体规范，teamcat:<库>:<类别> 是团队类别规范（ADR-0031）。
+const teamKey = (libraryId: string) => `team:${libraryId}`;
+const teamCategoryKey = (libraryId: string, category: string) => `teamcat:${libraryId}:${category}`;
+const isDraftKey = (key: string) => key === PROJECT || key.startsWith('category:') || key.startsWith('team:') || key.startsWith('teamcat:');
+
+function saveKey(projectId: string, key: string, text: string) {
+  if (key === PROJECT) return saveCanvasSpec(projectId, text);
+  if (key.startsWith('category:')) return saveCanvasSpec(projectId, text, key.slice(9));
+  if (key.startsWith('team:')) return saveTeamSpec(key.slice(5), text);
+  const rest = key.slice(8);
+  const colon = rest.indexOf(':');
+  return saveTeamSpec(rest.slice(0, colon), text, rest.slice(colon + 1));
+}
+
+/** 本画布挂载且可达的团队库，同一个库只留一条。 */
+function reachableLibraries(views: TeamLibraryView[]) {
+  const seen = new Set<string>();
+  return views.filter(view => view.reachable && !seen.has(view.library_id) && Boolean(seen.add(view.library_id)));
+}
 
 export function ProjectSpecsDrawer({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const storageKey = `canvas-spec-drafts:${projectId}`;
   const [texts, setTexts] = useState<Record<string, string>>({});
   const [categories, setCategories] = useState<string[]>([]);
+  const [libraries, setLibraries] = useState<TeamLibraryView[]>([]);
+  const [teamCategories, setTeamCategories] = useState<Record<string, string[]>>({});
+  const [scope, setScope] = useState(PROJECT);
   const [active, setActive] = useState(PROJECT);
   const [preview, setPreview] = useState(false);
   const [lessons, setLessons] = useState<CanvasLessons>({pending: [], adopted: []});
@@ -34,7 +59,7 @@ export function ProjectSpecsDrawer({ projectId, onClose }: { projectId: string; 
       setStatus('保存中');
       try {
         for (const [key, text] of pending) {
-          await saveCanvasSpec(projectId, text, key === PROJECT ? undefined : key.slice(9));
+          await saveKey(projectId, key, text);
           if (drafts.current[key] === text) delete drafts.current[key];
           remember();
         }
@@ -51,19 +76,33 @@ export function ProjectSpecsDrawer({ projectId, onClose }: { projectId: string; 
   }, [projectId, remember]);
   useEffect(() => {
     let disposed = false;
-    void Promise.all([getCanvasSpecs(projectId), getCanvasLessons(projectId)]).then(([specs, items]) => {
+    void Promise.all([getCanvasSpecs(projectId), getCanvasLessons(projectId)]).then(async ([specs, items]) => {
+      // 团队库读不到不挡项目规范：没挂或读失败的库不出现在切换里。
+      const mounted = await listTeamLibraries(projectId).then(reachableLibraries).catch(() => []);
+      const teams = await Promise.all(mounted.map(library => getTeamSpecs(library.library_id).then(specs => ({ library, specs })).catch(() => null)));
       if (disposed) return;
+      const loaded = teams.filter(team => team !== null);
       let recovered: Record<string, string> = {};
       try {
         const value: unknown = JSON.parse(localStorage.getItem(storageKey) || '{}');
         if (value && typeof value === 'object' && !Array.isArray(value)) {
           recovered = Object.fromEntries(Object.entries(value).filter(([key, text]) =>
-            typeof text === 'string' && (key === PROJECT || key.startsWith('category:'))));
+            typeof text === 'string' && isDraftKey(key)));
         }
       } catch { /* Ignore invalid local storage. */ }
       drafts.current = recovered;
-      setTexts({[PROJECT]: specs.project, ...Object.fromEntries(Object.entries(specs.categories).map(([key, text]) => [`category:${key}`, text])), ...recovered});
+      setTexts({
+        [PROJECT]: specs.project,
+        ...Object.fromEntries(Object.entries(specs.categories).map(([key, text]) => [`category:${key}`, text])),
+        ...Object.fromEntries(loaded.flatMap(({ library, specs: team }) => [
+          [teamKey(library.library_id), team.team],
+          ...Object.entries(team.categories).map(([name, text]) => [teamCategoryKey(library.library_id, name), text]),
+        ])),
+        ...recovered,
+      });
       setCategories(Object.keys(specs.categories));
+      setLibraries(loaded.map(team => team.library));
+      setTeamCategories(Object.fromEntries(loaded.map(({ library, specs: team }) => [library.library_id, Object.keys(team.categories)])));
       setLessons(items);
       setStatus(Object.keys(recovered).length ? '未保存' : '已保存');
       setReady(true);
@@ -84,6 +123,17 @@ export function ProjectSpecsDrawer({ projectId, onClose }: { projectId: string; 
   const switchTab = async (key: string) => {
     if (await flush()) { setActive(key); setPreview(false); }
   };
+  const switchScope = async (next: string) => {
+    if (next === scope || !await flush()) return;
+    setScope(next);
+    setActive(next === PROJECT ? PROJECT : teamKey(next));
+    setPreview(false);
+  };
+  // 团队类别 = 本项目类别 ∪ 团队库已有类别：写一份新类别规范就在团队库里建出映射。
+  const tabs = scope === PROJECT
+    ? [{key: PROJECT, label: '项目'}, ...categories.map(name => ({key: `category:${name}`, label: name})), {key: LESSONS, label: '经验'}]
+    : [{key: teamKey(scope), label: '团队'}, ...[...new Set([...categories, ...(teamCategories[scope] ?? [])])]
+      .map(name => ({key: teamCategoryKey(scope, name), label: name}))];
   const review = async (index: number, adopt: boolean) => {
     if (!await flush()) return;
     setReviewing(true);
@@ -97,9 +147,18 @@ export function ProjectSpecsDrawer({ projectId, onClose }: { projectId: string; 
   };
   return <Dialog open onOpenChange={open => { if (!open) void flush().then(saved => { if (saved) onClose(); }); }}>
     <DialogContent className="left-auto right-0 top-0 flex h-dvh w-full max-w-xl translate-x-0 translate-y-0 flex-col rounded-r-none" aria-describedby={undefined}>
-      <DialogTitle>项目规范</DialogTitle>
+      <DialogTitle>规范</DialogTitle>
+      {libraries.length > 0 && <div className="flex w-fit max-w-full gap-1 overflow-x-auto rounded-md bg-secondary/50 p-1" role="radiogroup" aria-label="规范来源">
+        {[{id: PROJECT, label: '本项目'}, ...libraries.map(library => ({id: library.library_id, label: library.name}))].map(item =>
+          <button key={item.id} type="button" role="radio" aria-checked={scope === item.id} disabled={!ready || reviewing}
+            onClick={() => void switchScope(item.id)}
+            className={cn('h-7 shrink-0 truncate rounded-sm px-3 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50',
+              scope === item.id ? 'bg-popover text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+            {item.label}
+          </button>)}
+      </div>}
       <div className="flex flex-wrap gap-1 pr-5" role="tablist" aria-label="规范类别">
-        {[{key: PROJECT, label: '项目'}, ...categories.map(name => ({key: `category:${name}`, label: name})), {key: LESSONS, label: '经验'}].map(tab =>
+        {tabs.map(tab =>
           <Button key={tab.key} role="tab" aria-selected={active === tab.key} variant={active === tab.key ? 'secondary' : 'ghost'} size="sm" disabled={!ready || reviewing} onClick={() => void switchTab(tab.key)}>{tab.label}</Button>)}
       </div>
       {error && <p role="alert" className="text-sm text-destructive">{error} <Button size="sm" variant="ghost" onClick={() => void flush()}>重试保存</Button></p>}

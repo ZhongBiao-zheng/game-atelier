@@ -1,12 +1,14 @@
-"""Project reference lookup and atomic asset-to-canvas change sets."""
+"""Project and team reference lookup and atomic asset-to-canvas change sets."""
 from __future__ import annotations
 
 import base64
 import hashlib
 import io
 import secrets
+from datetime import datetime, timezone
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, UnidentifiedImageError
+from pydantic import ValidationError
 
 from character_workflow.lib.canvas_agent_schema import AddMediaNodeChange, CanvasPointInput
 from character_workflow.lib.canvas_projects import (
@@ -22,8 +24,16 @@ from character_workflow.lib.schemas import (
     MEDIA_SUFFIXES, CanvasCreationAssetSnapshotOrigin, CanvasDocument, CanvasMediaVersion,
 )
 from character_workflow.lib.canvas_tool_common import CanvasToolError
+from character_workflow.lib.team_library import reachable_mounts
+from character_workflow.lib.team_library_adopt import TeamAssetAdoptError, adopt_team_asset
+from character_workflow.lib.team_library_index import (
+    get_entry, parse_instant, query_index, read_index, thumbnail_bytes,
+)
 
 ASSET_IMAGE_PREFIX = "asset:"
+# 团队资产引用 = team:<library_id>/<entry_id>；放上画布时先采用成本机创作资产。
+TEAM_ASSET_PREFIX = "team:"
+_EARLIEST = datetime.min.replace(tzinfo=timezone.utc)
 
 
 def project_image(project_id: str, asset_id: str):
@@ -67,6 +77,85 @@ def search_library(project_id: str, category: str | None, limit: int) -> dict:
     return {"assets": rows, "attach_images": [ASSET_IMAGE_PREFIX + row["asset_id"] for row in rows]}
 
 
+def team_entry(project_id: str, ref: str):
+    library_id, _, entry_id = ref.removeprefix(TEAM_ASSET_PREFIX).partition("/")
+    mount = next((m for m in reachable_mounts(project_id) if m.library_id == library_id), None)
+    if mount is None:
+        raise ValueError("团队资产不在本画布挂载的团队库里")
+    index = read_index(library_id)
+    if index is None:
+        raise ValueError("团队库索引尚未建立，请先重新扫描")
+    try:
+        return mount, get_entry(index, entry_id)
+    except KeyError:
+        raise ValueError("团队库里找不到这条资产") from None
+
+
+def team_preview(project_id: str, ref: str) -> str:
+    mount, entry = team_entry(project_id, ref)
+    data = thumbnail_bytes(mount, entry, 512)
+    if data is None:
+        raise ValueError("团队资产没有可用缩略图")
+    try:
+        with Image.open(io.BytesIO(data)) as opened:
+            rendered = opened.convert("RGB")
+    except (OSError, UnidentifiedImageError) as error:
+        raise ValueError("团队资产缩略图不可读") from error
+    buffer = io.BytesIO()
+    rendered.save(buffer, format="JPEG", quality=75)
+    return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
+
+
+def _matches_category(entry, category: str) -> bool:
+    # 原始文件和旧分享没有类别：退回按标题、标签和所在目录名匹配（团队常按类别分文件夹）。
+    if entry.category is not None:
+        return entry.category == category
+    return (category in entry.title or category in entry.relative_path
+            or any(category in tag for tag in entry.tags))
+
+
+def search_team(project_id: str, query: str | None, category: str | None, limit: int) -> dict:
+    found = []
+    for mount in reachable_mounts(project_id):
+        index = read_index(mount.library_id)
+        if index is None:
+            continue
+        for entry in query_index(index, q=query, limit=500).entries:
+            if entry.status != "ready" or not (entry.mime_type or "").startswith("image/"):
+                continue
+            if category and not _matches_category(entry, category):
+                continue
+            found.append((mount, entry))
+    found.sort(key=lambda row: parse_instant(row[1].updated_at) or _EARLIEST, reverse=True)
+    rows = [{"asset_id": f"{TEAM_ASSET_PREFIX}{mount.library_id}/{entry.id}", "title": entry.title,
+             "category": entry.category, "tags": entry.tags, "author": entry.author, "library": mount.name}
+            for mount, entry in found[:limit]]
+    return {"assets": rows, "attach_images": [row["asset_id"] for row in rows]}
+
+
+def _adopt_team_refs(payload):
+    """把 add_asset_node 里的团队资产引用换成采用后的创作资产 id；采用可重复调用，已采用过就复用。"""
+    adopted: dict[str, str] = {}
+    for change in payload.changes:
+        ref = getattr(change, "asset_id", "") if change.op == "add_asset_node" else ""
+        if not ref.startswith(TEAM_ASSET_PREFIX) or ref in adopted:
+            continue
+        mount, entry = team_entry(payload.project_id, ref)
+        try:
+            asset, _created = adopt_team_asset(mount=mount, entry=entry, project_id=payload.project_id)
+        except FileNotFoundError:
+            raise ValueError("团队资产的文件还没同步到本机") from None
+        except (TeamAssetAdoptError, ValidationError) as error:
+            raise ValueError(f"团队资产现在不能采用：{error}") from error
+        adopted[ref] = asset.asset_id
+    if not adopted:
+        return payload, adopted
+    changes = [change.model_copy(update={"asset_id": adopted[change.asset_id]})
+               if change.op == "add_asset_node" and change.asset_id in adopted else change
+               for change in payload.changes]
+    return payload.model_copy(update={"changes": changes}), adopted
+
+
 def existing_asset_node(document: CanvasDocument, asset_id: str):
     for node in document.nodes:
         version = document.content_versions.get(getattr(node.data, "current_version_id", None))
@@ -80,6 +169,7 @@ def apply_asset_changes(payload) -> dict:
     from character_workflow.lib.canvas_reproduce import _commit
 
     project_id = payload.project_id
+    payload, team_assets = _adopt_team_refs(payload)
     prepared_assets = {}
     for change in payload.changes:
         if change.op != "add_asset_node" or change.asset_id in prepared_assets:
@@ -89,8 +179,9 @@ def apply_asset_changes(payload) -> dict:
         except KeyError:
             raise ValueError("参考资产不存在") from None
         media = asset_media_content(asset)
-        if project_id not in asset.project_ids or not asset.category or media is None:
-            raise ValueError("只能添加本项目参考库的媒体资产")
+        # 采用来的团队资产没有类别也能放：它来自本画布挂载的库，本身就是参考。
+        if project_id not in asset.project_ids or media is None or (not asset.category and asset.adopted_from is None):
+            raise ValueError("只能添加本项目参考库或本画布团队库的媒体资产")
         try:
             body = creation_asset_media_path(asset.asset_id).read_bytes()
         except OSError as error:
@@ -166,4 +257,4 @@ def apply_asset_changes(payload) -> dict:
         _mark_used_if_present(asset_id, project_id)
     return {"project_id": project_id, "revision": updated.revision, **created,
             "version_ids": [*added_versions, *created["version_ids"]],
-            "asset_nodes": asset_nodes, "node_aliases": aliases}
+            "asset_nodes": asset_nodes, "node_aliases": aliases, "team_assets": team_assets}

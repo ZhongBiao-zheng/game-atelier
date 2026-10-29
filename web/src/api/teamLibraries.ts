@@ -182,7 +182,7 @@ export async function shareToTeamLibrary(
 export async function updateTeamAsset(
   libraryId: string,
   assetId: string,
-  body: { title: string; tags: string[] },
+  body: { title: string; tags: string[]; category: string | null },
 ): Promise<TeamLibraryIndexEntry> {
   const response = await teamWrite(`${lib(libraryId)}/assets/${encodeURIComponent(assetId)}`, '编辑团队资产', {
     method: 'PUT',
@@ -195,6 +195,22 @@ export async function updateTeamAsset(
 export async function withdrawTeamAsset(libraryId: string, assetId: string): Promise<void> {
   await teamWrite(`${lib(libraryId)}/assets/${encodeURIComponent(assetId)}`, '撤回团队资产', {
     method: 'DELETE',
+  });
+}
+
+/** 团队规范（团队库 specs/）：整体规范 + 类别规范，谁都能改（ADR-0031）。 */
+export interface TeamSpecs { team: string; categories: Record<string, string> }
+
+export function getTeamSpecs(libraryId: string): Promise<TeamSpecs> {
+  return requestJson<TeamSpecs>(`${lib(libraryId)}/specs`, '读取团队规范');
+}
+
+export function saveTeamSpec(libraryId: string, text: string, category?: string): Promise<{ saved: boolean }> {
+  const target = category === undefined ? 'team' : `categories/${encodeURIComponent(category)}`;
+  return requestJson(`${lib(libraryId)}/specs/${target}`, '保存团队规范', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text }),
   });
 }
 

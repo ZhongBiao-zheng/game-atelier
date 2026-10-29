@@ -481,6 +481,20 @@ def test_author_updates_title_and_tags(isolated_data_root, mount, monkeypatch):
     assert updated.prompt == original.prompt
 
 
+def test_category_is_written_on_share_and_replaced_or_cleared_on_update(isolated_data_root, mount):
+    asset = create_prompt_asset("t", [{"kind": "text", "text": "x"}], [])
+    shared = share_creation_asset(
+        mount, asset_id=asset.asset_id, title="弹窗底", tags=[], author=_AUTHOR, category="弹窗",
+    )
+    assert shared.category == "弹窗" and _read_asset(mount, shared.asset_id).category == "弹窗"
+    moved = update_shared_asset(
+        mount, asset_id=shared.asset_id, title="弹窗底", tags=[], author=_AUTHOR, category="底图",
+    )
+    assert moved.category == "底图"
+    cleared = update_shared_asset(mount, asset_id=shared.asset_id, title="弹窗底", tags=[], author=_AUTHOR)
+    assert cleared.category is None and _read_asset(mount, shared.asset_id).category is None
+
+
 def test_update_by_other_author_is_forbidden(isolated_data_root, mount):
     original = _shared(mount)
     with pytest.raises(TeamShareForbidden):

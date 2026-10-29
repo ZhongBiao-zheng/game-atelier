@@ -17,7 +17,8 @@ import type {
 } from '@/schema/teamLibrary';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { MountTeamLibraryDialog } from '@/components/team/MountTeamLibraryDialog';
-import { TagField, parseTags } from '@/components/assets/TagField';
+import { CategoryField, TagField, parseTags } from '@/components/assets/TagField';
+import { DEFAULT_CANVAS_CATEGORIES } from '@/schema/canvas';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -35,6 +36,8 @@ export interface TeamShareDialogRequest {
   defaultTitle: string;
   /** 只传图片 URL（渲染成 <img>）；视频等其他媒体不传。 */
   previewUrl?: string | null;
+  /** 来源已定稿时的类别：预填进类别框，作者可改可清空。 */
+  defaultCategory?: string | null;
 }
 
 export interface TeamShareDialogProps {
@@ -75,6 +78,7 @@ export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamS
   const [displayName, setDisplayName] = useState('');
   const [title, setTitle] = useState('');
   const [tags, setTags] = useState('');
+  const [category, setCategory] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +96,7 @@ export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamS
     setDisplayName('');
     setTitle(request.defaultTitle);
     setTags('');
+    setCategory(request.defaultCategory ?? '');
     setError(null);
     setLargeRefs(null);
     setLoading(true);
@@ -137,6 +142,7 @@ export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamS
         source: request.source,
         title: title.trim(),
         tags: parseTags(tags),
+        category: category.trim() || null,
         ...(allowLarge ? { allow_large: true } : {}),
       };
       const entry = await shareToTeamLibrary(library.library_id, body);
@@ -237,6 +243,9 @@ export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamS
                 onChange={event => setTitle(event.target.value)}
               />
             </div>
+
+            <CategoryField value={category} onChange={setCategory} disabled={submitting}
+              options={[...new Set([...(request?.defaultCategory ? [request.defaultCategory] : []), ...DEFAULT_CANVAS_CATEGORIES])]} />
 
             <TagField value={tags} onChange={setTags} />
 

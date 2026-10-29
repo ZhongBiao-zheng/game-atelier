@@ -2110,6 +2110,8 @@ function CanvasEditorInner({
       version,
       projectId,
       previewUrl: canvasMediaUrl(projectId, version.version_id),
+      // ref 在下方定义，回调只在点击时读它，不进依赖。
+      finalCategory: 'sha256' in version ? assetsByDigestRef.current.get(version.sha256)?.category : null,
     });
     if (!request) {
       setError('只有生成的图片或视频能分享。');
@@ -5242,7 +5244,7 @@ function CanvasEditorInner({
                       ))}
                     </DropdownMenuRadioGroup>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onSelect={() => setSpecsOpen(true)}>项目规范</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setSpecsOpen(true)}>规范</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <DropdownMenu>

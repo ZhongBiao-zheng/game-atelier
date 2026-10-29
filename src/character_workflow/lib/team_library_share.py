@@ -313,6 +313,7 @@ def _share_recipe_source(
     *,
     title: str,
     tags: list[str],
+    category: str | None,
     author: TeamAssetAuthor,
     allow_large: bool,
 ) -> TeamAssetFile:
@@ -327,8 +328,8 @@ def _share_recipe_source(
         payload = payload_for(folder)
         timestamp = _now()
         return TeamAssetFile(
-            asset_id=asset_id, title=title, tags=tags, author=author, shared_at=timestamp,
-            updated_at=timestamp, origin=origin, **payload,
+            asset_id=asset_id, title=title, tags=tags, category=category, author=author,
+            shared_at=timestamp, updated_at=timestamp, origin=origin, **payload,
         )
 
     return _write_new_asset(mount, author.display_name, stage)
@@ -342,13 +343,14 @@ def share_job_output(
     title: str,
     tags: list[str],
     author: str,
+    category: str | None = None,
     allow_large: bool = False,
 ) -> TeamAssetFile:
     clean_title, clean_tags, team_author = validate_share_meta(title, tags, author)
     with _share_errors():
         source = recipe_from_job_output(job_id, output_index)
     return _share_recipe_source(
-        mount, source, title=clean_title, tags=clean_tags, author=team_author,
+        mount, source, title=clean_title, tags=clean_tags, category=category, author=team_author,
         allow_large=allow_large,
     )
 
@@ -362,13 +364,14 @@ def share_canvas_result(
     title: str,
     tags: list[str],
     author: str,
+    category: str | None = None,
     allow_large: bool = False,
 ) -> TeamAssetFile:
     clean_title, clean_tags, team_author = validate_share_meta(title, tags, author)
     with _share_errors():
         source = recipe_from_canvas_result(canvas_project_id, node_id, version_id)
     return _share_recipe_source(
-        mount, source, title=clean_title, tags=clean_tags, author=team_author,
+        mount, source, title=clean_title, tags=clean_tags, category=category, author=team_author,
         allow_large=allow_large,
     )
 
@@ -415,6 +418,7 @@ def share_creation_asset(
     title: str,
     tags: list[str],
     author: str,
+    category: str | None = None,
     allow_large: bool = False,
 ) -> TeamAssetFile:
     clean_title, clean_tags, team_author = validate_share_meta(title, tags, author)
@@ -428,8 +432,8 @@ def share_creation_asset(
         payload = payload_for(folder)
         timestamp = _now()
         return TeamAssetFile(
-            asset_id=team_asset_id, title=clean_title, tags=clean_tags, author=team_author,
-            shared_at=timestamp, updated_at=timestamp, **payload,
+            asset_id=team_asset_id, title=clean_title, tags=clean_tags, category=category,
+            author=team_author, shared_at=timestamp, updated_at=timestamp, **payload,
         )
 
     return _write_new_asset(mount, team_author.display_name, stage)
@@ -482,11 +486,15 @@ def update_shared_asset(
     title: str,
     tags: list[str],
     author: str,
+    category: str | None = None,
 ) -> TeamAssetFile:
     clean_title, clean_tags, team_author = validate_share_meta(title, tags, author)
     folder, raw = _locate_own_asset(mount, asset_id, team_author.display_name)
     # 改原始 dict 而不是重新 dump 模型：别的版本多写的字段（R1 读时忽略）原样保留。
-    updated_raw = {**raw, "title": clean_title, "tags": clean_tags, "updated_at": _now()}
+    updated_raw = {key: value for key, value in raw.items() if key != "category"} | {
+        "title": clean_title, "tags": clean_tags, "updated_at": _now(),
+        **({"category": category} if category else {}),
+    }
     updated = TeamAssetFile.model_validate(updated_raw)
     atomic_write_json(folder / "asset.json", updated_raw)
     return updated

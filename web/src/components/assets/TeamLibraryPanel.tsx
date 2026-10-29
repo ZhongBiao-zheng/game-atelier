@@ -34,7 +34,7 @@ import {
   updateTeamAsset,
   withdrawTeamAsset,
 } from '@/api/teamLibraries';
-import { TagField, parseTags } from '@/components/assets/TagField';
+import { CategoryField, TagField, parseTags } from '@/components/assets/TagField';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { MountTeamLibraryDialog } from '@/components/team/MountTeamLibraryDialog';
 import { Button } from '@/components/ui/button';
@@ -47,6 +47,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { DEFAULT_CANVAS_CATEGORIES } from '@/schema/canvas';
 import type { CreationAsset } from '@/schema/creationAssets';
 import {
   TEAM_ASSET_DRAG_TYPE,
@@ -549,6 +550,7 @@ function TeamAssetEditDialog({
 }) {
   const [title, setTitle] = useState(entry.title);
   const [tags, setTags] = useState(entry.tags.join(', '));
+  const [category, setCategory] = useState(entry.category ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -557,7 +559,7 @@ function TeamAssetEditDialog({
     if (!trimmed || saving) return;
     setSaving(true);
     setError(null);
-    void updateTeamAsset(libraryId, entry.id, { title: trimmed, tags: parseTags(tags) })
+    void updateTeamAsset(libraryId, entry.id, { title: trimmed, tags: parseTags(tags), category: category.trim() || null })
       .then(onSaved)
       .catch(caught => {
         setError(errorMessage(caught, '保存失败'));
@@ -573,6 +575,8 @@ function TeamAssetEditDialog({
           <span className="text-xs text-muted-foreground">标题</span>
           <Input value={title} onChange={event => setTitle(event.target.value)} />
         </label>
+        {entry.kind !== 'prompt' && <CategoryField value={category} onChange={setCategory} disabled={saving}
+          options={[...new Set([...(entry.category ? [entry.category] : []), ...DEFAULT_CANVAS_CATEGORIES])]} />}
         <TagField value={tags} onChange={setTags} />
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
         <DialogFooter>

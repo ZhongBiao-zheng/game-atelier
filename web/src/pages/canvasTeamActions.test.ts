@@ -110,7 +110,14 @@ describe('canvasNodeShareRequest', () => {
         source: { kind: 'canvas_result', canvas_project_id: 'canvas-one', node_id: 'node-image', version_id: 'v-image' },
         defaultTitle: '城堡',
         previewUrl: '/media',
+        defaultCategory: null,
       });
+  });
+
+  it('prefills the category when the content is finalized in this project', () => {
+    expect(canvasNodeShareRequest({
+      node: imageNode, version: media('image', generated), projectId: 'canvas-one', previewUrl: '/media', finalCategory: '角色',
+    })?.defaultCategory).toBe('角色');
   });
 
   it('shares a generated video without an image preview', () => {

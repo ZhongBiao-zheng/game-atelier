@@ -118,6 +118,7 @@ def _new_adopted(
     content,
     project_id: str | None,
     origin: AdoptionOrigin,
+    category: str | None = None,
 ) -> CreationAsset:
     timestamp = _now()
     return CreationAsset(
@@ -125,6 +126,7 @@ def _new_adopted(
         kind=kind,
         title=title,
         tags=tags,
+        category=category,
         created_at=timestamp,
         updated_at=timestamp,
         content=content,
@@ -238,6 +240,8 @@ def _adopt_shared(
     return _commit(_new_adopted(
         kind=team_asset.kind, title=team_asset.title, tags=team_asset.tags, content=content,
         project_id=project_id, origin=origin,
+        # 类别只给媒体与生成资产：参考库只收这两种，提示词带类别没有去处。
+        category=team_asset.category if team_asset.kind != "prompt" else None,
     ))
 
 

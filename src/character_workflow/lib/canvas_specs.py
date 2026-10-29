@@ -21,6 +21,17 @@ def validate_text(text: str) -> str:
     return text
 
 
+def spec_filename(category: str, used: set[str]) -> str:
+    """类别名 → 规范文件名：中文类别转拼音 slug，避开 Windows 保留名与已用名。项目规范与团队规范共用。"""
+    try:
+        candidate = slug.generate(category)
+    except ValueError:
+        candidate = "category"
+    if candidate in {"con", "prn", "aux", "nul", *{f"com{i}" for i in range(10)}, *{f"lpt{i}" for i in range(10)}}:
+        candidate = f"category-{candidate}"
+    return slug.dedupe(candidate, used) + ".md"
+
+
 def _read(project_id: str, relative: str) -> str:
     root = canvas_project_dir(project_id)
     path = root / relative
@@ -53,14 +64,7 @@ def write_spec(project_id: str, text: str, category: str | None = None) -> None:
             if category not in project.categories and category not in mapping:
                 raise ValueError("类别不存在")
             if category not in mapping:
-                try:
-                    candidate = slug.generate(category)
-                except ValueError:
-                    candidate = "category"
-                if candidate in {"con", "prn", "aux", "nul", *{f"com{i}" for i in range(10)}, *{f"lpt{i}" for i in range(10)}}:
-                    candidate = f"category-{candidate}"
-                used = {"project", *(name[:-3] for name in mapping.values())}
-                mapping[category] = slug.dedupe(candidate, used) + ".md"
+                mapping[category] = spec_filename(category, {"project", *(name[:-3] for name in mapping.values())})
             filename = mapping[category]
         _read(project_id, f"specs/{filename}")  # Reject escaping symlinks before writing.
         root = canvas_project_dir(project_id)

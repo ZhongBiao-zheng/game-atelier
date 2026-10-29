@@ -54,6 +54,12 @@ class CanvasSearchLibraryInput(CanvasProjectInput):
     limit: int = Field(default=12, ge=1, le=12)
 
 
+class CanvasSearchTeamInput(CanvasProjectInput):
+    query: Annotated[str, StringConstraints(strip_whitespace=True, max_length=60)] | None = None
+    category: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=24)] | None = None
+    limit: int = Field(default=12, ge=1, le=12)
+
+
 class AddSurfaceChange(StrictInput):
     """空的图片 / 视频 / 音频节点：Web 的生成面就是它，跑完产物直接落在同一个节点上。"""
     op: Literal["add_surface"]

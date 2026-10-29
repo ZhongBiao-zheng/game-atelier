@@ -71,6 +71,7 @@ UTF-8 JSON，不带 BOM。读模型对每一层都忽略未知字段（向前兼
 | `kind` | string | 是 | `generation` / `media` / `prompt` |
 | `title` | string | 是 | 1–120 字符 |
 | `tags` | string[] | 否 | 缺省为空；≤ 20 个；本产品写出时每个 ≤ 40 字符、去首尾空白、忽略大小写去重 |
+| `category` | string | 否 | 类别名，1–24 字符、去首尾空白；采用时副本沿用它（见 [ADR-0031](adr/0031-team-library-carries-categories-and-specs.md)） |
 | `author` | object | 是 | `{"display_name": string}`，1–40 字符 |
 | `shared_at` | string | 是 | 首次分享时刻 |
 | `updated_at` | string | 是 | 最后修改时刻；读方靠它判断「来源已更新」 |
@@ -264,11 +265,27 @@ UTF-8 JSON，不带 BOM。读模型对每一层都忽略未知字段（向前兼
 - 身份 = `library_id` + 库内相对路径（`/` 分隔）。改名或移动即新资产，旧的视为已撤回。本产品的条目 id 是 `raw_` + 相对路径 UTF-8 字节的 sha1 前 24 位。
 - 判断采用副本是否过期时，同一路径的内容以文件 sha256 为准：修改时间变了但 sha256 没变（版本工具重新检出）不算过期。索引层只看修改时间，mtime 一变就发 `updated` 事件。
 
-## 7. 权限
+## 7. 团队规范 `specs/`
+
+团队规范与项目规范同构：一份整体规范，加按类别的规范。都是 UTF-8 Markdown，每份 ≤ 40000 字符。
+
+```
+<mount>/specs/
+  team.md            # 团队整体规范
+  index.json         # 类别 → 文件名
+  <slug>.md          # 类别规范
+```
+
+- `index.json`：`{"categories": {"<类别名>": "<文件名>"}}`。文件名正则 `^[a-z0-9]+(?:-[a-z0-9]+)*\.md$`，且不是 `team.md`；同一文件名不能对应两个类别。缺失或读不出来时视为没有类别规范。
+- 没有 `team.md` 视为整体规范为空。`specs/` 下不认 symlink。
+- `.md` 不在 §6.3 的后缀表里，所以 `specs/` 里的规范文件不会被当成原始团队资产。
+- 读方把团队规范与项目规范一并交给 Agent，冲突时以项目规范为准。
+
+## 8. 权限
 
 「只有作者能改、能撤回」是界面层约定：本产品只在 `shared/<自己的 author-slug>/` 里、且 `author.display_name` 等于本机显示名时才允许改或撤回。文件层不设防，任何能写这个目录的人或工具都能改任何文件。这是有意的取舍，见 [ADR-0020](adr/0020-team-library-is-a-synced-folder.md)。
 
-## 8. 完整示例
+## 9. 完整示例
 
 一个库：清单见 §2；作者 `老王` 分享了一条生成资产和一条提示词；库里另有团队自己放的 `角色/董卓/idle.png`。
 

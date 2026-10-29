@@ -48,6 +48,7 @@ function view(overrides: Partial<TeamLibraryView> = {}): TeamLibraryView {
 const entry: TeamLibraryIndexEntry = {
   id: 'ta_01',
   kind: 'generation',
+  category: null,
   title: '夜景',
   author: '老王',
   tags: ['夜'],
@@ -149,6 +150,7 @@ describe('TeamShareDialog', () => {
       source: request.source,
       title: '城市夜景',
       tags: ['夜', '城市'],
+      category: null,
     });
     expect(onClose).toHaveBeenCalled();
     expect(mockSaveProfile).not.toHaveBeenCalled();
@@ -199,8 +201,20 @@ describe('TeamShareDialog', () => {
       source: request.source,
       title: '夜景',
       tags: [],
+      category: null,
       allow_large: true,
     });
+  });
+
+  it('来源已定稿时预填类别，可改后随分享提交', async () => {
+    mockList.mockResolvedValue([view()]);
+    renderDialog({ request: { ...request, defaultCategory: '弹窗' } });
+    const field = await screen.findByLabelText('类别');
+    expect(field).toHaveValue('弹窗');
+    fireEvent.change(field, { target: { value: '底图' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '分享' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '分享' }));
+    await waitFor(() => expect(mockShare).toHaveBeenCalledWith('lib_a', expect.objectContaining({ category: '底图' })));
   });
 
   it('其他错误显示在对话框内且不关闭', async () => {

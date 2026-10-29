@@ -70,8 +70,9 @@ def with_attached_images(items: list[Any], data_url: Callable[[str], str | None]
                           and following.get("type") == "function_call_output")
         if pending and block_ends:
             content: list[dict] = [{"type": "input_text", "text": "上面工具结果里的图片："}]
-            # Library search returns up to 12 candidates; show all so the model can compare.
-            limit = 12 if any(value.startswith("asset:") for value in pending) else MAX_ATTACH_IMAGES
+            # 项目库与团队库各返回至多 12 张候选；同一批两边都搜时全给，模型才能放在一起比。
+            libraries = {value.split(":", 1)[0] for value in pending if value.startswith(("asset:", "team:"))}
+            limit = 12 * len(libraries) if libraries else MAX_ATTACH_IMAGES
             for version_id in list(dict.fromkeys(pending))[:limit]:
                 url = data_url(version_id)
                 if url:

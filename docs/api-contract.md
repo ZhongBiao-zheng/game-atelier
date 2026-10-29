@@ -312,6 +312,7 @@ Studio 作品总是混入。画布作品由 `/config` 的 `show_canvas_on_home` 
 `POST /team-libraries/{library_id}/assets/{entry_id}/adopt`
 `POST /team-libraries/{library_id}/share`
 `PUT /team-libraries/{library_id}/assets/{asset_id}` `DELETE /team-libraries/{library_id}/assets/{asset_id}`
+`PUT /team-libraries/{library_id}/specs/{team,categories/{name}}`
 `POST /canvas/projects/export` `POST /canvas/projects/import/{inspect,commit}`
 `DELETE /canvas/projects/{id}`
 `PUT /canvas/ui-preferences`
@@ -328,6 +329,7 @@ Studio 作品总是混入。画布作品由 `/config` 的 `show_canvas_on_home` 
 `GET /profile` `GET /team-libraries?project_id=` `GET /team-libraries/related?project_id=&sha256=`
 `GET /team-libraries/{library_id}/assets?kind&author&tag&q&cursor&limit`
 `GET /team-libraries/{library_id}/assets/{entry_id}/{content,thumb?w=}`
+`GET /team-libraries/{library_id}/specs`
 `GET /canvas/projects/{id}/agent/sessions` `/canvas/projects/{id}/agent/sessions/{session_id}`
 `GET /canvas/ui-preferences`
 
@@ -758,12 +760,21 @@ v2→v3 资产种类 `image` 改名 `media`，v3→v4 删掉每条资产的 `rec
 | PUT | `/team-libraries/{library_id}/assets/{asset_id}` | `TeamAssetUpdateRequest` | `TeamLibraryIndexEntry` |
 | DELETE | `/team-libraries/{library_id}/assets/{asset_id}` | — | 204 |
 | GET | `/team-libraries/related?project_id=&sha256=` | — | `list[TeamRelatedEntry]`（`sha256` 可选） |
+| GET | `/team-libraries/{library_id}/specs` | — | `{team: string, categories: Record<string, string>}` |
+| PUT | `/team-libraries/{library_id}/specs/team` | `CanvasSpecUpdate` | `{saved: true}` |
+| PUT | `/team-libraries/{library_id}/specs/categories/{name}` | `CanvasSpecUpdate` | `{saved: true}` |
 | GET | `/creation-assets/{asset_id}/staleness` | — | `CreationAssetStaleness` |
 | POST | `/creation-assets/staleness` | `CreationAssetStalenessBatchRequest` | `CreationAssetStalenessBatch` |
 | POST | `/creation-assets/{asset_id}/readopt` | — | `CreationAsset` |
 | POST | `/creation-assets/generation/from-job` | `CreationGenerationFromJob` | `CreationAsset` 201 |
 | POST | `/creation-assets/generation/from-canvas` | `CreationGenerationFromCanvas` | `CreationAsset` 201 |
 | POST | `/canvas/projects/{project_id}/creation-assets/{asset_id}/reproduce` | `CanvasReproduceRequest` + `If-Match` | `CanvasReproduceResponse` |
+
+类别与团队规范（ADR-0031）：`TeamShareRequest` 与 `TeamAssetUpdateRequest` 带可选 `category`（1–24 字，
+空 / 省略 = 不带类别；更新时省略即清掉），写进 `asset.json` 并出现在 `TeamLibraryIndexEntry.category`；
+采用媒体与生成资产时副本沿用这个类别。团队规范读写挂载目录下的 `specs/`（格式见
+`docs/team-library-format.md` §7），不设作者限制；库不可达 503，正文超 40000 字或类别名不合规 422，
+目录写不进去 503。
 
 `GET /team-libraries` 带 `project_id` 时只列该画布的挂载；不带时列本机全部挂载，按 `library_id` 去重，
 每个库取库级端点选中的那条记录（见下）。分享对话框用不带参数的形式。

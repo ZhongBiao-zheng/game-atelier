@@ -20,7 +20,7 @@ const folderApi = vi.hoisted(() => ({ chooseFolder: vi.fn() }));
 vi.mock('@/api/folders', () => folderApi);
 
 const library: TeamLibraryView = { library_id: 'lib_0123456789abcdef', project_id: 'p1', name: '角色参考', mount_path: '/x', mounted_at: '', reachable: true, asset_count: 2, scanned_at: null };
-const raw: TeamLibraryIndexEntry = { id: 'raw_a', kind: 'raw', title: 'castle.png', author: null, tags: [], mime_type: 'image/png', bytes: 1, relative_path: 'concept/castle.png', sha256: null, updated_at: '2026-09-20T00:00:00Z', reproducible: false, status: 'ready', model: null, cost_cny: null, input_sha256: [] };
+const raw: TeamLibraryIndexEntry = { id: 'raw_a', kind: 'raw', title: 'castle.png', author: null, tags: [], category: null, mime_type: 'image/png', bytes: 1, relative_path: 'concept/castle.png', sha256: null, updated_at: '2026-09-20T00:00:00Z', reproducible: false, status: 'ready', model: null, cost_cny: null, input_sha256: [] };
 const shared: TeamLibraryIndexEntry = { ...raw, id: 'ta_01ARZ3NDEKTSV4RRFFQ69G5FAV', kind: 'media', title: '董卓 待机', author: '老王', tags: ['皮肤'], relative_path: 'shared/老王/ta_01ARZ3NDEKTSV4RRFFQ69G5FAV' };
 
 const generation: TeamLibraryIndexEntry = { ...shared, id: 'ta_01ARZ3NDEKTSV4RRFFQ69G5FAW', kind: 'generation', title: '雪山白犬', reproducible: true, model: 'gpt-image-2', cost_cny: 0.21, relative_path: 'shared/老王/ta_01ARZ3NDEKTSV4RRFFQ69G5FAW' };
@@ -159,7 +159,7 @@ describe('TeamLibraryPanel', () => {
     fireEvent.keyDown(tagInput, { key: 'Enter' });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(api.updateTeamAsset).toHaveBeenCalledWith(
-      library.library_id, shared.id, { title: '董卓 攻击', tags: ['皮肤', '攻击'] },
+      library.library_id, shared.id, { title: '董卓 攻击', tags: ['皮肤', '攻击'], category: null },
     ));
     expect(await screen.findByText('董卓 攻击')).toBeInTheDocument();
     expect(screen.queryByText('董卓 待机')).toBeNull();

@@ -2420,6 +2420,17 @@ class TeamAssetOrigin(BaseModel):
     canvas_project_id: str | None = None
 
 
+def _lenient_team_category(value: Any) -> str | None:
+    """别的工具写坏的类别只当没有，不让整条团队资产读不出来。"""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value if 0 < len(value) <= 24 else None
+
+
+TeamCategory = Annotated[str | None, BeforeValidator(_lenient_team_category)]
+
+
 class TeamAssetFile(BaseModel):
     """分享资产的 `<asset_id>/asset.json`。"""
     model_config = ConfigDict(extra="ignore")
@@ -2428,6 +2439,7 @@ class TeamAssetFile(BaseModel):
     kind: Literal["generation", "media", "prompt"]
     title: str = Field(min_length=1, max_length=120)
     tags: list[str] = Field(default_factory=list, max_length=20)
+    category: TeamCategory = None
     author: TeamAssetAuthor
     shared_at: str
     updated_at: str
@@ -2469,6 +2481,7 @@ class TeamLibraryIndexEntry(BaseModel):
     title: str
     author: str | None = None
     tags: list[str] = Field(default_factory=list)
+    category: str | None = None
     mime_type: str | None = None
     bytes: int = Field(ge=0)
     relative_path: str
@@ -2561,6 +2574,7 @@ class TeamShareRequest(BaseModel):
     source: TeamShareSource
     title: str = Field(min_length=1, max_length=120)
     tags: list[str] = Field(default_factory=list, max_length=20)
+    category: OptionalCategory = None
     allow_large: bool = False
 
 
@@ -2568,6 +2582,7 @@ class TeamAssetUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=120)
     tags: list[str] = Field(max_length=20)
+    category: OptionalCategory = None
 
 
 class TeamRelatedEntry(BaseModel):

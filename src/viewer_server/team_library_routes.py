@@ -18,12 +18,14 @@ from pydantic import ValidationError
 from character_workflow.lib import data_root
 from character_workflow.lib import team_library as tl
 from character_workflow.lib import team_library_index as idx
+from character_workflow.lib import team_library_specs
 from character_workflow.lib.creation_assets import (
     CreationAssetDuplicateError,
     CreationAssetStateError,
     get_creation_asset,
 )
 from character_workflow.lib.schemas import (
+    CanvasSpecUpdate,
     CreationAsset,
     CreationAssetStaleness,
     CreationAssetStalenessBatch,
@@ -456,18 +458,18 @@ def post_team_share(library_id: str, payload: TeamShareRequest) -> TeamLibraryIn
             asset = share_job_output(
                 mount, job_id=source.job_id, output_index=source.output_index,
                 title=payload.title, tags=payload.tags, author=author,
-                allow_large=payload.allow_large,
+                category=payload.category, allow_large=payload.allow_large,
             )
         elif source.kind == "canvas_result":
             asset = share_canvas_result(
                 mount, canvas_project_id=source.canvas_project_id, node_id=source.node_id,
                 version_id=source.version_id, title=payload.title, tags=payload.tags,
-                author=author, allow_large=payload.allow_large,
+                author=author, category=payload.category, allow_large=payload.allow_large,
             )
         else:
             asset = share_creation_asset(
                 mount, asset_id=source.asset_id, title=payload.title, tags=payload.tags,
-                author=author, allow_large=payload.allow_large,
+                author=author, category=payload.category, allow_large=payload.allow_large,
             )
     return _refreshed_entry(mount, asset.asset_id)
 
@@ -483,9 +485,41 @@ def put_team_asset(
     _validate_meta(payload.title, payload.tags, author)
     with _share_errors(mount):
         update_shared_asset(
-            mount, asset_id=asset_id, title=payload.title, tags=payload.tags, author=author
+            mount, asset_id=asset_id, title=payload.title, tags=payload.tags, author=author,
+            category=payload.category,
         )
     return _refreshed_entry(mount, asset_id)
+
+
+@team_library_router.get("/team-libraries/{library_id}/specs")
+def get_team_specs(library_id: str) -> dict:
+    mount = _writable_mount(library_id)
+    try:
+        return team_library_specs.read_team_specs(mount)
+    except (OSError, ValueError) as error:
+        raise HTTPException(422, detail=str(error)) from error
+
+
+@team_library_router.put("/team-libraries/{library_id}/specs/team")
+def put_team_overall_spec(library_id: str, payload: CanvasSpecUpdate) -> dict:
+    return _put_team_spec(library_id, payload)
+
+
+@team_library_router.put("/team-libraries/{library_id}/specs/categories/{name:path}")
+def put_team_category_spec(library_id: str, name: str, payload: CanvasSpecUpdate) -> dict:
+    return _put_team_spec(library_id, payload, name)
+
+
+def _put_team_spec(library_id: str, payload: CanvasSpecUpdate, category: str | None = None) -> dict:
+    # 团队规范不设作者限制（ADR-0031）：谁都能改，并发交给团队的同步工具。
+    mount = _writable_mount(library_id)
+    try:
+        team_library_specs.write_team_spec(mount, payload.text, category)
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    except OSError as error:
+        raise HTTPException(503, detail=f"团队库目录写不进去：{error.strerror or error}") from error
+    return {"saved": True}
 
 
 @team_library_router.delete("/team-libraries/{library_id}/assets/{asset_id}", status_code=204)

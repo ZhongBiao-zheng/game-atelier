@@ -22,11 +22,11 @@ from character_workflow.lib import canvas_agent_layout as layout
 from character_workflow.lib import canvas_agent_skills as skills
 from character_workflow.lib import canvas_agent_tools as tools
 from character_workflow.lib import canvas_agent_vision as vision
-from character_workflow.lib import keys, canvas_specs
+from character_workflow.lib import keys, canvas_specs, team_library_specs
 from character_workflow.lib.canvas_agent_models import chat_base_url
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasChange, CanvasListModelsInput, CanvasProjectInput,
-    CanvasReadMediaInput, CanvasSearchLibraryInput, GetRunInput, RunInput,
+    CanvasReadMediaInput, CanvasSearchLibraryInput, CanvasSearchTeamInput, GetRunInput, RunInput,
 )
 from character_workflow.lib.canvas_agent_sessions import (
     mutate_canvas_agent_session, read_canvas_agent_session, with_appended_messages,
@@ -49,7 +49,8 @@ MEDIA_SCHEME = "atelier-media://"
 LOCAL = SimpleNamespace(kind="local", session_id="canvas-chat", grant_id=None)
 
 READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "read_media", "load_skill",
-                        "read_skill_file", "wait_for_run", "read_spec", "search_library"})
+                        "read_skill_file", "wait_for_run", "read_spec", "search_library",
+                        "search_team"})
 
 INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术和策划在无限画布上出图、出视频。
 
@@ -78,10 +79,13 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
 - list_models 返回空列表时不要建生成节点，告诉用户在输入框的「模型偏好」里选择模型。
 - 生成是付费的。不要自动重试失败的生成；失败时告诉用户原因，由用户决定。
 - 用户拒绝某个操作时，不要换个方式再做同一件事，先问用户想怎么改。
-- 用户提出出图需求时：判断类别 → read_spec(类别) → search_library(类别)，按需再搜相关类别
-  （例如弹窗需要按钮和底图）。优先挑 3–5 张同类、0–2 张相关类，总数不超过 list_models
-  中该模型的 reference_limits.image。库为空或无匹配类别时直说，按项目和类别规范继续。
-- 选好参考后，在回复里列出每张参考的标题、类别与一句选择理由。一次 apply_changes 完成：
+- 用户提出出图需求时：判断类别 → read_spec(类别) → 同时调 search_library(类别) 与 search_team(类别)，
+  按需再搜相关类别（例如弹窗需要按钮和底图）；search_team 还可以用 query 按标题关键词找。
+  两边结果放在一起挑：优先 3–5 张同类、0–2 张相关类，总数不超过 list_models 中该模型的
+  reference_limits.image。两边都为空或无匹配时直说，按项目和类别规范继续。
+- search_team 返回的 asset_id 形如 team:…，直接用在 add_asset_node 上；放上画布即采用成本机资产，
+  返回的 team_assets 给出对应的本机资产 ID。
+- 选好参考后，在回复里列出每张参考的标题、类别（团队资产注明来自哪个团队库）与一句选择理由。一次 apply_changes 完成：
   add_asset_node 各参考 → add_surface → set_draft → connect 每个参考到生成节点。
   每个参考必须成为可见节点和 input 连线，不得隐藏输入。add_asset_node 返回 asset_nodes 与
   node_aliases；已有同一资产时复用原节点及其冻结版本，同批连线会自动改用真实节点 ID。
@@ -217,8 +221,13 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
         payload = CanvasSearchLibraryInput(project_id=project_id, **arguments)
         tools.authorize(LOCAL, project_id, "canvas_read")
         return search_library(project_id, payload.category, payload.limit), []
+    if tool == "search_team":
+        from character_workflow.lib.canvas_agent_library import search_team
+        payload = CanvasSearchTeamInput(project_id=project_id, **arguments)
+        tools.authorize(LOCAL, project_id, "canvas_read")
+        return search_team(project_id, payload.query, payload.category, payload.limit), []
     if tool == "read_spec":
-        return {"text": canvas_specs.read_spec(project_id, arguments["category"])}, []
+        return {"text": team_library_specs.agent_category_spec(project_id, arguments["category"])}, []
     if tool == "append_lesson":
         return canvas_specs.append_lesson(project_id, arguments["text"]), []
     if tool == "get_canvas":
@@ -337,7 +346,13 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
                        {"type": "object", "properties": {
                            "category": {"type": "string"},
                            "limit": {"type": "integer", "minimum": 1, "maximum": 12}}}),
-    "read_spec": ("读取类别规范全文，不存在返回空文本。",
+    "search_team": ("搜索本画布挂载的团队库里的图片，按类别或标题关键词，返回资产 ID（team:…）、标题、类别、"
+                    "标签、作者和团队库名，并附缩略图。",
+                    {"type": "object", "properties": {
+                        "query": {"type": "string", "maxLength": 60},
+                        "category": {"type": "string"},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 12}}}),
+    "read_spec": ("读取类别规范全文：项目规范与本画布团队库的同名类别规范，冲突以项目为准；不存在返回空文本。",
                   {"type": "object", "required": ["category"],
                    "properties": {"category": {"type": "string"}}}),
     "append_lesson": ("记录一条待审项目经验，用户采纳后才生效。",
@@ -472,7 +487,14 @@ def build_tools() -> list:
 # ── 历史 ↔ 模型输入 ──────────────────────────────────────────────────────────────
 
 def _media_data_url(project_id: str, version_id: str) -> str | None:
-    from character_workflow.lib.canvas_agent_library import ASSET_IMAGE_PREFIX, preview
+    from character_workflow.lib.canvas_agent_library import (
+        ASSET_IMAGE_PREFIX, TEAM_ASSET_PREFIX, preview, team_preview,
+    )
+    if version_id.startswith(TEAM_ASSET_PREFIX):
+        try:
+            return team_preview(project_id, version_id)
+        except (KeyError, OSError, ValueError):
+            return None
     if version_id.startswith(ASSET_IMAGE_PREFIX):
         try:
             return preview(project_id, version_id.removeprefix(ASSET_IMAGE_PREFIX))[0]
@@ -570,7 +592,8 @@ def _arguments(raw: str | None) -> dict:
 
 READ_LABELS = {"get_canvas": "读取画布", "list_models": "查看可用模型", "get_run": "查询生成进度",
                "read_media": "读取媒体信息", "wait_for_run": "等待生成结果",
-               "search_library": "查找项目参考", "read_spec": "读取类别规范"}
+               "search_library": "查找项目参考", "search_team": "查找团队库参考",
+               "read_spec": "读取类别规范"}
 
 
 def summarize_call(tool: str, arguments: dict) -> str:
@@ -658,7 +681,7 @@ def build_agent(session: CanvasAgentSession):
     return Agent(
         name="canvas-agent",
         instructions=INSTRUCTIONS + CREATION_MODE_PROMPTS[session.creation_mode]
-        + skills.skills_prompt() + canvas_specs.instructions(session.project_id),
+        + skills.skills_prompt() + team_library_specs.agent_instructions(session.project_id),
         tools=build_tools(),
         model=OpenAIChatCompletionsModel(model=session.model, openai_client=client),
         model_settings=settings,

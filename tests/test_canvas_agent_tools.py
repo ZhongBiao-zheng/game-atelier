@@ -310,3 +310,116 @@ def test_disconnect_reconnect_same_transaction_keeps_reference(canvas):
         {"op": "connect", "source_node_id": "p1", "target_node_id": "surface"},
     ]))
     assert read_canvas_document(pid).nodes[-1].data.generation_draft.prompt == "@[node:p1] 保留"
+
+
+# ── 团队库：Agent 只看本画布挂载的库，放上画布即采用（ADR-0031）────────────────────
+
+_TEAM_ID = "ta_01ARZ3NDEKTSV4RRFFQ69G5FAV"
+
+
+def _png(path: Path, color=(200, 60, 60)) -> bytes:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (8, 8), color).save(path, format="PNG")
+    return path.read_bytes()
+
+
+@pytest.fixture
+def team(canvas, tmp_path):
+    import hashlib
+    import json
+
+    from character_workflow.lib.team_library import mount_library
+    from tests.team_library_helpers import scan_and_cache
+
+    folder = tmp_path / "team"
+    asset_dir = folder / "shared" / "老王" / _TEAM_ID
+    body = _png(asset_dir / "hero.png")
+    (asset_dir / "asset.json").write_text(json.dumps({
+        "asset_id": _TEAM_ID, "kind": "media", "title": "主角立绘", "tags": ["定稿"], "category": "角色",
+        "author": {"display_name": "老王"}, "shared_at": "2026-10-01T00:00:00Z",
+        "updated_at": "2026-10-01T00:00:00Z",
+        "media": {"filename": "hero.png", "mime_type": "image/png", "bytes": len(body),
+                  "sha256": hashlib.sha256(body).hexdigest()},
+    }, ensure_ascii=False), "utf-8")
+    _png(folder / "按钮" / "ok.png", (60, 200, 60))
+    mount = mount_library(project_id=canvas.project.project_id, path=str(folder), name="美术共享盘",
+                          created_by="老王")
+    scan_and_cache(mount)
+    return SimpleNamespace(mount=mount, ref=f"team:{mount.library_id}/{_TEAM_ID}")
+
+
+def test_search_team_sees_only_libraries_mounted_on_this_canvas(canvas, team):
+    from character_workflow.lib.canvas_agent_library import search_team
+
+    pid = canvas.project.project_id
+    heroes = search_team(pid, None, "角色", 12)
+    assert [row["asset_id"] for row in heroes["assets"]] == [team.ref]
+    assert {key: heroes["assets"][0][key] for key in ("title", "category", "library")} == {
+        "title": "主角立绘", "category": "角色", "library": "美术共享盘"}
+    assert heroes["attach_images"] == [team.ref]
+    # 原始文件没有类别：按所在目录名命中。
+    buttons = search_team(pid, None, "按钮", 12)
+    assert [row["title"] for row in buttons["assets"]] == ["ok.png"]
+    assert search_team(canvas.other.project_id, None, None, 12)["assets"] == []
+
+
+def test_add_asset_node_with_team_ref_adopts_with_category(canvas, team):
+    from character_workflow.lib.creation_assets import list_creation_assets
+
+    pid = canvas.project.project_id
+    result = tools.apply_changes(canvas.agent, ApplyChangesInput(project_id=pid, expected_revision=0, changes=[
+        {"op": "add_asset_node", "asset_id": team.ref, "node_id": "ref-1"},
+    ]))
+    adopted_id = result["team_assets"][team.ref]
+    [asset] = list_creation_assets().assets
+    assert asset.asset_id == adopted_id and asset.category == "角色" and pid in asset.project_ids
+    assert asset.adopted_from.asset_id == _TEAM_ID
+    assert result["asset_nodes"] == {adopted_id: "ref-1"}
+    assert any(node.id == "ref-1" for node in read_canvas_document(pid).nodes)
+
+    with pytest.raises(ValueError, match="不在本画布挂载的团队库里"):
+        tools.apply_changes(canvas.agent, ApplyChangesInput(
+            project_id=canvas.other.project_id, expected_revision=0,
+            changes=[{"op": "add_asset_node", "asset_id": team.ref, "node_id": "ref-1"}]))
+
+
+def test_team_specs_roundtrip_and_agent_gets_project_first(canvas, team):
+    from character_workflow.lib import canvas_specs
+    from character_workflow.lib.team_library_specs import (
+        PRIORITY_NOTE, agent_category_spec, agent_instructions, read_team_specs, write_team_spec,
+    )
+
+    pid = canvas.project.project_id
+    write_team_spec(team.mount, "全队统一描边 2px")
+    write_team_spec(team.mount, "角色三视图要有正侧背", "角色")
+    specs_dir = Path(team.mount.mount_path) / "specs"
+    assert (specs_dir / "team.md").read_text("utf-8") == "全队统一描边 2px"
+    filename = __import__("json").loads((specs_dir / "index.json").read_text("utf-8"))["categories"]["角色"]
+    assert filename.endswith(".md") and filename != "team.md"
+    assert read_team_specs(team.mount) == {"team": "全队统一描边 2px",
+                                           "categories": {"角色": "角色三视图要有正侧背"}}
+
+    canvas_specs.write_spec(pid, "本项目描边 3px")
+    canvas_specs.write_spec(pid, "主角只穿红色", "角色")
+    prompt = agent_instructions(pid)
+    assert prompt.index("本项目描边 3px") < prompt.index("全队统一描边 2px") and PRIORITY_NOTE in prompt
+    spec = agent_category_spec(pid, "角色")
+    assert spec.index("主角只穿红色") < spec.index("角色三视图要有正侧背") and "美术共享盘" in spec
+    # 没挂这个库的画布读不到团队规范。
+    assert "全队统一描边" not in agent_instructions(canvas.other.project_id)
+
+
+def test_team_spec_index_tolerates_bad_rows_and_rejects_symlinked_specs(canvas, team, tmp_path):
+    from character_workflow.lib.team_library_specs import read_team_specs, write_team_spec
+
+    specs_dir = Path(team.mount.mount_path) / "specs"
+    specs_dir.mkdir()
+    (specs_dir / "index.json").write_text(
+        '{"categories": {"按钮": "anniu.md", "坏的": "../x.md", "重复": "anniu.md"}}', "utf-8")
+    (specs_dir / "anniu.md").write_text("按钮圆角 8", "utf-8")
+    assert read_team_specs(team.mount)["categories"] == {"按钮": "按钮圆角 8"}
+
+    specs_dir.rename(tmp_path / "elsewhere")
+    specs_dir.symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    with pytest.raises(ValueError, match="团队规范路径不可用"):
+        write_team_spec(team.mount, "x")

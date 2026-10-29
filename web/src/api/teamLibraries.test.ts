@@ -127,7 +127,7 @@ describe('teamLibraries api', () => {
 
   it('updates title and tags with PUT', async () => {
     fetchMock.mockResolvedValue(json({ id: ASSET, title: '新' }, 200));
-    const entry = await updateTeamAsset(LIB, ASSET, { title: '新', tags: [] });
+    const entry = await updateTeamAsset(LIB, ASSET, { title: '新', tags: [], category: null });
     expect(entry.title).toBe('新');
     expect(String(fetchMock.mock.calls[0][0])).toBe(`/api/team-libraries/${LIB}/assets/${ASSET}`);
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('PUT');
@@ -135,7 +135,7 @@ describe('teamLibraries api', () => {
 
   it('update throws TeamNotAuthorError on 403', async () => {
     fetchMock.mockResolvedValue(json({ detail: { code: 'not_author' } }, 403));
-    await expect(updateTeamAsset(LIB, ASSET, { title: '新', tags: [] })).rejects.toBeInstanceOf(TeamNotAuthorError);
+    await expect(updateTeamAsset(LIB, ASSET, { title: '新', tags: [], category: null })).rejects.toBeInstanceOf(TeamNotAuthorError);
   });
 
   it('withdraw sends DELETE and resolves on 204', async () => {

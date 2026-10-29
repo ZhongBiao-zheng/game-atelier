@@ -898,3 +898,23 @@ def test_readopt_prompt_overwrites_segments(isolated_data_root, tmp_path):
     assert renewed.kind == "prompt" and renewed.asset_id == adopted.asset_id
     assert [seg.text for seg in renewed.content.segments] == ["像素狗"]
     assert list_creation_assets().assets == [renewed]
+
+
+def test_adopt_keeps_team_category(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    _write_shared(folder)
+    manifest = folder / "shared" / "老王" / _ID / "asset.json"
+    manifest.write_text(json.dumps({**json.loads(manifest.read_text("utf-8")), "category": "角色"},
+                                   ensure_ascii=False), "utf-8")
+    asset, _ = adopt_team_asset(mount=mount, entry=_entry(category="角色"), project_id="p1")
+    assert asset.category == "角色"
+
+
+def test_invalid_team_category_is_ignored_not_fatal(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    _write_shared(folder)
+    manifest = folder / "shared" / "老王" / _ID / "asset.json"
+    manifest.write_text(json.dumps({**json.loads(manifest.read_text("utf-8")), "category": "x" * 99},
+                                   ensure_ascii=False), "utf-8")
+    [entry] = scan_and_cache(mount).entries
+    assert entry.status == "ready" and entry.category is None

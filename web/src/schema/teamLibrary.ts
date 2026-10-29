@@ -19,6 +19,8 @@ export interface TeamLibraryIndexEntry {
   title: string;
   author: string | null;
   tags: string[];
+  /** 分享时带的类别；原始文件与旧分享为 null。 */
+  category: string | null;
   mime_type: string | null;
   bytes: number;
   relative_path: string;
@@ -44,6 +46,7 @@ export interface TeamShareRequest {
   source: TeamShareSource;
   title: string;
   tags: string[];
+  category?: string | null;
   allow_large?: boolean;
 }
 

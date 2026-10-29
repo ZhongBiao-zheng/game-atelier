@@ -159,7 +159,8 @@ def _shared_entry(root: Path, asset_dir: Path) -> TeamLibraryIndexEntry:
     snapshot = asset.snapshot
     return TeamLibraryIndexEntry(
         id=asset.asset_id, kind=asset.kind, title=asset.title, author=asset.author.display_name,
-        tags=asset.tags, mime_type=asset.media.mime_type if asset.media else "text/plain",
+        tags=asset.tags, category=asset.category,
+        mime_type=asset.media.mime_type if asset.media else "text/plain",
         bytes=asset.media.bytes if asset.media else 0, relative_path=relative,
         sha256=asset.media.sha256 if asset.media else None, updated_at=asset.updated_at,
         reproducible=asset.kind == "generation",
