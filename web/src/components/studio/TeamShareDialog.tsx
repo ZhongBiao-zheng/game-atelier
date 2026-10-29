@@ -203,7 +203,7 @@ export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamS
               </div>
             ) : (
               <div className="space-y-2">
-                <Label htmlFor="team-share-library">团队库</Label>
+                <Label htmlFor="team-share-library" className="text-xs font-normal text-muted-foreground">团队库</Label>
                 <select
                   id="team-share-library"
                   value={libraryId}
@@ -222,7 +222,7 @@ export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamS
 
             {needsName && (
               <div className="space-y-2">
-                <Label htmlFor="team-share-name">显示名</Label>
+                <Label htmlFor="team-share-name" className="text-xs font-normal text-muted-foreground">显示名</Label>
                 <Input
                   id="team-share-name"
                   value={displayName}
@@ -234,7 +234,7 @@ export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamS
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="team-share-title">标题</Label>
+              <Label htmlFor="team-share-title" className="text-xs font-normal text-muted-foreground">标题</Label>
               <Input
                 id="team-share-title"
                 value={title}
