@@ -20,6 +20,7 @@ import { canvasAgentSetupNotice } from './canvasAgentSetupNotice';
 import { AGENT_PANEL_MAX_WIDTH, AGENT_PANEL_MIN_WIDTH, useAgentPanelWidth } from './useAgentPanelWidth';
 import { CanvasAgentSkillPicker } from './CanvasAgentSkillPicker';
 import { useCanvasAgent } from './useCanvasAgent';
+import { Textarea } from '@/components/ui/textarea';
 
 export interface CanvasAgentNodeRef {
   id: string;
@@ -397,7 +398,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             ))}
           </div>
         )}
-        <textarea autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+        <Textarea variant="bare"
           ref={textareaRef}
           value={text}
           onChange={event => setText(event.target.value)}

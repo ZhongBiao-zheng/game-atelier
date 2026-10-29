@@ -5,6 +5,7 @@ import { refSlotSupported } from '@/lib/mjParams';
 import { imageFamily } from '@/lib/modelFamily';
 
 import { Lightbox } from '../Lightbox';
+import { FileInput } from '@/components/ui/file-input';
 
 /** MJ 的四个语义参考槽：图片（垫图 Image Prompt）/ 风格 / 角色 / Omni。
  *
@@ -99,9 +100,8 @@ function MjReferenceGroup({
       title={disabled ? disabledHint : undefined}
       className={`group relative h-[70px] w-[56px] shrink-0 ${disabled && files.length > 0 ? 'opacity-40' : ''}`}
     >
-      <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+      <FileInput
         id={inputId}
-        type="file"
         accept="image/*"
         multiple
         disabled={disabled}

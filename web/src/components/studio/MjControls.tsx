@@ -20,6 +20,8 @@ import {
 } from '@/lib/mjParams';
 import { ToolbarPopover } from './ToolbarPopover';
 import { SelectionHighlight } from '@/components/ui/selection-highlight';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 
 interface Props {
   value: MjParams;
@@ -93,7 +95,7 @@ export function MjControls({
             title="版本"
             hint={value.botType === 'NIJI_JOURNEY' ? 'niji 自己的版本号，与 Midjourney 不通用' : undefined}
           >
-            <select
+            <Select variant="bare"
               aria-label="选择版本"
               value={value.version}
               onChange={(e) => onChange(withTileGate({ version: e.target.value }, value))}
@@ -104,7 +106,7 @@ export function MjControls({
                   {value.botType === 'NIJI_JOURNEY' ? `niji ${item}` : `v${item}`}
                 </option>
               ))}
-            </select>
+            </Select>
           </Section>}
 
           {!evolink && <Section title="速度档">
@@ -197,7 +199,7 @@ export function MjControls({
           </Section>
 
           <Section title="风格编号 sref" hint="只填数字；填写后会暂停使用上传的风格参考图">
-            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+            <Input variant="bare"
               type="text"
               inputMode="numeric"
               maxLength={32}
@@ -210,7 +212,7 @@ export function MjControls({
           </Section>
 
           {!evolink && <Section title="个性化 profile" hint="填写 Midjourney Profile code 或 ID">
-            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+            <Input variant="bare"
               type="text"
               value={value.profile}
               onChange={(e) => {
@@ -227,7 +229,7 @@ export function MjControls({
           </Section>}
 
           <Section title="排除词 no" hint="不想出现的东西，逗号分隔">
-            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+            <Input variant="bare"
               type="text"
               value={value.no}
               onChange={(e) => onChange({ no: e.target.value })}
@@ -238,7 +240,7 @@ export function MjControls({
           </Section>
 
           <Section title="种子 seed" hint="填同一个种子 + 同一条 prompt 可复现构图">
-            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+            <Input variant="bare"
               type="text"
               inputMode="numeric"
               value={value.seed}

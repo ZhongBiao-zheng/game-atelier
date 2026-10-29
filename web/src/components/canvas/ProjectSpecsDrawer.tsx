@@ -6,6 +6,7 @@ import { getCanvasSpecs, saveCanvasSpec, getCanvasLessons, reviewCanvasLesson, t
 import { getTeamSpecs, listTeamLibraries, saveTeamSpec } from '@/api/teamLibraries';
 import type { TeamLibraryView } from '@/schema/teamLibrary';
 import { cn } from '@/lib/utils';
+import { Textarea } from '@/components/ui/textarea';
 
 const PROJECT = 'project';
 const LESSONS = 'lessons';
@@ -169,7 +170,7 @@ export function ProjectSpecsDrawer({ projectId, onClose }: { projectId: string; 
         {lessons.adopted.map((text, index) => <p key={index} className="whitespace-pre-wrap rounded-lg border border-border p-3">{text}</p>)}
       </div> : <>
         <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground" aria-live="polite">{status}</span><Button size="sm" variant="ghost" onClick={() => setPreview(value => !value)}>{preview ? '编辑' : '预览'}</Button></div>
-        {preview ? <div className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap text-sm"><ReactMarkdown>{texts[active] || ''}</ReactMarkdown></div> : <textarea autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" aria-label="规范正文" disabled={!ready} maxLength={40000} value={texts[active] || ''} onChange={event => change(event.target.value)} onCompositionStart={() => { composing.current = true; clearTimeout(timer.current); }} onCompositionEnd={() => { composing.current = false; schedule(); }} className="min-h-0 flex-1 resize-none rounded-lg border border-border bg-background p-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />}
+        {preview ? <div className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap text-sm"><ReactMarkdown>{texts[active] || ''}</ReactMarkdown></div> : <Textarea variant="bare" aria-label="规范正文" disabled={!ready} maxLength={40000} value={texts[active] || ''} onChange={event => change(event.target.value)} onCompositionStart={() => { composing.current = true; clearTimeout(timer.current); }} onCompositionEnd={() => { composing.current = false; schedule(); }} className="min-h-0 flex-1 resize-none rounded-lg border border-border bg-background p-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />}
       </>}
     </DialogContent>
   </Dialog>;

@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dialog';
 import { clamp, cn } from '@/lib/utils';
 import type { CanvasMediaOperation, CanvasMediaVersion } from '@/schema/canvas';
+import { Input } from '@/components/ui/input';
 
 export type CanvasMediaTool = 'crop' | 'split';
 
@@ -451,7 +452,7 @@ function PixelField({ label, value, max, onCommit }: {
   return (
     <label className="flex h-9 items-center gap-2 rounded-md border border-input px-2.5 text-xs text-muted-foreground focus-within:ring-2 focus-within:ring-primary">
       <span>{label}</span>
-      <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+      <Input variant="bare"
         type="text"
         inputMode="numeric"
         aria-label={`裁剪${label}度（像素）`}

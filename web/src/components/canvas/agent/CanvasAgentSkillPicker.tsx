@@ -5,6 +5,8 @@ import { ApiError } from '@/api/http';
 import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
 import { cn } from '@/lib/utils';
 import type { CanvasAgentSkill } from '@/schema/canvas';
+import { FileInput } from '@/components/ui/file-input';
+import { Input } from '@/components/ui/input';
 
 /** 文件夹选择器给的是相对路径（含选中的那层目录名），服务端以 SKILL.md 所在目录为根。 */
 function relativePath(file: File): string {
@@ -103,7 +105,7 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
         aria-label="Skill"
         className="flex w-72 flex-col rounded-xl border border-border bg-popover p-1.5 shell-glow"
       >
-        <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+        <Input variant="bare"
           value={query}
           onChange={event => setQuery(event.target.value)}
           placeholder="搜索 Skill"
@@ -147,9 +149,8 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
             <FolderOpen className="size-3.5" />导入文件夹
           </button>
         </div>
-        <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+        <FileInput
           ref={archiveRef}
-          type="file"
           accept=".zip,.md"
           aria-label="选择 Skill 压缩包或 SKILL.md"
           className="sr-only"
@@ -159,9 +160,8 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
             void importFiles(files, []);
           }}
         />
-        <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+        <FileInput
           ref={folderRef}
-          type="file"
           aria-label="选择 Skill 文件夹"
           className="sr-only"
           // 非标准属性：React 的类型里没有 webkitdirectory，用展开对象传进去。

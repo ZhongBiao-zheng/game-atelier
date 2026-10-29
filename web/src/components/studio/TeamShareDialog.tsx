@@ -30,6 +30,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SwapLabel } from '@/components/ui/swap-label';
+import { Select } from '@/components/ui/select';
 
 export interface TeamShareDialogRequest {
   source: TeamShareSource;
@@ -204,7 +205,7 @@ export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamS
             ) : (
               <div className="space-y-2">
                 <Label htmlFor="team-share-library" className="text-xs font-normal text-muted-foreground">团队库</Label>
-                <select
+                <Select variant="bare"
                   id="team-share-library"
                   value={libraryId}
                   onChange={event => setLibraryId(event.target.value)}
@@ -216,7 +217,7 @@ export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamS
                   {libraries.map(item => (
                     <option key={item.library_id} value={item.library_id}>{item.name}</option>
                   ))}
-                </select>
+                </Select>
               </div>
             )}
 

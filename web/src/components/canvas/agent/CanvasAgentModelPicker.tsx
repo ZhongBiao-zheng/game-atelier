@@ -4,6 +4,7 @@ import { Link } from 'wouter';
 import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
 import { cn } from '@/lib/utils';
 import type { CanvasAgentChatModel, CanvasAgentChatModelList } from '@/schema/canvas';
+import { Input } from '@/components/ui/input';
 
 export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelect }: {
   models: CanvasAgentChatModelList | null;
@@ -59,7 +60,7 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
         aria-label="对话模型"
         className="flex w-72 flex-col rounded-xl border border-border bg-popover p-1.5 shell-glow"
       >
-        <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+        <Input variant="bare"
           value={query}
           onChange={event => setQuery(event.target.value)}
           placeholder="搜索模型"

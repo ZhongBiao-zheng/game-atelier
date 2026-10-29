@@ -11,6 +11,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { SwapLabel } from '@/components/ui/swap-label';
+import { Select } from '@/components/ui/select';
+import { Slider } from '@/components/ui/slider';
 
 
 export interface CanvasAngleParams {
@@ -102,9 +104,9 @@ export function CanvasAngleDialog({
               </div>
             </fieldset>
             <label className="block text-xs text-muted-foreground">候选数
-              <select aria-label="多角度候选数" disabled={busy} value={params.requestedCount} onChange={event => update('requestedCount', Number(event.target.value))} className="canvas-input mt-1">
+              <Select variant="bare" aria-label="多角度候选数" disabled={busy} value={params.requestedCount} onChange={event => update('requestedCount', Number(event.target.value))} className="canvas-input mt-1">
                 {[1, 2, 3, 4].map(value => <option key={value} value={value}>{value} 张</option>)}
-              </select>
+              </Select>
             </label>
             {error && <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive" role="alert">{error}</p>}
           </div>
@@ -143,7 +145,7 @@ function AngleSlider({
   return (
     <label className="grid grid-cols-[4rem_1fr_4rem] items-center gap-3 text-xs text-muted-foreground">
       {label}
-      <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" aria-label={label} type="range" min={min} max={max} step={step} value={value} disabled={disabled} onChange={event => onChange(Number(event.target.value))} className="accent-primary" />
+      <Slider aria-label={label} min={min} max={max} step={step} value={value} disabled={disabled} onChange={event => onChange(Number(event.target.value))} className="accent-primary" />
       <span className="text-right text-foreground">{Number.isInteger(value) ? value : value.toFixed(1)}{suffix}</span>
     </label>
   );

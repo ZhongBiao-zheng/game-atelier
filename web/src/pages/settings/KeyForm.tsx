@@ -9,6 +9,10 @@ import { ApiError } from '@/api/http';
 import { PROVIDER_PRESETS, providerPresetId, type ProviderKind } from './providerPresets';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { SecretInput } from '@/components/ui/secret-input';
 const GATEWAY_PROVIDER = 'atelier';
 
 const KIND_LABELS: Record<ProviderKind, string> = {
@@ -427,16 +431,16 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         <div className="min-h-0 overflow-y-auto px-4 py-5 sm:px-6">
           {!editing && !presetId && <div className="mb-5 space-y-2">
             <label htmlFor="key-provider" className={capLabelClass}>供应商选择</label>
-            <select id="key-provider" value={activePresetId} disabled={fetching || testing || connecting} onChange={e => changeProvider(e.target.value)} className={fieldClass}>
+            <Select variant="bare" id="key-provider" value={activePresetId} disabled={fetching || testing || connecting} onChange={e => changeProvider(e.target.value)} className={fieldClass}>
               {PROVIDER_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label} · {KIND_LABELS[p.kind]}</option>)}
-            </select>
+            </Select>
           </div>}
           <div className="grid grid-cols-1 items-start gap-x-4 gap-y-3 sm:grid-cols-[88px_minmax(0,1fr)]">
             <label htmlFor="key-provider-name" className="pt-2 text-xs text-muted-foreground">名称</label>
-            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" id="key-provider-name" placeholder={provider === 'custom' ? '例如：openrouter-image-main' : undefined} value={alias} readOnly={editing || !usesNamedAlias(provider)} onChange={e => setAlias(e.target.value)} className={fieldClass} />
+            <Input variant="bare" id="key-provider-name" placeholder={provider === 'custom' ? '例如：openrouter-image-main' : undefined} value={alias} readOnly={editing || !usesNamedAlias(provider)} onChange={e => setAlias(e.target.value)} className={fieldClass} />
             {isGateway && <>
               <label htmlFor="key-gateway-url" className="pt-2 text-xs text-muted-foreground">网关地址</label>
-              <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" id="key-gateway-url" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setGatewayModels([]); setGatewayInfo(null); }} className={`${fieldClass} font-mono`} placeholder="http://192.168.1.20:5180" />
+              <Input variant="bare" id="key-gateway-url" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setGatewayModels([]); setGatewayInfo(null); }} className={`${fieldClass} font-mono`} placeholder="http://192.168.1.20:5180" />
             </>}
             {isSubscription ? <>
               <span className="pt-2 text-xs text-muted-foreground">账号</span>
@@ -445,8 +449,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
             <label htmlFor="key-access" className="pt-2 text-xs text-muted-foreground">{isGateway ? '网关密钥' : 'API 密钥'}</label>
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative min-w-0 flex-1">
-                {/* 不用 type="password"：Chrome 会把上一栏（网关地址）当用户名、弹出保存密码，autoComplete="off" 对密码框无效。用文本框 + text-security 遮挡。 */}
-                <input id="key-access" type="text" value={accessKey} onChange={e => { setAccessKey(e.target.value); setKeyRevealed(true); setConnectionTest(null); }} autoComplete="off" spellCheck={false} data-1p-ignore="" data-lpignore="true" data-form-type="other" className={`${fieldClass} pr-10 font-mono ${showKey ? '' : '[-webkit-text-security:disc]'}`} placeholder={editing ? '留空则保留原密钥' : '粘贴密钥'} />
+                <SecretInput variant="bare" id="key-access" revealed={showKey} value={accessKey} onChange={e => { setAccessKey(e.target.value); setKeyRevealed(true); setConnectionTest(null); }} className={`${fieldClass} pr-10 font-mono`} placeholder={editing ? '留空则保留原密钥' : '粘贴密钥'} />
                 <button type="button" aria-label={showKey ? '隐藏密钥' : '显示密钥'} disabled={revealing} onClick={toggleShowKey} className="absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-md text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary">
                   <SwapIcon swapKey={showKey}>{showKey ? <EyeOff size={16} /> : <Eye size={16} />}</SwapIcon>
                 </button>
@@ -467,7 +470,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                     <button type="button" aria-pressed={!preview} disabled={unresolvedChecked.length > 0} onClick={applyFetchedSelection} className={`rounded-sm px-3 py-1 text-xs ${!preview ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}>已选 {mergedModels().filter(m => m.id.trim()).length}</button>
                     <button type="button" aria-pressed={Boolean(preview)} onClick={() => void fetchModels()} className={`rounded-sm px-3 py-1 text-xs ${preview ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}>全部</button>
                   </div>
-                  {!preview && <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" aria-label="筛选模型" placeholder="筛选模型" value={modelQuery} onChange={e => setModelQuery(e.target.value)} className={`${fieldClass} min-w-0 flex-1 basis-28`} />}
+                  {!preview && <Input variant="bare" aria-label="筛选模型" placeholder="筛选模型" value={modelQuery} onChange={e => setModelQuery(e.target.value)} className={`${fieldClass} min-w-0 flex-1 basis-28`} />}
                   <button type="button" disabled={fetching || !fetchModelsBaseUrl} onClick={() => void fetchModels()} className={ghostButtonClass}>{fetching ? '获取中...' : '重新获取'}</button>
                 </div>
                 {fetchError && <p role="alert" className="text-sm text-destructive">{fetchError}</p>}
@@ -479,7 +482,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                       <button type="button" disabled={fetching} onClick={() => fetchModels(!preview.includeAll)} className={textActionClass}>{preview.includeAll ? '只看可生成模型' : '显示全部'}</button>
                     </>}
                   </div>
-                  <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" aria-label="搜索模型" placeholder="筛选模型" value={pickerQuery} onChange={e => setPickerQuery(e.target.value)} className={fieldClass} />
+                  <Input variant="bare" aria-label="搜索模型" placeholder="筛选模型" value={pickerQuery} onChange={e => setPickerQuery(e.target.value)} className={fieldClass} />
                   <div className="flex flex-wrap gap-1">
                     {pickerFilters.map(filter => <button type="button" key={filter} aria-pressed={pickerFilter === filter} onClick={() => setPickerFilter(filter)} className={`rounded-md px-2 py-1 text-xs ${pickerFilter === filter ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}>{filter === 'all' ? '全部' : CATEGORY_LABELS[filter]} {pickerCounts(filter)}</button>)}
                   </div>
@@ -511,8 +514,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                   </button>)}
                 </div>}
                 {provider === 'custom' && <div className="flex flex-wrap gap-2">
-                  <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" aria-label="添加模型 ID" placeholder="添加模型 ID" value={manualId} onChange={e => setManualId(e.target.value)} className={`${fieldClass} min-w-0 flex-1 basis-28 font-mono`} />
-                  <select aria-label="新增模型类型" value={manualType} onChange={e => setManualType(e.target.value as ModelModality)} className="rounded-md border border-input bg-transparent px-2 text-xs">{GENERATION_MODALITIES.map(type => <option key={type} value={type}>{CATEGORY_LABELS[type]}</option>)}</select>
+                  <Input variant="bare" aria-label="添加模型 ID" placeholder="添加模型 ID" value={manualId} onChange={e => setManualId(e.target.value)} className={`${fieldClass} min-w-0 flex-1 basis-28 font-mono`} />
+                  <Select variant="bare" aria-label="新增模型类型" value={manualType} onChange={e => setManualType(e.target.value as ModelModality)} className="rounded-md border border-input bg-transparent px-2 text-xs">{GENERATION_MODALITIES.map(type => <option key={type} value={type}>{CATEGORY_LABELS[type]}</option>)}</Select>
                   <button type="button" disabled={!manualId.trim() || models.some(m => m.id === manualId.trim())} onClick={addManualModel} className={ghostButtonClass}>添加</button>
                 </div>}
                 <details open={detailsOpen} onToggle={e => setDetailsOpen(e.currentTarget.open)}>
@@ -529,7 +532,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                   {models.map((model, index) => (
                     <div key={index} className="grid grid-cols-2 items-start gap-2">
                       <label className="sr-only" htmlFor={`key-model-name-${index}`}>模型名称 {index + 1}</label>
-                      <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+                      <Input variant="bare"
                         ref={(input) => {
                           if (!input || pendingModelFocus.current !== index) return;
                           pendingModelFocus.current = null;
@@ -544,7 +547,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                         placeholder="给人看的名字，例如：图片 5.0"
                       />
                       <label className="sr-only" htmlFor={`key-model-id-${index}`}>模型 ID {index + 1}</label>
-                      <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+                      <Input variant="bare"
                         id={`key-model-id-${index}`}
                         aria-label={`模型 ID ${index + 1}`}
                         value={model.id}
@@ -599,8 +602,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                             <span>理解输入</span>
                             {TEXT_INPUT_MODALITIES.map(([inputModality, label]) => (
                               <label key={inputModality} className="flex items-center gap-1.5">
-                                <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
-                                  type="checkbox"
+                                <Checkbox
                                   checked={(model.input_modalities ?? []).includes(inputModality)}
                                   onChange={(event) => setModels(models.map((current, i) => {
                                     if (i !== index) return current;
@@ -647,11 +649,11 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                 <summary className="cursor-pointer text-xs text-muted-foreground">高级：请求地址 · 计费分组</summary>
                 <div className="mt-3 grid grid-cols-1 items-center gap-3 sm:grid-cols-[88px_minmax(0,1fr)]">
                   <label htmlFor="key-base-url" className="text-xs text-muted-foreground">API 请求地址</label>
-                  <div className="flex gap-2"><input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" id="key-base-url" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setUrlTest(null); setConnectionTest(null); }} className={`${fieldClass} font-mono`} /><button type="button" onClick={testBaseUrl} className={ghostButtonClass}>测试</button></div>
+                  <div className="flex gap-2"><Input variant="bare" id="key-base-url" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setUrlTest(null); setConnectionTest(null); }} className={`${fieldClass} font-mono`} /><button type="button" onClick={testBaseUrl} className={ghostButtonClass}>测试</button></div>
                   {urlTest && <p className="col-span-full text-xs text-muted-foreground">{urlTest.message}</p>}
                   <label htmlFor="key-billing-group" className="text-xs text-muted-foreground">计费分组（可选）</label>
-                  <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" id="key-billing-group" value={billingGroup} onChange={e => setBillingGroup(e.target.value)} className={fieldClass} placeholder="default" />
-                  {provider === 'custom' && <><p className="col-span-full text-xs text-muted-foreground">自定义供应商可以创建多个配置，请用不同配置名称区分额度、用途或上游。</p><label htmlFor="key-homepage" className="text-xs text-muted-foreground">官网链接</label><input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" id="key-homepage" value={homepage} onChange={e => setHomepage(e.target.value)} className={fieldClass} /></>}
+                  <Input variant="bare" id="key-billing-group" value={billingGroup} onChange={e => setBillingGroup(e.target.value)} className={fieldClass} placeholder="default" />
+                  {provider === 'custom' && <><p className="col-span-full text-xs text-muted-foreground">自定义供应商可以创建多个配置，请用不同配置名称区分额度、用途或上游。</p><label htmlFor="key-homepage" className="text-xs text-muted-foreground">官网链接</label><Input variant="bare" id="key-homepage" value={homepage} onChange={e => setHomepage(e.target.value)} className={fieldClass} /></>}
                 </div>
               </details>
             </>}

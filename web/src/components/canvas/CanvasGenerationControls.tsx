@@ -29,6 +29,8 @@ import {
 } from '@/lib/audioGeneration';
 import type { JobParams } from '@/schema/jobs';
 import { SelectionHighlight } from '@/components/ui/selection-highlight';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 
 const REASONING_OPTIONS = ['auto', 'low', 'medium', 'high', 'xhigh'] as const;
 const REASONING_LABELS: Record<(typeof REASONING_OPTIONS)[number], string> = {
@@ -429,7 +431,7 @@ export function CanvasAudioSettings({
               getLabel={value => audioSpeedLabel(value)}
               onSelect={value => onPatch({ speed: value })}
             />
-            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+            <Input variant="bare"
               type="number"
               aria-label="自定义语速"
               min={0.25}
@@ -445,7 +447,7 @@ export function CanvasAudioSettings({
             />
           </SettingsSection>
           <SettingsSection title="朗读指令">
-            <textarea autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+            <Textarea variant="bare"
               aria-label="朗读指令"
               rows={3}
               value={instructionsDraft}

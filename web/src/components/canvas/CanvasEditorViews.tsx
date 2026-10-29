@@ -141,6 +141,9 @@ import { isSavableCanvasVersion, isShareableCanvasVersion } from '@/pages/canvas
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { SelectionHighlight } from '@/components/ui/selection-highlight';
+import { Input } from '@/components/ui/input';
+import { Slider } from '@/components/ui/slider';
+import { Textarea } from '@/components/ui/textarea';
 
 export type CanvasFlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
 /** 本地媒体操作（抠图 / 裁剪 / 切图 / 放大）进行中的占位节点：不在文档里，结果节点落地即撤。 */
@@ -640,7 +643,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         >
           {nodeIcon(node)}
           {isEditingTitle ? (
-            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+            <Input variant="bare"
               ref={titleInputRef}
               value={titleDraft}
               maxLength={120}
@@ -918,7 +921,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
                 />
               </div>
             ) : isEditingText ? (
-              <textarea autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+              <Textarea variant="bare"
                 ref={textEditorRef}
                 aria-label={`编辑 ${node.title} 正文`}
                 // 显示值取本地草稿：文档值要绕画布文档 → React Flow 节点 → 本组件一圈才回来，
@@ -3703,8 +3706,7 @@ function MediaPreview({
             </SwapIcon>
           </button>
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{formatMediaTime(videoCurrentTime)}</span>
-          <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
-            type="range"
+          <Slider
             aria-label="视频播放进度"
             min={0}
             max={videoDuration || 0}
@@ -3733,8 +3735,7 @@ function MediaPreview({
             </button>
             <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 pb-1 opacity-0 transition-opacity group-focus-within/volume:pointer-events-auto group-focus-within/volume:opacity-100 group-hover/volume:pointer-events-auto group-hover/volume:opacity-100">
               <div className="grid h-24 w-7 place-items-center rounded-lg border border-border bg-glass py-2 backdrop-blur-glass">
-                <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
-                  type="range"
+                <Slider
                   aria-label="视频音量"
                   aria-orientation="vertical"
                   min={0}

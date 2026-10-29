@@ -6,6 +6,8 @@ import { MediaPreview } from './CreationAssetCards';
 import { rememberedModel } from '@/components/canvas/agent/useCanvasAgent';
 import { Button } from '@/components/ui/button';
 import { assetMediaContent, type CreationAsset, type CategorySuggestion } from '@/schema/creationAssets';
+import { FileInput } from '@/components/ui/file-input';
+import { Select } from '@/components/ui/select';
 
 interface PendingQueue { ids: string[]; suggestions: Record<string, CategorySuggestion> }
 
@@ -137,7 +139,7 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
       <MediaPreview assetId={asset.asset_id} content={media} alt={asset.title} className="mb-2 max-h-64 w-full rounded-md object-contain" />
       <p className="truncate text-sm" title={asset.title}>{asset.title}</p>
       <div className="mt-2 flex items-center gap-2">
-        <select aria-label={`${asset.title} 的类别`} value={value} disabled={busy}
+        <Select variant="bare" aria-label={`${asset.title} 的类别`} value={value} disabled={busy}
           className="h-8 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-xs"
           onChange={event => {
             const category = event.target.value || null;
@@ -146,7 +148,7 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
           }}>
           <option value="">{waiting ? '待分类' : '取消定稿'}</option>
           {[...new Set([...categories, ...(value ? [value] : [])])].map(category => <option key={category} value={category}>{category}</option>)}
-        </select>
+        </Select>
         {waiting && suggestion && <span className="text-xs tabular-nums text-muted-foreground" title="分类置信度">{Math.round(suggestion.confidence * 100)}%</span>}
       </div>
       {!waiting && <Button variant="ghost" size="sm" className="mt-2 w-full" disabled={busy} onClick={() => onUse(asset)}>放到画布</Button>}
@@ -162,7 +164,7 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
   }}>
     <div className="border-b border-border p-3">
       <Button variant="outline" size="sm" disabled={busy} onClick={() => input.current?.click()}><Upload />导入</Button>
-      <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" ref={input} type="file" multiple accept="image/*" aria-label="导入参考图" className="hidden" onChange={event => {
+      <FileInput ref={input} multiple accept="image/*" aria-label="导入参考图" className="hidden" onChange={event => {
         void importFiles(Array.from(event.target.files ?? [])); event.target.value = '';
       }} />
       {error && <p role="alert" className="mt-2 text-xs text-destructive">{error}</p>}

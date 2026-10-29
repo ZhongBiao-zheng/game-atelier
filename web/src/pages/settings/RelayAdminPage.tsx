@@ -13,6 +13,7 @@ import { KpiRow } from './usage/KpiRow';
 import { TrendChart } from './usage/TrendChart';
 import { RankingCard } from './usage/RankingCard';
 import { TaskTable } from './usage/TaskTable';
+import { Select } from '@/components/ui/select';
 
 export function useAdminGateways() {
   const [aliases, setAliases] = useState<string[]>([]);
@@ -52,10 +53,10 @@ function TeamUsage({ alias }: { alias: string }) {
   }, [alias, range, member]);
   return <section className="space-y-6" aria-label="中转团队用量">
     <div className="flex flex-wrap gap-3">
-      <select aria-label="用量时间范围" className={button} value={range} onChange={e => setRange(e.target.value as UsageRange)}>
+      <Select variant="bare" aria-label="用量时间范围" className={button} value={range} onChange={e => setRange(e.target.value as UsageRange)}>
         {([['today', '今天'], ['7d', '7 天'], ['30d', '30 天'], ['90d', '90 天'], ['all', '全部']] as const).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-      </select>
-      <select aria-label="用量成员" className={button} value={member} onChange={e => setMember(e.target.value)}><option value="">全部成员</option>{data?.members.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>
+      </Select>
+      <Select variant="bare" aria-label="用量成员" className={button} value={member} onChange={e => setMember(e.target.value)}><option value="">全部成员</option>{data?.members.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</Select>
     </div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {data && <><KpiRow data={data} /><TrendChart data={data} /><div className="grid gap-4 md:grid-cols-2">{data.rankings.map(ranking => <RankingCard key={ranking.by} ranking={ranking} />)}</div></>}
@@ -113,7 +114,7 @@ export function RelayAdminPage() {
   function change(name: string, value: string) { const next = new URLSearchParams(search); next.set(name, value); navigate(`/settings/relay-admin?${next}`); }
   if (!alias) return <p className="text-sm text-muted-foreground">{loaded ? '没有可用的管理员中转连接' : '读取中转连接…'}</p>;
   return <div className="min-w-0 space-y-6">
-    <div className="flex flex-wrap gap-3"><select aria-label="管理的中转" className={button} value={alias} onChange={e => change('alias', e.target.value)}>{aliases.map(value => <option key={value}>{value}</option>)}</select>
+    <div className="flex flex-wrap gap-3"><Select variant="bare" aria-label="管理的中转" className={button} value={alias} onChange={e => change('alias', e.target.value)}>{aliases.map(value => <option key={value}>{value}</option>)}</Select>
       {([['members', '成员'], ['usage', '团队用量'], ['upstreams', '上游与路由'], ['audit', '操作日志']] as const).map(([value, label]) => <button key={value} className={`${button} ${view === value ? 'bg-secondary' : ''}`} aria-pressed={view === value} onClick={() => change('view', value)}>{label}</button>)}
     </div>
     {view === 'audit' ? <AuditLog gatewayAlias={alias} /> : view === 'usage' ? <TeamUsage key={alias} alias={alias} /> : view === 'upstreams' ? <Upstreams key={alias} alias={alias} /> : <LanSharingSection key={alias} gatewayAlias={alias} />}

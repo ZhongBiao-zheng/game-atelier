@@ -3,6 +3,7 @@
 > 永远先读这份文档再做任何视觉 / UI 决定。
 > 字体、颜色、间距、深度、组件配方都在这里定义。
 > 本文档由 `web/src/test/designDrift.test.ts` 守卫强制执行：硬编码色值、任意值字号、阴影、杂牌圆角/模糊会直接红灯。
+> 组件选用由 `web/src/test/nativeControlsGuard.test.ts` 守卫：页面写原生 input / select / textarea 会直接红灯。
 
 ---
 
@@ -134,7 +135,7 @@
 
 ## 组件配方（写组件先查这里）
 
-生成面板只保留当前素材、提示词、模型参数与操作。禁止追加“原任务输入／本轮冻结输入”等重复模型和提示词的解释区块；历史信息留在现有详情入口，不替换成新的说明卡片。
+页面只组合 `web/src/components/ui/` 的组件。组件清单与选用规则见 [组件规范](docs/design/components.md)；Studio、画布、控制台等具体界面的布局与交互见 [界面规格](docs/design/surfaces.md)。
 
 | 组件 | 配方 |
 |---|---|
@@ -144,43 +145,15 @@
 | 卡片 | `bg-card border border-border rounded-lg` |
 | 媒体瓦片 | `rounded-lg overflow-hidden border border-border`（框架隐形，让图说话） |
 | 选项弹窗（输入框控件 popover） | 面板 `bg-card border border-border rounded-xl`（**不透明**——内含可选项时玻璃透底会让选项难辨）；选项轨道 `bg-popover`（比面板亮一档）；选项 chip 默认透明贴轨道、左右贴紧（多行只留 `gap-y-1`），`hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60`。层级铁律：**越靠背景越深**，画布 → 输入壳 → 面板 → 轨道 → 选中/hover 单调变亮 |
-| 控件下拉面板限高 | `ToolbarPopover` 把定位算出的可用高度写在内联 style 上，会盖过 className 里的 `max-h-*`；要限高传 `maxHeight` prop（厂商 / 模型列表 400，生成模式 280） |
 | 玻璃浮层（无选项的悬浮 panel/菜单） | `bg-glass backdrop-blur-glass border border-border rounded-xl` |
-| Studio 输入壳（滚动联动收放） | 浮于历史滚动区上（wrapper `pointer-events-none`，壳 `pointer-events-auto`，两侧视觉与交互都穿透）；`rounded-xl` 收放两态一致（胶囊 `rounded-full` 试装后被否——过圆），展开 `min-h-[174px]`，距底 >160px 收成单行条：控件行 `grid-rows-[0fr] opacity-0` 折叠、textarea 单行、参考堆叠 `scale-80`，全程 `transition 300ms`；点击收缩壳展开但**不回滚**，「回到底部」独立玻璃 pill 出现在壳右上方，点击**瞬时跳底**不播滚动过程 |
-| Studio 生成记录 | 单列，一条记录上下三段，列表上限 1024px：① 信息：提示词一行（参考图在提示词左侧，多张时向右展开）+ 参数标签行 ② 结果 ③ 操作行。标签行与操作行始终从最左缘开始，有没有参考图都一样。参数标签实底 `rounded-sm bg-card px-2 py-0.5 text-xs`，来源是同一行里的描边标签，MJ flags 另起一行等宽灰字。操作按钮 `h-8 px-2 text-xs` 无底色、宽度随文字，整行 `-ml-2` 让文字贴左缘，上方不加分隔线；耗时 · 时分 · 费用等宽靠右。日期由分组标题承担（按北京日期分组，每组第一条上方一行 `text-xs tabular-nums`）。更多菜单向右弹。**两栏（结果左 / 信息右）试过后撤回**：右栏只有 20rem，参考图一多 hover 展开放不下 |
 | 玻璃 pill（顶栏 tab） | `bg-glass backdrop-blur-glass border border-border rounded-full` |
 | 顶栏圆形 icon 钮（主题切换 / 设置） | `h-10 w-10 rounded-full bg-glass backdrop-blur-glass text-muted-foreground hover:bg-secondary/60 hover:text-foreground`，icon 18px |
 | 遮罩层（lightbox） | `fixed inset-0 z-50 bg-scrim` |
 | 状态徽章 | `text-xs` + `text-[color:var(--status-*)]`（同字号靠颜色分语义） |
-| 输入框 | `border border-input bg-transparent rounded-md focus-visible:ring-1 focus-visible:ring-ring` |
-| 原生下拉 `<select>` | 外观由 `tokens.css` 的 base 规则统一（去系统箭头、`--select-chevron` 发丝箭头、右内边距 2rem）；tsx 只写与输入框相同的边框 / 圆角 / 高度类，不再各自画箭头 |
-| 控制台 | 左侧 220px 分组导航，组距 18px、组名 `text-xs text-subtle-foreground`；选中行 `bg-popover` + 24px 主色图标块，未选中中性灰。右侧 `.console-panel m-2 rounded-2xl border border-border bg-panel`，面包屑替代独立大标题。小于 768px 导航置顶横向滚动、隐藏组名。 |
-| 用量卡片 | `bg-card rounded-xl border border-border`；KPI `text-base font-semibold`；范围选中用主色，其他筛选用 secondary；类型胶囊用 brand，排行圆点和条用固定 chart 色并带文字标签；历史柱主色 30%，当前桶实色，空日 2px 边线色，三条虚线网格。 |
-| 网关状态卡 | 状态点、标题与运行胶囊、模型/在用成员/月花费摘要、地址复制、开关同排并允许窄屏换行；新建密钥主按钮；额度条正常主色、超过 85% 用运行警告色；任务前置类型胶囊，计时主色。 |
-| 外观设置 | 模式分段、44px 四色色卡、四项原生取色器与 hex 草稿、恢复默认、迷你控制台预览；修改即应用，主色对卡片低于 3:1 提示，不阻止应用。 |
+| 输入框（`Input`） | `border border-input bg-transparent rounded-md focus-visible:ring-1 focus-visible:ring-ring` |
+| 下拉（`Select`） | 外观由 `tokens.css` 的 base 规则统一（去系统箭头、`--select-chevron` 发丝箭头、右内边距 2rem）；`Select` 组件已带与输入框相同的边框 / 圆角 / 高度，不再各自画箭头 |
 | 小帽标签 | 拉丁 `text-xs uppercase tracking-label text-muted-foreground`；中文 `text-xs text-muted-foreground` |
 | 空状态 | `font-display text-display italic text-foreground/70` + 一行 `text-sm text-muted-foreground` 说明 |
-| 无限画布 chrome | React Flow 只占平面层；项目切换、工具条、MiniMap 与节点设置统一使用 `bg-glass backdrop-blur-glass border border-border`，节点本体用 `bg-card border-border rounded-lg`。素材名固定显示在节点左上方；节点选中后，功能工具条固定出现在节点上方，完整图片快捷工具不再按节点宽度折叠。空图片/视频/音频只在上方工具条保留一个上传入口，节点正文不重复放上传按钮；自身取得当前 Content Version 后恢复完整工具。空文本从创建起即持有真实的空 Content Version，必须保留输出连接点、出现在下游素材条与 `@` 候选中，允许先建立 Input Connection 再填写内容。选中框四边与缩放手柄均向节点外扩 1px，避免描边压住内容边缘。768px 起生成设置作为节点下方独立浮层。选中节点在渲染时临时提升到全部持久化节点之上，保证工具条与生成面板不会被其他节点遮盖，但不改写项目内 `z_index`。当前 Content Version 来源为 `upload` 的图片是纯素材节点：选中后不挂载桌面或移动端生成设置，只显示上方工具条，不额外显示替换动作。视频画面单击只选择节点并阻止浏览器切换播放状态；播放/暂停、进度、音量与全屏由节点内确定性的自有控制条操作，不猜测浏览器原生控制条几何。图片多结果在节点卡片展开，生成设置不重复预览。视频不使用候选堆叠或主结果切换，生成结果直接成为独立节点。批量执行按项与轮纵向展开普通节点链路，各行只连接本批上游；保留现有节点样式，不添加结果容器。生成设置的提示词上方使用 48px 素材缩略条展示当前 Input Connection，图片与视频分别显示图片和视频首帧；文本连接到全能参考视频时同步补入对应 `@` token，断开连接时同步移除，若只剩引用则提示词回到空字符串；其他素材连接不自动改写提示词。进入画布选材后，合法素材 hover 时点亮边框，“选择 + 节点名”以固定屏幕尺寸跟随光标；键盘聚焦时提示显示在节点起始位置。已对接素材和提示词内的 `@` token 在 hover 或键盘聚焦时复用同一固定屏幕尺寸详情，图片放大预览、视频静音循环预览、文本/音频显示摘要。两块跟随浮层都反向补偿画布缩放，保持固定屏幕尺寸，并允许随节点移出视口而被自然裁切，不做翻边或边缘钳位。文本生成设置标题只显示“文本”，提供 1–4 个结果；第一个覆盖原节点，第二个放右侧，第三个放左下，第四个放右下，新增结果均为携带相同 Draft 与输入连接的独立文本节点。文本模型可理解的图片、视频和音频先由 KEY 中的显式能力开关决定，caller 再核对当前供应商协议是否有对应传输格式；不支持时只在提交时给一条短消息，不增加常驻说明。所有模态的生成面板底部只保留生成动作，不渲染完成状态、配置状态或阻塞原因；按钮仅在提交过程中禁用，配置问题在点击后统一由画布中上方反馈，失败后按当前设置整批重新提交。生成中节点使用旋转与呼吸组合的动态指示，并尊重 `prefers-reduced-motion`；生成记录只展示解析后的用户内容，内部冻结模板的 `【文本N】` 编号不得暴露，但不得改写真实请求快照。375px 下生成设置降级为带 safe-area 的底部面板；MiniMap 与缩放 Controls 不占手机底部空间。触控板双指平移、捏合缩放，画布在 capture 阶段接管横向非 pinch wheel 并禁用 overscroll history navigation，避免手势起于 `nowheel` 节点或浮层时触发浏览器前进/后退；鼠标左键拖框选择，触屏单指平移、双指缩放。LLM 生成合并进文本节点，人工正文与生成结果共用同一 Content Version 表面；Chat Completions 显示随机性和最大输出长度，Responses 显示推理强度和最大输出长度。菜单打开后焦点进入首项，Esc 逐层关闭并回到触发器或画布。媒体双击或预览按钮进入有焦点陷阱的 Dialog。节点列表必须启用可见区域渲染、稳定对象 memo，图片原生 lazy，视频/音频接近视区后才绑定 `src` |
-
-模型菜单的耗时与价格、Studio 历史参数共用 `MetaTag` 实底标签。耗时按 10 秒向上取整并只显示秒，全站金额共用同一格式：最多两位小数、去末尾零、`¥` 后置且无空格。历史参数逐项点击复用，能力判断沿用当前模型能力表；禁用时无 hover 态并设 `aria-disabled`；模型失效提示「该模型已不可用」，模式不匹配提示切换到对应模式，其余能力不支持提示「当前模型不支持」。模型标签和当前模型按钮使用同源品牌图标，供应商图标按预设身份统一，全部单色并跟随文字色；位图去背景后作为遮罩，最大64px，资源随应用打包。
-
-### 画布图片表面例外
-
-图片节点工具条提供「标注」入口，进入后在节点下方 12px 显示一条浮动工具栏，替换常规节点工具。
-顺序为选择/框选/箭头/画笔/文字、五色点和尺寸浮层、撤回/重做/删除/展开、去改图。
-工具按钮 36px，当前工具反白；工具栏采用玻璃表面，无第二行参数、侧栏或补充提示词框。
-线宽与字号入口显示名称和当前数值，提供三档预设和滑杆；图形完成后保持当前工具并选中新图形；任何工具下指到已有标注（框按描边、文字按范围、箭头与画笔按路径）光标变为移动，按住即拖动，空白处照常绘制；指到标注时滚轮或双指滚动调整其线宽（文字调字号），停手后记一次撤回，双指捏合仍缩放画布；矩形可拖动四角独立调整宽高；箭头显示两端控制点，拖动任一端调整方向和长度，保持线宽。
-文字输入时不显示边框，结束后选中才显示四角缩放控件，缩放同步改变字号；文字默认深色描边，可开启同色实心底。绘图颜色属于用户内容。
-标注期间收起节点生成面板，退出后恢复原草稿，避免与标注工具栏重叠。
-节点右上常显「标注 N」胶囊控制显隐；编辑外圈为主题主色描边。指针不在标注上时，滚轮与空格平移沿用画布行为。工具、颜色与尺寸偏好在所有节点间共用。
-全屏使用不透明背景、顶部收起与尺寸、底部同一工具栏，复用编辑状态；Esc 返回就地态。
-标注自动保存，每个完整动作参与画布撤回。带标注连线使用主题主色与画笔徽标，素材芯片预览合成图并标记画笔。
-
-节点顶部工具栏不提供删除、存资产、复制提示词、反推提示词、替换和局部编辑，图片快捷工具配置也不列出这些项；已上传图片不再额外显示替换按钮。空媒体节点仍保留唯一上传入口，分组保留“解散”。这只收敛节点入口，不删除资产或处理历史。
-
-图片“更多”菜单提供“扩图”和“局部修改”，共用视口内的编辑浮层，不增加顶部按钮。通用编辑以源图/目标画框尺寸为准，不使用 AUTO；选区撤销仅在编辑器内部。原图不覆盖，结果可按住对比。MJ 原生模式只显示原任务实际开放的动作，不承诺与通用编辑相同的像素保护。
-
-取得图片 Content Version 的图片节点及图片候选卡片不铺底色，透明像素直接透出画布；堆叠候选的装饰卡片也不铺底色。空节点、非图片节点与状态提示保留原有可读性背景。左栏不显示撤销、重做按钮；保留撤销/重做快捷键。
 
 ## Motion
 
@@ -241,3 +214,4 @@
 | 2026-10-24 | 设置拆为七个控制台地址，用量统一展示个人与团队花费 | PRD D1–D13：配置、观测、资源、扩展分组，局域网额度仅在用量页出现 |
 | 2026-10-24 | 主色改为可配置、默认青柠，底色改为石墨；推翻 2026-05-18 和 2026-06-10 两条黄铜决定 | 暖棕加黄铜显旧显脏。主副色、固定数据色与状态色分离，详见 [主题色规范](docs/design/theme.md)；历史日志中的暖黑与黄铜记录不再作为现行规则。 |
 | 2026-10-26 | 正文改用 Inter + Noto Sans SC，全部字体本地打包，等宽字体只留给技术信息；推翻 2026-06-10「Geist 留任、拒收 Inter」 | 中文原本落到系统字体，Mac 苹方与 Windows 雅黑不一致；Google Fonts 在国内不翻墙与离线安装包下加载失败；同类工具 Tapnow / Lovart / LibTV 均为 Inter + 中文网页字体（读其线上 CSS 得出）；创作台 93 处等宽字体让数据行与正文割裂 |
+| 2026-10-29 | 页面禁写原生 input / select / textarea，补 `SecretInput` / `Select` / `Checkbox` / `Radio` / `Slider` / `FileInput`；原生 button、bare 控件、任意值间距走棘轮；界面规格拆到 `docs/design/surfaces.md`，组件选用写入 `docs/design/components.md` | 组件层已有但被绕开：78 处原生控件、32 个文件手抄防填充属性，密钥框的保存密码修法只留在单页；本文件混入大段界面交互，通用配方被冲淡 |

@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useState } from 'react';
 import { ArrowLeftRight, Plus, X } from 'lucide-react';
 
 import { Lightbox } from '../Lightbox';
+import { FileInput } from '@/components/ui/file-input';
 
 export const MAX_REF_IMAGES = 9;
 export const MAX_REF_VIDEOS = 3;
@@ -99,7 +100,7 @@ export function FixedSlot({
 
   return (
     <>
-      <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" id={inputId} type="file" accept={accept} className="hidden"
+      <FileInput id={inputId} accept={accept} className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(f); e.target.value = ''; }} />
       <label
         htmlFor={disabled ? undefined : inputId}

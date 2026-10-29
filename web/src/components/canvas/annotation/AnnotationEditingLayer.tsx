@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { AnnotationLayer } from './AnnotationLayer';
 import type { AnnotationEditor } from './useAnnotationEditor';
 import { ANNOTATION_FONT, ANNOTATION_COLORS, ANNOTATION_WHITE, ANNOTATION_INK, ANNOTATION_DARK, annotationUnitScale } from './annotationModel';
+import { Textarea } from '@/components/ui/textarea';
 export function AnnotationEditingLayer({ editor, width, height, fit }: {
   editor: AnnotationEditor; width: number; height: number; fit: 'contain' | 'cover' | 'fill';
 }) {
@@ -41,7 +42,7 @@ export function AnnotationEditingLayer({ editor, width, height, fit }: {
       onPointerDown={editor.pointerDown} onPointerMove={editor.pointerMove} onPointerUp={editor.pointerUp}
       onPointerLeave={editor.pointerLeave}
       onPointerCancel={editor.cancelGesture} onDoubleClick={editor.doubleClick} onClick={event => event.stopPropagation()} />
-    {text && <textarea autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" data-annotation-text ref={editor.textareaRef} value={text.text} maxLength={500}
+    {text && <Textarea variant="bare" data-annotation-text ref={editor.textareaRef} value={text.text} maxLength={500}
       aria-label="标注文字" wrap="off" className="nodrag nopan pointer-events-auto absolute min-w-32 resize-none border-0 bg-transparent p-0 outline-none"
       style={{ left: (size.width - width * xscale) / 2 + text.x * xscale,
         top: (size.height - height * yscale) / 2 + text.y * yscale,

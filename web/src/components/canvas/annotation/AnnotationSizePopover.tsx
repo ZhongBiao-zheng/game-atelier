@@ -2,6 +2,7 @@ import * as Popover from '@radix-ui/react-popover';
 import { FONT_PRESETS, STROKE_PRESETS } from './annotationModel';
 import { cn } from '@/lib/utils';
 import './annotation.css';
+import { Slider } from '@/components/ui/slider';
 export function AnnotationSizePopover({ text, value, onChange }: {
   text: boolean; value: number; onChange: (value: number, preview?: boolean) => void;
 }) {
@@ -18,7 +19,7 @@ export function AnnotationSizePopover({ text, value, onChange }: {
     <div className="flex gap-1">{(text ? FONT_PRESETS : STROKE_PRESETS).map(n => <button key={n} type="button" aria-label={`${label} ${n}`}
       className={cn('grid h-8 flex-1 place-items-center rounded-md text-muted-foreground hover:bg-secondary', value === n && 'bg-secondary text-foreground')}
       onClick={() => onChange(n)}><span className="rounded-full bg-current" style={{ width: dot(n), height: dot(n) }} /></button>)}</div>
-    <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" aria-label={`${label}调节`} className="annotation-range w-full" type="range" min={text ? 12 : 1} max={text ? 72 : 24} step={1} value={value}
+    <Slider aria-label={`${label}调节`} className="annotation-range w-full" min={text ? 12 : 1} max={text ? 72 : 24} step={1} value={value}
       onChange={event => onChange(Number(event.target.value), true)}
       onPointerUp={event => onChange(Number(event.currentTarget.value))}
       onKeyUp={event => onChange(Number(event.currentTarget.value))} />

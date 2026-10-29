@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { assetMediaContent, renderCreationPrompt, type CreationAsset, type CreationMediaAssetContent } from '@/schema/creationAssets';
 import type { TeamAssetAdoptResponse, TeamLibraryIndexEntry } from '@/schema/teamLibrary';
+import { Select } from '@/components/ui/select';
 
 export type { CreationAssetPanelMode, CreationAssetSaveRequest, CreationGenerationSource, CreationMediaKind } from '@/components/assets/creationAssetPanelModel';
 
@@ -314,7 +315,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           </div>
           {kind === 'team' && teamProjectId && teamProjectChoices.length > 1 && (
             <div className="border-b border-border p-3">
-              <select
+              <Select variant="bare"
                 aria-label="画布项目"
                 value={teamProjectId}
                 onChange={event => setPickedTeamProjectId(event.target.value)}
@@ -323,7 +324,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
                 {teamProjectChoices.map(target => (
                   <option key={target.projectId} value={target.projectId}>{target.name}</option>
                 ))}
-              </select>
+              </Select>
             </div>
           )}
           {kind === 'team' && teamProjectId && (

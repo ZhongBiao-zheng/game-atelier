@@ -41,6 +41,7 @@ import {
   createMentionTokenRegex,
   mentionTokenPatternForLabel,
 } from '@/lib/mentionTokens';
+import { FileInput } from '@/components/ui/file-input';
 
 interface Props {
   onSubmit: (prompt: string, promptTemplate?: string) => void | Promise<void>;
@@ -808,10 +809,9 @@ export function PromptInput({
             className={`shrink-0 self-stretch relative overflow-visible transition-transform duration-300 origin-left ${collapsed ? 'scale-80' : ''}`}
             style={{ width: REF_W + 14 }}
           >
-            <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+            <FileInput
               ref={refFileInputRef}
               id={refInputId}
-              type="file"
               accept={stackAccept}
               multiple
               className="hidden"

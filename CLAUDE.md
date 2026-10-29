@@ -129,7 +129,7 @@ uv run python src/viewer_server/server.py open-browser
 - **Python 3.11+** / FastAPI 0.115 / Pydantic 2.9 / uvicorn / watchdog；`uv` 装包。
 - **React 18.3** / TS 5.6 / Vite 5.4 / Vitest 2 / pnpm。
 - **Tailwind v4.3 + shadcn**：永远 v4 写法（`@import "tailwindcss"`、`@theme`），禁止 v3 的 `tailwind.config.js` + PostCSS 组合。
-- 设计系统：改 web 视觉时读 `DESIGN.md`（Atelier 暖调暗色画廊，黄铜 `#D4A574` primary，Instrument Serif display + Geist body）。
+- 设计系统：改 web 视觉前读 `DESIGN.md`。它是视觉规范的唯一来源，本文件不复述色值、字体与配方。
 
 ## 安全 / 部署约束
 
@@ -137,9 +137,10 @@ uv run python src/viewer_server/server.py open-browser
 - `/api/raw` 媒体读取用 job_id 白名单（只读 `output_paths`、`params` 三组参考素材、MJ 三组参考素材与 `source_image` 中登记的路径）。
 - 同一时间只支持一个 Web tab（多 tab 行为未定义）。
 
-## 反 Slop 红线（来自 DESIGN.md）
+## UI 硬约束
 
-紫蓝渐变 / 3 列 feature grid / 系统默认字体做正文 / 从外部 CDN 加载字体 / system-ui display / 渐变按钮 / 居中一切 —— 一律拒绝。另两条硬纪律：**tsx 不写阴影**（深度靠玻璃配方 `bg-glass backdrop-blur-glass border border-border`，tsx 内联 `shadow-*` 全禁；唯一放行的微阴影是 `tokens.css` 的 `.shell-glow` 工具类——inset 发丝高光 + 极淡软投影，复刻 tapnow，引类名即可，别在 tsx 内联）、**字阶四档**（xs/sm/base/display，禁任意值字号与 `text-lg` 以上档位）。以上由 `web/src/test/designDrift.test.ts` 守卫强制执行。详见 `DESIGN.md` "反 AI Slop 清单" 与 "组件配方"。
+- 视觉禁区见 `DESIGN.md`「反 AI Slop 清单」，由 `web/src/test/designDrift.test.ts` 守卫强制执行。
+- 页面只组合 `web/src/components/ui/` 的组件，不写原生 `<input>` / `<select>` / `<textarea>`；缺组件先在 `ui/` 补，再用。组件清单与用法见 `docs/design/components.md`。
 
 ## Agent skills
 

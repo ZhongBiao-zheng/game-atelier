@@ -8,6 +8,8 @@ import type { CanvasBatchMaterialNode, CanvasGroupNode } from '@/schema/canvas';
 import type { CanvasBatchRun } from '@/schema/canvasBatch';
 import type { CanvasNodeContextValue } from './CanvasEditorViews';
 import { SwapLabel } from '@/components/ui/swap-label';
+import { FileInput } from '@/components/ui/file-input';
+import { Input } from '@/components/ui/input';
 
 export function CanvasBatchMaterialEditor({ node, context }: {
   node: CanvasBatchMaterialNode; context: CanvasNodeContextValue;
@@ -54,7 +56,7 @@ export function CanvasBatchMaterialEditor({ node, context }: {
         <Plus className="size-4" />添加图片
       </Button>
     </div>
-    <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" ref={input} type="file" accept="image/*" multiple className="hidden" aria-label="上传批量素材"
+    <FileInput ref={input} accept="image/*" multiple className="hidden" aria-label="上传批量素材"
       onChange={event => {
         void upload(Array.from(event.target.files ?? []), targetItem.current);
         event.target.value = '';
@@ -166,7 +168,7 @@ export function CanvasGroupFrame({ node, context, selected }: {
       onClick={() => context.selectNode(node.id)}
       onDoubleClick={event => { event.stopPropagation(); if (!editing) beginRename(); }}>
       {editing
-        ? <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" autoFocus value={draft} maxLength={120} aria-label={`重命名分组 ${node.title}`}
+        ? <Input variant="bare" autoFocus value={draft} maxLength={120} aria-label={`重命名分组 ${node.title}`}
           className="nodrag nowheel h-7 w-48 min-w-0 border-0 border-b border-dashed border-input bg-transparent px-0 text-sm text-foreground outline-none focus-visible:border-ring"
           onChange={event => setDraft(event.target.value)}
           onFocus={event => event.target.select()}

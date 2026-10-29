@@ -32,6 +32,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { CanvasPackageInspection, CanvasProjectSummary } from '@/schema/canvas';
 import { SwapLabel } from '@/components/ui/swap-label';
+import { FileInput } from '@/components/ui/file-input';
 
 
 type EditorState =
@@ -197,9 +198,8 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
               <Plus aria-hidden="true" />新建项目
             </Button>
           </div>
-          <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+          <FileInput
             ref={importRef}
-            type="file"
             accept=".zip,application/zip"
             className="sr-only"
             aria-label="选择 Canvas 项目包"

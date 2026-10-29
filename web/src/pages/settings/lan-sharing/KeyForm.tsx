@@ -4,6 +4,8 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { button, KINDS, PERIODS } from './shared';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Select } from '@/components/ui/select';
 
 export function KeyForm({ record, options, onClose, onSaved, gatewayAlias }: {
   gatewayAlias?: string;
@@ -37,7 +39,7 @@ export function KeyForm({ record, options, onClose, onSaved, gatewayAlias }: {
         <button className={button} onClick={() => void navigator.clipboard.writeText(token)}>复制网关密钥</button>
       </div> : <form autoComplete="off" className="space-y-4" onSubmit={e => { e.preventDefault(); void save(); }}>
         <label className="block space-y-1 text-sm">名称<Input value={name} maxLength={40} required onChange={e => setName(e.target.value)} /></label>
-        <label className="flex items-center justify-between text-sm">角色<select aria-label="角色" value={role} onChange={e => setRole(e.target.value as 'member' | 'admin')} className="rounded-md border border-input bg-background px-3 py-2"><option value="member">成员</option><option value="admin">管理员</option></select></label>
+        <label className="flex items-center justify-between text-sm">角色<Select variant="bare" aria-label="角色" value={role} onChange={e => setRole(e.target.value as 'member' | 'admin')} className="rounded-md border border-input bg-background px-3 py-2"><option value="member">成员</option><option value="admin">管理员</option></Select></label>
         <fieldset className="space-y-2"><legend className="mb-2 text-sm">限额 <span title="留空表示不限额；多个窗口同时生效。金额包含运行中任务的预占。" tabIndex={0}>?</span></legend>
           {(Object.keys(PERIODS) as LimitPeriod[]).map(period => <label key={period} className="flex items-center justify-between gap-3 text-sm">{PERIODS[period]}（元）
             <Input aria-label={`${PERIODS[period]}限额`} type="number" min="0.000001" max="1000000" step="any" placeholder="不限" className="w-36" value={limits[period] ?? ''} onChange={e => setLimits({ ...limits, [period]: e.target.value })} />
@@ -47,13 +49,13 @@ export function KeyForm({ record, options, onClose, onSaved, gatewayAlias }: {
           <div className="flex items-center justify-between text-sm">全部<Switch label="全部模型" checked={models === null} onChange={all => setModels(all ? null : [])} /></div>
           {models !== null && (['image', 'video', 'audio', 'text'] as const).map(kind => <div key={kind} className="space-y-1">
             <p className="text-xs text-muted-foreground">{KINDS[kind]}</p>
-            {options.models.filter(m => m.modality === kind).map(m => <label key={`${kind}:${m.id}`} className="flex items-center gap-2 text-sm"><input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" type="checkbox" checked={models.includes(m.id)} onChange={() => setModels(toggle(models, m.id))} />{m.name}</label>)}
+            {options.models.filter(m => m.modality === kind).map(m => <label key={`${kind}:${m.id}`} className="flex items-center gap-2 text-sm"><Checkbox checked={models.includes(m.id)} onChange={() => setModels(toggle(models, m.id))} />{m.name}</label>)}
           </div>)}
-          {models?.filter(id => !options.models.some(m => m.id === id)).map(id => <label key={id} className="flex items-center gap-2 text-sm"><input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" type="checkbox" checked onChange={() => setModels(toggle(models, id))} />{id}</label>)}
+          {models?.filter(id => !options.models.some(m => m.id === id)).map(id => <label key={id} className="flex items-center gap-2 text-sm"><Checkbox checked onChange={() => setModels(toggle(models, id))} />{id}</label>)}
         </fieldset>
         <fieldset className="space-y-2"><legend className="mb-2 text-sm">可用供应商</legend>
           <div className="flex items-center justify-between text-sm">全部<Switch label="全部供应商" checked={aliases === null} onChange={all => setAliases(all ? null : [])} /></div>
-          {aliases !== null && [...new Set([...options.aliases.map(a => a.alias), ...aliases])].map(alias => <label key={alias} className="flex items-center gap-2 text-sm"><input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" type="checkbox" checked={aliases.includes(alias)} onChange={() => setAliases(toggle(aliases, alias))} />{alias}</label>)}
+          {aliases !== null && [...new Set([...options.aliases.map(a => a.alias), ...aliases])].map(alias => <label key={alias} className="flex items-center gap-2 text-sm"><Checkbox checked={aliases.includes(alias)} onChange={() => setAliases(toggle(aliases, alias))} />{alias}</label>)}
         </fieldset>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         <button type="submit" className={button} disabled={busy || !name.trim()}>{busy ? '保存中…' : '保存'}</button>

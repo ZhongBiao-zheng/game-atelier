@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { LayoutGroup, motion } from 'motion/react';
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter';
 import { HomeIcon, Moon, Palette, Settings, Sparkles, Sun } from 'lucide-react';
@@ -16,6 +16,9 @@ import { setTheme, useTheme, type Theme } from '@/lib/theme';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { AnnouncementHost } from '@/components/AnnouncementDialog';
 import { UpdateButton, UpdateProvider } from '@/components/UpdateControl';
+
+// 组件样例页只在 dev 存在，生产构建整段摇掉
+const Kit = import.meta.env.DEV ? lazy(() => import('@/pages/Kit').then(m => ({ default: m.Kit }))) : null;
 
 /** 深浅主题切换：图标显示目的地（暗色显太阳 = 点了去浅色） */
 function ThemeToggle() {
@@ -149,6 +152,7 @@ function AppShellContent() {
           <Route path="/settings">{() => <Redirect to="/settings/providers" replace />}</Route>
           <Route path="/settings/providers/new">{() => <ConsoleLayout />}</Route>
           <Route path="/settings/:page">{() => <ConsoleLayout />}</Route>
+          {Kit && <Route path="/kit">{() => <Suspense fallback={null}><Kit /></Suspense>}</Route>}
           <Route>
             <Redirect to="/" replace />
           </Route>

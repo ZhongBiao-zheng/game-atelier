@@ -56,6 +56,7 @@ import {
   type TeamLibraryView,
   type TeamRelatedEntry,
 } from '@/schema/teamLibrary';
+import { Select } from '@/components/ui/select';
 
 export interface TeamLibraryPanelProps {
   projectId: string;
@@ -408,7 +409,7 @@ export function TeamLibraryPanel({
         {libraries.length === 1 ? (
           <span className="truncate text-sm font-medium">{libraries[0].name}</span>
         ) : (
-          <select
+          <Select variant="bare"
             aria-label="团队库"
             value={libraryId ?? ''}
             onChange={event => { setNode(null); setLibraryId(event.target.value); }}
@@ -417,7 +418,7 @@ export function TeamLibraryPanel({
             {libraries.map(item => (
               <option key={item.library_id} value={item.library_id}>{item.name}</option>
             ))}
-          </select>
+          </Select>
         )}
         <Button
           size="icon"

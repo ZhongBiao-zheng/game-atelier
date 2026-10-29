@@ -8,6 +8,7 @@ import { listCanvasProjects } from '@/api/canvas';
 import { fetchProfile, mountTeamLibrary, saveProfile } from '@/api/teamLibraries';
 import type { TeamLibraryView } from '@/schema/teamLibrary';
 import { cn } from '@/lib/utils';
+import { Checkbox } from '@/components/ui/checkbox';
 
 export interface ProjectOption {
   project_id: string;
@@ -39,7 +40,7 @@ export function ProjectChecklist({ projects, selected, onToggle, disabled, tags,
       {visible.map(project => <label key={project.project_id}
         className={cn('flex h-9 cursor-pointer items-center gap-2.5 rounded-sm px-2 text-sm hover:bg-secondary/60',
           !selected.has(project.project_id) && 'text-muted-foreground', disabled && 'pointer-events-none opacity-50')}>
-        <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other" type="checkbox" className="size-4 shrink-0 accent-primary" checked={selected.has(project.project_id)}
+        <Checkbox className="size-4 shrink-0 accent-primary" checked={selected.has(project.project_id)}
           disabled={disabled} onChange={() => onToggle(project.project_id)} />
         <span className="min-w-0 flex-1 truncate">{project.name}</span>
         {tags?.[project.project_id] && <span className="shrink-0 text-xs text-muted-foreground">{tags[project.project_id]}</span>}

@@ -4,6 +4,7 @@ import { ChevronLeft, HelpCircle } from 'lucide-react';
 import { fetchGatewayMembers, restoreGatewayMember, type GatewayMembers } from '@/api/gateway';
 import { listModelRoutes, setModelRouteMode, setModelRouteOrder, type ModelRoute, type RouteMode } from '@/api/models';
 import { date } from './lan-sharing/shared';
+import { Select } from '@/components/ui/select';
 
 const MODALITY_LABELS: Record<ModelRoute['modality'], string> = {
   image: '图片', video: '视频', text: '文本', audio: '音频',
@@ -96,11 +97,11 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
             <p className="text-xs text-muted-foreground">{route.members.length} 家供应商</p>
             {status.unavailable_routes.some(item => item.id === route.id && item.modality === route.modality) && <p className="text-xs text-destructive">全部成员欠费</p>}
           </div>
-          <select aria-label={`${route.name} 的路由方式`} value={route.mode} disabled={savingId !== null || restoring}
+          <Select variant="bare" aria-label={`${route.name} 的路由方式`} value={route.mode} disabled={savingId !== null || restoring}
             onChange={e => { const mode = e.target.value as RouteMode; void save(route, () => setModelRouteMode(route.modality, route.id, mode)); }}
             className="h-8 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50">
             <option value="order">自定义顺序</option><option value="cheap">最便宜</option><option value="round_robin">轮流</option>
-          </select>
+          </Select>
           <ol aria-label={`${route.name} 的供应商顺序`} className="flex w-full min-w-0 flex-wrap items-center gap-1.5 md:w-auto md:min-w-56 md:flex-1">
             {route.members.map((member, index) => {
               const unavailable = status.members.find(item => item.modality === route.modality && item.alias === member.alias);

@@ -3,6 +3,7 @@ import { Search, ChevronDown, Image as ImageIcon, Video, Wand2, Heart, EyeOff, C
 
 import { ToolbarPopover } from './ToolbarPopover';
 import type { GenMode, HistoryFilters, TimeFilter } from '@/lib/historyFilters';
+import { Input } from '@/components/ui/input';
 
 const TIME_OPTS: { key: TimeFilter; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -85,7 +86,7 @@ export function StudioQueryBar({
         >
           <Search size={16} aria-hidden />
         </button>
-        <input autoComplete="off" data-1p-ignore="" data-lpignore="true" data-form-type="other"
+        <Input variant="bare"
           ref={searchInputRef}
           value={filters.search}
           placeholder="搜索提示词…"

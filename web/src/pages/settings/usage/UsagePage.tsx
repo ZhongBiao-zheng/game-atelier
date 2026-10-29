@@ -8,6 +8,7 @@ import { TrendChart } from './TrendChart';
 import { RankingCard } from './RankingCard';
 import { TaskTable } from './TaskTable';
 import { QuotaCard } from './QuotaCard';
+import { Select } from '@/components/ui/select';
 const ranges: { value: UsageRange; label: string }[] = [
   { value: 'today', label: '今天' },
   { value: '7d', label: '7 天' },
@@ -134,7 +135,7 @@ export function UsagePage() {
         </div>
       )}
       {scope === 'team' && (
-        <select
+        <Select variant="bare"
           aria-label="成员"
           value={member}
           onChange={(e) => change('member', e.target.value)}
@@ -146,7 +147,7 @@ export function UsagePage() {
               {item.name}
             </option>
           ))}
-        </select>
+        </Select>
       )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
