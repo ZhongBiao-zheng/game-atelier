@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { cn } from '@/lib/utils';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 
@@ -33,6 +33,8 @@ interface Props {
   children: ReactNode;
 }
 
+const openPopovers = new Set<{ close: () => void; content: () => HTMLElement | null }>();
+
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
@@ -56,6 +58,18 @@ export function ToolbarPopover({
   // 否则会落到 body 上、逃出 Dialog 的焦点陷阱。
   const [container, setContainer] = useState<HTMLElement | null>(null);
   useEffect(() => { setContainer(portalContainerRef?.current ?? null); }, [portalContainerRef, open]);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    if (!open) return;
+    for (const other of openPopovers) {
+      if (!anchorRef.current || !other.content()?.contains(anchorRef.current)) other.close();
+    }
+    const entry = { close: () => closeRef.current(), content: () => contentRef.current };
+    openPopovers.add(entry);
+    return () => { openPopovers.delete(entry); };
+  }, [open, anchorRef]);
   const waitingForContainer = Boolean(portalContainerRef) && !container;
   const insideAnchor = (target: EventTarget | null) => target instanceof Node && Boolean(anchorRef.current?.contains(target));
   const available = 'var(--radix-popover-content-available-height)';
@@ -70,6 +84,7 @@ export function ToolbarPopover({
       <PopoverPrimitive.Anchor virtualRef={anchorRef as RefObject<HTMLElement>} />
       {!waitingForContainer && <PopoverPrimitive.Portal container={container ?? undefined}>
         <PopoverPrimitive.Content
+          ref={contentRef}
           data-toolbar-popover=""
           side={direction === 'up' ? 'top' : 'bottom'}
           align={align}

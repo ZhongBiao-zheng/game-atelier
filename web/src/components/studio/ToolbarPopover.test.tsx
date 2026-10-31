@@ -56,3 +56,24 @@ describe('ToolbarPopover', () => {
     expect(screen.getByTestId('portal')).toContainElement(await screen.findByTestId('menu'));
   });
 });
+
+function Pair({ secondOpen, nested, close }: { secondOpen: boolean; nested: boolean; close: () => void }) {
+  const a = useRef<HTMLButtonElement>(null);
+  const b = useRef<HTMLButtonElement>(null);
+  const second = <><button ref={b}>B anchor</button><ToolbarPopover open={secondOpen} onClose={() => {}} anchorRef={b}>B</ToolbarPopover></>;
+  return <><button ref={a}>A anchor</button><ToolbarPopover open onClose={close} anchorRef={a}>A{nested && second}</ToolbarPopover>{!nested && second}</>;
+}
+
+it('closes an open sibling when another panel opens', () => {
+  const close = vi.fn();
+  const view = render(<Pair secondOpen={false} nested={false} close={close} />);
+  view.rerender(<Pair secondOpen nested={false} close={close} />);
+  expect(close).toHaveBeenCalledTimes(1);
+});
+
+it('keeps the parent open when a nested panel opens', () => {
+  const close = vi.fn();
+  const view = render(<Pair secondOpen={false} nested close={close} />);
+  view.rerender(<Pair secondOpen nested close={close} />);
+  expect(close).not.toHaveBeenCalled();
+});
