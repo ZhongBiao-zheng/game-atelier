@@ -104,7 +104,7 @@ export const EditableText = React.forwardRef<EditableTextHandle, EditableTextPro
             readOnly={busy}
             aria-label={inputLabel ?? triggerLabel}
             aria-invalid={error ? true : undefined}
-            className={cn('nodrag nowheel nopan col-start-1 row-start-1 min-w-24', sizeClass)}
+            className={cn('nodrag nowheel nopan col-start-1 row-start-1 min-w-8', sizeClass)}
             onChange={event => setDraft(event.target.value)}
             onPointerDown={event => event.stopPropagation()}
             onCompositionStart={() => { composing.current = true; }}
