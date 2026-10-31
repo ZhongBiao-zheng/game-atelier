@@ -21,7 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-import { Building2 } from 'lucide-react';
+import { Building2, Split } from 'lucide-react';
 import { providerPresetId } from '@/pages/settings/providerPresets';
 import { ModelBrandIcon } from './ModelBrandIcon';
 import tokendance from '@/assets/providers/tokendance.svg';
@@ -39,6 +39,7 @@ export function ProviderBrandIcon({ provider, size = 20 }: {
   provider?: { provider?: string; base_url?: string | null } | null;
   size?: number;
 }) {
+  if (provider?.provider === 'auto') return <Split size={size} className="shrink-0" aria-hidden="true" />;
   const id = providerPresetId(provider);
   if (id === 'openai' || id === 'chatgpt') return <ModelBrandIcon brand="openai" size={size} />;
   if (id === 'seedream' || id === 'openrouter') {

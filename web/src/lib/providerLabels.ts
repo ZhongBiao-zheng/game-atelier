@@ -6,7 +6,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
   tokendance: 'TokenDance',
   openrouter: 'OpenRouter',
   evolink: 'EvoLink',
-  auto: '自动',
+  auto: '智能路由',
   atelier: '局域网',
 };
 

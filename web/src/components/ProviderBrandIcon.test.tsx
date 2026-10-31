@@ -39,3 +39,9 @@ describe('provider identity and local branding', () => {
     expect(container.querySelector('svg')).toHaveClass('lucide-building-2');
   });
 });
+
+ it('智能路由使用 Split 图标，不落到普通厂商图标', () => {
+  const { container } = render(<ProviderBrandIcon provider={{ provider: 'auto' }} />);
+  expect(container.querySelector('.lucide-split')).toBeInTheDocument();
+  expect(container.querySelector('.lucide-building2')).not.toBeInTheDocument();
+});

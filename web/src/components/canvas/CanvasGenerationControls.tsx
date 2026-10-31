@@ -529,5 +529,5 @@ function OptionGrid<T extends string>({
 }
 
 function groupLabel(key: KeyView) {
-  return isAutoProvider(key) ? '自动' : key.alias;
+  return isAutoProvider(key) ? '智能路由' : key.alias;
 }

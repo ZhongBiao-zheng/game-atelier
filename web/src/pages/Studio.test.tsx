@@ -2890,7 +2890,7 @@ describe('Studio「自动」供应商', () => {
     const fetchMock = withRoutes();
     const { hook } = memoryLocation({ path: compact ? '/' : '/studio', static: true });
     render(<Router hook={hook}><Studio compact={compact} /></Router>);
-    expect(await screen.findByRole('button', { name: '选择厂商' })).toHaveTextContent('自动');
+    expect(await screen.findByRole('button', { name: '选择厂商' })).toHaveTextContent('智能路由');
     typePrompt(screen.getByLabelText('生图 prompt'), '城堡');
     await waitFor(() => expect(screen.getByLabelText('提交生成')).not.toBeDisabled());
     fireEvent.click(screen.getByLabelText('提交生成'));
@@ -2913,7 +2913,7 @@ describe('Studio「自动」供应商', () => {
     localStorage.setItem('studio:selection', JSON.stringify({ providerAlias: 'oa', model: 'gpt-image-2' }));
     const fetchMock = withRoutes();
     renderStudio();
-    expect(await screen.findByRole('button', { name: '选择厂商' })).not.toHaveTextContent('自动');
+    expect(await screen.findByRole('button', { name: '选择厂商' })).not.toHaveTextContent('智能路由');
     typePrompt(screen.getByLabelText('生图 prompt'), '城堡');
     await waitFor(() => expect(screen.getByLabelText('提交生成')).not.toBeDisabled());
     fireEvent.click(screen.getByLabelText('提交生成'));

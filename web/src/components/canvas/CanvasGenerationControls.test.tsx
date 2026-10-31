@@ -28,6 +28,16 @@ function key(alias: string, provider: string, model: string): KeyView {
 }
 
 describe('CanvasModelPicker', () => {
+  it('智能路由按钮和列表显示同一标签与分流图标', () => {
+    const auto = key('@auto', 'auto', 'gpt-image-2');
+    render(<CanvasModelPicker choices={[{ key: auto, model: auto.models[0] }]} alias={null} model="gpt-image-2" onSelect={vi.fn()} />);
+    const button = screen.getByRole('button', { name: '选择生成供应商' });
+    expect(button).toHaveTextContent('智能路由');
+    expect(button.querySelector('.lucide-split')).toBeInTheDocument();
+    fireEvent.click(button);
+    expect(screen.getByRole('option', { name: '智能路由' })).toBeInTheDocument();
+  });
+
   it('selects a provider and its highest ranked model, then shows only its models', () => {
     const first = key('主力', 'openai', 'gpt-image-2');
     const second = key('备用', 'custom', 'nano-banana');
