@@ -36,7 +36,7 @@ export const SegmentedItem = React.forwardRef<React.ElementRef<typeof ToggleGrou
   ({ className, selected: _selected, onSelect: _onSelect, ...props }, ref) => (
     <ToggleGroupPrimitive.Item
       ref={ref}
-      className={cn('h-8 min-w-0 cursor-pointer rounded-md text-center text-sm transition-colors hover:bg-secondary/60 disabled:cursor-not-allowed disabled:opacity-50', FOCUS_RING, className)}
+      className={cn('h-8 min-w-0 cursor-pointer rounded-md text-center text-sm transition-colors hover:bg-secondary/60 data-[state=on]:hover:bg-transparent disabled:cursor-not-allowed disabled:opacity-50', FOCUS_RING, className)}
       {...props}
     />
   ),

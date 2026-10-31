@@ -4,6 +4,7 @@ import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, 
 import { createPortal } from 'react-dom';
 import { ArrowUp, BookmarkPlus, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Video, X } from 'lucide-react';
 import { prefetchModelPickerMetrics } from '@/lib/useModelPickerMetrics';
+import { Segmented, SegmentedItem } from '@/components/ui/segmented';
 import { ModelPickerList } from '@/components/ModelPickerList';
 import { modelBrand, modelDisplayName, sortModels } from '@/lib/modelCatalog';
 import { modelModality, type KeyView } from '@/api/keys';
@@ -1231,27 +1232,17 @@ export function PromptInput({
                   {caps.qualities && (
                     <section className="w-[296px]">
                       <div className="py-1 px-1 text-xs text-muted-foreground">质量</div>
-                      <div
-                        role="listbox"
+                      <Segmented
                         aria-label="选择质量"
                         className={`grid h-9 ${caps.qualities.length === 5 ? 'grid-cols-5' : caps.qualities.length >= 4 ? 'grid-cols-4' : 'grid-cols-3'} rounded-lg bg-popover p-0.5`}
                       >
                         {caps.qualities.map((item) => (
-                          <Button variant="bare"
-                            key={item}
-                            type="button"
-                            role="option"
-                            aria-selected={quality === item}
-                            onClick={() => {
-                              onQualityChange?.(item);
-                              setOpenPanel(null);
-                            }}
-                            className="h-8 rounded-md text-center text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
-                          >
+                          <SegmentedItem key={item} value={item} selected={quality === item}
+                            onSelect={() => onQualityChange?.(item)}>
                             {QUALITY_LABELS[item]}
-                          </Button>
+                          </SegmentedItem>
                         ))}
-                      </div>
+                      </Segmented>
                     </section>
                   )}
                 </div>

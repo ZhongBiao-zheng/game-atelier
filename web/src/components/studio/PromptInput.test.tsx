@@ -674,3 +674,25 @@ describe('参考素材堆叠添加按钮', () => {
     cleanup();
   });
 });
+
+
+describe('质量参数分段选项', () => {
+  it('选质量后更新选中项并保持尺寸弹窗打开', () => {
+    const onChange = vi.fn();
+    function QualityInput() {
+      const [quality, setQuality] = useState<import('@/lib/imageControlCaps').Quality>('low');
+      return <PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="gpt-image-2" quality={quality}
+        onQualityChange={value => { onChange(value); setQuality(value); }} />;
+    }
+    render(<QualityInput />);
+    fireEvent.click(screen.getByLabelText('选择比例和分辨率'));
+    fireEvent.click(screen.getByRole('radio', { name: '高' }));
+    expect(onChange).toHaveBeenCalledWith('high');
+    expect(screen.getByTestId('size-popover')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '高' })).toHaveAttribute('data-state', 'on');
+    fireEvent.click(screen.getByRole('radio', { name: '低' }));
+    expect(onChange).toHaveBeenLastCalledWith('low');
+    expect(screen.getByTestId('size-popover')).toBeInTheDocument();
+    cleanup();
+  });
+});

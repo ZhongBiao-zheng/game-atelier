@@ -53,7 +53,7 @@ export function SelectionHighlight({ className }: { className?: string }) {
     <span
       ref={ref}
       aria-hidden="true"
-      className={cn('pointer-events-none absolute left-0 top-0 -z-10 rounded-md bg-secondary opacity-0 ring-1 ring-primary/60', className)}
+      className={cn('pointer-events-none absolute left-0 top-0 -z-10 rounded-md bg-secondary opacity-0 ring-1 ring-inset ring-primary/60', className)}
     />
   );
 }
