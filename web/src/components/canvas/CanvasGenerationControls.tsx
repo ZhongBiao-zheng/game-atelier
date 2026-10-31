@@ -57,8 +57,9 @@ export interface CanvasModelChoice {
 }
 
 export function CanvasModelPicker({ choices, alias, model, onSelect, params = {},
-  menuDirection = 'up', portalContainerRef,
+  menuDirection = 'up', portalContainerRef, fit = 'fill',
 }: {
+  fit?: 'fill' | 'content';
   choices: CanvasModelChoice[];
   alias: string | null;
   model: string;
@@ -77,8 +78,8 @@ export function CanvasModelPicker({ choices, alias, model, onSelect, params = {}
   const kind = selected ? modelModality(selected.model, selected.key)
     : models[0] ? modelModality(models[0].model, models[0].key) : 'image';
   const buttonClass = 'flex h-9 w-full min-w-0 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
-  return <div className="flex min-w-0 flex-1 basis-64 flex-wrap gap-1.5">
-    <div ref={providerRef} className="min-w-0 flex-1 basis-24">
+  return <div className={cn('flex min-w-0 gap-1.5', fit === 'content' ? 'flex-none flex-nowrap' : 'flex-1 basis-64 flex-wrap')}>
+    <div ref={providerRef} className={cn('min-w-0', fit === 'content' ? 'max-w-36' : 'flex-1 basis-24')}>
       <Button variant="bare" type="button" aria-label="选择生成供应商" aria-expanded={open === 'provider'}
         onClick={() => setOpen(open === 'provider' ? null : 'provider')} className={buttonClass}>
         <ProviderBrandIcon provider={provider} size={14} />
@@ -102,7 +103,7 @@ export function CanvasModelPicker({ choices, alias, model, onSelect, params = {}
         </Button>)}
       </ToolbarPopover>
     </div>
-    <div ref={modelRef} className="min-w-0 flex-1 basis-32">
+    <div ref={modelRef} className={cn('min-w-0', fit === 'content' ? 'max-w-44' : 'flex-1 basis-32')}>
       <Button variant="bare" type="button" aria-label="选择生成模型" aria-expanded={open === 'model'}
         onClick={() => setOpen(open === 'model' ? null : 'model')} className={buttonClass}>
         <ModelBrandIcon brand={modelCatalog(selected?.model.id ?? '')?.brand} size={14} />

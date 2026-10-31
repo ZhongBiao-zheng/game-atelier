@@ -70,7 +70,7 @@ export function VideoControls({
   ].filter(Boolean).join(' · ');
 
   return (
-    <div ref={wrapRef} className="relative">
+    <div ref={wrapRef} className="relative min-w-0 flex-1">
       <Button variant="bare"
         type="button"
         aria-label="视频设置"
@@ -80,17 +80,11 @@ export function VideoControls({
           open ? 'border-border bg-secondary text-foreground' : 'border-border text-foreground hover:bg-secondary'
         }`}
       >
-        <Clapperboard size={14} aria-hidden />
+        <Clapperboard size={14} className="shrink-0" aria-hidden />
         <span className="shrink-0">{VIDEO_MODE_LABELS[mode]}</span>
         {referenceLimitLabel && (
-          <Hint label={referenceLimitLabel(mode)}><span className="group/help relative shrink-0">
+          <Hint label={referenceLimitLabel(mode)}><span className="shrink-0">
             <CircleHelp className="size-3.5 text-muted-foreground" aria-hidden="true" />
-            <span
-              role="tooltip"
-              className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-2 w-max max-w-72 -translate-x-1/2 rounded-lg border border-border bg-popover px-2 py-1.5 text-xs font-normal leading-relaxed text-foreground opacity-0 transition-opacity group-hover/help:opacity-100 group-focus-within/help:opacity-100"
-            >
-              {referenceLimitLabel(mode)}
-            </span>
           </span></Hint>
         )}
         {summary && <span className="truncate">{' · '}{summary}</span>}

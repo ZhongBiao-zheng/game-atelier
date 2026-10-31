@@ -2343,8 +2343,9 @@ export function CanvasGenerationComposer({
         />
       )}
       <div className="mt-2 flex items-end gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+        <div className={cn('flex min-w-0 flex-1 items-center gap-1.5', draft.mode === 'video' ? 'flex-nowrap' : 'flex-wrap')}>
           <CanvasModelPicker
+          fit={draft.mode === 'video' ? 'content' : 'fill'}
           choices={modelChoices}
           params={draft.params}
           alias={draft.alias ?? null}
