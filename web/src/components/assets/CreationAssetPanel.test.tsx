@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { chooseOption } from '@/test/select';
 import { createRef } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -288,7 +289,7 @@ describe('CreationAssetPanel', () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: '团队' }));
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: '团队' }));
     expect(await screen.findByTestId('team-panel')).toBeInTheDocument();
     expect(screen.queryByPlaceholderText('搜索标题、正文或标签')).not.toBeInTheDocument();
   });
@@ -304,7 +305,7 @@ describe('CreationAssetPanel', () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: '团队' }));
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: '团队' }));
     expect(await screen.findByTestId('team-panel')).toBeInTheDocument();
 
     view.rerender(
@@ -329,9 +330,9 @@ describe('CreationAssetPanel', () => {
     expect(await screen.findByPlaceholderText('搜索标题、正文或标签')).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: '资产范围' })).not.toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole('button', { name: '团队' }));
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: '团队' }));
     expect(await screen.findByTestId('team-panel')).toHaveAttribute('data-project-id', 'canvas-a');
-    fireEvent.change(screen.getByLabelText('画布项目'), { target: { value: 'canvas-b' } });
+    await chooseOption(screen.getByLabelText('画布项目'), '画布乙');
     expect(await screen.findByTestId('team-panel')).toHaveAttribute('data-project-id', 'canvas-b');
   });
 
@@ -339,8 +340,8 @@ describe('CreationAssetPanel', () => {
     mocks.list.mockResolvedValue({ revision: 1, assets: [] });
     render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
-    await screen.findByRole('button', { name: '提示词' });
-    expect(screen.queryByRole('button', { name: '团队' })).not.toBeInTheDocument();
+    await screen.findByRole('tab', { name: '提示词' });
+    expect(screen.queryByRole('tab', { name: '团队' })).not.toBeInTheDocument();
   });
 
   it('previews video and audio media with native players', async () => {
@@ -435,7 +436,7 @@ describe('CreationAssetPanel', () => {
     const view = render(
       <CreationAssetPanel projectId="canvas-a" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} onReproduce={onReproduce} />,
     );
-    fireEvent.click(await screen.findByRole('button', { name: '团队' }));
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: '团队' }));
     fireEvent.click(await screen.findByRole('button', { name: '团队复刻' }));
     expect(onReproduce).toHaveBeenCalledWith(generationAsset);
 
@@ -533,7 +534,7 @@ describe('CreationAssetPanel', () => {
       renderMedia();
 
       fireEvent.click(await screen.findByRole('button', { name: '重新采用' }));
-      const dialog = await screen.findByRole('dialog');
+      const dialog = await screen.findByRole('alertdialog');
       expect(within(dialog).getByRole('heading', { name: '覆盖本机副本？' })).toBeInTheDocument();
       expect(mocks.readopt).not.toHaveBeenCalled();
       fireEvent.click(within(dialog).getByRole('button', { name: '覆盖' }));
@@ -551,7 +552,7 @@ describe('CreationAssetPanel', () => {
       renderMedia();
 
       fireEvent.click(await screen.findByRole('button', { name: '重新采用' }));
-      fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '覆盖' }));
+      fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '覆盖' }));
 
       expect(await screen.findByText('来源已撤回')).toBeInTheDocument();
       expect(screen.queryByText('来源已更新')).toBeNull();
@@ -583,7 +584,7 @@ describe('CreationAssetPanel', () => {
       await screen.findByText('来源已更新');
       expect(container.querySelector('img')).toHaveAttribute('src', versioned('asset-stale', 'b'.repeat(64)));
       fireEvent.click(screen.getByRole('button', { name: '重新采用' }));
-      fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '覆盖' }));
+      fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '覆盖' }));
 
       await waitFor(() => expect(container.querySelector('img')).toHaveAttribute('src', versioned('asset-stale', 'f'.repeat(64))));
     });
@@ -597,7 +598,7 @@ describe('CreationAssetPanel', () => {
       render(<CreationAssetPanel projectId="canvas-a" initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
       await screen.findByRole('button', { name: /旧白犬/ });
-      fireEvent.click(screen.getByRole('button', { name: '全部资产' }));
+      fireEvent.click(screen.getByRole('radio', { name: '全部资产' }));
       await waitFor(() => expect(mocks.staleness).toHaveBeenCalledTimes(2));
       await act(async () => { releaseFirst({ 'asset-stale': 'stale' }); });
 
@@ -614,10 +615,10 @@ describe('CreationAssetPanel', () => {
       render(<CreationAssetPanel projectId="canvas-a" initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
       await screen.findByText('来源已更新');
-      fireEvent.click(screen.getByRole('button', { name: '全部资产' }));
+      fireEvent.click(screen.getByRole('radio', { name: '全部资产' }));
       await waitFor(() => expect(mocks.staleness).toHaveBeenCalledTimes(2));
       fireEvent.click(screen.getByRole('button', { name: '重新采用' }));
-      fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '覆盖' }));
+      fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '覆盖' }));
       await waitFor(() => expect(screen.queryByText('来源已更新')).toBeNull());
 
       await act(async () => { releaseSecond({ 'asset-stale': 'stale' }); });
@@ -756,7 +757,7 @@ describe('CreationAssetPanel', () => {
     const team = await screen.findByTestId('team-panel');
     expect(team).toHaveAttribute('data-project-id', 'canvas-b');
     expect(team).toHaveAttribute('data-library-id', 'lib-art');
-    expect(screen.getByLabelText('画布项目')).toHaveValue('canvas-b');
+    expect(screen.getByLabelText('画布项目')).toHaveTextContent('画布乙');
   });
 
   it('falls back to the first canvas when the initial team project is not listed', async () => {

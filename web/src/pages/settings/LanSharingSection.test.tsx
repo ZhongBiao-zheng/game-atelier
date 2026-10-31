@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { chooseOption } from '@/test/select';
 import { requestJson } from '@/api/http';
 import * as api from '@/api/gateway';
 import { LanSharingSection } from './LanSharingSection';
@@ -50,7 +51,7 @@ describe('LAN sharing', () => {
     await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', expect.objectContaining({ name: '改名' })));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '撤销' }));
-    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '撤销' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '撤销' }));
     await waitFor(() => expect(api.revokeGatewayKey).toHaveBeenCalledWith('k1'));
   });
 });
@@ -167,7 +168,7 @@ it('远程复用成员编辑且不显示本机开关，角色通过代理保存'
   fireEvent.click(await screen.findByRole('button', { name: '编辑' }));
   expect(api.fetchGateway).toHaveBeenCalledWith('relay');
   expect(screen.queryByRole('switch', { name: '开启局域网共享' })).not.toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText('角色'), { target: { value: 'admin' } });
+  await chooseOption(screen.getByLabelText('角色'), '管理员');
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', expect.objectContaining({ role: 'admin' }), 'relay'));
 });
@@ -176,7 +177,7 @@ it('本机操作日志页签显示操作者与变更', async () => {
   vi.mocked(requestJson).mockResolvedValue({ entries: [{ time: '2026-10-26T03:00:00+00:00', actor_name: '负责人', action: 'member.update', target_id: 'k1', summary: { before: { role: 'member' }, after: { role: 'admin' } } }] });
   render(<LanSharingSection />);
   await screen.findByRole('button', { name: '编辑' });
-  fireEvent.click(screen.getByRole('button', { name: '操作日志' }));
+  fireEvent.mouseDown(screen.getByRole('tab', { name: '操作日志' }));
   expect(await screen.findByText('负责人')).toBeInTheDocument();
   expect(screen.getByText('修改成员')).toBeInTheDocument();
   expect(requestJson).toHaveBeenCalledWith('/api/gateway/audit', '读取操作日志');

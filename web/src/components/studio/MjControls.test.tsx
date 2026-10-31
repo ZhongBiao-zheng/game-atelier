@@ -18,14 +18,14 @@ describe('MjControls', () => {
     expect(screen.queryByLabelText('选择 Omni 权重')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('profile')).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'sref 编号' })).toBeInTheDocument();
-    expect(screen.getByRole('listbox', { name: '选择风格权重' })).toBeInTheDocument();
+    expect(screen.getByRole('radiogroup', { name: '选择风格权重' })).toBeInTheDocument();
   });
   it('chaos 下方依次是 sref 与 profile，且粘贴完整 flag 时只保留参数值', () => {
     const onChange = vi.fn();
     render(<MjControls value={MJ_DEFAULTS} onChange={onChange} menuDirection="down" />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Midjourney 参数' }));
-    const chaos = screen.getByRole('listbox', { name: '选择混乱度' });
+    const chaos = screen.getByRole('radiogroup', { name: '选择混乱度' });
     const srefInput = screen.getByRole('textbox', { name: 'sref 编号' });
     const profileInput = screen.getByRole('textbox', { name: 'profile' });
     expect(chaos.compareDocumentPosition(srefInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

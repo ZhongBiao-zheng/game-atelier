@@ -3,12 +3,14 @@ import { Folder, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { InputGroupInput } from '@/components/ui/input-group';
 import { chooseFolder } from '@/api/folders';
 import { listCanvasProjects } from '@/api/canvas';
 import { fetchProfile, mountTeamLibrary, saveProfile } from '@/api/teamLibraries';
 import type { TeamLibraryView } from '@/schema/teamLibrary';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 
 export interface ProjectOption {
   project_id: string;
@@ -31,20 +33,20 @@ export function ProjectChecklist({ projects, selected, onToggle, disabled, tags,
     return q ? projects.filter(project => project.name.toLowerCase().includes(q)) : projects;
   }, [projects, query]);
   return <div className={cn('overflow-hidden rounded-md border border-border bg-popover', className)}>
-    <label className="flex h-10 items-center gap-2 border-b border-border px-3 text-muted-foreground">
+    <Label className="flex h-10 items-center gap-2 border-b border-border px-3 text-muted-foreground">
       <Search className="size-3.5 shrink-0" aria-hidden />
-      <Input type="search" aria-label="搜索项目" placeholder="搜索项目" value={query} onChange={event => setQuery(event.target.value)}
-        className="h-full border-0 px-0 text-foreground focus-visible:ring-0" />
-    </label>
+      <InputGroupInput type="search" aria-label="搜索项目" placeholder="搜索项目" value={query} onChange={event => setQuery(event.target.value)}
+        className="px-0" />
+    </Label>
     <div className="max-h-60 overflow-y-auto p-1">
-      {visible.map(project => <label key={project.project_id}
+      {visible.map(project => <Label key={project.project_id}
         className={cn('flex h-9 cursor-pointer items-center gap-2.5 rounded-sm px-2 text-sm hover:bg-secondary/60',
           !selected.has(project.project_id) && 'text-muted-foreground', disabled && 'pointer-events-none opacity-50')}>
-        <Checkbox className="size-4 shrink-0 accent-primary" checked={selected.has(project.project_id)}
-          disabled={disabled} onChange={() => onToggle(project.project_id)} />
+        <Checkbox checked={selected.has(project.project_id)}
+          disabled={disabled} onCheckedChange={() => onToggle(project.project_id)} />
         <span className="min-w-0 flex-1 truncate">{project.name}</span>
         {tags?.[project.project_id] && <span className="shrink-0 text-xs text-muted-foreground">{tags[project.project_id]}</span>}
-      </label>)}
+      </Label>)}
       {visible.length === 0 && <p className="px-2 py-6 text-center text-xs text-muted-foreground">没有匹配的项目</p>}
     </div>
   </div>;
@@ -130,18 +132,18 @@ export function MountTeamLibraryDialog({ open, currentProjectId, onClose, onMoun
       <div className="space-y-4">
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">文件夹</p>
-          <button type="button" onClick={() => void pick()} disabled={busy}
+          <Button variant="bare" type="button" onClick={() => void pick()} disabled={busy}
             className="flex h-11 w-full items-center gap-2.5 rounded-md border border-input pl-3 pr-1.5 text-left hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50">
             <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden />
             <span className={cn('min-w-0 flex-1 truncate font-mono text-xs', !path && 'font-sans text-sm text-muted-foreground')}>{path ?? '选择文件夹'}</span>
             {path && <span className="rounded-sm bg-secondary px-2.5 py-1.5 text-xs">更换</span>}
-          </button>
+          </Button>
         </div>
-        {needsName && <label className="block space-y-2">
+        {needsName && <Label className="block space-y-2">
           <span className="text-xs text-muted-foreground">署名</span>
           <Input value={displayName} placeholder="分享时显示的名字" maxLength={40} disabled={busy}
             onChange={event => setDisplayName(event.target.value)} />
-        </label>}
+        </Label>}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>挂到项目</span>{selected.size > 0 && <span>已选 {selected.size}</span>}

@@ -9,6 +9,9 @@ import { drawEditStrokes, editMaskBlob, editModelChoices, editSize, type EditPoi
 import { EditorComposer, ImageEditorShell, editorIconButton, isTypingTarget, useEditorViewport,
   type CanvasMaskEditSubmission, type ImageEditorProps } from './ImageEditorShell';
 import { Slider } from '@/components/ui/slider';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 
 type BrushTool = 'brush' | 'eraser';
 const BRUSH_MIN = 8;
@@ -153,10 +156,9 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
   }
 
   const toolButton = (id: BrushTool, label: string, key: string, Icon: typeof Paintbrush) => (
-    <button type="button" aria-pressed={tool === id} onClick={() => setTool(id)}
-      className={`inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${tool === id ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-      <Icon className="size-4" aria-hidden />{label}<span className="hidden font-mono text-xs text-muted-foreground/80 lg:inline" aria-hidden>{key}</span>
-    </button>
+    <ToggleGroupItem value={id} className="gap-1.5 rounded-lg px-3 font-normal">
+      <Icon aria-hidden />{label}<span className="hidden font-mono text-xs text-muted-foreground/80 lg:inline" aria-hidden>{key}</span>
+    </ToggleGroupItem>
   );
 
   return <ImageEditorShell open={open} heading="局部修改" icon={Paintbrush}
@@ -164,22 +166,24 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
     onAutoSave={() => submit(false)}
     onKeyDown={handleKey} onKeyUp={event => { if (event.key === ' ') setSpacePan(false); }}
     toolbar={<>
-      {toolButton('brush', '涂抹', 'B', Paintbrush)}
-      {toolButton('eraser', '擦除', 'E', Eraser)}
+      <ToggleGroup type="single" aria-label="工具" value={tool} onValueChange={value => { if (value) setTool(value as BrushTool); }}>
+        {toolButton('brush', '涂抹', 'B', Paintbrush)}
+        {toolButton('eraser', '擦除', 'E', Eraser)}
+      </ToggleGroup>
       <span className="mx-1.5 h-5 w-px bg-border" aria-hidden />
-      <label className="flex items-center gap-2.5 px-2">
+      <Label className="flex items-center gap-2.5 px-2">
         <span className="sr-only">笔刷大小</span>
         <span className="size-1.5 rounded-full bg-muted-foreground" aria-hidden />
-        <Slider min={BRUSH_MIN} max={BRUSH_MAX} value={brushSize} className="w-28 accent-primary"
-          onChange={event => setBrushSize(Number(event.target.value))} />
+        <Slider min={BRUSH_MIN} max={BRUSH_MAX} value={[brushSize]} className="w-28"
+          onValueChange={([next]) => setBrushSize(next)} />
         <span className="size-3.5 rounded-full bg-muted-foreground" aria-hidden />
         <span className="w-7 tabular-nums text-xs">{brushSize}</span>
-      </label>
+      </Label>
       <span className="mx-1.5 h-5 w-px bg-border" aria-hidden />
-      <button type="button" aria-label="撤销选区" className={editorIconButton} disabled={!undoStack.current.length} onClick={undo}><Undo2 /></button>
-      <button type="button" aria-label="重做选区" className={editorIconButton} disabled={!redoStack.length} onClick={redo}><Redo2 /></button>
-      <button type="button" disabled={!strokes.length} onClick={() => commit([])}
-        className="h-9 shrink-0 whitespace-nowrap rounded-lg px-3 text-sm text-muted-foreground hover:text-foreground disabled:opacity-40">清空</button>
+      <Button variant="bare" type="button" aria-label="撤销选区" className={editorIconButton} disabled={!undoStack.current.length} onClick={undo}><Undo2 /></Button>
+      <Button variant="bare" type="button" aria-label="重做选区" className={editorIconButton} disabled={!redoStack.length} onClick={redo}><Redo2 /></Button>
+      <Button variant="bare" type="button" disabled={!strokes.length} onClick={() => commit([])}
+        className="h-9 shrink-0 whitespace-nowrap rounded-lg px-3 text-sm text-muted-foreground hover:text-foreground disabled:opacity-40">清空</Button>
     </>}
     stage={<div className={`relative size-full ${spacePan ? 'cursor-grab' : ''}`}
       onPointerDown={event => { if (event.target === event.currentTarget) viewport.startPan(event); }}

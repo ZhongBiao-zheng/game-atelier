@@ -4,8 +4,9 @@ import type { ImageControlCaps } from '@/lib/imageControlCaps';
 import { imageSizeError, imageSizeMode } from '@/lib/imageSizeMode';
 import { defaultResolution, normalizeImagePixelSize, studioSizeFor, type Resolution } from '@/lib/studioSize';
 import { RatioIcon } from './RatioIcon';
-import { SelectionHighlight } from '@/components/ui/selection-highlight';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Segmented, SegmentedItem } from '@/components/ui/segmented';
 
 export function ImageSizeFields({ caps, model, baseUrl, params, onPatch }: {
   caps: ImageControlCaps;
@@ -49,30 +50,22 @@ export function ImageSizeFields({ caps, model, baseUrl, params, onPatch }: {
     <>
       {options.length > 0 && <section>
         <div className="mb-1 px-1 text-xs text-muted-foreground">尺寸</div>
-        <div role="listbox" aria-label="选择图片尺寸" className="relative isolate grid grid-cols-4 gap-y-1 rounded-lg bg-popover p-1">
-          <SelectionHighlight />
+        <Segmented aria-label="选择图片尺寸" className="grid grid-cols-4 gap-y-1 rounded-lg bg-popover p-1">
           {options.map(value => (
-            <button key={value} type="button" role="option"
-              aria-selected={value === 'auto' || value === 'custom' ? mode === value : mode === 'ratio' && ratio === value}
-              onClick={() => select(value)}
-              className="flex h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-md text-xs transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+            <SegmentedItem key={value} value={String(value)} selected={value === 'auto' || value === 'custom' ? mode === value : mode === 'ratio' && ratio === value} onSelect={() => select(value)} className="flex h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-md text-xs transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
               {value === 'auto' ? <Scan className="size-4" aria-hidden="true" /> : value === 'custom'
                 ? <SlidersHorizontal className="size-4" aria-hidden="true" /> : <RatioIcon ratio={value} box={16} />}
               {value === 'auto' ? 'AUTO' : value === 'custom' ? '自定义' : value}
-            </button>
+            </SegmentedItem>
           ))}
-        </div>
+        </Segmented>
       </section>}
       {caps.showResolution && mode === 'ratio' && (
         <section>
           <div className="mb-1 px-1 text-xs text-muted-foreground">分辨率</div>
-          <div role="listbox" aria-label="选择图片分辨率" className="relative isolate flex rounded-lg bg-popover p-1">
-            <SelectionHighlight />
-            {[...(providerResolution ? ['default'] : []), ...caps.resolutions].map(value => <button key={value} type="button" role="option"
-              aria-selected={selectedResolution === value}
-              onClick={() => onPatch({ resolution: value === 'default' ? undefined : value, size: undefined })}
-              className="h-8 flex-1 rounded-md text-xs transition-colors hover:bg-secondary/60">{value === 'default' ? '默认' : value}</button>)}
-          </div>
+          <Segmented aria-label="选择图片分辨率" className="flex rounded-lg bg-popover p-1">
+            {[...(providerResolution ? ['default'] : []), ...caps.resolutions].map(value => <SegmentedItem key={value} value={String(value)} selected={selectedResolution === value} onSelect={() => onPatch({ resolution: value === 'default' ? undefined : value, size: undefined })} className="h-8 flex-1 rounded-md text-xs transition-colors hover:bg-secondary/60">{value === 'default' ? '默认' : value}</SegmentedItem>)}
+          </Segmented>
         </section>
       )}
       {caps.showCustomSize && mode !== 'auto' && (
@@ -80,17 +73,17 @@ export function ImageSizeFields({ caps, model, baseUrl, params, onPatch }: {
           <div className="mb-1 px-1 text-xs text-muted-foreground">自定义尺寸</div>
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg bg-popover p-2"
             onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) commit(); }}>
-            <label className="min-w-0 text-xs text-muted-foreground">宽
-              <Input variant="bare" type="number" aria-label="输出宽度" min={1} max={100000} step={1} value={width}
+            <Label className="min-w-0 text-xs text-muted-foreground">宽
+              <Input type="number" aria-label="输出宽度" min={1} max={100000} step={1} value={width}
                 aria-invalid={Boolean(error)} onChange={event => change(event.target.value, height)}
-                className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm tabular-nums text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring" />
-            </label>
+                className="mt-1 w-full tabular-nums" />
+            </Label>
             <span className="pt-5 text-xs text-muted-foreground">×</span>
-            <label className="min-w-0 text-xs text-muted-foreground">高
-              <Input variant="bare" type="number" aria-label="输出高度" min={1} max={100000} step={1} value={height}
+            <Label className="min-w-0 text-xs text-muted-foreground">高
+              <Input type="number" aria-label="输出高度" min={1} max={100000} step={1} value={height}
                 aria-invalid={Boolean(error)} onChange={event => change(width, event.target.value)}
-                className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm tabular-nums text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring" />
-            </label>
+                className="mt-1 w-full tabular-nums" />
+            </Label>
           </div>
           {error && <p role="alert" className="mt-1 px-1 text-xs text-destructive">{error}</p>}
         </section>

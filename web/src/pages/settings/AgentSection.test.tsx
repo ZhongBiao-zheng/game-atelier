@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { hoverHint } from '@/test/hint';
 
 import { AgentSection } from './AgentSection';
 
@@ -70,7 +71,7 @@ it('使用服务端路径与工具列表，标注计费工具并保留授权文�
   render(<AgentSection />);
   expect(await screen.findByText('/custom/codex/config.toml')).toBeInTheDocument();
   expect(screen.getByText('/data/connections/agent.json')).toBeInTheDocument();
-  expect(screen.getByText('canvas_run').parentElement).toHaveAttribute('title', '计费工具');
+  expect(await hoverHint(screen.getByText('canvas_run').parentElement!)).toHaveTextContent('计费工具');
   expect(screen.getByText('计费工具需先获得你的授权')).toBeInTheDocument();
   expect(screen.getByText('canvas_list_projects')).toBeInTheDocument();
 });

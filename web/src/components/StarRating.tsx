@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Star, StarHalf } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 interface Props {
   value: number;                 // 0–5，0.5 步进
@@ -43,14 +44,14 @@ export function StarRating({ value, onChange }: Props) {
                   aria-hidden
                 />
               )}
-              <button
+              <Button variant="bare"
                 type="button"
                 aria-label={`${pos - 0.5} 星`}
                 className="absolute left-0 top-0 z-10 h-full w-1/2 cursor-pointer bg-transparent p-0 focus-visible:outline-none"
                 onMouseEnter={() => setHover(pos - 0.5)}
                 onClick={() => onChange(value === pos - 0.5 ? 0 : pos - 0.5)}
               />
-              <button
+              <Button variant="bare"
                 type="button"
                 aria-label={`${pos} 星`}
                 className="absolute right-0 top-0 z-10 h-full w-1/2 cursor-pointer bg-transparent p-0 focus-visible:outline-none"

@@ -6,6 +6,9 @@ import { imageFamily } from '@/lib/modelFamily';
 
 import { Lightbox } from '../Lightbox';
 import { FileInput } from '@/components/ui/file-input';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 
 /** MJ 的四个语义参考槽：图片（垫图 Image Prompt）/ 风格 / 角色 / Omni。
  *
@@ -95,9 +98,8 @@ function MjReferenceGroup({
   useEffect(() => () => previews.forEach((preview) => URL.revokeObjectURL(preview)), [previews]);
 
   return (
-    <div
+    <Hint label={disabled ? disabledHint : undefined}><div
       aria-label={files.length > 0 ? `${caption}参考，共 ${files.length} 张` : undefined}
-      title={disabled ? disabledHint : undefined}
       className={`group relative h-[70px] w-[56px] shrink-0 ${disabled && files.length > 0 ? 'opacity-40' : ''}`}
     >
       <FileInput
@@ -117,21 +119,20 @@ function MjReferenceGroup({
         }}
       />
       {files.length === 0 ? (
-        <label
+        <Hint label={disabled ? disabledHint : undefined}><Label
           htmlFor={disabled ? undefined : inputId}
           aria-label={label}
           aria-disabled={disabled || undefined}
-          title={disabled ? disabledHint : undefined}
           className={`flex h-full w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-secondary transition-all ${
             disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer hover:-translate-y-0.5 hover:border-input'
           }`}
         >
           <Plus size={16} className="text-muted-foreground" />
           <span className="text-xs leading-none text-muted-foreground">{caption}</span>
-        </label>
+        </Label></Hint>
       ) : (
         <>
-          <button
+          <Button variant="bare"
             type="button"
             aria-label={`查看${caption}参考图`}
             disabled={disabled}
@@ -144,43 +145,43 @@ function MjReferenceGroup({
             <span className="absolute inset-x-0 bottom-0 bg-scrim px-1.5 py-1 text-left text-xs text-foreground">
               {caption} · {files.length}
             </span>
-          </button>
+          </Button>
           {!disabled && <div className={`invisible absolute bottom-full z-20 grid w-[246px] grid-cols-4 gap-1.5 rounded-xl border border-border bg-card p-2 opacity-0 transition-opacity duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 ${alignRight ? 'right-0' : 'left-0'}`}>
             {previews.map((preview, index) => (
               <div key={preview} className="relative h-[70px] w-[52px]">
-                <button
+                <Button variant="bare"
                   type="button"
                   aria-label={`查看${caption}参考图 ${index + 1}`}
                   onClick={() => setZoomed(preview)}
                   className="block h-full w-full overflow-hidden rounded-lg border border-border bg-card p-0 transition-transform duration-150 hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <img src={preview} alt={`${caption}参考 ${index + 1}`} className="h-full w-full object-cover" />
-                </button>
-                <button
+                </Button>
+                <Button variant="bare"
                   type="button"
                   aria-label={`移除${caption}参考图 ${index + 1}`}
                   onClick={() => onChange(files.filter((_, fileIndex) => fileIndex !== index))}
                   className="absolute -right-1.5 -top-1.5 z-10 grid h-[18px] w-[18px] place-items-center rounded-full border border-border bg-scrim text-foreground/80 transition-colors hover:bg-destructive hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
                 >
                   <X size={10} aria-hidden />
-                </button>
+                </Button>
               </div>
             ))}
             {files.length < MAX_MJ_REFS_PER_SLOT && (
-              <label
+              <Label
                 htmlFor={inputId}
                 aria-label={`添加${caption}参考图`}
                 className="flex h-[70px] w-[52px] cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-secondary text-muted-foreground transition-colors hover:border-input hover:text-foreground"
               >
                 <Plus size={16} aria-hidden />
                 <span className="text-xs">继续添加</span>
-              </label>
+              </Label>
             )}
           </div>}
         </>
       )}
       {zoomed && <Lightbox src={zoomed} onClose={() => setZoomed(null)} />}
-    </div>
+    </div></Hint>
   );
 }
 

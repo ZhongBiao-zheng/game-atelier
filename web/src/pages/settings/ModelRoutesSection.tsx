@@ -1,10 +1,13 @@
 import { formatGenerationCost } from '@/lib/generationCost';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useEffect, useState } from 'react';
 import { ChevronLeft, HelpCircle } from 'lucide-react';
 import { fetchGatewayMembers, restoreGatewayMember, type GatewayMembers } from '@/api/gateway';
 import { listModelRoutes, setModelRouteMode, setModelRouteOrder, type ModelRoute, type RouteMode } from '@/api/models';
 import { date } from './lan-sharing/shared';
-import { Select } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
 
 const MODALITY_LABELS: Record<ModelRoute['modality'], string> = {
   image: '图片', video: '视频', text: '文本', audio: '音频',
@@ -72,22 +75,22 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div aria-label="面包屑" className="flex items-center gap-1.5 text-sm">
         <span className="text-muted-foreground">模型 /</span><h1 className="text-sm font-semibold">路由</h1>
-        <button type="button" title={HINT} aria-label={HINT} className="rounded text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><HelpCircle className="size-3.5" aria-hidden /></button>
+        <Hint label={HINT}><Button variant="bare" type="button" aria-label={HINT} className="rounded text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><HelpCircle className="size-3.5" aria-hidden /></Button></Hint>
       </div>
-      <div role="tablist" aria-label="模态" className="flex max-w-full flex-wrap rounded-md border border-border bg-background p-0.5">
-        {(Object.keys(MODALITY_LABELS) as ModelRoute['modality'][]).filter(kind => kind !== 'audio' || routes.some(route => route.modality === kind)).map(kind =>
-          <button key={kind} type="button" role="tab" aria-selected={modality === kind}
-            onClick={() => setModality(kind)}
-            className={`rounded px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${modality === kind ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}>
-            {MODALITY_LABELS[kind]} <span className="text-xs text-muted-foreground">{routes.filter(route => route.modality === kind).length}</span>
-          </button>)}
-      </div>
+      <Tabs value={modality} onValueChange={value => setModality(value as ModelRoute['modality'])}>
+        <TabsList aria-label="模态" className="h-auto max-w-full flex-wrap">
+          {(Object.keys(MODALITY_LABELS) as ModelRoute['modality'][]).filter(kind => kind !== 'audio' || routes.some(route => route.modality === kind)).map(kind =>
+            <TabsTrigger key={kind} value={kind} className="flex-none px-3">
+              {MODALITY_LABELS[kind]} <span className="text-xs text-muted-foreground">{routes.filter(route => route.modality === kind).length}</span>
+            </TabsTrigger>)}
+        </TabsList>
+      </Tabs>
     </div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {overdue.length > 0 && <div role="status" className="flex flex-wrap items-center gap-2.5 rounded-md border border-destructive/35 bg-destructive/10 px-3.5 py-2.5 text-sm">
       <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-destructive" />
       <span className="min-w-0 flex-1">{overdueAliases.join('、')} 欠费，已从 {affected} 条路由摘除</span>
-      <button type="button" disabled={restoring || savingId !== null} onClick={() => void restore(overdue)} className="shrink-0 rounded-md border border-border px-3 py-1 text-xs disabled:opacity-50">全部恢复</button>
+      <Button variant="outline" size="sm" type="button" disabled={restoring || savingId !== null} onClick={() => void restore(overdue)} className="shrink-0">全部恢复</Button>
     </div>}
     {loading ? <p role="status" className="text-sm text-muted-foreground">加载中…</p> : <>
       {shared.length > 0 && <div aria-label="路由列表" className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
@@ -97,10 +100,12 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
             <p className="text-xs text-muted-foreground">{route.members.length} 家供应商</p>
             {status.unavailable_routes.some(item => item.id === route.id && item.modality === route.modality) && <p className="text-xs text-destructive">全部成员欠费</p>}
           </div>
-          <Select variant="bare" aria-label={`${route.name} 的路由方式`} value={route.mode} disabled={savingId !== null || restoring}
-            onChange={e => { const mode = e.target.value as RouteMode; void save(route, () => setModelRouteMode(route.modality, route.id, mode)); }}
-            className="h-8 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50">
-            <option value="order">自定义顺序</option><option value="cheap">最便宜</option><option value="round_robin">轮流</option>
+          <Select value={route.mode} disabled={savingId !== null || restoring}
+            onValueChange={value => { const mode = value as RouteMode; void save(route, () => setModelRouteMode(route.modality, route.id, mode)); }}>
+            <SelectTrigger size="sm" aria-label={`${route.name} 的路由方式`} className="w-auto"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="order">自定义顺序</SelectItem><SelectItem value="cheap">最便宜</SelectItem><SelectItem value="round_robin">轮流</SelectItem>
+            </SelectContent>
           </Select>
           <ol aria-label={`${route.name} 的供应商顺序`} className="flex w-full min-w-0 flex-wrap items-center gap-1.5 md:w-auto md:min-w-56 md:flex-1">
             {route.members.map((member, index) => {
@@ -114,10 +119,10 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
                   <span className="break-all text-sm">{member.alias}</span>
                   {unavailable && <span className="flex flex-wrap items-center gap-2 text-xs text-destructive">
                     {unavailable.reason === 'unavailable' ? '暂时不可用' : `欠费已摘除 · ${date(unavailable.since)}`}
-                    {unavailable.reason !== 'unavailable' && <button type="button" disabled={restoring || savingId !== null} onClick={() => void restore([unavailable])} className="rounded border border-border px-2 py-0.5 text-xs text-foreground disabled:opacity-50">恢复</button>}
+                    {unavailable.reason !== 'unavailable' && <Button variant="bare" type="button" disabled={restoring || savingId !== null} onClick={() => void restore([unavailable])} className="rounded border border-border px-2 py-0.5 text-xs text-foreground disabled:opacity-50">恢复</Button>}
                   </span>}
-                  {route.mode === 'order' && index > 0 && <button type="button" aria-label={`把 ${member.alias} 提前`} disabled={savingId !== null || restoring}
-                    onClick={() => moveEarlier(route, index)} className="rounded p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><ChevronLeft className="size-3.5" aria-hidden /></button>}
+                  {route.mode === 'order' && index > 0 && <Button variant="bare" type="button" aria-label={`把 ${member.alias} 提前`} disabled={savingId !== null || restoring}
+                    onClick={() => moveEarlier(route, index)} className="rounded p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><ChevronLeft className="size-3.5" aria-hidden /></Button>}
                 </span>
               </li>;
             })}

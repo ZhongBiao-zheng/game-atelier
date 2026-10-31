@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 /** 全屏大图层：点遮罩 / 右上角 / Esc 关闭。
  *
@@ -52,14 +53,14 @@ export function Lightbox({
         className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
         onClick={(e) => e.stopPropagation()}
       />
-      <button
+      <Button variant="bare"
         type="button"
         aria-label="关闭"
         onClick={onClose}
         className="absolute right-6 top-6 size-10 rounded-full bg-scrim text-white grid place-items-center hover:bg-background/90 backdrop-blur-glass border-0"
       >
         <X className="size-5" />
-      </button>
+      </Button>
     </div>,
     document.body,
   );

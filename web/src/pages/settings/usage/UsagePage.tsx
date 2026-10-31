@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useLocation, useSearch } from 'wouter';
 import { fetchUsage } from '@/api/usage';
 import { fetchGateway } from '@/api/gateway';
@@ -8,7 +9,10 @@ import { TrendChart } from './TrendChart';
 import { RankingCard } from './RankingCard';
 import { TaskTable } from './TaskTable';
 import { QuotaCard } from './QuotaCard';
-import { Select } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+/** Select 不接受空字符串选项值，「全部成员」用这个占位。 */
+const ALL_MEMBERS = '__all__';
 const ranges: { value: UsageRange; label: string }[] = [
   { value: 'today', label: '今天' },
   { value: '7d', label: '7 天' },
@@ -16,7 +20,6 @@ const ranges: { value: UsageRange; label: string }[] = [
   { value: '90d', label: '90 天' },
   { value: 'all', label: '全部' },
 ];
-const chip = 'whitespace-nowrap rounded-md px-3 py-1.5 text-sm hover:bg-secondary';
 export function UsagePage() {
   const search = useSearch();
   const [, navigate] = useLocation();
@@ -82,71 +85,39 @@ export function UsagePage() {
   return (
     <div className="min-w-0 space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        {enabled && <div className="flex rounded-lg border border-border p-1" aria-label="用量范围">
-          <button
-            className={`${chip} ${scope === 'mine' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''}`}
-            aria-pressed={scope === 'mine'}
-            onClick={() => change('scope', 'mine')}
-          >
-            我的
-          </button>
-          <button
-            className={`${chip} ${scope === 'team' ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''}`}
-            aria-pressed={scope === 'team'}
-            onClick={() => change('scope', 'team')}
-          >
-            团队
-          </button>
-        </div>}
-        <div
-          className="flex max-w-full overflow-x-auto rounded-lg border border-border p-1"
-          aria-label="时间范围"
-        >
-          {ranges.map((item) => (
-            <button
-              key={item.value}
-              aria-pressed={range === item.value}
-              className={`${chip} ${range === item.value ? 'bg-secondary' : ''}`}
-              onClick={() => change('range', item.value)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+        {enabled && <ToggleGroup type="single" variant="outline" aria-label="用量范围" value={scope}
+          onValueChange={value => { if (value) change('scope', value); }}>
+          <ToggleGroupItem value="mine">我的</ToggleGroupItem>
+          <ToggleGroupItem value="team">团队</ToggleGroupItem>
+        </ToggleGroup>}
+        <ToggleGroup type="single" variant="outline" aria-label="时间范围" className="max-w-full overflow-x-auto" value={range}
+          onValueChange={value => { if (value) change('range', value); }}>
+          {ranges.map((item) => <ToggleGroupItem key={item.value} value={item.value}>{item.label}</ToggleGroupItem>)}
+        </ToggleGroup>
       </div>
       {scope === 'mine' && data?.sources.includes('lan') && (
-        <div className="flex gap-1" aria-label="来源">
+        <ToggleGroup type="single" variant="outline" aria-label="来源" value={source}
+          onValueChange={value => { if (value) change('source', value); }}>
           {(
             [
               ['all', '全部'],
               ['local', '本机 KEY'],
               ['lan', '局域网'],
             ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              aria-pressed={source === value}
-              className={`${chip} ${source === value ? 'bg-secondary' : ''}`}
-              onClick={() => change('source', value)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+          ).map(([value, label]) => <ToggleGroupItem key={value} value={value}>{label}</ToggleGroupItem>)}
+        </ToggleGroup>
       )}
       {scope === 'team' && (
-        <Select variant="bare"
-          aria-label="成员"
-          value={member}
-          onChange={(e) => change('member', e.target.value)}
-          className="h-9 max-w-full rounded-md border border-input bg-transparent px-3 text-sm"
-        >
-          <option value="">全部成员</option>
-          {data?.members.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.name}
-            </option>
-          ))}
+        <Select value={member || ALL_MEMBERS} onValueChange={(value) => change('member', value === ALL_MEMBERS ? '' : value)}>
+          <SelectTrigger aria-label="成员" className="w-auto max-w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_MEMBERS}>全部成员</SelectItem>
+            {data?.members.map((item) => (
+              <SelectItem key={item.id} value={item.id}>
+                {item.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
         </Select>
       )}
       {error && (

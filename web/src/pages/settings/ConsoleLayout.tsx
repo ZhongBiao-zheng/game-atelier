@@ -15,6 +15,8 @@ import { UsagePage } from './usage/UsagePage';
 import { LibrariesPage } from './LibrariesPage';
 import { AgentPage } from './AgentPage';
 import { PreferencesPage } from './PreferencesPage';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
 
 export const CONSOLE_NAV: {
   group: string;
@@ -51,12 +53,12 @@ function LocalGatewayStatus() {
     return () => { sequence++; unsubscribe(); };
   }, []);
   if (!state?.enabled) return null;
-  return <Link href="/settings/gateway" title={state.status.error ?? undefined}
+  return <Hint label={state.status.error}><Link href="/settings/gateway"
     className="mb-1 flex shrink-0 items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground">
     <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${state.status.running
       ? 'bg-status-done' : state.status.error ? 'bg-destructive' : 'bg-status-pending'}`} />
     <span>局域网共享 · {state.status.running ? '运行中' : state.status.error ? '启动失败' : '未运行'}</span>
-  </Link>;
+  </Link></Hint>;
 }
 
 const PREFERENCE_SECTIONS = [['appearance', '外观'], ['storage', '存储'], ['profile', '个人']] as const;
@@ -97,12 +99,12 @@ function GatewayConnection() {
     return () => { active = false; unsubscribe(); };
   }, []);
   return <div className="hidden space-y-2 px-3 text-xs text-muted-foreground md:block">
-    {keys.map(key => <div key={key.alias} className="flex min-w-0 items-center gap-2" title={key.base_url ?? ''}>
+    {keys.map(key => <Hint key={key.alias} label={key.base_url ?? ''}><div className="flex min-w-0 items-center gap-2">
       <span aria-label={connected.has(key.alias) ? '已连接' : '未连接'}
         className={`size-1.5 shrink-0 rounded-full ${connected.has(key.alias)
           ? 'bg-[color:var(--status-done)]' : 'bg-[color:var(--status-pending)]'}`} />
       <span className="truncate font-mono">{key.base_url}</span>
-    </div>)}
+    </div></Hint>)}
   </div>;
 }
 
@@ -119,7 +121,7 @@ export function ConsoleLayout() {
       <Link href={lastCreativeLocation} className="flex items-center gap-2 px-3 text-sm text-muted-foreground">
         <ArrowLeft className="size-4" aria-hidden />返回创作
       </Link>
-      <nav aria-label="控制台" className="flex gap-2 overflow-x-auto md:flex-1 md:flex-col md:gap-[18px]">
+      <nav aria-label="控制台" className="flex gap-2 overflow-x-auto md:flex-1 md:flex-col md:gap-4.5">
         {CONSOLE_NAV.map(group => <div key={group.group} className={group.group ? 'shrink-0' : 'flex shrink-0 gap-1 md:mt-auto md:block'}>
           {!group.group && <><GatewayConnection /><LocalGatewayStatus /></>}
           {group.group && <p className="mb-2 hidden px-3 text-xs text-subtle-foreground md:block">{group.group}</p>}
@@ -142,10 +144,10 @@ export function ConsoleLayout() {
       {!['/settings/providers', '/settings/routes'].includes(current.path) && <div aria-label="面包屑" className="flex items-center gap-1.5 text-sm">
         {groupLabel && <span className="text-subtle-foreground">{groupLabel} /</span>}
         <h1 className="text-sm font-semibold">{current.label}</h1>
-        {current.hint && <button type="button" title={current.hint} aria-label={current.hint}
+        {current.hint && <Hint label={current.hint}><Button variant="bare" type="button" aria-label={current.hint}
           className="text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
           <HelpCircle className="size-3.5" aria-hidden />
-        </button>}
+        </Button></Hint>}
       </div>}
       <Page />
     </main>

@@ -9,7 +9,8 @@ import type { CanvasBatchRun } from '@/schema/canvasBatch';
 import type { CanvasNodeContextValue } from './CanvasEditorViews';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { FileInput } from '@/components/ui/file-input';
-import { Input } from '@/components/ui/input';
+import { EditableText } from '@/components/ui/editable-text';
+import { Hint } from '@/components/ui/tooltip';
 
 export function CanvasBatchMaterialEditor({ node, context }: {
   node: CanvasBatchMaterialNode; context: CanvasNodeContextValue;
@@ -62,11 +63,11 @@ export function CanvasBatchMaterialEditor({ node, context }: {
         event.target.value = '';
       }} />
     <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
-      {!node.data.items.length && <button type="button" disabled={disabled}
+      {!node.data.items.length && <Button variant="bare" type="button" disabled={disabled}
         className="grid h-full min-h-32 w-full place-content-center gap-2 rounded-xl border border-dashed border-border text-xs text-muted-foreground hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         onClick={() => choose()}>
         <Layers className="mx-auto size-5" />拖入多张图片，或点击上传
-      </button>}
+      </Button>}
       {node.data.items.map((item, index) => <div key={item.id} draggable={!disabled}
         onDragStart={event => {
           if (disabled) return;
@@ -85,7 +86,7 @@ export function CanvasBatchMaterialEditor({ node, context }: {
           {item.image_version_ids.map((versionId, imageIndex) => <div key={`${versionId}-${imageIndex}`} className="group/material relative">
             <img src={canvasMediaUrl(context.projectId, versionId, 96)} alt={`第 ${index + 1} 项参考 ${imageIndex + 1}`}
               draggable={false} loading="lazy" className="size-12 rounded-md object-cover" />
-            <button type="button" disabled={disabled} aria-label={`移除第 ${index + 1} 项参考 ${imageIndex + 1}`}
+            <Button variant="bare" type="button" disabled={disabled} aria-label={`移除第 ${index + 1} 项参考 ${imageIndex + 1}`}
               className="absolute right-0 top-0 rounded-full bg-background text-muted-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/material:opacity-100 disabled:hidden"
               onClick={() => context.updateNode(node.id, current => current.type !== 'batch_material' ? current : {
                 ...current, data: { items: current.data.items.flatMap(candidate => {
@@ -93,7 +94,7 @@ export function CanvasBatchMaterialEditor({ node, context }: {
                   const images = candidate.image_version_ids.filter((_, i) => i !== imageIndex);
                   return images.length ? [{ ...candidate, image_version_ids: images }] : [];
                 }) },
-              })}><X className="size-4" /></button>
+              })}><X className="size-4" /></Button>
           </div>)}
           <Button size="icon" variant="outline" className="size-12" aria-label={`给第 ${index + 1} 项增加参考图`}
             disabled={disabled || item.image_version_ids.length >= 16} onClick={() => choose(item.id)}><Plus className="size-4" /></Button>
@@ -126,17 +127,6 @@ export function CanvasBatchMaterialEditor({ node, context }: {
 export function CanvasGroupFrame({ node, context, selected }: {
   node: CanvasGroupNode; context: CanvasNodeContextValue; selected: boolean;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(node.title);
-  function beginRename() {
-    setDraft(node.title);
-    setEditing(true);
-  }
-  function finishRename() {
-    const title = draft.trim();
-    setEditing(false);
-    if (title && title !== node.title) context.renameNode(node.id, title);
-  }
   return <div className={`canvas-group-shell pointer-events-none h-full w-full border bg-secondary/40 ${selected ? 'border-transparent' : 'rounded-xl border-border'}`}
     data-selected={selected ? 'true' : 'false'}>
     {/* 分组的框由画师决定，不再跟着成员长。改框只改框：框外的成员会被摘掉，但把框拉大盖住
@@ -163,32 +153,15 @@ export function CanvasGroupFrame({ node, context, selected }: {
       className="canvas-node-handle canvas-group-add-handle pointer-events-auto" aria-label="把这个分组作为素材包连出去">
       <span className="canvas-group-add" aria-hidden="true"><Plus /></span>
     </Handle>
-    {/* 名字就是分组本身的把手：按住拖动整组，双击改名。它在框的左上角外侧，不占成员的位置。 */}
+    {/* 名字就是分组本身的把手：按住拖动整组，单击改名。它在框的左上角外侧，不占成员的位置。 */}
     <div className="pointer-events-auto absolute bottom-full left-0 flex max-w-full items-center gap-2 pb-2 text-sm"
-      onClick={() => context.selectNode(node.id)}
-      onDoubleClick={event => { event.stopPropagation(); if (!editing) beginRename(); }}>
-      {editing
-        ? <Input variant="bare" autoFocus value={draft} maxLength={120} aria-label={`重命名分组 ${node.title}`}
-          className="nodrag nowheel h-7 w-48 min-w-0 border-0 border-b border-dashed border-input bg-transparent px-0 text-sm text-foreground outline-none focus-visible:border-ring"
-          onChange={event => setDraft(event.target.value)}
-          onFocus={event => event.target.select()}
-          onPointerDown={event => event.stopPropagation()}
-          // 切应用、切标签页也会触发 blur；那不算编辑结束，否则输入法组合会被掐断。
-          onBlur={() => { if (window.document.hasFocus()) finishRename(); }}
-          onKeyDown={event => {
-            event.stopPropagation();
-            if (event.key === 'Enter') { event.preventDefault(); finishRename(); }
-            else if (event.key === 'Escape') { event.preventDefault(); setEditing(false); }
-          }} />
-        : <button type="button" title="双击重命名" aria-label={`分组 ${node.title}`}
-          className="min-w-0 truncate text-left text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          onKeyDown={event => {
-            if (event.key !== 'Enter' && event.key !== 'F2') return;
-            event.preventDefault(); event.stopPropagation(); beginRename();
-          }}>{node.title}</button>}
+      onClick={() => context.selectNode(node.id)}>
+      <EditableText value={node.title} maxLength={120} triggerLabel={`重命名分组 ${node.title}`}
+        className="text-muted-foreground hover:text-foreground"
+        onSave={title => context.renameNode(node.id, title)} />
       {selected && !context.multiSelectionActive && <div role="toolbar" aria-label={`${node.title} 节点工具`} data-canvas-node-toolbar={node.id}
         className="nodrag nopan flex shrink-0 items-center">
-        <Button size="sm" variant="ghost" className="h-7" aria-label={`删除 ${node.title}`} title="解散分组，保留成员节点" disabled={context.batchBusy} onClick={() => context.deleteNode(node.id)}>解散</Button>
+        <Hint label="解散分组，保留成员节点"><Button size="sm" variant="ghost" className="h-7" aria-label={`删除 ${node.title}`} disabled={context.batchBusy} onClick={() => context.deleteNode(node.id)}>解散</Button></Hint>
       </div>}
     </div>
   </div>;

@@ -59,7 +59,7 @@ describe('Home', () => {
     expect(screen.getByTestId('studio-prompt-shell')).toHaveClass(
       'min-h-[174px]',
       'h-auto',
-      'pt-[14px]',
+      'pt-3.5',
       'px-4',
       'pb-4',
     );
@@ -267,7 +267,7 @@ describe('Home', () => {
     // 弹窗 portal 后定位走 inline fixed：向下弹 = 设 top。
     const panel = await screen.findByRole('listbox', { name: '选择厂商列表' });
     expect(panel).toHaveAttribute('data-toolbar-popover');
-    expect(panel.style.top).not.toBe('');
+    expect(panel).toHaveAttribute('data-side', 'bottom');
   });
 
   it('anchors compact prompt popovers to their selected trigger on the home page', async () => {
@@ -306,12 +306,12 @@ describe('Home', () => {
     fireEvent.click(providerBtn);
     const providerPanel = await screen.findByRole('listbox', { name: '选择厂商列表' });
     expect(providerPanel).toHaveAttribute('data-toolbar-popover');
-    expect(providerPanel.style.top).not.toBe('');
+    expect(providerPanel).toHaveAttribute('data-side', 'bottom');
 
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
     const sizePanel = await screen.findByTestId('size-popover');
     expect(sizePanel).toHaveAttribute('data-toolbar-popover');
-    expect(sizePanel.style.top).not.toBe('');
+    expect(sizePanel).toHaveAttribute('data-side', 'bottom');
   });
 
   it('does not show persisted studio generation rounds on the home page', async () => {

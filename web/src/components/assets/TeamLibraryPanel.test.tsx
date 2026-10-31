@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { chooseOption } from '@/test/select';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TeamLibraryPanel } from './TeamLibraryPanel';
 import type { TeamLibraryIndexEntry, TeamLibraryView } from '@/schema/teamLibrary';
@@ -76,7 +77,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamLibraries.mockResolvedValue([other, library]);
     api.listTeamAssets.mockResolvedValue({ entries: [], next_cursor: null });
     render(<TeamLibraryPanel projectId="p1" initialTeamLibraryId={library.library_id} onAdopted={vi.fn()} />);
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveValue(library.library_id));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveTextContent(library.name));
     await waitFor(() => expect(api.listTeamAssets).toHaveBeenCalledWith(library.library_id, expect.anything()));
     expect(api.listTeamAssets).not.toHaveBeenCalledWith('lib_other', expect.anything());
   });
@@ -85,7 +86,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamLibraries.mockResolvedValue([other, library]);
     api.listTeamAssets.mockResolvedValue({ entries: [], next_cursor: null });
     render(<TeamLibraryPanel projectId="p1" initialTeamLibraryId="lib_missing" onAdopted={vi.fn()} />);
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveValue('lib_other'));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveTextContent('场景参考'));
   });
   it('sets drag payload on cards', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
@@ -184,7 +185,7 @@ describe('TeamLibraryPanel', () => {
     fireEvent.click(await screen.findByRole('button', { name: '撤回' }));
     expect(await screen.findByRole('heading', { name: '撤回团队资产' })).toBeInTheDocument();
     expect(api.withdrawTeamAsset).not.toHaveBeenCalled();
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '撤回' }));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '撤回' }));
     await waitFor(() => expect(api.withdrawTeamAsset).toHaveBeenCalledWith(library.library_id, shared.id));
     await waitFor(() => expect(screen.queryByText('董卓 待机')).toBeNull());
   });
@@ -195,7 +196,7 @@ describe('TeamLibraryPanel', () => {
     api.withdrawTeamAsset.mockRejectedValue(new api.TeamNotAuthorError());
     render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: '撤回' }));
-    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '撤回' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '撤回' }));
     expect(await screen.findByText('只有作者能修改')).toBeInTheDocument();
     expect(screen.getByText('董卓 待机')).toBeInTheDocument();
   });
@@ -289,7 +290,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamAssets.mockResolvedValue({ entries: [shared], next_cursor: null });
     render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
     expect(await screen.findByText('读取显示名失败')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('团队库'), { target: { value: second.library_id } });
+    await chooseOption(screen.getByLabelText('团队库'), second.name);
     await waitFor(() => expect(api.listTeamAssets).toHaveBeenLastCalledWith(second.library_id, {}));
     expect(screen.getByText('读取显示名失败')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '编辑' })).toBeNull();
@@ -304,7 +305,7 @@ describe('TeamLibraryPanel', () => {
     api.withdrawTeamAsset.mockResolvedValue(undefined);
     render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: '撤回' }));
-    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '撤回' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '撤回' }));
     expect(await screen.findByText('下一条')).toBeInTheDocument();
     expect(api.listTeamAssets).toHaveBeenCalledTimes(2);
     expect(api.listTeamAssets).toHaveBeenLastCalledWith(library.library_id, {});
@@ -317,7 +318,7 @@ describe('TeamLibraryPanel', () => {
     api.withdrawTeamAsset.mockResolvedValue(undefined);
     render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: '撤回' }));
-    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '撤回' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '撤回' }));
     await waitFor(() => expect(screen.queryByText('董卓 待机')).toBeNull());
     expect(api.listTeamAssets).toHaveBeenCalledTimes(1);
   });
@@ -327,7 +328,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamAssets.mockResolvedValue({ entries: [shared], next_cursor: null });
     render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: '撤回' }));
-    const confirm = within(await screen.findByRole('dialog')).getByRole('button', { name: '撤回' });
+    const confirm = within(await screen.findByRole('alertdialog')).getByRole('button', { name: '撤回' });
     // ConfirmDialog 的 destructive 变体把确认按钮换成 destructive 按钮。
     expect(confirm.className).toContain('bg-destructive');
   });

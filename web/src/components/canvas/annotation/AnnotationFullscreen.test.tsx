@@ -12,7 +12,7 @@ function Harness() {
     onCollapse={vi.fn()} undo={vi.fn()} redo={vi.fn()} canUndo={false} canRedo={false} />;
 }
 it('attaches wheel zoom after the dialog portal has mounted', () => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   render(<Harness />);
   const image = screen.getByRole('img', { name: '全屏验收' });
   fireEvent.wheel(image, { deltaY: -100 });

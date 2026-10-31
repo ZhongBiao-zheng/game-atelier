@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { UpdateSettings } from '@/components/UpdateControl';
 
 import { AppearanceSection } from './appearance/AppearanceSection';
+import { Button } from '@/components/ui/button';
 
 const DEFAULT_ROOT = '~/game-atelier';
 
@@ -96,24 +97,24 @@ export function PreferencesPage() {
             </span>
             {changed && <span className="text-xs text-muted-foreground">未保存</span>}
             <div className="flex shrink-0 items-center gap-2">
-              <button type="button" onClick={pickDataRoot} disabled={loading || saving || choosing}
-                className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary/60 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+              <Button variant="outline" size="sm" type="button" onClick={pickDataRoot} disabled={loading || saving || choosing}
+               >
                 <FolderOpen className="size-3.5" aria-hidden />{choosing ? '选择中…' : '更换文件夹'}
-              </button>
+              </Button>
               {changed && <>
-                <button type="button" onClick={saveDataRoot} disabled={saving}
-                  className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                <Button variant="default" size="sm" type="button" onClick={saveDataRoot} disabled={saving}
+                 >
                   <SwapLabel active={saving} on="保存中..." off="保存" />
-                </button>
-                <button type="button" onClick={() => setPendingRoot(null)} disabled={saving}
-                  className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-secondary/60 disabled:opacity-50">撤销</button>
+                </Button>
+                <Button variant="bare" type="button" onClick={() => setPendingRoot(null)} disabled={saving}
+                  className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-secondary/60 disabled:opacity-50">撤销</Button>
               </>}
             </div>
           </div>
         </div>
         <div className="flex items-center justify-between gap-3 px-4.5 py-3.5">
           <span className="text-sm">首页展示画布出图</span>
-          <Switch checked={showCanvasOnHome} label="首页展示画布出图" disabled={togglingStudio} onChange={() => void toggleShowStudioOnHome()} />
+          <Switch checked={showCanvasOnHome} aria-label="首页展示画布出图" disabled={togglingStudio} onCheckedChange={() => void toggleShowStudioOnHome()} />
         </div>
       </div>
       {message && <p role="status" className="text-sm text-muted-foreground">{message}</p>}

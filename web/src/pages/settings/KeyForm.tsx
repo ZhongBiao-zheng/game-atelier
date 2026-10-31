@@ -1,6 +1,8 @@
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, X } from 'lucide-react';
+import { Toggle } from '@/components/ui/toggle';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { getChatGPTSubscription, type ChatGPTSubscriptionStatus, createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelInputModality, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { checkGateway } from '@/api/gateway';
@@ -11,8 +13,11 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SecretInput } from '@/components/ui/secret-input';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 const GATEWAY_PROVIDER = 'atelier';
 
 const KIND_LABELS: Record<ProviderKind, string> = {
@@ -28,11 +33,8 @@ const providerByValue = (value: string) =>
 
 const usesNamedAlias = (provider: string) => provider === 'custom' || provider === GATEWAY_PROVIDER;
 
-const fieldClass = 'w-full rounded-md border border-input bg-background/35 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50';
 const capLabelClass = 'block text-xs text-muted-foreground mb-2';
-const ghostButtonClass = 'rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 // 次要文本操作（全选 / 清空 / 显示全部）：不占黄铜，也不做成方块按钮抢主操作的戏。
-const textActionClass = 'rounded-sm text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:opacity-40 disabled:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
 type PickerFilter = 'all' | ModelCategory;
 
@@ -426,33 +428,36 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
           <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-xs"><ProviderBrandIcon provider={{ provider: preset.value, base_url: preset.defaultBaseUrl }} /></span>
           <DialogTitle className="min-w-0 flex-1 truncate">{title}</DialogTitle>
           {homepage && <a href={homepage} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:text-primary">官网 ↗</a>}
-          <Switch compact checked={enabled} onChange={setEnabled} label={`启用 ${alias || preset.label}`} />
+          <Switch size="sm" checked={enabled} onCheckedChange={setEnabled} aria-label={`启用 ${alias || preset.label}`} />
         </header>
         <div className="min-h-0 overflow-y-auto px-4 py-5 sm:px-6">
           {!editing && !presetId && <div className="mb-5 space-y-2">
-            <label htmlFor="key-provider" className={capLabelClass}>供应商选择</label>
-            <Select variant="bare" id="key-provider" value={activePresetId} disabled={fetching || testing || connecting} onChange={e => changeProvider(e.target.value)} className={fieldClass}>
-              {PROVIDER_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label} · {KIND_LABELS[p.kind]}</option>)}
+            <Label htmlFor="key-provider" className={capLabelClass}>供应商选择</Label>
+            <Select value={activePresetId} disabled={fetching || testing || connecting} onValueChange={changeProvider}>
+              <SelectTrigger id="key-provider"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PROVIDER_PRESETS.map(p => <SelectItem key={p.id} value={p.id}>{p.label} · {KIND_LABELS[p.kind]}</SelectItem>)}
+              </SelectContent>
             </Select>
           </div>}
           <div className="grid grid-cols-1 items-start gap-x-4 gap-y-3 sm:grid-cols-[88px_minmax(0,1fr)]">
-            <label htmlFor="key-provider-name" className="pt-2 text-xs text-muted-foreground">名称</label>
-            <Input variant="bare" id="key-provider-name" placeholder={provider === 'custom' ? '例如：openrouter-image-main' : undefined} value={alias} readOnly={editing || !usesNamedAlias(provider)} onChange={e => setAlias(e.target.value)} className={fieldClass} />
+            <Label htmlFor="key-provider-name" className="pt-2 text-xs text-muted-foreground">名称</Label>
+            <Input id="key-provider-name" placeholder={provider === 'custom' ? '例如：openrouter-image-main' : undefined} value={alias} readOnly={editing || !usesNamedAlias(provider)} onChange={e => setAlias(e.target.value)} />
             {isGateway && <>
-              <label htmlFor="key-gateway-url" className="pt-2 text-xs text-muted-foreground">网关地址</label>
-              <Input variant="bare" id="key-gateway-url" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setGatewayModels([]); setGatewayInfo(null); }} className={`${fieldClass} font-mono`} placeholder="http://192.168.1.20:5180" />
+              <Label htmlFor="key-gateway-url" className="pt-2 text-xs text-muted-foreground">网关地址</Label>
+              <Input id="key-gateway-url" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setGatewayModels([]); setGatewayInfo(null); }} className="font-mono" placeholder="http://192.168.1.20:5180" />
             </>}
             {isSubscription ? <>
               <span className="pt-2 text-xs text-muted-foreground">账号</span>
               <div className="py-2 text-sm">{subscriptionError ? <p role="alert" className="text-destructive">{subscriptionError}</p> : !subscription ? <p role="status" className="text-muted-foreground">读取中…</p> : subscription.available ? <><p>{subscription.email}</p>{subscription.plan && <p className="mt-1 text-xs text-muted-foreground">{subscription.plan}</p>}</> : <p role="status" className="text-muted-foreground">请先在 Codex 里用 ChatGPT 登录</p>}</div>
             </> : <>
-            <label htmlFor="key-access" className="pt-2 text-xs text-muted-foreground">{isGateway ? '网关密钥' : 'API 密钥'}</label>
+            <Label htmlFor="key-access" className="pt-2 text-xs text-muted-foreground">{isGateway ? '网关密钥' : 'API 密钥'}</Label>
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative min-w-0 flex-1">
-                <SecretInput variant="bare" id="key-access" revealed={showKey} value={accessKey} onChange={e => { setAccessKey(e.target.value); setKeyRevealed(true); setConnectionTest(null); }} className={`${fieldClass} pr-10 font-mono`} placeholder={editing ? '留空则保留原密钥' : '粘贴密钥'} />
-                <button type="button" aria-label={showKey ? '隐藏密钥' : '显示密钥'} disabled={revealing} onClick={toggleShowKey} className="absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-md text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary">
+                <SecretInput id="key-access" revealed={showKey} value={accessKey} onChange={e => { setAccessKey(e.target.value); setKeyRevealed(true); setConnectionTest(null); }} className="pr-10 font-mono" placeholder={editing ? '留空则保留原密钥' : '粘贴密钥'} />
+                <Button variant="bare" type="button" aria-label={showKey ? '隐藏密钥' : '显示密钥'} disabled={revealing} onClick={toggleShowKey} className="absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-md text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary">
                   <SwapIcon swapKey={showKey}>{showKey ? <EyeOff size={16} /> : <Eye size={16} />}</SwapIcon>
-                </button>
+                </Button>
               </div>
               {(initial?.api_key_url || preset.apiKeyUrl) && <a href={initial?.api_key_url || preset.apiKeyUrl} target="_blank" rel="noreferrer" className="whitespace-nowrap text-xs text-primary">获取密钥 ↗</a>}
             </div>
@@ -460,18 +465,19 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
             <span className="pt-2 text-xs text-muted-foreground">模型</span>
             <div className="min-w-0 space-y-3">
               {isSubscription ? <p className="py-2 text-sm">GPT Image</p> : isGateway ? <>
-                <button type="button" onClick={connectGateway} disabled={!baseUrl.trim() || (!editing && !accessKey.trim()) || connecting} className={ghostButtonClass}>{connecting ? '连接中...' : gatewayModels.length ? '重新同步' : '连接网关'}</button>
+                <Button variant="ghost" size="sm" type="button" onClick={connectGateway} disabled={!baseUrl.trim() || (!editing && !accessKey.trim()) || connecting}>{connecting ? '连接中...' : gatewayModels.length ? '重新同步' : '连接网关'}</Button>
                 {gatewayInfo && <p role="status" className="text-sm text-muted-foreground">{gatewayInfo}</p>}
                 {gatewayError && <p role="alert" className="text-sm text-destructive">{gatewayError}</p>}
                 <ul aria-label="网关模型" className="flex flex-wrap gap-2">{gatewayModels.map(model => <li key={model.id} className="rounded-full border border-border px-3 py-1 text-xs">{model.name}<span className="ml-2 text-muted-foreground">{(model.via ?? []).map(item => item.alias).join(' · ')}</span></li>)}</ul>
               </> : <>
                 <div className="flex flex-wrap items-center gap-2">
-                  <div role="group" aria-label="模型范围" className="flex shrink-0 rounded-md border border-border p-0.5">
-                    <button type="button" aria-pressed={!preview} disabled={unresolvedChecked.length > 0} onClick={applyFetchedSelection} className={`rounded-sm px-3 py-1 text-xs ${!preview ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}>已选 {mergedModels().filter(m => m.id.trim()).length}</button>
-                    <button type="button" aria-pressed={Boolean(preview)} onClick={() => void fetchModels()} className={`rounded-sm px-3 py-1 text-xs ${preview ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}>全部</button>
-                  </div>
-                  {!preview && <Input variant="bare" aria-label="筛选模型" placeholder="筛选模型" value={modelQuery} onChange={e => setModelQuery(e.target.value)} className={`${fieldClass} min-w-0 flex-1 basis-28`} />}
-                  <button type="button" disabled={fetching || !fetchModelsBaseUrl} onClick={() => void fetchModels()} className={ghostButtonClass}>{fetching ? '获取中...' : '重新获取'}</button>
+                  <ToggleGroup type="single" size="sm" variant="outline" aria-label="模型范围" className="shrink-0" value={preview ? 'all' : 'selected'}
+                    onValueChange={value => { if (value === 'selected') applyFetchedSelection(); else if (value === 'all') void fetchModels(); }}>
+                    <ToggleGroupItem value="selected" disabled={unresolvedChecked.length > 0}>已选 {mergedModels().filter(m => m.id.trim()).length}</ToggleGroupItem>
+                    <ToggleGroupItem value="all">全部</ToggleGroupItem>
+                  </ToggleGroup>
+                  {!preview && <Input aria-label="筛选模型" placeholder="筛选模型" value={modelQuery} onChange={e => setModelQuery(e.target.value)} className="min-w-0 flex-1 basis-28" />}
+                  <Button variant="ghost" size="sm" type="button" disabled={fetching || !fetchModelsBaseUrl} onClick={() => void fetchModels()}>{fetching ? '获取中...' : '重新获取'}</Button>
                 </div>
                 {fetchError && <p role="alert" className="text-sm text-destructive">{fetchError}</p>}
                 {preview ? <div className="min-w-0 space-y-3">
@@ -479,49 +485,55 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                     <span>上游 {preview.total} 个模型</span>
                     {(preview.excluded > 0 || preview.includeAll) && <>
                       <span>{preview.includeAll ? '已显示全部，含不可生成模型' : `已过滤 ${preview.excluded} 个不可生成模型`}</span>
-                      <button type="button" disabled={fetching} onClick={() => fetchModels(!preview.includeAll)} className={textActionClass}>{preview.includeAll ? '只看可生成模型' : '显示全部'}</button>
+                      <Button variant="link" size="sm" type="button" disabled={fetching} onClick={() => fetchModels(!preview.includeAll)} className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground">{preview.includeAll ? '只看可生成模型' : '显示全部'}</Button>
                     </>}
                   </div>
-                  <Input variant="bare" aria-label="搜索模型" placeholder="筛选模型" value={pickerQuery} onChange={e => setPickerQuery(e.target.value)} className={fieldClass} />
-                  <div className="flex flex-wrap gap-1">
-                    {pickerFilters.map(filter => <button type="button" key={filter} aria-pressed={pickerFilter === filter} onClick={() => setPickerFilter(filter)} className={`rounded-md px-2 py-1 text-xs ${pickerFilter === filter ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}>{filter === 'all' ? '全部' : CATEGORY_LABELS[filter]} {pickerCounts(filter)}</button>)}
-                  </div>
+                  <Input aria-label="搜索模型" placeholder="筛选模型" value={pickerQuery} onChange={e => setPickerQuery(e.target.value)} />
+                  <ToggleGroup type="single" size="sm" aria-label="模型类型筛选" className="flex-wrap" value={pickerFilter}
+                    onValueChange={value => { if (value) setPickerFilter(value as typeof pickerFilter); }}>
+                    {pickerFilters.map(filter => <ToggleGroupItem key={filter} value={filter}>{filter === 'all' ? '全部' : CATEGORY_LABELS[filter]} {pickerCounts(filter)}</ToggleGroupItem>)}
+                  </ToggleGroup>
                   <div className="flex max-h-56 flex-wrap content-start items-start gap-2 overflow-auto">
                     {pickerVisible.map(model => <div key={model.id} className="max-w-full space-y-2">
-                      <button type="button" role="checkbox" aria-checked={fetchedChecked.has(model.id)} aria-label={`${model.name} ${model.id}`} title={model.name} onClick={() => {
+                      <Hint label={model.name}><Toggle size="sm" variant="outline" pressed={fetchedChecked.has(model.id)} aria-label={`${model.name} ${model.id}`} onPressedChange={() => {
                         const next = new Set(fetchedChecked);
                         if (next.has(model.id)) next.delete(model.id); else next.add(model.id);
                         setFetchedChecked(next);
-                      }} className={`flex max-w-full items-center gap-2 rounded-full border px-3 py-1.5 font-mono text-xs ${fetchedChecked.has(model.id) ? 'border-primary/40 bg-secondary text-foreground' : 'border-border text-muted-foreground'}`}>
+                      }} className="max-w-full rounded-full px-3 font-mono font-normal data-[state=on]:border-primary/40">
                         <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${typeDot(resolvedModality(model))}`} /><span className="truncate">{model.id}</span>
-                      </button>
-                      {!model.modality && fetchedChecked.has(model.id) && <div role="group" aria-label={`分类 ${model.id}`} className="flex flex-wrap gap-1">
-                        {GENERATION_MODALITIES.map(modality => <button type="button" key={modality} aria-pressed={modalityPick[model.id] === modality} onClick={() => setModalityPick({ ...modalityPick, [model.id]: modality })} className={`rounded-sm px-2 py-1 text-xs ${modalityPick[model.id] === modality ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}>{CATEGORY_LABELS[modality]}</button>)}
-                      </div>}
+                      </Toggle></Hint>
+                      {!model.modality && fetchedChecked.has(model.id) && <ToggleGroup type="single" size="sm" aria-label={`分类 ${model.id}`} className="flex-wrap"
+                        value={modalityPick[model.id] ?? ''}
+                        onValueChange={value => { if (value) setModalityPick({ ...modalityPick, [model.id]: value as ModelModality }); }}>
+                        {GENERATION_MODALITIES.map(modality => <ToggleGroupItem key={modality} value={modality}>{CATEGORY_LABELS[modality]}</ToggleGroupItem>)}
+                      </ToggleGroup>}
                     </div>)}
                     {pickerVisible.length === 0 && <p className="text-xs text-muted-foreground">没有匹配的模型</p>}
                   </div>
                   <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                     <span>已选 {fetchedChecked.size} 个模型</span>
-                    <button type="button" onClick={selectAllVisible} disabled={!pickerVisible.length} className={textActionClass}>全选当前 {pickerVisible.length} 个</button>
-                    <button type="button" onClick={() => setFetchedChecked(new Set())} disabled={!fetchedChecked.size} className={textActionClass}>清空选择</button>
-                    <button type="button" onClick={applyFetchedSelection} disabled={unresolvedChecked.length > 0} className={textActionClass}>启用所选（{fetchedChecked.size}）</button>
+                    <Button variant="link" size="sm" className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground" type="button" onClick={selectAllVisible} disabled={!pickerVisible.length}>全选当前 {pickerVisible.length} 个</Button>
+                    <Button variant="link" size="sm" type="button" onClick={() => setFetchedChecked(new Set())} disabled={!fetchedChecked.size} className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground">清空选择</Button>
+                    <Button variant="link" size="sm" type="button" onClick={applyFetchedSelection} disabled={unresolvedChecked.length > 0} className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground">启用所选（{fetchedChecked.size}）</Button>
                     {unresolvedChecked.length > 0 && <span className="text-destructive">{unresolvedChecked.length} 个未识别模型待指定分类</span>}
                   </div>
                 </div> : <div className="flex max-h-56 flex-wrap gap-2 overflow-auto">
-                  {models.filter(m => m.id.trim() && `${m.id} ${m.name}`.toLowerCase().includes(modelQuery.toLowerCase())).map((model, index) => <button key={`${model.id}-${index}`} type="button" aria-pressed="true" onClick={() => setModels(models.filter(m => m !== model))} className="flex max-w-full items-center gap-2 rounded-full border border-primary/40 bg-secondary px-3 py-1.5 font-mono text-xs">
+                  {models.filter(m => m.id.trim() && `${m.id} ${m.name}`.toLowerCase().includes(modelQuery.toLowerCase())).map((model, index) => <Button variant="bare" key={`${model.id}-${index}`} type="button" aria-pressed="true" onClick={() => setModels(models.filter(m => m !== model))} className="flex max-w-full items-center gap-2 rounded-full border border-primary/40 bg-secondary px-3 py-1.5 font-mono text-xs">
                     <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${typeDot(model.modality)}`} /><span className="truncate">{model.id}</span><X size={12} aria-hidden />
-                  </button>)}
+                  </Button>)}
                 </div>}
                 {provider === 'custom' && <div className="flex flex-wrap gap-2">
-                  <Input variant="bare" aria-label="添加模型 ID" placeholder="添加模型 ID" value={manualId} onChange={e => setManualId(e.target.value)} className={`${fieldClass} min-w-0 flex-1 basis-28 font-mono`} />
-                  <Select variant="bare" aria-label="新增模型类型" value={manualType} onChange={e => setManualType(e.target.value as ModelModality)} className="rounded-md border border-input bg-transparent px-2 text-xs">{GENERATION_MODALITIES.map(type => <option key={type} value={type}>{CATEGORY_LABELS[type]}</option>)}</Select>
-                  <button type="button" disabled={!manualId.trim() || models.some(m => m.id === manualId.trim())} onClick={addManualModel} className={ghostButtonClass}>添加</button>
+                  <Input aria-label="添加模型 ID" placeholder="添加模型 ID" value={manualId} onChange={e => setManualId(e.target.value)} className="min-w-0 flex-1 basis-28 font-mono" />
+                  <Select value={manualType} onValueChange={value => setManualType(value as ModelModality)}>
+                    <SelectTrigger aria-label="新增模型类型" className="w-auto"><SelectValue /></SelectTrigger>
+                    <SelectContent>{GENERATION_MODALITIES.map(type => <SelectItem key={type} value={type}>{CATEGORY_LABELS[type]}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <Button variant="ghost" size="sm" type="button" disabled={!manualId.trim() || models.some(m => m.id === manualId.trim())} onClick={addManualModel}>添加</Button>
                 </div>}
                 <details open={detailsOpen} onToggle={e => setDetailsOpen(e.currentTarget.open)}>
                   <summary className="cursor-pointer text-xs text-muted-foreground">模型详情</summary>
                   <div className="mt-3 space-y-3">
-                    <button type="button" onClick={() => { setDetailsOpen(true); pendingModelFocus.current = models.length; setModels([...models, { name: '', id: '' }]); }} className={ghostButtonClass}>添加模型</button>
+                    <Button variant="ghost" size="sm" type="button" onClick={() => { setDetailsOpen(true); pendingModelFocus.current = models.length; setModels([...models, { name: '', id: '' }]); }}>添加模型</Button>
                 <div className="mb-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                   <span>模型别名</span>
                   <span>模型 ID</span>
@@ -531,8 +543,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                 <div className="space-y-2">
                   {models.map((model, index) => (
                     <div key={index} className="grid grid-cols-2 items-start gap-2">
-                      <label className="sr-only" htmlFor={`key-model-name-${index}`}>模型名称 {index + 1}</label>
-                      <Input variant="bare"
+                      <Label className="sr-only" htmlFor={`key-model-name-${index}`}>模型名称 {index + 1}</Label>
+                      <Input
                         ref={(input) => {
                           if (!input || pendingModelFocus.current !== index) return;
                           pendingModelFocus.current = null;
@@ -543,16 +555,16 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                         aria-label={`模型名称 ${index + 1}`}
                         value={model.name}
                         onChange={(e) => setModels(models.map((m, i) => i === index ? { ...m, name: e.target.value } : m))}
-                        className={fieldClass}
+
                         placeholder="给人看的名字，例如：图片 5.0"
                       />
-                      <label className="sr-only" htmlFor={`key-model-id-${index}`}>模型 ID {index + 1}</label>
-                      <Input variant="bare"
+                      <Label className="sr-only" htmlFor={`key-model-id-${index}`}>模型 ID {index + 1}</Label>
+                      <Input
                         id={`key-model-id-${index}`}
                         aria-label={`模型 ID ${index + 1}`}
                         value={model.id}
                         onChange={(e) => setModels(models.map((m, i) => i === index ? { ...m, id: e.target.value } : m))}
-                        className={`${fieldClass} font-mono`}
+                        className="font-mono"
                         placeholder="请求里使用的 ID，例如：doubao-seedream-5-0-260128"
                       />
                       <div className="space-y-1.5">
@@ -570,59 +582,46 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                             </span>
                           </div>
                         ) : (
-                          <div
-                            role="group"
-                            aria-label={`模型分类 ${index + 1}`}
-                            className="flex items-center rounded-md border border-border p-0.5"
+                          <ToggleGroup type="single" size="sm" variant="outline" aria-label={`模型分类 ${index + 1}`}
+                            value={model.modality ?? 'image'}
+                            onValueChange={value => {
+                              if (!value) return;
+                              const mod = value as ModelModality;
+                              setModels(models.map((m, i) => i === index ? {
+                                ...m,
+                                modality: mod,
+                                input_modalities: mod === 'text' ? ['text'] : [],
+                              } : m));
+                            }}
                           >
-                            {GENERATION_MODALITIES.map((mod) => {
-                              const active = (model.modality ?? 'image') === mod;
-                              return (
-                                <button
-                                  key={mod}
-                                  type="button"
-                                  aria-pressed={active}
-                                  onClick={() => setModels(models.map((m, i) => i === index ? {
-                                    ...m,
-                                    modality: mod,
-                                    input_modalities: mod === 'text' ? ['text'] : [],
-                                  } : m))}
-                                  className={`rounded-sm px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                                    active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
-                                  }`}
-                                >
-                                  {CATEGORY_LABELS[mod]}
-                                </button>
-                              );
-                            })}
-                          </div>
+                            {GENERATION_MODALITIES.map((mod) => <ToggleGroupItem key={mod} value={mod}>{CATEGORY_LABELS[mod]}</ToggleGroupItem>)}
+                          </ToggleGroup>
                         )}
                         {(model.modality ?? 'image') === 'text' && (
                           <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                             <span>理解输入</span>
                             {TEXT_INPUT_MODALITIES.map(([inputModality, label]) => (
-                              <label key={inputModality} className="flex items-center gap-1.5">
+                              <Label key={inputModality} className="flex items-center gap-1.5">
                                 <Checkbox
                                   checked={(model.input_modalities ?? []).includes(inputModality)}
-                                  onChange={(event) => setModels(models.map((current, i) => {
+                                  onCheckedChange={(checked) => setModels(models.map((current, i) => {
                                     if (i !== index) return current;
                                     const currentInputs = new Set<ModelInputModality>(
                                       current.input_modalities ?? ['text'],
                                     );
                                     currentInputs.add('text');
-                                    if (event.target.checked) currentInputs.add(inputModality);
+                                    if (checked === true) currentInputs.add(inputModality);
                                     else currentInputs.delete(inputModality);
                                     return { ...current, input_modalities: Array.from(currentInputs) };
                                   }))}
-                                  className="size-3.5 accent-[color:var(--primary)]"
                                 />
                                 {label}
-                              </label>
+                              </Label>
                             ))}
                           </div>
                         )}
                       </div>
-                      <button
+                      <Button variant="bare"
                         type="button"
                         onClick={() => setModels(models.filter((_, i) => i !== index))}
                         disabled={models.length === 1}
@@ -630,7 +629,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                         className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-destructive disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
                       >
                         <X size={14} aria-hidden />
-                      </button>
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -642,18 +641,18 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
             {!isGateway && !isSubscription && <>
               <span className="pt-2 text-xs text-muted-foreground">连接</span>
               <div className="flex flex-wrap items-center gap-3">
-                <button type="button" onClick={testConnection} disabled={testing || !fetchModelsBaseUrl || (!editing && !accessKey.trim())} className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50">{testing ? '测试中...' : '测试连接'}</button>
+                <Button variant="outline" type="button" onClick={testConnection} disabled={testing || !fetchModelsBaseUrl || (!editing && !accessKey.trim())}>{testing ? '测试中...' : '测试连接'}</Button>
                 {connectionTest && <span role={connectionTest.ok ? 'status' : 'alert'} className={`text-xs ${connectionTest.ok ? 'text-[color:var(--status-done)]' : 'text-destructive'}`}>{connectionTest.message}</span>}
               </div>
               <details className="col-span-full border-t border-border pt-3">
                 <summary className="cursor-pointer text-xs text-muted-foreground">高级：请求地址 · 计费分组</summary>
                 <div className="mt-3 grid grid-cols-1 items-center gap-3 sm:grid-cols-[88px_minmax(0,1fr)]">
-                  <label htmlFor="key-base-url" className="text-xs text-muted-foreground">API 请求地址</label>
-                  <div className="flex gap-2"><Input variant="bare" id="key-base-url" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setUrlTest(null); setConnectionTest(null); }} className={`${fieldClass} font-mono`} /><button type="button" onClick={testBaseUrl} className={ghostButtonClass}>测试</button></div>
+                  <Label htmlFor="key-base-url" className="text-xs text-muted-foreground">API 请求地址</Label>
+                  <div className="flex gap-2"><Input id="key-base-url" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setUrlTest(null); setConnectionTest(null); }} className="font-mono" /><Button variant="ghost" size="sm" type="button" onClick={testBaseUrl}>测试</Button></div>
                   {urlTest && <p className="col-span-full text-xs text-muted-foreground">{urlTest.message}</p>}
-                  <label htmlFor="key-billing-group" className="text-xs text-muted-foreground">计费分组（可选）</label>
-                  <Input variant="bare" id="key-billing-group" value={billingGroup} onChange={e => setBillingGroup(e.target.value)} className={fieldClass} placeholder="default" />
-                  {provider === 'custom' && <><p className="col-span-full text-xs text-muted-foreground">自定义供应商可以创建多个配置，请用不同配置名称区分额度、用途或上游。</p><label htmlFor="key-homepage" className="text-xs text-muted-foreground">官网链接</label><Input variant="bare" id="key-homepage" value={homepage} onChange={e => setHomepage(e.target.value)} className={fieldClass} /></>}
+                  <Label htmlFor="key-billing-group" className="text-xs text-muted-foreground">计费分组（可选）</Label>
+                  <Input id="key-billing-group" value={billingGroup} onChange={e => setBillingGroup(e.target.value)} placeholder="default" />
+                  {provider === 'custom' && <><p className="col-span-full text-xs text-muted-foreground">自定义供应商可以创建多个配置，请用不同配置名称区分额度、用途或上游。</p><Label htmlFor="key-homepage" className="text-xs text-muted-foreground">官网链接</Label><Input id="key-homepage" value={homepage} onChange={e => setHomepage(e.target.value)} /></>}
                 </div>
               </details>
             </>}
@@ -661,10 +660,10 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         </div>
         {error && <p role="alert" className="px-6 pb-3 text-sm text-destructive">{error}</p>}
         <footer className="flex shrink-0 items-center gap-2 border-t border-border px-6 py-4">
-          {onDelete && <button type="button" onClick={onDelete} disabled={saving} className="rounded-md px-3 py-2 text-sm text-destructive">删除</button>}
+          {onDelete && <Button variant="bare" type="button" onClick={onDelete} disabled={saving} className="rounded-md px-3 py-2 text-sm text-destructive">删除</Button>}
           <span className="flex-1" />
-          <button type="button" onClick={onCancel} disabled={saving} className={ghostButtonClass}>取消</button>
-          <button type="button" onClick={submit} disabled={!canSubmit} className="rounded-md bg-primary px-5 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">{saving ? '保存中...' : submitLabel}</button>
+          <Button variant="ghost" size="sm" type="button" onClick={onCancel} disabled={saving}>取消</Button>
+          <Button type="button" onClick={submit} disabled={!canSubmit} className="px-5">{saving ? '保存中...' : submitLabel}</Button>
         </footer>
       </DialogContent>
     </Dialog>

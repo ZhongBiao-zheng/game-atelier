@@ -1,5 +1,6 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { hoverHint } from '@/test/hint';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { fetchUsage, fetchUsageTasks } from '@/api/usage';
@@ -51,9 +52,9 @@ function setup(path = '/settings/usage') {
 describe('用量筛选', () => {
   it('切换团队和时间写入 URL', async () => {
     const location = setup();
-    fireEvent.click(await screen.findByRole('button', { name: '团队' }));
+    fireEvent.click(await screen.findByRole('radio', { name: '团队' }));
     await waitFor(() => expect(location.history.at(-1)).toContain('scope=team'));
-    fireEvent.click(screen.getByRole('button', { name: '7 天' }));
+    fireEvent.click(screen.getByRole('radio', { name: '7 天' }));
     await waitFor(() => expect(location.history.at(-1)).toContain('range=7d'));
     expect(fetchUsage).toHaveBeenLastCalledWith(expect.objectContaining({ scope: 'team', range: '7d' }));
   });
@@ -62,12 +63,12 @@ describe('用量筛选', () => {
     setup();
     await waitFor(() => expect(fetchUsage).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: '我的' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '团队' })).toBeNull();
+    expect(screen.queryByRole('radio', { name: '团队' })).toBeNull();
   });
   it('来源根据区间内 sources 显示', async () => {
     vi.mocked(fetchUsage).mockResolvedValue({ ...empty, sources: ['local', 'lan'] });
     setup();
-    fireEvent.click(await screen.findByRole('button', { name: '局域网' }));
+    fireEvent.click(await screen.findByRole('radio', { name: '局域网' }));
     await waitFor(() =>
       expect(fetchUsage).toHaveBeenLastCalledWith(expect.objectContaining({ source: 'lan' })),
     );
@@ -75,20 +76,19 @@ describe('用量筛选', () => {
   it('没有局域网来源时隐藏来源，并显示空数据', async () => {
     setup();
     expect(await screen.findByText('暂无用量记录')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '局域网' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: '局域网' })).not.toBeInTheDocument();
   });
   it('网关关闭时隐藏团队并纠正 URL', async () => {
     vi.mocked(fetchGateway).mockResolvedValue({ enabled: false } as Awaited<ReturnType<typeof fetchGateway>>);
     const location = setup('/settings/usage?scope=team&member=k1');
     await screen.findByText('暂无用量记录');
-    expect(screen.queryByRole('button', { name: '团队' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: '团队' })).not.toBeInTheDocument();
     expect(location.history.at(-1)).toContain('scope=mine');
     expect(location.history.at(-1)).not.toContain('member');
   });
   it('网关花费链接恢复成员选择', async () => {
     setup('/settings/usage?scope=team&member=k1');
-    await screen.findByRole('option', { name: '小王' });
-    expect(screen.getByRole('combobox', { name: '成员' })).toHaveValue('k1');
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '成员' })).toHaveTextContent('小王'));
     expect(fetchUsage).toHaveBeenCalledWith(expect.objectContaining({ scope: 'team', member: 'k1' }));
   });
   it('切换加载时保留数据，失败显示错误', async () => {
@@ -100,7 +100,7 @@ describe('用量筛选', () => {
         reject = fail;
       }),
     );
-    fireEvent.click(screen.getByRole('button', { name: '7 天' }));
+    fireEvent.click(screen.getByRole('radio', { name: '7 天' }));
     expect(screen.getByText('暂无用量记录').parentElement).toHaveAttribute('aria-busy', 'true');
     reject(new Error('读取失败'));
     expect(await screen.findByRole('alert')).toHaveTextContent('读取失败');
@@ -134,9 +134,9 @@ const task: UsageTask = {
   cost_cny: null, label: '测试项目', source: 'local', thumb_url: null, href: '/canvas/test',
 };
 const filters = { scope: 'mine' as const, range: '30d' as const, source: 'all' as const, member: '' };
-it('趋势金额的无障碍标签和 tooltip 使用统一格式', () => {
+it('趋势金额的无障碍标签和 tooltip 使用统一格式', async () => {
   render(<TrendChart data={{ ...empty, trend: [{ start: '2026-10-27', cost_cny: 0.3 }] }} />);
-  expect(screen.getByRole('img', { name: '2026-10-27 0.3¥' })).toHaveAttribute('title', '2026-10-27 · 0.3¥');
+  expect(await hoverHint(screen.getByRole('img', { name: '2026-10-27 0.3¥' }))).toHaveTextContent('2026-10-27 · 0.3¥');
 });
 it('未计价独立显示次数与占比，零次隐藏', () => {
   const view = render(<KpiRow data={{ ...empty, totals: { ...empty.totals, count: 10, unpriced: 4 } }} />);
@@ -158,7 +158,7 @@ it('任务分页追加，切换筛选从头加载且费用和慢图片显示警�
   await screen.findByText('second');
   expect(fetchUsageTasks).toHaveBeenNthCalledWith(2, { ...filters, status: 'all', offset: 50 });
   expect(screen.queryByRole('button', { name: '加载更多' })).not.toBeInTheDocument();
-  fireEvent.click(within(screen.getByRole('group', { name: '状态筛选' })).getByRole('button', { name: '失败' }));
+  fireEvent.click(within(screen.getByRole('radiogroup', { name: '状态筛选' })).getByRole('radio', { name: '失败' }));
   await screen.findByText('暂无匹配的任务');
   expect(fetchUsageTasks).toHaveBeenLastCalledWith({ ...filters, status: 'failed', offset: 0 });
 });
@@ -169,10 +169,10 @@ it('筛选改变后忽略旧分页响应，点击当前筛选不丢失请求', a
     .mockReturnValueOnce(new Promise(resolve => { resolveMore = resolve; }))
     .mockResolvedValueOnce({ rows: [{ ...task, id: 'failed', status: 'failed', model: 'failure', cost_cny: 2 }], total: 1, next_offset: null });
   render(<TaskTable {...filters} />);
-  fireEvent.click(screen.getByRole('button', { name: '全部' }));
+  fireEvent.click(screen.getByRole('radio', { name: '全部' }));
   resolveFirst({ rows: [task], total: 2, next_offset: 50 });
   fireEvent.click(await screen.findByRole('button', { name: '加载更多' }));
-  fireEvent.click(screen.getByRole('button', { name: '失败' }));
+  fireEvent.click(screen.getByRole('radio', { name: '失败' }));
   await screen.findByText('failure');
   resolveMore({ rows: [{ ...task, id: 'stale', model: 'stale-page' }], total: 2, next_offset: null });
   await waitFor(() => expect(screen.getByRole('region', { name: '任务' })).toHaveAttribute('aria-busy', 'false'));

@@ -3,6 +3,7 @@ import { LoaderCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
+import { Hint } from '@/components/ui/tooltip';
 
 export type CanvasNodeRunStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -166,15 +167,14 @@ export function CanvasNodeRunOverlay({
           <LoaderCircle className={compact ? 'size-3.5' : 'size-5'} />
         </span>
       )}
-      <span
+      <Hint label={state.detail || state.label}><span
         className={cn(
           'min-w-0 max-w-full',
           compact ? 'truncate' : 'line-clamp-3 break-words leading-relaxed',
         )}
-        title={state.detail || state.label}
       >
         {state.detail || state.label}
-      </span>
+      </span></Hint>
     </div>
   );
 }

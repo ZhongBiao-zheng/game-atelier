@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type PointerEven
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { canvasMediaUrl, canvasMediaUrlAtWidth } from '@/api/canvas';
 import type { CanvasNormalizedFrame, CanvasSize } from '@/schema/canvas';
+import { Button } from '@/components/ui/button';
 
 const KEYBOARD_STEP = 5;
 
@@ -68,7 +69,7 @@ export function CanvasCompareSurface({ projectId, title, beforeVersionId, afterV
       <span className="pointer-events-none absolute left-2 top-2 rounded bg-black/45 px-1.5 py-0.5 text-xs text-white/90">Before</span>
       <span className="pointer-events-none absolute right-2 top-2 rounded bg-black/45 px-1.5 py-0.5 text-xs text-white/90">After</span>
       <div className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-white" style={{ left: `${split}%` }} />
-      <button type="button" role="slider" aria-label={`${title} 对比分界`}
+      <Button variant="bare" type="button" role="slider" aria-label={`${title} 对比分界`}
         aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(split)}
         className="nodrag nopan absolute top-1/2 flex h-7 w-11 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize items-center justify-center rounded-full bg-white text-neutral-900"
         style={{ left: `${split}%` }}
@@ -82,7 +83,7 @@ export function CanvasCompareSurface({ projectId, title, beforeVersionId, afterV
           setSplit(value => Math.min(100, Math.max(0, value + (event.key === 'ArrowLeft' ? -KEYBOARD_STEP : KEYBOARD_STEP))));
         }}>
         <ChevronLeft size={14} strokeWidth={2.5} /><ChevronRight size={14} strokeWidth={2.5} className="-ml-1" />
-      </button>
+      </Button>
     </div>
   );
 }

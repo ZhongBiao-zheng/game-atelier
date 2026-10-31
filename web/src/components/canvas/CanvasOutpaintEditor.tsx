@@ -9,6 +9,7 @@ import { editModelChoices, editSize, EXPAND_RATIOS, EXPAND_SCALES, presetFrame, 
   type EditFrame, type ExpandRatio } from './imageEditGeometry';
 import { EditorComposer, ImageEditorShell, editorIconButton, useEditorViewport,
   type CanvasMaskEditSubmission, type ImageEditorProps } from './ImageEditorShell';
+import { Button } from '@/components/ui/button';
 
 type DragKind = 'image' | 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 const HANDLES: DragKind[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
@@ -147,7 +148,7 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
         {HANDLES.map(direction => {
           const corner = direction.length === 2;
           const vertical = direction === 'e' || direction === 'w';
-          return <button key={direction} type="button" aria-label={`扩展画框 ${direction}`} onPointerDown={event => startDrag(event, direction)}
+          return <Button variant="bare" key={direction} type="button" aria-label={`扩展画框 ${direction}`} onPointerDown={event => startDrag(event, direction)}
             className="absolute grid size-6 -translate-x-1/2 -translate-y-1/2 place-items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             style={handleStyle(direction)}>
             {corner
@@ -156,7 +157,7 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
                 borderLeftWidth: direction.includes('w') ? 3 : 0, borderRightWidth: direction.includes('e') ? 3 : 0,
                 transform: `translate(${direction.includes('w') ? 5 : -5}px, ${direction.includes('n') ? 5 : -5}px)` }} />
               : <span aria-hidden className={`rounded-sm bg-foreground ${vertical ? 'h-8 w-1' : 'h-1 w-8'}`} />}
-          </button>;
+          </Button>;
         })}
         <span aria-label="编辑输出尺寸" className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-background/85 px-2.5 py-0.5 tabular-nums text-xs">
           {frame.width} × {frame.height}
@@ -173,17 +174,17 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
         count={count} onCount={setCount} />}>
       <div className="flex flex-wrap items-center gap-2">
         <div role="radiogroup" aria-label="画框比例" className="flex flex-wrap items-center gap-0.5">
-          {EXPAND_RATIOS.map(item => <button key={item} type="button" role="radio" aria-checked={ratio === item}
+          {EXPAND_RATIOS.map(item => <Button variant="bare" key={item} type="button" role="radio" aria-checked={ratio === item}
             onClick={() => applyPreset(item, item === 'original' ? 1 : scaleStep ?? 1)}
             className={`inline-flex h-8 items-center gap-2 rounded-lg px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${ratio === item ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
             <RatioIcon ratio={item} width={source.width} height={source.height} />{item === 'original' ? '原比例' : item}
-          </button>)}
+          </Button>)}
         </div>
         <div className="ml-auto flex h-8 items-center gap-0.5 rounded-full border border-border px-0.5">
           <span className="sr-only">扩展倍数</span>
-          <button type="button" aria-label="减小扩展倍数" className={`${editorIconButton} size-7`} disabled={!ratio || scaleStep === EXPAND_SCALES[0]} onClick={() => stepScale(-1)}><Minus /></button>
+          <Button variant="bare" type="button" aria-label="减小扩展倍数" className={`${editorIconButton} size-7`} disabled={!ratio || scaleStep === EXPAND_SCALES[0]} onClick={() => stepScale(-1)}><Minus /></Button>
           <span className="w-12 text-center tabular-nums text-xs">{scaleStep == null ? '自定义' : `${scaleStep}×`}</span>
-          <button type="button" aria-label="增大扩展倍数" className={`${editorIconButton} size-7`} disabled={!ratio || scaleStep === EXPAND_SCALES.at(-1)} onClick={() => stepScale(1)}><Plus /></button>
+          <Button variant="bare" type="button" aria-label="增大扩展倍数" className={`${editorIconButton} size-7`} disabled={!ratio || scaleStep === EXPAND_SCALES.at(-1)} onClick={() => stepScale(1)}><Plus /></Button>
         </div>
       </div>
     </EditorComposer>} />;

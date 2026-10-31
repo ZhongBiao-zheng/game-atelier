@@ -3,6 +3,9 @@ import { ArrowLeftRight, Plus, X } from 'lucide-react';
 
 import { Lightbox } from '../Lightbox';
 import { FileInput } from '@/components/ui/file-input';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 
 export const MAX_REF_IMAGES = 9;
 export const MAX_REF_VIDEOS = 3;
@@ -35,16 +38,15 @@ export function FirstLastFrames({
         onRemove={() => onChange({ ...frames, first: null })} />
       {maxFrames >= 2 && (
         <>
-          <button
+          <Hint label="互换首尾帧"><Button variant="bare"
             type="button"
             aria-label="互换首尾帧"
-            title="互换首尾帧"
             disabled={!canSwap}
             onClick={() => onChange({ first: frames.last, last: frames.first })}
             className="grid size-6 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
           >
             <ArrowLeftRight size={13} aria-hidden />
-          </button>
+          </Button></Hint>
           <FixedSlot label="上传尾帧" file={frames.last} accept="image/*" tilt="right"
             onPick={(f) => onChange({ ...frames, last: f })}
             onRemove={() => onChange({ ...frames, last: null })} />
@@ -85,14 +87,14 @@ export function FixedSlot({
     return (
       // 删除钮必须在 overflow-hidden 圆角框外层，否则左上突出的部分会被圆角裁掉。
       <div className={`relative ${SLOT} ${rotate} transition-transform duration-200 hover:scale-[1.12]`}>
-        <button type="button" aria-label={`查看${caption}大图`} onClick={() => setZoomed(true)}
+        <Button variant="bare" type="button" aria-label={`查看${caption}大图`} onClick={() => setZoomed(true)}
           className="block h-full w-full cursor-zoom-in overflow-hidden rounded-lg border-[1.5px] border-white bg-card p-0">
           <img src={preview} alt={caption} className="h-full w-full object-cover" />
-        </button>
-        <button type="button" aria-label={`移除${caption}`} onClick={onRemove}
+        </Button>
+        <Button variant="bare" type="button" aria-label={`移除${caption}`} onClick={onRemove}
           className="absolute -right-1.5 -top-1.5 z-10 grid h-[18px] w-[18px] place-items-center rounded-full bg-scrim backdrop-blur-glass border border-border text-foreground/80 hover:bg-destructive hover:text-foreground transition-colors">
           <X size={10} />
-        </button>
+        </Button>
         {zoomed && <Lightbox src={preview} onClose={() => setZoomed(false)} />}
       </div>
     );
@@ -102,11 +104,10 @@ export function FixedSlot({
     <>
       <FileInput id={inputId} accept={accept} className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(f); e.target.value = ''; }} />
-      <label
+      <Hint label={disabled ? disabledHint : undefined}><Label
         htmlFor={disabled ? undefined : inputId}
         aria-label={label}
         aria-disabled={disabled || undefined}
-        title={disabled ? disabledHint : undefined}
         className={`flex ${SLOT} ${rotate} flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-secondary transition-all ${
           disabled
             ? 'cursor-not-allowed opacity-40'
@@ -114,7 +115,7 @@ export function FixedSlot({
         }`}>
         <Plus size={16} className="text-muted-foreground" />
         <span className="text-xs leading-none text-muted-foreground">{caption}</span>
-      </label>
+      </Label></Hint>
     </>
   );
 }

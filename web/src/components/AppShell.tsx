@@ -16,6 +16,7 @@ import { setTheme, useTheme, type Theme } from '@/lib/theme';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { AnnouncementHost } from '@/components/AnnouncementDialog';
 import { UpdateButton, UpdateProvider } from '@/components/UpdateControl';
+import { Button } from '@/components/ui/button';
 
 // 组件样例页只在 dev 存在，生产构建整段摇掉
 const Kit = import.meta.env.DEV ? lazy(() => import('@/pages/Kit').then(m => ({ default: m.Kit }))) : null;
@@ -25,14 +26,14 @@ function ThemeToggle() {
   const theme = useTheme();
   const next: Theme = theme === 'dark' ? 'light' : 'dark';
   return (
-    <button
+    <Button variant="bare"
       type="button"
       aria-label={next === 'light' ? '切换到浅色主题' : '切换到深色主题'}
       onClick={() => setTheme(next)}
       className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-glass backdrop-blur-glass text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
       <SwapIcon swapKey={theme}>{theme === 'dark' ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}</SwapIcon>
-    </button>
+    </Button>
   );
 }
 

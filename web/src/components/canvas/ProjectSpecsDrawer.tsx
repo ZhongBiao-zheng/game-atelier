@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ReactMarkdown from 'react-markdown';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -151,17 +152,18 @@ export function ProjectSpecsDrawer({ projectId, onClose }: { projectId: string; 
       <DialogTitle>规范</DialogTitle>
       {libraries.length > 0 && <div className="flex w-fit max-w-full gap-1 overflow-x-auto rounded-md bg-secondary/50 p-1" role="radiogroup" aria-label="规范来源">
         {[{id: PROJECT, label: '本项目'}, ...libraries.map(library => ({id: library.library_id, label: library.name}))].map(item =>
-          <button key={item.id} type="button" role="radio" aria-checked={scope === item.id} disabled={!ready || reviewing}
+          <Button variant="bare" key={item.id} type="button" role="radio" aria-checked={scope === item.id} disabled={!ready || reviewing}
             onClick={() => void switchScope(item.id)}
             className={cn('h-7 shrink-0 truncate rounded-sm px-3 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50',
               scope === item.id ? 'bg-popover text-foreground' : 'text-muted-foreground hover:text-foreground')}>
             {item.label}
-          </button>)}
+          </Button>)}
       </div>}
-      <div className="flex flex-wrap gap-1 pr-5" role="tablist" aria-label="规范类别">
-        {tabs.map(tab =>
-          <Button key={tab.key} role="tab" aria-selected={active === tab.key} variant={active === tab.key ? 'secondary' : 'ghost'} size="sm" disabled={!ready || reviewing} onClick={() => void switchTab(tab.key)}>{tab.label}</Button>)}
-      </div>
+      <Tabs className="pr-5" value={active} onValueChange={key => void switchTab(key)}>
+        <TabsList aria-label="规范类别" className="h-auto flex-wrap justify-start">
+          {tabs.map(tab => <TabsTrigger key={tab.key} value={tab.key} disabled={!ready || reviewing} className="flex-none">{tab.label}</TabsTrigger>)}
+        </TabsList>
+      </Tabs>
       {error && <p role="alert" className="text-sm text-destructive">{error} <Button size="sm" variant="ghost" onClick={() => void flush()}>重试保存</Button></p>}
       {active === LESSONS ? <div className="min-h-0 flex-1 space-y-4 overflow-y-auto text-sm">
         <h3 className="text-muted-foreground">待审 · {lessons.pending.length}</h3>
@@ -170,7 +172,7 @@ export function ProjectSpecsDrawer({ projectId, onClose }: { projectId: string; 
         {lessons.adopted.map((text, index) => <p key={index} className="whitespace-pre-wrap rounded-lg border border-border p-3">{text}</p>)}
       </div> : <>
         <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground" aria-live="polite">{status}</span><Button size="sm" variant="ghost" onClick={() => setPreview(value => !value)}>{preview ? '编辑' : '预览'}</Button></div>
-        {preview ? <div className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap text-sm"><ReactMarkdown>{texts[active] || ''}</ReactMarkdown></div> : <Textarea variant="bare" aria-label="规范正文" disabled={!ready} maxLength={40000} value={texts[active] || ''} onChange={event => change(event.target.value)} onCompositionStart={() => { composing.current = true; clearTimeout(timer.current); }} onCompositionEnd={() => { composing.current = false; schedule(); }} className="min-h-0 flex-1 resize-none rounded-lg border border-border bg-background p-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />}
+        {preview ? <div className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap text-sm"><ReactMarkdown>{texts[active] || ''}</ReactMarkdown></div> : <Textarea aria-label="规范正文" disabled={!ready} maxLength={40000} value={texts[active] || ''} onChange={event => change(event.target.value)} onCompositionStart={() => { composing.current = true; clearTimeout(timer.current); }} onCompositionEnd={() => { composing.current = false; schedule(); }} className="min-h-0 flex-1 resize-none" />}
       </>}
     </DialogContent>
   </Dialog>;

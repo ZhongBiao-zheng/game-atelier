@@ -453,10 +453,10 @@ it('keeps populated media playable inside the node without opening preview from 
   Object.defineProperty(video!, 'requestFullscreen', { configurable: true, value: fullscreen });
   Object.defineProperty(video!, 'duration', { configurable: true, value: 100 });
   fireEvent.loadedMetadata(video!);
-  fireEvent.change(screen.getByRole('slider', { name: '视频播放进度' }), { target: { value: '20' } });
-  expect(video).toHaveProperty('currentTime', 20);
-  fireEvent.change(screen.getByRole('slider', { name: '视频音量' }), { target: { value: '0.4' } });
-  expect(video).toHaveProperty('volume', 0.4);
+  fireEvent.keyDown(screen.getByRole('slider', { name: '视频播放进度' }), { key: 'End' });
+  expect(video).toHaveProperty('currentTime', 100);
+  fireEvent.keyDown(screen.getByRole('slider', { name: '视频音量' }), { key: 'ArrowDown' });
+  expect(video).toHaveProperty('volume', 0.95);
   fireEvent.click(screen.getByRole('button', { name: '静音 视频' }));
   expect(video).toHaveProperty('muted', true);
   fireEvent.click(screen.getByRole('button', { name: '全屏播放 视频' }));
@@ -722,8 +722,8 @@ it('configures and starts layer decomposition inside the new node', () => {
   expect(screen.getByRole('button', { name: '图层拆分使用说明' })).toBeInTheDocument();
   expect(screen.getByRole('tooltip')).toHaveTextContent('留空会自动识别主要图层');
   expect(screen.getByLabelText('图层拆分设置')).not.toHaveClass('nowheel');
-  expect(screen.getByRole('option', { name: '智能' })).toHaveAttribute('aria-selected', 'true');
-  fireEvent.click(screen.getByRole('option', { name: '1.5K' }));
+  expect(screen.getByRole('radio', { name: '智能' })).toHaveAttribute('aria-checked', 'true');
+  fireEvent.click(screen.getByRole('radio', { name: '1.5K' }));
   const resolutionUpdate = vi.mocked(context.updateNode).mock.calls.at(-1)?.[1];
   expect(resolutionUpdate?.(layerStack)).toMatchObject({ data: { resolution: '1.5K' } });
   const promptEditor = screen.getByRole('combobox', { name: '提示词' });

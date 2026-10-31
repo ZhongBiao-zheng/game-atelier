@@ -897,9 +897,9 @@ it('records text candidate changes but ignores the already selected value', () =
   );
 
   fireEvent.click(screen.getByRole('button', { name: '文本设置' }));
-  fireEvent.click(screen.getByRole('option', { name: '1 个' }));
+  fireEvent.click(screen.getByRole('radio', { name: '1 个' }));
   expect(recordHistory).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('option', { name: '2 个' }));
+  fireEvent.click(screen.getByRole('radio', { name: '2 个' }));
   expect(recordHistory).toHaveBeenCalledOnce();
 });
 
@@ -930,9 +930,9 @@ it('records Responses reasoning changes but ignores the selected effort', () => 
   );
 
   fireEvent.click(screen.getByRole('button', { name: '文本设置' }));
-  fireEvent.click(within(screen.getByLabelText('选择推理强度')).getByRole('option', { name: '自动' }));
+  fireEvent.click(within(screen.getByLabelText('选择推理强度')).getByRole('radio', { name: '自动' }));
   expect(recordHistory).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('option', { name: '高' }));
+  fireEvent.click(screen.getByRole('radio', { name: '高' }));
   expect(recordHistory).toHaveBeenCalledOnce();
 });
 
@@ -966,9 +966,9 @@ it('records audio setting changes but ignores the selected voice', () => {
   );
 
   fireEvent.click(screen.getByRole('button', { name: '音频设置' }));
-  fireEvent.click(screen.getByRole('option', { name: 'Alloy' }));
+  fireEvent.click(screen.getByRole('radio', { name: 'Alloy' }));
   expect(recordHistory).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('option', { name: 'Marin' }));
+  fireEvent.click(screen.getByRole('radio', { name: 'Marin' }));
   expect(recordHistory).toHaveBeenCalledOnce();
 });
 
@@ -1025,7 +1025,7 @@ it('undoes and redoes image parameter changes as atomic history entries', () => 
   render(<HistoryHarness />);
   const settings = screen.getByRole('button', { name: '图片设置' });
   fireEvent.click(settings);
-  fireEvent.click(screen.getByRole('option', { name: '4:3' }));
+  fireEvent.click(screen.getByRole('radio', { name: '4:3' }));
   expect(settings).toHaveTextContent('4:3');
 
   fireEvent.click(screen.getByRole('button', { name: 'history undo' }));

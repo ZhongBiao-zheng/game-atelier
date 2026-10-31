@@ -50,6 +50,7 @@ import type { CanvasProject } from '@/schema/canvas';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 
 import { reuseRoundParameter, type RoundParameter } from './studioParameterReuse';
+import { Button } from '@/components/ui/button';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
 const ASSET_TITLE_LENGTH = 24;
@@ -865,7 +866,7 @@ function StudioFull() {
         onScroll={handleHistoryScroll}
         data-studio-history-scroll
         data-testid="studio-history-scroll"
-        className="flex h-full flex-col-reverse overflow-y-auto [scrollbar-gutter:stable_both-edges] pt-20 pb-[210px]"
+        className="flex h-full flex-col-reverse overflow-y-auto [scrollbar-gutter:stable_both-edges] pt-20 pb-52.5"
       >
         <RoundList
           rounds={reversedRounds}
@@ -908,7 +909,7 @@ function StudioFull() {
           <div className="relative min-w-0 flex-1">
           {/* 回到底部：常驻挂载才有进出动画。锚定 bottom-full 让它跟着壳顶升降——
               壳展开时被顶着上移、同时向右上平移渐隐；收起时反向浮现。 */}
-          <button
+          <Button variant="bare"
             type="button"
             onClick={scrollToBottom}
             tabIndex={dockCollapsed ? 0 : -1}
@@ -921,7 +922,7 @@ function StudioFull() {
           >
             <ChevronsDown size={13} aria-hidden />
             回到底部
-          </button>
+          </Button>
         <div className="absolute bottom-full left-0 mb-2 flex flex-col items-start gap-1">
           {recipeNotice && (
             <div
@@ -1022,7 +1023,7 @@ function StudioFull() {
           onVideoFramesChange={setVideoFrames}
         />
           </div>
-          <button
+          <Button variant="bare"
             type="button"
             aria-label="打开创作资产"
             aria-expanded={assetPanelOpen}
@@ -1031,7 +1032,7 @@ function StudioFull() {
               else setAssetPanelOpen(true);
             }}
             className={`pointer-events-auto grid shrink-0 place-items-center lg:absolute lg:bottom-0 lg:left-full lg:ml-3 rounded-full border border-input bg-glass text-muted-foreground backdrop-blur-glass transition-all duration-300 hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-              dockCollapsed ? 'mb-[22px] size-8' : 'mb-4 size-10'
+              dockCollapsed ? 'mb-5.5 size-8' : 'mb-4 size-10'
             }`}
           >
             <Library
@@ -1039,7 +1040,7 @@ function StudioFull() {
               aria-hidden
               className={`transition-transform duration-300 ${dockCollapsed ? 'scale-90' : ''}`}
             />
-          </button>
+          </Button>
         </div>
       </div>
       {assetPanelOpen && (

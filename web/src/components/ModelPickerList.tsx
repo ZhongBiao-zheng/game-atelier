@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { modelModality, type ModelModality } from '@/api/keys';
 import { modelCatalog, modelDisplayName, sortModels } from '@/lib/modelCatalog';
 import { useModelPickerMetrics, type ModelPickerChoice } from '@/lib/useModelPickerMetrics';
@@ -8,6 +9,7 @@ import { MetaTag } from './MetaTag';
 import { formatGenerationCost } from '@/lib/generationCost';
 import { routeChannel } from '@/lib/modelRoutes';
 import { formatModelDuration } from '@/lib/modelMetricFormat';
+import { Button } from '@/components/ui/button';
 
 export function ModelPickerList({ choices, selected, initialKind, sections = false, params = {}, onSelect }: {
   choices: ModelPickerChoice[];
@@ -43,23 +45,13 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
   useLayoutEffect(() => { if (sections && initialKind) goTo(initialKind, false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const flat = groups.flatMap(group => group.choices);
   return <div className="flex min-h-0 flex-1 flex-col gap-2">
-    {tabs && <div role="tablist" aria-label="模型类型" className="grid shrink-0 grid-cols-2 rounded-lg bg-popover p-0.5">
-      {groups.map(group => <button key={group.kind} type="button" role="tab" aria-selected={active === group.kind}
-        tabIndex={active === group.kind ? 0 : -1}
-        onClick={() => goTo(group.kind)}
-        onKeyDown={event => {
-          if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-            event.preventDefault();
-            const next = groups[(groups.indexOf(group) + 1) % groups.length];
-            goTo(next.kind);
-            const buttons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
-            buttons?.[groups.indexOf(next)].focus({ preventScroll: true });
-          }
-        }}
-        className="rounded-md px-3 py-2 text-xs hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/50">
-        {group.kind === 'image' ? 'Image' : 'Video'}
-      </button>)}
-    </div>}
+    {tabs && <Tabs activationMode="manual" value={active} onValueChange={value => goTo(value as ModelModality)}>
+      <TabsList aria-label="模型类型" className="grid w-full shrink-0 grid-cols-2">
+        {groups.map(group => <TabsTrigger key={group.kind} value={group.kind} className="text-xs">
+          {group.kind === 'image' ? 'Image' : 'Video'}
+        </TabsTrigger>)}
+      </TabsList>
+    </Tabs>}
     <div ref={scrollRef} role="listbox" aria-label="选择模型列表" tabIndex={-1}
       data-testid="model-picker-scroll" className="min-h-0 overflow-y-auto overscroll-contain rounded-lg bg-popover p-1"
       onWheel={() => { target.current = null; }} onTouchStart={() => { target.current = null; }}
@@ -96,7 +88,7 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
           const entry = modelCatalog(choice.model.id);
           const media = group.kind === 'image' || group.kind === 'video';
           const seconds = media ? durations[id] : null, cost = media ? prices[id] : null;
-          return <button key={id} type="button" role="option" aria-selected={selected === id}
+          return <Button variant="bare" key={id} type="button" role="option" aria-selected={selected === id}
             aria-label={modelDisplayName(choice.model)}
             tabIndex={selected === id || (!flat.some(item => `${item.key.alias}:${item.model.id}` === selected) && flat[0] === choice) ? 0 : -1}
             onClick={() => onSelect(choice)}
@@ -110,7 +102,7 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
                 {subscription ? <MetaTag className="ml-auto">订阅</MetaTag> : cost != null && <MetaTag className="ml-auto">{formatGenerationCost(cost)}</MetaTag>}
               </span>}
             </span>
-          </button>;
+          </Button>;
         })}
       </section>)}
       {!flat.length && <p className="px-3 py-2 text-sm text-muted-foreground">暂无可用模型</p>}

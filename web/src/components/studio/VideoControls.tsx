@@ -12,7 +12,9 @@ import { RatioIcon } from './RatioIcon';
 import { ToolbarPopover, type ToolbarPopoverMenuProps } from './ToolbarPopover';
 import { cn } from '@/lib/utils';
 import { SwapIcon } from '@/components/ui/swap-icon';
-import { SelectionHighlight } from '@/components/ui/selection-highlight';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
+import { Segmented, SegmentedItem } from '@/components/ui/segmented';
 
 interface Props extends ToolbarPopoverMenuProps {
   caps: VideoControlCaps;
@@ -69,7 +71,7 @@ export function VideoControls({
 
   return (
     <div ref={wrapRef} className="relative">
-      <button
+      <Button variant="bare"
         type="button"
         aria-label="视频设置"
         aria-expanded={open}
@@ -81,7 +83,7 @@ export function VideoControls({
         <Clapperboard size={14} aria-hidden />
         <span className="shrink-0">{VIDEO_MODE_LABELS[mode]}</span>
         {referenceLimitLabel && (
-          <span className="group/help relative shrink-0" title={referenceLimitLabel(mode)}>
+          <Hint label={referenceLimitLabel(mode)}><span className="group/help relative shrink-0">
             <CircleHelp className="size-3.5 text-muted-foreground" aria-hidden="true" />
             <span
               role="tooltip"
@@ -89,7 +91,7 @@ export function VideoControls({
             >
               {referenceLimitLabel(mode)}
             </span>
-          </span>
+          </span></Hint>
         )}
         {summary && <span className="truncate">{' · '}{summary}</span>}
         {caps.supportsAudio && (
@@ -99,7 +101,7 @@ export function VideoControls({
               : <VolumeX size={13} aria-hidden className="shrink-0 text-muted-foreground" />}
           </SwapIcon>
         )}
-      </button>
+      </Button>
 
       <ToolbarPopover
         open={open}
@@ -117,107 +119,89 @@ export function VideoControls({
         <div className="space-y-4">
             {caps.modes.length > 1 && (
               <Section title="生成方式">
-                <div role="listbox" aria-label="选择生成方式" className="relative isolate grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
-                  <SelectionHighlight />
+                <Segmented aria-label="选择生成方式" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
                   {caps.modes.map((m) => (
-                    <SegmentButton key={m} selected={mode === m} onClick={() => onModeChange(m)}>
+                    <SegmentedItem key={m} value={String(m)} selected={mode === m} onSelect={() => onModeChange(m)}>
                       {VIDEO_MODE_LABELS[m]}
-                    </SegmentButton>
+                    </SegmentedItem>
                   ))}
-                </div>
+                </Segmented>
               </Section>
             )}
 
             {caps.ratios.length > 0 && (
               <Section title="比例">
-                <div role="listbox" aria-label="选择比例" className={`relative isolate grid ${caps.ratios.length > 5 ? 'grid-cols-4' : 'grid-cols-5'} gap-y-1 rounded-lg bg-popover p-1`}>
-                  <SelectionHighlight />
+                <Segmented aria-label="选择比例" className={`grid ${caps.ratios.length > 5 ? 'grid-cols-4' : 'grid-cols-5'} gap-y-1 rounded-lg bg-popover p-1`}>
                   {caps.ratios.map((item) => (
-                    <button
-                      key={item}
-                      type="button"
-                      role="option"
-                      aria-selected={ratio === item}
-                      onClick={() => onRatioChange(item)}
-                      className="flex h-[43px] min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg text-xs hover:bg-secondary/60 transition-colors"
-                    >
+                    <SegmentedItem key={item} value={String(item)} selected={ratio === item} onSelect={() => onRatioChange(item)} className="flex h-[43px] min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg text-xs hover:bg-secondary/60 transition-colors">
                       <RatioIcon ratio={item} box={16} />
                       <span>{ratioLabel(item)}</span>
-                    </button>
+                    </SegmentedItem>
                   ))}
-                </div>
+                </Segmented>
               </Section>
             )}
 
             {caps.resolutions.length > 0 && (
               <Section title="清晰度">
-                <div role="listbox" aria-label="选择清晰度" className={`relative isolate grid h-9 ${caps.resolutions.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'} rounded-lg bg-popover p-0.5`}>
-                  <SelectionHighlight />
+                <Segmented aria-label="选择清晰度" className={`grid h-9 ${caps.resolutions.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'} rounded-lg bg-popover p-0.5`}>
                   {caps.resolutions.map((item) => (
-                    <SegmentButton key={item} selected={resolution === item} onClick={() => onResolutionChange(item)}>
+                    <SegmentedItem key={item} value={String(item)} selected={resolution === item} onSelect={() => onResolutionChange(item)}>
                       {item}
-                    </SegmentButton>
+                    </SegmentedItem>
                   ))}
-                </div>
+                </Segmented>
               </Section>
             )}
 
             {caps.qualities && (
               <Section title="生成档位">
-                <div role="listbox" aria-label="选择生成档位" className="relative isolate grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
-                  <SelectionHighlight />
+                <Segmented aria-label="选择生成档位" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
                   {caps.qualities.map((item) => (
-                    <SegmentButton key={item} selected={effectiveQuality === item} onClick={() => onQualityChange?.(item)}>
+                    <SegmentedItem key={item} value={String(item)} selected={effectiveQuality === item} onSelect={() => onQualityChange?.(item)}>
                       {VIDEO_QUALITY_LABELS[item]}
-                    </SegmentButton>
+                    </SegmentedItem>
                   ))}
-                </div>
+                </Segmented>
               </Section>
             )}
 
             {caps.durations.length > 0 && (
               <Section title="生成时长">
                 {/* seedance/happyhorse 官方是连续整数秒（最多 4-15 共 12 档），多于 4 档改 6 列多行铺开 */}
-                <div
-                  role="listbox"
-                  aria-label="选择生成时长"
-                  className={`relative isolate grid ${caps.durations.length > 4 ? 'grid-cols-6 gap-0.5' : 'h-9 grid-cols-2'} rounded-lg bg-popover p-0.5`}
-                >
-                  <SelectionHighlight />
+                <Segmented aria-label="选择生成时长" className={`grid ${caps.durations.length > 4 ? 'grid-cols-6 gap-0.5' : 'h-9 grid-cols-2'} rounded-lg bg-popover p-0.5`}>
                   {caps.durations.map((item) => (
-                    <SegmentButton key={item} selected={duration === item} onClick={() => onDurationChange(item)}>
+                    <SegmentedItem key={item} value={String(item)} selected={duration === item} onSelect={() => onDurationChange(item)}>
                       {item}s
-                    </SegmentButton>
+                    </SegmentedItem>
                   ))}
-                </div>
+                </Segmented>
               </Section>
             )}
 
             {caps.supportsAudio && (
               <Section title="生成音频">
-                <div role="listbox" aria-label="生成音频开关" className="relative isolate grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
-                  <SelectionHighlight />
-                  <SegmentButton selected={generateAudio} onClick={() => onGenerateAudioChange(true)}>
+                <Segmented aria-label="生成音频开关" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                  <SegmentedItem selected={generateAudio} onSelect={() => onGenerateAudioChange(true)} value="开启">
                     开启
-                  </SegmentButton>
-                  <SegmentButton selected={!generateAudio} onClick={() => onGenerateAudioChange(false)}>
+                  </SegmentedItem>
+                  <SegmentedItem selected={!generateAudio} onSelect={() => onGenerateAudioChange(false)} value="关闭">
                     关闭
-                  </SegmentButton>
-                </div>
+                  </SegmentedItem>
+                </Segmented>
               </Section>
             )}
 
             {caps.supportsWatermark && onWatermarkChange && (
               <Section title="视频水印">
-                <div role="listbox" aria-label="视频水印开关" className="relative isolate grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
-                  <SelectionHighlight />
-                  <SegmentButton selected={watermark} onClick={() => onWatermarkChange(true)}>
+                <Segmented aria-label="视频水印开关" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                  <SegmentedItem selected={watermark} onSelect={() => onWatermarkChange(true)} value="开启">
                     开启
-                  </SegmentButton>
-                  <SegmentButton selected={!watermark} onClick={() => onWatermarkChange(false)}>
+                  </SegmentedItem>
+                  <SegmentedItem selected={!watermark} onSelect={() => onWatermarkChange(false)} value="关闭">
                     关闭
-                  </SegmentButton>
-                </div>
+                  </SegmentedItem>
+                </Segmented>
               </Section>
             )}
           </div>
@@ -232,27 +216,5 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <div className="py-1 px-1 text-xs text-muted-foreground">{title}</div>
       {children}
     </section>
-  );
-}
-
-function SegmentButton({
-  selected,
-  onClick,
-  children,
-}: {
-  selected: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      role="option"
-      aria-selected={selected}
-      onClick={onClick}
-      className="h-8 rounded-md text-center text-sm hover:bg-secondary/60 transition-colors"
-    >
-      {children}
-    </button>
   );
 }

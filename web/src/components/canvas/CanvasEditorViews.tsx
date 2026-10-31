@@ -140,10 +140,13 @@ import {
 import { isSavableCanvasVersion, isShareableCanvasVersion } from '@/pages/canvasTeamActions';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { SwapLabel } from '@/components/ui/swap-label';
-import { SelectionHighlight } from '@/components/ui/selection-highlight';
-import { Input } from '@/components/ui/input';
+import { EditableText } from '@/components/ui/editable-text';
+import { Toggle } from '@/components/ui/toggle';
 import { Slider } from '@/components/ui/slider';
 import { Textarea } from '@/components/ui/textarea';
+import { Hint } from '@/components/ui/tooltip';
+import { Label } from '@/components/ui/label';
+import { Segmented, SegmentedItem } from '@/components/ui/segmented';
 
 export type CanvasFlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
 /** 本地媒体操作（抠图 / 裁剪 / 切图 / 放大）进行中的占位节点：不在文档里，结果节点落地即撤。 */
@@ -306,13 +309,9 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const context = useContext(CanvasNodeContext);
   const setTextEditing = context?.setTextEditing;
   const node = data.domain;
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingText, setIsEditingText] = useState(false);
   const [textDraft, setTextDraft] = useState<string | null>(null);
   const [isEditingInlineText, setIsEditingInlineText] = useState(false);
-  const [titleDraft, setTitleDraft] = useState(node.title);
-  const titleInputRef = useRef<HTMLInputElement>(null);
-  const titleTriggerRef = useRef<HTMLButtonElement>(null);
   const textEditorRef = useRef<HTMLTextAreaElement>(null);
   const textEditingExitRequested = useRef(false);
   const textSelectionRef = useRef<{
@@ -321,8 +320,6 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     direction: 'forward' | 'backward' | 'none';
   } | null>(null);
   const contentSurfaceRef = useRef<HTMLElement>(null);
-  const titleExitInProgress = useRef(false);
-  const restoreTitleFocus = useRef(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [toolbarOverlayOpen, setToolbarOverlayOpen] = useState(false);
   const [panelSide, setPanelSide] = useState<CanvasPanelSide>('below');
@@ -362,14 +359,6 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const materialPickEligible = Boolean(context?.materialPick?.selectableNodeIds.has(node.id));
   const [shellElement, setShellElement] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (!isEditingTitle) setTitleDraft(node.title);
-  }, [isEditingTitle, node.title]);
-  useEffect(() => {
-    if (!isEditingTitle) return;
-    titleInputRef.current?.focus();
-    titleInputRef.current?.select();
-  }, [isEditingTitle]);
-  useEffect(() => {
     if (!isEditingText) return;
     const editor = textEditorRef.current;
     editor?.focus();
@@ -400,12 +389,6 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     return () => window.document.removeEventListener('pointerdown', finishOnOutsidePointer, true);
   }, [isEditingText, node.id, setTextEditing]);
   useEffect(() => () => setTextEditing?.(node.id, false), [node.id, setTextEditing]);
-  useEffect(() => {
-    if (isEditingTitle) return;
-    if (restoreTitleFocus.current) titleTriggerRef.current?.focus();
-    restoreTitleFocus.current = false;
-    titleExitInProgress.current = false;
-  }, [isEditingTitle, node.title]);
   useEffect(() => {
     if (!selected && !toolbarOverlayOpen) return;
     const controls = toolbarControls(toolbarRef.current);
@@ -492,31 +475,6 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const mediaCandidates = candidatePresentation?.current ?? [];
   // 已隐藏的节点照样给出「显示」。
   const hasHideableContent = canvasNodeHasHideableContent(node, content);
-
-  function beginTitleEditing() {
-    titleExitInProgress.current = false;
-    restoreTitleFocus.current = false;
-    setTitleDraft(node.title);
-    setIsEditingTitle(true);
-  }
-
-  function finishTitleEditing(restoreFocus: boolean) {
-    if (titleExitInProgress.current) return;
-    titleExitInProgress.current = true;
-    const title = titleDraft.trim();
-    setTitleDraft(title || node.title);
-    setIsEditingTitle(false);
-    restoreTitleFocus.current = restoreFocus;
-    if (title && title !== node.title) renameNode(node.id, title);
-  }
-
-  function cancelTitleEditing() {
-    if (titleExitInProgress.current) return;
-    titleExitInProgress.current = true;
-    restoreTitleFocus.current = true;
-    setTitleDraft(node.title);
-    setIsEditingTitle(false);
-  }
 
   function beginTextEditing() {
     if (!context || node.type !== 'text' || isEditingText) return;
@@ -634,64 +592,28 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           className="flex min-w-0 flex-1 items-center gap-1.5"
           onPointerDown={event => event.stopPropagation()}
           onClick={event => event.stopPropagation()}
-          onDoubleClick={event => {
-            event.stopPropagation();
-            if (isEditingTitle) return;
-            event.preventDefault();
-            beginTitleEditing();
-          }}
         >
           {nodeIcon(node)}
-          {isEditingTitle ? (
-            <Input variant="bare"
-              ref={titleInputRef}
-              value={titleDraft}
-              maxLength={120}
-              aria-label={`重命名节点 ${node.title}`}
-              className="nodrag nowheel h-7 min-w-0 flex-1 border-0 border-b border-dashed border-input bg-transparent px-0 text-xs font-medium text-foreground outline-none focus-visible:border-ring"
-              onChange={event => setTitleDraft(event.target.value)}
-              onBlur={() => finishTitleEditing(false)}
-              onKeyDown={event => {
-                event.stopPropagation();
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  finishTitleEditing(true);
-                } else if (event.key === 'Escape') {
-                  event.preventDefault();
-                  cancelTitleEditing();
-                }
-              }}
-            />
-          ) : (
-            <button
-              ref={titleTriggerRef}
-              type="button"
-              title="双击或按 Enter 重命名节点"
-              aria-label={`重命名节点 ${node.title}`}
-              className="nodrag min-w-0 truncate border-b border-dashed border-transparent text-left text-xs font-medium text-foreground transition-colors hover:border-current focus-visible:border-current focus-visible:outline-none"
-              onKeyDown={event => {
-                if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'F2') return;
-                event.preventDefault();
-                event.stopPropagation();
-                beginTitleEditing();
-              }}
-            >
-              {node.title}
-            </button>
-          )}
+          <EditableText
+            value={node.title}
+            maxLength={120}
+            size="sm"
+            triggerLabel={`重命名节点 ${node.title}`}
+            className="nodrag min-w-0 font-medium text-foreground"
+            onSave={title => renameNode(node.id, title)}
+          />
         </span>
         {context.layerParentByNodeId?.get(node.id) && (
-          <button
+          <Hint label={context.layerParentByNodeId.get(node.id)!.title}><Button variant="bare"
             type="button"
             className="nodrag ml-2 flex shrink-0 items-center gap-1 rounded-sm px-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             aria-label={`定位父图层：${context.layerParentByNodeId.get(node.id)!.title}`}
-            title={context.layerParentByNodeId.get(node.id)!.title}
             onPointerDown={event => event.stopPropagation()}
             onClick={event => {
               event.stopPropagation();
               context.locateNode?.(context.layerParentByNodeId!.get(node.id)!.nodeId);
             }}
-          ><Layers3 className="size-3" aria-hidden="true" />父图层</button>
+          ><Layers3 className="size-3" aria-hidden="true" />父图层</Button></Hint>
         )}
         {layerStackInfo && (
           <span className="ml-2 shrink-0 truncate tabular-nums" aria-label={`图层栈尺寸 ${layerStackInfo}`}>
@@ -996,18 +918,17 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
               imageWidth={content.width ?? 1024} imageHeight={content.height ?? 1024}
               fit={node.data.display.free_resize ? 'fill' : node.data.display.fit}
               className="pointer-events-none absolute inset-0 size-full" />}
-            <button type="button" aria-label="显示标注" aria-pressed={node.data.annotation.visible}
-              className={cn('nodrag nopan absolute right-2.5 top-2.5 z-10 flex h-7 items-center gap-1.5 rounded-md border border-border bg-glass px-2 text-xs backdrop-blur-glass',
-                node.data.annotation.visible ? 'text-foreground' : 'text-muted-foreground')}
+            <Toggle size="sm" aria-label="显示标注" pressed={node.data.annotation.visible}
+              className="nodrag nopan absolute right-2.5 top-2.5 z-10 h-7 gap-1.5 border-border bg-glass px-2 text-xs font-normal backdrop-blur-glass data-[state=on]:bg-glass"
               onPointerDown={event => event.stopPropagation()}
-              onClick={event => {
-                event.stopPropagation();
+              onClick={event => event.stopPropagation()}
+              onPressedChange={() => {
                 context.recordHistory();
                 context.updateNode(node.id, current => current.type === 'image' && current.data.annotation
                   ? { ...current, data: { ...current.data, annotation: { ...current.data.annotation, visible: !current.data.annotation.visible } } } : current);
               }}>
-              <Pencil size={14} /><span>标注 {node.data.annotation.elements.length}</span>
-            </button>
+              <Pencil /><span>标注 {node.data.annotation.elements.length}</span>
+            </Toggle>
           </>}
           {node.type === 'image' && content?.kind === 'image' && context.showImageInfo
             && (node.size?.height ?? 176) >= 96 && (node.size?.width ?? 320) >= 160 && (
@@ -1419,7 +1340,7 @@ function MediaCandidateBatch({
         />
       )}
       {entries.length > 1 && (
-        <button
+        <Button variant="bare"
           type="button"
           className="pointer-events-auto absolute right-2 top-2 z-20 inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-glass px-3 text-xs font-medium text-foreground backdrop-blur-glass transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           aria-label={`${expanded ? '收起' : '展开'} ${entries.length} 个候选结果`}
@@ -1432,7 +1353,7 @@ function MediaCandidateBatch({
         >
           {entries.length} 个候选
           <ChevronRight className={cn('size-3.5 transition-transform', expanded && 'rotate-90')} aria-hidden="true" />
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -1501,10 +1422,9 @@ function MediaCandidateCard({
         {number}
       </span>
       {!disabled && version?.kind === node.type && (
-        <button
+        <Hint label="设为主结果"><Button variant="bare"
           type="button"
           aria-label={`将候选 ${number} 设为主结果`}
-          title="设为主结果"
           className="absolute bottom-2 left-2 grid size-8 place-items-center rounded-full border border-border bg-glass text-muted-foreground backdrop-blur-glass transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           onClick={event => {
             event.stopPropagation();
@@ -1512,7 +1432,7 @@ function MediaCandidateCard({
           }}
         >
           <Check className="size-4" aria-hidden="true" />
-        </button>
+        </Button></Hint>
       )}
       {terminalFailure && !disabled && (
         <CandidateFailureActions
@@ -1536,10 +1456,9 @@ function CandidateFailureActions({
 }) {
   return (
     <div className="pointer-events-auto absolute bottom-2 right-2 z-20 flex items-center gap-1.5">
-      <button
+      <Hint label="删除这个失败槽位"><Button variant="bare"
         type="button"
         aria-label={`删除候选 ${number}`}
-        title="删除这个失败槽位"
         className="grid size-8 place-items-center rounded-full border border-border bg-glass text-muted-foreground backdrop-blur-glass transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         onClick={event => {
           event.stopPropagation();
@@ -1547,7 +1466,7 @@ function CandidateFailureActions({
         }}
       >
         <Trash2 className="size-4" aria-hidden="true" />
-      </button>
+      </Button></Hint>
     </div>
   );
 }
@@ -2369,7 +2288,7 @@ export function CanvasGenerationComposer({
         />
       )}
       {promptCollapsed ? (
-        <button
+        <Button variant="bare"
           type="button"
           aria-label="展开提示词"
           className="block w-full rounded-md px-3 pb-1 pt-3 text-left transition-colors hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -2380,7 +2299,7 @@ export function CanvasGenerationComposer({
             {canvasPromptSummary(draft.prompt, mentionReferences)}
           </p>
           <span className="block text-right text-xs text-muted-foreground">展开</span>
-        </button>
+        </Button>
       ) : (
       <CanvasPromptInput
         value={draft.prompt}
@@ -2669,10 +2588,9 @@ function CanvasVideoFrameConnections({
         onSelect={sourceNodeId => onChange({ ...current, first_frame: sourceNodeId })}
       />
       {maxFrames >= 2 && (
-        <button
+        <Hint label="互换首尾帧"><Button variant="bare"
           type="button"
           aria-label="互换首尾帧"
-          title="互换首尾帧"
           disabled={!current.first_frame && !current.last_frame}
           className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
           onClick={() => onChange({
@@ -2681,7 +2599,7 @@ function CanvasVideoFrameConnections({
           })}
         >
           <ArrowLeftRight className="size-4" aria-hidden="true" />
-        </button>
+        </Button></Hint>
       )}
       {maxFrames >= 2 && (
         <CanvasVideoFrameSlot
@@ -2725,11 +2643,10 @@ function CanvasVideoFrameSlot({
   const rotate = tilt === 'left' ? '-rotate-3' : 'rotate-3';
   return (
     <div className={cn('relative size-14 shrink-0', rotate)}>
-      <button
+      <Hint label={selected ? `预览${label}` : `在画布选择${label}`}><Button variant="bare"
         type="button"
         disabled={materials.length === 0}
         aria-label={selected ? `预览${label} ${selected.title}` : `在画布选择${label}`}
-        title={selected ? `预览${label}` : `在画布选择${label}`}
         className={cn(
           'grid size-14 place-items-center overflow-hidden rounded-lg border border-dashed bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40',
           picking ? 'border-primary text-foreground' : 'border-border',
@@ -2744,17 +2661,16 @@ function CanvasVideoFrameSlot({
             <span className="text-xs">{selectedNodeId ? '失效' : label}</span>
           </span>
         )}
-      </button>
+      </Button></Hint>
       {selectedNodeId && (
-        <button
+        <Hint label={`移除${label}`}><Button variant="bare"
           type="button"
           aria-label={`移除${label}`}
-          title={`移除${label}`}
           className="absolute -right-1 -top-1 z-10 grid size-5 place-items-center rounded-full border border-border bg-background text-muted-foreground transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           onClick={() => onSelect(null)}
         >
           <X className="size-3" aria-hidden="true" />
-        </button>
+        </Button></Hint>
       )}
       {selected && (
         <span className="pointer-events-none absolute inset-x-1 bottom-1 rounded bg-background/80 px-1 text-center text-xs text-foreground">
@@ -2886,10 +2802,9 @@ function CanvasMaterialConnections({
               onDragEnd={finishDrag}
               className={cn('relative size-12 shrink-0', onReorder && connected.length > 1 && 'cursor-grab active:cursor-grabbing')}
             >
-              <button
+              <Hint label={`${reference.label} · ${reference.title}`}><Button variant="bare"
                 type="button"
                 aria-label={`查看已对接素材 ${reference.title}`}
-                title={`${reference.label} · ${reference.title}`}
                 aria-describedby={detailVisible ? `canvas-material-detail-${reference.nodeId}` : undefined}
                 className="relative grid size-12 place-items-center overflow-hidden rounded-lg border border-border bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 onMouseEnter={event => showMaterialDetail(reference, event.currentTarget)}
@@ -2899,27 +2814,26 @@ function CanvasMaterialConnections({
                 onClick={() => { if (!draggedRef.current) onPreview(reference); }}
               >
                 <CanvasMaterialPreview reference={reference} />
-                {reference.annotated && <span title="带标注" className="absolute bottom-0 right-0 z-10 grid size-3.5 place-items-center rounded-full border border-primary bg-popover text-primary"><Pencil size={10} /></span>}
+                {reference.annotated && <Hint label="带标注"><span className="absolute bottom-0 right-0 z-10 grid size-3.5 place-items-center rounded-full border border-primary bg-popover text-primary"><Pencil size={10} /></span></Hint>}
                 <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-xs text-foreground">
                   {reference.label}
                 </span>
-              </button>
-              <button
+              </Button></Hint>
+              <Button variant="bare"
                 type="button"
                 aria-label={`取消对接素材 ${reference.title}`}
                 className="absolute -right-1 -top-1 z-10 grid size-5 place-items-center rounded-full border border-border bg-background text-muted-foreground transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 onClick={() => onConnectedChange(reference.nodeId, false)}
               >
                 <X className="size-3" aria-hidden="true" />
-              </button>
+              </Button>
             </Reorder.Item>
           );
         })}
         </Reorder.Group>
-        <button
+        <Hint label="在画布选择素材"><Button variant="bare"
           type="button"
           aria-label={`为 ${node.title} 在画布选择素材`}
-          title="在画布选择素材"
           disabled={!choices.some(reference => (
             !connectedNodeIds.has(reference.nodeId) && !unavailableReason(reference)
           ))}
@@ -2934,7 +2848,7 @@ function CanvasMaterialConnections({
           ))))}
         >
           <Plus className="size-5" aria-hidden="true" />
-        </button>
+        </Button></Hint>
       </div>
       {hoveredMaterial && <CanvasMaterialHoverDetail {...hoveredMaterial} />}
     </>
@@ -3103,15 +3017,14 @@ function CandidateGrid({
               {candidate.index + 1}
             </span>
             {!actionsDisabled && candidate.version_id && candidate.version_id !== primaryVersionId && (
-              <button
+              <Hint label="设为主结果"><Button variant="bare"
                 type="button"
                 aria-label={`将候选 ${candidate.index + 1} 设为主结果`}
-                title="设为主结果"
                 className="absolute bottom-1.5 left-1.5 grid size-7 place-items-center rounded-full border border-border bg-background/90 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 onClick={() => context.selectCandidate(nodeId, candidate.version_id!)}
               >
                 <Check className="size-3.5" aria-hidden="true" />
-              </button>
+              </Button></Hint>
             )}
           </div>
         );
@@ -3135,7 +3048,7 @@ export function ToolButton({ label, active, disabled, onClick, children, buttonR
   controlsId?: string;
   popup?: 'menu' | 'dialog' | false;
 }) {
-  return <button ref={buttonRef} type="button" title={label} aria-label={label} aria-pressed={active} aria-expanded={expanded} aria-controls={controlsId} aria-haspopup={controlsId && popup ? popup : undefined} disabled={disabled} onClick={onClick} className={cn('grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-30', active && 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground')}>{children}</button>;
+  return <Hint label={label}><Button variant="bare" ref={buttonRef} type="button" aria-label={label} aria-pressed={active} aria-expanded={expanded} aria-controls={controlsId} aria-haspopup={controlsId && popup ? popup : undefined} disabled={disabled} onClick={onClick} className={cn('grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-30', active && 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground')}>{children}</Button></Hint>;
 }
 
 // forwardRef + 透传其余属性：作为 Radix DropdownMenuTrigger 的 asChild 子元素时要接住它注入的
@@ -3153,11 +3066,10 @@ const MediaToolButton = forwardRef<HTMLButtonElement, {
     ref,
   ) {
     return (
-      <button
+      <Hint label={label}><Button variant="bare"
         {...rest}
         ref={ref}
         type="button"
-        title={label}
         aria-label={label}
         disabled={disabled}
         className={cn(
@@ -3172,7 +3084,7 @@ const MediaToolButton = forwardRef<HTMLButtonElement, {
       >
         <span aria-hidden="true" className="[&_svg]:size-3.5">{children}</span>
         <span className="text-xs">{text}</span>
-      </button>
+      </Button></Hint>
     );
   },
 );
@@ -3184,9 +3096,8 @@ function MediaToolLink({ label, text, href, children }: {
   children: React.ReactNode;
 }) {
   return (
-    <a
+    <Hint label={label}><a
       href={href}
-      title={label}
       aria-label={label}
       className={cn(
         'nodrag flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
@@ -3196,12 +3107,12 @@ function MediaToolLink({ label, text, href, children }: {
     >
       <span aria-hidden="true" className="[&_svg]:size-3.5">{children}</span>
       {text && <span className="text-xs">{text}</span>}
-    </a>
+    </a></Hint>
   );
 }
 
 export function AddMenuButton({ icon, title, description, onClick, disabledReason }: { icon: React.ReactNode; title: string; description?: string; onClick: () => void; disabledReason?: string }) {
-  return <button type="button" role="menuitem" onClick={onClick} disabled={Boolean(disabledReason)} title={disabledReason} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"><span className="grid size-9 shrink-0 place-items-center rounded-md bg-secondary text-muted-foreground">{icon}</span><span className="min-w-0"><span className="block text-sm font-medium">{title}</span>{description && <span className="block truncate text-xs text-muted-foreground">{description}</span>}</span></button>;
+  return <Hint label={disabledReason}><Button variant="bare" type="button" role="menuitem" onClick={onClick} disabled={Boolean(disabledReason)} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"><span className="grid size-9 shrink-0 place-items-center rounded-md bg-secondary text-muted-foreground">{icon}</span><span className="min-w-0"><span className="block text-sm font-medium">{title}</span>{description && <span className="block truncate text-xs text-muted-foreground">{description}</span>}</span></Button></Hint>;
 }
 
 function contentForNode(
@@ -3365,7 +3276,7 @@ export function CanvasLayerStackSurface({
                 留空会自动识别主要图层。也可以明确要求：对输入图进行精确图层分离，识别并独立拆分标题文字、辅助文案、主体与装饰元素；调整指定文字图层和元素位置，同时保持原始画面风格、光影、色调和质感不变。
               </p>
             </div>
-            <label className="space-y-2 pr-7 text-xs text-muted-foreground">
+            <Label className="space-y-2 pr-7 text-xs text-muted-foreground">
               <span>模型</span>
               <span className="nodrag flex">
                 <CanvasModelPicker
@@ -3379,7 +3290,7 @@ export function CanvasLayerStackSurface({
                   }}
                 />
               </span>
-            </label>
+            </Label>
             <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
               <span>提示词</span>
               {busy ? (
@@ -3411,26 +3322,17 @@ export function CanvasLayerStackSurface({
             </div>
             <div className="space-y-1.5 text-xs text-muted-foreground">
               <span>分辨率</span>
-              <div role="listbox" aria-label="选择拆分分辨率" className="relative isolate grid grid-cols-4 rounded-lg bg-popover p-0.5">
-                <SelectionHighlight />
+              <Segmented aria-label="选择拆分分辨率" className="grid grid-cols-4 rounded-lg bg-popover p-0.5">
                 {(['auto', '1K', '1.5K', '2K'] as const).map(resolution => (
-                  <button
-                    key={resolution}
-                    type="button"
-                    role="option"
-                    aria-selected={node.data.resolution === resolution}
-                    disabled={busy}
-                    onClick={() => {
+                  <SegmentedItem key={resolution} value={String(resolution)} selected={node.data.resolution === resolution} disabled={busy} onSelect={() => {
                       if (node.data.resolution === resolution) return;
                       context.recordHistory();
                       updateDraft({ resolution });
-                    }}
-                    className="nodrag h-8 rounded-md px-1 text-center text-sm text-foreground transition-colors hover:bg-secondary/60 disabled:opacity-50"
-                  >
+                    }} className="nodrag h-8 rounded-md px-1 text-center text-sm text-foreground transition-colors hover:bg-secondary/60 disabled:opacity-50">
                     {resolution === 'auto' ? '智能' : resolution}
-                  </button>
+                  </SegmentedItem>
                 ))}
-              </div>
+              </Segmented>
             </div>
             {node.data.error && (
               <p role="alert" className="line-clamp-3 text-xs leading-relaxed text-[color:var(--status-failed)]">
@@ -3693,7 +3595,7 @@ function MediaPreview({
           onClick={stopCanvasInteraction}
           onKeyDown={stopCanvasInteraction}
         >
-          <button
+          <Button variant="bare"
             type="button"
             aria-label={`${videoPlaying ? '暂停' : '播放'} ${mediaLabel}`}
             className="grid size-7 shrink-0 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -3704,24 +3606,24 @@ function MediaPreview({
                 ? <Pause className="size-4" aria-hidden="true" />
                 : <Play className="size-4" aria-hidden="true" />}
             </SwapIcon>
-          </button>
+          </Button>
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{formatMediaTime(videoCurrentTime)}</span>
           <Slider
             aria-label="视频播放进度"
             min={0}
             max={videoDuration || 0}
-            step="any"
-            value={Math.min(videoCurrentTime, videoDuration || 0)}
-            className="range-progress min-w-0 flex-1"
-            style={{ '--progress': `${videoDuration ? Math.min(100, (videoCurrentTime / videoDuration) * 100) : 0}%` } as React.CSSProperties}
-            onChange={event => seekVideo(Number(event.currentTarget.value))}
+            step={0.01}
+            value={[Math.min(videoCurrentTime, videoDuration || 0)]}
+            // 进度条不显示滑钮（飙哥 2026-09-14），滑钮缩成 0 只保留拖拽与键盘。
+            className="min-w-0 flex-1 py-1.5 [&_[role=slider]]:size-0 [&_[role=slider]]:border-0"
+            onValueChange={([next]) => seekVideo(next)}
           />
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
             -{formatMediaTime(Math.max(0, videoDuration - videoCurrentTime))}
           </span>
           {/* 命名 group：节点卡片自己就是 .group，裸 group-hover 会在悬停整个节点时把音量弹出来。 */}
           <div className="group/volume relative shrink-0">
-            <button
+            <Button variant="bare"
               type="button"
               aria-label={`${videoMuted ? '取消静音' : '静音'} ${mediaLabel}`}
               className="grid size-7 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -3732,30 +3634,29 @@ function MediaPreview({
                   ? <VolumeX className="size-4" aria-hidden="true" />
                   : <Volume2 className="size-4" aria-hidden="true" />}
               </SwapIcon>
-            </button>
+            </Button>
             <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 pb-1 opacity-0 transition-opacity group-focus-within/volume:pointer-events-auto group-focus-within/volume:opacity-100 group-hover/volume:pointer-events-auto group-hover/volume:opacity-100">
               <div className="grid h-24 w-7 place-items-center rounded-lg border border-border bg-glass py-2 backdrop-blur-glass">
                 <Slider
                   aria-label="视频音量"
-                  aria-orientation="vertical"
+                  orientation="vertical"
                   min={0}
                   max={1}
                   step={0.05}
-                  value={videoMuted ? 0 : videoVolume}
-                  className="h-full w-4 accent-primary [direction:rtl] [writing-mode:vertical-lr]"
-                  onChange={event => setVolume(Number(event.currentTarget.value))}
+                  value={[videoMuted ? 0 : videoVolume]}
+                  onValueChange={([next]) => setVolume(next)}
                 />
               </div>
             </div>
           </div>
-          <button
+          <Button variant="bare"
             type="button"
             aria-label={`全屏播放 ${mediaLabel}`}
             className="grid size-7 shrink-0 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             onClick={showVideoFullscreen}
           >
             <Maximize2 className="size-4" aria-hidden="true" />
-          </button>
+          </Button>
         </div>
       </div>
     );

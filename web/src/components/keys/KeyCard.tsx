@@ -1,6 +1,7 @@
 import { Pencil, Trash2 } from 'lucide-react';
 import { modelModality } from '@/api/keys';
 import { providerLabel } from '@/lib/providerLabels';
+import { Button } from '@/components/ui/button';
 
 export interface KeyRow {
   alias: string;
@@ -91,22 +92,22 @@ export function KeyCard({ row, onEdit, onDelete }: Props) {
         )}
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <button
+        <Button variant="bare"
           type="button"
           onClick={onEdit}
           className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           aria-label={`编辑 ${row.alias}`}
         >
           <Pencil size={14} aria-hidden />
-        </button>
-        <button
+        </Button>
+        <Button variant="bare"
           type="button"
           onClick={onDelete}
           aria-label={`删除 ${row.alias}`}
           className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
         >
           <Trash2 size={14} aria-hidden />
-        </button>
+        </Button>
       </div>
     </div>
   );

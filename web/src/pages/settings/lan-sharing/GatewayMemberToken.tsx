@@ -1,6 +1,9 @@
 import { useState } from 'react';
+import { Toggle } from '@/components/ui/toggle';
 import { Check, Copy, Eye, EyeOff } from 'lucide-react';
 import { revealGatewayKey } from '@/api/gateway';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
 
 export function GatewayMemberToken({ id, name, onError }: {
   id: string; name: string; onError: (message: string) => void;
@@ -18,17 +21,16 @@ export function GatewayMemberToken({ id, name, onError }: {
     } catch (error) { onError(String(error)); }
     finally { setBusy(false); }
   }
-  const button = 'inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:opacity-50';
   return <>
-    <button type="button" className={button} disabled={busy} title={token ? '隐藏密钥' : '查看密钥'}
-      aria-label={`${token ? '隐藏' : '查看'} ${name} 的密钥`} aria-pressed={Boolean(token)}
-      onClick={() => { if (token) setToken(null); else void read(false); }}>
-      {token ? <EyeOff size={14} aria-hidden /> : <Eye size={14} aria-hidden />}
-    </button>
-    <button type="button" className={button} disabled={busy} title={copied ? '已复制' : '复制密钥'}
+    <Hint label={token ? '隐藏密钥' : '查看密钥'}><Toggle size="sm" className="size-7 min-w-7 px-0" disabled={busy}
+      aria-label={`${token ? '隐藏' : '查看'} ${name} 的密钥`} pressed={Boolean(token)}
+      onPressedChange={pressed => { if (pressed) void read(false); else setToken(null); }}>
+      {token ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+    </Toggle></Hint>
+    <Hint label={copied ? '已复制' : '复制密钥'}><Button variant="ghost" size="icon" className="size-7" type="button" disabled={busy}
       aria-label={`复制 ${name} 的密钥`} onClick={() => { setCopied(false); void read(true); }}>
       {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
-    </button>
+    </Button></Hint>
     <code className="basis-full break-all text-xs select-all">{token ?? '••••••••'}</code>
   </>;
 }

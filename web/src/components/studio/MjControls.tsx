@@ -19,9 +19,10 @@ import {
   type MjParams,
 } from '@/lib/mjParams';
 import { ToolbarPopover } from './ToolbarPopover';
-import { SelectionHighlight } from '@/components/ui/selection-highlight';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
+import { Segmented, SegmentedItem } from '@/components/ui/segmented';
 
 interface Props {
   value: MjParams;
@@ -49,7 +50,7 @@ export function MjControls({
 
   return (
     <div ref={wrapRef} className="relative shrink-0">
-      <button
+      <Button variant="bare"
         type="button"
         aria-label="Midjourney 参数"
         aria-expanded={open}
@@ -60,7 +61,7 @@ export function MjControls({
       >
         <Sparkles size={14} aria-hidden />
         <span className="truncate">{evolink ? 'Fast · Standard' : mjSummary(value)}</span>
-      </button>
+      </Button>
 
       <ToolbarPopover
         open={open}
@@ -72,134 +73,121 @@ export function MjControls({
       >
         <div className="space-y-4">
           {!evolink && <Section title="模型">
-            <div role="listbox" aria-label="选择 Midjourney 模型" className="relative isolate grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
-              <SelectionHighlight />
+            <Segmented aria-label="选择 Midjourney 模型" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
               {MJ_BOT_TYPES.map((item) => (
-                <SegmentButton
-                  key={item.value}
-                  selected={value.botType === item.value}
-                  // 切模型要一起纠版本：两套体系的版本号不通用（--v 7 vs --niji 6），
-                  // 留着旧值等于发一个不存在的组合。
-                  onClick={() => onChange(withTileGate({
+                <SegmentedItem key={item.value} value={String(item.value)} selected={value.botType === item.value} onSelect={() => onChange(withTileGate({
                     botType: item.value,
                     version: normalizeVersion(item.value, value.version),
-                  }, value))}
-                >
+                  }, value))} className="text-xs">
                   {item.label}
-                </SegmentButton>
+                </SegmentedItem>
               ))}
-            </div>
+            </Segmented>
           </Section>}
 
           {!evolink && <Section
             title="版本"
             hint={value.botType === 'NIJI_JOURNEY' ? 'niji 自己的版本号，与 Midjourney 不通用' : undefined}
           >
-            <Select variant="bare"
-              aria-label="选择版本"
+            <Select
               value={value.version}
-              onChange={(e) => onChange(withTileGate({ version: e.target.value }, value))}
-              className="h-9 w-full rounded-lg border border-input bg-popover px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary/60"
+              onValueChange={(version) => onChange(withTileGate({ version }, value))}
             >
-              {versionsFor(value.botType).map((item) => (
-                <option key={item} value={item}>
-                  {value.botType === 'NIJI_JOURNEY' ? `niji ${item}` : `v${item}`}
-                </option>
-              ))}
+              <SelectTrigger aria-label="选择版本"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {versionsFor(value.botType).map((item) => (
+                  <SelectItem key={item} value={item}>
+                    {value.botType === 'NIJI_JOURNEY' ? `niji ${item}` : `v${item}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
           </Section>}
 
           {!evolink && <Section title="速度档">
-            <div role="listbox" aria-label="选择速度档" className="relative isolate grid h-9 grid-cols-3 rounded-lg bg-popover p-0.5">
-              <SelectionHighlight />
+            <Segmented aria-label="选择速度档" className="grid h-9 grid-cols-3 rounded-lg bg-popover p-0.5">
               {MJ_MODES.map((item) => (
-                <SegmentButton key={item.value} selected={value.mode === item.value} onClick={() => onChange({ mode: item.value })}>
+                <SegmentedItem key={item.value} value={String(item.value)} selected={value.mode === item.value} onSelect={() => onChange({ mode: item.value })} className="text-xs">
                   {item.label}
-                </SegmentButton>
+                </SegmentedItem>
               ))}
-            </div>
+            </Segmented>
           </Section>}
 
           <Section title="风格化 stylize" hint="越高越有 MJ 自己的美术判断，越低越贴着 prompt">
-            <div role="listbox" aria-label="选择风格化强度" className="relative isolate grid grid-cols-6 gap-0.5 rounded-lg bg-popover p-0.5">
-              <SelectionHighlight />
+            <Segmented aria-label="选择风格化强度" className="grid grid-cols-6 gap-0.5 rounded-lg bg-popover p-0.5">
               {MJ_STYLIZE_STEPS.map((item) => (
-                <SegmentButton key={item} selected={value.stylize === item} onClick={() => onChange({ stylize: item })}>
+                <SegmentedItem key={item} value={String(item)} selected={value.stylize === item} onSelect={() => onChange({ stylize: item })} className="text-xs">
                   {item}
-                </SegmentButton>
+                </SegmentedItem>
               ))}
-            </div>
+            </Segmented>
           </Section>
 
           {filledRefs.image && (
             <Section title="垫图权重 iw" hint="图片槽那张对结果的影响强度">
-              <div role="listbox" aria-label="选择垫图权重" className="relative isolate grid h-9 grid-cols-5 rounded-lg bg-popover p-0.5">
-                <SelectionHighlight />
-                <SegmentButton selected={value.iw === null} onClick={() => onChange({ iw: null })}>默认</SegmentButton>
+              <Segmented aria-label="选择垫图权重" className="grid h-9 grid-cols-5 rounded-lg bg-popover p-0.5">
+                <SegmentedItem selected={value.iw === null} onSelect={() => onChange({ iw: null })} value="默认" className="text-xs">默认</SegmentedItem>
                 {MJ_IW_STEPS.map((item) => (
-                  <SegmentButton key={item} selected={value.iw === item} onClick={() => onChange({ iw: item })}>
+                  <SegmentedItem key={item} value={String(item)} selected={value.iw === item} onSelect={() => onChange({ iw: item })} className="text-xs">
                     {item}
-                  </SegmentButton>
+                  </SegmentedItem>
                 ))}
-              </div>
+              </Segmented>
             </Section>
           )}
 
           {filledRefs.sref && (
             <Section title="风格权重 sw" hint="风格参考图的影响强度（0-1000）">
-              <div role="listbox" aria-label="选择风格权重" className="relative isolate grid h-9 grid-cols-6 rounded-lg bg-popover p-0.5">
-                <SelectionHighlight />
-                <SegmentButton selected={value.sw === null} onClick={() => onChange({ sw: null })}>默认</SegmentButton>
+              <Segmented aria-label="选择风格权重" className="grid h-9 grid-cols-6 rounded-lg bg-popover p-0.5">
+                <SegmentedItem selected={value.sw === null} onSelect={() => onChange({ sw: null })} value="默认" className="text-xs">默认</SegmentedItem>
                 {MJ_SW_STEPS.map((item) => (
-                  <SegmentButton key={item} selected={value.sw === item} onClick={() => onChange({ sw: item })}>
+                  <SegmentedItem key={item} value={String(item)} selected={value.sw === item} onSelect={() => onChange({ sw: item })} className="text-xs">
                     {item}
-                  </SegmentButton>
+                  </SegmentedItem>
                 ))}
-              </div>
+              </Segmented>
             </Section>
           )}
 
           {!evolink && filledRefs.cref && (
             <Section title="角色权重 cw" hint="角色参考图的影响强度（0-100）">
-              <div role="listbox" aria-label="选择角色权重" className="relative isolate grid h-9 grid-cols-5 rounded-lg bg-popover p-0.5">
-                <SelectionHighlight />
-                <SegmentButton selected={value.cw === null} onClick={() => onChange({ cw: null })}>默认</SegmentButton>
+              <Segmented aria-label="选择角色权重" className="grid h-9 grid-cols-5 rounded-lg bg-popover p-0.5">
+                <SegmentedItem selected={value.cw === null} onSelect={() => onChange({ cw: null })} value="默认" className="text-xs">默认</SegmentedItem>
                 {MJ_CW_STEPS.map((item) => (
-                  <SegmentButton key={item} selected={value.cw === item} onClick={() => onChange({ cw: item })}>
+                  <SegmentedItem key={item} value={String(item)} selected={value.cw === item} onSelect={() => onChange({ cw: item })} className="text-xs">
                     {item}
-                  </SegmentButton>
+                  </SegmentedItem>
                 ))}
-              </div>
+              </Segmented>
             </Section>
           )}
 
           {!evolink && filledRefs.oref && (
             <Section title="Omni 权重 ow" hint="Omni 参考图的影响强度（0-1000）">
-              <div role="listbox" aria-label="选择 Omni 权重" className="relative isolate grid h-9 grid-cols-6 rounded-lg bg-popover p-0.5">
-                <SelectionHighlight />
-                <SegmentButton selected={value.ow === null} onClick={() => onChange({ ow: null })}>默认</SegmentButton>
+              <Segmented aria-label="选择 Omni 权重" className="grid h-9 grid-cols-6 rounded-lg bg-popover p-0.5">
+                <SegmentedItem selected={value.ow === null} onSelect={() => onChange({ ow: null })} value="默认" className="text-xs">默认</SegmentedItem>
                 {MJ_OW_STEPS.map((item) => (
-                  <SegmentButton key={item} selected={value.ow === item} onClick={() => onChange({ ow: item })}>
+                  <SegmentedItem key={item} value={String(item)} selected={value.ow === item} onSelect={() => onChange({ ow: item })} className="text-xs">
                     {item}
-                  </SegmentButton>
+                  </SegmentedItem>
                 ))}
-              </div>
+              </Segmented>
             </Section>
           )}
 
           <Section title="混乱度 chaos" hint="越高，四张方案之间差异越大">
-            <div role="listbox" aria-label="选择混乱度" className="relative isolate grid grid-cols-5 gap-0.5 rounded-lg bg-popover p-0.5">
-              <SelectionHighlight />
+            <Segmented aria-label="选择混乱度" className="grid grid-cols-5 gap-0.5 rounded-lg bg-popover p-0.5">
               {MJ_CHAOS_STEPS.map((item) => (
-                <SegmentButton key={item} selected={value.chaos === item} onClick={() => onChange({ chaos: item })}>
+                <SegmentedItem key={item} value={String(item)} selected={value.chaos === item} onSelect={() => onChange({ chaos: item })} className="text-xs">
                   {item}
-                </SegmentButton>
+                </SegmentedItem>
               ))}
-            </div>
+            </Segmented>
           </Section>
 
           <Section title="风格编号 sref" hint="只填数字；填写后会暂停使用上传的风格参考图">
-            <Input variant="bare"
+            <Input
               type="text"
               inputMode="numeric"
               maxLength={32}
@@ -207,12 +195,12 @@ export function MjControls({
               onChange={(e) => onChange({ srefCode: e.target.value.replace(/[^0-9]/g, '') })}
               placeholder="例如 1967932137"
               aria-label="sref 编号"
-              className="h-9 w-full rounded-lg border border-input bg-popover px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60"
+              className="w-full"
             />
           </Section>
 
           {!evolink && <Section title="个性化 profile" hint="填写 Midjourney Profile code 或 ID">
-            <Input variant="bare"
+            <Input
               type="text"
               value={value.profile}
               onChange={(e) => {
@@ -224,51 +212,49 @@ export function MjControls({
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
-              className="h-9 w-full rounded-lg border border-input bg-popover px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60"
+              className="w-full"
             />
           </Section>}
 
           <Section title="排除词 no" hint="不想出现的东西，逗号分隔">
-            <Input variant="bare"
+            <Input
               type="text"
               value={value.no}
               onChange={(e) => onChange({ no: e.target.value })}
               placeholder="text, watermark, blur"
               aria-label="排除词"
-              className="h-9 w-full rounded-lg border border-input bg-popover px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60"
+              className="w-full"
             />
           </Section>
 
           <Section title="种子 seed" hint="填同一个种子 + 同一条 prompt 可复现构图">
-            <Input variant="bare"
+            <Input
               type="text"
               inputMode="numeric"
               value={value.seed}
               onChange={(e) => onChange({ seed: e.target.value.replace(/[^0-9]/g, '') })}
               placeholder="留空 = 随机"
               aria-label="种子"
-              className="h-9 w-full rounded-lg border border-input bg-popover px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60"
+              className="w-full"
             />
           </Section>
 
           <Section title="怪异度 weird" hint="往非常规审美偏，和 stylize 是两个方向">
-            <div role="listbox" aria-label="选择怪异度" className="relative isolate grid h-9 grid-cols-4 rounded-lg bg-popover p-0.5">
-              <SelectionHighlight />
+            <Segmented aria-label="选择怪异度" className="grid h-9 grid-cols-4 rounded-lg bg-popover p-0.5">
               {MJ_WEIRD_STEPS.map((item) => (
-                <SegmentButton key={item} selected={value.weird === item} onClick={() => onChange({ weird: item })}>
+                <SegmentedItem key={item} value={String(item)} selected={value.weird === item} onSelect={() => onChange({ weird: item })} className="text-xs">
                   {item}
-                </SegmentButton>
+                </SegmentedItem>
               ))}
-            </div>
+            </Segmented>
           </Section>
 
           {tileSupported(value.botType, value.version) && (
             <Section title="无缝平铺 tile" hint="出可四方连续的贴图">
-              <div role="listbox" aria-label="无缝平铺开关" className="relative isolate grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
-                <SelectionHighlight />
-                <SegmentButton selected={value.tile} onClick={() => onChange({ tile: true })}>开启</SegmentButton>
-                <SegmentButton selected={!value.tile} onClick={() => onChange({ tile: false })}>关闭</SegmentButton>
-              </div>
+              <Segmented aria-label="无缝平铺开关" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                <SegmentedItem selected={value.tile} onSelect={() => onChange({ tile: true })} value="开启" className="text-xs">开启</SegmentedItem>
+                <SegmentedItem selected={!value.tile} onSelect={() => onChange({ tile: false })} value="关闭" className="text-xs">关闭</SegmentedItem>
+              </Segmented>
             </Section>
           )}
         </div>
@@ -292,27 +278,5 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
       {hint && <div className="px-1 pb-1 text-xs text-muted-foreground">{hint}</div>}
       {children}
     </section>
-  );
-}
-
-function SegmentButton({
-  selected,
-  onClick,
-  children,
-}: {
-  selected: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      role="option"
-      aria-selected={selected}
-      onClick={onClick}
-      className="h-8 rounded-md text-center text-xs hover:bg-secondary/60 transition-colors"
-    >
-      {children}
-    </button>
   );
 }

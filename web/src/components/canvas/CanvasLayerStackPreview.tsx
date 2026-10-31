@@ -2,10 +2,13 @@ import { useState } from 'react';
 import { Download, EyeOff } from 'lucide-react';
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { CanvasContentVersion, CanvasLayerStackNode } from '@/schema/canvas';
-import { cn } from '@/lib/utils';
 import { orderedLayerStackParts } from './canvasLayerOrder';
+
+/** ToggleGroup 的值不能为空，「合成预览」用这个占位。 */
+const COMPOSITE = '__composite__';
 
 interface LayerPreviewProps {
   node: CanvasLayerStackNode;
@@ -90,18 +93,22 @@ export function CanvasLayerStackPreview({ node, projectId, resolveVersion, onClo
           </Button>}
         </div>
       </div>
-      {parts.length > 0 && <div className="flex max-h-40 shrink-0 flex-col gap-1 overflow-y-auto md:max-h-none md:w-64" aria-label="详情图层列表">
-        <Button variant="ghost" className="shrink-0 justify-start" aria-pressed={!selected}
-          onClick={() => setSelectedKey(null)}>合成预览</Button>
-        {parts.map(part => <button key={part.key} type="button" aria-label={`查看图层 ${part.name}`}
-          aria-pressed={selected?.key === part.key} onClick={() => { setSelectedKey(part.key); setFailedVersion(null); }}
-          className={cn('flex shrink-0 items-center gap-2 rounded-md p-2 text-left text-sm hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            selected?.key === part.key && 'bg-secondary')}>
+      {parts.length > 0 && <ToggleGroup type="single" orientation="vertical" aria-label="详情图层列表"
+        className="flex max-h-40 w-auto shrink-0 flex-col items-stretch overflow-y-auto md:max-h-none md:w-64"
+        value={selected?.key ?? COMPOSITE}
+        onValueChange={value => {
+          if (!value) return;
+          setSelectedKey(value === COMPOSITE ? null : value);
+          if (value !== COMPOSITE) setFailedVersion(null);
+        }}>
+        <ToggleGroupItem value={COMPOSITE} className="shrink-0 justify-start">合成预览</ToggleGroupItem>
+        {parts.map(part => <ToggleGroupItem key={part.key} value={part.key} aria-label={`查看图层 ${part.name}`}
+          className="h-auto shrink-0 justify-start gap-2 p-2 text-left font-normal whitespace-normal">
           <img src={canvasMediaUrl(projectId, part.versionId, 128)} alt="" loading="lazy" className="size-12 shrink-0 object-contain" />
           <span className="min-w-0 flex-1 break-words">{part.name}</span>
           {!part.visible && <EyeOff aria-label="画布中已隐藏" className="size-4 shrink-0 text-muted-foreground" />}
-        </button>)}
-      </div>}
+        </ToggleGroupItem>)}
+      </ToggleGroup>}
     </div>
     <section className="min-w-0 shrink-0 space-y-1 border-t border-border pt-3" aria-label="提示词">
       <p className="text-xs text-muted-foreground">提示词</p>

@@ -6,18 +6,20 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { deleteCreationAsset, listCreationAssets, markCreationAssetUsed } from '@/api/creationAssets';
 import { AssetCard, AssetDetail } from '@/components/assets/CreationAssetCards';
 import { MediaEditor, PromptEditor } from '@/components/assets/CreationAssetEditors';
-import { CanvasPicker, DeleteAssetDialog, DiscardChangesDialog, PanelTab, ScopeButton } from '@/components/assets/CreationAssetPanelBits';
+import { CanvasPicker, DeleteAssetDialog, DiscardChangesDialog } from '@/components/assets/CreationAssetPanelBits';
 import { errorMessage, type CreationAssetPanelMode, type CreationAssetSaveRequest } from '@/components/assets/creationAssetPanelModel';
 import { TeamLibraryPanel } from '@/components/assets/TeamLibraryPanel';
 import { useAdoptionStaleness } from '@/components/assets/useAdoptionStaleness';
 import { useCreationAssetEditor } from '@/components/assets/useCreationAssetEditor';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { assetMediaContent, renderCreationPrompt, type CreationAsset, type CreationMediaAssetContent } from '@/schema/creationAssets';
 import type { TeamAssetAdoptResponse, TeamLibraryIndexEntry } from '@/schema/teamLibrary';
-import { Select } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export type { CreationAssetPanelMode, CreationAssetSaveRequest, CreationGenerationSource, CreationMediaKind } from '@/components/assets/creationAssetPanelModel';
 
@@ -307,23 +309,23 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
 
       {!selected && !isEditing && (
         <>
-          <div className={cn('grid border-b border-border p-1.5', projectId ? 'grid-cols-4' : teamProjectId ? 'grid-cols-3' : 'grid-cols-2')} role="group" aria-label="资产类型">
-            <PanelTab active={kind === 'prompt'} onClick={() => setKind('prompt')}><FileText />提示词</PanelTab>
-            <PanelTab active={kind === 'media'} onClick={() => setKind('media')}><FileImage />媒体</PanelTab>
-            {projectId && <PanelTab active={kind === 'reference'} onClick={() => setKind('reference')}><FileImage />参考库</PanelTab>}
-            {teamProjectId && <PanelTab active={kind === 'team'} onClick={() => setKind('team')}><Users />团队</PanelTab>}
-          </div>
+          <Tabs className="border-b border-border p-1.5" value={kind} onValueChange={value => setKind(value as typeof kind)}>
+            <TabsList aria-label="资产类型" className={cn('grid w-full', projectId ? 'grid-cols-4' : teamProjectId ? 'grid-cols-3' : 'grid-cols-2')}>
+              <TabsTrigger value="prompt"><FileText />提示词</TabsTrigger>
+              <TabsTrigger value="media"><FileImage />媒体</TabsTrigger>
+              {projectId && <TabsTrigger value="reference"><FileImage />参考库</TabsTrigger>}
+              {teamProjectId && <TabsTrigger value="team"><Users />团队</TabsTrigger>}
+            </TabsList>
+          </Tabs>
           {kind === 'team' && teamProjectId && teamProjectChoices.length > 1 && (
             <div className="border-b border-border p-3">
-              <Select variant="bare"
-                aria-label="画布项目"
-                value={teamProjectId}
-                onChange={event => setPickedTeamProjectId(event.target.value)}
-                className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              >
-                {teamProjectChoices.map(target => (
-                  <option key={target.projectId} value={target.projectId}>{target.name}</option>
-                ))}
+              <Select value={teamProjectId} onValueChange={setPickedTeamProjectId}>
+                <SelectTrigger size="sm" aria-label="画布项目"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {teamProjectChoices.map(target => (
+                    <SelectItem key={target.projectId} value={target.projectId}>{target.name}</SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             </div>
           )}
@@ -340,12 +342,14 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           )}
           {kind !== 'team' && kind !== 'reference' && (
           <div className="space-y-2 border-b border-border p-3">
-            {projectId && <div className="flex gap-1" role="group" aria-label="资产范围"><ScopeButton active={scope === 'all'} onClick={() => setScope('all')}>全部资产</ScopeButton><ScopeButton active={scope === 'project'} onClick={() => setScope('project')}>本项目</ScopeButton></div>}
-            <label className="relative block">
-              <span className="sr-only">搜索创作资产</span>
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索标题、正文或标签" className="pl-9" />
-            </label>
+            {projectId && <ToggleGroup type="single" size="sm" variant="outline" aria-label="资产范围" value={scope} onValueChange={value => { if (value) setScope(value as typeof scope); }}>
+              <ToggleGroupItem value="all">全部资产</ToggleGroupItem>
+              <ToggleGroupItem value="project">本项目</ToggleGroupItem>
+            </ToggleGroup>}
+            <InputGroup>
+              <InputGroupAddon><Search aria-hidden="true" /></InputGroupAddon>
+              <InputGroupInput aria-label="搜索创作资产" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索标题、正文或标签" />
+            </InputGroup>
             {kind === 'prompt' && <Button variant="outline" size="sm" className="w-full" onClick={() => beginPromptEdit()}><Plus />新建提示词资产</Button>}
           </div>
           )}

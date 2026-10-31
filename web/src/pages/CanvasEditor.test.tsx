@@ -557,12 +557,12 @@ it('opens layer-stack details and inspects hidden layers without changing the ca
   const dialog = await screen.findByRole('dialog', { name: '拆分图层' });
   expect(within(dialog).getByLabelText('拆分提示词')).toHaveTextContent('拆出头饰，保持原始色彩。');
   expect(within(dialog).getByRole('img', { name: '拆分图层 合成预览' })).toBeTruthy();
-  fireEvent.click(within(dialog).getByRole('button', { name: '查看图层 金色头饰的完整名称' }));
+  fireEvent.click(within(dialog).getByRole('radio', { name: '查看图层 金色头饰的完整名称' }));
   expect(within(dialog).getByRole('img', { name: '金色头饰的完整名称' })).toHaveAttribute('src', '/media');
   expect(within(dialog).getByText('80 × 40')).toBeTruthy();
   expect(within(dialog).getByText('头饰细节说明')).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '下载原图' })).toHaveAttribute('href', '/download');
-  fireEvent.click(within(dialog).getByRole('button', { name: '合成预览' }));
+  fireEvent.click(within(dialog).getByRole('radio', { name: '合成预览' }));
   expect(within(dialog).getByRole('img', { name: '拆分图层 合成预览' }).querySelector('[data-layer-stack-part="hidden-layer"]')).toBeNull();
   fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -581,7 +581,7 @@ const editSourceVersion = { version_id: 'source-v', kind: 'image' as const, path
   width: 512, height: 512, bytes: 123, created_at: '2026-09-09T00:00:00Z', sha256: 'a'.repeat(64), origin: { kind: 'upload' as const, upload_id: 'source-upload' } };
 
 it('creates a saved edit node before opening it and saves without a run or changing the source draft', async ({ onTestFinished }) => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   onTestFinished(() => { vi.unstubAllGlobals(); });
   const original = imageNode('original', '原图', imageDraft);
   original.data.current_version_id = 'source-v';
@@ -695,7 +695,7 @@ it('merges a new edit result without overwriting newer edit settings or old resu
 });
 
 it('undoes and redoes a configuration saved during an edit run without reverting completed results', async ({ onTestFinished }) => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const state = vi.spyOn(connection, 'useConnectionState').mockReturnValue({ phase: 'ready', generation: 1, editing: true, message: null });
   const events = createTestEventStream();
   vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(events.open())));
@@ -1568,7 +1568,7 @@ async function openTeamTab() {
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: '资产' }));
-  fireEvent.click(await screen.findByRole('button', { name: '团队' }));
+  fireEvent.mouseDown(await screen.findByRole('tab', { name: '团队' }));
 }
 
 it('team tab mounts in place with the current canvas preselected', async () => {
@@ -2617,13 +2617,13 @@ it('opens the team tab for a reminder «look» action', async () => {
   act(() => {
     dispatchTeamAssetAction({ library_id: 'lib_0123456789abcdef', asset_id: 'ta-raw', action: 'open' });
   });
-  expect(await screen.findByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true');
-  fireEvent.click(screen.getByRole('button', { name: '媒体' }));
-  expect(screen.getByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'false');
+  expect(await screen.findByRole('tab', { name: '团队' })).toHaveAttribute('aria-selected', 'true');
+  fireEvent.mouseDown(screen.getByRole('tab', { name: '媒体' }));
+  expect(screen.getByRole('tab', { name: '团队' })).toHaveAttribute('aria-selected', 'false');
   act(() => {
     dispatchTeamAssetAction({ library_id: 'lib_0123456789abcdef', asset_id: 'ta-raw', action: 'open' });
   });
-  await waitFor(() => expect(screen.getByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true'));
+  await waitFor(() => expect(screen.getByRole('tab', { name: '团队' })).toHaveAttribute('aria-selected', 'true'));
 });
 
 it('opens the reminder «look» action on the library it came from', async () => {
@@ -2637,7 +2637,7 @@ it('opens the reminder «look» action on the library it came from', async () =>
   act(() => {
     dispatchTeamAssetAction({ library_id: 'lib_0123456789abcdef', asset_id: 'ta-raw', action: 'open' });
   });
-  await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveValue('lib_0123456789abcdef'));
+  await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveTextContent('角色参考'));
 });
 
 it('does not look up related recipes when inserting the dropped asset fails', async () => {
@@ -2677,7 +2677,7 @@ it('opens the team tab from «look» even after the prompt panel it was suggeste
   fireEvent.click(screen.getByRole('button', { name: '关闭创作资产' }));
   await waitFor(() => expect(screen.queryByRole('complementary', { name: '创作资产' })).not.toBeInTheDocument());
   fireEvent.click(screen.getByRole('button', { name: '看看' }));
-  expect(await screen.findByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true');
+  expect(await screen.findByRole('tab', { name: '团队' })).toHaveAttribute('aria-selected', 'true');
 });
 
 it('suggests related recipes after dropping a raw team asset and opens them', async () => {
@@ -2700,12 +2700,12 @@ it('suggests related recipes after dropping a raw team asset and opens them', as
   expect(listRelatedTeamAssets).toHaveBeenCalledWith('canvas-one', sha);
   vi.mocked(listRelatedTeamAssets).mockClear();
   fireEvent.click(screen.getByRole('button', { name: '看看' }));
-  expect(await screen.findByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true');
+  expect(await screen.findByRole('tab', { name: '团队' })).toHaveAttribute('aria-selected', 'true');
   await waitFor(() => expect(listRelatedTeamAssets).toHaveBeenCalledWith('canvas-one', sha));
 });
 
 it('edits annotations in place, creates an annotated input and refreshes its composite before submitting', async ({ onTestFinished }) => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   onTestFinished(() => { vi.unstubAllGlobals(); });
   const source = imageNode('annotation-source', '标注原图'); source.data.current_version_id = 'source-v';
   const initial = documentWith({ nodes: [source], content_versions: { 'source-v': editSourceVersion } });
@@ -2739,7 +2739,7 @@ it('edits annotations in place, creates an annotated input and refreshes its com
 });
 
 it('hides the generation composer throughout annotation and restores the draft afterwards', async ({ onTestFinished }) => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   onTestFinished(() => { vi.unstubAllGlobals(); });
   const source = imageNode('annotation-result', '生成图片', { ...imageDraft, prompt: '保留我的提示词' });
   source.data.current_version_id = 'source-v';

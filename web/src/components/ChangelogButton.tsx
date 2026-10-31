@@ -14,6 +14,8 @@ import {
   type ChangelogEntry,
 } from '@/lib/changelog';
 import { ANNOUNCEMENTS, OPEN_ANNOUNCEMENT_EVENT, type Announcement } from '@/lib/announcements';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
 
 export const OPEN_CHANGELOG_EVENT = 'atelier:open-changelog';
 
@@ -111,13 +113,13 @@ function AnnouncementBlock({
       )}
       <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{announcement.summary}</p>
       <div className="mt-2 flex justify-end">
-        <button
+        <Button variant="bare"
           type="button"
           onClick={onOpen}
           className="rounded-sm text-xs text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           模型公告
-        </button>
+        </Button>
       </div>
     </section>
   );
@@ -197,11 +199,10 @@ export function ChangelogButton() {
 
   return (
     <>
-      <button
+      <Hint label="查看更新日志"><Button variant="bare"
         ref={anchorRef}
         type="button"
         aria-label={`v${CURRENT_VERSION} 更新日志${unread && !open ? '（有未读更新）' : ''}`}
-        title="查看更新日志"
         aria-haspopup="dialog"
         aria-expanded={open}
         data-testid="changelog-trigger"
@@ -222,18 +223,17 @@ export function ChangelogButton() {
             className="absolute right-0 top-1 size-1.5 rounded-full bg-primary ring-2 ring-background"
           />
         )}
-      </button>
+      </Button></Hint>
 
-      <a
+      <Hint label="GitHub 项目仓库"><a
         href={PROJECT_GITHUB_URL}
         target="_blank"
         rel="noopener noreferrer"
         aria-label="GitHub 项目仓库（新标签页打开）"
-        title="GitHub 项目仓库"
         className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
         <GitHubIcon />
-      </a>
+      </a></Hint>
 
       <ToolbarPopover
         open={open}

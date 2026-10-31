@@ -1,4 +1,4 @@
-import { type ButtonHTMLAttributes, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ButtonHTMLAttributes, forwardRef, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, Bookmark, BookmarkPlus, Download, Eye, EyeOff, Film, Heart, Info, Music, Pencil, Share2, Square, Trash2 } from 'lucide-react';
 
@@ -27,6 +27,9 @@ import {
 import { Lightbox } from '../Lightbox';
 import { WaitingCopy } from './WaitingCopy';
 import { SwapIcon } from '@/components/ui/swap-icon';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 const HISTORY_BATCH_SIZE = 30;
 const MEDIA_ROOT_MARGIN = '600px 0px';
@@ -494,9 +497,9 @@ function PendingBatch({
               {round.cancelRequested ? '停止中' : '停止'}
             </ActionButton>
           )}
-          <p data-testid="pending-run-meta" title="耗时 · 提交时间" className={ROUND_RUN_META_CLASS}>
+          <Hint label="耗时 · 提交时间"><p data-testid="pending-run-meta" className={ROUND_RUN_META_CLASS}>
             {elapsedSec}s · {submittedAt}
-          </p>
+          </p></Hint>
         </div>
       </section>
     </>
@@ -671,10 +674,9 @@ function ReferenceStack({
   const [active, setActive] = useState<number | null>(null);
   if (refs.length === 0) return null;
   return (
-    <button
+    <Hint label="点击复用这组参考素材"><Button variant="bare"
       type="button"
       data-testid="reference-stack"
-      title="点击复用这组参考素材"
       aria-label="复用这组参考素材"
       onClick={() => { void onReuse?.(config, jobId); }}
       onMouseEnter={() => setHover(true)}
@@ -709,7 +711,7 @@ function ReferenceStack({
           </span>
         );
       })}
-    </button>
+    </Button></Hint>
   );
 }
 
@@ -757,7 +759,7 @@ function MentionPrompt({
 
   return (
     <>
-      <p className="line-clamp-2 text-base leading-7 text-foreground" title={prompt}>
+      <Hint label={prompt}><p className="line-clamp-2 text-base leading-7 text-foreground">
         {parts.map((part, i) =>
           typeof part === 'string' ? (
             <span key={i}>{part}</span>
@@ -773,7 +775,7 @@ function MentionPrompt({
             />
           ),
         )}
-      </p>
+      </p></Hint>
       {hover && createPortal(
         <div
           data-testid="round-mention-preview"
@@ -878,35 +880,33 @@ type SaveResultAssetHandler = (request: SaveResultAssetRequest) => void;
 
 function SaveResultButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <button
+    <Hint label="保存为创作资产"><Button variant="bare"
       type="button"
       onClick={(event) => {
         event.stopPropagation();
         onClick();
       }}
       aria-label={label}
-      title="保存为创作资产"
       className={RESULT_ACTION_CLASS}
     >
       <BookmarkPlus className="size-4" aria-hidden />
-    </button>
+    </Button></Hint>
   );
 }
 
 function ShareResultButton({ index, onClick }: { index: number; onClick: () => void }) {
   return (
-    <button
+    <Hint label="分享到团队库"><Button variant="bare"
       type="button"
       onClick={(event) => {
         event.stopPropagation();
         onClick();
       }}
       aria-label={`分享生成结果 ${index + 1}`}
-      title="分享到团队库"
       className={RESULT_ACTION_CLASS}
     >
       <Share2 className="size-4" aria-hidden />
-    </button>
+    </Button></Hint>
   );
 }
 
@@ -945,18 +945,6 @@ function DoneBatch({
   onShareResult?: ShareResultHandler;
   mediaActive: boolean;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuWrapRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (menuWrapRef.current && !menuWrapRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [menuOpen]);
   const elapsedSec =
     round.completedAt && round.submittedAt
       ? Math.max(0, Math.round((Date.parse(round.completedAt) - Date.parse(round.submittedAt)) / 1000))
@@ -1060,24 +1048,22 @@ function DoneBatch({
                       />
                     )}
 
-                    <button
+                    <Hint label={favorited ? '取消喜欢' : '喜欢'}><Button variant="bare"
                       type="button"
                       onClick={(e) => { e.stopPropagation(); void onToggleFavorite?.(path); }}
                       aria-label={favorited ? '取消喜欢' : '喜欢'}
-                      title={favorited ? '取消喜欢' : '喜欢'}
                       className={`grid size-8 place-items-center rounded-full border border-border bg-scrim backdrop-blur-glass transition-opacity hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${favorited ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
                     >
                       <Heart className={`size-4 ${favorited ? 'fill-current' : ''}`} aria-hidden />
-                    </button>
-                    <a
+                    </Button></Hint>
+                    <Hint label="下载视频"><a
                       href={videoSrc(path)}
                       download={path.split('/').pop() || `${round.jobId}-${index + 1}.mp4`}
                       aria-label={`下载生成视频 ${index + 1}`}
-                      title="下载视频"
                       className="grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100"
                     >
                       <Download className="size-4" aria-hidden />
-                    </a>
+                    </a></Hint>
                   </div>
                 </figure>
               );
@@ -1110,48 +1096,44 @@ function DoneBatch({
                       />
                     )}
 
-                    <button
+                    <Hint label={favorited ? '取消喜欢' : '喜欢'}><Button variant="bare"
                       type="button"
                       onClick={(e) => { e.stopPropagation(); void onToggleFavorite?.(path); }}
                       aria-label={favorited ? '取消喜欢' : '喜欢'}
-                      title={favorited ? '取消喜欢' : '喜欢'}
                       className={`grid size-8 place-items-center rounded-full border border-border bg-scrim backdrop-blur-glass transition-opacity hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${favorited ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
                     >
                       <Heart className={`size-4 ${favorited ? 'fill-current' : ''}`} aria-hidden />
-                    </button>
+                    </Button></Hint>
                     {onToggleHidden && (
-                      <button
+                      <Hint label={hidden ? '取消隐藏' : '隐藏（不在首页展示）'}><Button variant="bare"
                         type="button"
                         onClick={(e) => { e.stopPropagation(); void onToggleHidden(path); }}
                         aria-label={hidden ? '取消隐藏' : '隐藏（不在首页展示）'}
-                        title={hidden ? '取消隐藏' : '隐藏（不在首页展示）'}
                         className={`grid size-8 place-items-center rounded-full border border-border bg-scrim backdrop-blur-glass transition-opacity hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${hidden ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
                       >
                         <SwapIcon swapKey={Boolean(hidden)}>{hidden ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}</SwapIcon>
-                      </button>
+                      </Button></Hint>
                     )}
-                    <a
+                    <Hint label="下载图片"><a
                       href={imageSrc(path)}
                       download={path.split('/').pop() || `${round.jobId}-${index + 1}.png`}
                       onClick={(e) => e.stopPropagation()}
                       aria-label={`下载生成结果 ${index + 1}`}
-                      title="下载图片"
                       className="grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                     >
                       <Download className="size-4" aria-hidden />
-                    </a>
+                    </a></Hint>
                   </div>
                   {/* 左下角编辑：把这张图导入下方输入框作参考图，继续图生图微调。 */}
                   {onEditAsReference && (
-                    <button
+                    <Hint label="编辑（导入为参考图）"><Button variant="bare"
                       type="button"
                       onClick={(e) => { e.stopPropagation(); void onEditAsReference(path); }}
                       aria-label={`编辑生成结果 ${index + 1}（导入为参考图）`}
-                      title="编辑（导入为参考图）"
                       className="absolute bottom-2 left-2 grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                     >
                       <Pencil className="size-4" aria-hidden />
-                    </button>
+                    </Button></Hint>
                   )}
                 </figure>
               );
@@ -1163,44 +1145,29 @@ function DoneBatch({
         {/* skill 出图（角色立绘/KV/三视图）在出图页只作溯源展示——删除会从磁盘抹掉角色资产，
             该操作只留在工坊页。这里仅对 studio 自家出图开放「删除该批次结果」。 */}
         {(onSavePromptAsset || round.mode !== 'canvas') && (
-        <div className="relative" ref={menuWrapRef}>
-          <ActionButton compact aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
-          {menuOpen && (
-            // 两栏下操作在右栏贴近视口右缘，向右弹会被裁掉，xl 起改为向下、右对齐
-            <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 w-[195px] rounded-xl border border-border bg-glass p-1 backdrop-blur-glass">
-              {onSavePromptAsset && (
-                <button
-                  type="button"
-                  className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-medium text-foreground hover:bg-secondary/80"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onSavePromptAsset(round.config);
-                  }}
-                >
-                  <BookmarkPlus className="size-4 shrink-0" aria-hidden />
-                  保存提示词资产
-                </button>
-              )}
-              {round.mode !== 'canvas' && (
-                <button
-                  type="button"
-                  aria-label="删除该批次结果"
-                  className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-medium text-foreground hover:bg-secondary/80"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    void onDeleteBatch?.(round.jobId, round.imagePaths);
-                  }}
-                >
-                  <Trash2 className="size-4 shrink-0" aria-hidden />
-                  删除该批次结果
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <ActionButton compact aria-label="更多操作">...</ActionButton>
+          </DropdownMenuTrigger>
+          {/* 空间不够时 Radix 自动翻到左侧，不再按断点手动改方向 */}
+          <DropdownMenuContent data-testid="studio-more-menu" side="right" align="start" className="w-48 rounded-xl">
+            {onSavePromptAsset && (
+              <DropdownMenuItem onSelect={() => onSavePromptAsset(round.config)}>
+                <BookmarkPlus className="size-4 shrink-0" aria-hidden />
+                保存提示词资产
+              </DropdownMenuItem>
+            )}
+            {round.mode !== 'canvas' && (
+              <DropdownMenuItem onSelect={() => { void onDeleteBatch?.(round.jobId, round.imagePaths); }}>
+                <Trash2 className="size-4 shrink-0" aria-hidden />
+                删除该批次结果
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
         )}
         {(runMeta.length > 0 || round.generationCost != null) && (
-          <p data-testid="round-run-meta" title="耗时 · 完成时间 · 费用" className={ROUND_RUN_META_CLASS}>
+          <Hint label="耗时 · 完成时间 · 费用"><p data-testid="round-run-meta" className={ROUND_RUN_META_CLASS}>
             {runMeta.length > 0 && <span>{runMeta.join(' · ')}</span>}
             {runMeta.length > 0 && round.generationCost != null && <span aria-hidden>·</span>}
             {round.generationCost != null && (
@@ -1208,26 +1175,26 @@ function DoneBatch({
                 {formatGenerationCost(round.generationCost)}
               </span>
             )}
-          </p>
+          </p></Hint>
         )}
       </div>
     </section>
   );
 }
 
-function ActionButton({
-  compact = false,
-  className = '',
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { compact?: boolean }) {
-  return (
-    <button
-      type="button"
-      className={`inline-flex items-center justify-center ${compact ? 'h-8 w-8 px-0' : 'h-8 px-2'} rounded-md text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
-      {...props}
-    />
-  );
-}
+// forwardRef：作为 DropdownMenuTrigger 的 asChild 子元素要接住 ref 与注入的事件
+const ActionButton = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement> & { compact?: boolean }>(
+  function ActionButton({ compact = false, className = '', ...props }, ref) {
+    return (
+      <Button variant="bare"
+        ref={ref}
+        type="button"
+        className={`inline-flex items-center justify-center ${compact ? 'h-8 w-8 px-0' : 'h-8 px-2'} rounded-md text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
+        {...props}
+      />
+    );
+  },
+);
 
 function FailedCard({
   round,
@@ -1285,29 +1252,28 @@ function FailedCard({
           {summary !== round.reason && (
             <>
               {detailOpen && <p className="mt-2 text-xs [overflow-wrap:anywhere]">{round.reason}</p>}
-              <button
+              <Button variant="bare"
                 type="button"
                 aria-expanded={detailOpen}
                 onClick={() => setDetailOpen(open => !open)}
                 className="mt-1 rounded-sm text-xs text-muted-foreground/80 underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 {detailOpen ? '收起' : '展开'}
-              </button>
+              </Button>
             </>
           )}
         </div>
         {round.jobId && onDeleteFailed && (
-          <button
+          <Hint label={round.canceled ? '删除已停止记录' : '删除失败记录'}><Button variant="bare"
             type="button"
             aria-label={round.canceled ? '删除已停止记录' : '删除失败记录'}
-            title={round.canceled ? '删除已停止记录' : '删除失败记录'}
             onClick={() => { void onDeleteFailed(round.jobId!); }}
             className={round.canceled
               ? 'shrink-0 whitespace-nowrap rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
               : 'shrink-0 whitespace-nowrap rounded-md border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'}
           >
             删除
-          </button>
+          </Button></Hint>
         )}
       </div>
       {config && (

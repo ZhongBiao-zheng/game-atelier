@@ -56,7 +56,11 @@ import {
   type TeamLibraryView,
   type TeamRelatedEntry,
 } from '@/schema/teamLibrary';
-import { Select } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Hint } from '@/components/ui/tooltip';
+import { Label } from '@/components/ui/label';
 
 export interface TeamLibraryPanelProps {
   projectId: string;
@@ -377,14 +381,14 @@ export function TeamLibraryPanel({
           {relatedError && <p className="text-xs text-muted-foreground">读取失败</p>}
           <div className="no-scrollbar flex gap-2 overflow-x-auto">
             {related.map(item => (
-              <button
+              <Button variant="bare"
                 key={`${item.library_id}:${item.entry.id}`}
                 type="button"
                 disabled={busy}
                 onClick={() => reproduce(item.library_id, item.entry)}
                 className="w-36 shrink-0 rounded-md border border-border bg-card px-2 py-1.5 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:opacity-50"
               >
-                <p className="truncate text-xs" title={item.entry.title}>{item.entry.title}</p>
+                <Hint label={item.entry.title}><p className="truncate text-xs">{item.entry.title}</p></Hint>
                 <p className="truncate text-xs text-muted-foreground">
                   {[
                     item.entry.author,
@@ -392,7 +396,7 @@ export function TeamLibraryPanel({
                     item.entry.cost_cny != null ? formatGenerationCost(item.entry.cost_cny) : null,
                   ].filter(part => part != null).join(' · ')}
                 </p>
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -409,15 +413,13 @@ export function TeamLibraryPanel({
         {libraries.length === 1 ? (
           <span className="truncate text-sm font-medium">{libraries[0].name}</span>
         ) : (
-          <Select variant="bare"
-            aria-label="团队库"
-            value={libraryId ?? ''}
-            onChange={event => { setNode(null); setLibraryId(event.target.value); }}
-            className="h-8 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          >
-            {libraries.map(item => (
-              <option key={item.library_id} value={item.library_id}>{item.name}</option>
-            ))}
+          <Select value={libraryId ?? ''} onValueChange={value => { setNode(null); setLibraryId(value); }}>
+            <SelectTrigger size="sm" aria-label="团队库" className="flex-1"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {libraries.map(item => (
+                <SelectItem key={item.library_id} value={item.library_id}>{item.name}</SelectItem>
+              ))}
+            </SelectContent>
           </Select>
         )}
         <Button
@@ -431,32 +433,15 @@ export function TeamLibraryPanel({
         </Button>
       </div>
 
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={query}
-          onChange={event => setQuery(event.target.value)}
-          placeholder="搜索"
-          className="pl-9"
-        />
-      </div>
+      <InputGroup>
+        <InputGroupAddon><Search aria-hidden="true" /></InputGroupAddon>
+        <InputGroupInput aria-label="搜索团队库" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索" />
+      </InputGroup>
 
-      <div className="flex flex-wrap gap-1.5">
-        {TYPE_FILTERS.map(item => (
-          <button
-            key={item.value}
-            type="button"
-            aria-pressed={typeFilter === item.value}
-            onClick={() => { setNode(null); setTypeFilter(item.value); }}
-            className={cn(
-              'rounded-full border border-transparent px-3 py-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary',
-              typeFilter === item.value && 'border-border bg-secondary text-foreground',
-            )}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+      <ToggleGroup type="single" size="sm" variant="outline" aria-label="类型" className="flex-wrap" value={typeFilter}
+        onValueChange={value => { if (!value) return; setNode(null); setTypeFilter(value as typeof typeFilter); }}>
+        {TYPE_FILTERS.map(item => <ToggleGroupItem key={item.value} value={item.value}>{item.label}</ToggleGroupItem>)}
+      </ToggleGroup>
 
       {library && !library.reachable ? (
         <p className="py-8 text-center text-xs text-muted-foreground">目录不可达</p>
@@ -466,20 +451,15 @@ export function TeamLibraryPanel({
             <p className="flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground">
               <FolderTree className="size-3.5" />目录
             </p>
-            {tree.map(item => (
-              <button
-                key={`${item.group}:${item.name}`}
-                type="button"
-                aria-pressed={node ? sameNode(node, item) : false}
-                onClick={() => setNode(current => (current && sameNode(current, item) ? null : item))}
-                className={cn(
-                  'block w-full truncate rounded-md px-2 py-1 text-left text-xs text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary',
-                  node && sameNode(node, item) && 'bg-secondary text-foreground',
-                )}
-              >
-                {item.name}
-              </button>
-            ))}
+            <ToggleGroup type="single" size="sm" orientation="vertical" aria-label="目录" className="w-full flex-col items-stretch"
+              value={node ? `${node.group}:${node.name}` : ''}
+              onValueChange={value => setNode(tree.find(item => `${item.group}:${item.name}` === value) ?? null)}>
+              {tree.map(item => (
+                <ToggleGroupItem key={`${item.group}:${item.name}`} value={`${item.group}:${item.name}`} className="justify-start truncate">
+                  {item.name}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
           </div>
 
           <div className="min-w-0 flex-1 overflow-y-auto">
@@ -572,10 +552,10 @@ function TeamAssetEditDialog({
     <Dialog open onOpenChange={next => { if (!next && !saving) onClose(); }}>
       <DialogContent aria-describedby={undefined}>
         <DialogHeader><DialogTitle>编辑团队资产</DialogTitle></DialogHeader>
-        <label className="block space-y-1.5">
+        <Label className="block space-y-1.5">
           <span className="text-xs text-muted-foreground">标题</span>
           <Input value={title} onChange={event => setTitle(event.target.value)} />
-        </label>
+        </Label>
         {entry.kind !== 'prompt' && <CategoryField value={category} onChange={setCategory} disabled={saving}
           options={[...new Set([...(entry.category ? [entry.category] : []), ...DEFAULT_CANVAS_CATEGORIES])]} />}
         <TagField value={tags} onChange={setTags} />
@@ -647,12 +627,12 @@ function TeamAssetCard({
           <TypeIcon entry={entry} className="size-5" />
         </div>
       )}
-      <p className="mt-2 truncate text-xs" title={entry.title}>{entry.title}</p>
+      <Hint label={entry.title}><p className="mt-2 truncate text-xs">{entry.title}</p></Hint>
       {entry.author && (
         <p className="truncate text-xs text-muted-foreground">{entry.author} · {formatBytes(entry.bytes)}</p>
       )}
       {entry.kind === 'generation' && entry.model != null && (
-        <p className="truncate text-xs text-muted-foreground" title={entry.model}>{entry.model}</p>
+        <Hint label={entry.model}><p className="truncate text-xs text-muted-foreground">{entry.model}</p></Hint>
       )}
       <div className="mt-1 flex flex-wrap items-center gap-1">
         {incomplete ? (
@@ -721,16 +701,15 @@ function CardIconButton({ label, disabled, onClick, children }: {
   children: ReactNode;
 }) {
   return (
-    <Button
+    <Hint label={label}><Button
       size="icon"
       variant="ghost"
       aria-label={label}
-      title={label}
       disabled={disabled}
       onClick={onClick}
       className="size-8"
     >
       {children}
-    </Button>
+    </Button></Hint>
   );
 }

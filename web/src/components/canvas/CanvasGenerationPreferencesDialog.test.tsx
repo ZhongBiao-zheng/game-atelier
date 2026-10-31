@@ -73,7 +73,7 @@ describe('CanvasGenerationPreferencesDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '图片设置' }));
     expect(screen.queryByRole('option', { name: '4K' })).not.toBeInTheDocument();
     for (const name of ['低', '中', '高', '超高', '最高']) {
-      expect(screen.getByRole('option', { name })).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name })).toBeInTheDocument();
     }
   });
   it('lists only Runner-routable models and saves a selected model with its params', async () => {
@@ -98,7 +98,7 @@ describe('CanvasGenerationPreferencesDialog', () => {
     await user.click(screen.getByRole('button', { name: '选择生成模型' }));
     await user.click(screen.getByRole('option', { name: 'Seedream 5 Lite' }));
     await user.click(screen.getByRole('button', { name: '图片设置' }));
-    await user.click(screen.getByRole('option', { name: '2 张' }));
+    await user.click(screen.getByRole('radio', { name: '2 张' }));
     await user.click(screen.getByRole('button', { name: '保存偏好' }));
 
     expect(props.onSave).toHaveBeenCalledOnce();
@@ -160,7 +160,7 @@ describe('CanvasGenerationPreferencesDialog', () => {
     setup({ onSave });
 
     await user.click(screen.getByRole('button', { name: '图片设置' }));
-    await user.click(screen.getByRole('option', { name: '2 张' }));
+    await user.click(screen.getByRole('radio', { name: '2 张' }));
     await user.click(screen.getByRole('button', { name: '保存偏好' }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({

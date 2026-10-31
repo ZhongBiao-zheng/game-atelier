@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { chooseOption } from '@/test/select';
 import { describe, expect, it, vi } from 'vitest';
 import { createKey } from '@/api/keys';
 import { checkGateway } from '@/api/gateway';
@@ -21,7 +22,7 @@ describe('局域网 Atelier 供应商', () => {
     vi.mocked(createKey).mockResolvedValue({ alias: '美术组网关' });
     render(<KeyForm onCreated={vi.fn()} onCancel={vi.fn()} />);
 
-    fireEvent.change(screen.getByLabelText('供应商选择'), { target: { value: 'atelier' } });
+    await chooseOption(screen.getByLabelText('供应商选择'), /^Remote Atelier ·/);
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: '美术组网关' } });
     fireEvent.change(screen.getByLabelText('网关地址'), { target: { value: 'http://192.168.1.20:5180' } });
     fireEvent.change(screen.getByLabelText('网关密钥'), { target: { value: 'atg_x' } });

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
+import { Hint } from '@/components/ui/tooltip';
 
 interface Props {
   /** 左侧面板当前宽度（px），决定分界线位置 */
@@ -38,11 +39,10 @@ export function ResizableDivider({ width, min, max, snap, onResize, onCommit, la
   }
 
   return (
-    <div
+    <Hint label="拖拽调整布局"><div
       role="separator"
       aria-orientation="vertical"
       aria-label={label}
-      title="拖拽调整布局"
       style={{ left: width }}
       className={cn(
         'group absolute inset-y-0 z-20 w-2.5 -translate-x-1/2 cursor-col-resize touch-none',
@@ -73,6 +73,6 @@ export function ResizableDivider({ width, min, max, snap, onResize, onCommit, la
           dragging ? 'bg-primary' : 'bg-transparent group-hover:bg-input',
         )}
       />
-    </div>
+    </div></Hint>
   );
 }

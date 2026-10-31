@@ -23,6 +23,7 @@ import type {
 } from '@/schema/canvas';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Hint } from '@/components/ui/tooltip';
 
 export function CanvasImageToolbarPreferencesDialog({
   open,
@@ -132,8 +133,7 @@ export function CanvasImageToolbarPreferencesDialog({
                 <Checkbox
                   aria-label={`显示${tool.label}`}
                   checked={false}
-                  onChange={() => setVisible(tool.id, true)}
-                  className="size-4 accent-primary"
+                  onCheckedChange={() => setVisible(tool.id, true)}
                 />
                 <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                 <span className="min-w-0 flex-1 text-sm text-muted-foreground">{tool.label}</span>
@@ -175,16 +175,14 @@ function VisibleToolRow({ tool, inMore, onHide, onMove }: {
       <Checkbox
         aria-label={`显示${tool.label}`}
         checked
-        onChange={onHide}
-        className="size-4 accent-primary"
+        onCheckedChange={onHide}
       />
       <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       <span className="min-w-0 flex-1 text-sm">{tool.label}</span>
       {inMore && <span className="text-xs text-muted-foreground">在「更多」里</span>}
-      <button
+      <Hint label="拖动排序，或按上下方向键"><Button variant="bare"
         type="button"
         aria-label={`拖动调整${tool.label}的顺序`}
-        title="拖动排序，或按上下方向键"
         className="grid size-8 cursor-grab touch-none place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary active:cursor-grabbing"
         onPointerDown={event => dragControls.start(event)}
         onKeyDown={event => {
@@ -194,7 +192,7 @@ function VisibleToolRow({ tool, inMore, onHide, onMove }: {
         }}
       >
         <GripVertical className="size-4" aria-hidden="true" />
-      </button>
+      </Button></Hint>
     </Reorder.Item>
   );
 }

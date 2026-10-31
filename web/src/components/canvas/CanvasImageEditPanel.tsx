@@ -7,6 +7,7 @@ import type { CanvasImageEditNode, CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 import type { CanvasNodeContextValue } from './CanvasEditorViews';
 import { CanvasMaterialHoverDetail, type CanvasMaterialHoverState } from './CanvasMaterialHoverDetail';
+import { Hint } from '@/components/ui/tooltip';
 
 type EditInput = NonNullable<Job['params']['edit_inputs']>[number];
 
@@ -71,14 +72,14 @@ export function CanvasImageEditPanel({ node, edit, context, onClose }: {
               left: bounds.left + bounds.width / 2, top: bounds.top - 8 });
           };
           return (
-            <button key={tile.key} type="button" aria-label={`查看${tile.label}`}
+            <Button variant="bare" key={tile.key} type="button" aria-label={`查看${tile.label}`}
               className="edit-checker relative grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-border transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               onMouseEnter={event => showDetail(event.currentTarget)} onMouseLeave={() => setHovered(null)}
               onFocus={event => showDetail(event.currentTarget)} onBlur={() => setHovered(null)}
               onClick={() => { setHovered(null); setZoomed(index); }}>
               <img src={tile.url} alt={tile.label} loading="lazy" draggable={false} className="size-full object-contain" />
               <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-center text-xs text-foreground">{tile.label}</span>
-            </button>
+            </Button>
           );
         })}
       </div>
@@ -86,19 +87,19 @@ export function CanvasImageEditPanel({ node, edit, context, onClose }: {
       {zoomed !== null && tiles[zoomed] && <Lightbox src={tiles[zoomed].url} onClose={() => setZoomed(null)}
         onPrevious={zoomed > 0 ? () => setZoomed(zoomed - 1) : undefined}
         onNext={zoomed < tiles.length - 1 ? () => setZoomed(zoomed + 1) : undefined} />}
-      <button type="button" aria-expanded={promptExpanded} onClick={() => setPromptExpanded(value => !value)}
+      <Button variant="bare" type="button" aria-expanded={promptExpanded} onClick={() => setPromptExpanded(value => !value)}
         className="block w-full rounded-md px-3 pb-1 pt-2 text-left transition-colors hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
         <p className={`whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground ${promptExpanded ? 'max-h-60 overflow-y-auto' : 'line-clamp-3'}`}>
           {prompt.trim() || <span className="text-muted-foreground">未填写提示词</span>}
         </p>
         <span className="block text-right text-xs text-muted-foreground">{promptExpanded ? '收起' : '展开'}</span>
-      </button>
+      </Button>
       <div className="mt-2 flex items-center gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
-        <span className={`${chip} flex-1`} title={alias ?? undefined}>
+        <Hint label={alias ?? undefined}><span className={`${chip} flex-1`}>
           <Icon className="size-4 shrink-0 text-primary" aria-hidden="true" />
           <span className="truncate">{modelName ?? '未选择模型'}</span>
           {alias && <span className="ml-auto shrink-0 text-muted-foreground">{alias}</span>}
-        </span>
+        </span></Hint>
         {size && <span className={`${chip} shrink-0 tabular-nums`}>{size.replace('x', '×')}</span>}
         <Button type="button" size="sm" className="shrink-0" disabled={running || submitting || !draft}
           onClick={() => void generate()}>

@@ -4,6 +4,7 @@ import { Search, ChevronDown, Image as ImageIcon, Video, Wand2, Heart, EyeOff, C
 import { ToolbarPopover } from './ToolbarPopover';
 import type { GenMode, HistoryFilters, TimeFilter } from '@/lib/historyFilters';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 
 const TIME_OPTS: { key: TimeFilter; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -28,7 +29,7 @@ function FilterChip({
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }) {
   return (
-    <button
+    <Button variant="bare"
       type="button"
       className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
         active ? 'bg-secondary text-foreground' : 'text-foreground hover:bg-secondary'
@@ -36,7 +37,7 @@ function FilterChip({
       {...props}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -78,14 +79,14 @@ export function StudioQueryBar({
           searchOpen ? 'w-80 pr-2' : 'w-8'
         }`}
       >
-        <button
+        <Button variant="bare"
           type="button"
           aria-label="搜索"
           onClick={() => (searchOpen ? searchInputRef.current?.focus() : setSearchOpen(true))}
           className="grid size-8 shrink-0 place-items-center rounded-full text-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           <Search size={16} aria-hidden />
-        </button>
+        </Button>
         <Input variant="bare"
           ref={searchInputRef}
           value={filters.search}
@@ -98,7 +99,7 @@ export function StudioQueryBar({
             searchOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
           }`}
         />
-        <button
+        <Button variant="bare"
           type="button"
           aria-label="关闭搜索"
           tabIndex={searchOpen ? 0 : -1}
@@ -108,7 +109,7 @@ export function StudioQueryBar({
           }`}
         >
           <X size={14} aria-hidden />
-        </button>
+        </Button>
       </div>
 
       <Divider />
@@ -118,11 +119,11 @@ export function StudioQueryBar({
         </FilterChip>
         <ToolbarPopover open={openPanel === 'time'} onClose={() => setOpenPanel(null)} anchorRef={timeRef} direction="down" role="listbox" aria-label="时间筛选列表" className={panelCls}>
           {TIME_OPTS.map((o) => (
-            <button key={o.key} type="button" role="option" aria-selected={filters.time === o.key} className={optionCls}
+            <Button variant="bare" key={o.key} type="button" role="option" aria-selected={filters.time === o.key} className={optionCls}
               onClick={() => onChange({ ...filters, time: o.key })}>
               <span>{o.label}</span>
               {filters.time === o.key && <Check size={16} aria-hidden className="text-primary" />}
-            </button>
+            </Button>
           ))}
         </ToolbarPopover>
       </div>
@@ -137,7 +138,7 @@ export function StudioQueryBar({
           {MODE_OPTS.map((o) => {
             const active = filters.modes.includes(o.key);
             return (
-              <button key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
+              <Button variant="bare" key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
                 onClick={() => onChange({
                   ...filters,
                   modes: active
@@ -146,7 +147,7 @@ export function StudioQueryBar({
                 })}>
                 <span className="flex items-center gap-3">{o.icon}{o.label}</span>
                 {active && <Check size={16} aria-hidden className="text-primary" />}
-              </button>
+              </Button>
             );
           })}
         </ToolbarPopover>
@@ -162,11 +163,11 @@ export function StudioQueryBar({
           {OP_OPTS.map((o) => {
             const active = filters.op === o.key;
             return (
-              <button key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
+              <Button variant="bare" key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
                 onClick={() => onChange({ ...filters, op: active ? null : o.key })}>
                 <span className="flex items-center gap-3">{o.icon}{o.label}</span>
                 {active && <Check size={16} aria-hidden className="text-primary" />}
-              </button>
+              </Button>
             );
           })}
         </ToolbarPopover>

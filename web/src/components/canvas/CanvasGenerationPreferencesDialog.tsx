@@ -1,4 +1,5 @@
 import { Link } from 'wouter';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { VideoMode } from '@/lib/videoControlCaps';
 import { AudioLines, Clapperboard, Image as ImageIcon, RotateCcw, Type, ZoomIn } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -26,7 +27,6 @@ import {
 import { VideoControls } from '@/components/studio/VideoControls';
 import { imageControlCaps, QUALITY_LABELS, type Quality } from '@/lib/imageControlCaps';
 import { providerForAlias, routeChannel, selectionImageCaps } from '@/lib/modelRoutes';
-import { cn } from '@/lib/utils';
 import {
   CANVAS_GENERATION_MODE_LABELS,
   canvasGenerationModelSupportsMode,
@@ -47,6 +47,7 @@ import type {
 } from '@/schema/canvas';
 import type { JobParams } from '@/schema/jobs';
 import { SwapLabel } from '@/components/ui/swap-label';
+import { Label } from '@/components/ui/label';
 
 const MODES = ['text', 'image', 'video', 'audio'] as const;
 export type CanvasGenerationPreferencesTab = CanvasGenerationMode | 'upscale';
@@ -284,11 +285,6 @@ export function CanvasGenerationPreferencesDialog({
           event.preventDefault();
           activeTabRef.current?.focus();
         }}
-        onEscapeKeyDown={event => {
-          if (dialogContentRef.current?.querySelector('[data-toolbar-popover]')) {
-            event.preventDefault();
-          }
-        }}
       >
         <DialogHeader>
           <DialogTitle>生成偏好</DialogTitle>
@@ -298,31 +294,19 @@ export function CanvasGenerationPreferencesDialog({
         </DialogHeader>
 
         <div className="min-h-0 space-y-4 overflow-x-hidden overflow-y-auto">
-        <div role="tablist" aria-label="生成类型" className="grid grid-cols-5 gap-1 rounded-xl border border-border bg-card p-1">
-          {TABS.map(mode => {
-            const Icon = TAB_ICONS[mode];
-            const active = tab === mode;
-            return (
-              <button
-                key={mode}
-                ref={active ? activeTabRef : undefined}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                aria-controls="canvas-generation-preference-panel"
-                onClick={() => setTab(mode)}
-                className={cn(
-                  'relative flex h-11 min-w-0 items-center justify-center gap-2 rounded-lg px-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                  active ? 'text-foreground' : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
-                )}
-              >
-                <Icon className="size-4 shrink-0" aria-hidden="true" />
-                <span className="truncate">{TAB_LABELS[mode]}</span>
-                {active && <span className="absolute inset-x-3 bottom-0 h-px bg-primary" aria-hidden="true" />}
-              </button>
-            );
-          })}
-        </div>
+        <Tabs value={tab} onValueChange={value => setTab(value as typeof tab)}>
+          <TabsList aria-label="生成类型" className="grid h-auto w-full grid-cols-5">
+            {TABS.map(mode => {
+              const Icon = TAB_ICONS[mode];
+              return (
+                <TabsTrigger key={mode} ref={tab === mode ? activeTabRef : undefined} value={mode} className="h-10 min-w-0">
+                  <Icon aria-hidden="true" />
+                  <span className="truncate">{TAB_LABELS[mode]}</span>
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+        </Tabs>
 
         {tab === 'upscale' ? (
         <section
@@ -410,10 +394,10 @@ export function CanvasGenerationPreferencesDialog({
             </div>
           )}
           <div className="space-y-2 border-t border-border pt-4">
-            <label htmlFor="canvas-upscale-prompt" className="block">
+            <Label htmlFor="canvas-upscale-prompt" className="block">
               <span className="text-sm font-medium">{upscaleTarget} 提示词</span>
               <span className="mt-0.5 block text-xs text-muted-foreground">该档位每次 AI高清 都用这段提示词重绘；清空后保存即恢复内置提示词。</span>
-            </label>
+            </Label>
             <Textarea
               id="canvas-upscale-prompt"
               rows={6}

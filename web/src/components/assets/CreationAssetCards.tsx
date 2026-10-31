@@ -24,14 +24,14 @@ export function AssetCard({ asset, busy, staleness, onOpen, onReproduce, onReado
   // 「复刻」是卡片外的兄弟按钮：按钮不能嵌套在打开详情的按钮里。
   return (
     <div className="mb-2 overflow-hidden rounded-lg border border-border bg-card">
-      <button type="button" className="w-full p-3 text-left outline-none hover:bg-secondary/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" onClick={onOpen}>
+      <Button variant="bare" type="button" className="w-full p-3 text-left outline-none hover:bg-secondary/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" onClick={onOpen}>
         {media && <MediaPreview assetId={asset.asset_id} content={media} alt="" className="mb-3 aspect-[4/3] w-full rounded-md bg-secondary object-cover" />}
         <p className="truncate text-sm font-medium">{asset.title}</p>
         {asset.content.kind === 'prompt' ? <PromptPreview segments={asset.content.segments} /> : <p className="mt-1 truncate text-xs text-muted-foreground">{media?.filename}</p>}
         {asset.category && <span className="mt-2 inline-block rounded-md border border-border px-2 py-0.5 text-xs">{asset.category}</span>}
         <TagList tags={asset.tags} />
         <StalenessBadge staleness={staleness} className="mt-2" />
-      </button>
+      </Button>
       {(onReproduce || readopt) && (
         <div className="flex gap-2 px-3 pb-3">
           {readopt && <Button size="sm" variant="outline" disabled={busy} onClick={readopt}><RefreshCw />重新采用</Button>}

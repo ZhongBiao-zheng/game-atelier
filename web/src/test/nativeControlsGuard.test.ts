@@ -1,9 +1,11 @@
 /**
  * 原生控件守卫 —— 页面只组合 components/ui，属性与配方集中在组件里（DESIGN.md § 组件）。
  *
- * - 页面禁写原生 input / textarea / select：防自动填充、密钥遮挡等属性由 ui 组件统一提供。
+ * - 页面禁写原生 input / textarea / select / button / label：防自动填充、焦点环、错误态等由 ui 组件统一提供。
+ * - 页面禁用原生 title 提示，改用 Hint（Tooltip）。
  * - form 一律 autoComplete="off"。
- * - 原生 button、bare 控件、任意值间距是存量债务，走棘轮：只许减少，减少后把基线改成新数值。
+ * - 任意值间距（p-[…]、gap-[…] 等）禁写，用 spacing 刻度。
+ * - bare 控件是存量债务，走棘轮：只许减少，减少后把基线改成新数值。
  */
 import { describe, expect, it } from 'vitest';
 import ts from 'typescript';
@@ -21,10 +23,8 @@ const FILES = Object.entries(sources)
   }));
 const PAGES = FILES.filter(({ rel }) => !rel.startsWith('components/ui/'));
 
-// 棘轮基线（2026-10-29）
-const RAW_BUTTON_BASELINE = 263;
-const BARE_CONTROL_BASELINE = 52;
-const ARBITRARY_SPACING_BASELINE = 5;
+// 棘轮基线（2026-10-30）：bare 含 2026-10-30 从原生 button 迁来的 Button variant="bare"
+const BARE_CONTROL_BASELINE = 184;
 
 const ARBITRARY_SPACING = /(?<![\w-])-?(?:p[xytrbl]?|m[xytrbl]?|gap(?:-[xy])?|space-[xy])-\[/g;
 
@@ -46,14 +46,28 @@ function expectRatchet(actual: number, baseline: number, what: string, hits: str
 }
 
 describe('原生控件守卫（DESIGN.md § 组件）', () => {
-  it('页面不写原生 input / textarea / select，改用 components/ui', () => {
+  it('页面不写原生 input / textarea / select / button / label，改用 components/ui', () => {
     const hits: string[] = [];
     for (const { rel, file } of PAGES) {
       jsxElements(file, node => {
-        if (['input', 'textarea', 'select'].includes(node.tagName.getText(file))) hits.push(where(file, rel, node));
+        if (['input', 'textarea', 'select', 'button', 'label'].includes(node.tagName.getText(file))) hits.push(where(file, rel, node));
       });
     }
-    expect(hits, `用 Input / SecretInput / Textarea / Select / Checkbox / Radio / Slider / FileInput：\n${hits.join('\n')}`).toEqual([]);
+    expect(hits, `用 Input / Textarea / Select / Checkbox / RadioGroup / Slider / FileInput / Button / Label：\n${hits.join('\n')}`).toEqual([]);
+  });
+
+  it('页面不用原生 title 提示，改用 Hint', () => {
+    const hits: string[] = [];
+    for (const { rel, file } of PAGES) {
+      jsxElements(file, node => {
+        const tag = node.tagName.getText(file);
+        if (!/^[a-z]/.test(tag) || ['iframe', 'svg', 'title'].includes(tag)) return;
+        if (node.attributes.properties.some(attribute => ts.isJsxAttribute(attribute) && attribute.name.getText(file) === 'title')) {
+          hits.push(where(file, rel, node));
+        }
+      });
+    }
+    expect(hits, `用 components/ui/tooltip 的 Hint：\n${hits.join('\n')}`).toEqual([]);
   });
 
   it('form 关闭自动填充', () => {
@@ -71,16 +85,6 @@ describe('原生控件守卫（DESIGN.md § 组件）', () => {
     expect(hits, `<form> 需要 autoComplete="off"：\n${hits.join('\n')}`).toEqual([]);
   });
 
-  it('原生 button 只减不增（新代码用 Button）', () => {
-    const hits: string[] = [];
-    for (const { rel, file } of PAGES) {
-      jsxElements(file, node => {
-        if (node.tagName.getText(file) === 'button') hits.push(where(file, rel, node));
-      });
-    }
-    expectRatchet(hits.length, RAW_BUTTON_BASELINE, '原生 <button> ', hits);
-  });
-
   it('bare 控件只减不增（新代码用组件默认配方）', () => {
     const hits: string[] = [];
     for (const { rel, file } of PAGES) {
@@ -95,13 +99,13 @@ describe('原生控件守卫（DESIGN.md § 组件）', () => {
     expectRatchet(hits.length, BARE_CONTROL_BASELINE, 'variant="bare" 控件', hits);
   });
 
-  it('任意值间距只减不增（DESIGN.md § Spacing）', () => {
+  it('不写任意值间距，用 spacing 刻度（DESIGN.md § Spacing）', () => {
     const hits: string[] = [];
     for (const { rel, source } of FILES) {
       source.split('\n').forEach((line, i) => {
         for (const _ of line.matchAll(ARBITRARY_SPACING)) hits.push(`${rel}:${i + 1}  ${line.trim().slice(0, 100)}`);
       });
     }
-    expectRatchet(hits.length, ARBITRARY_SPACING_BASELINE, '任意值间距 ', hits);
+    expect(hits, `p-[…] / gap-[…] 等改用刻度值（v4 支持 pt-3.5、gap-4.5 这类小数刻度）：\n${hits.join('\n')}`).toEqual([]);
   });
 });

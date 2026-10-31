@@ -6,6 +6,8 @@ import { fetchGalleryRecent, type GalleryItem } from '@/api/gallery';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { HomeDottedBackground } from '@/components/HomeDottedBackground';
 import { Studio } from './Studio';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
 
 type State =
   | { kind: 'loading' }
@@ -48,15 +50,14 @@ export function Home() {
         </Link>
 
         {/* 喜欢按钮：与导航链接平级（不在 <a> 内），hover 淡入（已喜欢常显），玻璃药丸取代描边框 */}
-        <button
+        <Hint label={favorited ? '取消喜欢' : '喜欢'}><Button variant="bare"
           type="button"
           onClick={() => void toggleFavorite(item.path)}
-          title={favorited ? '取消喜欢' : '喜欢'}
           aria-label={favorited ? '取消喜欢' : '喜欢'}
           className={`absolute left-3 top-3 grid size-9 place-items-center rounded-full bg-scrim/80 backdrop-blur-glass transition-all duration-200 hover:bg-background/90 z-10 ${favorited ? 'text-primary opacity-100' : 'text-foreground opacity-0 group-hover:opacity-100'}`}
         >
           <Heart className={`size-4 ${favorited ? 'fill-current' : ''}`} aria-hidden />
-        </button>
+        </Button></Hint>
       </div>
     );
   }, [isFavorited, toggleFavorite]);

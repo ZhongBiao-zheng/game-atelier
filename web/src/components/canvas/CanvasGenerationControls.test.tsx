@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { pointerDownOutside } from '@/test/hint';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -123,7 +124,7 @@ describe('CanvasTextSettings', () => {
     expect(popover).toHaveAttribute('data-toolbar-popover');
     expect(screen.getByLabelText('选择推理强度')).toBeInTheDocument();
     expect(screen.getByLabelText('选择文本生成数量')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('option', { name: '极高' }));
+    fireEvent.click(screen.getByRole('radio', { name: '极高' }));
     expect(onPatch).toHaveBeenCalledWith({ reasoning_effort: 'xhigh' });
   });
 
@@ -135,8 +136,8 @@ describe('CanvasTextSettings', () => {
     expect(screen.getByLabelText('选择文本生成数量')).toBeInTheDocument();
     expect(screen.getByLabelText('选择对话随机性')).toBeInTheDocument();
     expect(screen.getByLabelText('选择最大输出长度')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('option', { name: '均衡' }));
-    fireEvent.click(screen.getByRole('option', { name: '2048' }));
+    fireEvent.click(screen.getByRole('radio', { name: '均衡' }));
+    fireEvent.click(screen.getByRole('radio', { name: '2048' }));
     expect(onPatch).toHaveBeenNthCalledWith(1, { temperature: 0.7 });
     expect(onPatch).toHaveBeenNthCalledWith(2, { max_tokens: 2048 });
   });
@@ -158,9 +159,9 @@ describe('CanvasAudioSettings', () => {
     expect(screen.getByLabelText('自定义语速')).toHaveValue(1);
     expect(screen.getByLabelText('朗读指令')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('option', { name: 'Marin' }));
-    fireEvent.click(screen.getByRole('option', { name: 'PCM' }));
-    fireEvent.click(screen.getByRole('option', { name: '1.25x' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Marin' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'PCM' }));
+    fireEvent.click(screen.getByRole('radio', { name: '1.25x' }));
     expect(onPatch).toHaveBeenNthCalledWith(1, { voice: 'marin' });
     expect(onPatch).toHaveBeenNthCalledWith(2, { response_format: 'pcm' });
     expect(onPatch).toHaveBeenNthCalledWith(3, { speed: 1.25 });
@@ -181,7 +182,7 @@ describe('CanvasAudioSettings', () => {
     expect(onPatch).toHaveBeenCalledWith({ instructions: '温柔、克制' });
   });
 
-  it('commits pending fields atomically before an outside click closes the portal', () => {
+  it('commits pending fields atomically before an outside click closes the portal', async () => {
     const onPatch = vi.fn();
     render(<CanvasAudioSettings
       params={{ voice: 'alloy', response_format: 'mp3', speed: 1 }}
@@ -191,7 +192,7 @@ describe('CanvasAudioSettings', () => {
     fireEvent.change(screen.getByLabelText('自定义语速'), { target: { value: '1.35' } });
     fireEvent.change(screen.getByLabelText('朗读指令'), { target: { value: '  平静旁白  ' } });
 
-    fireEvent.mouseDown(document.body);
+    await pointerDownOutside();
 
     expect(screen.queryByTestId('canvas-audio-settings-popover')).not.toBeInTheDocument();
     expect(onPatch).toHaveBeenCalledOnce();

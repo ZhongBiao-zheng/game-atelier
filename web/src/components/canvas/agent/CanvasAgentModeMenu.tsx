@@ -3,6 +3,8 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { CanvasAgentCreationMode } from '@/schema/canvas';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
 
 export const CREATION_MODES: { value: CanvasAgentCreationMode; label: string; short: string; description: string; Icon: typeof Sparkles }[] = [
   { value: 'all', label: '全能创作', short: '全能', description: '按需求出图或出视频', Icon: Sparkles },
@@ -18,19 +20,18 @@ export function CanvasAgentModeMenu({ mode, disabled, onSelect }: {
   const current = CREATION_MODES.find(item => item.value === mode) ?? CREATION_MODES[0];
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
+      <Hint label={current.label}><DropdownMenuTrigger asChild>
+        <Button variant="bare"
           type="button"
           disabled={disabled}
           aria-label="创作模式"
-          title={current.label}
           className="flex h-7 shrink-0 items-center gap-0.5 rounded-full px-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40"
         >
           <current.Icon className="size-3.5" />
           {current.short}
           <ChevronDown className="size-3" />
-        </button>
-      </DropdownMenuTrigger>
+        </Button>
+      </DropdownMenuTrigger></Hint>
       {/* 面板是 z-40：菜单默认 z-20 会被压在面板下面，而 Radix 已锁住页面指针 → 整页像卡死。 */}
       <DropdownMenuContent side="top" align="start" className="z-50 w-52">
         {CREATION_MODES.map(item => (

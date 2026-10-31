@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import type { CanvasContentNode, CanvasContentVersion } from '@/schema/canvas';
 import type { CanvasNodeContextValue } from './CanvasEditorViews';
+import { Hint } from '@/components/ui/tooltip';
 
 export function CanvasFinalizationMenu({ node, content, context, disabled, onOverlayOpenChange }: {
   node: CanvasContentNode;
@@ -64,10 +65,10 @@ export function CanvasFinalizationMenu({ node, content, context, disabled, onOve
   return <>
     <DropdownMenu onOpenChange={open => onOverlayOpenChange(open || editing !== null)}>
       <DropdownMenuTrigger asChild>
-        <button type="button" aria-label={`定稿 ${node.title}`} disabled={disabled || busy}
+        <Button variant="bare" type="button" aria-label={`定稿 ${node.title}`} disabled={disabled || busy}
           className="flex h-9 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground disabled:pointer-events-none disabled:opacity-50">
           <Check className="size-4" />定稿
-        </button>
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="center" className="nodrag max-h-80 min-w-36 overflow-y-auto" onPointerDown={event => event.stopPropagation()}>
         {categories.map(value => <DropdownMenuItem key={value} disabled={busy} onSelect={() => void finalize(value)} className="justify-between gap-4">
@@ -95,7 +96,7 @@ export function CanvasFinalizationMenu({ node, content, context, disabled, onOve
     <Dialog open={editing === 'manage'} onOpenChange={open => { if (!busy && !open) edit(null); }}>
       <DialogContent aria-describedby={undefined} className="nodrag max-w-sm" onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
         <DialogHeader><DialogTitle>项目类别</DialogTitle></DialogHeader>
-        <span title="同一资产的类别和取消定稿对所有关联项目生效。使用已定稿资产后会自动进入本项目参考库。" tabIndex={0} aria-label="定稿规则" className="absolute right-14 top-5 text-muted-foreground"><CircleHelp className="size-4" /></span>
+        <Hint label="同一资产的类别和取消定稿对所有关联项目生效。使用已定稿资产后会自动进入本项目参考库。"><span tabIndex={0} aria-label="定稿规则" className="absolute right-14 top-5 text-muted-foreground"><CircleHelp className="size-4" /></span></Hint>
         <div className="max-h-64 space-y-1 overflow-y-auto">
           {categories.map(value => <div key={value} className="flex items-center justify-between gap-2 text-sm">
             <span className="truncate">{value}</span>

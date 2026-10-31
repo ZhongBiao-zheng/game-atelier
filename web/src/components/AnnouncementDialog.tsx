@@ -18,6 +18,8 @@ import {
 } from '@/lib/announcements';
 import { providerLabel } from '@/lib/providerLabels';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Hint } from '@/components/ui/tooltip';
+import { Label } from '@/components/ui/label';
 
 type KeyScan =
   | { key: KeyView; status: 'ok'; candidates: ModelCandidate[] }
@@ -179,19 +181,18 @@ export function AnnouncementDialog({ announcement, onClose }: { announcement: An
                   <h3 className="text-xs text-muted-foreground">
                     {item.key.alias} · {providerLabel(item.key.provider, item.key.alias)}
                   </h3>
-                  {item.status === 'error' && <p className="text-xs text-destructive" title={item.message}>拉取模型列表失败</p>}
+                  {item.status === 'error' && <Hint label={item.message}><p className="text-xs text-destructive">拉取模型列表失败</p></Hint>}
                   {item.status === 'ok' && item.candidates.map(candidate => {
                     const key = selectionKey(item.key.alias, candidate.model.id);
                     return (
-                      <label key={candidate.model.id} className="flex items-center gap-2 rounded-md px-1 py-1 text-sm hover:bg-secondary/40">
+                      <Label key={candidate.model.id} className="flex items-center gap-2 rounded-md px-1 py-1 text-sm hover:bg-secondary/40">
                         <Checkbox
-                          className="accent-primary"
                           disabled={candidate.added}
                           checked={candidate.added || selected.has(key)}
-                          onChange={() => toggle(key)}
+                          onCheckedChange={() => toggle(key)}
                         />
                         <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">{candidate.model.id}</span>
-                      </label>
+                      </Label>
                     );
                   })}
                 </section>

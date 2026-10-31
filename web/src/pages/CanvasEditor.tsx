@@ -268,7 +268,9 @@ import {
 } from './canvasTeamActions';
 import { canvasLayerMaterialConnections, type CanvasLayerMaterialConnection } from './canvasLayerMaterialConnections';
 import { FileInput } from '@/components/ui/file-input';
-import { Input } from '@/components/ui/input';
+import { EditableText, type EditableTextHandle } from '@/components/ui/editable-text';
+import { Toggle } from '@/components/ui/toggle';
+import { Hint } from '@/components/ui/tooltip';
 
 interface CreateMenuState {
   screen: XYPosition;
@@ -541,8 +543,6 @@ function CanvasEditorInner({
   const [generationPreferencesOpen, setGenerationPreferencesOpen] = useState(false);
   const [generationPreferencesTab, setGenerationPreferencesTab] = useState<CanvasGenerationPreferencesTab>('image');
   const [generationPreferencesSaving, setGenerationPreferencesSaving] = useState(false);
-  const [projectRenameDraft, setProjectRenameDraft] = useState<string | null>(null);
-  const [projectRenameBusy, setProjectRenameBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // 只对当前这条 error 生效：message 不匹配就不渲染按钮，换了别的错误自然失效。
@@ -658,10 +658,9 @@ function CanvasEditorInner({
   const pendingViewportCommand = useRef<Promise<void> | null>(null);
   const viewportCommandEpoch = useRef(0);
   const cancelViewportCommand = useRef<(() => void) | null>(null);
-  const projectRenameInputRef = useRef<HTMLInputElement>(null);
+  const projectNameEditorRef = useRef<EditableTextHandle>(null);
   const canvasMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const projectRenameInFlight = useRef(false);
-  const cancelProjectRename = useRef(false);
   const {
     screenToFlowPosition,
     fitView,
@@ -826,8 +825,6 @@ function CanvasEditorInner({
     setShortcutsOpen(false);
     setGenerationPreferencesOpen(false);
     setGenerationPreferencesSaving(false);
-    setProjectRenameDraft(null);
-    setProjectRenameBusy(false);
     setLibraryMode(null);
     setCreationAssetSaveRequest(null);
     setCanvasUiPreferences(DEFAULT_CANVAS_UI_PREFERENCES);
@@ -879,7 +876,6 @@ function CanvasEditorInner({
     uploadQueue.current = null;
     canvasUiPreferencesSaveInFlight.current = false;
     projectRenameInFlight.current = false;
-    cancelProjectRename.current = false;
     void getCanvasUiPreferences()
       .then(value => {
         if (!cancelled) setCanvasUiPreferences(value);
@@ -1988,41 +1984,20 @@ function CanvasEditorInner({
   const projectName = projects.find(project => project.project_id === projectId)?.name ?? '画布项目';
 
   function beginProjectRename() {
-    cancelProjectRename.current = false;
-    setProjectRenameDraft(projectName);
-    requestAnimationFrame(() => projectRenameInputRef.current?.select());
+    projectNameEditorRef.current?.edit();
   }
 
-  async function commitProjectRename(restoreFocus: boolean) {
-    if (projectRenameDraft === null || projectRenameInFlight.current || cancelProjectRename.current) return;
-    const name = projectRenameDraft.trim();
-    if (!name) {
-      setError('请输入画布项目名称');
-      requestAnimationFrame(() => projectRenameInputRef.current?.focus());
-      return;
-    }
-    if (name === projectName) {
-      setProjectRenameDraft(null);
-      if (restoreFocus) requestAnimationFrame(() => canvasMenuTriggerRef.current?.focus());
-      return;
-    }
+  async function saveProjectName(name: string) {
     projectRenameInFlight.current = true;
-    setProjectRenameBusy(true);
     setError(null);
     try {
       const renamed = await renameCanvasProject(projectId, name);
       setProjects(current => current.map(project => (
         project.project_id === projectId ? { ...project, name: renamed.name } : project
       )));
-      setProjectRenameDraft(null);
       announceToolNotice(`已重命名为“${renamed.name}”`);
-      if (restoreFocus) requestAnimationFrame(() => canvasMenuTriggerRef.current?.focus());
-    } catch (renameError) {
-      setError((renameError as Error).message);
-      requestAnimationFrame(() => projectRenameInputRef.current?.focus());
     } finally {
       projectRenameInFlight.current = false;
-      setProjectRenameBusy(false);
     }
   }
 
@@ -4917,20 +4892,15 @@ function CanvasEditorInner({
   const maskEditSourceTitle = document.nodes.find(node => node.id === maskEditData?.source_node_id)?.title;
 
   const minimapToggle = (
-    <button
-      type="button"
-      title={document.settings.show_minimap ? '关闭小地图' : '打开小地图'}
+    <Hint label={document.settings.show_minimap ? '关闭小地图' : '打开小地图'}><Toggle
       aria-label={document.settings.show_minimap ? '关闭小地图' : '打开小地图'}
-      aria-pressed={document.settings.show_minimap}
-      className={cn(
-        CANVAS_CHROME_BUTTON_CLASS,
-        document.settings.show_minimap && 'bg-secondary text-foreground',
-      )}
-      onClick={() => commit(current => ({
+      pressed={document.settings.show_minimap}
+      className={CANVAS_CHROME_BUTTON_CLASS}
+      onPressedChange={show_minimap => commit(current => ({
         ...current,
-        settings: { ...current.settings, show_minimap: !current.settings.show_minimap },
+        settings: { ...current.settings, show_minimap },
       }), true)}
-    ><MapPinned /></button>
+    ><MapPinned /></Toggle></Hint>
   );
   const toggleAssetLibrary = () => {
     setAddOpen(false);
@@ -5162,7 +5132,7 @@ function CanvasEditorInner({
         {!materialPick && (
           <CanvasZoomDock
             assetControl={narrowViewport ? null : (
-              <button
+              <Button variant="bare"
                 ref={assetLibraryTriggerRef}
                 type="button"
                 aria-pressed={Boolean(libraryMode)}
@@ -5173,7 +5143,7 @@ function CanvasEditorInner({
                   libraryMode && 'bg-secondary',
                 )}
                 onClick={toggleAssetLibrary}
-              ><Library aria-hidden="true" />资产</button>
+              ><Library aria-hidden="true" />资产</Button>
             )}
             minimapToggle={minimapToggle}
             onZoomOut={() => {
@@ -5199,7 +5169,7 @@ function CanvasEditorInner({
             className="pointer-events-auto absolute left-1/2 top-3 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full bg-primary py-1 pl-4 pr-1 text-xs font-medium text-primary-foreground shell-glow sm:top-4"
           >
             <span>从画布选择参考</span>
-            <button
+            <Button variant="bare"
               type="button"
               aria-label="退出画布参考选择"
               className="rounded-full bg-background/20 px-2.5 py-1 text-primary-foreground transition-colors hover:bg-background/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground"
@@ -5209,7 +5179,7 @@ function CanvasEditorInner({
               }}
             >
               退出
-            </button>
+            </Button>
           </div>
         )}
 
@@ -5217,18 +5187,20 @@ function CanvasEditorInner({
           <div className="pointer-events-auto flex min-w-0 items-center gap-2 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
             <Button variant="ghost" size="icon" className="size-9 shrink-0" aria-label="返回画布项目列表" onClick={() => void persistNow().then(saved => { if (saved) onBack(); })}><ArrowLeft /></Button>
             <div className="h-6 w-px bg-border" />
-            {projectRenameDraft === null ? (
-              <div className="flex min-w-0 items-center">
+            <div className="flex min-w-0 items-center">
+                <EditableText
+                  ref={projectNameEditorRef}
+                  value={projectName}
+                  triggerLabel={`重命名画布项目 ${projectName}`}
+                  inputLabel="画布项目名称"
+                  className="max-w-28 font-medium text-foreground sm:max-w-52"
+                  onSave={saveProjectName}
+                />
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      title="切换画布项目"
-                      className="flex h-9 min-w-0 max-w-28 items-center gap-1 rounded-md px-2 text-sm font-medium text-foreground outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-primary data-[state=open]:bg-secondary sm:max-w-52"
-                    >
-                      <span className="truncate">{projectName}</span>
-                      <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                    </button>
+                    <Button variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground data-[state=open]:bg-secondary" aria-label="切换画布项目">
+                      <ChevronDown aria-hidden="true" />
+                    </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="bottom" align="start" className="min-w-44 rounded-xl">
                     <DropdownMenuLabel>切换项目</DropdownMenuLabel>
@@ -5317,35 +5289,6 @@ function CanvasEditorInner({
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-            ) : (
-              <span className="inline-grid h-9 max-w-28 items-center overflow-hidden rounded-md bg-secondary px-2 text-sm font-medium sm:max-w-52">
-                {/* 输入框宽度跟着名字走：隐藏的同字号文本撑开格子，输入框铺满它。 */}
-                <span aria-hidden="true" className="invisible col-start-1 row-start-1 whitespace-pre">{projectRenameDraft || ' '}</span>
-                <Input variant="bare"
-                size={1}
-                ref={projectRenameInputRef}
-                value={projectRenameDraft}
-                disabled={projectRenameBusy}
-                aria-label="画布项目名称"
-                className="col-start-1 row-start-1 w-full min-w-0 bg-transparent text-foreground outline-none disabled:opacity-50"
-                onChange={event => setProjectRenameDraft(event.target.value)}
-                onBlur={() => void commitProjectRename(false)}
-                onKeyDown={event => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    void commitProjectRename(true);
-                  } else if (event.key === 'Escape') {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    cancelProjectRename.current = true;
-                    setProjectRenameDraft(null);
-                    requestAnimationFrame(() => canvasMenuTriggerRef.current?.focus());
-                  }
-                }}
-              />
-              </span>
-            )}
           </div>
           {/* 正常保存不打扰（飙哥 2026-09-30 去掉「已保存 · vN」）；只有失败要露出来并给重试。 */}
           {saveState === 'error' && (
@@ -5355,21 +5298,19 @@ function CanvasEditorInner({
             >
               {/* 原文案是「保存冲突，内容已保留」。它把所有失败都说成冲突，还向用户保证内容没事——
                   实际是本地已经和服务端分叉，之后的编辑都不落盘。这里只说失败，并给出重试入口。 */}
-              <button
+              <Hint label={saveErrorDetail ?? undefined}><Button variant="bare"
                 type="button"
-                title={saveErrorDetail ?? undefined}
                 className="underline-offset-2 hover:underline focus-visible:outline-none focus-visible:underline"
                 onClick={() => void flushSave().catch(() => undefined)}
               >
                 保存失败 · 重试
-              </button>
+              </Button></Hint>
             </div>
           )}
           {runningNodeIds.length > 0 && (
             <div className="pointer-events-auto ml-auto shrink-0 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
-              <Button
+              <Hint label="定位到生成中的节点"><Button
                 variant="ghost"
-                title="定位到生成中的节点"
                 className="h-9 gap-2 px-3 font-normal"
                 onClick={() => {
                   void runViewportCommand(() => fitView({
@@ -5383,7 +5324,7 @@ function CanvasEditorInner({
                 <span aria-hidden="true" className="size-1.5 rounded-full bg-primary" />
                 生成中
                 <span className="text-xs tabular-nums text-muted-foreground">{runningNodeIds.length}</span>
-              </Button>
+              </Button></Hint>
             </div>
           )}
           <div className={cn('pointer-events-auto shrink-0 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow', runningNodeIds.length === 0 && 'ml-auto')}>
@@ -5457,7 +5398,7 @@ function CanvasEditorInner({
 
         {createMenu && (
           <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenuDock?.left ?? createMenu.screen.x, top: createMenuDock?.top ?? createMenu.screen.y }}>
-            <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs text-muted-foreground">创建并连接</p><button type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><X className="size-4" /></button></div>
+            <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs text-muted-foreground">创建并连接</p><Button variant="bare" type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><X className="size-4" /></Button></div>
             <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddCompare={createMenuFromImage ? () => addCompareNode(createMenu) : undefined} rejectedModes={createMenu.sourceHandle === 'target' || !createMenu.sourceId ? undefined : canvasModesRejectingSources(document, createMenu.sourceIds ?? [createMenu.sourceId])} onAddBatch={createMenu.sourceId ? undefined : () => addBatchMaterialNode(createMenu)} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onUpload={() => uploadRef.current?.click()} />
           </div>
         )}
@@ -5821,7 +5762,7 @@ function CanvasPreview({
             } : { inset: 0, width: '100%', height: '100%' }} />}
           </div>
           {edit?.source_version_id && <Button size="sm" variant="ghost" onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); setShowSource(true); }} onPointerUp={() => setShowSource(false)} onPointerCancel={() => setShowSource(false)} onKeyDown={event => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); setShowSource(true); } }} onKeyUp={() => setShowSource(false)} onBlur={() => setShowSource(false)}>按住查看原图</Button>}
-          {edit && maskId && (edit.mode === 'inpaint' || edit.mode === 'outpaint') && <Button size="sm" variant="ghost" aria-pressed={showMask} onClick={() => setShowMask(value => !value)}>查看选区</Button>}
+          {edit && maskId && (edit.mode === 'inpaint' || edit.mode === 'outpaint') && <Toggle size="sm" pressed={showMask} onPressedChange={setShowMask}>查看选区</Toggle>}
         </div>
       )}
       {version.kind === 'video' && src && (
@@ -5878,13 +5819,13 @@ function CanvasActionFeedback({ error, notice, action = null, noticeAction = nul
         <div role="alert" className="flex min-w-0 items-start gap-2 overflow-hidden rounded-lg border border-destructive/30 bg-popover px-3 py-2 text-sm text-destructive shell-glow">
           <span className="line-clamp-3 min-w-0 flex-1 break-words leading-relaxed">{displayError}</span>
           {action && (
-            <button
+            <Button variant="bare"
               type="button"
               className="shrink-0 rounded-md border border-destructive/40 px-2 py-0.5 text-xs text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               onClick={action.run}
-            >{action.label}</button>
+            >{action.label}</Button>
           )}
-          <button type="button" aria-label="关闭错误提示" onClick={onDismissError}><X className="size-4" /></button>
+          <Button variant="bare" type="button" aria-label="关闭错误提示" onClick={onDismissError}><X className="size-4" /></Button>
         </div>
       )}
       {notice && (
@@ -5893,11 +5834,11 @@ function CanvasActionFeedback({ error, notice, action = null, noticeAction = nul
             {notice.split('\n').map((line, index) => <p key={index}>{line}</p>)}
           </div>
           {noticeAction && (
-            <button
+            <Button variant="outline" size="sm"
               type="button"
-              className="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="h-6 shrink-0 px-2"
               onClick={noticeAction.run}
-            >{noticeAction.label}</button>
+            >{noticeAction.label}</Button>
           )}
         </div>
       )}
@@ -5914,7 +5855,7 @@ function MetadataItem({ label, value, numeric = false, technical = false }: {
   return (
     <div className="min-w-0">
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={cn('mt-0.5 truncate text-foreground', numeric && 'tabular-nums', technical && 'font-mono text-xs')} title={value}>{value}</dd>
+      <Hint label={value}><dd className={cn('mt-0.5 truncate text-foreground', numeric && 'tabular-nums', technical && 'font-mono text-xs')}>{value}</dd></Hint>
     </div>
   );
 }
@@ -6354,41 +6295,40 @@ function CanvasZoomDock({
     <div className="canvas-zoom-dock absolute bottom-3 right-3 z-20 hidden items-center gap-1 rounded-full border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
       {minimapToggle}
       <div className="mx-1 h-5 w-px bg-border" />
-      <button
+      <Button variant="bare"
         type="button"
         aria-label="缩小画布"
         disabled={zoom <= CANVAS_MIN_ZOOM + 0.0005}
         className={zoomDockButtonClass}
         onClick={onZoomOut}
-      ><Minus className="size-4" aria-hidden="true" /></button>
+      ><Minus className="size-4" aria-hidden="true" /></Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button
+          <Button variant="bare"
             type="button"
             aria-label={`画布缩放 ${percent}%`}
             className="h-8 w-14 rounded-md text-xs tabular-nums text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary data-[state=open]:bg-secondary"
-          >{percent}%</button>
+          >{percent}%</Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="center" className="min-w-36 rounded-xl">
           <DropdownMenuItem onSelect={onFitView}>适应全部</DropdownMenuItem>
           <DropdownMenuItem onSelect={onResetZoom}>100%</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <button
+      <Button variant="bare"
         type="button"
         aria-label="放大画布"
         disabled={zoom >= CANVAS_MAX_ZOOM - 0.0005}
         className={zoomDockButtonClass}
         onClick={onZoomIn}
-      ><Plus className="size-4" aria-hidden="true" /></button>
+      ><Plus className="size-4" aria-hidden="true" /></Button>
       <div className="mx-1 h-5 w-px bg-border" />
-      <button
+      <Hint label="适应全部节点"><Button variant="bare"
         type="button"
-        title="适应全部节点"
         aria-label="适应全部节点"
         className={zoomDockButtonClass}
         onClick={onFitView}
-      ><Maximize2 className="size-4" aria-hidden="true" /></button>
+      ><Maximize2 className="size-4" aria-hidden="true" /></Button></Hint>
     </div>
     </>
   );

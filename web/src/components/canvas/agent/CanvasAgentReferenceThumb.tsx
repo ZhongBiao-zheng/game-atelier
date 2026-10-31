@@ -4,6 +4,7 @@ import { canvasMediaUrl } from '@/api/canvas';
 import {
   CanvasMaterialHoverDetail, type CanvasMaterialHoverState,
 } from '@/components/canvas/CanvasMaterialHoverDetail';
+import { Button } from '@/components/ui/button';
 
 /** 缩略图格子 40px，取 2 倍给高分屏；悬停大图与节点里的素材详情同款（w-64）。 */
 const THUMB_WIDTH = 80;
@@ -47,12 +48,12 @@ export function CanvasAgentReferenceThumb({ projectId, nodeId, versionId, title,
         <img src={canvasMediaUrl(projectId, versionId, THUMB_WIDTH)} alt="" loading="lazy" className="size-full object-cover" />
       </span>
       {onRemove && (
-        <button
+        <Button variant="bare"
           type="button"
           aria-label={`不带入 ${title}`}
           onClick={onRemove}
           className="absolute -right-1 -top-1 grid size-4 place-items-center rounded-full border border-border bg-background text-muted-foreground hover:text-destructive"
-        ><X className="size-2.5" /></button>
+        ><X className="size-2.5" /></Button>
       )}
       {detail && <CanvasMaterialHoverDetail {...detail} />}
     </span>

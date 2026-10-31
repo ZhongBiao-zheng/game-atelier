@@ -29,6 +29,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { EditableText, type EditableTextHandle } from '@/components/ui/editable-text';
 import { Label } from '@/components/ui/label';
 import type { CanvasPackageInspection, CanvasProjectSummary } from '@/schema/canvas';
 import { SwapLabel } from '@/components/ui/swap-label';
@@ -344,56 +345,15 @@ function CanvasProjectCard({
   onDelete: () => void;
   disabled: boolean;
 }) {
-  const [renaming, setRenaming] = useState(false);
-  const [renameDraft, setRenameDraft] = useState(project.name);
-  const [renameError, setRenameError] = useState<string | null>(null);
-  const [renameBusy, setRenameBusy] = useState(false);
-  const renameInputRef = useRef<HTMLInputElement>(null);
-  const renameTriggerRef = useRef<HTMLButtonElement>(null);
-  const renameInFlight = useRef(false);
-  const cancelRename = useRef(false);
+  const titleEditorRef = useRef<EditableTextHandle>(null);
 
   function beginInlineRename() {
-    if (disabled) return;
-    cancelRename.current = false;
-    setRenameDraft(project.name);
-    setRenameError(null);
-    setRenaming(true);
-    requestAnimationFrame(() => renameInputRef.current?.select());
-  }
-
-  async function commitInlineRename(restoreFocus: boolean) {
-    if (renameInFlight.current || cancelRename.current) return;
-    const name = renameDraft.trim();
-    if (!name) {
-      setRenameError('请输入画布项目名称');
-      requestAnimationFrame(() => renameInputRef.current?.focus());
-      return;
-    }
-    if (name === project.name) {
-      setRenaming(false);
-      if (restoreFocus) requestAnimationFrame(() => renameTriggerRef.current?.focus());
-      return;
-    }
-    renameInFlight.current = true;
-    setRenameBusy(true);
-    setRenameError(null);
-    try {
-      await onInlineRename(name);
-      setRenaming(false);
-      if (restoreFocus) requestAnimationFrame(() => renameTriggerRef.current?.focus());
-    } catch (error) {
-      setRenameError((error as Error).message);
-      requestAnimationFrame(() => renameInputRef.current?.focus());
-    } finally {
-      renameInFlight.current = false;
-      setRenameBusy(false);
-    }
+    titleEditorRef.current?.edit();
   }
 
   return (
     <article className="group relative overflow-hidden rounded-xl border border-border bg-card/45 transition-colors hover:border-input">
-      <button
+      <Button variant="bare"
         type="button"
         disabled={disabled}
         aria-label={`打开画布项目 ${project.name}`}
@@ -412,58 +372,24 @@ function CanvasProjectCard({
             <span className="line-clamp-2">{project.name}</span>
           </div>
         )}
-      </button>
+      </Button>
       <div className="space-y-1 p-4 pr-14">
-        {renaming ? (
-          <div className="space-y-1.5">
-            <Input
-              ref={renameInputRef}
-              value={renameDraft}
-              disabled={renameBusy}
-              aria-label={`重命名画布项目 ${project.name}`}
-              aria-invalid={Boolean(renameError)}
-              onChange={event => setRenameDraft(event.target.value)}
-              onBlur={() => void commitInlineRename(false)}
-              onKeyDown={event => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  void commitInlineRename(true);
-                } else if (event.key === 'Escape') {
-                  event.preventDefault();
-                  cancelRename.current = true;
-                  setRenameError(null);
-                  setRenaming(false);
-                  requestAnimationFrame(() => renameTriggerRef.current?.focus());
-                }
-              }}
-            />
-            {renameError && <p role="alert" className="text-xs text-destructive">{renameError}</p>}
-          </div>
-        ) : (
-          <button
-            ref={renameTriggerRef}
-            type="button"
-            disabled={disabled}
-            title="双击重命名"
-            onClick={event => {
-              if (event.detail === 0) onOpen();
-            }}
-            onDoubleClick={event => {
-              event.preventDefault();
-              beginInlineRename();
-            }}
-            className="block max-w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <h2 className="truncate text-base font-medium text-foreground">{project.name}</h2>
-          </button>
-        )}
+        <EditableText
+          ref={titleEditorRef}
+          value={project.name}
+          size="lg"
+          disabled={disabled}
+          triggerLabel={`重命名画布项目 ${project.name}`}
+          className="-ml-2 font-medium text-foreground"
+          onSave={onInlineRename}
+        />
         <p className="text-xs tabular-nums text-muted-foreground">
           {project.node_count} 个节点 · {project.connection_count} 条连线 · {formatActivity(project.updated_at)}
         </p>
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button disabled={disabled || renameBusy} variant="ghost" size="icon" aria-label={`管理画布项目 ${project.name}`} className="absolute bottom-2 right-2 size-11">
+          <Button disabled={disabled} variant="ghost" size="icon" aria-label={`管理画布项目 ${project.name}`} className="absolute bottom-2 right-2 size-11">
             <MoreHorizontal aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>

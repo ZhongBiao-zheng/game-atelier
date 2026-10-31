@@ -7,7 +7,11 @@ import { rememberedModel } from '@/components/canvas/agent/useCanvasAgent';
 import { Button } from '@/components/ui/button';
 import { assetMediaContent, type CreationAsset, type CategorySuggestion } from '@/schema/creationAssets';
 import { FileInput } from '@/components/ui/file-input';
-import { Select } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Hint } from '@/components/ui/tooltip';
+
+/** Select 不接受空字符串选项值，「无类别」用这个占位。 */
+const NO_CATEGORY = '__none__';
 
 interface PendingQueue { ids: string[]; suggestions: Record<string, CategorySuggestion> }
 
@@ -137,19 +141,21 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
     const value = waiting ? suggestion?.category ?? '' : asset.category ?? '';
     return <article key={asset.asset_id} className="mb-3 break-inside-avoid overflow-hidden rounded-lg border border-border bg-card p-3">
       <MediaPreview assetId={asset.asset_id} content={media} alt={asset.title} className="mb-2 max-h-64 w-full rounded-md object-contain" />
-      <p className="truncate text-sm" title={asset.title}>{asset.title}</p>
+      <Hint label={asset.title}><p className="truncate text-sm">{asset.title}</p></Hint>
       <div className="mt-2 flex items-center gap-2">
-        <Select variant="bare" aria-label={`${asset.title} 的类别`} value={value} disabled={busy}
-          className="h-8 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-xs"
-          onChange={event => {
-            const category = event.target.value || null;
+        <Select value={value || NO_CATEGORY} disabled={busy}
+          onValueChange={next => {
+            const category = next === NO_CATEGORY ? null : next;
             if (waiting) setSuggestions(current => ({ ...current, [asset.asset_id]: { asset_id: asset.asset_id, category, confidence: 1 } }));
             else void categorize(asset, category);
           }}>
-          <option value="">{waiting ? '待分类' : '取消定稿'}</option>
-          {[...new Set([...categories, ...(value ? [value] : [])])].map(category => <option key={category} value={category}>{category}</option>)}
+          <SelectTrigger size="sm" aria-label={`${asset.title} 的类别`} className="flex-1"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NO_CATEGORY}>{waiting ? '待分类' : '取消定稿'}</SelectItem>
+            {[...new Set([...categories, ...(value ? [value] : [])])].map(category => <SelectItem key={category} value={category}>{category}</SelectItem>)}
+          </SelectContent>
         </Select>
-        {waiting && suggestion && <span className="text-xs tabular-nums text-muted-foreground" title="分类置信度">{Math.round(suggestion.confidence * 100)}%</span>}
+        {waiting && suggestion && <Hint label="分类置信度"><span className="text-xs tabular-nums text-muted-foreground">{Math.round(suggestion.confidence * 100)}%</span></Hint>}
       </div>
       {!waiting && <Button variant="ghost" size="sm" className="mt-2 w-full" disabled={busy} onClick={() => onUse(asset)}>放到画布</Button>}
     </article>;
@@ -173,7 +179,7 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
       {pending.length > 0 && <section aria-label="待分类" className="mb-4">
         <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="text-sm">待分类 · {pending.length}</h3>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void classify()} title="使用 Agent 中选择的对话模型，此操作会产生模型费用"><WandSparkles />自动分类</Button>
+          <Hint label="使用 Agent 中选择的对话模型，此操作会产生模型费用"><Button variant="ghost" size="sm" disabled={busy} onClick={() => void classify()}><WandSparkles />自动分类</Button></Hint>
         </div>
         <div className="columns-[14rem] gap-3">{pending.map(asset => card(asset, true))}</div>
         <Button size="sm" disabled={busy || !pending.some(asset => suggestions[asset.asset_id]?.category)} onClick={() => void confirm()}>全部确认</Button>

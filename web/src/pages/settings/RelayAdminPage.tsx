@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useLocation, useSearch } from 'wouter';
 import { listKeys } from '@/api/keys';
 import { adminBase, fetchGatewayProviderMe, type GatewayMembers } from '@/api/gateway';
@@ -8,12 +9,15 @@ import { fetchUsage } from '@/api/usage';
 import type { UsageRange, UsageResponse } from '@/schema/usage';
 import { AuditLog } from './lan-sharing/AuditLog';
 import { LanSharingSection } from './LanSharingSection';
-import { button } from './lan-sharing/shared';
 import { KpiRow } from './usage/KpiRow';
 import { TrendChart } from './usage/TrendChart';
 import { RankingCard } from './usage/RankingCard';
 import { TaskTable } from './usage/TaskTable';
-import { Select } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
+
+/** Select 不接受空字符串选项值，「全部成员」用这个占位。 */
+const ALL_MEMBERS = '__all__';
 
 export function useAdminGateways() {
   const [aliases, setAliases] = useState<string[]>([]);
@@ -53,10 +57,19 @@ function TeamUsage({ alias }: { alias: string }) {
   }, [alias, range, member]);
   return <section className="space-y-6" aria-label="中转团队用量">
     <div className="flex flex-wrap gap-3">
-      <Select variant="bare" aria-label="用量时间范围" className={button} value={range} onChange={e => setRange(e.target.value as UsageRange)}>
-        {([['today', '今天'], ['7d', '7 天'], ['30d', '30 天'], ['90d', '90 天'], ['all', '全部']] as const).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      <Select value={range} onValueChange={value => setRange(value as UsageRange)}>
+        <SelectTrigger aria-label="用量时间范围" className="w-auto"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {([['today', '今天'], ['7d', '7 天'], ['30d', '30 天'], ['90d', '90 天'], ['all', '全部']] as const).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+        </SelectContent>
       </Select>
-      <Select variant="bare" aria-label="用量成员" className={button} value={member} onChange={e => setMember(e.target.value)}><option value="">全部成员</option>{data?.members.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</Select>
+      <Select value={member || ALL_MEMBERS} onValueChange={value => setMember(value === ALL_MEMBERS ? '' : value)}>
+        <SelectTrigger aria-label="用量成员" className="w-auto"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL_MEMBERS}>全部成员</SelectItem>
+          {data?.members.map(row => <SelectItem key={row.id} value={row.id}>{row.name}</SelectItem>)}
+        </SelectContent>
+      </Select>
     </div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {data && <><KpiRow data={data} /><TrendChart data={data} /><div className="grid gap-4 md:grid-cols-2">{data.rankings.map(ranking => <RankingCard key={ranking.by} ranking={ranking} />)}</div></>}
@@ -92,11 +105,11 @@ function Upstreams({ alias }: { alias: string }) {
         const blocked = status?.members.find(row => row.alias === upstream && row.modality === route.modality);
         return <li key={upstream} className="flex flex-wrap items-center gap-3 text-xs">
           <span className="min-w-0 break-all">{index + 1}. {upstream}</span><span className="text-muted-foreground">{blocked ? blocked.reason === 'insufficient_balance' ? '余额不足' : '暂不可用' : '可用'}</span>
-          {blocked && <button className={button} disabled={busy} onClick={() => void write(`/members/${encodeURIComponent(upstream)}/restore`, { modality: route.modality })}>恢复</button>}
-          <button className={button} disabled={busy || index === 0} aria-label={`上移 ${upstream}`} onClick={() => {
+          {blocked && <Button variant="outline" size="sm" disabled={busy} onClick={() => void write(`/members/${encodeURIComponent(upstream)}/restore`, { modality: route.modality })}>恢复</Button>}
+          <Button variant="outline" size="sm" disabled={busy || index === 0} aria-label={`上移 ${upstream}`} onClick={() => {
             const aliases = [...route.aliases]; [aliases[index - 1], aliases[index]] = [aliases[index], aliases[index - 1]];
             void write('/routes/order', { modality: route.modality, id: route.id, aliases }, 'PUT');
-          }}>上移</button>
+          }}>上移</Button>
         </li>;
       })}</ol>
     </div>)}
@@ -114,8 +127,13 @@ export function RelayAdminPage() {
   function change(name: string, value: string) { const next = new URLSearchParams(search); next.set(name, value); navigate(`/settings/relay-admin?${next}`); }
   if (!alias) return <p className="text-sm text-muted-foreground">{loaded ? '没有可用的管理员中转连接' : '读取中转连接…'}</p>;
   return <div className="min-w-0 space-y-6">
-    <div className="flex flex-wrap gap-3"><Select variant="bare" aria-label="管理的中转" className={button} value={alias} onChange={e => change('alias', e.target.value)}>{aliases.map(value => <option key={value}>{value}</option>)}</Select>
-      {([['members', '成员'], ['usage', '团队用量'], ['upstreams', '上游与路由'], ['audit', '操作日志']] as const).map(([value, label]) => <button key={value} className={`${button} ${view === value ? 'bg-secondary' : ''}`} aria-pressed={view === value} onClick={() => change('view', value)}>{label}</button>)}
+    <div className="flex flex-wrap gap-3"><Select value={alias} onValueChange={value => change('alias', value)}>
+      <SelectTrigger aria-label="管理的中转" className="w-auto"><SelectValue /></SelectTrigger>
+      <SelectContent>{aliases.map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent>
+    </Select>
+      <Tabs value={view} onValueChange={value => change('view', value)}>
+        <TabsList aria-label="管理页签">{([['members', '成员'], ['usage', '团队用量'], ['upstreams', '上游与路由'], ['audit', '操作日志']] as const).map(([value, label]) => <TabsTrigger key={value} value={value}>{label}</TabsTrigger>)}</TabsList>
+      </Tabs>
     </div>
     {view === 'audit' ? <AuditLog gatewayAlias={alias} /> : view === 'usage' ? <TeamUsage key={alias} alias={alias} /> : view === 'upstreams' ? <Upstreams key={alias} alias={alias} /> : <LanSharingSection key={alias} gatewayAlias={alias} />}
   </div>;

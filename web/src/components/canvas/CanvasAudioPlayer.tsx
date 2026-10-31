@@ -3,6 +3,7 @@ import { FastForward, Pause, Play, Rewind } from 'lucide-react';
 import { request } from '@/api/http';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 
 /** 每根波形条代表的最短时长；长音频按 MAX_BARS 摊开，避免几千根条。 */
 const MIN_SECONDS_PER_BAR = 0.2;
@@ -236,7 +237,7 @@ export function CanvasAudioPlayer({
         </div>
       </div>
       <div className="flex shrink-0 items-center justify-center gap-6 pt-4">
-        <button
+        <Button variant="bare"
           type="button"
           aria-label={`跳到上一段 ${label}`}
           className="nodrag grid size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -245,8 +246,8 @@ export function CanvasAudioPlayer({
           onClick={event => { stop(event); seek(previousStop); }}
         >
           <Rewind className="size-4 fill-current" aria-hidden="true" />
-        </button>
-        <button
+        </Button>
+        <Button variant="bare"
           type="button"
           aria-label={`${playing ? '暂停' : '播放'} ${label}`}
           className="nodrag grid size-10 place-items-center rounded-full bg-foreground text-background transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -259,8 +260,8 @@ export function CanvasAudioPlayer({
               ? <Pause className="size-4 fill-current" aria-hidden="true" />
               : <Play className="ml-0.5 size-4 fill-current" aria-hidden="true" />}
           </SwapIcon>
-        </button>
-        <button
+        </Button>
+        <Button variant="bare"
           type="button"
           aria-label={`跳到下一段 ${label}`}
           className="nodrag grid size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -269,7 +270,7 @@ export function CanvasAudioPlayer({
           onClick={event => { stop(event); seek(nextStop); }}
         >
           <FastForward className="size-4 fill-current" aria-hidden="true" />
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -1,10 +1,14 @@
 import { useMemo, useRef, useState } from 'react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Boxes, Check } from 'lucide-react';
 import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
 import { cn } from '@/lib/utils';
 import type {
   CanvasAgentCreationMode, CanvasAgentGenerationModel, CanvasAgentModelRef,
 } from '@/schema/canvas';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 
 type Kind = 'image' | 'video';
 const KINDS: Kind[] = ['image', 'video'];
@@ -51,10 +55,9 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, dis
 
   return (
     <>
-      <button
+      <Hint label={auto ? '模型偏好：自动' : `模型偏好：图像 ${chosenCount('image')} 个，视频 ${chosenCount('video')} 个`}><Button variant="bare"
         ref={anchorRef}
         type="button"
-        title={auto ? '模型偏好：自动' : `模型偏好：图像 ${chosenCount('image')} 个，视频 ${chosenCount('video')} 个`}
         aria-label="模型偏好"
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -64,7 +67,7 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, dis
           'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40',
           !auto && 'text-primary',
         )}
-      ><Boxes className="size-4" /></button>
+      ><Boxes className="size-4" /></Button></Hint>
       <ToolbarPopover
         open={open}
         onClose={() => setOpen(false)}
@@ -76,9 +79,9 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, dis
       >
         <div className="flex items-center justify-between px-1">
           <p className="text-sm font-medium">模型偏好</p>
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Label className="flex items-center gap-2 text-xs text-muted-foreground">
             自动
-            <button
+            <Button variant="bare"
               type="button"
               role="switch"
               aria-checked={auto}
@@ -87,24 +90,19 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, dis
               className={cn('relative h-5 w-9 rounded-full transition-colors', auto ? 'bg-primary' : 'bg-secondary')}
             >
               <span className={cn('absolute top-0.5 size-4 rounded-full bg-background transition-transform', auto ? 'translate-x-[1.125rem]' : 'translate-x-0.5')} />
-            </button>
-          </label>
+            </Button>
+          </Label>
         </div>
-        <div role="tablist" aria-label="模型类型" className="grid grid-cols-2 gap-1 rounded-lg bg-secondary/60 p-0.5">
-          {KINDS.map(kind => (
-            <button
-              key={kind}
-              type="button"
-              role="tab"
-              aria-selected={kind === activeKind}
-              onClick={() => setTab(kind)}
-              className={cn('rounded-md py-1 text-xs text-muted-foreground', kind === activeKind && 'bg-background text-foreground')}
-            >
-              {KIND_LABELS[kind]}
-              {!auto && <span className="ml-1 tabular-nums text-muted-foreground">{chosenCount(kind)}</span>}
-            </button>
-          ))}
-        </div>
+        <Tabs activationMode="manual" value={activeKind} onValueChange={value => setTab(value as typeof activeKind)}>
+          <TabsList aria-label="模型类型" className="grid h-8 w-full grid-cols-2">
+            {KINDS.map(kind => (
+              <TabsTrigger key={kind} value={kind} className="text-xs">
+                {KIND_LABELS[kind]}
+                {!auto && <span className="tabular-nums text-muted-foreground">{chosenCount(kind)}</span>}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
         <div role="listbox" aria-multiselectable aria-label={`${KIND_LABELS[activeKind]}模型`} className="max-h-72 overflow-y-auto">
           {!models && <p className="px-2 py-3 text-xs text-muted-foreground">读取中…</p>}
           {models && rows.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">没有可用的{KIND_LABELS[activeKind]}模型</p>}
@@ -114,7 +112,7 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, dis
               {items.map(item => {
                 const checked = !auto && isChosen(item);
                 return (
-                  <button
+                  <Button variant="bare"
                     key={`${item.alias}/${item.model}`}
                     type="button"
                     role="option"
@@ -124,9 +122,9 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, dis
                     onClick={() => toggle(item)}
                     className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-secondary disabled:opacity-50 disabled:hover:bg-transparent"
                   >
-                    <span className="min-w-0 flex-1 truncate text-xs" title={item.model}>{item.name}</span>
+                    <Hint label={item.model}><span className="min-w-0 flex-1 truncate text-xs">{item.name}</span></Hint>
                     {checked && <Check className="size-3.5 shrink-0 text-primary" />}
-                  </button>
+                  </Button>
                 );
               })}
             </div>

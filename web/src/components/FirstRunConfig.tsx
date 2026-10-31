@@ -126,7 +126,7 @@ function OptionCard({
   children?: React.ReactNode;
 }) {
   return (
-    <button
+    <Button variant="bare"
       type="button"
       onClick={onClick}
       className={cn(
@@ -153,6 +153,6 @@ function OptionCard({
         </span>
       </div>
       {children && <div>{children}</div>}
-    </button>
+    </Button>
   );
 }

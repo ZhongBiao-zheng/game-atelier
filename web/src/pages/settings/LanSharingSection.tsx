@@ -1,4 +1,5 @@
 import { AuditLog } from './lan-sharing/AuditLog';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Link } from 'wouter';
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -21,7 +22,9 @@ import { KeyForm } from './lan-sharing/KeyForm';
 import { GatewayMemberName } from './lan-sharing/GatewayMemberName';
 import { GatewayMemberToken } from './lan-sharing/GatewayMemberToken';
 import { Tasks } from './lan-sharing/Tasks';
-import { button, date, PERIODS } from './lan-sharing/shared';
+import { date, PERIODS } from './lan-sharing/shared';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
 
 export const GATEWAY_HINT =
   '同事在「添加供应商 → Remote Atelier」填写地址和网关密钥。连接使用明文 HTTP。同事连不上时检查防火墙：Windows 把当前网络设为「专用网络」，并在防火墙中允许 Atelier（Python）入站；macOS 首次开启时在弹窗中点「允许」。';
@@ -90,7 +93,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
         </div>
         {address && <div role="status" className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-xs">
           <span className="break-all font-mono">{address}</span>
-          <button aria-label="复制地址" className={`${button} shrink-0`} onClick={async () => {
+          <Button variant="outline" size="sm" aria-label="复制地址" className="shrink-0" onClick={async () => {
             setError('');
             try {
               await navigator.clipboard.writeText(address);
@@ -99,7 +102,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
               setCopiedAddress(null);
               setError('复制失败，请手动复制地址');
             }
-          }}>{copiedAddress === address ? '已复制' : '复制'}</button>
+          }}>{copiedAddress === address ? '已复制' : '复制'}</Button>
         </div>}
         {state?.enabled && (editingPort ? (
           <form autoComplete="off" className="flex flex-wrap items-center gap-2" onSubmit={event => {
@@ -110,19 +113,19 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
             });
           }}>
             <Input aria-label="端口" value={port} inputMode="numeric" autoFocus disabled={busy}
-              onChange={event => setPort(event.target.value.replace(/\D/g, ''))} className="h-8 w-24" />
-            <button type="submit" className={button}
-              disabled={busy || !(Number(port) >= 1024 && Number(port) <= 65535)}>保存端口</button>
-            <button type="button" className={button} disabled={busy} onClick={() => setEditingPort(false)}>取消</button>
+              onChange={event => setPort(event.target.value.replace(/\D/g, ''))} className="w-24" />
+            <Button variant="outline" size="sm" type="submit"
+              disabled={busy || !(Number(port) >= 1024 && Number(port) <= 65535)}>保存端口</Button>
+            <Button variant="outline" size="sm" type="button" disabled={busy} onClick={() => setEditingPort(false)}>取消</Button>
           </form>
         ) : (
-          <button className={button} disabled={busy} onClick={() => {
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => {
             setPort(String(state.port));
             setEditingPort(true);
-          }}>改端口</button>
+          }}>改端口</Button>
         ))}
-        <Switch compact label="开启局域网共享" checked={Boolean(state?.enabled)} disabled={!state || busy}
-          onChange={enabled => void run(() => updateGateway({ enabled })).then(saved => {
+        <Switch size="sm" aria-label="开启局域网共享" checked={Boolean(state?.enabled)} disabled={!state || busy}
+          onCheckedChange={enabled => void run(() => updateGateway({ enabled })).then(saved => {
             if (saved) setEditingPort(false);
           })} />
       </section>}
@@ -130,16 +133,18 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
         <p>常驻服务：{{ installed: '已安装', not_installed: '未安装', needs_credentials: '待设置系统凭据', unknown: '状态读取失败' }[service.state]}</p>
         {service.state !== 'installed' && <code className="block break-all select-all text-muted-foreground">{service.install_command}</code>}
       </section>}
-      {!gatewayAlias && <div className="flex gap-2" aria-label="成员管理页签">{[['members', '成员与任务'], ['audit', '操作日志']].map(([value, label]) => <button key={value} className={`${button} ${tab === value ? 'bg-secondary' : ''}`} aria-pressed={tab === value} onClick={() => setTab(value)}>{label}</button>)}</div>}
+      {!gatewayAlias && <Tabs value={tab} onValueChange={setTab}>
+        <TabsList aria-label="成员管理页签">{[['members', '成员与任务'], ['audit', '操作日志']].map(([value, label]) => <TabsTrigger key={value} value={value}>{label}</TabsTrigger>)}</TabsList>
+      </Tabs>}
       {tab === 'audit' ? <AuditLog gatewayAlias={gatewayAlias} /> : <div className="min-w-0 space-y-6">
         {state?.enabled && (
           <>
             <section aria-label="成员" className="space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium">成员 <span className="font-normal text-muted-foreground">{state.keys.length}</span></h3>
-                <button className={button} disabled={!state || busy} onClick={() => setEditing(null)}>
+                <Button variant="outline" size="sm" disabled={!state || busy} onClick={() => setEditing(null)}>
                   新建成员密钥
-                </button>
+                </Button>
               </div>
               <div className="overflow-x-auto rounded-xl border border-border bg-card">
                 <table className="w-full min-w-160 text-left text-xs">
@@ -159,7 +164,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
                           className={`max-w-64 px-4 py-3 ${key.revoked_at ? 'text-muted-foreground' : ''}`}
                         >
                           <div className="flex flex-wrap items-center gap-1">
-                            {key.revoked_at ? <span className="truncate" title={key.name}>{key.name}</span>
+                            {key.revoked_at ? <Hint label={key.name}><span className="truncate">{key.name}</span></Hint>
                               : <GatewayMemberName name={key.name} disabled={busy}
                                 onSave={name => run(() => updateGatewayKey(key.id, { name }, ...(gatewayAlias ? [gatewayAlias] as const : [])))} />}
                             {!gatewayAlias && !key.revoked_at && <GatewayMemberToken id={key.id} name={key.name} onError={setError} />}
@@ -207,17 +212,17 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
                             '已撤销'
                           ) : (
                             <div className="flex items-center gap-2 whitespace-nowrap text-muted-foreground">
-                              <button className="rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50" disabled={busy} onClick={() => setEditing(key)}>
+                              <Button variant="bare" className="rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50" disabled={busy} onClick={() => setEditing(key)}>
                                 编辑
-                              </button>
+                              </Button>
                               <span aria-hidden>·</span>
-                              <button
+                              <Button variant="bare"
                                 className="rounded-sm hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
                                 disabled={busy}
                                 onClick={() => setPendingRevoke(key)}
                               >
                                 撤销
-                              </button>
+                              </Button>
                             </div>
                           )}
                         </td>

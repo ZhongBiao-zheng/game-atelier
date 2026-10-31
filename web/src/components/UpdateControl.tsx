@@ -6,6 +6,7 @@ import { ApiError } from '@/api/http';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { OPEN_CHANGELOG_EVENT } from '@/components/ChangelogButton';
+import { Hint } from '@/components/ui/tooltip';
 
 const reason = (error: unknown) => error instanceof ApiError ? error.reason ?? error.message : error instanceof Error ? error.message : '更新失败，请重试';
 const releaseUrl = (version: string) => `https://github.com/ZhongBiao-zheng/game-atelier/releases/tag/v${encodeURIComponent(version)}`;
@@ -136,7 +137,7 @@ export function UpdateProvider({ children, runtimeMode, latestRelease }: {
       </DialogContent>
     </Dialog>
     {message && createPortal(<div data-connection-controls role="alert" className="fixed inset-x-3 bottom-6 z-50 mx-auto flex w-fit max-w-lg items-center gap-3 rounded-lg border border-border bg-popover px-4 py-3 text-sm">
-      <span>{message}</span><button type="button" data-connection-dismiss aria-label="关闭更新提示" className="rounded-sm p-1 text-muted-foreground hover:text-foreground" onClick={() => setMessage(null)}><X className="size-4" aria-hidden /></button>
+      <span>{message}</span><Button variant="bare" type="button" data-connection-dismiss aria-label="关闭更新提示" className="rounded-sm p-1 text-muted-foreground hover:text-foreground" onClick={() => setMessage(null)}><X className="size-4" aria-hidden /></Button>
     </div>, document.body)}
   </UpdateContext.Provider>;
 }
@@ -145,12 +146,12 @@ export function UpdateButton({ mobile = false }: { mobile?: boolean }) {
   const update = useContext(UpdateContext);
   if (!update) return null;
   const { state, mode, latest } = update;
-  if (mode === 'bundle') return !mobile && state?.status === 'ready' && state.to ? <button type="button" title={`更新到 ${state.to}`} onClick={update.requestApply}
-    className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-3 py-2 text-xs text-primary hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><ArrowUp className="size-3.5" aria-hidden />更新</button> : null;
+  if (mode === 'bundle') return !mobile && state?.status === 'ready' && state.to ? <Hint label={`更新到 ${state.to}`}><Button variant="bare" type="button" onClick={update.requestApply}
+    className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-3 py-2 text-xs text-primary hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><ArrowUp className="size-3.5" aria-hidden />更新</Button></Hint> : null;
   if (!latest) return null;
   const wrapper = mobile ? 'flex justify-end px-3 pb-2 sm:hidden' : 'hidden sm:contents';
-  if (mode === 'source') return <span className={wrapper}><button type="button" title="重新运行一键启动器即可更新" onClick={() => window.dispatchEvent(new Event(OPEN_CHANGELOG_EVENT))}
-    className="shrink-0 rounded-full px-3 py-2 text-xs text-primary hover:bg-secondary/60">新版本 {latest}</button></span>;
+  if (mode === 'source') return <span className={wrapper}><Hint label="重新运行一键启动器即可更新"><Button variant="bare" type="button" onClick={() => window.dispatchEvent(new Event(OPEN_CHANGELOG_EVENT))}
+    className="shrink-0 rounded-full px-3 py-2 text-xs text-primary hover:bg-secondary/60">新版本 {latest}</Button></Hint></span>;
   return <span className={wrapper}><a href={releaseUrl(latest)} target="_blank" rel="noopener noreferrer" className="shrink-0 rounded-full px-3 py-2 text-xs text-primary hover:bg-secondary/60">有新版本 {latest}</a></span>;
 }
 

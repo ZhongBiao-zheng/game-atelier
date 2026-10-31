@@ -30,7 +30,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SwapLabel } from '@/components/ui/swap-label';
-import { Select } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export interface TeamShareDialogRequest {
   source: TeamShareSource;
@@ -56,7 +56,6 @@ export interface TeamShareDialogProps {
 const TITLE_MAX_LENGTH = 120;
 const MAX_TAGS = 20;
 
-const selectClass = 'min-h-11 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50';
 
 /** 同一个库可能挂在多个画布上：只留可达的，按 library_id 去重。 */
 function reachableLibraries(views: TeamLibraryView[]): TeamLibraryView[] {
@@ -205,18 +204,19 @@ export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamS
             ) : (
               <div className="space-y-2">
                 <Label htmlFor="team-share-library" className="text-xs font-normal text-muted-foreground">团队库</Label>
-                <Select variant="bare"
-                  id="team-share-library"
+                <Select
                   value={libraryId}
-                  onChange={event => setLibraryId(event.target.value)}
+                  onValueChange={setLibraryId}
                   disabled={loading || submitting || libraries.length === 0}
-                  className={selectClass}
                 >
-                  {loading && <option value="">正在读取…</option>}
-                  {!loading && libraries.length !== 1 && <option value="">选择团队库…</option>}
-                  {libraries.map(item => (
-                    <option key={item.library_id} value={item.library_id}>{item.name}</option>
-                  ))}
+                  <SelectTrigger id="team-share-library">
+                    <SelectValue placeholder={loading ? '正在读取…' : '选择团队库…'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {libraries.map(item => (
+                      <SelectItem key={item.library_id} value={item.library_id}>{item.name}</SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               </div>
             )}

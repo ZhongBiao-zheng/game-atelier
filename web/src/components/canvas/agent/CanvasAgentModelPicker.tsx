@@ -5,6 +5,8 @@ import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
 import { cn } from '@/lib/utils';
 import type { CanvasAgentChatModel, CanvasAgentChatModelList } from '@/schema/canvas';
 import { Input } from '@/components/ui/input';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
 
 export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelect }: {
   models: CanvasAgentChatModelList | null;
@@ -36,20 +38,19 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
 
   return (
     <>
-      <button
+      <Hint label={current || (!models && model) ? `${alias} · ${model}` : '选择对话模型'}><Button variant="bare"
         ref={anchorRef}
         type="button"
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={current || (!models && model) ? `${alias} · ${model}` : '选择对话模型'}
         onClick={() => setOpen(value => !value)}
         className="flex h-7 min-w-0 max-w-[8rem] items-center gap-0.5 rounded-full px-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
       >
         {/* 记住的模型已不在列表里（Key 里停用了）：当作没选。 */}
         <span className="truncate">{(models ? current?.name : model) ?? '选择模型'}</span>
         <ChevronDown className="size-3.5 shrink-0" />
-      </button>
+      </Button></Hint>
       <ToolbarPopover
         open={open}
         onClose={() => setOpen(false)}
@@ -60,12 +61,12 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
         aria-label="对话模型"
         className="flex w-72 flex-col rounded-xl border border-border bg-popover p-1.5 shell-glow"
       >
-        <Input variant="bare"
+        <Input
           value={query}
           onChange={event => setQuery(event.target.value)}
           placeholder="搜索模型"
           aria-label="搜索模型"
-          className="mb-1 h-8 rounded-md border border-border bg-background px-2.5 text-xs outline-none focus-visible:ring-1 focus-visible:ring-primary"
+          className="mb-1"
         />
         <div role="listbox" aria-label="对话模型列表" className="max-h-72 overflow-y-auto">
           {!models && <p className="px-2 py-3 text-xs text-muted-foreground">读取中…</p>}
@@ -77,7 +78,7 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
               {items.map(item => {
                 const selected = item.alias === alias && item.model === model;
                 return (
-                  <button
+                  <Button variant="bare"
                     key={`${item.alias}/${item.model}`}
                     type="button"
                     role="option"
@@ -88,9 +89,9 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
                       selected && 'text-primary',
                     )}
                   >
-                    <span className="min-w-0 flex-1 truncate" title={item.model}>{item.name}</span>
+                    <Hint label={item.model}><span className="min-w-0 flex-1 truncate">{item.name}</span></Hint>
                     {selected && <Check className="size-3.5 shrink-0" />}
-                  </button>
+                  </Button>
                 );
               })}
             </div>

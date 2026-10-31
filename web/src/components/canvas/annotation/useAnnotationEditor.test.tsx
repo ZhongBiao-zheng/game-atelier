@@ -20,7 +20,7 @@ function Harness() {
 beforeEach(() => {
   commit.mockClear(); localStorage.clear();
   vi.stubGlobal('PointerEvent', MouseEvent);
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('DOMPoint', class { constructor(public x: number, public y: number) {} matrixTransform() { return this; } });
   Object.defineProperty(SVGElement.prototype, 'getScreenCTM', { configurable: true, value: () => ({ a: 1, b: 0, inverse: () => ({}) }) });
   Object.defineProperty(SVGElement.prototype, 'setPointerCapture', { configurable: true, value: vi.fn() });
@@ -69,7 +69,7 @@ it('discards tiny new shapes without adding undo history', () => {
 it('keeps the drawing tool and selects the completed shape for width changes and movement', () => {
   const { container } = render(<Harness />); const svg = container.querySelector('[data-annotation-surface] svg')!;
   draw(svg, 10, 100);
-  expect(screen.getByRole('button', { name: '框选 R' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('radio', { name: '框选 R' })).toHaveAttribute('aria-checked', 'true');
   fireEvent.click(screen.getByRole('button', { name: '线宽' }));
   fireEvent.click(screen.getByRole('button', { name: '线宽 8' }));
   expect(commit.mock.lastCall?.[0][0].stroke_width).toBe(8);
@@ -124,7 +124,7 @@ it.each([[0, 0], [0, 1], [1, 0], [1, 1]])('resizes a rectangle from corner %i,%i
 
 it.each(['start', 'end'] as const)('drags the arrow %s independently and commits once', endpoint => {
   const { container } = render(<Harness />); const svg = container.querySelector('[data-annotation-surface] svg')!;
-  fireEvent.click(screen.getByRole('button', { name: '箭头 A' }));
+  fireEvent.click(screen.getByRole('radio', { name: '箭头 A' }));
   draw(svg, 10, 100);
   const handle = svg.querySelector(`[data-annotation-endpoint="${endpoint}"]`)!;
   expect(handle).not.toBeNull();
@@ -142,7 +142,7 @@ it.each(['start', 'end'] as const)('drags the arrow %s independently and commits
 });
 it('does not collapse an arrow to a zero-length endpoint edit', () => {
   const { container } = render(<Harness />); const svg = container.querySelector('[data-annotation-surface] svg')!;
-  fireEvent.click(screen.getByRole('button', { name: '箭头 A' })); draw(svg, 10, 100);
+  fireEvent.click(screen.getByRole('radio', { name: '箭头 A' })); draw(svg, 10, 100);
   const handle = svg.querySelector('[data-annotation-endpoint="end"]')!;
   expect(handle).not.toBeNull(); commit.mockClear();
   fireEvent.pointerDown(handle, { clientX: 100, clientY: 100, button: 0 });
@@ -161,7 +161,7 @@ it('moves an existing mark when pressed with a drawing tool and draws a new box 
   expect(commit.mock.lastCall?.[0][0]).toMatchObject({ x: 30, y: 20, width: 90, height: 90 });
   commit.mockClear(); draw(svg, 50, 80);
   expect(commit.mock.lastCall?.[0]).toHaveLength(2);
-  expect(screen.getByRole('button', { name: '框选 R' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('radio', { name: '框选 R' })).toHaveAttribute('aria-checked', 'true');
 });
 
 it('shows a move cursor over a mark and adjusts its width with the wheel in one commit', () => {
@@ -191,8 +191,8 @@ it('shows a move cursor over a mark and adjusts its width with the wheel in one 
 
 it('shares tool and style choices between node editors', () => {
   render(<><Harness /><Harness /></>);
-  fireEvent.click(screen.getAllByRole('button', { name: '黄' })[0]);
-  fireEvent.click(screen.getAllByRole('button', { name: '箭头 A' })[0]);
-  expect(screen.getAllByRole('button', { name: '黄' })[1]).toHaveAttribute('aria-pressed', 'true');
-  expect(screen.getAllByRole('button', { name: '箭头 A' })[1]).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(screen.getAllByRole('radio', { name: '黄' })[0]);
+  fireEvent.click(screen.getAllByRole('radio', { name: '箭头 A' })[0]);
+  expect(screen.getAllByRole('radio', { name: '黄' })[1]).toHaveAttribute('aria-checked', 'true');
+  expect(screen.getAllByRole('radio', { name: '箭头 A' })[1]).toHaveAttribute('aria-checked', 'true');
 });

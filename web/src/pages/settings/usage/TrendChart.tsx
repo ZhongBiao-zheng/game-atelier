@@ -1,5 +1,6 @@
 import type { UsageResponse } from '@/schema/usage';
 import { formatGenerationCost } from '@/lib/generationCost';
+import { Hint } from '@/components/ui/tooltip';
 export function TrendChart({ data }: { data: UsageResponse }) {
   const max = Math.max(...data.trend.map((row) => row.cost_cny), 1);
   return (
@@ -13,13 +14,12 @@ export function TrendChart({ data }: { data: UsageResponse }) {
           {data.trend.map((row) => (
             <div key={row.start} className="flex h-full min-w-4 flex-1 flex-col">
               <div className="flex min-h-0 flex-1 items-end">
-                <div
+                <Hint label={`${row.start} · ${formatGenerationCost(row.cost_cny)}`}><div
                   role="img"
                   aria-label={`${row.start} ${formatGenerationCost(row.cost_cny)}`}
-                  title={`${row.start} · ${formatGenerationCost(row.cost_cny)}`}
                   className={`w-full rounded-sm ${isCurrentBucket(row.start, data.bucket) ? 'bg-primary' : row.cost_cny === 0 ? 'bg-border' : 'trend-history'}`}
                   style={{ height: `${(row.cost_cny / max) * 100}%`, minHeight: 2 }}
-                />
+                /></Hint>
               </div>
             </div>
           ))}

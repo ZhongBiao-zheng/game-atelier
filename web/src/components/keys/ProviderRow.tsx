@@ -3,6 +3,8 @@ import { ChevronRight } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { providerLabel } from '@/lib/providerLabels';
 import type { KeyRow } from './KeyCard';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
 
 export function providerHost(row: KeyRow) {
   try { return new URL(row.base_url || row.homepage_url || '').host; }
@@ -26,26 +28,26 @@ export function ProviderRow({ row, overdue, pending, onEdit, onToggle }: {
   const today = used?.toDateString() === new Date().toDateString();
   return <li className={`flex flex-wrap items-center gap-3.5 px-4 py-3.5 hover:bg-secondary/30 ${enabled ? '' : 'opacity-50'}`}>
     <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-md bg-secondary text-xs font-medium"><ProviderBrandIcon provider={row} /></span>
-    <button type="button" aria-label={`编辑 ${row.alias}`} onClick={onEdit}
+    <Button variant="bare" type="button" aria-label={`编辑 ${row.alias}`} onClick={onEdit}
       className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
       <span className="block truncate text-sm font-medium">{row.provider === 'chatgpt' ? vendor : row.alias}</span>
-      <span className="mt-1 block truncate text-xs text-muted-foreground" title={row.base_url ?? ''}>
+      <Hint label={row.base_url ?? ''}><span className="mt-1 block truncate text-xs text-muted-foreground">
         {[row.provider === 'custom' ? '自定义' : vendor, providerHost(row), `${row.models?.length ?? 0} 个模型`].filter(Boolean).join(' · ')}
-      </span>
-    </button>
-    <div className="order-last flex w-full items-center justify-between gap-3 pl-[52px] text-xs sm:order-none sm:w-auto sm:pl-0">
+      </span></Hint>
+    </Button>
+    <div className="order-last flex w-full items-center justify-between gap-3 pl-13 text-xs sm:order-none sm:w-auto sm:pl-0">
       <span className="flex items-center gap-1.5 whitespace-nowrap px-2.5 py-1 text-muted-foreground">
         <span aria-hidden className={`size-1.5 rounded-full bg-current ${tone}`} />{status}
       </span>
-      <span className="whitespace-nowrap text-right text-muted-foreground sm:w-28" title={used?.toLocaleString('zh-CN')}>
+      <Hint label={used?.toLocaleString('zh-CN')}><span className="whitespace-nowrap text-right text-muted-foreground sm:w-28">
         {!used ? '—' : today ? `今天 ${used.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
           : used.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}
-      </span>
+      </span></Hint>
     </div>
-    <Switch compact checked={enabled} disabled={pending} label={`启用 ${row.alias}`} onChange={onToggle} />
-    <button type="button" aria-label={`打开 ${row.alias}`} onClick={onEdit}
+    <Switch size="sm" checked={enabled} disabled={pending} aria-label={`启用 ${row.alias}`} onCheckedChange={onToggle} />
+    <Button variant="bare" type="button" aria-label={`打开 ${row.alias}`} onClick={onEdit}
       className="rounded-md p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
       <ChevronRight className="size-4" aria-hidden />
-    </button>
+    </Button>
   </li>;
 }

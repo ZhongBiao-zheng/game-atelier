@@ -1,6 +1,6 @@
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, act, fireEvent, render, screen } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
@@ -42,9 +42,19 @@ async function renderReminder() {
     </Router>,
   );
   await act(async () => {});
-  const notify = (event: TeamLibraryChangeEvent) => act(async () => { await ref.current?.notify(event); });
+  // sonner 在下一拍才把提示渲染出来
+  const notify = async (event: TeamLibraryChangeEvent) => {
+    await act(async () => { await ref.current?.notify(event); });
+    act(() => { vi.advanceTimersByTime(0); });
+  };
   return { ref, location, notify };
 }
+
+/** sonner 关闭提示后保留一段退场动画才卸载。 */
+const settle = () => {
+  // dismiss 走 rAF，退场标记与卸载再各隔一拍：分帧推进
+  for (let i = 0; i < 30; i += 1) act(() => { vi.advanceTimersByTime(16); });
+};
 
 const listeners: Array<(event: Event) => void> = [];
 
@@ -56,6 +66,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // 卸载时撤提示走 rAF：在假计时器上推完再切回真计时器，否则 sonner 的模块级状态会把它带进下一个用例
+  cleanup();
+  act(() => { vi.advanceTimersByTime(1000); });
   vi.useRealTimers();
   vi.restoreAllMocks();
   window.localStorage.removeItem(REMINDED_KEY);
@@ -172,6 +185,7 @@ describe('TeamShareReminder', () => {
       act(() => { vi.advanceTimersByTime(500); });
     }
 
+    settle();
     expect(screen.getByText('团队库新增 4 条')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '复刻' })).not.toBeInTheDocument();
 
@@ -196,6 +210,7 @@ describe('TeamShareReminder', () => {
     act(() => { vi.advanceTimersByTime(7999); });
     expect(screen.getByText('雨夜城门')).toBeInTheDocument();
     act(() => { vi.advanceTimersByTime(1); });
+    settle();
     expect(screen.queryByText('雨夜城门')).not.toBeInTheDocument();
   });
 
@@ -203,6 +218,7 @@ describe('TeamShareReminder', () => {
     const { notify } = await renderReminder();
     await notify(changeEvent());
     fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+    settle();
     expect(screen.queryByText('雨夜城门')).not.toBeInTheDocument();
   });
 
@@ -221,6 +237,7 @@ describe('TeamShareReminder', () => {
 
     expect(received).toEqual([{ library_id: 'lib_a', asset_id: 'ta_1', action: 'reproduce' }]);
     expect(location.history).toEqual(['/canvas']);
+    settle();
     expect(screen.queryByText('雨夜城门')).not.toBeInTheDocument();
   });
 
@@ -323,9 +340,11 @@ describe('TeamShareReminder', () => {
   it('starts counting afresh after the merged count is closed', async () => {
     const { notify } = await renderReminder();
     for (const id of ['ta_1', 'ta_2', 'ta_3', 'ta_4']) await notify(changeEvent({ asset_id: id, title: id }));
+    settle();
     fireEvent.click(screen.getByRole('button', { name: '关闭' }));
 
     await notify(changeEvent({ asset_id: 'ta_5', title: '新一条' }));
+    settle();
 
     expect(screen.queryByText(/团队库新增/)).not.toBeInTheDocument();
     expect(screen.getByText('新一条')).toBeInTheDocument();

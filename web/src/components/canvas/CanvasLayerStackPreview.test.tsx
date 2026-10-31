@@ -19,7 +19,7 @@ it('shows the complete user prompt as read-only text in details', () => {
   const content = screen.getByLabelText('拆分提示词');
   expect(content.textContent).toBe(prompt);
   expect(screen.queryByRole('textbox')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '查看图层 背景' }));
+  fireEvent.click(screen.getByRole('radio', { name: '查看图层 背景' }));
   expect(screen.getByLabelText('拆分提示词').textContent).toBe(prompt);
 });
 

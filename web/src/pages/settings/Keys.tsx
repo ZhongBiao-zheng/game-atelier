@@ -12,7 +12,8 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { listKeys, deleteKey, patchKey } from '@/api/keys';
 import { fetchKeyLastUsed } from '@/api/usage';
 import type { KeyCreatePayload } from '@/api/keys';
-import { Input } from '@/components/ui/input';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
+import { Button } from '@/components/ui/button';
 
 interface Props {
   /** 首启向导复用同一个供应商表单。 */
@@ -154,22 +155,21 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
           <span className="text-muted-foreground">模型 /</span><h1 className="text-sm font-semibold">供应商</h1>
         </div>}
         <div className="flex flex-wrap items-center gap-2">
-        {embedded && <label className="flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-muted-foreground focus-within:ring-1 focus-within:ring-ring">
-          <Search className="size-3.5" aria-hidden />
-          <Input variant="bare" aria-label="查找供应商" placeholder="查找供应商" value={query}
-            onChange={event => setQuery(event.target.value)}
-            className="w-44 min-w-0 bg-transparent text-sm text-foreground outline-none" />
-        </label>}
+        {embedded && <InputGroup className="w-56">
+          <InputGroupAddon><Search aria-hidden /></InputGroupAddon>
+          <InputGroupInput aria-label="查找供应商" placeholder="查找供应商" value={query}
+            onChange={event => setQuery(event.target.value)} />
+        </InputGroup>}
         {embedded ? <Link href="/settings/providers/new"
           className="flex h-9 items-center gap-1.5 rounded-md border border-input px-3.5 text-sm hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
           <Plus className="size-3.5" aria-hidden />添加供应商
-        </Link> : <button
+        </Link> : <Button variant="default"
           type="button"
           onClick={openCreate}
-          className="text-sm bg-primary text-primary-foreground rounded-md px-3 py-2 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background"
+
         >
           + 新建供应商
-        </button>}
+        </Button>}
         </div>
       </div>
 
@@ -211,11 +211,11 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
           )}
           </div>}
           {embedded && closedKeys.length > 0 && <section>
-            <button type="button" aria-expanded={closedOpen} onClick={() => setShowClosed(open => !open)}
+            <Button variant="bare" type="button" aria-expanded={closedOpen} onClick={() => setShowClosed(open => !open)}
               className="flex items-center gap-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
               <ChevronRight className={`size-3.5 transition-transform duration-150 ${closedOpen ? 'rotate-90' : ''}`} aria-hidden />
               已关闭的供应商<span className="tabular-nums">{closedKeys.length}</span>
-            </button>
+            </Button>
             {closedOpen && <div className="mt-2 overflow-hidden rounded-xl border border-border bg-card">
               <ul aria-label="已关闭的供应商" className="divide-y divide-border">{closedKeys.map(providerRow)}</ul>
             </div>}

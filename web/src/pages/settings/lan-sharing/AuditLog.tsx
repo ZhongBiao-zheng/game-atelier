@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { adminBase } from '@/api/gateway';
 import { requestJson } from '@/api/http';
-import { button, date } from './shared';
+import { date } from './shared';
+import { Button } from '@/components/ui/button';
 interface Entry { time: string; actor_name: string; action: string; target_id: string; summary: Record<string, unknown> }
 const actions: Record<string, string> = { 'member.create': '新建成员', 'member.update': '修改成员', 'member.revoke': '撤销成员', 'upstream.restore': '恢复供应商', 'route.reorder': '调整路由' };
 export function AuditLog({ gatewayAlias }: { gatewayAlias?: string }) {
@@ -16,7 +17,7 @@ export function AuditLog({ gatewayAlias }: { gatewayAlias?: string }) {
     return () => { active = false; };
   }, [gatewayAlias, revision]);
   return <section className="space-y-3" aria-label="操作日志">
-    <div className="flex items-center justify-between"><h3 className="text-sm font-medium">操作日志</h3><button className={button} onClick={() => setRevision(value => value + 1)}>刷新</button></div>
+    <div className="flex items-center justify-between"><h3 className="text-sm font-medium">操作日志</h3><Button variant="outline" size="sm" onClick={() => setRevision(value => value + 1)}>刷新</Button></div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {!entries.length && !error && <p className="text-sm text-muted-foreground">暂无操作记录</p>}
     <ul className="divide-y divide-border">{entries.map((entry, index) => <li key={`${entry.time}:${index}`} className="space-y-2 py-3 text-xs">

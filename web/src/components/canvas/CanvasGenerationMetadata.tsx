@@ -1,6 +1,7 @@
 import { AlertTriangle, Link2 } from 'lucide-react';
 
 import type { CanvasGenerationSnapshot, Job } from '@/schema/jobs';
+import { Hint } from '@/components/ui/tooltip';
 
 interface CanvasNodeIdentity {
   id: string;
@@ -196,9 +197,9 @@ export function CanvasGenerationMetadata({ snapshot, job, nodes }: {
                   <Link2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-foreground">{node?.title ?? '节点已删除'}</span>
-                    <span className="block truncate font-mono text-xs text-muted-foreground" title={input.version_id}>
+                    <Hint label={input.version_id}><span className="block truncate font-mono text-xs text-muted-foreground">
                       {kindLabel(input.kind)} · {input.node_id} · {input.version_id}
-                    </span>
+                    </span></Hint>
                   </span>
                 </li>
               );

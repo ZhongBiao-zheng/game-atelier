@@ -23,6 +23,7 @@ import {
   CanvasMaterialHoverDetail,
   type CanvasMaterialHoverState,
 } from '@/components/canvas/CanvasMaterialHoverDetail';
+import { Button } from '@/components/ui/button';
 
 interface MentionState {
   query: string;
@@ -501,7 +502,7 @@ function CanvasMentionMenu({
         className="grid gap-y-1 rounded-lg bg-popover"
       >
         {references.map((reference, index) => (
-          <button
+          <Button variant="bare"
             id={`${menuId}-option-${index}`}
             key={reference.nodeId}
             ref={index === activeIndex ? activeRef : undefined}
@@ -522,7 +523,7 @@ function CanvasMentionMenu({
               <span className="block font-medium">{reference.label}</span>
               <span className="block truncate text-muted-foreground">{reference.text || reference.title}</span>
             </span>
-          </button>
+          </Button>
         ))}
       </div>
     </div>,

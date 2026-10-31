@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { hoverHint } from '@/test/hint';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MJ_DEFAULTS } from '@/lib/mjParams';
 import { RoundList, type RoundState } from './RoundList';
@@ -329,8 +330,8 @@ describe('RoundList skill 出图删除门控', () => {
   it('通过更多操作显式保存历史提示词资产', () => {
     const onSavePromptAsset = vi.fn();
     render(<RoundList rounds={[imageDone('image')]} onSavePromptAsset={onSavePromptAsset} />);
-    fireEvent.click(screen.getByLabelText('更多操作'));
-    fireEvent.click(screen.getByRole('button', { name: '保存提示词资产' }));
+    fireEvent.keyDown(screen.getByLabelText('更多操作'), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitem', { name: '保存提示词资产' }));
     expect(onSavePromptAsset).toHaveBeenCalledWith(imageDone('image').config);
   });
 
@@ -412,7 +413,7 @@ describe('RoundList 图卡编辑（导入为参考图）', () => {
   it('传了 onEditAsReference 时每张图渲染编辑按钮，点击回传该图 path', () => {
     const onEditAsReference = vi.fn();
     render(<RoundList rounds={[imageDone]} onEditAsReference={onEditAsReference} />);
-    const buttons = screen.getAllByTitle('编辑（导入为参考图）');
+    const buttons = screen.getAllByRole('button', { name: /^编辑生成结果 \d+（导入为参考图）$/ });
     expect(buttons).toHaveLength(2);
     fireEvent.click(buttons[1]);
     expect(onEditAsReference).toHaveBeenCalledWith('/data/studio/job-edit-1/v2.png');
@@ -882,7 +883,7 @@ describe('RoundList 保存为创作资产', () => {
 });
 
 describe('history parameter buttons', () => {
-  it('shows all recorded image fields and invokes only the clicked field', () => {
+  it('shows all recorded image fields and invokes only the clicked field', async () => {
     const apply = vi.fn();
     const reuseParameter = vi.fn((_config, parameter) => parameter === 'quality' ? apply : '当前模型不支持');
     render(<RoundList rounds={[{ kind: 'done', jobId: 'tags', submittedAt: new Date().toISOString(), imagePaths: [],
@@ -894,7 +895,7 @@ describe('history parameter buttons', () => {
     expect(apply).toHaveBeenCalledOnce();
     const ratio = screen.getByRole('button', { name: '16:9' });
     expect(ratio).toHaveAttribute('aria-disabled', 'true');
-    expect(ratio).toHaveAttribute('title', '当前模型不支持');
+    expect(await hoverHint(ratio)).toHaveTextContent('当前模型不支持');
     fireEvent.click(ratio);
     expect(apply).toHaveBeenCalledOnce();
     expect(screen.getByRole('button', { name: 'GPT Image 2' }).querySelector('svg')).toHaveAttribute('width', '12');

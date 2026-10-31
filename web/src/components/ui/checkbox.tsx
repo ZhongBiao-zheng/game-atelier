@@ -1,22 +1,28 @@
 import * as React from 'react';
+import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
+import { Check } from 'lucide-react';
+
 import { cn } from '@/lib/utils';
+import { FOCUS_RING, INVALID_RING } from './focus';
 
-type ChoiceProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'>;
-
-const choiceClass = 'size-4 shrink-0 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50';
-
-/** 原生复选框。开关语义用 Switch。 */
-export const Checkbox = React.forwardRef<HTMLInputElement, ChoiceProps>(
-  ({ className, ...props }, ref) => (
-    <input ref={ref} type="checkbox" className={cn(choiceClass, className)} {...props} />
-  ),
-);
-Checkbox.displayName = 'Checkbox';
-
-/** 原生单选框。 */
-export const Radio = React.forwardRef<HTMLInputElement, ChoiceProps>(
-  ({ className, ...props }, ref) => (
-    <input ref={ref} type="radio" className={cn(choiceClass, className)} {...props} />
-  ),
-);
-Radio.displayName = 'Radio';
+/** 多选。开关语义（立即生效的启用 / 停用）用 Switch。 */
+export const Checkbox = React.forwardRef<
+  React.ElementRef<typeof CheckboxPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof CheckboxPrimitive.Root>
+>(({ className, ...props }, ref) => (
+  <CheckboxPrimitive.Root
+    ref={ref}
+    className={cn(
+      'peer size-4 shrink-0 cursor-pointer rounded-sm border border-input bg-transparent transition-[color,box-shadow,border-color] disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground',
+      FOCUS_RING,
+      INVALID_RING,
+      className,
+    )}
+    {...props}
+  >
+    <CheckboxPrimitive.Indicator className="grid place-content-center text-current">
+      <Check className="size-3.5" aria-hidden="true" />
+    </CheckboxPrimitive.Indicator>
+  </CheckboxPrimitive.Root>
+));
+Checkbox.displayName = CheckboxPrimitive.Root.displayName;

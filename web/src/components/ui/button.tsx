@@ -4,7 +4,7 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 const buttonVariants = cva(
-  "press inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 cursor-pointer",
+  "press inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-[color,box-shadow,background-color,border-color] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 cursor-pointer",
   {
     variants: {
       variant: {
@@ -12,7 +12,7 @@ const buttonVariants = cva(
         destructive: 'bg-destructive/75 backdrop-blur-glass border border-destructive/30 text-destructive-foreground hover:bg-destructive/90 glass-specular',
         outline: 'bg-glass backdrop-blur-glass border border-border hover:bg-secondary/70 glass-specular',
         secondary: 'bg-secondary/65 backdrop-blur-glass border border-border text-secondary-foreground hover:bg-secondary/85 glass-specular',
-        ghost: 'hover:bg-glass hover:backdrop-blur-glass hover:border hover:border-border hover:text-accent-foreground',
+        ghost: 'border border-transparent hover:bg-glass hover:backdrop-blur-glass hover:border-border hover:text-accent-foreground',
         link: 'text-foreground font-medium underline-offset-4 hover:underline',
       },
       size: {
@@ -28,14 +28,17 @@ const buttonVariants = cva(
 
 export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {
+    Omit<VariantProps<typeof buttonVariants>, 'variant'> {
+  /** bare：不带按钮配方，外观完全由 className 决定（图卡、列表行、画布工具等自定义表面） */
+  variant?: VariantProps<typeof buttonVariants>['variant'] | 'bare';
   asChild?: boolean;
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : 'button';
-    return <Comp className={cn(buttonVariants({ variant, size, className }))} ref={ref} {...props} />;
+    const classes = variant === 'bare' ? className : cn(buttonVariants({ variant, size, className }));
+    return <Comp className={classes} ref={ref} {...props} />;
   },
 );
 Button.displayName = 'Button';

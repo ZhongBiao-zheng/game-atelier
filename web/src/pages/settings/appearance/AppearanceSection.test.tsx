@@ -8,7 +8,7 @@ beforeEach(() => { localStorage.clear(); setTheme('dark'); });
 afterEach(() => { vi.unstubAllGlobals(); });
 it('预设、自定义草稿、对比度提示和恢复默认即时生效', () => {
   render(<AppearanceSection />);
-  fireEvent.click(screen.getByRole('button', { name: '钴蓝' }));
+  fireEvent.click(screen.getByRole('radio', { name: '钴蓝' }));
   expect(loadAccent()).toEqual({ preset: 'blue' });
   fireEvent.click(screen.getByText('自定义颜色'));
   fireEvent.change(screen.getByLabelText('主色'), { target: { value: '#33' } });
@@ -18,7 +18,7 @@ it('预设、自定义草稿、对比度提示和恢复默认即时生效', () =
   expect(screen.getByText('已启用')).toBeInTheDocument();
   expect(screen.getByRole('status')).toHaveTextContent('对比度较低');
   expect(document.documentElement.style.getPropertyValue('--primary-foreground')).toBe('#FFFFFF');
-  expect(screen.getByRole('button', { name: '钴蓝' })).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.getByRole('radio', { name: '钴蓝' })).toHaveAttribute('aria-checked', 'false');
   fireEvent.click(screen.getByRole('button', { name: '恢复默认' }));
   expect(loadAccent()).toEqual({ preset: 'lime' });
   expect(screen.queryByRole('status')).not.toBeInTheDocument();
@@ -29,7 +29,7 @@ it('跟随系统响应系统变化，手动切换后停止跟随', () => {
   vi.stubGlobal('matchMedia', () => media);
   const stop = startThemeSync();
   render(<AppearanceSection />);
-  fireEvent.click(screen.getByRole('button', { name: '跟随系统' }));
+  fireEvent.click(screen.getByRole('radio', { name: '跟随系统' }));
   expect(loadTheme()).toBe('system');
   act(() => { media.matches = true; handler(); });
   expect(document.documentElement).toHaveClass('light');
@@ -37,6 +37,6 @@ it('跟随系统响应系统变化，手动切换后停止跟随', () => {
   act(() => setTheme('dark'));
   act(() => handler());
   expect(document.documentElement).not.toHaveClass('light');
-  expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('radio', { name: '深色' })).toHaveAttribute('aria-checked', 'true');
   stop();
 });

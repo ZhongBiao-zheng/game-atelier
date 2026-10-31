@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import { pointerDownOutside } from '@/test/hint';
 
 import { ChangelogButton } from './ChangelogButton';
 import { CHANGELOG, CURRENT_VERSION, PROJECT_GITHUB_URL } from '@/lib/changelog';
@@ -42,14 +43,14 @@ describe('ChangelogButton', () => {
     expect(screen.queryByTestId('changelog-panel')).not.toBeInTheDocument();
   });
 
-  it('阅读时圆点消失，从面板外关闭后仍保持已读', () => {
+  it('阅读时圆点消失，从面板外关闭后仍保持已读', async () => {
     window.localStorage.setItem(SEEN_KEY, '0.0.1');
     render(<ChangelogButton />);
     expect(screen.getByTestId('changelog-unread-dot')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('changelog-trigger'));
     expect(screen.queryByTestId('changelog-unread-dot')).not.toBeInTheDocument();
     expect(screen.getByTestId('changelog-panel')).toBeInTheDocument();
-    fireEvent.mouseDown(document.body);
+    await pointerDownOutside();
     expect(screen.queryByTestId('changelog-panel')).not.toBeInTheDocument();
     expect(screen.queryByTestId('changelog-unread-dot')).not.toBeInTheDocument();
   });

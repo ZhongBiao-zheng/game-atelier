@@ -5,6 +5,7 @@ import type { KeyView } from '@/api/keys';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import type { CanvasGenerationDraft, CanvasImageEditEditorState, CanvasImageEditNode, CanvasImageEditSettings, CanvasMediaVersion } from '@/schema/canvas';
 import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@/components/ui/button';
 
 export interface CanvasMaskEditSubmission {
   mask: Blob | null;
@@ -83,7 +84,6 @@ export function ImageEditorShell({ open, heading, icon: Icon, viewport, busy, di
   /** 舞台底边，需要让出底部输入栏的高度。 */
   stageBottom?: string;
 }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
   async function requestClose() {
     if (busy) return;
     if (dirty && !await onAutoSave()) return;
@@ -91,28 +91,23 @@ export function ImageEditorShell({ open, heading, icon: Icon, viewport, busy, di
   }
   return <>
     <Dialog open={open} onOpenChange={next => { if (!next) void requestClose(); }}>
-      <DialogContent ref={dialogRef} hideClose onKeyDown={onKeyDown} onKeyUp={onKeyUp}
-        onEscapeKeyDown={event => {
-          if (dialogRef.current?.querySelector('[data-toolbar-popover]')) {
-            event.preventDefault();
-          }
-        }}
+      <DialogContent hideClose onKeyDown={onKeyDown} onKeyUp={onKeyUp}
         className="edit-dot-grid left-0 top-0 block h-dvh w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden rounded-none border-0 bg-background p-0">
         <DialogDescription className="sr-only">{heading}：编辑完成后生成新的图片节点。</DialogDescription>
         <div ref={viewport.measure} className={`absolute inset-x-0 top-20 touch-none ${stageBottom}`}>{stage}</div>
         <div className={`absolute left-4 top-4 flex h-11 items-center gap-1.5 rounded-full pl-1 pr-4 ${glass}`}>
-          <button type="button" aria-label="关闭编辑器" className={editorIconButton} disabled={busy} onClick={() => void requestClose()}><X /></button>
+          <Button variant="bare" type="button" aria-label="关闭编辑器" className={editorIconButton} disabled={busy} onClick={() => void requestClose()}><X /></Button>
           <Icon className="size-4 text-primary" aria-hidden />
           <DialogTitle className="text-sm font-medium">{heading}</DialogTitle>
         </div>
         {toolbar && <div role="toolbar" aria-label={`${heading}工具`}
           className={`absolute left-1/2 top-4 flex h-11 -translate-x-1/2 items-center gap-0.5 whitespace-nowrap rounded-xl px-1 ${glass}`}>{toolbar}</div>}
         <div className={`absolute right-4 top-4 flex h-11 items-center gap-0.5 rounded-full px-1.5 ${glass}`}>
-          <button type="button" aria-label="缩小" className={editorIconButton} onClick={() => viewport.zoomBy(1 / 1.25)}><Minus /></button>
+          <Button variant="bare" type="button" aria-label="缩小" className={editorIconButton} onClick={() => viewport.zoomBy(1 / 1.25)}><Minus /></Button>
           <span aria-label="编辑视图缩放" className="w-12 text-center tabular-nums text-xs">{Math.round(viewport.scale * 100)}%</span>
-          <button type="button" aria-label="放大" className={editorIconButton} onClick={() => viewport.zoomBy(1.25)}><Plus /></button>
+          <Button variant="bare" type="button" aria-label="放大" className={editorIconButton} onClick={() => viewport.zoomBy(1.25)}><Plus /></Button>
           <span className="mx-1 h-5 w-px bg-border" aria-hidden />
-          <button type="button" aria-label="适应窗口" className={editorIconButton} onClick={viewport.reset}><Maximize /></button>
+          <Button variant="bare" type="button" aria-label="适应窗口" className={editorIconButton} onClick={viewport.reset}><Maximize /></Button>
         </div>
         <section aria-label={`${heading}设置与生成`}
           className={`absolute bottom-4 left-1/2 flex w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 flex-col gap-3 rounded-2xl p-3.5 ${glass}`}>
@@ -140,11 +135,11 @@ export function EditorComposer({ prompt, onPrompt, placeholder, chips, blocker, 
     <div className="flex flex-wrap items-center gap-2">
       {chips}
       <span role="status" className="ml-auto text-xs text-muted-foreground">{blocker ?? (cost == null ? '费用以供应商结算为准' : `预计 ${formatGenerationCost(cost)}`)}</span>
-      <button type="button" disabled={Boolean(blocker)} onClick={onGenerate}
+      <Button variant="bare" type="button" disabled={Boolean(blocker)} onClick={onGenerate}
         className="inline-flex h-9 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40">
         {busy && <LoaderCircle className="size-4 animate-spin" aria-hidden />}{busy ? '提交中…' : generateLabel}
         {!busy && <span className="font-mono text-xs opacity-65" aria-hidden>⌘↵</span>}
-      </button>
+      </Button>
     </div>
   </fieldset>;
 }

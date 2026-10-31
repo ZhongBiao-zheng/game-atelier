@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { hoverHint } from '@/test/hint';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
@@ -239,7 +240,7 @@ describe('Studio', () => {
     expect(screen.getByTestId('studio-prompt-shell')).toHaveClass(
       'min-h-[174px]',
       'h-auto',
-      'pt-[14px]',
+      'pt-3.5',
       'px-4',
       'pb-4',
     );
@@ -267,14 +268,14 @@ describe('Studio', () => {
     await screen.findByText('Volcengine Ark');
 
     fireEvent.click(screen.getByLabelText('打开创作资产'));
-    fireEvent.click(await screen.findByRole('button', { name: /媒体/ }));
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: /媒体/ }));
     fireEvent.click(await screen.findByRole('button', { name: /战鼓/ }));
     fireEvent.click(screen.getByRole('button', { name: '使用' }));
     expect(await screen.findByText('当前模式不支持音频参考')).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/creation-assets/asset-bgm/content')).toBe(false);
 
     fireEvent.click(screen.getByLabelText('打开创作资产'));
-    fireEvent.click(await screen.findByRole('button', { name: /媒体/ }));
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: /媒体/ }));
     fireEvent.click(await screen.findByRole('button', { name: /城堡/ }));
     fireEvent.click(screen.getByRole('button', { name: '使用' }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/creation-assets/asset-img/content')).toBe(true));
@@ -369,8 +370,8 @@ describe('Studio', () => {
     // 默认即 seedream(volc)——standard 族，保留比例 + 2K/4K 分辨率控件。
     await screen.findByRole('button', { name: /选择比例和分辨率/ });
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
-    fireEvent.click(screen.getByRole('option', { name: '16:9' }));
-    fireEvent.click(screen.getByRole('option', { name: /^4K$/ }));
+    fireEvent.click(screen.getByRole('radio', { name: '16:9' }));
+    fireEvent.click(screen.getByRole('radio', { name: /^4K$/ }));
     fireEvent.click(screen.getByRole('button', { name: /选择出图数量/ }));
     fireEvent.click(screen.getByRole('option', { name: '3' }));
 
@@ -609,7 +610,7 @@ describe('Studio', () => {
     fireEvent.click(screen.getByRole('option', { name: /oa/ }));
     await screen.findByRole('button', { name: /选择比例和分辨率/ });
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
-    fireEvent.click(screen.getByRole('option', { name: '16:9' }));
+    fireEvent.click(screen.getByRole('radio', { name: '16:9' }));
     expect(screen.getByLabelText('输出宽度')).toHaveValue(2048);
     expect(screen.getByLabelText('输出高度')).toHaveValue(1152);
 
@@ -768,7 +769,7 @@ describe('Studio', () => {
 
     await screen.findByRole('button', { name: /选择比例和分辨率/ });
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
-    fireEvent.click(screen.getByRole('option', { name: '3:4' }));
+    fireEvent.click(screen.getByRole('radio', { name: '3:4' }));
     expect(screen.getByLabelText('输出宽度')).toHaveValue(1728);
     expect(screen.getByLabelText('输出高度')).toHaveValue(2304);
 
@@ -836,11 +837,9 @@ describe('Studio', () => {
   it('opens prompt menus upward on the studio page', async () => {
     renderStudio();
     fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
-    // 弹窗 portal 后定位走 inline fixed：向上弹 = 设 bottom、不设 top。
     const panel = screen.getByRole('listbox', { name: '选择厂商列表' });
     expect(panel).toHaveAttribute('data-toolbar-popover');
-    expect(panel.style.bottom).not.toBe('');
-    expect(panel.style.top).toBe('');
+    expect(panel).toHaveAttribute('data-side', 'top');
   });
 
   it('anchors prompt popovers to their selected trigger on the studio page', async () => {
@@ -850,28 +849,28 @@ describe('Studio', () => {
     expect(screen.getByTestId('provider-control-wrap')).toHaveClass('relative');
     const providerPanel = screen.getByRole('listbox', { name: '选择厂商列表' });
     expect(providerPanel).toHaveAttribute('data-toolbar-popover');
-    expect(providerPanel.style.bottom).not.toBe('');
+    expect(providerPanel).toHaveAttribute('data-side', 'top');
 
     fireEvent.click(screen.getByRole('button', { name: /选择模型/ }));
     expect(screen.getByTestId('model-control-wrap')).toHaveClass('relative');
     const modelPanel = screen.getByRole('listbox', { name: '选择模型列表' }).closest<HTMLElement>('[data-toolbar-popover]')!;
     expect(modelPanel).toHaveAttribute('data-toolbar-popover');
-    expect(modelPanel.style.bottom).not.toBe('');
+    expect(modelPanel).toHaveAttribute('data-side', 'top');
 
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
     expect(screen.getByTestId('size-control-wrap')).toHaveClass('relative');
     expect(screen.getByTestId('size-popover')).toHaveAttribute('data-toolbar-popover');
-    expect(screen.getByTestId('size-popover').style.bottom).not.toBe('');
+    expect(screen.getByTestId('size-popover')).toHaveAttribute('data-side', 'top');
   });
 
   it('renders a single sizing selector with a custom option', async () => {
     renderStudio();
     fireEvent.click(await screen.findByRole('button', { name: /选择比例和分辨率/ }));
     expect(screen.getByTestId('size-popover')).toHaveClass('w-[320px]', 'p-3', 'border', 'bg-card');
-    expect(screen.getByRole('listbox', { name: '选择图片尺寸' })).toHaveClass('grid', 'grid-cols-4');
-    expect(screen.getByRole('option', { name: '1:1' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('option', { name: '自定义' })).toHaveAttribute('aria-selected', 'false');
-    expect(screen.queryByRole('option', { name: 'AUTO' })).not.toBeInTheDocument();
+    expect(screen.getByRole('radiogroup', { name: '选择图片尺寸' })).toHaveClass('grid', 'grid-cols-4');
+    expect(screen.getByRole('radio', { name: '1:1' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: '自定义' })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.queryByRole('radio', { name: 'AUTO' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('输出宽度')).toHaveClass('tabular-nums');
   });
 
@@ -1249,21 +1248,19 @@ describe('Studio', () => {
     expect(screen.getByRole('button', { name: '再次生成' })).toHaveClass('h-8', 'px-2');
     expect(screen.getByRole('button', { name: '更多操作' })).toHaveClass('h-8', 'w-8');
 
-    fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
+    fireEvent.keyDown(screen.getByRole('button', { name: '更多操作' }), { key: 'Enter' });
 
-    expect(screen.getByTestId('studio-more-menu')).toHaveClass('absolute', 'left-full', 'top-0', 'ml-2');
-    expect(screen.getByTestId('studio-more-menu')).toHaveClass('w-[195px]', 'rounded-xl', 'bg-glass', 'p-1');
-    expect(screen.getByRole('button', { name: '删除该批次结果' })).toHaveClass('h-10', 'w-full', 'px-3', 'text-sm');
-    expect(screen.getByTestId('studio-more-menu')).not.toHaveClass('top-full');
+    expect(screen.getByTestId('studio-more-menu')).toHaveAttribute('data-side', 'right');
+    expect(screen.getByRole('menuitem', { name: '删除该批次结果' })).toBeInTheDocument();
   });
 
-  it('closes the more menu when clicking outside it', async () => {
+  it('closes the more menu on Escape', async () => {
     renderStudioWithCompletedBatch();
 
-    fireEvent.click(await screen.findByRole('button', { name: '更多操作' }));
+    fireEvent.keyDown(await screen.findByRole('button', { name: '更多操作' }), { key: 'Enter' });
     expect(screen.getByTestId('studio-more-menu')).toBeInTheDocument();
 
-    fireEvent.mouseDown(document.body);
+    fireEvent.keyDown(screen.getByTestId('studio-more-menu'), { key: 'Escape' });
 
     await waitFor(() => expect(screen.queryByTestId('studio-more-menu')).not.toBeInTheDocument());
   });
@@ -1330,8 +1327,8 @@ describe('Studio', () => {
     const fetchMock = mockCompletedBatchAndKeys();
     renderStudio();
 
-    fireEvent.click(await screen.findByRole('button', { name: '更多操作' }));
-    fireEvent.click(screen.getByRole('button', { name: '删除该批次结果' }));
+    fireEvent.keyDown(await screen.findByRole('button', { name: '更多操作' }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除该批次结果' }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/jobs/job-studio-1/image?path=%2Ftmp%2Fstudio%2Fjob-studio-1%2Fv1.png', { method: 'DELETE' });
@@ -1455,15 +1452,15 @@ describe('Studio', () => {
     renderStudio();
     await screen.findByRole('button', { name: /选择比例和分辨率/ });
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
-    fireEvent.click(screen.getByRole('option', { name: '4:3' }));
+    fireEvent.click(screen.getByRole('radio', { name: '4:3' }));
 
     expect(screen.getByLabelText('输出宽度')).toHaveValue(2048);
     expect(screen.getByLabelText('输出高度')).toHaveValue(1536);
 
     fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '2000' } });
     expect(screen.getByLabelText('输出高度')).toHaveValue(1536);
-    expect(screen.getByRole('option', { name: '4:3' })).toHaveAttribute('aria-selected', 'false');
-    expect(screen.getByRole('option', { name: '自定义' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('radio', { name: '4:3' })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('radio', { name: '自定义' })).toHaveAttribute('aria-checked', 'true');
   });
 
   it('submits custom dimensions when W/H are manually edited', async () => {
@@ -1514,7 +1511,7 @@ describe('Studio', () => {
     renderStudio();
     await screen.findByRole('button', { name: /选择比例和分辨率/ });
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
-    fireEvent.click(screen.getByRole('option', { name: '16:9' }));
+    fireEvent.click(screen.getByRole('radio', { name: '16:9' }));
 
     const sizeButton = screen.getByRole('button', { name: /选择比例和分辨率/ });
     expect(sizeButton).toHaveTextContent('16:9');
@@ -1527,8 +1524,8 @@ describe('Studio', () => {
     const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
     const view = renderStudio();
     fireEvent.click(await screen.findByRole('button', { name: '选择比例和分辨率' }));
-    expect(screen.getByRole('option', { name: 'AUTO' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('option', { name: '1:1' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByRole('radio', { name: 'AUTO' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: '1:1' })).toHaveAttribute('aria-checked', 'false');
     expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('AUTO');
     typePrompt(screen.getByLabelText('生图 prompt'), '自动构图');
@@ -1554,14 +1551,14 @@ describe('Studio', () => {
     localStorage.setItem('studio:selection', JSON.stringify({ providerAlias: 'oa', model: 'gpt-image-2' }));
     renderStudio();
     fireEvent.click(await screen.findByRole('button', { name: '选择比例和分辨率' }));
-    fireEvent.click(screen.getByRole('option', { name: '自定义' }));
+    fireEvent.click(screen.getByRole('radio', { name: '自定义' }));
     fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '1360' } });
     fireEvent.change(screen.getByLabelText('输出高度'), { target: { value: '2048' } });
-    expect(screen.getByRole('option', { name: '自定义' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('radio', { name: '自定义' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('1360×2048');
-    fireEvent.click(screen.getByRole('option', { name: '2:3' }));
-    expect(screen.getByRole('option', { name: '自定义' })).toHaveAttribute('aria-selected', 'false');
-    fireEvent.click(screen.getByRole('option', { name: '自定义' }));
+    fireEvent.click(screen.getByRole('radio', { name: '2:3' }));
+    expect(screen.getByRole('radio', { name: '自定义' })).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(screen.getByRole('radio', { name: '自定义' }));
     expect(screen.getByLabelText('输出宽度')).toHaveValue(1360);
     expect(screen.getByLabelText('输出高度')).toHaveValue(2048);
     fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '' } });
@@ -1594,8 +1591,8 @@ describe('Studio', () => {
     fireEvent.click(await screen.findByRole('button', { name: '重新编辑' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('2048×2048'));
     fireEvent.click(screen.getByRole('button', { name: '选择比例和分辨率' }));
-    expect(screen.getByRole('option', { name: '自定义' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('option', { name: '4:3' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByRole('radio', { name: '自定义' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: '4:3' })).toHaveAttribute('aria-checked', 'false');
     fireEvent.click(screen.getByRole('button', { name: '再次生成' }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
     const payload = JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs')![1]!.body));
@@ -2116,7 +2113,7 @@ describe('Studio 图卡编辑导入参考图', () => {
     (globalThis.URL as any).revokeObjectURL ??= vi.fn();
 
     renderStudio();
-    const editBtns = await screen.findAllByTitle('编辑（导入为参考图）');
+    const editBtns = await screen.findAllByRole('button', { name: /^编辑生成结果 \d+（导入为参考图）$/ });
     fireEvent.click(editBtns[0]);
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -2138,7 +2135,7 @@ describe('Studio 图卡编辑导入参考图', () => {
     globalThis.fetch = fetchMock as any;
 
     renderStudio();
-    const editBtns = await screen.findAllByTitle('编辑（导入为参考图）');
+    const editBtns = await screen.findAllByRole('button', { name: /^编辑生成结果 \d+（导入为参考图）$/ });
     fireEvent.click(editBtns[0]);
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/gallery/image?path='));
@@ -2743,7 +2740,7 @@ describe('Studio 响应团队资产动作', () => {
     act(() => { claimed = dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' }); });
     expect(claimed).toBe(true);
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true'));
+    await waitFor(() => expect(screen.getByRole('tab', { name: '团队' })).toHaveAttribute('aria-selected', 'true'));
     expect(screen.getByLabelText('打开创作资产')).toHaveAttribute('aria-expanded', 'true');
   });
 
@@ -2754,8 +2751,8 @@ describe('Studio 响应团队资产动作', () => {
 
     act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' }); });
 
-    await waitFor(() => expect(screen.getByLabelText('画布项目')).toHaveValue('canvas-2'));
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveValue('lib-art'));
+    await waitFor(() => expect(screen.getByLabelText('画布项目')).toHaveTextContent('画布二'));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveTextContent('美术库'));
   });
 
   it('「看看」：没有画布挂着这个库时只给一行提示', async () => {
@@ -2853,7 +2850,7 @@ describe('Studio 响应团队资产动作', () => {
     });
     render(<Router hook={hook} searchHook={searchHook}><Studio /></Router>);
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '团队' })).toHaveAttribute('aria-pressed', 'true'));
+    await waitFor(() => expect(screen.getByRole('tab', { name: '团队' })).toHaveAttribute('aria-selected', 'true'));
     expect(history).toEqual(['/studio']);
   });
 
@@ -2963,7 +2960,7 @@ describe('历史参数不可用原因', () => {
       return { ...response, json: async () => jobs };
     });
     renderStudio();
-    expect(await screen.findByRole('button', { name: '4:3' })).toHaveAttribute('title', '切换到视频模式后可用');
+    expect(await hoverHint(await screen.findByRole('button', { name: '4:3' }))).toHaveTextContent('切换到视频模式后可用');
   });
 
   it.each([
@@ -2983,8 +2980,12 @@ describe('历史参数不可用原因', () => {
       return { ...response, json: async () => db };
     });
     renderStudio();
-    const chip = await screen.findByTitle(title);
-    expect(chip).toHaveAttribute('aria-disabled', 'true');
+    const chip = await waitFor(() => {
+      const found = screen.getAllByRole('button').find(element => element.getAttribute('aria-disabled') === 'true');
+      expect(found).toBeDefined();
+      return found!;
+    });
+    expect(await hoverHint(chip)).toHaveTextContent(title);
     fireEvent.click(chip);
     expect(chip).toHaveAttribute('aria-disabled', 'true');
   });
@@ -3000,10 +3001,12 @@ describe('历史参数不可用原因', () => {
       return { ...response, json: async () => jobs };
     });
     renderStudio();
-    expect(await screen.findByRole('button', { name: '高' })).toHaveAttribute('title', '当前模型不支持');
+    expect(await hoverHint(await screen.findByRole('button', { name: '高' }))).toHaveTextContent('当前模型不支持');
     fireEvent.click(screen.getByRole('button', { name: '选择生成模式' }));
     fireEvent.click(screen.getByRole('option', { name: '视频' }));
-    expect(screen.getByRole('button', { name: '高' })).toHaveAttribute('title', '切换到图片模式后可用');
-    expect(screen.getByRole('button', { name: '4:3' })).toHaveAttribute('title', '切换到图片模式后可用');
+    // 「高」的提示仍开着，内容随模式更新；再悬停「4:3」，两条提示同时在场。
+    fireEvent.pointerMove(screen.getByRole('button', { name: '4:3' }));
+    await waitFor(() => expect(screen.getAllByRole('tooltip').map(tip => tip.textContent))
+      .toEqual(['切换到图片模式后可用', '切换到图片模式后可用']));
   });
 });

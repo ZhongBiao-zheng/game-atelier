@@ -4,15 +4,17 @@ import { MetaTag } from '@/components/MetaTag';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Checkbox, Radio } from '@/components/ui/checkbox';
+import { Checkbox } from '@/components/ui/checkbox';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { FileInput } from '@/components/ui/file-input';
 import { Input } from '@/components/ui/input';
 import { SecretInput } from '@/components/ui/secret-input';
-import { Select } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 
 const BUTTON_VARIANTS = ['default', 'secondary', 'outline', 'ghost', 'destructive', 'link'] as const;
 const BUTTON_SIZES = ['sm', 'default', 'lg'] as const;
@@ -63,19 +65,24 @@ export function Kit() {
         </Row>
         <Row label="Textarea"><Textarea placeholder="提示词" /></Row>
         <Row label="Select">
-          <Select defaultValue="b"><option value="a">选项 A</option><option value="b">选项 B</option></Select>
+          <Select defaultValue="b">
+            <SelectTrigger aria-label="样例下拉"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="a">选项 A</SelectItem><SelectItem value="b">选项 B</SelectItem></SelectContent>
+          </Select>
         </Row>
         <Row label="Checkbox / Radio">
-          <label className="flex items-center gap-2 text-sm"><Checkbox defaultChecked />多选</label>
-          {['a', 'b'].map(value => (
-            <label key={value} className="flex items-center gap-2 text-sm">
-              <Radio name="kit-radio" checked={radio === value} onChange={() => setRadio(value)} />单选 {value.toUpperCase()}
-            </label>
-          ))}
+          <Label className="flex items-center gap-2 text-sm"><Checkbox defaultChecked />多选</Label>
+          <RadioGroup className="flex" value={radio} onValueChange={setRadio}>
+            {['a', 'b'].map(value => (
+              <Label key={value} className="flex items-center gap-2 text-sm">
+                <RadioGroupItem value={value} />单选 {value.toUpperCase()}
+              </Label>
+            ))}
+          </RadioGroup>
         </Row>
-        <Row label="Switch"><Switch checked={enabled} label="启用" onChange={setEnabled} /></Row>
+        <Row label="Switch"><Switch checked={enabled} aria-label="启用" onCheckedChange={setEnabled} /></Row>
         <Row label="Slider">
-          <Slider className="flex-1" min={0} max={100} value={size} onChange={e => setSize(Number(e.target.value))} />
+          <Slider className="flex-1" aria-label="样例滑杆" min={0} max={100} value={[size]} onValueChange={([next]) => setSize(next)} />
           <span className="text-sm tabular-nums">{size}</span>
         </Row>
         <Row label="FileInput">

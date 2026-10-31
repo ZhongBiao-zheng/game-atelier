@@ -3,10 +3,13 @@ import { FileArchive, FolderOpen, Puzzle, Trash2 } from 'lucide-react';
 import { deleteCanvasAgentSkill, importCanvasAgentSkill } from '@/api/canvas';
 import { ApiError } from '@/api/http';
 import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { cn } from '@/lib/utils';
 import type { CanvasAgentSkill } from '@/schema/canvas';
 import { FileInput } from '@/components/ui/file-input';
 import { Input } from '@/components/ui/input';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
 
 /** 文件夹选择器给的是相对路径（含选中的那层目录名），服务端以 SKILL.md 所在目录为根。 */
 function relativePath(file: File): string {
@@ -29,6 +32,9 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+  const [confirming, setConfirming] = useState<{
+    title: string; message: string; confirmText: string; destructive: boolean; resolve: (ok: boolean) => void;
+  } | null>(null);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const archiveRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
@@ -40,6 +46,15 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
       : skills;
   }, [skills, query]);
 
+  function ask(title: string, message: string, confirmText: string, destructive = false) {
+    return new Promise<boolean>(resolve => setConfirming({ title, message, confirmText, destructive, resolve }));
+  }
+
+  function settle(ok: boolean) {
+    confirming?.resolve(ok);
+    setConfirming(null);
+  }
+
   async function importFiles(files: File[], paths: string[]) {
     if (!files.length) return;
     setBusy(true);
@@ -50,7 +65,7 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
         installed = await importCanvasAgentSkill(files, paths);
       } catch (error) {
         if (!(error instanceof ApiError && error.code === 'SKILL_EXISTS')) throw error;
-        if (!window.confirm(`${error.reason ?? '已有同名 Skill'}，覆盖吗？`)) return;
+        if (!await ask('覆盖 Skill？', error.reason ?? '已有同名 Skill', '覆盖')) return;
         installed = await importCanvasAgentSkill(files, paths, true);
       }
       setNotice({
@@ -66,7 +81,7 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
   }
 
   async function remove(name: string) {
-    if (!window.confirm(`删除 Skill「${name}」？`)) return;
+    if (!await ask('删除 Skill？', `删除 Skill「${name}」`, '删除', true)) return;
     setBusy(true);
     setNotice(null);
     try {
@@ -81,10 +96,9 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
 
   return (
     <>
-      <button
+      <Hint label="Skill"><Button variant="bare"
         ref={anchorRef}
         type="button"
-        title="Skill"
         aria-label="选择 Skill"
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -94,7 +108,7 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
           'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40',
           selected && 'text-primary',
         )}
-      ><Puzzle className="size-4" /></button>
+      ><Puzzle className="size-4" /></Button></Hint>
       <ToolbarPopover
         open={open}
         onClose={() => setOpen(false)}
@@ -105,19 +119,19 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
         aria-label="Skill"
         className="flex w-72 flex-col rounded-xl border border-border bg-popover p-1.5 shell-glow"
       >
-        <Input variant="bare"
+        <Input
           value={query}
           onChange={event => setQuery(event.target.value)}
           placeholder="搜索 Skill"
           aria-label="搜索 Skill"
-          className="mb-1 h-8 rounded-md border border-border bg-background px-2.5 text-xs outline-none focus-visible:ring-1 focus-visible:ring-primary"
+          className="mb-1"
         />
         <div role="listbox" aria-label="Skill 列表" className="max-h-64 overflow-y-auto">
           {skills.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">还没有 Skill</p>}
           {skills.length > 0 && matches.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">没有匹配的 Skill</p>}
           {matches.map(item => (
             <div key={item.name} className="group flex items-start gap-1 rounded-md hover:bg-secondary">
-              <button
+              <Button variant="bare"
                 type="button"
                 role="option"
                 aria-selected={item.name === selected}
@@ -126,15 +140,14 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
               >
                 <span className="block truncate text-xs font-medium">{item.name}</span>
                 <span className="line-clamp-2 text-xs text-muted-foreground">{item.description}</span>
-              </button>
-              <button
+              </Button>
+              <Hint label="删除"><Button variant="bare"
                 type="button"
-                title="删除"
                 aria-label={`删除 Skill ${item.name}`}
                 disabled={busy}
                 onClick={() => void remove(item.name)}
                 className="mt-1 grid size-6 shrink-0 place-items-center rounded text-muted-foreground opacity-0 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
-              ><Trash2 className="size-3.5" /></button>
+              ><Trash2 className="size-3.5" /></Button></Hint>
             </div>
           ))}
         </div>
@@ -142,12 +155,12 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
           <p role={notice.error ? 'alert' : 'status'} className={cn('px-2 py-1.5 text-xs', notice.error ? 'text-destructive' : 'text-muted-foreground')}>{notice.text}</p>
         )}
         <div className="mt-1 flex gap-1 border-t border-border pt-1.5">
-          <button type="button" disabled={busy} onClick={() => archiveRef.current?.click()} className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40">
+          <Button variant="bare" type="button" disabled={busy} onClick={() => archiveRef.current?.click()} className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40">
             <FileArchive className="size-3.5" />导入 zip / SKILL.md
-          </button>
-          <button type="button" disabled={busy} onClick={() => folderRef.current?.click()} className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40">
+          </Button>
+          <Button variant="bare" type="button" disabled={busy} onClick={() => folderRef.current?.click()} className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40">
             <FolderOpen className="size-3.5" />导入文件夹
-          </button>
+          </Button>
         </div>
         <FileInput
           ref={archiveRef}
@@ -173,6 +186,15 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
           }}
         />
       </ToolbarPopover>
+      <ConfirmDialog
+        open={confirming !== null}
+        title={confirming?.title ?? ''}
+        message={confirming?.message ?? ''}
+        confirmText={confirming?.confirmText}
+        variant={confirming?.destructive ? 'destructive' : 'default'}
+        onConfirm={() => settle(true)}
+        onCancel={() => settle(false)}
+      />
     </>
   );
 }

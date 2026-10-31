@@ -2,6 +2,7 @@ import { BaseEdge, EdgeLabelRenderer, EdgeToolbar, getBezierPath, useReactFlow, 
 import { PenLine, Scissors } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { Hint } from '@/components/ui/tooltip';
 
 function CanvasConnectionEdge(props: EdgeProps) {
   const { deleteElements } = useReactFlow();
@@ -18,17 +19,16 @@ function CanvasConnectionEdge(props: EdgeProps) {
         interactionWidth={props.interactionWidth}
       />
       {props.data?.annotated === true && <EdgeLabelRenderer>
-        <span title="带标注" className="pointer-events-none absolute grid size-6 place-items-center rounded-full border border-primary bg-popover text-primary"
+        <span role="img" aria-label="带标注" className="pointer-events-none absolute grid size-6 place-items-center rounded-full border border-primary bg-popover text-primary"
           style={{ transform: `translate(-50%, -50%) translate(${x}px,${y}px)` }}><PenLine size={12} /></span>
       </EdgeLabelRenderer>}
       <EdgeToolbar edgeId={props.id} x={x} y={props.data?.annotated ? y - 24 : y} isVisible={Boolean(props.selected) && props.deletable !== false}>
-        <Button
+        <Hint label="断开连接"><Button
           type="button"
           variant="outline"
           size="icon"
           className="nodrag nopan size-8 rounded-full text-muted-foreground hover:text-foreground"
           aria-label="断开连接"
-          title="断开连接"
           disabled={props.deletable === false}
           onPointerDown={event => event.stopPropagation()}
           onClick={event => {
@@ -37,7 +37,7 @@ function CanvasConnectionEdge(props: EdgeProps) {
           }}
         >
           <Scissors aria-hidden="true" />
-        </Button>
+        </Button></Hint>
       </EdgeToolbar>
     </>
   );

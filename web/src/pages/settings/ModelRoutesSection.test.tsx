@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { chooseOption } from '@/test/select';
 import { listModelRoutes, setModelRouteMode, setModelRouteOrder, type ModelRoute } from '@/api/models';
 import { fetchGatewayMembers, restoreGatewayMember } from '@/api/gateway';
 import { ModelRoutesSection } from './ModelRoutesSection';
@@ -45,10 +46,10 @@ describe('ModelRoutesSection', () => {
     render(<ModelRoutesSection reloadToken={0} />);
     await screen.findByText('只有一家供应商的模型 · 1');
     expect(screen.getByRole('tab', { name: '图片 1' })).toHaveAttribute('aria-selected', 'true');
-    fireEvent.click(screen.getByRole('tab', { name: '视频 1' }));
+    fireEvent.mouseDown(screen.getByRole('tab', { name: '视频 1' }));
     expect(screen.getByRole('list', { name: 'Veo 的供应商顺序' })).toBeInTheDocument();
     expect(screen.queryByText('flux-3')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: '文本 0' }));
+    fireEvent.mouseDown(screen.getByRole('tab', { name: '文本 0' }));
     expect(screen.getByText('暂无文本模型')).toBeInTheDocument();
   });
 
@@ -59,17 +60,17 @@ describe('ModelRoutesSection', () => {
       .mockRejectedValueOnce(new Error('保存失败'));
     render(<ModelRoutesSection reloadToken={0} />);
     const select = await screen.findByRole('combobox', { name: 'gpt-image-2 的路由方式' });
-    fireEvent.change(select, { target: { value: 'cheap' } });
+    await chooseOption(select, '最便宜');
     expect(setModelRouteMode).toHaveBeenCalledWith('image', 'gpt-image-2', 'cheap');
     await screen.findByText('≈0.21¥');
     expect(screen.getByText('未计价')).toBeInTheDocument();
     expect(screen.queryByLabelText('把 HK 提前')).not.toBeInTheDocument();
-    fireEvent.change(select, { target: { value: 'round_robin' } });
+    await chooseOption(select, '轮流');
     await screen.findByText('下一次走 HK');
     expect(screen.queryByText('≈0.21¥')).not.toBeInTheDocument();
-    fireEvent.change(select, { target: { value: 'order' } });
+    await chooseOption(select, '自定义顺序');
     await screen.findByText('保存失败');
-    expect(select).toHaveValue('round_robin');
+    expect(select).toHaveTextContent('轮流');
   });
 
   it('全部恢复按成员依次提交，刷新可用候选；局部失败保留剩余欠费', async () => {

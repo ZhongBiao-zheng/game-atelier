@@ -42,6 +42,9 @@ import {
   mentionTokenPatternForLabel,
 } from '@/lib/mentionTokens';
 import { FileInput } from '@/components/ui/file-input';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 
 interface Props {
   onSubmit: (prompt: string, promptTemplate?: string) => void | Promise<void>;
@@ -799,7 +802,7 @@ export function PromptInput({
       // 首页作品墙之上；全局梯度：内容卡片 auto < 外壳 20 < sticky 头 30 < lightbox/loading 50。
       // collapsed（Studio 滚动联动）收成单行条；圆角与展开态保持一致。
       className={`bg-glass shell-glow rounded-xl border border-input px-4 max-w-[780px] mx-auto relative z-20 backdrop-blur-glass h-auto flex flex-col pointer-events-auto transition-all duration-300 ${
-        collapsed ? 'pt-2 pb-2 gap-0 min-h-0' : 'pt-[14px] pb-4 gap-3 min-h-[174px]'
+        collapsed ? 'pt-2 pb-2 gap-0 min-h-0' : 'pt-3.5 pb-4 gap-3 min-h-[174px]'
       }`}
     >
       <div className={`flex min-h-0 gap-2 transition-[height] duration-300 ${collapsed ? 'h-[60px]' : 'h-[92px]'}`}>
@@ -819,14 +822,14 @@ export function PromptInput({
             />
 
             {stackItems.length === 0 ? (
-              <label
+              <Label
                 htmlFor={refInputId}
                 aria-label={isOmni ? '添加参考内容' : '添加参考图'}
                 className="absolute top-1/2 left-0 flex flex-col items-center justify-center gap-1 cursor-pointer rounded-lg border border-dashed border-border bg-secondary transition-all duration-200 hover:-translate-y-1 hover:brightness-110 hover:border-input"
                 style={{ width: REF_W, height: REF_H, transform: 'translateY(-50%) rotate(-8deg)' }}
               >
                 <Plus size={18} className="text-muted-foreground" />
-              </label>
+              </Label>
             ) : (
               <>
                 {/* hover 区域覆盖参考图 + 添加按钮：展开只由参考图触发，移动到添加按钮上保持展开，离开整个区域才收起 */}
@@ -889,7 +892,7 @@ export function PromptInput({
                             </span>
                           )}
                         </div>
-                        <button
+                        <Button variant="bare"
                           type="button"
                           onClick={(e) => { e.stopPropagation(); handleRefRemove(i); }}
                           className="absolute -top-1.5 -right-1.5 z-10 w-[18px] h-[18px] flex items-center justify-center rounded-full bg-scrim backdrop-blur-glass border border-border text-foreground/80 hover:bg-destructive hover:text-foreground transition-colors"
@@ -900,9 +903,9 @@ export function PromptInput({
                           }}
                         >
                           <X size={10} />
-                        </button>
+                        </Button>
                         {item.kind === 'image' && onSaveReferenceImage && (
-                          <button
+                          <Button variant="bare"
                             type="button"
                             aria-label="保存参考图为资产"
                             onClick={(e) => { e.stopPropagation(); onSaveReferenceImage(item.file); }}
@@ -910,12 +913,12 @@ export function PromptInput({
                             style={{ opacity: hovered ? 1 : 0, pointerEvents: hovered ? 'auto' : 'none' }}
                           >
                             <BookmarkPlus size={10} />
-                          </button>
+                          </Button>
                         )}
                       </div>
                     );
                   })}
-                  <label
+                  <Label
                     htmlFor={stackCanAdd ? refInputId : undefined}
                     aria-disabled={!stackCanAdd}
                     onClick={stackCanAdd ? undefined : (e) => e.preventDefault()}
@@ -936,7 +939,7 @@ export function PromptInput({
                     }}
                   >
                     <Plus size={14} />
-                  </label>
+                  </Label>
                 </div>
               </>
             )}
@@ -989,14 +992,14 @@ export function PromptInput({
         />
         {variableError && <span id={variableErrorId} className="sr-only">{variableError}</span>}
         {onSavePromptAsset && !collapsed && text.trim() && (
-          <button
+          <Button variant="bare"
             type="button"
             aria-label="保存当前提示词为资产"
             onClick={onSavePromptAsset}
             className="absolute right-3 top-3 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
           >
             <BookmarkPlus size={15} />
-          </button>
+          </Button>
         )}
         {/* chip hover 预览：视频静音循环播放 / 图片放大 / 音频文件卡，浮在 chip 上方 */}
         {chipHover && (() => {
@@ -1035,7 +1038,7 @@ export function PromptInput({
           className="w-[260px] max-h-[280px] overflow-y-auto rounded-xl border border-border bg-card p-1"
         >
           {mentionItems.map((item) => (
-            <button
+            <Button variant="bare"
               key={item.index}
               type="button"
               role="option"
@@ -1054,7 +1057,7 @@ export function PromptInput({
               )}
               <span className="shrink-0 font-medium">{item.label}</span>
               <span className="min-w-0 truncate text-muted-foreground">{item.file.name}</span>
-            </button>
+            </Button>
           ))}
         </ToolbarPopover>
       </div>
@@ -1109,7 +1112,7 @@ export function PromptInput({
                   { key: 'image', label: '图片', icon: <ImageIcon size={18} aria-hidden /> },
                   { key: 'video', label: '视频', icon: <Video size={18} aria-hidden /> },
                 ] as const).map((item) => (
-                  <button
+                  <Button variant="bare"
                     key={item.key}
                     type="button"
                     role="option"
@@ -1122,7 +1125,7 @@ export function PromptInput({
                   >
                     {item.icon}
                     {item.label}
-                  </button>
+                  </Button>
                 ))}
             </ToolbarPopover>
           </div>
@@ -1148,7 +1151,7 @@ export function PromptInput({
             >
                 <div className="px-3 py-2 text-sm text-muted-foreground">选择厂商</div>
                 {visibleProviders.map((item) => (
-                  <button
+                  <Button variant="bare"
                     key={item.alias}
                     type="button"
                     role="option"
@@ -1168,7 +1171,7 @@ export function PromptInput({
                       <span className="block truncate text-sm font-medium">{providerName(item)}</span>
                       <span className="block truncate text-xs text-muted-foreground">{isAutoProvider(item) ? '' : `${item.alias} · `}{item.models.length} models</span>
                     </span>
-                  </button>
+                  </Button>
                 ))}
             </ToolbarPopover>
           </div>
@@ -1248,7 +1251,7 @@ export function PromptInput({
                         className={`grid h-9 ${caps.qualities.length === 5 ? 'grid-cols-5' : caps.qualities.length >= 4 ? 'grid-cols-4' : 'grid-cols-3'} rounded-lg bg-popover p-0.5`}
                       >
                         {caps.qualities.map((item) => (
-                          <button
+                          <Button variant="bare"
                             key={item}
                             type="button"
                             role="option"
@@ -1260,7 +1263,7 @@ export function PromptInput({
                             className="h-8 rounded-md text-center text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
                           >
                             {QUALITY_LABELS[item]}
-                          </button>
+                          </Button>
                         ))}
                       </div>
                     </section>
@@ -1371,7 +1374,7 @@ export function PromptInput({
             <div aria-hidden className="absolute right-0 inset-y-0" style={{ width: scrollBlockWidth }} />
           )}
           {/* 右缘滚动箭头：实心胶囊、浮在最顶层，悬停底栏任意处即现。 */}
-          <button
+          <Button variant="bare"
             type="button"
             aria-label="向右滚动查看更多"
             onClick={() => trackRef.current?.scrollBy({ left: 200, behavior: 'smooth' })}
@@ -1380,7 +1383,7 @@ export function PromptInput({
             }`}
           >
             <ChevronRight size={17} aria-hidden />
-          </button>
+          </Button>
         </div>
         {/* pr-12 给提交按钮让位：按钮已改为绝对定位锚在壳右下角（见 shell 末尾），不再占这一行的 flex 位 */}
         <div className="flex items-center gap-3 shrink-0 pr-12">
@@ -1400,12 +1403,11 @@ export function PromptInput({
       </div>
       {/* 提交按钮：唯一一颗，锚定壳右下角。收/放时壳底边在屏幕上不动，按钮只原位缩放
           40↔32px，不随状态重新挂载——视觉连续性与参考堆叠 / 编辑器的缩放一致。 */}
-      <button
+      <Hint label={lastFrameOnlyBlocked ? 'Seedance 不支持只给尾帧：请先放首帧，或首尾都放' : '提交 (⌘↵)'}><Button variant="bare"
         type="button"
         onClick={(e) => { e.stopPropagation(); submit(); }}
         disabled={!canSubmit}
         aria-label="提交生成"
-        title={lastFrameOnlyBlocked ? 'Seedance 不支持只给尾帧：请先放首帧，或首尾都放' : '提交 (⌘↵)'}
         className={`absolute right-4 inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background transition-all duration-300 ${
           collapsed ? 'bottom-[22px] w-8 h-8' : 'bottom-4 w-10 h-10'
         }`}
@@ -1415,7 +1417,7 @@ export function PromptInput({
           aria-hidden
           className={`transition-transform duration-300 ${collapsed ? 'scale-90' : ''}`}
         />
-      </button>
+      </Button></Hint>
       {slotLightbox && <Lightbox src={slotLightbox} onClose={() => setSlotLightbox(null)} />}
     </div>
   );
@@ -1426,7 +1428,7 @@ function CountOptions({ value, onSelect, max = 4 }: { value: number; max?: numbe
   return (
     <div className="flex rounded-lg bg-popover p-1">
       {[1, 2, 3, 4].filter(item => item <= max).map((item) => (
-        <button
+        <Button variant="bare"
           key={item}
           type="button"
           role="option"
@@ -1436,7 +1438,7 @@ function CountOptions({ value, onSelect, max = 4 }: { value: number; max?: numbe
           className="inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60"
         >
           {item}
-        </button>
+        </Button>
       ))}
     </div>
   );
@@ -1448,7 +1450,7 @@ function ControlButton({
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }) {
   return (
-    <button
+    <Button variant="bare"
       type="button"
       className={`inline-flex min-w-0 max-w-full h-9 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
         active

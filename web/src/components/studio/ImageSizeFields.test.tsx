@@ -20,9 +20,9 @@ describe('image size intent', () => {
     const caps = imageControlCaps(model, 'openrouter', 'https://openrouter.ai/api/v1');
     const onPatch = vi.fn();
     render(<ImageSizeFields caps={caps} model={model} params={{ size_mode: 'ratio', ratio: '16:9' }} onPatch={onPatch} />);
-    expect(screen.getByRole('option', { name: '默认' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('radio', { name: '默认' })).toHaveAttribute('aria-checked', 'true');
     for (const resolution of ['2K', '4K']) {
-      fireEvent.click(screen.getByRole('option', { name: resolution }));
+      fireEvent.click(screen.getByRole('radio', { name: resolution }));
       expect(onPatch).toHaveBeenLastCalledWith({ resolution, size: undefined });
       expect(prepareImageSizeSubmission(model, 'openrouter', 'https://openrouter.ai/api/v1', {
         size_mode: 'ratio', ratio: '16:9', resolution,
@@ -38,9 +38,9 @@ describe('image size intent', () => {
     const onPatch = vi.fn();
     render(<ImageSizeFields caps={caps} model="gpt-image-2.5-flare"
       params={{ size_mode: 'ratio', ratio: '1:1', resolution: '2K' }} onPatch={onPatch} />);
-    expect(screen.getByRole('option', { name: 'AUTO' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'AUTO' })).toBeInTheDocument();
     expect(screen.queryByText('分辨率')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('option', { name: 'AUTO' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'AUTO' }));
     expect(onPatch).toHaveBeenLastCalledWith({ size_mode: 'auto', size: 'auto' });
     expect(screen.queryByText('自动尺寸')).not.toBeInTheDocument();
   });
@@ -55,9 +55,9 @@ describe('image size intent', () => {
     const onPatch = vi.fn();
     render(<ImageSizeFields model="nano-banana-pro" caps={imageControlCaps('nano-banana-pro', 'custom', 'https://api.tu-zi.com')}
       params={{ ratio: '1:1' }} onPatch={onPatch} />);
-    expect(screen.getAllByRole('option')).toHaveLength(10);
+    expect(screen.getAllByRole('radio')).toHaveLength(10);
     for (const ratio of ['4:5', '5:4', '21:9']) {
-      fireEvent.click(screen.getByRole('option', { name: ratio }));
+      fireEvent.click(screen.getByRole('radio', { name: ratio }));
       expect(onPatch).toHaveBeenLastCalledWith({ size_mode: 'ratio', ratio, size: undefined });
     }
     expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
@@ -65,13 +65,15 @@ describe('image size intent', () => {
   it('offers OpenRouter resolution tiers without silently picking a billed tier', () => {
     const model = 'google/gemini-3.1-flash-image-preview';
     const onPatch = vi.fn();
-    render(<ImageSizeFields model={model} caps={imageControlCaps(model, 'openrouter', 'https://openrouter.ai')}
+    const { rerender } = render(<ImageSizeFields model={model} caps={imageControlCaps(model, 'openrouter', 'https://openrouter.ai')}
       params={{ ratio: '1:1' }} onPatch={onPatch} />);
-    expect(screen.getByRole('option', { name: '默认' })).toHaveAttribute('aria-selected', 'true');
-    for (const value of ['1:8', '8:1', '512', '1K', '2K', '4K']) expect(screen.getByRole('option', { name: value })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('option', { name: '512' }));
+    expect(screen.getByRole('radio', { name: '默认' })).toHaveAttribute('aria-checked', 'true');
+    for (const value of ['1:8', '8:1', '512', '1K', '2K', '4K']) expect(screen.getByRole('radio', { name: value })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: '512' }));
     expect(onPatch).toHaveBeenLastCalledWith({ resolution: '512', size: undefined });
-    fireEvent.click(screen.getByRole('option', { name: '默认' }));
+    rerender(<ImageSizeFields model={model} caps={imageControlCaps(model, 'openrouter', 'https://openrouter.ai')}
+      params={{ ratio: '1:1', resolution: '512' }} onPatch={onPatch} />);
+    fireEvent.click(screen.getByRole('radio', { name: '默认' }));
     expect(onPatch).toHaveBeenLastCalledWith({ resolution: undefined, size: undefined });
   });
   it.each([
@@ -106,12 +108,12 @@ describe('image size intent', () => {
   it('gives Tuzi gpt-image AUTO plus 1K/2K tiers instead of a pixel box', () => {
     render(<Harness baseUrl="https://api.tu-zi.com/v1" />);
     expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: '自定义' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: '自定义' })).not.toBeInTheDocument();
     // 档位表是 1K 在前，但没显式选过的草稿仍落在 2K，不被静默降档。
-    expect(screen.getByRole('option', { name: '2K' })).toHaveAttribute('aria-selected', 'true');
-    fireEvent.click(screen.getByRole('option', { name: '1K' }));
-    expect(screen.getByRole('option', { name: '1K' })).toHaveAttribute('aria-selected', 'true');
-    fireEvent.click(screen.getByRole('option', { name: 'AUTO' }));
+    expect(screen.getByRole('radio', { name: '2K' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('radio', { name: '1K' }));
+    expect(screen.getByRole('radio', { name: '1K' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('radio', { name: 'AUTO' }));
     expect(screen.getByRole('status')).toHaveTextContent('AUTO');
     expect(imageControlCaps('gpt-image-2', 'custom', 'https://tu-zi.com.example/v1').showAutoSize).toBe(false);
   });
@@ -156,19 +158,19 @@ describe('image size intent', () => {
     render(<Harness />);
     const width = screen.getByLabelText('输出宽度');
     fireEvent.focus(width);
-    expect(screen.getByRole('option', { name: '2:3' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('radio', { name: '2:3' })).toHaveAttribute('aria-checked', 'true');
     fireEvent.change(width, { target: { value: '1024' } });
-    expect(screen.getByRole('option', { name: '自定义' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('option', { name: '2:3' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByRole('radio', { name: '自定义' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: '2:3' })).toHaveAttribute('aria-checked', 'false');
     fireEvent.change(screen.getByLabelText('输出高度'), { target: { value: '1536' } });
     fireEvent.blur(screen.getByLabelText('输出高度'));
     expect(screen.getByRole('status')).toHaveTextContent('1024×1536');
-    fireEvent.click(screen.getByRole('option', { name: 'AUTO' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'AUTO' }));
     expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('AUTO');
-    fireEvent.click(screen.getByRole('option', { name: '1:1' }));
+    fireEvent.click(screen.getByRole('radio', { name: '1:1' }));
     expect(screen.getByLabelText('输出宽度')).toHaveValue(2048);
-    fireEvent.click(screen.getByRole('option', { name: '自定义' }));
+    fireEvent.click(screen.getByRole('radio', { name: '自定义' }));
     expect(screen.getByLabelText('输出宽度')).toHaveValue(1024);
     expect(screen.getByLabelText('输出高度')).toHaveValue(1536);
   });

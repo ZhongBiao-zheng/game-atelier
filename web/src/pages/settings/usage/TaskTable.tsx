@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Link, useLocation } from 'wouter';
 import { fetchUsageTasks } from '@/api/usage';
 import type { UsageRange, UsageScope, UsageSource, UsageTask, UsageTaskFilter, UsageTasksResponse } from '@/schema/usage';
 import { formatGenerationCost } from '@/lib/generationCost';
 import { KindBadge } from './KindBadge';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
 
 type Filters = { gatewayAlias?: string; scope: UsageScope; range: UsageRange; source: UsageSource; member: string };
 const statuses: { value: UsageTaskFilter; label: string }[] = [
@@ -63,8 +66,8 @@ export function TaskTable(filters: Filters) {
       <td className={`${cell} whitespace-nowrap tabular-nums text-muted-foreground`}>
         {task.href ? <Link href={task.href} aria-label={`查看任务 ${task.id}`} className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{time(task.at)}</Link> : time(task.at)}
       </td>
-      <td className={`${cell} max-w-48 truncate`} title={task.project_label ?? undefined}>{scope === 'team' ? '—' : task.project_label || '—'}</td>
-      <td className={`${cell} max-w-64 truncate font-mono text-xs`} title={task.model}>{task.model}</td>
+      <Hint label={task.project_label ?? undefined}><td className={`${cell} max-w-48 truncate`}>{scope === 'team' ? '—' : task.project_label || '—'}</td></Hint>
+      <Hint label={task.model}><td className={`${cell} max-w-64 truncate font-mono text-xs`}>{task.model}</td></Hint>
       <td className={`${cell} max-w-40 truncate`}>{(scope === 'team' ? task.member_label : task.alias) || '—'}</td>
       <td className={`${cell} whitespace-nowrap`}><KindBadge kind={task.kind} /></td>
       <td className={`${cell} whitespace-nowrap text-right tabular-nums ${slow ? warning : 'text-muted-foreground'}`}>{duration(task.duration_s)}</td>
@@ -78,11 +81,10 @@ export function TaskTable(filters: Filters) {
   return <section aria-label="任务" aria-busy={loading} className="min-w-0 space-y-3">
     <div className="flex flex-wrap items-center justify-between gap-2.5">
       <h2 className="text-sm font-semibold">任务 {data && <span className="font-normal text-muted-foreground">{data.total}</span>}</h2>
-      <div role="group" aria-label="状态筛选" className="flex rounded-md border border-border bg-background p-0.5">
-        {statuses.map(item => <button key={item.value} type="button" aria-pressed={status === item.value}
-          onClick={() => { if (item.value !== status) { request.current++; setStatus(item.value); } }}
-          className={`rounded px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${status === item.value ? 'bg-secondary' : 'text-muted-foreground'}`}>{item.label}</button>)}
-      </div>
+      <ToggleGroup type="single" variant="outline" aria-label="状态筛选" value={status}
+        onValueChange={value => { if (!value || value === status) return; request.current++; setStatus(value as typeof status); }}>
+        {statuses.map(item => <ToggleGroupItem key={item.value} value={item.value}>{item.label}</ToggleGroupItem>)}
+      </ToggleGroup>
     </div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {!data && loading && <p role="status" className="text-sm text-muted-foreground">读取任务中…</p>}
@@ -96,8 +98,8 @@ export function TaskTable(filters: Filters) {
           <tbody>{data.rows.map(row)}</tbody>
         </table>
       </div> : <p className="text-sm text-muted-foreground">暂无匹配的任务</p>}
-      {data.next_offset !== null && <div className="text-center"><button type="button" disabled={loading} onClick={() => void more()}
-        className="rounded-md border border-border px-3.5 py-1.5 text-sm text-muted-foreground disabled:opacity-50">{loading ? '加载中…' : '加载更多'}</button></div>}
+      {data.next_offset !== null && <div className="text-center"><Button variant="outline" size="sm" type="button" disabled={loading} onClick={() => void more()}
+       >{loading ? '加载中…' : '加载更多'}</Button></div>}
     </>}
   </section>;
 }

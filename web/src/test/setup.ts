@@ -42,3 +42,21 @@ afterEach(() => {
   cleanup();
   document.body.innerHTML = '';
 });
+
+// Radix（Select / Slider / Tooltip 等）依赖的浏览器接口 jsdom 没实现：尺寸监听、指针捕获、滚动到可见。
+// 只补空实现，个别测试需要观察回调时仍可自己 stubGlobal 覆盖。
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+}
+for (const [name, value] of [
+  ['hasPointerCapture', () => false],
+  ['setPointerCapture', () => {}],
+  ['releasePointerCapture', () => {}],
+  ['scrollIntoView', () => {}],
+] as const) {
+  if (!(name in Element.prototype)) Object.defineProperty(Element.prototype, name, { configurable: true, writable: true, value });
+}

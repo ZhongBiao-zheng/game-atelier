@@ -2,12 +2,14 @@ import { useState, type DragEvent } from 'react';
 import { Download, Ellipsis, Eye, EyeOff, GripVertical } from 'lucide-react';
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
+import { Toggle } from '@/components/ui/toggle';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import type { CanvasLayerStackNode } from '@/schema/canvas';
 import { cn } from '@/lib/utils';
 import { moveLayerStackPart, orderedLayerStackParts } from './canvasLayerOrder';
 import type { CanvasNodeContextValue } from './CanvasEditorViews';
 import { SwapIcon } from '@/components/ui/swap-icon';
+import { Hint } from '@/components/ui/tooltip';
 
 export function CanvasLayerStackList({ node, context, disabled, onVisibility, onHover }: {
   node: CanvasLayerStackNode;
@@ -44,9 +46,8 @@ export function CanvasLayerStackList({ node, context, disabled, onVisibility, on
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setTarget(null);
     }}
     onDrop={event => { event.preventDefault(); event.stopPropagation(); resetDrag(); }}>
-    {parts.map((part, index) => <div key={part.key} role="listitem" data-layer-row={part.key}
+    {parts.map((part, index) => <Hint key={part.key} label={part.layer?.description || part.name}><div role="listitem" data-layer-row={part.key}
       aria-label={part.name} draggable={!disabled}
-      title={part.layer?.description || part.name}
       className={cn('relative flex items-center gap-1 rounded-md p-2 hover:bg-secondary/60 focus-within:bg-secondary/60',
         !disabled && 'cursor-grab', dragged === part.key && 'opacity-50')}
       onMouseEnter={() => onHover(part.layer?.id ?? null)} onMouseLeave={() => onHover(null)}
@@ -81,11 +82,12 @@ export function CanvasLayerStackList({ node, context, disabled, onVisibility, on
         className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <Download className="size-4" />
       </a>
-      <Button variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground"
-        aria-label={`${part.visible ? '隐藏' : '显示'}${part.name}`} aria-pressed={part.visible}
-        onClick={event => { event.stopPropagation(); onVisibility(part.layer?.id ?? null, !part.visible); }}>
-        <SwapIcon swapKey={Boolean(part.visible)}>{part.visible ? <Eye className="size-4" /> : <EyeOff className="size-4" />}</SwapIcon>
-      </Button>
+      <Toggle size="sm" className="size-8 shrink-0 px-0 data-[state=on]:bg-transparent"
+        aria-label={`${part.visible ? '隐藏' : '显示'}${part.name}`} pressed={Boolean(part.visible)}
+        onClick={event => event.stopPropagation()}
+        onPressedChange={visible => onVisibility(part.layer?.id ?? null, visible)}>
+        <SwapIcon swapKey={Boolean(part.visible)}>{part.visible ? <Eye /> : <EyeOff />}</SwapIcon>
+      </Toggle>
       <DropdownMenu><DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="size-6 shrink-0 text-muted-foreground"
           disabled={disabled} aria-label={`${part.name}图层排序`} onClick={event => event.stopPropagation()}>
@@ -97,6 +99,6 @@ export function CanvasLayerStackList({ node, context, disabled, onVisibility, on
         <DropdownMenuItem disabled={disabled || index === parts.length - 1}
           onSelect={() => move(part.key, parts[index + 1].key, true)}>下移一层</DropdownMenuItem>
       </DropdownMenuContent></DropdownMenu>
-    </div>)}
+    </div></Hint>)}
   </div>;
 }

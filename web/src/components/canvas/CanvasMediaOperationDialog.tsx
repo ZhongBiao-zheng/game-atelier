@@ -2,6 +2,7 @@ import { Minus, Plus, Redo2, Undo2 } from 'lucide-react';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   Dialog,
   DialogContent,
@@ -11,7 +12,8 @@ import {
 } from '@/components/ui/dialog';
 import { clamp, cn } from '@/lib/utils';
 import type { CanvasMediaOperation, CanvasMediaVersion } from '@/schema/canvas';
-import { Input } from '@/components/ui/input';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
+import { Hint } from '@/components/ui/tooltip';
 
 export type CanvasMediaTool = 'crop' | 'split';
 
@@ -45,9 +47,7 @@ const SPLIT_PRESETS: Array<{ rows: number; columns: number }> = [
 const SPLIT_MAX_COUNT = 12;
 const CROP_MIN_PIXELS = 2;
 
-const OPTION_TILE_CLASS = 'flex h-14 flex-col items-center justify-center gap-1.5 rounded-lg border text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
-const OPTION_TILE_ON_CLASS = 'border-primary bg-primary/10 text-foreground';
-const OPTION_TILE_OFF_CLASS = 'border-border text-muted-foreground hover:text-foreground';
+const OPTION_TILE_CLASS = 'h-14 flex-col gap-1.5 rounded-lg border-border text-xs font-normal data-[state=on]:border-primary data-[state=on]:bg-primary/10';
 const PANEL_LABEL_CLASS = 'mb-2 text-xs text-muted-foreground';
 const STAGE_BADGE_CLASS = 'pointer-events-none whitespace-nowrap rounded-sm bg-background/70 px-1.5 py-0.5 text-xs tabular-nums text-foreground';
 
@@ -309,7 +309,7 @@ function CropStage({
       <span aria-hidden="true" className="absolute inset-x-0 bottom-0 bg-background/60" style={{ height: `${(1 - bottom) * 100}%` }} />
       <span aria-hidden="true" className="absolute left-0 bg-background/60" style={{ top: `${rect.y * 100}%`, height: `${rect.height * 100}%`, width: `${rect.x * 100}%` }} />
       <span aria-hidden="true" className="absolute right-0 bg-background/60" style={{ top: `${rect.y * 100}%`, height: `${rect.height * 100}%`, width: `${(1 - right) * 100}%` }} />
-      <button
+      <Button variant="bare"
         type="button"
         aria-label="移动裁剪框"
         className="absolute z-20 cursor-move border border-foreground bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -337,9 +337,9 @@ function CropStage({
         <span className={cn(STAGE_BADGE_CLASS, 'absolute bottom-2 left-1/2 -translate-x-1/2')}>
           {output.width} × {output.height}
         </span>
-      </button>
+      </Button>
       {(['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'] as const).map(handle => (
-        <button
+        <Button variant="bare"
           key={handle}
           type="button"
           aria-label={`调整裁剪框${cropHandleLabel(handle)}`}
@@ -383,24 +383,19 @@ function CropControls({
     <>
       <fieldset>
         <legend className={PANEL_LABEL_CLASS}>比例</legend>
-        <div className="grid grid-cols-3 gap-1.5">
+        <ToggleGroup type="single" variant="outline" className="grid w-full grid-cols-3 gap-1.5" value={ratio}
+          onValueChange={value => { const item = CROP_RATIOS.find(entry => entry.value === value); if (item) onRatioChange(item.value); }}>
           {CROP_RATIOS.map(item => (
-            <button
-              key={item.value}
-              type="button"
-              aria-pressed={ratio === item.value}
-              className={cn(OPTION_TILE_CLASS, ratio === item.value ? OPTION_TILE_ON_CLASS : OPTION_TILE_OFF_CLASS)}
-              onClick={() => onRatioChange(item.value)}
-            >
+            <ToggleGroupItem key={item.value} value={item.value} className={OPTION_TILE_CLASS}>
               <span
                 aria-hidden="true"
                 className={cn('rounded-sm border border-current', item.value === 'free' && 'border-dashed')}
                 style={ratioGlyphSize(item.value, sourceWidth / sourceHeight)}
               />
               {item.label}
-            </button>
+            </ToggleGroupItem>
           ))}
-        </div>
+        </ToggleGroup>
       </fieldset>
       <fieldset>
         <legend className={PANEL_LABEL_CLASS}>尺寸（像素）</legend>
@@ -419,14 +414,14 @@ function CropControls({
           />
         </div>
       </fieldset>
-      <button
+      <Button variant="bare"
         type="button"
         disabled={isFullImage}
         className="self-start text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:underline disabled:pointer-events-none disabled:opacity-40"
         onClick={onReset}
       >
         重置为整张图
-      </button>
+      </Button>
     </>
   );
 }
@@ -450,9 +445,9 @@ function PixelField({ label, value, max, onCommit }: {
   }
 
   return (
-    <label className="flex h-9 items-center gap-2 rounded-md border border-input px-2.5 text-xs text-muted-foreground focus-within:ring-2 focus-within:ring-primary">
-      <span>{label}</span>
-      <Input variant="bare"
+    <InputGroup>
+      <InputGroupAddon className="text-xs">{label}</InputGroupAddon>
+      <InputGroupInput
         type="text"
         inputMode="numeric"
         aria-label={`裁剪${label}度（像素）`}
@@ -464,9 +459,9 @@ function PixelField({ label, value, max, onCommit }: {
           event.preventDefault();
           commit();
         }}
-        className="w-full min-w-0 bg-transparent text-right text-sm tabular-nums text-foreground outline-none"
+        className="text-right tabular-nums"
       />
-    </label>
+    </InputGroup>
   );
 }
 
@@ -537,7 +532,7 @@ function SplitStage({
         >{tile.number}</span>
       ))}
       {lines.vertical.map((value, index) => (
-        <button
+        <Button variant="bare"
           key={`vertical-${index}`}
           type="button"
           aria-label={`调整第 ${index + 1} 条竖向切线`}
@@ -560,10 +555,10 @@ function SplitStage({
           {isActive('vertical', index) && (
             <span className={cn(STAGE_BADGE_CLASS, 'absolute bottom-7 bg-primary text-primary-foreground')}>{Math.round(value * sourceWidth)} px</span>
           )}
-        </button>
+        </Button>
       ))}
       {lines.horizontal.map((value, index) => (
-        <button
+        <Button variant="bare"
           key={`horizontal-${index}`}
           type="button"
           aria-label={`调整第 ${index + 1} 条横向切线`}
@@ -586,7 +581,7 @@ function SplitStage({
           {isActive('horizontal', index) && (
             <span className={cn(STAGE_BADGE_CLASS, 'absolute right-7 bg-primary text-primary-foreground')}>{Math.round(value * sourceHeight)} px</span>
           )}
-        </button>
+        </Button>
       ))}
     </div>
   );
@@ -620,17 +615,19 @@ function SplitControls({
     <>
       <fieldset>
         <legend className={PANEL_LABEL_CLASS}>常用</legend>
-        <div className="grid grid-cols-4 gap-1.5">
+        <ToggleGroup type="single" variant="outline" className="grid w-full grid-cols-4 gap-1.5"
+          value={SPLIT_PRESETS.find(preset => preset.rows === rows && preset.columns === columns) ? `${rows}x${columns}` : ''}
+          onValueChange={value => {
+            const preset = SPLIT_PRESETS.find(entry => `${entry.rows}x${entry.columns}` === value);
+            if (preset) onCommit(evenSplit(preset.rows, preset.columns));
+          }}>
           {SPLIT_PRESETS.map(preset => {
-            const selected = preset.rows === rows && preset.columns === columns;
             return (
-              <button
+              <ToggleGroupItem
                 key={`${preset.rows}x${preset.columns}`}
-                type="button"
+                value={`${preset.rows}x${preset.columns}`}
                 aria-label={`${preset.rows} 行 ${preset.columns} 列`}
-                aria-pressed={selected}
-                className={cn(OPTION_TILE_CLASS, selected ? OPTION_TILE_ON_CLASS : OPTION_TILE_OFF_CLASS)}
-                onClick={() => onCommit(evenSplit(preset.rows, preset.columns))}
+                className={OPTION_TILE_CLASS}
               >
                 <span
                   aria-hidden="true"
@@ -642,24 +639,24 @@ function SplitControls({
                   ))}
                 </span>
                 {preset.rows}×{preset.columns}
-              </button>
+              </ToggleGroupItem>
             );
           })}
-        </div>
+        </ToggleGroup>
       </fieldset>
       <div className="grid grid-cols-2 gap-2">
         <CountStepper label="行" value={rows} onChange={next => onCommit(evenSplit(next, columns))} />
         <CountStepper label="列" value={columns} onChange={next => onCommit(evenSplit(rows, next))} />
       </div>
       <div className="flex items-center">
-        <button
+        <Button variant="bare"
           type="button"
           disabled={even}
           className="text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:underline disabled:pointer-events-none disabled:opacity-40"
           onClick={() => onCommit(evenSplit(rows, columns))}
         >
           恢复均分
-        </button>
+        </Button>
         <span className="ml-auto flex gap-1">
           <StepButton label="撤销切线调整" disabled={!canUndo} onClick={onUndo}><Undo2 aria-hidden="true" /></StepButton>
           <StepButton label="重做切线调整" disabled={!canRedo} onClick={onRedo}><Redo2 aria-hidden="true" /></StepButton>
@@ -700,16 +697,15 @@ function StepButton({ label, disabled, onClick, children }: {
   children: ReactNode;
 }) {
   return (
-    <button
+    <Hint label={label}><Button variant="bare"
       type="button"
       aria-label={label}
-      title={label}
       disabled={disabled}
       className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4"
       onClick={onClick}
     >
       {children}
-    </button>
+    </Button></Hint>
   );
 }
 

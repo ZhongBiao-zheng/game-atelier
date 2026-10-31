@@ -4,6 +4,8 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/compone
 import { useEditorViewport } from '../ImageEditorShell';
 import { AnnotationEditingLayer } from './AnnotationEditingLayer';
 import { AnnotationToolbar, type AnnotationToolbarProps } from './AnnotationToolbar';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
 export function AnnotationFullscreen({ title, src, width, height, onCollapse, ...toolbar }: AnnotationToolbarProps & {
   title: string; src: string; width: number; height: number; onCollapse: () => void;
 }) {
@@ -24,7 +26,7 @@ export function AnnotationFullscreen({ title, src, width, height, onCollapse, ..
       <DialogDescription className="sr-only">全屏标注</DialogDescription>
       <header className="absolute inset-x-4 top-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <button type="button" aria-label="收起" title="收起 Esc" className="grid size-9 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground" onClick={onCollapse}><Minimize2 size={18} /></button>
+          <Hint label="收起 Esc"><Button variant="bare" type="button" aria-label="收起" className="grid size-9 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground" onClick={onCollapse}><Minimize2 size={18} /></Button></Hint>
           <DialogTitle className="text-sm font-medium">{title}</DialogTitle>
           <span className="text-xs tabular-nums text-muted-foreground">{width} × {height}</span>
         </div>

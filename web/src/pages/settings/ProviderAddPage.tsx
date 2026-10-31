@@ -7,6 +7,9 @@ import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { KeyForm } from './KeyForm';
 import { PROVIDER_PRESETS, providerPresetId, type ProviderPreset } from './providerPresets';
 import { Input } from '@/components/ui/input';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 
 const GROUPS = [
   { kind: 'official', title: '供应商', description: '有自己的模型' },
@@ -56,11 +59,10 @@ export function ProviderAddPage() {
         <Link href="/settings/providers" className="text-muted-foreground">供应商 /</Link><h1 className="text-sm font-semibold">添加</h1>
       </div>
       <div className="flex items-center gap-2">
-        <label className="flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-muted-foreground focus-within:ring-1 focus-within:ring-ring">
-          <Search className="size-3.5" aria-hidden />
-          <Input variant="bare" aria-label="查找供应商" placeholder="查找供应商" value={query} onChange={e => setQuery(e.target.value)}
-            className="w-44 min-w-0 bg-transparent text-sm text-foreground outline-none" />
-        </label>
+        <InputGroup className="w-56">
+          <InputGroupAddon><Search aria-hidden /></InputGroupAddon>
+          <InputGroupInput aria-label="查找供应商" placeholder="查找供应商" value={query} onChange={e => setQuery(e.target.value)} />
+        </InputGroup>
         <Link href="/settings/providers" className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-secondary">关闭</Link>
       </div>
     </div>
@@ -73,25 +75,25 @@ export function ProviderAddPage() {
         <div className="grid grid-cols-[repeat(auto-fill,minmax(min(220px,100%),1fr))] gap-2">
           {items.map(preset => {
             const added = preset.id !== 'custom' && keys.some(key => providerPresetId(key) === preset.id);
-            return <button key={preset.id} type="button" onClick={() => open(preset)}
+            return <Button variant="bare" key={preset.id} type="button" onClick={() => open(preset)}
               className="flex min-h-14 items-center gap-3 rounded-md border border-border bg-card px-3.5 py-2 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
               <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-xs"><ProviderBrandIcon provider={{ provider: preset.value, base_url: preset.defaultBaseUrl }} /></span>
               <span className="min-w-0 flex-1"><span className="block text-sm">{preset.label}</span>
                 <span className="block text-xs text-muted-foreground">{preset.value === 'chatgpt' ? (subscriptionError ?? (!subscription ? '读取中…' : subscription.available ? [subscription.email, subscription.plan].filter(Boolean).join(' · ') : '请先在 Codex 里用 ChatGPT 登录')) : preset.value === 'atelier' ? '模型由对方决定' : preset.id === 'evolink' ? 'Midjourney' : preset.modalities.map(modality => MODALITIES[modality] ?? modality).join(' · ')}</span>
               </span>
               {added && <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[color:var(--status-done)]" />已添加</span>}
-            </button>;
+            </Button>;
           })}
         </div>
       </section>;
     })}
     {visible.length === 0 && <p className="text-sm text-muted-foreground">没有匹配的供应商</p>}
     <form autoComplete="off" onSubmit={e => { e.preventDefault(); custom(); }} className="mt-auto flex flex-wrap items-center gap-3 border-t border-border pt-5">
-      <label htmlFor="custom-provider-address" className="flex items-center gap-1.5 text-sm font-medium text-primary"><Plus className="size-3.5" aria-hidden />自定义供应商</label>
-      <Input variant="bare" id="custom-provider-address" aria-label="自定义供应商地址" placeholder="任意 OpenAI 兼容地址，如 https://api.example.com/v1"
+      <Label htmlFor="custom-provider-address" className="flex items-center gap-1.5 text-sm font-medium text-primary"><Plus className="size-3.5" aria-hidden />自定义供应商</Label>
+      <Input id="custom-provider-address" aria-label="自定义供应商地址" placeholder="任意 OpenAI 兼容地址，如 https://api.example.com/v1"
         value={address} onChange={e => setAddress(e.target.value)}
-        className="h-10 min-w-0 flex-[1_1_360px] rounded-md border border-input bg-background px-3 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" />
-      <button type="submit" disabled={!address.trim()} className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50">继续</button>
+        className="min-w-0 flex-[1_1_360px] font-mono" />
+      <Button type="submit" disabled={!address.trim()}>继续</Button>
     </form>
     {selected && <KeyForm presetId={selected.preset.id} initial={selected.initial} onCancel={() => setSelected(null)}
       onCreated={() => { window.dispatchEvent(new Event(KEYS_CHANGED_EVENT)); navigate('/settings/providers'); }} />}

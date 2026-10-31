@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { disableAgent, enableAgent, fetchAgentStatus, type AgentClient, type AgentStatus } from '@/api/agentConnection';
 import { Switch } from '@/components/ui/switch';
+import { Hint } from '@/components/ui/tooltip';
 
 const CLIENT_LABEL: Record<AgentClient, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
 // Agent 一开会话就会连过来，开着设置页时轮询，状态自己亮。
@@ -45,7 +46,7 @@ export function AgentSection() {
         <h2 className="text-sm font-semibold">允许本机 Agent 操作项目与画布</h2>
         <p role="status" className="text-xs text-muted-foreground">{!status ? '读取中…' : status.enabled ? `${connected.length} 个已连接` : '关闭后 Claude Code 与 Codex 无法读写画布'}</p>
       </div>
-      <Switch checked={Boolean(status?.enabled)} label="允许 Agent 操作本机" disabled={!status || busy} onChange={next => void toggle(next)} />
+      <Switch checked={Boolean(status?.enabled)} aria-label="允许 Agent 操作本机" disabled={!status || busy} onCheckedChange={next => void toggle(next)} />
     </section>
     {status?.enabled && <>
       <div className="grid min-w-0 gap-3 md:grid-cols-2">
@@ -67,9 +68,9 @@ export function AgentSection() {
       <section aria-label="可用工具" className="space-y-2.5">
         <h2 className="text-sm font-semibold">可用工具 <span className="font-normal text-muted-foreground">{status.tools.length}</span></h2>
         <div className="flex flex-wrap gap-1.5">
-          {status.tools.map(tool => <span key={tool.name} title={tool.billable ? '计费工具' : undefined} className="flex min-w-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 font-mono text-xs">
+          {status.tools.map(tool => <Hint key={tool.name} label={tool.billable ? '计费工具' : undefined}><span className="flex min-w-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 font-mono text-xs">
             <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${tool.billable ? 'bg-status-running' : 'bg-status-done'}`} /><span className="break-all">{tool.name}</span>
-          </span>)}
+          </span></Hint>)}
         </div>
         {status.tools.some(tool => tool.billable) && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><span aria-hidden className="size-1.5 shrink-0 rounded-full bg-status-running" />计费工具需先获得你的授权</p>}
       </section>

@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { hoverHint } from '@/test/hint';
 import { listKeys } from '@/api/keys';
 import { fetchGatewayProviderMe, fetchGateway, type GatewayState } from '@/api/gateway';
 import { publishGatewayConnected } from '@/api/gatewayEvents';
@@ -95,7 +96,7 @@ it('本机网关响应事件刷新且旧慢响应不能覆盖更新状态', asyn
   expect(screen.getByText('局域网共享 · 运行中')).toBeInTheDocument();
   vi.mocked(fetchGateway).mockResolvedValue({ ...gateway, status: { ...gateway.status, running: false, error: '端口占用' } });
   act(() => publishGatewayConnected());
-  expect(await screen.findByRole('link', { name: '局域网共享 · 启动失败' })).toHaveAttribute('title', '端口占用');
+  expect(await hoverHint(await screen.findByRole('link', { name: '局域网共享 · 启动失败' }))).toHaveTextContent('端口占用');
   expect(screen.queryByText('局域网共享 · 运行中')).not.toBeInTheDocument();
   vi.mocked(fetchGateway).mockRejectedValue(new Error('offline'));
   act(() => publishGatewayConnected());

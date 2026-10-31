@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { hoverHint } from '@/test/hint';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
@@ -241,7 +242,7 @@ describe('in-app update controls', () => {
   it('shows the ready bundle button and preserves the legacy release link', async () => {
     updateServer();
     const view = await renderUpdater();
-    expect(screen.getByRole('button', { name: '更新' })).toHaveAttribute('title', '更新到 5.130.0');
+    expect(await hoverHint(screen.getByRole('button', { name: '更新' }))).toHaveTextContent('更新到 5.130.0');
     view.unmount();
     updateServer({ state: { ...readyUpdate, runtime_mode: 'legacy_bundle' } });
     await renderUpdater('bundle', '5.130.0');

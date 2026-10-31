@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { canvasMediaUrl } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
+import { Toggle } from '@/components/ui/toggle';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -21,6 +22,7 @@ import { AGENT_PANEL_MAX_WIDTH, AGENT_PANEL_MIN_WIDTH, useAgentPanelWidth } from
 import { CanvasAgentSkillPicker } from './CanvasAgentSkillPicker';
 import { useCanvasAgent } from './useCanvasAgent';
 import { Textarea } from '@/components/ui/textarea';
+import { Hint } from '@/components/ui/tooltip';
 
 export interface CanvasAgentNodeRef {
   id: string;
@@ -93,7 +95,7 @@ function ProcessGroup({ projectId, messages, steps }: {
     ? message.references.filter(ref => ref.kind === 'content' && ref.version_id) : []);
   return (
     <div className="flex flex-col gap-2">
-      <button
+      <Button variant="bare"
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(value => !value)}
@@ -102,7 +104,7 @@ function ProcessGroup({ projectId, messages, steps }: {
         <Wrench className="size-3.5" />
         处理过程 · {steps} 步
         <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
-      </button>
+      </Button>
       {open ? (
         <div className="flex flex-col gap-3 border-l border-border pl-3">
           {messages.map(message => <Message key={message.message_id} projectId={projectId} message={message} />)}
@@ -288,10 +290,10 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
       <header className="flex items-center gap-1 border-b border-border px-2 py-1.5">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button type="button" className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-secondary">
+            <Button variant="bare" type="button" className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-secondary">
               <span className="truncate">{session?.title ?? '新对话'}</span>
               <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-            </button>
+            </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="z-50 max-h-80 w-72 overflow-y-auto">
             {agent.sessions.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground">还没有对话</p>}
@@ -303,8 +305,8 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <button type="button" title="新对话" aria-label="新对话" disabled={pending || running} onClick={() => void agent.newSession()} className={ICON_BUTTON}><SquarePen className="size-4" /></button>
-        <button type="button" title="关闭" aria-label="关闭 Agent" onClick={onClose} className={ICON_BUTTON}><X className="size-4" /></button>
+        <Hint label="新对话"><Button variant="bare" type="button" aria-label="新对话" disabled={pending || running} onClick={() => void agent.newSession()} className={ICON_BUTTON}><SquarePen className="size-4" /></Button></Hint>
+        <Hint label="关闭"><Button variant="bare" type="button" aria-label="关闭 Agent" onClick={onClose} className={ICON_BUTTON}><X className="size-4" /></Button></Hint>
       </header>
 
       <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
@@ -313,12 +315,12 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             <p className="font-display text-display leading-tight">想在画布上创作什么？</p>
             <div className="flex flex-col items-start gap-1.5">
               {PRESETS[creationMode].map(preset => (
-                <button
+                <Button variant="bare"
                   key={preset}
                   type="button"
                   onClick={() => { setText(preset); textareaRef.current?.focus(); }}
                   className="rounded-full border border-border px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
-                >{preset}</button>
+                >{preset}</Button>
               ))}
             </div>
           </div>
@@ -352,7 +354,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
       {agent.error && (
         <p role="alert" className="mx-3 mb-2 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
           <span className="min-w-0 flex-1 break-words">{agent.error}</span>
-          <button type="button" aria-label="关闭提示" onClick={agent.clearError}><X className="size-3.5" /></button>
+          <Button variant="bare" type="button" aria-label="关闭提示" onClick={agent.clearError}><X className="size-3.5" /></Button>
         </p>
       )}
 
@@ -360,13 +362,13 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
         <p role="status" className="mx-3 mb-2 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs text-muted-foreground">
           <CircleAlert className="size-3.5 shrink-0 text-primary" />
           <span className="min-w-0 flex-1 break-words">{setupNotice.text}</span>
-          <button
+          <Button variant="bare"
             type="button"
             onClick={() => setupNotice.action === 'settings'
               ? onOpenKeySettings()
               : void agent.updateSettings({ auto_models: true })}
             className="shrink-0 text-primary underline-offset-2 hover:underline"
-          >{setupNotice.action === 'settings' ? '去设置' : '改为自动'}</button>
+          >{setupNotice.action === 'settings' ? '去设置' : '改为自动'}</Button>
         </p>
       )}
 
@@ -377,7 +379,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
               <span className="flex max-w-[12rem] items-center gap-1 rounded-full border border-primary/50 py-0.5 pl-2 pr-1 text-xs text-primary">
                 <Puzzle className="size-3.5 shrink-0" />
                 <span className="truncate">{skill}</span>
-                <button type="button" aria-label={`不用 Skill ${skill}`} onClick={() => setSkill(null)} className="rounded-full p-0.5 hover:bg-secondary"><X className="size-3" /></button>
+                <Button variant="bare" type="button" aria-label={`不用 Skill ${skill}`} onClick={() => setSkill(null)} className="rounded-full p-0.5 hover:bg-secondary"><X className="size-3" /></Button>
               </span>
             )}
             {attached.map(node => node.type === 'image' && node.versionId ? (
@@ -393,7 +395,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
               <span key={node.id} className="flex max-w-[10rem] items-center gap-1 rounded-full border border-border py-0.5 pl-2 pr-1 text-xs text-muted-foreground">
                 <NodeIcon type={node.type} />
                 <span className="truncate">{node.title}</span>
-                <button type="button" aria-label={`不带入 ${node.title}`} onClick={() => setDismissed(current => new Set(current).add(node.id))} className="rounded-full p-0.5 hover:bg-secondary hover:text-foreground"><X className="size-3" /></button>
+                <Button variant="bare" type="button" aria-label={`不带入 ${node.title}`} onClick={() => setDismissed(current => new Set(current).add(node.id))} className="rounded-full p-0.5 hover:bg-secondary hover:text-foreground"><X className="size-3" /></Button>
               </span>
             ))}
           </div>
@@ -409,7 +411,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
           className="block max-h-48 min-h-[4.5rem] w-full resize-none bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
         />
         <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
-          <button type="button" title="上传素材" aria-label="上传素材" onClick={onUpload} className={ICON_BUTTON}><Paperclip className="size-4" /></button>
+          <Hint label="上传素材"><Button variant="bare" type="button" aria-label="上传素材" onClick={onUpload} className={ICON_BUTTON}><Paperclip className="size-4" /></Button></Hint>
           <CanvasAgentSkillPicker
             skills={agent.skills}
             selected={skill}
@@ -438,28 +440,25 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             disabled={running || pending}
             onSelect={choice => void agent.updateSettings({ model: choice.model, model_alias: choice.alias })}
           />
-          <button
-            type="button"
-            title={selectedModel?.reasoning === false ? '该模型不支持思考' : thinkingOn ? '思考：开' : '思考：关'}
+          <Hint label={selectedModel?.reasoning === false ? '该模型不支持思考' : thinkingOn ? '思考：开' : '思考：关'}><Toggle
             aria-label="思考模式"
-            aria-pressed={thinkingOn}
+            pressed={thinkingOn}
             disabled={running || pending || selectedModel?.reasoning === false}
-            onClick={() => void agent.updateSettings({ effort: thinkingOn ? 'off' : 'high' })}
-            className={cn(ICON_BUTTON, thinkingOn && 'text-primary')}
-          ><Brain className="size-4" /></button>
-          <button
+            onPressedChange={on => void agent.updateSettings({ effort: on ? 'high' : 'off' })}
+            className={cn(ICON_BUTTON, 'min-w-7 px-0 data-[state=on]:bg-transparent data-[state=on]:text-primary')}
+          ><Brain /></Toggle></Hint>
+          <Hint label={autoMode ? 'Auto：全部直接执行，不再确认' : '审查：每一步都先确认'}><Button variant="bare"
             type="button"
-            title={autoMode ? 'Auto：全部直接执行，不再确认' : '审查：每一步都先确认'}
             aria-label={autoMode ? '权限模式：Auto' : '权限模式：审查'}
             disabled={running || pending}
             onClick={() => void agent.updateSettings({ permission_mode: autoMode ? 'review' : 'auto' })}
             className={cn(ICON_BUTTON, autoMode && 'text-primary')}
-          >{autoMode ? <Zap className="size-4" /> : <ShieldCheck className="size-4" />}</button>
+          >{autoMode ? <Zap className="size-4" /> : <ShieldCheck className="size-4" />}</Button></Hint>
           <span className="min-w-1 flex-1" />
           {running ? (
-            <button type="button" title="停止" aria-label="停止" onClick={() => void agent.stop()} className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-foreground hover:bg-secondary/80"><Square className="size-3.5 fill-current" /></button>
+            <Hint label="停止"><Button variant="bare" type="button" aria-label="停止" onClick={() => void agent.stop()} className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-foreground hover:bg-secondary/80"><Square className="size-3.5 fill-current" /></Button></Hint>
           ) : (
-            <button type="button" title="发送" aria-label="发送" disabled={!canSend} onClick={() => void submit()} className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-40"><ArrowUp className="size-4" /></button>
+            <Hint label="发送"><Button variant="bare" type="button" aria-label="发送" disabled={!canSend} onClick={() => void submit()} className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-40"><ArrowUp className="size-4" /></Button></Hint>
           )}
         </div>
       </div>

@@ -124,7 +124,7 @@ describe('TeamLibrariesSection', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: '从全部项目卸载' }));
     expect(mockUnmount).not.toHaveBeenCalled();
 
-    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '卸载' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '卸载' }));
     await waitFor(() => expect(mockUnmount).toHaveBeenCalledTimes(2));
     expect(mockUnmount).toHaveBeenCalledWith('lib_0123456789abcdef', 'p1');
     expect(mockUnmount).toHaveBeenCalledWith('lib_0123456789abcdef', 'p2');

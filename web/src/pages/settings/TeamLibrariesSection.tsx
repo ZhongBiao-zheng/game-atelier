@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import * as Popover from '@radix-ui/react-popover';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Copy, Folder, FolderOpen, FolderX, MoreHorizontal, Plus, RotateCw, Trash2, X } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
@@ -11,10 +11,10 @@ import { listCanvasProjects } from '@/api/canvas';
 import { ProfileRequiredError, fetchProfile, listTeamLibraries, mountTeamLibrary, rescanTeamLibrary, saveProfile, unmountTeamLibrary } from '@/api/teamLibraries';
 import type { TeamLibraryView } from '@/schema/teamLibrary';
 import { cn } from '@/lib/utils';
+import { Hint } from '@/components/ui/tooltip';
 
 export const SYNC_HINT = '目录由团队自己的 SVN / Git / 网盘同步；这里只登记本机路径';
 const BAD_PAYLOAD = '读取列表失败：返回格式不对';
-const iconButton = 'grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
 function scannedAt(value: string | null) {
   if (!value) return '尚未扫描';
@@ -66,15 +66,15 @@ function SignatureControl({ value, open, onOpenChange, onSaved }: {
       onOpenChange(false);
     } catch (cause) { setError(message(cause)); } finally { setSaving(false); }
   }
-  return <Popover.Root open={open} onOpenChange={onOpenChange}>
-    <Popover.Trigger asChild>
-      <button type="button"
+  return <Popover open={open} onOpenChange={onOpenChange}>
+    <PopoverTrigger asChild>
+      <Button variant="bare" type="button"
         className="flex h-9 items-center gap-2 rounded-md border border-input px-3 text-xs text-muted-foreground hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary data-[state=open]:border-primary/60">
         署名<span className={cn('text-sm', value && 'text-foreground')}>{value || '未设置'}</span>
-      </button>
-    </Popover.Trigger>
-    <Popover.Portal>
-      <Popover.Content align="end" sideOffset={6} aria-label="署名"
+      </Button>
+    </PopoverTrigger>
+
+      <PopoverContent align="end" sideOffset={6} aria-label="署名"
         className="popover-in z-50 w-64 space-y-2 rounded-xl border border-border bg-card p-3">
         <form autoComplete="off" className="flex gap-2" onSubmit={event => { event.preventDefault(); void save(); }}>
           <Input autoFocus value={draft} maxLength={40} placeholder="分享时显示的名字" aria-label="署名"
@@ -82,9 +82,9 @@ function SignatureControl({ value, open, onOpenChange, onSaved }: {
           <Button type="submit" disabled={saving || !draft.trim()}>保存</Button>
         </form>
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-      </Popover.Content>
-    </Popover.Portal>
-  </Popover.Root>;
+      </PopoverContent>
+
+  </Popover>;
 }
 
 function checkedList<T>(value: T[]): T[] {
@@ -199,17 +199,17 @@ export function TeamLibrariesSection() {
                   {library.reachable ? `${library.asset_count.toLocaleString()} 项 · ${scannedAt(library.scanned_at)}` : '路径不可达'}
                 </span>
               </div>
-              <p title={library.mount_path} className="truncate font-mono text-xs text-muted-foreground">{library.mount_path}</p>
+              <Hint label={library.mount_path}><p className="truncate font-mono text-xs text-muted-foreground">{library.mount_path}</p></Hint>
             </div>
             {library.reachable
-              ? <button type="button" aria-label="重新扫描" title="重新扫描" disabled={busy} className={iconButton}
+              ? <Hint label="重新扫描"><Button variant="ghost" size="icon" className="size-8" type="button" aria-label="重新扫描" disabled={busy}
                 onClick={() => void run(() => rescanTeamLibrary(library.library_id))}>
                 <RotateCw className="size-4" aria-hidden />
-              </button>
+              </Button></Hint>
               : <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => relocate(group)}>重新定位</Button>}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button type="button" aria-label="更多" disabled={busy} className={iconButton}><MoreHorizontal className="size-4" aria-hidden /></button>
+                <Button variant="ghost" size="icon" className="size-8" type="button" aria-label="更多" disabled={busy}><MoreHorizontal className="size-4" aria-hidden /></Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onSelect={() => void navigator.clipboard?.writeText(library.mount_path)}><Copy className="size-4 text-muted-foreground" aria-hidden />复制路径</DropdownMenuItem>
@@ -226,27 +226,27 @@ export function TeamLibrariesSection() {
             {group.projectIds.map(projectId => <span key={projectId}
               className="inline-flex h-7 items-center gap-1.5 rounded-sm bg-secondary pl-2.5 pr-1 text-xs">
               {nameOf(projectId)}
-              <button type="button" aria-label={`从 ${nameOf(projectId)} 卸载`} disabled={busy}
+              <Button variant="bare" type="button" aria-label={`从 ${nameOf(projectId)} 卸载`} disabled={busy}
                 onClick={() => toggleProject(group, projectId)}
                 className="grid size-5 place-items-center rounded-sm text-muted-foreground hover:bg-background/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                 <X className="size-3" aria-hidden />
-              </button>
+              </Button>
             </span>)}
-            <Popover.Root>
-              <Popover.Trigger asChild>
-                <button type="button" disabled={busy || !library.reachable}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="bare" type="button" disabled={busy || !library.reachable}
                   className="inline-flex h-7 items-center gap-1 rounded-sm border border-dashed border-input px-2.5 text-xs text-muted-foreground hover:bg-secondary/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary data-[state=open]:border-solid data-[state=open]:border-primary/60 data-[state=open]:text-foreground">
                   <Plus className="size-3" aria-hidden />项目
-                </button>
-              </Popover.Trigger>
-              <Popover.Portal>
-                <Popover.Content align="start" sideOffset={6} aria-label={`${library.name} 挂到的项目`}
+                </Button>
+              </PopoverTrigger>
+
+                <PopoverContent align="start" sideOffset={6} aria-label={`${library.name} 挂到的项目`}
                   className="popover-in z-50 w-72">
                   <ProjectChecklist className="rounded-xl" disabled={busy} selected={new Set(group.projectIds)} onToggle={id => toggleProject(group, id)}
                     projects={projects} />
-                </Popover.Content>
-              </Popover.Portal>
-            </Popover.Root>
+                </PopoverContent>
+
+            </Popover>
           </div>
         </li>;
       })}

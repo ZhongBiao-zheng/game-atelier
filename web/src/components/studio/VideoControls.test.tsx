@@ -42,7 +42,7 @@ describe('VideoControls（五合一汇总按钮）', () => {
     fireEvent.click(screen.getByRole('button', { name: '视频设置' }));
     expect(screen.getByText('视频水印')).toBeInTheDocument();
     const section = screen.getByText('视频水印').closest('section')!;
-    fireEvent.click(section.querySelectorAll('[role="option"]')[0]);
+    fireEvent.click(section.querySelectorAll('[role="radio"]')[0]);
     expect(onWatermarkChange).toHaveBeenCalledWith(true);
 
     rerender(<VideoControls {...setupProps()} caps={{ ...seedance, supportsWatermark: false }} />);
@@ -67,7 +67,7 @@ describe('VideoControls（五合一汇总按钮）', () => {
   it('emits onModeChange when picking 全能参考', () => {
     const props = setup();
     fireEvent.click(screen.getByLabelText('视频设置'));
-    fireEvent.click(screen.getByRole('option', { name: '全能参考' }));
+    fireEvent.click(screen.getByRole('radio', { name: '全能参考' }));
     expect(props.onModeChange).toHaveBeenCalledWith('omni');
   });
 
@@ -75,20 +75,20 @@ describe('VideoControls（五合一汇总按钮）', () => {
     // 2.0-fast 官方无 1080p，分辨率断言用非 fast 的 seedance-2.0 caps。
     const props = setup({ caps: videoControlCaps('seedance-2.0') });
     fireEvent.click(screen.getByLabelText('视频设置'));
-    fireEvent.click(screen.getByRole('option', { name: '10s' }));
+    fireEvent.click(screen.getByRole('radio', { name: '10s' }));
     expect(props.onDurationChange).toHaveBeenCalledWith(10);
-    fireEvent.click(screen.getByRole('option', { name: '1080p' }));
+    fireEvent.click(screen.getByRole('radio', { name: '1080p' }));
     expect(props.onResolutionChange).toHaveBeenCalledWith('1080p');
-    fireEvent.click(screen.getByRole('option', { name: /9:16/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /9:16/ }));
     expect(props.onRatioChange).toHaveBeenCalledWith('9:16');
   });
 
   it('seedance 2.0 panel exposes the official 4-15s duration range and adaptive ratio', () => {
     setup({ caps: videoControlCaps('seedance-2.0') });
     fireEvent.click(screen.getByLabelText('视频设置'));
-    expect(screen.getByRole('option', { name: '4s' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '15s' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: /自适应/ })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '4s' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '15s' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /自适应/ })).toBeInTheDocument();
   });
 
   it('hides ratio/duration sections when the family has no such params (happyhorse video-edit)', () => {
@@ -102,7 +102,7 @@ describe('VideoControls（五合一汇总按钮）', () => {
   it('toggles generate-audio via 开启/关闭', () => {
     const props = setup({ generateAudio: false });
     fireEvent.click(screen.getByLabelText('视频设置'));
-    fireEvent.click(screen.getByRole('option', { name: '开启' }));
+    fireEvent.click(screen.getByRole('radio', { name: '开启' }));
     expect(props.onGenerateAudioChange).toHaveBeenCalledWith(true);
   });
 

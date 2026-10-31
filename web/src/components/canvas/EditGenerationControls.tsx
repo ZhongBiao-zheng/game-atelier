@@ -4,6 +4,7 @@ import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
 import { MJ_IMAGES_PER_TASK, QUALITY_LABELS, type ImageControlCaps, type Quality } from '@/lib/imageControlCaps';
 import { CanvasModelPicker, OptionTrack } from './CanvasGenerationControls';
 import type { EditModelChoice } from './imageEditGeometry';
+import { Button } from '@/components/ui/button';
 
 const TIERS = ['1K', '2K', '4K'];
 const TIER_SUFFIX = /\s*[·\-–]?\s*[24]K$/i;
@@ -25,9 +26,9 @@ function OptionChip({ label, summary, values, selected, getLabel, onSelect, port
   const anchorRef = useRef<HTMLDivElement>(null);
   return (
     <div ref={anchorRef} className="relative min-w-0">
-      <button type="button" aria-label={label} aria-expanded={open} onClick={() => setOpen(value => !value)} className={chipClass}>
+      <Button variant="bare" type="button" aria-label={label} aria-expanded={open} onClick={() => setOpen(value => !value)} className={chipClass}>
         <span className="truncate">{summary}</span>
-      </button>
+      </Button>
       <ToolbarPopover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} autoFocus direction="up"
         portalContainerRef={portalContainerRef} className="w-64 rounded-xl border border-border bg-card p-3">
         <OptionTrack label={label} values={values} selected={selected} getLabel={value => getLabel(String(value))}

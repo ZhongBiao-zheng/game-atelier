@@ -11,8 +11,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { SwapLabel } from '@/components/ui/swap-label';
-import { Select } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
+import { Label } from '@/components/ui/label';
 
 
 export interface CanvasAngleParams {
@@ -103,11 +104,14 @@ export function CanvasAngleDialog({
                 <Button type="button" size="sm" variant={params.wideAngle ? 'secondary' : 'ghost'} onClick={() => update('wideAngle', true)}>广角</Button>
               </div>
             </fieldset>
-            <label className="block text-xs text-muted-foreground">候选数
-              <Select variant="bare" aria-label="多角度候选数" disabled={busy} value={params.requestedCount} onChange={event => update('requestedCount', Number(event.target.value))} className="canvas-input mt-1">
-                {[1, 2, 3, 4].map(value => <option key={value} value={value}>{value} 张</option>)}
+            <Label className="block text-xs text-muted-foreground">候选数
+              <Select disabled={busy} value={String(params.requestedCount)} onValueChange={value => update('requestedCount', Number(value))}>
+                <SelectTrigger aria-label="多角度候选数" className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[1, 2, 3, 4].map(value => <SelectItem key={value} value={String(value)}>{value} 张</SelectItem>)}
+                </SelectContent>
               </Select>
-            </label>
+            </Label>
             {error && <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive" role="alert">{error}</p>}
           </div>
         </div>
@@ -143,11 +147,11 @@ function AngleSlider({
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="grid grid-cols-[4rem_1fr_4rem] items-center gap-3 text-xs text-muted-foreground">
+    <Label className="grid grid-cols-[4rem_1fr_4rem] items-center gap-3 text-xs text-muted-foreground">
       {label}
-      <Slider aria-label={label} min={min} max={max} step={step} value={value} disabled={disabled} onChange={event => onChange(Number(event.target.value))} className="accent-primary" />
+      <Slider aria-label={label} min={min} max={max} step={step} value={[value]} disabled={disabled} onValueChange={([next]) => onChange(next)} />
       <span className="text-right text-foreground">{Number.isInteger(value) ? value : value.toFixed(1)}{suffix}</span>
-    </label>
+    </Label>
   );
 }
 

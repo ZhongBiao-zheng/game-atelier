@@ -28,9 +28,10 @@ import {
   normalizeAudioVoice,
 } from '@/lib/audioGeneration';
 import type { JobParams } from '@/schema/jobs';
-import { SelectionHighlight } from '@/components/ui/selection-highlight';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@/components/ui/button';
+import { Segmented, SegmentedItem } from '@/components/ui/segmented';
 
 const REASONING_OPTIONS = ['auto', 'low', 'medium', 'high', 'xhigh'] as const;
 const REASONING_LABELS: Record<(typeof REASONING_OPTIONS)[number], string> = {
@@ -78,15 +79,15 @@ export function CanvasModelPicker({ choices, alias, model, onSelect, params = {}
   const buttonClass = 'flex h-9 w-full min-w-0 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
   return <div className="flex min-w-0 flex-1 basis-64 flex-wrap gap-1.5">
     <div ref={providerRef} className="min-w-0 flex-1 basis-24">
-      <button type="button" aria-label="选择生成供应商" aria-expanded={open === 'provider'}
+      <Button variant="bare" type="button" aria-label="选择生成供应商" aria-expanded={open === 'provider'}
         onClick={() => setOpen(open === 'provider' ? null : 'provider')} className={buttonClass}>
         <ProviderBrandIcon provider={provider} size={14} />
         <span className="truncate">{provider ? groupLabel(provider) : '供应商'}</span>
-      </button>
+      </Button>
       <ToolbarPopover open={open === 'provider'} onClose={() => setOpen(null)} anchorRef={providerRef}
         autoFocus direction={menuDirection} portalContainerRef={portalContainerRef} maxHeight={400}
         role="listbox" aria-label="选择生成供应商列表" className="w-80 rounded-xl border border-border bg-card p-2">
-        {providers.map(key => <button key={key.alias} type="button" role="option"
+        {providers.map(key => <Button variant="bare" key={key.alias} type="button" role="option"
           aria-selected={key.alias === selectedAlias}
           onClick={() => {
             const available = sortModels(choices.filter(choice => choice.key.alias === key.alias)
@@ -98,15 +99,15 @@ export function CanvasModelPicker({ choices, alias, model, onSelect, params = {}
           }} className="flex w-full items-center gap-3 rounded-md px-3 py-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/50">
           <ProviderBrandIcon provider={key} />
           <span className="min-w-0 truncate">{groupLabel(key)}</span>
-        </button>)}
+        </Button>)}
       </ToolbarPopover>
     </div>
     <div ref={modelRef} className="min-w-0 flex-1 basis-32">
-      <button type="button" aria-label="选择生成模型" aria-expanded={open === 'model'}
+      <Button variant="bare" type="button" aria-label="选择生成模型" aria-expanded={open === 'model'}
         onClick={() => setOpen(open === 'model' ? null : 'model')} className={buttonClass}>
         <ModelBrandIcon brand={modelCatalog(selected?.model.id ?? '')?.brand} size={14} />
         <span className="truncate">{selected ? modelDisplayName(selected.model) : '选择模型'}</span>
-      </button>
+      </Button>
       <ToolbarPopover open={open === 'model'} onClose={() => setOpen(null)} anchorRef={modelRef}
         autoFocus direction={menuDirection} portalContainerRef={portalContainerRef}
         maxHeight={window.innerHeight * (portalContainerRef ? 0.45 : 0.6)}
@@ -154,7 +155,7 @@ export function CanvasImageSettings({
 
   return (
     <div ref={anchorRef} className="relative min-w-0">
-      <button
+      <Button variant="bare"
         type="button"
         aria-label="图片设置"
         aria-expanded={open}
@@ -163,7 +164,7 @@ export function CanvasImageSettings({
       >
         <Settings2 className="size-3.5 shrink-0" aria-hidden="true" />
         <span className="truncate">{summary}</span>
-      </button>
+      </Button>
       <ToolbarPopover
         open={open}
         onClose={() => setOpen(false)}
@@ -241,7 +242,7 @@ export function CanvasTextSettings({
     : `${TEXT_TEMPERATURE_LABELS[temperature] ?? temperature} · ${count} 个`;
   return (
     <div ref={anchorRef} className="relative min-w-0">
-      <button
+      <Button variant="bare"
         type="button"
         aria-label="文本设置"
         aria-expanded={open}
@@ -250,7 +251,7 @@ export function CanvasTextSettings({
       >
         <Settings2 className="size-3.5 shrink-0" aria-hidden="true" />
         <span className="truncate">{summary}</span>
-      </button>
+      </Button>
       <ToolbarPopover
         open={open}
         onClose={() => setOpen(false)}
@@ -381,7 +382,7 @@ export function CanvasAudioSettings({
 
   return (
     <div ref={anchorRef} className="relative min-w-0">
-      <button
+      <Button variant="bare"
         type="button"
         aria-label="音频设置"
         aria-expanded={open}
@@ -392,7 +393,7 @@ export function CanvasAudioSettings({
         <span className="truncate">
           {audioVoiceLabel(voice)} · {audioFormatLabel(format)} · {audioSpeedLabel(speed)}
         </span>
-      </button>
+      </Button>
       <ToolbarPopover
         open={open}
         onClose={close}
@@ -431,7 +432,7 @@ export function CanvasAudioSettings({
               getLabel={value => audioSpeedLabel(value)}
               onSelect={value => onPatch({ speed: value })}
             />
-            <Input variant="bare"
+            <Input
               type="number"
               aria-label="自定义语速"
               min={0.25}
@@ -443,18 +444,18 @@ export function CanvasAudioSettings({
               onKeyDown={event => {
                 if (event.key === 'Enter') event.currentTarget.blur();
               }}
-              className="mt-2 h-9 w-full rounded-md border border-input bg-transparent px-3 text-center text-sm text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="mt-2 w-full text-center"
             />
           </SettingsSection>
           <SettingsSection title="朗读指令">
-            <Textarea variant="bare"
+            <Textarea
               aria-label="朗读指令"
               rows={3}
               value={instructionsDraft}
               placeholder="例如：语气温柔、语速平稳，句尾稍作停顿"
               onChange={event => setInstructionsDraft(event.target.value)}
               onBlur={commitInstructions}
-              className="w-full resize-none rounded-md border border-input bg-transparent px-3 py-2 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+              className="w-full resize-none leading-relaxed field-sizing-fixed"
             />
           </SettingsSection>
         </div>
@@ -486,27 +487,15 @@ export function OptionTrack<T extends string | number>({
   onSelect: (value: T) => void;
 }) {
   return (
-    <div
-      role="listbox"
-      aria-label={label}
-      className="relative isolate grid auto-cols-fr grid-flow-col rounded-lg bg-popover p-0.5"
-    >
-      <SelectionHighlight />
+    <Segmented aria-label={label} className="grid auto-cols-fr grid-flow-col rounded-lg bg-popover p-0.5">
       {values.map(value => (
-        <button
-          key={value}
-          type="button"
-          role="option"
-          aria-selected={selected === String(value)}
-          onClick={() => {
+        <SegmentedItem key={value} value={String(value)} selected={selected === String(value)} onSelect={() => {
             if (selected !== String(value)) onSelect(value);
-          }}
-          className="h-8 rounded-md px-2 text-center text-sm transition-colors hover:bg-secondary/60"
-        >
+          }} className="h-8 rounded-md px-2 text-center text-sm transition-colors hover:bg-secondary/60">
           {getLabel(value)}
-        </button>
+        </SegmentedItem>
       ))}
-    </div>
+    </Segmented>
   );
 }
 
@@ -522,23 +511,15 @@ function OptionGrid<T extends string>({
   onSelect: (value: T) => void;
 }) {
   return (
-    <div role="listbox" aria-label={label} className="relative isolate grid grid-cols-3 gap-y-1 rounded-lg bg-popover p-1">
-      <SelectionHighlight />
+    <Segmented aria-label={label} className="grid grid-cols-3 gap-y-1 rounded-lg bg-popover p-1">
       {values.map(item => (
-        <button
-          key={item.value}
-          type="button"
-          role="option"
-          aria-selected={selected === item.value}
-          onClick={() => {
+        <SegmentedItem key={item.value} value={String(item.value)} selected={selected === item.value} onSelect={() => {
             if (selected !== item.value) onSelect(item.value);
-          }}
-          className="h-8 rounded-md px-2 text-center text-sm transition-colors hover:bg-secondary/60"
-        >
+          }} className="h-8 rounded-md px-2 text-center text-sm transition-colors hover:bg-secondary/60">
           {item.label}
-        </button>
+        </SegmentedItem>
       ))}
-    </div>
+    </Segmented>
   );
 }
 

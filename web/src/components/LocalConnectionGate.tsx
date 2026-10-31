@@ -3,6 +3,7 @@ import { useLocation } from 'wouter';
 import { localConnection, useConnectionState } from '@/api/connection';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import { Hint } from '@/components/ui/tooltip';
 
 export function LocalConnectionGate({ children }: { children: ReactNode }) {
   const [location] = useLocation();
@@ -109,9 +110,8 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
       {/* 只读是常驻状态而非故障：顶栏字标右侧的胶囊，不压导航。它必须留在 fieldset 之外
           （disabled fieldset 会连带禁用里面的按钮），所以用 fixed 对齐顶栏而不是渲染进顶栏。
           画布编辑器没有顶栏，仍居中。 */}
-      {activated && ready && viewOnly && <div
+      {activated && ready && viewOnly && <Hint label="另一页面正在编辑"><div
         data-connection-controls
-        title="另一页面正在编辑"
         className={`fixed z-50 flex h-10 items-center gap-2.5 rounded-full border border-border bg-glass pl-1.5 pr-1.5 text-sm backdrop-blur-glass sm:pl-3.5 ${immersiveCanvas ? 'inset-x-3 top-3 mx-auto w-fit' : 'left-20 top-2 sm:left-24 lg:left-32 lg:top-5'}`}
         style={{ marginTop: 'env(safe-area-inset-top)' }}>
         <span aria-hidden className="hidden size-1.5 rounded-full bg-status-running sm:block" />
@@ -120,7 +120,7 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
         <Button variant="secondary" size="sm" aria-label="接管编辑" className="h-7 rounded-full px-3 text-xs" onClick={() => setConfirmTakeover(true)}>
           <span className="sm:hidden">接管</span><span className="hidden sm:inline">接管编辑</span>
         </Button>
-      </div>}
+      </div></Hint>}
       <Dialog open={confirmTakeover} onOpenChange={setConfirmTakeover}>
         <DialogContent data-connection-controls onOpenAutoFocus={event => { event.preventDefault(); cancelRef.current?.focus(); }}>
           <DialogTitle>接管编辑？</DialogTitle>

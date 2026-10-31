@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { openSelect } from '@/test/select';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TeamShareDialog, type TeamShareDialogRequest } from './TeamShareDialog';
@@ -110,7 +111,7 @@ describe('TeamShareDialog', () => {
     resolveProfile({ display_name: '老王' });
 
     const select = await screen.findByLabelText('团队库');
-    await waitFor(() => expect(select).toHaveValue('lib_a'));
+    await waitFor(() => expect(select).toHaveTextContent('美术共享盘'));
     expect(screen.getByLabelText('标题')).toHaveValue('夜景');
     expect(screen.queryByLabelText('显示名')).not.toBeInTheDocument();
   });
@@ -124,20 +125,20 @@ describe('TeamShareDialog', () => {
     ]);
     renderDialog();
 
+    openSelect(await screen.findByLabelText('团队库'));
     expect(await screen.findByRole('option', { name: '策划盘' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: '美术共享盘' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: '美术盘（画布 2）' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: '断开的盘' })).not.toBeInTheDocument();
-    expect(screen.getByLabelText('团队库')).toHaveValue('');
-    expect(screen.getByRole('button', { name: '分享' })).toBeDisabled();
-
-    fireEvent.change(screen.getByLabelText('团队库'), { target: { value: 'lib_b' } });
-    expect(screen.getByRole('button', { name: '分享' })).toBeEnabled();
+    expect(screen.getByLabelText('团队库')).toHaveTextContent('选择团队库…');
+    expect(screen.getByRole('button', { name: '分享', hidden: true })).toBeDisabled();
+    fireEvent.click(screen.getByRole('option', { name: '策划盘' }));
+    expect(await screen.findByRole('button', { name: '分享' })).toBeEnabled();
   });
 
   it('提交标题与标签，成功后回调 onShared 并关闭', async () => {
     const { onShared, onClose } = renderDialog();
-    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveValue('lib_a'));
+    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveTextContent('美术共享盘'));
 
     fireEvent.change(screen.getByLabelText('标题'), { target: { value: '  城市夜景  ' } });
     const tagInput = screen.getByPlaceholderText('输入标签，按 Enter 添加');
@@ -162,7 +163,7 @@ describe('TeamShareDialog', () => {
     const { onShared } = renderDialog();
 
     const nameInput = await screen.findByLabelText('显示名');
-    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveValue('lib_a'));
+    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveTextContent('美术共享盘'));
     expect(screen.getByRole('button', { name: '分享' })).toBeDisabled();
     fireEvent.change(nameInput, { target: { value: ' 小李 ' } });
     fireEvent.click(screen.getByRole('button', { name: '分享' }));
@@ -188,13 +189,13 @@ describe('TeamShareDialog', () => {
       .mockRejectedValueOnce(new TeamRefsTooLargeError(300 * 1024 * 1024))
       .mockResolvedValueOnce(entry);
     const { onShared } = renderDialog();
-    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveValue('lib_a'));
+    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveTextContent('美术共享盘'));
 
     fireEvent.click(screen.getByRole('button', { name: '分享' }));
     expect(await screen.findByText('参考内容共 300 MB')).toBeInTheDocument();
     expect(onShared).not.toHaveBeenCalled();
 
-    const confirm = screen.getByRole('dialog', { name: '参考内容较大' });
+    const confirm = screen.getByRole('alertdialog', { name: '参考内容较大' });
     fireEvent.click(within(confirm).getByRole('button', { name: '分享' }));
     await waitFor(() => expect(onShared).toHaveBeenCalledWith(entry, '美术共享盘'));
     expect(mockShare).toHaveBeenLastCalledWith('lib_a', {
@@ -220,7 +221,7 @@ describe('TeamShareDialog', () => {
   it('其他错误显示在对话框内且不关闭', async () => {
     mockShare.mockRejectedValue(new Error('分享到团队库失败：团队库不可达'));
     const { onShared, onClose } = renderDialog();
-    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveValue('lib_a'));
+    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveTextContent('美术共享盘'));
 
     fireEvent.click(screen.getByRole('button', { name: '分享' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('分享到团队库失败：团队库不可达');
@@ -236,14 +237,15 @@ describe('TeamShareDialog', () => {
     renderDialog();
 
     const select = await screen.findByLabelText('团队库');
-    await waitFor(() => expect(select).toHaveValue('lib_a'));
+    await waitFor(() => expect(select).toHaveTextContent('可达的挂载'));
+    openSelect(select);
     expect(screen.getByRole('option', { name: '可达的挂载' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: '断开的挂载' })).not.toBeInTheDocument();
   });
 
   it('标题限长 120，标签超过 20 个时禁用分享', async () => {
     renderDialog();
-    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveValue('lib_a'));
+    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveTextContent('美术共享盘'));
     expect(screen.getByLabelText('标题')).toHaveAttribute('maxLength', '120');
 
     const tagInput = screen.getByPlaceholderText('输入标签，按 Enter 添加');
@@ -261,7 +263,7 @@ describe('TeamShareDialog', () => {
     let resolveShare: (value: TeamLibraryIndexEntry) => void = () => {};
     mockShare.mockReturnValue(new Promise(resolve => { resolveShare = resolve; }));
     const { onShared } = renderDialog();
-    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveValue('lib_a'));
+    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveTextContent('美术共享盘'));
 
     const button = screen.getByRole('button', { name: '分享' });
     fireEvent.click(button);
@@ -274,7 +276,7 @@ describe('TeamShareDialog', () => {
   it('分享时报需要显示名，重新露出显示名输入并显示错误', async () => {
     mockShare.mockRejectedValueOnce(new ProfileRequiredError());
     const { onShared, onClose } = renderDialog();
-    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveValue('lib_a'));
+    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveTextContent('美术共享盘'));
     expect(screen.queryByLabelText('显示名')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '分享' }));
@@ -290,7 +292,7 @@ describe('TeamShareDialog', () => {
     renderDialog();
 
     fireEvent.change(await screen.findByLabelText('显示名'), { target: { value: '小李' } });
-    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveValue('lib_a'));
+    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveTextContent('美术共享盘'));
     fireEvent.click(screen.getByRole('button', { name: '分享' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('保存显示名失败：磁盘只读');
@@ -301,10 +303,10 @@ describe('TeamShareDialog', () => {
   it('参考内容过大时点取消不重发，分享对话框仍开着', async () => {
     mockShare.mockRejectedValueOnce(new TeamRefsTooLargeError(300 * 1024 * 1024));
     const { onShared, onClose } = renderDialog();
-    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveValue('lib_a'));
+    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveTextContent('美术共享盘'));
 
     fireEvent.click(screen.getByRole('button', { name: '分享' }));
-    const confirm = await screen.findByRole('dialog', { name: '参考内容较大' });
+    const confirm = await screen.findByRole('alertdialog', { name: '参考内容较大' });
     fireEvent.click(within(confirm).getByRole('button', { name: '取消' }));
 
     await waitFor(() => {
@@ -327,9 +329,9 @@ describe('TeamShareDialog', () => {
     rerender(<TeamShareDialog request={{ ...request, defaultTitle: '第二张' }} {...props} />);
     resolveFirst([view({ name: '迟到的库' })]);
 
-    expect(await screen.findByRole('option', { name: '正在读取…' })).toBeInTheDocument();
+    expect(await screen.findByLabelText('团队库')).toHaveTextContent('正在读取…');
     await waitFor(() => expect(screen.getByLabelText('标题')).toHaveValue('第二张'));
-    expect(screen.queryByRole('option', { name: '迟到的库' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('团队库')).not.toHaveTextContent('迟到的库');
   });
 
   it('传了画布项目时只拉该画布的库，只有一个库时默认选中', async () => {
@@ -338,7 +340,7 @@ describe('TeamShareDialog', () => {
 
     expect(mockList).toHaveBeenCalledWith('canvas-7');
     const select = await screen.findByLabelText('团队库');
-    await waitFor(() => expect(select).toHaveValue('lib_a'));
+    await waitFor(() => expect(select).toHaveTextContent('美术共享盘'));
   });
 
   it('画布上没有挂库时显示没有可用的团队库', async () => {

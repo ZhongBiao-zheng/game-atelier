@@ -9,6 +9,9 @@ import {
   teamAssetActionSearch,
 } from '@/lib/teamAssetActions';
 import type { TeamLibraryChangeEvent } from '@/schema/teamLibrary';
+import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
+import { toast as showToast, Toaster } from '@/components/ui/sonner';
 
 /** AppShell 持有句柄：SSE `team-library-changed` 交给 notify，SSE（重）连上时 refreshProfile。 */
 export interface TeamShareReminderHandle {
@@ -23,6 +26,9 @@ const MERGE_THRESHOLD = 3;
 const MAX_SINGLE_TOASTS = 3;
 const VISIBLE_MS = 8000;
 const THUMB_WIDTH = 96;
+const TOASTER_ID = 'team-reminder';
+/** sonner 的提示是模块级状态：id 带上实例序号，重新挂载时不会撞上上一个实例留下的同名提示。 */
+let instanceSeq = 0;
 
 type SingleToast = { id: number; type: 'single'; event: TeamLibraryChangeEvent; at: number };
 type MergedToast = { id: number; type: 'merged'; count: number };
@@ -71,6 +77,8 @@ export const TeamShareReminder = forwardRef<TeamShareReminderHandle>(function Te
   const timersRef = useRef(new Map<number, ReturnType<typeof setTimeout>>());
   const burstRef = useRef<number[]>([]);
   const nextIdRef = useRef(0);
+  const [instance] = useState(() => ++instanceSeq);
+  const toastKey = useCallback((id: number) => `team-reminder-${instance}-${id}`, [instance]);
   const sessionRemindedRef = useRef(new Set<string>());
   const displayNameRef = useRef<string | null>(null);
   const profileRequestRef = useRef(0);
@@ -166,49 +174,62 @@ export const TeamShareReminder = forwardRef<TeamShareReminderHandle>(function Te
     dismiss(toast.id);
   };
 
+  // 队列（合并、限条数、计时）由这里管，sonner 只负责呈现：列表变了就同步过去。
+  const shownRef = useRef(new Set<number>());
+  useEffect(() => {
+    const kept = new Set(toasts.map(item => item.id));
+    for (const id of shownRef.current) {
+      if (kept.has(id)) continue;
+      shownRef.current.delete(id);
+      showToast.dismiss(toastKey(id));
+    }
+    for (const item of toasts) {
+      shownRef.current.add(item.id);
+      showToast.custom(() => <ReminderCard toast={item} onAction={runAction} onClose={() => dismiss(item.id)} />, {
+        id: toastKey(item.id), toasterId: TOASTER_ID, duration: Infinity, unstyled: true,
+        onDismiss: () => dismiss(item.id),
+      });
+    }
+  });
+
+  // sonner 的提示存在模块级状态里：卸载时一并撤掉，否则重新挂载会把旧提示带回来。
+  useEffect(() => {
+    const shown = shownRef.current;
+    return () => {
+      for (const id of shown) showToast.dismiss(toastKey(id));
+      shown.clear();
+    };
+  }, [toastKey]);
+
+  // 右上角、顶栏（lg:h-20）下方：避开 Studio 底部输入壳与画布右下的批量结果 / MiniMap。
+  return <Toaster id={TOASTER_ID} position="top-right" offset={{ top: 96, right: 16 }} gap={8} expand visibleToasts={MAX_SINGLE_TOASTS + 1} />;
+});
+
+function ReminderCard({ toast, onAction, onClose }: {
+  toast: Toast; onAction: (toast: SingleToast) => void; onClose: () => void;
+}) {
   return (
-    // 右上角、顶栏（lg:h-20）下方：避开 Studio 底部输入壳与画布右下的批量结果 / MiniMap。
-    <div
-      role="status"
-      aria-live="polite"
-      className="pointer-events-none fixed top-24 right-4 z-30 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2"
-    >
-      {toasts.map(toast => (
-        <div
-          key={toast.id}
-          className="pointer-events-auto flex items-center gap-3 rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow"
-        >
-          {toast.type === 'single' ? (
-            <>
-              <ReminderThumb event={toast.event} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs text-muted-foreground">{toast.event.author}</p>
-                {toast.event.title && <p className="truncate text-sm" title={toast.event.title}>{toast.event.title}</p>}
-              </div>
-              <button
-                type="button"
-                onClick={() => runAction(toast)}
-                className="shrink-0 rounded-md bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                {toast.event.kind === 'generation' ? '复刻' : '看看'}
-              </button>
-            </>
-          ) : (
-            <p className="min-w-0 flex-1 truncate text-sm">团队库新增 {toast.count} 条</p>
-          )}
-          <button
-            type="button"
-            aria-label="关闭"
-            onClick={() => dismiss(toast.id)}
-            className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <X size={14} aria-hidden />
-          </button>
-        </div>
-      ))}
+    <div className="flex w-80 max-w-[calc(100vw-2rem)] items-center gap-3 rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow">
+      {toast.type === 'single' ? (
+        <>
+          <ReminderThumb event={toast.event} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs text-muted-foreground">{toast.event.author}</p>
+            {toast.event.title && <Hint label={toast.event.title}><p className="truncate text-sm">{toast.event.title}</p></Hint>}
+          </div>
+          <Button variant="secondary" size="sm" className="shrink-0" onClick={() => onAction(toast)}>
+            {toast.event.kind === 'generation' ? '复刻' : '看看'}
+          </Button>
+        </>
+      ) : (
+        <p className="min-w-0 flex-1 truncate text-sm">团队库新增 {toast.count} 条</p>
+      )}
+      <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose} className="size-6 shrink-0 rounded-full text-muted-foreground">
+        <X aria-hidden />
+      </Button>
     </div>
   );
-});
+}
 
 function ReminderThumb({ event }: { event: TeamLibraryChangeEvent }) {
   const [broken, setBroken] = useState(false);

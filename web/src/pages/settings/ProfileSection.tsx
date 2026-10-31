@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { fetchProfile, saveProfile } from '@/api/teamLibraries';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 
 /** 显示名：分享到团队库的资产用它署名。 */
 export function ProfileSection() {
@@ -34,12 +36,11 @@ export function ProfileSection() {
     <h2 id="profile-title" className="px-1 text-xs font-normal text-muted-foreground">个人</h2>
     <div className="rounded-xl border border-border bg-card px-4.5 py-3.5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label htmlFor="profile-name" className="text-sm">显示名 <span className="ml-2 text-xs text-muted-foreground">分享到团队库时署名</span></label>
+        <Label htmlFor="profile-name" className="text-sm">显示名 <span className="ml-2 text-xs text-muted-foreground">分享到团队库时署名</span></Label>
         <div className="flex min-w-0 items-center gap-2">
           <Input id="profile-name" aria-label="显示名" value={name} maxLength={40} disabled={savedName === null || saving}
-            onChange={event => setName(event.target.value)} className="h-8 w-50 min-w-0" />
-          {changed && <button type="button" onClick={() => void save()} disabled={saving || !name.trim()}
-            className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{saving ? '保存中…' : '保存'}</button>}
+            onChange={event => setName(event.target.value)} className="w-50 min-w-0" />
+          {changed && <Button type="button" size="sm" className="shrink-0" onClick={() => void save()} disabled={saving || !name.trim()}>{saving ? '保存中…' : '保存'}</Button>}
         </div>
       </div>
       {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}

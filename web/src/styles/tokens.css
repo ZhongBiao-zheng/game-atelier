@@ -133,8 +133,6 @@
   --ease-atelier-out: cubic-bezier(0.215, 0.61, 0.355, 1); /* = GSAP power2.out */
   --ease-atelier-in: cubic-bezier(0.55, 0.055, 0.675, 0.19); /* = GSAP power2.in */
 
-  /* 原生 select 的展开箭头：data URI 里拿不到 CSS 变量，描边色只能写死成 muted-foreground 的值 */
-  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238E8E93' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 /* Atelier — clean light palette（浅色主题，<html class="light"> 时生效）
@@ -189,7 +187,6 @@
   --status-done: #4F7C3E;
   --status-failed: #B04A4A;
 
-  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23595959' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 @layer utilities {
@@ -385,57 +382,6 @@
     border-radius: 999px;
   }
 
-  /* 画布视频进度条：无滑钮，只显示已播部分（飙哥 2026-09-14）。填充量由 tsx 写 --progress
-     （0–100%），轨底 --secondary、已播 --primary；Firefox 直接用 ::-moz-range-progress。
-     thumb 不能删（删了拖不动），设成 0×0 透明保留拖拽与键盘。 */
-  .range-progress {
-    -webkit-appearance: none;
-    appearance: none;
-    height: 14px;
-    background: transparent;
-    cursor: pointer;
-  }
-  .range-progress::-webkit-slider-runnable-track {
-    height: 4px;
-    border-radius: 999px;
-    background: linear-gradient(
-      to right,
-      var(--primary) 0,
-      var(--primary) var(--progress, 0%),
-      var(--secondary) var(--progress, 0%),
-      var(--secondary) 100%
-    );
-  }
-  .range-progress::-moz-range-track {
-    height: 4px;
-    border-radius: 999px;
-    background: var(--secondary);
-  }
-  .range-progress::-moz-range-progress {
-    height: 4px;
-    border-radius: 999px;
-    background: var(--primary);
-  }
-  .range-progress::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 0;
-    height: 0;
-    border: 0;
-    background: transparent;
-  }
-  .range-progress::-moz-range-thumb {
-    width: 0;
-    height: 0;
-    border: 0;
-    background: transparent;
-  }
-  .range-progress:focus-visible {
-    outline: 2px solid var(--ring);
-    outline-offset: 3px;
-    border-radius: 999px;
-  }
-
   .canvas-input {
     width: 100%;
     border: 1px solid var(--input);
@@ -451,9 +397,6 @@
     border-color: var(--ring);
     outline: 1px solid var(--ring);
     outline-offset: -1px;
-  }
-  .canvas-library-search-input {
-    padding-left: 2.25rem;
   }
 
   .canvas-editor-top {
@@ -785,17 +728,6 @@
 
 @layer base {
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  /* 原生 select 统一外观：去掉各平台自带的箭头与底色，换成发丝箭头。
-     右内边距用 !important——各处 select 都带 px-* 工具类，而 base 层的普通声明赢不了 utilities 层。 */
-  select {
-    appearance: none;
-    background-image: var(--select-chevron);
-    background-repeat: no-repeat;
-    background-position: right 0.625rem center;
-    background-size: 0.875rem;
-    padding-inline-end: 2rem !important;
-    cursor: pointer;
-  }
   html, body, #root { height: 100%; }
   body {
     @apply text-foreground;
@@ -899,7 +831,7 @@
 @media (prefers-reduced-motion: reduce) {
   .accent-swatch::before { animation: none; transition: none; }
 }
-.accent-preset[aria-pressed='true'] { border-color: var(--preset-primary); color: var(--foreground); }
+.accent-preset[data-state='on'] { border-color: var(--preset-primary); color: var(--foreground); }
 .accent-pill { background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary); }
 .type-image { background: color-mix(in srgb, var(--brand-2) 14%, transparent); color: var(--brand-2); }
 .type-video { background: color-mix(in srgb, var(--brand-3) 14%, transparent); color: var(--brand-3); }
