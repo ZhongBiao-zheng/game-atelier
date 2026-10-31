@@ -7,7 +7,7 @@ import { LanSharingSection } from './LanSharingSection';
 vi.mock('@/api/http', () => ({ requestJson: vi.fn() }));
 afterEach(() => vi.unstubAllGlobals());
 vi.mock('@/hooks/useSSE', () => ({ useSSE: vi.fn() }));
-vi.mock('@/api/gateway', () => ({ adminBase: (alias: string) => `/api/gateway/providers/${alias}/admin`, fetchGateway: vi.fn(), fetchGatewayOptions: vi.fn(), fetchGatewayService: vi.fn(),
+vi.mock('@/api/gateway', () => ({ GATEWAY_TOKEN_LENGTH: 47, adminBase: (alias: string) => `/api/gateway/providers/${alias}/admin`, fetchGateway: vi.fn(), fetchGatewayOptions: vi.fn(), fetchGatewayService: vi.fn(),
   fetchGatewayTasks: vi.fn(), fetchGatewayMembers: vi.fn(), createGatewayKey: vi.fn(), updateGatewayKey: vi.fn(),
   revealGatewayKey: vi.fn(), revokeGatewayKey: vi.fn(), updateGateway: vi.fn(), gatewayOutputUrl: vi.fn() }));
 const key: api.GatewayKey = { id: 'k1', name: '小王', limits: [], allowed_models: null, allowed_aliases: null,
@@ -192,6 +192,10 @@ describe('member token controls', () => {
     render(<LanSharingSection />);
     const reveal = await screen.findByRole('button', { name: '查看 小王 的密钥' });
     expect(api.revealGatewayKey).not.toHaveBeenCalled();
+    const hiddenToken = screen.getByText(`atg_${'•'.repeat(43)}`);
+    expect(hiddenToken.textContent).toHaveLength(47);
+    expect(hiddenToken.closest('td')).not.toBe(screen.getByText('小王').closest('td'));
+    expect(screen.getByRole('columnheader', { name: '密钥' })).toBeInTheDocument();
     fireEvent.click(reveal);
     expect(await screen.findByText('atg_test_only')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '隐藏 小王 的密钥' }));

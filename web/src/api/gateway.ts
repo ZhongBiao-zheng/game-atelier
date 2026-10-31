@@ -2,6 +2,9 @@ import { requestJson } from './http';
 import type { KeyModel } from './keys';
 import { publishGatewayConnected } from './gatewayEvents';
 
+// gateway_keys.py: TOKEN_PREFIX + token_urlsafe(32).
+export const GATEWAY_TOKEN_LENGTH = 47;
+
 /** 局域网共享（ADR-0025）：本机作为网关的设置、网关密钥与用量；接入端测试连接与同步模型。 */
 export type LimitPeriod = 'day' | 'week' | 'month';
 export interface GatewayLimit { period: LimitPeriod; cap_cny: number }

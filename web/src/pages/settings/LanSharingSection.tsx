@@ -150,64 +150,68 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
                 <table className="w-full min-w-160 text-left text-xs">
                   <thead className="text-muted-foreground">
                     <tr>
-                      {['名称', '角色', '本月额度', '本月花费', '最近使用', '操作'].map((h) => (
+                      {['名称', '密钥', '角色', '本月额度', '本月花费', '最近使用', '操作'].map((h) => (
                         <th key={h} className="px-4 py-3 font-normal">
                           {h}
                         </th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="border-b border-border">
                     {state?.keys.map((key) => (
                       <tr key={`${gatewayAlias ?? 'local'}:${key.id}`} className={`border-t border-border ${key.revoked_at ? 'opacity-50' : ''}`}>
                         <td
-                          className={`max-w-64 px-4 py-3 ${key.revoked_at ? 'text-muted-foreground' : ''}`}
+                          className={`max-w-64 px-4 py-3 align-middle ${key.revoked_at ? 'text-muted-foreground' : ''}`}
                         >
-                          <div className="flex flex-wrap items-center gap-1">
-                            {key.revoked_at ? <Hint label={key.name}><span className="truncate">{key.name}</span></Hint>
-                              : <GatewayMemberName name={key.name} disabled={busy}
-                                onSave={name => run(() => updateGatewayKey(key.id, { name }, ...(gatewayAlias ? [gatewayAlias] as const : [])))} />}
-                            {!gatewayAlias && !key.revoked_at && <GatewayMemberToken id={key.id} name={key.name} onError={setError} />}
+                          {key.revoked_at ? <Hint label={key.name}><span className="truncate">{key.name}</span></Hint>
+                            : <GatewayMemberName name={key.name} disabled={busy}
+                              onSave={name => run(() => updateGatewayKey(key.id, { name }, ...(gatewayAlias ? [gatewayAlias] as const : [])))} />}
+                        </td>
+                        <td className="px-4 py-3 align-middle">
+                          {!gatewayAlias && !key.revoked_at
+                            ? <div className="flex items-center gap-1 whitespace-nowrap"><GatewayMemberToken id={key.id} name={key.name} onError={setError} /></div>
+                            : '—'}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 align-middle">{key.role === 'admin' ? '管理员' : '成员'}</td>
+                        <td className="min-w-40 px-4 py-3 align-middle">
+                          <div className="flex h-9 flex-col justify-center">
+                            {!key.limits_status.some((limit) => limit.period === 'month')
+                              ? '不限额'
+                              : key.limits_status
+                                  .filter((limit) => limit.period === 'month')
+                                  .map((limit) => {
+                                    const used = limit.used_cny + limit.reserved_cny;
+                                    return (
+                                      <div
+                                        key={limit.period}
+                                        className={
+                                          used / limit.cap_cny > 0.85 ? 'text-status-running' : 'text-primary'
+                                        }
+                                      >
+                                        <p className="whitespace-nowrap tabular-nums">
+                                          {PERIODS[limit.period]} {formatGenerationCost(used)} /{' '}
+                                          {formatGenerationCost(limit.cap_cny)}
+                                        </p>
+                                        <progress
+                                          aria-label={`${key.name}${PERIODS[limit.period]}额度`}
+                                          max={limit.cap_cny}
+                                          value={Math.min(used, limit.cap_cny)}
+                                          className="gateway-quota h-1.5 w-full"
+                                        />
+                                      </div>
+                                    );
+                                  })}
                           </div>
                         </td>
-                        <td className="whitespace-nowrap px-4">{key.role === 'admin' ? '管理员' : '成员'}</td>
-                        <td className="min-w-40 space-y-2 px-4 py-3">
-                          {!key.limits_status.some((limit) => limit.period === 'month')
-                            ? '不限额'
-                            : key.limits_status
-                                .filter((limit) => limit.period === 'month')
-                                .map((limit) => {
-                                  const used = limit.used_cny + limit.reserved_cny;
-                                  return (
-                                    <div
-                                      key={limit.period}
-                                      className={
-                                        used / limit.cap_cny > 0.85 ? 'text-status-running' : 'text-primary'
-                                      }
-                                    >
-                                      <p className="whitespace-nowrap tabular-nums">
-                                        {PERIODS[limit.period]} {formatGenerationCost(used)} /{' '}
-                                        {formatGenerationCost(limit.cap_cny)}
-                                      </p>
-                                      <progress
-                                        aria-label={`${key.name}${PERIODS[limit.period]}额度`}
-                                        max={limit.cap_cny}
-                                        value={Math.min(used, limit.cap_cny)}
-                                        className="gateway-quota h-1.5 w-full"
-                                      />
-                                    </div>
-                                  );
-                                })}
-                        </td>
-                        <td className="whitespace-nowrap px-4 tabular-nums">
+                        <td className="whitespace-nowrap px-4 py-3 align-middle tabular-nums">
                           <Link className="underline decoration-border underline-offset-4 hover:text-primary" href={gatewayAlias ? `/settings/relay-admin?alias=${encodeURIComponent(gatewayAlias)}&view=usage&member=${encodeURIComponent(key.id)}` : `/settings/usage?scope=team&member=${encodeURIComponent(key.id)}`}>
                             {formatGenerationCost(key.month_charged_cny)}
                           </Link>
                         </td>
-                        <td className="whitespace-nowrap px-4 text-muted-foreground">
+                        <td className="whitespace-nowrap px-4 py-3 align-middle text-muted-foreground">
                           {date(key.last_used_at)}
                         </td>
-                        <td className="px-4">
+                        <td className="px-4 py-3 align-middle">
                           {key.revoked_at ? (
                             '已撤销'
                           ) : (
