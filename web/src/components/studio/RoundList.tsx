@@ -11,7 +11,7 @@ import { formatBeijingTime } from '@/lib/time';
 import { formatGenerationCost } from '@/lib/generationCost';
 import { MetaTag } from '@/components/MetaTag';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
-import { modelCatalog, modelDisplayName } from '@/lib/modelCatalog';
+import { modelBrand, modelDisplayName } from '@/lib/modelCatalog';
 import { QUALITY_LABELS } from '@/lib/imageControlCaps';
 import { VIDEO_QUALITY_LABELS, ratioLabel } from '@/lib/videoControlCaps';
 import type { RoundParameter } from '@/pages/studioParameterReuse';
@@ -147,7 +147,7 @@ function SpecChips({ config, reuseParameter, testId, children }: {
         const apply = typeof result === 'function' ? result : undefined;
         return <MetaTag key={parameter} className="inline-flex items-center gap-1"
           onClick={apply ?? (() => undefined)} disabled={!apply} disabledReason={typeof result === 'string' ? result : undefined}>
-          {parameter === 'model' && <ModelBrandIcon brand={modelCatalog(config.model)?.brand} size={12} />}
+          {parameter === 'model' && <ModelBrandIcon brand={modelBrand(config.model)} size={12} />}
           {label}
         </MetaTag>;
       })}

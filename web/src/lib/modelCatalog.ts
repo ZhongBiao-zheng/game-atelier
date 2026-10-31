@@ -1,6 +1,6 @@
 import { normalizedModelId } from './modelFamily';
 
-export type ModelBrand = 'openai' | 'gemini' | 'bytedance' | 'midjourney' | 'flux' | 'kling' | 'minimax' | 'alibaba';
+export type ModelBrand = 'openai' | 'gemini' | 'bytedance' | 'midjourney' | 'flux' | 'kling' | 'minimax' | 'alibaba' | 'anthropic' | 'deepseek' | 'moonshot' | 'zhipu';
 interface CatalogEntry { key: string; name: string; brand: ModelBrand; description: string; match: RegExp }
 // Order is display popularity only; it never changes automatic routing priority.
 const catalog: CatalogEntry[] = [
@@ -37,6 +37,23 @@ function baseId(id: string) { return identity(id).replace(/(?:(?:-(?:2k|4k|hd|vi
 export function modelCatalog(id: string) {
   const rank = catalog.findIndex(entry => entry.match.test(baseId(id)));
   return rank < 0 ? undefined : { ...catalog[rank], rank };
+}
+
+const textBrands: [RegExp, ModelBrand][] = [
+  [/^(seed-|doubao-)/, 'bytedance'],
+  [/^claude-/, 'anthropic'],
+  [/^(gpt-|o1|o3|o4|chatgpt-)/, 'openai'],
+  [/^gemini-/, 'gemini'],
+  [/^deepseek/, 'deepseek'],
+  [/^(qwen|qwq)/, 'alibaba'],
+  [/^(kimi|moonshot)/, 'moonshot'],
+  [/^(glm|chatglm)/, 'zhipu'],
+];
+
+/** Brand inference is independent of catalog names and display ordering. */
+export function modelBrand(id: string): ModelBrand | undefined {
+  return modelCatalog(id)?.brand
+    ?? textBrands.find(([prefix]) => prefix.test(normalizedModelId(id)))?.[1];
 }
 function variantRank(id: string) {
   const value = identity(id);

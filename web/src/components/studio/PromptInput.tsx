@@ -4,7 +4,7 @@ import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, 
 import { createPortal } from 'react-dom';
 import { ArrowUp, BookmarkPlus, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Video, X } from 'lucide-react';
 import { ModelPickerList } from '@/components/ModelPickerList';
-import { modelCatalog, modelDisplayName, sortModels } from '@/lib/modelCatalog';
+import { modelBrand, modelDisplayName, sortModels } from '@/lib/modelCatalog';
 import { modelModality, type KeyView } from '@/api/keys';
 import { hasImageSizeSelection, imageSizeMode, imageSizeSummary, imageSizeError, normalizeImageSizeParams } from '@/lib/imageSizeMode';
 import { isAutoProvider, sizeContext } from '@/lib/modelRoutes';
@@ -1183,7 +1183,7 @@ export function PromptInput({
               onClick={() => setOpenPanel(openPanel === 'model' ? null : 'model')}
               disabled={!provider || models.length === 0}
             >
-              <ModelBrandIcon brand={modelCatalog(selectedModel?.id ?? '')?.brand} size={14} /> {selectedModel ? modelDisplayName(selectedModel) : models.length > 0 ? '选择模型' : '未配置模型'}
+              <ModelBrandIcon brand={modelBrand(selectedModel?.id ?? '')} size={14} /> {selectedModel ? modelDisplayName(selectedModel) : models.length > 0 ? '选择模型' : '未配置模型'}
             </ControlButton>
             <ToolbarPopover
               open={openPanel === 'model'}
