@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { cn } from '@/lib/utils';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 
 export type ToolbarPopoverDirection = 'up' | 'down';
@@ -76,7 +77,7 @@ export function ToolbarPopover({
           collisionPadding={8}
           updatePositionStrategy="always"
           style={style}
-          className={className}
+          className={cn('z-50', className)}
           onOpenAutoFocus={event => {
             event.preventDefault();
             if (autoFocus) (event.currentTarget as HTMLElement).querySelector<HTMLElement>(FOCUSABLE)?.focus({ preventScroll: true });

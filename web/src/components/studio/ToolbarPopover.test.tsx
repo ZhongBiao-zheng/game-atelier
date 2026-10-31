@@ -23,6 +23,7 @@ describe('ToolbarPopover', () => {
     render(<Harness onClose={close} />);
     const panel = screen.getByTestId('menu');
     expect(panel).toHaveAttribute('data-toolbar-popover');
+    expect(panel).toHaveClass('z-50');
     expect(screen.getByRole('button', { name: '第一项' })).toHaveFocus();
     fireEvent.pointerDown(panel);
     fireEvent.pointerDown(screen.getByTestId('anchor'));
