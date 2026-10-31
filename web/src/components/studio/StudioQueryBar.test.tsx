@@ -20,6 +20,37 @@ describe('StudioQueryBar', () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ search: 'dragon' }));
   });
 
+  it('筛选关闭后仍显示当前值与主题色，恢复默认后还原标题', () => {
+    const { rerender } = render(<StudioQueryBar filters={{ ...DEFAULT_HISTORY_FILTERS, time: '1w', modes: ['image'], op: 'favorite' }} onChange={vi.fn()} />);
+    for (const [name, value] of [['时间', '最近一周'], ['生成模式', '图片'], ['操作类型', '喜欢']]) {
+      const chip = screen.getByRole('button', { name: `${name}筛选：${value}` });
+      expect(chip).toHaveTextContent(value);
+      expect(chip).toHaveClass('text-primary');
+      expect(chip.querySelector('svg')).toHaveClass('text-primary');
+      expect(chip).not.toHaveClass('bg-secondary');
+    }
+    fireEvent.click(screen.getByRole('button', { name: '时间筛选：最近一周' }));
+    expect(screen.getByRole('button', { name: '时间筛选：最近一周' })).toHaveClass('bg-secondary', 'text-primary');
+    fireEvent.click(screen.getByRole('button', { name: '时间筛选：最近一周' }));
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '时间筛选：最近一周' })).toHaveClass('text-primary');
+    rerender(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={vi.fn()} />);
+    for (const name of ['时间', '生成模式', '操作类型']) {
+      const chip = screen.getByRole('button', { name: `${name}筛选` });
+      expect(chip).toHaveTextContent(name);
+      expect(chip).not.toHaveClass('text-primary');
+    }
+  });
+
+  it('多选模式以顿号连接，时间与操作类型各自保留当前值', () => {
+    const { rerender } = render(<StudioQueryBar filters={{ ...DEFAULT_HISTORY_FILTERS, time: '1m', modes: ['video', 'image'], op: 'hidden' }} onChange={vi.fn()} />);
+    expect(screen.getByRole('button', { name: '生成模式筛选：图片、视频' })).toHaveTextContent('图片、视频');
+    expect(screen.getByRole('button', { name: '时间筛选：最近一个月' })).toHaveTextContent('最近一个月');
+    expect(screen.getByRole('button', { name: '操作类型筛选：隐藏' })).toHaveTextContent('隐藏');
+    rerender(<StudioQueryBar filters={{ ...DEFAULT_HISTORY_FILTERS, time: '3m' }} onChange={vi.fn()} />);
+    expect(screen.getByRole('button', { name: '时间筛选：最近三个月' })).toHaveTextContent('最近三个月');
+  });
+
   it('生成模式可以独立加选、取消，且不影响其他已选项', () => {
     const onChange = vi.fn();
     const { rerender } = render(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={onChange} />);

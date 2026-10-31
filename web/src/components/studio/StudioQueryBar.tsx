@@ -25,15 +25,16 @@ const OP_OPTS: { key: 'favorite' | 'hidden'; label: string; icon: ReactNode }[] 
 /** 查询面板 chip——复用 PromptInput ControlButton 配方（h-7 rounded-md token 色）。 */
 function FilterChip({
   active,
+  filtered,
   children,
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }) {
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean; filtered?: boolean }) {
   return (
     <Button variant="bare"
       type="button"
       className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-        active ? 'bg-secondary text-foreground' : 'text-foreground hover:bg-secondary'
-      }`}
+        active ? 'bg-secondary' : 'hover:bg-secondary'
+      } ${filtered ? 'text-primary' : 'text-foreground'}`}
       {...props}
     >
       {children}
@@ -67,6 +68,9 @@ export function StudioQueryBar({
   const panelCls = 'w-60 rounded-xl border border-border bg-card p-2';
   const optionCls =
     'flex h-10 w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60';
+  const timeLabel = filters.time === 'all' ? '' : TIME_OPTS.find(option => option.key === filters.time)?.label;
+  const modeLabel = MODE_OPTS.filter(option => filters.modes.includes(option.key)).map(option => option.label).join('、');
+  const opLabel = OP_OPTS.find(option => option.key === filters.op)?.label;
 
   return (
     <div
@@ -114,8 +118,8 @@ export function StudioQueryBar({
 
       <Divider />
       <div ref={timeRef} className="relative">
-        <FilterChip active={openPanel === 'time'} aria-label="时间筛选" onClick={() => toggle('time')}>
-          时间 <ChevronDown size={14} aria-hidden className="text-muted-foreground" />
+        <FilterChip active={openPanel === 'time'} filtered={Boolean(timeLabel)} aria-label={`时间筛选${timeLabel ? `：${timeLabel}` : ''}`} onClick={() => toggle('time')}>
+          {timeLabel || '时间'} <ChevronDown size={14} aria-hidden className={timeLabel ? 'text-primary' : 'text-muted-foreground'} />
         </FilterChip>
         <ToolbarPopover open={openPanel === 'time'} onClose={() => setOpenPanel(null)} anchorRef={timeRef} direction="down" role="listbox" aria-label="时间筛选列表" className={panelCls}>
           {TIME_OPTS.map((o) => (
@@ -130,8 +134,8 @@ export function StudioQueryBar({
 
       <Divider />
       <div ref={modeRef} className="relative">
-        <FilterChip active={openPanel === 'mode'} aria-label="生成模式筛选" onClick={() => toggle('mode')}>
-          生成模式 <ChevronDown size={14} aria-hidden className="text-muted-foreground" />
+        <FilterChip active={openPanel === 'mode'} filtered={Boolean(modeLabel)} aria-label={`生成模式筛选${modeLabel ? `：${modeLabel}` : ''}`} onClick={() => toggle('mode')}>
+          {modeLabel || '生成模式'} <ChevronDown size={14} aria-hidden className={modeLabel ? 'text-primary' : 'text-muted-foreground'} />
         </FilterChip>
         <ToolbarPopover open={openPanel === 'mode'} onClose={() => setOpenPanel(null)} anchorRef={modeRef} direction="down" role="listbox" aria-label="生成模式列表" aria-multiselectable="true" className={panelCls}>
           <div className="px-3 py-2 text-sm text-muted-foreground">生成模式</div>
@@ -155,8 +159,8 @@ export function StudioQueryBar({
 
       <Divider />
       <div ref={opRef} className="relative">
-        <FilterChip active={openPanel === 'op'} aria-label="操作类型筛选" onClick={() => toggle('op')}>
-          操作类型 <ChevronDown size={14} aria-hidden className="text-muted-foreground" />
+        <FilterChip active={openPanel === 'op'} filtered={Boolean(opLabel)} aria-label={`操作类型筛选${opLabel ? `：${opLabel}` : ''}`} onClick={() => toggle('op')}>
+          {opLabel || '操作类型'} <ChevronDown size={14} aria-hidden className={opLabel ? 'text-primary' : 'text-muted-foreground'} />
         </FilterChip>
         <ToolbarPopover open={openPanel === 'op'} onClose={() => setOpenPanel(null)} anchorRef={opRef} direction="down" role="listbox" aria-label="操作类型列表" className={panelCls}>
           <div className="px-3 py-2 text-sm text-muted-foreground">操作</div>
