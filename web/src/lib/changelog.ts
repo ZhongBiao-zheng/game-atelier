@@ -32,6 +32,20 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.132.0', date: '2026-10-31', headline: '团队库联动画布 Agent，界面控件统一', changes: [
+    { kind: 'feat', text: '画布 Agent 能搜索本画布挂载的团队库并直接放上画布；团队库也能存类别与团队规范，项目规范优先。' },
+    { kind: 'feat', text: '团队库设置页按库展示，可在卡片上增减项目、重新定位；画布、创作台和分享弹窗里就地挂载，不再跳转设置页。' },
+    { kind: 'feat', text: '页面上的输入框、下拉、开关等控件统一为新样式；项目名、画布名、分组名单击即可重命名。' },
+    { kind: 'feat', text: '用量页任务表的项目、模型、供应商、类型可点击筛选，多个条件可叠加。' },
+    { kind: 'feat', text: '文本模型显示厂商图标；供应商页把已关闭的供应商收进折叠区。' },
+    { kind: 'fix', text: '工具栏弹出的面板不再被输入框或节点盖住，同一时间只展开一个。' },
+    { kind: 'fix', text: '视频节点底栏固定为一排；画布名称编辑框宽度跟随文字。' },
+    { kind: 'fix', text: '画布左下角资产默认打开全部项目的提示词。' },
+    { kind: 'fix', text: '网关成员密钥与名称同一行显示、隐藏时宽度不变；用量排行的色条与金额对齐。' },
+    { kind: 'fix', text: '画布排队任务很多时，页面不再整体卡住。' },
+    { kind: 'fix', text: 'Windows 上数据目录放在 D 盘等位置时，打开 Agent 连接不再报错。' },
+    { kind: 'fix', text: '定稿时新增类别会直接应用到当前图片。' },
+  ] },
   { version: '5.131.0', date: '2026-10-27', headline: 'ChatGPT 订阅出图与模型菜单改版', changes: [
     { kind: 'feat', text: '可用本机 Codex 的 ChatGPT 登录添加订阅供应商，用 GPT Image 出图，按订阅记账不计费。' },
     { kind: 'feat', text: '模型菜单按热度排序，带品牌图标、简介、耗时与价格；供应商也换成品牌图标。' },
