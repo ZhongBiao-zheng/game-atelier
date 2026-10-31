@@ -731,12 +731,13 @@
   position: relative;
   overflow: hidden;
   isolation: isolate;
-  /* 发丝描边用淡黑：浅色描边叠在底部深色上会显出一道白边。 */
   border: 0.5px solid color-mix(in srgb, black 18%, transparent);
   background: linear-gradient(180deg,
     color-mix(in oklab, var(--preset-primary) 70%, white),
     var(--preset-primary) 45%,
     color-mix(in oklab, var(--preset-primary) 35%, black));
+  /* 渐变覆盖边框盒，避免默认 padding-box 的重复平铺在半透明底边露出浅色顶部。 */
+  background-origin: border-box;
 }
 .accent-swatch::before {
   content: '';
