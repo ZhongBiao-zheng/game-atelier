@@ -968,11 +968,6 @@ function StudioFull() {
               segments: promptToAssetSegments(promptText),
             });
           }}
-          onSaveReferenceImage={(file) => {
-            setAssetPanelKind('media');
-            setAssetPanelOpen(true);
-            setAssetSaveRequest({ requestId: crypto.randomUUID(), kind: 'media', file });
-          }}
           providers={providers}
           providerAlias={providerAlias}
           model={model}

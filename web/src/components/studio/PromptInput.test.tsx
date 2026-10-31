@@ -654,3 +654,23 @@ describe('shared model picker interactions', () => {
     cleanup();
   });
 });
+
+
+describe('参考素材堆叠添加按钮', () => {
+  it('折叠锚定首图，展开锚定末图，进入加号保持展开和放大', () => {
+    const files = [0, 1, 2].map(i => new File(['image'], `${i}.png`, { type: 'image/png' }));
+    render(<PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="gpt-image-2" referenceImages={files} onReferenceImagesChange={vi.fn()} />);
+    const items = screen.getAllByTestId('reference-stack-item');
+    expect(screen.queryByLabelText('保存参考图为资产')).not.toBeInTheDocument();
+    expect(items[0]).toContainElement(screen.getByTestId('reference-stack-add'));
+    fireEvent.mouseEnter(items[0]);
+    expect(items[2]).toContainElement(screen.getByTestId('reference-stack-add'));
+    fireEvent.mouseEnter(items[2]);
+    fireEvent.mouseEnter(screen.getByTestId('reference-stack-add'));
+    expect(items[2].style.transform).toContain('scale(1.12)');
+    expect(items[2]).toContainElement(screen.getByTestId('reference-stack-add'));
+    fireEvent.mouseLeave(items[0].parentElement!);
+    expect(items[0]).toContainElement(screen.getByTestId('reference-stack-add'));
+    cleanup();
+  });
+});

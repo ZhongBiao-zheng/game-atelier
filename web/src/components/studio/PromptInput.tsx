@@ -55,7 +55,6 @@ interface Props {
   /** 外部资产面板要求在最后一次编辑光标处插入文本。 */
   insertTextRequest?: { requestId: string; text: string } | null;
   onSavePromptAsset?: () => void;
-  onSaveReferenceImage?: (file: File) => void;
   providers?: KeyView[];
   providerAlias?: string;
   model?: string;
@@ -222,7 +221,6 @@ export function PromptInput({
   onValueChange,
   insertTextRequest,
   onSavePromptAsset,
-  onSaveReferenceImage,
   providers = [],
   providerAlias,
   model,
@@ -860,6 +858,7 @@ export function PromptInput({
                     return (
                       <div
                         key={i}
+                        data-testid="reference-stack-item"
                         className="absolute top-1/2 left-0"
                         style={{
                           width: REF_W,
@@ -913,42 +912,24 @@ export function PromptInput({
                         >
                           <X size={10} />
                         </Button>
-                        {item.kind === 'image' && onSaveReferenceImage && (
-                          <Button variant="bare"
-                            type="button"
-                            aria-label="保存参考图为资产"
-                            onClick={(e) => { e.stopPropagation(); onSaveReferenceImage(item.file); }}
-                            className="absolute -bottom-1.5 -right-1.5 z-10 flex h-[18px] w-[18px] items-center justify-center rounded-full border border-border bg-scrim text-foreground/80 transition-colors hover:bg-secondary hover:text-foreground"
-                            style={{ opacity: hovered ? 1 : 0, pointerEvents: hovered ? 'auto' : 'none' }}
+                        {i === (refExpanded ? stackItems.length - 1 : 0) && (
+                          <Label
+                            data-testid="reference-stack-add"
+                            htmlFor={stackCanAdd ? refInputId : undefined}
+                            aria-disabled={!stackCanAdd}
+                            onClick={stackCanAdd ? undefined : (e) => e.preventDefault()}
+                            className={`absolute -right-2.5 -bottom-2.5 z-10 flex size-7 items-center justify-center rounded-full border-[0.5px] border-border bg-secondary transition-colors ${
+                              stackCanAdd
+                                ? 'cursor-pointer text-muted-foreground hover:text-foreground hover:border-input hover:bg-card'
+                                : 'cursor-not-allowed text-muted-foreground opacity-40'
+                            }`}
                           >
-                            <BookmarkPlus size={10} />
-                          </Button>
+                            <Plus size={14} />
+                          </Label>
                         )}
                       </div>
                     );
                   })}
-                  <Label
-                    htmlFor={stackCanAdd ? refInputId : undefined}
-                    aria-disabled={!stackCanAdd}
-                    onClick={stackCanAdd ? undefined : (e) => e.preventDefault()}
-                    className={`absolute flex items-center justify-center rounded-full border-[0.5px] border-border bg-secondary transition-colors ${
-                      stackCanAdd
-                        ? 'cursor-pointer text-muted-foreground hover:text-foreground hover:border-input hover:bg-card'
-                        : 'cursor-not-allowed text-muted-foreground opacity-40'
-                    }`}
-                    style={{
-                      width: 28,
-                      height: 28,
-                      zIndex: 45,
-                      top: '50%',
-                      marginTop: 15,
-                      left: `${(refExpanded ? (stackItems.length - 1) * REF_W : 0) + REF_W - 20}px`,
-                      transform: `rotate(${refExpanded ? expandAngle(stackItems.length - 1) : collapseAngle(stackItems.length - 1)}deg)`,
-                      transition: 'left 300ms ease, transform 300ms ease',
-                    }}
-                  >
-                    <Plus size={14} />
-                  </Label>
                 </div>
               </>
             )}

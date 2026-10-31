@@ -24,7 +24,7 @@ const FILES = Object.entries(sources)
 const PAGES = FILES.filter(({ rel }) => !rel.startsWith('components/ui/'));
 
 // 棘轮基线（2026-10-30）：bare 含 2026-10-30 从原生 button 迁来的 Button variant="bare"
-const BARE_CONTROL_BASELINE = 184;
+const BARE_CONTROL_BASELINE = 183;
 
 const ARBITRARY_SPACING = /(?<![\w-])-?(?:p[xytrbl]?|m[xytrbl]?|gap(?:-[xy])?|space-[xy])-\[/g;
 
