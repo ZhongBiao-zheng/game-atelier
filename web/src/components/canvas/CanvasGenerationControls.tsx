@@ -99,7 +99,7 @@ export function CanvasModelPicker({ choices, alias, model, onSelect, params = {}
             if (next) onSelect(next);
             setOpen(null);
             providerRef.current?.querySelector('button')?.focus();
-          }} className="flex w-full items-center gap-3 rounded-md px-3 py-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/50">
+          }} className="flex w-full items-center gap-3 rounded-md px-3 py-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/50">
           <ProviderBrandIcon provider={key} />
           <span className="min-w-0 truncate">{groupLabel(key)}</span>
         </Button>)}

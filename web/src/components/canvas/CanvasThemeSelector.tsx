@@ -34,7 +34,7 @@ export function CanvasThemeSelector() {
             className={cn(
               'h-8 justify-center gap-1.5 px-2 py-0 font-medium focus:bg-secondary focus-visible:ring-2 focus-visible:ring-primary [&>span:first-child]:hidden',
               selected
-                ? 'bg-secondary text-foreground ring-1 ring-primary/60'
+                ? 'bg-secondary text-foreground ring-1 ring-inset ring-primary/60'
                 : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
             )}
           >

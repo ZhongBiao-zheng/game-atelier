@@ -1412,7 +1412,7 @@ function CountOptions({ value, onSelect, max = 4 }: { value: number; max?: numbe
           aria-selected={value === item}
           aria-label={String(item)}
           onClick={() => onSelect(item)}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60"
         >
           {item}
         </Button>
