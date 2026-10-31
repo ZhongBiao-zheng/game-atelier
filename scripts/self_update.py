@@ -144,7 +144,7 @@ def main() -> int:
     if release is None:
         return 0
     try:
-        newer = bootstrap._version_tuple(release["version"]) > bootstrap._version_tuple(current)
+        newer = bootstrap.version_key(release["version"]) > bootstrap.version_key(current)
     except ValueError:
         warn("本地版本号无效，跳过自动更新")
         return 0
@@ -155,7 +155,7 @@ def main() -> int:
         return 0
     # 切换分支后重新比较，避免把 main 当成原来的开发分支。
     current = version_at("HEAD")
-    if bootstrap._version_tuple(release["version"]) <= bootstrap._version_tuple(current):
+    if bootstrap.version_key(release["version"]) <= bootstrap.version_key(current):
         print("已是最新")
         return 0
     if not fetch(release):

@@ -275,3 +275,102 @@ def test_source_rejects_tag_manifest_mismatch(source_repos, update_env, monkeypa
     assert updater.main() == 0
     assert git(local, "rev-parse", "HEAD") == before
     assert "tag 与发布版本不一致" in capsys.readouterr().out
+
+
+@pytest.fixture
+def version_line_repos(tmp_path):
+    remote = tmp_path / "version-line.git"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    producer = tmp_path / "version-producer"
+    producer.mkdir()
+    git(producer, "init", "-b", "main")
+    git(producer, "config", "user.email", "test@example.invalid")
+    git(producer, "config", "user.name", "Test")
+    git(producer, "remote", "add", "origin", str(remote))
+    (producer / ".claude-plugin").mkdir()
+    (producer / "web/dist").mkdir(parents=True)
+    (producer / "web/dist/index.html").write_text("fixture")
+    for version in ["5.132.0", "5.133.0"]:
+        (producer / ".claude-plugin/plugin.json").write_text(json.dumps({"version": version}))
+        git(producer, "add", ".")
+        git(producer, "commit", "-m", version)
+        git(producer, "tag", f"v{version}")
+    git(producer, "push", "origin", "main", "--tags")
+    local = tmp_path / "version-client"
+    subprocess.run(["git", "clone", "-b", "main", str(remote), str(local)],
+                   check=True, capture_output=True)
+    (producer / ".claude-plugin/plugin.json").write_text('{"version":"0.5.134"}')
+    git(producer, "commit", "-am", "0.5.134")
+    git(producer, "tag", "v0.5.134")
+    git(producer, "push", "origin", "main", "v0.5.134")
+    return local, remote
+
+
+def test_version_line_cnb_prefers_new_numbering(version_line_repos, update_env, monkeypatch):
+    _, remote = version_line_repos
+    monkeypatch.setattr(bootstrap, "CNB_URL", str(remote))
+    assert bootstrap.latest_release(use_git=True)["tag"] == "v0.5.134"
+
+
+def test_version_line_transition_client_sees_new_release(update_env, monkeypatch):
+    monkeypatch.setattr(bootstrap, "_current_version", lambda: "5.133.0")
+    seed_cache(tag="v0.5.134")
+    assert bootstrap.update_info()["update_available"] is True
+
+
+def test_version_line_new_client_does_not_offer_legacy_downgrade(
+    version_line_repos, update_env, monkeypatch,
+):
+    local, remote = version_line_repos
+    updater = load_updater(monkeypatch, local)
+    git(local, "fetch", "origin", "tag", "v0.5.134")
+    git(local, "merge", "--ff-only", "v0.5.134")
+    monkeypatch.setattr(bootstrap, "_current_version", lambda: "0.5.134")
+    monkeypatch.setattr(bootstrap, "CNB_URL", str(remote))
+    assert bootstrap.update_info() == {"current": "0.5.134", "latest": "0.5.134",
+                                      "update_available": False, "dismissed": False}
+    monkeypatch.setattr(updater, "fetch", lambda *a: pytest.fail("不得降级或重复更新"))
+    assert updater.main() == 0
+
+
+def test_version_line_old_clients_can_reach_transition_release(update_env, monkeypatch):
+    tags = ["v5.132.0", "v5.133.0"]
+    output = "\n".join(f"{'a' * 40}\trefs/tags/{tag}" for tag in tags)
+    monkeypatch.setattr(bootstrap.subprocess, "run", lambda command, **kwargs:
+                        subprocess.CompletedProcess(command, 0, output, ""))
+    monkeypatch.setattr(bootstrap, "_current_version", lambda: "5.132.0")
+    assert bootstrap.latest_release(use_git=True)["tag"] == "v5.133.0"
+    assert bootstrap.update_info()["update_available"] is True
+    # 未安装过渡版的旧更新器仍按纯数字元组比较，也能发现过渡版。
+    def old_rank(tag):
+        return tuple(int(part) for part in tag[1:].split("."))
+    assert max(tags, key=old_rank) == "v5.133.0"
+    assert old_rank("v5.133.0") > old_rank("v5.132.0")
+
+
+def test_version_line_source_launcher_updates_transition_copy(
+    version_line_repos, update_env, monkeypatch, capsys,
+):
+    local, _ = version_line_repos
+    updater = load_updater(monkeypatch, local)
+    assert updater.main() == 10
+    assert updater.version_at("HEAD") == "0.5.134"
+    assert "发现新版本 5.133.0 → 0.5.134" in capsys.readouterr().out
+
+
+def test_version_line_source_launcher_rechecks_main_after_branch_switch(
+    version_line_repos, update_env, monkeypatch, capsys,
+):
+    local, _ = version_line_repos
+    git(local, "config", "user.email", "test@example.invalid")
+    git(local, "config", "user.name", "Test")
+    git(local, "switch", "-c", "dev")
+    (local / ".claude-plugin/plugin.json").write_text('{"version":"0.5.133"}')
+    git(local, "commit", "-am", "development numbering")
+    updater = load_updater(monkeypatch, local)
+    monkeypatch.setattr(updater, "ask", lambda *a: "1")
+    # 第一次比较处于新号段；切回 main 的 5.133.0 后第二次比较也必须允许更新。
+    assert updater.main() == 10
+    assert git(local, "branch", "--show-current") == "main"
+    assert updater.version_at("HEAD") == "0.5.134"
+    assert "发现新版本 5.133.0 → 0.5.134" in capsys.readouterr().out

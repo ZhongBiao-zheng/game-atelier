@@ -32,6 +32,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.133.0', date: '2026-10-31', headline: '模型选择更流畅，创作控件更清晰', changes: [
+    { kind: 'feat', text: '下一版起版本号改为 0.5.x，表示仍在测试阶段。' },
+    { kind: 'feat', text: '自动选择供应商统一叫「智能路由」，使用与设置页相同的分流图标。' },
+    { kind: 'fix', text: '模型菜单提前读取并缓存耗时与价格，再次打开时直接显示。' },
+    { kind: 'fix', text: '参考图堆叠只保留添加按钮，随最上方图片展开、旋转与放大。' },
+    { kind: 'fix', text: '尺寸与参数的选中描边不再被悬停底色遮住；选择质量后面板保持打开。' },
+    { kind: 'fix', text: '创作台筛选按钮直接显示已选条件，关闭菜单后仍可辨认。' },
+    { kind: 'fix', text: '主题色预览色块的底部不再出现亮边。' },
+  ] },
   { version: '5.132.0', date: '2026-10-31', headline: '团队库联动画布 Agent，界面控件统一', changes: [
     { kind: 'feat', text: '画布 Agent 能搜索本画布挂载的团队库并直接放上画布；团队库也能存类别与团队规范，项目规范优先。' },
     { kind: 'feat', text: '团队库设置页按库展示，可在卡片上增减项目、重新定位；画布、创作台和分享弹窗里就地挂载，不再跳转设置页。' },

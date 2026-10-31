@@ -243,8 +243,13 @@ def _current_version() -> str | None:
         return None
 
 
-def _version_tuple(v: str) -> tuple[int, ...]:
-    return tuple(int(p) for p in v.split("."))
+# 5.x 是退役号段，永久排在 0.5.x 及后续版本之前；旧 tag 保留，见 ADR-0032。
+LEGACY_MAJOR = 5
+
+
+def version_key(v: str) -> tuple[int, ...]:
+    parts = tuple(int(p) for p in v.split("."))
+    return (0 if parts[0] == LEGACY_MAJOR else 1, *parts)
 
 
 def _release(tag: str, source: str) -> dict:
@@ -271,7 +276,7 @@ def _query_latest_release(use_git: bool, deadline: float, cnb_timeout: float | N
             tags = [tag for tag in tags if RELEASE_TAG.fullmatch(tag)]
             if not tags:
                 raise ValueError("CNB 暂无正式 tag")
-            return _release(max(tags, key=lambda tag: _version_tuple(tag[1:])), "cnb")
+            return _release(max(tags, key=lambda tag: version_key(tag[1:])), "cnb")
         except (OSError, ValueError, subprocess.TimeoutExpired) as error:
             errors.append("CNB 查询超时" if isinstance(error, subprocess.TimeoutExpired) else str(error))
     # CNB Release API 实测匿名 401；无 git 的安装包直接查询公开 GitHub Release。
@@ -383,7 +388,7 @@ def update_info() -> dict | None:
     if not latest:
         return info
     try:
-        info["update_available"] = _version_tuple(latest) > _version_tuple(current)
+        info["update_available"] = version_key(latest) > version_key(current)
     except ValueError:
         return info
     info["dismissed"] = info["update_available"] and cache.get("dismissed") == latest

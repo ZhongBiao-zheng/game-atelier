@@ -5,6 +5,19 @@ import { describe, expect, it } from 'vitest';
 import pluginManifest from '../../../.claude-plugin/plugin.json?raw';
 import { CHANGELOG, CURRENT_VERSION, PROJECT_GITHUB_URL, groupChanges, hasUnreadChangelog } from './changelog';
 
+// 与 bootstrap.version_key 一致：ADR-0032 永久退役 5.x 号段。
+function versionRank(version: string) {
+  const parts = version.split('.').map(Number);
+  return [parts[0] === 5 ? 0 : 1, ...parts];
+}
+
+function isNewerVersion(a: string, b: string) {
+  const aRank = versionRank(a);
+  const bRank = versionRank(b);
+  const difference = aRank.findIndex((part, index) => part !== bRank[index]);
+  return difference >= 0 && aRank[difference] > bRank[difference];
+}
+
 describe('changelog 数据', () => {
   it('版本与仓库入口读取 plugin.json，最新日志覆盖当前版本', () => {
     const declared = JSON.parse(pluginManifest) as { version: string; homepage: string };
@@ -16,14 +29,19 @@ describe('changelog 数据', () => {
   it('新版在前、版本号不重复', () => {
     const versions = CHANGELOG.map((e) => e.version);
     expect(new Set(versions).size).toBe(versions.length);
-    const rank = (v: string) => v.split('.').map(Number);
     for (let i = 1; i < CHANGELOG.length; i += 1) {
-      const [aMaj, aMin, aPat] = rank(versions[i - 1]);
-      const [bMaj, bMin, bPat] = rank(versions[i]);
-      const newer =
-        aMaj > bMaj || (aMaj === bMaj && (aMin > bMin || (aMin === bMin && aPat > bPat)));
-      expect(newer, `${versions[i - 1]} 应排在 ${versions[i]} 之前`).toBe(true);
+      expect(isNewerVersion(versions[i - 1], versions[i]),
+        `${versions[i - 1]} 应排在 ${versions[i]} 之前`).toBe(true);
     }
+  });
+
+  it('新号段排在 5.x 前，号段内仍按数字排序', () => {
+    for (const [newer, older] of [['5.133.0', '5.132.0'], ['0.5.134', '5.133.0'],
+      ['0.5.135', '0.5.134'], ['1.0.0', '0.5.999']]) {
+      expect(isNewerVersion(newer, older)).toBe(true);
+      expect(isNewerVersion(older, newer)).toBe(false);
+    }
+    expect(isNewerVersion('0.5.134', '0.5.134')).toBe(false);
   });
 
   it('团队库挂在画布上，日志不说成「给项目挂」', () => {
