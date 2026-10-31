@@ -340,65 +340,6 @@
     border-bottom-color: rgba(0, 0, 0, 0.12);
   }
 
-  /* 列数滑块（工坊展墙列数）：细轨 + 黄铜圆钮。原生 range 的轨/钮只能靠伪元素改，
-     封装在 CSS 工具类、tsx 只引类名（方案 A，守卫扫不到也无需放开正则）。轨/钮走
-     --secondary / --primary token，亮暗自适应；focus-visible 画黄铜描边环。 */
-  .range-cols {
-    -webkit-appearance: none;
-    appearance: none;
-    height: 14px;
-    background: transparent;
-    cursor: pointer;
-  }
-  .range-cols::-webkit-slider-runnable-track {
-    height: 3px;
-    border-radius: 999px;
-    background: var(--secondary);
-  }
-  .range-cols::-moz-range-track {
-    height: 3px;
-    border-radius: 999px;
-    background: var(--secondary);
-  }
-  .range-cols::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 11px;
-    height: 11px;
-    margin-top: -4px;
-    border-radius: 999px;
-    background: var(--primary);
-  }
-  .range-cols::-moz-range-thumb {
-    width: 11px;
-    height: 11px;
-    border: 0;
-    border-radius: 999px;
-    background: var(--primary);
-  }
-  .range-cols:focus-visible {
-    outline: 2px solid var(--ring);
-    outline-offset: 3px;
-    border-radius: 999px;
-  }
-
-  .canvas-input {
-    width: 100%;
-    border: 1px solid var(--input);
-    border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--background) 70%, transparent);
-    color: var(--foreground);
-    padding: 0.55rem 0.7rem;
-    font-size: var(--text-sm);
-    line-height: 1.4;
-    outline: none;
-  }
-  .canvas-input:focus-visible {
-    border-color: var(--ring);
-    outline: 1px solid var(--ring);
-    outline-offset: -1px;
-  }
-
   .canvas-editor-top {
     padding-top: max(0.5rem, env(safe-area-inset-top));
     padding-right: max(0.5rem, env(safe-area-inset-right));
