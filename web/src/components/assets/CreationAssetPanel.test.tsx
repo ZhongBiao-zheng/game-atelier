@@ -598,7 +598,7 @@ describe('CreationAssetPanel', () => {
       render(<CreationAssetPanel projectId="canvas-a" initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
       await screen.findByRole('button', { name: /旧白犬/ });
-      fireEvent.click(screen.getByRole('radio', { name: '全部资产' }));
+      fireEvent.click(screen.getByRole('radio', { name: '本项目' }));
       await waitFor(() => expect(mocks.staleness).toHaveBeenCalledTimes(2));
       await act(async () => { releaseFirst({ 'asset-stale': 'stale' }); });
 
@@ -615,7 +615,7 @@ describe('CreationAssetPanel', () => {
       render(<CreationAssetPanel projectId="canvas-a" initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
       await screen.findByText('来源已更新');
-      fireEvent.click(screen.getByRole('radio', { name: '全部资产' }));
+      fireEvent.click(screen.getByRole('radio', { name: '本项目' }));
       await waitFor(() => expect(mocks.staleness).toHaveBeenCalledTimes(2));
       fireEvent.click(screen.getByRole('button', { name: '重新采用' }));
       fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '覆盖' }));
@@ -782,4 +782,13 @@ describe('CreationAssetPanel', () => {
     );
     expect(await screen.findByTestId('team-panel')).toHaveAttribute('data-related-sha256', 'd'.repeat(64));
   });
+});
+
+
+it('starts with all assets in a Canvas and can filter the current project', async () => {
+  render(<CreationAssetPanel projectId="canvas-demo" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
+  const all = await screen.findByRole('radio', { name: '全部资产' });
+  expect(all).toHaveAttribute('data-state', 'on');
+  fireEvent.click(screen.getByRole('radio', { name: '本项目' }));
+  expect(screen.getByRole('radio', { name: '本项目' })).toHaveAttribute('data-state', 'on');
 });

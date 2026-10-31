@@ -2672,6 +2672,8 @@ it('opens the team tab from «look» even after the prompt panel it was suggeste
   await renderReadyCanvas();
   fireEvent.click(screen.getByRole('button', { name: '资产' }));
   expect(await screen.findByRole('complementary', { name: '创作资产' })).toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: '提示词' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('radio', { name: '全部资产' })).toHaveAttribute('data-state', 'on');
   fireEvent.click(screen.getByRole('button', { name: 'simulate team asset drop' }));
   expect(await screen.findByText('有 1 条相关配方')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '关闭创作资产' }));

@@ -4907,7 +4907,7 @@ function CanvasEditorInner({
     setAgentOpen(false);
     setCreateMenu(null);
     if (libraryMode) creationAssetPanelRef.current?.requestClose();
-    else setLibraryMode('assets');
+    else setLibraryMode('prompts');
   };
   const fitAllNodes = () => {
     void runViewportCommand(() => fitView({ duration: 150, padding: 0.12 }));

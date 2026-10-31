@@ -73,7 +73,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   initialTeamProjectId,
 }: CreationAssetPanelProps, ref) {
   const [kind, setKind] = useState<CreationAssetPanelMode>(initialKind);
-  const [scope, setScope] = useState<'all' | 'project'>(projectId ? 'project' : 'all');
+  const [scope, setScope] = useState<'all' | 'project'>('all');
   const [assets, setAssets] = useState<CreationAsset[]>([]);
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
