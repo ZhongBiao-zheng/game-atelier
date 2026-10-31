@@ -203,6 +203,68 @@ def test_task_pagination_sorts_instants_then_id_and_filters_before_offset():
     assert first["total"] == aggregate_usage(records, scope="mine", period="today", now=NOW, source="local")["totals"]["count"]
 
 
+@pytest.mark.parametrize("filters,expected", [
+    ({"project": "canvas:c1"}, ["a", "b", "c"]),
+    ({"project": "unassigned"}, ["e"]),
+    ({"model": "exact"}, ["a", "b", "d", "e"]),
+    ({"model": "ex"}, []),
+    ({"alias": "Tuzi"}, ["a", "c", "d", "e"]),
+    ({"kind": "image"}, ["a", "b", "c", "d"]),
+    ({"kind": "video"}, ["e"]),
+    ({"project": "canvas:c1", "model": "exact", "alias": "Tuzi", "kind": "image"}, ["a"]),
+])
+def test_task_field_filters_match_keys_and_kind_categories(filters, expected):
+    records = mine([
+        job(job_id=name, model=model, alias=alias, kind=kind).model_copy(
+            update={"canvas_project_id": project})
+        for name, project, model, alias, kind in [
+            ("a", "c1", "exact", "Tuzi", "image"),
+            ("b", "c1", "exact", "Other", "image"),
+            ("c", "c1", "exact-long", "Tuzi", "image"),
+            ("d", "c2", "exact", "Tuzi", "image"),
+            ("e", None, "exact", "Tuzi", "video"),
+        ]
+    ])
+    result = usage_tasks(records, scope="mine", period="30d", now=NOW, **filters)
+    assert [row["id"] for row in result["rows"]] == expected
+    assert all(row["member_key"] is None for row in result["rows"])
+    assert {row["project_key"] for row in usage_tasks(
+        records, scope="mine", period="30d", now=NOW)["rows"]} == {
+            "canvas:c1", "canvas:c2", "unassigned"}
+    assert stats(records)["totals"]["by_kind"] == {"image": 4, "video": 1}
+
+
+def test_task_field_filter_pagination_and_status_intersect():
+    records = mine([job(job_id=str(i), model="match" if i % 2 else "other",
+                        status="failed" if i == 3 else "done") for i in range(8)])
+    def query(**options):
+        return usage_tasks(records, scope="mine", period="30d", now=NOW,
+                           model="match", status="done", limit=2, **options)
+    first = query()
+    assert [row["id"] for row in first["rows"]] == ["1", "5"]
+    assert first["total"] == 3 and first["next_offset"] == 2
+    last = query(offset=2)
+    assert [row["id"] for row in last["rows"]] == ["7"]
+    assert last["total"] == 3 and last["next_offset"] is None
+
+
+def test_task_filter_queries_reach_local_route(monkeypatch):
+    from character_workflow.lib import jobs
+    now = (datetime.now().astimezone() - timedelta(seconds=1)).isoformat()
+    monkeypatch.setattr(jobs, "list_jobs", lambda: [
+        job(job_id="yes", submitted_at=now, model="gpt", alias="Tuzi", kind="image")
+            .model_copy(update={"canvas_project_id": "c1"}),
+        job(job_id="no", submitted_at=now, model="gpt", alias="Other"),
+    ])
+    client = LocalTestClient(app=build_app(), base_url="http://127.0.0.1")
+    result = client.get("/api/usage/tasks", params={
+        "project": "canvas:c1", "model": "gpt", "alias": "Tuzi", "kind": "image",
+    })
+    assert result.status_code == 200
+    assert result.json()["total"] == 1
+    assert result.json()["rows"][0]["project_key"] == "canvas:c1"
+
+
 def test_team_tasks_preserve_ledger_billing_canceled_and_unknown_elapsed():
     records = team_records([dict(time=NOW.isoformat(), task_id=str(i), key_id="m", key_name="成员",
         charged_cny=amount, kind=kind, status=status, duration=90) for i, (amount, kind, status) in enumerate([
@@ -216,8 +278,12 @@ def test_team_tasks_preserve_ledger_billing_canceled_and_unknown_elapsed():
     assert totals["unpriced"] == 0
     assert all(row["duration_s"] is None and row["project_label"] is None
                and row["member_label"] == "成员" for row in result["rows"])
+    assert all(row["project_key"] is None and row["member_key"] == "m" for row in result["rows"])
     assert result["rows"][2]["status"] == "canceled"
     assert usage_tasks(records, scope="team", period="all", now=NOW, status="done")["total"] == 3
+    images = usage_tasks(records, scope="team", period="all", now=NOW, kind="image")
+    assert images["total"] == totals["by_kind"]["image"] == 3
+    assert {row["kind"] for row in images["rows"]} == {"image", "image_edit", "layer_split"}
 
 
 def test_usage_tasks_api_pagination_validation_and_management(monkeypatch):

@@ -8,6 +8,7 @@ import { KpiRow } from './KpiRow';
 import { TrendChart } from './TrendChart';
 import { RankingCard } from './RankingCard';
 import { TaskTable } from './TaskTable';
+import { useTaskFilters } from './useTaskFilters';
 import { QuotaCard } from './QuotaCard';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -29,6 +30,7 @@ export function UsagePage() {
   const source: UsageSource =
     query.get('source') === 'lan' ? 'lan' : query.get('source') === 'local' ? 'local' : 'all';
   const member = query.get('member') ?? '';
+  const taskFilters = useTaskFilters();
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [data, setData] = useState<UsageResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -75,10 +77,13 @@ export function UsagePage() {
   }, [scope, range, source, member, enabled]);
   function change(name: string, value: string) {
     const next = new URLSearchParams(search);
-    next.set(name, value);
+    if (value) next.set(name, value);
+    else next.delete(name);
     if (name === 'scope') {
       next.delete('member');
       next.delete('source');
+      next.delete('task_project');
+      next.delete('task_alias');
     }
     navigate(`/settings/usage?${next}`);
   }
@@ -141,7 +146,9 @@ export function UsagePage() {
                   <RankingCard key={ranking.by} ranking={ranking} />
                 ))}
               </div>
-              <TaskTable key={`${scope}:${range}:${source}:${member}`} scope={scope} range={range} source={source} member={member} />
+              <TaskTable key={JSON.stringify([scope, range, source, member, taskFilters.fields])}
+                scope={scope} range={range} source={source} member={member} {...taskFilters.fields}
+                memberLabel={data.members.find(item => item.id === member)?.name} onFiltersChange={taskFilters.change} />
             </>
           )}
         </div>

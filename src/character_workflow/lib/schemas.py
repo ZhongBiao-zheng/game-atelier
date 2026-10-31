@@ -2692,6 +2692,8 @@ class UsageTask(BaseModel):
     duration_s: float | None
     project_label: str | None
     member_label: str | None
+    project_key: str | None
+    member_key: str | None
     prompt: str | None = None
     thumb_url: str | None
     href: str | None

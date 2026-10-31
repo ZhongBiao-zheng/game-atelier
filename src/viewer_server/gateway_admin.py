@@ -68,9 +68,12 @@ def create_router(require_key):
     def usage_tasks(range: Literal["today", "7d", "30d", "90d", "all"] = "30d",
                     member: str | None = None,
                     status: Literal["all", "done", "failed", "unpriced"] = "all",
-                    offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200)):
+                    offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200),
+                    project: str | None = None, model: str | None = None,
+                    alias: str | None = None, kind: str | None = None):
         return get_usage_tasks(scope="team", range=range, member=member,
-                               status=status, offset=offset, limit=limit)
+                               status=status, offset=offset, limit=limit,
+                               project=project, model=model, alias=alias, kind=kind)
 
     @router.get("/tasks")
     def tasks(scope: Literal["active", "recent"] = "active"):

@@ -110,6 +110,31 @@ def test_upstream_status_restore_and_order_are_audited_without_keys(admin):
     assert entries[1]["action"] == "upstream.restore"
 
 
+def test_usage_task_filters_reach_admin_route(admin, monkeypatch):
+    from datetime import datetime, timedelta
+    from character_workflow.lib import gateway_tasks
+
+    client, actor, _ = admin
+    now = (datetime.now().astimezone() - timedelta(seconds=1)).isoformat()
+    monkeypatch.setattr(gateway_tasks, "read_usage_range", lambda *_: [
+        dict(time=now, task_id=name, key_id=actor.id, key_name="管理员", charged_cny=0,
+             kind=kind, model_id=model, member_alias=alias, status="done")
+        for name, kind, model, alias in [
+            ("match", "image_edit", "gpt", "Tuzi"), ("other", "image", "gpt", "Other"),
+        ]
+    ])
+    response = client.get("/gateway/v1/admin/usage/tasks", params={
+        "member": actor.id, "model": "gpt", "alias": "Tuzi", "kind": "image", "limit": 1,
+    })
+    assert response.status_code == 200
+    result = response.json()
+    assert result["total"] == 1 and result["next_offset"] is None
+    assert result["rows"][0]["id"] == "match"
+    assert result["rows"][0]["member_key"] == actor.id
+    assert result["rows"][0]["project_key"] is None
+    assert client.get("/gateway/v1/admin/usage/tasks?project=unassigned").json()["total"] == 0
+
+
 @pytest.mark.parametrize("method,path", ENDPOINTS)
 def test_every_proxy_route_is_management_only(method, path):
     path = path.format(key_id="member", member_alias="upstream")

@@ -963,7 +963,9 @@ failed 只计 actual。非失败且无价格的任务 `cost_cny=null`（未计�
 返回 `{rows: UsageTask[], total: number, next_offset: number | null}`；先筛选再分页，按提交/账本时间的真实时刻倒序、同刻按 id 升序，越界 offset 返回空 rows、原 total 和 null。
 `all.total` 与同口径 `totals.count` 一致；unpriced 严格等于 cost_cny=null，不把真实 0 元或失败无账单视为未计价。
 
-行字段为 `id, at, kind, model, label, source, cost_cny, alias, status, duration_s, project_label, member_label, thumb_url, href`，本机可带截断后的 prompt，团队不返回 prompt。
+额外支持可选的 `project/model/alias/kind` 查询参数，空值表示不限；与已有条件取交集，在分页之前精确匹配。`project` 使用项目稳定 key；`kind` 使用汇总类别，`image` 同时匹配 `image/image_edit/layer_split`，其余类别精确匹配。
+行字段为 `id, at, kind, model, label, source, cost_cny, alias, status, duration_s, project_key, member_key, project_label, member_label, thumb_url, href`，本机可带截断后的 prompt，团队不返回 prompt。
+`project_key` 为 `canvas:<id>` 或 `unassigned`（团队为 null），`member_key` 为团队成员 ID（本机为 null）；筛选使用 key，不使用可能重名的显示名称。
 status 保留真实状态（含 pending、done、failed，以及团队 canceled 等）；成功筛选只匹配 done，不把取消算成功。
 本机 duration_s 为终态 completed_at−submitted_at 的秒数，未完成或无完成时间为 null；项目沿用画布名称/未归档，member_label=null。
 团队 project_label=null、member_label 为成员名，cost_cny 始终使用账本 charged_cny（空值按既有账务记 0）；旧账本无执行耗时则 duration_s=null，账本视频 duration 是素材时长，不能当作耗时。
@@ -1026,7 +1028,7 @@ status 保留真实状态（含 pending、done、failed，以及团队 canceled 
 | PATCH /keys/{id} | 修改成员，返回脱敏记录 |
 | POST /keys/{id}/revoke | 撤销，返回脱敏记录 |
 | GET /options | 可授权的模型与上游alias |
-| GET /usage、/usage/tasks | 与本机用量结构一致，固定team；range/member/status/offset/limit筛选 |
+| GET /usage、/usage/tasks | 与本机用量结构一致，固定team；range/member筛选；tasks另支持status/offset/limit/project/model/alias/kind |
 | GET /tasks | scope=active/recent，所有成员任务的安全快照 |
 | GET /live | SSE task事件，4秒心跳；发送前复查权限，客户端另每4秒轮询tasks |
 | GET /members | 上游alias欠费/暂不可用状态 |

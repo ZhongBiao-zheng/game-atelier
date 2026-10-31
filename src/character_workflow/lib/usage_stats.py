@@ -102,21 +102,33 @@ def select_usage(
     return start, sources, selected, current
 
 
+def usage_kind(kind: str) -> str:
+    return "image" if kind in {"image_edit", "layer_split"} else kind
+
+
 def usage_tasks(
     records: list[dict], *, scope: str, period: str, now: datetime,
     source: str = "all", member: str | None = None, status: str = "all",
     offset: int = 0, limit: int = 50,
+    project: str | None = None, model: str | None = None,
+    alias: str | None = None, kind: str | None = None,
 ) -> dict:
     _, _, _, current = select_usage(records, scope=scope, period=period, now=now,
                                      source=source, member=member)
-    filtered = [(row, at) for row, at in current if status == "all"
+    filtered = [(row, at) for row, at in current if (status == "all"
                 or (status == "unpriced" and row["cost_cny"] is None)
-                or row["status"] == status]
+                or row["status"] == status)
+                and (not project or row.get("project") == project)
+                and (not model or row["model"] == model)
+                and (not alias or row.get("alias") == alias)
+                and (not kind or usage_kind(row["kind"]) == kind)]
     filtered.sort(key=lambda pair: (-pair[1].timestamp(), pair[0]["id"]))
     rows = []
     for row, at in filtered[offset:offset + limit]:
         item = {key: value for key, value in row.items() if key not in {"project", "member", "failed"}}
         item["at"] = at.isoformat()
+        item["project_key"] = row.get("project")
+        item["member_key"] = row.get("member")
         rows.append(item)
     end = offset + len(rows)
     return {"rows": rows, "total": len(filtered),
@@ -151,8 +163,7 @@ def aggregate_usage(
     rankings = []
     for row, at in current:
         trend[bucket_start(at).date().isoformat()] += cost(row)
-        kind = "image" if row["kind"] in {"image_edit", "layer_split"} else row["kind"]
-        kinds[kind] += 1
+        kinds[usage_kind(row["kind"])] += 1
     for by in (["model", "project"] if scope == "mine" else ["member", "model"]):
         grouped = {}
         for row, _ in current:

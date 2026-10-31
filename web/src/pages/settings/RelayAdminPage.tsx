@@ -13,6 +13,7 @@ import { KpiRow } from './usage/KpiRow';
 import { TrendChart } from './usage/TrendChart';
 import { RankingCard } from './usage/RankingCard';
 import { TaskTable } from './usage/TaskTable';
+import { useTaskFilters } from './usage/useTaskFilters';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 
@@ -45,7 +46,9 @@ export function useAdminGateways() {
 
 function TeamUsage({ alias }: { alias: string }) {
   const [range, setRange] = useState<UsageRange>('30d');
-  const [member, setMember] = useState(() => new URLSearchParams(window.location.search).get('member') ?? '');
+  const search = useSearch();
+  const member = new URLSearchParams(search).get('member') ?? '';
+  const taskFilters = useTaskFilters();
   const [data, setData] = useState<UsageResponse | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -63,7 +66,7 @@ function TeamUsage({ alias }: { alias: string }) {
           {([['today', '今天'], ['7d', '7 天'], ['30d', '30 天'], ['90d', '90 天'], ['all', '全部']] as const).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
         </SelectContent>
       </Select>
-      <Select value={member || ALL_MEMBERS} onValueChange={value => setMember(value === ALL_MEMBERS ? '' : value)}>
+      <Select value={member || ALL_MEMBERS} onValueChange={value => taskFilters.change({ member: value === ALL_MEMBERS ? '' : value })}>
         <SelectTrigger aria-label="用量成员" className="w-auto"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value={ALL_MEMBERS}>全部成员</SelectItem>
@@ -73,7 +76,9 @@ function TeamUsage({ alias }: { alias: string }) {
     </div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {data && <><KpiRow data={data} /><TrendChart data={data} /><div className="grid gap-4 md:grid-cols-2">{data.rankings.map(ranking => <RankingCard key={ranking.by} ranking={ranking} />)}</div></>}
-    <TaskTable gatewayAlias={alias} scope="team" range={range} source="all" member={member} />
+    <TaskTable key={JSON.stringify([alias, range, member, taskFilters.fields])}
+      gatewayAlias={alias} scope="team" range={range} source="all" member={member} {...taskFilters.fields}
+      memberLabel={data?.members.find(item => item.id === member)?.name} onFiltersChange={taskFilters.change} />
   </section>;
 }
 

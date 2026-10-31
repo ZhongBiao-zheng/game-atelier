@@ -1,14 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Link, useLocation } from 'wouter';
 import { fetchUsageTasks } from '@/api/usage';
-import type { UsageRange, UsageScope, UsageSource, UsageTask, UsageTaskFilter, UsageTasksResponse } from '@/schema/usage';
+import type { UsageRange, UsageScope, UsageSource, UsageTask, UsageTaskFilter, UsageTaskFields, UsageTasksResponse } from '@/schema/usage';
 import { formatGenerationCost } from '@/lib/generationCost';
 import { KindBadge } from './KindBadge';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import type { TaskFilterChanges, TaskFilterName } from './useTaskFilters';
 
-type Filters = { gatewayAlias?: string; scope: UsageScope; range: UsageRange; source: UsageSource; member: string };
+type Filters = UsageTaskFields & {
+  gatewayAlias?: string; scope: UsageScope; range: UsageRange; source: UsageSource; member: string;
+  memberLabel?: string; onFiltersChange?: (changes: TaskFilterChanges) => void;
+};
+const kindLabels: Record<string, string> = { image: '图片', video: '视频', text: '文本', audio: '音频' };
+const fieldLabels = { project: '项目', model: '模型', alias: '供应商', kind: '类型', member: '成员' };
 const statuses: { value: UsageTaskFilter; label: string }[] = [
   { value: 'all', label: '全部' }, { value: 'done', label: '成功' },
   { value: 'failed', label: '失败' }, { value: 'unpriced', label: '未计价' },
@@ -33,18 +39,22 @@ export function TaskTable(filters: Filters) {
   const [error, setError] = useState('');
   const request = useRef(0);
   const [, navigate] = useLocation();
-  const { scope, range, source, member, gatewayAlias } = filters;
+  const { scope, range, source, member, gatewayAlias, project, model, alias, kind, onFiltersChange } = filters;
+  const fields: UsageTaskFields = useMemo(() => ({
+    ...(project ? { project } : {}), ...(model ? { model } : {}),
+    ...(alias ? { alias } : {}), ...(kind ? { kind } : {}),
+  }), [project, model, alias, kind]);
   useEffect(() => {
     const current = ++request.current;
     setData(null);
     setLoading(true);
     setError('');
-    fetchUsageTasks({ scope, range, source, member, status, offset: 0 }, ...(gatewayAlias ? [gatewayAlias] as const : []))
+    fetchUsageTasks({ scope, range, source, member, status, offset: 0, ...fields }, ...(gatewayAlias ? [gatewayAlias] as const : []))
       .then(next => { if (request.current === current) setData(next); })
       .catch(e => { if (request.current === current) setError(e instanceof Error ? e.message : String(e)); })
       .finally(() => { if (request.current === current) setLoading(false); });
     return () => { request.current = current + 1; };
-  }, [scope, range, source, member, status, gatewayAlias]);
+  }, [scope, range, source, member, status, gatewayAlias, fields]);
 
   async function more() {
     if (loading || data?.next_offset == null) return;
@@ -52,10 +62,27 @@ export function TaskTable(filters: Filters) {
     setLoading(true);
     setError('');
     try {
-      const next = await fetchUsageTasks({ scope, range, source, member, status, offset: data.next_offset }, ...(gatewayAlias ? [gatewayAlias] as const : []));
+      const next = await fetchUsageTasks({ scope, range, source, member, status, offset: data.next_offset, ...fields }, ...(gatewayAlias ? [gatewayAlias] as const : []));
       if (current === request.current) setData(previous => ({ ...next, rows: [...(previous?.rows ?? []), ...next.rows] }));
     } catch (e) { if (current === request.current) setError(e instanceof Error ? e.message : String(e)); }
     finally { if (current === request.current) setLoading(false); }
+  }
+
+  function tag(name: TaskFilterName, value: string | null, label: string | null, content?: ReactNode) {
+    if (!value || !label) return '—';
+    const selected = filters[name] === value;
+    return <Hint label={label}><Button type="button" variant="ghost" size="sm" aria-pressed={selected}
+      className={`max-w-full rounded-full px-2 font-normal ${selected ? 'bg-secondary' : ''}`}
+      onClick={event => { event.stopPropagation(); onFiltersChange?.({ [name]: selected ? '' : value }); }}>
+      {content ?? <span className="truncate">{label}</span>}
+    </Button></Hint>;
+  }
+  const active: TaskFilterChanges = { ...fields, ...(scope === 'team' && member ? { member } : {}) };
+  function filterLabel(name: TaskFilterName, value: string) {
+    if (name === 'project') return data?.rows.find(row => row.project_key === value)?.project_label ?? value;
+    if (name === 'member') return filters.memberLabel ?? data?.rows.find(row => row.member_key === value)?.member_label ?? value;
+    if (name === 'kind') return kindLabels[value] ?? value;
+    return value;
   }
 
   function row(task: UsageTask) {
@@ -66,10 +93,11 @@ export function TaskTable(filters: Filters) {
       <td className={`${cell} whitespace-nowrap tabular-nums text-muted-foreground`}>
         {task.href ? <Link href={task.href} aria-label={`查看任务 ${task.id}`} className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{time(task.at)}</Link> : time(task.at)}
       </td>
-      <Hint label={task.project_label ?? undefined}><td className={`${cell} max-w-48 truncate`}>{scope === 'team' ? '—' : task.project_label || '—'}</td></Hint>
-      <Hint label={task.model}><td className={`${cell} max-w-64 truncate font-mono text-xs`}>{task.model}</td></Hint>
-      <td className={`${cell} max-w-40 truncate`}>{(scope === 'team' ? task.member_label : task.alias) || '—'}</td>
-      <td className={`${cell} whitespace-nowrap`}><KindBadge kind={task.kind} /></td>
+      <td className={`${cell} max-w-48`}>{scope === 'team' ? '—' : tag('project', task.project_key, task.project_label)}</td>
+      <td className={`${cell} max-w-64 font-mono text-xs`}>{tag('model', task.model, task.model)}</td>
+      <td className={`${cell} max-w-40`}>{scope === 'team' ? tag('member', task.member_key, task.member_label) : tag('alias', task.alias, task.alias)}</td>
+      <td className={`${cell} whitespace-nowrap`}>{tag('kind', ['image_edit', 'layer_split'].includes(task.kind) ? 'image' : task.kind,
+        kindLabels[['image_edit', 'layer_split'].includes(task.kind) ? 'image' : task.kind] ?? task.kind, <KindBadge kind={task.kind} />)}</td>
       <td className={`${cell} whitespace-nowrap text-right tabular-nums ${slow ? warning : 'text-muted-foreground'}`}>{duration(task.duration_s)}</td>
       <td className={`${cell} whitespace-nowrap text-right tabular-nums ${task.cost_cny === null ? warning : ''}`}>{task.cost_cny === null ? '未计价' : formatGenerationCost(task.cost_cny)}</td>
       <td className={`${cell} whitespace-nowrap`}><span className={`flex items-center gap-1.5 ${task.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
@@ -86,6 +114,15 @@ export function TaskTable(filters: Filters) {
         {statuses.map(item => <ToggleGroupItem key={item.value} value={item.value}>{item.label}</ToggleGroupItem>)}
       </ToggleGroup>
     </div>
+    {Object.keys(active).length > 0 && <div className="flex flex-wrap items-center gap-2" aria-label="任务筛选条件">
+      {Object.entries(active).map(([name, value]) => <Button key={name} type="button" variant="outline" size="sm"
+        className="max-w-full rounded-full" aria-label={`移除${fieldLabels[name as TaskFilterName]}筛选`}
+        onClick={() => onFiltersChange?.({ [name]: '' })}>
+        <span className="truncate">{fieldLabels[name as TaskFilterName]}：{filterLabel(name as TaskFilterName, value)}</span><span aria-hidden>×</span>
+      </Button>)}
+      {Object.keys(active).length >= 2 && <Button type="button" variant="ghost" size="sm"
+        onClick={() => onFiltersChange?.(Object.fromEntries(Object.keys(active).map(name => [name, ''])))}>清除筛选</Button>}
+    </div>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {!data && loading && <p role="status" className="text-sm text-muted-foreground">读取任务中…</p>}
     {data && <>

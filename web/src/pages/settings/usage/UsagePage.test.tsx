@@ -1,5 +1,5 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { hoverHint } from '@/test/hint';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
@@ -12,9 +12,11 @@ import { QuotaCard } from './QuotaCard';
 import { TaskTable } from './TaskTable';
 import { KpiRow } from './KpiRow';
 import { TrendChart } from './TrendChart';
+import { RelayAdminPage } from '../RelayAdminPage';
 vi.mock('@/api/usage', () => ({ fetchUsage: vi.fn(), fetchUsageTasks: vi.fn() }));
 vi.mock('@/api/gateway', () => ({ fetchGateway: vi.fn(), fetchGatewayProviderMe: vi.fn() }));
 vi.mock('@/api/keys', () => ({ listKeys: vi.fn() }));
+vi.mock('@/api/gatewayEvents', () => ({ subscribeGatewayEvents: vi.fn(() => () => {}) }));
 const empty: UsageResponse = {
   scope: 'mine',
   range: '30d',
@@ -131,9 +133,72 @@ it('额度超过 90% 使用警告色', async () => {
 const task: UsageTask = {
   id: 'job-1', at: '2026-10-25T10:00:00Z', model: 'gpt-image-2', kind: 'image',
   alias: 'Tuzi', status: 'done', duration_s: 75, project_label: '测试项目', member_label: null,
+  project_key: 'canvas:test', member_key: null,
   cost_cny: null, label: '测试项目', source: 'local', thumb_url: null, href: '/canvas/test',
 };
 const filters = { scope: 'mine' as const, range: '30d' as const, source: 'all' as const, member: '' };
+async function clickTaskControl(element: HTMLElement) {
+  await act(async () => { fireEvent.click(element); });
+}
+it('任务 tag 叠加 URL 筛选，点击不跳转，chip 逐项移除并支持清空', async () => {
+  vi.mocked(fetchUsage).mockResolvedValue({ ...empty, totals: { ...empty.totals, count: 2 } });
+  vi.mocked(fetchUsageTasks).mockResolvedValue({ rows: [{ ...task, kind: 'image_edit' }], total: 1, next_offset: null });
+  const location = setup('/settings/usage?range=7d');
+  await clickTaskControl(await screen.findByRole('button', { name: 'gpt-image-2' }));
+  await waitFor(() => expect(fetchUsageTasks).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'gpt-image-2', offset: 0 })));
+  expect(location.history.at(-1)).toContain('/settings/usage?');
+  expect(location.history.at(-1)).toContain('task_model=gpt-image-2');
+  expect(location.history).not.toContain('/canvas/test');
+  await clickTaskControl(await screen.findByRole('button', { name: '测试项目' }));
+  await waitFor(() => expect(fetchUsageTasks).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'gpt-image-2', project: 'canvas:test' })));
+  expect(await screen.findByRole('button', { name: 'gpt-image-2' })).toHaveAttribute('aria-pressed', 'true');
+  await clickTaskControl(screen.getByRole('button', { name: '移除模型筛选' }));
+  await waitFor(() => expect(location.history.at(-1)).not.toContain('task_model'));
+  expect(location.history.at(-1)).toContain('task_project=canvas%3Atest');
+  await clickTaskControl(await screen.findByRole('button', { name: '图片' }));
+  await waitFor(() => expect(fetchUsageTasks).toHaveBeenLastCalledWith(expect.objectContaining({ project: 'canvas:test', kind: 'image' })));
+  await clickTaskControl(screen.getByRole('button', { name: '清除筛选' }));
+  await waitFor(() => expect(location.history.at(-1)).toBe('/settings/usage?range=7d'));
+  await clickTaskControl(await screen.findByRole('button', { name: 'Tuzi' }));
+  await waitFor(() => expect(fetchUsageTasks).toHaveBeenLastCalledWith(expect.objectContaining({ alias: 'Tuzi' })));
+  await clickTaskControl(await screen.findByRole('button', { name: 'Tuzi' }));
+  await waitFor(() => expect(location.history.at(-1)).not.toContain('task_alias'));
+  await clickTaskControl(await screen.findByText('1m 15s'));
+  expect(location.history.at(-1)).toBe('/canvas/test');
+});
+it('从 URL 恢复任务筛选并在加载更多时保留全部条件', async () => {
+  vi.mocked(fetchUsage).mockResolvedValue({ ...empty, totals: { ...empty.totals, count: 99 } });
+  vi.mocked(fetchUsageTasks).mockResolvedValueOnce({ rows: [task], total: 51, next_offset: 50 })
+    .mockResolvedValueOnce({ rows: [{ ...task, id: 'next' }], total: 51, next_offset: null });
+  setup('/settings/usage?task_project=canvas%3Atest&task_model=gpt-image-2&task_alias=Tuzi&task_kind=image');
+  await clickTaskControl(await screen.findByRole('button', { name: '加载更多' }));
+  await waitFor(() => expect(fetchUsageTasks).toHaveBeenLastCalledWith(expect.objectContaining({
+    project: 'canvas:test', model: 'gpt-image-2', alias: 'Tuzi', kind: 'image', offset: 50,
+  })));
+  expect(screen.getByRole('heading', { name: '任务 51' })).toBeInTheDocument();
+});
+it('团队同名成员 tag 按 ID 筛选整个页面', async () => {
+  vi.mocked(fetchUsage).mockResolvedValue({ ...empty, scope: 'team', totals: { ...empty.totals, count: 2 } });
+  vi.mocked(fetchUsageTasks).mockResolvedValue({ rows: [{ ...task, project_key: null, project_label: null, member_key: 'k1', member_label: '小王' }], total: 1, next_offset: null });
+  const location = setup('/settings/usage?scope=team');
+  await clickTaskControl(await screen.findByRole('button', { name: '小王' }));
+  await waitFor(() => expect(fetchUsage).toHaveBeenLastCalledWith(expect.objectContaining({ member: 'k1' })));
+  expect(location.history.at(-1)).toContain('member=k1');
+  expect(fetchUsageTasks).toHaveBeenLastCalledWith(expect.objectContaining({ member: 'k1' }));
+  expect(await screen.findByRole('button', { name: '小王' })).toHaveAttribute('aria-pressed', 'true');
+});
+it('中转管理页恢复任务条件并通过同一 URL 更新成员筛选', async () => {
+  vi.mocked(listKeys).mockResolvedValue({ keys: [{ alias: 'Relay', provider: 'atelier', enabled: true }] as never });
+  vi.mocked(fetchGatewayProviderMe).mockResolvedValue({ role: 'admin' } as Awaited<ReturnType<typeof fetchGatewayProviderMe>>);
+  vi.mocked(fetchUsageTasks).mockResolvedValue({ rows: [{ ...task, member_key: 'k1', member_label: '小王' }], total: 1, next_offset: null });
+  const location = memoryLocation({ path: '/settings/relay-admin?alias=Relay&view=usage&task_model=gpt-image-2', record: true });
+  render(<Router hook={location.hook} searchHook={location.searchHook}><RelayAdminPage /></Router>);
+  await clickTaskControl(await screen.findByRole('button', { name: '小王' }));
+  await waitFor(() => expect(fetchUsageTasks).toHaveBeenLastCalledWith(expect.objectContaining({ member: 'k1', model: 'gpt-image-2' }), 'Relay'));
+  expect(fetchUsage).toHaveBeenLastCalledWith(expect.objectContaining({ member: 'k1' }), 'Relay');
+  expect(location.history.at(-1)).toContain('view=usage');
+  expect(location.history.at(-1)).toContain('member=k1');
+});
 it('趋势金额的无障碍标签和 tooltip 使用统一格式', async () => {
   render(<TrendChart data={{ ...empty, trend: [{ start: '2026-10-27', cost_cny: 0.3 }] }} />);
   expect(await hoverHint(screen.getByRole('img', { name: '2026-10-27 0.3¥' }))).toHaveTextContent('2026-10-27 · 0.3¥');
@@ -180,7 +245,7 @@ it('筛选改变后忽略旧分页响应，点击当前筛选不丢失请求', a
   expect(screen.queryByText('gpt-image-2')).not.toBeInTheDocument();
 });
 it('团队任务替换成员列，不显示项目，未知耗时为横线', async () => {
-  vi.mocked(fetchUsageTasks).mockResolvedValue({ rows: [{ ...task, project_label: null, member_label: '小王', duration_s: null }], total: 1, next_offset: null });
+  vi.mocked(fetchUsageTasks).mockResolvedValue({ rows: [{ ...task, project_label: null, project_key: null, member_key: 'k1', member_label: '小王', duration_s: null }], total: 1, next_offset: null });
   render(<TaskTable {...filters} scope="team" member="k1" />);
   const table = await screen.findByRole('table');
   expect(within(table).getByRole('columnheader', { name: '成员' })).toBeInTheDocument();

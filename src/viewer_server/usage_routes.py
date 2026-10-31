@@ -135,8 +135,11 @@ def get_usage_tasks(
     source: Literal["all", "local", "lan"] = "all", member: str | None = None,
     status: Literal["all", "done", "failed", "unpriced"] = "all",
     offset: int = Query(default=0, ge=0), limit: int = Query(default=50, ge=1, le=200),
+    project: str | None = None, model: str | None = None,
+    alias: str | None = None, kind: str | None = None,
 ) -> dict:
     now = datetime.now().astimezone()
     records, _ = _usage_records(scope, range, now)
     return usage_tasks(records, scope=scope, period=range, now=now, source=source,
-                       member=member, status=status, offset=offset, limit=limit)
+                       member=member, status=status, offset=offset, limit=limit,
+                       project=project, model=model, alias=alias, kind=kind)
