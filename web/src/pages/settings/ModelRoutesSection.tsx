@@ -71,10 +71,10 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
     void save(route, () => setModelRouteOrder(route.modality, route.id, aliases));
   }
 
-  return <section aria-label="模型路由" className="space-y-5">
+  return <section aria-label="智能路由" className="space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div aria-label="面包屑" className="flex items-center gap-1.5 text-sm">
-        <span className="text-muted-foreground">模型 /</span><h1 className="text-sm font-semibold">路由</h1>
+        <span className="text-muted-foreground">模型 /</span><h1 className="text-sm font-semibold">智能路由</h1>
         <Hint label={HINT}><Button variant="bare" type="button" aria-label={HINT} className="rounded text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><HelpCircle className="size-3.5" aria-hidden /></Button></Hint>
       </div>
       <Tabs value={modality} onValueChange={value => setModality(value as ModelRoute['modality'])}>

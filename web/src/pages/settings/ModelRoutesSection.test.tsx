@@ -32,6 +32,9 @@ describe('ModelRoutesSection', () => {
     vi.mocked(setModelRouteOrder).mockResolvedValue({ ...shared, candidate_alias: 'HK', members: [member('HK'), member('Tuzi')] });
     render(<ModelRoutesSection reloadToken={0} />);
     const order = await screen.findByRole('list', { name: 'gpt-image-2 的供应商顺序' });
+    expect(screen.getByRole('region', { name: '智能路由' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '智能路由' })).toBeInTheDocument();
+    expect(screen.getByLabelText('面包屑')).toHaveTextContent('模型 /智能路由');
     expect(screen.getByText('flux-3').closest('details')).not.toHaveAttribute('open');
     expect(within(order).getAllByRole('listitem')[0]).toHaveTextContent('1Tuzi');
     expect(screen.getByText('当前走 Tuzi')).toBeInTheDocument();

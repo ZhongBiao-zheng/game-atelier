@@ -25,7 +25,7 @@ export const CONSOLE_NAV: {
   { group: '模型', items: [
     { path: '/settings/providers', label: '供应商', page: ProvidersPage, icon: KeyRound },
     { path: '/settings/relay-admin', label: '中转管理', page: RelayAdminPage, icon: Server },
-    { path: '/settings/routes', label: '路由', page: RoutesPage, icon: Split },
+    { path: '/settings/routes', label: '智能路由', page: RoutesPage, icon: Split },
     { path: '/settings/gateway', label: '网关', page: GatewayPage, icon: Server, hint: GATEWAY_HINT },
   ] },
   { group: '观测', items: [{ path: '/settings/usage', label: '用量', page: UsagePage, icon: BarChart3 }] },
