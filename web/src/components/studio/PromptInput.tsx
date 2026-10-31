@@ -3,6 +3,7 @@ import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowUp, BookmarkPlus, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Video, X } from 'lucide-react';
+import { prefetchModelPickerMetrics } from '@/lib/useModelPickerMetrics';
 import { ModelPickerList } from '@/components/ModelPickerList';
 import { modelBrand, modelDisplayName, sortModels } from '@/lib/modelCatalog';
 import { modelModality, type KeyView } from '@/api/keys';
@@ -647,6 +648,14 @@ export function PromptInput({
     Boolean(provider && selectedModel && text.trim() && !disabled) && !lastFrameOnlyBlocked
       && !variableError
       && (isVideo || !imageSizeError(sizeParams, selectedModel?.id));
+  const pickerParams = { image: { ...sizeParams, quality,
+                  reference_images: referenceImages.map(() => 'reference'),
+                }, video: {
+                  duration, resolution: videoResolution, ratio: videoRatio, quality: videoQuality,
+                  generate_audio: generateAudio,
+                  reference_videos: referenceVideos.length ? ['reference'] : [],
+                } };
+
   // 控件行右缘渐隐 + 箭头几何：悬停时为箭头让出 36px 槽位，渐隐带 40px 落在箭头左侧。
   const SCROLL_ARROW = 36;
   const SCROLL_FADE = 40;
@@ -1180,6 +1189,8 @@ export function PromptInput({
             <ControlButton
               active={openPanel === 'model'}
               aria-label="选择模型"
+              onPointerEnter={() => void prefetchModelPickerMetrics(pickerChoices, pickerParams)}
+              onFocus={() => void prefetchModelPickerMetrics(pickerChoices, pickerParams)}
               onClick={() => setOpenPanel(openPanel === 'model' ? null : 'model')}
               disabled={!provider || models.length === 0}
             >
@@ -1196,13 +1207,7 @@ export function PromptInput({
             >
               <ModelPickerList choices={pickerChoices} selected={`${provider?.alias}:${model}`}
                 initialKind={wantedModality} sections
-                params={{ image: { ...sizeParams, quality,
-                  reference_images: referenceImages.map(() => 'reference'),
-                }, video: {
-                  duration, resolution: videoResolution, ratio: videoRatio, quality: videoQuality,
-                  generate_audio: generateAudio,
-                  reference_videos: referenceVideos.length ? ['reference'] : [],
-                } }}
+                params={pickerParams}
                 onSelect={choice => {
                   const nextKind = modelModality(choice.model, choice.key) === 'video' ? 'video' : 'image';
                   if (nextKind !== kind) onKindChange?.(nextKind);
