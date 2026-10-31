@@ -33,6 +33,8 @@ interface Props extends ToolbarPopoverMenuProps {
   onGenerateAudioChange: (generateAudio: boolean) => void;
   onWatermarkChange?: (watermark: boolean) => void;
   referenceLimitLabel?: (mode: VideoMode) => string;
+  /** fill：占满剩余宽度、放不下时截断参数摘要（画布节点单排底栏）；content：按内容宽，交给外层横滚。 */
+  fit?: 'fill' | 'content';
 }
 
 /** 生成方式 / 比例 / 清晰度（或档位）/ 生成时长 / 生成音频 多合一：
@@ -58,6 +60,7 @@ export function VideoControls({
   referenceLimitLabel,
   menuDirection = 'up',
   portalContainerRef,
+  fit = 'content',
 }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -70,7 +73,7 @@ export function VideoControls({
   ].filter(Boolean).join(' · ');
 
   return (
-    <div ref={wrapRef} className="relative min-w-0 flex-1">
+    <div ref={wrapRef} className={cn('relative', fit === 'fill' && 'min-w-0 flex-1')}>
       <Button variant="bare"
         type="button"
         aria-label="视频设置"

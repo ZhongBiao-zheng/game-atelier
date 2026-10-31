@@ -2447,6 +2447,7 @@ export function CanvasGenerationComposer({
         )}
           {draft.mode === 'video' && videoCaps && (
           <VideoControls
+            fit="fill"
             caps={videoCaps}
             mode={videoMode}
             duration={Number(draft.params.duration ?? videoCaps.durations[0] ?? 5)}

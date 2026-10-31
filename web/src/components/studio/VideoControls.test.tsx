@@ -29,6 +29,14 @@ function setup(overrides = {}) {
 }
 
 describe('VideoControls（五合一汇总按钮）', () => {
+  it('stretches and truncates only in the canvas single-row bar, staying content-sized in the studio scroller', () => {
+    const { rerender } = render(<VideoControls {...setupProps()} />);
+    const wrapper = screen.getByRole('button', { name: '视频设置' }).parentElement!;
+    expect(wrapper).not.toHaveClass('flex-1');
+    rerender(<VideoControls {...setupProps()} fit="fill" />);
+    expect(wrapper).toHaveClass('min-w-0', 'flex-1');
+  });
+
   it('shows a watermark section only when the model and caller support it', () => {
     const onWatermarkChange = vi.fn();
     const { rerender } = render(
