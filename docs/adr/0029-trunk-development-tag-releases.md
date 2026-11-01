@@ -11,7 +11,7 @@ status: accepted
 - main 是开发主干；dev 在首次过渡完成后冻结保留，不删除。既有未合并工作不自动并入。
 - 日常开发不 bump 版本。发版提交统一修改 plugin.json 版本和 changelog 最新条目；推送 main 后，由用户明确授权运行 make release。
 - make release 检查 main、干净工作区、正式版本、最新日志、本地与远端 tag 不存在，以及 HEAD 等于实时查询的 origin/main。任何失败均不推 tag。
-- vX.Y.Z tag 推送后，发布流水线依赖 macOS/Linux/Windows 的完整测试；Windows 在发布调用中必须阻塞。测试通过才构建，构建通过才发布 GitHub Release，发布后才镜像 CNB。
+- vX.Y.Z tag 推送后，发布流水线不重跑测试，而是要求 tag 指向的提交在 main 上的 CI 与 CI (Windows) 每个 job 都成功（Windows 日常非阻塞，发布时其失败同样拒绝）；该提交没跑过 CI（如纯文档提交）也拒绝。测试通过才构建，构建通过才发布 GitHub Release，发布后才镜像 CNB。
 - 源码更新优先查询 CNB 正式 tag，失败时使用 GitHub 已发布的正式 Release；只 fetch 指定 tag 并 fast-forward，不追踪任何分支。安装包只通过 HTTP 查询 GitHub Release，不自动替换文件。
 - CNB 最新 Release API 匿名实测返回401，不能作为安装包查询源。CNB tag 推送发生于 GitHub Release 发布后，附件同步可能随后失败；因此 CNB 裸 tag 证明代码已通过上游门禁，不证明附件已同步完成。
 - 更新发现总等待预算3秒，CNB优先阶段最多1.5秒；成功缓存24小时，失败缓存1小时。缓存按渠道和查询模式隔离，旧 main 版本缓存不复用。

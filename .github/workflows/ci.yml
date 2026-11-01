@@ -3,11 +3,19 @@ name: CI
 on:
   push:
     branches: [main]
+    # 纯文档提交不跑 CI；测试和插件检查会读的文档重新纳入。Release 只接受跑过 CI 的提交。
+    paths:
+      - '**'
+      - '!**/*.md'
+      - '!docs/**'
+      - 'README.md'
+      - 'skills/**'
+      - 'docs/references/**'
+      - 'docs/team-library-format.md'
   pull_request:
-  workflow_call:
 
 jobs:
-  test:
+  pytest:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -26,11 +34,17 @@ jobs:
       - name: Install Python deps
         run: uv sync
 
-      - name: Run ruff
-        run: uv run ruff check src scripts tests
-
       - name: Run pytest
-        run: uv run pytest -v
+        run: uv run pytest -v -n auto
+
+  vitest:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -48,6 +62,37 @@ jobs:
       - name: Run vitest
         working-directory: web
         run: pnpm test
+
+  # 与平台无关的检查只在 Ubuntu 跑一次。
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install Python deps
+        run: uv sync
+
+      - name: Run ruff
+        run: uv run ruff check src scripts tests
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+
+      - name: Install web deps
+        working-directory: web
+        run: pnpm install --frozen-lockfile
 
       - name: Type check
         working-directory: web

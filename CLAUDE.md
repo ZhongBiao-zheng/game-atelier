@@ -149,7 +149,7 @@ uv run python src/viewer_server/server.py open-browser
 - 日常开发直接在 `main` 提交并推送；`main` 是开发主干，用户更新渠道为通过门禁的正式 Release/tag。
 - 日常提交不 bump 版本。发版提交统一修改 `.claude-plugin/plugin.json` 和 `web/src/lib/changelog.ts`，验证并推送后运行 `make release`。
 - 推 `v*` tag 属于对外发布，必须获得飙哥针对本次发版的明确授权；普通开发、提交和推送不构成发布授权。
-- 发布 CI 三平台测试全部通过后才构建安装包、发布 GitHub Release、镜像到 CNB。
+- 发布流水线不重跑测试：确认 tag 提交在 main 上的三平台 CI 全部通过后才构建安装包、发布 GitHub Release、镜像到 CNB。纯文档提交不触发 CI，不能直接打 tag。
 - 首次过渡例外：本次发布机制改造仍在 `dev` 实施，合入 `main` 与第一个 tag 分别等飙哥确认。过渡完成后 `dev` 冻结保留，不删除；其他既有未合并工作不自动吸收。详见 ADR-0029。
 
 ### Product features

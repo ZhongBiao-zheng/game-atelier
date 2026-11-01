@@ -3,18 +3,23 @@ name: CI (Windows)
 on:
   push:
     branches: [main]
+    # 与 ci.yml 相同：纯文档提交不跑；测试会读的文档重新纳入。
+    paths:
+      - '**'
+      - '!**/*.md'
+      - '!docs/**'
+      - 'README.md'
+      - 'skills/**'
+      - 'docs/references/**'
+      - 'docs/team-library-format.md'
   pull_request:
   workflow_dispatch:
-  workflow_call:
-    inputs:
-      blocking:
-        type: boolean
-        default: false
 
+# 日常非阻塞：job 失败时 run 结论仍为 success。Release 逐个检查 job 结论，失败照样拒绝发版。
 jobs:
-  test-windows:
+  pytest-windows:
     runs-on: windows-latest
-    continue-on-error: ${{ !inputs.blocking }} # 发布调用必须阻塞；日常保持非阻塞
+    continue-on-error: true
     env:
       # Windows 默认 stdio/文件编码非 UTF-8（cp1252/cp936），撞仓库里大量中文内容会
       # UnicodeDecode/EncodeError。UTF-8 模式让 open()/read_text()/subprocess text 一律 UTF-8，
@@ -49,7 +54,13 @@ jobs:
           }
 
       - name: Run pytest
-        run: uv run pytest -v
+        run: uv run pytest -v -n auto
+
+  vitest-windows:
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Set up Node
         uses: actions/setup-node@v4
