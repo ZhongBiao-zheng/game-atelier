@@ -62,7 +62,7 @@ jobs:
         include:
           - runner: windows-latest
             platform: windows-x64
-          - runner: macos-14
+          - runner: macos-15
             platform: macos-arm64
           - runner: ubuntu-22.04
             platform: linux-x64
