@@ -82,7 +82,7 @@ export function ComfyWorkflows({ alias }: { alias: string }) {
             </Label>}
             <div className="space-y-3">{draft.inputs.map((item, index) => <div key={item.id} className="space-y-2 rounded-lg border border-border p-3">
               <div className="flex items-center gap-3">
-                <div className="mr-auto flex min-w-0 items-center gap-2 text-xs"><span className="truncate">{item.label}</span><span className="shrink-0 text-muted-foreground">{LABELS[TYPES.indexOf(item.type)]}</span></div>
+                <div className="mr-auto flex min-w-0 items-center gap-2 text-xs"><span className="truncate">{item.label}</span>{item.label !== LABELS[TYPES.indexOf(item.type)] && <span className="shrink-0 text-muted-foreground">{LABELS[TYPES.indexOf(item.type)]}</span>}</div>
                 <Label className="flex items-center gap-2 text-xs"><Checkbox checked={item.required} onCheckedChange={value => patch(index, { required: value === true })} />必填</Label>
                 <Button variant="ghost" size="sm" onClick={() => setDraft({ ...draft, inputs: draft.inputs.filter((_, i) => i !== index) })}>删除输入</Button>
               </div>
