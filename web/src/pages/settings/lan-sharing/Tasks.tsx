@@ -62,7 +62,7 @@ export function Tasks({ onFinished, gatewayAlias }: { onFinished: () => void; ga
       <div className="flex flex-wrap gap-x-3 gap-y-1">
         <KindBadge kind={task.kind} /><span>{task.key_name}</span><Hint label={task.route_id}><span className="max-w-64 truncate">{task.route_id}</span></Hint>
         <span>{task.member_trail.length ? task.member_trail.join(' → ') : task.member_alias ?? '—'}</span>
-        <span className="text-muted-foreground">{PHASES[task.phase ?? task.status] ?? task.phase}</span>
+        <span className="text-muted-foreground">{task.phase?.startsWith('queued:') ? `排队第 ${task.phase.slice(7)} 位` : PHASES[task.phase ?? task.status] ?? task.phase}</span>
         <span className={`tabular-nums ${preview ? 'text-muted-foreground' : 'text-primary'}`}>{preview ? date(task.updated_at) : `${Math.max(0, Math.floor((now - Date.parse(task.created_at)) / 1000))} 秒`}</span>
       </div>
       {task.kind !== 'text' && task.prompt && <details><summary className="cursor-pointer truncate text-muted-foreground">{task.prompt}</summary><p className="whitespace-pre-wrap break-words pt-2">{task.prompt}</p></details>}

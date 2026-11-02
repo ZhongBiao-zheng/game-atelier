@@ -34,3 +34,14 @@ it('ignores stale events and never renders a text prompt', async () => {
   act(() => listener(task({ kind: 'text', prompt: 'private text prompt' })));
   expect(screen.queryByText('private text prompt')).not.toBeInTheDocument();
 });
+
+it('shows ComfyUI queue position and clears it when execution starts', async () => {
+  vi.mocked(fetchGatewayTasks).mockResolvedValue([]);
+  render(<Tasks onFinished={vi.fn()} />);
+  await waitFor(() => expect(fetchGatewayTasks).toHaveBeenCalledTimes(2));
+  act(() => listener(task({ phase: 'queued:3' })));
+  expect(screen.getByText('排队第 3 位')).toBeInTheDocument();
+  act(() => listener(task({ phase: 'sent', updated_at: '2026-10-24T00:01:00Z' })));
+  expect(screen.queryByText('排队第 3 位')).not.toBeInTheDocument();
+  expect(screen.getByText('已提交')).toBeInTheDocument();
+});

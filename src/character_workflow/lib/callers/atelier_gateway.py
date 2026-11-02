@@ -321,7 +321,7 @@ def _poll(session, base, headers, task_id, phase, cancelled) -> dict[str, Any]:
             return status
         if status.get("phase") and status["phase"] != last_phase:
             last_phase = status["phase"]
-            if last_phase not in {"queued", "sent"}:
+            if last_phase != "queued":
                 phase(last_phase)
         time.sleep(POLL_INTERVAL_SECONDS)
 

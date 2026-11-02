@@ -6,8 +6,10 @@ from fastapi.testclient import TestClient
 
 from character_workflow.lib import gateway_keys, gateway_tasks, keys, model_routes
 from character_workflow.lib.callers import atelier_gateway
-from tests.test_comfyui import host, imported  # noqa: F401 — 共用隔离假 ComfyUI fixture
+from tests.test_comfyui import host as comfy_host, imported
 from viewer_server.gateway_app import create_gateway_app
+
+host = comfy_host
 
 
 @pytest.fixture
@@ -213,3 +215,32 @@ def test_member_caller_sends_mask_and_values(live_gateway, host, tmp_path):
     assert graph["2"]["inputs"]["strength_model"] == 0.35
     assert graph["11"]["inputs"]["image"] == "uploaded-2.png"
     assert b"separate-mask" in host.uploads[1]
+
+
+def test_member_job_observes_queue_and_leaves_queue_when_running(live_gateway, host, monkeypatch):
+    from character_workflow.lib import job_runner
+    from character_workflow.lib.callers import comfyui
+    from character_workflow.lib.jobs import read_job, save_job
+    from character_workflow.lib.schemas import Job, JobParams
+
+    workflow = imported()
+    atelier_gateway.sync_gateway_key("Hub")
+    monkeypatch.setattr(comfyui, "POLL_INTERVAL", 0.04)
+    phases = []
+    update = job_runner.update_job_phase
+
+    def observe(job_id, phase):
+        update(job_id, phase)
+        phases.append(read_job(job_id).progress_phase)
+
+    monkeypatch.setattr(job_runner, "update_job_phase", observe)
+    save_job(Job(job_id="member-queue", character_id="A", prompt="cat", model=workflow.id,
+                 alias="Hub", provider="atelier", namespace="studio", params=JobParams(n=1),
+                 output_paths=[], status="pending", error=None,
+                 submitted_at="2026-11-02T00:00:00+00:00"))
+    done = job_runner.run_job("member-queue")
+    assert done.status.value == "done", done.error
+    queued = phases.index("queued:1")
+    assert "sent" in phases[queued + 1:]
+    assert done.progress_phase is None
+    assert gateway_tasks.MAX_RUNNING == 8 and gateway_tasks.MAX_RUNNING_PER_KEY == 4
