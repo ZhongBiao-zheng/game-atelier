@@ -94,9 +94,11 @@ class Handler(BaseHTTPRequestHandler):
             if state.mode == "error":
                 status = {"status_str": "error", "completed": False, "messages": [
                     ["execution_error", {"node_id": "3", "exception_message": "fake execution error"}]]}
-            return self.respond({identifier: {"status": status, "outputs": {"9": {"images": [
+            return self.respond({identifier: {"status": status, "outputs": {node_id: {"images": [
                 {"filename": "result.png", "subfolder": "atelier", "type": "output"},
-                {"filename": "preview.png", "subfolder": "", "type": "temp"}]}}}})
+                {"filename": "preview.png", "subfolder": "", "type": "temp"}]}
+                for node_id, node in state.prompts[identifier]["prompt"].items()
+                if node["class_type"] == "SaveImage"}}})
         if path == "/view":
             return self.respond(state.png)
         self.respond({}, 404)

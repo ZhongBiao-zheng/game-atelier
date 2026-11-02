@@ -141,3 +141,75 @@ def test_connection_lost_after_submission_is_not_safe_to_retry(client, host, mon
     task = submit(client, workflow)
     assert task.status == "failed" and task.error_kind == "unconfirmed"
     assert "未确认" in task.error and len(host.prompts) == 1
+
+
+@pytest.fixture
+def live_gateway(host, monkeypatch):
+    import time
+    from tests.test_gateway_client import _free_port
+    from viewer_server.gateway_app import GatewayServer
+
+    model_routes._cooldowns.clear()
+    monkeypatch.setattr(atelier_gateway, "POLL_INTERVAL_SECONDS", 0.01)
+    record, token = gateway_keys.create_key("成员", None)
+    server = GatewayServer(host="127.0.0.1")
+    port = _free_port()
+    base = f"http://127.0.0.1:{port}"
+    server.start(port)
+    try:
+        for _ in range(50):
+            try:
+                atelier_gateway.check_gateway(base, token)
+                break
+            except Exception:  # noqa: BLE001 — 等待本机 HTTP 服务启动
+                time.sleep(0.05)
+        keys.add_key(keys.KeySpec(alias="Hub", provider="atelier", access_key=token,
+                                  base_url=base, created_at="test"))
+        yield record
+    finally:
+        server.stop()
+        model_routes._cooldowns.clear()
+
+
+def test_member_job_preserves_all_save_images_and_zero_cost(live_gateway, host):
+    from pathlib import Path
+    from character_workflow.lib import comfyui_workflows as workflows, job_runner
+    from character_workflow.lib.jobs import save_job
+    from character_workflow.lib.schemas import Job, JobParams
+
+    workflow = imported()
+    graph = workflow.api_workflow
+    graph["99"] = {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": "x"}}
+    workflows.save_workflow("local", name=workflow.name, api_workflow=graph,
+                            inputs=workflow.inputs, identifier=workflow.id)
+    atelier_gateway.sync_gateway_key("Hub")
+    save_job(Job(job_id="member-workflow", character_id="A", prompt="cat", model=workflow.id,
+                 alias="Hub", provider="atelier", namespace="studio", params=JobParams(n=1),
+                 output_paths=[], status="pending", error=None,
+                 submitted_at="2026-11-02T00:00:00+00:00"))
+    done = job_runner.run_job("member-workflow")
+    assert done.status.value == "done", done.error
+    assert len(done.output_paths) == 2
+    assert all(Path(path).read_bytes() == host.png for path in done.output_paths)
+    assert done.params.actual_cost_cny == 0
+    task = gateway_tasks.get_task(live_gateway.id, done.params.provider_task_ids[0])
+    assert task.actual_cost_cny == task.charged_cny == 0
+    assert task.created_at <= task.updated_at
+    assert done.completed_at and done.completed_at > done.submitted_at
+
+
+def test_member_caller_sends_mask_and_values(live_gateway, host, tmp_path):
+    workflow = imported("inpaint")
+    atelier_gateway.sync_gateway_key("Hub")
+    ref, mask = tmp_path / "ref.png", tmp_path / "mask.png"
+    ref.write_bytes(host.png)
+    mask.write_bytes(b"separate-mask")
+    strength = next(i for i in workflow.inputs if i.type == "float")
+    params = {"workflow_inputs": {strength.id: 0.35}, "reference_images": [str(ref)], "mask_image": str(mask)}
+    outputs = atelier_gateway.render(prompt="cat", model=workflow.id, alias="Hub",
+                                      output_dir=tmp_path / "out", params=params)
+    assert len(outputs) == 1
+    graph = host.prompts["prompt-1"]["prompt"]
+    assert graph["2"]["inputs"]["strength_model"] == 0.35
+    assert graph["11"]["inputs"]["image"] == "uploaded-2.png"
+    assert b"separate-mask" in host.uploads[1]

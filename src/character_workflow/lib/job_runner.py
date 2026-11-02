@@ -658,7 +658,7 @@ def _run_once(
             first_dims: tuple[int, int] | None = None
             selected_outputs = (
                 selected
-                if params.get("layer_decomposition") or job.provider == "comfyui"
+                if params.get("layer_decomposition") or _is_workflow_job(job)
                 else selected[: max(1, int(params.get("n") or 1))]
             )
             with asset_output_lock(output_dir):
@@ -732,6 +732,14 @@ def _run_once(
 
 _REFERENCE_MENTION = re.compile(r"(?:图片|图)\d+")
 _REFERENCE_NUMBERING_MARK = "参考素材编号："
+
+
+def _is_workflow_job(job: Job) -> bool:
+    from character_workflow.lib.keys import find_by_alias
+
+    key = find_by_alias(job.alias or "")
+    return bool(key and any(model.id == job.model and model.workflow_inputs is not None
+                            for model in key.models))
 
 
 def _with_reference_numbering(prompt: str, params: dict[str, Any]) -> str:

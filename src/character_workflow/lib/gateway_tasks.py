@@ -472,7 +472,7 @@ def run_task(task: GatewayTask) -> GatewayTask:
                     should_cancel=should_cancel,
                 )
                 return _store_outputs(task_id, [Path(path) for path in paths],
-                                      cost.pop("usd", None), params)
+                                      0.0 if key.provider == "comfyui" else cost.pop("usd", None), params)
             except Exception as error:  # noqa: BLE001 — 每种失败都要落成终态
                 _record_cost(task_id, cost.get("usd"))
                 if isinstance(error, JobCanceled) or should_cancel():
@@ -554,7 +554,7 @@ def _store_outputs(task_id: str, paths: list[Path], cost_usd: float | None,
     modality = modality_for(task.kind)
     validate = {"image": image_dimensions, "video": is_valid_video, "audio": is_valid_audio}[modality]
     valid = [path for path in paths if validate(path)]
-    if task.kind not in {"layer_split", "video"}:
+    if task.kind not in {"layer_split", "video"} and task.member_provider != "comfyui":
         valid = valid[:task.n]
     if not valid:
         return _finish(task, status="failed", error=f"{task.member_alias} 没有返回有效产物",
