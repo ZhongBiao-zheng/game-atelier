@@ -45,6 +45,8 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
     image_inputs = [item for item in workflow.inputs if item.type == "image"]
     if len(refs) > len(image_inputs):
         raise ValueError(f"工作流最多接受 {len(image_inputs)} 张参考图")
+    if params.get("mask_image") and not any(item.type == "mask" for item in workflow.inputs):
+        raise ValueError("工作流没有遮罩输入，不接受遮罩")
     for index, item in enumerate(image_inputs):
         workflows.validate_value(item, refs[index] if index < len(refs) else None)
     for item in workflow.inputs:

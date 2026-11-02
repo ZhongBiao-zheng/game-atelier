@@ -252,3 +252,13 @@ def test_canvas_without_prompt_ignores_previous_prompt(host):
     document = _save_nodes(project.project_id, [_media_node("source", draft)], [])
     job, _ = submit_canvas_run(project.project_id, "source", document.revision)
     assert job.prompt == ""
+
+
+def test_mask_without_declared_input_is_rejected_before_upload(host, tmp_path):
+    workflow = imported()
+    mask = tmp_path / "mask.png"
+    mask.write_bytes(host.png)
+    with pytest.raises(ValueError, match="没有遮罩输入"):
+        comfyui.render(prompt="cat", model=workflow.id, alias="local", output_dir=tmp_path,
+                       params={"mask_image": str(mask)})
+    assert not host.uploads and not host.prompts
