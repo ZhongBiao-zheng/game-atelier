@@ -23,7 +23,9 @@ export function WorkflowParameters({ inputs, params, onPatch, menuDirection = 'u
   const fixedSeed = fields.some(input => input.type === 'seed' && values[input.id] != null);
   const patchValue = (input: WorkflowInput, value: string | number | boolean | null) => onPatch({
     workflow_inputs: Object.fromEntries(fields.map(field => [field.id,
-      field.id === input.id ? value : values[field.id] ?? (field.type === 'seed' ? null : field.default)])),
+      field.id === input.id
+        ? typeof value === 'number' && (input.type === 'int' || input.type === 'seed') ? Math.trunc(value) : value
+        : values[field.id] ?? (field.type === 'seed' ? null : field.default)])),
     ...(input.type === 'seed' && value != null ? { n: 1 } : {}),
   });
   return <div ref={anchor} onKeyDown={event => {

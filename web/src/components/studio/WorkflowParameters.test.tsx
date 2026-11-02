@@ -15,6 +15,14 @@ const key: KeyView = { alias: 'local', provider: 'comfyui', base_url: 'http://12
   models: [{ id: 'comfyui-upscale', name: '放大', modality: 'image', workflow_inputs: [] }] };
 
 describe('ComfyUI generation controls', () => {
+  it.each(['int', 'seed'] as const)('normalizes fractional %s values before saving', type => {
+    const patch = vi.fn();
+    render(<WorkflowParameters inputs={[{ ...input, type }]} params={{ workflow_inputs: { seed: 2 } }} onPatch={patch} />);
+    fireEvent.click(screen.getByRole('button', { name: '参数' }));
+    fireEvent.change(screen.getByRole('spinbutton', { name: '种子' }), { target: { value: '1.5' } });
+    expect(patch.mock.lastCall?.[0].workflow_inputs.seed).toBe(1);
+  });
+
   it('closes parameters on Escape and outside clicks inside a keyboard-handling parent', async () => {
     render(<div onKeyDown={event => event.stopPropagation()}><WorkflowParameters inputs={[input]} params={{}} onPatch={vi.fn()} /></div>);
     const trigger = screen.getByRole('button', { name: '参数' });
