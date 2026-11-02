@@ -244,3 +244,52 @@ def test_member_job_observes_queue_and_leaves_queue_when_running(live_gateway, h
     assert "sent" in phases[queued + 1:]
     assert done.progress_phase is None
     assert gateway_tasks.MAX_RUNNING == 8 and gateway_tasks.MAX_RUNNING_PER_KEY == 4
+
+
+def test_canvas_member_can_submit_and_execute_workflow(live_gateway, host):
+    from character_workflow.lib.canvas_projects import create_canvas_project
+    from character_workflow.lib.canvas_runs import submit_canvas_run, run_canvas_job
+    from character_workflow.lib.jobs import read_job
+    from tests.test_generation_recipe import NOW, _media_node, _save_nodes
+
+    workflow = imported()
+    atelier_gateway.sync_gateway_key("Hub")
+    strength = next(item for item in workflow.inputs if item.type == "float")
+    draft = {"mode": "image", "prompt": "cat", "alias": "Hub", "model": workflow.id,
+             "params": {"n": 1, "workflow_inputs": {strength.id: 0.45}}, "updated_at": NOW}
+    project = create_canvas_project("Member canvas")
+    document = _save_nodes(project.project_id, [_media_node("source", draft)], [])
+    job, _ = submit_canvas_run(project.project_id, "source", document.revision)
+    assert job.alias == "Hub" and job.provider == "atelier"
+    run_canvas_job(job.job_id)
+    done = read_job(job.job_id)
+    assert done.status.value == "done", done.error
+    assert done.params.actual_cost_cny == 0
+    assert host.prompts["prompt-1"]["prompt"]["2"]["inputs"]["strength_model"] == 0.45
+
+
+@pytest.mark.parametrize("alias", ["Hub", None])
+def test_studio_http_accepts_empty_prompt_only_for_workflow_without_prompt(
+    live_gateway, host, monkeypatch, isolated_data_root, alias,
+):
+    from character_workflow.lib import job_runner
+    from tests.local_client import LocalTestClient
+    from viewer_server import routes
+    from viewer_server.server_app import build_app
+
+    upscale = imported("upscale")
+    lora = imported()
+    atelier_gateway.sync_gateway_key("Hub")
+    monkeypatch.setattr(routes, "_run_studio_job_safely", lambda _id: None)
+    ref = isolated_data_root / "reference.png"
+    ref.write_bytes(host.png)
+    with LocalTestClient(build_app(), base_url="http://127.0.0.1") as client:
+        payload = {"alias": alias, "prompt": "", "model": upscale.id,
+                   "params": {"reference_images": [str(ref)]}}
+        response = client.post("/api/studio/jobs", json=payload)
+        assert response.status_code == 201, response.text
+        done = job_runner.run_job(response.json()["job_id"])
+        assert done.status.value == "done", done.error
+        assert done.prompt == "" and done.alias == "Hub"
+        response = client.post("/api/studio/jobs", json={**payload, "model": lora.id, "params": {}})
+        assert response.status_code == 422 and "提示词不能为空" in response.text

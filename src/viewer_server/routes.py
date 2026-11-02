@@ -1558,7 +1558,7 @@ def gallery_image(path: str) -> FileResponse:
 
 class _StudioJobCreate(BaseModel):
     model_config = {"extra": "forbid"}
-    prompt: str = Field(min_length=1)
+    prompt: str
     prompt_template: str | None = Field(default=None, max_length=40_000)
     model: str
     params: JobParams

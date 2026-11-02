@@ -102,3 +102,16 @@ describe('局域网 Atelier 供应商', () => {
     expect(routeMemberChoices(auto, auto.models[0]).map(item => item.key.alias)).toEqual(['OpenRouter', 'Tuzi']);
   });
 });
+
+it('retains workflow declarations through gateway and automatic channel expansion for Canvas', async () => {
+  const { canvasGenerationModelSupportsMode } = await import('@/pages/canvasEditorModel');
+  const hub = key('Hub', 'atelier', 'http://127.0.0.1:5180', ['comfyui-test']);
+  const model = { ...hub.models[0], workflow_inputs: [], via: [{ alias: 'host', provider: 'comfyui', model_id: 'comfyui-test', name: '工作流', base_url: null, protocol: 'comfyui' }] };
+  hub.models = [model];
+  const available = withAutoProvider([hub], [{ id: model.id, name: model.name, modality: 'image', mode: 'order', candidate_alias: 'Hub', members: [{ alias: 'Hub', provider: 'atelier', model_id: model.id, name: model.name, protocol: null, base_url: hub.base_url, via: model.via }] }]);
+  for (const provider of available) {
+    expect(canvasGenerationModelSupportsMode(provider, provider.models[0], 'image')).toBe(true);
+    expect(routeMemberChoices(provider, provider.models[0])[0].model.workflow_inputs).toEqual([]);
+    expect(resolveChannel(available, provider, model.id).key?.models[0].workflow_inputs).toEqual([]);
+  }
+});

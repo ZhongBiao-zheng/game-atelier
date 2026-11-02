@@ -83,7 +83,8 @@ function memberCaps(member: ModelRouteMember): ImageControlCaps {
 export function resolveChannel(
   keys: KeyView[], key: KeyView | undefined, modelId: string,
 ): { key: KeyView | undefined; modelId: string } {
-  const members = selectionMembers(key, key?.models.find(model => model.id === modelId));
+  const model = key?.models.find(item => item.id === modelId);
+  const members = selectionMembers(key, model);
   if (!members) return { key, modelId };
   const first = members[0];
   const real = first && (keys.find(item => item.alias === first.alias) ?? (first.alias === key?.alias ? key : undefined));
@@ -93,7 +94,8 @@ export function resolveChannel(
   return {
     key: {
       ...real, provider: channel.provider, base_url: channel.base_url, billing_group: channel.billing_group,
-      models: [{ id: channel.model_id, name: channel.name, modality: 'image', protocol: channel.protocol }],
+      models: [{ id: channel.model_id, name: channel.name, modality: 'image', protocol: channel.protocol,
+        ...(model?.workflow_inputs != null ? { workflow_inputs: model.workflow_inputs } : {}) }],
     },
     modelId: channel.model_id,
   };
@@ -176,6 +178,7 @@ export function routeMemberChoices(key: KeyView, model: KeyModel): Array<{ key: 
 function memberChoice(auto: KeyView, model: KeyModel, member: ModelRouteMember) {
   return {
     key: { ...auto, alias: member.alias, provider: member.provider, base_url: member.base_url, billing_group: member.billing_group, models: [] },
-    model: { id: member.model_id, name: member.name, modality: model.modality, protocol: member.protocol },
+    model: { id: member.model_id, name: member.name, modality: model.modality, protocol: member.protocol,
+      ...(model.workflow_inputs != null ? { workflow_inputs: model.workflow_inputs } : {}) },
   };
 }

@@ -289,7 +289,7 @@ def size_channel(key: KeySpec, model: ModelSpec) -> tuple[KeySpec, ModelSpec]:
     if via is None:
         return key, model
     channel_model = ModelSpec(id=via.model_id, name=via.name, modality=model.modality,
-                              protocol=via.protocol)
+                              protocol=via.protocol, workflow_inputs=model.workflow_inputs)
     channel_key = key.model_copy(update={
         "provider": via.provider, "base_url": via.base_url, "billing_group": via.billing_group,
         "models": [channel_model],
