@@ -1618,6 +1618,13 @@ def _create_user_job(
         model_id = model_spec.id
     alias = key_row.alias
     model_spec = next((m for m in key_row.models if m.id == model_id), None)
+    if model_spec is not None and model_spec.workflow_inputs is not None:
+        from character_workflow.lib.comfyui_workflows import validate_values
+
+        try:
+            validate_values(model_spec.workflow_inputs, params.workflow_inputs or {})
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
     if not prompt.strip() and not (
         model_spec is not None and model_spec.workflow_inputs is not None
         and not any(item.type == "prompt" for item in model_spec.workflow_inputs)

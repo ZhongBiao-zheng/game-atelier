@@ -269,6 +269,28 @@ def test_canvas_member_can_submit_and_execute_workflow(live_gateway, host):
 
 
 @pytest.mark.parametrize("alias", ["Hub", None])
+def test_studio_rejects_undeclared_workflow_values_before_creating_job(
+    live_gateway, host, monkeypatch, alias,
+):
+    from character_workflow.lib.jobs import list_jobs
+    from tests.local_client import LocalTestClient
+    from viewer_server import routes
+    from viewer_server.server_app import build_app
+
+    workflow = imported()
+    atelier_gateway.sync_gateway_key("Hub")
+    submitted = []
+    monkeypatch.setattr(routes, "_run_studio_job_safely", submitted.append)
+    with LocalTestClient(build_app(), base_url="http://127.0.0.1") as client:
+        response = client.post("/api/studio/jobs", json={
+            "alias": alias, "prompt": "cat", "model": workflow.id,
+            "params": {"workflow_inputs": {"undeclared": 1}},
+        })
+    assert response.status_code == 422 and "未声明" in response.text
+    assert list_jobs() == [] and submitted == [] and host.prompts == {}
+
+
+@pytest.mark.parametrize("alias", ["Hub", None])
 def test_studio_http_accepts_empty_prompt_only_for_workflow_without_prompt(
     live_gateway, host, monkeypatch, isolated_data_root, alias,
 ):
