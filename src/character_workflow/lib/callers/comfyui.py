@@ -97,6 +97,7 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
             prompt_id = submitted.get("prompt_id")
             if not prompt_id or submitted.get("node_errors"):
                 raise ValueError(f"ComfyUI 拒绝工作流：{submitted.get('node_errors', submitted)}")
+            client.execution_started = True
             deadline = time.monotonic() + workflow.timeout_seconds
             while True:
                 if should_cancel and should_cancel():

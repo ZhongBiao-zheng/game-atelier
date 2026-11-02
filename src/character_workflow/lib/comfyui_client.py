@@ -7,7 +7,9 @@ from character_workflow.lib.comfyui_schema import local_base_url
 
 
 class ComfyUIUnavailableError(RuntimeError):
-    pass
+    def __init__(self, *, execution_started: bool = False):
+        self.execution_started = execution_started
+        super().__init__("ComfyUI 任务结果未确认" if execution_started else "主机的 ComfyUI 未启动")
 
 
 class ComfyUIClient:
@@ -15,6 +17,7 @@ class ComfyUIClient:
         self.base_url = local_base_url(base_url)
         self.session = requests.Session()
         self.session.trust_env = False
+        self.execution_started = False
 
     def __enter__(self):
         return self
@@ -27,7 +30,12 @@ class ComfyUIClient:
             response = self.session.request(method, self.base_url + path, timeout=(3, 30),
                                             allow_redirects=False, **kwargs)
         except requests.ConnectionError as error:
-            raise ComfyUIUnavailableError("主机的 ComfyUI 未启动") from error
+            from character_workflow.lib.callers.openai_image import _is_pre_flight_failure
+
+            uncertain_submit = path == "/prompt" and not _is_pre_flight_failure(error)
+            raise ComfyUIUnavailableError(
+                execution_started=self.execution_started or uncertain_submit,
+            ) from error
         if response.status_code >= 300:
             raise ValueError(f"ComfyUI 请求失败（HTTP {response.status_code}）："
                              f"{response.text[:1000]}")

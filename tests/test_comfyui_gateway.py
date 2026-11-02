@@ -113,3 +113,31 @@ def test_gateway_rejects_raw_workflow(client, host):
         "request": json.dumps({"model": workflow.id, "prompt": "cat", "params": {
             "api_workflow": workflow.api_workflow}})})
     assert response.status_code == 422 and not host.prompts
+
+
+def test_offline_is_unavailable(client, host):
+    from tests.test_gateway_client import _free_port
+
+    workflow = imported()
+    keys.patch_key("local", {"base_url": f"http://127.0.0.1:{_free_port()}"})
+    task = submit(client, workflow)
+    assert (task.status, task.error_kind, task.error) == (
+        "failed", "unavailable", "主机的 ComfyUI 未启动")
+    assert not host.prompts
+
+
+def test_connection_lost_after_submission_is_not_safe_to_retry(client, host, monkeypatch):
+    import requests
+
+    workflow = imported()
+    real_request = requests.Session.request
+
+    def disconnected(session, method, url, **kwargs):
+        if "/history/" in url:
+            raise requests.ConnectionError("connection lost")
+        return real_request(session, method, url, **kwargs)
+
+    monkeypatch.setattr(requests.Session, "request", disconnected)
+    task = submit(client, workflow)
+    assert task.status == "failed" and task.error_kind == "unconfirmed"
+    assert "未确认" in task.error and len(host.prompts) == 1

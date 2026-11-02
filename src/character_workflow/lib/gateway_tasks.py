@@ -390,6 +390,7 @@ def run_task(task: GatewayTask) -> GatewayTask:
     from character_workflow.lib.callers import dispatch, dispatch_audio, dispatch_video
     from character_workflow.lib.image_size import normalize_image_size_params
     from character_workflow.lib.job_runner import JobCanceled
+    from character_workflow.lib.comfyui_client import ComfyUIUnavailableError
 
     task_id = task.task_id
     modality = modality_for(task.kind)
@@ -476,6 +477,9 @@ def run_task(task: GatewayTask) -> GatewayTask:
                 _record_cost(task_id, cost.get("usd"))
                 if isinstance(error, JobCanceled) or should_cancel():
                     return _finish(_read(task_id), status="canceled", error="已停止")
+                if isinstance(error, ComfyUIUnavailableError):
+                    return _finish(_read(task_id), status="failed", error=str(error),
+                                   error_kind="unconfirmed" if error.execution_started else "unavailable")
                 current = _read(task_id)
                 uncertain = any(a.get("outcome") == "unconfirmed" for a in current.submission_attempts)
                 if current.upstream_task_ids or uncertain:
