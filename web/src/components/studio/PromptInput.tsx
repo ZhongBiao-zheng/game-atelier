@@ -924,17 +924,11 @@ export function PromptInput({
                         >
                           <X size={10} />
                         </Button>
-                        {i === (refExpanded ? stackItems.length - 1 : 0) && (
+                        {stackCanAdd && i === (refExpanded ? stackItems.length - 1 : 0) && (
                           <Label
                             data-testid="reference-stack-add"
-                            htmlFor={stackCanAdd ? refInputId : undefined}
-                            aria-disabled={!stackCanAdd}
-                            onClick={stackCanAdd ? undefined : (e) => e.preventDefault()}
-                            className={`absolute -right-2.5 -bottom-2.5 z-10 flex size-7 items-center justify-center rounded-full border-[0.5px] border-border bg-secondary transition-colors ${
-                              stackCanAdd
-                                ? 'cursor-pointer text-muted-foreground hover:text-foreground hover:border-input hover:bg-card'
-                                : 'cursor-not-allowed text-muted-foreground opacity-40'
-                            }`}
+                            htmlFor={refInputId}
+                            className="absolute -right-2.5 -bottom-2.5 z-10 flex size-7 items-center justify-center rounded-full border-[0.5px] border-border bg-secondary transition-colors cursor-pointer text-muted-foreground hover:text-foreground hover:border-input hover:bg-card"
                           >
                             <Plus size={14} />
                           </Label>
