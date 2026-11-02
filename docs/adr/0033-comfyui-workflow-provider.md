@@ -28,5 +28,12 @@ status: accepted
 ## 交付边界
 
 A 批提供主机本机工作流管理、执行、创作台与画布参数表单。
-B 批提供网关目录快照、声明参数与素材传输、成员端排队，以及 Studio / Canvas 的工作流控件。实际渠道转换保留输入声明，工作流全部图片产物经网关保存，实际费用记零。C 批再接入画布局部重绘与完整取消验收。
+B 批提供网关目录快照、声明参数与素材传输、成员端排队，以及 Studio / Canvas 的工作流控件。实际渠道转换保留输入声明，工作流全部图片产物经网关保存，实际费用记零。
+C 批提供本机与成员画布局部重绘：只开放恰好一个 image 和一个 mask 声明的工作流，
+不开放扩图。原图与独立遮罩分别上传；遮罩 RGB 为白色重绘、alpha 为白色保护，
+同时满足 LoadImage 的反向 alpha 与 LoadImageMask 的颜色通道语义。提示词与工作流参数
+原样传递，产物合成保留选区外像素。排队删除后复查运行状态；阶段回调和下载期间取消
+同样停止本任务，成员等待主机取消落定后结束，不再提交剩余张数。
+协议依据：[ComfyUI 遮罩节点](https://github.com/Comfy-Org/ComfyUI/blob/master/nodes.py)、
+[定向中断接口](https://github.com/Comfy-Org/ComfyUI/blob/master/server.py)。
 实际 ComfyUI 的模型文件、自定义节点和出图质量在 Windows 主机另行验证。

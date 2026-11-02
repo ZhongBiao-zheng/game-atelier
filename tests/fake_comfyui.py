@@ -27,6 +27,8 @@ class FakeComfyUI(ThreadingHTTPServer):
         self.delay = 2
         self.foreign_running = True
         self.pending_queue = None
+        self.start_on_delete = False
+        self.finish_before_interrupt = False
         stream = io.BytesIO()
         Image.new("RGB", (64, 64), "#669988").save(stream, format="PNG")
         self.png = stream.getvalue()
@@ -34,6 +36,16 @@ class FakeComfyUI(ThreadingHTTPServer):
     @property
     def url(self):
         return f"http://127.0.0.1:{self.server_port}"
+
+    def queue(self):
+        rows = [[index, identifier, payload["prompt"], {}, ["9"]]
+                for index, (identifier, payload) in enumerate(self.prompts.items())
+                if identifier not in self.deleted and identifier not in self.completed]
+        running = [[-1, "someone-else", {}, {}, []]] if self.foreign_running else []
+        if self.polls > self.delay and rows and (self.mode != "timeout" or not self.foreign_running):
+            running, rows = rows[:1], rows[1:]
+        return {"queue_running": running,
+                "queue_pending": self.pending_queue if self.pending_queue is not None else rows}
 
     def __enter__(self):
         self.thread = threading.Thread(target=self.serve_forever, daemon=True)
@@ -74,16 +86,7 @@ class Handler(BaseHTTPRequestHandler):
                 "strength_model": ["FLOAT", {"min": -10, "max": 10, "step": 0.01}],
             }}, "output_node": kind == "SaveImage"}})
         if path == "/queue":
-            rows = [[index, identifier, payload["prompt"], {}, ["9"]]
-                    for index, (identifier, payload) in enumerate(state.prompts.items())
-                    if identifier not in state.deleted and identifier not in state.completed]
-            running = [[-1, "someone-else", {}, {}, []]] if state.foreign_running else []
-            if state.polls > state.delay and rows and state.mode != "timeout":
-                running, rows = rows[:1], rows[1:]
-            elif state.polls > state.delay and rows and not state.foreign_running:
-                running, rows = rows[:1], rows[1:]
-            return self.respond({"queue_running": running,
-                                 "queue_pending": state.pending_queue if state.pending_queue is not None else rows})
+            return self.respond(state.queue())
         if path.startswith("/history/"):
             state.polls += 1
             identifier = path.rsplit("/", 1)[-1]
@@ -117,10 +120,19 @@ class Handler(BaseHTTPRequestHandler):
             state.polls = 0
             return self.respond({"prompt_id": identifier, "number": len(state.prompts), "node_errors": {}})
         if self.path == "/queue":
-            state.deleted.extend(data.get("delete", []))
+            if state.start_on_delete:
+                state.foreign_running = False
+                state.polls = state.delay + 1
+            pending = {row[1] for row in state.queue()["queue_pending"]}
+            state.deleted.extend(identifier for identifier in data.get("delete", []) if identifier in pending)
             return self.respond(b"")
         if self.path == "/interrupt":
-            state.interrupted.append(data.get("prompt_id"))
+            identifier = data.get("prompt_id")
+            if state.finish_before_interrupt:
+                state.completed.add(identifier)
+            if identifier in {row[1] for row in state.queue()["queue_running"]}:
+                state.interrupted.append(identifier)
+                state.completed.add(identifier)
             return self.respond(b"")
         self.respond({}, 404)
 

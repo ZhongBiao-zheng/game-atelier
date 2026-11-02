@@ -169,6 +169,53 @@ def test_cancel_owned_running_prompt(host):
     assert not host.deleted
 
 
+def test_cancel_handles_pending_to_running_race(host):
+    from character_workflow.lib.comfyui_client import ComfyUIClient
+
+    host.mode = "timeout"
+    host.start_on_delete = True
+    with ComfyUIClient(host.url) as client:
+        identifier = client.post("/prompt", json={"prompt": {}})["prompt_id"]
+        comfyui._cancel(client, identifier)
+    assert host.interrupted == [identifier] and not host.deleted
+
+
+def test_targeted_interrupt_cannot_interrupt_next_job(host):
+    from character_workflow.lib.comfyui_client import ComfyUIClient
+
+    host.foreign_running = False
+    host.finish_before_interrupt = True
+    with ComfyUIClient(host.url) as client:
+        identifier = client.post("/prompt", json={"prompt": {}})["prompt_id"]
+        client.post("/prompt", json={"prompt": {}})
+        host.polls = host.delay + 1
+        comfyui._cancel(client, identifier)
+    assert host.queue()["queue_running"][0][1] == "prompt-2"
+    assert not host.interrupted
+
+
+@pytest.mark.parametrize("phase", ["queued:1", "sent", "downloading"])
+def test_phase_callback_cancellation_stops_owned_task(host, tmp_path, phase):
+    from character_workflow.lib.job_runner import JobCanceled
+
+    workflow = imported()
+    if phase == "sent":
+        host.foreign_running = False
+        host.delay = 0
+
+    def changed(value):
+        if value == phase:
+            raise JobCanceled("cancel")
+
+    with pytest.raises(JobCanceled):
+        comfyui.render(prompt="cat", model=workflow.id, alias="local", output_dir=tmp_path,
+                       n=3, on_phase=changed)
+    assert len(host.prompts) == 1
+    assert host.deleted == (["prompt-1"] if phase == "queued:1" else [])
+    assert host.interrupted == (["prompt-1"] if phase == "sent" else [])
+    assert not list(tmp_path.glob("*.png"))
+
+
 def test_reimport_migrates_node_ids_and_reports_lost(host):
     workflow = imported()
     graph = copy.deepcopy(workflow.api_workflow)

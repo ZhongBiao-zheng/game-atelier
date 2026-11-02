@@ -23,7 +23,9 @@ def _cancel(client: ComfyUIClient, prompt_id: str) -> None:
     queue = client.get("/queue")
     if prompt_id in _queue_ids(queue, "queue_pending"):
         client.request("POST", "/queue", json={"delete": [prompt_id]})
-    elif prompt_id in _queue_ids(queue, "queue_running"):
+        # It may have started between GET and delete; only interrupt our own id.
+        queue = client.get("/queue")
+    if prompt_id in _queue_ids(queue, "queue_running"):
         # Pass the id too so supported ComfyUI versions recheck the running task.
         client.request("POST", "/interrupt", json={"prompt_id": prompt_id})
 
@@ -31,6 +33,8 @@ def _cancel(client: ComfyUIClient, prompt_id: str) -> None:
 def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
            n: int = 1, params: dict | None = None, on_phase=None,
            should_cancel=None, job_id: str | None = None, **kwargs) -> list[str]:
+    from character_workflow.lib.job_runner import JobCanceled
+
     key = workflows.provider(alias)
     workflow = workflows.read_workflow(alias, model)
     workflows.validate_mappings(workflow.api_workflow, workflow.inputs)
@@ -59,6 +63,22 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
     prefix = "atelier/" + (job_id or uuid4().hex)
     outputs = []
     with ComfyUIClient(key.base_url) as client:
+        def check_cancel(prompt_id=None):
+            if should_cancel and should_cancel():
+                if prompt_id:
+                    _cancel(client, prompt_id)
+                raise JobCanceled("任务已取消")
+
+        def phase_changed(phase, prompt_id):
+            # Runner phase callbacks can observe cancellation before the next poll.
+            try:
+                if on_phase:
+                    on_phase(phase)
+            except JobCanceled:
+                _cancel(client, prompt_id)
+                raise
+
+        check_cancel()
         uploaded = {}
         for item, path in [(item, refs[index] if index < len(refs) else None)
                            for index, item in enumerate(image_inputs)] + [
@@ -66,13 +86,13 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
                                if item.type == "mask"]:
             if not path:
                 continue
+            check_cancel()
             with Path(path).open("rb") as file:
                 result = client.post("/upload/image", files={
                     "image": (uuid4().hex + Path(path).suffix, file)}, data={"type": "input"})
             uploaded[item.id] = "/".join(filter(None, [result.get("subfolder"), result["name"]]))
         for _ in range(n):
-            if should_cancel and should_cancel():
-                raise RuntimeError("任务已取消")
+            check_cancel()
             graph = copy.deepcopy(workflow.api_workflow)
             declared_seeds = {(item.node_id, item.field) for item in workflow.inputs
                               if item.type == "seed"}
@@ -102,9 +122,7 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
             client.execution_started = True
             deadline = time.monotonic() + workflow.timeout_seconds
             while True:
-                if should_cancel and should_cancel():
-                    _cancel(client, prompt_id)
-                    raise RuntimeError("任务已取消")
+                check_cancel(prompt_id)
                 if time.monotonic() >= deadline:
                     _cancel(client, prompt_id)
                     raise TimeoutError("ComfyUI 工作流执行超时")
@@ -122,18 +140,19 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
                 pending = _queue_ids(queue, "queue_pending")
                 phase = (f"queued:{pending.index(prompt_id) + 1}" if prompt_id in pending
                          else "sent")
-                if on_phase:
-                    on_phase(phase)
+                phase_changed(phase, prompt_id)
                 time.sleep(POLL_INTERVAL)
-            if on_phase:
-                on_phase("downloading")
+            check_cancel(prompt_id)
+            phase_changed("downloading", prompt_id)
             start_count = len(outputs)
             for node_output in entry.get("outputs", {}).values():
                 for image in node_output.get("images", []):
                     if image.get("type") != "output":
                         continue
+                    check_cancel(prompt_id)
                     response = client.request("GET", "/view", params={
                         name: image.get(name, "") for name in ("filename", "subfolder", "type")})
+                    check_cancel(prompt_id)
                     suffix = Path(image["filename"]).suffix.lower()
                     if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
                         raise ValueError("ComfyUI 返回了不支持的图片格式")

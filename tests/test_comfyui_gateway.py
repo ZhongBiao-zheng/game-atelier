@@ -246,6 +246,37 @@ def test_member_job_observes_queue_and_leaves_queue_when_running(live_gateway, h
     assert gateway_tasks.MAX_RUNNING == 8 and gateway_tasks.MAX_RUNNING_PER_KEY == 4
 
 
+@pytest.mark.parametrize("running", [False, True])
+def test_member_cancel_reaches_comfyui_and_stops_remaining_images(live_gateway, host, monkeypatch, running):
+    from character_workflow.lib import job_runner
+    from character_workflow.lib.jobs import read_job, save_job, request_job_cancel
+    from character_workflow.lib.schemas import Job, JobParams
+
+    workflow = imported()
+    atelier_gateway.sync_gateway_key("Hub")
+    host.mode = "timeout"
+    host.foreign_running = not running
+    host.delay = 0 if running else 10000
+    def should_cancel():
+        if host.prompts and host.polls:
+            request_job_cancel("cancel-member")
+            return True
+        return False
+    save_job(Job(job_id="cancel-member", character_id="A", prompt="cat", model=workflow.id,
+                 alias="Hub", provider="atelier", namespace="studio", params=JobParams(n=3),
+                 output_paths=[], status="pending", error=None, submitted_at="2026-11-02T00:00:00+00:00"))
+    with pytest.raises(job_runner.JobCanceled):
+        job_runner.run_job("cancel-member", should_cancel=should_cancel)
+    done = read_job("cancel-member")
+    assert done.status.value == "canceled" and done.output_paths == []
+    assert done.error == "已停止" and done.params.actual_cost_cny == 0
+    assert len(host.prompts) == 1
+    assert host.interrupted == (["prompt-1"] if running else [])
+    assert host.deleted == ([] if running else ["prompt-1"])
+    task = gateway_tasks.get_task(live_gateway.id, done.params.provider_task_ids[0])
+    assert task.status == "canceled" and task.outputs == []
+
+
 def test_canvas_member_can_submit_and_execute_workflow(live_gateway, host):
     from character_workflow.lib.canvas_projects import create_canvas_project
     from character_workflow.lib.canvas_runs import submit_canvas_run, run_canvas_job

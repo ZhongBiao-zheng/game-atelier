@@ -140,7 +140,7 @@ def _raise_if_canceled(should_cancel: Callable[[], bool]) -> None:
 
 def _canceled_error(params: dict[str, Any]) -> str:
     ids = [str(task_id) for task_id in (params.get("provider_task_ids") or []) if task_id]
-    if not ids:
+    if not ids or params.get("actual_cost_cny") == 0:
         return "已停止"
     return f"已停止；上游任务 {', '.join(ids)} 已提交，可能已扣费"
 
@@ -397,8 +397,8 @@ def _freeze_estimated_cost(job: Job, params: dict[str, Any]) -> None:
     key = find_by_alias(job.alias or "")
     if key is None:
         return
-    if key.provider == "chatgpt":
-        # Subscription usage has no per-image charge, regardless of stale client estimates.
+    if key.provider in {"chatgpt", "comfyui"} or _is_workflow_job(job):
+        # Subscription and local workflows have no per-image charge, including cancellation.
         params["estimated_cost_cny"] = 0.0
         params["actual_cost_cny"] = 0.0
         update_job_params(job.job_id, params)

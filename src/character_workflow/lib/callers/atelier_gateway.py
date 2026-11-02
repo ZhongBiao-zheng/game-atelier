@@ -187,8 +187,19 @@ def _run_task(
     params = params if params is not None else {}
     base = key.base_url.rstrip("/")
     headers = {"Authorization": f"Bearer {key.access_key}"}
-    phase = on_phase or (lambda _phase: None)
-    cancelled = should_cancel or (lambda: False)
+    cancellation_observed = False
+
+    def phase(value):
+        nonlocal cancellation_observed
+        try:
+            if on_phase:
+                on_phase(value)
+        except JobCanceled:
+            # Keep polling until the host receives cancellation and settles the task.
+            cancellation_observed = True
+
+    def cancelled():
+        return cancellation_observed or bool(should_cancel and should_cancel())
 
     with _session() as session:
         existing = params.get("provider_task_ids") or []
@@ -301,10 +312,11 @@ def _poll(session, base, headers, task_id, phase, cancelled) -> dict[str, Any]:
     while True:
         if cancelled() and not cancel_sent:
             try:
-                session.post(f"{base}/gateway/v1/tasks/{task_id}/cancel", headers=headers,
-                             timeout=_TIMEOUT)
+                response = session.post(f"{base}/gateway/v1/tasks/{task_id}/cancel", headers=headers,
+                                        timeout=_TIMEOUT)
+                _raise_for_status(response)
                 cancel_sent = True
-            except requests.RequestException:
+            except (requests.RequestException, GatewayError):
                 pass
         try:
             response = session.get(f"{base}/gateway/v1/tasks/{task_id}", headers=headers,
