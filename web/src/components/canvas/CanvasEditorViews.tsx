@@ -2847,7 +2847,7 @@ function CanvasMaterialConnections({
           );
         })}
         </Reorder.Group>
-        <Hint label="在画布选择素材"><Button variant="bare"
+        {(imageLabels == null || connected.filter(reference => reference.kind === 'image').length < imageLabels.length) && <Hint label="在画布选择素材"><Button variant="bare"
           type="button"
           aria-label={`为 ${node.title} 在画布选择素材`}
           disabled={!choices.some(reference => (
@@ -2864,7 +2864,7 @@ function CanvasMaterialConnections({
           ))))}
         >
           <Plus className="size-5" aria-hidden="true" />
-        </Button></Hint>
+        </Button></Hint>}
       </div>
       {hoveredMaterial && <CanvasMaterialHoverDetail {...hoveredMaterial} />}
     </>
