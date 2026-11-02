@@ -44,3 +44,72 @@ def test_empty_declarations_survive_snapshot():
                      "name": "无参数"}],
     }])[0]
     assert model.model_dump()["workflow_inputs"] == []
+
+
+def submit(client, workflow, *, prompt="cat", params=None, files=None):
+    response = client.post("/gateway/v1/tasks", headers={"Idempotency-Key": "test"},
+                           data={"request": json.dumps({"kind": "image", "model": workflow.id,
+                                 "prompt": prompt, "n": 1, "params": params or {}})}, files=files)
+    assert response.status_code == 202, response.text
+    return gateway_tasks.run_task(gateway_tasks.get_task(client.record.id, response.json()["task_id"]))
+
+
+def test_values_ordered_images_mask_and_task_prefix(client, host):
+    from character_workflow.lib import comfyui_workflows as workflows
+    from character_workflow.lib.comfyui_schema import WorkflowInput
+
+    workflow = imported("inpaint")
+    graph = workflow.api_workflow
+    graph["12"] = {"class_type": "LoadImage", "inputs": {"image": "second.png"}}
+    inputs = [*workflow.inputs, WorkflowInput(id="second", label="第二张", type="image",
+               node_id="12", class_type="LoadImage", field="image", required=True)]
+    workflow = workflows.save_workflow("local", name=workflow.name, api_workflow=graph,
+                                       inputs=inputs, identifier=workflow.id)
+    strength = next(i for i in inputs if i.type == "float")
+    task = submit(client, workflow, params={"workflow_inputs": {strength.id: 0.25}}, files=[
+        ("ref_1", ("second.png", b"second-image")), ("mask", ("mask.png", b"mask-data")),
+        ("ref_0", ("first.png", b"first-image")),
+    ])
+    assert task.status == "done", task.error
+    graph = host.prompts["prompt-1"]["prompt"]
+    assert graph["10"]["inputs"]["image"] == "uploaded-1.png"
+    assert graph["12"]["inputs"]["image"] == "uploaded-2.png"
+    assert graph["11"]["inputs"]["image"] == "uploaded-3.png"
+    assert b"first-image" in host.uploads[0] and b"second-image" in host.uploads[1]
+    assert b"mask-data" in host.uploads[2]
+    assert graph["2"]["inputs"]["strength_model"] == 0.25
+    assert graph["9"]["inputs"]["filename_prefix"] == f"atelier/{task.task_id}"
+
+
+def test_old_member_uses_defaults(client, host):
+    workflow = imported()
+    task = submit(client, workflow)
+    assert task.status == "done", task.error
+    assert host.prompts["prompt-1"]["prompt"]["2"]["inputs"]["strength_model"] == 0.8
+
+
+def test_no_prompt_workflow_and_required_image(client, host):
+    workflow = imported("upscale")
+    task = submit(client, workflow, prompt="", files={"ref_0": ("ref.png", host.png)})
+    assert task.status == "done", task.error
+
+
+def test_old_member_missing_required_image_fails_clearly(client, host):
+    task = submit(client, imported("upscale"), prompt="")
+    assert task.status == "failed" and "参考图" in task.error
+    assert not host.prompts
+
+
+@pytest.mark.parametrize("values", [{"api_workflow": "malicious"}, {"image": "/etc/passwd"}])
+def test_undeclared_values_cannot_submit_graph_or_paths(client, host, values):
+    task = submit(client, imported(), params={"workflow_inputs": values})
+    assert task.status == "failed" and "未声明" in task.error
+    assert not host.prompts
+
+
+def test_gateway_rejects_raw_workflow(client, host):
+    workflow = imported()
+    response = client.post("/gateway/v1/tasks", headers={"Idempotency-Key": "test"}, data={
+        "request": json.dumps({"model": workflow.id, "prompt": "cat", "params": {
+            "api_workflow": workflow.api_workflow}})})
+    assert response.status_code == 422 and not host.prompts

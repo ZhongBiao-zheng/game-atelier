@@ -39,7 +39,7 @@ RETENTION = timedelta(hours=24)
 # 参考图只能以文件上传。否则局域网里的人能让网关读它本机的任意文件。
 _IMAGE_PARAMS = frozenset({
     "size", "size_mode", "custom_size", "ratio", "resolution", "quality", "background",
-    "steps", "cfg_scale", "requested_size",
+    "steps", "cfg_scale", "requested_size", "workflow_inputs",
     "bot_type", "mj_version", "mj_stylize", "mj_chaos", "mj_weird", "mj_seed", "mj_no",
     "mj_tile", "mj_iw", "mj_sref_code", "mj_profile", "mj_sw", "mj_cw", "mj_ow", "mj_flags",
 })
@@ -57,7 +57,7 @@ FILE_GROUPS = {"ref": 16, "mask": 1, "mj_sref": 8, "mj_cref": 8, "mj_oref": 8,
 FILE_PARAMS = {"ref": "reference_images", "mask": "mask_image", "mj_sref": "mj_sref",
                "mj_cref": "mj_cref", "mj_oref": "mj_oref", "video": "reference_videos",
                "audio": "reference_audios"}
-FILES_BY_KIND = {"image": {"ref", "mj_sref", "mj_cref", "mj_oref"},
+FILES_BY_KIND = {"image": {"ref", "mask", "mj_sref", "mj_cref", "mj_oref"},
                  "image_edit": {"ref", "mask"}, "layer_split": {"ref"},
                  "video": {"ref", "video", "audio"}, "audio": set()}
 
@@ -241,7 +241,7 @@ def submit(
     if kind == "layer_split":
         if params.get("layer_decomposition") is not True or len(files.get("ref", [])) != 1:
             raise GatewayRequestError(422, "图层拆分需要一张源图和 layer_decomposition=true")
-    if (not prompt.strip() and kind != "layer_split") or len(prompt) > MAX_PROMPT_CHARS:
+    if len(prompt) > MAX_PROMPT_CHARS:
         raise GatewayRequestError(422, "提示词为空或过长")
     if not 1 <= n <= MAX_IMAGES_PER_TASK:
         raise GatewayRequestError(422, f"张数必须在 1–{MAX_IMAGES_PER_TASK} 之间")
@@ -265,6 +265,11 @@ def submit(
                               freeze_order=route_order, consume=True)
         if picked is None:
             raise GatewayRequestError(503, "网关没有可用的供应商")
+        inputs = picked[1].workflow_inputs
+        if not prompt.strip() and kind != "layer_split" and not (
+            inputs is not None and not any(item.type == "prompt" for item in inputs)
+        ):
+            raise GatewayRequestError(422, "提示词为空或过长")
         estimate = _estimate(picked, n, size, params, kind, bool(files.get("video")))
         gateway_quota.admit(key, estimate or 0)
         task_id = uuid.uuid4().hex
@@ -459,7 +464,7 @@ def run_task(task: GatewayTask) -> GatewayTask:
                     render = dispatch_audio
                 paths = render(
                     prompt=task.prompt, model=model.id, alias=key.alias, output_dir=Path(tmp),
-                    n=task.n, size=params.get("size"), params=params,
+                    n=task.n, size=params.get("size"), params=params, job_id=task_id,
                     on_phase=lambda phase: _update(task_id, phase=phase),
                     on_params_changed=changed, on_task_id=on_task_id, on_submission=on_submission,
                     on_cost_usd=lambda usd: cost.__setitem__("usd", usd),
