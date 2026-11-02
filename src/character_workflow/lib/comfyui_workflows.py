@@ -145,7 +145,18 @@ def validate_values(inputs: list[WorkflowInput], values: dict) -> dict:
     return result
 
 
-def _candidate(node_id: str, node: dict, field: str, value: Any, prompt_seen: bool):
+def _explicit_prompt_field(node: dict) -> str | None:
+    title = str(node.get("_meta", {}).get("title", ""))
+    if not title.startswith("in:") or title[3:].strip().casefold() not in {"提示词", "prompt"}:
+        return None
+    text_fields = [field for field, value in node["inputs"].items() if isinstance(value, str)]
+    for field in ("text", "prompt"):
+        if field in text_fields:
+            return field
+    return text_fields[0] if len(text_fields) == 1 else None
+
+
+def _candidate(node_id: str, node: dict, field: str, value: Any):
     kind = node["class_type"]
     title = str(node.get("_meta", {}).get("title", ""))
     label = title[3:].strip() if title.startswith("in:") else f"{kind} · {field}"
@@ -153,8 +164,6 @@ def _candidate(node_id: str, node: dict, field: str, value: Any, prompt_seen: bo
                 else "float" if isinstance(value, float) else "text")
     if kind in {"LoadImage", "LoadImageMask"} and field == "image":
         inferred = "mask" if kind == "LoadImageMask" or re.search("遮罩|mask", title, re.I) else "image"
-    elif kind == "CLIPTextEncode" and field == "text" and not prompt_seen:
-        inferred = "prompt"
     elif field in {"seed", "noise_seed"}:
         inferred = "seed"
     identifier = re.sub(r"[^\w-]", "-", label).strip("-")[:55] or "input"
@@ -171,6 +180,8 @@ def inspect_workflow(alias: str, workflow: dict, previous_id: str | None = None)
     prompt_seen = False
     tagged = any(str(node.get("_meta", {}).get("title", "")).startswith("in:")
                  for node in workflow.values())
+    explicit_prompts = {node_id: field for node_id, node in workflow.items()
+                        if (field := _explicit_prompt_field(node)) is not None}
     defaults = {"CLIPTextEncode": "text", "LoadImage": "image", "LoadImageMask": "image",
                 "KSampler": "seed", "KSamplerAdvanced": "noise_seed",
                 "LoraLoader": "strength_model"}
@@ -186,17 +197,15 @@ def inspect_workflow(alias: str, workflow: dict, previous_id: str | None = None)
         available = [(field, value) for field, value in node["inputs"].items()
                      if isinstance(value, (str, int, float, bool))]
         numeric = [field for field, value in available if type(value) in {int, float}]
-        preferred = defaults.get(node["class_type"], numeric[0] if numeric else
-                                 available[0][0] if available else "")
+        preferred = explicit_prompts.get(node_id) or defaults.get(
+            node["class_type"], numeric[0] if numeric else available[0][0] if available else "")
         node_info = info.get(node["class_type"], {})
         if info and not node_info:
             warnings.append(f"主机上缺少节点：{node['class_type']}")
         fields = {**node_info.get("input", {}).get("required", {}),
                   **node_info.get("input", {}).get("optional", {})}
         for field, value in available:
-            item = _candidate(node_id, node, field, value, prompt_seen)
-            if item.type == "prompt" and (not tagged or title.startswith("in:")):
-                prompt_seen = True
+            item = _candidate(node_id, node, field, value)
             spec = fields.get(field, [])
             if spec and spec[0] in ("INT", "FLOAT") and item.type in {"int", "float"}:
                 default = item.default
@@ -215,10 +224,19 @@ def inspect_workflow(alias: str, workflow: dict, previous_id: str | None = None)
                 item = WorkflowInput(**{**item.model_dump(), **{
                     name: spec[1][name] for name in ("min", "max", "step") if name in spec[1]
                 }})
-            candidates.append(item)
-            if ((field == preferred and title.startswith("in:")) if tagged else (
+            selected = ((field == preferred and title.startswith("in:")) if tagged else (
                 field == preferred or field in numeric
-            )):
+            ))
+            if selected and item.type == "text" and not prompt_seen:
+                explicit = explicit_prompts.get(node_id) == field
+                standard = (not tagged and node["class_type"] == "CLIPTextEncode"
+                            and field == "text"
+                            and not re.search(r"负向|反向|负面|\bnegative\b", title, re.I))
+                if explicit or standard:
+                    item = item.model_copy(update={"type": "prompt"})
+                    prompt_seen = True
+            candidates.append(item)
+            if selected:
                 suggested.append(item)
     lost = []
     if previous_id:

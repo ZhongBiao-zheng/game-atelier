@@ -100,6 +100,75 @@ def test_int_metadata_overrides_integral_float_default(host):
         workflows.validate_value(steps, 20.5)
 
 
+@pytest.mark.parametrize("label,field", [("提示词", "text"), ("prompt", "value"), ("PROMPT", "prompt")])
+def test_explicit_prompt_tag_maps_custom_text_and_reaches_execution(host, tmp_path, label, field):
+    graph = json.loads((FIXTURES / "lora.json").read_text())
+    graph["6"] = {"class_type": "CR Text", "_meta": {"title": f"in:{label}"},
+                  "inputs": {"unused_number": 1, field: "original"}}
+    negative = {"class_type": "CLIPTextEncode", "inputs": {"text": "negative"},
+                "_meta": {"title": "in:负向提示词"}}
+    other_clip = {"class_type": "CLIPTextEncode", "inputs": {"text": "other"},
+                  "_meta": {"title": "in:其他文本"}}
+    graph = {"negative": negative, "other": other_clip, **graph}
+    inspected = workflows.inspect_workflow("local", graph)
+    assert not inspected["warnings"]
+    inputs = [WorkflowInput(**item) for item in inspected["inputs"]]
+    prompts = [item for item in inputs if item.type == "prompt"]
+    assert [(item.node_id, item.field) for item in prompts] == [("6", field)]
+    assert all(item.type == "text" for item in inputs if item.node_id in {"negative", "other"})
+    workflow = workflows.save_workflow("local", name="custom-prompt", api_workflow=graph, inputs=inputs)
+    comfyui.render(prompt="new prompt", model=workflow.id, alias="local", output_dir=tmp_path)
+    sent = next(iter(host.prompts.values()))["prompt"]
+    assert sent["6"]["inputs"][field] == "new prompt"
+    assert sent["negative"]["inputs"]["text"] == "negative"
+    assert sent["other"]["inputs"]["text"] == "other"
+
+
+def test_text_and_negative_prompt_tags_stay_text_without_main_prompt(host):
+    graph = {"output": {"class_type": "SaveImage", "inputs": {"images": ["image", 0]}}}
+    for i, (kind, label) in enumerate([("CR Text", "说明"), ("CR Text", "提示词后缀"),
+                                      ("CLIPTextEncode", "说明"),
+                                      ("CLIPTextEncode", "负向提示词"),
+                                      ("CLIPTextEncode", "negative prompt")]):
+        graph[str(i)] = {"class_type": kind, "inputs": {"text": "keep"},
+                         "_meta": {"title": f"in:{label}"}}
+    result = workflows.inspect_workflow("local", graph)
+    assert len(result["inputs"]) == 5
+    assert all(item["type"] == "text" for item in result["inputs"])
+
+
+def test_explicit_prompt_tags_never_promote_multiple_fields_or_selects(host):
+    graph = {"output": {"class_type": "SaveImage", "inputs": {"images": ["image", 0]}}}
+    for node_id in ("a", "b"):
+        graph[node_id] = {"class_type": "CR Text", "_meta": {"title": "in:提示词"},
+                          "inputs": {"text": "main", "suffix": "keep"}}
+    graph["enum"] = {"class_type": "SamplerChoice", "_meta": {"title": "in:prompt"},
+                     "inputs": {"sampler_name": "euler"}}
+    result = workflows.inspect_workflow("local", graph)
+    assert [(item["node_id"], item["field"]) for item in result["candidates"]
+            if item["type"] == "prompt"] == [("a", "text")]
+    assert next(item for item in result["inputs"] if item["node_id"] == "enum")["type"] == "select"
+
+
+def test_untagged_clip_prompt_suggestion_skips_named_negative(host):
+    graph = json.loads((FIXTURES / "lora.json").read_text())
+    for node in graph.values():
+        node.pop("_meta", None)
+    graph["7"]["_meta"] = {"title": "Negative prompt"}
+    graph = {"7": graph.pop("7"), **graph}
+    result = workflows.inspect_workflow("local", graph)
+    assert result["tagged"] is False
+    assert [item["node_id"] for item in result["inputs"] if item["type"] == "prompt"] == ["6"]
+
+
+def test_ambiguous_custom_prompt_fields_require_manual_mapping(host):
+    graph = {"1": {"class_type": "CustomText", "_meta": {"title": "in:提示词"},
+                   "inputs": {"first": "a", "second": "b"}},
+             "2": {"class_type": "SaveImage", "inputs": {"images": ["3", 0]}}}
+    result = workflows.inspect_workflow("local", graph)
+    assert all(item["type"] != "prompt" for item in result["candidates"])
+
+
 def test_stale_mapping_and_link_input_fail(host):
     workflow = imported()
     for change in ("missing", "class", "link"):

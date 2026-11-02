@@ -9,7 +9,7 @@ import io
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from PIL import Image
 
@@ -78,7 +78,7 @@ class Handler(BaseHTTPRequestHandler):
                 {"name": "Fake GPU", "type": "cuda", "index": 0, "vram_total": 16 * 1024**3,
                  "vram_free": 12 * 1024**3}]})
         if path.startswith("/object_info"):
-            kind = path.rsplit("/", 1)[-1]
+            kind = unquote(path.rsplit("/", 1)[-1])
             return self.respond({kind: {"input": {"required": {
                 "steps": ["INT", {"default": 20, "min": 1, "max": 10000}],
                 "lora_name": [["example.safetensors"]],
