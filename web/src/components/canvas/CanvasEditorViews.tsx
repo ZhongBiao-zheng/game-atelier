@@ -2351,7 +2351,7 @@ export function CanvasGenerationComposer({
           submitting={submitting}
         />
       )}
-      {!running && workflowReferenceProblem && <p role="status" className="mt-2 text-xs text-destructive">{workflowReferenceProblem}</p>}
+      {!running && workflowReferenceProblem && <p role="status" className="mt-2 text-xs text-muted-foreground">{workflowReferenceProblem}</p>}
       <div className="mt-2 flex items-end gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
         <div className={cn('flex min-w-0 flex-1 items-center gap-1.5', draft.mode === 'video' ? 'flex-nowrap' : 'flex-wrap')}>
           <CanvasModelPicker

@@ -6,5 +6,5 @@ export function workflowReferenceError(inputs: WorkflowInput[] | null | undefine
     if (input.type === 'image') return ++imageIndex > imageCount && input.required;
     return input.type === 'mask' && input.required && !hasMask;
   });
-  return missing.length ? `需要参考图：${missing.map(input => input.label).join('、')}` : null;
+  return missing.length ? `需要${missing.map(input => input.label).join('、')}` : null;
 }

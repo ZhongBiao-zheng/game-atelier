@@ -1378,7 +1378,7 @@ export function PromptInput({
         </div>
         {/* pr-12 给提交按钮让位：按钮已改为绝对定位锚在壳右下角（见 shell 末尾），不再占这一行的 flex 位 */}
         <div className="flex items-center gap-3 shrink-0 pr-12">
-          {workflowReferenceProblem && <span role="status" className="text-xs text-destructive">{workflowReferenceProblem}</span>}
+          {workflowReferenceProblem && <span role="status" className="text-xs text-muted-foreground">{workflowReferenceProblem}</span>}
           {lastFrameOnlyBlocked && (
             <span
               data-testid="frame-block-hint"

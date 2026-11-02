@@ -45,10 +45,10 @@ describe('ComfyUI generation controls', () => {
     const props = { providers: [provider], providerAlias: 'local', model: 'comfyui-upscale', onSubmit: vi.fn() };
     const { rerender } = render(<PromptInput {...props} />);
     expect(screen.getByRole('button', { name: '提交生成' })).toBeDisabled();
-    expect(screen.getByRole('status')).toHaveTextContent('需要参考图：原图');
+    expect(screen.getByRole('status')).toHaveTextContent('需要原图');
     rerender(<PromptInput {...props} referenceImages={[new File(['image'], 'ref.png', { type: 'image/png' })]} />);
     expect(screen.getByRole('button', { name: '提交生成' })).toBeEnabled();
-    expect(workflowReferenceError([image, mask], 1, false)).toBe('需要参考图：遮罩');
+    expect(workflowReferenceError([image, mask], 1, false)).toBe('需要遮罩');
     expect(workflowReferenceError([image, mask], 1, true)).toBeNull();
   });
 
