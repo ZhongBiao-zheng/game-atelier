@@ -9,6 +9,11 @@
 - 证据：2026-11-02 ComfyUI A 批并行验证出现 11 个 bootstrap 失败，构建完成后顺序重跑全部通过。
 - 出现：1
 
+## 新控件逐项对照同屏组件，并验证阻断和关闭行为
+- 原因：只验证生成成功会漏掉按钮尺寸、原有张数入口、必填素材阻断和键盘关闭等验收项。
+- 证据：2026-11-02 ComfyUI A 批返工按 REVIEW-A.md 逐项记录，截图同时保留相邻工具栏控件，并检查缺图、补图、固定种子和 Esc。
+- 出现：1
+
 ## 新增生成参数必须验证从界面保存到真实 caller 的完整链路
 - 原因：创作台重新组装 JobParams，Canvas 另有 CANVAS_DRAFT_PARAM_FIELDS 白名单；单测 caller 无法发现中途丢参数。
 - 证据：2026-11-02 ComfyUI A 批补齐 workflow_inputs 两处传递，并用 Studio / Canvas 的真实 Job 验证落盘值。

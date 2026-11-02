@@ -1,8 +1,9 @@
+import { ControlButton } from './ControlButton';
 import { WorkflowParameters } from './WorkflowParameters';
 import { workflowReferenceError } from '@/lib/workflowInputs';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
-import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowUp, BookmarkPlus, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Video, X } from 'lucide-react';
 import { prefetchModelPickerMetrics } from '@/lib/useModelPickerMetrics';
@@ -1429,23 +1430,5 @@ function CountOptions({ value, onSelect, max = 4 }: { value: number; max?: numbe
         </Button>
       ))}
     </div>
-  );
-}
-
-function ControlButton({
-  active,
-  className = '',
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }) {
-  return (
-    <Button variant="bare"
-      type="button"
-      className={`inline-flex min-w-0 max-w-full h-9 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-        active
-          ? 'border-border bg-secondary text-foreground'
-          : 'border-border text-foreground hover:bg-secondary'
-      } ${className}`}
-      {...props}
-    />
   );
 }
