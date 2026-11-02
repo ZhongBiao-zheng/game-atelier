@@ -1,0 +1,52 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {"ckpt_name": "1.5\\dreamshaper_8.safetensors"},
+    "_meta": {"title": "Supplemental synthetic acceptance - SD1.5 DreamShaper 8"}
+  },
+  "2": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {"text": "a small red ceramic vase, detailed, natural lighting", "clip": ["1", 1]},
+    "_meta": {"title": "in:提示词"}
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {"text": "blurry, low quality, artifacts, text, watermark", "clip": ["1", 1]},
+    "_meta": {"title": "Negative prompt"}
+  },
+  "4": {
+    "class_type": "LoadImage",
+    "inputs": {"image": "acceptance-input.png"},
+    "_meta": {"title": "in:原图"}
+  },
+  "5": {
+    "class_type": "LoadImageMask",
+    "inputs": {"image": "acceptance-mask.png", "channel": "red"},
+    "_meta": {"title": "in:遮罩"}
+  },
+  "6": {
+    "class_type": "VAEEncodeForInpaint",
+    "inputs": {"pixels": ["4", 0], "vae": ["1", 2], "mask": ["5", 0], "grow_mask_by": 6},
+    "_meta": {"title": "Encode with masked noise"}
+  },
+  "7": {
+    "class_type": "KSampler",
+    "inputs": {"model": ["1", 0], "seed": 20261102, "steps": 20, "cfg": 7.0, "sampler_name": "euler", "scheduler": "normal", "positive": ["2", 0], "negative": ["3", 0], "latent_image": ["6", 0], "denoise": 0.85},
+    "_meta": {"title": "in:种子"}
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": {"samples": ["7", 0], "vae": ["1", 2]},
+    "_meta": {"title": "Decode inpainted image"}
+  },
+  "9": {
+    "class_type": "ImageCompositeMasked",
+    "inputs": {"destination": ["4", 0], "source": ["8", 0], "x": 0, "y": 0, "resize_source": false, "mask": ["5", 0]},
+    "_meta": {"title": "Preserve original pixels outside mask"}
+  },
+  "10": {
+    "class_type": "SaveImage",
+    "inputs": {"images": ["9", 0], "filename_prefix": "acceptance/supplemental-inpaint"},
+    "_meta": {"title": "Supplemental synthetic acceptance output"}
+  }
+}

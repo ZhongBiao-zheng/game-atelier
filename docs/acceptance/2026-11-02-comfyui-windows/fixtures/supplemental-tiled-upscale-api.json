@@ -1,0 +1,62 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {"ckpt_name": "1.5\\dreamshaper_8.safetensors"},
+    "_meta": {"title": "Supplemental synthetic acceptance - SD1.5 DreamShaper 8"}
+  },
+  "2": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {"text": "high quality, detailed, sharp focus, preserve the original composition and colors", "clip": ["1", 1]},
+    "_meta": {"title": "in:提示词"}
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {"text": "blurry, low quality, artifacts, text, watermark", "clip": ["1", 1]},
+    "_meta": {"title": "Negative prompt"}
+  },
+  "4": {
+    "class_type": "LoadImage",
+    "inputs": {"image": "acceptance-input.png"},
+    "_meta": {"title": "in:原图"}
+  },
+  "5": {
+    "class_type": "ImageScaleBy",
+    "inputs": {"image": ["4", 0], "upscale_method": "lanczos", "scale_by": 2.0},
+    "_meta": {"title": "in:放大倍数"}
+  },
+  "6": {
+    "class_type": "UltimateSDUpscaleNoUpscale",
+    "inputs": {
+      "upscaled_image": ["5", 0],
+      "model": ["1", 0],
+      "positive": ["2", 0],
+      "negative": ["3", 0],
+      "vae": ["1", 2],
+      "seed": 20261102,
+      "steps": 20,
+      "cfg": 7.0,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 0.25,
+      "mode_type": "Linear",
+      "tile_width": 512,
+      "tile_height": 512,
+      "mask_blur": 8,
+      "tile_padding": 32,
+      "seam_fix_mode": "None",
+      "seam_fix_denoise": 0.2,
+      "seam_fix_width": 64,
+      "seam_fix_mask_blur": 8,
+      "seam_fix_padding": 16,
+      "force_uniform_tiles": true,
+      "tiled_decode": true,
+      "batch_size": 1
+    },
+    "_meta": {"title": "in:种子"}
+  },
+  "7": {
+    "class_type": "SaveImage",
+    "inputs": {"images": ["6", 0], "filename_prefix": "acceptance/supplemental-tiled-upscale"},
+    "_meta": {"title": "Supplemental synthetic acceptance output"}
+  }
+}

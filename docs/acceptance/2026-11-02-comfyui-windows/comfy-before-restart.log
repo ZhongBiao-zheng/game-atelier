@@ -1,0 +1,100 @@
+[2026-11-02 21:16:01.782] FETCH ComfyRegistry Data: 35/211
+[2026-11-02 21:16:08.318] FETCH ComfyRegistry Data: 40/211
+[2026-11-02 21:16:12.345] [36;20m[H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfy_mtb] | INFO -> Found multiple match, we will pick the last Z:\sd-webui-aki-v4.2\models\SwinIR
+['H:\\n8n_output\\ComfyUI\\ComfyUI\\models\\upscale_models', 'Z:\\sd-webui-aki-v4.2\\models\\ESRGAN', 'Z:\\sd-webui-aki-v4.2\\models\\RealESRGAN', 'Z:\\sd-webui-aki-v4.2\\models\\SwinIR'][0m
+[2026-11-02 21:16:12.345] [33;20m[H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfy_mtb] | WARNING -> Face restoration models not found.[0m
+[2026-11-02 21:16:12.350] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:16:12.350] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:16:14.927] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:16:14.927] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:16:15.328] [DEPRECATION WARNING] Detected import of deprecated legacy API: /scripts/ui/components/button.js. This is likely caused by a custom node extension using outdated APIs. Please update your extensions or contact the extension author for an updated version.
+[2026-11-02 21:16:16.127] FETCH ComfyRegistry Data: 45/211
+[2026-11-02 21:16:23.329] FETCH ComfyRegistry Data: 50/211
+[2026-11-02 21:16:30.460] FETCH ComfyRegistry Data: 55/211
+[2026-11-02 21:16:37.777] FETCH ComfyRegistry Data: 60/211
+[2026-11-02 21:16:45.413] FETCH ComfyRegistry Data: 65/211
+[2026-11-02 21:16:54.161] FETCH ComfyRegistry Data: 70/211
+[2026-11-02 21:17:01.919] FETCH ComfyRegistry Data: 75/211
+[2026-11-02 21:17:10.009] FETCH ComfyRegistry Data: 80/211
+[2026-11-02 21:17:18.177] FETCH ComfyRegistry Data: 85/211
+[2026-11-02 21:17:25.343] FETCH ComfyRegistry Data: 90/211
+[2026-11-02 21:17:33.401] FETCH ComfyRegistry Data: 95/211
+[2026-11-02 21:17:40.700] FETCH ComfyRegistry Data: 100/211
+[2026-11-02 21:17:48.084] FETCH ComfyRegistry Data: 105/211
+[2026-11-02 21:17:55.554] FETCH ComfyRegistry Data: 110/211
+[2026-11-02 21:18:03.207] FETCH ComfyRegistry Data: 115/211
+[2026-11-02 21:18:09.960] FETCH ComfyRegistry Data: 120/211
+[2026-11-02 21:18:17.794] FETCH ComfyRegistry Data: 125/211
+[2026-11-02 21:18:25.789] FETCH ComfyRegistry Data: 130/211
+[2026-11-02 21:18:33.161] FETCH ComfyRegistry Data: 135/211
+[2026-11-02 21:18:40.742] FETCH ComfyRegistry Data: 140/211
+[2026-11-02 21:18:47.525] FETCH ComfyRegistry Data: 145/211
+[2026-11-02 21:18:55.303] FETCH ComfyRegistry Data: 150/211
+[2026-11-02 21:19:03.767] FETCH ComfyRegistry Data: 155/211
+[2026-11-02 21:19:11.948] FETCH ComfyRegistry Data: 160/211
+[2026-11-02 21:19:19.651] FETCH ComfyRegistry Data: 165/211
+[2026-11-02 21:19:27.155] FETCH ComfyRegistry Data: 170/211
+[2026-11-02 21:19:34.622] FETCH ComfyRegistry Data: 175/211
+[2026-11-02 21:19:41.256] FETCH ComfyRegistry Data: 180/211
+[2026-11-02 21:19:47.762] FETCH ComfyRegistry Data: 185/211
+[2026-11-02 21:19:55.131] FETCH ComfyRegistry Data: 190/211
+[2026-11-02 21:20:02.278] FETCH ComfyRegistry Data: 195/211
+[2026-11-02 21:20:10.365] FETCH ComfyRegistry Data: 200/211
+[2026-11-02 21:20:11.696] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/photoswipe-lightbox.esm.min.js
+[2026-11-02 21:20:11.711] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/photoswipe.min.css
+[2026-11-02 21:20:11.713] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/pickr.min.js
+[2026-11-02 21:20:11.737] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/classic.min.css
+[2026-11-02 21:20:11.753] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/model-viewer.min.js
+[2026-11-02 21:20:11.813] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/juxtapose.css
+[2026-11-02 21:20:13.572] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:20:13.572] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:20:13.624] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/juxtapose.min.js
+[2026-11-02 21:20:16.832] FETCH ComfyRegistry Data: 205/211
+[2026-11-02 21:20:24.259] FETCH ComfyRegistry Data: 210/211
+[2026-11-02 21:20:26.168] FETCH ComfyRegistry Data [DONE]
+[2026-11-02 21:20:26.450] [ComfyUI-Manager] default cache updated: https://api.comfy.org/nodes
+[2026-11-02 21:20:26.554] FETCH DATA from: https://raw.githubusercontent.com/ltdrdata/ComfyUI-Manager/main/custom-node-list.json [DONE]
+[2026-11-02 21:20:27.948] [ComfyUI-Manager] All startup tasks have been completed.
+[2026-11-02 21:23:26.311] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/photoswipe-lightbox.esm.min.js
+[2026-11-02 21:23:26.331] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/photoswipe.min.css
+[2026-11-02 21:23:26.336] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/pickr.min.js
+[2026-11-02 21:23:26.390] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/classic.min.css
+[2026-11-02 21:23:26.455] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/model-viewer.min.js
+[2026-11-02 21:23:26.580] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/juxtapose.css
+[2026-11-02 21:23:26.597] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/juxtapose.min.js
+[2026-11-02 21:23:28.678] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:23:28.679] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:25:38.077] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/photoswipe-lightbox.esm.min.js
+[2026-11-02 21:25:38.096] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/photoswipe.min.css
+[2026-11-02 21:25:38.098] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/pickr.min.js
+[2026-11-02 21:25:38.166] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/classic.min.css
+[2026-11-02 21:25:38.167] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/model-viewer.min.js
+[2026-11-02 21:25:38.233] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/juxtapose.css
+[2026-11-02 21:25:38.400] H:\n8n_output\ComfyUI\ComfyUI\custom_nodes\comfyui-mixlab-nodes\webApp\lib/juxtapose.min.js
+[2026-11-02 21:25:40.547] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:25:40.547] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:42:33.947] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:42:33.947] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:42:54.604] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:42:54.605] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:43:17.344] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:43:17.344] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:43:46.487] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:43:46.487] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:45:10.794] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:45:10.794] ['flux_train_replicate.safetensors', 'xlabs_flux_anime_lora.safetensors', 'xlabs_flux_art_lora_comfyui.safetensors', 'xlabs_flux_disney_lora_comfyui.safetensors', 'xlabs_flux_mjv6_lora_comfyui.safetensors', 'xlabs_flux_realism_lora_comfui.safetensors', 'xlabs_flux_scenery_lora_comfyui.safetensors']
+[2026-11-02 21:49:18.391] got prompt
+[2026-11-02 21:49:18.478] Model storage policy: fast_disk=False paths=['H:\\n8n_output\\ComfyUI\\ComfyUI\\models\\vae\\ae.sft']
+[2026-11-02 21:49:18.481] Using xformers attention in VAE
+[2026-11-02 21:49:18.482] Using xformers attention in VAE
+[2026-11-02 21:49:19.188] VAE load device: cuda:0, offload device: cpu, dtype: torch.bfloat16
+[2026-11-02 21:49:19.748] model weight dtype torch.float8_e4m3fn, manual cast: torch.bfloat16
+[2026-11-02 21:49:19.755] model_type FLUX
+[2026-11-02 21:49:19.756] Model storage policy: fast_disk=False paths=['H:\\n8n_output\\ComfyUI\\ComfyUI\\models\\unet\\Flux\\Flux.Krea.FP8_fast.safetensors']
+[2026-11-02 21:49:41.140] Model storage policy: fast_disk=False paths=['H:\\n8n_output\\ComfyUI\\ComfyUI\\models\\clip\\clip_l.safetensors', 'H:\\n8n_output\\ComfyUI\\ComfyUI\\models\\clip\\t5\\t5xxl_fp8_e4m3fn.safetensors']
+[2026-11-02 21:49:42.000] clip missing: ['text_projection.weight']
+[2026-11-02 21:49:51.460] Requested to load FluxClipModel_
+[2026-11-02 21:49:51.486] loaded completely;  4777.54 MB loaded, full load: True
+[2026-11-02 21:49:51.488] CLIP/text encoder model load device: cuda:0, offload device: cpu, current: cuda:0, dtype: torch.float16
+[2026-11-02 21:49:53.018] Requested to load Flux
+[2026-11-02 21:52:38.049] loaded completely; 11725.54 MB usable, 11350.07 MB loaded, full load: True

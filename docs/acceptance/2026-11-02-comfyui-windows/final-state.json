@@ -1,0 +1,160 @@
+{
+  "jobs": [
+    {
+      "id": "job-20261102134918ea2035ae",
+      "status": "failed",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-20261102135730dbaa7f4e",
+      "status": "failed",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-202611021400517a22d963",
+      "status": "done",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-20261102140333b1f2de2a",
+      "status": "done",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-202611021403563cfbc21b",
+      "status": "done",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-202611021404470a6a00f6",
+      "status": "done",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-20261102140448027b6d57",
+      "status": "canceled",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-20261102140448e9e55ade",
+      "status": "canceled",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-2026110214045438e8f665",
+      "status": "canceled",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-202611021405013507f824",
+      "status": "canceled",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-2026110214050455e5e606",
+      "status": "canceled",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-20261102141145ce36fe67",
+      "status": "canceled",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-202611021412199f00b0a9",
+      "status": "canceled",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-2026110214144688aa1dde",
+      "status": "failed",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-202611021418387662360a",
+      "status": "done",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-202611021424523872b677",
+      "status": "done",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-202611021424524ae7ffd4",
+      "status": "done",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-20261102142452ce2596b3",
+      "status": "done",
+      "estimated": 0.0,
+      "actual": 0.0
+    }
+  ],
+  "nonzero_cost": [],
+  "unfinished": [],
+  "queue": {
+    "queue_running": [],
+    "queue_pending": []
+  },
+  "comfy_version": "0.42.0",
+  "queue_output_mapping": [
+    {
+      "job": "job-20261102142452ce2596b3",
+      "app_sha256": "b9c6b0089589f5ba0ee372b390e3625475c14fd6b0f2f17664a6c81c1e4b17d4",
+      "comfy_outputs": [
+        {
+          "prompt_id": "69e4ede7-1c46-4b61-bf31-17cb4565ae2b",
+          "file": "H:\\n8n_output\\ComfyUI\\ComfyUI\\output\\atelier\\job-20261102142452ce2596b3_00001_.png",
+          "sha256": "b9c6b0089589f5ba0ee372b390e3625475c14fd6b0f2f17664a6c81c1e4b17d4"
+        }
+      ],
+      "matches": true,
+      "elapsed_submit_complete": 34.645062
+    },
+    {
+      "job": "job-202611021424523872b677",
+      "app_sha256": "e48b6881007c2035d7dade21c1c64f0e5047c6e59f117edd7c882f070b0b03cc",
+      "comfy_outputs": [
+        {
+          "prompt_id": "30226926-3948-4242-a1cc-f1e8e2edd25c",
+          "file": "H:\\n8n_output\\ComfyUI\\ComfyUI\\output\\atelier\\job-202611021424523872b677_00001_.png",
+          "sha256": "e48b6881007c2035d7dade21c1c64f0e5047c6e59f117edd7c882f070b0b03cc"
+        }
+      ],
+      "matches": true,
+      "elapsed_submit_complete": 103.952337
+    },
+    {
+      "job": "job-202611021424524ae7ffd4",
+      "app_sha256": "89bc1adb79394e90b479cf08eb9936e46585b15eb0d8806ca90255fdf836d8b8",
+      "comfy_outputs": [
+        {
+          "prompt_id": "cc87493c-63a3-4165-8f90-934a881bc269",
+          "file": "H:\\n8n_output\\ComfyUI\\ComfyUI\\output\\atelier\\job-202611021424524ae7ffd4_00001_.png",
+          "sha256": "89bc1adb79394e90b479cf08eb9936e46585b15eb0d8806ca90255fdf836d8b8"
+        }
+      ],
+      "matches": true,
+      "elapsed_submit_complete": 69.336753
+    }
+  ]
+}

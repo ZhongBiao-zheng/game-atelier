@@ -1,0 +1,147 @@
+{
+  "id": "comfyui-9913ad3c1bf24d218e0656940554e55f",
+  "alias": "验收ComfyUI",
+  "name": "补充验收 SD15 小模型",
+  "source_filename": "synthetic-small-model.json",
+  "imported_at": "2026-11-02T14:00:51.721058+00:00",
+  "api_workflow": {
+    "1": {
+      "class_type": "CheckpointLoaderSimple",
+      "inputs": {
+        "ckpt_name": "1.5\\dreamshaper_8.safetensors"
+      }
+    },
+    "2": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "A small red ceramic teapot on a wooden table, studio product photograph",
+        "clip": [
+          "1",
+          1
+        ]
+      },
+      "_meta": {
+        "title": "in:提示词"
+      }
+    },
+    "3": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "blurry, low quality, watermark",
+        "clip": [
+          "1",
+          1
+        ]
+      }
+    },
+    "4": {
+      "class_type": "EmptyLatentImage",
+      "inputs": {
+        "width": 512,
+        "height": 512,
+        "batch_size": 1
+      },
+      "_meta": {
+        "title": "in:宽度"
+      }
+    },
+    "5": {
+      "class_type": "KSampler",
+      "inputs": {
+        "model": [
+          "1",
+          0
+        ],
+        "seed": 1,
+        "steps": 20,
+        "cfg": 7.0,
+        "sampler_name": "euler",
+        "scheduler": "normal",
+        "positive": [
+          "2",
+          0
+        ],
+        "negative": [
+          "3",
+          0
+        ],
+        "latent_image": [
+          "4",
+          0
+        ],
+        "denoise": 1.0
+      },
+      "_meta": {
+        "title": "in:种子"
+      }
+    },
+    "6": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": [
+          "5",
+          0
+        ],
+        "vae": [
+          "1",
+          2
+        ]
+      }
+    },
+    "7": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "images": [
+          "6",
+          0
+        ],
+        "filename_prefix": "acceptance/small"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "id": "提示词-3a16abaf",
+      "label": "提示词",
+      "type": "prompt",
+      "node_id": "2",
+      "class_type": "CLIPTextEncode",
+      "field": "text",
+      "default": "A small red ceramic teapot on a wooden table, studio product photograph",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "宽度-4b92727c",
+      "label": "宽度",
+      "type": "int",
+      "node_id": "4",
+      "class_type": "EmptyLatentImage",
+      "field": "width",
+      "default": 512,
+      "min": 16.0,
+      "max": 16384.0,
+      "step": 8.0,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "种子-76858a15",
+      "label": "种子",
+      "type": "seed",
+      "node_id": "5",
+      "class_type": "KSampler",
+      "field": "seed",
+      "default": null,
+      "min": 0.0,
+      "max": 1.8446744073709552e+19,
+      "step": null,
+      "options": [],
+      "required": true
+    }
+  ],
+  "timeout_seconds": 1800
+}

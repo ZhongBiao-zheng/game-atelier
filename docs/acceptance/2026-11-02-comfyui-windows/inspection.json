@@ -1,0 +1,961 @@
+{
+  "inputs": [
+    {
+      "id": "LoRA强度-4bcf6cc9",
+      "label": "LoRA强度",
+      "type": "int",
+      "node_id": "4",
+      "class_type": "LoraLoaderModelOnly",
+      "field": "strength_model",
+      "default": 1,
+      "min": -100.0,
+      "max": 100.0,
+      "step": 0.01,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "种子-f1b7bcdb",
+      "label": "种子",
+      "type": "seed",
+      "node_id": "7",
+      "class_type": "RandomNoise",
+      "field": "noise_seed",
+      "default": null,
+      "min": 0.0,
+      "max": 1.8446744073709552e+19,
+      "step": null,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "输出宽度-6dfde275",
+      "label": "输出宽度",
+      "type": "int",
+      "node_id": "10",
+      "class_type": "EmptySD3LatentImage",
+      "field": "width",
+      "default": 768,
+      "min": 16.0,
+      "max": 16384.0,
+      "step": 16.0,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "提示词-1b0c6756",
+      "label": "提示词",
+      "type": "text",
+      "node_id": "11",
+      "class_type": "CR Text",
+      "field": "text",
+      "default": "A scene of a young woman indoors. She is wearing a light pink baseball cap with small patterns on it. Wearing a light gray V-neck knitted cardigan with gold buttons and a light colored garment with a white bow inside, adding a sweet touch. Wear a light pink short skirt and a beige chain bag diagonally. She sat at the wooden table, her hand lightly resting on her lips, with a dark dessert topped with cream and pink sugar slices. The background features patterned walls and wooden cabinets (with cups and other items on them), while the street, vehicles, and green trees can be seen outside the window. The overall atmosphere is fresh and pleasant, showcasing a leisurely living scene.",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [],
+      "required": true
+    }
+  ],
+  "candidates": [
+    {
+      "id": "UNETLoader---unet_name-64452ca9",
+      "label": "UNETLoader · unet_name",
+      "type": "select",
+      "node_id": "1",
+      "class_type": "UNETLoader",
+      "field": "unet_name",
+      "default": "Flux\\Flux.Krea.FP8_fast.safetensors",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [
+        {
+          "value": "Flux\\Flux.Krea.FP8_fast.safetensors",
+          "label": "Flux\\Flux.Krea.FP8_fast.safetensors"
+        },
+        {
+          "value": "Flux\\flux1-dev-fp8.safetensors",
+          "label": "Flux\\flux1-dev-fp8.safetensors"
+        },
+        {
+          "value": "FramePackI2V_HY_fp8_e4m3fn.safetensors",
+          "label": "FramePackI2V_HY_fp8_e4m3fn.safetensors"
+        },
+        {
+          "value": "LBM\\LBM_relighting.safetensors",
+          "label": "LBM\\LBM_relighting.safetensors"
+        },
+        {
+          "value": "SUPIR-v0F_fp16.safetensors",
+          "label": "SUPIR-v0F_fp16.safetensors"
+        },
+        {
+          "value": "SUPIR-v0Q_fp16.safetensors",
+          "label": "SUPIR-v0Q_fp16.safetensors"
+        },
+        {
+          "value": "lotus-depth-g-v1-0-fp16.safetensors",
+          "label": "lotus-depth-g-v1-0-fp16.safetensors"
+        },
+        {
+          "value": "lotus-depth-g-v1-0.safetensors",
+          "label": "lotus-depth-g-v1-0.safetensors"
+        },
+        {
+          "value": "lotus-normal-d-v1-0.safetensors",
+          "label": "lotus-normal-d-v1-0.safetensors"
+        },
+        {
+          "value": "lotus-normal-g-v1-0-fp16.safetensors",
+          "label": "lotus-normal-g-v1-0-fp16.safetensors"
+        },
+        {
+          "value": "qwen-image-2512-fp8.safetensors",
+          "label": "qwen-image-2512-fp8.safetensors"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "UNETLoader---weight_dtype-b3acd153",
+      "label": "UNETLoader · weight_dtype",
+      "type": "select",
+      "node_id": "1",
+      "class_type": "UNETLoader",
+      "field": "weight_dtype",
+      "default": "fp8_e4m3fn_fast",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [
+        {
+          "value": "default",
+          "label": "default"
+        },
+        {
+          "value": "fp8_e4m3fn",
+          "label": "fp8_e4m3fn"
+        },
+        {
+          "value": "fp8_e4m3fn_fast",
+          "label": "fp8_e4m3fn_fast"
+        },
+        {
+          "value": "fp8_e5m2",
+          "label": "fp8_e5m2"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "DualCLIPLoader---clip_name1-7811faa9",
+      "label": "DualCLIPLoader · clip_name1",
+      "type": "select",
+      "node_id": "2",
+      "class_type": "DualCLIPLoader",
+      "field": "clip_name1",
+      "default": "clip_l.safetensors",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [
+        {
+          "value": "CLIP-ViT-bigG-14-laion2B-39B-b160k\\pytorch_model-00001-of-00002.bin",
+          "label": "CLIP-ViT-bigG-14-laion2B-39B-b160k\\pytorch_model-00001-of-00002.bin"
+        },
+        {
+          "value": "CLIP-ViT-bigG-14-laion2B-39B-b160k\\pytorch_model-00002-of-00002.bin",
+          "label": "CLIP-ViT-bigG-14-laion2B-39B-b160k\\pytorch_model-00002-of-00002.bin"
+        },
+        {
+          "value": "EVA02_CLIP_L_336_psz14_s6B.pt",
+          "label": "EVA02_CLIP_L_336_psz14_s6B.pt"
+        },
+        {
+          "value": "Long-ViT-L-14-GmP-SAE-TE-only.safetensors",
+          "label": "Long-ViT-L-14-GmP-SAE-TE-only.safetensors"
+        },
+        {
+          "value": "Stable-Cascade\\model.safetensors",
+          "label": "Stable-Cascade\\model.safetensors"
+        },
+        {
+          "value": "ViT-L-14-BEST-smooth-GmP-TE-only-HF-format.safetensors",
+          "label": "ViT-L-14-BEST-smooth-GmP-TE-only-HF-format.safetensors"
+        },
+        {
+          "value": "ViT-L-14-GmP-SAE-TE-only.safetensors",
+          "label": "ViT-L-14-GmP-SAE-TE-only.safetensors"
+        },
+        {
+          "value": "ViT-L-14-TEXT-detail-improved-hiT-GmP-TE-only-HF.safetensors",
+          "label": "ViT-L-14-TEXT-detail-improved-hiT-GmP-TE-only-HF.safetensors"
+        },
+        {
+          "value": "ViT-L-14-TEXT-detail.safetensors",
+          "label": "ViT-L-14-TEXT-detail.safetensors"
+        },
+        {
+          "value": "clip-vit-large-patch14\\model.safetensors",
+          "label": "clip-vit-large-patch14\\model.safetensors"
+        },
+        {
+          "value": "clip_g.safetensors",
+          "label": "clip_g.safetensors"
+        },
+        {
+          "value": "clip_l.safetensors",
+          "label": "clip_l.safetensors"
+        },
+        {
+          "value": "llava_llama3_fp8_scaled.safetensors",
+          "label": "llava_llama3_fp8_scaled.safetensors"
+        },
+        {
+          "value": "model.safetensors",
+          "label": "model.safetensors"
+        },
+        {
+          "value": "oldt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "label": "oldt5_xxl_fp8_e4m3fn_scaled.safetensors"
+        },
+        {
+          "value": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "label": "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+        },
+        {
+          "value": "siglip-so400m-patch14-384\\model.safetensors",
+          "label": "siglip-so400m-patch14-384\\model.safetensors"
+        },
+        {
+          "value": "t5\\t5xxl_fp16.safetensors",
+          "label": "t5\\t5xxl_fp16.safetensors"
+        },
+        {
+          "value": "t5\\t5xxl_fp8_e4m3fn.safetensors",
+          "label": "t5\\t5xxl_fp8_e4m3fn.safetensors"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "DualCLIPLoader---clip_name2-9e8d1b76",
+      "label": "DualCLIPLoader · clip_name2",
+      "type": "select",
+      "node_id": "2",
+      "class_type": "DualCLIPLoader",
+      "field": "clip_name2",
+      "default": "t5\\t5xxl_fp8_e4m3fn.safetensors",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [
+        {
+          "value": "CLIP-ViT-bigG-14-laion2B-39B-b160k\\pytorch_model-00001-of-00002.bin",
+          "label": "CLIP-ViT-bigG-14-laion2B-39B-b160k\\pytorch_model-00001-of-00002.bin"
+        },
+        {
+          "value": "CLIP-ViT-bigG-14-laion2B-39B-b160k\\pytorch_model-00002-of-00002.bin",
+          "label": "CLIP-ViT-bigG-14-laion2B-39B-b160k\\pytorch_model-00002-of-00002.bin"
+        },
+        {
+          "value": "EVA02_CLIP_L_336_psz14_s6B.pt",
+          "label": "EVA02_CLIP_L_336_psz14_s6B.pt"
+        },
+        {
+          "value": "Long-ViT-L-14-GmP-SAE-TE-only.safetensors",
+          "label": "Long-ViT-L-14-GmP-SAE-TE-only.safetensors"
+        },
+        {
+          "value": "Stable-Cascade\\model.safetensors",
+          "label": "Stable-Cascade\\model.safetensors"
+        },
+        {
+          "value": "ViT-L-14-BEST-smooth-GmP-TE-only-HF-format.safetensors",
+          "label": "ViT-L-14-BEST-smooth-GmP-TE-only-HF-format.safetensors"
+        },
+        {
+          "value": "ViT-L-14-GmP-SAE-TE-only.safetensors",
+          "label": "ViT-L-14-GmP-SAE-TE-only.safetensors"
+        },
+        {
+          "value": "ViT-L-14-TEXT-detail-improved-hiT-GmP-TE-only-HF.safetensors",
+          "label": "ViT-L-14-TEXT-detail-improved-hiT-GmP-TE-only-HF.safetensors"
+        },
+        {
+          "value": "ViT-L-14-TEXT-detail.safetensors",
+          "label": "ViT-L-14-TEXT-detail.safetensors"
+        },
+        {
+          "value": "clip-vit-large-patch14\\model.safetensors",
+          "label": "clip-vit-large-patch14\\model.safetensors"
+        },
+        {
+          "value": "clip_g.safetensors",
+          "label": "clip_g.safetensors"
+        },
+        {
+          "value": "clip_l.safetensors",
+          "label": "clip_l.safetensors"
+        },
+        {
+          "value": "llava_llama3_fp8_scaled.safetensors",
+          "label": "llava_llama3_fp8_scaled.safetensors"
+        },
+        {
+          "value": "model.safetensors",
+          "label": "model.safetensors"
+        },
+        {
+          "value": "oldt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "label": "oldt5_xxl_fp8_e4m3fn_scaled.safetensors"
+        },
+        {
+          "value": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "label": "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+        },
+        {
+          "value": "siglip-so400m-patch14-384\\model.safetensors",
+          "label": "siglip-so400m-patch14-384\\model.safetensors"
+        },
+        {
+          "value": "t5\\t5xxl_fp16.safetensors",
+          "label": "t5\\t5xxl_fp16.safetensors"
+        },
+        {
+          "value": "t5\\t5xxl_fp8_e4m3fn.safetensors",
+          "label": "t5\\t5xxl_fp8_e4m3fn.safetensors"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "DualCLIPLoader---type-84fc2292",
+      "label": "DualCLIPLoader · type",
+      "type": "select",
+      "node_id": "2",
+      "class_type": "DualCLIPLoader",
+      "field": "type",
+      "default": "flux",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [
+        {
+          "value": "sdxl",
+          "label": "sdxl"
+        },
+        {
+          "value": "sd3",
+          "label": "sd3"
+        },
+        {
+          "value": "flux",
+          "label": "flux"
+        },
+        {
+          "value": "hunyuan_video",
+          "label": "hunyuan_video"
+        },
+        {
+          "value": "hidream",
+          "label": "hidream"
+        },
+        {
+          "value": "hunyuan_image",
+          "label": "hunyuan_image"
+        },
+        {
+          "value": "hunyuan_video_15",
+          "label": "hunyuan_video_15"
+        },
+        {
+          "value": "kandinsky5",
+          "label": "kandinsky5"
+        },
+        {
+          "value": "kandinsky5_image",
+          "label": "kandinsky5_image"
+        },
+        {
+          "value": "ltxv",
+          "label": "ltxv"
+        },
+        {
+          "value": "newbie",
+          "label": "newbie"
+        },
+        {
+          "value": "ace",
+          "label": "ace"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "DualCLIPLoader---device-8c3fde65",
+      "label": "DualCLIPLoader · device",
+      "type": "select",
+      "node_id": "2",
+      "class_type": "DualCLIPLoader",
+      "field": "device",
+      "default": "default",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [
+        {
+          "value": "default",
+          "label": "default"
+        },
+        {
+          "value": "cpu",
+          "label": "cpu"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "KSamplerSelect---sampler_name-34630d20",
+      "label": "KSamplerSelect · sampler_name",
+      "type": "text",
+      "node_id": "3",
+      "class_type": "KSamplerSelect",
+      "field": "sampler_name",
+      "default": "ddim",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "LoRA强度-5f83e400",
+      "label": "LoRA强度",
+      "type": "select",
+      "node_id": "4",
+      "class_type": "LoraLoaderModelOnly",
+      "field": "lora_name",
+      "default": "自训练Lora\\xiongdawei\\Xiongdawei_V3.safetensors",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [
+        {
+          "value": "Flux\\AWPortraitCN.safetensors",
+          "label": "Flux\\AWPortraitCN.safetensors"
+        },
+        {
+          "value": "Flux\\Azer_亚洲写实富士摄影_v1.0.safetensors",
+          "label": "Flux\\Azer_亚洲写实富士摄影_v1.0.safetensors"
+        },
+        {
+          "value": "Flux\\C站像素风.safetensors",
+          "label": "Flux\\C站像素风.safetensors"
+        },
+        {
+          "value": "Flux\\F.1-新中式建筑设计-别墅-豪宅-会所-民宿-民居-合院_V1.safetensors",
+          "label": "Flux\\F.1-新中式建筑设计-别墅-豪宅-会所-民宿-民居-合院_V1.safetensors"
+        },
+        {
+          "value": "Flux\\FLUX-dev-lora-AntiBlur.safetensors",
+          "label": "Flux\\FLUX-dev-lora-AntiBlur.safetensors"
+        },
+        {
+          "value": "Flux\\FLUX-人像质感皮肤增强_v1.0.safetensors",
+          "label": "Flux\\FLUX-人像质感皮肤增强_v1.0.safetensors"
+        },
+        {
+          "value": "Flux\\Hyper-FLUX.1-dev-16steps-lora.safetensors",
+          "label": "Flux\\Hyper-FLUX.1-dev-16steps-lora.safetensors"
+        },
+        {
+          "value": "Flux\\Hyper-FLUX.1-dev-8steps-lora.safetensors",
+          "label": "Flux\\Hyper-FLUX.1-dev-8steps-lora.safetensors"
+        },
+        {
+          "value": "Flux\\MoonlitTide l 月涌星河-FLUX_扁平艺术插画_v1.0.safetensors",
+          "label": "Flux\\MoonlitTide l 月涌星河-FLUX_扁平艺术插画_v1.0.safetensors"
+        },
+        {
+          "value": "Flux\\StarlightCascade l 璀璨星河-FLUX_闪耀_v1.0.safetensors",
+          "label": "Flux\\StarlightCascade l 璀璨星河-FLUX_闪耀_v1.0.safetensors"
+        },
+        {
+          "value": "Flux\\[FLUX] Chinese ink painting - liujiyou.safetensors",
+          "label": "Flux\\[FLUX] Chinese ink painting - liujiyou.safetensors"
+        },
+        {
+          "value": "Flux\\flux-鸟瞰图-v2_flux-鸟瞰图-v2.safetensors",
+          "label": "Flux\\flux-鸟瞰图-v2_flux-鸟瞰图-v2.safetensors"
+        },
+        {
+          "value": "Flux\\国风游戏二次元角色立绘_FLUX-V1.safetensors",
+          "label": "Flux\\国风游戏二次元角色立绘_FLUX-V1.safetensors"
+        },
+        {
+          "value": "Flux\\游戏素材 _ 像素风格 _ 角色立绘_FLUX-V1.safetensors",
+          "label": "Flux\\游戏素材 _ 像素风格 _ 角色立绘_FLUX-V1.safetensors"
+        },
+        {
+          "value": "Flux\\细节超级增强器F1.1Pro（最强FLUX训练LORA）_V0.2 闪电版.safetensors",
+          "label": "Flux\\细节超级增强器F1.1Pro（最强FLUX训练LORA）_V0.2 闪电版.safetensors"
+        },
+        {
+          "value": "Flux_Cn\\flux1-canny-dev-lora.safetensors",
+          "label": "Flux_Cn\\flux1-canny-dev-lora.safetensors"
+        },
+        {
+          "value": "Flux_Cn\\flux1-depth-dev-lora.safetensors",
+          "label": "Flux_Cn\\flux1-depth-dev-lora.safetensors"
+        },
+        {
+          "value": "Flux_ICEdit\\ICEdit-MoE-LoRA.safetensors",
+          "label": "Flux_ICEdit\\ICEdit-MoE-LoRA.safetensors"
+        },
+        {
+          "value": "Flux_ICEdit\\ICEdit-normal-LoRA.safetensors",
+          "label": "Flux_ICEdit\\ICEdit-normal-LoRA.safetensors"
+        },
+        {
+          "value": "Flux_Kontext_lora\\clothes_remover_v0.safetensors",
+          "label": "Flux_Kontext_lora\\clothes_remover_v0.safetensors"
+        },
+        {
+          "value": "Flux_Kontext_lora\\flux-lora-Anime_Striptease_V2-3-14240.safetensors",
+          "label": "Flux_Kontext_lora\\flux-lora-Anime_Striptease_V2-3-14240.safetensors"
+        },
+        {
+          "value": "Flux_Kontext_lora\\flux-lora-Anime_Striptease_V2-4-17800.safetensors",
+          "label": "Flux_Kontext_lora\\flux-lora-Anime_Striptease_V2-4-17800.safetensors"
+        },
+        {
+          "value": "Oka_Style_15.safetensors",
+          "label": "Oka_Style_15.safetensors"
+        },
+        {
+          "value": "Oka_Style_c1-st8000.safetensors",
+          "label": "Oka_Style_c1-st8000.safetensors"
+        },
+        {
+          "value": "Wan2.1\\T2V - Lego World - 14B.safetensors",
+          "label": "Wan2.1\\T2V - Lego World - 14B.safetensors"
+        },
+        {
+          "value": "Wan2.1\\wan_flat_color_v2.safetensors",
+          "label": "Wan2.1\\wan_flat_color_v2.safetensors"
+        },
+        {
+          "value": "ip-adapter-faceid-plus_sd15_lora.safetensors",
+          "label": "ip-adapter-faceid-plus_sd15_lora.safetensors"
+        },
+        {
+          "value": "ip-adapter-faceid-plusv2_sd15_lora.safetensors",
+          "label": "ip-adapter-faceid-plusv2_sd15_lora.safetensors"
+        },
+        {
+          "value": "ip-adapter-faceid-plusv2_sdxl_lora.safetensors",
+          "label": "ip-adapter-faceid-plusv2_sdxl_lora.safetensors"
+        },
+        {
+          "value": "ip-adapter-faceid_sd15_lora.safetensors",
+          "label": "ip-adapter-faceid_sd15_lora.safetensors"
+        },
+        {
+          "value": "ip-adapter-faceid_sdxl_lora.safetensors",
+          "label": "ip-adapter-faceid_sdxl_lora.safetensors"
+        },
+        {
+          "value": "自训练Lora\\30.safetensors",
+          "label": "自训练Lora\\30.safetensors"
+        },
+        {
+          "value": "自训练Lora\\Popsocket-5\\flux-lora-000005.safetensors",
+          "label": "自训练Lora\\Popsocket-5\\flux-lora-000005.safetensors"
+        },
+        {
+          "value": "自训练Lora\\ml_poster\\flux-test-lora-1e-6.safetensors",
+          "label": "自训练Lora\\ml_poster\\flux-test-lora-1e-6.safetensors"
+        },
+        {
+          "value": "自训练Lora\\ml_poster_style\\zhen_test_v1.safetensors",
+          "label": "自训练Lora\\ml_poster_style\\zhen_test_v1.safetensors"
+        },
+        {
+          "value": "自训练Lora\\ml_style\\ml_style.safetensors",
+          "label": "自训练Lora\\ml_style\\ml_style.safetensors"
+        },
+        {
+          "value": "自训练Lora\\ml_style_2\\flux-test-lora-1e-6.safetensors",
+          "label": "自训练Lora\\ml_style_2\\flux-test-lora-1e-6.safetensors"
+        },
+        {
+          "value": "自训练Lora\\xiongdawei\\Xiongdawei_V1.safetensors",
+          "label": "自训练Lora\\xiongdawei\\Xiongdawei_V1.safetensors"
+        },
+        {
+          "value": "自训练Lora\\xiongdawei\\Xiongdawei_V2.safetensors",
+          "label": "自训练Lora\\xiongdawei\\Xiongdawei_V2.safetensors"
+        },
+        {
+          "value": "自训练Lora\\xiongdawei\\Xiongdawei_V3.5.safetensors",
+          "label": "自训练Lora\\xiongdawei\\Xiongdawei_V3.5.safetensors"
+        },
+        {
+          "value": "自训练Lora\\xiongdawei\\Xiongdawei_V3.safetensors",
+          "label": "自训练Lora\\xiongdawei\\Xiongdawei_V3.safetensors"
+        },
+        {
+          "value": "自训练Lora\\武侠风\\30.safetensors",
+          "label": "自训练Lora\\武侠风\\30.safetensors"
+        },
+        {
+          "value": "自训练Lora\\水墨武侠\\flux-test-lora-1e-6-000004.safetensors",
+          "label": "自训练Lora\\水墨武侠\\flux-test-lora-1e-6-000004.safetensors"
+        },
+        {
+          "value": "自训练Lora\\水墨武侠\\flux-test-lora-1e-6-000008.safetensors",
+          "label": "自训练Lora\\水墨武侠\\flux-test-lora-1e-6-000008.safetensors"
+        },
+        {
+          "value": "自训练Lora\\水墨武侠\\flux-test-lora-1e-6-000012.safetensors",
+          "label": "自训练Lora\\水墨武侠\\flux-test-lora-1e-6-000012.safetensors"
+        },
+        {
+          "value": "自训练Lora\\水墨武侠\\flux-test-lora-1e-6-000016.safetensors",
+          "label": "自训练Lora\\水墨武侠\\flux-test-lora-1e-6-000016.safetensors"
+        },
+        {
+          "value": "自训练Lora\\水墨武侠\\flux-test-lora-1e-6.safetensors",
+          "label": "自训练Lora\\水墨武侠\\flux-test-lora-1e-6.safetensors"
+        },
+        {
+          "value": "自训练Lora\\水墨武侠\\shuimowuxia-000002.safetensors",
+          "label": "自训练Lora\\水墨武侠\\shuimowuxia-000002.safetensors"
+        },
+        {
+          "value": "自训练Lora\\水墨武侠\\shuimowuxia-000004.safetensors",
+          "label": "自训练Lora\\水墨武侠\\shuimowuxia-000004.safetensors"
+        },
+        {
+          "value": "自训练Lora\\水墨武侠\\shuimowuxia-000006.safetensors",
+          "label": "自训练Lora\\水墨武侠\\shuimowuxia-000006.safetensors"
+        },
+        {
+          "value": "自训练Lora\\水墨武侠\\shuimowuxia-000008.safetensors",
+          "label": "自训练Lora\\水墨武侠\\shuimowuxia-000008.safetensors"
+        },
+        {
+          "value": "自训练Lora\\水墨武侠\\shuimowuxia.safetensors",
+          "label": "自训练Lora\\水墨武侠\\shuimowuxia.safetensors"
+        },
+        {
+          "value": "自训练Lora\\超人炫彩渐变\\Superman_Colorful Dynamic Light Streaks.safetensors",
+          "label": "自训练Lora\\超人炫彩渐变\\Superman_Colorful Dynamic Light Streaks.safetensors"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "LoRA强度-4bcf6cc9",
+      "label": "LoRA强度",
+      "type": "int",
+      "node_id": "4",
+      "class_type": "LoraLoaderModelOnly",
+      "field": "strength_model",
+      "default": 1,
+      "min": -100.0,
+      "max": 100.0,
+      "step": 0.01,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "CLIPTextEncodeFlux---guidance-089632b9",
+      "label": "CLIPTextEncodeFlux · guidance",
+      "type": "float",
+      "node_id": "5",
+      "class_type": "CLIPTextEncodeFlux",
+      "field": "guidance",
+      "default": 3.5,
+      "min": 0.0,
+      "max": 100.0,
+      "step": 0.1,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "BasicScheduler---scheduler-2f103c81",
+      "label": "BasicScheduler · scheduler",
+      "type": "text",
+      "node_id": "6",
+      "class_type": "BasicScheduler",
+      "field": "scheduler",
+      "default": "ddim_uniform",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "BasicScheduler---steps-7c6a4cf8",
+      "label": "BasicScheduler · steps",
+      "type": "int",
+      "node_id": "6",
+      "class_type": "BasicScheduler",
+      "field": "steps",
+      "default": 30,
+      "min": 1.0,
+      "max": 10000.0,
+      "step": null,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "BasicScheduler---denoise-90746a6a",
+      "label": "BasicScheduler · denoise",
+      "type": "int",
+      "node_id": "6",
+      "class_type": "BasicScheduler",
+      "field": "denoise",
+      "default": 1,
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.01,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "种子-f1b7bcdb",
+      "label": "种子",
+      "type": "seed",
+      "node_id": "7",
+      "class_type": "RandomNoise",
+      "field": "noise_seed",
+      "default": null,
+      "min": 0.0,
+      "max": 1.8446744073709552e+19,
+      "step": null,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "VAELoader---vae_name-e07c8db5",
+      "label": "VAELoader · vae_name",
+      "type": "select",
+      "node_id": "9",
+      "class_type": "VAELoader",
+      "field": "vae_name",
+      "default": "ae.sft",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [
+        {
+          "value": "HunyuanDiT_v1.2_t2i_vae.bin",
+          "label": "HunyuanDiT_v1.2_t2i_vae.bin"
+        },
+        {
+          "value": "Stable-Cascade\\effnet_encoder.safetensors",
+          "label": "Stable-Cascade\\effnet_encoder.safetensors"
+        },
+        {
+          "value": "Stable-Cascade\\stage_a.safetensors",
+          "label": "Stable-Cascade\\stage_a.safetensors"
+        },
+        {
+          "value": "ae.sft",
+          "label": "ae.sft"
+        },
+        {
+          "value": "cosmos_cv8x8x8_1.0.safetensors",
+          "label": "cosmos_cv8x8x8_1.0.safetensors"
+        },
+        {
+          "value": "diffusion_pytorch_model.safetensors",
+          "label": "diffusion_pytorch_model.safetensors"
+        },
+        {
+          "value": "fixFP16ErrorsSDXLLowerMemoryUse_v10.safetensors",
+          "label": "fixFP16ErrorsSDXLLowerMemoryUse_v10.safetensors"
+        },
+        {
+          "value": "hunyuan_video_vae_bf16.safetensors",
+          "label": "hunyuan_video_vae_bf16.safetensors"
+        },
+        {
+          "value": "kolors_vae.safetensors",
+          "label": "kolors_vae.safetensors"
+        },
+        {
+          "value": "qwen_image_vae.safetensors",
+          "label": "qwen_image_vae.safetensors"
+        },
+        {
+          "value": "sdxl_vae.safetensors",
+          "label": "sdxl_vae.safetensors"
+        },
+        {
+          "value": "sdxl_vae_fp16fix.safetensors",
+          "label": "sdxl_vae_fp16fix.safetensors"
+        },
+        {
+          "value": "vae-ft-mse-840000-ema-pruned.safetensors",
+          "label": "vae-ft-mse-840000-ema-pruned.safetensors"
+        },
+        {
+          "value": "动漫kl-f8-anime2 VAE_kl-f8-anime2VAE.ckpt",
+          "label": "动漫kl-f8-anime2 VAE_kl-f8-anime2VAE.ckpt"
+        },
+        {
+          "value": "taesd3",
+          "label": "taesd3"
+        },
+        {
+          "value": "taesd",
+          "label": "taesd"
+        },
+        {
+          "value": "taesdxl",
+          "label": "taesdxl"
+        },
+        {
+          "value": "pixel_space",
+          "label": "pixel_space"
+        }
+      ],
+      "required": true
+    },
+    {
+      "id": "输出宽度-6dfde275",
+      "label": "输出宽度",
+      "type": "int",
+      "node_id": "10",
+      "class_type": "EmptySD3LatentImage",
+      "field": "width",
+      "default": 768,
+      "min": 16.0,
+      "max": 16384.0,
+      "step": 16.0,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "输出宽度-178ae5be",
+      "label": "输出宽度",
+      "type": "int",
+      "node_id": "10",
+      "class_type": "EmptySD3LatentImage",
+      "field": "height",
+      "default": 1024,
+      "min": 16.0,
+      "max": 16384.0,
+      "step": 16.0,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "输出宽度-47b747da",
+      "label": "输出宽度",
+      "type": "int",
+      "node_id": "10",
+      "class_type": "EmptySD3LatentImage",
+      "field": "batch_size",
+      "default": 1,
+      "min": 1.0,
+      "max": 4096.0,
+      "step": null,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "提示词-1b0c6756",
+      "label": "提示词",
+      "type": "text",
+      "node_id": "11",
+      "class_type": "CR Text",
+      "field": "text",
+      "default": "A scene of a young woman indoors. She is wearing a light pink baseball cap with small patterns on it. Wearing a light gray V-neck knitted cardigan with gold buttons and a light colored garment with a white bow inside, adding a sweet touch. Wear a light pink short skirt and a beige chain bag diagonally. She sat at the wooden table, her hand lightly resting on her lips, with a dark dessert topped with cream and pink sugar slices. The background features patterned walls and wooden cabinets (with cups and other items on them), while the street, vehicles, and green trees can be seen outside the window. The overall atmosphere is fresh and pleasant, showcasing a leisurely living scene.",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "SaveImage---filename_prefix-30b857c7",
+      "label": "SaveImage · filename_prefix",
+      "type": "text",
+      "node_id": "14",
+      "class_type": "SaveImage",
+      "field": "filename_prefix",
+      "default": "ComfyUI/Flux/Xiongdawei",
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "ModelSamplingFlux---max_shift-77462c17",
+      "label": "ModelSamplingFlux · max_shift",
+      "type": "float",
+      "node_id": "15",
+      "class_type": "ModelSamplingFlux",
+      "field": "max_shift",
+      "default": 1.15,
+      "min": 0.0,
+      "max": 100.0,
+      "step": 0.01,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "ModelSamplingFlux---base_shift-cb700a99",
+      "label": "ModelSamplingFlux · base_shift",
+      "type": "float",
+      "node_id": "15",
+      "class_type": "ModelSamplingFlux",
+      "field": "base_shift",
+      "default": 0.5,
+      "min": 0.0,
+      "max": 100.0,
+      "step": 0.01,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "ModelSamplingFlux---width-4759a70e",
+      "label": "ModelSamplingFlux · width",
+      "type": "int",
+      "node_id": "15",
+      "class_type": "ModelSamplingFlux",
+      "field": "width",
+      "default": 768,
+      "min": 16.0,
+      "max": 16384.0,
+      "step": 8.0,
+      "options": [],
+      "required": true
+    },
+    {
+      "id": "ModelSamplingFlux---height-736e2ddc",
+      "label": "ModelSamplingFlux · height",
+      "type": "int",
+      "node_id": "15",
+      "class_type": "ModelSamplingFlux",
+      "field": "height",
+      "default": 1024,
+      "min": 16.0,
+      "max": 16384.0,
+      "step": 8.0,
+      "options": [],
+      "required": true
+    }
+  ],
+  "tagged": true,
+  "warnings": [],
+  "unmapped": []
+}

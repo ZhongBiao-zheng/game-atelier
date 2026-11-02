@@ -1,0 +1,101 @@
+[
+  {
+    "test": "T1-1",
+    "result": "API通过",
+    "detail": {
+      "devices": [
+        {
+          "name": "cuda:0 NVIDIA GeForce RTX 5080 : cudaMallocAsync",
+          "vram_total": 17094475776
+        }
+      ]
+    }
+  },
+  {
+    "test": "T1-2",
+    "result": "通过",
+    "detail": {
+      "status": 422,
+      "body": {
+        "detail": "1 validation error for KeySpec\n  Value error, ComfyUI 只支持本机地址（127.0.0.1 / localhost） [type=value_error, input_value={'alias': '验收ComfyUI'...T13:46:28.972420+00:00'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+      }
+    }
+  },
+  {
+    "test": "T1-3",
+    "result": "通过",
+    "detail": {
+      "detail": "请在 ComfyUI 用 Export (API) 导出"
+    }
+  },
+  {
+    "test": "T1-4原始LoRA",
+    "result": "已检查",
+    "detail": {
+      "warnings": [],
+      "inputs": [
+        {
+          "id": "LoRA强度-4bcf6cc9",
+          "label": "LoRA强度",
+          "type": "int",
+          "node_id": "4",
+          "class_type": "LoraLoaderModelOnly",
+          "field": "strength_model",
+          "default": 1,
+          "min": -100.0,
+          "max": 100.0,
+          "step": 0.01,
+          "options": [],
+          "required": true
+        },
+        {
+          "id": "种子-f1b7bcdb",
+          "label": "种子",
+          "type": "seed",
+          "node_id": "7",
+          "class_type": "RandomNoise",
+          "field": "noise_seed",
+          "default": null,
+          "min": 0.0,
+          "max": 1.8446744073709552e+19,
+          "step": null,
+          "options": [],
+          "required": true
+        },
+        {
+          "id": "输出宽度-6dfde275",
+          "label": "输出宽度",
+          "type": "int",
+          "node_id": "10",
+          "class_type": "EmptySD3LatentImage",
+          "field": "width",
+          "default": 768,
+          "min": 16.0,
+          "max": 16384.0,
+          "step": 16.0,
+          "options": [],
+          "required": true
+        },
+        {
+          "id": "提示词-1b0c6756",
+          "label": "提示词",
+          "type": "prompt",
+          "node_id": "11",
+          "class_type": "CR Text",
+          "field": "text",
+          "default": null,
+          "min": null,
+          "max": null,
+          "step": null,
+          "options": [],
+          "required": true
+        }
+      ]
+    }
+  },
+  {
+    "test": "T1-5",
+    "result": "API通过",
+    "detail": "真机验收 FLUX LoRA 中文"
+  }
+]

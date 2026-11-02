@@ -1,0 +1,144 @@
+{
+  "files": [
+    {
+      "prompt": "288c6879-5815-40f3-8c3c-37a15320b0e1",
+      "subfolder": "atelier",
+      "filename": "job-202611021400517a22d963_00001_.png",
+      "exists": true
+    },
+    {
+      "prompt": "7ddc7cb3-67a8-4422-ad07-023cff3af1b2",
+      "subfolder": "atelier",
+      "filename": "job-202611021400517a22d963_00002_.png",
+      "exists": true
+    },
+    {
+      "prompt": "462c31b5-7fef-41fc-87d6-0d1aac106058",
+      "subfolder": "atelier",
+      "filename": "job-20261102140333b1f2de2a_00001_.png",
+      "exists": true
+    },
+    {
+      "prompt": "1506494b-e830-4c0c-b70d-08b4e696d25b",
+      "subfolder": "atelier",
+      "filename": "job-202611021403563cfbc21b_00001_.png",
+      "exists": true
+    },
+    {
+      "prompt": "60104661-b546-4832-af63-648529b9ba22",
+      "subfolder": "atelier",
+      "filename": "job-202611021404470a6a00f6_00001_.png",
+      "exists": true
+    },
+    {
+      "prompt": "8d5320e8-f57e-4bcf-820b-66c75879937f",
+      "subfolder": "atelier",
+      "filename": "job-2026110214045438e8f665_00001_.png",
+      "exists": true
+    },
+    {
+      "prompt": "7734c844-7b8a-4a6a-8918-01f7f0d143fc",
+      "subfolder": "acceptance",
+      "filename": "manual-X-b5e31d96c1b940b38229f2c7da4bc288_00001_.png",
+      "exists": true
+    },
+    {
+      "prompt": "613191e9-4c02-45ce-8484-7ab7e8e32255",
+      "subfolder": "atelier",
+      "filename": "job-2026110214050455e5e606_00001_.png",
+      "exists": true
+    },
+    {
+      "prompt": "fc551c22-28fb-4df4-a4fa-8dfd1ead3eb6",
+      "subfolder": "acceptance",
+      "filename": "strict-X-2df1f057c15249c2a4aad1d8188c8161_00001_.png",
+      "exists": true
+    }
+  ],
+  "jobs": [
+    {
+      "id": "job-20261102134918ea2035ae",
+      "status": "failed",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-20261102135730dbaa7f4e",
+      "status": "failed",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-202611021400517a22d963",
+      "status": "done",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-20261102140333b1f2de2a",
+      "status": "done",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-202611021403563cfbc21b",
+      "status": "done",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-202611021404470a6a00f6",
+      "status": "done",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-20261102140448027b6d57",
+      "status": "canceled",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-20261102140448e9e55ade",
+      "status": "canceled",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-2026110214045438e8f665",
+      "status": "canceled",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-202611021405013507f824",
+      "status": "canceled",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-2026110214050455e5e606",
+      "status": "canceled",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-20261102141145ce36fe67",
+      "status": "canceled",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-202611021412199f00b0a9",
+      "status": "canceled",
+      "estimated": 0.0,
+      "actual": 0.0
+    },
+    {
+      "id": "job-2026110214144688aa1dde",
+      "status": "failed",
+      "estimated": 0.0,
+      "actual": 0.0
+    }
+  ]
+}

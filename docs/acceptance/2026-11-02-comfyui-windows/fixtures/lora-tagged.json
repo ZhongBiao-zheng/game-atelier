@@ -1,0 +1,240 @@
+{
+  "1": {
+    "inputs": {
+      "unet_name": "Flux\\Flux.Krea.FP8_fast.safetensors",
+      "weight_dtype": "fp8_e4m3fn_fast"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNET加载器",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.45"
+    }
+  },
+  "2": {
+    "inputs": {
+      "clip_name1": "clip_l.safetensors",
+      "clip_name2": "t5\\t5xxl_fp8_e4m3fn.safetensors",
+      "type": "flux",
+      "device": "default"
+    },
+    "class_type": "DualCLIPLoader",
+    "_meta": {
+      "title": "双CLIP加载器",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.45"
+    }
+  },
+  "3": {
+    "inputs": {
+      "sampler_name": "ddim"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "K采样器选择",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.41"
+    }
+  },
+  "4": {
+    "inputs": {
+      "lora_name": "自训练Lora\\xiongdawei\\Xiongdawei_V3.safetensors",
+      "strength_model": 1,
+      "model": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "in:LoRA强度",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.45"
+    }
+  },
+  "5": {
+    "inputs": {
+      "clip_l": [
+        "11",
+        0
+      ],
+      "t5xxl": [
+        "11",
+        0
+      ],
+      "guidance": 3.5,
+      "clip": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncodeFlux",
+    "_meta": {
+      "title": "CLIP文本编码Flux",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.41"
+    }
+  },
+  "6": {
+    "inputs": {
+      "scheduler": "ddim_uniform",
+      "steps": 30,
+      "denoise": 1,
+      "model": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "基础调度器",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.41"
+    }
+  },
+  "7": {
+    "inputs": {
+      "noise_seed": 963922851185955
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "in:种子",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.41"
+    }
+  },
+  "8": {
+    "inputs": {
+      "model": [
+        "4",
+        0
+      ],
+      "conditioning": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "基础引导",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.41"
+    }
+  },
+  "9": {
+    "inputs": {
+      "vae_name": "ae.sft"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "VAE加载器",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.41"
+    }
+  },
+  "10": {
+    "inputs": {
+      "width": 768,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "in:输出宽度",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.41"
+    }
+  },
+  "11": {
+    "inputs": {
+      "text": "A scene of a young woman indoors. She is wearing a light pink baseball cap with small patterns on it. Wearing a light gray V-neck knitted cardigan with gold buttons and a light colored garment with a white bow inside, adding a sweet touch. Wear a light pink short skirt and a beige chain bag diagonally. She sat at the wooden table, her hand lightly resting on her lips, with a dark dessert topped with cream and pink sugar slices. The background features patterned walls and wooden cabinets (with cups and other items on them), while the street, vehicles, and green trees can be seen outside the window. The overall atmosphere is fresh and pleasant, showcasing a leisurely living scene."
+    },
+    "class_type": "CR Text",
+    "_meta": {
+      "title": "in:提示词",
+      "cnr_id": "ComfyUI_Comfyroll_CustomNodes",
+      "ver": "d78b780ae43fcf8c6b7c6505e6ffb4584281ceca"
+    }
+  },
+  "12": {
+    "inputs": {
+      "noise": [
+        "7",
+        0
+      ],
+      "guider": [
+        "8",
+        0
+      ],
+      "sampler": [
+        "3",
+        0
+      ],
+      "sigmas": [
+        "6",
+        0
+      ],
+      "latent_image": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "自定义采样器(高级)",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.41"
+    }
+  },
+  "13": {
+    "inputs": {
+      "samples": [
+        "12",
+        0
+      ],
+      "vae": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.41"
+    }
+  },
+  "14": {
+    "inputs": {
+      "filename_prefix": "ComfyUI/Flux/Xiongdawei",
+      "images": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.41"
+    }
+  },
+  "15": {
+    "inputs": {
+      "max_shift": 1.15,
+      "base_shift": 0.5,
+      "width": 768,
+      "height": 1024,
+      "model": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingFlux",
+    "_meta": {
+      "title": "模型采样算法Flux",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.41"
+    }
+  }
+}

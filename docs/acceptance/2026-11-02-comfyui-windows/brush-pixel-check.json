@@ -1,0 +1,14 @@
+{
+  "mask_extrema": [
+    0,
+    255
+  ],
+  "overall_diff_bbox": [
+    195,
+    232,
+    316,
+    280
+  ],
+  "protected_diff_bbox": null,
+  "job": "job-202611021418387662360a"
+}

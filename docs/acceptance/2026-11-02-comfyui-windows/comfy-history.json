@@ -1,0 +1,1856 @@
+{
+  "288c6879-5815-40f3-8c3c-37a15320b0e1": {
+    "prompt": [
+      0,
+      "288c6879-5815-40f3-8c3c-37a15320b0e1",
+      {
+        "1": {
+          "class_type": "CheckpointLoaderSimple",
+          "inputs": {
+            "ckpt_name": "1.5\\dreamshaper_8.safetensors"
+          }
+        },
+        "2": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "A small red ceramic teapot on a wooden table, studio product photograph",
+            "clip": [
+              "1",
+              1
+            ]
+          },
+          "_meta": {
+            "title": "in:提示词"
+          }
+        },
+        "3": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "blurry, low quality, watermark",
+            "clip": [
+              "1",
+              1
+            ]
+          }
+        },
+        "4": {
+          "class_type": "EmptyLatentImage",
+          "inputs": {
+            "width": 512,
+            "height": 512,
+            "batch_size": 1
+          },
+          "_meta": {
+            "title": "in:宽度"
+          }
+        },
+        "5": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "seed": 3093021412824216,
+            "steps": 20,
+            "cfg": 7.0,
+            "sampler_name": "euler",
+            "scheduler": "normal",
+            "positive": [
+              "2",
+              0
+            ],
+            "negative": [
+              "3",
+              0
+            ],
+            "latent_image": [
+              "4",
+              0
+            ],
+            "denoise": 1.0
+          },
+          "_meta": {
+            "title": "in:种子"
+          }
+        },
+        "6": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "5",
+              0
+            ],
+            "vae": [
+              "1",
+              2
+            ]
+          }
+        },
+        "7": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "6",
+              0
+            ],
+            "filename_prefix": "atelier/job-202611021400517a22d963"
+          }
+        }
+      },
+      {
+        "client_id": "fedff2d4f5264cbab008be183f12d983",
+        "create_time": 1793628051776
+      },
+      [
+        "7"
+      ]
+    ],
+    "outputs": {
+      "7": {
+        "images": [
+          {
+            "filename": "job-202611021400517a22d963_00001_.png",
+            "subfolder": "atelier",
+            "type": "output",
+            "metadata": {
+              "kind": "image",
+              "width": 512,
+              "height": 512
+            }
+          }
+        ]
+      }
+    },
+    "status": {
+      "status_str": "success",
+      "completed": true,
+      "messages": [
+        [
+          "execution_start",
+          {
+            "prompt_id": "288c6879-5815-40f3-8c3c-37a15320b0e1",
+            "timestamp": 1793628051777
+          }
+        ],
+        [
+          "execution_cached",
+          {
+            "nodes": [],
+            "prompt_id": "288c6879-5815-40f3-8c3c-37a15320b0e1",
+            "timestamp": 1793628051780
+          }
+        ],
+        [
+          "execution_success",
+          {
+            "prompt_id": "288c6879-5815-40f3-8c3c-37a15320b0e1",
+            "timestamp": 1793628106958
+          }
+        ]
+      ]
+    },
+    "meta": {
+      "7": {
+        "node_id": "7",
+        "display_node": "7",
+        "parent_node": null,
+        "real_node_id": "7"
+      }
+    }
+  },
+  "7ddc7cb3-67a8-4422-ad07-023cff3af1b2": {
+    "prompt": [
+      1,
+      "7ddc7cb3-67a8-4422-ad07-023cff3af1b2",
+      {
+        "1": {
+          "class_type": "CheckpointLoaderSimple",
+          "inputs": {
+            "ckpt_name": "1.5\\dreamshaper_8.safetensors"
+          }
+        },
+        "2": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "A small red ceramic teapot on a wooden table, studio product photograph",
+            "clip": [
+              "1",
+              1
+            ]
+          },
+          "_meta": {
+            "title": "in:提示词"
+          }
+        },
+        "3": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "blurry, low quality, watermark",
+            "clip": [
+              "1",
+              1
+            ]
+          }
+        },
+        "4": {
+          "class_type": "EmptyLatentImage",
+          "inputs": {
+            "width": 512,
+            "height": 512,
+            "batch_size": 1
+          },
+          "_meta": {
+            "title": "in:宽度"
+          }
+        },
+        "5": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "seed": 8837799053168755,
+            "steps": 20,
+            "cfg": 7.0,
+            "sampler_name": "euler",
+            "scheduler": "normal",
+            "positive": [
+              "2",
+              0
+            ],
+            "negative": [
+              "3",
+              0
+            ],
+            "latent_image": [
+              "4",
+              0
+            ],
+            "denoise": 1.0
+          },
+          "_meta": {
+            "title": "in:种子"
+          }
+        },
+        "6": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "5",
+              0
+            ],
+            "vae": [
+              "1",
+              2
+            ]
+          }
+        },
+        "7": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "6",
+              0
+            ],
+            "filename_prefix": "atelier/job-202611021400517a22d963"
+          }
+        }
+      },
+      {
+        "client_id": "fedff2d4f5264cbab008be183f12d983",
+        "create_time": 1793628107382
+      },
+      [
+        "7"
+      ]
+    ],
+    "outputs": {
+      "7": {
+        "images": [
+          {
+            "filename": "job-202611021400517a22d963_00002_.png",
+            "subfolder": "atelier",
+            "type": "output",
+            "metadata": {
+              "kind": "image",
+              "width": 512,
+              "height": 512
+            }
+          }
+        ]
+      }
+    },
+    "status": {
+      "status_str": "success",
+      "completed": true,
+      "messages": [
+        [
+          "execution_start",
+          {
+            "prompt_id": "7ddc7cb3-67a8-4422-ad07-023cff3af1b2",
+            "timestamp": 1793628107383
+          }
+        ],
+        [
+          "execution_cached",
+          {
+            "nodes": [
+              "1",
+              "2",
+              "3",
+              "4"
+            ],
+            "prompt_id": "7ddc7cb3-67a8-4422-ad07-023cff3af1b2",
+            "timestamp": 1793628107384
+          }
+        ],
+        [
+          "execution_success",
+          {
+            "prompt_id": "7ddc7cb3-67a8-4422-ad07-023cff3af1b2",
+            "timestamp": 1793628108177
+          }
+        ]
+      ]
+    },
+    "meta": {
+      "7": {
+        "node_id": "7",
+        "display_node": "7",
+        "parent_node": null,
+        "real_node_id": "7"
+      }
+    }
+  },
+  "462c31b5-7fef-41fc-87d6-0d1aac106058": {
+    "prompt": [
+      2,
+      "462c31b5-7fef-41fc-87d6-0d1aac106058",
+      {
+        "1": {
+          "class_type": "CheckpointLoaderSimple",
+          "inputs": {
+            "ckpt_name": "1.5\\dreamshaper_8.safetensors"
+          },
+          "_meta": {
+            "title": "Supplemental synthetic acceptance - SD1.5 DreamShaper 8"
+          }
+        },
+        "2": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "A small red ceramic teapot on a wooden table, studio product photograph",
+            "clip": [
+              "1",
+              1
+            ]
+          },
+          "_meta": {
+            "title": "in:提示词"
+          }
+        },
+        "3": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "blurry, low quality, artifacts, text, watermark",
+            "clip": [
+              "1",
+              1
+            ]
+          },
+          "_meta": {
+            "title": "Negative prompt"
+          }
+        },
+        "4": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "b0baa45b8fb744078e3db85443dd3097.png"
+          },
+          "_meta": {
+            "title": "in:原图"
+          }
+        },
+        "5": {
+          "class_type": "ImageScaleBy",
+          "inputs": {
+            "image": [
+              "4",
+              0
+            ],
+            "upscale_method": "lanczos",
+            "scale_by": 2.0
+          },
+          "_meta": {
+            "title": "in:放大倍数"
+          }
+        },
+        "6": {
+          "class_type": "UltimateSDUpscaleNoUpscale",
+          "inputs": {
+            "upscaled_image": [
+              "5",
+              0
+            ],
+            "model": [
+              "1",
+              0
+            ],
+            "positive": [
+              "2",
+              0
+            ],
+            "negative": [
+              "3",
+              0
+            ],
+            "vae": [
+              "1",
+              2
+            ],
+            "seed": 6963690635669637,
+            "steps": 20,
+            "cfg": 7.0,
+            "sampler_name": "euler",
+            "scheduler": "normal",
+            "denoise": 0.25,
+            "mode_type": "Linear",
+            "tile_width": 512,
+            "tile_height": 512,
+            "mask_blur": 8,
+            "tile_padding": 32,
+            "seam_fix_mode": "None",
+            "seam_fix_denoise": 0.2,
+            "seam_fix_width": 64,
+            "seam_fix_mask_blur": 8,
+            "seam_fix_padding": 16,
+            "force_uniform_tiles": true,
+            "tiled_decode": true,
+            "batch_size": 1
+          },
+          "_meta": {
+            "title": "in:种子"
+          }
+        },
+        "7": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "6",
+              0
+            ],
+            "filename_prefix": "atelier/job-20261102140333b1f2de2a"
+          },
+          "_meta": {
+            "title": "Supplemental synthetic acceptance output"
+          }
+        }
+      },
+      {
+        "client_id": "fedff2d4f5264cbab008be183f12d983",
+        "create_time": 1793628213400
+      },
+      [
+        "7"
+      ]
+    ],
+    "outputs": {
+      "7": {
+        "images": [
+          {
+            "filename": "job-20261102140333b1f2de2a_00001_.png",
+            "subfolder": "atelier",
+            "type": "output",
+            "metadata": {
+              "kind": "image",
+              "width": 2048,
+              "height": 2048
+            }
+          }
+        ]
+      }
+    },
+    "status": {
+      "status_str": "success",
+      "completed": true,
+      "messages": [
+        [
+          "execution_start",
+          {
+            "prompt_id": "462c31b5-7fef-41fc-87d6-0d1aac106058",
+            "timestamp": 1793628213400
+          }
+        ],
+        [
+          "execution_cached",
+          {
+            "nodes": [
+              "1",
+              "2"
+            ],
+            "prompt_id": "462c31b5-7fef-41fc-87d6-0d1aac106058",
+            "timestamp": 1793628213443
+          }
+        ],
+        [
+          "execution_success",
+          {
+            "prompt_id": "462c31b5-7fef-41fc-87d6-0d1aac106058",
+            "timestamp": 1793628232963
+          }
+        ]
+      ]
+    },
+    "meta": {
+      "7": {
+        "node_id": "7",
+        "display_node": "7",
+        "parent_node": null,
+        "real_node_id": "7"
+      }
+    }
+  },
+  "1506494b-e830-4c0c-b70d-08b4e696d25b": {
+    "prompt": [
+      3,
+      "1506494b-e830-4c0c-b70d-08b4e696d25b",
+      {
+        "1": {
+          "class_type": "CheckpointLoaderSimple",
+          "inputs": {
+            "ckpt_name": "1.5\\dreamshaper_8.safetensors"
+          },
+          "_meta": {
+            "title": "Supplemental synthetic acceptance - SD1.5 DreamShaper 8"
+          }
+        },
+        "2": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "A shiny blue ceramic teapot, realistic photography",
+            "clip": [
+              "1",
+              1
+            ]
+          },
+          "_meta": {
+            "title": "in:提示词"
+          }
+        },
+        "3": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "blurry, low quality, artifacts, text, watermark",
+            "clip": [
+              "1",
+              1
+            ]
+          },
+          "_meta": {
+            "title": "Negative prompt"
+          }
+        },
+        "4": {
+          "class_type": "LoadImage",
+          "inputs": {
+            "image": "f4f64df2943d4d8db8a1b19da81f2e7f.png"
+          },
+          "_meta": {
+            "title": "in:原图"
+          }
+        },
+        "5": {
+          "class_type": "LoadImageMask",
+          "inputs": {
+            "image": "0f8af7f0988941dbb958287a377fd734.png",
+            "channel": "red"
+          },
+          "_meta": {
+            "title": "in:遮罩"
+          }
+        },
+        "6": {
+          "class_type": "VAEEncodeForInpaint",
+          "inputs": {
+            "pixels": [
+              "4",
+              0
+            ],
+            "vae": [
+              "1",
+              2
+            ],
+            "mask": [
+              "5",
+              0
+            ],
+            "grow_mask_by": 6
+          },
+          "_meta": {
+            "title": "Encode with masked noise"
+          }
+        },
+        "7": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "seed": 5242349734128309,
+            "steps": 20,
+            "cfg": 7.0,
+            "sampler_name": "euler",
+            "scheduler": "normal",
+            "positive": [
+              "2",
+              0
+            ],
+            "negative": [
+              "3",
+              0
+            ],
+            "latent_image": [
+              "6",
+              0
+            ],
+            "denoise": 0.85
+          },
+          "_meta": {
+            "title": "in:种子"
+          }
+        },
+        "8": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "7",
+              0
+            ],
+            "vae": [
+              "1",
+              2
+            ]
+          },
+          "_meta": {
+            "title": "Decode inpainted image"
+          }
+        },
+        "9": {
+          "class_type": "ImageCompositeMasked",
+          "inputs": {
+            "destination": [
+              "4",
+              0
+            ],
+            "source": [
+              "8",
+              0
+            ],
+            "x": 0,
+            "y": 0,
+            "resize_source": false,
+            "mask": [
+              "5",
+              0
+            ]
+          },
+          "_meta": {
+            "title": "Preserve original pixels outside mask"
+          }
+        },
+        "10": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "9",
+              0
+            ],
+            "filename_prefix": "atelier/job-202611021403563cfbc21b"
+          },
+          "_meta": {
+            "title": "Supplemental synthetic acceptance output"
+          }
+        }
+      },
+      {
+        "client_id": "fedff2d4f5264cbab008be183f12d983",
+        "create_time": 1793628236841
+      },
+      [
+        "10"
+      ]
+    ],
+    "outputs": {
+      "10": {
+        "images": [
+          {
+            "filename": "job-202611021403563cfbc21b_00001_.png",
+            "subfolder": "atelier",
+            "type": "output",
+            "metadata": {
+              "kind": "image",
+              "width": 512,
+              "height": 512
+            }
+          }
+        ]
+      }
+    },
+    "status": {
+      "status_str": "success",
+      "completed": true,
+      "messages": [
+        [
+          "execution_start",
+          {
+            "prompt_id": "1506494b-e830-4c0c-b70d-08b4e696d25b",
+            "timestamp": 1793628236842
+          }
+        ],
+        [
+          "execution_cached",
+          {
+            "nodes": [
+              "1",
+              "3"
+            ],
+            "prompt_id": "1506494b-e830-4c0c-b70d-08b4e696d25b",
+            "timestamp": 1793628236908
+          }
+        ],
+        [
+          "execution_success",
+          {
+            "prompt_id": "1506494b-e830-4c0c-b70d-08b4e696d25b",
+            "timestamp": 1793628238156
+          }
+        ]
+      ]
+    },
+    "meta": {
+      "10": {
+        "node_id": "10",
+        "display_node": "10",
+        "parent_node": null,
+        "real_node_id": "10"
+      }
+    }
+  },
+  "60104661-b546-4832-af63-648529b9ba22": {
+    "prompt": [
+      4,
+      "60104661-b546-4832-af63-648529b9ba22",
+      {
+        "1": {
+          "class_type": "CheckpointLoaderSimple",
+          "inputs": {
+            "ckpt_name": "1.5\\dreamshaper_8.safetensors"
+          }
+        },
+        "2": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "A small red ceramic teapot on a wooden table, studio product photograph",
+            "clip": [
+              "1",
+              1
+            ]
+          },
+          "_meta": {
+            "title": "in:提示词"
+          }
+        },
+        "3": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "blurry, low quality, watermark",
+            "clip": [
+              "1",
+              1
+            ]
+          }
+        },
+        "4": {
+          "class_type": "EmptyLatentImage",
+          "inputs": {
+            "width": 512,
+            "height": 512,
+            "batch_size": 1
+          },
+          "_meta": {
+            "title": "in:宽度"
+          }
+        },
+        "5": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "seed": 1282422570296277,
+            "steps": 120,
+            "cfg": 7.0,
+            "sampler_name": "euler",
+            "scheduler": "normal",
+            "positive": [
+              "2",
+              0
+            ],
+            "negative": [
+              "3",
+              0
+            ],
+            "latent_image": [
+              "4",
+              0
+            ],
+            "denoise": 1.0
+          },
+          "_meta": {
+            "title": "in:种子"
+          }
+        },
+        "6": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "5",
+              0
+            ],
+            "vae": [
+              "1",
+              2
+            ]
+          }
+        },
+        "7": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "6",
+              0
+            ],
+            "filename_prefix": "atelier/job-202611021404470a6a00f6"
+          }
+        }
+      },
+      {
+        "client_id": "fedff2d4f5264cbab008be183f12d983",
+        "create_time": 1793628288009
+      },
+      [
+        "7"
+      ]
+    ],
+    "outputs": {
+      "7": {
+        "images": [
+          {
+            "filename": "job-202611021404470a6a00f6_00001_.png",
+            "subfolder": "atelier",
+            "type": "output",
+            "metadata": {
+              "kind": "image",
+              "width": 512,
+              "height": 512
+            }
+          }
+        ]
+      }
+    },
+    "status": {
+      "status_str": "success",
+      "completed": true,
+      "messages": [
+        [
+          "execution_start",
+          {
+            "prompt_id": "60104661-b546-4832-af63-648529b9ba22",
+            "timestamp": 1793628288010
+          }
+        ],
+        [
+          "execution_cached",
+          {
+            "nodes": [
+              "1"
+            ],
+            "prompt_id": "60104661-b546-4832-af63-648529b9ba22",
+            "timestamp": 1793628288010
+          }
+        ],
+        [
+          "execution_success",
+          {
+            "prompt_id": "60104661-b546-4832-af63-648529b9ba22",
+            "timestamp": 1793628292228
+          }
+        ]
+      ]
+    },
+    "meta": {
+      "7": {
+        "node_id": "7",
+        "display_node": "7",
+        "parent_node": null,
+        "real_node_id": "7"
+      }
+    }
+  },
+  "fb846932-7405-46ba-9a27-dae1bface9cb": {
+    "prompt": [
+      6,
+      "fb846932-7405-46ba-9a27-dae1bface9cb",
+      {
+        "1": {
+          "class_type": "CheckpointLoaderSimple",
+          "inputs": {
+            "ckpt_name": "1.5\\dreamshaper_8.safetensors"
+          }
+        },
+        "2": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "A small red ceramic teapot on a wooden table, studio product photograph",
+            "clip": [
+              "1",
+              1
+            ]
+          },
+          "_meta": {
+            "title": "in:提示词"
+          }
+        },
+        "3": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "blurry, low quality, watermark",
+            "clip": [
+              "1",
+              1
+            ]
+          }
+        },
+        "4": {
+          "class_type": "EmptyLatentImage",
+          "inputs": {
+            "width": 512,
+            "height": 512,
+            "batch_size": 1
+          },
+          "_meta": {
+            "title": "in:宽度"
+          }
+        },
+        "5": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "seed": 1028677105503617,
+            "steps": 120,
+            "cfg": 7.0,
+            "sampler_name": "euler",
+            "scheduler": "normal",
+            "positive": [
+              "2",
+              0
+            ],
+            "negative": [
+              "3",
+              0
+            ],
+            "latent_image": [
+              "4",
+              0
+            ],
+            "denoise": 1.0
+          },
+          "_meta": {
+            "title": "in:种子"
+          }
+        },
+        "6": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "5",
+              0
+            ],
+            "vae": [
+              "1",
+              2
+            ]
+          }
+        },
+        "7": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "6",
+              0
+            ],
+            "filename_prefix": "atelier/job-20261102140448e9e55ade"
+          }
+        }
+      },
+      {
+        "client_id": "fedff2d4f5264cbab008be183f12d983",
+        "create_time": 1793628288455
+      },
+      [
+        "7"
+      ]
+    ],
+    "outputs": {},
+    "status": {
+      "status_str": "error",
+      "completed": false,
+      "messages": [
+        [
+          "execution_start",
+          {
+            "prompt_id": "fb846932-7405-46ba-9a27-dae1bface9cb",
+            "timestamp": 1793628292565
+          }
+        ],
+        [
+          "execution_cached",
+          {
+            "nodes": [
+              "1",
+              "2",
+              "3",
+              "4"
+            ],
+            "prompt_id": "fb846932-7405-46ba-9a27-dae1bface9cb",
+            "timestamp": 1793628292566
+          }
+        ],
+        [
+          "execution_interrupted",
+          {
+            "prompt_id": "fb846932-7405-46ba-9a27-dae1bface9cb",
+            "node_id": "5",
+            "node_type": "KSampler",
+            "executed": [],
+            "timestamp": 1793628292975
+          }
+        ]
+      ]
+    },
+    "meta": {}
+  },
+  "8d5320e8-f57e-4bcf-820b-66c75879937f": {
+    "prompt": [
+      7,
+      "8d5320e8-f57e-4bcf-820b-66c75879937f",
+      {
+        "1": {
+          "class_type": "CheckpointLoaderSimple",
+          "inputs": {
+            "ckpt_name": "1.5\\dreamshaper_8.safetensors"
+          }
+        },
+        "2": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "A small red ceramic teapot on a wooden table, studio product photograph",
+            "clip": [
+              "1",
+              1
+            ]
+          },
+          "_meta": {
+            "title": "in:提示词"
+          }
+        },
+        "3": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "blurry, low quality, watermark",
+            "clip": [
+              "1",
+              1
+            ]
+          }
+        },
+        "4": {
+          "class_type": "EmptyLatentImage",
+          "inputs": {
+            "width": 512,
+            "height": 512,
+            "batch_size": 1
+          },
+          "_meta": {
+            "title": "in:宽度"
+          }
+        },
+        "5": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "seed": 6253852936833427,
+            "steps": 120,
+            "cfg": 7.0,
+            "sampler_name": "euler",
+            "scheduler": "normal",
+            "positive": [
+              "2",
+              0
+            ],
+            "negative": [
+              "3",
+              0
+            ],
+            "latent_image": [
+              "4",
+              0
+            ],
+            "denoise": 1.0
+          },
+          "_meta": {
+            "title": "in:种子"
+          }
+        },
+        "6": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "5",
+              0
+            ],
+            "vae": [
+              "1",
+              2
+            ]
+          }
+        },
+        "7": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "6",
+              0
+            ],
+            "filename_prefix": "atelier/job-2026110214045438e8f665"
+          }
+        }
+      },
+      {
+        "client_id": "fedff2d4f5264cbab008be183f12d983",
+        "create_time": 1793628294201
+      },
+      [
+        "7"
+      ]
+    ],
+    "outputs": {
+      "7": {
+        "images": [
+          {
+            "filename": "job-2026110214045438e8f665_00001_.png",
+            "subfolder": "atelier",
+            "type": "output",
+            "metadata": {
+              "kind": "image",
+              "width": 512,
+              "height": 512
+            }
+          }
+        ]
+      }
+    },
+    "status": {
+      "status_str": "success",
+      "completed": true,
+      "messages": [
+        [
+          "execution_start",
+          {
+            "prompt_id": "8d5320e8-f57e-4bcf-820b-66c75879937f",
+            "timestamp": 1793628294203
+          }
+        ],
+        [
+          "execution_cached",
+          {
+            "nodes": [
+              "1",
+              "2",
+              "3",
+              "4"
+            ],
+            "prompt_id": "8d5320e8-f57e-4bcf-820b-66c75879937f",
+            "timestamp": 1793628294204
+          }
+        ],
+        [
+          "execution_success",
+          {
+            "prompt_id": "8d5320e8-f57e-4bcf-820b-66c75879937f",
+            "timestamp": 1793628298474
+          }
+        ]
+      ]
+    },
+    "meta": {
+      "7": {
+        "node_id": "7",
+        "display_node": "7",
+        "parent_node": null,
+        "real_node_id": "7"
+      }
+    }
+  },
+  "7734c844-7b8a-4a6a-8918-01f7f0d143fc": {
+    "prompt": [
+      8,
+      "7734c844-7b8a-4a6a-8918-01f7f0d143fc",
+      {
+        "1": {
+          "class_type": "CheckpointLoaderSimple",
+          "inputs": {
+            "ckpt_name": "1.5\\dreamshaper_8.safetensors"
+          }
+        },
+        "2": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "A small red ceramic teapot on a wooden table, studio product photograph",
+            "clip": [
+              "1",
+              1
+            ]
+          },
+          "_meta": {
+            "title": "in:提示词"
+          }
+        },
+        "3": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "blurry, low quality, watermark",
+            "clip": [
+              "1",
+              1
+            ]
+          }
+        },
+        "4": {
+          "class_type": "EmptyLatentImage",
+          "inputs": {
+            "width": 512,
+            "height": 512,
+            "batch_size": 1
+          },
+          "_meta": {
+            "title": "in:宽度"
+          }
+        },
+        "5": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "seed": 1793628299666,
+            "steps": 120,
+            "cfg": 7.0,
+            "sampler_name": "euler",
+            "scheduler": "normal",
+            "positive": [
+              "2",
+              0
+            ],
+            "negative": [
+              "3",
+              0
+            ],
+            "latent_image": [
+              "4",
+              0
+            ],
+            "denoise": 1.0
+          },
+          "_meta": {
+            "title": "in:种子"
+          }
+        },
+        "6": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "5",
+              0
+            ],
+            "vae": [
+              "1",
+              2
+            ]
+          }
+        },
+        "7": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "6",
+              0
+            ],
+            "filename_prefix": "acceptance/manual-X-b5e31d96c1b940b38229f2c7da4bc288"
+          }
+        }
+      },
+      {
+        "client_id": "windows-acceptance-direct",
+        "create_time": 1793628299680
+      },
+      [
+        "7"
+      ]
+    ],
+    "outputs": {
+      "7": {
+        "images": [
+          {
+            "filename": "manual-X-b5e31d96c1b940b38229f2c7da4bc288_00001_.png",
+            "subfolder": "acceptance",
+            "type": "output",
+            "metadata": {
+              "kind": "image",
+              "width": 512,
+              "height": 512
+            }
+          }
+        ]
+      }
+    },
+    "status": {
+      "status_str": "success",
+      "completed": true,
+      "messages": [
+        [
+          "execution_start",
+          {
+            "prompt_id": "7734c844-7b8a-4a6a-8918-01f7f0d143fc",
+            "timestamp": 1793628299681
+          }
+        ],
+        [
+          "execution_cached",
+          {
+            "nodes": [
+              "1",
+              "2",
+              "3",
+              "4"
+            ],
+            "prompt_id": "7734c844-7b8a-4a6a-8918-01f7f0d143fc",
+            "timestamp": 1793628299682
+          }
+        ],
+        [
+          "execution_success",
+          {
+            "prompt_id": "7734c844-7b8a-4a6a-8918-01f7f0d143fc",
+            "timestamp": 1793628303839
+          }
+        ]
+      ]
+    },
+    "meta": {
+      "7": {
+        "node_id": "7",
+        "display_node": "7",
+        "parent_node": null,
+        "real_node_id": "7"
+      }
+    }
+  },
+  "613191e9-4c02-45ce-8484-7ab7e8e32255": {
+    "prompt": [
+      10,
+      "613191e9-4c02-45ce-8484-7ab7e8e32255",
+      {
+        "1": {
+          "class_type": "CheckpointLoaderSimple",
+          "inputs": {
+            "ckpt_name": "1.5\\dreamshaper_8.safetensors"
+          }
+        },
+        "2": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "A small red ceramic teapot on a wooden table, studio product photograph",
+            "clip": [
+              "1",
+              1
+            ]
+          },
+          "_meta": {
+            "title": "in:提示词"
+          }
+        },
+        "3": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "blurry, low quality, watermark",
+            "clip": [
+              "1",
+              1
+            ]
+          }
+        },
+        "4": {
+          "class_type": "EmptyLatentImage",
+          "inputs": {
+            "width": 512,
+            "height": 512,
+            "batch_size": 1
+          },
+          "_meta": {
+            "title": "in:宽度"
+          }
+        },
+        "5": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "seed": 8920746779736903,
+            "steps": 120,
+            "cfg": 7.0,
+            "sampler_name": "euler",
+            "scheduler": "normal",
+            "positive": [
+              "2",
+              0
+            ],
+            "negative": [
+              "3",
+              0
+            ],
+            "latent_image": [
+              "4",
+              0
+            ],
+            "denoise": 1.0
+          },
+          "_meta": {
+            "title": "in:种子"
+          }
+        },
+        "6": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "5",
+              0
+            ],
+            "vae": [
+              "1",
+              2
+            ]
+          }
+        },
+        "7": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "6",
+              0
+            ],
+            "filename_prefix": "atelier/job-2026110214050455e5e606"
+          }
+        }
+      },
+      {
+        "client_id": "fedff2d4f5264cbab008be183f12d983",
+        "create_time": 1793628304232
+      },
+      [
+        "7"
+      ]
+    ],
+    "outputs": {
+      "7": {
+        "images": [
+          {
+            "filename": "job-2026110214050455e5e606_00001_.png",
+            "subfolder": "atelier",
+            "type": "output",
+            "metadata": {
+              "kind": "image",
+              "width": 512,
+              "height": 512
+            }
+          }
+        ]
+      }
+    },
+    "status": {
+      "status_str": "success",
+      "completed": true,
+      "messages": [
+        [
+          "execution_start",
+          {
+            "prompt_id": "613191e9-4c02-45ce-8484-7ab7e8e32255",
+            "timestamp": 1793628304232
+          }
+        ],
+        [
+          "execution_cached",
+          {
+            "nodes": [
+              "1",
+              "2",
+              "3",
+              "4"
+            ],
+            "prompt_id": "613191e9-4c02-45ce-8484-7ab7e8e32255",
+            "timestamp": 1793628304233
+          }
+        ],
+        [
+          "execution_success",
+          {
+            "prompt_id": "613191e9-4c02-45ce-8484-7ab7e8e32255",
+            "timestamp": 1793628308409
+          }
+        ]
+      ]
+    },
+    "meta": {
+      "7": {
+        "node_id": "7",
+        "display_node": "7",
+        "parent_node": null,
+        "real_node_id": "7"
+      }
+    }
+  },
+  "fc551c22-28fb-4df4-a4fa-8dfd1ead3eb6": {
+    "prompt": [
+      11,
+      "fc551c22-28fb-4df4-a4fa-8dfd1ead3eb6",
+      {
+        "1": {
+          "class_type": "CheckpointLoaderSimple",
+          "inputs": {
+            "ckpt_name": "1.5\\dreamshaper_8.safetensors"
+          }
+        },
+        "2": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "A small red ceramic teapot on a wooden table, studio product photograph",
+            "clip": [
+              "1",
+              1
+            ]
+          },
+          "_meta": {
+            "title": "in:提示词"
+          }
+        },
+        "3": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "blurry, low quality, watermark",
+            "clip": [
+              "1",
+              1
+            ]
+          }
+        },
+        "4": {
+          "class_type": "EmptyLatentImage",
+          "inputs": {
+            "width": 512,
+            "height": 512,
+            "batch_size": 1
+          },
+          "_meta": {
+            "title": "in:宽度"
+          }
+        },
+        "5": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "seed": 1793628705540,
+            "steps": 1000,
+            "cfg": 7.0,
+            "sampler_name": "euler",
+            "scheduler": "normal",
+            "positive": [
+              "2",
+              0
+            ],
+            "negative": [
+              "3",
+              0
+            ],
+            "latent_image": [
+              "4",
+              0
+            ],
+            "denoise": 1.0
+          },
+          "_meta": {
+            "title": "in:种子"
+          }
+        },
+        "6": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "5",
+              0
+            ],
+            "vae": [
+              "1",
+              2
+            ]
+          }
+        },
+        "7": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "6",
+              0
+            ],
+            "filename_prefix": "acceptance/strict-X-2df1f057c15249c2a4aad1d8188c8161"
+          }
+        }
+      },
+      {
+        "client_id": "acceptance-direct",
+        "create_time": 1793628705543
+      },
+      [
+        "7"
+      ]
+    ],
+    "outputs": {
+      "7": {
+        "images": [
+          {
+            "filename": "strict-X-2df1f057c15249c2a4aad1d8188c8161_00001_.png",
+            "subfolder": "acceptance",
+            "type": "output",
+            "metadata": {
+              "kind": "image",
+              "width": 512,
+              "height": 512
+            }
+          }
+        ]
+      }
+    },
+    "status": {
+      "status_str": "success",
+      "completed": true,
+      "messages": [
+        [
+          "execution_start",
+          {
+            "prompt_id": "fc551c22-28fb-4df4-a4fa-8dfd1ead3eb6",
+            "timestamp": 1793628705545
+          }
+        ],
+        [
+          "execution_cached",
+          {
+            "nodes": [
+              "1",
+              "2",
+              "3",
+              "4"
+            ],
+            "prompt_id": "fc551c22-28fb-4df4-a4fa-8dfd1ead3eb6",
+            "timestamp": 1793628705546
+          }
+        ],
+        [
+          "execution_success",
+          {
+            "prompt_id": "fc551c22-28fb-4df4-a4fa-8dfd1ead3eb6",
+            "timestamp": 1793628739297
+          }
+        ]
+      ]
+    },
+    "meta": {
+      "7": {
+        "node_id": "7",
+        "display_node": "7",
+        "parent_node": null,
+        "real_node_id": "7"
+      }
+    }
+  },
+  "ac058dda-4bac-421e-82a1-3d7ff1431454": {
+    "prompt": [
+      13,
+      "ac058dda-4bac-421e-82a1-3d7ff1431454",
+      {
+        "1": {
+          "class_type": "CheckpointLoaderSimple",
+          "inputs": {
+            "ckpt_name": "1.5\\dreamshaper_8.safetensors"
+          }
+        },
+        "2": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "A small red ceramic teapot on a wooden table, studio product photograph",
+            "clip": [
+              "1",
+              1
+            ]
+          },
+          "_meta": {
+            "title": "in:提示词"
+          }
+        },
+        "3": {
+          "class_type": "CLIPTextEncode",
+          "inputs": {
+            "text": "blurry, low quality, watermark",
+            "clip": [
+              "1",
+              1
+            ]
+          }
+        },
+        "4": {
+          "class_type": "EmptyLatentImage",
+          "inputs": {
+            "width": 512,
+            "height": 512,
+            "batch_size": 1
+          },
+          "_meta": {
+            "title": "in:宽度"
+          }
+        },
+        "5": {
+          "class_type": "KSampler",
+          "inputs": {
+            "model": [
+              "1",
+              0
+            ],
+            "seed": 5500115588171707,
+            "steps": 1000,
+            "cfg": 7.0,
+            "sampler_name": "euler",
+            "scheduler": "normal",
+            "positive": [
+              "2",
+              0
+            ],
+            "negative": [
+              "3",
+              0
+            ],
+            "latent_image": [
+              "4",
+              0
+            ],
+            "denoise": 1.0
+          },
+          "_meta": {
+            "title": "in:种子"
+          }
+        },
+        "6": {
+          "class_type": "VAEDecode",
+          "inputs": {
+            "samples": [
+              "5",
+              0
+            ],
+            "vae": [
+              "1",
+              2
+            ]
+          }
+        },
+        "7": {
+          "class_type": "SaveImage",
+          "inputs": {
+            "images": [
+              "6",
+              0
+            ],
+            "filename_prefix": "atelier/job-202611021412199f00b0a9"
+          }
+        }
+      },
+      {
+        "client_id": "fedff2d4f5264cbab008be183f12d983",
+        "create_time": 1793628739676
+      },
+      [
+        "7"
+      ]
+    ],
+    "outputs": {},
+    "status": {
+      "status_str": "error",
+      "completed": false,
+      "messages": [
+        [
+          "execution_start",
+          {
+            "prompt_id": "ac058dda-4bac-421e-82a1-3d7ff1431454",
+            "timestamp": 1793628739677
+          }
+        ],
+        [
+          "execution_cached",
+          {
+            "nodes": [
+              "1",
+              "2",
+              "3",
+              "4"
+            ],
+            "prompt_id": "ac058dda-4bac-421e-82a1-3d7ff1431454",
+            "timestamp": 1793628739678
+          }
+        ],
+        [
+          "execution_interrupted",
+          {
+            "prompt_id": "ac058dda-4bac-421e-82a1-3d7ff1431454",
+            "node_id": "5",
+            "node_type": "KSampler",
+            "executed": [],
+            "timestamp": 1793628741183
+          }
+        ]
+      ]
+    },
+    "meta": {}
+  }
+}
