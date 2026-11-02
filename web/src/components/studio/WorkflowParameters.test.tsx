@@ -5,6 +5,7 @@ import { PromptInput } from './PromptInput';
 import type { KeyView, WorkflowInput } from '@/api/keys';
 import { canvasGenerateBlock } from '@/pages/canvasEditorModel';
 import { withAutoProvider } from '@/lib/modelRoutes';
+import { workflowReferenceError } from '@/lib/workflowInputs';
 
 afterEach(cleanup);
 const input: WorkflowInput = { id: 'seed', label: '种子', type: 'seed', node_id: '3',
@@ -14,6 +15,22 @@ const key: KeyView = { alias: 'local', provider: 'comfyui', base_url: 'http://12
   models: [{ id: 'comfyui-upscale', name: '放大', modality: 'image', workflow_inputs: [] }] };
 
 describe('ComfyUI generation controls', () => {
+  it('blocks missing required images and masks before submission', () => {
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:test') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const image = { ...input, id: 'image', label: '原图', type: 'image' as const };
+    const mask = { ...input, id: 'mask', label: '遮罩', type: 'mask' as const };
+    const provider = { ...key, models: [{ ...key.models[0], workflow_inputs: [image] }] };
+    const props = { providers: [provider], providerAlias: 'local', model: 'comfyui-upscale', onSubmit: vi.fn() };
+    const { rerender } = render(<PromptInput {...props} />);
+    expect(screen.getByRole('button', { name: '提交生成' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('需要参考图：原图');
+    rerender(<PromptInput {...props} referenceImages={[new File(['image'], 'ref.png', { type: 'image/png' })]} />);
+    expect(screen.getByRole('button', { name: '提交生成' })).toBeEnabled();
+    expect(workflowReferenceError([image, mask], 1, false)).toBe('需要参考图：遮罩');
+    expect(workflowReferenceError([image, mask], 1, true)).toBeNull();
+  });
+
   it('fixing a seed also fixes the request count to one', () => {
     const patch = vi.fn();
     render(<WorkflowParameters inputs={[input]} params={{ n: 4 }} onPatch={patch} />);

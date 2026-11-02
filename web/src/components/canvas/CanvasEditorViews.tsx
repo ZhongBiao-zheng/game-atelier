@@ -70,6 +70,7 @@ import {
   type CanvasModelChoice,
 } from '@/components/canvas/CanvasGenerationControls';
 import { CanvasPromptInput } from '@/components/canvas/CanvasPromptInput';
+import { workflowReferenceError } from '@/lib/workflowInputs';
 import {
   CanvasMaterialHoverDetail,
   type CanvasMaterialHoverState,
@@ -2156,8 +2157,10 @@ export function CanvasGenerationComposer({
   });
   const workflowWithoutPrompt = selectedModel?.workflow_inputs != null
     && !selectedModel.workflow_inputs.some(input => input.type === 'prompt');
+  const workflowReferenceProblem = workflowReferenceError(selectedModel?.workflow_inputs,
+    connectedVideoMediaCounts.image, Boolean(draft.params.mask_image));
   const blockedReason = generateBlock?.message
-    ?? (workflowWithoutPrompt ? null : promptVariableError(draft.prompt)) ?? referenceProblem;
+    ?? (workflowWithoutPrompt ? null : promptVariableError(draft.prompt)) ?? referenceProblem ?? workflowReferenceProblem;
 
   useEffect(() => {
     if (!usesVideoFrameSlots || !videoCaps) return;
@@ -2348,6 +2351,7 @@ export function CanvasGenerationComposer({
           submitting={submitting}
         />
       )}
+      {!running && workflowReferenceProblem && <p role="status" className="mt-2 text-xs text-destructive">{workflowReferenceProblem}</p>}
       <div className="mt-2 flex items-end gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
         <div className={cn('flex min-w-0 flex-1 items-center gap-1.5', draft.mode === 'video' ? 'flex-nowrap' : 'flex-wrap')}>
           <CanvasModelPicker
@@ -2538,7 +2542,7 @@ export function CanvasGenerationComposer({
             type="button"
             size="sm"
             className="shrink-0"
-            disabled={submitting}
+            disabled={submitting || Boolean(workflowReferenceProblem)}
             onClick={submitGeneration}
           >
             <SwapIcon swapKey={Boolean(submitting)}>{submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}</SwapIcon>

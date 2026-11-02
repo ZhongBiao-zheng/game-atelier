@@ -1,4 +1,5 @@
 import { WorkflowParameters } from './WorkflowParameters';
+import { workflowReferenceError } from '@/lib/workflowInputs';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -320,6 +321,7 @@ export function PromptInput({
   const selectedModel = models.find((item) => item.id === model);
   const workflowInputs = selectedModel?.workflow_inputs;
   const noWorkflowPrompt = workflowInputs != null && !workflowInputs.some(input => input.type === 'prompt');
+  const workflowReferenceProblem = workflowReferenceError(workflowInputs, referenceImages.length, Boolean(sizeParams.mask_image));
   const isOmni = isVideo && videoMode === 'omni' && Boolean(videoCaps);
   // @引用开放给两类入口：视频「全能参考」(omni)，以及图片图生图（MJ 除外）。@ 提交时只剩
   // 「图N」字面量（见 serializeMentions），能不能吃到取决于模型是否按输入顺序理解序号：
@@ -651,6 +653,7 @@ export function PromptInput({
   const canSubmit =
     Boolean(provider && selectedModel && (text.trim() || noWorkflowPrompt) && !disabled) && !lastFrameOnlyBlocked
       && !variableError
+      && !workflowReferenceProblem
       && (isVideo || !imageSizeError(sizeParams, selectedModel?.id));
   const pickerParams = { image: { ...sizeParams, quality,
                   reference_images: referenceImages.map(() => 'reference'),
@@ -678,6 +681,7 @@ export function PromptInput({
   }, [refImagesLimit, referenceImages, onReferenceImagesChange]);
 
   const submit = useCallback(() => {
+    if (workflowReferenceProblem) return;
     if (!noWorkflowPrompt && promptVariableError(text)) {
       if (editorRef.current) focusEmptyVariable(editorRef.current, true);
       return;
@@ -688,7 +692,7 @@ export function PromptInput({
     if ((!trimmed && !noWorkflowPrompt) || disabled || !provider || !selectedModel || lastFrameOnlyBlocked || (!isVideo && imageSizeError(sizeParams, selectedModel?.id))) return;
     if (promptVariableParts(template).some(part => part.kind === 'variable')) onSubmit(trimmed, template);
     else onSubmit(trimmed);
-  }, [text, disabled, provider, selectedModel, onSubmit, lastFrameOnlyBlocked, isVideo, sizeParams, noWorkflowPrompt]);
+  }, [text, disabled, provider, selectedModel, onSubmit, lastFrameOnlyBlocked, isVideo, sizeParams, noWorkflowPrompt, workflowReferenceProblem]);
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (variableInput(e.target)) return;
@@ -1370,6 +1374,7 @@ export function PromptInput({
         </div>
         {/* pr-12 给提交按钮让位：按钮已改为绝对定位锚在壳右下角（见 shell 末尾），不再占这一行的 flex 位 */}
         <div className="flex items-center gap-3 shrink-0 pr-12">
+          {workflowReferenceProblem && <span role="status" className="text-xs text-destructive">{workflowReferenceProblem}</span>}
           {lastFrameOnlyBlocked && (
             <span
               data-testid="frame-block-hint"
@@ -1386,7 +1391,7 @@ export function PromptInput({
       </div>
       {/* 提交按钮：唯一一颗，锚定壳右下角。收/放时壳底边在屏幕上不动，按钮只原位缩放
           40↔32px，不随状态重新挂载——视觉连续性与参考堆叠 / 编辑器的缩放一致。 */}
-      <Hint label={lastFrameOnlyBlocked ? 'Seedance 不支持只给尾帧：请先放首帧，或首尾都放' : '提交 (⌘↵)'}><Button variant="bare"
+      <Hint label={workflowReferenceProblem ?? (lastFrameOnlyBlocked ? 'Seedance 不支持只给尾帧：请先放首帧，或首尾都放' : '提交 (⌘↵)')}><Button variant="bare"
         type="button"
         onClick={(e) => { e.stopPropagation(); submit(); }}
         disabled={!canSubmit}
