@@ -262,7 +262,7 @@ def submit(
                              ("audio", "reference_audios")):
             selection_params[field] = [name for name, _ in files.get(group, [])]
         picked = _pick_member(model, [], key, modality_for(kind), params=selection_params,
-                              freeze_order=route_order, consume=True)
+                              consume=False)
         if picked is None:
             raise GatewayRequestError(503, "网关没有可用的供应商")
         inputs = picked[1].workflow_inputs
@@ -272,6 +272,10 @@ def submit(
             raise GatewayRequestError(422, "提示词为空或过长")
         estimate = _estimate(picked, n, size, params, kind, bool(files.get("video")))
         gateway_quota.admit(key, estimate or 0)
+        picked = _pick_member(model, [], key, modality_for(kind), params=selection_params,
+                              freeze_order=route_order, consume=True)
+        if picked is None:
+            raise GatewayRequestError(503, "网关没有可用的供应商")
         task_id = uuid.uuid4().hex
         stored = {}
         for group, uploads in files.items():

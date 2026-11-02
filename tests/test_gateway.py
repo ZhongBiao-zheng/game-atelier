@@ -300,3 +300,14 @@ def test_round_robin_submit_freezes_once_and_run_and_idempotence_do_not_advance(
     assert task.member_alias == "B" and task.route_order == ["B", "A"]
     gateway_tasks.run_task(task)
     assert [call["alias"] for call in calls] == ["A", "B"]
+
+
+def test_rejected_blank_prompt_does_not_advance_round_robin(client):
+    model_routes.set_route_mode("image", "gpt-image-2", "round_robin")
+    body = {"kind": "image", "model": "gpt-image-2", "prompt": "", "n": 1, "params": {}}
+    response = client.post("/gateway/v1/tasks", data={"request": json.dumps(body)},
+                           headers={"Idempotency-Key": "blank"})
+    assert response.status_code == 422
+    first = _submit(client, key="valid-after-blank").json()["task_id"]
+    task = gateway_tasks.get_task(client.record.id, first)
+    assert task.member_alias == "A" and task.route_order == ["A", "B"]
