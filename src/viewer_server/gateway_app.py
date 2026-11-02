@@ -55,7 +55,7 @@ def _task_view(task: gateway_tasks.GatewayTask) -> dict[str, Any]:
 def _route_view(route: model_routes.ModelRoute, key: GatewayKeyRecord) -> dict[str, Any]:
     members = [m for m in route.members if m.provider != gateway_tasks.GATEWAY_PROVIDER
                and gateway_access.member_allowed(key, m.alias)]
-    return {
+    view = {
         "id": route.id, "name": members[0].name, "modality": route.modality,
         "members": [{
             "alias": m.alias, "provider": m.provider, "base_url": m.base_url,
@@ -63,6 +63,13 @@ def _route_view(route: model_routes.ModelRoute, key: GatewayKeyRecord) -> dict[s
             "model_id": m.model_id, "name": m.name, "protocol": m.protocol,
         } for m in members],
     }
+    if members[0].provider == "comfyui":
+        from character_workflow.lib.keys import find_by_alias
+
+        provider = find_by_alias(members[0].alias)
+        model = next(m for m in provider.models if m.id == members[0].model_id)
+        view["workflow_inputs"] = [item.model_dump() for item in model.workflow_inputs or []]
+    return view
 
 
 def _app_version() -> str:

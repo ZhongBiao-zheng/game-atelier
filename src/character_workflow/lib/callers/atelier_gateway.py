@@ -110,6 +110,7 @@ def gateway_models(routes: list[dict[str, Any]]) -> list[_keys.ModelSpec]:
             id=route["id"], name=route["name"], modality=route["modality"],
             protocol=(route["members"][0].get("protocol") if route["modality"] in {"text", "video"} else None),
             via=[_keys.ViaMember(**member) for member in route["members"]],
+            workflow_inputs=route.get("workflow_inputs"),
         )
         for route in routes if route.get("members")
     ]

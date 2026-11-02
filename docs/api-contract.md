@@ -1095,6 +1095,7 @@ Tuzi GPT Image 2.5 系列在 Studio 与 Canvas 提供五档质量：低/中/高/
 - Provider 新增 `comfyui`：不需要密钥，base_url 默认 `http://127.0.0.1:8188`，
   只允许 localhost / 127.0.0.1 根地址。通用 Key API 不得直接修改其 models。
 - ModelSpec / KeyModel 新增可选 `workflow_inputs: WorkflowInput[] | null`。
+- 网关协议保持 v2；`GET /gateway/v1/models` 的 ComfyUI 路由额外返回 `workflow_inputs`，成员刷新时与 `via` 一起保存快照（包括空数组）。目录不包含原始 `api_workflow`，仍按成员权限过滤。
   null 时不序列化，空数组表示工作流没有暴露输入，普通模型响应保持原样。
 - WorkflowInput：`id, label, type, node_id, class_type, field, default, min?, max?, step?,
   options: [{value,label}], required`。type 为 prompt / text / int / float / boolean /
