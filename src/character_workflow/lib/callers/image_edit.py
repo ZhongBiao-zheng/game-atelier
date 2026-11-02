@@ -35,11 +35,16 @@ def edit_transport(provider: str, model: str, protocol: str | None) -> str | Non
     return None
 
 
-def edit_transport_for_key(key, model: str) -> str | None:
+def edit_transport_for_key(key, model: str, mode: str = "inpaint") -> str | None:
     from .openai_image import _effective_image_protocol
 
+    spec = next((item for item in key.models if item.id == model), None)
+    if spec and spec.workflow_inputs is not None:
+        inputs = spec.workflow_inputs
+        return "workflow" if (mode == "inpaint"
+                              and sum(i.type == "image" for i in inputs) == 1
+                              and sum(i.type == "mask" for i in inputs) == 1) else None
     if key.provider == "atelier":
-        spec = next((item for item in key.models if item.id == model), None)
         transports = [edit_transport(m.provider, m.model_id, m.protocol)
                       for m in (spec.via or [])] if spec else []
         return transports[0] if transports and all(transports) else None
@@ -143,7 +148,6 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path,
            params: dict[str, Any], **kwargs) -> list[str]:
     from character_workflow.lib import keys
     from . import dispatch
-    from .openai_image import _effective_image_protocol
 
     options = params["image_edit"]
     validate_result = kwargs.pop("validate_result", None)
@@ -152,7 +156,7 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path,
         raise ValueError("编辑模型的密钥已经不存在")
     if not key.enabled:
         raise ValueError("供应商已停用")
-    transport = edit_transport(key.provider, model, _effective_image_protocol(key, model))
+    transport = edit_transport_for_key(key, model, options["mode"])
     if transport == "evolink":
         import base64
 
@@ -182,6 +186,27 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path,
     input_path = work / "source.png"
     base.save(input_path)
     refs[0] = str(input_path)
+    if transport == "workflow":
+        if len(refs) != 1:
+            raise ValueError("局部重绘工作流只接受一张原图和一个遮罩")
+        with Image.open(mask_path) as opened:
+            protected = opened.convert("L")
+        if protected.size != base.size:
+            raise ValueError("蒙版尺寸与编辑画框不一致")
+        # ComfyUI RGB channels use white=edit; its alpha mask uses 1-alpha.
+        selection = ImageOps.invert(protected)
+        sent_mask = work / "mask.png"
+        Image.merge("RGBA", (selection, selection, selection, protected)).save(sent_mask)
+        request.update(reference_images=refs, mask_image=str(sent_mask))
+        _record_inputs(params, work / "sent", prompt,
+                       [("source", input_path.read_bytes()), ("mask", sent_mask.read_bytes())])
+        paths = dispatch(prompt=prompt, model=model, alias=alias,
+                         output_dir=output_dir, params=request, **kwargs)
+        if validate_result:
+            for path in paths:
+                with Image.open(path) as opened:
+                    validate_result(ImageOps.exif_transpose(opened).convert("RGBA"))
+        return [str(composite_result(source, mask_path, Path(path), options)) for path in paths]
     instruction = (
         "Extend only the new canvas area, continuing the scene naturally. "
         if options["mode"] == "outpaint" else "Edit only the selected region. "

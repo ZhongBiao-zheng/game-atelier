@@ -1805,12 +1805,12 @@ def submit_image_edit_run(
                 )
             if draft.alias is None:
                 raise ValueError("图片编辑需要明确选择模型渠道，不能使用自动路由")
-            if not draft.prompt.strip():
+            key, model, kind = _resolve_key_and_model(draft)
+            if not draft.prompt.strip() and model.workflow_inputs is None:
                 draft = draft.model_copy(update={"prompt": (
                     "自然延展画面" if options.mode == "outpaint" else "自然修复选区内容"
                 )})
-            key, model, kind = _resolve_key_and_model(draft)
-            transport = edit_transport_for_key(key, model.id)
+            transport = edit_transport_for_key(key, model.id, options.mode)
             if not transport:
                 raise CanvasRunCommandError(
                     "canvas_media_capability_missing",
@@ -1825,6 +1825,17 @@ def submit_image_edit_run(
                 key,
                 model,
             )
+            if transport == "workflow":
+                from character_workflow.lib.comfyui_workflows import validate_values, validate_value
+
+                job_params.estimated_cost_cny = 0.0
+                job_params.actual_cost_cny = 0.0
+                values = validate_values(model.workflow_inputs, job_params.workflow_inputs or {})
+                for item in model.workflow_inputs:
+                    if item.type == "prompt":
+                        validate_value(item, draft.prompt)
+                    if item.type == "seed" and values[item.id] is not None and effective_count != 1:
+                        raise ValueError("固定种子时每次只能生成 1 张")
             unsupported_mentions = [
                 node_id for node_id in _MENTION.findall(draft.prompt)
                 if node_id not in {surface.id, surface.data.source_node_id}
@@ -1851,7 +1862,8 @@ def submit_image_edit_run(
                     version_id=reference.version_id, kind="image",
                 ))
             _validate_input_capabilities(model, kind, inputs, job_params, key.provider)
-            final_prompt = _render_final_prompt(current, draft, inputs)
+            final_prompt = (draft.prompt if transport == "workflow"
+                            else _render_final_prompt(current, draft, inputs))
             media_paths = _input_paths(project_id, current, inputs)
             if not media_paths["image"]:
                 raise CanvasRunCommandError(
@@ -1893,7 +1905,7 @@ def submit_image_edit_run(
                     body, width, height, hashlib.sha256(body).hexdigest(),
                 )
             edit.update(source_version_id=source.version_id)
-            if transport != "evolink":
+            if transport not in {"evolink", "workflow"}:
                 size_params = edit_size_params(key, model.id, width, height)
                 job_params = job_params.model_copy(update={
                     "ratio": None, "resolution": None, **size_params,
@@ -1901,7 +1913,7 @@ def submit_image_edit_run(
                 for field in ("ratio", "resolution", "custom_size"):
                     normalized.pop(field, None)
                 normalized.update(size_params)
-            else:
+            elif transport == "evolink":
                 effective_count = 4
                 job_params.n = effective_count
                 normalized["n"] = effective_count

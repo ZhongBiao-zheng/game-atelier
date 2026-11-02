@@ -12,6 +12,7 @@ import { Slider } from '@/components/ui/slider';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import type { JobParams } from '@/schema/jobs';
 
 type BrushTool = 'brush' | 'eraser';
 const BRUSH_MIN = 8;
@@ -46,9 +47,14 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
   });
   const choice = choices.find(item => choiceId(item.key.alias, item.model) === selected);
   const mj = Boolean(choice?.mj);
+  const workflowInputs = choice?.key.models.find(model => model.id === choice.model)?.workflow_inputs;
+  const [workflowValues, setWorkflowValues] = useState<JobParams['workflow_inputs']>(initialDraft?.params.workflow_inputs ?? {});
+  const fixedSeed = workflowInputs?.some(input => input.type === 'seed' && workflowValues?.[input.id] != null);
+  const noPrompt = workflowInputs != null && !workflowInputs.some(input => input.type === 'prompt');
+  const requiredPrompt = workflowInputs?.some(input => input.type === 'prompt' && input.required);
   const [count, setCount] = useState(() => initialDraft?.model === 'mj-v8.2' ? 1
     : Math.min(4, Math.max(1, initialDraft?.params.n ?? 1)));
-  const candidates = mj ? MJ_IMAGES_PER_TASK : count;
+  const candidates = mj ? MJ_IMAGES_PER_TASK : fixedSeed ? 1 : count;
   const caps = selectionImageCaps(choice?.key, choice?.model ?? '');
   const [qualityChoice, setQualityChoice] = useState(initialDraft?.params.quality);
   const [resolutionChoice, setResolutionChoice] = useState(initialDraft?.params.resolution);
@@ -57,16 +63,16 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
   const resolution = !caps.showResolution ? undefined
     : caps.resolutions.includes(resolutionChoice as never) ? resolutionChoice : defaultResolution(caps.resolutions);
   const size = editSize(choice?.key, choice?.model ?? '', dimensions.width, dimensions.height);
-  const params = mj ? { n: MJ_IMAGES_PER_TASK }
+  const params: JobParams = workflowInputs ? { workflow_inputs: workflowValues, n: candidates } : mj ? { n: MJ_IMAGES_PER_TASK }
     : { ...size.params, n: count, ...(quality ? { quality } : {}), ...(resolution ? { resolution } : {}) };
   const viewport = useEditorViewport(dimensions);
   const { scale, origin } = viewport;
-  const fingerprint = JSON.stringify({ strokes, prompt, selected, count, quality, resolution });
+  const fingerprint = JSON.stringify({ strokes, prompt, selected, count, quality, resolution, workflowValues });
   const savedFingerprint = useRef(fingerprint);
   const cost = useGenerationEstimate(choice?.key.alias, choice?.model ?? '',
     { ...params, image_edit: { mode: 'inpaint' } }, open);
   const blocker = !choice ? '请选择可用的编辑模型' : !ready ? '图片加载中' : initialData?.active_run_id ? '正在生成'
-    : size.error ? size.error : !strokes.length ? '先涂抹要修改的区域' : mj && !prompt.trim() ? '写下要改成什么' : null;
+    : size.error ? size.error : !strokes.length ? '先涂抹要修改的区域' : (mj || requiredPrompt) && !prompt.trim() ? '写下要改成什么' : null;
 
   useEffect(() => { if (overlay.current && ready) drawEditStrokes(overlay.current, strokes); }, [strokes, ready]);
 
@@ -141,9 +147,9 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
       const submission: CanvasMaskEditSubmission = {
         mask, requestedCount: candidates, options: { mode: 'inpaint' },
         editorState: { strokes, frame: { ...dimensions, x: 0, y: 0 }, frame_ratio: '' },
-        referenceNodeId: mj ? null : initialData?.reference_node_id ?? null,
-        referenceVersionId: mj ? null : initialData?.reference_version_id ?? null,
-        draft: { mode: 'image', prompt: prompt.trim(), input_policy: 'all_connected', alias: choice?.key.alias ?? '',
+        referenceNodeId: mj || workflowInputs ? null : initialData?.reference_node_id ?? null,
+        referenceVersionId: mj || workflowInputs ? null : initialData?.reference_version_id ?? null,
+        draft: { mode: 'image', prompt: noPrompt ? '' : prompt.trim(), input_policy: 'all_connected', alias: choice?.key.alias ?? '',
           model: choice?.model ?? '', params, updated_at: new Date().toISOString() },
       };
       const ok = await (generate ? onSubmit(submission) : onSave(submission));
@@ -200,11 +206,13 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
           style={{ left: cursor.x - brushSize / 2, top: cursor.y - brushSize / 2, width: brushSize, height: brushSize }} />}
       </div>
     </div>}
-    composer={<EditorComposer prompt={prompt} onPrompt={setPrompt} placeholder={mj ? '描述选区要改成什么（必填）' : '描述选区要改成什么；留空自然修复'}
+    composer={<EditorComposer prompt={noPrompt ? '' : prompt} onPrompt={setPrompt} promptDisabled={noPrompt}
+      placeholder={noPrompt ? '此工作流无需提示词' : mj || requiredPrompt ? '描述选区要改成什么（必填）' : workflowInputs ? '描述选区要改成什么' : '描述选区要改成什么；留空自然修复'}
       blocker={blocker} error={error || localError} cost={cost} busy={busy}
       generateLabel={`生成 ${candidates} 张`} onGenerate={() => void submit(true)}
       chips={<EditGenerationControls choices={choices} choice={choice}
-        onChoice={next => setSelected(choiceId(next.key.alias, next.model))} caps={caps}
+        onChoice={next => { setSelected(choiceId(next.key.alias, next.model)); setWorkflowValues({}); }} caps={caps}
         resolution={resolution} onResolution={setResolutionChoice} quality={quality} onQuality={setQualityChoice}
-        count={count} onCount={setCount} />} />} />;
+        count={candidates} onCount={setCount} workflowParams={params}
+        onWorkflowPatch={patch => { if (patch.workflow_inputs) setWorkflowValues(patch.workflow_inputs); if (patch.n) setCount(patch.n); }} />} />} />;
 }

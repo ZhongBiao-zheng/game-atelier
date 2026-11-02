@@ -290,6 +290,60 @@ def test_studio_rejects_undeclared_workflow_values_before_creating_job(
     assert list_jobs() == [] and submitted == [] and host.prompts == {}
 
 
+@pytest.mark.parametrize("alias", ["local", "Hub"])
+@pytest.mark.parametrize("has_prompt", [True, False])
+def test_canvas_inpaint_uploads_original_and_independent_mask(live_gateway, host, alias, has_prompt):
+    import io
+    from PIL import Image
+    from character_workflow.lib.canvas_projects import create_canvas_project, replace_canvas_node_media
+    from character_workflow.lib.canvas_runs import run_canvas_job
+    from tests.canvas_edit_helpers import submit_saved_edit
+    from tests.test_generation_recipe import NOW, _media_node, _save_nodes, png
+    from character_workflow.lib import comfyui_workflows as workflows
+
+    workflow = imported("inpaint")
+    if not has_prompt:
+        workflow = workflows.save_workflow("local", name=workflow.name, api_workflow=workflow.api_workflow,
+            inputs=[i for i in workflow.inputs if i.type != "prompt"], identifier=workflow.id)
+    atelier_gateway.sync_gateway_key("Hub")
+    strength = next(i.id for i in workflow.inputs if i.type == "float")
+    prompt = "蓝色帽子" if has_prompt else ""
+    draft = {"mode": "image", "prompt": prompt, "alias": alias, "model": workflow.id,
+             "params": {"workflow_inputs": {strength: 0.35}}, "updated_at": NOW}
+    pid = create_canvas_project("重绘工作流").project_id
+    doc = _save_nodes(pid, [_media_node("source", draft)], [])
+    version, doc, _ = replace_canvas_node_media(pid, "source", "s.png", ".png",
+                                               png((255, 0, 0), (64, 64)), "image", doc.revision)
+    mask = Image.new("L", (64, 64), 255)
+    mask.paste(0, (16, 16, 48, 48))
+    stream = io.BytesIO()
+    mask.save(stream, format="PNG")
+    job, _ = submit_saved_edit(pid, "source", doc.revision, 2, stream.getvalue())
+    assert job.prompt == prompt and job.params.workflow_inputs == {strength: 0.35}
+    done = run_canvas_job(job.job_id)
+    assert done.status.value == "done", done.error
+    assert len(done.output_paths) == 2 and len(host.uploads) == 4
+    assert done.params.actual_cost_cny == 0
+    graphs = [payload["prompt"] for payload in host.prompts.values()]
+    assert len(graphs) == 2 and graphs[0]["3"]["inputs"]["seed"] != graphs[1]["3"]["inputs"]["seed"]
+    for graph in graphs:
+        assert graph["6"]["inputs"]["text"] == (prompt if has_prompt else "a cat")
+        assert graph["2"]["inputs"]["strength_model"] == 0.35
+        assert graph["10"]["inputs"]["image"] != graph["11"]["inputs"]["image"]
+    # Extract the multipart PNG, asserting both ComfyUI red and inverse-alpha semantics.
+    for index, body in enumerate(host.uploads):
+        image = Image.open(io.BytesIO(body[body.index(b"\x89PNG\r\n\x1a\n"):])).convert("RGBA")
+        assert image.size == (64, 64)
+        if index % 2 == 0:
+            assert image.getpixel((32, 32)) == (255, 0, 0, 255)
+        else:
+            assert image.getpixel((0, 0)) == (0, 0, 0, 255)
+            assert image.getpixel((32, 32)) == (255, 255, 255, 0)
+    with Image.open(done.output_paths[0]) as output:
+        assert output.getpixel((0, 0)) == (255, 0, 0, 255)
+        assert output.getpixel((32, 32)) == (102, 153, 136, 255)
+
+
 @pytest.mark.parametrize("alias", ["Hub", None])
 def test_studio_http_accepts_empty_prompt_only_for_workflow_without_prompt(
     live_gateway, host, monkeypatch, isolated_data_root, alias,

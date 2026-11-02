@@ -36,7 +36,7 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
   const [frame, setFrame] = useState<EditFrame>(savedFrame ?? presetFrame(source.width, source.height, 'original', 1));
   const [prompt, setPrompt] = useState(initialDraft?.prompt ?? '');
   const [localError, setLocalError] = useState<string | null>(null);
-  const choices = useMemo(() => editModelChoices(keys), [keys]);
+  const choices = useMemo(() => editModelChoices(keys, 'outpaint'), [keys]);
   const [selected, setSelected] = useState(() => {
     const saved = choices.find(item => item.key.alias === initialDraft?.alias && item.model === initialDraft?.model) ?? choices[0];
     return saved ? choiceId(saved.key.alias, saved.model) : '';

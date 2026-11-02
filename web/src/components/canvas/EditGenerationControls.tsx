@@ -5,6 +5,8 @@ import { MJ_IMAGES_PER_TASK, QUALITY_LABELS, type ImageControlCaps, type Quality
 import { CanvasModelPicker, OptionTrack } from './CanvasGenerationControls';
 import type { EditModelChoice } from './imageEditGeometry';
 import { Button } from '@/components/ui/button';
+import { WorkflowParameters } from '@/components/studio/WorkflowParameters';
+import type { JobParams } from '@/schema/jobs';
 
 const TIERS = ['1K', '2K', '4K'];
 const TIER_SUFFIX = /\s*[·\-–]?\s*[24]K$/i;
@@ -40,11 +42,12 @@ function OptionChip({ label, summary, values, selected, getLabel, onSelect, port
 
 /** 编辑器底栏的模型 / 分辨率（或质量）/ 张数，沿用画布生成面板的控件：模型按供应商分组。 */
 export function EditGenerationControls({ choices, choice, onChoice, caps, resolution, onResolution, quality, onQuality,
-  count, onCount }: {
+  count, onCount, workflowParams, onWorkflowPatch }: {
   choices: EditModelChoice[]; choice: EditModelChoice | undefined; onChoice: (choice: EditModelChoice) => void;
   caps: ImageControlCaps; resolution: string | undefined; onResolution: (value: string) => void;
   quality: string | undefined; onQuality: (value: string) => void;
   count: number; onCount: (value: number) => void;
+  workflowParams?: JobParams; onWorkflowPatch?: (patch: JobParams) => void;
 }) {
   // 编辑器是模态 Dialog：弹层挂到 body 会被它禁掉指针事件，挂进 Dialog 自己。
   const portalContainerRef = useRef<HTMLElement | null>(null);
@@ -61,9 +64,11 @@ export function EditGenerationControls({ choices, choice, onChoice, caps, resolu
     return model ? [{ key: item.key, model: { ...model, name: (model.name || model.id).replace(TIER_SUFFIX, '') } }] : [];
   });
   const tiers = choice ? members(choice) : [];
+  const workflowInputs = choice?.key.models.find(model => model.id === choice.model)?.workflow_inputs;
+  const fixedSeed = workflowInputs?.some(input => input.type === 'seed' && workflowParams?.workflow_inputs?.[input.id] != null);
   const showTiers = tiers.length > 1;
-  const showResolution = Boolean(choice && !choice.mj && !showTiers && caps.showResolution && caps.resolutions.length > 0);
-  const showQuality = Boolean(choice && !choice.mj && !showTiers && !showResolution && caps.qualities?.length);
+  const showResolution = Boolean(choice && !workflowInputs && !choice.mj && !showTiers && caps.showResolution && caps.resolutions.length > 0);
+  const showQuality = Boolean(choice && !workflowInputs && !choice.mj && !showTiers && !showResolution && caps.qualities?.length);
   return <>
     <div ref={element => { portalContainerRef.current = element?.closest<HTMLElement>('[role="dialog"]') ?? null; }}
       className="min-w-0 basis-56">
@@ -86,7 +91,9 @@ export function EditGenerationControls({ choices, choice, onChoice, caps, resolu
     {showQuality && quality && <OptionChip label="质量" summary={QUALITY_LABELS[quality as Quality] ?? quality}
       values={caps.qualities ?? []} selected={quality} getLabel={value => QUALITY_LABELS[value as Quality] ?? value}
       onSelect={onQuality} portalContainerRef={portalContainerRef} />}
-    {!choice ? null : choice.mj
+    {workflowInputs && workflowParams && onWorkflowPatch && <WorkflowParameters inputs={workflowInputs}
+      params={workflowParams} onPatch={onWorkflowPatch} portalContainerRef={portalContainerRef} />}
+    {!choice ? null : fixedSeed ? <span className={`${chipClass} pointer-events-none`}>1 张</span> : choice.mj
       ? <span className={`${chipClass} pointer-events-none`}><Settings2 className="size-3.5" aria-hidden="true" />{MJ_IMAGES_PER_TASK} 张 · Fast</span>
       : <OptionChip label="生成数量" summary={`${count} 张`} values={[1, 2, 3, 4]} selected={String(count)}
         getLabel={value => `${value} 张`} onSelect={value => onCount(Number(value))} portalContainerRef={portalContainerRef} />}

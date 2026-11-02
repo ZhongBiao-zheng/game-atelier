@@ -120,14 +120,14 @@ export function ImageEditorShell({ open, heading, icon: Icon, viewport, busy, di
 
 /** 提示词 + 操作行；blocker 非空时生成置灰，并在按钮左侧写出缺什么。 */
 export function EditorComposer({ prompt, onPrompt, placeholder, chips, blocker, error, cost, busy, generateLabel,
-  onGenerate, children }: {
+  onGenerate, children, promptDisabled = false }: {
   prompt: string; onPrompt: (value: string) => void; placeholder: string; chips: ReactNode;
   blocker: string | null; error: string | null; cost: number | null; busy: boolean; generateLabel: string;
-  onGenerate: () => void; children?: ReactNode;
+  onGenerate: () => void; children?: ReactNode; promptDisabled?: boolean;
 }) {
   return <fieldset disabled={busy} className="contents">
     {children}
-    <Textarea variant="bare" aria-label="编辑提示词" rows={2} value={prompt} placeholder={placeholder}
+    <Textarea variant="bare" aria-label="编辑提示词" rows={2} value={prompt} placeholder={placeholder} disabled={promptDisabled}
       className="block w-full resize-none border-0 bg-transparent px-1 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground"
       onChange={event => onPrompt(event.target.value)}
       onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); if (!blocker) onGenerate(); } }} />
