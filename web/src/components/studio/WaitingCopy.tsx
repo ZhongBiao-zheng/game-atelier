@@ -1,7 +1,8 @@
-export function WaitingCopy({ startedAt, now }: { startedAt: number; now: number }) {
+export function WaitingCopy({ startedAt, now, phase }: { startedAt: number; now: number; phase?: string | null }) {
   const elapsed = Math.floor((now - startedAt) / 1000);
   let copy = '';
-  if (elapsed >= 30) copy = '可能要再等一会，复杂场景慢一点。';
+  if (phase?.startsWith('queued:')) copy = `排队第 ${phase.slice(7)} 位`;
+  else if (elapsed >= 30) copy = '可能要再等一会，复杂场景慢一点。';
   else if (elapsed >= 15) copy = '模型在画了…';
   else if (elapsed >= 5) copy = '正在调度…';
   return (

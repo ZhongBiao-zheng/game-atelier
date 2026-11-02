@@ -444,7 +444,7 @@ function PendingBatch({
   return (
     <>
       <div className="mb-3">
-        <WaitingCopy startedAt={round.startedAt} now={now} />
+        <WaitingCopy startedAt={round.startedAt} now={now} phase={round.progressPhase} />
       </div>
       <section className={ROUND_SECTION_CLASS}>
         <div className={ROUND_HEADER_CLASS}>

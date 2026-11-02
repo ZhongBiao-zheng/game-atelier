@@ -467,6 +467,16 @@ describe('RoundList progress badge', () => {
     expect(screen.getByTestId('progress-badge').textContent).toBe('0% 生成中');
   });
 
+  it('排队时顶部和图片角标保持一致，不显示按耗时推测的文案', () => {
+    render(<RoundList rounds={[pendingRound({
+      startedAt: Date.now() - 10_000,
+      progressPhase: 'queued:3',
+      config: { prompt: 'p', model: 'm', kind: 'image', referenceImages: [] },
+    })]} />);
+    expect(screen.getAllByText('排队第 3 位')).toHaveLength(2);
+    expect(screen.queryByText('正在调度…')).not.toBeInTheDocument();
+  });
+
   it('shows 20% once the task is sent and 95% while downloading', () => {
     const { unmount } = render(<RoundList rounds={[pendingRound({ progressPhase: 'sent' })]} />);
     expect(screen.getByTestId('progress-badge').textContent).toBe('20% 生成中');
