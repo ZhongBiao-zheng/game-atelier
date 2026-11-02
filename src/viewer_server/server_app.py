@@ -351,6 +351,8 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
         LocalRequestBoundary, dev_origin=development_origin(),
     )
     app.include_router(router)
+    from viewer_server.comfyui_routes import router as comfyui_router
+    app.include_router(comfyui_router)
     app.include_router(update_router)
     app.include_router(connection_router(connection_store))
     app.include_router(canvas_batches_router)

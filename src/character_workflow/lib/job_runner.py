@@ -634,6 +634,7 @@ def _run_once(
                 else:
                     from character_workflow.lib.callers.image_edit import render
             paths = render(
+                job_id=job.job_id,
                 prompt=_with_reference_numbering(job.prompt, params),
                 model=job.model,
                 alias=job.alias,
@@ -657,7 +658,7 @@ def _run_once(
             first_dims: tuple[int, int] | None = None
             selected_outputs = (
                 selected
-                if params.get("layer_decomposition")
+                if params.get("layer_decomposition") or job.provider == "comfyui"
                 else selected[: max(1, int(params.get("n") or 1))]
             )
             with asset_output_lock(output_dir):

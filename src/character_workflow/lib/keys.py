@@ -17,8 +17,10 @@ from pydantic import BaseModel, Field, field_validator, model_serializer, model_
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import _replace_with_retry
 from character_workflow.lib.file_lock import file_lock
+from character_workflow.lib.comfyui_schema import WorkflowInput, local_base_url
 
 Provider = Literal[
+    "comfyui",
     "chatgpt",
     "openai",
     "midjourney",
@@ -65,6 +67,7 @@ class ModelSpec(BaseModel):
     input_modalities: list[ModelInputModality] = Field(default_factory=list)
     # 只有局域网 Atelier 供应商有：网关那边的成员快照，能力取交集、估价取第一个（ADR-0025）。
     via: list[ViaMember] | None = None
+    workflow_inputs: list[WorkflowInput] | None = None
 
     @model_serializer(mode="wrap")
     def _omit_empty_via(self, handler):
@@ -72,6 +75,8 @@ class ModelSpec(BaseModel):
         data = handler(self)
         if data.get("via") is None:
             data.pop("via", None)
+        if data.get("workflow_inputs") is None:
+            data.pop("workflow_inputs", None)
         return data
 
 
@@ -96,6 +101,13 @@ class KeySpec(BaseModel):
 
     @model_validator(mode="after")
     def _subscription_contract(self):
+        if self.provider == "comfyui":
+            self.base_url = local_base_url(self.base_url)
+            if self.access_key or self.secret_key or self.auth_source or self.billing_group:
+                raise ValueError("ComfyUI 不接受密钥、订阅或计费分组")
+            if any(not m.id.startswith("comfyui-") for m in self.models):
+                raise ValueError("ComfyUI 模型必须通过工作流导入")
+            self.modalities = ["image"]
         if self.provider != "chatgpt":
             if self.auth_source is not None:
                 raise ValueError("只有 ChatGPT 订阅支持 Codex 登录")
@@ -222,7 +234,7 @@ def _backfill_model_protocols(db: KeysDB) -> None:
         for spec in key.models:
             if spec.protocol is not None:
                 continue
-            if key.provider == "chatgpt":
+            if key.provider in {"chatgpt", "comfyui"}:
                 continue
             # 文本/音频没有图片协议回填；它们只接受上游明确标注或各 caller 自己的
             # 保守旧模型推断，不能因为共用 ModelSpec 就误走 image resolver。

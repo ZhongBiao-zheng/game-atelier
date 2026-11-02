@@ -1,3 +1,4 @@
+import { Workflow } from 'lucide-react';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { modelModality, type ModelModality } from '@/api/keys';
@@ -84,6 +85,7 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
         </div>}
         {group.choices.map(choice => {
           const id = `${choice.key.alias}:${choice.model.id}`;
+          const local = choice.model.workflow_inputs != null;
           const subscription = routeChannel(choice.key, choice.model).key.provider === 'chatgpt';
           const entry = modelCatalog(choice.model.id);
           const media = group.kind === 'image' || group.kind === 'video';
@@ -93,13 +95,13 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
             tabIndex={selected === id || (!flat.some(item => `${item.key.alias}:${item.model.id}` === selected) && flat[0] === choice) ? 0 : -1}
             onClick={() => onSelect(choice)}
             className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors duration-150 hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60">
-            <span className={selected === id ? 'text-foreground' : 'text-muted-foreground'}><ModelBrandIcon brand={modelBrand(choice.model.id)} size={18} /></span>
+            <span className={selected === id ? 'text-foreground' : 'text-muted-foreground'}>{local ? <Workflow size={18} aria-hidden /> : <ModelBrandIcon brand={modelBrand(choice.model.id)} size={18} />}</span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">{modelDisplayName(choice.model)}</span>
               {entry && !subscription && <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{entry.description}</span>}
-              {(seconds != null || cost != null || subscription) && <span className="mt-2 flex justify-between gap-2 text-xs tabular-nums text-muted-foreground">
+              {(seconds != null || cost != null || subscription || local) && <span className="mt-2 flex justify-between gap-2 text-xs tabular-nums text-muted-foreground">
                 {seconds != null && <MetaTag>{formatModelDuration(seconds)}</MetaTag>}
-                {subscription ? <MetaTag className="ml-auto">订阅</MetaTag> : cost != null && <MetaTag className="ml-auto">{formatGenerationCost(cost)}</MetaTag>}
+                {local ? <MetaTag className="ml-auto">本机</MetaTag> : subscription ? <MetaTag className="ml-auto">订阅</MetaTag> : cost != null && <MetaTag className="ml-auto">{formatGenerationCost(cost)}</MetaTag>}
               </span>}
             </span>
           </Button>;

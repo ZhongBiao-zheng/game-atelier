@@ -878,8 +878,10 @@ def set_model_route_mode(payload: _ModelModePayload) -> dict:
 @router.post("/keys", status_code=201)
 def create_key(payload: _KeyCreatePayload) -> dict:
     from datetime import datetime, timezone
-    if payload.provider != "chatgpt" and not payload.access_key.strip():
+    if payload.provider not in {"chatgpt", "comfyui"} and not payload.access_key.strip():
         raise HTTPException(422, "供应商密钥不能为空")
+    if payload.provider == "comfyui" and payload.models:
+        raise HTTPException(422, "请通过工作流导入添加 ComfyUI 模型")
     try:
         spec = keys.KeySpec(
             alias=payload.alias, provider=payload.provider, enabled=payload.enabled,
@@ -913,6 +915,9 @@ def create_key(payload: _KeyCreatePayload) -> dict:
 @router.patch("/keys/{alias}")
 def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
     patch_data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    stored = keys.find_by_alias(alias)
+    if stored and stored.provider == "comfyui" and "models" in patch_data:
+        raise HTTPException(422, "请通过工作流编辑修改 ComfyUI 模型")
     # billing_group 留空表示明确关闭聚合商计价；不能像密钥字段一样把显式 null 当作“未传”。
     if "billing_group" in payload.model_fields_set:
         patch_data["billing_group"] = payload.billing_group
@@ -1576,8 +1581,6 @@ def _create_user_job(
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    if not prompt.strip():
-        raise HTTPException(status_code=422, detail="生成提示词不能为空")
     if body.kind not in {JobKind.IMAGE, JobKind.VIDEO}:
         raise HTTPException(422, detail="创作台目前只接受图片或视频任务")
     params = body.params.model_copy(deep=True)
@@ -1614,6 +1617,12 @@ def _create_user_job(
             raise HTTPException(status_code=422, detail=str(error)) from None
         model_id = model_spec.id
     alias = key_row.alias
+    model_spec = next((m for m in key_row.models if m.id == model_id), None)
+    if not prompt.strip() and not (
+        model_spec is not None and model_spec.workflow_inputs is not None
+        and not any(item.type == "prompt" for item in model_spec.workflow_inputs)
+    ):
+        raise HTTPException(status_code=422, detail="生成提示词不能为空")
     # 「自动」记下路由 id，运行时遇到确定没执行的失败才能换下一家；指定厂商不换。
     params.route_id = None if body.alias else body.model
     params.route_tried = None

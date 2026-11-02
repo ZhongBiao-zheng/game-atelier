@@ -92,6 +92,10 @@ export function imageControlCaps(
   _billingGroup?: string | null,
 ): ImageControlCaps {
   const family = imageFamily(modelId);
+  if (provider === 'comfyui' || modelId?.startsWith('comfyui-')) return {
+    family, maxCount: 4, ratios: [], resolutions: [], showResolution: false,
+    showCustomSize: false, showAutoSize: false, qualities: null, sizeKind: 'none',
+  };
   if (provider === 'chatgpt') return {
     family, maxCount: 1, maxRefImages: 1, ratios: [], resolutions: [], showResolution: false,
     showCustomSize: false, showAutoSize: false, qualities: null, sizeKind: 'none',

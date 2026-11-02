@@ -550,7 +550,7 @@ function StudioFull() {
       ? MJ_IMAGES_PER_TASK
       : Math.min(caps.maxCount ?? 4, clampImageCount(overrideConfig?.n ?? count));
     const rawSizeParams: JobParams = overrideConfig
-      ? { size_mode: overrideConfig.sizeMode ?? 'ratio', size: overrideConfig.size, ratio: overrideConfig.ratio, resolution: overrideConfig.resolution }
+      ? { workflow_inputs: overrideConfig.workflowInputs, size_mode: overrideConfig.sizeMode ?? 'ratio', size: overrideConfig.size, ratio: overrideConfig.ratio, resolution: overrideConfig.resolution }
       : sizeParams;
     const preparedSize = prepareImageSizeSubmission(size.modelId, effectiveProvider, size.baseUrl, rawSizeParams, caps);
     if (preparedSize.error) {
@@ -612,6 +612,7 @@ function StudioFull() {
       n: effectiveCount,
       quality: effectiveQuality,
       referenceImages: refPaths,
+      workflowInputs: effectiveSizeParams.workflow_inputs,
       ...(effectiveSourceAssetTitle ? { sourceAssetTitle: effectiveSourceAssetTitle } : {}),
       ...(caps.family === 'midjourney'
         ? { mjParams: effectiveMjParams, mjRefPaths }
@@ -620,6 +621,7 @@ function StudioFull() {
     // 控件隐藏的参数一律不写进 params（与视频侧同写法）：后端 openrouter_image 会把
     // params.resolution 原样当 API 参数发出去，在别的 key 上选过 4K 就会被带过来按 4K 计费。
     const jobParams: JobParams = {
+      ...(effectiveProvider === 'comfyui' ? { workflow_inputs: effectiveSizeParams.workflow_inputs } : {}),
       ...(caps.ratios.length || caps.showCustomSize || caps.showAutoSize ? { size_mode: effectiveMode } : {}),
       ...(effectiveSize ? { size: effectiveSize } : {}),
       ...(effectiveRatio ? { ratio: effectiveRatio } : {}),
@@ -1303,7 +1305,7 @@ function StudioFull() {
       setVideoMode(omni ? 'omni' : 'firstlast');
       setGenerateAudio(!!config.generateAudio);
     } else {
-      setSizeParams({ size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}) });
+      setSizeParams({ workflow_inputs: config.workflowInputs, size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}) });
       if (config.n) setCount(clampImageCount(config.n));
       if (config.quality) setQuality(config.quality);
       if (config.mjParams) setMjParams(config.mjParams);
@@ -1356,7 +1358,7 @@ function StudioFull() {
       setVideoMode(isOmniVideoConfig(config.frameMode, referencePathCounts(config)) ? 'omni' : 'firstlast');
       setGenerateAudio(!!config.generateAudio);
     } else {
-      setSizeParams({ size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}) });
+      setSizeParams({ workflow_inputs: config.workflowInputs, size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}) });
       if (config.n) setCount(clampImageCount(config.n));
       if (config.mjParams) setMjParams(config.mjParams);
     }

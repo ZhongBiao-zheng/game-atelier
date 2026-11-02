@@ -43,6 +43,7 @@ export interface KeyCreatePayload {
 }
 
 export interface KeyModel {
+  workflow_inputs?: WorkflowInput[] | null;
   name: string;
   id: string;
   /** 模型级生成模态；缺省时按 key 级 modalities 兜底（见 modelModality）。 */
@@ -55,6 +56,21 @@ export interface KeyModel {
   members?: ModelRouteMember[];
   /** 只出现在局域网 Atelier 供应商上：网关那边该模型的成员快照，能力取交集、估价取第一个。 */
   via?: ModelRouteMember[];
+}
+
+export interface WorkflowInput {
+  id: string;
+  label: string;
+  type: 'prompt' | 'text' | 'int' | 'float' | 'boolean' | 'select' | 'seed' | 'image' | 'mask';
+  node_id: string;
+  class_type: string;
+  field: string;
+  default: string | number | boolean | null;
+  min?: number | null;
+  max?: number | null;
+  step?: number | null;
+  options: { value: string | number | boolean; label: string }[];
+  required: boolean;
 }
 
 /** 模型分类的统一判定：模型级标注优先，未标注按 key 级 modalities 兜底。 */

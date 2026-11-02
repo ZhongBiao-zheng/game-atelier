@@ -522,6 +522,8 @@ def _supports_canvas_image_generation(key: KeySpec, model: ModelSpec) -> bool:
 
     if model_modality(model, key) != "image" or key.provider == "nano_banana":
         return False
+    if key.provider == "comfyui":
+        return model.workflow_inputs is not None
     if key.provider == "evolink":
         return model.id == "mj-v8.2" and model.protocol in {None, "evolink"}
     if image_family(model.id) == "midjourney" or key.provider == "openrouter":
@@ -911,7 +913,8 @@ def _trim_group_images_to_limit(
         return inputs
     from character_workflow.lib.callers.openai_image import max_reference_images
 
-    limit = max_reference_images(model.id)
+    limit = (sum(item.type == "image" for item in model.workflow_inputs)
+             if model.workflow_inputs is not None else max_reference_images(model.id))
     images = [item for item in inputs if item.kind == "image"]
     if len(images) <= limit:
         return inputs
@@ -974,7 +977,8 @@ def _validate_input_capabilities(
             raise ValueError("图片生成当前只支持文本与图片输入")
         from character_workflow.lib.callers.openai_image import max_reference_images
 
-        limit = max_reference_images(model.id)
+        limit = (sum(item.type == "image" for item in model.workflow_inputs)
+                 if model.workflow_inputs is not None else max_reference_images(model.id))
         if counts["image"] > limit:
             raise ValueError(f"当前图片模型最多支持 {limit} 张参考图")
         return
@@ -1451,7 +1455,11 @@ def prepare_canvas_generation(
             normalized["frame_mode"] = effective_frame_mode
     inputs = _trim_group_images_to_limit(model, kind, inputs, job_params)
     _validate_input_capabilities(model, kind, inputs, job_params, key.provider)
-    final_prompt = _render_final_prompt(document, draft, inputs)
+    no_workflow_prompt = (
+        model.workflow_inputs is not None
+        and not any(item.type == "prompt" for item in model.workflow_inputs)
+    )
+    final_prompt = "" if no_workflow_prompt else _render_final_prompt(document, draft, inputs)
     if resolve_media_paths:
         media_paths = _input_paths(project_id, document, inputs)
         job_params.reference_images = media_paths["image"] or None

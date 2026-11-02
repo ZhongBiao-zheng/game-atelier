@@ -1,3 +1,5 @@
+import { checkComfyUI } from '@/api/comfyui';
+import { ComfyWorkflows } from './ComfyWorkflows';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, X } from 'lucide-react';
@@ -26,12 +28,13 @@ const KIND_LABELS: Record<ProviderKind, string> = {
   custom: '自定义',
   team: '团队',
   subscription: '订阅',
+  local: '本机',
 };
 
 const providerByValue = (value: string) =>
   PROVIDER_PRESETS.find((preset) => preset.id === value) ?? PROVIDER_PRESETS[0];
 
-const usesNamedAlias = (provider: string) => provider === 'custom' || provider === GATEWAY_PROVIDER;
+const usesNamedAlias = (provider: string) => provider === 'custom' || provider === 'comfyui' || provider === GATEWAY_PROVIDER;
 
 const capLabelClass = 'block text-xs text-muted-foreground mb-2';
 // 次要文本操作（全选 / 清空 / 显示全部）：不占黄铜，也不做成方块按钮抢主操作的戏。
@@ -113,6 +116,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   const editing = mode === 'edit';
   const preset = providerByValue(activePresetId);
   const isGateway = provider === GATEWAY_PROVIDER;
+  const isComfy = provider === 'comfyui';
   const isSubscription = provider === 'chatgpt';
   const [subscription, setSubscription] = useState<ChatGPTSubscriptionStatus | null>(null);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
@@ -295,7 +299,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
     setSaving(true);
     setError(null);
     try {
-      const cleanModels = isGateway ? gatewayModels : mergedModels()
+      const cleanModels = isComfy ? [] : isGateway ? gatewayModels : mergedModels()
         .map((model) => {
           const modality = model.modality ?? 'image' as ModelModality;
           const inputModalities = modality === 'text'
@@ -320,7 +324,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         enabled,
         base_url: baseUrl.trim() || null,
         billing_group: billingGroup.trim() || null,
-        access_key: isSubscription ? '' : accessKey.trim(),
+        access_key: isSubscription || isComfy ? '' : accessKey.trim(),
         ...(isSubscription ? { auth_source: 'codex-cli' as const } : {}),
         secret_key: null,
         capabilities: ['portrait', 'promo', 'turnaround'],
@@ -347,6 +351,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
           notes: payload.notes,
         };
         if (!accessKey.trim() || accessKey === initial.access_key) delete patch.access_key;
+        if (isComfy) delete patch.models;
         await patchKey(initial.alias, patch);
       } else {
         await createKey(payload);
@@ -360,7 +365,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   };
 
   const canSubmit = Boolean(
-    (isSubscription ? (editing || subscription?.available) : (editing || accessKey.trim()))
+    (isComfy ? Boolean(baseUrl.trim()) : isSubscription ? (editing || subscription?.available) : (editing || accessKey.trim()))
     && (!usesNamedAlias(provider) || alias.trim())
     && (provider !== 'custom' || baseUrl.trim())
     && (!isGateway || (baseUrl.trim() && gatewayModels.length > 0))
@@ -399,6 +404,11 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         const parsed = new URL(fetchModelsBaseUrl);
         if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error();
       } catch { throw new Error('请输入完整的 HTTP(S) API 请求地址'); }
+      if (isComfy) {
+        const result = await checkComfyUI(baseUrl);
+        setConnectionTest({ ok: true, message: result.devices.map(device => `${device.name} · ${(device.vram_total / 1024 ** 3).toFixed(1)} GB`).join('、') || '已连接' });
+        return;
+      }
       const keyChanged = accessKey.trim() && accessKey !== initial?.access_key;
       await previewModels({ alias: editing ? initial?.alias ?? null : null, provider,
         base_url: fetchModelsBaseUrl, access_key: !editing || keyChanged ? accessKey.trim() || null : null,
@@ -447,7 +457,14 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
               <Label htmlFor="key-gateway-url" className="pt-2 text-xs text-muted-foreground">网关地址</Label>
               <Input id="key-gateway-url" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setGatewayModels([]); setGatewayInfo(null); }} className="font-mono" placeholder="http://192.168.1.20:5180" />
             </>}
-            {isSubscription ? <>
+            {isComfy ? <>
+              <Label htmlFor="comfy-address" className="pt-2 text-xs text-muted-foreground">ComfyUI 地址</Label>
+              <Input id="comfy-address" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); setConnectionTest(null); }} />
+              <span />
+              <div className="space-y-2"><Button variant="outline" disabled={testing} onClick={testConnection}>{testing ? '测试中…' : '测试连接'}</Button>
+                {connectionTest && <p role={connectionTest.ok ? 'status' : 'alert'} className="text-xs text-muted-foreground">{connectionTest.message}</p>}
+              </div>
+            </> : isSubscription ? <>
               <span className="pt-2 text-xs text-muted-foreground">账号</span>
               <div className="py-2 text-sm">{subscriptionError ? <p role="alert" className="text-destructive">{subscriptionError}</p> : !subscription ? <p role="status" className="text-muted-foreground">读取中…</p> : subscription.available ? <><p>{subscription.email}</p>{subscription.plan && <p className="mt-1 text-xs text-muted-foreground">{subscription.plan}</p>}</> : <p role="status" className="text-muted-foreground">请先在 Codex 里用 ChatGPT 登录</p>}</div>
             </> : <>
@@ -464,7 +481,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
             </>}
             <span className="pt-2 text-xs text-muted-foreground">模型</span>
             <div className="min-w-0 space-y-3">
-              {isSubscription ? <p className="py-2 text-sm">GPT Image</p> : isGateway ? <>
+              {isComfy ? (editing ? <ComfyWorkflows alias={initial!.alias!} /> : <p className="py-2 text-sm text-muted-foreground">保存后导入工作流</p>) : isSubscription ? <p className="py-2 text-sm">GPT Image</p> : isGateway ? <>
                 <Button variant="ghost" size="sm" type="button" onClick={connectGateway} disabled={!baseUrl.trim() || (!editing && !accessKey.trim()) || connecting}>{connecting ? '连接中...' : gatewayModels.length ? '重新同步' : '连接网关'}</Button>
                 {gatewayInfo && <p role="status" className="text-sm text-muted-foreground">{gatewayInfo}</p>}
                 {gatewayError && <p role="alert" className="text-sm text-destructive">{gatewayError}</p>}
@@ -638,7 +655,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                 </details>
               </>}
             </div>
-            {!isGateway && !isSubscription && <>
+            {!isGateway && !isSubscription && !isComfy && <>
               <span className="pt-2 text-xs text-muted-foreground">连接</span>
               <div className="flex flex-wrap items-center gap-3">
                 <Button variant="outline" type="button" onClick={testConnection} disabled={testing || !fetchModelsBaseUrl || (!editing && !accessKey.trim())}>{testing ? '测试中...' : '测试连接'}</Button>

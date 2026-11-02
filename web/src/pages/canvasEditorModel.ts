@@ -906,6 +906,7 @@ function isOpenAiHkBaseUrl(baseUrl: string | null | undefined) {
 }
 
 function canvasImageModelIsRoutable(key: KeyView, model: KeyView['models'][number]) {
+  if (key.provider === 'comfyui') return model.workflow_inputs != null;
   if (key.provider === 'chatgpt') return model.id === 'gpt-image-2';
   if (key.provider === 'evolink') return isEvolinkMidjourney(model.id, key.provider)
     && (!model.protocol || model.protocol === 'evolink');
@@ -1431,6 +1432,7 @@ export function canvasGenerateBlock(input: {
   alias: string | null | undefined;
   modelSelected: boolean;
   prompt: string;
+  allowEmptyPrompt?: boolean;
 }): CanvasGenerateBlock | null {
   if (input.modelChoiceCount === 0) {
     const label = CANVAS_GENERATION_MODE_LABELS[input.mode];
@@ -1444,7 +1446,7 @@ export function canvasGenerateBlock(input: {
   if (!input.alias || !input.modelSelected) {
     return { kind: 'no_model_selected', message: '先在上方选择一个生成模型。' };
   }
-  if (!input.prompt.trim()) {
+  if (!input.prompt.trim() && !input.allowEmptyPrompt) {
     return { kind: 'no_prompt', message: '先填写提示词。' };
   }
   return null;

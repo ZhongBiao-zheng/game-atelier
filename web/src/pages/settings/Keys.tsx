@@ -94,6 +94,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   };
 
   const closeForm = () => {
+    if (editingKey?.provider === 'comfyui') void refresh();
     setShowForm(false);
     setEditingKey(null);
   };

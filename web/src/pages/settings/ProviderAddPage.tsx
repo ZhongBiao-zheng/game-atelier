@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 
 const GROUPS = [
+  { kind: 'local', title: '本机', description: '' },
   { kind: 'official', title: '供应商', description: '有自己的模型' },
   { kind: 'relay', title: '中转', description: '一个密钥，多家模型' },
   { kind: 'subscription', title: '订阅', description: '' },

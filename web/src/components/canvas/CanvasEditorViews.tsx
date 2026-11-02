@@ -2152,8 +2152,12 @@ export function CanvasGenerationComposer({
     alias: selectedKey?.alias ?? draft.alias,
     modelSelected: Boolean(selectedModel),
     prompt: draft.prompt,
+    allowEmptyPrompt: selectedModel?.workflow_inputs != null && !selectedModel.workflow_inputs.some(input => input.type === 'prompt'),
   });
-  const blockedReason = generateBlock?.message ?? promptVariableError(draft.prompt) ?? referenceProblem;
+  const workflowWithoutPrompt = selectedModel?.workflow_inputs != null
+    && !selectedModel.workflow_inputs.some(input => input.type === 'prompt');
+  const blockedReason = generateBlock?.message
+    ?? (workflowWithoutPrompt ? null : promptVariableError(draft.prompt)) ?? referenceProblem;
 
   useEffect(() => {
     if (!usesVideoFrameSlots || !videoCaps) return;
@@ -2264,6 +2268,7 @@ export function CanvasGenerationComposer({
           node={node}
           materials={materialReferences}
           connectedReferences={mentionReferences.filter(reference => connectedMaterialNodeIds.has(reference.nodeId))}
+          imageLabels={selectedModel?.workflow_inputs?.filter(input => input.type === 'image').map(input => input.label)}
           connectedNodeIds={context.connectedMaterialNodeIdsByNodeId.get(node.id) ?? EMPTY_CANVAS_NODE_IDS}
           limits={draft.mode === 'video' ? selectedVideoReferenceLimits : imageCaps?.maxRefImages != null ? { images: imageCaps.maxRefImages, videos: 0, audios: 0 } : null}
           picking={context.materialPick?.targetNodeId === node.id
@@ -2302,7 +2307,8 @@ export function CanvasGenerationComposer({
         </Button>
       ) : (
       <CanvasPromptInput
-        value={draft.prompt}
+        disabled={selectedModel?.workflow_inputs != null && !selectedModel.workflow_inputs.some(input => input.type === 'prompt')}
+        value={selectedModel?.workflow_inputs != null && !selectedModel.workflow_inputs.some(input => input.type === 'prompt') ? '' : draft.prompt}
         references={mentionReferences}
         mentionsEnabled={mentionsEnabled}
         disabledMentionHint={usesVideoFrameSlots ? '首尾帧模式不使用 @' : undefined}
@@ -2322,7 +2328,7 @@ export function CanvasGenerationComposer({
           reference.title,
           reference.nodeId,
         )}
-        placeholder={draft.mode === 'video'
+        placeholder={selectedModel?.workflow_inputs != null && !selectedModel.workflow_inputs.some(input => input.type === 'prompt') ? '此工作流无需提示词' : draft.mode === 'video'
           ? usesVideoFrameSlots
             ? '描述镜头运动与画面变化'
             : '描述镜头运动与画面变化，输入 @ 引用已连接内容'
@@ -2359,6 +2365,7 @@ export function CanvasGenerationComposer({
                 ) : null;
             if (draft.mode === 'image') {
               const next = nextImageParams!;
+              if (draft.model !== chosenModel.id) delete next.workflow_inputs;
               const modeChanged = hasImageSizeSelection(draft.params) && imageSizeMode(next) !== imageSizeMode(draft.params);
               if (!modeChanged && imageSizeMode(next) === 'custom' && !imageSizeError(next, model.id)) {
                 const normalized = normalizeImagePixelSize(next.size!, model.id, key.base_url);
@@ -2423,6 +2430,7 @@ export function CanvasGenerationComposer({
           {draft.mode === 'image' && imageCaps && (
           <CanvasImageSettings
             caps={imageCaps}
+            workflowInputs={selectedModel?.workflow_inputs}
             model={channelModelId}
             baseUrl={channel?.key.base_url}
             params={draft.params}
@@ -2686,6 +2694,7 @@ function CanvasVideoFrameSlot({
 const INSTANT_LAYOUT = { layout: { duration: 0 } } as const;
 
 function CanvasMaterialConnections({
+  imageLabels,
   node,
   materials,
   connectedNodeIds,
@@ -2701,6 +2710,7 @@ function CanvasMaterialConnections({
   materials: readonly CanvasMaterialReference[];
   connectedNodeIds: ReadonlySet<string>;
   connectedReferences: readonly CanvasMentionReference[];
+  imageLabels?: string[];
   limits?: VideoReferenceLimits | null;
   picking: boolean;
   onPreview: (reference: CanvasMaterialReference) => void;
@@ -2818,7 +2828,7 @@ function CanvasMaterialConnections({
                 <CanvasMaterialPreview reference={reference} />
                 {reference.annotated && <Hint label="带标注"><span className="absolute bottom-0 right-0 z-10 grid size-3.5 place-items-center rounded-full border border-primary bg-popover text-primary"><Pencil size={10} /></span></Hint>}
                 <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-xs text-foreground">
-                  {reference.label}
+                  {reference.kind === 'image' ? imageLabels?.[connected.filter(item => item.kind === 'image').findIndex(item => item.nodeId === reference.nodeId)] ?? reference.label : reference.label}
                 </span>
               </Button></Hint>
               <Button variant="bare"

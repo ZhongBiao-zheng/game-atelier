@@ -1,3 +1,4 @@
+import type { Job, JobParams } from '@/schema/jobs';
 import { type ButtonHTMLAttributes, forwardRef, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, Bookmark, BookmarkPlus, Download, Eye, EyeOff, Film, Heart, Info, Music, Pencil, Share2, Square, Trash2 } from 'lucide-react';
@@ -36,6 +37,7 @@ const MEDIA_ROOT_MARGIN = '600px 0px';
 const HISTORY_LOAD_ROOT_MARGIN = '800px 0px 0px';
 
 export interface RoundConfig {
+  workflowInputs?: JobParams['workflow_inputs'];
   prompt: string;
   kind?: 'image' | 'video';
   alias?: string | null;
@@ -79,7 +81,7 @@ export type RoundState =
       jobId?: string;
       startedAt: number;
       // 后端回写的真实进度卡点（sent=已提交上游 / downloading=产物下载中），无 job 或未提交时为空。
-      progressPhase?: 'sent' | 'downloading' | null;
+      progressPhase?: Job['progress_phase'];
       // 已按「停止」：后端登记了 cancel_requested_at，等 runner 在可中断点落 canceled。
       cancelRequested?: boolean;
       config: RoundConfig;
@@ -544,7 +546,7 @@ function MediaActivationBoundary({
  */
 function progressPercent(opts: {
   isVideo: boolean;
-  phase: 'sent' | 'downloading' | null | undefined;
+  phase: Job['progress_phase'] | undefined;
   startedAt: number;
   durationSec?: number;
   now: number;
@@ -579,7 +581,7 @@ function ProgressBadge({
       data-testid="progress-badge"
       className="absolute left-2 top-2 rounded-full bg-scrim px-2.5 py-1 text-xs text-white backdrop-blur-glass"
     >
-      {percent}% 生成中
+      {round.progressPhase?.startsWith('queued:') ? `排队第 ${round.progressPhase.slice(7)} 位` : `${percent}% 生成中`}
     </span>
   );
 }

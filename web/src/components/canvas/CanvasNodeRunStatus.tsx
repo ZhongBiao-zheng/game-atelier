@@ -57,7 +57,7 @@ export function canvasNodeRunStateForJob(job: Job): CanvasNodeRunState {
   if (job.status === 'pending' || job.status === 'pending_confirm') {
     return {
       status: 'loading',
-      label: job.cancel_requested_at ? '正在停止…' : reversePrompt ? '正在分析提示词' : '正在生成',
+      label: job.cancel_requested_at ? '正在停止…' : reversePrompt ? '正在分析提示词' : job.progress_phase?.startsWith('queued:') ? `排队第 ${job.progress_phase.slice(7)} 位` : '正在生成',
       detail: job.cancel_requested_at ? '已请求停止，上游可能仍在执行' : null,
       job,
       reversePrompt,

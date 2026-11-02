@@ -33,6 +33,7 @@ interface MentionState {
 }
 
 interface CanvasPromptInputProps {
+  disabled?: boolean;
   value: string;
   references: readonly CanvasMentionReference[];
   mentionsEnabled?: boolean;
@@ -48,6 +49,7 @@ interface CanvasPromptInputProps {
 }
 
 export function CanvasPromptInput({
+  disabled = false,
   value,
   references,
   mentionsEnabled = true,
@@ -229,7 +231,8 @@ export function CanvasPromptInput({
       )}
       <div
         ref={editorRef}
-        contentEditable
+        contentEditable={!disabled}
+      aria-disabled={disabled}
         suppressContentEditableWarning
         role="combobox"
         aria-label="提示词"

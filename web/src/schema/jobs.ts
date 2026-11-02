@@ -8,6 +8,7 @@ export type JobKind = 'text' | 'image' | 'video' | 'audio';
 export type Namespace = 'studio' | 'canvas';
 
 export interface JobParams {
+  workflow_inputs?: Record<string, string | number | boolean | null>;
   size_mode?: 'auto' | 'ratio' | 'custom';
   custom_size?: string;
   size?: string;
@@ -200,7 +201,7 @@ export interface Job {
   // 2026-06-10: retry-job 克隆 failed job 时指回原 job_id — 与 schemas.py 同步
   retry_of?: string | null;
   // 2026-06-12: 出图进度真实卡点（视频 caller 回写；Web 只读）— 与 schemas.py 同步
-  progress_phase?: 'sent' | 'downloading' | null;
+  progress_phase?: 'sent' | 'downloading' | `queued:${number}` | null;
   // 2026-07-08: 出图完成时间戳（DONE/FAILED 终态回写；Web 只读）— 与 schemas.py 同步
   completed_at?: string | null;
   runner_started_at?: string | null;

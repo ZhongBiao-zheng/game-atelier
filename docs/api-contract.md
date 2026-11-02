@@ -1090,3 +1090,31 @@ Tuzi GPT Image 2.5 系列在 Studio 与 Canvas 提供五档质量：低/中/高/
 - `GET /api/models/durations` → `{ "<alias>:<model_id>": seconds }`。仅统计成功 Job；Studio 从 `submitted_at`、Canvas 从 `runner_started_at` 算至 `completed_at`，无有效起止时间跳过。每组按完成时间取最近 50 条，至少 3 条才返回中位数；`@auto:<route_id>` 合并成员记录后按同一规则计算。进程缓存有效期 60 秒，按 data root 隔离。
 - `POST /api/pricing/estimate-batch` 请求 `{ kind: "image" | "video", params: JobParams, items: [{ alias, model }] }`（最多 500 项），响应 `{ "<alias>:<model>": number | null }`，单位 CNY。复用 `estimate_submission`；未知渠道、模型或无法计价返回 null。`@auto` 只预览当前路由成员，不消费轮询游标。菜单请求设 `n: 1`，视频携带当前时长与分辨率；参数变化防抖 300ms。
 - 展示热度顺序由前端 `modelCatalog.ts` 管理，仅影响菜单及切换供应商的默认模型，不改变 `/api/models/order` 的路由优先级。Studio 的 Image/Video 标签滚动到同一列表内对应分段；Canvas 按节点模态展示供应商与模型两个控件。
+## ComfyUI 本机工作流（A 批，2026-11-02）
+
+- Provider 新增 `comfyui`：不需要密钥，base_url 默认 `http://127.0.0.1:8188`，
+  只允许 localhost / 127.0.0.1 根地址。通用 Key API 不得直接修改其 models。
+- ModelSpec / KeyModel 新增可选 `workflow_inputs: WorkflowInput[] | null`。
+  null 时不序列化，空数组表示工作流没有暴露输入，普通模型响应保持原样。
+- WorkflowInput：`id, label, type, node_id, class_type, field, default, min?, max?, step?,
+  options: [{value,label}], required`。type 为 prompt / text / int / float / boolean /
+  select / seed / image / mask；prompt 和 mask 最多一个，image 按声明顺序对应参考图。
+- JobParams 新增 `workflow_inputs: Record<string, string | number | boolean | null>`，
+  只允许普通参数和种子值；prompt、图片、mask 仍使用现有专用字段。seed 的 null 表示随机。
+  未声明参数、越界值、错误类型和非法选项直接拒绝。固定种子要求 n=1。
+- Job.progress_phase 扩展为 `sent | downloading | queued:<正整数> | null`。
+  前端将 queued:N 显示为「排队第 N 位」。终态仍清空。
+
+本机管理接口（需要本机会话和管理权限，未挂载到网关）：
+
+| 方法 | 路径 | 内容 |
+| --- | --- | --- |
+| POST | `/api/comfyui/connection` | `{base_url}` → `{devices: [{name,vram_total}]}` |
+| GET | `/api/comfyui/{alias}/workflows` | `{workflows: Workflow[]}` |
+| POST | `/api/comfyui/{alias}/inspect` | `{api_workflow, previous_id?}` → `{inputs,candidates,tagged,warnings,unmapped}` |
+| POST | `/api/comfyui/{alias}/workflows` | `{name,api_workflow,inputs,source_filename?,identifier?,timeout_seconds?}` → Workflow |
+| DELETE | `/api/comfyui/{alias}/workflows/{identifier}` | 204 |
+
+Workflow 包含 `id, alias, name, source_filename, imported_at, api_workflow, inputs,
+timeout_seconds`；超时默认 1800 秒，允许 1–86400 秒。inspect 不写盘；无 in: 标题时
+只给候选建议，由管理员选择后保存。重新导入按显示名、节点类型、字段匹配，未匹配项显式确认。

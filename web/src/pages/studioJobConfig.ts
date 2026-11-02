@@ -64,6 +64,7 @@ export function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
   const p = job.params ?? {};
   return {
     prompt: job.prompt ?? '',
+    ...(p.workflow_inputs != null ? { workflowInputs: p.workflow_inputs } : {}),
     kind: isVideo ? 'video' : 'image',
     alias: job.alias,
     provider: job.provider,

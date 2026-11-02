@@ -1,3 +1,5 @@
+import { WorkflowParameters } from '@/components/studio/WorkflowParameters';
+import type { WorkflowInput } from '@/api/keys';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -130,6 +132,7 @@ export function CanvasModelPicker({ choices, alias, model, onSelect, params = {}
 }
 
 export function CanvasImageSettings({
+  workflowInputs,
   caps,
   model,
   baseUrl,
@@ -139,6 +142,7 @@ export function CanvasImageSettings({
   portalContainerRef,
 }: {
   caps: ImageControlCaps;
+  workflowInputs?: WorkflowInput[] | null;
   model: string;
   baseUrl?: string | null;
   params: JobParams;
@@ -146,6 +150,7 @@ export function CanvasImageSettings({
 } & ToolbarPopoverMenuProps) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
+  if (workflowInputs != null) return <WorkflowParameters inputs={workflowInputs} params={params} onPatch={onPatch} menuDirection={menuDirection} portalContainerRef={portalContainerRef} />;
   const count = caps.family === 'midjourney'
     ? 4
     : Math.max(1, Math.min(caps.maxCount ?? 4, Number(params.n) || 1));

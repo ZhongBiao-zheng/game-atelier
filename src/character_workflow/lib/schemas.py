@@ -146,6 +146,7 @@ class EditInput(BaseModel):
 
 class JobParams(BaseModel):
     model_config = ConfigDict(extra="allow")
+    workflow_inputs: dict[str, str | int | float | bool | None] | None = None
     size: str | None = None
     size_mode: Literal["auto", "ratio", "custom"] | None = None
     custom_size: str | None = Field(default=None, max_length=40)
@@ -349,7 +350,7 @@ class Job(BaseModel):
     retry_of: str | None = None
     # 2026-06-12: 出图进度真实卡点（视频 caller 经 job_runner 回写；Web 不能改）。
     # sent=任务已全部提交上游；downloading=任务成功、产物下载中。终态时清空。
-    progress_phase: Literal["sent", "downloading"] | None = None
+    progress_phase: str | None = Field(default=None, pattern=r"^(sent|downloading|queued:[1-9][0-9]*)$")
     # 2026-07-08: 出图完成时间戳（update_job_status 在 DONE/FAILED 终态回写；Web 不能改）。
     # Studio 卡片用它算出图耗时（completed_at − submitted_at）+ 展示生成时间。旧 job 无此字段=None。
     completed_at: str | None = None
@@ -655,6 +656,7 @@ class CanvasGenerationDraft(BaseModel):
 # Content Version，所以全部路径类字段都不在名单里；新增控件时必须同时把字段加进这里。
 CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     "image": frozenset({
+        "workflow_inputs",
         "n", "size", "size_mode", "custom_size", "ratio", "resolution", "quality",
         "creation_asset_source_title",
         # 多角度生成由服务端写进结果 Draft，浏览器会原样回传，必须放行。

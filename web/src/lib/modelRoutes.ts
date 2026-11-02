@@ -44,6 +44,11 @@ export function withAutoProvider(keys: KeyView[], routes: ModelRoute[]): KeyView
   const auto = autoProviderView(routes.map(route => ({
     ...route, members: route.members.filter(member => aliases.has(member.alias)),
   })).filter(route => route.members.length > 0));
+  if (auto) auto.models = auto.models.map(model => {
+    const member = model.members?.[0];
+    const source = available.find(key => key.alias === member?.alias)?.models.find(item => item.id === member?.model_id);
+    return source?.workflow_inputs != null ? { ...model, workflow_inputs: source.workflow_inputs } : model;
+  });
   return auto ? [auto, ...available] : available;
 }
 
@@ -96,6 +101,8 @@ export function resolveChannel(
 
 /** 有成员时取全部成员能力的交集（「自动」、局域网 Atelier）；其余就是该 KEY 自己的能力。 */
 export function selectionImageCaps(key: KeyView | undefined, modelId: string): ImageControlCaps {
+  const workflow = key?.models.find(model => model.id === modelId)?.workflow_inputs;
+  if (workflow != null) return { ...imageControlCaps(modelId, 'comfyui'), maxRefImages: workflow.filter(input => input.type === 'image').length };
   const members = selectionMembers(key, key?.models.find(model => model.id === modelId));
   if (!members?.length) return imageControlCaps(modelId, key?.provider, key?.base_url, key?.billing_group);
   return intersectImageCaps(members.map(memberCaps));

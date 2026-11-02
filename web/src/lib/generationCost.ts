@@ -256,6 +256,7 @@ function estimateDashScopeVideo(request: GenerationCostRequest): number | null {
 export function estimateGenerationCost(request: GenerationCostRequest): number | null {
   if (!request.model?.id || !request.provider) return null;
 
+  if (request.kind === 'image' && request.provider.provider === 'comfyui') return 0;
   if (request.kind === 'image' && request.provider.provider === 'chatgpt' && request.model.id === 'gpt-image-2') return 0;
 
   if (request.kind === 'image' && request.provider.provider === 'evolink') {

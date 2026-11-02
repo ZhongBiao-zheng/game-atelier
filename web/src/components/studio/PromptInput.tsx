@@ -1,3 +1,4 @@
+import { WorkflowParameters } from './WorkflowParameters';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -317,6 +318,8 @@ export function PromptInput({
   ).map(model => ({ key: provider!, model }));
   // 模型不在当前列表时模型位空着、不能生成，不偷偷换成第一个模型：换类型后的收敛由上层做。
   const selectedModel = models.find((item) => item.id === model);
+  const workflowInputs = selectedModel?.workflow_inputs;
+  const noWorkflowPrompt = workflowInputs != null && !workflowInputs.some(input => input.type === 'prompt');
   const isOmni = isVideo && videoMode === 'omni' && Boolean(videoCaps);
   // @引用开放给两类入口：视频「全能参考」(omni)，以及图片图生图（MJ 除外）。@ 提交时只剩
   // 「图N」字面量（见 serializeMentions），能不能吃到取决于模型是否按输入顺序理解序号：
@@ -414,9 +417,10 @@ export function PromptInput({
 
   // 外部改写（重编号 / 再次编辑回填 / 提交清空）→ 重建 DOM；光标语义已失效，聚焦时落到末尾。
   useEffect(() => {
-    if (text === lastSynced.current) return;
-    renderDom(text);
-    lastSynced.current = text;
+    const rendered = noWorkflowPrompt ? '' : text;
+    if (rendered === lastSynced.current) return;
+    renderDom(rendered);
+    lastSynced.current = rendered;
     const root = editorRef.current;
     if (root && focusEmptyVariable(root)) return;
     if (root && document.activeElement === root) {
@@ -429,7 +433,7 @@ export function PromptInput({
         sel.addRange(r);
       }
     }
-  }, [text, renderDom]);
+  }, [text, renderDom, noWorkflowPrompt]);
 
   // 视频抽帧是异步的：thumb 到位后原地补进已渲染的 chip，不重建 DOM（保光标）。
   useEffect(() => {
@@ -602,6 +606,7 @@ export function PromptInput({
     sizeModelRef.current = identity;
     const context = sizeContext(providers, provider, selectedModel.id);
     const normalized = normalizeImageSizeParams(context.modelId, context.provider, context.baseUrl, sizeParams, context.caps);
+    if (changedModel) normalized.workflow_inputs = undefined;
     const modeChanged = hasImageSizeSelection(sizeParams) && imageSizeMode(normalized) !== imageSizeMode(sizeParams);
     if (!modeChanged && (changedModel || initialize) && imageSizeMode(normalized) === 'custom' && !imageSizeError(normalized, context.modelId)) {
       const pixels = normalizeImagePixelSize(normalized.size!, context.modelId, context.baseUrl);
@@ -642,9 +647,9 @@ export function PromptInput({
     (videoCaps?.maxFrames ?? 0) >= 2 &&
     !videoFrames?.first &&
     Boolean(videoFrames?.last);
-  const variableError = promptVariableError(text);
+  const variableError = noWorkflowPrompt ? null : promptVariableError(text);
   const canSubmit =
-    Boolean(provider && selectedModel && text.trim() && !disabled) && !lastFrameOnlyBlocked
+    Boolean(provider && selectedModel && (text.trim() || noWorkflowPrompt) && !disabled) && !lastFrameOnlyBlocked
       && !variableError
       && (isVideo || !imageSizeError(sizeParams, selectedModel?.id));
   const pickerParams = { image: { ...sizeParams, quality,
@@ -673,17 +678,17 @@ export function PromptInput({
   }, [refImagesLimit, referenceImages, onReferenceImagesChange]);
 
   const submit = useCallback(() => {
-    if (promptVariableError(text)) {
+    if (!noWorkflowPrompt && promptVariableError(text)) {
       if (editorRef.current) focusEmptyVariable(editorRef.current, true);
       return;
     }
     // @图1 → 图1：API 按序号自然语言绑定素材，@ 不出现在最终 prompt 里。
-    const template = serializeMentions(text).trim();
+    const template = noWorkflowPrompt ? '' : serializeMentions(text).trim();
     const trimmed = resolvePromptVariables(template).trim();
-    if (!trimmed || disabled || !provider || !selectedModel || lastFrameOnlyBlocked || (!isVideo && imageSizeError(sizeParams, selectedModel?.id))) return;
+    if ((!trimmed && !noWorkflowPrompt) || disabled || !provider || !selectedModel || lastFrameOnlyBlocked || (!isVideo && imageSizeError(sizeParams, selectedModel?.id))) return;
     if (promptVariableParts(template).some(part => part.kind === 'variable')) onSubmit(trimmed, template);
     else onSubmit(trimmed);
-  }, [text, disabled, provider, selectedModel, onSubmit, lastFrameOnlyBlocked, isVideo, sizeParams]);
+  }, [text, disabled, provider, selectedModel, onSubmit, lastFrameOnlyBlocked, isVideo, sizeParams, noWorkflowPrompt]);
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (variableInput(e.target)) return;
@@ -814,7 +819,7 @@ export function PromptInput({
       }`}
     >
       <div className={`flex min-h-0 gap-2 transition-[height] duration-300 ${collapsed ? 'h-[60px]' : 'h-[92px]'}`}>
-        {!isMj && (isOmni || (!isVideo && onReferenceImagesChange)) && (
+        {!isMj && (isOmni || (!isVideo && onReferenceImagesChange && maxRef > 0)) && (
           <div
             data-testid="reference-images-panel"
             className={`shrink-0 self-stretch relative overflow-visible transition-transform duration-300 origin-left ${collapsed ? 'scale-80' : ''}`}
@@ -897,7 +902,7 @@ export function PromptInput({
                           {/* @引用编号徽标：与 mentionItems 的「图N」一致，用户看着它敲 @。 */}
                           {mentionsEnabled && (
                             <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-scrim px-1 text-xs leading-4 text-foreground/90">
-                              {mentionItems[i]?.label}
+                              {workflowInputs?.filter(input => input.type === 'image')[i]?.label ?? mentionItems[i]?.label}
                             </span>
                           )}
                         </div>
@@ -958,13 +963,14 @@ export function PromptInput({
         )}
         <div
           ref={editorRef}
-          contentEditable
+          contentEditable={!noWorkflowPrompt}
+          aria-disabled={noWorkflowPrompt}
           suppressContentEditableWarning
           role="textbox"
           aria-multiline="true"
           aria-label="生图 prompt"
           aria-describedby={variableError ? variableErrorId : undefined}
-          data-placeholder={mentionsEnabled && stackItems.length > 0 ? '开始一段灵感对话，输入 @ 引用参考素材...' : '开始一段灵感对话...'}
+          data-placeholder={noWorkflowPrompt ? '此工作流无需提示词' : mentionsEnabled && stackItems.length > 0 ? '开始一段灵感对话，输入 @ 引用参考素材...' : '开始一段灵感对话...'}
           onInput={onEditorInput}
           onKeyDown={onKey}
           onKeyUp={rememberEditorRange}
@@ -1264,7 +1270,7 @@ export function PromptInput({
             />
           )}
 
-          <div ref={countRef} data-testid="count-control-wrap" className="relative shrink-0">
+          {workflowInputs != null ? <WorkflowParameters inputs={workflowInputs} params={{ ...sizeParams, n: count }} menuDirection={menuDirection} onPatch={patch => { onSizeParamsChange?.(patch); if (patch.n != null) onCountChange?.(patch.n); }} /> : <div ref={countRef} data-testid="count-control-wrap" className="relative shrink-0">
             <ControlButton
               active={openPanel === 'count'}
               aria-label="选择出图数量"
@@ -1296,7 +1302,7 @@ export function PromptInput({
                   />
                 )}
             </ToolbarPopover>
-          </div>
+          </div>}
             </>
           )}
           {isVideo && videoCaps && (

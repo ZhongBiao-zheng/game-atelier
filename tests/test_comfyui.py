@@ -1,0 +1,242 @@
+import copy
+import json
+from pathlib import Path
+
+import pytest
+
+from character_workflow.lib import comfyui_workflows as workflows, keys
+from character_workflow.lib.callers import comfyui
+from character_workflow.lib.comfyui_schema import WorkflowInput, local_base_url
+from character_workflow.lib.generation_pricing import estimate_cost_cny
+from tests.fake_comfyui import FakeComfyUI
+
+FIXTURES = Path(__file__).parent / "fixtures" / "comfyui"
+
+
+@pytest.fixture
+def host(monkeypatch):
+    monkeypatch.setattr(comfyui, "POLL_INTERVAL", 0.001)
+    with FakeComfyUI() as server:
+        keys.add_key(keys.KeySpec(alias="local", provider="comfyui", base_url=server.url,
+                                  created_at="2026-11-02"))
+        yield server
+
+
+def imported(name="lora"):
+    graph = json.loads((FIXTURES / f"{name}.json").read_text())
+    inspected = workflows.inspect_workflow("local", graph)
+    inputs = [WorkflowInput(**item) for item in inspected["inputs"]]
+    return workflows.save_workflow("local", name=name, api_workflow=graph, inputs=inputs)
+
+
+@pytest.mark.parametrize("url", ["http://192.168.1.2:8188", "http://localhost.evil:8188",
+                                "http://user@localhost", "http://localhost/path", "file:///tmp",
+                                "http://127.0.0.1?next=evil", "http://[::1]"])
+def test_loopback_only(url):
+    with pytest.raises(ValueError):
+        local_base_url(url)
+
+
+def test_import_storage_and_serialization(host):
+    workflow = imported()
+    assert workflows.read_workflow("local", workflow.id) == workflow
+    model = keys.find_by_alias("local").models[0]
+    assert model.workflow_inputs == workflow.inputs
+    assert "workflow_inputs" not in keys.ModelSpec(id="gpt-image-2", name="GPT").model_dump()
+    assert estimate_cost_cny(kind="image", provider="comfyui", model_id=workflow.id) == 0
+    workflows.delete_workflow("local", workflow.id)
+    assert not keys.find_by_alias("local").models
+    with pytest.raises(ValueError):
+        workflows.read_workflow("local", workflow.id)
+
+
+@pytest.mark.parametrize("graph,message", [
+    ({"nodes": [], "links": []}, "Export"),
+    ({"1": {"class_type": "PreviewImage", "inputs": {}}}, "SaveImage"),
+    ({"1": {"class_type": "SaveVideo", "inputs": {}}}, "暂不支持"),
+])
+def test_bad_formats(graph, message):
+    with pytest.raises(ValueError, match=message):
+        workflows.validate_api(graph)
+
+
+def test_tagged_prompt_wins_over_an_earlier_untagged_clip(host):
+    graph = json.loads((FIXTURES / "lora.json").read_text())
+    negative = {"class_type": "CLIPTextEncode", "inputs": {"text": "negative"}}
+    result = workflows.inspect_workflow("local", {"negative": negative, **graph})
+    prompts = [item for item in result["inputs"] if item["type"] == "prompt"]
+    assert len(prompts) == 1
+    assert prompts[0]["node_id"] == "6"
+
+
+def test_stale_mapping_and_link_input_fail(host):
+    workflow = imported()
+    for change in ("missing", "class", "link"):
+        graph = copy.deepcopy(workflow.api_workflow)
+        item = workflow.inputs[0]
+        if change == "missing":
+            del graph[item.node_id]
+        elif change == "class":
+            graph[item.node_id]["class_type"] = "Other"
+        else:
+            graph[item.node_id]["inputs"][item.field] = ["9", 0]
+        with pytest.raises(ValueError, match="工作流已变更"):
+            workflows.validate_mappings(graph, workflow.inputs)
+
+
+def test_values_reject_unknown_type_range_and_selection(host):
+    workflow = imported()
+    with pytest.raises(ValueError, match="未声明"):
+        workflows.validate_values(workflow.inputs, {"arbitrary": "value"})
+    item = next(item for item in workflow.inputs if item.type == "float")
+    for value in ("0.5", True, 999, float("nan")):
+        with pytest.raises(ValueError):
+            workflows.validate_values(workflow.inputs, {item.id: value})
+
+
+def test_http_execution_queue_seed_prefix_outputs(host, tmp_path):
+    workflow = imported()
+    phases = []
+    paths = comfyui.render(prompt="cat", model=workflow.id, alias="local", n=2,
+                           output_dir=tmp_path, on_phase=phases.append, job_id="test-job")
+    assert len(paths) == 2 and all(Path(path).read_bytes() == host.png for path in paths)
+    assert "queued:1" in phases
+    graphs = [item["prompt"] for item in host.prompts.values()]
+    assert graphs[0]["3"]["inputs"]["seed"] != graphs[1]["3"]["inputs"]["seed"]
+    assert graphs[0]["9"]["inputs"]["filename_prefix"] == "atelier/test-job"
+    assert graphs[0]["6"]["inputs"]["text"] == "cat"
+
+
+def test_image_upload_no_prompt_and_missing_required(host, tmp_path):
+    workflow = imported("upscale")
+    with pytest.raises(ValueError, match="请填写"):
+        comfyui.render(prompt="", model=workflow.id, alias="local", output_dir=tmp_path)
+    image = tmp_path / "input.png"
+    image.write_bytes(host.png)
+    assert comfyui.render(prompt="", model=workflow.id, alias="local", output_dir=tmp_path,
+                          params={"reference_images": [str(image)]})
+    assert host.uploads
+    assert next(iter(host.prompts.values()))["prompt"]["1"]["inputs"]["image"] == "uploaded-1.png"
+
+
+def test_execution_error(host, tmp_path):
+    workflow = imported()
+    host.mode = "error"
+    with pytest.raises(ValueError, match="fake execution error"):
+        comfyui.render(prompt="cat", model=workflow.id, alias="local", output_dir=tmp_path)
+
+
+def test_timeout_deletes_only_owned_pending_task(host, tmp_path, monkeypatch):
+    workflow = imported()
+    host.mode = "timeout"
+    now = iter([0, 0, 1801])
+    from types import SimpleNamespace
+    monkeypatch.setattr(comfyui, "time", SimpleNamespace(monotonic=lambda: next(now), sleep=lambda _: None))
+    with pytest.raises(TimeoutError):
+        comfyui.render(prompt="cat", model=workflow.id, alias="local", output_dir=tmp_path)
+    assert host.deleted == ["prompt-1"]
+    assert not host.interrupted
+
+
+def test_cancel_never_interrupts_foreign_prompt(host):
+    from character_workflow.lib.comfyui_client import ComfyUIClient
+    with ComfyUIClient(host.url) as client:
+        comfyui._cancel(client, "not-running")
+    assert not host.deleted and not host.interrupted
+
+
+def test_cancel_owned_running_prompt(host):
+    from character_workflow.lib.comfyui_client import ComfyUIClient
+    host.foreign_running = False
+    host.polls = host.delay + 1
+    with ComfyUIClient(host.url) as client:
+        result = client.post("/prompt", json={"prompt": {}, "client_id": "test"})
+        host.polls = host.delay + 1
+        comfyui._cancel(client, result["prompt_id"])
+    assert host.interrupted == [result["prompt_id"]]
+    assert not host.deleted
+
+
+def test_reimport_migrates_node_ids_and_reports_lost(host):
+    workflow = imported()
+    graph = copy.deepcopy(workflow.api_workflow)
+    graph["new-prompt"] = graph.pop("6")
+    result = workflows.inspect_workflow("local", graph, workflow.id)
+    assert not result["unmapped"]
+    assert next(item for item in result["inputs"] if item["type"] == "prompt")["node_id"] == "new-prompt"
+    graph["new-prompt"]["_meta"]["title"] = "in:changed"
+    assert workflows.inspect_workflow("local", graph, workflow.id)["unmapped"]
+
+
+def test_runner_persists_phases_and_zero_cost(host):
+    from character_workflow.lib.job_runner import run_job
+    from character_workflow.lib.jobs import list_jobs
+    from viewer_server.routes import _StudioJobCreate, _create_user_job
+    workflow = imported()
+    job = _create_user_job(_StudioJobCreate(
+        prompt="cat", model=workflow.id, alias="local", params={"n": 1},
+    ), namespace="studio")
+    result = run_job(job.job_id)
+    assert result.status.value == "done", result.error
+    assert result.params.estimated_cost_cny == 0
+    assert result.completed_at is not None
+    assert len(list_jobs()) == 1
+
+
+def test_local_api_import_and_access_boundary(host):
+    from fastapi.testclient import TestClient
+    from tests.local_client import LocalTestClient
+    from viewer_server.server_app import build_app
+    app = build_app()
+    with TestClient(app, base_url="http://127.0.0.1") as anonymous:
+        assert anonymous.get("/api/comfyui/local/workflows").status_code == 401
+    with LocalTestClient(app, base_url="http://127.0.0.1") as client:
+        assert client.post("/api/keys", json={"alias": "second", "provider": "comfyui"}).status_code == 201
+        assert client.post("/api/comfyui/connection", json={"base_url": host.url}).json()["devices"]
+        graph = json.loads((FIXTURES / "lora.json").read_text())
+        inspected = client.post("/api/comfyui/local/inspect", json={"api_workflow": graph})
+        assert inspected.status_code == 200
+        saved = client.post("/api/comfyui/local/workflows", json={
+            "name": "local workflow", "api_workflow": graph, "inputs": inspected.json()["inputs"],
+        })
+        assert saved.status_code == 200, saved.text
+        identifier = saved.json()["id"]
+        assert client.patch("/api/keys/local", json={"models": []}).status_code == 422
+        assert client.delete(f"/api/comfyui/second/workflows/{identifier}").status_code == 422
+        assert client.delete(f"/api/comfyui/local/workflows/{identifier}").status_code == 204
+
+
+def test_canvas_preserves_workflow_values_and_runs(host):
+    from character_workflow.lib.canvas_projects import create_canvas_project
+    from character_workflow.lib.canvas_runs import submit_canvas_run, run_canvas_job
+    from character_workflow.lib.jobs import read_job
+    from tests.test_generation_recipe import NOW, _media_node, _save_nodes
+    workflow = imported()
+    strength = next(item for item in workflow.inputs if item.type == "float")
+    draft = {"mode": "image", "prompt": "cat", "alias": "local", "model": workflow.id,
+             "params": {"n": 1, "workflow_inputs": {strength.id: 0.45}}, "updated_at": NOW}
+    project = create_canvas_project("ComfyUI canvas")
+    document = _save_nodes(project.project_id, [_media_node("source", draft)], [])
+    job, _ = submit_canvas_run(project.project_id, "source", document.revision)
+    assert job.params.workflow_inputs == {strength.id: 0.45}
+    run_canvas_job(job.job_id)
+    assert read_job(job.job_id).status.value == "done", read_job(job.job_id).error
+    graph = next(iter(host.prompts.values()))["prompt"]
+    assert graph[strength.node_id]["inputs"][strength.field] == 0.45
+
+
+def test_canvas_without_prompt_ignores_previous_prompt(host):
+    from character_workflow.lib.canvas_projects import create_canvas_project
+    from character_workflow.lib.canvas_runs import submit_canvas_run
+    from tests.test_generation_recipe import NOW, _media_node, _save_nodes
+    workflow = imported()
+    workflow = workflows.save_workflow(
+        "local", name=workflow.name, identifier=workflow.id, api_workflow=workflow.api_workflow,
+        inputs=[item for item in workflow.inputs if item.type != "prompt"],
+    )
+    draft = {"mode": "image", "prompt": "old prompt", "alias": "local", "model": workflow.id,
+             "params": {"n": 1}, "updated_at": NOW}
+    project = create_canvas_project("No prompt")
+    document = _save_nodes(project.project_id, [_media_node("source", draft)], [])
+    job, _ = submit_canvas_run(project.project_id, "source", document.revision)
+    assert job.prompt == ""

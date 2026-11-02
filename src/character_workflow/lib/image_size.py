@@ -63,6 +63,10 @@ def normalize_image_size_params(key: KeySpec, model: str, params: dict[str, Any]
         model = channel_model.id
     result = {name: value for name, value in params.items() if value is not None}
     result.pop("custom_size", None)
+    if key.provider == "comfyui":
+        for field in ("size_mode", "size", "ratio", "resolution", "quality", "background"):
+            result.pop(field, None)
+        return result
     if key.provider == "chatgpt":
         if result.get("image_edit") or result.get("layer_decomposition"):
             raise ValueError("ChatGPT 订阅尚不支持局部编辑、扩图或分层")

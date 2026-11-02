@@ -1,6 +1,6 @@
 import type { KeyModel } from '@/api/keys';
 
-export type ProviderKind = 'official' | 'relay' | 'custom' | 'team' | 'subscription';
+export type ProviderKind = 'official' | 'relay' | 'custom' | 'team' | 'subscription' | 'local';
 type ApiModality = 'image' | 'video' | 'audio' | 'llm';
 
 /** One identity rule for presets, settings and generation controls. */
@@ -30,6 +30,7 @@ export interface ProviderPreset {
 }
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
+  { id: 'comfyui', value: 'comfyui', label: 'ComfyUI', kind: 'local', modalities: ['image'], defaultBaseUrl: 'http://127.0.0.1:8188', defaultModels: [] },
   { id: 'openai', value: 'openai', label: 'OpenAI', kind: 'official', modalities: ['image', 'llm'], homepageUrl: 'https://platform.openai.com', docsUrl: 'https://platform.openai.com/docs', apiKeyUrl: 'https://platform.openai.com/api-keys', defaultBaseUrl: 'https://api.openai.com/v1', defaultModels: [{ name: 'GPT Image 1', id: 'gpt-image-1' }, { name: 'GPT 5', id: 'gpt-5', modality: 'text', protocol: 'openai-responses', input_modalities: ['text'] }] },
   { id: 'seedream', value: 'seedream', label: 'Volcengine Ark', kind: 'official', modalities: ['image', 'llm'], homepageUrl: 'https://www.volcengine.com', docsUrl: 'https://www.volcengine.com/docs/82379/1399008', apiKeyUrl: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModels: [{ name: '图片 5.0', id: 'doubao-seedream-5-0-260128' }, { name: '豆包 Seed 1.8', id: 'doubao-seed-1-8-251228', modality: 'text', protocol: 'openai-chat', input_modalities: ['text'] }] },
   { id: 'tokendance', value: 'tokendance', label: 'TokenDance', kind: 'relay', modalities: ['image', 'video'], homepageUrl: 'https://tokendance.space', docsUrl: 'https://tokendance.space/docs/quickstart', apiKeyUrl: 'https://tokendance.space/keys', defaultBaseUrl: 'https://tokendance.space/gateway/v1', defaultModels: [{ name: 'Seedream 5.0 Lite', id: 'seedream-5.0-lite', modality: 'image', protocol: 'openai' }, { name: 'Seedream 5.0 Pro', id: 'seedream-5.0-pro', modality: 'image', protocol: 'ark' }, { name: 'Seedance 2.0', id: 'seedance-2.0', modality: 'video', protocol: 'seedance' }] },

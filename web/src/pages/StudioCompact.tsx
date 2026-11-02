@@ -213,7 +213,7 @@ export function StudioCompact() {
       ? MJ_IMAGES_PER_TASK
       : Math.min(caps.maxCount ?? 4, clampImageCount(overrideConfig?.n ?? count));
     const rawSizeParams: JobParams = overrideConfig
-      ? { size_mode: overrideConfig.sizeMode ?? 'ratio', size: overrideConfig.size, ratio: overrideConfig.ratio, resolution: overrideConfig.resolution }
+      ? { workflow_inputs: overrideConfig.workflowInputs, size_mode: overrideConfig.sizeMode ?? 'ratio', size: overrideConfig.size, ratio: overrideConfig.ratio, resolution: overrideConfig.resolution }
       : sizeParams;
     const preparedSize = prepareImageSizeSubmission(size.modelId, effectiveProvider, size.baseUrl, rawSizeParams, caps);
     if (preparedSize.error) {
@@ -251,6 +251,7 @@ export function StudioCompact() {
 
     // 控件隐藏的参数不写进 params（同 Studio.onSubmit）：openrouter 会把 resolution 当 API 参数发。
     const jobParams: JobParams = {
+      ...(effectiveProvider === 'comfyui' ? { workflow_inputs: effectiveSizeParams.workflow_inputs } : {}),
       ...(caps.ratios.length || caps.showCustomSize || caps.showAutoSize ? { size_mode: effectiveMode } : {}),
       ...(effectiveSize ? { size: effectiveSize } : {}),
       ...(effectiveRatio ? { ratio: effectiveRatio } : {}),
