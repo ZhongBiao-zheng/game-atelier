@@ -26,7 +26,12 @@ export function WorkflowParameters({ inputs, params, onPatch, menuDirection = 'u
       field.id === input.id ? value : values[field.id] ?? (field.type === 'seed' ? null : field.default)])),
     ...(input.type === 'seed' && value != null ? { n: 1 } : {}),
   });
-  return <div ref={anchor}>
+  return <div ref={anchor} onKeyDown={event => {
+    if (event.key !== 'Escape' || !open || event.defaultPrevented) return;
+    event.stopPropagation();
+    setOpen(false);
+    anchor.current?.querySelector('button')?.focus();
+  }}>
     <Button variant="outline" size="sm" aria-expanded={open} onClick={() => setOpen(!open)}><Settings2 size={14} aria-hidden />参数</Button>
     <ToolbarPopover open={open} onClose={() => setOpen(false)} anchorRef={anchor} direction={menuDirection}
       portalContainerRef={portalContainerRef} autoFocus className="max-h-[65vh] w-80 overflow-y-auto rounded-xl border border-border bg-card p-4">

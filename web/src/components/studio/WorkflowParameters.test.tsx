@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { WorkflowParameters } from './WorkflowParameters';
 import { PromptInput } from './PromptInput';
 import type { KeyView, WorkflowInput } from '@/api/keys';
@@ -15,6 +15,19 @@ const key: KeyView = { alias: 'local', provider: 'comfyui', base_url: 'http://12
   models: [{ id: 'comfyui-upscale', name: '放大', modality: 'image', workflow_inputs: [] }] };
 
 describe('ComfyUI generation controls', () => {
+  it('closes parameters on Escape and outside clicks inside a keyboard-handling parent', async () => {
+    render(<div onKeyDown={event => event.stopPropagation()}><WorkflowParameters inputs={[input]} params={{}} onPatch={vi.fn()} /></div>);
+    const trigger = screen.getByRole('button', { name: '参数' });
+    fireEvent.click(trigger);
+    fireEvent.keyDown(screen.getByRole('switch'), { key: 'Escape' });
+    await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'false'));
+    expect(trigger).toHaveFocus();
+    fireEvent.click(trigger);
+    await act(() => new Promise(resolve => setTimeout(resolve, 0)));
+    fireEvent.pointerDown(document.body);
+    await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'false'));
+  });
+
   it('blocks missing required images and masks before submission', () => {
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:test') });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
