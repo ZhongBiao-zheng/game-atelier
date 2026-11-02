@@ -15,7 +15,8 @@ POLL_INTERVAL = 1.5
 
 
 def _queue_ids(queue: dict, name: str) -> list[str]:
-    return [str(item[1]) for item in queue.get(name, []) if isinstance(item, list) and len(item) > 1]
+    rows = [item for item in queue.get(name, []) if isinstance(item, list) and len(item) > 1]
+    return [str(item[1]) for item in sorted(rows, key=lambda item: item[0])]
 
 
 def _cancel(client: ComfyUIClient, prompt_id: str) -> None:

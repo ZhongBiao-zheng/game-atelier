@@ -26,6 +26,7 @@ class FakeComfyUI(ThreadingHTTPServer):
         self.polls = 0
         self.delay = 2
         self.foreign_running = True
+        self.pending_queue = None
         stream = io.BytesIO()
         Image.new("RGB", (64, 64), "#669988").save(stream, format="PNG")
         self.png = stream.getvalue()
@@ -81,7 +82,8 @@ class Handler(BaseHTTPRequestHandler):
                 running, rows = rows[:1], rows[1:]
             elif state.polls > state.delay and rows and not state.foreign_running:
                 running, rows = rows[:1], rows[1:]
-            return self.respond({"queue_running": running, "queue_pending": rows})
+            return self.respond({"queue_running": running,
+                                 "queue_pending": state.pending_queue if state.pending_queue is not None else rows})
         if path.startswith("/history/"):
             state.polls += 1
             identifier = path.rsplit("/", 1)[-1]

@@ -138,6 +138,18 @@ def test_timeout_deletes_only_owned_pending_task(host, tmp_path, monkeypatch):
     assert not host.interrupted
 
 
+def test_queue_position_follows_submission_number_not_heap_array(host, tmp_path):
+    workflow = imported()
+    # A valid min-heap: the fourth array element belongs ahead of the third.
+    host.pending_queue = [[1, "earlier-1", {}, {}, []], [2, "earlier-2", {}, {}, []],
+                          [4, "prompt-1", {}, {}, []], [3, "earlier-3", {}, {}, []]]
+    phases = []
+    comfyui.render(prompt="cat", model=workflow.id, alias="local", output_dir=tmp_path,
+                   on_phase=phases.append)
+    assert "queued:4" in phases
+    assert "queued:3" not in phases
+
+
 def test_cancel_never_interrupts_foreign_prompt(host):
     from character_workflow.lib.comfyui_client import ComfyUIClient
     with ComfyUIClient(host.url) as client:
