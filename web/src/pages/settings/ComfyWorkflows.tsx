@@ -96,7 +96,7 @@ export function ComfyWorkflows({ alias }: { alias: string }) {
                 <Label className="space-y-1 text-xs">字段<Input value={item.field} onChange={e => patch(index, { field: e.target.value })} /></Label>
               </div>
               <div className="flex flex-wrap items-end gap-3">
-                {!['image', 'mask', 'seed'].includes(item.type) && <Label className="min-w-32 flex-1 space-y-1 text-xs">默认值
+                {!['prompt', 'image', 'mask', 'seed'].includes(item.type) && <Label className="min-w-32 flex-1 space-y-1 text-xs">默认值
                   {item.type === 'boolean' ? <Checkbox checked={item.default === true} onCheckedChange={value => patch(index, { default: value === true })} />
                     : <Input value={String(item.default ?? '')} type={['int', 'float'].includes(item.type) ? 'number' : 'text'} step="any" onChange={e => patch(index, { default: ['int', 'float'].includes(item.type) ? (e.target.value === '' ? null : Number(e.target.value)) : e.target.value })} />}
                 </Label>}
