@@ -20,7 +20,6 @@ export function WorkflowParameters({ inputs, params, onPatch, menuDirection = 'u
   const anchor = useRef<HTMLDivElement>(null);
   const fields = inputs.filter(input => !['prompt', 'image', 'mask'].includes(input.type));
   const values = params.workflow_inputs ?? {};
-  const fixedSeed = fields.some(input => input.type === 'seed' && values[input.id] != null);
   const patchValue = (input: WorkflowInput, value: string | number | boolean | null) => onPatch({
     workflow_inputs: Object.fromEntries(fields.map(field => [field.id,
       field.id === input.id
@@ -28,6 +27,7 @@ export function WorkflowParameters({ inputs, params, onPatch, menuDirection = 'u
         : values[field.id] ?? (field.type === 'seed' ? null : field.default)])),
     ...(input.type === 'seed' && value != null ? { n: 1 } : {}),
   });
+  if (!fields.length) return null;
   return <div ref={anchor} onKeyDown={event => {
     if (event.key !== 'Escape' || !open || event.defaultPrevented) return;
     event.stopPropagation();
@@ -56,9 +56,7 @@ export function WorkflowParameters({ inputs, params, onPatch, menuDirection = 'u
               </>}
           </div>;
         })}
-        <Label className="block space-y-2">张数<Select value={String(fixedSeed ? 1 : params.n ?? 1)} disabled={fixedSeed} onValueChange={value => onPatch({ n: Number(value) })}>
-          <SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{[1, 2, 3, 4].map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}</SelectContent>
-        </Select></Label>
+
       </div>
     </ToolbarPopover>
   </div>;

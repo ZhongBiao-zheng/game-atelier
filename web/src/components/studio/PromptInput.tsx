@@ -321,6 +321,7 @@ export function PromptInput({
   // 模型不在当前列表时模型位空着、不能生成，不偷偷换成第一个模型：换类型后的收敛由上层做。
   const selectedModel = models.find((item) => item.id === model);
   const workflowInputs = selectedModel?.workflow_inputs;
+  const fixedWorkflowSeed = workflowInputs?.some(input => input.type === 'seed' && sizeParams.workflow_inputs?.[input.id] != null) ?? false;
   const noWorkflowPrompt = workflowInputs != null && !workflowInputs.some(input => input.type === 'prompt');
   const workflowReferenceProblem = workflowReferenceError(workflowInputs, referenceImages.length, Boolean(sizeParams.mask_image));
   const isOmni = isVideo && videoMode === 'omni' && Boolean(videoCaps);
@@ -1275,13 +1276,14 @@ export function PromptInput({
             />
           )}
 
-          {workflowInputs != null ? <WorkflowParameters inputs={workflowInputs} params={{ ...sizeParams, n: count }} menuDirection={menuDirection} onPatch={patch => { onSizeParamsChange?.(patch); if (patch.n != null) onCountChange?.(patch.n); }} /> : <div ref={countRef} data-testid="count-control-wrap" className="relative shrink-0">
+          <div ref={countRef} data-testid="count-control-wrap" className="relative shrink-0">
             <ControlButton
               active={openPanel === 'count'}
               aria-label="选择出图数量"
+              disabled={fixedWorkflowSeed}
               onClick={() => setOpenPanel(openPanel === 'count' ? null : 'count')}
             >
-              <Images size={14} aria-hidden /> {isMj ? MJ_IMAGES_PER_TASK : Math.min(count, caps.maxCount ?? 4)} 张
+              <Images size={14} aria-hidden /> {fixedWorkflowSeed ? 1 : isMj ? MJ_IMAGES_PER_TASK : Math.min(count, caps.maxCount ?? 4)} 张
             </ControlButton>
             <ToolbarPopover
               open={openPanel === 'count'}
@@ -1307,7 +1309,8 @@ export function PromptInput({
                   />
                 )}
             </ToolbarPopover>
-          </div>}
+          </div>
+          {workflowInputs != null && <WorkflowParameters inputs={workflowInputs} params={{ ...sizeParams, n: count }} menuDirection={menuDirection} onPatch={patch => { onSizeParamsChange?.(patch); if (patch.n != null) onCountChange?.(patch.n); }} />}
             </>
           )}
           {isVideo && videoCaps && (

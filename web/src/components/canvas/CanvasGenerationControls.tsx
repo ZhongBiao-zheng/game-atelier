@@ -3,7 +3,7 @@ import type { WorkflowInput } from '@/api/keys';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Settings2 } from 'lucide-react';
+import { Images, Settings2 } from 'lucide-react';
 
 import { prefetchModelPickerMetrics } from '@/lib/useModelPickerMetrics';
 import { ModelPickerList } from '@/components/ModelPickerList';
@@ -150,8 +150,8 @@ export function CanvasImageSettings({
 } & ToolbarPopoverMenuProps) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
-  if (workflowInputs != null) return <WorkflowParameters inputs={workflowInputs} params={params} onPatch={onPatch} menuDirection={menuDirection} portalContainerRef={portalContainerRef} />;
-  const count = caps.family === 'midjourney'
+  const fixedWorkflowSeed = workflowInputs?.some(input => input.type === 'seed' && params.workflow_inputs?.[input.id] != null) ?? false;
+  const count = fixedWorkflowSeed ? 1 : caps.family === 'midjourney'
     ? 4
     : Math.max(1, Math.min(caps.maxCount ?? 4, Number(params.n) || 1));
   const summary = [
@@ -164,15 +164,17 @@ export function CanvasImageSettings({
   ].filter(Boolean).join(' · ');
 
   return (
+    <>
     <div ref={anchorRef} className="relative min-w-0">
       <Button variant="bare"
         type="button"
-        aria-label="图片设置"
+        aria-label={workflowInputs != null ? '选择出图数量' : '图片设置'}
+        disabled={fixedWorkflowSeed}
         aria-expanded={open}
         onClick={() => setOpen(value => !value)}
-        className="flex h-9 max-w-full items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="flex h-9 max-w-full items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        <Settings2 className="size-3.5 shrink-0" aria-hidden="true" />
+        <span aria-hidden="true">{workflowInputs != null ? <Images size={14} /> : <Settings2 size={14} />}</span>
         <span className="truncate">{summary}</span>
       </Button>
       <ToolbarPopover
@@ -221,6 +223,8 @@ export function CanvasImageSettings({
         </div>
       </ToolbarPopover>
     </div>
+    {workflowInputs != null && <WorkflowParameters inputs={workflowInputs} params={params} onPatch={onPatch} menuDirection={menuDirection} portalContainerRef={portalContainerRef} />}
+    </>
   );
 }
 

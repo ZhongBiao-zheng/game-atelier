@@ -65,6 +65,8 @@ describe('ComfyUI generation controls', () => {
     render(<PromptInput providers={[key]} providerAlias="local" model="comfyui-upscale" onSubmit={submit} />);
     expect(screen.getByRole('textbox', { name: '生图 prompt' })).toHaveAttribute('contenteditable', 'false');
     expect(screen.queryByRole('button', { name: '选择比例和分辨率' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '参数' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '选择出图数量' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: '提交生成' }));
     expect(submit).toHaveBeenCalledWith('');
     expect(canvasGenerateBlock({ mode: 'image', modelChoiceCount: 1, keyCount: 1,
@@ -75,5 +77,15 @@ describe('ComfyUI generation controls', () => {
     const providers = withAutoProvider([key], [{ id: 'comfyui-upscale', name: '放大', modality: 'image', mode: 'order', candidate_alias: 'local',
       members: [{ alias: 'local', provider: 'comfyui', base_url: key.base_url, model_id: 'comfyui-upscale', name: '放大', protocol: 'comfyui' }] }]);
     expect(providers[0].models[0].workflow_inputs).toEqual([]);
+  });
+
+  it('keeps a disabled one-image toolbar button when the workflow seed is fixed', () => {
+    const provider = { ...key, models: [{ ...key.models[0], workflow_inputs: [input] }] };
+    render(<PromptInput providers={[provider]} providerAlias="local" model="comfyui-upscale"
+      count={4} sizeParams={{ workflow_inputs: { seed: 42 } }} onSubmit={vi.fn()} />);
+    expect(screen.getByRole('button', { name: '选择出图数量' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '选择出图数量' })).toHaveTextContent('1 张');
+    fireEvent.click(screen.getByRole('button', { name: '参数' }));
+    expect(screen.queryByText('张数')).not.toBeInTheDocument();
   });
 });
