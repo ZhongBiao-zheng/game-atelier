@@ -198,6 +198,12 @@ def inspect_workflow(alias: str, workflow: dict, previous_id: str | None = None)
             if item.type == "prompt" and (not tagged or title.startswith("in:")):
                 prompt_seen = True
             spec = fields.get(field, [])
+            if spec and spec[0] in ("INT", "FLOAT") and item.type in {"int", "float"}:
+                default = item.default
+                if spec[0] == "INT" and type(default) is float and default.is_integer():
+                    default = int(default)
+                item = WorkflowInput(**{**item.model_dump(), "type": spec[0].lower(),
+                                        "default": default})
             if spec and isinstance(spec[0], list) and item.type not in {"image", "mask"}:
                 options = [{"value": v, "label": str(v)} for v in spec[0]
                            if type(v) in {str, int, float, bool}]

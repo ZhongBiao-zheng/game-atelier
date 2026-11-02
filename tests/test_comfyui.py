@@ -69,6 +69,37 @@ def test_tagged_prompt_wins_over_an_earlier_untagged_clip(host):
     assert prompts[0]["node_id"] == "6"
 
 
+@pytest.mark.parametrize("class_type", ["LoraLoader", "LoraLoaderModelOnly", "CustomStrength"])
+def test_float_metadata_overrides_integer_default_through_execution(host, tmp_path, class_type):
+    graph = json.loads((FIXTURES / "lora.json").read_text())
+    graph["2"]["class_type"] = class_type
+    graph["2"]["inputs"]["strength_model"] = 1
+    inspected = workflows.inspect_workflow("local", graph)
+    inputs = [WorkflowInput(**item) for item in inspected["inputs"]]
+    strength = next(item for item in inputs if item.field == "strength_model")
+    assert (strength.type, strength.default, strength.step) == ("float", 1, 0.01)
+    assert (strength.min, strength.max) == (-10, 10)
+    workflow = workflows.save_workflow("local", name="integer-default", api_workflow=graph,
+                                        inputs=inputs)
+    comfyui.render(prompt="cat", model=workflow.id, alias="local", output_dir=tmp_path,
+                   params={"workflow_inputs": {strength.id: 0.8}})
+    assert next(iter(host.prompts.values()))["prompt"]["2"]["inputs"]["strength_model"] == 0.8
+    with pytest.raises(ValueError, match="超出范围"):
+        workflows.validate_value(strength, 11)
+
+
+def test_int_metadata_overrides_integral_float_default(host):
+    graph = json.loads((FIXTURES / "lora.json").read_text())
+    graph["3"]["inputs"]["steps"] = 20.0
+    inspected = workflows.inspect_workflow("local", graph)
+    steps = WorkflowInput(**next(item for item in inspected["candidates"]
+                                 if item["field"] == "steps"))
+    assert steps.type == "int" and type(steps.default) is int
+    assert workflows.validate_value(steps, 21) == 21
+    with pytest.raises(ValueError, match="类型"):
+        workflows.validate_value(steps, 20.5)
+
+
 def test_stale_mapping_and_link_input_fail(host):
     workflow = imported()
     for change in ("missing", "class", "link"):
