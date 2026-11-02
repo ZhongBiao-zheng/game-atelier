@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Hint } from '@/components/ui/tooltip';
 
 const TYPES: WorkflowInput['type'][] = ['prompt', 'text', 'int', 'float', 'boolean', 'select', 'seed', 'image', 'mask'];
 const LABELS = ['提示词', '文本', '整数', '小数', '开关', '下拉', '种子', '图片', '遮罩'];
@@ -72,7 +73,7 @@ export function ComfyWorkflows({ alias }: { alias: string }) {
       <DialogContent className="flex max-h-[85vh] max-w-5xl flex-col">
         <DialogTitle>{draft?.id ? '编辑工作流' : '导入工作流'}</DialogTitle>
         {draft && <>
-          <div className="min-h-0 space-y-4 overflow-y-auto">
+          <div className="min-h-0 space-y-4 overflow-y-auto p-2">
             <div className="grid grid-cols-2 gap-4"><Label className="space-y-2">名称<Input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} /></Label>
               <Label className="space-y-2">超时（秒）<Input type="number" min={1} max={86400} value={draft.timeout_seconds} onChange={e => setDraft({ ...draft, timeout_seconds: Number(e.target.value) })} /></Label></div>
             {inspection?.warnings.map(warning => <p key={warning} role="status" className="text-xs text-muted-foreground">{warning}</p>)}
@@ -80,12 +81,16 @@ export function ComfyWorkflows({ alias }: { alias: string }) {
               <Checkbox checked={accepted} onCheckedChange={value => setAccepted(value === true)} />移除无法匹配的输入：{inspection.unmapped.join('、')}
             </Label>}
             <div className="space-y-3">{draft.inputs.map((item, index) => <div key={item.id} className="space-y-2 rounded-lg border border-border p-3">
+              <div className="flex items-center justify-end gap-3">
+                <Label className="flex items-center gap-2 text-xs"><Checkbox checked={item.required} onCheckedChange={value => patch(index, { required: value === true })} />必填</Label>
+                <Button variant="ghost" size="sm" onClick={() => setDraft({ ...draft, inputs: draft.inputs.filter((_, i) => i !== index) })}>删除输入</Button>
+              </div>
               <div className="grid grid-cols-2 items-end gap-3 sm:grid-cols-4">
                 <Label className="space-y-1 text-xs">类型<Select value={item.type} onValueChange={type => patch(index, { type: type as WorkflowInput['type'], default: null })}>
                   <SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{TYPES.map((type, i) => <SelectItem key={type} value={type}>{LABELS[i]}</SelectItem>)}</SelectContent>
                 </Select></Label>
                 <Label className="space-y-1 text-xs">显示名<Input value={item.label} onChange={e => patch(index, { label: e.target.value })} /></Label>
-                <Label className="space-y-1 text-xs">节点 ID<Input value={item.node_id} onChange={e => {
+                <Label className="space-y-1 text-xs"><span className="flex min-w-0 items-center gap-2">节点 ID<Hint label={item.class_type}><span className="truncate font-mono text-muted-foreground">{item.class_type}</span></Hint></span><Input value={item.node_id} onChange={e => {
                   const node = draft.api_workflow[e.target.value]; patch(index, { node_id: e.target.value, class_type: node?.class_type ?? '' });
                 }} /></Label>
                 <Label className="space-y-1 text-xs">字段<Input value={item.field} onChange={e => patch(index, { field: e.target.value })} /></Label>
@@ -96,8 +101,6 @@ export function ComfyWorkflows({ alias }: { alias: string }) {
                     : <Input value={String(item.default ?? '')} type={['int', 'float'].includes(item.type) ? 'number' : 'text'} step="any" onChange={e => patch(index, { default: ['int', 'float'].includes(item.type) ? (e.target.value === '' ? null : Number(e.target.value)) : e.target.value })} />}
                 </Label>}
                 {['int', 'float', 'seed'].includes(item.type) && (['min', 'max', 'step'] as const).map((name, i) => <Label key={name} className="w-24 space-y-1 text-xs">{['最小值', '最大值', '步长'][i]}<Input type="number" step="any" value={item[name] ?? ''} onChange={e => patch(index, { [name]: e.target.value === '' ? null : Number(e.target.value) })} /></Label>)}
-                <Label className="flex items-center gap-2 text-xs"><Checkbox checked={item.required} onCheckedChange={value => patch(index, { required: value === true })} />必填</Label>
-                <Button variant="ghost" size="sm" onClick={() => setDraft({ ...draft, inputs: draft.inputs.filter((_, i) => i !== index) })}>删除输入</Button>
               </div>
               {item.type === 'select' && <Label className="block space-y-1 text-xs">选项（每行：值 | 显示名）<Textarea value={item.options.map(option => `${option.value} | ${option.label}`).join('\n')} onChange={e => patch(index, { options: e.target.value.split('\n').map(line => {
                 const [value, label] = line.split('|').map(part => part.trim()); return { value, label: label || value };
