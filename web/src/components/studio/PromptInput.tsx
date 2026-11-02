@@ -5,7 +5,7 @@ import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowUp, BookmarkPlus, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Video, X } from 'lucide-react';
+import { ArrowUp, BookmarkPlus, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Video, Workflow, X } from 'lucide-react';
 import { prefetchModelPickerMetrics } from '@/lib/useModelPickerMetrics';
 import { Segmented, SegmentedItem } from '@/components/ui/segmented';
 import { ModelPickerList } from '@/components/ModelPickerList';
@@ -1188,7 +1188,7 @@ export function PromptInput({
               onClick={() => setOpenPanel(openPanel === 'model' ? null : 'model')}
               disabled={!provider || models.length === 0}
             >
-              <ModelBrandIcon brand={modelBrand(selectedModel?.id ?? '')} size={14} /> {selectedModel ? modelDisplayName(selectedModel) : models.length > 0 ? '选择模型' : '未配置模型'}
+              {selectedModel?.id.startsWith('comfyui-') ? <Workflow size={14} aria-hidden /> : <ModelBrandIcon brand={modelBrand(selectedModel?.id ?? '')} size={14} />} {selectedModel ? modelDisplayName(selectedModel) : models.length > 0 ? '选择模型' : '未配置模型'}
             </ControlButton>
             <ToolbarPopover
               open={openPanel === 'model'}

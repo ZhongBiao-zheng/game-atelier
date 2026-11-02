@@ -3,7 +3,7 @@ import type { WorkflowInput } from '@/api/keys';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Images, Settings2 } from 'lucide-react';
+import { Images, Settings2, Workflow } from 'lucide-react';
 
 import { prefetchModelPickerMetrics } from '@/lib/useModelPickerMetrics';
 import { ModelPickerList } from '@/components/ModelPickerList';
@@ -112,7 +112,7 @@ export function CanvasModelPicker({ choices, alias, model, onSelect, params = {}
         onPointerEnter={() => void prefetchModelPickerMetrics(models, pickerParams)}
         onFocus={() => void prefetchModelPickerMetrics(models, pickerParams)}
         onClick={() => setOpen(open === 'model' ? null : 'model')} className={buttonClass}>
-        <ModelBrandIcon brand={modelBrand(selected?.model.id ?? '')} size={14} />
+        {selected?.model.id.startsWith('comfyui-') ? <Workflow size={14} aria-hidden /> : <ModelBrandIcon brand={modelBrand(selected?.model.id ?? '')} size={14} />}
         <span className="truncate">{selected ? modelDisplayName(selected.model) : '选择模型'}</span>
       </Button>
       <ToolbarPopover open={open === 'model'} onClose={() => setOpen(null)} anchorRef={modelRef}

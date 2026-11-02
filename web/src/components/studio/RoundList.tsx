@@ -1,7 +1,7 @@
 import type { Job, JobParams } from '@/schema/jobs';
 import { type ButtonHTMLAttributes, forwardRef, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Bookmark, BookmarkPlus, Download, Eye, EyeOff, Film, Heart, Info, Music, Pencil, Share2, Square, Trash2 } from 'lucide-react';
+import { AlertTriangle, Bookmark, BookmarkPlus, Download, Eye, EyeOff, Film, Heart, Info, Music, Pencil, Share2, Square, Trash2, Workflow } from 'lucide-react';
 
 import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
@@ -149,7 +149,7 @@ function SpecChips({ config, reuseParameter, testId, children }: {
         const apply = typeof result === 'function' ? result : undefined;
         return <MetaTag key={parameter} className="inline-flex items-center gap-1"
           onClick={apply ?? (() => undefined)} disabled={!apply} disabledReason={typeof result === 'string' ? result : undefined}>
-          {parameter === 'model' && <ModelBrandIcon brand={modelBrand(config.model)} size={12} />}
+          {parameter === 'model' && (config.model?.startsWith('comfyui-') ? <Workflow size={12} aria-hidden /> : <ModelBrandIcon brand={modelBrand(config.model)} size={12} />)}
           {label}
         </MetaTag>;
       })}
