@@ -32,7 +32,7 @@ export function ProviderRow({ row, overdue, pending, onEdit, onToggle }: {
       className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
       <span className="block truncate text-sm font-medium">{row.provider === 'chatgpt' ? vendor : row.alias}</span>
       <Hint label={row.base_url ?? ''}><span className="mt-1 block truncate text-xs text-muted-foreground">
-        {[row.provider === 'custom' ? '自定义' : vendor, providerHost(row), `${row.models?.length ?? 0} 个模型`].filter(Boolean).join(' · ')}
+        {[row.provider === 'custom' ? '自定义' : vendor, providerHost(row), `${row.models?.length ?? 0} 个${row.provider === 'comfyui' ? '工作流' : '模型'}`].filter(Boolean).join(' · ')}
       </span></Hint>
     </Button>
     <div className="order-last flex w-full items-center justify-between gap-3 pl-13 text-xs sm:order-none sm:w-auto sm:pl-0">

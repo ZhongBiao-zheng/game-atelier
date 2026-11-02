@@ -479,7 +479,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
               {(initial?.api_key_url || preset.apiKeyUrl) && <a href={initial?.api_key_url || preset.apiKeyUrl} target="_blank" rel="noreferrer" className="whitespace-nowrap text-xs text-primary">获取密钥 ↗</a>}
             </div>
             </>}
-            <span className="pt-2 text-xs text-muted-foreground">模型</span>
+            <span className="pt-2 text-xs text-muted-foreground">{isComfy ? '工作流' : '模型'}</span>
             <div className="min-w-0 space-y-3">
               {isComfy ? (editing ? <ComfyWorkflows alias={initial!.alias!} /> : <p className="py-2 text-sm text-muted-foreground">保存后导入工作流</p>) : isSubscription ? <p className="py-2 text-sm">GPT Image</p> : isGateway ? <>
                 <Button variant="ghost" size="sm" type="button" onClick={connectGateway} disabled={!baseUrl.trim() || (!editing && !accessKey.trim()) || connecting}>{connecting ? '连接中...' : gatewayModels.length ? '重新同步' : '连接网关'}</Button>

@@ -49,7 +49,7 @@ export function ComfyWorkflows({ alias }: { alias: string }) {
       const file = e.target.files?.[0]; e.target.value = '';
       if (file) void act(() => uploadFile(file));
     }} />
-    <Button variant="outline" size="sm" disabled={busy} onClick={() => { replacing.current = null; upload.current?.click(); }}>导入工作流</Button>
+    <Button variant="outline" disabled={busy} onClick={() => { replacing.current = null; upload.current?.click(); }}>导入工作流</Button>
     {!items.length && <p className="text-xs text-muted-foreground">导入 ComfyUI 的 API 格式 JSON</p>}
     <ul className="divide-y divide-border">{items.map(item => <li key={item.id} className="flex flex-wrap items-center gap-2 py-2">
       <div className="min-w-0 flex-1"><p className="truncate text-sm">{item.name}</p><p className="text-xs text-muted-foreground">{item.inputs.length} 个输入 · {new Date(item.imported_at).toLocaleDateString('zh-CN')}</p></div>
