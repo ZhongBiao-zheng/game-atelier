@@ -42,7 +42,7 @@ export function WorkflowParameters({ inputs, params, onPatch, menuDirection = 'u
           const value = values[input.id] ?? (input.type === 'seed' ? null : input.default);
           const id = `workflow-param-${input.id}`;
           return <div key={input.id} className="space-y-2">
-            <Label htmlFor={id}>{input.label}</Label>
+            <Label htmlFor={id} className="text-xs text-muted-foreground">{input.label}</Label>
             {input.type === 'boolean' ? <Switch id={id} checked={value === true} onCheckedChange={checked => patchValue(input, checked)} />
               : input.type === 'select' ? <Select value={String(value ?? '')} onValueChange={value => {
                 const option = input.options.find(option => String(option.value) === value);
@@ -51,7 +51,7 @@ export function WorkflowParameters({ inputs, params, onPatch, menuDirection = 'u
               : input.type === 'text' ? <Textarea id={id} value={String(value ?? '')} maxLength={40000} onChange={e => patchValue(input, e.target.value)} />
               : <>
                 {input.type === 'seed' && <Label className="flex items-center gap-2 text-xs"><Switch checked={value != null} onCheckedChange={checked => patchValue(input, checked ? 0 : null)} />{value == null ? '随机' : '固定'}</Label>}
-                {(input.type !== 'seed' || value != null) && <Input id={id} type="number" value={value == null ? '' : Number(value)} min={input.min ?? (input.type === 'seed' ? 0 : undefined)} max={input.max ?? (input.type === 'seed' ? Number.MAX_SAFE_INTEGER : undefined)} step={input.step ?? (input.type === 'float' ? 'any' : 1)} onChange={e => patchValue(input, e.target.value === '' ? null : Number(e.target.value))} />}
+                {(input.type !== 'seed' || value != null) && <Input id={id} type="number" className="[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" value={value == null ? '' : Number(value)} min={input.min ?? (input.type === 'seed' ? 0 : undefined)} max={input.max ?? (input.type === 'seed' ? Number.MAX_SAFE_INTEGER : undefined)} step={input.step ?? (input.type === 'float' ? 'any' : 1)} onChange={e => patchValue(input, e.target.value === '' ? null : Number(e.target.value))} />}
                 {input.type !== 'seed' && input.min != null && input.max != null && <Slider aria-label={input.label} min={input.min} max={input.max} step={input.step ?? (input.type === 'float' ? 0.01 : 1)} value={[Number(value ?? input.min)]} onValueChange={([value]) => patchValue(input, value)} />}
               </>}
           </div>;
