@@ -60,7 +60,7 @@ export function Tasks({ onFinished, gatewayAlias }: { onFinished: () => void; ga
   function row(task: GatewayTask, preview = false) {
     return <li key={task.task_id} className="space-y-2 border-t border-border py-3 text-xs">
       <div className="flex flex-wrap gap-x-3 gap-y-1">
-        <KindBadge kind={task.kind} /><span>{task.key_name}</span><Hint label={task.route_id}><span className="max-w-64 truncate">{task.route_id}</span></Hint>
+        <KindBadge kind={task.kind} /><span>{task.key_name}</span><Hint label={task.route_id}><span className="max-w-64 truncate">{task.workflow_name ?? task.route_id}</span></Hint>
         <span>{task.member_trail.length ? task.member_trail.join(' → ') : task.member_alias ?? '—'}</span>
         <span className="text-muted-foreground">{task.phase?.startsWith('queued:') ? `排队第 ${task.phase.slice(7)} 位` : PHASES[task.phase ?? task.status] ?? task.phase}</span>
         <span className={`tabular-nums ${preview ? 'text-muted-foreground' : 'text-primary'}`}>{preview ? date(task.updated_at) : `${Math.max(0, Math.floor((now - Date.parse(task.created_at)) / 1000))} 秒`}</span>

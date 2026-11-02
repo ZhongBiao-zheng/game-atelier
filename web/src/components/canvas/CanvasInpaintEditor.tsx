@@ -69,8 +69,10 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
   const { scale, origin } = viewport;
   const fingerprint = JSON.stringify({ strokes, prompt, selected, count, quality, resolution, workflowValues });
   const savedFingerprint = useRef(fingerprint);
-  const cost = useGenerationEstimate(choice?.key.alias, choice?.model ?? '',
-    { ...params, image_edit: { mode: 'inpaint' } }, open);
+  // Workflows run on the local ComfyUI and are always free; skip the estimate round trip.
+  const estimate = useGenerationEstimate(choice?.key.alias, choice?.model ?? '',
+    { ...params, image_edit: { mode: 'inpaint' } }, open && !workflowInputs);
+  const cost = workflowInputs ? 0 : estimate;
   const blocker = !choice ? '请选择可用的编辑模型' : !ready ? '图片加载中' : initialData?.active_run_id ? '正在生成'
     : size.error ? size.error : !strokes.length ? '先涂抹要修改的区域' : (mj || requiredPrompt) && !prompt.trim() ? '写下要改成什么' : null;
 

@@ -138,7 +138,7 @@ export interface GatewayTask {
   member_alias: string | null; member_trail: string[]; phase: string | null;
   status: 'pending' | 'running' | 'done' | 'failed' | 'canceled';
   created_at: string; updated_at: string; prompt: string | null; n: number;
-  outputs: number; output_types: string[]; error: string | null;
+  outputs: number; output_types: string[]; error: string | null; workflow_name?: string | null;
 }
 export type GatewayMembers = import('@/schema/modelRouteStatus').ModelRouteMemberStatusResponse;
 export async function fetchGatewayTasks(scope: 'active' | 'recent', alias?: string) {

@@ -167,10 +167,22 @@ _lock = threading.RLock()
 _running: dict[str, str] = {}  # task_id → key_id
 
 
+def _workflow_name(task: GatewayTask) -> str | None:
+    # Workflow route ids are opaque comfyui-<uuid>; the admin list needs the imported name.
+    if task.member_provider != "comfyui" or not task.member_alias:
+        return None
+    from character_workflow.lib.keys import find_by_alias
+
+    key = find_by_alias(task.member_alias)
+    return next((model.name for model in key.models if model.id == task.member_model_id),
+                None) if key else None
+
+
 def task_snapshot(task: GatewayTask) -> dict:
     return {**task.model_dump(include={"task_id", "kind", "key_name", "route_id", "member_alias",
             "member_trail", "phase", "status", "created_at", "updated_at", "n", "output_types", "error"}),
-            "prompt": task.prompt if task.kind != "text" else None, "outputs": len(task.outputs)}
+            "prompt": task.prompt if task.kind != "text" else None, "outputs": len(task.outputs),
+            "workflow_name": _workflow_name(task)}
 
 
 def _save(task: GatewayTask) -> GatewayTask:
