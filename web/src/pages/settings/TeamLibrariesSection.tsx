@@ -1,3 +1,7 @@
+import { getGatewayShareState, setGatewayShare, type GatewayShareState } from '@/api/gatewayLibraries';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { HelpCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Copy, Folder, FolderOpen, FolderX, MoreHorizontal, Plus, RotateCw, Trash2, X } from 'lucide-react';
@@ -96,6 +100,8 @@ function checkedList<T>(value: T[]): T[] {
 }
 
 export function TeamLibrariesSection() {
+  const [sharing, setSharing] = useState<GatewayShareState | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [mounts, setMounts] = useState<TeamLibraryView[] | null>(null);
   const [displayName, setDisplayName] = useState<string | null | undefined>(undefined);
@@ -121,6 +127,7 @@ export function TeamLibrariesSection() {
     const fail = (cause: unknown) => { if (!cancelled) setError(message(cause)); };
     void listCanvasProjects(true).then(list => { if (!cancelled) setProjects(checkedList(list)); }).catch(fail);
     void reload(() => cancelled).catch(fail);
+    void getGatewayShareState().then(state => { if (!cancelled) setSharing(state); }).catch(fail);
     void fetchProfile().then(profile => { if (!cancelled) setDisplayName(profile.display_name); }).catch(() => {});
     return () => { cancelled = true; };
   }, [reload]);
@@ -135,6 +142,7 @@ export function TeamLibrariesSection() {
       if (cause instanceof ProfileRequiredError) setSignatureOpen(true);
     } finally {
       await reload().catch(cause => setError(message(cause)));
+      await getGatewayShareState().then(setSharing).catch(cause => setError(message(cause)));
       setBusy(false);
     }
   }
@@ -220,6 +228,15 @@ export function TeamLibrariesSection() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+          </div>
+          <div className="flex items-center gap-2 border-t border-border px-4 py-3">
+            <Label htmlFor={`gateway-share-${library.library_id}`} className="flex-1 text-sm">通过网关共享</Label>
+            {!sharing?.gateway_enabled && <Hint label="请先开启网关"><Button size="icon" variant="ghost" className="size-7" aria-label="网关共享说明"><HelpCircle className="size-4" /></Button></Hint>}
+            <Switch id={`gateway-share-${library.library_id}`} checked={sharing?.shared_library_ids.includes(library.library_id) ?? false}
+              disabled={busy || shareBusy || !sharing?.gateway_enabled} onCheckedChange={enabled => {
+                setShareBusy(true); setError(null);
+                void setGatewayShare(library.library_id, enabled).then(setSharing).catch(cause => setError(message(cause))).finally(() => setShareBusy(false));
+              }} />
           </div>
           <div className="flex flex-wrap items-center gap-1.5 border-t border-border px-4 py-3">
             <span className="mr-1.5 text-xs text-muted-foreground">挂到</span>

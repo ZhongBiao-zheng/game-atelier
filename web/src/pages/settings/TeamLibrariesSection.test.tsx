@@ -1,3 +1,5 @@
+import { getGatewayShareState, setGatewayShare } from '@/api/gatewayLibraries';
+vi.mock('@/api/gatewayLibraries', () => ({ getGatewayShareState: vi.fn(), setGatewayShare: vi.fn() }));
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
@@ -52,6 +54,7 @@ const view: TeamLibraryView = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getGatewayShareState).mockResolvedValue({ gateway_enabled: true, shared_library_ids: [] });
   mockProjects.mockResolvedValue([
     { project_id: 'p1', name: '买牌三国' }, { project_id: 'p2', name: '列车短片' }, { project_id: 'p3', name: '空项目' },
   ] as never);
@@ -240,4 +243,19 @@ describe('TeamLibrariesSection', () => {
     await act(async () => { resolveInitial([]); });
     expect(screen.getByRole('listitem', { name: '美术共享盘' })).toBeInTheDocument();
   });
+});
+
+it('共享开关持久化，网关未开启时禁用', async () => {
+  vi.mocked(setGatewayShare).mockResolvedValue({ gateway_enabled: true, shared_library_ids: [view.library_id] });
+  const rendered = render(<TeamLibrariesSection />);
+  const toggle = await screen.findByRole('switch', { name: '通过网关共享' });
+  await waitFor(() => expect(toggle).toBeEnabled());
+  fireEvent.click(toggle);
+  await waitFor(() => expect(setGatewayShare).toHaveBeenCalledWith(view.library_id, true));
+  expect(toggle).toBeChecked();
+  rendered.unmount();
+  vi.mocked(getGatewayShareState).mockResolvedValue({ gateway_enabled: false, shared_library_ids: [] });
+  render(<TeamLibrariesSection />);
+  expect(await screen.findByRole('switch', { name: '通过网关共享' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '网关共享说明' })).toBeInTheDocument();
 });
