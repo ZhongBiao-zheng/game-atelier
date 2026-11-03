@@ -294,7 +294,7 @@ describe('CreationAssetPanel', () => {
     expect(screen.queryByPlaceholderText('搜索标题、正文或标签')).not.toBeInTheDocument();
   });
 
-  it('falls back to prompts when the project behind the team tab disappears', async () => {
+  it('keeps the gateway team browser when the local project disappears', async () => {
     mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset] });
     const view = render(
       <CreationAssetPanel
@@ -312,8 +312,7 @@ describe('CreationAssetPanel', () => {
       <CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />,
     );
 
-    expect(await screen.findByPlaceholderText('搜索标题、正文或标签')).toBeInTheDocument();
-    expect(screen.queryByTestId('team-panel')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('team-panel')).toHaveAttribute('data-project-id', '');
   });
 
   it('lets Studio pick a canvas project for the team tab without scoping personal assets', async () => {
@@ -336,12 +335,12 @@ describe('CreationAssetPanel', () => {
     expect(await screen.findByTestId('team-panel')).toHaveAttribute('data-project-id', 'canvas-b');
   });
 
-  it('hides the team tab without a project', async () => {
+  it('keeps the team tab for gateway browsing without a project', async () => {
     mocks.list.mockResolvedValue({ revision: 1, assets: [] });
     render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
     await screen.findByRole('tab', { name: '提示词' });
-    expect(screen.queryByRole('tab', { name: '团队' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '团队' })).toBeInTheDocument();
   });
 
   it('previews video and audio media with native players', async () => {

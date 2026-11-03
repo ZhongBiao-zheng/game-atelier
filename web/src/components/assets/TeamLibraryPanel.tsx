@@ -1,3 +1,5 @@
+import { GatewayLibraryBrowser, GatewayLibraryHelp, useGatewayLibrarySources } from './GatewayLibraryBrowser';
+import type { GatewayLibrarySelection } from '@/api/gatewayLibraries';
 import { TeamPromptPreviewGallery } from './TeamPromptPreviewGallery';
 import { formatGenerationCost } from '@/lib/generationCost';
 import {
@@ -131,6 +133,9 @@ export function TeamLibraryPanel({
   initialTeamLibraryId,
   className,
 }: TeamLibraryPanelProps) {
+  const remote = useGatewayLibrarySources();
+  const [remoteLibrary, setRemoteLibrary] = useState<GatewayLibrarySelection | null>(null);
+  const remoteAvailable = !!remoteLibrary && remote.sources.some(source => source.gateway_alias === remoteLibrary.alias && source.libraries.some(lib => lib.id === remoteLibrary.id));
   const [libraries, setLibraries] = useState<TeamLibraryView[]>([]);
   const [libraryId, setLibraryId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -170,6 +175,7 @@ export function TeamLibraryPanel({
 
   useEffect(() => {
     let alive = true;
+    if (!projectId) { setLibraries([]); setLibraryId(null); return; }
     void listTeamLibraries(projectId)
       .then(list => {
         if (!alive) return;
@@ -205,7 +211,7 @@ export function TeamLibraryPanel({
   useEffect(() => {
     setRelated([]);
     setRelatedError(false);
-    if (!canReproduce) return;
+    if (!canReproduce || !projectId) return;
     let alive = true;
     void (relatedSha256 ? listRelatedTeamAssets(projectId, relatedSha256) : listRelatedTeamAssets(projectId))
       .then(list => { if (alive) setRelated(list); })
@@ -353,11 +359,11 @@ export function TeamLibraryPanel({
     [node, typed],
   );
 
-  if (libraries.length === 0) {
+  if (libraries.length === 0 && remote.sources.length === 0 && !remoteLibrary) {
     return (
       <div className={cn('grid place-items-center gap-3 p-8 text-center', className)}>
-        <p className="text-xs text-muted-foreground">这个画布还没有团队库</p>
-        <Button size="sm" variant="outline" onClick={() => setMountOpen(true)}>挂载</Button>
+        <div className="flex items-center gap-1"><p className="text-xs text-muted-foreground">这个画布还没有团队库</p><GatewayLibraryHelp /></div>
+        {projectId && <Button size="sm" variant="outline" onClick={() => setMountOpen(true)}>挂载</Button>}
         <MountTeamLibraryDialog open={mountOpen} currentProjectId={projectId} onClose={() => setMountOpen(false)}
           onMounted={() => setMountsVersion(version => version + 1)} />
       </div>
@@ -366,7 +372,7 @@ export function TeamLibraryPanel({
 
   return (
     <div className={cn('flex min-h-0 flex-col gap-3 p-3', className)}>
-      {(related.length > 0 || relatedError) && (
+      {!remoteLibrary && (related.length > 0 || relatedError) && (
         <div className="space-y-1.5">
           <p className="text-xs text-muted-foreground">相关配方</p>
           {relatedError && <p className="text-xs text-muted-foreground">读取失败</p>}
@@ -393,7 +399,7 @@ export function TeamLibraryPanel({
         </div>
       )}
 
-      {(error || profileError) && (
+      {!remoteLibrary && (error || profileError) && (
         <div role="alert" className="space-y-0.5 text-xs text-destructive">
           {error && <p>{error}</p>}
           {profileError && <p>读取显示名失败</p>}
@@ -403,30 +409,42 @@ export function TeamLibraryPanel({
       <Popover open={selectorOpen} onOpenChange={setSelectorOpen}>
         <PopoverTrigger asChild>
           <Button variant="outline" aria-label="团队库" className="h-10 w-full justify-start bg-card font-normal">
-            <Folder /><span className="min-w-0 flex-1 truncate text-left">{library?.name}</span>
-            <span className="max-w-24 truncate text-xs text-muted-foreground">{node?.name ?? '全部目录'}</span><ChevronDown />
+            <Folder /><span className="min-w-0 flex-1 truncate text-left">{remoteLibrary ? `${remoteLibrary.name} · ${remoteLibrary.owner_name}` : library?.name ?? '选择团队库'}</span>
+            <span className="max-w-24 truncate text-xs text-muted-foreground">{remoteLibrary ? '只读' : node?.name ?? '全部目录'}</span><ChevronDown />
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-80 space-y-1">
           {libraries.map(item => <Button key={item.library_id} variant="ghost" className="w-full justify-start"
-            aria-pressed={libraryId === item.library_id} onClick={() => { setNode(null); setLibraryId(item.library_id); setSelectorOpen(false); }}>
+            aria-pressed={libraryId === item.library_id} onClick={() => { setRemoteLibrary(null); setNode(null); setLibraryId(item.library_id); setSelectorOpen(false); }}>
             <Folder />{item.name}
           </Button>)}
-          <div className="max-h-64 space-y-1 overflow-y-auto border-t border-border pt-1" role="group" aria-label="目录">
+          {!remoteLibrary && libraries.length > 0 && <div className="max-h-64 space-y-1 overflow-y-auto border-t border-border pt-1" role="group" aria-label="目录">
             <Button variant="ghost" size="sm" className="w-full justify-start" aria-pressed={!node}
               onClick={() => { setNode(null); setSelectorOpen(false); }}>全部目录</Button>
             {tree.map(item => <Button key={`${item.group}:${item.name}`} variant="ghost" size="sm"
               className="w-full justify-start truncate pl-6" aria-pressed={node ? sameNode(node, item) : false}
               onClick={() => { setNode(item); setSelectorOpen(false); }}>{item.name}</Button>)}
+          </div>}
+          <div role="group" aria-label="同事共享" className="max-h-64 space-y-1 overflow-y-auto border-t border-border pt-1">
+            <div className="flex items-center gap-1 px-2 text-xs text-muted-foreground">同事共享<GatewayLibraryHelp /></div>
+            {remote.sources.map(source => source.unreachable
+              ? <p key={source.gateway_alias} className="px-2 py-1 text-xs text-muted-foreground">{source.gateway_alias} · 无法连接</p>
+              : source.libraries.map(item => <Button key={`${source.gateway_alias}:${item.id}`} variant="ghost" className="w-full justify-start"
+                onClick={() => { setRemoteLibrary({ ...item, alias: source.gateway_alias }); setViewing(null); setSelectorOpen(false); }}>
+                <span className="min-w-0 flex-1 truncate text-left">{item.name} · {item.owner_name}</span><span className="text-xs text-muted-foreground">只读</span>
+              </Button>))}
           </div>
         </PopoverContent>
       </Popover>
+      {remoteLibrary ? <GatewayLibraryBrowser key={`${remoteLibrary.alias}:${remoteLibrary.id}`} library={remoteLibrary}
+        available={remoteAvailable} revision={remote.revision} onRefresh={() => { void remote.refresh(); }}
+        onUnavailable={() => remote.remove(remoteLibrary)} /> : <>
       <div className="flex items-center gap-2">
         <InputGroup className="min-w-0 flex-1">
           <InputGroupAddon><Search aria-hidden="true" /></InputGroupAddon>
           <InputGroupInput aria-label="搜索团队库" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索" />
         </InputGroup>
-        <Button size="icon" variant="outline" aria-label="刷新" disabled={busy} onClick={rescan}><RefreshCw /></Button>
+        <Button size="icon" variant="outline" aria-label="刷新" disabled={busy} onClick={() => { rescan(); void remote.refresh(); }}><RefreshCw /></Button>
       </div>
       <div role="group" aria-label="类型" className="flex flex-wrap gap-2">
         {TYPE_FILTERS.filter(item => item.value !== 'audio' || entries.some(entry => entry.mime_type?.startsWith('audio/')) || typeFilter === 'audio')
@@ -450,7 +468,8 @@ export function TeamLibraryPanel({
           {cursor && <div className="pt-3 text-center"><Button size="sm" variant="outline" disabled={busy} onClick={loadMore}>更多</Button></div>}
         </div>
       )}
-      {viewing && libraryId && <Dialog open onOpenChange={open => { if (!open) setViewing(null); }}>
+      </>}
+      {!remoteLibrary && viewing && libraryId && <Dialog open onOpenChange={open => { if (!open) setViewing(null); }}>
         <DialogContent aria-describedby={undefined}>
           <DialogHeader><DialogTitle>{viewing.title}</DialogTitle></DialogHeader>
           {viewing.kind === 'prompt' ? <div className="min-h-0 space-y-3 overflow-y-auto">

@@ -2707,6 +2707,7 @@ describe('Studio 响应团队资产动作', () => {
       }
       if (href === '/api/creation-assets/gen-1/use') return ok(generationAsset(recipe()));
       if (href.startsWith('/api/canvas/project-options')) return ok([CANVAS, CANVAS_2]);
+      if (href === '/api/gateway-libraries') return ok([]);
       if (href === '/api/team-libraries') return ok(mounts);
       if (href === '/api/team-libraries?project_id=canvas-2') {
         return ok([libraryView('lib-other', 'canvas-2', '场景库'), libraryView('lib-art', 'canvas-2', '美术库')]);

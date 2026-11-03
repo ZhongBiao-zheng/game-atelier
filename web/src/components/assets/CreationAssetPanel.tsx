@@ -160,11 +160,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     ?? teamProjectChoices.find(target => target.projectId === pickedTeamProjectId)?.projectId
     ?? teamProjectChoices[0]?.projectId;
 
-  // 可用的画布项目消失时，团队 tab 和主体会同时消失，用户困在空面板里切不走。
-  useEffect(() => {
-    if (kind === 'team' && !teamProjectId) setKind('prompt');
-  }, [kind, teamProjectId]);
-
   useEffect(() => {
     if (!saveRequest) return;
     setKind(saveRequest.kind);
@@ -334,7 +329,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
               <TabsTrigger variant="line" value="prompt">提示词</TabsTrigger>
               <TabsTrigger variant="line" value="media">媒体</TabsTrigger>
               {projectId && <TabsTrigger variant="line" value="reference">参考库</TabsTrigger>}
-              {teamProjectId && <TabsTrigger variant="line" value="team">团队</TabsTrigger>}
+              <TabsTrigger variant="line" value="team">团队</TabsTrigger>
             </TabsList>
           </Tabs>
           {kind === 'team' && teamProjectId && teamProjectChoices.length > 1 && (
@@ -349,10 +344,10 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
               </Select>
             </div>
           )}
-          {kind === 'team' && teamProjectId && (
+          {kind === 'team' && (
             <TeamLibraryPanel
               key={teamProjectId}
-              projectId={teamProjectId}
+              projectId={teamProjectId ?? ''}
               onAdopted={(result, entry) => { void refresh(); onTeamAssetAdopted?.(result, entry); }}
               onReproduce={onReproduce ? asset => { onReproduce(asset); onClose(); } : undefined}
               relatedSha256={teamRelatedSha256}
