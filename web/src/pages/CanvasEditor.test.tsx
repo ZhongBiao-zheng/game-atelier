@@ -2638,7 +2638,7 @@ it('opens the reminder «look» action on the library it came from', async () =>
   act(() => {
     dispatchTeamAssetAction({ library_id: 'lib_0123456789abcdef', asset_id: 'ta-raw', action: 'open' });
   });
-  await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveTextContent('角色参考'));
+  await waitFor(() => expect(screen.getByRole('button', { name: '团队库' })).toHaveTextContent('角色参考'));
 });
 
 it('does not look up related recipes when inserting the dropped asset fails', async () => {

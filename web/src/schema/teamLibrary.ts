@@ -33,6 +33,8 @@ export interface TeamLibraryIndexEntry {
   cost_cny: number | null;
   /** 仅生成资产有值：配方参考内容的 sha256，按 order。 */
   input_sha256: string[];
+  /** 提示词列表正文，变量显示默认值。 */
+  prompt_text?: string | null;
 }
 
 /** 分享来源：Studio 某次出图的第 output_index 张（Job.output_paths 下标）、一条本机创作资产，

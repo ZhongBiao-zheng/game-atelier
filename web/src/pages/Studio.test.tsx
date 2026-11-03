@@ -2752,7 +2752,7 @@ describe('Studio 响应团队资产动作', () => {
     act(() => { dispatchTeamAssetAction({ library_id: 'lib-art', asset_id: 'ta_1', action: 'open' }); });
 
     await waitFor(() => expect(screen.getByLabelText('画布项目')).toHaveTextContent('画布二'));
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveTextContent('美术库'));
+    await waitFor(() => expect(screen.getByRole('button', { name: '团队库' })).toHaveTextContent('美术库'));
   });
 
   it('「看看」：没有画布挂着这个库时只给一行提示', async () => {

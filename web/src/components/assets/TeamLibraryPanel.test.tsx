@@ -1,5 +1,4 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { chooseOption } from '@/test/select';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TeamLibraryPanel } from './TeamLibraryPanel';
 import type { TeamLibraryIndexEntry, TeamLibraryView } from '@/schema/teamLibrary';
@@ -57,10 +56,26 @@ describe('TeamLibraryPanel', () => {
     api.listTeamAssets.mockResolvedValue({ entries: [raw, shared], next_cursor: null });
     render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
     expect(await screen.findByText('董卓 待机')).toBeInTheDocument();
+    expect(screen.queryByText('concept')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '团队库' }));
     expect(screen.getByText('concept')).toBeInTheDocument();      // 目录树：原始文件按目录
     expect(screen.getByText('老王')).toBeInTheDocument();          // 目录树：分享内容按作者
+    if (screen.queryByRole('group', { name: '目录' })) fireEvent.click(screen.getByRole('button', { name: '团队库' }));
     fireEvent.change(screen.getByPlaceholderText('搜索'), { target: { value: '董' } });
     await waitFor(() => expect(api.listTeamAssets).toHaveBeenLastCalledWith(library.library_id, expect.objectContaining({ q: '董' })));
+  });
+  it('shows prompt text and filters directories from the selector', async () => {
+    const prompt: TeamLibraryIndexEntry = { ...shared, id: 'ta_prompt', kind: 'prompt', title: '角色提示词', mime_type: 'text/plain', prompt_text: '石墨线稿，柔和逆光' };
+    api.listTeamLibraries.mockResolvedValue([library]);
+    api.listTeamAssets.mockResolvedValue({ entries: [raw, prompt], next_cursor: null });
+    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    expect(await screen.findByText('石墨线稿，柔和逆光')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '音频' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '团队库' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'concept' }));
+    expect(screen.getByText('castle.png')).toBeInTheDocument();
+    expect(screen.queryByText('角色提示词')).toBeNull();
+    expect(screen.getByRole('button', { name: '团队库' })).toHaveTextContent('concept');
   });
   it('adopts on click and reports created flag', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
@@ -77,7 +92,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamLibraries.mockResolvedValue([other, library]);
     api.listTeamAssets.mockResolvedValue({ entries: [], next_cursor: null });
     render(<TeamLibraryPanel projectId="p1" initialTeamLibraryId={library.library_id} onAdopted={vi.fn()} />);
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveTextContent(library.name));
+    await waitFor(() => expect(screen.getByRole('button', { name: '团队库' })).toHaveTextContent(library.name));
     await waitFor(() => expect(api.listTeamAssets).toHaveBeenCalledWith(library.library_id, expect.anything()));
     expect(api.listTeamAssets).not.toHaveBeenCalledWith('lib_other', expect.anything());
   });
@@ -86,7 +101,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamLibraries.mockResolvedValue([other, library]);
     api.listTeamAssets.mockResolvedValue({ entries: [], next_cursor: null });
     render(<TeamLibraryPanel projectId="p1" initialTeamLibraryId="lib_missing" onAdopted={vi.fn()} />);
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '团队库' })).toHaveTextContent('场景参考'));
+    await waitFor(() => expect(screen.getByRole('button', { name: '团队库' })).toHaveTextContent('场景参考'));
   });
   it('sets drag payload on cards', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
@@ -113,6 +128,7 @@ describe('TeamLibraryPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
     await waitFor(() => expect(api.listTeamAssets).toHaveBeenCalledTimes(2));
 
+    if (screen.queryByRole('group', { name: '目录' })) fireEvent.click(screen.getByRole('button', { name: '团队库' }));
     fireEvent.change(screen.getByPlaceholderText('搜索'), { target: { value: '董' } });
     await screen.findByText('董卓 待机');
 
@@ -224,10 +240,11 @@ describe('TeamLibraryPanel', () => {
     expect(screen.queryByText('相关配方')).toBeNull();
     expect(api.listRelatedTeamAssets).not.toHaveBeenCalled();
   });
-  it('shows the model on generation cards', async () => {
+  it('keeps the generation model available in the detail', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [generation], next_cursor: null });
     render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '查看 雪山白犬' }));
     expect(await screen.findByText('gpt-image-2')).toBeInTheDocument();
   });
   it('lists related recipes and reproduces from their own library', async () => {
@@ -290,7 +307,8 @@ describe('TeamLibraryPanel', () => {
     api.listTeamAssets.mockResolvedValue({ entries: [shared], next_cursor: null });
     render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
     expect(await screen.findByText('读取显示名失败')).toBeInTheDocument();
-    await chooseOption(screen.getByLabelText('团队库'), second.name);
+    fireEvent.click(screen.getByRole('button', { name: '团队库' }));
+    fireEvent.click(await screen.findByRole('button', { name: second.name }));
     await waitFor(() => expect(api.listTeamAssets).toHaveBeenLastCalledWith(second.library_id, {}));
     expect(screen.getByText('读取显示名失败')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '编辑' })).toBeNull();

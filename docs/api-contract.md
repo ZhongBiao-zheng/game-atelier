@@ -748,6 +748,9 @@ v2→v3 资产种类 `image` 改名 `media`，v3→v4 删掉每条资产的 `rec
 挂载时补的 `.atelier-library.json`（清单，含 `library_id`）。索引是本机缓存
 （`.runtime/team-libraries/<library_id>/index.json` 与 `thumbs/`），可随时删除重建，绝不写进挂载目录。
 
+提示词索引条目带可选 `prompt_text`（正文拼接，变量取默认值），供列表文字卡预览；
+其他类型与旧缓存不带该字段，刷新索引后补齐提示词正文。
+
 | 方法 | 路径 | 请求 | 响应 |
 |---|---|---|---|
 | GET | `/profile` | — | `{display_name: string \| null}` |

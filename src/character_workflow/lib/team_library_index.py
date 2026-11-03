@@ -171,6 +171,12 @@ def _shared_entry(root: Path, asset_dir: Path) -> TeamLibraryIndexEntry:
             [row.sha256 for row in sorted(snapshot.inputs, key=lambda row: row.order)]
             if snapshot and asset.kind == "generation" else []
         ),
+        prompt_text=(
+            "".join(
+                segment.text if segment.kind == "text" else segment.default_value
+                for segment in asset.prompt.segments
+            ) if asset.prompt else None
+        ),
     )
 
 

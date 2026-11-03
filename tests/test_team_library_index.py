@@ -556,3 +556,21 @@ def test_related_by_input_sha_hits_ready_generations_newest_first():
     assert [e.id for e in idx.related_by_input_sha(index, hit, limit=1)] == ["g_new"]
     assert idx.related_by_input_sha(index, hit, limit=0) == []
     assert idx.related_by_input_sha(index, "c" * 64) == []
+
+
+def test_prompt_index_includes_rendered_body_and_omits_it_for_media(tmp_path):
+    folder, mount = _mount(tmp_path)
+    asset_dir = _shared_asset(folder)
+    media = scan_and_cache(mount).entries[0]
+    assert 'prompt_text' not in media.model_dump()
+    body = json.loads((asset_dir / 'asset.json').read_text('utf-8'))
+    body.update(kind='prompt', media=None, prompt={
+        'kind': 'prompt', 'segments': [
+            {'kind': 'text', 'text': '绘制'},
+            {'kind': 'variable', 'name': '角色', 'default_value': '白犬'},
+        ],
+    })
+    (asset_dir / 'asset.json').write_text(json.dumps(body), 'utf-8')
+    entry = scan_and_cache(mount).entries[0]
+    assert entry.prompt_text == '绘制白犬'
+    assert idx.read_index(mount.library_id).entries[0].prompt_text == '绘制白犬'

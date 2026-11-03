@@ -2,11 +2,8 @@ import { formatGenerationCost } from '@/lib/generationCost';
 import {
   Copy,
   Download,
-  FileAudio,
-  FileImage,
-  FileText,
-  FileVideo,
-  FolderTree,
+  ChevronDown,
+  Folder,
   Pencil,
   RefreshCw,
   Search,
@@ -56,9 +53,11 @@ import {
   type TeamLibraryView,
   type TeamRelatedEntry,
 } from '@/schema/teamLibrary';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { AssetFilterPill } from './AssetFilterPill';
+import { AssetMasonry, mediaRatio, useMediaSizes, type MediaSize } from './AssetMasonry';
+import { AssetMediaTile } from './AssetMediaTile';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Hint } from '@/components/ui/tooltip';
 import { Label } from '@/components/ui/label';
 
@@ -110,12 +109,6 @@ function matchesType(entry: TeamLibraryIndexEntry, filter: TypeFilter): boolean 
   return (entry.mime_type ?? '').startsWith(`${filter}/`);
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
 /** 列表第一页的筛选参数：提示词走服务端 kind，其余类型在前端过滤。 */
 function firstPageFilters(typeFilter: TypeFilter, search: string) {
   return {
@@ -126,14 +119,6 @@ function firstPageFilters(typeFilter: TypeFilter, search: string) {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
-}
-
-function TypeIcon({ entry, className }: { entry: TeamLibraryIndexEntry; className?: string }) {
-  const mime = entry.mime_type ?? '';
-  if (entry.kind === 'prompt') return <FileText className={className} />;
-  if (mime.startsWith('video/')) return <FileVideo className={className} />;
-  if (mime.startsWith('audio/')) return <FileAudio className={className} />;
-  return <FileImage className={className} />;
 }
 
 export function TeamLibraryPanel({
@@ -150,6 +135,10 @@ export function TeamLibraryPanel({
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [node, setNode] = useState<TreeNode | null>(null);
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const [viewing, setViewing] = useState<TeamLibraryIndexEntry | null>(null);
+  const { sizes, measure } = useMediaSizes();
+  const mediaKey = (entry: TeamLibraryIndexEntry) => `${libraryId}:${entry.id}:${entry.updated_at}`;
   const [entries, setEntries] = useState<TeamLibraryIndexEntry[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -381,12 +370,12 @@ export function TeamLibraryPanel({
           {relatedError && <p className="text-xs text-muted-foreground">读取失败</p>}
           <div className="no-scrollbar flex gap-2 overflow-x-auto">
             {related.map(item => (
-              <Button variant="bare"
+              <Button variant="ghost"
                 key={`${item.library_id}:${item.entry.id}`}
                 type="button"
                 disabled={busy}
                 onClick={() => reproduce(item.library_id, item.entry)}
-                className="w-36 shrink-0 rounded-md border border-border bg-card px-2 py-1.5 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:opacity-50"
+                className="block h-auto w-36 shrink-0 rounded-md border border-border bg-card px-2 py-1.5 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:opacity-50"
               >
                 <Hint label={item.entry.title}><p className="truncate text-xs">{item.entry.title}</p></Hint>
                 <p className="truncate text-xs text-muted-foreground">
@@ -409,91 +398,71 @@ export function TeamLibraryPanel({
         </div>
       )}
 
+      <Popover open={selectorOpen} onOpenChange={setSelectorOpen}>
+        <PopoverTrigger asChild>
+          <Button variant="outline" aria-label="团队库" className="h-10 w-full justify-start bg-card font-normal">
+            <Folder /><span className="min-w-0 flex-1 truncate text-left">{library?.name}</span>
+            <span className="max-w-24 truncate text-xs text-muted-foreground">{node?.name ?? '全部目录'}</span><ChevronDown />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-80 space-y-1">
+          {libraries.map(item => <Button key={item.library_id} variant="ghost" className="w-full justify-start"
+            aria-pressed={libraryId === item.library_id} onClick={() => { setNode(null); setLibraryId(item.library_id); setSelectorOpen(false); }}>
+            <Folder />{item.name}
+          </Button>)}
+          <div className="max-h-64 space-y-1 overflow-y-auto border-t border-border pt-1" role="group" aria-label="目录">
+            <Button variant="ghost" size="sm" className="w-full justify-start" aria-pressed={!node}
+              onClick={() => { setNode(null); setSelectorOpen(false); }}>全部目录</Button>
+            {tree.map(item => <Button key={`${item.group}:${item.name}`} variant="ghost" size="sm"
+              className="w-full justify-start truncate pl-6" aria-pressed={node ? sameNode(node, item) : false}
+              onClick={() => { setNode(item); setSelectorOpen(false); }}>{item.name}</Button>)}
+          </div>
+        </PopoverContent>
+      </Popover>
       <div className="flex items-center gap-2">
-        {libraries.length === 1 ? (
-          <span className="truncate text-sm font-medium">{libraries[0].name}</span>
-        ) : (
-          <Select value={libraryId ?? ''} onValueChange={value => { setNode(null); setLibraryId(value); }}>
-            <SelectTrigger size="sm" aria-label="团队库" className="flex-1"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {libraries.map(item => (
-                <SelectItem key={item.library_id} value={item.library_id}>{item.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-        <Button
-          size="icon"
-          variant="ghost"
-          aria-label="刷新"
-          disabled={busy}
-          onClick={rescan}
-        >
-          <RefreshCw />
-        </Button>
+        <InputGroup className="min-w-0 flex-1">
+          <InputGroupAddon><Search aria-hidden="true" /></InputGroupAddon>
+          <InputGroupInput aria-label="搜索团队库" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索" />
+        </InputGroup>
+        <Button size="icon" variant="outline" aria-label="刷新" disabled={busy} onClick={rescan}><RefreshCw /></Button>
       </div>
-
-      <InputGroup>
-        <InputGroupAddon><Search aria-hidden="true" /></InputGroupAddon>
-        <InputGroupInput aria-label="搜索团队库" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索" />
-      </InputGroup>
-
-      <ToggleGroup type="single" size="sm" variant="outline" aria-label="类型" className="flex-wrap" value={typeFilter}
-        onValueChange={value => { if (!value) return; setNode(null); setTypeFilter(value as typeof typeFilter); }}>
-        {TYPE_FILTERS.map(item => <ToggleGroupItem key={item.value} value={item.value}>{item.label}</ToggleGroupItem>)}
-      </ToggleGroup>
-
+      <div role="group" aria-label="类型" className="flex flex-wrap gap-2">
+        {TYPE_FILTERS.filter(item => item.value !== 'audio' || entries.some(entry => entry.mime_type?.startsWith('audio/')) || typeFilter === 'audio')
+          .map(item => <AssetFilterPill key={item.value} selected={typeFilter === item.value}
+            onClick={() => { setNode(null); setTypeFilter(item.value); }}>{item.label}</AssetFilterPill>)}
+      </div>
       {library && !library.reachable ? (
-        <p className="py-8 text-center text-xs text-muted-foreground">目录不可达</p>
+        <p className="py-8 text-center text-sm text-muted-foreground">目录不可达</p>
       ) : (
-        <div className="flex min-h-0 flex-1 gap-3">
-          <div className="w-40 shrink-0 space-y-1 overflow-y-auto">
-            <p className="flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground">
-              <FolderTree className="size-3.5" />目录
-            </p>
-            <ToggleGroup type="single" size="sm" orientation="vertical" aria-label="目录" className="w-full flex-col items-stretch"
-              value={node ? `${node.group}:${node.name}` : ''}
-              onValueChange={value => setNode(tree.find(item => `${item.group}:${item.name}` === value) ?? null)}>
-              {tree.map(item => (
-                <ToggleGroupItem key={`${item.group}:${item.name}`} value={`${item.group}:${item.name}`} className="justify-start truncate">
-                  {item.name}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          </div>
-
-          <div className="min-w-0 flex-1 overflow-y-auto">
-            {visible.length === 0 ? (
-              <p className="py-8 text-center text-xs text-muted-foreground">库里还没有内容</p>
-            ) : (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-3">
-                {visible.map(entry => (
-                  <TeamAssetCard
-                    key={entry.id}
-                    entry={entry}
-                    libraryId={library?.library_id ?? ''}
-                    busy={busy}
-                    owned={displayName !== null && entry.kind !== 'raw' && entry.author === displayName}
-                    onAdopt={adopt}
-                    onReproduce={
-                      onReproduce && library
-                        ? item => reproduce(library.library_id, item)
-                        : undefined
-                    }
-                    onEdit={setEditing}
-                    onWithdraw={setWithdrawing}
-                  />
-                ))}
-              </div>
-            )}
-            {cursor && (
-              <div className="pt-3 text-center">
-                <Button size="sm" variant="outline" disabled={busy} onClick={loadMore}>更多</Button>
-              </div>
-            )}
-          </div>
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+          {visible.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">库里还没有内容</p> : (
+            <AssetMasonry items={visible} itemKey={mediaKey} ratio={entry => mediaRatio(sizes[mediaKey(entry)])}>
+              {entry => <TeamAssetCard entry={entry} libraryId={library?.library_id ?? ''} busy={busy}
+                size={sizes[mediaKey(entry)]} onMeasure={size => measure(mediaKey(entry), size)}
+                owned={displayName !== null && entry.kind !== 'raw' && entry.author === displayName}
+                onAdopt={adopt} onView={setViewing}
+                onReproduce={onReproduce && library ? item => reproduce(library.library_id, item) : undefined}
+                onEdit={setEditing} onWithdraw={setWithdrawing} />}
+            </AssetMasonry>
+          )}
+          {cursor && <div className="pt-3 text-center"><Button size="sm" variant="outline" disabled={busy} onClick={loadMore}>更多</Button></div>}
         </div>
       )}
+      {viewing && libraryId && <Dialog open onOpenChange={open => { if (!open) setViewing(null); }}>
+        <DialogContent aria-describedby={undefined}>
+          <DialogHeader><DialogTitle>{viewing.title}</DialogTitle></DialogHeader>
+          {viewing.kind === 'prompt' ? <p className="whitespace-pre-wrap rounded-lg bg-card p-3 text-sm">{viewing.prompt_text}</p>
+            : viewing.mime_type?.startsWith('image/') ? <img src={teamAssetContentUrl(libraryId, viewing.id)} alt={viewing.title} className="max-h-120 w-full rounded-lg object-contain" />
+              : viewing.mime_type?.startsWith('video/') ? <video src={teamAssetContentUrl(libraryId, viewing.id)} controls className="max-h-120 w-full rounded-lg" />
+                : <audio src={teamAssetContentUrl(libraryId, viewing.id)} controls className="w-full" />}
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {viewing.author && <><dt>作者</dt><dd>{viewing.author}</dd></>}
+            {viewing.model && <><dt>模型</dt><dd>{viewing.model}</dd></>}
+            {viewing.cost_cny != null && <><dt>花费</dt><dd>{formatGenerationCost(viewing.cost_cny)}</dd></>}
+          </dl>
+          <DialogFooter><Button disabled={busy} onClick={() => adopt(viewing)}>采用</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>}
 
       {editing && libraryId && (
         <TeamAssetEditDialog
@@ -569,129 +538,52 @@ function TeamAssetEditDialog({
   );
 }
 
-function TeamAssetCard({
-  entry,
-  libraryId,
-  busy,
-  owned,
-  onAdopt,
-  onReproduce,
-  onEdit,
-  onWithdraw,
-}: {
+function TeamAssetCard({ entry, libraryId, busy, owned, size, onMeasure, onAdopt, onView, onReproduce, onEdit, onWithdraw }: {
   entry: TeamLibraryIndexEntry;
   libraryId: string;
   busy: boolean;
-  /** 当前显示名分享的资产：可编辑 / 撤回。 */
   owned: boolean;
+  size?: MediaSize;
+  onMeasure: (size: MediaSize) => void;
   onAdopt: (entry: TeamLibraryIndexEntry) => void;
+  onView: (entry: TeamLibraryIndexEntry) => void;
   onReproduce?: (entry: TeamLibraryIndexEntry) => void;
   onEdit: (entry: TeamLibraryIndexEntry) => void;
   onWithdraw: (entry: TeamLibraryIndexEntry) => void;
 }) {
-  const [broken, setBroken] = useState(false);
   const incomplete = entry.status === 'incomplete';
   const mime = entry.mime_type ?? '';
-  const showThumb = !broken && mime.startsWith('image/');
-  const showFirstFrame = !broken && !incomplete && mime.startsWith('video/');
-  const reproducible = Boolean(onReproduce) && entry.reproducible && entry.status === 'ready';
-
+  const reproducible = Boolean(onReproduce) && entry.reproducible && !incomplete;
   const onDragStart = (event: DragEvent<HTMLDivElement>) => {
-    event.dataTransfer.setData(
-      TEAM_ASSET_DRAG_TYPE,
-      JSON.stringify({ library_id: libraryId, entry_id: entry.id }),
-    );
+    event.dataTransfer.setData(TEAM_ASSET_DRAG_TYPE, JSON.stringify({ library_id: libraryId, entry_id: entry.id }));
     event.dataTransfer.effectAllowed = 'copy';
   };
-
-  return (
-    <div
-      draggable
-      onDragStart={onDragStart}
-      className={cn(
-        'rounded-lg border border-border bg-card p-2',
-        incomplete && 'opacity-50',
-      )}
-    >
-      {showThumb ? (
-        <img
-          src={teamAssetThumbUrl(libraryId, entry.id, 256)}
-          alt=""
-          onError={() => setBroken(true)}
-          className="aspect-square w-full rounded-md bg-secondary object-cover"
-        />
-      ) : showFirstFrame ? (
-        <FirstFrame src={teamAssetContentUrl(libraryId, entry.id)} onError={() => setBroken(true)} />
-      ) : (
-        <div className="grid aspect-square w-full place-items-center rounded-md bg-secondary text-muted-foreground">
-          <TypeIcon entry={entry} className="size-5" />
+  return <div draggable={!incomplete} onDragStart={onDragStart} className={cn('group min-w-0', incomplete && 'opacity-50')}>
+    <div className="relative">
+      <Button variant="ghost" aria-label={`查看 ${entry.title}`} disabled={incomplete} onClick={() => onView(entry)} className="block h-auto w-full p-0 text-left font-normal">
+        {entry.kind === 'prompt' ? <span className="block rounded-md border border-border bg-card p-3">
+          <span className="mb-2 block truncate text-sm font-medium">{entry.title}</span>
+          <span className="line-clamp-2 whitespace-normal text-xs text-muted-foreground">{entry.prompt_text}</span>
+        </span> : <AssetMediaTile src={mime.startsWith('image/') ? teamAssetThumbUrl(libraryId, entry.id, 256) : teamAssetContentUrl(libraryId, entry.id)}
+          mimeType={incomplete ? '' : mime} alt={entry.title} size={size} onMeasure={onMeasure} />}
+      </Button>
+      <div className="pointer-events-none absolute inset-x-1 bottom-1 flex flex-wrap items-center justify-end gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+        <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-glass p-0.5 backdrop-blur-glass">
+          {reproducible && <CardIconButton label="复刻" disabled={busy} onClick={() => onReproduce?.(entry)}><Copy /></CardIconButton>}
+          {owned && <>
+            <CardIconButton label="编辑" disabled={busy} onClick={() => onEdit(entry)}><Pencil /></CardIconButton>
+            <CardIconButton label="撤回" disabled={busy} onClick={() => onWithdraw(entry)}><Undo2 /></CardIconButton>
+          </>}
+          {!incomplete && <Button size="sm" className="h-7 rounded-full px-2 text-xs" disabled={busy} onClick={() => onAdopt(entry)}><Download />采用</Button>}
         </div>
-      )}
-      <Hint label={entry.title}><p className="mt-2 truncate text-xs">{entry.title}</p></Hint>
-      {entry.author && (
-        <p className="truncate text-xs text-muted-foreground">{entry.author} · {formatBytes(entry.bytes)}</p>
-      )}
-      {entry.kind === 'generation' && entry.model != null && (
-        <Hint label={entry.model}><p className="truncate text-xs text-muted-foreground">{entry.model}</p></Hint>
-      )}
-      <div className="mt-1 flex flex-wrap items-center gap-1">
-        {incomplete ? (
-          <span className="text-xs text-muted-foreground">同步中</span>
-        ) : (
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAdopt(entry)}>
-            <Download />采用
-          </Button>
-        )}
-        {reproducible && (
-          <CardIconButton label="复刻" disabled={busy} onClick={() => onReproduce?.(entry)}>
-            <Copy />
-          </CardIconButton>
-        )}
-        {owned && (
-          <>
-            <CardIconButton label="编辑" disabled={busy} onClick={() => onEdit(entry)}>
-              <Pencil />
-            </CardIconButton>
-            <CardIconButton label="撤回" disabled={busy} onClick={() => onWithdraw(entry)}>
-              <Undo2 />
-            </CardIconButton>
-          </>
-        )}
       </div>
     </div>
-  );
-}
-
-/** 视频首帧：接近视口才绑 src，免得整页卡片一起拉视频。 */
-function FirstFrame({ src, onError }: { src: string; onError: () => void }) {
-  const ref = useRef<HTMLVideoElement>(null);
-  const [bound, setBound] = useState(false);
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    if (!('IntersectionObserver' in window)) {
-      setBound(true);
-      return;
-    }
-    const observer = new IntersectionObserver(entries => {
-      if (!entries.some(item => item.isIntersecting)) return;
-      setBound(true);
-      observer.disconnect();
-    }, { rootMargin: '240px' });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-  return (
-    <video
-      ref={ref}
-      src={bound ? src : undefined}
-      muted
-      playsInline
-      preload="metadata"
-      onError={onError}
-      className="aspect-square w-full rounded-md bg-secondary object-cover"
-    />
-  );
+    <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+      {entry.author && <Hint label={entry.author}><span className="grid size-4 shrink-0 place-items-center rounded-full bg-secondary">{Array.from(entry.author)[0]}</span></Hint>}
+      {entry.kind !== 'prompt' && <Hint label={entry.title}><span className="truncate">{entry.title}</span></Hint>}
+      {incomplete && <span className="shrink-0">同步中</span>}
+    </div>
+  </div>;
 }
 
 function CardIconButton({ label, disabled, onClick, children }: {

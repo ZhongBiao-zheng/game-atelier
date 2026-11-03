@@ -2515,6 +2515,15 @@ class TeamLibraryIndexEntry(BaseModel):
     cost_cny: float | None = None
     # 仅 generation 有值：snapshot.inputs[].sha256，按 order（推荐 a 按参考 sha 查配方）。
     input_sha256: list[str] = Field(default_factory=list)
+    # 提示词列表的正文预览；普通媒体与旧索引不写入此字段。
+    prompt_text: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_prompt_text(self, handler):
+        data = handler(self)
+        if self.prompt_text is None:
+            data.pop("prompt_text", None)
+        return data
 
 
 class TeamLibraryIndex(BaseModel):
