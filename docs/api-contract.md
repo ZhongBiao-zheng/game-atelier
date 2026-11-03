@@ -1168,3 +1168,25 @@ Tuzi GPT Image 2.5 系列在 Studio 与 Canvas 提供五档质量：低/中/高/
 Workflow 包含 `id, alias, name, source_filename, imported_at, api_workflow, inputs,
 timeout_seconds`；超时默认 1800 秒，允许 1–86400 秒。inspect 不写盘；无 in: 标题时
 只给候选建议，由管理员选择后保存。重新导入按显示名、节点类型、字段匹配，未匹配项显式确认。
+
+## 网关共享库（ADR-0034）
+
+本机管理：`GET /api/team-library-gateway-share` 返回 `shared_library_ids` 与 `gateway_enabled`；
+`PUT /api/team-library-gateway-share/{library_id}` 接收 `{enabled: boolean}`，只能开启已挂载库，网关关闭时开启返回 409。卸载自动停止共享。
+
+网关接口均要求有效 Bearer 网关密钥，只有 GET；未共享或不可达的库统一 404：
+
+- `/gateway/v1/libraries`：数组 `{id,name,owner_name,updated_at,counts}`。
+- `/gateway/v1/libraries/{library_id}/assets`：数组 `{entry_id,kind,title,author?,mime_type?,width?,height?,duration_s?,tags,category?,prompt_text?,preview_count}`。当前无尺寸/时长的条目省略对应字段，客户端图片加载后测量。
+- `/gateway/v1/libraries/{library_id}/assets/{entry_id}/thumb?w=512`。
+- `/gateway/v1/libraries/{library_id}/assets/{entry_id}/previews/{n}/thumb?w=512`：效果图索引从 0 开始。
+
+`entry_id` 按 `TEAM_ASSET_ID_PATTERN` 校验，普通文件用其内部身份的稳定哈希生成公开标识。
+两类缩略图都为 WebP，`w` 范围 1–1024（当前取档上限 512），非图片返回 404。
+没有原文件、采用或生成快照接口，不发布本机路径、参考图、模型或参数。
+
+成员本机 `GET /api/gateway-libraries` 返回数组 `{gateway_alias,owner_name,unreachable,libraries}`，
+每个 Atelier 渠道均保留，连接/读取超时 3 秒，失败时 `unreachable=true`、库列表为空。
+`GET /api/gateway-libraries/{alias}/{library_id}/assets` 及对应 `/{entry_id}/thumb`、
+`/{entry_id}/previews/{n}/thumb` 由本机带已保存凭据转发，不接收 URL 或路径。
+缩略图不落盘，响应 `Cache-Control: private, max-age=60`；主机仍逐请求检查共享状态。
