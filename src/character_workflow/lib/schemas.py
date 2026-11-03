@@ -161,8 +161,9 @@ class JobParams(BaseModel):
     # 厂商成功响应返回的实际人民币费用；历史展示优先于预计快照。
     actual_cost_cny: float | None = Field(default=None, ge=0)
     # 从创作资产复制提示词时冻结的只读来源名称。正文与变量值已经展开进 prompt，
-    # 不再保留 asset_id / version_id 或任何可回写引用。
+    # 不保留任何可回写引用；prompt_asset_id 仅供效果图选择默认项。
     creation_asset_source_title: str | None = Field(default=None, max_length=120)
+    prompt_asset_id: str | None = None
     reference_images: list[str] | None = None
     # Canvas 局部编辑专用：服务端从不可变 mask Content Version 解析，浏览器不能传路径。
     mask_image: str | None = None
@@ -255,6 +256,13 @@ class JobParams(BaseModel):
     mj_ow: int | None = None          # --ow 0-1000
     # caller 回写：本次真实拼出的 flag 串（如 "--ar 16:9 --v 8.2 --chaos 10"），Web 只读展示
     mj_flags: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_prompt_asset(self, handler):
+        data = handler(self)
+        if self.prompt_asset_id is None:
+            data.pop("prompt_asset_id", None)
+        return data
 
 
 class CanvasActor(BaseModel):
@@ -659,7 +667,7 @@ CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     "image": frozenset({
         "workflow_inputs",
         "n", "size", "size_mode", "custom_size", "ratio", "resolution", "quality",
-        "creation_asset_source_title",
+        "creation_asset_source_title", "prompt_asset_id",
         # 多角度生成由服务端写进结果 Draft，浏览器会原样回传，必须放行。
         "angle_horizontal", "angle_pitch", "angle_distance", "angle_wide",
         # Midjourney 的纯标量 flag（都有 Field 上下界）；三组参考路径与 caller 回写的
@@ -670,15 +678,15 @@ CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     }),
     "video": frozenset({
         "duration", "resolution", "ratio", "mode", "frame_mode",
-        "generate_audio", "watermark", "creation_asset_source_title",
+        "generate_audio", "watermark", "creation_asset_source_title", "prompt_asset_id",
     }),
     "text": frozenset({
         "n", "temperature", "max_tokens", "reasoning_effort",
-        "creation_asset_source_title",
+        "creation_asset_source_title", "prompt_asset_id",
     }),
     "audio": frozenset({
         "voice", "response_format", "speed", "instructions",
-        "creation_asset_source_title",
+        "creation_asset_source_title", "prompt_asset_id",
     }),
 }
 
@@ -2042,10 +2050,29 @@ CreationPromptSegment = Annotated[
 ]
 
 
+class PromptPreviewImage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    file: str = Field(pattern=r"^[a-f0-9]{16}\.(png|jpg|webp|gif)$")
+    mime_type: str
+    width: int
+    height: int
+    source_job_id: str | None = None
+    source_model: str | None = None
+    added_at: str
+
+
 class CreationPromptAssetContent(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["prompt"]
     segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
+    preview_images: list[PromptPreviewImage] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_previews(self, handler):
+        data = handler(self)
+        if not self.preview_images:
+            data.pop("preview_images", None)
+        return data
 
 
 MEDIA_MIME_PATTERN = r"^(image|video|audio)/"

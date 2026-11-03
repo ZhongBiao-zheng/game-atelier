@@ -390,7 +390,7 @@ def _creation_stage(asset: CreationAsset, allow_large: bool) -> Callable[[Path],
     """按资产种类返回「把本体拷进资产目录并给出 asset.json 载荷字段」的函数。"""
     content = asset.content
     if content.kind == "prompt":
-        prompt = TeamPromptContent.model_validate(content.model_dump(mode="json"))
+        prompt = TeamPromptContent.model_validate(content.model_dump(mode="json", exclude={"preview_images"}))
         return lambda _folder: {"kind": "prompt", "prompt": prompt}
     if content.kind == "media":
         source = _blob_file(content)

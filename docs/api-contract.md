@@ -693,6 +693,30 @@ schema、摘要和项目内引用校验，再凭 30 分钟 token 调用 `commit`
 同时更新最近使用时间。`CreationMediaAssetContent.width/height` 是可选显示尺寸，图片入库时读取并计入
 EXIF 旋转；未知时不输出字段，旧内容无须迁移，前端可按加载后的自然尺寸显示。视频尺寸不强求。
 
+提示词效果图是 `CreationPromptAssetContent.preview_images` 的有序数组，第 0 张为封面；空数组不序列化。
+每项为 `{file, mime_type, width, height, source_job_id?, source_model?, added_at}`，`file` 只允许
+`[a-f0-9]{16}\.(png|jpg|webp|gif)`。文件独立保存到
+`creation-assets/prompt-previews/<asset_id>/<file>`，不进入媒体资产或共享 blob。唯一写入者为
+`creation_assets.py`，持 catalog 锁原子写入；内容哈希去重，删除提示词时清理全部效果图。
+
+| 方法 | 路径（均带 `/api` 前缀） | 契约 |
+|---|---|---|
+| POST | `/creation-assets/{id}/previews` | multipart `files`，可多选；可选 `replace_file` 原子更换一张，满 8 张也可更换 |
+| POST | `/creation-assets/{id}/previews/from-job` | `{job_id, output_index}`，只复制该图片 Job 登记的 `output_paths[index]`，记录 Job 与模型 |
+| PUT | `/creation-assets/{id}/previews/order` | `{files: [...]}`，必须恰好包含全部现有文件、无重复 |
+| DELETE | `/creation-assets/{id}/previews/{file}` | 删除元数据与文件 |
+| GET | `/creation-assets/{id}/previews/{file}` | 读取当前 catalog 登记的独立原图 |
+| GET | `/creation-assets/{id}/previews/{file}/thumb?w=` | 按 128/256/512 取档生成 WebP，运行时缓存放 `.runtime/thumbs/prompt-previews/` |
+
+写入边界：最多 8 张、每张 ≤20 MiB、PNG/JPEG/WebP/GIF，校验真实图像格式与声明 MIME 一致。
+不存在返回 404，不合规返回 422；这些接口要求本机会话，写操作要求编辑权限。图片响应为
+`Cache-Control: private, max-age=31536000, immutable`，不扩展 `/api/raw` 白名单。
+提示词文字编辑保留效果图；文件夹团队库的效果图拷贝在 C 批交付，B 批分享仍只传正文。
+
+`JobParams.prompt_asset_id` 是可选的效果图选择默认值，空值不序列化。Studio / Canvas 使用提示词资产
+后提交时带上，编辑正文仍保留；画布连接提示词文本节点时也从输入来源继承。资产被删除时默认项失效，
+用户可手动选另一条。它不授权读取资产、不回写正文，也不进入生成资产的冻结配方。
+
 生成资产 = 成片 + 自包含冻结快照：`content = {kind: "generation", media: CreationMediaAssetContent,
 snapshot: GenerationRecipe}`。`GenerationRecipe = {mode, model, provider, alias, final_prompt, draft_prompt,
 params, inputs, cost_cny, cost_basis, submitted_at}`；`cost_cny` 与 `cost_basis`（`actual | estimated`）同空同有。
@@ -710,8 +734,7 @@ Canvas 的“本项目”是 CreationAsset 上的项目关系过滤，不是项�
 `library/assets.json` 与 `library/prompts.json` 在首次读取时幂等迁移，旧 HTTP library 端点已删除。
 
 `POST .../creation-assets/{asset_id}/insert` 携带 Canvas Document 的 `If-Match`、目标坐标和可选变量值，
-把资产当前内容复制为新的 Canvas Content Version；内容 origin 只保存当时的资产标题快照，不保存
-asset_id 或可回写引用。Studio Job 的 `params.creation_asset_source_title` 同样只保存只读标题快照。
+把资产当前内容复制为新的 Canvas Content Version；内容 origin 保存当时的资产标题快照与用于效果图默认项的可选 `asset_id`，不保存可回写引用。Studio Job 的 `params.creation_asset_source_title` 同样只保存只读标题快照。
 后续编辑或删除资产都不会改变既有节点、草稿或生成记录，也不存在更新引用 API。画布项目包只携带已复制
 内容和来源标题，不携带个人资产库。
 

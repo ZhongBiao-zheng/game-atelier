@@ -22,6 +22,7 @@ export interface JobParams {
   actual_cost_cny?: number;
   /** 从创作资产复制提示词时冻结的只读来源名称；不保留可回写引用。 */
   creation_asset_source_title?: string;
+  prompt_asset_id?: string | null;
   reference_images?: string[];
   /** Canvas 局部编辑的服务端解析 mask 路径；浏览器不直接写入。 */
   mask_image?: string;

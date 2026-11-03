@@ -130,6 +130,12 @@ PUT /api/creation-assets/{asset_id}/prompt
 PUT /api/creation-assets/{asset_id}/media
 POST /api/creation-assets/{asset_id}/use
 DELETE /api/creation-assets/{asset_id}
+POST /api/creation-assets/{asset_id}/previews
+POST /api/creation-assets/{asset_id}/previews/from-job
+PUT /api/creation-assets/{asset_id}/previews/order
+DELETE /api/creation-assets/{asset_id}/previews/{file}
+GET /api/creation-assets/{asset_id}/previews/{file}
+GET /api/creation-assets/{asset_id}/previews/{file}/thumb
 GET /api/creation-assets/{asset_id}/content
 GET /api/creation-assets/{asset_id}/inputs/{order}
 GET /api/creation-assets/{asset_id}/staleness
@@ -234,6 +240,8 @@ _READ_POSTS = frozenset({("POST", "/api/creation-assets/staleness")})
 MEDIA_ROUTES = frozenset({
     "/api/raw", "/api/images", "/api/gallery/image",
     "/api/creation-assets/{asset_id}/content",
+    "/api/creation-assets/{asset_id}/previews/{file}",
+    "/api/creation-assets/{asset_id}/previews/{file}/thumb",
     "/api/creation-assets/{asset_id}/inputs/{order}",
     "/api/canvas/projects/{project_id}/versions/{version_id}/media",
     "/api/canvas/projects/{project_id}/versions/{version_id}/download",

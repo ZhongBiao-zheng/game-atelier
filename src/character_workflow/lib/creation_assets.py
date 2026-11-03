@@ -5,10 +5,13 @@ import hashlib
 import mimetypes
 import re
 import secrets
+import shutil
+from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
+from PIL import Image, ImageOps
 from pydantic import TypeAdapter, ValidationError
 
 from character_workflow.lib import data_root
@@ -42,6 +45,7 @@ from character_workflow.lib.schemas import (
     CreationPromptVariableSegment,
     GenerationRecipe,
     RevisionedSidecar,
+    PromptPreviewImage,
 )
 
 
@@ -364,6 +368,190 @@ def _new_asset(
     )
 
 
+# 效果图由提示词资产独占，所有写入与 catalog 变更使用同一把锁。
+PROMPT_PREVIEW_LIMIT = 8
+PROMPT_PREVIEW_MAX_BYTES = 20 * 1024 * 1024
+_PREVIEW_FORMATS = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp", "GIF": "image/gif"}
+_PREVIEW_FILE = re.compile(r"^[a-f0-9]{16}\.(png|jpg|webp|gif)$")
+
+
+def _preview_asset(catalog: CreationAssetCatalog, asset_id: str) -> CreationAsset:
+    asset = next((row for row in catalog.assets if row.asset_id == asset_id), None)
+    if asset is None:
+        raise KeyError(asset_id)
+    if asset.content.kind != "prompt":
+        raise ValueError("只有提示词资产可以添加效果图")
+    return asset
+
+
+def _preview_dir(asset_id: str) -> Path:
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", asset_id):
+        raise ValueError("资产编号无效")
+    root = data_root.resolve_data_root() / "creation-assets" / "prompt-previews"
+    target = root / asset_id
+    if root.is_symlink() or target.is_symlink():
+        raise ValueError("效果图目录无效")
+    return target
+
+
+def _preview_path(asset_id: str, file: str) -> Path:
+    if not _PREVIEW_FILE.fullmatch(file):
+        raise KeyError(file)
+    path = _preview_dir(asset_id) / file
+    if path.is_symlink():
+        raise KeyError(file)
+    return path
+
+
+def _preview_image(body: bytes, mime_type: str, source_job_id: str | None,
+                   source_model: str | None) -> PromptPreviewImage:
+    if not body or len(body) > PROMPT_PREVIEW_MAX_BYTES:
+        raise ValueError("效果图不能为空，且单张不能超过 20MB")
+    try:
+        with Image.open(BytesIO(body)) as opened:
+            detected = _PREVIEW_FORMATS.get(opened.format or "")
+            if detected is None or detected != mime_type:
+                raise ValueError("效果图只支持 PNG、JPEG、WebP、GIF，文件内容须与类型一致")
+            opened.verify()
+        width, height = _display_image_dimensions(body)
+    except (OSError, Image.DecompressionBombError) as error:
+        raise ValueError("效果图不是有效图片") from error
+    return PromptPreviewImage(
+        file=hashlib.sha256(body).hexdigest()[:16] + MEDIA_SUFFIXES[mime_type],
+        mime_type=mime_type, width=width, height=height,
+        source_job_id=source_job_id, source_model=source_model, added_at=_now(),
+    )
+
+
+def _replace_previews(catalog: CreationAssetCatalog, asset: CreationAsset,
+                      previews: list[PromptPreviewImage]) -> CreationAsset:
+    updated = asset.model_copy(update={
+        "content": asset.content.model_copy(update={"preview_images": previews}), "updated_at": _now(),
+    })
+    _replace_asset(catalog, updated)
+    return updated
+
+
+def add_prompt_previews(asset_id: str, uploads: list[tuple[bytes, str]], *,
+                        replace_file: str | None = None, source_job_id: str | None = None,
+                        source_model: str | None = None) -> CreationAsset:
+    if not uploads or len(uploads) > PROMPT_PREVIEW_LIMIT:
+        raise ValueError("请选择 1–8 张效果图")
+    prepared = [(_preview_image(body, mime, source_job_id, source_model), body)
+                for body, mime in uploads]
+    with file_lock(_catalog_lock_path()):
+        catalog = _read_catalog_unlocked()
+        asset = _preview_asset(catalog, asset_id)
+        previous = list(asset.content.preview_images)
+        if replace_file is not None:
+            if len(prepared) != 1:
+                raise ValueError("更换时只能选择一张图片")
+            if replace_file not in {item.file for item in previous}:
+                raise KeyError(replace_file)
+            replacement = prepared[0][0]
+            # 同图更换幂等；更换成已有图时保留它的来源元数据和唯一文件。
+            replacement = next((p for p in previous if p.file == replacement.file), replacement)
+            previews = [replacement if p.file == replace_file else p for p in previous
+                        if p.file == replace_file or p.file != replacement.file]
+        else:
+            previews = list(previous)
+            for preview, _body in prepared:
+                if preview.file not in {p.file for p in previews}:
+                    previews.append(preview)
+        if len(previews) > PROMPT_PREVIEW_LIMIT:
+            raise ValueError("每条提示词最多 8 张效果图")
+        created: list[Path] = []
+        try:
+            for preview, body in prepared:
+                path = _preview_path(asset_id, preview.file)
+                if path.exists():
+                    if path.read_bytes() != body:
+                        raise ValueError("效果图文件校验不一致")
+                else:
+                    atomic_write_bytes(path, body)
+                    created.append(path)
+            if [p.file for p in previews] == [p.file for p in previous]:
+                return asset
+            updated = _replace_previews(catalog, asset, previews)
+        except Exception:
+            for path in created:
+                path.unlink(missing_ok=True)
+            raise
+        retained = {p.file for p in previews}
+        for preview in previous:
+            if preview.file not in retained:
+                _preview_path(asset_id, preview.file).unlink(missing_ok=True)
+        return updated
+
+
+def add_prompt_preview_from_job(asset_id: str, job_id: str, output_index: int) -> CreationAsset:
+    from character_workflow.lib.jobs import read_job
+    job = read_job(job_id)
+    if job.kind != "image" or not 0 <= output_index < len(job.output_paths):
+        raise ValueError("这条记录没有可用的图片结果")
+    output = job.output_paths[output_index]
+    if output.startswith(("http://", "https://")):
+        raise ValueError("效果图需要本机图片结果")
+    path = Path(output)
+    path = (path if path.is_absolute() else data_root.resolve_data_root() / path).resolve()
+    # 唯一来源是服务端 Job.output_paths；不接受浏览器传本机路径。
+    with path.open("rb") as source:
+        body = source.read(PROMPT_PREVIEW_MAX_BYTES + 1)
+    try:
+        with Image.open(BytesIO(body)) as opened:
+            mime = _PREVIEW_FORMATS.get(opened.format or "", "")
+    except (OSError, Image.DecompressionBombError) as error:
+        raise ValueError("这张结果不是有效图片") from error
+    return add_prompt_previews(asset_id, [(body, mime)], source_job_id=job.job_id,
+                               source_model=job.model)
+
+
+def delete_prompt_preview(asset_id: str, file: str) -> CreationAsset:
+    with file_lock(_catalog_lock_path()):
+        catalog = _read_catalog_unlocked()
+        asset = _preview_asset(catalog, asset_id)
+        if file not in {p.file for p in asset.content.preview_images}:
+            raise KeyError(file)
+        path = _preview_path(asset_id, file)
+        updated = _replace_previews(catalog, asset, [p for p in asset.content.preview_images if p.file != file])
+        path.unlink(missing_ok=True)
+        return updated
+
+
+def reorder_prompt_previews(asset_id: str, files: list[str]) -> CreationAsset:
+    with file_lock(_catalog_lock_path()):
+        catalog = _read_catalog_unlocked()
+        asset = _preview_asset(catalog, asset_id)
+        by_file = {p.file: p for p in asset.content.preview_images}
+        if len(files) != len(by_file) or set(files) != set(by_file):
+            raise ValueError("排序必须包含当前的全部效果图，且不能重复")
+        return _replace_previews(catalog, asset, [by_file[file] for file in files])
+
+
+def prompt_preview_bytes(asset_id: str, file: str, width: int | None = None) -> tuple[bytes, str]:
+    from character_workflow.lib.team_library_index import _THUMB_WIDTHS
+    with file_lock(_catalog_lock_path()):
+        asset = _preview_asset(_read_catalog_unlocked(), asset_id)
+        preview = next((p for p in asset.content.preview_images if p.file == file), None)
+        if preview is None:
+            raise KeyError(file)
+        body = _preview_path(asset_id, file).read_bytes()
+    if width is None:
+        return body, preview.mime_type
+    snapped = next((w for w in _THUMB_WIDTHS if w >= width), _THUMB_WIDTHS[-1])
+    cache = data_root.runtime_dir() / "thumbs" / "prompt-previews" / f"{asset_id}-{file}-{snapped}.webp"
+    if cache.is_file():
+        return cache.read_bytes(), "image/webp"
+    with Image.open(BytesIO(body)) as opened:
+        image = ImageOps.exif_transpose(opened)
+        image.thumbnail((snapped, snapped))
+        result = BytesIO()
+        image.convert("RGBA" if image.mode in {"RGBA", "LA", "P"} else "RGB").save(result, "WEBP", quality=80)
+        body = result.getvalue()
+    atomic_write_bytes(cache, body)
+    return body, "image/webp"
+
+
 def create_prompt_asset(
     title: str,
     segments: list[CreationPromptSegment] | list[dict[str, str]],
@@ -674,7 +862,9 @@ def update_prompt_asset(
         updated = asset.model_copy(update={
             "title": _required_text(title, "资产标题"),
             "tags": _normalize_tags(tags),
-            "content": _prompt_content(segments),
+            "content": _prompt_content(segments).model_copy(update={
+                "preview_images": asset.content.preview_images,
+            }),
             "updated_at": _now(),
         })
         _replace_asset(current, updated)
@@ -730,6 +920,10 @@ def delete_creation_asset(asset_id: str) -> None:
         remaining = [row for row in current.assets if row.asset_id != asset_id]
         orphan_paths = _orphan_blob_paths(_asset_blob_paths(asset), remaining)
         _write_catalog_unlocked(current, remaining)
+        if asset.kind == "prompt":
+            preview_dir = _preview_dir(asset.asset_id)
+            if preview_dir.exists():
+                shutil.rmtree(preview_dir)
     for path in orphan_paths:
         path.unlink(missing_ok=True)
 

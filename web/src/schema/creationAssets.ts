@@ -4,9 +4,20 @@ export type CreationPromptSegment =
   | { kind: 'text'; text: string }
   | { kind: 'variable'; name: string; default_value: string };
 
+export interface PromptPreviewImage {
+  file: string;
+  mime_type: string;
+  width: number;
+  height: number;
+  source_job_id: string | null;
+  source_model: string | null;
+  added_at: string;
+}
+
 export interface CreationPromptAssetContent {
   kind: 'prompt';
   segments: CreationPromptSegment[];
+  preview_images?: PromptPreviewImage[];
 }
 
 export interface CreationMediaAssetContent {

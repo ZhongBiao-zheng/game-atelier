@@ -2301,6 +2301,84 @@ async def put_creation_media_asset(
         _raise_creation_asset_error(error)
 
 
+class PromptPreviewFromJob(BaseModel):
+    job_id: str = Field(min_length=1)
+    output_index: int = Field(ge=0)
+
+
+class PromptPreviewOrder(BaseModel):
+    files: list[str] = Field(max_length=8)
+
+
+@router.post("/creation-assets/{asset_id}/previews", response_model=CreationAsset)
+async def post_prompt_previews(asset_id: str, files: list[UploadFile] = File(...),
+                               replace_file: str | None = Form(default=None)):
+    from character_workflow.lib.creation_assets import (
+        PROMPT_PREVIEW_MAX_BYTES, add_prompt_previews,
+    )
+    try:
+        if not 1 <= len(files) <= 8:
+            raise ValueError("请选择 1–8 张效果图")
+        uploads = []
+        for file in files:
+            body = await file.read(PROMPT_PREVIEW_MAX_BYTES + 1)
+            if len(body) > PROMPT_PREVIEW_MAX_BYTES:
+                raise ValueError("单张效果图不能超过 20MB")
+            uploads.append((body, file.content_type or ""))
+        return await asyncio.to_thread(add_prompt_previews, asset_id, uploads, replace_file=replace_file)
+    except (KeyError, FileNotFoundError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.post("/creation-assets/{asset_id}/previews/from-job", response_model=CreationAsset)
+def post_prompt_preview_from_job(asset_id: str, payload: PromptPreviewFromJob):
+    from character_workflow.lib.creation_assets import add_prompt_preview_from_job
+    try:
+        return add_prompt_preview_from_job(asset_id, payload.job_id, payload.output_index)
+    except (KeyError, FileNotFoundError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.put("/creation-assets/{asset_id}/previews/order", response_model=CreationAsset)
+def put_prompt_preview_order(asset_id: str, payload: PromptPreviewOrder):
+    from character_workflow.lib.creation_assets import reorder_prompt_previews
+    try:
+        return reorder_prompt_previews(asset_id, payload.files)
+    except (KeyError, FileNotFoundError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.delete("/creation-assets/{asset_id}/previews/{file}", response_model=CreationAsset)
+def delete_prompt_preview_route(asset_id: str, file: str):
+    from character_workflow.lib.creation_assets import delete_prompt_preview
+    try:
+        return delete_prompt_preview(asset_id, file)
+    except (KeyError, FileNotFoundError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+def _prompt_preview_response(asset_id: str, file: str, width: int | None = None):
+    from character_workflow.lib.creation_assets import prompt_preview_bytes
+    try:
+        body, mime = prompt_preview_bytes(asset_id, file, width)
+        return Response(body, media_type=mime, headers={
+            "Cache-Control": "private, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+        })
+    except (KeyError, FileNotFoundError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.get("/creation-assets/{asset_id}/previews/{file}")
+def get_prompt_preview(asset_id: str, file: str):
+    return _prompt_preview_response(asset_id, file)
+
+
+@router.get("/creation-assets/{asset_id}/previews/{file}/thumb")
+def get_prompt_preview_thumb(asset_id: str, file: str, w: int = Query(default=256, ge=1, le=1024)):
+    return _prompt_preview_response(asset_id, file, w)
+
+
 @router.post("/creation-assets/{asset_id}/use", response_model=CreationAsset)
 def post_creation_asset_use(asset_id: str, payload: CreationAssetUseRequest):
     from character_workflow.lib.creation_assets import mark_creation_asset_used

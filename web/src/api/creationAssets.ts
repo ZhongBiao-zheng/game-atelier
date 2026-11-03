@@ -311,3 +311,34 @@ export function classifyCreationAssets(projectId: string, assetIds: string[], se
     body: JSON.stringify({ asset_ids: assetIds, model_alias: selection?.alias, model: selection?.model }),
   });
 }
+
+export function promptPreviewUrl(assetId: string, file: string, width?: number): string {
+  const base = `/api/creation-assets/${encodeURIComponent(assetId)}/previews/${encodeURIComponent(file)}`;
+  return width ? `${base}/thumb?w=${width}` : base;
+}
+
+export async function uploadPromptPreviews(assetId: string, files: File[], replaceFile?: string): Promise<CreationAsset> {
+  const form = new FormData();
+  files.forEach(file => form.append('files', file));
+  if (replaceFile) form.append('replace_file', replaceFile);
+  const response = await connectionFetch(`/api/creation-assets/${encodeURIComponent(assetId)}/previews`, { method: 'POST', body: form });
+  if (!response.ok) throw await apiError(response, '上传效果图');
+  return response.json() as Promise<CreationAsset>;
+}
+
+export function setPromptPreviewFromJob(assetId: string, jobId: string, outputIndex: number): Promise<CreationAsset> {
+  return requestJson(`/api/creation-assets/${encodeURIComponent(assetId)}/previews/from-job`, '设为效果图', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ job_id: jobId, output_index: outputIndex }),
+  });
+}
+
+export function deletePromptPreview(assetId: string, file: string): Promise<CreationAsset> {
+  return requestJson(`/api/creation-assets/${encodeURIComponent(assetId)}/previews/${encodeURIComponent(file)}`, '删除效果图', { method: 'DELETE' });
+}
+
+export function reorderPromptPreviews(assetId: string, files: string[]): Promise<CreationAsset> {
+  return requestJson(`/api/creation-assets/${encodeURIComponent(assetId)}/previews/order`, '设置效果图顺序', {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ files }),
+  });
+}
