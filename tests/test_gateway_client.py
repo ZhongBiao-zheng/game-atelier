@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from character_workflow.lib import gateway_keys, job_runner, keys, model_routes
+from character_workflow.lib import gateway_keys, gateway_tasks, job_runner, keys, model_routes
 from character_workflow.lib import openai_hk_prices
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.callers import atelier_gateway, openai_image
@@ -120,6 +120,13 @@ def test_job_runs_through_the_gateway(gateway, upstream):
     assert len(done.params.provider_task_ids) == 1
     assert done.params.gateway_member == "Local"
     assert Path(done.output_paths[0]).read_bytes().startswith(b"\x89PNG")
+
+
+def test_member_records_what_the_gateway_charged(gateway, upstream, monkeypatch):
+    # 成员端没有网关的价格表，只能记网关扣在密钥上的金额；网关自己也没价时保持未计价。
+    assert job_runner.run_job(_job("job-unpriced").job_id).params.actual_cost_cny is None
+    monkeypatch.setattr(gateway_tasks, "_estimate", lambda *_args, **_kwargs: 0.32)
+    assert job_runner.run_job(_job("job-priced").job_id).params.actual_cost_cny == 0.32
 
 
 def test_reference_images_are_uploaded_not_sent_as_paths(gateway, upstream, tmp_path):

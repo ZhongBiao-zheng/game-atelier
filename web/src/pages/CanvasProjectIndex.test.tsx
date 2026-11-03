@@ -54,8 +54,7 @@ describe('CanvasProjectIndex', () => {
     const onOpen = vi.fn();
     render(<CanvasProjectIndex onOpenProject={onOpen} />);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/canvas/projects'));
-    fireEvent.click(screen.getByRole('button', { name: /新建项目/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '新建一个画布项目' }));
     fireEvent.change(screen.getByLabelText('画布项目名称'), { target: { value: '广告分镜' } });
     fireEvent.click(screen.getByRole('button', { name: '创建并进入' }));
 

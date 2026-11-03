@@ -223,11 +223,18 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
           </div>
         )}
 
-        {!loading && !loadError && projects.length === 0 && (
-          <p className="font-display text-display italic text-foreground/70">还没有画布项目</p>
-        )}
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-busy={loading}>
           {loading && <span role="status" className="sr-only">正在加载画布项目</span>}
+          {!loading && !loadError && projects.length === 0 && (
+            <Button
+              variant="ghost"
+              onClick={() => { setEditor({ open: true, name: '' }); setEditorError(null); }}
+              className="aspect-[16/10] h-auto flex-col gap-3 rounded-xl border-dashed border-foreground/20 font-normal text-muted-foreground hover:border-foreground/40 hover:text-foreground [&_svg]:size-7"
+            >
+              <Plus size={28} strokeWidth={1.5} aria-hidden="true" />
+              <span className="text-sm">新建一个画布项目</span>
+            </Button>
+          )}
           {loading && projects.length === 0
             ? Array.from({ length: 3 }, (_, index) => <CanvasCardSkeleton key={index} />)
             : projects.map(project => (

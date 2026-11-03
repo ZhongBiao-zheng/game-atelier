@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 
 import { disableAgent, enableAgent, fetchAgentStatus, type AgentClient, type AgentStatus } from '@/api/agentConnection';
+import { Button } from '@/components/ui/button';
+import { Collapse } from '@/components/ui/collapse';
 import { Switch } from '@/components/ui/switch';
 import { Hint } from '@/components/ui/tooltip';
 
@@ -13,6 +16,7 @@ export function AgentSection() {
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -66,13 +70,17 @@ export function AgentSection() {
         </section>)}
       </div>
       <section aria-label="可用工具" className="space-y-2.5">
-        <h2 className="text-sm font-semibold">可用工具 <span className="font-normal text-muted-foreground">{status.tools.length}</span></h2>
+        <h2 className="text-sm font-semibold"><Button variant="ghost" size="sm" aria-expanded={toolsOpen} onClick={() => setToolsOpen(!toolsOpen)} className="-ml-2 gap-1 px-2 text-sm font-semibold">
+          <ChevronRight size={14} aria-hidden className={`transition-transform ${toolsOpen ? 'rotate-90' : ''}`} />可用工具 <span className="font-normal text-muted-foreground">{status.tools.length}</span>
+        </Button></h2>
+        <Collapse open={toolsOpen} className="space-y-2.5">
         <div className="flex flex-wrap gap-1.5">
           {status.tools.map(tool => <Hint key={tool.name} label={tool.billable ? '计费工具' : undefined}><span className="flex min-w-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 font-mono text-xs">
             <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${tool.billable ? 'bg-status-running' : 'bg-status-done'}`} /><span className="break-all">{tool.name}</span>
           </span></Hint>)}
         </div>
         {status.tools.some(tool => tool.billable) && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><span aria-hidden className="size-1.5 shrink-0 rounded-full bg-status-running" />计费工具需先获得你的授权</p>}
+        </Collapse>
       </section>
     </>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

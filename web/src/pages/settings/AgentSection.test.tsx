@@ -71,6 +71,10 @@ it('使用服务端路径与工具列表，标注计费工具并保留授权文�
   render(<AgentSection />);
   expect(await screen.findByText('/custom/codex/config.toml')).toBeInTheDocument();
   expect(screen.getByText('/data/connections/agent.json')).toBeInTheDocument();
+  const toggle = screen.getByRole('button', { name: /可用工具/ });
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByText('canvas_run')).not.toBeInTheDocument();
+  fireEvent.click(toggle);
   expect(await hoverHint(screen.getByText('canvas_run').parentElement!)).toHaveTextContent('计费工具');
   expect(screen.getByText('计费工具需先获得你的授权')).toBeInTheDocument();
   expect(screen.getByText('canvas_list_projects')).toBeInTheDocument();

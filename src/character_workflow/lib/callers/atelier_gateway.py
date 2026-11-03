@@ -238,8 +238,11 @@ def _run_task(
             params["warnings"] = [*(params.get("warnings") or []), *warnings]
         if on_params_changed and (member or warnings):
             on_params_changed()
-        if status.get("actual_cost_cny") is not None and on_cost_usd:
-            on_cost_usd(float(status["actual_cost_cny"]) / USD_TO_CNY)
+        cost = status.get("charged_cny")
+        if cost is None:
+            cost = status.get("actual_cost_cny")
+        if cost is not None and on_cost_usd:
+            on_cost_usd(float(cost) / USD_TO_CNY)
 
         phase("downloading")
         out_dir = Path(output_dir)
