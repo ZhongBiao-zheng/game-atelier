@@ -16,6 +16,8 @@ export interface CreationMediaAssetContent {
   bytes: number;
   sha256: string;
   filename: string;
+  width?: number | null;
+  height?: number | null;
 }
 
 export type RecipeInputRole = 'reference' | 'mask' | 'mj_sref' | 'mj_cref' | 'mj_oref';
@@ -71,6 +73,7 @@ export interface CreationAsset {
   created_at: string;
   updated_at: string;
   last_used_at: string | null;
+  use_count?: number;
   content: CreationAssetContent;
   project_ids: string[];
   category: string | null;

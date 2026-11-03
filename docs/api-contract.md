@@ -689,6 +689,10 @@ schema、摘要和项目内引用校验，再凭 30 分钟 token 调用 `commit`
 均由同一个编辑入口原位更新。媒体按 SHA-256 去重，提示词重复只在 Web 提醒。提示词资产不携带模型或参数
 （`recommendation` 已删除；创建 / 更新请求带它返回 422）。
 
+`CreationAsset.use_count` 默认 0，0 时不序列化；每次 `mark_creation_asset_used` 在 catalog 锁内加一，
+同时更新最近使用时间。`CreationMediaAssetContent.width/height` 是可选显示尺寸，图片入库时读取并计入
+EXIF 旋转；未知时不输出字段，旧内容无须迁移，前端可按加载后的自然尺寸显示。视频尺寸不强求。
+
 生成资产 = 成片 + 自包含冻结快照：`content = {kind: "generation", media: CreationMediaAssetContent,
 snapshot: GenerationRecipe}`。`GenerationRecipe = {mode, model, provider, alias, final_prompt, draft_prompt,
 params, inputs, cost_cny, cost_basis, submitted_at}`；`cost_cny` 与 `cost_basis`（`actual | estimated`）同空同有。

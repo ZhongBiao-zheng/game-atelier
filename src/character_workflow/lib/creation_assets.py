@@ -14,6 +14,7 @@ from pydantic import TypeAdapter, ValidationError
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
 from character_workflow.lib.canvas_projects import (
+    _display_image_dimensions,
     _read_canvas_document_unlocked,
     canvas_project_dir,
     canvas_project_lock_path,
@@ -255,6 +256,12 @@ def store_media_blob(
     if len(body) > limit:
         label = _MEDIA_SIZE_LABELS.get(family, "文件")
         raise ValueError(f"{label}不能超过 {limit // (1024 * 1024)} MiB")
+    width = height = None
+    if family == "image":
+        try:
+            width, height = _display_image_dimensions(body)
+        except ValueError:
+            pass
     digest = hashlib.sha256(body).hexdigest()
     relative = _blob_relative_path(digest, detected_mime)
     target = data_root.resolve_data_root() / relative
@@ -267,6 +274,8 @@ def store_media_blob(
         bytes=len(body),
         sha256=digest,
         filename=safe_filename,
+        width=width,
+        height=height,
     )
 
 
@@ -738,6 +747,7 @@ def mark_creation_asset_used(asset_id: str, project_id: str | None = None) -> Cr
         ])
         updated = asset.model_copy(update={
             "last_used_at": timestamp,
+            "use_count": asset.use_count + 1,
             "updated_at": timestamp,
             "project_ids": project_ids,
         })

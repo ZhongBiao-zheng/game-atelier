@@ -17,6 +17,7 @@ from pydantic import (
     JsonValue,
     StringConstraints,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -2075,6 +2076,16 @@ class CreationMediaAssetContent(BaseModel):
     bytes: int = Field(ge=1)
     sha256: str = Field(pattern=SHA256_PATTERN)
     filename: str = Field(min_length=1, max_length=255)
+    width: int | None = None
+    height: int | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unknown_dimensions(self, handler):
+        data = handler(self)
+        for field in ("width", "height"):
+            if data.get(field) is None:
+                data.pop(field, None)
+        return data
 
 
 RecipeInputRole = Literal["reference", "mask", "mj_sref", "mj_cref", "mj_oref"]
@@ -2186,10 +2197,18 @@ class CreationAsset(BaseModel):
     created_at: str
     updated_at: str
     last_used_at: str | None = None
+    use_count: int = Field(default=0, ge=0)
     content: CreationAssetContent
     category: OptionalCategory = None
     project_ids: list[str] = Field(default_factory=list)
     adopted_from: AdoptionOrigin | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unused_count(self, handler):
+        data = handler(self)
+        if data.get("use_count") == 0:
+            data.pop("use_count", None)
+        return data
 
     @model_validator(mode="after")
     def validate_content_identity(self) -> "CreationAsset":

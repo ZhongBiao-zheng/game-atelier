@@ -113,6 +113,41 @@ def test_project_scope_uses_last_used_sorting(monkeypatch):
     assert [row.asset_id for row in rows.assets] == [first.asset_id, second.asset_id]
 
 
+def test_asset_use_count_omits_zero_and_counts_concurrent_uses():
+    from concurrent.futures import ThreadPoolExecutor
+
+    created = create_prompt_asset("使用计数", _segments(), [])
+    assert created.use_count == 0
+    assert "use_count" not in created.model_dump(mode="json")
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        list(executor.map(lambda _: mark_creation_asset_used(created.asset_id), range(8)))
+    saved = get_creation_asset(created.asset_id)
+    assert saved.use_count == 8
+    assert saved.model_dump(mode="json")["use_count"] == 8
+    assert saved.last_used_at
+    legacy = created.model_dump(mode="json")
+    assert CreationAsset.model_validate(legacy).use_count == 0
+
+
+def test_media_dimensions_survive_storage_and_legacy_content_remains_readable():
+    import io
+    from PIL import Image
+    from character_workflow.lib.schemas import CreationMediaAssetContent
+
+    stream = io.BytesIO()
+    Image.new("RGB", (120, 240)).save(stream, format="PNG")
+    asset = create_media_asset_from_bytes(title="竖图", body=stream.getvalue(),
+                                           filename="portrait.png", mime_type="image/png", tags=[])
+    saved = get_creation_asset(asset.asset_id)
+    assert (saved.content.width, saved.content.height) == (120, 240)
+    legacy = saved.content.model_dump(mode="json")
+    legacy.pop("width")
+    legacy.pop("height")
+    parsed = CreationMediaAssetContent.model_validate(legacy)
+    assert parsed.width is None and parsed.height is None
+    assert parsed.model_dump(mode="json") == legacy
+
+
 def test_media_assets_are_deduplicated_and_edit_in_place():
     created = create_media_asset_from_bytes(
         title="测试图",
