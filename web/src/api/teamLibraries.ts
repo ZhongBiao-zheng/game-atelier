@@ -117,6 +117,10 @@ export function teamAssetThumbUrl(libraryId: string, entryId: string, width: num
   return `${lib(libraryId)}/assets/${encodeURIComponent(entryId)}/thumb?w=${width}`;
 }
 
+export function teamPromptPreviewUrl(libraryId: string, entryId: string, file: string, width = 256): string {
+  return `${lib(libraryId)}/assets/${encodeURIComponent(entryId)}/previews/${encodeURIComponent(file)}/thumb?w=${width}`;
+}
+
 export function adoptTeamAsset(
   libraryId: string,
   entryId: string,

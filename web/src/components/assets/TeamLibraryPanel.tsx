@@ -1,3 +1,4 @@
+import { TeamPromptPreviewGallery } from './TeamPromptPreviewGallery';
 import { formatGenerationCost } from '@/lib/generationCost';
 import {
   Copy,
@@ -28,6 +29,7 @@ import {
   rescanTeamLibrary,
   teamAssetContentUrl,
   teamAssetThumbUrl,
+  teamPromptPreviewUrl,
   updateTeamAsset,
   withdrawTeamAsset,
 } from '@/api/teamLibraries';
@@ -451,7 +453,10 @@ export function TeamLibraryPanel({
       {viewing && libraryId && <Dialog open onOpenChange={open => { if (!open) setViewing(null); }}>
         <DialogContent aria-describedby={undefined}>
           <DialogHeader><DialogTitle>{viewing.title}</DialogTitle></DialogHeader>
-          {viewing.kind === 'prompt' ? <p className="whitespace-pre-wrap rounded-lg bg-card p-3 text-sm">{viewing.prompt_text}</p>
+          {viewing.kind === 'prompt' ? <div className="min-h-0 space-y-3 overflow-y-auto">
+            <TeamPromptPreviewGallery key={viewing.id} libraryId={libraryId} entry={viewing} />
+            <p className="whitespace-pre-wrap rounded-lg bg-card p-3 text-sm">{viewing.prompt_text}</p>
+          </div>
             : viewing.mime_type?.startsWith('image/') ? <img src={teamAssetContentUrl(libraryId, viewing.id)} alt={viewing.title} className="max-h-120 w-full rounded-lg object-contain" />
               : viewing.mime_type?.startsWith('video/') ? <video src={teamAssetContentUrl(libraryId, viewing.id)} controls className="max-h-120 w-full rounded-lg" />
                 : <audio src={teamAssetContentUrl(libraryId, viewing.id)} controls className="w-full" />}
@@ -561,9 +566,13 @@ function TeamAssetCard({ entry, libraryId, busy, owned, size, onMeasure, onAdopt
   return <div draggable={!incomplete} onDragStart={onDragStart} className={cn('group min-w-0', incomplete && 'opacity-50')}>
     <div className="relative">
       <Button variant="ghost" aria-label={`查看 ${entry.title}`} disabled={incomplete} onClick={() => onView(entry)} className="block h-auto w-full p-0 text-left font-normal">
-        {entry.kind === 'prompt' ? <span className="block rounded-md border border-border bg-card p-3">
-          <span className="mb-2 block truncate text-sm font-medium">{entry.title}</span>
-          <span className="line-clamp-2 whitespace-normal text-xs text-muted-foreground">{entry.prompt_text}</span>
+        {entry.kind === 'prompt' ? <span className="block overflow-hidden rounded-md border border-border bg-card">
+          {entry.preview_images?.[0] && <img src={teamPromptPreviewUrl(libraryId, entry.id, entry.preview_images[0].file)}
+            alt={`${entry.title}效果图`} className="w-full object-contain" />}
+          <span className="block p-3">
+            <span className="mb-2 block truncate text-sm font-medium">{entry.title}</span>
+            <span className="line-clamp-2 whitespace-normal text-xs text-muted-foreground">{entry.prompt_text}</span>
+          </span>
         </span> : <AssetMediaTile src={mime.startsWith('image/') ? teamAssetThumbUrl(libraryId, entry.id, 256) : teamAssetContentUrl(libraryId, entry.id)}
           mimeType={incomplete ? '' : mime} alt={entry.title} size={size} onMeasure={onMeasure} />}
       </Button>

@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   listTeamLibraries: vi.fn(), listTeamAssets: vi.fn(), adoptTeamAsset: vi.fn(), rescanTeamLibrary: vi.fn(),
   fetchProfile: vi.fn(), saveProfile: vi.fn(), mountTeamLibrary: vi.fn(), updateTeamAsset: vi.fn(), withdrawTeamAsset: vi.fn(), listRelatedTeamAssets: vi.fn(),
   teamAssetThumbUrl: (l: string, e: string, w: number) => `/thumb/${l}/${e}/${w}`,
+  teamPromptPreviewUrl: (l: string, e: string, f: string, w = 256) => `/preview/${l}/${e}/${f}/${w}`,
   teamAssetContentUrl: (l: string, e: string) => `/content/${l}/${e}`,
   TeamNotAuthorError: class TeamNotAuthorError extends Error {
     constructor() { super('只有作者能修改'); }
@@ -456,4 +457,24 @@ describe('TeamLibraryPanel', () => {
     expect(api.listRelatedTeamAssets).toHaveBeenCalledOnce();
     expect(within(row).getByRole('button', { name: /雪山白犬/ })).toBeInTheDocument();
   });
+});
+
+
+it('shows the team prompt cover and switches previews without changing adoption semantics', async () => {
+  const previews = ['a', 'b'].map(x => ({ file: `${x.repeat(16)}.png`, mime_type: 'image/png', width: 120, height: 60, source_job_id: null, source_model: null, added_at: '' }));
+  const prompt: TeamLibraryIndexEntry = { ...shared, kind: 'prompt', title: '夕照', mime_type: 'text/plain', prompt_text: '水彩山谷', preview_images: previews };
+  api.listTeamLibraries.mockResolvedValue([library]);
+  api.listTeamAssets.mockResolvedValue({ entries: [prompt], next_cursor: null });
+  api.adoptTeamAsset.mockResolvedValue({ asset: { asset_id: 'copied', kind: 'prompt' }, created: true });
+  const onAdopted = vi.fn();
+  render(<TeamLibraryPanel projectId="p1" onAdopted={onAdopted} />);
+  expect(await screen.findByRole('img', { name: '夕照效果图' })).toHaveAttribute('src', `/preview/${library.library_id}/${prompt.id}/${previews[0].file}/256`);
+  fireEvent.click(screen.getByRole('button', { name: '查看 夕照' }));
+  const dialog = await screen.findByRole('dialog', { name: '夕照' });
+  fireEvent.click(within(dialog).getByRole('button', { name: '查看团队效果图 2' }));
+  expect(within(dialog).getByRole('img', { name: '夕照效果图' })).toHaveAttribute('src', `/preview/${library.library_id}/${prompt.id}/${previews[1].file}/512`);
+  expect(within(dialog).getByText('水彩山谷')).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole('button', { name: '采用' }));
+  await waitFor(() => expect(onAdopted).toHaveBeenCalled());
+  expect(api.adoptTeamAsset).toHaveBeenCalledWith(library.library_id, prompt.id, 'p1');
 });
