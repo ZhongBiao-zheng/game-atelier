@@ -1,3 +1,5 @@
+import { SetPromptPreviewDialog, type PromptPreviewRequest } from '@/components/assets/SetPromptPreviewDialog';
+import { canvasPromptPreviewSource } from '@/lib/promptPreviewSource';
 import { flushSync } from 'react-dom';
 import { createAnnotatedGeneration, ensureAnnotatedInputs, type AnnotationDocumentBridge } from '@/components/canvas/annotation/annotationRendering';
 import { useCanvasAnnotation } from '@/components/canvas/annotation/useCanvasAnnotation';
@@ -527,6 +529,7 @@ function CanvasEditorInner({
   // 提示条的「看看」等延后回调会在旧渲染的闭包里跑，判断面板开没开要读当前值。
   const libraryModeRef = useRef(libraryMode);
   libraryModeRef.current = libraryMode;
+  const [promptPreviewRequest, setPromptPreviewRequest] = useState<PromptPreviewRequest | null>(null);
   const [creationAssetSaveRequest, setCreationAssetSaveRequest] = useState<CreationAssetSaveRequest | null>(null);
   const [submittingNodeIds, setSubmittingNodeIds] = useState<Set<string>>(() => new Set());
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(() => new Set());
@@ -2061,6 +2064,12 @@ function CanvasEditorInner({
     return version;
   }, [persistNow]);
 
+  const setNodePromptPreview = useCallback((node: CanvasContentNode) => {
+    const source = canvasPromptPreviewSource(resolveVersion(node.data.current_version_id), jobs);
+    if (!source) { setError('找不到这张结果的出图记录'); return; }
+    setPromptPreviewRequest(source);
+  }, [jobs, resolveVersion]);
+
   const saveNodeToLibrary = useCallback(async (node: CanvasContentNode) => {
     const version = await persistedCurrentVersion(node);
     if (!version) return;
@@ -2863,16 +2872,25 @@ function CanvasEditorInner({
             sha256: CANVAS_LOCAL_VERSION_SHA,
             origin: { kind: 'user_edit' },
           };
+      const source = current.content_versions[node.data.current_version_id ?? ''];
+      const sourceAssetId = source?.origin.kind === 'creation_asset_snapshot' ? source.origin.asset_id : null;
+      const draft = sourceAssetId
+        ? resolveCanvasGenerationDraft(node, providers, canvasUiPreferences.generation_defaults.text)
+        : null;
       const next: CanvasDocument = {
         ...current,
         content_versions: { ...current.content_versions, [versionId]: version },
         nodes: current.nodes.map(candidate => candidate.id === nodeId && candidate.type === 'text'
-          ? { ...candidate, data: { ...candidate.data, current_version_id: versionId } }
+          ? { ...candidate, data: { ...candidate.data, current_version_id: versionId,
+              ...(draft && sourceAssetId ? { generation_draft: {
+                ...draft, params: { ...draft.params, prompt_asset_id: sourceAssetId },
+              } } : {}),
+            } }
           : candidate),
       };
       return syncCanvasPromptReferences(next, canvasPromptSyncTargets(next, nodeId));
     });
-  }, [commit]);
+  }, [canvasUiPreferences.generation_defaults.text, commit, providers]);
 
   const deleteNode = useCallback((nodeId: string) => {
     const blocked = canvasDeletionBlockedMessage(
@@ -4713,6 +4731,7 @@ function CanvasEditorInner({
     createImageFromSource,
     recordHistory: recordHistorySnapshot,
     saveAsset: saveNodeToLibrary,
+    setPromptPreview: setNodePromptPreview,
     shareResult: shareCanvasResult,
     copyPrompt,
     reversePrompt,
@@ -4804,6 +4823,7 @@ function CanvasEditorInner({
     reversePromptConfiguredNodeIds,
     renameNode,
     saveNodeToLibrary,
+    setNodePromptPreview,
     shareCanvasResult,
     multiSelectionActive,
     selectCandidate,
@@ -5429,6 +5449,7 @@ function CanvasEditorInner({
                     const params = {
                       ...draft.params,
                       creation_asset_source_title: asset.title,
+                      prompt_asset_id: asset.asset_id,
                     };
                     return withGenerationDraftForNode(node, {
                       ...draft,
@@ -5475,6 +5496,8 @@ function CanvasEditorInner({
           />
         )}
 
+        <SetPromptPreviewDialog request={promptPreviewRequest} onClose={() => setPromptPreviewRequest(null)}
+          onSaved={() => { setAssetsRevision(value => value + 1); announceToolNotice('已设为效果图'); }} />
         <TeamShareDialog
           request={shareRequest}
           projectId={projectId}

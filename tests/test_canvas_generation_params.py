@@ -208,3 +208,53 @@ def test_canvas_server_rejects_unimplemented_text_and_audio_protocols():
         _normalized_params(_draft("text", text.id, n=1), 1, _key("custom", text), text)
     with pytest.raises(ValueError, match="音频模型没有可用"):
         _normalized_params(_draft("audio", audio.id), 1, _key("custom", audio), audio)
+
+
+def test_prompt_asset_hint_survives_canvas_image_freeze_without_loading_the_asset():
+    model = ModelSpec(name="GPT", id="gpt-image-2", modality="image")
+    draft = _draft("image", model.id, prompt_asset_id="deleted-prompt", n=1)
+    draft.prompt = "用户已经改过正文"
+    normalized, params, _ = _normalized_params(draft, 1, _key("openai", model), model)
+    assert normalized["prompt_asset_id"] == "deleted-prompt"
+    assert params.prompt_asset_id == "deleted-prompt"
+
+
+@pytest.mark.parametrize("edited", [False, True])
+def test_canvas_connected_prompt_keeps_asset_default_after_editing(edited):
+    from character_workflow.lib.canvas_projects import create_canvas_project, read_canvas_document
+    from character_workflow.lib.canvas_runs import prepare_canvas_generation
+    from character_workflow.lib.keys import KeysDB, write_keys_db
+    from character_workflow.lib.schemas import (
+        CanvasImageNode, CanvasInputConnection, CanvasMediaNodeData, CanvasPoint,
+        CanvasTextNode, CanvasTextNodeData, CanvasTextVersion,
+    )
+
+    project = create_canvas_project("效果图默认来源")
+    document = read_canvas_document(project.project_id)
+    model = ModelSpec(id="gpt-image-2", name="GPT", modality="image")
+    write_keys_db(KeysDB(keys=[_key("openai", model)]))
+    source = CanvasTextNode(
+        id="source", type="text", title="提示词", position=CanvasPoint(x=0, y=0),
+        data=CanvasTextNodeData(current_version_id="v1", generation_draft=(
+            _draft("text", "gpt-5", prompt_asset_id="ca-prompt") if edited else None
+        )),
+    )
+    target = CanvasImageNode(
+        id="target", type="image", title="图片", position=CanvasPoint(x=400, y=0),
+        data=CanvasMediaNodeData(generation_draft=_draft("image", model.id)),
+    )
+    version = CanvasTextVersion(
+        version_id="v1", kind="text", text="改过的提示词" if edited else "原提示词",
+        sha256="e" * 64, created_at=document.updated_at,
+        origin={"kind": "user_edit"} if edited else {
+            "kind": "creation_asset_snapshot", "title": "提示词", "asset_id": "ca-prompt",
+        },
+    )
+    document = document.model_copy(update={
+        "nodes": [source, target], "content_versions": {"v1": version},
+        "connections": [CanvasInputConnection(
+            id="edge", role="input", source_node_id=source.id, target_node_id=target.id,
+        )],
+    })
+    prepared = prepare_canvas_generation(project.project_id, document, target)
+    assert prepared.job_params.prompt_asset_id == "ca-prompt"

@@ -852,6 +852,7 @@ it('keeps hide fixed before a trailing more menu that holds save and share for i
   const base = { created_at: '2026-09-24T00:00:00Z', sha256: 'd'.repeat(64), bytes: 1, width: 64, height: 64 };
   const context = nodeContext({
     shareResult: vi.fn(),
+    setPromptPreview: vi.fn(),
     resolveVersion: versionResolver({
       generated: { ...base, version_id: 'generated', kind: 'image', path: 'runs/a.png', mime_type: 'image/png',
         origin: { kind: 'job_output', job_id: 'job-1', candidate_id: 'c-1' } },
@@ -886,6 +887,9 @@ it('keeps hide fixed before a trailing more menu that holds save and share for i
   fireEvent.keyDown(screen.getByRole('button', { name: '图片 的更多工具' }), { key: 'Enter' });
   fireEvent.click(await screen.findByRole('menuitem', { name: '分享 图片' }));
   expect(context.shareResult).toHaveBeenCalledWith(generatedImage);
+  fireEvent.keyDown(screen.getByRole('button', { name: '图片 的更多工具' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: '设为效果图' }));
+  expect(context.setPromptPreview).toHaveBeenCalledWith(generatedImage);
 });
 
 it('has no fixed save button on an audio node', () => {

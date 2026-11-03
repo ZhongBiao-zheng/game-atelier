@@ -19,7 +19,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, BookmarkPlus, Columns2, Check, ChevronRight, CircleHelp, Download, Ellipsis, Expand, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Paintbrush, Pause, Pencil, Play, Plus, Settings2, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, BookmarkPlus, ImagePlus, Columns2, Check, ChevronRight, CircleHelp, Download, Ellipsis, Expand, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Paintbrush, Pause, Pencil, Play, Plus, Settings2, Share2, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
   useRef, useState,
@@ -237,6 +237,7 @@ export interface CanvasNodeContextValue {
   createImageFromSource?: (id: string) => void;
   recordHistory: () => void;
   saveAsset: (node: CanvasContentNode) => Promise<void>;
+  setPromptPreview?: (node: CanvasContentNode) => void;
   /** 分享生成结果到团队库；不传就不显示「分享」。 */
   shareResult?: (node: CanvasContentNode) => void;
   copyPrompt: (node: CanvasContentNode) => Promise<void>;
@@ -1975,6 +1976,9 @@ function ImageNodeToolbar({
               {action.icon}{action.text}
             </DropdownMenuItem>
           ))}
+          {context.setPromptPreview && content?.kind === 'image' && (content.origin.kind === 'job_output' || content.origin.kind === 'layer_decomposition') && (
+            <DropdownMenuItem onSelect={() => context.setPromptPreview?.(node)}><ImagePlus />设为效果图</DropdownMenuItem>
+          )}
           {onSave && (
             <DropdownMenuItem aria-label={`保存 ${node.title}`} className="gap-2" onSelect={onSave}>
               <BookmarkPlus />保存到资产

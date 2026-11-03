@@ -1436,6 +1436,19 @@ def prepare_canvas_generation(
     )
     normalized, job_params, effective_count = _normalized_params(draft, requested_count, key, model)
     job_params.route_order = route_order or None
+    if not job_params.prompt_asset_id:
+        for item in inputs:
+            version = document.content_versions.get(item.version_id)
+            if not version or version.kind != "text":
+                continue
+            source = next((node for node in document.nodes if node.id == item.node_id), None)
+            source_draft = getattr(source.data, "generation_draft", None) if source else None
+            job_params.prompt_asset_id = (
+                source_draft.params.prompt_asset_id if source_draft else None
+            ) or (version.origin.asset_id if version.origin.kind == "creation_asset_snapshot" else None)
+            if job_params.prompt_asset_id:
+                normalized["prompt_asset_id"] = job_params.prompt_asset_id
+                break
     if _uses_video_frame_slots(draft) or any(
         item.source in {"first_frame", "last_frame"} for item in inputs
     ):

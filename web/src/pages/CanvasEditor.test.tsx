@@ -2777,3 +2777,25 @@ it('停用供应商退出画布模型列表，刷新后仍不可选', async () =
   await waitFor(() => expect(listKeys).toHaveBeenCalledTimes(before + 1));
   expect(screen.queryByRole('option', { name: 'Disabled model' })).not.toBeInTheDocument();
 });
+
+it('retains the prompt asset default after editing an inserted text node', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [textNode('prompt-source', '资产正文', 'prompt-version')],
+    content_versions: { 'prompt-version': {
+      version_id: 'prompt-version', kind: 'text', text: '原始提示词',
+      created_at: '2026-11-03T00:00:00Z', sha256: 'e'.repeat(64),
+      origin: { kind: 'creation_asset_snapshot', title: '角色提示词', asset_id: 'ca-prompt' },
+    } },
+  }));
+  await renderReadyCanvas();
+  fireEvent.click(screen.getByRole('button', { name: 'flow-node-prompt-source' }));
+  fireEvent.doubleClick(await screen.findByText('原始提示词'));
+  const editor = await screen.findByLabelText('编辑 资产正文 正文');
+  fireEvent.change(editor, { target: { value: '修改后的提示词' } });
+  fireEvent.change(editor, { target: { value: '再次修改提示词' } });
+  fireEvent.keyDown(editor, { key: 'Tab' });
+  await waitFor(() => expect(savedText(lastSavedDocument())).toBe('再次修改提示词'));
+  expect(lastSavedDocument()?.nodes[0].data).toMatchObject({
+    generation_draft: { params: { prompt_asset_id: 'ca-prompt' } },
+  });
+});
