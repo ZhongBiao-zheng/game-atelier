@@ -578,11 +578,12 @@ function TeamAssetCard({ entry, libraryId, busy, owned, size, onMeasure, onAdopt
         </div>
       </div>
     </div>
-    <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+    {(entry.kind !== 'prompt' || entry.author) && <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
       {entry.author && <Hint label={entry.author}><span className="grid size-4 shrink-0 place-items-center rounded-full bg-secondary">{Array.from(entry.author)[0]}</span></Hint>}
+      {entry.kind === 'prompt' && entry.author && <span className="truncate">{entry.author}</span>}
       {entry.kind !== 'prompt' && <Hint label={entry.title}><span className="truncate">{entry.title}</span></Hint>}
       {incomplete && <span className="shrink-0">同步中</span>}
-    </div>
+    </div>}
   </div>;
 }
 

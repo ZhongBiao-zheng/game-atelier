@@ -70,6 +70,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamAssets.mockResolvedValue({ entries: [raw, prompt], next_cursor: null });
     render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
     expect(await screen.findByText('石墨线稿，柔和逆光')).toBeInTheDocument();
+    expect(screen.getByText('老王')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '音频' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '团队库' }));
     fireEvent.click(await screen.findByRole('button', { name: 'concept' }));
