@@ -4,7 +4,7 @@ import { ChevronDown, ChevronLeft, Plus, Search, Upload, X } from 'lucide-react'
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 
 import { deleteCreationAsset, listCreationAssets, markCreationAssetUsed } from '@/api/creationAssets';
-import { AssetCard, AssetDetail } from '@/components/assets/CreationAssetCards';
+import { AssetCard, AssetDetail, MediaAssetGrid } from '@/components/assets/CreationAssetCards';
 import { MediaEditor, PromptEditor } from '@/components/assets/CreationAssetEditors';
 import { CanvasPicker, DeleteAssetDialog, DiscardChangesDialog } from '@/components/assets/CreationAssetPanelBits';
 import { errorMessage, type CreationAssetPanelMode, type CreationAssetSaveRequest } from '@/components/assets/creationAssetPanelModel';
@@ -378,7 +378,9 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           {kind !== 'team' && kind !== 'reference' && (
           <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
             {adoption.stalenessError && <p className="mb-2 text-xs text-muted-foreground">来源状态读取失败</p>}
-            {visibleAssets.length ? <div className="space-y-1">{visibleAssets.map(asset => <AssetCard key={asset.asset_id} asset={asset} staleness={adoption.staleness[asset.asset_id]} onOpen={() => openAsset(asset)} />)}</div> : (
+            {visibleAssets.length ? kind === 'media'
+              ? <MediaAssetGrid assets={visibleAssets} staleness={adoption.staleness} onOpen={openAsset} />
+              : <div className="space-y-1">{visibleAssets.map(asset => <AssetCard key={asset.asset_id} asset={asset} staleness={adoption.staleness[asset.asset_id]} onOpen={() => openAsset(asset)} />)}</div> : (
               <p className="py-8 text-center text-sm text-muted-foreground">{normalizedQuery || category !== null || mediaType !== 'all' ? '没有匹配的创作资产' : kind === 'prompt' ? '还没有提示词资产' : '还没有媒体资产'}</p>
             )}
           </div>

@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { AssetMasonry, mediaRatio, useMediaSizes, type MediaSize } from './AssetMasonry';
+import { AssetMediaTile } from './AssetMediaTile';
 import {
   assetMediaContent,
   type CreationAsset,
@@ -11,10 +13,12 @@ import {
   type CreationPromptSegment,
 } from '@/schema/creationAssets';
 
-export function AssetCard({ asset, staleness, onOpen }: {
+export function AssetCard({ asset, staleness, onOpen, size, onMeasure }: {
   asset: CreationAsset;
   staleness?: CreationAssetStaleness;
   onOpen: () => void;
+  size?: MediaSize;
+  onMeasure?: (size: MediaSize) => void;
 }) {
   const media = assetMediaContent(asset);
   if (asset.content.kind === 'prompt') return (
@@ -35,14 +39,32 @@ export function AssetCard({ asset, staleness, onOpen }: {
     </Button>
   );
   if (!media) return null;
+  const dimensions = media.width && media.height ? media : size;
   return <Button variant="ghost" type="button" aria-label={asset.title}
-    className="mb-2 block h-auto w-full rounded-lg border-border bg-card p-3 text-left font-normal" onClick={onOpen}>
-    <MediaPreview assetId={asset.asset_id} content={media} alt={asset.title} className="mb-3 aspect-[4/3] w-full rounded-md bg-secondary object-cover" />
-    <span className="block truncate text-sm font-medium">{asset.title}</span>
-    <span className="mt-1 block truncate text-xs text-muted-foreground">{media.filename}</span>
-    <TagList tags={asset.tags} />
+    className="block h-auto w-full min-w-0 rounded-md border-0 p-0 text-left font-normal hover:bg-card" onClick={onOpen}>
+    <AssetMediaTile src={assetMediaSrc(asset.asset_id, media)} mimeType={media.mime_type}
+      alt={asset.title} size={dimensions} onMeasure={onMeasure} />
+    <span className="mt-1 flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+      <span className="min-w-0 flex-1 truncate">{media.filename}</span>
+      {dimensions?.width && dimensions.height && !media.mime_type.startsWith('audio/')
+        ? <span className="shrink-0 tabular-nums">{dimensions.width}×{dimensions.height}</span> : null}
+    </span>
     <StalenessBadge staleness={staleness} className="mt-1" />
   </Button>;
+}
+
+export function MediaAssetGrid({ assets, staleness, onOpen }: {
+  assets: CreationAsset[];
+  staleness: Record<string, CreationAssetStaleness>;
+  onOpen: (asset: CreationAsset) => void;
+}) {
+  const { sizes, measure } = useMediaSizes();
+  const key = (asset: CreationAsset) => `${asset.asset_id}:${assetMediaContent(asset)?.sha256}`;
+  return <AssetMasonry items={assets} itemKey={key} ratio={asset => {
+    const media = assetMediaContent(asset);
+    return mediaRatio(media?.width && media.height ? media : sizes[key(asset)]);
+  }}>{asset => <AssetCard asset={asset} staleness={staleness[asset.asset_id]}
+    onOpen={() => onOpen(asset)} size={sizes[key(asset)]} onMeasure={size => measure(key(asset), size)} />}</AssetMasonry>;
 }
 
 /** 媒体地址带内容版本：重新采用换了内容后 URL 跟着变，浏览器不会继续显示缓存的旧图。 */
@@ -86,7 +108,7 @@ export function AssetDetail({ asset, busy, staleness, onUse, onReproduce, onRead
   const readopt = staleness === 'stale' ? onReadopt : undefined;
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-4">
-      {media && <MediaPreview assetId={asset.asset_id} content={media} alt={asset.title} className="aspect-square w-full rounded-lg border border-border bg-secondary object-contain" />}
+      {media && <MediaPreview assetId={asset.asset_id} content={media} alt={asset.title} className="max-h-120 w-full rounded-lg border border-border object-contain" />}
       <h2 className="mt-3 text-base font-medium">{asset.title}</h2>
       {asset.content.kind === 'prompt' && <PromptPreview segments={asset.content.segments} />}
       <TagList tags={asset.tags} />
