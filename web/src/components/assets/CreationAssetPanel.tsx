@@ -1,6 +1,6 @@
 import { ProjectReferenceLibrary } from './ProjectReferenceLibrary';
 import { promptFromAsset } from '@/lib/promptVariables';
-import { ChevronLeft, FileImage, FileText, Plus, Search, Users, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, Plus, Search, Upload, X } from 'lucide-react';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 
 import { deleteCreationAsset, listCreationAssets, markCreationAssetUsed } from '@/api/creationAssets';
@@ -13,12 +13,14 @@ import { useAdoptionStaleness } from '@/components/assets/useAdoptionStaleness';
 import { useCreationAssetEditor } from '@/components/assets/useCreationAssetEditor';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
+import { FileInput } from '@/components/ui/file-input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { AssetFilterPill } from './AssetFilterPill';
 import { cn } from '@/lib/utils';
 import { assetMediaContent, renderCreationPrompt, type CreationAsset, type CreationMediaAssetContent } from '@/schema/creationAssets';
 import type { TeamAssetAdoptResponse, TeamLibraryIndexEntry } from '@/schema/teamLibrary';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export type { CreationAssetPanelMode, CreationAssetSaveRequest, CreationGenerationSource, CreationMediaKind } from '@/components/assets/creationAssetPanelModel';
@@ -76,6 +78,10 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   const [scope, setScope] = useState<'all' | 'project'>('all');
   const [assets, setAssets] = useState<CreationAsset[]>([]);
   const [query, setQuery] = useState('');
+  const [category, setCategory] = useState<string | null>(null);
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [mediaType, setMediaType] = useState('all');
+  const uploadRef = useRef<HTMLInputElement>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +101,9 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   const selected = assets.find(asset => asset.asset_id === selectedId) ?? null;
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visibleAssets = useMemo(() => assets.filter(asset => {
+    if (kind === 'prompt' && category !== null && (asset.category ?? '') !== category) return false;
+    if (kind === 'media' && mediaType !== 'all'
+      && !assetMediaContent(asset)?.mime_type.startsWith(`${mediaType}/`)) return false;
     if (!normalizedQuery) return true;
     const preview = asset.content.kind === 'prompt'
       ? renderCreationPrompt(asset.content.segments)
@@ -102,7 +111,8 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     return asset.title.toLocaleLowerCase().includes(normalizedQuery)
       || preview.toLocaleLowerCase().includes(normalizedQuery)
       || asset.tags.some(tag => tag.toLocaleLowerCase().includes(normalizedQuery));
-  }), [assets, normalizedQuery]);
+  }), [assets, normalizedQuery, kind, category, mediaType]);
+  const categories = [...new Set(assets.map(asset => asset.category).filter((value): value is string => Boolean(value)))];
 
   async function refresh(preferredId?: string) {
     // 团队库是只读的外部挂载，不走本机创作资产目录。
@@ -293,13 +303,12 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   const editingAsset = assets.find(asset => asset.asset_id === (promptEditor?.assetId ?? mediaEditor?.assetId));
 
   return (
-    <aside aria-label="创作资产" className={cn('fixed bottom-56 right-4 top-24 z-40 flex w-[min(25rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-popover shell-glow', className)}>
+    <aside aria-label="创作资产" className={cn('fixed bottom-56 right-4 top-24 z-40 flex w-[min(25rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-panel', className)}>
       <header className="flex items-center justify-between border-b border-border px-3 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           {(selected || isEditing) && <Button variant="ghost" size="icon" aria-label="返回资产列表" onClick={back}><ChevronLeft /></Button>}
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{canvasPickerAsset ? '加入画布' : promptEditor?.assetId || mediaEditor?.assetId ? '编辑资产' : isEditing ? '保存为创作资产' : selected?.title ?? '创作资产'}</p>
-            <p className="text-xs text-muted-foreground">创作台与画布共用</p>
+            <p className="truncate text-base font-medium">{canvasPickerAsset ? '加入画布' : promptEditor?.assetId || mediaEditor?.assetId ? '编辑资产' : isEditing ? '保存为创作资产' : selected?.title ?? '创作资产'}</p>
           </div>
         </div>
         <Button variant="ghost" size="icon" aria-label="关闭创作资产" onClick={close}><X /></Button>
@@ -309,12 +318,12 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
 
       {!selected && !isEditing && (
         <>
-          <Tabs className="border-b border-border p-1.5" value={kind} onValueChange={value => setKind(value as typeof kind)}>
-            <TabsList aria-label="资产类型" className={cn('grid w-full', projectId ? 'grid-cols-4' : teamProjectId ? 'grid-cols-3' : 'grid-cols-2')}>
-              <TabsTrigger value="prompt"><FileText />提示词</TabsTrigger>
-              <TabsTrigger value="media"><FileImage />媒体</TabsTrigger>
-              {projectId && <TabsTrigger value="reference"><FileImage />参考库</TabsTrigger>}
-              {teamProjectId && <TabsTrigger value="team"><Users />团队</TabsTrigger>}
+          <Tabs className="px-3" value={kind} onValueChange={value => { setKind(value as typeof kind); setScope('all'); setCategory(null); setMediaType('all'); }}>
+            <TabsList variant="line" aria-label="资产类型">
+              <TabsTrigger variant="line" value="prompt">提示词</TabsTrigger>
+              <TabsTrigger variant="line" value="media">媒体</TabsTrigger>
+              {projectId && <TabsTrigger variant="line" value="reference">参考库</TabsTrigger>}
+              {teamProjectId && <TabsTrigger variant="line" value="team">团队</TabsTrigger>}
             </TabsList>
           </Tabs>
           {kind === 'team' && teamProjectId && teamProjectChoices.length > 1 && (
@@ -341,23 +350,36 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
             />
           )}
           {kind !== 'team' && kind !== 'reference' && (
-          <div className="space-y-2 border-b border-border p-3">
-            {projectId && <ToggleGroup type="single" size="sm" variant="outline" aria-label="资产范围" value={scope} onValueChange={value => { if (value) setScope(value as typeof scope); }}>
-              <ToggleGroupItem value="all">全部资产</ToggleGroupItem>
-              <ToggleGroupItem value="project">本项目</ToggleGroupItem>
-            </ToggleGroup>}
-            <InputGroup>
+          <div className="space-y-3 p-3">
+            <div className="flex items-center gap-2"><InputGroup className="min-w-0 flex-1">
               <InputGroupAddon><Search aria-hidden="true" /></InputGroupAddon>
               <InputGroupInput aria-label="搜索创作资产" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索标题、正文或标签" />
             </InputGroup>
-            {kind === 'prompt' && <Button variant="outline" size="sm" className="w-full" onClick={() => beginPromptEdit()}><Plus />新建提示词资产</Button>}
+            {kind === 'prompt' ? <Button size="icon" className="shrink-0" aria-label="新建提示词资产" onClick={() => beginPromptEdit()}><Plus /></Button>
+              : <Button size="icon" className="shrink-0" aria-label="上传媒体资产" onClick={() => uploadRef.current?.click()}><Upload /></Button>}
+            {kind === 'media' && <FileInput ref={uploadRef} className="hidden" accept="image/*,video/*,audio/*" onChange={event => {
+              const file = event.target.files?.[0]; event.target.value = '';
+              if (file) loadSaveRequest({ requestId: crypto.randomUUID(), kind: 'media', file, projectId });
+            }} />}</div>
+            {kind === 'prompt' ? <div role="group" aria-label="资产范围" className="flex flex-wrap gap-2">
+              <AssetFilterPill selected={scope === 'all' && category === null} onClick={() => { setScope('all'); setCategory(null); }}>全部</AssetFilterPill>
+              {projectId && <AssetFilterPill selected={scope === 'project'} onClick={() => { setScope('project'); setCategory(null); }}>本项目</AssetFilterPill>}
+              <Popover open={categoryOpen} onOpenChange={setCategoryOpen}>
+                <PopoverTrigger asChild><Button variant="ghost" size="sm" className={cn('h-7 rounded-full border-border px-3 text-xs font-normal', category !== null ? 'bg-secondary' : 'text-muted-foreground')}>按分类<ChevronDown /></Button></PopoverTrigger>
+                <PopoverContent className="w-44 p-1" align="start">
+                  {[...categories, ''].map(value => <Button key={value} variant="ghost" className="w-full justify-start" onClick={() => { setCategory(value); setScope('all'); setCategoryOpen(false); }}>{value || '未分类'}</Button>)}
+                </PopoverContent>
+              </Popover>
+            </div> : <div role="group" aria-label="媒体类型" className="flex gap-2">
+              {[['all', '全部'], ['image', '图片'], ['video', '视频'], ['audio', '音频']].map(([value, label]) => <AssetFilterPill key={value} selected={mediaType === value} onClick={() => setMediaType(value)}>{label}</AssetFilterPill>)}
+            </div>}
           </div>
           )}
           {kind !== 'team' && kind !== 'reference' && (
-          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
             {adoption.stalenessError && <p className="mb-2 text-xs text-muted-foreground">来源状态读取失败</p>}
-            {visibleAssets.length ? visibleAssets.map(asset => <AssetCard key={asset.asset_id} asset={asset} busy={busy} staleness={adoption.staleness[asset.asset_id]} onOpen={() => openAsset(asset)} onReproduce={onReproduce && asset.kind === 'generation' ? () => void reproduceAsset(asset) : undefined} onReadopt={() => adoption.requestReadopt(asset)} />) : (
-              <div className="grid min-h-40 place-items-center rounded-lg border border-dashed border-border px-8 text-center text-xs leading-relaxed text-muted-foreground">{normalizedQuery ? '没有匹配的创作资产' : kind === 'prompt' ? '还没有提示词资产' : '还没有媒体资产'}</div>
+            {visibleAssets.length ? <div className="space-y-1">{visibleAssets.map(asset => <AssetCard key={asset.asset_id} asset={asset} staleness={adoption.staleness[asset.asset_id]} onOpen={() => openAsset(asset)} />)}</div> : (
+              <p className="py-8 text-center text-sm text-muted-foreground">{normalizedQuery || category !== null || mediaType !== 'all' ? '没有匹配的创作资产' : kind === 'prompt' ? '还没有提示词资产' : '还没有媒体资产'}</p>
             )}
           </div>
           )}

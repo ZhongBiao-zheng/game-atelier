@@ -14,11 +14,13 @@ Tabs.displayName = TabsPrimitive.Root.displayName;
 
 export const TabsList = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.List>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>
->(({ className, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof TabsPrimitive.List> & { variant?: 'default' | 'line' }
+>(({ className, variant = 'default', ...props }, ref) => (
   <TabsPrimitive.List
     ref={ref}
-    className={cn('inline-flex h-9 w-fit items-center justify-center rounded-lg bg-secondary p-1 text-muted-foreground', className)}
+    className={cn('inline-flex items-center text-muted-foreground', variant === 'line'
+      ? 'h-11 w-full justify-start gap-5 border-b border-border'
+      : 'h-9 w-fit justify-center rounded-lg bg-secondary p-1', className)}
     {...props}
   />
 ));
@@ -26,12 +28,14 @@ TabsList.displayName = TabsPrimitive.List.displayName;
 
 export const TabsTrigger = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
->(({ className, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger> & { variant?: 'default' | 'line' }
+>(({ className, variant = 'default', ...props }, ref) => (
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      'inline-flex h-full flex-1 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2 text-sm font-medium transition-[color,box-shadow,background-color] hover:text-foreground disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-card data-[state=active]:text-foreground [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
+      'inline-flex h-full cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap text-sm transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50 data-[state=active]:text-foreground [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
+      variant === 'line' ? 'border-b-2 border-transparent px-0 font-normal data-[state=active]:border-primary data-[state=active]:font-medium'
+        : 'flex-1 rounded-md border border-transparent px-2 font-medium data-[state=active]:bg-card',
       FOCUS_RING,
       className,
     )}

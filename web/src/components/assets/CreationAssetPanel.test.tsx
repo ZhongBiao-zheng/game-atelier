@@ -328,7 +328,7 @@ describe('CreationAssetPanel', () => {
     );
 
     expect(await screen.findByPlaceholderText('搜索标题、正文或标签')).toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: '资产范围' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '本项目' })).not.toBeInTheDocument();
 
     fireEvent.mouseDown(await screen.findByRole('tab', { name: '团队' }));
     expect(await screen.findByTestId('team-panel')).toHaveAttribute('data-project-id', 'canvas-a');
@@ -447,7 +447,7 @@ describe('CreationAssetPanel', () => {
     expect(screen.queryByRole('button', { name: '团队复刻' })).not.toBeInTheDocument();
   });
 
-  it('reproduces a generation asset from its card and detail', async () => {
+  it('moves reproduce from the generation card into its detail', async () => {
     const mediaAsset: CreationAsset = {
       ...promptAsset,
       asset_id: 'asset-media',
@@ -465,17 +465,13 @@ describe('CreationAssetPanel', () => {
     );
 
     await screen.findByRole('button', { name: /普通图/ });
-    const cardButtons = screen.getAllByRole('button', { name: '复刻' });
-    expect(cardButtons).toHaveLength(1);
-    fireEvent.click(cardButtons[0]);
-    await waitFor(() => expect(onReproduce).toHaveBeenCalledWith(generationAsset));
-    expect(mocks.markUsed).toHaveBeenCalledWith('asset-generation', undefined);
-    expect(onClose).toHaveBeenCalledOnce();
-
+    expect(screen.queryByRole('button', { name: '复刻' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /雪山白犬/ }));
     await screen.findByRole('heading', { name: '雪山白犬' });
     fireEvent.click(screen.getByRole('button', { name: '复刻' }));
-    await waitFor(() => expect(onReproduce).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(onReproduce).toHaveBeenCalledWith(generationAsset));
+    expect(mocks.markUsed).toHaveBeenCalledWith('asset-generation', undefined);
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it('hides reproduce on generation assets without onReproduce', async () => {
@@ -509,11 +505,11 @@ describe('CreationAssetPanel', () => {
       expect(await screen.findByText('来源已更新')).toBeInTheDocument();
       expect(mocks.staleness).toHaveBeenCalledOnce();
       expect(mocks.staleness).toHaveBeenCalledWith(['asset-stale', 'asset-gone', 'asset-fresh']);
-      expect(within(cardOf('旧白犬')).getByRole('button', { name: '重新采用' })).toBeInTheDocument();
+      expect(within(cardOf('旧白犬')).getByText('来源已更新')).toBeInTheDocument();
       expect(within(cardOf('撤回的')).getByText('来源已撤回')).toBeInTheDocument();
       expect(within(cardOf('撤回的')).queryByRole('button', { name: '重新采用' })).toBeNull();
       expect(within(cardOf('最新的')).queryByText(/来源已/)).toBeNull();
-      expect(screen.getAllByRole('button', { name: '重新采用' })).toHaveLength(1);
+      expect(screen.queryByRole('button', { name: '重新采用' })).toBeNull();
 
       fireEvent.change(screen.getByPlaceholderText('搜索标题、正文或标签'), { target: { value: '白犬' } });
       expect(screen.getByText('来源已更新')).toBeInTheDocument();
@@ -533,6 +529,7 @@ describe('CreationAssetPanel', () => {
       mocks.readopt.mockResolvedValue({ ...stale, title: '新白犬' });
       renderMedia();
 
+      fireEvent.click(await screen.findByRole('button', { name: /旧白犬/ }));
       fireEvent.click(await screen.findByRole('button', { name: '重新采用' }));
       const dialog = await screen.findByRole('alertdialog');
       expect(within(dialog).getByRole('heading', { name: '覆盖本机副本？' })).toBeInTheDocument();
@@ -540,7 +537,7 @@ describe('CreationAssetPanel', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: '覆盖' }));
 
       await waitFor(() => expect(mocks.readopt).toHaveBeenCalledWith('asset-stale'));
-      expect(await screen.findByRole('button', { name: /新白犬/ })).toBeInTheDocument();
+      expect(await screen.findByRole('heading', { name: '新白犬' })).toBeInTheDocument();
       expect(screen.queryByText('来源已更新')).toBeNull();
       expect(screen.queryByRole('button', { name: '重新采用' })).toBeNull();
     });
@@ -551,6 +548,7 @@ describe('CreationAssetPanel', () => {
       mocks.readopt.mockRejectedValue(new TeamSourceWithdrawnError());
       renderMedia();
 
+      fireEvent.click(await screen.findByRole('button', { name: /旧白犬/ }));
       fireEvent.click(await screen.findByRole('button', { name: '重新采用' }));
       fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '覆盖' }));
 
@@ -583,6 +581,7 @@ describe('CreationAssetPanel', () => {
 
       await screen.findByText('来源已更新');
       expect(container.querySelector('img')).toHaveAttribute('src', versioned('asset-stale', 'b'.repeat(64)));
+      fireEvent.click(screen.getByRole('button', { name: /旧白犬/ }));
       fireEvent.click(screen.getByRole('button', { name: '重新采用' }));
       fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '覆盖' }));
 
@@ -595,10 +594,10 @@ describe('CreationAssetPanel', () => {
       mocks.staleness
         .mockImplementationOnce(() => new Promise(resolve => { releaseFirst = resolve; }))
         .mockResolvedValue({ 'asset-stale': 'fresh' });
-      render(<CreationAssetPanel projectId="canvas-a" initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
+      const view = render(<CreationAssetPanel projectId="canvas-a" initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
       await screen.findByRole('button', { name: /旧白犬/ });
-      fireEvent.click(screen.getByRole('radio', { name: '本项目' }));
+      view.rerender(<CreationAssetPanel refreshKey={1} projectId="canvas-a" initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
       await waitFor(() => expect(mocks.staleness).toHaveBeenCalledTimes(2));
       await act(async () => { releaseFirst({ 'asset-stale': 'stale' }); });
 
@@ -612,11 +611,12 @@ describe('CreationAssetPanel', () => {
         .mockResolvedValueOnce({ 'asset-stale': 'stale' })
         .mockImplementationOnce(() => new Promise(resolve => { releaseSecond = resolve; }));
       mocks.readopt.mockResolvedValue(stale);
-      render(<CreationAssetPanel projectId="canvas-a" initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
+      const view = render(<CreationAssetPanel projectId="canvas-a" initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
       await screen.findByText('来源已更新');
-      fireEvent.click(screen.getByRole('radio', { name: '本项目' }));
+      view.rerender(<CreationAssetPanel refreshKey={1} projectId="canvas-a" initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
       await waitFor(() => expect(mocks.staleness).toHaveBeenCalledTimes(2));
+      fireEvent.click(screen.getByRole('button', { name: /旧白犬/ }));
       fireEvent.click(screen.getByRole('button', { name: '重新采用' }));
       fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '覆盖' }));
       await waitFor(() => expect(screen.queryByText('来源已更新')).toBeNull());
@@ -787,8 +787,8 @@ describe('CreationAssetPanel', () => {
 
 it('starts with all assets in a Canvas and can filter the current project', async () => {
   render(<CreationAssetPanel projectId="canvas-demo" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
-  const all = await screen.findByRole('radio', { name: '全部资产' });
-  expect(all).toHaveAttribute('data-state', 'on');
-  fireEvent.click(screen.getByRole('radio', { name: '本项目' }));
-  expect(screen.getByRole('radio', { name: '本项目' })).toHaveAttribute('data-state', 'on');
+  const all = await screen.findByRole('button', { name: '全部' });
+  expect(all).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(screen.getByRole('button', { name: '本项目' }));
+  expect(screen.getByRole('button', { name: '本项目' })).toHaveAttribute('aria-pressed', 'true');
 });

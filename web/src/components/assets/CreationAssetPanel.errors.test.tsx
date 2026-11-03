@@ -67,6 +67,7 @@ describe('CreationAssetPanel server errors', () => {
     });
     render(<CreationAssetPanel initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
+    fireEvent.click(await screen.findByRole('button', { name: /旧白犬/ }));
     fireEvent.click(await screen.findByRole('button', { name: '重新采用' }));
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '覆盖' }));
 

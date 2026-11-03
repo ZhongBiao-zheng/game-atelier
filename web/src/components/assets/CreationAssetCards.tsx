@@ -1,4 +1,4 @@
-import { Copy, FileAudio, FileVideo, RefreshCw, Trash2 } from 'lucide-react';
+import { Copy, FileAudio, FileVideo, ImageIcon, RefreshCw, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -11,35 +11,38 @@ import {
   type CreationPromptSegment,
 } from '@/schema/creationAssets';
 
-export function AssetCard({ asset, busy, staleness, onOpen, onReproduce, onReadopt }: {
+export function AssetCard({ asset, staleness, onOpen }: {
   asset: CreationAsset;
-  busy: boolean;
   staleness?: CreationAssetStaleness;
   onOpen: () => void;
-  onReproduce?: () => void;
-  onReadopt?: () => void;
 }) {
-  const readopt = staleness === 'stale' ? onReadopt : undefined;
   const media = assetMediaContent(asset);
-  // 「复刻」是卡片外的兄弟按钮：按钮不能嵌套在打开详情的按钮里。
-  return (
-    <div className="mb-2 overflow-hidden rounded-lg border border-border bg-card">
-      <Button variant="bare" type="button" className="w-full p-3 text-left outline-none hover:bg-secondary/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" onClick={onOpen}>
-        {media && <MediaPreview assetId={asset.asset_id} content={media} alt="" className="mb-3 aspect-[4/3] w-full rounded-md bg-secondary object-cover" />}
-        <p className="truncate text-sm font-medium">{asset.title}</p>
-        {asset.content.kind === 'prompt' ? <PromptPreview segments={asset.content.segments} /> : <p className="mt-1 truncate text-xs text-muted-foreground">{media?.filename}</p>}
-        {asset.category && <span className="mt-2 inline-block rounded-md border border-border px-2 py-0.5 text-xs">{asset.category}</span>}
-        <TagList tags={asset.tags} />
-        <StalenessBadge staleness={staleness} className="mt-2" />
-      </Button>
-      {(onReproduce || readopt) && (
-        <div className="flex gap-2 px-3 pb-3">
-          {readopt && <Button size="sm" variant="outline" disabled={busy} onClick={readopt}><RefreshCw />重新采用</Button>}
-          {onReproduce && <Button size="sm" variant="outline" disabled={busy} onClick={onReproduce}><Copy />复刻</Button>}
-        </div>
-      )}
-    </div>
+  if (asset.content.kind === 'prompt') return (
+    <Button variant="ghost" type="button" onClick={onOpen}
+      className="h-auto w-full items-start justify-start gap-3 rounded-lg p-2 text-left font-normal whitespace-normal hover:bg-card">
+      <span className="grid size-19 shrink-0 place-items-center rounded-md border border-dashed border-border text-muted-foreground">
+        <ImageIcon className="size-5" aria-hidden="true" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-2">
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{asset.title}</span>
+          <span className="shrink-0 text-xs font-normal tabular-nums text-muted-foreground">{asset.use_count ? `用过 ${asset.use_count} 次` : '未使用'}</span>
+        </span>
+        <PromptPreview segments={asset.content.segments} />
+        <TagList tags={[...(asset.category ? [asset.category] : []), ...asset.tags]} />
+        <StalenessBadge staleness={staleness} className="mt-1" />
+      </span>
+    </Button>
   );
+  if (!media) return null;
+  return <Button variant="ghost" type="button" aria-label={asset.title}
+    className="mb-2 block h-auto w-full rounded-lg border-border bg-card p-3 text-left font-normal" onClick={onOpen}>
+    <MediaPreview assetId={asset.asset_id} content={media} alt={asset.title} className="mb-3 aspect-[4/3] w-full rounded-md bg-secondary object-cover" />
+    <span className="block truncate text-sm font-medium">{asset.title}</span>
+    <span className="mt-1 block truncate text-xs text-muted-foreground">{media.filename}</span>
+    <TagList tags={asset.tags} />
+    <StalenessBadge staleness={staleness} className="mt-1" />
+  </Button>;
 }
 
 /** 媒体地址带内容版本：重新采用换了内容后 URL 跟着变，浏览器不会继续显示缓存的旧图。 */
@@ -101,7 +104,7 @@ export function AssetDetail({ asset, busy, staleness, onUse, onReproduce, onRead
 
 export function TagList({ tags }: { tags: string[] }) {
   if (!tags.length) return null;
-  return <div className="mt-2 flex flex-wrap gap-1.5">{tags.map(tag => <span key={tag} className="rounded-full border border-border bg-secondary px-2 py-0.5 text-xs text-muted-foreground">{tag}</span>)}</div>;
+  return <span className="mt-2 flex flex-wrap gap-1">{[...new Set(tags)].map(tag => <span key={tag} className="rounded-sm bg-secondary px-1.5 py-0.5 text-xs font-normal text-muted-foreground">{tag}</span>)}</span>;
 }
 
 /** 采用副本相对团队库来源的状态：fresh / unknown 不打扰。 */

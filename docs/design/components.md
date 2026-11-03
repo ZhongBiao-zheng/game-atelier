@@ -18,7 +18,7 @@
 | 分段切换（视图、模式） | `ToggleGroup` + `ToggleGroupItem` | `type="single"` 再点已选项得到空值，调用方忽略空值以保持必选 |
 | 单个按下 / 弹起 | `Toggle` | |
 | 弹层里的紧凑参数（尺寸、档位、时长、开关） | `Segmented` + `SegmentedItem` | ToggleGroup 单选 + 滑动底色；选中态写在各项的 `selected` 上 |
-| 内容分页 | `Tabs` + `TabsList` / `TabsTrigger` / `TabsContent` | |
+| 内容分页 | `Tabs` + `TabsList` / `TabsTrigger` / `TabsContent` | 文字下划线页签给 List 与 Trigger 传 `variant="line"` |
 | 数值拖动 | `Slider` | |
 | 选文件 | `FileInput` | 隐藏，由按钮或拖放区 `ref.click()` 触发 |
 | 按钮 | `Button` | `variant`：default / secondary / outline / ghost / destructive / link；`size`：default / sm / lg / icon |
