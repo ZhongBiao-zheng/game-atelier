@@ -1,6 +1,9 @@
+import { PromptAssetDetail } from './PromptAssetDetail';
+import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ProjectReferenceLibrary } from './ProjectReferenceLibrary';
 import { promptFromAsset } from '@/lib/promptVariables';
-import { ChevronDown, ChevronLeft, Plus, Search, Upload, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, Plus, Search, Upload, X, MoreHorizontal, Pencil, Share2, Trash2 } from 'lucide-react';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 
 import { deleteCreationAsset, listCreationAssets, markCreationAssetUsed } from '@/api/creationAssets';
@@ -88,6 +91,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   const [canvasPickerAsset, setCanvasPickerAsset] = useState<CreationAsset | null>(null);
   const [linkedCanvas, setLinkedCanvas] = useState<{ projectId: string; name: string } | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
+  const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CreationAsset | null>(null);
   const leaveActionRef = useRef<(() => void) | null>(null);
   const adoption = useAdoptionStaleness({
@@ -299,6 +303,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     }
   }
 
+  const HeaderTitle = selected?.kind === 'prompt' ? 'h2' : 'p';
   const isEditing = Boolean(promptEditor || mediaEditor || canvasPickerAsset);
   const editingAsset = assets.find(asset => asset.asset_id === (promptEditor?.assetId ?? mediaEditor?.assetId));
 
@@ -308,10 +313,16 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         <div className="flex min-w-0 items-center gap-2">
           {(selected || isEditing) && <Button variant="ghost" size="icon" aria-label="返回资产列表" onClick={back}><ChevronLeft /></Button>}
           <div className="min-w-0">
-            <p className="truncate text-base font-medium">{canvasPickerAsset ? '加入画布' : promptEditor?.assetId || mediaEditor?.assetId ? '编辑资产' : isEditing ? '保存为创作资产' : selected?.title ?? '创作资产'}</p>
+            <HeaderTitle className="truncate text-base font-medium">{canvasPickerAsset ? '加入画布' : promptEditor?.assetId || mediaEditor?.assetId ? '编辑资产' : isEditing ? '保存为创作资产' : selected?.title ?? '创作资产'}</HeaderTitle>
           </div>
         </div>
-        <Button variant="ghost" size="icon" aria-label="关闭创作资产" onClick={close}><X /></Button>
+        {selected?.kind === 'prompt' ? <DropdownMenu><DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" aria-label="更多提示词操作"><MoreHorizontal /></Button>
+        </DropdownMenuTrigger><DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => beginPromptEdit(selected)}><Pencil />编辑</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setShareRequest({ source: { kind: 'creation_asset', asset_id: selected.asset_id }, defaultTitle: selected.title })}><Share2 />分享到团队库</DropdownMenuItem>
+          <DropdownMenuItem className="text-destructive" onSelect={() => setDeleteTarget(selected)}><Trash2 />删除</DropdownMenuItem>
+        </DropdownMenuContent></DropdownMenu> : <Button variant="ghost" size="icon" aria-label="关闭创作资产" onClick={close}><X /></Button>}
       </header>
 
       {error && <p role="alert" className="mx-3 mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}
@@ -439,7 +450,12 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         />
       )}
 
-      {selected && (
+      {selected?.content.kind === 'prompt' && <PromptAssetDetail key={selected.asset_id} asset={selected} busy={busy}
+        staleness={adoption.staleness[selected.asset_id]} onUse={() => void applyAsset(selected)}
+        onEdit={() => beginPromptEdit(selected)} onReadopt={() => adoption.requestReadopt(selected)}
+        onUpdated={updated => setAssets(current => current.map(asset => asset.asset_id === updated.asset_id ? updated : asset))} />}
+      <TeamShareDialog request={shareRequest} projectId={projectId} onClose={() => setShareRequest(null)} onShared={() => setShareRequest(null)} />
+      {selected && selected.kind !== 'prompt' && (
         <AssetDetail
           asset={selected}
           busy={busy}
@@ -448,7 +464,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           onUse={() => void applyAsset(selected)}
           onReproduce={onReproduce && selected.kind === 'generation' ? () => void reproduceAsset(selected) : undefined}
           // 生成资产是冻结快照，本机不改；只能删。
-          onEdit={selected.kind === 'generation' ? undefined : () => selected.kind === 'prompt' ? beginPromptEdit(selected) : beginMediaEdit(selected)}
+          onEdit={selected.kind === 'generation' ? undefined : () => beginMediaEdit(selected)}
           onDelete={selected.kind === 'generation' ? () => setDeleteTarget(selected) : undefined}
         />
       )}

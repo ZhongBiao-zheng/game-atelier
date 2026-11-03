@@ -1,6 +1,7 @@
 import { Copy, FileAudio, FileVideo, ImageIcon, RefreshCw, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import { promptPreviewUrl } from '@/api/creationAssets';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { AssetMasonry, mediaRatio, useMediaSizes, type MediaSize } from './AssetMasonry';
@@ -24,9 +25,10 @@ export function AssetCard({ asset, staleness, onOpen, size, onMeasure }: {
   if (asset.content.kind === 'prompt') return (
     <Button variant="ghost" type="button" onClick={onOpen}
       className="h-auto w-full items-start justify-start gap-3 rounded-lg p-2 text-left font-normal whitespace-normal hover:bg-card">
-      <span className="grid size-19 shrink-0 place-items-center rounded-md border border-dashed border-border text-muted-foreground">
+      {asset.content.preview_images?.[0] ? <img src={promptPreviewUrl(asset.asset_id, asset.content.preview_images[0].file, 128)}
+        alt="" className="size-19 shrink-0 rounded-md object-cover" /> : <span className="grid size-19 shrink-0 place-items-center rounded-md border border-dashed border-input text-muted-foreground">
         <ImageIcon className="size-5" aria-hidden="true" />
-      </span>
+      </span>}
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
           <span className="min-w-0 flex-1 truncate text-sm font-medium">{asset.title}</span>
@@ -86,8 +88,8 @@ export function MediaPreview({ assetId, content, alt, className }: {
   return null;
 }
 
-export function PromptPreview({ segments }: { segments: CreationPromptSegment[] }) {
-  return <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{segments.map((segment, index) => segment.kind === 'text' ? segment.text : <span key={`${segment.name}-${index}`} className="mx-0.5 rounded border border-border bg-secondary px-1"><span className="text-muted-foreground">{segment.name}：</span><span className="text-foreground/80">{segment.default_value}</span></span>)}</p>;
+export function PromptPreview({ segments, clamp = true }: { segments: CreationPromptSegment[]; clamp?: boolean }) {
+  return <p className={cn("mt-1 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground", clamp && "line-clamp-2")}>{segments.map((segment, index) => segment.kind === 'text' ? segment.text : <span key={`${segment.name}-${index}`} className="mx-0.5 rounded border border-border bg-secondary px-1"><span className="text-muted-foreground">{segment.name}：</span><span className="text-foreground/80">{segment.default_value}</span></span>)}</p>;
 }
 
 export function DeleteAssetButton({ disabled, onClick }: { disabled: boolean; onClick: () => void }) {
