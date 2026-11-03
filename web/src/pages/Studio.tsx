@@ -1,3 +1,4 @@
+import { SetPromptPreviewDialog, type PromptPreviewRequest } from '@/components/assets/SetPromptPreviewDialog';
 import { connectionFetch } from '@/api/connection';
 import { useHeicAsJpeg } from '@/lib/heicImages';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -189,6 +190,9 @@ function StudioFull() {
   const [assetSaveRequest, setAssetSaveRequest] = useState<CreationAssetSaveRequest | null>(null);
   const assetPanelRef = useRef<CreationAssetPanelHandle>(null);
   const [canvasTargets, setCanvasTargets] = useState<CanvasProject[]>([]);
+  const [assetsRevision, setAssetsRevision] = useState(0);
+  const [promptPreviewRequest, setPromptPreviewRequest] = useState<PromptPreviewRequest | null>(null);
+  const [promptAssetId, setPromptAssetId] = useState<string | null>(draft?.promptAssetId ?? null);
   const [promptAssetSourceTitle, setPromptAssetSourceTitle] = useState<string | null>(draft?.promptAssetSourceTitle ?? null);
   const [referenceImages, setReferenceImages] = useState<File[]>(draft?.referenceImages ?? []);
   const [kind, setKind] = useState<JobKind>(draft?.kind ?? saved.kind ?? 'image');
@@ -212,13 +216,13 @@ function StudioFull() {
   // 每次改动都把未提交的输入写进内存草稿；切页卸载后回来按它恢复，刷新即清空。
   useEffect(() => {
     writeStudioDraft({
-      providerAlias, model, kind, promptText, promptAssetSourceTitle,
+      providerAlias, model, kind, promptText, promptAssetSourceTitle, promptAssetId,
       referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
       sizeParams, count, quality,
       videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
     });
   }, [
-    providerAlias, model, kind, promptText, promptAssetSourceTitle,
+    providerAlias, model, kind, promptText, promptAssetSourceTitle, promptAssetId,
     referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
     sizeParams, count, quality,
     videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
@@ -572,6 +576,7 @@ function StudioFull() {
     const evoMj = isEvolinkMidjourney(channel.modelId, effectiveProvider);
     const rawMjParams = overrideConfig?.mjParams ?? mjParams;
     const effectiveMjParams = evoMj ? evolinkMjParams(rawMjParams) : rawMjParams;
+    const effectivePromptAssetId = overrideConfig ? overrideConfig.promptAssetId : promptAssetId;
     const effectiveSourceAssetTitle = overrideConfig
       ? overrideConfig.sourceAssetTitle
       : promptAssetSourceTitle ?? undefined;
@@ -614,6 +619,7 @@ function StudioFull() {
       referenceImages: refPaths,
       workflowInputs: effectiveSizeParams.workflow_inputs,
       ...(effectiveSourceAssetTitle ? { sourceAssetTitle: effectiveSourceAssetTitle } : {}),
+      ...(effectivePromptAssetId ? { promptAssetId: effectivePromptAssetId } : {}),
       ...(caps.family === 'midjourney'
         ? { mjParams: effectiveMjParams, mjRefPaths }
         : {}),
@@ -629,6 +635,7 @@ function StudioFull() {
       n: effectiveCount,
       ...(effectiveQuality ? { quality: effectiveQuality } : {}),
       ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
+      ...(effectivePromptAssetId ? { prompt_asset_id: effectivePromptAssetId } : {}),
       ...(effectiveSourceAssetTitle
         ? { creation_asset_source_title: effectiveSourceAssetTitle }
         : {}),
@@ -751,6 +758,7 @@ function StudioFull() {
       ? overrideConfig.videoQuality
       : (effectiveCaps.qualities ? videoQuality : undefined);
     const effectiveCount = clampImageCount(overrideConfig?.n ?? videoCount);
+    const effectivePromptAssetId = overrideConfig ? overrideConfig.promptAssetId : promptAssetId;
     const effectiveSourceAssetTitle = overrideConfig
       ? overrideConfig.sourceAssetTitle
       : promptAssetSourceTitle ?? undefined;
@@ -779,6 +787,7 @@ function StudioFull() {
       ...(imgPaths.length ? { reference_images: imgPaths } : {}),
       ...(vidPaths.length ? { reference_videos: vidPaths } : {}),
       ...(audPaths.length ? { reference_audios: audPaths } : {}),
+      ...(effectivePromptAssetId ? { prompt_asset_id: effectivePromptAssetId } : {}),
       ...(effectiveSourceAssetTitle
         ? { creation_asset_source_title: effectiveSourceAssetTitle }
         : {}),
@@ -809,6 +818,7 @@ function StudioFull() {
       referenceVideos: vidPaths,
       referenceAudios: audPaths,
       ...(effectiveSourceAssetTitle ? { sourceAssetTitle: effectiveSourceAssetTitle } : {}),
+      ...(effectivePromptAssetId ? { promptAssetId: effectivePromptAssetId } : {}),
     };
 
     const startedAt = Date.now();
@@ -902,6 +912,7 @@ function StudioFull() {
             });
           }}
           onSaveResultAsset={saveResultAsset}
+          onSetPromptPreview={setPromptPreviewRequest}
         />
       </div>
       {/* 浮层输入：wrapper 不收事件，两侧视觉与交互都穿透到历史区；壳本体在 PromptInput 内
@@ -1042,6 +1053,7 @@ function StudioFull() {
       </div>
       {assetPanelOpen && (
         <CreationAssetPanel
+          refreshKey={assetsRevision}
           key={assetPanelMount}
           ref={assetPanelRef}
           initialKind={assetPanelKind}
@@ -1062,6 +1074,7 @@ function StudioFull() {
           onUsePrompt={(asset, renderedPrompt) => {
             setPromptText(renderedPrompt);
             setPromptAssetSourceTitle(asset.title);
+            setPromptAssetId(asset.asset_id);
             setClickPinned(true);
           }}
           onUseMedia={(asset, content) => { void addCreationAssetReference(asset, content); }}
@@ -1069,6 +1082,7 @@ function StudioFull() {
           onTeamAssetAdopted={result => setAssetNotice(result.created ? '已加入资产库' : '已在你的资产库')}
         />
       )}
+      <SetPromptPreviewDialog request={promptPreviewRequest} onClose={() => setPromptPreviewRequest(null)} onSaved={() => { setAssetsRevision(value => value + 1); setAssetNotice('已设为效果图'); }} />
       <TeamShareDialog
         request={shareRequest}
         onClose={() => setShareRequest(null)}
@@ -1244,6 +1258,7 @@ function StudioFull() {
       else if (route.target === 'audios') setReferenceAudios(current => [...current, file]);
       else setReferenceImages(current => [...current, file]);
       setPromptAssetSourceTitle(asset.title);
+      setPromptAssetId(null);
       setClickPinned(true);
     } catch (error) {
       alert(error instanceof Error ? error.message : String(error));
@@ -1340,6 +1355,7 @@ function StudioFull() {
     // 模式与素材已同步排入同一批状态更新，Prompt 里的 @图片N 会直接生成带缩略图的 chip。
     setPromptText(config.prompt);
     setPromptAssetSourceTitle(config.sourceAssetTitle ?? null);
+    setPromptAssetId(config.promptAssetId ?? null);
   }
 
   async function regenerate(config: RoundConfig) {

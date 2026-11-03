@@ -54,7 +54,7 @@ RECIPE_PARAM_EXCLUDE = frozenset({
     "provider_task_ids", "video_submission_attempts", "layer_decomposition_result", "mj_flags",
     "evolink_state",
     # 本机来源记录
-    "creation_asset_source_title", "archived_from_job_id",
+    "creation_asset_source_title", "prompt_asset_id", "archived_from_job_id",
 })
 # 白名单：JobParams 声明过的字段去掉上面的排除项，再放行前端可编辑的 seed。
 # JobParams 是 extra="allow"，浏览器能塞任意键（含路径）：未声明的额外键一律不进快照。

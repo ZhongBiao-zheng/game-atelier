@@ -18,6 +18,7 @@ export interface StudioDraft {
   kind: JobKind;
   promptText: string;
   promptAssetSourceTitle: string | null;
+  promptAssetId?: string | null;
   referenceImages: File[];
   referenceVideos: File[];
   referenceAudios: File[];

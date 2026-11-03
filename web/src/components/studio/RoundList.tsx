@@ -1,7 +1,8 @@
+import type { PromptPreviewRequest } from '@/components/assets/SetPromptPreviewDialog';
 import type { Job, JobParams } from '@/schema/jobs';
 import { type ButtonHTMLAttributes, forwardRef, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Bookmark, BookmarkPlus, Download, Eye, EyeOff, Film, Heart, Info, Music, Pencil, Share2, Square, Trash2, Workflow } from 'lucide-react';
+import { AlertTriangle, Bookmark, BookmarkPlus, Download, Eye, EyeOff, Film, Heart, Info, Music, Pencil, Share2, Square, Trash2, Workflow, ImagePlus, MoreHorizontal } from 'lucide-react';
 
 import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
@@ -53,6 +54,7 @@ export interface RoundConfig {
   referenceImages: string[];
   /** 使用创作资产时冻结的只读来源名称；不提供回跳或更新关系。 */
   sourceAssetTitle?: string;
+  promptAssetId?: string;
   /** MJ 专属参数（family=midjourney）——「编辑导入 / 再次生成」靠它还原画师当时的选择，
    *  否则会拿默认值静默重出一张不一样的图。 */
   mjParams?: MjParams;
@@ -213,6 +215,7 @@ export function RoundList({
   onSavePromptAsset,
   onSaveResultAsset,
   onShareResult,
+  onSetPromptPreview,
 }: {
   rounds: RoundState[];
   focusJobId?: string;
@@ -232,6 +235,7 @@ export function RoundList({
   onSaveResultAsset?: SaveResultAssetHandler;
   /** index 是 imagePaths 下标（= Job.output_paths 下标），分享来源的 output_index 直接用它。 */
   onShareResult?: ShareResultHandler;
+  onSetPromptPreview?: (request: PromptPreviewRequest) => void;
 }) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const lightboxSources = useMemo(() => rounds.flatMap((round) => (
@@ -382,6 +386,7 @@ export function RoundList({
                   onSavePromptAsset={onSavePromptAsset}
                   onSaveResultAsset={onSaveResultAsset}
                   onShareResult={onShareResult}
+                  onSetPromptPreview={onSetPromptPreview}
                   mediaActive={mediaActive}
                 />
               )}
@@ -928,6 +933,7 @@ function DoneBatch({
   onSavePromptAsset,
   onSaveResultAsset,
   onShareResult,
+  onSetPromptPreview,
   mediaActive,
 }: {
   round: Extract<RoundState, { kind: 'done' }>;
@@ -945,6 +951,7 @@ function DoneBatch({
   onSavePromptAsset?: (config: RoundConfig) => void;
   onSaveResultAsset?: SaveResultAssetHandler;
   onShareResult?: ShareResultHandler;
+  onSetPromptPreview?: (request: PromptPreviewRequest) => void;
   mediaActive: boolean;
 }) {
   const elapsedSec =
@@ -1088,15 +1095,17 @@ function DoneBatch({
                     className="h-full w-full object-contain"
                   />
                   <div className="absolute right-2 top-2 flex gap-1.5">
-                    {share && (
-                      <ShareResultButton index={index} onClick={() => share(round.jobId, index, path, round.config)} />
-                    )}
-                    {saveResult && (
-                      <SaveResultButton
-                        label={`保存生成结果 ${index + 1} 为资产`}
-                        onClick={() => saveResult(index, path, 'image')}
-                      />
-                    )}
+                    {(share || saveResult || onSetPromptPreview) && <DropdownMenu>
+                      <DropdownMenuTrigger asChild><Button variant="secondary" size="icon"
+                        aria-label={`生成结果 ${index + 1} 的更多操作`}
+                        className="size-8 rounded-full bg-scrim text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                        onClick={event => event.stopPropagation()}><MoreHorizontal /></Button></DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" onClick={event => event.stopPropagation()}>
+                        {onSetPromptPreview && <DropdownMenuItem onSelect={() => onSetPromptPreview({ jobId: round.jobId, outputIndex: index, promptAssetId: round.config.promptAssetId })}><ImagePlus />设为效果图</DropdownMenuItem>}
+                        {saveResult && <DropdownMenuItem aria-label={`保存生成结果 ${index + 1} 为资产`} onSelect={() => saveResult(index, path, 'image')}><BookmarkPlus />保存为创作资产</DropdownMenuItem>}
+                        {share && <DropdownMenuItem aria-label={`分享生成结果 ${index + 1}`} onSelect={() => share(round.jobId, index, path, round.config)}><Share2 />分享到团队库</DropdownMenuItem>}
+                      </DropdownMenuContent>
+                    </DropdownMenu>}
 
                     <Hint label={favorited ? '取消喜欢' : '喜欢'}><Button variant="bare"
                       type="button"

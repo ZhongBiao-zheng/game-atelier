@@ -803,6 +803,7 @@ describe('RoundList 分享到团队库', () => {
     const onShareResult = vi.fn();
     render(<RoundList rounds={[imageBatch]} onShareResult={onShareResult} />);
 
+    fireEvent.keyDown(screen.getByRole('button', { name: '生成结果 2 的更多操作' }), { key: 'Enter' });
     fireEvent.click(screen.getByLabelText('分享生成结果 2'));
     expect(onShareResult).toHaveBeenCalledWith(
       'job-share-image',
@@ -822,6 +823,7 @@ describe('RoundList 分享到团队库', () => {
 
   it('点分享不打开大图', () => {
     render(<RoundList rounds={[imageBatch]} onShareResult={vi.fn()} />);
+    fireEvent.keyDown(screen.getByRole('button', { name: '生成结果 1 的更多操作' }), { key: 'Enter' });
     fireEvent.click(screen.getByLabelText('分享生成结果 1'));
     expect(screen.queryByAltText('大图')).not.toBeInTheDocument();
   });
@@ -852,6 +854,7 @@ describe('RoundList 保存为创作资产', () => {
     const onSaveResultAsset = vi.fn();
     render(<RoundList rounds={[imageBatch]} onSaveResultAsset={onSaveResultAsset} />);
 
+    fireEvent.keyDown(screen.getByRole('button', { name: '生成结果 2 的更多操作' }), { key: 'Enter' });
     fireEvent.click(screen.getByLabelText('保存生成结果 2 为资产'));
     expect(onSaveResultAsset).toHaveBeenCalledWith({
       jobId: 'job-save-image',
@@ -883,6 +886,7 @@ describe('RoundList 保存为创作资产', () => {
     const onSaveResultAsset = vi.fn();
     render(<RoundList rounds={[{ ...imageBatch, shareable: false }]} onSaveResultAsset={onSaveResultAsset} />);
 
+    fireEvent.keyDown(screen.getByRole('button', { name: '生成结果 1 的更多操作' }), { key: 'Enter' });
     fireEvent.click(screen.getByLabelText('保存生成结果 1 为资产'));
     expect(onSaveResultAsset).toHaveBeenCalledWith(expect.objectContaining({ generated: false }));
   });
@@ -920,4 +924,15 @@ describe('history parameter buttons', () => {
     render(<RoundList rounds={[{ ...videoDone, config: { ...videoDone.config, kind: 'image', sizeMode: 'ratio' } }]} />);
     expect(specChips('round-spec-meta')).toHaveLength(1);
   });
+});
+
+it('sets the second image as a preview through its menu and retains the originating prompt', () => {
+  const onSetPromptPreview = vi.fn();
+  const round: RoundState = { kind: 'done', mode: 'image', jobId: 'job-preview', submittedAt: '',
+    imagePaths: ['/a.png', '/b.png'], config: { prompt: '白犬', model: 'gpt-image-2', kind: 'image', referenceImages: [], promptAssetId: 'prompt-dog' } };
+  render(<RoundList rounds={[round]} onSetPromptPreview={onSetPromptPreview} />);
+  fireEvent.keyDown(screen.getByRole('button', { name: '生成结果 2 的更多操作' }), { key: 'Enter' });
+  fireEvent.click(screen.getByRole('menuitem', { name: '设为效果图' }));
+  expect(onSetPromptPreview).toHaveBeenCalledWith({ jobId: 'job-preview', outputIndex: 1, promptAssetId: 'prompt-dog' });
+  expect(screen.queryByAltText('大图')).toBeNull();
 });
