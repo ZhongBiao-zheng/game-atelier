@@ -413,6 +413,24 @@ def get_team_asset_thumb(
     )
 
 
+@team_library_router.get("/team-libraries/{library_id}/assets/{entry_id}/previews/{file}/thumb")
+def get_team_prompt_preview_thumb(
+    library_id: str, entry_id: str, file: str, w: int = Query(default=256, ge=32, le=1024),
+) -> Response:
+    mount = _mount_or_404(library_id)
+    index = _index_or_503(mount)
+    try:
+        entry = idx.get_entry(index, entry_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这条团队资产") from None
+    data = idx.prompt_preview_thumbnail_bytes(mount, entry, file, w)
+    if data is None:
+        raise HTTPException(404, detail="没有效果图缩略图")
+    return Response(content=data, media_type="image/webp", headers={
+        "Cache-Control": "private, max-age=300",
+    })
+
+
 @team_library_router.post(
     "/team-libraries/{library_id}/assets/{entry_id}/adopt",
     response_model=TeamAssetAdoptResponse,

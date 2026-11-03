@@ -28,6 +28,7 @@ from character_workflow.lib.creation_assets import (
     _required_text,
     blob_path_for,
     get_creation_asset,
+    prompt_preview_snapshot,
 )
 from character_workflow.lib.generation_recipe import (
     RecipeSource,
@@ -390,8 +391,20 @@ def _creation_stage(asset: CreationAsset, allow_large: bool) -> Callable[[Path],
     """按资产种类返回「把本体拷进资产目录并给出 asset.json 载荷字段」的函数。"""
     content = asset.content
     if content.kind == "prompt":
-        prompt = TeamPromptContent.model_validate(content.model_dump(mode="json", exclude={"preview_images"}))
-        return lambda _folder: {"kind": "prompt", "prompt": prompt}
+        try:
+            content, bodies = prompt_preview_snapshot(asset.asset_id)
+        except (KeyError, OSError, ValueError) as error:
+            raise TeamShareError("source_missing", "提示词效果图不可读，请检查本机文件") from error
+        prompt = TeamPromptContent.model_validate(content.model_dump(mode="json"))
+
+        def stage_prompt(folder: Path) -> dict[str, Any]:
+            if bodies:
+                (folder / "previews").mkdir()
+                for file, body in bodies.items():
+                    (folder / "previews" / file).write_bytes(body)
+            return {"kind": "prompt", "prompt": prompt}
+
+        return stage_prompt
     if content.kind == "media":
         source = _blob_file(content)
         source_mime = _mime_for(source)

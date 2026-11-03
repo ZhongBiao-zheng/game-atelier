@@ -1,4 +1,4 @@
-import type { CreationAsset } from '@/schema/creationAssets';
+import type { CreationAsset, PromptPreviewImage } from '@/schema/creationAssets';
 
 export type TeamAssetKind = 'generation' | 'media' | 'prompt' | 'raw';
 
@@ -35,6 +35,7 @@ export interface TeamLibraryIndexEntry {
   input_sha256: string[];
   /** 提示词列表正文，变量显示默认值。 */
   prompt_text?: string | null;
+  preview_images?: PromptPreviewImage[];
 }
 
 /** 分享来源：Studio 某次出图的第 output_index 张（Job.output_paths 下标）、一条本机创作资产，

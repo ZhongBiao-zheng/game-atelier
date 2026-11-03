@@ -16,6 +16,7 @@ from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
 from character_workflow.lib.schemas import (
     TeamAssetFile,
+    PromptPreviewImage,
     TeamLibraryAssetPage,
     TeamLibraryIndex,
     TeamLibraryIndexEntry,
@@ -141,6 +142,8 @@ def _asset_files_present(asset_dir: Path, asset: TeamAssetFile) -> bool:
     names = [asset.media.filename] if asset.media else []
     if asset.snapshot is not None:
         names.extend(row.path for row in asset.snapshot.inputs)
+    if asset.prompt is not None:
+        names.extend(f"previews/{row.file}" for row in asset.prompt.preview_images)
     plain_dirs: set[str] = set()
     return all(_inside_file(asset_dir, name, plain_dirs) is not None for name in names)
 
@@ -171,6 +174,7 @@ def _shared_entry(root: Path, asset_dir: Path) -> TeamLibraryIndexEntry:
             [row.sha256 for row in sorted(snapshot.inputs, key=lambda row: row.order)]
             if snapshot and asset.kind == "generation" else []
         ),
+        preview_images=asset.prompt.preview_images if asset.prompt else [],
         prompt_text=(
             "".join(
                 segment.text if segment.kind == "text" else segment.default_value
@@ -309,6 +313,7 @@ def diff_index(before: TeamLibraryIndex | None, after: TeamLibraryIndex) -> list
             prior.updated_at != entry.updated_at
             or prior.status != entry.status
             or prior.bytes != entry.bytes
+            or prior.preview_images != entry.preview_images
         ):
             changes.append(_change(entry, "updated"))
     changes.extend(
@@ -429,3 +434,54 @@ def thumbnail_bytes(
     data = buffer.getvalue()
     atomic_write_bytes(target, data)
     return data
+
+
+def read_prompt_preview_files(asset_dir: Path, previews: list[PromptPreviewImage]) -> dict[str, bytes]:
+    from character_workflow.lib.creation_assets import (
+        PROMPT_PREVIEW_LIMIT, PROMPT_PREVIEW_MAX_BYTES, validate_prompt_preview,
+    )
+    if len(previews) > PROMPT_PREVIEW_LIMIT or len({p.file for p in previews}) != len(previews):
+        raise ValueError("效果图最多 8 张，且不能重复")
+    bodies = {}
+    for preview in previews:
+        path = asset_dir_file(asset_dir, f"previews/{preview.file}")
+        if path is None:
+            raise FileNotFoundError(preview.file)
+        with path.open("rb") as source:
+            body = source.read(PROMPT_PREVIEW_MAX_BYTES + 1)
+        validate_prompt_preview(preview, body)
+        bodies[preview.file] = body
+    return bodies
+
+
+def prompt_preview_thumbnail_bytes(
+    mount: TeamLibraryMount, entry: TeamLibraryIndexEntry, file: str, width: int,
+) -> bytes | None:
+    if entry.kind != "prompt" or entry.status != "ready":
+        return None
+    try:
+        folder = shared_asset_dir(mount, entry)
+        manifest = asset_dir_file(folder, "asset.json")
+        if manifest is None:
+            return None
+        asset = TeamAssetFile.model_validate_json(manifest.read_text(encoding="utf-8"))
+        if asset.asset_id != entry.id or asset.prompt is None or asset.kind != "prompt":
+            return None
+        preview = next((p for p in asset.prompt.preview_images if p.file == file), None)
+        if preview is None:
+            return None
+        body = read_prompt_preview_files(folder, [preview])[file]
+        snapped = next((w for w in _THUMB_WIDTHS if w >= width), _THUMB_WIDTHS[-1])
+        target = cache_dir(mount.library_id) / "thumbs" / f"{entry.id}-preview-{file}-{snapped}.webp"
+        if target.is_file():
+            return target.read_bytes()
+        with Image.open(BytesIO(body)) as opened:
+            image = ImageOps.exif_transpose(opened)
+            image.thumbnail((snapped, snapped))
+            result = BytesIO()
+            image.convert("RGBA" if image.mode in {"RGBA", "LA", "P"} else "RGB").save(result, "WEBP", quality=80)
+        body = result.getvalue()
+        atomic_write_bytes(target, body)
+        return body
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return None

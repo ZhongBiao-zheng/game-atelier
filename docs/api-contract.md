@@ -711,7 +711,7 @@ EXIF 旋转；未知时不输出字段，旧内容无须迁移，前端可按加
 写入边界：最多 8 张、每张 ≤20 MiB、PNG/JPEG/WebP/GIF，校验真实图像格式与声明 MIME 一致。
 不存在返回 404，不合规返回 422；这些接口要求本机会话，写操作要求编辑权限。图片响应为
 `Cache-Control: private, max-age=31536000, immutable`，不扩展 `/api/raw` 白名单。
-提示词文字编辑保留效果图；文件夹团队库的效果图拷贝在 C 批交付，B 批分享仍只传正文。
+提示词文字编辑保留效果图；文件夹团队库分享和采用均复制独立效果图文件，见下文团队库契约。
 
 `JobParams.prompt_asset_id` 是可选的效果图选择默认值，空值不序列化。Studio / Canvas 使用提示词资产
 后提交时带上，编辑正文仍保留；画布连接提示词文本节点时也从输入来源继承。资产被删除时默认项失效，
@@ -767,6 +767,24 @@ v2→v3 资产种类 `image` 改名 `media`，v3→v4 删掉每条资产的 `rec
 ### 团队库契约
 
 团队库是画师自己用 SVN / 网盘同步的共享目录，本机只读写目录、永不执行同步命令（ADR-0020）。
+
+提示词团队条目的 `prompt.preview_images` 与索引 `preview_images` 均为有序效果图元数据，
+缺省为空数组且空时不序列化；旧 `asset.json` 和旧索引不含此字段仍可读取、采用，无须迁移。
+图片保存在该团队资产目录的 `previews/<内容哈希文件名>`，先写临时条目再整体改名发布。
+索引扫描检查每张图都在该条目目录内，缺图或越界符号链接标记 `incomplete`；采用时重新校验
+实际内容哈希、图片类型、尺寸、20 MiB / 8 张限制，旧 ready 索引不能绕过验证。
+采用与重新采用由 `creation_assets.py` 在 catalog 锁内写入本机提示词独立目录；catalog 失败回滚新文件，
+重新采用成功后清理不再引用的旧效果图，保持本机资产身份与项目关系。团队文件被删除不影响已采用副本。
+
+`AdoptionOrigin.source_preview_fingerprint` 保存采用时来源效果图有序元数据的摘要，空值不序列化。
+来源图片增删、换图、顺序或元数据变化均纳入 `stale` 判定，即使来源时间戳未变化；本机修改效果图
+不会被误判为来源变化。旧采用记录缺少摘要时按原先无效果图处理。
+
+`GET /api/team-libraries/{library_id}/assets/{entry_id}/previews/{file}/thumb?w=` 返回当前 manifest 登记
+效果图的 WebP 缩略图（128/256/512 取档，缓存本机 runtime），要求本机会话与 read 权限；
+`Cache-Control: private, max-age=300`。缺失、未登记或不完整条目返回 404；非法宽度返回 422。
+团队卡片显示第一张封面，详情可切换多张图；提示词仍没有 `/content` 原文件接口。
+
 挂载记录在 `.config/team-libraries.json`，显示名在 `.config/profile.json`；库内唯一会被写入的文件是
 挂载时补的 `.atelier-library.json`（清单，含 `library_id`）。索引是本机缓存
 （`.runtime/team-libraries/<library_id>/index.json` 与 `thumbs/`），可随时删除重建，绝不写进挂载目录。
@@ -858,7 +876,7 @@ v2→v3 资产种类 `image` 改名 `media`，v3→v4 删掉每条资产的 `rec
 （`snapshot.inputs[].sha256`，按 `order`），P3 之前的索引缓存由启动补扫 / 下一次重扫补上。
 
 `GET /creation-assets/{asset_id}/staleness` 判断采用副本相对团队来源的状态：`fresh`（来源没变）、
-`stale`（来源 `updated_at` 晚于采用时；原始文件还要内容 sha256 真变了才算）、`withdrawn`（库可达、
+`stale`（来源 `updated_at` 晚于采用时，或提示词来源效果图摘要变化；原始文件还要内容 sha256 真变了才算）、`withdrawn`（库可达、
 已扫描但条目不在了）、`unknown`（不是采用来的、库没挂 / 不可达 / 没扫过、条目同步中）。资产不存在 404。
 `POST /creation-assets/staleness` 是资产面板的批量版（`asset_ids` 1–200 个），每个来源库只读一次挂载与索引；
 不存在的 id 不出现在 `statuses` 里。

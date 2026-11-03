@@ -2194,6 +2194,14 @@ class AdoptionOrigin(BaseModel):
     asset_id: str = Field(min_length=1, max_length=160)
     source_updated_at: str
     raw_path: str | None = None
+    source_preview_fingerprint: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_preview_fingerprint(self, handler):
+        data = handler(self)
+        if self.source_preview_fingerprint is None:
+            data.pop("source_preview_fingerprint", None)
+        return data
 
 
 class CanvasClassifyRequest(BaseModel):
@@ -2455,10 +2463,15 @@ TeamPromptSegment = Annotated[
 ]
 
 
+class TeamPromptPreviewImage(PromptPreviewImage):
+    model_config = ConfigDict(extra="ignore", from_attributes=True)
+
+
 class TeamPromptContent(CreationPromptAssetContent):
     """asset.json 里的 prompt：团队侧宽松读（R1）。继承本机模型，采用时可直接作为 content。"""
     model_config = ConfigDict(extra="ignore", from_attributes=True)
     segments: list[TeamPromptSegment] = Field(min_length=1, max_length=400)
+    preview_images: list[TeamPromptPreviewImage] = Field(default_factory=list)
 
 
 class TeamAssetOrigin(BaseModel):
@@ -2544,12 +2557,15 @@ class TeamLibraryIndexEntry(BaseModel):
     input_sha256: list[str] = Field(default_factory=list)
     # 提示词列表的正文预览；普通媒体与旧索引不写入此字段。
     prompt_text: str | None = None
+    preview_images: list[TeamPromptPreviewImage] = Field(default_factory=list)
 
     @model_serializer(mode="wrap")
     def _omit_empty_prompt_text(self, handler):
         data = handler(self)
         if self.prompt_text is None:
             data.pop("prompt_text", None)
+        if not self.preview_images:
+            data.pop("preview_images", None)
         return data
 
 

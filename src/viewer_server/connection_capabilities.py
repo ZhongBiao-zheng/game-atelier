@@ -151,6 +151,7 @@ POST /api/team-libraries/{library_id}/rescan
 GET /api/team-libraries/{library_id}/assets
 GET /api/team-libraries/{library_id}/assets/{entry_id}/content
 GET /api/team-libraries/{library_id}/assets/{entry_id}/thumb
+GET /api/team-libraries/{library_id}/assets/{entry_id}/previews/{file}/thumb
 POST /api/team-libraries/{library_id}/assets/{entry_id}/adopt
 GET /api/team-libraries/related
 POST /api/team-libraries/{library_id}/share
@@ -248,6 +249,7 @@ MEDIA_ROUTES = frozenset({
     "/api/canvas/projects/{project_id}/nodes/{node_id}/layers/download",
     "/api/team-libraries/{library_id}/assets/{entry_id}/content",
     "/api/team-libraries/{library_id}/assets/{entry_id}/thumb",
+    "/api/team-libraries/{library_id}/assets/{entry_id}/previews/{file}/thumb",
 })
 CANVAS_TOOLS = frozenset({
     "list-projects", "get-document", "list-models", "apply-changes", "import-media", "run",

@@ -73,6 +73,7 @@ export interface AdoptionOrigin {
   library_id: string;
   asset_id: string;
   source_updated_at: string;
+  source_preview_fingerprint?: string | null;
   raw_path: string | null;
 }
 

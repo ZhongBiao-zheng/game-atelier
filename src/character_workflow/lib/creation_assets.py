@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from contextlib import contextmanager
 import mimetypes
 import re
 import secrets
@@ -552,6 +554,66 @@ def prompt_preview_bytes(asset_id: str, file: str, width: int | None = None) -> 
     return body, "image/webp"
 
 
+
+def validate_prompt_preview(preview: PromptPreviewImage, body: bytes) -> None:
+    checked = _preview_image(body, preview.mime_type, preview.source_job_id, preview.source_model)
+    if (checked.file, checked.width, checked.height) != (preview.file, preview.width, preview.height):
+        raise ValueError("效果图内容与记录不一致，可能还没同步完")
+
+
+def prompt_preview_fingerprint(previews: list[PromptPreviewImage]) -> str:
+    # 不与本机可编辑的效果图比较：来源顺序、图片和元数据在采用时单独冻结。
+    payload = [PromptPreviewImage.model_validate(p.model_dump()).model_dump() for p in previews]
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def prompt_preview_snapshot(asset_id: str) -> tuple[CreationPromptAssetContent, dict[str, bytes]]:
+    """分享读取一份一致的提示词及其效果图，避免上传/删除与分享交错。"""
+    with file_lock(_catalog_lock_path()):
+        asset = _preview_asset(_read_catalog_unlocked(), asset_id)
+        previews = asset.content.preview_images
+        if len(previews) > PROMPT_PREVIEW_LIMIT or len({p.file for p in previews}) != len(previews):
+            raise ValueError("效果图最多 8 张，且不能重复")
+        bodies = {}
+        for preview in previews:
+            with _preview_path(asset_id, preview.file).open("rb") as source:
+                body = source.read(PROMPT_PREVIEW_MAX_BYTES + 1)
+            validate_prompt_preview(preview, body)
+            bodies[preview.file] = body
+        return asset.content, bodies
+
+
+@contextmanager
+def _staged_adopted_previews(asset: CreationAsset, bodies: dict[str, bytes] | None):
+    """调用方持 catalog 锁；文件先落盘，catalog 失败则只回滚本次新文件。"""
+    previews = asset.content.preview_images if asset.content.kind == "prompt" else []
+    bodies = bodies or {}
+    if len(previews) > PROMPT_PREVIEW_LIMIT or len({p.file for p in previews}) != len(previews):
+        raise ValueError("效果图最多 8 张，且不能重复")
+    if set(bodies) != {p.file for p in previews}:
+        raise ValueError("效果图尚未同步完整")
+    for preview in previews:
+        validate_prompt_preview(preview, bodies[preview.file])
+    created = []
+    try:
+        for preview in previews:
+            path = _preview_path(asset.asset_id, preview.file)
+            if path.exists():
+                if path.read_bytes() != bodies[preview.file]:
+                    raise ValueError("本机效果图文件校验不一致")
+            else:
+                atomic_write_bytes(path, bodies[preview.file])
+                created.append(path)
+        yield
+    except Exception:
+        for path in created:
+            path.unlink(missing_ok=True)
+        directory = _preview_dir(asset.asset_id)
+        if directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()
+        raise
+
+
 def create_prompt_asset(
     title: str,
     segments: list[CreationPromptSegment] | list[dict[str, str]],
@@ -1054,7 +1116,7 @@ def _join_projects_unlocked(
     return updated
 
 
-def create_adopted_asset(asset: CreationAsset) -> CreationAsset:
+def create_adopted_asset(asset: CreationAsset, *, preview_bodies: dict[str, bytes] | None = None) -> CreationAsset:
     """把已经构造好的采用资产追加进目录（asset_id 由调用方生成）。
 
     持锁再按来源查一次：并发采用同一条时只留一份。命中则返回已有那条（补上 project_ids），
@@ -1069,7 +1131,8 @@ def create_adopted_asset(asset: CreationAsset) -> CreationAsset:
         if duplicate is not None:
             return _join_projects_unlocked(current, duplicate, asset.project_ids)
         _require_blobs(asset)
-        _write_catalog_unlocked(current, [*current.assets, asset])
+        with _staged_adopted_previews(asset, preview_bodies):
+            _write_catalog_unlocked(current, [*current.assets, asset])
         return asset
 
 
@@ -1082,6 +1145,7 @@ def replace_adopted_asset(
         CreationPromptAssetContent | CreationMediaAssetContent | CreationGenerationAssetContent
     ),
     adopted_from: AdoptionOrigin,
+    preview_bodies: dict[str, bytes] | None = None,
 ) -> CreationAsset:
     """重新采用：内容、标题、标签、来源记录跟来源走；id / created_at / project_ids / last_used_at 保留。
 
@@ -1109,7 +1173,13 @@ def replace_adopted_asset(
         if duplicate is not None and duplicate.asset_id != asset_id:
             raise CreationAssetDuplicateError(duplicate.asset_id)
         _require_blobs(updated)
-        _replace_asset(current, updated)
+        with _staged_adopted_previews(updated, preview_bodies):
+            _replace_asset(current, updated)
+        old_previews = asset.content.preview_images if asset.content.kind == "prompt" else []
+        new_files = {p.file for p in updated.content.preview_images} if updated.content.kind == "prompt" else set()
+        for preview in old_previews:
+            if preview.file not in new_files:
+                _preview_path(asset_id, preview.file).unlink(missing_ok=True)
         orphan_paths = _orphan_blob_paths(
             _asset_blob_paths(asset),
             [updated if row.asset_id == asset_id else row for row in current.assets],

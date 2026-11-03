@@ -15,6 +15,7 @@ from character_workflow.lib.creation_assets import (
     list_creation_assets,
     mark_creation_asset_used,
     get_creation_asset,
+    prompt_preview_fingerprint,
     new_creation_asset_id,
     replace_adopted_asset,
     sniff_media_mime,
@@ -104,9 +105,9 @@ def _join_project(asset: CreationAsset, project_id: str | None) -> CreationAsset
     return asset
 
 
-def _commit(asset: CreationAsset) -> tuple[CreationAsset, bool]:
+def _commit(asset: CreationAsset, preview_bodies: dict[str, bytes] | None = None) -> tuple[CreationAsset, bool]:
     # 目录持锁再按来源查一次：并发采用同一条时拿回的是别人刚建的那条。
-    stored = create_adopted_asset(asset)
+    stored = create_adopted_asset(asset, preview_bodies=preview_bodies)
     return stored, stored.asset_id == asset.asset_id
 
 
@@ -205,18 +206,23 @@ def _generation_content(
 
 def _shared_copy(
     mount: TeamLibraryMount, entry: TeamLibraryIndexEntry
-) -> tuple[TeamAssetFile, _LocalContent, AdoptionOrigin]:
+) -> tuple[TeamAssetFile, _LocalContent, AdoptionOrigin, dict[str, bytes]]:
     """读库内分享资产、校验并把 blob 落进本机：返回 (团队资产, 本机内容, 来源记录)。"""
     try:
         asset_dir = idx.shared_asset_dir(mount, entry)
     except FileNotFoundError:
         raise TeamAssetAdoptError("库里找不到这条资产，可能还没同步完") from None
     team_asset = _read_team_asset(asset_dir, entry)
+    preview_bodies: dict[str, bytes] = {}
     if team_asset.kind == "generation":
         content = _generation_content(asset_dir, team_asset)
     elif team_asset.kind == "prompt":
         assert team_asset.prompt is not None
-        content = team_asset.prompt
+        content = CreationPromptAssetContent.model_validate(team_asset.prompt.model_dump())
+        try:
+            preview_bodies = idx.read_prompt_preview_files(asset_dir, content.preview_images)
+        except (OSError, ValueError) as error:
+            raise TeamAssetAdoptError("效果图缺失或内容不一致，可能还没同步完") from error
     else:
         media = team_asset.media
         assert media is not None
@@ -226,8 +232,11 @@ def _shared_copy(
         library_id=mount.library_id,
         asset_id=team_asset.asset_id,
         source_updated_at=team_asset.updated_at,
+        source_preview_fingerprint=(
+            prompt_preview_fingerprint(content.preview_images) if content.kind == "prompt" else None
+        ),
     )
-    return team_asset, content, origin
+    return team_asset, content, origin, preview_bodies
 
 
 def _adopt_shared(
@@ -236,13 +245,13 @@ def _adopt_shared(
     existing = find_adopted_asset(mount.library_id, entry.id)
     if existing is not None:
         return _join_project(existing, project_id), False
-    team_asset, content, origin = _shared_copy(mount, entry)
+    team_asset, content, origin, preview_bodies = _shared_copy(mount, entry)
     return _commit(_new_adopted(
         kind=team_asset.kind, title=team_asset.title, tags=team_asset.tags, content=content,
         project_id=project_id, origin=origin,
         # 类别只给媒体与生成资产：参考库只收这两种，提示词带类别没有去处。
         category=team_asset.category if team_asset.kind != "prompt" else None,
-    ))
+    ), preview_bodies)
 
 
 def adopt_team_asset(
@@ -305,6 +314,10 @@ def _staleness(asset: CreationAsset, source: _Source) -> Staleness:
         return "withdrawn"
     if entry.status != "ready":
         return "unknown"
+    if entry.kind == "prompt" and origin.raw_path is None:
+        previous = origin.source_preview_fingerprint or prompt_preview_fingerprint([])
+        if prompt_preview_fingerprint(entry.preview_images) != previous:
+            return "stale"
     current = idx.parse_instant(entry.updated_at)
     adopted = idx.parse_instant(origin.source_updated_at)
     if current is None or adopted is None:
@@ -364,13 +377,15 @@ def readopt_team_asset(asset_id: str) -> CreationAsset:
         raise TeamAssetWithdrawn(origin.asset_id) from None
     if entry.status != "ready":
         raise TeamAssetAdoptError("这条资产还没同步完整")
+    preview_bodies: dict[str, bytes] = {}
     if entry.kind == "raw":
         body = _library_file(mount, entry.relative_path).read_bytes()
         content = _store(body, Path(entry.relative_path).name, entry.mime_type)
         title, tags, new_origin = entry.title, [], _raw_origin(mount, entry)
     else:
-        team_asset, content, new_origin = _shared_copy(mount, entry)
+        team_asset, content, new_origin, preview_bodies = _shared_copy(mount, entry)
         title, tags = team_asset.title, team_asset.tags
     return replace_adopted_asset(
         asset_id, title=title, tags=tags, content=content, adopted_from=new_origin,
+        preview_bodies=preview_bodies,
     )
