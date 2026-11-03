@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import secrets
 import time
 from datetime import datetime, timezone
@@ -172,6 +173,7 @@ def remove_project_mounts(project_id: str) -> list[str]:
         if len(kept) == len(rows):
             return []
         _write_mounts_unlocked(kept)
+        _write_shared_unlocked(_read_shared_unlocked() & {m.library_id for m in kept})
     removed = {m.library_id for m in rows if m.project_id == project_id}
     still_mounted = {m.library_id for m in kept}
     return sorted(removed - still_mounted)
@@ -186,3 +188,41 @@ def unmount_library(library_id: str, project_id: str) -> None:
         if len(kept) == len(rows):
             raise KeyError(library_id)
         _write_mounts_unlocked(kept)
+        _write_shared_unlocked(_read_shared_unlocked() - {library_id})
+
+
+def _share_path() -> Path:
+    return data_root.config_dir() / "team-library-gateway-share.json"
+
+
+def _read_shared_unlocked() -> set[str]:
+    path = _share_path()
+    if not path.exists():
+        return set()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    ids = payload.get("shared_library_ids")
+    if not isinstance(ids, list) or any(not isinstance(item, str) for item in ids):
+        raise ValueError("网关共享设置格式不对")
+    return set(ids)
+
+
+def _write_shared_unlocked(ids: set[str]) -> None:
+    atomic_write_json(_share_path(), {"shared_library_ids": sorted(ids)})
+
+
+def shared_library_ids() -> set[str]:
+    with file_lock(_mounts_lock()):
+        return _read_shared_unlocked() & {m.library_id for m in _read_mounts_unlocked().mounts}
+
+
+def set_gateway_shared(library_id: str, enabled: bool) -> None:
+    """与卸载共用锁，防止卸载与开启共享相互覆盖。"""
+    with file_lock(_mounts_lock()):
+        if not any(m.library_id == library_id for m in _read_mounts_unlocked().mounts):
+            raise KeyError(library_id)
+        ids = _read_shared_unlocked()
+        if enabled:
+            ids.add(library_id)
+        else:
+            ids.discard(library_id)
+        _write_shared_unlocked(ids)

@@ -357,6 +357,8 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(connection_router(connection_store))
     app.include_router(canvas_batches_router)
     app.include_router(team_library_router)
+    from viewer_server.gateway_library_proxy import router as gateway_library_router
+    app.include_router(gateway_library_router)
     app.include_router(gateway_router)
     from viewer_server.gateway_admin_proxy import router as gateway_admin_proxy
     app.include_router(gateway_admin_proxy)
