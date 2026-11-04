@@ -21,7 +21,7 @@
 | 内容分页 | `Tabs` + `TabsList` / `TabsTrigger` / `TabsContent` | 文字下划线页签给 List 与 Trigger 传 `variant="line"` |
 | 数值拖动 | `Slider` | |
 | 选文件 | `FileInput` | 隐藏，由按钮或拖放区 `ref.click()` 触发 |
-| 按钮 | `Button` | `variant`：default / secondary / outline / ghost / destructive / link；`size`：default / sm / lg / icon |
+| 按钮 | `Button` | `variant`：default / secondary / outline / ghost / destructive / link / solid；`size`：default / sm / lg / icon |
 | 文字标签 | `Label` | 页面不写原生 `<label>` |
 | 悬停提示 | `Hint`（`ui/tooltip.tsx`） | 替代原生 `title`；测试里用 `test/hint.ts` 的 `hoverHint` |
 | 弹窗 | `Dialog` | 确认类用 `ConfirmDialog`（基于 `AlertDialog`） |
@@ -45,5 +45,7 @@
 1. 文件放 `web/src/components/ui/<kebab-name>.tsx`，`React.forwardRef` + `cn(默认配方, className)`。
 2. 文字类输入展开 `NO_AUTOFILL`（`ui/input.tsx` 导出）；可聚焦控件用 `ui/focus.ts` 的 `FOCUS_RING` / `INVALID_RING`。
 3. 在本页「选用」表登记一行。
+
+`Button variant="solid"`：无边框主色胶囊，只用于瓦片上的悬浮操作。
 
 `SelectTrigger variant="inline"`：表格文字原位编辑；箭头在行 hover、键盘聚焦或触屏时显示。
