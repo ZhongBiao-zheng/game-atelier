@@ -338,7 +338,7 @@ export function TeamLibraryPanel({
 
   if (libraries.length === 0 && !remote.sources.some(source => !source.unreachable && source.libraries.length) && !remoteLibrary) {
     return (
-      <div className={cn('grid place-items-center gap-3 p-8 text-center', className)}>
+      <div className={cn('grid content-center place-items-center gap-3 p-8 text-center', className)}>
         <div className="flex items-center gap-1"><p className="text-xs text-muted-foreground">{!librariesLoaded || remote.revision === 0 ? '读取中' : '还没有团队库'}</p><GatewayLibraryHelp /></div>
         {projectId && <Button size="sm" variant="outline" onClick={() => setMountOpen(true)}>挂载</Button>}
         <MountTeamLibraryDialog open={mountOpen} currentProjectId={projectId} onClose={() => setMountOpen(false)}
