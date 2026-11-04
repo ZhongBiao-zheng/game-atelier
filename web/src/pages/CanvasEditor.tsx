@@ -2568,7 +2568,7 @@ function CanvasEditorInner({
     return node.id;
   }
 
-  function handleUploads(files: File[], menu: CreateMenuState | null = createMenu, emptyTarget?: MediaReplaceTarget) {
+  function handleUploads(files: File[], menu: CreateMenuState | null = createMenu, emptyTarget?: MediaReplaceTarget, successNotice?: string) {
     if (!files.length) return;
     // Each batch owns the document command window; later drops wait instead of racing revisions.
     const command = (uploadQueue.current ?? Promise.resolve()).then(async () => {
@@ -2630,7 +2630,7 @@ function CanvasEditorInner({
             const addedIds = new Set(added);
             focusNewNodesHandler.current(latestDocument.current.nodes.filter(node => addedIds.has(node.id)));
             if (failures.length) setError(failures.slice(0, 3).join('；') + (failures.length > 3 ? `；共 ${failures.length} 项失败` : ''));
-            else announceToolNotice(`已添加 ${added.length} 个素材`);
+            else announceToolNotice(successNotice ?? `已添加 ${added.length} 个素材`);
           }
         }
       }
@@ -2641,6 +2641,7 @@ function CanvasEditorInner({
     void command.finally(() => {
       if (uploadQueue.current === command) uploadQueue.current = null;
     });
+    return command;
   }
 
   function copySelectedNodes(event: ClipboardEvent) {
@@ -5431,6 +5432,7 @@ function CanvasEditorInner({
             onAssetsChanged={refreshProjectAssets}
             className="canvas-library-panel"
             projectId={projectId}
+            canvasTargets={projects.map(project => ({ projectId: project.project_id, name: project.name }))}
             initialKind={libraryMode === 'prompts' ? 'prompt' : libraryMode === 'team' ? 'team' : 'media'}
             saveRequest={creationAssetSaveRequest}
             onSaveRequestHandled={requestId => {
@@ -5470,7 +5472,25 @@ function CanvasEditorInner({
                 selectedNode && selectedDraft ? selectedNode.id : undefined,
               );
             }}
-            onTeamAssetAdopted={result => announceToolNotice(result.created ? '已加入资产库' : '已在你的资产库')}
+            onUseTeamMedia={async file => {
+              const menu: CreateMenuState = { screen: { x: 0, y: 0 }, flow: defaultPosition(),
+                ...(selectedNode && selectedDraft ? { sourceId: selectedNode.id, sourceHandle: 'target' as const } : {}) };
+              await handleUploads([file], menu, undefined, '已放到画布');
+            }}
+            onUseTeamPrompt={(text, entry) => {
+              if (selectedNode && selectedDraft) {
+                commit(current => ({ ...current, nodes: current.nodes.map(node => node.id === selectedNode.id
+                  ? withGenerationDraftForNode(node, { ...selectedDraft, prompt: text,
+                    params: { ...selectedDraft.params, prompt_asset_id: null, creation_asset_source_title: entry.title }, updated_at: new Date().toISOString() }) : node) }), true);
+              } else {
+                const versionId = makeId('version');
+                const version: CanvasTextVersion = { version_id: versionId, kind: 'text', text,
+                  created_at: new Date().toISOString(), sha256: CANVAS_LOCAL_VERSION_SHA, origin: { kind: 'user_edit' } };
+                appendNode({ id: makeId('text'), type: 'text', title: entry.title, position: defaultPosition(CANVAS_TEXT_NODE_DEFAULT_SIZE),
+                  z_index: 0, data: { current_version_id: versionId, generation_draft: null, active_run_id: null, display: { scale: 'sm' } } }, null, undefined, [version]);
+              }
+              announceToolNotice('已放到画布');
+            }}
             onReproduce={asset => void reproduceGenerationAsset(asset)}
             teamRelatedSha256={teamRelatedSha256}
             initialTeamLibraryId={teamLibraryId}

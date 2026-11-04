@@ -1,3 +1,5 @@
+import { readTeamMedia } from './teamAssetUse';
+vi.mock('./teamAssetUse', () => ({ readTeamMedia: vi.fn() }));
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TeamLibraryPanel } from './TeamLibraryPanel';
@@ -28,6 +30,7 @@ const generation: TeamLibraryIndexEntry = { ...shared, id: 'ta_01ARZ3NDEKTSV4RRF
 const adoptedGeneration = { asset_id: 'ca_generation', kind: 'generation', title: '雪山白犬' };
 
 beforeEach(() => {
+  vi.mocked(readTeamMedia).mockResolvedValue(new File(['png'], 'image.png', { type: 'image/png' }));
   api.fetchProfile.mockResolvedValue({ display_name: null });
   api.listRelatedTeamAssets.mockResolvedValue([]);
 });
@@ -42,7 +45,7 @@ describe('TeamLibraryPanel', () => {
     api.mountTeamLibrary.mockResolvedValue(library);
     canvasApi.listCanvasProjects.mockResolvedValue([{ project_id: 'p0', name: '别的画布' }, { project_id: 'p1', name: '本画布' }]);
     folderApi.chooseFolder.mockResolvedValue('/team/art');
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
     const dialog = await screen.findByRole('dialog', { name: '挂载文件夹' });
     expect(await within(dialog).findByRole('checkbox', { name: /本画布/ })).toBeChecked();
@@ -52,48 +55,46 @@ describe('TeamLibraryPanel', () => {
     await waitFor(() => expect(api.mountTeamLibrary).toHaveBeenCalledWith({ projectId: 'p1', path: '/team/art' }));
     expect(await screen.findByText('角色参考')).toBeInTheDocument();
   });
-  it('lists entries grouped by tree and filters by kind and query', async () => {
+  it('lists libraries without directory options and searches all entries', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [raw, shared], next_cursor: null });
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     expect(await screen.findByText('董卓 待机')).toBeInTheDocument();
     expect(screen.queryByText('concept')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '团队库' }));
-    expect(screen.getByText('concept')).toBeInTheDocument();      // 目录树：原始文件按目录
-    expect(screen.getByText('老王')).toBeInTheDocument();          // 目录树：分享内容按作者
-    if (screen.queryByRole('group', { name: '目录' })) fireEvent.click(screen.getByRole('button', { name: '团队库' }));
+    expect(screen.queryByRole('group', { name: '目录' })).toBeNull();
+    expect(screen.queryByText('concept')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '团队库' }));
     fireEvent.change(screen.getByPlaceholderText('搜索'), { target: { value: '董' } });
     await waitFor(() => expect(api.listTeamAssets).toHaveBeenLastCalledWith(library.library_id, expect.objectContaining({ q: '董' })));
   });
-  it('shows prompt text and filters directories from the selector', async () => {
+  it('shows prompt text and filters types across the whole library', async () => {
     const prompt: TeamLibraryIndexEntry = { ...shared, id: 'ta_prompt', kind: 'prompt', title: '角色提示词', mime_type: 'text/plain', prompt_text: '石墨线稿，柔和逆光' };
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [raw, prompt], next_cursor: null });
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     expect(await screen.findByText('石墨线稿，柔和逆光')).toBeInTheDocument();
     expect(screen.getByText('老王')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '音频' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '团队库' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'concept' }));
+    fireEvent.click(screen.getByRole('button', { name: '图片' }));
     expect(screen.getByText('castle.png')).toBeInTheDocument();
     expect(screen.queryByText('角色提示词')).toBeNull();
-    expect(screen.getByRole('button', { name: '团队库' })).toHaveTextContent('concept');
   });
-  it('adopts on click and reports created flag', async () => {
+  it('uses the source file without adopting or creating a catalog item', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [shared], next_cursor: null });
     api.adoptTeamAsset.mockResolvedValue({ asset: { asset_id: 'ca' }, created: true });
-    const onAdopted = vi.fn();
-    render(<TeamLibraryPanel projectId="p1" onAdopted={onAdopted} />);
-    fireEvent.click(await screen.findByRole('button', { name: '采用' }));
-    await waitFor(() => expect(onAdopted).toHaveBeenCalledWith({ asset: { asset_id: 'ca' }, created: true }, shared));
-    expect(api.adoptTeamAsset).toHaveBeenCalledWith(library.library_id, shared.id, 'p1');
+    const onUseMedia = vi.fn();
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={onUseMedia} />);
+    fireEvent.click(await screen.findByRole('button', { name: '使用' }));
+    await waitFor(() => expect(onUseMedia).toHaveBeenCalledWith(expect.any(File), shared, `${library.library_id}:${shared.id}`));
+    expect(api.adoptTeamAsset).not.toHaveBeenCalled();
   });
   it('starts on the requested library when it is mounted here', async () => {
     const other: TeamLibraryView = { ...library, library_id: 'lib_other', name: '场景参考' };
     api.listTeamLibraries.mockResolvedValue([other, library]);
     api.listTeamAssets.mockResolvedValue({ entries: [], next_cursor: null });
-    render(<TeamLibraryPanel projectId="p1" initialTeamLibraryId={library.library_id} onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" initialTeamLibraryId={library.library_id} onUseMedia={vi.fn()} />);
     await waitFor(() => expect(screen.getByRole('button', { name: '团队库' })).toHaveTextContent(library.name));
     await waitFor(() => expect(api.listTeamAssets).toHaveBeenCalledWith(library.library_id, expect.anything()));
     expect(api.listTeamAssets).not.toHaveBeenCalledWith('lib_other', expect.anything());
@@ -102,13 +103,13 @@ describe('TeamLibraryPanel', () => {
     const other: TeamLibraryView = { ...library, library_id: 'lib_other', name: '场景参考' };
     api.listTeamLibraries.mockResolvedValue([other, library]);
     api.listTeamAssets.mockResolvedValue({ entries: [], next_cursor: null });
-    render(<TeamLibraryPanel projectId="p1" initialTeamLibraryId="lib_missing" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" initialTeamLibraryId="lib_missing" onUseMedia={vi.fn()} />);
     await waitFor(() => expect(screen.getByRole('button', { name: '团队库' })).toHaveTextContent('场景参考'));
   });
   it('sets drag payload on cards', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [raw], next_cursor: null });
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     const card = (await screen.findByText('castle.png')).closest('[draggable="true"]')!;
     const setData = vi.fn();
     fireEvent.dragStart(card, { dataTransfer: { setData, effectAllowed: '' } });
@@ -124,7 +125,7 @@ describe('TeamLibraryPanel', () => {
       .mockImplementationOnce(() => new Promise(resolve => { releaseRescanList = resolve; }))
       .mockResolvedValue({ entries: [shared], next_cursor: null });
 
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     await screen.findByText('castle.png');
 
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
@@ -145,9 +146,9 @@ describe('TeamLibraryPanel', () => {
   it('greys out incomplete entries and hides adopt', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [{ ...shared, status: 'incomplete' }], next_cursor: null });
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     await screen.findByText('董卓 待机');
-    expect(screen.queryByRole('button', { name: '采用' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '使用' })).toBeNull();
     expect(screen.getByText('同步中')).toBeInTheDocument();
   });
 
@@ -157,7 +158,7 @@ describe('TeamLibraryPanel', () => {
     const other: TeamLibraryIndexEntry = { ...shared, id: 'ta_other', title: '别人的', author: '小李' };
     const rawByName: TeamLibraryIndexEntry = { ...raw, author: '老王' };
     api.listTeamAssets.mockResolvedValue({ entries: [shared, other, rawByName], next_cursor: null });
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     await screen.findByText('别人的');
     expect(api.fetchProfile).toHaveBeenCalled();
     expect(screen.getAllByRole('button', { name: '编辑' })).toHaveLength(1);
@@ -168,7 +169,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [shared], next_cursor: null });
     api.updateTeamAsset.mockResolvedValue({ ...shared, title: '董卓 攻击', tags: ['皮肤', '攻击'] });
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }));
     const title = await screen.findByLabelText('标题');
     expect(title).toHaveValue('董卓 待机');
@@ -189,7 +190,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [shared], next_cursor: null });
     api.updateTeamAsset.mockRejectedValue(new api.TeamNotAuthorError());
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: '编辑' }));
     fireEvent.click(await screen.findByRole('button', { name: '保存' }));
     expect(await screen.findByText('只有作者能修改')).toBeInTheDocument();
@@ -199,7 +200,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [shared], next_cursor: null });
     api.withdrawTeamAsset.mockResolvedValue(undefined);
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: '撤回' }));
     expect(await screen.findByRole('heading', { name: '撤回团队资产' })).toBeInTheDocument();
     expect(api.withdrawTeamAsset).not.toHaveBeenCalled();
@@ -212,7 +213,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [shared], next_cursor: null });
     api.withdrawTeamAsset.mockRejectedValue(new api.TeamNotAuthorError());
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: '撤回' }));
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '撤回' }));
     expect(await screen.findByText('只有作者能修改')).toBeInTheDocument();
@@ -223,8 +224,8 @@ describe('TeamLibraryPanel', () => {
     api.listTeamAssets.mockResolvedValue({ entries: [generation, shared, { ...generation, id: 'ta_sync', title: '同步中的', status: 'incomplete' }], next_cursor: null });
     api.adoptTeamAsset.mockResolvedValue({ asset: adoptedGeneration, created: true });
     const onReproduce = vi.fn();
-    const onAdopted = vi.fn();
-    render(<TeamLibraryPanel projectId="p1" onAdopted={onAdopted} onReproduce={onReproduce} />);
+    const onUseMedia = vi.fn();
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={onUseMedia} onReproduce={onReproduce} />);
     await screen.findByText('同步中的');
     const buttons = screen.getAllByRole('button', { name: '复刻' });
     expect(buttons).toHaveLength(1);
@@ -236,7 +237,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [generation], next_cursor: null });
     api.listRelatedTeamAssets.mockResolvedValue([{ library_id: library.library_id, library_name: library.name, entry: generation }]);
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     await screen.findByText('雪山白犬');
     expect(screen.queryByRole('button', { name: '复刻' })).toBeNull();
     expect(screen.queryByText('相关配方')).toBeNull();
@@ -245,7 +246,7 @@ describe('TeamLibraryPanel', () => {
   it('keeps the generation model available in the detail', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [generation], next_cursor: null });
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: '查看 雪山白犬' }));
     expect(await screen.findByText('gpt-image-2')).toBeInTheDocument();
   });
@@ -259,7 +260,7 @@ describe('TeamLibraryPanel', () => {
     ]);
     api.adoptTeamAsset.mockResolvedValue({ asset: adoptedGeneration, created: false });
     const onReproduce = vi.fn();
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onReproduce={onReproduce} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} onReproduce={onReproduce} />);
     const row = (await screen.findByText('相关配方')).parentElement!;
     expect(api.listRelatedTeamAssets).toHaveBeenCalledWith('p1');
     const first = within(row).getByRole('button', { name: /雪山白犬/ });
@@ -276,7 +277,7 @@ describe('TeamLibraryPanel', () => {
   it('renders no related row when the list is empty', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [generation], next_cursor: null });
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onReproduce={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} onReproduce={vi.fn()} />);
     await screen.findByText('雪山白犬');
     await waitFor(() => expect(api.listRelatedTeamAssets).toHaveBeenCalledWith('p1'));
     expect(screen.queryByText('相关配方')).toBeNull();
@@ -287,7 +288,7 @@ describe('TeamLibraryPanel', () => {
     api.listRelatedTeamAssets.mockResolvedValue([{ library_id: 'lib_other', library_name: '别的库', entry: generation }]);
     api.adoptTeamAsset.mockRejectedValue(new Error('采用团队资产失败：参考内容缺失'));
     const onReproduce = vi.fn();
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onReproduce={onReproduce} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} onReproduce={onReproduce} />);
     expect(await screen.findByText('目录不可达')).toBeInTheDocument();
     const row = (await screen.findByText('相关配方')).parentElement!;
     fireEvent.click(within(row).getByRole('button', { name: /雪山白犬/ }));
@@ -298,7 +299,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [generation], next_cursor: null });
     api.listRelatedTeamAssets.mockRejectedValue(new Error('boom'));
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onReproduce={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} onReproduce={vi.fn()} />);
     const row = (await screen.findByText('相关配方')).parentElement!;
     expect(within(row).getByText('读取失败')).toBeInTheDocument();
   });
@@ -307,7 +308,7 @@ describe('TeamLibraryPanel', () => {
     const second: TeamLibraryView = { ...library, library_id: 'lib_fedcba9876543210', name: '场景参考' };
     api.listTeamLibraries.mockResolvedValue([library, second]);
     api.listTeamAssets.mockResolvedValue({ entries: [shared], next_cursor: null });
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     expect(await screen.findByText('读取显示名失败')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '团队库' }));
     fireEvent.click(await screen.findByRole('button', { name: second.name }));
@@ -323,7 +324,7 @@ describe('TeamLibraryPanel', () => {
       .mockResolvedValueOnce({ entries: [shared], next_cursor: 'c1' })
       .mockResolvedValueOnce({ entries: [next], next_cursor: null });
     api.withdrawTeamAsset.mockResolvedValue(undefined);
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: '撤回' }));
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '撤回' }));
     expect(await screen.findByText('下一条')).toBeInTheDocument();
@@ -336,7 +337,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [shared], next_cursor: null });
     api.withdrawTeamAsset.mockResolvedValue(undefined);
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: '撤回' }));
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '撤回' }));
     await waitFor(() => expect(screen.queryByText('董卓 待机')).toBeNull());
@@ -346,7 +347,7 @@ describe('TeamLibraryPanel', () => {
     api.fetchProfile.mockResolvedValue({ display_name: '老王' });
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [shared], next_cursor: null });
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: '撤回' }));
     const confirm = within(await screen.findByRole('alertdialog')).getByRole('button', { name: '撤回' });
     // ConfirmDialog 的 destructive 变体把确认按钮换成 destructive 按钮。
@@ -359,7 +360,7 @@ describe('TeamLibraryPanel', () => {
     let release: (value: unknown) => void = () => {};
     api.adoptTeamAsset.mockImplementation(() => new Promise(resolve => { release = resolve; }));
     const onReproduce = vi.fn();
-    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onReproduce={onReproduce} />);
+    render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} onReproduce={onReproduce} />);
     const card = await screen.findByRole('button', { name: '复刻' });
     const row = (await screen.findByText('相关配方')).parentElement!;
     fireEvent.click(card);
@@ -375,7 +376,7 @@ describe('TeamLibraryPanel', () => {
     let release: (value: unknown) => void = () => {};
     api.adoptTeamAsset.mockImplementation(() => new Promise(resolve => { release = resolve; }));
     const onReproduce = vi.fn();
-    const view = render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onReproduce={onReproduce} />);
+    const view = render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} onReproduce={onReproduce} />);
     fireEvent.click(await screen.findByRole('button', { name: '复刻' }));
     view.unmount();
     await act(async () => { release({ asset: adoptedGeneration, created: true }); });
@@ -398,7 +399,7 @@ describe('TeamLibraryPanel', () => {
       const clip: TeamLibraryIndexEntry = { ...shared, id: 'ta_clip', title: '开场', mime_type: 'video/mp4' };
       api.listTeamLibraries.mockResolvedValue([library]);
       api.listTeamAssets.mockResolvedValue({ entries: [clip], next_cursor: null });
-      const view = render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+      const view = render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
       await screen.findByText('开场');
       expect(disconnect).not.toHaveBeenCalled();
       view.unmount();
@@ -411,7 +412,7 @@ describe('TeamLibraryPanel', () => {
     const clip: TeamLibraryIndexEntry = { ...shared, id: 'ta_clip', title: '同步的片', mime_type: 'video/mp4', status: 'incomplete' };
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [clip], next_cursor: null });
-    const { container } = render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    const { container } = render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
     await screen.findByText('同步的片');
     expect(container.querySelector('video')).toBeNull();
   });
@@ -432,7 +433,7 @@ describe('TeamLibraryPanel', () => {
       const clip: TeamLibraryIndexEntry = { ...shared, id: 'ta_clip', title: '开场', mime_type: 'video/mp4' };
       api.listTeamLibraries.mockResolvedValue([library]);
       api.listTeamAssets.mockResolvedValue({ entries: [clip], next_cursor: null });
-      const { container } = render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+      const { container } = render(<TeamLibraryPanel projectId="p1" onUseMedia={vi.fn()} />);
       await screen.findByText('开场');
       const video = container.querySelector('video')!;
       expect(video).not.toBeNull();
@@ -451,7 +452,7 @@ describe('TeamLibraryPanel', () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [], next_cursor: null });
     api.listRelatedTeamAssets.mockResolvedValue([{ library_id: library.library_id, library_name: library.name, entry: generation }]);
-    render(<TeamLibraryPanel projectId="p1" relatedSha256={'e'.repeat(64)} onAdopted={vi.fn()} onReproduce={vi.fn()} />);
+    render(<TeamLibraryPanel projectId="p1" relatedSha256={'e'.repeat(64)} onUseMedia={vi.fn()} onReproduce={vi.fn()} />);
     const row = (await screen.findByText('相关配方')).parentElement!;
     expect(api.listRelatedTeamAssets).toHaveBeenCalledWith('p1', 'e'.repeat(64));
     expect(api.listRelatedTeamAssets).toHaveBeenCalledOnce();
@@ -460,21 +461,22 @@ describe('TeamLibraryPanel', () => {
 });
 
 
-it('shows the team prompt cover and switches previews without changing adoption semantics', async () => {
+it('shows the team prompt cover and switches previews and uses prompt text directly', async () => {
   const previews = ['a', 'b'].map(x => ({ file: `${x.repeat(16)}.png`, mime_type: 'image/png', width: 120, height: 60, source_job_id: null, source_model: null, added_at: '' }));
   const prompt: TeamLibraryIndexEntry = { ...shared, kind: 'prompt', title: '夕照', mime_type: 'text/plain', prompt_text: '水彩山谷', preview_images: previews };
   api.listTeamLibraries.mockResolvedValue([library]);
   api.listTeamAssets.mockResolvedValue({ entries: [prompt], next_cursor: null });
   api.adoptTeamAsset.mockResolvedValue({ asset: { asset_id: 'copied', kind: 'prompt' }, created: true });
-  const onAdopted = vi.fn();
-  render(<TeamLibraryPanel projectId="p1" onAdopted={onAdopted} />);
+  const onUsePrompt = vi.fn();
+  render(<TeamLibraryPanel projectId="p1" onUsePrompt={onUsePrompt} />);
   expect(await screen.findByRole('img', { name: '夕照效果图' })).toHaveAttribute('src', `/preview/${library.library_id}/${prompt.id}/${previews[0].file}/256`);
   fireEvent.click(screen.getByRole('button', { name: '查看 夕照' }));
   const dialog = await screen.findByRole('dialog', { name: '夕照' });
   fireEvent.click(within(dialog).getByRole('button', { name: '查看团队效果图 2' }));
   expect(within(dialog).getByRole('img', { name: '夕照效果图' })).toHaveAttribute('src', `/preview/${library.library_id}/${prompt.id}/${previews[1].file}/512`);
   expect(within(dialog).getByText('水彩山谷')).toBeInTheDocument();
-  fireEvent.click(within(dialog).getByRole('button', { name: '采用' }));
-  await waitFor(() => expect(onAdopted).toHaveBeenCalled());
-  expect(api.adoptTeamAsset).toHaveBeenCalledWith(library.library_id, prompt.id, 'p1');
+  fireEvent.click(within(dialog).getByRole('button', { name: '使用' }));
+  await waitFor(() => expect(onUsePrompt).toHaveBeenCalled());
+  expect(api.adoptTeamAsset).not.toHaveBeenCalled();
+  expect(onUsePrompt).toHaveBeenCalledWith('水彩山谷', prompt);
 });

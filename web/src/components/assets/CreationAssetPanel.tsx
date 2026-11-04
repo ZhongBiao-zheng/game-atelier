@@ -1,3 +1,4 @@
+import type { UseTeamMedia, UseTeamPrompt } from './teamAssetUse';
 import { PromptAssetDetail } from './PromptAssetDetail';
 import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -21,7 +22,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { AssetFilterPill } from './AssetFilterPill';
 import { cn } from '@/lib/utils';
 import { assetMediaContent, renderCreationPrompt, type CreationAsset, type CreationMediaAssetContent } from '@/schema/creationAssets';
-import type { TeamAssetAdoptResponse, TeamLibraryIndexEntry } from '@/schema/teamLibrary';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -43,7 +43,8 @@ export interface CreationAssetPanelProps {
     renderedPrompt: string,
   ) => void;
   onUseMedia: (asset: CreationAsset, content: CreationMediaAssetContent) => void;
-  onTeamAssetAdopted?: (result: TeamAssetAdoptResponse, entry: TeamLibraryIndexEntry) => void;
+  onUseTeamMedia?: UseTeamMedia;
+  onUseTeamPrompt?: UseTeamPrompt;
   /** 复刻生成资产（asset.kind 恒为 'generation'）；传了才显示「复刻」。 */
   onReproduce?: (asset: CreationAsset) => void;
   /** 透传给团队栏：有值时「相关配方」按参考 sha256 命中。 */
@@ -71,7 +72,8 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   onClose,
   onUsePrompt,
   onUseMedia,
-  onTeamAssetAdopted,
+  onUseTeamMedia,
+  onUseTeamPrompt,
   onReproduce,
   teamRelatedSha256,
   initialTeamLibraryId,
@@ -348,7 +350,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
             <TeamLibraryPanel
               key={teamProjectId}
               projectId={teamProjectId ?? ''}
-              onAdopted={(result, entry) => { void refresh(); onTeamAssetAdopted?.(result, entry); }}
+              onUseMedia={onUseTeamMedia} onUsePrompt={onUseTeamPrompt}
               onReproduce={onReproduce ? asset => { onReproduce(asset); onClose(); } : undefined}
               relatedSha256={teamRelatedSha256}
               initialTeamLibraryId={initialTeamLibraryId}

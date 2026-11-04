@@ -32,6 +32,8 @@ import {
   markCreationAssetUsed,
   saveGenerationFromCanvas,
 } from '@/api/creationAssets';
+import { readTeamMedia } from '@/components/assets/teamAssetUse';
+vi.mock('@/components/assets/teamAssetUse', () => ({ readTeamMedia: vi.fn() }));
 import { adoptTeamAsset, listRelatedTeamAssets, listTeamAssets, listTeamLibraries } from '@/api/teamLibraries';
 import { ApiError } from '@/api/http';
 import { dispatchTeamAssetAction } from '@/lib/teamAssetActions';
@@ -1581,7 +1583,7 @@ it('team tab mounts in place with the current canvas preselected', async () => {
   expect(window.location.pathname).not.toBe('/settings/libraries');
 });
 
-it('announces a team asset adopted from the panel', async () => {
+it('uses a team file directly without creating a catalog asset', async () => {
   vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
   vi.mocked(listTeamLibraries).mockResolvedValue([{
     library_id: 'lib_0123456789abcdef', project_id: 'canvas-one', name: '角色参考', mount_path: '/x',
@@ -1592,11 +1594,14 @@ it('announces a team asset adopted from the panel', async () => {
     relative_path: 'concept/castle.png', sha256: null, updated_at: '2026-09-20T00:00:00Z', reproducible: false, status: 'ready', model: null, cost_cny: null,
     input_sha256: [],
   }], next_cursor: null });
-  vi.mocked(adoptTeamAsset).mockResolvedValueOnce({ asset: { asset_id: 'ca1' } as never, created: true });
+  const file = new File(['png'], 'castle.png', { type: 'image/png' });
+  vi.mocked(readTeamMedia).mockResolvedValue(file);
+  vi.mocked(uploadCanvasMedia).mockImplementation(async (_project, file, revision) => mockFileUpload(file, revision));
   await openTeamTab();
-  fireEvent.click(await screen.findByRole('button', { name: '采用' }));
-  expect(await screen.findByText('已加入资产库')).toBeInTheDocument();
-  expect(adoptTeamAsset).toHaveBeenCalledWith('lib_0123456789abcdef', 'raw_a', 'canvas-one');
+  fireEvent.click(await screen.findByRole('button', { name: '使用' }));
+  expect(await screen.findByText('已放到画布')).toBeInTheDocument();
+  expect(uploadCanvasMedia).toHaveBeenCalled();
+  expect(adoptTeamAsset).not.toHaveBeenCalled();
 });
 
 function mockFileUpload(file: File, revision: number) {

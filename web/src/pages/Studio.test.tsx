@@ -3062,3 +3062,33 @@ it('refreshes an open asset panel after setting a generated result as preview', 
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(document.querySelector('img[src*="eeeeeeeeeeeeeeee.png/thumb"]')).not.toBeNull());
 });
+
+it('团队使用连续追加并按来源复用 File，满额不覆盖，也不写个人资产', async () => {
+  mockCompletedBatchAndKeys();
+  mockPanelEndpoints();
+  renderStudio();
+  await screen.findByText('Volcengine Ark');
+  fireEvent.click(screen.getByLabelText('打开创作资产'));
+  await waitFor(() => expect(assetPanelProps.current?.onUseTeamMedia).toBeTypeOf('function'));
+  const entry = { id: 'ta-first', kind: 'media', title: '一.png', mime_type: 'image/png' };
+  const first = new File(['1'], 'one.png', { type: 'image/png' });
+  const second = new File(['2'], 'two.png', { type: 'image/png' });
+  act(() => {
+    assetPanelProps.current!.onUseTeamMedia(first, entry, 'lib:one');
+    assetPanelProps.current!.onUseTeamMedia(second, { ...entry, id: 'ta-second' }, 'lib:two');
+  });
+  await waitFor(() => expect(readStudioDraft()?.referenceImages).toEqual([first, second]));
+  act(() => assetPanelProps.current!.onUseTeamMedia(new File(['1'], 'one.png', { type: 'image/png' }), entry, 'lib:one'));
+  expect(await screen.findByText('已在参考图中')).toBeInTheDocument();
+  expect(readStudioDraft()?.referenceImages).toHaveLength(2);
+  act(() => {
+    for (let n = 0; n < 50; n++) assetPanelProps.current!.onUseTeamMedia(new File([String(n)], `${n}.png`, { type: 'image/png' }), entry, `lib:extra-${n}`);
+  });
+  expect(await screen.findByText('参考图已满')).toBeInTheDocument();
+  const full = readStudioDraft()!.referenceImages;
+  expect(full.slice(0, 2)).toEqual([first, second]);
+  act(() => assetPanelProps.current!.onUseTeamMedia(new File(['last'], 'last.png', { type: 'image/png' }), entry, 'lib:last'));
+  expect(readStudioDraft()!.referenceImages).toEqual(full);
+  const requests = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+  expect(requests.filter(([url, init]) => (String(url).includes('/adopt') || String(url).includes('/creation-assets')) && init?.method && init.method !== 'GET')).toEqual([]);
+});

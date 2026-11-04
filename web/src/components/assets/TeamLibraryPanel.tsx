@@ -1,10 +1,12 @@
+import { readTeamMedia, type UseTeamMedia, type UseTeamPrompt } from './teamAssetUse';
 import { GatewayLibraryBrowser, GatewayLibraryHelp, useGatewayLibrarySources } from './GatewayLibraryBrowser';
 import type { GatewayLibrarySelection } from '@/api/gatewayLibraries';
 import { TeamPromptPreviewGallery } from './TeamPromptPreviewGallery';
 import { formatGenerationCost } from '@/lib/generationCost';
 import {
   Copy,
-  Download,
+  Plus,
+  Loader2,
   ChevronDown,
   Folder,
   Pencil,
@@ -52,7 +54,6 @@ import { DEFAULT_CANVAS_CATEGORIES } from '@/schema/canvas';
 import type { CreationAsset } from '@/schema/creationAssets';
 import {
   TEAM_ASSET_DRAG_TYPE,
-  type TeamAssetAdoptResponse,
   type TeamLibraryIndexEntry,
   type TeamLibraryView,
   type TeamRelatedEntry,
@@ -67,8 +68,8 @@ import { Label } from '@/components/ui/label';
 
 export interface TeamLibraryPanelProps {
   projectId: string;
-  /** 采用完成后交给调用方：由它决定提示与后续动作。 */
-  onAdopted: (result: TeamAssetAdoptResponse, entry: TeamLibraryIndexEntry) => void;
+  onUseMedia?: UseTeamMedia;
+  onUsePrompt?: UseTeamPrompt;
   /** 复刻出口（Studio 与画布都传）：面板先采用成本机副本再回调。不给就不显示复刻与相关配方。 */
   onReproduce?: (asset: CreationAsset) => void;
   /** 有值时顶部「相关配方」改为参考内容命中这份 sha256 的配方。 */
@@ -88,24 +89,6 @@ const TYPE_FILTERS: { value: TypeFilter; label: string }[] = [
   { value: 'audio', label: '音频' },
   { value: 'prompt', label: '提示词' },
 ];
-
-/** 目录树节点：原始文件按挂载点下第一级目录，分享内容按作者。 */
-type TreeNode = { group: 'dir' | 'author'; name: string };
-
-const ROOT_DIR = '根目录';
-const NO_AUTHOR = '未署名';
-
-function nodeOf(entry: TeamLibraryIndexEntry): TreeNode {
-  if (entry.kind === 'raw') {
-    const [head, ...rest] = entry.relative_path.split('/');
-    return { group: 'dir', name: rest.length > 0 ? head : ROOT_DIR };
-  }
-  return { group: 'author', name: entry.author ?? NO_AUTHOR };
-}
-
-function sameNode(a: TreeNode, b: TreeNode): boolean {
-  return a.group === b.group && a.name === b.name;
-}
 
 function matchesType(entry: TeamLibraryIndexEntry, filter: TypeFilter): boolean {
   if (filter === 'all') return true;
@@ -127,7 +110,8 @@ function errorMessage(error: unknown, fallback: string): string {
 
 export function TeamLibraryPanel({
   projectId,
-  onAdopted,
+  onUseMedia,
+  onUsePrompt,
   onReproduce,
   relatedSha256,
   initialTeamLibraryId,
@@ -141,7 +125,6 @@ export function TeamLibraryPanel({
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
-  const [node, setNode] = useState<TreeNode | null>(null);
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [viewing, setViewing] = useState<TeamLibraryIndexEntry | null>(null);
   const { sizes, measure } = useMediaSizes();
@@ -150,6 +133,7 @@ export function TeamLibraryPanel({
   const [cursor, setCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [usingId, setUsingId] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
   // 显示名读失败单独记：面板级 error 会被切库 / 搜索清掉，这条不该跟着消失。
   const [profileError, setProfileError] = useState(false);
@@ -282,19 +266,19 @@ export function TeamLibraryPanel({
       .finally(() => setBusy(false));
   }, [libraryId, search, typeFilter]);
 
-  const adopt = useCallback(
-    (entry: TeamLibraryIndexEntry) => {
-      if (!libraryId) return;
-      setBusy(true);
-      void adoptTeamAsset(libraryId, entry.id, projectId)
-        .then(result => onAdopted(result, entry))
-        .catch(() => setError('采用失败'))
-        .finally(() => setBusy(false));
-    },
-    [libraryId, onAdopted, projectId],
-  );
+  const applyTeamEntry = useCallback(async (entry: TeamLibraryIndexEntry) => {
+    if (!libraryId || usingId) return;
+    setError(null);
+    if (entry.kind === 'prompt') { onUsePrompt?.(entry.prompt_text ?? '', entry); return; }
+    setUsingId(entry.id);
+    try {
+      const file = await readTeamMedia(teamAssetContentUrl(libraryId, entry.id), entry);
+      await onUseMedia?.(file, entry, `${libraryId}:${entry.id}`);
+    } catch { setError('读取失败'); }
+    finally { setUsingId(null); }
+  }, [libraryId, usingId, onUseMedia, onUsePrompt]);
 
-  // 复刻 = 先采用（任何从库到本机的动作都是采用），再把本机副本交给调用方。
+  // 复刻先采用以冻结生成快照，再把本机副本交给调用方；普通使用不创建资产。
   const reproduce = useCallback(
     (targetLibraryId: string, entry: TeamLibraryIndexEntry) => {
       if (!onReproduce) return;
@@ -341,22 +325,6 @@ export function TeamLibraryPanel({
   const typed = useMemo(
     () => entries.filter(entry => matchesType(entry, typeFilter)),
     [entries, typeFilter],
-  );
-
-  const tree = useMemo(() => {
-    const seen = new Map<string, TreeNode>();
-    for (const entry of typed) {
-      const item = nodeOf(entry);
-      seen.set(`${item.group}:${item.name}`, item);
-    }
-    return [...seen.values()].sort(
-      (a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name),
-    );
-  }, [typed]);
-
-  const visible = useMemo(
-    () => (node ? typed.filter(entry => sameNode(nodeOf(entry), node)) : typed),
-    [node, typed],
   );
 
   if (libraries.length === 0 && remote.sources.length === 0 && !remoteLibrary) {
@@ -410,21 +378,14 @@ export function TeamLibraryPanel({
         <PopoverTrigger asChild>
           <Button variant="outline" aria-label="团队库" className="h-10 w-full justify-start bg-card font-normal">
             <Folder /><span className="min-w-0 flex-1 truncate text-left">{remoteLibrary ? `${remoteLibrary.name} · ${remoteLibrary.owner_name}` : library?.name ?? '选择团队库'}</span>
-            <span className="max-w-24 truncate text-xs text-muted-foreground">{remoteLibrary ? '只读' : node?.name ?? '全部目录'}</span><ChevronDown />
+            <span className="max-w-24 truncate text-xs text-muted-foreground">{remoteLibrary ? '只读' : ''}</span><ChevronDown />
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-80 space-y-1">
           {libraries.map(item => <Button key={item.library_id} variant="ghost" className="w-full justify-start"
-            aria-pressed={libraryId === item.library_id} onClick={() => { setRemoteLibrary(null); setNode(null); setLibraryId(item.library_id); setSelectorOpen(false); }}>
+            aria-pressed={libraryId === item.library_id} onClick={() => { setRemoteLibrary(null); setLibraryId(item.library_id); setSelectorOpen(false); }}>
             <Folder />{item.name}
           </Button>)}
-          {!remoteLibrary && libraries.length > 0 && <div className="max-h-64 space-y-1 overflow-y-auto border-t border-border pt-1" role="group" aria-label="目录">
-            <Button variant="ghost" size="sm" className="w-full justify-start" aria-pressed={!node}
-              onClick={() => { setNode(null); setSelectorOpen(false); }}>全部目录</Button>
-            {tree.map(item => <Button key={`${item.group}:${item.name}`} variant="ghost" size="sm"
-              className="w-full justify-start truncate pl-6" aria-pressed={node ? sameNode(node, item) : false}
-              onClick={() => { setNode(item); setSelectorOpen(false); }}>{item.name}</Button>)}
-          </div>}
           <div role="group" aria-label="同事共享" className="max-h-64 space-y-1 overflow-y-auto border-t border-border pt-1">
             <div className="flex items-center gap-1 px-2 text-xs text-muted-foreground">同事共享<GatewayLibraryHelp /></div>
             {remote.sources.map(source => source.unreachable
@@ -449,18 +410,18 @@ export function TeamLibraryPanel({
       <div role="group" aria-label="类型" className="flex flex-wrap gap-2">
         {TYPE_FILTERS.filter(item => item.value !== 'audio' || entries.some(entry => entry.mime_type?.startsWith('audio/')) || typeFilter === 'audio')
           .map(item => <AssetFilterPill key={item.value} selected={typeFilter === item.value}
-            onClick={() => { setNode(null); setTypeFilter(item.value); }}>{item.label}</AssetFilterPill>)}
+            onClick={() => { setTypeFilter(item.value); }}>{item.label}</AssetFilterPill>)}
       </div>
       {library && !library.reachable ? (
         <p className="py-8 text-center text-sm text-muted-foreground">目录不可达</p>
       ) : (
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-          {visible.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">库里还没有内容</p> : (
-            <AssetMasonry items={visible} itemKey={mediaKey} ratio={entry => mediaRatio(sizes[mediaKey(entry)])}>
+          {typed.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">库里还没有内容</p> : (
+            <AssetMasonry items={typed} itemKey={mediaKey} ratio={entry => mediaRatio(sizes[mediaKey(entry)])}>
               {entry => <TeamAssetCard entry={entry} libraryId={library?.library_id ?? ''} busy={busy}
                 size={sizes[mediaKey(entry)]} onMeasure={size => measure(mediaKey(entry), size)}
                 owned={displayName !== null && entry.kind !== 'raw' && entry.author === displayName}
-                onAdopt={adopt} onView={setViewing}
+                onUse={applyTeamEntry} usingId={usingId} onView={setViewing}
                 onReproduce={onReproduce && library ? item => reproduce(library.library_id, item) : undefined}
                 onEdit={setEditing} onWithdraw={setWithdrawing} />}
             </AssetMasonry>
@@ -484,7 +445,7 @@ export function TeamLibraryPanel({
             {viewing.model && <><dt>模型</dt><dd>{viewing.model}</dd></>}
             {viewing.cost_cny != null && <><dt>花费</dt><dd>{formatGenerationCost(viewing.cost_cny)}</dd></>}
           </dl>
-          <DialogFooter><Button disabled={busy} onClick={() => adopt(viewing)}>采用</Button></DialogFooter>
+          <DialogFooter><Button disabled={busy || usingId !== null} onClick={() => void applyTeamEntry(viewing)}>{usingId === viewing.id && <Loader2 className="animate-spin" />}使用</Button></DialogFooter>
         </DialogContent>
       </Dialog>}
 
@@ -562,14 +523,15 @@ function TeamAssetEditDialog({
   );
 }
 
-function TeamAssetCard({ entry, libraryId, busy, owned, size, onMeasure, onAdopt, onView, onReproduce, onEdit, onWithdraw }: {
+function TeamAssetCard({ entry, libraryId, busy, owned, size, onMeasure, onUse, usingId, onView, onReproduce, onEdit, onWithdraw }: {
   entry: TeamLibraryIndexEntry;
   libraryId: string;
   busy: boolean;
   owned: boolean;
   size?: MediaSize;
   onMeasure: (size: MediaSize) => void;
-  onAdopt: (entry: TeamLibraryIndexEntry) => void;
+  onUse: (entry: TeamLibraryIndexEntry) => void;
+  usingId: string | null;
   onView: (entry: TeamLibraryIndexEntry) => void;
   onReproduce?: (entry: TeamLibraryIndexEntry) => void;
   onEdit: (entry: TeamLibraryIndexEntry) => void;
@@ -596,13 +558,13 @@ function TeamAssetCard({ entry, libraryId, busy, owned, size, onMeasure, onAdopt
           mimeType={incomplete ? '' : mime} alt={entry.title} size={size} onMeasure={onMeasure} />}
       </Button>
       <div className="pointer-events-none absolute inset-x-1 bottom-1 flex flex-wrap items-center justify-end gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-        <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-glass p-0.5 backdrop-blur-glass">
+        <div className="pointer-events-auto flex items-center gap-1">
           {reproducible && <CardIconButton label="复刻" disabled={busy} onClick={() => onReproduce?.(entry)}><Copy /></CardIconButton>}
           {owned && <>
             <CardIconButton label="编辑" disabled={busy} onClick={() => onEdit(entry)}><Pencil /></CardIconButton>
             <CardIconButton label="撤回" disabled={busy} onClick={() => onWithdraw(entry)}><Undo2 /></CardIconButton>
           </>}
-          {!incomplete && <Button size="sm" className="h-7 rounded-full px-2 text-xs" disabled={busy} onClick={() => onAdopt(entry)}><Download />采用</Button>}
+          {!incomplete && <Button variant="solid" size="sm" className="h-7 rounded-full px-2 text-xs" disabled={busy || usingId !== null} onClick={() => onUse(entry)}>{usingId === entry.id ? <Loader2 className="animate-spin" /> : <Plus />}使用</Button>}
         </div>
       </div>
     </div>

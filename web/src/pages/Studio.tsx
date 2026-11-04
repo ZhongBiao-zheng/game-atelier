@@ -213,6 +213,10 @@ function StudioFull() {
   useHeicAsJpeg(mjRefs, setMjRefs, setAssetNotice);
   useHeicAsJpeg(videoFrames, setVideoFrames, setAssetNotice);
 
+  const teamReferenceFiles = useRef(new Map<string, File>());
+  const referenceSlots = useRef({ referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs });
+  referenceSlots.current = { referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs };
+
   // 每次改动都把未提交的输入写进内存草稿；切页卸载后回来按它恢复，刷新即清空。
   useEffect(() => {
     writeStudioDraft({
@@ -1079,7 +1083,14 @@ function StudioFull() {
           }}
           onUseMedia={(asset, content) => { void addCreationAssetReference(asset, content); }}
           onReproduce={requestReproduce}
-          onTeamAssetAdopted={result => setAssetNotice(result.created ? '已加入资产库' : '已在你的资产库')}
+          onUseTeamMedia={(file, entry, key) => {
+            const reused = teamReferenceFiles.current.get(key) ?? file;
+            teamReferenceFiles.current.set(key, reused);
+            addReferenceFile(reused, entry.mime_type ?? file.type, entry.title);
+          }}
+          onUseTeamPrompt={(text, entry) => {
+            setPromptText(text); setPromptAssetId(null); setPromptAssetSourceTitle(entry.title); setClickPinned(true);
+          }}
         />
       )}
       <SetPromptPreviewDialog request={promptPreviewRequest} onClose={() => setPromptPreviewRequest(null)} onSaved={() => { setAssetsRevision(value => value + 1); setAssetNotice('已设为效果图'); }} />
@@ -1228,41 +1239,49 @@ function StudioFull() {
     }
   }
 
-  // 媒体资产「使用」：按 mime 落到当前模式下真正会被提交的槽位；收不了的类型不取文件，只给一句提示。
-  async function addCreationAssetReference(asset: CreationAsset, content: CreationMediaAssetContent) {
-    const route = routeStudioMediaAsset(content.mime_type, {
-      kind,
-      videoMode,
-      model,
-      videoCaps: kind === 'video' ? videoCaps : null,
+  function mediaReferenceRoute(mime: string, empty = false) {
+    const slots = referenceSlots.current;
+    return routeStudioMediaAsset(mime, {
+      kind, videoMode, model, videoCaps: kind === 'video' ? videoCaps : null,
       maxImageReferences: sizeContext(providers, providers.find(item => item.alias === providerAlias), model).caps.maxRefImages,
-      counts: {
-        images: referenceImages.length,
-        mj: mjRefs.image.length,
-        videos: referenceVideos.length,
-        audios: referenceAudios.length,
+      counts: empty ? { images: 0, mj: 0, videos: 0, audios: 0 } : {
+        images: slots.referenceImages.length, mj: slots.mjRefs.image.length,
+        videos: slots.referenceVideos.length, audios: slots.referenceAudios.length,
       },
     });
-    if ('notice' in route) {
-      setAssetNotice(route.notice);
-      return;
-    }
+  }
+
+  function addReferenceFile(file: File, mime: string, title: string) {
+    const slots = referenceSlots.current;
+    const target = mediaReferenceRoute(mime, true);
+    if ('notice' in target) { setAssetNotice(target.notice); return; }
+    const current = target.target === 'frame' ? [slots.videoFrames.first, slots.videoFrames.last]
+      : target.target === 'mj' ? slots.mjRefs.image : target.target === 'videos' ? slots.referenceVideos
+        : target.target === 'audios' ? slots.referenceAudios : slots.referenceImages;
+    if (current.includes(file)) { setAssetNotice('已在参考图中'); return; }
+    const route = mediaReferenceRoute(mime);
+    if ('notice' in route) { setAssetNotice(route.notice); return; }
+    if (route.target === 'frame') {
+      const slot = !slots.videoFrames.first ? 'first' : !slots.videoFrames.last && (videoCaps?.maxFrames ?? 2) >= 2 ? 'last' : null;
+      if (!slot) { setAssetNotice('参考图已满'); return; }
+      slots.videoFrames = { ...slots.videoFrames, [slot]: file }; setVideoFrames(slots.videoFrames);
+    } else if (route.target === 'mj') {
+      slots.mjRefs = { ...slots.mjRefs, image: [...slots.mjRefs.image, file] }; setMjRefs(slots.mjRefs);
+    } else if (route.target === 'videos') { slots.referenceVideos = [...slots.referenceVideos, file]; setReferenceVideos(slots.referenceVideos); }
+    else if (route.target === 'audios') { slots.referenceAudios = [...slots.referenceAudios, file]; setReferenceAudios(slots.referenceAudios); }
+    else { slots.referenceImages = [...slots.referenceImages, file]; setReferenceImages(slots.referenceImages); }
+    setPromptAssetSourceTitle(title); setPromptAssetId(null); setClickPinned(true); setAssetNotice('已加入参考图');
+  }
+
+  async function addCreationAssetReference(asset: CreationAsset, content: CreationMediaAssetContent) {
+    const route = mediaReferenceRoute(content.mime_type);
+    if ('notice' in route) { setAssetNotice(route.notice); return; }
     try {
       const response = await connectionFetch(creationAssetMediaUrl(asset.asset_id));
       if (!response.ok) throw await apiError(response, '读取媒体资产');
       const blob = await response.blob();
-      const file = new File([blob], content.filename, { type: content.mime_type });
-      if (route.target === 'frame') setVideoFrames(current => ({ ...current, first: file }));
-      else if (route.target === 'mj') setMjRefs(current => ({ ...current, image: [...current.image, file] }));
-      else if (route.target === 'videos') setReferenceVideos(current => [...current, file]);
-      else if (route.target === 'audios') setReferenceAudios(current => [...current, file]);
-      else setReferenceImages(current => [...current, file]);
-      setPromptAssetSourceTitle(asset.title);
-      setPromptAssetId(null);
-      setClickPinned(true);
-    } catch (error) {
-      alert(error instanceof Error ? error.message : String(error));
-    }
+      addReferenceFile(new File([blob], content.filename, { type: content.mime_type }), content.mime_type, asset.title);
+    } catch (error) { alert(error instanceof Error ? error.message : String(error)); }
   }
 
   async function deleteFailedRound(jobId: string) {

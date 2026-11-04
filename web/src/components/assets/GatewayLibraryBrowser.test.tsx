@@ -21,7 +21,7 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.resetAllMocks(); });
 
 it('无本地项目也能选同事共享，只查看缩略图和提示词，没有媒体源与采用动作', async () => {
-  const { container } = render(<TeamLibraryPanel projectId="" onAdopted={vi.fn()} />);
+  const { container } = render(<TeamLibraryPanel projectId="" onUseMedia={vi.fn()} />);
   fireEvent.click(await screen.findByRole('button', { name: '团队库' }));
   const group = screen.getByRole('group', { name: '同事共享' });
   fireEvent.click(within(group).getByRole('button', { name: /画面参考 · 林晓/ }));
@@ -48,7 +48,7 @@ it('无本地项目也能选同事共享，只查看缩略图和提示词，没�
 
 it('每 30 秒重查目录，断连后清空，不依赖 SSE', async () => {
   vi.useFakeTimers();
-  render(<TeamLibraryPanel projectId="" onAdopted={vi.fn()} />);
+  render(<TeamLibraryPanel projectId="" onUseMedia={vi.fn()} />);
   await act(async () => {});
   expect(listGatewayLibraries).toHaveBeenCalledTimes(1);
   await act(async () => { vi.advanceTimersByTime(30000); });
