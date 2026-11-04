@@ -259,6 +259,21 @@ it('模型与额度在关闭弹层时保存，失败后回滚到服务器值', a
   await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { limits: [{ period: 'day', cap_cny: 10 }] }));
 });
 
+it('非法额度保留弹层和输入，修正后才允许关闭并保存', async () => {
+  vi.mocked(api.updateGatewayKey).mockResolvedValue(key);
+  render(<LanSharingSection />);
+  fireEvent.click(await screen.findByRole('button', { name: '额度' }));
+  fireEvent.change(screen.getByLabelText('今日限额'), { target: { value: '0' } });
+  fireEvent.keyDown(screen.getByLabelText('额度'), { key: 'Escape' });
+  expect(screen.getByRole('alert')).toHaveTextContent('额度须大于 0 且不超过 100 万');
+  expect(screen.getByLabelText('今日限额')).toHaveValue(0);
+  expect(api.updateGatewayKey).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('今日限额'), { target: { value: '25' } });
+  fireEvent.keyDown(screen.getByLabelText('额度'), { key: 'Escape' });
+  await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { limits: [{ period: 'day', cap_cny: 25 }] }));
+  expect(screen.queryByLabelText('今日限额')).toBeNull();
+});
+
 it('自定义密钥可见，创建错误只展示消息并保留草稿', async () => {
   vi.mocked(api.createGatewayKey).mockRejectedValue(new Error('密钥已存在'));
   render(<LanSharingSection />);

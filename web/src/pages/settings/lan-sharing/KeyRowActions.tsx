@@ -23,6 +23,7 @@ export function KeyRowActions({ record, options, busy, onSave, onRename, onReset
   const [aliases, setAliases] = useState<string[] | null>(null);
   const [limits, setLimits] = useState<Record<string, string>>({});
   const [limitError, setLimitError] = useState('');
+  const [limitsOpen, setLimitsOpen] = useState(false);
   const toggle = (values: string[], value: string) => values.includes(value) ? values.filter(v => v !== value) : [...values, value];
   return <div className="flex items-center justify-end gap-1 whitespace-nowrap">
     <Popover onOpenChange={open => {
@@ -42,22 +43,23 @@ export function KeyRowActions({ record, options, busy, onSave, onRename, onReset
         {aliases !== null && [...new Set([...options.aliases.map(a => a.alias), ...aliases])].map(alias => <Label key={alias} className="flex items-center gap-2"><Checkbox checked={aliases.includes(alias)} onCheckedChange={() => setAliases(toggle(aliases, alias))} />{alias}</Label>)}
       </PopoverContent>
     </Popover>
-    <Popover onOpenChange={open => {
+    <Popover open={limitsOpen} onOpenChange={open => {
       if (open) { setLimits(Object.fromEntries(record.limits.map(l => [l.period, String(l.cap_cny)]))); setLimitError(''); }
       else {
         const next = (Object.keys(PERIODS) as LimitPeriod[]).filter(p => limits[p]?.trim()).map(period => ({ period, cap_cny: Number(limits[period]) }));
         if (next.some(l => !Number.isFinite(l.cap_cny) || l.cap_cny <= 0 || l.cap_cny > 1000000)) { setLimitError('额度须大于 0 且不超过 100 万'); return; }
         if (JSON.stringify(next) !== JSON.stringify(record.limits)) void onSave({ limits: next });
       }
+      setLimitsOpen(open);
     }}>
       <Hint label="设置此密钥的消费额度"><PopoverTrigger asChild><Button size="sm" variant="outline" disabled={busy} className={cn('h-7 rounded-full px-2.5 text-xs', record.limits.length === 0 ? `text-muted-foreground ${reveal}` : 'text-foreground')}>额度</Button></PopoverTrigger></Hint>
       <PopoverContent align="end" aria-label="额度" className="space-y-3">
         {(Object.keys(PERIODS) as LimitPeriod[]).map(period => <Label key={period} className="flex items-center justify-between gap-2">{PERIODS[period]}（元）
-          <Input aria-label={`${PERIODS[period]}限额`} type="number" min="0.000001" max="1000000" step="any" placeholder="不限" className="w-32" value={limits[period] ?? ''} onChange={event => setLimits({ ...limits, [period]: event.target.value })} />
+          <Input aria-label={`${PERIODS[period]}限额`} type="number" min="0.000001" max="1000000" step="any" placeholder="不限" className="w-32" value={limits[period] ?? ''} aria-invalid={Boolean(limitError)} aria-describedby={limitError ? `limit-error-${record.id}` : undefined} onChange={event => { setLimits({ ...limits, [period]: event.target.value }); setLimitError(''); }} />
         </Label>)}
+        {limitError && <p id={`limit-error-${record.id}`} role="alert" className="text-xs text-destructive">{limitError}</p>}
       </PopoverContent>
     </Popover>
-    {limitError && <Hint label={limitError}><span role="alert" className="text-xs text-destructive">额度无效</span></Hint>}
     <DropdownMenu><DropdownMenuTrigger asChild><Button size="icon" variant="ghost" className="size-8" aria-label={`${record.name} 的更多操作`} disabled={busy}><MoreHorizontal /></Button></DropdownMenuTrigger>
       <DropdownMenuContent align="end"><DropdownMenuItem onSelect={onRename}>重命名</DropdownMenuItem><DropdownMenuItem onSelect={onReset}>重置密钥</DropdownMenuItem><DropdownMenuItem destructive onSelect={onRevoke}>撤销</DropdownMenuItem></DropdownMenuContent>
     </DropdownMenu>
