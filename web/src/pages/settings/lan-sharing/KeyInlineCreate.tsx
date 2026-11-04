@@ -3,6 +3,7 @@ import { createGatewayKey, type GatewayKey } from '@/api/gateway';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
+import { errorMessage } from '@/components/assets/creationAssetPanelModel';
 import { Label } from '@/components/ui/label';
 
 export function KeyInlineCreate({ gatewayAlias, onCancel, onCreated }: {
@@ -19,12 +20,12 @@ export function KeyInlineCreate({ gatewayAlias, onCancel, onCreated }: {
     setBusy(true); setError('');
     void createGatewayKey({ name: name.trim(), role: 'member', limits: [], allowed_models: null, allowed_aliases: null,
       ...(suffix ? { token: suffix } : {}) }, ...(gatewayAlias ? [gatewayAlias] as const : []))
-      .then(result => onCreated(result.key, result.token)).catch(cause => setError(String(cause))).finally(() => setBusy(false));
+      .then(result => onCreated(result.key, result.token)).catch(cause => setError(errorMessage(cause))).finally(() => setBusy(false));
   }}>
     <div className="grid gap-3 sm:grid-cols-2">
       <Label className="space-y-1">名称<Input autoFocus required maxLength={40} value={name} onChange={event => setName(event.target.value)} disabled={busy} /></Label>
       <Label className="space-y-1">自定义密钥（可选）<InputGroup><InputGroupAddon>atg_</InputGroupAddon>
-        <InputGroupInput type="password" aria-label="自定义密钥（可选）" minLength={16} maxLength={64} pattern="[A-Za-z0-9_-]{16,64}" value={suffix} onChange={event => setSuffix(event.target.value)} disabled={busy} />
+        <InputGroupInput type="text" className="font-mono" aria-label="自定义密钥（可选）" minLength={16} maxLength={64} pattern="[A-Za-z0-9_-]{16,64}" value={suffix} onChange={event => setSuffix(event.target.value)} disabled={busy} />
       </InputGroup></Label>
     </div>
     {error && <p role="alert" className="text-xs text-destructive">{error}</p>}

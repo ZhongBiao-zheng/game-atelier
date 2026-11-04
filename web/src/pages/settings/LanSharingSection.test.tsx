@@ -258,3 +258,16 @@ it('模型与额度在关闭弹层时保存，失败后回滚到服务器值', a
   fireEvent.keyDown(screen.getByLabelText('额度'), { key: 'Escape' });
   await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { limits: [{ period: 'day', cap_cny: 10 }] }));
 });
+
+it('自定义密钥可见，创建错误只展示消息并保留草稿', async () => {
+  vi.mocked(api.createGatewayKey).mockRejectedValue(new Error('密钥已存在'));
+  render(<LanSharingSection />);
+  fireEvent.click(await screen.findByRole('button', { name: '新建成员密钥' }));
+  fireEvent.change(screen.getByLabelText('名称'), { target: { value: '测试' } });
+  const suffix = screen.getByLabelText('自定义密钥（可选）');
+  expect(suffix).toHaveAttribute('type', 'text');
+  fireEvent.change(suffix, { target: { value: 'test_only_custom' } });
+  fireEvent.submit(suffix.closest('form')!);
+  expect(await screen.findByRole('alert')).toHaveTextContent(/^密钥已存在$/);
+  expect(suffix).toHaveValue('test_only_custom');
+});
