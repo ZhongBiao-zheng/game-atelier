@@ -4,7 +4,7 @@ import { requestJson } from '@/api/http';
 import { date } from './shared';
 import { Button } from '@/components/ui/button';
 interface Entry { time: string; actor_name: string; action: string; target_id: string; summary: Record<string, unknown> }
-const actions: Record<string, string> = { 'member.create': '新建成员', 'member.update': '修改成员', 'member.revoke': '撤销成员', 'upstream.restore': '恢复供应商', 'route.reorder': '调整路由' };
+const actions: Record<string, string> = { 'member.create': '新建成员', 'member.update': '修改成员', 'member.revoke': '撤销成员', 'member.reset': '重置密钥', 'upstream.restore': '恢复供应商', 'route.reorder': '调整路由' };
 export function AuditLog({ gatewayAlias }: { gatewayAlias?: string }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [error, setError] = useState('');

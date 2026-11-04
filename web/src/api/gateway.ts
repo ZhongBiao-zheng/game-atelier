@@ -1,3 +1,4 @@
+import type { GatewayKeyCreate } from '@/schema/gatewayShares';
 import { requestJson } from './http';
 import type { KeyModel } from './keys';
 import { publishGatewayConnected } from './gatewayEvents';
@@ -87,7 +88,7 @@ export async function updateGateway(patch: { enabled?: boolean; port?: number; n
   return state;
 }
 
-export async function createGatewayKey(payload: GatewayKeyInput, alias?: string) {
+export async function createGatewayKey(payload: Omit<GatewayKeyCreate, 'role'> & { role?: GatewayKeyCreate['role'] }, alias?: string) {
   return requestJson<{ key: GatewayKey; token: string }>(`${gatewayBase(alias)}/keys`, '新建网关密钥', {
     method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(payload),
   });
@@ -160,3 +161,6 @@ export async function fetchGatewayProviderMe(alias: string): Promise<GatewayMe |
   try { return await requestJson<GatewayMe | null>(`/api/gateway/providers/${encodeURIComponent(alias)}/me`, '读取额度'); }
   catch { return null; }
 }
+
+export const resetGatewayKey = (id: string, alias?: string) => requestJson<{key: GatewayKey; token: string}>(
+  `${gatewayBase(alias)}/keys/${encodeURIComponent(id)}/reset`, '重置网关密钥', { method: 'POST' });

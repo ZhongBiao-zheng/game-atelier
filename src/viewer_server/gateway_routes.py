@@ -31,6 +31,7 @@ class GatewaySettingsPatch(BaseModel):
 
 
 class GatewayKeyCreate(gateway_keys.GatewayPolicy):
+    token: str | None = Field(default=None, min_length=16, max_length=64, pattern=r"^[A-Za-z0-9_-]+$", repr=False)
     role: Literal["member", "admin"] = "member"
     name: Annotated[str, Field(min_length=1, max_length=40)]
 
@@ -87,6 +88,8 @@ def update_gateway(body: GatewaySettingsPatch) -> dict:
 def create_gateway_key(body: GatewayKeyCreate) -> dict:
     try:
         record, token = gateway_keys.create_key(**body.model_dump())
+    except gateway_keys.CustomGatewayTokenError as error:
+        raise HTTPException(422, str(error)) from None
     except ValidationError as error:
         raise HTTPException(422, "网关密钥配置不合法") from error
     return {"key": _key_view(record), "token": token}
@@ -109,6 +112,15 @@ def reveal_gateway_token(key_id: str, response: Response) -> dict:
         return {"token": gateway_keys.reveal_token(key_id)}
     except gateway_keys.NoSuchGatewayKeyError as error:
         raise HTTPException(404, "网关密钥不存在或已撤销") from error
+
+
+@gateway_router.post('/keys/{key_id}/reset')
+def reset_gateway_key(key_id: str):
+    try:
+        record, token = gateway_keys.reset_key(key_id)
+        return {'key': _key_view(record), 'token': token}
+    except gateway_keys.NoSuchGatewayKeyError:
+        raise HTTPException(404, '网关密钥不存在或已撤销') from None
 
 
 @gateway_router.post("/keys/{key_id}/revoke")

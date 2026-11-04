@@ -44,6 +44,7 @@ GET /api/gateway/audit
 GET /api/gateway/providers/{alias}/admin/keys
 POST /api/gateway/providers/{alias}/admin/keys
 PATCH /api/gateway/providers/{alias}/admin/keys/{key_id}
+POST /api/gateway/providers/{alias}/admin/keys/{key_id}/reset
 POST /api/gateway/providers/{alias}/admin/keys/{key_id}/revoke
 GET /api/gateway/providers/{alias}/admin/options
 GET /api/gateway/providers/{alias}/admin/usage
@@ -61,6 +62,7 @@ PUT /api/gateway
 POST /api/gateway/keys
 GET /api/gateway/keys/{key_id}/token
 PATCH /api/gateway/keys/{key_id}
+POST /api/gateway/keys/{key_id}/reset
 POST /api/gateway/keys/{key_id}/revoke
 GET /api/gateway/tasks
 GET /api/gateway/tasks/{task_id}/outputs/{index}
@@ -201,6 +203,7 @@ GET /openapi.json
 """.strip().splitlines()
 
 LOCAL_MANAGEMENT = frozenset({
+    "/api/gateway/keys/{key_id}/reset", "/api/gateway/providers/{alias}/admin/keys/{key_id}/reset",
     "/api/team-library-gateway-share", "/api/team-library-gateway-share/{library_id}",
     "/api/models/durations", "/api/pricing/estimate-batch",
     "/api/update/state", "/api/update/result", "/api/update/check",

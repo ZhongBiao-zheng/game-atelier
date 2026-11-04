@@ -43,13 +43,21 @@ def create_router(require_key):
 
     @router.post("/keys", status_code=201)
     def create(body: GatewayKeyCreate, actor=Depends(admin)):
-        key, token = gateway_keys.create_key(**body.model_dump(), actor_id=actor.id)
+        try:
+            key, token = gateway_keys.create_key(**body.model_dump(), actor_id=actor.id)
+        except gateway_keys.CustomGatewayTokenError as error:
+            raise HTTPException(422, str(error)) from None
         return {"key": _key_view(key), "token": token}
 
     @router.patch("/keys/{key_id}")
     def update(key_id: str, body: GatewayKeyPatch, actor=Depends(admin)):
         return _key_view(gateway_keys.update_key(
             key_id, **body.model_dump(exclude_unset=True), actor_id=actor.id))
+
+    @router.post('/keys/{key_id}/reset')
+    def reset(key_id: str, actor=Depends(admin)):
+        key, token = gateway_keys.reset_key(key_id, actor_id=actor.id)
+        return {'key': _key_view(key), 'token': token}
 
     @router.post("/keys/{key_id}/revoke")
     def revoke(key_id: str, actor=Depends(admin)):

@@ -5,8 +5,8 @@ import { GATEWAY_TOKEN_LENGTH, revealGatewayKey } from '@/api/gateway';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 
-export function GatewayMemberToken({ id, name, onError }: {
-  id: string; name: string; onError: (message: string) => void;
+export function GatewayMemberToken({ id, name, knownToken, onError }: {
+  id: string; name: string; knownToken?: string; onError: (message: string) => void;
 }) {
   const [token, setToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -15,14 +15,14 @@ export function GatewayMemberToken({ id, name, onError }: {
     setBusy(true);
     onError('');
     try {
-      const result = await revealGatewayKey(id);
+      const result = knownToken ? { token: knownToken } : await revealGatewayKey(id);
       if (copy) { await navigator.clipboard.writeText(result.token); setCopied(true); }
       else setToken(result.token);
     } catch (error) { onError(String(error)); }
     finally { setBusy(false); }
   }
   return <>
-    <code className="inline-block w-[47ch] shrink-0 overflow-hidden whitespace-nowrap font-mono text-xs select-all">{token ?? `atg_${'•'.repeat(GATEWAY_TOKEN_LENGTH - 4)}`}</code>
+    <code className="inline-block w-[47ch] shrink-0 overflow-x-auto whitespace-nowrap font-mono text-xs select-all">{token ?? `atg_${'•'.repeat(GATEWAY_TOKEN_LENGTH - 4)}`}</code>
     <Hint label={token ? '隐藏密钥' : '查看密钥'}><Toggle size="sm" className="size-7 min-w-7 px-0" disabled={busy}
       aria-label={`${token ? '隐藏' : '查看'} ${name} 的密钥`} pressed={Boolean(token)}
       onPressedChange={pressed => { if (pressed) void read(false); else setToken(null); }}>

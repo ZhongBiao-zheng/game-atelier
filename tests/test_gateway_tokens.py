@@ -120,3 +120,26 @@ def test_remote_admin_and_proxy_do_not_offer_token_reveal():
     assert local_capability("GET", proxy_path) is None
     local = LocalTestClient(build_app(), base_url="http://127.0.0.1")
     assert local.get(proxy_path).status_code == 403
+
+
+def test_custom_tokens_authenticate_duplicates_revoked_and_reset():
+    with LocalTestClient(build_app(), base_url="http://127.0.0.1") as client:
+        suffix = 'integration_test_suffix_2026'
+        created = client.post('/api/gateway/keys', json={'name': '自定义', 'token': suffix})
+        assert created.status_code == 201
+        payload = created.json()
+        token = 'atg_' + suffix
+        assert payload['token'] == token
+        record = gateway_keys.authenticate(token)
+        assert record and record.id == payload['key']['id']
+        assert client.post('/api/gateway/keys', json={'name': '重复', 'token': suffix}).status_code == 422
+        gateway_keys.revoke_key(record.id)
+        duplicate = client.post('/api/gateway/keys', json={'name': '撤销后重复', 'token': suffix})
+        assert duplicate.status_code == 422 and duplicate.json()['detail'] == '密钥已被使用'
+        for bad in ('too-short', 'invalid suffix with spaces', 'x' * 65):
+            assert client.post('/api/gateway/keys', json={'name': '无效', 'token': bad}).status_code == 422
+        random = client.post('/api/gateway/keys', json={'name': '随机'}).json()
+        assert random['token'].startswith('atg_') and len(random['token']) == 47
+        reset = client.post(f"/api/gateway/keys/{random['key']['id']}/reset").json()
+        assert gateway_keys.authenticate(random['token']) is None
+        assert gateway_keys.authenticate(reset['token']).id == random['key']['id']

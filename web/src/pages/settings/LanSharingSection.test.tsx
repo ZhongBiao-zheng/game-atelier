@@ -4,12 +4,13 @@ import { chooseOption } from '@/test/select';
 import { requestJson } from '@/api/http';
 import * as api from '@/api/gateway';
 import { LanSharingSection } from './LanSharingSection';
+vi.mock('@/api/gatewayLibraries', () => ({ getManagedGatewayShares: vi.fn().mockResolvedValue({ libraries: [], size_bytes: 0 }), stopManagedGatewayShare: vi.fn() }));
 vi.mock('@/api/http', () => ({ requestJson: vi.fn() }));
 afterEach(() => vi.unstubAllGlobals());
 vi.mock('@/hooks/useSSE', () => ({ useSSE: vi.fn() }));
 vi.mock('@/api/gateway', () => ({ GATEWAY_TOKEN_LENGTH: 47, adminBase: (alias: string) => `/api/gateway/providers/${alias}/admin`, fetchGateway: vi.fn(), fetchGatewayOptions: vi.fn(), fetchGatewayService: vi.fn(),
   fetchGatewayTasks: vi.fn(), fetchGatewayMembers: vi.fn(), createGatewayKey: vi.fn(), updateGatewayKey: vi.fn(),
-  revealGatewayKey: vi.fn(), revokeGatewayKey: vi.fn(), updateGateway: vi.fn(), gatewayOutputUrl: vi.fn() }));
+  resetGatewayKey: vi.fn(), revealGatewayKey: vi.fn(), revokeGatewayKey: vi.fn(), updateGateway: vi.fn(), gatewayOutputUrl: vi.fn() }));
 const key: api.GatewayKey = { id: 'k1', name: '小王', limits: [], allowed_models: null, allowed_aliases: null,
   created_at: '', revoked_at: null, month_charged_cny: .5, month_calls: 1, last_used_at: null, limits_status: [] };
 const state: api.GatewayState = { enabled: true, port: 5180, name: '', default_name: 'mac', keys: [key], status: { running: true, port: 5180, error: null, addresses: ['192.168.1.20'] } };
@@ -29,28 +30,30 @@ describe('LAN sharing', () => {
     expect(screen.getByText('powershell -File scripts/windows-service.ps1 install')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '安装' })).not.toBeInTheDocument();
   });
-  it('creates all three limits and scoped permissions; plaintext disappears when closed', async () => {
-    vi.mocked(api.createGatewayKey).mockResolvedValue({ key, token: 'atg_once' });
+  it('内嵌创建默认成员并支持自定义后缀，Esc 取消', async () => {
+    vi.mocked(api.createGatewayKey).mockResolvedValue({ key: { ...key, id: 'k2', name: '小李' }, token: 'atg_test_only_custom' });
     render(<LanSharingSection />);
-    await screen.findByText('http://192.168.1.20:5180');
+    fireEvent.click(await screen.findByRole('button', { name: '新建成员密钥' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    const name = screen.getByLabelText('名称');
+    expect(name).toHaveFocus();
+    fireEvent.change(name, { target: { value: '小李' } });
+    fireEvent.change(screen.getByLabelText('自定义密钥（可选）'), { target: { value: 'test_only_custom' } });
+    fireEvent.submit(name.closest('form')!);
+    await waitFor(() => expect(api.createGatewayKey).toHaveBeenCalledWith({ role: 'member', name: '小李', token: 'test_only_custom', limits: [], allowed_models: null, allowed_aliases: null }));
+    await waitFor(() => expect(screen.queryByLabelText('名称')).not.toBeInTheDocument());
+    expect(screen.queryByText('atg_test_only_custom')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '新建成员密钥' }));
-    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '小李' } });
-    for (const [label, value] of [['今日', '10'], ['本周', '50'], ['本月', '100']]) fireEvent.change(screen.getByLabelText(`${label}限额`), { target: { value } });
-    fireEvent.click(screen.getByRole('switch', { name: '全部模型' })); fireEvent.click(screen.getByLabelText('GPT'));
-    fireEvent.click(screen.getByRole('switch', { name: '全部供应商' })); fireEvent.click(screen.getByLabelText('HK'));
-    fireEvent.click(screen.getByRole('button', { name: '保存' }));
-    await waitFor(() => expect(api.createGatewayKey).toHaveBeenCalledWith({ role: 'member', name: '小李', limits: [{ period: 'day', cap_cny: 10 }, { period: 'week', cap_cny: 50 }, { period: 'month', cap_cny: 100 }], allowed_models: ['gpt'], allowed_aliases: ['HK'] }));
-    await screen.findByText('atg_once'); fireEvent.click(screen.getByRole('button', { name: '关闭' }));
-    expect(screen.queryByText('atg_once')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '新建成员密钥' })); expect(screen.queryByText('atg_once')).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByLabelText('名称'), { key: 'Escape' });
+    expect(screen.queryByLabelText('名称')).not.toBeInTheDocument();
   });
   it('edits existing keys and revokes through confirmation', async () => {
     vi.mocked(api.updateGatewayKey).mockResolvedValue(key); vi.mocked(api.revokeGatewayKey).mockResolvedValue(key);
-    render(<LanSharingSection />); fireEvent.click(await screen.findByRole('button', { name: '编辑' }));
+    render(<LanSharingSection />); await memberMenu('重命名');
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: '改名' } }); fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', expect.objectContaining({ name: '改名' })));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+    await memberMenu('撤销');
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '撤销' }));
     await waitFor(() => expect(api.revokeGatewayKey).toHaveBeenCalledWith('k1'));
   });
@@ -135,8 +138,7 @@ it('成员额度超过85%才变橙，撤销行整体变淡且不可操作', asyn
   expect(revoked).toHaveClass('opacity-50');
   expect(within(revoked).getByText('已撤销')).toBeInTheDocument();
   expect(within(revoked).queryByRole('button')).not.toBeInTheDocument();
-  expect(within(regular.closest('tr')!).getByRole('button', { name: '编辑' })).toBeInTheDocument();
-  expect(within(regular.closest('tr')!).getByText('·')).toBeInTheDocument();
+  expect(within(regular.closest('tr')!).getByRole('button', { name: '小王 的更多操作' })).toBeInTheDocument();
 });
 
 it('复制运行中的地址', async () => {
@@ -165,18 +167,17 @@ it('远程复用成员编辑且不显示本机开关，角色通过代理保存'
   vi.stubGlobal('EventSource', class { onopen = null; addEventListener() {} close() {} });
   vi.mocked(api.updateGatewayKey).mockResolvedValue({ ...key, role: 'admin' });
   render(<LanSharingSection gatewayAlias="relay" />);
-  fireEvent.click(await screen.findByRole('button', { name: '编辑' }));
+  await screen.findByText('小王');
   expect(api.fetchGateway).toHaveBeenCalledWith('relay');
   expect(screen.queryByRole('switch', { name: '开启局域网共享' })).not.toBeInTheDocument();
-  await chooseOption(screen.getByLabelText('角色'), '管理员');
-  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await chooseOption(screen.getByLabelText('小王 的角色'), '管理员');
   await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', expect.objectContaining({ role: 'admin' }), 'relay'));
 });
 
 it('本机操作日志页签显示操作者与变更', async () => {
   vi.mocked(requestJson).mockResolvedValue({ entries: [{ time: '2026-10-26T03:00:00+00:00', actor_name: '负责人', action: 'member.update', target_id: 'k1', summary: { before: { role: 'member' }, after: { role: 'admin' } } }] });
   render(<LanSharingSection />);
-  await screen.findByRole('button', { name: '编辑' });
+  await screen.findByText('小王');
   fireEvent.mouseDown(screen.getByRole('tab', { name: '操作日志' }));
   expect(await screen.findByText('负责人')).toBeInTheDocument();
   expect(screen.getByText('修改成员')).toBeInTheDocument();
@@ -227,9 +228,33 @@ describe('member token controls', () => {
   it('renames inline with only a name patch', async () => {
     vi.mocked(api.updateGatewayKey).mockResolvedValue({ ...key, name: '新名字' });
     render(<LanSharingSection />);
-    fireEvent.click(await screen.findByRole('button', { name: '重命名 小王' }));
-    fireEvent.change(screen.getByRole('textbox', { name: '修改 小王 的名称' }), { target: { value: '新名字' } });
-    fireEvent.keyDown(screen.getByRole('textbox', { name: '修改 小王 的名称' }), { key: 'Enter' });
+    await memberMenu('重命名');
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '新名字' } });
+    fireEvent.submit(screen.getByLabelText('名称').closest('form')!);
     await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { name: '新名字' }));
   });
+});
+
+async function memberMenu(item: string) {
+  fireEvent.keyDown(await screen.findByRole('button', { name: '小王 的更多操作' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: item }));
+}
+
+it('模型与额度在关闭弹层时保存，失败后回滚到服务器值', async () => {
+  vi.mocked(api.updateGatewayKey).mockRejectedValue(new Error('保存失败'));
+  render(<LanSharingSection />);
+  fireEvent.click(await screen.findByRole('button', { name: '全部模型' }));
+  fireEvent.click(screen.getByRole('switch', { name: '全部模型' }));
+  fireEvent.click(screen.getByLabelText('GPT'));
+  fireEvent.keyDown(screen.getByLabelText('模型与供应商'), { key: 'Escape' });
+  await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { allowed_models: ['gpt'], allowed_aliases: null }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('保存失败');
+  fireEvent.click(screen.getByRole('button', { name: '全部模型' }));
+  expect(screen.getByRole('switch', { name: '全部模型' })).toBeChecked();
+  fireEvent.keyDown(screen.getByLabelText('模型与供应商'), { key: 'Escape' });
+  vi.mocked(api.updateGatewayKey).mockResolvedValue(key);
+  fireEvent.click(screen.getByRole('button', { name: '额度' }));
+  fireEvent.change(screen.getByLabelText('今日限额'), { target: { value: '10' } });
+  fireEvent.keyDown(screen.getByLabelText('额度'), { key: 'Escape' });
+  await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { limits: [{ period: 'day', cap_cny: 10 }] }));
 });

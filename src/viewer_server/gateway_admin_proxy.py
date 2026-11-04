@@ -19,7 +19,7 @@ def audit():
 
 ENDPOINTS = [
     ("GET", "/keys"), ("POST", "/keys"), ("PATCH", "/keys/{key_id}"),
-    ("POST", "/keys/{key_id}/revoke"), ("GET", "/options"),
+    ("POST", "/keys/{key_id}/reset"), ("POST", "/keys/{key_id}/revoke"), ("GET", "/options"),
     ("GET", "/usage"), ("GET", "/usage/tasks"), ("GET", "/tasks"),
     ("GET", "/live"), ("GET", "/members"),
     ("POST", "/members/{member_alias}/restore"),

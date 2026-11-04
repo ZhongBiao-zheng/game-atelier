@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -67,6 +68,10 @@ class GatewayConfig(BaseModel):
 
 
 class GatewayAdminError(PermissionError):
+    pass
+
+
+class CustomGatewayTokenError(ValueError):
     pass
 
 
@@ -132,9 +137,12 @@ def create_key(
     name: str, limits: list[GatewayLimit] | None = None,
     allowed_models: list[str] | None = None, allowed_aliases: list[str] | None = None,
     *, role: Literal["member", "admin"] = "member", actor_id: str | None = None,
+    token: str | None = None,
 ) -> tuple[GatewayKeyRecord, str]:
     """新建网关密钥；返回 (记录, 明文)。"""
-    token = TOKEN_PREFIX + secrets.token_urlsafe(32)
+    if token is not None and not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", token):
+        raise CustomGatewayTokenError("自定义密钥格式不合法")
+    token = TOKEN_PREFIX + (token if token is not None else secrets.token_urlsafe(32))
     record = GatewayKeyRecord(
         id=uuid.uuid4().hex[:12], name=name.strip(), token_sha256=digest(token), token=token,
         limits=limits or [], allowed_models=allowed_models, allowed_aliases=allowed_aliases,
@@ -143,6 +151,8 @@ def create_key(
     with _lock():
         config = _read_config_locked()
         actor = require_admin(config, actor_id)
+        if any(secrets.compare_digest(k.token_sha256, record.token_sha256) for k in config.keys):
+            raise CustomGatewayTokenError("密钥已被使用")
         _write(config.model_copy(update={"keys": [*config.keys, record]}))
         gateway_audit.append("member.create", record.id, {"after": _summary(record)}, actor)
     return record, token
@@ -160,6 +170,15 @@ def update_key(
         patch["name"] = patch["name"].strip()
     return _replace(key_id, lambda record: GatewayKeyRecord.model_validate(
         {**record.model_dump(), **patch}), actor_id, "member.update")
+
+
+def reset_key(key_id: str, *, actor_id: str | None = None) -> tuple[GatewayKeyRecord, str]:
+    token = TOKEN_PREFIX + secrets.token_urlsafe(32)
+    def change(record):
+        if record.revoked_at:
+            raise NoSuchGatewayKeyError(key_id)
+        return GatewayKeyRecord.model_validate({**record.model_dump(), 'token': token, 'token_sha256': digest(token)})
+    return _replace(key_id, change, actor_id, 'member.reset'), token
 
 
 def revoke_key(key_id: str, *, actor_id: str | None = None) -> GatewayKeyRecord:

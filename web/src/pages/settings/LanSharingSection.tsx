@@ -7,6 +7,7 @@ import {
   fetchGatewayOptions,
   fetchGatewayService,
   revokeGatewayKey,
+  resetGatewayKey,
   updateGateway,
   updateGatewayKey,
   type GatewayKey,
@@ -18,8 +19,9 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { formatGenerationCost } from '@/lib/generationCost';
-import { KeyForm } from './lan-sharing/KeyForm';
-import { GatewayMemberName } from './lan-sharing/GatewayMemberName';
+import { KeyInlineCreate } from './lan-sharing/KeyInlineCreate';
+import { KeyRowActions } from './lan-sharing/KeyRowActions';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { GatewayMemberToken } from './lan-sharing/GatewayMemberToken';
 import { Tasks } from './lan-sharing/Tasks';
 import { date, PERIODS } from './lan-sharing/shared';
@@ -38,7 +40,14 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
   const [port, setPort] = useState('');
   const [editingPort, setEditingPort] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
-  const [editing, setEditing] = useState<GatewayKey | null | undefined>(undefined);
+  const [creating, setCreating] = useState(false);
+  const [highlight, setHighlight] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<GatewayKey | null>(null);
+  const [rename, setRename] = useState('');
+  const [pendingReset, setPendingReset] = useState<GatewayKey | null>(null);
+  const [tokenVersion, setTokenVersion] = useState(0);
+  const [createdTokens, setCreatedTokens] = useState<Record<string, string>>({});
+  useEffect(() => { if (!highlight) return; const timer = window.setTimeout(() => setHighlight(null), 2000); return () => window.clearTimeout(timer); }, [highlight]);
   const [pendingRevoke, setPendingRevoke] = useState<GatewayKey | null>(null);
   const reload = useCallback(async () => {
     const [next, choices] = await Promise.all([fetchGateway(gatewayAlias), fetchGatewayOptions(gatewayAlias)]);
@@ -142,7 +151,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
             <section aria-label="成员" className="space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium">成员 <span className="font-normal text-muted-foreground">{state.keys.length}</span></h3>
-                <Button variant="outline" size="sm" disabled={!state || busy} onClick={() => setEditing(null)}>
+                <Button variant="outline" size="sm" disabled={!state || busy} onClick={() => setCreating(true)}>
                   新建成员密钥
                 </Button>
               </div>
@@ -159,17 +168,15 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
                   </thead>
                   <tbody className="border-b border-border">
                     {state?.keys.map((key) => (
-                      <tr key={`${gatewayAlias ?? 'local'}:${key.id}`} className={`border-t border-border ${key.revoked_at ? 'opacity-50' : ''}`}>
+                      <tr key={`${gatewayAlias ?? 'local'}:${key.id}`} className={`group border-t border-border ${highlight === key.id ? "bg-secondary" : ""} ${key.revoked_at ? 'opacity-50' : ''}`}>
                         <td
                           className={`max-w-64 px-4 py-3 align-middle ${key.revoked_at ? 'text-muted-foreground' : ''}`}
                         >
-                          {key.revoked_at ? <Hint label={key.name}><span className="truncate">{key.name}</span></Hint>
-                            : <GatewayMemberName name={key.name} disabled={busy}
-                              onSave={name => run(() => updateGatewayKey(key.id, { name }, ...(gatewayAlias ? [gatewayAlias] as const : [])))} />}
+                          <Hint label={key.name}><span className="truncate">{key.name}</span></Hint>
                         </td>
                         <td className="px-4 py-3 align-middle">
-                          {!gatewayAlias && !key.revoked_at
-                            ? <div className="flex items-center gap-1 whitespace-nowrap"><GatewayMemberToken id={key.id} name={key.name} onError={setError} /></div>
+                          {(!gatewayAlias || createdTokens[key.id]) && !key.revoked_at
+                            ? <div className="flex items-center gap-1 whitespace-nowrap"><GatewayMemberToken key={`${key.id}:${tokenVersion}`} knownToken={createdTokens[key.id]} id={key.id} name={key.name} onError={setError} /></div>
                             : '—'}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 align-middle">{key.role === 'admin' ? '管理员' : '成员'}</td>
@@ -215,23 +222,18 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
                           {key.revoked_at ? (
                             '已撤销'
                           ) : (
-                            <div className="flex items-center gap-2 whitespace-nowrap text-muted-foreground">
-                              <Button variant="bare" className="rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50" disabled={busy} onClick={() => setEditing(key)}>
-                                编辑
-                              </Button>
-                              <span aria-hidden>·</span>
-                              <Button variant="bare"
-                                className="rounded-sm hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
-                                disabled={busy}
-                                onClick={() => setPendingRevoke(key)}
-                              >
-                                撤销
-                              </Button>
-                            </div>
+                            <KeyRowActions record={key} options={options} busy={busy}
+                              onSave={patch => run(() => updateGatewayKey(key.id, patch, ...(gatewayAlias ? [gatewayAlias] as const : [])))}
+                              onRename={() => { setRename(key.name); setRenaming(key); }}
+                              onReset={() => setPendingReset(key)} onRevoke={() => setPendingRevoke(key)} />
                           )}
                         </td>
                       </tr>
                     ))}
+                    {creating && <tr className="border-t border-border"><td colSpan={7}><KeyInlineCreate gatewayAlias={gatewayAlias} onCancel={() => setCreating(false)} onCreated={(key, token) => {
+                      setCreating(false); setHighlight(key.id); setCreatedTokens(current => ({ ...current, [key.id]: token }));
+                      setState(current => current ? { ...current, keys: [...current.keys, key] } : current); finished();
+                    }} /></td></tr>}
                   </tbody>
                 </table>
               </div>
@@ -245,15 +247,15 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
           </p>
         )}
       </div>}
-      {editing !== undefined && (
-        <KeyForm
-          gatewayAlias={gatewayAlias}
-          record={editing}
-          options={options}
-          onClose={() => setEditing(undefined)}
-          onSaved={finished}
-        />
-      )}
+      {renaming && <Dialog open onOpenChange={open => { if (!open) setRenaming(null); }}><DialogContent aria-describedby={undefined}>
+        <DialogTitle>重命名成员</DialogTitle><form autoComplete="off" className="space-y-3" onSubmit={event => { event.preventDefault();
+          void run(() => updateGatewayKey(renaming.id, { name: rename.trim() }, ...(gatewayAlias ? [gatewayAlias] as const : []))).then(ok => { if (ok) setRenaming(null); });
+        }}><Input autoFocus aria-label="名称" value={rename} maxLength={40} onChange={event => setRename(event.target.value)} /><Button disabled={busy || !rename.trim()} type="submit">保存</Button></form>
+      </DialogContent></Dialog>}
+      <ConfirmDialog open={pendingReset !== null} title={`重置 ${pendingReset?.name ?? ''} 的密钥？`} message="原密钥立即失效，需要把新密钥交给对方。" confirmText="重置"
+        onCancel={() => setPendingReset(null)} onConfirm={() => { const target = pendingReset; setPendingReset(null); if (target) void run(async () => {
+          const result = await resetGatewayKey(target.id, gatewayAlias); setCreatedTokens(current => ({ ...current, [target.id]: result.token })); setTokenVersion(value => value + 1);
+        }); }} />
       <ConfirmDialog
         open={pendingRevoke !== null}
         title={`撤销 ${pendingRevoke?.name ?? ''} 的网关密钥？`}
