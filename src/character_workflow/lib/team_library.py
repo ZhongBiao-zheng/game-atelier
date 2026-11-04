@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import json
 import secrets
 import time
 from datetime import datetime, timezone
@@ -176,6 +175,9 @@ def remove_project_mounts(project_id: str) -> list[str]:
         _write_shared_unlocked(_read_shared_unlocked() & {m.library_id for m in kept})
     removed = {m.library_id for m in rows if m.project_id == project_id}
     still_mounted = {m.library_id for m in kept}
+    from character_workflow.lib.gateway_share_publisher import schedule
+    for library_id in removed - still_mounted:
+        schedule(library_id)
     return sorted(removed - still_mounted)
 
 
@@ -189,25 +191,48 @@ def unmount_library(library_id: str, project_id: str) -> None:
             raise KeyError(library_id)
         _write_mounts_unlocked(kept)
         _write_shared_unlocked(_read_shared_unlocked() - {library_id})
+    from character_workflow.lib.gateway_share_publisher import schedule
+    schedule(library_id)
 
 
 def _share_path() -> Path:
     return data_root.config_dir() / "team-library-gateway-share.json"
 
 
-def _read_shared_unlocked() -> set[str]:
+def _read_gateway_state_unlocked():
+    from character_workflow.lib.gateway_share_models import TeamLibraryGatewayState
     path = _share_path()
-    if not path.exists():
-        return set()
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    ids = payload.get("shared_library_ids")
-    if not isinstance(ids, list) or any(not isinstance(item, str) for item in ids):
-        raise ValueError("网关共享设置格式不对")
-    return set(ids)
+    return TeamLibraryGatewayState.model_validate_json(path.read_text(encoding='utf-8')) if path.exists() else TeamLibraryGatewayState()
+
+
+def gateway_share_state():
+    with file_lock(_mounts_lock()):
+        return _read_gateway_state_unlocked()
+
+
+def mutate_gateway_state(change):
+    from character_workflow.lib.gateway_share_models import TeamLibraryGatewayState
+    with file_lock(_mounts_lock()):
+        state = _read_gateway_state_unlocked()
+        change(state)
+        state = TeamLibraryGatewayState.model_validate(state.model_dump())
+        atomic_write_json(_share_path(), state.model_dump(mode='json'))
+        return state
+
+
+def _read_shared_unlocked() -> set[str]:
+    return set(_read_gateway_state_unlocked().shared_library_ids)
 
 
 def _write_shared_unlocked(ids: set[str]) -> None:
-    atomic_write_json(_share_path(), {"shared_library_ids": sorted(ids)})
+    state = _read_gateway_state_unlocked()
+    removed = set(state.shared_library_ids) - ids
+    for library_id in removed:
+        if library_id in state.publishes:
+            for target in state.publishes[library_id].gateways.values():
+                target.delete_pending = True
+    state.shared_library_ids = sorted(ids)
+    atomic_write_json(_share_path(), state.model_dump(mode='json'))
 
 
 def shared_library_ids() -> set[str]:

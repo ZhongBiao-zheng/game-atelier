@@ -247,6 +247,8 @@ async def normal_lifespan(app: FastAPI):
     from character_workflow.lib.callers.atelier_gateway import sync_all_gateway_keys
 
     gateway_sync = asyncio.create_task(asyncio.to_thread(sync_all_gateway_keys))
+    from character_workflow.lib.gateway_share_publisher import run_periodic
+    share_sync = asyncio.create_task(run_periodic())
     resume_tasks: set[asyncio.Task[None]] = set()
 
     async def maintain_canvas_lifecycle() -> None:
@@ -294,6 +296,8 @@ async def normal_lifespan(app: FastAPI):
             task.cancel()
         gateway_live.listeners.remove(gateway_listener)
         gateway_sync.cancel()
+        share_sync.cancel()
+        await asyncio.gather(share_sync, return_exceptions=True)
         await asyncio.to_thread(gateway_server.stop)
         stop_team_library_watches()
         observer.stop()
@@ -359,6 +363,8 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(team_library_router)
     from viewer_server.gateway_library_proxy import router as gateway_library_router
     app.include_router(gateway_library_router)
+    from viewer_server.gateway_shares import install_errors
+    install_errors(app)
     app.include_router(gateway_router)
     from viewer_server.gateway_admin_proxy import router as gateway_admin_proxy
     app.include_router(gateway_admin_proxy)

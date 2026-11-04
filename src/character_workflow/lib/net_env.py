@@ -41,7 +41,7 @@ DIRECT_HOST_SUFFIXES: tuple[str, ...] = (
 DEFAULT_TIMEOUT: tuple[float, float] = (30.0, 300.0)
 
 
-def configure_proxy_bypass() -> None:
+def configure_proxy_bypass(extra_hosts: tuple[str, ...] = ()) -> None:
     """把国内厂商 host 追加进 NO_PROXY / no_proxy（幂等，保留用户已有条目）。
 
     requests / urllib / curl 都认 NO_PROXY：命中的 host 绕过系统/环境代理直连，
@@ -55,7 +55,7 @@ def configure_proxy_bypass() -> None:
         for entry in os.environ.get(var, "").split(","):
             if entry.strip() and entry.strip() not in merged:
                 merged.append(entry.strip())
-    for suffix in DIRECT_HOST_SUFFIXES:
+    for suffix in (*DIRECT_HOST_SUFFIXES, *extra_hosts):
         if suffix not in merged:
             merged.append(suffix)
     for var in ("NO_PROXY", "no_proxy"):

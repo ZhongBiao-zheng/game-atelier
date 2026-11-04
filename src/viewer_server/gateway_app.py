@@ -92,6 +92,9 @@ def create_gateway_app() -> FastAPI:
     app.include_router(admin_router(_require_key))
     from viewer_server.gateway_libraries import create_router as library_router
     app.include_router(library_router(_require_key))
+    from viewer_server.gateway_shares import create_router as share_router, install_errors
+    app.include_router(share_router(_require_key))
+    install_errors(app)
 
     @app.exception_handler(gateway_keys.GatewayAdminError)
     async def admin_denied(_request, error):

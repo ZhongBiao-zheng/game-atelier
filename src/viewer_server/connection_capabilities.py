@@ -147,6 +147,9 @@ POST /api/canvas/projects/{project_id}/creation-assets/{asset_id}/reproduce
 GET /api/team-library-gateway-share
 PUT /api/team-library-gateway-share/{library_id}
 GET /api/gateway-libraries
+GET /api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/content
+GET /api/gateway-shares
+DELETE /api/gateway-shares/{library_id}
 GET /api/gateway-libraries/{alias}/{library_id}/assets
 GET /api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/thumb
 GET /api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/previews/{n}/thumb
@@ -203,6 +206,7 @@ GET /openapi.json
 """.strip().splitlines()
 
 LOCAL_MANAGEMENT = frozenset({
+    "/api/gateway-shares", "/api/gateway-shares/{library_id}",
     "/api/gateway/keys/{key_id}/reset", "/api/gateway/providers/{alias}/admin/keys/{key_id}/reset",
     "/api/team-library-gateway-share", "/api/team-library-gateway-share/{library_id}",
     "/api/models/durations", "/api/pricing/estimate-batch",
@@ -249,6 +253,7 @@ _MANAGEMENT_READ_EXEMPT = frozenset({("GET", "/api/keys"), ("GET", "/api/team-li
 # 用 POST 只因为 id 列表放不进查询串；它只读，不需要编辑租约。
 _READ_POSTS = frozenset({("POST", "/api/creation-assets/staleness")})
 MEDIA_ROUTES = frozenset({
+    "/api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/content",
     "/api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/thumb",
     "/api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/previews/{n}/thumb",
     "/api/raw", "/api/images", "/api/gallery/image",

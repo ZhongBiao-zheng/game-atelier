@@ -202,6 +202,9 @@ def _replace(key_id: str, change, actor_id: str | None, action: str) -> GatewayK
         _write(config.model_copy(update={
             "keys": [updated if item.id == key_id else item for item in config.keys],
         }))
+        if updated.revoked_at:
+            from character_workflow.lib.gateway_share_store import revoke_owner_locked
+            revoke_owner_locked(key_id)
         gateway_audit.append(action, record.id, {"before": _summary(record), "after": _summary(updated)}, actor)
         return updated
 

@@ -1,4 +1,4 @@
-"""网关共享库：显式公开字段，逐请求校验共享状态，只输出派生缩略图。"""
+"""网关共享库：显式公开字段，逐请求校验共享状态，受控输出原文件与缩略图。"""
 from __future__ import annotations
 
 import hashlib
@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from character_workflow.lib import gateway_share_store as store
 from character_workflow.lib import team_library as libraries
 from character_workflow.lib import team_library_index as indexer
 from character_workflow.lib.schemas import (
@@ -20,7 +21,7 @@ from character_workflow.lib.schemas import (
 
 class SharedLibrary(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    id: str = Field(pattern=TEAM_LIBRARY_ID_PATTERN)
+    id: str = Field(pattern=r"^(lib_[a-f0-9]{16}|ms_[a-f0-9]{12}_sh_[a-z0-9]{12})$")
     name: str
     owner_name: str
     updated_at: str
@@ -40,6 +41,7 @@ class SharedEntry(BaseModel):
     tags: list[str]
     category: str | None = None
     prompt_text: str | None = None
+    has_content: bool = False
     preview_count: int = Field(default=0, ge=0, le=8)
 
 
@@ -112,7 +114,7 @@ def create_router(require_key) -> APIRouter:
     router = APIRouter(prefix="/gateway/v1/libraries", dependencies=[Depends(require_key)])
 
     @router.get("", response_model=list[SharedLibrary])
-    def list_libraries():
+    def list_libraries(key=Depends(require_key)):
         profile = libraries.read_profile()
         result = []
         for library_id in sorted(libraries.shared_library_ids()):
@@ -127,45 +129,96 @@ def create_router(require_key) -> APIRouter:
                 ))
             except HTTPException:
                 continue
-        return result
+        return [*result, *store.list_libraries(exclude_key=key.id)]
 
     @router.get("/{library_id}/assets", response_model=list[SharedEntry], response_model_exclude_none=True)
     def list_assets(library_id: str):
-        mount = shared_mount(library_id)
-        result = [SharedEntry(
-            entry_id=public_id(e), kind=e.kind, title=e.title, author=e.author,
-            mime_type=e.mime_type, tags=e.tags, category=e.category,
-            prompt_text=e.prompt_text if e.kind == "prompt" else None,
-            preview_count=len(e.preview_images) if e.kind == "prompt" else 0,
-        ) for e in available_entries(mount)]
-        shared_mount(library_id)
-        return result
+        return public_entries(library_id)
 
-    def thumbnail(library_id: str, entry_id: str, w: int, n: int | None = None):
-        mount, entry = _entry(library_id, entry_id)
-        try:
-            if n is None:
-                content = indexer.entry_content_path(mount, entry)
-                _safe_path(mount, str(content.relative_to(Path(mount.mount_path).resolve())),
-                           raw=entry.kind == "raw")
-                body = indexer.thumbnail_bytes(mount, entry, w)
-            else:
-                if entry.kind != "prompt" or not 0 <= n < len(entry.preview_images):
-                    raise ValueError("效果图不存在")
-                body = indexer.prompt_preview_thumbnail_bytes(mount, entry, entry.preview_images[n].file, w)
-        except (OSError, ValueError):
-            body = None
-        shared_mount(library_id)  # 缓存命中也不能越过关闭共享的闸门。
-        if body is None:
-            raise HTTPException(404, "缩略图不可用")
-        return Response(body, media_type="image/webp", headers={"Cache-Control": "no-store"})
+    @router.get("/{library_id}/assets/{entry_id}/content")
+    def content(library_id: str, entry_id: str):
+        return content_response(library_id, entry_id)
 
     @router.get("/{library_id}/assets/{entry_id}/thumb")
     def image_thumb(library_id: str, entry_id: str, w: int = Query(512, ge=1, le=1024)):
-        return thumbnail(library_id, entry_id, w)
+        return thumbnail_response(library_id, entry_id, w)
 
     @router.get("/{library_id}/assets/{entry_id}/previews/{n}/thumb")
     def preview_thumb(library_id: str, entry_id: str, n: int, w: int = Query(512, ge=1, le=1024)):
-        return thumbnail(library_id, entry_id, w, n)
+        return thumbnail_response(library_id, entry_id, w, n)
 
     return router
+
+
+def public_entries(library_id):
+    if library_id.startswith('ms_'):
+        return [SharedEntry(**e.model_dump(exclude={'file', 'previews'}),
+                            has_content=e.file is not None, preview_count=len(e.previews))
+                for e in store.get(library_id).entries]
+    mount = shared_mount(library_id)
+    result = [SharedEntry(
+        entry_id=public_id(e), kind=e.kind, title=e.title, author=e.author,
+        mime_type=e.mime_type, tags=e.tags, category=e.category,
+        prompt_text=e.prompt_text if e.kind == 'prompt' else None,
+        has_content=e.kind != 'prompt',
+        preview_count=len(e.preview_images) if e.kind == 'prompt' else 0,
+    ) for e in available_entries(mount)]
+    shared_mount(library_id)
+    return result
+
+
+def local_content(mount, entry):
+    content = indexer.entry_content_path(mount, entry)
+    return _safe_path(mount, str(content.relative_to(Path(mount.mount_path).resolve())), raw=entry.kind == 'raw')
+
+
+def content_response(library_id, entry_id):
+    if library_id.startswith('ms_'):
+        entry = store.entry(library_id, entry_id)
+        if not entry.file:
+            raise HTTPException(404, '原文件不可用')
+        return FileResponse(store.blob_path(entry.file.sha256), media_type=entry.mime_type,
+                            filename=entry.file.filename, headers={'Cache-Control': 'no-store'})
+    mount, entry = _entry(library_id, entry_id)
+    try:
+        path = local_content(mount, entry)
+    except (OSError, ValueError):
+        raise HTTPException(404, '原文件不可用') from None
+    shared_mount(library_id)
+    return FileResponse(path, media_type=entry.mime_type, filename=path.name,
+                        headers={'Cache-Control': 'no-store'})
+
+
+def thumbnail_response(library_id, entry_id, w, n=None):
+    from PIL import Image
+    try:
+        if library_id.startswith('ms_'):
+            from io import BytesIO
+            from PIL import Image, ImageOps
+            entry = store.entry(library_id, entry_id)
+            blob = (entry.previews[n] if n is not None and 0 <= n < len(entry.previews)
+                    else entry.file if n is None and (entry.mime_type or '').startswith('image/') else None)
+            if blob is None:
+                raise ValueError('无缩略图')
+            with Image.open(store.blob_path(blob.sha256)) as source:
+                image = ImageOps.exif_transpose(source)
+                image.thumbnail((w, w))
+                buffer = BytesIO()
+                image.convert('RGBA' if image.mode in {'RGBA', 'LA', 'P'} else 'RGB').save(buffer, 'WEBP', quality=80)
+                body = buffer.getvalue()
+            store.get(library_id)
+        else:
+            mount, entry = _entry(library_id, entry_id)
+            if n is None:
+                local_content(mount, entry)
+                body = indexer.thumbnail_bytes(mount, entry, w)
+            else:
+                if entry.kind != 'prompt' or not 0 <= n < len(entry.preview_images):
+                    raise ValueError('效果图不存在')
+                body = indexer.prompt_preview_thumbnail_bytes(mount, entry, entry.preview_images[n].file, w)
+            shared_mount(library_id)
+    except (OSError, ValueError, Image.DecompressionBombError):
+        body = None
+    if body is None:
+        raise HTTPException(404, '缩略图不可用')
+    return Response(body, media_type='image/webp', headers={'Cache-Control': 'no-store'})

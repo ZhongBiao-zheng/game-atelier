@@ -94,7 +94,7 @@ def pair(tmp_path, monkeypatch):
         session.close()
 
 
-def test_two_roots_open_browse_close_and_no_originals(pair):
+def test_two_roots_open_browse_use_and_close(pair):
     p = pair
     client, lib = p['client'], p['mount'].library_id
     discovery = client.get('/api/gateway-libraries').json()
@@ -107,7 +107,7 @@ def test_two_roots_open_browse_close_and_no_originals(pair):
     entries = result.json()
     assert len(entries) == 4
     assert "private-model" not in result.text and "private prompt" not in result.text and "12345" not in result.text
-    allowed = {'entry_id', 'kind', 'title', 'author', 'mime_type', 'width', 'height', 'duration_s', 'tags', 'category', 'prompt_text', 'preview_count'}
+    allowed = {'entry_id', 'kind', 'title', 'author', 'mime_type', 'width', 'height', 'duration_s', 'tags', 'category', 'prompt_text', 'preview_count', 'has_content'}
     assert all(set(e) <= allowed and re.fullmatch(TEAM_ASSET_ID_PATTERN, e['entry_id']) for e in entries)
     def no_paths(value):
         if isinstance(value, dict):
@@ -139,7 +139,8 @@ def test_two_roots_open_browse_close_and_no_originals(pair):
     assert team_library.list_mounts() == []  # 成员根与主机根确实隔离。
     headers = {'Authorization': 'Bearer ' + p['secret']}
     remote = p['base'] + f'/gateway/v1/libraries/{lib}/assets'
-    for suffix in ('content', 'raw', 'download', 'adopt'):
+    assert p['session'].get(remote + f"/{image['entry_id']}/content", headers=headers).content == (p['host'] / 'team' / 'scene.png').read_bytes()
+    for suffix in ('raw', 'download', 'adopt'):
         assert p['session'].get(remote + f"/{image['entry_id']}/{suffix}", headers=headers).status_code == 404
     assert p['session'].get(remote).status_code == 401
     assert p['session'].get(remote + '/raw_any/thumb', headers=headers).status_code == 404
@@ -151,6 +152,7 @@ def test_two_roots_open_browse_close_and_no_originals(pair):
         team_library.set_gateway_shared(lib, False)
     # 即使主机已有缩略图缓存，关共享后的列表与图像请求都立即 404。
     assert client.get(prefix).status_code == 404
+    assert client.get(prefix + f"/{image['entry_id']}/content").status_code == 404
     for url in urls:
         assert client.get(url).status_code == 404
     assert client.get('/api/gateway-libraries').json()[0]['libraries'] == []
@@ -193,7 +195,7 @@ def test_share_management_persists_and_requires_enabled_gateway(pair):
     p = pair
     with p['at_host']():
         lib = p['mount'].library_id
-        assert p['client'].put(f'/api/team-library-gateway-share/{lib}', json={'enabled': True}).status_code == 409
+        assert p['client'].put(f'/api/team-library-gateway-share/{lib}', json={'enabled': True}).status_code == 422
         gateway_keys.update_settings(enabled=True)
         assert p['client'].put(f'/api/team-library-gateway-share/{lib}', json={'enabled': True}).status_code == 200
         assert lib in team_library.shared_library_ids()

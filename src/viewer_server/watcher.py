@@ -186,6 +186,8 @@ def refresh_team_library(mount: TeamLibraryMount) -> TeamLibraryIndex:
                 event = TeamLibraryChangeEvent(library_id=mount.library_id, **change)
                 hub.broadcast("team-library-changed", event.model_dump(mode="json"))
     if not superseded:
+        from character_workflow.lib.gateway_share_publisher import schedule
+        schedule(mount.library_id)
         return after
     # 重刷必须在锁外：_refresh_lock 不可重入。
     return latest if latest is not None else refresh_team_library(mount)
