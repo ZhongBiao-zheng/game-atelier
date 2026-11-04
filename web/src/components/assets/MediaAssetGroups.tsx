@@ -44,6 +44,8 @@ export function MediaAssetGroups({ assets, projects, currentProjectId, staleness
   assets: CreationAsset[]; projects: Project[]; currentProjectId?: string;
   staleness: React.ComponentProps<typeof MediaAssetGrid>['staleness']; onOpen: (asset: CreationAsset) => void;
 }) {
-  return <div className="space-y-3">{groupMediaAssets(assets, projects, currentProjectId).map(group =>
+  const groups = groupMediaAssets(assets, projects, currentProjectId);
+  if (groups.length === 1) return <MediaAssetGrid assets={groups[0].assets} staleness={staleness} onOpen={onOpen} />;
+  return <div className="space-y-3">{groups.map(group =>
     <MediaGroup key={group.id} group={group} staleness={staleness} onOpen={onOpen} />)}</div>;
 }
