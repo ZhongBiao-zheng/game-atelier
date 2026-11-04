@@ -1,3 +1,4 @@
+import { GatewayPublishStatus } from './GatewayPublishStatus';
 import { getGatewayShareState, setGatewayShare, type GatewayShareState } from '@/api/gatewayLibraries';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -129,7 +130,8 @@ export function TeamLibrariesSection() {
     void reload(() => cancelled).catch(fail);
     void getGatewayShareState().then(state => { if (!cancelled) setSharing(state); }).catch(fail);
     void fetchProfile().then(profile => { if (!cancelled) setDisplayName(profile.display_name); }).catch(() => {});
-    return () => { cancelled = true; };
+    const timer = window.setInterval(() => { void getGatewayShareState().then(state => { if (!cancelled) setSharing(state); }).catch(fail); }, 3000);
+    return () => { cancelled = true; window.clearInterval(timer); };
   }, [reload]);
 
   async function run(action: () => Promise<unknown>) {
@@ -230,10 +232,11 @@ export function TeamLibrariesSection() {
             </DropdownMenu>
           </div>
           <div className="flex items-center gap-2 border-t border-border px-4 py-3">
-            <Label htmlFor={`gateway-share-${library.library_id}`} className="flex-1 text-sm">通过网关共享</Label>
-            {!sharing?.gateway_enabled && <Hint label="请先开启网关"><Button size="icon" variant="ghost" className="size-7" aria-label="网关共享说明"><HelpCircle className="size-4" /></Button></Hint>}
+            <Label htmlFor={`gateway-share-${library.library_id}`} className="flex-1 text-sm">共享给网关同事</Label>
+            {!(sharing?.gateway_enabled || sharing?.can_publish) && <Hint label="请先开启网关或接入同事的网关"><Button size="icon" variant="ghost" className="size-7" aria-label="网关共享说明"><HelpCircle className="size-4" /></Button></Hint>}
+            <GatewayPublishStatus targets={sharing?.publishes?.[library.library_id]?.gateways} />
             <Switch id={`gateway-share-${library.library_id}`} checked={sharing?.shared_library_ids.includes(library.library_id) ?? false}
-              disabled={busy || shareBusy || !sharing?.gateway_enabled} onCheckedChange={enabled => {
+              disabled={busy || shareBusy || !(sharing?.gateway_enabled || sharing?.can_publish)} onCheckedChange={enabled => {
                 setShareBusy(true); setError(null);
                 void setGatewayShare(library.library_id, enabled).then(setSharing).catch(cause => setError(message(cause))).finally(() => setShareBusy(false));
               }} />

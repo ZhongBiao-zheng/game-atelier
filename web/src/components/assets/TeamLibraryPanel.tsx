@@ -377,8 +377,8 @@ export function TeamLibraryPanel({
       <Popover open={selectorOpen} onOpenChange={setSelectorOpen}>
         <PopoverTrigger asChild>
           <Button variant="outline" aria-label="团队库" className="h-10 w-full justify-start bg-card font-normal">
-            <Folder /><span className="min-w-0 flex-1 truncate text-left">{remoteLibrary ? `${remoteLibrary.name} · ${remoteLibrary.owner_name}` : library?.name ?? '选择团队库'}</span>
-            <span className="max-w-24 truncate text-xs text-muted-foreground">{remoteLibrary ? '只读' : ''}</span><ChevronDown />
+            <Folder /><span className="min-w-0 flex-1 truncate text-left">{remoteLibrary ? remoteLibrary.name : library?.name ?? '选择团队库'}</span>
+            <span className="max-w-24 truncate text-xs text-muted-foreground">{remoteLibrary?.owner_name ?? ''}</span><ChevronDown />
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-80 space-y-1">
@@ -392,12 +392,12 @@ export function TeamLibraryPanel({
               ? <p key={source.gateway_alias} className="px-2 py-1 text-xs text-muted-foreground">{source.gateway_alias} · 无法连接</p>
               : source.libraries.map(item => <Button key={`${source.gateway_alias}:${item.id}`} variant="ghost" className="w-full justify-start"
                 onClick={() => { setRemoteLibrary({ ...item, alias: source.gateway_alias }); setViewing(null); setSelectorOpen(false); }}>
-                <span className="min-w-0 flex-1 truncate text-left">{item.name} · {item.owner_name}</span><span className="text-xs text-muted-foreground">只读</span>
+                <span className="min-w-0 flex-1 truncate text-left">{item.name} · {item.owner_name}</span>
               </Button>))}
           </div>
         </PopoverContent>
       </Popover>
-      {remoteLibrary ? <GatewayLibraryBrowser key={`${remoteLibrary.alias}:${remoteLibrary.id}`} library={remoteLibrary}
+      {remoteLibrary ? <GatewayLibraryBrowser key={`${remoteLibrary.alias}:${remoteLibrary.id}`} library={remoteLibrary} onUseMedia={onUseMedia} onUsePrompt={onUsePrompt}
         available={remoteAvailable} revision={remote.revision} onRefresh={() => { void remote.refresh(); }}
         onUnavailable={() => remote.remove(remoteLibrary)} /> : <>
       <div className="flex items-center gap-2">

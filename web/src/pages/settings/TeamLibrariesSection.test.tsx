@@ -248,7 +248,7 @@ describe('TeamLibrariesSection', () => {
 it('共享开关持久化，网关未开启时禁用', async () => {
   vi.mocked(setGatewayShare).mockResolvedValue({ gateway_enabled: true, shared_library_ids: [view.library_id] });
   const rendered = render(<TeamLibrariesSection />);
-  const toggle = await screen.findByRole('switch', { name: '通过网关共享' });
+  const toggle = await screen.findByRole('switch', { name: '共享给网关同事' });
   await waitFor(() => expect(toggle).toBeEnabled());
   fireEvent.click(toggle);
   await waitFor(() => expect(setGatewayShare).toHaveBeenCalledWith(view.library_id, true));
@@ -256,6 +256,6 @@ it('共享开关持久化，网关未开启时禁用', async () => {
   rendered.unmount();
   vi.mocked(getGatewayShareState).mockResolvedValue({ gateway_enabled: false, shared_library_ids: [] });
   render(<TeamLibrariesSection />);
-  expect(await screen.findByRole('switch', { name: '通过网关共享' })).toBeDisabled();
+  expect(await screen.findByRole('switch', { name: '共享给网关同事' })).toBeDisabled();
   expect(screen.getByRole('button', { name: '网关共享说明' })).toBeInTheDocument();
 });

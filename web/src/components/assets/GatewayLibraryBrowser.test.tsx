@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { readTeamMedia } from './teamAssetUse';
+vi.mock('./teamAssetUse', () => ({ readTeamMedia: vi.fn() }));
 import { fetchProfile } from '@/api/teamLibraries';
 import { TeamLibraryPanel } from './TeamLibraryPanel';
 import { GatewayLibraryBrowser } from './GatewayLibraryBrowser';
@@ -9,8 +11,8 @@ vi.mock('@/api/gatewayLibraries', async original => ({ ...await original<typeof 
 vi.mock('@/api/teamLibraries', () => ({ listTeamLibraries: vi.fn(async () => []), fetchProfile: vi.fn(async () => ({ display_name: null })), listRelatedTeamAssets: vi.fn(async () => []) }));
 const library: GatewayLibrarySelection = { alias: '林晓网关', id: 'lib_0123456789abcdef', name: '画面参考', owner_name: '林晓', updated_at: 'now', counts: {} };
 const entries = [
-  { entry_id: 'ta_image', kind: 'raw' as const, title: '风景.png', mime_type: 'image/png', tags: [], preview_count: 0 },
-  { entry_id: 'ta_video', kind: 'raw' as const, title: '片段.mp4', mime_type: 'video/mp4', tags: [], preview_count: 0 },
+  { entry_id: 'ta_image', kind: 'raw' as const, title: '风景.png', mime_type: 'image/png', tags: [], preview_count: 0, has_content: true },
+  { entry_id: 'ta_video', kind: 'raw' as const, title: '片段.mp4', mime_type: 'video/mp4', tags: [], preview_count: 0, has_content: true },
   { entry_id: 'ta_prompt', kind: 'prompt' as const, title: '夕照提示词', author: '林晓', prompt_text: '山谷夕照', tags: [], preview_count: 2 },
 ];
 beforeEach(() => {
@@ -20,7 +22,7 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); vi.resetAllMocks(); });
 
-it('无本地项目也能选同事共享，只查看缩略图和提示词，没有媒体源与采用动作', async () => {
+it('无本地项目也能选同事共享，展示缩略图和使用入口，没有复刻与采用动作', async () => {
   const { container } = render(<TeamLibraryPanel projectId="" onUseMedia={vi.fn()} />);
   fireEvent.click(await screen.findByRole('button', { name: '团队库' }));
   const group = screen.getByRole('group', { name: '同事共享' });
@@ -75,4 +77,18 @@ it('正常轮询保留正在查看的详情，停止共享才清空', async () =
   expect(screen.getByRole('dialog')).toBeInTheDocument();
   rerender(<GatewayLibraryBrowser {...props} revision={3} available={false} />);
   expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('同事库使用通过 content 代理取文件并传给创作端，提示词直接填入', async () => {
+  const media = vi.fn(), prompt = vi.fn();
+  const file = new File(['image'], '风景.png', { type: 'image/png' });
+  vi.mocked(readTeamMedia).mockResolvedValue(file);
+  render(<GatewayLibraryBrowser library={library} available revision={1} onRefresh={vi.fn()} onUnavailable={vi.fn()} onUseMedia={media} onUsePrompt={prompt} />);
+  fireEvent.click((await screen.findAllByRole('button', { name: '使用' }))[0]);
+  await waitFor(() => expect(media).toHaveBeenCalledWith(file, expect.objectContaining({ id: 'ta_image' }), `${library.alias}:${library.id}:ta_image`));
+  expect(readTeamMedia).toHaveBeenCalledWith(expect.stringContaining('/ta_image/content'), expect.any(Object));
+  const promptUse = within(screen.getByRole('button', { name: '查看 夕照提示词' }).parentElement!).getByRole('button', { name: '使用' });
+  await waitFor(() => expect(promptUse).not.toBeDisabled());
+  fireEvent.click(promptUse);
+  expect(prompt).toHaveBeenCalledWith('山谷夕照', expect.objectContaining({ id: 'ta_prompt' }));
 });

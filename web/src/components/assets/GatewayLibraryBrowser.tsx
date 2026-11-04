@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AudioLines, Copy, Film, HelpCircle, RefreshCw, Search } from 'lucide-react';
-import { gatewayThumbUrl, listGatewayAssets, listGatewayLibraries, type GatewayLibraryEntry,
+import { AudioLines, Copy, Film, HelpCircle, RefreshCw, Search, Plus, Loader2 } from 'lucide-react';
+import { gatewayContentUrl, gatewayThumbUrl, listGatewayAssets, listGatewayLibraries, type GatewayLibraryEntry,
   type GatewayLibrarySelection, type GatewayLibrarySource } from '@/api/gatewayLibraries';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -9,6 +9,7 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/in
 import { AssetFilterPill } from './AssetFilterPill';
 import { AssetMasonry, mediaRatio, useMediaSizes } from './AssetMasonry';
 import { mediaDuration } from './AssetMediaTile';
+import { readTeamMedia, type UseTeamMedia, type UseTeamPrompt } from './teamAssetUse';
 
 export function GatewayLibraryHelp() {
   return <Hint label="将同事的网关添加为供应商后，可以查看他开启共享的团队库">
@@ -48,10 +49,22 @@ export function useGatewayLibrarySources() {
   return { sources, revision, refresh, remove };
 }
 
-export function GatewayLibraryBrowser({ library, available, revision, onRefresh, onUnavailable }: {
+export function GatewayLibraryBrowser({ library, available, revision, onRefresh, onUnavailable, onUseMedia, onUsePrompt }: {
   library: GatewayLibrarySelection; available: boolean; revision: number;
-  onRefresh: () => void; onUnavailable: () => void;
+  onRefresh: () => void; onUnavailable: () => void; onUseMedia?: UseTeamMedia; onUsePrompt?: UseTeamPrompt;
 }) {
+  const [using, setUsing] = useState<string | null>(null);
+  const [useError, setUseError] = useState<string | null>(null);
+  async function applyEntry(entry: GatewayLibraryEntry) {
+    setUsing(entry.entry_id); setUseError(null);
+    const local = { ...entry, id: entry.entry_id, mime_type: entry.mime_type ?? null };
+    try {
+      if (entry.kind === 'prompt') onUsePrompt?.(entry.prompt_text ?? '', local);
+      else if (onUseMedia) await onUseMedia(await readTeamMedia(gatewayContentUrl(library, entry), local), local, `${library.alias}:${library.id}:${entry.entry_id}`);
+    } catch { setUseError('读取失败'); } finally { setUsing(null); }
+  }
+  const actionButton = (entry: GatewayLibraryEntry) => <Button variant="solid" size="sm" className="rounded-full" disabled={using !== null || (entry.kind !== 'prompt' && !entry.has_content)} onClick={() => void applyEntry(entry)}>
+    {using === entry.entry_id ? <Loader2 className="animate-spin" /> : <Plus />}使用</Button>;
   const [entries, setEntries] = useState<GatewayLibraryEntry[]>([]);
   const [viewing, setViewing] = useState<GatewayLibraryEntry | null>(null);
   const [preview, setPreview] = useState(0);
@@ -91,6 +104,7 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
       </InputGroup>
       <Button size="icon" variant="outline" aria-label="刷新" onClick={onRefresh}><RefreshCw /></Button>
     </div>
+    {useError && <p role="alert" className="text-sm text-destructive">{useError}</p>}
     {!available ? <p role="status" className="py-8 text-center text-sm text-muted-foreground">已停止共享</p> : <>
       <div role="group" aria-label="类型" className="flex flex-wrap gap-2">
         {([['all', '全部'], ['image', '图片'], ['video', '视频'], ['prompt', '提示词'],
@@ -110,8 +124,8 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
                   <span className="mb-2 block truncate text-sm font-medium">{entry.title}</span>
                   <span className="line-clamp-2 whitespace-normal text-xs text-muted-foreground">{entry.prompt_text}</span>
                 </span>}
-                <span className="absolute bottom-1 right-1 rounded-full bg-primary px-2 py-1 text-xs text-primary-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">查看</span>
               </Button>
+              <div className="absolute bottom-1 right-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">{actionButton(entry)}</div>
             </div>
             <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
               {entry.author && <span className="grid size-4 shrink-0 place-items-center rounded-full bg-secondary">{Array.from(entry.author)[0]}</span>}
@@ -139,6 +153,7 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
             {copyError && <p role="alert" className="text-xs text-destructive">复制失败</p>}
           </>}
         </div>
+        <div className="flex justify-end">{actionButton(viewing)}</div>
       </DialogContent>
     </Dialog>}
   </>;

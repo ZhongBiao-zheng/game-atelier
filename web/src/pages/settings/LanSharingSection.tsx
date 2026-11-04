@@ -1,3 +1,4 @@
+import { GatewaySharedLibraries } from './lan-sharing/GatewaySharedLibraries';
 import { AuditLog } from './lan-sharing/AuditLog';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Link } from 'wouter';
@@ -239,6 +240,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
               </div>
             </section>
             <Tasks onFinished={finished} gatewayAlias={gatewayAlias} />
+            {!gatewayAlias && <GatewaySharedLibraries />}
           </>
         )}
         {error && (
