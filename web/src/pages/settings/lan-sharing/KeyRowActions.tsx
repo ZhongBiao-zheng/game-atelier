@@ -31,7 +31,7 @@ export function KeyRowActions({ record, options, busy, onSave, onRename, onReset
         void onSave({ allowed_models: models, allowed_aliases: aliases });
     }}>
       <Hint label="选择此密钥可用的模型和供应商"><PopoverTrigger asChild>
-        <Button variant="ghost" size="sm" disabled={busy} className={cn(record.allowed_models === null && record.allowed_aliases === null && reveal)}>
+        <Button variant="outline" size="sm" disabled={busy} className={cn('h-7 rounded-full px-2.5 text-xs', record.allowed_models === null && record.allowed_aliases === null ? `text-muted-foreground ${reveal}` : 'text-foreground')}>
           {record.allowed_models === null ? '全部模型' : `${record.allowed_models.length} 个模型`}
         </Button>
       </PopoverTrigger></Hint>
@@ -50,7 +50,7 @@ export function KeyRowActions({ record, options, busy, onSave, onRename, onReset
         if (JSON.stringify(next) !== JSON.stringify(record.limits)) void onSave({ limits: next });
       }
     }}>
-      <Hint label="设置此密钥的消费额度"><PopoverTrigger asChild><Button size="sm" variant="ghost" disabled={busy} className={cn(record.limits.length === 0 && reveal)}>额度</Button></PopoverTrigger></Hint>
+      <Hint label="设置此密钥的消费额度"><PopoverTrigger asChild><Button size="sm" variant="outline" disabled={busy} className={cn('h-7 rounded-full px-2.5 text-xs', record.limits.length === 0 ? `text-muted-foreground ${reveal}` : 'text-foreground')}>额度</Button></PopoverTrigger></Hint>
       <PopoverContent align="end" aria-label="额度" className="space-y-3">
         {(Object.keys(PERIODS) as LimitPeriod[]).map(period => <Label key={period} className="flex items-center justify-between gap-2">{PERIODS[period]}（元）
           <Input aria-label={`${PERIODS[period]}限额`} type="number" min="0.000001" max="1000000" step="any" placeholder="不限" className="w-32" value={limits[period] ?? ''} onChange={event => setLimits({ ...limits, [period]: event.target.value })} />
