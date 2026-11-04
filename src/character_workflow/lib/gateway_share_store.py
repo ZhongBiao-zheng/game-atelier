@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+import logging
+from functools import wraps
 import shutil
 import tempfile
 from collections import Counter
@@ -17,6 +19,17 @@ from character_workflow.lib.gateway_share_models import (
 class ShareError(Exception):
     def __init__(self, status: int, detail: str, missing=None):
         self.status, self.detail, self.missing = status, detail, missing
+
+
+def storage_operation(operation):
+    @wraps(operation)
+    def run(*args, **kwargs):
+        try:
+            return operation(*args, **kwargs)
+        except OSError as error:
+            logging.getLogger(__name__).exception('共享存储读写失败')
+            raise ShareError(503, '文件读写失败，请检查主机磁盘') from error
+    return run
 
 
 def root() -> Path:
@@ -53,6 +66,7 @@ def _missing(manifest):
             if not (root() / 'blobs' / sha).is_file() or (root() / 'blobs' / sha).stat().st_size != size]
 
 
+@storage_operation
 def stage(key_id, share_id, payload):
     manifest = SharedLibraryManifest.model_validate(payload)
     if manifest.share_id != share_id:
@@ -63,6 +77,7 @@ def stage(key_id, share_id, payload):
         return _missing(manifest)
 
 
+@storage_operation
 def upload_expected(key_id, share_id, sha):
     if not re.fullmatch(SHA_PATTERN, sha):
         raise ShareError(422, '文件摘要不合法')
@@ -74,12 +89,14 @@ def upload_expected(key_id, share_id, sha):
         return references(_read(path))[sha]
 
 
+@storage_operation
 def temporary_upload():
     folder = root() / 'uploads'
     folder.mkdir(parents=True, exist_ok=True)
     return tempfile.NamedTemporaryFile(dir=folder, delete=False)
 
 
+@storage_operation
 def finish_upload(key_id, share_id, sha, temp, actual_sha, size):
     with gateway_keys._lock():
         _owner(key_id, share_id)
@@ -104,6 +121,7 @@ def _gc():
             path.unlink(missing_ok=True)
 
 
+@storage_operation
 def commit(key_id, share_id):
     with gateway_keys._lock():
         _owner(key_id, share_id)
@@ -119,6 +137,7 @@ def commit(key_id, share_id):
         _gc()
 
 
+@storage_operation
 def delete(key_id, share_id, *, stopped=False):
     with gateway_keys._lock():
         _owner(key_id, share_id)
@@ -129,6 +148,7 @@ def delete(key_id, share_id, *, stopped=False):
         _gc()
 
 
+@storage_operation
 def revoke_owner_locked(key_id):
     """调用方已持 gateway lock；写入撤销状态后再清理文件。"""
     for section in ('libraries', 'pending', 'stopped'):
@@ -144,6 +164,7 @@ def split_id(library_id):
     return library_id[3:15], library_id[16:]
 
 
+@storage_operation
 def get(library_id):
     key_id, share_id = split_id(library_id)
     with gateway_keys._lock():
@@ -154,6 +175,7 @@ def get(library_id):
         return _read(path)
 
 
+@storage_operation
 def list_libraries(exclude_key=None, *, admin=False):
     with gateway_keys._lock():
         names = {k.id: k.name for k in gateway_keys._read_config_locked().keys if not k.revoked_at}
@@ -174,6 +196,7 @@ def list_libraries(exclude_key=None, *, admin=False):
         return result
 
 
+@storage_operation
 def disk_usage():
     with gateway_keys._lock():
         return sum(p.stat().st_size for p in (root() / 'blobs').glob('*'))
@@ -191,3 +214,21 @@ def blob_path(sha):
     if not re.fullmatch(SHA_PATTERN, sha):
         raise ShareError(404, '文件不存在')
     return root() / 'blobs' / sha
+
+
+@storage_operation
+def write_upload(temp, chunk):
+    temp.write(chunk)
+
+
+@storage_operation
+def close_upload(temp):
+    temp.close()
+
+
+@storage_operation
+def discard_upload(temp):
+    try:
+        temp.close()
+    finally:
+        Path(temp.name).unlink(missing_ok=True)

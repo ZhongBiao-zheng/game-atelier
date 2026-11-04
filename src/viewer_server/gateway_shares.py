@@ -1,7 +1,6 @@
 """鉴权后的成员上传协议；文件收取流式执行，磁盘操作不阻塞事件循环。"""
 import asyncio
 import hashlib
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -27,12 +26,11 @@ def create_router(require_key):
                 if size > MAX_FILE_BYTES or size > expected:
                     raise store.ShareError(413, '文件过大')
                 digest.update(chunk)
-                await asyncio.to_thread(temp.write, chunk)
-            await asyncio.to_thread(temp.close)
+                await asyncio.to_thread(store.write_upload, temp, chunk)
+            await asyncio.to_thread(store.close_upload, temp)
             await asyncio.to_thread(store.finish_upload, key.id, share_id, sha, temp.name, digest.hexdigest(), size)
         finally:
-            await asyncio.to_thread(temp.close)
-            await asyncio.to_thread(Path(temp.name).unlink, missing_ok=True)
+            await asyncio.to_thread(store.discard_upload, temp)
         return {'ok': True}
 
     @router.post('/{share_id}/commit')
@@ -56,6 +54,3 @@ def install_errors(app):
             body['missing'] = error.missing
         return JSONResponse(body, status_code=error.status)
 
-    @app.exception_handler(OSError)
-    async def disk_error(_request, _error):
-        return JSONResponse({'detail': '文件读写失败，请检查主机磁盘'}, status_code=503)
