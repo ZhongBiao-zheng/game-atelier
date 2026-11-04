@@ -8,6 +8,7 @@ import secrets
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -34,28 +35,46 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
+@lru_cache(maxsize=4096)
+def _uncatalogued_digest(path: Path, size: int, mtime_ns: int, preview_json: str | None):
+    """没有索引摘要的文件按身份缓存；效果图校验与摘要一起失效。"""
+    with path.open('rb') as source:
+        if preview_json is None:
+            sha = hashlib.file_digest(source, 'sha256').hexdigest()
+        else:
+            from character_workflow.lib.creation_assets import PROMPT_PREVIEW_MAX_BYTES, validate_prompt_preview
+            from character_workflow.lib.schemas import PromptPreviewImage
+            body = source.read(PROMPT_PREVIEW_MAX_BYTES + 1)
+            validate_prompt_preview(PromptPreviewImage.model_validate_json(preview_json), body)
+            sha = hashlib.sha256(body).hexdigest()
+    current = path.stat()
+    if (current.st_size, current.st_mtime_ns) != (size, mtime_ns):
+        raise ValueError('文件正在变化，请重新扫描')
+    return sha
+
+
 def build_manifest(library_id, share_id):
     # 与主机直读共享使用同一路径闸门，输出只由公开模型构造。
     from viewer_server.gateway_libraries import available_entries, local_content, public_id, _safe_path
     mount = libraries.get_mount(library_id)
     entries, files = [], {}
-    def blob(path):
-        with path.open('rb') as source:
-            sha = hashlib.file_digest(source, 'sha256').hexdigest()
+    def blob(path, known_sha=None, preview=None):
+        stat = path.stat()
+        sha = known_sha or _uncatalogued_digest(path.resolve(), stat.st_size, stat.st_mtime_ns,
+            preview.model_dump_json() if preview else None)
         files[sha] = path
-        return {'sha256': sha, 'size': path.stat().st_size}
+        return {'sha256': sha, 'size': stat.st_size}
     for e in available_entries(mount):
         row = dict(entry_id=public_id(e), kind=e.kind, title=e.title, author=e.author,
                    mime_type=e.mime_type, tags=e.tags, category=e.category)
         if e.kind == 'prompt':
             row['prompt_text'] = e.prompt_text
             folder = indexer.shared_asset_dir(mount, e)
-            # 校验登记效果图的内容与尺寸后才发布。
-            indexer.read_prompt_preview_files(folder, e.preview_images)
-            row['previews'] = [blob(_safe_path(mount, str((folder / 'previews' / p.file).relative_to(Path(mount.mount_path).resolve())))) for p in e.preview_images]
+            # 缓存命中不再读图；文件或登记信息变化时重新验证内容与尺寸。
+            row['previews'] = [blob(_safe_path(mount, str((folder / 'previews' / p.file).relative_to(Path(mount.mount_path).resolve()))), preview=p) for p in e.preview_images]
         else:
             path = local_content(mount, e)
-            row['file'] = {**blob(path), 'filename': path.name}
+            row['file'] = {**blob(path, known_sha=e.sha256), 'filename': path.name}
         entries.append(row)
     profile = libraries.read_profile()
     return SharedLibraryManifest.model_validate(dict(share_id=share_id, name=mount.name,

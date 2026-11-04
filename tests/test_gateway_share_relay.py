@@ -241,3 +241,38 @@ def test_pending_references_survive_gc_and_disk_errors_are_503(trio, monkeypatch
     response = p['request']('PUT', 'shares/sh_333333333333/manifest', payload, other=True)
     assert response.status_code == 503
     assert 'private disk' not in response.text
+
+
+def test_unchanged_second_sync_does_not_open_media_or_previews(trio, monkeypatch):
+    from pathlib import Path
+    from character_workflow.lib import creation_assets
+    from character_workflow.lib.team_library_share import share_creation_asset
+    p = trio
+    with p['at']('publisher'):
+        folder = Path(p['mount'].mount_path)
+        prompt = creation_assets.create_prompt_asset('提示词', [{'kind': 'text', 'text': '山谷'}], [])
+        creation_assets.add_prompt_previews(prompt.asset_id, [((folder / 'one.png').read_bytes(), 'image/png')])
+        share_creation_asset(p['mount'], asset_id=prompt.asset_id, title=prompt.title, tags=[], author='作者')
+        media = creation_assets.create_media_asset_from_bytes(title='素材', body=(folder / 'two.png').read_bytes(),
+            filename='stored.png', mime_type='image/png', tags=[])
+        share_creation_asset(p['mount'], asset_id=media.asset_id, title=media.title, tags=[], author='作者')
+        (folder / 'clip.mp4').write_bytes(b'test-video-content')
+        indexer.write_index(indexer.build_index(p['mount']))
+        media_paths = {path.resolve() for path in folder.rglob('*') if path.suffix in ('.png', '.mp4')}
+    opened = []
+    original_open = Path.open
+    def track(path, *args, **kwargs):
+        if path.resolve() in media_paths and (args[0] if args else kwargs.get('mode', 'r')) == 'rb':
+            opened.append(path.resolve())
+        return original_open(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'open', track)
+    publish(p)
+    assert opened
+    opened.clear()
+    publish(p)
+    assert opened == []
+    # 大小相同、mtime 不同也必须重新计算，不能上传旧摘要。
+    with p['at']('publisher'):
+        (folder / 'clip.mp4').write_bytes(b'next-video-content')
+    publish(p)
+    assert opened and set(opened) == {(folder / 'clip.mp4').resolve()}
