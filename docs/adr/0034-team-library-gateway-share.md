@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by 0035
 ---
 
 # 团队库网关临时共享

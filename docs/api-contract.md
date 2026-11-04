@@ -1190,3 +1190,14 @@ timeout_seconds`；超时默认 1800 秒，允许 1–86400 秒。inspect 不写
 `GET /api/gateway-libraries/{alias}/{library_id}/assets` 及对应 `/{entry_id}/thumb`、
 `/{entry_id}/previews/{n}/thumb` 由本机带已保存凭据转发，不接收 URL 或路径。
 缩略图不落盘，响应 `Cache-Control: private, max-age=60`；主机仍逐请求检查共享状态。
+
+
+### 网关共享中转（ADR-0035）
+
+- `PUT /gateway/v1/shares/{share_id}/manifest`：`SharedLibraryManifest`（extra forbid），响应 `{missing: sha256[]}`。`share_id=sh_[a-z0-9]{12}`，最多 10000 条，单文件不超过 500 MiB。
+- `PUT .../blobs/{sha256}`：流式文件，摘要及大小必须与暂存清单一致；`POST .../commit` 校验完整后原子生效；缺文件 422 含 `missing`，保留旧清单。`DELETE /gateway/v1/shares/{share_id}` 停止本人共享。
+- 清单字段：`share_id/name/owner_name/updated_at/entries`；条目只有 `entry_id/kind/title/author/mime_type/width/height/duration_s/tags/category/prompt_text/file/previews`，文件 `{sha256,size,filename}`、效果图 `{sha256,size}`。不接受 key_id、路径或生成快照。密钥决定归属；越权/停止 404、校验 422、超限 413、磁盘错误 503。
+- `GET /gateway/v1/libraries` 合并主机与成员库，排除请求者自己的成员库；成员库 id 为 `ms_<key_id>_<share_id>`。资产列表增加 `has_content`；`.../assets/{entry_id}/content` 返回登记 MIME 的原文件 attachment。原文件代理 `/api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/content` 流式回传，不落盘。
+- 本机 `/api/gateway-shares` GET 返回 `{libraries:[{id,name,owner_name,updated_at,counts,size_bytes}],size_bytes}`；DELETE `/{library_id}` 主机停止共享，旧 share_id 不可重新发布。`@host` 是本机存储浏览源的保留别名。
+- `.config/team-library-gateway-share.json`：`{shared_library_ids,publishes:{[library_id]:{share_id,gateways:{[alias]:{synced_at,error,status,uploaded,total,delete_pending}}}}}`。status 为 pending/syncing/synced/failed/stopped。发布状态仅本机管理接口可见。
+- 网关密钥创建请求新增可选 `token` 后缀（`[A-Za-z0-9_-]{16,64}`）；服务端加 `atg_`。与任何现存记录（含已撤销）重复时 422。POST `/api/gateway/keys/{key_id}/reset` 及对应管理员路由生成新密钥，旧密钥立即失效。
