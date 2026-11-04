@@ -26,7 +26,6 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { GatewayMemberToken } from './lan-sharing/GatewayMemberToken';
 import { Tasks } from './lan-sharing/Tasks';
 import { date, PERIODS } from './lan-sharing/shared';
-import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 
 export const GATEWAY_HINT =
@@ -173,7 +172,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
                         <td
                           className={`max-w-64 px-4 py-3 align-middle ${key.revoked_at ? 'text-muted-foreground' : ''}`}
                         >
-                          <Hint label={key.name}><span className="truncate">{key.name}</span></Hint>
+                          <span className="block truncate">{key.name}</span>
                         </td>
                         <td className="px-4 py-3 align-middle">
                           {(!gatewayAlias || createdTokens[key.id]) && !key.revoked_at
