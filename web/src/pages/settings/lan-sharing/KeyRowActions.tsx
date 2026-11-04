@@ -58,12 +58,19 @@ export function KeyRowActions({ record, options, busy, onSave, onRename, onReset
       </PopoverContent>
     </Popover>
     {limitError && <Hint label={limitError}><span role="alert" className="text-xs text-destructive">额度无效</span></Hint>}
-    <Select value={record.role ?? 'member'} onValueChange={role => { void onSave({ role: role as 'member' | 'admin' }); }} disabled={busy}>
-      <Hint label="设置成员或管理员权限"><SelectTrigger aria-label={`${record.name} 的角色`} size="sm" className={cn('w-auto', record.role !== 'admin' && reveal)}><SelectValue /></SelectTrigger></Hint>
-      <SelectContent><SelectItem value="member">成员</SelectItem><SelectItem value="admin">管理员</SelectItem></SelectContent>
-    </Select>
     <DropdownMenu><DropdownMenuTrigger asChild><Button size="icon" variant="ghost" className="size-8" aria-label={`${record.name} 的更多操作`} disabled={busy}><MoreHorizontal /></Button></DropdownMenuTrigger>
       <DropdownMenuContent align="end"><DropdownMenuItem onSelect={onRename}>重命名</DropdownMenuItem><DropdownMenuItem onSelect={onReset}>重置密钥</DropdownMenuItem><DropdownMenuItem destructive onSelect={onRevoke}>撤销</DropdownMenuItem></DropdownMenuContent>
     </DropdownMenu>
   </div>;
+}
+
+
+export function KeyRoleCell({ record, busy, onSave }: {
+  record: GatewayKey; busy: boolean; onSave: (patch: Partial<GatewayKeyInput>) => Promise<boolean>;
+}) {
+  if (record.revoked_at) return <>{record.role === 'admin' ? '管理员' : '成员'}</>;
+  return <Select value={record.role ?? 'member'} onValueChange={role => { void onSave({ role: role as 'member' | 'admin' }); }} disabled={busy}>
+    <SelectTrigger aria-label={`${record.name} 的角色`} size="sm" variant="inline"><SelectValue /></SelectTrigger>
+    <SelectContent><SelectItem value="member">成员</SelectItem><SelectItem value="admin">管理员</SelectItem></SelectContent>
+  </Select>;
 }

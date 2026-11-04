@@ -11,14 +11,15 @@ export const SelectValue = SelectPrimitive.Value;
 
 export const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> & { size?: 'sm' | 'default' }
->(({ className, size = 'default', children, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> & { size?: 'sm' | 'default'; variant?: 'default' | 'inline' }
+>(({ className, size = 'default', variant = 'default', children, ...props }, ref) => (
   <SelectPrimitive.Trigger
     ref={ref}
     data-size={size}
     className={cn(
-      'flex w-full min-w-0 cursor-pointer items-center justify-between gap-2 whitespace-nowrap rounded-md border border-input bg-transparent px-3 text-sm text-foreground transition-[color,box-shadow,border-color] disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-muted-foreground [&>span]:line-clamp-1 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
+      'flex w-full min-w-0 cursor-pointer items-center justify-between gap-2 whitespace-nowrap rounded-md bg-transparent text-sm text-foreground transition-[color,box-shadow,border-color] disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-muted-foreground [&>span]:line-clamp-1 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
       size === 'sm' ? 'h-8 text-xs' : 'h-9',
+      variant === 'inline' ? 'w-auto px-0 data-[state=open]:[&>svg]:opacity-100' : 'border border-input px-3',
       FOCUS_RING,
       INVALID_RING,
       className,
@@ -27,7 +28,7 @@ export const SelectTrigger = React.forwardRef<
   >
     {children}
     <SelectPrimitive.Icon asChild>
-      <ChevronDown className="text-muted-foreground" aria-hidden="true" />
+      <ChevronDown className={cn('text-muted-foreground', variant === 'inline' && 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100')} aria-hidden="true" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));

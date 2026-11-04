@@ -21,7 +21,7 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { formatGenerationCost } from '@/lib/generationCost';
 import { KeyInlineCreate } from './lan-sharing/KeyInlineCreate';
-import { KeyRowActions } from './lan-sharing/KeyRowActions';
+import { KeyRowActions, KeyRoleCell } from './lan-sharing/KeyRowActions';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { GatewayMemberToken } from './lan-sharing/GatewayMemberToken';
 import { Tasks } from './lan-sharing/Tasks';
@@ -180,7 +180,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
                             ? <div className="flex items-center gap-1 whitespace-nowrap"><GatewayMemberToken key={`${key.id}:${tokenVersion}`} knownToken={createdTokens[key.id]} id={key.id} name={key.name} onError={setError} /></div>
                             : '—'}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 align-middle">{key.role === 'admin' ? '管理员' : '成员'}</td>
+                        <td className="whitespace-nowrap px-4 py-3 align-middle"><KeyRoleCell record={key} busy={busy} onSave={patch => run(() => updateGatewayKey(key.id, patch, ...(gatewayAlias ? [gatewayAlias] as const : [])))} /></td>
                         <td className="min-w-40 px-4 py-3 align-middle">
                           <div className="flex h-9 flex-col justify-center">
                             {!key.limits_status.some((limit) => limit.period === 'month')

@@ -45,3 +45,5 @@
 1. 文件放 `web/src/components/ui/<kebab-name>.tsx`，`React.forwardRef` + `cn(默认配方, className)`。
 2. 文字类输入展开 `NO_AUTOFILL`（`ui/input.tsx` 导出）；可聚焦控件用 `ui/focus.ts` 的 `FOCUS_RING` / `INVALID_RING`。
 3. 在本页「选用」表登记一行。
+
+`SelectTrigger variant="inline"`：表格文字原位编辑；箭头在行 hover、键盘聚焦或触屏时显示。
