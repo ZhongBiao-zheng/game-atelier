@@ -385,7 +385,7 @@ export function TeamLibraryPanel({
 
       <Popover open={selectorOpen} onOpenChange={setSelectorOpen}>
         <PopoverTrigger asChild>
-          <Button variant="outline" aria-label="团队库" className="h-10 w-full justify-start bg-card font-normal">
+          <Button variant="outline" aria-label="团队库" className="h-9 w-full justify-start bg-card font-normal">
             <Folder /><span className="min-w-0 flex-1 truncate text-left">{remoteLibrary ? remoteLibrary.name : library?.name ?? '选择团队库'}</span>
             <span className="max-w-24 truncate text-xs text-muted-foreground">{remoteLibrary?.owner_name ?? ''}</span><ChevronDown />
           </Button>

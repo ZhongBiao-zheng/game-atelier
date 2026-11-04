@@ -17,7 +17,7 @@ import { TeamLibraryPanel } from '@/components/assets/TeamLibraryPanel';
 import { useAdoptionStaleness } from '@/components/assets/useAdoptionStaleness';
 import { useCreationAssetEditor } from '@/components/assets/useCreationAssetEditor';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { FileInput } from '@/components/ui/file-input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { AssetFilterPill } from './AssetFilterPill';
@@ -338,7 +338,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           {kind === 'team' && teamProjectId && teamProjectChoices.length > 1 && (
             <div className="border-b border-border p-3">
               <Select value={teamProjectId} onValueChange={setPickedTeamProjectId}>
-                <SelectTrigger size="sm" aria-label="画布项目"><SelectValue /></SelectTrigger>
+                <SelectTrigger aria-label="画布项目" className={buttonVariants({ variant: 'outline', className: 'w-full justify-between bg-card font-normal' })}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {teamProjectChoices.map(target => (
                     <SelectItem key={target.projectId} value={target.projectId}>{target.name}</SelectItem>
