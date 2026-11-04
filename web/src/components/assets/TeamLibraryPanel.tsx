@@ -121,6 +121,7 @@ export function TeamLibraryPanel({
   const [remoteLibrary, setRemoteLibrary] = useState<GatewayLibrarySelection | null>(null);
   const remoteAvailable = !!remoteLibrary && remote.sources.some(source => source.gateway_alias === remoteLibrary.alias && source.libraries.some(lib => lib.id === remoteLibrary.id));
   const [libraries, setLibraries] = useState<TeamLibraryView[]>([]);
+  const [librariesLoaded, setLibrariesLoaded] = useState(!projectId);
   const [libraryId, setLibraryId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
@@ -159,7 +160,8 @@ export function TeamLibraryPanel({
 
   useEffect(() => {
     let alive = true;
-    if (!projectId) { setLibraries([]); setLibraryId(null); return; }
+    if (!projectId) { setLibraries([]); setLibraryId(null); setLibrariesLoaded(true); return; }
+    setLibrariesLoaded(false);
     void listTeamLibraries(projectId)
       .then(list => {
         if (!alive) return;
@@ -171,9 +173,16 @@ export function TeamLibraryPanel({
             ?? null,
         );
       })
-      .catch(() => { if (alive) setLibraries([]); });
+      .catch(() => { if (alive) setLibraries([]); })
+      .finally(() => { if (alive) setLibrariesLoaded(true); });
     return () => { alive = false; };
   }, [projectId, initialTeamLibraryId, mountsVersion]);
+
+  useEffect(() => {
+    if (!librariesLoaded || libraryId || remoteLibrary) return;
+    const source = remote.sources.find(source => !source.unreachable && source.libraries.length > 0);
+    if (source) setRemoteLibrary({ ...source.libraries[0], alias: source.gateway_alias });
+  }, [librariesLoaded, libraryId, remoteLibrary, remote.sources]);
 
   // 显示名决定哪些卡是「我分享的」：只有作者本人能编辑 / 撤回。
   useEffect(() => {
@@ -327,10 +336,10 @@ export function TeamLibraryPanel({
     [entries, typeFilter],
   );
 
-  if (libraries.length === 0 && remote.sources.length === 0 && !remoteLibrary) {
+  if (libraries.length === 0 && !remote.sources.some(source => !source.unreachable && source.libraries.length) && !remoteLibrary) {
     return (
       <div className={cn('grid place-items-center gap-3 p-8 text-center', className)}>
-        <div className="flex items-center gap-1"><p className="text-xs text-muted-foreground">这个画布还没有团队库</p><GatewayLibraryHelp /></div>
+        <div className="flex items-center gap-1"><p className="text-xs text-muted-foreground">{!librariesLoaded || remote.revision === 0 ? '读取中' : '还没有团队库'}</p><GatewayLibraryHelp /></div>
         {projectId && <Button size="sm" variant="outline" onClick={() => setMountOpen(true)}>挂载</Button>}
         <MountTeamLibraryDialog open={mountOpen} currentProjectId={projectId} onClose={() => setMountOpen(false)}
           onMounted={() => setMountsVersion(version => version + 1)} />
@@ -416,7 +425,7 @@ export function TeamLibraryPanel({
         <p className="py-8 text-center text-sm text-muted-foreground">目录不可达</p>
       ) : (
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-          {typed.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">库里还没有内容</p> : (
+          {typed.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">{!librariesLoaded || !libraryId ? '读取中' : '库里还没有内容'}</p> : (
             <AssetMasonry items={typed} itemKey={mediaKey} ratio={entry => mediaRatio(sizes[mediaKey(entry)])}>
               {entry => <TeamAssetCard entry={entry} libraryId={library?.library_id ?? ''} busy={busy}
                 size={sizes[mediaKey(entry)]} onMeasure={size => measure(mediaKey(entry), size)}

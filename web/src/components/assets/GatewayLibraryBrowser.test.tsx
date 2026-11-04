@@ -22,11 +22,8 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); vi.resetAllMocks(); });
 
-it('无本地项目也能选同事共享，展示缩略图和使用入口，没有复刻与采用动作', async () => {
+it('无本地项目默认选中首个同事共享，展示缩略图和使用入口，没有复刻与采用动作', async () => {
   const { container } = render(<TeamLibraryPanel projectId="" onUseMedia={vi.fn()} />);
-  fireEvent.click(await screen.findByRole('button', { name: '团队库' }));
-  const group = screen.getByRole('group', { name: '同事共享' });
-  fireEvent.click(within(group).getByRole('button', { name: /画面参考 · 林晓/ }));
   await screen.findByRole('button', { name: '查看 风景.png' });
   expect(container.querySelector('video, audio, [draggable="true"]')).toBeNull();
   expect(screen.queryByRole('button', { name: /采用|下载|复刻/ })).toBeNull();
@@ -91,4 +88,12 @@ it('同事库使用通过 content 代理取文件并传给创作端，提示词�
   await waitFor(() => expect(promptUse).not.toBeDisabled());
   fireEvent.click(promptUse);
   expect(prompt).toHaveBeenCalledWith('山谷夕照', expect.objectContaining({ id: 'ta_prompt' }));
+});
+
+it('没有本地或同事共享库时明确显示尚无团队库', async () => {
+  vi.mocked(listGatewayLibraries).mockResolvedValue([]);
+  render(<TeamLibraryPanel projectId="" />);
+  expect(await screen.findByText('还没有团队库')).toBeInTheDocument();
+  expect(screen.queryByText('库里还没有内容')).toBeNull();
+  expect(listGatewayAssets).not.toHaveBeenCalled();
 });
