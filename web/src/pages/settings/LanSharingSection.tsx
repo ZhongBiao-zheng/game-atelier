@@ -161,7 +161,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
                   <thead className="text-muted-foreground">
                     <tr>
                       {['名称', '密钥', '角色', '本月额度', '本月花费', '最近使用', '操作'].map((h) => (
-                        <th key={h} className="px-4 py-3 font-normal">
+                        <th key={h} className="whitespace-nowrap px-4 py-3 font-normal">
                           {h}
                         </th>
                       ))}
@@ -219,7 +219,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
                         <td className="whitespace-nowrap px-4 py-3 align-middle text-muted-foreground">
                           {date(key.last_used_at)}
                         </td>
-                        <td className="px-4 py-3 align-middle">
+                        <td className="w-px whitespace-nowrap px-4 py-3 align-middle">
                           {key.revoked_at ? (
                             '已撤销'
                           ) : (
