@@ -4,6 +4,8 @@ export type ModelBrand = 'openai' | 'gemini' | 'bytedance' | 'midjourney' | 'flu
 interface CatalogEntry { key: string; name: string; brand: ModelBrand; description: string; match: RegExp }
 // Order is display popularity only; it never changes automatic routing priority.
 const catalog: CatalogEntry[] = [
+  { key: 'gpt-image-2.6-sunburst', name: 'GPT Image 2.6 Sunburst', brand: 'openai', description: 'Most detailed, consistent across edits. GIF output.', match: /^gpt-image-2\.6-sunburst$/ },
+  { key: 'gpt-image-2.6-flare', name: 'GPT Image 2.6 Flare', brand: 'openai', description: 'Fastest OpenAI image model, 6s at low quality. GIF output.', match: /^gpt-image-2\.6-flare$/ },
   { key: 'gpt-image-2.5-sunburst', name: 'GPT Image 2.5 Sunburst', brand: 'openai', description: 'Top quality with tight control across edits.', match: /^gpt-image-2\.5-sunburst$/ },
   { key: 'gpt-image-2.5-flare', name: 'GPT Image 2.5 Flare', brand: 'openai', description: 'Fast default. Better than GPT Image 2 at half the latency.', match: /^gpt-image-2\.5-flare$/ },
   { key: 'gpt-image-2.5', name: 'GPT Image 2.5', brand: 'openai', description: "OpenAI's latest image model.", match: /^gpt-image-2\.5$/ },

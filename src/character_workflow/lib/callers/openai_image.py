@@ -136,6 +136,12 @@ def render(
     is_hk = _is_openai_hk(base_url)
     is_tuzi = _is_tuzi_gateway(base_url)
     params = kwargs.get("params") if isinstance(kwargs.get("params"), dict) else None
+    # 2.6 新增：complexity（规划强度）与 GIF 输出都只对支持的模型发；
+    # 其他模型上这些字段即使存在也不发（Tuzi 对未知字段直接 400）。
+    complexity = _complexity_param(kwargs) if supports_image_complexity(model) else None
+    gif = _gif_params(kwargs) if supports_gif_output(model) else None
+    if gif and (mask_path or _collect_ref_paths(kwargs, key.provider, model)):
+        raise OpenAIImageError("GIF 只支持文生图，不能带参考图或蒙版")
     has_native_order = bool(params and params.get("provider_task_protocol") == tuzi_async.TASK_PROTOCOL
                             and params.get("provider_task_ids"))
     # Native tasks document neither mask nor independent quality/background controls.
@@ -144,6 +150,7 @@ def render(
         is_tuzi and model in tuzi_async.IMAGE_TASK_MODELS and not mask_path
         and _quality_param(kwargs) in {None, "auto"}
         and _background_param(kwargs) in {None, "auto"}
+        and complexity is None and gif is None
         and _effective_image_protocol(key, model) in {None, "openai"}
         # Tuzi's native GPT2 AUTO tasks can stay queued indefinitely; Images AUTO is verified.
         # Existing paid tasks retain their original protocol and are only polled, never resubmitted.
@@ -274,7 +281,7 @@ def render(
                 break
             fields = _hk_edits_fields(
                 model=model, prompt=prompt, size=requested_size, quality=quality,
-                background=background, n=1,
+                background=background, n=1, complexity=complexity,
             )
             files = _ref_file_parts(ref_paths, str(mask_path) if mask_path else None)
             data = (
@@ -353,6 +360,8 @@ def render(
             image=ref_image,
             quality=quality,
             background=background,
+            complexity=complexity,
+            gif=gif,
             seedream=is_seedream,
             sequential=sends_ark_params and _supports_sequential(model),
             seedream_png=not _is_tuzi_gateway(base_url),
@@ -515,7 +524,7 @@ def _normalized_edit_mask(path: Path, source_size: tuple[int, int]) -> bytes:
 
 def _hk_edits_fields(
     *, model: str, prompt: str, size: object, quality: str | None,
-    background: str | None = None, n: int = 1,
+    background: str | None = None, n: int = 1, complexity: str | None = None,
 ) -> dict:
     fields: dict[str, str] = {"model": model, "prompt": prompt, "n": str(max(1, n))}
     if size:
@@ -524,6 +533,8 @@ def _hk_edits_fields(
         fields["quality"] = quality
     if background:
         fields["background"] = background
+    if complexity:
+        fields["complexity"] = complexity
     return fields
 
 
@@ -573,6 +584,8 @@ def _image_generation_payload(
     image: str | list[str] | None = None,
     quality: str | None = None,
     background: str | None = None,
+    complexity: str | None = None,
+    gif: dict[str, int] | None = None,
     seedream: bool = False,
     sequential: bool = False,
     seedream_png: bool = True,
@@ -602,6 +615,12 @@ def _image_generation_payload(
         payload["quality"] = quality
     if background:  # gpt-image：auto/opaque/transparent
         payload["background"] = background
+    if complexity:  # gpt-image 2.6：规划强度，与 quality 独立
+        payload["complexity"] = complexity
+    if gif:  # gpt-image 2.6：动图只走 generations，帧数 / 帧间隔只在 GIF 下有意义
+        payload["output_format"] = "gif"
+        payload["frame_count"] = gif["frame_count"]
+        payload["frame_duration_ms"] = gif["frame_duration_ms"]
     # Seedream / Ark 图生图：image 接受 URL 或 base64 data-url，单张为 str、多张为 list。
     if image:
         payload["image"] = image
@@ -736,6 +755,40 @@ def _background_param(kwargs: dict) -> str | None:
     params = kwargs.get("params") or {}
     background = kwargs.get("background") or params.get("background")
     return background if background in ("auto", "opaque", "transparent") else None
+
+
+# GPT Image 2.6 才有的两项能力：complexity 规划强度与 GIF 输出。按模型 id 判，不按 provider。
+GIF_FRAME_COUNT_RANGE = (2, 64)
+GIF_FRAME_DURATION_MS_RANGE = (20, 2000)
+GIF_DEFAULT_FRAME_COUNT = 9
+GIF_DEFAULT_FRAME_DURATION_MS = 200
+
+
+def supports_image_complexity(model: str) -> bool:
+    return normalized_model_id(model).startswith("gpt-image-2-6")
+
+
+def supports_gif_output(model: str) -> bool:
+    return supports_image_complexity(model)
+
+
+def _complexity_param(kwargs: dict) -> str | None:
+    """high 是官方默认值：不发，省得对字段白名单严格的网关（Tuzi）误报未知字段。"""
+    params = kwargs.get("params") or {}
+    complexity = kwargs.get("complexity") or params.get("complexity")
+    return complexity if complexity in ("low", "medium") else None
+
+
+def _gif_params(kwargs: dict) -> dict[str, int] | None:
+    params = kwargs.get("params") or {}
+    if (kwargs.get("output_format") or params.get("output_format")) != "gif":
+        return None
+    low, high = GIF_FRAME_COUNT_RANGE
+    frame_count = min(high, max(low, int(params.get("frame_count") or GIF_DEFAULT_FRAME_COUNT)))
+    low, high = GIF_FRAME_DURATION_MS_RANGE
+    duration = int(params.get("frame_duration_ms") or GIF_DEFAULT_FRAME_DURATION_MS)
+    duration = min(high, max(low, round(duration / 10) * 10))
+    return {"frame_count": frame_count, "frame_duration_ms": duration}
 
 
 def max_reference_images(model: str) -> int:

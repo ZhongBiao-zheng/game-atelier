@@ -67,6 +67,11 @@ export interface JobParams {
   ratio?: string;
   quality?: string;
   background?: 'auto' | 'opaque' | 'transparent';
+  /** GPT Image 2.6：规划强度（与 quality 独立）与 GIF 输出；caller 只对支持的模型发。 */
+  complexity?: 'low' | 'medium' | 'high';
+  output_format?: 'gif';
+  frame_count?: number;
+  frame_duration_ms?: number;
   /** Seedream 5.0 Pro 图层拆分；结果中的 output_index 与 Job.output_paths 对齐。 */
   layer_decomposition?: boolean;
   layer_decomposition_result?: {

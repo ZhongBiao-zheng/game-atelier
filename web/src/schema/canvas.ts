@@ -80,6 +80,7 @@ export interface CanvasImageDefaultParams {
   resolution?: string;
   size?: string;
   quality?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
+  complexity?: 'low' | 'medium' | 'high';
 }
 
 export interface CanvasVideoDefaultParams {

@@ -100,7 +100,7 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 - 任务只对创建它的密钥可见（其他密钥 404）；任务与文件保留 24 小时。
 - 任务参数补充：`prompt` 最多 32,000 字符，除 layer_split 外不能为空；`n` 为 1–8。生成任务最多同时运行 8 个、每把密钥最多 4 个，剩余已受理任务排队。
   各类型允许的文件组：image 为 ref/mj_sref/mj_cref/mj_oref，image_edit 为 ref/mask，layer_split 为 ref，video 为 ref/video/audio，audio 不接受文件。
-  图片控制字段白名单为 size/size_mode/custom_size/ratio/resolution/quality/background/steps/cfg_scale/requested_size、
+  图片控制字段白名单为 size/size_mode/custom_size/ratio/resolution/quality/background/complexity/output_format/frame_count/frame_duration_ms/steps/cfg_scale/requested_size、
   bot_type/mj_version/mj_stylize/mj_chaos/mj_weird/mj_seed/mj_no/mj_tile/mj_iw/mj_sref_code/mj_profile/mj_sw/mj_cw/mj_ow/mj_flags；
   image_edit 额外接收 image_edit 对象，layer_split 额外接收 layer_decomposition。未声明字段返回 422。
   `layer_result.outputs` 以 output_index 关联产物，包含 z_index、size、output_format 和前景 bounding_box（absolute 像素坐标 / normalized 千分坐标）；不含本机路径。
@@ -1129,9 +1129,18 @@ status 保留真实状态（含 pending、done、failed，以及团队 canceled 
 
 请求成功不等于尺寸生效：目前无法据此提供可靠的比例选择。前后端能力保持无比例，caller 不发送 size；未测试其他像素、图生图尺寸、质量或背景。
 
-## Tuzi GPT Image 2.5 图片质量
+## Tuzi GPT Image 2.5 / 2.6 图片质量
 
-Tuzi GPT Image 2.5 系列在 Studio 与 Canvas 提供五档质量：低/中/高/超高/最高，分别传 `quality=low|medium|high|xhigh|max`。比例独立选择，不提供 K 分辨率档位，也不再将 resolution 转换为 quality。
+Tuzi GPT Image 2.5 与 2.6 系列在 Studio 与 Canvas 提供五档质量：低/中/高/超高/最高，分别传 `quality=low|medium|high|xhigh|max`。比例独立选择，不提供 K 分辨率档位，也不再将 resolution 转换为 quality。
+
+## GPT Image 2.6：规划强度与 GIF 输出
+
+`gpt-image-2.6-flare` / `gpt-image-2.6-sunburst`（2026-11-04 发布）独有两项能力，判据按模型 id（`supports_image_complexity` / `supports_gif_output`，前端 `supportsGptImage26`），不按 provider：
+
+- `params.complexity`：`low | medium | high`，规划强度，与 `quality` 独立。`high` 是官方默认值，caller 不发；只有 `low | medium` 进请求体（Tuzi 对未知字段 400，少发一个字段少一条故障路径）。
+- `params.output_format = "gif"` + `frame_count`（2–64，默认 9）+ `frame_duration_ms`（20–2000，默认 200，10ms 取整）：动图只走 `/images/generations`，带参考图或蒙版时 caller 直接拒绝（不计费）；前端带参考图时也不提交 GIF 字段。产物按文件头存成 `.gif`，`image_dimensions` 读 GIF 头，画布导入 mime 为 `image/gif`，缩略图接口对动图退回原图。
+- 这四个字段在 `JobParams` 双端声明、进入 Canvas 浏览器可提交白名单与局域网网关图片白名单；换到不支持的模型时前端 `normalizeImageSizeParams` 与服务端 `_normalized_image_preference_params` 都会丢掉它们。Canvas 生成偏好只记住 `complexity`，GIF 是当次的选择。
+- 不做：SVG 输出（官方 reference 要求 `svg.model` 与额外权限，网关不透传，产物管线按位图设计）、`markup` 标注层（画布标注已定只发合成图）。两家网关 2026-11-05 对 2.6 都回「价格未配置」，size=auto 放行按 2.5 同系推定，上架后复验。
 
 ### 模型菜单元数据（本机只读）
 

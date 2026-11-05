@@ -10,7 +10,7 @@ from typing import Iterator
 from character_workflow.lib.jobs import job_lock
 
 
-_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 _VERSION_RE = re.compile(r"^v([1-9][0-9]*)$", re.IGNORECASE)
 _VERSION_FILE = re.compile(r"^v(?P<number>[1-9]\d*)\.[A-Za-z0-9]+$")
 

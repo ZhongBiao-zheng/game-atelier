@@ -25,3 +25,10 @@ def test_extension_follows_real_format_and_bytes_are_untouched(tmp_path, fmt, su
 
 def test_unknown_bytes_keep_old_png_name(tmp_path):
     assert write_image(tmp_path, "v2", b"not an image").name == "v2.png"
+
+
+def test_gif_bytes_keep_gif_extension(tmp_path):
+    """GPT Image 2.6 的动图产物按真实格式存 .gif，不再被当成 png。"""
+    data = _encode("GIF")
+    assert data.startswith(b"GIF8")
+    assert write_image(tmp_path, "v3", data) == tmp_path / "v3.gif"

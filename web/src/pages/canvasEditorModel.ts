@@ -1073,7 +1073,7 @@ export function canvasGenerationPreferenceForModel<M extends CanvasGenerationMod
  *  视频生成方式 frame_mode 也不在里面：新视频节点一律从全能参考开始，首尾帧是当次的选择。 */
 const CANVAS_REMEMBERED_PARAM_KEYS: Record<CanvasGenerationMode, readonly string[]> = {
   text: ['temperature', 'max_tokens', 'reasoning_effort'],
-  image: ['ratio', 'resolution', 'size', 'size_mode', 'custom_size', 'quality'],
+  image: ['ratio', 'resolution', 'size', 'size_mode', 'custom_size', 'quality', 'complexity'],
   video: ['duration', 'ratio', 'resolution', 'mode', 'generate_audio', 'watermark'],
   audio: ['voice', 'response_format', 'speed', 'instructions'],
 };

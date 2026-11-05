@@ -11,6 +11,8 @@ from pathlib import Path
 _SIGNATURES: tuple[tuple[bytes, str], ...] = (
     (b"\x89PNG\r\n\x1a\n", ".png"),
     (b"\xff\xd8\xff", ".jpg"),
+    (b"GIF87a", ".gif"),
+    (b"GIF89a", ".gif"),
 )
 
 

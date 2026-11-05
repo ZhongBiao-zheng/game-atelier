@@ -91,6 +91,7 @@ _OUTPUT_MIME = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".webp": "image/webp",
+    ".gif": "image/gif",
     ".mp4": "video/mp4",
     ".mov": "video/quicktime",
     ".webm": "video/webm",
@@ -534,6 +535,21 @@ def _supports_canvas_image_generation(key: KeySpec, model: ModelSpec) -> bool:
     return protocol in {None, "openai", "ark"}
 
 
+def _gpt_image_26_params(model_id: str, params: dict[str, Any]) -> dict[str, Any]:
+    """GPT Image 2.6 专属字段只在支持的模型上保留；换到别的模型就丢掉，不带着旧值出图。"""
+    from character_workflow.lib.callers.openai_image import supports_image_complexity
+
+    if not supports_image_complexity(model_id):
+        return {}
+    kept = {name: params[name] for name in (
+        "complexity", "output_format", "frame_count", "frame_duration_ms",
+    ) if params.get(name) is not None}
+    if kept.get("output_format") != "gif":
+        kept.pop("frame_count", None)
+        kept.pop("frame_duration_ms", None)
+    return kept
+
+
 def _normalized_image_preference_params(
     key: KeySpec,
     model: ModelSpec,
@@ -567,7 +583,9 @@ def _normalized_image_preference_params(
         for field in ("ratio", "resolution", "custom_size"):
             if params.get(field) is not None and draft_params.get("size_mode"):
                 draft_params[field] = params[field]
-        return JobParams.model_validate(draft_params)
+        for field in ("complexity", "output_format", "frame_count", "frame_duration_ms"):
+            draft_params.pop(field, None)
+        return JobParams.model_validate({**draft_params, **_gpt_image_26_params(model.id, params)})
 
     family = image_family(model.id)
     options = image_size_options(key.provider, key.base_url, model.id)
@@ -589,6 +607,7 @@ def _normalized_image_preference_params(
         "low", "medium", "high", "xhigh", "max", "auto",
     }:
         normalized["quality"] = quality
+    normalized.update(_gpt_image_26_params(model.id, params))
     if family == "midjourney":
         return JobParams.model_validate(normalized)
     if key.provider == "openrouter" or is_nano_image_size_model(model.id):

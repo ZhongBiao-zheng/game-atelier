@@ -19,10 +19,14 @@ def is_nano_image_size_model(model: str) -> bool:
     )
 
 
+_TUZI_GPT_TIERED = re.compile(r"^gpt-image-2\.[56](?:-|$)")
+
+
 def is_tuzi_gpt25(base_url: str | None, model: str) -> bool:
+    """Tuzi 上的 GPT Image 2.5 / 2.6 系：五档质量、比例自选、不给 K 分辨率档。"""
     host = (urlsplit(base_url or "").hostname or "").lower()
     return (host == "tu-zi.com" or host.endswith(".tu-zi.com")) and (
-        model == "gpt-image-2.5" or model.startswith("gpt-image-2.5-")
+        _TUZI_GPT_TIERED.match(model) is not None
     )
 
 
@@ -51,5 +55,5 @@ def image_size_options(provider: str, base_url: str | None, model: str) -> dict[
     # Tuzi 的 gpt-image 走 1K / 2K 档位（前端据此去掉自定义像素框）。不给 4K：2026-09-17
     # 实测单边封顶 2880，发 3840 / 4096 都只回 2880²，还比按 2880 发多花一倍 token。
     if "gpt-image" in normalized and (host == "tu-zi.com" or host.endswith(".tu-zi.com")):
-        resolutions = [] if model.startswith("gpt-image-2.5") else ["1K", "2K"]
+        resolutions = [] if _TUZI_GPT_TIERED.match(model) else ["1K", "2K"]
     return {"ratios": list(ratios), "resolutions": resolutions}

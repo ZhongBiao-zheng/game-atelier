@@ -15,6 +15,7 @@ import { hasImageSizeSelection, imageSizeMode, imageSizeSummary, imageSizeError,
 import { isAutoProvider, sizeContext } from '@/lib/modelRoutes';
 import { normalizeImagePixelSize } from '@/lib/studioSize';
 import { ImageSizeFields } from './ImageSizeFields';
+import { GptImage26Fields } from './GptImage26Fields';
 import { providerLabel } from '@/lib/providerLabels';
 import { promptVariableError, promptVariableParts, readablePromptVariables, resolvePromptVariables } from '@/lib/promptVariables';
 import { focusEmptyVariable, syncVariableInput, variableInput, variablePromptNodes } from '@/lib/promptVariableEditor';
@@ -1251,6 +1252,9 @@ export function PromptInput({
                       </Segmented>
                     </section>
                   )}
+
+                  <GptImage26Fields caps={caps} params={sizeParams} hasReferences={referenceImages.length > 0}
+                    onPatch={patch => onSizeParamsChange?.(patch)} />
                 </div>
             </ToolbarPopover>
           </div>}

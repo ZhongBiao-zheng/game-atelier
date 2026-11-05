@@ -464,6 +464,12 @@ def _jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
     return None
 
 
+def _gif_dimensions(data: bytes) -> tuple[int, int] | None:
+    if len(data) < 10 or not data.startswith((b"GIF87a", b"GIF89a")):
+        return None
+    return int.from_bytes(data[6:8], "little"), int.from_bytes(data[8:10], "little")
+
+
 def _webp_dimensions(data: bytes) -> tuple[int, int] | None:
     if len(data) < 30 or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
         return None
@@ -485,7 +491,7 @@ def image_dimensions_from_bytes(data: bytes) -> tuple[int, int] | None:
     上传接口用它把「这张图多少像素」写进报错里（画师看到体积超限时，往往真正的原因是
     这张图有一万多像素宽）—— 那里只有内存里的 bytes，没有落盘路径。
     """
-    for parser in (_png_dimensions, _jpeg_dimensions, _webp_dimensions):
+    for parser in (_png_dimensions, _jpeg_dimensions, _webp_dimensions, _gif_dimensions):
         dims = parser(data[:262144])
         if dims and dims[0] > 0 and dims[1] > 0:
             return dims

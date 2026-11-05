@@ -48,7 +48,8 @@ def test_model_normalization_matches_browser_dimensions():
 
 def test_tuzi_gpt_image_uses_tiers_instead_of_custom_pixels():
     """Tuzi 的 gpt-image 用 1K/2K 档位；4K 拿不到（单边封顶 2880），其他网关不受影响。"""
-    for model in ("gpt-image-2", "gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"):
+    for model in ("gpt-image-2", "gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
+                  "gpt-image-2.6-flare", "gpt-image-2.6-sunburst"):
         assert image_size_options("custom", "https://api.tu-zi.com", model)["resolutions"] == (
             ["1K", "2K"] if model == "gpt-image-2" else []
         )

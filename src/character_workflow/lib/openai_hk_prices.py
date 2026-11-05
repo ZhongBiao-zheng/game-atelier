@@ -104,6 +104,7 @@ def estimate(*, model_id: str, n: int, billing_group: str | None) -> float | Non
     # Verified against existing bills; no inferred aliases, quality tiers or multi-image fees.
     if n != 1 or model_id not in {
         "gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
+        "gpt-image-2.6-flare", "gpt-image-2.6-sunburst",
         "nano-banana", "nano-banana-hd",
     } or (billing_group or "default").strip() != "default":
         return None

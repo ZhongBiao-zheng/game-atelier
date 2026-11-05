@@ -80,6 +80,12 @@ export function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
       || p.quality === 'high' || p.quality === 'xhigh' || p.quality === 'max' || p.quality === 'auto')
       ? p.quality
       : undefined,
+    ...(p.complexity === 'low' || p.complexity === 'medium' || p.complexity === 'high' ? { complexity: p.complexity } : {}),
+    ...(p.output_format === 'gif' ? {
+      output_format: 'gif' as const,
+      ...(typeof p.frame_count === 'number' ? { frame_count: p.frame_count } : {}),
+      ...(typeof p.frame_duration_ms === 'number' ? { frame_duration_ms: p.frame_duration_ms } : {}),
+    } : {}),
     referenceImages: referenceImagesFor(job),
     promptAssetId: typeof p.prompt_asset_id === 'string' ? p.prompt_asset_id : undefined,
     sourceAssetTitle: typeof p.creation_asset_source_title === 'string'

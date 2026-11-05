@@ -13,7 +13,8 @@ def _key(provider="openai", base_url=None):
 
 
 @pytest.mark.parametrize("model", ["gpt-image-2.5", "gpt-image-2.5-flare",
-                                  "gpt-image-2.5-sunburst", "gpt-image-2.5-vip"])
+                                  "gpt-image-2.5-sunburst", "gpt-image-2.5-vip",
+                                  "gpt-image-2.6-flare", "gpt-image-2.6-sunburst"])
 @pytest.mark.parametrize("quality", ["low", "medium", "high", "xhigh", "max"])
 @pytest.mark.parametrize("mode", ["ratio", "custom"])
 def test_tuzi_gpt25_preserves_quality_without_resolution_tiers(model, quality, mode):
@@ -49,6 +50,11 @@ def test_tuzi_default_auto_ignores_inactive_tiers_and_other_groups_unchanged():
     ("custom", "https://api.tu-zi.com/v1", "gpt-image-2.5", True),
     ("custom", "https://api.tu-zi.com/v1", "gpt-image-2.5-flare", True),
     ("custom", "https://api.tu-zi.com/v1", "gpt-image-2.5-sunburst", True),
+    # 2.6 两款按 2.5 同系推定放行（2026-11-05 两家网关都还没配价，无法实测）。
+    ("custom", "https://api.openai-hk.com/v1", "gpt-image-2.6-flare", True),
+    ("custom", "https://api.tu-zi.com/v1", "gpt-image-2.6-sunburst", True),
+    ("openai", None, "gpt-image-2.6-sunburst", True),
+    ("custom", "https://api.openai-hk.com/v1", "gpt-image-2.6", False),
     # HK 侧没验过裸 gpt-image-2.5，名单里就不该有它。
     ("custom", "https://api.openai-hk.com/v1", "gpt-image-2.5", False),
     ("openai", "https://api.tu-zi.com/v1", "gpt-image-1.5", True),

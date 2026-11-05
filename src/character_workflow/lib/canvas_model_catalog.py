@@ -39,7 +39,7 @@ def model_rows(kind: str) -> list[dict]:
                 continue
             from character_workflow.lib.callers.openai_image import (
                 fixed_nano_resolution_quality, image_family, max_reference_images,
-                supports_image_quality,
+                supports_gif_output, supports_image_complexity, supports_image_quality,
             )
             from character_workflow.lib.video_caps import seedance_limits
             limits = {"image": max_reference_images(model.id), "video": 0, "audio": 0}
@@ -64,10 +64,15 @@ def model_rows(kind: str) -> list[dict]:
                        if kind == "image" and supports_image_quality(model.id) else None)
             if kind == "image" and is_tuzi_gpt25(key.base_url, model.id):
                 quality = ["low", "medium", "high", "xhigh", "max"]
+            complexity = (["low", "medium", "high"]
+                          if kind == "image" and supports_image_complexity(model.id) else None)
             rows.append({"alias": key.alias, "provider": key.provider, "model": model.id,
                          "name": model.name, "kind": kind, "protocol": configured.protocol,
                          "reference_limits": limits, "estimated_cost_cny": None,
                          "capabilities": {"count": count, "quality": quality,
+                                          "complexity": complexity,
+                                          "gif": (kind == "image"
+                                                  and supports_gif_output(model.id)),
                                           "fixed_quality": (fixed_nano_resolution_quality(model.id)
                                                             if kind == "image" else None),
                                           "size": None, "ratio": None, "duration": duration,

@@ -27,6 +27,27 @@ def test_tuzi_gpt25_preferences_retain_quality_without_resolution():
     assert params.quality == "max"
 
 
+def test_gpt_image_26_params_follow_the_model():
+    """complexity / GIF 字段只在 2.6 上保留；换到 2.5 就丢掉，不带着旧值出图。"""
+    key = KeySpec(alias="HK", provider="custom", base_url="https://api.openai-hk.com",
+                  access_key="fake", created_at="2026-11-05")
+    draft = {"size_mode": "auto", "size": "auto", "quality": "high", "complexity": "low",
+             "output_format": "gif", "frame_count": 12, "frame_duration_ms": 80}
+    kept = _normalized_image_preference_params(key, ModelSpec(id="gpt-image-2.6-flare", name="F"), draft)
+    assert (kept.complexity, kept.output_format, kept.frame_count, kept.frame_duration_ms) == (
+        "low", "gif", 12, 80)
+    dropped = _normalized_image_preference_params(key, ModelSpec(id="gpt-image-2.5-flare", name="F"), draft)
+    assert (dropped.complexity, dropped.output_format, dropped.frame_count) == (None, None, None)
+    # 不是 GIF 就不该带帧参数。
+    still = _normalized_image_preference_params(
+        key, ModelSpec(id="gpt-image-2.6-flare", name="F"), {**draft, "output_format": None})
+    assert (still.output_format, still.frame_count) == (None, None)
+    assert still.complexity == "low"
+    ratio = _normalized_image_preference_params(
+        key, ModelSpec(id="gpt-image-2.6-flare", name="F"), {**draft, "size_mode": "ratio", "ratio": "1:1"})
+    assert ratio.complexity == "low" and ratio.frame_count == 12
+
+
 def _payload(revision: int = 0) -> dict:
     return {
         "expected_revision": revision,

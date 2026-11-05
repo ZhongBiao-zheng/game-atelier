@@ -17,6 +17,24 @@ describe('imageControlCaps', () => {
     }
     expect(imageControlCaps('gpt-image-2.5-1k', 'custom', 'https://api.tu-zi.com', 'default').resolutions).toEqual([]);
   });
+  it('GPT Image 2.6 暴露规划强度与 GIF，2.5 及其他族不暴露', () => {
+    for (const model of ['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst']) {
+      const direct = imageControlCaps(model, 'openai');
+      expect(direct.complexities).toEqual(['low', 'medium', 'high']);
+      expect(direct.gifOutput).toBe(true);
+      expect(direct.showAutoSize).toBe(true);
+      // Tuzi 上与 2.5 同一套：五档质量、无 K 档、保留 AUTO。
+      expect(imageControlCaps(model, 'custom', 'https://api.tu-zi.com', 'default')).toMatchObject({
+        resolutions: [], qualities: ['low', 'medium', 'high', 'xhigh', 'max'], showAutoSize: true, gifOutput: true,
+      });
+      expect(imageControlCaps(model, 'custom', 'https://api.openai-hk.com').showAutoSize).toBe(true);
+    }
+    for (const model of ['gpt-image-2.5-sunburst', 'gpt-image-2', 'nano-banana-pro', 'seedream-5.0-pro']) {
+      expect(imageControlCaps(model, 'openai').complexities).toBeNull();
+      expect(imageControlCaps(model, 'openai').gifOutput).toBe(false);
+    }
+    expect(imageControlCaps('gpt-image-2.6-flare', 'comfyui').complexities).toBeNull();
+  });
   it('EvoLink V8.2 保留比例，不开放通用质量、AUTO 或像素尺寸', () => {
     expect(imageControlCaps('mj-v8.2', 'evolink', 'https://api.evolink.ai/v1')).toMatchObject({
       family: 'midjourney', qualities: null, sizeKind: 'none',

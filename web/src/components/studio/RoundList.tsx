@@ -14,7 +14,8 @@ import { formatGenerationCost } from '@/lib/generationCost';
 import { MetaTag } from '@/components/MetaTag';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { modelBrand, modelDisplayName } from '@/lib/modelCatalog';
-import { QUALITY_LABELS } from '@/lib/imageControlCaps';
+import { COMPLEXITY_LABELS, QUALITY_LABELS } from '@/lib/imageControlCaps';
+import { gifSummary } from './GptImage26Fields';
 import { VIDEO_QUALITY_LABELS, ratioLabel } from '@/lib/videoControlCaps';
 import type { RoundParameter } from '@/pages/studioParameterReuse';
 import { imageSizeSummary } from '@/lib/imageSizeMode';
@@ -48,6 +49,11 @@ export interface RoundConfig {
   ratio?: string;
   resolution?: '512' | '1K' | '2K' | '4K';
   quality?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
+  /** GPT Image 2.6：规划强度与 GIF 输出，字段名与 JobParams 一致，再次生成时原样回填。 */
+  complexity?: 'low' | 'medium' | 'high';
+  output_format?: 'gif';
+  frame_count?: number;
+  frame_duration_ms?: number;
   size?: string;
   sizeMode?: 'auto' | 'ratio' | 'custom';
   n?: number;
@@ -141,6 +147,10 @@ function SpecChips({ config, reuseParameter, testId, children }: {
   if (video) add('duration', config.duration != null ? `${config.duration}s` : undefined);
   add('quality', video ? config.videoQuality && VIDEO_QUALITY_LABELS[config.videoQuality]
     : config.quality && QUALITY_LABELS[config.quality]);
+  if (!video) {
+    add('complexity', config.complexity && `规划 ${COMPLEXITY_LABELS[config.complexity]}`);
+    add('gif', gifSummary(config) ?? undefined);
+  }
   add('count', config.n != null ? `${config.n} 张` : undefined);
   if (video) add('audio', config.generateAudio != null ? config.generateAudio ? '有音频' : '无音频' : undefined);
   return (

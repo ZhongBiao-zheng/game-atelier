@@ -39,6 +39,7 @@ RETENTION = timedelta(hours=24)
 # 参考图只能以文件上传。否则局域网里的人能让网关读它本机的任意文件。
 _IMAGE_PARAMS = frozenset({
     "size", "size_mode", "custom_size", "ratio", "resolution", "quality", "background",
+    "complexity", "output_format", "frame_count", "frame_duration_ms",
     "steps", "cfg_scale", "requested_size", "workflow_inputs",
     "bot_type", "mj_version", "mj_stylize", "mj_chaos", "mj_weird", "mj_seed", "mj_no",
     "mj_tile", "mj_iw", "mj_sref_code", "mj_profile", "mj_sw", "mj_cw", "mj_ow", "mj_flags",
@@ -588,7 +589,7 @@ def _store_outputs(task_id: str, paths: list[Path], cost_usd: float | None,
     if modality == "image":
         width, height = image_dimensions(valid[0])
         actual_size = f"{width}x{height}"
-    allowed_suffixes = {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm",
+    allowed_suffixes = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".webm",
                         ".mp3", ".wav", ".flac", ".opus", ".aac", ".pcm"}
     for index, path in enumerate(valid):
         suffix = path.suffix.lower() if path.suffix.lower() in allowed_suffixes else ".png"

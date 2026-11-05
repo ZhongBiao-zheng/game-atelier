@@ -9,7 +9,7 @@ import { listModelRoutes, type ModelRoute } from '@/api/models';
 import { PromptInput } from '@/components/studio/PromptInput';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import type { RoundConfig } from '@/components/studio/RoundList';
-import { imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
+import { gptImage26JobParams, imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { hasSrefCode, MJ_DEFAULTS, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { EMPTY_MJ_REFS, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
@@ -258,6 +258,7 @@ export function StudioCompact() {
       ...(effectiveResolution ? { resolution: effectiveResolution } : {}),
       n: effectiveCount,
       ...(effectiveQuality ? { quality: effectiveQuality } : {}),
+      ...gptImage26JobParams(caps, overrideConfig ?? effectiveSizeParams, refPaths.length > 0),
       ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
       // MJ 的控制全在 prompt flag 里，由后端 mj_image 拼接（同 StudioFull）。
       ...(caps.family === 'midjourney'

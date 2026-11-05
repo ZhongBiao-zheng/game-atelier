@@ -202,6 +202,11 @@ class JobParams(BaseModel):
     ratio: str | None = None               # e.g. "16:9"
     quality: str | None = None             # low | medium | high | xhigh | max | auto
     background: Literal["auto", "opaque", "transparent"] | None = None
+    # GPT Image 2.6：规划强度（与 quality 独立）与 GIF 输出；caller 只对支持的模型发。
+    complexity: Literal["low", "medium", "high"] | None = None
+    output_format: Literal["gif"] | None = None
+    frame_count: int | None = Field(default=None, ge=2, le=64)
+    frame_duration_ms: int | None = Field(default=None, ge=20, le=2000)
     # Seedream 5.0 Pro 图层拆分：caller 回写有序图层元数据，output_index 对齐 Job.output_paths。
     layer_decomposition: bool | None = None
     layer_decomposition_result: LayerDecompositionResult | None = None
@@ -483,6 +488,7 @@ class CanvasImageDefaultParams(BaseModel):
     size_mode: Literal["auto", "ratio", "custom"] | None = None
     custom_size: str | None = Field(default=None, max_length=40, pattern=r"^[A-Za-z0-9_.:+-]*$")
     quality: Literal["low", "medium", "high", "xhigh", "max", "auto"] | None = None
+    complexity: Literal["low", "medium", "high"] | None = None
 
 
 class CanvasVideoDefaultParams(BaseModel):
@@ -667,6 +673,7 @@ CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     "image": frozenset({
         "workflow_inputs",
         "n", "size", "size_mode", "custom_size", "ratio", "resolution", "quality",
+        "complexity", "output_format", "frame_count", "frame_duration_ms",
         "creation_asset_source_title", "prompt_asset_id",
         # 多角度生成由服务端写进结果 Draft，浏览器会原样回传，必须放行。
         "angle_horizontal", "angle_pitch", "angle_distance", "angle_wide",

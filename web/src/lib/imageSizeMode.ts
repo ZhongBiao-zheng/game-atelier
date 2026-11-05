@@ -54,12 +54,45 @@ export function prepareImageSizeSubmission(
 
 /** Drafts retain inactive choices; the server freezes only the active sizing rule.
  *  `caps` 由「自动」传入路由组的能力交集；不传时按该渠道自己的能力。 */
+/** 提交时真正写进 job.params 的 2.6 字段：按 caps 过滤，带参考图时 GIF 不发（官方只在文生图支持）。
+ *  `source` 可以是当前 sizeParams，也可以是「再次生成」带来的 RoundConfig（字段名相同）。 */
+export function gptImage26JobParams(
+  caps: ImageControlCaps,
+  source: Pick<JobParams, 'complexity' | 'output_format' | 'frame_count' | 'frame_duration_ms'>,
+  hasReferences: boolean,
+): Pick<JobParams, 'complexity' | 'output_format' | 'frame_count' | 'frame_duration_ms'> {
+  const kept = withoutUnsupportedGptImage26Params({
+    complexity: source.complexity, output_format: source.output_format,
+    frame_count: source.frame_count, frame_duration_ms: source.frame_duration_ms,
+  }, caps);
+  if (hasReferences) {
+    delete kept.output_format;
+    delete kept.frame_count;
+    delete kept.frame_duration_ms;
+  }
+  return kept;
+}
+
+/** GPT Image 2.6 专属字段只在支持的模型上保留；换到别的模型就丢掉，不带着旧值出图。 */
+export function withoutUnsupportedGptImage26Params(current: JobParams, caps: ImageControlCaps): JobParams {
+  const { complexity, output_format, frame_count, frame_duration_ms, ...rest } = current;
+  const params: JobParams = rest;
+  if (caps.complexities && complexity) params.complexity = complexity;
+  if (caps.gifOutput && output_format === 'gif') {
+    params.output_format = 'gif';
+    if (frame_count != null) params.frame_count = frame_count;
+    if (frame_duration_ms != null) params.frame_duration_ms = frame_duration_ms;
+  }
+  return params;
+}
+
 export function normalizeImageSizeParams(
   model: string, provider: string | null | undefined, baseUrl: string | null | undefined,
   current: JobParams,
   capsOverride?: ImageControlCaps,
 ): JobParams {
   const caps = capsOverride ?? imageControlCaps(model, provider, baseUrl);
+  current = withoutUnsupportedGptImage26Params(current, caps);
   if (caps.sizeKind === 'none' && !caps.ratios.length) {
     const params = { ...current, n: Math.min(current.n ?? 1, caps.maxCount ?? 4) };
     delete params.size;

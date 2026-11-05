@@ -89,7 +89,7 @@ class ImagesHandler(FileSystemEventHandler):
         if event.is_directory:
             return
         p = Path(event.src_path)
-        if p.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+        if p.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
             return
         cid = self._resolve(p)
         hub.broadcast("image-added", {"character_id": cid, "path": str(p)})

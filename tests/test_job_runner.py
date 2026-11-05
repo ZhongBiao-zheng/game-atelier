@@ -861,3 +861,18 @@ def test_run_job_keeps_real_jpeg_extension(project, monkeypatch):
     expected = project / "studio" / "studio-jpeg-001" / "v1.jpg"
     assert final.output_paths == [str(expected)]
     assert expected.read_bytes()[:3] == b"\xff\xd8\xff"
+
+
+def test_image_dimensions_reads_gif_header(project):
+    """GIF 产物（GPT Image 2.6 动图）也能读出宽高，不会被当成无效图丢掉。"""
+    import io
+    from PIL import Image
+
+    gif = project / "characters" / "holy" / "promo" / "loop.gif"
+    frames = [Image.new("RGB", (48, 32), color) for color in ("red", "blue")]
+    buffer = io.BytesIO()
+    frames[0].save(buffer, format="GIF", save_all=True, append_images=frames[1:])
+    gif.write_bytes(buffer.getvalue())
+
+    assert job_runner.image_dimensions(gif) == (48, 32)
+    assert job_runner.is_valid_image(gif) is True

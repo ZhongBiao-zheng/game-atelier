@@ -94,8 +94,9 @@ HK caller保留模型ID，仅传递支持的quality与归一化尺寸，未把Na
 官网前端按次 `quota_type=1` 展示 `model_price×10000` 积分；[积分说明](https://openai-hk.com/docs/price.html)
 为1元=10000积分。2026-10-25用户提供的已有账单支持以下裁决：
 
-- default单张：`gpt-image-2`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、
-  `nano-banana`、`nano-banana-hd` 读取精确型号的 `model_price`，不乘分组倍率7。
+- default单张：`gpt-image-2`、`gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`gpt-image-2.6-flare`、
+  `gpt-image-2.6-sunburst`、`nano-banana`、`nano-banana-hd` 读取精确型号的 `model_price`，不乘分组倍率7
+  （2.6 两款 2026-11-05 登记时 HK 还未配价，同步到价格快照后即生效）。
 - GPT Image 2的269条记录均800积分；Flare的41条中40条800、1条2400；Sunburst的176条中
   174条800、1条2400、1条3200；Nano Banana六条2000，HD一条3200。
 - 9月9日Flare/Sunburst单张2400积分的历史记录真实存在，之后对应本机单张任务已扣800积分；

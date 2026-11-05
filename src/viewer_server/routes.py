@@ -108,7 +108,7 @@ def get_job(job_id: str) -> Job:
 
 
 
-_THUMBNAIL_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+_THUMBNAIL_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 
 
 
@@ -1302,7 +1302,7 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
 
 
 _GALLERY_SLOTS = ("portrait", "promo", "turnaround")
-_GALLERY_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+_GALLERY_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 
 
 @router.get("/gallery/recent")

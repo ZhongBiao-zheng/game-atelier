@@ -24,16 +24,22 @@ _OPENAI_AUTO_MODELS = frozenset({
     "gpt-image-1", "gpt-image-1-mini", "gpt-image-1.5", "gpt-image-2",
     "gpt-image-2-2026-04-21", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare",
     "gpt-image-2.5-sunburst-2026-09-08", "gpt-image-2.5-flare-2026-09-08",
+    # 2026-11-04 发布；官方 reference 写明 size 默认 auto。
+    "gpt-image-2.6-sunburst", "gpt-image-2.6-flare",
 })
 # 2026-09-17 实测：两家网关的 gpt-image-2.5 系发 size=auto 都正常出图，与 gpt-image-2 同列。
 # 名单只收真打过 auto 请求验证过的型号；HK 侧没验过裸 gpt-image-2.5，就不写进来。
+# 2.6 两款 2026-11-05 登记时两家网关都还没配价（请求回「价格未配置」），按 2.5 同系推定放行，
+# 网关上架后要用真请求复验一次。
 _HK_AUTO_MODELS = frozenset({
     "gpt-image-1", "gpt-image-1.5", "gpt-image-2",
     "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
+    "gpt-image-2.6-flare", "gpt-image-2.6-sunburst",
 })
 _TUZI_AUTO_MODELS = frozenset({
     "gpt-image-1", "gpt-image-1.5", "gpt-image-2",
     "gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
+    "gpt-image-2.6-flare", "gpt-image-2.6-sunburst",
 })
 
 

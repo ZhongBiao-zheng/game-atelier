@@ -24,7 +24,7 @@ import { RoundList, type RoundConfig, type RoundState, type SaveResultAssetReque
 import { StudioQueryBar } from '@/components/studio/StudioQueryBar';
 import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
+import { gptImage26JobParams, imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { imageFamily, isEvolinkMidjourney } from '@/lib/modelFamily';
 import { promptToAssetSegments } from '@/lib/promptVariables';
@@ -620,6 +620,7 @@ function StudioFull() {
       sizeMode: effectiveMode,
       n: effectiveCount,
       quality: effectiveQuality,
+      ...gptImage26JobParams(caps, overrideConfig ?? effectiveSizeParams, refPaths.length > 0),
       referenceImages: refPaths,
       workflowInputs: effectiveSizeParams.workflow_inputs,
       ...(effectiveSourceAssetTitle ? { sourceAssetTitle: effectiveSourceAssetTitle } : {}),
@@ -638,6 +639,7 @@ function StudioFull() {
       ...(effectiveResolution ? { resolution: effectiveResolution } : {}),
       n: effectiveCount,
       ...(effectiveQuality ? { quality: effectiveQuality } : {}),
+      ...gptImage26JobParams(caps, overrideConfig ?? effectiveSizeParams, refPaths.length > 0),
       ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
       ...(effectivePromptAssetId ? { prompt_asset_id: effectivePromptAssetId } : {}),
       ...(effectiveSourceAssetTitle
@@ -1339,7 +1341,7 @@ function StudioFull() {
       setVideoMode(omni ? 'omni' : 'firstlast');
       setGenerateAudio(!!config.generateAudio);
     } else {
-      setSizeParams({ workflow_inputs: config.workflowInputs, size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}) });
+      setSizeParams({ workflow_inputs: config.workflowInputs, size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}), complexity: config.complexity, output_format: config.output_format, frame_count: config.frame_count, frame_duration_ms: config.frame_duration_ms });
       if (config.n) setCount(clampImageCount(config.n));
       if (config.quality) setQuality(config.quality);
       if (config.mjParams) setMjParams(config.mjParams);
@@ -1393,7 +1395,7 @@ function StudioFull() {
       setVideoMode(isOmniVideoConfig(config.frameMode, referencePathCounts(config)) ? 'omni' : 'firstlast');
       setGenerateAudio(!!config.generateAudio);
     } else {
-      setSizeParams({ workflow_inputs: config.workflowInputs, size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}) });
+      setSizeParams({ workflow_inputs: config.workflowInputs, size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}), complexity: config.complexity, output_format: config.output_format, frame_count: config.frame_count, frame_duration_ms: config.frame_duration_ms });
       if (config.n) setCount(clampImageCount(config.n));
       if (config.mjParams) setMjParams(config.mjParams);
     }

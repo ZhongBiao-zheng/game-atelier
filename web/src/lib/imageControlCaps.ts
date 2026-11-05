@@ -23,8 +23,19 @@ import { availableResolutions, type Resolution } from '@/lib/studioSize';
 import { imageSizeOptions, isNanoImageSizeModel } from './imageSizeCatalog';
 
 export type Quality = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
+export type Complexity = 'low' | 'medium' | 'high';
+export const COMPLEXITIES: Complexity[] = ['low', 'medium', 'high'];
 
 const TUZI_GPT_IMAGE_RESOLUTIONS: Resolution[] = ['1K', '2K'];
+// Tuzi 上的 GPT Image 2.5 / 2.6 系：五档质量、比例自选、不给 K 分辨率档（与 image_size_catalog.py 同判据）。
+const TUZI_GPT_TIERED = /^gpt-image-2\.[56](?:-|$)/;
+
+/** GPT Image 2.6 才有的两项能力：complexity 规划强度与 GIF 输出。按模型 id 判，不按 provider；
+ *  与后端 `supports_image_complexity` / `supports_gif_output` 同判据。 */
+export function supportsGptImage26(modelId?: string | null): boolean {
+  // 后端 normalized_model_id 还会把 `.` 归一成 `-`，前端的 normalizedModelId 不做这步，这里补上。
+  return normalizedModelId(modelId).replace(/\./g, '-').startsWith('gpt-image-2-6');
+}
 
 export interface ImageControlCaps {
   family: ImageFamily;
@@ -42,13 +53,17 @@ export interface ImageControlCaps {
   showAutoSize: boolean;
   /** 质量选项；null 表示该族不暴露质量控件（也不该写进 job params）。 */
   qualities: Quality[] | null;
+  /** 规划强度选项（GPT Image 2.6）；null 表示不暴露，也不该写进 job params。 */
+  complexities: Complexity[] | null;
+  /** 能否出 GIF 动图（GPT Image 2.6，仅文生图）。 */
+  gifOutput: boolean;
   /** size 传给后端的语义：'ratio' = 传比例字符串(如 16:9)；'pixels' = 传 WxH；
    *  'none' = 该族不接受任何尺寸参数，控件与 params 都不该出现尺寸（MJ：比例由渠道锁定）。 */
   sizeKind: 'ratio' | 'pixels' | 'none';
 }
 
 // resolutions 不在这张表里：它按【模型】的像素上限裁，不是族属性（同族的 pro 与 lite 就不一样）。
-const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'ratios' | 'resolutions' | 'showAutoSize'>> = {
+const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'ratios' | 'resolutions' | 'showAutoSize' | 'complexities' | 'gifOutput'>> = {
   'nano-banana': {
     showResolution: false,
     showCustomSize: false,
@@ -92,13 +107,17 @@ export function imageControlCaps(
   _billingGroup?: string | null,
 ): ImageControlCaps {
   const family = imageFamily(modelId);
+  const gpt26 = supportsGptImage26(modelId);
+  const complexities = gpt26 ? COMPLEXITIES : null;
   if (provider === 'comfyui' || modelId?.startsWith('comfyui-')) return {
     family, maxCount: 4, ratios: [], resolutions: [], showResolution: false,
     showCustomSize: false, showAutoSize: false, qualities: null, sizeKind: 'none',
+    complexities: null, gifOutput: false,
   };
   if (provider === 'chatgpt') return {
     family, maxCount: 1, maxRefImages: 1, ratios: [], resolutions: [], showResolution: false,
     showCustomSize: false, showAutoSize: false, qualities: null, sizeKind: 'none',
+    complexities: null, gifOutput: false,
   };
   const base = FAMILY_CAPS[family];
   const sizeOptions = imageSizeOptions(modelId, provider, baseUrl);
@@ -109,12 +128,16 @@ export function imageControlCaps(
   const isTuzi = host === 'tu-zi.com' || host.endsWith('.tu-zi.com');
   // 2026-09-17 实测：Tuzi / OpenAI-HK 的 gpt-image-2.5 系也接受 size=auto 并正常出图，
   // 与 gpt-image-2 一样进白名单。名单只收实打实发过 auto 请求验证过的型号。
+  // 2.6 两款 2026-11-05 登记时两家网关都还没配价，按 2.5 同系推定放行；上架后用真请求复验（同 image_size.py）。
   const tuziAutoModels = ['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2',
-    'gpt-image-2.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
+    'gpt-image-2.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst',
+    'gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'];
   const hkAutoModels = ['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2',
-    'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
+    'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst',
+    'gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'];
   const openaiAutoModels = ['gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-2', 'gpt-image-2-2026-04-21',
-    'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst-2026-09-08', 'gpt-image-2.5-flare-2026-09-08'];
+    'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst-2026-09-08', 'gpt-image-2.5-flare-2026-09-08',
+    'gpt-image-2.6-sunburst', 'gpt-image-2.6-flare'];
   const showAutoSize = ((provider === 'openai' || provider === 'custom')
       && (host === 'api.openai.com' || (!host && provider === 'openai')) && openaiAutoModels.includes(modelId ?? ''))
     || ((provider === 'openai' || provider === 'custom') && isHk && hkAutoModels.includes(modelId ?? ''))
@@ -123,7 +146,7 @@ export function imageControlCaps(
   // Tuzi 的 nano-banana 只有 Pro 与 2 的基础型号接收独立 quality；HD/NT/VIP 与固定 2K/4K
   // 的档位都编码在 model id。其余 GPT 路由保留已验证的 1K/2K 尺寸与质量控件。
   const tuziGptImageTiers = isTuzi && family === 'gpt-image';
-  const tuziGpt25 = isTuzi && (modelId === 'gpt-image-2.5' || modelId?.startsWith('gpt-image-2.5-'));
+  const tuziGpt25 = isTuzi && TUZI_GPT_TIERED.test(modelId ?? '');
   const tuziNanoWithoutQuality = isTuzi && family === 'nano-banana'
     && !['nano-banana-pro', 'nano-banana-2', 'gemini-nano-banana-2.1', 'nano-banana-2.1'].includes(normalized);
   const qualities: Quality[] | null = tuziGpt25 ? ['low', 'medium', 'high', 'xhigh', 'max']
@@ -140,12 +163,16 @@ export function imageControlCaps(
       showCustomSize: false,
       showAutoSize,
       qualities,
+      complexities,
+      gifOutput: gpt26,
       sizeKind: sizeOptions.ratios.length ? 'ratio' : 'none',
     };
   }
   return {
     family,
     ...base,
+    complexities,
+    gifOutput: gpt26,
     ...(isNanoImageSizeModel(modelId) ? { showResolution: false, showCustomSize: false, sizeKind: 'ratio' as const } : {}),
     ...(tuziGptImageTiers ? { showResolution: !tuziGpt25, showCustomSize: false } : {}),
     ratios: sizeOptions.ratios,
@@ -168,3 +195,9 @@ export const QUALITY_LABELS: Record<Quality, string> = {
   max: '最高',
   auto: '自动',
 };
+
+export const COMPLEXITY_LABELS: Record<Complexity, string> = { low: '低', medium: '中', high: '高' };
+
+/** GIF 参数边界与默认值，与后端 openai_image 的常量一致。 */
+export const GIF_FRAME_COUNT = { min: 2, max: 64, default: 9 } as const;
+export const GIF_FRAME_DURATION_MS = { min: 20, max: 2000, default: 200 } as const;

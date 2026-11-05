@@ -6,7 +6,7 @@ import { providerForAlias, sizeContext, resolveChannel } from '@/lib/modelRoutes
 import { videoControlCaps } from '@/lib/videoControlCaps';
 import { clampImageCount } from './studioJobConfig';
 
-export type RoundParameter = 'model' | 'size' | 'resolution' | 'quality' | 'count' | 'duration' | 'audio';
+export type RoundParameter = 'model' | 'size' | 'resolution' | 'quality' | 'complexity' | 'gif' | 'count' | 'duration' | 'audio';
 export interface ParameterReuseContext {
   providers: KeyView[];
   alias: string;
@@ -71,6 +71,12 @@ export function reuseRoundParameter(config: RoundConfig, parameter: RoundParamet
     case 'resolution': return config.resolution && caps.resolutions.includes(config.resolution)
       ? { sizeParams: normalizeImageSizeParams(size.modelId, size.provider, size.baseUrl, { ...sizeParams, resolution: config.resolution, ...(sizeParams.size_mode === 'custom' ? {} : { size: undefined }) }, caps) } : null;
     case 'quality': return config.quality && caps.qualities?.includes(config.quality) ? { quality: config.quality } : null;
+    case 'complexity': return config.complexity && caps.complexities
+      ? { sizeParams: normalizeImageSizeParams(size.modelId, size.provider, size.baseUrl, { ...sizeParams, complexity: config.complexity }, caps) } : null;
+    case 'gif': return config.output_format === 'gif' && caps.gifOutput
+      ? { sizeParams: normalizeImageSizeParams(size.modelId, size.provider, size.baseUrl, {
+          ...sizeParams, output_format: 'gif', frame_count: config.frame_count, frame_duration_ms: config.frame_duration_ms,
+        }, caps) } : null;
     case 'count': return config.n != null && caps.family !== 'midjourney' ? { count: Math.min(caps.maxCount ?? 4, clampImageCount(config.n)) } : null;
     default: return null;
   }

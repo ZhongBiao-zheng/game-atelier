@@ -2374,3 +2374,122 @@ def test_seedream_keeps_reference_image_bytes_when_already_large_enough(
 def test_image_data_url_never_reads_url_shaped_values_as_local_files(value):
     with pytest.raises(openai_image.OpenAIImageError, match="网址参考图"):
         openai_image._image_data_url(value)
+
+
+# ---- GPT Image 2.6：complexity 与 GIF 输出 --------------------------------------------------
+
+def _custom_key(tmp_path, monkeypatch, base_url="https://api.example.com/v1"):
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    from character_workflow.lib import keys as _keys
+    _keys.add_key(_keys.KeySpec(
+        alias="cu", provider="custom", base_url=base_url,
+        access_key="x", created_at="2026-11-05T00:00:00Z",
+    ))
+
+
+def test_supports_complexity_and_gif_only_for_gpt_image_26():
+    for model in ("gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "openai/GPT-Image-2.6-Flare"):
+        assert openai_image.supports_image_complexity(model)
+        assert openai_image.supports_gif_output(model)
+    for model in ("gpt-image-2.5-flare", "gpt-image-2", "nano-banana-pro", "seedream-5.0-pro"):
+        assert not openai_image.supports_image_complexity(model)
+        assert not openai_image.supports_gif_output(model)
+
+
+@pytest.mark.parametrize("complexity,sent", [("low", "low"), ("medium", "medium"), ("high", None)])
+def test_gpt_image_26_sends_complexity_except_default_high(tmp_path, monkeypatch, complexity, sent):
+    """high 是官方默认，不发——Tuzi 对未知字段 400，少发一个字段少一条故障路径。"""
+    _custom_key(tmp_path, monkeypatch)
+    posted = {}
+    monkeypatch.setattr(openai_image, "_post_json",
+                        lambda url, key, payload, *, timeout: (posted.update(body=payload),
+                                                               {"data": [{"b64_json": "aGk="}]})[1])
+    openai_image.render(prompt="p", model="gpt-image-2.6-sunburst", alias="cu",
+                        output_dir=tmp_path / "o", params={"complexity": complexity})
+    assert posted["body"].get("complexity") == sent
+
+
+def test_gpt_image_25_never_sends_complexity_even_if_params_carry_it(tmp_path, monkeypatch):
+    _custom_key(tmp_path, monkeypatch)
+    posted = {}
+    monkeypatch.setattr(openai_image, "_post_json",
+                        lambda url, key, payload, *, timeout: (posted.update(body=payload),
+                                                               {"data": [{"b64_json": "aGk="}]})[1])
+    openai_image.render(prompt="p", model="gpt-image-2.5-flare", alias="cu",
+                        output_dir=tmp_path / "o",
+                        params={"complexity": "low", "output_format": "gif", "frame_count": 4})
+    assert "complexity" not in posted["body"]
+    assert "output_format" not in posted["body"]
+    assert "frame_count" not in posted["body"]
+
+
+def test_gpt_image_26_edits_carry_complexity(tmp_path, monkeypatch):
+    _custom_key(tmp_path, monkeypatch)
+    ref = tmp_path / "r.png"
+    ref.write_bytes(b"png")
+    seen = {}
+    monkeypatch.setattr(openai_image, "_post_multipart",
+                        lambda url, key, *, fields, files, timeout: (seen.update(fields),
+                                                                     {"data": [{"b64_json": "aGk="}]})[1])
+    openai_image.render(prompt="p", model="gpt-image-2.6-flare", alias="cu",
+                        output_dir=tmp_path / "o", reference_images=[str(ref)],
+                        params={"complexity": "low"})
+    assert seen["complexity"] == "low"
+
+
+def test_gpt_image_26_gif_payload_and_clamped_frames(tmp_path, monkeypatch):
+    _custom_key(tmp_path, monkeypatch)
+    posted = {}
+    gif_bytes = base64.b64encode(b"GIF89a" + b"\x10\x00\x08\x00" + b"\x00" * 20).decode()
+    monkeypatch.setattr(openai_image, "_post_json",
+                        lambda url, key, payload, *, timeout: (posted.update(body=payload),
+                                                               {"data": [{"b64_json": gif_bytes}]})[1])
+    paths = openai_image.render(
+        prompt="p", model="gpt-image-2.6-flare", alias="cu", output_dir=tmp_path / "o",
+        params={"output_format": "gif", "frame_count": 999, "frame_duration_ms": 123},
+    )
+    body = posted["body"]
+    assert body["output_format"] == "gif"
+    assert body["frame_count"] == 64          # 夹到上限
+    assert body["frame_duration_ms"] == 120   # 10ms 取整
+    assert paths == [str(tmp_path / "o" / "v1.gif")]
+
+
+def test_gpt_image_26_gif_defaults_when_only_format_given(tmp_path, monkeypatch):
+    _custom_key(tmp_path, monkeypatch)
+    posted = {}
+    monkeypatch.setattr(openai_image, "_post_json",
+                        lambda url, key, payload, *, timeout: (posted.update(body=payload),
+                                                               {"data": [{"b64_json": "aGk="}]})[1])
+    openai_image.render(prompt="p", model="gpt-image-2.6-flare", alias="cu",
+                        output_dir=tmp_path / "o", params={"output_format": "gif"})
+    assert posted["body"]["frame_count"] == 9
+    assert posted["body"]["frame_duration_ms"] == 200
+
+
+def test_gpt_image_26_gif_rejects_reference_images(tmp_path, monkeypatch):
+    """GIF 只走 generations，带参考图会被官方 edits 端点拒绝；本地先拦住，不计费。"""
+    _custom_key(tmp_path, monkeypatch)
+    ref = tmp_path / "r.png"
+    ref.write_bytes(b"png")
+    with pytest.raises(openai_image.OpenAIImageError, match="GIF"):
+        openai_image.render(prompt="p", model="gpt-image-2.6-flare", alias="cu",
+                            output_dir=tmp_path / "o", reference_images=[str(ref)],
+                            params={"output_format": "gif"})
+
+
+def test_tuzi_gpt_image_26_complexity_skips_native_task_route(tmp_path, monkeypatch):
+    """Tuzi 原生任务接口不认 complexity / GIF 字段，这类请求必须走 Images 合约。"""
+    _custom_key(tmp_path, monkeypatch, base_url="https://api.tu-zi.com")
+    monkeypatch.setattr(openai_image.tuzi_async, "IMAGE_TASK_MODELS",
+                        set(openai_image.tuzi_async.IMAGE_TASK_MODELS) | {"gpt-image-2.6-flare"})
+    posted = {}
+    monkeypatch.setattr(openai_image, "_post_json",
+                        lambda url, key, payload, *, timeout: (posted.update(url=url, body=payload),
+                                                               {"data": [{"b64_json": "aGk="}]})[1])
+    monkeypatch.setattr(openai_image.tuzi_async, "execute_json",
+                        lambda **kwargs: (_ for _ in ()).throw(AssertionError("native route used")))
+    openai_image.render(prompt="p", model="gpt-image-2.6-flare", alias="cu",
+                        output_dir=tmp_path / "o", params={"complexity": "low"})
+    assert posted["url"].endswith("/images/generations")
+    assert posted["body"]["complexity"] == "low"

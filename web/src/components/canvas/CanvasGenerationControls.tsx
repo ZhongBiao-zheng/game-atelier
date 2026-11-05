@@ -11,6 +11,7 @@ import { modelBrand, modelDisplayName, sortModels } from '@/lib/modelCatalog';
 import { modelModality, type KeyView } from '@/api/keys';
 import { AUTO_PROVIDER_ALIAS, isAutoProvider } from '@/lib/modelRoutes';
 import { ImageSizeFields } from '@/components/studio/ImageSizeFields';
+import { GptImage26Fields, gifSummary } from '@/components/studio/GptImage26Fields';
 import { defaultResolution } from '@/lib/studioSize';
 import { imageSizeMode, imageSizeSummary } from '@/lib/imageSizeMode';
 import {
@@ -160,6 +161,7 @@ export function CanvasImageSettings({
       ? params.resolution ?? (caps.sizeKind === 'ratio' ? null : defaultResolution(caps.resolutions))
       : null,
     caps.qualities ? QUALITY_LABELS[(params.quality as Quality) ?? caps.qualities[0]] : null,
+    caps.gifOutput ? gifSummary(params) : null,
     `${count} 张`,
   ].filter(Boolean).join(' · ');
 
@@ -204,6 +206,8 @@ export function CanvasImageSettings({
               />
             </SettingsSection>
           )}
+
+          <GptImage26Fields caps={caps} params={params} onPatch={onPatch} />
 
           <SettingsSection title="生成数量">
             {caps.family === 'midjourney' ? (
