@@ -131,7 +131,7 @@ export function imageControlCaps(
   // 2.6 两款 2026-11-05 登记时两家网关都还没配价，按 2.5 同系推定放行；上架后用真请求复验（同 image_size.py）。
   const tuziAutoModels = ['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2',
     'gpt-image-2.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst',
-    'gpt-image-2.6', 'gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'];
+    'gpt-image-2.6', 'gpt-image-2.6-flare', 'gpt-image-2.6-sunburst', 'gpt-image-2.6-1k'];
   const hkAutoModels = ['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2',
     'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst',
     'gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'];

@@ -85,6 +85,8 @@ Tuzi扩展已由[官方定价计算器源码](https://api.tu-zi.com/assets/index
 - 共享用例179组、近30天77条任务去重41组，合计220组逐条对账记录在本地任务日志。
   额外差异按用户裁决记录，已知公式采用公开快照，未核实表达式保留未计价。
 
+- 2026-11-05 实测 `gpt-image-2.6-1k`（default 分组）：AUTO/低 一张 ¥0.02，耗时 27–51s；GIF 走 chat/completions 同价。同日 `gpt-image-2.6` / `-flare` / `-sunburst` / `-vip` 仍「价格尚未由管理员配置」。
+
 ## OpenAI-HK 实时同步：2026-10-25 起
 
 服务启动及每6小时 GET [官网价格接口](https://www.openai-hk.com/ccapi/pricing)，仅保留已配置模型，

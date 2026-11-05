@@ -1150,6 +1150,7 @@ Tuzi GPT Image 2.5 与 2.6 系列在 Studio 与 Canvas 提供五档质量：低/
 - 这四个字段在 `JobParams` 双端声明、进入 Canvas 浏览器可提交白名单与局域网网关图片白名单；换到不支持的模型时前端 `normalizeImageSizeParams` 与服务端 `_normalized_image_preference_params` 都会丢掉它们。Canvas 生成偏好只记住 `complexity`，GIF 是当次的选择。
 - `markup` 标注层：官方 `/images/edits` 的 multipart 字段，与首张输入图同宽高的透明 PNG，各 ≤16,777,216 像素；不能与 `mask` 同用。caller 只对 `supports_image_complexity` 为真的模型发 `markup`，同时带 `mask_image` 时直接报错不计费；来源只有画布标注（见「画布标注」节的 `markup_version_id` / `params.markup_image`），Studio 没有入口。
 - 不做：SVG 输出（官方 reference 要求 `svg.model` 与额外权限，网关不透传，产物管线按位图设计）。两家网关 2026-11-05 对 2.6 都回「价格未配置」，size=auto 放行按 2.5 同系推定，上架后复验；markup 的真实请求同样待上架后复验。
+- Tuzi 实测（2026-11-05，`gpt-image-2.6-1k`，¥0.02/张，AUTO 出 508–1254²）：images 端点拒 `output_format=gif`（400「must be png, jpeg, or webp」），`complexity` 字段可发；GIF 走 `chat/completions`，提示词末尾加「生成gif，N 帧，每帧 M 毫秒」，帧数与帧间隔实测被遵守（6 帧 150ms → 6 帧 150ms），三次里一次回静态 PNG，caller 按文件头落盘并写 warning「网关返回了静态图」，不重试。另：提示词本身写了 looping animation 时，images 端点也会直接回 GIF 字节，管线按文件头存 .gif。Tuzi 的 `gpt-image-2.6-flare/-sunburst/-vip` 与 OpenAI-HK 的 2.6 截至当日仍未配价。
 - OpenRouter 实测（2026-11-05，真打两次）：`complexity` 传非法值照样 200 出图 = 字段被 OpenRouter 剥离不透传；`output_format=gif` 被其 schema 400 拒（只认 png/jpeg/webp/svg）。所以 OpenRouter 渠道不暴露规划与 GIF，这是协议级限制。同渠道 2.6 Flare AUTO/低 一张 19s、¥0.19，AUTO 实际出 1312×1199。
 
 ### 模型菜单元数据（本机只读）

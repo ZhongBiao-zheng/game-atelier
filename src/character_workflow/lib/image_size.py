@@ -40,6 +40,8 @@ _TUZI_AUTO_MODELS = frozenset({
     "gpt-image-1", "gpt-image-1.5", "gpt-image-2",
     "gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
     "gpt-image-2.6", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst",
+    # 2026-11-05 实测：Tuzi gpt-image-2.6-1k 发 size=auto 出 1254²，¥0.02/张。
+    "gpt-image-2.6-1k",
 })
 
 

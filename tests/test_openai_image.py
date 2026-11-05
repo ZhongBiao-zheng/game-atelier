@@ -2542,3 +2542,28 @@ def test_markup_rejections_before_billing(tmp_path, monkeypatch, case, message):
     with pytest.raises(openai_image.OpenAIImageError, match=message):
         openai_image.render(prompt="p", model=model, alias="cu", output_dir=tmp_path / "o",
                             reference_images=refs, params=params)
+
+
+@pytest.mark.parametrize("head,suffix,warned", [
+    (b"GIF89a" + b"\x10\x00\x08\x00" + b"\x00" * 20, ".gif", False),
+    (b"\x89PNG\r\n\x1a\n" + b"\x00" * 20, ".png", True),
+])
+def test_tuzi_gif_goes_through_chat_prompt(tmp_path, monkeypatch, head, suffix, warned):
+    """Tuzi 的 images 端点拒 output_format=gif，GIF 走 chat/completions + 提示词「生成gif」；
+    回静态图时产物照存（已计费）并写 warning。"""
+    _custom_key(tmp_path, monkeypatch, base_url="https://api.tu-zi.com")
+    posted = {}
+    monkeypatch.setattr(openai_image, "_post_json",
+                        lambda url, key, payload, *, timeout: (posted.update(url=url, body=payload),
+                                                               {"choices": [{"message": {"content":
+                                                                   "![image_1](https://cdn.example/x.gif)"}}]})[1])
+    monkeypatch.setattr(openai_image, "_download_image_url", lambda url: head)
+    params = {"output_format": "gif", "frame_count": 4, "frame_duration_ms": 150}
+    paths = openai_image.render(prompt="a bouncing ball", model="gpt-image-2.6-1k", alias="cu",
+                                output_dir=tmp_path / "o", params=params)
+    assert posted["url"].endswith("/chat/completions")
+    text = posted["body"]["messages"][0]["content"]
+    assert text.startswith("a bouncing ball") and "生成gif" in text and "4 帧" in text and "150 毫秒" in text
+    assert "output_format" not in posted["body"]
+    assert paths == [str(tmp_path / "o" / f"v1{suffix}")]
+    assert any("静态图" in w for w in params.get("warnings", [])) is warned

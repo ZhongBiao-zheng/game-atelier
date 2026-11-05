@@ -244,6 +244,26 @@ def render(
                 break
         return paths[:requested]
 
+    # Tuzi 的 GIF：images 端点不收 output_format=gif（400「must be png, jpeg, or webp」），网关的
+    # 做法是 chat/completions 提示词里写「生成gif」，回 markdown 图片链接。2026-11-05 实测
+    # gpt-image-2.6-1k：提示词里的帧数会被遵守（4 帧→4 帧），三次里一次回了静态 PNG——已计费，
+    # 不重试，落盘按文件头判断并写 warning 让画师知道。
+    if is_tuzi and gif:
+        paths: list[str] = []
+        for _ in range(requested):
+            data = _post_json(
+                _chat_image_url(base_url), key.access_key,
+                _chat_image_payload(prompt=_tuzi_gif_prompt(prompt, gif), model=model, size=None),
+                timeout=timeout,
+            )
+            paths.extend(_write_outputs(data, out_dir, start_index=len(paths) + 1))
+            if len(paths) >= requested:
+                break
+        static = [p for p in paths if not p.lower().endswith(".gif")]
+        if static:
+            _warn(kwargs, f"网关返回了静态图而不是 GIF（{len(static)}/{len(paths)} 张）")
+        return paths[:requested]
+
     # custom 走 family 判定补诚实；命名 provider(openai/seedream/tokendance/HK) 分支不动。
     # family / is_seedream 已在上方（尺寸归一化前）算好，这里不重算。
     # quality 按**模型能力**判，与前端 imageControlCaps 同一判据（旧版按 provider：词元跳动上的
@@ -828,6 +848,11 @@ def _complexity_param(kwargs: dict) -> str | None:
     params = kwargs.get("params") or {}
     complexity = kwargs.get("complexity") or params.get("complexity")
     return complexity if complexity in ("low", "medium") else None
+
+
+def _tuzi_gif_prompt(prompt: str, gif: dict[str, int]) -> str:
+    """Tuzi 的 GIF 只认提示词：帧数与帧间隔都写进去（帧数实测会被遵守）。"""
+    return f"{prompt}\n生成gif，{gif['frame_count']} 帧，每帧 {gif['frame_duration_ms']} 毫秒，循环播放"
 
 
 def _gif_params(kwargs: dict) -> dict[str, int] | None:
