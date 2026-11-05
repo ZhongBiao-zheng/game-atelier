@@ -75,10 +75,9 @@ export function gptImage26JobParams(
 
 /** GPT Image 2.6 专属字段只在支持的模型上保留；换到别的模型就丢掉，不带着旧值出图。 */
 export function withoutUnsupportedGptImage26Params(current: JobParams, caps: ImageControlCaps): JobParams {
-  const { complexity, output_format, frame_count, frame_duration_ms, annotation_delivery, ...rest } = current;
+  const { complexity, output_format, frame_count, frame_duration_ms, ...rest } = current;
   const params: JobParams = rest;
   if (caps.complexities && complexity) params.complexity = complexity;
-  if (caps.complexities && annotation_delivery === 'composite') params.annotation_delivery = 'composite';
   if (caps.gifOutput && output_format === 'gif') {
     params.output_format = 'gif';
     if (frame_count != null) params.frame_count = frame_count;

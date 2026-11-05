@@ -146,6 +146,7 @@ def test_annotation_result_connection_inherits_snapshot(monkeypatch):
     from character_workflow.lib.keys import KeySpec, ModelSpec
     from character_workflow.lib.schemas import JobKind, JobParams
     document = parsed_document()
+    document.connections[0].annotation_delivery = "composite"
     surface = document.nodes[1]
     draft = surface.data.generation_draft
     inputs = canvas_runs._resolve_inputs(document, surface, draft)
@@ -161,7 +162,7 @@ def test_annotation_result_connection_inherits_snapshot(monkeypatch):
         transaction_kind="submit", run_id="run-annotation")
     edge = next(edge for edge in updated.connections
                 if edge.target_node_id == job.canvas_run.result_node_id)
-    assert edge.annotated
+    assert edge.annotated and edge.annotation_delivery == "composite"
     assert job.canvas_run.snapshot.inputs[0].version_id == "rendered"
 
 
@@ -238,6 +239,24 @@ def markup_document(extra_input=False):
     return document
 
 
+def test_composite_choice_on_connection_overrides_markup():
+    from character_workflow.lib.canvas_runs import _resolve_inputs
+    document = markup_document()
+    target = document.nodes[1]
+    document.connections[0].annotation_delivery = "composite"
+    inputs = _resolve_inputs(document, target, target.data.generation_draft, markup=True)
+    assert [(item.version_id, item.markup_version_id) for item in inputs] == [("rendered", None)]
+
+
+def test_annotation_delivery_requires_annotated_connection():
+    document = copy.deepcopy(annotation_document())
+    document["connections"][0]["annotation_delivery"] = "composite"
+    assert CanvasDocument.model_validate(document).connections[0].annotation_delivery == "composite"
+    document["connections"][0]["annotated"] = False
+    with pytest.raises(ValidationError):
+        CanvasDocument.model_validate(document)
+
+
 def test_markup_inputs_send_original_plus_layer_and_come_first():
     from character_workflow.lib.canvas_runs import _resolve_inputs
     document = markup_document(extra_input=True)
@@ -251,7 +270,7 @@ def test_markup_inputs_send_original_plus_layer_and_come_first():
 
 
 @pytest.mark.parametrize("case,message", [
-    ("unrendered", "标注层还没生成"), ("missing", "标注层还没生成"), ("two", "只能连接一张"),
+    ("unrendered", "标注层还没生成"), ("missing", "标注层还没生成"), ("two", "只能有一张"),
 ])
 def test_markup_input_errors(case, message):
     from character_workflow.lib.canvas_runs import _resolve_inputs
@@ -276,20 +295,18 @@ def test_markup_input_errors(case, message):
         _resolve_inputs(document, target, target.data.generation_draft, markup=True)
 
 
-@pytest.mark.parametrize("provider,model,delivery,expected", [
-    ("custom", "gpt-image-2.6-flare", None, True),
-    ("openai", "gpt-image-2.6-sunburst", "markup", True),
-    ("custom", "gpt-image-2.6-flare", "composite", False),
-    ("custom", "gpt-image-2.5-flare", None, False),
-    ("openrouter", "openai/gpt-image-2.6-flare", None, False),
-    ("atelier", "gpt-image-2.6-flare", None, False),
+@pytest.mark.parametrize("provider,model,expected", [
+    ("custom", "gpt-image-2.6-flare", True),
+    ("openai", "gpt-image-2.6-sunburst", True),
+    ("custom", "gpt-image-2.5-flare", False),
+    ("openrouter", "openai/gpt-image-2.6-flare", False),
+    ("atelier", "gpt-image-2.6-flare", False),
 ])
-def test_uses_annotation_markup_by_model_transport_and_choice(provider, model, delivery, expected):
+def test_uses_annotation_markup_by_model_and_transport(provider, model, expected):
     from character_workflow.lib.canvas_runs import uses_annotation_markup
     from character_workflow.lib.keys import KeySpec, ModelSpec
-    from character_workflow.lib.schemas import CanvasGenerationDraft, JobParams
-    draft = CanvasGenerationDraft(mode="image", model=model, updated_at="2026-11-05T00:00:00Z",
-                                  params=JobParams(annotation_delivery=delivery))
+    from character_workflow.lib.schemas import CanvasGenerationDraft
+    draft = CanvasGenerationDraft(mode="image", model=model, updated_at="2026-11-05T00:00:00Z")
     key = KeySpec(alias="k", provider=provider, access_key="x", models=[],
                   created_at="2026-11-05T00:00:00Z")
     assert uses_annotation_markup(draft, key, ModelSpec(id=model, name=model)) is expected
@@ -314,7 +331,7 @@ def test_prepare_generation_freezes_markup_path_for_gpt_image_26(monkeypatch):
         id="target", type="image", title="改图", position={"x": 400, "y": 0},
         data=dict(generation_draft=CanvasGenerationDraft(
             mode="image", prompt="按图中标注修改", model="gpt-image-2.6-flare",
-            params=JobParams(annotation_delivery="markup", complexity="low"),
+            params=JobParams(complexity="low"),
             updated_at=document.updated_at).model_dump(mode="json")))))
     document.connections.append(CanvasInputConnection(
         id="edge", role="input", source_node_id=document.nodes[0].id, target_node_id="target",
@@ -332,11 +349,10 @@ def test_prepare_generation_freezes_markup_path_for_gpt_image_26(monkeypatch):
     assert prepared.job_params.markup_image.endswith(markup.path.rsplit("/", 1)[-1])
     assert prepared.job_params.reference_images[0].endswith(
         document.content_versions[prepared.inputs[0].version_id].path.rsplit("/", 1)[-1])
-    assert prepared.normalized["annotation_delivery"] == "markup"
-    # 切回合成图：解析回合成版本，参数里不再留 annotation_delivery，也不写 markup 路径。
-    document.nodes[-1].data.generation_draft.params.annotation_delivery = "composite"
+    # 连线上改选合成图：解析回合成版本，不写 markup 路径。
+    edge = next(edge for edge in document.connections if edge.target_node_id == "target")
+    edge.annotation_delivery = "composite"
     prepared = canvas_runs.prepare_canvas_generation(project_id, document, document.nodes[-1])
     assert prepared.inputs[0].version_id == image.data.annotation.rendered_version_id
     assert prepared.inputs[0].markup_version_id is None
     assert prepared.job_params.markup_image is None
-    assert "annotation_delivery" not in prepared.normalized

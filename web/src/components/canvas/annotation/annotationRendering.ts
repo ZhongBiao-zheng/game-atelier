@@ -1,5 +1,5 @@
 import { canvasMediaUrl, uploadCanvasMedia } from '@/api/canvas';
-import type { CanvasDocument, CanvasGenerationDraft } from '@/schema/canvas';
+import type { CanvasConnection, CanvasDocument, CanvasGenerationDraft } from '@/schema/canvas';
 import { acceptServerContentVersions } from '@/pages/canvasEditorModel';
 import { createConnectedCanvasSurface } from '@/pages/canvasEditorModel';
 import { composeAnnotatedImage, composeAnnotationMarkup } from './composeAnnotatedImage';
@@ -59,12 +59,13 @@ export function ensureAnnotationRendered(bridge: AnnotationDocumentBridge, nodeI
 export function ensureAnnotationMarkup(bridge: AnnotationDocumentBridge, nodeId: string) {
   return ensureAnnotationDerived(bridge, nodeId, 'markup_version_id');
 }
-/** 目标节点的 Draft 是否会按「原图 + 标注层」发送：模型支持 2.6 能力且没切回合成图。
+/** 这条带标注连线是否可能按「原图 + 标注层」发送：目标模型有 2.6 能力且连线上没选合成图。
  *  渠道是否真走官方 edits 由服务端判（uses_annotation_markup）；这里多算一张标注层只是多一次上传。 */
-export function draftWantsAnnotationMarkup(document: CanvasDocument | null, targetNodeId: string) {
-  const node = document?.nodes.find(n => n.id === targetNodeId);
+export function edgeWantsAnnotationMarkup(document: CanvasDocument | null, edge: CanvasConnection) {
+  if (edge.role !== 'input' || !edge.annotated || edge.annotation_delivery === 'composite') return false;
+  const node = document?.nodes.find(n => n.id === edge.target_node_id);
   const draft = node && 'generation_draft' in node.data ? node.data.generation_draft : null;
-  return !!draft && draft.mode === 'image' && supportsGptImage26(draft.model) && draft.params.annotation_delivery !== 'composite';
+  return !!draft && draft.mode === 'image' && supportsGptImage26(draft.model);
 }
 export async function ensureAnnotatedInputs(bridge: AnnotationDocumentBridge, targetNodeId: string, upstream = false) {
   const document = bridge.current();
@@ -80,7 +81,7 @@ export async function ensureAnnotatedInputs(bridge: AnnotationDocumentBridge, ta
   for (const edge of bridge.current()?.connections ?? []) {
     if (edge.role !== 'input' || !edge.annotated || !targets.has(edge.target_node_id)) continue;
     sources.add(edge.source_node_id);
-    if (draftWantsAnnotationMarkup(bridge.current(), edge.target_node_id)) markupSources.add(edge.source_node_id);
+    if (edgeWantsAnnotationMarkup(bridge.current(), edge)) markupSources.add(edge.source_node_id);
   }
   // 合成图始终准备：服务端在渠道不透传 markup 时会退回合成图，不能到那时才发现没图。
   for (const id of sources) await ensureAnnotationRendered(bridge, id);

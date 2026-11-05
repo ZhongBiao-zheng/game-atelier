@@ -1,6 +1,7 @@
 import { canvasMediaUrl } from '@/api/canvas';
 import { readablePromptVariables } from './promptVariables';
 import type {
+  CanvasAnnotationDelivery,
   CanvasConnection,
   CanvasContentNode,
   CanvasContentVersion,
@@ -18,6 +19,8 @@ export interface CanvasMaterialReference {
   previewUrl?: string;
   inputCount?: number;
   annotated?: boolean;
+  /** 带标注连线上的发送形式（原样取自连线，缺省 = 支持时发标注层）。 */
+  annotationDelivery?: CanvasAnnotationDelivery;
 }
 
 export interface CanvasMentionReference extends CanvasMaterialReference {
@@ -128,11 +131,14 @@ export function buildCanvasMentionReferences(
       if (seen.has(sourceId)) return [];
       seen.add(sourceId);
       const node = nodesById.get(sourceId);
+      const annotatedEdge = connections.find(edge => edge.role === 'input' && edge.target_node_id === surface.id
+        && edge.source_node_id === sourceId && edge.annotated);
       const material = node
         ? canvasMaterialReference(projectId, node, contentVersions, isMentionContentNode(surface)
-          ? surface.data.batch_result : null, connections.some(edge => edge.role === 'input' && edge.target_node_id === surface.id && edge.source_node_id === sourceId && edge.annotated))
+          ? surface.data.batch_result : null, !!annotatedEdge)
         : null;
-      return material ? [material] : [];
+      const delivery = annotatedEdge?.role === 'input' ? annotatedEdge.annotation_delivery : null;
+      return material ? [delivery ? { ...material, annotationDelivery: delivery } : material] : [];
     });
   }));
 }

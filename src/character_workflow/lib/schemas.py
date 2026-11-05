@@ -207,9 +207,6 @@ class JobParams(BaseModel):
     background: Literal["auto", "opaque", "transparent"] | None = None
     # GPT Image 2.6：规划强度（与 quality 独立）与 GIF 输出；caller 只对支持的模型发。
     complexity: Literal["low", "medium", "high"] | None = None
-    # 画布带标注输入连到 GPT Image 2.6 时发什么：缺省 = 模型与渠道支持时发原图 + markup 标注层，
-    # "composite" 强制只发合成图（其他模型永远只发合成图，这个值不起作用）。
-    annotation_delivery: Literal["markup", "composite"] | None = None
     output_format: Literal["gif"] | None = None
     frame_count: int | None = Field(default=None, ge=2, le=64)
     frame_duration_ms: int | None = Field(default=None, ge=20, le=2000)
@@ -681,7 +678,7 @@ CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     "image": frozenset({
         "workflow_inputs",
         "n", "size", "size_mode", "custom_size", "ratio", "resolution", "quality",
-        "complexity", "output_format", "frame_count", "frame_duration_ms", "annotation_delivery",
+        "complexity", "output_format", "frame_count", "frame_duration_ms",
         "creation_asset_source_title", "prompt_asset_id",
         # 多角度生成由服务端写进结果 Draft，浏览器会原样回传，必须放行。
         "angle_horizontal", "angle_pitch", "angle_distance", "angle_wide",
@@ -1054,6 +1051,9 @@ class CanvasInputConnection(BaseModel):
     # first_frame / last_frame：视频首尾帧；before / after：对比节点的两侧。
     slot: Literal["first_frame", "last_frame", "before", "after"] | None = None
     annotated: bool = False
+    # 带标注连线发给模型的形式：缺省 = 目标模型与渠道支持时发「原图 + markup 标注层」，否则发合成图；
+    # "composite" 固定发合成图。只在 annotated 连线上有意义。
+    annotation_delivery: Literal["markup", "composite"] | None = None
 
 
 class CanvasMaterialConnection(BaseModel):
@@ -1491,6 +1491,8 @@ class CanvasDocument(BaseModel):
             if edge.role == "input":
                 if edge.annotated and (edge.slot is not None or source.type != "image"):
                     raise ValueError("annotated connections require an unslotted image source")
+                if edge.annotation_delivery is not None and not edge.annotated:
+                    raise ValueError("annotation delivery requires an annotated connection")
                 if source.type in {"plugin", "layer_stack", "image_edit"}:
                     raise ValueError("canvas input source cannot provide content")
                 if target.type == "image_edit":

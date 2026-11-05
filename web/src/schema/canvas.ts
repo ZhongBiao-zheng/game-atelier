@@ -320,7 +320,11 @@ export interface CanvasInputConnection {
   target_node_id: string;
   slot?: CanvasVideoFrameSlot | CanvasCompareSlot | null;
   annotated?: boolean;
+  /** 带标注连线的发送形式：缺省 = 目标支持时发原图 + 标注层，否则合成图；'composite' 固定合成图。 */
+  annotation_delivery?: CanvasAnnotationDelivery | null;
 }
+
+export type CanvasAnnotationDelivery = 'markup' | 'composite';
 
 export interface CanvasMaterialConnection {
   id: string;

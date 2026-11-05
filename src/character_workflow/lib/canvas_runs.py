@@ -784,11 +784,11 @@ def canvas_input_sources(
 
 
 def uses_annotation_markup(draft: CanvasGenerationDraft, key: KeySpec, model: ModelSpec) -> bool:
-    """带标注输入是否按「原图 + markup 标注层」发送（GPT Image 2.6 官方 edits 的 markup 字段）。
+    """目标能否接收「原图 + markup 标注层」（GPT Image 2.6 官方 edits 的 markup 字段）。
 
     判据按模型（supports_image_complexity）加渠道（必须是走官方 /images/edits 的 openai/custom
-    协议路径；OpenRouter / 局域网网关 / 订阅都不透传 markup）；用户在 Draft 里选
-    annotation_delivery="composite" 可以切回只发合成图。
+    协议路径；OpenRouter / 局域网网关 / 订阅都不透传 markup）。每条带标注连线自己的
+    annotation_delivery="composite" 仍然只发合成图，见 _resolve_inputs。
     """
     from character_workflow.lib.callers.openai_image import (
         _effective_image_protocol,
@@ -796,7 +796,7 @@ def uses_annotation_markup(draft: CanvasGenerationDraft, key: KeySpec, model: Mo
         supports_image_mask,
     )
 
-    if draft.mode != "image" or draft.params.annotation_delivery == "composite":
+    if draft.mode != "image":
         return False
     return supports_image_complexity(model.id) and supports_image_mask(
         key.provider, model.id, _effective_image_protocol(key, model.id),
@@ -817,6 +817,12 @@ def _resolve_inputs(
         version_bindings = {batch_result.source_node_id: batch_result.image_version_ids}
 
     nodes = {node.id: node for node in document.nodes}
+    # 连线上选了「合成图」的来源：即便目标支持标注层也只发合成图。
+    composite_ids = {
+        edge.source_node_id for edge in document.connections
+        if edge.role == "input" and edge.target_node_id == surface.id and edge.annotated
+        and edge.annotation_delivery == "composite"
+    }
     resolved: list[CanvasSnapshotInput] = []
     markup_version_id: str | None = None
     for source, node_id, annotated in candidates:
@@ -832,10 +838,10 @@ def _resolve_inputs(
                 raise ValueError(f"「{title}」的标注已被清除，请断开这条连接或重新标注")
             if annotation.version_id != version_id:
                 raise ValueError(f"「{title}」当前版本没有标注，切回标注所在版本或断开连接")
-            if markup:
+            if markup and node_id not in composite_ids:
                 # 官方 markup 要求与首张输入图同尺寸、且只有一张：带标注的原图排到第一位。
                 if markup_version_id is not None:
-                    raise ValueError("标注层模式只能连接一张带标注的图片，请改为合成图或断开多余连接")
+                    raise ValueError("只能有一张带标注的图片按标注层发送，请把其余的改为合成图")
                 if (not annotation.markup_version_id
                         or annotation.markup_version_id not in document.content_versions):
                     raise ValueError(f"「{title}」的标注层还没生成，请重新提交")
@@ -871,7 +877,8 @@ def _resolve_inputs(
                 version_id=version.version_id,
                 kind=version.kind,
                 annotated=annotated,
-                markup_version_id=markup_version_id if annotated and markup else None,
+                markup_version_id=(markup_version_id
+                                   if annotated and markup and node_id not in composite_ids else None),
             ))
     if markup_version_id is not None:
         # 标注层只认首张输入图的尺寸：带标注的原图提到第一位，其余顺序不变，编号随之重算。
@@ -1448,6 +1455,11 @@ def _commit_frozen_run(
                 id=f"connection-{secrets.token_hex(12)}", role="input",
                 source_node_id=item.node_id, target_node_id=result_id, slot=slot,
                 annotated=item.annotated,
+                annotation_delivery=next((
+                    edge.annotation_delivery for edge in current.connections
+                    if edge.role == "input" and edge.annotated
+                    and edge.source_node_id == item.node_id and edge.target_node_id == surface.id
+                ), None) if item.annotated else None,
             ))
     content_versions = dict(current.content_versions)
     for version in additional_versions or []:
@@ -1519,9 +1531,6 @@ def prepare_canvas_generation(
         # 才知道走不走，所以先按合成图解析一次用于选路估价，再按标注层重解析。
         inputs = _resolve_inputs(document, surface, draft, version_bindings, markup=True)
     normalized, job_params, effective_count = _normalized_params(draft, requested_count, key, model)
-    if not any(item.markup_version_id for item in inputs):
-        normalized.pop("annotation_delivery", None)
-        job_params.annotation_delivery = None
     job_params.route_order = route_order or None
     if not job_params.prompt_asset_id:
         for item in inputs:

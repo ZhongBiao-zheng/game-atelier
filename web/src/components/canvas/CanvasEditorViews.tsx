@@ -47,7 +47,7 @@ import { CanvasFinalizationMenu } from './CanvasFinalizationMenu';
 import { CanvasCompareSurface } from './CanvasCompareSurface';
 import { canvasCompareFrame, canvasCompareSource, type CanvasCompareInputs, type CanvasCompareSource } from './canvasCompare';
 import { CanvasImageEditSurface } from './CanvasImageEditSurface';
-import type { CanvasCompareNode, CanvasImageEditNode, CanvasMediaVersion } from '@/schema/canvas';
+import type { CanvasAnnotationDelivery, CanvasCompareNode, CanvasImageEditNode, CanvasMediaVersion } from '@/schema/canvas';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import {
@@ -214,6 +214,7 @@ export interface CanvasNodeContextValue {
     selectableNodeIds: ReadonlySet<string>;
   }) => void;
   setMaterialConnected: (sourceNodeId: string, targetNodeId: string, connected: boolean) => void;
+  setAnnotationDelivery?: (sourceNodeId: string, targetNodeId: string, delivery: CanvasAnnotationDelivery) => void;
   reorderMaterialConnections?: (targetNodeId: string, orderedSourceIds: readonly string[]) => void;
   setVideoFrameConnections?: (
     targetNodeId: string,
@@ -2294,6 +2295,10 @@ export function CanvasGenerationComposer({
             node.id,
             connected,
           )}
+          annotationLayerAvailable={draft.mode === 'image' && !!imageCaps?.complexities}
+          onAnnotationDeliveryChange={context.setAnnotationDelivery
+            ? (sourceNodeId, delivery) => context.setAnnotationDelivery?.(sourceNodeId, node.id, delivery)
+            : undefined}
           onReorder={context.reorderMaterialConnections
             ? orderedNodeIds => context.reorderMaterialConnections?.(node.id, orderedNodeIds)
             : undefined}
@@ -2441,7 +2446,6 @@ export function CanvasGenerationComposer({
             workflowInputs={selectedModel?.workflow_inputs}
             model={channelModelId}
             baseUrl={channel?.key.base_url}
-            annotatedInput={mentionReferences.some(reference => reference.annotated)}
             params={draft.params}
             onPatch={patch => updateDraftWithHistory(current => {
               const merged = { ...current.params, ...patch };
@@ -2702,6 +2706,43 @@ function CanvasVideoFrameSlot({
 
 const INSTANT_LAYOUT = { layout: { duration: 0 } } as const;
 
+const ANNOTATION_DELIVERY_LABELS: Record<CanvasAnnotationDelivery, string> = {
+  composite: '合成图',
+  markup: '标注层',
+};
+
+/** 带标注参考的发送形式：合成图（原图烙上标注）或原图 + 标注层（GPT Image 2.6 markup）。 */
+function AnnotationDeliveryMenu({ title, delivery, onChange }: {
+  title: string;
+  delivery: CanvasAnnotationDelivery;
+  onChange: (delivery: CanvasAnnotationDelivery) => void;
+}) {
+  const Icon = delivery === 'markup' ? Layers3 : Pencil;
+  return (
+    <DropdownMenu>
+      <Hint label={`标注 · ${ANNOTATION_DELIVERY_LABELS[delivery]}`}>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="icon"
+            type="button"
+            aria-label={`${title} 的标注发送方式：${ANNOTATION_DELIVERY_LABELS[delivery]}`}
+            className="absolute bottom-0 right-0 z-10 size-4 rounded-full border-primary bg-popover p-0 text-primary [&_svg]:size-2.5"
+          >
+            <Icon aria-hidden="true" />
+          </Button>
+        </DropdownMenuTrigger>
+      </Hint>
+      <DropdownMenuContent align="start" className="w-32">
+        {(['composite', 'markup'] as const).map(value => (
+          <DropdownMenuItem key={value} onSelect={() => onChange(value)}>
+            <span className="flex-1">{ANNOTATION_DELIVERY_LABELS[value]}</span>
+            {delivery === value && <Check className="size-3.5" aria-hidden="true" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function CanvasMaterialConnections({
   imageLabels,
   node,
@@ -2714,6 +2755,8 @@ function CanvasMaterialConnections({
   onBeginPick,
   onConnectedChange,
   onReorder,
+  annotationLayerAvailable = false,
+  onAnnotationDeliveryChange,
 }: {
   node: CanvasNode;
   materials: readonly CanvasMaterialReference[];
@@ -2726,6 +2769,9 @@ function CanvasMaterialConnections({
   onBeginPick: (selectableNodeIds: ReadonlySet<string>) => void;
   onConnectedChange: (sourceNodeId: string, connected: boolean) => void;
   onReorder?: (orderedNodeIds: readonly string[]) => void;
+  /** 目标模型与渠道能收 GPT Image 2.6 的 markup 标注层时，带标注参考可选「合成图 / 标注层」。 */
+  annotationLayerAvailable?: boolean;
+  onAnnotationDeliveryChange?: (sourceNodeId: string, delivery: CanvasAnnotationDelivery) => void;
 }) {
   const choices = materials.filter(reference => reference.nodeId !== node.id);
   // 拖动期间只动本地顺序（编号跟着实时变），松手才写回文档，一次拖拽一条撤销记录。
@@ -2835,11 +2881,18 @@ function CanvasMaterialConnections({
                 onClick={() => { if (!draggedRef.current) onPreview(reference); }}
               >
                 <CanvasMaterialPreview reference={reference} />
-                {reference.annotated && <Hint label="带标注"><span className="absolute bottom-0 right-0 z-10 grid size-3.5 place-items-center rounded-full border border-primary bg-popover text-primary"><Pencil size={10} /></span></Hint>}
+                {reference.annotated && !(annotationLayerAvailable && onAnnotationDeliveryChange) && <Hint label="带标注"><span className="absolute bottom-0 right-0 z-10 grid size-3.5 place-items-center rounded-full border border-primary bg-popover text-primary"><Pencil size={10} /></span></Hint>}
                 <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-xs text-foreground">
                   {reference.kind === 'image' ? imageLabels?.[connected.filter(item => item.kind === 'image').findIndex(item => item.nodeId === reference.nodeId)] ?? reference.label : reference.label}
                 </span>
               </Button></Hint>
+              {reference.annotated && annotationLayerAvailable && onAnnotationDeliveryChange && (
+                <AnnotationDeliveryMenu
+                  title={reference.title}
+                  delivery={reference.annotationDelivery === 'composite' ? 'composite' : 'markup'}
+                  onChange={delivery => onAnnotationDeliveryChange(reference.nodeId, delivery)}
+                />
+              )}
               <Button variant="bare"
                 type="button"
                 aria-label={`取消对接素材 ${reference.title}`}

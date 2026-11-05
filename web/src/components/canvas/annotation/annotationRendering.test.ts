@@ -62,7 +62,7 @@ it('rejects cleared annotations without uploading', async () => {
   await expect(ensureAnnotationRendered(bridge, 'source')).rejects.toThrow('标注已清空');
   expect(uploadCanvasMedia).not.toHaveBeenCalled();
 });
-it('also prepares a transparent markup layer when the target is GPT Image 2.6, unless composite is chosen', async () => {
+it('also prepares a transparent markup layer when the target is GPT Image 2.6, unless the connection picks composite', async () => {
   const id = await createAnnotatedGeneration(bridge, 'source', { ...draft, model: 'gpt-image-2.6-flare' });
   await ensureAnnotatedInputs(bridge, id);
   expect(composeAnnotationMarkup).toHaveBeenCalledWith(expect.any(Array), 1024, 768);
@@ -72,8 +72,7 @@ it('also prepares a transparent markup layer when the target is GPT Image 2.6, u
   expect(annotation.markup_version_id).toBe('rendered-2');
   await ensureAnnotatedInputs(bridge, id);
   expect(uploadCanvasMedia).toHaveBeenCalledTimes(2);
-  const target = document.nodes[1] as CanvasImageNode;
-  target.data.generation_draft = { ...target.data.generation_draft!, params: { annotation_delivery: 'composite' } };
+  document.connections = document.connections.map(edge => edge.role === 'input' ? { ...edge, annotation_delivery: 'composite' } : edge);
   annotation.markup_version_id = null; annotation.rendered_version_id = null;
   await ensureAnnotatedInputs(bridge, id);
   expect(composeAnnotationMarkup).toHaveBeenCalledTimes(1);

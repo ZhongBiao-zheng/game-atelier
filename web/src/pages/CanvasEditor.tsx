@@ -187,6 +187,7 @@ import type {
   CanvasContentNode,
   CanvasContentVersion,
   CanvasDocument,
+  CanvasAnnotationDelivery,
   CanvasGenerationDefaults,
   CanvasGenerationDraft,
   CanvasImageToolbarPreferences,
@@ -411,6 +412,7 @@ function mentionConnectionFragment(connection: CanvasConnection): string {
   const fragment = JSON.stringify([
     connection.id, connection.source_node_id, connection.target_node_id,
     connection.role === 'input' && connection.annotated === true,
+    connection.role === 'input' ? connection.annotation_delivery ?? null : null,
     connection.role === 'input' ? connection.slot ?? null : null,
   ]);
   mentionConnectionFragments.set(connection, fragment);
@@ -1675,6 +1677,22 @@ function CanvasEditorInner({
       connection => removedIds.has(connection.id),
     ), true);
   }, [commit, onConnect]);
+
+  const setAnnotationDelivery = useCallback((
+    sourceNodeId: string,
+    targetNodeId: string,
+    delivery: CanvasAnnotationDelivery,
+  ) => {
+    commit(current => ({
+      ...current,
+      connections: current.connections.map(connection => (
+        connection.role === 'input' && connection.annotated
+        && connection.source_node_id === sourceNodeId && connection.target_node_id === targetNodeId
+          ? { ...connection, annotation_delivery: delivery }
+          : connection
+      )),
+    }), true);
+  }, [commit]);
 
   const setVideoFrameConnections = useCallback((
     targetNodeId: string,
@@ -4712,6 +4730,7 @@ function CanvasEditorInner({
     materialPick,
     beginMaterialPick,
     setMaterialConnected,
+    setAnnotationDelivery,
     reorderMaterialConnections,
     setVideoFrameConnections,
     selectNode: selectOnlyNode,
@@ -4830,6 +4849,7 @@ function CanvasEditorInner({
     selectCandidate,
     selectOnlyNode,
     setMaterialConnected,
+    setAnnotationDelivery,
     reorderMaterialConnections,
     setTextEditing,
     setVideoFrameConnections,

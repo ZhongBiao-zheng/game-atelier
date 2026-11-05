@@ -395,8 +395,9 @@ provider 为 openai/custom 且协议为 openai；OpenRouter、局域网网关、
 输入解析为 `annotation.version_id`，Snapshot Input 记 `markup_version_id`，服务端把标注层绝对路径写进
 `job.params.markup_image`（服务端独占路径字段，浏览器两个入口都丢弃，`/api/raw` 按 job 放行）。
 带标注层的输入固定排到第一位（官方要求标注层与首张输入图同尺寸），且只允许一条；缺标注层或多于一条时拒绝提交。
-Draft `params.annotation_delivery = "composite"` 强制只发合成图（浏览器可提交字段，只在 2.6 控件上出现），
-不走标注层时服务端不保留该字段。提交前浏览器总是准备合成图，目标为 2.6 且未选合成图时再多准备一张标注层。普通输入仍解析当前版本，分组展开保持普通输入，
+发送形式记在连线上：Input Connection `annotation_delivery: "markup" | "composite" | null`，仅 `annotated` 连线可带；
+缺省或 `markup` 在目标支持时发标注层，`composite` 固定发合成图。界面入口是生成面板里带标注参考图的角标菜单，
+只在目标有 2.6 能力时出现；结果回连继承该值。提交前浏览器总是准备合成图，连线可能走标注层时再多准备一张标注层。普通输入仍解析当前版本，分组展开保持普通输入，
 同一来源既直连又在组内时以直连标记为准。Snapshot Input 同样保存 annotated，结果回连接续标记。
 「去改图」仅上传隐藏合成版本、创建图片生成节点与 annotated 输入，预填「按图中标注修改，输出不保留标注。」；
 不提交 Job。普通和批量提交前自动重新合成失效标注；合成版本派生写入不占撤回历史。

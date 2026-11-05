@@ -1,5 +1,6 @@
 import type { CanvasContentVersion } from '@/schema/canvas';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useRef, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 
@@ -19,6 +20,7 @@ import {
 } from './canvasNodePanelInteraction';
 import type { CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
+import type { CanvasMentionReference } from '@/lib/canvasMentions';
 
 
 /** context 里已经不再是版本表而是解析器（见 CanvasEditor 里 resolveVersion 的说明），
@@ -143,6 +145,34 @@ it('renders current input thumbnails in frozen connection order, not material or
   expect(images.map(button => button.textContent)).toEqual(['图片1', '图片2']);
   fireEvent.click(within(group).getByRole('button', { name: '取消对接素材 第一张' }));
   expect(context.setMaterialConnected).toHaveBeenCalledWith('first', node.id, false);
+});
+
+it('lets an annotated reference choose composite or markup layer only on GPT Image 2.6', async () => {
+  const user = userEvent.setup();
+  const annotated: CanvasMentionReference = { nodeId: 'marked', versionId: 'marked-v', kind: 'image', title: '原图', label: '图片1', annotated: true };
+  const keyFor = (model: string) => ({
+    alias: 'main', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
+    capabilities: [], notes: '', created_at: '2026-11-05T00:00:00Z',
+    models: [{ id: model, name: model, modality: 'image' as const, protocol: 'openai' }],
+  });
+  const setAnnotationDelivery = vi.fn();
+  const contextFor = (model: string, reference = annotated) => nodeContext({
+    keys: [keyFor(model)], setAnnotationDelivery,
+    materialReferences: [reference],
+    connectedMaterialNodeIdsByNodeId: new Map([[node.id, new Set(['marked'])]]),
+    mentionReferencesByNodeId: new Map([[node.id, [reference]]]),
+  });
+  const draft26 = { ...draft, model: 'gpt-image-2.6-flare', alias: 'main' };
+  const { rerender } = render(<CanvasGenerationComposer node={node} draft={draft26} context={contextFor('gpt-image-2.6-flare')} />);
+  const trigger = screen.getByRole('button', { name: '原图 的标注发送方式：标注层' });
+  await user.click(trigger);
+  await user.click(screen.getByRole('menuitem', { name: '合成图' }));
+  expect(setAnnotationDelivery).toHaveBeenCalledWith('marked', node.id, 'composite');
+  rerender(<CanvasGenerationComposer node={node} draft={draft26}
+    context={contextFor('gpt-image-2.6-flare', { ...annotated, annotationDelivery: 'composite' })} />);
+  expect(screen.getByRole('button', { name: '原图 的标注发送方式：合成图' })).toBeInTheDocument();
+  rerender(<CanvasGenerationComposer node={node} draft={{ ...draft26, model: 'gpt-image-2' }} context={contextFor('gpt-image-2')} />);
+  expect(screen.queryByRole('button', { name: /的标注发送方式/ })).not.toBeInTheDocument();
 });
 
 function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNodeContextValue {

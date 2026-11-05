@@ -323,6 +323,7 @@ def _expanded_document(
                 id=f"connection-{secrets.token_hex(12)}", role="input",
                 source_node_id=source_id, target_node_id=result_id, slot=edge.slot,
                 annotated=edge.annotated,
+                annotation_delivery=edge.annotation_delivery,
             ))
     return CanvasDocument.model_validate(current.model_copy(
         update={"nodes": nodes, "connections": connections,

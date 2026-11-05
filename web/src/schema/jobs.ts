@@ -71,8 +71,6 @@ export interface JobParams {
   background?: 'auto' | 'opaque' | 'transparent';
   /** GPT Image 2.6：规划强度（与 quality 独立）与 GIF 输出；caller 只对支持的模型发。 */
   complexity?: 'low' | 'medium' | 'high';
-  /** 画布带标注输入连到 2.6 时发什么：缺省 = 支持时发原图 + 标注层；'composite' = 只发合成图。 */
-  annotation_delivery?: 'markup' | 'composite';
   output_format?: 'gif';
   frame_count?: number;
   frame_duration_ms?: number;
