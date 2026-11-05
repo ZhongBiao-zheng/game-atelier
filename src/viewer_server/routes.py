@@ -163,10 +163,11 @@ def get_config() -> dict:
 
 # 浏览器提交的参考路径字段：/api/raw 按 job 登记的这些路径放行读取，mj_image 还会把本地文件
 # 上传成公网直链，所以每一项都要过数据根闸门。
-# 减 mask_image：只由服务端写（画布局部编辑），两个浏览器入口都先把浏览器传的丢掉。
+# 减 mask_image / markup_image：只由服务端写（画布局部编辑 / 标注层），两个浏览器入口都先把浏览器传的丢掉。
 # 加 source_image：不是 JobParams 的声明字段，但 extra="allow" 让浏览器能塞进来，caller 会回退读它。
+_SERVER_OWNED_PATH_FIELDS = ("mask_image", "markup_image")
 _BROWSER_REF_FIELDS = tuple(
-    field for field in JOB_PARAM_PATH_FIELDS if field != "mask_image"
+    field for field in JOB_PARAM_PATH_FIELDS if field not in _SERVER_OWNED_PATH_FIELDS
 ) + ("source_image",)
 
 
@@ -222,10 +223,10 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                 # These fields identify an already billed provider task.  Browser edits must never
                 # replace or erase them, otherwise a forged/stale id could retrieve the wrong task
                 # or make the runner submit a second order after losing its recovery handle.
-                # mask_image 同理只由服务端写。
+                # mask_image / markup_image 同理只由服务端写。
                 for owned in (
                     "provider_task_protocol", "provider_task_ids", "video_submission_attempts",
-                    "mask_image", "image_edit", "mj_submission_ids", "mj_submit_uncertain",
+                    "mask_image", "markup_image", "image_edit", "mj_submission_ids", "mj_submit_uncertain",
                     "evolink_state", "edit_inputs", "edit_prompt",
                     "route_id", "route_order", "route_tried",
                 ):
@@ -287,7 +288,7 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
             raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）") from e
         whitelist = set(job.output_paths)
         params = job.params.model_dump() if job.params else {}
-        # 全部声明的路径字段都放行（含服务端写的 mask_image）；params 里的 extra 字段 source_image
+        # 全部声明的路径字段都放行（含服务端写的 mask_image / markup_image）；params 里的 extra 字段 source_image
         # 不放行——Job 顶层的 source_image 在下面单独加。
         for field in JOB_PARAM_PATH_FIELDS:
             value = params.get(field)
@@ -1590,6 +1591,7 @@ def _create_user_job(
     params.provider_task_ids = None
     params.video_submission_attempts = None
     params.mask_image = None
+    params.markup_image = None
     params.image_edit = None
     params.mj_submission_ids = None
     params.mj_submit_uncertain = None

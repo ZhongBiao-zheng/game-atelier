@@ -110,6 +110,8 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path | str,
     mask = kwargs.get("mask_image") or (kwargs.get("params") or {}).get("mask_image")
     if mask:
         raise ValueError("ChatGPT 订阅尚未开放蒙版编辑")
+    if kwargs.get("markup_image") or params.get("markup_image"):
+        raise ValueError("ChatGPT 订阅尚未开放标注层编辑")
     if refs:
         payload["images"] = [{"image_url": openai_image._image_data_url(p)} for p in refs]
     # size/quality/background remain absent until real-account probes establish support.

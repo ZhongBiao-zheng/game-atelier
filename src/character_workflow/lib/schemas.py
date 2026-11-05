@@ -119,7 +119,7 @@ class LayerDecompositionResult(BaseModel):
 # （mask_image 只由服务端写、extra 字段 source_image）在调用点显式加减。
 # 只是 Python 常量，不是模型字段，TS 端无对应。
 JOB_PARAM_PATH_FIELDS: tuple[str, ...] = (
-    "reference_images", "reference_videos", "reference_audios", "mask_image",
+    "reference_images", "reference_videos", "reference_audios", "mask_image", "markup_image",
     "mj_sref", "mj_cref", "mj_oref",
 )
 
@@ -167,6 +167,9 @@ class JobParams(BaseModel):
     reference_images: list[str] | None = None
     # Canvas 局部编辑专用：服务端从不可变 mask Content Version 解析，浏览器不能传路径。
     mask_image: str | None = None
+    # GPT Image 2.6 标注层（官方 edits 的 `markup`）：与首张参考图同尺寸的透明 PNG，由服务端从画布
+    # 标注的 markup Content Version 解析，浏览器不能传路径；与 mask_image 互斥。
+    markup_image: str | None = None
     image_edit: dict[str, Any] | None = None
     mj_submission_ids: list[str] | None = None
     mj_submit_uncertain: bool | None = None
@@ -204,6 +207,9 @@ class JobParams(BaseModel):
     background: Literal["auto", "opaque", "transparent"] | None = None
     # GPT Image 2.6：规划强度（与 quality 独立）与 GIF 输出；caller 只对支持的模型发。
     complexity: Literal["low", "medium", "high"] | None = None
+    # 画布带标注输入连到 GPT Image 2.6 时发什么：缺省 = 模型与渠道支持时发原图 + markup 标注层，
+    # "composite" 强制只发合成图（其他模型永远只发合成图，这个值不起作用）。
+    annotation_delivery: Literal["markup", "composite"] | None = None
     output_format: Literal["gif"] | None = None
     frame_count: int | None = Field(default=None, ge=2, le=64)
     frame_duration_ms: int | None = Field(default=None, ge=20, le=2000)
@@ -290,6 +296,8 @@ class CanvasSnapshotInput(BaseModel):
     node_id: str
     version_id: str
     kind: Literal["text", "image", "video", "audio"]
+    # 带标注输入按 markup 发送时：version_id 是原图，这里记标注层版本（透明 PNG）。
+    markup_version_id: str | None = None
 
 
 class CanvasGenerationSnapshot(BaseModel):
@@ -673,7 +681,7 @@ CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     "image": frozenset({
         "workflow_inputs",
         "n", "size", "size_mode", "custom_size", "ratio", "resolution", "quality",
-        "complexity", "output_format", "frame_count", "frame_duration_ms",
+        "complexity", "output_format", "frame_count", "frame_duration_ms", "annotation_delivery",
         "creation_asset_source_title", "prompt_asset_id",
         # 多角度生成由服务端写进结果 Draft，浏览器会原样回传，必须放行。
         "angle_horizontal", "angle_pitch", "angle_distance", "angle_wide",
@@ -805,6 +813,8 @@ class CanvasImageAnnotation(BaseModel):
     elements: list[AnnotationElement] = Field(default_factory=list, max_length=500)
     visible: bool = True
     rendered_version_id: str | None = Field(default=None, min_length=1, max_length=160)
+    # 只含标注、背景透明的同尺寸 PNG；给 GPT Image 2.6 的 markup 字段用，与合成图各自独立失效。
+    markup_version_id: str | None = Field(default=None, min_length=1, max_length=160)
 
     @model_validator(mode="after")
     def validate_scene(self) -> "CanvasImageAnnotation":
@@ -1372,6 +1382,12 @@ class CanvasDocument(BaseModel):
                         raise ValueError("annotation requires an owned rendered image version")
                     if (source.width, source.height) != (rendered.width, rendered.height):
                         raise ValueError("annotation must preserve source image dimensions")
+                if annotation.markup_version_id is not None:
+                    markup = self.content_versions.get(annotation.markup_version_id)
+                    if markup is None or markup.kind != "image" or markup.mime_type != "image/png":
+                        raise ValueError("annotation markup requires an owned PNG image version")
+                    if (source.width, source.height) != (markup.width, markup.height):
+                        raise ValueError("annotation markup must preserve source image dimensions")
             if node.type == "image_edit":
                 for linked_id in (node.data.source_node_id, node.data.reference_node_id):
                     linked = nodes_by_id.get(linked_id)
@@ -2122,7 +2138,7 @@ class CreationMediaAssetContent(BaseModel):
         return data
 
 
-RecipeInputRole = Literal["reference", "mask", "mj_sref", "mj_cref", "mj_oref"]
+RecipeInputRole = Literal["reference", "mask", "markup", "mj_sref", "mj_cref", "mj_oref"]
 RecipeMediaKind = Literal["image", "video", "audio"]
 
 

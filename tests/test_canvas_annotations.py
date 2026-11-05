@@ -20,7 +20,7 @@ def annotation_document():
         key: dict(version_id=key, kind="image", path=f"uploads/{key}.png", mime_type="image/png",
                   bytes=100, width=1024, height=768, sha256="a" * 64,
                   created_at="2026-10-24T00:00:00Z", origin={"kind": "upload", "upload_id": key})
-        for key in ["original", "rendered", "other"]
+        for key in ["original", "rendered", "other", "markup"]
     }
     return dict(project_id="canvas-annotation", updated_at="2026-10-24T00:00:00Z",
                 content_versions=versions, nodes=[
@@ -61,7 +61,8 @@ def test_annotation_bounds_scene_size():
         CanvasImageAnnotation(version_id="original", elements=[large] * 10)
 
 
-@pytest.mark.parametrize("case", ["missing", "rendered_size", "video", "slot", "source_type"])
+@pytest.mark.parametrize("case", ["missing", "rendered_size", "video", "slot", "source_type",
+                                  "markup_missing", "markup_size", "markup_mime"])
 def test_annotation_document_rejects_invalid_references(case):
     document = copy.deepcopy(annotation_document())
     source = document["nodes"][0]
@@ -69,6 +70,14 @@ def test_annotation_document_rejects_invalid_references(case):
         source["data"]["annotation"]["version_id"] = "missing"
     elif case == "rendered_size":
         document["content_versions"]["rendered"]["width"] = 50
+    elif case.startswith("markup"):
+        source["data"]["annotation"]["markup_version_id"] = "markup"
+        if case == "markup_missing":
+            del document["content_versions"]["markup"]
+        elif case == "markup_size":
+            document["content_versions"]["markup"]["height"] = 100
+        else:
+            document["content_versions"]["markup"]["mime_type"] = "image/jpeg"
     elif case == "video":
         source["type"] = "video"
         source["data"]["current_version_id"] = None
@@ -207,3 +216,127 @@ def test_annotation_versions_follow_project_package():
         version_id = getattr(annotation, field)
         assert resolve_canvas_media(source, version_id)[0].read_bytes() == resolve_canvas_media(
             imported.project_id, version_id)[0].read_bytes()
+
+
+def test_annotation_markup_accepted_and_kept_in_batch_versions():
+    document = copy.deepcopy(annotation_document())
+    document["nodes"][0]["data"]["annotation"]["markup_version_id"] = "markup"
+    parsed = CanvasDocument.model_validate(document)
+    assert parsed.nodes[0].data.annotation.markup_version_id == "markup"
+
+
+def markup_document(extra_input=False):
+    from character_workflow.lib.schemas import CanvasImageNode, CanvasInputConnection
+    document = parsed_document()
+    document.nodes[0].data.annotation.markup_version_id = "markup"
+    if extra_input:
+        document.nodes.append(CanvasImageNode.model_validate(dict(
+            id="plain", type="image", title="普通参考", position={"x": 0, "y": 0},
+            data=dict(current_version_id="other"))))
+        document.connections.insert(0, CanvasInputConnection(
+            id="plain-edge", role="input", source_node_id="plain", target_node_id="target"))
+    return document
+
+
+def test_markup_inputs_send_original_plus_layer_and_come_first():
+    from character_workflow.lib.canvas_runs import _resolve_inputs
+    document = markup_document(extra_input=True)
+    target = document.nodes[1]
+    composite = _resolve_inputs(document, target, target.data.generation_draft)
+    assert [(item.version_id, item.markup_version_id) for item in composite] == [
+        ("other", None), ("rendered", None)]
+    inputs = _resolve_inputs(document, target, target.data.generation_draft, markup=True)
+    assert [(item.order, item.version_id, item.annotated, item.markup_version_id) for item in inputs] == [
+        (0, "original", True, "markup"), (1, "other", False, None)]
+
+
+@pytest.mark.parametrize("case,message", [
+    ("unrendered", "标注层还没生成"), ("missing", "标注层还没生成"), ("two", "只能连接一张"),
+])
+def test_markup_input_errors(case, message):
+    from character_workflow.lib.canvas_runs import _resolve_inputs
+    from character_workflow.lib.schemas import CanvasImageNode, CanvasInputConnection
+    document = markup_document()
+    source, target = document.nodes[0], document.nodes[1]
+    if case == "unrendered":
+        source.data.annotation.markup_version_id = None
+    elif case == "missing":
+        del document.content_versions["markup"]
+    else:
+        second = CanvasImageNode.model_validate(dict(
+            id="second", type="image", title="第二张", position={"x": 0, "y": 0},
+            data=dict(current_version_id="other", annotation=dict(
+                version_id="other", rendered_version_id="rendered", markup_version_id="markup",
+                elements=ELEMENTS))))
+        document.nodes.append(second)
+        document.connections.append(CanvasInputConnection(
+            id="second-edge", role="input", source_node_id="second", target_node_id="target",
+            annotated=True))
+    with pytest.raises(ValueError, match=message):
+        _resolve_inputs(document, target, target.data.generation_draft, markup=True)
+
+
+@pytest.mark.parametrize("provider,model,delivery,expected", [
+    ("custom", "gpt-image-2.6-flare", None, True),
+    ("openai", "gpt-image-2.6-sunburst", "markup", True),
+    ("custom", "gpt-image-2.6-flare", "composite", False),
+    ("custom", "gpt-image-2.5-flare", None, False),
+    ("openrouter", "openai/gpt-image-2.6-flare", None, False),
+    ("atelier", "gpt-image-2.6-flare", None, False),
+])
+def test_uses_annotation_markup_by_model_transport_and_choice(provider, model, delivery, expected):
+    from character_workflow.lib.canvas_runs import uses_annotation_markup
+    from character_workflow.lib.keys import KeySpec, ModelSpec
+    from character_workflow.lib.schemas import CanvasGenerationDraft, JobParams
+    draft = CanvasGenerationDraft(mode="image", model=model, updated_at="2026-11-05T00:00:00Z",
+                                  params=JobParams(annotation_delivery=delivery))
+    key = KeySpec(alias="k", provider=provider, access_key="x", models=[],
+                  created_at="2026-11-05T00:00:00Z")
+    assert uses_annotation_markup(draft, key, ModelSpec(id=model, name=model)) is expected
+
+
+def test_prepare_generation_freezes_markup_path_for_gpt_image_26(monkeypatch):
+    from character_workflow.lib import canvas_runs
+    from character_workflow.lib.canvas_projects import (
+        read_canvas_document, save_canvas_document, save_canvas_upload,
+    )
+    from character_workflow.lib.keys import KeySpec, ModelSpec
+    from character_workflow.lib.schemas import CanvasGenerationDraft, JobKind, JobParams
+    from tests.test_canvas_paste_routes import _png
+    project_id, image = saved_annotation()
+    document = read_canvas_document(project_id)
+    markup, document, _ = save_canvas_upload(
+        project_id, "markup.png", ".png", _png(), "image", document.revision)
+    document.nodes[0].data.annotation.markup_version_id = markup.version_id
+    document.nodes[0].data.annotation.rendered_version_id = image.data.annotation.rendered_version_id
+    from character_workflow.lib.schemas import CanvasImageNode, CanvasInputConnection
+    document.nodes.append(CanvasImageNode.model_validate(dict(
+        id="target", type="image", title="改图", position={"x": 400, "y": 0},
+        data=dict(generation_draft=CanvasGenerationDraft(
+            mode="image", prompt="按图中标注修改", model="gpt-image-2.6-flare",
+            params=JobParams(annotation_delivery="markup", complexity="low"),
+            updated_at=document.updated_at).model_dump(mode="json")))))
+    document.connections.append(CanvasInputConnection(
+        id="edge", role="input", source_node_id=document.nodes[0].id, target_node_id="target",
+        annotated=True))
+    save_canvas_document(project_id, document, document.revision)
+    document = read_canvas_document(project_id)
+    key = KeySpec(alias="cu", provider="custom", access_key="x", base_url="https://api.example.com/v1",
+                  models=[ModelSpec(id="gpt-image-2.6-flare", name="2.6")],
+                  created_at=document.updated_at)
+    monkeypatch.setattr(canvas_runs, "_resolve_key_and_model",
+                        lambda draft, **kwargs: (key, key.models[0], JobKind.IMAGE))
+    prepared = canvas_runs.prepare_canvas_generation(project_id, document, document.nodes[-1])
+    assert prepared.inputs[0].markup_version_id == markup.version_id
+    assert prepared.inputs[0].version_id == document.nodes[0].data.annotation.version_id
+    assert prepared.job_params.markup_image.endswith(markup.path.rsplit("/", 1)[-1])
+    assert prepared.job_params.reference_images[0].endswith(
+        document.content_versions[prepared.inputs[0].version_id].path.rsplit("/", 1)[-1])
+    assert prepared.normalized["annotation_delivery"] == "markup"
+    # 切回合成图：解析回合成版本，参数里不再留 annotation_delivery，也不写 markup 路径。
+    document.nodes[-1].data.generation_draft.params.annotation_delivery = "composite"
+    prepared = canvas_runs.prepare_canvas_generation(project_id, document, document.nodes[-1])
+    assert prepared.inputs[0].version_id == image.data.annotation.rendered_version_id
+    assert prepared.inputs[0].markup_version_id is None
+    assert prepared.job_params.markup_image is None
+    assert "annotation_delivery" not in prepared.normalized

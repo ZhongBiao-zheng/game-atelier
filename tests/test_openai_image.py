@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import io
 from http.client import IncompleteRead
 import json
 from pathlib import Path
@@ -2493,3 +2494,51 @@ def test_tuzi_gpt_image_26_complexity_skips_native_task_route(tmp_path, monkeypa
                         output_dir=tmp_path / "o", params={"complexity": "low"})
     assert posted["url"].endswith("/images/generations")
     assert posted["body"]["complexity"] == "low"
+
+
+def _markup_fixture(tmp_path, size=(32, 32), markup_size=None):
+    from PIL import Image
+    ref, markup = tmp_path / "source.png", tmp_path / "markup.png"
+    Image.new("RGB", size, "red").save(ref)
+    Image.new("RGBA", markup_size or size, (0, 0, 0, 0)).save(markup)
+    return ref, markup
+
+
+def test_gpt_image_26_edits_send_markup_layer(tmp_path, monkeypatch):
+    from PIL import Image
+    _custom_key(tmp_path, monkeypatch)
+    ref, markup = _markup_fixture(tmp_path)
+    seen = {}
+    def fake_post(url, key, *, fields, files, timeout):
+        seen.update(url=url, fields=fields, files=files)
+        return {"data": [{"b64_json": "aGk="}]}
+    monkeypatch.setattr(openai_image, "_post_multipart", fake_post)
+    openai_image.render(prompt="p", model="gpt-image-2.6-flare", alias="cu",
+                        output_dir=tmp_path / "o", reference_images=[str(ref)],
+                        params={"markup_image": str(markup), "complexity": "medium"})
+    assert seen["url"].endswith("/images/edits")
+    assert seen["fields"]["complexity"] == "medium"
+    names = [part[0] for part in seen["files"]]
+    assert names == ["image", "markup"]
+    with Image.open(io.BytesIO(seen["files"][1][1][1])) as sent:
+        assert sent.mode == "RGBA" and sent.size == (32, 32)
+
+
+@pytest.mark.parametrize("case,message", [
+    ("model", "不支持标注层"), ("mask", "不能同时使用"), ("size", "不一致"), ("no_ref", "第一张参考图"),
+])
+def test_markup_rejections_before_billing(tmp_path, monkeypatch, case, message):
+    _custom_key(tmp_path, monkeypatch)
+    ref, markup = _markup_fixture(tmp_path, markup_size=(16, 16) if case == "size" else None)
+    monkeypatch.setattr(openai_image, "_post_multipart",
+                        lambda *a, **k: pytest.fail("must not reach the provider"))
+    monkeypatch.setattr(openai_image, "_post_json",
+                        lambda *a, **k: pytest.fail("must not reach the provider"))
+    params = {"markup_image": str(markup)}
+    model = "gpt-image-2.5-flare" if case == "model" else "gpt-image-2.6-flare"
+    if case == "mask":
+        params["mask_image"] = str(markup)
+    refs = [] if case == "no_ref" else [str(ref)]
+    with pytest.raises(openai_image.OpenAIImageError, match=message):
+        openai_image.render(prompt="p", model=model, alias="cu", output_dir=tmp_path / "o",
+                            reference_images=refs, params=params)

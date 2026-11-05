@@ -2441,6 +2441,7 @@ export function CanvasGenerationComposer({
             workflowInputs={selectedModel?.workflow_inputs}
             model={channelModelId}
             baseUrl={channel?.key.base_url}
+            annotatedInput={mentionReferences.some(reference => reference.annotated)}
             params={draft.params}
             onPatch={patch => updateDraftWithHistory(current => {
               const merged = { ...current.params, ...patch };

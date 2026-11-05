@@ -238,6 +238,28 @@ describe('CanvasImageSettings', () => {
     expect(screen.queryByText('分辨率')).not.toBeInTheDocument();
   });
 
+  it('offers markup layer vs composite only for annotated inputs on GPT Image 2.6', () => {
+    const onPatch = vi.fn();
+    const { rerender } = render(
+      <CanvasImageSettings caps={imageControlCaps('gpt-image-2.6-flare', 'openai')} model="gpt-image-2.6-flare"
+        params={{ size_mode: 'auto', size: 'auto' }} onPatch={onPatch} annotatedInput />,
+    );
+    expect(screen.getByRole('button', { name: '图片设置' })).toHaveTextContent('标注层');
+    fireEvent.click(screen.getByRole('button', { name: '图片设置' }));
+    fireEvent.click(screen.getByRole('radio', { name: '合成图' }));
+    expect(onPatch).toHaveBeenCalledWith({ annotation_delivery: 'composite' });
+    rerender(
+      <CanvasImageSettings caps={imageControlCaps('gpt-image-2', 'openai')} model="gpt-image-2"
+        params={{ size_mode: 'auto', size: 'auto' }} onPatch={onPatch} annotatedInput />,
+    );
+    expect(screen.queryByLabelText('选择标注发送方式')).not.toBeInTheDocument();
+    rerender(
+      <CanvasImageSettings caps={imageControlCaps('gpt-image-2.6-flare', 'openai')} model="gpt-image-2.6-flare"
+        params={{ size_mode: 'auto', size: 'auto' }} onPatch={onPatch} />,
+    );
+    expect(screen.queryByLabelText('选择标注发送方式')).not.toBeInTheDocument();
+  });
+
   it('uses Seedream resolution controls without inventing quality', () => {
     render(
       <CanvasImageSettings

@@ -26,6 +26,8 @@ export interface JobParams {
   reference_images?: string[];
   /** Canvas 局部编辑的服务端解析 mask 路径；浏览器不直接写入。 */
   mask_image?: string;
+  /** GPT Image 2.6 标注层（官方 edits 的 markup）的服务端解析路径；浏览器不直接写入。 */
+  markup_image?: string;
   image_edit?: Record<string, unknown>;
   mj_submission_ids?: string[];
   mj_submit_uncertain?: boolean;
@@ -69,6 +71,8 @@ export interface JobParams {
   background?: 'auto' | 'opaque' | 'transparent';
   /** GPT Image 2.6：规划强度（与 quality 独立）与 GIF 输出；caller 只对支持的模型发。 */
   complexity?: 'low' | 'medium' | 'high';
+  /** 画布带标注输入连到 2.6 时发什么：缺省 = 支持时发原图 + 标注层；'composite' = 只发合成图。 */
+  annotation_delivery?: 'markup' | 'composite';
   output_format?: 'gif';
   frame_count?: number;
   frame_duration_ms?: number;
@@ -162,6 +166,8 @@ export interface CanvasGenerationSnapshot {
     node_id: string;
     version_id: string;
     kind: 'text' | 'image' | 'video' | 'audio';
+    /** 带标注输入按标注层发送时：version_id 是原图，这里是透明 PNG 标注层。 */
+    markup_version_id?: string | null;
   }>;
   mask_version_id: string | null;
   submitted_at: string;

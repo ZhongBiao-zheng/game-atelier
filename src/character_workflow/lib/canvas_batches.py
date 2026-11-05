@@ -382,7 +382,8 @@ def prepare_canvas_batch(project_id: str, payload: CanvasBatchCreate) -> CanvasB
         for node in frozen_nodes:
             annotation = getattr(node.data, "annotation", None)
             if annotation:
-                version_ids.update([annotation.version_id, annotation.rendered_version_id])
+                version_ids.update([annotation.version_id, annotation.rendered_version_id,
+                                    annotation.markup_version_id])
         version_ids.update(version_id for item in items for version_id in item.image_version_ids)
         version_ids.update(version_id for node in frozen_nodes
                            if getattr(node.data, "batch_result", None)

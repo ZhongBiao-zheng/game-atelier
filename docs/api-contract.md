@@ -376,8 +376,9 @@ Canvas 媒体只按项目内不可变 `version_id` 读取，不接受裸路径�
 文本节点的 `data.display.scale` 只接受 Atelier 字阶 token `xs/sm/base`，缺省为 `sm`；字号切换属于
 Document 显示状态并参与 revision 与 undo/redo，不修改文本 Content Version。图片/视频继续使用
 `data.display.fit/free_resize`；视频和音频播放进度、音量与控件焦点只属于浏览器呈现状态，不落盘。
-图片节点可保存 `data.annotation = { version_id, elements, visible, rendered_version_id }`，无提示词字段。
-`version_id` 固定原图；`rendered_version_id` 可空，非空时必须是本项目拥有且尺寸与原图一致的图片。
+图片节点可保存 `data.annotation = { version_id, elements, visible, rendered_version_id, markup_version_id }`，无提示词字段。
+`version_id` 固定原图；`rendered_version_id`（合成图）与 `markup_version_id`（只含标注的透明 PNG 标注层）都可空，
+非空时必须是本项目拥有且尺寸与原图一致的图片，标注层还必须是 `image/png`。两者由浏览器各自按需合成、各自独立失效。
 `visible` 默认 true；显示还要求 `version_id == current_version_id`，切版本仅隐藏。标注修改使合成版本失效，
 删除全部元素写 null。视频及其他节点不得带 annotation。原图不被覆盖，也不创建独立标注节点。
 元素类型为 `rect/arrow/freedraw/text`，共用 `id`、`color`，拒绝未知字段。最多 500 个、JSON 不超过 2 MiB。
@@ -387,8 +388,15 @@ Document 显示状态并参与 revision 与 undo/redo，不修改文本 Content 
 线宽 1–24、字号 12–72 使用基准单位：实际像素 = 值 × max(原图宽, 原图高) / 1024。
 节点、全屏和 PNG 合成共用 SVG 渲染器，原尺寸原图从版本媒体接口读取，不把图片字节写入 JSON。
 Input Connection 新增 `annotated: boolean = false`，仅允许图片来源且 `slot` 必须为空。
-带标注输入解析为来源的 `annotation.rendered_version_id`，不同时发送原图；显隐不影响输入。
-来源标注清空、切换到无标注版本或合成图缺失时拒绝提交。普通输入仍解析当前版本，分组展开保持普通输入，
+带标注输入默认解析为来源的 `annotation.rendered_version_id`（合成图），不同时发送原图；显隐不影响输入。
+来源标注清空、切换到无标注版本或合成图缺失时拒绝提交。
+目标 Draft 的模型支持 GPT Image 2.6 能力且渠道走官方 `/images/edits`（`canvas_runs.uses_annotation_markup`：
+provider 为 openai/custom 且协议为 openai；OpenRouter、局域网网关、订阅都不透传）时改为「原图 + 标注层」：
+输入解析为 `annotation.version_id`，Snapshot Input 记 `markup_version_id`，服务端把标注层绝对路径写进
+`job.params.markup_image`（服务端独占路径字段，浏览器两个入口都丢弃，`/api/raw` 按 job 放行）。
+带标注层的输入固定排到第一位（官方要求标注层与首张输入图同尺寸），且只允许一条；缺标注层或多于一条时拒绝提交。
+Draft `params.annotation_delivery = "composite"` 强制只发合成图（浏览器可提交字段，只在 2.6 控件上出现），
+不走标注层时服务端不保留该字段。提交前浏览器总是准备合成图，目标为 2.6 且未选合成图时再多准备一张标注层。普通输入仍解析当前版本，分组展开保持普通输入，
 同一来源既直连又在组内时以直连标记为准。Snapshot Input 同样保存 annotated，结果回连接续标记。
 「去改图」仅上传隐藏合成版本、创建图片生成节点与 annotated 输入，预填「按图中标注修改，输出不保留标注。」；
 不提交 Job。普通和批量提交前自动重新合成失效标注；合成版本派生写入不占撤回历史。
@@ -1140,7 +1148,8 @@ Tuzi GPT Image 2.5 与 2.6 系列在 Studio 与 Canvas 提供五档质量：低/
 - `params.complexity`：`low | medium | high`，规划强度，与 `quality` 独立。`high` 是官方默认值，caller 不发；只有 `low | medium` 进请求体（Tuzi 对未知字段 400，少发一个字段少一条故障路径）。
 - `params.output_format = "gif"` + `frame_count`（2–64，默认 9）+ `frame_duration_ms`（20–2000，默认 200，10ms 取整）：动图只走 `/images/generations`，带参考图或蒙版时 caller 直接拒绝（不计费）；前端带参考图时也不提交 GIF 字段。产物按文件头存成 `.gif`，`image_dimensions` 读 GIF 头，画布导入 mime 为 `image/gif`，缩略图接口对动图退回原图。
 - 这四个字段在 `JobParams` 双端声明、进入 Canvas 浏览器可提交白名单与局域网网关图片白名单；换到不支持的模型时前端 `normalizeImageSizeParams` 与服务端 `_normalized_image_preference_params` 都会丢掉它们。Canvas 生成偏好只记住 `complexity`，GIF 是当次的选择。
-- 不做：SVG 输出（官方 reference 要求 `svg.model` 与额外权限，网关不透传，产物管线按位图设计）、`markup` 标注层（画布标注已定只发合成图）。两家网关 2026-11-05 对 2.6 都回「价格未配置」，size=auto 放行按 2.5 同系推定，上架后复验。
+- `markup` 标注层：官方 `/images/edits` 的 multipart 字段，与首张输入图同宽高的透明 PNG，各 ≤16,777,216 像素；不能与 `mask` 同用。caller 只对 `supports_image_complexity` 为真的模型发 `markup`，同时带 `mask_image` 时直接报错不计费；来源只有画布标注（见「画布标注」节的 `markup_version_id` / `params.markup_image`），Studio 没有入口。
+- 不做：SVG 输出（官方 reference 要求 `svg.model` 与额外权限，网关不透传，产物管线按位图设计）。两家网关 2026-11-05 对 2.6 都回「价格未配置」，size=auto 放行按 2.5 同系推定，上架后复验；markup 的真实请求同样待上架后复验。
 - OpenRouter 实测（2026-11-05，真打两次）：`complexity` 传非法值照样 200 出图 = 字段被 OpenRouter 剥离不透传；`output_format=gif` 被其 schema 400 拒（只认 png/jpeg/webp/svg）。所以 OpenRouter 渠道不暴露规划与 GIF，这是协议级限制。同渠道 2.6 Flare AUTO/低 一张 19s、¥0.19，AUTO 实际出 1312×1199。
 
 ### 模型菜单元数据（本机只读）

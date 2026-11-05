@@ -27,7 +27,7 @@ export function useCanvasAnnotation(document: CanvasDocument | null, selectedIds
     commit(current => ({ ...current, nodes: current.nodes.map(node => {
       if (node.id !== id || node.type !== 'image' || !node.data.current_version_id) return node;
       return { ...node, data: { ...node.data, annotation: elements.length ? {
-        version_id: node.data.current_version_id, elements, visible: true, rendered_version_id: null,
+        version_id: node.data.current_version_id, elements, visible: true, rendered_version_id: null, markup_version_id: null,
       } : null } };
     }) }), true);
   }, [commit]);

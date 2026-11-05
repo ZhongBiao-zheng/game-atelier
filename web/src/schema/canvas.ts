@@ -195,6 +195,8 @@ export interface CanvasImageAnnotation {
   elements: AnnotationElement[];
   visible: boolean;
   rendered_version_id: string | null;
+  /** 只含标注、背景透明的同尺寸 PNG（GPT Image 2.6 markup）；与合成图各自独立失效。 */
+  markup_version_id?: string | null;
 }
 
 export interface CanvasVideoNode extends CanvasNodeBase {

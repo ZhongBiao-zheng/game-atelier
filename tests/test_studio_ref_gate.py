@@ -124,6 +124,13 @@ def test_create_drops_browser_supplied_mask_image(client, isolated_data_root):
     assert read_job(response.json()["job_id"]).params.mask_image is None
 
 
+def test_create_drops_browser_supplied_markup_image(client, isolated_data_root):
+    response = _create(client, {"markup_image": str(isolated_data_root / ".config" / "keys.json")})
+
+    assert response.status_code == 201
+    assert read_job(response.json()["job_id"]).params.markup_image is None
+
+
 def test_create_drops_browser_supplied_video_diagnostics(client):
     response = _create(client, {"video_submission_attempts": [{
         "attempt": 1, "url": "https://example.test/tasks", "started_at": "old",
@@ -158,6 +165,17 @@ def test_post_prompt_accepts_references_inside_data_root(client, isolated_data_r
 
     assert response.status_code == 200, response.text
     assert read_job(job_id).params.reference_images == [str(Path(p).resolve()) for p in allowed]
+
+
+def test_post_prompt_cannot_set_markup_image(client, isolated_data_root):
+    job_id = _create(client, {}).json()["job_id"]
+    keys_file = str(isolated_data_root / ".config" / "keys.json")
+
+    response = client.post(f"/api/prompt/{job_id}", json={"params": {"markup_image": keys_file}})
+
+    assert response.status_code == 200
+    assert read_job(job_id).params.markup_image is None
+    assert client.get("/api/raw", params={"job_id": job_id, "path": keys_file}).status_code == 403
 
 
 def test_post_prompt_cannot_set_mask_image(client, isolated_data_root):

@@ -16,6 +16,14 @@ describe('GPT Image 2.6 params follow the model', () => {
     expect(dropped.frame_duration_ms).toBeUndefined();
   });
 
+  it('keeps the composite choice only on 2.6 and never stores the markup default', () => {
+    const composite = { size_mode: 'auto' as const, size: 'auto', annotation_delivery: 'composite' as const };
+    expect(normalizeImageSizeParams('gpt-image-2.6-flare', 'openai', null, composite).annotation_delivery).toBe('composite');
+    expect(normalizeImageSizeParams('gpt-image-2.5-flare', 'openai', null, composite).annotation_delivery).toBeUndefined();
+    const markup = { ...composite, annotation_delivery: 'markup' as const };
+    expect(normalizeImageSizeParams('gpt-image-2.6-flare', 'openai', null, markup).annotation_delivery).toBeUndefined();
+  });
+
   it('never submits GIF alongside reference images', () => {
     const caps = imageControlCaps('gpt-image-2.6-sunburst', 'openai');
     const source = { complexity: 'medium' as const, output_format: 'gif' as const, frame_count: 4, frame_duration_ms: 100 };

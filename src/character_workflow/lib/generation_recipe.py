@@ -45,7 +45,7 @@ from character_workflow.lib.schemas import (
 # 运行后由 caller / runner 回写的状态、指回本机对象的来源记录。
 RECIPE_PARAM_EXCLUDE = frozenset({
     # 本机文件路径
-    "reference_images", "reference_videos", "reference_audios", "mask_image",
+    "reference_images", "reference_videos", "reference_audios", "mask_image", "markup_image",
     "mj_sref", "mj_cref", "mj_oref", "archived_from_path",
     # 费用
     "estimated_cost_cny", "actual_cost_cny",
@@ -63,7 +63,8 @@ RECIPE_PARAM_ALLOW = frozenset(set(JobParams.model_fields) - RECIPE_PARAM_EXCLUD
 # 参考在快照里的顺序（order 全局递增）= JOB_PARAM_PATH_FIELDS 的顺序；首尾帧靠 params.frame_mode
 # 解释 reference_images 顺序。不含 params 里的 extra 字段 source_image：未声明的键不进快照。
 _REF_ROLES: dict[str, RecipeInputRole] = {
-    "mask_image": "mask", "mj_sref": "mj_sref", "mj_cref": "mj_cref", "mj_oref": "mj_oref",
+    "mask_image": "mask", "markup_image": "markup",
+    "mj_sref": "mj_sref", "mj_cref": "mj_cref", "mj_oref": "mj_oref",
 }
 _JOB_REF_FIELDS: tuple[tuple[str, RecipeInputRole], ...] = tuple(
     (field, _REF_ROLES.get(field, "reference")) for field in JOB_PARAM_PATH_FIELDS
@@ -309,6 +310,9 @@ def recipe_from_canvas_result(
     ]
     if snapshot.mask_version_id is not None:
         refs.append(("mask", _canvas_media(canvas_project_id, snapshot.mask_version_id)))
+    for row in snapshot.inputs:
+        if row.markup_version_id:
+            refs.append(("markup", _canvas_media(canvas_project_id, row.markup_version_id)))
     inputs = [_recipe_input(order, role, path) for order, (role, path) in enumerate(refs)]
     cost_cny, cost_basis = _job_cost(job)
     recipe = GenerationRecipe(

@@ -2,7 +2,8 @@ import { canvasMediaUrl, uploadCanvasMedia } from '@/api/canvas';
 import type { CanvasDocument, CanvasGenerationDraft } from '@/schema/canvas';
 import { acceptServerContentVersions } from '@/pages/canvasEditorModel';
 import { createConnectedCanvasSurface } from '@/pages/canvasEditorModel';
-import { composeAnnotatedImage } from './composeAnnotatedImage';
+import { composeAnnotatedImage, composeAnnotationMarkup } from './composeAnnotatedImage';
+import { supportsGptImage26 } from '@/lib/imageControlCaps';
 export interface AnnotationDocumentBridge {
   projectId: string;
   current: () => CanvasDocument | null;
@@ -19,17 +20,21 @@ function sourceAnnotation(document: CanvasDocument | null, id: string) {
   if (node.data.annotation.version_id !== node.data.current_version_id) throw new Error(`「${node.title}」当前版本没有标注，切回标注所在版本或断开连接`);
   return node.data.annotation;
 }
-export async function ensureAnnotationRendered(bridge: AnnotationDocumentBridge, nodeId: string) {
+type AnnotationDerivedField = 'rendered_version_id' | 'markup_version_id';
+async function ensureAnnotationDerived(bridge: AnnotationDocumentBridge, nodeId: string, field: AnnotationDerivedField) {
   if (bridge.busy()) throw new Error('画布正在处理其他操作，请稍后再试');
   const current = bridge.current(), annotation = sourceAnnotation(current, nodeId);
-  const rendered = annotation.rendered_version_id ? current?.content_versions[annotation.rendered_version_id] : undefined;
-  if (rendered?.kind === 'image') return rendered.version_id;
+  const existingId = annotation[field];
+  const existing = existingId ? current?.content_versions[existingId] : undefined;
+  if (existing?.kind === 'image') return existing.version_id;
   const version = current?.content_versions[annotation.version_id];
   if (version?.kind !== 'image' || !version.width || !version.height) throw new Error('找不到标注原图尺寸');
   const fingerprint = JSON.stringify([annotation.version_id, annotation.elements]);
   bridge.lock(true);
   try {
-    const file = await composeAnnotatedImage(canvasMediaUrl(bridge.projectId, version.version_id), annotation.elements, version.width, version.height);
+    const file = field === 'markup_version_id'
+      ? await composeAnnotationMarkup(annotation.elements, version.width, version.height)
+      : await composeAnnotatedImage(canvasMediaUrl(bridge.projectId, version.version_id), annotation.elements, version.width, version.height);
     const uploaded = await uploadCanvasMedia(bridge.projectId, file, bridge.revision());
     bridge.setRevision(uploaded.document.revision);
     const latest = bridge.current(); if (!latest) throw new Error('画布已关闭');
@@ -42,9 +47,24 @@ export async function ensureAnnotationRendered(bridge: AnnotationDocumentBridge,
       throw new Error('标注已改变，请重新提交');
     }
     bridge.apply({ ...next, nodes: next.nodes.map(node => node.id === nodeId && node.type === 'image'
-      ? { ...node, data: { ...node.data, annotation: { ...live, rendered_version_id: uploaded.version.version_id } } } : node) }, false);
+      ? { ...node, data: { ...node.data, annotation: { ...live, [field]: uploaded.version.version_id } } } : node) }, false);
     return uploaded.version.version_id;
   } finally { bridge.lock(false); }
+}
+/** 合成图：原图 + 标注一张 PNG。 */
+export function ensureAnnotationRendered(bridge: AnnotationDocumentBridge, nodeId: string) {
+  return ensureAnnotationDerived(bridge, nodeId, 'rendered_version_id');
+}
+/** 标注层：只含标注的透明 PNG（GPT Image 2.6 markup）。 */
+export function ensureAnnotationMarkup(bridge: AnnotationDocumentBridge, nodeId: string) {
+  return ensureAnnotationDerived(bridge, nodeId, 'markup_version_id');
+}
+/** 目标节点的 Draft 是否会按「原图 + 标注层」发送：模型支持 2.6 能力且没切回合成图。
+ *  渠道是否真走官方 edits 由服务端判（uses_annotation_markup）；这里多算一张标注层只是多一次上传。 */
+export function draftWantsAnnotationMarkup(document: CanvasDocument | null, targetNodeId: string) {
+  const node = document?.nodes.find(n => n.id === targetNodeId);
+  const draft = node && 'generation_draft' in node.data ? node.data.generation_draft : null;
+  return !!draft && draft.mode === 'image' && supportsGptImage26(draft.model) && draft.params.annotation_delivery !== 'composite';
 }
 export async function ensureAnnotatedInputs(bridge: AnnotationDocumentBridge, targetNodeId: string, upstream = false) {
   const document = bridge.current();
@@ -56,9 +76,15 @@ export async function ensureAnnotatedInputs(bridge: AnnotationDocumentBridge, ta
       document.connections.forEach(edge => { if (edge.role === 'input' && edge.target_node_id === id) targets.add(edge.source_node_id); });
     }
   }
-  const sources = new Set(bridge.current()?.connections.flatMap(edge => edge.role === 'input' && edge.annotated
-    && targets.has(edge.target_node_id) ? [edge.source_node_id] : []) ?? []);
+  const sources = new Set<string>(), markupSources = new Set<string>();
+  for (const edge of bridge.current()?.connections ?? []) {
+    if (edge.role !== 'input' || !edge.annotated || !targets.has(edge.target_node_id)) continue;
+    sources.add(edge.source_node_id);
+    if (draftWantsAnnotationMarkup(bridge.current(), edge.target_node_id)) markupSources.add(edge.source_node_id);
+  }
+  // 合成图始终准备：服务端在渠道不透传 markup 时会退回合成图，不能到那时才发现没图。
   for (const id of sources) await ensureAnnotationRendered(bridge, id);
+  for (const id of markupSources) await ensureAnnotationMarkup(bridge, id);
   if (sources.size && !await bridge.persist()) throw new Error('标注尚未保存，请重试');
 }
 export async function createAnnotatedGeneration(bridge: AnnotationDocumentBridge, nodeId: string, draft: CanvasGenerationDraft) {

@@ -783,11 +783,33 @@ def canvas_input_sources(
     return candidates
 
 
+def uses_annotation_markup(draft: CanvasGenerationDraft, key: KeySpec, model: ModelSpec) -> bool:
+    """带标注输入是否按「原图 + markup 标注层」发送（GPT Image 2.6 官方 edits 的 markup 字段）。
+
+    判据按模型（supports_image_complexity）加渠道（必须是走官方 /images/edits 的 openai/custom
+    协议路径；OpenRouter / 局域网网关 / 订阅都不透传 markup）；用户在 Draft 里选
+    annotation_delivery="composite" 可以切回只发合成图。
+    """
+    from character_workflow.lib.callers.openai_image import (
+        _effective_image_protocol,
+        supports_image_complexity,
+        supports_image_mask,
+    )
+
+    if draft.mode != "image" or draft.params.annotation_delivery == "composite":
+        return False
+    return supports_image_complexity(model.id) and supports_image_mask(
+        key.provider, model.id, _effective_image_protocol(key, model.id),
+    )
+
+
 def _resolve_inputs(
     document: CanvasDocument,
     surface: CanvasNode,
     draft: CanvasGenerationDraft,
     version_bindings: dict[str, list[str]] | None = None,
+    *,
+    markup: bool = False,
 ) -> list[CanvasSnapshotInput]:
     candidates = canvas_input_sources(document, surface, draft)
     batch_result = getattr(surface.data, "batch_result", None)
@@ -796,6 +818,7 @@ def _resolve_inputs(
 
     nodes = {node.id: node for node in document.nodes}
     resolved: list[CanvasSnapshotInput] = []
+    markup_version_id: str | None = None
     for source, node_id, annotated in candidates:
         node = nodes.get(node_id)
         if node is not None and node.type == "batch_material" and version_bindings is None:
@@ -809,9 +832,20 @@ def _resolve_inputs(
                 raise ValueError(f"「{title}」的标注已被清除，请断开这条连接或重新标注")
             if annotation.version_id != version_id:
                 raise ValueError(f"「{title}」当前版本没有标注，切回标注所在版本或断开连接")
-            if not annotation.rendered_version_id or annotation.rendered_version_id not in document.content_versions:
-                raise ValueError(f"「{title}」的标注图还没生成，请重新提交")
-            version_ids = [annotation.rendered_version_id]
+            if markup:
+                # 官方 markup 要求与首张输入图同尺寸、且只有一张：带标注的原图排到第一位。
+                if markup_version_id is not None:
+                    raise ValueError("标注层模式只能连接一张带标注的图片，请改为合成图或断开多余连接")
+                if (not annotation.markup_version_id
+                        or annotation.markup_version_id not in document.content_versions):
+                    raise ValueError(f"「{title}」的标注层还没生成，请重新提交")
+                markup_version_id = annotation.markup_version_id
+                version_ids = [annotation.version_id]
+            else:
+                if (not annotation.rendered_version_id
+                        or annotation.rendered_version_id not in document.content_versions):
+                    raise ValueError(f"「{title}」的标注图还没生成，请重新提交")
+                version_ids = [annotation.rendered_version_id]
         if node is None or not version_ids or any(
             item not in document.content_versions for item in version_ids
         ):
@@ -837,7 +871,13 @@ def _resolve_inputs(
                 version_id=version.version_id,
                 kind=version.kind,
                 annotated=annotated,
+                markup_version_id=markup_version_id if annotated and markup else None,
             ))
+    if markup_version_id is not None:
+        # 标注层只认首张输入图的尺寸：带标注的原图提到第一位，其余顺序不变，编号随之重算。
+        resolved.sort(key=lambda item: item.markup_version_id is None)
+        resolved = [item.model_copy(update={"order": order}) for order, item in enumerate(resolved)]
+
     return resolved
 
 
@@ -917,6 +957,24 @@ def _input_paths(
             raise ValueError("生成输入媒体不存在或不属于当前画布")
         paths[version.kind].append(str(target))
     return paths
+
+
+def _markup_path(
+    project_id: str,
+    document: CanvasDocument,
+    inputs: list[CanvasSnapshotInput],
+) -> str | None:
+    """带标注输入按 markup 发送时的标注层绝对路径；没有则 None。"""
+    root = canvas_project_dir(project_id).resolve()
+    for item in inputs:
+        if not item.markup_version_id:
+            continue
+        version = document.content_versions[item.markup_version_id]
+        target = (root / version.path).resolve()
+        if not target.is_relative_to(root) or not target.is_file():
+            raise ValueError("标注层文件不存在或不属于当前画布")
+        return str(target)
+    return None
 
 
 def _trim_group_images_to_limit(
@@ -1456,7 +1514,14 @@ def prepare_canvas_generation(
     key, model, kind = _resolve_key_and_model(
         draft, selection_params=selection_params, route_order=route_order, consume_route=consume_route,
     )
+    if uses_annotation_markup(draft, key, model):
+        # 2.6 走官方 edits 的 markup：带标注输入改发原图 + 透明标注层。只有模型与渠道都定下来
+        # 才知道走不走，所以先按合成图解析一次用于选路估价，再按标注层重解析。
+        inputs = _resolve_inputs(document, surface, draft, version_bindings, markup=True)
     normalized, job_params, effective_count = _normalized_params(draft, requested_count, key, model)
+    if not any(item.markup_version_id for item in inputs):
+        normalized.pop("annotation_delivery", None)
+        job_params.annotation_delivery = None
     job_params.route_order = route_order or None
     if not job_params.prompt_asset_id:
         for item in inputs:
@@ -1500,6 +1565,7 @@ def prepare_canvas_generation(
         job_params.reference_images = media_paths["image"] or None
         job_params.reference_videos = media_paths["video"] or None
         job_params.reference_audios = media_paths["audio"] or None
+        job_params.markup_image = _markup_path(project_id, document, inputs)
     return PreparedCanvasGeneration(
         key, model, kind, draft, normalized, job_params, inputs, effective_count, final_prompt,
     )

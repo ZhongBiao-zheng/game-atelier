@@ -1,10 +1,10 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { createAnnotatedGeneration, ensureAnnotatedInputs, ensureAnnotationRendered, type AnnotationDocumentBridge } from './annotationRendering';
 import { uploadCanvasMedia } from '@/api/canvas';
-import { composeAnnotatedImage } from './composeAnnotatedImage';
+import { composeAnnotatedImage, composeAnnotationMarkup } from './composeAnnotatedImage';
 import type { CanvasDocument, CanvasGenerationDraft, CanvasImageNode, CanvasMediaVersion } from '@/schema/canvas';
 vi.mock('@/api/canvas', () => ({ canvasMediaUrl: (_p: string, v: string) => `/media/${v}`, uploadCanvasMedia: vi.fn() }));
-vi.mock('./composeAnnotatedImage', () => ({ composeAnnotatedImage: vi.fn() }));
+vi.mock('./composeAnnotatedImage', () => ({ composeAnnotatedImage: vi.fn(), composeAnnotationMarkup: vi.fn() }));
 const version: CanvasMediaVersion = { version_id: 'original', kind: 'image', path: 'uploads/original.png', width: 1024, height: 768,
   mime_type: 'image/png', bytes: 100, sha256: 'a'.repeat(64), created_at: '2026-10-24T00:00:00Z', origin: { kind: 'upload', upload_id: 'original' } };
 const draft: CanvasGenerationDraft = { mode: 'image', model: 'gpt-image-2', alias: null, prompt: '', params: {}, input_policy: 'all_connected', updated_at: version.created_at };
@@ -21,6 +21,7 @@ beforeEach(() => {
     setRevision: value => { revision = value; }, apply: vi.fn(next => { document = next; }), persist: vi.fn(async () => true),
     busy: () => locked, lock: value => { locked = value; } };
   vi.mocked(composeAnnotatedImage).mockResolvedValue(new File(['png'], 'annotation.png'));
+  vi.mocked(composeAnnotationMarkup).mockResolvedValue(new File(['png'], 'markup.png'));
   vi.mocked(uploadCanvasMedia).mockImplementation(async () => {
     const rendered = { ...version, version_id: `rendered-${revision + 1}` };
     return { version: rendered, document: { ...document, revision: revision + 1, content_versions: { ...document.content_versions, [rendered.version_id]: rendered } } } as Awaited<ReturnType<typeof uploadCanvasMedia>>;
@@ -60,4 +61,26 @@ it('rejects cleared annotations without uploading', async () => {
   (document.nodes[0] as CanvasImageNode).data.annotation = null;
   await expect(ensureAnnotationRendered(bridge, 'source')).rejects.toThrow('标注已清空');
   expect(uploadCanvasMedia).not.toHaveBeenCalled();
+});
+it('also prepares a transparent markup layer when the target is GPT Image 2.6, unless composite is chosen', async () => {
+  const id = await createAnnotatedGeneration(bridge, 'source', { ...draft, model: 'gpt-image-2.6-flare' });
+  await ensureAnnotatedInputs(bridge, id);
+  expect(composeAnnotationMarkup).toHaveBeenCalledWith(expect.any(Array), 1024, 768);
+  expect(uploadCanvasMedia).toHaveBeenCalledTimes(2);
+  const annotation = (document.nodes[0] as CanvasImageNode).data.annotation!;
+  expect(annotation.rendered_version_id).toBe('rendered-1');
+  expect(annotation.markup_version_id).toBe('rendered-2');
+  await ensureAnnotatedInputs(bridge, id);
+  expect(uploadCanvasMedia).toHaveBeenCalledTimes(2);
+  const target = document.nodes[1] as CanvasImageNode;
+  target.data.generation_draft = { ...target.data.generation_draft!, params: { annotation_delivery: 'composite' } };
+  annotation.markup_version_id = null; annotation.rendered_version_id = null;
+  await ensureAnnotatedInputs(bridge, id);
+  expect(composeAnnotationMarkup).toHaveBeenCalledTimes(1);
+  expect((document.nodes[0] as CanvasImageNode).data.annotation?.markup_version_id).toBeNull();
+});
+it('does not render a markup layer for models without GPT Image 2.6 capabilities', async () => {
+  const id = await createAnnotatedGeneration(bridge, 'source', draft);
+  await ensureAnnotatedInputs(bridge, id);
+  expect(composeAnnotationMarkup).not.toHaveBeenCalled();
 });

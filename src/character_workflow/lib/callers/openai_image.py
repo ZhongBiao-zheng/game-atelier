@@ -113,6 +113,13 @@ def render(
         _effective_image_protocol(key, model),
     ):
         raise OpenAIImageError("current image model does not support mask edits")
+    # GPT Image 2.6 的 markup 标注层：只对支持的模型发，与 mask 互斥（官方同时拒绝 prompt_rewriter，
+    # 本仓不发那个字段）。路径只由服务端（画布标注）写。
+    markup_path = kwargs.get("markup_image") or (kwargs.get("params") or {}).get("markup_image")
+    if markup_path and not supports_image_complexity(model):
+        raise OpenAIImageError("当前模型不支持标注层（markup），请换 GPT Image 2.6 或改发合成图")
+    if markup_path and mask_path:
+        raise OpenAIImageError("标注层（markup）与蒙版不能同时使用")
     # 尺寸下限是模型属性，与 provider / 网关无关（实测：同一把词元跳动 key 下 5.0-lite 要
     # 3686400 像素、5.0-pro 只要 921600，两条协议路径给出的下限一模一样）。所以归一化按
     # 模型族判，火山直连 / Tuzi / 词元跳动下的 seedream 一视同仁。
@@ -140,14 +147,14 @@ def render(
     # 其他模型上这些字段即使存在也不发（Tuzi 对未知字段直接 400）。
     complexity = _complexity_param(kwargs) if supports_image_complexity(model) else None
     gif = _gif_params(kwargs) if supports_gif_output(model) else None
-    if gif and (mask_path or _collect_ref_paths(kwargs, key.provider, model)):
-        raise OpenAIImageError("GIF 只支持文生图，不能带参考图或蒙版")
+    if gif and (mask_path or markup_path or _collect_ref_paths(kwargs, key.provider, model)):
+        raise OpenAIImageError("GIF 只支持文生图，不能带参考图、蒙版或标注层")
     has_native_order = bool(params and params.get("provider_task_protocol") == tuzi_async.TASK_PROTOCOL
                             and params.get("provider_task_ids"))
     # Native tasks document neither mask nor independent quality/background controls.
     # Select the Images contract up front for those requests; never retry via another route.
     use_tuzi_tasks = (
-        is_tuzi and model in tuzi_async.IMAGE_TASK_MODELS and not mask_path
+        is_tuzi and model in tuzi_async.IMAGE_TASK_MODELS and not mask_path and not markup_path
         and _quality_param(kwargs) in {None, "auto"}
         and _background_param(kwargs) in {None, "auto"}
         and complexity is None and gif is None
@@ -262,6 +269,8 @@ def render(
     ref_paths = _collect_ref_paths(kwargs, key.provider, model)
     if mask_path and not ref_paths:
         raise OpenAIImageError("mask edit requires a source image")
+    if markup_path and not ref_paths:
+        raise OpenAIImageError("标注层需要原图作为第一张参考图")
 
     # 图生图端点按族分流：gpt-image 族走官方同步 /images/edits（multipart，OpenAI/HK 实现）。
     # nano-banana 是 Gemini 多模态，OpenAI-HK / 聚合商对其 /images/edits 一律 403（openresty
@@ -273,6 +282,8 @@ def render(
         model,
         _effective_image_protocol(key, model),
     )
+    if markup_path and not supports_edits:
+        raise OpenAIImageError("当前渠道不走官方图片编辑接口，不能发送标注层，请改发合成图")
     if supports_edits and ref_paths:
         paths: list[str] = []
         for _ in range(requested):
@@ -283,7 +294,10 @@ def render(
                 model=model, prompt=prompt, size=requested_size, quality=quality,
                 background=background, n=1, complexity=complexity,
             )
-            files = _ref_file_parts(ref_paths, str(mask_path) if mask_path else None)
+            files = _ref_file_parts(
+                ref_paths, str(mask_path) if mask_path else None,
+                markup_path=str(markup_path) if markup_path else None,
+            )
             data = (
                 tuzi_async.execute_multipart(
                     url=_edits_url(base_url), api_key=key.access_key,
@@ -468,12 +482,17 @@ def _guess_mime(path: str) -> str:
     return "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
 
 
-def _ref_file_parts(paths: list[str], mask_path: str | None = None) -> list[tuple]:
-    """multipart 文件部件列表；多张参考图重复 `image` 字段名（OpenAI-HK edits 约定）。"""
+def _ref_file_parts(
+    paths: list[str], mask_path: str | None = None, *, markup_path: str | None = None,
+) -> list[tuple]:
+    """multipart 文件部件列表；多张参考图重复 `image` 字段名（OpenAI-HK edits 约定）。
+
+    带 mask / markup 时参考图统一转成 PNG 并记下首张尺寸：两者都要求与首张输入图同宽高。
+    """
     parts: list[tuple] = []
     source_size: tuple[int, int] | None = None
     for p in paths:
-        if mask_path:
+        if mask_path or markup_path:
             image_bytes, size = _normalized_edit_image(Path(p))
             source_size = source_size or size
             parts.append(("image", (f"{Path(p).stem}.png", image_bytes, "image/png")))
@@ -483,7 +502,39 @@ def _ref_file_parts(paths: list[str], mask_path: str | None = None) -> list[tupl
         if source_size is None:
             raise OpenAIImageError("mask edit requires a source image")
         parts.append(("mask", ("mask.png", _normalized_edit_mask(Path(mask_path), source_size), "image/png")))
+    if markup_path:
+        if source_size is None:
+            raise OpenAIImageError("标注层需要原图作为第一张参考图")
+        parts.append(("markup", ("markup.png", _normalized_markup(Path(markup_path), source_size), "image/png")))
     return parts
+
+
+# 官方对首图与 markup 各限 16,777,216 像素（4096²）。
+MARKUP_MAX_PIXELS = 16_777_216
+
+
+def _normalized_markup(path: Path, source_size: tuple[int, int]) -> bytes:
+    """标注层：与首张输入图同尺寸的透明 PNG，原样按 RGBA 重编码后发送。"""
+    try:
+        with Image.open(path) as opened:
+            if opened.format != "PNG":
+                raise OpenAIImageError("标注层必须是 PNG")
+            if opened.size != source_size:
+                raise OpenAIImageError(
+                    f"标注层尺寸 {opened.size[0]}x{opened.size[1]} 与首张输入图 "
+                    f"{source_size[0]}x{source_size[1]} 不一致，请重新生成标注层"
+                )
+            if opened.size[0] * opened.size[1] > MARKUP_MAX_PIXELS:
+                raise OpenAIImageError("标注层超过 16,777,216 像素上限，请先缩小原图")
+            opened.load()
+            rgba = opened.convert("RGBA")
+            output = io.BytesIO()
+            rgba.save(output, format="PNG")
+            return output.getvalue()
+    except OpenAIImageError:
+        raise
+    except (OSError, UnidentifiedImageError, ValueError) as error:
+        raise OpenAIImageError("标注层不是可读的 PNG 图片") from error
 
 
 def _normalized_edit_image(path: Path) -> tuple[bytes, tuple[int, int]]:

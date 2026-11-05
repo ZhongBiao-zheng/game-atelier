@@ -16,6 +16,7 @@ const PARAM_LABELS: Record<string, string> = {
   quality: '质量',
   background: '背景',
   complexity: '规划',
+  annotation_delivery: '标注',
   output_format: '输出格式',
   frame_count: '帧数',
   frame_duration_ms: '帧间隔 ms',
@@ -58,6 +59,7 @@ const REFERENCE_PARAM_KEYS = new Set([
   'reference_videos',
   'reference_audios',
   'mask_image',
+  'markup_image',
   'mj_sref',
   'mj_cref',
   'mj_oref',
@@ -115,6 +117,7 @@ function formatParameter(value: unknown, key: string): string {
       : Array.isArray(edit.regions) ? `${label} · ${edit.regions.length} 区 · 融合范围外不变` : label;
   }
   if (key === 'size_mode') return ({ auto: 'AUTO', ratio: '比例', custom: '自定义' } as Record<string, string>)[String(value)] ?? String(value);
+  if (key === 'annotation_delivery') return ({ markup: '标注层', composite: '合成图' } as Record<string, string>)[String(value)] ?? String(value);
   const sanitized = sanitizeParameter(value, key);
   if (typeof sanitized === 'boolean') return sanitized ? '开启' : '关闭';
   if (typeof sanitized === 'string' || typeof sanitized === 'number') return String(sanitized);
@@ -200,7 +203,7 @@ export function CanvasGenerationMetadata({ snapshot, job, nodes }: {
                 <li key={`${input.node_id}-${input.version_id}`} className="flex items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm">
                   <Link2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-foreground">{node?.title ?? '节点已删除'}</span>
+                    <span className="block text-foreground">{node?.title ?? '节点已删除'}{input.markup_version_id ? ' · 原图 + 标注层' : input.annotated ? ' · 合成图' : ''}</span>
                     <Hint label={input.version_id}><span className="block truncate font-mono text-xs text-muted-foreground">
                       {kindLabel(input.kind)} · {input.node_id} · {input.version_id}
                     </span></Hint>

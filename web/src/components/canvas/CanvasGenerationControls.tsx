@@ -132,6 +132,8 @@ export function CanvasModelPicker({ choices, alias, model, onSelect, params = {}
   </div>;
 }
 
+const ANNOTATION_DELIVERY_LABELS = { markup: '标注层', composite: '合成图' } as const;
+
 export function CanvasImageSettings({
   workflowInputs,
   caps,
@@ -139,6 +141,7 @@ export function CanvasImageSettings({
   baseUrl,
   params,
   onPatch,
+  annotatedInput = false,
   menuDirection = 'up',
   portalContainerRef,
 }: {
@@ -148,7 +151,11 @@ export function CanvasImageSettings({
   baseUrl?: string | null;
   params: JobParams;
   onPatch: (patch: JobParams) => void;
+  /** 节点有带标注的输入连接：GPT Image 2.6 上才出现「标注层 / 合成图」切换。 */
+  annotatedInput?: boolean;
 } & ToolbarPopoverMenuProps) {
+  const showAnnotationDelivery = annotatedInput && !!caps.complexities;
+  const annotationDelivery = params.annotation_delivery === 'composite' ? 'composite' : 'markup';
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const fixedWorkflowSeed = workflowInputs?.some(input => input.type === 'seed' && params.workflow_inputs?.[input.id] != null) ?? false;
@@ -162,6 +169,7 @@ export function CanvasImageSettings({
       : null,
     caps.qualities ? QUALITY_LABELS[(params.quality as Quality) ?? caps.qualities[0]] : null,
     caps.gifOutput ? gifSummary(params) : null,
+    showAnnotationDelivery ? ANNOTATION_DELIVERY_LABELS[annotationDelivery] : null,
     `${count} 张`,
   ].filter(Boolean).join(' · ');
 
@@ -208,6 +216,18 @@ export function CanvasImageSettings({
           )}
 
           <GptImage26Fields caps={caps} params={params} onPatch={onPatch} />
+
+          {showAnnotationDelivery && (
+            <SettingsSection title="标注">
+              <OptionTrack
+                label="选择标注发送方式"
+                values={['markup', 'composite'] as const}
+                selected={annotationDelivery}
+                getLabel={value => ANNOTATION_DELIVERY_LABELS[value]}
+                onSelect={value => onPatch({ annotation_delivery: value === 'composite' ? 'composite' : undefined })}
+              />
+            </SettingsSection>
+          )}
 
           <SettingsSection title="生成数量">
             {caps.family === 'midjourney' ? (

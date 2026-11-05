@@ -31,7 +31,7 @@ export interface CreationMediaAssetContent {
   height?: number | null;
 }
 
-export type RecipeInputRole = 'reference' | 'mask' | 'mj_sref' | 'mj_cref' | 'mj_oref';
+export type RecipeInputRole = 'reference' | 'mask' | 'markup' | 'mj_sref' | 'mj_cref' | 'mj_oref';
 
 /** 冻结快照里的一份参考内容；order 是提交时的序号（0..n-1），本体按 sha256 存在 blobs。 */
 export interface RecipeInput {
