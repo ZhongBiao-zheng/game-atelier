@@ -158,6 +158,10 @@ uv run python src/viewer_server/server.py open-browser
 先确认对象与操作语义；过程记录留本地，长期规则随代码提交。交付前运行 `make verify`，
 UI 改动需真实页面验证；用户明确授权后才合并，保留其他未合并工作。
 
+### Model onboarding
+
+接入新模型 / 新版本 / 新参数 / 新产物格式，开工前读取 `docs/agents/model-onboarding.md`：搜集官方契约与网关上架状态、能力登记代码清单、UI 两端、价格与耗时实测、公告与文档，按验收清单交付。
+
 ### Issue tracker
 
 任务使用本地 Markdown，存放在 `.scratch/<feature>/`；日常代码提交到 `main`，用户授权发版时推正式 tag；首次过渡按 ADR-0029 执行。详见 `docs/agents/issue-tracker.md`。

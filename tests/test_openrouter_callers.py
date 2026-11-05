@@ -69,6 +69,21 @@ def test_sunburst_tiers_submit_pixels(openrouter_key, tmp_path, monkeypatch,
                      "size": expected, "quality": "low"}]
 
 
+def test_sunburst_26_tiers_submit_pixels_too(openrouter_key, tmp_path, monkeypatch):
+    """2.6 Sunburst 与 2.5 同一套尺寸规则：2K/4K 档同样翻成显式像素。"""
+    seen = []
+    def post(url, api_key, payload, *, timeout):
+        seen.append(payload)
+        return {"data": [{"b64_json": base64.b64encode(_PNG).decode()}]}
+    monkeypatch.setattr(openrouter_image, "_post_json", post)
+    dispatch(prompt="p", model="openai/gpt-image-2.6-sunburst", alias="OpenRouter",
+             output_dir=tmp_path / "out", params={"size_mode": "ratio", "size": "16:9",
+                 "ratio": "16:9", "resolution": "2K", "quality": "low",
+                 "complexity": "low", "output_format": "gif"})
+    assert seen == [{"model": "openai/gpt-image-2.6-sunburst", "prompt": "p", "n": 1,
+                     "size": "2048x1152", "quality": "low"}]
+
+
 def test_sunburst_default_auto_and_explicit_pixels_ignore_tiers():
     for params, expected in [
         ({"size": "16:9"}, {"aspect_ratio": "16:9"}),

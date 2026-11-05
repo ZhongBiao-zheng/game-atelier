@@ -535,11 +535,14 @@ def _supports_canvas_image_generation(key: KeySpec, model: ModelSpec) -> bool:
     return protocol in {None, "openai", "ark"}
 
 
-def _gpt_image_26_params(model_id: str, params: dict[str, Any]) -> dict[str, Any]:
-    """GPT Image 2.6 专属字段只在支持的模型上保留；换到别的模型就丢掉，不带着旧值出图。"""
+def _gpt_image_26_params(key: KeySpec, model_id: str, params: dict[str, Any]) -> dict[str, Any]:
+    """GPT Image 2.6 专属字段只在支持的模型上保留；换到别的模型就丢掉，不带着旧值出图。
+
+    OpenRouter 的图片协议不收 complexity / GIF（/images/models 描述符里没有这两项），走它时也丢。
+    """
     from character_workflow.lib.callers.openai_image import supports_image_complexity
 
-    if not supports_image_complexity(model_id):
+    if key.provider == "openrouter" or not supports_image_complexity(model_id):
         return {}
     kept = {name: params[name] for name in (
         "complexity", "output_format", "frame_count", "frame_duration_ms",
@@ -585,7 +588,7 @@ def _normalized_image_preference_params(
                 draft_params[field] = params[field]
         for field in ("complexity", "output_format", "frame_count", "frame_duration_ms"):
             draft_params.pop(field, None)
-        return JobParams.model_validate({**draft_params, **_gpt_image_26_params(model.id, params)})
+        return JobParams.model_validate({**draft_params, **_gpt_image_26_params(key, model.id, params)})
 
     family = image_family(model.id)
     options = image_size_options(key.provider, key.base_url, model.id)
@@ -607,7 +610,7 @@ def _normalized_image_preference_params(
         "low", "medium", "high", "xhigh", "max", "auto",
     }:
         normalized["quality"] = quality
-    normalized.update(_gpt_image_26_params(model.id, params))
+    normalized.update(_gpt_image_26_params(key, model.id, params))
     if family == "midjourney":
         return JobParams.model_validate(normalized)
     if key.provider == "openrouter" or is_nano_image_size_model(model.id):

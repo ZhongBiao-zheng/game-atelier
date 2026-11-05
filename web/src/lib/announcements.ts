@@ -25,6 +25,18 @@ export interface Announcement {
 
 export const ANNOUNCEMENTS: Announcement[] = [
   {
+    id: '2026-11-gpt-image-2-6',
+    date: '2026-11-05',
+    title: 'GPT Image 2.6 上线',
+    summary: 'OpenAI 11 月 4 日发布：Flare 主打速度（低档约 6 秒出图），Sunburst 主打细节与多轮编辑一致性。新增「规划」强度与 GIF 动图输出（文生图，2–64 帧）。API 价格与 2.5 相同；OpenRouter 已上线，OpenAI-HK / Tuzi 待配价。',
+    // openai.com/index/introducing-images-2-6 的 og:image。
+    imageUrl: 'https://images.ctfassets.net/kftzwdyauwt9/6EYvL2y5CLXFr8E1pqoVUK/064e0d73b10087e20967b69ef0a06678/images-2-6-social.png?w=1600&h=900&fit=fill',
+    models: [
+      { name: 'GPT Image 2.6 Sunburst', ids: ['gpt-image-2.6-sunburst', 'openai/gpt-image-2.6-sunburst'] },
+      { name: 'GPT Image 2.6 Flare', ids: ['gpt-image-2.6-flare', 'openai/gpt-image-2.6-flare'] },
+    ],
+  },
+  {
     id: '2026-10-flux-3-image',
     date: '2026-10-12',
     title: 'FLUX 3 Image 上线',

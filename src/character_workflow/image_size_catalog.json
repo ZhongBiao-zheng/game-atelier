@@ -67,6 +67,34 @@
       ],
       "resolutions": []
     },
+    "openai/gpt-image-2.6-sunburst": {
+      "ratios": [
+        "1:1",
+        "3:2",
+        "2:3",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "21:9",
+        "auto"
+      ],
+      "resolutions": ["2K", "4K"]
+    },
+    "openai/gpt-image-2.6-flare": {
+      "ratios": [
+        "1:1",
+        "3:2",
+        "2:3",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "21:9",
+        "auto"
+      ],
+      "resolutions": []
+    },
     "microsoft/mai-image-2.6": {
       "ratios": [
         "1:1",

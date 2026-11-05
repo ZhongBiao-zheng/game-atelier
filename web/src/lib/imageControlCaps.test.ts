@@ -34,6 +34,11 @@ describe('imageControlCaps', () => {
       expect(imageControlCaps(model, 'openai').gifOutput).toBe(false);
     }
     expect(imageControlCaps('gpt-image-2.6-flare', 'comfyui').complexities).toBeNull();
+    const viaRouter = imageControlCaps('openai/gpt-image-2.6-flare', 'openrouter', 'https://openrouter.ai/api/v1');
+    expect(viaRouter.complexities).toBeNull();
+    expect(viaRouter.gifOutput).toBe(false);
+    expect(viaRouter.showAutoSize).toBe(true);
+    expect(imageControlCaps('openai/gpt-image-2.6-sunburst', 'openrouter', 'https://openrouter.ai/api/v1').resolutions).toEqual(['2K', '4K']);
   });
   it('EvoLink V8.2 保留比例，不开放通用质量、AUTO 或像素尺寸', () => {
     expect(imageControlCaps('mj-v8.2', 'evolink', 'https://api.evolink.ai/v1')).toMatchObject({

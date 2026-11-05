@@ -46,6 +46,11 @@ def test_gpt_image_26_params_follow_the_model():
     ratio = _normalized_image_preference_params(
         key, ModelSpec(id="gpt-image-2.6-flare", name="F"), {**draft, "size_mode": "ratio", "ratio": "1:1"})
     assert ratio.complexity == "low" and ratio.frame_count == 12
+    # OpenRouter 协议不收这些字段，走它时一律丢。
+    router = KeySpec(alias="OR", provider="openrouter", access_key="fake", created_at="2026-11-05")
+    via = _normalized_image_preference_params(
+        router, ModelSpec(id="openai/gpt-image-2.6-flare", name="F"), {**draft, "size_mode": "ratio", "ratio": "1:1"})
+    assert (via.complexity, via.output_format, via.frame_count) == (None, None, None)
 
 
 def _payload(revision: int = 0) -> dict:

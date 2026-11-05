@@ -39,7 +39,7 @@ _HK_AUTO_MODELS = frozenset({
 _TUZI_AUTO_MODELS = frozenset({
     "gpt-image-1", "gpt-image-1.5", "gpt-image-2",
     "gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
-    "gpt-image-2.6-flare", "gpt-image-2.6-sunburst",
+    "gpt-image-2.6", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst",
 })
 
 

@@ -83,6 +83,10 @@ def render(
     return paths[:requested]
 
 
+# 2.5 Sunburst 的 2K/4K 走显式像素（实测 2048² 与 3840×2160 通过）；2.6 尺寸规则与 2.5 相同，同列。
+_SUNBURST = re.compile(r"openai/gpt-image-2\.[56]-sunburst")
+
+
 def _image_payload(*, prompt: str, model: str, n: int, kwargs: dict) -> dict:
     params = kwargs.get("params") or {}
     payload: dict[str, Any] = {"model": model, "prompt": prompt, "n": n}
@@ -102,7 +106,7 @@ def _image_payload(*, prompt: str, model: str, n: int, kwargs: dict) -> dict:
         resolution = params.get("resolution")
         if isinstance(resolution, str) and resolution.strip():
             resolution = resolution.strip().upper()
-            if model == "openai/gpt-image-2.5-sunburst" and resolution in {"2K", "4K"}:
+            if _SUNBURST.fullmatch(model) and resolution in {"2K", "4K"}:
                 # Sunburst's catalog omits resolution, but explicit pixels were verified
                 # at 2048² and 3840×2160. Do not send the unsupported tier parameter.
                 a, b = map(float, payload.pop("aspect_ratio", "1:1").split(":"))
