@@ -1141,6 +1141,7 @@ Tuzi GPT Image 2.5 与 2.6 系列在 Studio 与 Canvas 提供五档质量：低/
 - `params.output_format = "gif"` + `frame_count`（2–64，默认 9）+ `frame_duration_ms`（20–2000，默认 200，10ms 取整）：动图只走 `/images/generations`，带参考图或蒙版时 caller 直接拒绝（不计费）；前端带参考图时也不提交 GIF 字段。产物按文件头存成 `.gif`，`image_dimensions` 读 GIF 头，画布导入 mime 为 `image/gif`，缩略图接口对动图退回原图。
 - 这四个字段在 `JobParams` 双端声明、进入 Canvas 浏览器可提交白名单与局域网网关图片白名单；换到不支持的模型时前端 `normalizeImageSizeParams` 与服务端 `_normalized_image_preference_params` 都会丢掉它们。Canvas 生成偏好只记住 `complexity`，GIF 是当次的选择。
 - 不做：SVG 输出（官方 reference 要求 `svg.model` 与额外权限，网关不透传，产物管线按位图设计）、`markup` 标注层（画布标注已定只发合成图）。两家网关 2026-11-05 对 2.6 都回「价格未配置」，size=auto 放行按 2.5 同系推定，上架后复验。
+- OpenRouter 实测（2026-11-05，真打两次）：`complexity` 传非法值照样 200 出图 = 字段被 OpenRouter 剥离不透传；`output_format=gif` 被其 schema 400 拒（只认 png/jpeg/webp/svg）。所以 OpenRouter 渠道不暴露规划与 GIF，这是协议级限制。同渠道 2.6 Flare AUTO/低 一张 19s、¥0.19，AUTO 实际出 1312×1199。
 
 ### 模型菜单元数据（本机只读）
 
