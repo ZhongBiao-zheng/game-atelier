@@ -33,7 +33,7 @@ describe('CanvasModelPicker', () => {
     render(<CanvasModelPicker choices={[{ key: auto, model: auto.models[0] }]} alias={null} model="gpt-image-2" onSelect={vi.fn()} />);
     const button = screen.getByRole('button', { name: '选择生成供应商' });
     expect(button).toHaveTextContent('智能路由');
-    expect(button.querySelector('.lucide-split')).toBeInTheDocument();
+    expect(button.querySelector('[data-icon="route"]')).toBeInTheDocument();
     fireEvent.click(button);
     expect(screen.getByRole('option', { name: '智能路由' })).toBeInTheDocument();
   });

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'wouter';
-import { Heart } from 'lucide-react';
+import { FavoriteIcon } from '@/components/ui/icons';
 
 import { fetchGalleryRecent, type GalleryItem } from '@/api/gallery';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
@@ -56,7 +56,7 @@ export function Home() {
           aria-label={favorited ? '取消喜欢' : '喜欢'}
           className={`absolute left-3 top-3 grid size-9 place-items-center rounded-full bg-scrim/80 backdrop-blur-glass transition-all duration-200 hover:bg-background/90 z-10 ${favorited ? 'text-primary opacity-100' : 'text-foreground opacity-0 group-hover:opacity-100'}`}
         >
-          <Heart className={`size-4 ${favorited ? 'fill-current' : ''}`} aria-hidden />
+          <FavoriteIcon className={`${favorited ? 'fill-current' : ''}`} aria-hidden />
         </Button></Hint>
       </div>
     );

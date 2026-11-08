@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MoreHorizontal } from 'lucide-react';
+import { MoreIcon } from '@/components/ui/icons';
 import type { GatewayKey, GatewayKeyInput, GatewayOptions, LimitPeriod } from '@/api/gateway';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -60,7 +60,7 @@ export function KeyRowActions({ record, options, busy, onSave, onRename, onReset
         {limitError && <p id={`limit-error-${record.id}`} role="alert" className="text-xs text-destructive">{limitError}</p>}
       </PopoverContent>
     </Popover>
-    <DropdownMenu><DropdownMenuTrigger asChild><Button size="icon" variant="ghost" className="size-8" aria-label={`${record.name} 的更多操作`} disabled={busy}><MoreHorizontal /></Button></DropdownMenuTrigger>
+    <DropdownMenu><DropdownMenuTrigger asChild><Button size="icon" variant="ghost" className="size-8" aria-label={`${record.name} 的更多操作`} disabled={busy}><MoreIcon /></Button></DropdownMenuTrigger>
       <DropdownMenuContent align="end"><DropdownMenuItem onSelect={onRename}>重命名</DropdownMenuItem><DropdownMenuItem onSelect={onReset}>重置密钥</DropdownMenuItem><DropdownMenuItem destructive onSelect={onRevoke}>撤销</DropdownMenuItem></DropdownMenuContent>
     </DropdownMenu>
   </div>;

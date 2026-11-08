@@ -2,7 +2,7 @@ import { checkComfyUI } from '@/api/comfyui';
 import { ComfyWorkflows } from './ComfyWorkflows';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { useEffect, useRef, useState } from 'react';
-import { Eye, EyeOff, X } from 'lucide-react';
+import { CloseIcon, HideIcon, ShowIcon } from '@/components/ui/icons';
 import { Toggle } from '@/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { getChatGPTSubscription, type ChatGPTSubscriptionStatus, createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelInputModality, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
@@ -473,7 +473,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
               <div className="relative min-w-0 flex-1">
                 <SecretInput id="key-access" revealed={showKey} value={accessKey} onChange={e => { setAccessKey(e.target.value); setKeyRevealed(true); setConnectionTest(null); }} className="pr-10 font-mono" placeholder={editing ? '留空则保留原密钥' : '粘贴密钥'} />
                 <Button variant="bare" type="button" aria-label={showKey ? '隐藏密钥' : '显示密钥'} disabled={revealing} onClick={toggleShowKey} className="absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-md text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary">
-                  <SwapIcon swapKey={showKey}>{showKey ? <EyeOff size={16} /> : <Eye size={16} />}</SwapIcon>
+                  <SwapIcon swapKey={showKey}>{showKey ? <HideIcon /> : <ShowIcon />}</SwapIcon>
                 </Button>
               </div>
               {(initial?.api_key_url || preset.apiKeyUrl) && <a href={initial?.api_key_url || preset.apiKeyUrl} target="_blank" rel="noreferrer" className="whitespace-nowrap text-xs text-primary">获取密钥 ↗</a>}
@@ -536,7 +536,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                   </div>
                 </div> : <div className="flex max-h-56 flex-wrap gap-2 overflow-auto">
                   {models.filter(m => m.id.trim() && `${m.id} ${m.name}`.toLowerCase().includes(modelQuery.toLowerCase())).map((model, index) => <Button variant="bare" key={`${model.id}-${index}`} type="button" aria-pressed="true" onClick={() => setModels(models.filter(m => m !== model))} className="flex max-w-full items-center gap-2 rounded-full border border-primary/40 bg-secondary px-3 py-1.5 font-mono text-xs">
-                    <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${typeDot(model.modality)}`} /><span className="truncate">{model.id}</span><X size={12} aria-hidden />
+                    <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${typeDot(model.modality)}`} /><span className="truncate">{model.id}</span><CloseIcon size="sm" aria-hidden />
                   </Button>)}
                 </div>}
                 {provider === 'custom' && <div className="flex flex-wrap gap-2">
@@ -645,7 +645,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                         aria-label={`删除模型 ${index + 1}`}
                         className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-destructive disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
                       >
-                        <X size={14} aria-hidden />
+                        <CloseIcon size="sm" aria-hidden />
                       </Button>
                     </div>
                   ))}

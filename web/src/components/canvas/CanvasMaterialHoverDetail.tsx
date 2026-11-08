@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { FileAudio, FileImage, FileVideo } from 'lucide-react';
+import { AudioFileIcon, ImageFileIcon, VideoFileIcon } from '@/components/ui/icons';
 
 import { mentionKindLabel, type CanvasMaterialReference } from '@/lib/canvasMentions';
 
@@ -47,10 +47,10 @@ export function CanvasMaterialHoverDetail({
       ) : (
         <div className="grid h-40 place-items-center bg-secondary/30 text-muted-foreground">
           {reference.kind === 'audio'
-            ? <FileAudio className="size-8" aria-hidden="true" />
+            ? <AudioFileIcon size="xl" aria-hidden="true" />
             : reference.kind === 'video'
-              ? <FileVideo className="size-8" aria-hidden="true" />
-              : <FileImage className="size-8" aria-hidden="true" />}
+              ? <VideoFileIcon size="xl" aria-hidden="true" />
+              : <ImageFileIcon size="xl" aria-hidden="true" />}
         </div>
       )}
       <figcaption className="flex min-w-0 items-center gap-2 border-t border-border px-3 py-2">

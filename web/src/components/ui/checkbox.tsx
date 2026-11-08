@@ -1,6 +1,6 @@
 import * as React from 'react';
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
-import { Check } from 'lucide-react';
+import { CheckIcon } from '@/components/ui/icons';
 
 import { cn } from '@/lib/utils';
 import { FOCUS_RING, INVALID_RING } from './focus';
@@ -21,7 +21,7 @@ export const Checkbox = React.forwardRef<
     {...props}
   >
     <CheckboxPrimitive.Indicator className="grid place-content-center text-current">
-      <Check className="size-3.5" aria-hidden="true" />
+      <CheckIcon size="sm" aria-hidden="true" />
     </CheckboxPrimitive.Indicator>
   </CheckboxPrimitive.Root>
 ));

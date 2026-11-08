@@ -1,7 +1,7 @@
 import { Link } from 'wouter';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { VideoMode } from '@/lib/videoControlCaps';
-import { AudioLines, Clapperboard, Image as ImageIcon, RotateCcw, Type, ZoomIn } from 'lucide-react';
+import { AudioIcon, ImageIcon, ResetIcon, TextIcon, UpscaleIcon, VideoIcon } from '@/components/ui/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { KeyView } from '@/api/keys';
@@ -57,11 +57,11 @@ const TAB_LABELS: Record<CanvasGenerationPreferencesTab, string> = {
   upscale: 'AI高清',
 };
 const TAB_ICONS = {
-  text: Type,
+  text: TextIcon,
   image: ImageIcon,
-  video: Clapperboard,
-  audio: AudioLines,
-  upscale: ZoomIn,
+  video: VideoIcon,
+  audio: AudioIcon,
+  upscale: UpscaleIcon,
 };
 
 function cloneDefaults(value: CanvasGenerationDefaults): CanvasGenerationDefaults {
@@ -342,7 +342,7 @@ export function CanvasGenerationPreferencesDialog({
                   disabled={upscaleTier.selection === null}
                   onClick={() => patchUpscaleTier({ selection: null })}
                 >
-                  <RotateCcw aria-hidden="true" />恢复自动选择
+                  <ResetIcon aria-hidden="true" />恢复自动选择
                 </Button>
               )}
             </div>
@@ -426,7 +426,7 @@ export function CanvasGenerationPreferencesDialog({
                 disabled={preference.selection === null}
                 onClick={() => setPreference(activeMode, { selection: null, params })}
               >
-                <RotateCcw aria-hidden="true" />恢复自动选择
+                <ResetIcon aria-hidden="true" />恢复自动选择
               </Button>
             </div>
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-secondary/20 p-2">

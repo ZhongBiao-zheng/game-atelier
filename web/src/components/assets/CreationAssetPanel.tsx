@@ -5,7 +5,7 @@ import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studi
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ProjectReferenceLibrary } from './ProjectReferenceLibrary';
 import { promptFromAsset } from '@/lib/promptVariables';
-import { ChevronDown, ChevronLeft, Plus, Search, Upload, X, MoreHorizontal, Pencil, Share2, Trash2 } from 'lucide-react';
+import { AddIcon, ChevronDownIcon, ChevronLeftIcon, CloseIcon, DeleteIcon, EditIcon, MoreIcon, SearchIcon, ShareIcon, UploadIcon } from '@/components/ui/icons';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 
 import { deleteCreationAsset, listCreationAssets, markCreationAssetUsed } from '@/api/creationAssets';
@@ -309,18 +309,18 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     <aside aria-label="创作资产" className={cn('fixed bottom-56 right-4 top-24 z-40 flex w-[min(25rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-panel', className)}>
       <header className="flex items-center justify-between border-b border-border px-3 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          {(selected || isEditing) && <Button variant="ghost" size="icon" aria-label="返回资产列表" onClick={back}><ChevronLeft /></Button>}
+          {(selected || isEditing) && <Button variant="ghost" size="icon" aria-label="返回资产列表" onClick={back}><ChevronLeftIcon /></Button>}
           <div className="min-w-0">
             <HeaderTitle className="truncate text-base font-medium">{canvasPickerAsset ? '加入画布' : promptEditor?.assetId || mediaEditor?.assetId ? '编辑资产' : isEditing ? '保存为创作资产' : selected?.title ?? '创作资产'}</HeaderTitle>
           </div>
         </div>
         {selected?.kind === 'prompt' ? <DropdownMenu><DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label="更多提示词操作"><MoreHorizontal /></Button>
+          <Button variant="ghost" size="icon" aria-label="更多提示词操作"><MoreIcon /></Button>
         </DropdownMenuTrigger><DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => beginPromptEdit(selected)}><Pencil />编辑</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setShareRequest({ source: { kind: 'creation_asset', asset_id: selected.asset_id }, defaultTitle: selected.title })}><Share2 />分享到团队库</DropdownMenuItem>
-          <DropdownMenuItem className="text-destructive" onSelect={() => setDeleteTarget(selected)}><Trash2 />删除</DropdownMenuItem>
-        </DropdownMenuContent></DropdownMenu> : <Button variant="ghost" size="icon" aria-label="关闭创作资产" onClick={close}><X /></Button>}
+          <DropdownMenuItem onSelect={() => beginPromptEdit(selected)}><EditIcon />编辑</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setShareRequest({ source: { kind: 'creation_asset', asset_id: selected.asset_id }, defaultTitle: selected.title })}><ShareIcon />分享到团队库</DropdownMenuItem>
+          <DropdownMenuItem className="text-destructive" onSelect={() => setDeleteTarget(selected)}><DeleteIcon />删除</DropdownMenuItem>
+        </DropdownMenuContent></DropdownMenu> : <Button variant="ghost" size="icon" aria-label="关闭创作资产" onClick={close}><CloseIcon /></Button>}
       </header>
 
       {error && <p role="alert" className="mx-3 mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}
@@ -361,11 +361,11 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           {kind !== 'team' && kind !== 'reference' && (
           <div className="space-y-3 p-3">
             <div className="flex items-center gap-2"><InputGroup className="min-w-0 flex-1">
-              <InputGroupAddon><Search aria-hidden="true" /></InputGroupAddon>
+              <InputGroupAddon><SearchIcon aria-hidden="true" /></InputGroupAddon>
               <InputGroupInput aria-label="搜索创作资产" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索标题、正文或标签" />
             </InputGroup>
-            {kind === 'prompt' ? <Button size="icon" className="shrink-0" aria-label="新建提示词资产" onClick={() => beginPromptEdit()}><Plus /></Button>
-              : <Button size="icon" className="shrink-0" aria-label="上传媒体资产" onClick={() => uploadRef.current?.click()}><Upload /></Button>}
+            {kind === 'prompt' ? <Button size="icon" className="shrink-0" aria-label="新建提示词资产" onClick={() => beginPromptEdit()}><AddIcon /></Button>
+              : <Button size="icon" className="shrink-0" aria-label="上传媒体资产" onClick={() => uploadRef.current?.click()}><UploadIcon /></Button>}
             {kind === 'media' && <FileInput ref={uploadRef} className="hidden" accept="image/*,video/*,audio/*" onChange={event => {
               const file = event.target.files?.[0]; event.target.value = '';
               if (file) loadSaveRequest({ requestId: crypto.randomUUID(), kind: 'media', file, projectId });
@@ -374,7 +374,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
               <AssetFilterPill selected={scope === 'all' && category === null} onClick={() => { setScope('all'); setCategory(null); }}>全部</AssetFilterPill>
               {projectId && <AssetFilterPill selected={scope === 'project'} onClick={() => { setScope('project'); setCategory(null); }}>本项目</AssetFilterPill>}
               <Popover open={categoryOpen} onOpenChange={setCategoryOpen}>
-                <PopoverTrigger asChild><Button variant="ghost" size="sm" className={cn('h-7 rounded-full border-border px-3 text-xs font-normal', category !== null ? 'bg-secondary' : 'text-muted-foreground')}>按分类<ChevronDown /></Button></PopoverTrigger>
+                <PopoverTrigger asChild><Button variant="ghost" size="sm" className={cn('h-7 rounded-full border-border px-3 text-xs font-normal', category !== null ? 'bg-secondary' : 'text-muted-foreground')}>按分类<ChevronDownIcon /></Button></PopoverTrigger>
                 <PopoverContent className="w-44 p-1" align="start">
                   {[...categories, ''].map(value => <Button key={value} variant="ghost" className="w-full justify-start" onClick={() => { setCategory(value); setScope('all'); setCategoryOpen(false); }}>{value || '未分类'}</Button>)}
                 </PopoverContent>

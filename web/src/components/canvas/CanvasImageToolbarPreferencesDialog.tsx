@@ -1,4 +1,4 @@
-import { Ellipsis, GripVertical, Image as ImageIcon } from 'lucide-react';
+import { DragHandleIcon, ImageIcon, MoreIcon } from '@/components/ui/icons';
 import { Reorder, useDragControls } from 'motion/react';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -89,18 +89,18 @@ export function CanvasImageToolbarPreferencesDialog({
                 const Icon = tool.icon;
                 return (
                   <span key={tool.id} className="flex h-9 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground">
-                    <Icon className="size-4" aria-hidden="true" />
+                    <Icon aria-hidden="true" />
                     <span>{tool.label}</span>
                   </span>
                 );
               })}
               <span className="grid size-9 place-items-center rounded-md text-muted-foreground" aria-label="更多与配置">
-                <Ellipsis className="size-4" aria-hidden="true" />
+                <MoreIcon aria-hidden="true" />
               </span>
             </div>
           </div>
           <div className="mt-3 grid min-h-28 place-items-center rounded-lg border border-border bg-secondary/20 text-muted-foreground">
-            <span className="flex items-center gap-2 text-sm"><ImageIcon className="size-5" aria-hidden="true" />图片节点</span>
+            <span className="flex items-center gap-2 text-sm"><ImageIcon size="lg" aria-hidden="true" />图片节点</span>
           </div>
         </section>
 
@@ -135,7 +135,7 @@ export function CanvasImageToolbarPreferencesDialog({
                   checked={false}
                   onCheckedChange={() => setVisible(tool.id, true)}
                 />
-                <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <Icon className="shrink-0 text-muted-foreground" aria-hidden="true" />
                 <span className="min-w-0 flex-1 text-sm text-muted-foreground">{tool.label}</span>
               </div>
             );
@@ -177,7 +177,7 @@ function VisibleToolRow({ tool, inMore, onHide, onMove }: {
         checked
         onCheckedChange={onHide}
       />
-      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <Icon className="shrink-0 text-muted-foreground" aria-hidden="true" />
       <span className="min-w-0 flex-1 text-sm">{tool.label}</span>
       {inMore && <span className="text-xs text-muted-foreground">在「更多」里</span>}
       <Hint label="拖动排序，或按上下方向键"><Button variant="bare"
@@ -191,7 +191,7 @@ function VisibleToolRow({ tool, inMore, onHide, onMove }: {
           onMove(event.key === 'ArrowUp' ? -1 : 1);
         }}
       >
-        <GripVertical className="size-4" aria-hidden="true" />
+        <DragHandleIcon aria-hidden="true" />
       </Button></Hint>
     </Reorder.Item>
   );

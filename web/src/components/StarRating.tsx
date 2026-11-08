@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Star, StarHalf } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { StarIcon } from '@/components/ui/icons';
 
 interface Props {
   value: number;                 // 0–5，0.5 步进
@@ -24,25 +24,14 @@ export function StarRating({ value, onChange }: Props) {
           const full = shown >= pos;
           const half = !full && shown >= pos - 0.5;
           return (
-            <span key={pos} className="relative inline-flex size-7">
-              <Star
-                className="absolute inset-0 size-7 text-muted-foreground/25"
-                strokeWidth={1.5}
-                aria-hidden
-              />
-              {full && (
-                <Star
-                  className="absolute inset-0 size-7 text-primary fill-current"
-                  strokeWidth={1.5}
-                  aria-hidden
-                />
-              )}
+            <span key={pos} className="relative inline-flex size-6">
+              <StarIcon size="xl" className="absolute inset-0 text-muted-foreground/25" />
+              {full && <StarIcon size="xl" className="absolute inset-0 fill-current text-primary" />}
+              {/* 半星：实心整星裁掉右半（图标库的半星是整星加中线，填色后会变整星） */}
               {half && (
-                <StarHalf
-                  className="absolute inset-0 size-7 text-primary fill-current"
-                  strokeWidth={1.5}
-                  aria-hidden
-                />
+                <span className="absolute inset-y-0 left-0 w-1/2 overflow-hidden">
+                  <StarIcon size="xl" className="fill-current text-primary" />
+                </span>
               )}
               <Button variant="bare"
                 type="button"

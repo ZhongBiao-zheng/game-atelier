@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AudioLines, Copy, Film, HelpCircle, RefreshCw, Search, Plus, Loader2 } from 'lucide-react';
+import { AddIcon, AudioIcon, CopyIcon, HelpIcon, LoadingIcon, RetryIcon, SearchIcon, VideoIcon } from '@/components/ui/icons';
 import { gatewayContentUrl, gatewayThumbUrl, listGatewayAssets, listGatewayLibraries, type GatewayLibraryEntry,
   type GatewayLibrarySelection, type GatewayLibrarySource } from '@/api/gatewayLibraries';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,7 @@ import { readTeamMedia, type UseTeamMedia, type UseTeamPrompt } from './teamAsse
 
 export function GatewayLibraryHelp() {
   return <Hint label="将同事的网关添加为供应商后，可以查看他开启共享的团队库">
-    <Button size="icon" variant="ghost" className="size-7" aria-label="同事共享说明"><HelpCircle className="size-4" /></Button>
+    <Button size="icon" variant="ghost" className="size-7" aria-label="同事共享说明"><HelpIcon /></Button>
   </Hint>;
 }
 
@@ -64,7 +64,7 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
     } catch { setUseError('读取失败'); } finally { setUsing(null); }
   }
   const actionButton = (entry: GatewayLibraryEntry) => <Button variant="solid" size="sm" className="rounded-full" disabled={using !== null || (entry.kind !== 'prompt' && !entry.has_content)} onClick={() => void applyEntry(entry)}>
-    {using === entry.entry_id ? <Loader2 className="animate-spin" /> : <Plus />}使用</Button>;
+    {using === entry.entry_id ? <LoadingIcon className="animate-spin" /> : <AddIcon />}使用</Button>;
   const [entries, setEntries] = useState<GatewayLibraryEntry[]>([]);
   const [viewing, setViewing] = useState<GatewayLibraryEntry | null>(null);
   const [preview, setPreview] = useState(0);
@@ -92,17 +92,17 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
     ? (entry.preview_count > 0 ? gatewayThumbUrl(library, entry, Math.min(n, entry.preview_count - 1)) : null)
     : (entry.mime_type?.startsWith('image/') ? gatewayThumbUrl(library, entry) : null);
   const placeholder = (entry: GatewayLibraryEntry) => <span className="grid aspect-square w-full place-content-center gap-2 rounded-md border border-border bg-card text-muted-foreground">
-    {entry.mime_type?.startsWith('audio/') ? <AudioLines className="mx-auto size-6" /> : <Film className="mx-auto size-6" />}
+    {entry.mime_type?.startsWith('audio/') ? <AudioIcon size="xl" className="mx-auto" /> : <VideoIcon size="xl" className="mx-auto" />}
     <span className="text-center text-xs tabular-nums">{mediaDuration(entry.duration_s ?? undefined)}</span>
   </span>;
   const visible = entries.filter(entry => (type === 'all' || (type === 'prompt' ? entry.kind === 'prompt' : entry.mime_type?.startsWith(type + '/')))
     && [entry.title, entry.prompt_text, ...entry.tags].join(' ').toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   return <>
     <div className="flex items-center gap-2">
-      <InputGroup className="min-w-0 flex-1"><InputGroupAddon><Search /></InputGroupAddon>
+      <InputGroup className="min-w-0 flex-1"><InputGroupAddon><SearchIcon /></InputGroupAddon>
         <InputGroupInput aria-label="搜索同事共享" placeholder="搜索" value={query} onChange={event => setQuery(event.target.value)} />
       </InputGroup>
-      <Button size="icon" variant="outline" aria-label="刷新" onClick={onRefresh}><RefreshCw /></Button>
+      <Button size="icon" variant="outline" aria-label="刷新" onClick={onRefresh}><RetryIcon /></Button>
     </div>
     {useError && <p role="alert" className="text-sm text-destructive">{useError}</p>}
     {!available ? <p role="status" className="py-8 text-center text-sm text-muted-foreground">已停止共享</p> : <>
@@ -148,7 +148,7 @@ export function GatewayLibraryBrowser({ library, available, revision, onRefresh,
           </div>}
           {viewing.kind === 'prompt' && <>
             <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">提示词</span>
-              <Button variant="ghost" size="sm" onClick={() => { void navigator.clipboard.writeText(viewing.prompt_text ?? '').catch(() => setCopyError(true)); }}><Copy />复制</Button>
+              <Button variant="ghost" size="sm" onClick={() => { void navigator.clipboard.writeText(viewing.prompt_text ?? '').catch(() => setCopyError(true)); }}><CopyIcon />复制</Button>
             </div><p className="whitespace-pre-wrap rounded-lg bg-card p-3 text-sm">{viewing.prompt_text}</p>
             {copyError && <p role="alert" className="text-xs text-destructive">复制失败</p>}
           </>}

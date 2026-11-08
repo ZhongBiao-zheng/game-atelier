@@ -2,10 +2,9 @@ import { GatewayPublishStatus } from './GatewayPublishStatus';
 import { getGatewayShareState, setGatewayShare, type GatewayShareState } from '@/api/gatewayLibraries';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { HelpCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Copy, Folder, FolderOpen, FolderX, MoreHorizontal, Plus, RotateCw, Trash2, X } from 'lucide-react';
+import { AddIcon, CloseIcon, CopyIcon, DeleteIcon, FolderIcon, FolderOffIcon, FolderOpenIcon, HelpIcon, MoreIcon, RetryIcon } from '@/components/ui/icons';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -178,12 +177,12 @@ export function TeamLibrariesSection() {
       {displayName !== undefined && <SignatureControl value={displayName} open={signatureOpen} onOpenChange={setSignatureOpen}
         onSaved={name => { setDisplayName(name); setError(null); }} />}
       <Button type="button" disabled={busy || projects.length === 0} onClick={() => setMountOpen(true)}>
-        <Plus aria-hidden />挂载文件夹
+        <AddIcon aria-hidden />挂载文件夹
       </Button>
     </div>
 
     {mounts && groups.length === 0 && <div className="flex min-h-80 flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-input px-4 py-12">
-      <span aria-hidden className="grid size-12 place-items-center rounded-lg bg-popover text-muted-foreground"><FolderOpen className="size-5" /></span>
+      <span aria-hidden className="grid size-12 place-items-center rounded-lg bg-popover text-muted-foreground"><FolderOpenIcon size="lg" /></span>
       <div className="space-y-1.5 text-center">
         <p className="text-sm font-medium">还没有团队库</p>
         <p className="text-xs text-muted-foreground">选一个团队用 SVN / Git / 网盘同步的文件夹</p>
@@ -193,13 +192,13 @@ export function TeamLibrariesSection() {
     {groups.length > 0 && <ul aria-label="团队库" className="space-y-3">
       {groups.map(group => {
         const { library } = group;
-        const FolderIcon = library.reachable ? Folder : FolderX;
+        const LibraryFolderIcon = library.reachable ? FolderIcon : FolderOffIcon;
         return <li key={library.library_id} aria-label={library.name}
           className={cn('overflow-hidden rounded-lg border bg-card', library.reachable ? 'border-border' : 'border-destructive/40')}>
           <div className="flex items-center gap-3.5 p-4">
             <span aria-hidden className={cn('grid size-10 shrink-0 place-items-center rounded-md',
               library.reachable ? 'bg-secondary' : 'bg-destructive/10 text-destructive')}>
-              <FolderIcon className="size-4.5" />
+              <LibraryFolderIcon size="lg" />
             </span>
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
@@ -214,26 +213,26 @@ export function TeamLibrariesSection() {
             {library.reachable
               ? <Hint label="重新扫描"><Button variant="ghost" size="icon" className="size-8" type="button" aria-label="重新扫描" disabled={busy}
                 onClick={() => void run(() => rescanTeamLibrary(library.library_id))}>
-                <RotateCw className="size-4" aria-hidden />
+                <RetryIcon aria-hidden />
               </Button></Hint>
               : <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => relocate(group)}>重新定位</Button>}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="size-8" type="button" aria-label="更多" disabled={busy}><MoreHorizontal className="size-4" aria-hidden /></Button>
+                <Button variant="ghost" size="icon" className="size-8" type="button" aria-label="更多" disabled={busy}><MoreIcon aria-hidden /></Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => void navigator.clipboard?.writeText(library.mount_path)}><Copy className="size-4 text-muted-foreground" aria-hidden />复制路径</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => relocate(group)}><Folder className="size-4 text-muted-foreground" aria-hidden />重新定位</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void navigator.clipboard?.writeText(library.mount_path)}><CopyIcon className="text-muted-foreground" aria-hidden />复制路径</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => relocate(group)}><FolderIcon className="text-muted-foreground" aria-hidden />重新定位</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem destructive onSelect={() => setPendingUnmount(group)}>
-                  <Trash2 className="size-4" aria-hidden />从全部项目卸载
+                  <DeleteIcon aria-hidden />从全部项目卸载
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
           <div className="flex items-center gap-2 border-t border-border px-4 py-3">
             <Label htmlFor={`gateway-share-${library.library_id}`} className="flex-1 text-sm">共享给网关同事</Label>
-            {!(sharing?.gateway_enabled || sharing?.can_publish) && <Hint label="请先开启网关或接入同事的网关"><Button size="icon" variant="ghost" className="size-7" aria-label="网关共享说明"><HelpCircle className="size-4" /></Button></Hint>}
+            {!(sharing?.gateway_enabled || sharing?.can_publish) && <Hint label="请先开启网关或接入同事的网关"><Button size="icon" variant="ghost" className="size-7" aria-label="网关共享说明"><HelpIcon /></Button></Hint>}
             <GatewayPublishStatus targets={sharing?.publishes?.[library.library_id]?.gateways} />
             <Switch id={`gateway-share-${library.library_id}`} checked={sharing?.shared_library_ids.includes(library.library_id) ?? false}
               disabled={busy || shareBusy || !(sharing?.gateway_enabled || sharing?.can_publish)} onCheckedChange={enabled => {
@@ -249,14 +248,14 @@ export function TeamLibrariesSection() {
               <Button variant="bare" type="button" aria-label={`从 ${nameOf(projectId)} 卸载`} disabled={busy}
                 onClick={() => toggleProject(group, projectId)}
                 className="grid size-5 place-items-center rounded-sm text-muted-foreground hover:bg-background/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                <X className="size-3" aria-hidden />
+                <CloseIcon size="sm" aria-hidden />
               </Button>
             </span>)}
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="bare" type="button" disabled={busy || !library.reachable}
                   className="inline-flex h-7 items-center gap-1 rounded-sm border border-dashed border-input px-2.5 text-xs text-muted-foreground hover:bg-secondary/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary data-[state=open]:border-solid data-[state=open]:border-primary/60 data-[state=open]:text-foreground">
-                  <Plus className="size-3" aria-hidden />项目
+                  <AddIcon size="sm" aria-hidden />项目
                 </Button>
               </PopoverTrigger>
 

@@ -1,5 +1,5 @@
 import { useState, type DragEvent } from 'react';
-import { Download, Ellipsis, Eye, EyeOff, GripVertical } from 'lucide-react';
+import { DownloadIcon, DragHandleIcon, HideIcon, MoreIcon, ShowIcon } from '@/components/ui/icons';
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
@@ -73,25 +73,25 @@ export function CanvasLayerStackList({ node, context, disabled, onVisibility, on
       }}>
       {target?.key === part.key && dragged !== part.key && <span aria-hidden="true"
         className={cn('pointer-events-none absolute inset-x-2 border-t-2 border-primary', target.after ? 'bottom-0' : 'top-0')} />}
-      <GripVertical aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
+      <DragHandleIcon size="sm" aria-hidden="true" className="shrink-0 text-muted-foreground" />
       <img src={canvasMediaUrl(context.projectId, part.versionId, 128)} alt="" draggable={false}
         className="size-12 shrink-0 rounded-md bg-secondary/40 object-contain" />
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">{part.name}</span>
       <a href={canvasDownloadUrl(context.projectId, part.versionId)} download draggable={false}
         aria-label={`下载${part.name}`} onClick={event => event.stopPropagation()}
         className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <Download className="size-4" />
+        <DownloadIcon />
       </a>
       <Toggle size="sm" className="size-8 shrink-0 px-0 data-[state=on]:bg-transparent"
         aria-label={`${part.visible ? '隐藏' : '显示'}${part.name}`} pressed={Boolean(part.visible)}
         onClick={event => event.stopPropagation()}
         onPressedChange={visible => onVisibility(part.layer?.id ?? null, visible)}>
-        <SwapIcon swapKey={Boolean(part.visible)}>{part.visible ? <Eye /> : <EyeOff />}</SwapIcon>
+        <SwapIcon swapKey={Boolean(part.visible)}>{part.visible ? <ShowIcon /> : <HideIcon />}</SwapIcon>
       </Toggle>
       <DropdownMenu><DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="size-6 shrink-0 text-muted-foreground"
           disabled={disabled} aria-label={`${part.name}图层排序`} onClick={event => event.stopPropagation()}>
-          <Ellipsis className="size-4" />
+          <MoreIcon />
         </Button>
       </DropdownMenuTrigger><DropdownMenuContent onPointerDown={event => event.stopPropagation()}>
         <DropdownMenuItem disabled={disabled || index === 0}

@@ -1,4 +1,4 @@
-import { Scissors } from 'lucide-react';
+import { CutIcon } from '@/components/ui/icons';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -29,7 +29,7 @@ export function CanvasMattingModelDialog({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Scissors aria-hidden="true" />
+            <CutIcon aria-hidden="true" />
             下载抠图模型
           </DialogTitle>
           <DialogDescription>

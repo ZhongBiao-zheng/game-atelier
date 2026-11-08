@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react';
-import { Sparkles } from 'lucide-react';
+import { AiIcon } from '@/components/ui/icons';
 
 import {
   MJ_BOT_TYPES,
@@ -59,7 +59,7 @@ export function MjControls({
           open ? 'border-border bg-secondary text-foreground' : 'border-border text-foreground hover:bg-secondary'
         }`}
       >
-        <Sparkles size={14} aria-hidden />
+        <AiIcon size="sm" aria-hidden />
         <span className="truncate">{evolink ? 'Fast · Standard' : mjSummary(value)}</span>
       </Button>
 

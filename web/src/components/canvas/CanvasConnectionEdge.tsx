@@ -1,5 +1,5 @@
 import { BaseEdge, EdgeLabelRenderer, EdgeToolbar, getBezierPath, useReactFlow, type EdgeProps } from '@xyflow/react';
-import { PenLine, Scissors } from 'lucide-react';
+import { CutIcon, PenIcon } from '@/components/ui/icons';
 
 import { Button } from '@/components/ui/button';
 import { Hint } from '@/components/ui/tooltip';
@@ -20,7 +20,7 @@ function CanvasConnectionEdge(props: EdgeProps) {
       />
       {props.data?.annotated === true && <EdgeLabelRenderer>
         <span role="img" aria-label="带标注" className="pointer-events-none absolute grid size-6 place-items-center rounded-full border border-primary bg-popover text-primary"
-          style={{ transform: `translate(-50%, -50%) translate(${x}px,${y}px)` }}><PenLine size={12} /></span>
+          style={{ transform: `translate(-50%, -50%) translate(${x}px,${y}px)` }}><PenIcon size="sm" /></span>
       </EdgeLabelRenderer>}
       <EdgeToolbar edgeId={props.id} x={x} y={props.data?.annotated ? y - 24 : y} isVisible={Boolean(props.selected) && props.deletable !== false}>
         <Hint label="断开连接"><Button
@@ -36,7 +36,7 @@ function CanvasConnectionEdge(props: EdgeProps) {
             void deleteElements({ edges: [{ id: props.id }] });
           }}
         >
-          <Scissors aria-hidden="true" />
+          <CutIcon aria-hidden="true" />
         </Button></Hint>
       </EdgeToolbar>
     </>

@@ -3,7 +3,7 @@ import type { WorkflowInput } from '@/api/keys';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Images, Settings2, Workflow } from 'lucide-react';
+import { ImagesIcon, ParamsIcon, WorkflowIcon } from '@/components/ui/icons';
 
 import { prefetchModelPickerMetrics } from '@/lib/useModelPickerMetrics';
 import { ModelPickerList } from '@/components/ModelPickerList';
@@ -87,7 +87,7 @@ export function CanvasModelPicker({ choices, alias, model, onSelect, params = {}
     <div ref={providerRef} className={cn('min-w-0', fit === 'content' ? 'max-w-36' : 'flex-1 basis-24')}>
       <Button variant="bare" type="button" aria-label="选择生成供应商" aria-expanded={open === 'provider'}
         onClick={() => setOpen(open === 'provider' ? null : 'provider')} className={buttonClass}>
-        <ProviderBrandIcon provider={provider} size={14} />
+        <ProviderBrandIcon provider={provider} size="sm" />
         <span className="truncate">{provider ? groupLabel(provider) : '供应商'}</span>
       </Button>
       <ToolbarPopover open={open === 'provider'} onClose={() => setOpen(null)} anchorRef={providerRef}
@@ -113,7 +113,7 @@ export function CanvasModelPicker({ choices, alias, model, onSelect, params = {}
         onPointerEnter={() => void prefetchModelPickerMetrics(models, pickerParams)}
         onFocus={() => void prefetchModelPickerMetrics(models, pickerParams)}
         onClick={() => setOpen(open === 'model' ? null : 'model')} className={buttonClass}>
-        {selected?.model.id.startsWith('comfyui-') ? <Workflow size={14} aria-hidden /> : <ModelBrandIcon brand={modelBrand(selected?.model.id ?? '')} size={14} />}
+        {selected?.model.id.startsWith('comfyui-') ? <WorkflowIcon size="sm" aria-hidden /> : <ModelBrandIcon brand={modelBrand(selected?.model.id ?? '')} size="sm" />}
         <span className="truncate">{selected ? modelDisplayName(selected.model) : '选择模型'}</span>
       </Button>
       <ToolbarPopover open={open === 'model'} onClose={() => setOpen(null)} anchorRef={modelRef}
@@ -176,7 +176,7 @@ export function CanvasImageSettings({
         onClick={() => setOpen(value => !value)}
         className="flex h-9 max-w-full items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        <span aria-hidden="true">{workflowInputs != null ? <Images size={14} /> : <Settings2 size={14} />}</span>
+        <span aria-hidden="true">{workflowInputs != null ? <ImagesIcon size="sm" /> : <ParamsIcon size="sm" />}</span>
         <span className="truncate">{summary}</span>
       </Button>
       <ToolbarPopover
@@ -267,7 +267,7 @@ export function CanvasTextSettings({
         onClick={() => setOpen(current => !current)}
         className="flex h-9 max-w-full items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
-        <Settings2 className="size-3.5 shrink-0" aria-hidden="true" />
+        <ParamsIcon size="sm" className="shrink-0" aria-hidden="true" />
         <span className="truncate">{summary}</span>
       </Button>
       <ToolbarPopover
@@ -407,7 +407,7 @@ export function CanvasAudioSettings({
         onClick={toggle}
         className="flex h-9 max-w-full items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
-        <Settings2 className="size-3.5 shrink-0" aria-hidden="true" />
+        <ParamsIcon size="sm" className="shrink-0" aria-hidden="true" />
         <span className="truncate">
           {audioVoiceLabel(voice)} · {audioFormatLabel(format)} · {audioSpeedLabel(speed)}
         </span>

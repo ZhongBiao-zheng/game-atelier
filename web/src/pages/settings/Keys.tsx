@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronRight, Plus, Search } from 'lucide-react';
+import { AddIcon, ChevronRightIcon, SearchIcon } from '@/components/ui/icons';
 import { Link } from 'wouter';
 
 import { KeyCard, type KeyRow } from '@/components/keys/KeyCard';
@@ -157,13 +157,13 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
         </div>}
         <div className="flex flex-wrap items-center gap-2">
         {embedded && <InputGroup className="w-56">
-          <InputGroupAddon><Search aria-hidden /></InputGroupAddon>
+          <InputGroupAddon><SearchIcon aria-hidden /></InputGroupAddon>
           <InputGroupInput aria-label="查找供应商" placeholder="查找供应商" value={query}
             onChange={event => setQuery(event.target.value)} />
         </InputGroup>}
         {embedded ? <Link href="/settings/providers/new"
           className="flex h-9 items-center gap-1.5 rounded-md border border-input px-3.5 text-sm hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-          <Plus className="size-3.5" aria-hidden />添加供应商
+          <AddIcon size="sm" aria-hidden />添加供应商
         </Link> : <Button variant="default"
           type="button"
           onClick={openCreate}
@@ -214,7 +214,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
           {embedded && closedKeys.length > 0 && <section>
             <Button variant="bare" type="button" aria-expanded={closedOpen} onClick={() => setShowClosed(open => !open)}
               className="flex items-center gap-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-              <ChevronRight className={`size-3.5 transition-transform duration-150 ${closedOpen ? 'rotate-90' : ''}`} aria-hidden />
+              <ChevronRightIcon size="sm" className={`transition-transform duration-150 ${closedOpen ? 'rotate-90' : ''}`} aria-hidden />
               已关闭的供应商<span className="tabular-nums">{closedKeys.length}</span>
             </Button>
             {closedOpen && <div className="mt-2 overflow-hidden rounded-xl border border-border bg-card">

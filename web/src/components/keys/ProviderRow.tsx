@@ -1,5 +1,5 @@
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRightIcon } from '@/components/ui/icons';
 import { Switch } from '@/components/ui/switch';
 import { providerLabel } from '@/lib/providerLabels';
 import type { KeyRow } from './KeyCard';
@@ -47,7 +47,7 @@ export function ProviderRow({ row, overdue, pending, onEdit, onToggle }: {
     <Switch size="sm" checked={enabled} disabled={pending} aria-label={`启用 ${row.alias}`} onCheckedChange={onToggle} />
     <Button variant="bare" type="button" aria-label={`打开 ${row.alias}`} onClick={onEdit}
       className="rounded-md p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-      <ChevronRight className="size-4" aria-hidden />
+      <ChevronRightIcon aria-hidden />
     </Button>
   </li>;
 }

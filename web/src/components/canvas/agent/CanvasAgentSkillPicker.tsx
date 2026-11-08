@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { FileArchive, FolderOpen, Puzzle, Trash2 } from 'lucide-react';
+import { ArchiveFileIcon, DeleteIcon, FolderOpenIcon, SkillIcon } from '@/components/ui/icons';
 import { deleteCanvasAgentSkill, importCanvasAgentSkill } from '@/api/canvas';
 import { ApiError } from '@/api/http';
 import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
@@ -108,7 +108,7 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
           'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40',
           selected && 'text-primary',
         )}
-      ><Puzzle className="size-4" /></Button></Hint>
+      ><SkillIcon /></Button></Hint>
       <ToolbarPopover
         open={open}
         onClose={() => setOpen(false)}
@@ -147,7 +147,7 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
                 disabled={busy}
                 onClick={() => void remove(item.name)}
                 className="mt-1 grid size-6 shrink-0 place-items-center rounded text-muted-foreground opacity-0 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
-              ><Trash2 className="size-3.5" /></Button></Hint>
+              ><DeleteIcon size="sm" /></Button></Hint>
             </div>
           ))}
         </div>
@@ -156,10 +156,10 @@ export function CanvasAgentSkillPicker({ skills, selected, disabled, onSelect, o
         )}
         <div className="mt-1 flex gap-1 border-t border-border pt-1.5">
           <Button variant="bare" type="button" disabled={busy} onClick={() => archiveRef.current?.click()} className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40">
-            <FileArchive className="size-3.5" />导入 zip / SKILL.md
+            <ArchiveFileIcon size="sm" />导入 zip / SKILL.md
           </Button>
           <Button variant="bare" type="button" disabled={busy} onClick={() => folderRef.current?.click()} className="flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-40">
-            <FolderOpen className="size-3.5" />导入文件夹
+            <FolderOpenIcon size="sm" />导入文件夹
           </Button>
         </div>
         <FileInput

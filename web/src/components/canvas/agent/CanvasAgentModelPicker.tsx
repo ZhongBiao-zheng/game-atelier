@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, Plus } from 'lucide-react';
+import { AddIcon, CheckIcon, ChevronDownIcon } from '@/components/ui/icons';
 import { Link } from 'wouter';
 import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
 import { cn } from '@/lib/utils';
@@ -49,7 +49,7 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
       >
         {/* 记住的模型已不在列表里（Key 里停用了）：当作没选。 */}
         <span className="truncate">{(models ? current?.name : model) ?? '选择模型'}</span>
-        <ChevronDown className="size-3.5 shrink-0" />
+        <ChevronDownIcon size="sm" className="shrink-0" />
       </Button></Hint>
       <ToolbarPopover
         open={open}
@@ -90,7 +90,7 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
                     )}
                   >
                     <Hint label={item.model}><span className="min-w-0 flex-1 truncate">{item.name}</span></Hint>
-                    {selected && <Check className="size-3.5 shrink-0" />}
+                    {selected && <CheckIcon size="sm" className="shrink-0" />}
                   </Button>
                 );
               })}
@@ -104,7 +104,7 @@ export function CanvasAgentModelPicker({ models, alias, model, disabled, onSelec
           href="/settings/providers"
           className="mt-1 flex items-center gap-2 rounded-md border-t border-border px-2 py-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
         >
-          <Plus className="size-3.5 shrink-0" aria-hidden="true" />添加模型
+          <AddIcon size="sm" className="shrink-0" aria-hidden="true" />添加模型
         </Link>
       </ToolbarPopover>
     </>

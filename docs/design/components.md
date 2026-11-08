@@ -22,6 +22,7 @@
 | 数值拖动 | `Slider` | |
 | 选文件 | `FileInput` | 隐藏，由按钮或拖放区 `ref.click()` 触发 |
 | 按钮 | `Button` | `variant`：default / secondary / outline / ghost / destructive / link / solid；`size`：default / sm / lg / icon |
+| 图标 | `ui/icons` 的语义图标（`CloseIcon`…） | `size`：sm / md / lg / xl；新图标先在注册表登记，规则见 DESIGN.md「图标」 |
 | 文字标签 | `Label` | 页面不写原生 `<label>` |
 | 悬停提示 | `Hint`（`ui/tooltip.tsx`） | 替代原生 `title`；测试里用 `test/hint.ts` 的 `hoverHint` |
 | 弹窗 | `Dialog` | 确认类用 `ConfirmDialog`（基于 `AlertDialog`） |

@@ -1,4 +1,4 @@
-import { LoaderCircle } from 'lucide-react';
+import { LoadingIcon } from '@/components/ui/icons';
 
 import { cn } from '@/lib/utils';
 import type { CanvasNode } from '@/schema/canvas';
@@ -164,7 +164,7 @@ export function CanvasNodeRunOverlay({
           className={cn('canvas-generation-indicator shrink-0', compact ? 'size-5' : 'size-12')}
           aria-hidden="true"
         >
-          <LoaderCircle className={compact ? 'size-3.5' : 'size-5'} />
+          <LoadingIcon size="lg" className={compact ? '': ''} />
         </span>
       )}
       <Hint label={state.detail || state.label}><span

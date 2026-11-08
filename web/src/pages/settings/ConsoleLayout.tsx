@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentType } from 'react';
 import { Link, Redirect, useLocation } from 'wouter';
-import { ArrowLeft, HelpCircle, KeyRound, Split, Server, BarChart3, LibraryBig, Bot, SlidersHorizontal, type LucideIcon } from 'lucide-react';
+import { AgentIcon, BackIcon, HelpIcon, KeyIcon, LibraryIcon, RouteIcon, ServerIcon, SettingsIcon, UsageIcon, type AppIcon } from '@/components/ui/icons';
 import { listKeys, type KeyView } from '@/api/keys';
 import { fetchGateway, fetchGatewayProviderMe, type GatewayState } from '@/api/gateway';
 import { subscribeGatewayEvents } from '@/api/gatewayEvents';
@@ -20,18 +20,18 @@ import { Button } from '@/components/ui/button';
 
 export const CONSOLE_NAV: {
   group: string;
-  items: { path: string; label: string; page: ComponentType; icon: LucideIcon; hint?: string }[];
+  items: { path: string; label: string; page: ComponentType; icon: AppIcon; hint?: string }[];
 }[] = [
   { group: '模型', items: [
-    { path: '/settings/providers', label: '供应商', page: ProvidersPage, icon: KeyRound },
-    { path: '/settings/relay-admin', label: '中转管理', page: RelayAdminPage, icon: Server },
-    { path: '/settings/routes', label: '智能路由', page: RoutesPage, icon: Split },
-    { path: '/settings/gateway', label: '网关', page: GatewayPage, icon: Server, hint: GATEWAY_HINT },
+    { path: '/settings/providers', label: '供应商', page: ProvidersPage, icon: KeyIcon },
+    { path: '/settings/relay-admin', label: '中转管理', page: RelayAdminPage, icon: ServerIcon },
+    { path: '/settings/routes', label: '智能路由', page: RoutesPage, icon: RouteIcon },
+    { path: '/settings/gateway', label: '网关', page: GatewayPage, icon: ServerIcon, hint: GATEWAY_HINT },
   ] },
-  { group: '观测', items: [{ path: '/settings/usage', label: '用量', page: UsagePage, icon: BarChart3 }] },
-  { group: '资源', items: [{ path: '/settings/libraries', label: '团队库', page: LibrariesPage, icon: LibraryBig, hint: SYNC_HINT }] },
-  { group: '扩展', items: [{ path: '/settings/agent', label: 'Agent 连接', page: AgentPage, icon: Bot }] },
-  { group: '', items: [{ path: '/settings/preferences', label: '设置', page: PreferencesPage, icon: SlidersHorizontal }] },
+  { group: '观测', items: [{ path: '/settings/usage', label: '用量', page: UsagePage, icon: UsageIcon }] },
+  { group: '资源', items: [{ path: '/settings/libraries', label: '团队库', page: LibrariesPage, icon: LibraryIcon, hint: SYNC_HINT }] },
+  { group: '扩展', items: [{ path: '/settings/agent', label: 'Agent 连接', page: AgentPage, icon: AgentIcon }] },
+  { group: '', items: [{ path: '/settings/preferences', label: '设置', page: PreferencesPage, icon: SettingsIcon }] },
 ];
 let lastCreativeLocation = '/';
 export function rememberCreativeLocation(path: string) {
@@ -119,7 +119,7 @@ export function ConsoleLayout() {
   return <div className="flex min-h-full min-w-0 flex-col bg-sidebar md:flex-row">
     <aside className="flex min-w-0 shrink-0 flex-col gap-6 border-b border-border p-4 md:sticky md:top-0 md:h-[calc(100dvh-80px)] md:w-[220px] md:border-b-0">
       <Link href={lastCreativeLocation} className="flex items-center gap-2 px-3 text-sm text-muted-foreground">
-        <ArrowLeft className="size-4" aria-hidden />返回创作
+        <BackIcon aria-hidden />返回创作
       </Link>
       <nav aria-label="控制台" className="flex gap-2 overflow-x-auto md:flex-1 md:flex-col md:gap-4.5">
         {CONSOLE_NAV.map(group => <div key={group.group} className={group.group ? 'shrink-0' : 'flex shrink-0 gap-1 md:mt-auto md:block'}>
@@ -132,7 +132,7 @@ export function ConsoleLayout() {
                 current.path === item.path ? 'bg-popover font-medium text-foreground'
                   : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'}`}>
               <span className={`flex size-6 shrink-0 items-center justify-center rounded-sm ${current.path === item.path ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}>
-                <item.icon className="size-3.5" aria-hidden />
+                <item.icon size="sm" aria-hidden />
               </span>{item.label}
             </Link>)}
             {!group.group && current.path === '/settings/preferences' && <PreferenceLinks />}
@@ -146,7 +146,7 @@ export function ConsoleLayout() {
         <h1 className="text-sm font-semibold">{current.label}</h1>
         {current.hint && <Hint label={current.hint}><Button variant="bare" type="button" aria-label={current.hint}
           className="text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-          <HelpCircle className="size-3.5" aria-hidden />
+          <HelpIcon size="sm" aria-hidden />
         </Button></Hint>}
       </div>}
       <Page />

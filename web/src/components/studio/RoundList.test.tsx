@@ -913,7 +913,7 @@ describe('history parameter buttons', () => {
     expect(await hoverHint(ratio)).toHaveTextContent('当前模型不支持');
     fireEvent.click(ratio);
     expect(apply).toHaveBeenCalledOnce();
-    expect(screen.getByRole('button', { name: 'GPT Image 2' }).querySelector('svg')).toHaveAttribute('width', '12');
+    expect(screen.getByRole('button', { name: 'GPT Image 2' }).querySelector('svg')).toHaveAttribute('width', '14');
   });
   it('shows video fields in order including explicitly disabled audio', () => {
     render(<RoundList rounds={[{ ...videoDone, config: { ...videoDone.config,

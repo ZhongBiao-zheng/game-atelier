@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Download, EyeOff } from 'lucide-react';
+import { DownloadIcon, HideIcon } from '@/components/ui/icons';
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -89,7 +89,7 @@ export function CanvasLayerStackPreview({ node, projectId, resolveVersion, onClo
             {selected?.layer?.description && <p className="max-h-20 overflow-y-auto break-words text-pretty text-sm text-muted-foreground">{selected.layer.description}</p>}
           </div>
           {image && <Button asChild variant="outline" size="sm">
-            <a href={canvasDownloadUrl(projectId, image.version_id)} download><Download aria-hidden="true" />下载原图</a>
+            <a href={canvasDownloadUrl(projectId, image.version_id)} download><DownloadIcon aria-hidden="true" />下载原图</a>
           </Button>}
         </div>
       </div>
@@ -106,7 +106,7 @@ export function CanvasLayerStackPreview({ node, projectId, resolveVersion, onClo
           className="h-auto shrink-0 justify-start gap-2 p-2 text-left font-normal whitespace-normal">
           <img src={canvasMediaUrl(projectId, part.versionId, 128)} alt="" loading="lazy" className="size-12 shrink-0 object-contain" />
           <span className="min-w-0 flex-1 break-words">{part.name}</span>
-          {!part.visible && <EyeOff aria-label="画布中已隐藏" className="size-4 shrink-0 text-muted-foreground" />}
+          {!part.visible && <HideIcon aria-label="画布中已隐藏" className="shrink-0 text-muted-foreground" />}
         </ToggleGroupItem>)}
       </ToggleGroup>}
     </div>

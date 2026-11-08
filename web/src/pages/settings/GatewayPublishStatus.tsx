@@ -1,7 +1,7 @@
 import type { GatewayPublishTarget } from '@/schema/gatewayShares';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
-import { HelpCircle } from 'lucide-react';
+import { HelpIcon } from '@/components/ui/icons';
 export function GatewayPublishStatus({ targets }: { targets?: Record<string, GatewayPublishTarget> }) {
   if (!targets) return null;
   return <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -12,7 +12,7 @@ export function GatewayPublishStatus({ targets }: { targets?: Record<string, Gat
         : target.status === 'synced' ? `已同步 · ${minutes < 1 ? '刚刚' : `${minutes} 分钟前`}`
         : target.status === 'failed' ? '同步失败' : target.status === 'stopped' ? '已停止共享' : '等待同步';
       return <span key={alias} className="flex items-center gap-1">{Object.keys(targets).length > 1 && `${alias} · `}{text}
-        {target.error && <Hint label={target.error}><Button variant="ghost" size="icon" className="size-6" aria-label={`${alias} 同步详情`}><HelpCircle className="size-3" /></Button></Hint>}
+        {target.error && <Hint label={target.error}><Button variant="ghost" size="icon" className="size-6" aria-label={`${alias} 同步详情`}><HelpIcon size="sm" /></Button></Hint>}
       </span>;
     })}
   </div>;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Minimize2 } from 'lucide-react';
+import { CollapseIcon } from '@/components/ui/icons';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useEditorViewport } from '../ImageEditorShell';
 import { AnnotationEditingLayer } from './AnnotationEditingLayer';
@@ -26,7 +26,7 @@ export function AnnotationFullscreen({ title, src, width, height, onCollapse, ..
       <DialogDescription className="sr-only">全屏标注</DialogDescription>
       <header className="absolute inset-x-4 top-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <Hint label="收起 Esc"><Button variant="bare" type="button" aria-label="收起" className="grid size-9 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground" onClick={onCollapse}><Minimize2 size={18} /></Button></Hint>
+          <Hint label="收起 Esc"><Button variant="bare" type="button" aria-label="收起" className="grid size-9 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground" onClick={onCollapse}><CollapseIcon size="lg" /></Button></Hint>
           <DialogTitle className="text-sm font-medium">{title}</DialogTitle>
           <span className="text-xs tabular-nums text-muted-foreground">{width} × {height}</span>
         </div>

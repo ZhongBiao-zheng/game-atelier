@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { FastForward, Pause, Play, Rewind } from 'lucide-react';
+import { FastForwardIcon, PauseIcon, PlayIcon, RewindIcon } from '@/components/ui/icons';
 import { request } from '@/api/http';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { cn } from '@/lib/utils';
@@ -245,7 +245,7 @@ export function CanvasAudioPlayer({
           onDoubleClick={stop}
           onClick={event => { stop(event); seek(previousStop); }}
         >
-          <Rewind className="size-4 fill-current" aria-hidden="true" />
+          <RewindIcon className="fill-current" aria-hidden="true" />
         </Button>
         <Button variant="bare"
           type="button"
@@ -257,8 +257,8 @@ export function CanvasAudioPlayer({
         >
           <SwapIcon swapKey={playing}>
             {playing
-              ? <Pause className="size-4 fill-current" aria-hidden="true" />
-              : <Play className="ml-0.5 size-4 fill-current" aria-hidden="true" />}
+              ? <PauseIcon className="fill-current" aria-hidden="true" />
+              : <PlayIcon className="ml-0.5 fill-current" aria-hidden="true" />}
           </SwapIcon>
         </Button>
         <Button variant="bare"
@@ -269,7 +269,7 @@ export function CanvasAudioPlayer({
           onDoubleClick={stop}
           onClick={event => { stop(event); seek(nextStop); }}
         >
-          <FastForward className="size-4 fill-current" aria-hidden="true" />
+          <FastForwardIcon className="fill-current" aria-hidden="true" />
         </Button>
       </div>
     </div>

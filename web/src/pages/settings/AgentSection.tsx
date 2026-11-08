@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRightIcon } from '@/components/ui/icons';
 
 import { disableAgent, enableAgent, fetchAgentStatus, type AgentClient, type AgentStatus } from '@/api/agentConnection';
 import { Button } from '@/components/ui/button';
@@ -71,7 +71,7 @@ export function AgentSection() {
       </div>
       <section aria-label="可用工具" className="space-y-2.5">
         <h2 className="text-sm font-semibold"><Button variant="ghost" size="sm" aria-expanded={toolsOpen} onClick={() => setToolsOpen(!toolsOpen)} className="-ml-2 gap-1 px-2 text-sm font-semibold">
-          <ChevronRight size={14} aria-hidden className={`transition-transform ${toolsOpen ? 'rotate-90' : ''}`} />可用工具 <span className="font-normal text-muted-foreground">{status.tools.length}</span>
+          <ChevronRightIcon size="sm" aria-hidden className={`transition-transform ${toolsOpen ? 'rotate-90': ''}`} />可用工具 <span className="font-normal text-muted-foreground">{status.tools.length}</span>
         </Button></h2>
         <Collapse open={toolsOpen} className="space-y-2.5">
         <div className="flex flex-wrap gap-1.5">

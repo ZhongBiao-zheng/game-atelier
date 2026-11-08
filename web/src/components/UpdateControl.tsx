@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowUp, X } from 'lucide-react';
+import { ArrowUpIcon, CloseIcon } from '@/components/ui/icons';
 import { applyUpdate, cancelUpdate, checkUpdate, fetchUpdateResult, fetchUpdateState, probeUpdateInstance, readPendingUpdate, savePendingUpdate, updateRecoveryExpired, updateNavigation, type PendingUpdate, type UpdateState } from '@/api/update';
 import { ApiError } from '@/api/http';
 import { Button } from '@/components/ui/button';
@@ -137,7 +137,7 @@ export function UpdateProvider({ children, runtimeMode, latestRelease }: {
       </DialogContent>
     </Dialog>
     {message && createPortal(<div data-connection-controls role="alert" className="fixed inset-x-3 bottom-6 z-50 mx-auto flex w-fit max-w-lg items-center gap-3 rounded-lg border border-border bg-popover px-4 py-3 text-sm">
-      <span>{message}</span><Button variant="bare" type="button" data-connection-dismiss aria-label="关闭更新提示" className="rounded-sm p-1 text-muted-foreground hover:text-foreground" onClick={() => setMessage(null)}><X className="size-4" aria-hidden /></Button>
+      <span>{message}</span><Button variant="bare" type="button" data-connection-dismiss aria-label="关闭更新提示" className="rounded-sm p-1 text-muted-foreground hover:text-foreground" onClick={() => setMessage(null)}><CloseIcon aria-hidden /></Button>
     </div>, document.body)}
   </UpdateContext.Provider>;
 }
@@ -147,7 +147,7 @@ export function UpdateButton({ mobile = false }: { mobile?: boolean }) {
   if (!update) return null;
   const { state, mode, latest } = update;
   if (mode === 'bundle') return !mobile && state?.status === 'ready' && state.to ? <Hint label={`更新到 ${state.to}`}><Button variant="bare" type="button" onClick={update.requestApply}
-    className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-3 py-2 text-xs text-primary hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><ArrowUp className="size-3.5" aria-hidden />更新</Button></Hint> : null;
+    className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-3 py-2 text-xs text-primary hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><ArrowUpIcon size="sm" aria-hidden />更新</Button></Hint> : null;
   if (!latest) return null;
   const wrapper = mobile ? 'flex justify-end px-3 pb-2 sm:hidden' : 'hidden sm:contents';
   if (mode === 'source') return <span className={wrapper}><Hint label="重新运行一键启动器即可更新"><Button variant="bare" type="button" onClick={() => window.dispatchEvent(new Event(OPEN_CHANGELOG_EVENT))}

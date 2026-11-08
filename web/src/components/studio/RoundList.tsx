@@ -2,7 +2,7 @@ import type { PromptPreviewRequest } from '@/components/assets/SetPromptPreviewD
 import type { Job, JobParams } from '@/schema/jobs';
 import { type ButtonHTMLAttributes, forwardRef, Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Bookmark, BookmarkPlus, Download, Eye, EyeOff, Film, Heart, Info, Music, Pencil, Share2, Square, Trash2, Workflow, ImagePlus, MoreHorizontal } from 'lucide-react';
+import { AddImageIcon, AudioIcon, BookmarkIcon, DeleteIcon, DownloadIcon, EditIcon, FavoriteIcon, HideIcon, InfoIcon, MoreIcon, SaveAssetIcon, ShareIcon, ShowIcon, StopIcon, VideoIcon, WarningIcon, WorkflowIcon } from '@/components/ui/icons';
 
 import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
@@ -161,7 +161,7 @@ function SpecChips({ config, reuseParameter, testId, children }: {
         const apply = typeof result === 'function' ? result : undefined;
         return <MetaTag key={parameter} className="inline-flex items-center gap-1"
           onClick={apply ?? (() => undefined)} disabled={!apply} disabledReason={typeof result === 'string' ? result : undefined}>
-          {parameter === 'model' && (config.model?.startsWith('comfyui-') ? <Workflow size={12} aria-hidden /> : <ModelBrandIcon brand={modelBrand(config.model)} size={12} />)}
+          {parameter === 'model' && (config.model?.startsWith('comfyui-') ? <WorkflowIcon size="sm" aria-hidden /> : <ModelBrandIcon brand={modelBrand(config.model)} size="sm" />)}
           {label}
         </MetaTag>;
       })}
@@ -174,7 +174,7 @@ function SpecChips({ config, reuseParameter, testId, children }: {
 function SourceChip({ title, testId }: { title: string; testId?: string }) {
   return (
     <span data-testid={testId} className="inline-flex items-center gap-1 rounded-sm border border-border px-2 py-0.5 text-muted-foreground">
-      <Bookmark className="size-3 shrink-0" aria-hidden />
+      <BookmarkIcon size="sm" className="shrink-0" aria-hidden />
       <span className="sr-only">来源：</span>{title}
     </span>
   );
@@ -510,7 +510,7 @@ function PendingBatch({
               disabled={round.cancelRequested}
               onClick={() => { void onCancel(round.jobId!); }}
             >
-              <Square className="mr-1.5 size-3 fill-current" aria-hidden />
+              <StopIcon size="sm" className="mr-1.5 fill-current" aria-hidden />
               {round.cancelRequested ? '停止中' : '停止'}
             </ActionButton>
           )}
@@ -816,7 +816,7 @@ function MentionPrompt({
             />
           ) : (
             <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
-              <Music className="size-4" aria-hidden />
+              <AudioIcon aria-hidden />
               <span className="max-w-[180px] truncate">{hover.path.split('/').pop()}</span>
             </div>
           )}
@@ -851,7 +851,7 @@ function MentionChip({ label, kind, path, jobId, onHover, mediaActive }: {
         <img src={thumb} alt="" className="h-[18px] w-[18px] rounded-sm object-cover" />
       ) : kind !== 'image' ? (
         <span className="grid h-[18px] w-[18px] place-items-center rounded-sm bg-secondary text-muted-foreground">
-          {kind === 'video' ? <Film className="size-3" aria-hidden /> : <Music className="size-3" aria-hidden />}
+          {kind === 'video' ? <VideoIcon size="sm" aria-hidden /> : <AudioIcon size="sm" aria-hidden />}
         </span>
       ) : null}
       {label}
@@ -873,7 +873,7 @@ function RefThumb({ src, jobId, mediaActive }: { src: string; jobId?: string; me
   }
   return (
     <span className="flex h-full w-full items-center justify-center bg-card text-muted-foreground">
-      {isAudio ? <Music className="size-4" /> : <Film className="size-4" />}
+      {isAudio ? <AudioIcon /> : <VideoIcon />}
     </span>
   );
 }
@@ -906,7 +906,7 @@ function SaveResultButton({ label, onClick }: { label: string; onClick: () => vo
       aria-label={label}
       className={RESULT_ACTION_CLASS}
     >
-      <BookmarkPlus className="size-4" aria-hidden />
+      <SaveAssetIcon aria-hidden />
     </Button></Hint>
   );
 }
@@ -922,7 +922,7 @@ function ShareResultButton({ index, onClick }: { index: number; onClick: () => v
       aria-label={`分享生成结果 ${index + 1}`}
       className={RESULT_ACTION_CLASS}
     >
-      <Share2 className="size-4" aria-hidden />
+      <ShareIcon aria-hidden />
     </Button></Hint>
   );
 }
@@ -1021,7 +1021,7 @@ function DoneBatch({
             <ul data-testid="round-warnings" className="mt-1.5 space-y-1">
               {round.config.warnings!.map((warning, i) => (
                 <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                  <Info className="mt-px size-3 shrink-0" aria-hidden />
+                  <InfoIcon size="sm" className="mt-px shrink-0" aria-hidden />
                   <span>{warning}</span>
                 </li>
               ))}
@@ -1053,7 +1053,7 @@ function DoneBatch({
                       style={aspectStyle(round.config)}
                       className="flex h-full w-full items-center justify-center text-muted-foreground"
                     >
-                      <Film className="size-6" aria-hidden />
+                      <VideoIcon size="xl" aria-hidden />
                     </div>
                   )}
                   <div className="absolute right-2 top-2 flex gap-1.5">
@@ -1073,7 +1073,7 @@ function DoneBatch({
                       aria-label={favorited ? '取消喜欢' : '喜欢'}
                       className={`grid size-8 place-items-center rounded-full border border-border bg-scrim backdrop-blur-glass transition-opacity hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${favorited ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
                     >
-                      <Heart className={`size-4 ${favorited ? 'fill-current' : ''}`} aria-hidden />
+                      <FavoriteIcon className={`${favorited ? 'fill-current' : ''}`} aria-hidden />
                     </Button></Hint>
                     <Hint label="下载视频"><a
                       href={videoSrc(path)}
@@ -1081,7 +1081,7 @@ function DoneBatch({
                       aria-label={`下载生成视频 ${index + 1}`}
                       className="grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100"
                     >
-                      <Download className="size-4" aria-hidden />
+                      <DownloadIcon aria-hidden />
                     </a></Hint>
                   </div>
                 </figure>
@@ -1109,11 +1109,11 @@ function DoneBatch({
                       <DropdownMenuTrigger asChild><Button variant="secondary" size="icon"
                         aria-label={`生成结果 ${index + 1} 的更多操作`}
                         className="size-8 rounded-full bg-scrim text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                        onClick={event => event.stopPropagation()}><MoreHorizontal /></Button></DropdownMenuTrigger>
+                        onClick={event => event.stopPropagation()}><MoreIcon /></Button></DropdownMenuTrigger>
                       <DropdownMenuContent align="end" onClick={event => event.stopPropagation()}>
-                        {onSetPromptPreview && <DropdownMenuItem onSelect={() => onSetPromptPreview({ jobId: round.jobId, outputIndex: index, promptAssetId: round.config.promptAssetId })}><ImagePlus />设为效果图</DropdownMenuItem>}
-                        {saveResult && <DropdownMenuItem aria-label={`保存生成结果 ${index + 1} 为资产`} onSelect={() => saveResult(index, path, 'image')}><BookmarkPlus />保存为创作资产</DropdownMenuItem>}
-                        {share && <DropdownMenuItem aria-label={`分享生成结果 ${index + 1}`} onSelect={() => share(round.jobId, index, path, round.config)}><Share2 />分享到团队库</DropdownMenuItem>}
+                        {onSetPromptPreview && <DropdownMenuItem onSelect={() => onSetPromptPreview({ jobId: round.jobId, outputIndex: index, promptAssetId: round.config.promptAssetId })}><AddImageIcon />设为效果图</DropdownMenuItem>}
+                        {saveResult && <DropdownMenuItem aria-label={`保存生成结果 ${index + 1} 为资产`} onSelect={() => saveResult(index, path, 'image')}><SaveAssetIcon />保存为创作资产</DropdownMenuItem>}
+                        {share && <DropdownMenuItem aria-label={`分享生成结果 ${index + 1}`} onSelect={() => share(round.jobId, index, path, round.config)}><ShareIcon />分享到团队库</DropdownMenuItem>}
                       </DropdownMenuContent>
                     </DropdownMenu>}
 
@@ -1123,7 +1123,7 @@ function DoneBatch({
                       aria-label={favorited ? '取消喜欢' : '喜欢'}
                       className={`grid size-8 place-items-center rounded-full border border-border bg-scrim backdrop-blur-glass transition-opacity hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${favorited ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
                     >
-                      <Heart className={`size-4 ${favorited ? 'fill-current' : ''}`} aria-hidden />
+                      <FavoriteIcon className={`${favorited ? 'fill-current' : ''}`} aria-hidden />
                     </Button></Hint>
                     {onToggleHidden && (
                       <Hint label={hidden ? '取消隐藏' : '隐藏（不在首页展示）'}><Button variant="bare"
@@ -1132,7 +1132,7 @@ function DoneBatch({
                         aria-label={hidden ? '取消隐藏' : '隐藏（不在首页展示）'}
                         className={`grid size-8 place-items-center rounded-full border border-border bg-scrim backdrop-blur-glass transition-opacity hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${hidden ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
                       >
-                        <SwapIcon swapKey={Boolean(hidden)}>{hidden ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}</SwapIcon>
+                        <SwapIcon swapKey={Boolean(hidden)}>{hidden ? <HideIcon aria-hidden /> : <ShowIcon aria-hidden />}</SwapIcon>
                       </Button></Hint>
                     )}
                     <Hint label="下载图片"><a
@@ -1142,7 +1142,7 @@ function DoneBatch({
                       aria-label={`下载生成结果 ${index + 1}`}
                       className="grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                     >
-                      <Download className="size-4" aria-hidden />
+                      <DownloadIcon aria-hidden />
                     </a></Hint>
                   </div>
                   {/* 左下角编辑：把这张图导入下方输入框作参考图，继续图生图微调。 */}
@@ -1153,7 +1153,7 @@ function DoneBatch({
                       aria-label={`编辑生成结果 ${index + 1}（导入为参考图）`}
                       className="absolute bottom-2 left-2 grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                     >
-                      <Pencil className="size-4" aria-hidden />
+                      <EditIcon aria-hidden />
                     </Button></Hint>
                   )}
                 </figure>
@@ -1174,13 +1174,13 @@ function DoneBatch({
           <DropdownMenuContent data-testid="studio-more-menu" side="right" align="start" className="w-48 rounded-xl">
             {onSavePromptAsset && (
               <DropdownMenuItem onSelect={() => onSavePromptAsset(round.config)}>
-                <BookmarkPlus className="size-4 shrink-0" aria-hidden />
+                <SaveAssetIcon className="shrink-0" aria-hidden />
                 保存提示词资产
               </DropdownMenuItem>
             )}
             {round.mode !== 'canvas' && (
               <DropdownMenuItem onSelect={() => { void onDeleteBatch?.(round.jobId, round.imagePaths); }}>
-                <Trash2 className="size-4 shrink-0" aria-hidden />
+                <DeleteIcon className="shrink-0" aria-hidden />
                 删除该批次结果
               </DropdownMenuItem>
             )}
@@ -1266,8 +1266,8 @@ function FailedCard({
         className={`flex items-start gap-2 rounded-lg border px-4 py-3 text-sm ${round.canceled ? 'border-border bg-card/40' : 'border-destructive/30 bg-destructive/5'}`}
       >
         {round.canceled
-          ? <Square className="mt-1 size-3 shrink-0 fill-current text-muted-foreground" aria-hidden />
-          : <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive/70" aria-hidden />}
+          ? <StopIcon size="sm" className="mt-1 shrink-0 fill-current text-muted-foreground" aria-hidden />
+          : <WarningIcon className="mt-0.5 shrink-0 text-destructive/70" aria-hidden />}
         <div className="min-w-0 flex-1 text-muted-foreground">
           <p className="[overflow-wrap:anywhere]">{summary}</p>
           {summary !== round.reason && (

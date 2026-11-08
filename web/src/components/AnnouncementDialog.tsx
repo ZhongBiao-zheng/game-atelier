@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { LoaderCircle, Plus, X } from 'lucide-react';
+import { AddIcon, CloseIcon, LoadingIcon } from '@/components/ui/icons';
 
 import { listKeys, patchKey, previewModels, type KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
@@ -133,7 +133,7 @@ export function AnnouncementDialog({ announcement, onClose }: { announcement: An
           aria-label="关闭"
           className="absolute right-5 top-5 z-10 grid size-8 place-items-center rounded-full bg-scrim text-white backdrop-blur-glass transition-colors hover:bg-scrim/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
-          <X className="size-4" aria-hidden="true" />
+          <CloseIcon aria-hidden="true" />
         </DialogClose>
 
         {(step.kind === 'intro' || step.kind === 'scanning') && (
@@ -162,7 +162,7 @@ export function AnnouncementDialog({ announcement, onClose }: { announcement: An
               {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
               <div className="flex justify-end pt-1">
                 <Button size="sm" disabled={step.kind === 'scanning'} onClick={() => void scan()}>
-                  {step.kind === 'scanning' ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Plus aria-hidden="true" />}
+                  {step.kind === 'scanning' ? <LoadingIcon className="animate-spin" aria-hidden="true" /> : <AddIcon aria-hidden="true" />}
                   <SwapLabel active={step.kind === 'scanning'} on="查找中…" off="快速添加" />
                 </Button>
               </div>

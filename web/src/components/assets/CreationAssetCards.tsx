@@ -1,4 +1,4 @@
-import { Copy, FileAudio, FileVideo, ImageIcon, RefreshCw, Trash2 } from 'lucide-react';
+import { AudioFileIcon, CopyIcon, DeleteIcon, ImageIcon, RetryIcon, VideoFileIcon } from '@/components/ui/icons';
 import { useEffect, useState } from 'react';
 
 import { promptPreviewUrl } from '@/api/creationAssets';
@@ -27,7 +27,7 @@ export function AssetCard({ asset, staleness, onOpen, size, onMeasure }: {
       className="h-auto w-full items-start justify-start gap-3 rounded-lg p-2 text-left font-normal whitespace-normal hover:bg-card">
       {asset.content.preview_images?.[0] ? <img src={promptPreviewUrl(asset.asset_id, asset.content.preview_images[0].file, 128)}
         alt="" className="size-19 shrink-0 rounded-md object-cover" /> : <span className="grid size-19 shrink-0 place-items-center rounded-md border border-dashed border-input text-muted-foreground">
-        <ImageIcon className="size-5" aria-hidden="true" />
+        <ImageIcon size="lg" aria-hidden="true" />
       </span>}
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
@@ -93,7 +93,7 @@ export function PromptPreview({ segments, clamp = true }: { segments: CreationPr
 }
 
 export function DeleteAssetButton({ disabled, onClick }: { disabled: boolean; onClick: () => void }) {
-  return <div className="border-t border-border pt-4"><Button variant="ghost" className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={disabled} onClick={onClick}><Trash2 />删除资产</Button></div>;
+  return <div className="border-t border-border pt-4"><Button variant="ghost" className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={disabled} onClick={onClick}><DeleteIcon />删除资产</Button></div>;
 }
 
 export function AssetDetail({ asset, busy, staleness, onUse, onReproduce, onReadopt, onEdit, onDelete }: {
@@ -117,8 +117,8 @@ export function AssetDetail({ asset, busy, staleness, onUse, onReproduce, onRead
       <StalenessBadge staleness={staleness} className="mt-2" />
       <div className="mt-4 flex gap-2">
         <Button className="flex-1" disabled={busy} onClick={onUse}>使用</Button>
-        {readopt && <Button variant="outline" disabled={busy} onClick={readopt}><RefreshCw />重新采用</Button>}
-        {onReproduce && <Button variant="outline" disabled={busy} onClick={onReproduce}><Copy />复刻</Button>}
+        {readopt && <Button variant="outline" disabled={busy} onClick={readopt}><RetryIcon />重新采用</Button>}
+        {onReproduce && <Button variant="outline" disabled={busy} onClick={onReproduce}><CopyIcon />复刻</Button>}
         {onEdit && <Button variant="outline" disabled={busy} onClick={onEdit}>编辑</Button>}
       </div>
       {onDelete && <div className="mt-4"><DeleteAssetButton disabled={busy} onClick={onDelete} /></div>}
@@ -151,10 +151,10 @@ export function PendingFilePreview({ file }: { file: File }) {
   if (isImage) {
     return url ? <img src={url} alt="待保存媒体预览" className="aspect-square w-full rounded-lg border border-border object-contain" /> : null;
   }
-  const Icon = file.type.startsWith('audio/') ? FileAudio : FileVideo;
+  const Icon = file.type.startsWith('audio/') ? AudioFileIcon : VideoFileIcon;
   return (
     <div className="grid aspect-square w-full place-items-center gap-2 rounded-lg border border-border text-muted-foreground">
-      <Icon className="size-8" />
+      <Icon size="xl" />
       <p className="max-w-full truncate px-4 text-xs">{file.name}</p>
     </div>
   );

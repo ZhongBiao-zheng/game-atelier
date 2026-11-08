@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Toggle } from '@/components/ui/toggle';
-import { Check, Copy, Eye, EyeOff } from 'lucide-react';
+import { CheckIcon, CopyIcon, HideIcon, ShowIcon } from '@/components/ui/icons';
 import { GATEWAY_TOKEN_LENGTH, revealGatewayKey } from '@/api/gateway';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -26,11 +26,11 @@ export function GatewayMemberToken({ id, name, knownToken, onError }: {
     <Hint label={token ? '隐藏密钥' : '查看密钥'}><Toggle size="sm" className="size-7 min-w-7 px-0" disabled={busy}
       aria-label={`${token ? '隐藏' : '查看'} ${name} 的密钥`} pressed={Boolean(token)}
       onPressedChange={pressed => { if (pressed) void read(false); else setToken(null); }}>
-      {token ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+      {token ? <HideIcon aria-hidden /> : <ShowIcon aria-hidden />}
     </Toggle></Hint>
     <Hint label={copied ? '已复制' : '复制密钥'}><Button variant="ghost" size="icon" className="size-7" type="button" disabled={busy}
       aria-label={`复制 ${name} 的密钥`} onClick={() => { setCopied(false); void read(true); }}>
-      {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
+      {copied ? <CheckIcon size="sm" aria-hidden /> : <CopyIcon size="sm" aria-hidden />}
     </Button></Hint>
   </>;
 }

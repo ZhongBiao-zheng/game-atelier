@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Folder, Search } from 'lucide-react';
+import { FolderIcon, SearchIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -34,7 +34,7 @@ export function ProjectChecklist({ projects, selected, onToggle, disabled, tags,
   }, [projects, query]);
   return <div className={cn('overflow-hidden rounded-md border border-border bg-popover', className)}>
     <Label className="flex h-10 items-center gap-2 border-b border-border px-3 text-muted-foreground">
-      <Search className="size-3.5 shrink-0" aria-hidden />
+      <SearchIcon size="sm" className="shrink-0" aria-hidden />
       <InputGroupInput type="search" aria-label="搜索项目" placeholder="搜索项目" value={query} onChange={event => setQuery(event.target.value)}
         className="px-0" />
     </Label>
@@ -134,7 +134,7 @@ export function MountTeamLibraryDialog({ open, currentProjectId, onClose, onMoun
           <p className="text-xs text-muted-foreground">文件夹</p>
           <Button variant="bare" type="button" onClick={() => void pick()} disabled={busy}
             className="flex h-11 w-full items-center gap-2.5 rounded-md border border-input pl-3 pr-1.5 text-left hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50">
-            <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <FolderIcon className="shrink-0 text-muted-foreground" aria-hidden />
             <span className={cn('min-w-0 flex-1 truncate font-mono text-xs', !path && 'font-sans text-sm text-muted-foreground')}>{path ?? '选择文件夹'}</span>
             {path && <span className="rounded-sm bg-secondary px-2.5 py-1.5 text-xs">更换</span>}
           </Button>

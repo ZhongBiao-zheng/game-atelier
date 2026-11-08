@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useLocation } from 'wouter';
-import { X } from 'lucide-react';
+import { CloseIcon } from '@/components/ui/icons';
 
 import { fetchProfile, teamAssetThumbUrl } from '@/api/teamLibraries';
 import {
@@ -225,7 +225,7 @@ function ReminderCard({ toast, onAction, onClose }: {
         <p className="min-w-0 flex-1 truncate text-sm">团队库新增 {toast.count} 条</p>
       )}
       <Button variant="ghost" size="icon" aria-label="关闭" onClick={onClose} className="size-6 shrink-0 rounded-full text-muted-foreground">
-        <X aria-hidden />
+        <CloseIcon aria-hidden />
       </Button>
     </div>
   );

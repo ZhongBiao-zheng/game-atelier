@@ -1,4 +1,4 @@
-import { Expand, Minus, Move, Plus } from 'lucide-react';
+import { AddIcon, MinusIcon, MoveIcon, OutpaintIcon } from '@/components/ui/icons';
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useGenerationEstimate } from '@/lib/useGenerationEstimate';
 import { selectionImageCaps } from '@/lib/modelRoutes';
@@ -128,7 +128,7 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
     cursor: `${direction}-resize`,
   });
 
-  return <ImageEditorShell open={open} heading="扩图" icon={Expand}
+  return <ImageEditorShell open={open} heading="扩图" icon={OutpaintIcon}
     viewport={viewport} busy={busy} dirty={fingerprint !== savedFingerprint.current} onClose={() => onOpenChange(false)}
     onAutoSave={() => submit(false)}
     stageBottom="bottom-56"
@@ -142,7 +142,7 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
           <img src={mediaUrl} alt={title} draggable={false} className="block size-full select-none"
             onLoad={() => setReady(true)} onError={() => { setReady(false); setLocalError('源图片加载失败'); }} />
           <span aria-hidden className="absolute left-1/2 top-1/2 grid size-8 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-background/70 text-foreground opacity-80 group-hover:opacity-100">
-            <Move className="size-4" />
+            <MoveIcon />
           </span>
         </div>
         {HANDLES.map(direction => {
@@ -182,9 +182,9 @@ export function CanvasOutpaintEditor({ open, title, version, mediaUrl, keys, ini
         </div>
         <div className="ml-auto flex h-8 items-center gap-0.5 rounded-full border border-border px-0.5">
           <span className="sr-only">扩展倍数</span>
-          <Button variant="bare" type="button" aria-label="减小扩展倍数" className={`${editorIconButton} size-7`} disabled={!ratio || scaleStep === EXPAND_SCALES[0]} onClick={() => stepScale(-1)}><Minus /></Button>
+          <Button variant="bare" type="button" aria-label="减小扩展倍数" className={`${editorIconButton} size-7`} disabled={!ratio || scaleStep === EXPAND_SCALES[0]} onClick={() => stepScale(-1)}><MinusIcon /></Button>
           <span className="w-12 text-center tabular-nums text-xs">{scaleStep == null ? '自定义' : `${scaleStep}×`}</span>
-          <Button variant="bare" type="button" aria-label="增大扩展倍数" className={`${editorIconButton} size-7`} disabled={!ratio || scaleStep === EXPAND_SCALES.at(-1)} onClick={() => stepScale(1)}><Plus /></Button>
+          <Button variant="bare" type="button" aria-label="增大扩展倍数" className={`${editorIconButton} size-7`} disabled={!ratio || scaleStep === EXPAND_SCALES.at(-1)} onClick={() => stepScale(1)}><AddIcon /></Button>
         </div>
       </div>
     </EditorComposer>} />;

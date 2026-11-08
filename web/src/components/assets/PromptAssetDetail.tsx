@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ImagePlus, Plus, RefreshCw, X } from 'lucide-react';
+import { AddIcon, AddImageIcon, CloseIcon, RetryIcon } from '@/components/ui/icons';
 import { deletePromptPreview, promptPreviewUrl, reorderPromptPreviews, uploadPromptPreviews } from '@/api/creationAssets';
 import { Button } from '@/components/ui/button';
 import { FileInput } from '@/components/ui/file-input';
@@ -73,14 +73,14 @@ export function PromptAssetDetail({ asset, busy, staleness, onUpdated, onUse, on
             </Button>
             <Hint label="删除效果图"><Button variant="secondary" size="icon" aria-label={`删除效果图 ${index + 1}`} disabled={disabled}
               className="absolute right-0.5 top-0.5 size-6 rounded-full opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
-              onClick={() => void mutate(() => deletePromptPreview(asset.asset_id, preview.file))}><X /></Button></Hint>
+              onClick={() => void mutate(() => deletePromptPreview(asset.asset_id, preview.file))}><CloseIcon /></Button></Hint>
           </div>)}
           {previews.length < 8 && <Button variant="ghost" aria-label="添加效果图" disabled={disabled}
-            className="aspect-square h-auto rounded-md border border-dashed border-input text-muted-foreground" onClick={() => addInput.current?.click()}><Plus /></Button>}
+            className="aspect-square h-auto rounded-md border border-dashed border-input text-muted-foreground" onClick={() => addInput.current?.click()}><AddIcon /></Button>}
         </div>
       </div> : <Button variant="ghost" disabled={disabled} className="flex aspect-[4/3] h-auto w-full flex-col gap-2 rounded-lg border border-dashed border-input text-muted-foreground"
         onClick={() => addInput.current?.click()} onDragOver={event => event.preventDefault()}
-        onDrop={event => { event.preventDefault(); event.stopPropagation(); upload(Array.from(event.dataTransfer.files)); }}><ImagePlus />添加效果图</Button>}
+        onDrop={event => { event.preventDefault(); event.stopPropagation(); upload(Array.from(event.dataTransfer.files)); }}><AddImageIcon />添加效果图</Button>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       <section className="space-y-2">
         <div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">提示词</span>
@@ -101,7 +101,7 @@ export function PromptAssetDetail({ asset, busy, staleness, onUpdated, onUse, on
     <div className="flex shrink-0 flex-wrap gap-2 border-t border-border p-3">
       <Button className="flex-1" disabled={disabled} onClick={onUse}>使用</Button>
       <Button variant="outline" disabled={disabled} onClick={onEdit}>编辑</Button>
-      {staleness === 'stale' && onReadopt && <Button variant="outline" disabled={disabled} onClick={onReadopt}><RefreshCw />重新采用</Button>}
+      {staleness === 'stale' && onReadopt && <Button variant="outline" disabled={disabled} onClick={onReadopt}><RetryIcon />重新采用</Button>}
     </div>
   </>;
 }

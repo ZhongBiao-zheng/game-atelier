@@ -135,6 +135,24 @@
   | `rounded-xl` | 20 | 浮层：输入壳、popover、dialog |
   | `rounded-full` | 9999 | 圆形按钮、avatar、pill |
 
+## 图标
+
+图标库为 Hugeicons Rounded Stroke（免费 MIT），唯一入口是 `web/src/components/ui/icons.tsx`。页面只导入语义图标（`CloseIcon`、`RetryIcon`…），不直接用图标库。⚙ 守卫测试强制。
+
+| 档位 | 像素 | 用途 |
+|---|---|---|
+| `sm` | 14 | 芯片、标签、正文内联 |
+| `md`（默认） | 16 | 按钮、菜单、列表、输入框前后缀 |
+| `lg` | 18 | 顶栏导航、画布与创作台悬浮工具条 |
+| `xl` | 24 | 空状态、媒体占位 |
+
+1. 尺寸只用 `size` 档位，不写 `size-*` / `h-*` / `w-*` 类、数字尺寸或 `strokeWidth`。描边由注册表固定为 1.5，`sm` 补到 1.75。`Button` / `Select` / `Tabs` / `Toggle` 内的图标由组件统一为 16px。
+2. 一个含义只对应一个图标。新图标先在注册表登记语义名，同一图形可服务多个语义（如停止、空白背景、矩形工具都是方块）。
+3. 选图优先 Hugeicons 原生带编号的版本；包里不带编号的 Lucide 移植名（`BotIcon`、`ScissorsIcon`…）只在原生没有合适图形时用。挑选时放 16px 与 24px 两档并排看，避免手势类、含义不清的变体。
+4. 选中态靠底色块表达，不换实心图标（免费版只有线性风格）。
+5. 命令式 DOM（contentEditable 芯片）用 `iconMarkup(Icon, size)` 取 SVG 字符串，不手抄路径。
+6. 品牌与自绘图标不走注册表：`ModelBrandIcon`、`ProviderBrandIcon`、`GitHubIcon`、`RatioIcon`、标注工具条的自绘 SVG；尺寸同样用四档。
+
 ## 组件配方（写组件先查这里）
 
 页面只组合 `web/src/components/ui/` 的组件。组件清单与选用规则见 [组件规范](docs/design/components.md)；Studio、画布、控制台等具体界面的布局与交互见 [界面规格](docs/design/surfaces.md)。
@@ -149,7 +167,7 @@
 | 选项弹窗（输入框控件 popover） | 面板 `bg-card border border-border rounded-xl`（**不透明**——内含可选项时玻璃透底会让选项难辨）；选项轨道 `bg-popover`（比面板亮一档）；选项 chip 默认透明贴轨道、左右贴紧（多行只留 `gap-y-1`），`hover:bg-secondary/60`；选中滑块 `bg-secondary ring-1 ring-inset ring-primary/60`，选中项不叠 hover 底色（`data-[state=on]:hover:bg-transparent`）。层级铁律：**越靠背景越深**，画布 → 输入壳 → 面板 → 轨道 → 选中/hover 单调变亮 |
 | 玻璃浮层（无选项的悬浮 panel/菜单） | `bg-glass backdrop-blur-glass border border-border rounded-xl` |
 | 玻璃 pill（顶栏 tab） | `bg-glass backdrop-blur-glass border border-border rounded-full` |
-| 顶栏圆形 icon 钮（主题切换 / 设置） | `h-10 w-10 rounded-full bg-glass backdrop-blur-glass text-muted-foreground hover:bg-secondary/60 hover:text-foreground`，icon 18px |
+| 顶栏圆形 icon 钮（主题切换 / 设置） | `h-10 w-10 rounded-full bg-glass backdrop-blur-glass text-muted-foreground hover:bg-secondary/60 hover:text-foreground`，图标 `size="lg"` |
 | 遮罩层（lightbox） | `fixed inset-0 z-50 bg-scrim` |
 | 状态徽章 | `text-xs` + `text-[color:var(--status-*)]`（同字号靠颜色分语义） |
 | 输入框（`Input`） | `border border-input bg-transparent rounded-md focus-visible:ring-1 focus-visible:ring-ring` |
@@ -217,5 +235,6 @@
 | 2026-10-24 | 主色改为可配置、默认青柠，底色改为石墨；推翻 2026-05-18 和 2026-06-10 两条黄铜决定 | 暖棕加黄铜显旧显脏。主副色、固定数据色与状态色分离，详见 [主题色规范](docs/design/theme.md)；历史日志中的暖黑与黄铜记录不再作为现行规则。 |
 | 2026-10-26 | 正文改用 Inter + Noto Sans SC，全部字体本地打包，等宽字体只留给技术信息；推翻 2026-06-10「Geist 留任、拒收 Inter」 | 中文原本落到系统字体，Mac 苹方与 Windows 雅黑不一致；Google Fonts 在国内不翻墙与离线安装包下加载失败；同类工具 Tapnow / Lovart / LibTV 均为 Inter + 中文网页字体（读其线上 CSS 得出）；创作台 93 处等宽字体让数据行与正文割裂 |
 | 2026-10-29 | 页面禁写原生 input / select / textarea，补 `SecretInput` / `Select` / `Checkbox` / `Radio` / `Slider` / `FileInput`；原生 button、bare 控件、任意值间距走棘轮；界面规格拆到 `docs/design/surfaces.md`，组件选用写入 `docs/design/components.md` | 组件层已有但被绕开：78 处原生控件、32 个文件手抄防填充属性，密钥框的保存密码修法只留在单页；本文件混入大段界面交互，通用配方被冲淡 |
+| 2026-11-08 | 图标从 Lucide 换成 Hugeicons Rounded Stroke，建语义注册表 `ui/icons.tsx`，尺寸收为 14/16/18/24 四档、描边固定 1.5，守卫禁止直接导入图标库与散写尺寸 / 描边 | 87 个文件各自导入 Lucide，同一含义有两个名字（HelpCircle / CircleHelp 等 8 组），尺寸 8 档、描边 5 种。Mobbin 同类工具（Framer、ElevenLabs Flows、Luma、Weavy）统一单一线性图标族、描边约 1.5；Hugeicons 的圆头圆角与圆角卡片、药丸导航一致 |
 | 2026-11-08 | 浅色底从纯白改为浅灰 `#F2F2F3`，卡片 / panel / muted 改纯白，secondary / accent 改 `#E9E9EB`，侧栏与画布同色；作品图卡片加 `.media-edge` 内侧发丝边；推翻 2026-06-12「纯白画廊」 | 纯白底上白底作品图与页面连成一片，大面积纯白刺眼（飙哥反馈）。参考 Gamma / mymind / Luma：浅灰画布、白色内容面。选中性灰，避开 06-12 被否的暖米色；浅色阶梯与暗色统一为越靠背景越深 |
 | 2026-10-30 | 原生 button / label 与 `title` 提示清零后改为硬禁止；Select / Checkbox / Slider / Switch 换成 Radix，补 Tooltip（`Hint`）/ Tabs / ToggleGroup / RadioGroup / Popover / AlertDialog / InputGroup / EditableText；任意值间距清零后禁写 | 原生 select 箭头与 range 进度条靠 tokens.css 全局样式兜底，各平台外观不一；原生 title 提示延迟长、样式不可控；263 处原生 button 各写一套焦点环 |

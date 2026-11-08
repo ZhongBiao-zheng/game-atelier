@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Search, ChevronDown, Image as ImageIcon, Video, Wand2, Heart, EyeOff, Check, X } from 'lucide-react';
+import { CanvasIcon, CheckIcon, ChevronDownIcon, CloseIcon, FavoriteIcon, HideIcon, ImageIcon, SearchIcon, VideoIcon } from '@/components/ui/icons';
 
 import { ToolbarPopover } from './ToolbarPopover';
 import type { GenMode, HistoryFilters, TimeFilter } from '@/lib/historyFilters';
@@ -13,13 +13,13 @@ const TIME_OPTS: { key: TimeFilter; label: string }[] = [
   { key: '3m', label: '最近三个月' },
 ];
 const MODE_OPTS: { key: GenMode; label: string; icon: ReactNode }[] = [
-  { key: 'image', label: '图片', icon: <ImageIcon size={18} aria-hidden /> },
-  { key: 'video', label: '视频', icon: <Video size={18} aria-hidden /> },
-  { key: 'canvas', label: '画布', icon: <Wand2 size={18} aria-hidden /> },
+  { key: 'image', label: '图片', icon: <ImageIcon size="lg" aria-hidden /> },
+  { key: 'video', label: '视频', icon: <VideoIcon size="lg" aria-hidden /> },
+  { key: 'canvas', label: '画布', icon: <CanvasIcon size="lg" aria-hidden /> },
 ];
 const OP_OPTS: { key: 'favorite' | 'hidden'; label: string; icon: ReactNode }[] = [
-  { key: 'favorite', label: '喜欢', icon: <Heart size={18} aria-hidden /> },
-  { key: 'hidden', label: '隐藏', icon: <EyeOff size={18} aria-hidden /> },
+  { key: 'favorite', label: '喜欢', icon: <FavoriteIcon size="lg" aria-hidden /> },
+  { key: 'hidden', label: '隐藏', icon: <HideIcon size="lg" aria-hidden /> },
 ];
 
 /** 查询面板 chip——复用 PromptInput ControlButton 配方（h-7 rounded-md token 色）。 */
@@ -89,7 +89,7 @@ export function StudioQueryBar({
           onClick={() => (searchOpen ? searchInputRef.current?.focus() : setSearchOpen(true))}
           className="grid size-8 shrink-0 place-items-center rounded-full text-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
-          <Search size={16} aria-hidden />
+          <SearchIcon aria-hidden />
         </Button>
         <Input variant="bare"
           ref={searchInputRef}
@@ -112,21 +112,21 @@ export function StudioQueryBar({
             searchOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
           }`}
         >
-          <X size={14} aria-hidden />
+          <CloseIcon size="sm" aria-hidden />
         </Button>
       </div>
 
       <Divider />
       <div ref={timeRef} className="relative">
         <FilterChip active={openPanel === 'time'} filtered={Boolean(timeLabel)} aria-label={`时间筛选${timeLabel ? `：${timeLabel}` : ''}`} onClick={() => toggle('time')}>
-          {timeLabel || '时间'} <ChevronDown size={14} aria-hidden className={timeLabel ? 'text-primary' : 'text-muted-foreground'} />
+          {timeLabel || '时间'} <ChevronDownIcon size="sm" aria-hidden className={timeLabel ? 'text-primary': 'text-muted-foreground'} />
         </FilterChip>
         <ToolbarPopover open={openPanel === 'time'} onClose={() => setOpenPanel(null)} anchorRef={timeRef} direction="down" role="listbox" aria-label="时间筛选列表" className={panelCls}>
           {TIME_OPTS.map((o) => (
             <Button variant="bare" key={o.key} type="button" role="option" aria-selected={filters.time === o.key} className={optionCls}
               onClick={() => onChange({ ...filters, time: o.key })}>
               <span>{o.label}</span>
-              {filters.time === o.key && <Check size={16} aria-hidden className="text-primary" />}
+              {filters.time === o.key && <CheckIcon aria-hidden className="text-primary" />}
             </Button>
           ))}
         </ToolbarPopover>
@@ -135,7 +135,7 @@ export function StudioQueryBar({
       <Divider />
       <div ref={modeRef} className="relative">
         <FilterChip active={openPanel === 'mode'} filtered={Boolean(modeLabel)} aria-label={`生成模式筛选${modeLabel ? `：${modeLabel}` : ''}`} onClick={() => toggle('mode')}>
-          {modeLabel || '生成模式'} <ChevronDown size={14} aria-hidden className={modeLabel ? 'text-primary' : 'text-muted-foreground'} />
+          {modeLabel || '生成模式'} <ChevronDownIcon size="sm" aria-hidden className={modeLabel ? 'text-primary': 'text-muted-foreground'} />
         </FilterChip>
         <ToolbarPopover open={openPanel === 'mode'} onClose={() => setOpenPanel(null)} anchorRef={modeRef} direction="down" role="listbox" aria-label="生成模式列表" aria-multiselectable="true" className={panelCls}>
           <div className="px-3 py-2 text-sm text-muted-foreground">生成模式</div>
@@ -150,7 +150,7 @@ export function StudioQueryBar({
                     : [...filters.modes, o.key],
                 })}>
                 <span className="flex items-center gap-3">{o.icon}{o.label}</span>
-                {active && <Check size={16} aria-hidden className="text-primary" />}
+                {active && <CheckIcon aria-hidden className="text-primary" />}
               </Button>
             );
           })}
@@ -160,7 +160,7 @@ export function StudioQueryBar({
       <Divider />
       <div ref={opRef} className="relative">
         <FilterChip active={openPanel === 'op'} filtered={Boolean(opLabel)} aria-label={`操作类型筛选${opLabel ? `：${opLabel}` : ''}`} onClick={() => toggle('op')}>
-          {opLabel || '操作类型'} <ChevronDown size={14} aria-hidden className={opLabel ? 'text-primary' : 'text-muted-foreground'} />
+          {opLabel || '操作类型'} <ChevronDownIcon size="sm" aria-hidden className={opLabel ? 'text-primary': 'text-muted-foreground'} />
         </FilterChip>
         <ToolbarPopover open={openPanel === 'op'} onClose={() => setOpenPanel(null)} anchorRef={opRef} direction="down" role="listbox" aria-label="操作类型列表" className={panelCls}>
           <div className="px-3 py-2 text-sm text-muted-foreground">操作</div>
@@ -170,7 +170,7 @@ export function StudioQueryBar({
               <Button variant="bare" key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
                 onClick={() => onChange({ ...filters, op: active ? null : o.key })}>
                 <span className="flex items-center gap-3">{o.icon}{o.label}</span>
-                {active && <Check size={16} aria-hidden className="text-primary" />}
+                {active && <CheckIcon aria-hidden className="text-primary" />}
               </Button>
             );
           })}

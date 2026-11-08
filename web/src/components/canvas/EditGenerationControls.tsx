@@ -1,5 +1,5 @@
 import { useRef, useState, type RefObject } from 'react';
-import { Settings2 } from 'lucide-react';
+import { ParamsIcon } from '@/components/ui/icons';
 import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
 import { MJ_IMAGES_PER_TASK, QUALITY_LABELS, type ImageControlCaps, type Quality } from '@/lib/imageControlCaps';
 import { CanvasModelPicker, OptionTrack } from './CanvasGenerationControls';
@@ -94,7 +94,7 @@ export function EditGenerationControls({ choices, choice, onChoice, caps, resolu
     {workflowInputs && workflowParams && onWorkflowPatch && <WorkflowParameters inputs={workflowInputs}
       params={workflowParams} onPatch={onWorkflowPatch} portalContainerRef={portalContainerRef} />}
     {!choice ? null : fixedSeed ? <span className={`${chipClass} pointer-events-none`}>1 张</span> : choice.mj
-      ? <span className={`${chipClass} pointer-events-none`}><Settings2 className="size-3.5" aria-hidden="true" />{MJ_IMAGES_PER_TASK} 张 · Fast</span>
+      ? <span className={`${chipClass} pointer-events-none`}><ParamsIcon size="sm" aria-hidden="true" />{MJ_IMAGES_PER_TASK} 张 · Fast</span>
       : <OptionChip label="生成数量" summary={`${count} 张`} values={[1, 2, 3, 4]} selected={String(count)}
         getLabel={value => `${value} 张`} onSelect={value => onCount(Number(value))} portalContainerRef={portalContainerRef} />}
   </>;

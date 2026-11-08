@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Boxes, Check } from 'lucide-react';
+import { CheckIcon, ModelIcon } from '@/components/ui/icons';
 import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
 import { cn } from '@/lib/utils';
 import type {
@@ -67,7 +67,7 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, dis
           'grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40',
           !auto && 'text-primary',
         )}
-      ><Boxes className="size-4" /></Button></Hint>
+      ><ModelIcon /></Button></Hint>
       <ToolbarPopover
         open={open}
         onClose={() => setOpen(false)}
@@ -123,7 +123,7 @@ export function CanvasAgentPreferencePicker({ models, mode, auto, preferred, dis
                     className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-secondary disabled:opacity-50 disabled:hover:bg-transparent"
                   >
                     <Hint label={item.model}><span className="min-w-0 flex-1 truncate text-xs">{item.name}</span></Hint>
-                    {checked && <Check className="size-3.5 shrink-0 text-primary" />}
+                    {checked && <CheckIcon size="sm" className="shrink-0 text-primary" />}
                   </Button>
                 );
               })}

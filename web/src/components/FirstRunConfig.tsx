@@ -1,6 +1,6 @@
 import { connectionFetch } from '@/api/connection';
 import { useEffect, useState } from 'react';
-import { FolderOpen, FolderEdit, AlertCircle, Sparkles } from 'lucide-react';
+import { AiIcon, ErrorIcon, FolderEditIcon, FolderOpenIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
 import { chooseFolder } from '@/api/folders';
 import { setDataRoot } from '@/api/onboarding';
@@ -61,7 +61,7 @@ export function FirstRunConfig({ onSaved }: Props) {
     <div className="min-h-screen flex items-center justify-center px-6 bg-background">
       <div className="w-full max-w-[560px]">
         <div className="flex items-center gap-3 mb-3">
-          <Sparkles className="size-5 text-primary" />
+          <AiIcon size="lg" className="text-primary" />
           <h1 className="font-display text-display tracking-tight">角色资产工作流</h1>
         </div>
         <p className="text-sm text-muted-foreground mb-10 leading-relaxed">
@@ -72,7 +72,7 @@ export function FirstRunConfig({ onSaved }: Props) {
           <OptionCard
             active={mode === 'default'}
             onClick={() => setMode('default')}
-            icon={<FolderOpen className="size-4" />}
+            icon={<FolderOpenIcon />}
             title="使用默认目录"
             badge="推荐"
           >
@@ -82,7 +82,7 @@ export function FirstRunConfig({ onSaved }: Props) {
           <OptionCard
             active={mode === 'custom'}
             onClick={() => { void pickCustomPath(); }}
-            icon={<FolderEdit className="size-4" />}
+            icon={<FolderEditIcon />}
             title="选择数据目录"
           >
             <div className="mt-2 min-w-0 truncate rounded-md border border-input bg-background/35 px-3 py-2 font-mono text-xs text-muted-foreground">
@@ -106,7 +106,7 @@ export function FirstRunConfig({ onSaved }: Props) {
 
         {error && (
           <div className="mt-4 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
+            <ErrorIcon size="sm" className="shrink-0 mt-0.5" />
             <span>{error}</span>
           </div>
         )}

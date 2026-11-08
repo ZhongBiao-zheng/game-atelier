@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from 'react';
-import { ArrowLeftRight, Plus, X } from 'lucide-react';
+import { AddIcon, CloseIcon, ExchangeIcon } from '@/components/ui/icons';
 
 import { Lightbox } from '../Lightbox';
 import { FileInput } from '@/components/ui/file-input';
@@ -45,7 +45,7 @@ export function FirstLastFrames({
             onClick={() => onChange({ first: frames.last, last: frames.first })}
             className="grid size-6 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
           >
-            <ArrowLeftRight size={13} aria-hidden />
+            <ExchangeIcon size="sm" aria-hidden />
           </Button></Hint>
           <FixedSlot label="上传尾帧" file={frames.last} accept="image/*" tilt="right"
             onPick={(f) => onChange({ ...frames, last: f })}
@@ -93,7 +93,7 @@ export function FixedSlot({
         </Button>
         <Button variant="bare" type="button" aria-label={`移除${caption}`} onClick={onRemove}
           className="absolute -right-1.5 -top-1.5 z-10 grid h-[18px] w-[18px] place-items-center rounded-full bg-scrim backdrop-blur-glass border border-border text-foreground/80 hover:bg-destructive hover:text-foreground transition-colors">
-          <X size={10} />
+          <CloseIcon size="sm" />
         </Button>
         {zoomed && <Lightbox src={preview} onClose={() => setZoomed(false)} />}
       </div>
@@ -113,7 +113,7 @@ export function FixedSlot({
             ? 'cursor-not-allowed opacity-40'
             : 'cursor-pointer hover:-translate-y-0.5 hover:border-input'
         }`}>
-        <Plus size={16} className="text-muted-foreground" />
+        <AddIcon className="text-muted-foreground" />
         <span className="text-xs leading-none text-muted-foreground">{caption}</span>
       </Label></Hint>
     </>

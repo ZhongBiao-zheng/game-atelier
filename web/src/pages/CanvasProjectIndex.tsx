@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { AddIcon, DeleteIcon, DownloadIcon, EditIcon, MoreIcon, RetryIcon, UploadIcon } from '@/components/ui/icons';
 
 import {
   canvasMediaUrl,
@@ -188,7 +188,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
           <h1 className="text-balance font-display text-display italic text-foreground">画布项目</h1>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" disabled={importing} onClick={() => importRef.current?.click()}>
-              <Upload aria-hidden="true" />{importing ? '校验中…' : '导入项目包'}
+              <UploadIcon aria-hidden="true" />{importing ? '校验中…' : '导入项目包'}
             </Button>
             <Button
               onClick={() => {
@@ -196,7 +196,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
                 setEditorError(null);
               }}
             >
-              <Plus aria-hidden="true" />新建项目
+              <AddIcon aria-hidden="true" />新建项目
             </Button>
           </div>
           <FileInput
@@ -217,7 +217,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
             <span>{actionError ?? loadError}</span>
             {loadError && (
               <Button variant="outline" size="sm" onClick={() => void load()}>
-                <RefreshCw aria-hidden="true" />重试
+                <RetryIcon aria-hidden="true" />重试
               </Button>
             )}
           </div>
@@ -231,7 +231,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
               onClick={() => { setEditor({ open: true, name: '' }); setEditorError(null); }}
               className="aspect-[16/10] h-auto flex-col gap-3 rounded-xl border-dashed border-foreground/20 font-normal text-muted-foreground hover:border-foreground/40 hover:text-foreground [&_svg]:size-7"
             >
-              <Plus size={28} strokeWidth={1.5} aria-hidden="true" />
+              <AddIcon size="xl" aria-hidden="true" />
               <span className="text-sm">新建一个画布项目</span>
             </Button>
           )}
@@ -397,14 +397,14 @@ function CanvasProjectCard({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button disabled={disabled} variant="ghost" size="icon" aria-label={`管理画布项目 ${project.name}`} className="absolute bottom-2 right-2 size-11">
-            <MoreHorizontal aria-hidden="true" />
+            <MoreIcon aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => window.setTimeout(beginInlineRename, 0)}><Pencil aria-hidden="true" />重命名</DropdownMenuItem>
-          <DropdownMenuItem onSelect={onExport}><Download aria-hidden="true" />导出项目包</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => window.setTimeout(beginInlineRename, 0)}><EditIcon aria-hidden="true" />重命名</DropdownMenuItem>
+          <DropdownMenuItem onSelect={onExport}><DownloadIcon aria-hidden="true" />导出项目包</DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={onDelete} className="text-destructive"><Trash2 aria-hidden="true" />删除</DropdownMenuItem>
+          <DropdownMenuItem onSelect={onDelete} className="text-destructive"><DeleteIcon aria-hidden="true" />删除</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </article>

@@ -3,17 +3,7 @@ import { GatewayLibraryBrowser, GatewayLibraryHelp, useGatewayLibrarySources } f
 import type { GatewayLibrarySelection } from '@/api/gatewayLibraries';
 import { TeamPromptPreviewGallery } from './TeamPromptPreviewGallery';
 import { formatGenerationCost } from '@/lib/generationCost';
-import {
-  Copy,
-  Plus,
-  Loader2,
-  ChevronDown,
-  Folder,
-  Pencil,
-  RefreshCw,
-  Search,
-  Undo2,
-} from 'lucide-react';
+import { AddIcon, ChevronDownIcon, CopyIcon, EditIcon, FolderIcon, LoadingIcon, RetryIcon, SearchIcon, UndoIcon } from '@/components/ui/icons';
 import {
   useCallback,
   useEffect,
@@ -386,14 +376,14 @@ export function TeamLibraryPanel({
       <Popover open={selectorOpen} onOpenChange={setSelectorOpen}>
         <PopoverTrigger asChild>
           <Button variant="outline" aria-label="团队库" className="h-9 w-full justify-start bg-card font-normal">
-            <Folder /><span className="min-w-0 flex-1 truncate text-left">{remoteLibrary ? remoteLibrary.name : library?.name ?? '选择团队库'}</span>
-            <span className="max-w-24 truncate text-xs text-muted-foreground">{remoteLibrary?.owner_name ?? ''}</span><ChevronDown />
+            <FolderIcon /><span className="min-w-0 flex-1 truncate text-left">{remoteLibrary ? remoteLibrary.name : library?.name ?? '选择团队库'}</span>
+            <span className="max-w-24 truncate text-xs text-muted-foreground">{remoteLibrary?.owner_name ?? ''}</span><ChevronDownIcon />
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-80 space-y-1">
           {libraries.map(item => <Button key={item.library_id} variant="ghost" className="w-full justify-start"
             aria-pressed={libraryId === item.library_id} onClick={() => { setRemoteLibrary(null); setLibraryId(item.library_id); setSelectorOpen(false); }}>
-            <Folder />{item.name}
+            <FolderIcon />{item.name}
           </Button>)}
           <div role="group" aria-label="同事共享" className="max-h-64 space-y-1 overflow-y-auto border-t border-border pt-1">
             <div className="flex items-center gap-1 px-2 text-xs text-muted-foreground">同事共享<GatewayLibraryHelp /></div>
@@ -411,10 +401,10 @@ export function TeamLibraryPanel({
         onUnavailable={() => remote.remove(remoteLibrary)} /> : <>
       <div className="flex items-center gap-2">
         <InputGroup className="min-w-0 flex-1">
-          <InputGroupAddon><Search aria-hidden="true" /></InputGroupAddon>
+          <InputGroupAddon><SearchIcon aria-hidden="true" /></InputGroupAddon>
           <InputGroupInput aria-label="搜索团队库" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索" />
         </InputGroup>
-        <Button size="icon" variant="outline" aria-label="刷新" disabled={busy} onClick={() => { rescan(); void remote.refresh(); }}><RefreshCw /></Button>
+        <Button size="icon" variant="outline" aria-label="刷新" disabled={busy} onClick={() => { rescan(); void remote.refresh(); }}><RetryIcon /></Button>
       </div>
       <div role="group" aria-label="类型" className="flex flex-wrap gap-2">
         {TYPE_FILTERS.filter(item => item.value !== 'audio' || entries.some(entry => entry.mime_type?.startsWith('audio/')) || typeFilter === 'audio')
@@ -454,7 +444,7 @@ export function TeamLibraryPanel({
             {viewing.model && <><dt>模型</dt><dd>{viewing.model}</dd></>}
             {viewing.cost_cny != null && <><dt>花费</dt><dd>{formatGenerationCost(viewing.cost_cny)}</dd></>}
           </dl>
-          <DialogFooter><Button disabled={busy || usingId !== null} onClick={() => void applyTeamEntry(viewing)}>{usingId === viewing.id && <Loader2 className="animate-spin" />}使用</Button></DialogFooter>
+          <DialogFooter><Button disabled={busy || usingId !== null} onClick={() => void applyTeamEntry(viewing)}>{usingId === viewing.id && <LoadingIcon className="animate-spin" />}使用</Button></DialogFooter>
         </DialogContent>
       </Dialog>}
 
@@ -568,12 +558,12 @@ function TeamAssetCard({ entry, libraryId, busy, owned, size, onMeasure, onUse, 
       </Button>
       <div className="pointer-events-none absolute inset-x-1 bottom-1 flex flex-wrap items-center justify-end gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
         <div className="pointer-events-auto flex items-center gap-1">
-          {reproducible && <CardIconButton label="复刻" disabled={busy} onClick={() => onReproduce?.(entry)}><Copy /></CardIconButton>}
+          {reproducible && <CardIconButton label="复刻" disabled={busy} onClick={() => onReproduce?.(entry)}><CopyIcon /></CardIconButton>}
           {owned && <>
-            <CardIconButton label="编辑" disabled={busy} onClick={() => onEdit(entry)}><Pencil /></CardIconButton>
-            <CardIconButton label="撤回" disabled={busy} onClick={() => onWithdraw(entry)}><Undo2 /></CardIconButton>
+            <CardIconButton label="编辑" disabled={busy} onClick={() => onEdit(entry)}><EditIcon /></CardIconButton>
+            <CardIconButton label="撤回" disabled={busy} onClick={() => onWithdraw(entry)}><UndoIcon /></CardIconButton>
           </>}
-          {!incomplete && <Button variant="solid" size="sm" className="h-7 rounded-full px-2 text-xs" disabled={busy || usingId !== null} onClick={() => onUse(entry)}>{usingId === entry.id ? <Loader2 className="animate-spin" /> : <Plus />}使用</Button>}
+          {!incomplete && <Button variant="solid" size="sm" className="h-7 rounded-full px-2 text-xs" disabled={busy || usingId !== null} onClick={() => onUse(entry)}>{usingId === entry.id ? <LoadingIcon className="animate-spin" /> : <AddIcon />}使用</Button>}
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { useId, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position } from '@xyflow/react';
-import { ArrowDown, ArrowUp, CircleHelp, Layers, Plus, X } from 'lucide-react';
+import { AddIcon, ArrowDownIcon, ArrowUpIcon, CloseIcon, HelpIcon, LayersIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { canvasMediaUrl } from '@/api/canvas';
@@ -54,7 +54,7 @@ export function CanvasBatchMaterialEditor({ node, context }: {
     <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
       <span className="tabular-nums">{node.data.items.length} 项</span>
       <Button size="sm" variant="ghost" disabled={disabled} onClick={() => choose()}>
-        <Plus className="size-4" />添加图片
+        <AddIcon />添加图片
       </Button>
     </div>
     <FileInput ref={input} accept="image/*" multiple className="hidden" aria-label="上传批量素材"
@@ -66,7 +66,7 @@ export function CanvasBatchMaterialEditor({ node, context }: {
       {!node.data.items.length && <Button variant="bare" type="button" disabled={disabled}
         className="grid h-full min-h-32 w-full place-content-center gap-2 rounded-xl border border-dashed border-border text-xs text-muted-foreground hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         onClick={() => choose()}>
-        <Layers className="mx-auto size-5" />拖入多张图片，或点击上传
+        <LayersIcon size="lg" className="mx-auto" />拖入多张图片，或点击上传
       </Button>}
       {node.data.items.map((item, index) => <div key={item.id} draggable={!disabled}
         onDragStart={event => {
@@ -94,16 +94,16 @@ export function CanvasBatchMaterialEditor({ node, context }: {
                   const images = candidate.image_version_ids.filter((_, i) => i !== imageIndex);
                   return images.length ? [{ ...candidate, image_version_ids: images }] : [];
                 }) },
-              })}><X className="size-4" /></Button>
+              })}><CloseIcon /></Button>
           </div>)}
           <Button size="icon" variant="outline" className="size-12" aria-label={`给第 ${index + 1} 项增加参考图`}
-            disabled={disabled || item.image_version_ids.length >= 16} onClick={() => choose(item.id)}><Plus className="size-4" /></Button>
+            disabled={disabled || item.image_version_ids.length >= 16} onClick={() => choose(item.id)}><AddIcon /></Button>
         </div>
         <div className="flex flex-col">
           <Button size="icon" variant="ghost" className="size-6" aria-label={`上移第 ${index + 1} 项`}
-            disabled={disabled || index === 0} onClick={() => move(item.id, index - 1)}><ArrowUp className="size-3" /></Button>
+            disabled={disabled || index === 0} onClick={() => move(item.id, index - 1)}><ArrowUpIcon size="sm" /></Button>
           <Button size="icon" variant="ghost" className="size-6" aria-label={`下移第 ${index + 1} 项`}
-            disabled={disabled || index === node.data.items.length - 1} onClick={() => move(item.id, index + 1)}><ArrowDown className="size-3" /></Button>
+            disabled={disabled || index === node.data.items.length - 1} onClick={() => move(item.id, index + 1)}><ArrowDownIcon size="sm" /></Button>
         </div>
       </div>)}
     </div>
@@ -114,7 +114,7 @@ export function CanvasBatchMaterialEditor({ node, context }: {
         className="peer size-6 rounded-full text-muted-foreground hover:text-foreground"
         aria-label="批量素材使用说明" aria-describedby={helpId}
         onClick={event => event.stopPropagation()}>
-        <CircleHelp aria-hidden="true" />
+        <HelpIcon aria-hidden="true" />
       </Button>
       <p id={helpId} role="tooltip"
         className="pointer-events-none invisible absolute bottom-full right-0 z-20 mb-2 w-64 max-w-full rounded-lg border border-border bg-popover px-3 py-2 text-pretty text-xs leading-relaxed text-foreground peer-hover:visible peer-focus-visible:visible">
@@ -151,7 +151,7 @@ export function CanvasGroupFrame({ node, context, selected }: {
         pointer-events:none（好让下面的连线露出来），所以这个把手要自己开回可点。 */}
     <Handle type="source" position={Position.Right}
       className="canvas-node-handle canvas-group-add-handle pointer-events-auto" aria-label="把这个分组作为素材包连出去">
-      <span className="canvas-group-add" aria-hidden="true"><Plus /></span>
+      <span className="canvas-group-add" aria-hidden="true"><AddIcon /></span>
     </Handle>
     {/* 名字就是分组本身的把手：按住拖动整组，单击改名。它在框的左上角外侧，不占成员的位置。 */}
     <div className="pointer-events-auto absolute bottom-full left-0 flex max-w-full items-center gap-2 pb-2 text-sm"

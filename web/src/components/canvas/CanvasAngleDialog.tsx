@@ -1,4 +1,4 @@
-import { Orbit, RotateCcw, WandSparkles } from 'lucide-react';
+import { AiIcon, AngleIcon, ResetIcon } from '@/components/ui/icons';
 import { useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -72,7 +72,7 @@ export function CanvasAngleDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[94dvh] max-w-4xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Orbit aria-hidden="true" />生成“{title}”的新角度</DialogTitle>
+          <DialogTitle className="flex items-center gap-2"><AngleIcon aria-hidden="true" />生成“{title}”的新角度</DialogTitle>
           <DialogDescription>预览只表达机位方向；真实结果由图片编辑模型生成，并保留原主体与画面风格。</DialogDescription>
         </DialogHeader>
 
@@ -89,7 +89,7 @@ export function CanvasAngleDialog({
             </div>
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs text-muted-foreground">{angleSummary(params)}</p>
-              <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setParams(DEFAULT_ANGLE)}><RotateCcw />重置</Button>
+              <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setParams(DEFAULT_ANGLE)}><ResetIcon />重置</Button>
             </div>
           </div>
 
@@ -119,7 +119,7 @@ export function CanvasAngleDialog({
         <DialogFooter>
           <Button type="button" variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>取消</Button>
           <Button type="button" disabled={busy} onClick={() => onSubmit(params)}>
-            <WandSparkles /><SwapLabel active={Boolean(busy)} on="提交中…" off="生成新角度" />
+            <AiIcon /><SwapLabel active={Boolean(busy)} on="提交中…" off="生成新角度" />
           </Button>
         </DialogFooter>
       </DialogContent>

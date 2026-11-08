@@ -3,7 +3,7 @@ import { connectionFetch } from '@/api/connection';
 import { useHeicAsJpeg } from '@/lib/heicImages';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useSearch } from 'wouter';
-import { ChevronsDown, Library } from 'lucide-react';
+import { LibraryIcon, ScrollBottomIcon } from '@/components/ui/icons';
 
 import { createStudioJob, getStudioJob, listStudioJobs, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
 import { apiError } from '@/api/http';
@@ -939,7 +939,7 @@ function StudioFull() {
                 : 'pointer-events-none opacity-0 translate-x-3 -translate-y-2'
             }`}
           >
-            <ChevronsDown size={13} aria-hidden />
+            <ScrollBottomIcon size="sm" aria-hidden />
             回到底部
           </Button>
         <div className="absolute bottom-full left-0 mb-2 flex flex-col items-start gap-1">
@@ -1049,10 +1049,9 @@ function StudioFull() {
               dockCollapsed ? 'mb-5.5 size-8' : 'mb-4 size-10'
             }`}
           >
-            <Library
-              size={18}
+            <LibraryIcon size="lg"
               aria-hidden
-              className={`transition-transform duration-300 ${dockCollapsed ? 'scale-90' : ''}`}
+              className={`transition-transform duration-300 ${dockCollapsed ? 'scale-90': ''}`}
             />
           </Button>
         </div>

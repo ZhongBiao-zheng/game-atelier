@@ -5,7 +5,7 @@ import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowUp, BookmarkPlus, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Video, Workflow, X } from 'lucide-react';
+import { AddIcon, ArrowUpIcon, AspectRatioIcon, AudioIcon, ChevronRightIcon, CloseIcon, ImageIcon, ImagesIcon, SaveAssetIcon, VideoIcon, WorkflowIcon, iconMarkup } from '@/components/ui/icons';
 import { prefetchModelPickerMetrics } from '@/lib/useModelPickerMetrics';
 import { Segmented, SegmentedItem } from '@/components/ui/segmented';
 import { ModelPickerList } from '@/components/ModelPickerList';
@@ -154,10 +154,10 @@ export function serializeMentions(prompt: string): string {
 
 type ChipMeta = { kind: 'image' | 'video' | 'audio'; thumb: string | null };
 
-/** lucide Film / Music 的内联 SVG：chip 走命令式 DOM 构建，用不了 React 图标组件。 */
+/** chip 走命令式 DOM 构建，用不了 React 图标组件；SVG 字符串取自同一份图标数据。 */
 const CHIP_ICON_SVG: Record<'video' | 'audio', string> = {
-  video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></svg>',
-  audio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+  video: iconMarkup(VideoIcon, 'sm'),
+  audio: iconMarkup(AudioIcon, 'sm'),
 };
 
 function decorateChip(span: HTMLSpanElement, label: string, meta: ChipMeta | undefined) {
@@ -848,7 +848,7 @@ export function PromptInput({
                 className="absolute top-1/2 left-0 flex flex-col items-center justify-center gap-1 cursor-pointer rounded-lg border border-dashed border-border bg-secondary transition-all duration-200 hover:-translate-y-1 hover:brightness-110 hover:border-input"
                 style={{ width: REF_W, height: REF_H, transform: 'translateY(-50%) rotate(-8deg)' }}
               >
-                <Plus size={18} className="text-muted-foreground" />
+                <AddIcon size="lg" className="text-muted-foreground" />
               </Label>
             ) : (
               <>
@@ -902,7 +902,7 @@ export function PromptInput({
                             <img src={thumb} alt="" className="w-full h-full object-cover" />
                           ) : (
                             <div className="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-muted-foreground">
-                              {item.kind === 'video' ? <Film size={18} aria-hidden /> : <Music size={18} aria-hidden />}
+                              {item.kind === 'video' ? <VideoIcon size="lg" aria-hidden /> : <AudioIcon size="lg" aria-hidden />}
                               <span className="w-full truncate text-center text-xs">{item.file.name}</span>
                             </div>
                           )}
@@ -923,7 +923,7 @@ export function PromptInput({
                             pointerEvents: hovered ? 'auto' : 'none',
                           }}
                         >
-                          <X size={10} />
+                          <CloseIcon size="sm" />
                         </Button>
                         {stackCanAdd && i === (refExpanded ? stackItems.length - 1 : 0) && (
                           <Label
@@ -931,7 +931,7 @@ export function PromptInput({
                             htmlFor={refInputId}
                             className="absolute -right-2.5 -bottom-2.5 z-10 flex size-7 items-center justify-center rounded-full border-[0.5px] border-border bg-secondary transition-colors cursor-pointer text-muted-foreground hover:text-foreground hover:border-input hover:bg-card"
                           >
-                            <Plus size={14} />
+                            <AddIcon size="sm" />
                           </Label>
                         )}
                       </div>
@@ -996,7 +996,7 @@ export function PromptInput({
             onClick={onSavePromptAsset}
             className="absolute right-3 top-3 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
           >
-            <BookmarkPlus size={15} />
+            <SaveAssetIcon />
           </Button>
         )}
         {/* chip hover 预览：视频静音循环播放 / 图片放大 / 音频文件卡，浮在 chip 上方 */}
@@ -1016,7 +1016,7 @@ export function PromptInput({
                 <img src={url} alt="" className="h-[150px] rounded-lg border border-border object-cover" />
               ) : (
                 <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground">
-                  <Music size={16} aria-hidden />
+                  <AudioIcon aria-hidden />
                   <span className="max-w-[200px] truncate">{item.file.name}</span>
                 </div>
               )}
@@ -1050,7 +1050,7 @@ export function PromptInput({
                 <img src={thumbFor(item.index)!} alt="" className="h-8 w-8 shrink-0 rounded-md object-cover" />
               ) : (
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground">
-                  {item.kind === 'video' ? <Film size={14} aria-hidden /> : <Music size={14} aria-hidden />}
+                  {item.kind === 'video' ? <VideoIcon size="sm" aria-hidden /> : <AudioIcon size="sm" aria-hidden />}
                 </span>
               )}
               <span className="shrink-0 font-medium">{item.label}</span>
@@ -1093,7 +1093,7 @@ export function PromptInput({
               aria-label="选择生成模式"
               onClick={() => setOpenPanel(openPanel === 'kind' ? null : 'kind')}
             >
-              {isVideo ? <Video size={14} aria-hidden /> : <ImageIcon size={14} aria-hidden />}
+              {isVideo ? <VideoIcon size="sm" aria-hidden /> : <ImageIcon size="sm" aria-hidden />}
               {isVideo ? '视频' : '图片'}
             </ControlButton>
             <ToolbarPopover
@@ -1107,8 +1107,8 @@ export function PromptInput({
             >
                 <div className="px-3 py-2 text-sm text-muted-foreground">生成模式</div>
                 {([
-                  { key: 'image', label: '图片', icon: <ImageIcon size={18} aria-hidden /> },
-                  { key: 'video', label: '视频', icon: <Video size={18} aria-hidden /> },
+                  { key: 'image', label: '图片', icon: <ImageIcon size="lg" aria-hidden /> },
+                  { key: 'video', label: '视频', icon: <VideoIcon size="lg" aria-hidden /> },
                 ] as const).map((item) => (
                   <Button variant="bare"
                     key={item.key}
@@ -1135,7 +1135,7 @@ export function PromptInput({
               onClick={() => setOpenPanel(openPanel === 'provider' ? null : 'provider')}
               disabled={visibleProviders.length === 0}
             >
-              <ProviderBrandIcon provider={provider} size={14} /> {providerDisplayName}
+              <ProviderBrandIcon provider={provider} size="sm" /> {providerDisplayName}
             </ControlButton>
             <ToolbarPopover
               open={openPanel === 'provider'}
@@ -1183,7 +1183,7 @@ export function PromptInput({
               onClick={() => setOpenPanel(openPanel === 'model' ? null : 'model')}
               disabled={!provider || models.length === 0}
             >
-              {selectedModel?.id.startsWith('comfyui-') ? <Workflow size={14} aria-hidden /> : <ModelBrandIcon brand={modelBrand(selectedModel?.id ?? '')} size={14} />} {selectedModel ? modelDisplayName(selectedModel) : models.length > 0 ? '选择模型' : '未配置模型'}
+              {selectedModel?.id.startsWith('comfyui-') ? <WorkflowIcon size="sm" aria-hidden /> : <ModelBrandIcon brand={modelBrand(selectedModel?.id ?? '')} size="sm" />} {selectedModel ? modelDisplayName(selectedModel) : models.length > 0 ? '选择模型' : '未配置模型'}
             </ControlButton>
             <ToolbarPopover
               open={openPanel === 'model'}
@@ -1215,7 +1215,7 @@ export function PromptInput({
               aria-label="选择比例和分辨率"
               onClick={() => setOpenPanel(openPanel === 'size' ? null : 'size')}
             >
-              <Square size={14} aria-hidden />
+              <AspectRatioIcon size="sm" aria-hidden />
               {imageSizeSummary(sizeParams)}
               {/* 第二段没有实际参数时连分隔符一起省掉，避免按钮末尾挂一根竖线。 */}
               {sizeControlDetail && (
@@ -1281,7 +1281,7 @@ export function PromptInput({
               disabled={fixedWorkflowSeed}
               onClick={() => setOpenPanel(openPanel === 'count' ? null : 'count')}
             >
-              <Images size={14} aria-hidden /> {fixedWorkflowSeed ? 1 : isMj ? MJ_IMAGES_PER_TASK : Math.min(count, caps.maxCount ?? 4)} 张
+              <ImagesIcon size="sm" aria-hidden /> {fixedWorkflowSeed ? 1 : isMj ? MJ_IMAGES_PER_TASK : Math.min(count, caps.maxCount ?? 4)} 张
             </ControlButton>
             <ToolbarPopover
               open={openPanel === 'count'}
@@ -1335,7 +1335,7 @@ export function PromptInput({
                   aria-label="选择视频生成数量"
                   onClick={() => setOpenPanel(openPanel === 'count' ? null : 'count')}
                 >
-                  <Images size={14} aria-hidden /> {videoCount} 条
+                  <ImagesIcon size="sm" aria-hidden /> {videoCount} 条
                 </ControlButton>
                 <ToolbarPopover
                   open={openPanel === 'count'}
@@ -1371,7 +1371,7 @@ export function PromptInput({
               canScrollRight && barHovering ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
             }`}
           >
-            <ChevronRight size={17} aria-hidden />
+            <ChevronRightIcon size="lg" aria-hidden />
           </Button>
         </div>
         {/* pr-12 给提交按钮让位：按钮已改为绝对定位锚在壳右下角（见 shell 末尾），不再占这一行的 flex 位 */}
@@ -1382,7 +1382,7 @@ export function PromptInput({
               data-testid="frame-block-hint"
               className="inline-flex items-center gap-1 text-xs text-destructive"
             >
-              <Film size={12} aria-hidden />
+              <VideoIcon size="sm" aria-hidden />
               需先放首帧
             </span>
           )}
@@ -1402,10 +1402,9 @@ export function PromptInput({
           collapsed ? 'bottom-[22px] w-8 h-8' : 'bottom-4 w-10 h-10'
         }`}
       >
-        <ArrowUp
-          size={18}
+        <ArrowUpIcon size="lg"
           aria-hidden
-          className={`transition-transform duration-300 ${collapsed ? 'scale-90' : ''}`}
+          className={`transition-transform duration-300 ${collapsed ? 'scale-90': ''}`}
         />
       </Button></Hint>
       {slotLightbox && <Lightbox src={slotLightbox} onClose={() => setSlotLightbox(null)} />}

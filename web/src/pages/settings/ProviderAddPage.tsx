@@ -1,7 +1,7 @@
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'wouter';
-import { Plus, Search } from 'lucide-react';
+import { AddIcon, SearchIcon } from '@/components/ui/icons';
 import { getChatGPTSubscription, type ChatGPTSubscriptionStatus, listKeys, type KeyView, type KeyCreatePayload } from '@/api/keys';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { KeyForm } from './KeyForm';
@@ -61,7 +61,7 @@ export function ProviderAddPage() {
       </div>
       <div className="flex items-center gap-2">
         <InputGroup className="w-56">
-          <InputGroupAddon><Search aria-hidden /></InputGroupAddon>
+          <InputGroupAddon><SearchIcon aria-hidden /></InputGroupAddon>
           <InputGroupInput aria-label="查找供应商" placeholder="查找供应商" value={query} onChange={e => setQuery(e.target.value)} />
         </InputGroup>
         <Link href="/settings/providers" className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-secondary">关闭</Link>
@@ -90,7 +90,7 @@ export function ProviderAddPage() {
     })}
     {visible.length === 0 && <p className="text-sm text-muted-foreground">没有匹配的供应商</p>}
     <form autoComplete="off" onSubmit={e => { e.preventDefault(); custom(); }} className="mt-auto flex flex-wrap items-center gap-3 border-t border-border pt-5">
-      <Label htmlFor="custom-provider-address" className="flex items-center gap-1.5 text-sm font-medium text-primary"><Plus className="size-3.5" aria-hidden />自定义供应商</Label>
+      <Label htmlFor="custom-provider-address" className="flex items-center gap-1.5 text-sm font-medium text-primary"><AddIcon size="sm" aria-hidden />自定义供应商</Label>
       <Input id="custom-provider-address" aria-label="自定义供应商地址" placeholder="任意 OpenAI 兼容地址，如 https://api.example.com/v1"
         value={address} onChange={e => setAddress(e.target.value)}
         className="min-w-0 flex-[1_1_360px] font-mono" />

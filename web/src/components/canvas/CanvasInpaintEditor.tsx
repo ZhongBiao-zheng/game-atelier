@@ -1,4 +1,4 @@
-import { Eraser, Paintbrush, Redo2, Undo2 } from 'lucide-react';
+import { BrushIcon, EraserIcon, RedoIcon, UndoIcon } from '@/components/ui/icons';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { useGenerationEstimate } from '@/lib/useGenerationEstimate';
 import { defaultResolution } from '@/lib/studioSize';
@@ -163,20 +163,20 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
     } finally { setSerializing(false); }
   }
 
-  const toolButton = (id: BrushTool, label: string, key: string, Icon: typeof Paintbrush) => (
+  const toolButton = (id: BrushTool, label: string, key: string, Icon: typeof BrushIcon) => (
     <ToggleGroupItem value={id} className="gap-1.5 rounded-lg px-3 font-normal">
       <Icon aria-hidden />{label}<span className="hidden font-mono text-xs text-muted-foreground/80 lg:inline" aria-hidden>{key}</span>
     </ToggleGroupItem>
   );
 
-  return <ImageEditorShell open={open} heading="局部修改" icon={Paintbrush}
+  return <ImageEditorShell open={open} heading="局部修改" icon={BrushIcon}
     viewport={viewport} busy={busy} dirty={fingerprint !== savedFingerprint.current} onClose={() => onOpenChange(false)}
     onAutoSave={() => submit(false)}
     onKeyDown={handleKey} onKeyUp={event => { if (event.key === ' ') setSpacePan(false); }}
     toolbar={<>
       <ToggleGroup type="single" aria-label="工具" value={tool} onValueChange={value => { if (value) setTool(value as BrushTool); }}>
-        {toolButton('brush', '涂抹', 'B', Paintbrush)}
-        {toolButton('eraser', '擦除', 'E', Eraser)}
+        {toolButton('brush', '涂抹', 'B', BrushIcon)}
+        {toolButton('eraser', '擦除', 'E', EraserIcon)}
       </ToggleGroup>
       <span className="mx-1.5 h-5 w-px bg-border" aria-hidden />
       <Label className="flex items-center gap-2.5 px-2">
@@ -188,8 +188,8 @@ export function CanvasInpaintEditor({ open, title, version, mediaUrl, keys, init
         <span className="w-7 tabular-nums text-xs">{brushSize}</span>
       </Label>
       <span className="mx-1.5 h-5 w-px bg-border" aria-hidden />
-      <Button variant="bare" type="button" aria-label="撤销选区" className={editorIconButton} disabled={!undoStack.current.length} onClick={undo}><Undo2 /></Button>
-      <Button variant="bare" type="button" aria-label="重做选区" className={editorIconButton} disabled={!redoStack.length} onClick={redo}><Redo2 /></Button>
+      <Button variant="bare" type="button" aria-label="撤销选区" className={editorIconButton} disabled={!undoStack.current.length} onClick={undo}><UndoIcon /></Button>
+      <Button variant="bare" type="button" aria-label="重做选区" className={editorIconButton} disabled={!redoStack.length} onClick={redo}><RedoIcon /></Button>
       <Button variant="bare" type="button" disabled={!strokes.length} onClick={() => commit([])}
         className="h-9 shrink-0 whitespace-nowrap rounded-lg px-3 text-sm text-muted-foreground hover:text-foreground disabled:opacity-40">清空</Button>
     </>}

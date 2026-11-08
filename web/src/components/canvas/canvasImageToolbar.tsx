@@ -1,14 +1,4 @@
-import {
-  Crop,
-  Download,
-  Eye,
-  Grid2X2,
-  Scissors,
-  Lock,
-  Orbit,
-  ZoomIn,
-  type LucideIcon,
-} from 'lucide-react';
+import { AngleIcon, CropIcon, CutIcon, DownloadIcon, GridIcon, LockIcon, ShowIcon, UpscaleIcon, type AppIcon } from '@/components/ui/icons';
 
 import type {
   CanvasImageQuickToolId,
@@ -21,7 +11,7 @@ import type {
 export interface CanvasImageToolDefinition {
   id: CanvasImageQuickToolId;
   label: string;
-  icon: LucideIcon;
+  icon: AppIcon;
   defaultVisible: boolean;
 }
 
@@ -29,14 +19,14 @@ export interface CanvasImageToolDefinition {
 export const IMAGE_TOOLBAR_INLINE_LIMIT = 4;
 
 export const CANVAS_IMAGE_TOOLS: CanvasImageToolDefinition[] = [
-  { id: 'info', label: '查看', icon: Eye, defaultVisible: true },
-  { id: 'download', label: '下载', icon: Download, defaultVisible: true },
-  { id: 'resize', label: '比例缩放', icon: Lock, defaultVisible: false },
-  { id: 'crop', label: '裁剪', icon: Crop, defaultVisible: true },
-  { id: 'split', label: '切分', icon: Grid2X2, defaultVisible: true },
-  { id: 'removeBackground', label: '抠图', icon: Scissors, defaultVisible: true },
-  { id: 'upscale', label: 'AI高清', icon: ZoomIn, defaultVisible: true },
-  { id: 'angle', label: '多角度', icon: Orbit, defaultVisible: false },
+  { id: 'info', label: '查看', icon: ShowIcon, defaultVisible: true },
+  { id: 'download', label: '下载', icon: DownloadIcon, defaultVisible: true },
+  { id: 'resize', label: '比例缩放', icon: LockIcon, defaultVisible: false },
+  { id: 'crop', label: '裁剪', icon: CropIcon, defaultVisible: true },
+  { id: 'split', label: '切分', icon: GridIcon, defaultVisible: true },
+  { id: 'removeBackground', label: '抠图', icon: CutIcon, defaultVisible: true },
+  { id: 'upscale', label: 'AI高清', icon: UpscaleIcon, defaultVisible: true },
+  { id: 'angle', label: '多角度', icon: AngleIcon, defaultVisible: false },
 ];
 
 /** AI高清档位：longEdge 是该档的目标长边，长边不超过原图的档位不展示；

@@ -1,4 +1,4 @@
-import { AlertTriangle, Link2 } from 'lucide-react';
+import { LinkIcon, WarningIcon } from '@/components/ui/icons';
 
 import type { CanvasGenerationSnapshot, Job } from '@/schema/jobs';
 import { Hint } from '@/components/ui/tooltip';
@@ -199,7 +199,7 @@ export function CanvasGenerationMetadata({ snapshot, job, nodes }: {
               const node = nodeById.get(input.node_id);
               return (
                 <li key={`${input.node_id}-${input.version_id}`} className="flex items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm">
-                  <Link2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <LinkIcon className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-foreground">{node?.title ?? '节点已删除'}{input.markup_version_id ? ' · 原图 + 标注层' : input.annotated ? ' · 合成图' : ''}</span>
                     <Hint label={input.version_id}><span className="block truncate font-mono text-xs text-muted-foreground">
@@ -211,7 +211,7 @@ export function CanvasGenerationMetadata({ snapshot, job, nodes }: {
             })}
             {snapshot.mask_version_id && (
               <li className="flex items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm">
-                <Link2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <LinkIcon className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                 <span>
                   <span className="block text-foreground">局部编辑蒙版</span>
                   <span className="block font-mono text-xs text-muted-foreground">{snapshot.mask_version_id}</span>
@@ -225,7 +225,7 @@ export function CanvasGenerationMetadata({ snapshot, job, nodes }: {
       {(job.params.actual_size || warnings.length > 0) && (
         <div className="space-y-2 rounded-md border border-[color:var(--status-pending)]/30 bg-card px-3 py-2">
           <p className="flex items-center gap-2 text-xs font-medium text-[color:var(--status-pending)]">
-            <AlertTriangle className="size-4" aria-hidden="true" />执行结果
+            <WarningIcon aria-hidden="true" />执行结果
           </p>
           {job.params.actual_size && (
             <dl className="text-sm">

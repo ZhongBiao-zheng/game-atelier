@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FolderOpen } from 'lucide-react';
+import { FolderOpenIcon } from '@/components/ui/icons';
 
 import { chooseFolder } from '@/api/folders';
 import { fetchConfig, updateConfig } from '@/api/config';
@@ -99,7 +99,7 @@ export function PreferencesPage() {
             <div className="flex shrink-0 items-center gap-2">
               <Button variant="outline" size="sm" type="button" onClick={pickDataRoot} disabled={loading || saving || choosing}
                >
-                <FolderOpen className="size-3.5" aria-hidden />{choosing ? '选择中…' : '更换文件夹'}
+                <FolderOpenIcon size="sm" aria-hidden />{choosing ? '选择中…' : '更换文件夹'}
               </Button>
               {changed && <>
                 <Button variant="default" size="sm" type="button" onClick={saveDataRoot} disabled={saving}

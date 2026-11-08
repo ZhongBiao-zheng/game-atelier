@@ -1,4 +1,4 @@
-import { Workflow } from 'lucide-react';
+import { WorkflowIcon } from '@/components/ui/icons';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { modelModality, type ModelModality } from '@/api/keys';
@@ -95,7 +95,7 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
             tabIndex={selected === id || (!flat.some(item => `${item.key.alias}:${item.model.id}` === selected) && flat[0] === choice) ? 0 : -1}
             onClick={() => onSelect(choice)}
             className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors duration-150 hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-inset aria-selected:ring-primary/60">
-            <span className={selected === id ? 'text-foreground' : 'text-muted-foreground'}>{local ? <Workflow size={18} aria-hidden /> : <ModelBrandIcon brand={modelBrand(choice.model.id)} size={18} />}</span>
+            <span className={selected === id ? 'text-foreground' : 'text-muted-foreground'}>{local ? <WorkflowIcon size="lg" aria-hidden /> : <ModelBrandIcon brand={modelBrand(choice.model.id)} size="lg" />}</span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">{modelDisplayName(choice.model)}</span>
               {entry && !subscription && <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{entry.description}</span>}

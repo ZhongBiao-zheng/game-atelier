@@ -1,6 +1,6 @@
 import * as React from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { X } from 'lucide-react';
+import { CloseIcon } from '@/components/ui/icons';
 
 import { cn } from '@/lib/utils';
 
@@ -45,7 +45,7 @@ export const DialogContent = React.forwardRef<
           aria-label="关闭"
           className="absolute right-3 top-3 inline-flex size-9 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
-          <X className="size-4" aria-hidden="true" />
+          <CloseIcon aria-hidden="true" />
         </DialogPrimitive.Close>
       )}
     </DialogPrimitive.Content>

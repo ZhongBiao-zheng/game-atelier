@@ -1,4 +1,4 @@
-import { Expand, LoaderCircle, Paintbrush, Sparkles, X } from 'lucide-react';
+import { AiIcon, BrushIcon, CloseIcon, LoadingIcon, OutpaintIcon } from '@/components/ui/icons';
 import { useState } from 'react';
 import { canvasMediaUrl } from '@/api/canvas';
 import { Lightbox } from '@/components/Lightbox';
@@ -49,7 +49,7 @@ export function CanvasImageEditPanel({ node, edit, context, onClose }: {
   const modelName = context.keys.find(key => key.alias === alias)?.models.find(model => model.id === modelId)?.name || modelId;
   const size = job ? job.params.actual_size ?? job.params.size : draft?.params.size;
   const running = Boolean(edit.data.active_run_id) || context.submittingNodeIds.has(edit.id);
-  const Icon = outpaint ? Expand : Paintbrush;
+  const Icon = outpaint ? OutpaintIcon : BrushIcon;
   const label = outpaint ? '扩图' : '局部修改';
 
   async function generate() {
@@ -63,7 +63,7 @@ export function CanvasImageEditPanel({ node, edit, context, onClose }: {
       className="nodrag relative overflow-hidden rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow"
       onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
       <Button type="button" variant="ghost" size="icon" className="absolute right-2 top-2 z-10 size-7 rounded-full"
-        aria-label={`关闭${label}设置`} onClick={onClose}><X aria-hidden="true" /></Button>
+        aria-label={`关闭${label}设置`} onClick={onClose}><CloseIcon aria-hidden="true" /></Button>
       <div className="mb-1 flex min-h-12 min-w-0 items-center gap-2 overflow-x-auto px-1 py-1 pr-9">
         {tiles.map((tile, index) => {
           const showDetail = (target: HTMLElement) => {
@@ -96,14 +96,14 @@ export function CanvasImageEditPanel({ node, edit, context, onClose }: {
       </Button>
       <div className="mt-2 flex items-center gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
         <Hint label={alias ?? undefined}><span className={`${chip} flex-1`}>
-          <Icon className="size-4 shrink-0 text-primary" aria-hidden="true" />
+          <Icon className="shrink-0 text-primary" aria-hidden="true" />
           <span className="truncate">{modelName ?? '未选择模型'}</span>
           {alias && <span className="ml-auto shrink-0 text-muted-foreground">{alias}</span>}
         </span></Hint>
         {size && <span className={`${chip} shrink-0 tabular-nums`}>{size.replace('x', '×')}</span>}
         <Button type="button" size="sm" className="shrink-0" disabled={running || submitting || !draft}
           onClick={() => void generate()}>
-          {running || submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
+          {running || submitting ? <LoadingIcon className="animate-spin" aria-hidden="true" /> : <AiIcon aria-hidden="true" />}
           {running || submitting ? '生成中…' : '开始生成'}
         </Button>
       </div>

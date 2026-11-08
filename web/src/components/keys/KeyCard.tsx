@@ -1,4 +1,4 @@
-import { Pencil, Trash2 } from 'lucide-react';
+import { DeleteIcon, EditIcon } from '@/components/ui/icons';
 import { modelModality } from '@/api/keys';
 import { providerLabel } from '@/lib/providerLabels';
 import { Button } from '@/components/ui/button';
@@ -98,7 +98,7 @@ export function KeyCard({ row, onEdit, onDelete }: Props) {
           className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           aria-label={`编辑 ${row.alias}`}
         >
-          <Pencil size={14} aria-hidden />
+          <EditIcon size="sm" aria-hidden />
         </Button>
         <Button variant="bare"
           type="button"
@@ -106,7 +106,7 @@ export function KeyCard({ row, onEdit, onDelete }: Props) {
           aria-label={`删除 ${row.alias}`}
           className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
         >
-          <Trash2 size={14} aria-hidden />
+          <DeleteIcon size="sm" aria-hidden />
         </Button>
       </div>
     </div>

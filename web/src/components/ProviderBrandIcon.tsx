@@ -21,7 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-import { Building2, Split, Workflow } from 'lucide-react';
+import { ICON_PX, ProviderIcon, RouteIcon, WorkflowIcon, type IconSize } from '@/components/ui/icons';
 import { providerPresetId } from '@/pages/settings/providerPresets';
 import { ModelBrandIcon } from './ModelBrandIcon';
 import tokendance from '@/assets/providers/tokendance.svg';
@@ -35,17 +35,18 @@ const paths = {
   openrouter: <><path d="M18.654 3.87a5.087 5.087 0 110 10.174L23.7 19.09c.64.641.187 1.737-.72 1.737H8.48a8.479 8.479 0 010-16.958h10.175zM8.479 7.26a5.087 5.087 0 100 10.176 5.087 5.087 0 000-10.175z"></path></>,
 };
 
-export function ProviderBrandIcon({ provider, size = 20 }: {
+export function ProviderBrandIcon({ provider, size = 'lg' }: {
   provider?: { provider?: string; base_url?: string | null } | null;
-  size?: number;
+  size?: IconSize;
 }) {
-  if (provider?.provider === 'auto') return <Split size={size} className="shrink-0" aria-hidden="true" />;
+  const px = ICON_PX[size];
+  if (provider?.provider === 'auto') return <RouteIcon size={size} className="shrink-0" aria-hidden="true" />;
   const id = providerPresetId(provider);
-  if (id === 'comfyui') return <Workflow size={size} aria-hidden="true" />;
+  if (id === 'comfyui') return <WorkflowIcon size={size} aria-hidden="true" />;
   if (id === 'openai' || id === 'chatgpt') return <ModelBrandIcon brand="openai" size={size} />;
   if (id === 'seedream' || id === 'openrouter') {
-    return <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" fillRule="evenodd" className="shrink-0" aria-hidden="true">{paths[id]}</svg>;
+    return <svg viewBox="0 0 24 24" width={px} height={px} fill="currentColor" fillRule="evenodd" className="shrink-0" aria-hidden="true">{paths[id]}</svg>;
   }
-  if (masks[id]) return <span aria-hidden="true" className="shrink-0 bg-current" style={{ width: size, height: size, maskImage: `url("${masks[id]}")`, maskSize: 'contain', maskRepeat: 'no-repeat' }} />;
-  return <Building2 size={size} className="shrink-0" aria-hidden="true" />;
+  if (masks[id]) return <span aria-hidden="true" className="shrink-0 bg-current" style={{ width: px, height: px, maskImage: `url("${masks[id]}")`, maskSize: 'contain', maskRepeat: 'no-repeat' }} />;
+  return <ProviderIcon size={size} className="shrink-0" aria-hidden="true" />;
 }

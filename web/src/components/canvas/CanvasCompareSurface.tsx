@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeftIcon, ChevronRightIcon } from '@/components/ui/icons';
 import { canvasMediaUrl, canvasMediaUrlAtWidth } from '@/api/canvas';
 import type { CanvasNormalizedFrame, CanvasSize } from '@/schema/canvas';
 import { Button } from '@/components/ui/button';
@@ -82,7 +82,7 @@ export function CanvasCompareSurface({ projectId, title, beforeVersionId, afterV
           event.stopPropagation();
           setSplit(value => Math.min(100, Math.max(0, value + (event.key === 'ArrowLeft' ? -KEYBOARD_STEP : KEYBOARD_STEP))));
         }}>
-        <ChevronLeft size={14} strokeWidth={2.5} /><ChevronRight size={14} strokeWidth={2.5} className="-ml-1" />
+        <ChevronLeftIcon size="sm" /><ChevronRightIcon size="sm" className="-ml-1" />
       </Button>
     </div>
   );

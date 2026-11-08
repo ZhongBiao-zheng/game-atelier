@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Share2 } from 'lucide-react';
+import { ShareIcon } from '@/components/ui/icons';
 
 import {
   ProfileRequiredError,
@@ -180,7 +180,7 @@ export function TeamShareDialog({ request, onClose, onShared, projectId }: TeamS
         <DialogContent aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Share2 className="size-4" aria-hidden />
+              <ShareIcon aria-hidden />
               分享到团队库
             </DialogTitle>
           </DialogHeader>

@@ -8,7 +8,7 @@ import {
   type PointerEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { FileAudio, FileImage, FileText, FileVideo } from 'lucide-react';
+import { AudioFileIcon, ImageFileIcon, TextFileIcon, VideoFileIcon } from '@/components/ui/icons';
 import { focusEmptyVariable, syncVariableInput, variableInput, variablePromptNodes } from '@/lib/promptVariableEditor';
 import { hasPromptVariableContent, readablePromptVariables } from '@/lib/promptVariables';
 
@@ -542,15 +542,15 @@ function MentionPreview({ reference }: { reference: CanvasMentionReference }) {
     return <video src={reference.previewUrl} className="size-9 shrink-0 rounded-md bg-black object-cover" muted preload="metadata" />;
   }
   const Icon = reference.kind === 'audio'
-    ? FileAudio
+    ? AudioFileIcon
     : reference.kind === 'video'
-      ? FileVideo
+      ? VideoFileIcon
       : reference.kind === 'image'
-        ? FileImage
-        : FileText;
+        ? ImageFileIcon
+        : TextFileIcon;
   return (
     <span className="grid size-9 shrink-0 place-items-center rounded-md bg-secondary text-muted-foreground">
-      <Icon className="size-4" aria-hidden="true" />
+      <Icon aria-hidden="true" />
     </span>
   );
 }

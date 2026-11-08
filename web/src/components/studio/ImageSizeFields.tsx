@@ -1,4 +1,4 @@
-import { Scan, SlidersHorizontal } from 'lucide-react';
+import { AutoSizeIcon, ParamsIcon } from '@/components/ui/icons';
 import type { JobParams } from '@/schema/jobs';
 import type { ImageControlCaps } from '@/lib/imageControlCaps';
 import { imageSizeError, imageSizeMode } from '@/lib/imageSizeMode';
@@ -53,8 +53,8 @@ export function ImageSizeFields({ caps, model, baseUrl, params, onPatch }: {
         <Segmented aria-label="选择图片尺寸" className="grid grid-cols-4 gap-y-1 rounded-lg bg-popover p-1">
           {options.map(value => (
             <SegmentedItem key={value} value={String(value)} selected={value === 'auto' || value === 'custom' ? mode === value : mode === 'ratio' && ratio === value} onSelect={() => select(value)} className="flex h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-md text-xs transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
-              {value === 'auto' ? <Scan className="size-4" aria-hidden="true" /> : value === 'custom'
-                ? <SlidersHorizontal className="size-4" aria-hidden="true" /> : <RatioIcon ratio={value} box={16} />}
+              {value === 'auto' ? <AutoSizeIcon aria-hidden="true" /> : value === 'custom'
+                ? <ParamsIcon aria-hidden="true" /> : <RatioIcon ratio={value} box={16} />}
               {value === 'auto' ? 'AUTO' : value === 'custom' ? '自定义' : value}
             </SegmentedItem>
           ))}

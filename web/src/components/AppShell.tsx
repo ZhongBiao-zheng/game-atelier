@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef } from 'react';
 import { LayoutGroup, motion } from 'motion/react';
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter';
-import { HomeIcon, Moon, Palette, Settings, Sparkles, Sun } from 'lucide-react';
+import { AiIcon, CanvasIcon, DarkModeIcon, HomeIcon, LightModeIcon, SettingsIcon } from '@/components/ui/icons';
 
 import { ChangelogButton } from '@/components/ChangelogButton';
 import { TeamShareReminder, type TeamShareReminderHandle } from '@/components/team/TeamShareReminder';
@@ -32,15 +32,15 @@ function ThemeToggle() {
       onClick={() => setTheme(next)}
       className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-glass backdrop-blur-glass text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
-      <SwapIcon swapKey={theme}>{theme === 'dark' ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}</SwapIcon>
+      <SwapIcon swapKey={theme}>{theme === 'dark' ? <LightModeIcon size="lg" aria-hidden /> : <DarkModeIcon size="lg" aria-hidden />}</SwapIcon>
     </Button>
   );
 }
 
 const NAV_TABS: { to: string; label: string; icon: typeof HomeIcon }[] = [
   { to: '/', label: '主页', icon: HomeIcon },
-  { to: '/studio', label: '创作台', icon: Sparkles },
-  { to: '/canvas', label: '画布', icon: Palette },
+  { to: '/studio', label: '创作台', icon: AiIcon },
+  { to: '/canvas', label: '画布', icon: CanvasIcon },
 ];
 
 function NavTab({ to, label, isActive, icon: Icon, badge = 0 }: { to: string; label: string; isActive: boolean; icon: typeof HomeIcon; badge?: number }) {
@@ -68,7 +68,7 @@ function NavTab({ to, label, isActive, icon: Icon, badge = 0 }: { to: string; la
           transition={{ type: 'spring', stiffness: 420, damping: 34 }}
         />
       )}
-      <Icon size={18} aria-hidden />
+      <Icon size="lg" />
       {label}
       {badge > 0 && <span aria-hidden className="ml-0.5 rounded-full bg-primary px-1.5 text-xs leading-4 text-primary-foreground">{badge}</span>}
     </Link>
@@ -125,7 +125,7 @@ function AppShellContent() {
                 onSettings ? 'text-foreground ring-1 ring-border' : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
               ].join(' ')}
             >
-              <Settings size={18} aria-hidden />
+              <SettingsIcon size="lg" aria-hidden />
             </Link>
           </div>
         </div>

@@ -22,7 +22,7 @@ describe('provider identity and local branding', () => {
     { provider: 'evolink' },
     { provider: 'tokendance' },
   ])('uses packaged monochrome masks at the requested size for $provider $base_url', provider => {
-    const { container } = render(<ProviderBrandIcon provider={provider} size={14} />);
+    const { container } = render(<ProviderBrandIcon provider={provider} size="sm" />);
     const mask = container.querySelector('span')!;
     expect(container.querySelector('img')).toBeNull();
     expect(mask).toHaveClass('bg-current');
@@ -32,16 +32,16 @@ describe('provider identity and local branding', () => {
   });
 
   it('uses currentColor SVGs and falls back to the building icon for unknown providers', () => {
-    const { container, rerender } = render(<ProviderBrandIcon provider={{ provider: 'openrouter' }} size={14} />);
+    const { container, rerender } = render(<ProviderBrandIcon provider={{ provider: 'openrouter' }} size="sm" />);
     expect(container.querySelector('svg')).toHaveAttribute('fill', 'currentColor');
     expect(container.querySelector('svg')).toHaveAttribute('width', '14');
     rerender(<ProviderBrandIcon provider={{ provider: 'unknown' }} />);
-    expect(container.querySelector('svg')).toHaveClass('lucide-building-2');
+    expect(container.querySelector('svg')).toHaveAttribute('data-icon', 'provider');
   });
 });
 
  it('智能路由使用 Split 图标，不落到普通厂商图标', () => {
   const { container } = render(<ProviderBrandIcon provider={{ provider: 'auto' }} />);
-  expect(container.querySelector('.lucide-split')).toBeInTheDocument();
-  expect(container.querySelector('.lucide-building2')).not.toBeInTheDocument();
+  expect(container.querySelector('[data-icon="route"]')).toBeInTheDocument();
+  expect(container.querySelector('[data-icon="provider"]')).not.toBeInTheDocument();
 });

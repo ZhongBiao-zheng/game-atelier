@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Settings2 } from 'lucide-react';
+import { ParamsIcon } from '@/components/ui/icons';
 import type { WorkflowInput } from '@/api/keys';
 import type { JobParams } from '@/schema/jobs';
 import { ControlButton } from './ControlButton';
@@ -34,7 +34,7 @@ export function WorkflowParameters({ inputs, params, onPatch, menuDirection = 'u
     setOpen(false);
     anchor.current?.querySelector('button')?.focus();
   }}>
-    <ControlButton active={open} aria-expanded={open} onClick={() => setOpen(!open)}><Settings2 size={14} aria-hidden />参数</ControlButton>
+    <ControlButton active={open} aria-expanded={open} onClick={() => setOpen(!open)}><ParamsIcon size="sm" aria-hidden />参数</ControlButton>
     <ToolbarPopover open={open} onClose={() => setOpen(false)} anchorRef={anchor} direction={menuDirection}
       portalContainerRef={portalContainerRef} autoFocus className="max-h-[65vh] w-80 overflow-y-auto rounded-xl border border-border bg-card p-4">
       <div className="space-y-4">

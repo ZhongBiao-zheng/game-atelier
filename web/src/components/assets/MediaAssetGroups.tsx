@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDownIcon, ChevronRightIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
 import { MediaAssetGrid } from './CreationAssetCards';
 import type { CreationAsset } from '@/schema/creationAssets';
@@ -34,7 +34,7 @@ function MediaGroup({ group, staleness, onOpen }: {
     <Button variant="ghost" className="w-full justify-start px-0" aria-expanded={!collapsed} onClick={() => {
       setCollapsed(!collapsed); try { localStorage.setItem(key, String(!collapsed)); } catch { /* 存储不可用时本次仍可折叠。 */ }
     }}>
-      {collapsed ? <ChevronRight /> : <ChevronDown />}<span className="truncate">{group.name}</span><span className="text-xs tabular-nums text-muted-foreground">{group.assets.length}</span>
+      {collapsed ? <ChevronRightIcon /> : <ChevronDownIcon />}<span className="truncate">{group.name}</span><span className="text-xs tabular-nums text-muted-foreground">{group.assets.length}</span>
     </Button>
     {!collapsed && <MediaAssetGrid assets={group.assets} staleness={staleness} onOpen={onOpen} />}
   </section>;

@@ -1,4 +1,4 @@
-import { Minus, Plus, Redo2, Undo2 } from 'lucide-react';
+import { AddIcon, MinusIcon, RedoIcon, UndoIcon } from '@/components/ui/icons';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -658,8 +658,8 @@ function SplitControls({
           恢复均分
         </Button>
         <span className="ml-auto flex gap-1">
-          <StepButton label="撤销切线调整" disabled={!canUndo} onClick={onUndo}><Undo2 aria-hidden="true" /></StepButton>
-          <StepButton label="重做切线调整" disabled={!canRedo} onClick={onRedo}><Redo2 aria-hidden="true" /></StepButton>
+          <StepButton label="撤销切线调整" disabled={!canUndo} onClick={onUndo}><UndoIcon aria-hidden="true" /></StepButton>
+          <StepButton label="重做切线调整" disabled={!canRedo} onClick={onRedo}><RedoIcon aria-hidden="true" /></StepButton>
         </span>
       </div>
       <div className="min-h-0">
@@ -682,9 +682,9 @@ function CountStepper({ label, value, onChange }: { label: string; value: number
     <div>
       <p className={PANEL_LABEL_CLASS}>{label}</p>
       <div className="flex h-9 items-center justify-between rounded-md border border-input px-1">
-        <StepButton label={`减少${label}数`} disabled={value <= 1} onClick={() => onChange(value - 1)}><Minus aria-hidden="true" /></StepButton>
+        <StepButton label={`减少${label}数`} disabled={value <= 1} onClick={() => onChange(value - 1)}><MinusIcon aria-hidden="true" /></StepButton>
         <span aria-live="polite" className="text-sm tabular-nums">{value}</span>
-        <StepButton label={`增加${label}数`} disabled={value >= SPLIT_MAX_COUNT} onClick={() => onChange(value + 1)}><Plus aria-hidden="true" /></StepButton>
+        <StepButton label={`增加${label}数`} disabled={value >= SPLIT_MAX_COUNT} onClick={() => onChange(value + 1)}><AddIcon aria-hidden="true" /></StepButton>
       </div>
     </div>
   );

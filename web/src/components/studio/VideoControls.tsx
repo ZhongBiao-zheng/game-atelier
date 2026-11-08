@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react';
-import { CircleHelp, Clapperboard, Volume2, VolumeX } from 'lucide-react';
+import { HelpIcon, MuteIcon, VideoIcon, VolumeIcon } from '@/components/ui/icons';
 import {
   VIDEO_MODE_LABELS,
   VIDEO_QUALITY_LABELS,
@@ -83,19 +83,19 @@ export function VideoControls({
           open ? 'border-border bg-secondary text-foreground' : 'border-border text-foreground hover:bg-secondary'
         }`}
       >
-        <Clapperboard size={14} className="shrink-0" aria-hidden />
+        <VideoIcon size="sm" className="shrink-0" aria-hidden />
         <span className="shrink-0">{VIDEO_MODE_LABELS[mode]}</span>
         {referenceLimitLabel && (
           <Hint label={referenceLimitLabel(mode)}><span className="shrink-0">
-            <CircleHelp className="size-3.5 text-muted-foreground" aria-hidden="true" />
+            <HelpIcon size="sm" className="text-muted-foreground" aria-hidden="true" />
           </span></Hint>
         )}
         {summary && <span className="truncate">{' · '}{summary}</span>}
         {caps.supportsAudio && (
           <SwapIcon swapKey={Boolean(generateAudio)}>
             {generateAudio
-              ? <Volume2 size={13} aria-hidden className="shrink-0" />
-              : <VolumeX size={13} aria-hidden className="shrink-0 text-muted-foreground" />}
+              ? <VolumeIcon size="sm" aria-hidden className="shrink-0" />
+              : <MuteIcon size="sm" aria-hidden className="shrink-0 text-muted-foreground" />}
           </SwapIcon>
         )}
       </Button>

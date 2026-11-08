@@ -48,6 +48,11 @@ const ALLOWLIST: AllowEntry[] = [
     pattern: 'ctx.fillStyle',
     reason: 'canvas 逐点填充色由 rgb 数值动态拼成，无法走 class token —— 基础色已读 --foreground 跟随主题',
   },
+  {
+    file: 'components/ui/icons.tsx',
+    pattern: "from '@hugeicons/",
+    reason: '图标注册表是图标库的唯一入口',
+  },
 ];
 
 const FILES = Object.entries(RAW_SOURCES)
@@ -138,6 +143,17 @@ describe('设计漂移守卫（DESIGN.md 硬约束）', () => {
     assertClean(
       /backdrop-blur-(?:xs|sm|md|lg|xl|2xl|3xl)\b/,
       'DESIGN.md § Elevation（统一 28px 玻璃模糊）',
+    );
+  });
+
+  it('图标只从 components/ui/icons 导入（DESIGN.md § 图标）', () => {
+    assertClean(/from ['"](?:lucide-react|@hugeicons\/)/, 'DESIGN.md § 图标（语义注册表是唯一入口）');
+  });
+
+  it('图标尺寸只走 size 四档，不写尺寸类、数字尺寸与描边（DESIGN.md § 图标）', () => {
+    assertClean(
+      /<(?:[A-Za-z_]\w*\.)?(?:[A-Z]\w*)?(?:Icon|icon)\b(?<!HugeiconsIcon)(?<!RatioIcon)(?<!SwapIcon)[^>]*(?:className=[^>]*?[\s"'`{](?:size|h|w)-[\d.]+(?=[\s"'`}])|strokeWidth=|\bsize=\{\d)/,
+      'DESIGN.md § 图标（size="sm|md|lg|xl"，描边由注册表固定）',
     );
   });
 });

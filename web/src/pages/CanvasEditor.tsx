@@ -26,40 +26,7 @@ import {
   useStore,
   useStoreApi,
 } from '@xyflow/react';
-import {
-  ArrowLeft,
-  ChevronDown,
-  CircleDot,
-  CircleHelp,
-  ClipboardCopy,
-  Download,
-  Ellipsis,
-  Eye,
-  EyeOff,
-  FileAudio,
-  FileImage,
-  FileVideo,
-  Grid2X2,
-  Info,
-  Columns2,
-  Layers,
-  Library,
-  LoaderCircle,
-  MapPinned,
-  Maximize2,
-  Minus,
-  MousePointer2,
-  Pencil,
-  Plus,
-  Settings,
-  Settings2,
-  Sparkles,
-  Square,
-  Trash2,
-  Type,
-  Upload,
-  X,
-} from 'lucide-react';
+import { AddIcon, AiIcon, AudioFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, SelectIcon, SettingsIcon, ShowIcon, TextIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { Link, useLocation } from 'wouter';
 
@@ -4893,7 +4860,7 @@ function CanvasEditorInner({
     return () => { root.style.overscrollBehaviorX = previous; };
   }, []);
 
-  if (loading) return <EditorMessage icon={<LoaderCircle className="size-5 animate-spin" />} text="正在展开画布…" />;
+  if (loading) return <EditorMessage icon={<LoadingIcon size="lg" className="animate-spin" />} text="正在展开画布…" />;
   if (!document) return <EditorMessage text={error || '画布读取失败'} action={<Button onClick={onBack}>返回项目列表</Button>} />;
 
   const background = backgroundVariant(document.settings.background);
@@ -4941,7 +4908,7 @@ function CanvasEditorInner({
         ...current,
         settings: { ...current.settings, show_minimap },
       }), true)}
-    ><MapPinned /></Toggle></Hint>
+    ><MinimapIcon /></Toggle></Hint>
   );
   const toggleAssetLibrary = () => {
     setAddOpen(false);
@@ -5110,13 +5077,13 @@ function CanvasEditorInner({
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <Button size="sm" variant="outline" onClick={() => addTextNode(null)}>
-                  <Type aria-hidden="true" />文本节点
+                  <TextIcon aria-hidden="true" />文本节点
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => addGenerationNode('image', null)}>
-                  <FileImage aria-hidden="true" />图片节点
+                  <ImageFileIcon aria-hidden="true" />图片节点
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => uploadRef.current?.click()}>
-                  <Upload aria-hidden="true" />上传素材
+                  <UploadIcon aria-hidden="true" />上传素材
                 </Button>
               </div>
             </div>
@@ -5134,13 +5101,13 @@ function CanvasEditorInner({
             </span>
             <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
             <Button type="button" variant="ghost" size="sm" disabled={Boolean(activeBatch)} onClick={groupSelection}>
-              <Layers aria-hidden="true" />分组
+              <LayersIcon aria-hidden="true" />分组
             </Button>
             {hideableSelection.length > 0 && (
               <Button type="button" variant="ghost" size="sm" onClick={toggleSelectionHidden}>
                 {hideableSelectionAllHidden
-                  ? <><Eye aria-hidden="true" />显示</>
-                  : <><EyeOff aria-hidden="true" />隐藏</>}
+                  ? <><ShowIcon aria-hidden="true" />显示</>
+                  : <><HideIcon aria-hidden="true" />隐藏</>}
               </Button>
             )}
             <Button
@@ -5150,7 +5117,7 @@ function CanvasEditorInner({
               className="text-destructive hover:text-destructive"
               onClick={deleteSelection}
             >
-              <Trash2 aria-hidden="true" />
+              <DeleteIcon aria-hidden="true" />
               删除
             </Button>
             <Button
@@ -5165,7 +5132,7 @@ function CanvasEditorInner({
                 requestAnimationFrame(() => editorRegionRef.current?.focus());
               }}
             >
-              <X aria-hidden="true" />
+              <CloseIcon aria-hidden="true" />
             </Button>
           </div>
         )}
@@ -5184,7 +5151,7 @@ function CanvasEditorInner({
                   libraryMode && 'bg-secondary',
                 )}
                 onClick={toggleAssetLibrary}
-              ><Library aria-hidden="true" />资产</Button>
+              ><LibraryIcon aria-hidden="true" />资产</Button>
             )}
             minimapToggle={minimapToggle}
             onZoomOut={() => {
@@ -5226,7 +5193,7 @@ function CanvasEditorInner({
 
         <div className="canvas-editor-top pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-start gap-2 p-2 sm:gap-3 sm:p-3 md:p-4">
           <div className="pointer-events-auto flex min-w-0 items-center gap-2 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
-            <Button variant="ghost" size="icon" className="size-9 shrink-0" aria-label="返回画布项目列表" onClick={() => void persistNow().then(saved => { if (saved) onBack(); })}><ArrowLeft /></Button>
+            <Button variant="ghost" size="icon" className="size-9 shrink-0" aria-label="返回画布项目列表" onClick={() => void persistNow().then(saved => { if (saved) onBack(); })}><BackIcon /></Button>
             <div className="h-6 w-px bg-border" />
             <div className="flex min-w-0 items-center">
                 <EditableText
@@ -5240,7 +5207,7 @@ function CanvasEditorInner({
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground data-[state=open]:bg-secondary" aria-label="切换画布项目">
-                      <ChevronDown aria-hidden="true" />
+                      <ChevronDownIcon aria-hidden="true" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="bottom" align="start" className="min-w-44 rounded-xl">
@@ -5265,12 +5232,12 @@ function CanvasEditorInner({
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button ref={canvasMenuTriggerRef} variant="ghost" size="icon" className="size-8 shrink-0 data-[state=open]:bg-secondary" aria-label="画布菜单">
-                      <Ellipsis aria-hidden="true" />
+                      <MoreIcon aria-hidden="true" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="bottom" align="start" className="w-48 rounded-xl">
                     <DropdownMenuItem className="gap-2" onSelect={beginProjectRename}>
-                      <Pencil className="size-4" aria-hidden="true" />重命名
+                      <EditIcon aria-hidden="true" />重命名
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       className="gap-2"
@@ -5280,15 +5247,15 @@ function CanvasEditorInner({
                         openGenerationPreferences('image');
                       }}
                     >
-                      <Settings2 className="size-4" aria-hidden="true" />生成偏好
+                      <ParamsIcon aria-hidden="true" />生成偏好
                     </DropdownMenuItem>
                     <DropdownMenuItem className="gap-2" onSelect={() => setShortcutsOpen(true)}>
-                      <CircleHelp className="size-4" aria-hidden="true" />快捷键
+                      <HelpIcon aria-hidden="true" />快捷键
                     </DropdownMenuItem>
                     {/* 沉浸式画布把整条顶栏（含设置入口）藏了：没有密钥的新用户在画布里点不动「生成」，
                         也没有任何地方能去配置。这一项是画布内唯一的全局设置出口。 */}
                     <DropdownMenuItem asChild className="gap-2">
-                      <Link href="/settings/providers"><Settings className="size-4" aria-hidden="true" />设置</Link>
+                      <Link href="/settings/providers"><SettingsIcon aria-hidden="true" />设置</Link>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuLabel>主题</DropdownMenuLabel>
@@ -5307,12 +5274,12 @@ function CanvasEditorInner({
                       }}
                     >
                       {([
-                        ['none', '空白', Square],
-                        ['dots', '点阵', CircleDot],
-                        ['lines', '线框', Grid2X2],
+                        ['none', '空白', BlankIcon],
+                        ['dots', '点阵', DotGridIcon],
+                        ['lines', '线框', GridIcon],
                       ] as const).map(([value, label, Icon]) => (
                         <DropdownMenuRadioItem key={value} value={value} className="gap-2">
-                          <Icon className="size-4" aria-hidden="true" />{label}
+                          <Icon aria-hidden="true" />{label}
                         </DropdownMenuRadioItem>
                       ))}
                     </DropdownMenuRadioGroup>
@@ -5325,7 +5292,7 @@ function CanvasEditorInner({
                         settings: { ...current.settings, show_image_info: checked },
                       }), true)}
                     >
-                      <Info className="size-4" aria-hidden="true" />显示图片信息
+                      <InfoIcon aria-hidden="true" />显示图片信息
                     </DropdownMenuCheckboxItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -5376,7 +5343,7 @@ function CanvasEditorInner({
               aria-controls="canvas-agent-panel"
               onClick={toggleAgent}
               className={cn('h-9 gap-1.5 px-3', agentOpen && 'bg-secondary text-primary hover:text-primary')}
-            ><Sparkles />Agent</Button>
+            ><AiIcon />Agent</Button>
           </div>
         </div>
 
@@ -5384,26 +5351,26 @@ function CanvasEditorInner({
           <div className="canvas-mobile-rail absolute left-3 top-1/2 z-20 flex max-h-[calc(100dvh-8rem)] -translate-y-1/2 flex-col items-center gap-1 overflow-y-auto rounded-full border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:contents md:max-h-none md:overflow-visible">
           <div className="canvas-tool-dock contents md:absolute md:z-20 md:flex md:max-h-[calc(100dvh-17rem)] md:flex-col md:items-center md:gap-0 md:overflow-y-auto md:rounded-full md:border md:border-border md:bg-glass md:p-1.5 md:backdrop-blur-glass md:shell-glow">
             <span className="xl:hidden">
-              <ToolButton buttonRef={addTriggerRef} label={addOpen ? '关闭添加菜单' : '添加节点'} active={addOpen} expanded={addOpen} controlsId="canvas-add-menu" onClick={() => { setCreateMenu(null); setAddOpen(value => !value); }}>{addOpen ? <X /> : <Plus />}</ToolButton>
+              <ToolButton buttonRef={addTriggerRef} label={addOpen ? '关闭添加菜单' : '添加节点'} active={addOpen} expanded={addOpen} controlsId="canvas-add-menu" onClick={() => { setCreateMenu(null); setAddOpen(value => !value); }}>{addOpen ? <CloseIcon /> : <AddIcon />}</ToolButton>
             </span>
-            <ToolButton label="选择工具" active={!addOpen && !createMenu} onClick={() => { setAddOpen(false); setCreateMenu(null); }}><MousePointer2 /></ToolButton>
+            <ToolButton label="选择工具" active={!addOpen && !createMenu} onClick={() => { setAddOpen(false); setCreateMenu(null); }}><SelectIcon /></ToolButton>
             <div className="my-1 h-px w-7 bg-border" />
             <div className="hidden xl:contents">
-              <ToolButton label="添加批量素材节点" onClick={() => addBatchMaterialNode(null)}><Layers /></ToolButton>
-              <ToolButton label="添加对比节点" onClick={() => addCompareNode(null)}><Columns2 /></ToolButton>
-              <ToolButton label="添加文本节点" onClick={() => addTextNode(null)}><Type /></ToolButton>
-              <ToolButton label="添加图片节点" onClick={() => addGenerationNode('image', null)}><FileImage /></ToolButton>
-              <ToolButton label="添加视频节点" onClick={() => addGenerationNode('video', null)}><FileVideo /></ToolButton>
-              <ToolButton label="添加音频节点" onClick={() => addGenerationNode('audio', null)}><FileAudio /></ToolButton>
-              <ToolButton label="上传素材" onClick={() => uploadRef.current?.click()}><Upload /></ToolButton>
+              <ToolButton label="添加批量素材节点" onClick={() => addBatchMaterialNode(null)}><LayersIcon /></ToolButton>
+              <ToolButton label="添加对比节点" onClick={() => addCompareNode(null)}><CompareIcon /></ToolButton>
+              <ToolButton label="添加文本节点" onClick={() => addTextNode(null)}><TextIcon /></ToolButton>
+              <ToolButton label="添加图片节点" onClick={() => addGenerationNode('image', null)}><ImageFileIcon /></ToolButton>
+              <ToolButton label="添加视频节点" onClick={() => addGenerationNode('video', null)}><VideoFileIcon /></ToolButton>
+              <ToolButton label="添加音频节点" onClick={() => addGenerationNode('audio', null)}><AudioFileIcon /></ToolButton>
+              <ToolButton label="上传素材" onClick={() => uploadRef.current?.click()}><UploadIcon /></ToolButton>
             </div>
           </div>
           {/* 窄屏没有底部两组浮条，视图与资产入口并进这条工具栏。 */}
           {narrowViewport && (
             <div className="contents">
-              <ToolButton label="适应全部节点" onClick={fitAllNodes}><Maximize2 /></ToolButton>
+              <ToolButton label="适应全部节点" onClick={fitAllNodes}><ExpandIcon /></ToolButton>
               {minimapToggle}
-              <ToolButton buttonRef={assetLibraryTriggerRef} label="资产" active={Boolean(libraryMode)} expanded={Boolean(libraryMode)} controlsId="canvas-library-panel" popup={false} onClick={toggleAssetLibrary}><Library /></ToolButton>
+              <ToolButton buttonRef={assetLibraryTriggerRef} label="资产" active={Boolean(libraryMode)} expanded={Boolean(libraryMode)} controlsId="canvas-library-panel" popup={false} onClick={toggleAssetLibrary}><LibraryIcon /></ToolButton>
             </div>
           )}
           {addOpen && (
@@ -5439,7 +5406,7 @@ function CanvasEditorInner({
 
         {createMenu && (
           <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenuDock?.left ?? createMenu.screen.x, top: createMenuDock?.top ?? createMenu.screen.y }}>
-            <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs text-muted-foreground">创建并连接</p><Button variant="bare" type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><X className="size-4" /></Button></div>
+            <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs text-muted-foreground">创建并连接</p><Button variant="bare" type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><CloseIcon /></Button></div>
             <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddCompare={createMenuFromImage ? () => addCompareNode(createMenu) : undefined} rejectedModes={createMenu.sourceHandle === 'target' || !createMenu.sourceId ? undefined : canvasModesRejectingSources(document, createMenu.sourceIds ?? [createMenu.sourceId])} onAddBatch={createMenu.sourceId ? undefined : () => addBatchMaterialNode(createMenu)} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onUpload={() => uploadRef.current?.click()} />
           </div>
         )}
@@ -5735,13 +5702,13 @@ function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, on
   onUpload: () => void;
 }) {
   return <>
-    {onAddBatch && <AddMenuButton icon={<Layers />} title="批量素材" description="一张一项，节点内编辑" onClick={onAddBatch} />}
-    {allowEmptyNodes && <AddMenuButton icon={<Type />} title="文本" description="脚本、提示词与备注" onClick={onAddText} />}
-    {allowEmptyNodes && <AddMenuButton icon={<FileImage />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} disabledReason={rejectedModes?.has('image') ? '图片生成只能参考文本和图片' : undefined} />}
-    {allowEmptyNodes && <AddMenuButton icon={<FileVideo />} title="视频" description="空节点可填写生成设置" onClick={onAddVideo} />}
-    {allowEmptyNodes && <AddMenuButton icon={<FileAudio />} title="音频" description="旁白、对白与语音" onClick={onAddAudio} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
-    {onAddCompare && <AddMenuButton icon={<Columns2 />} title="对比" description="左右拖动对照两张图" onClick={onAddCompare} />}
-    {allowUpload && <AddMenuButton icon={<Upload />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
+    {onAddBatch && <AddMenuButton icon={<LayersIcon />} title="批量素材" description="一张一项，节点内编辑" onClick={onAddBatch} />}
+    {allowEmptyNodes && <AddMenuButton icon={<TextIcon />} title="文本" description="脚本、提示词与备注" onClick={onAddText} />}
+    {allowEmptyNodes && <AddMenuButton icon={<ImageFileIcon />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} disabledReason={rejectedModes?.has('image') ? '图片生成只能参考文本和图片' : undefined} />}
+    {allowEmptyNodes && <AddMenuButton icon={<VideoFileIcon />} title="视频" description="空节点可填写生成设置" onClick={onAddVideo} />}
+    {allowEmptyNodes && <AddMenuButton icon={<AudioFileIcon />} title="音频" description="旁白、对白与语音" onClick={onAddAudio} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
+    {onAddCompare && <AddMenuButton icon={<CompareIcon />} title="对比" description="左右拖动对照两张图" onClick={onAddCompare} />}
+    {allowUpload && <AddMenuButton icon={<UploadIcon />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
   </>;
 }
 
@@ -5851,13 +5818,13 @@ function CanvasPreview({
       <DialogFooter>
         {onCopyPrompt && (
           <Button variant="outline" onClick={onCopyPrompt}>
-            <ClipboardCopy aria-hidden="true" />复制生成提示词
+            <CopyIcon aria-hidden="true" />复制生成提示词
           </Button>
         )}
         {version.kind !== 'text' && (
           <Button asChild>
             <a href={canvasDownloadUrl(projectId, version.version_id)}>
-              <Download aria-hidden="true" />下载原文件
+              <DownloadIcon aria-hidden="true" />下载原文件
             </a>
           </Button>
         )}
@@ -5888,7 +5855,7 @@ function CanvasActionFeedback({ error, notice, action = null, noticeAction = nul
               onClick={action.run}
             >{action.label}</Button>
           )}
-          <Button variant="bare" type="button" aria-label="关闭错误提示" onClick={onDismissError}><X className="size-4" /></Button>
+          <Button variant="bare" type="button" aria-label="关闭错误提示" onClick={onDismissError}><CloseIcon /></Button>
         </div>
       )}
       {notice && (
@@ -6364,7 +6331,7 @@ function CanvasZoomDock({
         disabled={zoom <= CANVAS_MIN_ZOOM + 0.0005}
         className={zoomDockButtonClass}
         onClick={onZoomOut}
-      ><Minus className="size-4" aria-hidden="true" /></Button>
+      ><MinusIcon aria-hidden="true" /></Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="bare"
@@ -6384,14 +6351,14 @@ function CanvasZoomDock({
         disabled={zoom >= CANVAS_MAX_ZOOM - 0.0005}
         className={zoomDockButtonClass}
         onClick={onZoomIn}
-      ><Plus className="size-4" aria-hidden="true" /></Button>
+      ><AddIcon aria-hidden="true" /></Button>
       <div className="mx-1 h-5 w-px bg-border" />
       <Hint label="适应全部节点"><Button variant="bare"
         type="button"
         aria-label="适应全部节点"
         className={zoomDockButtonClass}
         onClick={onFitView}
-      ><Maximize2 className="size-4" aria-hidden="true" /></Button></Hint>
+      ><ExpandIcon aria-hidden="true" /></Button></Hint>
     </div>
     </>
   );

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Upload, WandSparkles } from 'lucide-react';
+import { AiIcon, UploadIcon } from '@/components/ui/icons';
 import { classifyCreationAssets, listCreationAssets, updateCreationAssetCategory, uploadMediaCreationAsset } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
 import { MediaPreview } from './CreationAssetCards';
@@ -169,7 +169,7 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
     void importFiles(Array.from(event.dataTransfer.files));
   }}>
     <div className="border-b border-border p-3">
-      <Button variant="outline" size="sm" disabled={busy} onClick={() => input.current?.click()}><Upload />导入</Button>
+      <Button variant="outline" size="sm" disabled={busy} onClick={() => input.current?.click()}><UploadIcon />导入</Button>
       <FileInput ref={input} multiple accept="image/*" aria-label="导入参考图" className="hidden" onChange={event => {
         void importFiles(Array.from(event.target.files ?? [])); event.target.value = '';
       }} />
@@ -179,7 +179,7 @@ export function ProjectReferenceLibrary({ projectId, refreshKey, visible, onUse,
       {pending.length > 0 && <section aria-label="待分类" className="mb-4">
         <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="text-sm">待分类 · {pending.length}</h3>
-          <Hint label="使用 Agent 中选择的对话模型，此操作会产生模型费用"><Button variant="ghost" size="sm" disabled={busy} onClick={() => void classify()}><WandSparkles />自动分类</Button></Hint>
+          <Hint label="使用 Agent 中选择的对话模型，此操作会产生模型费用"><Button variant="ghost" size="sm" disabled={busy} onClick={() => void classify()}><AiIcon />自动分类</Button></Hint>
         </div>
         <div className="columns-[14rem] gap-3">{pending.map(asset => card(asset, true))}</div>
         <Button size="sm" disabled={busy || !pending.some(asset => suggestions[asset.asset_id]?.category)} onClick={() => void confirm()}>全部确认</Button>

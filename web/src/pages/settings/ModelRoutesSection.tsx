@@ -1,7 +1,7 @@
 import { formatGenerationCost } from '@/lib/generationCost';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useEffect, useState } from 'react';
-import { ChevronLeft, HelpCircle } from 'lucide-react';
+import { ChevronLeftIcon, HelpIcon } from '@/components/ui/icons';
 import { fetchGatewayMembers, restoreGatewayMember, type GatewayMembers } from '@/api/gateway';
 import { listModelRoutes, setModelRouteMode, setModelRouteOrder, type ModelRoute, type RouteMode } from '@/api/models';
 import { date } from './lan-sharing/shared';
@@ -75,7 +75,7 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div aria-label="面包屑" className="flex items-center gap-1.5 text-sm">
         <span className="text-muted-foreground">模型 /</span><h1 className="text-sm font-semibold">智能路由</h1>
-        <Hint label={HINT}><Button variant="bare" type="button" aria-label={HINT} className="rounded text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><HelpCircle className="size-3.5" aria-hidden /></Button></Hint>
+        <Hint label={HINT}><Button variant="bare" type="button" aria-label={HINT} className="rounded text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><HelpIcon size="sm" aria-hidden /></Button></Hint>
       </div>
       <Tabs value={modality} onValueChange={value => setModality(value as ModelRoute['modality'])}>
         <TabsList aria-label="模态" className="h-auto max-w-full flex-wrap">
@@ -122,7 +122,7 @@ export function ModelRoutesSection({ reloadToken }: { reloadToken: number }) {
                     {unavailable.reason !== 'unavailable' && <Button variant="bare" type="button" disabled={restoring || savingId !== null} onClick={() => void restore([unavailable])} className="rounded border border-border px-2 py-0.5 text-xs text-foreground disabled:opacity-50">恢复</Button>}
                   </span>}
                   {route.mode === 'order' && index > 0 && <Button variant="bare" type="button" aria-label={`把 ${member.alias} 提前`} disabled={savingId !== null || restoring}
-                    onClick={() => moveEarlier(route, index)} className="rounded p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><ChevronLeft className="size-3.5" aria-hidden /></Button>}
+                    onClick={() => moveEarlier(route, index)} className="rounded p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"><ChevronLeftIcon size="sm" aria-hidden /></Button>}
                 </span>
               </li>;
             })}

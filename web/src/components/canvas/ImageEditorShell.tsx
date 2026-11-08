@@ -1,5 +1,5 @@
 import { formatGenerationCost } from '@/lib/generationCost';
-import { LoaderCircle, Maximize, Minus, Plus, X, type LucideIcon } from 'lucide-react';
+import { AddIcon, CloseIcon, FitScreenIcon, LoadingIcon, MinusIcon, type AppIcon } from '@/components/ui/icons';
 import { useCallback, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import type { KeyView } from '@/api/keys';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
@@ -75,7 +75,7 @@ export const editorChip = 'inline-flex h-8 shrink-0 items-center gap-1.5 whitesp
 
 export function ImageEditorShell({ open, heading, icon: Icon, viewport, busy, dirty, onClose, onAutoSave, onKeyDown, onKeyUp,
   toolbar, stage, composer, stageBottom = 'bottom-44' }: {
-  open: boolean; heading: string; icon: LucideIcon; viewport: EditorViewport;
+  open: boolean; heading: string; icon: AppIcon; viewport: EditorViewport;
   busy: boolean; dirty: boolean; onClose: () => void;
   /** 关闭前自动保存未保存的修改；失败时留在编辑器里显示错误。 */
   onAutoSave: () => Promise<boolean>;
@@ -96,18 +96,18 @@ export function ImageEditorShell({ open, heading, icon: Icon, viewport, busy, di
         <DialogDescription className="sr-only">{heading}：编辑完成后生成新的图片节点。</DialogDescription>
         <div ref={viewport.measure} className={`absolute inset-x-0 top-20 touch-none ${stageBottom}`}>{stage}</div>
         <div className={`absolute left-4 top-4 flex h-11 items-center gap-1.5 rounded-full pl-1 pr-4 ${glass}`}>
-          <Button variant="bare" type="button" aria-label="关闭编辑器" className={editorIconButton} disabled={busy} onClick={() => void requestClose()}><X /></Button>
-          <Icon className="size-4 text-primary" aria-hidden />
+          <Button variant="bare" type="button" aria-label="关闭编辑器" className={editorIconButton} disabled={busy} onClick={() => void requestClose()}><CloseIcon /></Button>
+          <Icon className="text-primary" aria-hidden />
           <DialogTitle className="text-sm font-medium">{heading}</DialogTitle>
         </div>
         {toolbar && <div role="toolbar" aria-label={`${heading}工具`}
           className={`absolute left-1/2 top-4 flex h-11 -translate-x-1/2 items-center gap-0.5 whitespace-nowrap rounded-xl px-1 ${glass}`}>{toolbar}</div>}
         <div className={`absolute right-4 top-4 flex h-11 items-center gap-0.5 rounded-full px-1.5 ${glass}`}>
-          <Button variant="bare" type="button" aria-label="缩小" className={editorIconButton} onClick={() => viewport.zoomBy(1 / 1.25)}><Minus /></Button>
+          <Button variant="bare" type="button" aria-label="缩小" className={editorIconButton} onClick={() => viewport.zoomBy(1 / 1.25)}><MinusIcon /></Button>
           <span aria-label="编辑视图缩放" className="w-12 text-center tabular-nums text-xs">{Math.round(viewport.scale * 100)}%</span>
-          <Button variant="bare" type="button" aria-label="放大" className={editorIconButton} onClick={() => viewport.zoomBy(1.25)}><Plus /></Button>
+          <Button variant="bare" type="button" aria-label="放大" className={editorIconButton} onClick={() => viewport.zoomBy(1.25)}><AddIcon /></Button>
           <span className="mx-1 h-5 w-px bg-border" aria-hidden />
-          <Button variant="bare" type="button" aria-label="适应窗口" className={editorIconButton} onClick={viewport.reset}><Maximize /></Button>
+          <Button variant="bare" type="button" aria-label="适应窗口" className={editorIconButton} onClick={viewport.reset}><FitScreenIcon /></Button>
         </div>
         <section aria-label={`${heading}设置与生成`}
           className={`absolute bottom-4 left-1/2 flex w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 flex-col gap-3 rounded-2xl p-3.5 ${glass}`}>
@@ -137,7 +137,7 @@ export function EditorComposer({ prompt, onPrompt, placeholder, chips, blocker, 
       <span role="status" className="ml-auto text-xs text-muted-foreground">{blocker ?? (cost == null ? '费用以供应商结算为准' : `预计 ${formatGenerationCost(cost)}`)}</span>
       <Button variant="bare" type="button" disabled={Boolean(blocker)} onClick={onGenerate}
         className="inline-flex h-9 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40">
-        {busy && <LoaderCircle className="size-4 animate-spin" aria-hidden />}{busy ? '提交中…' : generateLabel}
+        {busy && <LoadingIcon className="animate-spin" aria-hidden />}{busy ? '提交中…' : generateLabel}
         {!busy && <span className="font-mono text-xs opacity-65" aria-hidden>⌘↵</span>}
       </Button>
     </div>

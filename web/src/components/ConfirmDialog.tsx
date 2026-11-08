@@ -1,4 +1,4 @@
-import { AlertTriangle } from 'lucide-react';
+import { WarningIcon } from '@/components/ui/icons';
 
 import {
   AlertDialog,
@@ -40,7 +40,7 @@ export function ConfirmDialog({
         <div className="flex items-start gap-4">
           {variant === 'destructive' && (
             <div className="grid size-10 shrink-0 place-items-center rounded-full bg-destructive/10">
-              <AlertTriangle className="size-5 text-destructive" aria-hidden />
+              <WarningIcon size="lg" className="text-destructive" aria-hidden />
             </div>
           )}
           <AlertDialogHeader className="min-w-0 flex-1">

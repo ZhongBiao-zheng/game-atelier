@@ -1,4 +1,4 @@
-import { Moon, Sun } from 'lucide-react';
+import { DarkModeIcon, LightModeIcon } from '@/components/ui/icons';
 
 import {
   DropdownMenuRadioGroup,
@@ -7,9 +7,9 @@ import {
 import { setTheme, useTheme, type Theme } from '@/lib/theme';
 import { cn } from '@/lib/utils';
 
-const OPTIONS: Array<{ value: Theme; label: string; icon: typeof Sun }> = [
-  { value: 'light', label: '浅色', icon: Sun },
-  { value: 'dark', label: '深色', icon: Moon },
+const OPTIONS: Array<{ value: Theme; label: string; icon: typeof LightModeIcon }> = [
+  { value: 'light', label: '浅色', icon: LightModeIcon },
+  { value: 'dark', label: '深色', icon: DarkModeIcon },
 ];
 
 export function CanvasThemeSelector() {
@@ -38,7 +38,7 @@ export function CanvasThemeSelector() {
                 : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
             )}
           >
-            <Icon className="size-4" aria-hidden="true" />
+            <Icon aria-hidden="true" />
             {label}
           </DropdownMenuRadioItem>
         );

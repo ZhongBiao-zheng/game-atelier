@@ -1,4 +1,4 @@
-import { Tags, X } from 'lucide-react';
+import { CloseIcon, TagIcon } from '@/components/ui/icons';
 import { useId, useState } from 'react';
 
 import { Input } from '@/components/ui/input';
@@ -14,8 +14,8 @@ export function TagField({ value, onChange }: { value: string; onChange: (value:
   return (
     <Label className="block space-y-1.5">
       <span className="flex items-center justify-between text-xs text-muted-foreground"><span>标签</span></span>
-      <InputGroup><InputGroupAddon><Tags aria-hidden="true" /></InputGroupAddon><InputGroupInput value={draft} onChange={event => setDraft(event.target.value)} onBlur={commitDraft} onKeyDown={event => { if (event.key !== 'Enter' && event.key !== ',') return; event.preventDefault(); commitDraft(); }} placeholder="输入标签，按 Enter 添加" /></InputGroup>
-      {current.size > 0 && <div className="flex flex-wrap gap-1.5 pt-1">{[...current].map(tag => <span key={tag} className="group inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:border-foreground/20 hover:bg-accent hover:text-foreground">{tag}<Button variant="bare" type="button" aria-label={`移除标签 ${tag}`} className="rounded-full transition-colors group-hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" onClick={() => onChange(parseTags(value).filter(item => item !== tag).join(', '))}><X className="size-3" /></Button></span>)}</div>}
+      <InputGroup><InputGroupAddon><TagIcon aria-hidden="true" /></InputGroupAddon><InputGroupInput value={draft} onChange={event => setDraft(event.target.value)} onBlur={commitDraft} onKeyDown={event => { if (event.key !== 'Enter' && event.key !== ',') return; event.preventDefault(); commitDraft(); }} placeholder="输入标签，按 Enter 添加" /></InputGroup>
+      {current.size > 0 && <div className="flex flex-wrap gap-1.5 pt-1">{[...current].map(tag => <span key={tag} className="group inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:border-foreground/20 hover:bg-accent hover:text-foreground">{tag}<Button variant="bare" type="button" aria-label={`移除标签 ${tag}`} className="rounded-full transition-colors group-hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" onClick={() => onChange(parseTags(value).filter(item => item !== tag).join(', '))}><CloseIcon size="sm" /></Button></span>)}</div>}
     </Label>
   );
 }

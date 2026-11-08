@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X } from 'lucide-react';
+import { CloseIcon } from '@/components/ui/icons';
 import { canvasMediaUrl } from '@/api/canvas';
 import {
   CanvasMaterialHoverDetail, type CanvasMaterialHoverState,
@@ -53,7 +53,7 @@ export function CanvasAgentReferenceThumb({ projectId, nodeId, versionId, title,
           aria-label={`不带入 ${title}`}
           onClick={onRemove}
           className="absolute -right-1 -top-1 grid size-4 place-items-center rounded-full border border-border bg-background text-muted-foreground hover:text-destructive"
-        ><X className="size-2.5" /></Button>
+        ><CloseIcon size="sm" /></Button>
       )}
       {detail && <CanvasMaterialHoverDetail {...detail} />}
     </span>

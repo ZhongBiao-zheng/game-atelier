@@ -1,4 +1,4 @@
-import { FileImage, Play, AudioLines } from 'lucide-react';
+import { AudioIcon, ImageFileIcon, PlayIcon } from '@/components/ui/icons';
 import { useEffect, useRef, useState } from 'react';
 import type { MediaSize } from './AssetMasonry';
 
@@ -46,11 +46,11 @@ export function AssetMediaTile({ src, mimeType, alt, size, onMeasure }: {
         onError={() => setBroken(true)} onLoadedMetadata={event => measure({ width: event.currentTarget.videoWidth,
           height: event.currentTarget.videoHeight, duration: event.currentTarget.duration })} />
         : <span className="grid h-full w-full place-items-center bg-card text-muted-foreground">
-          {audio ? <AudioLines className="size-6" /> : <FileImage className="size-6" />}
+          {audio ? <AudioIcon size="xl" /> : <ImageFileIcon size="xl" />}
         </span>}
     {audio && <audio src={bound ? src : undefined} preload="metadata" className="hidden" onLoadedMetadata={event => measure({ width: 1, height: 1, duration: event.currentTarget.duration })} />}
     {(video || (audio && duration)) && <span className="absolute bottom-2 left-2 flex items-center gap-1 rounded-full border border-border bg-glass px-2 py-0.5 text-xs tabular-nums backdrop-blur-glass">
-      {video && <Play className="size-3" />}{duration}
+      {video && <PlayIcon size="sm" />}{duration}
     </span>}
   </span>;
 }
