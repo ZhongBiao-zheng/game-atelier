@@ -56,7 +56,9 @@
 
 ## Color — Graphite + Configurable Accent
 
-暗色底固定为冷调石墨，浅色保持纯白画廊。完整色值和七套预设见 [主题色规范](docs/design/theme.md)。
+暗色底固定为冷调石墨，浅色为浅灰画廊（画布 `#F2F2F3`、卡片与弹层纯白）。两种模式都是越靠背景越深。完整色值和七套预设见 [主题色规范](docs/design/theme.md)。
+
+**作品图发丝边**：作品图卡片加 `.media-edge`，图片上方叠一道 1px 内侧边（`--media-edge`，浅色黑 7%、暗色白 8%），让底色接近画布的图也有边界。容器自带圆角与 `overflow-hidden`。
 
 | 层级 | 暗色值 | 用途 |
 |---|---|---|
@@ -215,4 +217,5 @@
 | 2026-10-24 | 主色改为可配置、默认青柠，底色改为石墨；推翻 2026-05-18 和 2026-06-10 两条黄铜决定 | 暖棕加黄铜显旧显脏。主副色、固定数据色与状态色分离，详见 [主题色规范](docs/design/theme.md)；历史日志中的暖黑与黄铜记录不再作为现行规则。 |
 | 2026-10-26 | 正文改用 Inter + Noto Sans SC，全部字体本地打包，等宽字体只留给技术信息；推翻 2026-06-10「Geist 留任、拒收 Inter」 | 中文原本落到系统字体，Mac 苹方与 Windows 雅黑不一致；Google Fonts 在国内不翻墙与离线安装包下加载失败；同类工具 Tapnow / Lovart / LibTV 均为 Inter + 中文网页字体（读其线上 CSS 得出）；创作台 93 处等宽字体让数据行与正文割裂 |
 | 2026-10-29 | 页面禁写原生 input / select / textarea，补 `SecretInput` / `Select` / `Checkbox` / `Radio` / `Slider` / `FileInput`；原生 button、bare 控件、任意值间距走棘轮；界面规格拆到 `docs/design/surfaces.md`，组件选用写入 `docs/design/components.md` | 组件层已有但被绕开：78 处原生控件、32 个文件手抄防填充属性，密钥框的保存密码修法只留在单页；本文件混入大段界面交互，通用配方被冲淡 |
+| 2026-11-08 | 浅色底从纯白改为浅灰 `#F2F2F3`，卡片 / panel / muted 改纯白，secondary / accent 改 `#E9E9EB`，侧栏与画布同色；作品图卡片加 `.media-edge` 内侧发丝边；推翻 2026-06-12「纯白画廊」 | 纯白底上白底作品图与页面连成一片，大面积纯白刺眼（飙哥反馈）。参考 Gamma / mymind / Luma：浅灰画布、白色内容面。选中性灰，避开 06-12 被否的暖米色；浅色阶梯与暗色统一为越靠背景越深 |
 | 2026-10-30 | 原生 button / label 与 `title` 提示清零后改为硬禁止；Select / Checkbox / Slider / Switch 换成 Radix，补 Tooltip（`Hint`）/ Tabs / ToggleGroup / RadioGroup / Popover / AlertDialog / InputGroup / EditableText；任意值间距清零后禁写 | 原生 select 箭头与 range 进度条靠 tokens.css 全局样式兜底，各平台外观不一；原生 title 提示延迟长、样式不可控；263 处原生 button 各写一套焦点环 |

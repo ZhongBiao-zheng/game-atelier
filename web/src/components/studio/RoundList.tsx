@@ -1094,7 +1094,7 @@ function DoneBatch({
                 <figure
                   key={path}
                   data-testid={`studio-result-thumb-${index + 1}`}
-                  className="group relative w-[251.5px] overflow-hidden rounded-md bg-card cursor-pointer"
+                  className="media-edge group w-[251.5px] overflow-hidden rounded-md bg-card cursor-pointer"
                   onClick={() => onLightbox?.(imageSrc(path))}
                 >
                   <img

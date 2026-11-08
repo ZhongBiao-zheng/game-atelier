@@ -34,8 +34,8 @@ export function Home() {
     return (
       // 卡片容器本身非交互：导航链接与喜欢按钮作两个平级交互元素，
       // 不再用 <a> 套 <button>（非法嵌套交互），喜欢点击也无需 stopPropagation 兜底。
-      <div className="group relative overflow-hidden rounded-xl">
-        {/* Pinterest 式瀑布流：图片直出、无边框无放大，hover 只淡入操作按钮 */}
+      <div className="media-edge group overflow-hidden rounded-xl">
+        {/* Pinterest 式瀑布流：图片直出、无放大，只留内侧发丝边，hover 淡入操作按钮 */}
         <Link
           href={galleryItemHref(item)}
           aria-label={galleryItemAriaLabel(item)}

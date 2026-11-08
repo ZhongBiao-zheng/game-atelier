@@ -50,7 +50,7 @@
 
 ## 浅色派生与存储
 
-浅色背景仍为 #FFFFFF，卡片 #FAFAFA，popover #FFFFFF，secondary/accent #F0F0F0，muted #F5F5F5；文字 #000000 / #595959，subtle #707075。主色和三个副色在 OKLCH 中设置 L=0.5，保持 C/h；固定数据色设置 L=0.55。主副色与数据色均需对白底达到 3:1。
+浅色背景与侧栏 #F2F2F3，卡片、panel、popover、muted #FFFFFF，secondary/accent #E9E9EB；文字 #000000 / #595959，subtle #707075；作品图发丝边 `--media-edge` 黑 7%（暗色白 8%）。主色和三个副色在 OKLCH 中设置 L=0.5，保持 C/h；固定数据色设置 L=0.55。主副色与数据色均需对浅底达到 3:1。
 
 浅色状态沿用固定值：pending #767676、running #A3742D、done #4F7C3E、failed/destructive #B04A4A。这些值只随明暗变化，不随主题预设变化。
 

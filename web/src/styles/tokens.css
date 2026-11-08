@@ -120,6 +120,9 @@
   --scrim-soft: rgba(0, 0, 0, 0.16);
   --nav-ring-stroke: rgba(255, 255, 255, 0.45);
 
+  /* 作品图内侧发丝边：近黑底图在石墨底上也有边界（.media-edge） */
+  --media-edge: rgba(255, 255, 255, 0.08);
+
   /* Status colors — fixed semantic palette */
   --status-pending: #5C5C61;
   --status-running: #F2A33A;
@@ -136,12 +139,13 @@
 }
 
 /* Atelier — clean light palette（浅色主题，<html class="light"> 时生效）
-   纯白画廊（按飙哥给的参考站调）：画布纯白，表面向灰走深（与暗色阶梯方向相反），
-   文字纯黑系，发丝边纯黑 alpha；主题色压低明度，保证白底对比 */
+   浅灰画廊：画布 #F2F2F3、卡片与弹层纯白，与暗色同为「越靠背景越深」；
+   白底作品图因此与画布分得开，整页也不刺眼。文字纯黑系，发丝边纯黑 alpha；
+   主题色压低明度，保证浅底对比 */
 :root.light {
   color-scheme: light;
   --panel: #FFFFFF;
-  --sidebar: #F4F4F5;
+  --sidebar: #F2F2F3;
   --subtle-foreground: #707075;
   --brand-2: oklch(from #6FD6F0 0.55 c h);
   --brand-3: oklch(from #F5D06A 0.55 c h);
@@ -152,19 +156,19 @@
   --chart-4: oklch(from #A99FF5 0.55 c h);
   --chart-5: oklch(from #F5D06A 0.55 c h);
 
-  --background: #FFFFFF;
+  --background: #F2F2F3;
   --foreground: #000000;
-  --card: #FAFAFA;
+  --card: #FFFFFF;
   --card-foreground: #000000;
   --popover: #FFFFFF;
   --popover-foreground: #000000;
   --primary: oklch(from #D4F53C 0.5 c h);
   --primary-foreground: #FFFFFF;
-  --secondary: #F0F0F0;
+  --secondary: #E9E9EB;
   --secondary-foreground: #000000;
-  --muted: #F5F5F5;
+  --muted: #FFFFFF;
   --muted-foreground: #595959;
-  --accent: #F0F0F0;
+  --accent: #E9E9EB;
   --accent-foreground: #000000;
   --destructive: #B04A4A;
   --destructive-foreground: #FFFFFF;
@@ -181,6 +185,8 @@
   --hairline-inset: rgba(0, 0, 0, 0.04);
   --scrim-soft: rgba(0, 0, 0, 0.10);
   --nav-ring-stroke: rgba(0, 0, 0, 0.32);
+
+  --media-edge: rgba(0, 0, 0, 0.07);
 
   --status-pending: #767676;
   --status-running: #A3742D;
@@ -275,6 +281,20 @@
     box-shadow:
       0 0.5px 0 0 var(--hairline-inset) inset,
       0 4px 16px 0 var(--scrim-soft);
+  }
+
+  /* 作品图卡片：内侧 1px 发丝边叠在图片之上，底色与画布相近的图也有边界。
+     容器需自带圆角与 overflow-hidden；::after 不拦截点击。 */
+  .media-edge {
+    position: relative;
+  }
+  .media-edge::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 1px var(--media-edge);
+    pointer-events: none;
   }
 
   /* 图片编辑器底板与扩图的待生成区域：点阵表示「这里会被生成」。 */
