@@ -32,6 +32,18 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.134.0', date: '2026-11-10', headline: 'ComfyUI 工作流、团队共享素材与 GPT Image 2.6', changes: [
+    { kind: 'feat', text: '可接入本机 ComfyUI 工作流出图和局部重绘；成员也能经主机网关排队使用。' },
+    { kind: 'feat', text: '团队库经主机网关共享：同事分享的素材和提示词可直接用于参考图和画布。' },
+    { kind: 'feat', text: '资产库改版：媒体按项目分组、按原比例排列；提示词可设效果图并显示多图预览。' },
+    { kind: 'feat', text: '接入 GPT Image 2.6（Sunburst / Flare），支持规划强度与 GIF 动图输出。' },
+    { kind: 'feat', text: '画布一次出多张改为可收起的结果组：每张都是独立图片，全部工具可单独使用；收起时连线归到封面。' },
+    { kind: 'feat', text: '创作台大图可左右翻页、右上角直接下载；同一版本有多条模型公告时可左右翻看。' },
+    { kind: 'feat', text: '图层拆分支持 Seedream 5.0 Flash。' },
+    { kind: 'feat', text: '图标整体换新；浅色主题画廊改为浅灰底。' },
+    { kind: 'fix', text: '鼠标停在多张结果上时，双指可以正常平移画布。' },
+    { kind: 'fix', text: '版本号暂不切换到 0.5.x，等所有同事升级后再切。' },
+  ] },
   { version: '5.133.0', date: '2026-10-31', headline: '模型选择更流畅，创作控件更清晰', changes: [
     { kind: 'feat', text: '下一版起版本号改为 0.5.x，表示仍在测试阶段。' },
     { kind: 'feat', text: '自动选择供应商统一叫「智能路由」，使用与设置页相同的分流图标。' },
