@@ -181,6 +181,10 @@ def _detached(node: dict[str, Any], pasted_ids: set[str]) -> dict[str, Any]:
             **({"active_run_id": None} if "active_run_id" in data else {}),
             **({"batch_result": None} if "batch_result" in data else {}),
         }}
+        stack = node["data"].get("result_stack")
+        if isinstance(stack, dict):
+            members = [item for item in stack.get("member_node_ids", []) if item in pasted_ids]
+            node["data"]["result_stack"] = {**stack, "member_node_ids": members} if members else None
         if node.get("type") == "image_edit":
             for field in ("source_node_id", "reference_node_id"):
                 if node["data"].get(field) not in pasted_ids:

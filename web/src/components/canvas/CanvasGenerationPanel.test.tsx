@@ -369,12 +369,13 @@ it('defaults a blank image config to AUTO on first model selection without a dow
   });
 });
 
-it('renders image candidates as a collapsed stack owned by the result node', () => {
+it('shows a finished multi-image run as a collapsed result stack on the cover', () => {
   const job = batchJob();
   const context = nodeContext({
     resolveVersion: versionResolver(imageVersions()),
     jobsByRunId: new Map([['run-batch', job]]),
     jobsByResultNodeId: new Map([[imageResultNode.id, [job]]]),
+    toggleResultStack: vi.fn(),
   });
 
   render(
@@ -383,46 +384,59 @@ it('renders image candidates as a collapsed stack owned by the result node', () 
     </CanvasNodeContext.Provider>,
   );
 
-  expect(screen.getByTestId('canvas-candidate-stack')).toHaveAttribute('data-expanded', 'false');
-  expect(screen.getByRole('button', { name: '展开 3 个候选结果' })).toBeInTheDocument();
-  expect(screen.queryByRole('group', { name: '候选 2' })).not.toBeInTheDocument();
+  // 两张成功、一张失败：结果组按成功的张数算。
+  expect(screen.getByTestId('canvas-result-stack')).toHaveAttribute('data-expanded', 'false');
+  // 滚轮 / 双指在结果组上照常平移画布。
+  expect(screen.getByTestId('canvas-result-stack')).not.toHaveClass('nowheel');
+  expect(screen.queryByTestId('canvas-candidate-stack')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '展开 2 张结果' }));
+  expect(context.toggleResultStack).toHaveBeenCalledWith(imageResultNode.id);
 });
 
-it('expands image candidates around the node and exposes candidate-specific actions', () => {
+it('shows an expanded result stack with a collapse control', () => {
   const job = batchJob();
+  const member: CanvasNode = { ...imageResultNode, id: 'image-member', title: '图片结果 · 2',
+    data: { ...imageResultNode.data, current_version_id: 'version-other', generation_draft: null } } as CanvasNode;
+  const cover = { ...imageResultNode, data: { ...imageResultNode.data,
+    result_stack: { run_id: 'run-batch', member_node_ids: [member.id] } } } as CanvasNode;
   const context = nodeContext({
     resolveVersion: versionResolver(imageVersions()),
     jobsByRunId: new Map([['run-batch', job]]),
-    jobsByResultNodeId: new Map([[imageResultNode.id, [job]]]),
+    jobsByResultNodeId: new Map([[cover.id, [job]]]),
+    resultStackOwnerById: new Map([[member.id, cover.id]]),
+    expandedResultStackIds: new Set([cover.id]),
+    toggleResultStack: vi.fn(),
   });
 
   render(
     <CanvasNodeContext.Provider value={context}>
-      <NodeCard data={{ domain: imageResultNode }} selected={false} />
+      <NodeCard data={{ domain: cover }} selected={false} />
     </CanvasNodeContext.Provider>,
   );
 
-  fireEvent.click(screen.getByRole('button', { name: '展开 3 个候选结果' }));
-  expect(screen.getByTestId('canvas-candidate-stack')).toHaveAttribute('data-expanded', 'true');
-  expect(screen.getByRole('group', { name: '候选 2' })).toBeInTheDocument();
-  expect(screen.getByRole('group', { name: '候选 3' })).toBeInTheDocument();
-  expect(screen.getByRole('group', { name: '候选 2' })).toHaveClass('bg-transparent');
-  expect(screen.getByRole('group', { name: '候选 3' })).toHaveClass('bg-card');
-  // 滚轮 / 双指在候选区上照常平移画布。
-  expect(screen.getByTestId('canvas-candidate-stack')).not.toHaveClass('nowheel');
+  expect(screen.getByTestId('canvas-result-stack')).toHaveAttribute('data-expanded', 'true');
+  fireEvent.click(screen.getByRole('button', { name: '收起 2 张结果' }));
+  expect(context.toggleResultStack).toHaveBeenCalledWith(cover.id);
+});
 
-  // 单击候选图：选中态落到候选上，主结果让出。
-  fireEvent.click(screen.getByRole('group', { name: '候选 2' }));
-  expect(context.selectNode).toHaveBeenCalledWith(imageResultNode.id);
-  expect(screen.getByRole('group', { name: '候选 2' })).toHaveAttribute('data-selected', 'true');
-  expect(screen.getByRole('group', { name: '候选 2' })).toHaveClass('border-primary');
-  expect(screen.getByRole('group', { name: '候选 3' })).toHaveAttribute('data-selected', 'false');
+it('lets a result stack member become the cover', () => {
+  const member: CanvasNode = { ...imageResultNode, id: 'image-member', title: '图片结果 · 2',
+    data: { ...imageResultNode.data, current_version_id: 'version-other', generation_draft: null } } as CanvasNode;
+  const context = nodeContext({
+    resolveVersion: versionResolver(imageVersions()),
+    resultStackOwnerById: new Map([[member.id, imageResultNode.id]]),
+    setResultStackCover: vi.fn(),
+  });
 
-  fireEvent.click(screen.getByRole('button', { name: '将候选 2 设为主结果' }));
-  expect(context.selectCandidate).toHaveBeenCalledWith(imageResultNode.id, 'version-other');
+  render(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: member }} selected={false} />
+    </CanvasNodeContext.Provider>,
+  );
 
-  fireEvent.click(screen.getByRole('button', { name: '删除候选 3' }));
-  expect(context.dismissCandidate).toHaveBeenCalledWith('run-batch', 'candidate-failed');
+  fireEvent.click(screen.getByRole('button', { name: '将 图片结果 · 2 设为封面' }));
+  expect(context.setResultStackCover).toHaveBeenCalledWith(imageResultNode.id, member.id);
+  expect(screen.queryByTestId('canvas-result-stack')).not.toBeInTheDocument();
 });
 
 it('shows the current video directly without candidate stacking or primary-result selection', () => {
@@ -499,7 +513,7 @@ it('shows the current video directly without candidate stacking or primary-resul
 
   expect(screen.getByRole('button', { name: '播放 视频结果' })).toBeInTheDocument();
   expect(screen.queryByTestId('canvas-candidate-stack')).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /个候选结果/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /张结果/ })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /设为主结果/ })).not.toBeInTheDocument();
   expect(context.selectCandidate).not.toHaveBeenCalled();
 });
@@ -520,7 +534,7 @@ it('keeps delete available for the last failed image slot', () => {
     </CanvasNodeContext.Provider>,
   );
 
-  expect(screen.queryByRole('button', { name: /展开 1 个候选结果/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /展开 1 张结果/ })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '删除候选 3' }));
   expect(context.dismissCandidate).toHaveBeenCalledWith('run-batch', 'candidate-failed');
 });

@@ -171,7 +171,18 @@ export interface CanvasTextNode extends CanvasNodeBase {
 
 export interface CanvasImageNode extends CanvasNodeBase {
   type: 'image';
-  data: CanvasContentNodeData & { display: CanvasMediaDisplay; annotation?: CanvasImageAnnotation | null };
+  data: CanvasContentNodeData & {
+    display: CanvasMediaDisplay;
+    annotation?: CanvasImageAnnotation | null;
+    result_stack?: CanvasResultStack | null;
+  };
+}
+
+/** 一次生成出多张时的结果组：封面（本节点）+ 其余结果各自的图片节点。
+ *  `run_id` 是已拆成节点的那次生成；成员 id 读时按存在过滤。 */
+export interface CanvasResultStack {
+  run_id: string;
+  member_node_ids: string[];
 }
 
 export type AnnotationColor = '#F04438' | '#FACC15' | '#22C55E' | '#3B82F6' | '#FFFFFF';

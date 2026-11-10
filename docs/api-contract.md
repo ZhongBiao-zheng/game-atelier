@@ -480,6 +480,8 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 计划文件属于本机执行状态，不随项目包导入；图片素材、普通节点及已经生成的 Jobs/Versions 仍随包保存。
 前端执行期间锁定画布内容编辑，仍可浏览结果；项目导出/删除在批量运行时拒绝。
 
+图片节点的可选 `data.result_stack` 保存 `{run_id, member_node_ids}`：一次生成出多张时，本节点为封面，`member_node_ids` 是其余结果各自的图片节点（最多 64 个），`run_id` 是已拆成节点的那次生成。成员 id 不做文档级引用校验，读取方按存在过滤；跨画布粘贴时只保留一起粘贴的成员。
+
 四模态均进入同一个 Job Runner：图片/视频沿用既有厂商协议；文本只接受明确可执行的
 OpenAI-compatible `chat/completions` 或 `responses`，后者支持 `reasoning_effort`，其中 `auto` 只作为
 Draft 选择且冻结/请求时省略；音频只接受 OpenAI-compatible `audio/speech`，冻结并发送白名单内的

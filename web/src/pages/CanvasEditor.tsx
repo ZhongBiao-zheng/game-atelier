@@ -241,6 +241,13 @@ import { FileInput } from '@/components/ui/file-input';
 import { EditableText, type EditableTextHandle } from '@/components/ui/editable-text';
 import { Toggle } from '@/components/ui/toggle';
 import { Hint } from '@/components/ui/tooltip';
+import {
+  normalizeResultStacks,
+  pendingResultStack,
+  resultStackOwners,
+  settleResultStack,
+  swapResultStackCover,
+} from '@/lib/canvasResultStacks';
 
 interface CreateMenuState {
   screen: XYPosition;
@@ -540,6 +547,8 @@ function CanvasEditorInner({
   // （onlyRenderVisibleElements 下从没渲染过的屏外节点）一律当成「在框内」，随手一框就选中一大片。
   // 框选期间节点设为不可选，让 xyflow 那一路选不出任何东西。
   const [sweeping, setSweeping] = useState(false);
+  // 展开中的结果组（封面 id）。只是界面状态，刷新后全部收起。
+  const [expandedResultStackIds, setExpandedResultStackIds] = useState<ReadonlySet<string>>(() => new Set());
   const [mediaOperationError, setMediaOperationError] = useState<string | null>(null);
   const [mattingPrompt, setMattingPrompt] = useState<MattingPromptState | null>(null);
   const [mattingDownloading, setMattingDownloading] = useState(false);
@@ -576,6 +585,8 @@ function CanvasEditorInner({
     selected: boolean;
     selectable: boolean;
     liveLayout: LiveNodeLayout | undefined;
+    hidden: boolean;
+    stackMember: boolean;
     flowNode: FlowNode;
   }>());
   const flowEdgeCache = useRef(new Map<string, {
@@ -584,6 +595,8 @@ function CanvasEditorInner({
     selected: boolean;
     sourceTitle: string;
     targetTitle: string;
+    source: string;
+    target: string;
     flowEdge: Edge;
   }>());
   const flowEdgesRef = useRef<Edge[]>([]);
@@ -1337,6 +1350,34 @@ function CanvasEditorInner({
     }));
   }, [commit]);
 
+  // 结果组：成员 → 封面。封面没展开、或正在重新生成时，成员收起不显示，连到成员的线画到封面上。
+  // 按内容签名缓存：打字、拖动都会换 document.nodes，但结果组关系没变时要给出同一个对象，
+  // 否则节点上下文和全部连线每次都跟着重算（见「引用变化打穿 memo」）。
+  const resultStackSignature = JSON.stringify([...resultStackOwners(document?.nodes ?? [])].map(([memberId, coverId]) => {
+    const cover = document?.nodes.find(node => node.id === coverId);
+    return [memberId, coverId, cover?.type === 'image' && Boolean(cover.data.active_run_id)];
+  }));
+  const resultStackEntries = useMemo(
+    () => JSON.parse(resultStackSignature) as Array<[string, string, boolean]>,
+    [resultStackSignature],
+  );
+  const resultStackOwnerById = useMemo<ReadonlyMap<string, string>>(
+    () => new Map(resultStackEntries.map(([memberId, coverId]) => [memberId, coverId])),
+    [resultStackEntries],
+  );
+  const collapsedStackMemberIds = useMemo<ReadonlySet<string>>(() => new Set(resultStackEntries.flatMap(
+    ([memberId, coverId, running]) => (!expandedResultStackIds.has(coverId) || running ? [memberId] : []),
+  )), [expandedResultStackIds, resultStackEntries]);
+  const collapsedStackMemberIdsRef = useRef(collapsedStackMemberIds);
+  collapsedStackMemberIdsRef.current = collapsedStackMemberIds;
+  useEffect(() => {
+    // 收起后成员不可见，不能还留在选中里（否则按删除键删掉的是看不见的节点）。
+    setSelectedNodeIds(current => {
+      if (![...current].some(id => collapsedStackMemberIds.has(id))) return current;
+      return new Set([...current].filter(id => !collapsedStackMemberIds.has(id)));
+    });
+  }, [collapsedStackMemberIds]);
+
   const flowNodes = useMemo<FlowNode[]>(() => {
     const activeIds = new Set<string>();
     const maximumPersistedZIndex = Math.max(0, ...(document?.nodes ?? []).map(node => node.z_index));
@@ -1345,12 +1386,16 @@ function CanvasEditorInner({
       const selected = selectedNodeIds.has(node.id);
       const liveLayout = liveNodeLayout?.nodeId === node.id ? liveNodeLayout : undefined;
       const selectable = !sweeping;
+      const stackMember = resultStackOwnerById.has(node.id);
+      const hidden = collapsedStackMemberIds.has(node.id);
       const cached = flowNodeCache.current.get(node.id);
       if (
         cached?.node === node
         && cached.selected === selected
         && cached.selectable === selectable
         && cached.liveLayout === liveLayout
+        && cached.hidden === hidden
+        && cached.stackMember === stackMember
       ) return cached.flowNode;
       const renderedSize = liveLayout?.size
         ?? canvasNodeRenderedSize(node, document?.content_versions ?? {});
@@ -1367,9 +1412,12 @@ function CanvasEditorInner({
         },
         selected,
         selectable,
+        hidden,
+        // 成员的位置由封面决定（拖封面整组移动），自己不能单独拖走。
+        draggable: !stackMember,
         data: { domain: node },
       };
-      flowNodeCache.current.set(node.id, { node, selected, selectable, liveLayout, flowNode });
+      flowNodeCache.current.set(node.id, { node, selected, selectable, liveLayout, hidden, stackMember, flowNode });
       return flowNode;
     });
     for (const id of flowNodeCache.current.keys()) {
@@ -1394,7 +1442,7 @@ function CanvasEditorInner({
       });
     }
     return next;
-  }, [document?.content_versions, document?.nodes, liveNodeLayout, mediaPlaceholder, selectedNodeIds, sweeping]);
+  }, [collapsedStackMemberIds, document?.content_versions, document?.nodes, liveNodeLayout, mediaPlaceholder, resultStackOwnerById, selectedNodeIds, sweeping]);
 
   const activeNodeId = hoveredNodeId ?? (
     selectedNodeIds.size === 1 ? selectedNodeIds.values().next().value ?? null : null
@@ -1412,7 +1460,15 @@ function CanvasEditorInner({
   const flowEdges = useMemo(() => {
     const titles = new Map((document?.nodes ?? []).map(node => [node.id, node.title]));
     const liveIds = new Set<string>();
-    const next = [...document?.connections ?? [], ...layerConnections].map(connection => {
+    // 收起的结果组成员不显示：连到它的线画到封面上，只改显示，连线数据仍连在具体那张。
+    const shown = (id: string) => (
+      collapsedStackMemberIds.has(id) ? resultStackOwnerById.get(id) ?? id : id
+    );
+    const next = [...document?.connections ?? [], ...layerConnections].flatMap(connection => {
+      const source = shown(connection.source_node_id);
+      const target = shown(connection.target_node_id);
+      // 组内两张之间的线收起后首尾落在同一个封面上，不画。
+      if (source === target) return [];
       liveIds.add(connection.id);
       const active = activeNodeId === connection.source_node_id || activeNodeId === connection.target_node_id;
       const selected = selectedConnectionIds.has(connection.id);
@@ -1427,12 +1483,14 @@ function CanvasEditorInner({
         && cached.selected === selected
         && cached.sourceTitle === sourceTitle
         && cached.targetTitle === targetTitle
+        && cached.source === source
+        && cached.target === target
         && cached.flowEdge.deletable === (!activeBatch && !readOnly)
-      ) return cached.flowEdge;
+      ) return [cached.flowEdge];
       const flowEdge: Edge = {
         id: connection.id,
-        source: connection.source_node_id,
-        target: connection.target_node_id,
+        source,
+        target,
         targetHandle: connection.role === 'input' && isCanvasCompareSlot(connection.slot) ? connection.slot : undefined,
         type: 'canvasConnection',
         data: { annotated: connection.role === 'input' && connection.annotated === true },
@@ -1451,9 +1509,9 @@ function CanvasEditorInner({
       };
       flowEdgeCache.current.set(
         connection.id,
-        { connection, active, selected, sourceTitle, targetTitle, flowEdge },
+        { connection, active, selected, sourceTitle, targetTitle, source, target, flowEdge },
       );
-      return flowEdge;
+      return [flowEdge];
     });
     for (const id of flowEdgeCache.current.keys()) {
       if (!liveIds.has(id)) flowEdgeCache.current.delete(id);
@@ -1465,7 +1523,7 @@ function CanvasEditorInner({
     }
     flowEdgesRef.current = next;
     return next;
-  }, [activeBatch, activeNodeId, document?.connections, document?.nodes, layerConnections, selectedConnectionIds]);
+  }, [activeBatch, activeNodeId, collapsedStackMemberIds, document?.connections, document?.nodes, layerConnections, resultStackOwnerById, selectedConnectionIds]);
 
   const isValidConnection = useCallback<IsValidConnection>((connection) => (
     canCreateCanvasInputConnection(latestDocument.current, connection)
@@ -1848,6 +1906,7 @@ function CanvasEditorInner({
     const bottom = top + rect.height / zoom;
     const hits = new Set<string>();
     for (const node of current.nodes) {
+      if (collapsedStackMemberIdsRef.current.has(node.id)) continue;
       const size = canvasNodeRenderedSize(node, current.content_versions);
       const nodeRight = node.position.x + size.width;
       const nodeBottom = node.position.y + size.height;
@@ -3520,6 +3579,67 @@ function CanvasEditorInner({
     }
     return grouped;
   }, [jobs]);
+
+  const jobsByResultNodeIdRef = useRef(jobsByResultNodeId);
+  jobsByResultNodeIdRef.current = jobsByResultNodeId;
+  const expandedResultStackIdsRef = useRef(expandedResultStackIds);
+  expandedResultStackIdsRef.current = expandedResultStackIds;
+
+  /** 展开 / 收起结果组。最近一次生成还没拆成节点时（旧数据、或生成结束时页面不在），展开时先拆。 */
+  const toggleResultStack = useCallback((coverId: string) => {
+    const cover = latestDocument.current?.nodes.find(node => node.id === coverId);
+    if (!cover) return;
+    const opening = !expandedResultStackIdsRef.current.has(coverId);
+    if (opening) {
+      const pending = pendingResultStack(cover, jobsByResultNodeIdRef.current.get(coverId));
+      if (pending) commit(current => settleResultStack(current, coverId, pending, () => makeId('image')), true);
+    }
+    setExpandedResultStackIds(current => {
+      const next = new Set(current);
+      if (opening) next.add(coverId);
+      else next.delete(coverId);
+      return next;
+    });
+  }, [commit]);
+
+  const setResultStackCover = useCallback((coverId: string, memberId: string) => {
+    commit(current => swapResultStackCover(current, coverId, memberId), true);
+    setSelectedNodeIds(new Set([coverId]));
+  }, [commit]);
+
+  // 生成在页面上结束时，把这一批的其余结果拆成结果组成员（替换上一批）。只认这次会话里
+  // 亲眼看到从「生成中」变成结束的那次：打开画布时早已结束的旧数据留到点「展开」再拆。
+  const runsSeenPending = useRef(new Set<string>());
+  useEffect(() => {
+    const current = latestDocument.current;
+    // 批量执行期间画布由服务端写，不在这里插手；留到批量结束后的下一次同步或点「展开」再拆。
+    if (!current || batchBusyRef.current) return;
+    const settled: Array<{ coverId: string; pending: NonNullable<ReturnType<typeof pendingResultStack>> }> = [];
+    for (const node of current.nodes) {
+      const runHistory = jobsByResultNodeId.get(node.id);
+      const latest = runHistory?.[runHistory.length - 1];
+      const runId = latest?.canvas_run?.run_id;
+      if (!latest || !runId) continue;
+      if (latest.status === 'pending' || latest.status === 'pending_confirm') {
+        runsSeenPending.current.add(runId);
+        continue;
+      }
+      if (!runsSeenPending.current.has(runId)) continue;
+      const pending = pendingResultStack(node, runHistory);
+      const hasMembers = node.type === 'image' && Boolean(node.data.result_stack?.member_node_ids.length);
+      if (pending && (pending.versionIds.length || hasMembers)) settled.push({ coverId: node.id, pending });
+      runsSeenPending.current.delete(runId);
+    }
+    if (!settled.length) return;
+    // 和服务端合并结果一样，不进撤销历史、也不清掉重做。
+    setDocument(document => document ? normalizeCommittedDocument(settled.reduce(
+      (next, { coverId, pending }) => settleResultStack(next, coverId, pending, () => makeId('image')),
+      document,
+    ), document) : document);
+    dirtyVersion.current += 1;
+    setDirtySignal(dirtyVersion.current);
+  }, [jobsByResultNodeId]);
+
   const reversePromptConfiguredNodeIds = useMemo(() => {
     const configured = new Set<string>();
     const document = mentionDocumentRef.current;
@@ -4704,6 +4824,10 @@ function CanvasEditorInner({
     previewContent,
     previewLayerStack,
     selectCandidate,
+    resultStackOwnerById,
+    expandedResultStackIds,
+    toggleResultStack,
+    setResultStackCover,
     reportError,
     submitRun,
     cancelRun,
@@ -4814,6 +4938,10 @@ function CanvasEditorInner({
     shareCanvasResult,
     multiSelectionActive,
     selectCandidate,
+    resultStackOwnerById,
+    expandedResultStackIds,
+    toggleResultStack,
+    setResultStackCover,
     selectOnlyNode,
     setMaterialConnected,
     setAnnotationDelivery,
@@ -6137,6 +6265,11 @@ function cloneCanvasNode(
         ...clone.data,
         generation_draft: cloneCanvasDraft(clone.data.generation_draft, idMap),
         active_run_id: null,
+        // 结果组只保留一起复制过来的成员；一个都没跟过来就不再是结果组。
+        ...(clone.type === 'image' && clone.data.result_stack ? (() => {
+          const members = clone.data.result_stack.member_node_ids.flatMap(id => idMap.get(id) ?? []);
+          return { result_stack: members.length ? { ...clone.data.result_stack, member_node_ids: members } : null };
+        })() : {}),
         batch_result: clone.data.batch_result ? {
           ...clone.data.batch_result,
           template_node_id: idMap.get(clone.data.batch_result.template_node_id)
@@ -6203,7 +6336,9 @@ function cloneCanvasDraft(
 /** 所有本地编辑的统一收尾：传 previous 进去当「谁动过」的判据，只有自己刚动过的节点会被分组吞进去。 */
 function normalizeCommittedDocument(next: CanvasDocument, previous: CanvasDocument): CanvasDocument {
   return {
-    ...normalizeCanvasGroups(normalizeCanvasCompareConnections(detachMissingImageEditNodes(syncDraftLayerStackSources(next))), previous),
+    ...normalizeCanvasGroups(normalizeCanvasCompareConnections(detachMissingImageEditNodes(syncDraftLayerStackSources(
+      normalizeResultStacks(next, previous),
+    ))), previous),
     updated_at: new Date().toISOString(),
   };
 }

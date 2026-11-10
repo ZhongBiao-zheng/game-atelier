@@ -746,9 +746,22 @@ class CanvasMediaDisplay(BaseModel):
     free_resize: bool = False
 
 
+class CanvasResultStack(BaseModel):
+    """一次生成出多张时的结果组：封面（本节点）+ 其余结果各自的图片节点。
+
+    `run_id` 记录已经拆成节点的那次生成，避免成员被删后又按同一批结果长回来。
+    成员 id 读的时候按存在过滤，不在文档级校验：删掉成员不能让整份画布读不出来。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    run_id: str = Field(min_length=1, max_length=160)
+    member_node_ids: list[str] = Field(default_factory=list, max_length=64)
+
+
 class CanvasMediaNodeData(CanvasContentNodeData):
     display: CanvasMediaDisplay = Field(default_factory=CanvasMediaDisplay)
     annotation: CanvasImageAnnotation | None = None
+    result_stack: CanvasResultStack | None = None
 
 
 AnnotationColor = Literal["#F04438", "#FACC15", "#22C55E", "#3B82F6", "#FFFFFF"]
