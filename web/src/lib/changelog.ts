@@ -32,6 +32,12 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.135.0', date: '2026-11-10', headline: '可灵 4.0 与 3.0 系列视频模型', changes: [
+    { kind: 'feat', text: '接入可灵 4.0 与 4.0 Flash：音画同出，4.0 单次最长 30 秒、Flash 更快更便宜；同时补齐可灵 3.0 / 3.0 Turbo / 3.0 Omni。' },
+    { kind: 'feat', text: 'TokenDance、兔子、EvoLink 都可选可灵；TokenDance 渠道在模型菜单里直接显示价格。' },
+    { kind: 'fix', text: 'TokenDance 的可灵模型名不再丢掉「Kling」前缀。' },
+    { kind: 'fix', text: '同一天连发两版时，模型公告不再把上一版的公告混进来翻页。' },
+  ] },
   { version: '5.134.0', date: '2026-11-10', headline: 'ComfyUI 工作流、团队共享素材与 GPT Image 2.6', changes: [
     { kind: 'feat', text: '可接入本机 ComfyUI 工作流出图和局部重绘；成员也能经主机网关排队使用。' },
     { kind: 'feat', text: '团队库经主机网关共享：同事分享的素材和提示词可直接用于参考图和画布。' },

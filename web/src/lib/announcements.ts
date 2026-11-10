@@ -4,9 +4,9 @@
  * （可写多个别名），「快速添加」拿它去各供应商实际开通的模型列表里找同名 / 相似项。
  * 能被快速添加的模型，必须已在代码里登记过能力（imageSizeCatalog / imageControlCaps 等），
  * 公告和能力登记放在同一个版本里发。图片用外链（官方或自有 OSS）。
+ * `version` 写随哪一版发出（与 changelog.ts 的条目一致，有测试校验）；同一版的多条公告在弹窗里可翻页。
  */
 import type { KeyModel, KeyView, RemoteModel } from '@/api/keys';
-import { CHANGELOG } from '@/lib/changelog';
 
 export interface AnnouncedModel {
   name: string;
@@ -18,6 +18,8 @@ export interface Announcement {
   id: string;
   /** YYYY-MM-DD */
   date: string;
+  /** 随哪一版发出。同一天可能连发两版，只按日期分不清，所以显式写版本号。 */
+  version: string;
   title: string;
   summary: string;
   imageUrl: string;
@@ -28,6 +30,7 @@ export const ANNOUNCEMENTS: Announcement[] = [
   {
     id: '2026-11-kling-4-0',
     date: '2026-11-10',
+    version: '5.135.0',
     title: '可灵 4.0 上线',
     summary: '可灵 4.0 单次最长 30 秒，音画同出，可用最多 10 张参考图和参考视频驱动；4.0 Flash 更快更便宜，720p、最长 20 秒。TokenDance 与 EvoLink 已上线，TokenDance 720p 价格 4.0 每秒 1 元、Flash 每秒 0.6 元。同版补齐可灵 3.0 / 3.0 Turbo / 3.0 Omni。',
     // klingai.com 首页 Kling 4.0 主视觉（发布页 og:image 只是 logo）。
@@ -40,6 +43,7 @@ export const ANNOUNCEMENTS: Announcement[] = [
   {
     id: '2026-11-gpt-image-2-6',
     date: '2026-11-05',
+    version: '5.134.0',
     title: 'GPT Image 2.6 上线',
     summary: 'OpenAI 11 月 4 日发布：Flare 主打速度（低档约 6 秒出图），Sunburst 主打细节与多轮编辑一致性。新增「规划」强度与 GIF 动图输出（文生图，2–64 帧）。API 价格与 2.5 相同；OpenRouter 已上线，OpenAI-HK / Tuzi 待配价。',
     // openai.com/index/introducing-images-2-6 的 og:image。
@@ -52,6 +56,7 @@ export const ANNOUNCEMENTS: Announcement[] = [
   {
     id: '2026-10-flux-3-image',
     date: '2026-10-12',
+    version: '5.128.0',
     title: 'FLUX 3 Image 上线',
     summary: 'Black Forest Labs 新一代图像生成与编辑模型：多轮编辑时不改动没提到的部分，复杂提示词和多语言文字渲染更准，官方支持最多 10 张参考图和原生 4K。Tuzi default 分组已上线，0.15¥ / 次。',
     // BFL 官方模型页（bfl.ai/models/flux-3-image）的 og:image。
@@ -61,6 +66,7 @@ export const ANNOUNCEMENTS: Announcement[] = [
   {
     id: '2026-10-nano-banana-2-1',
     date: '2026-10-08',
+    version: '5.128.0',
     title: 'Nano Banana 2.1 上线',
     summary: 'Google 最新的 Flash 档图像模型：画面质量、文字排版和多轮编辑的一致性全面提升，最多 14 张参考图，支持 1K / 2K / 4K，官方 API 单价约为 Nano Banana 2 的一半。',
     // Google 未为 2.1 单独出宣传图，用 DeepMind Gemini Image 官方页主图。
@@ -102,19 +108,12 @@ export function latestUnseenAnnouncement(
   return latest && !seen.includes(latest.id) ? latest : null;
 }
 
-/** 与 `target` 随同一个版本发布的公告（新的在前，含自身），公告弹窗在这组内翻页。
- *  公告归属「日期不早于它的最早一个版本」；比最新版本还新的公告归到下一次发版。
- *  按日期推算而不另存版本号：公告往往先于版本号确定写好，发版时无需回填。 */
+/** 与 `target` 随同一个版本发布的公告（新的在前，含自身），公告弹窗在这组内翻页。 */
 export function announcementsInSameRelease(
   target: Announcement,
   announcements: readonly Announcement[] = ANNOUNCEMENTS,
-  releaseDates: readonly string[] = CHANGELOG.map(entry => entry.date),
 ): Announcement[] {
-  const releaseOf = (announcement: Announcement) => releaseDates
-    .filter(date => date >= announcement.date)
-    .reduce<string | null>((earliest, date) => (earliest === null || date < earliest ? date : earliest), null);
-  const release = releaseOf(target);
-  return announcements.filter(item => releaseOf(item) === release);
+  return announcements.filter(item => item.version === target.version);
 }
 
 export type ModelMatchKind = 'exact' | 'similar';
