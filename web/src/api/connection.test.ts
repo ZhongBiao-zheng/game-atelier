@@ -247,6 +247,53 @@ describe('local connection', () => {
     await connection.start({ takeover: true }); expect(connection.getSnapshot().phase).toBe('ready');
   });
 
+  it('lets a read-only page pick up a freed lease quietly, and changes nothing while it is still held', async () => {
+    vi.useFakeTimers(); let occupied = true;
+    const network = server((url, init) => url.endsWith('editor-lease') && init.method === 'POST' && occupied
+      ? json({ error: { code: 'EDITOR_IN_USE', message: '另一个页面正在编辑' } }, 409) : undefined);
+    const leases = () => network.mock.calls.filter(([url]) => url.endsWith('editor-lease')).length;
+    const connection = client(); await connection.start({ editing: false });
+    const generation = connection.getSnapshot().generation;
+    expect(await connection.acquireIfFree()).toBe(false);
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'ready', editing: false, generation });
+    occupied = false;
+    expect(await connection.acquireIfFree()).toBe(true);
+    // 不换代：正在进行的读取不被打断；拿到之后照常续约。
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'ready', editing: true, generation });
+    const before = leases(); await vi.advanceTimersByTimeAsync(10_000);
+    expect(leases()).toBe(before + 1);
+    expect(await connection.acquireIfFree()).toBe(false);
+  });
+
+  it('renews immediately on demand and keeps a single heartbeat chain', async () => {
+    vi.useFakeTimers();
+    const network = server();
+    const leases = () => network.mock.calls.filter(([url]) => url.endsWith('editor-lease')).length;
+    const connection = client(); await connection.start();
+    await vi.advanceTimersByTimeAsync(4000);
+    connection.renewNow(); connection.renewNow(); await vi.advanceTimersByTimeAsync(0);
+    expect(leases()).toBe(2);
+    await vi.advanceTimersByTimeAsync(9999); expect(leases()).toBe(2);
+    await vi.advanceTimersByTimeAsync(1); expect(leases()).toBe(3);
+  });
+
+  it.each(['handshake', 'interrupted'])('releases the lease when the page leaves during %s', async state => {
+    let finish = () => {};
+    const network = server((url, init) => {
+      if (state === 'handshake' && url.endsWith('editor-lease') && init.method === 'POST') {
+        return new Promise<Response>(resolve => { finish = () => resolve(json({ client_id: 'c', expires_at: '2099-01-01T00:00:00Z' })); });
+      }
+      return undefined;
+    });
+    const releases = () => network.mock.calls.filter(([url, init]) => url.endsWith('editor-lease') && init.method === 'DELETE').length;
+    const connection = client(); const pending = connection.start();
+    if (state === 'handshake') await vi.waitFor(() => expect(network.mock.calls.some(([url]) => url.endsWith('editor-lease'))).toBe(true));
+    else { await pending; connection.pause('测试断连'); }
+    connection.dispose(); finish();
+    expect(releases()).toBe(1);
+    connection.dispose(); expect(releases()).toBe(1);
+  });
+
   it('renews at ten seconds, stops on revoke and rejects further background reads', async () => {
     vi.useFakeTimers(); let revoke = false;
     const network = server(url => revoke && url.endsWith('editor-lease') ? json({ error: { code: 'SESSION_REVOKED', message: '会话已撤销' } }, 403) : undefined);

@@ -170,6 +170,22 @@ describe('local connection gate', () => {
     expect(screen.getByLabelText('编辑草稿')).toHaveValue(''); expect(onMount).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('只读')).not.toBeInTheDocument();
   });
+  it('resumes editing by itself once the other page lets go, without a takeover', async () => {
+    const options = { occupied: true }; const network = server(options); const onMount = vi.fn();
+    render(<LocalConnectionGate><Draft onMount={onMount} /></LocalConnectionGate>);
+    await screen.findByText('只读');
+    // 仍被占用时回到前台：继续只读。
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+    await waitFor(() => expect(network.mock.calls.filter(([url]) => url.endsWith('editor-lease'))).toHaveLength(2));
+    expect(screen.getByText('只读')).toBeInTheDocument();
+    options.occupied = false;
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+    await waitFor(() => expect(screen.getByLabelText('编辑草稿')).not.toBeDisabled());
+    expect(screen.queryByText('只读')).not.toBeInTheDocument();
+    expect(localConnection.getSnapshot()).toMatchObject({ phase: 'ready', editing: true });
+    expect(network.mock.calls.some(([, init]) => init.body && JSON.parse(String(init.body)).takeover === true)).toBe(false);
+    expect(onMount).toHaveBeenCalledTimes(1);
+  });
   it('does not replay retained drafts when restored from the browser history cache', async () => {
     server(); const onMount = vi.fn(); render(<LocalConnectionGate><Draft onMount={onMount} /></LocalConnectionGate>);
     const editor = await screen.findByLabelText('编辑草稿'); fireEvent.change(editor, { target: { value: '历史中的手稿' } });

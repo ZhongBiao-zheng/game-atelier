@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { useLocation } from 'wouter';
-import { localConnection, useConnectionState } from '@/api/connection';
+import { HEARTBEAT_MS, localConnection, useConnectionState } from '@/api/connection';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Hint } from '@/components/ui/tooltip';
@@ -62,6 +62,27 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
       void localConnection.start({ editing: false });
     }
   }, [connection.phase]);
+
+  useEffect(() => {
+    // 只读页面在前台时定期看一眼编辑权是否空出来（对方关闭或租约过期），空了就自动恢复编辑；
+    // 持有编辑权的页面回到前台时立刻续约。后台页面不抢编辑权。
+    let cancelled = false;
+    const visible = () => window.document.visibilityState === 'visible';
+    const acquire = async () => {
+      if (visible() && await localConnection.acquireIfFree() && !cancelled) setViewOnly(false);
+    };
+    const shown = () => {
+      if (!visible()) return;
+      if (viewOnly) void acquire(); else localConnection.renewNow();
+    };
+    window.document.addEventListener('visibilitychange', shown);
+    const timer = viewOnly && ready ? setInterval(() => { void acquire(); }, HEARTBEAT_MS) : undefined;
+    return () => {
+      cancelled = true;
+      window.document.removeEventListener('visibilitychange', shown);
+      clearInterval(timer);
+    };
+  }, [viewOnly, ready]);
 
   function reconnect() {
     void localConnection.start({ editing });

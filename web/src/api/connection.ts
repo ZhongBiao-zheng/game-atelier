@@ -9,6 +9,7 @@ export interface ConnectionSnapshot {
 }
 
 export const PROTOCOL = 'atelier-local/2';
+export const HEARTBEAT_MS = 10_000;
 
 export class ConnectionInterrupted extends Error {
   constructor(message = '本机连接已暂停，请重新连接。') {
@@ -269,7 +270,32 @@ export class LocalConnection {
     return pending;
   };
 
-  private scheduleHeartbeat(generation: number) {
+  /** 只读页面静默申请编辑权：不带 takeover，仍被占用时什么也不改，也不打断正在进行的读取。 */
+  acquireIfFree = async (): Promise<boolean> => {
+    const idle = () => this.snapshot.phase === 'ready' && !this.snapshot.editing && !this.pending;
+    if (!idle()) return false;
+    const generation = this.snapshot.generation;
+    try {
+      const response = await fetch('/api/connection/editor-lease', {
+        method: 'POST', credentials: 'same-origin', redirect: 'error',
+        headers: { 'Content-Type': 'application/json', 'X-Atelier-Client': this.clientId },
+        body: JSON.stringify({ client_id: this.clientId }),
+      });
+      if (!response.ok || generation !== this.snapshot.generation || !idle()) return false;
+    } catch { return false; }
+    this.requestedEditing = true;
+    this.publish({ editing: true });
+    this.scheduleHeartbeat(generation);
+    return true;
+  };
+
+  /** 后台标签页的定时器会被浏览器压到每分钟一次，超过租约时长；回到前台时立刻续约。 */
+  renewNow = () => {
+    if (this.snapshot.phase === 'ready' && this.snapshot.editing) this.scheduleHeartbeat(this.snapshot.generation, 0);
+  };
+
+  private scheduleHeartbeat(generation: number, delay = HEARTBEAT_MS) {
+    clearTimeout(this.heartbeat);
     this.heartbeat = setTimeout(async () => {
       if (generation !== this.snapshot.generation || this.snapshot.phase !== 'ready') return;
       try {
@@ -278,11 +304,14 @@ export class LocalConnection {
       } catch (error) {
         if (generation === this.snapshot.generation) this.interrupt(error instanceof Error ? error.message : '编辑连接已暂停。');
       }
-    }, 10_000);
+    }, delay);
   }
 
   dispose = () => {
-    const release = this.snapshot.phase === 'ready' && this.snapshot.editing;
+    // 握手中、断连恢复中离开页面时租约可能已经在服务端生效；只按「是否申请过」判断，
+    // 否则刷新后的新页面会被自己留下的旧租约挡成只读。释放只对本页的租约生效，多发无害。
+    const release = this.requestedEditing && !['idle', 'editor_in_use'].includes(this.snapshot.phase);
+    this.requestedEditing = false;
     this.invalidate();
     this.pending = null;
     this.recoveryAttempts = 0;
