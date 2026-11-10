@@ -210,7 +210,7 @@ class JobParams(BaseModel):
     output_format: Literal["gif"] | None = None
     frame_count: int | None = Field(default=None, ge=2, le=64)
     frame_duration_ms: int | None = Field(default=None, ge=20, le=2000)
-    # Seedream 5.0 Pro 图层拆分：caller 回写有序图层元数据，output_index 对齐 Job.output_paths。
+    # Seedream 5.0 Pro / Flash 图层拆分：caller 回写有序图层元数据，output_index 对齐 Job.output_paths。
     layer_decomposition: bool | None = None
     layer_decomposition_result: LayerDecompositionResult | None = None
     # 视频参数（kind=video）—— 做成一等公民以保证双端类型对齐

@@ -350,7 +350,9 @@ def render(
 
     if params and params.get("layer_decomposition"):
         if not supports_layer_decomposition(key, model):
-            raise OpenAIImageError("layer decomposition requires an Ark-compatible Seedream 5.0 Pro")
+            raise OpenAIImageError(
+                "layer decomposition requires an Ark-compatible Seedream 5.0 Pro or Flash"
+            )
         if not isinstance(ref_image, str):
             raise OpenAIImageError("layer decomposition requires exactly one source image")
         layer_size = str(requested_size or "auto")
@@ -445,8 +447,13 @@ def _is_tokendance_gateway(base_url: str | None) -> bool:
     return "tokendance" in urlsplit((base_url or "").strip()).netloc.lower()
 
 
+# 支持图层拆分的模型族（归一化 id 子串）：Seedream 5.0 Pro 与 5.0 Flash。
+# 前端 canvasLayerDecomposition.ts 的 LAYER_DECOMPOSITION_FAMILIES 必须同步。
+LAYER_DECOMPOSITION_FAMILIES = ("seedream-5-0-pro", "seedream-5-0-flash")
+
+
 def supports_layer_decomposition(key, model: str) -> bool:
-    """图层拆分唯一判据：Seedream 5.0 Pro 且实际走 Ark 协议（火山直连或已解析为 ark 的网关）。
+    """图层拆分唯一判据：Seedream 5.0 Pro / Flash 且实际走 Ark 协议（火山直连或已解析为 ark 的网关）。
 
     canvas_runs 的模型筛选与 render 的出站门禁都调这里，不各写一份。前端
     web/src/components/canvas/canvasLayerDecomposition.ts 是同一真值表的 TS 版。
@@ -458,7 +465,8 @@ def supports_layer_decomposition(key, model: str) -> bool:
             SimpleNamespace(provider=m.provider, base_url=m.base_url,
                             models=[SimpleNamespace(id=m.model_id, protocol=m.protocol)]), m.model_id,
         ) for m in spec.via)
-    if "seedream-5-0-pro" not in normalized_model_id(model):
+    normalized = normalized_model_id(model)
+    if not any(family in normalized for family in LAYER_DECOMPOSITION_FAMILIES):
         return False
     return key.provider == "seedream" or _effective_image_protocol(key, model) == "ark"
 

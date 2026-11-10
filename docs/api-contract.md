@@ -552,7 +552,7 @@ Input Connection。图片模型优先使用仍可路由的画布图片生成偏�
 初始尺寸；运行中及已完成节点冻结本次源 Version，历史产物不随上游变化。节点左侧展示源图，右侧保存用户选择的
 `alias + model` 与可选提示词。`POST
 /canvas/projects/{id}/runs/layer-decomposition` 只接受该节点的 `surface_node_id + expected_revision + alias + model`，
-服务端还会核对请求选择与节点已保存设置完全一致。只接受火山直连或明确使用 Ark 协议的 Seedream 5.0 Pro，
+服务端还会核对请求选择与节点已保存设置完全一致。只接受火山直连或明确使用 Ark 协议的 Seedream 5.0 Pro / Flash，
 绝不自动替换渠道或模型。比例固定为“智能”并继承输入图；分辨率默认 `auto`，可显式选择
 `1K / 1.5K / 2K`。调用固定提交单张源图、`layer_decomposition=true`、节点保存的 `size`、
 `output_format=png`、`response_format=b64_json` 与

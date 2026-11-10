@@ -11,9 +11,12 @@ function isTokendanceGateway(baseUrl: string | null | undefined): boolean {
   }
 }
 
+/** 支持图层拆分的模型族（归一化 id 子串）；与后端 openai_image.LAYER_DECOMPOSITION_FAMILIES 同步。 */
+export const LAYER_DECOMPOSITION_FAMILIES = ['seedream-5-0-pro', 'seedream-5-0-flash'] as const;
+
 /** 图层拆分模型判据的 TS 版；Python 版是 openai_image.supports_layer_decomposition，改一边必须改另一边。
  *
- * Seedream 5.0 Pro 且实际走 Ark 协议：火山直连（provider=seedream）、模型已登记 protocol=ark，
+ * Seedream 5.0 Pro / Flash 且实际走 Ark 协议：火山直连（provider=seedream）、模型已登记 protocol=ark，
  * 或未登记 protocol 但入口是词元跳动网关（后端 resolve_image_protocol 会把 seedream 族解析成 ark）。 */
 export function supportsLayerDecomposition(
   key: Pick<KeyView, 'provider' | 'base_url'>,
@@ -26,7 +29,7 @@ export function supportsLayerDecomposition(
     ));
   }
   const normalized = model.id.toLowerCase().replace(/[._]/g, '-');
-  if (!normalized.includes('seedream-5-0-pro')) return false;
+  if (!LAYER_DECOMPOSITION_FAMILIES.some(family => normalized.includes(family))) return false;
   if (key.provider === 'seedream') return true;
   const protocol = model.protocol
     ?? ((key.provider === 'tokendance' || isTokendanceGateway(key.base_url)) ? 'ark' : null);

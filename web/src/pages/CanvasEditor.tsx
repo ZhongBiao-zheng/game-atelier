@@ -3203,7 +3203,7 @@ function CanvasEditorInner({
       return;
     }
     if (!node.data.alias || !node.data.model) {
-      setError('请先选择 Seedream 5.0 Pro 模型。');
+      setError('请先选择图层拆分模型。');
       return;
     }
     if (runSubmissionInFlight.current) {

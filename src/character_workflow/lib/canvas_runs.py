@@ -512,7 +512,7 @@ def _resolve_layer_decomposition_model(alias: str, model_id: str) -> tuple[KeySp
         return key, model
     raise CanvasRunCommandError(
         "canvas_layer_decomposition_model_invalid",
-        "所选 Seedream 5.0 Pro 模型不可用于图层拆分，请重新选择。",
+        "所选模型不可用于图层拆分，请重新选择 Ark 协议下的 Seedream 5.0 Pro 或 Flash。",
     )
 
 
