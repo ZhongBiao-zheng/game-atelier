@@ -248,11 +248,15 @@ export function RoundList({
   onSetPromptPreview?: (request: PromptPreviewRequest) => void;
 }) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
-  const lightboxSources = useMemo(() => rounds.flatMap((round) => (
+  const lightboxItems = useMemo(() => rounds.flatMap((round) => (
     round.kind === 'done' && round.config.kind !== 'video'
-      ? round.imagePaths.map(imageSrc)
+      ? round.imagePaths.map((path, index) => ({
+        src: imageSrc(path),
+        name: path.split('/').pop() || `${round.jobId}-${index + 1}.png`,
+      }))
       : []
   )), [rounds]);
+  const lightboxIndex = lightboxSrc ? lightboxItems.findIndex((item) => item.src === lightboxSrc) : -1;
   const [mountedHistoryCount, setMountedHistoryCount] = useState(HISTORY_BATCH_SIZE);
   const [historyAutoLoadArmed, setHistoryAutoLoadArmed] = useState(() => !focusJobId);
   const historySentinelRef = useRef<HTMLDivElement>(null);
@@ -269,14 +273,11 @@ export function RoundList({
   const remainingCount = Math.max(0, rounds.length - mountedHistoryCount);
   const hasEarlierHistory = remainingCount > 0;
   useEffect(() => setHistoryAutoLoadArmed(!focusJobId), [focusJobId]);
-  const moveLightbox = (offset: -1 | 1) => setLightboxSrc((current) => {
-    if (!current || lightboxSources.length < 2) return current;
-    const currentIndex = lightboxSources.indexOf(current);
-    if (currentIndex < 0) return current;
-    return lightboxSources[
-      (currentIndex + offset + lightboxSources.length) % lightboxSources.length
-    ];
-  });
+  // 不循环：到头的一侧不给回调，大图层据此把那一侧箭头置灰。
+  const lightboxStep = (offset: -1 | 1) => {
+    const target = lightboxIndex < 0 ? undefined : lightboxItems[lightboxIndex + offset];
+    return target ? () => setLightboxSrc(target.src) : undefined;
+  };
   useEffect(() => {
     const sentinel = historySentinelRef.current;
     if (historyAutoLoadArmed || !hasEarlierHistory || !sentinel) return;
@@ -422,8 +423,9 @@ export function RoundList({
         <Lightbox
           src={lightboxSrc}
           onClose={() => setLightboxSrc(null)}
-          onPrevious={lightboxSources.length > 1 ? () => moveLightbox(-1) : undefined}
-          onNext={lightboxSources.length > 1 ? () => moveLightbox(1) : undefined}
+          onPrevious={lightboxStep(-1)}
+          onNext={lightboxStep(1)}
+          downloadName={lightboxItems[lightboxIndex]?.name}
         />
       )}
     </>

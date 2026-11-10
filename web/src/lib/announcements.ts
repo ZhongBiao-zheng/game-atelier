@@ -6,6 +6,7 @@
  * 公告和能力登记放在同一个版本里发。图片用外链（官方或自有 OSS）。
  */
 import type { KeyModel, KeyView, RemoteModel } from '@/api/keys';
+import { CHANGELOG } from '@/lib/changelog';
 
 export interface AnnouncedModel {
   name: string;
@@ -87,6 +88,21 @@ export function latestUnseenAnnouncement(
 ): Announcement | null {
   const latest = announcements[0];
   return latest && !seen.includes(latest.id) ? latest : null;
+}
+
+/** 与 `target` 随同一个版本发布的公告（新的在前，含自身），公告弹窗在这组内翻页。
+ *  公告归属「日期不早于它的最早一个版本」；比最新版本还新的公告归到下一次发版。
+ *  按日期推算而不另存版本号：公告往往先于版本号确定写好，发版时无需回填。 */
+export function announcementsInSameRelease(
+  target: Announcement,
+  announcements: readonly Announcement[] = ANNOUNCEMENTS,
+  releaseDates: readonly string[] = CHANGELOG.map(entry => entry.date),
+): Announcement[] {
+  const releaseOf = (announcement: Announcement) => releaseDates
+    .filter(date => date >= announcement.date)
+    .reduce<string | null>((earliest, date) => (earliest === null || date < earliest ? date : earliest), null);
+  const release = releaseOf(target);
+  return announcements.filter(item => releaseOf(item) === release);
 }
 
 export type ModelMatchKind = 'exact' | 'similar';

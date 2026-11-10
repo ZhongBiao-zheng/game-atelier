@@ -268,7 +268,7 @@ describe('RoundList video', () => {
 });
 
 describe('RoundList 大图键盘切换', () => {
-  it('在先后生成的多张图之间用左右方向键循环切换', () => {
+  it('在先后生成的多张图之间用方向键和箭头切换，到头置灰', () => {
     const imageRound = (jobId: string, path: string): RoundState => ({
       kind: 'done',
       jobId,
@@ -298,17 +298,21 @@ describe('RoundList 大图键盘切换', () => {
       expect.stringContaining('job-second%2Fv1.png'),
     );
 
+    // 到最后一张不再循环：右箭头置灰，方向键不动。
+    expect(screen.getByRole('button', { name: '下一张' })).toBeDisabled();
     fireEvent.keyDown(window, { key: 'ArrowRight' });
-    expect(screen.getByAltText('大图')).toHaveAttribute(
-      'src',
-      expect.stringContaining('job-first%2Fv1.png'),
-    );
-
-    fireEvent.keyDown(window, { key: 'ArrowLeft' });
     expect(screen.getByAltText('大图')).toHaveAttribute(
       'src',
       expect.stringContaining('job-second%2Fv1.png'),
     );
+
+    fireEvent.click(screen.getByRole('button', { name: '上一张' }));
+    expect(screen.getByAltText('大图')).toHaveAttribute(
+      'src',
+      expect.stringContaining('job-first%2Fv1.png'),
+    );
+    expect(screen.getByRole('button', { name: '上一张' })).toBeDisabled();
+    expect(screen.getByRole('link', { name: '下载图片' })).toHaveAttribute('download', 'v1.png');
   });
 });
 

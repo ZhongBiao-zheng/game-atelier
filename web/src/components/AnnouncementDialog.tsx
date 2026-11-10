@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AddIcon, CloseIcon, LoadingIcon } from '@/components/ui/icons';
+import { AddIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, LoadingIcon } from '@/components/ui/icons';
 
 import { listKeys, patchKey, previewModels, type KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import {
   ANNOUNCEMENTS,
   KEYS_CHANGED_EVENT,
   OPEN_ANNOUNCEMENT_EVENT,
+  announcementsInSameRelease,
   findCandidates,
   latestUnseenAnnouncement,
   markAnnouncementsSeen,
@@ -50,10 +51,17 @@ export function AnnouncementHost() {
   }, []);
 
   if (!announcement) return null;
+  const siblings = announcementsInSameRelease(announcement);
+  const index = siblings.findIndex(item => item.id === announcement.id);
+  const step = (offset: -1 | 1) => {
+    const target = siblings[index + offset];
+    return target ? () => setAnnouncement(target) : undefined;
+  };
   return (
     <AnnouncementDialog
       key={announcement.id}
       announcement={announcement}
+      pager={siblings.length > 1 ? { index, total: siblings.length, onPrevious: step(-1), onNext: step(1) } : undefined}
       onClose={() => {
         markAnnouncementsSeen();
         setAnnouncement(null);
@@ -62,7 +70,19 @@ export function AnnouncementHost() {
   );
 }
 
-export function AnnouncementDialog({ announcement, onClose }: { announcement: Announcement; onClose: () => void }) {
+/** 同一次发版有多条公告时的翻页；到头的一侧不给回调，箭头置灰。 */
+export interface AnnouncementPager {
+  index: number;
+  total: number;
+  onPrevious?: () => void;
+  onNext?: () => void;
+}
+
+export function AnnouncementDialog({ announcement, pager, onClose }: {
+  announcement: Announcement;
+  pager?: AnnouncementPager;
+  onClose: () => void;
+}) {
   const [step, setStep] = useState<Step>({ kind: 'intro' });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
@@ -160,7 +180,18 @@ export function AnnouncementDialog({ announcement, onClose }: { announcement: An
                 ))}
               </ul>
               {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-              <div className="flex justify-end pt-1">
+              <div className="flex items-center justify-end gap-1 pt-1">
+                {pager && (
+                  <div className="mr-auto flex items-center gap-1 text-xs tabular-nums text-muted-foreground">
+                    <Button variant="ghost" size="icon" className="size-8" aria-label="上一条公告" disabled={!pager.onPrevious} onClick={pager.onPrevious}>
+                      <ChevronLeftIcon aria-hidden="true" />
+                    </Button>
+                    <span>{pager.index + 1} / {pager.total}</span>
+                    <Button variant="ghost" size="icon" className="size-8" aria-label="下一条公告" disabled={!pager.onNext} onClick={pager.onNext}>
+                      <ChevronRightIcon aria-hidden="true" />
+                    </Button>
+                  </div>
+                )}
                 <Button size="sm" disabled={step.kind === 'scanning'} onClick={() => void scan()}>
                   {step.kind === 'scanning' ? <LoadingIcon className="animate-spin" aria-hidden="true" /> : <AddIcon aria-hidden="true" />}
                   <SwapLabel active={step.kind === 'scanning'} on="查找中…" off="快速添加" />

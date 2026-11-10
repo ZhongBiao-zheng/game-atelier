@@ -327,6 +327,11 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   const [toolbarOverlayOpen, setToolbarOverlayOpen] = useState(false);
   const [panelSide, setPanelSide] = useState<CanvasPanelSide>('below');
   const [candidateBatchExpanded, setCandidateBatchExpanded] = useState(false);
+  // 展开后单击某张候选图：选中态与工具条都落到那张候选上，主结果让出选中态。
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!selected || !candidateBatchExpanded) setSelectedCandidateId(null);
+  }, [selected, candidateBatchExpanded]);
   const [materialPickPointer, setMaterialPickPointer] = useState<{ left: number; top: number } | null>(null);
   const draftKeys = context?.keys;
   const textPreference = context?.canvasUiPreferences.generation_defaults.text;
@@ -345,7 +350,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     && selected
     && !context.multiSelectionActive
     && !context.generationPanel.narrowViewport
-    && context.generationPanel.dismissedNodeId !== node.id,
+    && context.generationPanel.dismissedNodeId !== node.id
+    && !selectedCandidateId,
   );
   const editSource = context?.editSourceByResultNodeId?.get(node.id);
   const editPanelVisible = nodePanelAllowed && Boolean(editSource);
@@ -476,6 +482,15 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     ? presentCanvasCandidates(context.jobsByResultNodeId.get(node.id) ?? [])
     : null;
   const mediaCandidates = candidatePresentation?.current ?? [];
+  const candidateSplit = node.type === 'image' && mediaCandidates.length
+    ? splitCandidateEntries(mediaCandidates, node.data.current_version_id)
+    : null;
+  const selectedCandidateIndex = candidateSplit && selectedCandidateId
+    ? candidateSplit.others.findIndex(entry => entry.candidate.candidate_id === selectedCandidateId)
+    : -1;
+  const selectedCandidate = selectedCandidateIndex >= 0 ? candidateSplit!.others[selectedCandidateIndex] : null;
+  const selectedCandidateVersion = selectedCandidate ? context.resolveVersion(selectedCandidate.candidate.version_id) : undefined;
+  const nodeSelected = Boolean(selected) && !selectedCandidate;
   // 已隐藏的节点照样给出「显示」。
   const hasHideableContent = canvasNodeHasHideableContent(node, content);
 
@@ -571,7 +586,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
       onPointerLeave={hideHoverHandles}
     >
       <NodeResizer
-        isVisible={selected && !annotating && !context.multiSelectionActive && !replacingMedia}
+        isVisible={nodeSelected && !annotating && !context.multiSelectionActive && !replacingMedia}
         keepAspectRatio={(node.type === 'image' && !node.data.display.free_resize) || node.type === 'image_edit'}
         minWidth={node.type === 'text' ? 220 : node.type === 'layer_stack' ? 560 : 240}
         minHeight={node.type === 'text' ? 120 : node.type === 'layer_stack' ? 320 : 150}
@@ -629,13 +644,30 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         isVisible={
           !context.multiSelectionActive && !(annotating && context.annotationController?.fullscreen)
           && (selected || toolbarOverlayOpen)
+          && (!selectedCandidate || selectedCandidateVersion?.kind === 'image')
         }
         position={annotating ? Position.Bottom : chromeBelow ? Position.Bottom : Position.Top}
         align="center"
         offset={annotating ? 12 : 32}
         className="nodrag"
       >
-        {annotating && context.annotationController ? <CanvasAnnotationToolbarBounds nodeId={node.id}><AnnotationToolbar editor={annotationEditor}
+        {selectedCandidate && selectedCandidateVersion?.kind === 'image' ? (
+          <CandidateToolbar
+            nodeWidth={node.size?.width ?? 320}
+            offsetIndex={selectedCandidateIndex + 1}
+            title={`${node.title} · 候选 ${selectedCandidate.candidate.index + 1}`}
+            downloadHref={canvasDownloadUrl(context.projectId, selectedCandidateVersion.version_id)}
+            onPreview={() => context.previewContent(
+              selectedCandidateVersion.version_id,
+              `${node.title} · 候选 ${selectedCandidate.candidate.index + 1}`,
+              node.id,
+            )}
+            onSetPrimary={submittingNode || nodeRunState.status === 'loading' ? undefined : () => {
+              context.selectCandidate(node.id, selectedCandidateVersion.version_id);
+              setSelectedCandidateId(null);
+            }}
+          />
+        ) : annotating && context.annotationController ? <CanvasAnnotationToolbarBounds nodeId={node.id}><AnnotationToolbar editor={annotationEditor}
           undo={context.annotationController.undo} redo={context.annotationController.redo}
           canUndo={context.annotationController.canUndo} canRedo={context.annotationController.canRedo}
           onExpand={context.annotationController.expand}
@@ -744,6 +776,11 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           expanded={candidateBatchExpanded}
           disabled={submittingNode || nodeRunState.status === 'loading'}
           context={context}
+          selectedCandidateId={selectedCandidate?.candidate.candidate_id ?? null}
+          onSelectCandidate={candidateId => {
+            context.selectNode(node.id);
+            setSelectedCandidateId(candidateId);
+          }}
           onToggle={() => setCandidateBatchExpanded(current => !current)}
         />
       )}
@@ -758,7 +795,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         className={cn(
           'relative h-full overflow-hidden rounded-lg border text-foreground transition-colors shell-glow',
           node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-card/95',
-          selected ? 'border-primary' : 'border-border',
+          nodeSelected ? 'border-primary' : 'border-border',
           annotating && 'annotation-active',
           context.materialPick && materialPickEligible && 'cursor-copy hover:border-primary focus-visible:border-primary',
           context.materialPick && !materialPickEligible && 'cursor-default',
@@ -766,6 +803,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         onClick={event => {
           if (!context.materialPick && (event.shiftKey || event.metaKey || event.ctrlKey)) return;
           event.stopPropagation();
+          setSelectedCandidateId(null);
           context.selectNode(node.id);
         }}
         onPointerMove={event => {
@@ -1280,6 +1318,44 @@ function CanvasNodeFloatingPanel({
   );
 }
 
+/** 展开后相邻候选卡之间的间距（画布坐标）。 */
+const CANDIDATE_CARD_GAP = 16;
+
+function splitCandidateEntries(entries: CanvasCandidateEntry[], primaryVersionId: string | null) {
+  const primary = entries.find(entry => entry.candidate.version_id === primaryVersionId) ?? entries[0];
+  const others = entries.filter(entry => entry.candidate.candidate_id !== primary.candidate.candidate_id);
+  return { primary, others };
+}
+
+/** 选中候选图时的工具条。NodeToolbar 以节点为准居中，这里按画布缩放把它平移到被选中的候选卡上方。
+ *  裁剪、放大等工具作用于节点的主结果，候选图先「设为主结果」再用。 */
+function CandidateToolbar({ nodeWidth, offsetIndex, title, downloadHref, onPreview, onSetPrimary }: {
+  nodeWidth: number;
+  offsetIndex: number;
+  title: string;
+  downloadHref: string;
+  onPreview: () => void;
+  onSetPrimary?: () => void;
+}) {
+  const zoom = useStore(canvasFlowTransform)[2];
+  return (
+    <div
+      role="toolbar"
+      aria-label={`${title} 工具`}
+      className="flex items-center gap-1 rounded-xl border border-border bg-glass p-1 backdrop-blur-glass shell-glow"
+      style={{ transform: `translateX(${offsetIndex * (nodeWidth + CANDIDATE_CARD_GAP) * zoom}px)` }}
+      onPointerDown={event => event.stopPropagation()}
+      onClick={event => event.stopPropagation()}
+    >
+      <MediaToolButton label={`查看 ${title} 详情`} text="查看" onClick={onPreview}><ShowIcon /></MediaToolButton>
+      <MediaToolLink label={`下载 ${title}`} text="下载" href={downloadHref}><DownloadIcon /></MediaToolLink>
+      {onSetPrimary && (
+        <MediaToolButton label={`将 ${title} 设为主结果`} text="设为主结果" onClick={onSetPrimary}><CheckIcon /></MediaToolButton>
+      )}
+    </div>
+  );
+}
+
 function MediaCandidateBatch({
   node,
   entries,
@@ -1287,6 +1363,8 @@ function MediaCandidateBatch({
   expanded,
   disabled,
   context,
+  selectedCandidateId,
+  onSelectCandidate,
   onToggle,
 }: {
   node: Extract<CanvasContentNode, { type: 'image' }>;
@@ -1295,10 +1373,11 @@ function MediaCandidateBatch({
   expanded: boolean;
   disabled: boolean;
   context: CanvasNodeContextValue;
+  selectedCandidateId: string | null;
+  onSelectCandidate: (candidateId: string) => void;
   onToggle: () => void;
 }) {
-  const primary = entries.find(entry => entry.candidate.version_id === primaryVersionId) ?? entries[0];
-  const others = entries.filter(entry => entry.candidate.candidate_id !== primary.candidate.candidate_id);
+  const { primary, others } = splitCandidateEntries(entries, primaryVersionId);
   const primaryTerminalFailure = primary.candidate.status === 'failed' || primary.candidate.status === 'canceled';
   const primaryNumber = primary.candidate.index + 1;
   const stackRef = useRef<HTMLDivElement>(null);
@@ -1312,7 +1391,8 @@ function MediaCandidateBatch({
       ref={stackRef}
       data-testid="canvas-candidate-stack"
       data-expanded={expanded ? 'true' : 'false'}
-      className="nodrag nowheel pointer-events-none absolute inset-0 overflow-visible"
+      // 不加 nowheel：候选区没有自己的滚动内容，滚轮 / 双指要照常平移画布。
+      className="nodrag pointer-events-none absolute inset-0 overflow-visible"
     >
       {!expanded && entries.length > 1 && entries.slice(1, 4).map((entry, index) => (
         <span
@@ -1331,6 +1411,8 @@ function MediaCandidateBatch({
           number={entry.candidate.index + 1}
           disabled={disabled}
           context={context}
+          selected={entry.candidate.candidate_id === selectedCandidateId}
+          onSelect={() => onSelectCandidate(entry.candidate.candidate_id)}
         />
       ))}
       {primaryTerminalFailure && !disabled && (
@@ -1369,6 +1451,8 @@ function MediaCandidateCard({
   number,
   disabled,
   context,
+  selected,
+  onSelect,
 }: {
   node: Extract<CanvasContentNode, { type: 'image' }>;
   entry: CanvasCandidateEntry;
@@ -1376,6 +1460,8 @@ function MediaCandidateCard({
   number: number;
   disabled: boolean;
   context: CanvasNodeContextValue;
+  selected: boolean;
+  onSelect: () => void;
 }) {
   const { candidate } = entry;
   const horizontalOffset = index + 1;
@@ -1387,12 +1473,17 @@ function MediaCandidateCard({
       role="group"
       data-candidate-card
       aria-label={`候选 ${number}`}
-      className={cn('pointer-events-auto absolute top-0 z-20 h-full overflow-hidden rounded-lg border border-border shell-glow', version?.kind === 'image' ? 'bg-transparent' : 'bg-card')}
+      data-selected={selected ? 'true' : 'false'}
+      className={cn('pointer-events-auto absolute top-0 z-20 h-full overflow-hidden rounded-lg border shell-glow', selected ? 'border-primary' : 'border-border', version?.kind === 'image' ? 'bg-transparent' : 'bg-card')}
       style={{
-        left: `calc(${horizontalOffset * 100}% + ${horizontalOffset * 16}px)`,
+        left: `calc(${horizontalOffset * 100}% + ${horizontalOffset * CANDIDATE_CARD_GAP}px)`,
         width: '100%',
       }}
       onPointerDown={event => event.stopPropagation()}
+      onClick={event => {
+        event.stopPropagation();
+        onSelect();
+      }}
       onDoubleClick={event => {
         event.stopPropagation();
         if (isControlDoubleClick(event)) return;

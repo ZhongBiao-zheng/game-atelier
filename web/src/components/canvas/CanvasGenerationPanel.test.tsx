@@ -408,6 +408,15 @@ it('expands image candidates around the node and exposes candidate-specific acti
   expect(screen.getByRole('group', { name: '候选 3' })).toBeInTheDocument();
   expect(screen.getByRole('group', { name: '候选 2' })).toHaveClass('bg-transparent');
   expect(screen.getByRole('group', { name: '候选 3' })).toHaveClass('bg-card');
+  // 滚轮 / 双指在候选区上照常平移画布。
+  expect(screen.getByTestId('canvas-candidate-stack')).not.toHaveClass('nowheel');
+
+  // 单击候选图：选中态落到候选上，主结果让出。
+  fireEvent.click(screen.getByRole('group', { name: '候选 2' }));
+  expect(context.selectNode).toHaveBeenCalledWith(imageResultNode.id);
+  expect(screen.getByRole('group', { name: '候选 2' })).toHaveAttribute('data-selected', 'true');
+  expect(screen.getByRole('group', { name: '候选 2' })).toHaveClass('border-primary');
+  expect(screen.getByRole('group', { name: '候选 3' })).toHaveAttribute('data-selected', 'false');
 
   fireEvent.click(screen.getByRole('button', { name: '将候选 2 设为主结果' }));
   expect(context.selectCandidate).toHaveBeenCalledWith(imageResultNode.id, 'version-other');
