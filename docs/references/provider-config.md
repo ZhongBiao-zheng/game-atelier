@@ -22,7 +22,7 @@
 |---|---|---|
 | `category` | `text` / `image` / `video` / `audio` / `unknown` / `excluded` | 分类结果。`excluded` 只在 `include_all: true` 时出现在 `models` 里 |
 | `modality` | `text` / `image` / `video` / `audio` / `null` | 四种生成类别给值；`unknown` / `excluded` 为 `null`，由画师在 picker 显式指定（不静默兜底成 image）|
-| `protocol` | 见各厂契约 / `null` | 对话=openai-chat·openai-responses；视频=seedance·kling·dashscope·openrouter；图片=ark·openai；语音合成=openai-speech |
+| `protocol` | 见各厂契约 / `null` | 对话=openai-chat·openai-responses；视频=seedance·kling·klingai·evolink·dashscope·openrouter；图片=ark·openai；语音合成=openai-speech |
 | `input_modalities` | 数组 | 上游显式声明的 text / image / video / audio 输入，不凭模型名猜能力 |
 | `total` / `excluded` | 数字 | 上游去重总数 / 明确不可生成而未返回的条数；「显示全部」可查看被过滤项 |
 
@@ -152,7 +152,7 @@ Seedream 4.5、Seedream 5.0 Pro、Nano Banana Pro、Nano Banana 2 与 Midjourney
 Midjourney 按任务计费，四张拆分结果只计一次。`绘画` 分组当前只核实 GPT Image 2。
 未知分组或未知模型不显示价格。
 
-TokenDance 当前只对 Seedream 5.0 Lite / Pro 图片按张计价（`¥0.22 / ¥0.30`）。
+TokenDance 当前对 Seedream 5.0 Lite / Pro 图片按张计价（`¥0.22 / ¥0.30`），可灵 3.0 / 4.0 系与 HappyHorse 视频按价格快照每秒计价。
 Seedance 自动路由尚不能确定实际服务商，保持不计价。
 
 统一计价入口是 `web/src/lib/generationCost.ts`。价格规则必须同时命中真实渠道、模型与参数：
@@ -306,6 +306,34 @@ TokenDance quickstart 的请求体与阿里官方**不一致**：它写 `input.i
 - `mode` std/pro（v2-master 不发、v2-6 固定 pro）；`sound` 仅 v2-6；`duration` "5"/"10"；`aspect_ratio` 七档（o1 仅 16:9/9:16/1:1）。
 - 帧映射：首帧 `image`、尾帧 `image_tail`。
 
+## 视频契约 — 可灵 3.0 / 4.0 新版接口（`klingai`：词元跳动 / 兔子）
+
+契约源：官方 `klingai.com/document-api/api/video/{4-0,4-0-flash,3-0-omni,3-0-turbo}`；词元跳动
+`tokendance.space/docs/protocol-kling-{text2video,image2video,omni-video}{,-v2}.md`。caller `klingai_video.py`，
+型号能力表 `video_caps.kling_spec`（前端 `videoControlCaps.klingGeneration` 同表）。
+
+| 渠道 | 提交 | 轮询 / 产物 |
+|---|---|---|
+| 词元跳动 | `POST {gateway}/kling/{v2\|v1}/{text2video\|image2video\|omni-video}`，4.x 走 v2、3.x 走 v1；body `model_name` | `GET 同路径/{data.id}` → `data[0].status` submitted/processing/succeeded/failed，`data[0].outputs[type=video].url` |
+| 兔子 | `POST {root}/v1/videos`，body `model` + `contents[]`（文生也放 contents）+ `settings` | `GET /v1/videos/{id}` → `status` queued/in_progress/completed/failed，`video_url`（缺时取 `/content`） |
+
+- 文生 `prompt`；图生 / 全能参考 `contents[]`：`prompt`、`first_frame`、`refer_image`（id `image_N`）、`feature_video`（id `video_N`）、`last_frame`（官方要求排最后）。
+- `settings`：`resolution`、`duration`、`aspect_ratio`（图生视频不发，比例随首帧）、`audio`（仅 3.0 / 3.0 Omni，默认 off 须显式发；4.x 恒音画同出无此参数）。
+- 图片 url 收 URL 或裸 base64；视频只收 URL（本地走 OSS 中转）。
+- 型号：4.0 3–30s、720p/1080p、21:9/16:9/9:16/1:1、全能参考图≤10 视频≤5；4.0 Flash 3–20s、仅 720p、图生只收首帧；3.0 3–15s、720p/1080p/4k、三档比例、无全能参考；3.0 Turbo 无 audio、图生只收首帧；3.0 Omni 只挂 omni-video、参考图≤7 视频≤1。
+- 不支持只给尾帧（官方 3.0 明文；4.x 一并拦）。
+- 2026-11-10 实测：词元跳动 `kling-4.0-flash` 文生 3s 720p 55s 出片，1280×720 / 3.04s / 带 AAC 音轨。兔子 `kling-4.0` 只在其公开价格表里，本机 key 的 `/v1/models` 未列出，未实测。
+
+## 视频契约 — 可灵（`evolink`：EvoLink）
+
+契约源 `evolink.ai/docs/en/api-manual/video-series/kling/<model>.json`。caller `evolink_video.py`。
+
+- EvoLink 按任务拆 id：`kling-v4[-flash]-{text,image,reference}-to-video`、`kling-v3[-turbo]-{text,image}-to-video`、`kling-o3-{text,image,reference}-to-video`。models-preview 只列 `-text-to-video`，caller 按输入换成同族图生 / 参考 id。
+- `POST /v1/videos/generations`：`model`、`prompt`、`duration`、`quality`（=分辨率）、`aspect_ratio`（v3/v4 图生不收）、`sound` on/off（仅 v3 / O3；v4 传了 400）、`image_start` / `image_end`、`image_urls`、`video_urls`。
+- `GET /v1/tasks/{id}`：pending/processing/completed/failed，产物 `results[]`，费用 `usage.cost.usd`。
+- 图片只收公网 URL：本地图走 EvoLink 自带上传；参考视频不转存第三方，只收公网直链（界面不开视频槽）。
+- 2026-11-10 实测 `kling-v4-flash-text-to-video` 3s：HTTP 402 余额不足（预估 $0.28），未出片、未扣费。
+
 ## 路由现状
 
 **视频早已不按 provider 路由，改成按协议走注册表**（`callers/__init__.py::dispatch_video` →
@@ -321,16 +349,18 @@ TokenDance quickstart 的请求体与阿里官方**不一致**：它写 `input.i
     base 含 openai-hk                        → 强制同步通道（gpt-image 发 ?async=true 会 404）
     HK 上的非 gpt-image / nano-banana 族      → 回落 /chat/completions 抽图
 
-视频 dispatch_video：按 ModelSpec.protocol 查 VIDEO_ADAPTERS，四个协议
+视频 dispatch_video：按 ModelSpec.protocol 查 VIDEO_ADAPTERS，六个协议
   seedance   → volcengine_video   （Ark 直连 / 词元跳动改写任务 URL）
   dashscope  → happyhorse_video   （阿里百炼 / 词元跳动转发）
-  kling      → kling_video        （HK 聚合，挂站点根）
+  kling      → kling_video        （HK 聚合旧版接口，挂站点根）
+  klingai    → klingai_video      （可灵 3.0 / 4.0 新版接口：词元跳动 / 兔子）
+  evolink    → evolink_video      （EvoLink 可灵，按任务拆 id）
   openrouter → openrouter_video   （异步 /videos job）
   protocol 为 None → WrongProviderError「无法识别视频模型的接口协议」
 ```
 
 注意:上游模型列表里能拉到、但 `resolve_protocol` 认不出协议的视频模型（如词元跳动的
-`kling-3.0` / `minimax-h3`）目前仍可被勾选保存，要到真出图时才报错。
+`minimax-h3`、可灵特效 / 数字人 / TTS）目前仍可被勾选保存，要到真出图时才报错。
 
 帧语义（前端→caller）：双帧 = firstlast、仅首 = first、仅尾 = last、全空 = 文生视频；多余图片作 `reference_image`。
 

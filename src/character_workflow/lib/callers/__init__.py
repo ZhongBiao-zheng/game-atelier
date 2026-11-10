@@ -139,7 +139,7 @@ def dispatch_video(
     protocol = _effective_protocol(key, model)
     if not protocol:
         raise WrongProviderError(
-            f"无法识别视频模型 {model!r} 的接口协议（支持 seedance / kling / dashscope 系），"
+            f"无法识别视频模型 {model!r} 的接口协议（支持 seedance / kling / klingai / dashscope 系），"
             "请确认模型 id 与供应商配置"
         )
     adapter = VIDEO_ADAPTERS.get(protocol)

@@ -87,3 +87,55 @@ def _validate_timeline(prompt: str, duration: int) -> None:
     for previous, current in zip(sorted(segments), sorted(segments)[1:]):
         if current[0] < previous[1]:
             raise ValueError("Seedance 2.5 时间段不能重叠")
+
+
+@dataclass(frozen=True)
+class KlingSpec:
+    """可灵新版接口（contents[] + settings）各型号能力，契约见 provider-config.md「视频契约 — 可灵新版接口」。
+
+    endpoints 是该型号在网关上挂的端点；omni 端点承载参考图 / 参考视频。
+    max_images / max_videos 只算全能参考素材（refer_image / feature_video），首尾帧另计。
+    """
+    label: str
+    endpoint_version: str  # 词元跳动路径段：4.x = v2，3.x = v1
+    endpoints: tuple[str, ...]
+    max_duration: int
+    resolutions: tuple[str, ...]
+    ratios: tuple[str, ...]
+    max_frames: int  # 2 = 首 + 尾，1 = 仅首帧
+    audio_toggle: bool  # settings.audio native/off；4.x 恒有声、Turbo 无该参数
+    max_images: int
+    max_videos: int
+    min_duration: int = 3
+    max_mixed_references: int | None = None
+
+
+_KLING_4_RATIOS = ("21:9", "16:9", "9:16", "1:1")
+_KLING_3_RATIOS = ("16:9", "9:16", "1:1")
+_ALL_KLING_ENDPOINTS = ("text2video", "image2video", "omni-video")
+
+
+def kling_spec(model: str) -> KlingSpec | None:
+    """按模型 id 判可灵代际与变体；不是 3.x / 4.x 可灵返回 None。
+
+    兼容词元跳动（kling-4.0-flash）与 EvoLink（kling-v4-flash-text-to-video）两种 id。
+    """
+    m = (model or "").lower().replace("_", "-")
+    if not m.startswith("kling"):
+        return None
+    if re.match(r"^kling-v?4(?:[.-]0)?(?:-|$)", m):
+        if "flash" in m:
+            return KlingSpec("Kling 4.0 Flash", "v2", _ALL_KLING_ENDPOINTS, 20, ("720p",),
+                             _KLING_4_RATIOS, 1, False, 10, 5, max_mixed_references=15)
+        return KlingSpec("Kling 4.0", "v2", _ALL_KLING_ENDPOINTS, 30, ("720p", "1080p"),
+                         _KLING_4_RATIOS, 2, False, 10, 5, max_mixed_references=15)
+    if re.match(r"^kling-(?:v?3(?:[.-]0)?|o3)(?:-|$)", m):
+        if "omni" in m or m.startswith("kling-o3"):
+            return KlingSpec("Kling 3.0 Omni", "v1", ("omni-video",), 15, ("720p", "1080p", "4k"),
+                             _KLING_3_RATIOS, 2, True, 7, 1)
+        if "turbo" in m:
+            return KlingSpec("Kling 3.0 Turbo", "v1", ("text2video", "image2video"), 15,
+                             ("720p", "1080p"), _KLING_3_RATIOS, 1, False, 0, 0)
+        return KlingSpec("Kling 3.0", "v1", ("text2video", "image2video"), 15,
+                         ("720p", "1080p", "4k"), _KLING_3_RATIOS, 2, True, 0, 0)
+    return None

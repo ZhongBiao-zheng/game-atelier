@@ -59,7 +59,7 @@ class ModelSpec(BaseModel):
     id: str
     # None = 未标注：消费端按 key 级 modalities 兜底。
     modality: ModelModality | None = None
-    # 调用协议 id —— 视频：seedance/kling/dashscope/openrouter；图片：ark/openai/evolink。
+    # 调用协议 id —— 视频：seedance/kling/klingai/dashscope/openrouter；图片：ark/openai/evolink。
     # 权威值来自上游 /models 的协议标注（models-preview 解析后随模型一起存）；旧数据为
     # None，读时由 _backfill_model_protocols 按启发式回填（见 read_keys_db）。
     protocol: str | None = None

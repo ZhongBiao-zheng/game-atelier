@@ -519,3 +519,82 @@ def test_upload_failure_does_not_mark_paid_submission_uncertain(key, monkeypatch
 def test_result_urls_reject_local_or_credentialled_locations(key, tmp_path, url):
     with pytest.raises(evolink.EvoLinkError):
         evolink._public_url(url)
+
+
+# ---- EvoLink 可灵视频（evolink_video）----
+
+from character_workflow.lib.callers import evolink_video  # noqa: E402
+
+
+@pytest.fixture
+def video_key(monkeypatch):
+    key = SimpleNamespace(alias="evo", provider="evolink", base_url="https://api.evolink.ai/v1",
+                          access_key="fake-test-secret")
+    monkeypatch.setattr(evolink_video._keys, "find_by_alias", lambda _alias: key)
+    monkeypatch.setattr(evolink, "_reference_url", lambda value, _key: f"https://files/{Path(value).name}")
+    return key
+
+
+def test_kling_video_task_follows_inputs(video_key):
+    _, t2v = evolink_video.build_request("p", "kling-v4-flash-text-to-video",
+                                         {"duration": 3, "resolution": "720p", "ratio": "9:16"}, video_key)
+    assert t2v == {"model": "kling-v4-flash-text-to-video", "prompt": "p", "quality": "720p",
+                   "duration": 3, "aspect_ratio": "9:16"}
+    _, i2v = evolink_video.build_request("p", "kling-v4-text-to-video", {
+        "reference_images": ["/tmp/a.png", "/tmp/b.png"], "frame_mode": "firstlast",
+        "ratio": "16:9"}, video_key)
+    # 图生视频比例随首帧，v4 路由不收 aspect_ratio / sound。
+    assert i2v == {"model": "kling-v4-image-to-video", "prompt": "p",
+                   "image_start": "https://files/a.png", "image_end": "https://files/b.png"}
+    _, ref = evolink_video.build_request("p", "kling-v4-text-to-video",
+                                         {"reference_images": ["/tmp/c.png"]}, video_key)
+    assert ref["model"] == "kling-v4-reference-to-video"
+    assert ref["image_urls"] == ["https://files/c.png"]
+
+
+def test_kling_v3_sends_sound_and_rejects_references(video_key):
+    _, body = evolink_video.build_request("p", "kling-v3-text-to-video",
+                                          {"generate_audio": True}, video_key)
+    assert body["sound"] == "on"
+    with pytest.raises(evolink_video.EvoLinkVideoError, match="不支持全能参考"):
+        evolink_video.build_request("p", "kling-v3-turbo-text-to-video",
+                                    {"reference_images": ["/tmp/a.png"]}, video_key)
+    with pytest.raises(evolink_video.EvoLinkVideoError, match="公网直链"):
+        evolink_video.build_request("p", "kling-v4-text-to-video",
+                                    {"reference_videos": ["/tmp/a.mp4"]}, video_key)
+
+
+class _VideoResponse(Response):
+    def raise_for_status(self):
+        if not self.ok:
+            raise requests.HTTPError(str(self.status_code))
+
+
+def test_kling_video_render_polls_results_and_reports_cost(video_key, monkeypatch, tmp_path):
+    posted, costs = {}, []
+
+    def fake_post(url, headers=None, json=None, timeout=None, allow_redirects=None):
+        posted.update(url=url, body=json)
+        return Response({"id": "task-unified-1", "status": "pending"})
+
+    polls = iter([
+        Response({"id": "task-unified-1", "status": "processing"}),
+        Response({"id": "task-unified-1", "status": "completed",
+                           "results": ["https://cdn/out.mp4"],
+                           "usage": {"cost": {"usd": 0.28}}}),
+    ])
+
+    def fake_get(url, headers=None, timeout=None, **_kwargs):
+        if url == "https://cdn/out.mp4":
+            return _VideoResponse({}, content=b"MP4")
+        assert url == "https://api.evolink.ai/v1/tasks/task-unified-1"
+        return next(polls)
+
+    monkeypatch.setattr(evolink_video.requests, "post", fake_post)
+    monkeypatch.setattr(evolink_video.requests, "get", fake_get)
+    out = evolink_video.render_video(prompt="p", model="kling-v4-flash-text-to-video", alias="evo",
+                                     output_dir=tmp_path / "o", params={"duration": 3},
+                                     poll_interval=0, on_cost_usd=costs.append)
+    assert posted["url"] == "https://api.evolink.ai/v1/videos/generations"
+    assert Path(out[0]).read_bytes() == b"MP4"
+    assert costs == [0.28]

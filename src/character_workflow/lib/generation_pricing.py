@@ -117,7 +117,8 @@ def layer_decomposition_cost_cny(provider: str | None, model_id: str, result: di
     return _priced(total)
 
 
-def _tokendance(*, kind, model_id, n, size, duration, resolution, ratio, has_reference_video):
+def _tokendance(*, kind, model_id, n, size, duration, resolution, ratio, has_reference_video,
+                generate_audio=False):
     """按 TokenDance 价格快照估价：图片按张（可按输出千像素分段），视频按输出 token 或按秒。"""
     from character_workflow.lib.tokendance_prices import model_pricing
 
@@ -130,17 +131,29 @@ def _tokendance(*, kind, model_id, n, size, duration, resolution, ratio, has_ref
         return None
     res = (resolution or "").strip().lower()
     video = "true" if has_reference_video else "false"
+    # 可灵按「输入视频秒 + 输出秒」两段计费：带参考视频时拿不到输入时长，不估。
+    if has_reference_video and any(str(item.get("id", "")).endswith(":video_input_seconds")
+                                   for item in items):
+        return None
+    feature = "video_reference" if has_reference_video else (
+        "sound" if generate_audio else "silent")
     candidates = []
     for item in items:
+        item_id = str(item.get("id", ""))
+        # 输入视频计费与动作控制是另外的计费项，不是这次生成的单价。
+        if item_id.endswith(":video_input_seconds") or "motion-control" in item_id:
+            continue
         for sku in item.get("skus") or []:
             specs = sku.get("specs") or {} if isinstance(sku, dict) else {}
             sku_res = str(specs.get("resolution", "*")).lower()
             if sku_res not in ("*", res) or specs.get("has_video", video) != video:
                 continue
-            candidates.append((sku_res != "*", sku))
+            if specs.get("feature", feature) != feature:
+                continue
+            candidates.append(((sku_res != "*") + ("feature" in specs), sku))
     if not candidates:
         return None
-    sku = max(candidates, key=lambda pair: pair[0])[1]  # 指定分辨率的价格优先于通配
+    sku = max(candidates, key=lambda pair: pair[0])[1]  # 指定分辨率 / 特性的价格优先于通配
     rate = _rate(sku.get("rate"))
     if rate is None:
         return None
@@ -216,7 +229,8 @@ def estimate_cost_cny(
     if _normalize(provider) == "tokendance":
         return _tokendance(kind=kind, model_id=model_id, n=count, size=size, duration=duration,
                            resolution=resolution, ratio=ratio,
-                           has_reference_video=has_reference_video)
+                           has_reference_video=has_reference_video,
+                           generate_audio=generate_audio)
     if ark and proto in ("", "seedance"):
         if has_reference_video:
             return None

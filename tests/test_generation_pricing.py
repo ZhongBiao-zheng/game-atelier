@@ -54,3 +54,35 @@ def test_batch_estimates_match_single_submission(monkeypatch, kind, model, param
             f"test:{model}": pricing.estimate_submission(key, model, kind, params),
             "test:unknown": None, f"missing:{model}": None, "@auto:missing": None,
         }
+
+
+def test_tokendance_kling_video_picks_feature_and_skips_input_billing(monkeypatch):
+    from character_workflow.lib import tokendance_prices
+
+    def sku(res, rate, feature=None):
+        specs = {"resolution": res, **({"feature": feature} if feature else {})}
+        return {"specs": specs, "rate": rate, "unit": "seconds"}
+
+    snapshot = {
+        "kling-3.0": {"items": [
+            {"id": "kling:motion-control:video_seconds", "skus": [sku("720p", "0.72")]},
+            {"id": "kling:text2video:video_seconds", "skus": [
+                sku("720p", "0.48", "silent"), sku("720p", "0.72", "sound")]},
+        ]},
+        "kling-4.0": {"items": [
+            {"id": "kling:omni-video-v2:video_input_seconds", "skus": [sku("720p", "0.6")]},
+            {"id": "kling:omni-video-v2:video_seconds", "skus": [sku("720p", "1"), sku("1080p", "1.5")]},
+        ]},
+    }
+    monkeypatch.setattr(tokendance_prices, "model_pricing", snapshot.get)
+
+    def cost(model, **kw):
+        return pricing.estimate_cost_cny(kind="video", provider="tokendance",
+                                 base_url="https://tokendance.space/gateway/v1",
+                                 model_id=model, protocol="klingai", duration=5, **kw)
+
+    assert cost("kling-3.0", resolution="720p") == 2.4
+    assert cost("kling-3.0", resolution="720p", generate_audio=True) == 3.6
+    assert cost("kling-4.0", resolution="1080p") == 7.5
+    # 带参考视频要加「输入秒」计费，拿不到输入时长就不估。
+    assert cost("kling-4.0", resolution="720p", has_reference_video=True) is None

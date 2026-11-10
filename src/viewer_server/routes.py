@@ -1182,6 +1182,13 @@ def _url_host(url: str) -> str:
     return netloc or (url or "").strip().lower()
 
 
+def _is_evolink_kling_entry(model_id: str) -> bool:
+    """EvoLink 把同一代可灵按任务拆成多个 id；只把文生入口列给画师，图生 / 参考由 caller 按输入换。"""
+    from character_workflow.lib.video_caps import kling_spec
+
+    return model_id.endswith("-text-to-video") and kling_spec(model_id) is not None
+
+
 def _image_protocol(item: dict) -> str | None:
     """图片模型的调用协议 —— 直接取上游协议标注，别猜。
 
@@ -1266,10 +1273,11 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
         total += 1
         # EvoLink shares /models across many endpoint contracts. Only the implemented
         # base model belongs in the generator; derivative IDs are internal edit actions.
-        if evolink and mid != "mj-v8.2":
+        evolink_video = evolink and _is_evolink_kling_entry(mid)
+        if evolink and mid != "mj-v8.2" and not evolink_video:
             excluded += 1
             continue
-        category = "image" if evolink else _classify_model(item)
+        category = ("video" if evolink_video else "image") if evolink else _classify_model(item)
         # 明确不能生成内容的模型不入列表；include_all 是逃生舱：
         # deny 词表哪天判过头了，画师能自己看到全量，不至于变成死路。
         if category == "excluded" and not payload.include_all:

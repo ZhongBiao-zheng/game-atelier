@@ -1103,6 +1103,24 @@ def _validate_input_capabilities(
                 f"{limits.max_mixed_references} 个"
             )
         return
+    if protocol == "klingai":
+        from character_workflow.lib.video_caps import kling_spec
+
+        spec = kling_spec(model.id)
+        if spec is None:
+            raise ValueError("当前可灵模型没有可用的生成协议")
+        if counts["audio"]:
+            raise ValueError(f"{spec.label} 不支持参考音频")
+        if params.frame_mode == "last":
+            raise ValueError(f"{spec.label} 不支持只设置尾帧，请先设置首帧")
+        if params.frame_mode == "firstlast" and spec.max_frames < 2:
+            raise ValueError(f"{spec.label} 图生视频只支持首帧")
+        frames = {"first": 1, "firstlast": 2}.get(params.frame_mode or "", 0)
+        if counts["image"] - frames > spec.max_images or counts["video"] > spec.max_videos:
+            raise ValueError(
+                f"{spec.label} 最多参考 {spec.max_images} 张图、{spec.max_videos} 个视频"
+            )
+        return
     if counts["video"] or counts["audio"]:
         raise ValueError("当前视频模型只支持文本与图片输入")
     if protocol == "kling":

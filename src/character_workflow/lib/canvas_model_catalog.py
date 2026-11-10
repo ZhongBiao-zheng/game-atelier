@@ -41,7 +41,7 @@ def model_rows(kind: str) -> list[dict]:
                 fixed_nano_resolution_quality, image_family, max_reference_images,
                 supports_gif_output, supports_image_complexity, supports_image_quality,
             )
-            from character_workflow.lib.video_caps import seedance_limits
+            from character_workflow.lib.video_caps import kling_spec, seedance_limits
             limits = {"image": max_reference_images(model.id), "video": 0, "audio": 0}
             duration = None
             if kind == "video":
@@ -57,6 +57,14 @@ def model_rows(kind: str) -> list[dict]:
                           "audio": caps.max_audios if caps else 0}
                 if caps and caps.min_duration is not None and caps.max_duration is not None:
                     duration = {"min": caps.min_duration, "max": caps.max_duration}
+                kling = (kling_spec(model.id)
+                         if configured.protocol in ("klingai", "evolink") else None)
+                if kling:
+                    # EvoLink 参考视频只收公网直链，画布素材是本地文件 → 不开视频输入。
+                    limits = {"image": kling.max_frames + kling.max_images,
+                              "video": 0 if configured.protocol == "evolink" else kling.max_videos,
+                              "audio": 0}
+                    duration = {"min": kling.min_duration, "max": kling.max_duration}
             count = {"min": 1, "max": 4} if kind == "image" else {"min": 1, "max": 1}
             if kind == "image" and image_family(model.id) == "midjourney":
                 count = {"min": 4, "max": 4}

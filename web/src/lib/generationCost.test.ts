@@ -364,6 +364,31 @@ describe('estimateGenerationCost', () => {
     setTokenDancePrices({});
   });
 
+  it('prices TokenDance Kling by audio feature and skips input-video billing', () => {
+    const sku = (resolution: string, rate: string, feature?: string) => ({
+      specs: { resolution, ...(feature ? { feature } : {}) }, rate, unit: 'seconds',
+    });
+    setTokenDancePrices({
+      'kling-3.0': { items: [
+        { id: 'kling:motion-control:video_seconds', skus: [sku('720p', '0.72')] },
+        { id: 'kling:text2video:video_seconds', skus: [sku('720p', '0.48', 'silent'), sku('720p', '0.72', 'sound')] },
+      ] },
+      'kling-4.0': { items: [
+        { id: 'kling:omni-video-v2:video_input_seconds', skus: [sku('720p', '0.6')] },
+        { id: 'kling:omni-video-v2:video_seconds', skus: [sku('720p', '1'), sku('1080p', '1.5')] },
+      ] },
+    });
+    const cost = (id: string, extra: Record<string, unknown>) => estimateGenerationCost({
+      provider: { provider: 'tokendance', baseUrl: 'https://tokendance.space/gateway/v1' },
+      model: { id, protocol: 'klingai' }, kind: 'video', duration: 5, ...extra,
+    });
+    expect(cost('kling-3.0', { resolution: '720p' })).toBe(2.4);
+    expect(cost('kling-3.0', { resolution: '720p', generateAudio: true })).toBe(3.6);
+    expect(cost('kling-4.0', { resolution: '1080p' })).toBe(7.5);
+    expect(cost('kling-4.0', { resolution: '720p', hasReferenceVideo: true })).toBeNull();
+    setTokenDancePrices({});
+  });
+
   it('calculates Ark Seedream per-image pricing', () => {
     const result = estimateGenerationCost({
       provider: {

@@ -25,8 +25,10 @@ TokenDance 模型请求公开接口 `GET https://tokendance.space/portal/api/mod
 
 - 图片：`*generated_images` / `*:images` 项按张计价；带 `range` 的按输出千像素分段，不知道输出尺寸且各档不同价时不估。
   输入图片的附加费（如 seedream-5.0-pro 每张参考图 0.02）不计入预计。
-- 视频：`skus` 按 `resolution`（`*` 为通配，指定分辨率优先）与 `has_video`（有参考视频为 true）匹配；
-  `unit=seconds` 按时长，`unit=millionTokens` 按 `时长 × 宽 × 高 × 24 / 1024` 输出 token，宽高沿用方舟 Seedance 尺寸表。
+- 视频：`skus` 按 `resolution`（`*` 为通配，指定分辨率优先）、`has_video`（有参考视频为 true）与
+  `feature`（可灵：`silent` / `sound` 按是否生成音频，`video_reference` 按有参考视频）匹配，带指定值的档优先；
+  `*:video_input_seconds`（可灵输入视频计费）与 `motion-control` 项不是生成单价，跳过。带参考视频而模型有输入视频计费项时
+  拿不到输入时长，不估。`unit=seconds` 按时长，`unit=millionTokens` 按 `时长 × 宽 × 高 × 24 / 1024` 输出 token，宽高沿用方舟 Seedance 尺寸表。
 - 接口不标币种；不含视频的 Seedance 档与火山方舟官方价一致，按人民币处理。
 - 没有快照的模型返回 null（未计价）。任务的预计在执行前冻结，快照之后变化不影响历史。
 - 图层拆分（seedream-5.0-pro，`layer_decomposition`）拆前不知道层数，不做预估；完成时按厂商回传的 `usage` 与每层 `size` 结算写入 `actual_cost_cny`：每层按自身输出千像素选档计一张生成图，另加 `input_images` × 输入图单价（`generation_pricing.layer_decomposition_cost_cny`）。2026-10-25 按此规则回填了此前 7 次成功拆分（合计 ¥24.44）。

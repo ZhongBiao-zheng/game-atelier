@@ -33,6 +33,7 @@ import type {
   CanvasSize,
 } from '@/schema/canvas';
 import {
+  klingGeneration,
   videoControlCaps,
   type VideoControlCaps,
   type VideoQuality,
@@ -905,6 +906,15 @@ function isOpenAiHkBaseUrl(baseUrl: string | null | undefined) {
   return (baseUrl ?? '').toLowerCase().includes('openai-hk.com');
 }
 
+function isTuziBaseUrl(baseUrl: string | null | undefined) {
+  try {
+    const host = new URL(baseUrl ?? '').hostname.toLowerCase();
+    return host === 'tu-zi.com' || host.endsWith('.tu-zi.com');
+  } catch {
+    return false;
+  }
+}
+
 function canvasImageModelIsRoutable(key: KeyView, model: KeyView['models'][number]) {
   if (key.provider === 'comfyui') return model.workflow_inputs != null;
   if (key.provider === 'chatgpt') return model.id === 'gpt-image-2';
@@ -927,11 +937,14 @@ function canvasVideoModelIsRoutable(key: KeyView, model: KeyView['models'][numbe
     if (key.provider === 'tokendance') {
       if (id.includes('seedance')) return 'seedance';
       if (id.includes('happyhorse')) return 'dashscope';
+      if (klingGeneration(id)) return 'klingai';
     }
+    if (key.provider === 'evolink') return klingGeneration(id) ? 'evolink' : null;
     if (id.startsWith('kling') && isOpenAiHkBaseUrl(key.base_url)) return 'kling';
+    if (klingGeneration(id) && isTuziBaseUrl(key.base_url)) return 'klingai';
     return null;
   })();
-  if (!['seedance', 'kling', 'dashscope', 'openrouter'].includes(String(protocol))) return false;
+  if (!['seedance', 'kling', 'klingai', 'evolink', 'dashscope', 'openrouter'].includes(String(protocol))) return false;
   // Canvas Runner 明确拒绝 HappyHorse video-edit：它只收公网 URL，画布内容是本地版本。
   return protocol !== 'dashscope' || !model.id.toLowerCase().includes('video-edit');
 }
@@ -1336,7 +1349,8 @@ export function supportsCanvasVideoEdit(
   const caps = canvasVideoEditCaps(model, protocol);
   // Canvas Content Version 永远是服务端本地文件；HappyHorse video-edit 只收公网 URL，
   // 不能把“协议支持”冒充成“当前空间可执行”。Seedance 会走项目已有 OSS 中转。
-  return caps.supportsReferenceVideo && caps.family !== 'happyhorse';
+  // 可灵的参考视频是「特征参考」（feature_video），不是编辑底片，不能冒充视频编辑。
+  return caps.supportsReferenceVideo && caps.family !== 'happyhorse' && caps.family !== 'klingai';
 }
 
 export function normalizeCanvasVideoParams(

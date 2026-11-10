@@ -25,7 +25,11 @@ const catalog: CatalogEntry[] = [
   { key: 'seedance-2.0-fast', name: 'Seedance 2.0 Fast', brand: 'bytedance', description: 'Quicker, cheaper Seedance 2.0.', match: /^(doubao-)?seedance-2[.-]0-fast(-\d+)?$/ },
   { key: 'veo-3.1', name: 'Veo 3.1', brand: 'gemini', description: "Google's cinematic video with sound.", match: /^veo-3\.1(-.*)?$/ },
   { key: 'sora-2-pro', name: 'Sora 2 Pro', brand: 'openai', description: "OpenAI's high-fidelity video with audio.", match: /^sora-2-pro$/ },
-  { key: 'kling-3.0', name: 'Kling 3.0', brand: 'kling', description: 'Realistic motion, up to 4K output.', match: /^kling-v?3[.-]0(-.*)?$/ },
+  { key: 'kling-4.0', name: 'Kling 4.0', brand: 'kling', description: 'Up to 30s with native audio and multi-reference control.', match: /^kling-v?4(?:[.-]0)?(?:-(?:text|image|reference)-to-video)?$/ },
+  { key: 'kling-4.0-flash', name: 'Kling 4.0 Flash', brand: 'kling', description: 'Faster, cheaper Kling 4.0 at 720p.', match: /^kling-v?4(?:[.-]0)?-flash(?:-(?:text|image|reference)-to-video)?$/ },
+  { key: 'kling-3.0', name: 'Kling 3.0', brand: 'kling', description: 'Realistic motion, up to 4K output.', match: /^kling-v?3(?:[.-]0)?(?:-(?:std|pro|text-to-video|image-to-video))?$/ },
+  { key: 'kling-3.0-omni', name: 'Kling 3.0 Omni', brand: 'kling', description: 'Kling 3.0 driven by reference images.', match: /^(?:kling-v?3(?:[.-]0)?-omni|kling-o3)(?:-(?:text|image|reference)-to-video)?$/ },
+  { key: 'kling-3.0-turbo', name: 'Kling 3.0 Turbo', brand: 'kling', description: 'Quicker, lower-cost Kling 3.0.', match: /^kling-v?3(?:[.-]0)?-turbo(?:-(?:text|image)-to-video)?$/ },
   { key: 'minimax-h3', name: 'MiniMax H3', brand: 'minimax', description: 'Near top-tier quality at a low per-second price.', match: /^minimax-h3$/ },
   { key: 'happyhorse-1.1', name: 'HappyHorse 1.1', brand: 'alibaba', description: 'Alibaba video from text, image or references.', match: /^happyhorse-1\.1(-.*)?$/ },
   { key: 'seedance-2.0-mini', name: 'Seedance 2.0 Mini', brand: 'bytedance', description: 'Lightweight Seedance for quick drafts.', match: /^(doubao-)?seedance-2[.-]0-mini(-\d+)?$/ },
@@ -73,6 +77,10 @@ export function sortModels<T extends { id: string }>(models: readonly T[]): T[] 
 
 /** 菜单与按钮上的模型名：品牌图标已表明厂商，去掉配置名里的「厂商: 」前缀；没起名（名称就是 id）时用目录名。 */
 export function modelDisplayName(model: { id: string; name?: string | null }): string {
-  const named = model.name && model.name !== model.id ? model.name.replace(/^[^:]{2,40}:\s+/, '') : '';
+  // 去掉前缀后若只剩通用词开头（词元跳动的「Kling: Video 4.0」），保留品牌名。
+  const named = model.name && model.name !== model.id
+    ? model.name.replace(/^([^:]{2,40}):\s+(?=((?:Video|Image)\b)?)/,
+      (_match, vendor: string, generic?: string) => (generic ? `${vendor} ` : ''))
+    : '';
   return named || modelCatalog(model.id)?.name || model.id;
 }

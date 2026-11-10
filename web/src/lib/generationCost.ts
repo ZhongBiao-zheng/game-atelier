@@ -165,14 +165,27 @@ function estimateTokenDanceVideo(request: GenerationCostRequest): number | null 
   if (!Number.isFinite(duration) || (duration ?? 0) <= 0) return null;
   const resolution = (request.resolution ?? '').trim().toLowerCase();
   const video = request.hasReferenceVideo ? 'true' : 'false';
-  const skus = (tokenDancePricing[request.model?.id ?? '']?.items ?? []).flatMap(item => item.skus ?? [])
+  const items = tokenDancePricing[request.model?.id ?? '']?.items ?? [];
+  // 可灵按「输入视频秒 + 输出秒」两段计费：带参考视频时拿不到输入时长，不估。
+  if (request.hasReferenceVideo && items.some(item => (item.id ?? '').endsWith(':video_input_seconds'))) {
+    return null;
+  }
+  const feature = request.hasReferenceVideo ? 'video_reference' : request.generateAudio ? 'sound' : 'silent';
+  const skus = items
+    // 输入视频计费与动作控制是另外的计费项，不是这次生成的单价。
+    .filter(item => !(item.id ?? '').endsWith(':video_input_seconds') && !(item.id ?? '').includes('motion-control'))
+    .flatMap(item => item.skus ?? [])
     .filter(sku => {
       const skuResolution = (sku.specs?.resolution ?? '*').toLowerCase();
       return (skuResolution === '*' || skuResolution === resolution)
-        && (sku.specs?.has_video ?? video) === video;
+        && (sku.specs?.has_video ?? video) === video
+        && (sku.specs?.feature ?? feature) === feature;
     });
-  // 指定分辨率的价格优先于通配。
-  const sku = skus.find(entry => (entry.specs?.resolution ?? '*') !== '*') ?? skus[0];
+  // 指定分辨率 / 特性的价格优先于通配（与服务端 generation_pricing._tokendance 同一排序）。
+  const specificity = (entry: (typeof skus)[number]) =>
+    Number((entry.specs?.resolution ?? '*') !== '*') + Number(entry.specs?.feature != null);
+  const sku = skus.reduce<(typeof skus)[number] | undefined>(
+    (best, entry) => (best == null || specificity(entry) > specificity(best) ? entry : best), undefined);
   const rate = pricingRate(sku?.rate);
   if (!sku || rate == null) return null;
   const count = safeCount(request.count);

@@ -643,12 +643,12 @@ export function PromptInput({
       (Boolean(videoCaps?.supportsReferenceVideo) && referenceVideos.length < maxRefVids) ||
       (Boolean(videoCaps?.supportsReferenceAudio) && referenceAudios.length < maxRefAudios)
     : referenceImages.length < maxRef;
-  // Seedance（火山 Ark）不支持只给尾帧：last_frame 必须配 first_frame。只填尾帧槽时在客户端
+  // Seedance（火山 Ark）与可灵 3.0 / 4.0 都不支持只给尾帧：last_frame 必须配 first_frame。只填尾帧槽时在客户端
   // 拦下并禁用生成，不浪费一轮注定被上游拒的 API 往返（其余族 / 模式 / 再次生成路径不受影响）。
   const lastFrameOnlyBlocked =
     isVideo &&
     videoMode === 'firstlast' &&
-    videoCaps?.family === 'seedance' &&
+    (videoCaps?.family === 'seedance' || videoCaps?.family === 'klingai') &&
     (videoCaps?.maxFrames ?? 0) >= 2 &&
     !videoFrames?.first &&
     Boolean(videoFrames?.last);

@@ -20,7 +20,7 @@ export type VideoFrameMode = 'auto' | 'first' | 'last' | 'firstlast';
 export type VideoQuality = 'std' | 'pro';
 
 export interface VideoControlCaps {
-  family: 'seedance' | 'happyhorse' | 'kling' | 'openrouter' | 'standard';
+  family: 'seedance' | 'happyhorse' | 'kling' | 'klingai' | 'openrouter' | 'standard';
   /** 可用生成方式；只有一种时 VideoControls 隐藏该分区。 */
   modes: VideoMode[];
   /** 可选时长（秒）；空数组 = 该模式无时长参数（如 happyhorse video-edit 随输入），隐藏分区。 */
@@ -203,6 +203,75 @@ function klingCaps(id: string): VideoControlCaps {
   };
 }
 
+// 可灵 3.0 / 4.0 新版接口（词元跳动 / 兔子转发 contents + settings，EvoLink 按任务拆 id）。
+// 与服务端 video_caps.kling_spec 同一张表；契约见 provider-config.md「视频契约 — 可灵新版接口」。
+const KLING_4_RATIOS = ['21:9', '16:9', '9:16', '1:1'];
+const KLING_3_RATIOS = ['16:9', '9:16', '1:1'];
+
+/** 可灵 3.0 / 4.0 系型号；不是则返回 null。兼容 kling-4.0-flash 与 kling-v4-flash-text-to-video 两种 id。 */
+export function klingGeneration(id: string): 'v4' | 'v4-flash' | 'v3' | 'v3-turbo' | 'v3-omni' | null {
+  const m = id.toLowerCase().replace(/_/g, '-');
+  if (/^kling-v?4(?:[.-]0)?(?:-|$)/.test(m)) return m.includes('flash') ? 'v4-flash' : 'v4';
+  if (/^kling-(?:v?3(?:[.-]0)?|o3)(?:-|$)/.test(m)) {
+    if (m.includes('omni') || m.startsWith('kling-o3')) return 'v3-omni';
+    return m.includes('turbo') ? 'v3-turbo' : 'v3';
+  }
+  return null;
+}
+
+function klingaiCaps(id: string, protocol: string): VideoControlCaps | null {
+  const generation = klingGeneration(id);
+  if (!generation) return null;
+  // EvoLink：v3 / Turbo 没有参考任务；参考视频只收公网直链，本地上传走不通 → 不开视频槽。
+  const evolink = protocol === 'evolink';
+  const base = {
+    family: 'klingai' as const,
+    supportsWatermark: false,
+    supportsReferenceAudio: false,
+  };
+  if (generation === 'v4' || generation === 'v4-flash') {
+    const flash = generation === 'v4-flash';
+    return {
+      ...base,
+      modes: ['firstlast', 'omni'],
+      durations: durationRange(3, flash ? 20 : 30),
+      resolutions: flash ? ['720p'] : ['720p', '1080p'],
+      ratios: KLING_4_RATIOS,
+      supportsAudio: false, // 4.x 恒音画同出，无关闭参数
+      supportsReferenceVideo: !evolink,
+      maxFrames: flash ? 1 : 2,
+      maxRefImages: 10,
+      maxRefVideos: evolink ? 0 : 5,
+      maxMixedReferences: 15,
+    };
+  }
+  if (generation === 'v3-omni') {
+    return {
+      ...base,
+      modes: ['firstlast', 'omni'],
+      durations: durationRange(3, 15),
+      resolutions: evolink ? ['720p', '1080p'] : ['720p', '1080p', '4k'],
+      ratios: KLING_3_RATIOS,
+      supportsAudio: true,
+      supportsReferenceVideo: !evolink,
+      maxFrames: 2,
+      maxRefImages: 7,
+      maxRefVideos: evolink ? 0 : 1,
+    };
+  }
+  const turbo = generation === 'v3-turbo';
+  return {
+    ...base,
+    modes: ['firstlast'],
+    durations: durationRange(3, 15),
+    resolutions: turbo ? ['720p', '1080p'] : ['720p', '1080p', '4k'],
+    ratios: KLING_3_RATIOS,
+    supportsAudio: !turbo,
+    supportsReferenceVideo: false,
+    maxFrames: turbo ? 1 : 2,
+  };
+}
+
 export function videoControlCaps(modelId?: string | null, protocol?: string | null): VideoControlCaps {
   const id = (modelId ?? '').toLowerCase();
   const p = protocol ?? '';
@@ -210,6 +279,7 @@ export function videoControlCaps(modelId?: string | null, protocol?: string | nu
   if (p === 'seedance') return seedanceCaps(id);
   if (p === 'dashscope') return happyhorseCaps(id);
   if (p === 'kling') return klingCaps(id);
+  if (p === 'klingai' || p === 'evolink') return klingaiCaps(id, p) ?? STANDARD_CAPS;
   if (p === 'openrouter') return OPENROUTER_VIDEO_CAPS;
   // 无协议 → 退回按 modelId 子串识别（命名 provider 历史调用兼容）。
   if (id.includes('seedance')) return seedanceCaps(id);

@@ -131,4 +131,33 @@ describe('videoControlCaps', () => {
     expect(videoControlCaps('foo-1').family).toBe('standard');
     expect(videoControlCaps('foo-1', null).family).toBe('standard');
   });
+
+  it('kling 3.0 / 4.0 caps follow the official per-model contract', () => {
+    const v4 = videoControlCaps('kling-4.0', 'klingai');
+    expect(v4.family).toBe('klingai');
+    expect(v4.modes).toEqual(['firstlast', 'omni']);
+    expect([v4.durations[0], v4.durations.at(-1)]).toEqual([3, 30]);
+    expect(v4.resolutions).toEqual(['720p', '1080p']);
+    expect(v4.ratios).toContain('21:9');
+    expect(v4.supportsAudio).toBe(false); // 4.x 恒音画同出
+    expect([v4.maxRefImages, v4.maxRefVideos]).toEqual([10, 5]);
+
+    const flash = videoControlCaps('kling-4.0-flash', 'klingai');
+    expect([flash.durations.at(-1), flash.resolutions, flash.maxFrames]).toEqual([20, ['720p'], 1]);
+
+    const v3 = videoControlCaps('kling-3.0', 'klingai');
+    expect(v3.modes).toEqual(['firstlast']);
+    expect(v3.resolutions).toContain('4k');
+    expect(v3.supportsAudio).toBe(true);
+    expect(videoControlCaps('kling-3.0-turbo', 'klingai').supportsAudio).toBe(false);
+    expect(videoControlCaps('kling-3.0-omni', 'klingai').maxRefImages).toBe(7);
+  });
+
+  it('EvoLink kling ids map to the same generation without local reference videos', () => {
+    const caps = videoControlCaps('kling-v4-flash-text-to-video', 'evolink');
+    expect(caps.family).toBe('klingai');
+    expect(caps.durations.at(-1)).toBe(20);
+    expect(caps.supportsReferenceVideo).toBe(false);
+    expect(videoControlCaps('kling-v3-text-to-video', 'evolink').modes).toEqual(['firstlast']);
+  });
 });

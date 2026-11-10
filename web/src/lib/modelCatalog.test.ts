@@ -43,3 +43,31 @@ describe('modelBrand', () => {
     expect(sortModels(models)).toEqual(models);
   });
 });
+
+describe('kling catalog ids across channels', () => {
+  it.each([
+    ['kling-4.0', 'kling-4.0'],
+    ['kling-v4-text-to-video', 'kling-4.0'],
+    ['kling-4.0-flash', 'kling-4.0-flash'],
+    ['kling-v4-flash-text-to-video', 'kling-4.0-flash'],
+    ['kling-3.0', 'kling-3.0'],
+    ['kwaivgi/kling-v3.0-std', 'kling-3.0'],
+    ['kling-v3-text-to-video', 'kling-3.0'],
+    ['kling-3.0-omni', 'kling-3.0-omni'],
+    ['kling-o3-text-to-video', 'kling-3.0-omni'],
+    ['kling-3.0-turbo', 'kling-3.0-turbo'],
+    ['kling-v3-turbo-text-to-video', 'kling-3.0-turbo'],
+  ])('%s is %s', (id, key) => {
+    expect(modelCatalog(id)?.key).toBe(key);
+  });
+});
+
+describe('modelDisplayName vendor prefix', () => {
+  it.each([
+    ['ByteDance: Seedance 2.5', 'Seedance 2.5'],
+    ['Kling: Video 4.0 Flash', 'Kling Video 4.0 Flash'],
+    ['Kling: Kling TTS', 'Kling TTS'],
+  ])('%s → %s', (name, shown) => {
+    expect(modelDisplayName({ id: 'x', name })).toBe(shown);
+  });
+});

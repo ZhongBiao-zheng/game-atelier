@@ -26,6 +26,18 @@ export interface Announcement {
 
 export const ANNOUNCEMENTS: Announcement[] = [
   {
+    id: '2026-11-kling-4-0',
+    date: '2026-11-10',
+    title: '可灵 4.0 上线',
+    summary: '可灵 4.0 单次最长 30 秒，音画同出，可用最多 10 张参考图和参考视频驱动；4.0 Flash 更快更便宜，720p、最长 20 秒。TokenDance 与 EvoLink 已上线，TokenDance 720p 价格 4.0 每秒 1 元、Flash 每秒 0.6 元。同版补齐可灵 3.0 / 3.0 Turbo / 3.0 Omni。',
+    // klingai.com 首页 Kling 4.0 主视觉（发布页 og:image 只是 logo）。
+    imageUrl: 'https://p1-kling.klingai.com/kcdn/cdn-kcdn112452/kling-homepage-aio/assets/images/hero-v4-ocean-pianist-BJN4qEvR.jpg',
+    models: [
+      { name: 'Kling 4.0', ids: ['kling-4.0', 'kling-v4-text-to-video'] },
+      { name: 'Kling 4.0 Flash', ids: ['kling-4.0-flash', 'kling-v4-flash-text-to-video'] },
+    ],
+  },
+  {
     id: '2026-11-gpt-image-2-6',
     date: '2026-11-05',
     title: 'GPT Image 2.6 上线',
