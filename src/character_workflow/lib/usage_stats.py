@@ -47,11 +47,13 @@ def mine_records(
         cost = job.params.actual_cost_cny
         if cost is None and job.status != "failed":
             cost = job.params.estimated_cost_cny
+        # 「项目」回答这笔钱花在哪：画布按项目，创作台本身没有项目，整体算「创作台」；
+        # 画布项目被删后找不到名字，单独标出来，不和创作台混在一起。
         if job.canvas_project_id:
             project_key = f"canvas:{job.canvas_project_id}"
-            label = canvas_names.get(job.canvas_project_id, "未归档")
+            label = canvas_names.get(job.canvas_project_id, "已删除的项目")
         else:
-            project_key, label = "unassigned", "未归档"
+            project_key, label = "studio", "创作台"
         records.append({
             # 没有价格的成功任务记 None（未计价），不能当成免费；失败且无实际账单按 0 计。
             "id": job.job_id, "cost_cny": cost if cost is not None or job.status != "failed" else 0,

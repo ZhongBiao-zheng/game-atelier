@@ -65,8 +65,10 @@ def test_sources_filter_preserves_available_sources():
 
 
 def test_project_labels_and_distinct_ids():
-    rows = mine([job().model_copy(update={"canvas_project_id": "c1"}), job()])
-    assert [row["label"] for row in rows] == ["画布", "未归档"]
+    rows = mine([job().model_copy(update={"canvas_project_id": "c1"}), job(),
+                 job().model_copy(update={"canvas_project_id": "gone"})])
+    assert [row["label"] for row in rows] == ["画布", "创作台", "已删除的项目"]
+    assert [row["project"] for row in rows] == ["canvas:c1", "studio", "canvas:gone"]
 
 
 @pytest.mark.parametrize("period,bucket,first,length", [
@@ -205,7 +207,7 @@ def test_task_pagination_sorts_instants_then_id_and_filters_before_offset():
 
 @pytest.mark.parametrize("filters,expected", [
     ({"project": "canvas:c1"}, ["a", "b", "c"]),
-    ({"project": "unassigned"}, ["e"]),
+    ({"project": "studio"}, ["e"]),
     ({"model": "exact"}, ["a", "b", "d", "e"]),
     ({"model": "ex"}, []),
     ({"alias": "Tuzi"}, ["a", "c", "d", "e"]),
@@ -230,7 +232,7 @@ def test_task_field_filters_match_keys_and_kind_categories(filters, expected):
     assert all(row["member_key"] is None for row in result["rows"])
     assert {row["project_key"] for row in usage_tasks(
         records, scope="mine", period="30d", now=NOW)["rows"]} == {
-            "canvas:c1", "canvas:c2", "unassigned"}
+            "canvas:c1", "canvas:c2", "studio"}
     assert stats(records)["totals"]["by_kind"] == {"image": 4, "video": 1}
 
 
