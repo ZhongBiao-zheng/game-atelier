@@ -28,6 +28,19 @@ export interface Announcement {
 
 export const ANNOUNCEMENTS: Announcement[] = [
   {
+    id: '2026-11-seedream-5-5',
+    date: '2026-11-13',
+    version: '5.136.0',
+    title: 'Seedream 5.5 上线',
+    summary: '字节 11 月 9 日发布：多轮修改时没动的地方保持不变，光影、皮肤和小字更真实。提示词里写「透明背景」就直接出透明 PNG，做图标、贴纸、道具不用再抠图。火山方舟与 TokenDance 0.13–0.23 元 / 张，不到 5.0 Pro 一半；Tuzi、OpenRouter 也已上线。',
+    // 火山方舟「Doubao Seedream 5.5 教程」的透明贴纸示例输出（官方页没有 og:image）。
+    imageUrl: 'https://arkdocs.tos-cn-beijing.volces.com/images/image-generation/seedream-5-5-transparent-stickers-output-20261103.png',
+    models: [{
+      name: 'Seedream 5.5',
+      ids: ['doubao-seedream-5-5-261028', 'seedream-5.5', 'bytedance-seed/seedream-5-5', 'doubao-seedream-5.5'],
+    }],
+  },
+  {
     id: '2026-11-kling-4-0',
     date: '2026-11-10',
     version: '5.135.0',
