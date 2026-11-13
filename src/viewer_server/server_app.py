@@ -282,9 +282,14 @@ async def normal_lifespan(app: FastAPI):
     from character_workflow.lib.tuzi_prices import start_background_sync as start_tuzi_sync
     from character_workflow.lib.openai_hk_prices import start_background_sync as start_hk_sync
 
+    from character_workflow.lib.announcement_feed import (
+        start_background_sync as start_announcement_sync,
+    )
+
     start_background_sync()
     start_tuzi_sync()
     start_hk_sync()
+    start_announcement_sync()
     try:
         yield
     finally:

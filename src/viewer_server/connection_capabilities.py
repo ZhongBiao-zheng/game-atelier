@@ -74,6 +74,7 @@ GET /api/usage
 GET /api/usage/tasks
 GET /api/usage/key-last-used
 GET /api/pricing/tokendance
+GET /api/announcements
 POST /api/pricing/estimate
 POST /api/pricing/estimate-batch
 GET /api/models/durations

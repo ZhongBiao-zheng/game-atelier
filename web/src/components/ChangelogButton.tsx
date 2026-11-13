@@ -13,7 +13,7 @@ import {
   saveSeenVersion,
   type ChangelogEntry,
 } from '@/lib/changelog';
-import { ANNOUNCEMENTS, OPEN_ANNOUNCEMENT_EVENT, type Announcement } from '@/lib/announcements';
+import { OPEN_ANNOUNCEMENT_EVENT, useAnnouncements, type Announcement } from '@/lib/announcements';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 
@@ -130,8 +130,8 @@ type FeedItem =
   | { kind: 'announcement'; announcement: Announcement };
 
 /** 最新一条公告置顶（否则排在当天几个版本之后，打开面板看不到）；其余公告按日期插到同日及更早版本之前。 */
-function buildFeed(): FeedItem[] {
-  const [latest, ...pending] = ANNOUNCEMENTS;
+function buildFeed(announcements: readonly Announcement[]): FeedItem[] {
+  const [latest, ...pending] = announcements;
   const feed: FeedItem[] = latest ? [{ kind: 'announcement', announcement: latest }] : [];
   CHANGELOG.forEach((entry, index) => {
     while (pending.length && pending[0].date >= entry.date) {
@@ -154,6 +154,7 @@ export function ChangelogButton() {
   const [unread, setUnread] = useState(false);
   /** 正文还没滚到底 —— 底部加渐隐，明示下面还有版本 */
   const [fade, setFade] = useState(false);
+  const announcements = useAnnouncements();
 
   useEffect(() => {
     const seen = loadSeenVersion();
@@ -261,7 +262,7 @@ export function ChangelogButton() {
             fade ? 'scroll-fade-b' : '',
           ].join(' ')}
         >
-          {buildFeed().map((item, position) =>
+          {buildFeed(announcements).map((item, position) =>
             item.kind === 'version' ? (
               <VersionBlock
                 key={item.entry.version}

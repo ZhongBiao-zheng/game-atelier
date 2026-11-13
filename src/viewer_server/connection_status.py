@@ -35,9 +35,13 @@ def new_instance_id() -> str:
     return uuid.uuid4().hex
 
 
-def create_connection_status(instance_id: str | None = None) -> LocalConnectionStatus:
+def app_version() -> str:
     manifest = Path(__file__).resolve().parents[2] / ".claude-plugin" / "plugin.json"
-    version = json.loads(manifest.read_text(encoding="utf-8"))["version"]
+    return json.loads(manifest.read_text(encoding="utf-8"))["version"]
+
+
+def create_connection_status(instance_id: str | None = None) -> LocalConnectionStatus:
+    version = app_version()
     identity = instance_id if instance_id is not None else os.environ.get(INSTANCE_ENV)
     return LocalConnectionStatus(
         service="game-atelier",

@@ -801,6 +801,15 @@ class _KeyPatchPayload(BaseModel):
         return value
 
 
+@router.get("/announcements")
+def announcements() -> dict:
+    """模型公告：远程源缓存优先、打包兜底，只返回本机版本已支持的（见 announcement_feed）。"""
+    from character_workflow.lib.announcement_feed import visible
+    from viewer_server.connection_status import app_version
+
+    return {"announcements": visible(app_version())}
+
+
 @router.get("/keys")
 def list_keys() -> dict:
     db = keys.read_keys_db()

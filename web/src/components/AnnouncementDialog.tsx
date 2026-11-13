@@ -6,13 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog';
 import { SwapLabel } from '@/components/ui/swap-label';
 import {
-  ANNOUNCEMENTS,
   KEYS_CHANGED_EVENT,
   OPEN_ANNOUNCEMENT_EVENT,
   announcementsInSameRelease,
   findCandidates,
   latestUnseenAnnouncement,
   markAnnouncementsSeen,
+  useAnnouncements,
   withAddedModels,
   type Announcement,
   type ModelCandidate,
@@ -39,23 +39,28 @@ const visibleScans = (scans: KeyScan[]) => scans.filter(item => item.status === 
 
 /** 启动时弹出最新一条未读公告；关掉即记为已读。更新日志里的公告卡片按 id 通过事件再次打开。 */
 export function AnnouncementHost() {
-  const [announcement, setAnnouncement] = useState<Announcement | null>(() => latestUnseenAnnouncement());
+  const announcements = useAnnouncements();
+  // undefined = 还没人操作，按「最新一条未读」自动弹；null = 已关闭；字符串 = 当前显示的公告 id。
+  const [openedId, setOpenedId] = useState<string | null | undefined>(undefined);
+  const announcement = openedId === undefined
+    ? latestUnseenAnnouncement(announcements)
+    : announcements.find(item => item.id === openedId) ?? null;
 
   useEffect(() => {
     const open = (event: Event) => {
       const id = (event as CustomEvent<string | undefined>).detail;
-      setAnnouncement(ANNOUNCEMENTS.find(item => item.id === id) ?? ANNOUNCEMENTS[0] ?? null);
+      setOpenedId(announcements.find(item => item.id === id)?.id ?? announcements[0]?.id ?? null);
     };
     window.addEventListener(OPEN_ANNOUNCEMENT_EVENT, open);
     return () => window.removeEventListener(OPEN_ANNOUNCEMENT_EVENT, open);
-  }, []);
+  }, [announcements]);
 
   if (!announcement) return null;
-  const siblings = announcementsInSameRelease(announcement);
+  const siblings = announcementsInSameRelease(announcement, announcements);
   const index = siblings.findIndex(item => item.id === announcement.id);
   const step = (offset: -1 | 1) => {
     const target = siblings[index + offset];
-    return target ? () => setAnnouncement(target) : undefined;
+    return target ? () => setOpenedId(target.id) : undefined;
   };
   return (
     <AnnouncementDialog
@@ -63,8 +68,8 @@ export function AnnouncementHost() {
       announcement={announcement}
       pager={siblings.length > 1 ? { index, total: siblings.length, onPrevious: step(-1), onNext: step(1) } : undefined}
       onClose={() => {
-        markAnnouncementsSeen();
-        setAnnouncement(null);
+        markAnnouncementsSeen(announcements);
+        setOpenedId(null);
       }}
     />
   );

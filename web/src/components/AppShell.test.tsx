@@ -6,7 +6,6 @@ import { memoryLocation } from 'wouter/memory-location';
 
 import type { useSSE as UseSSE } from '@/hooks/useSSE';
 import { AppShell } from './AppShell';
-import { markAnnouncementsSeen } from '@/lib/announcements';
 import type { UpdateState } from '@/api/update';
 
 type SSEOptions = NonNullable<Parameters<typeof UseSSE>[0]>;
@@ -49,8 +48,6 @@ beforeEach(() => {
     ok: true,
     json: async () => ({}),
   }));
-  // 模型公告是模态弹窗，弹出时外壳整体 aria-hidden；外壳测试按已读起步。
-  markAnnouncementsSeen();
 });
 
 afterEach(() => {

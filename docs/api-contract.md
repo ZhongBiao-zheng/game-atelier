@@ -143,6 +143,10 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 - 只在发出首字节之前对确定可切换的错误换成员；已转发后的中断结束当前流、记 failed，不重发请求。流前错误形状统一为 `{error: {message, type, code}}`；全部成员不可用为 503 / gateway_unavailable，限额为 429 并带 Retry-After。上游可能已执行的错误为 503 / gateway_upstream_error，接入端不得切换本机 KEY 重发。
 - 接入端 `key_api_root` 将 atelier 的文本/Agent URL 指向上述前缀；同步文本模型保留协议。文本 Job 收到 503 gateway_unavailable 时可按自动路由切回本机 KEY。
 
+### 模型公告源
+
+`GET /api/announcements` 返回 `{announcements: [...]}`，字段与 `src/character_workflow/data/announcements.json` 一致（`id`、`date`、`version`、`title`、`summary`、`imageUrl`、`models[{name, ids}]`，新的在前）。来源顺序：上次从 main 拉到并校验通过的缓存（`.runtime/announcements.json`）> 打包的那份；远程只认仓库自己的 CNB / GitHub raw 地址，校验失败不覆盖缓存，`imageUrl` 只收 https。只返回 `version` 不高于本机插件版本（ADR-0032 排序）的条目。
+
 ### 图层栈显示顺序（5.44.0）
 
 `layer_stack.data.base_z_index` 默认 0，背景与 `layers[].z_index` 共用 0–99 范围（5.136.0 起随 Seedream 5.5 由 0–16 放宽）；存在背景时所有层级值必须唯一。

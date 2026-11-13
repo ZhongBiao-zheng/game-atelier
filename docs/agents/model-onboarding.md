@@ -72,9 +72,10 @@
 
 ## 5. 公告与日志
 
-- `web/src/lib/announcements.ts` 数组开头插一条：稳定 id、日期、标题、三句话摘要（定位 / 新能力 / 渠道与价格）、官方 og:image 外链、`models[].ids` 列全官方 id 与聚合商 slug（「快速添加」靠它匹配）。
-- 发版提交时在 `web/src/lib/changelog.ts` 开头加条目（有断言钉死）。
-- 公告与能力登记放同一个版本，不先发公告后补能力。
+- 公告存在 `src/character_workflow/data/announcements.json`，数组开头插一条：稳定 id、日期、`version`、标题、三句话摘要（定位 / 新能力 / 渠道与价格）、官方 og:image 外链（https）、`models[].ids` 列全官方 id 与聚合商 slug（「快速添加」靠它匹配）。
+- 本机服务打包一份兜底，启动后（之后每 6 小时）从 CNB / GitHub 的 main 拉同一个文件；只返回 `version` 不高于本机版本的公告。同版本同一天的公告在弹窗里翻页。
+- **要改代码才能用的模型**：公告与能力登记放同一个版本，`version` 填那一版；发版提交时在 `web/src/lib/changelog.ts` 开头加条目（有断言钉死）。不先发公告后补能力。
+- **不用改代码的模型**（现有判据已覆盖，「快速添加」后直接能用）：只改 JSON 推 main，不 bump、不打 tag；`version` 填当时已发布的最新版本（`version` 必须在 changelog 里有条目，有测试校验）。推送后已安装的客户端最晚 6 小时内、或重启服务后看到。
 
 ## 6. 文档
 
