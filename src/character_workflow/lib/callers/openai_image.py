@@ -63,9 +63,10 @@ def _warn(kwargs: dict, message: str) -> None:
         warnings.append(message)
 
 
-# 不支持 Ark 组图参数的模型：实测 seedream-5.0-pro 收到 sequential_image_generation 直接 400。
+# 不支持 Ark 组图参数的模型：实测 seedream-5.0-pro 收到 sequential_image_generation 直接 400；
+# Seedream 5.5 的官方能力表（Ark「Doubao Seedream 5.5 教程」2026-11-12）同样不含组图。
 # 这是**模型**属性，与 provider 无关 —— 火山直连、Tuzi、词元跳动上的同一模型都拒。
-_NO_SEQUENTIAL_MODELS = ("seedream-5-0-pro",)
+_NO_SEQUENTIAL_MODELS = ("seedream-5-0-pro", "seedream-5-5")
 
 
 def _supports_sequential(model: str) -> bool:
@@ -1255,14 +1256,24 @@ def _snap_hk_gpt_image_size(size: object) -> object:
     return f"{best[0]}x{best[1]}"
 
 
+# 像素范围 [1280x720, 2048x2048x1.1025] = [921600, 4624220] 的 seedream 型号。Seedream 5.5 按
+# Ark 官方教程与 5.0 pro 同范围；前端 studioSize.ts 的两张表必须同步。
+_PRO_PIXEL_RANGE_FAMILIES = ("seedream-5-0-pro", "seedream-5-5")
+
+
+def _has_pro_pixel_range(model: str) -> bool:
+    normalized = normalized_model_id(model)
+    return any(family in normalized for family in _PRO_PIXEL_RANGE_FAMILIES)
+
+
 def _min_pixels_for_seedream(model: str) -> int:
     """seedream 族的最小像素约束 —— 实测值表，按模型 id 子串取。
 
     3686400：Tuzi 的 doubao-seedream-4-5、词元跳动的 seedream-5.0-lite（1024² 与 960²
     都被拒，报 must be at least 3686400 pixels）。
-    921600：词元跳动的 seedream-5.0-pro（960² 通过，实测 88s 出图）。
+    921600：词元跳动的 seedream-5.0-pro（960² 通过，实测 88s 出图）；Seedream 5.5 官方范围相同。
     """
-    if "seedream-5-0-pro" in normalized_model_id(model):
+    if _has_pro_pixel_range(model):
         return 921_600
     return 3_686_400
 
@@ -1275,7 +1286,7 @@ def _max_pixels_for_seedream(model: str) -> int:
     4096x2304 就有 9437184 像素，是它上限的两倍，所以选 4K 必报
     `image area must be at most 4624220 pixels`（2026-08-14 实测，画师侧现象就是这条）。
     """
-    if "seedream-5-0-pro" in normalized_model_id(model):
+    if _has_pro_pixel_range(model):
         return 4_624_220
     return 16_777_216
 

@@ -2076,6 +2076,9 @@ def test_sequential_is_a_model_property_not_a_provider_one():
     assert openai_image._supports_sequential("doubao-seedream-4-5-251128") is True
     assert openai_image._supports_sequential("seedream-5.0-pro") is False
     assert openai_image._supports_sequential("bytedance-seed/seedream-5.0-pro") is False
+    # Seedream 5.5 的官方能力表不含组图；三种渠道写法都要命中。
+    for model in ("doubao-seedream-5-5-261028", "seedream-5.5", "bytedance-seed/seedream-5-5"):
+        assert openai_image._supports_sequential(model) is False
 
 
 def test_render_direct_seedream_pro_omits_sequential(isolated_data_root, tmp_path, monkeypatch):

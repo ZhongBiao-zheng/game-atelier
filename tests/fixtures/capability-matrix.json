@@ -78,6 +78,24 @@
       "min_pixels": 921600, "max_pixels": 4624220
     },
     {
+      "why": "Seedream 5.5 火山直连：Ark 官方像素范围与 5.0 pro 相同 [921600, 4624220]，参考图 10 张",
+      "model": "doubao-seedream-5-5-261028", "provider": "seedream",
+      "family": "seedream", "max_reference_images": 10, "supports_quality": false,
+      "min_pixels": 921600, "max_pixels": 4624220
+    },
+    {
+      "why": "Seedream 5.5 在词元跳动 / OpenRouter 的写法：点号与斜杠前缀都要归到同一判据",
+      "model": "seedream-5.5", "provider": "tokendance",
+      "family": "seedream", "max_reference_images": 10, "supports_quality": false,
+      "min_pixels": 921600, "max_pixels": 4624220
+    },
+    {
+      "why": "OpenRouter 的 Seedream 5.5 slug",
+      "model": "bytedance-seed/seedream-5-5", "provider": "openrouter",
+      "family": "seedream", "max_reference_images": 10, "supports_quality": false,
+      "min_pixels": 921600, "max_pixels": 4624220
+    },
+    {
       "why": "OpenRouter 的 seedream slug",
       "model": "bytedance-seed/seedream-4.5", "provider": "openrouter",
       "family": "seedream", "max_reference_images": 10, "supports_quality": false,

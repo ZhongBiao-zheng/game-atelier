@@ -16,6 +16,8 @@ const SEEDREAM_MIN_PIXELS_DEFAULT = 3686400;
 const SEEDREAM_MIN_PIXELS_BY_MODEL: Array<[string, number]> = [
   // 实测下限只要 921600，套默认值会让用户白付 4 倍像素。
   ['seedream-5-0-pro', 921600],
+  // Seedream 5.5：Ark 官方教程给的像素范围与 5.0 pro 相同。
+  ['seedream-5-5', 921600],
 ];
 
 // seedream 族像素上限（高于此值上游直接 400 `image area must be at most N pixels`）。
@@ -24,6 +26,8 @@ const SEEDREAM_MAX_PIXELS_DEFAULT = 16777216;
 const SEEDREAM_MAX_PIXELS_BY_MODEL: Array<[string, number]> = [
   // 实测上限只有 4624220，不到别人三分之一 —— 4K 档最小的一挡 4096x2304 就是它的两倍。
   ['seedream-5-0-pro', 4624220],
+  // Seedream 5.5：Ark 官方教程给的像素范围与 5.0 pro 相同。
+  ['seedream-5-5', 4624220],
 ];
 
 /** 该模型的最小像素下限；null = 该族不做最小像素归一。

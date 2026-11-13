@@ -14,6 +14,7 @@ const catalog: CatalogEntry[] = [
   { key: 'nano-banana-2.1', name: 'Nano Banana 2.1', brand: 'gemini', description: 'Flash-speed Gemini model, better text and consistency.', match: /^(gemini-)?nano-banana-2\.1$/ },
   { key: 'nano-banana-pro', name: 'Nano Banana Pro', brand: 'gemini', description: "Gemini's pro model for detailed, high-fidelity images.", match: /^(nano-banana(-pro)?|gemini-3-pro-image)$/ },
   { key: 'nano-banana-2', name: 'Nano Banana 2', brand: 'gemini', description: 'Fast, low-cost Gemini generation and editing.', match: /^(nano-banana-2|gemini-3\.1-flash-image)$/ },
+  { key: 'seedream-5.5', name: 'Seedream 5.5', brand: 'bytedance', description: 'Newest Seedream: steadier multi-round edits, transparent PNG.', match: /^(doubao-)?seedream-5[.-]5(-\d+)?$/ },
   { key: 'seedream-5.0-pro', name: 'Seedream 5.0 Pro', brand: 'bytedance', description: 'ByteDance flagship for design, layouts and precise edits.', match: /^(doubao-)?seedream-5[.-]0-pro(-\d+)?$/ },
   { key: 'seedream-5.0-lite', name: 'Seedream 5.0 Lite', brand: 'bytedance', description: 'Lighter, faster Seedream 5.0.', match: /^(doubao-)?seedream-5[.-]0(-lite)?(-\d+)?$/ },
   { key: 'midjourney', name: 'Midjourney', brand: 'midjourney', description: 'Distinctive artistic styles and aesthetics.', match: /^(mj-|midjourney|niji)/ },

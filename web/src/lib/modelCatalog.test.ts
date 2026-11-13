@@ -28,7 +28,7 @@ describe('modelBrand', () => {
 
   it.each([
     'gpt-image-2.6-sunburst', 'gpt-image-2.6-flare', 'gpt-image-2.6-1k',
-    'gpt-image-2.5-sunburst', 'nano-banana-pro', 'doubao-seedream-5-0-pro',
+    'gpt-image-2.5-sunburst', 'nano-banana-pro', 'doubao-seedream-5-0-pro', 'doubao-seedream-5-5-261028', 'seedream-5.5',
     'midjourney', 'flux-3-image', 'seedance-2.0-fast', 'veo-3.1',
     'sora-2-pro', 'kling-3.0', 'minimax-h3', 'happyhorse-1.1',
   ])('preserves the catalog brand for %s', id => {
