@@ -120,15 +120,31 @@ describe('分辨率档位按模型上限裁', () => {
   // lite 的上限是 16777216（=4096²），4K 表原样通过，拿它当「标准表」的取值口。
   const std = (ratio: string, res: '2K' | '4K') => computeStudioPixelSize(ratio, res, 'seedream-5.0-lite');
 
+  // 官方 1K 表里像素最少的一挡是 4:3 的 1152x864 = 995328：下限高于它的型号不给 1K。
+  const ONE_K_MIN_PIXELS = 995328;
+
   for (const c of CASES.filter((x) => x.max_pixels !== null)) {
-    it(`${c.model} — 可选档位与 4K 可达性一致`, () => {
+    it(`${c.model} — 可选档位与 1K / 4K 可达性一致`, () => {
       const anyFits = RATIOS.some((r) => {
         const s = std(r, '4K');
         return s.w * s.h <= c.max_pixels!;
       });
-      expect(availableResolutions(c.model)).toEqual(anyFits ? ['2K', '4K'] : ['2K']);
+      expect(availableResolutions(c.model)).toEqual([
+        ...(c.min_pixels! <= ONE_K_MIN_PIXELS ? ['1K'] : []), '2K', ...(anyFits ? ['4K'] : []),
+      ]);
     });
   }
+
+  it('1K 档每一挡都落在 5.0 pro / 5.5 的像素范围内', () => {
+    for (const model of ['seedream-5.0-pro', 'doubao-seedream-5-5-261028']) {
+      for (const r of RATIOS) {
+        const s = computeStudioPixelSize(r, '1K', model);
+        expect(s.w * s.h, `${model} ${r}`).toBeGreaterThanOrEqual(921600);
+        expect(s.w * s.h, `${model} ${r}`).toBeLessThanOrEqual(2610000);
+      }
+    }
+    expect(computeStudioPixelSize('16:9', '1K', 'seedream-5.5')).toEqual({ w: 1424, h: 800 });
+  });
 
   it('非 seedream 族不受影响（上限为 null → 两档都在）', () => {
     expect(availableResolutions('dall-e-3')).toEqual(['2K', '4K']);
@@ -159,7 +175,7 @@ describe('分辨率档位按模型上限裁', () => {
   });
 
   it('caps.resolutions 跟着模型走，不跟着族走', () => {
-    expect(imageControlCaps('seedream-5.0-pro', 'tokendance').resolutions).toEqual(['2K']);
+    expect(imageControlCaps('seedream-5.0-pro', 'tokendance').resolutions).toEqual(['1K', '2K']);
     expect(imageControlCaps('seedream-5.0-lite', 'tokendance').resolutions).toEqual(['2K', '4K']);
     // 不显示分辨率控件的族给空数组，PromptInput 的纠偏 effect 靠 showResolution 提前 return。
     expect(imageControlCaps('gpt-image-2', 'openai').resolutions).toEqual([]);

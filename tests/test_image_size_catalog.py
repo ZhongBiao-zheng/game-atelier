@@ -43,8 +43,10 @@ def test_hk_nano_only_exposes_verified_ratios():
 def test_model_normalization_matches_browser_dimensions():
     assert not is_nano_image_size_model("gemini-nonimage")
     assert is_nano_image_size_model("google/gemini-3.1-flash-image-preview")
-    assert image_size_options("tokendance", None, "seedream-5.0-pro")["resolutions"] == ["2K"]
-    assert image_size_options("seedream", None, "doubao-seedream-5-5-261028")["resolutions"] == ["2K"]
+    assert image_size_options("tokendance", None, "seedream-5.0-pro")["resolutions"] == ["1K", "2K"]
+    assert image_size_options("seedream", None, "doubao-seedream-5-5-261028")["resolutions"] == [
+        "1K", "2K",
+    ]
     assert image_size_options("openrouter", None, "bytedance-seed/seedream-5-5")["resolutions"] == [
         "1K", "2K",
     ]

@@ -138,3 +138,12 @@ def test_ratio_mode_without_size_derives_pixels(key, model, params, expected):
     result = normalize_image_size_params(key, model, params)
     assert result["size"] == expected
     assert normalize_image_size_params(key, model, result) == result
+
+
+def test_seedream_1k_tier_only_for_low_minimum_models():
+    """与前端 studioSize.computeStudioPixelSize 同表：5.0 pro / 5.5 下限 921600 可走 1K，其他型号回落 2K。"""
+    from character_workflow.lib.image_size import ratio_pixel_size
+
+    assert ratio_pixel_size("16:9", "1K", "doubao-seedream-5-5-261028") == "1424x800"
+    assert ratio_pixel_size("4:3", "1K", "seedream-5.0-pro") == "1152x864"
+    assert ratio_pixel_size("16:9", "1K", "seedream-5.0-lite") == "2560x1440"

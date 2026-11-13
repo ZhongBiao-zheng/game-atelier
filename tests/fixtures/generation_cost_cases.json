@@ -2956,5 +2956,76 @@
       "model_id": "unknown"
     },
     "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "provider": "seedream",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "protocol": "ark",
+      "model_id": "doubao-seedream-5-5-261028",
+      "size": "1600x1600"
+    },
+    "expected": 0.26
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "provider": "seedream",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "protocol": "ark",
+      "model_id": "doubao-seedream-5-5-261028",
+      "size": "2150x2150"
+    },
+    "expected": 0.23
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "provider": "seedream",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "protocol": "ark",
+      "model_id": "doubao-seedream-5-0-pro-260628",
+      "size": "1024x1024"
+    },
+    "expected": 0.3
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "provider": "seedream",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "protocol": "ark",
+      "model_id": "doubao-seedream-5-0-pro-260628",
+      "size": "2150x2150"
+    },
+    "expected": 0.6
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "provider": "seedream",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "protocol": "ark",
+      "model_id": "doubao-seedream-5-0-pro-260628"
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 1,
+      "provider": "seedream",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "protocol": "ark",
+      "model_id": "doubao-seedream-5-0-flash-260915",
+      "size": "2048x2048"
+    },
+    "expected": 0.12
   }
 ]

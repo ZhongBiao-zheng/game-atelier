@@ -198,7 +198,15 @@ function estimateTokenDanceVideo(request: GenerationCostRequest): number | null 
 
 function estimateArkImage(request: GenerationCostRequest): number | null {
   const model = normalize(request.model?.id);
-  const unitPrice = ARK_SEEDREAM_YUAN_PER_IMAGE[model];
+  const entry = ARK_SEEDREAM_YUAN_PER_IMAGE[model];
+  if (entry == null) return null;
+  let unitPrice: number | null = typeof entry === 'number' ? entry : null;
+  if (Array.isArray(entry)) {
+    const match = /^(\d+)x(\d+)$/.exec(request.size?.trim() ?? '');
+    if (!match) return null;
+    const total = Number(match[1]) * Number(match[2]);
+    unitPrice = entry.find(([upper]) => total <= upper)?.[1] ?? null;
+  }
   if (unitPrice == null) return null;
   return priced(unitPrice * safeCount(request.count));
 }

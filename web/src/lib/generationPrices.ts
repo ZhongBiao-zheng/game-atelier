@@ -12,8 +12,8 @@ import prices from '@pricing';
 export const EVOLINK_MIDJOURNEY_USD_PER_REQUEST = prices.EVOLINK_MIDJOURNEY_USD_PER_REQUEST;
 export const GENERATION_USD_TO_CNY = prices.GENERATION_USD_TO_CNY;
 
-// 火山 Ark 直连：元 / 张。
-export const ARK_SEEDREAM_YUAN_PER_IMAGE: Record<string, number> = prices.ARK_SEEDREAM_YUAN_PER_IMAGE;
+// 火山 Ark 直连：元 / 张。数字为单一价；`[[像素上限, 单价], ...]` 按输出总像素分档（上限含）。
+export const ARK_SEEDREAM_YUAN_PER_IMAGE: Record<string, number | number[][]> = prices.ARK_SEEDREAM_YUAN_PER_IMAGE;
 
 // 火山 Ark 直连 Seedance：元 / 百万输出 token。
 export const ARK_SEEDANCE_YUAN_PER_MILLION_TOKENS = prices.ARK_SEEDANCE_YUAN_PER_MILLION_TOKENS;

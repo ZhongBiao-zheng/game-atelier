@@ -11,7 +11,7 @@ Tuzi、OpenAI-HK 与 TokenDance 使用本机同步快照；Tuzi 和 OpenAI-HK �
 | EvoLink Midjourney V8.2 | `EVOLINK_MIDJOURNEY_USD_PER_REQUEST` | 美元 / 请求，最多四张结果仍只计一次 |
 | Tuzi | `.runtime/prices/tuzi.json` | 公开表达式或固定请求价，经人民币系数换算 |
 | TokenDance（全部模型） | 不入价格表，见下方「TokenDance 实时同步」 | 按其接口：元 / 张、元 / 百万输出 token、元 / 秒 |
-| 火山 Ark Seedream | `ARK_SEEDREAM_YUAN_PER_IMAGE` | 元 / 张 |
+| 火山 Ark Seedream | `ARK_SEEDREAM_YUAN_PER_IMAGE` | 元 / 张；`[[像素上限, 单价], ...]` 按输出总像素分档（5.5：≤2.61M 0.13、≤4.63M 0.23；5.0 Pro：0.30 / 0.60；2026-11-13 Ark 价格页），参考图附加费不计入预计 |
 | 火山 Ark Seedance | `ARK_SEEDANCE_YUAN_PER_MILLION_TOKENS` | 元 / 百万输出 token |
 | 阿里 DashScope HappyHorse | `HAPPYHORSE_1_0_YUAN_PER_SECOND`、`HAPPYHORSE_1_1_YUAN_PER_SECOND` | 元 / 秒 |
 

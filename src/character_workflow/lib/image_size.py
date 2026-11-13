@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 from character_workflow.lib.callers.openai_image import (
     _max_pixels_for_seedream,
+    _min_pixels_for_seedream,
     _snap_hk_gpt_image_size,
     image_family,
     normalize_image_pixel_size,
@@ -170,6 +171,11 @@ def normalize_image_size_params(key: KeySpec, model: str, params: dict[str, Any]
 
 # 与 web/src/lib/studioSize.ts 的 SEEDREAM 尺寸表 / computeStudioPixelSize 逐项一致。
 _SEEDREAM_SIZE_TABLE: dict[str, dict[str, tuple[int, int]]] = {
+    "1K": {
+        "1:1": (1024, 1024), "4:3": (1152, 864), "3:4": (864, 1152),
+        "16:9": (1424, 800), "9:16": (800, 1424), "3:2": (1248, 832),
+        "2:3": (832, 1248), "21:9": (1568, 672), "4:5": (896, 1120), "5:4": (1120, 896),
+    },
     "2K": {
         "1:1": (2048, 2048), "4:3": (2304, 1728), "3:4": (1728, 2304),
         "16:9": (2560, 1440), "9:16": (1440, 2560), "3:2": (2496, 1664),
@@ -193,8 +199,14 @@ def ratio_pixel_size(ratio: str, resolution: str, model: str) -> str:
     """比例 + 档位 → 像素，浏览器 studioSizeFor 的服务端版本。"""
     if image_family(model) == "seedream":
         max_pixels = _max_pixels_for_seedream(model)
+        min_pixels = _min_pixels_for_seedream(model)
+        if resolution == "1K" and all(
+            w * h >= min_pixels for w, h in _SEEDREAM_SIZE_TABLE["1K"].values()
+        ):
+            w, h = _SEEDREAM_SIZE_TABLE["1K"].get(ratio, _SEEDREAM_SIZE_TABLE["1K"]["1:1"])
+            return f"{w}x{h}"
         if all(w * h > max_pixels for w, h in _SEEDREAM_SIZE_TABLE["4K"].values()):
-            # 只剩 2K 一档：撑满模型上限（向下取整，多一个像素就越界）。
+            # 4K 够不着：2K 档撑满模型上限（向下取整，多一个像素就越界）。
             w, h = _SEEDREAM_SIZE_TABLE["2K"].get(ratio, _SEEDREAM_SIZE_TABLE["2K"]["1:1"])
             scale = (max_pixels / (w * h)) ** 0.5
             return f"{max(1, int(w * scale))}x{max(1, int(h * scale))}"

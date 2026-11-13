@@ -51,7 +51,8 @@ def image_size_options(provider: str, base_url: str | None, model: str) -> dict[
         normalized.startswith(("mj-", "niji")) or "midjourney" in normalized
     ) else ["2K", "4K"]
     if "seedream-5-0-pro" in normalized or "seedream-5-5" in normalized:
-        resolutions = ["2K"]  # 上限 4624220，4K 档每一挡都超
+        # 上限 4624220，4K 档每一挡都超；下限 921600，1K 档可用（与前端 availableResolutions 同判据）。
+        resolutions = ["1K", "2K"]
     # Tuzi 的 gpt-image 走 1K / 2K 档位（前端据此去掉自定义像素框）。不给 4K：2026-09-17
     # 实测单边封顶 2880，发 3840 / 4096 都只回 2880²，还比按 2880 发多花一倍 token。
     if "gpt-image" in normalized and (host == "tu-zi.com" or host.endswith(".tu-zi.com")):

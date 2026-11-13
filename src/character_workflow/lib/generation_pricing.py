@@ -57,6 +57,17 @@ def _pixels(size: str | None) -> tuple[int, int] | None:
 
 
 
+def _ark_seedream_rate(entry: Any, size: str | None) -> float | None:
+    """火山直连 Seedream 单价：数字为单一价；`[[像素上限, 单价], ...]` 按输出总像素选档（上限含）。"""
+    if not isinstance(entry, list):
+        return entry
+    pixels = _pixels(size)
+    if pixels is None:
+        return None
+    total = pixels[0] * pixels[1]
+    return next((rate for upper, rate in entry if total <= upper), None)
+
+
 def _rate(value: Any) -> float | None:
     try:
         rate = float(value)
@@ -219,7 +230,7 @@ def estimate_cost_cny(
                                resolution=resolution, ratio=ratio,
                                has_reference_video=has_reference_video)
         elif ark and proto in ("", "ark"):
-            rate = p["ARK_SEEDREAM_YUAN_PER_IMAGE"].get(model)
+            rate = _ark_seedream_rate(p["ARK_SEEDREAM_YUAN_PER_IMAGE"].get(model), size)
         else:
             return None
         return None if rate is None else _priced(rate * count)

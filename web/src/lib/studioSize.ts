@@ -53,8 +53,21 @@ export function familyMaxPixels(modelId?: string | null): number | null {
   return SEEDREAM_MAX_PIXELS_DEFAULT;
 }
 
-// seedream 族的 2K/4K 标准档（火山官方尺寸表，已满足默认像素下限）。
-const SIZE_TABLE: Record<'2K' | '4K', Record<string, { w: number; h: number }>> = {
+// seedream 族的 1K/2K/4K 标准档（火山官方尺寸表）。1K 档取自 Ark「图片生成 API」Seedream 5.5 / 5.0 pro
+// 的 1K 映射表（4:5 / 5:4 官方未列，按同像素量取 16 倍数），只对像素下限够低的型号开放。
+const SIZE_TABLE: Record<'1K' | '2K' | '4K', Record<string, { w: number; h: number }>> = {
+  '1K': {
+    '1:1': { w: 1024, h: 1024 },
+    '4:3': { w: 1152, h: 864 },
+    '3:4': { w: 864, h: 1152 },
+    '16:9': { w: 1424, h: 800 },
+    '9:16': { w: 800, h: 1424 },
+    '3:2': { w: 1248, h: 832 },
+    '2:3': { w: 832, h: 1248 },
+    '21:9': { w: 1568, h: 672 },
+    '4:5': { w: 896, h: 1120 },
+    '5:4': { w: 1120, h: 896 },
+  },
   '2K': {
     '1:1': { w: 2048, h: 2048 },
     '4:3': { w: 2304, h: 1728 },
@@ -95,8 +108,11 @@ function fitToPixels(size: { w: number; h: number }, target: number): { w: numbe
 export function availableResolutions(modelId?: string | null): Resolution[] {
   const max = familyMaxPixels(modelId);
   if (max === null) return ['2K', '4K'];
+  // 1K 档只给下限够低的型号（5.0 pro / 5.5 下限 921600）：默认下限 3686400 的型号 1K 每一挡都会被拒。
+  const min = familyMinPixels(modelId) ?? 0;
+  const oneK: Resolution[] = Object.values(SIZE_TABLE['1K']).every((s) => s.w * s.h >= min) ? ['1K'] : [];
   const anyReachable = Object.values(SIZE_TABLE['4K']).some((s) => s.w * s.h <= max);
-  return anyReachable ? ['2K', '4K'] : ['2K'];
+  return [...oneK, '2K', ...(anyReachable ? ['4K' as const] : [])];
 }
 
 /** 档位表的默认档：有 2K 就用 2K，不拿数组第一项。
@@ -113,10 +129,14 @@ export function computeStudioPixelSize(
   modelId?: string | null,
 ): { w: number; h: number } {
   if (imageFamily(modelId) === 'seedream') {
-    // 只剩 2K 一档的模型：把这一档撑满模型上限。标准 2K 表只用掉 pro 4194304/4624220 的额度，
-    // 照搬等于白丢约 10% 像素 —— 既然 4K 够不着，唯一的档位就该给到模型的天花板。
-    // （此处不管传进来的 resolution 是哪档：状态里可能还留着切模型前选的 4K。）
-    if (availableResolutions(modelId).length === 1) {
+    // 4K 够不着的模型（5.0 pro / 5.5）：2K 档撑满模型上限。标准 2K 表只用掉 pro 4194304/4624220 的额度，
+    // 照搬等于白丢约 10% 像素 —— 既然 4K 够不着，最高档就该给到模型的天花板。
+    // （状态里可能还留着切模型前选的 4K，此时也按 2K 处理。）
+    const resolutions = availableResolutions(modelId);
+    if (resolution === '1K' && resolutions.includes('1K')) {
+      return SIZE_TABLE['1K'][ratio] ?? SIZE_TABLE['1K']['1:1'];
+    }
+    if (!resolutions.includes('4K')) {
       return fitToPixels(SIZE_TABLE['2K'][ratio] ?? SIZE_TABLE['2K']['1:1'], familyMaxPixels(modelId)!);
     }
     const tier = resolution === '4K' ? '4K' : '2K';
