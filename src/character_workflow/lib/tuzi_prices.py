@@ -60,6 +60,30 @@ def _configured_models() -> dict[str, set[str]]:
     return configured
 
 
+def _expression_multipliers(
+    group_prices: dict[str, Any], ratios: dict[str, Any], expressions: dict[str, str],
+) -> dict[str, float]:
+    """表达式结果还要乘的分组倍率，按 (分组, 模型) 取。
+
+    Tuzi 账单（2026-11-13 只读核对）：`pricing_source=group_override` 的表达式结果就是最终
+    美元额（nano-banana / gpt-image 系 group_ratio=1）；`global_fallback` 的结果要再乘
+    「生效分组」（effective_group）的倍率 —— Seedream 5.5 在 default 分组下生效「官方优惠」，
+    表达式写成 `0.13 / 7`，账单按 ×7 扣成 $0.13。只记不为 1 的倍率。
+    """
+    sources = group_prices.get("pricing_source") or {}
+    effective = group_prices.get("effective_group") or {}
+    multipliers: dict[str, float] = {}
+    for model_id in expressions:
+        if not isinstance(sources, dict) or sources.get(model_id) != "global_fallback":
+            continue
+        ratio = ratios.get(effective.get(model_id)) if isinstance(effective, dict) else None
+        if isinstance(ratio, bool) or not isinstance(ratio, (int, float)) or ratio <= 0:
+            continue
+        if ratio != 1:
+            multipliers[model_id] = ratio
+    return multipliers
+
+
 def sync() -> dict[str, Any]:
     """Publish both public responses atomically; failed refreshes keep the old snapshot."""
     configured = _configured_models()
@@ -97,6 +121,7 @@ def sync() -> dict[str, Any]:
                     for field in ("quota_type", "model_price", "enable_groups")
                 }
         expressions = {}
+        multipliers = {}
         from character_workflow.lib.tuzi_billing_expr import (
             UnsupportedBillingExpr, compile_expression,
         )
@@ -112,6 +137,7 @@ def sync() -> dict[str, Any]:
                 model_id: expression for model_id, expression in billing.items()
                 if model_id in ids
             }
+            multipliers[group] = _expression_multipliers(group_prices, ratios, expressions[group])
             for model_id, expression in expressions[group].items():
                 try:
                     compile_expression(expression)
@@ -122,6 +148,7 @@ def sync() -> dict[str, Any]:
             "usd_exchange_rate": rate,
             "group_ratio": {group: ratios[group] for group in configured if group in ratios},
             "billing_expr": expressions,
+            "expr_multiplier": multipliers,
             "models": models,
         }
         atomic_write_json(snapshot_path(), snapshot)

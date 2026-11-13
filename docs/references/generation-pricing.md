@@ -88,6 +88,12 @@ Tuzi扩展已由[官方定价计算器源码](https://api.tu-zi.com/assets/index
   额外差异按用户裁决记录，已知公式采用公开快照，未核实表达式保留未计价。
 
 - 2026-11-05 实测 `gpt-image-2.6-1k`（default 分组）：AUTO/低 一张 ¥0.02，耗时 27–51s；GIF 走 chat/completions 同价。同日 `gpt-image-2.6` / `-flare` / `-sunburst` / `-vip` 仍「价格尚未由管理员配置」。
+- 2026-11-13 分组倍率（`/api/log/token` 账单核对）：`group_model_pricing.<分组>.pricing_source` 为
+  `group_override` 时表达式结果即最终美元额；为 `global_fallback` 时还要乘 `effective_group` 指向分组的
+  `group_ratio`。同步时按（分组, 模型）记入 `expr_multiplier`，估价乘上。证据：default 分组下两者都生效
+  「官方优惠」（×7）——`doubao-seedream-5-5-261028` 1600² 表达式 $0.01857、实扣 $0.13（¥0.091，官方价 7 折）；
+  `doubao-seedream-5-0-pro-260628` 1600² 表达式 $0.4286、实扣 $3.0（¥2.1，官方价 0.30 的 7 倍），
+  旧估价漏乘倍率显示 ¥0.3。
 
 ## OpenAI-HK 实时同步：2026-10-25 起
 
