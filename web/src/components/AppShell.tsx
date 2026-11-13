@@ -4,6 +4,7 @@ import { Link, Redirect, Route, Switch, useLocation } from 'wouter';
 import { AiIcon, CanvasIcon, DarkModeIcon, HomeIcon, LightModeIcon, SettingsIcon } from '@/components/ui/icons';
 
 import { ChangelogButton } from '@/components/ChangelogButton';
+import { AtelierMark } from '@/components/AtelierMark';
 import { TeamShareReminder, type TeamShareReminderHandle } from '@/components/team/TeamShareReminder';
 import { useSSE } from '@/hooks/useSSE';
 import { publishGatewayTask, publishGatewayConnected } from '@/api/gatewayEvents';
@@ -103,7 +104,8 @@ function AppShellContent() {
     <div className="flex flex-col h-screen bg-background text-foreground">
       {!immersiveCanvas && <header className="sticky top-0 z-30 shrink-0">
         <div className="mx-auto grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 lg:h-20 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:gap-4 lg:px-8 lg:py-0">
-          <Link href="/" className="flex shrink-0 items-baseline gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
+          <Link href="/" className="flex shrink-0 items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
+            <AtelierMark />
             <span className="brand-wordmark font-display text-2xl">Atelier</span>
           </Link>
           <LayoutGroup>
