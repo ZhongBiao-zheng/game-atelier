@@ -68,7 +68,7 @@ describe('VideoControls（五合一汇总按钮）', () => {
     expect(screen.getByLabelText('选择生成方式')).toBeInTheDocument();
     expect(screen.getByLabelText('选择比例')).toBeInTheDocument();
     expect(screen.getByLabelText('选择清晰度')).toBeInTheDocument();
-    expect(screen.getByLabelText('选择生成时长')).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: '生成时长' })).toBeInTheDocument();
     expect(screen.getByLabelText('生成音频开关')).toBeInTheDocument();
   });
 
@@ -83,7 +83,9 @@ describe('VideoControls（五合一汇总按钮）', () => {
     // 2.0-fast 官方无 1080p，分辨率断言用非 fast 的 seedance-2.0 caps。
     const props = setup({ caps: videoControlCaps('seedance-2.0') });
     fireEvent.click(screen.getByLabelText('视频设置'));
-    fireEvent.click(screen.getByRole('radio', { name: '10s' }));
+    const input = screen.getByRole('spinbutton', { name: '生成时长（秒）' });
+    fireEvent.change(input, { target: { value: '10' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
     expect(props.onDurationChange).toHaveBeenCalledWith(10);
     fireEvent.click(screen.getByRole('radio', { name: '1080p' }));
     expect(props.onResolutionChange).toHaveBeenCalledWith('1080p');
@@ -91,12 +93,39 @@ describe('VideoControls（五合一汇总按钮）', () => {
     expect(props.onRatioChange).toHaveBeenCalledWith('9:16');
   });
 
-  it('seedance 2.0 panel exposes the official 4-15s duration range and adaptive ratio', () => {
+  it('seedance 2.0 panel exposes the official 4-15s duration range, four resolutions in one row and adaptive ratio', () => {
     setup({ caps: videoControlCaps('seedance-2.0') });
     fireEvent.click(screen.getByLabelText('视频设置'));
-    expect(screen.getByRole('radio', { name: '4s' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: '15s' })).toBeInTheDocument();
+    const slider = screen.getByRole('slider', { name: '生成时长' });
+    expect(slider).toHaveAttribute('aria-valuemin', '4');
+    expect(slider).toHaveAttribute('aria-valuemax', '15');
+    const resolutions = screen.getByLabelText('选择清晰度');
+    expect(resolutions).toHaveClass('grid-flow-col', 'auto-cols-fr');
+    expect(resolutions.querySelectorAll('[role="radio"]')).toHaveLength(4);
     expect(screen.getByRole('radio', { name: /自适应/ })).toBeInTheDocument();
+  });
+
+  it('duration number input steps with the arrows and clamps typed values to the model range', () => {
+    const props = setup({ caps: videoControlCaps('kling-v4', 'klingai'), duration: 30 });
+    fireEvent.click(screen.getByLabelText('视频设置'));
+    expect(screen.getByRole('button', { name: '增加' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '减少' }));
+    expect(props.onDurationChange).toHaveBeenLastCalledWith(29);
+    const input = screen.getByRole('spinbutton', { name: '生成时长（秒）' });
+    fireEvent.change(input, { target: { value: '1' } });
+    fireEvent.blur(input);
+    expect(props.onDurationChange).toHaveBeenLastCalledWith(3);
+    fireEvent.change(input, { target: { value: 'abc' } });
+    fireEvent.blur(input);
+    expect(input).toHaveValue('30');
+  });
+
+  it('keeps segmented buttons for non-contiguous durations (kling 5s / 10s)', () => {
+    const props = setup({ caps: videoControlCaps('kling-v2-1', 'kling') });
+    fireEvent.click(screen.getByLabelText('视频设置'));
+    expect(screen.queryByRole('slider')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: '10s' }));
+    expect(props.onDurationChange).toHaveBeenCalledWith(10);
   });
 
   it('hides ratio/duration sections when the family has no such params (happyhorse video-edit)', () => {

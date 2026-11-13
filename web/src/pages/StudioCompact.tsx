@@ -13,7 +13,7 @@ import { gptImage26JobParams, imageSizeMode, normalizeImageSizeParams, prepareIm
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { hasSrefCode, MJ_DEFAULTS, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { EMPTY_MJ_REFS, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
-import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
+import { nearestDuration, videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import { isAutoProvider, resolveChannel, sizeContext, withAutoProvider } from '@/lib/modelRoutes';
 import type { JobKind, JobParams } from '@/schema/jobs';
@@ -168,7 +168,7 @@ export function StudioCompact() {
     const caps = videoControlCaps(selected.modelId, selModel?.protocol);
     if (!caps.modes.includes(videoMode)) setVideoMode(caps.modes[0]);
     if (caps.ratios.length > 0 && !caps.ratios.includes(videoRatio)) setVideoRatio(caps.ratios[0]);
-    if (caps.durations.length > 0 && !caps.durations.includes(duration)) setDuration(caps.durations[0]);
+    if (caps.durations.length > 0 && !caps.durations.includes(duration)) setDuration(nearestDuration(caps.durations, duration));
     if (caps.resolutions.length > 0 && !caps.resolutions.includes(videoResolution)) {
       setVideoResolution(caps.resolutions[0]);
     }

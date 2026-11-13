@@ -75,6 +75,7 @@ export const CheckIcon = defineIcon(Huge.Tick02Icon, 'check');
 export const ChevronDownIcon = defineIcon(Huge.ArrowDown01Icon, 'chevron-down');
 export const ChevronLeftIcon = defineIcon(Huge.ArrowLeft01Icon, 'chevron-left');
 export const ChevronRightIcon = defineIcon(Huge.ArrowRight01Icon, 'chevron-right');
+export const ChevronUpIcon = defineIcon(Huge.ArrowUp01Icon, 'chevron-up');
 export const CloseIcon = defineIcon(Huge.Cancel01Icon, 'close');
 export const CollapseIcon = defineIcon(Huge.ArrowShrink01Icon, 'collapse');
 export const CompareIcon = defineIcon(Huge.LayoutTwoColumnIcon, 'compare');

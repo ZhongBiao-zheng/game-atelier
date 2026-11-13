@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { videoControlCaps } from './videoControlCaps';
+import { durationRangeOf, nearestDuration, videoControlCaps } from './videoControlCaps';
 
 describe('videoControlCaps', () => {
   it('seedance 2.0 supports the full matrix with official duration/ratio ranges', () => {
@@ -159,5 +159,20 @@ describe('videoControlCaps', () => {
     expect(caps.durations.at(-1)).toBe(20);
     expect(caps.supportsReferenceVideo).toBe(false);
     expect(videoControlCaps('kling-v3-text-to-video', 'evolink').modes).toEqual(['firstlast']);
+  });
+});
+
+describe('duration helpers', () => {
+  it('treats contiguous ranges as slider bounds and short or sparse lists as buttons', () => {
+    expect(durationRangeOf([3, 4, 5, 6])).toEqual({ min: 3, max: 6 });
+    expect(durationRangeOf([5, 10])).toBeNull();
+    expect(durationRangeOf([5, 10, 15])).toBeNull();
+  });
+
+  it('clamps to the nearest supported duration when switching models', () => {
+    expect(nearestDuration([4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], 30)).toBe(15);
+    expect(nearestDuration([4, 5, 6], 2)).toBe(4);
+    expect(nearestDuration([5, 10], 8)).toBe(10);
+    expect(nearestDuration([5, 10], 7)).toBe(5);
   });
 });

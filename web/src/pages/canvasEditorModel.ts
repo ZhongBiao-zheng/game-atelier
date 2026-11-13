@@ -34,6 +34,7 @@ import type {
 } from '@/schema/canvas';
 import {
   klingGeneration,
+  nearestDuration,
   videoControlCaps,
   type VideoControlCaps,
   type VideoQuality,
@@ -1391,8 +1392,8 @@ export function normalizeCanvasVideoParams(
 
   if (caps.durations.length) {
     const duration = Number(currentDuration);
-    params.duration = caps.durations.includes(duration)
-      ? duration
+    params.duration = Number.isFinite(duration) && currentDuration != null
+      ? nearestDuration(caps.durations, duration)
       : caps.durations.includes(5) ? 5 : caps.durations[0];
   }
   if (caps.resolutions.length) {

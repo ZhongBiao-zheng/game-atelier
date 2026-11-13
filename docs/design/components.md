@@ -19,7 +19,8 @@
 | 单个按下 / 弹起 | `Toggle` | |
 | 弹层里的紧凑参数（尺寸、档位、时长、开关） | `Segmented` + `SegmentedItem` | ToggleGroup 单选 + 滑动底色；选中态写在各项的 `selected` 上 |
 | 内容分页 | `Tabs` + `TabsList` / `TabsTrigger` / `TabsContent` | 文字下划线页签给 List 与 Trigger 传 `variant="line"` |
-| 数值拖动 | `Slider` | |
+| 数值拖动 | `Slider` | 刻度数字用 `SliderMarks`（与滑钮中心对齐、当前值高亮） |
+| 数字步进（带单位与上下箭头） | `NumberInput` | 方向键 / 箭头按 step 增减，回车或失焦夹到 [min, max]；常与 `Slider` 并排联动 |
 | 选文件 | `FileInput` | 隐藏，由按钮或拖放区 `ref.click()` 触发 |
 | 按钮 | `Button` | `variant`：default / secondary / outline / ghost / destructive / link / solid；`size`：default / sm / lg / icon |
 | 图标 | `ui/icons` 的语义图标（`CloseIcon`…） | `size`：sm / md / lg / xl；新图标先在注册表登记，规则见 DESIGN.md「图标」 |

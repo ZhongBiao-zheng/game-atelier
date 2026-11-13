@@ -288,6 +288,18 @@ export function videoControlCaps(modelId?: string | null, protocol?: string | nu
   return STANDARD_CAPS;
 }
 
+/** 时长是否为连续整数区间（≥3 档）：是则返回上下限，界面用滑杆；否则（如 5/10 两档）用分段按钮。 */
+export function durationRangeOf(durations: number[]): { min: number; max: number } | null {
+  if (durations.length < 3) return null;
+  const min = durations[0];
+  return durations.every((d, i) => d === min + i) ? { min, max: durations[durations.length - 1] } : null;
+}
+
+/** 把时长夹到该模型支持的档位：取最接近的一档（同距取较短）。切模型时用它，不再一律回到第一档。 */
+export function nearestDuration(durations: number[], value: number): number {
+  return durations.reduce((best, d) => (Math.abs(d - value) < Math.abs(best - value) ? d : best), durations[0]);
+}
+
 /** 可灵生成档位的中文标签。 */
 export const VIDEO_QUALITY_LABELS: Record<VideoQuality, string> = {
   std: '标准',

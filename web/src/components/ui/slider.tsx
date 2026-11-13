@@ -39,3 +39,33 @@ export const Slider = React.forwardRef<React.ElementRef<typeof SliderPrimitive.R
   },
 );
 Slider.displayName = SliderPrimitive.Root.displayName;
+
+/** 滑钮半宽（size-4）。Radix 把滑钮收在轨道内：值 p% 处滑钮中心 = p% + 半宽 × (1 - p / 50)。 */
+const THUMB_HALF_PX = 8;
+
+/** 滑杆下方的刻度数字，与滑钮中心对齐；当前值高亮。 */
+export function SliderMarks({ min, max, marks, value, className }: {
+  min: number;
+  max: number;
+  marks: number[];
+  value?: number;
+  className?: string;
+}) {
+  const span = max - min || 1;
+  return (
+    <div aria-hidden="true" className={cn('relative h-4 text-xs tabular-nums', className)}>
+      {marks.map(mark => {
+        const percent = ((mark - min) / span) * 100;
+        return (
+          <span
+            key={mark}
+            className={cn('absolute -translate-x-1/2', mark === value ? 'text-foreground' : 'text-muted-foreground')}
+            style={{ left: `calc(${percent}% + ${THUMB_HALF_PX * (1 - percent / 50)}px)` }}
+          >
+            {mark}
+          </span>
+        );
+      })}
+    </div>
+  );
+}

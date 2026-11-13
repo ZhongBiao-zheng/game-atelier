@@ -3,6 +3,7 @@ import { HelpIcon, MuteIcon, VideoIcon, VolumeIcon } from '@/components/ui/icons
 import {
   VIDEO_MODE_LABELS,
   VIDEO_QUALITY_LABELS,
+  durationRangeOf,
   ratioLabel,
   type VideoControlCaps,
   type VideoMode,
@@ -15,6 +16,8 @@ import { SwapIcon } from '@/components/ui/swap-icon';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { Segmented, SegmentedItem } from '@/components/ui/segmented';
+import { Slider, SliderMarks } from '@/components/ui/slider';
+import { NumberInput } from '@/components/ui/number-input';
 
 interface Props extends ToolbarPopoverMenuProps {
   caps: VideoControlCaps;
@@ -65,6 +68,7 @@ export function VideoControls({
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const effectiveQuality = quality ?? caps.qualities?.[0];
+  const durationRange = durationRangeOf(caps.durations);
   const summary = [
     caps.ratios.length > 0 ? ratioLabel(ratio) : null,
     caps.resolutions.length > 0 ? resolution : null,
@@ -141,7 +145,7 @@ export function VideoControls({
 
             {caps.resolutions.length > 0 && (
               <Section title="清晰度">
-                <Segmented aria-label="选择清晰度" className={`grid h-9 ${caps.resolutions.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'} rounded-lg bg-popover p-0.5`}>
+                <Segmented aria-label="选择清晰度" className="grid h-9 auto-cols-fr grid-flow-col rounded-lg bg-popover p-0.5">
                   {caps.resolutions.map((item) => (
                     <SegmentedItem key={item} value={String(item)} selected={resolution === item} onSelect={() => onResolutionChange(item)}>
                       {item}
@@ -165,14 +169,43 @@ export function VideoControls({
 
             {caps.durations.length > 0 && (
               <Section title="生成时长">
-                {/* seedance/happyhorse 官方是连续整数秒（最多 4-15 共 12 档），多于 4 档改 6 列多行铺开 */}
-                <Segmented aria-label="选择生成时长" className={`grid ${caps.durations.length > 4 ? 'grid-cols-6 gap-0.5' : 'h-9 grid-cols-2'} rounded-lg bg-popover p-0.5`}>
-                  {caps.durations.map((item) => (
-                    <SegmentedItem key={item} value={String(item)} selected={duration === item} onSelect={() => onDurationChange(item)}>
-                      {item}s
-                    </SegmentedItem>
-                  ))}
-                </Segmented>
+                {durationRange ? (
+                  <div className="flex items-start gap-3 px-1">
+                    <div className="min-w-0 flex-1 pt-3.5">
+                      <Slider
+                        aria-label="生成时长"
+                        min={durationRange.min}
+                        max={durationRange.max}
+                        step={1}
+                        value={[duration]}
+                        onValueChange={([next]) => { if (next !== duration) onDurationChange(next); }}
+                      />
+                      <SliderMarks
+                        className="mt-2"
+                        min={durationRange.min}
+                        max={durationRange.max}
+                        marks={durationMarks(durationRange.min, durationRange.max)}
+                        value={duration}
+                      />
+                    </div>
+                    <NumberInput
+                      aria-label="生成时长（秒）"
+                      min={durationRange.min}
+                      max={durationRange.max}
+                      unit="s"
+                      value={duration}
+                      onValueChange={onDurationChange}
+                    />
+                  </div>
+                ) : (
+                  <Segmented aria-label="选择生成时长" className="grid h-9 auto-cols-fr grid-flow-col rounded-lg bg-popover p-0.5">
+                    {caps.durations.map((item) => (
+                      <SegmentedItem key={item} value={String(item)} selected={duration === item} onSelect={() => onDurationChange(item)}>
+                        {item}s
+                      </SegmentedItem>
+                    ))}
+                  </Segmented>
+                )}
               </Section>
             )}
 
@@ -205,6 +238,16 @@ export function VideoControls({
       </ToolbarPopover>
     </div>
   );
+}
+
+/** 刻度：两端 + 区间内 5 的倍数（3–15 → 3 5 10 15）；离两端不足 10% 的中间刻度省掉，免得数字挤在一起（3–30 → 3 10 15 …）。 */
+function durationMarks(min: number, max: number): number[] {
+  const gap = (max - min) * 0.1;
+  const marks = [min];
+  for (let mark = Math.ceil((min + 1) / 5) * 5; mark < max; mark += 5) {
+    if (mark - min >= gap && max - mark >= gap) marks.push(mark);
+  }
+  return [...marks, max];
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
