@@ -32,6 +32,11 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.137.0', date: '2026-11-13', headline: 'Seedream 5.5 透明背景与图层拆分', changes: [
+    { kind: 'feat', text: 'Seedream 5.5 新增「背景：自动 / 透明」开关，选透明时提示词不写也直接出透明 PNG（OpenRouter 渠道不支持）。' },
+    { kind: 'feat', text: '图层拆分可选 Seedream 5.5，最多拆出 99 层，可设「最多图层」控制拆多细。' },
+    { kind: 'feat', text: 'Seedream 5.0 Pro / 5.5 新增 1K 分辨率，按低价档计费；火山直连按出图尺寸显示预计费用。' },
+  ] },
   { version: '5.136.0', date: '2026-11-13', headline: 'Seedream 5.5 图像模型', changes: [
     { kind: 'feat', text: '接入 Seedream 5.5：火山方舟、TokenDance、兔子、OpenRouter 都可选；提示词里写「透明背景」就直接出透明 PNG。' },
     { kind: 'fix', text: '兔子渠道 Seedream 的预计费用改正：此前少算了分组倍率，5.0 Pro 实际约 2.1 元 / 张起，旧显示 0.3 元。' },
