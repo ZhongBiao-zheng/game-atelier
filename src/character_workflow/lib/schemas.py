@@ -686,7 +686,7 @@ CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     "image": frozenset({
         "workflow_inputs",
         "n", "size", "size_mode", "custom_size", "ratio", "resolution", "quality",
-        "complexity", "output_format", "frame_count", "frame_duration_ms",
+        "complexity", "output_format", "frame_count", "frame_duration_ms", "background",
         "creation_asset_source_title", "prompt_asset_id",
         # 多角度生成由服务端写进结果 Draft，浏览器会原样回传，必须放行。
         "angle_horizontal", "angle_pitch", "angle_distance", "angle_wide",

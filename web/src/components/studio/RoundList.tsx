@@ -54,6 +54,8 @@ export interface RoundConfig {
   output_format?: 'gif';
   frame_count?: number;
   frame_duration_ms?: number;
+  /** Seedream 5.5：transparent = 强制透明背景（其余值不展示）。 */
+  background?: JobParams['background'];
   size?: string;
   sizeMode?: 'auto' | 'ratio' | 'custom';
   n?: number;
@@ -150,6 +152,7 @@ function SpecChips({ config, reuseParameter, testId, children }: {
   if (!video) {
     add('complexity', config.complexity && `规划 ${COMPLEXITY_LABELS[config.complexity]}`);
     add('gif', gifSummary(config) ?? undefined);
+    add('background', config.background === 'transparent' ? '透明背景' : undefined);
   }
   add('count', config.n != null ? `${config.n} 张` : undefined);
   if (video) add('audio', config.generateAudio != null ? config.generateAudio ? '有音频' : '无音频' : undefined);

@@ -134,6 +134,8 @@ export function intersectImageCaps(all: ImageControlCaps[]): ImageControlCaps {
     showCustomSize: all.every(caps => caps.showCustomSize),
     showAutoSize: all.every(caps => caps.showAutoSize),
     qualities: qualities?.length ? qualities : null,
+    // 透明背景是请求参数：「自动」路由到不收 background 的成员会静默丢掉，所以必须每个成员都支持。
+    transparentBackground: all.every(caps => caps.transparentBackground),
   };
 }
 

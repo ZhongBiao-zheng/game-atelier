@@ -2594,3 +2594,35 @@ def test_layer_max_images_is_a_seedream_55_only_option():
         assert openai_image.supports_layer_max_images(model) is True
     for model in ("doubao-seedream-5-0-pro-260628", "seedream-5.0-flash"):
         assert openai_image.supports_layer_max_images(model) is False
+
+
+@pytest.mark.parametrize(("model", "background", "sent"), [
+    ("seedream-5.5", "transparent", "transparent"),
+    # 5.0 Pro 不支持强制透明：草稿残留的 background 不得发出去。
+    ("seedream-5.0-pro", "transparent", None),
+])
+def test_seedream_55_sends_transparent_background(
+    isolated_data_root, tmp_path, monkeypatch, model, background, sent,
+):
+    _add_tokendance_key("td", [{"name": model, "id": model, "protocol": "ark"}])
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured.update(json)
+        return FakePostResponse({"data": [{
+            "b64_json": base64.b64encode(b"\x89PNG\r\n\x1a\nbg").decode("ascii"),
+        }]})
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    openai_image.render(prompt="potion icon", model=model, alias="td", output_dir=tmp_path,
+                        n=1, size="1024x1024", params={"background": background})
+
+    assert captured.get("background") == sent
+    assert captured["output_format"] == "png"
+
+
+def test_transparent_background_skips_openrouter():
+    assert openai_image.supports_transparent_background("seedream", "doubao-seedream-5-5-261028")
+    assert openai_image.supports_transparent_background("tokendance", "seedream-5.5")
+    assert not openai_image.supports_transparent_background("openrouter", "bytedance-seed/seedream-5-5")
+    assert not openai_image.supports_transparent_background("seedream", "doubao-seedream-5-0-pro-260628")

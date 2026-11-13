@@ -58,12 +58,13 @@ export function prepareImageSizeSubmission(
  *  `source` 可以是当前 sizeParams，也可以是「再次生成」带来的 RoundConfig（字段名相同）。 */
 export function gptImage26JobParams(
   caps: ImageControlCaps,
-  source: Pick<JobParams, 'complexity' | 'output_format' | 'frame_count' | 'frame_duration_ms'>,
+  source: Pick<JobParams, 'complexity' | 'output_format' | 'frame_count' | 'frame_duration_ms' | 'background'>,
   hasReferences: boolean,
-): Pick<JobParams, 'complexity' | 'output_format' | 'frame_count' | 'frame_duration_ms'> {
+): Pick<JobParams, 'complexity' | 'output_format' | 'frame_count' | 'frame_duration_ms' | 'background'> {
   const kept = withoutUnsupportedGptImage26Params({
     complexity: source.complexity, output_format: source.output_format,
     frame_count: source.frame_count, frame_duration_ms: source.frame_duration_ms,
+    background: source.background,
   }, caps);
   if (hasReferences) {
     delete kept.output_format;
@@ -73,10 +74,12 @@ export function gptImage26JobParams(
   return kept;
 }
 
-/** GPT Image 2.6 专属字段只在支持的模型上保留；换到别的模型就丢掉，不带着旧值出图。 */
+/** 模型专属字段（GPT Image 2.6 的规划 / GIF、Seedream 5.5 的透明背景）只在支持的模型上保留；
+ *  换到别的模型就丢掉，不带着旧值出图。 */
 export function withoutUnsupportedGptImage26Params(current: JobParams, caps: ImageControlCaps): JobParams {
-  const { complexity, output_format, frame_count, frame_duration_ms, ...rest } = current;
+  const { complexity, output_format, frame_count, frame_duration_ms, background, ...rest } = current;
   const params: JobParams = rest;
+  if (caps.transparentBackground && background === 'transparent') params.background = 'transparent';
   if (caps.complexities && complexity) params.complexity = complexity;
   if (caps.gifOutput && output_format === 'gif') {
     params.output_format = 'gif';

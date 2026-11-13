@@ -253,6 +253,32 @@ describe('CanvasImageSettings', () => {
     expect(screen.queryByText('质量')).not.toBeInTheDocument();
   });
 
+  it('Seedream 5.5 的「背景」开关写 background=transparent，5.0 Pro 没有这个开关', () => {
+    const onPatch = vi.fn();
+    const { unmount } = render(
+      <CanvasImageSettings
+        caps={imageControlCaps('seedream-5.5', 'tokendance')}
+        model="seedream-5.5"
+        params={{ n: 1, ratio: '1:1', resolution: '2K' }}
+        onPatch={onPatch}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '图片设置' }));
+    fireEvent.click(screen.getByRole('radio', { name: '透明' }));
+    expect(onPatch).toHaveBeenCalledWith({ background: 'transparent' });
+    unmount();
+    render(
+      <CanvasImageSettings
+        caps={imageControlCaps('seedream-5.0-pro', 'tokendance')}
+        model="seedream-5.0-pro"
+        params={{ n: 1, ratio: '1:1', resolution: '2K' }}
+        onPatch={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '图片设置' }));
+    expect(screen.queryByLabelText('选择背景')).not.toBeInTheDocument();
+  });
+
   it('explains Midjourney fixed outputs instead of rendering a fake count control', () => {
     render(
       <CanvasImageSettings

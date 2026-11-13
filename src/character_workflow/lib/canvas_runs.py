@@ -542,6 +542,11 @@ def _gpt_image_26_params(key: KeySpec, model_id: str, params: dict[str, Any]) ->
     """
     from character_workflow.lib.callers.openai_image import supports_image_complexity
 
+    from character_workflow.lib.callers.openai_image import supports_transparent_background
+
+    # Seedream 5.5 的「透明背景」开关与 2.6 字段同一条清理路径：只保留 transparent，换模型即丢。
+    if supports_transparent_background(key.provider, model_id):
+        return {"background": "transparent"} if params.get("background") == "transparent" else {}
     if key.provider == "openrouter" or not supports_image_complexity(model_id):
         return {}
     kept = {name: params[name] for name in (
@@ -586,7 +591,7 @@ def _normalized_image_preference_params(
         for field in ("ratio", "resolution", "custom_size"):
             if params.get(field) is not None and draft_params.get("size_mode"):
                 draft_params[field] = params[field]
-        for field in ("complexity", "output_format", "frame_count", "frame_duration_ms"):
+        for field in ("complexity", "output_format", "frame_count", "frame_duration_ms", "background"):
             draft_params.pop(field, None)
         return JobParams.model_validate({**draft_params, **_gpt_image_26_params(key, model.id, params)})
 

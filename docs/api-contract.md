@@ -265,7 +265,10 @@ server 启动建好监听后对每个库各起一条后台线程补扫一次（�
 Seedance 提交诊断位于 `params.video_submission_attempts`（每单最多四项）：`attempt`、`method`、`url`（去掉凭证、query 与 fragment）、`started_at`（UTC）、`elapsed_ms`、`http_status`、`request_ids`（只取白名单响应头）、`error_type`（网络异常类名）与 `outcome`。提交前记录 `submitting`，收到响应记录 `response`；5xx、网络中断及无法解析的成功响应标为 `unconfirmed`。不保存请求正文、授权头、图片 Base64 或原始网络异常文本。504 等错误说明“提交结果未确认”，不自动重提。Windows 复测后提供数据目录 `.runtime/jobs/<job_id>.json` 即可核对记录；无须提供 `.config/keys.json`。这些诊断不进入复用配方，新订单不继承。
 
 Canvas 节点媒体设置新增的显式参数也遵循同一契约：图片 `background` 只允许
-`auto | opaque | transparent`，并只向已验证的 GPT Image 直连协议发送；视频 `watermark`
+`auto | opaque | transparent`，并只向已验证的 GPT Image 直连协议发送；Seedream 5.5 界面给
+「背景：自动 / 透明」，只保留并发送 `transparent`（自动 = 不发，由提示词决定），火山直连、TokenDance、Tuzi 都发，
+OpenRouter 的 `/images` 描述符没有该参数故不给开关，「自动」路由须每个成员都支持。2026-11-13 实测 `transparent`
+不写提示词也出 RGBA，`opaque` 能压过提示词里的「透明背景」。视频 `watermark`
 为 bool，只在 Seedance / HappyHorse capability 开启时写入 Snapshot 与厂商请求。
 
 Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每组最多 4 张），分别归属风格、角色、Omni 语义槽；垫图仍写入通用的 `reference_images`。编号式风格参考写入 `mj_sref_code`（只存数字），它与图片式 `mj_sref` 互斥且优先级更高。个性化 Profile code/ID 写入 `mj_profile`（1–64 位 ASCII 字母或数字），caller 统一拼为 `--profile <value>`。Web 创建 job，caller 只负责校验结构化参数、把本地路径转公网 URL 并拼接对应 flag。

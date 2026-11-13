@@ -86,6 +86,7 @@ export function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
       ...(typeof p.frame_count === 'number' ? { frame_count: p.frame_count } : {}),
       ...(typeof p.frame_duration_ms === 'number' ? { frame_duration_ms: p.frame_duration_ms } : {}),
     } : {}),
+    ...(p.background === 'transparent' ? { background: 'transparent' as const } : {}),
     referenceImages: referenceImagesFor(job),
     promptAssetId: typeof p.prompt_asset_id === 'string' ? p.prompt_asset_id : undefined,
     sourceAssetTitle: typeof p.creation_asset_source_title === 'string'

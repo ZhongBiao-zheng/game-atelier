@@ -1340,7 +1340,7 @@ function StudioFull() {
       setVideoMode(omni ? 'omni' : 'firstlast');
       setGenerateAudio(!!config.generateAudio);
     } else {
-      setSizeParams({ workflow_inputs: config.workflowInputs, size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}), complexity: config.complexity, output_format: config.output_format, frame_count: config.frame_count, frame_duration_ms: config.frame_duration_ms });
+      setSizeParams({ workflow_inputs: config.workflowInputs, size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}), complexity: config.complexity, output_format: config.output_format, frame_count: config.frame_count, frame_duration_ms: config.frame_duration_ms, background: config.background });
       if (config.n) setCount(clampImageCount(config.n));
       if (config.quality) setQuality(config.quality);
       if (config.mjParams) setMjParams(config.mjParams);
@@ -1394,7 +1394,7 @@ function StudioFull() {
       setVideoMode(isOmniVideoConfig(config.frameMode, referencePathCounts(config)) ? 'omni' : 'firstlast');
       setGenerateAudio(!!config.generateAudio);
     } else {
-      setSizeParams({ workflow_inputs: config.workflowInputs, size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}), complexity: config.complexity, output_format: config.output_format, frame_count: config.frame_count, frame_duration_ms: config.frame_duration_ms });
+      setSizeParams({ workflow_inputs: config.workflowInputs, size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}), complexity: config.complexity, output_format: config.output_format, frame_count: config.frame_count, frame_duration_ms: config.frame_duration_ms, background: config.background });
       if (config.n) setCount(clampImageCount(config.n));
       if (config.mjParams) setMjParams(config.mjParams);
     }

@@ -282,11 +282,10 @@ def render(
     if is_tuzi and family == "nano-banana":
         quality = tuzi_image_quality(model, quality)
     image_protocol = _effective_image_protocol(key, model)
-    background = (
-        _background_param(kwargs)
-        if family == "gpt-image" and image_protocol in {None, "openai"}
-        else None
-    )
+    background = _background_param(kwargs) if (
+        (family == "gpt-image" and image_protocol in {None, "openai"})
+        or supports_transparent_background(key.provider, model)
+    ) else None
     ref_paths = _collect_ref_paths(kwargs, key.provider, model)
     if mask_path and not ref_paths:
         raise OpenAIImageError("mask edit requires a source image")
@@ -861,6 +860,19 @@ def supports_image_complexity(model: str) -> bool:
 
 def supports_gif_output(model: str) -> bool:
     return supports_image_complexity(model)
+
+
+# 能强制透明背景的模型族：Seedream 5.5 的 background=transparent 会压过提示词（2026-11-13 实测：
+# 提示词不提透明也出 RGBA；opaque 能压过「透明背景」）。前端 imageControlCaps 同判据。
+TRANSPARENT_BACKGROUND_FAMILIES = ("seedream-5-5",)
+
+
+def supports_transparent_background(provider: str, model: str) -> bool:
+    """OpenRouter 的 /images 描述符没有 background，走它不发（协议限制，不是模型能力）。"""
+    normalized = normalized_model_id(model)
+    return provider != "openrouter" and any(
+        family in normalized for family in TRANSPARENT_BACKGROUND_FAMILIES
+    )
 
 
 def _complexity_param(kwargs: dict) -> str | None:

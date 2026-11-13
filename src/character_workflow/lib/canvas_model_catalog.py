@@ -40,6 +40,7 @@ def model_rows(kind: str) -> list[dict]:
             from character_workflow.lib.callers.openai_image import (
                 fixed_nano_resolution_quality, image_family, max_reference_images,
                 supports_gif_output, supports_image_complexity, supports_image_quality,
+                supports_transparent_background,
             )
             from character_workflow.lib.video_caps import kling_spec, seedance_limits
             limits = {"image": max_reference_images(model.id), "video": 0, "audio": 0}
@@ -81,6 +82,9 @@ def model_rows(kind: str) -> list[dict]:
                                           "complexity": complexity,
                                           "gif": (kind == "image"
                                                   and supports_gif_output(model.id)),
+                                          "transparent_background": (
+                                              kind == "image" and supports_transparent_background(
+                                                  key.provider, model.id)),
                                           "fixed_quality": (fixed_nano_resolution_quality(model.id)
                                                             if kind == "image" else None),
                                           "size": None, "ratio": None, "duration": duration,

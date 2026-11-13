@@ -37,6 +37,11 @@ export function supportsGptImage26(modelId?: string | null): boolean {
   return normalizedModelId(modelId).replace(/\./g, '-').startsWith('gpt-image-2-6');
 }
 
+/** 能强制透明背景的模型（Seedream 5.5）；与后端 openai_image.TRANSPARENT_BACKGROUND_FAMILIES 同判据。 */
+export function supportsTransparentBackground(modelId?: string | null): boolean {
+  return normalizedModelId(modelId).replace(/\./g, '-').includes('seedream-5-5');
+}
+
 export interface ImageControlCaps {
   family: ImageFamily;
   maxCount?: number;
@@ -57,13 +62,15 @@ export interface ImageControlCaps {
   complexities: Complexity[] | null;
   /** 能否出 GIF 动图（GPT Image 2.6，仅文生图）。 */
   gifOutput: boolean;
+  /** 能否强制透明背景（Seedream 5.5；OpenRouter 的图片协议不收 background）。 */
+  transparentBackground: boolean;
   /** size 传给后端的语义：'ratio' = 传比例字符串(如 16:9)；'pixels' = 传 WxH；
    *  'none' = 该族不接受任何尺寸参数，控件与 params 都不该出现尺寸（MJ：比例由渠道锁定）。 */
   sizeKind: 'ratio' | 'pixels' | 'none';
 }
 
 // resolutions 不在这张表里：它按【模型】的像素上限裁，不是族属性（同族的 pro 与 lite 就不一样）。
-const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'ratios' | 'resolutions' | 'showAutoSize' | 'complexities' | 'gifOutput'>> = {
+const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'ratios' | 'resolutions' | 'showAutoSize' | 'complexities' | 'gifOutput' | 'transparentBackground'>> = {
   'nano-banana': {
     showResolution: false,
     showCustomSize: false,
@@ -112,12 +119,12 @@ export function imageControlCaps(
   if (provider === 'comfyui' || modelId?.startsWith('comfyui-')) return {
     family, maxCount: 4, ratios: [], resolutions: [], showResolution: false,
     showCustomSize: false, showAutoSize: false, qualities: null, sizeKind: 'none',
-    complexities: null, gifOutput: false,
+    complexities: null, gifOutput: false, transparentBackground: false,
   };
   if (provider === 'chatgpt') return {
     family, maxCount: 1, maxRefImages: 1, ratios: [], resolutions: [], showResolution: false,
     showCustomSize: false, showAutoSize: false, qualities: null, sizeKind: 'none',
-    complexities: null, gifOutput: false,
+    complexities: null, gifOutput: false, transparentBackground: false,
   };
   const base = FAMILY_CAPS[family];
   const sizeOptions = imageSizeOptions(modelId, provider, baseUrl);
@@ -166,6 +173,7 @@ export function imageControlCaps(
       // OpenRouter 的图片协议不收 complexity / GIF（/images/models 描述符里没有这两项）。
       complexities: null,
       gifOutput: false,
+      transparentBackground: false,
       sizeKind: sizeOptions.ratios.length ? 'ratio' : 'none',
     };
   }
@@ -174,6 +182,7 @@ export function imageControlCaps(
     ...base,
     complexities,
     gifOutput: gpt26,
+    transparentBackground: supportsTransparentBackground(modelId),
     ...(isNanoImageSizeModel(modelId) ? { showResolution: false, showCustomSize: false, sizeKind: 'ratio' as const } : {}),
     ...(tuziGptImageTiers ? { showResolution: !tuziGpt25, showCustomSize: false } : {}),
     ratios: sizeOptions.ratios,

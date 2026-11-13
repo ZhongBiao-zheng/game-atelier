@@ -6,7 +6,7 @@ import { providerForAlias, sizeContext, resolveChannel } from '@/lib/modelRoutes
 import { videoControlCaps } from '@/lib/videoControlCaps';
 import { clampImageCount } from './studioJobConfig';
 
-export type RoundParameter = 'model' | 'size' | 'resolution' | 'quality' | 'complexity' | 'gif' | 'count' | 'duration' | 'audio';
+export type RoundParameter = 'model' | 'size' | 'resolution' | 'quality' | 'complexity' | 'gif' | 'background' | 'count' | 'duration' | 'audio';
 export interface ParameterReuseContext {
   providers: KeyView[];
   alias: string;
@@ -77,6 +77,8 @@ export function reuseRoundParameter(config: RoundConfig, parameter: RoundParamet
       ? { sizeParams: normalizeImageSizeParams(size.modelId, size.provider, size.baseUrl, {
           ...sizeParams, output_format: 'gif', frame_count: config.frame_count, frame_duration_ms: config.frame_duration_ms,
         }, caps) } : null;
+    case 'background': return config.background === 'transparent' && caps.transparentBackground
+      ? { sizeParams: normalizeImageSizeParams(size.modelId, size.provider, size.baseUrl, { ...sizeParams, background: 'transparent' }, caps) } : null;
     case 'count': return config.n != null && caps.family !== 'midjourney' ? { count: Math.min(caps.maxCount ?? 4, clampImageCount(config.n)) } : null;
     default: return null;
   }

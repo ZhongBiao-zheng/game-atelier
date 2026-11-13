@@ -469,3 +469,17 @@ def test_layer_decomposition_result_accepts_seedream_55_layer_count():
     assert len(LayerDecompositionResult.model_validate({"outputs": outputs}).outputs) == 100
     with pytest.raises(ValueError):
         LayerDecompositionResult.model_validate({"outputs": [*outputs, {**outputs[-1], "output_index": 100}]})
+
+
+def test_canvas_keeps_background_only_for_seedream_55():
+    from types import SimpleNamespace
+
+    from character_workflow.lib.canvas_runs import _gpt_image_26_params
+
+    params = {"background": "transparent", "complexity": "low"}
+    assert _gpt_image_26_params(SimpleNamespace(provider="tokendance"), "seedream-5.5", params) == {
+        "background": "transparent",
+    }
+    assert _gpt_image_26_params(SimpleNamespace(provider="openrouter"), "bytedance-seed/seedream-5-5",
+                                params) == {}
+    assert _gpt_image_26_params(SimpleNamespace(provider="tokendance"), "seedream-5.0-pro", params) == {}
