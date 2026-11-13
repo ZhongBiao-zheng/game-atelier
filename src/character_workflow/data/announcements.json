@@ -5,7 +5,7 @@
       "date": "2026-11-13",
       "version": "5.136.0",
       "title": "Seedream 5.5 上线",
-      "summary": "字节 11 月 9 日发布：多轮修改时没动的地方保持不变，光影、皮肤和小字更真实。提示词里写「透明背景」就直接出透明 PNG，做图标、贴纸、道具不用再抠图。火山方舟与 TokenDance 0.13–0.23 元 / 张，不到 5.0 Pro 一半；Tuzi、OpenRouter 也已上线。",
+      "summary": "字节新一代图像模型：多轮修改不走样，可直出透明 PNG。火山方舟与 TokenDance 每张 0.13 元起。",
       "imageUrl": "https://arkdocs.tos-cn-beijing.volces.com/images/image-generation/seedream-5-5-transparent-stickers-output-20261103.png",
       "models": [
         {
@@ -24,7 +24,7 @@
       "date": "2026-11-10",
       "version": "5.135.0",
       "title": "可灵 4.0 上线",
-      "summary": "可灵 4.0 单次最长 30 秒，音画同出，可用最多 10 张参考图和参考视频驱动；4.0 Flash 更快更便宜，720p、最长 20 秒。TokenDance 与 EvoLink 已上线，TokenDance 720p 价格 4.0 每秒 1 元、Flash 每秒 0.6 元。同版补齐可灵 3.0 / 3.0 Turbo / 3.0 Omni。",
+      "summary": "单次最长 30 秒、音画同出，最多 10 张参考图；Flash 版更快更便宜。TokenDance、EvoLink 已上线。",
       "imageUrl": "https://p1-kling.klingai.com/kcdn/cdn-kcdn112452/kling-homepage-aio/assets/images/hero-v4-ocean-pianist-BJN4qEvR.jpg",
       "models": [
         {
@@ -48,7 +48,7 @@
       "date": "2026-11-05",
       "version": "5.134.0",
       "title": "GPT Image 2.6 上线",
-      "summary": "OpenAI 11 月 4 日发布：Flare 主打速度（低档约 6 秒出图），Sunburst 主打细节与多轮编辑一致性。新增「规划」强度与 GIF 动图输出（文生图，2–64 帧）。API 价格与 2.5 相同；OpenRouter 已上线，OpenAI-HK / Tuzi 待配价。",
+      "summary": "OpenAI 新版：Flare 主打速度，Sunburst 主打细节；新增「规划」强度与 GIF 动图输出。",
       "imageUrl": "https://images.ctfassets.net/kftzwdyauwt9/6EYvL2y5CLXFr8E1pqoVUK/064e0d73b10087e20967b69ef0a06678/images-2-6-social.png?w=1600&h=900&fit=fill",
       "models": [
         {
@@ -72,7 +72,7 @@
       "date": "2026-10-12",
       "version": "5.128.0",
       "title": "FLUX 3 Image 上线",
-      "summary": "Black Forest Labs 新一代图像生成与编辑模型：多轮编辑时不改动没提到的部分，复杂提示词和多语言文字渲染更准，官方支持最多 10 张参考图和原生 4K。Tuzi default 分组已上线，0.15¥ / 次。",
+      "summary": "BFL 新一代模型：多轮编辑不改没提到的部分，最多 10 张参考图、原生 4K。兔子 0.15 元 / 次。",
       "imageUrl": "https://cdn.sanity.io/images/2gpum2i6/production/486fe8dbe090c31226c868dac01a1f5d918eb756-1200x630.jpg",
       "models": [
         {
@@ -88,7 +88,7 @@
       "date": "2026-10-08",
       "version": "5.128.0",
       "title": "Nano Banana 2.1 上线",
-      "summary": "Google 最新的 Flash 档图像模型：画面质量、文字排版和多轮编辑的一致性全面提升，最多 14 张参考图，支持 1K / 2K / 4K，官方 API 单价约为 Nano Banana 2 的一半。",
+      "summary": "Google Flash 档图像模型：画质、文字与多轮编辑一致性提升，最多 14 张参考图，价格约为上一代一半。",
       "imageUrl": "https://lh3.googleusercontent.com/IQrKmeotvku7oU92ImkQ4h74TbS7A695HU4Zq633YsuNW0hvjZlndcmzyhh5-CqxFntzW6K9J1pgaTUayRTYgK93laVGdPBp2uDAdJASSm4CZprKE3Q=w1440-h810-n-nu",
       "models": [
         {

@@ -33,6 +33,11 @@ describe('公告数据文件', () => {
     for (const item of items) expect(versions, item.id).toContain(item.version);
   });
 
+  it('摘要两行以内：弹窗宽 448px、14px 字一行约 29 个汉字（英文数字按半个算）', () => {
+    const width = (text: string) => [...text].reduce((sum, char) => sum + (char.charCodeAt(0) < 128 ? 0.5 : 1), 0);
+    for (const item of items) expect(width(item.summary), item.id).toBeLessThanOrEqual(52);
+  });
+
   it('id 唯一，新的在前', () => {
     expect(new Set(items.map(item => item.id)).size).toBe(items.length);
     const dates = items.map(item => item.date);

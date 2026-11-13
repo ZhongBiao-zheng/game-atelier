@@ -163,31 +163,30 @@ export function AnnouncementDialog({ announcement, pager, onClose }: {
 
         {(step.kind === 'intro' || step.kind === 'scanning') && (
           <>
-            {/* 同心圆角：图片内缩 10px，圆角 = 外框 20px − 10px */}
+            {/* 卡片式（Mobbin：Perplexity / Recraft）：图片铺满顶部，圆角交给外框 overflow-hidden 裁。 */}
             {!imageFailed && (
-              <div className="p-2.5 pb-0">
-                <img
-                  src={announcement.imageUrl}
-                  alt=""
-                  className="aspect-video w-full rounded-md bg-secondary object-cover"
-                  onError={() => setImageFailed(true)}
-                />
-              </div>
+              <img
+                src={announcement.imageUrl}
+                alt=""
+                className="aspect-video w-full bg-secondary object-cover"
+                onError={() => setImageFailed(true)}
+              />
             )}
-            <div className="space-y-3 p-5">
-              <DialogTitle className="leading-snug">{announcement.title}</DialogTitle>
+            <div className="space-y-2 p-5">
+              <DialogTitle className="font-semibold leading-snug">{announcement.title}</DialogTitle>
               <DialogDescription>{announcement.summary}</DialogDescription>
-              <ul className="flex flex-wrap gap-1.5">
-                {announcement.models.map(model => (
-                  <li key={model.name} className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground">
-                    {model.name}
-                  </li>
-                ))}
-              </ul>
               {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-              <div className="flex items-center justify-end gap-1 pt-1">
+              {/* 模型标签、翻页与快速添加同一排：标签就是「快速添加」要加的东西，放一起不另起一行。 */}
+              <div className="flex items-center gap-1 pt-2">
+                <ul className="mr-auto flex min-w-0 flex-1 flex-wrap gap-1.5">
+                  {announcement.models.map(model => (
+                    <li key={model.name} className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground">
+                      {model.name}
+                    </li>
+                  ))}
+                </ul>
                 {pager && (
-                  <div className="mr-auto flex items-center gap-1 text-xs tabular-nums text-muted-foreground">
+                  <div className="flex shrink-0 items-center gap-1 text-xs tabular-nums text-muted-foreground">
                     <Button variant="ghost" size="icon" className="size-8" aria-label="上一条公告" disabled={!pager.onPrevious} onClick={pager.onPrevious}>
                       <ChevronLeftIcon aria-hidden="true" />
                     </Button>
@@ -197,7 +196,7 @@ export function AnnouncementDialog({ announcement, pager, onClose }: {
                     </Button>
                   </div>
                 )}
-                <Button size="sm" disabled={step.kind === 'scanning'} onClick={() => void scan()}>
+                <Button size="sm" className="shrink-0" disabled={step.kind === 'scanning'} onClick={() => void scan()}>
                   {step.kind === 'scanning' ? <LoadingIcon className="animate-spin" aria-hidden="true" /> : <AddIcon aria-hidden="true" />}
                   <SwapLabel active={step.kind === 'scanning'} on="查找中…" off="快速添加" />
                 </Button>
