@@ -260,6 +260,8 @@ export interface CanvasLayerStackNode extends CanvasNodeBase {
     model: string | null;
     prompt: string;
     resolution: 'auto' | '1K' | '1.5K' | '2K';
+    /** 最多输出张数（含底图），只有 Seedream 5.5 支持；缺省由厂商默认 30。 */
+    max_images?: number | null;
     base_version_id: string | null;
     base_visible: boolean;
     base_z_index?: number;

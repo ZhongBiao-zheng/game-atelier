@@ -74,8 +74,10 @@ export interface JobParams {
   output_format?: 'gif';
   frame_count?: number;
   frame_duration_ms?: number;
-  /** Seedream 5.0 Pro / Flash 图层拆分；结果中的 output_index 与 Job.output_paths 对齐。 */
+  /** Seedream 5.0 Pro / Flash / 5.5 图层拆分；结果中的 output_index 与 Job.output_paths 对齐。 */
   layer_decomposition?: boolean;
+  /** Seedream 5.5 图层拆分的最多输出张数（含底图，2–100）；缺省由厂商默认 30。 */
+  layer_max_images?: number | null;
   layer_decomposition_result?: {
     outputs: Array<{
       output_index: number;

@@ -105,7 +105,8 @@ def test_layer_stack_rejects_conflicting_background_or_layer_order(base_z_index,
     assert read_canvas_document(project.project_id) == document
 
 
-@pytest.mark.parametrize("field, rank", [("base", -1), ("base", 17), ("layer", -1), ("layer", 17)])
+# Seedream 5.5 起层级范围是 0–99（1 张底图 + 最多 99 层）。
+@pytest.mark.parametrize("field, rank", [("base", -1), ("base", 100), ("layer", -1), ("layer", 100)])
 def test_layer_stack_order_is_bounded(field, rank):
     _, document = _bound_stack()
     payload = document.model_dump(mode="json")

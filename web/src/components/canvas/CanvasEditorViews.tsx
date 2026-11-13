@@ -61,7 +61,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { CanvasImageToolbarPreferencesDialog } from '@/components/canvas/CanvasImageToolbarPreferencesDialog';
-import { layerDecompositionModelChoices } from '@/components/canvas/canvasLayerDecomposition';
+import {
+  LAYER_MAX_IMAGES_DEFAULT, LAYER_MAX_IMAGES_OPTIONS, layerDecompositionMaxOutputs,
+  layerDecompositionModelChoices, supportsLayerMaxImages,
+} from '@/components/canvas/canvasLayerDecomposition';
 import {
   CanvasAudioSettings,
   CanvasImageSettings,
@@ -254,7 +257,7 @@ export interface CanvasNodeContextValue {
   createLayerDecomposition: (node: Extract<CanvasContentNode, { type: 'image' }>) => void;
   submitLayerDecomposition: (nodeId: string) => Promise<void>;
   /** 已完成的拆分节点改提示词重拆：新建一个拆分节点并提交。 */
-  rerunLayerDecomposition?: (nodeId: string, settings: { alias: string; model: string; prompt: string }) => Promise<void>;
+  rerunLayerDecomposition?: (nodeId: string, settings: { alias: string; model: string; prompt: string; max_images?: number | null }) => Promise<void>;
   replaceLayerStackSource: (nodeId: string) => void;
   expandLayerStack: (nodeId: string) => void;
   recoverReversePromptConfig: (job: Job) => Promise<void>;
@@ -3341,7 +3344,7 @@ export function CanvasLayerStackSurface({
     sourceNodeId && context.mediaReplaceBusyNodeIds.has(sourceNodeId),
   );
 
-  function updateDraft(patch: Partial<Pick<CanvasLayerStackNode['data'], 'alias' | 'model' | 'prompt' | 'resolution'>>) {
+  function updateDraft(patch: Partial<Pick<CanvasLayerStackNode['data'], 'alias' | 'model' | 'prompt' | 'resolution' | 'max_images'>>) {
     context.updateNode(node.id, candidate => candidate.type === 'layer_stack'
       ? { ...candidate, data: { ...candidate.data, ...patch, error: null } }
       : candidate);
@@ -3425,7 +3428,7 @@ export function CanvasLayerStackSurface({
                 role="tooltip"
                 className="pointer-events-none invisible absolute right-0 top-full z-20 mt-1 w-64 rounded-lg border border-border bg-popover px-3 py-2 text-xs leading-relaxed text-foreground peer-hover:visible peer-focus-visible:visible"
               >
-                留空会自动识别主要图层。也可以明确要求：对输入图进行精确图层分离，识别并独立拆分标题文字、辅助文案、主体与装饰元素；调整指定文字图层和元素位置，同时保持原始画面风格、光影、色调和质感不变。
+                比例跟随原图。留空会自动识别主要图层。也可以明确要求：对输入图进行精确图层分离，识别并独立拆分标题文字、辅助文案、主体与装饰元素；调整指定文字图层和元素位置，同时保持原始画面风格、光影、色调和质感不变。
               </p>
             </div>
             <Label className="space-y-2 pr-7 text-xs text-muted-foreground">
@@ -3458,19 +3461,13 @@ export function CanvasLayerStackSurface({
                     value={node.data.prompt}
                     references={EMPTY_CANVAS_MENTION_REFERENCES}
                     mentionsEnabled={false}
-                    placeholder="上传单张图片，分离图中元素，最高支持17张输出"
+                    placeholder={`上传单张图片，分离图中元素，最高支持${layerDecompositionMaxOutputs(node.data.model)}张输出`}
                     onFocus={context.recordHistory}
                     onEditingChange={editing => context.setTextEditing?.(`prompt:${node.id}`, editing)}
                     onChange={prompt => updateDraft({ prompt: prompt.slice(0, 4000) })}
                   />
                 </div>
               )}
-            </div>
-            <div className="space-y-1.5 text-xs text-muted-foreground">
-              <span>图片比例</span>
-              <div aria-label="图片比例" className="flex h-8 items-center justify-center rounded-md bg-popover text-sm text-foreground">
-                智能
-              </div>
             </div>
             <div className="space-y-1.5 text-xs text-muted-foreground">
               <span>分辨率</span>
@@ -3486,6 +3483,17 @@ export function CanvasLayerStackSurface({
                 ))}
               </Segmented>
             </div>
+            {supportsLayerMaxImages(node.data.model) && (
+              <LayerMaxImagesPicker
+                value={node.data.max_images ?? LAYER_MAX_IMAGES_DEFAULT}
+                disabled={busy}
+                onSelect={maxImages => {
+                  if ((node.data.max_images ?? LAYER_MAX_IMAGES_DEFAULT) === maxImages) return;
+                  context.recordHistory();
+                  updateDraft({ max_images: maxImages });
+                }}
+              />
+            )}
             {node.data.error && (
               <p role="alert" className="line-clamp-3 text-xs leading-relaxed text-[color:var(--status-failed)]">
                 {canvasNodeRunDisplayError(node.data.error, '图层拆分失败，请重试')}
@@ -3516,6 +3524,32 @@ export function CanvasLayerStackSurface({
 }
 
 /** 已完成拆分节点的重拆面板：提示词与模型只存在面板里，提交时新建一个拆分节点，原节点的记录不动。 */
+/** Seedream 5.5 图层拆分的「最多图层」：含底图的总张数，越大拆得越细，费用按实际输出张数计。 */
+function LayerMaxImagesPicker({
+  value,
+  disabled,
+  onSelect,
+}: {
+  value: number;
+  disabled?: boolean;
+  onSelect: (maxImages: number) => void;
+}) {
+  return (
+    <div className="space-y-1.5 text-xs text-muted-foreground">
+      <span>最多图层</span>
+      <Segmented aria-label="选择最多图层" className="grid grid-cols-4 rounded-lg bg-popover p-0.5">
+        {LAYER_MAX_IMAGES_OPTIONS.map(option => (
+          <SegmentedItem key={option} value={String(option)} selected={value === option} disabled={disabled}
+            onSelect={() => onSelect(option)}
+            className="nodrag h-8 rounded-md px-1 text-center text-sm tabular-nums text-foreground transition-colors hover:bg-secondary/60 disabled:opacity-50">
+            {option}
+          </SegmentedItem>
+        ))}
+      </Segmented>
+    </div>
+  );
+}
+
 function CanvasLayerStackComposer({
   node,
   context,
@@ -3528,10 +3562,12 @@ function CanvasLayerStackComposer({
   const choices = useMemo(() => layerDecompositionModelChoices(context.keys), [context.keys]);
   const [prompt, setPrompt] = useState(node.data.prompt);
   const [selection, setSelection] = useState({ alias: node.data.alias, model: node.data.model });
+  const [maxImages, setMaxImages] = useState(node.data.max_images ?? LAYER_MAX_IMAGES_DEFAULT);
   const [submitting, setSubmitting] = useState(false);
   const selectedChoice = choices.find(choice => (
     choice.key.alias === selection.alias && choice.model.id === selection.model
   )) ?? choices[0];
+  const maxImagesSupported = supportsLayerMaxImages(selectedChoice?.model.id);
 
   async function submit() {
     if (!selectedChoice || !context.rerunLayerDecomposition) return;
@@ -3541,6 +3577,7 @@ function CanvasLayerStackComposer({
         alias: selectedChoice.key.alias,
         model: selectedChoice.model.id,
         prompt: prompt.slice(0, 4000),
+        max_images: maxImagesSupported ? maxImages : null,
       });
     } finally {
       setSubmitting(false);
@@ -3570,9 +3607,14 @@ function CanvasLayerStackComposer({
         references={EMPTY_CANVAS_MENTION_REFERENCES}
         mentionsEnabled={false}
         className="max-h-[50vh]"
-        placeholder="上传单张图片，分离图中元素，最高支持17张输出"
+        placeholder={`上传单张图片，分离图中元素，最高支持${layerDecompositionMaxOutputs(selectedChoice?.model.id)}张输出`}
         onChange={setPrompt}
       />
+      {maxImagesSupported && (
+        <div className="mt-2">
+          <LayerMaxImagesPicker value={maxImages} disabled={submitting} onSelect={setMaxImages} />
+        </div>
+      )}
       <div className="mt-2 flex items-end gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
           <CanvasModelPicker

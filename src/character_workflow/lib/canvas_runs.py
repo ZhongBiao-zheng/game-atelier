@@ -512,7 +512,7 @@ def _resolve_layer_decomposition_model(alias: str, model_id: str) -> tuple[KeySp
         return key, model
     raise CanvasRunCommandError(
         "canvas_layer_decomposition_model_invalid",
-        "所选模型不可用于图层拆分，请重新选择 Ark 协议下的 Seedream 5.0 Pro 或 Flash。",
+        "所选模型不可用于图层拆分，请重新选择 Ark 协议下的 Seedream 5.5、5.0 Pro 或 Flash。",
     )
 
 
@@ -1775,6 +1775,9 @@ def submit_layer_decomposition_run(
             )
 
         key, model = _resolve_layer_decomposition_model(alias, model_id)
+        from character_workflow.lib.callers.openai_image import supports_layer_max_images
+
+        max_images = surface.data.max_images if supports_layer_max_images(model.id) else None
         timestamp = _now()
         job_id = new_job_id()
         run_id = f"run-{secrets.token_hex(12)}"
@@ -1796,6 +1799,7 @@ def submit_layer_decomposition_run(
             "output_format": "png",
             "watermark": False,
             "n": 1,
+            **({"layer_max_images": max_images} if max_images else {}),
         }
         snapshot_payload = {
             "snapshot_version": 1,
@@ -1830,6 +1834,7 @@ def submit_layer_decomposition_run(
             size=surface.data.resolution,
             reference_images=paths["image"],
             layer_decomposition=True,
+            layer_max_images=max_images,
         )
         job = Job(
             job_id=job_id,

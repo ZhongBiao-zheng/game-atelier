@@ -352,7 +352,7 @@ def render(
     if params and params.get("layer_decomposition"):
         if not supports_layer_decomposition(key, model):
             raise OpenAIImageError(
-                "layer decomposition requires an Ark-compatible Seedream 5.0 Pro or Flash"
+                "layer decomposition requires an Ark-compatible Seedream 5.0 Pro / Flash or 5.5"
             )
         if not isinstance(ref_image, str):
             raise OpenAIImageError("layer decomposition requires exactly one source image")
@@ -370,6 +370,9 @@ def render(
             "response_format": "b64_json",
             "watermark": False,
         }
+        max_images = params.get("layer_max_images")
+        if max_images and supports_layer_max_images(model):
+            payload["layer_decomposition_options"] = {"max_images": int(max_images)}
         if prompt.strip():
             payload["prompt"] = prompt.strip()
         data = _post_json(generations_url, key.access_key, payload, timeout=timeout)
@@ -448,13 +451,21 @@ def _is_tokendance_gateway(base_url: str | None) -> bool:
     return "tokendance" in urlsplit((base_url or "").strip()).netloc.lower()
 
 
-# 支持图层拆分的模型族（归一化 id 子串）：Seedream 5.0 Pro 与 5.0 Flash。
+# 支持图层拆分的模型族（归一化 id 子串）：Seedream 5.0 Pro、5.0 Flash 与 5.5。
 # 前端 canvasLayerDecomposition.ts 的 LAYER_DECOMPOSITION_FAMILIES 必须同步。
-LAYER_DECOMPOSITION_FAMILIES = ("seedream-5-0-pro", "seedream-5-0-flash")
+LAYER_DECOMPOSITION_FAMILIES = ("seedream-5-0-pro", "seedream-5-0-flash", "seedream-5-5")
+# 支持 layer_decomposition_options.max_images 的模型族（Ark 文档：只有 5.5，5.0 传了会报错）。
+# 前端 canvasLayerDecomposition.ts 的 supportsLayerMaxImages 必须同步。
+LAYER_MAX_IMAGES_FAMILIES = ("seedream-5-5",)
+
+
+def supports_layer_max_images(model: str) -> bool:
+    normalized = normalized_model_id(model)
+    return any(family in normalized for family in LAYER_MAX_IMAGES_FAMILIES)
 
 
 def supports_layer_decomposition(key, model: str) -> bool:
-    """图层拆分唯一判据：Seedream 5.0 Pro / Flash 且实际走 Ark 协议（火山直连或已解析为 ark 的网关）。
+    """图层拆分唯一判据：Seedream 5.0 Pro / Flash / 5.5 且实际走 Ark 协议（火山直连或已解析为 ark 的网关）。
 
     canvas_runs 的模型筛选与 render 的出站门禁都调这里，不各写一份。前端
     web/src/components/canvas/canvasLayerDecomposition.ts 是同一真值表的 TS 版。

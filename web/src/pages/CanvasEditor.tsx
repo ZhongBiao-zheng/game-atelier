@@ -3248,7 +3248,7 @@ function CanvasEditorInner({
   // 已完成的拆分节点不能再提交：改提示词重拆 = 从同一张来源图新建一个拆分节点放在下方并立即提交。
   const rerunLayerDecomposition = useCallback(async (
     stackId: string,
-    settings: { alias: string; model: string; prompt: string },
+    settings: { alias: string; model: string; prompt: string; max_images?: number | null },
   ) => {
     if (batchBusyRef.current) {
       setError('批量执行期间暂时锁定画布编辑，请先停止或等待完成。');
@@ -3274,7 +3274,7 @@ function CanvasEditorInner({
       source,
       sourceVersion,
       { x: previous.position.x, y: previous.position.y + previousSize.height + 72 },
-      { ...settings, resolution: previous.data.resolution },
+      { max_images: previous.data.max_images ?? null, ...settings, resolution: previous.data.resolution },
     );
     history.current.past.push(current);
     history.current.past = history.current.past.slice(-50);
@@ -6348,7 +6348,7 @@ function newLayerStackNode(
   source: Extract<CanvasContentNode, { type: 'image' }>,
   sourceVersion: CanvasMediaVersion,
   preferred: XYPosition,
-  settings: Pick<CanvasLayerStackNode['data'], 'alias' | 'model' | 'prompt' | 'resolution'>,
+  settings: Pick<CanvasLayerStackNode['data'], 'alias' | 'model' | 'prompt' | 'resolution' | 'max_images'>,
 ): CanvasLayerStackNode {
   const size = layerStackSizeForCanvasVersion(sourceVersion);
   return {

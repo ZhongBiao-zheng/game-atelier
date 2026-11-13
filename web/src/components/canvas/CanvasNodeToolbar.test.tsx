@@ -717,10 +717,11 @@ it('configures and starts layer decomposition inside the new node', () => {
   expect(screen.getByRole('img', { name: '待拆分图片' })).toHaveAttribute('draggable', 'false');
   expect(screen.getByRole('button', { name: '选择生成模型' })).toHaveTextContent('Seedream 5.0 Pro');
   expect(screen.queryByText('保持原图比例 · PNG')).not.toBeInTheDocument();
-  expect(screen.getByLabelText('图片比例')).toHaveTextContent('智能');
+  // 比例固定跟随原图：不占一行假控件，写进「?」说明。
+  expect(screen.queryByLabelText('图片比例')).not.toBeInTheDocument();
   expect(screen.getByText('上传单张图片，分离图中元素，最高支持17张输出')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '图层拆分使用说明' })).toBeInTheDocument();
-  expect(screen.getByRole('tooltip')).toHaveTextContent('留空会自动识别主要图层');
+  expect(screen.getByRole('tooltip')).toHaveTextContent('比例跟随原图。留空会自动识别主要图层');
   expect(screen.getByLabelText('图层拆分设置')).not.toHaveClass('nowheel');
   expect(screen.getByRole('radio', { name: '智能' })).toHaveAttribute('aria-checked', 'true');
   fireEvent.click(screen.getByRole('radio', { name: '1.5K' }));

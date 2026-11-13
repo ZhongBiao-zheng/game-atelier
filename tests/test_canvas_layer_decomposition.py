@@ -35,6 +35,7 @@ from character_workflow.lib.schemas import (
     CanvasLayerStackData,
     CanvasLayerStackNode,
     JobParams,
+    LayerDecompositionResult,
     CanvasMediaDisplay,
     CanvasMediaNodeData,
     CanvasPoint,
@@ -424,3 +425,47 @@ def test_layer_decomposition_endpoint_schedules_the_canvas_job(
     assert payload["job"]["canvas_run"]["snapshot"]["normalized_params"]["size"] == "auto"
     stack = next(node for node in payload["document"]["nodes"] if node["id"] == "layer-stack")
     assert stack["data"]["active_run_id"] == payload["job"]["canvas_run"]["run_id"]
+
+
+def _configure_seedream_55() -> None:
+    write_keys_db(KeysDB(default_alias="ark", keys=[KeySpec(
+        alias="ark", provider="seedream", base_url="https://ark.cn-beijing.volces.com/api/v3",
+        access_key="secret", created_at="2026-11-13T00:00:00Z",
+        models=[
+            ModelSpec(name="Seedream 5.5", id="doubao-seedream-5-5-261028", modality="image"),
+            ModelSpec(name="Seedream 5.0 Pro", id="doubao-seedream-5-0-pro-260628", modality="image"),
+        ],
+    )]))
+
+
+@pytest.mark.parametrize(("model", "frozen"), [
+    ("doubao-seedream-5-5-261028", 10),
+    # 5.0 Pro 不支持 max_images：节点上残留的值（切模型前选的）不得发出去。
+    ("doubao-seedream-5-0-pro-260628", None),
+])
+def test_layer_decomposition_freezes_max_images_only_for_seedream_55(isolated_data_root, model, frozen):
+    _configure_seedream_55()
+    project, current, _version = _project_with_decomposition_node(model=model)
+    stack = next(node for node in current.nodes if node.id == "layer-stack")
+    current = save_canvas_document(project.project_id, current.model_copy(update={"nodes": [
+        node.model_copy(update={"data": stack.data.model_copy(update={"max_images": 10})})
+        if node.id == "layer-stack" else node
+        for node in current.nodes
+    ]}), current.revision)
+
+    job, _submitted = submit_layer_decomposition_run(
+        project.project_id, "layer-stack", current.revision, "ark", model,
+    )
+
+    assert job.params.layer_max_images == frozen
+    assert job.canvas_run.snapshot.normalized_params.get("layer_max_images") == frozen
+
+
+def test_layer_decomposition_result_accepts_seedream_55_layer_count():
+    outputs = [{
+        "output_index": index, "z_index": index, "size": "1x1", "output_format": "png",
+        "bounding_box": None if index == 0 else {"absolute": [0, 0, 1, 1], "normalized": [0, 0, 1000, 1000]},
+    } for index in range(100)]
+    assert len(LayerDecompositionResult.model_validate({"outputs": outputs}).outputs) == 100
+    with pytest.raises(ValueError):
+        LayerDecompositionResult.model_validate({"outputs": [*outputs, {**outputs[-1], "output_index": 100}]})

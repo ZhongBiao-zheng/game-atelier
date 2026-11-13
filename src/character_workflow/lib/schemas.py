@@ -71,10 +71,14 @@ class LayerDecompositionBoundingBox(BaseModel):
         return self
 
 
+# Seedream 5.5 单次最多 1 张底图 + 99 个图层（5.0 Pro / Flash 为 1 + 16）。
+LAYER_DECOMPOSITION_MAX_OUTPUTS = 100
+
+
 class LayerDecompositionOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    output_index: int = Field(ge=0, le=16)
-    z_index: int = Field(ge=0, le=16)
+    output_index: int = Field(ge=0, le=LAYER_DECOMPOSITION_MAX_OUTPUTS - 1)
+    z_index: int = Field(ge=0, le=LAYER_DECOMPOSITION_MAX_OUTPUTS - 1)
     size: str = Field(min_length=1, max_length=40)
     output_format: Literal["png", "jpeg"]
     name: str = Field(default="", max_length=200)
@@ -98,7 +102,9 @@ class LayerDecompositionUsage(BaseModel):
 
 class LayerDecompositionResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    outputs: list[LayerDecompositionOutput] = Field(min_length=2, max_length=17)
+    outputs: list[LayerDecompositionOutput] = Field(
+        min_length=2, max_length=LAYER_DECOMPOSITION_MAX_OUTPUTS,
+    )
     usage: LayerDecompositionUsage | None = None
 
     @model_validator(mode="after")
@@ -212,6 +218,8 @@ class JobParams(BaseModel):
     frame_duration_ms: int | None = Field(default=None, ge=20, le=2000)
     # Seedream 5.0 Pro / Flash 图层拆分：caller 回写有序图层元数据，output_index 对齐 Job.output_paths。
     layer_decomposition: bool | None = None
+    # Seedream 5.5 图层拆分的最多输出张数（含底图）；不填由厂商默认 30。
+    layer_max_images: int | None = Field(default=None, ge=2, le=LAYER_DECOMPOSITION_MAX_OUTPUTS)
     layer_decomposition_result: LayerDecompositionResult | None = None
     # 视频参数（kind=video）—— 做成一等公民以保证双端类型对齐
     duration: int | None = None            # 秒，1-60
@@ -935,7 +943,7 @@ class CanvasLayerStackLayer(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=120)
     version_id: str = Field(min_length=1, max_length=160)
-    z_index: int = Field(ge=0, le=16)
+    z_index: int = Field(ge=0, le=LAYER_DECOMPOSITION_MAX_OUTPUTS - 1)
     name: str = Field(default="", max_length=200)
     description: str = Field(default="", max_length=2000)
     bounding_box: LayerDecompositionBoundingBox
@@ -950,12 +958,16 @@ class CanvasLayerStackData(BaseModel):
     model: str | None = Field(default=None, min_length=1, max_length=240)
     prompt: str = Field(default="", max_length=4000)
     resolution: Literal["auto", "1K", "1.5K", "2K"] = "auto"
+    # 最多输出张数（含底图），只有 Seedream 5.5 支持；None = 厂商默认 30。
+    max_images: int | None = Field(default=None, ge=2, le=LAYER_DECOMPOSITION_MAX_OUTPUTS)
     base_version_id: str | None = Field(default=None, max_length=160)
-    base_z_index: int = Field(default=0, ge=0, le=16)
+    base_z_index: int = Field(default=0, ge=0, le=LAYER_DECOMPOSITION_MAX_OUTPUTS - 1)
     base_visible: bool = True
     base_material_node_id: str | None = None
     layout_size: CanvasGroupSize | None = None
-    layers: list[CanvasLayerStackLayer] = Field(default_factory=list, max_length=16)
+    layers: list[CanvasLayerStackLayer] = Field(
+        default_factory=list, max_length=LAYER_DECOMPOSITION_MAX_OUTPUTS - 1,
+    )
     active_run_id: str | None = Field(default=None, max_length=160)
     error: str | None = Field(default=None, max_length=4000)
 

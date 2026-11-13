@@ -145,7 +145,7 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 
 ### 图层栈显示顺序（5.44.0）
 
-`layer_stack.data.base_z_index` 默认 0，背景与 `layers[].z_index` 共用 0–16 范围；存在背景时所有层级值必须唯一。
+`layer_stack.data.base_z_index` 默认 0，背景与 `layers[].z_index` 共用 0–99 范围（5.136.0 起随 Seedream 5.5 由 0–16 放宽）；存在背景时所有层级值必须唯一。
 左侧合成按 z 升序绘制，右侧列表按 z 降序展示。拖拽后统一编号 0..N-1，通过原 Document 保存与撤销链路持久化。
 层 id、version_id、bounding_box、可见性、material_node_id 不随排序改变；Job 中的原始输出层号仍表示不可变来源，不是编辑后的显示顺序。
 
@@ -552,12 +552,12 @@ Input Connection。图片模型优先使用仍可路由的画布图片生成偏�
 初始尺寸；运行中及已完成节点冻结本次源 Version，历史产物不随上游变化。节点左侧展示源图，右侧保存用户选择的
 `alias + model` 与可选提示词。`POST
 /canvas/projects/{id}/runs/layer-decomposition` 只接受该节点的 `surface_node_id + expected_revision + alias + model`，
-服务端还会核对请求选择与节点已保存设置完全一致。只接受火山直连或明确使用 Ark 协议的 Seedream 5.0 Pro / Flash，
+服务端还会核对请求选择与节点已保存设置完全一致。只接受火山直连或明确使用 Ark 协议的 Seedream 5.5 / 5.0 Pro / Flash，
 绝不自动替换渠道或模型。比例固定为“智能”并继承输入图；分辨率默认 `auto`，可显式选择
 `1K / 1.5K / 2K`。调用固定提交单张源图、`layer_decomposition=true`、节点保存的 `size`、
 `output_format=png`、`response_format=b64_json` 与
-`watermark=false`，不自动回退到其他渠道或普通生图。提交与完成事务都复用原 `layer_stack` 节点；完成后把背景图
-和最多 16 张透明 PNG 全部登记为不可变图片 Version，并保存厂商返回的 `z_index`、`name`、
+`watermark=false`，不自动回退到其他渠道或普通生图。Seedream 5.5 另可在节点保存 `max_images`（含底图的最多输出张数，2–100，界面给 10 / 30 / 60 / 100，缺省由厂商默认 30），提交时冻结进 `params.layer_max_images`，caller 只对 5.5 发 `layer_decomposition_options.max_images`（Ark 文档：5.0 Pro / Flash 不支持）。提交与完成事务都复用原 `layer_stack` 节点；完成后把背景图
+和全部透明 PNG（5.0 Pro / Flash 最多 16 张、5.5 最多 99 张）登记为不可变图片 Version，并保存厂商返回的 `z_index`、`name`、
 `description`、`bounding_box`。底图使用普通 `job_output` 血缘，透明层使用带 `job_id + output_index` 的
 `layer_decomposition` 血缘；媒体读取和项目包导入导出均校验该索引与 Job 输出一致。图层栈按绝对 bbox
 重建原图，显隐只修改节点呈现状态，不改写产物字节或 Job 历史。

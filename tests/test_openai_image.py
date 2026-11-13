@@ -2577,6 +2577,8 @@ def test_tuzi_gif_goes_through_chat_prompt(tmp_path, monkeypatch, head, suffix, 
     [
         ("doubao-seedream-5-0-pro-260628", True),
         ("doubao-seedream-5-0-flash-260915", True),
+        ("doubao-seedream-5-5-261028", True),
+        ("seedream-5.5", True),
         ("doubao-seedream-5-0-lite-260128", False),
     ],
 )
@@ -2585,3 +2587,10 @@ def test_layer_decomposition_accepts_seedream_5_pro_and_flash(model, expected):
 
     key = SimpleNamespace(provider="seedream", base_url=None, models=[])
     assert openai_image.supports_layer_decomposition(key, model) is expected
+
+
+def test_layer_max_images_is_a_seedream_55_only_option():
+    for model in ("doubao-seedream-5-5-261028", "seedream-5.5", "bytedance-seed/seedream-5-5"):
+        assert openai_image.supports_layer_max_images(model) is True
+    for model in ("doubao-seedream-5-0-pro-260628", "seedream-5.0-flash"):
+        assert openai_image.supports_layer_max_images(model) is False
