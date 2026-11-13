@@ -44,7 +44,7 @@ export function Home() {
           <img
             src={`/api/gallery/image?path=${encodeURIComponent(item.path)}`}
             alt=""
-            className="w-full block"
+            className="media-checker w-full block"
             loading="lazy"
           />
         </Link>

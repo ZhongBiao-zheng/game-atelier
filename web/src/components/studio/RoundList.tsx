@@ -1107,7 +1107,7 @@ function DoneBatch({
                     alt={`生成结果 ${index + 1}`}
                     loading="lazy"
                     decoding="async"
-                    className="h-full w-full object-contain"
+                    className="media-checker h-full w-full object-contain"
                   />
                   <div className="absolute right-2 top-2 flex gap-1.5">
                     {(share || saveResult || onSetPromptPreview) && <DropdownMenu>

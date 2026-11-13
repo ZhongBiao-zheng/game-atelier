@@ -3744,7 +3744,7 @@ function MediaPreview({
       decoding="async"
       draggable={false}
       className={cn(
-        'block size-full select-none',
+        'media-checker block size-full select-none',
         freeResize ? 'object-fill' : fit === 'cover' ? 'object-cover' : 'object-contain',
         compact && 'max-h-48 rounded-md',
       )}

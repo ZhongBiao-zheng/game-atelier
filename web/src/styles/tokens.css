@@ -306,6 +306,17 @@
     background-image: radial-gradient(color-mix(in srgb, var(--foreground) 22%, transparent) 1px, transparent 1px);
     background-size: 12px 12px;
   }
+  /* 作品图的透明区域：棋盘格挂在 <img> 自己的背景上，不透明的图会把它整块盖住，透明的图才露出来，
+     不用逐张判断。格子色 = 前景色按比例混进卡片底色：深色主题是深底浅格，浅色主题自动变成浅底深格
+     （Mobbin：Leonardo 深色、Canva / Adobe Express 浅色都是低对比小方格）。只用在 <img> 尺寸贴合图片的地方。 */
+  .media-checker {
+    background-color: var(--card);
+    background-image: conic-gradient(
+      color-mix(in srgb, var(--foreground) 10%, var(--card)) 25%, transparent 0 50%,
+      color-mix(in srgb, var(--foreground) 10%, var(--card)) 0 75%, transparent 0
+    );
+    background-size: 20px 20px;
+  }
   /* 透明像素用棋盘格显示，看得出发给厂商的图哪里是透明的。 */
   .edit-checker {
     background-color: #fff;
