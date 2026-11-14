@@ -188,10 +188,10 @@
   "files": [
     {
       "path": "ui/index.html",
-      "sha256": "6ac39b18c65a8c753eda78f37b74de6c98f290b303cc66c2992ef235fe2f7b55",
-      "bytes": 164029
+      "sha256": "a741c7797dbb23e050b0fc7445cc807517d845e042c44639002bbd814cf31d20",
+      "bytes": 164060
     }
   ],
   "source": "bundled",
-  "digest": "sha256:e11031c5c4f5ad081d84263f840b6524bd3fc19301ebd77ed6b2ed91e276b541"
+  "digest": "sha256:649963105bd6d15dbeb832935531d90c1ae6e33b98f5eefbae79f868f81a549a"
 }

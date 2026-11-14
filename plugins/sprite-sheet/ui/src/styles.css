@@ -12,7 +12,9 @@ body { background: transparent; color: var(--foreground); font: 14px/1.5 var(--f
 .panel { display: grid; grid-template-columns: minmax(0, 1fr) 18rem; height: 100%; background: var(--card); }
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .main > .stage { flex: 1; }
-.stage:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+/* 原图区域接收方向键，但不画整圈强调色：选中态只靠帧框高亮，聚焦时原图的细边框略加深。 */
+.stage:focus, .stage:focus-visible { outline: none; }
+.stage:focus-visible canvas { outline-color: var(--input); }
 .strip { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--border); flex-shrink: 0; min-width: 0; }
 .strip-frames { display: flex; gap: 8px; overflow-x: auto; min-width: 0; flex: 1; padding: 3px; }
 .strip-actions { display: flex; gap: 8px; flex-shrink: 0; }
