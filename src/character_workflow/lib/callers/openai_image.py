@@ -1055,11 +1055,15 @@ def _is_pre_flight_failure(error: BaseException) -> bool:
         return False
     if isinstance(error, requests.ConnectionError):
         # ConnectionError 同时涵盖「连不上」与「连上后被掐」，只能按报文区分。
-        dropped = (
+        # 后三个是「响应头已到、读响应体时失败」：requests 在 stream=False 下读体超时抛的是
+        # ConnectionError("Read timed out.") 而不是 ReadTimeout，原先被当成没送达而重试
+        # （本机假服务实测同一请求提交 3 次）。这时上游早已受理，必须当场致命。
+        sent = (
             "remote end closed", "remotedisconnected", "connection reset",
             "reset by peer", "connection aborted", "broken pipe",
+            "read timed out", "connection broken", "incompleteread", "incomplete read",
         )
-        return not any(marker in str(error).lower() for marker in dropped)
+        return not any(marker in str(error).lower() for marker in sent)
     return False
 
 

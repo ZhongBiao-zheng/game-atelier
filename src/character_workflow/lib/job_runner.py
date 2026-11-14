@@ -351,6 +351,14 @@ def _error_hint(low: str) -> str | None:
         or "欠费" in low
     ):
         return "厂商额度 / 余额不足：请到厂商官网充值或检查账户额度后重试。"
+    # 响应头已到、读响应体时中断（连接中途断开 / 响应不完整）：请求已被厂商受理。
+    # 读体超时与等响应头超时的报文都是 "Read timed out"，分不开，统一走下面的超时文案。
+    if ("connection broken" in low or "incompleteread" in low
+            or "incomplete read" in low or "读取响应体时失败" in low):
+        return (
+            "已收到厂商响应，但读取结果时失败：请求可能已经执行，请先在厂商后台核对再重试，"
+            "避免重复计费。"
+        )
     # 连接已建立但被远端中途掐断：多是该生成过重 / 上游太慢超出厂商网关等待时限（非本机网络问题）。
     if (
         "remote end closed" in low
@@ -367,8 +375,8 @@ def _error_hint(low: str) -> str | None:
         # 同步出图端点在图出完之前一个字节都不吐，所以读超时几乎必然意味着上游仍在生成、
         # 并且这次调用**已经计费**。别引导画师无脑重试（那是再买一次），先去后台确认。
         return (
-            "厂商接口超时未响应：这类超时通常意味着上游仍在出图、且这次调用已经计费。"
-            "重试前先到厂商后台确认这一单是否已经出图，避免重复付费；确认没出再重试或换模型。"
+            "厂商接口超时未响应：请求可能已经执行，请先在厂商后台核对再重试。"
+            "这类超时通常意味着上游仍在出图、且这次调用已经计费；确认没出再重试或换模型，避免重复付费。"
         )
     if "max retries" in low or "failed to establish" in low or (
         "connection" in low and "refused" in low
