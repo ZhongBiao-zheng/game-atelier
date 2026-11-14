@@ -269,7 +269,9 @@ def test_task_filter_queries_reach_local_route(monkeypatch):
 
 def test_team_tasks_preserve_ledger_billing_canceled_and_unknown_elapsed():
     records = team_records([dict(time=NOW.isoformat(), task_id=str(i), key_id="m", key_name="成员",
-        charged_cny=amount, kind=kind, status=status, duration=90) for i, (amount, kind, status) in enumerate([
+        # 真实用量行总带 estimated_cny（免费路由为 0.0）；缺了会被判成「未计价」。
+        charged_cny=amount, estimated_cny=amount, kind=kind, status=status, duration=90)
+        for i, (amount, kind, status) in enumerate([
             (0, "image", "done"), (4, "text", "done"), (0, "audio", "canceled"),
             (2, "image_edit", "failed"), (0, "layer_split", "done"),
         ])], set())
@@ -340,3 +342,20 @@ def test_model_duration_medians_recent_samples_and_auto_members(monkeypatch):
     durations.model_durations()
     assert len(calls) == 2
     durations._cache.clear()
+
+
+def test_gateway_unpriced_rows_count_as_unpriced_not_free():
+    """网关的配额账本把未计价任务记 0；用量页必须显示「未计价」，不能当成免费。"""
+    base = dict(time=NOW.isoformat(), key_id="m", key_name="成员", kind="image")
+    rows = [
+        {**base, "task_id": "unpriced", "status": "done", "charged_cny": 0,
+         "estimated_cny": None, "actual_cost_cny": None},
+        {**base, "task_id": "priced", "status": "done", "charged_cny": 0.2,
+         "estimated_cny": 0.2, "actual_cost_cny": None},
+        {**base, "task_id": "failed", "status": "failed", "charged_cny": 0,
+         "estimated_cny": None, "actual_cost_cny": None},
+    ]
+    costs = {row["id"]: row["cost_cny"] for row in team_records(rows, set())}
+    assert costs == {"unpriced": None, "priced": 0.2, "failed": 0}
+    totals = aggregate_usage(team_records(rows, set()), scope="team", period="today", now=NOW)["totals"]
+    assert totals["unpriced"] == 1 and totals["cost_cny"] == 0.2

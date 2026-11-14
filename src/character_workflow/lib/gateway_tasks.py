@@ -90,6 +90,16 @@ ErrorKind = Literal["unavailable", "unconfirmed", "failed"]
 TERMINAL: frozenset[str] = frozenset({"done", "failed", "canceled"})
 
 
+def is_unpriced(record: Any) -> bool:
+    """成功但没有任何价格依据：实付、预估都为空，扣费也为 0（0 只是配额账本的占位）。
+
+    任务对象与用量行（dict）共用这一判据；旧用量行没有新字段也能按原字段推断。
+    """
+    get = record.get if isinstance(record, dict) else (lambda name: getattr(record, name, None))
+    return (get("status") == "done" and get("actual_cost_cny") is None
+            and get("estimated_cny") is None and not get("charged_cny"))
+
+
 class GatewayTask(BaseModel):
     task_id: str
     key_id: str

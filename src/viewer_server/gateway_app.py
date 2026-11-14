@@ -49,9 +49,8 @@ def _task_view(task: gateway_tasks.GatewayTask) -> dict[str, Any]:
         "warnings": task.warnings, "actual_size": task.actual_size,
         "actual_cost_cny": task.actual_cost_cny, "outputs": len(task.outputs),
         # 成员端估不了中转价，只能用网关扣在密钥上的金额记账。
-        "charged_cny": None if task.status not in gateway_tasks.TERMINAL or (
-            task.status == "done" and task.actual_cost_cny is None and task.estimated_cny is None
-        ) else task.charged_cny,
+        "charged_cny": None if task.status not in gateway_tasks.TERMINAL
+        or gateway_tasks.is_unpriced(task) else task.charged_cny,
         "error": task.error, "error_kind": task.error_kind,
     }
 

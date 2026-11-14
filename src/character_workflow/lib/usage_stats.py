@@ -73,8 +73,12 @@ def mine_records(
 
 
 def team_records(rows: list[dict], available_outputs: set[str]) -> list[dict]:
+    from .gateway_tasks import is_unpriced
+
+    # 未计价的成功任务记 None（计入「未计价」），不能按配额账本里的 0 当成免费。
     return [{
-        "id": row.get("task_id", ""), "cost_cny": row.get("charged_cny") or 0,
+        "id": row.get("task_id", ""),
+        "cost_cny": None if is_unpriced(row) else row.get("charged_cny") or 0,
         "at": row["time"], "kind": row.get("kind", "image"),
         "model": row.get("model_id") or row.get("route_id") or "未知模型",
         "label": row.get("key_name", "未知成员"), "member": row.get("key_id", ""),
