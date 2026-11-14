@@ -27,6 +27,8 @@ interface ApiErrorDetail {
   message: string | null;
   code: string | null;
   recovery: string | null;
+  /** 服务端附带的上游原文（已遮掉密钥），界面放进可展开的详情。 */
+  raw?: string | null;
 }
 
 export class ApiError extends Error {
@@ -34,12 +36,14 @@ export class ApiError extends Error {
   readonly code: string | null;
   readonly reason: string | null;
   readonly recovery: string | null;
+  readonly raw: string | null;
 
   constructor(message: string, options: {
     status: number;
     code?: string | null;
     reason?: string | null;
     recovery?: string | null;
+    raw?: string | null;
   }) {
     super(message);
     this.name = 'ApiError';
@@ -47,6 +51,7 @@ export class ApiError extends Error {
     this.code = options.code ?? null;
     this.reason = options.reason ?? null;
     this.recovery = options.recovery ?? null;
+    this.raw = options.raw ?? null;
   }
 }
 
@@ -58,11 +63,12 @@ function readDetail(body: unknown): ApiErrorDetail {
   const detail = payload.detail ?? payload.error;
   if (typeof detail === 'string') return { message: detail.trim() || null, code: null, recovery: null };
   if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
-    const stable = detail as { message?: unknown; code?: unknown; recovery?: unknown };
+    const stable = detail as { message?: unknown; code?: unknown; recovery?: unknown; raw?: unknown };
     return {
       message: typeof stable.message === 'string' ? stable.message.trim() || null : null,
       code: typeof stable.code === 'string' ? stable.code : null,
       recovery: typeof stable.recovery === 'string' ? stable.recovery.trim() || null : null,
+      raw: typeof stable.raw === 'string' ? stable.raw.trim() || null : null,
     };
   }
   if (Array.isArray(detail)) {
@@ -104,6 +110,7 @@ export async function apiError(resp: Response, what: string): Promise<ApiError> 
       code: detail.code,
       reason: detail.message,
       recovery: detail.recovery,
+      raw: detail.raw,
     },
   );
 }

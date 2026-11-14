@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { draftHttpProtocol, listAssistModels, type AssistDraft, type AssistModel } from '@/api/httpProtocols';
+import { ApiError } from '@/api/http';
 import type { HttpProtocolKind } from '@/schema/httpProtocols';
 import { Button } from '@/components/ui/button';
 import { HelpIcon } from '@/components/ui/icons';
@@ -49,6 +50,8 @@ export function CustomInterfaceAssist({ kind, onDraft, onUndo }: {
   const [urls, setUrls] = useState('');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 上游原文（已遮掉密钥）：失败原因只显示中文，原文放在可展开的详情里。
+  const [errorRaw, setErrorRaw] = useState<string | null>(null);
   const [result, setResult] = useState<AssistDraft | null>(null);
 
   useEffect(() => {
@@ -73,6 +76,7 @@ export function CustomInterfaceAssist({ kind, onDraft, onUndo }: {
     if (!model) return;
     setRunning(true);
     setError(null);
+    setErrorRaw(null);
     setResult(null);
     writeLast(selected);
     try {
@@ -80,7 +84,8 @@ export function CustomInterfaceAssist({ kind, onDraft, onUndo }: {
       setResult(draft);
       onDraft(draft.document);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof ApiError && e.reason ? e.reason : e instanceof Error ? e.message : String(e));
+      setErrorRaw(e instanceof ApiError ? e.raw : null);
     } finally {
       setRunning(false);
     }
@@ -104,7 +109,13 @@ export function CustomInterfaceAssist({ kind, onDraft, onUndo }: {
         {onUndo && <Button variant="ghost" size="sm" type="button" disabled={running} onClick={onUndo}>撤销</Button>}
         <Button size="sm" type="button" disabled={!canRun} onClick={() => void run()}>{running ? '生成中…' : '生成（消耗对话额度）'}</Button>
       </div>
-      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+      {error && <div role="alert" className="space-y-1 text-xs">
+        <p className="text-destructive">{error}</p>
+        {errorRaw && <details>
+          <summary className="cursor-pointer text-muted-foreground">详情</summary>
+          <pre className="mt-1 whitespace-pre-wrap break-all rounded-md bg-secondary/40 p-2 font-mono text-muted-foreground">{errorRaw}</pre>
+        </details>}
+      </div>}
       {result && <ul aria-label="生成结果" className="space-y-0.5 text-xs text-muted-foreground">
         {result.notices.map(notice => <li key={notice}>{notice}</li>)}
         <li>{usageText(result.usage)}</li>

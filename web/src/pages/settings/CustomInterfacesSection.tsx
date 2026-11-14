@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react';
 import { deleteHttpProtocol, listHttpProtocols } from '@/api/httpProtocols';
-import type { HttpProtocolRow } from '@/schema/httpProtocols';
+import type { HttpProtocolKind, HttpProtocolRow } from '@/schema/httpProtocols';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Hint } from '@/components/ui/tooltip';
 import { CustomInterfaceDialog } from './CustomInterfaceDialog';
 
 const KIND_LABELS = { image: '图片', video: '视频' } as const;
 
-/** 供应商页底部的自定义接口列表（ADR-0036）。新建入口在模型行的「接口」下拉里，这里只管编辑与删除。 */
+/** 供应商页底部的自定义接口列表（ADR-0036）。没有模板时也保留标题与「新建」，入口不藏在供应商弹窗里。 */
 export function CustomInterfacesSection() {
   const [rows, setRows] = useState<HttpProtocolRow[]>([]);
   const [editing, setEditing] = useState<HttpProtocolRow | null>(null);
+  const [creating, setCreating] = useState<HttpProtocolKind | null>(null);
   const [deleting, setDeleting] = useState<HttpProtocolRow | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,8 +27,6 @@ export function CustomInterfacesSection() {
     window.addEventListener(KEYS_CHANGED_EVENT, load);
     return () => { active = false; window.removeEventListener(KEYS_CHANGED_EVENT, load); };
   }, []);
-
-  if (rows.length === 0 && !error) return null;
 
   const remove = async (row: HttpProtocolRow) => {
     setDeleting(null);
@@ -41,7 +41,17 @@ export function CustomInterfacesSection() {
 
   return (
     <section aria-label="自定义接口" className="space-y-2">
-      <h2 className="text-sm text-muted-foreground">自定义接口</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm text-muted-foreground">自定义接口</h2>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild><Button variant="ghost" size="sm" type="button">新建</Button></DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {(Object.keys(KIND_LABELS) as HttpProtocolKind[]).map(kind => (
+              <DropdownMenuItem key={kind} onSelect={() => setCreating(kind)}>{KIND_LABELS[kind]}接口</DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {rows.length > 0 && <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
         {rows.map(row => <li key={row.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
@@ -62,6 +72,8 @@ export function CustomInterfacesSection() {
       </ul>}
       {editing && <CustomInterfaceDialog identifier={editing.id} kind={editing.kind ?? 'image'}
         onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />}
+      {creating && <CustomInterfaceDialog identifier={null} kind={creating}
+        onClose={() => setCreating(null)} onSaved={() => setCreating(null)} />}
       {deleting && <ConfirmDialog open title={`删除「${deleting.name}」？`} message="删除后不能恢复。"
         variant="destructive" onConfirm={() => void remove(deleting)} onCancel={() => setDeleting(null)} />}
     </section>

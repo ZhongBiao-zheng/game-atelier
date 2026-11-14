@@ -118,7 +118,8 @@ def test_unusable_output_is_reported_and_still_billed(client, vendor):
     vendor.on("POST", "/v1/chat/completions", reply("抱歉，我无法完成 sk-live-ABCDEFGHIJKLMNOPQRST"))
     response = post(client, text="doc")
     assert response.status_code == 422
-    assert "没有给出可用的 JSON" in response.json()["detail"]
+    detail = response.json()["detail"]
+    assert "没有给出可用的模板 JSON" in detail["message"] and "抱歉" in detail["raw"]
     assert "ABCDEFGHIJ" not in response.text
     assert [j.status.value for j in list_jobs()] == ["done"]
 
@@ -127,10 +128,35 @@ def test_model_failure_is_recorded_once_without_retry(client, vendor):
     chat_provider(vendor)
     vendor.on("POST", "/v1/chat/completions", (502, {"error": "upstream"}))
     response = post(client, text="doc")
-    assert response.status_code == 502 and "对话模型调用失败" in response.json()["detail"]
+    assert response.status_code == 502
+    assert response.json()["detail"]["message"] == "对话模型调用失败"
     assert len(vendor.calls("POST")) == 1
     [job] = list_jobs()
     assert job.status.value == "failed" and job.namespace == "assist"
+
+
+@pytest.mark.parametrize("status, body, reason", [
+    (403, {"error": {"code": "AccountOverdueError", "message": "The request failed because your "
+                                                             "account has an overdue balance."}},
+     "欠费或余额不足"),
+    (401, {"error": {"message": "Incorrect API key provided: sk-live-ABCDEFGHIJKLMNOPQRST"}},
+     "密钥无效或没有权限"),
+    (429, {"error": {"message": "Rate limit reached"}}, "请求太频繁"),
+])
+def test_model_failures_get_a_chinese_reason_and_keep_the_raw_text(client, vendor, status, body,
+                                                                    reason):
+    chat_provider(vendor)
+    vendor.on("POST", "/v1/chat/completions", (status, body))
+    detail = post(client, text="doc").json()["detail"]
+    assert reason in detail["message"] and "text api" not in detail["message"]
+    assert f"text api {status}" in detail["raw"] and detail["code"] == "ASSIST_FAILED"
+    assert "ABCDEFGHIJ" not in detail["raw"]  # 原文里的密钥照样遮掉
+    [job] = list_jobs()
+    assert reason in job.error and "原始报错" in job.error
+
+
+def test_timeouts_are_explained():
+    assert "超时" in assist.failure_reason("HTTPSConnectionPool: Read timed out. (read timeout=180)")
 
 
 @pytest.mark.parametrize("body, status, message", [

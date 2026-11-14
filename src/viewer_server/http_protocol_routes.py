@@ -101,7 +101,11 @@ def assist(body: _Assist) -> dict:
         return http_protocol_assist.draft(kind=body.kind, alias=body.alias,
                                           model_id=body.model_id, text=body.text, urls=body.urls)
     except http_protocol_assist.AssistError as error:
-        raise HTTPException(error.status, str(error)) from None
+        if error.raw is None:
+            raise HTTPException(error.status, str(error)) from None
+        # 中文原因进 message；遮掉密钥的上游原文进 raw，界面放在可展开的详情里。
+        raise HTTPException(error.status, {"message": str(error), "code": "ASSIST_FAILED",
+                                           "raw": error.raw}) from None
 
 
 @router.get("/{identifier}")

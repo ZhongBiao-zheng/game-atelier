@@ -44,7 +44,8 @@ export const SelectContent = React.forwardRef<
       position={position}
       sideOffset={position === 'popper' ? sideOffset : undefined}
       className={cn(
-        'popover-in relative z-50 max-h-(--radix-select-content-available-height) min-w-32 overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-card text-popover-foreground',
+        // 弹层常开在同为 bg-card 的弹窗里（浅色两者都是纯白）：shell-glow 给出抬升，选项不会和下方的输入行糊在一起。
+        'popover-in shell-glow relative z-50 max-h-(--radix-select-content-available-height) min-w-32 overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-card text-popover-foreground',
         className,
       )}
       {...props}

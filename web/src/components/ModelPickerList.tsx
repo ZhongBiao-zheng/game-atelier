@@ -86,8 +86,11 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
         {group.choices.map(choice => {
           const id = `${choice.key.alias}:${choice.model.id}`;
           const local = choice.model.workflow_inputs != null;
-          const subscription = routeChannel(choice.key, choice.model).key.provider === 'chatgpt';
-          const entry = modelCatalog(choice.model.id);
+          const channel = routeChannel(choice.key, choice.model).key;
+          const subscription = channel.provider === 'chatgpt';
+          // 自定义接口（ADR-0036）：名字常与内置模型相同，标出供应商与「自定义」；目录简介描述的是内置模型，不显示。
+          const custom = choice.model.declared != null;
+          const entry = custom ? undefined : modelCatalog(choice.model.id);
           const media = group.kind === 'image' || group.kind === 'video';
           const seconds = media ? durations[id] : null, cost = media ? prices[id] : null;
           return <Button variant="bare" key={id} type="button" role="option" aria-selected={selected === id}
@@ -98,10 +101,11 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
             <span className={selected === id ? 'text-foreground' : 'text-muted-foreground'}>{local ? <WorkflowIcon size="lg" aria-hidden /> : <ModelBrandIcon brand={modelBrand(choice.model.id)} size="lg" />}</span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">{modelDisplayName(choice.model)}</span>
+              {custom && <span className="mt-1 block truncate text-xs text-muted-foreground">自定义 · {channel.alias}</span>}
               {entry && !subscription && <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{entry.description}</span>}
-              {(seconds != null || cost != null || subscription || local) && <span className="mt-2 flex justify-between gap-2 text-xs tabular-nums text-muted-foreground">
+              {(seconds != null || cost != null || subscription || local || custom) && <span className="mt-2 flex justify-between gap-2 text-xs tabular-nums text-muted-foreground">
                 {seconds != null && <MetaTag>{formatModelDuration(seconds)}</MetaTag>}
-                {local ? <MetaTag className="ml-auto">本机</MetaTag> : subscription ? <MetaTag className="ml-auto">订阅</MetaTag> : cost != null && <MetaTag className="ml-auto">{formatGenerationCost(cost)}</MetaTag>}
+                {local ? <MetaTag className="ml-auto">本机</MetaTag> : subscription ? <MetaTag className="ml-auto">订阅</MetaTag> : custom ? <MetaTag className="ml-auto">未计价</MetaTag> : cost != null && <MetaTag className="ml-auto">{formatGenerationCost(cost)}</MetaTag>}
               </span>}
             </span>
           </Button>;

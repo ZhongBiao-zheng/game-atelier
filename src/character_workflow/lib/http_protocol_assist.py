@@ -34,9 +34,30 @@ REDACTED = "<redacted>"
 
 
 class AssistError(RuntimeError):
-    def __init__(self, message: str, status: int = 422):
+    """message 是给人看的中文原因；raw 是遮掉密钥后的上游原文，界面放进可展开的详情。"""
+
+    def __init__(self, message: str, status: int = 422, raw: str | None = None):
         super().__init__(message)
         self.status = status
+        self.raw = raw
+
+
+def failure_reason(raw: str) -> str:
+    """对话模型调用失败的中文原因。欠费排在 403 前面：方舟欠费回的就是 403 AccountOverdueError。"""
+    low = raw.lower()
+    if any(word in low for word in ("accountoverdue", "overdue", "insufficient", "quota",
+                                     "balance", "余额", "欠费", "额度")):
+        return "对话模型的账号欠费或余额不足，请到该厂商充值后重试"
+    if any(word in low for word in ("401", "403", "unauthorized", "forbidden", "invalid api key",
+                                     "invalid_api_key", "authentication", "permission")):
+        return "对话模型的密钥无效或没有权限，请在供应商里检查密钥与模型开通情况"
+    if "429" in low or "rate limit" in low or "too many requests" in low or "ratelimit" in low:
+        return "对话模型请求太频繁或达到限额，请稍后再试"
+    if "timed out" in low or "timeout" in low:
+        return "对话模型响应超时，可以缩短文档或换一个更快的模型后再试"
+    if any(word in low for word in ("connection", "resolve", "proxy", "ssl", "max retries")):
+        return "连不上对话模型的服务地址，请检查网络、代理或供应商的请求地址"
+    return "对话模型调用失败"
 
 
 # ---------------------------------------------------------------- 密钥遮罩
@@ -230,7 +251,8 @@ def parse_output(text: str) -> dict[str, Any]:
         if isinstance(value, dict):
             return value
     excerpt, _, _ = redact_secrets(text.strip()[:300])
-    raise AssistError(f"模型没有给出可用的 JSON：{excerpt or '（空）'}")
+    raise AssistError("模型没有给出可用的模板 JSON，可以换个模型或补充文档后重试",
+                      raw=excerpt or "（空）")
 
 
 def _redact_strings(value: Any) -> tuple[Any, int]:
@@ -359,9 +381,10 @@ def draft(*, kind: str, alias: str, model_id: str, text: str | None, urls: list[
     try:
         output, tokens_in, tokens_out = call_model(key, model, system, user)
     except Exception as error:  # noqa: BLE001 —— 失败也要记账，再按原因报错
-        message = "对话模型调用失败：" + redact_secrets(str(error))[0][:300]
-        _record(key, model, kind, started=started, cost=None, error=message)
-        raise AssistError(message, 502) from None
+        raw = redact_secrets(str(error))[0][:500]
+        reason = failure_reason(raw)
+        _record(key, model, kind, started=started, cost=None, error=f"{reason}（原始报错：{raw}）")
+        raise AssistError(reason, 502, raw=raw) from None
     from character_workflow.lib.generation_pricing import estimate_text_cost_cny
 
     cost = (estimate_text_cost_cny(model.id, tokens_in, tokens_out)

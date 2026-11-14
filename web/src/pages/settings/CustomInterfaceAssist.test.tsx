@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { ApiError } from '@/api/http';
 import { chooseOption } from '@/test/select';
 import { CustomInterfaceDialog } from './CustomInterfaceDialog';
 
@@ -71,6 +72,23 @@ it('blocks more than three urls and shows the server error without touching the 
   fireEvent.click(run);
   expect(await screen.findByRole('alert')).toHaveTextContent('模型没有给出可用的 JSON');
   expect(editor.value).toBe(before);
+});
+
+it('shows the chinese reason and keeps the upstream text behind 详情', async () => {
+  api.draftHttpProtocol.mockRejectedValue(new ApiError('AI 帮我配置失败：对话模型的账号欠费或余额不足，请到该厂商充值后重试（HTTP 502）', {
+    status: 502, code: 'ASSIST_FAILED', reason: '对话模型的账号欠费或余额不足，请到该厂商充值后重试',
+    raw: 'text api 403: {"error":{"code":"AccountOverdueError"}}',
+  }));
+  open();
+  fireEvent.click(screen.getByRole('button', { name: /AI 帮我配置/ }));
+  await screen.findByLabelText('对话模型');
+  fireEvent.change(screen.getByLabelText('接口文档'), { target: { value: 'doc' } });
+  fireEvent.click(screen.getByRole('button', { name: '生成（消耗对话额度）' }));
+  const alert = await screen.findByRole('alert');
+  expect(alert).toHaveTextContent('对话模型的账号欠费或余额不足');
+  expect(within(alert).getByText('详情')).toBeInTheDocument();
+  expect(within(alert).getByText(/AccountOverdueError/)).toBeInTheDocument();
+  expect(alert.querySelector('details')?.open).toBe(false);  // 原文默认收起
 });
 
 it('disables generation when no chat model is configured', async () => {
