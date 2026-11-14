@@ -1,5 +1,6 @@
 import { canvasInputSourceIds, canvasModeAcceptsNodeType, canvasTargetAcceptsSource } from '@/lib/canvasMentions';
 import { normalizeImageSizeParams } from '@/lib/imageSizeMode';
+import { enabledNodeContribution } from '@/plugin-host/registry';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type ImageControlCaps, type Quality } from '@/lib/imageControlCaps';
 import { hasChannelMembers, providerForAlias, routeChannel, routeMemberChoices, selectionImageCaps, storedAlias } from '@/lib/modelRoutes';
 import type { Job, JobParams } from '@/schema/jobs';
@@ -574,8 +575,11 @@ export function canvasMediaOperationPlaceholder(
 }
 
 export function canvasNodeAcceptsInput(node: CanvasNode) {
+  // 插件节点收不收输入由清单决定；插件未启用时不接新连线（已有的连线保留）。
+  if (node.type === 'plugin') {
+    return (enabledNodeContribution(node.data.plugin_id, node.data.node_type)?.node.input_modalities.length ?? 0) > 0;
+  }
   return node.type !== 'group'
-    && node.type !== 'plugin'
     && node.type !== 'batch_material'
     && node.type !== 'layer_stack'
     && node.type !== 'image_edit'
@@ -830,6 +834,15 @@ export function canCreateCanvasInputConnection(
   const target = document.nodes.find(node => node.id === connection.target);
   // 对比节点：任意图片都能连；同一来源改连另一侧、或顶替已占的一侧，由提交时的收口处理。
   if (target?.type === 'compare') return source?.type === 'image';
+  if (target?.type === 'plugin') {
+    // 与服务端 canvas_plugin_rules 同一组判据：类型在清单里、没超过上限、没重复。
+    const contribution = enabledNodeContribution(target.data.plugin_id, target.data.node_type)?.node;
+    if (!contribution || !source || !canvasNodeProvidesContent(source)
+      || !contribution.input_modalities.includes(source.type)) return false;
+    const existing = document.connections.filter(edge => edge.role === 'input' && edge.target_node_id === target.id);
+    return !existing.some(edge => edge.source_node_id === source.id)
+      && (contribution.max_inputs === null || existing.length < contribution.max_inputs);
+  }
   if (
     !source
     || !target

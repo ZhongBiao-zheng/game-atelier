@@ -64,10 +64,10 @@
   "files": [
     {
       "path": "ui/index.html",
-      "sha256": "0923b4d9fcc06e5ae05e69b7645ffd58bbbe9c38f003c0e0b5bddaa88abcc296",
-      "bytes": 141936
+      "sha256": "0bebd44a402320d0d50fc8ec64312f81a97983a5a1aab9a24c2ecdcab35f2e61",
+      "bytes": 146436
     }
   ],
   "source": "bundled",
-  "digest": "sha256:08c8db5d1b5739e141f3654408dba036a3cb20c0af40d0f48fc5fba8f3e1e887"
+  "digest": "sha256:3ad0efca11c27a9cd8ce6f991f8d632d5e9d8e3b64594ae2e721fbcb5eee35b6"
 }

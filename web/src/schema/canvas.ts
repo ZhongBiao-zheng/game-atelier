@@ -279,6 +279,8 @@ export interface CanvasPluginNode extends CanvasNodeBase {
     plugin_id: string;
     node_type: string;
     plugin_version: string;
+    /** 创建节点时的包摘要；早于它的文档没有这个字段。 */
+    package_digest?: string | null;
     data_schema_version: number;
     payload: JsonValue;
     generation_draft: CanvasGenerationDraft | null;

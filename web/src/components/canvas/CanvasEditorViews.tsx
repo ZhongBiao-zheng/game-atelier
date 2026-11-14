@@ -1,4 +1,5 @@
 import { AnnotationFullscreen } from './annotation/AnnotationFullscreen';
+import { PluginNodeBody, type PluginNodeInput } from '@/plugin-host/PluginNodeBody';
 import { useAnnotationEditor } from './annotation/useAnnotationEditor';
 import { AnnotationToolbar } from './annotation/AnnotationToolbar';
 import { AnnotationEditingLayer } from './annotation/AnnotationEditingLayer';
@@ -272,6 +273,8 @@ export interface CanvasNodeContextValue {
   openAngle: (node: CanvasContentNode) => void;
   upscaleImage: (node: CanvasContentNode, target: CanvasUpscaleTarget) => void;
   createCompareNode?: (node: CanvasContentNode, source: CanvasCompareSource) => void;
+  /** 插件节点 → 当前连到它的输入。按图签名重算，引用稳定。 */
+  pluginInputsByNodeId?: ReadonlyMap<string, readonly PluginNodeInput[]>;
   /** 对比节点 → before / after 两侧当前接入的图。按图签名重算，引用稳定。 */
   compareInputsByNodeId?: ReadonlyMap<string, CanvasCompareInputs>;
   swapCompareInputs?: (nodeId: string) => void;
@@ -283,6 +286,7 @@ export interface CanvasNodeContextValue {
 
 export const CanvasNodeContext = createContext<CanvasNodeContextValue | null>(null);
 const EMPTY_CANVAS_NODE_IDS: ReadonlySet<string> = new Set();
+const EMPTY_PLUGIN_INPUTS: readonly PluginNodeInput[] = [];
 const EMPTY_VIDEO_FRAME_NODE_IDS: Readonly<Partial<Record<CanvasVideoFrameSlot, string>>> = {};
 const EMPTY_CANVAS_PENDING_INPUTS: readonly CanvasPendingInput[] = [];
 const EMPTY_CANVAS_MENTION_REFERENCES: readonly CanvasMentionReference[] = [];
@@ -994,10 +998,10 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           {node.type === 'compare' && <CanvasCompareNodeBody node={node} context={context} bitmapWidth={imageBitmapWidth} />}
           {node.type === 'image_edit' && <CanvasImageEditSurface node={node} projectId={context.projectId}
             source={context.resolveVersion(node.data.source_version_id) as CanvasMediaVersion | undefined} />}
-          {node.type === 'plugin' && !content && (
-            <div className="grid min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">
-              插件节点
-            </div>
+          {node.type === 'plugin' && (
+            <PluginNodeBody node={node} projectId={context.projectId} selected={Boolean(selected)}
+              inputs={context.pluginInputsByNodeId?.get(node.id) ?? EMPTY_PLUGIN_INPUTS}
+              resolveVersion={context.resolveVersion} updateNode={context.updateNode} recordHistory={context.recordHistory} />
           )}
         </div>
       </article>

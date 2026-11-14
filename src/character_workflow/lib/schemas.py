@@ -978,6 +978,8 @@ class CanvasPluginNodeData(BaseModel):
     plugin_id: str = Field(min_length=1, max_length=120)
     node_type: str = Field(min_length=1, max_length=120)
     plugin_version: str = Field(min_length=1, max_length=80)
+    # 创建节点时的包摘要，占位信息与将来的版本 pin 用。可选：早于它的文档必须照常读得出。
+    package_digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     data_schema_version: int = Field(ge=1)
     payload: JsonValue
     generation_draft: CanvasGenerationDraft | None = None
@@ -1524,7 +1526,11 @@ class CanvasDocument(BaseModel):
                 if target.type == "image_edit":
                     raise ValueError("image edit nodes only accept material connections")
                 if target.type == "plugin":
-                    raise ValueError("canvas plugin connections require a verified capability manifest")
+                    # 结构上只放行普通输入。插件是否收这种素材、收几条，要看清单，由保存路径对
+                    # 新增连线核对（canvas_plugin_rules）；这里不查，停用插件后旧文档才读得出。
+                    if edge.slot is not None or edge.annotated:
+                        raise ValueError("canvas plugin inputs must be unslotted and unannotated")
+                    continue
                 if target.type == "batch_material":
                     raise ValueError("batch material nodes cannot receive input connections")
                 if target.type == "layer_stack":

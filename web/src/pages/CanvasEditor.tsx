@@ -1,4 +1,8 @@
 import { SetPromptPreviewDialog, type PromptPreviewRequest } from '@/components/assets/SetPromptPreviewDialog';
+import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
+import type { PluginNodeInput } from '@/plugin-host/PluginNodeBody';
+import type { PluginNodeContribution, PluginPackageLock } from '@/schema/plugins';
+import { pluginIcon } from '@/components/ui/icons';
 import { canvasPromptPreviewSource } from '@/lib/promptPreviewSource';
 import { flushSync } from 'react-dom';
 import { createAnnotatedGeneration, ensureAnnotatedInputs, type AnnotationDocumentBridge } from '@/components/canvas/annotation/annotationRendering';
@@ -2492,6 +2496,15 @@ function CanvasEditorInner({
       size, z_index: 0, data: {} }, menu);
   }
 
+  function addPluginNode(plugin: PluginPackageLock, contribution: PluginNodeContribution) {
+    const size = contribution.default_size;
+    appendNode({ id: makeId('plugin'), type: 'plugin', title: contribution.title,
+      position: defaultPosition(size), size, z_index: 0,
+      data: { plugin_id: plugin.id, node_type: contribution.type, plugin_version: plugin.version,
+        package_digest: plugin.digest, data_schema_version: contribution.payload_schema_version,
+        payload: {}, generation_draft: null } }, null);
+  }
+
   function addBatchMaterialNode(menu: CreateMenuState | null = createMenu) {
     const size = { width: 360, height: 360 };
     appendNode({ id: makeId('batch-material'), type: 'batch_material', title: '批量素材',
@@ -4606,6 +4619,22 @@ function CanvasEditorInner({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方图签名说明
   }, [mentionGraphSignature]);
 
+  const pluginInputsByNodeId = useMemo(() => {
+    const current = mentionDocumentRef.current;
+    const nodes = new Map((current?.nodes ?? []).map(node => [node.id, node]));
+    const result = new Map<string, PluginNodeInput[]>();
+    for (const connection of current?.connections ?? []) {
+      if (connection.role !== 'input' || nodes.get(connection.target_node_id)?.type !== 'plugin') continue;
+      const source = nodes.get(connection.source_node_id);
+      if (!source || !canvasNodeProvidesContent(source)) continue;
+      const inputs = result.get(connection.target_node_id) ?? [];
+      inputs.push({ nodeId: source.id, title: source.title, versionId: source.data.current_version_id });
+      result.set(connection.target_node_id, inputs);
+    }
+    return result;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方图签名说明
+  }, [mentionGraphSignature]);
+
   const layerParentSignature = JSON.stringify((document?.nodes ?? []).flatMap(node => {
     if (node.type !== 'layer_stack') return [];
     return [node.data.base_material_node_id, ...node.data.layers.map(layer => layer.material_node_id)]
@@ -4864,6 +4893,7 @@ function CanvasEditorInner({
     upscaleImage,
     createCompareNode,
     compareInputsByNodeId,
+    pluginInputsByNodeId,
     swapCompareInputs,
     openCompare,
     editVideo,
@@ -4913,6 +4943,7 @@ function CanvasEditorInner({
     upscaleImage,
     createCompareNode,
     compareInputsByNodeId,
+    pluginInputsByNodeId,
     swapCompareInputs,
     openCompare,
     openMaskEdit,
@@ -5505,6 +5536,7 @@ function CanvasEditorInner({
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs text-muted-foreground">添加节点</p>
               <CanvasCreateMenuItems allowEmptyNodes allowUpload onAddBatch={() => addBatchMaterialNode(null)} onAddCompare={() => addCompareNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onUpload={() => uploadRef.current?.click()} />
+              <PluginCreateMenuItems onAdd={addPluginNode} />
             </div>
           )}
           </div>
@@ -5814,6 +5846,18 @@ function CanvasEditorInner({
       </section>
     </CanvasNodeContext.Provider>
   );
+}
+
+/** 已启用插件贡献的节点类型，排在内置项之后。没有启用的插件时什么都不渲染。 */
+function PluginCreateMenuItems({ onAdd }: { onAdd: (plugin: PluginPackageLock, node: PluginNodeContribution) => void }) {
+  const plugins = usePlugins();
+  return <>
+    {enabledPlugins(plugins).flatMap(plugin => plugin.contributes.nodes.map(node => {
+      const Icon = pluginIcon(node.icon);
+      return <AddMenuButton key={`${plugin.id}:${node.type}`} icon={<Icon />} title={node.title}
+        description={plugin.name} onClick={() => onAdd(plugin, node)} />;
+    }))}
+  </>;
 }
 
 function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, onAddText, onAddImage, onAddVideo, onAddAudio, onUpload, onAddBatch, onAddCompare }: {

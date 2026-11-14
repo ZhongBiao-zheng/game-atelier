@@ -459,6 +459,17 @@ def _normalized_web_document(
     return normalized
 
 
+def _check_new_plugin_connections(current: CanvasDocument, updated: CanvasDocument) -> None:
+    # 延迟导入：插件规则依赖注册表，注册表不该在读文档的路径上被加载。
+    from character_workflow.lib.canvas_plugin_rules import (
+        PluginConnectionError, validate_new_plugin_connections,
+    )
+    try:
+        validate_new_plugin_connections(current, updated)
+    except PluginConnectionError as error:
+        raise CanvasDocumentError(error.code, error.message) from None
+
+
 def save_canvas_document(
     project_id: str,
     document: CanvasDocument,
@@ -476,6 +487,7 @@ def save_canvas_document(
         timestamp = _now()
         updated = _normalized_web_document(current, document, timestamp)
         updated.sync_layer_materials()
+        _check_new_plugin_connections(current, updated)
         touched = project.model_copy(update={"updated_at": timestamp})
         atomic_write_json(_project_path(project_id), touched.model_dump(mode="json"))
         atomic_write_json(_document_path(project_id), updated.model_dump(mode="json"))

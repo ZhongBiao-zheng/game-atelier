@@ -4,6 +4,7 @@ import { fetchPlugins, setPluginEnabled } from '@/api/plugins';
 import { pluginIcon, PluginIcon } from '@/components/ui/icons';
 import { Switch } from '@/components/ui/switch';
 import { Hint } from '@/components/ui/tooltip';
+import { setPluginsSnapshot } from '@/plugin-host/registry';
 import type { PluginEntry } from '@/schema/plugins';
 
 function PluginRow({ plugin, busy, onToggle }: {
@@ -31,7 +32,9 @@ function PluginRow({ plugin, busy, onToggle }: {
 }
 
 export function PluginsPage() {
-  const [plugins, setPlugins] = useState<PluginEntry[] | null>(null);
+  const [plugins, setLocalPlugins] = useState<PluginEntry[] | null>(null);
+  // 画布的添加菜单与插件节点读的是全局注册表，这里的变化要同步过去。
+  const setPlugins = (next: PluginEntry[]) => { setLocalPlugins(next); setPluginsSnapshot(next); };
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 

@@ -2,10 +2,11 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from character_workflow.lib import plugin_registry
+from character_workflow.lib import plugin_grants, plugin_registry
 from character_workflow.lib.plugin_registry import PluginError
 
 router = APIRouter(prefix="/api/plugins")
+grants_router = APIRouter(prefix="/api/canvas/projects/{project_id}/plugin-grants")
 
 
 def _http(error: PluginError) -> HTTPException:
@@ -48,3 +49,25 @@ def package_file(plugin_id: str, file: str) -> FileResponse:
     # 宿主拿到后要按清单核对 SHA-256 再放进沙箱，不能让浏览器按 MIME 猜类型。
     return FileResponse(path, media_type="application/octet-stream",
                         headers={"X-Content-Type-Options": "nosniff"})
+
+
+def _grants(call, *args) -> dict:
+    try:
+        return {"grants": call(*args)}
+    except PluginError as error:
+        raise _http(error) from None
+
+
+@grants_router.get("")
+def list_grants(project_id: str) -> dict:
+    return _grants(plugin_grants.active_grants, project_id)
+
+
+@grants_router.put("/{plugin_id}")
+def grant_plugin(project_id: str, plugin_id: str) -> dict:
+    return _grants(plugin_grants.grant, project_id, plugin_id)
+
+
+@grants_router.delete("/{plugin_id}")
+def revoke_plugin(project_id: str, plugin_id: str) -> dict:
+    return _grants(plugin_grants.revoke, project_id, plugin_id)

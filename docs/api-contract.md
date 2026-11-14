@@ -1308,3 +1308,11 @@ multipart 里的数组值展开成同名重复字段。
 `<data_root>/.config/plugins.json`：`{schema_version: 1, plugins: {[id]: {enabled, enabled_at?, digest?}}}`，`enabled_at` 为 UTC ISO 8601。整份文件损坏时按全部未启用处理，原文件改名为 `plugins.json.broken-<UTC 时间>` 保留；单条不合规只忽略该条；清单里已不存在的插件 id 原样保留。记录为启用但清单失效或不兼容的插件不算启用。
 
 包锁文件 `plugins/<id>/package/manifest.lock.json`：源清单全部字段 + `files: [{path, sha256, bytes}]` + `source: "bundled"` + `digest`。`digest = "sha256:" + SHA-256(去掉 digest 键后，按键排序、无空白、非 ASCII 不转义的 JSON)`。清单字段见 `lib/plugin_manifest.py`；清单不接受未知字段。
+
+### 项目批准与插件界面协议（B2）
+
+- `GET /api/canvas/projects/{project_id}/plugin-grants`：`{grants: {[plugin_id]: {capabilities, granted_at}}}`，只列当前有效的批准——插件已启用，且它现在声明的能力都在批准过的范围内。插件更新后能力没有增加则沿用，增加了就不再出现在结果里，需要重新批准。
+- `PUT .../plugin-grants/{plugin_id}`（编辑类）：按插件当前清单记录批准；插件未启用或不存在 409 `PLUGIN_DISABLED`。`DELETE` 撤销。未知项目 404 `PROJECT_NOT_FOUND`。
+- 存储 `<data_root>/canvases/<project>/plugin-grants.json`：`{schema_version: 1, grants: {[plugin_id]: {digest, capabilities, granted_at}}}`。不进项目包。文件读不出按没有批准处理。
+- 画布文档：`CanvasPluginNodeData` 增加可选 `package_digest`（`sha256:` + 64 位十六进制）。指向插件节点的输入连线必须无 slot、非标注；保存时只对**新增**的这类连线按清单核对（插件已启用、节点类型已声明、素材类型在 `input_modalities` 内、不超过 `max_inputs`），不通过 422 `canvas_plugin_connection_rejected`。已有连线与文档读取不依赖插件是否存在。
+- 插件界面协议 `atelier-plugin/1`：类型在 `plugins/sdk/protocol.ts`，宿主实现在 `web/src/plugin-host/`。宿主在沙箱页面加载后向它发送握手消息并附带一个 `MessagePort`，此后只在该 port 上通信。方法：`node.readSelf`、`node.writeSelf`、`inputs.list`、`inputs.read`、`fonts.request`；事件：`theme.changed`、`node.changed`、`inputs.changed`。协议里没有节点、项目、路径参数；素材用只在本界面实例有效的句柄指代。

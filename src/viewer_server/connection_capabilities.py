@@ -44,6 +44,9 @@ GET /api/plugins
 POST /api/plugins/{plugin_id}/enable
 POST /api/plugins/{plugin_id}/disable
 GET /api/plugins/{plugin_id}/package/{file:path}
+GET /api/canvas/projects/{project_id}/plugin-grants
+PUT /api/canvas/projects/{project_id}/plugin-grants/{plugin_id}
+DELETE /api/canvas/projects/{project_id}/plugin-grants/{plugin_id}
 POST /api/keys
 PATCH /api/keys/{alias}
 DELETE /api/keys/{alias}
