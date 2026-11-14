@@ -42,7 +42,9 @@ def mine_records(
 ) -> list[dict]:
     records = []
     for job in jobs:
-        if job.kind not in {"image", "video"} or job.status in {"pending_confirm", "canceled"}:
+        assist = job.namespace == "assist"
+        if (job.kind not in {"image", "video"} and not assist) \
+                or job.status in {"pending_confirm", "canceled"}:
             continue
         cost = job.params.actual_cost_cny
         if cost is None and job.status != "failed":
@@ -52,6 +54,8 @@ def mine_records(
         if job.canvas_project_id:
             project_key = f"canvas:{job.canvas_project_id}"
             label = canvas_names.get(job.canvas_project_id, "已删除的项目")
+        elif assist:
+            project_key, label = "assist", "接口配置"
         else:
             project_key, label = "studio", "创作台"
         records.append({

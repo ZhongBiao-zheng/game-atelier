@@ -75,6 +75,35 @@ def validate(body: _Validate) -> dict:
             "preview": preview}
 
 
+class _Assist(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: str
+    alias: str = Field(max_length=200)
+    model_id: str = Field(max_length=200)
+    text: str | None = Field(default=None, max_length=200_000)
+    urls: list[str] = Field(default_factory=list, max_length=8)
+
+
+@router.get("/assist/models")
+def assist_models() -> dict:
+    """「AI 帮我配置」可用的对话模型；max_cost_cny 是按资料上限估的最高花费，无价格为 null。"""
+    from character_workflow.lib import http_protocol_assist
+
+    return {"models": http_protocol_assist.candidates()}
+
+
+@router.post("/assist")
+def assist(body: _Assist) -> dict:
+    """计费调用：用对话模型按文档起草模板，只返回草稿，不保存。不收供应商密钥。"""
+    from character_workflow.lib import http_protocol_assist
+
+    try:
+        return http_protocol_assist.draft(kind=body.kind, alias=body.alias,
+                                          model_id=body.model_id, text=body.text, urls=body.urls)
+    except http_protocol_assist.AssistError as error:
+        raise HTTPException(error.status, str(error)) from None
+
+
 @router.get("/{identifier}")
 def detail(identifier: str) -> dict:
     stored = store.read_stored(identifier)

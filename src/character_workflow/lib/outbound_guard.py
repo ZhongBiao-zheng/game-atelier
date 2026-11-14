@@ -197,10 +197,9 @@ def read_limited(response: requests.Response, max_bytes: int,
     return b"".join(chunks)
 
 
-def fetch(url: str, *, max_bytes: int, trusted: Origin | None = None,
-          timeout: tuple[float, float] = (30.0, 180.0),
-          sink: Callable[[bytes], None] | None = None) -> bytes:
-    """下载一个结果地址。sink 给定时流式写出（视频），否则返回内容。"""
+def _fetch(url: str, *, max_bytes: int, trusted: Origin | None,
+           timeout: tuple[float, float],
+           sink: Callable[[bytes], None] | None) -> tuple[bytes, str]:
     current = url
     for _ in range(_MAX_REDIRECTS + 1):
         with _open(current, trusted, timeout) as response:
@@ -208,6 +207,20 @@ def fetch(url: str, *, max_bytes: int, trusted: Origin | None = None,
                 current = urljoin(current, response.headers["Location"])
                 continue
             if response.status_code >= 400:
-                raise OutboundError(f"下载结果失败：HTTP {response.status_code}")
-            return read_limited(response, max_bytes, sink)
-    raise OutboundError("下载结果时重定向次数过多")
+                raise OutboundError(f"下载失败：HTTP {response.status_code}")
+            content_type = response.headers.get("Content-Type", "")
+            return read_limited(response, max_bytes, sink), content_type
+    raise OutboundError("重定向次数过多")
+
+
+def fetch(url: str, *, max_bytes: int, trusted: Origin | None = None,
+          timeout: tuple[float, float] = (30.0, 180.0),
+          sink: Callable[[bytes], None] | None = None) -> bytes:
+    """下载一个结果地址。sink 给定时流式写出（视频），否则返回内容。"""
+    return _fetch(url, max_bytes=max_bytes, trusted=trusted, timeout=timeout, sink=sink)[0]
+
+
+def fetch_document(url: str, *, max_bytes: int,
+                   timeout: tuple[float, float] = (10.0, 30.0)) -> tuple[bytes, str]:
+    """抓一个用户填的文档网址：只放行公网，每次重定向重新检查。返回 (内容, Content-Type)。"""
+    return _fetch(url, max_bytes=max_bytes, trusted=None, timeout=timeout, sink=None)

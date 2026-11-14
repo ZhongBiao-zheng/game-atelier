@@ -7,11 +7,12 @@ import type {
 } from '@/schema/httpProtocols';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import examples from './customInterfaceExamples.json';
+import { CustomInterfaceAssist } from './CustomInterfaceAssist';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { FileInput } from '@/components/ui/file-input';
-import { HelpIcon } from '@/components/ui/icons';
+import { AiIcon, HelpIcon } from '@/components/ui/icons';
 import { Textarea } from '@/components/ui/textarea';
 import { Hint } from '@/components/ui/tooltip';
 
@@ -79,6 +80,9 @@ export function CustomInterfaceDialog({ identifier, kind, baseUrl, model, onSave
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const upload = useRef<HTMLInputElement>(null);
+  const [assistOpen, setAssistOpen] = useState(false);
+  // 生成前的模板正文：草稿直接填进编辑区，撤销回到这份。
+  const [beforeDraft, setBeforeDraft] = useState<string | null>(null);
   const editor = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -144,6 +148,8 @@ export function CustomInterfaceDialog({ identifier, kind, baseUrl, model, onSave
         <div className="flex items-center gap-2">
           <DialogTitle>自定义接口</DialogTitle>
           <Hint label={HELP}><span tabIndex={0} aria-label="写法说明" className="text-muted-foreground"><HelpIcon size="sm" /></span></Hint>
+          <Button variant="ghost" size="sm" type="button" aria-pressed={assistOpen} disabled={loading}
+            onClick={() => setAssistOpen(!assistOpen)}><AiIcon size="sm" />AI 帮我配置</Button>
           {!identifier && kindExamples.length > 1 && <Select value={exampleId} onValueChange={value => {
             const example = kindExamples.find(item => item.id === value);
             if (!example) return;
@@ -154,6 +160,9 @@ export function CustomInterfaceDialog({ identifier, kind, baseUrl, model, onSave
             <SelectContent>{kindExamples.map(item => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent>
           </Select>}
         </div>
+        {assistOpen && <CustomInterfaceAssist kind={kind}
+          onDraft={document => { setBeforeDraft(current => current ?? text); setText(pretty(document)); }}
+          onUndo={beforeDraft === null ? null : () => { setText(beforeDraft); setBeforeDraft(null); }} />}
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto md:grid-cols-2">
           <div className="flex min-h-0 flex-col gap-2">
             <Textarea ref={editor} aria-label="接口模板" value={text} disabled={loading} spellCheck={false}

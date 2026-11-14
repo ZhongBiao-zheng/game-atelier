@@ -23,7 +23,9 @@ def model_durations() -> dict[str, float]:
         samples: dict[tuple[str, str], list[tuple[float, float]]] = {}
         for job in jobs.list_jobs():
             start = job.runner_started_at if job.namespace == "canvas" else job.submitted_at
-            if job.status != "done" or not job.alias or not job.completed_at or not start:
+            # assist（AI 帮我配置）读整份文档，耗时不代表该模型平时的出结果速度。
+            if job.status != "done" or job.namespace == "assist" or not job.alias \
+                    or not job.completed_at or not start:
                 continue
             try:
                 end = _timestamp(job.completed_at)

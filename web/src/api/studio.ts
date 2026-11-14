@@ -80,13 +80,14 @@ export async function resolveImageReferencePaths({
 
 export async function listStudioJobs(): Promise<Job[]> {
   // Canvas 是独立人工创作空间；它的运行历史只在画布节点内展示，不进入创作台时间线。
+  // 「AI 帮我配置」的对话调用（assist）只进用量。
   const jobs = await requestJson<Job[]>('/api/jobs', '读取出图记录');
-  return jobs.filter(job => job.namespace !== 'canvas');
+  return jobs.filter(job => job.namespace !== 'canvas' && job.namespace !== 'assist');
 }
 
 export async function getStudioJob(jobId: string): Promise<Job | null> {
   const resp = await connectionFetch(`/api/jobs/${encodeURIComponent(jobId)}`);
   if (!resp.ok) return null;
   const job = (await resp.json()) as Job;
-  return job.namespace === 'canvas' ? null : job;
+  return job.namespace === 'canvas' || job.namespace === 'assist' ? null : job;
 }

@@ -35,3 +35,21 @@ export function validateHttpProtocol(document: unknown, options: { baseUrl?: str
     document, base_url: options.baseUrl || null, model: options.model || null,
   }));
 }
+
+/** 「AI 帮我配置」可用的对话模型；max_cost_cny 是按资料上限估的最高花费，null 为未计价。 */
+export interface AssistModel { alias: string; model_id: string; name: string; max_cost_cny: number | null }
+
+export interface AssistDraft {
+  document: Record<string, unknown>;
+  notices: string[];
+  usage: { input_tokens: number | null; output_tokens: number | null; cost_cny: number | null; job_id: string };
+}
+
+export function listAssistModels() {
+  return requestJson<{ models: AssistModel[] }>(`${BASE}/assist/models`, '读取对话模型');
+}
+
+/** 计费调用：用对话模型按文档起草模板，只返回草稿。 */
+export function draftHttpProtocol(body: { kind: string; alias: string; model_id: string; text: string; urls: string[] }) {
+  return requestJson<AssistDraft>(`${BASE}/assist`, 'AI 帮我配置', json('POST', body));
+}

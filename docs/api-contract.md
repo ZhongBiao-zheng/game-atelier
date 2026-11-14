@@ -277,7 +277,7 @@ OpenRouter 的 `/images` 描述符没有该参数故不给开关，「自动」�
 
 Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每组最多 4 张），分别归属风格、角色、Omni 语义槽；垫图仍写入通用的 `reference_images`。编号式风格参考写入 `mj_sref_code`（只存数字），它与图片式 `mj_sref` 互斥且优先级更高。个性化 Profile code/ID 写入 `mj_profile`（1–64 位 ASCII 字母或数字），caller 统一拼为 `--profile <value>`。Web 创建 job，caller 只负责校验结构化参数、把本地路径转公网 URL 并拼接对应 flag。
 
-`namespace` 只含 studio / canvas，分别落在 `studio/<job_id>/` 和 `canvases/<canvas_project_id>/outputs/<job_id>/`。canvas 任务必须带项目与冻结执行上下文。
+`namespace` 含 studio / canvas / assist：前两者分别落在 `studio/<job_id>/` 和 `canvases/<canvas_project_id>/outputs/<job_id>/`，canvas 任务必须带项目与冻结执行上下文；assist 是「AI 帮我配置」的对话调用记录（`kind=text`、无产物、直接写成终态），只进用量（类别「接口配置」），不进创作台、画布与模型耗时统计。
 
 ## 端点
 
@@ -1257,6 +1257,8 @@ multipart 里的数组值展开成同名重复字段。
 | PUT | `/api/http-protocols/{id}` | `{document}`；仍被绑定时改 kind 返回 409 |
 | DELETE | `/api/http-protocols/{id}` | 204；仍被绑定返回 409 |
 | POST | `/api/http-protocols/validate` | `{document, base_url?, model?}` → `{valid, issues:[{path,message}], declared, preview}`；不写盘、不发请求，预览里密钥为 `***` |
+| GET | `/api/http-protocols/assist/models` | 「AI 帮我配置」可用的对话模型：`{models:[{alias, model_id, name, max_cost_cny}]}`（启用的文本模型；`max_cost_cny` 按资料上限估，无价格为 null） |
+| POST | `/api/http-protocols/assist` | 计费调用：`{kind, alias, model_id, text?, urls?≤3}` → `{document, notices, usage:{input_tokens, output_tokens, cost_cny, job_id}}`。只起草不保存；不收供应商密钥；网址走出站检查（只放行公网，≤2 MB，只收 html / plain / markdown / json）；资料单份 ≤60K、合计 ≤120K 字符；资料与输出里有明确密钥特征的值替换为 `<redacted>`，长串只提示；输出只保留模板顶层字段，`version` / `kind` 强制覆盖；请求不带 tools、不重试、`max_tokens` 4096；抓取失败在调用前报错（502，不计费），模型失败 502、输出不是 JSON 422（都已记账） |
 
 ## 网关共享库（ADR-0034）
 

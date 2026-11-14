@@ -5,7 +5,8 @@ export type JobStatus = 'pending_confirm' | 'pending' | 'done' | 'partial' | 'fa
 // 新 JobKind: 媒体类型
 export type JobKind = 'text' | 'image' | 'video' | 'audio';
 
-export type Namespace = 'studio' | 'canvas';
+/** assist：「AI 帮我配置」的对话调用，只进用量，不进创作台与画布 — 与 schemas.py 同步。 */
+export type Namespace = 'studio' | 'canvas' | 'assist';
 
 export interface JobParams {
   workflow_inputs?: Record<string, string | number | boolean | null>;

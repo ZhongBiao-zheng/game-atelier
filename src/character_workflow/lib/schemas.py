@@ -41,7 +41,8 @@ class JobKind(str, Enum):
     AUDIO = "audio"
 
 
-Namespace = Literal["studio", "canvas"]
+# assist：「AI 帮我配置」的对话调用，只进用量，不进创作台与画布。
+Namespace = Literal["studio", "canvas", "assist"]
 ProviderTaskId = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=512),
