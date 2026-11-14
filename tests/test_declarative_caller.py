@@ -351,3 +351,13 @@ def test_redirect_into_private_network_is_refused(vendor):
     trusted = outbound_guard.origin(requests.utils.urlparse(vendor.url))
     with pytest.raises(outbound_guard.OutboundError, match="私有网络"):
         outbound_guard.fetch(vendor.url + "/hop", max_bytes=1024, trusted=trusted)
+
+
+def test_poll_redirect_is_not_followed(vendor, tmp_path):
+    configure(vendor, ASYNC)
+    vendor.on("POST", "/v1/tasks", {"data": {"id": "t-r"}})
+    vendor.on("GET", "/v1/tasks/t-r", (302, b"", {"Location": vendor.url + "/elsewhere"}))
+    vendor.on("GET", "/elsewhere", {"data": {"status": "SUCCESS", "images": []}})
+    with pytest.raises(declarative.DeclarativeError, match="重定向.*task_id=t-r"):
+        run_image(tmp_path)
+    assert vendor.calls("GET", "/elsewhere") == []

@@ -417,7 +417,12 @@ def _run_async(binding: Binding, context: dict[str, Any], params: dict[str, Any]
         max_polls=ceil(window / poll.interval_seconds) + 10, poll_interval=poll.interval_seconds,
         task_ref=task_id, error_cls=DeclarativePendingError, should_cancel=should_cancel,
         max_elapsed_seconds=window, method=call.method, json_body=call.json_body,
+        follow_redirects=False,
     ):
+        if 300 <= response.status_code < 400:
+            raise DeclarativeError(video_poll.with_task_ref(
+                f"custom api {response.status_code}: 查询任务时接口返回了重定向，自定义接口不跟随重定向",
+                task_id))
         raw = response.content or b""
         if len(raw) > POLL_RESPONSE_LIMIT:
             raise DeclarativeError(video_poll.with_task_ref("查询任务的响应超过 2 MB 上限", task_id))
