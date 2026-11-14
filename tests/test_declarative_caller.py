@@ -361,3 +361,157 @@ def test_poll_redirect_is_not_followed(vendor, tmp_path):
     with pytest.raises(declarative.DeclarativeError, match="重定向.*task_id=t-r"):
         run_image(tmp_path)
     assert vendor.calls("GET", "/elsewhere") == []
+
+
+class _StallingServer:
+    """回 200 响应头 + 8 字节后不再发送：复现「头到体停」，统计收到几次提交。"""
+
+    def __init__(self):
+        import socket
+        import threading
+
+        self.connections = 0
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.url = f"http://127.0.0.1:{self.sock.getsockname()[1]}"
+        self.open: list = []
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            self.connections += 1
+            self.open.append(conn)
+            conn.recv(65536)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                         b"Content-Length: 100\r\n\r\n{\"data\":")
+
+    def close(self):
+        for conn in self.open:
+            conn.close()
+        self.sock.close()
+
+
+def test_body_read_timeout_after_headers_is_never_retried(tmp_path, monkeypatch):
+    stalling = _StallingServer()
+    try:
+        stored = http_protocols.save_protocol(copy.deepcopy(SYNC))
+        keys.add_key(keys.KeySpec(
+            alias="vendor", provider="custom", base_url=stalling.url, access_key=SECRET,
+            models=[keys.ModelSpec(id="m1", name="m1", modality="image", protocol="declarative",
+                                   declarative_id=stored.id)],
+            created_at="2026-11-14T00:00:00Z"))
+        monkeypatch.setattr(declarative.net_env, "DEFAULT_TIMEOUT", (1.0, 1.0))
+        with pytest.raises(declarative.DeclarativeError, match="可能已经执行"):
+            run_image(tmp_path)
+        assert stalling.connections == 1
+    finally:
+        stalling.close()
+
+
+def _chain_text(error: BaseException) -> str:
+    import traceback
+    return "".join(traceback.format_exception(error))
+
+
+def test_query_secret_never_reaches_error_text_or_traceback(tmp_path):
+    stored = http_protocols.save_protocol({**copy.deepcopy(SYNC), "auth": {"type": "query", "name": "key"}})
+    keys.add_key(keys.KeySpec(
+        alias="vendor", provider="custom", base_url="http://127.0.0.1:1", access_key=SECRET,
+        models=[keys.ModelSpec(id="m1", name="m1", modality="image", protocol="declarative",
+                               declarative_id=stored.id)],
+        created_at="2026-11-14T00:00:00Z"))
+    with pytest.raises(declarative.DeclarativeError) as error:
+        run_image(tmp_path)
+    assert "127.0.0.1:1/v1/images/generations" in str(error.value)
+    assert SECRET not in _chain_text(error.value)
+
+
+def test_poll_abandon_drops_the_secret_bearing_cause(vendor, tmp_path, monkeypatch):
+    configure(vendor, {**copy.deepcopy(ASYNC), "auth": {"type": "query", "name": "key"}})
+    vendor.on("POST", "/v1/tasks", {"data": {"id": "t-q"}})
+
+    original = requests.request
+
+    def refuse(method, url, **kw):
+        if method != "GET":
+            return original(method, url, **kw)
+        raise requests.ConnectionError(f"Max retries exceeded with url: {url}")
+
+    monkeypatch.setattr(video_poll.requests, "request", refuse)
+    with pytest.raises(declarative.DeclarativePendingError, match="task_id=t-q") as error:
+        run_image(tmp_path)
+    assert SECRET not in _chain_text(error.value)
+
+
+def test_poll_response_size_is_capped_while_streaming(vendor, tmp_path, monkeypatch):
+    configure(vendor, ASYNC)
+    monkeypatch.setattr(declarative, "POLL_RESPONSE_LIMIT", 64)
+    vendor.on("POST", "/v1/tasks", {"data": {"id": "t-big"}})
+    vendor.on("GET", "/v1/tasks/t-big", {"data": {"status": "RUNNING", "pad": "x" * 500}})
+    with pytest.raises(declarative.DeclarativeError, match="超过 2 MB 上限.*task_id=t-big"):
+        run_image(tmp_path)
+
+
+def test_poll_404_keeps_waiting(vendor, tmp_path):
+    configure(vendor, ASYNC)
+    vendor.on("POST", "/v1/tasks", {"data": {"id": "t-404"}})
+    vendor.on("GET", "/v1/tasks/t-404", (404, {"error": "not found"}),
+              {"data": {"status": "SUCCESS", "images": [vendor.url + "/files/a.png"]}})
+    assert run_image(tmp_path)
+
+
+def test_too_many_results_is_an_error_not_a_silent_cut(vendor, tmp_path):
+    configure(vendor, SYNC)
+    vendor.on("POST", "/v1/images/generations",
+              {"data": [{"url": f"{vendor.url}/files/a.png?i={i}"} for i in range(9)]})
+    with pytest.raises(declarative.DeclarativeError, match="9 个结果"):
+        run_image(tmp_path)
+
+
+def test_base_url_rejects_mapped_link_local_and_gateway_port(monkeypatch):
+    with pytest.raises(outbound_guard.OutboundError):
+        outbound_guard.check_base_url("http://[::ffff:169.254.169.254]/")
+    monkeypatch.setattr(outbound_guard, "_gateway_port", lambda: 5180)
+    with pytest.raises(outbound_guard.OutboundError, match="网关"):
+        outbound_guard.check_base_url("http://192.168.1.5:5180")
+    outbound_guard.check_base_url("http://192.168.1.5:8080")
+
+
+def test_proxy_branch_reads_no_env_credentials(monkeypatch):
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def fake_get(self, url, **kwargs):
+        seen.update(trust_env=self.trust_env, proxies=kwargs.get("proxies"))
+        raise Stop
+
+    monkeypatch.setattr(outbound_guard.requests.utils, "get_environ_proxies",
+                        lambda _u: {"https": "http://127.0.0.1:7890"})
+    monkeypatch.setattr(outbound_guard.requests.Session, "get", fake_get)
+    with pytest.raises(Stop):
+        outbound_guard.fetch("https://cdn.example.com/a.png", max_bytes=10)
+    assert seen == {"trust_env": False, "proxies": {"https": "http://127.0.0.1:7890"}}
+
+
+def test_image_edit_is_refused_for_declarative_models(vendor):
+    from character_workflow.lib.job_runner import JobRunnerError, run_job
+    from character_workflow.lib.jobs import read_job, save_job
+    from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
+
+    configure(vendor, SYNC)
+    save_job(Job(job_id="edit-decl-1", character_id="vendor", prompt="改",
+                 submitted_at="2026-11-14T00:00:00+08:00", model="m1",
+                 params=JobParams(image_edit={"mode": "inpaint"}), output_paths=[],
+                 status=JobStatus.PENDING, error=None, kind=JobKind.IMAGE, namespace="studio",
+                 alias="vendor", provider="custom"))
+    with pytest.raises(JobRunnerError, match="不支持局部编辑"):
+        run_job("edit-decl-1")
+    assert read_job("edit-decl-1").status.value == "failed"
+    assert vendor.received == []

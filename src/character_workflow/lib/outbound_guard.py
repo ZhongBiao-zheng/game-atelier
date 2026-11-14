@@ -34,13 +34,24 @@ class OutboundError(RuntimeError):
 
 def _ip_literal(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
     try:
-        return ipaddress.ip_address(host)
+        ip = ipaddress.ip_address(host.strip("[]"))
     except ValueError:
         try:
             # libc 还接受 2130706433、0x7f.1 这类缩写 / 十进制 / 十六进制 IPv4 写法。
-            return ipaddress.ip_address(socket.inet_aton(host))
+            ip = ipaddress.ip_address(socket.inet_aton(host))
         except OSError:
             return None
+    # ::ffff:169.254.169.254 这类 IPv4 映射地址按它映射的 IPv4 判。
+    mapped = getattr(ip, "ipv4_mapped", None)
+    return mapped or ip
+
+
+def _gateway_port() -> int | None:
+    try:
+        from character_workflow.lib.gateway_keys import read_config
+        return read_config().port
+    except Exception:  # noqa: BLE001 —— 网关配置读不出时不影响普通供应商
+        return None
 
 
 def origin(parts: SplitResult) -> Origin:
@@ -81,8 +92,13 @@ def check_base_url(url: str | None) -> SplitResult:
         raise OutboundError("服务地址不能指向链路本地或广播地址")
     loopback = (host in _LOCAL_NAMES or host.endswith(".localhost")
                 or (ip is not None and ip.is_loopback))
-    if loopback and origin(parts)[2] == _viewer_port():
+    port = origin(parts)[2]
+    if loopback and port == _viewer_port():
         raise OutboundError("服务地址不能指向 Atelier 自己")
+    # 局域网网关只挂在本机的局域网地址上：本机 / 私有地址 + 网关端口一律拒绝。
+    local_or_private = loopback or (ip is not None and ip.is_private)
+    if local_or_private and port == _gateway_port():
+        raise OutboundError("服务地址不能指向 Atelier 的局域网网关")
     return parts
 
 
@@ -113,13 +129,15 @@ def _open_public(url: str, parts: SplitResult, timeout) -> Iterator[requests.Res
     hostname = _public_hostname(parts)
     proxies = requests.utils.get_environ_proxies(url)
     with requests.Session() as session:
+        # 一律不读环境凭据：trust_env 会把 ~/.netrc 里的账号密码附到结果地址上。
+        session.trust_env = False
         if proxies.get(parts.scheme) or proxies.get("all"):
-            # 走用户的代理：域名由代理解析，本机不做 IP 固定。
+            # 走用户配置的代理：域名由代理解析，本机拿不到真实 IP，不做 IP 固定（ADR-0036）。
+            # 代理显式传入，仍不读 netrc；字面量私网 IP 与本机域名在上面已拦下。
             with session.get(url, headers=_HEADERS, timeout=timeout, stream=True,
                              allow_redirects=False, proxies=proxies) as response:
                 yield response
             return
-        session.trust_env = False
         port = origin(parts)[2]
         try:
             answers = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)

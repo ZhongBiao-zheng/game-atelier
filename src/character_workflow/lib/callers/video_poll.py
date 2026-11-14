@@ -21,6 +21,8 @@ from typing import Any
 
 import requests
 
+from character_workflow.lib.outbound_guard import read_limited
+
 # 容忍窗口按墙钟时间定，不按次数：四家的 poll_interval 差 3 倍（5s vs 15s），
 # 定成固定次数会让同一次 Clash 切节点在 Seedance 上只忍 30s、在 HappyHorse 上忍 90s，
 # 同一个故障在不同厂商表现不一致，排障时会误判成「某厂商特别脆」。
@@ -87,6 +89,7 @@ def poll_responses(
     method: str = "GET",
     json_body: Any = None,
     follow_redirects: bool = True,
+    max_bytes: int | None = None,
 ) -> Iterator[Any]:
     """按 poll_interval 节奏轮询 GET，逐次 yield「值得解读」的响应。
 
@@ -115,11 +118,20 @@ def poll_responses(
         try:
             # 既有调用点只走默认 GET（测试按 requests.get 打桩）。自定义接口不跟随重定向：
             # 它的密钥可能在自定义请求头里，requests 换主机时只剥 Authorization。
-            if method == "GET" and follow_redirects:
+            if method == "GET" and follow_redirects and max_bytes is None:
                 resp = requests.get(url, headers=headers, timeout=min(timeout, remaining))
             else:
                 resp = requests.request(method, url, headers=headers, json=json_body,
-                                        timeout=min(timeout, remaining), allow_redirects=False)
+                                        timeout=min(timeout, remaining),
+                                        allow_redirects=follow_redirects,
+                                        stream=max_bytes is not None)
+                if max_bytes is not None:
+                    # 流式读并强制上限（超限抛 OutboundError 交给调用方）；读完回填到响应对象，
+                    # 后面 .content / .json() 照常可用。读体中途的网络失败按「这次没问到」计。
+                    with resp:
+                        body = read_limited(resp, max_bytes)
+                    resp._content = body
+                    resp._content_consumed = True
         except requests.RequestException as e:
             consecutive += 1
             if consecutive >= limit:

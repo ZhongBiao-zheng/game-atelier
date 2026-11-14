@@ -343,13 +343,15 @@ TokenDance quickstart 的请求体与阿里官方**不一致**：它写 `input.i
 
 ```
 图片 dispatch：
+  provider custom 且 ModelSpec.protocol == "declarative" → declarative.render_image（自定义接口，ADR-0036）
   provider openrouter                      → openrouter_image.render（专用 /images，回 b64_json）
   provider openai/seedream/tokendance/custom → openai_image.render
     protocol == "ark"（词元跳动的 seedream 系）→ {gateway}/ark/v3/images/generations
     base 含 openai-hk                        → 强制同步通道（gpt-image 发 ?async=true 会 404）
     HK 上的非 gpt-image / nano-banana 族      → 回落 /chat/completions 抽图
 
-视频 dispatch_video：按 ModelSpec.protocol 查 VIDEO_ADAPTERS，六个协议
+视频 dispatch_video：按 ModelSpec.protocol 查 VIDEO_ADAPTERS，七个协议
+  declarative → declarative.render_video（自定义接口，只允许 provider=custom）
   seedance   → volcengine_video   （Ark 直连 / 词元跳动改写任务 URL）
   dashscope  → happyhorse_video   （阿里百炼 / 词元跳动转发）
   kling      → kling_video        （HK 聚合旧版接口，挂站点根）
@@ -363,6 +365,23 @@ TokenDance quickstart 的请求体与阿里官方**不一致**：它写 `input.i
 `minimax-h3`、可灵特效 / 数字人 / TTS）目前仍可被勾选保存，要到真出图时才报错。
 
 帧语义（前端→caller）：双帧 = firstlast、仅首 = first、仅尾 = last、全空 = 文生视频；多余图片作 `reference_image`。
+
+## 自定义接口（ADR-0036）
+
+用户在设置里写一份接口模板（`.config/http-protocols/<id>.json`），自定义供应商的模型绑定后由
+`callers/declarative.py` 执行，不需要写 caller。契约与字段见 `docs/api-contract.md`「自定义接口」。
+
+| 项 | 规则 |
+|---|---|
+| 请求目标 | 模板只写相对路径，拼在供应商 `base_url` 后；拼接后核对源未变。`base_url` 允许本机 / 局域网，拒绝链路本地（含 IPv4 映射写法）、本服务端口与局域网网关端口 |
+| 鉴权 | `bearer` / `header` / `query` / `none`；密钥只在 keys.json。query 鉴权的报错文本与异常链里密钥一律遮掉 |
+| 重试 | 只对「请求没送达」与 502/503/504 重试。响应头一旦到达，读体阶段任何失败都当场致命 |
+| 重定向 | 提交与轮询都不跟随，3xx 当失败 |
+| 轮询 | 复用 `video_poll.poll_responses`（`follow_redirects=False`、`max_bytes` 流式上限）；任务号先落盘再轮询；404 视为「还查不到」继续等，窗口到期图片任务保留可续查 |
+| 结果下载 | 只放行公网地址或与 `base_url` 同源；按校验过的 IP 建连；走代理 / Fake-IP 时不做 IP 固定，且不读 netrc 等环境凭据 |
+| 上限 | 提交响应 64 MB、轮询响应 2 MB、单图 50 MB、视频 1 GB；结果超过 8 个报错 |
+| 计价 | 一律未计价；不与内置渠道同名模型合组；不经网关发布 |
+| 不支持 | 局部编辑 / 扩图（runner 明确拒绝）、签名、多步上传、回调、二进制响应、参考视频 / 音频 |
 
 ## 官方能力 vs 当前实装差距
 

@@ -635,6 +635,11 @@ def _run_once(
                 edit_key = find_by_alias(job.alias)
                 if edit_key and edit_key.provider == "chatgpt":
                     raise JobRunnerError("ChatGPT 订阅尚不支持局部编辑或扩图")
+                edit_model = next((m for m in (edit_key.models if edit_key else [])
+                                   if m.id == job.model), None)
+                if edit_model is not None and edit_model.protocol == "declarative":
+                    # image_edit.render 走内置 edits 端点，会绕过模板直接把密钥发给 base_url。
+                    raise JobRunnerError("自定义接口不支持局部编辑或扩图，请换用内置模型")
                 if edit_key and edit_key.provider == "atelier":
                     from character_workflow.lib.callers.atelier_gateway import render_edit as render
                 else:

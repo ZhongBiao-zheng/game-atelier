@@ -36,6 +36,8 @@ MAX_PATH_SEGMENTS = 8
 
 _NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,39}$")
 _HEADER_NAME = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$")
+# CR / LF 等控制字符会拆出第二个请求头（头注入）；制表符在 HTTP 头值里合法。
+_CONTROL = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
 WHOLE = re.compile(r"^\$([A-Za-z][A-Za-z0-9_]*)$")
 BRACED = re.compile(r"\$\{([^}]*)\}")
 _BARE = re.compile(r"\$([A-Za-z][A-Za-z0-9_]*)")
@@ -281,6 +283,8 @@ def _auth_issues(p: HttpProtocol) -> list[Issue]:
         issues.append(Issue(path="auth.name", message="只有 header / query 鉴权需要 name"))
     if p.auth.prefix is not None and p.auth.type != "header":
         issues.append(Issue(path="auth.prefix", message="只有 header 鉴权可以带前缀"))
+    if p.auth.prefix and _CONTROL.search(p.auth.prefix):
+        issues.append(Issue(path="auth.prefix", message="前缀里不能有换行或控制字符"))
     for name, value in p.submit.headers.items():
         low = name.lower()
         where = f"submit.headers.{name}"
@@ -290,6 +294,8 @@ def _auth_issues(p: HttpProtocol) -> list[Issue]:
             issues.append(Issue(path=where, message="这个请求头由系统负责，不能写死"))
         if "$" in value.replace("$$", ""):
             issues.append(Issue(path=where, message="请求头里不能用占位符"))
+        if _CONTROL.search(value):
+            issues.append(Issue(path=where, message="请求头的值不能有换行或控制字符"))
     return issues
 
 

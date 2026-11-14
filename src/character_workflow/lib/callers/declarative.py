@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from math import ceil
 from pathlib import Path
 from typing import Any
-from urllib.parse import SplitResult, urlencode, urlsplit
+from urllib.parse import SplitResult, quote, quote_plus, urlencode, urlsplit
 
 import requests
 
@@ -74,6 +74,8 @@ class PreparedCall:
     json_body: Any = None
     parts: list[tuple[str, tuple[str | None, Any, str | None]]] = field(default_factory=list)
     sent_urls: set[str] = field(default_factory=set)
+    # 报错文本里要遮掉的串：密钥原文及其 URL 编码形式。
+    secrets: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -205,7 +207,9 @@ def prepare(base: SplitResult, access_key: str, protocol: HttpProtocol,
     elif auth.type == "query":
         url += ("&" if "?" in url else "?") + urlencode({auth.name or "": access_key})
     rendered = render(body, context) if body is not None else None
-    call = PreparedCall(method=method, url=url, headers=headers)
+    secrets = tuple(dict.fromkeys(s for s in (access_key, quote(access_key, safe=""),
+                                              quote_plus(access_key)) if s))
+    call = PreparedCall(method=method, url=url, headers=headers, secrets=secrets)
     if rendered is MISSING or rendered is None:
         return call
     call.sent_urls = video_poll.sent_url_set(_strings(rendered))
@@ -269,26 +273,53 @@ def _decode_json(raw: bytes) -> Any:
         return None
 
 
+def redact(call: PreparedCall, text: str) -> str:
+    """去掉报错文本里的密钥：query 鉴权会把密钥拼进 URL，requests 的异常文本会原样带出 URL。"""
+    for secret in call.secrets:
+        text = text.replace(secret, "<redacted>")
+    return text
+
+
+def safe_url(call: PreparedCall) -> str:
+    parts = urlsplit(call.url)
+    return parts._replace(query="", fragment="").geturl()
+
+
+def _transport_error(call: PreparedCall, error: requests.RequestException, *, received: bool) -> str:
+    stage = "已收到响应头、读取响应体时失败，这次请求可能已经执行" if received else "请求失败"
+    return f"custom api request failed ({safe_url(call)})：{stage}：{redact(call, str(error))}"
+
+
 def send(call: PreparedCall, *, timeout, error_path: str | None) -> Any:
-    """发提交请求：只在确定没执行的失败上重试；返回解析后的 JSON。"""
+    """发提交请求：只在确定没送达的失败上重试；返回解析后的 JSON。
+
+    响应头一旦到达，请求就已被厂商受理（多半已计费）：读体阶段的任何失败都当场致命。
+    requests 在读体超时时抛的是 ConnectionError("Read timed out") 而不是 ReadTimeout，
+    交给 _is_pre_flight_failure 判会被当成「没送达」重试（实测重复提交 3 次）。
+    异常一律 `from None`：原始异常文本带完整 URL（含 query 密钥），不能进 traceback / 日志。
+    """
     from .openai_image import _is_pre_flight_failure
 
     for attempt in range(3):
         try:
-            with requests.request(
+            response = requests.request(
                 call.method, call.url, headers=call.headers,
                 json=call.json_body if not call.parts else None,
                 files=call.parts or None, timeout=timeout, stream=True, allow_redirects=False,
-            ) as response:
-                status = response.status_code
-                raw = outbound_guard.read_limited(response, SUBMIT_RESPONSE_LIMIT)
-        except outbound_guard.OutboundError as error:
-            raise DeclarativeError(f"custom api 响应过大：{error}") from None
+            )
         except requests.RequestException as error:
             if _is_pre_flight_failure(error) and attempt < 2:
                 time.sleep(1 + attempt)
                 continue
-            raise DeclarativeError(f"custom api request failed: {error}") from error
+            raise DeclarativeError(_transport_error(call, error, received=False)) from None
+        with response:
+            status = response.status_code
+            try:
+                raw = outbound_guard.read_limited(response, SUBMIT_RESPONSE_LIMIT)
+            except outbound_guard.OutboundError as error:
+                raise DeclarativeError(f"custom api 响应过大：{error}") from None
+            except requests.RequestException as error:
+                raise DeclarativeError(_transport_error(call, error, received=True)) from None
         payload = _decode_json(raw)
         if 300 <= status < 400:
             raise DeclarativeError(f"custom api {status}: 接口返回了重定向，自定义接口不跟随重定向")
@@ -321,7 +352,11 @@ def _results(payload: Any, spec: ResultSpec, sent: set[str],
         raise DeclarativeError(video_poll.with_task_ref(
             f"自定义接口按 {paths} 取不到结果，请核对接口模板；厂商响应：{_summary(payload)}",
             task_ref))
-    return items[:MAX_RESULTS]
+    if len(items) > MAX_RESULTS:
+        raise DeclarativeError(video_poll.with_task_ref(
+            f"厂商返回了 {len(items)} 个结果，超过 {MAX_RESULTS} 个上限，请核对接口模板的取值路径",
+            task_ref))
+    return items
 
 
 def _decode_base64(value: str, limit: int) -> bytes:
@@ -408,25 +443,46 @@ def _run_async(binding: Binding, context: dict[str, Any], params: dict[str, Any]
         on_phase("sent")
     call = prepare(binding.base, binding.key.access_key, protocol,
                    {**context, "taskId": task_id}, poll=True)
+    try:
+        return _poll(call, protocol, task_id, on_phase=on_phase, should_cancel=should_cancel)
+    except DeclarativeError as error:
+        # video_poll 放弃时 `raise ... from <requests 异常>`，原始异常文本带完整 URL（含 query 密钥）：
+        # 换成同类、同文案、不带异常链的新异常，traceback 与日志里都不出现密钥。
+        raise type(error)(redact(call, str(error))) from None
+
+
+def _poll(call: PreparedCall, protocol: HttpProtocol, task_id: str, *,
+          on_phase, should_cancel) -> tuple[Any, str]:
+    poll = protocol.poll
+    assert poll is not None
     window = poll.timeout_seconds or DEFAULT_POLL_TIMEOUT[protocol.kind]
     success = {s.lower() for s in poll.success}
     failure = {s.lower() for s in poll.failure}
     status = ""
-    for response in video_poll.poll_responses(
+    responses = video_poll.poll_responses(
         url=call.url, headers=call.headers, timeout=POLL_REQUEST_TIMEOUT,
         max_polls=ceil(window / poll.interval_seconds) + 10, poll_interval=poll.interval_seconds,
         task_ref=task_id, error_cls=DeclarativePendingError, should_cancel=should_cancel,
         max_elapsed_seconds=window, method=call.method, json_body=call.json_body,
-        follow_redirects=False,
-    ):
+        follow_redirects=False, max_bytes=POLL_RESPONSE_LIMIT,
+    )
+    while True:
+        try:
+            response = next(responses)
+        except StopIteration:
+            break
+        except outbound_guard.OutboundError:
+            raise DeclarativeError(video_poll.with_task_ref("查询任务的响应超过 2 MB 上限", task_id)) from None
         if 300 <= response.status_code < 400:
             raise DeclarativeError(video_poll.with_task_ref(
                 f"custom api {response.status_code}: 查询任务时接口返回了重定向，自定义接口不跟随重定向",
                 task_id))
         raw = response.content or b""
-        if len(raw) > POLL_RESPONSE_LIMIT:
-            raise DeclarativeError(video_poll.with_task_ref("查询任务的响应超过 2 MB 上限", task_id))
         payload = _decode_json(raw)
+        if response.status_code == 404:
+            # 厂商刚受理的任务可能短暂查不到；任务多半已计费，继续等，窗口到了按「可续查」收尾。
+            status = "404"
+            continue
         if response.status_code >= 400:
             raise DeclarativeError(video_poll.with_task_ref(
                 f"custom api {response.status_code}: "
