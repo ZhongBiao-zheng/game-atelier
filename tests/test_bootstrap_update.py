@@ -4,6 +4,7 @@ import io
 import json
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -136,16 +137,27 @@ def test_http_rejects_unpublished_or_invalid_release(monkeypatch, payload):
 
 
 def test_slow_response_cannot_exceed_total_budget_or_write_late_cache(update_env, monkeypatch):
+    # 不靠时间余量：慢响应被事件挡住（最多 5 秒），预算是 0.05 秒。等慢响应就要 5 秒，
+    # 只要总耗时远小于它，就证明主线程按预算返回、没有等上游；CI 机器慢一些也不会误报。
     monkeypatch.setattr(bootstrap, "UPDATE_FETCH_TIMEOUT", .05)
+    release_slow = threading.Event()
+    slow_finished = threading.Event()
+
     def slow(*args):
-        time.sleep(.2)
-        return bootstrap._release("v99.0.0", "github")
+        try:
+            release_slow.wait(5)
+            return bootstrap._release("v99.0.0", "github")
+        finally:
+            slow_finished.set()
+
     monkeypatch.setattr(bootstrap, "_query_latest_release", slow)
     start = time.monotonic()
     assert bootstrap.latest_release() is None
-    assert time.monotonic() - start < .18
-    time.sleep(.25)
-    assert bootstrap._read_update_cache()["release"] is None
+    assert time.monotonic() - start < 2.5
+    assert not slow_finished.is_set()  # 返回时慢响应确实还没回来
+    release_slow.set()
+    assert slow_finished.wait(5)
+    assert bootstrap._read_update_cache()["release"] is None  # 迟到的结果不写缓存
 
 
 def load_updater(monkeypatch, repo):
