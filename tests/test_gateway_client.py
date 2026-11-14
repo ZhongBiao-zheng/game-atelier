@@ -280,13 +280,13 @@ def test_video_sync_groups_with_local_and_job_restart_only_polls(gateway, monkey
 
 def test_audio_job_and_canvas_capability_use_gateway(gateway, monkeypatch):
     from character_workflow.lib.callers import openai_audio
-    from character_workflow.lib.canvas_runs import _supports_openai_speech
+    from character_workflow.lib.audio_caps import audio_protocol
 
     _add("Speech", "openai", keys.ModelSpec(id="tts-1", name="Speech", modality="audio"))
     atelier_gateway.sync_gateway_key("Hub")
     key = keys.find_by_alias("Hub")
     model = next(m for m in key.models if m.modality == "audio")
-    assert _supports_openai_speech(key, model)
+    assert audio_protocol(key, model) == "openai-speech"
 
     def render(*, output_dir, params, **kwargs):
         assert params["voice"] == "alloy"

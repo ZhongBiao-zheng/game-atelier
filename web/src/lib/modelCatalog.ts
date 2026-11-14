@@ -35,6 +35,11 @@ const catalog: CatalogEntry[] = [
   { key: 'happyhorse-1.1', name: 'HappyHorse 1.1', brand: 'alibaba', description: 'Alibaba video from text, image or references.', match: /^happyhorse-1\.1(-.*)?$/ },
   { key: 'seedance-2.0-mini', name: 'Seedance 2.0 Mini', brand: 'bytedance', description: 'Lightweight Seedance for quick drafts.', match: /^(doubao-)?seedance-2[.-]0-mini(-\d+)?$/ },
   { key: 'happyhorse-1.0', name: 'HappyHorse 1.0', brand: 'alibaba', description: 'Earlier HappyHorse release.', match: /^happyhorse-1\.0(-.*)?$/ },
+  // Speech. `-hd` is stripped as a size variant before matching, so the HD id lands on the base pattern.
+  { key: 'minimax-speech-2.8-turbo', name: 'MiniMax Speech 2.8 Turbo', brand: 'minimax', description: 'Fast, low-cost speech with many Chinese voices.', match: /^minimax-speech-2[.-]8-turbo$/ },
+  { key: 'minimax-speech-2.8-hd', name: 'MiniMax Speech 2.8 HD', brand: 'minimax', description: 'Most expressive MiniMax speech, with pause and sigh tags.', match: /^minimax-speech-2[.-]8$/ },
+  { key: 'gpt-4o-mini-tts', name: 'GPT-4o mini TTS', brand: 'openai', description: 'OpenAI speech you can steer with spoken instructions.', match: /^gpt-4o-mini-tts(-\d{4}-\d{2}-\d{2})?$/ },
+  { key: 'tts-1', name: 'TTS-1', brand: 'openai', description: "OpenAI's classic text-to-speech; HD for higher quality.", match: /^tts-1(-hd)?(-\d+)?$/ },
 ];
 
 function identity(id: string) {

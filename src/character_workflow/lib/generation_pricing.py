@@ -179,6 +179,31 @@ def _tokendance(*, kind, model_id, n, size, duration, resolution, ratio, has_ref
     return None
 
 
+def _tokendance_character_rate(model_id: str) -> float | None:
+    """TokenDance 语音的「元 / 千字」单价：同步接口的按字符计费项；流式与音色复刻不算。"""
+    from character_workflow.lib.tokendance_prices import model_pricing
+
+    items = [item for item in (model_pricing(model_id) or {}).get("items") or []
+             if isinstance(item, dict)]
+    rates = {
+        _rate(plan.get("rate"))
+        for item in items
+        if str(item.get("id", "")).endswith(":characters")
+        and "_ws:" not in str(item.get("id", "")) and "voice_clone" not in str(item.get("id", ""))
+        for plan in item.get("plans") or []
+        if isinstance(plan, dict) and plan.get("unit") == "kCharacters"
+    }
+    return rates.pop() if len(rates) == 1 and None not in rates else None
+
+
+def speech_cost_cny(*, provider: str | None, model_id: str, characters: int) -> float | None:
+    """按字符计费的语音：预估用朗读文本字数，实付用上游回报的计费字数。只认有价格快照的渠道。"""
+    if _normalize(provider) != "tokendance" or characters < 0:
+        return None
+    rate = _tokendance_character_rate(model_id)
+    return None if rate is None else _priced(rate * characters / 1000)
+
+
 def estimate_cost_cny(
     *, kind: str, provider: str | None = None, base_url: str | None = None,
     billing_group: str | None = None, model_id: str | None = None,
@@ -187,11 +212,15 @@ def estimate_cost_cny(
     resolution: str | None = None, ratio: str | None = None, generate_audio: bool = False,
     has_reference_video: bool = False, image_edit: bool = False,
     reference_image_count: int = 0, layer_decomposition: bool = False,
+    text_length: int | None = None,
 ) -> float | None:
     """Estimate one generation request; None means no verified price."""
     # 自定义接口一律未计价：模型 id 与地址可能恰好撞上内置渠道，不能套用内置价格（ADR-0036）。
     if not model_id or _normalize(protocol) == "declarative":
         return None
+    if kind == "audio":
+        return None if text_length is None else speech_cost_cny(
+            provider=provider, model_id=model_id, characters=text_length)
     if provider == "comfyui":
         return 0.0 if kind == "image" else None
     if provider == "chatgpt":

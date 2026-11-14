@@ -44,6 +44,7 @@ import {
 } from '@/api/canvas';
 import { CanvasBatchMaterialEditor, CanvasGroupFrame } from './CanvasBatchControls';
 import { CanvasAudioPlayer } from './CanvasAudioPlayer';
+import { audioCapsOf } from '@/lib/audioCaps';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
 import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
 import { CanvasImageEditPanel } from './CanvasImageEditPanel';
@@ -2624,8 +2625,9 @@ export function CanvasGenerationComposer({
             }))}
           />
         )}
-          {draft.mode === 'audio' && channel && (
+          {draft.mode === 'audio' && channel && audioCapsOf(channel.model.id, channel.key.provider, channel.model.protocol) && (
           <CanvasAudioSettings
+            caps={audioCapsOf(channel.model.id, channel.key.provider, channel.model.protocol)!}
             params={draft.params}
             onPatch={patch => updateDraftWithHistory(current => ({
               ...current,

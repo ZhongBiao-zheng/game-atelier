@@ -11,7 +11,7 @@ describe('shared Python / TypeScript generation estimates', () => {
       kind: r.kind, count: r.n, size: r.size, sizeMode: r.size_mode, quality: r.quality,
       duration: r.duration, resolution: r.resolution, ratio: r.ratio,
       generateAudio: r.generate_audio, hasReferenceVideo: r.has_reference_video,
-      imageEdit: r.image_edit,
+      imageEdit: r.image_edit, textLength: r.text_length,
     } as GenerationCostRequest;
     expect(estimateGenerationCost(mapped)).toBe(expected);
   });

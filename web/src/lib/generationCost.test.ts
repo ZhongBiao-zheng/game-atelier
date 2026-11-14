@@ -364,6 +364,25 @@ describe('estimateGenerationCost', () => {
     setTokenDancePrices({});
   });
 
+  it('prices TokenDance speech per thousand characters, like the server', () => {
+    setTokenDancePrices({
+      'minimax-speech-2.8-turbo': { items: [
+        { id: 'minimax:t2a_v2:characters', plans: [{ unit: 'kCharacters', rate: '0.16' }] },
+        { id: 'minimax:t2a_v2_ws:characters', plans: [{ unit: 'kCharacters', rate: '0.16' }] },
+        { id: 'minimax:voice_clone:characters', plans: [{ unit: 'kCharacters', rate: '0.28' }] },
+      ] },
+    });
+    const speech = (textLength?: number, provider = 'tokendance') => estimateGenerationCost({
+      provider: { provider, baseUrl: 'https://tokendance.space/gateway/v1' },
+      model: { id: 'minimax-speech-2.8-turbo', protocol: 'minimax-t2a' }, kind: 'audio', textLength,
+    });
+    expect(speech(1000)).toBe(0.16);
+    expect(speech(20)).toBe(0.0032);
+    expect(speech()).toBeNull();
+    expect(speech(20, 'custom')).toBeNull();
+    setTokenDancePrices({});
+  });
+
   it('prices TokenDance Kling by audio feature and skips input-video billing', () => {
     const sku = (resolution: string, rate: string, feature?: string) => ({
       specs: { resolution, ...(feature ? { feature } : {}) }, rate, unit: 'seconds',

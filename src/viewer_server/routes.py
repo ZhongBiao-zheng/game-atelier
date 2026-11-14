@@ -1058,7 +1058,7 @@ def _classify_model(item: dict) -> str:
         return "image"
     if any(h in p for p in protocols for h in _PROTOCOL_VIDEO_HINTS):
         return "video"
-    if any(_protocol_is_openai_speech(protocol) for protocol in protocols):
+    if any(_speech_protocol(protocol) for protocol in protocols):
         return "audio"
     if any(h in p for p in protocols for h in _PROTOCOL_TEXT_GENERATION_HINTS):
         return "text"
@@ -1134,10 +1134,28 @@ def _text_protocol(item: dict) -> str | None:
     return None
 
 
+# 厂商私有的语音协议：端点与请求体都不是 OpenAI 的 audio/speech，必须按厂商协议走各自的 caller。
+_VENDOR_SPEECH_PROTOCOLS = {
+    "minimax:t2a_v2": "minimax-t2a", "ark:tts": "ark-tts", "kling:tts": "kling-tts",
+}
+_VENDOR_SPEECH_PREFIXES = ("minimax:", "ark:", "kling:")
+
+
+def _speech_protocol(protocol: str) -> str | None:
+    """上游一条协议标注对应的本机语音协议 id；不是语音生成返回 None。"""
+    if protocol in _VENDOR_SPEECH_PROTOCOLS:
+        return _VENDOR_SPEECH_PROTOCOLS[protocol]
+    # 同一厂商的流式（_ws）等变体不是 OpenAI 兼容端点，也不能靠 tts 字样被认成 openai-speech。
+    if protocol.startswith(_VENDOR_SPEECH_PREFIXES):
+        return None
+    return "openai-speech" if _protocol_is_openai_speech(protocol) else None
+
+
 def _audio_protocol(item: dict) -> str | None:
     protocols = [str(p).lower() for p in (item.get("supported_protocols") or [])]
-    if any(_protocol_is_openai_speech(protocol) for protocol in protocols):
-        return "openai-speech"
+    for protocol in protocols:
+        if speech := _speech_protocol(protocol):
+            return speech
     arch = item.get("architecture")
     if isinstance(arch, dict) and "speech" in (arch.get("output_modalities") or []):
         return "openai-speech"

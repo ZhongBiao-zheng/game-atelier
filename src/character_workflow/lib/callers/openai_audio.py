@@ -7,6 +7,7 @@ from typing import Any
 import requests
 
 from character_workflow.lib import net_env
+from character_workflow.lib.audio_caps import AUDIO_CAPS, audio_protocol
 from character_workflow.lib.callers.openai_compat import api_root
 
 
@@ -14,36 +15,13 @@ class OpenAIAudioError(RuntimeError):
     pass
 
 
-AUDIO_FORMATS = {"mp3", "opus", "aac", "flac", "wav", "pcm"}
-AUDIO_VOICES = {
-    "alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx",
-    "sage", "shimmer", "verse", "marin", "cedar",
-}
-
-
-def _looks_like_speech_model(model: str) -> bool:
-    normalized = model.lower()
-    if any(item in normalized for item in ("asr", "speech-to-text", "speech2text", "whisper")):
-        return False
-    return "tts" in normalized or "text-to-speech" in normalized
+_CAPS = AUDIO_CAPS["openai-speech"]
+AUDIO_FORMATS = set(_CAPS.formats)
+AUDIO_VOICES = set(_CAPS.voices)
 
 
 def supports_model(key: Any, model: Any) -> bool:
-    if model is None:
-        return False
-    if key.provider == "atelier":
-        from types import SimpleNamespace
-        return bool(model.via) and all(supports_model(
-            SimpleNamespace(provider=member.provider),
-            SimpleNamespace(id=member.model_id, protocol=member.protocol),
-        ) for member in model.via)
-    if model.protocol in {"openai", "openai-speech", "tts", "speech"}:
-        return True
-    return (
-        model.protocol is None
-        and key.provider in {"openai", "custom"}
-        and _looks_like_speech_model(model.id)
-    )
+    return audio_protocol(key, model) == "openai-speech"
 
 
 def render(

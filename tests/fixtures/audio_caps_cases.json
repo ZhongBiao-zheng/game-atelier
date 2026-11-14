@@ -1,0 +1,47 @@
+{
+  "protocol": [
+    { "provider": "tokendance", "model_id": "minimax-speech-2.8-turbo", "protocol": "minimax-t2a", "expected": "minimax-t2a" },
+    { "provider": "custom", "model_id": "tts-1", "protocol": "openai-speech", "expected": "openai-speech" },
+    { "provider": "openai", "model_id": "advanced-model", "protocol": "openai", "expected": "openai-speech" },
+    { "provider": "custom", "model_id": "speech-model", "protocol": "speech", "expected": "openai-speech" },
+    { "provider": "custom", "model_id": "tts-1-hd", "protocol": null, "expected": "openai-speech" },
+    { "provider": "openai", "model_id": "gpt-4o-mini-tts", "protocol": null, "expected": "openai-speech" },
+    { "provider": "custom", "model_id": "whisper-1", "protocol": null, "expected": null },
+    { "provider": "custom", "model_id": "tts-asr-1", "protocol": null, "expected": null },
+    { "provider": "tokendance", "model_id": "seed-tts-2.0", "protocol": null, "expected": null },
+    { "provider": "tokendance", "model_id": "seed-tts-2.0", "protocol": "ark-tts", "expected": null },
+    { "provider": "tokendance", "model_id": "yc-song-4.0", "protocol": "yinchao-song", "expected": null }
+  ],
+  "normalize": [
+    {
+      "protocol": "minimax-t2a",
+      "params": {},
+      "expected": { "voice": "male-qn-qingse", "response_format": "mp3", "speed": 1 }
+    },
+    {
+      "protocol": "minimax-t2a",
+      "params": { "voice": "female-yujie", "response_format": "wav", "speed": 1.25 },
+      "expected": { "voice": "female-yujie", "response_format": "wav", "speed": 1.25 }
+    },
+    {
+      "protocol": "minimax-t2a",
+      "params": { "voice": "my-cloned-voice-01", "response_format": "flac", "speed": 3 },
+      "expected": { "voice": "my-cloned-voice-01", "response_format": "flac", "speed": 2 }
+    },
+    {
+      "protocol": "minimax-t2a",
+      "params": { "voice": "alloy", "response_format": "pcm", "speed": 0.25, "instructions": "温柔" },
+      "expected": { "voice": "male-qn-qingse", "response_format": "mp3", "speed": 0.5 }
+    },
+    {
+      "protocol": "openai-speech",
+      "params": { "voice": "female-yujie", "response_format": "pcm", "speed": 1.257, "instructions": "  温柔  " },
+      "expected": { "voice": "alloy", "response_format": "pcm", "speed": 1.26, "instructions": "温柔" }
+    },
+    {
+      "protocol": "openai-speech",
+      "params": { "voice": "my-cloned-voice-01", "speed": "abc" },
+      "expected": { "voice": "alloy", "response_format": "mp3", "speed": 1 }
+    }
+  ]
+}

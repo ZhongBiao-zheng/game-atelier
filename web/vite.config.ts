@@ -8,6 +8,7 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, 'src'),
       '@pricing': path.resolve(__dirname, '../src/character_workflow/data/generation_prices.json'),
+      '@audio-caps': path.resolve(__dirname, '../src/character_workflow/data/audio_caps.json'),
     },
   },
   build: {

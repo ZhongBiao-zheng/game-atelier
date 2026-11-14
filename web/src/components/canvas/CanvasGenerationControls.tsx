@@ -22,16 +22,14 @@ import {
 import { QUALITY_LABELS, type ImageControlCaps, type Quality } from '@/lib/imageControlCaps';
 import { cn } from '@/lib/utils';
 import {
-  AUDIO_FORMAT_OPTIONS,
   AUDIO_SPEED_PRESETS,
-  AUDIO_VOICE_OPTIONS,
+  CUSTOM_VOICE_MAX_LENGTH,
   audioFormatLabel,
   audioSpeedLabel,
   audioVoiceLabel,
-  normalizeAudioFormat,
-  normalizeAudioSpeed,
-  normalizeAudioVoice,
-} from '@/lib/audioGeneration';
+  normalizeSpeechParams,
+  type AudioCaps,
+} from '@/lib/audioCaps';
 import type { JobParams } from '@/schema/jobs';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -335,23 +333,27 @@ export function CanvasTextSettings({
 }
 
 export function CanvasAudioSettings({
+  caps,
   params,
   onPatch,
   menuDirection = 'up',
   portalContainerRef,
 }: {
+  caps: AudioCaps;
   params: JobParams;
   onPatch: (patch: JobParams) => void;
 } & ToolbarPopoverMenuProps) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
-  const voice = normalizeAudioVoice(params.voice);
-  const format = normalizeAudioFormat(params.response_format);
-  const speed = normalizeAudioSpeed(params.speed);
-  const instructions = String(params.instructions ?? '');
+  const settings = normalizeSpeechParams(caps, params as Record<string, unknown>);
+  const { voice, response_format: format, speed } = settings;
+  const instructions = settings.instructions ?? '';
+  const builtinVoice = caps.voices.some(item => item.id === voice);
+  const customVoice = builtinVoice ? '' : voice;
   const [speedDraft, setSpeedDraft] = useState(String(speed));
   const [instructionsDraft, setInstructionsDraft] = useState(instructions);
-  const committedRef = useRef({ speed, instructions });
+  const [customVoiceDraft, setCustomVoiceDraft] = useState(customVoice);
+  const committedRef = useRef({ speed, instructions, customVoice });
 
   useEffect(() => {
     committedRef.current.speed = speed;
@@ -361,18 +363,25 @@ export function CanvasAudioSettings({
     committedRef.current.instructions = instructions;
     setInstructionsDraft(instructions);
   }, [instructions]);
+  useEffect(() => {
+    committedRef.current.customVoice = customVoice;
+    setCustomVoiceDraft(customVoice);
+  }, [customVoice]);
 
-  function commitDrafts(fields: { speed: boolean; instructions: boolean }) {
+  function commitDrafts(fields: { speed: boolean; instructions: boolean; customVoice: boolean }) {
     const patch: JobParams = {};
     if (fields.speed) {
-      const normalizedSpeed = normalizeAudioSpeed(speedDraft);
+      const parsed = Number(speedDraft);
+      const normalizedSpeed = Number.isFinite(parsed) && speedDraft.trim() !== ''
+        ? Number(Math.max(caps.speedMin, Math.min(caps.speedMax, parsed)).toFixed(2))
+        : committedRef.current.speed;
       setSpeedDraft(String(normalizedSpeed));
       if (normalizedSpeed !== committedRef.current.speed) {
         patch.speed = normalizedSpeed;
         committedRef.current.speed = normalizedSpeed;
       }
     }
-    if (fields.instructions) {
+    if (fields.instructions && caps.instructions) {
       const normalizedInstructions = instructionsDraft.trim();
       setInstructionsDraft(normalizedInstructions);
       if (normalizedInstructions !== committedRef.current.instructions) {
@@ -380,19 +389,20 @@ export function CanvasAudioSettings({
         committedRef.current.instructions = normalizedInstructions;
       }
     }
+    if (fields.customVoice && caps.customVoice) {
+      const normalizedVoice = customVoiceDraft.trim();
+      setCustomVoiceDraft(normalizedVoice);
+      // 清空自定义音色等于不用它：保留当前已选的内置音色。
+      if (normalizedVoice && normalizedVoice !== committedRef.current.customVoice) {
+        patch.voice = normalizedVoice;
+        committedRef.current.customVoice = normalizedVoice;
+      }
+    }
     if (Object.keys(patch).length) onPatch(patch);
   }
 
-  function commitSpeed() {
-    commitDrafts({ speed: true, instructions: false });
-  }
-
-  function commitInstructions() {
-    commitDrafts({ speed: false, instructions: true });
-  }
-
   function close() {
-    commitDrafts({ speed: true, instructions: true });
+    commitDrafts({ speed: true, instructions: true, customVoice: true });
     setOpen(false);
   }
 
@@ -400,6 +410,8 @@ export function CanvasAudioSettings({
     if (open) close();
     else setOpen(true);
   }
+
+  const speedPresets = AUDIO_SPEED_PRESETS.filter(value => value >= caps.speedMin && value <= caps.speedMax);
 
   return (
     <div ref={anchorRef} className="relative min-w-0">
@@ -412,7 +424,7 @@ export function CanvasAudioSettings({
       >
         <ParamsIcon size="sm" className="shrink-0" aria-hidden="true" />
         <span className="truncate">
-          {audioVoiceLabel(voice)} · {audioFormatLabel(format)} · {audioSpeedLabel(speed)}
+          {audioVoiceLabel(caps, voice)} · {audioFormatLabel(format)} · {audioSpeedLabel(speed)}
         </span>
       </Button>
       <ToolbarPopover
@@ -432,15 +444,29 @@ export function CanvasAudioSettings({
           <SettingsSection title="音色">
             <OptionGrid
               label="选择音色"
-              values={AUDIO_VOICE_OPTIONS}
+              values={caps.voices.map(item => ({ value: item.id, label: item.label }))}
               selected={voice}
               onSelect={value => onPatch({ voice: value })}
             />
+            {caps.customVoice && (
+              <Input
+                aria-label="自定义音色 ID"
+                placeholder="自定义音色 ID"
+                maxLength={CUSTOM_VOICE_MAX_LENGTH}
+                value={customVoiceDraft}
+                onChange={event => setCustomVoiceDraft(event.target.value)}
+                onBlur={() => commitDrafts({ speed: false, instructions: false, customVoice: true })}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') event.currentTarget.blur();
+                }}
+                className="mt-2 w-full"
+              />
+            )}
           </SettingsSection>
           <SettingsSection title="格式">
             <OptionGrid
               label="选择音频格式"
-              values={AUDIO_FORMAT_OPTIONS}
+              values={caps.formats.map(value => ({ value, label: audioFormatLabel(value) }))}
               selected={format}
               onSelect={value => onPatch({ response_format: value })}
             />
@@ -448,7 +474,7 @@ export function CanvasAudioSettings({
           <SettingsSection title="语速">
             <OptionTrack
               label="选择语速预设"
-              values={AUDIO_SPEED_PRESETS}
+              values={speedPresets}
               selected={String(speed)}
               getLabel={value => audioSpeedLabel(value)}
               onSelect={value => onPatch({ speed: value })}
@@ -456,29 +482,31 @@ export function CanvasAudioSettings({
             <Input
               type="number"
               aria-label="自定义语速"
-              min={0.25}
-              max={4}
+              min={caps.speedMin}
+              max={caps.speedMax}
               step={0.05}
               value={speedDraft}
               onChange={event => setSpeedDraft(event.target.value)}
-              onBlur={commitSpeed}
+              onBlur={() => commitDrafts({ speed: true, instructions: false, customVoice: false })}
               onKeyDown={event => {
                 if (event.key === 'Enter') event.currentTarget.blur();
               }}
               className="mt-2 w-full text-center"
             />
           </SettingsSection>
-          <SettingsSection title="朗读指令">
-            <Textarea
-              aria-label="朗读指令"
-              rows={3}
-              value={instructionsDraft}
-              placeholder="例如：语气温柔、语速平稳，句尾稍作停顿"
-              onChange={event => setInstructionsDraft(event.target.value)}
-              onBlur={commitInstructions}
-              className="w-full resize-none leading-relaxed field-sizing-fixed"
-            />
-          </SettingsSection>
+          {caps.instructions && (
+            <SettingsSection title="朗读指令">
+              <Textarea
+                aria-label="朗读指令"
+                rows={3}
+                value={instructionsDraft}
+                placeholder="例如：语气温柔、语速平稳，句尾稍作停顿"
+                onChange={event => setInstructionsDraft(event.target.value)}
+                onBlur={() => commitDrafts({ speed: false, instructions: true, customVoice: false })}
+                className="w-full resize-none leading-relaxed field-sizing-fixed"
+              />
+            </SettingsSection>
+          )}
         </div>
       </ToolbarPopover>
     </div>

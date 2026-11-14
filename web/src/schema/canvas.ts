@@ -94,8 +94,8 @@ export interface CanvasVideoDefaultParams {
 }
 
 export interface CanvasAudioDefaultParams {
-  voice?: 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'fable' | 'nova' | 'onyx'
-    | 'sage' | 'shimmer' | 'verse' | 'marin' | 'cedar';
+  /** 音色随模型协议变化（data/audio_caps.json），MiniMax 还接受自定义音色 ID。 */
+  voice?: string;
   response_format?: 'mp3' | 'wav' | 'opus' | 'aac' | 'flac' | 'pcm';
   speed?: number;
   instructions?: string;

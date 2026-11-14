@@ -3049,5 +3049,27 @@
       "protocol": "declarative"
     },
     "expected": null
+  },
+  {
+    "request": {
+      "kind": "audio",
+      "provider": "tokendance",
+      "base_url": "https://tokendance.space/gateway/v1",
+      "model_id": "minimax-speech-2.8-turbo",
+      "protocol": "minimax-t2a",
+      "text_length": 20
+    },
+    "expected": null
+  },
+  {
+    "request": {
+      "kind": "audio",
+      "provider": "custom",
+      "base_url": "https://api.openai-hk.com",
+      "model_id": "tts-1",
+      "protocol": "openai-speech",
+      "text_length": 20
+    },
+    "expected": null
   }
 ]

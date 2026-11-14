@@ -1,0 +1,58 @@
+{
+  "openai-speech": {
+    "family": "speech",
+    "voices": [
+      { "id": "alloy", "label": "Alloy" },
+      { "id": "ash", "label": "Ash" },
+      { "id": "ballad", "label": "Ballad" },
+      { "id": "coral", "label": "Coral" },
+      { "id": "echo", "label": "Echo" },
+      { "id": "fable", "label": "Fable" },
+      { "id": "nova", "label": "Nova" },
+      { "id": "onyx", "label": "Onyx" },
+      { "id": "sage", "label": "Sage" },
+      { "id": "shimmer", "label": "Shimmer" },
+      { "id": "verse", "label": "Verse" },
+      { "id": "marin", "label": "Marin" },
+      { "id": "cedar", "label": "Cedar" }
+    ],
+    "default_voice": "alloy",
+    "custom_voice": false,
+    "speed": [0.25, 4],
+    "formats": ["mp3", "wav", "opus", "aac", "flac", "pcm"],
+    "default_format": "mp3",
+    "max_chars": 4096,
+    "instructions": true
+  },
+  "minimax-t2a": {
+    "family": "speech",
+    "voices": [
+      { "id": "male-qn-qingse", "label": "青涩青年" },
+      { "id": "male-qn-jingying", "label": "精英青年" },
+      { "id": "male-qn-badao", "label": "霸道青年" },
+      { "id": "male-qn-daxuesheng", "label": "青年大学生" },
+      { "id": "female-shaonv", "label": "少女" },
+      { "id": "female-yujie", "label": "御姐" },
+      { "id": "female-chengshu", "label": "成熟女性" },
+      { "id": "female-tianmei", "label": "甜美女性" },
+      { "id": "clever_boy", "label": "聪明男童" },
+      { "id": "cute_boy", "label": "可爱男童" },
+      { "id": "lovely_girl", "label": "萌萌女童" },
+      { "id": "Chinese (Mandarin)_News_Anchor", "label": "新闻女声" },
+      { "id": "Chinese (Mandarin)_Male_Announcer", "label": "播报男声" },
+      { "id": "Chinese (Mandarin)_Gentleman", "label": "温润男声" },
+      { "id": "Chinese (Mandarin)_Humorous_Elder", "label": "搞笑大爷" },
+      { "id": "Chinese (Mandarin)_Kind-hearted_Elder", "label": "花甲奶奶" },
+      { "id": "Robot_Armor", "label": "机械战甲" },
+      { "id": "English_Trustworthy_Man", "label": "英文男声" },
+      { "id": "English_Graceful_Lady", "label": "英文女声" }
+    ],
+    "default_voice": "male-qn-qingse",
+    "custom_voice": true,
+    "speed": [0.5, 2],
+    "formats": ["mp3", "wav", "flac"],
+    "default_format": "mp3",
+    "max_chars": 9999,
+    "instructions": false
+  }
+}

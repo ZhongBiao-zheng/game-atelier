@@ -26,7 +26,7 @@
 |---|---|---|
 | `category` | `text` / `image` / `video` / `audio` / `unknown` / `excluded` | 分类结果。`excluded` 只在 `include_all: true` 时出现在 `models` 里 |
 | `modality` | `text` / `image` / `video` / `audio` / `null` | 四种生成类别给值；`unknown` / `excluded` 为 `null`，由画师在 picker 显式指定（不静默兜底成 image）|
-| `protocol` | 见各厂契约 / `null` | 对话=openai-chat·openai-responses；视频=seedance·kling·klingai·evolink·dashscope·openrouter；图片=ark·openai；语音合成=openai-speech |
+| `protocol` | 见各厂契约 / `null` | 对话=openai-chat·openai-responses；视频=seedance·kling·klingai·evolink·dashscope·openrouter；图片=ark·openai；语音合成=openai-speech·minimax-t2a（可执行），ark-tts·kling-tts（已识别，本机暂无执行器）|
 | `input_modalities` | 数组 | 上游显式声明的 text / image / video / audio 输入，不凭模型名猜能力 |
 | `total` / `excluded` | 数字 | 上游去重总数 / 明确不可生成而未返回的条数；「显示全部」可查看被过滤项 |
 
@@ -337,6 +337,23 @@ TokenDance quickstart 的请求体与阿里官方**不一致**：它写 `input.i
 - `GET /v1/tasks/{id}`：pending/processing/completed/failed，产物 `results[]`，费用 `usage.cost.usd`。
 - 图片只收公网 URL：本地图走 EvoLink 自带上传；参考视频不转存第三方，只收公网直链（界面不开视频槽）。
 - 2026-11-10 实测 `kling-v4-flash-text-to-video` 3s：HTTP 402 余额不足（预估 $0.28），未出片、未扣费。
+
+## 语音契约 — MiniMax T2A v2（`minimax-t2a`：词元跳动 / 官方）
+
+契约源：官方 `platform.minimaxi.com/docs/api-reference/speech-t2a-http`，转发 `tokendance.space/docs/protocol-minimax-t2a-v2.md`。
+caller `callers/minimax_speech.py`，能力表 `data/audio_caps.json`（前后端共用）。
+
+| 项 | 官方 | 词元跳动 |
+|---|---|---|
+| 端点 | `POST {base}/v1/t2a_v2` | `POST https://tokendance.space/gateway/minimax/v1/t2a_v2` |
+| 模型 id | `speech-2.8-turbo` / `speech-2.8-hd` | `minimax-speech-2.8-turbo` / `minimax-speech-2.8-hd` |
+| 价格 | — | turbo 0.16 元 / 千计费字符（公开价格接口 `minimax:t2a_v2:characters`） |
+
+- 非流式，一次返回完整音频；`data.audio` 为 hex，`extra_info.usage_characters` 是计费字符数（实付按它算），`base_resp.status_code` 非 0 即失败。
+- 显式发出：`stream=false`、`output_format=hex`、`subtitle_enable=false`、`aigc_watermark=false`、`sample_rate=32000`、`bitrate=128000`、`channel=1`。
+- 文本上限 < 10000 字；语速 0.5–2；格式只开放 mp3 / wav / flac。音色内置 19 个常用系统音色，另接受自定义音色 ID（复刻音色、未收录系统音色）。
+- 重试：只对连不上与 502/503/504 重试三次；读超时与其余状态码当场失败。
+- 目录识别：`minimax:t2a_v2 → minimax-t2a`；同厂的 `_ws` 流式、`voice_clone` 不算可执行协议。`ark:tts`、`kling:tts` 认作语音但本机暂无执行器（旧版会被 `tts` 字样误认成 OpenAI `audio/speech`）。
 
 ## 路由现状
 

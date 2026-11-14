@@ -293,7 +293,8 @@ def submit(
             inputs is not None and not any(item.type == "prompt" for item in inputs)
         ):
             raise GatewayRequestError(422, "提示词为空或过长")
-        estimate = _estimate(picked, n, size, params, kind, bool(files.get("video")))
+        estimate = _estimate(picked, n, size, params, kind, bool(files.get("video")),
+                             text_length=len(prompt.strip()) if kind == "audio" else None)
         gateway_quota.admit(key, estimate or 0)
         picked = _pick_member(model, [], key, modality_for(kind), params=selection_params,
                               freeze_order=route_order, consume=True)
@@ -323,7 +324,7 @@ def submit(
 
 
 def _estimate(picked, n: int, size: str | None, params: dict, kind="image",
-              has_reference_video=False) -> float | None:
+              has_reference_video=False, text_length: int | None = None) -> float | None:
     from character_workflow.lib.generation_pricing import estimate_cost_cny
     from character_workflow.lib.image_size import normalize_image_size_params
 
@@ -344,6 +345,7 @@ def _estimate(picked, n: int, size: str | None, params: dict, kind="image",
         duration=effective.get("duration"), ratio=effective.get("ratio"),
         generate_audio=effective.get("generate_audio", False),
         has_reference_video=has_reference_video, image_edit=kind == "image_edit",
+        text_length=text_length,
     )
 
 
@@ -576,8 +578,11 @@ def _store_outputs(task_id: str, paths: list[Path], cost_usd: float | None,
     from character_workflow.lib.schemas import LayerDecompositionResult
 
     _record_cost(task_id, cost_usd)
-    task = _read(task_id)
     params = params or {}
+    # 按人民币回报实付的 caller（语音按计费字数、图层拆分按层数）直接写进 params。
+    if cost_usd is None and isinstance(params.get("actual_cost_cny"), int | float):
+        _update(task_id, actual_cost_cny=float(params["actual_cost_cny"]))
+    task = _read(task_id)
     modality = modality_for(task.kind)
     validate = {"image": image_dimensions, "video": is_valid_video, "audio": is_valid_audio}[modality]
     valid = [path for path in paths if validate(path)]

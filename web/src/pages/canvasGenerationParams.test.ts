@@ -59,3 +59,20 @@ it('normalizes speech controls and removes foreign modality parameters', () => {
     instructions: '温柔、克制',
   });
 });
+
+it('normalizes MiniMax speech by its own voices, formats and speed range', () => {
+  expect(normalizeCanvasAudioParams(
+    'minimax-speech-2.8-turbo',
+    'tokendance',
+    'minimax-t2a',
+    { voice: 'marin', response_format: 'pcm', speed: 3, instructions: '温柔', n: 2 },
+  )).toEqual({ voice: 'male-qn-qingse', response_format: 'mp3', speed: 2 });
+  expect(normalizeCanvasAudioParams(
+    'minimax-speech-2.8-turbo',
+    'tokendance',
+    'minimax-t2a',
+    { voice: 'my-cloned-voice', response_format: 'wav', speed: 0.75 },
+  )).toEqual({ voice: 'my-cloned-voice', response_format: 'wav', speed: 0.75 });
+  // 本机还没有执行器的厂商语音协议不提供参数，界面也选不到它。
+  expect(normalizeCanvasAudioParams('seed-tts-2.0', 'tokendance', 'ark-tts', { voice: 'x' })).toEqual({});
+});

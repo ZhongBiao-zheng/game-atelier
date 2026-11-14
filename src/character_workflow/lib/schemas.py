@@ -518,10 +518,8 @@ class CanvasVideoDefaultParams(BaseModel):
 
 class CanvasAudioDefaultParams(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    voice: Literal[
-        "alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx",
-        "sage", "shimmer", "verse", "marin", "cedar",
-    ] | None = None
+    # 音色随模型协议变化（见 data/audio_caps.json），MiniMax 还接受自定义音色 ID；提交时再按协议归一。
+    voice: str | None = Field(default=None, min_length=1, max_length=200)
     response_format: Literal["mp3", "wav", "opus", "aac", "flac", "pcm"] | None = None
     speed: float | None = Field(default=None, ge=0.25, le=4)
     instructions: str | None = Field(default=None, max_length=4096)

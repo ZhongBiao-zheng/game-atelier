@@ -19,7 +19,7 @@ export interface GenerationCostRequest {
     billingGroup?: string | null;
   };
   model?: { id?: string | null; protocol?: string | null };
-  kind: 'image' | 'video';
+  kind: 'image' | 'video' | 'audio';
   count?: number;
   size?: string;
   quality?: Quality | '1k' | '2k' | '4k';
@@ -30,6 +30,8 @@ export interface GenerationCostRequest {
   generateAudio?: boolean;
   hasReferenceVideo?: boolean;
   imageEdit?: boolean;
+  /** 语音按朗读文本字数计价。 */
+  textLength?: number;
 }
 
 const HAPPYHORSE_1_1_MODELS = new Set([
@@ -160,6 +162,21 @@ function estimateTokenDanceImage(request: GenerationCostRequest): number | null 
   return rate == null ? null : priced(rate * safeCount(request.count));
 }
 
+/** TokenDance 语音「元 / 千字」：同步接口的按字符计费项；流式与音色复刻不算。与服务端 _tokendance_character_rate 同义。 */
+function estimateTokenDanceSpeech(request: GenerationCostRequest): number | null {
+  const characters = request.textLength;
+  if (characters == null || !Number.isFinite(characters) || characters < 0) return null;
+  const items = tokenDancePricing[request.model?.id ?? '']?.items ?? [];
+  const rates = new Set(items
+    .filter(item => /:characters$/.test(item.id ?? '') && !(item.id ?? '').includes('_ws:')
+      && !(item.id ?? '').includes('voice_clone'))
+    .flatMap(item => (item.plans ?? []).filter(plan => plan.unit === 'kCharacters'))
+    .map(plan => pricingRate(plan.rate)));
+  if (rates.size !== 1) return null;
+  const [rate] = [...rates];
+  return rate == null ? null : priced(rate * characters / 1000);
+}
+
 function estimateTokenDanceVideo(request: GenerationCostRequest): number | null {
   const duration = request.duration;
   if (!Number.isFinite(duration) || (duration ?? 0) <= 0) return null;
@@ -279,6 +296,9 @@ export function estimateGenerationCost(request: GenerationCostRequest): number |
   // 自定义接口一律未计价：id 与地址可能撞上内置渠道，不能套用内置价格（ADR-0036）。
   if (normalize(request.model.protocol) === 'declarative') return null;
 
+  if (request.kind === 'audio') {
+    return normalize(request.provider.provider) === 'tokendance' ? estimateTokenDanceSpeech(request) : null;
+  }
   if (request.kind === 'image' && request.provider.provider === 'comfyui') return 0;
   if (request.kind === 'image' && request.provider.provider === 'chatgpt' && request.model.id === 'gpt-image-2') return 0;
 

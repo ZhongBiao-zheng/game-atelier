@@ -13,7 +13,8 @@
     "skipLibCheck": true,
     "paths": {
       "@/*": ["./src/*"],
-      "@pricing": ["../src/character_workflow/data/generation_prices.json"]
+      "@pricing": ["../src/character_workflow/data/generation_prices.json"],
+      "@audio-caps": ["../src/character_workflow/data/audio_caps.json"]
     }
   },
   "include": ["src"]

@@ -31,6 +31,7 @@ describe('modelBrand', () => {
     'gpt-image-2.5-sunburst', 'nano-banana-pro', 'doubao-seedream-5-0-pro', 'doubao-seedream-5-5-261028', 'seedream-5.5',
     'midjourney', 'flux-3-image', 'seedance-2.0-fast', 'veo-3.1',
     'sora-2-pro', 'kling-3.0', 'minimax-h3', 'happyhorse-1.1',
+    'minimax-speech-2.8-turbo', 'minimax-speech-2.8-hd', 'tts-1', 'tts-1-hd', 'tts-1-hd-1106', 'gpt-4o-mini-tts',
   ])('preserves the catalog brand for %s', id => {
     expect(modelCatalog(id)).toBeDefined();
     expect(modelBrand(id)).toBe(modelCatalog(id)?.brand);

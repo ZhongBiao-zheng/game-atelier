@@ -8,11 +8,7 @@ import { availableDeclared, type ModelDeclared } from '@/schema/httpProtocols';
 import { modelModality, type KeyView } from '@/api/keys';
 import { imageFamily, isEvolinkMidjourney, supportsImageQuality } from '@/lib/modelFamily';
 import { maxReferenceImages } from '@/lib/referenceLimits';
-import {
-  normalizeAudioFormat,
-  normalizeAudioSpeed,
-  normalizeAudioVoice,
-} from '@/lib/audioGeneration';
+import { audioCapsOf, audioProtocolOf, normalizeSpeechParams } from '@/lib/audioCaps';
 import type {
   CanvasContentNode,
   CanvasBatchMaterialNode,
@@ -1053,7 +1049,8 @@ function defaultCanvasGenerationParams(mode: CanvasGenerationDraft['mode']): Job
       generate_audio: true,
     };
   }
-  if (mode === 'audio') return { voice: 'alloy', response_format: 'mp3', speed: 1 };
+  // 语音参数在下面按所选模型的协议归一：音色、格式取该协议的默认值。
+  if (mode === 'audio') return { speed: 1 };
   return { n: 1, reasoning_effort: 'auto' };
 }
 
@@ -1333,13 +1330,7 @@ export function supportsCanvasAudioGeneration(
   provider: string | null | undefined,
   protocol: string | null | undefined,
 ) {
-  if (['openai', 'openai-speech', 'tts', 'speech'].includes(String(protocol))) return true;
-  if (protocol != null || !['openai', 'custom'].includes(String(provider))) return false;
-  const normalized = model.toLowerCase();
-  if (['asr', 'speech-to-text', 'speech2text', 'whisper'].some(value => normalized.includes(value))) {
-    return false;
-  }
-  return normalized.includes('tts') || normalized.includes('text-to-speech');
+  return audioProtocolOf(model, provider, protocol) !== null;
 }
 
 export function normalizeCanvasAudioParams(
@@ -1348,15 +1339,8 @@ export function normalizeCanvasAudioParams(
   protocol: string | null | undefined,
   current: JobParams,
 ): JobParams {
-  if (!supportsCanvasAudioGeneration(model, provider, protocol)) return {};
-  const params: JobParams = {
-    voice: normalizeAudioVoice(current.voice),
-    response_format: normalizeAudioFormat(current.response_format),
-    speed: normalizeAudioSpeed(current.speed),
-  };
-  const instructions = String(current.instructions ?? '').trim();
-  if (instructions) params.instructions = instructions;
-  return params;
+  const caps = audioCapsOf(model, provider, protocol);
+  return caps ? normalizeSpeechParams(caps, current as Record<string, unknown>) : {};
 }
 
 export function canvasVideoEditCaps(

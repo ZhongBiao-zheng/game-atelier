@@ -43,7 +43,7 @@ def mine_records(
     records = []
     for job in jobs:
         assist = job.namespace == "assist"
-        if (job.kind not in {"image", "video"} and not assist) \
+        if (job.kind not in {"image", "video", "audio"} and not assist) \
                 or job.status in {"pending_confirm", "canceled"}:
             continue
         cost = job.params.actual_cost_cny

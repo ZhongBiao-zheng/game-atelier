@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as http from '@/api/http';
 import type { KeyView } from '@/api/keys';
 import { imageControlCaps } from '@/lib/imageControlCaps';
+import { AUDIO_CAPS } from '@/lib/audioCaps';
 import {
   CanvasAudioSettings,
   CanvasImageSettings,
@@ -157,6 +158,7 @@ describe('CanvasAudioSettings', () => {
   it('shows voice, format, speed and instructions in an independent portal', () => {
     const onPatch = vi.fn();
     render(<CanvasAudioSettings
+      caps={AUDIO_CAPS['openai-speech']}
       params={{ voice: 'alloy', response_format: 'mp3', speed: 1 }}
       onPatch={onPatch}
     />);
@@ -180,6 +182,7 @@ describe('CanvasAudioSettings', () => {
   it('commits clamped custom speed and trimmed instructions on blur', () => {
     const onPatch = vi.fn();
     render(<CanvasAudioSettings
+      caps={AUDIO_CAPS['openai-speech']}
       params={{ voice: 'alloy', response_format: 'mp3', speed: 1 }}
       onPatch={onPatch}
     />);
@@ -195,6 +198,7 @@ describe('CanvasAudioSettings', () => {
   it('commits pending fields atomically before an outside click closes the portal', async () => {
     const onPatch = vi.fn();
     render(<CanvasAudioSettings
+      caps={AUDIO_CAPS['openai-speech']}
       params={{ voice: 'alloy', response_format: 'mp3', speed: 1 }}
       onPatch={onPatch}
     />);
@@ -207,6 +211,39 @@ describe('CanvasAudioSettings', () => {
     expect(screen.queryByTestId('canvas-audio-settings-popover')).not.toBeInTheDocument();
     expect(onPatch).toHaveBeenCalledOnce();
     expect(onPatch).toHaveBeenCalledWith({ speed: 1.35, instructions: '平静旁白' });
+  });
+
+  it('follows the MiniMax protocol: its voices, custom voice ID, no instructions', () => {
+    const onPatch = vi.fn();
+    render(<CanvasAudioSettings
+      caps={AUDIO_CAPS['minimax-t2a']}
+      params={{ voice: 'alloy', response_format: 'pcm', speed: 4 }}
+      onPatch={onPatch}
+    />);
+    // 别的协议的内置音色与格式不会带过来：摘要显示 MiniMax 的默认值，语速夹到 2。
+    expect(screen.getByRole('button', { name: '音频设置' })).toHaveTextContent('青涩青年 · MP3 · 2x');
+    fireEvent.click(screen.getByRole('button', { name: '音频设置' }));
+    expect(screen.queryByRole('radio', { name: 'Alloy' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'PCM' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: '0.75x' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('朗读指令')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('radio', { name: '御姐' }));
+    expect(onPatch).toHaveBeenLastCalledWith({ voice: 'female-yujie' });
+    fireEvent.change(screen.getByLabelText('自定义音色 ID'), { target: { value: '  my-voice  ' } });
+    fireEvent.blur(screen.getByLabelText('自定义音色 ID'));
+    expect(onPatch).toHaveBeenLastCalledWith({ voice: 'my-voice' });
+  });
+
+  it('shows a committed custom voice in the input and the summary', () => {
+    render(<CanvasAudioSettings
+      caps={AUDIO_CAPS['minimax-t2a']}
+      params={{ voice: 'my-voice', response_format: 'wav', speed: 1 }}
+      onPatch={vi.fn()}
+    />);
+    expect(screen.getByRole('button', { name: '音频设置' })).toHaveTextContent('my-voice · WAV · 1x');
+    fireEvent.click(screen.getByRole('button', { name: '音频设置' }));
+    expect(screen.getByLabelText('自定义音色 ID')).toHaveValue('my-voice');
   });
 });
 

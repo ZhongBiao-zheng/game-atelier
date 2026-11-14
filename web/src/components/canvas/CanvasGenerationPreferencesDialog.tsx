@@ -27,6 +27,7 @@ import {
 import { VideoControls } from '@/components/studio/VideoControls';
 import { imageControlCaps, QUALITY_LABELS, type Quality } from '@/lib/imageControlCaps';
 import { providerForAlias, routeChannel, selectionImageCaps } from '@/lib/modelRoutes';
+import { audioCapsOf } from '@/lib/audioCaps';
 import {
   CANVAS_GENERATION_MODE_LABELS,
   canvasGenerationModelSupportsMode,
@@ -264,6 +265,9 @@ export function CanvasGenerationPreferencesDialog({
 
   // 「自动」按组内第一个成员算参数控件；图片可选范围取成员交集。
   const effectiveChannel = effectiveChoice ? routeChannel(effectiveChoice.key, effectiveChoice.model) : null;
+  const audioCaps = activeMode === 'audio' && effectiveChannel
+    ? audioCapsOf(effectiveChannel.model.id, effectiveChannel.key.provider, effectiveChannel.model.protocol)
+    : null;
   const imageCaps = activeMode === 'image' && effectiveChoice
     ? selectionImageCaps(effectiveChoice.key, effectiveChoice.model.id)
     : null;
@@ -503,8 +507,9 @@ export function CanvasGenerationPreferencesDialog({
                     onWatermarkChange={watermark => patchParams({ watermark })}
                   />
                 )}
-                {activeMode === 'audio' && (
+                {activeMode === 'audio' && audioCaps && (
                   <CanvasAudioSettings
+                    caps={audioCaps}
                     params={params}
                     menuDirection="up"
                     portalContainerRef={dialogContentRef}

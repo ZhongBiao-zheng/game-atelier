@@ -196,7 +196,17 @@ def dispatch_audio(
     if key.provider == "atelier":
         from .atelier_gateway import render_audio as render
     else:
-        from .openai_audio import render
+        # 按模型的音频协议分派；认不出的协议诚实报错，不再默认打到 OpenAI 的 audio/speech。
+        from character_workflow.lib.audio_caps import audio_protocol
+
+        spec = next((item for item in key.models if item.id == model), None)
+        protocol = audio_protocol(key, spec)
+        if protocol == "openai-speech":
+            from .openai_audio import render
+        elif protocol == "minimax-t2a":
+            from .minimax_speech import render
+        else:
+            raise ValueError(f"音频模型 {model} 没有可用的生成协议")
 
     return render(
         prompt=prompt, model=model, alias=alias, output_dir=output_dir,

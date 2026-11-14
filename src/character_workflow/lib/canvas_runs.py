@@ -478,12 +478,6 @@ def _supports_openai_text(key: KeySpec, model: ModelSpec) -> bool:
     return supports_model(key, model)
 
 
-def _supports_openai_speech(key: KeySpec, model: ModelSpec) -> bool:
-    from character_workflow.lib.callers.openai_audio import supports_model
-
-    return supports_model(key, model)
-
-
 def _resolve_reverse_prompt_model() -> tuple[KeySpec, ModelSpec]:
     for key in _keys_default_first():
         for model in key.models:
@@ -1213,25 +1207,12 @@ def _normalized_params(
     elif draft.mode == "audio":
         if requested_count != 1:
             raise ValueError("视频与音频生成一次只允许一个结果")
-        if not _supports_openai_speech(key, model):
-            raise ValueError("当前音频模型没有可用的语音生成协议")
-        from character_workflow.lib.callers.openai_audio import (
-            AUDIO_FORMATS,
-            AUDIO_VOICES,
-        )
+        from character_workflow.lib.audio_caps import audio_caps, normalize_speech_params
 
-        voice = str(draft.params.voice or "alloy").lower()
-        response_format = str(draft.params.response_format or "mp3").lower()
-        raw_speed = draft.params.speed if draft.params.speed is not None else 1
-        speed = round(max(0.25, min(4.0, float(raw_speed))), 2)
-        normalized = {
-            "voice": voice if voice in AUDIO_VOICES else "alloy",
-            "response_format": response_format if response_format in AUDIO_FORMATS else "mp3",
-            "speed": speed,
-        }
-        instructions = str(draft.params.instructions or "").strip()
-        if instructions:
-            normalized["instructions"] = instructions
+        caps = audio_caps(key, model)
+        if caps is None:
+            raise ValueError("当前音频模型没有可用的语音生成协议")
+        normalized = normalize_speech_params(caps, draft.params.model_dump())
     else:
         if requested_count != 1:
             raise ValueError("视频与音频生成一次只允许一个结果")
