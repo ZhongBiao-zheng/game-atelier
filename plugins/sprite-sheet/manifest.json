@@ -157,6 +157,26 @@
             "frame_data": {
               "type": "boolean",
               "description": "同时把帧数据（每帧位置与锚点的 JSON）放成一个文本节点"
+            },
+            "trim": {
+              "type": "boolean",
+              "description": "排之前裁掉每帧的透明边，默认是"
+            },
+            "anchor": {
+              "type": "object",
+              "description": "锚点，0 到 1 的比例，默认 x=0.5、y=1（底边中点）",
+              "properties": {
+                "x": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "y": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              }
             }
           }
         },

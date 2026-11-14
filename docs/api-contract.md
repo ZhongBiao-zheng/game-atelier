@@ -1339,3 +1339,9 @@ multipart 里的数组值展开成同名重复字段。
 - 界面协议增加方法 `ui.close`（不需要能力）：请求宿主关闭面板。SDK 在面板里把 Esc 接到它。
 - 服务端模块上下文增加 `ctx.create_text(text, title)`（需要 `resource.create`）：落成画布上的普通文本节点，走与 Agent 相同的变更集入口，正文上限 40000 字符。
 - 精灵表调整的 `/repack` 接受 `frame_data: true`：把帧数据 JSON（`{frames:[{x,y,w,h,anchor_x,anchor_y}], meta:{size,columns,rows,cell}}`）落成文本节点，返回 `frame_data_node_id`；超过上限时返回 `frame_data_error`，图片照常生成。
+
+### 精灵表的逐帧编辑（B4 补充）
+
+- 节点数据（`payload`，版本 1，新字段都可缺省）：`frames[]` 每项 `{x, y, w, h, ox?, oy?}`，`ox` / `oy` 是逐帧偏移（像素，±512）；`grid {columns, rows, margin, spacing}`；`columns`、`spacing`、`margin`、`align`、`trim`（默认 true）、`anchor {x, y}`（0–1 比例，默认 0.5 / 1）、`fps`、`onion`。
+- `/repack` 接受上述字段：每帧先按 `trim` 裁透明边，格子取所有帧最大宽高，按 `align` 放好后再加偏移，超出格子的部分裁掉。返回的每帧 `anchor_x/anchor_y` 与 `meta.anchor` 为 `floor(格宽 × anchor.x)`、`floor(格高 × anchor.y)`。
+- 界面预览与服务端用同一套排布算法，两端都跑 `plugins/sprite-sheet/tests/layout_cases.json`。

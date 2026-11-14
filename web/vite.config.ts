@@ -25,7 +25,7 @@ export default defineConfig({
     },
   },
   server: {
-    fs: { allow: [__dirname, path.resolve(__dirname, '../src/character_workflow/data')] },
+    fs: { allow: [__dirname, path.resolve(__dirname, '../src/character_workflow/data'), path.resolve(__dirname, '../plugins')] },
     port: 5173,
     proxy: {
       '/api': { target: 'http://127.0.0.1:5174', changeOrigin: true },
@@ -36,5 +36,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     globals: true,
+    // 官方插件的界面源码在 web/ 之外（plugins/<id>/ui），它们的测试也要收进来。
+    include: ['src/**/*.{test,spec}.{ts,tsx}', '../plugins/*/ui/**/*.{test,spec}.{ts,tsx}'],
   },
 })

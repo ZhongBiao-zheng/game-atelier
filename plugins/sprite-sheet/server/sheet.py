@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import math
 from typing import Any
 
 from PIL import Image
@@ -83,21 +84,66 @@ def _frame_box(frame: dict[str, Any], image: Image.Image) -> tuple[int, int, int
     return x, y, x + w, y + h
 
 
+MAX_OFFSET = 4096
+
+
+def _offset(frame: dict[str, Any], key: str) -> int:
+    value = frame.get(key, 0)
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or abs(value) > MAX_OFFSET:
+        raise ValueError("帧的偏移不对")
+    return int(value)
+
+
+def placements(sizes: list[tuple[int, int]], offsets: list[tuple[int, int]],
+               align: str) -> tuple[int, int, list[tuple[int, int]]]:
+    """每帧在格内的位置。格子取所有帧里最大的宽高；先按对齐方式放，再加上逐帧偏移。
+
+    界面里的预览用同一套算法（ui/src/layout.ts），两边由 tests/layout_cases.json 对齐。
+    """
+    if align not in ALIGNMENTS:
+        raise ValueError("排布参数不对")
+    cell_w, cell_h = max(w for w, _ in sizes), max(h for _, h in sizes)
+    result = []
+    for (w, h), (ox, oy) in zip(sizes, offsets, strict=True):
+        if align == "top-left":
+            dx, dy = 0, 0
+        elif align == "center":
+            dx, dy = (cell_w - w) // 2, (cell_h - h) // 2
+        else:
+            dx, dy = (cell_w - w) // 2, cell_h - h
+        result.append((dx + ox, dy + oy))
+    return cell_w, cell_h, result
+
+
+def anchor_point(cell_w: int, cell_h: int, anchor: tuple[float, float]) -> tuple[int, int]:
+    """锚点在格内的像素位置。anchor 是 0–1 的比例，(0.5, 1) 是底边中点。"""
+    ax, ay = anchor
+    if not (0 <= ax <= 1 and 0 <= ay <= 1):
+        raise ValueError("锚点要在 0 到 1 之间")
+    return math.floor(cell_w * ax), math.floor(cell_h * ay)
+
+
 def repack(image: Image.Image, frames: list[dict[str, Any]], *, columns: int, spacing: int = 0,
-           margin: int = 0, align: str = "bottom-center", trim: bool = True) -> tuple[bytes, dict[str, Any]]:
-    """把帧重排成一张等格的精灵表。返回 (PNG 字节, 帧数据)。"""
+           margin: int = 0, align: str = "bottom-center", trim: bool = True,
+           anchor: tuple[float, float] = (0.5, 1.0)) -> tuple[bytes, dict[str, Any]]:
+    """把帧重排成一张等格的精灵表。返回 (PNG 字节, 帧数据)。
+
+    每帧可带 `ox` / `oy` 偏移（像素），超出格子的部分被裁掉，不会画进相邻的格子。
+    """
     if not frames or len(frames) > MAX_FRAMES:
         raise ValueError("没有可排的帧" if not frames else f"帧数不能超过 {MAX_FRAMES}")
     if columns < 1 or spacing < 0 or margin < 0 or align not in ALIGNMENTS:
         raise ValueError("排布参数不对")
-    tiles = []
+    tiles, offsets = [], []
     for frame in frames:
         tile = image.crop(_frame_box(frame, image))
         if trim:
             box = _mask(tile).getbbox()
             tile = tile.crop(box) if box else tile.crop((0, 0, 1, 1))
         tiles.append(tile)
-    cell_w, cell_h = max(tile.width for tile in tiles), max(tile.height for tile in tiles)
+        offsets.append((_offset(frame, "ox"), _offset(frame, "oy")))
+    cell_w, cell_h, positions = placements([tile.size for tile in tiles], offsets, align)
+    anchor_x, anchor_y = anchor_point(cell_w, cell_h, anchor)
     columns = min(columns, len(tiles))
     rows = -(-len(tiles) // columns)
     sheet_w = 2 * margin + columns * cell_w + (columns - 1) * spacing
@@ -106,20 +152,17 @@ def repack(image: Image.Image, frames: list[dict[str, Any]], *, columns: int, sp
         raise ValueError(f"排出来的图长边超过 {MAX_EDGE} 像素，请减少列数或间距")
     sheet = Image.new("RGBA", (sheet_w, sheet_h), (0, 0, 0, 0))
     placed = []
-    for index, tile in enumerate(tiles):
+    for index, (tile, (dx, dy)) in enumerate(zip(tiles, positions, strict=True)):
         cell_x = margin + (index % columns) * (cell_w + spacing)
         cell_y = margin + (index // columns) * (cell_h + spacing)
-        if align == "top-left":
-            dx, dy = 0, 0
-        elif align == "center":
-            dx, dy = (cell_w - tile.width) // 2, (cell_h - tile.height) // 2
-        else:
-            dx, dy = (cell_w - tile.width) // 2, cell_h - tile.height
-        sheet.paste(tile, (cell_x + dx, cell_y + dy))
+        cell = Image.new("RGBA", (cell_w, cell_h), (0, 0, 0, 0))
+        cell.paste(tile, (dx, dy))  # 先画进单独的格子，偏移出界的部分在这里被裁掉
+        sheet.paste(cell, (cell_x, cell_y))
         placed.append({"x": cell_x, "y": cell_y, "w": cell_w, "h": cell_h,
-                       "anchor_x": cell_w // 2, "anchor_y": cell_h})
+                       "anchor_x": anchor_x, "anchor_y": anchor_y})
     buffer = io.BytesIO()
     sheet.save(buffer, "PNG")
     data = {"frames": placed, "meta": {"size": {"w": sheet_w, "h": sheet_h}, "columns": columns,
-                                       "rows": rows, "cell": {"w": cell_w, "h": cell_h}}}
+                                       "rows": rows, "cell": {"w": cell_w, "h": cell_h},
+                                       "anchor": {"x": anchor_x, "y": anchor_y}}}
     return buffer.getvalue(), data

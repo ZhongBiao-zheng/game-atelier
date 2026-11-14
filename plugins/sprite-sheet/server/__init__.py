@@ -29,6 +29,13 @@ def _frames(image, params: dict) -> list[dict]:
     return sheet.detect_frames(image)["frames"]
 
 
+def _anchor(params: dict) -> tuple[float, float]:
+    anchor = params.get("anchor")
+    if not isinstance(anchor, dict):
+        return (0.5, 1.0)
+    return (float(anchor.get("x", 0.5)), float(anchor.get("y", 1.0)))
+
+
 def register(api) -> None:
     @api.route("POST", "/detect")
     def detect(ctx, params: dict) -> dict:
@@ -43,6 +50,7 @@ def register(api) -> None:
             image, frames, columns=int(params.get("columns", len(frames))),
             spacing=int(params.get("spacing", 0)), margin=int(params.get("margin", 0)),
             align=str(params.get("align", "bottom-center")), trim=bool(params.get("trim", True)),
+            anchor=_anchor(params),
         )
         created = ctx.create_image(png, f"{source.title} 精灵表"[:120], beside_node_id=ctx.node_id or source.node_id)
         result = {**created, **data}

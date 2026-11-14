@@ -10,6 +10,22 @@ body { background: transparent; color: var(--foreground); font: 14px/1.5 var(--f
 .empty { flex: 1; display: grid; place-items: center; font-size: 12px; color: var(--muted-foreground); }
 
 .panel { display: grid; grid-template-columns: minmax(0, 1fr) 18rem; height: 100%; background: var(--card); }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.main > .stage { flex: 1; }
+.stage:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.strip { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--border); flex-shrink: 0; min-width: 0; }
+.strip-frames { display: flex; gap: 8px; overflow-x: auto; min-width: 0; flex: 1; padding: 3px; }
+.strip-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.thumb { position: relative; flex: 0 0 auto; width: 56px; height: 56px; display: grid; place-items: center; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--popover); cursor: grab; touch-action: none; user-select: none; }
+.thumb canvas { max-width: 44px; max-height: 44px; image-rendering: pixelated; }
+.thumb .index { position: absolute; left: 4px; top: 1px; font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.thumb.selected { outline: 2px solid var(--primary); outline-offset: 1px; }
+.thumb.dragging { opacity: 0.4; cursor: grabbing; }
+.thumb.drop { border-color: var(--primary); }
+.editor { height: 176px; display: grid; place-items: center; border-radius: 10px; border: 1px solid var(--border); background: var(--popover); }
+.editor canvas { cursor: crosshair; image-rendering: pixelated; outline: 1px dashed var(--border); }
+.btn-sm { height: 32px; padding: 0 12px; font-size: 12px; }
 .stage { position: relative; min-width: 0; min-height: 0; padding: 16px; display: grid; place-items: center; overflow: hidden; }
 .stage canvas { max-width: 100%; max-height: 100%; border-radius: 10px; outline: 1px solid var(--border); }
 .side { display: flex; flex-direction: column; gap: 24px; padding: 20px; border-left: 1px solid var(--border); overflow-y: auto; }

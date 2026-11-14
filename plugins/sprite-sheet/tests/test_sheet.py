@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
 from pathlib import Path
 
 import pytest
@@ -161,3 +162,49 @@ def test_open_sheet_rejects_huge_images(tmp_path):
     Image.new("L", (8200, 4)).save(path)
     with pytest.raises(ValueError, match="长边不能超过"):
         sheet.open_sheet(path)
+
+
+CASES = json.loads((Path(__file__).parent / "layout_cases.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
+def test_placements_match_the_shared_cases(case):
+    """界面预览（ui/src/layout.ts）用同一组用例，两边的排布算法不能分叉。"""
+    sizes = [tuple(size) for size in case["sizes"]]
+    offsets = [tuple(offset) for offset in case["offsets"]]
+    cell_w, cell_h, positions = sheet.placements(sizes, offsets, case["align"])
+    assert [cell_w, cell_h] == case["expect"]["cell"]
+    assert [list(position) for position in positions] == case["expect"]["positions"]
+    assert list(sheet.anchor_point(cell_w, cell_h, tuple(case["anchor"]))) == case["expect"]["anchor"]
+
+
+def test_repack_applies_offsets_and_clips_to_the_cell():
+    image = Image.new("RGBA", (20, 10), (0, 0, 0, 0))
+    image.paste(Image.new("RGBA", (4, 4), RED), (3, 3))
+    image.paste(Image.new("RGBA", (4, 4), GREEN), (13, 3))
+    frames = [{"x": 0, "y": 0, "w": 10, "h": 10, "ox": 0, "oy": -2},
+              {"x": 10, "y": 0, "w": 10, "h": 10, "ox": 3, "oy": 0}]
+    out = decode(sheet.repack(image, frames, columns=2, align="top-left")[0])
+    assert out.size == (8, 4)
+    # 第一帧上移 2：只剩下半截 2 行，上面没有越出格子。
+    assert out.getpixel((0, 0)) == RED and out.getpixel((0, 2))[3] == 0
+    # 第二帧右移 3：超出格子的 3 列被裁掉，没有画进格子之外。
+    assert out.getpixel((4 + 3, 0)) == GREEN and out.getpixel((4 + 2, 0))[3] == 0
+
+
+def test_repack_anchor_is_reported_in_frames_and_meta():
+    _png, data = sheet.repack(strip(2), sheet.detect_frames(strip(2))["frames"], columns=2, anchor=(0.25, 0.5))
+    assert data["meta"]["anchor"] == {"x": 2, "y": 6}
+    assert {(frame["anchor_x"], frame["anchor_y"]) for frame in data["frames"]} == {(2, 6)}
+
+
+@pytest.mark.parametrize("frame_patch", [{"ox": 5000}, {"oy": "1"}, {"ox": True}])
+def test_repack_rejects_bad_offsets(frame_patch):
+    with pytest.raises(ValueError, match="偏移"):
+        sheet.repack(strip(2), [{"x": 0, "y": 0, "w": 16, "h": 16, **frame_patch}], columns=1)
+
+
+@pytest.mark.parametrize("anchor", [(-0.1, 1), (0.5, 1.5)])
+def test_repack_rejects_bad_anchor(anchor):
+    with pytest.raises(ValueError, match="锚点"):
+        sheet.repack(strip(2), sheet.grid_frames(32, 16, 2, 1), columns=2, anchor=anchor)
