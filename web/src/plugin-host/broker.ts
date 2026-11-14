@@ -6,7 +6,7 @@
  * 这里不信任消息的任何部分——形状、大小、频率、方法名、句柄都要验。
  */
 import {
-  PAYLOAD_MAX_BYTES, PAYLOAD_MAX_DEPTH, PAYLOAD_MAX_KEYS,
+  PAYLOAD_MAX_BYTES, PAYLOAD_MAX_DEPTH, PAYLOAD_MAX_KEYS, READY_TYPE,
   type PluginErrorCode, type PluginInput, type PluginMethod, type PluginNodeView, type PluginRpcResponse,
 } from '../../../plugins/sdk/protocol';
 
@@ -29,6 +29,12 @@ export interface BrokerOptions {
   /** 调用本插件声明的服务端路由。`versionIds` 是已由 broker 核对过的、当前连在节点上的素材。 */
   callServer: (path: string, params: Record<string, unknown>, versionIds: string[]) => Promise<unknown>;
   now?: () => number;
+}
+
+/** 握手证明：插件在 port 上的第一条消息必须带回宿主放在页面前缀里的 nonce。 */
+export function isReadyProof(message: unknown, nonce: string): boolean {
+  return isPlainObject(message) && message.type === READY_TYPE
+    && typeof message.nonce === 'string' && message.nonce.length > 0 && message.nonce === nonce;
 }
 
 export interface BrokerReply { response: PluginRpcResponse; transfer: Transferable[] }
@@ -64,48 +70,63 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype
 );
 
-/** 只接受纯 JSON：超深、超多键、非 JSON 类型（函数、Map、二进制、循环引用）都拒绝。返回规范化后的副本。 */
-export function normalizePayload(payload: unknown): unknown {
+const encoder = new TextEncoder();
+/** 孤立代理字符编不成 UTF-8：服务端落盘时会让整份画布保存失败，所以在这里就拒绝。 */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/**
+ * 只接受纯 JSON，返回规范化后的副本。超深、超多键、非 JSON 类型（函数、Map、二进制、循环引用）、
+ * 不合规的字符串都拒绝。大小按 UTF-8 字节在遍历过程中累计，一超限就停，不把超大数据走完再判。
+ */
+export function normalizePayload(payload: unknown, maxBytes: number = PAYLOAD_MAX_BYTES): unknown {
   let keys = 0;
+  let bytes = 0;
+  const spend = (amount: number) => {
+    bytes += amount;
+    if (bytes > maxBytes) throw new BrokerError('PAYLOAD_TOO_LARGE', '数据过大');
+  };
+  const text = (value: string) => {
+    // 先按字符数挡一次（每个字符至少 1 字节），再做精确的字节统计，避免对超长字符串做完整编码。
+    if (value.length > maxBytes) throw new BrokerError('PAYLOAD_TOO_LARGE', '数据过大');
+    if (LONE_SURROGATE.test(value)) throw new BrokerError('BAD_REQUEST', '数据里有无效字符');
+    spend(encoder.encode(JSON.stringify(value)).length);
+    return value;
+  };
   const visit = (value: unknown, depth: number): unknown => {
     if (depth > PAYLOAD_MAX_DEPTH) throw new BrokerError('PAYLOAD_TOO_LARGE', '数据层级过深');
-    if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+    if (value === null || typeof value === 'boolean') { spend(5); return value; }
+    if (typeof value === 'string') return text(value);
     if (typeof value === 'number') {
       if (!Number.isFinite(value)) throw new BrokerError('BAD_REQUEST', '数据里有无效数字');
+      spend(String(value).length);
       return value;
     }
     if (Array.isArray(value)) {
       keys += value.length;
       if (keys > PAYLOAD_MAX_KEYS) throw new BrokerError('PAYLOAD_TOO_LARGE', '数据条目过多');
-      return value.map(item => visit(item, depth + 1));
+      spend(2 + value.length);
+      const copy: unknown[] = [];
+      for (const item of value) copy.push(visit(item, depth + 1));
+      return copy;
     }
     if (isPlainObject(value)) {
       const copy: Record<string, unknown> = {};
-      for (const [key, item] of Object.entries(value)) {
+      spend(2);
+      for (const key of Object.keys(value)) {
         if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
           throw new BrokerError('BAD_REQUEST', '数据里有不允许的键');
         }
         keys += 1;
         if (keys > PAYLOAD_MAX_KEYS) throw new BrokerError('PAYLOAD_TOO_LARGE', '数据条目过多');
-        copy[key] = visit(item, depth + 1);
+        text(key);
+        spend(2);
+        copy[key] = visit(value[key], depth + 1);
       }
       return copy;
     }
     throw new BrokerError('BAD_REQUEST', '数据必须是纯 JSON');
   };
-  const normalized = visit(payload, 0);
-  if (new TextEncoder().encode(JSON.stringify(normalized)).length > PAYLOAD_MAX_BYTES) {
-    throw new BrokerError('PAYLOAD_TOO_LARGE', '数据超过 256 KiB');
-  }
-  return normalized;
-}
-
-function paramsSize(params: unknown): number {
-  try {
-    return JSON.stringify(params)?.length ?? 0;
-  } catch {
-    return Number.POSITIVE_INFINITY;
-  }
+  return visit(payload, 0);
 }
 
 export function createBroker(options: BrokerOptions) {
@@ -210,12 +231,14 @@ export function createBroker(options: BrokerOptions) {
     if (capability !== null && !options.capabilities.has(capability)) {
       return fail('CAPABILITY_DENIED', '本项目没有允许这项能力');
     }
-    if (method !== 'node.writeSelf' && paramsSize(raw.params) > MAX_PARAMS_BYTES) {
-      return fail('PAYLOAD_TOO_LARGE', '参数过大');
-    }
     running += 1;
     try {
-      const { result, transfer } = await dispatch(method, raw.params);
+      // 参数先规范化成纯 JSON 并按字节限长：之后的处理拿到的不再是插件给的原对象。
+      // 写节点与调服务端的正文上限是 256 KiB，其余方法的参数只需要很小。
+      const roomy = method === 'node.writeSelf' || method === 'server.call';
+      const params = raw.params === undefined ? undefined
+        : normalizePayload(raw.params, roomy ? PAYLOAD_MAX_BYTES + MAX_PARAMS_BYTES : MAX_PARAMS_BYTES);
+      const { result, transfer } = await dispatch(method, params);
       return closed ? null : { response: { id, ok: true, result }, transfer };
     } catch (error) {
       if (error instanceof BrokerError) return fail(error.code, error.message);

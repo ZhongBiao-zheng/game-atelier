@@ -326,8 +326,17 @@ class RevalidatedStaticFiles(StaticFiles):
         return response
 
 
+# 宿主页面不允许任何子框架发起网络加载。插件界面是 srcdoc 沙箱帧（不走网络，不受影响）；
+# 没有任何 CSP 指令能阻止沙箱帧把自己导航走，只有父页面的 frame-src 能拦住那次加载，
+# 否则恶意插件可以把读到的数据拼进地址带出去（ADR-0037，B2 安全验收 S2）。
+HOST_PAGE_CSP = "frame-src 'none'"
+
+
 def _revalidated_file(path: Path) -> FileResponse:
-    return FileResponse(path, headers={"Cache-Control": _STATIC_CACHE_CONTROL})
+    headers = {"Cache-Control": _STATIC_CACHE_CONTROL}
+    if path.suffix == ".html":
+        headers["Content-Security-Policy"] = HOST_PAGE_CSP
+    return FileResponse(path, headers=headers)
 
 
 def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -> FastAPI:

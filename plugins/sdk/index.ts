@@ -3,7 +3,7 @@
  * 不依赖任何框架；插件界面用什么渲染由插件自己决定。
  */
 import {
-  HANDSHAKE_TYPE, PLUGIN_PROTOCOL,
+  HANDSHAKE_TYPE, NONCE_GLOBAL, PLUGIN_PROTOCOL, READY_TYPE,
   type PluginErrorCode, type PluginFontSlice, type PluginHandshake, type PluginHostEventMessage,
   type PluginHostEventName, type PluginHostEvents, type PluginInput, type PluginNodeView,
   type PluginRpcResponse, type PluginSurfaceKind, type PluginTheme,
@@ -155,6 +155,10 @@ function createClient(port: MessagePort, hello: PluginHandshake): PluginClient {
     waiting.set(id, { resolve: resolve as (value: unknown) => void, reject });
     port.postMessage({ id, method, params });
   });
+
+  // 第一条消息必须是握手证明：nonce 只在宿主拼出来的这份页面里，别的页面拿到 port 也过不了这一关。
+  const nonce = (window as unknown as Record<string, unknown>)[NONCE_GLOBAL];
+  port.postMessage({ type: READY_TYPE, nonce: typeof nonce === 'string' ? nonce : '' });
 
   applyTheme(theme);
   startFontLoader(hello.fonts ?? [], ids => call('fonts.request', { ids }));

@@ -22,6 +22,8 @@ from character_workflow.lib.plugin_manifest import (  # noqa: E402
 )
 
 LOCK_NAME = "manifest.lock.json"
+# 与 web/scripts/build-plugins.mjs 生成的页面开头一致。
+UI_SHELL_PREFIX = '<!doctype html>\n<html lang="zh-CN">\n<head><meta charset="UTF-8"><title>'
 # 服务端模块要生成内容只能走宿主的 Run 入口，这样成本统计与网关配额才覆盖得到。
 _FORBIDDEN_IMPORT = re.compile(
     r"^\s*(?:from|import)\s+character_workflow\.lib\.(?:callers|job_runner)\b", re.MULTILINE)
@@ -63,6 +65,11 @@ def check_plugin(plugin_dir: Path) -> list[str]:
         data = target.read_bytes()
         if len(data) != item.bytes or hashlib.sha256(data).hexdigest() != item.sha256:
             errors.append(f"{name}: {path} 与清单里的摘要不一致")
+    if lock.ui is not None and (package / lock.ui.entry).is_file():
+        # 入口必须是构建脚本生成的固定外壳：策略由宿主拼在最前面，外壳里不该有它之外的东西抢先。
+        head = (package / lock.ui.entry).read_bytes()[:200].decode("utf-8", errors="replace")
+        if not head.startswith(UI_SHELL_PREFIX):
+            errors.append(f"{name}: {lock.ui.entry} 不是构建脚本生成的外壳，重新运行 make build")
     declares_server = lock.contributes.server is not None
     server_dir = plugin_dir / "server"
     if declares_server != (server_dir / "__init__.py").is_file():

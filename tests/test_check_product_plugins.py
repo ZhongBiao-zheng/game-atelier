@@ -89,3 +89,20 @@ def test_server_module_that_fails_to_import_fails(copy):
     (copy / "plugins/sprite-sheet/server/__init__.py").write_text("raise RuntimeError('broken')\n", encoding="utf-8")
     result = run(copy)
     assert result.returncode == 1 and "服务端模块加载失败" in result.stdout
+
+
+def test_entry_must_be_the_generated_shell(copy):
+    """包内容自带抢先的脚本或注释时拒绝入库（B2 安全验收 S1）。"""
+    import hashlib
+
+    from character_workflow.lib.plugin_manifest import package_digest
+    package = copy / "plugins/sprite-sheet/package"
+    entry = package / "ui/index.html"
+    forged = b"<!-- <head> --><script>steal()</script>" + entry.read_bytes()
+    entry.write_bytes(forged)
+    lock = json.loads((package / "manifest.lock.json").read_text(encoding="utf-8"))
+    lock["files"] = [{"path": "ui/index.html", "sha256": hashlib.sha256(forged).hexdigest(), "bytes": len(forged)}]
+    lock["digest"] = package_digest(lock)
+    (package / "manifest.lock.json").write_text(json.dumps(lock, ensure_ascii=False), encoding="utf-8")
+    result = run(copy)
+    assert result.returncode == 1 and "不是构建脚本生成的外壳" in result.stdout

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { connect, HANDSHAKE_TYPE, PLUGIN_PROTOCOL, type PluginHandshake } from '../../../plugins/sdk';
 
 const hello = (patch: Partial<PluginHandshake> = {}): PluginHandshake => ({
-  type: HANDSHAKE_TYPE, protocol: PLUGIN_PROTOCOL, nonce: 'n', plugin_id: 'demo', digest: 'sha256:x',
+  type: HANDSHAKE_TYPE, protocol: PLUGIN_PROTOCOL, plugin_id: 'demo', digest: 'sha256:x',
   surface: 'node', theme: { mode: 'dark', tokens: { foreground: '#fff' } }, fonts: [], ...patch,
 });
 
@@ -29,6 +29,16 @@ describe('插件 SDK 握手', () => {
     const client = await pending;
     expect(client.pluginId).toBe('demo');
     sibling.remove();
+  });
+
+  it('握手后在 port 上先回报宿主放在页面里的 nonce', async () => {
+    Object.defineProperty(window, '__atelierPluginNonce', { value: 'nonce-from-host', configurable: true });
+    const pending = connect(500);
+    const channel = post(hello(), window.parent);
+    const first = new Promise(resolve => { channel.port1.onmessage = event => resolve(event.data); });
+    await pending;
+    expect(await first).toEqual({ type: 'atelier-plugin:ready', nonce: 'nonce-from-host' });
+    delete (window as unknown as Record<string, unknown>).__atelierPluginNonce;
   });
 
   it('没有 port 或类型不对的消息被忽略，握手后套用主题', async () => {

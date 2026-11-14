@@ -86,3 +86,17 @@ def test_capabilities_are_registered():
     # 没登记的插件路径仍然拒绝：B3 的服务端模块路由要走清单声明，不能靠前缀放行。
     assert local_capability("POST", "/api/plugins/demo/detect") is None
     assert local_capability("GET", "/api/plugins/demo") is None
+
+
+def test_host_page_forbids_network_loads_in_child_frames(client, tmp_path):
+    """宿主页面响应头：子框架不能发起任何网络加载，沙箱帧也就无法把自己导航走（安全验收 S2）。"""
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html><title>x</title>", encoding="utf-8")
+    (dist / "assets" / "index.js").write_text("1", encoding="utf-8")
+    served = TestClient(app=build_app(dist_dir=dist), base_url="http://127.0.0.1")
+    for path in ("/", "/canvas/some-project", "/settings/plugins", "/index.html"):
+        response = served.get(path)
+        assert response.status_code == 200
+        assert response.headers["content-security-policy"] == "frame-src 'none'", path
+    assert "content-security-policy" not in served.get("/assets/index.js").headers

@@ -1315,7 +1315,7 @@ multipart 里的数组值展开成同名重复字段。
 - `PUT .../plugin-grants/{plugin_id}`（编辑类）：按插件当前清单记录批准；插件未启用或不存在 409 `PLUGIN_DISABLED`。`DELETE` 撤销。未知项目 404 `PROJECT_NOT_FOUND`。
 - 存储 `<data_root>/canvases/<project>/plugin-grants.json`：`{schema_version: 1, grants: {[plugin_id]: {digest, capabilities, granted_at}}}`。不进项目包。文件读不出按没有批准处理。
 - 画布文档：`CanvasPluginNodeData` 增加可选 `package_digest`（`sha256:` + 64 位十六进制）。指向插件节点的输入连线必须无 slot、非标注；保存时只对**新增**的这类连线按清单核对（插件已启用、节点类型已声明、素材类型在 `input_modalities` 内、不超过 `max_inputs`），不通过 422 `canvas_plugin_connection_rejected`。已有连线与文档读取不依赖插件是否存在。
-- 插件界面协议 `atelier-plugin/1`：类型在 `plugins/sdk/protocol.ts`，宿主实现在 `web/src/plugin-host/`。宿主在沙箱页面加载后向它发送握手消息并附带一个 `MessagePort`，此后只在该 port 上通信。方法：`node.readSelf`、`node.writeSelf`、`inputs.list`、`inputs.read`、`fonts.request`；事件：`theme.changed`、`node.changed`、`inputs.changed`。协议里没有节点、项目、路径参数；素材用只在本界面实例有效的句柄指代。
+- 插件界面协议 `atelier-plugin/1`：类型在 `plugins/sdk/protocol.ts`，宿主实现在 `web/src/plugin-host/`。宿主在沙箱页面加载后向它发送握手消息并附带一个 `MessagePort`，此后只在该 port 上通信。插件在 port 上的第一条消息必须是 `{type: "atelier-plugin:ready", nonce}`，nonce 取自宿主前缀脚本放在 `window.__atelierPluginNonce` 的值；宿主收到正确的 nonce 之前不服务任何方法，收到别的消息即断开。方法：`node.readSelf`、`node.writeSelf`、`inputs.list`、`inputs.read`、`fonts.request`；事件：`theme.changed`、`node.changed`、`inputs.changed`。协议里没有节点、项目、路径参数；素材用只在本界面实例有效的句柄指代。
 
 ### 插件服务端路由与 Agent 工具（B3）
 
@@ -1325,3 +1325,9 @@ multipart 里的数组值展开成同名重复字段。
 - 服务端模块 `plugins/<id>/server/__init__.py` 导出 `register(api)`，用 `@api.route("POST", path)` 登记 `handler(ctx, params) -> dict`。模块在第一次调用时才 import，插件停用时卸载，包摘要变化后重新加载。`ctx.inputs` 是核对过的图片（含服务端路径，不回传界面）；`ctx.create_image(png, title)` 需要 `resource.create`，结果落成画布上的普通图片节点（`upload` 来源）；`ctx.image_of_node(node_id)` 只在 Agent 调用时可用。
 - 插件界面协议增加方法 `server.call {path, params, inputs: handle[]}`（能力 `server.call`）与错误码 `SERVER_ERROR`（`message` 为服务端给用户的原因）。浏览器侧把句柄换成版本 id 后转发；路径必须符合清单的 path 格式。
 - 内置 Agent：已启用插件的 `contributes.agent_tools[]` 以 `plugin_<id 下划线化>_<name>` 为名加入工具列表，每次组装 Agent 时读取一次。`read_only` 的工具不需确认，其余按当前权限模式；调用同样要求本项目已批准该插件。外部 MCP 的工具列表不变。
+
+### 安全修复后的补充（B2 安全验收）
+
+- 宿主页面（`index.html` 及所有回落到它的地址）响应头带 `Content-Security-Policy: frame-src 'none'`；`/assets/*` 不带。
+- 批准记录绑定包摘要：记录里的 `digest` 与当前包一致才直接有效；不一致时仅 `source == "bundled"` 且能力未增加才沿用，并把记录回写为新摘要。
+- 写入节点与调用服务端的数据只接受纯 JSON 且字符串必须是合规的 Unicode（不含孤立代理字符）；大小按 UTF-8 字节计，超限即拒。

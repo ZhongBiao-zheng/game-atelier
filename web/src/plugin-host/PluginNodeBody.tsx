@@ -67,11 +67,13 @@ export function PluginNodeBody({ node, projectId, selected, inputs, resolveVersi
   const brokerInputs = useMemo<BrokerInput[]>(() => inputs.flatMap(input => {
     const version = resolveVersion(input.versionId);
     if (!version || !input.versionId) return [];
+    // 清单没声明要收的素材类型不交给插件，即使文档里有这条连线。
+    if (!contribution?.input_modalities.includes(version.kind)) return [];
     const media = version.kind === 'text' ? null : version;
     return [{ versionId: input.versionId, kind: version.kind, title: input.title,
       width: media?.width ?? null, height: media?.height ?? null }];
   // eslint-disable-next-line react-hooks/exhaustive-deps -- resolveVersion 是常量引用；输入变了 inputs 会换引用
-  }), [inputs]);
+  }), [inputs, contribution]);
 
   if (!entry) return <Placeholder reason="未安装此插件" />;
   if (!manifest) {

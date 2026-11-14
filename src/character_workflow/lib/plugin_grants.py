@@ -60,23 +60,40 @@ def _read_unlocked(project_id: str) -> dict[str, dict[str, Any]]:
 
 
 def active_grants(project_id: str) -> dict[str, dict[str, Any]]:
-    """当前有效的批准：插件已启用，且它现在要的能力都在批准过的范围内。
+    """当前有效的批准：插件已启用，且批准记录对得上现在这份包。
 
-    插件更新后摘要会变；能力没有增加就沿用原批准，增加了就要重新批准（ADR-0012）。
+    批准绑定包摘要（ADR-0012）。摘要一致才直接有效；摘要变了（插件更新）时，只有随应用
+    发布的包、且能力没有增加，才沿用原批准并把记录更新到新摘要，其余情况要重新批准。
     """
     _require_project(project_id)
     stored = _read_unlocked(project_id)
     enabled = plugin_registry.enabled_ids()
     active: dict[str, dict[str, Any]] = {}
+    renewed: dict[str, dict[str, Any]] = {}
     for record in plugin_registry.scan():
         entry = stored.get(record.plugin_id)
         if entry is None or record.lock is None or record.plugin_id not in enabled:
             continue
-        if set(record.lock.capabilities) <= set(entry["capabilities"]):
-            active[record.plugin_id] = {
-                "capabilities": list(record.lock.capabilities),
-                "granted_at": entry.get("granted_at"),
-            }
+        if entry.get("digest") != record.lock.digest:
+            carries_over = (record.lock.source == "bundled"
+                            and set(record.lock.capabilities) <= set(entry["capabilities"]))
+            if not carries_over:
+                continue
+            renewed[record.plugin_id] = {**entry, "digest": record.lock.digest,
+                                         "capabilities": list(record.lock.capabilities)}
+        elif not set(record.lock.capabilities) <= set(entry["capabilities"]):
+            continue
+        active[record.plugin_id] = {
+            "capabilities": list(record.lock.capabilities),
+            "granted_at": entry.get("granted_at"),
+        }
+    if renewed:
+        with file_lock(_lock_path(project_id)):
+            latest = _read_unlocked(project_id)
+            atomic_write_json(_grants_path(project_id), {
+                "schema_version": SCHEMA_VERSION,
+                "grants": {**latest, **{key: value for key, value in renewed.items() if key in latest}},
+            })
     return active
 
 

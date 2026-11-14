@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createBroker, normalizePayload, PluginServerError, type BrokerInput, type BrokerOptions } from './broker';
+import { createBroker, isReadyProof, normalizePayload, PluginServerError, type BrokerInput, type BrokerOptions } from './broker';
 
 const ALL = ['node.read_self', 'node.write_self', 'resource.read_inputs', 'server.call'];
 const NODE = { node_type: 'sheet', title: '精灵表', size: { width: 320, height: 240 }, payload_schema_version: 1, payload: { frames: [] } };
@@ -143,6 +143,35 @@ describe('插件 broker：节点读写', () => {
     expect(errorCode(await call(broker, 'node.writeSelf', { payload }))).toBe(code);
     expect(options.writePayload).not.toHaveBeenCalled();
     expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+  });
+
+  // B2 安全验收 M1：孤立代理字符编不成 UTF-8，写进节点会让整份画布保存失败。
+  it.each([
+    ['值里的高位代理', { name: '\ud800' }], ['值里的低位代理', { name: 'a\udc00b' }],
+    ['键里的代理', { ['k\ud83d']: 1 }], ['数组里的', ['ok', '\udfff']], ['颠倒的一对', { s: '\udc00\ud800' }],
+  ])('拒绝无效字符：%s', async (_name, payload) => {
+    const { broker, options } = setup();
+    expect(errorCode(await call(broker, 'node.writeSelf', { payload }))).toBe('BAD_REQUEST');
+    expect(options.writePayload).not.toHaveBeenCalled();
+  });
+
+  it('成对的代理字符（表情、生僻字）照常写入', async () => {
+    const { broker, options } = setup();
+    expect((await call(broker, 'node.writeSelf', { payload: { name: '🙂𠮷' } })).response.ok).toBe(true);
+    expect(options.writePayload).toHaveBeenCalledWith({ name: '🙂𠮷' });
+  });
+
+  // M3：超限时立刻停，不把剩下的数据走完。
+  it('超大数据在遍历途中就被拒，后面的内容不再被读取', () => {
+    let touched = 0;
+    const tail = new Proxy({}, { ownKeys() { touched += 1; return []; }, getPrototypeOf: () => Object.prototype });
+    expect(() => normalizePayload(['x'.repeat(300 * 1024), tail])).toThrow();
+    expect(touched).toBe(0);
+  });
+
+  it('大小按 UTF-8 字节算，不按字符数', () => {
+    expect(() => normalizePayload({ s: '汉'.repeat(80 * 1024) })).not.toThrow();   // 240 KiB
+    expect(() => normalizePayload({ s: '汉'.repeat(90 * 1024) })).toThrow();       // 270 KiB，字符数只有 90K
   });
 
   it('循环引用被拒而不是卡死', () => {
@@ -319,5 +348,20 @@ describe('插件 broker：调用服务端路由', () => {
     const crashed = setup({ callServer: async () => { throw new Error('GET /api/plugins/x failed at /Users/a/b'); } });
     expect((await call(crashed.broker, 'server.call', { path: '/repack' })).response)
       .toEqual({ id: 1, ok: false, error: { code: 'INTERNAL', message: '宿主处理失败' } });
+  });
+});
+
+describe('握手证明', () => {
+  const NONCE = '0f8fad5b-d9cb-469f-a165-70867728950e';
+  it('只有带回正确 nonce 的 ready 消息算数', () => {
+    expect(isReadyProof({ type: 'atelier-plugin:ready', nonce: NONCE }, NONCE)).toBe(true);
+  });
+  it.each([
+    null, undefined, 'atelier-plugin:ready', { type: 'atelier-plugin:ready' }, { type: 'atelier-plugin:ready', nonce: '' },
+    { type: 'atelier-plugin:ready', nonce: 'guess' }, { type: 'atelier-plugin:ready', nonce: [NONCE] },
+    { type: 'other', nonce: NONCE }, { id: 1, method: 'node.readSelf' }, { nonce: NONCE },
+  ])('其余消息都不算：%j', message => {
+    expect(isReadyProof(message, NONCE)).toBe(false);
+    expect(isReadyProof(message, '')).toBe(false);
   });
 });

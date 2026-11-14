@@ -27,6 +27,7 @@ export const SANDBOX_CSP = [
   "frame-src 'none'",
   "form-action 'none'",
   "base-uri 'none'",
+  "webrtc 'block'",
 ].join('; ');
 
 export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
@@ -34,20 +35,39 @@ export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-/** 把策略放在 <head> 的第一个位置。包自带的 meta 只能在此基础上收紧，放宽不了。 */
-export function buildSrcdoc(html: string): string {
-  const head = /<head[^>]*>/i.exec(html);
-  if (!head) throw new Error('插件界面缺少 <head>，无法装载');
-  const at = head.index + head[0].length;
-  const meta = `<meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}">`;
-  return html.slice(0, at) + meta + html.slice(at);
+/** 握手证明的全局名：前缀脚本把本次实例的 nonce 放在这里，SDK 读出后在 port 上回报。 */
+export const NONCE_GLOBAL = '__atelierPluginNonce';
+
+/**
+ * 前缀脚本：先于包里的任何内容执行。
+ * 1. 放下握手 nonce——只有这份由宿主拼出来的页面知道它；被导航走之后的页面拿到 port 也用不了。
+ * 2. 把 WebRTC 构造器置为不可用。CSP 管不到 WebRTC 的出站包，这一步是纵深防御，不是边界：
+ *    页面仍可能从别的全局对象里取回构造器（ADR-0037 把它记为已知残余）。
+ */
+function prefixScript(nonce: string): string {
+  return `(()=>{Object.defineProperty(window,${JSON.stringify(NONCE_GLOBAL)},{value:${JSON.stringify(nonce)},writable:false,configurable:false,enumerable:false});`
+    + "for(const k of ['RTCPeerConnection','webkitRTCPeerConnection','mozRTCPeerConnection','RTCDataChannel','RTCIceTransport','RTCSessionDescription']){"
+    + 'try{Object.defineProperty(window,k,{value:undefined,writable:false,configurable:false})}catch(e){}}})();';
 }
 
-const srcdocByDigest = new Map<string, Promise<string>>();
+/**
+ * 沙箱页面 = 宿主的固定前缀 + 包内容。
+ *
+ * 前缀永远在最前面，不在包内容里找插入位置：包是不可信输入，注释、属性值、长得像 <head> 的
+ * 标签、抢先的 <script> 都能让「找到的位置」落在策略生效之前或根本不生效的地方（B2 安全验收 S1）。
+ * 先于一切标签的 <meta> 由解析器放进隐式的 <head>，对其后的全部内容生效；包自带的 meta 只能收紧。
+ */
+export function buildSrcdoc(html: string, nonce: string): string {
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(nonce)) throw new Error('无效的握手 nonce');
+  return `<!doctype html><meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}">`
+    + `<script>${prefixScript(nonce)}</script>` + html;
+}
 
-/** 取界面包并按清单核对字节数与 SHA-256；不一致就拒绝，不把内容交给 iframe。 */
-export function loadPluginSrcdoc(plugin: PluginPackageLock): Promise<string> {
-  const cached = srcdocByDigest.get(plugin.digest);
+const htmlByDigest = new Map<string, Promise<string>>();
+
+/** 取界面包并按清单核对字节数与 SHA-256；不一致就拒绝，不把内容交给 iframe。返回包的原始 HTML。 */
+export function loadPluginHtml(plugin: PluginPackageLock): Promise<string> {
+  const cached = htmlByDigest.get(plugin.digest);
   if (cached) return cached;
   const loading = (async () => {
     const entry = plugin.ui?.entry;
@@ -58,10 +78,10 @@ export function loadPluginSrcdoc(plugin: PluginPackageLock): Promise<string> {
     if (bytes.byteLength !== listed.bytes || await sha256Hex(bytes) !== listed.sha256) {
       throw new Error('插件界面与清单里的摘要不一致，已拒绝加载');
     }
-    return buildSrcdoc(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   })();
-  srcdocByDigest.set(plugin.digest, loading);
-  loading.catch(() => srcdocByDigest.delete(plugin.digest));
+  htmlByDigest.set(plugin.digest, loading);
+  loading.catch(() => htmlByDigest.delete(plugin.digest));
   return loading;
 }
 

@@ -78,6 +78,10 @@ def test_update_keeps_the_grant_unless_capabilities_grow(client, root):
     # 新版本、能力变少：摘要变了，批准沿用。
     write_plugin(root, version="1.1.0", capabilities=["node.read_self"])
     assert grants(client, project_id)["demo"]["capabilities"] == ["node.read_self"]
+    # 沿用时把记录更新到新摘要：批准始终对得上当前这份包。
+    stored = json.loads((canvas_project_dir(project_id) / "plugin-grants.json").read_text(encoding="utf-8"))
+    assert stored["grants"]["demo"]["digest"] == plugin_registry.find("demo").lock.digest
+    assert stored["grants"]["demo"]["capabilities"] == ["node.read_self"]
     # 新版本、能力变多：要重新批准。
     write_plugin(root, version="1.2.0", capabilities=["node.read_self", "node.write_self", "resource.create"])
     assert grants(client, project_id) == {}
@@ -122,3 +126,31 @@ def test_grants_do_not_travel_in_project_packages(client):
     from character_workflow.lib import canvas_packages
     names = {path.name for path in canvas_packages._metadata_files(canvas_project_dir(project_id))}
     assert "plugin-grants.json" not in names
+
+
+def test_grant_is_bound_to_the_package_digest(client, root, monkeypatch):
+    """摘要对不上、又不是随应用发布的包时，批准不沿用（B2 安全验收 M2）。"""
+    plugin_registry.set_enabled("demo", True)
+    project_id = project(client)
+    client.put(f"/api/canvas/projects/{project_id}/plugin-grants/demo", json={})
+    write_plugin(root, version="1.1.0")  # 能力不变，摘要变了
+    original = plugin_registry.scan
+
+    def as_installed():
+        return [type(record)(record.plugin_id, record.package_dir,
+                             record.lock.model_copy(update={"source": "installed"}) if record.lock else None,
+                             record.availability, record.reason) for record in original()]
+    monkeypatch.setattr(plugin_registry, "scan", as_installed)
+    assert grants(client, project_id) == {}
+    monkeypatch.setattr(plugin_registry, "scan", original)
+    assert "demo" in grants(client, project_id)
+
+
+def test_missing_digest_in_old_record_is_treated_as_mismatch(client, root):
+    plugin_registry.set_enabled("demo", True)
+    project_id = project(client)
+    path = canvas_project_dir(project_id) / "plugin-grants.json"
+    path.write_text(json.dumps({"grants": {"demo": {"capabilities": ["node.read_self", "node.write_self"]}}}),
+                    encoding="utf-8")
+    assert "demo" in grants(client, project_id)  # 随应用发布、能力未增加：沿用
+    assert json.loads(path.read_text(encoding="utf-8"))["grants"]["demo"]["digest"].startswith("sha256:")

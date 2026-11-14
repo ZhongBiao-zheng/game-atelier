@@ -6,6 +6,11 @@
  */
 export const PLUGIN_PROTOCOL = 'atelier-plugin/1';
 export const HANDSHAKE_TYPE = 'atelier-plugin:init';
+/** 插件在 port 上发的第一条消息：回报宿主放在页面里的 nonce。宿主收到正确的 nonce 之前不服务任何方法。 */
+export const READY_TYPE = 'atelier-plugin:ready';
+/** 宿主前缀脚本放 nonce 的全局名。 */
+export const NONCE_GLOBAL = '__atelierPluginNonce';
+export interface PluginReadyMessage { type: typeof READY_TYPE; nonce: string }
 
 export type PluginSurfaceKind = 'node' | 'panel';
 
@@ -27,7 +32,6 @@ export interface PluginFontSlice {
 export interface PluginHandshake {
   type: typeof HANDSHAKE_TYPE;
   protocol: typeof PLUGIN_PROTOCOL;
-  nonce: string;
   plugin_id: string;
   digest: string;
   surface: PluginSurfaceKind;
