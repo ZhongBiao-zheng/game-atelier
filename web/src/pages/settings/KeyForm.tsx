@@ -104,7 +104,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // preview 存整份响应（models + total + excluded），头部才能诚实说清「上游多少、过滤了多少」。
-  const [preview, setPreview] = useState<(ModelsPreview & { includeAll: boolean }) | null>(null);
+  const [preview, setPreview] = useState<(ModelsPreview & { includeAll: boolean; protocolId: string | null }) | null>(null);
   const [fetchedChecked, setFetchedChecked] = useState<Set<string>>(new Set());
   // 上游没判出分类的行（unknown / excluded）在 picker 里的显式二选一结果，按模型 id 存。
   const [modalityPick, setModalityPick] = useState<Record<string, ModelModality>>({});
@@ -121,6 +121,10 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   const [interfaces, setInterfaces] = useState<HttpProtocolRow[]>([]);
   const [interfaceEditor, setInterfaceEditor] = useState<{ index: number; identifier: string | null; kind: HttpProtocolKind } | null>(null);
   const reloadInterfaces = () => listHttpProtocols().then(result => setInterfaces(result.protocols));
+  // 目录来源：空 = 默认 GET /models；否则按这份自定义接口的 catalog 发现（ADR-0036）。
+  const [catalogSource, setCatalogSource] = useState('');
+  const catalogInterfaces = provider === 'custom' ? interfaces.filter(item => item.available && item.catalog) : [];
+  const catalogProtocolId = catalogInterfaces.some(item => item.id === catalogSource) ? catalogSource : null;
   useEffect(() => {
     if (provider !== 'custom') return;
     listHttpProtocols().then(result => setInterfaces(result.protocols)).catch(() => setInterfaces([]));
@@ -204,6 +208,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         base_url: fetchModelsBaseUrl || null,
         access_key: !editing || keyChanged ? accessKey.trim() || null : null,
         include_all: includeAll,
+        protocol_id: catalogProtocolId,
       });
       const order = (m: RemoteModel) => ['text', 'image', 'video', 'audio', 'unknown', 'excluded'].indexOf(m.category);
       const sorted = [...remote.models].sort((a, b) => order(a) - order(b));
@@ -216,7 +221,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
       );
       setPickerFilter('all');
       setPickerQuery('');
-      setPreview({ ...remote, models: sorted, includeAll });
+      setPreview({ ...remote, models: sorted, includeAll, protocolId: catalogProtocolId });
       setFetchedChecked(new Set(
         sorted.filter((m) => preview ? carried.includes(m.id) : enabledIds.has(m.id)).map((m) => m.id),
       ));
@@ -237,6 +242,10 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   const mergedModels = (): EditableModel[] => {
     if (!preview) return models;
     const upstream = new Map(preview.models.map((m) => [m.id, m]));
+    // 按自定义接口目录发现的行：分类与该接口一致的绑定它；目录不提供内置协议，已有行的协议保持不变。
+    const boundKind = interfaces.find(item => item.id === preview.protocolId)?.kind;
+    const discoveredBinding = (modality: ModelModality | null | undefined): Partial<EditableModel> =>
+      preview.protocolId && modality === boundKind ? { protocol: 'declarative', declarative_id: preview.protocolId } : {};
     const kept = models
       .filter((m) => !upstream.has(m.id.trim()) || fetchedChecked.has(m.id.trim()))
       .map((m) => {
@@ -246,7 +255,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
           ...m,
           // 「重拉一次列表来修协议」必须真的有效：protocol 是纯机器字段（表单里没有输入口），
           // 命中上游就用上游值覆盖，否则存错 / 存空的行永远修不回来。绑定了自定义接口的行除外。
-          protocol: m.protocol === 'declarative' ? m.protocol : hit.protocol,
+          protocol: m.protocol === 'declarative' || preview.protocolId ? m.protocol : hit.protocol,
           input_modalities: hit.input_modalities ?? m.input_modalities,
           // name 有输入框、可能被改成自己的叫法，只在空着或还等于 id 时补上游名。
           name: !m.name.trim() || m.name.trim() === m.id.trim() ? hit.name : m.name,
@@ -262,9 +271,9 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
       .map((m): EditableModel => {
         const stored = editing ? initial?.models?.find(model => model.id === m.id) : undefined;
         return stored ? { ...stored, _locked: true, modality: modelModality(stored, initial),
-          protocol: m.protocol, input_modalities: stored.input_modalities ?? m.input_modalities }
+          protocol: preview.protocolId ? stored.protocol : m.protocol, input_modalities: stored.input_modalities ?? m.input_modalities }
           : { name: m.name, id: m.id, modality: resolvedModality(m) as ModelModality,
-            protocol: m.protocol, input_modalities: m.input_modalities };
+            protocol: m.protocol, input_modalities: m.input_modalities, ...discoveredBinding(resolvedModality(m)) };
       });
     return [...kept, ...added];
   };
@@ -507,12 +516,20 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                     <ToggleGroupItem value="all">全部</ToggleGroupItem>
                   </ToggleGroup>
                   {!preview && <Input aria-label="筛选模型" placeholder="筛选模型" value={modelQuery} onChange={e => setModelQuery(e.target.value)} className="min-w-0 flex-1 basis-28" />}
+                  {catalogInterfaces.length > 0 && <Select value={catalogProtocolId ?? DEFAULT_CATALOG} onValueChange={value => setCatalogSource(value === DEFAULT_CATALOG ? '' : value)}>
+                    <SelectTrigger size="sm" aria-label="模型目录" className="w-auto"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={DEFAULT_CATALOG}>/models</SelectItem>
+                      {catalogInterfaces.map(item => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>}
                   <Button variant="ghost" size="sm" type="button" disabled={fetching || !fetchModelsBaseUrl} onClick={() => void fetchModels()}>{fetching ? '获取中...' : '重新获取'}</Button>
                 </div>
                 {fetchError && <p role="alert" className="text-sm text-destructive">{fetchError}</p>}
                 {preview ? <div className="min-w-0 space-y-3">
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <span>上游 {preview.total} 个模型</span>
+                    {preview.discovered && <span>已发现不代表可用</span>}
                     {(preview.excluded > 0 || preview.includeAll) && <>
                       <span>{preview.includeAll ? '已显示全部，含不可生成模型' : `已过滤 ${preview.excluded} 个不可生成模型`}</span>
                       <Button variant="link" size="sm" type="button" disabled={fetching} onClick={() => fetchModels(!preview.includeAll)} className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground">{preview.includeAll ? '只看可生成模型' : '显示全部'}</Button>
@@ -721,6 +738,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
 }
 
 const BUILTIN_INTERFACE = '__builtin';
+const DEFAULT_CATALOG = '__models';
 const NEW_INTERFACE = '__new';
 
 /** 模型行的「接口」：默认走内置调用，或绑定一份同类型的自定义接口（ADR-0036）。 */

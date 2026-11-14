@@ -102,6 +102,21 @@ class Poll(_Strict):
     result: ResultSpec
 
 
+class CatalogKind(_Strict):
+    field: str = Field(min_length=1, max_length=128)
+    map: dict[str, Literal["image", "video", "text", "audio", "excluded"]] = Field(
+        min_length=1, max_length=MAX_ARRAY_ITEMS)
+
+
+class Catalog(_Strict):
+    """目录发现：只发一次 GET，读出模型 id / 名称 / 类别。价格类字段一律不读。"""
+    path: str = Field(min_length=1, max_length=512)
+    items: str | None = None
+    id: str = "id"
+    name: str | None = None
+    kind: CatalogKind | None = None
+
+
 class HttpProtocol(_Strict):
     version: Literal[1]
     name: str = Field(min_length=1, max_length=60)
@@ -113,8 +128,7 @@ class HttpProtocol(_Strict):
     derive: dict[str, Derive] = Field(default_factory=dict, max_length=16)
     result: ResultSpec = Field(default_factory=ResultSpec)
     poll: Poll | None = None
-    # 保留给「目录发现」：版本 1 只接受、不解析。
-    catalog: Any = None
+    catalog: Catalog | None = None
 
 
 class Issue(BaseModel):
@@ -203,6 +217,21 @@ def _check_result(spec: ResultSpec, where: str) -> list[Issue]:
             issues += _check_result_path(item, f"{where}.{field}.{i}")
     if spec.error:
         issues += _check_result_path(spec.error, f"{where}.error")
+    return issues
+
+
+def _catalog_issues(catalog: Catalog) -> list[Issue]:
+    # 目录请求没有模型上下文：路径只能是静态的，任何占位符都不允许。
+    issues = [i for i in _check_relative_path(catalog.path, "catalog.path", set())
+              if "占位符" not in i.message and "只能用" not in i.message]
+    if "$" in catalog.path.replace("$$", ""):
+        issues.append(Issue(path="catalog.path", message="目录路径不能用占位符"))
+    for field in ("items", "id", "name"):
+        value = getattr(catalog, field)
+        if value:
+            issues += _check_result_path(value, f"catalog.{field}")
+    if catalog.kind:
+        issues += _check_result_path(catalog.kind.field, "catalog.kind.field")
     return issues
 
 
@@ -384,6 +413,8 @@ def _semantic_issues(p: HttpProtocol) -> list[Issue]:
     issues += _option_issues(p, used)
     issues += _image_issues(p, used, body_names)
     issues += _body_issues(p)
+    if p.catalog is not None:
+        issues += _catalog_issues(p.catalog)
     return issues
 
 

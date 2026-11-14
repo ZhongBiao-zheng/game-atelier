@@ -194,6 +194,21 @@ def build_context(protocol: HttpProtocol, *, prompt: str, model: str,
 # ---------------------------------------------------------------- 请求
 
 
+def authorized(method: str, url: str, protocol: HttpProtocol, access_key: str) -> PreparedCall:
+    """按模板 auth 注入密钥，带上模板的固定请求头；secrets 供报错遮罩用。"""
+    headers = dict(protocol.submit.headers)
+    auth = protocol.auth
+    if auth.type == "bearer":
+        headers["Authorization"] = f"Bearer {access_key}"
+    elif auth.type == "header":
+        headers[auth.name or ""] = f"{auth.prefix or ''}{access_key}"
+    elif auth.type == "query":
+        url += ("&" if "?" in url else "?") + urlencode({auth.name or "": access_key})
+    secrets = tuple(dict.fromkeys(s for s in (access_key, quote(access_key, safe=""),
+                                              quote_plus(access_key)) if s))
+    return PreparedCall(method=method, url=url, headers=headers, secrets=secrets)
+
+
 def prepare(base: SplitResult, access_key: str, protocol: HttpProtocol,
             context: dict[str, Any], *, poll: bool = False) -> PreparedCall:
     if poll:
@@ -206,18 +221,8 @@ def prepare(base: SplitResult, access_key: str, protocol: HttpProtocol,
     url = base.geturl().rstrip("/") + render_path(path_template, context)
     if outbound_guard.origin(urlsplit(url)) != outbound_guard.origin(base):
         raise DeclarativeError("自定义接口的地址拼接后离开了服务地址")
-    headers = dict(protocol.submit.headers)
-    auth = protocol.auth
-    if auth.type == "bearer":
-        headers["Authorization"] = f"Bearer {access_key}"
-    elif auth.type == "header":
-        headers[auth.name or ""] = f"{auth.prefix or ''}{access_key}"
-    elif auth.type == "query":
-        url += ("&" if "?" in url else "?") + urlencode({auth.name or "": access_key})
+    call = authorized(method, url, protocol, access_key)
     rendered = render(body, context) if body is not None else None
-    secrets = tuple(dict.fromkeys(s for s in (access_key, quote(access_key, safe=""),
-                                              quote_plus(access_key)) if s))
-    call = PreparedCall(method=method, url=url, headers=headers, secrets=secrets)
     if rendered is MISSING or rendered is None:
         return call
     call.sent_urls = video_poll.sent_url_set(_strings(rendered))

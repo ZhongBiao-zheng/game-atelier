@@ -40,6 +40,7 @@ def _row(stored: store.StoredProtocol, used_by: list[tuple[str, str]]) -> dict[s
         "kind": protocol.kind if protocol else document.get("kind"),
         "available": protocol is not None, "error": stored.error,
         "declared": declared_capabilities(protocol) if protocol else None,
+        "catalog": bool(protocol and protocol.catalog),
         "used_by": [{"alias": alias, "model": model} for alias, model in used_by],
     }
 

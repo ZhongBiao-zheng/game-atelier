@@ -38,7 +38,14 @@ export interface HttpProtocolDocument {
     timeout_seconds?: number | null;
     result: HttpProtocolResult;
   } | null;
-  catalog?: unknown;
+  /** 目录发现：只发一次 GET，读模型 id / 名称 / 类别；价格类字段不读。 */
+  catalog?: {
+    path: string;
+    items?: string | null;
+    id?: string;
+    name?: string | null;
+    kind?: { field: string; map: Record<string, 'image' | 'video' | 'text' | 'audio' | 'excluded'> } | null;
+  } | null;
 }
 
 /** 服务端按模板算出的能力声明：控件只显示非 null 的项，提交时服务端按同一份再校验。 */
@@ -69,6 +76,8 @@ export interface HttpProtocolRow {
   available: boolean;
   error: string | null;
   declared: DeclaredCapabilities | null;
+  /** 模板写了 catalog，可用于按目录发现模型。 */
+  catalog: boolean;
   used_by: { alias: string; model: string }[];
 }
 

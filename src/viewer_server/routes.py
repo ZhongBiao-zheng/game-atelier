@@ -991,6 +991,8 @@ class _ModelsPreviewPayload(BaseModel):
     access_key: str | None = None
     # 逃生舱：连判定为不可生成的模型也一并返回（词表判过头时用）。
     include_all: bool = False
+    # 按自定义接口模板的 catalog 发现模型（ADR-0036）；不带时走默认 GET /models。
+    protocol_id: str | None = None
 
 
 # 模型分类：text / image / video / audio / unknown / excluded。
@@ -1274,6 +1276,8 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
         preview_provider = stored.provider or payload.provider or "custom"
     if not base_url:
         raise HTTPException(422, "缺少 API 请求地址（base_url）")
+    if payload.protocol_id:
+        return _catalog_preview(payload, preview_provider, base_url, access_key)
 
     url = _model_list_url(base_url, preview_provider)
     headers = {"Authorization": f"Bearer {access_key}"} if access_key else {}
@@ -1331,6 +1335,47 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
             "input_modalities": _model_input_modalities(item),
         })
     return {"models": models, "total": total, "excluded": excluded}
+
+
+def _catalog_preview(payload: _ModelsPreviewPayload, provider: str, base_url: str,
+                     access_key: str) -> dict:
+    """按模板 catalog 发现模型：只发一次目录 GET；分类以模板 kind.map 为准，未命中走现有规则。
+
+    发现不代表可用，前端据 `discovered` 标明；启用时分类与模板 kind 一致的行由前端绑定该模板。
+    目录里的价格字段不读。
+    """
+    from character_workflow.lib import http_protocol_catalog, http_protocols
+
+    if provider != "custom":
+        raise HTTPException(400, "只有自定义供应商可以按自定义接口发现模型")
+    try:
+        protocol = http_protocols.read_protocol(payload.protocol_id or "")
+    except http_protocols.ProtocolUnavailableError as error:
+        raise HTTPException(422, str(error)) from None
+    if protocol.catalog is None:
+        raise HTTPException(422, f"自定义接口「{protocol.name}」没有填写模型目录（catalog）")
+    try:
+        found = http_protocol_catalog.fetch_catalog(base_url, access_key, protocol)
+    except http_protocol_catalog.CatalogError as error:
+        raise HTTPException(502, str(error)) from None
+    models = []
+    excluded = 0
+    for entry in found:
+        category = entry.kind or _classify_model({**entry.item, "id": entry.id})
+        if category == "excluded" and not payload.include_all:
+            excluded += 1
+            continue
+        modality = category if category in ("text", "image", "video", "audio") else None
+        models.append({
+            "id": entry.id,
+            "name": entry.name,
+            "modality": modality,
+            "category": category,
+            # 绑定在前端「启用所选」时按最终分类做（未识别行要等用户指定），这里不猜内置协议。
+            "protocol": None,
+            "input_modalities": _model_input_modalities(entry.item),
+        })
+    return {"models": models, "total": len(found), "excluded": excluded, "discovered": True}
 
 
 _GALLERY_SLOTS = ("portrait", "promo", "turnaround")

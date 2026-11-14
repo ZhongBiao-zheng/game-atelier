@@ -233,6 +233,85 @@
           ]
         }
       }
+    },
+    {
+      "name": "with-catalog",
+      "declared": {
+        "kind": "image",
+        "ratios": [
+          "1:1",
+          "16:9"
+        ],
+        "resolutions": null,
+        "durations": null,
+        "max_count": 4,
+        "reference_images": 4,
+        "frames": 0
+      },
+      "document": {
+        "version": 1,
+        "name": "同步出图",
+        "kind": "image",
+        "auth": {
+          "type": "bearer"
+        },
+        "submit": {
+          "path": "/v1/images/generations",
+          "format": "json",
+          "body": {
+            "model": "$model",
+            "prompt": "$prompt",
+            "size": "$size",
+            "n": "$n",
+            "image": "$images"
+          }
+        },
+        "inputs": {
+          "images": {
+            "max": 4,
+            "encode": "data_url"
+          }
+        },
+        "options": {
+          "ratio": [
+            "1:1",
+            "16:9"
+          ],
+          "count": 4
+        },
+        "derive": {
+          "size": {
+            "from": "ratio",
+            "map": {
+              "1:1": "1024x1024",
+              "16:9": "1536x1024"
+            }
+          }
+        },
+        "result": {
+          "urls": [
+            "data.*.url"
+          ],
+          "base64": [
+            "data.*.b64_json"
+          ],
+          "error": "error.message"
+        },
+        "catalog": {
+          "path": "/api/models/list",
+          "items": "result.items",
+          "id": "model_name",
+          "name": "display",
+          "kind": {
+            "field": "tags",
+            "map": {
+              "text2image": "image",
+              "chat": "text",
+              "embedding": "excluded"
+            }
+          }
+        }
+      }
     }
   ],
   "invalid": [
@@ -519,6 +598,59 @@
           "type": "header",
           "name": "X-Key",
           "prefix": "Key\r\n"
+        }
+      }
+    },
+    {
+      "name": "catalog-absolute-path",
+      "path": "catalog.path",
+      "patch": {
+        "catalog": {
+          "path": "https://evil.example/models"
+        }
+      }
+    },
+    {
+      "name": "catalog-placeholder",
+      "path": "catalog.path",
+      "patch": {
+        "catalog": {
+          "path": "/v1/models/${model}"
+        }
+      }
+    },
+    {
+      "name": "catalog-bad-kind",
+      "path": "catalog.kind.map.x",
+      "patch": {
+        "catalog": {
+          "path": "/v1/models",
+          "kind": {
+            "field": "type",
+            "map": {
+              "x": "music"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "catalog-bad-items-path",
+      "path": "catalog.items",
+      "patch": {
+        "catalog": {
+          "path": "/v1/models",
+          "items": "data[0]"
+        }
+      }
+    },
+    {
+      "name": "catalog-unknown-field",
+      "path": "catalog.price",
+      "patch": {
+        "catalog": {
+          "path": "/v1/models",
+          "price": "pricing"
         }
       }
     }

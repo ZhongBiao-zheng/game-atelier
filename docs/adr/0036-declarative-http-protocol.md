@@ -52,5 +52,6 @@ status: accepted
 
 ## 后续
 
-`catalog` 字段保留给「目录发现」；`POST /api/http-protocols/validate`（错误列表 + 请求预览）
-保留给「AI 帮我配置」共用。
+目录发现（2026-11-14 已实现）：模板可选 `catalog` 描述一次目录 GET（路径、列表位置、id / 名称 / 类别字段），
+经现有 `models-preview` 入口（`protocol_id`）执行，出站规则与执行器相同；发现的模型不代表可用，分类可由用户修正，
+目录里的价格不作为本机价格。`POST /api/http-protocols/validate`（错误列表 + 请求预览）保留给「AI 帮我配置」共用。

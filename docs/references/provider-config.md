@@ -12,7 +12,11 @@
 
 ### models-preview 契约（前后端唯一形状来源）
 
-请求：`{ alias?, provider?, base_url?, access_key?, include_all? }`。
+请求：`{ alias?, provider?, base_url?, access_key?, include_all?, protocol_id? }`。
+带 `protocol_id`（自定义接口目录发现，ADR-0036）时改按该模板的 `catalog` 发一次 GET：只限 custom 供应商，
+模板缺失或没写 `catalog` 返回 422；鉴权、出站检查、不跟随重定向与自定义接口执行器一致，响应 ≤2 MB、
+超时 20 秒、条目 ≤2000；分类先看 `catalog.kind.map`，未命中再走下面的分类瀑布；响应多 `discovered: true`，
+行的 `protocol` 恒为 null，绑定由前端「启用所选」时按最终分类做。目录里的价格字段不读。
 **安全边界**：传了 `alias` 而不带 `access_key` 时会取出存储的**明文密钥**，所以此时请求体里的
 `base_url` 只允许与存储值同 host（换域名要自带密钥）——否则等于让调用方指定「把密钥发到哪」。
 
@@ -382,6 +386,7 @@ TokenDance quickstart 的请求体与阿里官方**不一致**：它写 `input.i
 | 参考图 | `encode`：data_url / base64 / file（multipart）/ url（经对象存储中转成 24 小时签名直链；未配置 OSS 时保存模板即报错） |
 | 上限 | 提交响应 64 MB、轮询响应 2 MB、单图 50 MB、视频 1 GB；结果超过 8 个报错 |
 | 计价 | 一律未计价；不与内置渠道同名模型合组；经网关发布时只给成员能力快照，设了金额上限的网关密钥不可用 |
+| 目录发现 | 模板可选 `catalog`：`models-preview` 带 `protocol_id` 时按它发一次 GET 列模型；界面标「已发现不代表可用」，分类可改，分类与模板一致的行自动绑定；价格字段不读 |
 | 不支持 | 局部编辑 / 扩图（runner 明确拒绝）、签名、多步上传、回调、二进制响应、参考视频 / 音频 |
 
 ## 官方能力 vs 当前实装差距

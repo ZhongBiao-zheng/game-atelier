@@ -1234,7 +1234,7 @@ timeout_seconds`；超时默认 1800 秒，允许 1–86400 秒。inspect 不写
 | `derive` | `{名称: {from: 占位符 \| [两个占位符], map}}`；两个来源的键用 `@` 连接，须覆盖全部组合 |
 | `result` | `{urls: [路径], base64: [路径], error?}`；同步时至少一个取值路径 |
 | `poll` | `{path, method: GET\|POST, body?, task_id, status, success, failure, interval_seconds: 1–60, timeout_seconds: 30–3600, result}` |
-| `catalog` | 保留，不解析 |
+| `catalog` | 可选，目录发现：`{path, items?, id?: "id", name?, kind?: {field, map}}`；path 为静态相对路径（不能用占位符），items / id / name / kind.field 为取值路径，map 的值只能是 `image\|video\|text\|audio\|excluded`。由 `POST /api/keys/models-preview` 的 `protocol_id` 使用，只发一次 GET，价格字段不读 |
 
 占位符：整值 `"$name"` 保留类型、取不到值时删除所在键；字符串内插写 `${name}`；字面量 `$` 写 `$$`。
 内置名：`prompt model n ratio resolution images image`，视频另有 `duration durationText firstFrame lastFrame`，
@@ -1251,7 +1251,7 @@ multipart 里的数组值展开成同名重复字段。
 
 | 方法 | 路径 | 内容 |
 | --- | --- | --- |
-| GET | `/api/http-protocols` | `{protocols: [{id,name,kind,available,error,declared,used_by:[{alias,model}]}]}` |
+| GET | `/api/http-protocols` | `{protocols: [{id,name,kind,available,error,declared,catalog,used_by:[{alias,model}]}]}`；`catalog` 为模板是否写了目录 |
 | GET | `/api/http-protocols/{id}` | 同上一行的条目 + `document` |
 | POST | `/api/http-protocols` | `{document}` → 201；校验失败 422 `{message, code: "PROTOCOL_INVALID"}` |
 | PUT | `/api/http-protocols/{id}` | `{document}`；仍被绑定时改 kind 返回 409 |

@@ -145,6 +145,8 @@ export interface ModelsPreview {
   total: number;
   /** 判定为「不可生成」而未返回的条数；include_all 下恒为 0。 */
   excluded: number;
+  /** 按自定义接口的目录发现（protocol_id）：发现不代表可用。 */
+  discovered?: boolean;
 }
 
 export async function previewModels(payload: {
@@ -154,6 +156,8 @@ export async function previewModels(payload: {
   access_key?: string | null;
   /** 逃生舱：连判定为不可生成的模型也一并返回。 */
   include_all?: boolean;
+  /** 按这份自定义接口的 catalog 发现模型（ADR-0036）。 */
+  protocol_id?: string | null;
 }): Promise<ModelsPreview> {
   // 这条报错直接贴在密钥表单里给画师看，detail 已是中文（routes.py 的 502/422 分支）。
   return requestJson<ModelsPreview>('/api/keys/models-preview', '拉取模型列表', {
