@@ -35,7 +35,17 @@ API 认证失败不能掉进 SPA 返回 200，也不能跳转到调用者提交�
 `POST /api/connection/local-session` 只允许实际本机页面的精确 Origin，以及浏览器 same-origin
 Fetch Metadata；不接受无 Origin 的匿名请求，不提供 CORS。响应创建随机本地会话，
 使用 HttpOnly、SameSite=Strict、Path=/ 的 cookie；回环 HTTP 的 cookie 不假设具有公网 HTTPS 的 Secure 属性。
+cookie 名为 `atelier_local_session_<端口>`：cookie 按主机共享、不按端口隔离，名字带本实例端口，
+同机多个实例（预览、多数据目录、端口被占用自动 +1）互不覆盖；服务端只认本实例端口的那一个，其余忽略。
+带 cookie 的私有请求（含 GET、媒体与事件流）必须带 `Sec-Fetch-Site: same-origin`，否则 403 `ORIGIN_DENIED`：
+浏览器从本机页面发出的 fetch、`<img>` / `<video>`、同页点开的链接都带这个标记；地址栏直接打开私有地址
+（`none`）本来就被请求边界拒绝。Agent 的 Bearer 请求与局域网网关不走 cookie，不受此规则影响。
 状态变更继续要求正确 Origin、JSON 内容类型及会话，避免跨站表单和无读权限的 CSRF。
+
+残余风险：http 下 cookie 无法按端口限制，浏览器访问本机其它端口时会把会话值一并发过去，
+那个端口上的服务能收到它，并可在会话有效期内（最长 12 小时，或到本实例重启）伪造请求头重放。
+前提是它能连到本机回环端口；能做到这一点的本机进程本来也能伪造请求头直接建会话，彻底解决需要把建会话
+绑定到实例秘密（与桌面外壳一起另行设计）。
 
 开发环境 Vite 入口只能由显式开发启动模式登记精确 Origin，生产不得信任所有 localhost 端口。
 非浏览器维护命令不能伪造 Origin 获取管理身份，应使用用户启动本机服务时建立的专用 OS 受保护通道。

@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 from character_workflow.lib import data_root
 from character_workflow.mcp.tool_catalog import TOOL_DEFINITIONS
 from viewer_server.codex_config import codex_config_path, write_codex_entry_if_installed
-from viewer_server.connection_auth import COOKIE_NAME, ConnectionStore, iso_time
+from viewer_server.connection_auth import ConnectionStore, cookie_name, iso_time
 
 TextId = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")]
 
@@ -37,12 +37,11 @@ def connection_router(store: ConnectionStore) -> APIRouter:
 
     @router.post("/local-session")
     def local_session(payload: ControlPayload, request: Request, response: Response) -> dict:
-        session, token = store.local_session(
-            request.headers["origin"], request.cookies.get(COOKIE_NAME),
-        )
+        name = cookie_name((request.scope.get("server") or (None, None))[1])
+        session, token = store.local_session(request.headers["origin"], request.cookies.get(name))
         if token:
             response.set_cookie(
-                COOKIE_NAME, token, httponly=True, samesite="strict", path="/",
+                name, token, httponly=True, samesite="strict", path="/",
                 max_age=max(0, int(session.expires_at - time.time())),
             )
         return {"session_id": session.principal.session_id, "instance_id": store.instance_id,

@@ -11,12 +11,13 @@ from fastapi.testclient import TestClient
 from character_workflow.lib import data_root
 from character_workflow.lib.private_json import read_private_json, write_private_json
 from character_workflow.lib.canvas_projects import create_canvas_project as create_project
-from viewer_server.connection_auth import COOKIE_NAME, ConnectionError, ConnectionStore
+from viewer_server.connection_auth import ConnectionError, ConnectionStore, cookie_name
 from viewer_server.connection_capabilities import PLUGIN_ROUTE, local_capability
 from viewer_server.connection_middleware import ConnectionMiddleware
 from viewer_server.server_app import build_app
 
 ORIGIN = "http://127.0.0.1:5174"
+COOKIE_NAME = cookie_name(5174)
 LOCAL_HEADERS = {"Origin": ORIGIN, "Sec-Fetch-Site": "same-origin"}
 
 
@@ -66,6 +67,71 @@ def test_local_bootstrap_is_idempotent_and_cookie_is_private(client):
     assert "set-cookie" not in again.headers
     assert client.get("/api/canvas/projects").status_code == 200
     assert client.post("/api/canvas/projects", json={"name": "授权项目"}).status_code == 201
+
+
+def test_cookie_name_is_scoped_to_the_instance_port(client):
+    response = bootstrap(client)
+    assert response.headers["set-cookie"].startswith("atelier_local_session_5174=")
+
+
+def test_two_instances_on_one_host_keep_their_own_sessions(tmp_path):
+    first = TestClient(build_app(dist_dir=tmp_path), base_url=ORIGIN)
+    other_origin = "http://127.0.0.1:5175"
+    second = TestClient(build_app(dist_dir=tmp_path), base_url=other_origin)
+    bootstrap(first)
+    second.headers.update({"Origin": other_origin, "Sec-Fetch-Site": "same-origin"})
+    assert second.post("/api/connection/local-session", json={}).status_code == 200
+    a, b = first.cookies.get(cookie_name(5174)), second.cookies.get(cookie_name(5175))
+    assert a and b and a != b
+    # 浏览器按主机把两个 cookie 都带给两个端口：各自只认自己的，谁也不把谁踢下线。
+    both = f"{cookie_name(5175)}={b}; {cookie_name(5174)}={a}"
+    assert first.get("/api/canvas/projects", headers={"Cookie": both}).status_code == 200
+    assert second.get("/api/canvas/projects", headers={"Cookie": both}).status_code == 200
+    # 别的实例的会话值换成本实例的名字也用不了（会话只在签发它的进程里）。
+    stolen = {"Cookie": f"{cookie_name(5174)}={b}"}
+    assert first.get("/api/canvas/projects", headers=stolen).status_code == 401
+
+
+def test_unscoped_legacy_cookie_is_ignored(client):
+    bootstrap(client)
+    token = client.cookies.get(COOKIE_NAME)
+    response = client.get("/api/canvas/projects", headers={"Cookie": f"atelier_local_session={token}"})
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "CONNECTION_REQUIRED"
+
+
+@pytest.mark.parametrize("site", [None, "none", "same-site", "cross-site"])
+def test_cookie_requests_need_same_origin_fetch_metadata(client, site):
+    bootstrap(client)
+    token = client.cookies.get(COOKIE_NAME)
+    headers = {"Cookie": f"{COOKIE_NAME}={token}"}
+    if site:
+        headers["Sec-Fetch-Site"] = site
+    # 模拟浏览器之外重放会话值：不带 Origin、不带（或带错）同源标记。
+    replay = TestClient(client.app, base_url=ORIGIN)
+    for path in ("/api/keys", "/api/canvas/projects", "/events"):
+        response = replay.get(path, headers=headers)
+        assert response.status_code == 403, path
+        assert response.json()["error"]["code"] == "ORIGIN_DENIED"
+    ok = replay.get("/api/canvas/projects", headers={**headers, "Sec-Fetch-Site": "same-origin"})
+    assert ok.status_code == 200
+
+
+def test_plugin_requests_from_the_host_pass_and_from_the_sandbox_do_not(client):
+    """插件界面跑在 sandbox="allow-scripts" 的 iframe 里（opaque origin）：文件由宿主页面读取、
+    路由调用由宿主经 MessagePort 转发，都是同源请求；iframe 自己发的请求 Origin 为 null、跨站，
+    即使带上会话 cookie 也到不了路由。"""
+    bootstrap(client)
+    token = client.cookies.get(COOKIE_NAME)
+    host = client.get("/api/plugins/example/package/index.html")
+    assert host.status_code == 404 and "error" not in host.json()  # 到达路由：插件不存在
+    sandbox = TestClient(client.app, base_url=ORIGIN)
+    framed = {"Cookie": f"{COOKIE_NAME}={token}", "Origin": "null", "Sec-Fetch-Site": "cross-site"}
+    for method, path in (("GET", "/api/plugins/example/package/index.html"),
+                         ("POST", "/api/plugins/example/routes/run"), ("GET", "/api/plugins")):
+        response = sandbox.request(method, path, headers=framed, json={} if method == "POST" else None)
+        assert response.status_code == 403, path
+        assert response.json()["error"]["code"] == "ORIGIN_DENIED"
 
 
 def test_workshop_body_is_bounded_before_parsing_and_accepts_only_json(client):

@@ -20,7 +20,14 @@ AGENT_CAPABILITIES = frozenset({
     "canvas_read", "canvas_edit", "canvas_generate",
 })
 SESSION_LIMIT = 64
-COOKIE_NAME = "atelier_local_session"
+COOKIE_PREFIX = "atelier_local_session"
+
+
+def cookie_name(port: int | None) -> str:
+    """cookie 按主机共享、不按端口隔离：名字带上本实例端口，同机多个实例（预览、多数据目录、
+    端口被占用自动 +1）才不会互相覆盖、轮流把对方踢下线。会话值仍会被浏览器发给同主机的其它端口，
+    这是 http 下 cookie 的限制（残余风险见 docs/security.md）。"""
+    return f"{COOKIE_PREFIX}_{port}" if port else COOKIE_PREFIX
 PrincipalKind = Literal["local", "agent"]
 
 

@@ -8,7 +8,7 @@ from http.cookies import CookieError, SimpleCookie
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from viewer_server.connection_auth import COOKIE_NAME, ConnectionError, ConnectionStore
+from viewer_server.connection_auth import ConnectionError, ConnectionStore, cookie_name
 from viewer_server.connection_capabilities import (
     CANVAS_TOOLS, is_media_route, local_capability,
 )
@@ -29,11 +29,13 @@ def _cookie(scope: Scope) -> str | None:
     raw = _header(scope, b"cookie")
     if not raw:
         return None
-    if len(re.findall(r"(?:^|;)\s*" + COOKIE_NAME + r"\s*=", raw)) > 1:
+    # 只认本实例端口的 cookie；同主机其它实例的 cookie 也会被浏览器带来，一律忽略。
+    name = cookie_name((scope.get("server") or (None, None))[1])
+    if len(re.findall(r"(?:^|;)\s*" + re.escape(name) + r"\s*=", raw)) > 1:
         raise ConnectionError("CONNECTION_REQUIRED", "连接凭据无效", 401)
     cookies = SimpleCookie()
     cookies.load(raw)
-    return cookies[COOKIE_NAME].value if COOKIE_NAME in cookies else None
+    return cookies[name].value if name in cookies else None
 
 
 def _private_path(path: str) -> bool:
@@ -89,6 +91,10 @@ class ConnectionMiddleware:
                         raise ConnectionError("CAPABILITY_DENIED", "Agent 连接凭据无效")
                     session = self.store.authenticate(authorization[7:], kind="agent", origin=None)
                 elif cookie:
+                    # 浏览器发往本机私有入口的请求（fetch / EventSource / <img> / <video> / 同页点开的链接）
+                    # 都带 same-origin；拿着 cookie 却没有这个标记的，是浏览器之外的客户端在重放会话值。
+                    if site != "same-origin":
+                        raise ConnectionError("ORIGIN_DENIED", "请从本机页面访问")
                     session = self.store.authenticate(cookie, kind="local", origin=origin)
                 else:
                     raise ConnectionError("CONNECTION_REQUIRED", "请先连接本机画布", 401)
