@@ -70,12 +70,14 @@ class ModelSpec(BaseModel):
     workflow_inputs: list[WorkflowInput] | None = None
     # 自定义接口模板 id（protocol == "declarative" 时有效，ADR-0036）。只在 API 写入边界校验。
     declarative_id: str | None = None
+    # 局域网网关上自定义接口模型的能力快照（只含能力，不含模板与密钥），由同步网关写入。
+    declared_snapshot: dict | None = None
 
     @model_serializer(mode="wrap")
     def _omit_empty_via(self, handler):
         # 普通 KEY 没有 via：不写进 keys.json / API，旧数据与旧断言保持原样。
         data = handler(self)
-        for field in ("via", "workflow_inputs", "declarative_id"):
+        for field in ("via", "workflow_inputs", "declarative_id", "declared_snapshot"):
             if data.get(field) is None:
                 data.pop(field, None)
         return data
@@ -290,7 +292,8 @@ def size_channel(key: KeySpec, model: ModelSpec) -> tuple[KeySpec, ModelSpec]:
     if via is None:
         return key, model
     channel_model = ModelSpec(id=via.model_id, name=via.name, modality=model.modality,
-                              protocol=via.protocol, workflow_inputs=model.workflow_inputs)
+                              protocol=via.protocol, workflow_inputs=model.workflow_inputs,
+                              declared_snapshot=model.declared_snapshot)
     channel_key = key.model_copy(update={
         "provider": via.provider, "base_url": via.base_url, "billing_group": via.billing_group,
         "models": [channel_model],

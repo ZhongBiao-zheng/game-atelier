@@ -13,6 +13,7 @@ import { Hint } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { PERIODS } from './shared';
 
+const UNPRICED_BLOCKED = '未计价，该密钥不可用';
 const reveal = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100';
 export function KeyRowActions({ record, options, busy, onSave, onRename, onReset, onRevoke }: {
   record: GatewayKey; options: GatewayOptions; busy: boolean;
@@ -25,6 +26,8 @@ export function KeyRowActions({ record, options, busy, onSave, onRename, onReset
   const [limitError, setLimitError] = useState('');
   const [limitsOpen, setLimitsOpen] = useState(false);
   const toggle = (values: string[], value: string) => values.includes(value) ? values.filter(v => v !== value) : [...values, value];
+  // 设了金额上限的密钥用不了未计价的模型（费用无法计入上限），服务端同样会拒绝。
+  const capped = record.limits.length > 0;
   return <div className="flex items-center justify-end gap-1 whitespace-nowrap">
     <Popover onOpenChange={open => {
       if (open) { setModels(record.allowed_models); setAliases(record.allowed_aliases); }
@@ -38,7 +41,13 @@ export function KeyRowActions({ record, options, busy, onSave, onRename, onReset
       </PopoverTrigger></Hint>
       <PopoverContent align="end" className="max-h-96 space-y-3 overflow-y-auto" aria-label="模型与供应商">
         <Label className="flex items-center justify-between">全部模型<Switch aria-label="全部模型" checked={models === null} onCheckedChange={all => setModels(all ? null : [])} /></Label>
-        {models !== null && [...new Set([...options.models.map(m => m.id), ...models])].map(id => <Label key={id} className="flex items-center gap-2"><Checkbox checked={models.includes(id)} onCheckedChange={() => setModels(toggle(models, id))} />{options.models.find(m => m.id === id)?.name ?? id}</Label>)}
+        {models === null && capped && options.models.some(m => m.unpriced) && <p className="text-xs text-muted-foreground">未计价的模型该密钥不可用</p>}
+        {models !== null && [...new Set([...options.models.map(m => m.id), ...models])].map(id => {
+          const option = options.models.find(m => m.id === id);
+          const blocked = capped && Boolean(option?.unpriced);
+          return <Label key={id} className="flex items-center gap-2"><Checkbox checked={models.includes(id)} disabled={blocked} onCheckedChange={() => setModels(toggle(models, id))} />{option?.name ?? id}
+            {blocked && <span className="text-xs text-muted-foreground">{UNPRICED_BLOCKED}</span>}</Label>;
+        })}
         <Label className="flex items-center justify-between border-t border-border pt-3">全部供应商<Switch aria-label="全部供应商" checked={aliases === null} onCheckedChange={all => setAliases(all ? null : [])} /></Label>
         {aliases !== null && [...new Set([...options.aliases.map(a => a.alias), ...aliases])].map(alias => <Label key={alias} className="flex items-center gap-2"><Checkbox checked={aliases.includes(alias)} onCheckedChange={() => setAliases(toggle(aliases, alias))} />{alias}</Label>)}
       </PopoverContent>

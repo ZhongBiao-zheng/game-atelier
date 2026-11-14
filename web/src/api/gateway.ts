@@ -40,7 +40,8 @@ export interface GatewayMe {
   month_calls: number;
 }
 export interface GatewayOptions {
-  models: { id: string; name: string; modality: 'image' | 'video' | 'audio' | 'text' }[];
+  /** unpriced：未计价的路由（自定义接口）；设了金额上限的密钥不能用（ADR-0036）。 */
+  models: { id: string; name: string; modality: 'image' | 'video' | 'audio' | 'text'; unpriced?: boolean }[];
   aliases: { alias: string; provider: string; name: string }[];
 }
 

@@ -61,11 +61,15 @@ def _route_view(route: model_routes.ModelRoute, key: GatewayKeyRecord) -> dict[s
     view = {
         "id": route.id, "name": members[0].name, "modality": route.modality,
         "members": [{
-            "alias": m.alias, "provider": m.provider, "base_url": m.base_url,
+            # 自定义接口成员不外泄主机侧服务地址（ADR-0036）。
+            "alias": m.alias, "provider": m.provider,
+            "base_url": None if m.protocol == "declarative" else m.base_url,
             "billing_group": m.billing_group,
             "model_id": m.model_id, "name": m.name, "protocol": m.protocol,
         } for m in members],
     }
+    if (declared := gateway_access.declared_view(route)) is not None:
+        view["declared"] = declared
     if members[0].provider == "comfyui":
         from character_workflow.lib.keys import find_by_alias
 

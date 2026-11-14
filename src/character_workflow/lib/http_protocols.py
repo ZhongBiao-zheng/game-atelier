@@ -144,7 +144,13 @@ def is_declarative(model: Any) -> bool:
 
 
 def declared_for(model: Any) -> dict[str, Any] | None:
-    """随模型返回给前端的只读能力声明；模板不可用时带 error，模型不可选。"""
+    """随模型返回给前端的只读能力声明；模板不可用时带 error，模型不可选。
+
+    局域网网关的模型没有模板，只有主机发来的能力快照（批次 4）：直接用快照。
+    """
+    snapshot = getattr(model, "declared_snapshot", None)
+    if snapshot:
+        return {"available": True, "error": None, "name": getattr(model, "name", None), **snapshot}
     if not is_declarative(model):
         return None
     stored = read_stored(model.declarative_id or "")

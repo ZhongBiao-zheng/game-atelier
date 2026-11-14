@@ -16,10 +16,14 @@ class RestoreBody(BaseModel):
 
 
 def route_options() -> dict:
+    from character_workflow.lib import gateway_access
+
     return {"models": [{"id": route.id, "name": route.name, "modality": route.modality,
-                        "aliases": [m.alias for m in route.members if m.provider != "atelier"]}
+                        "aliases": [m.alias for m in route.members if m.provider != "atelier"],
+                        "unpriced": gateway_access.is_unpriced_route(route)}
                        for route in model_routes.list_routes()
-                       if any(m.provider != "atelier" for m in route.members)]}
+                       if any(m.provider != "atelier" for m in route.members)
+                       and gateway_access.publishable(route)]}
 
 
 def create_router(require_key):
