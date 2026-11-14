@@ -14,8 +14,13 @@ def model_allowed(key: GatewayKeyRecord, route_id: str) -> bool:
     )
 
 
+def _publishable(route: model_routes.ModelRoute) -> bool:
+    # 自定义接口不经网关发布：接入端没有模板，判断不了能力（ADR-0036）。
+    return not any(m.protocol == "declarative" for m in route.members)
+
+
 def route_visible(key: GatewayKeyRecord, route: model_routes.ModelRoute) -> bool:
-    return model_allowed(key, route.id) and any(
+    return _publishable(route) and model_allowed(key, route.id) and any(
         m.provider != "atelier" and member_allowed(key, m.alias) for m in route.members
     )
 
@@ -27,7 +32,7 @@ def check_route(key: GatewayKeyRecord, modality, route_id: str) -> model_routes.
         route = model_routes.find_route(modality, route_id)
     except model_routes.NoSuchRouteError as error:
         raise GatewayRequestError(404, f"网关没有模型 {route_id}") from error
-    if not any(m.provider != "atelier" for m in route.members):
+    if not _publishable(route) or not any(m.provider != "atelier" for m in route.members):
         raise GatewayRequestError(404, f"网关没有模型 {route_id}")
     if not model_allowed(key, route_id):
         raise GatewayRequestError(403, f"这把密钥不能用模型 {route_id}")

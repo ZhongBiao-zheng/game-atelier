@@ -3027,5 +3027,27 @@
       "size": "2048x2048"
     },
     "expected": 0.12
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "provider": "custom",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "model_id": "doubao-seedream-5-0-260128",
+      "protocol": "ark"
+    },
+    "expected": 0.44
+  },
+  {
+    "request": {
+      "kind": "image",
+      "n": 2,
+      "provider": "custom",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "model_id": "doubao-seedream-5-0-260128",
+      "protocol": "declarative"
+    },
+    "expected": null
   }
 ]

@@ -22,11 +22,21 @@ class WrongProviderError(Exception):
     """Raised when a caller is invoked with an alias of the wrong provider."""
 
 
+def _is_declarative(key: _keys.KeySpec, model: str) -> bool:
+    """模型绑定了自定义接口（ADR-0036）：只认自定义供应商，判据挂模型不挂 provider。"""
+    from character_workflow.lib.http_protocols import is_declarative
+    spec = next((m for m in key.models if m.id == model), None)
+    return spec is not None and is_declarative(spec)
+
+
 def _provider_render(key: _keys.KeySpec, model: str = ""):
     """Resolve provider name → render function, fresh each call.
 
     Re-read via attribute so monkeypatch on provider `render` takes effect.
     """
+    if key.provider == "custom" and _is_declarative(key, model):
+        from .declarative import render_image
+        return render_image
     if key.provider == "comfyui":
         from .comfyui import render
         return render
@@ -88,7 +98,9 @@ def dispatch(
     if fn is None:
         raise WrongProviderError(f"unknown provider {key.provider!r}")
     params = kwargs.get("params")
-    if isinstance(params, dict) and params.get("size_mode") is not None:
+    # 自定义接口按模板声明的选项取值，不套内置模型的尺寸规则。
+    if (isinstance(params, dict) and params.get("size_mode") is not None
+            and not _is_declarative(key, model)):
         from character_workflow.lib.image_size import normalize_image_size_params
 
         normalized = normalize_image_size_params(key, model, params)
@@ -137,6 +149,8 @@ def dispatch_video(
         return render_video(prompt=prompt, model=model, alias=alias,
                             output_dir=output_dir, params=params, **kwargs)
     protocol = _effective_protocol(key, model)
+    if protocol == "declarative" and key.provider != "custom":
+        raise WrongProviderError("只有自定义供应商可以使用自定义接口")
     if not protocol:
         raise WrongProviderError(
             f"无法识别视频模型 {model!r} 的接口协议（支持 seedance / kling / klingai / dashscope 系），"

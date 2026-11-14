@@ -53,7 +53,13 @@ def _openrouter_render(**kw: Any) -> list[str]:
     return openrouter_video.render_video(**kw)
 
 
+def _declarative_render(**kw: Any) -> list[str]:
+    from . import declarative
+    return declarative.render_video(**kw)
+
+
 VIDEO_ADAPTERS: dict[str, VideoAdapter] = {
+    "declarative": VideoAdapter("declarative", "自定义接口", _declarative_render),
     "seedance": VideoAdapter("seedance", "Seedance(火山 / Ark)", _seedance_render),
     "kling": VideoAdapter("kling", "可灵 Kling（OpenAI-HK 旧版接口）", _kling_render),
     "klingai": VideoAdapter("klingai", "可灵 Kling 3.0 / 4.0（新版接口）", _klingai_render),

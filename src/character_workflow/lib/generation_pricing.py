@@ -189,7 +189,8 @@ def estimate_cost_cny(
     reference_image_count: int = 0, layer_decomposition: bool = False,
 ) -> float | None:
     """Estimate one generation request; None means no verified price."""
-    if not model_id:
+    # 自定义接口一律未计价：模型 id 与地址可能恰好撞上内置渠道，不能套用内置价格（ADR-0036）。
+    if not model_id or _normalize(protocol) == "declarative":
         return None
     if provider == "comfyui":
         return 0.0 if kind == "image" else None

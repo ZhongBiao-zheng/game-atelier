@@ -79,6 +79,9 @@ class ModelRoute:
 
 def route_id(model: ModelSpec, key: KeySpec) -> str:
     base = model.id.rsplit("/", 1)[-1].lower()
+    # 自定义接口只与绑定同一模板的同名模型成组，不混进内置渠道的「自动」组（ADR-0036）。
+    if model.protocol == "declarative":
+        return f"declarative:{model.declarative_id}:{base}"
     if model_modality(model, key) == "video" and model.protocol:
         if key.provider == "atelier":
             return base

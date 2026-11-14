@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
+from character_workflow.lib.callers.declarative import DeclarativePendingError
 from character_workflow.lib.callers.tuzi_async import TuziAsyncPendingError
 from character_workflow.lib.canvas_projects import (
     canvas_node_has_pending_run,
@@ -85,6 +86,8 @@ from character_workflow.lib.schemas import (
 )
 
 
+# 厂商任务已提交、本地停止等待：画布没有续查等待者，统一落 FAILED 并提示核对订单。
+_PROVIDER_TASK_PENDING = (TuziAsyncPendingError, DeclarativePendingError)
 _MENTION = re.compile(r"@\[node:([^\]]+)\]")
 _OUTPUT_MIME = {
     ".png": "image/png",
@@ -3101,7 +3104,7 @@ def _run_canvas_candidates_incrementally(job: Job) -> Job:
             # Another process owns this exact paid attempt. Leave the shared Job untouched;
             # the lock owner will commit the candidate when it finishes.
             return read_job(job.job_id)
-        except TuziAsyncPendingError:
+        except _PROVIDER_TASK_PENDING:
             raise
         except Exception:
             attempt = read_job(job.job_id)
@@ -3585,7 +3588,7 @@ def run_canvas_job(job_id: str) -> Job:
     except JobExecutionBusy:
         # A duplicate scheduler must never mark the lock owner's in-flight Job as failed.
         return read_job(job_id)
-    except TuziAsyncPendingError as error:
+    except _PROVIDER_TASK_PENDING as error:
         _fail_pending_canvas_candidates(
             job.canvas_project_id, job_id,
             f"已停止本地等待：{error}。请核对厂商订单，重新生成可能重复计费。",

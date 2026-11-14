@@ -203,7 +203,7 @@ class JobParams(BaseModel):
     # 局域网 Atelier：网关那边实际出图的成员别名（ADR-0025）。
     gateway_member: str | None = Field(default=None, max_length=120)
     provider_task_protocol: Literal[
-        "tuzi_async", "tuzi_images", "seedance", "evolink", "atelier_gateway",
+        "tuzi_async", "tuzi_images", "seedance", "evolink", "atelier_gateway", "declarative",
     ] | None = None
     provider_task_ids: list[ProviderTaskId] | None = Field(default=None, max_length=4)
     video_submission_attempts: list[VideoSubmissionAttempt] | None = Field(default=None, max_length=4)

@@ -52,7 +52,7 @@ export interface JobParams {
   /** 局域网 Atelier：网关那边实际出图的成员别名。 */
   gateway_member?: string | null;
   /** 厂商订单；Web 只读。Tuzi 支持续查，Seedance 留供核对，不自动重提。 */
-  provider_task_protocol?: 'tuzi_async' | 'tuzi_images' | 'seedance' | 'evolink' | 'atelier_gateway';
+  provider_task_protocol?: 'tuzi_async' | 'tuzi_images' | 'seedance' | 'evolink' | 'atelier_gateway' | 'declarative';
   provider_task_ids?: string[];
   video_submission_attempts?: Array<{
     attempt: number;

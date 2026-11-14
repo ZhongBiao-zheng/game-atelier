@@ -276,6 +276,8 @@ function estimateDashScopeVideo(request: GenerationCostRequest): number | null {
  */
 export function estimateGenerationCost(request: GenerationCostRequest): number | null {
   if (!request.model?.id || !request.provider) return null;
+  // 自定义接口一律未计价：id 与地址可能撞上内置渠道，不能套用内置价格（ADR-0036）。
+  if (normalize(request.model.protocol) === 'declarative') return null;
 
   if (request.kind === 'image' && request.provider.provider === 'comfyui') return 0;
   if (request.kind === 'image' && request.provider.provider === 'chatgpt' && request.model.id === 'gpt-image-2') return 0;

@@ -37,6 +37,10 @@ def model_rows(kind: str) -> list[dict]:
                 _, configured = model_configuration(key.alias, model.id, kind)
             except CanvasToolError:
                 continue
+            if configured.protocol == "declarative":
+                if (row := _declarative_row(key, model, kind)) is not None:
+                    rows.append(row)
+                continue
             from character_workflow.lib.callers.openai_image import (
                 fixed_nano_resolution_quality, image_family, max_reference_images,
                 supports_gif_output, supports_image_complexity, supports_image_quality,
@@ -93,6 +97,32 @@ def model_rows(kind: str) -> list[dict]:
                          "capability_basis": "当前本地适配器约束；null 表示未确认，prepare 会校验已知限制",
                          "price_basis": "费用待确认；以供应商实际账单为准"})
     return _auto_rows(kind, rows) + rows
+
+
+def _declarative_row(key, model, kind: str) -> dict | None:
+    """自定义接口：能力完全取自模板声明，不按模型 id 推断（ADR-0036）。"""
+    from character_workflow.lib.http_protocols import declared_for
+
+    declared = declared_for(model)
+    if not declared or not declared["available"] or declared["kind"] != kind:
+        return None
+    images = (declared["reference_images"] if kind == "image"
+              else max(declared["reference_images"], declared["frames"]))
+    durations = declared["durations"]
+    return {"alias": key.alias, "provider": key.provider, "model": model.id,
+            "name": model.name, "kind": kind, "protocol": "declarative",
+            "reference_limits": {"image": images, "video": 0, "audio": 0},
+            "estimated_cost_cny": None,
+            "capabilities": {"count": {"min": 1, "max": declared["max_count"]},
+                             "quality": None, "complexity": None, "gif": False,
+                             "transparent_background": False, "fixed_quality": None,
+                             "size": None, "ratio": declared["ratios"],
+                             "duration": ({"min": min(durations), "max": max(durations)}
+                                          if durations else None),
+                             "resolution": declared["resolutions"]},
+            "request_limits": {"max_references": images},
+            "capability_basis": "自定义接口模板声明",
+            "price_basis": "未计价"}
 
 
 def _auto_rows(kind: str, rows: list[dict]) -> list[dict]:

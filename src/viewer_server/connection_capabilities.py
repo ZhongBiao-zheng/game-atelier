@@ -32,6 +32,12 @@ GET /api/comfyui/{alias}/workflows
 POST /api/comfyui/{alias}/inspect
 POST /api/comfyui/{alias}/workflows
 DELETE /api/comfyui/{alias}/workflows/{identifier}
+GET /api/http-protocols
+POST /api/http-protocols
+POST /api/http-protocols/validate
+GET /api/http-protocols/{identifier}
+PUT /api/http-protocols/{identifier}
+DELETE /api/http-protocols/{identifier}
 POST /api/keys
 PATCH /api/keys/{alias}
 DELETE /api/keys/{alias}
@@ -232,6 +238,8 @@ LOCAL_MANAGEMENT = frozenset({
     "/api/subscriptions/chatgpt",
     "/api/comfyui/connection", "/api/comfyui/{alias}/workflows",
     "/api/comfyui/{alias}/inspect", "/api/comfyui/{alias}/workflows/{identifier}",
+    # 自定义接口模板决定密钥发往哪个路径、怎么发（ADR-0036），只给本机页面。
+    "/api/http-protocols", "/api/http-protocols/validate", "/api/http-protocols/{identifier}",
     "/api/keys/models-preview", "/api/models/order", "/api/models/mode", "/api/folder-picker", "/api/onboarding/status",
     "/api/onboarding/data-root",
     # 局域网共享：开关会让本机对局域网开端口，密钥与用量也只给本机页面（ADR-0025）。

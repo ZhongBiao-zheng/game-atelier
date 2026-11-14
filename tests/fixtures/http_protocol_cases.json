@@ -1,0 +1,76 @@
+{
+  "base": {
+    "version": 1, "name": "最小模板", "kind": "image", "auth": {"type": "bearer"},
+    "submit": {"path": "/v1/x", "body": {"prompt": "$prompt"}},
+    "result": {"urls": ["data.*.url"]}
+  },
+  "valid": [
+    {
+      "name": "sync-image-url-and-base64",
+      "declared": {"kind": "image", "ratios": ["1:1", "16:9"], "resolutions": null, "durations": null, "max_count": 4, "reference_images": 4, "frames": 0},
+      "document": {
+        "version": 1, "name": "同步出图", "kind": "image",
+        "auth": {"type": "bearer"},
+        "submit": {"path": "/v1/images/generations", "format": "json",
+                   "body": {"model": "$model", "prompt": "$prompt", "size": "$size", "n": "$n", "image": "$images"}},
+        "inputs": {"images": {"max": 4, "encode": "data_url"}},
+        "options": {"ratio": ["1:1", "16:9"], "count": 4},
+        "derive": {"size": {"from": "ratio", "map": {"1:1": "1024x1024", "16:9": "1536x1024"}}},
+        "result": {"urls": ["data.*.url"], "base64": ["data.*.b64_json"], "error": "error.message"}
+      }
+    },
+    {
+      "name": "async-video-first-last",
+      "declared": {"kind": "video", "ratios": ["16:9", "9:16"], "resolutions": ["720p", "1080p"], "durations": [5, 10], "max_count": 1, "reference_images": 0, "frames": 2},
+      "document": {
+        "version": 1, "name": "视频任务", "kind": "video",
+        "auth": {"type": "header", "name": "X-API-Key"},
+        "submit": {"path": "/v1/videos", "body": {"model": "$model", "prompt": "$prompt",
+                   "first_frame": "$firstFrame", "last_frame": "$lastFrame",
+                   "aspect_ratio": "$ratio", "resolution": "$resolution", "duration": "$duration"}},
+        "inputs": {"images": {"max": 2, "encode": "data_url"}},
+        "options": {"ratio": ["16:9", "9:16"], "resolution": ["720p", "1080p"], "duration": [5, 10]},
+        "result": {"error": "error.message"},
+        "poll": {"path": "/v1/videos/${taskId}", "task_id": "id", "status": "status",
+                 "success": ["completed"], "failure": ["failed"], "interval_seconds": 5,
+                 "result": {"urls": ["video_url"]}}
+      }
+    },
+    {
+      "name": "multipart-file-query-auth-two-key-derive",
+      "declared": {"kind": "image", "ratios": ["1:1"], "resolutions": ["1K", "2K"], "durations": null, "max_count": 1, "reference_images": 1, "frames": 0},
+      "document": {
+        "version": 1, "name": "表单图生图", "kind": "image",
+        "auth": {"type": "query", "name": "key"},
+        "submit": {"path": "/edit/${model}", "format": "multipart",
+                   "body": {"prompt": "$prompt", "image": "$image", "size": "$size", "price": "$$5"}},
+        "inputs": {"images": {"max": 3, "encode": "file"}},
+        "options": {"ratio": ["1:1"], "resolution": ["1K", "2K"]},
+        "derive": {"size": {"from": ["ratio", "resolution"], "map": {"1:1@1K": "1024x1024", "1:1@2K": "2048x2048"}}},
+        "result": {"base64": ["images.0"]}
+      }
+    }
+  ],
+  "invalid": [
+    {"name": "absolute-path", "path": "submit.path", "patch": {"submit": {"path": "https://evil.example/steal", "body": {"prompt": "$prompt"}}}},
+    {"name": "protocol-relative", "path": "submit.path", "patch": {"submit": {"path": "//evil.example/x", "body": {"prompt": "$prompt"}}}},
+    {"name": "dot-dot", "path": "submit.path", "patch": {"submit": {"path": "/v1/../admin", "body": {"prompt": "$prompt"}}}},
+    {"name": "unknown-placeholder", "path": "submit.body.prompt", "patch": {"submit": {"path": "/v1/x", "body": {"prompt": "$promt"}}}},
+    {"name": "bare-interpolation", "path": "submit.body.prompt", "patch": {"submit": {"path": "/v1/x", "body": {"prompt": "画 $prompt"}}}},
+    {"name": "authorization-header", "path": "submit.headers.Authorization", "patch": {"submit": {"path": "/v1/x", "headers": {"Authorization": "Bearer x"}, "body": {"prompt": "$prompt"}}}},
+    {"name": "header-placeholder", "path": "submit.headers.X-Prompt", "patch": {"submit": {"path": "/v1/x", "headers": {"X-Prompt": "$prompt"}, "body": {"prompt": "$prompt"}}}},
+    {"name": "version-2", "path": "version", "patch": {"version": 2}},
+    {"name": "count-without-n", "path": "options.count", "patch": {"options": {"count": 2}}},
+    {"name": "ratio-without-options", "path": "options.ratio", "patch": {"submit": {"path": "/v1/x", "body": {"prompt": "$prompt", "ratio": "$ratio"}}}},
+    {"name": "images-without-inputs", "path": "inputs.images", "patch": {"submit": {"path": "/v1/x", "body": {"prompt": "$prompt", "image": "$images"}}}},
+    {"name": "file-in-json", "path": "inputs.images.encode", "patch": {"submit": {"path": "/v1/x", "body": {"prompt": "$prompt", "image": "$images"}}, "inputs": {"images": {"max": 1, "encode": "file"}}}},
+    {"name": "duration-in-image", "path": "submit.body.duration", "patch": {"submit": {"path": "/v1/x", "body": {"prompt": "$prompt", "duration": "$duration"}}, "options": {"duration": [5]}}},
+    {"name": "task-id-in-submit", "path": "submit.body.id", "patch": {"submit": {"path": "/v1/x", "body": {"id": "$taskId"}}}},
+    {"name": "no-result-path", "path": "result", "patch": {"result": {}}},
+    {"name": "derive-missing-key", "path": "derive.size.map", "patch": {"submit": {"path": "/v1/x", "body": {"size": "$size"}}, "options": {"ratio": ["1:1", "16:9"]}, "derive": {"size": {"from": "ratio", "map": {"1:1": "1024x1024"}}}}},
+    {"name": "unknown-field", "path": "endpoint", "patch": {"endpoint": "/v1/x"}},
+    {"name": "poll-without-task-id", "path": "poll.path", "patch": {"poll": {"path": "/v1/tasks", "task_id": "id", "status": "status", "success": ["ok"], "result": {"urls": ["url"]}}}},
+    {"name": "query-auth-without-name", "path": "auth.name", "patch": {"auth": {"type": "query"}}},
+    {"name": "bad-result-path", "path": "result.urls.0", "patch": {"result": {"urls": ["data[0].url"]}}}
+  ]
+}

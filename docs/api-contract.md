@@ -1199,6 +1199,57 @@ Workflow 包含 `id, alias, name, source_filename, imported_at, api_workflow, in
 timeout_seconds`；超时默认 1800 秒，允许 1–86400 秒。inspect 不写盘；无 in: 标题时
 只给候选建议，由管理员选择后保存。重新导入按显示名、节点类型、字段匹配，未匹配项显式确认。
 
+## 自定义接口（ADR-0036）
+
+自定义供应商（`provider=custom`）下的模型可绑定一份接口模板，由通用执行器发请求；已登记模型不变。
+
+- ModelSpec / KeyModel 新增可选 `declarative_id: string | null`（null 不序列化），配合
+  `protocol = "declarative"`。只在 `POST/PATCH /api/keys` 校验：供应商必须是 custom、模板存在、
+  模型 modality 与模板 kind 一致（未标注时按 kind 补齐）。
+- `GET /api/keys` 对绑定模型额外返回只读 `declared`：
+  `{available, error, name, kind, ratios, resolutions, durations, max_count, reference_images, frames}`。
+  模板缺失或损坏时只有 `{available: false, error, name: null}`，模型不可选。控件只显示非 null 的项。
+- `JobParams.provider_task_protocol` 新增 `declarative`：异步模板的任务号先落盘再轮询，
+  创作台图片任务可续查；画布与 Tuzi 异步一致，停止等待后落 FAILED。
+- 估价恒为 null（未计价），两端估价器在 `protocol == "declarative"` 时直接返回。
+- 路由 id 为 `declarative:<模板 id>:<模型 id>`，不与内置渠道合组；网关不发布、不接受这些路由。
+
+模板（版本 1，Pydantic `http_protocol_schema.HttpProtocol` ↔ TS `web/src/schema/httpProtocols.ts`，
+共用夹具 `tests/fixtures/http_protocol_cases.json`）：
+
+| 字段 | 说明 |
+| --- | --- |
+| `version` | 只接受 `1` |
+| `name` / `kind` | 显示名（≤60）/ `image` \| `video` |
+| `auth` | `{type: bearer\|header\|query\|none, name?, prefix?}`；header / query 需要 name |
+| `submit` | `{path, format: json\|multipart, headers?, body}`；path 为以 `/` 开头的相对路径，只能内插 `${model}` |
+| `inputs.images` | `{max: 1–16, encode: data_url\|base64\|file}`；file 只用于 multipart 顶层字段 |
+| `options` | `{ratio?, resolution?, duration?, count: 1–4}`；用到对应占位符必须列出可选值 |
+| `derive` | `{名称: {from: 占位符 \| [两个占位符], map}}`；两个来源的键用 `@` 连接，须覆盖全部组合 |
+| `result` | `{urls: [路径], base64: [路径], error?}`；同步时至少一个取值路径 |
+| `poll` | `{path, method: GET\|POST, body?, task_id, status, success, failure, interval_seconds: 1–60, timeout_seconds: 30–3600, result}` |
+| `catalog` | 保留，不解析 |
+
+占位符：整值 `"$name"` 保留类型、取不到值时删除所在键；字符串内插写 `${name}`；字面量 `$` 写 `$$`。
+内置名：`prompt model n ratio resolution images image`，视频另有 `duration durationText firstFrame lastFrame`，
+轮询另有 `taskId`。取值路径为点分，`*` 遍历数组，数字为下标。单份 ≤64 KB、嵌套 ≤12 层、数组 ≤64 项。
+multipart 里的数组值展开成同名重复字段。
+
+执行：同步用 (30s, 300s) 超时，只对未送达与 502/503/504 重试；报错为 `custom api <状态码>: <厂商文字>`。
+不跟随重定向。结果下载只允许公网地址或与 base_url 同源；提交响应 ≤64 MB、轮询响应 ≤2 MB、
+单张图片 ≤50 MB、视频 ≤1 GB、结果最多 8 个。不支持的情况见 ADR-0036。
+
+本机管理接口（本机会话 + 管理权限，未挂载到网关）：
+
+| 方法 | 路径 | 内容 |
+| --- | --- | --- |
+| GET | `/api/http-protocols` | `{protocols: [{id,name,kind,available,error,declared,used_by:[{alias,model}]}]}` |
+| GET | `/api/http-protocols/{id}` | 同上一行的条目 + `document` |
+| POST | `/api/http-protocols` | `{document}` → 201；校验失败 422 `{message, code: "PROTOCOL_INVALID"}` |
+| PUT | `/api/http-protocols/{id}` | `{document}`；仍被绑定时改 kind 返回 409 |
+| DELETE | `/api/http-protocols/{id}` | 204；仍被绑定返回 409 |
+| POST | `/api/http-protocols/validate` | `{document, base_url?, model?}` → `{valid, issues:[{path,message}], declared, preview}`；不写盘、不发请求，预览里密钥为 `***` |
+
 ## 网关共享库（ADR-0034）
 
 本机管理：`GET /api/team-library-gateway-share` 返回 `shared_library_ids` 与 `gateway_enabled`；

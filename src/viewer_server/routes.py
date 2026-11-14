@@ -885,6 +885,16 @@ def set_model_route_mode(payload: _ModelModePayload) -> dict:
         raise HTTPException(404, str(error)) from None
 
 
+def _checked_bindings(provider: str, models: list[keys.ModelSpec]) -> list[keys.ModelSpec]:
+    """自定义接口绑定只在这个写入边界校验（ADR-0036）；读盘不校验，旧数据不会被拖垮。"""
+    from character_workflow.lib.http_protocols import normalize_bindings
+
+    try:
+        return normalize_bindings(provider, models)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+
+
 @router.post("/keys", status_code=201)
 def create_key(payload: _KeyCreatePayload) -> dict:
     from datetime import datetime, timezone
@@ -892,6 +902,7 @@ def create_key(payload: _KeyCreatePayload) -> dict:
         raise HTTPException(422, "供应商密钥不能为空")
     if payload.provider == "comfyui" and payload.models:
         raise HTTPException(422, "请通过工作流导入添加 ComfyUI 模型")
+    payload.models = _checked_bindings(payload.provider, payload.models)
     try:
         spec = keys.KeySpec(
             alias=payload.alias, provider=payload.provider, enabled=payload.enabled,
@@ -928,6 +939,9 @@ def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
     stored = keys.find_by_alias(alias)
     if stored and stored.provider == "comfyui" and "models" in patch_data:
         raise HTTPException(422, "请通过工作流编辑修改 ComfyUI 模型")
+    if stored and payload.models is not None:
+        patch_data["models"] = [model.model_dump() for model in
+                                _checked_bindings(stored.provider, payload.models)]
     # billing_group 留空表示明确关闭聚合商计价；不能像密钥字段一样把显式 null 当作“未传”。
     if "billing_group" in payload.model_fields_set:
         patch_data["billing_group"] = payload.billing_group

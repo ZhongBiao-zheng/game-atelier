@@ -708,7 +708,9 @@ def _run_once(
             update_job_status(job.job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
             raise JobCanceled("已按请求停止") from e
         # Canvas settles to FAILED + explicit "continue query"; Studio owns a polling worker.
-        provider_task_pending = (isinstance(e, TuziAsyncPendingError)
+        from character_workflow.lib.callers.declarative import DeclarativePendingError
+
+        provider_task_pending = (isinstance(e, (TuziAsyncPendingError, DeclarativePendingError))
                                  or (isinstance(e, EvoLinkPendingError)
                                      and job.namespace != "canvas"))
         if not provider_task_pending and _switch_route(job.job_id, e):
@@ -868,7 +870,8 @@ def _run_video_job(job: Job) -> Job:
         if task_id not in ids:
             ids.append(task_id)
         params["provider_task_ids"] = ids
-        if params.get("provider_task_protocol") != "atelier_gateway":
+        # 网关与自定义接口自己写协议标记（后者支持凭任务号续查）；其余视频 caller 记作 seedance。
+        if params.get("provider_task_protocol") not in ("atelier_gateway", "declarative"):
             params["provider_task_protocol"] = "seedance"
         update_job_params(job.job_id, params)
 

@@ -68,15 +68,16 @@ class ModelSpec(BaseModel):
     # 只有局域网 Atelier 供应商有：网关那边的成员快照，能力取交集、估价取第一个（ADR-0025）。
     via: list[ViaMember] | None = None
     workflow_inputs: list[WorkflowInput] | None = None
+    # 自定义接口模板 id（protocol == "declarative" 时有效，ADR-0036）。只在 API 写入边界校验。
+    declarative_id: str | None = None
 
     @model_serializer(mode="wrap")
     def _omit_empty_via(self, handler):
         # 普通 KEY 没有 via：不写进 keys.json / API，旧数据与旧断言保持原样。
         data = handler(self)
-        if data.get("via") is None:
-            data.pop("via", None)
-        if data.get("workflow_inputs") is None:
-            data.pop("workflow_inputs", None)
+        for field in ("via", "workflow_inputs", "declarative_id"):
+            if data.get(field) is None:
+                data.pop(field, None)
         return data
 
 
@@ -377,10 +378,15 @@ def preferred_alias_for_kind(kind: Kind) -> str | None:
 
 
 def keys_for_api() -> list[dict]:
+    from character_workflow.lib.http_protocols import declared_for
+
     db = read_keys_db()
     out = []
     for k in db.keys:
         d = k.model_dump()
+        for spec, row in zip(k.models, d["models"]):
+            if (declared := declared_for(spec)) is not None:
+                row["declared"] = declared
         d["access_key"] = _mask(d.get("access_key"))
         d["secret_key"] = None
         d["is_default"] = (k.alias == db.default_alias)

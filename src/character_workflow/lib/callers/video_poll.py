@@ -84,6 +84,8 @@ def poll_responses(
     error_cls: type[Exception],
     should_cancel: Callable[[], bool] | None = None,
     max_elapsed_seconds: float | None = None,
+    method: str = "GET",
+    json_body: Any = None,
 ) -> Iterator[Any]:
     """按 poll_interval 节奏轮询 GET，逐次 yield「值得解读」的响应。
 
@@ -110,7 +112,12 @@ def poll_responses(
         if remaining <= 0:
             return
         try:
-            resp = requests.get(url, headers=headers, timeout=min(timeout, remaining))
+            # 既有调用点只走 GET（测试按 requests.get 打桩）；POST 轮询仅自定义接口使用。
+            if method == "GET":
+                resp = requests.get(url, headers=headers, timeout=min(timeout, remaining))
+            else:
+                resp = requests.post(url, headers=headers, json=json_body,
+                                     timeout=min(timeout, remaining), allow_redirects=False)
         except requests.RequestException as e:
             consecutive += 1
             if consecutive >= limit:

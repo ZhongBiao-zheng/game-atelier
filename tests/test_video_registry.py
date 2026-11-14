@@ -7,8 +7,9 @@ from character_workflow.lib.callers.video_registry import (
 )
 
 
-def test_registry_has_six_protocols_with_labels():
-    assert set(VIDEO_ADAPTERS) == {"seedance", "kling", "klingai", "evolink", "dashscope", "openrouter"}
+def test_registry_has_seven_protocols_with_labels():
+    assert set(VIDEO_ADAPTERS) == {"seedance", "kling", "klingai", "evolink", "dashscope",
+                                   "openrouter", "declarative"}
     for pid, adapter in VIDEO_ADAPTERS.items():
         assert adapter.protocol == pid
         assert adapter.label  # 非空友好名
