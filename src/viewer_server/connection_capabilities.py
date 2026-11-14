@@ -40,6 +40,10 @@ POST /api/http-protocols/assist
 GET /api/http-protocols/{identifier}
 PUT /api/http-protocols/{identifier}
 DELETE /api/http-protocols/{identifier}
+GET /api/plugins
+POST /api/plugins/{plugin_id}/enable
+POST /api/plugins/{plugin_id}/disable
+GET /api/plugins/{plugin_id}/package/{file:path}
 POST /api/keys
 PATCH /api/keys/{alias}
 DELETE /api/keys/{alias}
@@ -256,6 +260,8 @@ LOCAL_MANAGEMENT = frozenset({
     "/api/model-routes/member-status", "/api/model-routes/member-status/restore",
     # 挂载团队库 = 往本机任意目录写清单并整棵扫描，同 folder-picker 只给本机页面。
     "/api/team-libraries",
+    # 启停插件决定本机加载哪些代码（ADR-0037），只给本机页面；列表与包文件仍可读。
+    "/api/plugins/{plugin_id}/enable", "/api/plugins/{plugin_id}/disable",
     # 导入 / 删除 Agent Skill 改写数据目录里的说明文件，Agent 每轮都会读，只给本机页面。
     "/api/canvas/agent/skills/import", "/api/canvas/agent/skills/{name}",
 })

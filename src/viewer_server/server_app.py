@@ -364,6 +364,8 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(comfyui_router)
     from viewer_server.http_protocol_routes import router as http_protocol_router
     app.include_router(http_protocol_router)
+    from viewer_server.plugin_routes import router as plugin_router
+    app.include_router(plugin_router)
     app.include_router(update_router)
     app.include_router(connection_router(connection_store))
     app.include_router(canvas_batches_router)

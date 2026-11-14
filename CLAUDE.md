@@ -54,6 +54,7 @@ export GAME_ATELIER_DATA_ROOT=/tmp/test-data-root
 | `.runtime/gallery-hidden.json` | Web (`POST /api/gallery/hidden`) | viewer-server（`/api/gallery/recent` 过滤首页作品展示） |
 | `.runtime/server.{pid,port,log}` | viewer-server CLI（log 为后台服务本次运行的 stdout/stderr，含 500 traceback） | viewer-server CLI / 排障 |
 | `.config/keys.json` | Skill / Web (`POST /api/keys`) | Skill 通过 `lib/keys.py` 读 |
+| `.config/plugins.json` | Web (`POST /api/plugins/{id}/enable\|disable`) | viewer-server（`lib/plugin_registry.py`，决定加载哪些插件） |
 | `.config/venv-hash` | `bootstrap.py --ensure-venv` | `bootstrap.py --check` |
 
 **Web 不能改 job 状态字段**：`WebEditableJobPatch` 白名单只允许 `prompt / model / params / seed`；`status / output_paths / submitted_at / character_id / job_id / error` 是 Skill 独占。

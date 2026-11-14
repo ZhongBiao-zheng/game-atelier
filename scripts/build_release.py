@@ -85,7 +85,7 @@ def build(output: Path, platform: str) -> Path:
     ], cwd=REPO, check=True)
     app = payload / "app"
     app.mkdir()
-    for name in ("src", "web/dist", "scripts", "skills", ".claude-plugin"):
+    for name in ("src", "web/dist", "scripts", "skills", ".claude-plugin", "plugins"):
         shutil.copytree(REPO / name, app / name,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     for name in ("pyproject.toml", "uv.lock", ".python-version"):

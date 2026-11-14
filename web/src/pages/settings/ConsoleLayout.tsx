@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentType } from 'react';
 import { Link, Redirect, useLocation } from 'wouter';
-import { AgentIcon, BackIcon, HelpIcon, KeyIcon, LibraryIcon, RouteIcon, ServerIcon, SettingsIcon, UsageIcon, type AppIcon } from '@/components/ui/icons';
+import { AgentIcon, BackIcon, HelpIcon, KeyIcon, LibraryIcon, PluginIcon, RouteIcon, ServerIcon, SettingsIcon, UsageIcon, type AppIcon } from '@/components/ui/icons';
 import { listKeys, type KeyView } from '@/api/keys';
 import { fetchGateway, fetchGatewayProviderMe, type GatewayState } from '@/api/gateway';
 import { subscribeGatewayEvents } from '@/api/gatewayEvents';
@@ -14,6 +14,7 @@ import { SYNC_HINT } from './TeamLibrariesSection';
 import { UsagePage } from './usage/UsagePage';
 import { LibrariesPage } from './LibrariesPage';
 import { AgentPage } from './AgentPage';
+import { PluginsPage } from './PluginsPage';
 import { PreferencesPage } from './PreferencesPage';
 import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -30,7 +31,10 @@ export const CONSOLE_NAV: {
   ] },
   { group: '观测', items: [{ path: '/settings/usage', label: '用量', page: UsagePage, icon: UsageIcon }] },
   { group: '资源', items: [{ path: '/settings/libraries', label: '团队库', page: LibrariesPage, icon: LibraryIcon, hint: SYNC_HINT }] },
-  { group: '扩展', items: [{ path: '/settings/agent', label: 'Agent 连接', page: AgentPage, icon: AgentIcon }] },
+  { group: '扩展', items: [
+    { path: '/settings/agent', label: 'Agent 连接', page: AgentPage, icon: AgentIcon },
+    { path: '/settings/plugins', label: '插件', page: PluginsPage, icon: PluginIcon },
+  ] },
   { group: '', items: [{ path: '/settings/preferences', label: '设置', page: PreferencesPage, icon: SettingsIcon }] },
 ];
 let lastCreativeLocation = '/';

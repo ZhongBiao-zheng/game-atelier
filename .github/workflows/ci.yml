@@ -79,7 +79,7 @@ jobs:
         run: uv sync
 
       - name: Run ruff
-        run: uv run ruff check src scripts tests
+        run: uv run ruff check src scripts tests plugins
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -107,16 +107,20 @@ jobs:
           # content 源，造成 over-existing 构建非幂等；clean build 才能稳定比对。
           rm -rf web/dist
           ( cd web && pnpm build )
-          if [ -n "$(git status --porcelain -- web/dist)" ]; then
-            echo "::error::web/dist 与当前源码构建产物不一致（缺失/过期/未提交）。请本地运行 'make build' 并提交 web/dist/ 后再推。"
-            git status --porcelain -- web/dist
-            git --no-pager diff --stat -- web/dist
+          # pnpm build 同时重建 plugins/*/package（官方插件的界面包），一并比对。
+          if [ -n "$(git status --porcelain -- web/dist plugins/*/package)" ]; then
+            echo "::error::web/dist 或 plugins/*/package 与当前源码构建产物不一致（缺失/过期/未提交）。请本地运行 'make build' 并提交后再推。"
+            git status --porcelain -- web/dist plugins/*/package
+            git --no-pager diff --stat -- web/dist plugins/*/package
             exit 1
           fi
           echo "web/dist 与源码构建一致 OK"
 
       - name: Plugin sanity check
         run: uv run python scripts/check_plugin.py
+
+      - name: Product plugin check
+        run: uv run python scripts/check_product_plugins.py
 
       - name: No PROJECT_ROOT regression
         run: bash scripts/check_no_project_root.sh

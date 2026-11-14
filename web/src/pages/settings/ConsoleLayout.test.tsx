@@ -23,6 +23,7 @@ vi.mock('./usage/UsagePage', () => ({ UsagePage: () => <p>usage-content</p> }));
 vi.mock('./LibrariesPage', () => ({ LibrariesPage: () => <p>libraries-content</p> }));
 vi.mock('./AgentPage', () => ({ AgentPage: () => <p>agent-content</p> }));
 vi.mock('./PreferencesPage', () => ({ PreferencesPage: () => <p>preferences-content</p> }));
+vi.mock('./PluginsPage', () => ({ PluginsPage: () => <p>plugins-content</p> }));
 
 describe('控制台路由', () => {
   it('添加页仍选中供应商导航', () => {

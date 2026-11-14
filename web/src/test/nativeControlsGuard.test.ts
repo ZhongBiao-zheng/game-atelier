@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import ts from 'typescript';
 
-const sources = import.meta.glob('../**/*.tsx', {
+const sources = import.meta.glob(['../**/*.tsx', '../../../plugins/*/ui/**/*.tsx'], {
   query: '?raw', import: 'default', eager: true,
 }) as Record<string, string>;
 

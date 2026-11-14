@@ -163,3 +163,15 @@ export const VideoIcon = defineIcon(Huge.Video01Icon, 'video');
 export const VolumeIcon = defineIcon(Huge.VolumeHighIcon, 'volume');
 export const WarningIcon = defineIcon(Huge.Alert02Icon, 'warning');
 export const WorkflowIcon = defineIcon(Huge.WorkflowSquare03Icon, 'workflow');
+
+/** 产品内插件（设置页「插件」、缺失占位）的通用图标。 */
+export const PluginIcon = defineIcon(Huge.Plug01Icon, 'plugin');
+const PluginFramesIcon = defineIcon(Huge.KeyframesMultipleIcon, 'plugin-frames');
+/** 插件清单 `icon` 字段可用的名字。插件不能自带图形，新名字先在这里登记。 */
+const PLUGIN_ICONS: Record<string, AppIcon> = {
+  frames: PluginFramesIcon, grid: GridIcon, cube: ModelIcon, layers: LayersIcon, scissors: CutIcon,
+};
+/** 未登记的名字回落到通用插件图标，旧版宿主遇到新名字不报错。 */
+export function pluginIcon(name: string): AppIcon {
+  return Object.hasOwn(PLUGIN_ICONS, name) ? PLUGIN_ICONS[name] : PluginIcon;
+}

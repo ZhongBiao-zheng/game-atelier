@@ -1,0 +1,73 @@
+{
+  "manifest_version": 1,
+  "id": "sprite-sheet",
+  "name": "精灵表调整",
+  "version": "0.1.0",
+  "description": "切帧、对齐、重排并导出精灵表",
+  "icon": "frames",
+  "publisher": {
+    "id": "atelier",
+    "name": "Atelier"
+  },
+  "sdk_version": "1",
+  "app_version": {
+    "min": "5.137.0"
+  },
+  "ui": {
+    "entry": "ui/index.html"
+  },
+  "capabilities": [
+    "node.read_self",
+    "node.write_self",
+    "resource.read_inputs",
+    "resource.create",
+    "server.call"
+  ],
+  "contributes": {
+    "nodes": [
+      {
+        "type": "sheet",
+        "title": "精灵表",
+        "icon": "frames",
+        "default_size": {
+          "width": 360,
+          "height": 300
+        },
+        "min_size": {
+          "width": 240,
+          "height": 200
+        },
+        "payload_schema_version": 1,
+        "input_modalities": [
+          "image"
+        ],
+        "max_inputs": 1,
+        "surfaces": [
+          "node",
+          "panel"
+        ]
+      }
+    ],
+    "image_actions": [
+      {
+        "id": "open",
+        "label": "精灵表",
+        "icon": "frames",
+        "action": {
+          "kind": "create_node",
+          "node_type": "sheet",
+          "open_panel": true
+        }
+      }
+    ]
+  },
+  "files": [
+    {
+      "path": "ui/index.html",
+      "sha256": "0923b4d9fcc06e5ae05e69b7645ffd58bbbe9c38f003c0e0b5bddaa88abcc296",
+      "bytes": 141936
+    }
+  ],
+  "source": "bundled",
+  "digest": "sha256:08c8db5d1b5739e141f3654408dba036a3cb20c0af40d0f48fc5fba8f3e1e887"
+}

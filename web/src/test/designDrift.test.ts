@@ -20,7 +20,7 @@ const tokens = CSS_SOURCES['../styles/tokens.css'];
 
 // Vite 在 transform 期把全部非测试 tsx 以纯文本内联进来——不依赖 node API，
 // tsconfig 只需 vite/client 类型（src/vite-env.d.ts）。
-const RAW_SOURCES = import.meta.glob('../**/*.tsx', {
+const RAW_SOURCES = import.meta.glob(['../**/*.tsx', '../../../plugins/*/ui/**/*.tsx'], {
   query: '?raw',
   import: 'default',
   eager: true,

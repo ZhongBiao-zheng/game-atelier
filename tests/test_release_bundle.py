@@ -48,6 +48,8 @@ def test_relocated_archive_runs_without_system_tools_and_preserves_data(tmp_path
     payload = folder / "versions" / version
     python = payload / "python" / ("python.exe" if os.name == "nt" else "bin/python3")
     boot = payload / "app/scripts/bootstrap.py"
+    # 官方插件随安装包发布：包目录必须在 app/ 下，注册表按 app/plugins 扫描。
+    assert (payload / "app/plugins/sprite-sheet/package/manifest.lock.json").is_file()
     data = tmp_path / "data"
     (data / ".config").mkdir(parents=True)
     sentinel = data / ".config/keep.txt"

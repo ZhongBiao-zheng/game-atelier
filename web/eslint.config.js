@@ -8,18 +8,21 @@ import tseslint from 'typescript-eslint';
  *
  *  刻意不引入 recommended 规则集：一次性铺开几百条风格告警会让这道门禁被整体忽略，而 hooks
  *  依赖是唯一「不跑就会静默出错」的那类。要加别的规则，等这两条长期保持零告警之后再说。 */
+/** 同一组规则也给 web/ 之外的插件界面源码用（plugins/eslint.config.js）。 */
+export const reactHooksRules = (files) => ({
+  files,
+  languageOptions: {
+    parser: tseslint.parser,
+    parserOptions: { ecmaFeatures: { jsx: true } },
+  },
+  plugins: { 'react-hooks': reactHooks },
+  rules: {
+    'react-hooks/rules-of-hooks': 'error',
+    'react-hooks/exhaustive-deps': 'error',
+  },
+});
+
 export default tseslint.config(
   { ignores: ['dist/**', 'node_modules/**', 'coverage/**'] },
-  {
-    files: ['src/**/*.{ts,tsx}'],
-    languageOptions: {
-      parser: tseslint.parser,
-      parserOptions: { ecmaFeatures: { jsx: true } },
-    },
-    plugins: { 'react-hooks': reactHooks },
-    rules: {
-      'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/exhaustive-deps': 'error',
-    },
-  },
+  reactHooksRules(['src/**/*.{ts,tsx}']),
 );

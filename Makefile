@@ -22,17 +22,18 @@ test:
 # 本地交付守门，覆盖当前主机的 CI 主路径。先 stage 预期的 web/dist 更新；clean build 后若仍产生 unstaged
 # 产物或新文件，说明源码与待提交静态包不一致。
 verify:
-	uv run ruff check src scripts tests
+	uv run ruff check src scripts tests plugins
 	uv run pytest -v
 	cd web && pnpm test
 	cd web && pnpm lint
 	$(MAKE) build
 	uv run python scripts/check_plugin.py
+	uv run python scripts/check_product_plugins.py
 	bash scripts/check_no_project_root.sh
 	git diff --check
 	git diff --cached --check
-	@ git diff --quiet -- web/dist || (echo "web/dist clean build 后仍有未暂存差异；请重新 stage 构建产物。" && git --no-pager diff --stat -- web/dist && exit 1)
-	@ test -z "$$(git ls-files --others --exclude-standard web/dist)" || (echo "web/dist clean build 产生未跟踪文件；请检查并 stage 构建产物。" && git ls-files --others --exclude-standard web/dist && exit 1)
+	@ git diff --quiet -- web/dist plugins/*/package || (echo "clean build 后 web/dist 或 plugins/*/package 仍有未暂存差异；请重新 stage 构建产物。" && git --no-pager diff --stat -- web/dist plugins/*/package && exit 1)
+	@ test -z "$$(git ls-files --others --exclude-standard web/dist plugins/*/package)" || (echo "clean build 产生未跟踪文件；请检查并 stage 构建产物。" && git ls-files --others --exclude-standard web/dist plugins/*/package && exit 1)
 	@ echo "Local verification OK"
 
 clean:

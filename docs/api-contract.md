@@ -249,6 +249,8 @@ server 启动建好监听后对每个库各起一条后台线程补扫一次（�
 | CreationAsset / CreationAssetContent | `lib/schemas.py` | `web/src/schema/creationAssets.ts` | `tests/test_creation_assets.py` + `CreationAssetPanel.test.tsx` |
 | 图像能力矩阵 | `callers/openai_image.py` | `lib/modelFamily.ts` `referenceLimits.ts` `studioSize.ts` | `tests/fixtures/capability-matrix.json`，两端各自断言 |
 | 视频控件能力 | 各 `*_video.py` | `lib/videoControlCaps.ts` | 无 —— 靠人 |
+| 插件清单 / 包锁文件 / 列表接口 | `lib/plugin_manifest.py` + `lib/plugin_registry.py` | `web/src/schema/plugins.ts` + `api/plugins.ts` | `tests/test_plugin_registry.py` + `PluginsPage.test.tsx`（后者直接读入库的 `manifest.lock.json`） |
+| 插件包摘要算法 | `plugin_manifest.package_digest` | `web/scripts/build-plugins.mjs` 的 `canonical` | `scripts/check_product_plugins.py`（Python 复算入库产物的摘要） |
 
 给序列化 model 加字段会打红全仓精确字典断言，改完立刻跑全量 pytest + vitest。
 
@@ -1292,3 +1294,17 @@ multipart 里的数组值展开成同名重复字段。
 - 本机 `/api/gateway-shares` GET 返回 `{libraries:[{id,name,owner_name,updated_at,counts,size_bytes}],size_bytes}`；DELETE `/{library_id}` 主机停止共享，旧 share_id 不可重新发布。`@host` 是本机存储浏览源的保留别名。
 - `.config/team-library-gateway-share.json`：`{shared_library_ids,publishes:{[library_id]:{share_id,gateways:{[alias]:{synced_at,error,status,uploaded,total,delete_pending}}}}}`。status 为 pending/syncing/synced/failed/stopped。发布状态仅本机管理接口可见。
 - 网关密钥创建请求新增可选 `token` 后缀（`[A-Za-z0-9_-]{16,64}`）；服务端加 `atg_`。与任何现存记录（含已撤销）重复时 422。POST `/api/gateway/keys/{key_id}/reset` 及对应管理员路由生成新密钥，旧密钥立即失效。
+
+## 插件（ADR-0012 / ADR-0037）
+
+只挂本机服务，不上局域网网关。Agent 会话不能访问。
+
+- `GET /api/plugins`：`{app_version, plugins: PluginEntry[]}`。`PluginEntry = {id, availability, reason, enabled, manifest}`；`availability` 为 `ok`（可启用）/ `incompatible`（清单合法，但版本范围、SDK 版本、capability 或必需大文件当前不支持；`reason` 是给用户看的一句话）/ `invalid`（清单读不出，`manifest` 为 `null`，`reason` 是技术原因）。一个插件无效不影响列表里的其他项。`manifest` 是包锁文件全文。
+- `POST /api/plugins/{plugin_id}/enable`、`.../disable`：本机管理类。返回与列表接口相同的结构。未知插件 404 `PLUGIN_NOT_FOUND`；不可用的插件启用时 409 `PLUGIN_UNAVAILABLE`，`message` 为不可用原因。停用任何状态的已知插件都允许。
+- `GET /api/plugins/{plugin_id}/package/{file}`：已启用插件的包内文件，只放行锁文件 `files` 里登记的路径；未启用 404 `PLUGIN_DISABLED`，其他情况 404 `PLUGIN_FILE_NOT_FOUND`。响应 `application/octet-stream` + `nosniff` + `no-store`；宿主按 `files[].sha256` 核对后才放进沙箱。
+- 错误体：`{detail: {message, code}}`。
+- 除以上四条外，`/api/plugins/` 下的路径一律 403；插件服务端模块的路由要在清单 `contributes.server.routes` 里逐条声明后才可达。
+
+`<data_root>/.config/plugins.json`：`{schema_version: 1, plugins: {[id]: {enabled, enabled_at?, digest?}}}`，`enabled_at` 为 UTC ISO 8601。整份文件损坏时按全部未启用处理，原文件改名为 `plugins.json.broken-<UTC 时间>` 保留；单条不合规只忽略该条；清单里已不存在的插件 id 原样保留。记录为启用但清单失效或不兼容的插件不算启用。
+
+包锁文件 `plugins/<id>/package/manifest.lock.json`：源清单全部字段 + `files: [{path, sha256, bytes}]` + `source: "bundled"` + `digest`。`digest = "sha256:" + SHA-256(去掉 digest 键后，按键排序、无空白、非 ASCII 不转义的 JSON)`。清单字段见 `lib/plugin_manifest.py`；清单不接受未知字段。
