@@ -34,6 +34,13 @@ export interface PluginClient {
     readBytes(handle: string): Promise<ArrayBuffer>;
     readText(handle: string): Promise<string>;
   };
+  server: {
+    /**
+     * 调用本插件在清单里声明的服务端路由。`inputs` 传素材句柄，服务端拿到的是对应的文件；
+     * 界面自己拿不到文件路径。
+     */
+    call<Result = unknown>(path: string, params?: Record<string, unknown>, inputs?: string[]): Promise<Result>;
+  };
   on<Name extends PluginHostEventName>(event: Name, listener: (data: PluginHostEvents[Name]) => void): () => void;
 }
 
@@ -165,6 +172,9 @@ function createClient(port: MessagePort, hello: PluginHandshake): PluginClient {
       readBitmap: handle => call<ImageBitmap>('inputs.read', { handle, as: 'bitmap' }),
       readBytes: handle => call<ArrayBuffer>('inputs.read', { handle, as: 'bytes' }),
       readText: handle => call<string>('inputs.read', { handle, as: 'text' }),
+    },
+    server: {
+      call: (path, params, inputs) => call('server.call', { path, params: params ?? {}, inputs: inputs ?? [] }),
     },
     on(event, listener) {
       const set = listeners.get(event) ?? new Set();

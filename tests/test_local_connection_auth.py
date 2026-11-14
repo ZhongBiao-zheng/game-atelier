@@ -12,7 +12,7 @@ from character_workflow.lib import data_root
 from character_workflow.lib.private_json import read_private_json, write_private_json
 from character_workflow.lib.canvas_projects import create_canvas_project as create_project
 from viewer_server.connection_auth import COOKIE_NAME, ConnectionError, ConnectionStore
-from viewer_server.connection_capabilities import local_capability
+from viewer_server.connection_capabilities import PLUGIN_ROUTE, local_capability
 from viewer_server.connection_middleware import ConnectionMiddleware
 from viewer_server.server_app import build_app
 
@@ -298,6 +298,10 @@ def test_all_existing_data_routes_are_explicitly_registered(tmp_path):
         if not path.startswith("/api/") or path.startswith(handled_elsewhere):
             continue
         if path == "/api/connection/status" or not getattr(route, "methods", None):
+            continue
+        if path == PLUGIN_ROUTE:
+            # 这一条不按前缀放行：只有已启用插件在清单里声明过的路由才有能力（ADR-0037）。
+            assert local_capability("POST", "/api/plugins/example/routes/example") is None
             continue
         for method in route.methods:
             sample = route.path

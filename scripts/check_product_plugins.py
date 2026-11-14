@@ -70,7 +70,37 @@ def check_plugin(plugin_dir: Path) -> list[str]:
     for module in sorted(server_dir.rglob("*.py")) if server_dir.is_dir() else []:
         if _FORBIDDEN_IMPORT.search(module.read_text(encoding="utf-8")):
             errors.append(f"{name}: {module.relative_to(plugin_dir).as_posix()} 不能直接调用厂商或 Job Runner")
+    if declares_server and not errors:
+        declared = {(route.method, route.path) for route in lock.contributes.server.routes}
+        try:
+            implemented = _implemented_routes(name, server_dir)
+        except Exception as error:  # noqa: BLE001 - 任何加载失败都要报出来
+            return [f"{name}: 服务端模块加载失败：{error}"]
+        for method, path in sorted(declared - implemented):
+            errors.append(f"{name}: 清单声明了 {method} {path}，服务端模块没有实现")
+        for method, path in sorted(implemented - declared):
+            errors.append(f"{name}: 服务端模块实现了 {method} {path}，清单里没有声明")
     return errors
+
+
+def _implemented_routes(name: str, server_dir: Path) -> set[tuple[str, str]]:
+    """与运行时同样的方式加载服务端模块，取它登记的路由。"""
+    import importlib.util
+
+    from character_workflow.lib.plugin_server import PluginServerAPI
+    module_name = "_check_plugin_" + name.replace("-", "_")
+    spec = importlib.util.spec_from_file_location(
+        module_name, server_dir / "__init__.py", submodule_search_locations=[str(server_dir)])
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+        api = PluginServerAPI()
+        module.register(api)
+        return set(api.handlers)
+    finally:
+        for key in [key for key in sys.modules if key == module_name or key.startswith(module_name + ".")]:
+            del sys.modules[key]
 
 
 def main() -> int:

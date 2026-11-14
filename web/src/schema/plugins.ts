@@ -34,7 +34,7 @@ export interface PluginImageAction {
 }
 
 export interface PluginServerRoute {
-  method: 'GET' | 'POST';
+  method: 'POST';
   path: string;
   access: 'read' | 'edit';
   long_running: boolean;

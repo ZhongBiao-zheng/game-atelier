@@ -52,11 +52,14 @@ export interface PluginInput {
   height: number | null;
 }
 
-export type PluginMethod = 'node.readSelf' | 'node.writeSelf' | 'inputs.list' | 'inputs.read' | 'fonts.request';
+export type PluginMethod =
+  | 'node.readSelf' | 'node.writeSelf' | 'inputs.list' | 'inputs.read' | 'fonts.request' | 'server.call';
 
 export type PluginErrorCode =
   | 'BAD_REQUEST' | 'UNKNOWN_METHOD' | 'CAPABILITY_DENIED' | 'RATE_LIMITED'
-  | 'PAYLOAD_TOO_LARGE' | 'INVALID_HANDLE' | 'UNAVAILABLE' | 'INTERNAL';
+  | 'PAYLOAD_TOO_LARGE' | 'INVALID_HANDLE' | 'UNAVAILABLE' | 'INTERNAL'
+  /** 插件自己的服务端路由拒绝了请求；`message` 是给用户看的原因。 */
+  | 'SERVER_ERROR';
 
 export interface PluginRpcRequest { id: number; method: string; params?: unknown }
 export type PluginRpcResponse =

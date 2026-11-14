@@ -26,6 +26,8 @@ export interface BrokerOptions {
   listInputs: () => readonly BrokerInput[];
   readInput: (versionId: string, as: 'bitmap' | 'bytes' | 'text') => Promise<ImageBitmap | ArrayBuffer | string>;
   loadFonts: (ids: readonly string[]) => Promise<Array<{ id: string; bytes: ArrayBuffer }>>;
+  /** 调用本插件声明的服务端路由。`versionIds` 是已由 broker 核对过的、当前连在节点上的素材。 */
+  callServer: (path: string, params: Record<string, unknown>, versionIds: string[]) => Promise<unknown>;
   now?: () => number;
 }
 
@@ -38,7 +40,15 @@ const REQUIRED_CAPABILITY: Record<PluginMethod, string | null> = {
   'inputs.list': 'resource.read_inputs',
   'inputs.read': 'resource.read_inputs',
   'fonts.request': null,
+  'server.call': 'server.call',
 };
+
+/** 与清单里路由 path 的格式一致；不含 `.`，所以拼不出 `..`。 */
+const SERVER_PATH = /^\/[a-z0-9][a-z0-9/_-]{0,79}$/;
+const MAX_SERVER_INPUTS = 64;
+
+/** `callServer` 抛它时，原因会原样转给插件界面（服务端给用户看的那句话）；其他报错一律不透出细节。 */
+export class PluginServerError extends Error {}
 
 const RATE_WINDOW_MS = 1000;
 const RATE_MAX_CALLS = 60;
@@ -156,6 +166,27 @@ export function createBroker(options: BrokerOptions) {
         }
         const fonts = await options.loadFonts(params.ids as string[]);
         return { result: fonts, transfer: fonts.map(font => font.bytes) };
+      }
+      case 'server.call': {
+        if (!isPlainObject(params) || typeof params.path !== 'string' || !SERVER_PATH.test(params.path)
+          || (params.params !== undefined && !isPlainObject(params.params))
+          || (params.inputs !== undefined && (!Array.isArray(params.inputs) || params.inputs.length > MAX_SERVER_INPUTS
+            || !params.inputs.every(handle => typeof handle === 'string')))) {
+          throw new BrokerError('BAD_REQUEST', '参数不对');
+        }
+        const connected = new Set(options.listInputs().map(input => input.versionId));
+        const versionIds = ((params.inputs as string[] | undefined) ?? []).map(handle => {
+          const versionId = versionByHandle.get(handle);
+          if (!versionId || !connected.has(versionId)) throw new BrokerError('INVALID_HANDLE', '素材句柄无效');
+          return versionId;
+        });
+        const body = normalizePayload(params.params ?? {}) as Record<string, unknown>;
+        try {
+          return { result: await options.callServer(params.path, body, versionIds), transfer: [] };
+        } catch (error) {
+          if (error instanceof PluginServerError) throw new BrokerError('SERVER_ERROR', error.message);
+          throw error;
+        }
       }
     }
   }

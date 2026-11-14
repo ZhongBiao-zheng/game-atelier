@@ -44,6 +44,7 @@ GET /api/plugins
 POST /api/plugins/{plugin_id}/enable
 POST /api/plugins/{plugin_id}/disable
 GET /api/plugins/{plugin_id}/package/{file:path}
+POST /api/plugins/{plugin_id}/routes/{route:path}
 GET /api/canvas/projects/{project_id}/plugin-grants
 PUT /api/canvas/projects/{project_id}/plugin-grants/{plugin_id}
 DELETE /api/canvas/projects/{project_id}/plugin-grants/{plugin_id}
@@ -305,11 +306,23 @@ def is_media_route(path: str) -> bool:
     return any(template in MEDIA_ROUTES and pattern.fullmatch(path) for _, template, pattern in LOCAL_RULES)
 
 
+PLUGIN_ROUTE = "/api/plugins/{plugin_id}/routes/{route:path}"
+
+
+def _plugin_route_capability(match) -> str | None:
+    """插件路由不靠前缀放行：只有已启用插件在清单里声明过的那几条可达，读写类别也取清单的。"""
+    from character_workflow.lib import plugin_server
+    access = plugin_server.declared_access(match["plugin_id"], "POST", "/" + match["route"])
+    return {"read": "read", "edit": "edit"}.get(access or "")
+
+
 def local_capability(method: str, path: str) -> str | None:
     for allowed_method, template, pattern in LOCAL_RULES:
         if (allowed_method == method or (
             method == "HEAD" and allowed_method == "GET" and template in MEDIA_ROUTES
-        )) and pattern.fullmatch(path):
+        )) and (match := pattern.fullmatch(path)):
+            if template == PLUGIN_ROUTE:
+                return _plugin_route_capability(match)
             if template in LOCAL_MANAGEMENT and (method, template) not in _MANAGEMENT_READ_EXEMPT:
                 return "manage"
             if method in {"GET", "HEAD"} or (method, template) in _READ_POSTS:

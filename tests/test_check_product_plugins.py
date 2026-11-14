@@ -72,3 +72,20 @@ def test_undeclared_server_module_and_direct_provider_calls_fail(copy):
     result = run(copy)
     assert result.returncode == 1
     assert "不能直接调用厂商或 Job Runner" in result.stdout
+
+
+def test_declared_route_without_implementation_fails(copy):
+    init = copy / "plugins/sprite-sheet/server/__init__.py"
+    source = init.read_text(encoding="utf-8")
+    assert '@api.route("POST", "/repack")' in source
+    init.write_text(source.replace('@api.route("POST", "/repack")', '@api.route("POST", "/renamed")'), encoding="utf-8")
+    result = run(copy)
+    assert result.returncode == 1
+    assert "清单声明了 POST /repack，服务端模块没有实现" in result.stdout
+    assert "服务端模块实现了 POST /renamed，清单里没有声明" in result.stdout
+
+
+def test_server_module_that_fails_to_import_fails(copy):
+    (copy / "plugins/sprite-sheet/server/__init__.py").write_text("raise RuntimeError('broken')\n", encoding="utf-8")
+    result = run(copy)
+    assert result.returncode == 1 and "服务端模块加载失败" in result.stdout

@@ -85,7 +85,8 @@ class PluginImageAction(_Model):
 
 
 class PluginServerRoute(_Model):
-    method: Literal["GET", "POST"]
+    # 界面与 Agent 都以 JSON 请求体调用，只有 POST。
+    method: Literal["POST"]
     path: Annotated[str, StringConstraints(pattern=_ROUTE_PATH)]
     access: Literal["read", "edit"]
     long_running: bool = False

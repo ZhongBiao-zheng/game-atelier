@@ -59,15 +59,115 @@
           "open_panel": true
         }
       }
+    ],
+    "server": {
+      "module": "server",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/detect",
+          "access": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/repack",
+          "access": "edit"
+        }
+      ]
+    },
+    "agent_tools": [
+      {
+        "name": "detect",
+        "description": "识别一张精灵表里的帧：按透明的整行整列切成网格，返回帧数、行列数和每帧的位置。只读。",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "image_node_id"
+          ],
+          "properties": {
+            "image_node_id": {
+              "type": "string",
+              "description": "画布上图片节点的 id"
+            }
+          }
+        },
+        "read_only": true,
+        "route": "/detect"
+      },
+      {
+        "name": "repack",
+        "description": "把一张精灵表里的帧重新排成等格的精灵表，并在画布上生成一张新图片。不传 frames 与 grid 时自动识别帧。",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "image_node_id",
+            "columns"
+          ],
+          "properties": {
+            "image_node_id": {
+              "type": "string",
+              "description": "画布上图片节点的 id"
+            },
+            "columns": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "每行几帧"
+            },
+            "spacing": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "帧间距，像素"
+            },
+            "margin": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "外边距，像素"
+            },
+            "align": {
+              "type": "string",
+              "enum": [
+                "bottom-center",
+                "center",
+                "top-left"
+              ],
+              "description": "帧在格内的对齐方式"
+            },
+            "grid": {
+              "type": "object",
+              "description": "手动网格：columns、rows、margin、spacing",
+              "properties": {
+                "columns": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "rows": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "margin": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "spacing": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "read_only": false,
+        "route": "/repack"
+      }
     ]
   },
   "files": [
     {
       "path": "ui/index.html",
-      "sha256": "0bebd44a402320d0d50fc8ec64312f81a97983a5a1aab9a24c2ecdcab35f2e61",
-      "bytes": 146436
+      "sha256": "e9d2cb520f995d0f1f9f25f949b7e621398681b7c525543e40e808af739b7846",
+      "bytes": 146511
     }
   ],
   "source": "bundled",
-  "digest": "sha256:3ad0efca11c27a9cd8ce6f991f8d632d5e9d8e3b64594ae2e721fbcb5eee35b6"
+  "digest": "sha256:f5fa328bba3e2bf29ba131da540f6ad5fbb20a2ec71e6b631c280dedadbc1f91"
 }

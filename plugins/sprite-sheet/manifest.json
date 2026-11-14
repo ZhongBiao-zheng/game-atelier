@@ -5,10 +5,17 @@
   "version": "0.1.0",
   "description": "切帧、对齐、重排并导出精灵表",
   "icon": "frames",
-  "publisher": { "id": "atelier", "name": "Atelier" },
+  "publisher": {
+    "id": "atelier",
+    "name": "Atelier"
+  },
   "sdk_version": "1",
-  "app_version": { "min": "5.137.0" },
-  "ui": { "entry": "ui/index.html" },
+  "app_version": {
+    "min": "5.137.0"
+  },
+  "ui": {
+    "entry": "ui/index.html"
+  },
   "capabilities": [
     "node.read_self",
     "node.write_self",
@@ -22,12 +29,23 @@
         "type": "sheet",
         "title": "精灵表",
         "icon": "frames",
-        "default_size": { "width": 360, "height": 300 },
-        "min_size": { "width": 240, "height": 200 },
+        "default_size": {
+          "width": 360,
+          "height": 300
+        },
+        "min_size": {
+          "width": 240,
+          "height": 200
+        },
         "payload_schema_version": 1,
-        "input_modalities": ["image"],
+        "input_modalities": [
+          "image"
+        ],
         "max_inputs": 1,
-        "surfaces": ["node", "panel"]
+        "surfaces": [
+          "node",
+          "panel"
+        ]
       }
     ],
     "image_actions": [
@@ -35,7 +53,111 @@
         "id": "open",
         "label": "精灵表",
         "icon": "frames",
-        "action": { "kind": "create_node", "node_type": "sheet", "open_panel": true }
+        "action": {
+          "kind": "create_node",
+          "node_type": "sheet",
+          "open_panel": true
+        }
+      }
+    ],
+    "server": {
+      "module": "server",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/detect",
+          "access": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/repack",
+          "access": "edit"
+        }
+      ]
+    },
+    "agent_tools": [
+      {
+        "name": "detect",
+        "description": "识别一张精灵表里的帧：按透明的整行整列切成网格，返回帧数、行列数和每帧的位置。只读。",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "image_node_id"
+          ],
+          "properties": {
+            "image_node_id": {
+              "type": "string",
+              "description": "画布上图片节点的 id"
+            }
+          }
+        },
+        "read_only": true,
+        "route": "/detect"
+      },
+      {
+        "name": "repack",
+        "description": "把一张精灵表里的帧重新排成等格的精灵表，并在画布上生成一张新图片。不传 frames 与 grid 时自动识别帧。",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "image_node_id",
+            "columns"
+          ],
+          "properties": {
+            "image_node_id": {
+              "type": "string",
+              "description": "画布上图片节点的 id"
+            },
+            "columns": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "每行几帧"
+            },
+            "spacing": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "帧间距，像素"
+            },
+            "margin": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "外边距，像素"
+            },
+            "align": {
+              "type": "string",
+              "enum": [
+                "bottom-center",
+                "center",
+                "top-left"
+              ],
+              "description": "帧在格内的对齐方式"
+            },
+            "grid": {
+              "type": "object",
+              "description": "手动网格：columns、rows、margin、spacing",
+              "properties": {
+                "columns": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "rows": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "margin": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "spacing": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "read_only": false,
+        "route": "/repack"
       }
     ]
   }

@@ -70,6 +70,7 @@ export function PluginSurface({ plugin, surface, host, nodeSignature, inputsSign
       writePayload: payload => hostRef.current.writePayload(payload),
       listInputs: () => hostRef.current.listInputs(),
       readInput: (versionId, as) => hostRef.current.readInput(versionId, as),
+      callServer: (path, params, versionIds) => hostRef.current.callServer(path, params, versionIds),
       loadFonts: loadFontBytes,
     });
     let ready = false;

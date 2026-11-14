@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createBroker, normalizePayload, type BrokerInput, type BrokerOptions } from './broker';
+import { createBroker, normalizePayload, PluginServerError, type BrokerInput, type BrokerOptions } from './broker';
 
-const ALL = ['node.read_self', 'node.write_self', 'resource.read_inputs'];
+const ALL = ['node.read_self', 'node.write_self', 'resource.read_inputs', 'server.call'];
 const NODE = { node_type: 'sheet', title: '精灵表', size: { width: 320, height: 240 }, payload_schema_version: 1, payload: { frames: [] } };
 const IMAGE: BrokerInput = { versionId: 'version-secret-1', kind: 'image', title: '角色', width: 64, height: 64 };
 const TEXT: BrokerInput = { versionId: 'version-text-1', kind: 'text', title: '备注', width: null, height: null };
@@ -15,6 +15,7 @@ function setup(overrides: Partial<BrokerOptions> = {}, capabilities: string[] = 
     listInputs: vi.fn(() => [IMAGE, TEXT]),
     readInput: vi.fn(async (_versionId, as) => as === 'text' ? '文字' : new ArrayBuffer(8)),
     loadFonts: vi.fn(async (ids: readonly string[]) => ids.map(id => ({ id, bytes: new ArrayBuffer(4) }))),
+    callServer: vi.fn(async (path: string, params: Record<string, unknown>, versionIds: string[]) => ({ path, params, versionIds })),
     ...overrides,
   };
   return { options, broker: createBroker(options) };
@@ -70,6 +71,7 @@ describe('插件 broker：能力校验', () => {
     ['node.writeSelf', { payload: {} }, 'node.write_self'],
     ['inputs.list', undefined, 'resource.read_inputs'],
     ['inputs.read', { handle: 'h', as: 'bytes' }, 'resource.read_inputs'],
+    ['server.call', { path: '/detect' }, 'server.call'],
   ])('%s 没有对应能力时被拒', async (method, params, capability) => {
     const { broker, options } = setup({}, ALL.filter(item => item !== capability));
     expect(errorCode(await call(broker, method, params))).toBe('CAPABILITY_DENIED');
@@ -77,6 +79,7 @@ describe('插件 broker：能力校验', () => {
     expect(options.writePayload).not.toHaveBeenCalled();
     expect(options.listInputs).not.toHaveBeenCalled();
     expect(options.readInput).not.toHaveBeenCalled();
+    expect(options.callServer).not.toHaveBeenCalled();
   });
 
   it('没有任何批准时只有字体可用', async () => {
@@ -250,5 +253,71 @@ describe('插件 broker：频率与字体', () => {
     expect(options.loadFonts).not.toHaveBeenCalled();
     const ok = await call(broker, 'fonts.request', { ids: ['f0', 'f1'] }, 4);
     expect(ok.transfer).toHaveLength(2);
+  });
+});
+
+describe('插件 broker：调用服务端路由', () => {
+  const handles = async (broker: ReturnType<typeof createBroker>) => (
+    (await call(broker, 'inputs.list', undefined, 90)).response as { result: Array<{ handle: string }> }
+  ).result.map(item => item.handle);
+
+  it('把句柄换成版本 id 后转给宿主，界面拿不到版本 id', async () => {
+    const { broker, options } = setup();
+    const [image] = await handles(broker);
+    const reply = await call(broker, 'server.call', { path: '/detect', params: { columns: 4 }, inputs: [image] });
+    expect(reply.response.ok).toBe(true);
+    expect(options.callServer).toHaveBeenCalledWith('/detect', { columns: 4 }, ['version-secret-1']);
+  });
+
+  it.each([
+    '../../keys', '/../keys', '/a/../../b', 'detect', '/Detect', '/detect?x=1', '/detect#x', '//evil.example/x',
+    'https://evil.example/x', '/a b', '/' + 'a'.repeat(90), '', '/',
+  ])('路径只能是清单格式的相对路径：%s', async path => {
+    const { broker, options } = setup();
+    expect(errorCode(await call(broker, 'server.call', { path }))).toBe('BAD_REQUEST');
+    expect(options.callServer).not.toHaveBeenCalled();
+  });
+
+  it.each(['version-secret-1', 'version-other-project', '../../.config/keys.json'])(
+    '素材只能用本实例发出的句柄：%s', async handle => {
+      const { broker, options } = setup();
+      await handles(broker);
+      expect(errorCode(await call(broker, 'server.call', { path: '/detect', inputs: [handle] }))).toBe('INVALID_HANDLE');
+      expect(options.callServer).not.toHaveBeenCalled();
+    });
+
+  it('素材断开后句柄失效', async () => {
+    let connected: BrokerInput[] = [IMAGE];
+    const { broker, options } = setup({ listInputs: () => connected });
+    const [image] = await handles(broker);
+    connected = [];
+    expect(errorCode(await call(broker, 'server.call', { path: '/detect', inputs: [image] }))).toBe('INVALID_HANDLE');
+    expect(options.callServer).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ path: '/detect', params: [] }], [{ path: '/detect', params: 'x' }], [{ path: '/detect', inputs: 'h' }],
+    [{ path: '/detect', inputs: [1] }], [{ path: 7 }], [undefined],
+    [{ path: '/detect', inputs: Array.from({ length: 65 }, () => 'h') }],
+  ])('参数形状不对：%j', async params => {
+    const { broker, options } = setup();
+    expect(errorCode(await call(broker, 'server.call', params))).toBe('BAD_REQUEST');
+    expect(options.callServer).not.toHaveBeenCalled();
+  });
+
+  it('参数同样只收纯 JSON 且有大小上限', async () => {
+    const { broker, options } = setup();
+    expect(errorCode(await call(broker, 'server.call', { path: '/detect', params: { blob: 'x'.repeat(300 * 1024) } }))).toBe('PAYLOAD_TOO_LARGE');
+    expect(errorCode(await call(broker, 'server.call', { path: '/detect', params: JSON.parse('{"__proto__":{"a":1}}') }, 2))).toBe('BAD_REQUEST');
+    expect(options.callServer).not.toHaveBeenCalled();
+  });
+
+  it('服务端给用户看的原因转给界面，其他报错不透出细节', async () => {
+    const refused = setup({ callServer: async () => { throw new PluginServerError('列数必须大于 0'); } });
+    expect((await call(refused.broker, 'server.call', { path: '/repack' })).response)
+      .toEqual({ id: 1, ok: false, error: { code: 'SERVER_ERROR', message: '列数必须大于 0' } });
+    const crashed = setup({ callServer: async () => { throw new Error('GET /api/plugins/x failed at /Users/a/b'); } });
+    expect((await call(crashed.broker, 'server.call', { path: '/repack' })).response)
+      .toEqual({ id: 1, ok: false, error: { code: 'INTERNAL', message: '宿主处理失败' } });
   });
 });

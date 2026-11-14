@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'wouter';
 
 import { canvasMediaUrl } from '@/api/canvas';
-import { request } from '@/api/http';
+import { ApiError, request, requestJson } from '@/api/http';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { PluginIcon, pluginIcon } from '@/components/ui/icons';
 import type { CanvasContentVersion, CanvasNode, CanvasPluginNode } from '@/schema/canvas';
-import type { BrokerInput } from './broker';
+import { PluginServerError, type BrokerInput } from './broker';
 import { useProjectGrants } from './grants';
 import { PluginSurface, type PluginSurfaceHost } from './PluginSurface';
 import { usePlugins } from './registry';
@@ -121,6 +121,20 @@ export function PluginNodeBody({ node, projectId, selected, inputs, resolveVersi
       if (version.kind === 'text') return version.text;
       const response = await request(canvasMediaUrl(projectId, versionId), '读取素材');
       return as === 'bitmap' ? createImageBitmap(await response.blob()) : response.arrayBuffer();
+    },
+    callServer: async (path, params, versionIds) => {
+      try {
+        // 服务端不信这里：它会重新核对插件是否启用、项目是否批准、节点与素材的归属。
+        const body = await requestJson<{ result: unknown }>(
+          `/api/plugins/${encodeURIComponent(manifest.id)}/routes${path}`, manifest.name, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project_id: projectId, node_id: node.id, inputs: versionIds, params }),
+          });
+        return body.result;
+      } catch (error) {
+        if (error instanceof ApiError && error.reason) throw new PluginServerError(error.reason);
+        throw error;
+      }
     },
   };
   return <div className="relative size-full min-h-44" onDoubleClick={() => { if (selected) setInteractive(true); }}>

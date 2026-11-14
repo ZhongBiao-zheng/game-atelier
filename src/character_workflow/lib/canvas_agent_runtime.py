@@ -142,7 +142,48 @@ class TurnContext:
 
 def needs_confirmation(tool: str, mode: str) -> bool:
     """审查模式：所有写操作都确认。Auto：一律直接执行，出图、修改、删除都不再询问（2026-10-09 定）。"""
-    return tool not in READ_TOOLS and mode != "auto"
+    return tool not in READ_TOOLS and not _plugin_tool_is_read_only(tool) and mode != "auto"
+
+
+# ── 插件贡献的工具（ADR-0037）────────────────────────────────────────────────────
+
+PLUGIN_TOOL_PREFIX = "plugin_"
+
+
+def plugin_tools() -> dict[str, dict]:
+    """已启用插件在清单里声明的 Agent 工具。只读清单，不加载插件代码。"""
+    from character_workflow.lib import plugin_registry
+    enabled = plugin_registry.enabled_ids()
+    found: dict[str, dict] = {}
+    for record in plugin_registry.scan():
+        if record.lock is None or record.plugin_id not in enabled:
+            continue
+        for tool in record.lock.contributes.agent_tools:
+            name = f"{PLUGIN_TOOL_PREFIX}{record.plugin_id.replace('-', '_')}_{tool.name}"
+            found[name] = {
+                "plugin_id": record.plugin_id, "route": tool.route, "read_only": tool.read_only,
+                "description": f"（插件：{record.lock.name}）{tool.description}",
+                "parameters": tool.parameters,
+            }
+    return found
+
+
+def _plugin_tool_is_read_only(tool: str) -> bool:
+    return tool.startswith(PLUGIN_TOOL_PREFIX) and bool(plugin_tools().get(tool, {}).get("read_only"))
+
+
+def _execute_plugin_tool(project_id: str, tool: str, arguments: dict) -> tuple[dict, list[str]]:
+    from character_workflow.lib import plugin_server
+    from character_workflow.lib.plugin_registry import PluginError
+    spec = plugin_tools().get(tool)
+    if spec is None:
+        raise CanvasToolError("INVALID_TARGET", f"未知工具 {tool}（插件可能已停用）", 422)
+    tools.authorize(LOCAL, project_id, "canvas_read" if spec["read_only"] else "canvas_edit")
+    try:
+        return plugin_server.call(spec["plugin_id"], "POST", spec["route"], project_id=project_id,
+                                  origin="agent", params=arguments)
+    except PluginError as error:
+        raise CanvasToolError(error.code, error.message, error.status) from None
 
 
 # ── 工具执行（同步，跑在线程里）──────────────────────────────────────────────────
@@ -273,6 +314,8 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
             return result
         result = _with_fresh_revision(project_id, submit)
         return result, [result["result_node_id"]] if result.get("result_node_id") else []
+    if tool.startswith(PLUGIN_TOOL_PREFIX):
+        return _execute_plugin_tool(project_id, tool, arguments)
     raise CanvasToolError("INVALID_TARGET", f"未知工具 {tool}", 422)
 
 
@@ -478,10 +521,15 @@ def build_tools() -> list:
         # 「参数无法解析」后会无视回调、一律要求人工确认，读画布也弹确认卡。
         return FunctionTool(name=name, description=description, params_json_schema=schema,
                             on_invoke_tool=invoke, strict_json_schema=False,
-                            needs_approval=False if name in READ_TOOLS else approval)
+                            needs_approval=False if name in READ_TOOLS or name in read_only_plugin_tools
+                            else approval)
 
+    # 每次组装 Agent 时读一遍已启用的插件：启停在下一轮对话生效。
+    contributed = plugin_tools()
+    read_only_plugin_tools = {name for name, spec in contributed.items() if spec["read_only"]}
     return [make(name, desc, _params_schema(name, schema))
-            for name, (desc, schema) in TOOL_SPECS.items()]
+            for name, (desc, schema) in TOOL_SPECS.items()] + [
+        make(name, spec["description"], spec["parameters"]) for name, spec in contributed.items()]
 
 
 # ── 历史 ↔ 模型输入 ──────────────────────────────────────────────────────────────

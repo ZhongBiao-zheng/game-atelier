@@ -50,8 +50,13 @@ def lock_for(source: dict[str, Any], files: dict[str, bytes]) -> dict[str, Any]:
 
 
 def write_plugin(root: Path, plugin_id: str = "demo", *, lock: dict[str, Any] | None = None,
-                 files: dict[str, bytes] | None = None, **overrides: Any) -> Path:
+                 files: dict[str, bytes] | None = None, server_source: str | None = None,
+                 **overrides: Any) -> Path:
     files = {"ui/index.html": UI_HTML} if files is None else files
+    if server_source is not None:
+        server = root / plugin_id / "server"
+        server.mkdir(parents=True, exist_ok=True)
+        (server / "__init__.py").write_text(server_source, encoding="utf-8")
     package = root / plugin_id / "package"
     for path, data in files.items():
         target = package / path
