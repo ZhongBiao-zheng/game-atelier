@@ -145,6 +145,14 @@ def _assign_images(caps: dict, refs: list[str], frame_mode: str) -> dict[str, An
 def encode_image(path: str, encode: str, label: str) -> Any:
     if encode == "file":
         return FilePart(path, label)
+    if encode == "url":
+        # 本机文件没有公网地址：经对象存储中转成 24 小时签名直链（与视频参考素材同一通道）。
+        from character_workflow.lib import oss_upload
+
+        try:
+            return oss_upload.upload_for_url(path)
+        except (oss_upload.OssNotConfiguredError, oss_upload.OssUploadError) as error:
+            raise DeclarativeError(f"{label}上传到对象存储失败：{error}") from None
     file = Path(path)
     if file.stat().st_size > INPUT_IMAGE_LIMIT:
         raise DeclarativeError(f"{label}超过 20 MB，请压缩后重试")

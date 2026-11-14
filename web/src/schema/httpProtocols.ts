@@ -22,7 +22,7 @@ export interface HttpProtocolDocument {
     headers?: Record<string, string>;
     body?: unknown;
   };
-  inputs?: { images?: { max: number; encode?: 'data_url' | 'base64' | 'file' } | null };
+  inputs?: { images?: { max: number; encode?: 'data_url' | 'base64' | 'file' | 'url' } | null };
   options?: { ratio?: string[] | null; resolution?: string[] | null; duration?: number[] | null; count?: number };
   derive?: Record<string, { from: string | string[]; map: Record<string, unknown> }>;
   result?: HttpProtocolResult;

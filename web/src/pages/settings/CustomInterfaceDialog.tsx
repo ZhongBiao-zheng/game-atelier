@@ -28,6 +28,7 @@ const HELP = (
   <div className="max-w-xs space-y-1 text-xs">
     <p>整值占位：$prompt $model $n $ratio $resolution $images $image；视频另有 $duration $durationText $firstFrame $lastFrame；轮询地址用 {'${taskId}'}。</p>
     <p>字符串内插写 {'${name}'}，字面量 $ 写 $$。取值路径如 data.*.url。</p>
+    <p>参考图编码 encode：data_url / base64 / file（表单上传）/ url（需先配置对象存储）。</p>
     <p>不支持：签名、多步上传、回调、二进制响应、参考视频 / 音频。</p>
   </div>
 );

@@ -56,7 +56,8 @@ class Auth(_Strict):
 
 class ImageInputs(_Strict):
     max: int = Field(ge=1, le=16)
-    encode: Literal["data_url", "base64", "file"] = "data_url"
+    # url：本机文件先经对象存储中转成签名直链（需要配置 OSS，保存时检查，见 http_protocols）。
+    encode: Literal["data_url", "base64", "file", "url"] = "data_url"
 
 
 class Inputs(_Strict):

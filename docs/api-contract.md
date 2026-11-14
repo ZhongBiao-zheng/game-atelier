@@ -1223,7 +1223,7 @@ timeout_seconds`；超时默认 1800 秒，允许 1–86400 秒。inspect 不写
 | `name` / `kind` | 显示名（≤60）/ `image` \| `video` |
 | `auth` | `{type: bearer\|header\|query\|none, name?, prefix?}`；header / query 需要 name |
 | `submit` | `{path, format: json\|multipart, headers?, body}`；path 为以 `/` 开头的相对路径，只能内插 `${model}` |
-| `inputs.images` | `{max: 1–16, encode: data_url\|base64\|file}`；file 只用于 multipart 顶层字段 |
+| `inputs.images` | `{max: 1–16, encode: data_url\|base64\|file\|url}`；file 只用于 multipart 顶层字段；url 经对象存储中转成 24 小时签名直链，未配置 OSS 时保存与 validate 报错 |
 | `options` | `{ratio?, resolution?, duration?, count: 1–4}`；用到对应占位符必须列出可选值 |
 | `derive` | `{名称: {from: 占位符 \| [两个占位符], map}}`；两个来源的键用 `@` 连接，须覆盖全部组合 |
 | `result` | `{urls: [路径], base64: [路径], error?}`；同步时至少一个取值路径 |

@@ -17,7 +17,7 @@ from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.http_protocol_schema import (
-    HttpProtocol, ProtocolInvalidError, declared_capabilities, parse_protocol,
+    HttpProtocol, Issue, ProtocolInvalidError, declared_capabilities, parse_protocol,
 )
 
 PROTOCOL = "declarative"
@@ -89,8 +89,24 @@ def list_protocols() -> list[StoredProtocol]:
     return [read_stored(identifier) for identifier in ids]
 
 
+def environment_issues(protocol: HttpProtocol) -> list[Issue]:
+    """依赖本机环境的检查：模板结构合法，但这台机器跑不了。只在写入边界与 validate 里用。"""
+    images = protocol.inputs.images
+    if images is not None and images.encode == "url":
+        from character_workflow.lib import keys
+
+        if keys.read_keys_db().oss is None:
+            return [Issue(path="inputs.images.encode", message=(
+                "参考图按公网地址发送需要先配置对象存储（.config/keys.json 的 oss 字段）："
+                "本机图片没有公网地址，要先上传到对象存储再把直链发给厂商"))]
+    return []
+
+
 def save_protocol(document: Any, identifier: str | None = None) -> StoredProtocol:
     protocol = parse_protocol(document)
+    issues = environment_issues(protocol)
+    if issues:
+        raise ProtocolInvalidError(issues)
     with _lock():
         if identifier is None:
             identifier = "hp-" + secrets.token_hex(6)

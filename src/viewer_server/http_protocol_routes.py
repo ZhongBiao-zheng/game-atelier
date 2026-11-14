@@ -60,6 +60,10 @@ def validate(body: _Validate) -> dict:
     except ProtocolInvalidError as error:
         return {"valid": False, "issues": [i.model_dump() for i in error.issues],
                 "declared": None, "preview": None}
+    environment = store.environment_issues(protocol)
+    if environment:
+        return {"valid": False, "issues": [i.model_dump() for i in environment],
+                "declared": declared_capabilities(protocol), "preview": None}
     try:
         preview = _preview(protocol, body.base_url or _PREVIEW_BASE, body.model or "model-id")
     except (declarative.DeclarativeError, ValueError) as error:
@@ -110,7 +114,9 @@ def delete(identifier: str) -> None:
 
 
 def _preview_encoder(_path: str, encode: str, label: str) -> str:
-    return f"<文件 {label}>" if encode == "file" else f"<{label}>"
+    if encode == "file":
+        return f"<文件 {label}>"
+    return f"<{label} 公网地址>" if encode == "url" else f"<{label}>"
 
 
 def _call_view(call: declarative.PreparedCall) -> dict[str, Any]:

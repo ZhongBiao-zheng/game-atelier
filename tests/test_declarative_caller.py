@@ -515,3 +515,46 @@ def test_image_edit_is_refused_for_declarative_models(vendor):
         run_job("edit-decl-1")
     assert read_job("edit-decl-1").status.value == "failed"
     assert vendor.received == []
+
+
+URL_REFS = {**SYNC, "inputs": {"images": {"max": 2, "encode": "url"}}}
+
+
+def _configure_oss():
+    db = keys.read_keys_db()
+    db.oss = keys.OssConfig(access_key_id="id", access_key_secret="secret", bucket="b",
+                            endpoint="oss-cn-beijing.aliyuncs.com")
+    keys.write_keys_db(db)
+
+
+def test_url_encoding_needs_object_storage_at_save_time():
+    with pytest.raises(http_protocols.ProtocolInvalidError, match="对象存储") as error:
+        http_protocols.save_protocol(copy.deepcopy(URL_REFS))
+    assert [issue.path for issue in error.value.issues] == ["inputs.images.encode"]
+    _configure_oss()
+    assert http_protocols.save_protocol(copy.deepcopy(URL_REFS)).protocol is not None
+
+
+def test_url_encoding_sends_the_object_storage_link(vendor, tmp_path, monkeypatch):
+    from character_workflow.lib import oss_upload
+
+    _configure_oss()
+    configure(vendor, URL_REFS)
+    signed = "https://b.oss-cn-beijing.aliyuncs.com/video-refs/abc.png?Signature=x"
+    monkeypatch.setattr(oss_upload, "upload_for_url", lambda _path: signed)
+    vendor.on("POST", "/v1/images/generations", {"data": [
+        {"url": signed}, {"url": vendor.url + "/files/a.png"}]})
+    paths = run_image(tmp_path, {"reference_images": write_refs(tmp_path, 1)})
+    assert vendor.calls("POST")[0].json()["image"] == [signed]
+    assert len(paths) == 1  # 回显的输入直链不算结果
+
+
+def test_url_encoding_fails_clearly_when_storage_is_removed_later(vendor, tmp_path):
+    _configure_oss()
+    configure(vendor, URL_REFS)
+    db = keys.read_keys_db()
+    db.oss = None
+    keys.write_keys_db(db)
+    with pytest.raises(declarative.DeclarativeError, match="图片1上传到对象存储失败"):
+        run_image(tmp_path, {"reference_images": write_refs(tmp_path, 1)})
+    assert vendor.calls("POST") == []

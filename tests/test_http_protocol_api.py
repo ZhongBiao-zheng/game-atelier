@@ -221,3 +221,12 @@ def test_image_size_and_canvas_rules_follow_the_template(client):
     assert not canvas_runs._upscale_model_eligible(key, key.models[0])
     (data_root.config_dir() / "http-protocols" / f"{other}.json").write_text("{", encoding="utf-8")
     assert not canvas_runs._supports_canvas_image_generation(key, key.models[0])
+
+
+def test_validate_reports_missing_object_storage(client):
+    document = {**DOC, "inputs": {"images": {"max": 3, "encode": "url"}}}
+    result = client.post("/api/http-protocols/validate", json={"document": document}).json()
+    assert not result["valid"] and result["preview"] is None
+    assert result["issues"][0]["path"] == "inputs.images.encode"
+    response = client.post("/api/http-protocols", json={"document": document})
+    assert response.status_code == 422 and "对象存储" in response.json()["detail"]["message"]
