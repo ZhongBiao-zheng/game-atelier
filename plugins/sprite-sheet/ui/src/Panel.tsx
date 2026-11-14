@@ -7,7 +7,7 @@ import { FrameStrip } from './FrameStrip';
 import { Button, Checkbox, NumberField, SelectField } from './kit/controls';
 import { anchorPoint, layoutFrames } from './layout';
 import {
-  DEFAULT_GRID, DEFAULT_STATE, MAX_OFFSET, gridFrames, moveFrame, nudgeFrame, parseState,
+  DEFAULT_GRID, DEFAULT_STATE, MAX_OFFSET, frameAnchor, gridFrames, moveFrame, nudgeFrame, parseState, setFrameAnchor,
   type Align, type Grid, type SheetState,
 } from './sheetState';
 
@@ -167,7 +167,13 @@ export function Panel({ client }: { client: PluginClient }) {
 
   if (!source) return <div className="panel"><div className="empty">{error ?? '连接一张图片'}</div></div>;
   const frame = frames[current];
-  const anchorPx = layout ? anchorPoint(layout.cellW, layout.cellH, state.anchor) : [0, 0];
+  const ownAnchor = frame?.ax !== undefined;
+  const anchor = frameAnchor(frame, state.anchor);
+  const anchorPx = layout ? anchorPoint(layout.cellW, layout.cellH, anchor) : [0, 0];
+  /** 改锚点：当前帧有单独锚点时改它的，否则改整表的。 */
+  const setAnchor = (next: { x: number; y: number }) => (ownAnchor
+    ? save({ frames: setFrameAnchor(frames, current, next) })
+    : save({ anchor: next }));
   return <div className="panel">
     <div className="main">
       <div className="stage" tabIndex={0} aria-label="原图" aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Delete">
@@ -199,8 +205,8 @@ export function Panel({ client }: { client: PluginClient }) {
       </section>
       {frame && layout && <section className="group">
         <h2>第 {current + 1} 帧</h2>
-        <FrameEditor bitmap={source.bitmap} layout={layout} index={current} onion={state.onion} anchor={state.anchor}
-          onAnchor={anchor => save({ anchor })} />
+        <FrameEditor bitmap={source.bitmap} layout={layout} index={current} onion={state.onion} anchor={anchor}
+          onAnchor={setAnchor} />
         <div className="row">
           <NumberField label="偏移 X" value={frame.ox ?? 0} min={-MAX_OFFSET} max={MAX_OFFSET}
             onChange={ox => save({ frames: nudgeFrame(frames, current, ox - (frame.ox ?? 0), 0) })} />
@@ -209,10 +215,12 @@ export function Panel({ client }: { client: PluginClient }) {
         </div>
         <div className="row">
           <NumberField label="锚点 X" value={anchorPx[0]} min={0} max={layout.cellW}
-            onChange={x => save({ anchor: { ...state.anchor, x: layout.cellW ? x / layout.cellW : 0.5 } })} />
+            onChange={x => setAnchor({ ...anchor, x: layout.cellW ? x / layout.cellW : 0.5 })} />
           <NumberField label="锚点 Y" value={anchorPx[1]} min={0} max={layout.cellH}
-            onChange={y => save({ anchor: { ...state.anchor, y: layout.cellH ? y / layout.cellH : 1 } })} />
+            onChange={y => setAnchor({ ...anchor, y: layout.cellH ? y / layout.cellH : 1 })} />
         </div>
+        <Checkbox label="本帧单独锚点" checked={ownAnchor}
+          onChange={own => save({ frames: setFrameAnchor(frames, current, own ? state.anchor : null) })} />
         <Checkbox label="洋葱皮" checked={state.onion} onChange={onion => save({ onion })} />
       </section>}
       <section className="group">

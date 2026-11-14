@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import cases from '../../tests/layout_cases.json';
 import { anchorPoint, contentBox, layoutFrames, placements } from './layout';
-import { gridFrames, moveFrame, nudgeFrame, parseState } from './sheetState';
+import { frameAnchor, gridFrames, moveFrame, nudgeFrame, parseState, setFrameAnchor } from './sheetState';
 import type { Align } from './sheetState';
 
 describe('排布算法与服务端一致', () => {
@@ -77,5 +77,27 @@ describe('数值输入', () => {
     expect(normalizeDigits('１２')).toBe('12');
     expect(normalizeDigits(' －５ ')).toBe('-5');
     expect(normalizeDigits('abc')).toBe('abc');
+  });
+});
+
+describe('逐帧锚点', () => {
+  const sheetAnchor = { x: 0.5, y: 1 };
+  it('有单独锚点用它的，否则用整表的', () => {
+    expect(frameAnchor({ x: 0, y: 0, w: 1, h: 1, ax: 0.2, ay: 0.3 }, sheetAnchor)).toEqual({ x: 0.2, y: 0.3 });
+    expect(frameAnchor({ x: 0, y: 0, w: 1, h: 1 }, sheetAnchor)).toBe(sheetAnchor);
+    expect(frameAnchor(undefined, sheetAnchor)).toBe(sheetAnchor);
+  });
+  it('设置与去掉单独锚点，只动那一帧，偏移保留', () => {
+    const frames = [{ x: 0, y: 0, w: 1, h: 1 }, { x: 1, y: 0, w: 1, h: 1, ox: 2 }];
+    const set = setFrameAnchor(frames, 1, { x: 0, y: 0.5 });
+    expect(set[1]).toEqual({ x: 1, y: 0, w: 1, h: 1, ox: 2, ax: 0, ay: 0.5 });
+    expect(set[0]).toBe(frames[0]);
+    expect(setFrameAnchor(set, 1, null)[1]).toEqual({ x: 1, y: 0, w: 1, h: 1, ox: 2 });
+    expect(nudgeFrame(set, 1, 1, 0)[1]).toMatchObject({ ox: 3, ax: 0, ay: 0.5 });
+  });
+  it('解析时两个分量都在才算单独锚点，超出范围夹到 0–1', () => {
+    const state = parseState({ frames: [{ x: 0, y: 0, w: 1, h: 1, ax: 2, ay: -1 }, { x: 0, y: 0, w: 1, h: 1, ax: 0.5 }] });
+    expect(state.frames[0]).toMatchObject({ ax: 1, ay: 0 });
+    expect(state.frames[1].ax).toBeUndefined();
   });
 });

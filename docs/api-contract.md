@@ -1342,6 +1342,6 @@ multipart 里的数组值展开成同名重复字段。
 
 ### 精灵表的逐帧编辑（B4 补充）
 
-- 节点数据（`payload`，版本 1，新字段都可缺省）：`frames[]` 每项 `{x, y, w, h, ox?, oy?}`，`ox` / `oy` 是逐帧偏移（像素，±512）；`grid {columns, rows, margin, spacing}`；`columns`、`spacing`、`margin`、`align`、`trim`（默认 true）、`anchor {x, y}`（0–1 比例，默认 0.5 / 1）、`fps`、`onion`。
-- `/repack` 接受上述字段：每帧先按 `trim` 裁透明边，格子取所有帧最大宽高，按 `align` 放好后再加偏移，超出格子的部分裁掉。返回的每帧 `anchor_x/anchor_y` 与 `meta.anchor` 为 `floor(格宽 × anchor.x)`、`floor(格高 × anchor.y)`。
+- 节点数据（`payload`，版本 1，新字段都可缺省）：`frames[]` 每项 `{x, y, w, h, ox?, oy?, ax?, ay?}`，`ox` / `oy` 是逐帧偏移（像素，±512），`ax` / `ay` 是这一帧单独的锚点（0–1，两个都要有，省略时用整表锚点）；`grid {columns, rows, margin, spacing}`；`columns`、`spacing`、`margin`、`align`、`trim`（默认 true）、`anchor {x, y}`（0–1 比例，默认 0.5 / 1）、`fps`、`onion`。
+- `/repack` 接受上述字段：每帧先按 `trim` 裁透明边，格子取所有帧最大宽高，按 `align` 放好后再加偏移，超出格子的部分裁掉。返回的每帧 `anchor_x/anchor_y` 按该帧的锚点（有单独锚点用它的，否则用整表的）算，`meta.anchor` 是整表锚点，都是 `floor(格宽 × x)`、`floor(格高 × y)`。
 - 界面预览与服务端用同一套排布算法，两端都跑 `plugins/sprite-sheet/tests/layout_cases.json`。

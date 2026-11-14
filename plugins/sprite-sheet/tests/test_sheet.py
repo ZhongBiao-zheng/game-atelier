@@ -208,3 +208,18 @@ def test_repack_rejects_bad_offsets(frame_patch):
 def test_repack_rejects_bad_anchor(anchor):
     with pytest.raises(ValueError, match="锚点"):
         sheet.repack(strip(2), sheet.grid_frames(32, 16, 2, 1), columns=2, anchor=anchor)
+
+
+def test_repack_per_frame_anchor_overrides_the_sheet_anchor():
+    frames = sheet.detect_frames(strip(3))["frames"]
+    frames[1] = {**frames[1], "ax": 0, "ay": 0.5}
+    _png, data = sheet.repack(strip(3), frames, columns=3, anchor=(0.5, 1.0))
+    assert data["meta"]["anchor"] == {"x": 4, "y": 12}
+    assert [(frame["anchor_x"], frame["anchor_y"]) for frame in data["frames"]] == [(4, 12), (0, 6), (4, 12)]
+
+
+@pytest.mark.parametrize("patch", [{"ax": 0.5}, {"ax": 0.5, "ay": "1"}, {"ax": 1.5, "ay": 1}])
+def test_repack_rejects_bad_per_frame_anchor(patch):
+    frames = [{"x": 0, "y": 0, "w": 16, "h": 16, **patch}]
+    with pytest.raises(ValueError, match="锚点"):
+        sheet.repack(strip(1), frames, columns=1)

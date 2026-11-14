@@ -115,6 +115,16 @@ def placements(sizes: list[tuple[int, int]], offsets: list[tuple[int, int]],
     return cell_w, cell_h, result
 
 
+def _frame_anchor(frame: dict[str, Any], fallback: tuple[float, float]) -> tuple[float, float]:
+    """这一帧的锚点：带了 ax / ay 就用它的（两个都要有），否则用整表的。"""
+    if "ax" not in frame and "ay" not in frame:
+        return fallback
+    ax, ay = frame.get("ax"), frame.get("ay")
+    if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in (ax, ay)):
+        raise ValueError("锚点要在 0 到 1 之间")
+    return float(ax), float(ay)
+
+
 def anchor_point(cell_w: int, cell_h: int, anchor: tuple[float, float]) -> tuple[int, int]:
     """锚点在格内的像素位置。anchor 是 0–1 的比例，(0.5, 1) 是底边中点。"""
     ax, ay = anchor
@@ -144,6 +154,7 @@ def repack(image: Image.Image, frames: list[dict[str, Any]], *, columns: int, sp
         offsets.append((_offset(frame, "ox"), _offset(frame, "oy")))
     cell_w, cell_h, positions = placements([tile.size for tile in tiles], offsets, align)
     anchor_x, anchor_y = anchor_point(cell_w, cell_h, anchor)
+    frame_anchors = [anchor_point(cell_w, cell_h, _frame_anchor(frame, anchor)) for frame in frames]
     columns = min(columns, len(tiles))
     rows = -(-len(tiles) // columns)
     sheet_w = 2 * margin + columns * cell_w + (columns - 1) * spacing
@@ -158,8 +169,9 @@ def repack(image: Image.Image, frames: list[dict[str, Any]], *, columns: int, sp
         cell = Image.new("RGBA", (cell_w, cell_h), (0, 0, 0, 0))
         cell.paste(tile, (dx, dy))  # 先画进单独的格子，偏移出界的部分在这里被裁掉
         sheet.paste(cell, (cell_x, cell_y))
+        frame_x, frame_y = frame_anchors[index]
         placed.append({"x": cell_x, "y": cell_y, "w": cell_w, "h": cell_h,
-                       "anchor_x": anchor_x, "anchor_y": anchor_y})
+                       "anchor_x": frame_x, "anchor_y": frame_y})
     buffer = io.BytesIO()
     sheet.save(buffer, "PNG")
     data = {"frames": placed, "meta": {"size": {"w": sheet_w, "h": sheet_h}, "columns": columns,

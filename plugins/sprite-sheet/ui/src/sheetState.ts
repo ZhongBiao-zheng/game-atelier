@@ -1,5 +1,6 @@
 /** 节点里保存的精灵表设置。读到不认识的版本或坏数据时回落到默认值，不覆盖原数据直到用户改动。 */
-export interface Frame { x: number; y: number; w: number; h: number; ox?: number; oy?: number }
+/** `ox` / `oy`：逐帧偏移（像素）。`ax` / `ay`：这一帧单独的锚点（0–1 比例），省略时用整表锚点。 */
+export interface Frame { x: number; y: number; w: number; h: number; ox?: number; oy?: number; ax?: number; ay?: number }
 export type Align = 'bottom-center' | 'center' | 'top-left';
 export interface Grid { columns: number; rows: number; margin: number; spacing: number }
 export interface SheetState {
@@ -36,7 +37,10 @@ function parseFrame(item: unknown): Frame[] {
   const parsed: Frame = { x: frame.x!, y: frame.y!, w: frame.w!, h: frame.h! };
   const ox = int(frame.ox, 0, -MAX_OFFSET, MAX_OFFSET);
   const oy = int(frame.oy, 0, -MAX_OFFSET, MAX_OFFSET);
-  return [ox || oy ? { ...parsed, ox, oy } : parsed];
+  const withOffset = ox || oy ? { ...parsed, ox, oy } : parsed;
+  // 单独锚点要两个分量都在：只剩一个时当作没有覆盖，避免和整表锚点拼出不想要的点。
+  return [isNumber(frame.ax) && isNumber(frame.ay)
+    ? { ...withOffset, ax: ratio(frame.ax, 0.5), ay: ratio(frame.ay, 1) } : withOffset];
 }
 
 export function parseState(payload: unknown): SheetState {
@@ -81,6 +85,20 @@ export function moveFrame(frames: readonly Frame[], from: number, to: number): F
   const [moved] = next.splice(from, 1);
   next.splice(Math.max(0, Math.min(next.length, to)), 0, moved);
   return next;
+}
+
+/** 这一帧实际用的锚点：有单独锚点用它的，否则用整表的。 */
+export function frameAnchor(frame: Frame | undefined, fallback: { x: number; y: number }): { x: number; y: number } {
+  return frame?.ax !== undefined && frame.ay !== undefined ? { x: frame.ax, y: frame.ay } : fallback;
+}
+
+/** 设置或去掉某一帧的单独锚点。 */
+export function setFrameAnchor(frames: readonly Frame[], index: number, anchor: { x: number; y: number } | null): Frame[] {
+  return frames.map((frame, at) => {
+    if (at !== index) return frame;
+    const { ax: _ax, ay: _ay, ...rest } = frame;
+    return anchor ? { ...rest, ax: anchor.x, ay: anchor.y } : rest;
+  });
 }
 
 export function nudgeFrame(frames: readonly Frame[], index: number, dx: number, dy: number): Frame[] {
