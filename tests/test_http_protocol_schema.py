@@ -86,3 +86,18 @@ def test_resolve_path():
     assert resolve_path(data, "task.status") == ["ok"]
     assert resolve_path(data, "missing.path") == []
     assert strings_at(data, ["data.*.url", "data.0.url", "output.*"]) == ["a", "b", "x", "y"]
+
+
+EXAMPLES = json.loads((Path(__file__).parents[1] / "web/src/pages/settings/customInterfaceExamples.json")
+                      .read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("example", EXAMPLES, ids=lambda e: e["id"])
+def test_bundled_examples_are_valid(example):
+    """设置页「从示例开始」的每一份都必须能直接保存。"""
+    parse_protocol(example["document"])
+
+
+def test_examples_cover_sync_image_async_image_and_video():
+    shapes = {(e["document"]["kind"], "poll" in e["document"]) for e in EXAMPLES}
+    assert shapes == {("image", False), ("image", True), ("video", True)}

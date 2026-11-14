@@ -32,8 +32,8 @@ class Received:
 
 
 class FakeVendor(ThreadingHTTPServer):
-    def __init__(self):
-        super().__init__(("127.0.0.1", 0), _Handler)
+    def __init__(self, port: int = 0):
+        super().__init__(("127.0.0.1", port), _Handler)
         self.routes: dict[tuple[str, str], list[tuple[int, object, dict]]] = {}
         self.received: list[Received] = []
 

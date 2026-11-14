@@ -72,6 +72,11 @@ def normalize_image_size_params(key: KeySpec, model: str, params: dict[str, Any]
         model = channel_model.id
     result = {name: value for name, value in params.items() if value is not None}
     result.pop("custom_size", None)
+    spec = next((item for item in getattr(key, "models", ()) if item.id == model), None)
+    if spec is not None and spec.protocol == "declarative":
+        # 自定义接口（ADR-0036）：比例 / 分辨率按模板声明原样交给执行器校验，不套内置尺寸规则。
+        result.pop("size", None)
+        return result
     if key.provider == "comfyui":
         for field in ("size_mode", "size", "ratio", "resolution", "quality", "background"):
             result.pop(field, None)

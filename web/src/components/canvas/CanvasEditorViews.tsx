@@ -2119,6 +2119,7 @@ export function CanvasGenerationComposer({
   const channel = selectedKey && selectedModel ? routeChannel(selectedKey, selectedModel) : null;
   const channelModelId = channel?.model.id ?? draft.model;
   const channelProtocol = channel?.model.protocol;
+  const channelDeclared = channel?.model.declared;
   const imageCaps = draft.mode === 'image' && selectedModel
     ? selectionImageCaps(selectedKey, draft.model)
     : null;
@@ -2127,9 +2128,9 @@ export function CanvasGenerationComposer({
   // 首尾帧连接。selectedModel 取自 context.keys 里的元素，引用本身是稳的。
   const rawVideoCaps = useMemo(
     () => draft.mode === 'video' && selectedModel
-      ? canvasVideoEditCaps(channelModelId, channelProtocol)
+      ? canvasVideoEditCaps(channelModelId, channelProtocol, channelDeclared)
       : null,
-    [draft.mode, channelModelId, channelProtocol, selectedModel],
+    [draft.mode, channelModelId, channelProtocol, channelDeclared, selectedModel],
   );
   const videoCaps = useMemo(
     () => rawVideoCaps && editingExistingVideo

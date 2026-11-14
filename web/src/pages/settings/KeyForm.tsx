@@ -9,6 +9,9 @@ import { getChatGPTSubscription, type ChatGPTSubscriptionStatus, createKey, patc
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { checkGateway } from '@/api/gateway';
 import { ApiError } from '@/api/http';
+import { listHttpProtocols } from '@/api/httpProtocols';
+import type { HttpProtocolKind, HttpProtocolRow } from '@/schema/httpProtocols';
+import { CustomInterfaceDialog } from './CustomInterfaceDialog';
 
 import { PROVIDER_PRESETS, providerPresetId, type ProviderKind } from './providerPresets';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -114,6 +117,14 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   // 编辑态打开时密钥框是掩码（前端只有掩码）；create 态字段值即用户实输的真值。
   const [keyRevealed, setKeyRevealed] = useState(mode !== 'edit');
   const editing = mode === 'edit';
+  // 自定义接口（ADR-0036）：只有自定义供应商的图片 / 视频模型可以绑定。
+  const [interfaces, setInterfaces] = useState<HttpProtocolRow[]>([]);
+  const [interfaceEditor, setInterfaceEditor] = useState<{ index: number; identifier: string | null; kind: HttpProtocolKind } | null>(null);
+  const reloadInterfaces = () => listHttpProtocols().then(result => setInterfaces(result.protocols));
+  useEffect(() => {
+    if (provider !== 'custom') return;
+    listHttpProtocols().then(result => setInterfaces(result.protocols)).catch(() => setInterfaces([]));
+  }, [provider]);
   const preset = providerByValue(activePresetId);
   const isGateway = provider === GATEWAY_PROVIDER;
   const isComfy = provider === 'comfyui';
@@ -234,8 +245,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         return {
           ...m,
           // 「重拉一次列表来修协议」必须真的有效：protocol 是纯机器字段（表单里没有输入口），
-          // 命中上游就用上游值覆盖，否则存错 / 存空的行永远修不回来。
-          protocol: hit.protocol,
+          // 命中上游就用上游值覆盖，否则存错 / 存空的行永远修不回来。绑定了自定义接口的行除外。
+          protocol: m.protocol === 'declarative' ? m.protocol : hit.protocol,
           input_modalities: hit.input_modalities ?? m.input_modalities,
           // name 有输入框、可能被改成自己的叫法，只在空着或还等于 id 时补上游名。
           name: !m.name.trim() || m.name.trim() === m.id.trim() ? hit.name : m.name,
@@ -305,12 +316,14 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
           const inputModalities = modality === 'text'
             ? Array.from(new Set<ModelInputModality>(['text', ...(model.input_modalities ?? [])]))
             : model.input_modalities ?? [];
+          const bound = provider === 'custom' && model.protocol === 'declarative' && model.declarative_id;
           return {
             name: model.name.trim(),
             id: model.id.trim(),
             modality,
-            protocol: model.protocol ?? null,
+            protocol: bound ? 'declarative' : model.protocol === 'declarative' ? null : model.protocol ?? null,
             input_modalities: inputModalities,
+            ...(bound ? { declarative_id: model.declarative_id } : {}),
           };
         })
         .filter((model) => model.name && model.id);
@@ -608,11 +621,23 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                                 ...m,
                                 modality: mod,
                                 input_modalities: mod === 'text' ? ['text'] : [],
+                                // 换了分类，原来绑定的自定义接口类型就对不上了。
+                                ...(m.protocol === 'declarative' ? { protocol: null, declarative_id: null } : {}),
                               } : m));
                             }}
                           >
                             {GENERATION_MODALITIES.map((mod) => <ToggleGroupItem key={mod} value={mod}>{CATEGORY_LABELS[mod]}</ToggleGroupItem>)}
                           </ToggleGroup>
+                        )}
+                        {provider === 'custom' && (model.modality === 'image' || model.modality === 'video') && (
+                          <InterfacePicker
+                            index={index}
+                            model={model}
+                            interfaces={interfaces}
+                            onBind={(identifier) => setModels(models.map((m, i) => i === index
+                              ? { ...m, protocol: identifier ? 'declarative' : null, declarative_id: identifier } : m))}
+                            onEdit={(identifier) => setInterfaceEditor({ index, identifier, kind: model.modality as HttpProtocolKind })}
+                          />
                         )}
                         {(model.modality ?? 'image') === 'text' && (
                           <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
@@ -675,6 +700,20 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
             </>}
           </div>
         </div>
+        {interfaceEditor && <CustomInterfaceDialog
+          identifier={interfaceEditor.identifier}
+          kind={interfaceEditor.kind}
+          baseUrl={baseUrl.trim() || undefined}
+          model={models[interfaceEditor.index]?.id.trim() || undefined}
+          onClose={() => setInterfaceEditor(null)}
+          onSaved={(saved) => {
+            const { index } = interfaceEditor;
+            setModels(current => current.map((m, i) => i === index
+              ? { ...m, protocol: 'declarative', declarative_id: saved.id } : m));
+            setInterfaceEditor(null);
+            void reloadInterfaces().catch(() => undefined);
+          }}
+        />}
         {error && <p role="alert" className="px-6 pb-3 text-sm text-destructive">{error}</p>}
         <footer className="flex shrink-0 items-center gap-2 border-t border-border px-6 py-4">
           {onDelete && <Button variant="bare" type="button" onClick={onDelete} disabled={saving} className="rounded-md px-3 py-2 text-sm text-destructive">删除</Button>}
@@ -684,5 +723,38 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         </footer>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const BUILTIN_INTERFACE = '__builtin';
+const NEW_INTERFACE = '__new';
+
+/** 模型行的「接口」：默认走内置调用，或绑定一份同类型的自定义接口（ADR-0036）。 */
+function InterfacePicker({ index, model, interfaces, onBind, onEdit }: {
+  index: number;
+  model: EditableModel;
+  interfaces: HttpProtocolRow[];
+  onBind: (identifier: string | null) => void;
+  onEdit: (identifier: string | null) => void;
+}) {
+  const bound = model.protocol === 'declarative' ? model.declarative_id ?? null : null;
+  const options = interfaces.filter(item => item.kind === model.modality && (item.available || item.id === bound));
+  const missing = bound && !options.some(item => item.id === bound);
+  return (
+    <div className="flex items-center gap-2">
+      <Select value={bound ?? BUILTIN_INTERFACE} onValueChange={value => {
+        if (value === NEW_INTERFACE) onEdit(null);
+        else onBind(value === BUILTIN_INTERFACE ? null : value);
+      }}>
+        <SelectTrigger size="sm" aria-label={`模型接口 ${index + 1}`} className="w-auto"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value={BUILTIN_INTERFACE}>默认接口</SelectItem>
+          {missing && <SelectItem value={bound}>{model.declared?.name ?? '自定义接口'}</SelectItem>}
+          {options.map(item => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
+          <SelectItem value={NEW_INTERFACE}>新建自定义接口…</SelectItem>
+        </SelectContent>
+      </Select>
+      {bound && <Button variant="ghost" size="sm" type="button" onClick={() => onEdit(bound)}>编辑</Button>}
+    </div>
   );
 }

@@ -20,6 +20,7 @@ import {
   type ImageFamily,
 } from '@/lib/modelFamily';
 import { availableResolutions, type Resolution } from '@/lib/studioSize';
+import type { DeclaredCapabilities } from '@/schema/httpProtocols';
 import { imageSizeOptions, isNanoImageSizeModel } from './imageSizeCatalog';
 
 export type Quality = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
@@ -190,6 +191,28 @@ export function imageControlCaps(
     qualities,
     resolutions: tuziGpt25 ? [] : tuziGptImageTiers ? TUZI_GPT_IMAGE_RESOLUTIONS
       : base.showResolution && !isNanoImageSizeModel(modelId) ? availableResolutions(modelId) : [],
+  };
+}
+
+/** 自定义接口（ADR-0036）：能力完全取自模板声明，不按模型 id 推断，内置模型的专属控件一律不出现。
+ *  比例与分辨率都按 'ratio' 语义原样写进 params.ratio / params.resolution，由服务端按同一份声明校验。 */
+export function declaredImageCaps(declared: DeclaredCapabilities): ImageControlCaps {
+  const ratios = declared.ratios ?? [];
+  const resolutions = (declared.resolutions ?? []) as Resolution[];
+  return {
+    family: 'standard',
+    maxCount: declared.max_count,
+    maxRefImages: declared.reference_images,
+    ratios,
+    showResolution: resolutions.length > 0,
+    resolutions,
+    showCustomSize: false,
+    showAutoSize: false,
+    qualities: null,
+    complexities: null,
+    gifOutput: false,
+    transparentBackground: false,
+    sizeKind: ratios.length || resolutions.length ? 'ratio' : 'none',
   };
 }
 

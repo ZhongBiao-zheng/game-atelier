@@ -534,6 +534,11 @@ def _supports_canvas_image_generation(key: KeySpec, model: ModelSpec) -> bool:
         return True
     if key.provider not in {"openai", "midjourney", "seedream", "tokendance", "custom"}:
         return False
+    if model.protocol == "declarative":
+        from character_workflow.lib.http_protocols import declared_for
+
+        declared = declared_for(model)
+        return key.provider == "custom" and bool(declared and declared["available"])
     protocol = model.protocol or resolve_image_protocol(key.provider, key.base_url, model.id)
     return protocol in {None, "openai", "ark"}
 
@@ -1072,8 +1077,15 @@ def _validate_input_capabilities(
             raise ValueError("图片生成当前只支持文本与图片输入")
         from character_workflow.lib.callers.openai_image import max_reference_images
 
-        limit = (sum(item.type == "image" for item in model.workflow_inputs)
-                 if model.workflow_inputs is not None else max_reference_images(model.id))
+        if model.protocol == "declarative":
+            from character_workflow.lib.http_protocols import declared_for
+
+            declared = declared_for(model) or {}
+            limit = int(declared.get("reference_images") or 0)
+        elif model.workflow_inputs is not None:
+            limit = sum(item.type == "image" for item in model.workflow_inputs)
+        else:
+            limit = max_reference_images(model.id)
         if counts["image"] > limit:
             raise ValueError(f"当前图片模型最多支持 {limit} 张参考图")
         return
@@ -1131,6 +1143,8 @@ def _validate_input_capabilities(
         return
     if counts["video"] or counts["audio"]:
         raise ValueError("当前视频模型只支持文本与图片输入")
+    if protocol == "declarative":
+        return  # 自定义接口的首尾帧与参考图上限由执行器按模板声明校验（ADR-0036）。
     if protocol == "kling":
         limit = 2 if params.frame_mode == "firstlast" else 1
     elif protocol == "dashscope":
@@ -2299,6 +2313,12 @@ def _upscale_model_eligible(key: KeySpec, model: ModelSpec) -> bool:
     """AI高清可指定任何画布能运行、且吃参考图的图片模型；MJ 不收：无尺寸参数且固定出四宫格。"""
     from character_workflow.lib.callers.openai_image import image_family, max_reference_images
 
+    if model.protocol == "declarative":
+        from character_workflow.lib.http_protocols import declared_for
+
+        declared = declared_for(model) or {}
+        return (_supports_canvas_image_generation(key, model)
+                and int(declared.get("reference_images") or 0) >= 1)
     return (
         _supports_canvas_image_generation(key, model)
         and image_family(model.id) != "midjourney"

@@ -1,5 +1,6 @@
 import { request, requestJson } from './http';
 import type { ModelRouteMember } from './models';
+import type { ModelDeclared } from '@/schema/httpProtocols';
 export type ApiModality = 'image' | 'video' | 'audio' | 'llm' | string;
 export type ModelModality = 'text' | 'image' | 'video' | 'audio';
 export type ModelInputModality = 'text' | 'image' | 'video' | 'audio';
@@ -56,6 +57,10 @@ export interface KeyModel {
   members?: ModelRouteMember[];
   /** 只出现在局域网 Atelier 供应商上：网关那边该模型的成员快照，能力取交集、估价取第一个。 */
   via?: ModelRouteMember[];
+  /** 绑定的自定义接口（protocol === 'declarative'，ADR-0036）。 */
+  declarative_id?: string | null;
+  /** 服务端按绑定模板算出的只读能力声明；只出现在绑定了自定义接口的模型上。 */
+  declared?: ModelDeclared;
 }
 
 export interface WorkflowInput {

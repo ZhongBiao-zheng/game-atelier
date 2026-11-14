@@ -3,6 +3,7 @@ import { normalizeImageSizeParams } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type ImageControlCaps, type Quality } from '@/lib/imageControlCaps';
 import { hasChannelMembers, providerForAlias, routeChannel, routeMemberChoices, selectionImageCaps, storedAlias } from '@/lib/modelRoutes';
 import type { Job, JobParams } from '@/schema/jobs';
+import { availableDeclared, type ModelDeclared } from '@/schema/httpProtocols';
 import { modelModality, type KeyView } from '@/api/keys';
 import { imageFamily, isEvolinkMidjourney, supportsImageQuality } from '@/lib/modelFamily';
 import { maxReferenceImages } from '@/lib/referenceLimits';
@@ -916,7 +917,13 @@ function isTuziBaseUrl(baseUrl: string | null | undefined) {
   }
 }
 
+/** 自定义接口（ADR-0036）：只认自定义供应商、模板可用且类型一致；与服务端 canvas_runs 同判据。 */
+function declarativeModelIsRoutable(key: KeyView, model: KeyView['models'][number], kind: 'image' | 'video') {
+  return key.provider === 'custom' && availableDeclared(model.declared)?.kind === kind;
+}
+
 function canvasImageModelIsRoutable(key: KeyView, model: KeyView['models'][number]) {
+  if (model.protocol === 'declarative') return declarativeModelIsRoutable(key, model, 'image');
   if (key.provider === 'comfyui') return model.workflow_inputs != null;
   if (key.provider === 'chatgpt') return model.id === 'gpt-image-2';
   if (key.provider === 'evolink') return isEvolinkMidjourney(model.id, key.provider)
@@ -931,6 +938,7 @@ function canvasImageModelIsRoutable(key: KeyView, model: KeyView['models'][numbe
 }
 
 function canvasVideoModelIsRoutable(key: KeyView, model: KeyView['models'][number]) {
+  if (model.protocol === 'declarative') return declarativeModelIsRoutable(key, model, 'video');
   const protocol = model.protocol ?? (() => {
     const id = model.id.toLowerCase();
     if (key.provider === 'seedance') return 'seedance';
@@ -956,7 +964,9 @@ export function canvasUpscaleModelChoices(keys: KeyView[]) {
     .filter(model => canvasGenerationModelSupportsMode(key, model, 'image')
       && selectionImageCaps(key, model.id).sizeKind !== 'none'
       && imageFamily(model.id) !== 'midjourney'
-      && maxReferenceImages(model.id) >= 1)
+      && (model.protocol === 'declarative'
+        ? (availableDeclared(model.declared)?.reference_images ?? 0) >= 1
+        : maxReferenceImages(model.id) >= 1))
     .map(model => ({ key, model })));
 }
 
@@ -1057,7 +1067,7 @@ function normalizedCanvasGenerationParams(
       selectionImageCaps(key, model.id),
     );
   }
-  if (mode === 'video') return normalizeCanvasVideoParams(model.id, model.protocol, current);
+  if (mode === 'video') return normalizeCanvasVideoParams(model.id, model.protocol, current, false, model.declared);
   if (mode === 'audio') {
     return normalizeCanvasAudioParams(model.id, key.provider, model.protocol, current);
   }
@@ -1339,8 +1349,9 @@ export function normalizeCanvasAudioParams(
 export function canvasVideoEditCaps(
   model: string,
   protocol: string | null | undefined,
+  declared?: ModelDeclared | null,
 ): VideoControlCaps {
-  return videoControlCaps(model, protocol);
+  return videoControlCaps(model, protocol, declared);
 }
 
 export function supportsCanvasVideoEdit(
@@ -1359,8 +1370,9 @@ export function normalizeCanvasVideoParams(
   protocol: string | null | undefined,
   current: JobParams,
   editingExistingVideo = false,
+  declared?: ModelDeclared | null,
 ): JobParams {
-  const caps = canvasVideoEditCaps(model, protocol);
+  const caps = canvasVideoEditCaps(model, protocol, declared);
   const {
     duration: currentDuration,
     resolution: currentResolution,

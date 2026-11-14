@@ -116,7 +116,7 @@ export function StudioCompact() {
   ]);
   const channel = resolveChannel(keys, providers.find((k) => k.alias === providerAlias), model);
   const selectedModelObj = channel.key?.models.find((m) => m.id === channel.modelId);
-  const videoCaps = videoControlCaps(channel.modelId, selectedModelObj?.protocol);
+  const videoCaps = videoControlCaps(channel.modelId, selectedModelObj?.protocol, selectedModelObj?.declared);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,7 +165,7 @@ export function StudioCompact() {
     if (kind !== 'video' || !model) return;
     const selected = resolveChannel(keys, providers.find((k) => k.alias === providerAlias), model);
     const selModel = selected.key?.models.find((m) => m.id === selected.modelId);
-    const caps = videoControlCaps(selected.modelId, selModel?.protocol);
+    const caps = videoControlCaps(selected.modelId, selModel?.protocol, selModel?.declared);
     if (!caps.modes.includes(videoMode)) setVideoMode(caps.modes[0]);
     if (caps.ratios.length > 0 && !caps.ratios.includes(videoRatio)) setVideoRatio(caps.ratios[0]);
     if (caps.durations.length > 0 && !caps.durations.includes(duration)) setDuration(nearestDuration(caps.durations, duration));
@@ -308,7 +308,7 @@ export function StudioCompact() {
       ?? model;
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
     const channel = resolveChannel(keys, selectedKey, effectiveModel);
-    const effectiveCaps = videoControlCaps(channel.modelId, selectedModel?.protocol);
+    const effectiveCaps = videoControlCaps(channel.modelId, selectedModel?.protocol, selectedModel?.declared);
 
     setPending(true);
     setCompactError(null);

@@ -7,6 +7,8 @@ import { KeyForm } from './KeyForm';
 
 // 模型路由区块有自己的测试；这里按顺序喂 fetch 响应，不让它多吃一条。
 vi.mock('@/api/models', () => ({ listModelRoutes: vi.fn().mockResolvedValue([]), setModelRouteOrder: vi.fn() }));
+// 自定义接口列表同理：有自己的测试（CustomInterfaces.test.tsx），这里不占 fetch 队列。
+vi.mock('@/api/httpProtocols', () => ({ listHttpProtocols: vi.fn().mockResolvedValue({ protocols: [] }) }));
 
 const originalScrollIntoView = Element.prototype.scrollIntoView;
 

@@ -6,6 +6,8 @@
  * 未知模型走保守默认（只文生 + 单图自动，不开放视频/音频参考）。
  */
 
+import { availableDeclared, type ModelDeclared } from '@/schema/httpProtocols';
+
 /** 视频生成方式（UI 概念，决定开放哪些上传槽）。
  * 文生视频不再是显式选项：首尾帧模式下不传任何帧 = 文生视频。
  */
@@ -272,9 +274,35 @@ function klingaiCaps(id: string, protocol: string): VideoControlCaps | null {
   };
 }
 
-export function videoControlCaps(modelId?: string | null, protocol?: string | null): VideoControlCaps {
+/** 自定义接口（ADR-0036）：只开放模板声明的选项；没有参考视频 / 音频，也没有音画开关。 */
+function declaredVideoCaps(declared: ModelDeclared | null | undefined): VideoControlCaps {
+  const caps = availableDeclared(declared);
+  const frames = caps?.frames ?? 0;
+  const references = caps?.reference_images ?? 0;
+  const modes: VideoMode[] = references > 0 ? (frames > 0 ? ['firstlast', 'omni'] : ['omni']) : ['firstlast'];
+  return {
+    family: 'standard',
+    modes,
+    durations: caps?.durations ?? [],
+    resolutions: caps?.resolutions ?? [],
+    ratios: caps?.ratios ?? [],
+    supportsAudio: false,
+    supportsWatermark: false,
+    supportsReferenceVideo: false,
+    supportsReferenceAudio: false,
+    maxFrames: frames,
+    maxRefImages: references,
+    maxRefVideos: 0,
+    maxRefAudios: 0,
+  };
+}
+
+export function videoControlCaps(
+  modelId?: string | null, protocol?: string | null, declared?: ModelDeclared | null,
+): VideoControlCaps {
   const id = (modelId ?? '').toLowerCase();
   const p = protocol ?? '';
+  if (p === 'declarative') return declaredVideoCaps(declared);
   // 显式协议优先：custom 模型 id 不含族关键词也能定族；id 仍用于族内分代（seedance 2.0 vs 1.5pro 等）。
   if (p === 'seedance') return seedanceCaps(id);
   if (p === 'dashscope') return happyhorseCaps(id);

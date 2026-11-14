@@ -269,7 +269,7 @@ export function CanvasGenerationPreferencesDialog({
     : null;
   // 生成方式不是偏好（新节点一律全能参考），这里只留模型支持的那一种，不显示切换。
   const rawVideoCaps = activeMode === 'video' && effectiveChannel
-    ? canvasVideoEditCaps(effectiveChannel.model.id, effectiveChannel.model.protocol)
+    ? canvasVideoEditCaps(effectiveChannel.model.id, effectiveChannel.model.protocol, effectiveChannel.model.declared)
     : null;
   const videoMode: VideoMode = rawVideoCaps?.modes.includes('omni') ? 'omni' : 'firstlast';
   const videoCaps = rawVideoCaps ? { ...rawVideoCaps, modes: [videoMode] } : null;

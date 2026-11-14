@@ -98,9 +98,7 @@ def dispatch(
     if fn is None:
         raise WrongProviderError(f"unknown provider {key.provider!r}")
     params = kwargs.get("params")
-    # 自定义接口按模板声明的选项取值，不套内置模型的尺寸规则。
-    if (isinstance(params, dict) and params.get("size_mode") is not None
-            and not _is_declarative(key, model)):
+    if isinstance(params, dict) and params.get("size_mode") is not None:
         from character_workflow.lib.image_size import normalize_image_size_params
 
         normalized = normalize_image_size_params(key, model, params)

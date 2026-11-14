@@ -186,3 +186,38 @@ def test_canvas_catalog_uses_declared_capabilities(client):
     assert row["capabilities"]["count"] == {"min": 1, "max": 2}
     assert row["reference_limits"]["image"] == 1
     assert not model_rows("video")
+
+
+def test_image_size_and_canvas_rules_follow_the_template(client):
+    from character_workflow.lib import canvas_runs
+    from character_workflow.lib.image_size import normalize_image_size_params
+    from character_workflow.lib.schemas import CanvasSnapshotInput, JobKind, JobParams
+
+    identifier = create(client)
+    custom_key(client, identifier)
+    key = keys.find_by_alias("vendor")
+    model = key.models[0]
+    params = {"size_mode": "ratio", "ratio": "3:4", "resolution": "1K", "size": "999x999", "n": 2}
+    assert normalize_image_size_params(key, "m1", params) == {
+        "size_mode": "ratio", "ratio": "3:4", "resolution": "1K", "n": 2}
+    assert canvas_runs._supports_canvas_image_generation(key, model)
+    assert canvas_runs._upscale_model_eligible(key, model)
+
+    def image(order):
+        return CanvasSnapshotInput(order=order, source="input_connection", node_id=f"n{order}",
+                                   version_id=f"v{order}", kind="image")
+
+    canvas_runs._validate_input_capabilities(model, JobKind.IMAGE, [image(0)], JobParams())
+    with pytest.raises(ValueError, match="最多支持 1 张"):
+        canvas_runs._validate_input_capabilities(model, JobKind.IMAGE, [image(0), image(1)], JobParams())
+
+    text_only = copy.deepcopy(DOC)
+    text_only["submit"]["body"].pop("image")
+    text_only.pop("inputs")
+    other = create(client, text_only)
+    client.patch("/api/keys/vendor", json={"models": [
+        {"id": "m1", "name": "M1", "protocol": "declarative", "declarative_id": other}]})
+    key = keys.find_by_alias("vendor")
+    assert not canvas_runs._upscale_model_eligible(key, key.models[0])
+    (data_root.config_dir() / "http-protocols" / f"{other}.json").write_text("{", encoding="utf-8")
+    assert not canvas_runs._supports_canvas_image_generation(key, key.models[0])

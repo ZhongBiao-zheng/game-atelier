@@ -13,6 +13,7 @@ import { listKeys, deleteKey, patchKey } from '@/api/keys';
 import { fetchKeyLastUsed } from '@/api/usage';
 import type { KeyCreatePayload } from '@/api/keys';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
+import { CustomInterfacesSection } from './CustomInterfacesSection';
 import { Button } from '@/components/ui/button';
 
 interface Props {
@@ -221,6 +222,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
               <ul aria-label="已关闭的供应商" className="divide-y divide-border">{closedKeys.map(providerRow)}</ul>
             </div>}
           </section>}
+          {embedded && <CustomInterfacesSection />}
           <div className="text-xs text-muted-foreground">
             密钥仅存本机 <span className="font-mono">&lt;数据目录&gt;/.config/keys.json</span>
           </div>

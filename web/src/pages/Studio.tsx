@@ -244,7 +244,7 @@ function StudioFull() {
   const reEditSequence = useRef(0);
   const channel = resolveChannel(keys, providers.find((k) => k.alias === providerAlias), model);
   const selectedModelObj = channel.key?.models.find((m) => m.id === channel.modelId);
-  const videoCaps = videoControlCaps(channel.modelId, selectedModelObj?.protocol);
+  const videoCaps = videoControlCaps(channel.modelId, selectedModelObj?.protocol, selectedModelObj?.declared);
   // 切换生成类型 / keys 加载时把 alias、model 收敛到本类模型（规则见 convergeModelSelection）：
   // 界面显示的模型就是提交的模型；复刻缺模型（model 为空）时只换 key，模型位留空。
   useEffect(() => {
@@ -261,7 +261,7 @@ function StudioFull() {
     if (kind !== 'video' || !model) return;
     const selected = resolveChannel(keys, providers.find((k) => k.alias === providerAlias), model);
     const selModel = selected.key?.models.find((m) => m.id === selected.modelId);
-    const caps = videoControlCaps(selected.modelId, selModel?.protocol);
+    const caps = videoControlCaps(selected.modelId, selModel?.protocol, selModel?.declared);
     if (!caps.modes.includes(videoMode)) setVideoMode(caps.modes[0]);
     if (caps.ratios.length > 0 && !caps.ratios.includes(videoRatio)) setVideoRatio(caps.ratios[0]);
     if (caps.durations.length > 0 && !caps.durations.includes(duration)) setDuration(nearestDuration(caps.durations, duration));
@@ -720,7 +720,7 @@ function StudioFull() {
     const effectiveProvider = channel.key?.provider ?? overrideConfig?.provider;
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
     // 协议由后端按模型 id/供应商自动判定（read_keys_db 回填）；前端只在已知时用它精化 caps。
-    const effectiveCaps = videoControlCaps(channel.modelId, selectedModel?.protocol);
+    const effectiveCaps = videoControlCaps(channel.modelId, selectedModel?.protocol, selectedModel?.declared);
 
     setPending(true);
     // 视频/音频参考图复用通用文件上传端点（Task 1 已放开 video/audio）。override 携带的已是服务器路径，直接复用。

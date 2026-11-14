@@ -6,7 +6,8 @@
  */
 import type { KeyModel, KeyView } from '@/api/keys';
 import type { ModelRoute, ModelRouteMember } from '@/api/models';
-import { imageControlCaps, type ImageControlCaps } from '@/lib/imageControlCaps';
+import { declaredImageCaps, imageControlCaps, type ImageControlCaps } from '@/lib/imageControlCaps';
+import { availableDeclared } from '@/schema/httpProtocols';
 
 export const AUTO_PROVIDER_ALIAS = '@auto';
 /** 局域网 Atelier（ADR-0025）：模型带网关那边的成员快照 `via`，能力与估价按它算。 */
@@ -39,7 +40,10 @@ export function autoProviderView(routes: ModelRoute[]): KeyView | null {
 
 /** 有路由组时把「自动」放在第一项；没有可用模型就只有真实 KEY。 */
 export function withAutoProvider(keys: KeyView[], routes: ModelRoute[]): KeyView[] {
-  const available = keys.filter(key => key.enabled !== false);
+  // 模板缺失或损坏的自定义接口模型不可选（服务端执行时也会拒绝）。
+  const available = keys.filter(key => key.enabled !== false).map(key => (
+    key.models.some(model => model.declared?.available === false)
+      ? { ...key, models: key.models.filter(model => model.declared?.available !== false) } : key));
   const aliases = new Set(available.map(key => key.alias));
   const auto = autoProviderView(routes.map(route => ({
     ...route, members: route.members.filter(member => aliases.has(member.alias)),
@@ -47,6 +51,7 @@ export function withAutoProvider(keys: KeyView[], routes: ModelRoute[]): KeyView
   if (auto) auto.models = auto.models.map(model => {
     const member = model.members?.[0];
     const source = available.find(key => key.alias === member?.alias)?.models.find(item => item.id === member?.model_id);
+    if (source?.declared) return { ...model, declared: source.declared };
     return source?.workflow_inputs != null ? { ...model, workflow_inputs: source.workflow_inputs } : model;
   });
   return auto ? [auto, ...available] : available;
@@ -103,6 +108,8 @@ export function resolveChannel(
 
 /** 有成员时取全部成员能力的交集（「自动」、局域网 Atelier）；其余就是该 KEY 自己的能力。 */
 export function selectionImageCaps(key: KeyView | undefined, modelId: string): ImageControlCaps {
+  const declared = availableDeclared(key?.models.find(model => model.id === modelId)?.declared);
+  if (declared) return declaredImageCaps(declared);
   const workflow = key?.models.find(model => model.id === modelId)?.workflow_inputs;
   if (workflow != null) return { ...imageControlCaps(modelId, 'comfyui'), maxRefImages: workflow.filter(input => input.type === 'image').length };
   const members = selectionMembers(key, key?.models.find(model => model.id === modelId));

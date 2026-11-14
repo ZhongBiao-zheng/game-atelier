@@ -46,7 +46,7 @@ export function reuseRoundParameter(config: RoundConfig, parameter: RoundParamet
   if (kind === 'video') {
     const channel = resolveChannel(providers, key, model);
     const selected = channel.key?.models.find(item => item.id === channel.modelId);
-    const caps = videoControlCaps(channel.modelId, selected?.protocol);
+    const caps = videoControlCaps(channel.modelId, selected?.protocol, selected?.declared);
     switch (parameter) {
       case 'size': return config.ratio && caps.ratios.includes(config.ratio) ? { videoRatio: config.ratio } : null;
       case 'resolution': return config.videoResolution && caps.resolutions.includes(config.videoResolution) ? { videoResolution: config.videoResolution } : null;
