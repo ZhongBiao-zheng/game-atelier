@@ -165,8 +165,15 @@ function createClient(port: MessagePort, hello: PluginHandshake): PluginClient {
   port.postMessage({ type: READY_TYPE, nonce: typeof nonce === 'string' ? nonce : '' });
 
   if (hello.surface === 'panel') {
+    // 输入法组合期间的 Esc 是取消组合，不是关面板。不只看 isComposing：有的输入路径送来的
+    // Esc 不带这个标记，所以自己记组合状态；结束标记推迟一拍，同一轮里随后到的 Esc 仍算在组合里。
+    let composing = false;
+    window.addEventListener('compositionstart', () => { composing = true; }, true);
+    window.addEventListener('compositionend', () => { window.setTimeout(() => { composing = false; }, 0); }, true);
     window.addEventListener('keydown', event => {
-      if (event.key === 'Escape' && !event.isComposing && !event.defaultPrevented) void call('ui.close');
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (composing || event.isComposing || event.keyCode === 229) return;
+      void call('ui.close');
     });
   }
 

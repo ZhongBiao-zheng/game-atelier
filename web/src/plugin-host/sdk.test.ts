@@ -53,6 +53,25 @@ describe('插件 SDK 握手', () => {
     document.documentElement.classList.remove('light');
   });
 
+  it('面板里输入法组合期间的 Esc 不关面板，组合结束后的 Esc 才关', async () => {
+    const pending = connect(500);
+    const channel = post(hello({ surface: 'panel' }), window.parent);
+    const methods: string[] = [];
+    channel.port1.onmessage = event => { if (event.data?.method) methods.push(event.data.method); };
+    await pending;
+    const escape = (init: KeyboardEventInit = {}) => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', ...init }));
+    window.dispatchEvent(new CompositionEvent('compositionstart'));
+    escape();                         // 有的路径送来的 Esc 不带 isComposing
+    escape({ isComposing: true });
+    window.dispatchEvent(new CompositionEvent('compositionend'));
+    escape();                         // 同一轮里随后到的 Esc 仍算在组合里
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(methods.filter(method => method === 'ui.close')).toHaveLength(0);
+    escape();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(methods.filter(method => method === 'ui.close')).toHaveLength(1);
+  });
+
   it('协议版本不对时拒绝', async () => {
     const pending = connect(500);
     post({ ...hello(), protocol: 'atelier-plugin/99' }, window.parent);

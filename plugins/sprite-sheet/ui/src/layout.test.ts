@@ -70,3 +70,12 @@ describe('节点数据的解析', () => {
     expect(gridFrames(10, 10, { columns: 40, rows: 1, margin: 0, spacing: 0 })).toEqual([]);
   });
 });
+
+describe('数值输入', () => {
+  it('全角数字与负号换成半角', async () => {
+    const { normalizeDigits } = await import('./kit/controls');
+    expect(normalizeDigits('１２')).toBe('12');
+    expect(normalizeDigits(' －５ ')).toBe('-5');
+    expect(normalizeDigits('abc')).toBe('abc');
+  });
+});
