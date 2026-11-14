@@ -405,7 +405,9 @@ describe('KeyForm', () => {
 
     expect(screen.getByText('模型别名')).toBeInTheDocument();
     expect(screen.getByText('模型 ID')).toBeInTheDocument();
-    expect(screen.getByText('分类 / 输入')).toBeInTheDocument();
+    // 表头只对齐别名 / ID 两列输入框；分类控件在别名下方，自带标签，不再单占一格表头。
+    expect(screen.queryByText('分类 / 输入')).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText(/^模型分类 \d/)).toHaveLength(2);
     expect(screen.getAllByPlaceholderText('给人看的名字，例如：图片 5.0')).toHaveLength(2);
     expect(screen.getAllByPlaceholderText('请求里使用的 ID，例如：doubao-seedream-5-0-260128')).toHaveLength(2);
   });

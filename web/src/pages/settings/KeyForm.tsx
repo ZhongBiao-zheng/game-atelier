@@ -567,8 +567,6 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                 <div className="mb-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                   <span>模型别名</span>
                   <span>模型 ID</span>
-                  <span>分类 / 输入</span>
-                  <span className="sr-only">操作</span>
                 </div>
                 <div className="space-y-2">
                   {models.map((model, index) => (
@@ -601,13 +599,9 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                         {isLocked(model) ? (
                           /* 已存在的模型分类固化为只读徽标——添加完成后不允许再调分类。 */
                           <div role="group" aria-label={`模型分类 ${index + 1}`} className="flex items-center">
-                            <span
-                              className={`rounded-full border px-2 py-0.5 text-xs ${
-                                (model.modality ?? 'image') === 'video'
-                                  ? 'border-border text-foreground'
-                                  : 'border-primary/40 text-primary'
-                              }`}
-                            >
+                            {/* 各分类同一种外观，靠与上方模型标签相同的类型圆点区分。 */}
+                            <span className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs text-foreground">
+                              <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${typeDot(model.modality)}`} />
                               {CATEGORY_LABELS[model.modality ?? 'image']}
                             </span>
                           </div>

@@ -99,6 +99,8 @@ def test_validate_previews_poll_and_file_parts(client):
     assert preview["submit"]["body"] == {"image": ["<文件 图片1>", "<文件 图片2>"]}
     assert preview["submit"]["headers"]["X-Key"] == "***"
     assert preview["poll"]["url"].endswith("/tasks/%3Ctask-id%3E")
+    # 没有供应商上下文时用一眼能看出的占位地址，不冒充真实请求地址。
+    assert preview["submit"]["url"] == "https://服务地址/tasks"
 
 
 def test_keys_binding_is_checked_at_the_write_boundary(client):

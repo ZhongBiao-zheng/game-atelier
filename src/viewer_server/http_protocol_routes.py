@@ -14,7 +14,8 @@ from character_workflow.lib.http_protocol_schema import (
 )
 
 router = APIRouter(prefix="/api/http-protocols")
-_PREVIEW_BASE = "https://api.example.com"
+# 独立打开（没有供应商上下文）时的占位地址：一眼能看出不是真实请求地址。
+_PREVIEW_BASE = "https://服务地址"
 _MASK = "***"
 
 
