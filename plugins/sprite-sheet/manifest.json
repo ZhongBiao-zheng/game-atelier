@@ -153,6 +153,10 @@
                   "minimum": 0
                 }
               }
+            },
+            "frame_data": {
+              "type": "boolean",
+              "description": "同时把帧数据（每帧位置与锚点的 JSON）放成一个文本节点"
             }
           }
         },

@@ -21,7 +21,10 @@ const FILES = Object.entries(sources)
     source,
     file: ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX),
   }));
-const PAGES = FILES.filter(({ rel }) => !rel.startsWith('components/ui/'));
+// 沙箱里的插件界面用不了宿主的组件（运行时隔离），基础控件写在它自己的 kit/ 目录里，
+// 与宿主的 components/ui/ 同一条规则：只有这一层可以写原生控件，页面文件不行。
+const PLUGIN_KIT = /(?:^|\/)plugins\/[^/]+\/ui\/src\/kit\//;
+const PAGES = FILES.filter(({ rel }) => !rel.startsWith('components/ui/') && !PLUGIN_KIT.test(rel));
 
 // 棘轮基线（2026-10-30）：bare 含 2026-10-30 从原生 button 迁来的 Button variant="bare"
 const BARE_CONTROL_BASELINE = 178;

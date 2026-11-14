@@ -57,7 +57,9 @@ export interface PluginInput {
 }
 
 export type PluginMethod =
-  | 'node.readSelf' | 'node.writeSelf' | 'inputs.list' | 'inputs.read' | 'fonts.request' | 'server.call';
+  | 'node.readSelf' | 'node.writeSelf' | 'inputs.list' | 'inputs.read' | 'fonts.request' | 'server.call'
+  /** 请求宿主关闭本界面所在的面板（节点内容面上无效果）。 */
+  | 'ui.close';
 
 export type PluginErrorCode =
   | 'BAD_REQUEST' | 'UNKNOWN_METHOD' | 'CAPABILITY_DENIED' | 'RATE_LIMITED'

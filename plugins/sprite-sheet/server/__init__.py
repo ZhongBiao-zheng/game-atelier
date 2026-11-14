@@ -1,7 +1,12 @@
 """精灵表调整的服务端模块：界面与 Agent 共用同一组处理函数。"""
 from __future__ import annotations
 
+import json
+
 from . import sheet
+
+# 画布文本节点的正文上限。
+FRAME_DATA_MAX_CHARS = 40_000
 
 
 def _source(ctx, params: dict):
@@ -40,4 +45,13 @@ def register(api) -> None:
             align=str(params.get("align", "bottom-center")), trim=bool(params.get("trim", True)),
         )
         created = ctx.create_image(png, f"{source.title} 精灵表"[:120], beside_node_id=ctx.node_id or source.node_id)
-        return {**created, **data}
+        result = {**created, **data}
+        if params.get("frame_data"):
+            # 帧数据给引擎用：落成一个文本节点，内容是 JSON，可以直接复制。
+            encoded = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+            if len(encoded) > FRAME_DATA_MAX_CHARS:
+                result["frame_data_error"] = "帧太多，帧数据放不进文本节点"
+            else:
+                text = ctx.create_text(encoded, f"{source.title} 帧数据"[:120], beside_node_id=created["node_id"])
+                result["frame_data_node_id"] = text["node_id"]
+        return result

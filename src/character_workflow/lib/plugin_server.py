@@ -84,6 +84,45 @@ class PluginRequest:
         self.created_node_ids.append(node_id)
         return {"node_id": node_id}
 
+    def create_text(self, text: str, title: str, beside_node_id: str | None = None) -> dict:
+        """把一段文本落成画布上的普通文本节点，返回 `{node_id}`。"""
+        if "resource.create" not in self.capabilities:
+            raise PluginError("CAPABILITY_DENIED", "本项目没有允许这项能力", status=403)
+        node_id = _create_text_node(self.project_id, text, title, beside_node_id or self.node_id)
+        self.created_node_ids.append(node_id)
+        return {"node_id": node_id}
+
+
+def _create_text_node(project_id: str, text: str, title: str, beside_node_id: str | None) -> str:
+    """文本节点走与 Agent 相同的变更集入口，校验与落盘规则只有一份。"""
+    from types import SimpleNamespace
+
+    from character_workflow.lib import canvas_agent_tools as tools
+    from character_workflow.lib.canvas_agent_schema import ApplyChangesInput
+    from character_workflow.lib.canvas_projects import read_canvas_document
+    from character_workflow.lib.canvas_tool_common import CanvasToolError
+    node_id = f"text-{secrets.token_hex(6)}"
+    principal = SimpleNamespace(kind="local", session_id="plugin", grant_id=None)
+    for attempt in range(3):
+        document = read_canvas_document(project_id)
+        anchor = next((node for node in document.nodes if node.id == beside_node_id), None)
+        position = {"x": 0.0, "y": 0.0}
+        if anchor is not None:
+            height = anchor.size.height if anchor.size else 240
+            position = {"x": anchor.position.x, "y": anchor.position.y + height + 60}
+        try:
+            tools.apply_changes(principal, ApplyChangesInput(
+                project_id=project_id, expected_revision=document.revision,
+                changes=[{"op": "add_text", "title": title[:120] or "文本", "text": text,
+                          "position": position, "node_id": node_id}]))
+            return node_id
+        except CanvasToolError as error:
+            if error.code != "DOCUMENT_CONFLICT" or attempt == 2:
+                raise PluginError(error.code, error.message, status=error.status) from error
+        except ValueError as error:
+            raise PluginError("INVALID_TARGET", str(error)[:200], status=422) from error
+    raise PluginError("DOCUMENT_CONFLICT", "画布正在变化，请重试", status=409)
+
 
 def _image(project_id: str, node: Any, version_id: str) -> PluginImage:
     from character_workflow.lib.canvas_projects import resolve_canvas_media

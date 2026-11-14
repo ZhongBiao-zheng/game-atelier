@@ -1,0 +1,39 @@
+/* 精灵表调整的界面样式。颜色、字体只用宿主下发的设计 token；尺寸与圆角按 DESIGN.md 的档位。 */
+html, body, #root { height: 100%; margin: 0; }
+body { background: transparent; color: var(--foreground); font: 14px/1.5 var(--font-sans, sans-serif); }
+* { box-sizing: border-box; }
+
+.face { display: flex; flex-direction: column; height: 100%; }
+.face canvas { flex: 1; min-height: 0; width: 100%; object-fit: contain; }
+.face footer { padding: 6px 10px; font-size: 12px; color: var(--muted-foreground);
+  border-top: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.empty { flex: 1; display: grid; place-items: center; font-size: 12px; color: var(--muted-foreground); }
+
+.panel { display: grid; grid-template-columns: minmax(0, 1fr) 18rem; height: 100%; background: var(--card); }
+.stage { position: relative; min-width: 0; min-height: 0; padding: 16px; display: grid; place-items: center; overflow: hidden; }
+.stage canvas { max-width: 100%; max-height: 100%; border-radius: 10px; outline: 1px solid var(--border); }
+.side { display: flex; flex-direction: column; gap: 24px; padding: 20px; border-left: 1px solid var(--border); overflow-y: auto; }
+.group { display: flex; flex-direction: column; gap: 12px; flex-shrink: 0; }
+.side > .btn, .side > p { flex-shrink: 0; }
+.group h2 { margin: 0; font-size: 12px; font-weight: 400; color: var(--muted-foreground); }
+.row { display: flex; align-items: center; gap: 8px; }
+.row > * { flex: 1; min-width: 0; }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted-foreground); }
+.count { font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.preview { height: 96px; display: grid; place-items: center; border-radius: 10px; border: 1px solid var(--border); background: var(--popover); }
+.preview canvas { max-width: 100%; max-height: 88px; image-rendering: pixelated; }
+.error { margin: 0; font-size: 12px; color: var(--destructive); }
+.done { margin: 0; font-size: 12px; color: var(--status-done); }
+.spacer { flex: 1; }
+
+.btn { height: 36px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--secondary);
+  color: var(--foreground); font: inherit; font-weight: 500; cursor: pointer; transition: background-color 150ms ease-out; }
+.btn:hover:not(:disabled) { background: var(--accent); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn:focus-visible, .input:focus-visible, .check input:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.btn-primary { background: var(--primary); color: var(--primary-foreground); border-color: transparent; }
+.btn-primary:hover:not(:disabled) { background: var(--primary); opacity: 0.9; }
+.input { height: 36px; width: 100%; padding: 0 10px; border-radius: 10px; border: 1px solid var(--input); background: transparent;
+  color: var(--foreground); font: inherit; font-variant-numeric: tabular-nums; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--foreground); }
+.check input { accent-color: var(--primary); width: 16px; height: 16px; margin: 0; }

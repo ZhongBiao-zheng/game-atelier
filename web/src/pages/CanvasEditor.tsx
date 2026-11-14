@@ -1,7 +1,8 @@
 import { SetPromptPreviewDialog, type PromptPreviewRequest } from '@/components/assets/SetPromptPreviewDialog';
 import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
 import type { PluginNodeInput } from '@/plugin-host/PluginNodeBody';
-import type { PluginNodeContribution, PluginPackageLock } from '@/schema/plugins';
+import type { PluginImageAction, PluginNodeContribution, PluginPackageLock } from '@/schema/plugins';
+import { requestPluginPanel } from '@/plugin-host/panelRequests';
 import { pluginIcon } from '@/components/ui/icons';
 import { canvasPromptPreviewSource } from '@/lib/promptPreviewSource';
 import { flushSync } from 'react-dom';
@@ -4758,6 +4759,36 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set([compareId]));
     focusNewNodesHandler.current([compare]);
   };
+  const createPluginNodeFromImageHandler = useRef<(node: CanvasContentNode, plugin: PluginPackageLock, action: PluginImageAction) => void>(() => undefined);
+  createPluginNodeFromImageHandler.current = (node, plugin, action) => {
+    const current = latestDocument.current;
+    const target = action.action;
+    const contribution = target.kind === 'create_node'
+      ? plugin.contributes.nodes.find(item => item.type === target.node_type) : undefined;
+    if (!current || !contribution || target.kind !== 'create_node') return;
+    const size = contribution.default_size;
+    const sourceSize = canvasNodeRenderedSize(node, current.content_versions);
+    const id = makeId('plugin');
+    const created: CanvasNode = { id, type: 'plugin', title: contribution.title,
+      position: placeNewNode({ x: node.position.x + sourceSize.width + 96, y: node.position.y }, size),
+      size, z_index: 0,
+      data: { plugin_id: plugin.id, node_type: contribution.type, plugin_version: plugin.version,
+        package_digest: plugin.digest, data_schema_version: contribution.payload_schema_version,
+        payload: {}, generation_draft: null } };
+    commit(document => ({
+      ...document,
+      nodes: [...document.nodes, created],
+      connections: [...document.connections,
+        { id: makeId('connection'), role: 'input', source_node_id: node.id, target_node_id: id }],
+    }), true);
+    setSelectedConnectionIds(new Set());
+    setSelectedNodeIds(new Set([id]));
+    focusNewNodesHandler.current([created]);
+    if (target.open_panel) requestPluginPanel(id);
+  };
+  const createPluginNodeFromImage = useCallback(
+    (node: CanvasContentNode, plugin: PluginPackageLock, action: PluginImageAction) => (
+      createPluginNodeFromImageHandler.current(node, plugin, action)), []);
   const createCompareNode = useCallback(
     (node: CanvasContentNode, source: CanvasCompareSource) => createCompareNodeHandler.current(node, source), []);
   const swapCompareInputs = useCallback((nodeId: string) => {
@@ -4894,6 +4925,7 @@ function CanvasEditorInner({
     createCompareNode,
     compareInputsByNodeId,
     pluginInputsByNodeId,
+    createPluginNodeFromImage,
     swapCompareInputs,
     openCompare,
     editVideo,
@@ -4944,6 +4976,7 @@ function CanvasEditorInner({
     createCompareNode,
     compareInputsByNodeId,
     pluginInputsByNodeId,
+    createPluginNodeFromImage,
     swapCompareInputs,
     openCompare,
     openMaskEdit,

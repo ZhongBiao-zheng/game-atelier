@@ -28,6 +28,8 @@ export interface BrokerOptions {
   loadFonts: (ids: readonly string[]) => Promise<Array<{ id: string; bytes: ArrayBuffer }>>;
   /** 调用本插件声明的服务端路由。`versionIds` 是已由 broker 核对过的、当前连在节点上的素材。 */
   callServer: (path: string, params: Record<string, unknown>, versionIds: string[]) => Promise<unknown>;
+  /** 插件请求关闭它所在的面板。节点内容面不传。 */
+  closeSurface?: () => void;
   now?: () => number;
 }
 
@@ -47,6 +49,7 @@ const REQUIRED_CAPABILITY: Record<PluginMethod, string | null> = {
   'inputs.read': 'resource.read_inputs',
   'fonts.request': null,
   'server.call': 'server.call',
+  'ui.close': null,
 };
 
 /** 与清单里路由 path 的格式一致；不含 `.`，所以拼不出 `..`。 */
@@ -187,6 +190,10 @@ export function createBroker(options: BrokerOptions) {
         }
         const fonts = await options.loadFonts(params.ids as string[]);
         return { result: fonts, transfer: fonts.map(font => font.bytes) };
+      }
+      case 'ui.close': {
+        options.closeSurface?.();
+        return { result: { ok: true }, transfer: [] };
       }
       case 'server.call': {
         if (!isPlainObject(params) || typeof params.path !== 'string' || !SERVER_PATH.test(params.path)

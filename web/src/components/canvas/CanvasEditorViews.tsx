@@ -1,5 +1,8 @@
 import { AnnotationFullscreen } from './annotation/AnnotationFullscreen';
 import { PluginNodeBody, type PluginNodeInput } from '@/plugin-host/PluginNodeBody';
+import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
+import type { PluginImageAction, PluginPackageLock } from '@/schema/plugins';
+import { pluginIcon } from '@/components/ui/icons';
 import { useAnnotationEditor } from './annotation/useAnnotationEditor';
 import { AnnotationToolbar } from './annotation/AnnotationToolbar';
 import { AnnotationEditingLayer } from './annotation/AnnotationEditingLayer';
@@ -273,6 +276,8 @@ export interface CanvasNodeContextValue {
   openAngle: (node: CanvasContentNode) => void;
   upscaleImage: (node: CanvasContentNode, target: CanvasUpscaleTarget) => void;
   createCompareNode?: (node: CanvasContentNode, source: CanvasCompareSource) => void;
+  /** 图片工具栏里的插件动作：在图片旁建插件节点并连线。 */
+  createPluginNodeFromImage?: (node: CanvasContentNode, plugin: PluginPackageLock, action: PluginImageAction) => void;
   /** 插件节点 → 当前连到它的输入。按图签名重算，引用稳定。 */
   pluginInputsByNodeId?: ReadonlyMap<string, readonly PluginNodeInput[]>;
   /** 对比节点 → before / after 两侧当前接入的图。按图签名重算，引用稳定。 */
@@ -1800,6 +1805,12 @@ function ImageNodeToolbar({
   trailing?: React.ReactNode;
   onOverlayOpenChange: (open: boolean) => void;
 }) {
+  // 已启用插件在清单里声明的图片动作：按钮是宿主按清单画的，点之前不运行插件代码。
+  const plugins = usePlugins();
+  const pluginImageActions = useMemo(() => enabledPlugins(plugins).flatMap(plugin => (
+    plugin.contributes.image_actions.filter(action => action.action.kind === 'create_node')
+      .map(action => ({ plugin, action, Icon: pluginIcon(action.icon) }))
+  )), [plugins]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 「自定义工具条」从更多菜单里打开：菜单随后收起，不能把弹窗还开着的工具条一起收掉。
   const settingsOpenRef = useRef(false);
@@ -2075,6 +2086,15 @@ function ImageNodeToolbar({
               <ShareIcon />分享
             </DropdownMenuItem>
           )}
+          {content?.kind === 'image' && context.createPluginNodeFromImage && pluginImageActions.length > 0 && <>
+            <DropdownMenuSeparator />
+            {pluginImageActions.map(({ plugin, action, Icon }) => (
+              <DropdownMenuItem key={`${plugin.id}:${action.id}`} className="gap-2"
+                onSelect={() => context.createPluginNodeFromImage?.(node, plugin, action)}>
+                <Icon />{action.label}
+              </DropdownMenuItem>
+            ))}
+          </>}
           <DropdownMenuSeparator />
           <DropdownMenuItem aria-label="配置图片快捷工具" className="gap-2" onSelect={openSettings}>
             <ParamsIcon />自定义工具条

@@ -365,3 +365,13 @@ describe('握手证明', () => {
     expect(isReadyProof(message, '')).toBe(false);
   });
 });
+
+describe('插件 broker：关闭面板', () => {
+  it('不需要能力；节点内容面没有可关的面板时什么都不做', async () => {
+    const closeSurface = vi.fn();
+    const panel = setup({ closeSurface }, []);
+    expect((await call(panel.broker, 'ui.close')).response.ok).toBe(true);
+    expect(closeSurface).toHaveBeenCalledTimes(1);
+    expect((await call(setup({}, []).broker, 'ui.close')).response.ok).toBe(true);
+  });
+});

@@ -74,6 +74,7 @@ export function PluginSurface({ plugin, surface, host, nodeSignature, inputsSign
       listInputs: () => hostRef.current.listInputs(),
       readInput: (versionId, as) => hostRef.current.readInput(versionId, as),
       callServer: (path, params, versionIds) => hostRef.current.callServer(path, params, versionIds),
+      closeSurface: () => hostRef.current.closeSurface?.(),
       loadFonts: loadFontBytes,
     });
     // 在收到正确的 nonce 之前不服务任何方法：握手是发给 iframe 当时的窗口的，

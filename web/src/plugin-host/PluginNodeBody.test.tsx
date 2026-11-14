@@ -1,15 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { hoverHint } from '@/test/hint';
 
 import lockFixture from '../../../plugins/sprite-sheet/package/manifest.lock.json';
 import type { CanvasPluginNode } from '@/schema/canvas';
 import type { PluginEntry, PluginPackageLock } from '@/schema/plugins';
 import { PluginNodeBody } from './PluginNodeBody';
+import { requestPluginPanel } from './panelRequests';
 import { setPluginsSnapshot } from './registry';
 
 vi.mock('./PluginSurface', () => ({
-  PluginSurface: ({ host }: { host: { capabilities: ReadonlySet<string> } }) => (
-    <p data-testid="surface">{[...host.capabilities].sort().join(',')}</p>
+  PluginSurface: ({ host, surface }: { host: { capabilities: ReadonlySet<string>; closeSurface?: () => void }; surface: string }) => (
+    surface === 'panel'
+      ? <p data-testid="panel" onClick={() => host.closeSurface?.()}>panel</p>
+      : <p data-testid="surface">{[...host.capabilities].sort().join(',')}</p>
   ),
 }));
 
@@ -89,9 +93,11 @@ describe('插件节点内容区', () => {
     fireEvent.click(screen.getByRole('button', { name: '允许' }));
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog).toHaveTextContent('在本项目使用「精灵表调整」？');
-    expect(dialog).toHaveTextContent('它会读取连到它的素材、在画布上新建内容、保存它自己的节点数据。');
+    expect(dialog).toHaveTextContent('它会读取连到它的素材内容、在画布上新建内容、保存它自己的节点数据。');
     expect(network.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: '允许', hidden: false }));
+    // 「?」里如实说明插件读得到什么。
+    expect(await hoverHint(screen.getByRole('button', { name: '插件能做什么' }))).toHaveTextContent('它能读到完整内容');
+    fireEvent.click(within(dialog).getByRole('button', { name: '允许' }));
     expect(await screen.findByTestId('surface')).toHaveTextContent('node.read_self');
     expect(network.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
   });
@@ -112,7 +118,7 @@ describe('插件节点内容区', () => {
     setPluginsSnapshot([entry()]);
     mount();
     fireEvent.click(await screen.findByRole('button', { name: '允许' }));
-    fireEvent.click(await screen.findByRole('button', { name: '允许' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '允许' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('插件未启用');
     expect(screen.queryByTestId('surface')).not.toBeInTheDocument();
   });
@@ -122,6 +128,29 @@ describe('插件节点内容区', () => {
     setPluginsSnapshot([entry()]);
     mount();
     expect(await screen.findByTestId('surface')).toHaveTextContent(/^node\.read_self$/);
+  });
+
+  it('双击节点打开编辑面板，插件请求关闭时关上', async () => {
+    server({ 'sprite-sheet': { capabilities: manifest.capabilities } });
+    setPluginsSnapshot([entry()]);
+    mount();
+    const face = await screen.findByTestId('surface');
+    expect(screen.queryByTestId('panel')).not.toBeInTheDocument();
+    fireEvent.doubleClick(face);
+    const panel = await screen.findByTestId('panel');
+    fireEvent.click(panel);
+    await waitFor(() => expect(screen.queryByTestId('panel')).not.toBeInTheDocument());
+  });
+
+  it('工具栏动作请求打开面板：批准之前不打开，批准后打开', async () => {
+    server({});
+    setPluginsSnapshot([entry()]);
+    requestPluginPanel('sheet-1');
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: '允许' }));
+    expect(screen.queryByTestId('panel')).not.toBeInTheDocument();
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '允许' }));
+    expect(await screen.findByTestId('panel')).toBeInTheDocument();
   });
 
   it('读取批准失败按没有批准处理', async () => {

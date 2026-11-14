@@ -153,6 +153,10 @@
                   "minimum": 0
                 }
               }
+            },
+            "frame_data": {
+              "type": "boolean",
+              "description": "同时把帧数据（每帧位置与锚点的 JSON）放成一个文本节点"
             }
           }
         },
@@ -164,10 +168,10 @@
   "files": [
     {
       "path": "ui/index.html",
-      "sha256": "b9cf00801a7ec3ddc25cfb6f2109e5ae9a402cdb9b47de9bf8d5bef03484b602",
-      "bytes": 146631
+      "sha256": "79b6b8482b421550c40d4bc3eb274aac20f2a39a8b45d7f80e1c11ab5f9b99e2",
+      "bytes": 154521
     }
   ],
   "source": "bundled",
-  "digest": "sha256:d4e41ea1e05326b9090404f72a805217dc5af25ab811e87c08c817a599bceb29"
+  "digest": "sha256:9b1b7848fe3474c4a83750794186dac784c8b32ebd7c37f78ef639ba431341f8"
 }

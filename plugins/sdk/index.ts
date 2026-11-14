@@ -41,6 +41,10 @@ export interface PluginClient {
      */
     call<Result = unknown>(path: string, params?: Record<string, unknown>, inputs?: string[]): Promise<Result>;
   };
+  ui: {
+    /** 关闭编辑面板。SDK 已把 Esc 接到这里：焦点在沙箱里时宿主收不到按键。 */
+    close(): Promise<void>;
+  };
   on<Name extends PluginHostEventName>(event: Name, listener: (data: PluginHostEvents[Name]) => void): () => void;
 }
 
@@ -160,6 +164,12 @@ function createClient(port: MessagePort, hello: PluginHandshake): PluginClient {
   const nonce = (window as unknown as Record<string, unknown>)[NONCE_GLOBAL];
   port.postMessage({ type: READY_TYPE, nonce: typeof nonce === 'string' ? nonce : '' });
 
+  if (hello.surface === 'panel') {
+    window.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !event.isComposing && !event.defaultPrevented) void call('ui.close');
+    });
+  }
+
   applyTheme(theme);
   startFontLoader(hello.fonts ?? [], ids => call('fonts.request', { ids }));
 
@@ -180,6 +190,7 @@ function createClient(port: MessagePort, hello: PluginHandshake): PluginClient {
     server: {
       call: (path, params, inputs) => call('server.call', { path, params: params ?? {}, inputs: inputs ?? [] }),
     },
+    ui: { close: async () => { await call('ui.close'); } },
     on(event, listener) {
       const set = listeners.get(event) ?? new Set();
       set.add(listener as (data: unknown) => void);

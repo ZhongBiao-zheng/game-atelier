@@ -356,6 +356,51 @@ def test_agent_detects_and_repacks(sprite):
     assert node.type == "image" and node.title == "角色 精灵表"
 
 
+def test_repack_can_put_frame_data_on_the_canvas_as_a_text_node(sprite):
+    plugin_registry.set_enabled("sprite-sheet", True)
+    plugin_grants.grant(sprite, "sprite-sheet")
+    result, created = runtime.execute_tool(
+        sprite, "plugin_sprite_sheet_repack", {"image_node_id": "image-1", "columns": 4, "frame_data": True})
+    assert len(created) == 2 and result["frame_data_node_id"] == created[1]
+    document = read_canvas_document(sprite)
+    text_node = next(item for item in document.nodes if item.id == created[1])
+    assert text_node.type == "text" and text_node.title == "角色 帧数据"
+    import json as _json
+    data = _json.loads(document.content_versions[text_node.data.current_version_id].text)
+    assert len(data["frames"]) == 4 and data["meta"]["columns"] == 4
+    assert data["frames"][0] == {"x": 0, "y": 0, "w": 8, "h": 12, "anchor_x": 4, "anchor_y": 12}
+
+
+def test_surface_repack_end_to_end_through_the_route(client, sprite):
+    """界面那条路：经分发路由调用 /detect 与 /repack，素材由服务端按连线核对。"""
+    plugin_registry.set_enabled("sprite-sheet", True)
+    document = read_canvas_document(sprite)
+    version_id = next(node for node in document.nodes if node.id == "image-1").data.current_version_id
+    raw = document.model_dump(mode="json")
+    raw["nodes"].append({
+        "id": "sheet-1", "type": "plugin", "title": "精灵表", "position": {"x": 400, "y": 0}, "z_index": 0,
+        "size": {"width": 360, "height": 300},
+        "data": {"plugin_id": "sprite-sheet", "node_type": "sheet", "plugin_version": "0.1.0",
+                 "data_schema_version": 1, "payload": {}, "generation_draft": None}})
+    raw["connections"].append({"id": "c1", "role": "input", "source_node_id": "image-1", "target_node_id": "sheet-1"})
+    save_canvas_document(sprite, CanvasDocument.model_validate(raw), document.revision)
+    plugin_grants.grant(sprite, "sprite-sheet")
+    found = post(client, "detect", sprite, inputs=[version_id], plugin="sprite-sheet")
+    assert found.status_code == 200, found.text
+    frames = found.json()["result"]["frames"]
+    assert len(frames) == 4
+    placed = post(client, "repack", sprite, inputs=[version_id], plugin="sprite-sheet",
+                  params={"frames": frames, "columns": 2, "spacing": 1, "align": "center", "frame_data": True})
+    assert placed.status_code == 200, placed.text
+    after = read_canvas_document(sprite)
+    kinds = {node.id: node.type for node in after.nodes}
+    assert kinds[placed.json()["result"]["node_id"]] == "image"
+    assert kinds[placed.json()["result"]["frame_data_node_id"]] == "text"
+    # 没连图就调用：服务端给出用户看得懂的原因。
+    empty = post(client, "detect", sprite, plugin="sprite-sheet")
+    assert empty.status_code == 422 and empty.json()["detail"]["message"] == "请先连接一张图片"
+
+
 def test_agent_tool_errors_become_text(sprite):
     plugin_registry.set_enabled("sprite-sheet", True)
     plugin_grants.grant(sprite, "sprite-sheet")

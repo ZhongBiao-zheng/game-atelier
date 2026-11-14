@@ -1331,3 +1331,11 @@ multipart 里的数组值展开成同名重复字段。
 - 宿主页面（`index.html` 及所有回落到它的地址）响应头带 `Content-Security-Policy: frame-src 'none'`；`/assets/*` 不带。
 - 批准记录绑定包摘要：记录里的 `digest` 与当前包一致才直接有效；不一致时仅 `source == "bundled"` 且能力未增加才沿用，并把记录回写为新摘要。
 - 写入节点与调用服务端的数据只接受纯 JSON 且字符串必须是合规的 Unicode（不含孤立代理字符）；大小按 UTF-8 字节计，超限即拒。
+
+### 编辑面板与帧数据（B4）
+
+- 清单 `contributes.image_actions[]` 的 `create_node` 动作出现在图片工具栏「更多」菜单里：宿主在图片右侧建插件节点并连一条输入连线，`open_panel` 为真时在批准通过后打开编辑面板。
+- 插件节点声明了 `panel` surface 时，双击节点打开编辑面板（宿主的对话框，内容是同一个界面包以 `surface: "panel"` 运行）。节点内容面不接收指针事件。
+- 界面协议增加方法 `ui.close`（不需要能力）：请求宿主关闭面板。SDK 在面板里把 Esc 接到它。
+- 服务端模块上下文增加 `ctx.create_text(text, title)`（需要 `resource.create`）：落成画布上的普通文本节点，走与 Agent 相同的变更集入口，正文上限 40000 字符。
+- 精灵表调整的 `/repack` 接受 `frame_data: true`：把帧数据 JSON（`{frames:[{x,y,w,h,anchor_x,anchor_y}], meta:{size,columns,rows,cell}}`）落成文本节点，返回 `frame_data_node_id`；超过上限时返回 `frame_data_error`，图片照常生成。
