@@ -8,20 +8,32 @@
 
 ## 快速安装
 
-### 方式一：插件市场（推荐，支持 `claude plugin update` 一键更新）
+### 方式一：安装包（推荐）
+
+1. 在 [Releases](https://github.com/ZhongBiao-zheng/game-atelier/releases/latest) 下载对应平台的安装包：`GameAtelier-<版本>-windows-x64.zip`、`-macos-arm64.tar.gz` 或 `-linux-x64.tar.gz`。
+2. 完整解压到一个可写目录。
+3. 双击根目录的「启动」。
+
+无需安装 Git、uv、Python 或 Node。之后的版本在应用内更新。目录结构与更换目录的注意事项见 [`docs/release-notes.md`](docs/release-notes.md)。
+
+### 方式二：源码版（要看 / 改代码）
+
+```bash
+git clone https://cnb.cool/ZhongBiao-zheng/game-atelier.git   # 国内镜像，与 GitHub main 同步
+```
+
+双击对应系统的一键启动器：`Mac一键启动.command`、`Windows一键启动.bat` 或 `Linux一键启动.desktop`。启动器会准备运行环境并检查更新。
+
+### 可选：接入 Claude Code / Codex
+
+让外部 Agent 操作本机画布时再装。通过插件市场安装：
 
 ```bash
 claude plugin marketplace add ZhongBiao-zheng/game-atelier
 claude plugin install game-atelier@atelier
 ```
 
-### 方式二：本地源码包（要看 / 改代码，或离线分发）
-
-```bash
-git clone https://cnb.cool/ZhongBiao-zheng/game-atelier.git   # 国内镜像，与 GitHub main 同步
-```
-
-仓库自带一键安装脚本，自动检测本机已装的代理（Claude Code / Codex），把 Skill 软链过去：
+或在源码版目录运行安装脚本，自动检测本机已装的代理（Claude Code / Codex），把 Skill 软链过去：
 
 ```bash
 # macOS / Linux
@@ -47,16 +59,16 @@ claude --plugin-dir .
 
 ## 首次启动
 
-运行 `/game-atelier:viewer-server`，按指引完成本地初始化：
+启动后浏览器会打开本地页面，按指引完成初始化（已接入 Claude Code 的也可运行 `/game-atelier:viewer-server` 启动）：
 
 1. **数据目录** — 默认 `~/game-atelier/`（可自定义）
-2. **Python 环境** — 在数据目录内自动创建 `.venv`，无需手动安装依赖
+2. **Python 环境** — 安装包自带；源码版在数据目录内自动创建 `.venv`，无需手动安装依赖
 3. **API Key** — 打开本地 Web UI，在设置页添加图像服务 Key
 4. **Agent 授权** — 设置 → 本机 Agent 连接，选择项目与能力；按[本机 MCP 说明](docs/mcp-local-client.md)配置 Codex / Claude
 
 外部 Agent 通过 `canvas_*` MCP 工具操作项目；计费生成前需明确确认。凭据只保存在本地受保护的文件中。
 
-## 命令列表
+## Agent 命令（接入 Claude Code 后可用）
 
 | 命令 | 用途 |
 |---|---|
@@ -72,7 +84,7 @@ claude --plugin-dir .
 
 ## 数据目录结构
 
-数据与插件分离，卸载插件不会删除资产。
+数据与程序分离，删除或更换安装目录不会删除资产。
 
 ```
 ~/game-atelier/
@@ -102,9 +114,9 @@ claude --plugin-dir .
 
 | 现象 | 处理 |
 |---|---|
-| `uv` 未安装 | 按插件输出的命令安装，[安装文档](https://docs.astral.sh/uv/) |
+| 源码版提示 `uv` 未安装 | 按启动器输出的命令安装，[安装文档](https://docs.astral.sh/uv/)；安装包不需要 |
 | 端口 5174 被占用 | viewer-server 自动使用后续空闲端口，见 `.runtime/server.port` |
-| Web UI 没打开 | 重新运行 `/game-atelier:viewer-server` |
+| Web UI 没打开 | 重新双击启动器 |
 | Agent 提示没有授权 / MCP 工具 | 从本地设置创建项目授权，按 MCP 说明配置客户端；不退回直接出图命令 |
 | 另一个页面正在编辑 | 先保留旧页草稿，再显式接管；不同时编辑两份页面 |
 | API Key 填错 | 在 Web 设置页更新或删除后重新添加 |
