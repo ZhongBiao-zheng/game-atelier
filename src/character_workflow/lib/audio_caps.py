@@ -34,26 +34,36 @@ class AudioCaps:
     speed_max: float
     formats: tuple[str, ...]
     default_format: str
+    # 语音：朗读文本上限；音乐：描述（提示词）上限。
     max_chars: int
     instructions: bool
+    # 音乐：一次最多几首、歌词上限、哪些型号没有纯音乐。
+    max_count: int
+    max_lyrics_chars: int
+    no_instrumental_models: tuple[str, ...]
 
 
-AUDIO_CAPS: dict[str, AudioCaps] = {
-    protocol: AudioCaps(
+def _caps(protocol: str, raw: dict[str, Any]) -> AudioCaps:
+    speed = raw.get("speed") or [1, 1]
+    return AudioCaps(
         protocol=protocol,
         family=raw["family"],
-        voices=tuple(voice["id"] for voice in raw["voices"]),
-        default_voice=raw["default_voice"],
-        custom_voice=bool(raw["custom_voice"]),
-        speed_min=float(raw["speed"][0]),
-        speed_max=float(raw["speed"][1]),
+        voices=tuple(voice["id"] for voice in raw.get("voices") or []),
+        default_voice=raw.get("default_voice", ""),
+        custom_voice=bool(raw.get("custom_voice", False)),
+        speed_min=float(speed[0]),
+        speed_max=float(speed[1]),
         formats=tuple(raw["formats"]),
         default_format=raw["default_format"],
         max_chars=int(raw["max_chars"]),
-        instructions=bool(raw["instructions"]),
+        instructions=bool(raw.get("instructions", False)),
+        max_count=int(raw.get("max_count", 1)),
+        max_lyrics_chars=int(raw.get("max_lyrics_chars", 0)),
+        no_instrumental_models=tuple(raw.get("no_instrumental_models") or []),
     )
-    for protocol, raw in _RAW.items()
-}
+
+
+AUDIO_CAPS: dict[str, AudioCaps] = {protocol: _caps(protocol, raw) for protocol, raw in _RAW.items()}
 # 任何协议的内置音色：换协议时它们不能被当成「自定义音色 ID」带过去。
 _BUILTIN_VOICES = frozenset(voice for caps in AUDIO_CAPS.values() for voice in caps.voices)
 
@@ -122,4 +132,30 @@ def normalize_speech_params(caps: AudioCaps, params: dict[str, Any]) -> dict[str
     instructions = str(params.get("instructions") or "").strip()
     if caps.instructions and instructions:
         normalized["instructions"] = instructions
+    return normalized
+
+
+def supports_instrumental(caps: AudioCaps, model_id: str) -> bool:
+    return caps.family == "music" and model_id not in caps.no_instrumental_models
+
+
+def normalize_music_params(caps: AudioCaps, model_id: str, params: dict[str, Any]) -> dict[str, Any]:
+    """音乐参数：纯音乐（型号不支持就关）、歌词（纯音乐时不发）、数量夹到 1..上限。
+
+    歌词超长直接报错，不截断：截掉的段落用户看不出来，生成出的歌会少一段。
+    """
+    instrumental = params.get("instrumental") is True and supports_instrumental(caps, model_id)
+    try:
+        count = int(params.get("n") or 1)
+    except (TypeError, ValueError):
+        count = 1
+    normalized: dict[str, Any] = {
+        "instrumental": instrumental,
+        "n": max(1, min(caps.max_count, count)),
+    }
+    lyrics = str(params.get("lyrics") or "").strip()
+    if lyrics and not instrumental:
+        if len(lyrics) > caps.max_lyrics_chars:
+            raise ValueError(f"歌词不能超过 {caps.max_lyrics_chars} 字")
+        normalized["lyrics"] = lyrics
     return normalized

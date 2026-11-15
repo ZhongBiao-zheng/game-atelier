@@ -67,6 +67,7 @@ export const DEFAULT_CANVAS_UI_PREFERENCES: CanvasUiPreferences = {
     image: { selection: null, params: {} },
     video: { selection: null, params: {} },
     audio: { selection: null, params: {} },
+    music: { selection: null, params: {} },
   },
   upscale: emptyCanvasUpscalePreferences(),
   updated_at: null,

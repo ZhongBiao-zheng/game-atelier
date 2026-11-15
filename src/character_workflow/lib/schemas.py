@@ -49,6 +49,14 @@ ProviderTaskId = Annotated[
 ]
 
 
+class MusicTrack(BaseModel):
+    """音乐生成一首的厂商回报：歌名与歌词，顺序与 output_paths 一致。"""
+
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(default="", max_length=200)
+    lyric: str = Field(default="", max_length=10000)
+
+
 class LayerDecompositionBoundingBox(BaseModel):
     """One layer's placement in the reconstructed Seedream canvas."""
 
@@ -205,6 +213,7 @@ class JobParams(BaseModel):
     gateway_member: str | None = Field(default=None, max_length=120)
     provider_task_protocol: Literal[
         "tuzi_async", "tuzi_images", "seedance", "evolink", "atelier_gateway", "declarative",
+        "yinchao",
     ] | None = None
     provider_task_ids: list[ProviderTaskId] | None = Field(default=None, max_length=4)
     video_submission_attempts: list[VideoSubmissionAttempt] | None = Field(default=None, max_length=4)
@@ -240,6 +249,10 @@ class JobParams(BaseModel):
     speed: float | None = None
     response_format: str | None = None
     instructions: str | None = None
+    # 音乐生成参数：自定义歌词（不填由模型作词）、纯音乐；music_tracks 是厂商返回的每首歌名与歌词。
+    lyrics: str | None = Field(default=None, max_length=5000)
+    instrumental: bool | None = None
+    music_tracks: list[MusicTrack] | None = Field(default=None, max_length=4)
     # 2026-08-10 (B3): UI 页面风格候选 —— 结构锁定、只换风格时记来源关系。
     # style_variant = 画师给的风格方向标签；base_version = 结构所本的基准页文件名（如 v1.png）。
     style_variant: str | None = None
@@ -525,6 +538,13 @@ class CanvasAudioDefaultParams(BaseModel):
     instructions: str | None = Field(default=None, max_length=4096)
 
 
+class CanvasMusicDefaultParams(BaseModel):
+    """音乐偏好只记纯音乐开关；歌词与首数是每次的决定。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    instrumental: bool | None = None
+
+
 def _validated_canvas_default_params(value: object, schema: type[BaseModel]) -> dict[str, JsonValue]:
     return schema.model_validate(value).model_dump(mode="json", exclude_none=True)
 
@@ -573,12 +593,25 @@ class CanvasAudioGenerationDefault(BaseModel):
         return _validated_canvas_default_params(value, CanvasAudioDefaultParams)
 
 
+class CanvasMusicGenerationDefault(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    selection: CanvasGenerationModelSelection | None = None
+    params: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @field_validator("params")
+    @classmethod
+    def valid_params(cls, value: object) -> dict[str, JsonValue]:
+        return _validated_canvas_default_params(value, CanvasMusicDefaultParams)
+
+
 class CanvasGenerationDefaults(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     text: CanvasTextGenerationDefault = Field(default_factory=CanvasTextGenerationDefault)
     image: CanvasImageGenerationDefault = Field(default_factory=CanvasImageGenerationDefault)
     video: CanvasVideoGenerationDefault = Field(default_factory=CanvasVideoGenerationDefault)
+    # audio 是语音的偏好；音乐节点同属 audio 生成模式，偏好单独存一份。
     audio: CanvasAudioGenerationDefault = Field(default_factory=CanvasAudioGenerationDefault)
+    music: CanvasMusicGenerationDefault = Field(default_factory=CanvasMusicGenerationDefault)
 
 
 # 源自画师资产库「通用高清-真实-Banana Pro」，去掉写实限定，卡通 / 矢量素材同样适用。
@@ -704,7 +737,7 @@ CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
         "creation_asset_source_title", "prompt_asset_id",
     }),
     "audio": frozenset({
-        "voice", "response_format", "speed", "instructions",
+        "voice", "response_format", "speed", "instructions", "lyrics", "instrumental", "n",
         "creation_asset_source_title", "prompt_asset_id",
     }),
 }

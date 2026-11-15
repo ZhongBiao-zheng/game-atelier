@@ -31,6 +31,12 @@ def test_shared_normalize_cases(case):
     assert audio_caps.normalize_speech_params(caps, case["params"]) == case["expected"]
 
 
+@pytest.mark.parametrize("case", CASES["music"])
+def test_shared_music_cases(case):
+    caps = audio_caps.AUDIO_CAPS["yinchao-song"]
+    assert audio_caps.normalize_music_params(caps, case["model_id"], case["params"]) == case["expected"]
+
+
 def test_gateway_model_needs_every_member_on_one_protocol():
     def member(provider, model_id, protocol):
         return keys.ViaMember(alias=provider, provider=provider, model_id=model_id,
@@ -258,6 +264,7 @@ def test_models_preview_maps_vendor_speech_protocols(tmp_path, monkeypatch):
         {"id": "kling-tts", "supported_protocols": ["kling:tts"]},
         {"id": "qwen-audio-3.1-asr-flash-streaming", "supported_protocols": ["qwen:audio-asr-streaming"]},
         {"id": "tts-1", "supported_protocols": ["openai:text-to-speech"]},
+        {"id": "yc-song-4.0", "supported_protocols": ["yinchao:lyric-generate", "yinchao:song"]},
     ]
     by_id = {m["id"]: m for m in _preview_with_upstream(client, rows).json()["models"]}
 
@@ -268,6 +275,7 @@ def test_models_preview_maps_vendor_speech_protocols(tmp_path, monkeypatch):
     assert by_id["kling-tts"]["protocol"] == "kling-tts"
     assert "qwen-audio-3.1-asr-flash-streaming" not in by_id
     assert by_id["tts-1"]["protocol"] == "openai-speech"
+    assert (by_id["yc-song-4.0"]["modality"], by_id["yc-song-4.0"]["protocol"]) == ("audio", "yinchao-song")
 
 
 # ---- 用量 -----------------------------------------------------------------------------------

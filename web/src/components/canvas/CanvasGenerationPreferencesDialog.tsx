@@ -1,13 +1,14 @@
 import { Link } from 'wouter';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { VideoMode } from '@/lib/videoControlCaps';
-import { AudioIcon, ImageIcon, ResetIcon, TextIcon, UpscaleIcon, VideoIcon } from '@/components/ui/icons';
+import { AudioIcon, ImageIcon, ResetIcon, SpeechIcon, TextIcon, UpscaleIcon, VideoIcon } from '@/components/ui/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { KeyView } from '@/api/keys';
 import {
   CanvasAudioSettings,
   CanvasImageSettings,
+  CanvasMusicSettings,
   CanvasModelPicker,
   CanvasTextSettings,
   OptionTrack,
@@ -32,6 +33,8 @@ import {
   CANVAS_GENERATION_MODE_LABELS,
   canvasGenerationModelSupportsMode,
   canvasGenerationPreferenceForModel,
+  canvasGenerationSlotAudioFamily,
+  canvasGenerationSlotMode,
   canvasUpscaleAutoChoice,
   canvasUpscaleModelChoices,
   canvasVideoEditCaps,
@@ -41,7 +44,7 @@ import type {
   CanvasGenerationDefault,
   CanvasGenerationDefaults,
   CanvasGenerationDraft,
-  CanvasGenerationMode,
+  CanvasGenerationSlot,
   CanvasUpscalePreferences,
   CanvasUpscaleTarget,
   CanvasUpscaleTierPreferences,
@@ -50,18 +53,21 @@ import type { JobParams } from '@/schema/jobs';
 import { SwapLabel } from '@/components/ui/swap-label';
 import { Label } from '@/components/ui/label';
 
-const MODES = ['text', 'image', 'video', 'audio'] as const;
-export type CanvasGenerationPreferencesTab = CanvasGenerationMode | 'upscale';
-const TABS: CanvasGenerationPreferencesTab[] = [...MODES, 'upscale'];
+const SLOTS = ['text', 'image', 'video', 'audio', 'music'] as const;
+export type CanvasGenerationPreferencesTab = CanvasGenerationSlot | 'upscale';
+const TABS: CanvasGenerationPreferencesTab[] = [...SLOTS, 'upscale'];
 const TAB_LABELS: Record<CanvasGenerationPreferencesTab, string> = {
   ...CANVAS_GENERATION_MODE_LABELS,
+  audio: '语音',
+  music: '音乐',
   upscale: 'AI高清',
 };
 const TAB_ICONS = {
   text: TextIcon,
   image: ImageIcon,
   video: VideoIcon,
-  audio: AudioIcon,
+  audio: SpeechIcon,
+  music: AudioIcon,
   upscale: UpscaleIcon,
 };
 
@@ -71,6 +77,7 @@ function cloneDefaults(value: CanvasGenerationDefaults): CanvasGenerationDefault
     image: { selection: value.image.selection && { ...value.image.selection }, params: { ...value.image.params } },
     video: { selection: value.video.selection && { ...value.video.selection }, params: { ...value.video.params } },
     audio: { selection: value.audio.selection && { ...value.audio.selection }, params: { ...value.audio.params } },
+    music: { selection: value.music.selection && { ...value.music.selection }, params: { ...value.music.params } },
   };
 }
 
@@ -110,11 +117,14 @@ function defaultsForSave(
   value: CanvasGenerationDefaults,
   keys: KeyView[],
 ): CanvasGenerationDefaults {
-  function normalize<M extends CanvasGenerationMode>(mode: M): CanvasGenerationDefault<M> {
+  function normalize<M extends CanvasGenerationSlot>(mode: M): CanvasGenerationDefault<M> {
     const current = value[mode];
     if (!current.selection) {
       const automatic = keys.flatMap(key => key.models.map(model => ({ key, model })))
-        .find(choice => canvasGenerationModelSupportsMode(choice.key, choice.model, mode));
+        .find(choice => canvasGenerationModelSupportsMode(
+          choice.key, choice.model, canvasGenerationSlotMode(mode),
+          { audioFamily: canvasGenerationSlotAudioFamily(mode) },
+        ));
       if (!automatic) return current;
       const normalized = canvasGenerationPreferenceForModel(
         automatic.key,
@@ -126,7 +136,9 @@ function defaultsForSave(
     }
     const key = providerForAlias(keys, current.selection.alias);
     const model = key?.models.find(candidate => candidate.id === current.selection?.model);
-    if (!key || !model || !canvasGenerationModelSupportsMode(key, model, mode)) {
+    if (!key || !model || !canvasGenerationModelSupportsMode(
+      key, model, canvasGenerationSlotMode(mode), { audioFamily: canvasGenerationSlotAudioFamily(mode) },
+    )) {
       return { selection: null, params: {} };
     }
     return canvasGenerationPreferenceForModel(key, model, mode, current.params as JobParams)
@@ -137,6 +149,7 @@ function defaultsForSave(
     image: normalize('image'),
     video: normalize('video'),
     audio: normalize('audio'),
+    music: normalize('music'),
   };
 }
 
@@ -181,8 +194,10 @@ export function CanvasGenerationPreferencesDialog({
   }, [initialTab, open, upscale, value]);
 
   // 生成类型页签之外还有 AI高清；下面按模态计算的部分在 AI高清 页签下不渲染，取 image 只为类型收窄。
-  const activeMode: CanvasGenerationDraft['mode'] = tab === 'upscale' ? 'image' : tab;
-  const preference = draft[activeMode];
+  const activeSlot: CanvasGenerationSlot = tab === 'upscale' ? 'image' : tab;
+  const activeMode: CanvasGenerationDraft['mode'] = canvasGenerationSlotMode(activeSlot);
+  const activeAudioFamily = canvasGenerationSlotAudioFamily(activeSlot);
+  const preference = draft[activeSlot];
   const upscaleChoices = useMemo(() => canvasUpscaleModelChoices(keys), [keys]);
   const upscaleAutoChoice = useMemo(() => canvasUpscaleAutoChoice(keys), [keys]);
   const upscaleTargetSpec = CANVAS_UPSCALE_TARGETS.find(target => target.id === upscaleTarget) ?? CANVAS_UPSCALE_TARGETS[0];
@@ -212,8 +227,8 @@ export function CanvasGenerationPreferencesDialog({
 
   const providers = generationProviders ?? keys;
   const choices = useMemo<CanvasModelChoice[]>(() => providers.flatMap(key => key.models
-    .filter(model => canvasGenerationModelSupportsMode(key, model, activeMode))
-    .map(model => ({ key, model }))), [activeMode, providers]);
+    .filter(model => canvasGenerationModelSupportsMode(key, model, activeMode, { audioFamily: activeAudioFamily }))
+    .map(model => ({ key, model }))), [activeAudioFamily, activeMode, providers]);
   const selectedChoice = preference.selection
     ? choices.find(choice => (
         choice.key === providerForAlias(providers, preference.selection?.alias)
@@ -226,13 +241,13 @@ export function CanvasGenerationPreferencesDialog({
     ? canvasGenerationPreferenceForModel(
         effectiveChoice.key,
         effectiveChoice.model,
-        activeMode,
+        activeSlot,
         selectedChoice || preference.selection === null ? preference.params as JobParams : {},
       )
     : null;
   const params = (effectivePreference?.params ?? {}) as JobParams;
 
-  function setPreference(mode: CanvasGenerationDraft['mode'], next: CanvasGenerationDefault) {
+  function setPreference(mode: CanvasGenerationSlot, next: CanvasGenerationDefault) {
     setDraft(current => ({ ...current, [mode]: next }));
   }
 
@@ -240,10 +255,10 @@ export function CanvasGenerationPreferencesDialog({
     const next = canvasGenerationPreferenceForModel(
       choice.key,
       choice.model,
-      activeMode,
+      activeSlot,
       selectedChoice || preference.selection === null ? preference.params as JobParams : {},
     );
-    if (next) setPreference(activeMode, next);
+    if (next) setPreference(activeSlot, next);
   }
 
   function patchParams(patch: JobParams) {
@@ -252,11 +267,11 @@ export function CanvasGenerationPreferencesDialog({
     const next = canvasGenerationPreferenceForModel(
       effectiveChoice.key,
       effectiveChoice.model,
-      activeMode,
+      activeSlot,
       merged,
     );
     if (next) {
-      setPreference(activeMode, {
+      setPreference(activeSlot, {
         selection: preference.selection,
         params: next.params,
       });
@@ -299,7 +314,7 @@ export function CanvasGenerationPreferencesDialog({
 
         <div className="min-h-0 space-y-4 overflow-x-hidden overflow-y-auto">
         <Tabs value={tab} onValueChange={value => setTab(value as typeof tab)}>
-          <TabsList aria-label="生成类型" className="grid h-auto w-full grid-cols-5">
+          <TabsList aria-label="生成类型" className="grid h-auto w-full grid-cols-6">
             {TABS.map(mode => {
               const Icon = TAB_ICONS[mode];
               return (
@@ -414,7 +429,7 @@ export function CanvasGenerationPreferencesDialog({
         <section
           id="canvas-generation-preference-panel"
           role="tabpanel"
-          aria-label={`${CANVAS_GENERATION_MODE_LABELS[activeMode]}生成偏好`}
+          aria-label={`${TAB_LABELS[activeSlot]}生成偏好`}
           className="space-y-4 rounded-xl border border-border bg-card p-4"
         >
           <div className="space-y-2">
@@ -428,7 +443,7 @@ export function CanvasGenerationPreferencesDialog({
                 variant="ghost"
                 size="sm"
                 disabled={preference.selection === null}
-                onClick={() => setPreference(activeMode, { selection: null, params })}
+                onClick={() => setPreference(activeSlot, { selection: null, params })}
               >
                 <ResetIcon aria-hidden="true" />恢复自动选择
               </Button>
@@ -454,7 +469,7 @@ export function CanvasGenerationPreferencesDialog({
             )}
             {!choices.length && (
               <p role="status" className="text-sm text-muted-foreground">
-                当前没有可运行的{CANVAS_GENERATION_MODE_LABELS[activeMode]}模型。
+                当前没有可运行的{TAB_LABELS[activeSlot]}模型。
               </p>
             )}
           </div>
@@ -507,7 +522,18 @@ export function CanvasGenerationPreferencesDialog({
                     onWatermarkChange={watermark => patchParams({ watermark })}
                   />
                 )}
-                {activeMode === 'audio' && audioCaps && (
+                {activeSlot === 'music' && audioCaps && effectiveChannel && (
+                  <CanvasMusicSettings
+                    caps={audioCaps}
+                    modelId={effectiveChannel.model.id}
+                    params={params}
+                    rememberedOnly
+                    menuDirection="up"
+                    portalContainerRef={dialogContentRef}
+                    onPatch={patch => patchParams(patch)}
+                  />
+                )}
+                {activeSlot === 'audio' && audioCaps && (
                   <CanvasAudioSettings
                     caps={audioCaps}
                     params={params}

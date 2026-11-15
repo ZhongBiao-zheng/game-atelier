@@ -1134,15 +1134,16 @@ def _text_protocol(item: dict) -> str | None:
     return None
 
 
-# 厂商私有的语音协议：端点与请求体都不是 OpenAI 的 audio/speech，必须按厂商协议走各自的 caller。
+# 厂商私有的语音 / 音乐协议：端点与请求体都不是 OpenAI 的 audio/speech，必须按厂商协议走各自的 caller。
 _VENDOR_SPEECH_PROTOCOLS = {
     "minimax:t2a_v2": "minimax-t2a", "ark:tts": "ark-tts", "kling:tts": "kling-tts",
+    "yinchao:song": "yinchao-song",
 }
-_VENDOR_SPEECH_PREFIXES = ("minimax:", "ark:", "kling:")
+_VENDOR_SPEECH_PREFIXES = ("minimax:", "ark:", "kling:", "yinchao:")
 
 
 def _speech_protocol(protocol: str) -> str | None:
-    """上游一条协议标注对应的本机语音协议 id；不是语音生成返回 None。"""
+    """上游一条协议标注对应的本机音频协议 id（语音或音乐）；不是音频生成返回 None。"""
     if protocol in _VENDOR_SPEECH_PROTOCOLS:
         return _VENDOR_SPEECH_PROTOCOLS[protocol]
     # 同一厂商的流式（_ws）等变体不是 OpenAI 兼容端点，也不能靠 tts 字样被认成 openai-speech。

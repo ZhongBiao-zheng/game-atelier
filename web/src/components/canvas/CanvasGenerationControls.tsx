@@ -3,7 +3,7 @@ import type { WorkflowInput } from '@/api/keys';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ImagesIcon, ParamsIcon, WorkflowIcon } from '@/components/ui/icons';
+import { HelpIcon, ImagesIcon, ParamsIcon, WorkflowIcon } from '@/components/ui/icons';
 
 import { prefetchModelPickerMetrics } from '@/lib/useModelPickerMetrics';
 import { ModelPickerList } from '@/components/ModelPickerList';
@@ -27,9 +27,12 @@ import {
   audioFormatLabel,
   audioSpeedLabel,
   audioVoiceLabel,
+  normalizeMusicParams,
   normalizeSpeechParams,
+  supportsInstrumental,
   type AudioCaps,
 } from '@/lib/audioCaps';
+import { Hint } from '@/components/ui/tooltip';
 import type { JobParams } from '@/schema/jobs';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -504,6 +507,132 @@ export function CanvasAudioSettings({
                 onChange={event => setInstructionsDraft(event.target.value)}
                 onBlur={() => commitDrafts({ speed: false, instructions: true, customVoice: false })}
                 className="w-full resize-none leading-relaxed field-sizing-fixed"
+              />
+            </SettingsSection>
+          )}
+        </div>
+      </ToolbarPopover>
+    </div>
+  );
+}
+
+const MUSIC_KINDS = ['song', 'instrumental'] as const;
+const MUSIC_KIND_LABELS = { song: '歌曲', instrumental: '纯音乐' } as const;
+
+export function CanvasMusicSettings({
+  caps,
+  modelId,
+  params,
+  onPatch,
+  rememberedOnly = false,
+  menuDirection = 'up',
+  portalContainerRef,
+}: {
+  caps: AudioCaps;
+  modelId: string;
+  params: JobParams;
+  onPatch: (patch: JobParams) => void;
+  /** 生成偏好里只记纯音乐开关：歌词与首数是每次的决定，不在这里出现。 */
+  rememberedOnly?: boolean;
+} & ToolbarPopoverMenuProps) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const settings = normalizeMusicParams(caps, modelId, params as Record<string, unknown>);
+  const lyrics = settings.lyrics ?? '';
+  const [lyricsDraft, setLyricsDraft] = useState(lyrics);
+  const committedLyrics = useRef(lyrics);
+  const canInstrumental = supportsInstrumental(caps, modelId);
+
+  useEffect(() => {
+    committedLyrics.current = lyrics;
+    setLyricsDraft(lyrics);
+  }, [lyrics]);
+
+  function commitLyrics() {
+    const next = lyricsDraft.trim();
+    setLyricsDraft(next);
+    if (next === committedLyrics.current) return;
+    committedLyrics.current = next;
+    onPatch({ lyrics: next || undefined });
+  }
+
+  function close() {
+    if (!settings.instrumental) commitLyrics();
+    setOpen(false);
+  }
+
+  const kind = settings.instrumental ? 'instrumental' : 'song';
+  const summary = settings.instrumental ? '纯音乐' : lyrics ? '自定义歌词' : '歌曲';
+
+  return (
+    <div ref={anchorRef} className="relative min-w-0">
+      <Button
+        variant="outline"
+        type="button"
+        aria-label="音乐设置"
+        aria-expanded={open}
+        onClick={() => (open ? close() : setOpen(true))}
+        className="h-9 max-w-full gap-1.5 px-3 text-xs"
+      >
+        <ParamsIcon size="sm" className="shrink-0" aria-hidden="true" />
+        <span className="truncate">{rememberedOnly ? (settings.instrumental ? '纯音乐' : '歌曲') : `${summary} · ${settings.n} 首`}</span>
+      </Button>
+      <ToolbarPopover
+        open={open}
+        onClose={close}
+        anchorRef={anchorRef}
+        autoFocus
+        direction={menuDirection}
+        portalContainerRef={portalContainerRef}
+        data-testid="canvas-music-settings-popover"
+        className={cn(
+          portalContainerRef ? 'max-h-[55vh]' : 'max-h-[70vh]',
+          'w-[22.25rem] overflow-y-auto rounded-xl border border-border bg-card p-3',
+        )}
+      >
+        <div className="space-y-4">
+          {canInstrumental && (
+            <SettingsSection title="类型">
+              <OptionTrack
+                label="选择音乐类型"
+                values={MUSIC_KINDS}
+                selected={kind}
+                getLabel={value => MUSIC_KIND_LABELS[value]}
+                onSelect={value => {
+                  if (value === 'instrumental') commitLyrics();
+                  onPatch({ instrumental: value === 'instrumental' });
+                }}
+              />
+            </SettingsSection>
+          )}
+          {!settings.instrumental && !rememberedOnly && (
+            <section>
+              <div className="flex items-center gap-1 px-1 py-1 text-xs text-muted-foreground">
+                歌词
+                <Hint label="留空由模型作词；可用 [VERSE]、[CHORUS] 标出段落">
+                  <span className="inline-flex"><HelpIcon size="sm" aria-hidden="true" /></span>
+                </Hint>
+              </div>
+              <Textarea
+                aria-label="歌词"
+                rows={5}
+                maxLength={caps.maxLyricsChars}
+                value={lyricsDraft}
+                placeholder="留空由模型作词"
+                onChange={event => setLyricsDraft(event.target.value)}
+                onBlur={commitLyrics}
+                className="w-full resize-none leading-relaxed field-sizing-fixed"
+              />
+            </section>
+          )}
+          {!rememberedOnly && (
+            <SettingsSection title="数量">
+              <OptionTrack
+                label="选择生成首数"
+                values={Array.from({ length: caps.maxCount }, (_, index) => index + 1)}
+                selected={String(settings.n)}
+                getLabel={value => `${value} 首`}
+                onSelect={value => onPatch({ n: value })}
               />
             </SettingsSection>
           )}

@@ -53,7 +53,7 @@ export interface JobParams {
   /** 局域网 Atelier：网关那边实际出图的成员别名。 */
   gateway_member?: string | null;
   /** 厂商订单；Web 只读。Tuzi 支持续查，Seedance 留供核对，不自动重提。 */
-  provider_task_protocol?: 'tuzi_async' | 'tuzi_images' | 'seedance' | 'evolink' | 'atelier_gateway' | 'declarative';
+  provider_task_protocol?: 'tuzi_async' | 'tuzi_images' | 'seedance' | 'evolink' | 'atelier_gateway' | 'declarative' | 'yinchao';
   provider_task_ids?: string[];
   video_submission_attempts?: Array<{
     attempt: number;
@@ -115,6 +115,10 @@ export interface JobParams {
   speed?: number;
   response_format?: string;
   instructions?: string;
+  /** 音乐：自定义歌词（不填由模型作词）、纯音乐；music_tracks 为厂商返回的每首歌名与歌词，顺序同 output_paths。 */
+  lyrics?: string;
+  instrumental?: boolean;
+  music_tracks?: { title: string; lyric: string }[];
   // B3 UI 页面风格候选来源关系 —— 与 schemas.py::JobParams 同步
   style_variant?: string;
   base_version?: string;

@@ -1205,14 +1205,22 @@ def _normalized_params(
             text_params["reasoning_effort"] = draft.params.reasoning_effort
         normalized = text_params
     elif draft.mode == "audio":
-        if requested_count != 1:
-            raise ValueError("视频与音频生成一次只允许一个结果")
-        from character_workflow.lib.audio_caps import audio_caps, normalize_speech_params
+        from character_workflow.lib.audio_caps import (
+            audio_caps, normalize_music_params, normalize_speech_params,
+        )
 
         caps = audio_caps(key, model)
         if caps is None:
             raise ValueError("当前音频模型没有可用的语音生成协议")
-        normalized = normalize_speech_params(caps, draft.params.model_dump())
+        if caps.family == "music":
+            if requested_count < 1 or requested_count > caps.max_count:
+                raise ValueError(f"音乐一次最多生成 {caps.max_count} 首")
+            normalized = normalize_music_params(
+                caps, model.id, {**draft.params.model_dump(), "n": requested_count})
+        else:
+            if requested_count != 1:
+                raise ValueError("视频与音频生成一次只允许一个结果")
+            normalized = normalize_speech_params(caps, draft.params.model_dump())
     else:
         if requested_count != 1:
             raise ValueError("视频与音频生成一次只允许一个结果")
@@ -3652,7 +3660,7 @@ def reconcile_canvas_jobs(
     两遍：这里一遍，路由拼列表时又一遍。
     """
     from character_workflow.lib.canvas_image_edits import has_resumable_mj_task
-    from character_workflow.lib.jobs import has_resumable_gateway_task
+    from character_workflow.lib.jobs import has_resumable_gateway_task, has_resumable_music_task
     reconciled: list[str] = []
     for job in (list_jobs() if jobs is None else jobs):
         if job.namespace != "canvas" or not job.canvas_project_id:
@@ -3677,7 +3685,8 @@ def reconcile_canvas_jobs(
                 _cancel_pending_canvas_candidates(job.canvas_project_id, job.job_id)
                 reconciled.append(job.job_id)
                 continue
-            elif has_resumable_mj_task(job) or has_resumable_gateway_task(job):
+            elif (has_resumable_mj_task(job) or has_resumable_gateway_task(job)
+                  or has_resumable_music_task(job)):
                 # Only resume a known order. The caller reuses its durable task ID.
                 reconciled.append(job.job_id)
                 continue

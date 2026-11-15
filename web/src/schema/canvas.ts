@@ -101,20 +101,29 @@ export interface CanvasAudioDefaultParams {
   instructions?: string;
 }
 
+/** 音乐偏好只记纯音乐开关；歌词与首数是每次的决定。 */
+export interface CanvasMusicDefaultParams {
+  instrumental?: boolean;
+}
+
+/** 生成偏好的槽位：四种生成模式，外加音乐（音乐节点的生成模式仍是 audio，偏好单独存一份）。 */
+export type CanvasGenerationSlot = CanvasGenerationMode | 'music';
+
 export interface CanvasGenerationParamsByMode {
   text: CanvasTextDefaultParams;
   image: CanvasImageDefaultParams;
   video: CanvasVideoDefaultParams;
   audio: CanvasAudioDefaultParams;
+  music: CanvasMusicDefaultParams;
 }
 
-export interface CanvasGenerationDefault<M extends CanvasGenerationMode = CanvasGenerationMode> {
+export interface CanvasGenerationDefault<M extends CanvasGenerationSlot = CanvasGenerationSlot> {
   selection: CanvasGenerationModelSelection | null;
   params: CanvasGenerationParamsByMode[M];
 }
 
 export type CanvasGenerationDefaults = {
-  [M in CanvasGenerationMode]: CanvasGenerationDefault<M>;
+  [M in CanvasGenerationSlot]: CanvasGenerationDefault<M>;
 };
 
 export interface CanvasGenerationDraft {

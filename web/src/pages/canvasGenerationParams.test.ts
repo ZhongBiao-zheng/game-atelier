@@ -76,3 +76,30 @@ it('normalizes MiniMax speech by its own voices, formats and speed range', () =>
   // 本机还没有执行器的厂商语音协议不提供参数，界面也选不到它。
   expect(normalizeCanvasAudioParams('seed-tts-2.0', 'tokendance', 'ark-tts', { voice: 'x' })).toEqual({});
 });
+
+it('keeps speech and music apart: model filter, draft defaults and remembered preference', async () => {
+  const { canvasGenerationModelSupportsMode, canvasGenerationPreferenceForModel, canvasGenerationSlot, createCanvasGenerationDraft } = await import('./canvasEditorModel');
+  const td = {
+    alias: 'td', provider: 'tokendance', base_url: 'https://tokendance.space/gateway/v1', access_key: '***',
+    secret_key: null, capabilities: [], notes: '', created_at: '2026-11-15T00:00:00Z',
+    models: [
+      { id: 'minimax-speech-2.8-turbo', name: 'speech', modality: 'audio' as const, protocol: 'minimax-t2a' },
+      { id: 'yc-song-4.0', name: 'song', modality: 'audio' as const, protocol: 'yinchao-song' },
+    ],
+  };
+  const [speech, song] = td.models;
+  expect(canvasGenerationModelSupportsMode(td, song, 'audio')).toBe(true);
+  expect(canvasGenerationModelSupportsMode(td, song, 'audio', { audioFamily: 'speech' })).toBe(false);
+  expect(canvasGenerationModelSupportsMode(td, speech, 'audio', { audioFamily: 'music' })).toBe(false);
+
+  const music = createCanvasGenerationDraft([td], 'audio', { audioFamily: 'music', now: 'x' });
+  expect([music.model, music.params]).toEqual(['yc-song-4.0', { instrumental: false, n: 1 }]);
+  expect(canvasGenerationSlot([td], music)).toBe('music');
+  expect(canvasGenerationSlot([td], createCanvasGenerationDraft([td], 'audio', { audioFamily: 'speech', now: 'x' })))
+    .toBe('audio');
+
+  // 音乐偏好只记纯音乐开关：首数、歌词每次重填（多一个键服务端 422）。
+  expect(canvasGenerationPreferenceForModel(td, song, 'music', { instrumental: true, n: 2, lyrics: '词' }))
+    .toEqual({ selection: { alias: 'td', model: 'yc-song-4.0' }, params: { instrumental: true } });
+  expect(canvasGenerationPreferenceForModel(td, speech, 'music')).toBeNull();
+});

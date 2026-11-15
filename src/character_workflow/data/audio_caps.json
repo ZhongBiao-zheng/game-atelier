@@ -54,5 +54,14 @@
     "default_format": "mp3",
     "max_chars": 9999,
     "instructions": false
+  },
+  "yinchao-song": {
+    "family": "music",
+    "formats": ["mp3"],
+    "default_format": "mp3",
+    "max_chars": 1000,
+    "max_lyrics_chars": 3000,
+    "max_count": 2,
+    "no_instrumental_models": ["yc-song-3.5"]
   }
 }

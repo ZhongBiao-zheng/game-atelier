@@ -108,7 +108,7 @@ def test_generation_preferences_default_get_is_v2_and_does_not_write(isolated_da
         },
         "generation_defaults": {
             mode: {"selection": None, "params": {}}
-            for mode in ("text", "image", "video", "audio")
+            for mode in ("text", "image", "video", "audio", "music")
         },
         "upscale": {
             "tiers": {

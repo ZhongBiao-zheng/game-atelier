@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import cases from '../../../tests/fixtures/audio_caps_cases.json';
-import { AUDIO_CAPS, audioProtocolOf, normalizeSpeechParams } from './audioCaps';
+import { AUDIO_CAPS, audioProtocolOf, normalizeMusicParams, normalizeSpeechParams } from './audioCaps';
 
 // 与 tests/test_audio_speech.py 读同一份夹具：协议解析与参数归一两端必须逐条同义。
 describe('shared Python / TypeScript audio capabilities', () => {
@@ -10,5 +10,9 @@ describe('shared Python / TypeScript audio capabilities', () => {
 
   it.each(cases.normalize)('normalizes $protocol params', ({ protocol, params, expected }) => {
     expect(normalizeSpeechParams(AUDIO_CAPS[protocol], params)).toEqual(expected);
+  });
+
+  it.each(cases.music)('normalizes music for $model_id', ({ model_id, params, expected }) => {
+    expect(normalizeMusicParams(AUDIO_CAPS['yinchao-song'], model_id, params)).toEqual(expected);
   });
 });

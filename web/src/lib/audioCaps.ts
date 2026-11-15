@@ -8,14 +8,17 @@ import raw from '@audio-caps';
 
 interface RawAudioCaps {
   family: string;
-  voices: { id: string; label: string }[];
-  default_voice: string;
-  custom_voice: boolean;
-  speed: number[];
+  voices?: { id: string; label: string }[];
+  default_voice?: string;
+  custom_voice?: boolean;
+  speed?: number[];
   formats: string[];
   default_format: string;
   max_chars: number;
-  instructions: boolean;
+  instructions?: boolean;
+  max_count?: number;
+  max_lyrics_chars?: number;
+  no_instrumental_models?: string[];
 }
 
 export interface AudioCaps {
@@ -28,23 +31,31 @@ export interface AudioCaps {
   speedMax: number;
   formats: readonly string[];
   defaultFormat: string;
+  /** 语音：朗读文本上限；音乐：描述上限。 */
   maxChars: number;
   instructions: boolean;
+  /** 音乐：一次最多几首、歌词上限、哪些型号没有纯音乐。 */
+  maxCount: number;
+  maxLyricsChars: number;
+  noInstrumentalModels: readonly string[];
 }
 
 export const AUDIO_CAPS: Readonly<Record<string, AudioCaps>> = Object.fromEntries(
   Object.entries(raw as Record<string, RawAudioCaps>).map(([protocol, caps]) => [protocol, {
     protocol,
     family: caps.family === 'music' ? 'music' : 'speech',
-    voices: caps.voices,
-    defaultVoice: caps.default_voice,
-    customVoice: caps.custom_voice,
-    speedMin: caps.speed[0],
-    speedMax: caps.speed[1],
+    voices: caps.voices ?? [],
+    defaultVoice: caps.default_voice ?? '',
+    customVoice: caps.custom_voice ?? false,
+    speedMin: caps.speed?.[0] ?? 1,
+    speedMax: caps.speed?.[1] ?? 1,
     formats: caps.formats,
     defaultFormat: caps.default_format,
     maxChars: caps.max_chars,
-    instructions: caps.instructions,
+    instructions: caps.instructions ?? false,
+    maxCount: caps.max_count ?? 1,
+    maxLyricsChars: caps.max_lyrics_chars ?? 0,
+    noInstrumentalModels: caps.no_instrumental_models ?? [],
   }]),
 );
 
@@ -132,4 +143,22 @@ export function audioFormatLabel(format: string) {
 
 export function audioSpeedLabel(speed: number) {
   return `${speed}x`;
+}
+
+export function supportsInstrumental(caps: AudioCaps, modelId: string) {
+  return caps.family === 'music' && !caps.noInstrumentalModels.includes(modelId);
+}
+
+export type MusicParams = { instrumental: boolean; n: number; lyrics?: string };
+
+/** 音乐参数：纯音乐（型号不支持就关）、歌词（纯音乐时不发）、首数夹到 1..上限。与 audio_caps.normalize_music_params 同义。
+ *  歌词超长这里不截断：输入框按上限限制，服务端拒绝超长内容。 */
+export function normalizeMusicParams(caps: AudioCaps, modelId: string, params: Record<string, unknown>): MusicParams {
+  const instrumental = params.instrumental === true && supportsInstrumental(caps, modelId);
+  const parsed = Math.trunc(Number(params.n || 1));
+  const count = Number.isFinite(parsed) ? parsed : 1;
+  const normalized: MusicParams = { instrumental, n: Math.max(1, Math.min(caps.maxCount, count)) };
+  const lyrics = String(params.lyrics ?? '').trim();
+  if (lyrics && !instrumental) normalized.lyrics = lyrics;
+  return normalized;
 }

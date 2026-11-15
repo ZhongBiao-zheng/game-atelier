@@ -72,6 +72,7 @@ import {
 } from '@/components/canvas/canvasLayerDecomposition';
 import {
   CanvasAudioSettings,
+  CanvasMusicSettings,
   CanvasImageSettings,
   CanvasModelPicker,
   CanvasTextSettings,
@@ -2142,6 +2143,9 @@ export function CanvasGenerationComposer({
   const selectedModel = models.find(model => model.id === draft.model);
   // 「自动」按组内第一个成员算参数（一期就是它出图）；图片可选范围取成员交集。
   const channel = selectedKey && selectedModel ? routeChannel(selectedKey, selectedModel) : null;
+  const audioCaps = draft.mode === 'audio' && channel
+    ? audioCapsOf(channel.model.id, channel.key.provider, channel.model.protocol)
+    : null;
   const channelModelId = channel?.model.id ?? draft.model;
   const channelProtocol = channel?.model.protocol;
   const channelDeclared = channel?.model.declared;
@@ -2452,7 +2456,9 @@ export function CanvasGenerationComposer({
             ? '描述镜头运动与画面变化'
             : '描述镜头运动与画面变化，输入 @ 引用已连接内容'
           : draft.mode === 'audio'
-            ? '输入需要朗读的文本，输入 @ 引用已连接内容'
+            ? audioCaps?.family === 'music'
+              ? '描述风格、情绪、乐器，输入 @ 引用已连接内容'
+              : '输入需要朗读的文本，输入 @ 引用已连接内容'
             : draft.mode === 'text'
               ? '描述要创作的文案、脚本或内容，输入 @ 引用已连接内容'
               : '描述任何你想要生成的内容，输入 @ 引用已连接内容'}
@@ -2625,9 +2631,25 @@ export function CanvasGenerationComposer({
             }))}
           />
         )}
-          {draft.mode === 'audio' && channel && audioCapsOf(channel.model.id, channel.key.provider, channel.model.protocol) && (
+          {draft.mode === 'audio' && channel && audioCaps?.family === 'music' && (
+          <CanvasMusicSettings
+            caps={audioCaps}
+            modelId={channel.model.id}
+            params={draft.params}
+            onPatch={patch => updateDraftWithHistory(current => ({
+              ...current,
+              params: normalizeCanvasAudioParams(
+                channel.model.id,
+                channel.key.provider,
+                channel.model.protocol,
+                { ...current.params, ...patch },
+              ),
+            }))}
+          />
+        )}
+          {draft.mode === 'audio' && channel && audioCaps?.family === 'speech' && (
           <CanvasAudioSettings
-            caps={audioCapsOf(channel.model.id, channel.key.provider, channel.model.protocol)!}
+            caps={audioCaps}
             params={draft.params}
             onPatch={patch => updateDraftWithHistory(current => ({
               ...current,

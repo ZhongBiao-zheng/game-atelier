@@ -8,7 +8,7 @@ import { availableDeclared, type ModelDeclared } from '@/schema/httpProtocols';
 import { modelModality, type KeyView } from '@/api/keys';
 import { imageFamily, isEvolinkMidjourney, supportsImageQuality } from '@/lib/modelFamily';
 import { maxReferenceImages } from '@/lib/referenceLimits';
-import { audioCapsOf, audioProtocolOf, normalizeSpeechParams } from '@/lib/audioCaps';
+import { audioCapsOf, audioProtocolOf, normalizeMusicParams, normalizeSpeechParams } from '@/lib/audioCaps';
 import type {
   CanvasContentNode,
   CanvasBatchMaterialNode,
@@ -19,6 +19,7 @@ import type {
   CanvasContentVersion,
   CanvasGenerationDefault,
   CanvasGenerationMode,
+  CanvasGenerationSlot,
   CanvasGenerationParamsByMode,
   CanvasGenerationDraft,
   CanvasDocument,
@@ -991,11 +992,30 @@ export function canvasUpscaleAutoChoice(keys: KeyView[]) {
   return null;
 }
 
+export type CanvasAudioFamily = 'speech' | 'music';
+
+/** 音频模型属于语音还是音乐（「自动」与局域网模型按第一个成员判断）；不是可执行的音频模型返回 null。 */
+export function canvasAudioFamily(key: KeyView, model: KeyView['models'][number]): CanvasAudioFamily | null {
+  const channel = routeChannel(key, model);
+  return audioCapsOf(channel.model.id, channel.key.provider, channel.model.protocol)?.family ?? null;
+}
+
+/** 草稿对应的偏好槽位：音乐模型的音频草稿记在 music，其余按生成模式。 */
+export function canvasGenerationSlot(
+  keys: readonly KeyView[],
+  draft: Pick<CanvasGenerationDraft, 'mode' | 'alias' | 'model'>,
+): CanvasGenerationSlot {
+  if (draft.mode !== 'audio') return draft.mode;
+  const key = providerForAlias(keys, draft.alias);
+  const model = key?.models.find(candidate => candidate.id === draft.model);
+  return key && model && canvasAudioFamily(key, model) === 'music' ? 'music' : 'audio';
+}
+
 export function canvasGenerationModelSupportsMode(
   key: KeyView,
   model: KeyView['models'][number],
   mode: CanvasGenerationDraft['mode'],
-  options: { editingExistingVideo?: boolean } = {},
+  options: { editingExistingVideo?: boolean; audioFamily?: CanvasAudioFamily } = {},
 ): boolean {
   // 「自动」与局域网 Atelier 的模型要每个成员都能跑：换到任何一家都不会因为能力不够失败。
   if (hasChannelMembers(key, model.id)) {
@@ -1008,7 +1028,9 @@ export function canvasGenerationModelSupportsMode(
     && (mode !== 'video' || canvasVideoModelIsRoutable(key, model))
     && (!options.editingExistingVideo || supportsCanvasVideoEdit(model.id, model.protocol))
     && (mode !== 'audio'
-      || supportsCanvasAudioGeneration(model.id, key.provider, model.protocol))
+      || (supportsCanvasAudioGeneration(model.id, key.provider, model.protocol)
+        && (!options.audioFamily
+          || audioCapsOf(model.id, key.provider, model.protocol)?.family === options.audioFamily)))
     && (mode !== 'text'
       || supportsCanvasTextGeneration(key.provider, model.protocol));
 }
@@ -1016,9 +1038,10 @@ export function canvasGenerationModelSupportsMode(
 export function firstCanvasGenerationModel(
   keys: readonly KeyView[],
   mode: CanvasGenerationDraft['mode'],
+  audioFamily?: CanvasAudioFamily,
 ) {
   for (const key of keys) {
-    const model = key.models.find(candidate => canvasGenerationModelSupportsMode(key, candidate, mode));
+    const model = key.models.find(candidate => canvasGenerationModelSupportsMode(key, candidate, mode, { audioFamily }));
     if (model) return { key, model };
   }
   return null;
@@ -1028,12 +1051,13 @@ function preferredCanvasGenerationModel(
   keys: readonly KeyView[],
   mode: CanvasGenerationDraft['mode'],
   preference: CanvasGenerationDefault | undefined,
+  audioFamily?: CanvasAudioFamily,
 ) {
   const selection = preference?.selection;
   if (!selection) return null;
   const key = providerForAlias(keys, selection.alias);
   const model = key?.models.find(candidate => candidate.id === selection.model);
-  return key && model && canvasGenerationModelSupportsMode(key, model, mode)
+  return key && model && canvasGenerationModelSupportsMode(key, model, mode, { audioFamily })
     ? { key, model }
     : null;
 }
@@ -1084,32 +1108,50 @@ function normalizedCanvasGenerationParams(
   return normalizeCanvasTextParams(model.protocol, current);
 }
 
-export function canvasGenerationPreferenceForModel<M extends CanvasGenerationMode>(
+export function canvasGenerationSlotMode(slot: CanvasGenerationSlot): CanvasGenerationMode {
+  return slot === 'music' ? 'audio' : slot;
+}
+
+export function canvasGenerationSlotAudioFamily(slot: CanvasGenerationSlot): CanvasAudioFamily | undefined {
+  return slot === 'music' ? 'music' : slot === 'audio' ? 'speech' : undefined;
+}
+
+export function canvasGenerationPreferenceForModel<M extends CanvasGenerationSlot>(
   key: KeyView,
   model: KeyView['models'][number],
-  mode: M,
+  slot: M,
   current: JobParams = {},
 ): CanvasGenerationDefault<M> | null {
-  if (!canvasGenerationModelSupportsMode(key, model, mode)) return null;
+  const mode = canvasGenerationSlotMode(slot);
+  if (!canvasGenerationModelSupportsMode(key, model, mode, { audioFamily: canvasGenerationSlotAudioFamily(slot) })) return null;
+  const normalized = withoutUnrememberedParams(mode, normalizedCanvasGenerationParams(
+    key,
+    model,
+    mode,
+    { ...defaultCanvasGenerationParams(mode), ...current },
+  ));
   return {
     selection: { alias: storedAlias(key), model: model.id },
-    params: withoutUnrememberedParams(mode, normalizedCanvasGenerationParams(
-      key,
-      model,
-      mode,
-      { ...defaultCanvasGenerationParams(mode), ...current },
-    )) as CanvasGenerationParamsByMode[M],
+    // 音乐的首数与歌词是当次的决定：偏好只留能记住的字段（多一个键服务端 422）。
+    params: (slot === 'music' ? rememberedParams('music', normalized) : normalized) as CanvasGenerationParamsByMode[M],
   };
+}
+
+function rememberedParams(slot: CanvasGenerationSlot, params: JobParams): Record<string, unknown> {
+  return Object.fromEntries(CANVAS_REMEMBERED_PARAM_KEYS[slot].flatMap(key => (
+    params[key] === undefined || params[key] === null ? [] : [[key, params[key]]]
+  )));
 }
 
 /** 生成偏好里能记住的参数（与服务端 Canvas*DefaultParams 逐字段对应，多一个键整份偏好 422）。
  *  张数 n 不在里面：每次出几张是当次的决定，不跟着上一次走。
  *  视频生成方式 frame_mode 也不在里面：新视频节点一律从全能参考开始，首尾帧是当次的选择。 */
-const CANVAS_REMEMBERED_PARAM_KEYS: Record<CanvasGenerationMode, readonly string[]> = {
+const CANVAS_REMEMBERED_PARAM_KEYS: Record<CanvasGenerationSlot, readonly string[]> = {
   text: ['temperature', 'max_tokens', 'reasoning_effort'],
   image: ['ratio', 'resolution', 'size', 'size_mode', 'custom_size', 'quality', 'complexity'],
   video: ['duration', 'ratio', 'resolution', 'mode', 'generate_audio', 'watermark'],
   audio: ['voice', 'response_format', 'speed', 'instructions'],
+  music: ['instrumental'],
 };
 
 /** 偏好文件里旧版本记下的 frame_mode 不再生效，读写两头都去掉。 */
@@ -1124,13 +1166,10 @@ function withoutUnrememberedParams(mode: CanvasGenerationMode, params: JobParams
 export function canvasGenerationDefaultFromDraft(
   draft: CanvasGenerationDraft,
   current: CanvasGenerationDefault,
+  slot: CanvasGenerationSlot = draft.mode,
 ): CanvasGenerationDefault | null {
   if (!draft.model) return null;
-  const params: Record<string, unknown> = Object.fromEntries(
-    CANVAS_REMEMBERED_PARAM_KEYS[draft.mode].flatMap(key => (
-      draft.params[key] === undefined || draft.params[key] === null ? [] : [[key, draft.params[key]]]
-    )),
-  );
+  const params = rememberedParams(slot, draft.params);
   const count = (current.params as { n?: unknown }).n;
   if (count !== undefined) params.n = count;
   const next = {
@@ -1147,11 +1186,13 @@ export function createCanvasGenerationDraft(
     prompt?: string;
     inputPolicy?: CanvasGenerationDraft['input_policy'];
     preference?: CanvasGenerationDefault;
+    /** 音频节点：只在语音或音乐模型里选。 */
+    audioFamily?: CanvasAudioFamily;
     now?: string;
   } = {},
 ): CanvasGenerationDraft {
-  const preferred = preferredCanvasGenerationModel(keys, mode, options.preference);
-  const selected = preferred ?? firstCanvasGenerationModel(keys, mode);
+  const preferred = preferredCanvasGenerationModel(keys, mode, options.preference, options.audioFamily);
+  const selected = preferred ?? firstCanvasGenerationModel(keys, mode, options.audioFamily);
   const model = selected?.model.id ?? '';
   const mayApplyPreferenceParams = preferred || options.preference?.selection === null;
   const sourceParams = mayApplyPreferenceParams
@@ -1340,7 +1381,10 @@ export function normalizeCanvasAudioParams(
   current: JobParams,
 ): JobParams {
   const caps = audioCapsOf(model, provider, protocol);
-  return caps ? normalizeSpeechParams(caps, current as Record<string, unknown>) : {};
+  if (!caps) return {};
+  return caps.family === 'music'
+    ? normalizeMusicParams(caps, model, current as Record<string, unknown>)
+    : normalizeSpeechParams(caps, current as Record<string, unknown>);
 }
 
 export function canvasVideoEditCaps(

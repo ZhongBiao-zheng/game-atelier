@@ -204,6 +204,25 @@ def speech_cost_cny(*, provider: str | None, model_id: str, characters: int) -> 
     return None if rate is None else _priced(rate * characters / 1000)
 
 
+def music_cost_cny(*, provider: str | None, model_id: str, songs: int) -> float | None:
+    """按首计费的音乐（TokenDance `songs`）：预估按请求首数，实付按成功下载的首数。"""
+    if _normalize(provider) != "tokendance" or songs < 0:
+        return None
+    from character_workflow.lib.tokendance_prices import model_pricing
+
+    items = [item for item in (model_pricing(model_id) or {}).get("items") or []
+             if isinstance(item, dict)]
+    rates = {
+        _rate(plan.get("rate"))
+        for item in items
+        if str(item.get("id", "")).endswith(":song:songs")
+        for plan in item.get("plans") or []
+        if isinstance(plan, dict) and plan.get("unit") == "songs"
+    }
+    rate = rates.pop() if len(rates) == 1 and None not in rates else None
+    return None if rate is None else _priced(rate * songs)
+
+
 def estimate_cost_cny(
     *, kind: str, provider: str | None = None, base_url: str | None = None,
     billing_group: str | None = None, model_id: str | None = None,
@@ -219,6 +238,12 @@ def estimate_cost_cny(
     if not model_id or _normalize(protocol) == "declarative":
         return None
     if kind == "audio":
+        from character_workflow.lib.audio_caps import AUDIO_CAPS
+
+        caps = AUDIO_CAPS.get(protocol or "")
+        if caps is not None and caps.family == "music":
+            songs = max(1, min(caps.max_count, math.floor(n))) if n is not None and math.isfinite(n) else 1
+            return music_cost_cny(provider=provider, model_id=model_id, songs=songs)
         return None if text_length is None else speech_cost_cny(
             provider=provider, model_id=model_id, characters=text_length)
     if provider == "comfyui":

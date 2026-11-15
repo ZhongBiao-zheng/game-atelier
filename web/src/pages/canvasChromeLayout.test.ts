@@ -29,7 +29,8 @@ describe('canvas chrome spatial hierarchy', () => {
       '添加文本节点',
       '添加图片节点',
       '添加视频节点',
-      '添加音频节点',
+      '添加语音节点',
+      '添加音乐节点',
       '上传素材',
     ]) {
       expect(canvasEditorSource).toContain(`label="${label}"`);

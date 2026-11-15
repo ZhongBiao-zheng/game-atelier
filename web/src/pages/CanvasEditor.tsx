@@ -31,7 +31,7 @@ import {
   useStore,
   useStoreApi,
 } from '@xyflow/react';
-import { AddIcon, AiIcon, AudioFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, SelectIcon, SettingsIcon, ShowIcon, TextIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
+import { AddIcon, AiIcon, AudioFileIcon, MusicFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, SelectIcon, SettingsIcon, ShowIcon, TextIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { Link, useLocation } from 'wouter';
 
@@ -211,6 +211,8 @@ import {
   canvasRequiresBatchRun,
   closestCanvasConnectionEndpoint,
   canvasGenerationDefaultFromDraft,
+  canvasGenerationSlot,
+  type CanvasAudioFamily,
   canvasNodeHasHideableContent,
   createCanvasGenerationDraft,
   resolveCanvasGenerationDraft,
@@ -476,6 +478,8 @@ function CanvasEditorInner({
   const [routes, setRoutes] = useState<ModelRoute[]>([]);
   // 生成节点选模型用的厂商列表 =「自动」+ 真实 KEY；局部编辑、分层、AI高清等单项工具仍只用真实 KEY。
   const providers = useMemo(() => withAutoProvider(keys, routes), [keys, routes]);
+  const latestProviders = useRef(providers);
+  useEffect(() => { latestProviders.current = providers; }, [providers]);
   // 公告「快速添加」等别处改了密钥的模型列表：只刷新列表，不动节点上已选的模型。
   useEffect(() => {
     const refresh = () => {
@@ -2536,15 +2540,23 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set([id]));
   }
 
-  function addGenerationNode(kind: JobKind, menu: CreateMenuState | null = createMenu) {
+  function addGenerationNode(
+    kind: JobKind,
+    menu: CreateMenuState | null = createMenu,
+    audioFamily?: CanvasAudioFamily,
+  ) {
+    // 语音与音乐同为音频节点：各自从对应的偏好与模型族开始。
     const draft = createCanvasGenerationDraft(providers, kind, {
       inputPolicy: 'all_connected',
-      preference: canvasUiPreferences.generation_defaults[kind],
+      preference: canvasUiPreferences.generation_defaults[audioFamily === 'music' ? 'music' : kind],
+      audioFamily,
     });
     const nodeSize = kind === 'text' ? CANVAS_TEXT_NODE_DEFAULT_SIZE : CANVAS_DEFAULT_NODE_SIZE;
     const base = {
       id: makeId(kind),
-      title: { text: '文本', image: '图片', video: '视频', audio: '音频' }[kind],
+      title: kind === 'audio'
+        ? (audioFamily === 'music' ? '音乐' : '语音')
+        : { text: '文本', image: '图片', video: '视频' }[kind],
       position: menu?.flow ? placeNewNode(menu.flow, nodeSize) : defaultPosition(nodeSize),
       z_index: 0,
     };
@@ -3069,13 +3081,14 @@ function CanvasEditorInner({
   useEffect(() => { latestCanvasUiPreferences.current = canvasUiPreferences; }, [canvasUiPreferences]);
   const rememberGenerationDefault = useCallback((draft: CanvasGenerationDraft) => {
     const preferences = latestCanvasUiPreferences.current;
-    const next = canvasGenerationDefaultFromDraft(draft, preferences.generation_defaults[draft.mode]);
+    const slot = canvasGenerationSlot(latestProviders.current, draft);
+    const next = canvasGenerationDefaultFromDraft(draft, preferences.generation_defaults[slot], slot);
     if (!next || canvasUiPreferencesSaveInFlight.current) return;
     canvasUiPreferencesSaveInFlight.current = true;
     void saveCanvasUiPreferences(
       preferences.revision,
       preferences.image_toolbar,
-      { ...preferences.generation_defaults, [draft.mode]: next },
+      { ...preferences.generation_defaults, [slot]: next },
       preferences.upscale,
     )
       .then(saved => setCanvasUiPreferences(saved))
@@ -3102,9 +3115,12 @@ function CanvasEditorInner({
       const node = current?.nodes.find(candidate => candidate.id === nodeId);
       const draft = node ? generationDraftForNode(node) : null;
       if (!current || !node || !draft) throw new Error('当前节点没有可提交的生成设置');
+      // 音乐一次可出两首（服务端按模型上限校验）；语音的参数里没有 n，仍是一条。
       const requestedCount = draft.mode === 'text' || draft.mode === 'image'
         ? Math.max(1, Math.min(4, Number(draft.params.n ?? 1)))
-        : 1;
+        : draft.mode === 'audio'
+          ? Math.max(1, Math.min(2, Number(draft.params.n ?? 1)))
+          : 1;
       const dirtyAtSubmission = dirtyVersion.current;
       runSubmissionInFlight.current = true;
       const run = await submitCanvasRun(
@@ -5553,7 +5569,8 @@ function CanvasEditorInner({
               <ToolButton label="添加文本节点" onClick={() => addTextNode(null)}><TextIcon /></ToolButton>
               <ToolButton label="添加图片节点" onClick={() => addGenerationNode('image', null)}><ImageFileIcon /></ToolButton>
               <ToolButton label="添加视频节点" onClick={() => addGenerationNode('video', null)}><VideoFileIcon /></ToolButton>
-              <ToolButton label="添加音频节点" onClick={() => addGenerationNode('audio', null)}><AudioFileIcon /></ToolButton>
+              <ToolButton label="添加语音节点" onClick={() => addGenerationNode('audio', null, 'speech')}><AudioFileIcon /></ToolButton>
+              <ToolButton label="添加音乐节点" onClick={() => addGenerationNode('audio', null, 'music')}><MusicFileIcon /></ToolButton>
               <ToolButton label="上传素材" onClick={() => uploadRef.current?.click()}><UploadIcon /></ToolButton>
             </div>
           </div>
@@ -5568,7 +5585,7 @@ function CanvasEditorInner({
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs text-muted-foreground">添加节点</p>
-              <CanvasCreateMenuItems allowEmptyNodes allowUpload onAddBatch={() => addBatchMaterialNode(null)} onAddCompare={() => addCompareNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onUpload={() => uploadRef.current?.click()} />
+              <CanvasCreateMenuItems allowEmptyNodes allowUpload onAddBatch={() => addBatchMaterialNode(null)} onAddCompare={() => addCompareNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null, 'speech')} onAddMusic={() => addGenerationNode('audio', null, 'music')} onUpload={() => uploadRef.current?.click()} />
               <PluginCreateMenuItems onAdd={addPluginNode} />
             </div>
           )}
@@ -5600,7 +5617,7 @@ function CanvasEditorInner({
         {createMenu && (
           <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenuDock?.left ?? createMenu.screen.x, top: createMenuDock?.top ?? createMenu.screen.y }}>
             <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs text-muted-foreground">创建并连接</p><Button variant="bare" type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><CloseIcon /></Button></div>
-            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddCompare={createMenuFromImage ? () => addCompareNode(createMenu) : undefined} rejectedModes={createMenu.sourceHandle === 'target' || !createMenu.sourceId ? undefined : canvasModesRejectingSources(document, createMenu.sourceIds ?? [createMenu.sourceId])} onAddBatch={createMenu.sourceId ? undefined : () => addBatchMaterialNode(createMenu)} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onUpload={() => uploadRef.current?.click()} />
+            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddCompare={createMenuFromImage ? () => addCompareNode(createMenu) : undefined} rejectedModes={createMenu.sourceHandle === 'target' || !createMenu.sourceId ? undefined : canvasModesRejectingSources(document, createMenu.sourceIds ?? [createMenu.sourceId])} onAddBatch={createMenu.sourceId ? undefined : () => addBatchMaterialNode(createMenu)} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu, 'speech')} onAddMusic={() => addGenerationNode('audio', createMenu, 'music')} onUpload={() => uploadRef.current?.click()} />
           </div>
         )}
 
@@ -5893,7 +5910,7 @@ function PluginCreateMenuItems({ onAdd }: { onAdd: (plugin: PluginPackageLock, n
   </>;
 }
 
-function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, onAddText, onAddImage, onAddVideo, onAddAudio, onUpload, onAddBatch, onAddCompare }: {
+function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, onAddText, onAddImage, onAddVideo, onAddAudio, onAddMusic, onUpload, onAddBatch, onAddCompare }: {
   onAddBatch?: () => void;
   onAddCompare?: () => void;
   /** 连出来的素材里有这些模式收不下的类型：对应选项置灰。 */
@@ -5904,6 +5921,7 @@ function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, on
   onAddImage: () => void;
   onAddVideo: () => void;
   onAddAudio: () => void;
+  onAddMusic: () => void;
   onUpload: () => void;
 }) {
   return <>
@@ -5911,7 +5929,8 @@ function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, on
     {allowEmptyNodes && <AddMenuButton icon={<TextIcon />} title="文本" description="脚本、提示词与备注" onClick={onAddText} />}
     {allowEmptyNodes && <AddMenuButton icon={<ImageFileIcon />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} disabledReason={rejectedModes?.has('image') ? '图片生成只能参考文本和图片' : undefined} />}
     {allowEmptyNodes && <AddMenuButton icon={<VideoFileIcon />} title="视频" description="空节点可填写生成设置" onClick={onAddVideo} />}
-    {allowEmptyNodes && <AddMenuButton icon={<AudioFileIcon />} title="音频" description="旁白、对白与语音" onClick={onAddAudio} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
+    {allowEmptyNodes && <AddMenuButton icon={<AudioFileIcon />} title="语音" description="旁白与配音" onClick={onAddAudio} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
+    {allowEmptyNodes && <AddMenuButton icon={<MusicFileIcon />} title="音乐" description="配乐与歌曲" onClick={onAddMusic} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
     {onAddCompare && <AddMenuButton icon={<CompareIcon />} title="对比" description="左右拖动对照两张图" onClick={onAddCompare} />}
     {allowUpload && <AddMenuButton icon={<UploadIcon />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
   </>;

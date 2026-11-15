@@ -821,6 +821,7 @@ def _run_text_job(job: Job) -> Job:
 
 def _run_audio_job(job: Job) -> Job:
     params = _params(job)
+    _freeze_estimated_cost(job, params)
     should_cancel = _cancel_checker(job)
     try:
         if not job.alias:
@@ -832,6 +833,7 @@ def _run_audio_job(job: Job) -> Job:
                 alias=job.alias,
                 output_dir=Path(tmp),
                 params=params,
+                n=int(params.get("n") or 1),
                 on_params_changed=lambda: update_job_params(job.job_id, params),
                 on_phase=lambda phase: update_job_phase(job.job_id, phase),
                 on_cost_usd=_actual_cost_recorder(job.job_id, params),
@@ -843,7 +845,8 @@ def _run_audio_job(job: Job) -> Job:
             output_dir = job_output_dir_for(job)
             output_paths: list[str] = []
             with asset_output_lock(output_dir):
-                for source in valid[:1]:
+                # 语音一次一条；音乐按请求的首数（厂商可能只成功一部分）。
+                for source in valid[:max(1, int(params.get("n") or 1))]:
                     target = next_asset_path(output_dir, source.suffix)
                     shutil.move(str(source), target)
                     output_paths.append(str(target))

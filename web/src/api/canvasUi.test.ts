@@ -19,6 +19,7 @@ it('reads and writes the complete revisioned Canvas UI preference document', asy
     },
     video: { selection: null, params: {} },
     audio: { selection: null, params: {} },
+    music: { selection: null, params: {} },
   };
   const upscale = {
     tiers: {

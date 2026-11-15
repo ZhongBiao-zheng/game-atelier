@@ -33,6 +33,8 @@ const PARAM_LABELS: Record<string, string> = {
   speed: '语速',
   response_format: '格式',
   instructions: '语音指令',
+  instrumental: '纯音乐',
+  lyrics: '歌词',
   angle_horizontal: '水平角度',
   angle_pitch: '俯仰角度',
   angle_distance: '镜头距离',

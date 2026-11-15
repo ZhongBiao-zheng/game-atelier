@@ -9,6 +9,7 @@ import { imageControlCaps } from '@/lib/imageControlCaps';
 import { AUDIO_CAPS } from '@/lib/audioCaps';
 import {
   CanvasAudioSettings,
+  CanvasMusicSettings,
   CanvasImageSettings,
   CanvasModelPicker,
   CanvasTextSettings,
@@ -328,5 +329,63 @@ describe('CanvasImageSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: '图片设置' }));
     expect(screen.getByText('Midjourney 每次任务固定返回 4 张方案。')).toBeInTheDocument();
     expect(screen.queryByLabelText('选择图片生成数量')).not.toBeInTheDocument();
+  });
+});
+
+describe('CanvasMusicSettings', () => {
+  it('switches song / instrumental, commits lyrics on blur and picks the song count', () => {
+    const onPatch = vi.fn();
+    const { rerender } = render(<CanvasMusicSettings
+      caps={AUDIO_CAPS['yinchao-song']}
+      modelId="yc-song-4.0"
+      params={{ instrumental: false, n: 1 }}
+      onPatch={onPatch}
+    />);
+    expect(screen.getByRole('button', { name: '音乐设置' })).toHaveTextContent('歌曲 · 1 首');
+    fireEvent.click(screen.getByRole('button', { name: '音乐设置' }));
+    fireEvent.change(screen.getByLabelText('歌词'), { target: { value: '  [VERSE]\n海风  ' } });
+    fireEvent.blur(screen.getByLabelText('歌词'));
+    expect(onPatch).toHaveBeenLastCalledWith({ lyrics: '[VERSE]\n海风' });
+    fireEvent.click(screen.getByRole('radio', { name: '2 首' }));
+    expect(onPatch).toHaveBeenLastCalledWith({ n: 2 });
+    fireEvent.click(screen.getByRole('radio', { name: '纯音乐' }));
+    expect(onPatch).toHaveBeenLastCalledWith({ instrumental: true });
+
+    rerender(<CanvasMusicSettings
+      caps={AUDIO_CAPS['yinchao-song']}
+      modelId="yc-song-4.0"
+      params={{ instrumental: true, n: 2, lyrics: '词' }}
+      onPatch={onPatch}
+    />);
+    expect(screen.getByRole('button', { name: '音乐设置' })).toHaveTextContent('纯音乐 · 2 首');
+    expect(screen.queryByLabelText('歌词')).not.toBeInTheDocument();
+  });
+
+  it('only offers the remembered instrumental switch in preferences', () => {
+    render(<CanvasMusicSettings
+      caps={AUDIO_CAPS['yinchao-song']}
+      modelId="yc-song-4.0"
+      params={{ instrumental: false, n: 2, lyrics: '词' }}
+      onPatch={vi.fn()}
+      rememberedOnly
+    />);
+    expect(screen.getByRole('button', { name: '音乐设置' })).toHaveTextContent(/^歌曲$/);
+    fireEvent.click(screen.getByRole('button', { name: '音乐设置' }));
+    expect(screen.getByRole('radio', { name: '纯音乐' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('歌词')).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: '2 首' })).not.toBeInTheDocument();
+  });
+
+  it('hides the instrumental choice for a model without it', () => {
+    render(<CanvasMusicSettings
+      caps={AUDIO_CAPS['yinchao-song']}
+      modelId="yc-song-3.5"
+      params={{ instrumental: true, lyrics: '词' }}
+      onPatch={vi.fn()}
+    />);
+    expect(screen.getByRole('button', { name: '音乐设置' })).toHaveTextContent('自定义歌词 · 1 首');
+    fireEvent.click(screen.getByRole('button', { name: '音乐设置' }));
+    expect(screen.queryByRole('radio', { name: '纯音乐' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('歌词')).toHaveValue('词');
   });
 });

@@ -332,6 +332,11 @@ def has_resumable_gateway_task(job: Job) -> bool:
                 and job.params.provider_task_ids)
 
 
+def has_resumable_music_task(job: Job) -> bool:
+    """音乐任务拿到厂商任务号后只续查，不重新提交（音潮按首计费）。"""
+    return bool(job.params.provider_task_protocol == "yinchao" and job.params.provider_task_ids)
+
+
 def is_resumable_studio_job(job: Job) -> bool:
     if job.provider == "evolink":
         from .canvas_image_edits import has_resumable_mj_task

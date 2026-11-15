@@ -12,6 +12,7 @@ const EMPTY_DEFAULTS: CanvasGenerationDefaults = {
   image: { selection: null, params: {} },
   video: { selection: null, params: {} },
   audio: { selection: null, params: {} },
+  music: { selection: null, params: {} },
 };
 
 function key(

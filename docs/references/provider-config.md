@@ -355,6 +355,25 @@ caller `callers/minimax_speech.py`，能力表 `data/audio_caps.json`（前后�
 - 重试：只对连不上与 502/503/504 重试三次；读超时与其余状态码当场失败。
 - 目录识别：`minimax:t2a_v2 → minimax-t2a`；同厂的 `_ws` 流式、`voice_clone` 不算可执行协议。`ark:tts`、`kling:tts` 认作语音但本机暂无执行器（旧版会被 `tts` 字样误认成 OpenAI `audio/speech`）。
 
+## 音乐契约 — 音潮歌曲（`yinchao-song`：词元跳动 / 官方）
+
+契约源：转发 `tokendance.space/docs/protocol-yinchao-song.md`，官方 `platform.yinchaoyongxian.com/docs/guides/prompt-generate`、
+`instrumental-generate`。caller `callers/yinchao_music.py`，能力在 `data/audio_caps.json`。
+
+| 项 | 词元跳动 | 官方 |
+|---|---|---|
+| 提交 | `POST /gateway/yinchao/v1/song/generate`（`task_type=normal`）或 `/song/instrumental` | `POST https://open.yinchaoyongxian.com/api/v1/song/...` |
+| 查询 | `GET /gateway/yinchao/v1/task/query?task_id=` | 同路径 |
+| 模型 id | `yc-song-4.0` / `yc-song-3.5` | `v4.5` / `v3.5` |
+| 价格 | 0.22 元 / 首（公开价格接口 `yinchao:song:songs`） | — |
+
+- 异步：响应 `id` 即任务号，拿到先落盘（`provider_task_protocol=yinchao`）再轮询；带任务号进入只查询，服务重启后续查，不重新提交。
+- 每首状态在 `choices[].status`：pending / running / stream / done / fail；done 才有 `audio_url`，同时回 `title`、`lyric`，存进 `params.music_tracks`。
+- `n` 最大 2，上游默认 2，本机显式发出（默认 1）；部分成功只收成功的几首、按成功首数记实付。
+- 纯音乐走独立端点，3.5 没有纯音乐（按型号关掉）；描述上限按 3.5 的 1000 字、歌词按 3000 字取保守值。
+- 提交只发一次：连不上报「连不上」，其余网络失败与 5xx 报「结果未确认」，不自动重发。
+- 结果地址经 `outbound_guard.fetch` 下载（公网检查、与供应商同源放行），单首上限 50MB；扩展名按地址取，认不出按 mp3。
+
 ## 路由现状
 
 **视频早已不按 provider 路由，改成按协议走注册表**（`callers/__init__.py::dispatch_video` →

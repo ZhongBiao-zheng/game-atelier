@@ -51,7 +51,7 @@ ALLOWED_PARAMS_BY_KIND = {
     "layer_split": _IMAGE_PARAMS | {"layer_decomposition"},
     "video": frozenset({"duration", "resolution", "ratio", "mode", "frame_mode",
                         "generate_audio", "watermark"}),
-    "audio": frozenset({"voice", "speed", "response_format", "instructions"}),
+    "audio": frozenset({"voice", "speed", "response_format", "instructions", "lyrics", "instrumental"}),
 }
 FILE_GROUPS = {"ref": 16, "mask": 1, "mj_sref": 8, "mj_cref": 8, "mj_oref": 8,
                "video": 4, "audio": 4}
