@@ -1396,3 +1396,10 @@ multipart 里的数组值展开成同名重复字段。
 - 算法只在服务端：目标网格按长边（不放大源图）或按块大小（四舍五入）；主色降采样取每格出现最多的调色板色，格内透明像素过半则该格透明；平均降采样按预乘 alpha 缩小后再量化；自动调色板为 Lab 空间 k-means（固定种子），只统计不透明像素，按亮度排序；映射走 5 位 RGB 查找表；输出 alpha 只有 0 / 255；放大为整数倍最近邻。
 - 路由：`POST /palette`（读）返回 `{colors}`；`POST /preview`（读，加 `frame`）返回 `{url, size, colors}`，`url` 是实际像素尺寸的 PNG data URL；`POST /pixelate`（写）单张输出一个图片节点、多张输出结果组（标题「<首张标题> 像素」），`upscale > 1` 且 `keep_original_size` 时另出一份实际像素尺寸（「… 原尺寸」），返回 `{node_id, member_node_ids?, frame_count, size, colors, original_node_id?}`。
 - Agent 工具 `plugin_pixel_pixelate`：参数 `image_node_ids`（1–65）加上述设置字段。
+
+### 像素化插件：调色板与修饰（X2）
+
+- 节点数据新增：`palette.kind` 为 `auto` / `preset` / `custom`，`palette.preset`（`pico-8` / `gameboy` / `db16` / `db32` / `endesga-32` / `nes`），`palette.custom`（`#RGB` 或 `#RRGGBB`，逗号、空白或换行分隔，2–256 色）；`dither: {kind: none|bayer2|bayer4|bayer8|floyd, strength 0–100}`；`cleanup: {isolated: 0|4|8, min_region: 0–16}`；`outline: {enabled, connectivity: 4|8, color: "darkest"|"#RRGGBB"}`。
+- 预设调色板的色值随插件包入库：`plugins/pixel/server/palettes.json`，取自 Lospec 公开调色板库（每套带来源 url，2026-11-15 按 `.json` 原样复制，测试逐色核对 PICO-8）。Game Boy 用 Lospec 的「Nintendo Gameboy (bgb)」4 色；NES 为 55 色。面板只显示调色板名称与色块，色值只在服务端。
+- 处理顺序：降采样与映射 → 抖动 → 清理 → 描边。抖动需要连续色调，开启后颜色取格内平均（即使选了主色）。Bayer 偏移量 = 矩阵值（归一化到 ±0.5）× 255/round(k^(1/3)) × 强度；Floyd–Steinberg 用 Pillow 实现（按 RGB 距离，不看强度）。去孤立像素：与四周不透明邻居都不同色的像素换成邻居里最多的颜色，四周全透明的单个不透明像素变透明。合并小色块按 4 连通、面积小于 `min_region` 的同色块并进周围最多的颜色。外描边在不透明区域外圈 1 像素，颜色默认取调色板里亮度最低的颜色。
+- 新路由 `POST /presets`（读）返回 `{presets: [{id, name, colors}]}`。Agent 工具参数同步增加上述字段。

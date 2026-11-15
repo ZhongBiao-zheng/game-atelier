@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { PluginRpcError, type PluginClient, type PluginInput } from '../../../sdk';
-import { Button, Checkbox, NumberField, SelectField, Swatch, ThumbButton } from './kit/controls';
-import { DEFAULT_STATE, LIMITS, parseState, requestParams, type Downsample, type PixelState, type SizeMode } from './state';
+import { Button, Checkbox, HelpMark, NumberField, SelectField, Swatch, TextAreaField, ThumbButton } from './kit/controls';
+import {
+  DEFAULT_STATE, LIMITS, OUTLINE_COLOR_OPTIONS, PRESET_NAMES, parseState, requestParams,
+  type DitherKind, type Downsample, type PaletteKind, type PixelState, type SizeMode,
+} from './state';
 
 const SIZE_OPTIONS: ReadonlyArray<{ value: SizeMode; label: string }> = [
   { value: 'long_edge', label: '按长边' }, { value: 'block', label: '按像素块' },
@@ -10,6 +13,17 @@ const SIZE_OPTIONS: ReadonlyArray<{ value: SizeMode; label: string }> = [
 const DOWNSAMPLE_OPTIONS: ReadonlyArray<{ value: Downsample; label: string }> = [
   { value: 'mode', label: '主色' }, { value: 'average', label: '平均' },
 ];
+const PALETTE_OPTIONS: ReadonlyArray<{ value: PaletteKind; label: string }> = [
+  { value: 'auto', label: '自动' }, { value: 'preset', label: '预设' }, { value: 'custom', label: '自定义' },
+];
+const PRESET_OPTIONS = Object.entries(PRESET_NAMES).map(([value, label]) => ({ value, label }));
+const DITHER_OPTIONS: ReadonlyArray<{ value: DitherKind; label: string }> = [
+  { value: 'none', label: '无' }, { value: 'bayer2', label: 'Bayer 2×2' }, { value: 'bayer4', label: 'Bayer 4×4' },
+  { value: 'bayer8', label: 'Bayer 8×8' }, { value: 'floyd', label: 'Floyd–Steinberg' },
+];
+const ISOLATED_OPTIONS = [{ value: '0', label: '不处理' }, { value: '4', label: '四邻域' }, { value: '8', label: '八邻域' }] as const;
+const CONNECTIVITY_OPTIONS = [{ value: '4', label: '四向' }, { value: '8', label: '八向' }] as const;
+const CLEANUP_HELP = '孤立像素：与四周邻居都不同色的单个像素，换成邻居里最多的颜色。最小色块：小于这个面积的同色块并进周围的颜色，0 表示不合并。';
 const THUMB_EDGE = 384;
 const PREVIEW_DELAY = 250;
 const message = (error: unknown) => (error instanceof PluginRpcError && error.code === 'SERVER_ERROR' ? error.message : '处理失败，请重试');
@@ -70,10 +84,8 @@ export function Panel({ client }: { client: PluginClient }) {
   const handles = (frames ?? []).map(item => item.handle);
   const current = Math.min(frame, Math.max(0, handles.length - 1));
   // 放大倍数与是否另出原尺寸不影响预览本身，不触发重算。
-  const previewKey = handles.length ? JSON.stringify([
-    state.size_mode, state.long_edge, state.block, state.downsample, state.palette.colors, state.shared_palette,
-    state.alpha_threshold, current, handles,
-  ]) : '';
+  const { upscale: _upscale, keep_original_size: _keep, ...previewParams } = state;
+  const previewKey = handles.length ? JSON.stringify([previewParams, current, handles]) : '';
 
   useEffect(() => {
     if (!previewKey) return;
@@ -142,15 +154,56 @@ export function Panel({ client }: { client: PluginClient }) {
       </section>
       <section className="group">
         <h2>颜色</h2>
-        <NumberField label="颜色数" value={state.palette.colors} min={LIMITS.colors[0]} max={LIMITS.colors[1]}
-          onChange={colors => save({ palette: { kind: 'auto', colors } })} />
+        <div className="row">
+          <SelectField label="调色板" value={state.palette.kind} options={PALETTE_OPTIONS} onChange={kind => save({
+            palette: {
+              ...state.palette, kind,
+              // 第一次切到自定义时，用当前调色板起个头，在它基础上改。
+              custom: kind === 'custom' && !state.palette.custom && preview ? preview.colors.join(' ') : state.palette.custom,
+            },
+          })} />
+          {state.palette.kind === 'auto' && <NumberField label="颜色数" value={state.palette.colors} min={LIMITS.colors[0]}
+            max={LIMITS.colors[1]} onChange={colors => save({ palette: { ...state.palette, colors } })} />}
+          {state.palette.kind === 'preset' && <SelectField label="预设" value={state.palette.preset} options={PRESET_OPTIONS}
+            onChange={preset => save({ palette: { ...state.palette, preset } })} />}
+        </div>
+        {state.palette.kind === 'custom' && <TextAreaField label="色值" value={state.palette.custom} rows={3}
+          onChange={custom => save({ palette: { ...state.palette, custom } })} />}
         {preview && <div className="swatches" aria-label="调色板">
           {preview.colors.map(color => <Swatch key={color} color={color} />)}
         </div>}
-        {frames.length > 1 && <Checkbox label="整组共用调色板" checked={state.shared_palette}
+        {frames.length > 1 && state.palette.kind === 'auto' && <Checkbox label="整组共用调色板" checked={state.shared_palette}
           onChange={shared => save({ shared_palette: shared })} />}
         <NumberField label="透明阈值" value={state.alpha_threshold} min={LIMITS.alpha[0]} max={LIMITS.alpha[1]}
           onChange={alpha => save({ alpha_threshold: alpha })} />
+      </section>
+      <section className="group">
+        <h2>抖动</h2>
+        <div className="row">
+          <SelectField label="方式" value={state.dither.kind} options={DITHER_OPTIONS}
+            onChange={kind => save({ dither: { ...state.dither, kind } })} />
+          {state.dither.kind.startsWith('bayer') && <NumberField label="强度" value={state.dither.strength}
+            min={LIMITS.strength[0]} max={LIMITS.strength[1]} onChange={strength => save({ dither: { ...state.dither, strength } })} />}
+        </div>
+      </section>
+      <section className="group">
+        <h2 className="with-help">清理 <HelpMark text={CLEANUP_HELP} /></h2>
+        <div className="row">
+          <SelectField label="孤立像素" value={String(state.cleanup.isolated) as '0' | '4' | '8'} options={ISOLATED_OPTIONS}
+            onChange={value => save({ cleanup: { ...state.cleanup, isolated: Number(value) as 0 | 4 | 8 } })} />
+          <NumberField label="最小色块" value={state.cleanup.min_region} min={LIMITS.minRegion[0]} max={LIMITS.minRegion[1]}
+            onChange={minRegion => save({ cleanup: { ...state.cleanup, min_region: minRegion } })} />
+        </div>
+      </section>
+      <section className="group">
+        <h2>描边</h2>
+        <Checkbox label="外描边" checked={state.outline.enabled} onChange={enabled => save({ outline: { ...state.outline, enabled } })} />
+        {state.outline.enabled && <div className="row">
+          <SelectField label="方向" value={String(state.outline.connectivity) as '4' | '8'} options={CONNECTIVITY_OPTIONS}
+            onChange={value => save({ outline: { ...state.outline, connectivity: Number(value) as 4 | 8 } })} />
+          <SelectField label="颜色" value={OUTLINE_COLOR_OPTIONS.some(option => option.value === state.outline.color) ? state.outline.color : 'darkest'}
+            options={OUTLINE_COLOR_OPTIONS} onChange={color => save({ outline: { ...state.outline, color } })} />
+        </div>}
       </section>
       <section className="group">
         <h2>输出</h2>

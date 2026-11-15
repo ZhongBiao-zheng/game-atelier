@@ -6,8 +6,11 @@
 """
 from __future__ import annotations
 
+import json
 import math
+import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import cv2
@@ -21,6 +24,11 @@ COLORS_RANGE = (2, 64)
 UPSCALE_RANGE = (1, 16)
 SAMPLE_PIXELS = 60_000
 KMEANS_SEED = 1234
+CUSTOM_COLORS_RANGE = (2, 256)
+DITHERS = ("none", "bayer2", "bayer4", "bayer8", "floyd")
+PRESETS = {item["id"]: item for item in json.loads(
+    (Path(__file__).with_name("palettes.json")).read_text(encoding="utf-8"))["palettes"]}
+_HEX = re.compile(r"^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
 
 def _half_up(value: float) -> int:
@@ -34,16 +42,51 @@ def _int_in(params: dict[str, Any], key: str, default: int, bounds: tuple[int, i
     return value
 
 
+def parse_hex_colors(text: str) -> np.ndarray:
+    """自定义调色板：#RGB 或 #RRGGBB，逗号、空白或换行分隔。"""
+    tokens = [token for token in re.split(r"[\s,;]+", text or "") if token]
+    colors = [list(_one_hex(token)) for token in tokens]
+    if not CUSTOM_COLORS_RANGE[0] <= len(colors) <= CUSTOM_COLORS_RANGE[1]:
+        raise ValueError(f"自定义调色板要有 {CUSTOM_COLORS_RANGE[0]} 到 {CUSTOM_COLORS_RANGE[1]} 个颜色")
+    return np.unique(np.array(colors, np.uint8), axis=0)
+
+
+def _one_hex(text: str) -> tuple[int, int, int]:
+    match = _HEX.match(text.strip())
+    if not match:
+        raise ValueError(f"色值「{text[:16]}」不对，要写成 #RRGGBB")
+    value = match.group(1)
+    if len(value) == 3:
+        value = "".join(char * 2 for char in value)
+    return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
+
+
+def _preset_colors(preset_id: str) -> np.ndarray:
+    preset = PRESETS.get(preset_id)
+    if preset is None:
+        raise ValueError("没有这个预设调色板")
+    return np.array([[int(color[i:i + 2], 16) for i in (0, 2, 4)] for color in preset["colors"]], np.uint8)
+
+
 @dataclass(frozen=True)
 class Settings:
     size_mode: str  # long_edge | block
     long_edge: int
     block: int
     downsample: str  # mode | average
+    palette_kind: str  # auto | preset | custom
     colors: int
+    fixed_palette: np.ndarray | None  # 预设或自定义时的色板
     shared_palette: bool
     alpha_threshold: int
     upscale: int
+    dither: str
+    dither_strength: float  # 0–1
+    isolated: int  # 0 = 不清理；4 / 8 = 按 4 / 8 邻域去孤立像素
+    min_region: int  # 0 = 不合并；否则合并面积小于它的色块
+    outline: bool
+    outline_connectivity: int
+    outline_color: tuple[int, int, int] | None  # None = 调色板最深色
 
     @classmethod
     def parse(cls, params: dict[str, Any]) -> "Settings":
@@ -54,17 +97,44 @@ class Settings:
         if downsample not in ("mode", "average"):
             raise ValueError("降采样方式不对")
         palette = params.get("palette") or {"kind": "auto", "colors": 16}
-        if not isinstance(palette, dict) or palette.get("kind", "auto") != "auto":
+        if not isinstance(palette, dict) or palette.get("kind", "auto") not in ("auto", "preset", "custom"):
             raise ValueError("调色板设置不对")
+        kind = palette.get("kind", "auto")
+        fixed = None
+        if kind == "preset":
+            fixed = _preset_colors(str(palette.get("preset", "")))
+        elif kind == "custom":
+            fixed = parse_hex_colors(str(palette.get("custom", "")))
+        dither = params.get("dither") or {"kind": "none"}
+        if not isinstance(dither, dict) or dither.get("kind", "none") not in DITHERS:
+            raise ValueError("抖动设置不对")
+        cleanup = params.get("cleanup") or {}
+        if not isinstance(cleanup, dict) or cleanup.get("isolated", 0) not in (0, 4, 8):
+            raise ValueError("清理设置不对")
+        outline = params.get("outline") or {}
+        if not isinstance(outline, dict) or outline.get("connectivity", 4) not in (4, 8):
+            raise ValueError("描边设置不对")
+        outline_color = None
+        if outline.get("color", "darkest") != "darkest":
+            outline_color = _one_hex(str(outline.get("color")))
         return cls(
             size_mode=size_mode,
             long_edge=_int_in(params, "long_edge", 64, LONG_EDGE_RANGE, "长边"),
             block=_int_in(params, "block", 8, BLOCK_RANGE, "像素块"),
             downsample=downsample,
-            colors=_int_in(palette, "colors", 16, COLORS_RANGE, "颜色数"),
+            palette_kind=kind,
+            colors=_int_in(palette, "colors", 16, COLORS_RANGE, "颜色数") if kind == "auto" else 0,
+            fixed_palette=fixed,
             shared_palette=params.get("shared_palette", True) is not False,
             alpha_threshold=_int_in(params, "alpha_threshold", 128, (1, 255), "透明阈值"),
             upscale=_int_in(params, "upscale", 1, UPSCALE_RANGE, "放大倍数"),
+            dither=dither.get("kind", "none"),
+            dither_strength=_int_in(dither, "strength", 100, (0, 100), "抖动强度") / 100,
+            isolated=cleanup.get("isolated", 0),
+            min_region=_int_in(cleanup, "min_region", 0, (0, 16), "最小色块"),
+            outline=outline.get("enabled") is True,
+            outline_connectivity=outline.get("connectivity", 4),
+            outline_color=outline_color,
         )
 
 
@@ -153,16 +223,98 @@ def _indices(rgb: np.ndarray, lut: np.ndarray) -> np.ndarray:
     return lut[(q[..., 0] << 10) | (q[..., 1] << 5) | q[..., 2]]
 
 
+def _bayer(size: int) -> np.ndarray:
+    """标准 Bayer 阈值矩阵，归一化到 (-0.5, 0.5)。"""
+    matrix = np.array([[0]])
+    while matrix.shape[0] < size:
+        matrix = np.block([[4 * matrix, 4 * matrix + 2], [4 * matrix + 3, 4 * matrix + 1]])
+    return (matrix + 0.5) / matrix.size - 0.5
+
+
+def _floyd(rgb: np.ndarray, palette: np.ndarray) -> np.ndarray:
+    """Floyd–Steinberg 误差扩散（Pillow 实现，按 RGB 距离取色）。"""
+    k = len(palette)
+    flat = palette.reshape(-1).tolist()
+    holder = Image.new("P", (1, 1))
+    holder.putpalette(flat + flat[:3] * (256 - k))  # 补位都填第 0 色，映射回来时折回 0
+    quantized = Image.fromarray(rgb, "RGB").quantize(palette=holder, dither=Image.Dither.FLOYDSTEINBERG)
+    index = np.asarray(quantized).astype(np.int32)
+    index[index >= k] = 0
+    return index
+
+
+_NEIGHBOURS = {4: ((-1, 0), (1, 0), (0, -1), (0, 1)),
+               8: ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1))}
+
+
+def _remove_isolated(index: np.ndarray, opaque: np.ndarray, connectivity: int) -> tuple[np.ndarray, np.ndarray]:
+    """孤立像素：与四周不透明邻居都不同色的像素换成邻居里最多的颜色；四周全透明的单个像素变透明。"""
+    height, width = index.shape
+    code = np.pad(np.where(opaque, index, -1), 1, constant_values=-1)
+    neighbours = np.stack([code[1 + dy:1 + dy + height, 1 + dx:1 + dx + width] for dy, dx in _NEIGHBOURS[connectivity]])
+    valid = neighbours >= 0
+    same = ((neighbours == index[None]) & valid).any(0)
+    lonely = opaque & ~valid.any(0)
+    isolated = opaque & ~same & (valid.sum(0) >= 2)
+    result = index.copy()
+    if isolated.any():
+        values = neighbours[:, isolated]  # (邻居数, N)
+        ok = values >= 0
+        votes = ((values[:, None, :] == values[None, :, :]) & ok[None, :, :] & ok[:, None, :]).sum(1)
+        result[isolated] = values[votes.argmax(0), np.arange(values.shape[1])]
+    return result, opaque & ~lonely
+
+
+def _merge_small_regions(index: np.ndarray, opaque: np.ndarray, min_region: int) -> np.ndarray:
+    """面积小于 min_region 的同色连通块（4 连通）并进周围最多的颜色。"""
+    result = index.copy()
+    cross = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], np.uint8)
+    for color in np.unique(index[opaque]):
+        mask = (opaque & (result == color)).astype(np.uint8)
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=4)
+        for label in range(1, count):
+            x, y, w, h, area = stats[label]
+            if area >= min_region:
+                continue
+            top, left = max(0, y - 1), max(0, x - 1)
+            bottom, right = min(index.shape[0], y + h + 1), min(index.shape[1], x + w + 1)
+            component = labels[top:bottom, left:right] == label
+            ring = cv2.dilate(component.astype(np.uint8), cross).astype(bool) & ~component & opaque[top:bottom, left:right]
+            around = result[top:bottom, left:right][ring]
+            around = around[around != color]
+            if len(around):
+                window = result[top:bottom, left:right]
+                window[component] = np.bincount(around).argmax()
+    return result
+
+
+def _darkest(palette: np.ndarray) -> tuple[int, int, int]:
+    luminance = palette.astype(np.float32) @ np.array([0.299, 0.587, 0.114], np.float32)
+    return tuple(palette[int(luminance.argmin())].tolist())  # type: ignore[return-value]
+
+
 def pixelate_one(image: Image.Image, palette: np.ndarray, lut: np.ndarray, settings: Settings) -> Image.Image:
-    """一张图像素化到实际像素尺寸（不放大）。"""
+    """一张图像素化到实际像素尺寸（不放大）：降采样与映射 → 抖动 → 清理 → 描边。"""
     array = _rgba(image)
     height, width = array.shape[:2]
     target_w, target_h = target_size(width, height, settings)
     k = len(palette)
-    if settings.downsample == "average":
+    dithering = settings.dither != "none" and settings.dither_strength > 0
+    if settings.downsample == "average" or dithering:
+        # 抖动需要连续色调：颜色取格内平均（按预乘 alpha），再按抖动方式映射。
         small = _resize_rgba(array, (target_w, target_h)) if (target_w, target_h) != (width, height) else array
         opaque = small[..., 3] >= settings.alpha_threshold
-        index = _indices(small[..., :3], lut)
+        rgb = small[..., :3]
+        if dithering and settings.dither == "floyd":
+            index = _floyd(np.ascontiguousarray(rgb), palette)
+        elif dithering:
+            size = int(settings.dither[5:])
+            matrix = np.tile(_bayer(size), (target_h // size + 1, target_w // size + 1))[:target_h, :target_w]
+            spread = 255 / max(1, round(k ** (1 / 3)))  # 大致等于相邻调色板色的间距
+            shifted = rgb.astype(np.float32) + (matrix * spread * settings.dither_strength)[..., None]
+            index = _indices(np.clip(np.rint(shifted), 0, 255).astype(np.uint8), lut)
+        else:
+            index = _indices(rgb, lut)
     else:
         # 主色：每格里出现最多的调色板色；格里透明像素过半，这一格就是透明。
         if width * height > 16 * target_w * target_h:
@@ -177,10 +329,20 @@ def pixelate_one(image: Image.Image, palette: np.ndarray, lut: np.ndarray, setti
         counts = np.bincount(block * (k + 1) + code, minlength=target_w * target_h * (k + 1)).reshape(-1, k + 1)
         opaque = (counts[:, 0] * 2 < counts.sum(1)).reshape(target_h, target_w)
         index = counts[:, 1:].argmax(1).reshape(target_h, target_w)
+    if settings.isolated:
+        index, opaque = _remove_isolated(index, opaque, settings.isolated)
+    if settings.min_region > 1:
+        index = _merge_small_regions(index, opaque, settings.min_region)
     out = np.zeros((target_h, target_w, 4), np.uint8)
     out[..., :3] = palette[index]
     out[..., 3] = np.where(opaque, 255, 0)
     out[~opaque, :3] = 0
+    if settings.outline:
+        kernel = np.ones((3, 3), np.uint8) if settings.outline_connectivity == 8 else \
+            np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], np.uint8)
+        ring = cv2.dilate(opaque.astype(np.uint8), kernel).astype(bool) & ~opaque
+        out[ring, :3] = settings.outline_color or _darkest(palette)
+        out[ring, 3] = 255
     return Image.fromarray(out, "RGBA")
 
 
@@ -194,8 +356,8 @@ def pixelate(images: list[Image.Image], settings: Settings) -> tuple[list[Image.
     """整组像素化。shared_palette 为真时全组共用一个调色板，动画帧之间颜色不跳。"""
     if not images:
         raise ValueError("没有要像素化的图片")
-    if settings.shared_palette:
-        palette = auto_palette(images, settings.colors, settings.alpha_threshold)
+    if settings.fixed_palette is not None or settings.shared_palette:
+        palette = resolve_palette(images, settings)
         lut = palette_lut(palette)
         return [pixelate_one(image, palette, lut, settings) for image in images], [palette] * len(images)
     outputs, palettes = [], []
@@ -204,6 +366,18 @@ def pixelate(images: list[Image.Image], settings: Settings) -> tuple[list[Image.
         outputs.append(pixelate_one(image, palette, palette_lut(palette), settings))
         palettes.append(palette)
     return outputs, palettes
+
+
+def resolve_palette(images: list[Image.Image], settings: Settings) -> np.ndarray:
+    """这次用的调色板：预设或自定义时就是它；自动时按 k 色聚类。"""
+    if settings.fixed_palette is not None:
+        return settings.fixed_palette
+    return auto_palette(images, settings.colors, settings.alpha_threshold)
+
+
+def preset_list() -> list[dict]:
+    return [{"id": item["id"], "name": item["name"], "colors": [f"#{color}" for color in item["colors"]]}
+            for item in PRESETS.values()]
 
 
 def hex_colors(palette: np.ndarray) -> list[str]:

@@ -137,3 +137,27 @@ def test_agent_pixelates_by_node_ids(project):
     result, created = plugin_server.call("pixel", "POST", "/pixelate", project_id=project, origin="agent",
                                          params={**SETTINGS, "image_node_ids": ["frame-1", "frame-2"]})
     assert result["frame_count"] == 2 and len(created) == 2
+
+
+def test_presets_route_lists_named_palettes(client, project):
+    presets = post(client, project, "presets", {}).json()["result"]["presets"]
+    assert [item["name"] for item in presets] == ["PICO-8", "Game Boy", "DawnBringer 16", "DawnBringer 32",
+                                                  "Endesga 32", "NES"]
+
+
+def test_preset_dither_cleanup_and_outline_through_the_route(client, project):
+    response = post(client, project, "pixelate", {
+        **SETTINGS, "palette": {"kind": "preset", "preset": "pico-8"}, "dither": {"kind": "bayer4", "strength": 50},
+        "cleanup": {"isolated": 4, "min_region": 3}, "outline": {"enabled": True, "color": "#000000"},
+    }, versions=stack_versions(project)[:1])
+    assert response.status_code == 200, response.text
+    result = response.json()["result"]
+    pico8 = {tuple(int(value[i:i + 2], 16) for i in (1, 3, 5)) for value in result["colors"]}
+    assert len(pico8) == 16
+    array = np.asarray(image_of(project, result["node_id"]))
+    assert {tuple(pixel) for pixel in array[array[..., 3] > 0][:, :3].tolist()} <= pico8
+
+
+def test_bad_custom_palette_is_readable(client, project):
+    response = post(client, project, "preview", {**SETTINGS, "palette": {"kind": "custom", "custom": "#zz0000"}})
+    assert response.status_code == 422 and "要写成 #RRGGBB" in response.text

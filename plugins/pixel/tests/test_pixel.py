@@ -125,3 +125,113 @@ def test_large_source_stays_within_the_time_budget():
                                                   "palette": {"kind": "auto", "colors": 16}}))
     # 方案假设 7：单帧 1024² 目标 0.5 秒；CI 机器慢，这里留 4 倍余量只防数量级退化。
     assert time.perf_counter() - started < 2.0
+
+
+# ── X2：调色板来源、抖动、清理、描边 ─────────────────────────────────────────────
+
+PICO8 = ["#000000", "#1d2b53", "#7e2553", "#008751", "#ab5236", "#5f574f", "#c2c3c7", "#fff1e8",
+         "#ff004d", "#ffa300", "#ffec27", "#00e436", "#29adff", "#83769c", "#ff77a8", "#ffccaa"]
+
+
+def test_presets_are_the_published_lospec_values():
+    presets = {item["id"]: item for item in pixel.preset_list()}
+    assert presets["pico-8"]["colors"] == PICO8
+    assert {key: len(item["colors"]) for key, item in presets.items()} == {
+        "pico-8": 16, "gameboy": 4, "db16": 16, "db32": 32, "endesga-32": 32, "nes": 55}
+
+
+def test_preset_palette_restricts_output_colours():
+    rng = np.random.default_rng(9)
+    image = Image.fromarray(rng.integers(0, 255, (32, 32, 3), dtype=np.uint8), "RGB")
+    (out,), (palette,) = pixel.pixelate([image], settings(palette={"kind": "preset", "preset": "gameboy"}))
+    assert colors_of(out) <= {(8, 24, 32), (52, 104, 86), (136, 192, 112), (224, 248, 208)}
+    assert len(palette) == 4
+
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ("#fff, #000000", [(0, 0, 0), (255, 255, 255)]),
+    ("ff0000\n00ff00 ; 0000ff", [(0, 0, 255), (0, 255, 0), (255, 0, 0)]),
+])
+def test_custom_palette_parsing(text, expected):
+    assert [tuple(color) for color in pixel.parse_hex_colors(text).tolist()] == expected
+
+
+@pytest.mark.parametrize("text", ["#ff00", "red, blue", "#000000"])
+def test_custom_palette_rejects_bad_or_too_few_colours(text):
+    with pytest.raises(ValueError):
+        pixel.parse_hex_colors(text)
+
+
+def black_white(**overrides):
+    return settings(palette={"kind": "custom", "custom": "#000000 #ffffff"}, size_mode="long_edge", long_edge=64, downsample="average", **overrides)
+
+
+def test_bayer_turns_mid_grey_into_an_even_pattern():
+    grey = Image.new("RGB", (8, 8), (128, 128, 128))
+    (dithered,), _ = pixel.pixelate([grey], black_white(dither={"kind": "bayer4", "strength": 100}))
+    values = np.asarray(dithered)[..., 0]
+    assert set(np.unique(values).tolist()) == {0, 255}
+    # 映射按 Lab 感知距离：128 灰的 L* 约 54，略偏白，所以白点略多于一半。
+    assert 24 <= (values == 255).sum() <= 44
+    assert np.array_equal(values, np.tile(values[:4, :4], (2, 2))), "Bayer 4×4 网点按 4 像素周期重复"
+    (flat,), _ = pixel.pixelate([grey], black_white(dither={"kind": "bayer4", "strength": 0}))
+    assert len(np.unique(np.asarray(flat)[..., 0])) == 1, "强度 0 等于不抖动"
+
+
+def test_floyd_steinberg_only_uses_palette_colours():
+    gradient = Image.fromarray(np.tile(np.linspace(0, 255, 32, dtype=np.uint8), (16, 1)), "L").convert("RGB")
+    (out,), _ = pixel.pixelate([gradient], black_white(dither={"kind": "floyd"}))
+    assert colors_of(out) == {(0, 0, 0), (255, 255, 255)}
+
+
+def test_isolated_pixel_is_replaced_but_larger_specks_stay():
+    array = np.full((8, 8, 3), RED, np.uint8)
+    array[3, 3] = BLUE                 # 单个孤立像素
+    array[6:8, 0] = BLUE               # 两个像素的竖条：与彼此相邻，不算孤立
+    (out,), _ = pixel.pixelate([Image.fromarray(array, "RGB")],
+                               settings(size_mode="long_edge", long_edge=64, palette={"kind": "custom", "custom": "#dc2828 #283cdc"},
+                                        cleanup={"isolated": 4}))
+    result = np.asarray(out)[..., :3]
+    assert tuple(result[3, 3]) == RED
+    assert tuple(result[6, 0]) == BLUE and tuple(result[7, 0]) == BLUE
+
+
+def test_stray_opaque_pixel_in_transparent_area_disappears():
+    array = np.zeros((6, 6, 4), np.uint8)
+    array[2, 2] = (*RED, 255)
+    (out,), _ = pixel.pixelate([Image.fromarray(array, "RGBA")], settings(size_mode="long_edge", long_edge=64, cleanup={"isolated": 8}))
+    assert np.asarray(out)[..., 3].max() == 0
+
+
+def test_small_regions_merge_into_their_surroundings():
+    array = np.full((10, 10, 3), RED, np.uint8)
+    array[2:4, 2:4] = BLUE   # 4 像素
+    array[6:9, 6:9] = BLUE   # 9 像素
+    (out,), _ = pixel.pixelate([Image.fromarray(array, "RGB")],
+                               settings(size_mode="long_edge", long_edge=64, palette={"kind": "custom", "custom": "#dc2828 #283cdc"},
+                                        cleanup={"min_region": 5}))
+    result = np.asarray(out)[..., :3]
+    assert tuple(result[2, 2]) == RED, "小于 5 像素的色块被并掉"
+    assert tuple(result[7, 7]) == BLUE, "9 像素的色块保留"
+
+
+@pytest.mark.parametrize(("connectivity", "ring"), [(4, 4 * 4), (8, 4 * 4 + 4)])
+def test_outline_wraps_the_opaque_shape(connectivity, ring):
+    array = np.zeros((10, 10, 4), np.uint8)
+    array[3:7, 3:7] = (*RED, 255)  # 4×4 方块
+    (out,), _ = pixel.pixelate([Image.fromarray(array, "RGBA")],
+                               settings(size_mode="long_edge", long_edge=64, palette={"kind": "custom", "custom": "#dc2828 #102030"},
+                                        outline={"enabled": True, "connectivity": connectivity, "color": "#00ff00"}))
+    result = np.asarray(out)
+    green = (result[..., :3] == (0, 255, 0)).all(-1) & (result[..., 3] == 255)
+    assert green.sum() == ring
+    assert (result[3:7, 3:7, :3] == RED).all(), "描边不盖住内部"
+
+
+def test_outline_defaults_to_the_darkest_palette_colour():
+    array = np.zeros((6, 6, 4), np.uint8)
+    array[2:4, 2:4] = (*RED, 255)
+    (out,), _ = pixel.pixelate([Image.fromarray(array, "RGBA")],
+                               settings(size_mode="long_edge", long_edge=64, palette={"kind": "custom", "custom": "#dc2828 #102030 #eeeeee"},
+                                        outline={"enabled": True}))
+    assert tuple(np.asarray(out)[1, 2, :3]) == (16, 32, 48)

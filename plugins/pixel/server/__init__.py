@@ -37,8 +37,7 @@ def _data_url(image: Image.Image) -> str:
 
 
 def _palette_for(images: list[Image.Image], frame: Image.Image, settings: pixel.Settings):
-    palette = pixel.auto_palette(images if settings.shared_palette else [frame], settings.colors,
-                                 settings.alpha_threshold)
+    palette = pixel.resolve_palette(images if settings.shared_palette else [frame], settings)
     return palette, pixel.palette_lut(palette)
 
 
@@ -63,6 +62,10 @@ def register(api) -> None:
         frame = images[_frame_index(params, len(images))]
         colors, _ = _palette_for(images, frame, settings)
         return {"colors": pixel.hex_colors(colors)}
+
+    @api.route("POST", "/presets")
+    def presets(ctx, params: dict) -> dict:
+        return {"presets": pixel.preset_list()}
 
     @api.route("POST", "/preview")
     def preview(ctx, params: dict) -> dict:

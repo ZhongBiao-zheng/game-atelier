@@ -66,6 +66,11 @@
       "routes": [
         {
           "method": "POST",
+          "path": "/presets",
+          "access": "read"
+        },
+        {
+          "method": "POST",
           "path": "/palette",
           "access": "read"
         },
@@ -84,7 +89,7 @@
     "agent_tools": [
       {
         "name": "pixelate",
-        "description": "把图片转成像素画：降采样到目标像素网格、限制颜色数、透明度二值化，可按整数倍放大输出。多张时输出一个结果组。",
+        "description": "把图片转成像素画：降采样到目标像素网格、限定调色板（自动、预设或自定义）、可选抖动、去杂点与外描边，可按整数倍放大输出。多张时输出一个结果组。",
         "parameters": {
           "type": "object",
           "required": [
@@ -130,18 +135,34 @@
             },
             "palette": {
               "type": "object",
-              "description": "调色板，目前支持 {kind: 'auto', colors: 2–64}",
+              "description": "调色板：{kind:'auto', colors:2–64} 自动聚类；{kind:'preset', preset:'pico-8'|'gameboy'|'db16'|'db32'|'endesga-32'|'nes'}；{kind:'custom', custom:'#RRGGBB …'}",
               "properties": {
                 "kind": {
                   "type": "string",
                   "enum": [
-                    "auto"
+                    "auto",
+                    "preset",
+                    "custom"
                   ]
                 },
                 "colors": {
                   "type": "integer",
                   "minimum": 2,
                   "maximum": 64
+                },
+                "preset": {
+                  "type": "string",
+                  "enum": [
+                    "pico-8",
+                    "gameboy",
+                    "db16",
+                    "db32",
+                    "endesga-32",
+                    "nes"
+                  ]
+                },
+                "custom": {
+                  "type": "string"
                 }
               }
             },
@@ -164,6 +185,65 @@
             "keep_original_size": {
               "type": "boolean",
               "description": "放大时另外输出实际像素尺寸的版本"
+            },
+            "dither": {
+              "type": "object",
+              "description": "抖动：kind 为 none / bayer2 / bayer4 / bayer8 / floyd，strength 0–100（Bayer 用）",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "bayer2",
+                    "bayer4",
+                    "bayer8",
+                    "floyd"
+                  ]
+                },
+                "strength": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                }
+              }
+            },
+            "cleanup": {
+              "type": "object",
+              "description": "清理：isolated 为 0 / 4 / 8（按 4 或 8 邻域去孤立像素），min_region 为 0–16（合并面积小于它的色块）",
+              "properties": {
+                "isolated": {
+                  "type": "integer",
+                  "enum": [
+                    0,
+                    4,
+                    8
+                  ]
+                },
+                "min_region": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 16
+                }
+              }
+            },
+            "outline": {
+              "type": "object",
+              "description": "外描边 1 像素：enabled，connectivity 4 / 8，color 为 'darkest'（调色板最深色）或 #RRGGBB",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "connectivity": {
+                  "type": "integer",
+                  "enum": [
+                    4,
+                    8
+                  ]
+                },
+                "color": {
+                  "type": "string"
+                }
+              }
             }
           }
         },
