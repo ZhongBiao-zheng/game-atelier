@@ -493,6 +493,8 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 
 分镜节点是插件节点外壳（ADR-0038）：`type: "plugin"`，`data.plugin_id = "atelier.storyboard"`，`data.node_type = "board"`，`data.payload = {ratio, style_prefix, entities[], shots[], script_node_ids[]}`。条目 `{id, kind: character|scene|prop, name, description, reference_node_id}`；镜头 `{id, scene, shot_size, camera, duration_s, visual, dialogue, entity_ids[], image_prompt, video_prompt, image_node_id, video_node_id}`。文档校验对 `payload` 只查 256 KiB 大小；形状由 `canvas_storyboard.normalize_payload`（后端）与 `normalizeStoryboardPayload`（前端）宽容读取，两端共用 `tests/fixtures/storyboard_payload_cases.json`。上限 120 镜、60 条目、每镜 20 个条目引用、8 个来源文本节点；时长夹到 1–60 秒。`payload` 里的节点 id 不做文档级引用校验，读取方只认当前文档内类型相符的节点。分镜节点不接连线。
 
+时间线读取（给「视频时间线导出」用，纯函数，不是 HTTP 接口）：后端 `canvas_storyboard.timeline(document, node)` 与前端 `storyboardTimeline(payload, findNode, resolveVersion)` 按镜头顺序返回 `[{shot_id, index, planned_duration_s, dialogue, video_node_id, video_version_id, duration_ms}]`。`video_version_id` 是镜头的 `video_node_id` 指向的视频节点的当前内容版本；节点不存在、类型不符或没有内容时为 `null`。`duration_ms` 取内容版本上登记的时长，生成出的视频目前不登记（为 `null`），需要调用方自己探测。两端共用夹具 `tests/fixtures/storyboard_timeline_case.json`。
+
 剧本解析（计费调用，只返回镜头草稿，不写画布）：
 - `GET /api/canvas/storyboard/models` → `{models: [{alias, model_id, name, max_cost_cny}]}`，候选是已启用密钥下的文本模型（含局域网网关提供的）；`max_cost_cny` 是解析一段的最高花费，没有价格时为 `null`。
 - `POST /api/canvas/projects/{id}/storyboard/plan`，体 `{script_node_ids}`（1–8 个）→ `{total_chars, segments: [{index, chars, preview}]}`。不调模型；剧本只从已保存文档里的文本节点读，单段上限 8000 字，全文上限 120000 字。

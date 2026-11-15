@@ -161,3 +161,18 @@ def test_storyboard_follows_project_package():
     restored = read_canvas_document(imported.project_id)
     assert restored.nodes[0].data.payload == payload
     assert agent_view(restored, restored.nodes[0])["storyboard"]["shots"][0]["image_node_id"] == "image-1"
+
+
+def test_timeline_lists_selected_video_per_shot_in_order():
+    """时间线导出的读取入口：顺序即镜头顺序，每镜的视频只认当前文档里类型相符且有内容的节点。"""
+    from character_workflow.lib.canvas_storyboard import timeline
+
+    case = json.loads((Path(__file__).parent / "fixtures" / "storyboard_timeline_case.json").read_text(encoding="utf-8"))
+    project = create_canvas_project("时间线")
+    current = read_canvas_document(project.project_id)
+    document = CanvasDocument.model_validate({
+        **current.model_dump(mode="json"),
+        "nodes": [storyboard_node(case["payload"]), *case["nodes"]],
+        "content_versions": case["content_versions"],
+    })
+    assert timeline(document, document.nodes[0]) == case["expected"]

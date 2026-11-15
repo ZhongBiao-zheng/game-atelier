@@ -203,3 +203,18 @@ describe('并入剧本解析结果', () => {
     expect(droppedShots).toBe(4);
   });
 });
+
+describe('时间线读取', () => {
+  it('与后端同一份夹具：按镜头顺序给出每镜选定的视频', async () => {
+    const { default: timelineCase } = await import('../../../tests/fixtures/storyboard_timeline_case.json');
+    const { storyboardTimeline } = await import('./canvasStoryboard');
+    const nodes = timelineCase.nodes as unknown as CanvasNode[];
+    const versions = timelineCase.content_versions as Record<string, { kind: string; version_id: string; duration_ms?: number }>;
+    const rows = storyboardTimeline(
+      normalizeStoryboardPayload(timelineCase.payload),
+      id => nodes.find(node => node.id === id),
+      id => (id ? versions[id] : undefined),
+    );
+    expect(rows).toEqual(timelineCase.expected);
+  });
+});

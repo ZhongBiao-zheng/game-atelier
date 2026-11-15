@@ -1,0 +1,43 @@
+{
+  "_comment": "分镜的时间线读取：Python canvas_storyboard.timeline 与 TS storyboardTimeline 对同一份文档必须给出同样结果。",
+  "payload": {
+    "ratio": "16:9",
+    "shots": [
+      {"id": "a", "duration_s": 4, "dialogue": "甲：请", "image_node_id": "image-a", "video_node_id": "video-a"},
+      {"id": "b", "duration_s": 6, "video_node_id": "video-empty"},
+      {"id": "c", "duration_s": 3, "video_node_id": "image-a"},
+      {"id": "d", "duration_s": 5, "video_node_id": "deleted"},
+      {"id": "e", "duration_s": 2.5}
+    ]
+  },
+  "nodes": [
+    {"id": "image-a", "type": "image", "title": "01 图", "position": {"x": 0, "y": 0}, "z_index": 0,
+     "data": {"current_version_id": "v-image", "generation_draft": null, "active_run_id": null}},
+    {"id": "video-a", "type": "video", "title": "01 视频", "position": {"x": 0, "y": 0}, "z_index": 0,
+     "data": {"current_version_id": "v-video", "generation_draft": null, "active_run_id": null}},
+    {"id": "video-empty", "type": "video", "title": "02 视频", "position": {"x": 0, "y": 0}, "z_index": 0,
+     "data": {"current_version_id": null, "generation_draft": null, "active_run_id": null}}
+  ],
+  "content_versions": {
+    "v-image": {"version_id": "v-image", "kind": "image", "path": "uploads/upload-1.png", "mime_type": "image/png", "bytes": 10,
+                "created_at": "2026-11-15T00:00:00+00:00",
+                "sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+                "origin": {"kind": "upload", "upload_id": "upload-1"}},
+    "v-video": {"version_id": "v-video", "kind": "video", "path": "uploads/upload-2.mp4", "mime_type": "video/mp4", "bytes": 20,
+                "duration_ms": 4200, "created_at": "2026-11-15T00:00:00+00:00",
+                "sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+                "origin": {"kind": "upload", "upload_id": "upload-2"}}
+  },
+  "expected": [
+    {"shot_id": "a", "index": 1, "planned_duration_s": 4, "dialogue": "甲：请",
+     "video_node_id": "video-a", "video_version_id": "v-video", "duration_ms": 4200},
+    {"shot_id": "b", "index": 2, "planned_duration_s": 6, "dialogue": "",
+     "video_node_id": "video-empty", "video_version_id": null, "duration_ms": null},
+    {"shot_id": "c", "index": 3, "planned_duration_s": 3, "dialogue": "",
+     "video_node_id": null, "video_version_id": null, "duration_ms": null},
+    {"shot_id": "d", "index": 4, "planned_duration_s": 5, "dialogue": "",
+     "video_node_id": null, "video_version_id": null, "duration_ms": null},
+    {"shot_id": "e", "index": 5, "planned_duration_s": 2.5, "dialogue": "",
+     "video_node_id": null, "video_version_id": null, "duration_ms": null}
+  ]
+}

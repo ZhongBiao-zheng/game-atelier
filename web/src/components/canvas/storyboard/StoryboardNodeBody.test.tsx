@@ -262,3 +262,29 @@ it('节点高度随镜头数变化，手动改过高度后不再自动调整', (
   expect(latest!.size?.height).toBe(400);
   expect([0, 3, 40].map(storyboardAutoHeight)).toEqual([176, 192, 480]);
 });
+
+it('镜头可以改绑到画布上另一个已有内容的视频节点', () => {
+  let latest: StoryboardNode | null = null;
+  const videos = [
+    { ...videoNode, id: 'video-old', title: '01 视频（旧）', data: { ...videoNode.data, current_version_id: 'v-old' } },
+    { ...videoNode, id: 'video-new', title: '01 视频', data: { ...videoNode.data, current_version_id: 'v-new' } },
+    { ...videoNode, id: 'video-empty', title: '空视频', data: { ...videoNode.data, current_version_id: null } },
+  ] as CanvasNode[];
+  const versions: Record<string, CanvasContentVersion> = {
+    'v-old': { ...imageVersion, version_id: 'v-old', kind: 'video' } as CanvasContentVersion,
+    'v-new': { ...imageVersion, version_id: 'v-new', kind: 'video' } as CanvasContentVersion,
+  };
+  render(<Harness initial={storyboard({ shots: [{ id: 'a', visual: '一', video_node_id: 'video-new' }] })}
+    overrides={{
+      listNodes: () => videos, findNode: id => videos.find(node => node.id === id),
+      resolveVersion: id => (id ? versions[id] : undefined),
+    }} onNode={node => { latest = node; }} />);
+  const dialog = openEditor();
+  const select = within(dialog).getByRole('combobox', { name: '本镜视频' });
+  expect(select).toHaveTextContent('01 视频');
+  fireEvent.keyDown(select, { key: 'Enter' });
+  const options = screen.getAllByRole('option').map(option => option.textContent);
+  expect(options).toEqual(['未绑定', '01 视频（旧）', '01 视频']);  // 没有内容的节点不在可选项里
+  fireEvent.click(screen.getByRole('option', { name: '01 视频（旧）' }));
+  expect(storyboardPayloadOf(latest!).shots[0].video_node_id).toBe('video-old');
+});

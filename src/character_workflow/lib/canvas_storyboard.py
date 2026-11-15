@@ -143,3 +143,28 @@ def agent_view(document: Any, node: Any, text_limit: int = 300) -> dict[str, Any
             } for index, shot in enumerate(payload["shots"])],
         },
     }
+
+
+def timeline(document: Any, node: Any) -> list[dict[str, Any]]:
+    """按镜头顺序列出每镜选定的视频，给「视频时间线导出」读取。
+
+    每镜只有一个出处：`video_node_id` 指向的视频节点的当前内容版本。绑定的节点不存在、不是
+    视频节点、或还没有内容时 `video_version_id` 为 None，由调用方决定跳过还是中止。
+    `duration_ms` 取版本上登记的时长；生成出的视频目前不登记时长，为 None 时需要调用方自己探测。
+    与前端 `storyboardTimeline` 同一套规则，共用夹具 `tests/fixtures/storyboard_timeline_case.json`。
+    """
+    payload = normalize_payload(node.data.payload)
+    nodes = {item.id: item for item in document.nodes}
+    rows: list[dict[str, Any]] = []
+    for index, shot in enumerate(payload["shots"]):
+        video_id = bound_node_id(document, shot["video_node_id"], "video")
+        version = (document.content_versions.get(nodes[video_id].data.current_version_id or "")
+                   if video_id else None)
+        ready = version is not None and version.kind == "video"
+        rows.append({
+            "shot_id": shot["id"], "index": index + 1, "planned_duration_s": shot["duration_s"],
+            "dialogue": shot["dialogue"], "video_node_id": video_id,
+            "video_version_id": version.version_id if ready else None,
+            "duration_ms": version.duration_ms if ready else None,
+        })
+    return rows

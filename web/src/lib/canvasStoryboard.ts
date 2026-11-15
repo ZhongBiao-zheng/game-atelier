@@ -333,3 +333,38 @@ export function mergeParsedStoryboard(
   }
   return { payload: normalizeStoryboardPayload({ ...payload, entities, shots }), droppedShots };
 }
+
+/** 时间线里的一镜：顺序即镜头顺序；`videoVersionId` 为 null 表示这一镜还没有可用的视频。 */
+export interface StoryboardTimelineRow {
+  shot_id: string;
+  index: number;
+  planned_duration_s: number;
+  dialogue: string;
+  video_node_id: string | null;
+  video_version_id: string | null;
+  /** 版本上登记的时长；生成出的视频目前不登记，为 null 时需要调用方自己探测。 */
+  duration_ms: number | null;
+}
+
+/**
+ * 按镜头顺序列出每镜选定的视频，给「视频时间线导出」读取。每镜只有一个出处：`video_node_id`
+ * 指向的视频节点的当前内容版本。与后端 `canvas_storyboard.timeline` 同一套规则，
+ * 共用夹具 `tests/fixtures/storyboard_timeline_case.json`。
+ */
+export function storyboardTimeline(
+  payload: StoryboardPayload,
+  findNode: (id: string) => CanvasNode | undefined,
+  resolveVersion: (versionId: string | null | undefined) => { kind: string; version_id: string; duration_ms?: number | null } | undefined,
+): StoryboardTimelineRow[] {
+  return payload.shots.map((shot, index) => {
+    const video = resolveStoryboardBinding(findNode, shot.video_node_id, 'video');
+    const version = video ? resolveVersion(video.data.current_version_id) : undefined;
+    const ready = version?.kind === 'video';
+    return {
+      shot_id: shot.id, index: index + 1, planned_duration_s: shot.duration_s, dialogue: shot.dialogue,
+      video_node_id: video?.id ?? null,
+      video_version_id: ready ? version.version_id : null,
+      duration_ms: ready ? version.duration_ms ?? null : null,
+    };
+  });
+}

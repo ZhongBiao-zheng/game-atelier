@@ -209,6 +209,30 @@ function Field({ id, label, hint, children, className }: {
   </div>;
 }
 
+const UNBOUND = '__unbound__';
+
+/** 镜头绑定哪个图片 / 视频节点：只能选当前画布上已有内容的节点。 */
+function BindingSelect({ id, label, hint, type, value, host, onChange }: {
+  id: string; label: string; hint: string; type: 'image' | 'video'; value: string | null; host: StoryboardHost;
+  onChange: (value: string | null) => void;
+}) {
+  const options = (host.listNodes?.() ?? []).filter(node => node.type === type
+    && host.resolveVersion(node.data.current_version_id)?.kind === type);
+  // 已绑定但还没有内容的节点（刚建好、正在生成）也要能显示出来。
+  const bound = host.findNode(value ?? '');
+  const current = bound?.type === type ? bound : null;
+  const listed = current && !options.some(node => node.id === current.id) ? [current, ...options] : options;
+  return <Field id={id} label={label} hint={hint}>
+    <Select value={current?.id ?? UNBOUND} onValueChange={next => onChange(next === UNBOUND ? null : next)}>
+      <SelectTrigger id={id} aria-label={label}><SelectValue /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value={UNBOUND}>未绑定</SelectItem>
+        {listed.map(node => <SelectItem key={node.id} value={node.id}>{node.title}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  </Field>;
+}
+
 /** 预设 + 可手输：点预设填入，也可以直接改文字。 */
 function PresetInput({ id, value, presets, maxLength, onChange }: {
   id: string; value: string; presets: readonly string[]; maxLength: number; onChange: (value: string) => void;
@@ -260,6 +284,12 @@ function ShotForm({ shot, payload, host, onChange, onToggle, onGenerate }: {
         }}>更新提示词</Button>
       </Hint>}
     </div>}
+    {host.listNodes && <>
+      <BindingSelect id={id('image-node')} label="本镜图片" hint="这一镜用哪张图。重新出图后想换回旧结果，在这里改选。"
+        type="image" value={shot.image_node_id} host={host} onChange={value => onToggle({ image_node_id: value })} />
+      <BindingSelect id={id('video-node')} label="本镜视频" hint="这一镜选定的视频，时间线导出时按它取。"
+        type="video" value={shot.video_node_id} host={host} onChange={value => onToggle({ video_node_id: value })} />
+    </>}
     <Field id={id('scene')} label="场次">
       <Input id={id('scene')} value={shot.scene} maxLength={STORYBOARD_TEXT_LIMITS.scene}
         onChange={event => onChange({ scene: event.target.value })} />
