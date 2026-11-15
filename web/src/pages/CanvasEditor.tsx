@@ -1,6 +1,6 @@
 import { SetPromptPreviewDialog, type PromptPreviewRequest } from '@/components/assets/SetPromptPreviewDialog';
 import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
-import type { PluginNodeInput } from '@/plugin-host/PluginNodeBody';
+import { pluginInputsFromDocument } from '@/plugin-host/inputs';
 import type { PluginMediaAction, PluginNodeContribution, PluginPackageLock } from '@/schema/plugins';
 import { requestPluginPanel } from '@/plugin-host/panelRequests';
 import { pluginIcon } from '@/components/ui/icons';
@@ -376,6 +376,8 @@ function mentionNodeFragment(node: CanvasNode): string {
           node.data.generation_draft?.mode ?? null,
           node.data.batch_result ?? null,
           node.type === 'image' ? node.data.annotation?.rendered_version_id ?? null : null,
+          // 结果组成员表决定插件节点收到哪几张（expand_result_stack）。
+          node.type === 'image' ? node.data.result_stack?.member_node_ids ?? null : null,
         ]
         // 分组的成员表必须进签名：它决定面板上看到哪几张参考图。漏了的话把节点拖进 / 拖出
         // 分组只换了分组这一个对象，签名值不变，下游 memo 一个都不重算，参考位要硬刷新才更新。
@@ -1278,6 +1280,16 @@ function CanvasEditorInner({
     window.addEventListener('beforeunload', warnBeforeUnload);
     return () => window.removeEventListener('beforeunload', warnBeforeUnload);
   }, []);
+
+  /** 插件调服务端之前把页面上还没保存的编辑落盘：刚建的插件节点要先存到服务端，服务端才认它。 */
+  const savePendingEdits = useCallback(async () => {
+    if (latestDocument.current && dirtyVersion.current > 0) {
+      saveQueued.current = latestDocument.current;
+      await flushSave(true);
+    } else if (saveInFlight.current) {
+      await saveInFlight.current;
+    }
+  }, [flushSave]);
 
   const persistNow = useCallback(async (): Promise<boolean> => {
     if (projectRenameInFlight.current) {
@@ -4636,21 +4648,9 @@ function CanvasEditorInner({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方图签名说明
   }, [mentionGraphSignature]);
 
-  const pluginInputsByNodeId = useMemo(() => {
-    const current = mentionDocumentRef.current;
-    const nodes = new Map((current?.nodes ?? []).map(node => [node.id, node]));
-    const result = new Map<string, PluginNodeInput[]>();
-    for (const connection of current?.connections ?? []) {
-      if (connection.role !== 'input' || nodes.get(connection.target_node_id)?.type !== 'plugin') continue;
-      const source = nodes.get(connection.source_node_id);
-      if (!source || !canvasNodeProvidesContent(source)) continue;
-      const inputs = result.get(connection.target_node_id) ?? [];
-      inputs.push({ nodeId: source.id, title: source.title, versionId: source.data.current_version_id });
-      result.set(connection.target_node_id, inputs);
-    }
-    return result;
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方图签名说明
-  }, [mentionGraphSignature]);
+  const pluginInputsByNodeId = useMemo(() => pluginInputsFromDocument(mentionDocumentRef.current),
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方图签名说明（结果组成员表在签名里）
+    [mentionGraphSignature]);
 
   const layerParentSignature = JSON.stringify((document?.nodes ?? []).flatMap(node => {
     if (node.type !== 'layer_stack') return [];
@@ -4941,6 +4941,7 @@ function CanvasEditorInner({
     createCompareNode,
     compareInputsByNodeId,
     pluginInputsByNodeId,
+    savePendingEdits,
     createPluginNodeFromMedia,
     swapCompareInputs,
     openCompare,
@@ -4992,6 +4993,7 @@ function CanvasEditorInner({
     createCompareNode,
     compareInputsByNodeId,
     pluginInputsByNodeId,
+    savePendingEdits,
     createPluginNodeFromMedia,
     swapCompareInputs,
     openCompare,

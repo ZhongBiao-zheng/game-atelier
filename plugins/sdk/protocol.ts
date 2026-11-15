@@ -54,6 +54,8 @@ export interface PluginInput {
   title: string;
   width: number | null;
   height: number | null;
+  /** 属于结果组时为封面的句柄（封面自己也带），同组素材按组内顺序排在一起；否则为 null。 */
+  group: string | null;
 }
 
 export type PluginMethod =

@@ -314,13 +314,17 @@ def _surface_inputs(record: PluginRecord, project_id: str, node_id: str | None,
     contribution = next((item for item in record.lock.contributes.nodes if item.type == node.data.node_type), None)
     kinds = {kind for kind in (contribution.input_modalities if contribution else []) if kind in MEDIA_KINDS}
     nodes = {item.id: item for item in document.nodes}
-    connected = {
-        source.data.current_version_id: source
-        for edge in document.connections
-        if edge.role == "input" and edge.target_node_id == node_id
-        and (source := nodes.get(edge.source_node_id)) is not None
-        and source.type in kinds and source.data.current_version_id
-    }
+    sources = [source for edge in document.connections
+               if edge.role == "input" and edge.target_node_id == node_id
+               and (source := nodes.get(edge.source_node_id)) is not None]
+    if contribution is not None and contribution.expand_result_stack:
+        # 连的是结果组封面：此刻还在组里的成员也算连在这个节点上。
+        sources += [member for source in list(sources)
+                    if source.type == "image" and source.data.result_stack
+                    for member_id in source.data.result_stack.member_node_ids
+                    if (member := nodes.get(member_id)) is not None and member.type == "image"]
+    connected = {source.data.current_version_id: source for source in sources
+                 if source.type in kinds and source.data.current_version_id}
     media = []
     for version_id in version_ids:
         source = connected.get(version_id)

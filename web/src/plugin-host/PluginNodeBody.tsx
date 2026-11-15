@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'wouter';
 
 import { canvasMediaUrl } from '@/api/canvas';
-import { ApiError, request, requestJson } from '@/api/http';
+import { request } from '@/api/http';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -12,13 +12,15 @@ import { Hint } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { HelpIcon, PluginIcon, pluginIcon } from '@/components/ui/icons';
 import type { CanvasContentVersion, CanvasNode, CanvasPluginNode } from '@/schema/canvas';
-import { PluginServerError, type BrokerInput } from './broker';
+import type { BrokerInput } from './broker';
 import { useProjectGrants } from './grants';
+import { callPluginRoute } from './serverCall';
+import { brokerInputsFor, type PluginNodeInput } from './inputs';
 import { PluginSurface, type PluginSurfaceHost } from './PluginSurface';
 import { clearPluginPanelRequest, usePluginPanelRequested } from './panelRequests';
 import { usePlugins } from './registry';
 
-export interface PluginNodeInput { nodeId: string; title: string; versionId: string | null }
+export type { PluginNodeInput } from './inputs';
 
 /** 批准弹窗里那一句话：按插件声明的能力拼出它要做的事。 */
 const CAPABILITY_PHRASES: Array<[string, string]> = [
@@ -54,7 +56,7 @@ function Placeholder({ icon: Icon = PluginIcon, reason, children }: {
  * 插件节点的内容区。插件可用且本项目已批准时渲染沙箱界面；其余情况显示宿主占位。
  * 占位状态下节点的数据原样保留，仍可移动、复制、删除。
  */
-export function PluginNodeBody({ node, projectId, inputs, resolveVersion, updateNode, recordHistory }: {
+export function PluginNodeBody({ node, projectId, inputs, resolveVersion, updateNode, recordHistory, savePendingEdits }: {
   node: CanvasPluginNode;
   projectId: string;
   /** 保留给宿主传入；内容面不随选中改变行为。 */
@@ -63,6 +65,8 @@ export function PluginNodeBody({ node, projectId, inputs, resolveVersion, update
   resolveVersion: (versionId: string | null | undefined) => CanvasContentVersion | undefined;
   updateNode: (id: string, updater: (node: CanvasNode) => CanvasNode) => void;
   recordHistory: () => void;
+  /** 把页面上还没保存的编辑落盘；插件每次调服务端之前等它完成。 */
+  savePendingEdits?: () => Promise<void>;
 }) {
   const plugins = usePlugins();
   const entry = plugins.find(plugin => plugin.id === node.data.plugin_id);
@@ -79,16 +83,9 @@ export function PluginNodeBody({ node, projectId, inputs, resolveVersion, update
 
   const granted = manifest ? grants?.[manifest.id] : undefined;
   const capabilities = useMemo(() => new Set(granted?.capabilities ?? []), [granted]);
-  const brokerInputs = useMemo<BrokerInput[]>(() => inputs.flatMap(input => {
-    const version = resolveVersion(input.versionId);
-    if (!version || !input.versionId) return [];
-    // 清单没声明要收的素材类型不交给插件，即使文档里有这条连线。
-    if (!contribution?.input_modalities.includes(version.kind)) return [];
-    const media = version.kind === 'text' ? null : version;
-    return [{ versionId: input.versionId, kind: version.kind, title: input.title,
-      width: media?.width ?? null, height: media?.height ?? null, ...(media ? { bytes: media.bytes } : {}) }];
+  const brokerInputs = useMemo<BrokerInput[]>(() => brokerInputsFor(inputs, contribution, resolveVersion),
   // eslint-disable-next-line react-hooks/exhaustive-deps -- resolveVersion 是常量引用；输入变了 inputs 会换引用
-  }), [inputs, contribution]);
+    [inputs, contribution]);
 
   if (!entry) return <Placeholder reason="未安装此插件" />;
   if (!manifest) {
@@ -152,20 +149,10 @@ export function PluginNodeBody({ node, projectId, inputs, resolveVersion, update
       const response = await request(canvasMediaUrl(projectId, versionId), '读取素材');
       return as === 'bitmap' ? createImageBitmap(await response.blob()) : response.arrayBuffer();
     },
-    callServer: async (path, params, versionIds) => {
-      try {
-        // 服务端不信这里：它会重新核对插件是否启用、项目是否批准、节点与素材的归属。
-        const body = await requestJson<{ result: unknown }>(
-          `/api/plugins/${encodeURIComponent(manifest.id)}/routes${path}`, manifest.name, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ project_id: projectId, node_id: node.id, inputs: versionIds, params }),
-          });
-        return body.result;
-      } catch (error) {
-        if (error instanceof ApiError && error.reason) throw new PluginServerError(error.reason);
-        throw error;
-      }
-    },
+    callServer: (path, params, versionIds) => callPluginRoute({
+      pluginId: manifest.id, pluginName: manifest.name, projectId, nodeId: node.id, path, params, versionIds,
+      savePendingEdits,
+    }),
   };
   const hasPanel = contribution.surfaces.includes('panel');
   const showPanel = hasPanel && (panelOpen || requested);

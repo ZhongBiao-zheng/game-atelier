@@ -37,7 +37,7 @@ client.theme;              // { mode: 'dark' | 'light', tokens: Record<string, s
 await client.node.readSelf();              // { node_type, title, size, payload_schema_version, payload }
 await client.node.writeSelf(payload);      // 写回节点数据，进撤销历史与自动保存
 
-await client.inputs.list();                // [{ handle, kind, title, width, height }]
+await client.inputs.list();                // [{ handle, kind, title, width, height, group }]
 await client.inputs.readBitmap(handle);    // ImageBitmap（转移，不复制）
 await client.inputs.readBytes(handle);     // ArrayBuffer（素材文件超过 256 MiB 时拒绝）
 await client.inputs.readText(handle);      // 文本素材
@@ -49,6 +49,8 @@ const off = client.on('node.changed', () => {});  // 也有 'inputs.changed'、'
 ```
 
 - `handle` 只在本次界面实例里有效，不是文件路径或版本 id。素材断开连接后句柄立即失效。
+- `group`：素材属于结果组时为封面的句柄（封面自己也带），同组素材按组内顺序排在一起；不属于结果组时为 `null`。节点类型声明了 `expand_result_stack` 才会收到组内成员。
+- 宿主转发 `server.call` 之前先把页面上还没保存的编辑落盘：刚从工具栏动作建出来的节点要先存到服务端，服务端才认它。
 - `server.call` 的 `handles` 由宿主换成版本后转发，服务端再核对这些素材此刻确实连在这个节点上；界面拿不到文件路径。路径必须符合清单路由的格式（`/` 开头，小写字母、数字、`/`、`_`、`-`）。
 - 失败时抛 `PluginRpcError`，`code` 见下表。`SERVER_ERROR` 的 `message` 是服务端给用户看的原因，可以直接显示。
 

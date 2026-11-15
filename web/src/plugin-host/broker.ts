@@ -18,6 +18,8 @@ export interface BrokerInput {
   height: number | null;
   /** 媒体文件字节数；文本素材没有。 */
   bytes?: number;
+  /** 属于结果组时为封面的版本 id；插件看到的是封面的句柄。 */
+  groupVersionId?: string;
 }
 
 /** 插件一次读取素材的上限：整份进沙箱内存，过大的视频不交给插件（画布上传上限是 100 MB，生成产物可能更大）。 */
@@ -172,6 +174,7 @@ export function createBroker(options: BrokerOptions) {
         const inputs: PluginInput[] = options.listInputs().map(input => ({
           handle: handleFor(input.versionId), kind: input.kind, title: input.title,
           width: input.width, height: input.height,
+          group: input.groupVersionId ? handleFor(input.groupVersionId) : null,
         }));
         return { result: inputs, transfer: [] };
       }

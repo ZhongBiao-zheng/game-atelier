@@ -20,6 +20,8 @@ export interface PluginNodeContribution {
   input_modalities: PluginModality[];
   max_inputs: number | null;
   surfaces: PluginSurfaceKind[];
+  /** 连进来的是结果组封面时，按组内顺序把封面与成员都交给插件。 */
+  expand_result_stack: boolean;
 }
 
 export type PluginMediaActionTarget =

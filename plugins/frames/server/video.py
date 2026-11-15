@@ -14,6 +14,7 @@ import cv2
 from PIL import Image
 
 THUMB_EDGE = 160
+PREVIEW_EDGE = 384
 
 
 def _open(path: Path) -> cv2.VideoCapture:
@@ -80,10 +81,13 @@ def png_bytes(image: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
-def thumbnail_url(image: Image.Image) -> str:
-    """面板预览用的小图：长边 160 的 JPEG data URL（沙箱允许 img-src data:）。"""
+def thumbnail_url(image: Image.Image, edge: int = THUMB_EDGE) -> str:
+    """面板预览用的小图 data URL（沙箱允许 img-src data:）。带透明的用 PNG，否则 JPEG。"""
     thumb = image.copy()
-    thumb.thumbnail((THUMB_EDGE, THUMB_EDGE))
+    thumb.thumbnail((edge, edge))
     buffer = io.BytesIO()
-    thumb.convert("RGB").save(buffer, "JPEG", quality=80)
+    if thumb.mode == "RGBA" and thumb.getchannel("A").getextrema()[0] < 255:
+        thumb.save(buffer, "PNG")
+        return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+    thumb.convert("RGB").save(buffer, "JPEG", quality=85)
     return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")

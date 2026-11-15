@@ -3,7 +3,7 @@
   "id": "frames",
   "name": "序列帧",
   "version": "0.1.0",
-  "description": "把视频抽成序列帧",
+  "description": "把视频抽成序列帧，在帧之间补间",
   "icon": "film",
   "publisher": {
     "id": "atelier",
@@ -46,6 +46,29 @@
           "node",
           "panel"
         ]
+      },
+      {
+        "type": "tween",
+        "title": "补间",
+        "icon": "tween",
+        "default_size": {
+          "width": 360,
+          "height": 280
+        },
+        "min_size": {
+          "width": 240,
+          "height": 200
+        },
+        "payload_schema_version": 1,
+        "input_modalities": [
+          "image"
+        ],
+        "max_inputs": 2,
+        "surfaces": [
+          "node",
+          "panel"
+        ],
+        "expand_result_stack": true
       }
     ],
     "video_actions": [
@@ -76,6 +99,16 @@
         {
           "method": "POST",
           "path": "/extract",
+          "access": "edit"
+        },
+        {
+          "method": "POST",
+          "path": "/tween_preview",
+          "access": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/tween",
           "access": "edit"
         }
       ]
@@ -173,16 +206,87 @@
         },
         "read_only": false,
         "route": "/extract"
+      },
+      {
+        "name": "tween",
+        "description": "在一组按顺序排好的图片之间补出中间帧，结果放到画布上成为一个结果组（最多 65 帧）。flow（光流）适合相邻帧差别小的动作，crossfade（交叉淡化）只适合淡入淡出这类不位移的变化；大幅度动作改用视频模型的首尾帧生成。",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "image_node_ids"
+          ],
+          "properties": {
+            "image_node_ids": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 65,
+              "items": {
+                "type": "string"
+              },
+              "description": "按播放顺序排列的图片节点 id"
+            },
+            "method": {
+              "type": "string",
+              "enum": [
+                "flow",
+                "crossfade"
+              ],
+              "description": "补间方式，默认 flow"
+            },
+            "between": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 15,
+              "description": "每两帧之间补几帧，默认 3"
+            },
+            "output": {
+              "type": "string",
+              "enum": [
+                "all",
+                "new"
+              ],
+              "description": "all：原帧加补出的帧（默认）；new：只要补出的帧"
+            },
+            "sheet": {
+              "type": "boolean",
+              "description": "同时拼成一张精灵表（格间留透明间隔）"
+            },
+            "columns": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65,
+              "description": "精灵表每行几帧，默认 8"
+            },
+            "frame_data": {
+              "type": "boolean",
+              "description": "拼精灵表时同时输出帧数据（JSON 文本节点）"
+            }
+          }
+        },
+        "read_only": false,
+        "route": "/tween"
+      }
+    ],
+    "image_actions": [
+      {
+        "id": "tween",
+        "label": "补间",
+        "icon": "tween",
+        "action": {
+          "kind": "create_node",
+          "node_type": "tween",
+          "open_panel": true
+        }
       }
     ]
   },
   "files": [
     {
       "path": "ui/index.html",
-      "sha256": "b992122325b71d9d747d3a8d89753f82a9cdc0d34c484f21108ce9f7d461bd1f",
-      "bytes": 159028
+      "sha256": "b625c0fa3a0fd7d8d7a3c3d5c6d63cd2e07422f55392a3d98357fb7b86d7eff7",
+      "bytes": 166114
     }
   ],
   "source": "bundled",
-  "digest": "sha256:3d0c4c3ef65de59e2686d7b4c4192a44581f4660fd3aa7eab164534a624286c2"
+  "digest": "sha256:bfe9f0fbcf5c1d9da0f2f3a64d053f7d0ca0cdb8720095f176cc9140eceab2f3"
 }

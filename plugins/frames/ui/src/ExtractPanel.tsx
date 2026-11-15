@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { PluginRpcError, type PluginClient } from '../../../sdk';
 import { Button, Checkbox, NumberField, SelectField, ThumbButton } from './kit/controls';
 import { LONG_EDGE_MAX, LONG_EDGE_MIN, MAX_FRAMES, outputSize, planFrames, PlanError, type Mode } from './plan';
-import { DEFAULT_LONG_EDGE, DEFAULT_STATE, parseState, requestParams, type ExtractState } from './state';
+import { DEFAULT_LONG_EDGE, DEFAULT_STATE, parseState, requestParams, type ExtractState } from './extractState';
 
 interface VideoMeta { width: number; height: number; fps: number; frame_count: number; title: string }
 interface Preview { key: string; frames: number[]; thumbnails: string[] }
@@ -16,7 +16,7 @@ const PREVIEW_DELAY = 350;
 const message = (error: unknown) => (error instanceof PluginRpcError && error.code === 'SERVER_ERROR' ? error.message : '处理失败，请重试');
 
 /** 编辑面板：选区间、抽帧方式与尺寸，预览将要抽出的帧，抽成结果组放到画布。 */
-export function Panel({ client }: { client: PluginClient }) {
+export function ExtractPanel({ client }: { client: PluginClient }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [state, setState] = useState<ExtractState>(DEFAULT_STATE);
   const [source, setSource] = useState<{ handle: string; meta: VideoMeta } | null>(null);

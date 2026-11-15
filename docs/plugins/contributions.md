@@ -27,6 +27,7 @@
 | `input_modalities` | 可以连进来的素材类型：`text`、`image`、`video`、`audio`。空数组表示不接收输入 |
 | `max_inputs` | 输入连线上限 |
 | `surfaces` | `node`：节点内容面；`panel`：双击节点打开的编辑面板 |
+| `expand_result_stack` | 可选，默认 false。为真时，连进来的是结果组封面就把封面与组内成员按组内顺序都交给插件（一条连线 = 整组，成员不占 `max_inputs`）；`inputs.list` 里同组素材带同一个 `group`。要求 `input_modalities` 含 `image` |
 
 宿主负责：添加菜单项（排在内置项之后，说明显示插件名）、节点标题、连接柄、缩放手柄、选中框、工具条、占位与批准。插件界面只占节点内容区。
 

@@ -1361,3 +1361,12 @@ multipart 里的数组值展开成同名重复字段。
 - 抽帧计划的取整一律 `floor(x + 0.5)`，去重后升序，最多 65 帧；界面与服务端跑同一份 `plugins/frames/tests/plan_cases.json`。
 - 路由：`POST /probe`（读）返回 `{width, height, fps, frame_count, duration_ms, title}`；`POST /preview`（读）返回 `{frames, size, fps, thumbnails}`，`thumbnails` 是长边 160 的 JPEG data URL，与 `frames` 一一对应；`POST /extract`（写）按帧号精确解码（顺序解码，不按时间跳转），落成结果组，返回 `{node_id, member_node_ids, frames, size}`，`sheet` 为真时另外拼一张精灵表（格间 2 像素全透明，帧数据与精灵表调整 `/repack` 同一格式）放在结果组右侧，返回 `sheet_node_id`，`frame_data` 为真时再返回 `frame_data_node_id`。
 - Agent 工具：`plugin_frames_probe`（只读，参数 `video_node_id`）、`plugin_frames_extract`（参数 `video_node_id` 加上述抽帧、尺寸与输出字段）。
+
+### 结果组作为插件输入（P3）与补间（`plugins/frames`，F2）
+
+- 节点贡献新增 `expand_result_stack`（默认 false，要求 `input_modalities` 含 `image`）。为真时，连到该插件节点的结果组封面连同组内此刻存在的成员按组内顺序交给插件；`inputs.list` 的每项新增 `group`（同组素材为封面的句柄，否则 `null`）；同一版本只列一次。服务端核对同样把「连着的封面所在组的成员」算作已连接，成员被移出结果组后立即失效。
+- 宿主转发插件的 `server.call` 前先把页面上未保存的编辑落盘（新建的插件节点要先存到服务端才能通过节点归属核对）；落盘失败时返回 `SERVER_ERROR`「画布还没保存好，请稍后重试」，不发请求。
+- 节点类型 `tween`「补间」：收 2 张图片或 1 个结果组（`expand_result_stack`），图片工具栏「更多 → 补间」建节点并打开面板。节点数据（版本 1）：`{method: "flow"|"crossfade", between, output: "all"|"new", swap, sheet, columns, frame_data}`。帧序列：有结果组时用第一组（组内顺序），否则用两张图（`swap` 交换首尾）。
+- 路由：`POST /tween_preview`（读，参数 `method`、`pair`、`t`，默认 0.5）返回 `{url, pairs}`，`url` 是长边 384 的中间帧 data URL；`POST /tween`（写）在每对相邻帧之间补 `between`（1–15）帧，`output` 为 `all` 时含原帧，总数最多 65；落成结果组（封面标题「<首帧标题> 补间」），返回 `{node_id, member_node_ids, frame_count}`，`sheet` / `frame_data` 与抽帧相同。第二帧尺寸不同时按第一帧等比缩放，宽高比差超过 1% 拒绝。
+- 算法：交叉淡化按预乘 alpha 线性混合；光流为 OpenCV DIS（MEDIUM 预设）双向估计，两帧各按 t 反向变形后线性混合，光流在合成到中性灰底的 RGB 上计算，RGBA 四通道用同一组光流变形。
+- Agent 工具 `plugin_frames_tween`：参数 `image_node_ids`（2–65 个，按播放顺序）加上述补间与输出字段。

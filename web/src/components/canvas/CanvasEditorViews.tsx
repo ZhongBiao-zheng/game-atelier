@@ -283,6 +283,8 @@ export interface CanvasNodeContextValue {
   createPluginNodeFromMedia?: (node: CanvasContentNode, plugin: PluginPackageLock, action: PluginMediaAction) => void;
   /** 插件节点 → 当前连到它的输入。按图签名重算，引用稳定。 */
   pluginInputsByNodeId?: ReadonlyMap<string, readonly PluginNodeInput[]>;
+  /** 把页面上还没保存的编辑落盘（插件调服务端之前用）。 */
+  savePendingEdits?: () => Promise<void>;
   /** 对比节点 → before / after 两侧当前接入的图。按图签名重算，引用稳定。 */
   compareInputsByNodeId?: ReadonlyMap<string, CanvasCompareInputs>;
   swapCompareInputs?: (nodeId: string) => void;
@@ -1012,7 +1014,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           {node.type === 'plugin' && (
             <PluginNodeBody node={node} projectId={context.projectId} selected={Boolean(selected)}
               inputs={context.pluginInputsByNodeId?.get(node.id) ?? EMPTY_PLUGIN_INPUTS}
-              resolveVersion={context.resolveVersion} updateNode={context.updateNode} recordHistory={context.recordHistory} />
+              resolveVersion={context.resolveVersion} updateNode={context.updateNode} recordHistory={context.recordHistory}
+              savePendingEdits={context.savePendingEdits} />
           )}
         </div>
       </article>

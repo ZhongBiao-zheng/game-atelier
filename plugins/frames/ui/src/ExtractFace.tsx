@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 
 import type { PluginClient } from '../../../sdk';
-import { modeSummary, parseState, type ExtractState } from './state';
+import { modeSummary, parseState, type ExtractState } from './extractState';
 
 /** 节点内容面：连入的视频与抽帧设置摘要。设置与预览在面板里做（双击节点打开）。 */
-export function NodeFace({ client }: { client: PluginClient }) {
+export function ExtractFace({ client }: { client: PluginClient }) {
   const [state, setState] = useState<ExtractState | null>(null);
   const [video, setVideo] = useState<string | null>(null);
 

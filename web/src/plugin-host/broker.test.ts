@@ -189,7 +189,7 @@ describe('插件 broker：节点读写', () => {
 
 describe('插件 broker：素材句柄', () => {
   const list = async (broker: ReturnType<typeof createBroker>, id = 1) => (
-    (await call(broker, 'inputs.list', undefined, id)).response as { result: Array<{ handle: string; kind: string }> }
+    (await call(broker, 'inputs.list', undefined, id)).response as { result: Array<{ handle: string; kind: string; group: string | null }> }
   ).result;
 
   it('列表给的是句柄，不含版本 id 与路径', async () => {
@@ -199,6 +199,16 @@ describe('插件 broker：素材句柄', () => {
     expect(JSON.stringify(inputs)).not.toContain('version-');
     expect(inputs[0].handle).not.toBe(inputs[1].handle);
     expect((await list(broker, 2))[0].handle).toBe(inputs[0].handle);
+  });
+
+  it('结果组里的素材带封面的句柄作为分组', async () => {
+    const cover: BrokerInput = { ...IMAGE, versionId: 'version-cover', groupVersionId: 'version-cover' };
+    const member: BrokerInput = { ...IMAGE, versionId: 'version-member', groupVersionId: 'version-cover' };
+    const { broker } = setup({ listInputs: vi.fn(() => [cover, member, TEXT]) });
+    const [first, second, text] = await list(broker);
+    expect(first.group).toBe(first.handle);
+    expect(second.group).toBe(first.handle);
+    expect(text.group).toBeNull();
   });
 
   it('超过读取上限的素材不读，直接拒绝', async () => {

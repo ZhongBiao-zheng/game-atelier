@@ -60,6 +60,9 @@ export function Checkbox({ label, checked, onChange }: { label: string; checked:
 }
 
 /** 帧缩略图按钮：图在上、帧号在下。 */
-export function ThumbButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
-  return <button type="button" className="thumb" aria-label={label} onClick={onClick}>{children}</button>;
+export function ThumbButton({ label, selected = false, onClick, children }: {
+  label: string; selected?: boolean; onClick: () => void; children: ReactNode;
+}) {
+  return <button type="button" className={selected ? 'thumb selected' : 'thumb'} aria-label={label} aria-pressed={selected}
+    onClick={onClick}>{children}</button>;
 }

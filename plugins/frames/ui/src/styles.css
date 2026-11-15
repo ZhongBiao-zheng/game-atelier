@@ -55,3 +55,12 @@ body { background: transparent; color: var(--foreground); font: 14px/1.5 var(--f
 .summary { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 12px 16px; min-height: 0; }
 .summary p { margin: 0; }
 .summary-title { font-size: 14px; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thumb.selected { outline: 2px solid var(--primary); outline-offset: 1px; }
+/* .stage 的 place-items:center 会让格子按内容收缩，图片的 width:100% 失效；这里横向拉满。 */
+.tween-stage { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: center; justify-items: stretch; }
+.tween-stage figure { margin: 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+/* 三张都按列宽缩放：首尾帧的缩略图比中间帧预览小，按原始尺寸显示会一大两小。 */
+.tween-stage img { width: 100%; height: auto; max-height: 22rem; object-fit: contain; border-radius: 10px; background: var(--popover); }
+.tween-stage .thumb-wait { width: 100%; aspect-ratio: 1; border-radius: 10px; }
+.tween-stage figcaption { font-size: 12px; color: var(--muted-foreground); }
+.tween-middle img { outline: 1px solid var(--border); }

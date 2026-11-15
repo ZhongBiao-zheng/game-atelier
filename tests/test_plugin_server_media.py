@@ -46,9 +46,10 @@ ROUTES = [{"method": "POST", "path": path, "access": access}
           for path, access in (("/inputs", "read"), ("/peek", "read"), ("/group", "edit"))]
 
 
-def write_demo(root: Path, *, modalities=("video",), capabilities=CAPS) -> None:
+def write_demo(root: Path, *, modalities=("video",), capabilities=CAPS, expand=False) -> None:
     base = manifest()
-    node = {**base["contributes"]["nodes"][0], "input_modalities": list(modalities), "max_inputs": 2}
+    node = {**base["contributes"]["nodes"][0], "input_modalities": list(modalities), "max_inputs": 2,
+            "expand_result_stack": expand}
     write_plugin(root, server_source=SERVER, capabilities=capabilities,
                  contributes={"nodes": [node], "server": {"module": "server", "routes": ROUTES}})
 
@@ -183,3 +184,51 @@ def test_image_group_needs_the_create_capability(client, root):
     project_id, _ = setup(root, capabilities=["node.read_self", "resource.read_inputs", "server.call"])
     response = post(client, "group", project_id, params={"count": 2})
     assert response.status_code == 403 and response.json()["detail"]["code"] == "CAPABILITY_DENIED"
+
+
+# ── 结果组作为输入（P3）──────────────────────────────────────────────────────────
+
+def stack_project(root, *, expand: bool):
+    """插件节点只连了结果组封面（image-1），组里还有 image-2、image-3。"""
+    write_demo(root, modalities=("image",), expand=expand)
+    plugin_registry.set_enabled("demo", True)
+    project_id, versions = project_with_media()
+    for node_id in ("image-2", "image-3"):
+        document = read_canvas_document(project_id)
+        version, _, _ = save_canvas_upload(
+            project_id, f"{node_id}.png", "png", png(), "image", document.revision,
+            node_factory=lambda v, node_id=node_id: _media_node("image", node_id, node_id, {"x": 0, "y": 0}, v.version_id))
+        versions[node_id] = version.version_id
+    document = read_canvas_document(project_id)
+    raw = document.model_dump(mode="json")
+    cover = next(node for node in raw["nodes"] if node["id"] == "image-1")
+    cover["data"]["result_stack"] = {"run_id": "plugin:demo:test", "member_node_ids": ["image-2", "image-3"]}
+    save_canvas_document(project_id, CanvasDocument.model_validate(raw), document.revision)
+    add_plugin_node(project_id, sources=("image-1",))
+    plugin_grants.grant(project_id, "demo")
+    return project_id, versions
+
+
+def test_members_of_a_connected_result_stack_count_as_inputs_when_the_node_expands_stacks(client, root):
+    project_id, versions = stack_project(root, expand=True)
+    response = post(client, "inputs", project_id, inputs=[versions["image-1"], versions["image-2"], versions["image-3"]])
+    assert response.status_code == 200, response.text
+    assert len(response.json()["result"]["inputs"]) == 3
+
+
+def test_without_expand_only_the_cover_is_connected(client, root):
+    project_id, versions = stack_project(root, expand=False)
+    assert post(client, "inputs", project_id, inputs=[versions["image-1"]]).status_code == 200
+    refused = post(client, "inputs", project_id, inputs=[versions["image-2"]])
+    assert refused.status_code == 403 and refused.json()["detail"]["code"] == "INVALID_HANDLE"
+
+
+def test_a_node_removed_from_the_stack_is_no_longer_an_input(client, root):
+    project_id, versions = stack_project(root, expand=True)
+    document = read_canvas_document(project_id)
+    raw = document.model_dump(mode="json")
+    cover = next(node for node in raw["nodes"] if node["id"] == "image-1")
+    cover["data"]["result_stack"]["member_node_ids"] = ["image-2"]
+    save_canvas_document(project_id, CanvasDocument.model_validate(raw), document.revision)
+    refused = post(client, "inputs", project_id, inputs=[versions["image-3"]])
+    assert refused.status_code == 403 and refused.json()["detail"]["code"] == "INVALID_HANDLE"

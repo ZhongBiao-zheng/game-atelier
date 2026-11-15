@@ -67,6 +67,13 @@ def test_video_action_can_create_a_node_that_accepts_video():
     assert parsed.contributes.video_actions[0].label == "抽帧"
 
 
+def test_expanding_result_stacks_needs_image_inputs():
+    node = {**manifest()["contributes"]["nodes"][0], "expand_result_stack": True}
+    assert PluginManifest.model_validate(manifest(contributes={"nodes": [node]})).contributes.nodes[0].expand_result_stack
+    with pytest.raises(ValidationError):
+        PluginManifest.model_validate(manifest(contributes={"nodes": [{**node, "input_modalities": ["video"]}]}))
+
+
 def test_manifest_missing_required_field_is_rejected():
     source = manifest()
     del source["name"]

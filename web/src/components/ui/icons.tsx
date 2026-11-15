@@ -170,9 +170,10 @@ export const WorkflowIcon = defineIcon(Huge.WorkflowSquare03Icon, 'workflow');
 export const PluginIcon = defineIcon(Huge.Plug01Icon, 'plugin');
 const PluginFramesIcon = defineIcon(Huge.KeyframesMultipleIcon, 'plugin-frames');
 const PluginFilmIcon = defineIcon(Huge.FilmRoll02Icon, 'plugin-film');
+const PluginTweenIcon = defineIcon(Huge.KeyframesDoubleIcon, 'plugin-tween');
 /** 插件清单 `icon` 字段可用的名字。插件不能自带图形，新名字先在这里登记。 */
 const PLUGIN_ICONS: Record<string, AppIcon> = {
-  frames: PluginFramesIcon, film: PluginFilmIcon, grid: GridIcon, cube: ModelIcon, layers: LayersIcon, scissors: CutIcon,
+  frames: PluginFramesIcon, film: PluginFilmIcon, tween: PluginTweenIcon, grid: GridIcon, cube: ModelIcon, layers: LayersIcon, scissors: CutIcon,
 };
 /** 未登记的名字回落到通用插件图标，旧版宿主遇到新名字不报错。 */
 export function pluginIcon(name: string): AppIcon {

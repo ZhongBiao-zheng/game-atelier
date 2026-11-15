@@ -64,6 +64,14 @@ class PluginNodeContribution(_Model):
     input_modalities: list[Modality] = Field(default_factory=list, max_length=4)
     max_inputs: int | None = Field(default=None, ge=1, le=64)
     surfaces: list[Literal["node", "panel"]] = Field(min_length=1, max_length=2)
+    # 连进来的是结果组封面时，按组内顺序把封面与成员都交给插件（一条连线 = 整组）。
+    expand_result_stack: bool = False
+
+    @model_validator(mode="after")
+    def _stack_needs_images(self) -> "PluginNodeContribution":
+        if self.expand_result_stack and "image" not in self.input_modalities:
+            raise ValueError("expand_result_stack needs image in input_modalities")
+        return self
 
 
 class PluginCreateNodeAction(_Model):

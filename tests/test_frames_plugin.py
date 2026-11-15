@@ -134,3 +134,70 @@ def test_agent_extracts_by_video_node_id(project):
     with pytest.raises(plugin_server.PluginError):
         plugin_server.call("frames", "POST", "/probe", project_id=project, origin="agent",
                            params={"video_node_id": "extract-1"})
+
+
+# ── 补间 ─────────────────────────────────────────────────────────────────────
+
+def add_tween_node(project_id: str, source: str) -> None:
+    document = read_canvas_document(project_id)
+    raw = document.model_dump(mode="json")
+    raw["nodes"].append({
+        "id": "tween-1", "type": "plugin", "title": "补间", "position": {"x": 400, "y": 600}, "z_index": 0,
+        "size": {"width": 360, "height": 280},
+        "data": {"plugin_id": "frames", "node_type": "tween", "plugin_version": "0.1.0",
+                 "data_schema_version": 1, "payload": {}, "generation_draft": None}})
+    raw["connections"].append({"id": "c-tween", "role": "input", "source_node_id": source, "target_node_id": "tween-1"})
+    save_canvas_document(project_id, CanvasDocument.model_validate(raw), document.revision)
+
+
+def stack_versions(project_id: str, cover_id: str) -> list[str]:
+    nodes = {node.id: node for node in read_canvas_document(project_id).nodes}
+    cover = nodes[cover_id]
+    return [nodes[node_id].data.current_version_id for node_id in [cover_id, *cover.data.result_stack.member_node_ids]]
+
+
+def post_tween(client, project_id, route, versions, params):
+    return client.post(f"/api/plugins/frames/routes/{route}", json={
+        "project_id": project_id, "node_id": "tween-1", "inputs": versions, "params": params})
+
+
+def test_tween_takes_a_whole_result_stack_through_one_connection(client, project):
+    group = post(client, project, "extract", {"start": 0, "end": 3, "mode": "step", "step": 1}).json()["result"]
+    add_tween_node(project, group["node_id"])
+    versions = stack_versions(project, group["node_id"])
+    assert len(versions) == 4
+
+    preview = post_tween(client, project, "tween_preview", versions, {"method": "flow", "pair": 1})
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["result"]["pairs"] == 3
+    assert preview.json()["result"]["url"].startswith("data:image/")
+
+    response = post_tween(client, project, "tween", versions, {"method": "flow", "between": 3, "output": "all"})
+    assert response.status_code == 200, response.text
+    result = response.json()["result"]
+    assert result["frame_count"] == 4 + 3 * 3
+    nodes = {node.id: node for node in read_canvas_document(project).nodes}
+    frames = [image_of(project, node_id) for node_id in [result["node_id"], *result["member_node_ids"]]]
+    # 原帧是第 0–3 帧（白块 x=0/4/8/12），中间各补 3 帧：白块应依次右移约 1 像素。
+    positions = [block_x(frame) for frame in frames]
+    assert positions == pytest.approx(list(range(13)), abs=1.0)
+    assert nodes[result["node_id"]].title == "走路 帧 补间"
+
+
+def test_tween_refuses_versions_outside_the_connected_stack(client, project):
+    group = post(client, project, "extract", {"start": 0, "end": 12, "mode": "step", "step": 6}).json()["result"]
+    other = post(client, project, "extract", {"start": 0, "end": 6, "mode": "step", "step": 6}).json()["result"]
+    add_tween_node(project, group["node_id"])
+    stranger = stack_versions(project, other["node_id"])[1]
+    response = post_tween(client, project, "tween", [stack_versions(project, group["node_id"])[0], stranger],
+                          {"method": "crossfade", "between": 1})
+    assert response.status_code == 403 and response.json()["detail"]["code"] == "INVALID_HANDLE"
+
+
+def test_agent_tweens_by_image_node_ids(project, client):
+    group = post(client, project, "extract", {"start": 0, "end": 8, "mode": "step", "step": 8}).json()["result"]
+    result, created = plugin_server.call("frames", "POST", "/tween", project_id=project, origin="agent", params={
+        "image_node_ids": [group["node_id"], *group["member_node_ids"]], "method": "crossfade", "between": 2,
+        "output": "new"})
+    assert result["frame_count"] == 2 and len(created) == 2
+    assert "plugin_frames_tween" in runtime.plugin_tools()
