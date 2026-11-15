@@ -5,11 +5,12 @@ import { ImageIcon } from '@/components/ui/icons';
 import {
   STORYBOARD_PAYLOAD_MAX_BYTES, STORYBOARD_TOO_LARGE, formatStoryboardDuration, isStoryboardNode,
   normalizeStoryboardPayload, resolveStoryboardBinding, storyboardPayloadBytes, storyboardPayloadOf,
-  storyboardShotLabel, storyboardTotalDuration, type StoryboardNode, type StoryboardPayload, type StoryboardShot,
+  storyboardAutoHeight, storyboardShotLabel, storyboardTotalDuration, type StoryboardNode, type StoryboardPayload, type StoryboardShot,
 } from '@/lib/canvasStoryboard';
 import type { CanvasContentVersion, CanvasNode, JsonValue } from '@/schema/canvas';
 
 import { StoryboardEditor } from './StoryboardEditor';
+import type { ShotGenerationKind, ShotGenerationPlan } from './storyboardGeneration';
 
 /** 分镜节点向画布要的东西。分镜由宿主直接渲染，不经过插件注册表、批准与沙箱。 */
 export interface StoryboardHost {
@@ -25,6 +26,31 @@ export interface StoryboardHost {
   savePendingEdits?: () => Promise<void>;
   /** 当前文档里的全部节点。 */
   listNodes?: () => readonly CanvasNode[];
+  /** 按当前文档算一份生成计划（不建节点、不提交）；确认弹窗只显示它。 */
+  planShots?: (nodeId: string, shotIds: readonly string[], kind: ShotGenerationKind, count: number) => ShotGenerationPlan | null;
+  /** 应用确认过的计划并逐镜提交。 */
+  runShots?: (plan: ShotGenerationPlan) => Promise<void>;
+  /** 这个节点最近一次生成是否失败。 */
+  lastRunFailed?: (nodeId: string) => boolean;
+}
+
+export type ShotMediaState = 'none' | 'running' | 'done' | 'failed';
+const STATE_LABEL: Record<ShotMediaState, string> = { none: '未生成', running: '生成中', done: '已完成', failed: '失败' };
+const STATE_COLOR: Record<ShotMediaState, string> = {
+  none: 'bg-status-pending', running: 'bg-status-running', done: 'bg-status-done', failed: 'bg-status-failed',
+};
+
+/** 镜头的图或视频处在哪一步。绑定的节点不存在或类型不符时算未生成。 */
+export function shotMediaState(host: StoryboardHost, nodeId: string | null, type: 'image' | 'video'): ShotMediaState {
+  const node = resolveStoryboardBinding(host.findNode, nodeId, type);
+  if (!node) return 'none';
+  if (node.data.active_run_id) return 'running';
+  if (host.resolveVersion(node.data.current_version_id)?.kind === type) return 'done';
+  return host.lastRunFailed?.(node.id) ? 'failed' : 'none';
+}
+
+export function ShotStateDot({ state, label }: { state: ShotMediaState; label: string }) {
+  return <span role="img" aria-label={`${label}${STATE_LABEL[state]}`} className={`size-1.5 shrink-0 rounded-full ${STATE_COLOR[state]}`} />;
 }
 
 // 节点工具条的「编辑」在卡片之外，用一个极小的外部状态请求打开弹窗。
@@ -82,8 +108,14 @@ export function StoryboardNodeBody({ node, host }: { node: StoryboardNode; host:
       reportError?.(STORYBOARD_TOO_LARGE);
       return false;
     }
-    updateNode(node.id, current => isStoryboardNode(current)
-      ? { ...current, data: { ...current.data, payload: normalized as unknown as JsonValue } } : current);
+    updateNode(node.id, current => {
+      if (!isStoryboardNode(current)) return current;
+      // 高度跟着镜头数走；画师手动改过高度（不等于按旧镜头数算出的值）就不再动它。
+      const previous = storyboardAutoHeight(storyboardPayloadOf(current).shots.length);
+      const size = current.size && current.size.height === previous
+        ? { ...current.size, height: storyboardAutoHeight(normalized.shots.length) } : current.size;
+      return { ...current, size, data: { ...current.data, payload: normalized as unknown as JsonValue } };
+    });
     return true;
   }, [node.id, updateNode, reportError]);
 
@@ -105,9 +137,11 @@ export function StoryboardNodeBody({ node, host }: { node: StoryboardNode; host:
               <span className="block truncate text-xs tabular-nums text-muted-foreground">{storyboardShotMeta(shot)}</span>
               <span className="block truncate text-sm text-foreground">{shot.visual || '未填写画面'}</span>
             </span>
+            <ShotStateDot state={shotMediaState(host, shot.image_node_id, 'image')} label="图片" />
+            <ShotStateDot state={shotMediaState(host, shot.video_node_id, 'video')} label="视频" />
           </li>;
         })}
       </ol>}
-    <StoryboardEditor open={editing} onOpenChange={setEditing} initialTab={requested ? request.tab : 'shots'} title={node.title} payload={payload} host={host} write={write} />
+    <StoryboardEditor open={editing} onOpenChange={setEditing} initialTab={requested ? request.tab : 'shots'} title={node.title} payload={payload} host={host} nodeId={node.id} write={write} />
   </div>;
 }

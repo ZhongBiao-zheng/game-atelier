@@ -34,6 +34,9 @@ import {
 import { AddIcon, AiIcon, AudioFileIcon, MusicFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, SelectIcon, SettingsIcon, ShowIcon, StoryboardIcon, TextIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
 import { STORYBOARD_DEFAULT_SIZE, createStoryboardNode, isStoryboardNode, remapStoryboardPayload } from '@/lib/canvasStoryboard';
 import { requestStoryboardEdit } from '@/components/canvas/storyboard/StoryboardNodeBody';
+import {
+  applyShotGenerationPlan, planShotGeneration, rebindShotResult, type ShotGenerationKind, type ShotGenerationPlan,
+} from '@/components/canvas/storyboard/storyboardGeneration';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { Link, useLocation } from 'wouter';
 
@@ -3117,19 +3120,21 @@ function CanvasEditorInner({
       .finally(() => { canvasUiPreferencesSaveInFlight.current = false; });
   }, []);
 
-  const submitRun = useCallback(async (nodeId: string) => {
-    if (batchBusyRef.current) { setError('批量执行期间请先等待或停止'); return; }
+  /** 返回这次提交的结果：submitted 已受理；not_sent / conflict 确定没有发出或被版本校验拒绝（可以再提交）；
+   *  error 结果不明或被拒绝（不要自动再提交，可能已经在计费）。 */
+  const submitRun = useCallback(async (nodeId: string): Promise<SubmitRunOutcome> => {
+    if (batchBusyRef.current) { setError('批量执行期间请先等待或停止'); return { status: 'error' }; }
     if (canvasRequiresBatchRun(latestDocument.current, nodeId)) {
-      await prepareBatch(nodeId); return;
+      await prepareBatch(nodeId); return { status: 'error' };
     }
     if (runSubmissionInFlight.current) {
       setError('另一项生成正在提交，请稍后再试。');
-      return;
+      return { status: 'not_sent' };
     }
     setSubmittingNodeIds(current => new Set(current).add(nodeId));
     setError(null);
     try {
-      if (!await persistNow()) return;
+      if (!await persistNow()) return { status: 'not_sent' };
       await ensureAnnotatedInputs(annotationBridge, nodeId);
       const current = latestDocument.current;
       const node = current?.nodes.find(candidate => candidate.id === nodeId);
@@ -3154,8 +3159,10 @@ function CanvasEditorInner({
       rememberGenerationDefault(draft);
       const resultId = run.job.canvas_run?.result_node_id;
       if (resultId) setSelectedNodeIds(new Set([resultId]));
+      return { status: 'submitted', resultNodeId: resultId };
     } catch (submitError) {
       setError((submitError as Error).message);
+      return { status: submitError instanceof ApiError && submitError.status === 409 ? 'conflict' : 'error' };
     } finally {
       runSubmissionInFlight.current = false;
       if (saveQueued.current) void flushSave().catch(() => undefined);
@@ -4274,6 +4281,61 @@ function CanvasEditorInner({
   };
   const createStoryboardFromText = useCallback((nodeId: string) => createStoryboardFromTextHandler.current(nodeId), []);
 
+  /** 分镜：按当前文档算一份生成计划。只算不改，确认弹窗显示的就是它。 */
+  const planStoryboardShots = useCallback((nodeId: string, shotIds: readonly string[], kind: ShotGenerationKind, count: number) => {
+    const current = latestDocument.current;
+    return current ? planShotGeneration({
+      document: current, storyboardNodeId: nodeId, shotIds, kind, count,
+      deps: { providers, preference: canvasUiPreferences.generation_defaults[kind], newId: makeId },
+    }) : null;
+  }, [canvasUiPreferences.generation_defaults, providers]);
+  /** 分镜：应用确认过的计划，再一镜一镜提交；每镜是一次独立的 Canvas Run，某一镜失败不影响后面的。 */
+  const runStoryboardShotsHandler = useRef<(plan: ShotGenerationPlan) => Promise<void>>(async () => undefined);
+  runStoryboardShotsHandler.current = async plan => {
+    const current = latestDocument.current;
+    if (!current) return;
+    const { nodeIds } = applyShotGenerationPlan(current, plan);
+    if (nodeIds.length === 0) return;
+    commit(document => applyShotGenerationPlan(document, plan).document, true);
+    // 画布状态经 React 更新后才进 latestDocument：每一步都等它落定，
+    // 否则下一镜提交前的保存会带着旧文档，把上一镜的运行状态盖掉。
+    const settled = async (ready: (document: CanvasDocument) => boolean) => {
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        if (latestDocument.current && ready(latestDocument.current)) return true;
+        await new Promise(resolve => window.setTimeout(resolve, 25));
+      }
+      return false;
+    };
+    const nodeOf = (document: CanvasDocument, id: string) => document.nodes.find(node => node.id === id);
+    if (!await settled(document => nodeIds.every(id => nodeOf(document, id)))) return;
+    for (const nodeId of nodeIds) {
+      const before = nodeOf(latestDocument.current!, nodeId);
+      const versionBefore = before && isContentNode(before) ? before.data.current_version_id : null;
+      // 保存没完成、或服务端版本刚被上一镜的结果推进（409）时，这一镜确定没有发出去：等一下再提交。
+      // 其它错误结果不明，不再提交，继续下一镜。
+      let outcome = await submitRun(nodeId);
+      for (let attempt = 0; attempt < 3 && (outcome.status === 'not_sent' || outcome.status === 'conflict'); attempt += 1) {
+        await new Promise(resolve => window.setTimeout(resolve, 600));
+        outcome = await submitRun(nodeId);
+      }
+      if (outcome.status !== 'submitted') continue;
+      setError(null);
+      const resultId = outcome.resultNodeId ?? nodeId;
+      // 提交成功后结果节点会带上运行状态（或已经出了新内容）；等它进了本地文档再提交下一镜。
+      await settled(document => {
+        const node = nodeOf(document, resultId);
+        return Boolean(node) && (!isContentNode(node!) || Boolean(node!.data.active_run_id) || node!.data.current_version_id !== versionBefore);
+      });
+      // 在已有内容的节点上重新生成，结果会落到一个新节点：让这一镜改绑到新结果，并沿用镜头的标题。
+      const item = plan.items.find(candidate => candidate.nodeId === nodeId);
+      if (item && resultId !== nodeId) {
+        commit(document => rebindShotResult(document, plan, item.shotId, resultId, before?.title ?? ''), false);
+        await settled(document => nodeOf(document, resultId)?.title === (before?.title ?? ''));
+      }
+    }
+  };
+  const runStoryboardShots = useCallback((plan: ShotGenerationPlan) => runStoryboardShotsHandler.current(plan), []);
+
   const submitAngle = useCallback(async (params: CanvasAngleParams) => {
     if (!angleState || runSubmissionInFlight.current) return;
     setAngleBusy(true);
@@ -4901,6 +4963,8 @@ function CanvasEditorInner({
     findNode,
     listNodes,
     createStoryboardFromText,
+    planStoryboardShots,
+    runStoryboardShots,
     keys,
     generationProviders: providers,
     jobsByRunId,
@@ -5071,6 +5135,8 @@ function CanvasEditorInner({
     findNode,
     listNodes,
     createStoryboardFromText,
+    planStoryboardShots,
+    runStoryboardShots,
     videoFrameNodeIdsByNodeId,
     pendingInputNodesByNodeId,
   ]);
@@ -6527,6 +6593,10 @@ function withLayerStackFromSource(
     }],
   };
 }
+
+type SubmitRunOutcome =
+  | { status: 'submitted'; resultNodeId?: string }
+  | { status: 'not_sent' | 'conflict' | 'error' };
 
 function makeId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;

@@ -4,11 +4,12 @@ import { expect, it, vi } from 'vitest';
 
 import {
   STORYBOARD_MAX_SHOTS, STORYBOARD_TOO_LARGE, createStoryboardNode, isStoryboardNode, normalizeStoryboardPayload,
-  storyboardPayloadOf, type StoryboardNode,
+  storyboardAutoHeight, storyboardPayloadOf, type StoryboardNode,
 } from '@/lib/canvasStoryboard';
 import type { CanvasContentVersion, CanvasNode, JsonValue } from '@/schema/canvas';
 
 import { StoryboardNodeBody, type StoryboardHost } from './StoryboardNodeBody';
+import { NO_IMAGE_FOR_VIDEO, type ShotGenerationPlan } from './storyboardGeneration';
 
 const sources = import.meta.glob('./*.tsx', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
 
@@ -162,4 +163,102 @@ it('超过载荷上限时不写入并提示一句话', () => {
   fireEvent.change(within(dialog).getByLabelText('出图提示词'), { target: { value: '图'.repeat(4000) } });
   expect(reportError).toHaveBeenCalledWith(STORYBOARD_TOO_LARGE);
   expect(onNode).not.toHaveBeenCalled();
+});
+
+// ---------------------------------------------------------------- 批量生成的确认弹窗
+
+function fakePlan(kind: 'image' | 'video', shotIds: readonly string[], count: number, cost: number | null): ShotGenerationPlan {
+  const items = shotIds.map((shotId, index) => ({
+    shotId, label: String(index + 1).padStart(2, '0'), nodeId: `${kind}-${shotId}`, create: null, connections: [], cost,
+    draft: { mode: kind, prompt: '', input_policy: 'all_connected' as const, model: 'seedream-5', params: { n: count }, updated_at: '' },
+  }));
+  return {
+    storyboardNodeId: 'plugin-1', kind, items, skipped: [], models: ['seedream-5'],
+    unpricedCount: cost === null ? items.length : 0,
+    totalCost: cost === null ? null : items.reduce((sum, item) => sum + (item.cost ?? 0) * count, 0),
+  };
+}
+
+const THREE_SHOTS = { shots: [{ id: 'a', visual: '一' }, { id: 'b', visual: '二' }, { id: 'c', visual: '三' }] };
+
+it('确认弹窗显示的镜头数、模型与花费来自同一份计划，确认时提交的就是这一份', () => {
+  const planShots = vi.fn((_node: string, shotIds: readonly string[], kind: 'image' | 'video', count: number) => fakePlan(kind, shotIds, count, 0.22));
+  const runShots = vi.fn(async () => undefined);
+  render(<Harness initial={storyboard(THREE_SHOTS)} overrides={{ planShots, runShots }} />);
+  const dialog = openEditor();
+  fireEvent.click(within(dialog).getByRole('button', { name: '生成图片…' }));
+  const confirm = screen.getByRole('alertdialog');
+  expect(planShots).toHaveBeenLastCalledWith('plugin-1', ['a', 'b', 'c'], 'image', 1);  // 没勾选：全部还没出图的镜头
+  expect(within(confirm).getByText('3 个（01、02、03）')).toBeInTheDocument();
+  expect(within(confirm).getByText('seedream-5')).toBeInTheDocument();
+  expect(within(confirm).getByTestId('storyboard-plan-cost')).toHaveTextContent('0.66¥');
+  expect(runShots).not.toHaveBeenCalled();
+  // 改成每镜 2 张：重新算计划，花费跟着变，提交的是新的这一份。
+  fireEvent.click(within(confirm).getByRole('radio', { name: '2 张' }));
+  expect(within(confirm).getByTestId('storyboard-plan-cost')).toHaveTextContent('1.32¥');
+  fireEvent.click(within(confirm).getByRole('button', { name: '生成 3 个' }));
+  expect(runShots).toHaveBeenCalledTimes(1);
+  expect(runShots).toHaveBeenCalledWith(planShots.mock.results.at(-1)!.value);
+  expect(planShots.mock.calls.at(-1)).toEqual(['plugin-1', ['a', 'b', 'c'], 'image', 2]);
+});
+
+it('模型没有价格时写未计价，不写 0', () => {
+  const planShots = vi.fn((_node: string, shotIds: readonly string[], kind: 'image' | 'video', count: number) => fakePlan(kind, shotIds, count, null));
+  render(<Harness initial={storyboard(THREE_SHOTS)} overrides={{ planShots, runShots: vi.fn(async () => undefined) }} />);
+  fireEvent.click(within(openEditor()).getByRole('button', { name: '生成图片…' }));
+  const cost = within(screen.getByRole('alertdialog')).getByTestId('storyboard-plan-cost');
+  expect(cost).toHaveTextContent('未计价');
+  expect(cost.textContent).not.toMatch(/0/);
+});
+
+it('取消确认不提交；只勾选的镜头进入计划', () => {
+  const planShots = vi.fn((_node: string, shotIds: readonly string[], kind: 'image' | 'video', count: number) => fakePlan(kind, shotIds, count, 0.22));
+  const runShots = vi.fn(async () => undefined);
+  render(<Harness initial={storyboard(THREE_SHOTS)} overrides={{ planShots, runShots }} />);
+  const dialog = openEditor();
+  fireEvent.click(within(dialog).getByRole('checkbox', { name: '选择镜头 02' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '生成图片…' }));
+  expect(planShots).toHaveBeenLastCalledWith('plugin-1', ['b'], 'image', 1);
+  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '取消' }));
+  expect(runShots).not.toHaveBeenCalled();
+  expect(screen.queryByRole('alertdialog')).toBeNull();
+});
+
+it('没有图的镜头不能出视频，并写明原因', () => {
+  const planShots = vi.fn(() => ({ ...fakePlan('video', [], 1, 0.5), skipped: [{ shotId: 'a', label: '01', reason: NO_IMAGE_FOR_VIDEO }] }));
+  render(<Harness initial={storyboard({ shots: [{ id: 'a', visual: '一' }] })} overrides={{ planShots, runShots: vi.fn(async () => undefined) }} />);
+  const dialog = openEditor();
+  expect(within(dialog).getByRole('button', { name: '出视频' })).toBeDisabled();
+  expect(within(dialog).getByText(NO_IMAGE_FOR_VIDEO)).toBeInTheDocument();
+  expect(within(dialog).getByRole('button', { name: '出图' })).toBeEnabled();
+  fireEvent.click(within(dialog).getByRole('button', { name: '生成视频…' }));
+  const confirm = screen.getByRole('alertdialog');
+  expect(within(confirm).getByText('0 个')).toBeInTheDocument();
+  expect(within(confirm).getByRole('button', { name: '生成 0 个' })).toBeDisabled();
+});
+
+it('有图的镜头可以出视频，状态点跟着节点走', () => {
+  const planShots = vi.fn((_node: string, shotIds: readonly string[], kind: 'image' | 'video', count: number) => fakePlan(kind, shotIds, count, 0.5));
+  render(<Harness initial={storyboard({ shots: [{ id: 'a', visual: '一', image_node_id: 'image-1' }, { id: 'b', visual: '二' }] })}
+    overrides={{ planShots, runShots: vi.fn(async () => undefined) }} />);
+  expect(screen.getAllByRole('img', { name: '图片已完成' })).toHaveLength(1);
+  expect(screen.getAllByRole('img', { name: '图片未生成' })).toHaveLength(1);
+  const dialog = openEditor();
+  expect(within(dialog).getByRole('button', { name: '出视频' })).toBeEnabled();
+  expect(within(dialog).getByRole('button', { name: '重新出图' })).toBeEnabled();
+  fireEvent.click(within(dialog).getByRole('button', { name: '生成视频…' }));
+  expect(planShots).toHaveBeenLastCalledWith('plugin-1', ['a'], 'video', 1);  // 只有有图的那一镜
+});
+
+it('节点高度随镜头数变化，手动改过高度后不再自动调整', () => {
+  let latest: StoryboardNode | null = null;
+  const { unmount } = render(<Harness initial={storyboard({})} onNode={node => { latest = node; }} />);
+  fireEvent.click(within(openEditor()).getByRole('button', { name: '添加镜头' }));
+  expect(latest!.size?.height).toBe(storyboardAutoHeight(1));
+  unmount();
+  const resized = { ...storyboard({}), size: { width: 420, height: 400 } };
+  render(<Harness initial={resized} onNode={node => { latest = node; }} />);
+  fireEvent.click(within(openEditor()).getByRole('button', { name: '添加镜头' }));
+  expect(latest!.size?.height).toBe(400);
+  expect([0, 3, 40].map(storyboardAutoHeight)).toEqual([176, 192, 480]);
 });

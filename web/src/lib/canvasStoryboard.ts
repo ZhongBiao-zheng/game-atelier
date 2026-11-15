@@ -7,7 +7,16 @@ import type { CanvasNode, CanvasPluginNode, CanvasPoint, JsonValue } from '@/sch
 
 export const STORYBOARD_PLUGIN_ID = 'atelier.storyboard';
 export const STORYBOARD_NODE_TYPE = 'board';
-export const STORYBOARD_DEFAULT_SIZE = { width: 420, height: 480 };
+/** 节点高度随镜头数变化：一行汇总 + 每镜一行，封顶后在节点内滚动。 */
+const STORYBOARD_HEADER_HEIGHT = 33;
+const STORYBOARD_ROW_HEIGHT = 53;
+const STORYBOARD_MIN_HEIGHT = 176;
+const STORYBOARD_MAX_HEIGHT = 480;
+export function storyboardAutoHeight(shotCount: number): number {
+  return Math.min(STORYBOARD_MAX_HEIGHT,
+    Math.max(STORYBOARD_MIN_HEIGHT, STORYBOARD_HEADER_HEIGHT + shotCount * STORYBOARD_ROW_HEIGHT));
+}
+export const STORYBOARD_DEFAULT_SIZE = { width: 420, height: storyboardAutoHeight(0) };
 export const STORYBOARD_MAX_SHOTS = 120;
 export const STORYBOARD_MAX_ENTITIES = 60;
 export const STORYBOARD_MAX_SHOT_ENTITIES = 20;

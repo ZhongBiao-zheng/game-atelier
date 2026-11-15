@@ -1188,6 +1188,8 @@ export function createCanvasGenerationDraft(
     preference?: CanvasGenerationDefault;
     /** 音频节点：只在语音或音乐模型里选。 */
     audioFamily?: CanvasAudioFamily;
+    /** 调用方指定的参数（如分镜的画幅、首帧模式），盖在默认值与偏好之上，再按所选模型归一。 */
+    paramOverrides?: JobParams;
     now?: string;
   } = {},
 ): CanvasGenerationDraft {
@@ -1195,12 +1197,15 @@ export function createCanvasGenerationDraft(
   const selected = preferred ?? firstCanvasGenerationModel(keys, mode, options.audioFamily);
   const model = selected?.model.id ?? '';
   const mayApplyPreferenceParams = preferred || options.preference?.selection === null;
-  const sourceParams = mayApplyPreferenceParams
-    ? {
-      ...defaultCanvasGenerationParams(mode),
-      ...withoutUnrememberedParams(mode, (options.preference?.params ?? {}) as JobParams),
-    }
-    : defaultCanvasGenerationParams(mode);
+  const sourceParams = {
+    ...(mayApplyPreferenceParams
+      ? {
+        ...defaultCanvasGenerationParams(mode),
+        ...withoutUnrememberedParams(mode, (options.preference?.params ?? {}) as JobParams),
+      }
+      : defaultCanvasGenerationParams(mode)),
+    ...options.paramOverrides,
+  };
   const params = !selected
     ? {}
     : normalizedCanvasGenerationParams(selected.key, selected.model, mode, sourceParams);

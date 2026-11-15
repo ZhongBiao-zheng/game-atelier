@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -24,7 +25,11 @@ import {
 } from '@/lib/canvasStoryboard';
 import { cn } from '@/lib/utils';
 
-import { StoryboardThumb, storyboardShotMeta, type StoryboardEditorTab, type StoryboardHost } from './StoryboardNodeBody';
+import { StoryboardGenerate, type GenerateRequest } from './StoryboardGenerate';
+import {
+  ShotStateDot, StoryboardThumb, shotMediaState, storyboardShotMeta, type StoryboardEditorTab, type StoryboardHost,
+} from './StoryboardNodeBody';
+import { NO_IMAGE_FOR_VIDEO, composeShotImagePrompt, type ShotGenerationKind } from './storyboardGeneration';
 import { StoryboardScript } from './StoryboardScript';
 
 function newId(prefix: string): string {
@@ -39,12 +44,15 @@ interface EditorProps {
   title: string;
   payload: StoryboardPayload;
   host: StoryboardHost;
+  nodeId: string;
   /** 写回节点；超过载荷上限时返回 false 并已提示。 */
   write: (next: StoryboardPayload) => boolean;
 }
 
 /** 分镜编辑弹窗：左列表右表单。删除镜头不删除它的图片与视频节点。 */
-export function StoryboardEditor({ open, onOpenChange, initialTab = 'shots', title, payload, host, write }: EditorProps) {
+export function StoryboardEditor({ open, onOpenChange, initialTab = 'shots', title, payload, host, nodeId, write }: EditorProps) {
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  const [generate, setGenerate] = useState<GenerateRequest | null>(null);
   const [tab, setTab] = useState<StoryboardEditorTab>(initialTab);
   useEffect(() => { if (open) setTab(initialTab); }, [open, initialTab]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -67,6 +75,17 @@ export function StoryboardEditor({ open, onOpenChange, initialTab = 'shots', tit
     write(next);
   };
   const endTyping = () => { recorded.current = false; };
+  /** 范围：勾选了就用勾选的；没勾选时取还没出图（或有图但还没出视频）的全部镜头。 */
+  const shotsFor = (kind: ShotGenerationKind): string[] => {
+    const picked = payload.shots.filter(shot => checked.has(shot.id)).map(shot => shot.id);
+    if (picked.length > 0) return picked;
+    return payload.shots.filter(shot => {
+      const image = shotMediaState(host, shot.image_node_id, 'image');
+      if (kind === 'image') return image === 'none' || image === 'failed';
+      const video = shotMediaState(host, shot.video_node_id, 'video');
+      return image === 'done' && (video === 'none' || video === 'failed');
+    }).map(shot => shot.id);
+  };
   const addShot = () => {
     const shot = emptyStoryboardShot(newId('s'));
     if (change(addStoryboardShot(payload, shot, selected?.id ?? null))) setSelectedId(shot.id);
@@ -100,6 +119,13 @@ export function StoryboardEditor({ open, onOpenChange, initialTab = 'shots', tit
                   if (draggingId) change(moveStoryboardShot(payload, draggingId, index));
                   setDraggingId(null);
                 }}>
+                <Checkbox aria-label={`选择镜头 ${storyboardShotLabel(index)}`} checked={checked.has(shot.id)}
+                  onClick={event => event.stopPropagation()}
+                  onCheckedChange={value => setChecked(current => {
+                    const next = new Set(current);
+                    if (value === true) next.add(shot.id); else next.delete(shot.id);
+                    return next;
+                  })} />
                 <DragHandleIcon size="sm" className="shrink-0 cursor-grab text-subtle-foreground" />
                 <span className="w-6 shrink-0 text-xs tabular-nums text-muted-foreground">{storyboardShotLabel(index)}</span>
                 <StoryboardThumb host={host} imageNodeId={shot.image_node_id} />
@@ -135,22 +161,34 @@ export function StoryboardEditor({ open, onOpenChange, initialTab = 'shots', tit
           </div>
           <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pr-1">
             {selected
-              ? <ShotForm key={selected.id} shot={selected} payload={payload}
+              ? <ShotForm key={selected.id} shot={selected} payload={payload} host={host}
+                onGenerate={kind => setGenerate({ kind, shotIds: [selected.id] })}
                 onChange={patch => type(updateStoryboardShot(payload, selected.id, patch))}
                 onToggle={patch => change(updateStoryboardShot(payload, selected.id, patch))} />
               : <p className="grid h-full place-items-center text-sm text-muted-foreground">添加镜头后在这里填写</p>}
           </div>
         </TabsContent>
         <TabsContent value="entities" className="min-h-0 flex-1 overflow-y-auto pr-1 data-[state=inactive]:hidden">
-          <EntitiesForm payload={payload} type={type} change={change} />
+          <EntitiesForm payload={payload} host={host} type={type} change={change} />
         </TabsContent>
         <TabsContent value="script" className="min-h-0 flex-1 overflow-y-auto pr-1 data-[state=inactive]:hidden">
           <StoryboardScript payload={payload} host={host} change={change} onWritten={() => setTab('shots')} />
         </TabsContent>
       </Tabs>
-      <p className="shrink-0 text-xs tabular-nums text-muted-foreground">
-        {payload.shots.length} 镜 · {formatStoryboardDuration(storyboardTotalDuration(payload))}
-      </p>
+      <div className="flex shrink-0 items-center gap-2">
+        <p className="text-xs tabular-nums text-muted-foreground">
+          {payload.shots.length} 镜 · {formatStoryboardDuration(storyboardTotalDuration(payload))}
+          {checked.size > 0 && ` · 已选 ${payload.shots.filter(shot => checked.has(shot.id)).length}`}
+        </p>
+        <span className="flex-1" />
+        {host.planShots && <>
+          <Button size="sm" variant="outline" disabled={payload.shots.length === 0}
+            onClick={() => setGenerate({ kind: 'video', shotIds: shotsFor('video') })}>生成视频…</Button>
+          <Button size="sm" disabled={payload.shots.length === 0}
+            onClick={() => setGenerate({ kind: 'image', shotIds: shotsFor('image') })}>生成图片…</Button>
+        </>}
+      </div>
+      <StoryboardGenerate request={generate} nodeId={nodeId} host={host} onClose={() => setGenerate(null)} />
     </DialogContent>
   </Dialog>;
 }
@@ -184,14 +222,44 @@ function PresetInput({ id, value, presets, maxLength, onChange }: {
   </div>;
 }
 
-function ShotForm({ shot, payload, onChange, onToggle }: {
+function ShotForm({ shot, payload, host, onChange, onToggle, onGenerate }: {
   shot: StoryboardShot;
   payload: StoryboardPayload;
+  host: StoryboardHost;
+  onGenerate: (kind: ShotGenerationKind) => void;
   onChange: (patch: Partial<Omit<StoryboardShot, 'id'>>) => void;
   onToggle: (patch: Partial<Omit<StoryboardShot, 'id'>>) => void;
 }) {
   const id = (field: string) => `storyboard-${shot.id}-${field}`;
+  const imageState = shotMediaState(host, shot.image_node_id, 'image');
+  const videoState = shotMediaState(host, shot.video_node_id, 'video');
+  const imageNode = host.findNode(shot.image_node_id ?? '');
+  const canSyncPrompt = imageNode?.type === 'image' && Boolean(imageNode.data.generation_draft) && imageState !== 'running';
   return <div className="grid grid-cols-2 gap-4">
+    {host.planShots && <div className="col-span-2 flex flex-wrap items-center gap-2">
+      <ShotStateDot state={imageState} label="图片" />
+      <Button size="sm" variant="outline" disabled={imageState === 'running'} onClick={() => onGenerate('image')}>
+        {imageState === 'none' ? '出图' : '重新出图'}
+      </Button>
+      <ShotStateDot state={videoState} label="视频" />
+      <Hint label={imageState === 'done' ? '' : NO_IMAGE_FOR_VIDEO}>
+        <span tabIndex={imageState === 'done' ? -1 : 0}>
+          <Button size="sm" variant="outline" disabled={imageState !== 'done' || videoState === 'running'}
+            onClick={() => onGenerate('video')}>{videoState === 'none' ? '出视频' : '重新出视频'}</Button>
+        </span>
+      </Hint>
+      {imageState !== 'done' && <span className="text-xs text-muted-foreground">{NO_IMAGE_FOR_VIDEO}</span>}
+      <span className="flex-1" />
+      {canSyncPrompt && <Hint label="把镜头表里的提示词、风格前缀和条目描述重新写进这一镜的图片节点。不会开始生成。">
+        <Button size="sm" variant="ghost" onClick={() => {
+          host.recordHistory();
+          host.updateNode(imageNode.id, current => (current.type === 'image' && current.data.generation_draft
+            ? { ...current, data: { ...current.data, generation_draft: {
+              ...current.data.generation_draft, prompt: composeShotImagePrompt(payload, shot), updated_at: new Date().toISOString(),
+            } } } : current));
+        }}>更新提示词</Button>
+      </Hint>}
+    </div>}
     <Field id={id('scene')} label="场次">
       <Input id={id('scene')} value={shot.scene} maxLength={STORYBOARD_TEXT_LIMITS.scene}
         onChange={event => onChange({ scene: event.target.value })} />
@@ -240,11 +308,17 @@ function ShotForm({ shot, payload, onChange, onToggle }: {
   </div>;
 }
 
-function EntitiesForm({ payload, type, change }: {
+const NO_REFERENCE = '__none__';
+
+function EntitiesForm({ payload, host, type, change }: {
   payload: StoryboardPayload;
+  host: StoryboardHost;
   type: (next: StoryboardPayload) => void;
   change: (next: StoryboardPayload) => boolean;
 }) {
+  // 参考图只能选当前画布上已有内容的图片节点。
+  const images = (host.listNodes?.() ?? []).filter(node => node.type === 'image'
+    && host.resolveVersion(node.data.current_version_id)?.kind === 'image');
   return <div className="space-y-4">
     <div className="grid grid-cols-[10rem_1fr] gap-4">
       <Field id="storyboard-ratio" label="画幅">
@@ -261,7 +335,7 @@ function EntitiesForm({ payload, type, change }: {
       </Field>
     </div>
     <ul aria-label="角色与场景" className="space-y-2">
-      {payload.entities.map(entity => <li key={entity.id} className="grid grid-cols-[7rem_12rem_1fr_auto] items-start gap-2">
+      {payload.entities.map(entity => <li key={entity.id} className="grid grid-cols-[6rem_10rem_1fr_4rem_10rem_auto] items-start gap-2">
         <Select value={entity.kind}
           onValueChange={kind => change(updateStoryboardEntity(payload, entity.id, { kind: kind as StoryboardEntityKind }))}>
           <SelectTrigger aria-label="类型"><SelectValue /></SelectTrigger>
@@ -274,6 +348,15 @@ function EntitiesForm({ payload, type, change }: {
         <Textarea aria-label="固定描述" placeholder="固定描述" rows={2} value={entity.description}
           maxLength={STORYBOARD_TEXT_LIMITS.entity_description}
           onChange={event => type(updateStoryboardEntity(payload, entity.id, { description: event.target.value }))} />
+        <StoryboardThumb host={host} imageNodeId={entity.reference_node_id} />
+        <Select value={images.some(node => node.id === entity.reference_node_id) ? entity.reference_node_id! : NO_REFERENCE}
+          onValueChange={value => change(updateStoryboardEntity(payload, entity.id, { reference_node_id: value === NO_REFERENCE ? null : value }))}>
+          <SelectTrigger aria-label={`${entity.name || STORYBOARD_ENTITY_KIND_LABELS[entity.kind]}的参考图`}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NO_REFERENCE}>无参考图</SelectItem>
+            {images.map(node => <SelectItem key={node.id} value={node.id}>{node.title}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <Button variant="ghost" size="icon" aria-label={`删除${entity.name || STORYBOARD_ENTITY_KIND_LABELS[entity.kind]}`}
           className="text-muted-foreground" onClick={() => change(removeStoryboardEntity(payload, entity.id))}>
           <DeleteIcon />

@@ -208,6 +208,9 @@ export interface CanvasNodeContextValue {
   listNodes?: () => readonly CanvasNode[];
   /** 在文本节点右侧建一个以它为剧本来源的分镜节点。 */
   createStoryboardFromText?: (nodeId: string) => void;
+  /** 分镜的逐镜生成：先算计划（确认弹窗显示它），确认后应用并逐镜提交。 */
+  planStoryboardShots?: StoryboardHost['planShots'];
+  runStoryboardShots?: StoryboardHost['runShots'];
   keys: KeyView[];
   /** 生成节点选模型用：「自动」+ 真实 KEY。缺省时只有真实 KEY。 */
   generationProviders?: KeyView[];
@@ -251,7 +254,7 @@ export interface CanvasNodeContextValue {
   /** 封面与该成员交换图片，连线跟着图片走。 */
   setResultStackCover?: (coverId: string, memberId: string) => void;
   reportError?: (message: string) => void;
-  submitRun: (id: string) => Promise<void>;
+  submitRun: (id: string) => Promise<unknown>;
   cancelRun: (runId: string) => Promise<void>;
   resumeMjEdit?: (runId: string) => Promise<void>;
   dismissCandidate: (runId: string, candidateId: string) => Promise<void>;
@@ -310,6 +313,8 @@ function storyboardHost(context: CanvasNodeContextValue): StoryboardHost {
     resolveVersion: context.resolveVersion, updateNode: context.updateNode, recordHistory: context.recordHistory,
     selectNode: context.selectNode, reportError: context.reportError,
     savePendingEdits: context.savePendingEdits, listNodes: context.listNodes,
+    planShots: context.planStoryboardShots, runShots: context.runStoryboardShots,
+    lastRunFailed: nodeId => context.jobsByResultNodeId.get(nodeId)?.some(job => job.status === 'failed') ?? false,
   };
 }
 
