@@ -1403,3 +1403,9 @@ multipart 里的数组值展开成同名重复字段。
 - 预设调色板的色值随插件包入库：`plugins/pixel/server/palettes.json`，取自 Lospec 公开调色板库（每套带来源 url，2026-11-15 按 `.json` 原样复制，测试逐色核对 PICO-8）。Game Boy 用 Lospec 的「Nintendo Gameboy (bgb)」4 色；NES 为 55 色。面板只显示调色板名称与色块，色值只在服务端。
 - 处理顺序：降采样与映射 → 抖动 → 清理 → 描边。抖动需要连续色调，开启后颜色取格内平均（即使选了主色）。Bayer 偏移量 = 矩阵值（归一化到 ±0.5）× 255/round(k^(1/3)) × 强度；Floyd–Steinberg 用 Pillow 实现（按 RGB 距离，不看强度）。去孤立像素：与四周不透明邻居都不同色的像素换成邻居里最多的颜色，四周全透明的单个不透明像素变透明。合并小色块按 4 连通、面积小于 `min_region` 的同色块并进周围最多的颜色。外描边在不透明区域外圈 1 像素，颜色默认取调色板里亮度最低的颜色。
 - 新路由 `POST /presets`（读）返回 `{presets: [{id, name, colors}]}`。Agent 工具参数同步增加上述字段。
+
+### 精灵表调整接收结果组（X3）
+
+- 精灵表节点类型开启 `expand_result_stack`。帧新增可选字段 `src`（源图序号，省略为 0）；`/repack` 的源图是界面带来的全部图片（结果组按组内顺序），帧按 `src` 取图；界面带来多张图又没给 `frames` 时，每张图一帧（整张图，再按 `trim` 裁透明边）。`src` 越界或不是整数时返回 422「帧的来源图不对」。`/detect` 与手动网格仍只针对第一张图。
+- Agent 工具 `plugin_sprite_sheet_repack` 新增 `image_node_ids`（1–65 个，按顺序，每张图一帧），与 `image_node_id` 二选一。
+- 服务端 `sheet.repack(sources, frames, …)` 的第一个参数改为源图列表。

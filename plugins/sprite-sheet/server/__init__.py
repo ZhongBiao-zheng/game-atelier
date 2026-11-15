@@ -9,6 +9,9 @@ from . import sheet
 FRAME_DATA_MAX_CHARS = 40_000
 
 
+MAX_SOURCES = 65  # 结果组上限
+
+
 def _source(ctx, params: dict):
     # 界面只能用连在自己节点上的那张图；Agent 按图片节点 id 指定。
     if ctx.origin == "agent":
@@ -18,10 +21,30 @@ def _source(ctx, params: dict):
     return ctx.inputs[0]
 
 
-def _frames(image, params: dict) -> list[dict]:
+def _sources(ctx, params: dict) -> list:
+    """重排用的源图。连的是结果组时界面按组内顺序带来全部帧图；Agent 用 image_node_ids 列出。"""
+    if ctx.origin == "agent":
+        node_ids = params.get("image_node_ids")
+        if node_ids is None:
+            return [_source(ctx, params)]
+        if not isinstance(node_ids, list) or not 1 <= len(node_ids) <= MAX_SOURCES:
+            raise ValueError(f"要给 1 到 {MAX_SOURCES} 张图片节点")
+        return [ctx.image_of_node(str(node_id)) for node_id in node_ids]
+    images = [item for item in ctx.inputs if item.kind == "image"]
+    if not images:
+        raise ValueError("请先连接一张图片")
+    return images[:MAX_SOURCES]
+
+
+def _frames(images: list, params: dict) -> list[dict]:
     frames = params.get("frames")
     if isinstance(frames, list) and frames:
         return frames
+    if len(images) > 1:
+        # 结果组：每张图就是一帧（整张图，排之前再按 trim 裁透明边）。
+        return [{"src": index, "x": 0, "y": 0, "w": image.width, "h": image.height}
+                for index, image in enumerate(images)]
+    image = images[0]
     grid = params.get("grid")
     if isinstance(grid, dict):
         return sheet.grid_frames(image.width, image.height, int(grid.get("columns", 1)), int(grid.get("rows", 1)),
@@ -43,11 +66,12 @@ def register(api) -> None:
 
     @api.route("POST", "/repack")
     def repack(ctx, params: dict) -> dict:
-        source = _source(ctx, params)
-        image = sheet.open_sheet(source.path)
-        frames = _frames(image, params)
+        sources = _sources(ctx, params)
+        source = sources[0]
+        images = [sheet.open_sheet(item.path) for item in sources]
+        frames = _frames(images, params)
         png, data = sheet.repack(
-            image, frames, columns=int(params.get("columns", len(frames))),
+            images, frames, columns=int(params.get("columns", len(frames))),
             spacing=int(params.get("spacing", 0)), margin=int(params.get("margin", 0)),
             align=str(params.get("align", "bottom-center")), trim=bool(params.get("trim", True)),
             anchor=_anchor(params),

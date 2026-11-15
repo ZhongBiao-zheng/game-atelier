@@ -7,7 +7,8 @@ import { FrameStrip } from './FrameStrip';
 import { Button, Checkbox, NumberField, SelectField } from './kit/controls';
 import { anchorPoint, layoutFrames } from './layout';
 import {
-  DEFAULT_GRID, DEFAULT_STATE, MAX_OFFSET, frameAnchor, gridFrames, moveFrame, nudgeFrame, parseState, setFrameAnchor,
+  DEFAULT_GRID, DEFAULT_STATE, MAX_OFFSET, frameAnchor, framesMatchSources, gridFrames, groupFrames, moveFrame, nudgeFrame,
+  parseState, setFrameAnchor,
   type Align, type Grid, type SheetState,
 } from './sheetState';
 
@@ -23,7 +24,8 @@ export function Panel({ client }: { client: PluginClient }) {
   const stageRef = useRef<HTMLCanvasElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
   const [state, setState] = useState<SheetState>(DEFAULT_STATE);
-  const [source, setSource] = useState<{ handle: string; bitmap: ImageBitmap } | null>(null);
+  // 源图：单张精灵表只有一张；连的是结果组时按组内顺序每张图一帧。
+  const [source, setSource] = useState<{ handles: string[]; bitmaps: ImageBitmap[] } | null>(null);
   const [selected, setSelected] = useState(0);
   const [grid, setGrid] = useState<Grid>(DEFAULT_GRID);
   const [frameData, setFrameData] = useState(true);
@@ -35,20 +37,26 @@ export function Panel({ client }: { client: PluginClient }) {
 
   useEffect(() => {
     let active = true;
-    let held: ImageBitmap | null = null;
+    let held: ImageBitmap[] = [];
     void (async () => {
       const node = await client.node.readSelf();
-      const loaded = parseState(node.payload);
-      const image = (await client.inputs.list()).find(input => input.kind === 'image');
-      const bitmap = image ? await client.inputs.readBitmap(image.handle) : null;
-      if (!active) { bitmap?.close(); return; }
-      held = bitmap;
+      let loaded = parseState(node.payload);
+      const images = (await client.inputs.list()).filter(input => input.kind === 'image');
+      const bitmaps: ImageBitmap[] = [];
+      for (const image of images) bitmaps.push(await client.inputs.readBitmap(image.handle));
+      held = bitmaps;
+      if (!active) { bitmaps.forEach(bitmap => bitmap.close()); return; }
+      if (bitmaps.length > 1 && !framesMatchSources(loaded.frames, bitmaps.length)) {
+        // 第一次连上结果组：每张图一帧，存进节点，之后的整理、偏移、锚点都在这组帧上做。
+        loaded = { ...loaded, frames: groupFrames(bitmaps), grid: null, columns: Math.min(bitmaps.length, 64) };
+        void client.node.writeSelf(loaded).catch(() => setError('保存失败，请重试'));
+      }
       latest.current = loaded;
       setState(loaded);
       if (loaded.grid) setGrid(loaded.grid);
-      setSource(image && bitmap ? { handle: image.handle, bitmap } : null);
+      setSource(bitmaps.length ? { handles: images.map(image => image.handle), bitmaps } : null);
     })().catch(() => { if (active) setError('读取失败，请重试'); });
-    return () => { active = false; held?.close(); };
+    return () => { active = false; held.forEach(bitmap => bitmap.close()); };
   }, [client]);
 
   const write = (next: SheetState) => {
@@ -74,7 +82,8 @@ export function Panel({ client }: { client: PluginClient }) {
 
   const frames = state.frames;
   const current = Math.min(selected, Math.max(0, frames.length - 1));
-  const reader = useMemo(() => (source ? createBoxReader(source.bitmap) : null), [source]);
+  const reader = useMemo(() => (source ? createBoxReader(source.bitmaps) : null), [source]);
+  const fromGroup = (source?.bitmaps.length ?? 0) > 1;
   const layout = useMemo(() => (reader ? layoutFrames(frames, reader, { align: state.align, trim: state.trim }) : null),
     [reader, frames, state.align, state.trim]);
 
@@ -109,12 +118,16 @@ export function Panel({ client }: { client: PluginClient }) {
     const canvas = stageRef.current;
     const context = canvas?.getContext('2d');
     if (!canvas || !context || !source) return;
-    canvas.width = source.bitmap.width;
-    canvas.height = source.bitmap.height;
-    context.drawImage(source.bitmap, 0, 0);
+    // 原图区域显示当前帧所在的那张源图，只画取自这张图的帧框。
+    const shownSource = frames[current]?.src ?? 0;
+    const bitmap = source.bitmaps[shownSource] ?? source.bitmaps[0];
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    context.drawImage(bitmap, 0, 0);
     const line = Math.max(1, Math.round(Math.max(canvas.width, canvas.height) / 512));
     const primary = token('primary');
     frames.forEach((frame, index) => {
+      if ((frame.src ?? 0) !== shownSource) return;
       context.strokeStyle = primary;
       context.globalAlpha = index === current ? 1 : 0.55;
       context.lineWidth = index === current ? line * 2 : line;
@@ -127,7 +140,7 @@ export function Panel({ client }: { client: PluginClient }) {
     const canvas = previewRef.current;
     if (!canvas || !source || !layout || layout.items.length === 0) return;
     let index = 0;
-    const draw = () => { drawCell(canvas, source.bitmap, layout, index % layout.items.length, { fit: 88 }); index += 1; };
+    const draw = () => { drawCell(canvas, source.bitmaps, layout, index % layout.items.length, { fit: 88 }); index += 1; };
     draw();
     const timer = window.setInterval(draw, 1000 / state.fps);
     return () => window.clearInterval(timer);
@@ -137,7 +150,9 @@ export function Panel({ client }: { client: PluginClient }) {
     const rect = event.currentTarget.getBoundingClientRect();
     const x = (event.clientX - rect.left) / rect.width * event.currentTarget.width;
     const y = (event.clientY - rect.top) / rect.height * event.currentTarget.height;
-    const hit = frames.findIndex(frame => x >= frame.x && x < frame.x + frame.w && y >= frame.y && y < frame.y + frame.h);
+    const shownSource = frames[current]?.src ?? 0;
+    const hit = frames.findIndex(frame => (frame.src ?? 0) === shownSource
+      && x >= frame.x && x < frame.x + frame.w && y >= frame.y && y < frame.y + frame.h);
     if (hit >= 0) setSelected(hit);
   };
 
@@ -148,12 +163,12 @@ export function Panel({ client }: { client: PluginClient }) {
     try { await work(); } catch (cause) { setError(message(cause)); } finally { setBusy(false); }
   };
   const detect = () => run(async () => {
-    const found = await client.server.call<{ frames: SheetState['frames']; columns: number }>('/detect', {}, [source!.handle]);
+    const found = await client.server.call<{ frames: SheetState['frames']; columns: number }>('/detect', {}, source!.handles.slice(0, 1));
     save({ frames: found.frames, grid: null, columns: Math.max(1, Math.min(64, found.columns || state.columns)) });
     setSelected(0);
   });
   const applyGrid = () => {
-    save({ frames: gridFrames(source!.bitmap.width, source!.bitmap.height, grid), grid, columns: grid.columns });
+    save({ frames: gridFrames(source!.bitmaps[0].width, source!.bitmaps[0].height, grid), grid, columns: grid.columns });
     setSelected(0);
   };
   const place = () => run(async () => {
@@ -161,7 +176,7 @@ export function Panel({ client }: { client: PluginClient }) {
     const result = await client.server.call<{ frame_data_error?: string }>('/repack', {
       frames, columns: state.columns, spacing: state.spacing, margin: state.margin, align: state.align,
       trim: state.trim, anchor: state.anchor, frame_data: frameData,
-    }, [source!.handle]);
+    }, source!.handles);
     setDone(result.frame_data_error ?? '已放到画布');
   });
 
@@ -180,7 +195,7 @@ export function Panel({ client }: { client: PluginClient }) {
         <canvas ref={stageRef} onPointerDown={pickOnStage} />
       </div>
       {frames.length > 0 && <div className="strip">
-        <FrameStrip bitmap={source.bitmap} frames={frames} selected={current} onSelect={setSelected}
+        <FrameStrip bitmaps={source.bitmaps} frames={frames} selected={current} onSelect={setSelected}
           onMove={(from, to) => { save({ frames: moveFrame(frames, from, to) }); setSelected(to); }} />
         <div className="strip-actions">
           <Button small onClick={() => { save({ frames: [...frames].reverse() }); setSelected(frames.length - 1 - current); }}>反转</Button>
@@ -189,7 +204,14 @@ export function Panel({ client }: { client: PluginClient }) {
       </div>}
     </div>
     <aside className="side">
-      <section className="group">
+      {fromGroup ? <section className="group">
+        <h2>帧</h2>
+        <Button disabled={busy} onClick={() => {
+          save({ frames: groupFrames(source.bitmaps), grid: null, columns: Math.min(source.bitmaps.length, 64) });
+          setSelected(0);
+        }}>按结果组重建</Button>
+        <p className="count">{source.bitmaps.length} 张图 · {frames.length} 帧</p>
+      </section> : <section className="group">
         <h2>切帧</h2>
         <Button disabled={busy} onClick={() => void detect()}>自动识别</Button>
         <div className="row">
@@ -202,10 +224,10 @@ export function Panel({ client }: { client: PluginClient }) {
         </div>
         <Button disabled={busy} onClick={applyGrid}>按网格切</Button>
         <p className="count">{frames.length} 帧</p>
-      </section>
+      </section>}
       {frame && layout && <section className="group">
         <h2>第 {current + 1} 帧</h2>
-        <FrameEditor bitmap={source.bitmap} layout={layout} index={current} onion={state.onion} anchor={anchor}
+        <FrameEditor bitmaps={source.bitmaps} layout={layout} index={current} onion={state.onion} anchor={anchor}
           onAnchor={setAnchor} />
         <div className="row">
           <NumberField label="偏移 X" value={frame.ox ?? 0} min={-MAX_OFFSET} max={MAX_OFFSET}

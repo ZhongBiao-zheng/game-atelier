@@ -4,8 +4,8 @@ import { drawCell } from './draw';
 import { anchorPoint, type Layout } from './layout';
 
 /** 当前帧：按输出格子画出来，叠上前一帧（洋葱皮）和锚点。点一下设锚点。 */
-export function FrameEditor({ bitmap, layout, index, onion, anchor, onAnchor }: {
-  bitmap: ImageBitmap;
+export function FrameEditor({ bitmaps, layout, index, onion, anchor, onAnchor }: {
+  bitmaps: readonly ImageBitmap[];
   layout: Layout;
   index: number;
   onion: boolean;
@@ -17,11 +17,11 @@ export function FrameEditor({ bitmap, layout, index, onion, anchor, onAnchor }: 
   const count = layout.items.length;
   useEffect(() => {
     if (!ref.current || count === 0) return;
-    zoom.current = drawCell(ref.current, bitmap, layout, index, {
+    zoom.current = drawCell(ref.current, bitmaps, layout, index, {
       fit: 160, onion: onion && count > 1 ? (index - 1 + count) % count : null,
       anchor: anchorPoint(layout.cellW, layout.cellH, anchor),
     });
-  }, [bitmap, layout, index, onion, anchor, count]);
+  }, [bitmaps, layout, index, onion, anchor, count]);
 
   const place = (event: PointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();

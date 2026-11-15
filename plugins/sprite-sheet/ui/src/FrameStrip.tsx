@@ -3,8 +3,8 @@ import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import type { Frame } from './sheetState';
 
 /** 帧列表：点选一帧，按住拖动换顺序。 */
-export function FrameStrip({ bitmap, frames, selected, onSelect, onMove }: {
-  bitmap: ImageBitmap;
+export function FrameStrip({ bitmaps, frames, selected, onSelect, onMove }: {
+  bitmaps: readonly ImageBitmap[];
   frames: readonly Frame[];
   selected: number;
   onSelect: (index: number) => void;
@@ -46,17 +46,17 @@ export function FrameStrip({ bitmap, frames, selected, onSelect, onMove }: {
           drag?.moved && drag.to === index && drag.from !== index ? 'drop' : ''].join(' ')}
         onPointerDown={down(index)} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrag(null)}>
         <span className="index">{index + 1}</span>
-        <Thumb bitmap={bitmap} frame={frame} />
+        <Thumb bitmap={bitmaps[frame.src ?? 0]} frame={frame} />
       </div>
     ))}
   </div>;
 }
 
-function Thumb({ bitmap, frame }: { bitmap: ImageBitmap; frame: Frame }) {
+function Thumb({ bitmap, frame }: { bitmap: ImageBitmap | undefined; frame: Frame }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
-    if (!canvas) return;
+    if (!canvas || !bitmap) return;
     canvas.width = Math.max(1, Math.round(frame.w));
     canvas.height = Math.max(1, Math.round(frame.h));
     const context = canvas.getContext('2d')!;

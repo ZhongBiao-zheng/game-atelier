@@ -45,7 +45,8 @@
         "surfaces": [
           "node",
           "panel"
-        ]
+        ],
+        "expand_result_stack": true
       }
     ],
     "image_actions": [
@@ -96,11 +97,10 @@
       },
       {
         "name": "repack",
-        "description": "把一张精灵表里的帧重新排成等格的精灵表，并在画布上生成一张新图片。不传 frames 与 grid 时自动识别帧。",
+        "description": "把帧重新排成等格的精灵表，并在画布上生成一张新图片。给 image_node_id 时从一张精灵表里取帧（不传 frames 与 grid 时自动识别）；给 image_node_ids 时每张图就是一帧（例如抽帧、补间、像素化得到的结果组，按顺序列出）。",
         "parameters": {
           "type": "object",
           "required": [
-            "image_node_id",
             "columns"
           ],
           "properties": {
@@ -177,6 +177,15 @@
                   "maximum": 1
                 }
               }
+            },
+            "image_node_ids": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 65,
+              "items": {
+                "type": "string"
+              },
+              "description": "每张图一帧，按播放顺序列出的图片节点 id；与 image_node_id 二选一"
             }
           }
         },
@@ -188,10 +197,10 @@
   "files": [
     {
       "path": "ui/index.html",
-      "sha256": "ae5a4d1ad9e6075b0eac6b2e05cac55543f88abb668019b815617b643723c391",
-      "bytes": 165161
+      "sha256": "db461e81dd739a403f66f3885292993496f96ea74a1faead621debc7f95954b1",
+      "bytes": 166347
     }
   ],
   "source": "bundled",
-  "digest": "sha256:233a3acb08c939f27f25c26cbcc82d8b0e97dc097927c5e8566eae69ec06b604"
+  "digest": "sha256:d94f59ac863f77604e602f32499c04159a9c7f194974daa9e1716179fdffba31"
 }

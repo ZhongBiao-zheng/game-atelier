@@ -99,7 +99,7 @@ def test_repack_trims_and_aligns_to_bottom_center():
     image.paste(Image.new("RGBA", (4, 10), RED), (2, 5))      # 窄高
     image.paste(Image.new("RGBA", (10, 4), GREEN), (25, 8))   # 宽矮
     frames = [{"x": 0, "y": 0, "w": 20, "h": 20}, {"x": 20, "y": 0, "w": 20, "h": 20}]
-    png, data = sheet.repack(image, frames, columns=2, spacing=2, margin=1)
+    png, data = sheet.repack([image], frames, columns=2, spacing=2, margin=1)
     out = decode(png)
     assert data["meta"]["cell"] == {"w": 10, "h": 10}
     assert out.size == (1 + 10 + 2 + 10 + 1, 1 + 10 + 1) == (data["meta"]["size"]["w"], data["meta"]["size"]["h"])
@@ -111,7 +111,7 @@ def test_repack_trims_and_aligns_to_bottom_center():
 
 
 def test_repack_wraps_into_rows_and_keeps_order():
-    png, data = sheet.repack(strip(5), sheet.detect_frames(strip(5))["frames"], columns=2)
+    png, data = sheet.repack([strip(5)], sheet.detect_frames(strip(5))["frames"], columns=2)
     assert (data["meta"]["columns"], data["meta"]["rows"]) == (2, 3)
     assert decode(png).size == (16, 36)
     assert [frame["x"] for frame in data["frames"]] == [0, 8, 0, 8, 0]
@@ -122,9 +122,9 @@ def test_repack_alignments_differ():
     image.paste(Image.new("RGBA", (2, 2), RED), (0, 0))
     image.paste(Image.new("RGBA", (6, 6), GREEN), (12, 2))
     frames = [{"x": 0, "y": 0, "w": 10, "h": 10}, {"x": 10, "y": 0, "w": 10, "h": 10}]
-    top_left = decode(sheet.repack(image, frames, columns=2, align="top-left")[0])
-    center = decode(sheet.repack(image, frames, columns=2, align="center")[0])
-    bottom = decode(sheet.repack(image, frames, columns=2, align="bottom-center")[0])
+    top_left = decode(sheet.repack([image], frames, columns=2, align="top-left")[0])
+    center = decode(sheet.repack([image], frames, columns=2, align="center")[0])
+    bottom = decode(sheet.repack([image], frames, columns=2, align="bottom-center")[0])
     assert top_left.getpixel((0, 0)) == RED
     assert center.getpixel((2, 2)) == RED and center.getpixel((0, 0))[3] == 0
     assert bottom.getpixel((2, 4)) == RED and bottom.getpixel((2, 2))[3] == 0
@@ -132,7 +132,7 @@ def test_repack_alignments_differ():
 
 def test_repack_without_trim_keeps_cells():
     image = strip(2)
-    png, data = sheet.repack(image, sheet.grid_frames(32, 16, 2, 1), columns=2, trim=False)
+    png, data = sheet.repack([image], sheet.grid_frames(32, 16, 2, 1), columns=2, trim=False)
     assert data["meta"]["cell"] == {"w": 16, "h": 16}
     assert decode(png).tobytes() == image.tobytes()
 
@@ -149,12 +149,12 @@ def test_repack_without_trim_keeps_cells():
 ])
 def test_repack_rejects_bad_input(frames, kwargs):
     with pytest.raises((ValueError, KeyError)):
-        sheet.repack(strip(2), frames, **kwargs)
+        sheet.repack([strip(2)], frames, **kwargs)
 
 
 def test_repack_refuses_oversized_output():
     with pytest.raises(ValueError, match="长边超过"):
-        sheet.repack(strip(2), sheet.grid_frames(32, 16, 2, 1), columns=1, margin=5000, trim=False)
+        sheet.repack([strip(2)], sheet.grid_frames(32, 16, 2, 1), columns=1, margin=5000, trim=False)
 
 
 def test_open_sheet_rejects_huge_images(tmp_path):
@@ -184,7 +184,7 @@ def test_repack_applies_offsets_and_clips_to_the_cell():
     image.paste(Image.new("RGBA", (4, 4), GREEN), (13, 3))
     frames = [{"x": 0, "y": 0, "w": 10, "h": 10, "ox": 0, "oy": -2},
               {"x": 10, "y": 0, "w": 10, "h": 10, "ox": 3, "oy": 0}]
-    out = decode(sheet.repack(image, frames, columns=2, align="top-left")[0])
+    out = decode(sheet.repack([image], frames, columns=2, align="top-left")[0])
     assert out.size == (8, 4)
     # 第一帧上移 2：只剩下半截 2 行，上面没有越出格子。
     assert out.getpixel((0, 0)) == RED and out.getpixel((0, 2))[3] == 0
@@ -193,7 +193,7 @@ def test_repack_applies_offsets_and_clips_to_the_cell():
 
 
 def test_repack_anchor_is_reported_in_frames_and_meta():
-    _png, data = sheet.repack(strip(2), sheet.detect_frames(strip(2))["frames"], columns=2, anchor=(0.25, 0.5))
+    _png, data = sheet.repack([strip(2)], sheet.detect_frames(strip(2))["frames"], columns=2, anchor=(0.25, 0.5))
     assert data["meta"]["anchor"] == {"x": 2, "y": 6}
     assert {(frame["anchor_x"], frame["anchor_y"]) for frame in data["frames"]} == {(2, 6)}
 
@@ -201,19 +201,19 @@ def test_repack_anchor_is_reported_in_frames_and_meta():
 @pytest.mark.parametrize("frame_patch", [{"ox": 5000}, {"oy": "1"}, {"ox": True}])
 def test_repack_rejects_bad_offsets(frame_patch):
     with pytest.raises(ValueError, match="偏移"):
-        sheet.repack(strip(2), [{"x": 0, "y": 0, "w": 16, "h": 16, **frame_patch}], columns=1)
+        sheet.repack([strip(2)], [{"x": 0, "y": 0, "w": 16, "h": 16, **frame_patch}], columns=1)
 
 
 @pytest.mark.parametrize("anchor", [(-0.1, 1), (0.5, 1.5)])
 def test_repack_rejects_bad_anchor(anchor):
     with pytest.raises(ValueError, match="锚点"):
-        sheet.repack(strip(2), sheet.grid_frames(32, 16, 2, 1), columns=2, anchor=anchor)
+        sheet.repack([strip(2)], sheet.grid_frames(32, 16, 2, 1), columns=2, anchor=anchor)
 
 
 def test_repack_per_frame_anchor_overrides_the_sheet_anchor():
     frames = sheet.detect_frames(strip(3))["frames"]
     frames[1] = {**frames[1], "ax": 0, "ay": 0.5}
-    _png, data = sheet.repack(strip(3), frames, columns=3, anchor=(0.5, 1.0))
+    _png, data = sheet.repack([strip(3)], frames, columns=3, anchor=(0.5, 1.0))
     assert data["meta"]["anchor"] == {"x": 4, "y": 12}
     assert [(frame["anchor_x"], frame["anchor_y"]) for frame in data["frames"]] == [(4, 12), (0, 6), (4, 12)]
 
@@ -222,4 +222,24 @@ def test_repack_per_frame_anchor_overrides_the_sheet_anchor():
 def test_repack_rejects_bad_per_frame_anchor(patch):
     frames = [{"x": 0, "y": 0, "w": 16, "h": 16, **patch}]
     with pytest.raises(ValueError, match="锚点"):
-        sheet.repack(strip(1), frames, columns=1)
+        sheet.repack([strip(1)], frames, columns=1)
+
+
+def test_frames_can_come_from_several_source_images():
+    # 结果组：每张图一帧，帧用 src 指明来源；尺寸不同的帧按最大的格子对齐。
+    small = Image.new("RGBA", (10, 12), (0, 0, 0, 0))
+    small.paste(Image.new("RGBA", (6, 8), RED), (2, 4))
+    large = Image.new("RGBA", (16, 16), GREEN)
+    frames = [{"src": 0, "x": 0, "y": 0, "w": 10, "h": 12}, {"src": 1, "x": 0, "y": 0, "w": 16, "h": 16}]
+    png, data = sheet.repack([small, large], frames, columns=2, trim=True)
+    out = decode(png)
+    assert data["meta"]["cell"] == {"w": 16, "h": 16}
+    assert out.size == (32, 16)
+    assert out.getpixel((16 + 8, 8)) == GREEN
+    assert out.getpixel((8, 15)) == RED, "裁边后的小图底部居中贴在格子底边"
+
+
+@pytest.mark.parametrize("src", [2, -1, "0", True])
+def test_frame_source_index_must_exist(src):
+    with pytest.raises(ValueError, match="来源图"):
+        sheet.repack([strip(1)], [{"src": src, "x": 0, "y": 0, "w": 16, "h": 16}], columns=1)

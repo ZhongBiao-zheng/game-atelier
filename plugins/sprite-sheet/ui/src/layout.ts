@@ -10,7 +10,7 @@ export interface Layout {
   cellW: number;
   cellH: number;
   /** 每帧：取图的区域（裁过透明边）与它在格内的位置。 */
-  items: Array<{ source: Rect; x: number; y: number }>;
+  items: Array<{ source: Rect; x: number; y: number; src: number }>;
 }
 
 export function placements(sizes: ReadonlyArray<readonly [number, number]>,
@@ -57,5 +57,7 @@ export function layoutFrames(frames: readonly Frame[], box: (frame: Frame) => Re
   const { cellW, cellH, positions } = placements(
     sources.map(source => [source.w, source.h] as const),
     frames.map(frame => [frame.ox ?? 0, frame.oy ?? 0] as const), options.align);
-  return { cellW, cellH, items: sources.map((source, index) => ({ source, x: positions[index][0], y: positions[index][1] })) };
+  return { cellW, cellH, items: sources.map((source, index) => ({
+    source, x: positions[index][0], y: positions[index][1], src: frames[index].src ?? 0,
+  })) };
 }

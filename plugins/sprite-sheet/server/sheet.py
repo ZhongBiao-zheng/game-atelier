@@ -133,11 +133,20 @@ def anchor_point(cell_w: int, cell_h: int, anchor: tuple[float, float]) -> tuple
     return math.floor(cell_w * ax), math.floor(cell_h * ay)
 
 
-def repack(image: Image.Image, frames: list[dict[str, Any]], *, columns: int, spacing: int = 0,
+def _source_of(frame: dict[str, Any], sources: list[Image.Image]) -> Image.Image:
+    """这一帧取自哪张源图：`src` 是源图序号，省略为 0（单张精灵表）。"""
+    index = frame.get("src", 0)
+    if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(sources):
+        raise ValueError("帧的来源图不对")
+    return sources[index]
+
+
+def repack(sources: list[Image.Image], frames: list[dict[str, Any]], *, columns: int, spacing: int = 0,
            margin: int = 0, align: str = "bottom-center", trim: bool = True,
            anchor: tuple[float, float] = (0.5, 1.0)) -> tuple[bytes, dict[str, Any]]:
     """把帧重排成一张等格的精灵表。返回 (PNG 字节, 帧数据)。
 
+    `sources` 是源图列表：单张精灵表只有一项；结果组每张图一项，帧用 `src` 指明取自哪张。
     每帧可带 `ox` / `oy` 偏移（像素），超出格子的部分被裁掉，不会画进相邻的格子。
     """
     if not frames or len(frames) > MAX_FRAMES:
@@ -146,6 +155,7 @@ def repack(image: Image.Image, frames: list[dict[str, Any]], *, columns: int, sp
         raise ValueError("排布参数不对")
     tiles, offsets = [], []
     for frame in frames:
+        image = _source_of(frame, sources)
         tile = image.crop(_frame_box(frame, image))
         if trim:
             box = _mask(tile).getbbox()

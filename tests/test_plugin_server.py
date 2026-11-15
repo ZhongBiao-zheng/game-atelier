@@ -435,3 +435,70 @@ def test_agent_call_does_not_run_on_the_event_loop_thread(sprite):
         await asyncio.to_thread(work)
     asyncio.run(main())
     assert len(seen["result"]["frames"]) == 4 and seen["thread"] != threading.main_thread().name
+
+
+
+# ── 精灵表接收结果组（每张图一帧）────────────────────────────────────────────────
+
+def sprite_group(project_id: str) -> list[str]:
+    """画布里放一个 3 帧的结果组，精灵表节点连封面；返回按组内顺序的版本。"""
+    from character_workflow.lib.canvas_projects import save_canvas_upload_batch
+    from character_workflow.lib.schemas import CanvasResultStack
+    document = read_canvas_document(project_id)
+    ids = ["frame-a", "frame-b", "frame-c"]
+    colors = [(229, 83, 75, 255), (82, 171, 105, 255), (70, 110, 220, 255)]
+
+    def frame(color):
+        image = Image.new("RGBA", (20, 24), (0, 0, 0, 0))
+        image.paste(Image.new("RGBA", (10, 16), color), (5, 8))
+        buffer = io.BytesIO()
+        image.save(buffer, "PNG")
+        return buffer.getvalue()
+
+    def nodes(versions):
+        built = [_media_node("image", node_id, f"帧 {index}", {"x": 0, "y": 400}, version.version_id)
+                 for index, (node_id, version) in enumerate(zip(ids, versions, strict=True), start=1)]
+        stack = CanvasResultStack(run_id="plugin:frames:test", member_node_ids=ids[1:])
+        built[0] = built[0].model_copy(update={"data": built[0].data.model_copy(update={"result_stack": stack})})
+        return built
+
+    save_canvas_upload_batch(project_id, [(".png", frame(color), "image") for color in colors],
+                             document.revision, nodes_factory=nodes)
+    document = read_canvas_document(project_id)
+    raw = document.model_dump(mode="json")
+    if any(node["id"] == "sheet-1" for node in raw["nodes"]):
+        raw["connections"] = [edge for edge in raw["connections"] if edge["target_node_id"] != "sheet-1"]
+        raw["connections"].append({"id": "c-group", "role": "input", "source_node_id": "frame-a",
+                                   "target_node_id": "sheet-1"})
+        save_canvas_document(project_id, CanvasDocument.model_validate(raw), document.revision)
+    nodes_by_id = {node.id: node for node in read_canvas_document(project_id).nodes}
+    return [nodes_by_id[node_id].data.current_version_id for node_id in ids]
+
+
+def test_sprite_sheet_repacks_a_result_stack_one_image_per_frame(client, sprite):
+    plugin_registry.set_enabled("sprite-sheet", True)
+    plugin_grants.grant(sprite, "sprite-sheet")
+    document = read_canvas_document(sprite)
+    raw = document.model_dump(mode="json")
+    raw["nodes"].append({
+        "id": "sheet-1", "type": "plugin", "title": "精灵表", "position": {"x": 400, "y": 0}, "z_index": 0,
+        "size": {"width": 360, "height": 300},
+        "data": {"plugin_id": "sprite-sheet", "node_type": "sheet", "plugin_version": "0.1.0",
+                 "data_schema_version": 1, "payload": {}, "generation_draft": None}})
+    save_canvas_document(sprite, CanvasDocument.model_validate(raw), document.revision)
+    versions = sprite_group(sprite)
+    response = post(client, "repack", sprite, node_id="sheet-1", inputs=versions, plugin="sprite-sheet",
+                    params={"columns": 3, "frame_data": True})
+    assert response.status_code == 200, response.text
+    result = response.json()["result"]
+    assert result["meta"]["cell"] == {"w": 10, "h": 16} and result["meta"]["columns"] == 3
+    assert [frame["x"] for frame in result["frames"]] == [0, 10, 20]
+
+
+def test_agent_repacks_listed_images_as_frames(sprite):
+    plugin_registry.set_enabled("sprite-sheet", True)
+    plugin_grants.grant(sprite, "sprite-sheet")
+    sprite_group(sprite)
+    text, _ = runtime.run_tool_safely(sprite, "plugin_sprite_sheet_repack",
+                                      {"image_node_ids": ["frame-c", "frame-a"], "columns": 2})
+    assert '"columns": 2' in text or '"columns":2' in text

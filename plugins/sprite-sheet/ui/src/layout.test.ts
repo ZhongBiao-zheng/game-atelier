@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import cases from '../../tests/layout_cases.json';
 import { anchorPoint, contentBox, layoutFrames, placements } from './layout';
-import { frameAnchor, gridFrames, moveFrame, nudgeFrame, parseState, setFrameAnchor } from './sheetState';
+import {
+  frameAnchor, framesMatchSources, gridFrames, groupFrames, moveFrame, nudgeFrame, parseState, setFrameAnchor,
+} from './sheetState';
 import type { Align } from './sheetState';
 
 describe('排布算法与服务端一致', () => {
@@ -99,5 +101,33 @@ describe('逐帧锚点', () => {
     const state = parseState({ frames: [{ x: 0, y: 0, w: 1, h: 1, ax: 2, ay: -1 }, { x: 0, y: 0, w: 1, h: 1, ax: 0.5 }] });
     expect(state.frames[0]).toMatchObject({ ax: 1, ay: 0 });
     expect(state.frames[1].ax).toBeUndefined();
+  });
+});
+
+describe('结果组作为帧来源', () => {
+  it('每张图一帧，按组内顺序标上来源', () => {
+    expect(groupFrames([{ width: 20, height: 24 }, { width: 18, height: 30 }])).toEqual([
+      { src: 0, x: 0, y: 0, w: 20, h: 24 }, { src: 1, x: 0, y: 0, w: 18, h: 30 },
+    ]);
+  });
+  it('来源字段读回来时校验范围；单张精灵表的旧数据没有来源', () => {
+    const state = parseState({ frames: [{ x: 0, y: 0, w: 4, h: 4, src: 2 }, { x: 0, y: 0, w: 4, h: 4, src: 99 },
+      { x: 0, y: 0, w: 4, h: 4 }] });
+    expect(state.frames.map(frame => frame.src)).toEqual([2, undefined, undefined]);
+  });
+  it('只有每帧都标了来源且在范围内，才算按这组源图建的帧', () => {
+    const frames = groupFrames([{ width: 4, height: 4 }, { width: 4, height: 4 }]);
+    expect(framesMatchSources(frames, 2)).toBe(true);
+    expect(framesMatchSources(frames, 1)).toBe(false);
+    expect(framesMatchSources([{ x: 0, y: 0, w: 4, h: 4 }], 2)).toBe(false);
+    expect(framesMatchSources([], 2)).toBe(false);
+  });
+  it('排布结果带上每帧的来源，裁边按各自的源图', () => {
+    const frames = groupFrames([{ width: 10, height: 10 }, { width: 10, height: 10 }]);
+    const boxes = [{ x: 2, y: 3, w: 4, h: 5 }, { x: 0, y: 0, w: 10, h: 10 }];
+    const layout = layoutFrames(frames, frame => boxes[frame.src ?? 0], { align: 'bottom-center', trim: true });
+    expect(layout.items.map(item => item.src)).toEqual([0, 1]);
+    expect(layout.items[0].source).toEqual({ x: 2, y: 3, w: 4, h: 5 });
+    expect([layout.cellW, layout.cellH]).toEqual([10, 10]);
   });
 });

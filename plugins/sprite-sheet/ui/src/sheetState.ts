@@ -1,6 +1,10 @@
 /** 节点里保存的精灵表设置。读到不认识的版本或坏数据时回落到默认值，不覆盖原数据直到用户改动。 */
-/** `ox` / `oy`：逐帧偏移（像素）。`ax` / `ay`：这一帧单独的锚点（0–1 比例），省略时用整表锚点。 */
-export interface Frame { x: number; y: number; w: number; h: number; ox?: number; oy?: number; ax?: number; ay?: number }
+/** `ox` / `oy`：逐帧偏移（像素）。`ax` / `ay`：这一帧单独的锚点（0–1 比例），省略时用整表锚点。
+ *  `src`：取自第几张源图（连的是结果组时每张图一帧），省略为 0。 */
+export interface Frame {
+  x: number; y: number; w: number; h: number; ox?: number; oy?: number; ax?: number; ay?: number; src?: number;
+}
+export const MAX_SOURCES = 65;
 export type Align = 'bottom-center' | 'center' | 'top-left';
 export interface Grid { columns: number; rows: number; margin: number; spacing: number }
 export interface SheetState {
@@ -34,7 +38,8 @@ const ratio = (value: unknown, fallback: number) => (isNumber(value) ? Math.min(
 function parseFrame(item: unknown): Frame[] {
   const frame = item as Partial<Frame> | null;
   if (!frame || ![frame.x, frame.y, frame.w, frame.h].every(isNumber) || frame.w! <= 0 || frame.h! <= 0) return [];
-  const parsed: Frame = { x: frame.x!, y: frame.y!, w: frame.w!, h: frame.h! };
+  const source = isNumber(frame.src) && Number.isInteger(frame.src) && frame.src > 0 && frame.src < MAX_SOURCES ? frame.src : 0;
+  const parsed: Frame = { x: frame.x!, y: frame.y!, w: frame.w!, h: frame.h!, ...(source || frame.src === 0 ? { src: source } : {}) };
   const ox = int(frame.ox, 0, -MAX_OFFSET, MAX_OFFSET);
   const oy = int(frame.oy, 0, -MAX_OFFSET, MAX_OFFSET);
   const withOffset = ox || oy ? { ...parsed, ox, oy } : parsed;
@@ -108,4 +113,14 @@ export function nudgeFrame(frames: readonly Frame[], index: number, dx: number, 
     const oy = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, (frame.oy ?? 0) + dy));
     return { ...frame, ox, oy };
   });
+}
+
+/** 结果组：每张图一帧（整张图，排之前再按 trim 裁透明边），按组内顺序。 */
+export function groupFrames(sizes: ReadonlyArray<{ width: number; height: number }>): Frame[] {
+  return sizes.map((size, src) => ({ src, x: 0, y: 0, w: size.width, h: size.height }));
+}
+
+/** 已有的帧是不是按这组源图建的：每帧都标了来源且来源都在范围内。 */
+export function framesMatchSources(frames: readonly Frame[], count: number): boolean {
+  return frames.length > 0 && frames.every(frame => frame.src !== undefined && frame.src < count);
 }
