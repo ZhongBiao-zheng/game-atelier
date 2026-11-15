@@ -1,0 +1,184 @@
+{
+  "manifest_version": 1,
+  "id": "pixel",
+  "name": "像素化",
+  "version": "0.1.0",
+  "description": "把图片转成像素画",
+  "icon": "pixel",
+  "publisher": {
+    "id": "atelier",
+    "name": "Atelier"
+  },
+  "sdk_version": "1",
+  "app_version": {
+    "min": "5.137.0"
+  },
+  "ui": {
+    "entry": "ui/index.html"
+  },
+  "capabilities": [
+    "node.read_self",
+    "node.write_self",
+    "resource.read_inputs",
+    "resource.create",
+    "server.call"
+  ],
+  "contributes": {
+    "nodes": [
+      {
+        "type": "pixelate",
+        "title": "像素化",
+        "icon": "pixel",
+        "default_size": {
+          "width": 320,
+          "height": 280
+        },
+        "min_size": {
+          "width": 240,
+          "height": 200
+        },
+        "payload_schema_version": 1,
+        "input_modalities": [
+          "image"
+        ],
+        "max_inputs": 1,
+        "surfaces": [
+          "node",
+          "panel"
+        ],
+        "expand_result_stack": true
+      }
+    ],
+    "image_actions": [
+      {
+        "id": "pixelate",
+        "label": "像素化",
+        "icon": "pixel",
+        "action": {
+          "kind": "create_node",
+          "node_type": "pixelate",
+          "open_panel": true
+        }
+      }
+    ],
+    "server": {
+      "module": "server",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/palette",
+          "access": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/preview",
+          "access": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/pixelate",
+          "access": "edit"
+        }
+      ]
+    },
+    "agent_tools": [
+      {
+        "name": "pixelate",
+        "description": "把图片转成像素画：降采样到目标像素网格、限制颜色数、透明度二值化，可按整数倍放大输出。多张时输出一个结果组。",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "image_node_ids"
+          ],
+          "properties": {
+            "image_node_ids": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 65,
+              "items": {
+                "type": "string"
+              },
+              "description": "要像素化的图片节点 id；多张时按顺序输出一个结果组，默认共用一个调色板"
+            },
+            "size_mode": {
+              "type": "string",
+              "enum": [
+                "long_edge",
+                "block"
+              ],
+              "description": "long_edge：按长边像素数；block：按几个原像素合成一格"
+            },
+            "long_edge": {
+              "type": "integer",
+              "minimum": 8,
+              "maximum": 512,
+              "description": "目标长边像素数，默认 64"
+            },
+            "block": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 64,
+              "description": "像素块大小，默认 8"
+            },
+            "downsample": {
+              "type": "string",
+              "enum": [
+                "mode",
+                "average"
+              ],
+              "description": "mode：格内主色（默认，像素画）；average：格内平均（照片类）"
+            },
+            "palette": {
+              "type": "object",
+              "description": "调色板，目前支持 {kind: 'auto', colors: 2–64}",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "auto"
+                  ]
+                },
+                "colors": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 64
+                }
+              }
+            },
+            "shared_palette": {
+              "type": "boolean",
+              "description": "多张时共用一个调色板，默认是"
+            },
+            "alpha_threshold": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 255,
+              "description": "透明度低于它的像素变成全透明，默认 128"
+            },
+            "upscale": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16,
+              "description": "输出按整数倍最近邻放大，默认 1"
+            },
+            "keep_original_size": {
+              "type": "boolean",
+              "description": "放大时另外输出实际像素尺寸的版本"
+            }
+          }
+        },
+        "read_only": false,
+        "route": "/pixelate"
+      }
+    ]
+  },
+  "files": [
+    {
+      "path": "ui/index.html",
+      "sha256": "55ce9570bd0e8a2c5ca803cab51bbeec26b2a99e7b5aac31ee4e82e44af97b8f",
+      "bytes": 158692
+    }
+  ],
+  "source": "bundled",
+  "digest": "sha256:e8da64e7ac835c20437ad29a059bc3d085176abea7612c7f588b44cd4ab798a1"
+}

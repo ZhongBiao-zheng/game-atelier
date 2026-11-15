@@ -1388,3 +1388,11 @@ multipart 里的数组值展开成同名重复字段。
 - 新能力 `generation.draft`（批准弹窗短语「准备生成任务」，「?」里说明「你点生成后才会计费」）。服务端模块 `ctx.create_generation_draft(prompt, first_node_id, last_node_id, title)` 用变更集一次提交：`add_surface`（video）+ `set_draft`（`frame_mode: "firstlast"` 加模型默认参数）+ 两条带 `slot` 的 `connect`。不创建 Job，不请求厂商。
 - 模型选择：画布视频默认偏好里指定了供应商与模型且该模型能做首尾帧时用它，否则按供应商顺序（默认供应商在前）取第一个能做首尾帧的视频模型。能做首尾帧的判定与参数取自 `video_caps.first_last_video_defaults`，只覆盖前后端判断一致的协议：Seedance（1.0 最短 2 秒、比例取最接近首帧的固定比例；1.5 与 2.x 最短 4 秒、`adaptive`；均 480p、`watermark: false`）、可灵旧接口（5 秒、最接近的比例）、可灵 3/4 系（`max_frames == 2` 的型号，最短时长与最低分辨率）。其余协议（HappyHorse、OpenRouter、自定义接口等）不替用户选。
 - 补间节点路由 `POST /tween_draft`（写，参数 `pair`、`prompt`）：对帧序列里第 `pair` 与 `pair+1` 帧建草稿，返回 `create_generation_draft` 的结果。
+
+### 像素化插件（`plugins/pixel`，X1）
+
+- 节点类型 `pixelate`「像素化」：收 1 张图片或 1 个结果组（`expand_result_stack`），图片工具栏「更多 → 像素化」建节点并打开面板。能力与精灵表调整相同，没有新增平台能力。
+- 节点数据（版本 1）：`{size_mode: "long_edge"|"block", long_edge (8–512), block (2–64), downsample: "mode"|"average", palette: {kind: "auto", colors (2–64)}, shared_palette, alpha_threshold (1–255), upscale (1–16), keep_original_size}`。
+- 算法只在服务端：目标网格按长边（不放大源图）或按块大小（四舍五入）；主色降采样取每格出现最多的调色板色，格内透明像素过半则该格透明；平均降采样按预乘 alpha 缩小后再量化；自动调色板为 Lab 空间 k-means（固定种子），只统计不透明像素，按亮度排序；映射走 5 位 RGB 查找表；输出 alpha 只有 0 / 255；放大为整数倍最近邻。
+- 路由：`POST /palette`（读）返回 `{colors}`；`POST /preview`（读，加 `frame`）返回 `{url, size, colors}`，`url` 是实际像素尺寸的 PNG data URL；`POST /pixelate`（写）单张输出一个图片节点、多张输出结果组（标题「<首张标题> 像素」），`upscale > 1` 且 `keep_original_size` 时另出一份实际像素尺寸（「… 原尺寸」），返回 `{node_id, member_node_ids?, frame_count, size, colors, original_node_id?}`。
+- Agent 工具 `plugin_pixel_pixelate`：参数 `image_node_ids`（1–65）加上述设置字段。
