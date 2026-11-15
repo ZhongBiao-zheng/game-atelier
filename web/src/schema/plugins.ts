@@ -6,7 +6,7 @@ export type PluginModality = 'text' | 'image' | 'video' | 'audio';
 export type PluginSurfaceKind = 'node' | 'panel';
 export type PluginCapability =
   | 'node.read_self' | 'node.write_self' | 'resource.read_inputs' | 'resource.create'
-  | 'storage.project' | 'server.call';
+  | 'storage.project' | 'server.call' | 'generation.draft';
 
 export interface PluginSize { width: number; height: number }
 

@@ -102,6 +102,17 @@ describe('插件节点内容区', () => {
     expect(network.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
   });
 
+  it('会准备生成任务的插件在批准时说清楚：点生成才计费', async () => {
+    server({});
+    const drafting = { ...manifest, capabilities: [...manifest.capabilities, 'generation.draft'] };
+    setPluginsSnapshot([entry({ manifest: drafting })]);
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: '允许' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('保存它自己的节点数据、准备生成任务。');
+    expect(await hoverHint(screen.getByRole('button', { name: '插件能做什么' }))).toHaveTextContent('你点生成后才会计费');
+  });
+
   it('取消确认不会批准', async () => {
     const network = server({});
     setPluginsSnapshot([entry()]);

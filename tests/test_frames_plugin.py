@@ -201,3 +201,26 @@ def test_agent_tweens_by_image_node_ids(project, client):
         "output": "new"})
     assert result["frame_count"] == 2 and len(created) == 2
     assert "plugin_frames_tween" in runtime.plugin_tools()
+
+
+def test_tween_draft_prepares_a_first_last_video_without_running_it(client, project):
+    from character_workflow.lib import keys
+    from character_workflow.lib.jobs import list_jobs
+    keys.write_keys_db(keys.KeysDB(keys=[keys.KeySpec(
+        alias="ark", provider="seedance", access_key="test-only-not-a-real-key", modalities=["video"],
+        models=[keys.ModelSpec(id="doubao-seedance-1-0-pro-250528", name="Seedance 1.0 Pro", modality="video",
+                               protocol="seedance")],
+        created_at="2026-11-15T00:00:00Z")]))
+    group = post(client, project, "extract", {"start": 0, "end": 12, "mode": "step", "step": 6}).json()["result"]
+    add_tween_node(project, group["node_id"])
+    versions = stack_versions(project, group["node_id"])
+    response = post_tween(client, project, "tween_draft", versions, {"pair": 1, "prompt": "平滑过渡"})
+    assert response.status_code == 200, response.text
+    result = response.json()["result"]
+    # 96×64（1.5）最接近 4:3；Seedance 1.0 最短 2 秒。
+    assert (result["model"], result["duration"], result["resolution"], result["ratio"]) == (
+        "doubao-seedance-1-0-pro-250528", 2, "480p", "4:3")
+    document = read_canvas_document(project)
+    slots = {edge.slot: edge.source_node_id for edge in document.connections if edge.target_node_id == result["node_id"]}
+    assert slots == {"first_frame": group["member_node_ids"][0], "last_frame": group["member_node_ids"][1]}
+    assert list_jobs() == []

@@ -26,7 +26,7 @@ Modality = Literal["text", "image", "video", "audio"]
 # 当前宿主实现的 capability。清单里出现其他值时插件判为「需要更高版本」，不是清单无效。
 SUPPORTED_CAPABILITIES = frozenset({
     "node.read_self", "node.write_self", "resource.read_inputs", "resource.create",
-    "storage.project", "server.call",
+    "storage.project", "server.call", "generation.draft",
 })
 SUPPORTED_SDK_VERSIONS = frozenset({"1"})
 

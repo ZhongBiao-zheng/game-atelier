@@ -66,3 +66,16 @@ export function ThumbButton({ label, selected = false, onClick, children }: {
   return <button type="button" className={selected ? 'thumb selected' : 'thumb'} aria-label={label} aria-pressed={selected}
     onClick={onClick}>{children}</button>;
 }
+
+export function TextAreaField({ label, value, rows = 3, onChange }: {
+  label: string; value: string; rows?: number; onChange: (value: string) => void;
+}) {
+  return <label className="field">{label}
+    <textarea className="input textarea" rows={rows} value={value} onChange={event => onChange(event.target.value)} />
+  </label>;
+}
+
+/** 「?」：规则说明放在悬停提示里，界面上不写解释段。 */
+export function HelpMark({ text }: { text: string }) {
+  return <span className="help" role="img" aria-label={text} title={text}>?</span>;
+}

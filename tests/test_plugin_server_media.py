@@ -232,3 +232,97 @@ def test_a_node_removed_from_the_stack_is_no_longer_an_input(client, root):
     save_canvas_document(project_id, CanvasDocument.model_validate(raw), document.revision)
     refused = post(client, "inputs", project_id, inputs=[versions["image-3"]])
     assert refused.status_code == 403 and refused.json()["detail"]["code"] == "INVALID_HANDLE"
+
+
+# ── 生成草稿（P4）─────────────────────────────────────────────────────────────────
+
+DRAFT_SERVER = '''
+def register(api):
+    @api.route("POST", "/draft")
+    def draft(ctx, params):
+        first, last = params["nodes"]
+        return ctx.create_generation_draft("从首帧过渡到尾帧", first, last)
+'''
+
+
+def write_keys(*models):
+    from character_workflow.lib import keys
+    keys.write_keys_db(keys.KeysDB(keys=[keys.KeySpec(
+        alias="ark", provider="seedance", access_key="test-only-not-a-real-key", modalities=["video"],
+        models=[keys.ModelSpec(id=model_id, name=model_id, modality="video", protocol=protocol)
+                for protocol, model_id in models],
+        created_at="2026-11-15T00:00:00Z",
+    )]))
+
+
+def draft_project(root, *, capabilities):
+    base = manifest()
+    node = {**base["contributes"]["nodes"][0], "input_modalities": ["image"], "max_inputs": 2}
+    write_plugin(root, server_source=DRAFT_SERVER, capabilities=capabilities,
+                 contributes={"nodes": [node], "server": {"module": "server", "routes": [
+                     {"method": "POST", "path": "/draft", "access": "edit"}]}})
+    plugin_registry.set_enabled("demo", True)
+    project_id, versions = project_with_media()
+    document = read_canvas_document(project_id)
+    version, _, _ = save_canvas_upload(
+        project_id, "b.png", "png", png(), "image", document.revision,
+        node_factory=lambda v: _media_node("image", "image-2", "尾帧", {"x": 0, "y": 0}, v.version_id))
+    versions["image-2"] = version.version_id
+    add_plugin_node(project_id, sources=("image-1", "image-2"))
+    plugin_grants.grant(project_id, "demo")
+    return project_id, versions
+
+
+def post_draft(client, project_id, versions, nodes=("image-1", "image-2")):
+    return post(client, "draft", project_id, inputs=[versions["image-1"], versions["image-2"]],
+                params={"nodes": list(nodes)})
+
+
+def test_generation_draft_creates_an_unrun_video_node_wired_to_both_frames(client, root):
+    write_keys(("dashscope", "happyhorse-1.0-i2v"), ("seedance", "doubao-seedance-1-5-pro-260428"))
+    project_id, versions = draft_project(root, capabilities=[*CAPS, "generation.draft"])
+    response = post_draft(client, project_id, versions)
+    assert response.status_code == 200, response.text
+    result = response.json()["result"]
+    # HappyHorse i2v 只能做首帧，被跳过；Seedance 1.5 取最短 4 秒、480p。
+    assert result == {"node_id": result["node_id"], "model": "doubao-seedance-1-5-pro-260428", "alias": "ark",
+                      "duration": 4, "resolution": "480p", "watermark": False, "ratio": "adaptive"}
+    document = read_canvas_document(project_id)
+    node = next(item for item in document.nodes if item.id == result["node_id"])
+    assert node.type == "video" and node.data.current_version_id is None and node.data.active_run_id is None
+    draft = node.data.generation_draft
+    assert (draft.mode, draft.model, draft.alias, draft.prompt) == ("video", "doubao-seedance-1-5-pro-260428", "ark", "从首帧过渡到尾帧")
+    assert (draft.params.duration, draft.params.resolution, draft.params.frame_mode, draft.params.watermark) == (
+        4, "480p", "firstlast", False)
+    slots = {edge.slot: edge.source_node_id for edge in document.connections if edge.target_node_id == node.id}
+    assert slots == {"first_frame": "image-1", "last_frame": "image-2"}
+    from character_workflow.lib.canvas_runs import prepare_canvas_generation
+    from character_workflow.lib.jobs import list_jobs
+    assert list_jobs() == [], "只建草稿，不提交任何任务"
+    # 用户点生成时走的同一道提交前校验（不写任务、不请求厂商）：首尾帧两张图都被认作输入。
+    prepared = prepare_canvas_generation(project_id, document, node)
+    assert (prepared.model.id, prepared.job_params.frame_mode) == ("doubao-seedance-1-5-pro-260428", "firstlast")
+    assert [item.source for item in prepared.inputs] == ["first_frame", "last_frame"]
+
+
+def test_generation_draft_needs_its_capability(client, root):
+    write_keys(("seedance", "doubao-seedance-1-5-pro-260428"))
+    project_id, versions = draft_project(root, capabilities=CAPS)
+    response = post_draft(client, project_id, versions)
+    assert response.status_code == 403 and response.json()["detail"]["code"] == "CAPABILITY_DENIED"
+
+
+def test_generation_draft_without_a_first_last_model_says_so(client, root):
+    write_keys(("dashscope", "happyhorse-1.0-i2v"))
+    project_id, versions = draft_project(root, capabilities=[*CAPS, "generation.draft"])
+    before = read_canvas_document(project_id).revision
+    response = post_draft(client, project_id, versions)
+    assert response.status_code == 422 and "没有可用的首尾帧视频模型" in response.text
+    assert read_canvas_document(project_id).revision == before
+
+
+def test_generation_draft_frames_must_be_connected_images(client, root):
+    write_keys(("seedance", "doubao-seedance-1-5-pro-260428"))
+    project_id, versions = draft_project(root, capabilities=[*CAPS, "generation.draft"])
+    response = post_draft(client, project_id, versions, nodes=("image-1", "video-1"))
+    assert response.status_code == 403 and response.json()["detail"]["code"] == "INVALID_HANDLE"

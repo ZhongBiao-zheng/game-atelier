@@ -1382,3 +1382,9 @@ multipart 里的数组值展开成同名重复字段。
 - 路由：`POST /tween_preview`（读，参数 `method`、`pair`、`t`，默认 0.5）返回 `{url, pairs}`，`url` 是长边 384 的中间帧 data URL；`POST /tween`（写）在每对相邻帧之间补 `between`（1–15）帧，`output` 为 `all` 时含原帧，总数最多 65；落成结果组（封面标题「<首帧标题> 补间」），返回 `{node_id, member_node_ids, frame_count}`，`sheet` / `frame_data` 与抽帧相同。第二帧尺寸不同时按第一帧等比缩放，宽高比差超过 1% 拒绝。
 - 算法：交叉淡化按预乘 alpha 线性混合；光流为 OpenCV DIS（MEDIUM 预设）双向估计，两帧各按 t 反向变形后线性混合，光流在合成到中性灰底的 RGB 上计算，RGBA 四通道用同一组光流变形。
 - Agent 工具 `plugin_frames_tween`：参数 `image_node_ids`（2–65 个，按播放顺序）加上述补间与输出字段。
+
+### 生成草稿（P4）与首尾帧补间（`plugins/frames`，F3）
+
+- 新能力 `generation.draft`（批准弹窗短语「准备生成任务」，「?」里说明「你点生成后才会计费」）。服务端模块 `ctx.create_generation_draft(prompt, first_node_id, last_node_id, title)` 用变更集一次提交：`add_surface`（video）+ `set_draft`（`frame_mode: "firstlast"` 加模型默认参数）+ 两条带 `slot` 的 `connect`。不创建 Job，不请求厂商。
+- 模型选择：画布视频默认偏好里指定了供应商与模型且该模型能做首尾帧时用它，否则按供应商顺序（默认供应商在前）取第一个能做首尾帧的视频模型。能做首尾帧的判定与参数取自 `video_caps.first_last_video_defaults`，只覆盖前后端判断一致的协议：Seedance（1.0 最短 2 秒、比例取最接近首帧的固定比例；1.5 与 2.x 最短 4 秒、`adaptive`；均 480p、`watermark: false`）、可灵旧接口（5 秒、最接近的比例）、可灵 3/4 系（`max_frames == 2` 的型号，最短时长与最低分辨率）。其余协议（HappyHorse、OpenRouter、自定义接口等）不替用户选。
+- 补间节点路由 `POST /tween_draft`（写，参数 `pair`、`prompt`）：对帧序列里第 `pair` 与 `pair+1` 帧建草稿，返回 `create_generation_draft` 的结果。

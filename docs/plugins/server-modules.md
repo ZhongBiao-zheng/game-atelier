@@ -44,6 +44,7 @@ def register(api) -> None:
 | `ctx.media_of_node(node_id, kinds)` | 按节点 id 取素材，只认 `kinds` 里的类型，只在 Agent 调用时可用 |
 | `ctx.image_of_node(node_id)` | 等于 `media_of_node(node_id, ("image",))` |
 | `ctx.create_image(png_bytes, title, beside_node_id=None)` | 把 PNG 落成画布上的普通图片节点，需要 `resource.create`，返回 `{node_id}` |
+| `ctx.create_generation_draft(prompt, first_node_id, last_node_id, title="首尾帧补间")` | 新建一个视频生成节点：首帧、尾帧槽分别连好，草稿填好提示词与参数，**不运行**；需要 `generation.draft`。模型取用户的默认视频模型（能做首尾帧时），否则按供应商顺序取第一个能做首尾帧的（Seedance、可灵）；时长与分辨率取最低档，Seedance 显式关水印。没有可用模型时报「没有可用的首尾帧视频模型」。界面发起时首尾帧必须是连到本节点的图片。返回 `{node_id, model, alias, duration, …}` |
 | `ctx.create_text(text, title, beside_node_id=None)` | 落成普通文本节点（正文 ≤ 40000 字符），需要 `resource.create` |
 | `ctx.create_image_group(pngs, title, beside_node_id=None)` | 把 1–65 张 PNG 一次提交落成一个结果组（封面 + 成员，与生成出多张时的结果组相同：可收起、成员是普通图片节点），需要 `resource.create`，返回 `{node_id, member_node_ids}`。单张 ≤ 64 MiB、合计 ≤ 256 MiB |
 
@@ -61,6 +62,6 @@ def register(api) -> None:
 
 ## 不能做的
 
-- 不能直接调用厂商接口或 Job Runner 内部函数：`check_product_plugins.py` 拒绝 `character_workflow.lib.callers` 与 `job_runner` 的导入。需要生成内容时，应提出生成草稿由用户确认后走 Canvas Run，这样成本统计、路由和网关配额才覆盖得到（界面侧的生成能力尚未开放）。
+- 不能直接调用厂商接口或 Job Runner 内部函数：`check_product_plugins.py` 拒绝 `character_workflow.lib.callers` 与 `job_runner` 的导入。需要生成内容时，用 `ctx.create_generation_draft` 建好草稿，由用户在节点上点生成，走 Canvas Run，这样成本统计、路由和网关配额才覆盖得到。
 - 第三方 Python 依赖只能写进根 `pyproject.toml`，安装包没有给单个插件装依赖的机制（取舍见 ADR-0037「插件的第三方 Python 依赖」）。已有可直接用的：Pillow、numpy、`opencv-python-headless`（视频解码、光流、模板匹配）。
 - 不要依赖当前工作目录；路径从 `ctx` 或模块自身位置取。

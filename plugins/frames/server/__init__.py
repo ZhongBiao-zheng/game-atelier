@@ -130,3 +130,16 @@ def register(api) -> None:
         result: dict = {"frame_count": len(images), **_sheet_outputs(ctx, images, title, beside, params)}
         group = ctx.create_image_group([video.png_bytes(image) for image in images], title, beside_node_id=beside)
         return {**group, **result}
+
+    @api.route("POST", "/tween_draft")
+    def tween_draft(ctx, params: dict) -> dict:
+        """用视频模型的首尾帧生成补间：只在画布上建好视频节点与草稿，用户点生成才提交计费任务。"""
+        sources = _sequence(ctx, params)
+        pair = _int_param(params, "pair", 0)
+        if not 0 <= pair < len(sources) - 1:
+            raise ValueError("没有这一对帧")
+        prompt = params.get("prompt")
+        if not isinstance(prompt, str):
+            raise ValueError("提示词不对")
+        return ctx.create_generation_draft(prompt, sources[pair].node_id, sources[pair + 1].node_id,
+                                           title=f"{sources[pair].title[:90]} 首尾帧补间")

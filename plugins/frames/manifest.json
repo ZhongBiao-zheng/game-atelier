@@ -21,7 +21,8 @@
     "node.write_self",
     "resource.read_inputs",
     "resource.create",
-    "server.call"
+    "server.call",
+    "generation.draft"
   ],
   "contributes": {
     "nodes": [
@@ -109,6 +110,11 @@
         {
           "method": "POST",
           "path": "/tween",
+          "access": "edit"
+        },
+        {
+          "method": "POST",
+          "path": "/tween_draft",
           "access": "edit"
         }
       ]

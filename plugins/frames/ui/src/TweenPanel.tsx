@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { PluginRpcError, type PluginClient, type PluginInput } from '../../../sdk';
-import { Button, Checkbox, NumberField, SelectField, ThumbButton } from './kit/controls';
+import { Button, Checkbox, HelpMark, NumberField, SelectField, TextAreaField, ThumbButton } from './kit/controls';
 import {
   DEFAULT_TWEEN, MAX_BETWEEN, MAX_OUTPUT, outputCount, parseTween, tweenSequence,
   type TweenMethod, type TweenOutput, type TweenState,
@@ -14,6 +14,8 @@ const OUTPUT_OPTIONS: ReadonlyArray<{ value: TweenOutput; label: string }> = [
   { value: 'all', label: '原帧 + 补出的帧' }, { value: 'new', label: '只要补出的帧' },
 ];
 const THUMB_EDGE = 256;
+const DEFAULT_PROMPT = '镜头固定，背景不变，角色从首帧的动作平滑过渡到尾帧的动作';
+const GENERATION_HELP = '用视频模型按首尾帧生成一段过渡视频，再用「视频抽帧」抽成序列帧。只建好视频节点，点节点上的生成才会计费。视频画面不透明，透明底会丢失；可能带镜头运动。';
 const PREVIEW_DELAY = 300;
 const message = (error: unknown) => (error instanceof PluginRpcError && error.code === 'SERVER_ERROR' ? error.message : '处理失败，请重试');
 
@@ -39,6 +41,7 @@ export function TweenPanel({ client }: { client: PluginClient }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const latest = useRef(state);
 
   useEffect(() => {
@@ -104,6 +107,20 @@ export function TweenPanel({ client }: { client: PluginClient }) {
     }
   };
 
+  const prepare = async () => {
+    setBusy(true);
+    setError(null);
+    setDone(null);
+    try {
+      await client.server.call('/tween_draft', { pair: pairIndex, prompt }, handles);
+      setDone('已建好视频节点，点它上面的生成才会计费');
+    } catch (cause) {
+      setError(message(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!inputs) return <div className="panel"><div className="empty">{error ?? '读取中'}</div></div>;
   if (!sequence || sequence.kind === 'none') {
     return <div className="panel"><div className="empty">连接两张图片，或一个结果组</div></div>;
@@ -141,6 +158,11 @@ export function TweenPanel({ client }: { client: PluginClient }) {
         <SelectField label="输出" value={state.output} options={OUTPUT_OPTIONS} onChange={output => save({ output })} />
         {sequence.kind === 'pair' && <Checkbox label="交换首尾" checked={state.swap} onChange={swap => save({ swap })} />}
         <p className="count">{items.length} 帧 → {total} 帧</p>
+      </section>
+      <section className="group">
+        <h2 className="with-help">视频模型 <HelpMark text={GENERATION_HELP} /></h2>
+        <TextAreaField label={`第 ${pairIndex + 1}–${pairIndex + 2} 帧之间`} value={prompt} onChange={setPrompt} />
+        <Button disabled={busy || !prompt.trim()} onClick={() => void prepare()}>准备生成</Button>
       </section>
       <section className="group">
         <h2>输出</h2>

@@ -66,6 +66,7 @@ const off = client.on('node.changed', () => {});  // 也有 'inputs.changed'、'
 | `resource.create` | 服务端模块新建画布节点（`create_image`、`create_text`） |
 | `storage.project` | 项目级插件状态（已定义，宿主尚未开放接口） |
 | `server.call` | `server.call` |
+| `generation.draft` | 服务端模块用 `ctx.create_generation_draft` 在画布上新建生成节点并填好草稿（不运行，用户点生成才计费） |
 
 清单声明了宿主不认识的能力，插件显示为「需要更高版本的 Atelier」。
 

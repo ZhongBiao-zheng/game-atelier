@@ -21,7 +21,8 @@
     "node.write_self",
     "resource.read_inputs",
     "resource.create",
-    "server.call"
+    "server.call",
+    "generation.draft"
   ],
   "contributes": {
     "nodes": [
@@ -109,6 +110,11 @@
         {
           "method": "POST",
           "path": "/tween",
+          "access": "edit"
+        },
+        {
+          "method": "POST",
+          "path": "/tween_draft",
           "access": "edit"
         }
       ]
@@ -283,10 +289,10 @@
   "files": [
     {
       "path": "ui/index.html",
-      "sha256": "b625c0fa3a0fd7d8d7a3c3d5c6d63cd2e07422f55392a3d98357fb7b86d7eff7",
-      "bytes": 166114
+      "sha256": "466d45a68afc12034b9e075f717ee59d9d434ad9f6f9058eb2c2dc5381a8a0c0",
+      "bytes": 167556
     }
   ],
   "source": "bundled",
-  "digest": "sha256:bfe9f0fbcf5c1d9da0f2f3a64d053f7d0ca0cdb8720095f176cc9140eceab2f3"
+  "digest": "sha256:f40394bee4de0b9e9bda2df0b38356c500d79c0ce341bf0ac022b420b9f9bf2a"
 }

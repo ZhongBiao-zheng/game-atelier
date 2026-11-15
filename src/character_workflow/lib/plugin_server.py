@@ -111,6 +111,31 @@ class PluginRequest:
         self.created_node_ids.extend(node_ids)
         return {"node_id": node_ids[0], "member_node_ids": node_ids[1:]}
 
+    def create_generation_draft(self, prompt: str, first_node_id: str, last_node_id: str,
+                                title: str = "首尾帧补间") -> dict:
+        """在画布上新建一个视频生成节点：首帧、尾帧槽分别连好，草稿填好提示词与参数，**不运行**。
+
+        用户在节点上点生成才会提交，计费、成本统计、路由与网关配额都走 Canvas Run。模型取用户的
+        默认视频模型（能做首尾帧时），否则取第一个能做首尾帧的视频模型；时长与分辨率取最低档。
+        """
+        if "generation.draft" not in self.capabilities:
+            raise PluginError("CAPABILITY_DENIED", "本项目没有允许这项能力", status=403)
+        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 2000:
+            raise PluginError("BAD_REQUEST", "提示词不能为空，最多 2000 字", status=422)
+        frames = []
+        for node_id in (first_node_id, last_node_id):
+            if self.origin == "agent":
+                frames.append(self.image_of_node(node_id))
+                continue
+            image = next((item for item in self.inputs if item.kind == "image" and item.node_id == node_id), None)
+            if image is None:
+                raise PluginError("INVALID_HANDLE", "首尾帧要是连到本节点的图片", status=403)
+            frames.append(image)
+        node_id = _create_generation_draft(self.project_id, prompt.strip(), frames, title,
+                                           self.node_id or frames[-1].node_id)
+        self.created_node_ids.append(node_id["node_id"])
+        return node_id
+
     def create_text(self, text: str, title: str, beside_node_id: str | None = None) -> dict:
         """把一段文本落成画布上的普通文本节点，返回 `{node_id}`。"""
         if "resource.create" not in self.capabilities:
@@ -118,6 +143,69 @@ class PluginRequest:
         node_id = _create_text_node(self.project_id, text, title, beside_node_id or self.node_id)
         self.created_node_ids.append(node_id)
         return {"node_id": node_id}
+
+
+def _first_last_video_model(width: int, height: int) -> tuple[str, str, dict]:
+    """首尾帧补间用哪个视频模型：默认视频模型能做首尾帧就用它，否则按供应商顺序取第一个能做的。"""
+    from character_workflow.lib.canvas_ui import read_canvas_ui_preferences
+    from character_workflow.lib.keys import model_modality, read_keys_db
+    from character_workflow.lib.video_caps import first_last_video_defaults
+    database = read_keys_db()
+    keys = sorted([key for key in database.keys if key.enabled],
+                  key=lambda key: 0 if key.alias == database.default_alias else 1)
+    candidates = [(key, model) for key in keys for model in key.models if model_modality(model, key) == "video"]
+    try:
+        selection = read_canvas_ui_preferences().generation_defaults.video.selection
+    except Exception:  # noqa: BLE001 - 偏好文件读不出时按供应商顺序挑，不挡住插件
+        selection = None
+    if selection is not None and selection.alias is not None:
+        preferred = [(key, model) for key, model in candidates
+                     if key.alias == selection.alias and model.id == selection.model]
+        candidates = preferred + [item for item in candidates if item not in preferred]
+    for key, model in candidates:
+        params = first_last_video_defaults(model.protocol, model.id, width, height)
+        if params is not None:
+            return key.alias, model.id, params
+    raise PluginError("NO_MODEL", "没有可用的首尾帧视频模型，请先在设置里添加", status=422)
+
+
+def _create_generation_draft(project_id: str, prompt: str, frames: list, title: str,
+                             beside_node_id: str | None) -> dict:
+    """新建视频节点、填草稿、连首尾帧槽，一次变更集提交（与 Agent 同一个入口，校验只有一份）。"""
+    from types import SimpleNamespace
+
+    from character_workflow.lib import canvas_agent_tools as tools
+    from character_workflow.lib.canvas_agent_layout import _locked_size
+    from character_workflow.lib.canvas_agent_schema import ApplyChangesInput
+    from character_workflow.lib.canvas_projects import read_canvas_document
+    from character_workflow.lib.canvas_tool_common import CanvasToolError
+    first, last = frames
+    alias, model, params = _first_last_video_model(first.width or 1, first.height or 1)
+    node_id = f"video-{secrets.token_hex(6)}"
+    principal = SimpleNamespace(kind="local", session_id="plugin", grant_id=None)
+    for attempt in range(3):
+        document = read_canvas_document(project_id)
+        rect = _free_spot(document, beside_node_id, *_locked_size(None, first.width, first.height))
+        try:
+            tools.apply_changes(principal, ApplyChangesInput(
+                project_id=project_id, expected_revision=document.revision, changes=[
+                    {"op": "add_surface", "kind": "video", "title": title[:120], "node_id": node_id,
+                     "position": {"x": rect.x, "y": rect.y}},
+                    # frame_mode 必须写明：服务端只在首尾帧模式下接受 first_frame / last_frame 槽的连线。
+                    {"op": "set_draft", "node_id": node_id, "mode": "video", "prompt": prompt,
+                     "model": model, "alias": alias, "params": {**params, "frame_mode": "firstlast"}},
+                    {"op": "connect", "source_node_id": first.node_id, "target_node_id": node_id,
+                     "slot": "first_frame"},
+                    {"op": "connect", "source_node_id": last.node_id, "target_node_id": node_id,
+                     "slot": "last_frame"},
+                ]))
+            return {"node_id": node_id, "model": model, "alias": alias, **params}
+        except CanvasToolError as error:
+            if error.code != "DOCUMENT_CONFLICT" or attempt == 2:
+                raise PluginError(error.code, error.message, status=error.status) from error
+        except ValueError as error:
+            raise PluginError("INVALID_TARGET", str(error)[:200], status=422) from error
+    raise PluginError("DOCUMENT_CONFLICT", "画布正在变化，请重试", status=409)
 
 
 def _create_text_node(project_id: str, text: str, title: str, beside_node_id: str | None) -> str:

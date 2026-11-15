@@ -27,6 +27,7 @@ const CAPABILITY_PHRASES: Array<[string, string]> = [
   ['resource.read_inputs', '读取连到它的素材内容'],
   ['resource.create', '在画布上新建内容'],
   ['node.write_self', '保存它自己的节点数据'],
+  ['generation.draft', '准备生成任务'],
 ];
 function capabilitySentence(capabilities: readonly string[]): string {
   const phrases = CAPABILITY_PHRASES.filter(([capability]) => capabilities.includes(capability)).map(([, phrase]) => phrase);
@@ -37,6 +38,7 @@ function capabilityDetail(capabilities: readonly string[]): string {
   const lines = ['插件在隔离环境里运行，读不到其他节点、其他项目和你的密钥。'];
   if (capabilities.includes('resource.read_inputs')) lines.push('你连到它的素材，它能读到完整内容（包括已隐藏的节点）。');
   if (capabilities.includes('server.call')) lines.push('它会把这些素材交给本机上自己的处理模块。');
+  if (capabilities.includes('generation.draft')) lines.push('它能在画布上新建生成节点并填好提示词；你点生成后才会计费。');
   return lines.join('');
 }
 

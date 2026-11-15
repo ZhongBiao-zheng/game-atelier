@@ -139,3 +139,40 @@ def kling_spec(model: str) -> KlingSpec | None:
         return KlingSpec("Kling 3.0", "v1", ("text2video", "image2video"), 15,
                          ("720p", "1080p", "4k"), _KLING_3_RATIOS, 2, True, 0, 0)
     return None
+
+
+# ── 首尾帧补间的默认参数（序列帧插件的生成草稿用）────────────────────────────────────
+# 只覆盖前后端对「能做首尾帧」判断一致的协议，取值与 web/src/lib/videoControlCaps.ts 同一张表：
+# 不在这里的模型，插件不替用户选（前端遇到 maxFrames < 2 的模型会断开首尾帧连线）。
+_SEEDANCE_FIXED_RATIOS = ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9")
+_KLING_LEGACY_RATIOS = ("16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3")
+
+
+def _ratio_value(ratio: str) -> float:
+    width, height = ratio.split(":")
+    return int(width) / int(height)
+
+
+def nearest_ratio(width: int, height: int, ratios: tuple[str, ...]) -> str:
+    target = width / height if width > 0 and height > 0 else 1.0
+    return min(ratios, key=lambda ratio: abs(_ratio_value(ratio) - target))
+
+
+def first_last_video_defaults(protocol: str | None, model: str, width: int, height: int) -> dict | None:
+    """这个视频模型能否做首尾帧；能的话给出最省钱的一组参数（最短时长、最低分辨率、贴近首帧的比例）。"""
+    normalized = (model or "").lower().replace("_", "-").replace(".", "-")
+    if protocol == "seedance":
+        legacy = "1-0" in normalized  # 1.0 系最短 2 秒、比例里没有 adaptive；1.5 与 2.x 最短 4 秒
+        # watermark 显式写 false：Ark 不传时默认打水印，而画布界面把「未设置」显示成关闭。
+        return {"duration": 2 if legacy else 4, "resolution": "480p", "watermark": False,
+                "ratio": nearest_ratio(width, height, _SEEDANCE_FIXED_RATIOS) if legacy else "adaptive"}
+    if protocol == "kling":
+        ratios = ("16:9", "9:16", "1:1") if "o1" in normalized else _KLING_LEGACY_RATIOS
+        return {"duration": 5, "ratio": nearest_ratio(width, height, ratios)}
+    if protocol in ("klingai", "evolink"):
+        spec = kling_spec(model)
+        if spec is None or spec.max_frames < 2:
+            return None
+        return {"duration": spec.min_duration, "resolution": spec.resolutions[0],
+                "ratio": nearest_ratio(width, height, spec.ratios)}
+    return None
