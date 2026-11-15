@@ -4,7 +4,8 @@ import type { KeyView } from '@/api/keys';
 import type { ModelDeclared } from '@/schema/httpProtocols';
 import { ModelPickerList } from './ModelPickerList';
 
-vi.mock('@/lib/useModelPickerMetrics', () => ({ useModelPickerMetrics: () => ({ durations: {}, prices: {} }) }));
+const metrics = vi.hoisted(() => ({ prices: {} as Record<string, number | null> }));
+vi.mock('@/lib/useModelPickerMetrics', () => ({ useModelPickerMetrics: () => ({ durations: {}, prices: metrics.prices }) }));
 
 const DECLARED: ModelDeclared = {
   available: true, error: null, name: '接口', kind: 'image', ratios: ['1:1'], resolutions: null,
@@ -31,4 +32,16 @@ it('marks custom-interface models with their provider and as unpriced', () => {
   const plain = options.find(option => option !== marked)!;
   expect(plain.textContent).not.toContain('自定义');
   expect(plain.textContent).not.toContain('未计价');
+});
+
+it('shows audio unit prices per thousand characters or per song', () => {
+  const td: KeyView = { ...key('TD', [
+    { id: 'minimax-speech-2.8-turbo', name: 'Speech', modality: 'audio', protocol: 'minimax-t2a' },
+    { id: 'yc-song-4.0', name: 'Song', modality: 'audio', protocol: 'yinchao-song' },
+  ]), provider: 'tokendance' };
+  metrics.prices = { 'TD:minimax-speech-2.8-turbo': 0.16, 'TD:yc-song-4.0': 0.22 };
+  render(<ModelPickerList selected="" onSelect={vi.fn()} choices={td.models.map(model => ({ key: td, model }))} />);
+  expect(within(screen.getByRole('option', { name: 'Speech' })).getByText('0.16¥/千字')).toBeInTheDocument();
+  expect(within(screen.getByRole('option', { name: 'Song' })).getByText('0.22¥/首')).toBeInTheDocument();
+  metrics.prices = {};
 });

@@ -6,14 +6,16 @@ import type { JobParams } from '@/schema/jobs';
 export interface ModelPickerChoice { key: KeyView; model: KeyModel }
 type Metrics = Record<string, number | null>;
 type Params = Partial<Record<'image' | 'video', JobParams>>;
+// 音频返回单价（语音每千字、音乐每首），与参数无关。
+const PRICED_KINDS = ['image', 'video', 'audio'] as const;
 const DURATION_TTL = 60_000;
 let durationCache: { values: Metrics; at: number } | undefined;
 let durationRequest: Promise<Metrics> | undefined;
 const priceCache = new Map<string, { values?: Metrics; pending?: Promise<Metrics> }>();
 
 function requestKey(choices: ModelPickerChoice[], params: Params) {
-  return JSON.stringify((['image', 'video'] as const).map(kind => ({
-    kind, params: { ...params[kind], n: 1 },
+  return JSON.stringify(PRICED_KINDS.map(kind => ({
+    kind, params: kind === 'audio' ? {} : { ...params[kind], n: 1 },
     items: choices.filter(choice => modelModality(choice.model, choice.key) === kind)
       .map(choice => ({ alias: choice.key.alias, model: choice.model.id })),
   })).filter(batch => batch.items.length));

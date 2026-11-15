@@ -141,6 +141,7 @@ import {
   CANVAS_MAX_NODE_SIZE,
   canvasGenerateBlock,
   canvasGenerationModelSupportsMode,
+  canvasAudioFamily,
   canvasVideoEditCaps,
   normalizeCanvasAudioParams,
   normalizeCanvasImageParams,
@@ -2207,10 +2208,14 @@ export function CanvasGenerationComposer({
 }) {
   const editingExistingVideo = draft.mode === 'video'
     && Boolean(context.mentionReferencesByNodeId.get(node.id)?.some(reference => reference.kind === 'video'));
-  const acceptsModel = (model: KeyView['models'][number], key: KeyView) => (
-    canvasGenerationModelSupportsMode(key, model, draft.mode, { editingExistingVideo })
-  );
   const providers = context.generationProviders ?? context.keys;
+  // 语音节点与音乐节点同为音频节点：按当前模型所属的族只列本族模型（没有选中模型时不限）。
+  const draftKey = draft.mode === 'audio' ? providerForAlias(providers, draft.alias) : undefined;
+  const draftModel = draftKey?.models.find(candidate => candidate.id === draft.model);
+  const audioFamily = draftKey && draftModel ? canvasAudioFamily(draftKey, draftModel) ?? undefined : undefined;
+  const acceptsModel = (model: KeyView['models'][number], key: KeyView) => (
+    canvasGenerationModelSupportsMode(key, model, draft.mode, { editingExistingVideo, audioFamily })
+  );
   const availableKeys = providers.filter(key => key.models.some(model => acceptsModel(model, key)));
   const modelChoices: CanvasModelChoice[] = availableKeys.flatMap(key => key.models
     .filter(model => acceptsModel(model, key))

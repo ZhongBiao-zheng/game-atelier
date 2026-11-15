@@ -27,7 +27,8 @@ class PricingBatchItem(BaseModel):
 
 
 class PricingBatchRequest(BaseModel):
-    kind: Literal["image", "video"]
+    # 音频返回单价：语音每千字、音乐每首（模型菜单展示用）。
+    kind: Literal["image", "video", "audio"]
     params: JobParams = Field(default_factory=JobParams)
     items: list[PricingBatchItem] = Field(max_length=500)
 

@@ -1025,6 +1025,45 @@ it('records audio setting changes but ignores the selected voice', () => {
   expect(recordHistory).toHaveBeenCalledOnce();
 });
 
+it('lists only the node family models: speech on a voice node, music on a music node', async () => {
+  const td = {
+    alias: 'td', provider: 'tokendance', base_url: null, access_key: '***', secret_key: null,
+    capabilities: [], notes: '', created_at: '2026-11-15T00:00:00Z',
+    models: [
+      { id: 'minimax-speech-2.8-turbo', name: 'Speech 2.8 Turbo', modality: 'audio' as const, protocol: 'minimax-t2a' },
+      { id: 'seed-tts-2.0', name: 'Seed TTS 2.0', modality: 'audio' as const, protocol: 'ark-tts' },
+      { id: 'yc-song-4.0', name: 'Song V4.0', modality: 'audio' as const, protocol: 'yinchao-song' },
+    ],
+  };
+  const audioNode = (model: string) => ({
+    ...generationNodes[3][0],
+    data: {
+      ...generationNodes[3][0].data,
+      generation_draft: { ...draft, mode: 'audio' as const, alias: 'td', model, params: {} },
+    },
+  }) as CanvasNode;
+  const { unmount } = render(
+    <CanvasNodeContext.Provider value={nodeContext({ keys: [td] })}>
+      <NodeCard data={{ domain: audioNode('minimax-speech-2.8-turbo') }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
+  await act(async () => {});
+  expect(screen.getAllByRole('option').map(option => option.getAttribute('aria-label')))
+    .toEqual(expect.arrayContaining(['Speech 2.8 Turbo', 'Seed TTS 2.0']));
+  expect(screen.queryByRole('option', { name: 'Song V4.0' })).not.toBeInTheDocument();
+  unmount();
+
+  render(
+    <CanvasNodeContext.Provider value={nodeContext({ keys: [td] })}>
+      <NodeCard data={{ domain: audioNode('yc-song-4.0') }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
+  await act(async () => {});
+  expect(screen.getAllByRole('option').map(option => option.getAttribute('aria-label'))).toEqual(['Song V4.0']);
+});
+
 it('undoes and redoes image parameter changes as atomic history entries', () => {
   const imageKey = {
     alias: 'image-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,

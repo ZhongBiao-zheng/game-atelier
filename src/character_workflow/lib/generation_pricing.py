@@ -333,14 +333,36 @@ def estimate_text_cost_cny(
     return _priced((input_tokens * rate["input"] + output_tokens * rate["output"]) / 1_000_000)
 
 
+AUDIO_UNIT_CHARACTERS = 1000
+
+
+def audio_unit_cost_cny(key, model) -> float | None:
+    """模型菜单与「最便宜」排序用的音频单价：语音每千字、音乐每首。"""
+    from character_workflow.lib.audio_caps import audio_caps
+
+    caps = audio_caps(key, model)
+    if caps is None:
+        return None
+    common = {"kind": "audio", "provider": key.provider, "base_url": key.base_url,
+              "model_id": model.id, "protocol": model.protocol}
+    if caps.family == "music":
+        return estimate_cost_cny(**common, n=1)
+    return estimate_cost_cny(**common, text_length=AUDIO_UNIT_CHARACTERS)
+
+
 def estimate_submission(key, model_id: str, kind: str, params: dict) -> float | None:
-    """Use the same frozen size intent as submission, without creating a job."""
+    """Use the same frozen size intent as submission, without creating a job.
+
+    音频没有文本就没有总价，这里返回单价（见 audio_unit_cost_cny）。
+    """
     from character_workflow.lib.image_size import normalize_image_size_params
     from character_workflow.lib.keys import size_channel
 
     model = next((item for item in key.models if item.id == model_id), None)
     if model is None:
         return None
+    if kind == "audio":
+        return audio_unit_cost_cny(key, model)
     key, model = size_channel(key, model)
     model_id = model.id
     try:
