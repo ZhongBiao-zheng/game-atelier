@@ -1,6 +1,8 @@
 import { AnnotationFullscreen } from './annotation/AnnotationFullscreen';
 import { PluginNodeBody, type PluginNodeInput } from '@/plugin-host/PluginNodeBody';
 import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
+import { isStoryboardNode } from '@/lib/canvasStoryboard';
+import { StoryboardNodeBody, requestStoryboardEdit, type StoryboardHost } from './storyboard/StoryboardNodeBody';
 import type { PluginMediaAction, PluginPackageLock } from '@/schema/plugins';
 import { pluginIcon } from '@/components/ui/icons';
 import { useAnnotationEditor } from './annotation/useAnnotationEditor';
@@ -199,6 +201,8 @@ export interface CanvasNodeContextValue {
   mentionReferencesByNodeId: ReadonlyMap<string, readonly CanvasMentionReference[]>;
   /** 按 version_id 取内容。常量引用，不随版本表变化——原因见 CanvasEditor 里的说明。 */
   resolveVersion: (versionId: string | null | undefined) => CanvasContentVersion | undefined;
+  /** 按 id 取当前文档里的节点。常量引用，同 resolveVersion。 */
+  findNode?: (id: string) => CanvasNode | undefined;
   keys: KeyView[];
   /** 生成节点选模型用：「自动」+ 真实 KEY。缺省时只有真实 KEY。 */
   generationProviders?: KeyView[];
@@ -292,6 +296,15 @@ export interface CanvasNodeContextValue {
   editVideo: (node: CanvasContentNode) => void;
   saveImageToolbarPreferences: (value: CanvasImageToolbarPreferences) => Promise<void>;
   deleteNode: (id: string) => void;
+}
+
+/** 分镜节点（宿主内置，ADR-0038）只拿它用得到的这几项，不经过插件批准与沙箱。 */
+function storyboardHost(context: CanvasNodeContextValue): StoryboardHost {
+  return {
+    projectId: context.projectId, findNode: context.findNode ?? (() => undefined),
+    resolveVersion: context.resolveVersion, updateNode: context.updateNode, recordHistory: context.recordHistory,
+    selectNode: context.selectNode, reportError: context.reportError,
+  };
 }
 
 export const CanvasNodeContext = createContext<CanvasNodeContextValue | null>(null);
@@ -1011,7 +1024,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           {node.type === 'compare' && <CanvasCompareNodeBody node={node} context={context} bitmapWidth={imageBitmapWidth} />}
           {node.type === 'image_edit' && <CanvasImageEditSurface node={node} projectId={context.projectId}
             source={context.resolveVersion(node.data.source_version_id) as CanvasMediaVersion | undefined} />}
-          {node.type === 'plugin' && (
+          {isStoryboardNode(node) && <StoryboardNodeBody node={node} host={storyboardHost(context)} />}
+          {node.type === 'plugin' && !isStoryboardNode(node) && (
             <PluginNodeBody node={node} projectId={context.projectId} selected={Boolean(selected)}
               inputs={context.pluginInputsByNodeId?.get(node.id) ?? EMPTY_PLUGIN_INPUTS}
               resolveVersion={context.resolveVersion} updateNode={context.updateNode} recordHistory={context.recordHistory}
@@ -1593,6 +1607,10 @@ function CanvasNodeToolbar({
   const [downloadingLayers, setDownloadingLayers] = useState<CanvasLayerExportFormat | null>(null);
   const layersReady = node.type === 'layer_stack' && Boolean(node.data.base_version_id)
     && !node.data.active_run_id && !submitting;
+
+  if (isStoryboardNode(node)) return (
+    <MediaToolButton label={`编辑 ${node.title}`} text="编辑" onClick={() => requestStoryboardEdit(node.id)}><EditIcon /></MediaToolButton>
+  );
 
   if (node.type === 'image_edit') return <>
     <MediaToolButton label={`编辑 ${node.title}`} text="编辑" onClick={() => context.openImageEdit?.(node.id)}>{node.data.options.mode === 'outpaint' ? <OutpaintIcon /> : <BrushIcon />}</MediaToolButton>

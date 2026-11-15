@@ -21,7 +21,7 @@ HTTP 端点 `POST /api/canvas-agent/<op>`，请求体 JSON ≤ 1 MiB，参数包
 | 工具 | 输入 → 结果 | 能力 |
 | --- | --- | --- |
 | `canvas_list_projects` | `{}` → 授权画布 id / 名称 | canvas_read |
-| `canvas_get_document` | project_id → revision、节点（类型 / 标题 / 位置 / 文本 ≤4000 字 / draft / 版本）、输入与派生连线、媒体版本 | canvas_read |
+| `canvas_get_document` | project_id → revision、节点（类型 / 标题 / 位置 / 文本 ≤4000 字 / draft / 版本；分镜节点另带只读的 `storyboard` 镜头摘要）、输入与派生连线、媒体版本 | canvas_read |
 | `canvas_list_models` | project_id、mode(image/video) → 可用 alias / model / 能力 | canvas_read |
 | `canvas_apply_changes` | project_id、expected_revision、changes[] → 新 revision、新建 id | canvas_edit |
 | `canvas_import_media` | project_id、expected_revision、本机绝对路径、title?、position? → version_id、node_id、revision | canvas_edit |

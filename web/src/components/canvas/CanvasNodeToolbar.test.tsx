@@ -16,6 +16,7 @@ import { DEFAULT_CANVAS_UI_PREFERENCES } from './canvasImageToolbar';
 import type { CanvasNode } from '@/schema/canvas';
 import type { PluginPackageLock } from '@/schema/plugins';
 import { setPluginsSnapshot } from '@/plugin-host/registry';
+import { createStoryboardNode } from '@/lib/canvasStoryboard';
 import spriteLock from '../../../../plugins/sprite-sheet/package/manifest.lock.json';
 
 vi.mock('@/api/canvas', async importOriginal => ({
@@ -1014,4 +1015,32 @@ it('treats a double-click on a button inside a node as two clicks, not a node pr
   // 拆分节点本身双击也不进详情。
   fireEvent.doubleClick(screen.getByRole('group', { name: /选择节点 拆分图层/ }));
   expect(context.previewLayerStack).not.toHaveBeenCalled();
+});
+
+it('renders the built-in storyboard node without plugin approval or sandbox', () => {
+  const fetchSpy = vi.spyOn(globalThis, 'fetch');
+  const node = createStoryboardNode('plugin-storyboard', { x: 0, y: 0 });
+  render(
+    <CanvasNodeContext.Provider value={nodeContext()}>
+      <NodeCard data={{ domain: node }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+  expect(screen.getByText('双击添加镜头')).toBeInTheDocument();
+  expect(screen.queryByText('未安装此插件')).toBeNull();
+  expect(document.querySelector('iframe')).toBeNull();
+  expect(fetchSpy).not.toHaveBeenCalled();
+  fetchSpy.mockRestore();
+});
+
+it('opens the storyboard editor from the node toolbar', () => {
+  const node = createStoryboardNode('plugin-storyboard-edit', { x: 0, y: 0 });
+  render(
+    <CanvasNodeContext.Provider value={nodeContext()}>
+      <NodeCard data={{ domain: node }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+  const toolbar = screen.getByRole('toolbar', { name: '分镜 节点工具' });
+  expect(within(toolbar).queryByRole('button', { name: /查看/ })).toBeNull();
+  fireEvent.click(within(toolbar).getByRole('button', { name: '编辑 分镜' }));
+  expect(within(screen.getByRole('dialog')).getByRole('button', { name: '添加镜头' })).toBeInTheDocument();
 });

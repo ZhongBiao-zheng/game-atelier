@@ -167,6 +167,7 @@ export const WarningIcon = defineIcon(Huge.Alert02Icon, 'warning');
 export const WorkflowIcon = defineIcon(Huge.WorkflowSquare03Icon, 'workflow');
 
 /** 产品内插件（设置页「插件」、缺失占位）的通用图标。 */
+export const StoryboardIcon = defineIcon(Huge.ClapperboardIcon, 'storyboard');
 export const PluginIcon = defineIcon(Huge.Plug01Icon, 'plugin');
 const PluginFramesIcon = defineIcon(Huge.KeyframesMultipleIcon, 'plugin-frames');
 const PluginFilmIcon = defineIcon(Huge.FilmRoll02Icon, 'plugin-film');

@@ -491,6 +491,8 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 
 图片节点的可选 `data.result_stack` 保存 `{run_id, member_node_ids}`：一次生成出多张时，本节点为封面，`member_node_ids` 是其余结果各自的图片节点（最多 64 个），`run_id` 是已拆成节点的那次生成。成员 id 不做文档级引用校验，读取方按存在过滤；跨画布粘贴时只保留一起粘贴的成员。
 
+分镜节点是插件节点外壳（ADR-0038）：`type: "plugin"`，`data.plugin_id = "atelier.storyboard"`，`data.node_type = "board"`，`data.payload = {ratio, style_prefix, entities[], shots[], script_node_ids[]}`。条目 `{id, kind: character|scene|prop, name, description, reference_node_id}`；镜头 `{id, scene, shot_size, camera, duration_s, visual, dialogue, entity_ids[], image_prompt, video_prompt, image_node_id, video_node_id}`。文档校验对 `payload` 只查 256 KiB 大小；形状由 `canvas_storyboard.normalize_payload`（后端）与 `normalizeStoryboardPayload`（前端）宽容读取，两端共用 `tests/fixtures/storyboard_payload_cases.json`。上限 120 镜、60 条目、每镜 20 个条目引用、8 个来源文本节点；时长夹到 1–60 秒。`payload` 里的节点 id 不做文档级引用校验，读取方只认当前文档内类型相符的节点。分镜节点不接连线。
+
 四模态均进入同一个 Job Runner：图片/视频沿用既有厂商协议；文本只接受明确可执行的
 OpenAI-compatible `chat/completions` 或 `responses`，后者支持 `reasoning_effort`，其中 `auto` 只作为
 Draft 选择且冻结/请求时省略；音频只接受 OpenAI-compatible `audio/speech`，冻结并发送白名单内的

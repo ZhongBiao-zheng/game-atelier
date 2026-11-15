@@ -1,0 +1,118 @@
+{
+  "_comment": "分镜节点载荷的宽容读取：Python normalize_payload 与 TS normalizeStoryboardPayload 必须给出同样结果。repeat 字段表示把 text 重复 count 次后作为该键的值。",
+  "cases": [
+    {
+      "name": "空载荷补默认值",
+      "input": {},
+      "expected": {"ratio": "16:9", "style_prefix": "", "entities": [], "shots": [], "script_node_ids": []}
+    },
+    {
+      "name": "不是对象",
+      "input": "oops",
+      "expected": {"ratio": "16:9", "style_prefix": "", "entities": [], "shots": [], "script_node_ids": []}
+    },
+    {
+      "name": "完整载荷原样保留",
+      "input": {
+        "ratio": "9:16", "style_prefix": "水墨",
+        "entities": [{"id": "e1", "kind": "scene", "name": "茶馆", "description": "木桌", "reference_node_id": "image-1"}],
+        "shots": [{"id": "s1", "scene": "一", "shot_size": "中景", "camera": "推", "duration_s": 4.5, "visual": "倒茶",
+                   "dialogue": "甲：请", "entity_ids": ["e1"], "image_prompt": "p", "video_prompt": "v",
+                   "image_node_id": "image-2", "video_node_id": "video-1"}],
+        "script_node_ids": ["text-1"]
+      },
+      "expected": {
+        "ratio": "9:16", "style_prefix": "水墨",
+        "entities": [{"id": "e1", "kind": "scene", "name": "茶馆", "description": "木桌", "reference_node_id": "image-1"}],
+        "shots": [{"id": "s1", "scene": "一", "shot_size": "中景", "camera": "推", "duration_s": 4.5, "visual": "倒茶",
+                   "dialogue": "甲：请", "entity_ids": ["e1"], "image_prompt": "p", "video_prompt": "v",
+                   "image_node_id": "image-2", "video_node_id": "video-1"}],
+        "script_node_ids": ["text-1"]
+      }
+    },
+    {
+      "name": "多余字段丢弃、缺字段补默认",
+      "input": {
+        "extra": 1, "ratio": "超宽",
+        "entities": [{"id": "e1", "name": "阿青", "html": "<b>x</b>"}],
+        "shots": [{"id": "s1", "visual": "走进门", "onClick": "alert(1)"}]
+      },
+      "expected": {
+        "ratio": "16:9", "style_prefix": "",
+        "entities": [{"id": "e1", "kind": "character", "name": "阿青", "description": "", "reference_node_id": null}],
+        "shots": [{"id": "s1", "scene": "", "shot_size": "", "camera": "", "duration_s": 5, "visual": "走进门",
+                   "dialogue": "", "entity_ids": [], "image_prompt": "", "video_prompt": "",
+                   "image_node_id": null, "video_node_id": null}],
+        "script_node_ids": []
+      }
+    },
+    {
+      "name": "类型不对取默认，时长夹到范围内",
+      "input": {
+        "style_prefix": 12,
+        "entities": [{"id": "e1", "kind": "monster", "name": ["x"], "description": null, "reference_node_id": 7}],
+        "shots": [
+          {"id": "s1", "duration_s": "长", "visual": 3, "entity_ids": "e1", "image_node_id": {"a": 1}},
+          {"id": "s2", "duration_s": 0},
+          {"id": "s3", "duration_s": 999},
+          {"id": "s4", "duration_s": true}
+        ],
+        "script_node_ids": "text-1"
+      },
+      "expected": {
+        "ratio": "16:9", "style_prefix": "",
+        "entities": [{"id": "e1", "kind": "character", "name": "", "description": "", "reference_node_id": null}],
+        "shots": [
+          {"id": "s1", "scene": "", "shot_size": "", "camera": "", "duration_s": 5, "visual": "", "dialogue": "",
+           "entity_ids": [], "image_prompt": "", "video_prompt": "", "image_node_id": null, "video_node_id": null},
+          {"id": "s2", "scene": "", "shot_size": "", "camera": "", "duration_s": 1, "visual": "", "dialogue": "",
+           "entity_ids": [], "image_prompt": "", "video_prompt": "", "image_node_id": null, "video_node_id": null},
+          {"id": "s3", "scene": "", "shot_size": "", "camera": "", "duration_s": 60, "visual": "", "dialogue": "",
+           "entity_ids": [], "image_prompt": "", "video_prompt": "", "image_node_id": null, "video_node_id": null},
+          {"id": "s4", "scene": "", "shot_size": "", "camera": "", "duration_s": 5, "visual": "", "dialogue": "",
+           "entity_ids": [], "image_prompt": "", "video_prompt": "", "image_node_id": null, "video_node_id": null}
+        ],
+        "script_node_ids": []
+      }
+    },
+    {
+      "name": "id 不合规或重复的条目与镜头丢弃，镜头里对不上的条目引用丢弃",
+      "input": {
+        "entities": [{"id": "e1", "name": "甲"}, {"id": "e1", "name": "重复"}, {"id": "", "name": "空"},
+                     {"id": "a b", "name": "带空格"}, {"name": "无 id"}, 5],
+        "shots": [{"id": "s1", "entity_ids": ["e1", "ghost", "e1", 3]}, {"id": "s1"}, {"id": "<script>"}, null],
+        "script_node_ids": ["text-1", "text-1", 9, ""]
+      },
+      "expected": {
+        "ratio": "16:9", "style_prefix": "",
+        "entities": [{"id": "e1", "kind": "character", "name": "甲", "description": "", "reference_node_id": null}],
+        "shots": [{"id": "s1", "scene": "", "shot_size": "", "camera": "", "duration_s": 5, "visual": "", "dialogue": "",
+                   "entity_ids": ["e1"], "image_prompt": "", "video_prompt": "", "image_node_id": null, "video_node_id": null}],
+        "script_node_ids": ["text-1"]
+      }
+    },
+    {
+      "name": "超长字符串截断",
+      "input": {
+        "style_prefix": {"repeat": "风", "count": 2500},
+        "entities": [{"id": "e1", "name": {"repeat": "名", "count": 50}, "description": {"repeat": "述", "count": 1200}}],
+        "shots": [{"id": "s1", "scene": {"repeat": "场", "count": 70}, "shot_size": {"repeat": "景", "count": 30},
+                   "camera": {"repeat": "镜", "count": 50}, "visual": {"repeat": "画", "count": 2100},
+                   "dialogue": {"repeat": "词", "count": 1100}, "image_prompt": {"repeat": "图", "count": 4100},
+                   "video_prompt": {"repeat": "影", "count": 4100}, "image_node_id": {"repeat": "n", "count": 200}}]
+      },
+      "expected": {
+        "ratio": "16:9", "style_prefix": {"repeat": "风", "count": 2000},
+        "entities": [{"id": "e1", "kind": "character", "name": {"repeat": "名", "count": 40},
+                      "description": {"repeat": "述", "count": 1000}, "reference_node_id": null}],
+        "shots": [{"id": "s1", "scene": {"repeat": "场", "count": 60}, "shot_size": {"repeat": "景", "count": 20},
+                   "camera": {"repeat": "镜", "count": 40}, "duration_s": 5, "visual": {"repeat": "画", "count": 2000},
+                   "dialogue": {"repeat": "词", "count": 1000}, "entity_ids": [],
+                   "image_prompt": {"repeat": "图", "count": 4000}, "video_prompt": {"repeat": "影", "count": 4000},
+                   "image_node_id": null, "video_node_id": null}],
+        "script_node_ids": []
+      }
+    }
+  ],
+  "limits": {"shots": 120, "entities": 60, "shot_entities": 20, "script_nodes": 8}
+}

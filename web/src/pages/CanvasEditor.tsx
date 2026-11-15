@@ -31,7 +31,8 @@ import {
   useStore,
   useStoreApi,
 } from '@xyflow/react';
-import { AddIcon, AiIcon, AudioFileIcon, MusicFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, SelectIcon, SettingsIcon, ShowIcon, TextIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
+import { AddIcon, AiIcon, AudioFileIcon, MusicFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, SelectIcon, SettingsIcon, ShowIcon, StoryboardIcon, TextIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
+import { STORYBOARD_DEFAULT_SIZE, createStoryboardNode, isStoryboardNode, remapStoryboardPayload } from '@/lib/canvasStoryboard';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { Link, useLocation } from 'wouter';
 
@@ -1074,6 +1075,7 @@ function CanvasEditorInner({
   const resolveVersion = useCallback((versionId: string | null | undefined) => (
     versionId ? latestDocument.current?.content_versions[versionId] : undefined
   ), []);
+  const findNode = useCallback((id: string) => latestDocument.current?.nodes.find(node => node.id === id), []);
 
   const selectedId = selectedNodeIds.size === 1
     ? selectedNodeIds.values().next().value ?? null
@@ -2520,6 +2522,10 @@ function CanvasEditorInner({
       data: { plugin_id: plugin.id, node_type: contribution.type, plugin_version: plugin.version,
         package_digest: plugin.digest, data_schema_version: contribution.payload_schema_version,
         payload: {}, generation_draft: null } }, null);
+  }
+
+  function addStoryboardNode() {
+    appendNode(createStoryboardNode(makeId('plugin'), defaultPosition(STORYBOARD_DEFAULT_SIZE)), null);
   }
 
   function addBatchMaterialNode(menu: CreateMenuState | null = createMenu) {
@@ -4872,6 +4878,7 @@ function CanvasEditorInner({
     pendingInputNodesByNodeId,
     mentionReferencesByNodeId,
     resolveVersion,
+    findNode,
     keys,
     generationProviders: providers,
     jobsByRunId,
@@ -5039,6 +5046,7 @@ function CanvasEditorInner({
     updateText,
     previewNodeResize,
     resolveVersion,
+    findNode,
     videoFrameNodeIdsByNodeId,
     pendingInputNodesByNodeId,
   ]);
@@ -5568,6 +5576,7 @@ function CanvasEditorInner({
             <div className="hidden xl:contents">
               <ToolButton label="添加批量素材节点" onClick={() => addBatchMaterialNode(null)}><LayersIcon /></ToolButton>
               <ToolButton label="添加对比节点" onClick={() => addCompareNode(null)}><CompareIcon /></ToolButton>
+              <ToolButton label="添加分镜节点" onClick={addStoryboardNode}><StoryboardIcon /></ToolButton>
               <ToolButton label="添加文本节点" onClick={() => addTextNode(null)}><TextIcon /></ToolButton>
               <ToolButton label="添加图片节点" onClick={() => addGenerationNode('image', null)}><ImageFileIcon /></ToolButton>
               <ToolButton label="添加视频节点" onClick={() => addGenerationNode('video', null)}><VideoFileIcon /></ToolButton>
@@ -5587,7 +5596,7 @@ function CanvasEditorInner({
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs text-muted-foreground">添加节点</p>
-              <CanvasCreateMenuItems allowEmptyNodes allowUpload onAddBatch={() => addBatchMaterialNode(null)} onAddCompare={() => addCompareNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null, 'speech')} onAddMusic={() => addGenerationNode('audio', null, 'music')} onUpload={() => uploadRef.current?.click()} />
+              <CanvasCreateMenuItems allowEmptyNodes allowUpload onAddStoryboard={addStoryboardNode} onAddBatch={() => addBatchMaterialNode(null)} onAddCompare={() => addCompareNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null, 'speech')} onAddMusic={() => addGenerationNode('audio', null, 'music')} onUpload={() => uploadRef.current?.click()} />
               <PluginCreateMenuItems onAdd={addPluginNode} />
             </div>
           )}
@@ -5912,7 +5921,8 @@ function PluginCreateMenuItems({ onAdd }: { onAdd: (plugin: PluginPackageLock, n
   </>;
 }
 
-function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, onAddText, onAddImage, onAddVideo, onAddAudio, onAddMusic, onUpload, onAddBatch, onAddCompare }: {
+function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, onAddText, onAddImage, onAddVideo, onAddAudio, onAddMusic, onUpload, onAddBatch, onAddCompare, onAddStoryboard }: {
+  onAddStoryboard?: () => void;
   onAddBatch?: () => void;
   onAddCompare?: () => void;
   /** 连出来的素材里有这些模式收不下的类型：对应选项置灰。 */
@@ -5934,6 +5944,7 @@ function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, on
     {allowEmptyNodes && <AddMenuButton icon={<AudioFileIcon />} title="语音" description="旁白与配音" onClick={onAddAudio} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
     {allowEmptyNodes && <AddMenuButton icon={<MusicFileIcon />} title="音乐" description="配乐与歌曲" onClick={onAddMusic} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
     {onAddCompare && <AddMenuButton icon={<CompareIcon />} title="对比" description="左右拖动对照两张图" onClick={onAddCompare} />}
+    {onAddStoryboard && <AddMenuButton icon={<StoryboardIcon />} title="分镜" description="镜头列表，逐镜出图出视频" onClick={onAddStoryboard} />}
     {allowUpload && <AddMenuButton icon={<UploadIcon />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
   </>;
 }
@@ -6411,6 +6422,8 @@ function cloneCanvasNode(
     z_index: zIndex,
     data: {
       ...clone.data,
+      // 分镜节点的绑定：一同复制的改指新节点，其余清空。
+      ...(isStoryboardNode(clone) ? { payload: remapStoryboardPayload(clone.data.payload, idMap) } : {}),
       generation_draft: cloneCanvasDraft(clone.data.generation_draft, idMap),
     },
   };

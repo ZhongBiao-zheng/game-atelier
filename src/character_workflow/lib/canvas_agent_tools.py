@@ -17,7 +17,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from character_workflow.lib import data_root
+from character_workflow.lib import canvas_storyboard, data_root
 from character_workflow.lib.canvas_projects import (
     AUDIO_UPLOAD_EXTS, IMAGE_UPLOAD_EXTS, VIDEO_UPLOAD_EXTS, CanvasDocumentError,
     list_canvas_project_options, read_canvas_document, read_canvas_project, resolve_canvas_media,
@@ -108,6 +108,8 @@ def document_view(document: CanvasDocument) -> dict:
                 row.update(_text_of(document, node))
         elif node.type == "group":
             row["member_node_ids"] = node.data.member_node_ids
+        elif canvas_storyboard.is_storyboard_node(node):
+            row.update(canvas_storyboard.agent_view(document, node))
         nodes.append(row)
     media = [
         {"version_id": vid, "kind": v.kind, "mime_type": v.mime_type,
