@@ -355,6 +355,25 @@ caller `callers/minimax_speech.py`，能力表 `data/audio_caps.json`（前后�
 - 重试：只对连不上与 502/503/504 重试三次；读超时与其余状态码当场失败。
 - 目录识别：`minimax:t2a_v2 → minimax-t2a`；同厂的 `_ws` 流式、`voice_clone` 不算可执行协议。`ark:tts`、`kling:tts` 认作语音但本机暂无执行器（旧版会被 `tts` 字样误认成 OpenAI `audio/speech`）。
 
+## 语音契约 — 豆包语音 2.0（`ark-tts`：词元跳动）
+
+契约源：`tokendance.space/docs/protocol-ark-tts.md`，官方 `volcengine.com/docs/6561/1598757`，音色表 `docs.volcengine.com/docs/doubao-voice/tone-list-3`（2.0 音色以 `_uranus_bigtts` 结尾）。
+caller `callers/ark_speech.py`。
+
+- `POST https://tokendance.space/gateway/ark/v3/tts/unidirectional`；模型 id（`seed-tts-2.0`）放 `X-Api-Resource-Id` 头，鉴权 Bearer。
+- 体：`req_params.text`、`speaker`、`audio_params.{format, sample_rate, speech_rate, loudness_rate}`；`speech_rate` -50..100 按倍速 0.5–2 线性换算。
+- SSE：`code=0` 带 base64 片段按序拼接；`code=20000000` 是成功结束；其余 code 失败（如 45000000 音色无权限、40402003 文本超长）。没收到结束帧按失败处理，不落半截音频。
+- 只开放 mp3：流式 wav 每段带文件头，拼起来不合法。
+- 计费 0.24 元 / 千字（`ark:tts:characters`）。请求带 `X-Control-Require-Usage-Tokens-Return: text_words`，结束帧回 `usage.text_words` 时按它记实付，否则按预估。转发方是否回这个字段未实测。
+- 单次文本上限文档未写，本机按 1000 字限制（保守值）。官方直连（`openspeech.bytedance.com`，`X-Api-Key`）不支持。
+
+## 音乐 — Suno（Tuzi）未接入
+
+2026-11-15 免费探针：`GET https://api.tu-zi.com/suno/fetch/<不存在的任务号>` → 400 `{"code":"task_not_exist"}`，
+`POST /suno/fetch` → 200 `{"code":"success","data":null}`，页面带 `New-Api-Version` 头 —— Tuzi 是 new-api，Suno 走它的转发
+（`/suno/submit/music` + `/suno/fetch/{id}`，信封 `{"code","message","data"}`）。仍未确认：`mv`（Suno 版本）可用取值（new-api 文档前后矛盾）、
+一次提交回几首、按次还是按首计费。确认只能真提交，而 Tuzi 被拒的请求照样计费，所以本期不接，等一次付费契约探针（约 1.14 元 × 分组倍率）。
+
 ## 音乐契约 — 音潮歌曲（`yinchao-song`：词元跳动 / 官方）
 
 契约源：转发 `tokendance.space/docs/protocol-yinchao-song.md`，官方 `platform.yinchaoyongxian.com/docs/guides/prompt-generate`、

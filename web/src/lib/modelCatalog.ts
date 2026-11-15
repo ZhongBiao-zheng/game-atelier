@@ -38,6 +38,7 @@ const catalog: CatalogEntry[] = [
   // Speech. `-hd` is stripped as a size variant before matching, so the HD id lands on the base pattern.
   { key: 'minimax-speech-2.8-turbo', name: 'MiniMax Speech 2.8 Turbo', brand: 'minimax', description: 'Fast, low-cost speech with many Chinese voices.', match: /^minimax-speech-2[.-]8-turbo$/ },
   { key: 'minimax-speech-2.8-hd', name: 'MiniMax Speech 2.8 HD', brand: 'minimax', description: 'Most expressive MiniMax speech, with pause and sigh tags.', match: /^minimax-speech-2[.-]8$/ },
+  { key: 'seed-tts-2.0', name: 'Seed TTS 2.0', brand: 'bytedance', description: 'Doubao speech with expressive Chinese voices and dialects.', match: /^(doubao-)?seed-tts-2[.-]0$/ },
   { key: 'gpt-4o-mini-tts', name: 'GPT-4o mini TTS', brand: 'openai', description: 'OpenAI speech you can steer with spoken instructions.', match: /^gpt-4o-mini-tts(-\d{4}-\d{2}-\d{2})?$/ },
   { key: 'tts-1', name: 'TTS-1', brand: 'openai', description: "OpenAI's classic text-to-speech; HD for higher quality.", match: /^tts-1(-hd)?(-\d+)?$/ },
 ];

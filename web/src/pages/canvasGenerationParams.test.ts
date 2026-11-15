@@ -74,7 +74,7 @@ it('normalizes MiniMax speech by its own voices, formats and speed range', () =>
     { voice: 'my-cloned-voice', response_format: 'wav', speed: 0.75 },
   )).toEqual({ voice: 'my-cloned-voice', response_format: 'wav', speed: 0.75 });
   // 本机还没有执行器的厂商语音协议不提供参数，界面也选不到它。
-  expect(normalizeCanvasAudioParams('seed-tts-2.0', 'tokendance', 'ark-tts', { voice: 'x' })).toEqual({});
+  expect(normalizeCanvasAudioParams('kling-tts', 'tokendance', 'kling-tts', { voice: 'x' })).toEqual({});
 });
 
 it('keeps speech and music apart: model filter, draft defaults and remembered preference', async () => {

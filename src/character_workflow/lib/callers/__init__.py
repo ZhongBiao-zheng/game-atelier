@@ -207,6 +207,8 @@ def dispatch_audio(
             from .minimax_speech import render
         elif protocol == "yinchao-song":
             from .yinchao_music import render
+        elif protocol == "ark-tts":
+            from .ark_speech import render
         else:
             raise ValueError(f"音频模型 {model} 没有可用的生成协议")
 

@@ -1,4 +1,5 @@
 """语音生成：能力表、MiniMax caller、分派、估价、模型分类、用量。"""
+import base64
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -211,15 +212,15 @@ def test_dispatch_audio_routes_by_protocol(tmp_path, monkeypatch):
     _add_minimax()
     keys.add_key(keys.KeySpec(
         alias="ark", provider="tokendance", base_url="https://tokendance.space/gateway/v1",
-        access_key="sk", models=[keys.ModelSpec(name="Seed", id="seed-tts-2.0", modality="audio",
-                                                protocol="ark-tts")],
+        access_key="sk", models=[keys.ModelSpec(name="Kling", id="kling-tts", modality="audio",
+                                                protocol="kling-tts")],
         created_at="2026-11-14T00:00:00Z",
     ))
     monkeypatch.setattr(minimax_speech, "render", lambda **kwargs: ["minimax"])
     assert dispatch_audio(prompt="hi", model="minimax-speech-2.8-turbo", alias="td",
                           output_dir=tmp_path) == ["minimax"]
     with pytest.raises(ValueError, match="没有可用的生成协议"):
-        dispatch_audio(prompt="hi", model="seed-tts-2.0", alias="ark", output_dir=tmp_path)
+        dispatch_audio(prompt="hi", model="kling-tts", alias="ark", output_dir=tmp_path)
 
 
 # ---- 估价 -----------------------------------------------------------------------------------
@@ -315,3 +316,128 @@ def test_canvas_freezes_minimax_params_by_its_protocol():
         "voice": "Chinese (Mandarin)_News_Anchor", "response_format": "wav", "speed": 1.5}
     assert freeze(voice="marin", response_format="pcm", speed=0.25) == {
         "voice": "male-qn-qingse", "response_format": "mp3", "speed": 0.5}
+
+
+# ---- 豆包语音（SSE） ------------------------------------------------------------------------
+
+
+class _Stream:
+    def __init__(self, lines, status_code=200, text=""):
+        self.lines = lines
+        self.status_code = status_code
+        self.text = text
+        self.closed = False
+
+    def iter_lines(self):
+        for line in self.lines:
+            if isinstance(line, Exception):
+                raise line
+            yield line
+
+    def close(self):
+        self.closed = True
+
+
+def _frame(payload):
+    return ("data: " + json.dumps(payload)).encode()
+
+
+def _add_ark(base_url="https://tokendance.space/gateway/v1"):
+    keys.add_key(keys.KeySpec(
+        alias="ark", provider="tokendance", base_url=base_url, access_key="sk-ark",
+        models=[keys.ModelSpec(name="Seed", id="seed-tts-2.0", modality="audio", protocol="ark-tts")],
+        created_at="2026-11-15T00:00:00Z",
+    ))
+
+
+ARK_PRICING = {"items": [
+    {"id": "ark:tts:characters", "plans": [{"unit": "kCharacters", "rate": "0.24"}]},
+    {"id": "ark:tts_ws:characters", "plans": [{"unit": "kCharacters", "rate": "0.24"}]},
+]}
+
+
+def test_ark_speech_joins_sse_chunks_and_reads_usage(tmp_path, monkeypatch):
+    from character_workflow.lib.callers import ark_speech
+
+    _add_ark()
+    monkeypatch.setattr(tokendance_prices, "model_pricing", {"seed-tts-2.0": ARK_PRICING}.get)
+    captured = {}
+    stream = _Stream([
+        b"", b": ping", _frame({"code": 0, "message": "", "data": base64.b64encode(b"ID3\x04").decode()}),
+        _frame({"code": 0, "message": "", "data": None, "sentence": {"text": "你好"}}),
+        _frame({"code": 0, "message": "", "data": base64.b64encode(b"tail").decode()}),
+        _frame({"code": 20000000, "message": "ok", "data": None, "usage": {"text_words": 5}}),
+        _frame({"code": 0, "data": base64.b64encode(b"after-finish").decode()}),
+    ])
+
+    def fake_post(url, **kwargs):
+        captured.update(url=url, **kwargs)
+        return stream
+
+    monkeypatch.setattr(ark_speech.requests, "post", fake_post)
+    params = {"voice": "zh_female_xiaohe_uranus_bigtts", "speed": 1.5}
+    paths = ark_speech.render(prompt=" 你好世界 ", model="seed-tts-2.0", alias="ark",
+                              output_dir=tmp_path, params=params)
+
+    assert captured["url"] == "https://tokendance.space/gateway/ark/v3/tts/unidirectional"
+    assert captured["headers"]["X-Api-Resource-Id"] == "seed-tts-2.0"
+    assert captured["headers"]["Authorization"] == "Bearer sk-ark"
+    assert captured["stream"] is True
+    assert captured["json"] == {"req_params": {
+        "text": "你好世界", "speaker": "zh_female_xiaohe_uranus_bigtts",
+        "audio_params": {"format": "mp3", "sample_rate": 24000, "speech_rate": 50, "loudness_rate": 0},
+    }}
+    assert Path(paths[0]).read_bytes() == b"ID3\x04tail"
+    assert params["actual_cost_cny"] == 0.0012
+    assert stream.closed
+
+
+@pytest.mark.parametrize("speed,rate", [(0.5, -50), (1, 0), (2, 100), (0.75, -25)])
+def test_ark_speech_maps_speed_linearly(tmp_path, monkeypatch, speed, rate):
+    from character_workflow.lib.callers import ark_speech
+
+    _add_ark()
+    sent = []
+    done = [_frame({"code": 0, "data": base64.b64encode(b"ID3").decode()}), _frame({"code": 20000000})]
+    monkeypatch.setattr(ark_speech.requests, "post",
+                        lambda url, **kwargs: sent.append(kwargs["json"]) or _Stream(list(done)))
+    ark_speech.render(prompt="hi", model="seed-tts-2.0", alias="ark", output_dir=tmp_path,
+                      params={"speed": speed})
+    assert sent[0]["req_params"]["audio_params"]["speech_rate"] == rate
+
+
+@pytest.mark.parametrize("lines,match", [
+    ([_frame({"code": 45000000, "message": "speaker permission denied"})], "45000000: speaker permission denied"),
+    ([_frame({"code": 0, "data": base64.b64encode(b"ID3").decode()})], "结束标志"),
+    ([_frame({"code": 20000000})], "没有返回音频"),
+    ([_frame({"code": 0, "data": "@@@"})], "无法解码"),
+    ([_frame({"code": 0, "data": "SUQz"}), requests.ConnectionError("reset")], "中途断开"),
+])
+def test_ark_speech_stream_failures(tmp_path, monkeypatch, lines, match):
+    from character_workflow.lib.callers import ark_speech
+
+    _add_ark()
+    monkeypatch.setattr(ark_speech.requests, "post", lambda url, **kwargs: _Stream(list(lines)))
+    with pytest.raises(ark_speech.ArkSpeechError, match=match):
+        ark_speech.render(prompt="hi", model="seed-tts-2.0", alias="ark", output_dir=tmp_path, params={})
+
+
+def test_ark_speech_http_error_and_unsupported_base(tmp_path, monkeypatch):
+    from character_workflow.lib.callers import ark_speech
+
+    _add_ark()
+    monkeypatch.setattr(ark_speech.requests, "post",
+                        lambda url, **kwargs: _Stream([], status_code=403, text="AccountOverdueError"))
+    with pytest.raises(ark_speech.ArkSpeechError, match="403: AccountOverdueError"):
+        ark_speech.render(prompt="hi", model="seed-tts-2.0", alias="ark", output_dir=tmp_path, params={})
+    keys.delete_key("ark")
+    _add_ark("https://openspeech.bytedance.com")
+    with pytest.raises(ark_speech.ArkSpeechError, match="词元跳动"):
+        ark_speech.render(prompt="hi", model="seed-tts-2.0", alias="ark", output_dir=tmp_path, params={})
+
+
+def test_ark_speech_estimate_uses_character_rate(monkeypatch):
+    monkeypatch.setattr(tokendance_prices, "model_pricing", {"seed-tts-2.0": ARK_PRICING}.get)
+    assert generation_pricing.estimate_cost_cny(
+        kind="audio", provider="tokendance", model_id="seed-tts-2.0", protocol="ark-tts",
+        text_length=1000) == 0.24

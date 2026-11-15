@@ -58,7 +58,7 @@
       "provider": "tokendance",
       "model_id": "seed-tts-2.0",
       "protocol": "ark-tts",
-      "expected": null
+      "expected": "ark-tts"
     },
     {
       "provider": "tokendance",
@@ -142,6 +142,31 @@
         "voice": "alloy",
         "response_format": "mp3",
         "speed": 1
+      }
+    },
+    {
+      "protocol": "ark-tts",
+      "params": {
+        "voice": "female-yujie",
+        "response_format": "wav",
+        "speed": 2.5
+      },
+      "expected": {
+        "voice": "zh_female_vv_uranus_bigtts",
+        "response_format": "mp3",
+        "speed": 2
+      }
+    },
+    {
+      "protocol": "ark-tts",
+      "params": {
+        "voice": "zh_female_peiqi_uranus_bigtts",
+        "speed": 0.75
+      },
+      "expected": {
+        "voice": "zh_female_peiqi_uranus_bigtts",
+        "response_format": "mp3",
+        "speed": 0.75
       }
     }
   ],
