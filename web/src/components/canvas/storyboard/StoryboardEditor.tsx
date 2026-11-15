@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -24,7 +24,8 @@ import {
 } from '@/lib/canvasStoryboard';
 import { cn } from '@/lib/utils';
 
-import { StoryboardThumb, storyboardShotMeta, type StoryboardHost } from './StoryboardNodeBody';
+import { StoryboardThumb, storyboardShotMeta, type StoryboardEditorTab, type StoryboardHost } from './StoryboardNodeBody';
+import { StoryboardScript } from './StoryboardScript';
 
 function newId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
@@ -33,6 +34,8 @@ function newId(prefix: string): string {
 interface EditorProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** 打开时停在哪个页签。 */
+  initialTab?: StoryboardEditorTab;
   title: string;
   payload: StoryboardPayload;
   host: StoryboardHost;
@@ -41,7 +44,9 @@ interface EditorProps {
 }
 
 /** 分镜编辑弹窗：左列表右表单。删除镜头不删除它的图片与视频节点。 */
-export function StoryboardEditor({ open, onOpenChange, title, payload, host, write }: EditorProps) {
+export function StoryboardEditor({ open, onOpenChange, initialTab = 'shots', title, payload, host, write }: EditorProps) {
+  const [tab, setTab] = useState<StoryboardEditorTab>(initialTab);
+  useEffect(() => { if (open) setTab(initialTab); }, [open, initialTab]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   // 连续输入只记一步撤销：一次聚焦内的第一次改动才记历史。
@@ -72,10 +77,11 @@ export function StoryboardEditor({ open, onOpenChange, title, payload, host, wri
       onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}
       onBlurCapture={endTyping}>
       <DialogTitle className="pr-10 text-base font-medium">{title}</DialogTitle>
-      <Tabs defaultValue="shots" className="min-h-0 flex-1">
+      <Tabs value={tab} onValueChange={value => setTab(value as StoryboardEditorTab)} className="min-h-0 flex-1">
         <TabsList>
           <TabsTrigger value="shots">镜头</TabsTrigger>
           <TabsTrigger value="entities">角色与场景</TabsTrigger>
+          <TabsTrigger value="script">剧本</TabsTrigger>
         </TabsList>
         <TabsContent value="shots" className="flex min-h-0 flex-1 gap-3 data-[state=inactive]:hidden">
           <div className="flex w-72 shrink-0 flex-col overflow-hidden rounded-lg border border-border">
@@ -137,6 +143,9 @@ export function StoryboardEditor({ open, onOpenChange, title, payload, host, wri
         </TabsContent>
         <TabsContent value="entities" className="min-h-0 flex-1 overflow-y-auto pr-1 data-[state=inactive]:hidden">
           <EntitiesForm payload={payload} type={type} change={change} />
+        </TabsContent>
+        <TabsContent value="script" className="min-h-0 flex-1 overflow-y-auto pr-1 data-[state=inactive]:hidden">
+          <StoryboardScript payload={payload} host={host} change={change} onWritten={() => setTab('shots')} />
         </TabsContent>
       </Tabs>
       <p className="shrink-0 text-xs tabular-nums text-muted-foreground">

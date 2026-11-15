@@ -287,3 +287,40 @@ export function remapStoryboardPayload(raw: unknown, idMap: ReadonlyMap<string, 
     script_node_ids: payload.script_node_ids.flatMap(id => idMap.get(id) ?? []),
   } as unknown as JsonValue;
 }
+
+/** 剧本解析返回的一段结果：条目是新出现的，镜头里的条目用名称引用。 */
+export interface ParsedStoryboardSegment {
+  entities: Array<{ kind: StoryboardEntityKind; name: string; description: string }>;
+  shots: Array<Pick<StoryboardShot, typeof SHOT_TEXT_FIELDS[number] | 'duration_s'> & { entities: string[] }>;
+}
+
+/**
+ * 把解析结果并进分镜：新条目按名称去重后追加，镜头里的条目名称换成 id。
+ * 「替换」清空现有镜头（它们的图片与视频节点留在画布上），条目保留；超过上限的镜头丢弃并回报数量。
+ */
+export function mergeParsedStoryboard(
+  payload: StoryboardPayload, segments: readonly ParsedStoryboardSegment[], mode: 'append' | 'replace',
+  newId: (prefix: 's' | 'e') => string,
+): { payload: StoryboardPayload; droppedShots: number } {
+  const entities = [...payload.entities];
+  const idByName = new Map(entities.map(entity => [entity.name, entity.id]));
+  const shots = mode === 'replace' ? [] : [...payload.shots];
+  let droppedShots = 0;
+  for (const segment of segments) {
+    for (const entity of segment.entities) {
+      if (idByName.has(entity.name) || entities.length >= STORYBOARD_MAX_ENTITIES) continue;
+      const id = newId('e');
+      idByName.set(entity.name, id);
+      entities.push({ id, kind: entity.kind, name: entity.name, description: entity.description, reference_node_id: null });
+    }
+    for (const shot of segment.shots) {
+      if (shots.length >= STORYBOARD_MAX_SHOTS) { droppedShots += 1; continue; }
+      const { entities: names, ...fields } = shot;
+      shots.push({
+        ...emptyStoryboardShot(newId('s')), ...fields,
+        entity_ids: [...new Set(names.flatMap(name => idByName.get(name) ?? []))],
+      });
+    }
+  }
+  return { payload: normalizeStoryboardPayload({ ...payload, entities, shots }), droppedShots };
+}

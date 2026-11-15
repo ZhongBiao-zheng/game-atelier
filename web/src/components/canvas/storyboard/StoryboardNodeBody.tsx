@@ -21,21 +21,26 @@ export interface StoryboardHost {
   recordHistory: () => void;
   selectNode: (id: string) => void;
   reportError?: (message: string) => void;
+  /** 把页面上还没保存的编辑落盘（解析剧本前用：服务端只读已保存的剧本）。 */
+  savePendingEdits?: () => Promise<void>;
+  /** 当前文档里的全部节点。 */
+  listNodes?: () => readonly CanvasNode[];
 }
 
 // 节点工具条的「编辑」在卡片之外，用一个极小的外部状态请求打开弹窗。
-let editRequest: string | null = null;
+export type StoryboardEditorTab = 'shots' | 'entities' | 'script';
+let editRequest: { nodeId: string; tab: StoryboardEditorTab } | null = null;
 const editListeners = new Set<() => void>();
-function setEditRequest(nodeId: string | null) {
-  editRequest = nodeId;
+function setEditRequest(request: typeof editRequest) {
+  editRequest = request;
   editListeners.forEach(listener => listener());
 }
 function subscribeEditRequest(listener: () => void) {
   editListeners.add(listener);
   return () => { editListeners.delete(listener); };
 }
-export function requestStoryboardEdit(nodeId: string) {
-  setEditRequest(nodeId);
+export function requestStoryboardEdit(nodeId: string, tab: StoryboardEditorTab = 'shots') {
+  setEditRequest({ nodeId, tab });
 }
 
 /** 镜头行的摘要：景别 · 运镜 · 时长，空项不占位。 */
@@ -62,7 +67,8 @@ export function StoryboardThumb({ host, imageNodeId }: { host: StoryboardHost; i
  */
 export function StoryboardNodeBody({ node, host }: { node: StoryboardNode; host: StoryboardHost }) {
   const [opened, setOpened] = useState(false);
-  const requested = useSyncExternalStore(subscribeEditRequest, () => editRequest === node.id);
+  const request = useSyncExternalStore(subscribeEditRequest, () => editRequest);
+  const requested = request?.nodeId === node.id;
   const editing = opened || requested;
   const setEditing = (open: boolean) => {
     setOpened(open);
@@ -102,6 +108,6 @@ export function StoryboardNodeBody({ node, host }: { node: StoryboardNode; host:
           </li>;
         })}
       </ol>}
-    <StoryboardEditor open={editing} onOpenChange={setEditing} title={node.title} payload={payload} host={host} write={write} />
+    <StoryboardEditor open={editing} onOpenChange={setEditing} initialTab={requested ? request.tab : 'shots'} title={node.title} payload={payload} host={host} write={write} />
   </div>;
 }

@@ -1044,3 +1044,22 @@ it('opens the storyboard editor from the node toolbar', () => {
   fireEvent.click(within(toolbar).getByRole('button', { name: '编辑 分镜' }));
   expect(within(screen.getByRole('dialog')).getByRole('button', { name: '添加镜头' })).toBeInTheDocument();
 });
+
+it('offers 拆分镜 on a text node that has content', () => {
+  const createStoryboardFromText = vi.fn();
+  const textNode = { ...nodes[0], data: { ...nodes[0].data, current_version_id: 'script' } } as CanvasNode;
+  const version = (text: string): CanvasContentVersion => ({
+    kind: 'text', text, version_id: 'script', sha256: 'x',
+    created_at: '2026-11-15T00:00:00Z', origin: { kind: 'user_edit' },
+  });
+  const { unmount } = render(<CanvasNodeContext.Provider value={nodeContext({
+    createStoryboardFromText, resolveVersion: () => version('第一场 茶馆'),
+  })}><NodeCard data={{ domain: textNode }} selected /></CanvasNodeContext.Provider>);
+  fireEvent.click(screen.getByRole('button', { name: '用 文本 拆分镜' }));
+  expect(createStoryboardFromText).toHaveBeenCalledWith(textNode.id);
+  unmount();
+  render(<CanvasNodeContext.Provider value={nodeContext({
+    createStoryboardFromText, resolveVersion: () => version('   '),
+  })}><NodeCard data={{ domain: textNode }} selected /></CanvasNodeContext.Provider>);
+  expect(screen.getByRole('button', { name: '用 文本 拆分镜' })).toBeDisabled();
+});

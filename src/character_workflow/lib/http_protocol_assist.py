@@ -13,12 +13,10 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Any
 
-from character_workflow.lib import keys, outbound_guard
-from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
+from character_workflow.lib import keys, outbound_guard, structured_text_call
 
 MAX_URLS = 3
 MAX_SOURCE_CHARS = 60_000
@@ -26,7 +24,7 @@ MAX_TOTAL_CHARS = 120_000
 URL_MAX_BYTES = 2 * 1024 * 1024
 MAX_OUTPUT_TOKENS = 4096
 TIMEOUT = (10.0, 180.0)
-JOB_NAMESPACE = "assist"
+JOB_NAMESPACE = structured_text_call.JOB_NAMESPACE
 TOP_LEVEL = ("version", "name", "kind", "auth", "submit", "inputs", "options", "derive",
              "result", "poll", "catalog")
 _DOC_TYPES = ("text/html", "text/plain", "text/markdown", "application/json")
@@ -42,22 +40,7 @@ class AssistError(RuntimeError):
         self.raw = raw
 
 
-def failure_reason(raw: str) -> str:
-    """对话模型调用失败的中文原因。欠费排在 403 前面：方舟欠费回的就是 403 AccountOverdueError。"""
-    low = raw.lower()
-    if any(word in low for word in ("accountoverdue", "overdue", "insufficient", "quota",
-                                     "balance", "余额", "欠费", "额度")):
-        return "对话模型的账号欠费或余额不足，请到该厂商充值后重试"
-    if any(word in low for word in ("401", "403", "unauthorized", "forbidden", "invalid api key",
-                                     "invalid_api_key", "authentication", "permission")):
-        return "对话模型的密钥无效或没有权限，请在供应商里检查密钥与模型开通情况"
-    if "429" in low or "rate limit" in low or "too many requests" in low or "ratelimit" in low:
-        return "对话模型请求太频繁或达到限额，请稍后再试"
-    if "timed out" in low or "timeout" in low:
-        return "对话模型响应超时，可以缩短文档或换一个更快的模型后再试"
-    if any(word in low for word in ("connection", "resolve", "proxy", "ssl", "max retries")):
-        return "连不上对话模型的服务地址，请检查网络、代理或供应商的请求地址"
-    return "对话模型调用失败"
+failure_reason = structured_text_call.failure_reason
 
 
 # ---------------------------------------------------------------- 密钥遮罩
@@ -287,14 +270,6 @@ def shape_document(document: dict[str, Any], kind: str) -> tuple[dict[str, Any],
 # ---------------------------------------------------------------- 对话模型
 
 
-def _text_models() -> list[tuple[keys.KeySpec, keys.ModelSpec]]:
-    from character_workflow.lib.callers.openai_text import supports_model
-
-    return [(key, model) for key in keys.read_keys_db().keys if key.enabled
-            for model in key.models
-            if model.modality == "text" and supports_model(key, model)]
-
-
 def max_cost_cny(model_id: str) -> float | None:
     from character_workflow.lib.generation_pricing import estimate_text_cost_cny
 
@@ -304,65 +279,15 @@ def max_cost_cny(model_id: str) -> float | None:
 
 def candidates() -> list[dict[str, Any]]:
     return [{"alias": key.alias, "model_id": model.id, "name": model.name or model.id,
-             "max_cost_cny": max_cost_cny(model.id)} for key, model in _text_models()]
-
-
-def _usage(body: Any) -> tuple[int | None, int | None]:
-    usage = body.get("usage") if isinstance(body, dict) else None
-    if not isinstance(usage, dict):
-        return None, None
-    first = usage.get("prompt_tokens", usage.get("input_tokens"))
-    second = usage.get("completion_tokens", usage.get("output_tokens"))
-    if all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in (first, second)):
-        return first, second
-    return None, None
-
-
-def call_model(key: keys.KeySpec, model: keys.ModelSpec, system: str, user: str
-               ) -> tuple[str, int | None, int | None]:
-    """调一次对话模型，不带 tools、不重试。返回 (输出文本, 输入 token, 输出 token)。"""
-    from character_workflow.lib.callers.openai_compat import key_api_root
-    from character_workflow.lib.callers.openai_text import (
-        _content_text, _post_json, _response_text,
-    )
-
-    gateway = key.alias if key.provider == "atelier" else None
-    if model.protocol == "openai-responses":
-        payload: dict[str, Any] = {"model": model.id, "instructions": system, "input": user,
-                                   "max_output_tokens": MAX_OUTPUT_TOKENS}
-        body = _post_json(url=f"{key_api_root(key)}/responses", access_key=key.access_key,
-                          payload=payload, timeout=TIMEOUT, gateway_alias=gateway)
-        text = _response_text(body)
-    else:
-        payload = {"model": model.id, "stream": False, "max_tokens": MAX_OUTPUT_TOKENS,
-                   "messages": [{"role": "system", "content": system},
-                                {"role": "user", "content": user}]}
-        body = _post_json(url=f"{key_api_root(key)}/chat/completions",
-                          access_key=key.access_key, payload=payload, timeout=TIMEOUT,
-                          gateway_alias=gateway)
-        choices = body.get("choices") if isinstance(body, dict) else None
-        text = _content_text(choices[0]) if isinstance(choices, list) and choices else None
-    tokens_in, tokens_out = _usage(body)
-    return text or "", tokens_in, tokens_out
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+             "max_cost_cny": max_cost_cny(model.id)}
+            for key, model in structured_text_call.text_models()]
 
 
 def _record(key: keys.KeySpec, model: keys.ModelSpec, kind: str, *, started: str,
             cost: float | None, error: str | None) -> str:
-    from character_workflow.lib.jobs import new_job_id, save_job
-
-    job = Job(
-        job_id=new_job_id(), character_id=key.alias,
-        prompt=f"AI 帮我配置 · {KIND_LABELS[kind]}接口",
-        submitted_at=started, completed_at=_now(), model=model.id,
-        params=JobParams(estimated_cost_cny=cost), output_paths=[],
-        status=JobStatus.FAILED if error else JobStatus.DONE, error=error,
-        kind=JobKind.TEXT, namespace=JOB_NAMESPACE, alias=key.alias, provider=key.provider,
-    )
-    return save_job(job).job_id
+    return structured_text_call.record_job(
+        key, model, prompt=f"AI 帮我配置 · {KIND_LABELS[kind]}接口", started=started, cost=cost,
+        error=error)
 
 
 def draft(*, kind: str, alias: str, model_id: str, text: str | None, urls: list[str]
@@ -374,7 +299,7 @@ def draft(*, kind: str, alias: str, model_id: str, text: str | None, urls: list[
         raise AssistError(f"网址最多 {MAX_URLS} 个")
     if not (text and text.strip()) and not urls:
         raise AssistError("请粘贴接口文档或填写文档网址")
-    pair = next(((k, m) for k, m in _text_models() if k.alias == alias and m.id == model_id), None)
+    pair = structured_text_call.find_text_model(alias, model_id)
     if pair is None:
         raise AssistError("找不到这个对话模型，或它已停用", 404)
     key, model = pair
@@ -382,18 +307,17 @@ def draft(*, kind: str, alias: str, model_id: str, text: str | None, urls: list[
         raise AssistError("这个对话模型的供应商没有填写请求地址")
     sources = gather_sources(text, urls)  # 抓取失败在调用模型之前报错，不计费
     system, user = build_messages(kind, sources)
-    started = _now()
+    started = structured_text_call.now()
     try:
-        output, tokens_in, tokens_out = call_model(key, model, system, user)
+        output, tokens_in, tokens_out = structured_text_call.call_model(
+            key, model, system, user, max_output_tokens=MAX_OUTPUT_TOKENS, timeout=TIMEOUT)
     except Exception as error:  # noqa: BLE001 —— 失败也要记账，再按原因报错
         raw = redact_secrets(str(error))[0][:500]
         reason = failure_reason(raw)
-        _record(key, model, kind, started=started, cost=None, error=f"{reason}（原始报错：{raw}）")
+        _record(key, model, kind, started=started, cost=None,
+                error=f"{reason}（原始报错：{raw}）")
         raise AssistError(reason, 502, raw=raw) from None
-    from character_workflow.lib.generation_pricing import estimate_text_cost_cny
-
-    cost = (estimate_text_cost_cny(model.id, tokens_in, tokens_out)
-            if tokens_in is not None and tokens_out is not None else None)
+    cost = structured_text_call.cost_of(model.id, tokens_in, tokens_out)
     usage = {"input_tokens": tokens_in, "output_tokens": tokens_out, "cost_cny": cost,
              "job_id": _record(key, model, kind, started=started, cost=cost, error=None)}
     document = parse_output(output)

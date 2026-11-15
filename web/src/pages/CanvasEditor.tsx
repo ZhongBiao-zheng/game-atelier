@@ -33,6 +33,7 @@ import {
 } from '@xyflow/react';
 import { AddIcon, AiIcon, AudioFileIcon, MusicFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, SelectIcon, SettingsIcon, ShowIcon, StoryboardIcon, TextIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
 import { STORYBOARD_DEFAULT_SIZE, createStoryboardNode, isStoryboardNode, remapStoryboardPayload } from '@/lib/canvasStoryboard';
+import { requestStoryboardEdit } from '@/components/canvas/storyboard/StoryboardNodeBody';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { Link, useLocation } from 'wouter';
 
@@ -1076,6 +1077,7 @@ function CanvasEditorInner({
     versionId ? latestDocument.current?.content_versions[versionId] : undefined
   ), []);
   const findNode = useCallback((id: string) => latestDocument.current?.nodes.find(node => node.id === id), []);
+  const listNodes = useCallback(() => latestDocument.current?.nodes ?? [], []);
 
   const selectedId = selectedNodeIds.size === 1
     ? selectedNodeIds.values().next().value ?? null
@@ -4254,6 +4256,24 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set([newNodeId]));
   }, [canvasUiPreferences.generation_defaults.image, commit, providers]);
 
+  /** 文本节点工具条「拆分镜」：在它右侧建一个以它为剧本来源的分镜节点，直接打开「剧本」页签。 */
+  // placeNewNode 每次渲染都是新函数：用 ref 取最新实现，对外的回调保持常量引用。
+  const createStoryboardFromTextHandler = useRef<(nodeId: string) => void>(() => undefined);
+  createStoryboardFromTextHandler.current = nodeId => {
+    const current = latestDocument.current;
+    const source = current?.nodes.find(node => node.id === nodeId);
+    if (!current || source?.type !== 'text') return;
+    const size = canvasNodeRenderedSize(source, current.content_versions);
+    const node = createStoryboardNode(makeId('plugin'),
+      placeNewNode({ x: source.position.x + size.width + 96, y: source.position.y }, STORYBOARD_DEFAULT_SIZE), [nodeId]);
+    const topZ = Math.max(0, ...current.nodes.map(item => item.z_index));
+    commit(document => ({ ...document, nodes: [...document.nodes, { ...node, z_index: topZ + 1 }] }), true);
+    setSelectedConnectionIds(new Set());
+    setSelectedNodeIds(new Set([node.id]));
+    requestStoryboardEdit(node.id, 'script');
+  };
+  const createStoryboardFromText = useCallback((nodeId: string) => createStoryboardFromTextHandler.current(nodeId), []);
+
   const submitAngle = useCallback(async (params: CanvasAngleParams) => {
     if (!angleState || runSubmissionInFlight.current) return;
     setAngleBusy(true);
@@ -4879,6 +4899,8 @@ function CanvasEditorInner({
     mentionReferencesByNodeId,
     resolveVersion,
     findNode,
+    listNodes,
+    createStoryboardFromText,
     keys,
     generationProviders: providers,
     jobsByRunId,
@@ -5047,6 +5069,8 @@ function CanvasEditorInner({
     previewNodeResize,
     resolveVersion,
     findNode,
+    listNodes,
+    createStoryboardFromText,
     videoFrameNodeIdsByNodeId,
     pendingInputNodesByNodeId,
   ]);

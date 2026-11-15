@@ -209,6 +209,9 @@ POST /api/canvas/projects/{project_id}/batch-runs/prepare
 GET /api/canvas/projects/{project_id}/batch-runs/{batch_id}
 POST /api/canvas/projects/{project_id}/batch-runs/{batch_id}/start
 POST /api/canvas/projects/{project_id}/batch-runs/{batch_id}/cancel
+GET /api/canvas/storyboard/models
+POST /api/canvas/projects/{project_id}/storyboard/plan
+POST /api/canvas/projects/{project_id}/storyboard/parse
 POST /api/canvas/projects/{project_id}/runs/{run_id}/reverse-prompt-config
 POST /api/canvas/projects/{project_id}/runs
 POST /api/canvas/projects/{project_id}/runs/{run_id}/cancel
@@ -273,7 +276,10 @@ LOCAL_MANAGEMENT = frozenset({
 # 已挂载的团队库列表同理：网站会话要读它才能浏览 / 采用。
 _MANAGEMENT_READ_EXEMPT = frozenset({("GET", "/api/keys"), ("GET", "/api/team-libraries")})
 # 用 POST 只因为 id 列表放不进查询串；它只读，不需要编辑租约。
-_READ_POSTS = frozenset({("POST", "/api/creation-assets/staleness")})
+_READ_POSTS = frozenset({
+    ("POST", "/api/creation-assets/staleness"),
+    ("POST", "/api/canvas/projects/{project_id}/storyboard/plan"),  # 只算分段，不调模型
+})
 MEDIA_ROUTES = frozenset({
     "/api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/content",
     "/api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/thumb",

@@ -6,7 +6,7 @@ import {
   STORYBOARD_MAX_ENTITIES, STORYBOARD_MAX_SCRIPT_NODES, STORYBOARD_MAX_SHOTS, STORYBOARD_MAX_SHOT_ENTITIES,
   STORYBOARD_PAYLOAD_MAX_BYTES, STORYBOARD_TOO_LARGE, addStoryboardEntity, addStoryboardShot, createStoryboardNode,
   duplicateStoryboardShot, emptyStoryboardEntity, emptyStoryboardShot, formatStoryboardDuration, isStoryboardNode,
-  moveStoryboardShot, normalizeStoryboardPayload, remapStoryboardPayload, removeStoryboardEntity, removeStoryboardShot,
+  mergeParsedStoryboard, moveStoryboardShot, normalizeStoryboardPayload, remapStoryboardPayload, removeStoryboardEntity, removeStoryboardShot,
   resolveStoryboardBinding, storyboardPayloadOf, storyboardShotLabel, storyboardTotalDuration, updateStoryboardShot,
   withStoryboardPayload, type StoryboardPayload,
 } from './canvasStoryboard';
@@ -159,5 +159,47 @@ describe('节点绑定', () => {
     expect(remapped.shots[0]).toMatchObject({ image_node_id: 'image-9', video_node_id: null });
     expect(remapped.entities.map(entity => entity.reference_node_id)).toEqual(['image-8', null]);
     expect(remapped.script_node_ids).toEqual(['text-7']);
+  });
+});
+
+describe('并入剧本解析结果', () => {
+  const ids = () => {
+    let next = 0;
+    return (prefix: 's' | 'e') => `${prefix}-${next += 1}`;
+  };
+  const shot = (visual: string, entities: string[] = []) => ({
+    scene: '', shot_size: '中景', camera: '', duration_s: 4, visual, dialogue: '', image_prompt: '', video_prompt: '', entities,
+  });
+  const base = normalizeStoryboardPayload({
+    entities: [{ id: 'e-old', kind: 'scene', name: '茶馆', description: '老木桌', reference_node_id: 'image-1' }],
+    shots: [{ id: 's-old', visual: '旧镜头', image_node_id: 'image-2' }],
+  });
+
+  it('追加：新条目去重，镜头里的名称换成 id', () => {
+    const { payload, droppedShots } = mergeParsedStoryboard(base, [
+      { entities: [{ kind: 'character', name: '阿青', description: '青色短袄' }, { kind: 'scene', name: '茶馆', description: '别的描述' }],
+        shots: [shot('进门', ['阿青', '茶馆', '不存在'])] },
+      { entities: [{ kind: 'character', name: '阿青', description: '重复' }], shots: [shot('坐下', ['阿青'])] },
+    ], 'append', ids());
+    expect(droppedShots).toBe(0);
+    expect(payload.entities.map(entity => [entity.name, entity.description, entity.reference_node_id])).toEqual([
+      ['茶馆', '老木桌', 'image-1'], ['阿青', '青色短袄', null]]);
+    const qing = payload.entities[1].id;
+    expect(payload.shots.map(item => [item.visual, item.entity_ids])).toEqual([
+      ['旧镜头', []], ['进门', [qing, 'e-old']], ['坐下', [qing]]]);
+    expect(payload.shots[1]).toMatchObject({ shot_size: '中景', duration_s: 4, image_node_id: null });
+  });
+
+  it('替换：清空现有镜头，条目保留', () => {
+    const { payload } = mergeParsedStoryboard(base, [{ entities: [], shots: [shot('新镜头', ['茶馆'])] }], 'replace', ids());
+    expect(payload.shots.map(item => item.visual)).toEqual(['新镜头']);
+    expect(payload.entities.map(entity => entity.name)).toEqual(['茶馆']);
+  });
+
+  it('超过镜头上限的部分丢弃并回报数量', () => {
+    const many = Array.from({ length: STORYBOARD_MAX_SHOTS + 3 }, (_, index) => shot(String(index)));
+    const { payload, droppedShots } = mergeParsedStoryboard(base, [{ entities: [], shots: many }], 'append', ids());
+    expect(payload.shots).toHaveLength(STORYBOARD_MAX_SHOTS);
+    expect(droppedShots).toBe(4);
   });
 });

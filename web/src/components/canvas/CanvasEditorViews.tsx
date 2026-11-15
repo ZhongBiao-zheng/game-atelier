@@ -25,6 +25,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
+import { StoryboardIcon } from '@/components/ui/icons';
 import { AddIcon, AddImageIcon, AiIcon, AudioFileIcon, BrushIcon, ChatIcon, CheckIcon, ChevronRightIcon, CloseIcon, CompareIcon, DeleteIcon, DownloadIcon, EditIcon, ExchangeIcon, ExpandIcon, ExportFileIcon, HelpIcon, HideIcon, ImageFileIcon, LayersIcon, LoadingIcon, LockIcon, MoreIcon, MuteIcon, OutpaintIcon, ParamsIcon, PauseIcon, PlayIcon, ReplaceFileIcon, SaveAssetIcon, ShareIcon, ShowIcon, StopIcon, TextIcon, UnlockIcon, VideoFileIcon, VolumeIcon } from '@/components/ui/icons';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
@@ -203,6 +204,10 @@ export interface CanvasNodeContextValue {
   resolveVersion: (versionId: string | null | undefined) => CanvasContentVersion | undefined;
   /** 按 id 取当前文档里的节点。常量引用，同 resolveVersion。 */
   findNode?: (id: string) => CanvasNode | undefined;
+  /** 当前文档里的全部节点。常量引用。 */
+  listNodes?: () => readonly CanvasNode[];
+  /** 在文本节点右侧建一个以它为剧本来源的分镜节点。 */
+  createStoryboardFromText?: (nodeId: string) => void;
   keys: KeyView[];
   /** 生成节点选模型用：「自动」+ 真实 KEY。缺省时只有真实 KEY。 */
   generationProviders?: KeyView[];
@@ -304,6 +309,7 @@ function storyboardHost(context: CanvasNodeContextValue): StoryboardHost {
     projectId: context.projectId, findNode: context.findNode ?? (() => undefined),
     resolveVersion: context.resolveVersion, updateNode: context.updateNode, recordHistory: context.recordHistory,
     selectNode: context.selectNode, reportError: context.reportError,
+    savePendingEdits: context.savePendingEdits, listNodes: context.listNodes,
   };
 }
 
@@ -1633,6 +1639,14 @@ function CanvasNodeToolbar({
           >
             <ImageFileIcon />
           </MediaToolButton>
+          {context.createStoryboardFromText && <MediaToolButton
+            label={`用 ${node.title} 拆分镜`}
+            text="拆分镜"
+            disabled={content?.kind !== 'text' || !content.text.trim()}
+            onClick={() => context.createStoryboardFromText?.(node.id)}
+          >
+            <StoryboardIcon />
+          </MediaToolButton>}
         </>
       )}
       {node.type === 'layer_stack' && (

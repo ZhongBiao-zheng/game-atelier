@@ -20,11 +20,17 @@ def range_start(period: str, now: datetime) -> datetime | None:
     return now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
 
 
+def assist_project_id(job: Job) -> str | None:
+    value = (job.params.model_extra or {}).get("assist_project_id") if job.namespace == "assist" else None
+    return value if isinstance(value, str) and value else None
+
+
 def job_location(job: Job) -> str | None:
     def q(value: str) -> str:
         return quote(value, safe="")
-    if job.canvas_project_id:
-        return f"/canvas/{q(job.canvas_project_id)}"
+    project_id = job.canvas_project_id or assist_project_id(job)
+    if project_id:
+        return f"/canvas/{q(project_id)}"
     if job.namespace == "studio":
         return "/studio"
     return None
@@ -51,9 +57,11 @@ def mine_records(
             cost = job.params.estimated_cost_cny
         # 「项目」回答这笔钱花在哪：画布按项目，创作台本身没有项目，整体算「创作台」；
         # 画布项目被删后找不到名字，单独标出来，不和创作台混在一起。
-        if job.canvas_project_id:
-            project_key = f"canvas:{job.canvas_project_id}"
-            label = canvas_names.get(job.canvas_project_id, "已删除的项目")
+        # 画布里发起的辅助调用（剧本解析）把项目记在 params 里：Job.canvas_project_id 只给画布生成用。
+        project_id = job.canvas_project_id or (assist_project_id(job) if assist else None)
+        if project_id:
+            project_key = f"canvas:{project_id}"
+            label = canvas_names.get(project_id, "已删除的项目")
         elif assist:
             project_key, label = "assist", "接口配置"
         else:
