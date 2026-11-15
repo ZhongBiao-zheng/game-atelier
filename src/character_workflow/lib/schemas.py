@@ -175,6 +175,9 @@ class JobParams(BaseModel):
     estimated_cost_cny: float | None = Field(default=None, ge=0)
     # 厂商成功响应返回的实际人民币费用；历史展示优先于预计快照。
     actual_cost_cny: float | None = Field(default=None, ge=0)
+    # 按字符计费的语音：上游回报的计费字符数。预计按朗读文本字数估；上游若按别的口径计
+    # （例如一个汉字算两个字符），两者在记录里并排可见，不在估价里静默取一个。
+    billed_characters: int | None = Field(default=None, ge=0)
     # 从创作资产复制提示词时冻结的只读来源名称。正文与变量值已经展开进 prompt，
     # 不保留任何可回写引用；prompt_asset_id 仅供效果图选择默认项。
     creation_asset_source_title: str | None = Field(default=None, max_length=120)

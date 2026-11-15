@@ -895,6 +895,14 @@ def _checked_bindings(provider: str, models: list[keys.ModelSpec]) -> list[keys.
         raise HTTPException(422, str(error)) from None
 
 
+def _sync_new_model_prices(provider: str) -> None:
+    """新加的 TokenDance 模型不等下一轮全量同步，后台补拉价格，模型菜单与估价马上可用。"""
+    if provider == "tokendance":
+        from character_workflow.lib.tokendance_prices import start_missing_sync
+
+        start_missing_sync()
+
+
 @router.post("/keys", status_code=201)
 def create_key(payload: _KeyCreatePayload) -> dict:
     from datetime import datetime, timezone
@@ -930,6 +938,7 @@ def create_key(payload: _KeyCreatePayload) -> dict:
     if spec.provider == "atelier":
         # 局域网网关接进来就排在每个路由组的第一位，本机 KEY 作兜底（ADR-0025）。
         model_routes.put_alias_first(spec.alias)
+    _sync_new_model_prices(spec.provider)
     return {"alias": payload.alias}
 
 
@@ -953,6 +962,8 @@ def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
         raise HTTPException(404, f"找不到别名「{alias}」的密钥（可能已被删除）") from None
     except ValidationError as error:
         raise HTTPException(422, "供应商配置无效") from error
+    if stored is not None and "models" in patch_data:
+        _sync_new_model_prices(stored.provider)
     return {"alias": alias}
 
 

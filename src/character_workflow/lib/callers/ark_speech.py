@@ -156,9 +156,10 @@ def render(
     target = target_dir / f"speech.{settings['response_format']}"
     target.write_bytes(audio)
     if words is not None and words >= 0:
+        options["billed_characters"] = words
         cost = speech_cost_cny(provider=key.provider, model_id=model, characters=words)
         if cost is not None:
             options["actual_cost_cny"] = cost
-            if on_params_changed is not None:
-                on_params_changed()
+        if on_params_changed is not None:
+            on_params_changed()
     return [str(target)]

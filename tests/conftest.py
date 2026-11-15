@@ -24,6 +24,13 @@ def isolated_data_root(tmp_path, monkeypatch):
         announcement_feed, openai_hk_prices, tokendance_prices, tuzi_prices,
     )
     monkeypatch.setattr(tokendance_prices, "start_background_sync", lambda: None)
+    monkeypatch.setattr(tokendance_prices, "start_missing_sync", lambda: None)
+
+    def offline_pricing(origin, model_id):
+        raise tokendance_prices.requests.ConnectionError("tests are offline")
+
+    monkeypatch.setattr(tokendance_prices, "_fetch_pricing", offline_pricing)
+    monkeypatch.setattr(tokendance_prices, "_missing_attempts", {})
     monkeypatch.setattr(tuzi_prices, "start_background_sync", lambda: None)
     monkeypatch.setattr(openai_hk_prices, "start_background_sync", lambda: None)
     # 公告源同理：启动不拉 CNB / GitHub。

@@ -129,9 +129,10 @@ def render(
 
     characters = (body.get("extra_info") or {}).get("usage_characters")
     if isinstance(characters, int) and characters >= 0:
+        options["billed_characters"] = characters
         cost = speech_cost_cny(provider=key.provider, model_id=model, characters=characters)
         if cost is not None:
             options["actual_cost_cny"] = cost
-            if on_params_changed is not None:
-                on_params_changed()
+        if on_params_changed is not None:
+            on_params_changed()
     return [str(target)]

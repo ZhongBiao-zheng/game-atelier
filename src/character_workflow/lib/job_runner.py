@@ -411,6 +411,12 @@ def _freeze_estimated_cost(job: Job, params: dict[str, Any]) -> None:
         params["actual_cost_cny"] = 0.0
         update_job_params(job.job_id, params)
         return
+    if key.provider == "tokendance":
+        # 运行中刚加到供应商的模型还不在价格快照里（全量同步只在启动时与每 6 小时）：先补拉，
+        # 否则预计费用与 caller 回写的实际费用都是未计价。
+        from character_workflow.lib.tokendance_prices import ensure_priced
+
+        ensure_priced(job.model)
     if params.get("estimated_cost_cny") is not None or params.get("actual_cost_cny") is not None:
         return
     model = next((m for m in key.models if m.id == job.model), None)

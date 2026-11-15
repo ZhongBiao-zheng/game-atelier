@@ -21,6 +21,8 @@ export interface JobParams {
   estimated_cost_cny?: number;
   /** 厂商成功响应返回的实际人民币费用；历史展示优先于预计快照。 */
   actual_cost_cny?: number;
+  /** 按字符计费的语音：上游回报的计费字符数（可能与朗读文本字数口径不同）。 */
+  billed_characters?: number;
   /** 从创作资产复制提示词时冻结的只读来源名称；不保留可回写引用。 */
   creation_asset_source_title?: string;
   prompt_asset_id?: string | null;

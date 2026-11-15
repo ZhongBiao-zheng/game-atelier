@@ -392,5 +392,7 @@ export function estimateGenerationCostForSubmission(
 
 export function formatGenerationCost(amount: number): string {
   const rounded = Math.round((amount + Number.EPSILON) * 100) / 100;
+  // 语音按字计价，一条常只有几厘钱：取整成 0 会被读成免费；真正的 0（订阅、本机）仍是 0¥。
+  if (amount > 0 && rounded === 0) return '<0.01¥';
   return `${Number(rounded.toFixed(2))}¥`;
 }
