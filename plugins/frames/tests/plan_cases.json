@@ -1,0 +1,25 @@
+{
+  "plan": [
+    { "name": "目标帧数含首尾、均匀取", "frame_count": 97, "fps": 24, "params": { "start": 0, "end": null, "mode": "count", "count": 5 }, "expect": [0, 24, 48, 72, 96] },
+    { "name": "目标帧数按四舍五入取整", "frame_count": 100, "fps": 24, "params": { "start": 10, "end": 20, "mode": "count", "count": 4 }, "expect": [10, 13, 17, 20] },
+    { "name": "目标帧数多于区间帧数时去重", "frame_count": 100, "fps": 24, "params": { "start": 0, "end": 2, "mode": "count", "count": 5 }, "expect": [0, 1, 2] },
+    { "name": "只要一帧取起始帧", "frame_count": 100, "fps": 24, "params": { "start": 7, "end": 50, "mode": "count", "count": 1 }, "expect": [7] },
+    { "name": "每隔几帧", "frame_count": 30, "fps": 24, "params": { "start": 3, "end": 20, "mode": "step", "step": 5 }, "expect": [3, 8, 13, 18] },
+    { "name": "每秒几帧：24 帧视频抽成 8 帧每秒", "frame_count": 25, "fps": 24, "params": { "start": 0, "end": null, "mode": "rate", "rate": 8 }, "expect": [0, 3, 6, 9, 12, 15, 18, 21, 24] },
+    { "name": "每秒几帧：非整除时四舍五入", "frame_count": 24, "fps": 24, "params": { "start": 0, "end": 23, "mode": "rate", "rate": 10 }, "expect": [0, 2, 5, 7, 10, 12, 14, 17, 19, 22] },
+    { "name": "每秒帧数高于视频帧率时逐帧取", "frame_count": 5, "fps": 24, "params": { "start": 0, "end": null, "mode": "rate", "rate": 60 }, "expect": [0, 1, 2, 3, 4] },
+    { "name": "结束帧超出视频时截到最后一帧", "frame_count": 10, "fps": 24, "params": { "start": 0, "end": 99, "mode": "step", "step": 4 }, "expect": [0, 4, 8] },
+    { "name": "起止相同只有一帧", "frame_count": 10, "fps": 24, "params": { "start": 4, "end": 4, "mode": "step", "step": 1 }, "expect": [4] },
+    { "name": "超过 65 帧报错", "frame_count": 200, "fps": 24, "params": { "start": 0, "end": null, "mode": "step", "step": 1 }, "error": "最多 65 帧，现在是 200 帧" },
+    { "name": "目标帧数超出范围报错", "frame_count": 200, "fps": 24, "params": { "start": 0, "end": null, "mode": "count", "count": 66 }, "error": "帧数要在 1 到 65 之间" },
+    { "name": "结束帧在起始帧之前报错", "frame_count": 100, "fps": 24, "params": { "start": 50, "end": 10, "mode": "count", "count": 3 }, "error": "结束帧要在起始帧之后" },
+    { "name": "起始帧超出视频报错", "frame_count": 10, "fps": 24, "params": { "start": 10, "end": null, "mode": "count", "count": 3 }, "error": "起始帧超出了视频" },
+    { "name": "读不出帧率报错", "frame_count": 10, "fps": 0, "params": { "start": 0, "end": null, "mode": "rate", "rate": 8 }, "error": "读不出视频的帧率" }
+  ],
+  "size": [
+    { "name": "不缩放", "width": 1280, "height": 720, "long_edge": null, "expect": [1280, 720] },
+    { "name": "横版按长边缩小", "width": 1280, "height": 720, "long_edge": 512, "expect": [512, 288] },
+    { "name": "竖版按长边缩小并四舍五入", "width": 496, "height": 864, "long_edge": 256, "expect": [147, 256] },
+    { "name": "按长边放大", "width": 96, "height": 64, "long_edge": 192, "expect": [192, 128] }
+  ]
+}

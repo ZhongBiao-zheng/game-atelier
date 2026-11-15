@@ -248,9 +248,17 @@ def test_create_image_adds_a_plain_image_node(client, ready):
     after = read_canvas_document(project_id)
     created = next(node for node in after.nodes if node.id == response.json()["result"]["node_id"])
     assert created.type == "image" and created.title == "结果"
-    assert created.position.x == 400 + 320 + 60
+    assert created.position.x == 400 + 320 + 48, "插件节点右侧一个 Agent 布局间距"
     assert after.content_versions[created.data.current_version_id].kind == "image"
     assert len(after.nodes) == len(before.nodes) + 1 and after.connections == before.connections
+
+
+def test_repeated_create_image_does_not_stack_on_the_previous_result(client, ready):
+    project_id, version_id = ready
+    first = post(client, "make", project_id, inputs=[version_id]).json()["result"]["node_id"]
+    second = post(client, "make", project_id, inputs=[version_id]).json()["result"]["node_id"]
+    nodes = {node.id: node for node in read_canvas_document(project_id).nodes}
+    assert nodes[second].position.x >= nodes[first].position.x + 240, "第二张放到第一张右边，不压在上面"
 
 
 def test_create_image_needs_its_capability(client, root):

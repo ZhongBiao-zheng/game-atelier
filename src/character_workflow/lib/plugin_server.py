@@ -163,10 +163,18 @@ def _media(project_id: str, node: Any, version_id: str) -> PluginMedia:
                        version.duration_ms)
 
 
+def _free_spot(document: Any, beside_node_id: str | None, width: float, height: float):
+    """新节点的落点：从 beside 节点右侧开始，跳过所有会压到的节点（与 Agent 新建节点同一套规则）。"""
+    from character_workflow.lib.canvas_agent_layout import node_rect, place
+    anchor = next((node for node in document.nodes if node.id == beside_node_id), None)
+    obstacles = [node_rect(node, document) for node in document.nodes if node.id != beside_node_id]
+    return place(obstacles, node_rect(anchor, document) if anchor is not None else None, width, height)
+
+
 def _create_image_group(plugin_id: str, project_id: str, pngs: list[bytes], title: str,
                         beside_node_id: str | None) -> list[str]:
     """结果组的封面与成员在同一次提交里落盘：要么整组出现，要么一张都不留。"""
-    from character_workflow.lib.canvas_agent_layout import _locked_size, node_rect, place
+    from character_workflow.lib.canvas_agent_layout import _locked_size
     from character_workflow.lib.canvas_agent_tools import _media_node
     from character_workflow.lib.canvas_projects import read_canvas_document, save_canvas_upload_batch
     from character_workflow.lib.schemas import CanvasResultStack
@@ -177,12 +185,9 @@ def _create_image_group(plugin_id: str, project_id: str, pngs: list[bytes], titl
 
     def build(versions: list, document: Any) -> list:
         # 整组按一个矩形找落点（插件节点右侧、不压别的节点），成员再在里面按前端结果组的间距排开。
-        anchor = next((node for node in document.nodes if node.id == beside_node_id), None)
-        anchor_rect = node_rect(anchor, document) if anchor is not None else None
         sizes = [_locked_size(None, version.width, version.height) for version in versions]
         total = sum(width for width, _ in sizes) + RESULT_STACK_GAP * (len(sizes) - 1)
-        obstacles = [node_rect(node, document) for node in document.nodes if node.id != beside_node_id]
-        start = place(obstacles, anchor_rect, total, max(height for _, height in sizes))
+        start = _free_spot(document, beside_node_id, total, max(height for _, height in sizes))
         nodes, x = [], start.x
         for node_id, node_title, version, (width, _) in zip(node_ids, titles, versions, sizes, strict=True):
             nodes.append(_media_node("image", node_id, node_title[:120], {"x": x, "y": start.y}, version.version_id))
@@ -210,18 +215,19 @@ def _create_image_group(plugin_id: str, project_id: str, pngs: list[bytes], titl
 def _create_image_node(project_id: str, png: bytes, title: str, beside_node_id: str | None) -> str:
     from character_workflow.lib.canvas_agent_tools import _media_node
     from character_workflow.lib.canvas_projects import read_canvas_document, save_canvas_upload
+    from character_workflow.lib.canvas_agent_layout import _locked_size
     node_id = f"image-{secrets.token_hex(6)}"
+
+    def build(version, document):
+        rect = _free_spot(document, beside_node_id, *_locked_size(None, version.width, version.height))
+        return _media_node("image", node_id, title[:120] or "图片", {"x": rect.x, "y": rect.y}, version.version_id)
+
     for attempt in range(3):
         document = read_canvas_document(project_id)
-        anchor = next((node for node in document.nodes if node.id == beside_node_id), None)
-        position = {"x": 0.0, "y": 0.0}
-        if anchor is not None:
-            width = anchor.size.width if anchor.size else 320
-            position = {"x": anchor.position.x + width + 60, "y": anchor.position.y}
         try:
             save_canvas_upload(
                 project_id, f"{title}.png", "png", png, "image", document.revision,
-                node_factory=lambda version: _media_node("image", node_id, title[:120] or "图片", position, version.version_id),
+                node_factory=lambda version, document=document: build(version, document),
             )
             return node_id
         except RuntimeError as error:

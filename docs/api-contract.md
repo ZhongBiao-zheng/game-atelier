@@ -1353,3 +1353,11 @@ multipart 里的数组值展开成同名重复字段。
 - `ctx.create_image_group(pngs, title, beside_node_id=None)`（需要 `resource.create`）：把 1–65 张 PNG（单张 ≤ 64 MiB，合计 ≤ 256 MiB）在**一次提交**里落成一个结果组：封面标题 `title`，成员 `title · 2` 起编号；封面的 `result_stack = {run_id: "plugin:<id>:<随机串>", member_node_ids}`；整组在插件节点右侧找一个不压其他节点的位置，成员与封面顶端对齐、间距 16。返回 `{node_id, member_node_ids}`。
 - 清单新增 `contributes.video_actions[]`，形状与 `image_actions[]` 相同（两者在 schema 里同为 `PluginMediaAction`）。已启用插件声明了视频动作时，视频节点工具栏最右出现「更多」，点击 `create_node` 动作在视频右侧建插件节点并连一条输入线。`create_node` 的目标节点类型必须在 `input_modalities` 里收对应素材（图片动作收 `image`、视频动作收 `video`），否则清单无效。
 - 插件界面读取素材（`inputs.read`）时，素材文件超过 256 MiB 直接拒绝（`PAYLOAD_TOO_LARGE`），不读入沙箱。
+
+### 序列帧插件：视频抽帧（`plugins/frames`，F1）
+
+- 节点类型 `extract`「视频抽帧」：收 1 个视频；视频工具栏「更多 → 抽帧」建节点并打开面板。
+- 节点数据（`payload`，版本 1）：`{start, end, mode, count, step, rate, long_edge, sheet, columns, frame_data}`。`start` / `end` 是帧号（从 0 起，`end` 含在内，`null` 表示到最后一帧）；`mode` 为 `count`（区间内均匀取 `count` 帧，含首尾）、`step`（每隔 `step` 帧）、`rate`（每秒 `rate` 帧，间隔 = 视频帧率 / `rate`，不足 1 帧按 1 帧）；`long_edge` 为输出按长边缩放的像素（16–4096），`null` 为原尺寸。
+- 抽帧计划的取整一律 `floor(x + 0.5)`，去重后升序，最多 65 帧；界面与服务端跑同一份 `plugins/frames/tests/plan_cases.json`。
+- 路由：`POST /probe`（读）返回 `{width, height, fps, frame_count, duration_ms, title}`；`POST /preview`（读）返回 `{frames, size, fps, thumbnails}`，`thumbnails` 是长边 160 的 JPEG data URL，与 `frames` 一一对应；`POST /extract`（写）按帧号精确解码（顺序解码，不按时间跳转），落成结果组，返回 `{node_id, member_node_ids, frames, size}`，`sheet` 为真时另外拼一张精灵表（格间 2 像素全透明，帧数据与精灵表调整 `/repack` 同一格式）放在结果组右侧，返回 `sheet_node_id`，`frame_data` 为真时再返回 `frame_data_node_id`。
+- Agent 工具：`plugin_frames_probe`（只读，参数 `video_node_id`）、`plugin_frames_extract`（参数 `video_node_id` 加上述抽帧、尺寸与输出字段）。

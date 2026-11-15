@@ -1,0 +1,179 @@
+{
+  "manifest_version": 1,
+  "id": "frames",
+  "name": "序列帧",
+  "version": "0.1.0",
+  "description": "把视频抽成序列帧",
+  "icon": "film",
+  "publisher": {
+    "id": "atelier",
+    "name": "Atelier"
+  },
+  "sdk_version": "1",
+  "app_version": {
+    "min": "5.137.0"
+  },
+  "ui": {
+    "entry": "ui/index.html"
+  },
+  "capabilities": [
+    "node.read_self",
+    "node.write_self",
+    "resource.read_inputs",
+    "resource.create",
+    "server.call"
+  ],
+  "contributes": {
+    "nodes": [
+      {
+        "type": "extract",
+        "title": "视频抽帧",
+        "icon": "film",
+        "default_size": {
+          "width": 360,
+          "height": 280
+        },
+        "min_size": {
+          "width": 240,
+          "height": 200
+        },
+        "payload_schema_version": 1,
+        "input_modalities": [
+          "video"
+        ],
+        "max_inputs": 1,
+        "surfaces": [
+          "node",
+          "panel"
+        ]
+      }
+    ],
+    "video_actions": [
+      {
+        "id": "extract",
+        "label": "抽帧",
+        "icon": "film",
+        "action": {
+          "kind": "create_node",
+          "node_type": "extract",
+          "open_panel": true
+        }
+      }
+    ],
+    "server": {
+      "module": "server",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/probe",
+          "access": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/preview",
+          "access": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/extract",
+          "access": "edit"
+        }
+      ]
+    },
+    "agent_tools": [
+      {
+        "name": "probe",
+        "description": "读一个视频的帧数、帧率、尺寸和时长。抽帧前用它确定帧号范围。只读。",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "video_node_id"
+          ],
+          "properties": {
+            "video_node_id": {
+              "type": "string",
+              "description": "画布上视频节点的 id"
+            }
+          }
+        },
+        "read_only": true,
+        "route": "/probe"
+      },
+      {
+        "name": "extract",
+        "description": "把一个视频按帧号抽成序列帧，放到画布上成为一个结果组（每帧一张图片，最多 65 帧）。可同时拼成一张精灵表。",
+        "parameters": {
+          "type": "object",
+          "required": [
+            "video_node_id",
+            "mode"
+          ],
+          "properties": {
+            "video_node_id": {
+              "type": "string",
+              "description": "画布上视频节点的 id"
+            },
+            "start": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "起始帧号，从 0 开始，默认 0"
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "结束帧号（含），省略表示到最后一帧"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "count",
+                "step",
+                "rate"
+              ],
+              "description": "count：在区间里均匀取 count 帧（含首尾）；step：每隔 step 帧取一帧；rate：按每秒 rate 帧取"
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65,
+              "description": "mode=count 时的帧数"
+            },
+            "step": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "mode=step 时的间隔帧数"
+            },
+            "rate": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60,
+              "description": "mode=rate 时每秒取几帧"
+            },
+            "long_edge": {
+              "type": "integer",
+              "minimum": 16,
+              "maximum": 4096,
+              "description": "输出帧按长边缩放到多少像素，省略为原尺寸"
+            },
+            "sheet": {
+              "type": "boolean",
+              "description": "同时把这些帧拼成一张精灵表（格间留透明间隔）"
+            },
+            "columns": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65,
+              "description": "精灵表每行几帧，默认 8"
+            },
+            "frame_data": {
+              "type": "boolean",
+              "description": "拼精灵表时同时输出帧数据（JSON 文本节点）"
+            }
+          }
+        },
+        "read_only": false,
+        "route": "/extract"
+      }
+    ]
+  }
+}
