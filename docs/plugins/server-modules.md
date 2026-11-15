@@ -31,7 +31,7 @@ def register(api) -> None:
 1. 插件已启用；
 2. 路由在清单里声明过；
 3. 本项目对该插件的批准有效（见 [安全与隔离](security.md)）；界面发起的调用还要求批准里有 `server.call`；
-4. 界面发起时：`node_id` 是本项目里属于该插件的节点；`inputs` 里每个版本都是此刻以输入连线连到这个节点的图片的当前版本。
+4. 界面发起时：`node_id` 是本项目里属于该插件的节点；`inputs` 里每个版本都是此刻以输入连线连到这个节点的素材的当前版本，且素材类型在该节点类型的 `input_modalities` 里（插件更新收窄了类型后，旧连线上的素材同样被拒）。
 
 ## `ctx`
 
@@ -40,10 +40,12 @@ def register(api) -> None:
 | `ctx.origin` | `"surface"`（插件界面经宿主发起）或 `"agent"`（内置 Agent 调用） |
 | `ctx.plugin_id`、`ctx.project_id`、`ctx.node_id` | 当前插件、项目、节点（Agent 调用时 `node_id` 为空） |
 | `ctx.capabilities` | 本项目批准的能力 |
-| `ctx.inputs` | 界面带来的、已核对的图片：`node_id`、`version_id`、`title`、`path`、`width`、`height`。`path` 只在服务端使用，不要回传给界面 |
-| `ctx.image_of_node(node_id)` | 按节点 id 取图片，只在 Agent 调用时可用 |
+| `ctx.inputs` | 界面带来的、已核对的素材：`kind`（`image` / `video` / `audio`）、`node_id`、`version_id`、`title`、`path`、`width`、`height`、`duration_ms`（可能为空）。`path` 只在服务端使用，不要回传给界面 |
+| `ctx.media_of_node(node_id, kinds)` | 按节点 id 取素材，只认 `kinds` 里的类型，只在 Agent 调用时可用 |
+| `ctx.image_of_node(node_id)` | 等于 `media_of_node(node_id, ("image",))` |
 | `ctx.create_image(png_bytes, title, beside_node_id=None)` | 把 PNG 落成画布上的普通图片节点，需要 `resource.create`，返回 `{node_id}` |
 | `ctx.create_text(text, title, beside_node_id=None)` | 落成普通文本节点（正文 ≤ 40000 字符），需要 `resource.create` |
+| `ctx.create_image_group(pngs, title, beside_node_id=None)` | 把 1–65 张 PNG 一次提交落成一个结果组（封面 + 成员，与生成出多张时的结果组相同：可收起、成员是普通图片节点），需要 `resource.create`，返回 `{node_id, member_node_ids}`。单张 ≤ 64 MiB、合计 ≤ 256 MiB |
 
 新建的节点放在 `beside_node_id`（默认当前节点）旁边；画布正在自动保存时会重读重试，最多三次。
 
@@ -58,5 +60,5 @@ def register(api) -> None:
 ## 不能做的
 
 - 不能直接调用厂商接口或 Job Runner 内部函数：`check_product_plugins.py` 拒绝 `character_workflow.lib.callers` 与 `job_runner` 的导入。需要生成内容时，应提出生成草稿由用户确认后走 Canvas Run，这样成本统计、路由和网关配额才覆盖得到（界面侧的生成能力尚未开放）。
-- 第三方 Python 依赖只能写进根 `pyproject.toml`，安装包没有给单个插件装依赖的机制。
+- 第三方 Python 依赖只能写进根 `pyproject.toml`，安装包没有给单个插件装依赖的机制（取舍见 ADR-0037「插件的第三方 Python 依赖」）。已有可直接用的：Pillow、numpy、`opencv-python-headless`（视频解码、光流、模板匹配）。
 - 不要依赖当前工作目录；路径从 `ctx` 或模块自身位置取。

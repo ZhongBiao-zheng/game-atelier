@@ -39,7 +39,7 @@ await client.node.writeSelf(payload);      // 写回节点数据，进撤销历�
 
 await client.inputs.list();                // [{ handle, kind, title, width, height }]
 await client.inputs.readBitmap(handle);    // ImageBitmap（转移，不复制）
-await client.inputs.readBytes(handle);     // ArrayBuffer
+await client.inputs.readBytes(handle);     // ArrayBuffer（素材文件超过 256 MiB 时拒绝）
 await client.inputs.readText(handle);      // 文本素材
 
 await client.server.call(path, params, handles);  // 调本插件的服务端路由，见下
@@ -82,7 +82,7 @@ const off = client.on('node.changed', () => {});  // 也有 'inputs.changed'、'
 | `CAPABILITY_DENIED` | 本项目没有批准这项能力 |
 | `UNKNOWN_METHOD` | 不支持的方法 |
 | `BAD_REQUEST` | 参数形状或数据格式不对 |
-| `PAYLOAD_TOO_LARGE` | 超过大小、深度或条目上限 |
+| `PAYLOAD_TOO_LARGE` | 超过大小、深度或条目上限；读取的素材文件超过 256 MiB |
 | `INVALID_HANDLE` | 句柄不是本实例发出的，或素材已断开 |
 | `RATE_LIMITED` | 调用过于频繁 |
 | `UNAVAILABLE` | 节点已不存在 |

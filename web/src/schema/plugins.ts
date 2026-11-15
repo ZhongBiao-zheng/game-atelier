@@ -22,15 +22,16 @@ export interface PluginNodeContribution {
   surfaces: PluginSurfaceKind[];
 }
 
-export type PluginImageActionTarget =
+export type PluginMediaActionTarget =
   | { kind: 'create_node'; node_type: string; open_panel: boolean }
   | { kind: 'open_panel'; panel: string };
 
-export interface PluginImageAction {
+/** 图片 / 视频节点工具栏「更多」里的一项（清单 image_actions / video_actions）。 */
+export interface PluginMediaAction {
   id: string;
   label: string;
   icon: string;
-  action: PluginImageActionTarget;
+  action: PluginMediaActionTarget;
 }
 
 export interface PluginServerRoute {
@@ -74,7 +75,8 @@ export interface PluginPackageLock {
   capabilities: string[];
   contributes: {
     nodes: PluginNodeContribution[];
-    image_actions: PluginImageAction[];
+    image_actions: PluginMediaAction[];
+    video_actions: PluginMediaAction[];
     server: { module: 'server'; routes: PluginServerRoute[] } | null;
     agent_tools: PluginAgentTool[];
   };

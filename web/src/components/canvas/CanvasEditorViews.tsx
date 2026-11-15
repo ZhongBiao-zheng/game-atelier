@@ -1,7 +1,7 @@
 import { AnnotationFullscreen } from './annotation/AnnotationFullscreen';
 import { PluginNodeBody, type PluginNodeInput } from '@/plugin-host/PluginNodeBody';
 import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
-import type { PluginImageAction, PluginPackageLock } from '@/schema/plugins';
+import type { PluginMediaAction, PluginPackageLock } from '@/schema/plugins';
 import { pluginIcon } from '@/components/ui/icons';
 import { useAnnotationEditor } from './annotation/useAnnotationEditor';
 import { AnnotationToolbar } from './annotation/AnnotationToolbar';
@@ -279,7 +279,8 @@ export interface CanvasNodeContextValue {
   upscaleImage: (node: CanvasContentNode, target: CanvasUpscaleTarget) => void;
   createCompareNode?: (node: CanvasContentNode, source: CanvasCompareSource) => void;
   /** 图片工具栏里的插件动作：在图片旁建插件节点并连线。 */
-  createPluginNodeFromImage?: (node: CanvasContentNode, plugin: PluginPackageLock, action: PluginImageAction) => void;
+  /** 插件在图片 / 视频工具栏「更多」里声明的动作：在素材右侧建插件节点并从素材连线。 */
+  createPluginNodeFromMedia?: (node: CanvasContentNode, plugin: PluginPackageLock, action: PluginMediaAction) => void;
   /** 插件节点 → 当前连到它的输入。按图签名重算，引用稳定。 */
   pluginInputsByNodeId?: ReadonlyMap<string, readonly PluginNodeInput[]>;
   /** 对比节点 → before / after 两侧当前接入的图。按图签名重算，引用稳定。 */
@@ -763,6 +764,9 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
             />
           )}
           {(emptyMediaNode || node.type !== 'image') && fixedToolbarButtons}
+          {!emptyMediaNode && node.type === 'video' && content?.kind === 'video' && (
+            <PluginVideoActionsMenu node={node} context={context} onOverlayOpenChange={setToolbarOverlayOpen} />
+          )}
         </div>}
       </NodeToolbar>
       {annotating && context.annotationController?.fullscreen && content?.kind === 'image' && <AnnotationFullscreen
@@ -1700,6 +1704,39 @@ function CanvasNodeToolbar({
   );
 }
 
+/** 视频节点工具栏的「更多」：只放已启用插件声明的视频动作，没有动作时不出现。
+ *  按钮由宿主按清单画，点击前不运行插件代码。 */
+function PluginVideoActionsMenu({ node, context, onOverlayOpenChange }: {
+  node: Extract<CanvasContentNode, { type: 'video' }>;
+  context: CanvasNodeContextValue;
+  onOverlayOpenChange: (open: boolean) => void;
+}) {
+  const plugins = usePlugins();
+  const actions = useMemo(() => enabledPlugins(plugins).flatMap(plugin => (
+    plugin.contributes.video_actions.filter(action => action.action.kind === 'create_node')
+      .map(action => ({ plugin, action, Icon: pluginIcon(action.icon) }))
+  )), [plugins]);
+  if (!context.createPluginNodeFromMedia || actions.length === 0) return null;
+  return (
+    <DropdownMenu onOpenChange={onOverlayOpenChange}>
+      <DropdownMenuTrigger asChild>
+        <MediaToolButton label={`${node.title} 的更多工具`} text="更多" onClick={() => undefined}>
+          <MoreIcon />
+        </MediaToolButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="center" className="nodrag min-w-40 [&_svg]:size-4"
+        onPointerDown={event => event.stopPropagation()}>
+        {actions.map(({ plugin, action, Icon }) => (
+          <DropdownMenuItem key={`${plugin.id}:${action.id}`} className="gap-2"
+            onSelect={() => context.createPluginNodeFromMedia?.(node, plugin, action)}>
+            <Icon />{action.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 /** 节点上的按钮常被快速连点（连续切换显示 / 隐藏、连点下载），两次点击会凑成一次 dblclick；
  *  落在按钮或链接上的双击不算「双击节点」，不打开预览 / 进入编辑。 */
 function isControlDoubleClick(event: React.MouseEvent<HTMLElement>) {
@@ -2088,11 +2125,11 @@ function ImageNodeToolbar({
               <ShareIcon />分享
             </DropdownMenuItem>
           )}
-          {content?.kind === 'image' && context.createPluginNodeFromImage && pluginImageActions.length > 0 && <>
+          {content?.kind === 'image' && context.createPluginNodeFromMedia && pluginImageActions.length > 0 && <>
             <DropdownMenuSeparator />
             {pluginImageActions.map(({ plugin, action, Icon }) => (
               <DropdownMenuItem key={`${plugin.id}:${action.id}`} className="gap-2"
-                onSelect={() => context.createPluginNodeFromImage?.(node, plugin, action)}>
+                onSelect={() => context.createPluginNodeFromMedia?.(node, plugin, action)}>
                 <Icon />{action.label}
               </DropdownMenuItem>
             ))}

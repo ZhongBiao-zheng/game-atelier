@@ -1,7 +1,7 @@
 import { SetPromptPreviewDialog, type PromptPreviewRequest } from '@/components/assets/SetPromptPreviewDialog';
 import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
 import type { PluginNodeInput } from '@/plugin-host/PluginNodeBody';
-import type { PluginImageAction, PluginNodeContribution, PluginPackageLock } from '@/schema/plugins';
+import type { PluginMediaAction, PluginNodeContribution, PluginPackageLock } from '@/schema/plugins';
 import { requestPluginPanel } from '@/plugin-host/panelRequests';
 import { pluginIcon } from '@/components/ui/icons';
 import { canvasPromptPreviewSource } from '@/lib/promptPreviewSource';
@@ -4775,8 +4775,8 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set([compareId]));
     focusNewNodesHandler.current([compare]);
   };
-  const createPluginNodeFromImageHandler = useRef<(node: CanvasContentNode, plugin: PluginPackageLock, action: PluginImageAction) => void>(() => undefined);
-  createPluginNodeFromImageHandler.current = (node, plugin, action) => {
+  const createPluginNodeFromMediaHandler = useRef<(node: CanvasContentNode, plugin: PluginPackageLock, action: PluginMediaAction) => void>(() => undefined);
+  createPluginNodeFromMediaHandler.current = (node, plugin, action) => {
     const current = latestDocument.current;
     const target = action.action;
     const contribution = target.kind === 'create_node'
@@ -4802,9 +4802,9 @@ function CanvasEditorInner({
     focusNewNodesHandler.current([created]);
     if (target.open_panel) requestPluginPanel(id);
   };
-  const createPluginNodeFromImage = useCallback(
-    (node: CanvasContentNode, plugin: PluginPackageLock, action: PluginImageAction) => (
-      createPluginNodeFromImageHandler.current(node, plugin, action)), []);
+  const createPluginNodeFromMedia = useCallback(
+    (node: CanvasContentNode, plugin: PluginPackageLock, action: PluginMediaAction) => (
+      createPluginNodeFromMediaHandler.current(node, plugin, action)), []);
   const createCompareNode = useCallback(
     (node: CanvasContentNode, source: CanvasCompareSource) => createCompareNodeHandler.current(node, source), []);
   const swapCompareInputs = useCallback((nodeId: string) => {
@@ -4941,7 +4941,7 @@ function CanvasEditorInner({
     createCompareNode,
     compareInputsByNodeId,
     pluginInputsByNodeId,
-    createPluginNodeFromImage,
+    createPluginNodeFromMedia,
     swapCompareInputs,
     openCompare,
     editVideo,
@@ -4992,7 +4992,7 @@ function CanvasEditorInner({
     createCompareNode,
     compareInputsByNodeId,
     pluginInputsByNodeId,
-    createPluginNodeFromImage,
+    createPluginNodeFromMedia,
     swapCompareInputs,
     openCompare,
     openMaskEdit,

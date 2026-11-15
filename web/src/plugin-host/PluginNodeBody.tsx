@@ -86,7 +86,7 @@ export function PluginNodeBody({ node, projectId, inputs, resolveVersion, update
     if (!contribution?.input_modalities.includes(version.kind)) return [];
     const media = version.kind === 'text' ? null : version;
     return [{ versionId: input.versionId, kind: version.kind, title: input.title,
-      width: media?.width ?? null, height: media?.height ?? null }];
+      width: media?.width ?? null, height: media?.height ?? null, ...(media ? { bytes: media.bytes } : {}) }];
   // eslint-disable-next-line react-hooks/exhaustive-deps -- resolveVersion 是常量引用；输入变了 inputs 会换引用
   }), [inputs, contribution]);
 

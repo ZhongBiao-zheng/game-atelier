@@ -37,6 +37,15 @@ def test_valid_manifest_parses():
         "id": "go", "label": "去", "icon": "grid",
         "action": {"kind": "create_node", "node_type": "missing"},
     }]}},
+    # 视频动作建的节点会接一条视频输入线：目标节点类型必须收视频（夹具节点只收图片）。
+    {"contributes": {**manifest()["contributes"], "video_actions": [{
+        "id": "go", "label": "去", "icon": "grid",
+        "action": {"kind": "create_node", "node_type": "demo"},
+    }]}},
+    {"contributes": {**manifest()["contributes"], "video_actions": [
+        {"id": "go", "label": "去", "icon": "grid", "action": {"kind": "open_panel", "panel": "a"}},
+        {"id": "go", "label": "再去", "icon": "grid", "action": {"kind": "open_panel", "panel": "b"}},
+    ]}},
     {"contributes": {"server": {"module": "server", "routes": [
         {"method": "POST", "path": "/detect", "access": "read"},
     ]}, "agent_tools": [{
@@ -46,6 +55,16 @@ def test_valid_manifest_parses():
 def test_invalid_manifest_is_rejected(patch):
     with pytest.raises(ValidationError):
         PluginManifest.model_validate(manifest(**patch))
+
+
+def test_video_action_can_create_a_node_that_accepts_video():
+    contributes = manifest()["contributes"]
+    node = {**contributes["nodes"][0], "input_modalities": ["video"]}
+    parsed = PluginManifest.model_validate(manifest(contributes={"nodes": [node], "video_actions": [{
+        "id": "extract", "label": "抽帧", "icon": "grid",
+        "action": {"kind": "create_node", "node_type": "demo", "open_panel": True},
+    }]}))
+    assert parsed.contributes.video_actions[0].label == "抽帧"
 
 
 def test_manifest_missing_required_field_is_rejected():

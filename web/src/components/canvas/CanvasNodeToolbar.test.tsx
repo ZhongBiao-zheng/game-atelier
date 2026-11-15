@@ -14,6 +14,9 @@ import {
 } from './CanvasEditorViews';
 import { DEFAULT_CANVAS_UI_PREFERENCES } from './canvasImageToolbar';
 import type { CanvasNode } from '@/schema/canvas';
+import type { PluginPackageLock } from '@/schema/plugins';
+import { setPluginsSnapshot } from '@/plugin-host/registry';
+import spriteLock from '../../../../plugins/sprite-sheet/package/manifest.lock.json';
 
 vi.mock('@/api/canvas', async importOriginal => ({
   ...await importOriginal<typeof import('@/api/canvas')>(),
@@ -274,6 +277,48 @@ it('shows content actions in the floating toolbar instead of the title row', () 
   expect(within(toolbar).queryByRole('button', { name: '替换 视频' })).not.toBeInTheDocument();
   expect(within(toolbar).getByRole('button', { name: '编辑视频 视频' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '重命名节点 视频' }).closest('header')).not.toContainElement(toolbar);
+});
+
+it('puts plugin video actions in a More menu on the video toolbar', async () => {
+  const base = spriteLock as unknown as PluginPackageLock;
+  const plugin: PluginPackageLock = {
+    ...base,
+    id: 'frames',
+    contributes: {
+      ...base.contributes,
+      nodes: [{ ...base.contributes.nodes[0], type: 'extract', input_modalities: ['video'] }],
+      image_actions: [],
+      video_actions: [{ id: 'extract', label: '抽帧', icon: 'frames',
+        action: { kind: 'create_node', node_type: 'extract', open_panel: true } }],
+    },
+  };
+  const video = { ...nodes[2], data: { ...nodes[2].data, current_version_id: 'version-video' } } as CanvasNode;
+  const createPluginNodeFromMedia = vi.fn();
+  const context = nodeContext({
+    createPluginNodeFromMedia,
+    resolveVersion: versionResolver({
+      'version-video': {
+        version_id: 'version-video', kind: 'video', created_at: '2026-08-25T00:00:00Z', sha256: 'a'.repeat(64),
+        origin: { kind: 'upload', upload_id: 'upload-video' }, path: 'uploads/upload-video.mp4',
+        mime_type: 'video/mp4', bytes: 42, width: 1920, height: 1080, duration_ms: 1000,
+      },
+    }),
+  });
+  setPluginsSnapshot([{ id: 'frames', availability: 'ok', reason: null, enabled: false, manifest: plugin }]);
+  const { rerender } = render(
+    <CanvasNodeContext.Provider value={context}><NodeCard data={{ domain: video }} selected /></CanvasNodeContext.Provider>,
+  );
+  const toolbar = screen.getByRole('toolbar', { name: '视频 节点工具' });
+  expect(within(toolbar).queryByRole('button', { name: '视频 的更多工具' })).not.toBeInTheDocument();
+
+  act(() => setPluginsSnapshot([{ id: 'frames', availability: 'ok', reason: null, enabled: true, manifest: plugin }]));
+  rerender(<CanvasNodeContext.Provider value={context}><NodeCard data={{ domain: video }} selected /></CanvasNodeContext.Provider>);
+  const buttons = within(toolbar).getAllByRole('button').map(button => button.getAttribute('aria-label'));
+  expect(buttons.at(-1)).toBe('视频 的更多工具');
+  fireEvent.keyDown(within(toolbar).getByRole('button', { name: '视频 的更多工具' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: '抽帧' }));
+  expect(createPluginNodeFromMedia).toHaveBeenCalledWith(video, plugin, plugin.contributes.video_actions[0]);
+  act(() => setPluginsSnapshot([]));
 });
 
 it('edits text inside the node as one history session', () => {

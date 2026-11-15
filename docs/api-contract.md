@@ -1345,3 +1345,11 @@ multipart 里的数组值展开成同名重复字段。
 - 节点数据（`payload`，版本 1，新字段都可缺省）：`frames[]` 每项 `{x, y, w, h, ox?, oy?, ax?, ay?}`，`ox` / `oy` 是逐帧偏移（像素，±512），`ax` / `ay` 是这一帧单独的锚点（0–1，两个都要有，省略时用整表锚点）；`grid {columns, rows, margin, spacing}`；`columns`、`spacing`、`margin`、`align`、`trim`（默认 true）、`anchor {x, y}`（0–1 比例，默认 0.5 / 1）、`fps`、`onion`。
 - `/repack` 接受上述字段：每帧先按 `trim` 裁透明边，格子取所有帧最大宽高，按 `align` 放好后再加偏移，超出格子的部分裁掉。返回的每帧 `anchor_x/anchor_y` 按该帧的锚点（有单独锚点用它的，否则用整表的）算，`meta.anchor` 是整表锚点，都是 `floor(格宽 × x)`、`floor(格高 × y)`。
 - 界面预览与服务端用同一套排布算法，两端都跑 `plugins/sprite-sheet/tests/layout_cases.json`。
+
+### 视频素材、结果组与视频工具栏动作（序列帧 F0）
+
+- 服务端模块的 `ctx.inputs` 是核对过的素材 `PluginMedia {kind, node_id, version_id, title, path, width, height, duration_ms}`，`kind` 为 `image` / `video` / `audio`。界面调用时，素材类型必须在该插件节点类型的 `input_modalities` 里（插件更新收窄了类型后，旧连线上的素材同样被拒，`INVALID_HANDLE`）。
+- `ctx.media_of_node(node_id, kinds)` 按节点 id 取素材，只认 `kinds` 里的类型，只在 Agent 调用时可用；`ctx.image_of_node(node_id)` 等于 `kinds=("image",)`。
+- `ctx.create_image_group(pngs, title, beside_node_id=None)`（需要 `resource.create`）：把 1–65 张 PNG（单张 ≤ 64 MiB，合计 ≤ 256 MiB）在**一次提交**里落成一个结果组：封面标题 `title`，成员 `title · 2` 起编号；封面的 `result_stack = {run_id: "plugin:<id>:<随机串>", member_node_ids}`；整组在插件节点右侧找一个不压其他节点的位置，成员与封面顶端对齐、间距 16。返回 `{node_id, member_node_ids}`。
+- 清单新增 `contributes.video_actions[]`，形状与 `image_actions[]` 相同（两者在 schema 里同为 `PluginMediaAction`）。已启用插件声明了视频动作时，视频节点工具栏最右出现「更多」，点击 `create_node` 动作在视频右侧建插件节点并连一条输入线。`create_node` 的目标节点类型必须在 `input_modalities` 里收对应素材（图片动作收 `image`、视频动作收 `video`），否则清单无效。
+- 插件界面读取素材（`inputs.read`）时，素材文件超过 256 MiB 直接拒绝（`PAYLOAD_TOO_LARGE`），不读入沙箱。

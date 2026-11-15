@@ -41,7 +41,18 @@
 
 动作出现在图片节点工具栏「更多」菜单里，排在内置项之后，不进「自定义工具条」。按钮是宿主按清单画的，点击之前不运行任何插件代码。
 
-`create_node`：在图片右侧新建该类型的插件节点，并从图片连一条输入连线；`open_panel` 为真时，本项目批准通过后自动打开编辑面板。另一种 `open_panel` 动作已在清单 schema 里定义，宿主尚未实现。
+`create_node`：在图片右侧新建该类型的插件节点，并从图片连一条输入连线；`open_panel` 为真时，本项目批准通过后自动打开编辑面板。目标节点类型的 `input_modalities` 必须包含 `image`，否则清单无效。另一种 `open_panel` 动作已在清单 schema 里定义，宿主尚未实现。
+
+## 视频工具栏动作 `contributes.video_actions[]`
+
+形状与 `image_actions[]` 相同：
+
+```json
+{ "id": "extract", "label": "抽帧", "icon": "frames",
+  "action": { "kind": "create_node", "node_type": "extract", "open_panel": true } }
+```
+
+视频节点工具栏本身没有「更多」菜单；有已启用插件声明了视频动作时，宿主在工具栏最右加一个「更多」，里面只有这些插件动作。`create_node` 在视频右侧建节点并从视频连线，目标节点类型的 `input_modalities` 必须包含 `video`。
 
 ## 服务端路由 `contributes.server`
 

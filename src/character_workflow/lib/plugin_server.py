@@ -40,16 +40,24 @@ class PluginServerAPI:
         return decorate
 
 
-@dataclass(frozen=True)
-class PluginImage:
-    """一张可读的图片。`path` 只在服务端模块里出现，不会回传给界面。"""
+MEDIA_KINDS = ("image", "video", "audio")
+MAX_GROUP_IMAGES = 65  # 结果组 = 封面 + 最多 64 个成员（CanvasResultStack.member_node_ids）
+MAX_GROUP_BYTES = 256 * 1024 * 1024
+RESULT_STACK_GAP = 16  # 与前端 canvasResultStacks.RESULT_STACK_GAP 一致
 
+
+@dataclass(frozen=True)
+class PluginMedia:
+    """一份可读的素材（图片、视频或音频）。`path` 只在服务端模块里出现，不会回传给界面。"""
+
+    kind: str
     node_id: str
     version_id: str
     title: str
     path: Path
     width: int | None
     height: int | None
+    duration_ms: int | None
 
 
 @dataclass
@@ -60,19 +68,23 @@ class PluginRequest:
     origin: str
     capabilities: frozenset[str]
     node_id: str | None = None
-    inputs: list[PluginImage] = field(default_factory=list)
+    inputs: list[PluginMedia] = field(default_factory=list)
     created_node_ids: list[str] = field(default_factory=list)
 
-    def image_of_node(self, node_id: str) -> PluginImage:
-        """按节点 id 取图。只给 Agent 用：界面只能用 `inputs`。"""
+    def media_of_node(self, node_id: str, kinds: tuple[str, ...] = ("image",)) -> PluginMedia:
+        """按节点 id 取素材，只认 `kinds` 里的类型。只给 Agent 用：界面只能用 `inputs`。"""
         if self.origin != "agent":
             raise PluginError("CAPABILITY_DENIED", "界面只能读取连到本节点的素材", status=403)
         from character_workflow.lib.canvas_projects import read_canvas_document
         document = read_canvas_document(self.project_id)
         node = next((item for item in document.nodes if item.id == node_id), None)
-        if node is None or node.type != "image" or not node.data.current_version_id:
-            raise PluginError("INVALID_TARGET", "找不到这张图片", status=422)
-        return _image(self.project_id, node, node.data.current_version_id)
+        if node is None or node.type not in kinds or not node.data.current_version_id:
+            raise PluginError("INVALID_TARGET", "找不到这张图片" if kinds == ("image",) else "找不到这份素材",
+                              status=422)
+        return _media(self.project_id, node, node.data.current_version_id)
+
+    def image_of_node(self, node_id: str) -> PluginMedia:
+        return self.media_of_node(node_id, ("image",))
 
     def create_image(self, png: bytes, title: str, beside_node_id: str | None = None) -> dict:
         """把结果落成画布上的一个普通图片节点，返回 `{node_id}`。"""
@@ -83,6 +95,21 @@ class PluginRequest:
         node_id = _create_image_node(self.project_id, png, title, beside_node_id or self.node_id)
         self.created_node_ids.append(node_id)
         return {"node_id": node_id}
+
+    def create_image_group(self, pngs: list[bytes], title: str, beside_node_id: str | None = None) -> dict:
+        """把多张 PNG 落成一个结果组（封面 + 成员，一次提交），返回 `{node_id, member_node_ids}`。"""
+        if "resource.create" not in self.capabilities:
+            raise PluginError("CAPABILITY_DENIED", "本项目没有允许这项能力", status=403)
+        if not pngs:
+            raise PluginError("BAD_REQUEST", "没有可输出的图片", status=422)
+        if len(pngs) > MAX_GROUP_IMAGES:
+            raise PluginError("PAYLOAD_TOO_LARGE", f"一组最多 {MAX_GROUP_IMAGES} 张", status=413)
+        if any(len(png) > MAX_IMAGE_BYTES for png in pngs) or sum(map(len, pngs)) > MAX_GROUP_BYTES:
+            raise PluginError("PAYLOAD_TOO_LARGE", "图片过大", status=413)
+        node_ids = _create_image_group(self.plugin_id, self.project_id, pngs, title,
+                                       beside_node_id or self.node_id)
+        self.created_node_ids.extend(node_ids)
+        return {"node_id": node_ids[0], "member_node_ids": node_ids[1:]}
 
     def create_text(self, text: str, title: str, beside_node_id: str | None = None) -> dict:
         """把一段文本落成画布上的普通文本节点，返回 `{node_id}`。"""
@@ -124,15 +151,60 @@ def _create_text_node(project_id: str, text: str, title: str, beside_node_id: st
     raise PluginError("DOCUMENT_CONFLICT", "画布正在变化，请重试", status=409)
 
 
-def _image(project_id: str, node: Any, version_id: str) -> PluginImage:
+def _media(project_id: str, node: Any, version_id: str) -> PluginMedia:
     from character_workflow.lib.canvas_projects import resolve_canvas_media
     try:
         path, version = resolve_canvas_media(project_id, version_id)
     except (OSError, PermissionError, ValueError) as error:
         raise PluginError("INVALID_TARGET", "读不到这份素材", status=422) from error
-    if version.kind != "image":
-        raise PluginError("INVALID_TARGET", "这份素材不是图片", status=422)
-    return PluginImage(node.id, version_id, node.title, path, version.width, version.height)
+    if version.kind != node.type:
+        raise PluginError("INVALID_TARGET", "素材类型与节点不符", status=422)
+    return PluginMedia(version.kind, node.id, version_id, node.title, path, version.width, version.height,
+                       version.duration_ms)
+
+
+def _create_image_group(plugin_id: str, project_id: str, pngs: list[bytes], title: str,
+                        beside_node_id: str | None) -> list[str]:
+    """结果组的封面与成员在同一次提交里落盘：要么整组出现，要么一张都不留。"""
+    from character_workflow.lib.canvas_agent_layout import _locked_size, node_rect, place
+    from character_workflow.lib.canvas_agent_tools import _media_node
+    from character_workflow.lib.canvas_projects import read_canvas_document, save_canvas_upload_batch
+    from character_workflow.lib.schemas import CanvasResultStack
+    node_ids = [f"image-{secrets.token_hex(6)}" for _ in pngs]
+    run_id = f"plugin:{plugin_id}:{secrets.token_hex(8)}"
+    base = title[:100] or "图片"
+    titles = [base, *(f"{base} · {index}" for index in range(2, len(pngs) + 1))]
+
+    def build(versions: list, document: Any) -> list:
+        # 整组按一个矩形找落点（插件节点右侧、不压别的节点），成员再在里面按前端结果组的间距排开。
+        anchor = next((node for node in document.nodes if node.id == beside_node_id), None)
+        anchor_rect = node_rect(anchor, document) if anchor is not None else None
+        sizes = [_locked_size(None, version.width, version.height) for version in versions]
+        total = sum(width for width, _ in sizes) + RESULT_STACK_GAP * (len(sizes) - 1)
+        obstacles = [node_rect(node, document) for node in document.nodes if node.id != beside_node_id]
+        start = place(obstacles, anchor_rect, total, max(height for _, height in sizes))
+        nodes, x = [], start.x
+        for node_id, node_title, version, (width, _) in zip(node_ids, titles, versions, sizes, strict=True):
+            nodes.append(_media_node("image", node_id, node_title[:120], {"x": x, "y": start.y}, version.version_id))
+            x += width + RESULT_STACK_GAP
+        stack = CanvasResultStack(run_id=run_id, member_node_ids=node_ids[1:])
+        cover = nodes[0]
+        nodes[0] = cover.model_copy(update={"data": cover.data.model_copy(update={"result_stack": stack})})
+        return nodes
+
+    for attempt in range(3):
+        document = read_canvas_document(project_id)
+        try:
+            save_canvas_upload_batch(
+                project_id, [(".png", png, "image") for png in pngs], document.revision,
+                nodes_factory=lambda versions, document=document: build(versions, document))
+            return node_ids
+        except RuntimeError as error:
+            if not str(error).startswith("revision_conflict:") or attempt == 2:
+                raise PluginError("DOCUMENT_CONFLICT", "画布正在变化，请重试", status=409) from error
+        except ValueError as error:
+            raise PluginError("INVALID_TARGET", str(error)[:200], status=422) from error
+    raise PluginError("DOCUMENT_CONFLICT", "画布正在变化，请重试", status=409)
 
 
 def _create_image_node(project_id: str, png: bytes, title: str, beside_node_id: str | None) -> str:
@@ -224,29 +296,32 @@ def declared_access(plugin_id: str, method: str, path: str) -> str | None:
     return route.access if route else None
 
 
-def _surface_inputs(project_id: str, plugin_id: str, node_id: str | None,
-                    version_ids: list[str]) -> list[PluginImage]:
-    """界面带来的素材版本，必须此刻真的连在它自己的节点上。"""
+def _surface_inputs(record: PluginRecord, project_id: str, node_id: str | None,
+                    version_ids: list[str]) -> list[PluginMedia]:
+    """界面带来的素材版本，必须此刻真的连在它自己的节点上，且类型在该节点类型的 `input_modalities` 里。"""
     from character_workflow.lib.canvas_projects import read_canvas_document
+    assert record.lock is not None
     document = read_canvas_document(project_id)
     node = next((item for item in document.nodes if item.id == node_id), None)
-    if node is None or node.type != "plugin" or node.data.plugin_id != plugin_id:
+    if node is None or node.type != "plugin" or node.data.plugin_id != record.plugin_id:
         raise PluginError("INVALID_TARGET", "这个节点不属于此插件", status=403)
+    contribution = next((item for item in record.lock.contributes.nodes if item.type == node.data.node_type), None)
+    kinds = {kind for kind in (contribution.input_modalities if contribution else []) if kind in MEDIA_KINDS}
     nodes = {item.id: item for item in document.nodes}
     connected = {
         source.data.current_version_id: source
         for edge in document.connections
         if edge.role == "input" and edge.target_node_id == node_id
         and (source := nodes.get(edge.source_node_id)) is not None
-        and source.type == "image" and source.data.current_version_id
+        and source.type in kinds and source.data.current_version_id
     }
-    images = []
+    media = []
     for version_id in version_ids:
         source = connected.get(version_id)
         if source is None:
             raise PluginError("INVALID_HANDLE", "素材没有连到这个节点", status=403)
-        images.append(_image(project_id, source, version_id))
-    return images
+        media.append(_media(project_id, source, version_id))
+    return media
 
 
 def call(plugin_id: str, method: str, path: str, *, project_id: str, origin: str,
@@ -266,7 +341,7 @@ def call(plugin_id: str, method: str, path: str, *, project_id: str, origin: str
         raise PluginError("CAPABILITY_DENIED", "本项目没有允许这项能力", status=403)
     request = PluginRequest(plugin_id, project_id, origin, capabilities, node_id=node_id)
     if origin == "surface":
-        request.inputs = _surface_inputs(project_id, plugin_id, node_id, input_version_ids or [])
+        request.inputs = _surface_inputs(record, project_id, node_id, input_version_ids or [])
     handler = _handlers(record).get((method, path))
     if handler is None:
         raise PluginError("PLUGIN_BROKEN", "插件没有实现这个接口", status=500)

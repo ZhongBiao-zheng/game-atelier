@@ -27,6 +27,7 @@ dependencies = [
   "pyyaml>=6",
   "openai-agents>=0.4",
   "tomlkit>=0.15.1",
+  "opencv-python-headless>=4.11,<4.12",
 ]
 
 [build-system]

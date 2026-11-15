@@ -534,6 +534,48 @@ def save_canvas_upload(
         return version, updated, _display_filename(raw_name)
 
 
+def save_canvas_upload_batch(
+    project_id: str,
+    uploads: list[tuple[str, bytes, str]],
+    expected_revision: int,
+    nodes_factory: Callable[[list[CanvasMediaVersion]], list[CanvasNode]],
+) -> tuple[list[CanvasMediaVersion], CanvasDocument]:
+    """一次提交多份 upload 版本（ext, body, kind）和引用它们的节点：要么全部落盘，要么一份都不留。
+
+    插件结果组用它：封面与成员分多次提交时，中间撞 revision 会留下半组。"""
+    with file_lock(canvas_project_lock_path(project_id)):
+        _recover_canvas_transactions_unlocked(project_id)
+        project = read_canvas_project(project_id)
+        current = _read_canvas_document_unlocked(project_id)
+        if current.revision != expected_revision:
+            raise RuntimeError(f"revision_conflict:{current.revision}")
+        timestamp = _now()
+        created = [_new_upload_version(project_id, ext, body, kind, timestamp) for ext, body, kind in uploads]
+        versions = [version for version, _ in created]
+        updated = CanvasDocument.model_validate(current.model_copy(update={
+            "revision": current.revision + 1,
+            "updated_at": timestamp,
+            "content_versions": {**current.content_versions, **{version.version_id: version for version in versions}},
+            "nodes": [*current.nodes, *nodes_factory(versions)],
+        }).model_dump(mode="json"))
+        updated.sync_layer_materials()
+        targets = [target for _, target in created]
+        try:
+            for target, (_, body, _) in zip(targets, uploads, strict=True):
+                atomic_write_bytes(target, body)
+            atomic_write_json(
+                _project_path(project_id),
+                project.model_copy(update={"updated_at": timestamp}).model_dump(mode="json"),
+            )
+            # canvas.json 是提交点：引用的字节和元数据先落盘。
+            atomic_write_json(_document_path(project_id), updated.model_dump(mode="json"))
+        except BaseException:
+            for target in targets:
+                target.unlink(missing_ok=True)
+            raise
+        return versions, updated
+
+
 def canvas_node_has_pending_run(document: CanvasDocument, node: CanvasNode) -> bool:
     run_id = node.data.active_run_id if node.type in {"image", "video", "audio", "text", "image_edit"} else None
     return bool(run_id) and any(

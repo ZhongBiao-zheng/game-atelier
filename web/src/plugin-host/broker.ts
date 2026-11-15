@@ -16,7 +16,12 @@ export interface BrokerInput {
   title: string;
   width: number | null;
   height: number | null;
+  /** 媒体文件字节数；文本素材没有。 */
+  bytes?: number;
 }
+
+/** 插件一次读取素材的上限：整份进沙箱内存，过大的视频不交给插件（画布上传上限是 100 MB，生成产物可能更大）。 */
+export const PLUGIN_READ_MAX_BYTES = 256 * 1024 * 1024;
 
 export interface BrokerOptions {
   /** 本项目批准给这个插件的能力。 */
@@ -180,6 +185,7 @@ export function createBroker(options: BrokerOptions) {
         const input = versionId ? options.listInputs().find(item => item.versionId === versionId) : undefined;
         if (!versionId || !input) throw new BrokerError('INVALID_HANDLE', '素材句柄无效');
         if ((params.as === 'text') !== (input.kind === 'text')) throw new BrokerError('BAD_REQUEST', '读取方式与素材类型不符');
+        if ((input.bytes ?? 0) > PLUGIN_READ_MAX_BYTES) throw new BrokerError('PAYLOAD_TOO_LARGE', '素材过大');
         const result = await options.readInput(versionId, params.as);
         return { result, transfer: typeof result === 'string' ? [] : [result] };
       }

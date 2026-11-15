@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createBroker, isReadyProof, normalizePayload, PluginServerError, type BrokerInput, type BrokerOptions } from './broker';
+import { createBroker, isReadyProof, normalizePayload, PLUGIN_READ_MAX_BYTES, PluginServerError, type BrokerInput, type BrokerOptions } from './broker';
 
 const ALL = ['node.read_self', 'node.write_self', 'resource.read_inputs', 'server.call'];
 const NODE = { node_type: 'sheet', title: '精灵表', size: { width: 320, height: 240 }, payload_schema_version: 1, payload: { frames: [] } };
@@ -199,6 +199,14 @@ describe('插件 broker：素材句柄', () => {
     expect(JSON.stringify(inputs)).not.toContain('version-');
     expect(inputs[0].handle).not.toBe(inputs[1].handle);
     expect((await list(broker, 2))[0].handle).toBe(inputs[0].handle);
+  });
+
+  it('超过读取上限的素材不读，直接拒绝', async () => {
+    const huge: BrokerInput = { ...IMAGE, versionId: 'version-huge', kind: 'video', bytes: PLUGIN_READ_MAX_BYTES + 1 };
+    const { broker, options } = setup({ listInputs: vi.fn(() => [huge]) });
+    const [video] = await list(broker);
+    expect(errorCode(await call(broker, 'inputs.read', { handle: video.handle, as: 'bytes' }, 2))).toBe('PAYLOAD_TOO_LARGE');
+    expect(options.readInput).not.toHaveBeenCalled();
   });
 
   it('用句柄读取，位图与字节走转移', async () => {

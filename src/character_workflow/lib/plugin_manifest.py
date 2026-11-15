@@ -77,7 +77,9 @@ class PluginOpenPanelAction(_Model):
     panel: Annotated[str, StringConstraints(pattern=_NAME)]
 
 
-class PluginImageAction(_Model):
+class PluginMediaAction(_Model):
+    """图片 / 视频节点工具栏「更多」里的一项；按钮由宿主按清单画，点击前不运行插件代码。"""
+
     id: Annotated[str, StringConstraints(pattern=_NAME)]
     label: str = Field(min_length=1, max_length=20)
     icon: IconName
@@ -107,7 +109,8 @@ class PluginAgentTool(_Model):
 
 class PluginContributes(_Model):
     nodes: list[PluginNodeContribution] = Field(default_factory=list, max_length=32)
-    image_actions: list[PluginImageAction] = Field(default_factory=list, max_length=16)
+    image_actions: list[PluginMediaAction] = Field(default_factory=list, max_length=16)
+    video_actions: list[PluginMediaAction] = Field(default_factory=list, max_length=16)
     server: PluginServerContribution | None = None
     agent_tools: list[PluginAgentTool] = Field(default_factory=list, max_length=32)
 
@@ -145,12 +148,20 @@ class PluginManifest(_Model):
         node_types = [node.type for node in contributes.nodes]
         if len(set(node_types)) != len(node_types):
             raise ValueError("plugin node types must be unique")
-        action_ids = [action.id for action in contributes.image_actions]
-        if len(set(action_ids)) != len(action_ids):
-            raise ValueError("plugin image action ids must be unique")
-        for action in contributes.image_actions:
-            if action.action.kind == "create_node" and action.action.node_type not in node_types:
-                raise ValueError(f"image action {action.id} targets an undeclared node type")
+        nodes = {node.type: node for node in contributes.nodes}
+        for kind, actions in (("image", contributes.image_actions), ("video", contributes.video_actions)):
+            action_ids = [action.id for action in actions]
+            if len(set(action_ids)) != len(action_ids):
+                raise ValueError(f"plugin {kind} action ids must be unique")
+            for action in actions:
+                if action.action.kind != "create_node":
+                    continue
+                target = nodes.get(action.action.node_type)
+                if target is None:
+                    raise ValueError(f"{kind} action {action.id} targets an undeclared node type")
+                # create_node 会从这个素材连一条输入线过去，目标节点必须收这种素材。
+                if kind not in target.input_modalities:
+                    raise ValueError(f"{kind} action {action.id} targets a node that does not accept {kind}")
         declared = contributes.server.routes if contributes.server else []
         routes = {(route.method, route.path) for route in declared}
         if len(routes) != len(declared):
@@ -161,7 +172,7 @@ class PluginManifest(_Model):
         for tool in contributes.agent_tools:
             if ("POST", tool.route) not in routes:
                 raise ValueError(f"agent tool {tool.name} must point at a declared POST route")
-        if (contributes.nodes or contributes.image_actions) and self.ui is None:
+        if (contributes.nodes or contributes.image_actions or contributes.video_actions) and self.ui is None:
             raise ValueError("plugin with node or action contributions must declare ui")
         return self
 
