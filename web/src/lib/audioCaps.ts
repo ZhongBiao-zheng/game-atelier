@@ -5,6 +5,7 @@
  * 与 audio_caps.py 逐条同义，由 tests/fixtures/audio_caps_cases.json 两端共同钉住。
  */
 import raw from '@audio-caps';
+import { availableDeclared, type ModelDeclared } from '@/schema/httpProtocols';
 
 interface RawAudioCaps {
   family: string;
@@ -38,7 +39,16 @@ export interface AudioCaps {
   maxCount: number;
   maxLyricsChars: number;
   noInstrumentalModels: readonly string[];
+  /** 自定义接口按模板声明：没声明的控件不出现；语速只有离散档位；可能没有纯音乐。 */
+  controls: ReadonlySet<'voice' | 'speed' | 'format'>;
+  speeds: readonly number[];
+  instrumentalSupported: boolean;
 }
+
+const ALL_CONTROLS: ReadonlySet<'voice' | 'speed' | 'format'> = new Set(['voice', 'speed', 'format']);
+/** 模板没写上限时的兜底，与服务端 DECLARED_MAX_CHARS / DECLARED_MAX_LYRICS 一致。 */
+const DECLARED_MAX_CHARS = 20000;
+const DECLARED_MAX_LYRICS = 5000;
 
 export const AUDIO_CAPS: Readonly<Record<string, AudioCaps>> = Object.fromEntries(
   Object.entries(raw as Record<string, RawAudioCaps>).map(([protocol, caps]) => [protocol, {
@@ -56,8 +66,43 @@ export const AUDIO_CAPS: Readonly<Record<string, AudioCaps>> = Object.fromEntrie
     maxCount: caps.max_count ?? 1,
     maxLyricsChars: caps.max_lyrics_chars ?? 0,
     noInstrumentalModels: caps.no_instrumental_models ?? [],
+    controls: ALL_CONTROLS,
+    speeds: [],
+    instrumentalSupported: true,
   }]),
 );
+
+/** 自定义接口的能力声明（本机模板或局域网快照）→ AudioCaps；与 audio_caps.declared_audio_caps 同义。 */
+export function declaredAudioCaps(declared?: ModelDeclared | null): AudioCaps | null {
+  const caps = availableDeclared(declared);
+  if (!caps || caps.kind !== 'audio') return null;
+  const voices = caps.voices ?? [];
+  const speeds = caps.speeds ?? [];
+  const formats = caps.formats ?? [];
+  const controls = new Set<'voice' | 'speed' | 'format'>();
+  if (voices.length) controls.add('voice');
+  if (speeds.length) controls.add('speed');
+  if (formats.length) controls.add('format');
+  return {
+    protocol: 'declarative',
+    family: caps.family === 'music' ? 'music' : 'speech',
+    voices,
+    defaultVoice: voices[0]?.id ?? '',
+    customVoice: Boolean(caps.custom_voice),
+    speedMin: speeds.length ? Math.min(...speeds) : 1,
+    speedMax: speeds.length ? Math.max(...speeds) : 1,
+    formats,
+    defaultFormat: formats[0] ?? '',
+    maxChars: caps.max_chars || DECLARED_MAX_CHARS,
+    instructions: false,
+    maxCount: caps.max_count || 1,
+    maxLyricsChars: caps.lyrics ? DECLARED_MAX_LYRICS : 0,
+    noInstrumentalModels: [],
+    controls,
+    speeds,
+    instrumentalSupported: Boolean(caps.instrumental),
+  };
+}
 
 /** 任何协议的内置音色：换协议时它们不能被当成「自定义音色 ID」带过去。 */
 const BUILTIN_VOICES = new Set(Object.values(AUDIO_CAPS).flatMap(caps => caps.voices.map(voice => voice.id)));
@@ -72,6 +117,7 @@ export function audioProtocolOf(
   provider: string | null | undefined,
   protocol: string | null | undefined,
 ): string | null {
+  if (protocol === 'declarative') return 'declarative';
   if (protocol && OPENAI_SPEECH_ALIASES.has(protocol)) return 'openai-speech';
   if (protocol && protocol in AUDIO_CAPS) return protocol;
   if (protocol != null || !['openai', 'custom'].includes(String(provider))) return null;
@@ -84,8 +130,10 @@ export function audioCapsOf(
   modelId: string,
   provider: string | null | undefined,
   protocol: string | null | undefined,
+  declared?: ModelDeclared | null,
 ): AudioCaps | null {
   const resolved = audioProtocolOf(modelId, provider, protocol);
+  if (resolved === 'declarative') return declaredAudioCaps(declared);
   return resolved ? AUDIO_CAPS[resolved] : null;
 }
 
@@ -103,9 +151,9 @@ export function isCustomVoice(caps: AudioCaps, value: string) {
 }
 
 export type SpeechParams = {
-  voice: string;
-  response_format: string;
-  speed: number;
+  voice?: string;
+  response_format?: string;
+  speed?: number;
   instructions?: string;
 };
 
@@ -119,11 +167,18 @@ export function normalizeSpeechParams(caps: AudioCaps, params: Record<string, un
   const responseFormat = caps.formats.includes(rawFormat) ? rawFormat : caps.defaultFormat;
   const parsed = params.speed == null || params.speed === '' ? 1 : Number(params.speed);
   const speed = Number.isFinite(parsed) ? parsed : 1;
-  const normalized: SpeechParams = {
-    voice,
-    response_format: responseFormat,
-    speed: Number(Math.max(caps.speedMin, Math.min(caps.speedMax, speed)).toFixed(2)),
-  };
+  let clamped = Number(Math.max(caps.speedMin, Math.min(caps.speedMax, speed)).toFixed(2));
+  if (caps.speeds.length) {
+    // 离散档位：吸附到最近一档（同距取较慢的那档）。
+    clamped = caps.speeds.reduce((best, value) => {
+      const gap = Math.abs(value - clamped) - Math.abs(best - clamped);
+      return gap < 0 || (gap === 0 && value < best) ? value : best;
+    });
+  }
+  const normalized = {} as SpeechParams;
+  if (caps.controls.has('voice')) normalized.voice = voice;
+  if (caps.controls.has('format')) normalized.response_format = responseFormat;
+  if (caps.controls.has('speed')) normalized.speed = clamped;
   const instructions = String(params.instructions ?? '').trim();
   if (caps.instructions && instructions) normalized.instructions = instructions;
   return normalized;
@@ -146,7 +201,7 @@ export function audioSpeedLabel(speed: number) {
 }
 
 export function supportsInstrumental(caps: AudioCaps, modelId: string) {
-  return caps.family === 'music' && !caps.noInstrumentalModels.includes(modelId);
+  return caps.family === 'music' && caps.instrumentalSupported && !caps.noInstrumentalModels.includes(modelId);
 }
 
 export type MusicParams = { instrumental: boolean; n: number; lyrics?: string };
@@ -159,6 +214,6 @@ export function normalizeMusicParams(caps: AudioCaps, modelId: string, params: R
   const count = Number.isFinite(parsed) ? parsed : 1;
   const normalized: MusicParams = { instrumental, n: Math.max(1, Math.min(caps.maxCount, count)) };
   const lyrics = String(params.lyrics ?? '').trim();
-  if (lyrics && !instrumental) normalized.lyrics = lyrics;
+  if (lyrics && !instrumental && caps.maxLyricsChars > 0) normalized.lyrics = lyrics;
   return normalized;
 }

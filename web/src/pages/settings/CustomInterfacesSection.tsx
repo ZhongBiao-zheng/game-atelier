@@ -8,7 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Hint } from '@/components/ui/tooltip';
 import { CustomInterfaceDialog } from './CustomInterfaceDialog';
 
-const KIND_LABELS = { image: '图片', video: '视频' } as const;
+const KIND_LABELS = { image: '图片', video: '视频', audio: '音频' } as const;
 
 /** 供应商页底部的自定义接口列表（ADR-0036）。没有模板时也保留标题与「新建」，入口不藏在供应商弹窗里。 */
 export function CustomInterfacesSection() {

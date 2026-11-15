@@ -349,7 +349,13 @@ export function CanvasAudioSettings({
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const settings = normalizeSpeechParams(caps, params as Record<string, unknown>);
-  const { voice, response_format: format, speed } = settings;
+  const voice = settings.voice ?? '';
+  const format = settings.response_format ?? '';
+  const speed = settings.speed ?? 1;
+  const hasVoice = caps.controls.has('voice');
+  const hasFormat = caps.controls.has('format');
+  const hasSpeed = caps.controls.has('speed');
+  const discreteSpeeds = caps.speeds.length > 0;
   const instructions = settings.instructions ?? '';
   const builtinVoice = caps.voices.some(item => item.id === voice);
   const customVoice = builtinVoice ? '' : voice;
@@ -414,7 +420,14 @@ export function CanvasAudioSettings({
     else setOpen(true);
   }
 
-  const speedPresets = AUDIO_SPEED_PRESETS.filter(value => value >= caps.speedMin && value <= caps.speedMax);
+  const speedPresets = discreteSpeeds
+    ? caps.speeds
+    : AUDIO_SPEED_PRESETS.filter(value => value >= caps.speedMin && value <= caps.speedMax);
+  const summary = [
+    hasVoice ? audioVoiceLabel(caps, voice) : null,
+    hasFormat ? audioFormatLabel(format) : null,
+    hasSpeed ? audioSpeedLabel(speed) : null,
+  ].filter(Boolean).join(' · ') || '默认设置';
 
   return (
     <div ref={anchorRef} className="relative min-w-0">
@@ -427,7 +440,7 @@ export function CanvasAudioSettings({
       >
         <ParamsIcon size="sm" className="shrink-0" aria-hidden="true" />
         <span className="truncate">
-          {audioVoiceLabel(caps, voice)} · {audioFormatLabel(format)} · {audioSpeedLabel(speed)}
+          {summary}
         </span>
       </Button>
       <ToolbarPopover
@@ -444,7 +457,7 @@ export function CanvasAudioSettings({
         )}
       >
         <div className="space-y-4">
-          <SettingsSection title="音色">
+          {hasVoice && <SettingsSection title="音色">
             <OptionGrid
               label="选择音色"
               values={caps.voices.map(item => ({ value: item.id, label: item.label }))}
@@ -465,16 +478,16 @@ export function CanvasAudioSettings({
                 className="mt-2 w-full"
               />
             )}
-          </SettingsSection>
-          <SettingsSection title="格式">
+          </SettingsSection>}
+          {hasFormat && <SettingsSection title="格式">
             <OptionGrid
               label="选择音频格式"
               values={caps.formats.map(value => ({ value, label: audioFormatLabel(value) }))}
               selected={format}
               onSelect={value => onPatch({ response_format: value })}
             />
-          </SettingsSection>
-          <SettingsSection title="语速">
+          </SettingsSection>}
+          {hasSpeed && <SettingsSection title="语速">
             <OptionTrack
               label="选择语速预设"
               values={speedPresets}
@@ -482,7 +495,7 @@ export function CanvasAudioSettings({
               getLabel={value => audioSpeedLabel(value)}
               onSelect={value => onPatch({ speed: value })}
             />
-            <Input
+            {!discreteSpeeds && <Input
               type="number"
               aria-label="自定义语速"
               min={caps.speedMin}
@@ -495,8 +508,8 @@ export function CanvasAudioSettings({
                 if (event.key === 'Enter') event.currentTarget.blur();
               }}
               className="mt-2 w-full text-center"
-            />
-          </SettingsSection>
+            />}
+          </SettingsSection>}
           {caps.instructions && (
             <SettingsSection title="朗读指令">
               <Textarea
@@ -605,7 +618,7 @@ export function CanvasMusicSettings({
               />
             </SettingsSection>
           )}
-          {!settings.instrumental && !rememberedOnly && (
+          {!settings.instrumental && !rememberedOnly && caps.maxLyricsChars > 0 && (
             <section>
               <div className="flex items-center gap-1 px-1 py-1 text-xs text-muted-foreground">
                 歌词
@@ -625,7 +638,7 @@ export function CanvasMusicSettings({
               />
             </section>
           )}
-          {!rememberedOnly && (
+          {!rememberedOnly && caps.maxCount > 1 && (
             <SettingsSection title="数量">
               <OptionTrack
                 label="选择生成首数"

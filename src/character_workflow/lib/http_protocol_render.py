@@ -67,10 +67,19 @@ def derive_values(derive: dict[str, Derive], context: dict[str, Any]) -> dict[st
         values = [context.get(source) for source in sources]
         if any(v is None for v in values):
             continue
-        key = "@".join(str(v) for v in values)
+        key = "@".join(_key_text(v) for v in values)
         if key in spec.map:
             out[name] = spec.map[key]
     return out
+
+
+def _key_text(value: Any) -> str:
+    """派生表的键：布尔写成 true / false，整数值的小数（语速 1.0）写成 1，与模板校验同一写法。"""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
 
 
 def resolve_path(data: Any, path: str) -> list[Any]:

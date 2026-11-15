@@ -3,12 +3,16 @@
  * 结构校验以服务端为准（POST /api/http-protocols/validate）；前端只持有类型与能力声明，
  * 两端共用夹具 tests/fixtures/http_protocol_cases.json。 */
 
-export type HttpProtocolKind = 'image' | 'video';
+export type HttpProtocolKind = 'image' | 'video' | 'audio';
 
 export interface HttpProtocolResult {
   urls?: string[];
   base64?: string[];
+  /** hex 编码的结果（仅音频）。 */
+  hex?: string[];
   error?: string | null;
+  /** binary：整个响应体就是音频文件（仅音频的同步接口）。 */
+  body?: 'json' | 'binary';
 }
 
 export interface HttpProtocolDocument {
@@ -23,7 +27,12 @@ export interface HttpProtocolDocument {
     body?: unknown;
   };
   inputs?: { images?: { max: number; encode?: 'data_url' | 'base64' | 'file' | 'url' } | null };
-  options?: { ratio?: string[] | null; resolution?: string[] | null; duration?: number[] | null; count?: number };
+  options?: {
+    ratio?: string[] | null; resolution?: string[] | null; duration?: number[] | null; count?: number;
+    voices?: { id: string; label?: string | null }[] | null; custom_voice?: boolean;
+    speeds?: number[] | null; formats?: ('mp3' | 'wav' | 'flac' | 'opus' | 'aac')[] | null;
+    max_chars?: number | null;
+  };
   derive?: Record<string, { from: string | string[]; map: Record<string, unknown> }>;
   result?: HttpProtocolResult;
   poll?: {
@@ -57,6 +66,15 @@ export interface DeclaredCapabilities {
   max_count: number;
   reference_images: number;
   frames: 0 | 1 | 2;
+  /** 以下只有音频模板有：没用到的控件给 null / false。 */
+  family?: 'speech' | 'music';
+  voices?: { id: string; label: string }[] | null;
+  custom_voice?: boolean;
+  speeds?: number[] | null;
+  formats?: string[] | null;
+  max_chars?: number | null;
+  lyrics?: boolean;
+  instrumental?: boolean;
 }
 
 /** 随 GET /api/keys 的模型返回；模板缺失或损坏时只有 available=false + error。 */

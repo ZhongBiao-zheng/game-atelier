@@ -161,7 +161,7 @@ def test_timeouts_are_explained():
 
 @pytest.mark.parametrize("body, status, message", [
     ({}, 422, "请粘贴接口文档"),
-    ({"text": "doc", "kind": "audio"}, 422, "类型"),
+    ({"text": "doc", "kind": "text"}, 422, "类型"),
     ({"text": "doc", "model_id": "painter"}, 404, "找不到"),
     ({"urls": ["https://a.example/1", "https://a.example/2", "https://a.example/3",
                "https://a.example/4"]}, 422, "最多 3 个"),

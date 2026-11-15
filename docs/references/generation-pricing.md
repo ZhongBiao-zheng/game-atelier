@@ -29,6 +29,10 @@ TokenDance 模型请求公开接口 `GET https://tokendance.space/portal/api/mod
   `feature`（可灵：`silent` / `sound` 按是否生成音频，`video_reference` 按有参考视频）匹配，带指定值的档优先；
   `*:video_input_seconds`（可灵输入视频计费）与 `motion-control` 项不是生成单价，跳过。带参考视频而模型有输入视频计费项时
   拿不到输入时长，不估。`unit=seconds` 按时长，`unit=millionTokens` 按 `时长 × 宽 × 高 × 24 / 1024` 输出 token，宽高沿用方舟 Seedance 尺寸表。
+- 语音：`*:characters` 项（`unit=kCharacters`，同步接口；`_ws` 流式与 `voice_clone` 不算）按「元 / 千字」。预估用朗读文本字数；
+  MiniMax 实付按响应 `extra_info.usage_characters`，豆包实付按结束帧 `usage.text_words`（转发方不回时按预估）。2026-11-14 公开价：
+  `minimax-speech-2.8-turbo` 0.16、`seed-tts-2.0` 0.24。中文是否按每字 2 个计费字符，待实测账单核对。
+- 音乐：`*:song:songs` 项（`unit=songs`）按首。预估按请求首数，实付按成功下载的首数。2026-11-14 公开价：`yc-song-4.0` / `yc-song-3.5` 0.22 元 / 首。
 - 接口不标币种；不含视频的 Seedance 档与火山方舟官方价一致，按人民币处理。
 - 没有快照的模型返回 null（未计价）。任务的预计在执行前冻结，快照之后变化不影响历史。
 - 图层拆分（seedream-5.0-pro，`layer_decomposition`）拆前不知道层数，不做预估；完成时按厂商回传的 `usage` 与每层 `size` 结算写入 `actual_cost_cny`：每层按自身输出千像素选档计一张生成图，另加 `input_images` × 输入图单价（`generation_pricing.layer_decomposition_cost_cny`）。2026-10-25 按此规则回填了此前 7 次成功拆分（合计 ¥24.44）。

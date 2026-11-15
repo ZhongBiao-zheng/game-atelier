@@ -312,6 +312,147 @@
           }
         }
       }
+    },
+    {
+      "name": "audio-speech-binary",
+      "declared": {
+        "kind": "audio",
+        "family": "speech",
+        "ratios": null,
+        "resolutions": null,
+        "durations": null,
+        "max_count": 1,
+        "reference_images": 0,
+        "frames": 0,
+        "voices": [
+          {
+            "id": "alloy",
+            "label": "Alloy"
+          },
+          {
+            "id": "nova",
+            "label": "Nova"
+          }
+        ],
+        "custom_voice": false,
+        "speeds": [
+          0.75,
+          1.0,
+          1.25,
+          1.5
+        ],
+        "formats": [
+          "mp3",
+          "wav"
+        ],
+        "max_chars": 4096,
+        "lyrics": false,
+        "instrumental": false
+      },
+      "document": {
+        "version": 1,
+        "name": "OpenAI 兼容语音",
+        "kind": "audio",
+        "auth": {
+          "type": "bearer"
+        },
+        "submit": {
+          "path": "/v1/audio/speech",
+          "format": "json",
+          "body": {
+            "model": "$model",
+            "input": "$prompt",
+            "voice": "$voice",
+            "speed": "$speed",
+            "response_format": "$format"
+          }
+        },
+        "options": {
+          "voices": [
+            {
+              "id": "alloy",
+              "label": "Alloy"
+            },
+            {
+              "id": "nova",
+              "label": "Nova"
+            }
+          ],
+          "speeds": [
+            0.75,
+            1,
+            1.25,
+            1.5
+          ],
+          "formats": [
+            "mp3",
+            "wav"
+          ],
+          "max_chars": 4096
+        },
+        "result": {
+          "body": "binary"
+        }
+      }
+    },
+    {
+      "name": "audio-music-async",
+      "declared": {
+        "kind": "audio",
+        "family": "music",
+        "ratios": null,
+        "resolutions": null,
+        "durations": null,
+        "max_count": 2,
+        "reference_images": 0,
+        "frames": 0,
+        "voices": null,
+        "custom_voice": false,
+        "speeds": null,
+        "formats": null,
+        "max_chars": null,
+        "lyrics": true,
+        "instrumental": true
+      },
+      "document": {
+        "version": 1,
+        "name": "歌曲任务",
+        "kind": "audio",
+        "auth": {
+          "type": "bearer"
+        },
+        "submit": {
+          "path": "/song",
+          "format": "json",
+          "body": {
+            "model": "$model",
+            "prompt": "$prompt",
+            "lyric": "$lyrics",
+            "pure": "$instrumental",
+            "n": "$n"
+          }
+        },
+        "options": {
+          "count": 2
+        },
+        "poll": {
+          "path": "/task/${taskId}",
+          "task_id": "id",
+          "status": "status",
+          "success": [
+            "done"
+          ],
+          "failure": [
+            "fail"
+          ],
+          "interval_seconds": 3,
+          "result": {
+            "urls": [
+              "songs.*.url"
+            ]
+          }
+        }
+      }
     }
   ],
   "invalid": [
@@ -651,6 +792,28 @@
         "catalog": {
           "path": "/v1/models",
           "price": "pricing"
+        }
+      }
+    },
+    {
+      "name": "binary-on-image",
+      "path": "result.body",
+      "patch": {
+        "result": {
+          "body": "binary"
+        }
+      }
+    },
+    {
+      "name": "audio-placeholder-on-image",
+      "path": "submit.body.v",
+      "patch": {
+        "submit": {
+          "path": "/v1/x",
+          "body": {
+            "prompt": "$prompt",
+            "v": "$voice"
+          }
         }
       }
     }

@@ -42,11 +42,14 @@ SUBMIT_RESPONSE_LIMIT = 64 * 1024 * 1024
 POLL_RESPONSE_LIMIT = 2 * 1024 * 1024
 IMAGE_LIMIT = 50 * 1024 * 1024
 VIDEO_LIMIT = 1024 * 1024 * 1024
+AUDIO_LIMIT = 50 * 1024 * 1024
+# 二进制响应出错时只读这么多当错误文本。
+BINARY_ERROR_LIMIT = 64 * 1024
 INPUT_IMAGE_LIMIT = 20 * 1024 * 1024
 MAX_RESULTS = 8
 ASYNC_SUBMIT_TIMEOUT = (30.0, 120.0)
 POLL_REQUEST_TIMEOUT = 30.0
-DEFAULT_POLL_TIMEOUT = {"image": 600, "video": 1800}
+DEFAULT_POLL_TIMEOUT = {"image": 600, "video": 1800, "audio": 900}
 _RETRYABLE_STATUS = frozenset({502, 503, 504})
 _MIME = {".png": "image/png", ".jpg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
 
@@ -99,7 +102,7 @@ def bind(alias: str, model: str, kind: str) -> Binding:
     except ProtocolUnavailableError as error:
         raise DeclarativeError(str(error)) from None
     if protocol.kind != kind:
-        label = "图片" if kind == "image" else "视频"
+        label = {"image": "图片", "video": "视频", "audio": "音频"}[kind]
         raise DeclarativeError(f"自定义接口「{protocol.name}」不是{label}接口")
     try:
         base = outbound_guard.check_base_url(key.base_url)
@@ -171,6 +174,8 @@ def build_context(protocol: HttpProtocol, *, prompt: str, model: str,
     n = int(params.get("n") or 1)
     if not 1 <= n <= caps["max_count"]:
         raise DeclarativeError(f"该接口一次最多出 {caps['max_count']} 张")
+    if protocol.kind == "audio":
+        return _audio_context(protocol, caps, prompt=prompt, model=model, n=n, params=params)
     duration = _choice(params.get("duration"), caps["durations"], "时长", numeric=True)
     context: dict[str, Any] = {
         "prompt": prompt, "model": model, "n": n,
@@ -187,6 +192,38 @@ def build_context(protocol: HttpProtocol, *, prompt: str, model: str,
             context[name] = [encoder(p, encoding, labels[p]) for p in value]
         elif value is not None:
             context[name] = encoder(value, encoding, labels[value])
+    context.update(derive_values(protocol.derive, context))
+    return context
+
+
+def _audio_context(protocol: HttpProtocol, caps: dict[str, Any], *, prompt: str, model: str,
+                   n: int, params: dict[str, Any]) -> dict[str, Any]:
+    """音频的占位符取值：按模板声明校验，不合声明的参数当场拒绝，请求不发出。"""
+    text = prompt.strip()
+    if caps["max_chars"] and len(text) > caps["max_chars"]:
+        raise DeclarativeError(f"文本不能超过 {caps['max_chars']} 字")
+    context: dict[str, Any] = {"prompt": text, "model": model, "n": n}
+    voices = [item["id"] for item in caps["voices"] or []]
+    if voices:
+        voice = str(params.get("voice") or "").strip() or voices[0]
+        if voice not in voices and not caps["custom_voice"]:
+            raise DeclarativeError(f"音色 {voice} 不在该接口支持的范围内")
+        context["voice"] = voice
+    if caps["speeds"]:
+        raw = params.get("speed")
+        speed = 1 if raw in (None, "") else raw
+        matched = next((v for v in caps["speeds"] if abs(float(v) - float(speed)) < 1e-6), None)
+        if matched is None:
+            options = "、".join(map(str, caps["speeds"]))
+            raise DeclarativeError(f"语速 {speed} 不在该接口支持的范围内（可选：{options}）")
+        context["speed"] = int(matched) if float(matched).is_integer() else matched
+    if caps["formats"]:
+        context["format"] = _choice(params.get("response_format"), caps["formats"], "格式")
+    if caps["instrumental"]:
+        context["instrumental"] = params.get("instrumental") is True
+    if caps["lyrics"] and not context.get("instrumental"):
+        lyrics = str(params.get("lyrics") or "").strip()
+        context["lyrics"] = lyrics or None
     context.update(derive_values(protocol.derive, context))
     return context
 
@@ -348,6 +385,116 @@ def send(call: PreparedCall, *, timeout, error_path: str | None) -> Any:
     raise DeclarativeError("custom api: retries exhausted")
 
 
+def send_binary(call: PreparedCall, target: Path, *, timeout, error_path: str | None) -> str:
+    """提交并把整个响应体当成音频流式写进 target；返回响应的 Content-Type。
+
+    与 send() 同一套约束：只在确定没送达时重试；不跟随重定向；响应头到达后读体失败当场致命
+    （此时多半已计费，重发就是第二次计费）；报错文本遮掉密钥，异常 `from None` 不带原始 URL。
+    """
+    from .openai_image import _is_pre_flight_failure
+
+    for attempt in range(3):
+        try:
+            response = requests.request(
+                call.method, call.url, headers=call.headers,
+                json=call.json_body if not call.parts else None,
+                files=call.parts or None, timeout=timeout, stream=True, allow_redirects=False,
+            )
+        except requests.RequestException as error:
+            if _is_pre_flight_failure(error) and attempt < 2:
+                time.sleep(1 + attempt)
+                continue
+            raise DeclarativeError(_transport_error(call, error, received=False)) from None
+        with response:
+            status = response.status_code
+            content_type = str(response.headers.get("Content-Type") or "").lower()
+            if 300 <= status < 400:
+                raise DeclarativeError(f"custom api {status}: 接口返回了重定向，自定义接口不跟随重定向")
+            if status >= 400 or "json" in content_type or content_type.startswith("text/"):
+                try:
+                    raw = outbound_guard.read_limited(response, BINARY_ERROR_LIMIT)
+                except outbound_guard.OutboundError:
+                    raw = b""
+                except requests.RequestException as error:
+                    raise DeclarativeError(_transport_error(call, error, received=True)) from None
+                if status >= 400:
+                    if status in _RETRYABLE_STATUS and attempt < 2:
+                        time.sleep(1 + attempt)
+                        continue
+                    text = _error_text(_decode_json(raw), raw, error_path)
+                    raise DeclarativeError(redact(call, f"custom api {status}: {text}"))
+                text = _error_text(_decode_json(raw), raw, error_path)
+                raise DeclarativeError(redact(call, f"custom api 返回的不是音频：{text}"))
+            try:
+                with target.open("wb") as stream:
+                    outbound_guard.read_limited(response, AUDIO_LIMIT, stream.write)
+            except outbound_guard.OutboundError as error:
+                target.unlink(missing_ok=True)
+                raise DeclarativeError(f"custom api 响应过大：{error}") from None
+            except requests.RequestException as error:
+                target.unlink(missing_ok=True)
+                raise DeclarativeError(_transport_error(call, error, received=True)) from None
+            return content_type
+    raise DeclarativeError("custom api: retries exhausted")
+
+
+# 文件头 → 落盘后缀；与 job_runner.is_valid_audio 认的格式一致，不新增格式。
+def audio_suffix(head: bytes) -> str | None:
+    if head.startswith(b"ID3") or (len(head) >= 2 and head[0] == 0xFF and head[1] & 0xE0 == 0xE0
+                                   and head[1] & 0xF6 != 0xF0):
+        return ".mp3"
+    if head.startswith(b"RIFF") and head[8:12] == b"WAVE":
+        return ".wav"
+    if head.startswith(b"fLaC"):
+        return ".flac"
+    if head.startswith(b"OggS"):
+        return ".opus"
+    if len(head) >= 2 and head[0] == 0xFF and head[1] & 0xF6 == 0xF0:
+        return ".aac"
+    return None
+
+
+def _finish_audio(source: Path, output_dir: Path, index: int) -> str:
+    """按文件头定后缀（Content-Type 只作参考，冲突时以文件头为准）；认不出的格式不落盘。"""
+    with source.open("rb") as stream:
+        head = stream.read(16)
+    if head.lstrip().startswith((b"{", b"[")):
+        source.unlink(missing_ok=True)
+        raise DeclarativeError("custom api 返回的是 JSON，不是音频；请核对接口模板的结果设置")
+    suffix = audio_suffix(head)
+    if suffix is None:
+        source.unlink(missing_ok=True)
+        raise DeclarativeError("厂商返回了无法识别的音频格式（支持 mp3、wav、flac、opus、aac）")
+    target = output_dir / f"v{index}{suffix}"
+    source.replace(target)
+    return str(target)
+
+
+def _decode_hex(value: str, limit: int) -> bytes:
+    if len(value) // 2 > limit:
+        raise DeclarativeError("厂商返回的 hex 结果超过大小上限")
+    try:
+        return bytes.fromhex(value)
+    except ValueError:
+        raise DeclarativeError("厂商返回的 hex 结果无法解码") from None
+
+
+def _write_audios(items, output_dir: Path, trusted, task_ref: str) -> list[str]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for index, (kind, value) in enumerate(items, start=1):
+        part = output_dir / f"v{index}.part"
+        if kind == "base64":
+            part.write_bytes(_decode_base64(value, AUDIO_LIMIT))
+        elif kind == "hex":
+            part.write_bytes(_decode_hex(value, AUDIO_LIMIT))
+        else:
+            with part.open("wb") as stream:
+                _download(value, AUDIO_LIMIT, trusted, task_ref, sink=stream.write)
+        paths.append(_finish_audio(part, output_dir, index))
+    return paths
+
+
 # ---------------------------------------------------------------- 结果
 
 
@@ -358,10 +505,11 @@ def _summary(payload: Any) -> str:
 def _results(payload: Any, spec: ResultSpec, sent: set[str],
              task_ref: str = "") -> list[tuple[str, str]]:
     items = [("base64", v) for v in strings_at(payload, spec.base64)]
+    items += [("hex", v) for v in strings_at(payload, spec.hex)]
     items += [("url", v) for v in strings_at(payload, spec.urls)
               if not video_poll.is_echoed_input(v, sent)]
     if not items:
-        paths = "、".join([*spec.base64, *spec.urls])
+        paths = "、".join([*spec.base64, *spec.hex, *spec.urls])
         raise DeclarativeError(video_poll.with_task_ref(
             f"自定义接口按 {paths} 取不到结果，请核对接口模板；厂商响应：{_summary(payload)}",
             task_ref))
@@ -564,4 +712,35 @@ def render_video(*, prompt: str, model: str, alias: str, output_dir: Path | str,
     items, task_id = _execute(binding, context, params, persist=persist, on_phase=on_phase,
                               should_cancel=should_cancel)
     return _write_videos(items[:1], Path(output_dir), outbound_guard.origin(binding.base),
+                         task_id)
+
+
+def render_audio(*, prompt: str, model: str, alias: str, output_dir: Path | str,
+                 params: dict[str, Any] | None = None, n: int | None = None, on_phase=None,
+                 on_params_changed=None, should_cancel=None, **_kwargs) -> list[str]:
+    params = params if params is not None else {}
+    binding = bind(alias, model, "audio")
+    count = n if n is not None else params.get("n")
+    context = build_context(binding.protocol, prompt=prompt, model=model,
+                            params={**params, "n": count or 1})
+    target_dir = Path(output_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    protocol = binding.protocol
+    if protocol.result.body == "binary":
+        if should_cancel and should_cancel():
+            raise DeclarativeError("生成已按请求停止，尚未提交厂商请求")
+        call = prepare(binding.base, binding.key.access_key, protocol, context)
+        if on_phase:
+            on_phase("sent")
+        part = target_dir / "v1.part"
+        send_binary(call, part, timeout=net_env.DEFAULT_TIMEOUT, error_path=protocol.result.error)
+        return [_finish_audio(part, target_dir, 1)]
+
+    def persist(_task_id: str) -> None:
+        if on_params_changed:
+            on_params_changed()
+
+    items, task_id = _execute(binding, context, params, persist=persist, on_phase=on_phase,
+                              should_cancel=should_cancel)
+    return _write_audios(items[:context["n"]], target_dir, outbound_guard.origin(binding.base),
                          task_id)

@@ -27,10 +27,11 @@ export function examplesFor(kind: HttpProtocolKind) {
 
 const HELP = (
   <div className="max-w-xs space-y-1 text-xs">
-    <p>整值占位：$prompt $model $n $ratio $resolution $images $image；视频另有 $duration $durationText $firstFrame $lastFrame；轮询地址用 {'${taskId}'}。</p>
+    <p>整值占位：$prompt $model $n；图片 / 视频另有 $ratio $resolution $images $image；视频另有 $duration $durationText $firstFrame $lastFrame；音频另有 $voice $speed $format $lyrics $instrumental；轮询地址用 {'${taskId}'}。</p>
     <p>字符串内插写 {'${name}'}，字面量 $ 写 $$。取值路径如 data.*.url。</p>
     <p>参考图编码 encode：data_url / base64 / file（表单上传）/ url（需先配置对象存储）。</p>
-    <p>不支持：签名、多步上传、回调、二进制响应、参考视频 / 音频。</p>
+    <p>音频的同步接口可用 result.body = binary（响应体即音频）；hex 结果写 result.hex。</p>
+    <p>不支持：签名、多步上传、回调、流式响应、图片与视频的二进制响应、参考视频 / 音频。</p>
   </div>
 );
 

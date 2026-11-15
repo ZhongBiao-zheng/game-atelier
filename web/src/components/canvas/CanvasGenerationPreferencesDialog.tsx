@@ -281,7 +281,7 @@ export function CanvasGenerationPreferencesDialog({
   // 「自动」按组内第一个成员算参数控件；图片可选范围取成员交集。
   const effectiveChannel = effectiveChoice ? routeChannel(effectiveChoice.key, effectiveChoice.model) : null;
   const audioCaps = activeMode === 'audio' && effectiveChannel
-    ? audioCapsOf(effectiveChannel.model.id, effectiveChannel.key.provider, effectiveChannel.model.protocol)
+    ? audioCapsOf(effectiveChannel.model.id, effectiveChannel.key.provider, effectiveChannel.model.protocol, effectiveChannel.model.declared)
     : null;
   const imageCaps = activeMode === 'image' && effectiveChoice
     ? selectionImageCaps(effectiveChoice.key, effectiveChoice.model.id)

@@ -8,7 +8,7 @@ import { availableDeclared, type ModelDeclared } from '@/schema/httpProtocols';
 import { modelModality, type KeyView } from '@/api/keys';
 import { imageFamily, isEvolinkMidjourney, supportsImageQuality } from '@/lib/modelFamily';
 import { maxReferenceImages } from '@/lib/referenceLimits';
-import { audioCapsOf, audioProtocolOf, normalizeMusicParams, normalizeSpeechParams } from '@/lib/audioCaps';
+import { audioCapsOf, audioProtocolOf, declaredAudioCaps, normalizeMusicParams, normalizeSpeechParams } from '@/lib/audioCaps';
 import type {
   CanvasContentNode,
   CanvasBatchMaterialNode,
@@ -997,7 +997,7 @@ export type CanvasAudioFamily = 'speech' | 'music';
 /** 音频模型属于语音还是音乐（「自动」与局域网模型按第一个成员判断）；不是可执行的音频模型返回 null。 */
 export function canvasAudioFamily(key: KeyView, model: KeyView['models'][number]): CanvasAudioFamily | null {
   const channel = routeChannel(key, model);
-  return audioCapsOf(channel.model.id, channel.key.provider, channel.model.protocol)?.family ?? null;
+  return audioCapsOf(channel.model.id, channel.key.provider, channel.model.protocol, channel.model.declared)?.family ?? null;
 }
 
 /** 草稿对应的偏好槽位：音乐模型的音频草稿记在 music，其余按生成模式。 */
@@ -1028,9 +1028,9 @@ export function canvasGenerationModelSupportsMode(
     && (mode !== 'video' || canvasVideoModelIsRoutable(key, model))
     && (!options.editingExistingVideo || supportsCanvasVideoEdit(model.id, model.protocol))
     && (mode !== 'audio'
-      || (supportsCanvasAudioGeneration(model.id, key.provider, model.protocol)
+      || (supportsCanvasAudioGeneration(model.id, key.provider, model.protocol, model.declared)
         && (!options.audioFamily
-          || audioCapsOf(model.id, key.provider, model.protocol)?.family === options.audioFamily)))
+          || audioCapsOf(model.id, key.provider, model.protocol, model.declared)?.family === options.audioFamily)))
     && (mode !== 'text'
       || supportsCanvasTextGeneration(key.provider, model.protocol));
 }
@@ -1103,7 +1103,7 @@ function normalizedCanvasGenerationParams(
   }
   if (mode === 'video') return normalizeCanvasVideoParams(model.id, model.protocol, current, false, model.declared);
   if (mode === 'audio') {
-    return normalizeCanvasAudioParams(model.id, key.provider, model.protocol, current);
+    return normalizeCanvasAudioParams(model.id, key.provider, model.protocol, current, model.declared);
   }
   return normalizeCanvasTextParams(model.protocol, current);
 }
@@ -1370,7 +1370,9 @@ export function supportsCanvasAudioGeneration(
   model: string,
   provider: string | null | undefined,
   protocol: string | null | undefined,
+  declared?: ModelDeclared | null,
 ) {
+  if (protocol === 'declarative') return declaredAudioCaps(declared) !== null;
   return audioProtocolOf(model, provider, protocol) !== null;
 }
 
@@ -1379,8 +1381,9 @@ export function normalizeCanvasAudioParams(
   provider: string | null | undefined,
   protocol: string | null | undefined,
   current: JobParams,
+  declared?: ModelDeclared | null,
 ): JobParams {
-  const caps = audioCapsOf(model, provider, protocol);
+  const caps = audioCapsOf(model, provider, protocol, declared);
   if (!caps) return {};
   return caps.family === 'music'
     ? normalizeMusicParams(caps, model, current as Record<string, unknown>)

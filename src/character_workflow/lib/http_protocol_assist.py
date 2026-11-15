@@ -199,17 +199,19 @@ def gather_sources(text: str | None, urls: list[str]) -> Sources:
 # ---------------------------------------------------------------- 提示词
 
 SPEC = """模板（JSON，版本 1）字段：
-- version: 1；name: 显示名（≤60 字）；kind: "image" 或 "video"
+- version: 1；name: 显示名（≤60 字）；kind: "image"、"video" 或 "audio"
 - auth: {"type": "bearer"|"header"|"query"|"none", "name"?: 字段名（header/query 必填）, "prefix"?: 前缀（仅 header）}
 - submit: {"path": 以 / 开头的相对路径（只能内插 ${model}）, "format": "json"|"multipart", "headers"?: 固定请求头（不能写鉴权头，不能用占位符）, "body": 请求体}
 - inputs.images: {"max": 1–16, "encode": "data_url"|"base64"|"file"|"url"}（用到参考图占位符时必填；file 只用于 multipart 顶层字段）
 - options: {"ratio"?: [比例], "resolution"?: [分辨率], "duration"?: [秒数], "count": 1–4}（用到对应占位符必须列出可选值）
+- 音频的 options: {"voices"?: [{"id": 音色 id, "label"?: 显示名}], "custom_voice"?: 是否允许填其它音色 id, "speeds"?: [语速档位，0.25–4], "formats"?: ["mp3"|"wav"|"flac"|"opus"|"aac"], "max_chars"?: 文本上限, "count": 语音 1、音乐最多 2}
 - derive: {"名称": {"from": 占位符或两个占位符, "map": {取值: 映射值}}}（两个来源的键用 @ 连接，须覆盖全部组合）
-- result: {"urls": [取值路径], "base64": [取值路径], "error"?: 路径}（同步接口至少一个）
+- result: {"urls": [取值路径], "base64": [取值路径], "hex"?: [取值路径（仅音频）], "error"?: 路径}（同步接口至少一个）
+- result.body: "binary" 表示整个响应体就是音频文件（仅音频的同步接口，如 OpenAI 的 /v1/audio/speech；此时不写取值路径）
 - poll: {"path", "method": "GET"|"POST", "body"?, "task_id": 提交响应里任务号的路径, "status": 状态路径, "success": [成功状态], "failure": [失败状态], "interval_seconds": 1–60, "timeout_seconds": 30–3600, "result": {...}}（异步接口才写；轮询地址用 ${taskId}）
 - catalog?: {"path": 静态相对路径, "items": 列表路径, "id": id 路径, "name"?: 名称路径, "kind"?: {"field": 路径, "map": {取值: "image"|"video"|"text"|"audio"|"excluded"}}}（只在文档写明了模型列表接口时填）
 占位符：整值 "$name" 保留类型；字符串内插 "${name}"；字面量 $ 写 $$。
-内置：$prompt $model $n $ratio $resolution $images $image；视频另有 $duration $durationText $firstFrame $lastFrame；轮询另有 $taskId。
+内置：$prompt $model $n；图片 / 视频另有 $ratio $resolution $images $image；视频另有 $duration $durationText $firstFrame $lastFrame；音频另有 $voice $speed $format $lyrics $instrumental（用到 $lyrics 或 $instrumental 即为音乐接口）；轮询另有 $taskId。
 取值路径用点分，* 遍历数组，数字为下标，如 data.*.url。
 示例：
 {"version": 1, "name": "OpenAI 兼容出图", "kind": "image", "auth": {"type": "bearer"},
@@ -219,8 +221,11 @@ SPEC = """模板（JSON，版本 1）字段：
  "result": {"urls": ["data.*.url"], "base64": ["data.*.b64_json"]}}"""
 
 
+KIND_LABELS = {"image": "图片", "video": "视频", "audio": "音频"}
+
+
 def build_messages(kind: str, sources: Sources) -> tuple[str, str]:
-    label = "图片" if kind == "image" else "视频"
+    label = KIND_LABELS[kind]
     system = (
         f"你是接口配置助手。任务：阅读用户提供的厂商接口文档，为一个{label}生成接口写出一份自定义接口模板。\n"
         "只输出一个 JSON 对象，不要输出解释、Markdown 或其它内容。\n"
@@ -351,7 +356,7 @@ def _record(key: keys.KeySpec, model: keys.ModelSpec, kind: str, *, started: str
 
     job = Job(
         job_id=new_job_id(), character_id=key.alias,
-        prompt=f"AI 帮我配置 · {'图片' if kind == 'image' else '视频'}接口",
+        prompt=f"AI 帮我配置 · {KIND_LABELS[kind]}接口",
         submitted_at=started, completed_at=_now(), model=model.id,
         params=JobParams(estimated_cost_cny=cost), output_paths=[],
         status=JobStatus.FAILED if error else JobStatus.DONE, error=error,
@@ -362,8 +367,8 @@ def _record(key: keys.KeySpec, model: keys.ModelSpec, kind: str, *, started: str
 
 def draft(*, kind: str, alias: str, model_id: str, text: str | None, urls: list[str]
           ) -> dict[str, Any]:
-    if kind not in ("image", "video"):
-        raise AssistError("类型只能是图片或视频")
+    if kind not in KIND_LABELS:
+        raise AssistError("类型只能是图片、视频或音频")
     urls = [u.strip() for u in urls if u.strip()]
     if len(urls) > MAX_URLS:
         raise AssistError(f"网址最多 {MAX_URLS} 个")

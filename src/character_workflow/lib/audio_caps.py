@@ -21,6 +21,10 @@ _RAW: dict[str, dict[str, Any]] = json.loads(
 _OPENAI_SPEECH_ALIASES = {"openai", "openai-speech", "tts", "speech"}
 _NON_SPEECH_ID_HINTS = ("asr", "speech-to-text", "speech2text", "whisper")
 CUSTOM_VOICE_MAX_LENGTH = 200
+DECLARATIVE = "declarative"
+# 模板没写上限时的兜底：与模板 options.max_chars 的上限一致；歌词上限与 JobParams.lyrics 一致。
+DECLARED_MAX_CHARS = 20000
+DECLARED_MAX_LYRICS = 5000
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,10 @@ class AudioCaps:
     max_count: int
     max_lyrics_chars: int
     no_instrumental_models: tuple[str, ...]
+    # 自定义接口按模板声明：没声明的控件不出现（也不提交）；语速只有离散档位；可能没有纯音乐。
+    controls: frozenset[str] = frozenset({"voice", "speed", "format"})
+    speeds: tuple[float, ...] = ()
+    instrumental_supported: bool = True
 
 
 def _caps(protocol: str, raw: dict[str, Any]) -> AudioCaps:
@@ -89,6 +97,8 @@ def audio_protocol(key: Any, model: Any) -> str | None:
         }
         return protocols.pop() if len(protocols) == 1 and None not in protocols else None
     protocol = model.protocol
+    if protocol == DECLARATIVE:
+        return DECLARATIVE
     if protocol in _OPENAI_SPEECH_ALIASES:
         return "openai-speech"
     if protocol in AUDIO_CAPS:
@@ -100,7 +110,41 @@ def audio_protocol(key: Any, model: Any) -> str | None:
 
 def audio_caps(key: Any, model: Any) -> AudioCaps | None:
     protocol = audio_protocol(key, model)
+    if protocol == DECLARATIVE:
+        from character_workflow.lib.http_protocols import declared_for
+
+        return declared_audio_caps(declared_for(model))
     return AUDIO_CAPS.get(protocol) if protocol else None
+
+
+def declared_audio_caps(declared: dict[str, Any] | None) -> AudioCaps | None:
+    """自定义接口的能力声明（本机模板或局域网快照）→ AudioCaps；前端 declaredAudioCaps 同义。"""
+    if not declared or not declared.get("available", True) or declared.get("kind") != "audio":
+        return None
+    voices = tuple(item["id"] for item in declared.get("voices") or [])
+    speeds = tuple(float(v) for v in declared.get("speeds") or [])
+    formats = tuple(declared.get("formats") or [])
+    controls = frozenset(name for name, present in (("voice", voices), ("speed", speeds),
+                                                    ("format", formats)) if present)
+    return AudioCaps(
+        protocol=DECLARATIVE,
+        family="music" if declared.get("family") == "music" else "speech",
+        voices=voices,
+        default_voice=voices[0] if voices else "",
+        custom_voice=bool(declared.get("custom_voice")),
+        speed_min=min(speeds) if speeds else 1.0,
+        speed_max=max(speeds) if speeds else 1.0,
+        formats=formats,
+        default_format=formats[0] if formats else "",
+        max_chars=int(declared.get("max_chars") or DECLARED_MAX_CHARS),
+        instructions=False,
+        max_count=int(declared.get("max_count") or 1),
+        max_lyrics_chars=DECLARED_MAX_LYRICS if declared.get("lyrics") else 0,
+        no_instrumental_models=(),
+        controls=controls,
+        speeds=speeds,
+        instrumental_supported=bool(declared.get("instrumental")),
+    )
 
 
 def _valid_custom_voice(value: str) -> bool:
@@ -128,7 +172,15 @@ def normalize_speech_params(caps: AudioCaps, params: dict[str, Any]) -> dict[str
     if not math.isfinite(speed):
         speed = 1.0
     speed = round(max(caps.speed_min, min(caps.speed_max, speed)), 2)
-    normalized: dict[str, Any] = {"voice": voice, "response_format": response_format, "speed": speed}
+    if caps.speeds:
+        # 离散档位：吸附到最近一档（同距取较慢的那档）。
+        speed = min(caps.speeds, key=lambda value: (abs(value - speed), value))
+    values = {"voice": voice, "response_format": response_format, "speed": speed}
+    normalized: dict[str, Any] = {
+        name: values[name] for name, control in
+        (("voice", "voice"), ("response_format", "format"), ("speed", "speed"))
+        if control in caps.controls
+    }
     instructions = str(params.get("instructions") or "").strip()
     if caps.instructions and instructions:
         normalized["instructions"] = instructions
@@ -136,7 +188,8 @@ def normalize_speech_params(caps: AudioCaps, params: dict[str, Any]) -> dict[str
 
 
 def supports_instrumental(caps: AudioCaps, model_id: str) -> bool:
-    return caps.family == "music" and model_id not in caps.no_instrumental_models
+    return (caps.family == "music" and caps.instrumental_supported
+            and model_id not in caps.no_instrumental_models)
 
 
 def normalize_music_params(caps: AudioCaps, model_id: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -154,7 +207,7 @@ def normalize_music_params(caps: AudioCaps, model_id: str, params: dict[str, Any
         "n": max(1, min(caps.max_count, count)),
     }
     lyrics = str(params.get("lyrics") or "").strip()
-    if lyrics and not instrumental:
+    if lyrics and not instrumental and caps.max_lyrics_chars > 0:
         if len(lyrics) > caps.max_lyrics_chars:
             raise ValueError(f"歌词不能超过 {caps.max_lyrics_chars} 字")
         normalized["lyrics"] = lyrics

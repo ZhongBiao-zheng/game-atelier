@@ -6,15 +6,51 @@
       "version": 1,
       "name": "OpenAI 兼容出图",
       "kind": "image",
-      "auth": { "type": "bearer" },
+      "auth": {
+        "type": "bearer"
+      },
       "submit": {
         "path": "/v1/images/generations",
-        "body": { "model": "$model", "prompt": "$prompt", "n": "$n", "size": "$size", "image": "$images" }
+        "body": {
+          "model": "$model",
+          "prompt": "$prompt",
+          "n": "$n",
+          "size": "$size",
+          "image": "$images"
+        }
       },
-      "inputs": { "images": { "max": 4 } },
-      "options": { "ratio": ["1:1", "16:9", "9:16"], "count": 4 },
-      "derive": { "size": { "from": "ratio", "map": { "1:1": "1024x1024", "16:9": "1536x1024", "9:16": "1024x1536" } } },
-      "result": { "urls": ["data.*.url"], "base64": ["data.*.b64_json"], "error": "error.message" }
+      "inputs": {
+        "images": {
+          "max": 4
+        }
+      },
+      "options": {
+        "ratio": [
+          "1:1",
+          "16:9",
+          "9:16"
+        ],
+        "count": 4
+      },
+      "derive": {
+        "size": {
+          "from": "ratio",
+          "map": {
+            "1:1": "1024x1024",
+            "16:9": "1536x1024",
+            "9:16": "1024x1536"
+          }
+        }
+      },
+      "result": {
+        "urls": [
+          "data.*.url"
+        ],
+        "base64": [
+          "data.*.b64_json"
+        ],
+        "error": "error.message"
+      }
     }
   },
   {
@@ -24,22 +60,53 @@
       "version": 1,
       "name": "异步出图任务",
       "kind": "image",
-      "auth": { "type": "bearer" },
+      "auth": {
+        "type": "bearer"
+      },
       "submit": {
         "path": "/v1/tasks",
-        "body": { "model": "$model", "prompt": "$prompt", "aspect_ratio": "$ratio", "images": "$images" }
+        "body": {
+          "model": "$model",
+          "prompt": "$prompt",
+          "aspect_ratio": "$ratio",
+          "images": "$images"
+        }
       },
-      "inputs": { "images": { "max": 4 } },
-      "options": { "ratio": ["1:1", "16:9", "9:16"] },
-      "result": { "error": "error.message" },
+      "inputs": {
+        "images": {
+          "max": 4
+        }
+      },
+      "options": {
+        "ratio": [
+          "1:1",
+          "16:9",
+          "9:16"
+        ]
+      },
+      "result": {
+        "error": "error.message"
+      },
       "poll": {
         "path": "/v1/tasks/${taskId}",
         "task_id": "data.task_id",
         "status": "data.status",
-        "success": ["succeeded", "completed"],
-        "failure": ["failed", "canceled"],
+        "success": [
+          "succeeded",
+          "completed"
+        ],
+        "failure": [
+          "failed",
+          "canceled"
+        ],
         "interval_seconds": 3,
-        "result": { "urls": ["data.output.*.url", "data.output.*"], "error": "data.error" }
+        "result": {
+          "urls": [
+            "data.output.*.url",
+            "data.output.*"
+          ],
+          "error": "data.error"
+        }
       }
     }
   },
@@ -50,25 +117,113 @@
       "version": 1,
       "name": "异步视频任务",
       "kind": "video",
-      "auth": { "type": "bearer" },
+      "auth": {
+        "type": "bearer"
+      },
       "submit": {
         "path": "/v1/videos",
         "body": {
-          "model": "$model", "prompt": "$prompt", "first_frame": "$firstFrame", "last_frame": "$lastFrame",
-          "aspect_ratio": "$ratio", "duration": "$duration"
+          "model": "$model",
+          "prompt": "$prompt",
+          "first_frame": "$firstFrame",
+          "last_frame": "$lastFrame",
+          "aspect_ratio": "$ratio",
+          "duration": "$duration"
         }
       },
-      "inputs": { "images": { "max": 2 } },
-      "options": { "ratio": ["16:9", "9:16"], "duration": [5, 10] },
-      "result": { "error": "error.message" },
+      "inputs": {
+        "images": {
+          "max": 2
+        }
+      },
+      "options": {
+        "ratio": [
+          "16:9",
+          "9:16"
+        ],
+        "duration": [
+          5,
+          10
+        ]
+      },
+      "result": {
+        "error": "error.message"
+      },
       "poll": {
         "path": "/v1/videos/${taskId}",
         "task_id": "id",
         "status": "status",
-        "success": ["completed", "succeeded"],
-        "failure": ["failed"],
+        "success": [
+          "completed",
+          "succeeded"
+        ],
+        "failure": [
+          "failed"
+        ],
         "interval_seconds": 5,
-        "result": { "urls": ["video_url", "data.*.url"], "error": "error.message" }
+        "result": {
+          "urls": [
+            "video_url",
+            "data.*.url"
+          ],
+          "error": "error.message"
+        }
+      }
+    }
+  },
+  {
+    "id": "openai-speech",
+    "label": "OpenAI 兼容语音",
+    "document": {
+      "version": 1,
+      "name": "OpenAI 兼容语音",
+      "kind": "audio",
+      "auth": {
+        "type": "bearer"
+      },
+      "submit": {
+        "path": "/v1/audio/speech",
+        "body": {
+          "model": "$model",
+          "input": "$prompt",
+          "voice": "$voice",
+          "speed": "$speed",
+          "response_format": "$format"
+        }
+      },
+      "options": {
+        "voices": [
+          {
+            "id": "alloy",
+            "label": "Alloy"
+          },
+          {
+            "id": "nova",
+            "label": "Nova"
+          },
+          {
+            "id": "shimmer",
+            "label": "Shimmer"
+          },
+          {
+            "id": "onyx",
+            "label": "Onyx"
+          }
+        ],
+        "speeds": [
+          0.75,
+          1,
+          1.25,
+          1.5
+        ],
+        "formats": [
+          "mp3",
+          "wav"
+        ],
+        "max_chars": 4096
+      },
+      "result": {
+        "body": "binary"
       }
     }
   }

@@ -98,6 +98,6 @@ def test_bundled_examples_are_valid(example):
     parse_protocol(example["document"])
 
 
-def test_examples_cover_sync_image_async_image_and_video():
+def test_examples_cover_sync_image_async_image_video_and_speech():
     shapes = {(e["document"]["kind"], "poll" in e["document"]) for e in EXAMPLES}
-    assert shapes == {("image", False), ("image", True), ("video", True)}
+    assert shapes == {("image", False), ("image", True), ("video", True), ("audio", False)}

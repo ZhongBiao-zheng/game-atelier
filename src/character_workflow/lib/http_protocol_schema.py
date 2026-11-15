@@ -14,15 +14,23 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 PROTOCOL_VERSION = 1
 
-# 内置占位符 → 可用范围。taskId 只在轮询里有意义；时长与首尾帧只对视频有意义。
+# 内置占位符 → 可用范围。taskId 只在轮询里有意义；时长与首尾帧只对视频有意义；
+# 音色、语速、格式、歌词、纯音乐只对音频有意义。
 BUILTIN_PLACEHOLDERS: dict[str, str] = {
-    "prompt": "any", "model": "any", "n": "any", "ratio": "any", "resolution": "any",
-    "duration": "video", "durationText": "video", "images": "any", "image": "any",
+    "prompt": "any", "model": "any", "n": "any", "ratio": "visual", "resolution": "visual",
+    "duration": "video", "durationText": "video", "images": "visual", "image": "visual",
     "firstFrame": "video", "lastFrame": "video", "taskId": "poll",
+    "voice": "audio", "speed": "audio", "format": "audio", "lyrics": "audio",
+    "instrumental": "audio",
 }
 IMAGE_PLACEHOLDERS = frozenset({"images", "image", "firstFrame", "lastFrame"})
+# 用到其中任一个即为音乐接口，否则音频接口按语音处理。
+MUSIC_PLACEHOLDERS = frozenset({"lyrics", "instrumental"})
 # 派生值只能从这些单值占位符换算。
-DERIVABLE = frozenset({"ratio", "resolution", "duration", "n", "model"})
+DERIVABLE = frozenset({"ratio", "resolution", "duration", "n", "model",
+                       "voice", "speed", "format", "instrumental"})
+AUDIO_FORMATS = ("mp3", "wav", "flac", "opus", "aac")
+AUDIO_MAX_COUNT = 2
 # 固定请求头里不允许出现的键：鉴权由 auth 注入，其余由 HTTP 库负责。
 FORBIDDEN_HEADERS = frozenset({
     "authorization", "proxy-authorization", "host", "cookie", "content-length",
@@ -74,7 +82,16 @@ class Submit(_Strict):
 class ResultSpec(_Strict):
     urls: list[str] = Field(default_factory=list, max_length=8)
     base64: list[str] = Field(default_factory=list, max_length=8)
+    # hex 编码的结果（MiniMax 一类语音接口），只用于音频。
+    hex: list[str] = Field(default_factory=list, max_length=8)
     error: str | None = None
+    # binary：整个响应体就是结果文件。只对音频的同步接口开放（ADR-0036 2026-11-15 修订）。
+    body: Literal["json", "binary"] = "json"
+
+
+class VoiceOption(_Strict):
+    id: str = Field(min_length=1, max_length=200)
+    label: str | None = Field(default=None, max_length=40)
 
 
 class Options(_Strict):
@@ -82,6 +99,13 @@ class Options(_Strict):
     resolution: list[str] | None = Field(default=None, min_length=1, max_length=32)
     duration: list[int] | None = Field(default=None, min_length=1, max_length=32)
     count: int = Field(default=1, ge=1, le=4)
+    # 音频：音色清单（第一个是默认）、是否允许手填音色 ID、离散语速档位、输出格式、文本上限。
+    voices: list[VoiceOption] | None = Field(default=None, min_length=1, max_length=64)
+    custom_voice: bool = False
+    speeds: list[float] | None = Field(default=None, min_length=1, max_length=16)
+    formats: list[Literal["mp3", "wav", "flac", "opus", "aac"]] | None = Field(
+        default=None, min_length=1, max_length=5)
+    max_chars: int | None = Field(default=None, ge=1, le=20000)
 
 
 class Derive(_Strict):
@@ -120,7 +144,7 @@ class Catalog(_Strict):
 class HttpProtocol(_Strict):
     version: Literal[1]
     name: str = Field(min_length=1, max_length=60)
-    kind: Literal["image", "video"]
+    kind: Literal["image", "video", "audio"]
     auth: Auth
     submit: Submit
     inputs: Inputs = Field(default_factory=Inputs)
@@ -210,9 +234,15 @@ def _check_result_path(value: str, where: str) -> list[Issue]:
 
 def _check_result(spec: ResultSpec, where: str) -> list[Issue]:
     issues = []
-    if not spec.urls and not spec.base64:
-        issues.append(Issue(path=where, message="至少要写一个 urls 或 base64 路径"))
-    for field in ("urls", "base64"):
+    if spec.body == "binary":
+        if spec.urls or spec.base64 or spec.hex:
+            issues.append(Issue(path=where, message="二进制响应不需要 urls / base64 / hex 路径"))
+        if spec.error:
+            issues += _check_result_path(spec.error, f"{where}.error")
+        return issues
+    if not spec.urls and not spec.base64 and not spec.hex:
+        issues.append(Issue(path=where, message="至少要写一个 urls、base64 或 hex 路径"))
+    for field in ("urls", "base64", "hex"):
         for i, item in enumerate(getattr(spec, field)):
             issues += _check_result_path(item, f"{where}.{field}.{i}")
     if spec.error:
@@ -257,6 +287,10 @@ def _placeholder_issue(p: HttpProtocol, name: str, where: str, known: set[str],
         return [Issue(path=where, message="$taskId 只能用在轮询里")]
     if scope == "video" and p.kind != "video":
         return [Issue(path=where, message=f"${name} 只能用在视频接口里")]
+    if scope == "audio" and p.kind != "audio":
+        return [Issue(path=where, message=f"${name} 只能用在音频接口里")]
+    if scope == "visual" and p.kind == "audio":
+        return [Issue(path=where, message=f"音频接口不能用 ${name}")]
     return []
 
 
@@ -269,7 +303,20 @@ def _option_values(p: HttpProtocol, name: str) -> list[str] | None:
         return None if p.options.duration is None else [str(v) for v in p.options.duration]
     if name == "n":
         return [str(v) for v in range(1, p.options.count + 1)]
+    if name == "voice":
+        return None if p.options.voices is None else [v.id for v in p.options.voices]
+    if name == "speed":
+        return None if p.options.speeds is None else [_number_text(v) for v in p.options.speeds]
+    if name == "format":
+        return None if p.options.formats is None else list(p.options.formats)
+    if name == "instrumental":
+        return ["true", "false"]
     return None
+
+
+def _number_text(value: float) -> str:
+    """语速 1.0 与 1 写进派生表都是 "1"：派生键与运行时取值用同一种写法。"""
+    return str(int(value)) if float(value).is_integer() else str(value)
 
 
 def _derive_issues(p: HttpProtocol) -> list[Issue]:
@@ -363,6 +410,32 @@ def _option_issues(p: HttpProtocol, used: set[str]) -> list[Issue]:
                             message="一次出多张必须在正文里用 $n（不支持循环多次提交）"))
     if p.kind == "video" and p.options.count != 1:
         issues.append(Issue(path="options.count", message="视频接口一次只出一条"))
+    issues += _audio_option_issues(p, used)
+    return issues
+
+
+def _audio_option_issues(p: HttpProtocol, used: set[str]) -> list[Issue]:
+    o = p.options
+    declared = {"voices": o.voices, "speeds": o.speeds, "formats": o.formats,
+                "max_chars": o.max_chars, "custom_voice": o.custom_voice or None}
+    if p.kind != "audio":
+        return [Issue(path=f"options.{name}", message="只有音频接口能声明这一项")
+                for name, value in declared.items() if value is not None]
+    issues = []
+    for name, option in (("voice", "voices"), ("speed", "speeds"), ("format", "formats")):
+        if name in used and declared[option] is None:
+            issues.append(Issue(path=f"options.{option}",
+                                message=f"用到 ${name} 必须在 options.{option} 列出可选值"))
+    if o.custom_voice and "voice" not in used:
+        issues.append(Issue(path="options.custom_voice", message="允许自定义音色必须在正文里用到 $voice"))
+    if o.speeds is not None and any(not 0.25 <= v <= 4 for v in o.speeds):
+        issues.append(Issue(path="options.speeds", message="语速档位要在 0.25–4 之间"))
+    if o.voices is not None and len({v.id for v in o.voices}) != len(o.voices):
+        issues.append(Issue(path="options.voices", message="音色 id 不能重复"))
+    music = bool(used & MUSIC_PLACEHOLDERS)
+    if o.count > (AUDIO_MAX_COUNT if music else 1):
+        issues.append(Issue(path="options.count",
+                            message=f"音乐一次最多 {AUDIO_MAX_COUNT} 条" if music else "语音一次只出一条"))
     return issues
 
 
@@ -395,6 +468,23 @@ def _body_issues(p: HttpProtocol) -> list[Issue]:
     return []
 
 
+def _binary_issues(p: HttpProtocol) -> list[Issue]:
+    """二进制响应与 hex 只对音频放开；二进制还要求同步（ADR-0036 2026-11-15 修订）。"""
+    issues = []
+    if p.result.body == "binary":
+        if p.kind != "audio":
+            issues.append(Issue(path="result.body", message="二进制响应只用于音频接口"))
+        if p.poll is not None:
+            issues.append(Issue(path="result.body", message="二进制响应只用于同步接口（不能配 poll）"))
+    if p.poll is not None and p.poll.result.body == "binary":
+        issues.append(Issue(path="poll.result.body", message="轮询结果只能是 JSON"))
+    specs = [("result", p.result)] + ([("poll.result", p.poll.result)] if p.poll else [])
+    for where, spec in specs:
+        if spec.hex and p.kind != "audio":
+            issues.append(Issue(path=f"{where}.hex", message="hex 结果只用于音频接口"))
+    return issues
+
+
 def _semantic_issues(p: HttpProtocol) -> list[Issue]:
     known = set(BUILTIN_PLACEHOLDERS) | set(p.derive)
     body_names = placeholders_in(p.submit.body, "submit.body")
@@ -409,6 +499,7 @@ def _semantic_issues(p: HttpProtocol) -> list[Issue]:
         issues += _check_result(p.result, "result")
     if p.poll is not None and p.result.error:
         issues += _check_result_path(p.result.error, "result.error")
+    issues += _binary_issues(p)
     used = used_placeholders(p)
     issues += _option_issues(p, used)
     issues += _image_issues(p, used, body_names)
@@ -462,6 +553,8 @@ def declared_capabilities(protocol: HttpProtocol) -> dict[str, Any]:
         reference = min(limit, 1)
     else:
         reference = 0
+    if protocol.kind == "audio":
+        return _audio_capabilities(protocol, used)
     return {
         "kind": protocol.kind,
         "ratios": protocol.options.ratio if "ratio" in used else None,
@@ -471,4 +564,25 @@ def declared_capabilities(protocol: HttpProtocol) -> dict[str, Any]:
         "max_count": protocol.options.count if "n" in used else 1,
         "reference_images": reference,
         "frames": 2 if "lastFrame" in used else 1 if "firstFrame" in used else 0,
+    }
+
+
+def _audio_capabilities(protocol: HttpProtocol, used: set[str]) -> dict[str, Any]:
+    """音频的能力声明：没用到的控件给 null / false，界面不显示，提交时也不接受。"""
+    o = protocol.options
+    music = bool(used & MUSIC_PLACEHOLDERS)
+    return {
+        "kind": "audio",
+        "family": "music" if music else "speech",
+        "ratios": None, "resolutions": None, "durations": None,
+        "max_count": o.count if "n" in used else 1,
+        "reference_images": 0, "frames": 0,
+        "voices": ([{"id": v.id, "label": v.label or v.id} for v in o.voices]
+                   if "voice" in used and o.voices else None),
+        "custom_voice": bool(o.custom_voice and "voice" in used),
+        "speeds": list(o.speeds) if "speed" in used and o.speeds else None,
+        "formats": list(o.formats) if "format" in used and o.formats else None,
+        "max_chars": o.max_chars,
+        "lyrics": "lyrics" in used,
+        "instrumental": "instrumental" in used,
     }

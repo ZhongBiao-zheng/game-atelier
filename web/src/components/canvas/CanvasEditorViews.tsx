@@ -2184,7 +2184,7 @@ export function CanvasGenerationComposer({
   // 「自动」按组内第一个成员算参数（一期就是它出图）；图片可选范围取成员交集。
   const channel = selectedKey && selectedModel ? routeChannel(selectedKey, selectedModel) : null;
   const audioCaps = draft.mode === 'audio' && channel
-    ? audioCapsOf(channel.model.id, channel.key.provider, channel.model.protocol)
+    ? audioCapsOf(channel.model.id, channel.key.provider, channel.model.protocol, channel.model.declared)
     : null;
   const channelModelId = channel?.model.id ?? draft.model;
   const channelProtocol = channel?.model.protocol;
@@ -2576,6 +2576,7 @@ export function CanvasGenerationComposer({
                       key.provider,
                       model.protocol,
                       current.params,
+                      model.declared,
                     ),
             }));
           }}
@@ -2683,6 +2684,7 @@ export function CanvasGenerationComposer({
                 channel.key.provider,
                 channel.model.protocol,
                 { ...current.params, ...patch },
+                channel.model.declared,
               ),
             }))}
           />
@@ -2698,6 +2700,7 @@ export function CanvasGenerationComposer({
                 channel.key.provider,
                 channel.model.protocol,
                 { ...current.params, ...patch },
+                channel.model.declared,
               ),
             }))}
           />

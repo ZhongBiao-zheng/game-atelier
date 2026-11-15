@@ -5,6 +5,7 @@ import type { KeyView } from '@/api/keys';
 import { declaredImageCaps } from '@/lib/imageControlCaps';
 import { selectionImageCaps, withAutoProvider } from '@/lib/modelRoutes';
 import { videoControlCaps } from '@/lib/videoControlCaps';
+import { declaredAudioCaps } from '@/lib/audioCaps';
 import { canvasGenerationModelSupportsMode } from '@/pages/canvasEditorModel';
 import { estimateGenerationCost } from '@/lib/generationCost';
 import type { DeclaredCapabilities, ModelDeclared } from '@/schema/httpProtocols';
@@ -63,6 +64,14 @@ describe('declared capabilities drive the controls', () => {
       expect(image.resolutions).toEqual(caps.resolutions ?? []);
       expect(image.qualities).toBeNull();
       expect(image.showCustomSize).toBe(false);
+    } else if (caps.kind === 'audio') {
+      const audio = declaredAudioCaps({ available: true, error: null, name: 'x', ...caps });
+      expect(audio?.family).toBe(caps.family);
+      expect(audio?.voices).toEqual(caps.voices ?? []);
+      expect(audio?.speeds).toEqual(caps.speeds ?? []);
+      expect(audio?.formats).toEqual(caps.formats ?? []);
+      expect(audio?.maxCount).toBe(caps.max_count);
+      expect(audio?.instrumentalSupported).toBe(Boolean(caps.instrumental));
     } else {
       const video = videoControlCaps('anything', 'declarative', { available: true, error: null, name: 'x', ...caps });
       expect(video.durations).toEqual(caps.durations ?? []);

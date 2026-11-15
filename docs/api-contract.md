@@ -1201,9 +1201,21 @@ Workflow 包含 `id, alias, name, source_filename, imported_at, api_workflow, in
 timeout_seconds`；超时默认 1800 秒，允许 1–86400 秒。inspect 不写盘；无 in: 标题时
 只给候选建议，由管理员选择后保存。重新导入按显示名、节点类型、字段匹配，未匹配项显式确认。
 
+## 语音与音乐（2026-11-15）
+
+- `JobParams` 语音字段：`voice`（音色 id，也接受模型允许的自定义 id）、`speed`、`response_format`、`instructions`（仅 OpenAI 兼容）；
+  音乐字段：`lyrics`（≤5000 字，不填由模型作词）、`instrumental`、`n`（1–2）、`music_tracks`（厂商回报的每首 `{title, lyric}`，顺序同 `output_paths`）。
+- `provider_task_protocol` 新增 `yinchao`：音潮任务号先落盘再轮询，服务重启后凭它续查（画布与创作台）。
+- 能力表 `src/character_workflow/data/audio_caps.json` 前后端共用：协议 → 族（speech / music）、音色、语速范围、格式、上限。
+  可执行协议：`openai-speech`、`minimax-t2a`、`ark-tts`、`yinchao-song`、`declarative`（音频模板）。
+- 画布生成偏好 `generation_defaults` 新增 `music` 槽位，`params` 只收 `instrumental`；`audio` 槽位是语音，`voice` 为 1–200 字的字符串。
+- 局域网网关音频任务参数白名单：`voice / speed / response_format / instructions / lyrics / instrumental`，首数走任务的 `n`。
+
 ## 自定义接口（ADR-0036）
 
 自定义供应商（`provider=custom`）下的模型可绑定一份接口模板，由通用执行器发请求；已登记模型不变。
+音频模板（`kind=audio`，2026-11-15）：`declared` 另含 `family / voices / custom_voice / speeds / formats / max_chars / lyrics / instrumental`；
+`result.body = "binary"`（仅音频同步接口）表示响应体即音频，`result.hex` 读 hex 编码的音频。规则见 ADR-0036「2026-11-15 修订」。
 
 - ModelSpec / KeyModel 新增可选 `declarative_id: string | null`（null 不序列化），配合
   `protocol = "declarative"`。只在 `POST/PATCH /api/keys` 校验：供应商必须是 custom、模板存在、
