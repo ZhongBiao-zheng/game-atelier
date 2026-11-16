@@ -32,6 +32,18 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  { version: '5.138.0', date: '2026-11-16', headline: '插件、自定义接口与语音音乐', changes: [
+    { kind: 'feat', text: '新增插件：在「设置 → 插件」里启用或关闭，关闭后完全不加载。首批官方插件有精灵表调整、序列帧（视频抽帧与补间）、像素化和分镜。' },
+    { kind: 'feat', text: '分镜插件：把剧本拆成镜头，逐镜出图、出视频。' },
+    { kind: 'feat', text: '自定义接口：按模板接入任意图片、视频、语音、音乐接口；可粘贴接口文档让 AI 帮你生成模板，也可从目录接口列出模型，并经局域网网关分享给团队成员。' },
+    { kind: 'feat', text: '画布新增语音与音乐生成：接入 MiniMax 语音、豆包语音 2.0 和音潮歌曲。' },
+    { kind: 'feat', text: '扩图、局部修改、对比和插件节点也能「隐藏」内容。' },
+    { kind: 'feat', text: '透明图用棋盘格显示；浅色主题统一为白底细边加柔和阴影，主色按钮文字改为白色。' },
+    { kind: 'feat', text: '模型公告改为远程下发，新公告不用等发版。' },
+    { kind: 'fix', text: '移除画布的批量素材节点；旧项目里的批量素材打开时自动变成图片分组，图片不丢。' },
+    { kind: 'fix', text: '厂商已开始返回结果、读取中途断开时，不再重复提交同一任务，避免重复扣费。' },
+    { kind: 'fix', text: '运行中新加的 TokenDance 模型也有预计与实际花费；网关上未计价的任务显示「未计价」，不再算成 0 元。' },
+  ] },
   { version: '5.137.0', date: '2026-11-13', headline: 'Seedream 5.5 透明背景与图层拆分', changes: [
     { kind: 'feat', text: 'Seedream 5.5 新增「背景：自动 / 透明」开关，选透明时提示词不写也直接出透明 PNG（OpenRouter 渠道不支持）。' },
     { kind: 'feat', text: '图层拆分可选 Seedream 5.5，最多拆出 99 层，可设「最多图层」控制拆多细。' },
