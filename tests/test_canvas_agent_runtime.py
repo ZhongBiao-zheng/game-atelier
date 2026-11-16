@@ -176,6 +176,33 @@ def test_model_failure_lands_in_session_as_error(isolated_data_root, chat_key, m
         assert client.post(f"{base}/messages", json={"text": "再试"}).status_code == 202
 
 
+def test_next_message_waits_for_previous_turn_to_finish_settling(isolated_data_root, chat_key,
+                                                                 monkeypatch):
+    # 终态已落盘、任务还在收尾（广播、退出）时，页面已经允许再发；这一刻发出的消息不能报「上一轮还没结束」。
+    import asyncio
+
+    calls = []
+
+    async def slow_tail(project_id, session_id, notify):
+        calls.append(session_id)
+        await asyncio.to_thread(runtime._finish_failed, project_id, session_id, "turn-x",
+                                "failed", "boom")
+        await asyncio.sleep(0.5)
+
+    monkeypatch.setattr(runtime, "run_turn", slow_tail)
+    with LocalTestClient(base_url="http://127.0.0.1",
+                         app=build_app(dist_dir=isolated_data_root / "dist")) as client:
+        project_id, session_id, base = _session(client)
+        client.patch(base, json={"model": "m", "model_alias": "chat"})
+        assert client.post(f"{base}/messages", json={"text": "你好"}).status_code == 202
+        _wait_status(project_id, session_id, {"failed"})
+        assert client.post(f"{base}/messages", json={"text": "再试"}).status_code == 202
+        deadline = time.monotonic() + 5
+        while len(calls) < 2 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert len(calls) == 2, "第二轮没有被调度"
+
+
 def test_assistant_text_with_local_path_is_redacted_not_rejected():
     items = [{"type": "message", "role": "assistant",
               "content": [{"type": "output_text", "text": "文件在 /Users/someone/secret.png 里"}]}]

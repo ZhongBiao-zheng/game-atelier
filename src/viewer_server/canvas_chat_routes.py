@@ -59,9 +59,30 @@ def _schedule(project_id: str, session_id: str) -> None:
             logger.warning("canvas agent task crashed: %s/%s", project_id, session_id,
                            exc_info=True)
         finally:
-            _tasks.pop((project_id, session_id), None)
+            # 只摘自己：收尾期间新一轮可能已经登记，按 key 直接 pop 会把新任务摘掉。
+            if _tasks.get((project_id, session_id)) is task:
+                del _tasks[(project_id, session_id)]
 
-    _tasks[(project_id, session_id)] = asyncio.get_running_loop().create_task(turn())
+    task = asyncio.get_running_loop().create_task(turn())
+    _tasks[(project_id, session_id)] = task
+
+
+# 一轮把终态写进会话后，还要广播、退出任务；这段收尾通常只有几毫秒。
+_SETTLE_SECONDS = 2.0
+
+
+async def _previous_turn_done(project_id: str, session_id: str) -> bool:
+    """上一轮已经结束：没有任务，或任务已把非 running 状态落盘、只差收尾（此时等它退出）。
+
+    页面收到「会话已落盘」的广播就允许再发，这一刻任务往往还没退出；只看任务会误报 409。"""
+    task = _tasks.get((project_id, session_id))
+    if task is None or task.done():
+        return True
+    session = await _call(read_canvas_agent_session, project_id, session_id)
+    if session.status == "running":
+        return False
+    await asyncio.wait({task}, timeout=_SETTLE_SECONDS)
+    return task.done()
 
 
 async def _call(function, *args):
@@ -107,7 +128,7 @@ async def patch_session(project_id: str, session_id: str,
 @router.post(f"{SESSION}/messages", response_model=CanvasAgentSession, status_code=202)
 async def post_message(project_id: str, session_id: str,
                        payload: CanvasAgentTurnCreate) -> CanvasAgentSession:
-    if is_running(project_id, session_id):
+    if not await _previous_turn_done(project_id, session_id):
         raise CanvasToolError("SESSION_BUSY", "上一轮还没结束", 409)
     await _call(recover_if_stale, await _call(read_canvas_agent_session, project_id, session_id))
     session = await _call(runtime.begin_user_turn, project_id, session_id, payload.text,
@@ -119,7 +140,7 @@ async def post_message(project_id: str, session_id: str,
 @router.post(f"{SESSION}/approvals", response_model=CanvasAgentSession, status_code=202)
 async def post_approvals(project_id: str, session_id: str,
                          payload: CanvasAgentApprovalsSubmit) -> CanvasAgentSession:
-    if is_running(project_id, session_id):
+    if not await _previous_turn_done(project_id, session_id):
         raise CanvasToolError("SESSION_BUSY", "上一轮还没结束", 409)
     decisions = {decision.call_id: decision.approve for decision in payload.decisions}
     session = await _call(runtime.resolve_approvals, project_id, session_id, decisions)
