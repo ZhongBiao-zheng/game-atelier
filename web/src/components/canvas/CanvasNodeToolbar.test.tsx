@@ -322,6 +322,34 @@ it('puts plugin video actions in a More menu on the video toolbar', async () => 
   act(() => setPluginsSnapshot([]));
 });
 
+it('shows plugin image actions only while the plugin is enabled', async () => {
+  const plugin = spriteLock as unknown as PluginPackageLock;
+  const image = { ...nodes[1], data: { ...nodes[1].data, current_version_id: 'version-image' } } as CanvasNode;
+  const context = nodeContext({
+    createPluginNodeFromMedia: vi.fn(),
+    resolveVersion: versionResolver({
+      'version-image': {
+        version_id: 'version-image', kind: 'image', created_at: '2026-08-25T00:00:00Z', sha256: 'a'.repeat(64),
+        origin: { kind: 'upload', upload_id: 'upload-image' }, path: 'uploads/upload-image.png',
+        mime_type: 'image/png', bytes: 42, width: 64, height: 64,
+      },
+    }),
+  });
+  const view = () => <CanvasNodeContext.Provider value={context}><NodeCard data={{ domain: image }} selected /></CanvasNodeContext.Provider>;
+  setPluginsSnapshot([{ id: plugin.id, availability: 'ok', reason: null, enabled: false, manifest: null }]);
+  const { rerender } = render(view());
+  fireEvent.keyDown(screen.getByRole('button', { name: '图片 的更多工具' }), { key: 'Enter' });
+  await screen.findByRole('menuitem', { name: 'AI高清 图片' });
+  expect(screen.queryByRole('menuitem', { name: plugin.contributes.image_actions[0].label })).toBeNull();
+  fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+
+  act(() => setPluginsSnapshot([{ id: plugin.id, availability: 'ok', reason: null, enabled: true, manifest: plugin }]));
+  rerender(view());
+  fireEvent.keyDown(screen.getByRole('button', { name: '图片 的更多工具' }), { key: 'Enter' });
+  expect(await screen.findByRole('menuitem', { name: plugin.contributes.image_actions[0].label })).toBeInTheDocument();
+  act(() => setPluginsSnapshot([]));
+});
+
 it('edits text inside the node as one history session', () => {
   const text = {
     ...nodes[0],

@@ -7,6 +7,9 @@ import { useReactFlow } from '@xyflow/react';
 import { createTestEventStream } from '@/test/eventStream';
 
 import { CanvasEditor, canvasMentionGraphSignature } from './CanvasEditor';
+import { setPluginsSnapshot } from '@/plugin-host/registry';
+import type { PluginPackageLock } from '@/schema/plugins';
+import spriteLock from '../../../plugins/sprite-sheet/package/manifest.lock.json';
 import { CanvasNodeContext, type CanvasNodeContextValue } from '@/components/canvas/CanvasEditorViews';
 import {
   createCanvasReversePromptConfig,
@@ -2803,4 +2806,17 @@ it('retains the prompt asset default after editing an inserted text node', async
   expect(lastSavedDocument()?.nodes[0].data).toMatchObject({
     generation_draft: { params: { prompt_asset_id: 'ca-prompt' } },
   });
+});
+
+it('lists a plugin node in the add menu only while the plugin is enabled', async () => {
+  const plugin = spriteLock as unknown as PluginPackageLock;
+  setPluginsSnapshot([{ id: plugin.id, availability: 'ok', reason: null, enabled: false, manifest: null }]);
+  onTestFinished(() => setPluginsSnapshot([]));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByRole('button', { name: '添加节点' }));
+  expect(within(screen.getByRole('menu', { name: '添加节点' })).queryByRole('menuitem', { name: /^精灵表/ })).toBeNull();
+
+  act(() => setPluginsSnapshot([{ id: plugin.id, availability: 'ok', reason: null, enabled: true, manifest: plugin }]));
+  expect(within(screen.getByRole('menu', { name: '添加节点' })).getByRole('menuitem', { name: /^精灵表/ })).toBeInTheDocument();
 });
