@@ -17,7 +17,6 @@ export interface CanvasMaterialReference {
   title: string;
   text?: string;
   previewUrl?: string;
-  inputCount?: number;
   annotated?: boolean;
   /** 带标注连线上的发送形式（原样取自连线，缺省 = 支持时发标注层）。 */
   annotationDelivery?: CanvasAnnotationDelivery;
@@ -134,8 +133,7 @@ export function buildCanvasMentionReferences(
       const annotatedEdge = connections.find(edge => edge.role === 'input' && edge.target_node_id === surface.id
         && edge.source_node_id === sourceId && edge.annotated);
       const material = node
-        ? canvasMaterialReference(projectId, node, contentVersions, isMentionContentNode(surface)
-          ? surface.data.batch_result : null, !!annotatedEdge)
+        ? canvasMaterialReference(projectId, node, contentVersions, !!annotatedEdge)
         : null;
       const delivery = annotatedEdge?.role === 'input' ? annotatedEdge.annotation_delivery : null;
       return material ? [delivery ? { ...material, annotationDelivery: delivery } : material] : [];
@@ -143,17 +141,17 @@ export function buildCanvasMentionReferences(
   }));
 }
 
-/** 按排列顺序给参考素材编号：各类型分别计数（图片1、视频1、图片2…），多张一组的写成区间。 */
+/** 按排列顺序给参考素材编号：各类型分别计数（图片1、视频1、图片2…）。 */
 export function labelCanvasMentionReferences(
   materials: readonly CanvasMaterialReference[],
 ): CanvasMentionReference[] {
   const counts: Record<CanvasMentionKind, number> = { text: 0, image: 0, video: 0, audio: 0 };
   return materials.map(material => {
     const index = counts[material.kind] + 1;
-    counts[material.kind] += material.inputCount ?? 1;
+    counts[material.kind] = index;
     return {
       ...material,
-      label: `${mentionKindLabel(material.kind)}${index}${counts[material.kind] > index ? `–${counts[material.kind]}` : ''}`,
+      label: `${mentionKindLabel(material.kind)}${index}`,
     };
   });
 }
@@ -184,17 +182,8 @@ function canvasMaterialReference(
   projectId: string,
   node: CanvasNode,
   contentVersions: Readonly<Record<string, CanvasContentVersion>>,
-  binding?: CanvasContentNode['data']['batch_result'],
   annotated = false,
 ): CanvasMaterialReference | null {
-  if (node.type === 'batch_material') {
-    const bound = binding?.source_node_id === node.id ? binding : null;
-    const versionId = bound ? bound.image_version_ids[0] : node.data.items[0]?.image_version_ids[0];
-    if (!versionId || contentVersions[versionId]?.kind !== 'image') return null;
-    return { nodeId: node.id, versionId, kind: 'image', inputCount: bound?.image_version_ids.length ?? 1, title: bound
-      ? `${node.title} · 本批 ${bound.image_version_ids.length} 张` : `${node.title} · ${node.data.items.length} 项`,
-      previewUrl: canvasMediaUrl(projectId, versionId, 256) };
-  }
   if (!isMentionContentNode(node)) return null;
   const versionId = annotated && node.type === 'image' && node.data.annotation?.rendered_version_id
     ? node.data.annotation.rendered_version_id : node.data.current_version_id;

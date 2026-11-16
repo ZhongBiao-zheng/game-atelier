@@ -555,9 +555,6 @@ it('offers bulk layer actions only after completion and reports download failure
   expect(downloadCanvasLayers).toHaveBeenLastCalledWith('canvas-test', stack.id, 'psd');
   await act(async () => undefined);
   expect(screen.getByRole('button', { name: '导出 PSD' })).toBeEnabled();
-  context.batchBusy = true;
-  rerender(view(ready));
-  expect(screen.getByRole('button', { name: '展开图层到画布并分组' })).toBeDisabled();
   rerender(view({ ...ready, data: { ...ready.data, active_run_id: 'run' } }));
   expect(screen.getByRole('button', { name: '下载全部图层' })).toBeDisabled();
 });
@@ -986,28 +983,6 @@ it('has no fixed save button on an audio node', () => {
   const toolbar = screen.getByRole('toolbar', { name: '音频 节点工具' });
   expect(within(toolbar).queryByRole('button', { name: '保存 音频' })).not.toBeInTheDocument();
   expect(within(toolbar).queryByRole('button', { name: '分享 音频' })).not.toBeInTheDocument();
-});
-
-it('lets the batch scope node stop the batch even when it is not a group', () => {
-  const stopActiveBatch = vi.fn(async () => undefined);
-  const context = nodeContext({
-    batchBusy: true,
-    activeBatch: { scopeNodeId: 'image', stopping: false },
-    stopActiveBatch,
-  });
-  const view = (node: CanvasNode) => <CanvasNodeContext.Provider value={context}>
-    <NodeCard data={{ domain: node }} selected />
-  </CanvasNodeContext.Provider>;
-  const { rerender } = render(view(nodes[1]));
-  fireEvent.click(screen.getByRole('button', { name: '停止 图片 的批量执行' }));
-  expect(stopActiveBatch).toHaveBeenCalledTimes(1);
-
-  context.activeBatch = { scopeNodeId: 'image', stopping: true };
-  rerender(view(nodes[1]));
-  expect(screen.getByRole('button', { name: '正在停止 图片 的批量执行' })).toBeDisabled();
-
-  rerender(view(nodes[0]));
-  expect(screen.queryByRole('button', { name: /批量执行/ })).toBeNull();
 });
 
 it('treats a double-click on a button inside a node as two clicks, not a node preview', () => {

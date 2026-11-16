@@ -458,36 +458,19 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 （`reference_images/videos/audios`、`mask_image`、`mj_sref/cref/oref`）与 caller 回写字段
 （`actual_size`、`warnings`、`mj_flags`）都不在名单里 —— 浏览器不能提交路径，Canvas 的参考素材只能
 来自不可变 Content Version。
-批量执行使用 `batch_material` 节点：`data.items` 为最多 200 个 `{id,image_version_ids}`，
-每项 1–16 张已登记图片；项 ID 在节点内唯一。节点仅提供输入，没有生成 Draft。分组不能执行；分组整包连给生成节点时按目标模式过滤成员
-（图片生成只取文本与图片，音频生成只取文本），
+分组不能执行；分组整包连给生成节点时按目标模式过滤成员（图片生成只取文本与图片，音频生成只取文本），
 `group.data` 只有 `member_node_ids`，一层显式成员关系保持不变。分组外框按成员显示边界派生，加载与实时合并使用同一规则；
-`group.size` 为正有限数的 `CanvasGroupSize`，不受普通节点 `CanvasSize` 的 4000px 上限影响，
-大批次展开后仍能包围所有成员。图片、视频等普通节点继续保留 4000px 尺寸上限。单个生成节点可以调用：
+`group.size` 为正有限数的 `CanvasGroupSize`，不受普通节点 `CanvasSize` 的 4000px 上限影响。
+图片、视频等普通节点继续保留 4000px 尺寸上限。
 
-- `POST /canvas/projects/{id}/batch-runs/prepare`：`{scope_node_id,expected_revision}`，`scope_node_id` 是分组时 422；
-  校验冻结素材、输入依赖、模型能力及单产物，返回 `ready` 计划，不调用模型。计划只有这一个节点一步，最多 2000 次生成；
-  只允许一个批量素材来源，无素材节点时固定输入为一项；不支持插件节点执行。
-- `POST .../batch-runs/{batch_id}/start`：确认后启动；revision 必须仍匹配，同项目只允许一份活动计划。
-  同一计划重复 start 不再调度。串行执行的普通 Canvas Job 带 `canvas_run.batch`
-  `{batch_id,item_id,round_index,step_index}`，两个 index 从 0 开始。
-- `POST .../batch-runs/{batch_id}/cancel`：取消未提交步骤，对当前 Job 发协作停止；已收费产物继续登记。
-- `GET .../batch-runs` / `GET .../batch-runs/{batch_id}`：读取最近 20 份计划/单份计划，
-  包含每项每步的 Job、Run、结果 Version ID 和状态；`executions[].result_node_id` 在展开前为空，
-  首次提交事务展开链路后指向对应普通节点。未提交步骤不伪造节点的 `active_run_id`。
 - 节点 `active_run_id` 只在 run 进行中非空：finalize / failed / canceled 三条路径都清掉（内容节点与
   layer_stack 一致）。「最近一次生成」由 job 的 `canvas_run.result_node_id` 反查，不读该字段。
 
-批量计划冻结数据落在项目 `.runtime/batch-plans/`；进度在 `.runtime/batches/`，活动计划索引为
-`.runtime/batch-active.json`。同项同轮上游输出绑定到下游的精确 Version ID。
-首次提交事务同时展开各项、各轮的真实结果节点和输入连线：第一项第一轮使用配置链路的原节点，
-其余项/轮按行排在现有内容下方，各行的下游只连接同行上游；不在一个节点中切换批次结果。
-内容节点的可选 `data.batch_result` 保存 `{batch_id,template_node_id,source_node_id,item_id,image_version_ids,round_index}`，
-绑定本批素材的不可变版本，单独再次生成时不读取其他批次。所有结果仍由普通 Job/Version 保存，视频不提供候选切换。
-上次生成的输出不隐式成为下一次批量执行的自身参考。
-失败停止剩余步骤，无自动付费重试；服务重启将活动计划标为 interrupted，不自动提交剩余步骤。
-计划文件属于本机执行状态，不随项目包导入；图片素材、普通节点及已经生成的 Jobs/Versions 仍随包保存。
-前端执行期间锁定画布内容编辑，仍可浏览结果；项目导出/删除在批量运行时拒绝。
+批量素材节点与批量执行（`batch-runs`）已删除。旧数据读取时按下列规则处理，不写回磁盘：
+`batch_material` 节点按图片顺序换成普通图片节点（id 为 `<原id>-<序号>`，4 列网格、宽 320），原节点不在分组里时
+再用沿用原 id 的同名分组装起来，在分组里时把分组成员换成这些图片节点；连到批量素材节点的连线删除；
+内容节点的 `data.batch_result` 与 Job 的 `canvas_run.batch` 剥掉，带 `canvas_run.batch` 且尚未开始的 Job
+记 `cancel_requested_at`，由 reconcile 取消，不在重启后提交。项目内 `.runtime/batch-plans/` 等文件不再读取。
 
 图片节点的可选 `data.result_stack` 保存 `{run_id, member_node_ids}`：一次生成出多张时，本节点为封面，`member_node_ids` 是其余结果各自的图片节点（最多 64 个），`run_id` 是已拆成节点的那次生成。成员 id 不做文档级引用校验，读取方按存在过滤；跨画布粘贴时只保留一起粘贴的成员。
 

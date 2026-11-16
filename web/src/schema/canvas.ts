@@ -140,14 +140,6 @@ export interface CanvasContentNodeData {
   current_version_id: string | null;
   generation_draft: CanvasGenerationDraft | null;
   active_run_id: string | null;
-  batch_result?: {
-    batch_id: string;
-    template_node_id: string;
-    source_node_id: string | null;
-    item_id: string;
-    image_version_ids: string[];
-    round_index: number;
-  } | null;
 }
 
 export interface CanvasTextDisplay {
@@ -233,16 +225,6 @@ export interface CanvasGroupNode extends CanvasNodeBase {
   type: 'group';
   size?: CanvasGroupSize | null;
   data: { member_node_ids: string[] };
-}
-
-export interface CanvasBatchMaterialItem {
-  id: string;
-  image_version_ids: string[];
-}
-
-export interface CanvasBatchMaterialNode extends CanvasNodeBase {
-  type: 'batch_material';
-  data: { items: CanvasBatchMaterialItem[] };
 }
 
 export interface CanvasLayerBoundingBox {
@@ -332,7 +314,7 @@ export interface CanvasCompareNode extends CanvasNodeBase {
 
 export type CanvasContentNode = CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode;
 export type CanvasNode = CanvasContentNode | CanvasGroupNode | CanvasPluginNode | CanvasImageEditNode
-  | CanvasBatchMaterialNode | CanvasLayerStackNode | CanvasCompareNode;
+  | CanvasLayerStackNode | CanvasCompareNode;
 
 export type CanvasVideoFrameSlot = 'first_frame' | 'last_frame';
 export type CanvasCompareSlot = 'before' | 'after';

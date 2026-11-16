@@ -11,7 +11,6 @@ import { maxReferenceImages } from '@/lib/referenceLimits';
 import { audioCapsOf, audioProtocolOf, declaredAudioCaps, normalizeMusicParams, normalizeSpeechParams } from '@/lib/audioCaps';
 import type {
   CanvasContentNode,
-  CanvasBatchMaterialNode,
   CanvasCompareSlot,
   CanvasConnection,
   CanvasInputConnection,
@@ -577,7 +576,6 @@ export function canvasNodeAcceptsInput(node: CanvasNode) {
     return (enabledNodeContribution(node.data.plugin_id, node.data.node_type)?.node.input_modalities.length ?? 0) > 0;
   }
   return node.type !== 'group'
-    && node.type !== 'batch_material'
     && node.type !== 'layer_stack'
     && node.type !== 'image_edit'
     && node.type !== 'compare';
@@ -639,7 +637,7 @@ export function canvasNodeProvidesContent(node: CanvasNode): node is CanvasConte
   return node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio';
 }
 
-/** 「隐藏」只对有内容的节点有意义：图层栈、编辑节点、插件节点、连了图的对比、有条目的批量素材、
+/** 「隐藏」只对有内容的节点有意义：图层栈、编辑节点、插件节点、连了图的对比、
  *  有当前版本（文本还得非空）的内容节点。插件节点的内容由插件画，宿主判断不了空不空，按有内容算。 */
 export function canvasNodeHasHideableContent(
   node: CanvasNode,
@@ -648,7 +646,6 @@ export function canvasNodeHasHideableContent(
 ): boolean {
   if (node.type === 'layer_stack' || node.type === 'image_edit' || node.type === 'plugin') return true;
   if (node.type === 'compare') return compareHasInput;
-  if (node.type === 'batch_material') return node.data.items.length > 0;
   return content !== undefined && (content.kind !== 'text' || content.text.trim() !== '');
 }
 
@@ -678,8 +675,8 @@ export function canvasNodeHasCurrentContent(
  *  （节点卡因此每一次按键都要重渲染，见 CanvasEditor 里 resolveVersion 的说明）。 */
 export function canvasNodeProvidesOutput(
   node: CanvasNode,
-): node is CanvasContentNode | CanvasBatchMaterialNode | CanvasGroupNode {
-  return canvasNodeProvidesContent(node) || node.type === 'batch_material' || node.type === 'group';
+): node is CanvasContentNode | CanvasGroupNode {
+  return canvasNodeProvidesContent(node) || node.type === 'group';
 }
 
 /** 一条 input 连线的源，展开成真正会被喂给模型的节点 id。
@@ -724,18 +721,6 @@ export interface CanvasPendingInput {
   title: string;
 }
 
-/** A different batch source needs a new confirmation, including when retrying a result. */
-export function canvasRequiresBatchRun(document: CanvasDocument | null, nodeId: string): boolean {
-  if (!document) return false;
-  const nodes = new Map(document.nodes.map(node => [node.id, node]));
-  const target = nodes.get(nodeId);
-  const boundSourceId = target && canvasNodeProvidesContent(target) ? target.data.batch_result?.source_node_id : null;
-  return document.connections.some(connection => connection.role === 'input'
-    && connection.target_node_id === nodeId
-    && nodes.get(connection.source_node_id)?.type === 'batch_material'
-    && connection.source_node_id !== boundSourceId);
-}
-
 /** 每个目标节点上「已连接但还没有内容」的输入源。
  *
  *  只看不带 slot 的普通 input；首尾帧的空来源由 missingVideoFrame 单独把关，
@@ -752,15 +737,6 @@ export function canvasPendingInputNodes(
     for (const sourceId of expandCanvasInputSource(document, connection.source_node_id, connection.target_node_id)) {
     const source = nodes.get(sourceId);
     if (!source || canvasNodeHasCurrentContent(source, document.content_versions)) continue;
-    if (source.type === 'batch_material') {
-      const target = nodes.get(connection.target_node_id);
-      const binding = target && canvasNodeProvidesContent(target) ? target.data.batch_result : null;
-      if (binding?.source_node_id === source.id) {
-        if (binding.image_version_ids.length && binding.image_version_ids.every(
-          id => document.content_versions[id]?.kind === 'image',
-        )) continue;
-      } else if (source.data.items.length) continue;
-    }
     const pending = result.get(connection.target_node_id) ?? [];
     pending.push({ nodeId: source.id, title: source.title });
     result.set(connection.target_node_id, pending);
@@ -779,11 +755,6 @@ export function isCanvasCompareSlot(value: unknown): value is CanvasCompareSlot 
   return value === 'before' || value === 'after';
 }
 
-/** 对比节点的输入连线收敛成最多两条：before / after 各一张图。
- *
- *  建线入口很多（拖到接口、拖到节点身上、多选连线、从菜单新建），只有拖到接口时知道槽位。
- *  所以在提交时统一收口：只认图片来源；同一来源只留最新一条；指定槽位的后来者顶替先来者；
- *  没有槽位的按 before → after 填空位，两边都占了就丢弃。 */
 /** 对比节点连着至少一张图（任一侧）。 */
 export function canvasCompareHasInput(document: CanvasDocument, nodeId: string): boolean {
   const nodes = new Map(document.nodes.map(node => [node.id, node]));
@@ -791,6 +762,11 @@ export function canvasCompareHasInput(document: CanvasDocument, nodeId: string):
     && nodes.get(connection.source_node_id)?.type === 'image');
 }
 
+/** 对比节点的输入连线收敛成最多两条：before / after 各一张图。
+ *
+ *  建线入口很多（拖到接口、拖到节点身上、多选连线、从菜单新建），只有拖到接口时知道槽位。
+ *  所以在提交时统一收口：只认图片来源；同一来源只留最新一条；指定槽位的后来者顶替先来者；
+ *  没有槽位的按 before → after 填空位，两边都占了就丢弃。 */
 export function normalizeCanvasCompareConnections(document: CanvasDocument): CanvasDocument {
   const nodes = new Map(document.nodes.map(node => [node.id, node]));
   const incoming = new Map<string, CanvasInputConnection[]>();

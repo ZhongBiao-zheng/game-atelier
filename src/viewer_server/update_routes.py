@@ -75,7 +75,7 @@ def work_request(path: str, method: str) -> bool:
         return True
     if path.startswith("/api/canvas/projects/"):
         return bool(re.search(
-            r"/(runs(?:/[^/]+)?|batch-runs/[^/]+/start|agent/sessions(?:/[^/]+/messages)?|"
+            r"/(runs(?:/[^/]+)?|agent/sessions(?:/[^/]+/messages)?|"
             r"classify|media-operations)$", path)) or path.endswith("/resume-mj-edit")
     return False
 

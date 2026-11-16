@@ -325,10 +325,6 @@ def _normalized_web_document(
     if submitted.revision != current.revision:
         raise RuntimeError(f"revision_conflict:{current.revision}")
 
-    from character_workflow.lib.canvas_batches import assert_batch_document_change
-
-    assert_batch_document_change(current, submitted)
-
     previous_nodes = {node.id: node for node in current.nodes}
     submitted_ids = {node.id for node in submitted.nodes}
     edit_node_ids = {node.id for node in [*current.nodes, *submitted.nodes]

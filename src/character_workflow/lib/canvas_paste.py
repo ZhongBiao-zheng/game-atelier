@@ -173,13 +173,12 @@ def _strings(value: Any):
 
 
 def _detached(node: dict[str, Any], pasted_ids: set[str]) -> dict[str, Any]:
-    """运行态与批次归属留在源画布：进行中的 run 和批次绑定在目标画布里没有对应的 job。"""
+    """运行态留在源画布：进行中的 run 在目标画布里没有对应的 job。"""
     data = node.get("data")
     if isinstance(data, dict):
         node = {**node, "data": {
             **data,
             **({"active_run_id": None} if "active_run_id" in data else {}),
-            **({"batch_result": None} if "batch_result" in data else {}),
         }}
         stack = node["data"].get("result_stack")
         if isinstance(stack, dict):

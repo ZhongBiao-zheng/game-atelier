@@ -204,11 +204,6 @@ POST /api/canvas/projects/{project_id}/runs/upscale
 POST /api/canvas/projects/{project_id}/image-edits
 POST /api/canvas/projects/{project_id}/runs/image-edit
 POST /api/canvas/projects/{project_id}/runs/layer-decomposition
-GET /api/canvas/projects/{project_id}/batch-runs
-POST /api/canvas/projects/{project_id}/batch-runs/prepare
-GET /api/canvas/projects/{project_id}/batch-runs/{batch_id}
-POST /api/canvas/projects/{project_id}/batch-runs/{batch_id}/start
-POST /api/canvas/projects/{project_id}/batch-runs/{batch_id}/cancel
 GET /api/canvas/storyboard/models
 POST /api/canvas/projects/{project_id}/storyboard/plan
 POST /api/canvas/projects/{project_id}/storyboard/parse

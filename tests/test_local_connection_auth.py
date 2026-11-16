@@ -549,7 +549,6 @@ def test_update_existing_transaction_lock_rejects_apply(update_client):
 @pytest.mark.parametrize("path", [
     "/api/studio/jobs", "/api/canvas-agent/run", "/api/jobs/example/confirm",
     "/api/canvas/projects/example/runs", "/api/canvas/projects/example/runs/angle",
-    "/api/canvas/projects/example/batch-runs/batch/start",
     "/api/canvas/projects/example/agent/sessions/session/messages",
 ])
 def test_maintenance_rejects_new_generation_before_payload_or_provider(update_client, path):
@@ -578,7 +577,7 @@ def test_every_route_that_starts_background_work_is_blocked_during_maintenance(t
         return False
     starting = [route.path for route in build_app(dist_dir=tmp_path).routes
                 if "POST" in (getattr(route, "methods", None) or set()) and starts_work(route.endpoint)]
-    assert len(starting) >= 10
+    assert len(starting) >= 9
     concrete = {path: path.replace("{", "x").replace("}", "x") for path in starting}
     assert [path for path, sample in concrete.items() if not work_request(sample, "POST")] == []
 

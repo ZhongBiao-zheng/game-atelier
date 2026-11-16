@@ -47,7 +47,6 @@ from character_workflow.lib.model_routes import NoSuchRouteError, resolve_auto
 from character_workflow.lib.prompt_variables import resolve_prompt_variables
 from character_workflow.lib.schemas import (
     CanvasActor,
-    CanvasBatchJobOrigin,
     CanvasContentVersion,
     CanvasDocument,
     CanvasGenerationModelSelection,
@@ -222,13 +221,6 @@ def _commit_transaction_unlocked(
     job_locked: bool = False,
     artifacts: list[dict[str, Any]] | None = None,
 ) -> None:
-    if kind in {
-        "submit", "reverse_prompt", "mask_edit", "angle", "upscale", "layer_decomposition",
-    } and job.canvas_run \
-            and job.canvas_run.batch is None:
-        from character_workflow.lib.canvas_batches import assert_node_not_batch_running
-
-        assert_node_not_batch_running(project_id, job.canvas_run.snapshot.surface_node_id)
     def commit() -> None:
         path = _prepare_transaction(
             project_id,
@@ -735,7 +727,7 @@ def canvas_input_sources(
     surface: CanvasNode,
     draft: CanvasGenerationDraft,
 ) -> list[tuple[str, str, bool]]:
-    """Select source nodes once, shared by batch dependency planning and input freezing."""
+    """Select source nodes once for input freezing."""
     candidates: list[tuple[str, str, bool]] = []
     incoming = [
         edge for edge in document.connections
@@ -814,14 +806,10 @@ def _resolve_inputs(
     document: CanvasDocument,
     surface: CanvasNode,
     draft: CanvasGenerationDraft,
-    version_bindings: dict[str, list[str]] | None = None,
     *,
     markup: bool = False,
 ) -> list[CanvasSnapshotInput]:
     candidates = canvas_input_sources(document, surface, draft)
-    batch_result = getattr(surface.data, "batch_result", None)
-    if version_bindings is None and batch_result and batch_result.source_node_id:
-        version_bindings = {batch_result.source_node_id: batch_result.image_version_ids}
 
     nodes = {node.id: node for node in document.nodes}
     # 连线上选了「合成图」的来源：即便目标支持标注层也只发合成图。
@@ -834,10 +822,8 @@ def _resolve_inputs(
     markup_version_id: str | None = None
     for source, node_id, annotated in candidates:
         node = nodes.get(node_id)
-        if node is not None and node.type == "batch_material" and version_bindings is None:
-            raise ValueError("批量素材需要通过批量执行提交")
         version_id = _current_version_id(node) if node is not None else None
-        version_ids = (version_bindings or {}).get(node_id, [version_id] if version_id else [])
+        version_ids = [version_id] if version_id else []
         if annotated:
             title = node.title if node is not None else node_id
             annotation = node.data.annotation if isinstance(node, CanvasImageNode) else None
@@ -1374,7 +1360,6 @@ def _commit_frozen_run(
     run_id: str | None = None,
     additional_versions: list[CanvasContentVersion] | None = None,
     artifacts: list[dict[str, Any]] | None = None,
-    batch_origin: CanvasBatchJobOrigin | None = None,
     job_id: str | None = None,
 ) -> tuple[Job, CanvasDocument]:
     timestamp = _now()
@@ -1388,7 +1373,7 @@ def _commit_frozen_run(
         allow_surface_reuse
         and surface.type in {"text", "image", "video", "audio"}
         and surface.type == mode
-        and (batch_origin is not None or mode == "text" or _current_version_id(surface) is None)
+        and (mode == "text" or _current_version_id(surface) is None)
     )
     result_id = surface.id if use_surface else f"{mode}-{secrets.token_hex(12)}"
     snapshot_payload = {
@@ -1425,7 +1410,6 @@ def _commit_frozen_run(
         snapshot=snapshot,
         result_node_id=result_id,
         candidates=candidates,
-        batch=batch_origin,
     )
     job = Job(
         job_id=job_id,
@@ -1533,7 +1517,6 @@ def prepare_canvas_generation(
     surface: CanvasNode,
     requested_count: int = 1,
     *,
-    version_bindings: dict[str, list[str]] | None = None,
     resolve_media_paths: bool = True,
     consume_route: bool = False,
 ) -> PreparedCanvasGeneration:
@@ -1541,7 +1524,7 @@ def prepare_canvas_generation(
     draft = _draft_for_node(surface)
     if draft is None:
         raise ValueError("当前节点没有可提交的生成设置")
-    inputs = _resolve_inputs(document, surface, draft, version_bindings)
+    inputs = _resolve_inputs(document, surface, draft)
     # 图片上限按模型族定义；在选路估价前使用与实际提交一致的分组裁剪结果。
     pricing_inputs = _trim_group_images_to_limit(
         ModelSpec(id=draft.model, name=draft.model, modality=draft.mode),
@@ -1558,7 +1541,7 @@ def prepare_canvas_generation(
     if uses_annotation_markup(draft, key, model):
         # 2.6 走官方 edits 的 markup：带标注输入改发原图 + 透明标注层。只有模型与渠道都定下来
         # 才知道走不走，所以先按合成图解析一次用于选路估价，再按标注层重解析。
-        inputs = _resolve_inputs(document, surface, draft, version_bindings, markup=True)
+        inputs = _resolve_inputs(document, surface, draft, markup=True)
     normalized, job_params, effective_count = _normalized_params(draft, requested_count, key, model)
     job_params.route_order = route_order or None
     if not job_params.prompt_asset_id:
@@ -1615,7 +1598,6 @@ def commit_canvas_generation_under_lock(
     surface: CanvasNode,
     prepared: PreparedCanvasGeneration,
     *,
-    batch_origin: CanvasBatchJobOrigin | None = None,
     job_id: str | None = None,
     run_id: str | None = None,
 ) -> tuple[Job, CanvasDocument]:
@@ -1635,7 +1617,6 @@ def commit_canvas_generation_under_lock(
         result_draft=prepared.draft,
         allow_surface_reuse=True,
         transaction_kind="submit",
-        batch_origin=batch_origin,
         job_id=job_id,
         run_id=run_id,
     )
@@ -3691,11 +3672,6 @@ def reconcile_canvas_jobs(
                 reconciled.append(job.job_id)
                 continue
             elif job.runner_started_at is None:
-                if context is not None and context.batch is not None:
-                    # Batch approval is not permission to submit unstarted steps after restart.
-                    _cancel_pending_canvas_candidates(job.canvas_project_id, job.job_id)
-                    reconciled.append(job.job_id)
-                    continue
                 # The durable command exists but no provider call was claimed. Startup may resume
                 # it without risking a duplicate charge.
                 reconciled.append(job.job_id)

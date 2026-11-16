@@ -4,7 +4,7 @@ from io import BytesIO
 import pytest
 from PIL import Image
 
-from character_workflow.lib import canvas_batches, canvas_runs
+from character_workflow.lib import canvas_runs
 from character_workflow.lib.canvas_media_operations import execute_canvas_media_operation
 from character_workflow.lib.canvas_packages import (
     commit_canvas_package, export_canvas_projects, inspect_canvas_package,
@@ -142,9 +142,7 @@ def test_only_direct_inputs_are_resolved_alongside_material_relationships(monkey
     assert [(item.node_id, item.version_id) for item in inputs] == [
         (derived.id, derived.data.current_version_id),
     ]
-    assert canvas_batches._sources(document, target) == [derived.id]
     assert canvas_runs._resolve_inputs(document, derived, draft) == []
-    assert canvas_batches._sources(document, derived) == []
     write_keys_db(KeysDB(keys=[KeySpec(
         alias="test", provider="openai", access_key="test-only", created_at=document.updated_at,
         models=[ModelSpec(id="gpt-image-1", name="Test", modality="image")],

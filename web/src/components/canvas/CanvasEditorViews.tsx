@@ -45,7 +45,7 @@ import {
   downloadCanvasLayers,
   type CanvasLayerExportFormat,
 } from '@/api/canvas';
-import { CanvasBatchMaterialEditor, CanvasGroupFrame } from './CanvasBatchControls';
+import { CanvasGroupFrame } from './CanvasGroupFrame';
 import { CanvasAudioPlayer } from './CanvasAudioPlayer';
 import { audioCapsOf } from '@/lib/audioCaps';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
@@ -184,11 +184,6 @@ export interface CanvasNodeContextValue {
   saveCategories?: (categories: string[]) => Promise<void>;
   annotationController?: CanvasAnnotationController;
   editWithAnnotation?: (id: string) => Promise<void>;
-  batchBusy?: boolean;
-  /** 正在跑的批量执行：只有它的分组节点显示「停止」，停止中不重复发取消。 */
-  activeBatch?: { scopeNodeId: string; stopping: boolean };
-  stopActiveBatch?: () => Promise<void>;
-  uploadBatchImages?: (nodeId: string, files: File[], itemId?: string) => Promise<void>;
   projectId: string;
   layerParentByNodeId?: ReadonlyMap<string, { nodeId: string; title: string }>;
   /** 局部修改 / 扩图结果节点 → 产生它的编辑节点。 */
@@ -390,7 +385,6 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
   );
   const nodePanelAllowed = Boolean(
     context
-    && !context.batchBusy
     && !context.annotationController?.nodeId
     && selected
     && !context.multiSelectionActive
@@ -732,17 +726,6 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
               <SwapIcon swapKey={Boolean(nodeJob.cancel_requested_at)}>{nodeJob.cancel_requested_at ? <LoadingIcon /> : <StopIcon />}</SwapIcon>
             </MediaToolButton>
           )}
-          {context.activeBatch?.scopeNodeId === node.id && (
-            // 批量的范围节点不一定是分组：输入连着批量素材节点的普通节点也会发起批量执行。
-            <MediaToolButton
-              label={context.activeBatch.stopping ? `正在停止 ${node.title} 的批量执行` : `停止 ${node.title} 的批量执行`}
-              text="停止批量"
-              disabled={context.activeBatch.stopping}
-              onClick={() => void context.stopActiveBatch?.()}
-            >
-              <SwapIcon swapKey={Boolean(context.activeBatch.stopping)}>{context.activeBatch.stopping ? <LoadingIcon /> : <StopIcon />}</SwapIcon>
-            </MediaToolButton>
-          )}
           {node.type !== 'image_edit' && nodeJob?.status === 'failed' && Boolean(nodeJob.params.evolink_state?.poll_paused) && nodeJob.canvas_run && (
             <MediaToolButton label="继续查询 MJ 原任务（不重新下单）" text="继续查询" onClick={() => void context.resumeMjEdit?.(nodeJob.canvas_run!.run_id)}><ShowIcon /></MediaToolButton>
           )}
@@ -1030,7 +1013,6 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           {isCanvasContentNode(node) && node.type !== 'text' && !content && (
             <EmptyMediaSurface node={node} />
           )}
-          {node.type === 'batch_material' && <CanvasBatchMaterialEditor node={node} context={context} />}
           {node.type === 'layer_stack' && (
             <CanvasLayerStackSurface node={node} context={context} onOpenComposer={() => setLayerComposerOpen(true)} />
           )}
@@ -1679,7 +1661,7 @@ function CanvasNodeToolbar({
           <MediaToolButton
             label="展开图层到画布并分组"
             text="展开图层"
-            disabled={!layersReady || context.batchBusy}
+            disabled={!layersReady}
             onClick={() => context.expandLayerStack(node.id)}
           >
             <LayersIcon />
@@ -2287,11 +2269,7 @@ export function CanvasGenerationComposer({
     document.addEventListener('pointerdown', onPointerDown, true);
     return () => document.removeEventListener('pointerdown', onPointerDown, true);
   }, [promptExpanded]);
-  const batchBinding = isCanvasContentNode(node) ? node.data.batch_result : null;
-  const boundMaterial = mentionReferences.find(reference => reference.nodeId === batchBinding?.source_node_id);
-  const materialReferences = boundMaterial
-    ? [...context.materialReferences.filter(reference => reference.nodeId !== boundMaterial.nodeId), boundMaterial]
-    : context.materialReferences;
+  const materialReferences = context.materialReferences;
   const mentionsEnabled = !usesVideoFrameSlots;
   const frameModeHasMentions = usesVideoFrameSlots && canvasMentionMatches(draft.prompt).length > 0;
   const missingMentionIds = mentionsEnabled
@@ -2307,8 +2285,7 @@ export function CanvasGenerationComposer({
   const connectedVideoMediaCounts = materialReferences.reduce(
     (counts, reference) => {
       if (!connectedMaterialNodeIds.has(reference.nodeId) || reference.kind === 'text') return counts;
-      counts[reference.kind] += reference.nodeId === batchBinding?.source_node_id
-        ? batchBinding.image_version_ids.length : 1;
+      counts[reference.kind] += 1;
       return counts;
     },
     { image: 0, video: 0, audio: 0 },
@@ -3016,7 +2993,7 @@ function CanvasMaterialConnections({
   };
   const connectedCounts = connected.reduce<Record<'image' | 'video' | 'audio', number>>(
     (counts, reference) => {
-      if (reference.kind !== 'text') counts[reference.kind] += reference.inputCount ?? 1;
+      if (reference.kind !== 'text') counts[reference.kind] += 1;
       return counts;
     },
     { image: 0, video: 0, audio: 0 },
@@ -3542,7 +3519,7 @@ export function CanvasLayerStackSurface({
       </div>
       <div className="w-72 shrink-0 border-l border-border">
         {baseImage ? (
-          <CanvasLayerStackList node={node} context={context} disabled={busy || Boolean(context.batchBusy)}
+          <CanvasLayerStackList node={node} context={context} disabled={busy}
             onVisibility={updateVisibility} onHover={setHoveredLayerId} />
         ) : (
           <div className="relative flex h-full flex-col gap-3 overflow-y-auto p-4" aria-label="图层拆分设置">

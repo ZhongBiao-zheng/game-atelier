@@ -26,7 +26,6 @@ from viewer_server.model_route_status import member_status_router
 from viewer_server.usage_routes import usage_router
 from viewer_server.routes import router
 from viewer_server.request_boundary import LocalRequestBoundary, development_origin
-from viewer_server.routes_canvas_batches import router as canvas_batches_router
 from viewer_server.sse import hub, sse_router
 from viewer_server.team_library_routes import team_library_router
 from viewer_server.watcher import start_watchers, stop_team_library_watches
@@ -220,10 +219,6 @@ async def normal_lifespan(app: FastAPI):
         recover_canvas_transactions(project.project_id)
 
     reconciled = reconcile_canvas_jobs(fail_pending=True)
-    from character_workflow.lib.canvas_batches import interrupt_canvas_batch_after_restart
-
-    for project in canvas_projects:
-        interrupt_canvas_batch_after_restart(project.project_id)
     from character_workflow.lib.canvas_image_edits import has_resumable_mj_task
     from character_workflow.lib.jobs import has_resumable_gateway_task, has_resumable_music_task
     resumable = [
@@ -378,7 +373,6 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(plugin_grants_router)
     app.include_router(update_router)
     app.include_router(connection_router(connection_store))
-    app.include_router(canvas_batches_router)
     from viewer_server.routes_canvas_storyboard import router as canvas_storyboard_router
     app.include_router(canvas_storyboard_router)
     app.include_router(team_library_router)

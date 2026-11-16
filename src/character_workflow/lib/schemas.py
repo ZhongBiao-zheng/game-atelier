@@ -353,21 +353,12 @@ class CanvasResultCandidate(BaseModel):
     dismissed_at: str | None = None
 
 
-class CanvasBatchJobOrigin(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    batch_id: str = Field(pattern=r"^batch-[a-f0-9]{24}$")
-    item_id: str
-    round_index: int = Field(ge=0)
-    step_index: int = Field(ge=0)
-
-
 class CanvasJobContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
     run_id: str
     snapshot: CanvasGenerationSnapshot
     result_node_id: str
     candidates: list[CanvasResultCandidate]
-    batch: CanvasBatchJobOrigin | None = None
 
 
 class Job(BaseModel):
@@ -403,6 +394,20 @@ class Job(BaseModel):
     # Any namespace: a stop request stays truthful even when a synchronous upstream request cannot
     # be interrupted; the runner turns it into CANCELED at the next cancellation point.
     cancel_requested_at: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def retire_batch_origin(cls, value: object) -> object:
+        # 批量素材与批量执行已删除，旧 job 的 `canvas_run.batch` 读时剥掉。批次确认不授权重启后提交
+        # 还没开始的步骤：这类 job 标记为已请求取消，由 reconcile 走现有取消路径，不会被重新提交。
+        run = value.get("canvas_run") if isinstance(value, dict) else None
+        if not isinstance(run, dict) or "batch" not in run:
+            return value
+        updated = {**value, "canvas_run": {key: item for key, item in run.items() if key != "batch"}}
+        if (run.get("batch") is not None and value.get("status") in {"pending", "pending_confirm"}
+                and value.get("runner_started_at") is None and not value.get("cancel_requested_at")):
+            updated["cancel_requested_at"] = value.get("submitted_at")
+        return updated
 
     @model_validator(mode="after")
     def validate_namespace_ownership(self) -> "Job":
@@ -756,22 +761,19 @@ def canvas_allowed_draft_params(mode: str, params: JobParams) -> dict[str, Any]:
     }
 
 
-class CanvasBatchResultBinding(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    batch_id: str
-    template_node_id: str
-    source_node_id: str | None = None
-    item_id: str
-    image_version_ids: list[str] = Field(default_factory=list)
-    round_index: int = Field(ge=0)
-
-
 class CanvasContentNodeData(BaseModel):
     model_config = ConfigDict(extra="forbid")
     current_version_id: str | None = None
     generation_draft: CanvasGenerationDraft | None = None
     active_run_id: str | None = None
-    batch_result: CanvasBatchResultBinding | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_batch_result(cls, value: object) -> object:
+        # 批量素材删除前，内容节点都带 `batch_result`（多数是 null）；已有画布和导出包里还留着这个键。
+        if isinstance(value, dict) and "batch_result" in value:
+            return {key: item for key, item in value.items() if key != "batch_result"}
+        return value
 
 
 class CanvasTextDisplay(BaseModel):
@@ -957,23 +959,6 @@ class CanvasGroupNodeData(BaseModel):
         return value
 
 
-class CanvasBatchMaterialItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: str = Field(min_length=1, max_length=120)
-    image_version_ids: list[str] = Field(min_length=1, max_length=16)
-
-
-class CanvasBatchMaterialData(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    items: list[CanvasBatchMaterialItem] = Field(default_factory=list, max_length=200)
-
-    @model_validator(mode="after")
-    def unique_item_ids(self) -> "CanvasBatchMaterialData":
-        if len({item.id for item in self.items}) != len(self.items):
-            raise ValueError("batch material item ids must be unique")
-        return self
-
-
 class CanvasLayerStackLayer(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=120)
@@ -1071,11 +1056,6 @@ class CanvasGroupNode(CanvasNodeBase):
     data: CanvasGroupNodeData
 
 
-class CanvasBatchMaterialNode(CanvasNodeBase):
-    type: Literal["batch_material"]
-    data: CanvasBatchMaterialData
-
-
 class CanvasLayerStackNode(CanvasNodeBase):
     type: Literal["layer_stack"]
     data: CanvasLayerStackData
@@ -1098,7 +1078,7 @@ class CanvasCompareNode(CanvasNodeBase):
 
 CanvasNode = Annotated[
     CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode
-    | CanvasGroupNode | CanvasPluginNode | CanvasBatchMaterialNode
+    | CanvasGroupNode | CanvasPluginNode
     | CanvasLayerStackNode | CanvasImageEditNode | CanvasCompareNode,
     Field(discriminator="type"),
 ]
@@ -1295,6 +1275,94 @@ CanvasContentVersion = Annotated[
 ]
 
 
+_BATCH_LIFT_COLUMNS = 4
+_BATCH_LIFT_WIDTH = 320.0
+_BATCH_LIFT_GAP = 40.0
+# 与前端「编组」一致：成员外框四周留白，上方多留一行给分组名。
+_GROUP_PAD_SIDE, _GROUP_PAD_TOP = 24.0, 40.0
+
+
+def _lift_member_size(version: object) -> dict:
+    width = height = None
+    if isinstance(version, dict):
+        width, height = version.get("width"), version.get("height")
+    if not (isinstance(width, (int, float)) and isinstance(height, (int, float)) and width > 0 and height > 0):
+        return {"width": _BATCH_LIFT_WIDTH, "height": _BATCH_LIFT_WIDTH}
+    node_width, node_height = _BATCH_LIFT_WIDTH, round(_BATCH_LIFT_WIDTH * height / width, 2)
+    if node_height > 4000:
+        node_width, node_height = round(4000 * width / height, 2), 4000.0
+    return {"width": node_width, "height": max(node_height, 1.0)}
+
+
+def _lift_batch_material_nodes(value: dict) -> dict:
+    raw_nodes = value["nodes"]
+    versions = value.get("content_versions") if isinstance(value.get("content_versions"), dict) else {}
+    used = {node.get("id") for node in raw_nodes if isinstance(node, dict)}
+    grouped = {
+        member for node in raw_nodes
+        if isinstance(node, dict) and node.get("type") == "group" and isinstance(node.get("data"), dict)
+        for member in node["data"].get("member_node_ids") or []
+    }
+    replaced: dict[str, list[str]] = {}
+    nodes: list = []
+    for node in raw_nodes:
+        if not (isinstance(node, dict) and node.get("type") == "batch_material"):
+            nodes.append(node)
+            continue
+        batch_id = node.get("id")
+        position = node.get("position") if isinstance(node.get("position"), dict) else {}
+        origin_x, origin_y = position.get("x", 0), position.get("y", 0)
+        items = (node.get("data") or {}).get("items") or []
+        version_ids = [version_id for item in items if isinstance(item, dict)
+                       for version_id in item.get("image_version_ids") or []]
+        title = node.get("title") or "批量素材"
+        members: list[str] = []
+        sizes = [_lift_member_size(versions.get(version_id)) for version_id in version_ids]
+        row_heights = [max(size["height"] for size in sizes[start:start + _BATCH_LIFT_COLUMNS])
+                       for start in range(0, len(sizes), _BATCH_LIFT_COLUMNS)]
+        for index, version_id in enumerate(version_ids):
+            member_id = f"{batch_id}-{index + 1}"
+            while member_id in used:
+                member_id = f"{member_id}-b"
+            used.add(member_id)
+            members.append(member_id)
+            row, column = divmod(index, _BATCH_LIFT_COLUMNS)
+            nodes.append({
+                "id": member_id, "type": "image", "title": f"{title} {index + 1}"[:120],
+                "position": {"x": origin_x + column * (_BATCH_LIFT_WIDTH + _BATCH_LIFT_GAP),
+                             "y": origin_y + sum(row_heights[:row]) + row * _BATCH_LIFT_GAP},
+                "size": sizes[index], "z_index": node.get("z_index", 0),
+                "hidden": bool(node.get("hidden", False)), "data": {"current_version_id": version_id},
+            })
+        replaced[batch_id] = members
+        if batch_id not in grouped and members:
+            columns = min(len(members), _BATCH_LIFT_COLUMNS)
+            nodes.append({
+                "id": batch_id, "type": "group", "title": title,
+                "position": {"x": origin_x - _GROUP_PAD_SIDE, "y": origin_y - _GROUP_PAD_TOP},
+                "size": {
+                    "width": columns * _BATCH_LIFT_WIDTH + (columns - 1) * _BATCH_LIFT_GAP + 2 * _GROUP_PAD_SIDE,
+                    "height": sum(row_heights) + (len(row_heights) - 1) * _BATCH_LIFT_GAP
+                    + _GROUP_PAD_TOP + _GROUP_PAD_SIDE,
+                },
+                "z_index": node.get("z_index", 0), "data": {"member_node_ids": members},
+            })
+    if grouped & set(replaced):
+        nodes = [
+            {**node, "data": {**node["data"], "member_node_ids": [
+                member for member_id in node["data"].get("member_node_ids") or []
+                for member in replaced.get(member_id, [member_id])]}}
+            if isinstance(node, dict) and node.get("type") == "group" and isinstance(node.get("data"), dict)
+            else node
+            for node in nodes
+        ]
+    connections = value.get("connections")
+    if isinstance(connections, list):
+        connections = [edge for edge in connections if not (isinstance(edge, dict) and (
+            edge.get("source_node_id") in replaced or edge.get("target_node_id") in replaced))]
+    return {**value, "nodes": nodes, "connections": connections}
+
+
 class CanvasDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal[2] = 2
@@ -1323,6 +1391,19 @@ class CanvasDocument(BaseModel):
                 node = {**node, "type": draft.get("mode"), "data": {"generation_draft": draft}}
             nodes.append(node)
         return {**value, "nodes": nodes}
+
+    @model_validator(mode="before")
+    @classmethod
+    def lift_batch_material_nodes(cls, value: object) -> object:
+        # 删除「批量素材」节点：已有画布和导出包里的批量节点换成普通图片节点（每张图一个），
+        # 不在分组里时再用一个同名分组装起来（分组沿用原节点 id）。原节点的连线删除：批量素材
+        # 给下游的是「当前项」，换成分组后保留连线会变成「整批同时当参考」，静默改变生成结果。
+        # 读时转换不写回磁盘，所以结果只由输入决定：id 按序号生成，坐标按网格算。
+        if not isinstance(value, dict) or not isinstance(value.get("nodes"), list):
+            return value
+        if not any(isinstance(node, dict) and node.get("type") == "batch_material" for node in value["nodes"]):
+            return value
+        return _lift_batch_material_nodes(value)
 
     def layer_material_node_ids(self) -> set[str]:
         return {
@@ -1470,12 +1551,6 @@ class CanvasDocument(BaseModel):
                             or mask.origin.source_version_id != source.version_id
                             or mask.origin.expanded_canvas):
                         raise ValueError("image edit mask must belong to its fixed source version")
-            if node.type == "batch_material":
-                for item in node.data.items:
-                    for version_id in item.image_version_ids:
-                        version = self.content_versions.get(version_id)
-                        if version is None or version.kind != "image":
-                            raise ValueError("batch material must reference project image versions")
             if node.type == "layer_stack":
                 source = self.content_versions.get(node.data.source_version_id)
                 if source is None or source.kind != "image":
@@ -1500,11 +1575,6 @@ class CanvasDocument(BaseModel):
                     if version is None or version.kind != "image":
                         raise ValueError("layer stack must reference image layer versions")
             if node.type in {"text", "image", "video", "audio"}:
-                if node.data.batch_result:
-                    for image_id in node.data.batch_result.image_version_ids:
-                        image = self.content_versions.get(image_id)
-                        if image is None or image.kind != "image":
-                            raise ValueError("batch result binding requires owned image versions")
                 version_id = node.data.current_version_id
                 if version_id is not None:
                     version = self.content_versions.get(version_id)
@@ -1565,8 +1635,6 @@ class CanvasDocument(BaseModel):
                     if edge.slot is not None or edge.annotated:
                         raise ValueError("canvas plugin inputs must be unslotted and unannotated")
                     continue
-                if target.type == "batch_material":
-                    raise ValueError("batch material nodes cannot receive input connections")
                 if target.type == "layer_stack":
                     if source.type != "image" or edge.slot is not None:
                         raise ValueError("layer stack input must be one image node")
