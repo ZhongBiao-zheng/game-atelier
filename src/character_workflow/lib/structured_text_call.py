@@ -1,6 +1,6 @@
 """调一次对话模型拿结构化输出，并把这次调用记进用量。
 
-「AI 帮我配置」（http_protocol_assist）与「剧本解析」（canvas_storyboard_parse）共用。
+「AI 帮我配置」（http_protocol_assist）与分镜插件的剧本解析（plugins/storyboard/server/parse.py）共用。
 调用规则只有一套：不带 tools、不重试、失败也记账；经局域网网关的文本模型自动走网关。
 任务记成 namespace=assist 的文本任务。画布里发起的调用把项目 id 写在 params.assist_project_id，
 用量页据此归到那个项目（Job 的 canvas_project_id 只允许 namespace=canvas 使用）。

@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vitest';
 import {
   STORYBOARD_MAX_SHOTS, STORYBOARD_TOO_LARGE, createStoryboardNode, isStoryboardNode, normalizeStoryboardPayload,
   storyboardAutoHeight, storyboardPayloadOf, type StoryboardNode,
-} from '@/lib/canvasStoryboard';
+} from './canvasStoryboard';
 import type { CanvasContentVersion, CanvasNode, JsonValue } from '@/schema/canvas';
 
 import { StoryboardNodeBody, type StoryboardHost } from './StoryboardNodeBody';
@@ -102,10 +102,11 @@ it('绑定的节点不存在或类型不符时当作没有绑定', () => {
   expect(selectNode).toHaveBeenCalledWith('image-1');
 });
 
-it('不依赖插件注册表、批准与沙箱', () => {
+it('宿主插件只用宿主插件接口，不碰沙箱、批准与消息通道', () => {
   for (const [path, source] of Object.entries(sources)) {
     if (path.endsWith('.test.tsx')) continue;
-    expect(source, path).not.toContain('plugin-host');
+    const hosts = [...source.matchAll(/from '@\/plugin-host\/([^']+)'/g)].map(match => match[1]);
+    expect(hosts.filter(name => name !== 'hostPlugins'), path).toEqual([]);
   }
 });
 

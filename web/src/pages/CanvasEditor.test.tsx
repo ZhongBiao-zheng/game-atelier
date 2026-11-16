@@ -2814,8 +2814,11 @@ it('lists a plugin node in the add menu only while the plugin is enabled', async
   onTestFinished(() => setPluginsSnapshot([]));
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
   await screen.findByLabelText('画布编辑器 列车短片');
+  expect(screen.queryByRole('button', { name: '添加分镜节点' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '添加批量素材节点' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '添加节点' }));
   expect(within(screen.getByRole('menu', { name: '添加节点' })).queryByRole('menuitem', { name: /^精灵表/ })).toBeNull();
+  expect(within(screen.getByRole('menu', { name: '添加节点' })).queryByRole('menuitem', { name: /^分镜/ })).toBeNull();
 
   act(() => setPluginsSnapshot([{ id: plugin.id, availability: 'ok', reason: null, enabled: true, manifest: plugin }]));
   expect(within(screen.getByRole('menu', { name: '添加节点' })).getByRole('menuitem', { name: /^精灵表/ })).toBeInTheDocument();

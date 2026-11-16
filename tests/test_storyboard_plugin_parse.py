@@ -1,12 +1,11 @@
-"""剧本解析：把文本节点里的剧本交给对话模型拆成镜头（ADR-0038）。只用本机假厂商。"""
+"""分镜插件的剧本解析：把文本节点里的剧本交给对话模型拆成镜头（ADR-0038 / ADR-0039）。只用本机假厂商。"""
 from __future__ import annotations
 
 import json
 
 import pytest
 
-from character_workflow.lib import canvas_storyboard_parse as parse
-from character_workflow.lib import keys
+from character_workflow.lib import keys, plugin_registry, plugin_server
 from character_workflow.lib.canvas_projects import (
     create_canvas_project, read_canvas_document, save_canvas_document,
 )
@@ -15,7 +14,10 @@ from character_workflow.lib.schemas import CanvasDocument
 from character_workflow.lib.usage_stats import job_location, mine_records
 from tests.fake_http_vendor import FakeVendor
 from tests.local_client import LocalTestClient as TestClient
+from tests.test_storyboard_plugin import load_server_package
 from viewer_server.server_app import build_app
+
+parse = load_server_package().parse
 
 CHAT_KEY = "sk-chat-provider-key-000111"
 SCRIPT = "第一场 茶馆 日\n阿青推门进来，收伞。\n掌柜：姑娘，喝点什么？"
@@ -33,7 +35,18 @@ OUTPUT = {
 
 @pytest.fixture
 def client(isolated_data_root):
-    return TestClient(base_url="http://127.0.0.1", app=build_app())
+    plugin_registry.set_enabled("storyboard", True)
+    yield TestClient(base_url="http://127.0.0.1", app=build_app())
+    plugin_server.unload("storyboard")
+
+
+def route(client, project_id, path, params):
+    """分镜插件的路由；成功时把 `result` 摊平回 body，方便沿用原来的断言。"""
+    response = client.post(f"/api/plugins/storyboard/routes{path}",
+                           json={"project_id": project_id, "node_id": "storyboard-1", "params": params})
+    if response.status_code == 200:
+        response._content = json.dumps(response.json()["result"], ensure_ascii=False).encode()
+    return response
 
 
 @pytest.fixture
@@ -79,7 +92,7 @@ def project_with_script(*texts: str) -> tuple[str, list[str]]:
 def post(client, project_id, ids, **body):
     payload = {"script_node_ids": ids, "segment_index": 0, "segment_count": 1,
                "alias": "chat", "model_id": "writer", **body}
-    return client.post(f"/api/canvas/projects/{project_id}/storyboard/parse", json=payload)
+    return route(client, project_id, "/parse", payload)
 
 
 # ---------------------------------------------------------------- 分段
@@ -107,13 +120,11 @@ def test_oversized_paragraph_is_cut_by_lines_then_by_length():
 
 def test_plan_reads_only_text_nodes_of_the_document(client):
     project_id, ids = project_with_script(SCRIPT, "第二场 街道\n雨停了。")
-    body = client.post(f"/api/canvas/projects/{project_id}/storyboard/plan",
-                       json={"script_node_ids": [*ids, "image-1", "ghost"]}).json()
+    body = route(client, project_id, "/plan", {"script_node_ids": [*ids, "image-1", "ghost"]}).json()
     assert body["total_chars"] == len(SCRIPT) + 2 + len("第二场 街道\n雨停了。")
     assert [segment["index"] for segment in body["segments"]] == [0]
-    empty = client.post(f"/api/canvas/projects/{project_id}/storyboard/plan",
-                        json={"script_node_ids": ["image-1"]})
-    assert empty.status_code == 422 and "没有可解析的剧本" in empty.json()["detail"]
+    empty = route(client, project_id, "/plan", {"script_node_ids": ["image-1"]})
+    assert empty.status_code == 422 and "没有可解析的剧本" in empty.json()["detail"]["message"]
 
 
 # ---------------------------------------------------------------- 调用与整理
@@ -227,7 +238,7 @@ def test_each_request_parses_one_segment_and_calls_the_model_once(client, vendor
     vendor.on("POST", "/v1/chat/completions", reply(OUTPUT), (500, {"error": "boom"}))
     long_script = "\n\n".join(f"第{index}场 街道\n" + "走" * 2900 for index in range(1, 6))
     project_id, ids = project_with_script(long_script)
-    plan = client.post(f"/api/canvas/projects/{project_id}/storyboard/plan", json={"script_node_ids": ids}).json()
+    plan = route(client, project_id, "/plan", {"script_node_ids": ids}).json()
     assert len(plan["segments"]) == 3
     first = post(client, project_id, ids, segment_count=3)
     assert first.status_code == 200 and first.json()["segment_count"] == 3
@@ -248,7 +259,7 @@ def test_changed_script_is_rejected_before_calling_the_model(client, vendor):
     chat_provider(vendor)
     project_id, ids = project_with_script(SCRIPT)
     stale = post(client, project_id, ids, segment_index=1, segment_count=2)
-    assert stale.status_code == 409 and "剧本已变化" in stale.json()["detail"]
+    assert stale.status_code == 409 and "剧本已变化" in stale.json()["detail"]["message"]
     missing = post(client, project_id, ids, model_id="nobody")
     assert missing.status_code == 404
     assert vendor.calls("POST") == [] and list_jobs() == []
@@ -291,5 +302,6 @@ def test_gateway_text_model_goes_through_the_lan_gateway(client, vendor):
 
 def test_models_list_only_text_models(client, vendor):
     chat_provider(vendor)
-    body = client.get("/api/canvas/storyboard/models").json()
+    project_id, _ids = project_with_script(SCRIPT)
+    body = route(client, project_id, "/models", {}).json()
     assert body == {"models": [{"alias": "chat", "model_id": "writer", "name": "写手", "max_cost_cny": None}]}

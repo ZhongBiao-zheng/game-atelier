@@ -7,7 +7,7 @@ import type { KeyView } from '@/api/keys';
 import {
   STORYBOARD_DEFAULT_SIZE, isStoryboardNode, resolveStoryboardBinding, storyboardPayloadOf, storyboardShotLabel,
   type StoryboardEntity, type StoryboardPayload, type StoryboardShot,
-} from '@/lib/canvasStoryboard';
+} from './canvasStoryboard';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import { providerForAlias, routeChannel } from '@/lib/modelRoutes';
 import {

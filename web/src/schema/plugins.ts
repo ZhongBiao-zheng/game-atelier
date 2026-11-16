@@ -73,12 +73,17 @@ export interface PluginPackageLock {
   publisher: { id: string; name: string };
   sdk_version: string;
   app_version: { min: string; max: string | null };
+  /** sandbox：界面在沙箱 iframe 里；host：界面是宿主代码、按需加载（ADR-0039）。
+   *  是不是 host 以服务端注册表的白名单为准，前端只认 `plugin-host/hostPlugins.ts` 里登记过的 id。 */
+  runtime?: 'sandbox' | 'host';
   ui: { entry: 'ui/index.html' } | null;
   capabilities: string[];
   contributes: {
     nodes: PluginNodeContribution[];
     image_actions: PluginMediaAction[];
     video_actions: PluginMediaAction[];
+    /** 文本节点工具栏上的按钮。 */
+    text_actions?: PluginMediaAction[];
     server: { module: 'server'; routes: PluginServerRoute[] } | null;
     agent_tools: PluginAgentTool[];
   };

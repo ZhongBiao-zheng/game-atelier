@@ -1,29 +1,52 @@
-"""分镜节点（ADR-0038）：插件节点外壳里的镜头载荷。"""
+"""分镜插件（宿主插件，ADR-0038 / ADR-0039）：插件节点外壳里的镜头载荷、Agent 摘要、宿主白名单。"""
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from pydantic import ValidationError
 
 from character_workflow.lib import canvas_agent_tools as tools
+from character_workflow.lib import plugin_registry, plugin_server
 from character_workflow.lib.canvas_agent_schema import CanvasProjectInput
 from character_workflow.lib.canvas_projects import (
     create_canvas_project, list_canvas_projects, read_canvas_document, save_canvas_document,
 )
-from character_workflow.lib.canvas_storyboard import (
-    MAX_ENTITIES, MAX_SCRIPT_NODES, MAX_SHOT_ENTITIES, MAX_SHOTS, STORYBOARD_NODE_TYPE,
-    STORYBOARD_PLUGIN_ID, agent_view, is_storyboard_node, normalize_payload,
-)
-from character_workflow.lib.plugin_manifest import PluginManifest
 from character_workflow.lib.schemas import CanvasDocument
-from tests.plugin_fixtures import manifest
+from tests.plugin_fixtures import use_plugins_root, write_plugin
 
-FIXTURE = json.loads(
-    (Path(__file__).parent / "fixtures" / "storyboard_payload_cases.json").read_text(encoding="utf-8"))
+PLUGIN_DIR = Path(__file__).resolve().parent.parent / "plugins" / "storyboard"
+FIXTURE = json.loads((PLUGIN_DIR / "tests" / "payload_cases.json").read_text(encoding="utf-8"))
 LOCAL = SimpleNamespace(kind="local", session_id="human", grant_id=None)
+
+
+def load_server_package():
+    """不经注册表直接加载插件的服务端包，给纯函数测试用（不启用插件、不碰数据目录）。"""
+    name = "storyboard_plugin_under_test"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(
+            name, PLUGIN_DIR / "server" / "__init__.py", submodule_search_locations=[str(PLUGIN_DIR / "server")])
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+_SB = load_server_package().storyboard
+MAX_ENTITIES, MAX_SCRIPT_NODES = _SB.MAX_ENTITIES, _SB.MAX_SCRIPT_NODES
+MAX_SHOT_ENTITIES, MAX_SHOTS = _SB.MAX_SHOT_ENTITIES, _SB.MAX_SHOTS
+STORYBOARD_NODE_TYPE, STORYBOARD_PLUGIN_ID = _SB.STORYBOARD_NODE_TYPE, _SB.STORYBOARD_PLUGIN_ID
+agent_view, is_storyboard_node, normalize_payload = _SB.agent_view, _SB.is_storyboard_node, _SB.normalize_payload
+
+
+@pytest.fixture
+def enabled():
+    plugin_registry.set_enabled(STORYBOARD_PLUGIN_ID, True)
+    yield
+    plugin_server.unload(STORYBOARD_PLUGIN_ID)
 
 
 def expand(value):
@@ -88,7 +111,7 @@ def test_counts_are_capped():
 
 
 def test_document_shape_is_readable_by_released_versions():
-    """只用 v5.137.0 已有的节点类型与字段：旧版本回滚后读得出，项目不会从列表里消失。"""
+    """只用 v5.137.0 已有的节点类型与字段：旧版本读得出，项目不会从列表里消失。"""
     node = storyboard_node({"shots": [{"id": "s1"}]})
     assert node["type"] == "plugin"
     assert set(node["data"]) == {
@@ -99,11 +122,37 @@ def test_document_shape_is_readable_by_released_versions():
     assert [project.project_id for project in list_canvas_projects()] == [document.project_id]
 
 
-def test_reserved_plugin_id_cannot_be_claimed_by_a_plugin_package():
-    with pytest.raises(ValidationError):
-        PluginManifest.model_validate(manifest(id=STORYBOARD_PLUGIN_ID))
-    with pytest.raises(ValidationError):
-        PluginManifest.model_validate(manifest(id="atelier.other"))
+def test_host_runtime_comes_from_the_host_allowlist_not_the_manifest(tmp_path, monkeypatch):
+    """清单自报 runtime: host 不算数：白名单外的包声明 host 拒绝加载；白名单里的 id 不声明 host 也拒绝。"""
+    use_plugins_root(monkeypatch, tmp_path / "plugins")
+    host_shape = {"ui": None, "capabilities": [], "runtime": "host"}
+    write_plugin(tmp_path / "plugins", "intruder", files={}, **host_shape)
+    write_plugin(tmp_path / "plugins", STORYBOARD_PLUGIN_ID, files={"ui/index.html": b"<!doctype html>"})
+    write_plugin(tmp_path / "plugins", "demo")
+    records = {record.plugin_id: record for record in plugin_registry.scan()}
+    assert records["intruder"].availability == "invalid"
+    assert records[STORYBOARD_PLUGIN_ID].availability == "invalid"
+    assert records["demo"].availability == "ok" and not plugin_registry.is_host(records["demo"])
+    with pytest.raises(plugin_registry.PluginError):
+        plugin_registry.set_enabled("intruder", True)
+
+
+def test_real_storyboard_package_is_a_host_plugin():
+    record = plugin_registry.find(STORYBOARD_PLUGIN_ID)
+    assert record is not None and record.availability == "ok" and plugin_registry.is_host(record)
+    assert record.lock.ui is None and record.lock.capabilities == []
+
+
+def test_sandbox_plugin_cannot_use_the_host_entry(tmp_path, monkeypatch):
+    use_plugins_root(monkeypatch, tmp_path / "plugins")
+    write_plugin(tmp_path / "plugins", "demo", server_source="def register(api):\n    pass\n",
+                 contributes={"server": {"module": "server", "routes": [
+                     {"method": "POST", "path": "/echo", "access": "read"}]}})
+    plugin_registry.set_enabled("demo", True)
+    project = create_canvas_project("入口")
+    with pytest.raises(plugin_registry.PluginError) as error:
+        plugin_server.call("demo", "POST", "/echo", project_id=project.project_id, origin="host")
+    assert error.value.code == "CAPABILITY_DENIED"
 
 
 def test_bindings_resolve_only_inside_the_current_document():
@@ -124,7 +173,7 @@ def test_bindings_resolve_only_inside_the_current_document():
     assert view["shots"][0]["entities"] == ["茶馆"]
 
 
-def test_agent_reads_shot_summary():
+def test_agent_reads_shot_summary(enabled):
     document = saved({
         "ratio": "9:16",
         "shots": [{"id": "s1", "shot_size": "中景", "duration_s": 4, "visual": "画" * 500},
@@ -139,7 +188,15 @@ def test_agent_reads_shot_summary():
     assert len(row["storyboard"]["shots"][0]["visual"]) == 300
 
 
-def test_other_plugin_nodes_have_no_storyboard_view():
+def test_agent_summary_needs_the_plugin_enabled():
+    document = saved({"shots": [{"id": "s1"}]})
+    module = plugin_server._module_name(STORYBOARD_PLUGIN_ID)
+    view = tools.get_document(LOCAL, CanvasProjectInput(project_id=document.project_id))
+    assert "storyboard" not in view["nodes"][0]
+    assert module not in sys.modules, "插件关闭时 get_canvas 不加载插件代码"
+
+
+def test_other_plugin_nodes_have_no_storyboard_view(enabled):
     node = storyboard_node({})
     node["data"]["plugin_id"] = "demo"
     project = create_canvas_project("别的插件")
@@ -165,9 +222,8 @@ def test_storyboard_follows_project_package():
 
 def test_timeline_lists_selected_video_per_shot_in_order():
     """时间线导出的读取入口：顺序即镜头顺序，每镜的视频只认当前文档里类型相符且有内容的节点。"""
-    from character_workflow.lib.canvas_storyboard import timeline
-
-    case = json.loads((Path(__file__).parent / "fixtures" / "storyboard_timeline_case.json").read_text(encoding="utf-8"))
+    timeline = _SB.timeline
+    case = json.loads((PLUGIN_DIR / "tests" / "timeline_case.json").read_text(encoding="utf-8"))
     project = create_canvas_project("时间线")
     current = read_canvas_document(project.project_id)
     document = CanvasDocument.model_validate({

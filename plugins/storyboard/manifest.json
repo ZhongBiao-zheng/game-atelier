@@ -1,0 +1,66 @@
+{
+  "manifest_version": 1,
+  "id": "storyboard",
+  "name": "分镜",
+  "version": "0.1.0",
+  "description": "把剧本拆成镜头，逐镜出图出视频",
+  "icon": "storyboard",
+  "publisher": {
+    "id": "atelier",
+    "name": "Atelier"
+  },
+  "sdk_version": "1",
+  "app_version": {
+    "min": "5.137.0"
+  },
+  "runtime": "host",
+  "contributes": {
+    "nodes": [
+      {
+        "type": "board",
+        "title": "分镜",
+        "icon": "storyboard",
+        "default_size": {
+          "width": 420,
+          "height": 176
+        },
+        "payload_schema_version": 1,
+        "surfaces": [
+          "node"
+        ]
+      }
+    ],
+    "text_actions": [
+      {
+        "id": "split",
+        "label": "拆分镜",
+        "icon": "storyboard",
+        "action": {
+          "kind": "create_node",
+          "node_type": "board",
+          "open_panel": true
+        }
+      }
+    ],
+    "server": {
+      "module": "server",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/models",
+          "access": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/plan",
+          "access": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/parse",
+          "access": "edit"
+        }
+      ]
+    }
+  }
+}

@@ -22,6 +22,8 @@ from character_workflow.lib.plugin_registry import PluginError, PluginRecord
 logger = logging.getLogger(__name__)
 
 Handler = Callable[["PluginRequest", dict], dict]
+# 画布 Agent 的 get_canvas 给这类节点追加的只读摘要：(文档, 节点) → 字段。只有宿主插件能登记。
+AgentView = Callable[[Any, Any], dict]
 MODULE_PREFIX = "atelier_plugin_"
 MAX_RESULT_BYTES = 4 * 1024 * 1024
 MAX_IMAGE_BYTES = 64 * 1024 * 1024
@@ -32,11 +34,18 @@ class PluginServerAPI:
 
     def __init__(self) -> None:
         self.handlers: dict[tuple[str, str], Handler] = {}
+        self.agent_views: dict[str, AgentView] = {}
 
     def route(self, method: str, path: str) -> Callable[[Handler], Handler]:
         def decorate(handler: Handler) -> Handler:
             self.handlers[(method, path)] = handler
             return handler
+        return decorate
+
+    def agent_view(self, node_type: str) -> Callable[[AgentView], AgentView]:
+        def decorate(view: AgentView) -> AgentView:
+            self.agent_views[node_type] = view
+            return view
         return decorate
 
 
@@ -65,6 +74,7 @@ class PluginRequest:
     plugin_id: str
     project_id: str
     # surface：界面经宿主发起，只能碰连在自己节点上的素材。agent：本机 Agent 的一轮对话里发起。
+    # host：宿主插件（ADR-0039）的宿主代码发起，不经过项目批准。
     origin: str
     capabilities: frozenset[str]
     node_id: str | None = None
@@ -328,7 +338,7 @@ def _create_image_node(project_id: str, png: bytes, title: str, beside_node_id: 
 
 
 _lock = threading.Lock()
-_loaded: dict[str, tuple[str, dict[tuple[str, str], Handler]]] = {}
+_loaded: dict[str, tuple[str, PluginServerAPI]] = {}
 
 
 def _module_name(plugin_id: str) -> str:
@@ -344,6 +354,10 @@ def unload(plugin_id: str) -> None:
 
 
 def _handlers(record: PluginRecord) -> dict[tuple[str, str], Handler]:
+    return _api(record).handlers
+
+
+def _api(record: PluginRecord) -> PluginServerAPI:
     """首次调用时才 import 服务端模块；插件更新（摘要变化）后重新加载。"""
     assert record.lock is not None
     with _lock:
@@ -367,8 +381,11 @@ def _handlers(record: PluginRecord) -> dict[tuple[str, str], Handler]:
             sys.modules.pop(name, None)
             logger.exception("plugin %s server module failed to load", record.plugin_id)
             raise PluginError("PLUGIN_BROKEN", "插件服务端模块加载失败", status=500) from error
-        _loaded[record.plugin_id] = (record.lock.digest, api.handlers)
-    return api.handlers
+        if api.agent_views and not plugin_registry.is_host(record):
+            sys.modules.pop(name, None)
+            raise PluginError("PLUGIN_BROKEN", "只有宿主插件可以登记 Agent 节点摘要", status=500)
+        _loaded[record.plugin_id] = (record.lock.digest, api)
+    return api
 
 
 def _enabled_record(plugin_id: str) -> PluginRecord:
@@ -431,10 +448,16 @@ def call(plugin_id: str, method: str, path: str, *, project_id: str, origin: str
     server = record.lock.contributes.server
     if server is None or not any(item.method == method and item.path == path for item in server.routes):
         raise PluginError("ROUTE_NOT_DECLARED", "插件没有声明这个接口", status=404)
-    granted = plugin_grants.active_grants(project_id).get(plugin_id)
-    if granted is None:
-        raise PluginError("PLUGIN_NOT_GRANTED", "本项目尚未允许此插件", status=403)
-    capabilities = frozenset(granted["capabilities"])
+    if (origin == "host") != plugin_registry.is_host(record):
+        # 宿主插件只走宿主入口；沙箱插件不能借宿主入口绕过项目批准。
+        raise PluginError("CAPABILITY_DENIED", "这个入口不能调用此插件", status=403)
+    if origin == "host":
+        capabilities: frozenset[str] = frozenset()
+    else:
+        granted = plugin_grants.active_grants(project_id).get(plugin_id)
+        if granted is None:
+            raise PluginError("PLUGIN_NOT_GRANTED", "本项目尚未允许此插件", status=403)
+        capabilities = frozenset(granted["capabilities"])
     if origin == "surface" and "server.call" not in capabilities:
         raise PluginError("CAPABILITY_DENIED", "本项目没有允许这项能力", status=403)
     request = PluginRequest(plugin_id, project_id, origin, capabilities, node_id=node_id)
@@ -455,3 +478,14 @@ def call(plugin_id: str, method: str, path: str, *, project_id: str, origin: str
     if not isinstance(result, dict) or len(json.dumps(result, ensure_ascii=False)) > MAX_RESULT_BYTES:
         raise PluginError("PLUGIN_FAILED", "插件返回的结果不合规", status=500)
     return result, request.created_node_ids
+
+
+def node_agent_view(document: Any, node: Any) -> dict:
+    """画布 Agent 看到的插件节点额外摘要。插件未启用、不是宿主插件或没登记时为空，且不 import 插件代码。"""
+    if node.type != "plugin":
+        return {}
+    record = plugin_registry.find(node.data.plugin_id)
+    if not plugin_registry.is_host(record) or node.data.plugin_id not in plugin_registry.enabled_ids():
+        return {}
+    view = _api(record).agent_views.get(node.data.node_type)
+    return view(document, node) if view is not None else {}

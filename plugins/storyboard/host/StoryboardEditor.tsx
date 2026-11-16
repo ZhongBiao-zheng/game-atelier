@@ -22,7 +22,7 @@ import {
   emptyStoryboardShot, formatStoryboardDuration, moveStoryboardShot, removeStoryboardEntity, removeStoryboardShot,
   storyboardShotLabel, storyboardTotalDuration, updateStoryboardEntity, updateStoryboardShot,
   type StoryboardEntityKind, type StoryboardPayload, type StoryboardShot,
-} from '@/lib/canvasStoryboard';
+} from './canvasStoryboard';
 import { cn } from '@/lib/utils';
 
 import { StoryboardGenerate, type GenerateRequest } from './StoryboardGenerate';

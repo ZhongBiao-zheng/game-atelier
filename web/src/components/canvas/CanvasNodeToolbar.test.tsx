@@ -16,7 +16,10 @@ import { DEFAULT_CANVAS_UI_PREFERENCES } from './canvasImageToolbar';
 import type { CanvasNode } from '@/schema/canvas';
 import type { PluginPackageLock } from '@/schema/plugins';
 import { setPluginsSnapshot } from '@/plugin-host/registry';
-import { createStoryboardNode } from '@/lib/canvasStoryboard';
+import { createStoryboardNode } from '../../../../plugins/storyboard/host/canvasStoryboard';
+import { plugin as storyboardPlugin } from '../../../../plugins/storyboard/host/storyboard';
+import storyboardLock from '../../../../plugins/storyboard/package/manifest.lock.json';
+import type { HostPluginApi } from '@/plugin-host/hostPlugins';
 import spriteLock from '../../../../plugins/sprite-sheet/package/manifest.lock.json';
 
 vi.mock('@/api/canvas', async importOriginal => ({
@@ -1053,11 +1056,23 @@ it('treats a double-click on a button inside a node as two clicks, not a node pr
   expect(context.previewLayerStack).not.toHaveBeenCalled();
 });
 
-it('renders the built-in storyboard node without plugin approval or sandbox', () => {
+function hostApi(): HostPluginApi {
+  return {
+    projectId: 'canvas-test', findNode: () => undefined, listNodes: () => [], resolveVersion: () => undefined,
+    updateNode: vi.fn(), recordHistory: vi.fn(), selectNode: vi.fn(), reportError: vi.fn(), clearError: vi.fn(),
+    savePendingEdits: vi.fn(async () => undefined), lastRunFailed: () => false, currentDocument: () => null,
+    commitDocument: vi.fn(), submitRun: vi.fn(async () => ({ status: 'error' as const })),
+    waitForDocument: vi.fn(async () => true), providers: () => [], generationDefault: () => undefined,
+    newId: prefix => `${prefix}-1`,
+  };
+}
+const storyboardEnabled = { hostPlugins: new Map([['storyboard', storyboardPlugin]]), hostPluginApi: hostApi() };
+
+it('renders the storyboard plugin node in the host page once the plugin is loaded', () => {
   const fetchSpy = vi.spyOn(globalThis, 'fetch');
   const node = createStoryboardNode('plugin-storyboard', { x: 0, y: 0 });
   render(
-    <CanvasNodeContext.Provider value={nodeContext()}>
+    <CanvasNodeContext.Provider value={nodeContext(storyboardEnabled)}>
       <NodeCard data={{ domain: node }} selected />
     </CanvasNodeContext.Provider>,
   );
@@ -1068,10 +1083,25 @@ it('renders the built-in storyboard node without plugin approval or sandbox', ()
   fetchSpy.mockRestore();
 });
 
+it('shows a placeholder for a storyboard node while the plugin is disabled and keeps its payload', () => {
+  const lock = storyboardLock as unknown as PluginPackageLock;
+  setPluginsSnapshot([{ id: lock.id, availability: 'ok', reason: null, enabled: false, manifest: null }]);
+  const node = createStoryboardNode('plugin-storyboard-off', { x: 0, y: 0 });
+  render(
+    <CanvasNodeContext.Provider value={nodeContext()}>
+      <NodeCard data={{ domain: node }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+  expect(screen.getByText('插件未启用')).toBeInTheDocument();
+  expect(screen.queryByText('双击添加镜头')).toBeNull();
+  expect(screen.queryByRole('button', { name: '编辑 分镜' })).toBeNull();
+  act(() => setPluginsSnapshot([]));
+});
+
 it('opens the storyboard editor from the node toolbar', () => {
   const node = createStoryboardNode('plugin-storyboard-edit', { x: 0, y: 0 });
   render(
-    <CanvasNodeContext.Provider value={nodeContext()}>
+    <CanvasNodeContext.Provider value={nodeContext(storyboardEnabled)}>
       <NodeCard data={{ domain: node }} selected />
     </CanvasNodeContext.Provider>,
   );
@@ -1081,21 +1111,29 @@ it('opens the storyboard editor from the node toolbar', () => {
   expect(within(screen.getByRole('dialog')).getByRole('button', { name: '添加镜头' })).toBeInTheDocument();
 });
 
-it('offers 拆分镜 on a text node that has content', () => {
-  const createStoryboardFromText = vi.fn();
+it('offers 拆分镜 on a text node only while the storyboard plugin is enabled', () => {
+  const lock = storyboardLock as unknown as PluginPackageLock;
+  const createPluginNodeFromMedia = vi.fn();
   const textNode = { ...nodes[0], data: { ...nodes[0].data, current_version_id: 'script' } } as CanvasNode;
   const version = (text: string): CanvasContentVersion => ({
     kind: 'text', text, version_id: 'script', sha256: 'x',
     created_at: '2026-11-15T00:00:00Z', origin: { kind: 'user_edit' },
   });
-  const { unmount } = render(<CanvasNodeContext.Provider value={nodeContext({
-    createStoryboardFromText, resolveVersion: () => version('第一场 茶馆'),
-  })}><NodeCard data={{ domain: textNode }} selected /></CanvasNodeContext.Provider>);
-  fireEvent.click(screen.getByRole('button', { name: '用 文本 拆分镜' }));
-  expect(createStoryboardFromText).toHaveBeenCalledWith(textNode.id);
+  const view = (text: string) => <CanvasNodeContext.Provider value={nodeContext({
+    createPluginNodeFromMedia, resolveVersion: () => version(text),
+  })}><NodeCard data={{ domain: textNode }} selected /></CanvasNodeContext.Provider>;
+
+  setPluginsSnapshot([{ id: lock.id, availability: 'ok', reason: null, enabled: false, manifest: null }]);
+  const { unmount } = render(view('第一场 茶馆'));
+  expect(screen.queryByRole('button', { name: '用 文本 拆分镜' })).toBeNull();
   unmount();
-  render(<CanvasNodeContext.Provider value={nodeContext({
-    createStoryboardFromText, resolveVersion: () => version('   '),
-  })}><NodeCard data={{ domain: textNode }} selected /></CanvasNodeContext.Provider>);
+
+  act(() => setPluginsSnapshot([{ id: lock.id, availability: 'ok', reason: null, enabled: true, manifest: lock }]));
+  const second = render(view('第一场 茶馆'));
+  fireEvent.click(screen.getByRole('button', { name: '用 文本 拆分镜' }));
+  expect(createPluginNodeFromMedia).toHaveBeenCalledWith(textNode, lock, lock.contributes.text_actions?.[0]);
+  second.unmount();
+  render(view('   '));
   expect(screen.getByRole('button', { name: '用 文本 拆分镜' })).toBeDisabled();
+  act(() => setPluginsSnapshot([]));
 });

@@ -1,4 +1,4 @@
-"""剧本解析：把连到分镜节点的剧本交给对话模型，拆成一组镜头（ADR-0038）。
+"""剧本解析：把分镜节点的剧本交给对话模型，拆成一组镜头（ADR-0038）。
 
 只产出镜头草稿：不写画布、不发生成请求。边界与「AI 帮我配置」相同：
 - 剧本只作资料：放进定界块，系统消息写死任务；请求不带 tools，服务端不按模型输出发任何请求。
@@ -13,7 +13,8 @@ import re
 from typing import Any
 
 from character_workflow.lib import structured_text_call
-from character_workflow.lib.canvas_storyboard import (
+
+from .storyboard import (
     ENTITY_KINDS, MAX_ENTITIES, MAX_SCRIPT_NODES, MAX_SHOT_ENTITIES, MIN_DURATION_S, _SHOT_TEXT,
     _duration,
 )

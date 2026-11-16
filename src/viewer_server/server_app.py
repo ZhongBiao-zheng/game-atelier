@@ -373,8 +373,6 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(plugin_grants_router)
     app.include_router(update_router)
     app.include_router(connection_router(connection_store))
-    from viewer_server.routes_canvas_storyboard import router as canvas_storyboard_router
-    app.include_router(canvas_storyboard_router)
     app.include_router(team_library_router)
     from viewer_server.gateway_library_proxy import router as gateway_library_router
     app.include_router(gateway_library_router)

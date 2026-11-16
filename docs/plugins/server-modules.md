@@ -30,7 +30,7 @@ def register(api) -> None:
 
 1. 插件已启用；
 2. 路由在清单里声明过；
-3. 本项目对该插件的批准有效（见 [安全与隔离](security.md)）；界面发起的调用还要求批准里有 `server.call`；
+3. 本项目对该插件的批准有效（见 [安全与隔离](security.md)）；界面发起的调用还要求批准里有 `server.call`。宿主插件（ADR-0039）的调用走 `host` 入口，跳过这一步与下一步；沙箱插件不能走这个入口；
 4. 界面发起时：`node_id` 是本项目里属于该插件的节点；`inputs` 里每个版本都是此刻以输入连线连到这个节点的素材的当前版本，且素材类型在该节点类型的 `input_modalities` 里（插件更新收窄了类型后，旧连线上的素材同样被拒）。节点类型声明了 `expand_result_stack` 时，连着的结果组封面所在组里此刻的成员也算连着。
 
 ## `ctx`
@@ -62,6 +62,7 @@ def register(api) -> None:
 
 ## 不能做的
 
+- 只有宿主插件可以用 `@api.agent_view(node_type)` 登记 `view(document, node) -> dict`，给画布 Agent 的 `get_canvas` 追加这类节点的只读摘要；插件关闭时不调用。
 - 不能直接调用厂商接口或 Job Runner 内部函数：`check_product_plugins.py` 拒绝 `character_workflow.lib.callers` 与 `job_runner` 的导入。需要生成内容时，用 `ctx.create_generation_draft` 建好草稿，由用户在节点上点生成，走 Canvas Run，这样成本统计、路由和网关配额才覆盖得到。
 - 第三方 Python 依赖只能写进根 `pyproject.toml`，安装包没有给单个插件装依赖的机制（取舍见 ADR-0037「插件的第三方 Python 依赖」）。已有可直接用的：Pillow、numpy、`opencv-python-headless`（视频解码、光流、模板匹配）。
 - 不要依赖当前工作目录；路径从 `ctx` 或模块自身位置取。

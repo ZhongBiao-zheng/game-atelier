@@ -1,5 +1,5 @@
 {
-  "_comment": "分镜的时间线读取：Python canvas_storyboard.timeline 与 TS storyboardTimeline 对同一份文档必须给出同样结果。",
+  "_comment": "分镜的时间线读取：Python plugins/storyboard/server/storyboard.py 的 timeline 与 TS storyboardTimeline 对同一份文档必须给出同样结果。",
   "payload": {
     "ratio": "16:9",
     "shots": [

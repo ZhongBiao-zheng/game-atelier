@@ -1,6 +1,10 @@
 ---
-status: accepted
+status: accepted（部分被 ADR-0039 取代）
 ---
+
+> 2026-11-16：分镜改成宿主插件 `storyboard`（ADR-0039）。「`atelier.` 前缀保留给宿主、由宿主直接渲染、不经插件注册表」三条被取代；
+> 「借用插件节点外壳存新节点」「payload 当不可信数据宽容读取」「不接连线」「逐镜生成在前端完成」仍然有效。
+> 下文的 `canvas_storyboard`、`tests/fixtures/storyboard_*` 已搬到 `plugins/storyboard/server/` 与 `plugins/storyboard/tests/`。以下为原文。
 
 # 宿主内置节点借用插件节点外壳
 

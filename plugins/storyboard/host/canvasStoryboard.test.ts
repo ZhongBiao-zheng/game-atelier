@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import fixture from '../../../tests/fixtures/storyboard_payload_cases.json';
+import fixture from '../tests/payload_cases.json';
 import type { CanvasNode } from '@/schema/canvas';
 import {
   STORYBOARD_MAX_ENTITIES, STORYBOARD_MAX_SCRIPT_NODES, STORYBOARD_MAX_SHOTS, STORYBOARD_MAX_SHOT_ENTITIES,
@@ -206,7 +206,7 @@ describe('并入剧本解析结果', () => {
 
 describe('时间线读取', () => {
   it('与后端同一份夹具：按镜头顺序给出每镜选定的视频', async () => {
-    const { default: timelineCase } = await import('../../../tests/fixtures/storyboard_timeline_case.json');
+    const { default: timelineCase } = await import('../tests/timeline_case.json');
     const { storyboardTimeline } = await import('./canvasStoryboard');
     const nodes = timelineCase.nodes as unknown as CanvasNode[];
     const versions = timelineCase.content_versions as Record<string, { kind: string; version_id: string; duration_ms?: number }>;

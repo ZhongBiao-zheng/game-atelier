@@ -1,9 +1,25 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
+
+const pluginsDir = path.resolve(__dirname, '../plugins')
+
+/** 宿主插件的界面源码在 plugins/<id>/host（ADR-0039），裸模块（react 等）改从 web 的 node_modules 解析。 */
+function resolvePluginHostFromWeb(): Plugin {
+  return {
+    name: 'atelier-plugin-host-resolve',
+    enforce: 'pre',
+    async resolveId(source, importer, options) {
+      if (!importer || !importer.startsWith(pluginsDir + path.sep)) return null
+      if (/^[./\0]/.test(source) || source.startsWith('@/') || source.startsWith('@pricing') || source.startsWith('@audio-caps')) return null
+      return this.resolve(source, path.join(__dirname, 'src', 'main.tsx'), { ...options, skipSelf: true })
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), resolvePluginHostFromWeb()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
@@ -37,7 +53,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     globals: true,
-    // 官方插件的界面源码在 web/ 之外（plugins/<id>/ui），它们的测试也要收进来。
-    include: ['src/**/*.{test,spec}.{ts,tsx}', '../plugins/*/ui/**/*.{test,spec}.{ts,tsx}'],
+    // 官方插件的界面源码在 web/ 之外（plugins/<id>/ui、plugins/<id>/host），它们的测试也要收进来。
+    include: ['src/**/*.{test,spec}.{ts,tsx}', '../plugins/*/ui/**/*.{test,spec}.{ts,tsx}', '../plugins/*/host/**/*.{test,spec}.{ts,tsx}'],
   },
 })

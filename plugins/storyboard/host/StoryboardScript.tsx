@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import {
   listStoryboardParseModels, parseStoryboardSegment, planStoryboardParse,
   type StoryboardParseModel, type StoryboardParseResult,
-} from '@/api/canvasStoryboard';
+} from './api';
 import { ApiError } from '@/api/http';
 import { Button } from '@/components/ui/button';
 import { CloseIcon, HelpIcon } from '@/components/ui/icons';
@@ -13,7 +13,7 @@ import { Hint } from '@/components/ui/tooltip';
 import {
   STORYBOARD_MAX_SCRIPT_NODES, formatStoryboardDuration, mergeParsedStoryboard, storyboardShotLabel,
   type StoryboardPayload,
-} from '@/lib/canvasStoryboard';
+} from './canvasStoryboard';
 import { formatGenerationCost } from '@/lib/generationCost';
 import type { CanvasNode } from '@/schema/canvas';
 
@@ -63,7 +63,7 @@ export function StoryboardScript({ payload, host, change, onWritten }: {
 
   useEffect(() => {
     let active = true;
-    listStoryboardParseModels()
+    listStoryboardParseModels(host.projectId)
       .then(({ models: rows }) => {
         if (!active) return;
         setModels(rows);
@@ -72,7 +72,7 @@ export function StoryboardScript({ payload, host, change, onWritten }: {
       })
       .catch(e => { if (active) { setModels([]); setError(e instanceof Error ? e.message : String(e)); } });
     return () => { active = false; };
-  }, []);
+  }, [host.projectId]);
 
   const textOf = (node: CanvasNode | undefined) => {
     const version = node?.type === 'text' ? host.resolveVersion(node.data.current_version_id) : undefined;

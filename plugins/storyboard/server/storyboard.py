@@ -1,10 +1,10 @@
-"""分镜节点：载荷的宽容读取（ADR-0038）。
+"""分镜节点：载荷的宽容读取（ADR-0038、ADR-0039）。
 
-分镜节点存成插件节点外壳，`plugin_id` 是宿主保留的 `atelier.storyboard`，镜头数据在 `payload`。
+分镜节点是分镜插件（宿主插件，`plugin_id` 为 `storyboard`）的节点，镜头数据在 `payload`。
 画布文档的读盘模型对 `payload` 只有大小约束，形状由这里解析：缺字段补默认、类型不对取默认、
 超长截断、多余字段丢弃。载荷可能来自项目包、局域网分享或粘贴，一律当不可信数据。
-与前端 `web/src/lib/canvasStoryboard.ts` 的 normalizeStoryboardPayload 同一套规则，
-共用夹具 `tests/fixtures/storyboard_payload_cases.json`。
+与前端 `plugins/storyboard/host/canvasStoryboard.ts` 的 normalizeStoryboardPayload 同一套规则，
+共用夹具 `plugins/storyboard/tests/payload_cases.json`。
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import math
 import re
 from typing import Any
 
-STORYBOARD_PLUGIN_ID = "atelier.storyboard"
+STORYBOARD_PLUGIN_ID = "storyboard"
 STORYBOARD_NODE_TYPE = "board"
 
 MAX_SHOTS = 120
@@ -151,7 +151,7 @@ def timeline(document: Any, node: Any) -> list[dict[str, Any]]:
     每镜只有一个出处：`video_node_id` 指向的视频节点的当前内容版本。绑定的节点不存在、不是
     视频节点、或还没有内容时 `video_version_id` 为 None，由调用方决定跳过还是中止。
     `duration_ms` 取版本上登记的时长；生成出的视频目前不登记时长，为 None 时需要调用方自己探测。
-    与前端 `storyboardTimeline` 同一套规则，共用夹具 `tests/fixtures/storyboard_timeline_case.json`。
+    与前端 `storyboardTimeline` 同一套规则，共用夹具 `plugins/storyboard/tests/timeline_case.json`。
     """
     payload = normalize_payload(node.data.payload)
     nodes = {item.id: item for item in document.nodes}

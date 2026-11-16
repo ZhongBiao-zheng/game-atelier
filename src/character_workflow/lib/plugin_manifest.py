@@ -86,7 +86,7 @@ class PluginOpenPanelAction(_Model):
 
 
 class PluginMediaAction(_Model):
-    """图片 / 视频节点工具栏「更多」里的一项；按钮由宿主按清单画，点击前不运行插件代码。"""
+    """图片 / 视频节点工具栏「更多」或文本节点工具栏里的一项；按钮由宿主按清单画，点击前不运行插件代码。"""
 
     id: Annotated[str, StringConstraints(pattern=_NAME)]
     label: str = Field(min_length=1, max_length=20)
@@ -119,6 +119,7 @@ class PluginContributes(_Model):
     nodes: list[PluginNodeContribution] = Field(default_factory=list, max_length=32)
     image_actions: list[PluginMediaAction] = Field(default_factory=list, max_length=16)
     video_actions: list[PluginMediaAction] = Field(default_factory=list, max_length=16)
+    text_actions: list[PluginMediaAction] = Field(default_factory=list, max_length=16)
     server: PluginServerContribution | None = None
     agent_tools: list[PluginAgentTool] = Field(default_factory=list, max_length=32)
 
@@ -143,6 +144,9 @@ class PluginManifest(_Model):
     publisher: PluginPublisher
     sdk_version: Annotated[str, StringConstraints(pattern=r"^[1-9][0-9]*$")]
     app_version: PluginAppVersion
+    # sandbox：界面在沙箱 iframe 里（ADR-0012）。host：界面是宿主代码、按需加载（ADR-0039）；
+    # 清单自报不算数，只有宿主白名单里的随应用发布插件可以是 host（plugin_registry.HOST_PLUGIN_IDS）。
+    runtime: Literal["sandbox", "host"] = "sandbox"
     ui: PluginUi | None = None
     capabilities: list[Annotated[str, StringConstraints(pattern=r"^[a-z]+\.[a-z_]+$")]] = Field(
         default_factory=list, max_length=32)
@@ -157,7 +161,9 @@ class PluginManifest(_Model):
         if len(set(node_types)) != len(node_types):
             raise ValueError("plugin node types must be unique")
         nodes = {node.type: node for node in contributes.nodes}
-        for kind, actions in (("image", contributes.image_actions), ("video", contributes.video_actions)):
+        host = self.runtime == "host"
+        for kind, actions in (("image", contributes.image_actions), ("video", contributes.video_actions),
+                              ("text", contributes.text_actions)):
             action_ids = [action.id for action in actions]
             if len(set(action_ids)) != len(action_ids):
                 raise ValueError(f"plugin {kind} action ids must be unique")
@@ -168,7 +174,8 @@ class PluginManifest(_Model):
                 if target is None:
                     raise ValueError(f"{kind} action {action.id} targets an undeclared node type")
                 # create_node 会从这个素材连一条输入线过去，目标节点必须收这种素材。
-                if kind not in target.input_modalities:
+                # 宿主插件不连线：来源节点交给插件代码处理（分镜把剧本来源记进 payload）。
+                if not host and kind not in target.input_modalities:
                     raise ValueError(f"{kind} action {action.id} targets a node that does not accept {kind}")
         declared = contributes.server.routes if contributes.server else []
         routes = {(route.method, route.path) for route in declared}
@@ -180,7 +187,12 @@ class PluginManifest(_Model):
         for tool in contributes.agent_tools:
             if ("POST", tool.route) not in routes:
                 raise ValueError(f"agent tool {tool.name} must point at a declared POST route")
-        if (contributes.nodes or contributes.image_actions or contributes.video_actions) and self.ui is None:
+        has_surface = contributes.nodes or contributes.image_actions or contributes.video_actions \
+            or contributes.text_actions
+        if host:
+            if self.ui is not None or self.capabilities or contributes.agent_tools:
+                raise ValueError("host plugin must not declare ui, capabilities or agent tools")
+        elif has_surface and self.ui is None:
             raise ValueError("plugin with node or action contributions must declare ui")
         return self
 

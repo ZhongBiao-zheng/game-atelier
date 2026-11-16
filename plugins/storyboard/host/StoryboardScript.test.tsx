@@ -2,15 +2,15 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { useState } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 
-import { listStoryboardParseModels, parseStoryboardSegment, planStoryboardParse } from '@/api/canvasStoryboard';
+import { listStoryboardParseModels, parseStoryboardSegment, planStoryboardParse } from './api';
 import { ApiError } from '@/api/http';
-import { normalizeStoryboardPayload, type StoryboardPayload } from '@/lib/canvasStoryboard';
+import { normalizeStoryboardPayload, type StoryboardPayload } from './canvasStoryboard';
 import type { CanvasContentVersion, CanvasNode } from '@/schema/canvas';
 
 import type { StoryboardHost } from './StoryboardNodeBody';
 import { StoryboardScript } from './StoryboardScript';
 
-vi.mock('@/api/canvasStoryboard', () => ({
+vi.mock('./api', () => ({
   listStoryboardParseModels: vi.fn(),
   planStoryboardParse: vi.fn(),
   parseStoryboardSegment: vi.fn(),

@@ -1,8 +1,7 @@
 import { AnnotationFullscreen } from './annotation/AnnotationFullscreen';
 import { PluginNodeBody, type PluginNodeInput } from '@/plugin-host/PluginNodeBody';
 import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
-import { isStoryboardNode } from '@/lib/canvasStoryboard';
-import { StoryboardNodeBody, requestStoryboardEdit, type StoryboardHost } from './storyboard/StoryboardNodeBody';
+import { hostNodeType, type HostPluginApi, type HostPluginModule } from '@/plugin-host/hostPlugins';
 import type { PluginMediaAction, PluginPackageLock } from '@/schema/plugins';
 import { pluginIcon } from '@/components/ui/icons';
 import { useAnnotationEditor } from './annotation/useAnnotationEditor';
@@ -25,7 +24,6 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { StoryboardIcon } from '@/components/ui/icons';
 import { AddIcon, AddImageIcon, AiIcon, AudioFileIcon, BrushIcon, ChatIcon, CheckIcon, ChevronRightIcon, CloseIcon, CompareIcon, DeleteIcon, DownloadIcon, EditIcon, ExchangeIcon, ExpandIcon, ExportFileIcon, HelpIcon, HideIcon, ImageFileIcon, LayersIcon, LoadingIcon, LockIcon, MoreIcon, MuteIcon, OutpaintIcon, ParamsIcon, PauseIcon, PlayIcon, ReplaceFileIcon, SaveAssetIcon, ShareIcon, ShowIcon, StopIcon, TextIcon, UnlockIcon, VideoFileIcon, VolumeIcon } from '@/components/ui/icons';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
@@ -126,6 +124,7 @@ import type {
   CanvasImageToolbarPreferences,
   CanvasLayerStackNode,
   CanvasNode,
+  CanvasPluginNode,
   CanvasPoint,
   CanvasSize,
   CanvasUiPreferences,
@@ -202,11 +201,9 @@ export interface CanvasNodeContextValue {
   findNode?: (id: string) => CanvasNode | undefined;
   /** 当前文档里的全部节点。常量引用。 */
   listNodes?: () => readonly CanvasNode[];
-  /** 在文本节点右侧建一个以它为剧本来源的分镜节点。 */
-  createStoryboardFromText?: (nodeId: string) => void;
-  /** 分镜的逐镜生成：先算计划（确认弹窗显示它），确认后应用并逐镜提交。 */
-  planStoryboardShots?: StoryboardHost['planShots'];
-  runStoryboardShots?: StoryboardHost['runShots'];
+  /** 已启用且已加载的宿主插件（ADR-0039）与交给它们的画布能力。插件关闭时不在表里。 */
+  hostPlugins?: ReadonlyMap<string, HostPluginModule>;
+  hostPluginApi?: HostPluginApi;
   keys: KeyView[];
   /** 生成节点选模型用：「自动」+ 真实 KEY。缺省时只有真实 KEY。 */
   generationProviders?: KeyView[];
@@ -302,21 +299,10 @@ export interface CanvasNodeContextValue {
   deleteNode: (id: string) => void;
 }
 
-/** 分镜节点（宿主内置，ADR-0038）只拿它用得到的这几项，不经过插件批准与沙箱。 */
-function storyboardHost(context: CanvasNodeContextValue): StoryboardHost {
-  return {
-    projectId: context.projectId, findNode: context.findNode ?? (() => undefined),
-    resolveVersion: context.resolveVersion, updateNode: context.updateNode, recordHistory: context.recordHistory,
-    selectNode: context.selectNode, reportError: context.reportError,
-    savePendingEdits: context.savePendingEdits, listNodes: context.listNodes,
-    planShots: context.planStoryboardShots, runShots: context.runStoryboardShots,
-    lastRunFailed: nodeId => context.jobsByResultNodeId.get(nodeId)?.some(job => job.status === 'failed') ?? false,
-  };
-}
-
 export const CanvasNodeContext = createContext<CanvasNodeContextValue | null>(null);
 const EMPTY_CANVAS_NODE_IDS: ReadonlySet<string> = new Set();
 const EMPTY_PLUGIN_INPUTS: readonly PluginNodeInput[] = [];
+const EMPTY_HOST_PLUGINS: ReadonlyMap<string, HostPluginModule> = new Map();
 const EMPTY_VIDEO_FRAME_NODE_IDS: Readonly<Partial<Record<CanvasVideoFrameSlot, string>>> = {};
 const EMPTY_CANVAS_PENDING_INPUTS: readonly CanvasPendingInput[] = [];
 const EMPTY_CANVAS_MENTION_REFERENCES: readonly CanvasMentionReference[] = [];
@@ -894,7 +880,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         <div
           data-canvas-node-hidden={node.hidden ? 'true' : undefined}
           className={cn('h-full', node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-secondary/20', node.type === 'text' ? 'min-h-32'
-            : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44', node.hidden && 'canvas-node-hidden', node.hidden && (node.type === 'text' || isStoryboardNode(node)) && 'canvas-node-hidden-text')}
+            : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44', node.hidden && 'canvas-node-hidden', node.hidden && (node.type === 'text' || hostNodeType(context.hostPlugins ?? EMPTY_HOST_PLUGINS, node)?.textContent) && 'canvas-node-hidden-text')}
         >
           {node.type === 'text' && (
             content?.kind === 'text' && (isEditingInlineText || promptVariableParts(content.text).some(part => part.kind === 'variable')) ? (
@@ -1019,13 +1005,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
           {node.type === 'compare' && <CanvasCompareNodeBody node={node} context={context} bitmapWidth={imageBitmapWidth} />}
           {node.type === 'image_edit' && <CanvasImageEditSurface node={node} projectId={context.projectId}
             source={context.resolveVersion(node.data.source_version_id) as CanvasMediaVersion | undefined} />}
-          {isStoryboardNode(node) && <StoryboardNodeBody node={node} host={storyboardHost(context)} />}
-          {node.type === 'plugin' && !isStoryboardNode(node) && (
-            <PluginNodeBody node={node} projectId={context.projectId} selected={Boolean(selected)}
-              inputs={context.pluginInputsByNodeId?.get(node.id) ?? EMPTY_PLUGIN_INPUTS}
-              resolveVersion={context.resolveVersion} updateNode={context.updateNode} recordHistory={context.recordHistory}
-              savePendingEdits={context.savePendingEdits} />
-          )}
+          {node.type === 'plugin' && <PluginNodeContent node={node} context={context} selected={Boolean(selected)} />}
         </div>
       </article>
       <CanvasNodeRunLiveRegion state={nodeRunState} />
@@ -1582,6 +1562,18 @@ function CandidateFailureActions({
   );
 }
 
+/** 插件节点的内容：已启用、已加载的宿主插件由宿主直接渲染；其余走沙箱界面，或在插件关闭时显示占位。 */
+function PluginNodeContent({ node, context, selected }: {
+  node: CanvasPluginNode; context: CanvasNodeContextValue; selected: boolean;
+}) {
+  const hostType = hostNodeType(context.hostPlugins ?? EMPTY_HOST_PLUGINS, node);
+  if (hostType && context.hostPluginApi) return <hostType.Body node={node} api={context.hostPluginApi} />;
+  return <PluginNodeBody node={node} projectId={context.projectId} selected={selected}
+    inputs={context.pluginInputsByNodeId?.get(node.id) ?? EMPTY_PLUGIN_INPUTS}
+    resolveVersion={context.resolveVersion} updateNode={context.updateNode} recordHistory={context.recordHistory}
+    savePendingEdits={context.savePendingEdits} />;
+}
+
 function CanvasNodeToolbar({
   node,
   content,
@@ -1600,12 +1592,21 @@ function CanvasNodeToolbar({
   const contentNode = isCanvasContentNode(node) ? node : null;
   const mediaNode = contentNode && contentNode.type !== 'text' ? contentNode : null;
   const [downloadingLayers, setDownloadingLayers] = useState<CanvasLayerExportFormat | null>(null);
+  const plugins = usePlugins();
+  // 文本节点工具栏上的插件按钮（清单 text_actions）：插件关闭时不出现。
+  const pluginTextActions = useMemo(() => enabledPlugins(plugins).flatMap(plugin => (
+    (plugin.contributes.text_actions ?? []).filter(action => action.action.kind === 'create_node')
+      .map(action => ({ plugin, action, Icon: pluginIcon(action.icon) }))
+  )), [plugins]);
   const layersReady = node.type === 'layer_stack' && Boolean(node.data.base_version_id)
     && !node.data.active_run_id && !submitting;
 
-  if (isStoryboardNode(node)) return (
-    <MediaToolButton label={`编辑 ${node.title}`} text="编辑" onClick={() => requestStoryboardEdit(node.id)}><EditIcon /></MediaToolButton>
-  );
+  const hostType = hostNodeType(context.hostPlugins ?? EMPTY_HOST_PLUGINS, node);
+  if (hostType && node.type === 'plugin') return <>
+    {hostType.toolbar(node).map(action => (
+      <MediaToolButton key={action.id} label={action.label} text={action.text} onClick={action.onClick}><action.Icon /></MediaToolButton>
+    ))}
+  </>;
 
   if (node.type === 'image_edit') return <>
     <MediaToolButton label={`编辑 ${node.title}`} text="编辑" onClick={() => context.openImageEdit?.(node.id)}>{node.data.options.mode === 'outpaint' ? <OutpaintIcon /> : <BrushIcon />}</MediaToolButton>
@@ -1628,14 +1629,16 @@ function CanvasNodeToolbar({
           >
             <ImageFileIcon />
           </MediaToolButton>
-          {context.createStoryboardFromText && <MediaToolButton
-            label={`用 ${node.title} 拆分镜`}
-            text="拆分镜"
-            disabled={content?.kind !== 'text' || !content.text.trim()}
-            onClick={() => context.createStoryboardFromText?.(node.id)}
-          >
-            <StoryboardIcon />
-          </MediaToolButton>}
+          {context.createPluginNodeFromMedia && pluginTextActions.map(({ plugin, action, Icon }) => (
+            <MediaToolButton key={`${plugin.id}:${action.id}`}
+              label={`用 ${node.title} ${action.label}`}
+              text={action.label}
+              disabled={content?.kind !== 'text' || !content.text.trim()}
+              onClick={() => contentNode && context.createPluginNodeFromMedia?.(contentNode, plugin, action)}
+            >
+              <Icon />
+            </MediaToolButton>
+          ))}
         </>
       )}
       {node.type === 'layer_stack' && (

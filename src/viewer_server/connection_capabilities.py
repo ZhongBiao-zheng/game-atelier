@@ -204,9 +204,6 @@ POST /api/canvas/projects/{project_id}/runs/upscale
 POST /api/canvas/projects/{project_id}/image-edits
 POST /api/canvas/projects/{project_id}/runs/image-edit
 POST /api/canvas/projects/{project_id}/runs/layer-decomposition
-GET /api/canvas/storyboard/models
-POST /api/canvas/projects/{project_id}/storyboard/plan
-POST /api/canvas/projects/{project_id}/storyboard/parse
 POST /api/canvas/projects/{project_id}/runs/{run_id}/reverse-prompt-config
 POST /api/canvas/projects/{project_id}/runs
 POST /api/canvas/projects/{project_id}/runs/{run_id}/cancel
@@ -273,7 +270,6 @@ _MANAGEMENT_READ_EXEMPT = frozenset({("GET", "/api/keys"), ("GET", "/api/team-li
 # 用 POST 只因为 id 列表放不进查询串；它只读，不需要编辑租约。
 _READ_POSTS = frozenset({
     ("POST", "/api/creation-assets/staleness"),
-    ("POST", "/api/canvas/projects/{project_id}/storyboard/plan"),  # 只算分段，不调模型
 })
 MEDIA_ROUTES = frozenset({
     "/api/gateway-libraries/{alias}/{library_id}/assets/{entry_id}/content",

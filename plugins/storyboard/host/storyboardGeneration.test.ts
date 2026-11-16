@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { KeyView } from '@/api/keys';
-import { createStoryboardNode, normalizeStoryboardPayload, storyboardPayloadOf, type StoryboardNode } from '@/lib/canvasStoryboard';
+import { createStoryboardNode, normalizeStoryboardPayload, storyboardPayloadOf, type StoryboardNode } from './canvasStoryboard';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import type { CanvasContentVersion, CanvasDocument, CanvasNode, JsonValue } from '@/schema/canvas';
 

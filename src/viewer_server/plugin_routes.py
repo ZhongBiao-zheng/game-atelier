@@ -12,7 +12,8 @@ grants_router = APIRouter(prefix="/api/canvas/projects/{project_id}/plugin-grant
 
 
 def _http(error: PluginError) -> HTTPException:
-    return HTTPException(error.status, {"message": error.message, "code": error.code})
+    detail = {"message": error.message, "code": error.code}
+    return HTTPException(error.status, {**detail, "raw": error.raw} if error.raw else detail)
 
 
 def _listing() -> dict:
@@ -80,17 +81,22 @@ def revoke_plugin(project_id: str, plugin_id: str) -> dict:
 class PluginCall(BaseModel):
     model_config = ConfigDict(extra="forbid")
     project_id: str = Field(min_length=1, max_length=160)
-    node_id: str = Field(min_length=1, max_length=120)
+    # 沙箱界面必须带（服务端核对素材连在这个节点上）；宿主插件不按节点核对，可以不带。
+    node_id: str | None = Field(default=None, min_length=1, max_length=120)
     inputs: list[str] = Field(default_factory=list, max_length=64)
     params: dict = Field(default_factory=dict)
 
 
 @router.post("/{plugin_id}/routes/{route:path}")
 def call_plugin_route(plugin_id: str, route: str, body: PluginCall) -> dict:
-    """插件界面经宿主调用它自己声明的服务端路由。同步处理函数由框架放进线程池执行。"""
+    """插件界面经宿主调用它自己声明的服务端路由。同步处理函数由框架放进线程池执行。
+
+    宿主插件（ADR-0039）的界面就是宿主代码，走 host 入口；其余插件的界面在沙箱里，走 surface 入口。
+    """
+    origin = "host" if plugin_registry.is_host(plugin_registry.find(plugin_id)) else "surface"
     try:
         result, _created = plugin_server.call(
-            plugin_id, "POST", "/" + route, project_id=body.project_id, origin="surface",
+            plugin_id, "POST", "/" + route, project_id=body.project_id, origin=origin,
             params=body.params, node_id=body.node_id, input_version_ids=body.inputs,
         )
     except PluginError as error:

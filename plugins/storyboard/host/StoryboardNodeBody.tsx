@@ -6,7 +6,7 @@ import {
   STORYBOARD_PAYLOAD_MAX_BYTES, STORYBOARD_TOO_LARGE, formatStoryboardDuration, isStoryboardNode,
   normalizeStoryboardPayload, resolveStoryboardBinding, storyboardPayloadBytes, storyboardPayloadOf,
   storyboardAutoHeight, storyboardShotLabel, storyboardTotalDuration, type StoryboardNode, type StoryboardPayload, type StoryboardShot,
-} from '@/lib/canvasStoryboard';
+} from './canvasStoryboard';
 import type { CanvasContentVersion, CanvasNode, JsonValue } from '@/schema/canvas';
 
 import { StoryboardEditor } from './StoryboardEditor';

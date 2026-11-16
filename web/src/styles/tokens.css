@@ -7,6 +7,8 @@
 @import "@fontsource-variable/jetbrains-mono/wght.css";
 @import "tailwindcss";
 @import "tw-animate-css";
+/* 宿主插件（ADR-0039）的界面源码在 web/ 之外，类名也要扫进来。 */
+@source "../../../plugins/*/host/**/*.{ts,tsx}";
 
 @custom-variant dark (&:where(.dark, .dark *));
 

@@ -55,6 +55,17 @@
 
 视频节点工具栏本身没有「更多」菜单；有已启用插件声明了视频动作时，宿主在工具栏最右加一个「更多」，里面只有这些插件动作。`create_node` 在视频右侧建节点并从视频连线，目标节点类型的 `input_modalities` 必须包含 `video`。
 
+## 文本工具栏动作 `contributes.text_actions[]`
+
+形状与 `image_actions[]` 相同，按钮直接出现在文本节点工具栏上（分镜的「拆分镜」）：
+
+```json
+{ "id": "split", "label": "拆分镜", "icon": "storyboard",
+  "action": { "kind": "create_node", "node_type": "board", "open_panel": true } }
+```
+
+文本为空时按钮置灰。沙箱插件的 `create_node` 在文本右侧建节点并从文本连线，目标节点类型的 `input_modalities` 必须包含 `text`；宿主插件不连线，来源节点交给插件代码处理。插件关闭时按钮不出现。
+
 ## 服务端路由 `contributes.server`
 
 ```json

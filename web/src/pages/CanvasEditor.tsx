@@ -31,12 +31,8 @@ import {
   useStore,
   useStoreApi,
 } from '@xyflow/react';
-import { AddIcon, AiIcon, AudioFileIcon, MusicFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, SelectIcon, SettingsIcon, ShowIcon, StoryboardIcon, TextIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
-import { STORYBOARD_DEFAULT_SIZE, createStoryboardNode, isStoryboardNode, remapStoryboardPayload } from '@/lib/canvasStoryboard';
-import { requestStoryboardEdit } from '@/components/canvas/storyboard/StoryboardNodeBody';
-import {
-  applyShotGenerationPlan, planShotGeneration, rebindShotResult, type ShotGenerationKind, type ShotGenerationPlan,
-} from '@/components/canvas/storyboard/storyboardGeneration';
+import { AddIcon, AiIcon, AudioFileIcon, MusicFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, SelectIcon, SettingsIcon, ShowIcon, TextIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
+import { currentHostNodeType, loadHostPlugin, useHostPlugins, type HostPluginApi } from '@/plugin-host/hostPlugins';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { Link, useLocation } from 'wouter';
 
@@ -170,6 +166,7 @@ import type {
   CanvasMediaVersion,
   CanvasImageEditNode,
   CanvasNode,
+  CanvasPluginNode,
   CanvasPoint,
   CanvasSize,
   CanvasTextVersion,
@@ -2503,15 +2500,20 @@ function CanvasEditorInner({
 
   function addPluginNode(plugin: PluginPackageLock, contribution: PluginNodeContribution) {
     const size = contribution.default_size;
-    appendNode({ id: makeId('plugin'), type: 'plugin', title: contribution.title,
+    const shell: CanvasPluginNode = { id: makeId('plugin'), type: 'plugin', title: contribution.title,
       position: defaultPosition(size), size, z_index: 0,
       data: { plugin_id: plugin.id, node_type: contribution.type, plugin_version: plugin.version,
         package_digest: plugin.digest, data_schema_version: contribution.payload_schema_version,
-        payload: {}, generation_draft: null } }, null);
-  }
-
-  function addStoryboardNode() {
-    appendNode(createStoryboardNode(makeId('plugin'), defaultPosition(STORYBOARD_DEFAULT_SIZE)), null);
+        payload: {}, generation_draft: null } };
+    if (plugin.runtime !== 'host') {
+      appendNode(shell, null);
+      return;
+    }
+    // 宿主插件（ADR-0039）的 payload 由插件代码填；插件启用时分块已在画布打开时加载。
+    void loadHostPlugin(plugin.id).then(module => {
+      const type = module?.nodeTypes[contribution.type];
+      if (type) appendNode(type.create(shell), null);
+    });
   }
 
   function groupSelection() {
@@ -4150,78 +4152,6 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set([newNodeId]));
   }, [canvasUiPreferences.generation_defaults.image, commit, providers]);
 
-  /** 文本节点工具条「拆分镜」：在它右侧建一个以它为剧本来源的分镜节点，直接打开「剧本」页签。 */
-  // placeNewNode 每次渲染都是新函数：用 ref 取最新实现，对外的回调保持常量引用。
-  const createStoryboardFromTextHandler = useRef<(nodeId: string) => void>(() => undefined);
-  createStoryboardFromTextHandler.current = nodeId => {
-    const current = latestDocument.current;
-    const source = current?.nodes.find(node => node.id === nodeId);
-    if (!current || source?.type !== 'text') return;
-    const size = canvasNodeRenderedSize(source, current.content_versions);
-    const node = createStoryboardNode(makeId('plugin'),
-      placeNewNode({ x: source.position.x + size.width + 96, y: source.position.y }, STORYBOARD_DEFAULT_SIZE), [nodeId]);
-    const topZ = Math.max(0, ...current.nodes.map(item => item.z_index));
-    commit(document => ({ ...document, nodes: [...document.nodes, { ...node, z_index: topZ + 1 }] }), true);
-    setSelectedConnectionIds(new Set());
-    setSelectedNodeIds(new Set([node.id]));
-    requestStoryboardEdit(node.id, 'script');
-  };
-  const createStoryboardFromText = useCallback((nodeId: string) => createStoryboardFromTextHandler.current(nodeId), []);
-
-  /** 分镜：按当前文档算一份生成计划。只算不改，确认弹窗显示的就是它。 */
-  const planStoryboardShots = useCallback((nodeId: string, shotIds: readonly string[], kind: ShotGenerationKind, count: number) => {
-    const current = latestDocument.current;
-    return current ? planShotGeneration({
-      document: current, storyboardNodeId: nodeId, shotIds, kind, count,
-      deps: { providers, preference: canvasUiPreferences.generation_defaults[kind], newId: makeId },
-    }) : null;
-  }, [canvasUiPreferences.generation_defaults, providers]);
-  /** 分镜：应用确认过的计划，再一镜一镜提交；每镜是一次独立的 Canvas Run，某一镜失败不影响后面的。 */
-  const runStoryboardShotsHandler = useRef<(plan: ShotGenerationPlan) => Promise<void>>(async () => undefined);
-  runStoryboardShotsHandler.current = async plan => {
-    const current = latestDocument.current;
-    if (!current) return;
-    const { nodeIds } = applyShotGenerationPlan(current, plan);
-    if (nodeIds.length === 0) return;
-    commit(document => applyShotGenerationPlan(document, plan).document, true);
-    // 画布状态经 React 更新后才进 latestDocument：每一步都等它落定，
-    // 否则下一镜提交前的保存会带着旧文档，把上一镜的运行状态盖掉。
-    const settled = async (ready: (document: CanvasDocument) => boolean) => {
-      for (let attempt = 0; attempt < 80; attempt += 1) {
-        if (latestDocument.current && ready(latestDocument.current)) return true;
-        await new Promise(resolve => window.setTimeout(resolve, 25));
-      }
-      return false;
-    };
-    const nodeOf = (document: CanvasDocument, id: string) => document.nodes.find(node => node.id === id);
-    if (!await settled(document => nodeIds.every(id => nodeOf(document, id)))) return;
-    for (const nodeId of nodeIds) {
-      const before = nodeOf(latestDocument.current!, nodeId);
-      const versionBefore = before && isContentNode(before) ? before.data.current_version_id : null;
-      // 保存没完成、或服务端版本刚被上一镜的结果推进（409）时，这一镜确定没有发出去：等一下再提交。
-      // 其它错误结果不明，不再提交，继续下一镜。
-      let outcome = await submitRun(nodeId);
-      for (let attempt = 0; attempt < 3 && (outcome.status === 'not_sent' || outcome.status === 'conflict'); attempt += 1) {
-        await new Promise(resolve => window.setTimeout(resolve, 600));
-        outcome = await submitRun(nodeId);
-      }
-      if (outcome.status !== 'submitted') continue;
-      setError(null);
-      const resultId = outcome.resultNodeId ?? nodeId;
-      // 提交成功后结果节点会带上运行状态（或已经出了新内容）；等它进了本地文档再提交下一镜。
-      await settled(document => {
-        const node = nodeOf(document, resultId);
-        return Boolean(node) && (!isContentNode(node!) || Boolean(node!.data.active_run_id) || node!.data.current_version_id !== versionBefore);
-      });
-      // 在已有内容的节点上重新生成，结果会落到一个新节点：让这一镜改绑到新结果，并沿用镜头的标题。
-      const item = plan.items.find(candidate => candidate.nodeId === nodeId);
-      if (item && resultId !== nodeId) {
-        commit(document => rebindShotResult(document, plan, item.shotId, resultId, before?.title ?? ''), false);
-        await settled(document => nodeOf(document, resultId)?.title === (before?.title ?? ''));
-      }
-    }
-  };
-  const runStoryboardShots = useCallback((plan: ShotGenerationPlan) => runStoryboardShotsHandler.current(plan), []);
 
   const submitAngle = useCallback(async (params: CanvasAngleParams) => {
     if (!angleState || runSubmissionInFlight.current) return;
@@ -4760,12 +4690,26 @@ function CanvasEditorInner({
     const size = contribution.default_size;
     const sourceSize = canvasNodeRenderedSize(node, current.content_versions);
     const id = makeId('plugin');
-    const created: CanvasNode = { id, type: 'plugin', title: contribution.title,
+    const created: CanvasPluginNode = { id, type: 'plugin', title: contribution.title,
       position: placeNewNode({ x: node.position.x + sourceSize.width + 96, y: node.position.y }, size),
       size, z_index: 0,
       data: { plugin_id: plugin.id, node_type: contribution.type, plugin_version: plugin.version,
         package_digest: plugin.digest, data_schema_version: contribution.payload_schema_version,
         payload: {}, generation_draft: null } };
+    if (plugin.runtime === 'host') {
+      // 宿主插件不连线：来源节点交给插件代码处理（分镜把它记成剧本来源）。
+      void loadHostPlugin(plugin.id).then(module => {
+        const type = module?.nodeTypes[contribution.type];
+        if (!type) return;
+        const filled = type.create(created, node.id);
+        commit(document => ({ ...document, nodes: [...document.nodes, filled] }), true);
+        setSelectedConnectionIds(new Set());
+        setSelectedNodeIds(new Set([id]));
+        focusNewNodesHandler.current([filled]);
+        if (target.open_panel) type.openPanel?.(id);
+      });
+      return;
+    }
     commit(document => ({
       ...document,
       nodes: [...document.nodes, created],
@@ -4827,6 +4771,34 @@ function CanvasEditorInner({
     } catch (error) { setError((error as Error).message); }
     finally { setSubmittingNodeIds(current => { const next = new Set(current); next.delete(nodeId); return next; }); }
   }, [annotationBridge, annotationController, providers, canvasUiPreferences.generation_defaults.image, locateNode]);
+  // 宿主插件（ADR-0039）：已启用的在画布打开时加载；交给它们的能力对象保持常量引用。
+  const hostPlugins = useHostPlugins();
+  const hostPluginLatest = useRef({ submitRun, commit, providers, savePendingEdits, jobsByResultNodeId,
+    defaults: canvasUiPreferences.generation_defaults });
+  hostPluginLatest.current = { submitRun, commit, providers, savePendingEdits, jobsByResultNodeId,
+    defaults: canvasUiPreferences.generation_defaults };
+  const hostPluginApi = useMemo<HostPluginApi>(() => ({
+    projectId, findNode, listNodes, resolveVersion, updateNode, reportError,
+    recordHistory: recordHistorySnapshot, selectNode: selectOnlyNode,
+    clearError: () => setError(null),
+    savePendingEdits: () => hostPluginLatest.current.savePendingEdits(),
+    lastRunFailed: nodeId => hostPluginLatest.current.jobsByResultNodeId.get(nodeId)?.some(job => job.status === 'failed') ?? false,
+    currentDocument: () => latestDocument.current,
+    commitDocument: (updater, record) => hostPluginLatest.current.commit(updater, record),
+    submitRun: nodeId => hostPluginLatest.current.submitRun(nodeId),
+    // 画布状态经 React 更新后才进 latestDocument：插件的下一步要等它落定。
+    waitForDocument: async ready => {
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        if (latestDocument.current && ready(latestDocument.current)) return true;
+        await new Promise(resolve => window.setTimeout(resolve, 25));
+      }
+      return false;
+    },
+    providers: () => hostPluginLatest.current.providers,
+    generationDefault: slot => hostPluginLatest.current.defaults[slot],
+    newId: makeId,
+  }), [projectId, findNode, listNodes, resolveVersion, updateNode, reportError, recordHistorySnapshot, selectOnlyNode]);
+
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
     projectCategories, resolveFinalCategory, finalizationRevision, finalizeNode, saveCategories,
     editWithAnnotation,
@@ -4845,9 +4817,8 @@ function CanvasEditorInner({
     resolveVersion,
     findNode,
     listNodes,
-    createStoryboardFromText,
-    planStoryboardShots,
-    runStoryboardShots,
+    hostPlugins,
+    hostPluginApi,
     keys,
     generationProviders: providers,
     jobsByRunId,
@@ -5014,9 +4985,8 @@ function CanvasEditorInner({
     resolveVersion,
     findNode,
     listNodes,
-    createStoryboardFromText,
-    planStoryboardShots,
-    runStoryboardShots,
+    hostPlugins,
+    hostPluginApi,
     videoFrameNodeIdsByNodeId,
     pendingInputNodesByNodeId,
   ]);
@@ -5545,7 +5515,6 @@ function CanvasEditorInner({
             <div className="my-1 h-px w-7 bg-border" />
             <div className="hidden xl:contents">
               <ToolButton label="添加对比节点" onClick={() => addCompareNode(null)}><CompareIcon /></ToolButton>
-              <ToolButton label="添加分镜节点" onClick={addStoryboardNode}><StoryboardIcon /></ToolButton>
               <ToolButton label="添加文本节点" onClick={() => addTextNode(null)}><TextIcon /></ToolButton>
               <ToolButton label="添加图片节点" onClick={() => addGenerationNode('image', null)}><ImageFileIcon /></ToolButton>
               <ToolButton label="添加视频节点" onClick={() => addGenerationNode('video', null)}><VideoFileIcon /></ToolButton>
@@ -5565,7 +5534,7 @@ function CanvasEditorInner({
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs text-muted-foreground">添加节点</p>
-              <CanvasCreateMenuItems allowEmptyNodes allowUpload onAddStoryboard={addStoryboardNode} onAddCompare={() => addCompareNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null, 'speech')} onAddMusic={() => addGenerationNode('audio', null, 'music')} onUpload={() => uploadRef.current?.click()} />
+              <CanvasCreateMenuItems allowEmptyNodes allowUpload onAddCompare={() => addCompareNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null, 'speech')} onAddMusic={() => addGenerationNode('audio', null, 'music')} onUpload={() => uploadRef.current?.click()} />
               <PluginCreateMenuItems onAdd={addPluginNode} />
             </div>
           )}
@@ -5888,8 +5857,7 @@ function PluginCreateMenuItems({ onAdd }: { onAdd: (plugin: PluginPackageLock, n
   </>;
 }
 
-function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, onAddText, onAddImage, onAddVideo, onAddAudio, onAddMusic, onUpload, onAddCompare, onAddStoryboard }: {
-  onAddStoryboard?: () => void;
+function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, onAddText, onAddImage, onAddVideo, onAddAudio, onAddMusic, onUpload, onAddCompare }: {
   onAddCompare?: () => void;
   /** 连出来的素材里有这些模式收不下的类型：对应选项置灰。 */
   rejectedModes?: ReadonlySet<string>;
@@ -5909,7 +5877,6 @@ function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, rejectedModes, on
     {allowEmptyNodes && <AddMenuButton icon={<AudioFileIcon />} title="语音" description="旁白与配音" onClick={onAddAudio} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
     {allowEmptyNodes && <AddMenuButton icon={<MusicFileIcon />} title="音乐" description="配乐与歌曲" onClick={onAddMusic} disabledReason={rejectedModes?.has('audio') ? '音频生成只能参考文本' : undefined} />}
     {onAddCompare && <AddMenuButton icon={<CompareIcon />} title="对比" description="左右拖动对照两张图" onClick={onAddCompare} />}
-    {onAddStoryboard && <AddMenuButton icon={<StoryboardIcon />} title="分镜" description="镜头列表，逐镜出图出视频" onClick={onAddStoryboard} />}
     {allowUpload && <AddMenuButton icon={<UploadIcon />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
   </>;
 }
@@ -6379,8 +6346,8 @@ function cloneCanvasNode(
     z_index: zIndex,
     data: {
       ...clone.data,
-      // 分镜节点的绑定：一同复制的改指新节点，其余清空。
-      ...(isStoryboardNode(clone) ? { payload: remapStoryboardPayload(clone.data.payload, idMap) } : {}),
+      // 宿主插件节点（如分镜）payload 里的节点绑定：一同复制的改指新节点，其余清空。插件关闭时原样复制。
+      ...((remap => remap ? { payload: remap(clone.data.payload, idMap) } : {})(currentHostNodeType(clone)?.remapPayload)),
       generation_draft: cloneCanvasDraft(clone.data.generation_draft, idMap),
     },
   };

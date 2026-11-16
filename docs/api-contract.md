@@ -474,14 +474,14 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 
 图片节点的可选 `data.result_stack` 保存 `{run_id, member_node_ids}`：一次生成出多张时，本节点为封面，`member_node_ids` 是其余结果各自的图片节点（最多 64 个），`run_id` 是已拆成节点的那次生成。成员 id 不做文档级引用校验，读取方按存在过滤；跨画布粘贴时只保留一起粘贴的成员。
 
-分镜节点是插件节点外壳（ADR-0038）：`type: "plugin"`，`data.plugin_id = "atelier.storyboard"`，`data.node_type = "board"`，`data.payload = {ratio, style_prefix, entities[], shots[], script_node_ids[]}`。条目 `{id, kind: character|scene|prop, name, description, reference_node_id}`；镜头 `{id, scene, shot_size, camera, duration_s, visual, dialogue, entity_ids[], image_prompt, video_prompt, image_node_id, video_node_id}`。文档校验对 `payload` 只查 256 KiB 大小；形状由 `canvas_storyboard.normalize_payload`（后端）与 `normalizeStoryboardPayload`（前端）宽容读取，两端共用 `tests/fixtures/storyboard_payload_cases.json`。上限 120 镜、60 条目、每镜 20 个条目引用、8 个来源文本节点；时长夹到 1–60 秒。`payload` 里的节点 id 不做文档级引用校验，读取方只认当前文档内类型相符的节点。分镜节点不接连线。
+分镜节点是分镜插件（宿主插件，ADR-0038 / ADR-0039，默认关闭）的节点：`type: "plugin"`，`data.plugin_id = "storyboard"`，`data.node_type = "board"`，`data.payload = {ratio, style_prefix, entities[], shots[], script_node_ids[]}`。条目 `{id, kind: character|scene|prop, name, description, reference_node_id}`；镜头 `{id, scene, shot_size, camera, duration_s, visual, dialogue, entity_ids[], image_prompt, video_prompt, image_node_id, video_node_id}`。文档校验对 `payload` 只查 256 KiB 大小；形状由 `plugins/storyboard/server/storyboard.py` 的 `normalize_payload`（后端）与 `plugins/storyboard/host/canvasStoryboard.ts` 的 `normalizeStoryboardPayload`（前端）宽容读取，两端共用 `plugins/storyboard/tests/payload_cases.json`。插件关闭时节点显示占位，`payload` 原样保留。上限 120 镜、60 条目、每镜 20 个条目引用、8 个来源文本节点；时长夹到 1–60 秒。`payload` 里的节点 id 不做文档级引用校验，读取方只认当前文档内类型相符的节点。分镜节点不接连线。
 
-时间线读取（给「视频时间线导出」用，纯函数，不是 HTTP 接口）：后端 `canvas_storyboard.timeline(document, node)` 与前端 `storyboardTimeline(payload, findNode, resolveVersion)` 按镜头顺序返回 `[{shot_id, index, planned_duration_s, dialogue, video_node_id, video_version_id, duration_ms}]`。`video_version_id` 是镜头的 `video_node_id` 指向的视频节点的当前内容版本；节点不存在、类型不符或没有内容时为 `null`。`duration_ms` 取内容版本上登记的时长，生成出的视频目前不登记（为 `null`），需要调用方自己探测。两端共用夹具 `tests/fixtures/storyboard_timeline_case.json`。
+时间线读取（给「视频时间线导出」用，纯函数，不是 HTTP 接口）：后端分镜插件服务端包里的 `storyboard.timeline(document, node)` 与前端 `storyboardTimeline(payload, findNode, resolveVersion)` 按镜头顺序返回 `[{shot_id, index, planned_duration_s, dialogue, video_node_id, video_version_id, duration_ms}]`。`video_version_id` 是镜头的 `video_node_id` 指向的视频节点的当前内容版本；节点不存在、类型不符或没有内容时为 `null`。`duration_ms` 取内容版本上登记的时长，生成出的视频目前不登记（为 `null`），需要调用方自己探测。两端共用夹具 `plugins/storyboard/tests/timeline_case.json`。
 
-剧本解析（计费调用，只返回镜头草稿，不写画布）：
-- `GET /api/canvas/storyboard/models` → `{models: [{alias, model_id, name, max_cost_cny}]}`，候选是已启用密钥下的文本模型（含局域网网关提供的）；`max_cost_cny` 是解析一段的最高花费，没有价格时为 `null`。
-- `POST /api/canvas/projects/{id}/storyboard/plan`，体 `{script_node_ids}`（1–8 个）→ `{total_chars, segments: [{index, chars, preview}]}`。不调模型；剧本只从已保存文档里的文本节点读，单段上限 8000 字，全文上限 120000 字。
-- `POST /api/canvas/projects/{id}/storyboard/parse`，体 `{script_node_ids, segment_index, segment_count, alias, model_id, entities: [{kind, name, description}], style_prefix}` → `{segment_index, segment_count, entities, shots, notices, usage: {input_tokens, output_tokens, cost_cny, job_id}}`。一次请求只解析一段、只调一次对话模型，不带 tools，失败不重试；`segment_count` 与服务端按当前剧本算出的段数不一致时 409「剧本已变化」且不调模型。返回的 `entities` 只含新条目，`shots[].entities` 用名称引用；每段最多 80 镜。模型输出不可用时 422，上游失败 502，`detail = {message, code: "STORYBOARD_PARSE_FAILED", raw}`（`raw` 已遮掉密钥）。
+剧本解析（计费调用，只返回镜头草稿，不写画布）。三条都是插件路由 `POST /api/plugins/storyboard/routes/<path>`，请求体 `{project_id, params}`，成功时返回 `{result: ...}`；插件关闭时鉴权中间件按未声明路由拒绝（403），不加载插件代码：
+- `/models`（read），`params = {}` → `{models: [{alias, model_id, name, max_cost_cny}]}`，候选是已启用密钥下的文本模型（含局域网网关提供的）；`max_cost_cny` 是解析一段的最高花费，没有价格时为 `null`。
+- `/plan`（read），`params = {script_node_ids}`（1–8 个）→ `{total_chars, segments: [{index, chars, preview}]}`。不调模型；剧本只从已保存文档里的文本节点读，单段上限 8000 字，全文上限 120000 字。
+- `/parse`（edit），`params = {script_node_ids, segment_index, segment_count, alias, model_id, entities: [{kind, name, description}], style_prefix}` → `{segment_index, segment_count, entities, shots, notices, usage: {input_tokens, output_tokens, cost_cny, job_id}}`。一次请求只解析一段、只调一次对话模型，不带 tools，失败不重试；`segment_count` 与服务端按当前剧本算出的段数不一致时 409「剧本已变化」且不调模型。返回的 `entities` 只含新条目，`shots[].entities` 用名称引用；每段最多 80 镜。模型输出不可用时 422，上游失败 502，`detail = {message, code: "STORYBOARD_PARSE_FAILED", raw}`（`raw` 已遮掉密钥）。
 - 每次调用（成功或失败）记一条 `namespace=assist, kind=text, output_paths=[]` 的任务，`prompt` 为「剧本解析 · N 字」，项目 id 记在 `params.assist_project_id`（`Job.canvas_project_id` 只给 `namespace=canvas` 用）；用量页据此归到该画布项目。
 
 四模态均进入同一个 Job Runner：图片/视频沿用既有厂商协议；文本只接受明确可执行的
@@ -1330,6 +1330,14 @@ multipart 里的数组值展开成同名重复字段。
 - 服务端模块 `plugins/<id>/server/__init__.py` 导出 `register(api)`，用 `@api.route("POST", path)` 登记 `handler(ctx, params) -> dict`。模块在第一次调用时才 import，插件停用时卸载，包摘要变化后重新加载。`ctx.inputs` 是核对过的图片（含服务端路径，不回传界面）；`ctx.create_image(png, title)` 需要 `resource.create`，结果落成画布上的普通图片节点（`upload` 来源）；`ctx.image_of_node(node_id)` 只在 Agent 调用时可用。
 - 插件界面协议增加方法 `server.call {path, params, inputs: handle[]}`（能力 `server.call`）与错误码 `SERVER_ERROR`（`message` 为服务端给用户的原因）。浏览器侧把句柄换成版本 id 后转发；路径必须符合清单的 path 格式。
 - 内置 Agent：已启用插件的 `contributes.agent_tools[]` 以 `plugin_<id 下划线化>_<name>` 为名加入工具列表，每次组装 Agent 时读取一次。`read_only` 的工具不需确认，其余按当前权限模式；调用同样要求本项目已批准该插件。外部 MCP 的工具列表不变。
+
+### 宿主插件（ADR-0039）
+
+- 清单 `runtime: "sandbox" | "host"`，缺省 `sandbox`。是否为宿主插件以服务端白名单 `plugin_registry.HOST_PLUGIN_IDS` 为准：白名单外的包声明 `host`、或白名单里的包不声明 `host`，一律 `availability = "invalid"`，不能启用。宿主插件不声明 `ui`、`capabilities`、`agent_tools`。目前只有 `storyboard`（分镜）。
+- 宿主插件的界面是宿主代码，编进 `web/dist/assets/<id>.js` 单独的分块，只在插件启用时由画布 import（前端白名单 `web/src/plugin-host/hostPlugins.ts`）；插件关闭时不加载这个分块，它的节点显示占位、`payload` 原样保留。
+- 清单新增贡献点 `contributes.text_actions[]`：形状同 `image_actions`，按钮出现在文本节点工具栏。沙箱插件的 `create_node` 从文本节点连一条输入线到新节点，目标节点必须收 `text`；宿主插件不连线，把来源节点交给插件代码。
+- `POST /api/plugins/{plugin_id}/routes/{path}` 的 `node_id` 改为可选：沙箱界面必须带；宿主插件走 `origin = "host"`，不检查项目批准与输入，其余（已启用、路由已声明、读写类别、结果大小）不变。沙箱插件不能走宿主入口（403 `CAPABILITY_DENIED`）。插件错误体可带 `raw`（遮掉密钥的上游原文）：`{detail: {message, code, raw?}}`。
+- 服务端模块可用 `@api.agent_view(node_type)` 登记 `view(document, node) -> dict`，画布 Agent 的 `get_canvas` 把它合进该节点的行；只有宿主插件可以登记，插件关闭时不调用、不 import。
 
 ### 安全修复后的补充（B2 安全验收）
 

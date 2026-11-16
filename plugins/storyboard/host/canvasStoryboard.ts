@@ -1,11 +1,11 @@
-/** 分镜节点（ADR-0038）：存成插件节点外壳，`plugin_id` 是宿主保留的 `atelier.storyboard`，镜头数据在 payload。
+/** 分镜节点（ADR-0038 / ADR-0039）：分镜插件（宿主插件）的节点，`plugin_id` 为 `storyboard`，镜头数据在 payload。
  *
  *  payload 可能来自项目包、局域网分享或粘贴，一律当不可信数据：读取只走 normalizeStoryboardPayload
  *  （缺字段补默认、类型不对取默认、超长截断、多余字段丢弃），里面的节点 id 只在当前文档内解析。
- *  规则与后端 `canvas_storyboard.normalize_payload` 相同，共用夹具 `tests/fixtures/storyboard_payload_cases.json`。 */
+ *  规则与后端 `plugins/storyboard/server/storyboard.py` 的 normalize_payload 相同，共用夹具 `plugins/storyboard/tests/payload_cases.json`。 */
 import type { CanvasNode, CanvasPluginNode, CanvasPoint, JsonValue } from '@/schema/canvas';
 
-export const STORYBOARD_PLUGIN_ID = 'atelier.storyboard';
+export const STORYBOARD_PLUGIN_ID = 'storyboard';
 export const STORYBOARD_NODE_TYPE = 'board';
 /** 节点高度随镜头数变化：一行汇总 + 每镜一行，封顶后在节点内滚动。 */
 const STORYBOARD_HEADER_HEIGHT = 33;
@@ -348,8 +348,8 @@ export interface StoryboardTimelineRow {
 
 /**
  * 按镜头顺序列出每镜选定的视频，给「视频时间线导出」读取。每镜只有一个出处：`video_node_id`
- * 指向的视频节点的当前内容版本。与后端 `canvas_storyboard.timeline` 同一套规则，
- * 共用夹具 `tests/fixtures/storyboard_timeline_case.json`。
+ * 指向的视频节点的当前内容版本。与后端 `plugins/storyboard/server/storyboard.py` 的 timeline 同一套规则，
+ * 共用夹具 `plugins/storyboard/tests/timeline_case.json`。
  */
 export function storyboardTimeline(
   payload: StoryboardPayload,

@@ -29,13 +29,18 @@ logger = logging.getLogger(__name__)
 
 LOCK_NAME = "manifest.lock.json"
 STATE_SCHEMA_VERSION = 1
+# 界面是宿主代码的插件（ADR-0039）。这里是唯一判据：清单写 `runtime: host` 不算数，
+# 不在这里的插件声明 host 一律拒绝加载；在这里的插件也必须声明 host。
+HOST_PLUGIN_IDS = frozenset({"storyboard"})
 
 
 class PluginError(Exception):
     """启停被拒绝；`code` 给前端分支用，`message` 给用户看。"""
 
-    def __init__(self, code: str, message: str, status: int = 409) -> None:
+    def __init__(self, code: str, message: str, status: int = 409, raw: str | None = None) -> None:
         super().__init__(message)
+        # 遮掉密钥后的上游原文（例如对话模型的报错），界面放进可展开的详情。
+        self.raw = raw
         self.code = code
         self.message = message
         self.status = status
@@ -90,6 +95,8 @@ def _load_record(package_dir: Path, current_app: str) -> PluginRecord:
             raise ValueError(f"清单 id {lock.id} 与目录名不一致")
         if package_digest(raw) != lock.digest:
             raise ValueError("包摘要与清单内容不一致")
+        if (lock.runtime == "host") != (plugin_id in HOST_PLUGIN_IDS):
+            raise ValueError("只有宿主登记过的官方插件可以以宿主代码运行")
     except (OSError, ValueError, ValidationError) as error:
         logger.warning("plugin %s manifest rejected: %s", plugin_id, error)
         return PluginRecord(plugin_id, package_dir, None, "invalid", _short(error))
@@ -113,6 +120,12 @@ def scan() -> list[PluginRecord]:
         _load_record(lock_path.parent, current_app)
         for lock_path in sorted(root.glob(f"*/package/{LOCK_NAME}"))
     ]
+
+
+def is_host(record: PluginRecord | None) -> bool:
+    """以宿主代码运行的插件：白名单与清单同时成立（_load_record 已拒绝两者不一致的包）。"""
+    return (record is not None and record.lock is not None and record.lock.runtime == "host"
+            and record.plugin_id in HOST_PLUGIN_IDS)
 
 
 def find(plugin_id: str) -> PluginRecord | None:
