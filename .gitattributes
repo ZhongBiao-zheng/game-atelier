@@ -1,0 +1,3 @@
+# 插件包文件按 sha256 校验（manifest.lock.json 记录字节摘要）。Windows 上 core.autocrlf
+# 会把 LF 转成 CRLF，摘要对不上，插件被判为无效。包内文件一律按原字节检出。
+plugins/*/package/** -text

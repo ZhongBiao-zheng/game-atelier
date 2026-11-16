@@ -1,9 +1,10 @@
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, normalizePath, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
-const pluginsDir = path.resolve(__dirname, '../plugins')
+// Vite 传给 resolveId 的 importer 一律是正斜杠路径（Windows 上也是 D:/…），用同一形式比较。
+const pluginsDir = normalizePath(path.resolve(__dirname, '../plugins')) + '/'
 
 /** 宿主插件的界面源码在 plugins/<id>/host（ADR-0039），裸模块（react 等）改从 web 的 node_modules 解析。 */
 function resolvePluginHostFromWeb(): Plugin {
@@ -11,7 +12,7 @@ function resolvePluginHostFromWeb(): Plugin {
     name: 'atelier-plugin-host-resolve',
     enforce: 'pre',
     async resolveId(source, importer, options) {
-      if (!importer || !importer.startsWith(pluginsDir + path.sep)) return null
+      if (!importer || !normalizePath(importer).startsWith(pluginsDir)) return null
       if (/^[./\0]/.test(source) || source.startsWith('@/') || source.startsWith('@pricing') || source.startsWith('@audio-caps')) return null
       return this.resolve(source, path.join(__dirname, 'src', 'main.tsx'), { ...options, skipSelf: true })
     },
