@@ -2821,5 +2821,17 @@ it('lists a plugin node in the add menu only while the plugin is enabled', async
   expect(within(screen.getByRole('menu', { name: '添加节点' })).queryByRole('menuitem', { name: /^分镜/ })).toBeNull();
 
   act(() => setPluginsSnapshot([{ id: plugin.id, availability: 'ok', reason: null, enabled: true, manifest: plugin }]));
-  expect(within(screen.getByRole('menu', { name: '添加节点' })).getByRole('menuitem', { name: /^精灵表/ })).toBeInTheDocument();
+  const item = within(screen.getByRole('menu', { name: '添加节点' })).getByRole('menuitem', { name: /^精灵表/ });
+  // 副标题是插件清单的一句话说明，与内建项一样；不重复标题或插件名。
+  expect(within(item).getByText(plugin.description)).toBeInTheDocument();
+});
+
+it('official plugin descriptions read like the built-in add-menu subtitles', () => {
+  const manifests = Object.values(import.meta.glob('../../../plugins/*/manifest.json', { eager: true, import: 'default' })) as PluginPackageLock[];
+  expect(manifests.map(manifest => manifest.id).sort()).toEqual(expect.arrayContaining(['frames', 'pixel', 'sprite-sheet', 'storyboard']));
+  for (const manifest of manifests) {
+    const titles = [manifest.name, ...manifest.contributes.nodes.map(node => node.title)];
+    expect(titles, manifest.id).not.toContain(manifest.description);
+    expect([...manifest.description].length, manifest.id).toBeLessThanOrEqual(10);
+  }
 });

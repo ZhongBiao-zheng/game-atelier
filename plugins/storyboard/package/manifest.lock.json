@@ -3,7 +3,7 @@
   "id": "storyboard",
   "name": "分镜",
   "version": "0.1.0",
-  "description": "把剧本拆成镜头，逐镜出图出视频",
+  "description": "剧本拆镜，逐镜生成",
   "icon": "storyboard",
   "publisher": {
     "id": "atelier",
@@ -65,5 +65,5 @@
   },
   "files": [],
   "source": "bundled",
-  "digest": "sha256:dfb3b33c96bcc51f9b220d19457e0cbb41a9f0a9595aa4bfc6b571a09a4105f7"
+  "digest": "sha256:ba25cedcfa27b54907be0ae1c5d6aaa0a7d2091a7192dd163f43c89f8a2deb0c"
 }

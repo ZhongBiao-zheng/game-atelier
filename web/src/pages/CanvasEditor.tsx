@@ -5845,14 +5845,14 @@ function CanvasEditorInner({
   );
 }
 
-/** 已启用插件贡献的节点类型，排在内置项之后。没有启用的插件时什么都不渲染。 */
+/** 已启用插件贡献的节点类型，排在内置项之后；副标题用插件清单的一句话说明。没有启用的插件时什么都不渲染。 */
 function PluginCreateMenuItems({ onAdd }: { onAdd: (plugin: PluginPackageLock, node: PluginNodeContribution) => void }) {
   const plugins = usePlugins();
   return <>
     {enabledPlugins(plugins).flatMap(plugin => plugin.contributes.nodes.map(node => {
       const Icon = pluginIcon(node.icon);
       return <AddMenuButton key={`${plugin.id}:${node.type}`} icon={<Icon />} title={node.title}
-        description={plugin.name} onClick={() => onAdd(plugin, node)} />;
+        description={plugin.description} onClick={() => onAdd(plugin, node)} />;
     }))}
   </>;
 }

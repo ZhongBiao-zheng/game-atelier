@@ -3,7 +3,7 @@
   "id": "frames",
   "name": "序列帧",
   "version": "0.1.0",
-  "description": "把视频抽成序列帧，在帧之间补间",
+  "description": "视频抽帧与补间",
   "icon": "film",
   "publisher": {
     "id": "atelier",
@@ -294,5 +294,5 @@
     }
   ],
   "source": "bundled",
-  "digest": "sha256:f40394bee4de0b9e9bda2df0b38356c500d79c0ce341bf0ac022b420b9f9bf2a"
+  "digest": "sha256:b332f9e641aba2476af35f34542b2469e1cb0948ca689304a0ca8f5a24868eac"
 }

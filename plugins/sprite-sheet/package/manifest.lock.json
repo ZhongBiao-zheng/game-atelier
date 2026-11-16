@@ -3,7 +3,7 @@
   "id": "sprite-sheet",
   "name": "精灵表调整",
   "version": "0.1.0",
-  "description": "切帧、对齐、重排并导出精灵表",
+  "description": "切帧对齐，导出精灵表",
   "icon": "frames",
   "publisher": {
     "id": "atelier",
@@ -202,5 +202,5 @@
     }
   ],
   "source": "bundled",
-  "digest": "sha256:d94f59ac863f77604e602f32499c04159a9c7f194974daa9e1716179fdffba31"
+  "digest": "sha256:43f45a2f877e30b43cad4acde9a39922831619098c34d1e9e12a74301af9974d"
 }
