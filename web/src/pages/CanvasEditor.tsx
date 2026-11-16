@@ -219,6 +219,7 @@ import {
   canvasGenerationSlot,
   type CanvasAudioFamily,
   canvasNodeHasHideableContent,
+  canvasCompareHasInput,
   createCanvasGenerationDraft,
   resolveCanvasGenerationDraft,
   createConnectedCanvasSurface,
@@ -1981,7 +1982,8 @@ function CanvasEditorInner({
     if (!selectedNodeIds.has(node.id)) return false;
     if (node.hidden) return true;
     const versionId = canvasNodeProvidesContent(node) ? node.data.current_version_id : null;
-    return canvasNodeHasHideableContent(node, versionId ? document?.content_versions[versionId] : undefined);
+    return canvasNodeHasHideableContent(node, versionId ? document?.content_versions[versionId] : undefined,
+      node.type === 'compare' && document ? canvasCompareHasInput(document, node.id) : false);
   }), [document, selectedNodeIds]);
   const hideableSelectionAllHidden = hideableSelection.length > 0
     && hideableSelection.every(node => node.hidden);

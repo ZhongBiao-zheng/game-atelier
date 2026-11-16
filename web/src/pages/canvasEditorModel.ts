@@ -639,12 +639,15 @@ export function canvasNodeProvidesContent(node: CanvasNode): node is CanvasConte
   return node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio';
 }
 
-/** 「隐藏」只对有内容的节点有意义：图层栈、有条目的批量素材、有当前版本（文本还得非空）的内容节点。 */
+/** 「隐藏」只对有内容的节点有意义：图层栈、编辑节点、插件节点、连了图的对比、有条目的批量素材、
+ *  有当前版本（文本还得非空）的内容节点。插件节点的内容由插件画，宿主判断不了空不空，按有内容算。 */
 export function canvasNodeHasHideableContent(
   node: CanvasNode,
   content: CanvasContentVersion | undefined,
+  compareHasInput = false,
 ): boolean {
-  if (node.type === 'layer_stack') return true;
+  if (node.type === 'layer_stack' || node.type === 'image_edit' || node.type === 'plugin') return true;
+  if (node.type === 'compare') return compareHasInput;
   if (node.type === 'batch_material') return node.data.items.length > 0;
   return content !== undefined && (content.kind !== 'text' || content.text.trim() !== '');
 }
@@ -781,6 +784,13 @@ export function isCanvasCompareSlot(value: unknown): value is CanvasCompareSlot 
  *  建线入口很多（拖到接口、拖到节点身上、多选连线、从菜单新建），只有拖到接口时知道槽位。
  *  所以在提交时统一收口：只认图片来源；同一来源只留最新一条；指定槽位的后来者顶替先来者；
  *  没有槽位的按 before → after 填空位，两边都占了就丢弃。 */
+/** 对比节点连着至少一张图（任一侧）。 */
+export function canvasCompareHasInput(document: CanvasDocument, nodeId: string): boolean {
+  const nodes = new Map(document.nodes.map(node => [node.id, node]));
+  return document.connections.some(connection => connection.role === 'input' && connection.target_node_id === nodeId
+    && nodes.get(connection.source_node_id)?.type === 'image');
+}
+
 export function normalizeCanvasCompareConnections(document: CanvasDocument): CanvasDocument {
   const nodes = new Map(document.nodes.map(node => [node.id, node]));
   const incoming = new Map<string, CanvasInputConnection[]>();

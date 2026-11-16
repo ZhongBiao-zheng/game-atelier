@@ -892,6 +892,39 @@ it('hide toggles the node hidden flag and flips the button label', () => {
   expect(document.querySelector('[data-canvas-node-hidden="true"]')).not.toBeNull();
 });
 
+it('offers hide on image edit, plugin and connected compare nodes', () => {
+  const edit = { id: 'edit', type: 'image_edit', title: '扩图', position: { x: 0, y: 0 }, z_index: 0,
+    data: { source_node_id: null, source_version_id: 'source', mask_version_id: null,
+      reference_node_id: null, reference_version_id: null, generation_draft: null, active_run_id: null,
+      options: { mode: 'outpaint' }, editor_state: { strokes: [], frame_ratio: '', frame: { width: 100, height: 100, x: 0, y: 0 } },
+    } } as CanvasNode;
+  const compare = { id: 'compare', type: 'compare', title: '对比', position: { x: 0, y: 0 }, z_index: 0, data: {} } as CanvasNode;
+  const context = nodeContext({
+    compareInputsByNodeId: new Map([['compare', { before: { nodeId: 'image', title: '图', versionId: 'v1' } }]]),
+  });
+  for (const node of [edit, nodes[6], compare]) {
+    const { unmount } = render(
+      <CanvasNodeContext.Provider value={context}>
+        <NodeCard data={{ domain: node }} selected />
+      </CanvasNodeContext.Provider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: `隐藏 ${node.title} 的内容` }));
+    const updater = (context.updateNode as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as (item: CanvasNode) => CanvasNode;
+    expect(updater(node).hidden).toBe(true);
+    unmount();
+  }
+});
+
+it('does not offer hide on a compare node without images', () => {
+  const compare = { id: 'compare', type: 'compare', title: '对比', position: { x: 0, y: 0 }, z_index: 0, data: {} } as CanvasNode;
+  render(
+    <CanvasNodeContext.Provider value={nodeContext()}>
+      <NodeCard data={{ domain: compare }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+  expect(screen.queryByRole('button', { name: '隐藏 对比 的内容' })).toBeNull();
+});
+
 it('keeps hide fixed before a trailing more menu that holds save and share for images', async () => {
   const generatedImage = { ...nodes[1], data: { ...nodes[1].data, current_version_id: 'generated' } } as CanvasNode;
   const uploadedVideo = { ...nodes[2], data: { ...nodes[2].data, current_version_id: 'uploaded' } } as CanvasNode;

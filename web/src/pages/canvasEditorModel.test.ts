@@ -3,6 +3,8 @@ import { expect, it, test } from 'vitest';
 import {
   acceptCanvasJobs,
   canvasDeletionBlockedMessage,
+  canvasCompareHasInput,
+  canvasNodeHasHideableContent,
   canvasMediaOperationPlaceholder,
   canvasNodeRenderZIndex,
   canvasGenerationPreferenceForModel,
@@ -590,4 +592,23 @@ test('「自动」：新节点默认选它，草稿存 alias=null 和路由 id�
     member(keys[0]), { ...member(keys[0]), alias: 'NB', provider: 'nano_banana' },
   ] }]);
   expect(canvasGenerationModelSupportsMode(unroutable[0], unroutable[0].models[0], 'image')).toBe(false);
+});
+
+test('hideable content covers edit, plugin and compare nodes', () => {
+  const base = { position: { x: 0, y: 0 }, z_index: 0 };
+  const image = { ...base, id: 'image', title: '图', type: 'image',
+    data: { current_version_id: null, generation_draft: null, active_run_id: null, display: { fit: 'contain', free_resize: false } } } as CanvasNode;
+  const compare = { ...base, id: 'compare', title: '对比', type: 'compare', data: {} } as CanvasNode;
+  const edit = { ...base, id: 'edit', title: '扩图', type: 'image_edit', data: {} } as unknown as CanvasNode;
+  const plugin = { ...base, id: 'plugin', title: '插件', type: 'plugin', data: {} } as unknown as CanvasNode;
+  expect(canvasNodeHasHideableContent(edit, undefined)).toBe(true);
+  expect(canvasNodeHasHideableContent(plugin, undefined)).toBe(true);
+  expect(canvasNodeHasHideableContent(compare, undefined)).toBe(false);
+  expect(canvasNodeHasHideableContent(compare, undefined, true)).toBe(true);
+  expect(canvasNodeHasHideableContent(image, undefined)).toBe(false);
+  const empty = documentWithNodes([image, compare], []);
+  expect(canvasCompareHasInput(empty, 'compare')).toBe(false);
+  const linked = documentWithNodes([image, compare],
+    [{ id: 'c', role: 'input', source_node_id: 'image', target_node_id: 'compare' }]);
+  expect(canvasCompareHasInput(linked, 'compare')).toBe(true);
 });

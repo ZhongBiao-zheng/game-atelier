@@ -540,7 +540,8 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
     return members ? members + 1 : 0;
   })();
   // 已隐藏的节点照样给出「显示」。
-  const hasHideableContent = canvasNodeHasHideableContent(node, content);
+  const compareInputs = node.type === 'compare' ? context.compareInputsByNodeId?.get(node.id) : undefined;
+  const hasHideableContent = canvasNodeHasHideableContent(node, content, Boolean(compareInputs?.before || compareInputs?.after));
 
   function beginTextEditing() {
     if (!context || node.type !== 'text' || isEditingText) return;
@@ -910,7 +911,7 @@ export function CanvasNodeCard({ data, selected, dragging = false }: NodeProps<C
         <div
           data-canvas-node-hidden={node.hidden ? 'true' : undefined}
           className={cn('h-full', node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-secondary/20', node.type === 'text' ? 'min-h-32'
-            : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44', node.hidden && 'canvas-node-hidden', node.hidden && node.type === 'text' && 'canvas-node-hidden-text')}
+            : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44', node.hidden && 'canvas-node-hidden', node.hidden && (node.type === 'text' || isStoryboardNode(node)) && 'canvas-node-hidden-text')}
         >
           {node.type === 'text' && (
             content?.kind === 'text' && (isEditingInlineText || promptVariableParts(content.text).some(part => part.kind === 'variable')) ? (
