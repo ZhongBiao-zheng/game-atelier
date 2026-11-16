@@ -50,7 +50,7 @@
 
 ## 浅色派生与存储
 
-浅色背景与侧栏 #F2F2F3，卡片、panel、popover、muted #FFFFFF，secondary/accent #E9E9EB；文字 #000000 / #595959，subtle #707075；作品图发丝边 `--media-edge` 黑 7%（暗色白 8%）。主色和三个副色在 OKLCH 中设置 L=0.5，保持 C/h；固定数据色设置 L=0.55。主副色与数据色均需对浅底达到 3:1。
+浅色背景与侧栏 #F2F2F3，卡片、panel、popover、muted #FFFFFF，secondary/accent #E9E9EB；文字 #000000 / #595959，subtle #707075；发丝边 border 黑 8%、输入框 input 黑 10%；作品图发丝边 `--media-edge` 黑 7%（暗色白 8%）。浅色投影两档：`--elevation-float` = `0 1px 2px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06)`，`--elevation-raised` = `0 1px 2px rgba(0,0,0,0.06)`；暗色不定义。主色和三个副色在 OKLCH 中设置 L=0.5，保持 C/h；固定数据色设置 L=0.55。主副色与数据色均需对浅底达到 3:1。
 
 浅色状态沿用固定值：pending #767676、running #A3742D、done #4F7C3E、failed/destructive #B04A4A。这些值只随明暗变化，不随主题预设变化。
 

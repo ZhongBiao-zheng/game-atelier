@@ -178,15 +178,15 @@
   --glass: rgba(255, 255, 255, 0.66);
   --scrim: rgba(0, 0, 0, 0.45);
 
-  /* 发丝边界翻转为纯黑 alpha */
-  --border: rgba(0, 0, 0, 0.12);
-  --input: rgba(0, 0, 0, 0.2);
+  /* 发丝边界：纯黑 alpha。输入框比发丝边高一档，保留可点感 */
+  --border: rgba(0, 0, 0, 0.08);
+  --input: rgba(0, 0, 0, 0.10);
   --ring: oklch(from #D4F53C 0.5 c h);
 
-  /* 白底上 inset 白高光不可见 → 深度改由软投影承载，inset 收一道极淡内线；描边环转黑 */
-  --hairline-inset: rgba(0, 0, 0, 0.04);
-  --scrim-soft: rgba(0, 0, 0, 0.10);
-  --nav-ring-stroke: rgba(0, 0, 0, 0.32);
+  /* 浅色深度 = 白面 + 发丝边 + 柔和投影；不用暗色的顶部高光、斜面和描边环。
+     两档投影只在浅色定义，由下方 :root.light 规则读取（2026-11-16） */
+  --elevation-float: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.06);
+  --elevation-raised: 0 1px 2px rgba(0, 0, 0, 0.06);
 
   --media-edge: rgba(0, 0, 0, 0.07);
 
@@ -284,6 +284,12 @@
       0 0.5px 0 0 var(--hairline-inset) inset,
       0 4px 16px 0 var(--scrim-soft);
   }
+  /* 浅色浮层：去掉顶部内线，改两层柔和投影。.popover-in 是 Popover / Dropdown / Dialog /
+     Select / Tooltip 等浮层面板共用的进出场类，[data-toolbar-popover] 是 ToolbarPopover 的面板；
+     浅色下白面叠在白内容上，没有投影就分不出层 */
+  :root.light :is(.shell-glow, .popover-in, [data-toolbar-popover]) {
+    box-shadow: var(--elevation-float);
+  }
 
   /* 作品图卡片：内侧 1px 发丝边叠在图片之上，底色与画布相近的图也有边界。
      容器需自带圆角与 overflow-hidden；::after 不拦截点击。 */
@@ -355,22 +361,41 @@
     border-top: 1px solid rgba(237, 234, 227, 0.22);
     border-bottom: 1px solid rgba(237, 234, 227, 0.07);
   }
+  /* 浅色选中药丸：白底 + 四边同色发丝边 + 小投影，不画金属环与斜面 */
+  :root.light .nav-active-ring::before {
+    content: none;
+  }
   :root.light .nav-tab-glass {
-    /* 亮模式：发丝边高对比，白底上也要能看清——深度靠 border alpha 不靠阴影 */
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    border-top-color: rgba(255, 255, 255, 0.92);
-    border-bottom-color: rgba(0, 0, 0, 0.10);
+    border-color: var(--border);
+    background-color: var(--card);
+    box-shadow: var(--elevation-raised);
   }
 
   /* 玻璃顶部高光 —— 按钮的冰晶质感 */
   .glass-specular {
     border-top: 1px solid rgba(237, 234, 227, 0.14);
   }
+  /* 浅色按钮：四边同色、不做斜面。btn-* 是 ui/button.tsx 变体上的无样式标记类，
+     只在这里被读取，用来区分平涂的主色 / 危险按钮与带发丝边的 outline */
   :root.light .glass-specular {
-    /* 深度靠发丝边 border alpha，不靠阴影 */
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    border-top-color: rgba(255, 255, 255, 0.90);
-    border-bottom-color: rgba(0, 0, 0, 0.12);
+    border-color: var(--border);
+  }
+  :root.light .glass-specular.btn-default {
+    border-color: transparent;
+    background-color: var(--primary);
+  }
+  :root.light .glass-specular.btn-default:hover {
+    background-color: color-mix(in oklab, var(--primary) 90%, transparent);
+  }
+  :root.light .glass-specular.btn-destructive {
+    border-color: transparent;
+    background-color: var(--destructive);
+  }
+  :root.light .glass-specular.btn-destructive:hover {
+    background-color: color-mix(in oklab, var(--destructive) 90%, transparent);
+  }
+  :root.light .glass-specular.btn-secondary {
+    border-color: transparent;
   }
 
   .canvas-editor-top {

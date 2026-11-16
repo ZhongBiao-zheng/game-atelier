@@ -70,7 +70,7 @@
 | `--foreground` | `#EDEDEF` | 主文字 |
 | `--muted-foreground` | `#8E8E93` | 次要文字 |
 | `--subtle-foreground` | `#5C5C61` | 组名、面包屑 |
-| `--border` / `--input` | 白色 8% / 14% | 发丝边、输入框 |
+| `--border` / `--input` | 白色 8% / 14%（浅色：黑 8% / 10%） | 发丝边、输入框 |
 | `--glass` / `--scrim` | `rgba(17,17,19,0.66)` / `rgba(0,0,0,0.62)` | 玻璃、遮罩 |
 
 **主题色组**：`--primary` + `--brand-2/3/4`，默认青柠；用户在设置 / 外观选择预设或配置四个 hex。`--accent` 仍专用于 shadcn hover 底色。
@@ -97,6 +97,7 @@
   ```
 
   `backdrop-blur-glass` = 28px，是唯一允许的 backdrop-blur 档位（杂牌 sm/md/lg/xl/2xl 守卫红灯）。
+- **浅色主题的深度**：白面 + 黑 8% 发丝边 + 柔和投影，不用暗色的顶部高光、上亮下暗斜面和金属描边环。投影只有两档 token，只在 `:root.light` 定义：`--elevation-float`（浮动 chrome、Popover / Dropdown / Dialog / Select / 工具栏弹层）与 `--elevation-raised`（导航选中药丸）。全部写在 `tokens.css` 的 `:root.light` 规则里，tsx 照旧不写 `shadow-*`。主色 / 危险按钮在浅色下是平涂实色块，outline 是白底发丝边；按钮变体靠 `ui/button.tsx` 上的无样式标记类 `btn-default` / `btn-destructive` / `btn-outline` / `btn-secondary` 区分。深色 token 与深色玻璃配方由 `web/src/test/themeTokens.test.ts` 钉死。
 - **遮罩配方**（lightbox / 全屏 loading）：`bg-scrim`（不再 `bg-black/85` 散值）。
 - **z 梯度**（沿用既有层级，不得乱加）：内容 `auto` < 输入壳/弹窗 `z-20` < sticky 头 `z-30` < lightbox / 全屏 loading `z-50`。
 
@@ -238,4 +239,5 @@
 | 2026-11-08 | 图标从 Lucide 换成 Hugeicons Rounded Stroke，建语义注册表 `ui/icons.tsx`，尺寸收为 14/16/18/24 四档、描边固定 1.5，守卫禁止直接导入图标库与散写尺寸 / 描边 | 87 个文件各自导入 Lucide，同一含义有两个名字（HelpCircle / CircleHelp 等 8 组），尺寸 8 档、描边 5 种。Mobbin 同类工具（Framer、ElevenLabs Flows、Luma、Weavy）统一单一线性图标族、描边约 1.5；Hugeicons 的圆头圆角与圆角卡片、药丸导航一致 |
 | 2026-11-08 | 浅色底从纯白改为浅灰 `#F2F2F3`，卡片 / panel / muted 改纯白，secondary / accent 改 `#E9E9EB`，侧栏与画布同色；作品图卡片加 `.media-edge` 内侧发丝边；推翻 2026-06-12「纯白画廊」 | 纯白底上白底作品图与页面连成一片，大面积纯白刺眼（飙哥反馈）。参考 Gamma / mymind / Luma：浅灰画布、白色内容面。选中性灰，避开 06-12 被否的暖米色；浅色阶梯与暗色统一为越靠背景越深 |
 | 2026-10-30 | 原生 button / label 与 `title` 提示清零后改为硬禁止；Select / Checkbox / Slider / Switch 换成 Radix，补 Tooltip（`Hint`）/ Tabs / ToggleGroup / RadioGroup / Popover / AlertDialog / InputGroup / EditableText；任意值间距清零后禁写 | 原生 select 箭头与 range 进度条靠 tokens.css 全局样式兜底，各平台外观不一；原生 title 提示延迟长、样式不可控；263 处原生 button 各写一套焦点环 |
+| 2026-11-16 | 浅色主题统一为「白面 + 发丝边 + 柔和投影」：border 黑 12%→8%、input 黑 20%→10%；导航选中药丸改白底 + 发丝边 + `--elevation-raised`，去掉金属描边环与斜面；`shell-glow` 与浮层在浅色下用 `--elevation-float`；主色 / 危险按钮平涂 100% 实色，outline 四边同色发丝边；深色不变 | 深色的顶部高光、斜面、描边环在浅色下只是被翻转，出现灰环、上亮下暗和偏黑粗框（飙哥反馈）。参考 Luma、Recraft、Canva、Base44 的浅色界面与 shadcn new-york 默认值；input 先取 12%，与导航胶囊并排后仍明显偏重，降到 10%。规格与截图在 `.scratch/light-theme/` |
 | 2026-11-13 | 作品图透明区域显示棋盘格：`.media-checker` 挂在 `<img>` 自身背景上（创作台卡片、大图、首页作品墙、画布图片节点），格子色 = 前景 10% 混进 `--card`，深色主题深底浅格、浅色主题自动白底浅灰格，格子 10px | 透明 PNG 放在深色卡片上看不出透明（飙哥反馈）；Mobbin 参考 Leonardo（深色）、Canva / Adobe Express（浅色）；不透明图会整块盖住背景，所以不用逐张判断是否透明 |

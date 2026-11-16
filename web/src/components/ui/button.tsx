@@ -7,12 +7,13 @@ const buttonVariants = cva(
   "press inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-[color,box-shadow,background-color,border-color] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 cursor-pointer",
   {
     variants: {
+      // btn-* 是无样式标记类：只给 tokens.css 的 :root.light 规则区分变体（浅色主色平涂、outline 发丝边），深色不读
       variant: {
         solid: 'bg-primary text-primary-foreground hover:bg-primary/90',
-        default: 'bg-primary/80 backdrop-blur-glass border border-primary/35 text-primary-foreground hover:bg-primary/95 glass-specular',
-        destructive: 'bg-destructive/75 backdrop-blur-glass border border-destructive/30 text-destructive-foreground hover:bg-destructive/90 glass-specular',
-        outline: 'bg-glass backdrop-blur-glass border border-border hover:bg-secondary/70 glass-specular',
-        secondary: 'bg-secondary/65 backdrop-blur-glass border border-border text-secondary-foreground hover:bg-secondary/85 glass-specular',
+        default: 'bg-primary/80 backdrop-blur-glass border border-primary/35 text-primary-foreground hover:bg-primary/95 glass-specular btn-default',
+        destructive: 'bg-destructive/75 backdrop-blur-glass border border-destructive/30 text-destructive-foreground hover:bg-destructive/90 glass-specular btn-destructive',
+        outline: 'bg-glass backdrop-blur-glass border border-border hover:bg-secondary/70 glass-specular btn-outline',
+        secondary: 'bg-secondary/65 backdrop-blur-glass border border-border text-secondary-foreground hover:bg-secondary/85 glass-specular btn-secondary',
         ghost: 'border border-transparent hover:bg-glass hover:backdrop-blur-glass hover:border-border hover:text-accent-foreground',
         link: 'text-foreground font-medium underline-offset-4 hover:underline',
       },
