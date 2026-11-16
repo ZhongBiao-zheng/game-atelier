@@ -80,7 +80,9 @@ function accentLuminance(hex: string, mode: 'dark' | 'light') {
   const { a, b } = oklab(hex);
   return labLuminance(lightL(hex), a, b);
 }
+/** 深色主题按对比度选黑或白；浅色主题主色已压暗到对浅色卡片 3:1，按钮内容一律用白色（2026-11-16 飙哥定）。 */
 export function primaryForeground(hex: string, mode: 'dark' | 'light' = 'dark') {
+  if (mode === 'light') return '#FFFFFF';
   const value = accentLuminance(hex, mode);
   return ratio(value, luminance(linearRgb('#0A0A0B'))) >= ratio(value, 1) ? '#0A0A0B' : '#FFFFFF';
 }

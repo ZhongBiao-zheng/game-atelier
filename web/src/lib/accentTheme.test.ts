@@ -28,6 +28,10 @@ describe('主题色存储与应用', () => {
     expect(primaryForeground('#333333')).toBe('#FFFFFF');
     expect(accentCardContrast('#333333', 'dark')).toBeLessThan(3);
   });
+  it('浅色主题的主色按钮内容一律用白色', () => {
+    for (const preset of ACCENT_PRESETS) expect(primaryForeground(preset.primary, 'light')).toBe('#FFFFFF');
+    expect(primaryForeground('#333333', 'light')).toBe('#FFFFFF');
+  });
   it('浅色只压到对卡片刚好 3:1，不再一刀切到 0.5', () => {
     for (const preset of ACCENT_PRESETS) {
       for (const color of [preset.primary, preset.brand2, preset.brand3, preset.brand4]) {
