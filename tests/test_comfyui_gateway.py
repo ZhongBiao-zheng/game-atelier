@@ -225,7 +225,9 @@ def test_member_job_observes_queue_and_leaves_queue_when_running(live_gateway, h
 
     workflow = imported()
     atelier_gateway.sync_gateway_key("Hub")
-    monkeypatch.setattr(comfyui, "POLL_INTERVAL", 0.04)
+    # 假 ComfyUI 只在一次主机轮询里报「运行中」，这段窗口就是主机的轮询间隔。成员每 0.01 秒查一次网关，
+    # 窗口取 0.04 秒时慢的 CI 机器会整段错过（macOS 偶发只见 queued → downloading）；0.3 秒留出约 30 倍余量。
+    monkeypatch.setattr(comfyui, "POLL_INTERVAL", 0.3)
     phases = []
     update = job_runner.update_job_phase
 
