@@ -15,7 +15,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_serializer, model_validator
 
 from character_workflow.lib import data_root
-from character_workflow.lib.atomic_io import _replace_with_retry
+from character_workflow.lib.atomic_io import _replace_with_retry, read_text_with_retry
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.comfyui_schema import WorkflowInput, local_base_url
 
@@ -181,7 +181,7 @@ def read_keys_db() -> KeysDB:
     if not path.exists():
         return KeysDB()
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(read_text_with_retry(path))
     except json.JSONDecodeError as e:
         raise KeysFileCorruptedError(f"{path}: {e}") from e
     _migrate_legacy_providers(raw)

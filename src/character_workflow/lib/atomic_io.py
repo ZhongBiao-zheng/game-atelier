@@ -32,6 +32,21 @@ def _replace_with_retry(tmp: Path, path: Path) -> None:
             time.sleep(_REPLACE_DELAY)
 
 
+def read_text_with_retry(path: Path, encoding: str = "utf-8") -> str:
+    """读一个会被 `os.replace` 原地替换的文件。
+
+    Windows 上替换的瞬间目标文件不可读（PermissionError），写入方已有重试、读取方没有时，
+    恰好在这一刻读的线程会失败（实例：任务启动读 keys.json 撞上保存供应商）。POSIX 不命中，行为不变。"""
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            return path.read_text(encoding=encoding)
+        except PermissionError:
+            if os.name != "nt" or attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_DELAY)
+    raise AssertionError("unreachable")
+
+
 def atomic_write_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
