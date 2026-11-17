@@ -176,6 +176,11 @@ def resolve_data_root() -> Path | None:
     return None
 
 
+def effective_data_root() -> Path:
+    """The data root the server will use; the desktop shell reads it only through this."""
+    return resolve_data_root() or (Path.home() / APP_NAME).resolve()
+
+
 def _venv_python(data_root: Path) -> Path:
     if is_bundle():
         return Path(sys.executable)
@@ -662,7 +667,7 @@ def launch(*, open_browser: bool = True) -> int:
         print("前端文件 web/dist 缺失，请运行一键修复。", file=sys.stderr)
         return 1
     if resolve_data_root() is None:
-        init_data_root(Path.home() / APP_NAME)
+        init_data_root(effective_data_root())
     if is_bundle():
         update_info()
     started = time.perf_counter()
@@ -709,6 +714,8 @@ def main() -> int:
     parser.add_argument("--update-id")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--check", action="store_true", help="Report current bootstrap state.")
+    parser.add_argument("--print-data-root", action="store_true",
+                        help="Print the data root the server uses (desktop shell contract).")
     parser.add_argument(
         "--launch", action="store_true", help="Prepare the shared runtime and launch the viewer.",
     )
@@ -749,6 +756,10 @@ def main() -> int:
         parser.error("--to and --update-id require --select-version or --apply-update")
     if args.service:
         parser.error("--service requires --select-version")
+
+    if args.print_data_root:
+        print(effective_data_root())
+        return 0
 
     if args.check:
         result = check()

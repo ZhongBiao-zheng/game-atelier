@@ -173,6 +173,12 @@ async def lifespan(app: FastAPI):
 @asynccontextmanager
 async def normal_lifespan(app: FastAPI):
     hub.set_loop(asyncio.get_running_loop())
+    from character_workflow.lib import data_root
+    try:
+        app.state.shell_control.issue(data_root.runtime_dir(), app.state.connection_status.instance_id)
+    except OSError as error:
+        # 只影响桌面外壳退出前的确认；不能因此挡住服务启动。
+        logging.getLogger(__name__).warning("desktop shell control token unavailable: %s", error)
     from character_workflow.lib import gateway_live
     def gateway_listener(snapshot):
         hub.broadcast("gateway_task", snapshot)
@@ -343,6 +349,8 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.state.connection_status = connection_status
     from viewer_server.update_routes import UpdateController, UpdateAdmissionMiddleware, router as update_router
     app.state.update_controller = UpdateController(connection_status.instance_id)
+    from viewer_server.shell_control import ShellControl, router as shell_router
+    app.state.shell_control = ShellControl()
 
     @app.exception_handler(ConnectionError)
     async def handle_connection_error(_request, error: ConnectionError) -> JSONResponse:
@@ -358,6 +366,7 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.add_middleware(UpdateAdmissionMiddleware)
     app.add_middleware(
         ConnectionMiddleware, store=connection_store, dev_origin=development_origin(),
+        shell_control=app.state.shell_control,
     )
     # Added last so untrusted requests are rejected before buffering document/upload bodies.
     app.add_middleware(
@@ -372,6 +381,7 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(plugin_router)
     app.include_router(plugin_grants_router)
     app.include_router(update_router)
+    app.include_router(shell_router)
     app.include_router(connection_router(connection_store))
     app.include_router(team_library_router)
     from viewer_server.gateway_library_proxy import router as gateway_library_router

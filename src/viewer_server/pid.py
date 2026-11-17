@@ -156,4 +156,5 @@ def cleanup_stale_pid(runtime: Path) -> bool:
     _pid_path(runtime).unlink(missing_ok=True)
     _port_path(runtime).unlink(missing_ok=True)
     (runtime / "server.instance").unlink(missing_ok=True)
+    (runtime / "shell-control.json").unlink(missing_ok=True)
     return True

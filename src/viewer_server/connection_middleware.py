@@ -13,6 +13,7 @@ from viewer_server.connection_capabilities import (
     CANVAS_TOOLS, is_media_route, local_capability,
 )
 from viewer_server.request_boundary import _authority, _header
+from viewer_server.shell_control import ACTIVE_WORK_PATH, ShellControl
 
 _CONTROL_ROUTES = {
     ("POST", "/api/connection/local-session"),
@@ -56,8 +57,10 @@ def connection_error(error: ConnectionError) -> JSONResponse:
 
 
 class ConnectionMiddleware:
-    def __init__(self, app: ASGIApp, *, store: ConnectionStore, dev_origin: str | None = None):
+    def __init__(self, app: ASGIApp, *, store: ConnectionStore, dev_origin: str | None = None,
+                 shell_control: ShellControl | None = None):
         self.app, self.store, self.dev_origin = app, store, dev_origin
+        self.shell_control = shell_control
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -83,6 +86,12 @@ class ConnectionMiddleware:
             elif agent_bootstrap:
                 if origin or site or cookie or authorization:
                     raise ConnectionError("CAPABILITY_DENIED", "此入口仅用于已授权的本地 Agent")
+            elif path == ACTIVE_WORK_PATH:
+                # 桌面外壳的控制通道：只认 .runtime 里的控制令牌，浏览器（带 Origin / Fetch Metadata /
+                # cookie）与 Agent 会话都进不来。
+                if (method != "GET" or origin or site or cookie or self.shell_control is None
+                        or not self.shell_control.accepts(authorization)):
+                    raise ConnectionError("CAPABILITY_DENIED", "此入口仅用于桌面外壳")
             elif _private_path(path) and path != "/api/connection/status":
                 if authorization:
                     if not authorization.startswith("Bearer "):

@@ -50,7 +50,9 @@ def write_launchers(folder: Path, *, windows: bool) -> None:
             'RUNTIME="$BUNDLE_DIR/versions/$VERSION"\n'
             'unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT\n'
             'export PYTHONPATH="$RUNTIME/app/src"\n'
-            'exec "$RUNTIME/python/bin/python3" "$RUNTIME/app/scripts/bootstrap.py" --select-version\n',
+            '# Double-click launches; the desktop shell passes bootstrap arguments explicitly.\n'
+            'if [ "$#" -eq 0 ]; then set -- --select-version; fi\n'
+            'exec "$RUNTIME/python/bin/python3" "$RUNTIME/app/scripts/bootstrap.py" "$@"\n',
             encoding="utf-8",
         )
         launcher.chmod(0o755)
