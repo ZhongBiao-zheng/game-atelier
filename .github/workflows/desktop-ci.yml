@@ -72,6 +72,22 @@ jobs:
         run: |
           seed="$(find release-build -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)"
           uv run --no-project python scripts/build_desktop.py --seed "$seed" --output desktop-build --platform ${{ matrix.platform }}
+      - name: Capture the installer UI on this runner's locale
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          Get-WinSystemLocale | Format-List Name, DisplayName
+          Get-Culture | Format-List Name
+          $installer = Get-ChildItem desktop-build -Filter '*-setup.exe' | Select-Object -First 1
+          $process = Start-Process -FilePath $installer.FullName -PassThru
+          Start-Sleep -Seconds 10
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+          [System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+          $bitmap.Save("desktop-build/installer-ui-$((Get-Culture).Name).png")
+          Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          Get-Process | Where-Object { $_.Path -like '*nsis*' -or $_.Name -like '*setup*' } | Stop-Process -Force -ErrorAction SilentlyContinue
       - name: Install, open, quit and uninstall the installed app
         run: |
           installer="$(find desktop-build -maxdepth 1 -type f \( -name '*.dmg' -o -name '*-setup.exe' \) | head -1)"
