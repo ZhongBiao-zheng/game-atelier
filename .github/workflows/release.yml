@@ -97,6 +97,8 @@ jobs:
         include:
           - runner: macos-15
             platform: macos-arm64
+          - runner: windows-latest
+            platform: windows-x64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     env:
@@ -127,8 +129,11 @@ jobs:
           rustc -vV
           seed="$(find seed -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)"
           uv run --no-project python scripts/build_desktop.py --seed "$seed" --output desktop-build --platform ${{ matrix.platform }}
-      - name: Install, open and quit the installed app
-        run: uv run --no-project python scripts/smoke_desktop.py --installer "$(ls desktop-build/*.dmg)"
+      - name: Install, open, quit and uninstall the installed app
+        shell: bash
+        run: |
+          installer="$(find desktop-build -maxdepth 1 -type f \( -name '*.dmg' -o -name '*-setup.exe' \) | head -1)"
+          uv run --no-project python scripts/smoke_desktop.py --installer "$installer"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-installer-${{ matrix.platform }}

@@ -85,6 +85,7 @@ pub fn seed_version(seed: &Path) -> Option<String> {
     valid_version(version).then(|| version.to_string())
 }
 
+#[cfg(not(windows))]
 /// Counts compressed bytes read so the window can show real progress while unpacking.
 struct Progress<'a, R> {
     inner: R,
@@ -93,6 +94,7 @@ struct Progress<'a, R> {
     report: &'a dyn Fn(u64, u64),
 }
 
+#[cfg(not(windows))]
 impl<R: Read> Read for Progress<'_, R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let n = self.inner.read(buf)?;
@@ -102,6 +104,7 @@ impl<R: Read> Read for Progress<'_, R> {
     }
 }
 
+#[cfg(not(windows))]
 fn extract(seed: &Path, staging: &Path, report: &dyn Fn(u64, u64)) -> Result<(), String> {
     let file = fs::File::open(seed).map_err(|e| format!("打不开运行包：{e}"))?;
     let total = file.metadata().map(|m| m.len()).unwrap_or(0);
@@ -117,6 +120,17 @@ fn extract(seed: &Path, staging: &Path, report: &dyn Fn(u64, u64)) -> Result<(),
     // `unpack` refuses entries that would escape `staging`.
     archive
         .unpack(staging)
+        .map_err(|e| format!("解压运行包失败：{e}"))
+}
+
+/// Windows bundles are zip archives (scripts/build_release.py).
+#[cfg(windows)]
+fn extract(seed: &Path, staging: &Path, _report: &dyn Fn(u64, u64)) -> Result<(), String> {
+    let file = fs::File::open(seed).map_err(|e| format!("打不开运行包：{e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("解压运行包失败：{e}"))?;
+    // `extract` refuses entries that would escape `staging`.
+    archive
+        .extract(staging)
         .map_err(|e| format!("解压运行包失败：{e}"))
 }
 
@@ -201,18 +215,19 @@ impl Runtime {
             cmd.arg(self.root.join("启动.command"));
             cmd
         };
+        // Windows: do what launch.ps1 does (last-good interpreter runs bootstrap.py) without
+        // PowerShell. launch.ps1 stays untouched for double-click and the scheduled task, the
+        // shell skips ~1 s of PowerShell start-up per call, and Python's UTF-8 output reaches
+        // us unchanged instead of being re-encoded by the PowerShell host (Chinese data roots).
         #[cfg(windows)]
         let mut cmd = {
             use std::os::windows::process::CommandExt;
-            let mut cmd = Command::new("powershell.exe");
-            cmd.args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-            ])
-            .arg(self.root.join("launch.ps1"));
+            let version = read_trim(&self.root.join("last-good")).unwrap_or_default();
+            let payload = self.root.join("versions").join(&version);
+            let mut cmd = Command::new(payload.join("python").join("python.exe"));
+            cmd.arg(payload.join("app").join("scripts").join("bootstrap.py"))
+                .env("PYTHONPATH", payload.join("app").join("src"))
+                .env("PYTHONUTF8", "1");
             cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
             cmd
         };

@@ -8,17 +8,19 @@
 
 | 位置 | 内容 | 谁写 |
 | --- | --- | --- |
-| 安装位置（`/Applications/Atelier.app`） | 外壳与 `Contents/Resources/seed/GameAtelier-<版本>-<平台>.tar.gz` 种子 | 安装器，只读 |
+| 安装位置（macOS `/Applications/Atelier.app`；Windows `%LOCALAPPDATA%\Atelier\`，当前用户安装、不需要管理员） | 外壳与种子（macOS `Contents/Resources/seed/GameAtelier-<版本>-macos-arm64.tar.gz`；Windows `seed\GameAtelier-<版本>-windows-x64.zip`） | 安装器，只读 |
 | `<本地应用数据>/game-atelier/runtime/GameAtelier/` | ADR-0030 运行包布局 | 外壳首次启动时由种子解压；之后只由应用内更新修改 |
 | `<本地应用数据>/game-atelier/runtime/shell.log` | 外壳日志 | 外壳 |
 | `<数据目录>/.runtime/` | 服务记录 | 见下 |
 
-macOS 的本地应用数据是 `~/Library/Application Support`。运行包根已存在且 `last-good` 指向完整版本时，外壳不再碰种子。
+本地应用数据：macOS 是 `~/Library/Application Support`，Windows 是 `%LOCALAPPDATA%`。Windows 卸载时删除运行包根，数据目录不动。运行包根已存在且 `last-good` 指向完整版本时，外壳不再碰种子。
 外壳所在路径不能包含符号链接（Tauri 会拒绝解析资源目录），装在 `/Applications` 不受影响。
 
 ## 固定启动器
 
-外壳只调用运行包根下的固定启动器（macOS `启动.command`），不自己选版本、不直接找解释器。启动器无参数时等同 `--select-version`；有参数时原样转给 `bootstrap.py`。
+macOS：外壳只调用运行包根下的固定启动器 `启动.command`，不自己选版本、不直接找解释器。启动器无参数时等同 `--select-version`；有参数时原样转给 `bootstrap.py`。
+
+Windows：外壳不经 `launch.ps1`，而是做 `launch.ps1` 做的同一件事——读 `last-good`，用 `versions\<版本>\python\python.exe` 运行 `versions\<版本>\app\scripts\bootstrap.py`，设 `PYTHONPATH=…\app\src`、`PYTHONUTF8=1`，以无控制台窗口方式启动。这样 `launch.ps1`（双击启动与常驻任务的入口）一行不改；每次调用省掉 PowerShell 的启动时间；Python 的 UTF-8 输出不经 PowerShell 转码，中文数据目录也能原样传回。选版本仍由 `bootstrap.py --select-version` 负责。下表的参数两个平台相同。
 
 | 调用 | 用途 | 约定 |
 | --- | --- | --- |
