@@ -166,7 +166,11 @@ def probe_key(preset: str, access_key: str) -> ProbeResult:
     if not url or not access_key.strip():
         return "unknown"
     try:
-        resp = requests.get(url, headers={"Authorization": f"Bearer {access_key.strip()}"}, timeout=10)
+        # 带密钥的请求不跟随重定向：3xx 归为 unknown，密钥不会被带去别的地址。
+        resp = requests.get(
+            url, headers={"Authorization": f"Bearer {access_key.strip()}"}, timeout=10,
+            allow_redirects=False,
+        )
     except requests.RequestException:
         return "unknown"
     if resp.status_code in (401, 403):

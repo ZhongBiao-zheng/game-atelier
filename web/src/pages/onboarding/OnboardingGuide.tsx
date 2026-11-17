@@ -102,7 +102,7 @@ export function OnboardingGuide({ source, onDone }: { source: GuideSource; onDon
             const preset = presetById(item.presetId);
             return preset && <li key={item.presetId}>
               <Button variant="bare" type="button" onClick={() => chooseVendor(item)}
-                className="flex h-full w-full items-center gap-4 rounded-lg border border-border bg-card p-5 text-left transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                className="flex h-full w-full items-start gap-3 rounded-lg border border-border bg-card p-4 text-left transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                 <BrandTile provider={{ provider: preset.value, base_url: preset.defaultBaseUrl }} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
@@ -111,7 +111,7 @@ export function OnboardingGuide({ source, onDone }: { source: GuideSource; onDon
                   </span>
                   <span className="mt-1 block text-xs text-muted-foreground">{item.coverage}</span>
                 </span>
-                <ChevronRightIcon className="shrink-0 text-muted-foreground" aria-hidden />
+                <ChevronRightIcon className="shrink-0 self-center text-muted-foreground" aria-hidden />
               </Button>
             </li>;
           })}

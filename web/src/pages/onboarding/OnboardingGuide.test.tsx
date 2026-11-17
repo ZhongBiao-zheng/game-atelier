@@ -47,7 +47,7 @@ it('lays out the recommended provider and the three key-free paths with their li
   render(<OnboardingGuide source="model_chip" onDone={vi.fn()} />);
   const recommended = within(screen.getByRole('list', { name: '推荐' })).getAllByRole('button');
   expect(recommended.map(card => card.textContent)).toEqual([
-    expect.stringMatching(/^Tuzi推荐GPT Image · Nano Banana · Seedream · 视频$/),
+    expect.stringMatching(/^Tuzi推荐GPT Image · Nano Banana · 视频$/),
     expect.stringMatching(/^TokenDance推荐Seedream · 视频 · 语音$/),
   ]);
   const others = screen.getByRole('list', { name: '其他方式' });

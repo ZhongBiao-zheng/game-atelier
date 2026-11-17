@@ -22,7 +22,7 @@ export function OnboardingHost() {
       void recordOnboardingEvent({ event: 'closed' });
       setSource(null);
     }}>
-      <DialogContent aria-describedby={undefined} className="flex max-h-[90dvh] max-w-2xl flex-col gap-6 overflow-y-auto p-6 sm:p-8">
+      <DialogContent aria-describedby={undefined} className="flex max-h-[90dvh] max-w-2xl flex-col gap-6 overflow-y-auto p-6">
         <DialogTitle className="font-display text-display font-normal">连接一个模型</DialogTitle>
         <OnboardingGuide source={source} onDone={() => setSource(null)} />
       </DialogContent>

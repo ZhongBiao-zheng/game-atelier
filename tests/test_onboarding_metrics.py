@@ -115,7 +115,8 @@ class _Resp:
 def test_key_probe_classifies_responses(client, monkeypatch, preset, status, body, expected):
     calls = []
 
-    def fake_get(url, headers, timeout):
+    def fake_get(url, headers, timeout, allow_redirects):
+        assert allow_redirects is False
         calls.append(url)
         return _Resp(status, body)
 
@@ -123,6 +124,30 @@ def test_key_probe_classifies_responses(client, monkeypatch, preset, status, bod
     resp = client.post("/api/onboarding/key-probe", json={"preset": preset, "access_key": "sk-test"})
     assert resp.json() == {"result": expected}
     assert calls == [onboarding_metrics.KEY_PROBES[preset]]
+
+
+def test_key_probe_does_not_follow_redirects(client, monkeypatch):
+    import requests
+    from requests.adapters import HTTPAdapter
+
+    sent = []
+
+    def fake_adapter_send(self, request, **kwargs):
+        # 替换传输层，requests 自己的跟随重定向逻辑仍然生效：跟了就会出现第二个请求。
+        sent.append(request.url)
+        resp = requests.Response()
+        resp.status_code = 302 if len(sent) == 1 else 200
+        resp.headers["Location"] = "https://redirect.example/collect"
+        resp._content = b"{}"
+        resp.url = request.url
+        resp.request = request
+        resp.raw = None
+        return resp
+
+    monkeypatch.setattr(HTTPAdapter, "send", fake_adapter_send)
+    resp = client.post("/api/onboarding/key-probe", json={"preset": "tuzi", "access_key": "sk-test"})
+    assert resp.json() == {"result": "unknown"}
+    assert sent == [onboarding_metrics.KEY_PROBES["tuzi"]]
 
 
 def test_key_probe_skips_vendors_without_probe(client, monkeypatch):

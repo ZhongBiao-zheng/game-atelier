@@ -28,7 +28,7 @@ export interface RecommendedProvider {
 export const RECOMMENDED_PROVIDERS: readonly RecommendedProvider[] = [
   {
     presetId: 'tuzi',
-    coverage: 'GPT Image · Nano Banana · Seedream · 视频',
+    coverage: 'GPT Image · Nano Banana · 视频',
     steps: [
       { id: 'signup', label: '注册', url: 'https://api.tu-zi.com/register', hint: '邮箱、GitHub 或 Google 均可' },
       { id: 'topup', label: '充值', url: 'https://api.tu-zi.com/console/topup', hint: '支付宝或微信，0.7 元 = 1 美元额度' },
