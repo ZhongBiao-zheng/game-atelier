@@ -260,7 +260,11 @@ fn prepare_runtime_inner(app: &AppHandle) -> Result<Arc<Runtime>, String> {
             })?
         }
     };
-    let runtime = Arc::new(Runtime { root });
+    let shell_version = app.package_info().version.to_string();
+    let current =
+        runtime::installed_version(&root).is_some_and(|v| runtime::at_least(&v, &shell_version));
+    log(&format!("runtime current={current}"));
+    let runtime = Arc::new(Runtime { root, current });
     *app.state::<Shell>().runtime.lock().unwrap() = Some(runtime.clone());
     Ok(runtime)
 }
@@ -518,7 +522,10 @@ fn overlay_title_bar(app: &tauri::App) -> bool {
         return false;
     }
     let parent = app.state::<Shell>().runtime_parent.lock().unwrap().clone();
-    let installed = parent.and_then(|p| runtime::installed_version(&runtime::runtime_root(&p)));
+    // Before the first unpack, the page that will be shown is the seed's.
+    let installed = parent
+        .and_then(|p| runtime::installed_version(&runtime::runtime_root(&p)))
+        .or_else(|| seed_archive(app.handle()).and_then(|s| runtime::seed_version(&s)));
     let shell = app.package_info().version.to_string();
     installed.is_none_or(|v| runtime::at_least(&v, &shell))
 }
@@ -653,6 +660,7 @@ fn handle_menu(app: &AppHandle, id: &str) {
             let _ = window.set_zoom(1.0);
         }
         menu::OPEN_LOG => open_log(app.clone()),
+        menu::QUIT => quit(app),
         _ => {}
     }
 }

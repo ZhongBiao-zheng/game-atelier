@@ -11,6 +11,7 @@ pub const SETTINGS: &str = "settings";
 pub const RELOAD: &str = "reload";
 pub const ACTUAL_SIZE: &str = "actual-size";
 pub const OPEN_LOG: &str = "open-log";
+pub const QUIT: &str = "quit-app";
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let name = app.package_info().name.clone();
@@ -34,7 +35,9 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &PredefinedMenuItem::hide_others(app, Some("隐藏其他"))?,
             &PredefinedMenuItem::show_all(app, Some("全部显示"))?,
             &separator()?,
-            &PredefinedMenuItem::quit(app, Some(&format!("退出 {name}")))?,
+            // Not the predefined Quit: that terminates the app on the spot and skips the shell's quit
+            // flow (stop the server it started, ask first while work is running).
+            &MenuItem::with_id(app, QUIT, format!("退出 {name}"), true, Some("CmdOrCtrl+Q"))?,
         ],
     )?;
     let edit = Submenu::with_items(

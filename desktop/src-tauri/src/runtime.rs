@@ -188,6 +188,9 @@ pub fn runtime_root(parent: &Path) -> PathBuf {
 
 pub struct Runtime {
     pub root: PathBuf,
+    /// At least as new as the shell, so its launcher knows `--desktop-start`. An older runtime
+    /// (kept from an earlier install) is started the way the first shell did.
+    pub current: bool,
 }
 
 impl Runtime {
@@ -259,6 +262,10 @@ impl Runtime {
 
     /// Starts the server and returns the data root it uses (the launcher's last stdout line).
     pub fn start(&self) -> Result<PathBuf, String> {
+        if !self.current {
+            self.run(&["--select-version", "--no-browser"], None)?;
+            return self.data_root();
+        }
         let out = self.run(&["--desktop-start"], None)?;
         out.lines()
             .rev()
