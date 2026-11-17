@@ -31,6 +31,13 @@ pub fn log(line: &str) {
     }
 }
 
+pub fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// `<local data>/game-atelier/runtime`: writable, outside the read-only app bundle.
 pub fn runtime_parent(local_data: &Path) -> PathBuf {
     let parent = local_data.join(APP_DIR).join("runtime");
@@ -138,6 +145,47 @@ pub fn prepare(parent: &Path, seed: &Path, report: &dyn Fn(u64, u64)) -> Result<
     result.map(|()| root)
 }
 
+/// Ordering key shared with `bootstrap.version_key`: 5.x is the retired line and sorts first.
+fn version_key(version: &str) -> Option<(u8, Vec<u64>)> {
+    if !valid_version(version) {
+        return None;
+    }
+    let parts: Vec<u64> = version.split('.').filter_map(|p| p.parse().ok()).collect();
+    Some((u8::from(parts[0] != 5), parts))
+}
+
+/// Whether `runtime` is at least `shell`; unknown versions count as older.
+pub fn at_least(runtime: &str, shell: &str) -> bool {
+    match (version_key(runtime), version_key(shell)) {
+        (Some(a), Some(b)) => a >= b,
+        _ => false,
+    }
+}
+
+/// `light` / `dark` as the page last reported it (see `save_theme`).
+pub fn saved_theme(parent: &Path) -> Option<String> {
+    read_trim(&parent.join("window-theme")).filter(|t| t == "light" || t == "dark")
+}
+
+pub fn save_theme(parent: &Path, theme: &str) {
+    let _ = fs::write(parent.join("window-theme"), theme);
+}
+
+/// The version the launcher would start (`current`, falling back to `last-good`), if installed.
+pub fn installed_version(root: &Path) -> Option<String> {
+    ["current", "last-good"]
+        .iter()
+        .filter_map(|name| read_trim(&root.join(name)))
+        .find(|v| valid_version(v))
+}
+
+/// Where the runtime lives (or will be unpacked to); `ATELIER_RUNTIME_ROOT` is for development.
+pub fn runtime_root(parent: &Path) -> PathBuf {
+    std::env::var_os("ATELIER_RUNTIME_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| parent.join(BUNDLE_DIR))
+}
+
 pub struct Runtime {
     pub root: PathBuf,
 }
@@ -171,12 +219,17 @@ impl Runtime {
         cmd
     }
 
+    /// Err carries only what the launcher wrote to stderr for users (empty when it gave no
+    /// reason); internal failures go to the log, not to the window.
     fn run(&self, args: &[&str], data_root: Option<&Path>) -> Result<String, String> {
         let mut cmd = self.launcher(args);
         if let Some(root) = data_root {
             cmd.env("GAME_ATELIER_DATA_ROOT", root);
         }
-        let out = cmd.output().map_err(|e| format!("无法运行启动器：{e}"))?;
+        let out = cmd.output().map_err(|e| {
+            log(&format!("cannot run the launcher: {e}"));
+            String::new()
+        })?;
         log(&format!("launcher {args:?} -> {:?}", out.status.code()));
         if out.status.success() {
             return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
@@ -190,11 +243,7 @@ impl Runtime {
             .collect();
         let message = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
         log(&format!("launcher stderr: {message}"));
-        Err(if message.is_empty() {
-            "启动器没有给出原因".into()
-        } else {
-            message
-        })
+        Err(message)
     }
 
     /// Single source of truth for the data root (`bootstrap.py --print-data-root`).
@@ -202,7 +251,8 @@ impl Runtime {
         let out = self.run(&["--print-data-root"], None)?;
         let line = out.lines().next().unwrap_or("").trim();
         if line.is_empty() {
-            return Err("启动器没有返回数据目录".into());
+            log("the launcher printed no data root");
+            return Err(String::new());
         }
         Ok(PathBuf::from(line))
     }
@@ -215,7 +265,10 @@ impl Runtime {
             .map(str::trim)
             .find(|line| !line.is_empty())
             .map(PathBuf::from)
-            .ok_or_else(|| "启动器没有返回数据目录".into())
+            .ok_or_else(|| {
+                log("the launcher printed no data root");
+                String::new()
+            })
     }
 
     /// Pinned to the data root the server was started with: the page may switch the configured
@@ -337,6 +390,17 @@ mod tests {
         assert!(!valid_version("5.138"));
         assert!(!valid_version("5.138.0-rc1"));
         assert!(!valid_version("../1.2.3"));
+    }
+
+    #[test]
+    fn versions_order_like_bootstrap() {
+        assert!(at_least("5.139.0", "5.138.0"));
+        assert!(at_least("5.138.0", "5.138.0"));
+        assert!(!at_least("5.137.9", "5.138.0"));
+        // 0.5.x replaced the retired 5.x line (ADR-0032).
+        assert!(at_least("0.5.134", "5.138.0"));
+        assert!(!at_least("5.200.0", "0.5.134"));
+        assert!(!at_least("garbage", "5.138.0"));
     }
 
     #[test]

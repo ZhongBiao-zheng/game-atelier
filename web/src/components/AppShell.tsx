@@ -20,6 +20,7 @@ import { AnnouncementHost } from '@/components/AnnouncementDialog';
 import { OnboardingHost } from '@/components/OnboardingHost';
 import { UpdateButton, UpdateProvider } from '@/components/UpdateControl';
 import { Button } from '@/components/ui/button';
+import { DESKTOP_NAVIGATE_EVENT, desktopNavigatePath } from '@/lib/desktopShell';
 
 // 组件样例页只在 dev 存在，生产构建整段摇掉
 const Kit = import.meta.env.DEV ? lazy(() => import('@/pages/Kit').then(m => ({ default: m.Kit }))) : null;
@@ -88,6 +89,14 @@ function AppShellContent() {
   const onCanvas = loc.startsWith('/canvas');
   const onHome = loc === '/';
   useEffect(() => { rememberCreativeLocation(loc + window.location.search); }, [loc]);
+  useEffect(() => {
+    const navigate = (event: Event) => {
+      const path = desktopNavigatePath(event);
+      if (path) setLocation(path);
+    };
+    window.addEventListener(DESKTOP_NAVIGATE_EVENT, navigate);
+    return () => window.removeEventListener(DESKTOP_NAVIGATE_EVENT, navigate);
+  }, [setLocation]);
   const onSettings = loc.startsWith('/settings');
   const immersiveCanvas = /^\/canvas\/[^/]+$/.test(loc);
   // 这些页面自带滚动容器；外层再留一条滚动槽会让内容右侧多出 10px 空白。
@@ -105,8 +114,9 @@ function AppShellContent() {
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
       {!immersiveCanvas && <header className="sticky top-0 z-30 shrink-0">
-        <div className="mx-auto grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 lg:h-20 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:gap-4 lg:px-8 lg:py-0">
-          <Link href="/" className="flex shrink-0 items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
+        {/* 桌面版隐藏了系统标题栏：顶栏空白处拖动窗口、双击缩放；按钮与链接照常点击。浏览器里这个属性没有作用。 */}
+        <div data-tauri-drag-region="deep" className="app-titlebar mx-auto grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 lg:h-20 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:gap-4 lg:px-8 lg:py-0">
+          <Link href="/" className="flex shrink-0 items-center gap-2 justify-self-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
             <AtelierMark />
             <span className="brand-wordmark font-display text-2xl">Atelier</span>
           </Link>
@@ -163,6 +173,8 @@ function AppShellContent() {
           </Route>
         </Switch>
       </ContentTag>
+      {/* 红绿灯旁的拖动把手，只在桌面版显示（沉浸式画布没有顶栏时靠它移动窗口）。 */}
+      <div data-tauri-drag-region aria-hidden className="desktop-window-handle" />
       <TeamShareReminder ref={reminderRef} />
       <DesktopDownloadNotice />
       <AnnouncementHost />

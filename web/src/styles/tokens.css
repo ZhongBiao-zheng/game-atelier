@@ -736,6 +736,38 @@
       transition: none;
     }
   }
+
+  /* 桌面版：外壳在页面加载前给 <html> 写 data-shell（在外壳里）与 data-titlebar="overlay"
+     （系统标题栏隐藏、红绿灯叠在页面上），见 docs/contracts/desktop-shell.md。浏览器里这些规则都不生效。 */
+  .desktop-window-handle {
+    display: none;
+  }
+  :root[data-titlebar='overlay'] {
+    --titlebar-inset: 6.25rem;
+  }
+  :root[data-titlebar='overlay'] .desktop-window-handle {
+    display: block;
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 40;
+    width: var(--titlebar-inset);
+    height: 5rem;
+  }
+  :root[data-titlebar='overlay'] :is(.app-titlebar, .canvas-editor-top) {
+    padding-left: var(--titlebar-inset);
+  }
+  /* 原生应用不整页回弹、不能拖选界面文字、不能把链接拖出去；正文、提示词与输入框照常可选。 */
+  :root[data-shell] {
+    overscroll-behavior: none;
+  }
+  :root[data-shell] :is(header, nav, button, label, [role='tab'], [role='menuitem'], [role='option']) {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  :root[data-shell] a {
+    -webkit-user-drag: none;
+  }
 }
 
 @layer base {
