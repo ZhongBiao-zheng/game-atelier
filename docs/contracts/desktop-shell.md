@@ -22,6 +22,8 @@ macOS：外壳只调用运行包根下的固定启动器 `启动.command`，不�
 
 Windows：外壳不经 `launch.ps1`，而是做 `launch.ps1` 做的同一件事——读 `last-good`，用 `versions\<版本>\python\python.exe` 运行 `versions\<版本>\app\scripts\bootstrap.py`，设 `PYTHONPATH=…\app\src`、`PYTHONUTF8=1`，以无控制台窗口方式启动。这样 `launch.ps1`（双击启动与常驻任务的入口）一行不改；每次调用省掉 PowerShell 的启动时间；Python 的 UTF-8 输出不经 PowerShell 转码，中文数据目录也能原样传回。选版本仍由 `bootstrap.py --select-version` 负责。下表的参数两个平台相同。
 
+这条启动规则因此写了两份：`scripts/build_release.py` 生成的 `launch.ps1`，以及 `desktop/src-tauri/src/runtime.rs` 的 Windows 代码块。指针文件、解释器与入口的相对路径、`PYTHONPATH`、`PYTHONUTF8`、要清除的环境变量，改其中一处必须同步另一处；`tests/test_desktop_shell_contract.py` 用同一张规则表同时检查两边。
+
 | 调用 | 用途 | 约定 |
 | --- | --- | --- |
 | `--print-data-root` | 数据目录 | 标准输出只有一行绝对路径；与服务端 `data_root.resolve_data_root()` 结果一致。外壳不另写解析规则 |

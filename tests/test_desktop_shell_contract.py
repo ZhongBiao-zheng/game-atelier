@@ -238,3 +238,59 @@ def test_shell_commands_are_declared_so_remote_pages_cannot_reach_them():
     handlers = main.split("generate_handler![", 1)[1].split("]", 1)[0]
     for command in (c.strip() for c in handlers.split(",") if c.strip()):
         assert f'"{command}"' in build, f"{command} is not declared in the app manifest"
+
+
+# One startup rule, written twice: launch.ps1 (double-click, scheduled task) and the desktop shell
+# on Windows (desktop/src-tauri/src/runtime.rs). Changing one without the other must fail here.
+WINDOWS_STARTUP_RULE = {
+    "pointer": "last-good",
+    "interpreter": ("python", "python.exe"),
+    "entry": ("app", "scripts", "bootstrap.py"),
+    "pythonpath": ("app", "src"),
+    "pythonutf8": "1",
+    "cleared": ("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT"),
+}
+
+
+def _generated_launch_ps1(tmp_path: Path) -> str:
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_build_release_ps", REPO_ROOT / "scripts/build_release.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.write_launchers(tmp_path, windows=True)
+    return (tmp_path / "launch.ps1").read_text(encoding="utf-8-sig")
+
+
+def _shell_windows_block() -> str:
+    source = (REPO_ROOT / "desktop/src-tauri/src/runtime.rs").read_text(encoding="utf-8")
+    start = source.index("#[cfg(windows)]\n        let mut cmd = {")
+    end = source.index("\n        };", start)
+    common = source[end:source.index("\n    }", end)]
+    return source[start:end] + common
+
+
+def test_launch_ps1_follows_the_windows_startup_rule(tmp_path):
+    rule, script = WINDOWS_STARTUP_RULE, _generated_launch_ps1(tmp_path)
+    assert f"(Join-Path $PSScriptRoot '{rule['pointer']}')" in script
+    assert "('versions\\' + $version)" in script
+    for key in ("interpreter", "entry"):
+        assert "'" + "\\".join(rule[key]) + "'" in script, key
+    assert "$env:PYTHONPATH = Join-Path $runtime '" + "\\".join(rule["pythonpath"]) + "'" in script
+    assert f"$env:PYTHONUTF8 = '{rule['pythonutf8']}'" in script
+    for name in rule["cleared"]:
+        assert f"Remove-Item Env:{name}" in script
+
+
+def test_desktop_shell_follows_the_windows_startup_rule():
+    rule, block = WINDOWS_STARTUP_RULE, _shell_windows_block()
+    join = lambda parts: "payload" + "".join(f'.join("{p}")' for p in parts)  # noqa: E731
+    assert f'self.root.join("{rule["pointer"]}")' in block
+    assert '.join("versions").join(&version)' in block
+    assert f"Command::new({join(rule['interpreter'])})" in block
+    assert f"arg({join(rule['entry'])})" in block
+    assert f'.env("PYTHONPATH", {join(rule["pythonpath"])})' in block
+    assert f'.env("PYTHONUTF8", "{rule["pythonutf8"]}")' in block
+    for name in rule["cleared"]:
+        assert f'.env_remove("{name}")' in block
