@@ -67,6 +67,7 @@ Agent 的 Authorization 与本地管理 cookie 不可混用，有冲突的凭据
 | `DELETE /api/connection/editor-lease` | 租约持有者 | 主动释放，不撤销仍需使用的本地管理能力 |
 
 这些端点与其 schema 在实现 PR 中同时落到 Python、TS 和测试；版本号不取代协议版本。
+桌面外壳的控制通道 `GET /api/shell/active-work` 不走 cookie 与 Agent 凭据，只认 `.runtime/shell-control.json` 里的令牌，见 [桌面外壳契约](desktop-shell.md)。
 Web 与服务必须协商同一个受支持协议；不匹配时停止读取与写入，显示更新指引，不试旧式匿名 API。
 
 P1a 启动器以 `.runtime/server.instance` 和状态响应比对实例，不再读取 `/api/config`。
