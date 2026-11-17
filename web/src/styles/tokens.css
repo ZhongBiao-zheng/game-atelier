@@ -111,6 +111,8 @@
   /* 玻璃与遮罩：深度靠玻璃不靠阴影（DESIGN.md Elevation） */
   --glass: rgba(17, 17, 19, 0.66);
   --scrim: rgba(0, 0, 0, 0.62);
+  /* 画布节点里的浮层（尺寸、定稿、播放条…）：不透明度更高的平底，代替玻璃 */
+  --canvas-chip: rgba(17, 17, 19, 0.88);
 
   /* 发丝边界：白色 alpha，8% 默认 / 14% 输入框 */
   --border: rgba(255, 255, 255, 0.08);
@@ -177,6 +179,7 @@
 
   --glass: rgba(255, 255, 255, 0.66);
   --scrim: rgba(0, 0, 0, 0.45);
+  --canvas-chip: rgba(255, 255, 255, 0.9);
 
   /* 发丝边界：纯黑 alpha。输入框比发丝边高一档，保留可点感 */
   --border: rgba(0, 0, 0, 0.08);
@@ -450,6 +453,16 @@
     --xy-controls-button-border-color: var(--border);
     --xy-minimap-background-color: var(--card);
     --xy-attribution-background-color: var(--glass);
+  }
+  /* 画布视口（transform: scale）里不允许 backdrop-filter。WebKit（Safari、桌面版）会因此把整个节点
+     按 1 倍栅格化成合成层，再随画布缩放拉伸：放大后图片和文字一起发虚。Chrome 缩放结束后会重新
+     栅格化，没有这个问题。视口里的玻璃一律变成平底浮层；视口外的工具条与面板不受影响。 */
+  .canvas-flow .react-flow__viewport * {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  .canvas-flow .react-flow__viewport .bg-glass {
+    background-color: var(--canvas-chip);
   }
   .canvas-flow .react-flow__minimap.canvas-minimap {
     left: calc(max(0.75rem, env(safe-area-inset-left)) + 3.25rem) !important;

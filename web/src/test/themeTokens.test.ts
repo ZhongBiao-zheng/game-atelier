@@ -54,6 +54,7 @@ const DARK_TOKENS: Record<string, string> = {
   '--destructive': '#E5534B',
   '--destructive-foreground': '#FFFFFF',
   '--glass': 'rgba(17, 17, 19, 0.66)',
+  '--canvas-chip': 'rgba(17, 17, 19, 0.88)',
   '--scrim': 'rgba(0, 0, 0, 0.62)',
   '--border': 'rgba(255, 255, 255, 0.08)',
   '--input': 'rgba(255, 255, 255, 0.14)',

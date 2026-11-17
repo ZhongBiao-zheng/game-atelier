@@ -97,6 +97,7 @@
   ```
 
   `backdrop-blur-glass` = 28px，是唯一允许的 backdrop-blur 档位（杂牌 sm/md/lg/xl/2xl 守卫红灯）。
+- **画布节点里没有玻璃**：xyflow 视口（随画布缩放的那一层）里的浮层——尺寸、定稿、标注开关、播放条、候选按钮——由 `tokens.css` 统一去掉 `backdrop-filter`，底色换成 `--canvas-chip`（暗色 88% / 浅色 90% 平底）。WebKit（Safari、桌面版）遇到 `backdrop-filter` 会把整个节点按 1 倍栅格化后随缩放拉伸，放大后图片和文字一起发虚。节点外的工具条与面板照旧用玻璃。守卫：`web/src/test/canvasViewportGlass.test.ts`。
 - **浅色主题的深度**：白面 + 黑 8% 发丝边 + 柔和投影，不用暗色的顶部高光、上亮下暗斜面和金属描边环。投影只有两档 token，只在 `:root.light` 定义：`--elevation-float`（浮动 chrome、Popover / Dropdown / Dialog / Select / 工具栏弹层）与 `--elevation-raised`（导航选中药丸）。全部写在 `tokens.css` 的 `:root.light` 规则里，tsx 照旧不写 `shadow-*`。主色 / 危险按钮在浅色下是平涂实色块，outline 是白底发丝边；按钮变体靠 `ui/button.tsx` 上的无样式标记类 `btn-default` / `btn-destructive` / `btn-outline` / `btn-secondary` 区分。深色 token 与深色玻璃配方由 `web/src/test/themeTokens.test.ts` 钉死。
 - **遮罩配方**（lightbox / 全屏 loading）：`bg-scrim`（不再 `bg-black/85` 散值）。
 - **z 梯度**（沿用既有层级，不得乱加）：内容 `auto` < 输入壳/弹窗 `z-20` < sticky 头 `z-30` < lightbox / 全屏 loading `z-50`。
@@ -233,6 +234,7 @@
 | 2026-10-13 | 画布四角各管一类：左上项目与画布菜单（重命名 / 生成偏好 / 快捷键 / 设置 / 外观），右上生成中计数与 Agent，左下资产，右下小地图 / 缩放百分比 / 适应全部；删缩放滑杆。图片节点工具条直接露出前 4 个快捷工具 + 图生图 + 更多 + 保存 + 隐藏；生成面板去标题行 | UI 评审第二轮（Mobbin：FLORA、Weavy、ElevenLabs Flows、Runway）：左下 5 个图标混了视图、内容、设置三类；工具条 13 项占 870px。飙哥定：生成面板保持跟随节点、不做撤销重做按钮与保存状态文字、连接线不换、保存与隐藏保持固定 |
 | 2026-10-13 | 裁剪 / 切分弹窗改左图右栏（舞台用 container-type: size 让图片等比铺满，右栏 18rem）；裁剪框外四块遮罩压暗、三分线、L 形角手柄；尺寸只留宽高像素输入（失焦或回车提交），不做 X / Y；切分块编号 + 结果尺寸列表、行列步进、四个预设 | Mobbin 参考 Air、Telegram、Shopify、Squarespace 的裁剪器；原先竖排一列，图高时整个弹窗滚动，百分比输入不直观 |
 | 2026-10-24 | 设置拆为七个控制台地址，用量统一展示个人与团队花费 | PRD D1–D13：配置、观测、资源、扩展分组，局域网额度仅在用量页出现 |
+| 2026-11-17 | 画布视口里的浮层去掉背景模糊，改 `--canvas-chip` 平底（浏览器与桌面版一致） | WebKit 把含 `backdrop-filter` 的节点按 1 倍栅格化，画布放大到 300% 以上时图片与尺寸徽标发虚（桌面版实测，Safari 同样，Chrome 不受影响）；见 `.scratch/desktop-feel/PLAN.md` 第 3 节 |
 | 2026-10-24 | 主色改为可配置、默认青柠，底色改为石墨；推翻 2026-05-18 和 2026-06-10 两条黄铜决定 | 暖棕加黄铜显旧显脏。主副色、固定数据色与状态色分离，详见 [主题色规范](docs/design/theme.md)；历史日志中的暖黑与黄铜记录不再作为现行规则。 |
 | 2026-10-26 | 正文改用 Inter + Noto Sans SC，全部字体本地打包，等宽字体只留给技术信息；推翻 2026-06-10「Geist 留任、拒收 Inter」 | 中文原本落到系统字体，Mac 苹方与 Windows 雅黑不一致；Google Fonts 在国内不翻墙与离线安装包下加载失败；同类工具 Tapnow / Lovart / LibTV 均为 Inter + 中文网页字体（读其线上 CSS 得出）；创作台 93 处等宽字体让数据行与正文割裂 |
 | 2026-10-29 | 页面禁写原生 input / select / textarea，补 `SecretInput` / `Select` / `Checkbox` / `Radio` / `Slider` / `FileInput`；原生 button、bare 控件、任意值间距走棘轮；界面规格拆到 `docs/design/surfaces.md`，组件选用写入 `docs/design/components.md` | 组件层已有但被绕开：78 处原生控件、32 个文件手抄防填充属性，密钥框的保存密码修法只留在单页；本文件混入大段界面交互，通用配方被冲淡 |
