@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from zipfile import ZipFile, ZIP_STORED
 
-from PIL import Image
 
 from character_workflow.lib.canvas_projects import (
     _read_canvas_document_unlocked,
@@ -98,6 +97,7 @@ def export_canvas_layers(project_id: str, node_id: str) -> tuple[Path, str]:
 
 
 def _write_psd(files: list[_LayerFile], target: Path) -> None:
+    from PIL import Image
     from psd_tools import PSDImage
     from psd_tools.constants import Tag
 

@@ -7,7 +7,10 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, ImageOps, UnidentifiedImageError
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 from character_workflow.lib.schemas import CanvasMediaVersion
 
@@ -72,6 +75,7 @@ def normalize_canvas_mask(
 
 
 def _source_display_size(path: Path, version: CanvasMediaVersion) -> tuple[int, int]:
+    from PIL import Image, ImageOps, UnidentifiedImageError
     if not path.is_file():
         raise CanvasMaskError(
             "canvas_mask_source_missing",
@@ -125,6 +129,7 @@ def _source_display_size(path: Path, version: CanvasMediaVersion) -> tuple[int, 
 
 
 def _decode_mask(body: bytes) -> Image.Image:
+    from PIL import Image, UnidentifiedImageError
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)

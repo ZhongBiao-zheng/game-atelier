@@ -83,7 +83,7 @@ def select_bundle_version(root: Path) -> Path:
 
 def launch_selected_version(
     *, service: bool = False, to_version: str | None = None,
-    update_id: str | None = None, open_browser: bool = True,
+    update_id: str | None = None, open_browser: bool = True, desktop: bool = False,
 ) -> int:
     root = bundle_root()
     if root is None:
@@ -136,8 +136,14 @@ def launch_selected_version(
         command = [str(python), str(payload / "app/scripts/bootstrap.py"), "--launch"]
         if not open_browser:
             command.append("--no-browser")
+        if desktop:
+            command.append("--desktop")
     # Keep the foreground child inside the scheduled task's process lifetime on Windows.
-    return subprocess.run(command, env=env).returncode
+    result = subprocess.run(command, env=env).returncode
+    if desktop and result == 0:
+        # Desktop shell contract: the last stdout line is the data root the server now uses.
+        print(effective_data_root(), flush=True)
+    return result
 
 
 def _user_config_dir() -> Path:
@@ -661,14 +667,18 @@ def run_in_venv(forward_args: list[str], *, stdout=None) -> int:
     return proc.returncode
 
 
-def launch(*, open_browser: bool = True) -> int:
-    """一键启动：按需准备共享运行环境，再用该环境重启服务。"""
+def launch(*, open_browser: bool = True, desktop: bool = False) -> int:
+    """一键启动：按需准备共享运行环境，再用该环境重启服务。
+
+    desktop=True 是桌面外壳的快速路径（外壳已确认没有可用实例）：不联网检查更新（运行中的服务
+    自己会查），没有启动记录时不跑 stop，start 跳过运行包模式下的 bootstrap --check。
+    """
     if not _web_dist_ok():
         print("前端文件 web/dist 缺失，请运行一键修复。", file=sys.stderr)
         return 1
     if resolve_data_root() is None:
         init_data_root(effective_data_root())
-    if is_bundle():
+    if is_bundle() and not desktop:
         update_info()
     started = time.perf_counter()
     result = ensure_venv(quiet=True)
@@ -676,14 +686,19 @@ def launch(*, open_browser: bool = True) -> int:
     if result:
         return result
     started = time.perf_counter()
-    result = run_in_venv(["-m", "viewer_server.server", "stop"])
-    print(f"[5/6] 停止旧实例 … {time.perf_counter() - started:.1f}s", flush=True)
-    if result:
-        return result
+    data_root = resolve_data_root()
+    # 一个 Python 进程约 0.1 秒；记录不存在时 stop 什么也不做，桌面外壳就不付这笔。
+    if not desktop or (data_root is not None and (data_root / ".runtime" / "server.pid").exists()):
+        result = run_in_venv(["-m", "viewer_server.server", "stop"])
+        print(f"[5/6] 停止旧实例 … {time.perf_counter() - started:.1f}s", flush=True)
+        if result:
+            return result
     started = time.perf_counter()
     start_args = ["-m", "viewer_server.server", "start", "--background"]
     if not open_browser:
         start_args.append("--no-browser")
+    if desktop and is_bundle():
+        start_args.append("--skip-check")
     result = run_in_venv(start_args)
     print(f"[6/6] 启动工坊 … {time.perf_counter() - started:.1f}s", flush=True)
     return result
@@ -707,6 +722,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Bootstrap the game-atelier plugin.")
     parser.add_argument("--select-version", action="store_true",
                         help="Launch the selected version from a versioned bundle.")
+    parser.add_argument("--desktop-start", action="store_true",
+                        help="Desktop shell fast path; prints the data root as the last line.")
+    parser.add_argument("--desktop", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--service", action="store_true",
                         help="Run the selected bundle in the foreground for Task Scheduler.")
     parser.add_argument("--apply-update", action="store_true")
@@ -752,6 +770,8 @@ def main() -> int:
     if args.select_version:
         return launch_selected_version(service=args.service, to_version=args.to_version,
                                        update_id=args.update_id, open_browser=not args.no_browser)
+    if args.desktop_start:
+        return launch_selected_version(open_browser=False, desktop=True)
     if args.to_version or args.update_id:
         parser.error("--to and --update-id require --select-version or --apply-update")
     if args.service:
@@ -778,7 +798,7 @@ def main() -> int:
         return ensure_venv()
 
     if args.launch:
-        return launch(open_browser=False) if args.no_browser else launch()
+        return launch(open_browser=not args.no_browser, desktop=args.desktop)
 
     parser.print_help()
     return 1

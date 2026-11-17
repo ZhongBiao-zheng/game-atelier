@@ -514,6 +514,33 @@ def test_dependency_update_stops_environment_owner_before_sync(
     assert mod._venv_is_current(isolated_data_root) is (not stop_code)
 
 
+def _desktop_bundle(mod, monkeypatch):
+    monkeypatch.setattr(mod, "is_bundle", lambda: True)
+    monkeypatch.setattr(mod, "update_info", lambda: pytest.fail("desktop start must not check updates"))
+    calls = []
+    monkeypatch.setattr(mod, "run_in_venv", lambda args: calls.append(args) or 0)
+    return calls
+
+
+def test_desktop_launch_starts_without_stop_or_checks_when_nothing_is_recorded(
+    monkeypatch, isolated_data_root,
+):
+    mod = _load_bootstrap()
+    calls = _desktop_bundle(mod, monkeypatch)
+    assert mod.launch(open_browser=False, desktop=True) == 0
+    assert calls == [["-m", "viewer_server.server", "start", "--background", "--no-browser", "--skip-check"]]
+
+
+def test_desktop_launch_still_stops_a_recorded_server(monkeypatch, isolated_data_root):
+    # The shell only gets here when the recorded server does not answer; stop clears a hung one.
+    mod = _load_bootstrap()
+    calls = _desktop_bundle(mod, monkeypatch)
+    (isolated_data_root / ".runtime" / "server.pid").write_text("123\n")
+    assert mod.launch(open_browser=False, desktop=True) == 0
+    assert calls[0] == ["-m", "viewer_server.server", "stop"]
+    assert calls[1][-1] == "--skip-check"
+
+
 def test_launch_initializes_default_data_root(tmp_path, monkeypatch):
     mod = _load_bootstrap()
     monkeypatch.delenv("GAME_ATELIER_DATA_ROOT", raising=False)

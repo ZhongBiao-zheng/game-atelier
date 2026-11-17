@@ -10,7 +10,6 @@ from io import BytesIO
 from pathlib import Path
 from typing import Callable
 
-from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
 from character_workflow.lib import data_root
@@ -720,6 +719,7 @@ def _commit_canvas_upload(
 
 def _display_image_dimensions(body: bytes) -> tuple[int, int]:
     """Read the browser-visible size, including EXIF rotations, without rewriting upload bytes."""
+    from PIL import Image, UnidentifiedImageError
     try:
         with Image.open(BytesIO(body)) as image:
             width, height = image.size

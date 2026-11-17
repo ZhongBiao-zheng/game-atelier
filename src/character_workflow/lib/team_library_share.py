@@ -20,7 +20,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageOps, UnidentifiedImageError
 
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.creation_assets import (
@@ -192,6 +191,7 @@ def _copy_hashed(source: Path, folder: Path, name_for: Callable[[str], str]) -> 
 
 def _write_thumbnail(source: Path, target: Path) -> None:
     """图片成片的 ≤ 512px webp；Pillow 读不了就不写（索引会按需自己生成）。"""
+    from PIL import Image, ImageOps, UnidentifiedImageError
     try:
         with Image.open(source) as opened:
             image = ImageOps.exif_transpose(opened) or opened

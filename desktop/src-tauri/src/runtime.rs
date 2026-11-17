@@ -78,9 +78,33 @@ pub fn seed_version(seed: &Path) -> Option<String> {
     valid_version(version).then(|| version.to_string())
 }
 
-fn extract(seed: &Path, staging: &Path) -> Result<(), String> {
+/// Counts compressed bytes read so the window can show real progress while unpacking.
+struct Progress<'a, R> {
+    inner: R,
+    done: u64,
+    total: u64,
+    report: &'a dyn Fn(u64, u64),
+}
+
+impl<R: Read> Read for Progress<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.done += n as u64;
+        (self.report)(self.done, self.total);
+        Ok(n)
+    }
+}
+
+fn extract(seed: &Path, staging: &Path, report: &dyn Fn(u64, u64)) -> Result<(), String> {
     let file = fs::File::open(seed).map_err(|e| format!("打不开运行包：{e}"))?;
-    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
+    let total = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let reader = Progress {
+        inner: std::io::BufReader::new(file),
+        done: 0,
+        total,
+        report,
+    };
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(reader));
     archive.set_preserve_permissions(true);
     archive.set_preserve_mtime(true);
     // `unpack` refuses entries that would escape `staging`.
@@ -90,7 +114,7 @@ fn extract(seed: &Path, staging: &Path) -> Result<(), String> {
 }
 
 /// Existing runtime wins; the seed only creates it the first time (newer seeds: batch 3).
-pub fn prepare(parent: &Path, seed: &Path) -> Result<PathBuf, String> {
+pub fn prepare(parent: &Path, seed: &Path, report: &dyn Fn(u64, u64)) -> Result<PathBuf, String> {
     let root = parent.join(BUNDLE_DIR);
     if validate_bundle(&root).is_ok() {
         return Ok(root);
@@ -101,7 +125,7 @@ pub fn prepare(parent: &Path, seed: &Path) -> Result<PathBuf, String> {
     let staging = parent.join(format!(".staging-{}", std::process::id()));
     let _ = fs::remove_dir_all(&staging);
     fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
-    let result = extract(seed, &staging).and_then(|()| {
+    let result = extract(seed, &staging, report).and_then(|()| {
         let extracted = staging.join(BUNDLE_DIR);
         validate_bundle(&extracted)?;
         if root.exists() {
@@ -183,9 +207,15 @@ impl Runtime {
         Ok(PathBuf::from(line))
     }
 
-    pub fn start(&self) -> Result<(), String> {
-        self.run(&["--select-version", "--no-browser"], None)
-            .map(|_| ())
+    /// Starts the server and returns the data root it uses (the launcher's last stdout line).
+    pub fn start(&self) -> Result<PathBuf, String> {
+        let out = self.run(&["--desktop-start"], None)?;
+        out.lines()
+            .rev()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .map(PathBuf::from)
+            .ok_or_else(|| "启动器没有返回数据目录".into())
     }
 
     /// Pinned to the data root the server was started with: the page may switch the configured

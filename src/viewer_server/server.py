@@ -188,12 +188,16 @@ def _wait_for_server(port: int, instance_id: str, *, timeout: float = 8.0) -> bo
     return False
 
 
-def cmd_start(background: bool = False, *, open_browser: bool = True) -> None:
+def _bundled() -> bool:
+    return Path(sys.executable).resolve().is_relative_to(_BOOTSTRAP.parent.parent.parent / "python")
+
+
+def cmd_start(background: bool = False, *, open_browser: bool = True, skip_check: bool = False) -> None:
     from viewer_server.bundle_update import start_allowed
     if not start_allowed(data_root.runtime_dir()):
         print("正在更新，请稍后重试。", file=sys.stderr)
         sys.exit(1)
-    bundled = Path(sys.executable).resolve().is_relative_to(_BOOTSTRAP.parent.parent.parent / "python")
+    bundled = _bundled()
     # Source dependency repair may stop the old server and therefore takes its own lock.
     if not bundled and not _bootstrap_gate(background):
         sys.exit(1)
@@ -212,7 +216,10 @@ def cmd_start(background: bool = False, *, open_browser: bool = True) -> None:
             print("正在更新，请稍后重试。", file=sys.stderr)
             sys.exit(1)
         # Bundle --check may update the shared release cache: keep it inside the start lock.
-        if bundled and not _bootstrap_gate(background):
+        # A bundle never needs uv or a venv, so its gate only runs `bootstrap --check` (which also
+        # refreshes the release cache). The desktop shell skips it: the page asks for the same
+        # check right after it loads (/api/onboarding/status), and the server checks updates itself.
+        if bundled and not skip_check and not _bootstrap_gate(background):
             sys.exit(1)
         foreground = _start_locked(runtime, background=background, open_browser=open_browser)
     if foreground is not None:
@@ -382,7 +389,8 @@ if __name__ == "__main__":
         sys.exit(1)
     cmd = sys.argv[1]
     if cmd == "start":
-        cmd_start(background="--background" in sys.argv, open_browser="--no-browser" not in sys.argv)
+        cmd_start(background="--background" in sys.argv, open_browser="--no-browser" not in sys.argv,
+                  skip_check="--skip-check" in sys.argv)
     elif cmd == "stop":
         cmd_stop()
     elif cmd == "open-browser":

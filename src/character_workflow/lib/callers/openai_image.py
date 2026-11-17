@@ -14,7 +14,6 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
-from PIL import Image, ImageOps, UnidentifiedImageError
 
 from character_workflow.lib import net_env
 from character_workflow.lib.callers import tuzi_async
@@ -554,6 +553,7 @@ MARKUP_MAX_PIXELS = 16_777_216
 
 def _normalized_markup(path: Path, source_size: tuple[int, int]) -> bytes:
     """标注层：与首张输入图同尺寸的透明 PNG，原样按 RGBA 重编码后发送。"""
+    from PIL import Image, UnidentifiedImageError
     try:
         with Image.open(path) as opened:
             if opened.format != "PNG":
@@ -577,6 +577,7 @@ def _normalized_markup(path: Path, source_size: tuple[int, int]) -> bytes:
 
 
 def _normalized_edit_image(path: Path) -> tuple[bytes, tuple[int, int]]:
+    from PIL import Image, ImageOps, UnidentifiedImageError
     try:
         with Image.open(path) as opened:
             if getattr(opened, "is_animated", False) or getattr(opened, "n_frames", 1) != 1:
@@ -595,6 +596,7 @@ def _normalized_edit_image(path: Path) -> tuple[bytes, tuple[int, int]]:
 
 
 def _normalized_edit_mask(path: Path, source_size: tuple[int, int]) -> bytes:
+    from PIL import Image, UnidentifiedImageError
     try:
         with Image.open(path) as opened:
             if opened.format != "PNG" or opened.size != source_size:
@@ -980,6 +982,7 @@ def _image_data_url(path: str, *, min_pixels: int = 0) -> str:
 
 def _upscaled_to_min_pixels(raw: bytes, min_pixels: int) -> bytes | None:
     """像素不足则等比放大到下限，返回 PNG 字节；够大或解不开返回 None（原样发送）。"""
+    from PIL import Image, UnidentifiedImageError
     try:
         with Image.open(io.BytesIO(raw)) as opened:
             width, height = opened.size
@@ -1093,6 +1096,7 @@ def _write_outputs(payload: dict, output_dir: Path, *, start_index: int = 1) -> 
 
 
 def _source_image_size(path: str) -> tuple[int, int] | None:
+    from PIL import Image, ImageOps, UnidentifiedImageError
     try:
         with Image.open(path) as image:
             return ImageOps.exif_transpose(image).size
@@ -1126,6 +1130,7 @@ def _resample_layer_decomposition(
     底图整幅缩放到源图尺寸；每个透明图层的包围盒按同一比例换算，图层像素缩到新包围盒大小，
     这样画布预览、PSD / ZIP 导出、素材节点全部按源图分辨率对齐，不必各自再算一次。
     """
+    from PIL import Image
     base = next(item for item in items if item[0]["z_index"] == 0)
     with Image.open(io.BytesIO(base[1])) as base_image:
         base_width, base_height = base_image.size
@@ -1161,6 +1166,7 @@ def _write_layer_decomposition_outputs(
     source_size: tuple[int, int] | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     """Persist one base plus ordered transparent layers without discarding placement metadata."""
+    from PIL import UnidentifiedImageError
     from character_workflow.lib.schemas import LayerDecompositionResult
 
     items = payload.get("data")

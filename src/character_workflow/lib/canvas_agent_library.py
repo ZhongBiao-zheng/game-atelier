@@ -7,7 +7,6 @@ import io
 import secrets
 from datetime import datetime, timezone
 
-from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError
 
 from character_workflow.lib.canvas_agent_schema import AddMediaNodeChange, CanvasPointInput
@@ -45,6 +44,7 @@ def project_image(project_id: str, asset_id: str):
 
 
 def preview(project_id: str, asset_id: str) -> tuple[str, int, int]:
+    from PIL import Image, ImageOps
     _asset, media = project_image(project_id, asset_id)
     path = creation_asset_media_path(asset_id)
     if path.stat().st_size > 25 * 1024 * 1024:
@@ -92,6 +92,7 @@ def team_entry(project_id: str, ref: str):
 
 
 def team_preview(project_id: str, ref: str) -> str:
+    from PIL import Image, UnidentifiedImageError
     mount, entry = team_entry(project_id, ref)
     data = thumbnail_bytes(mount, entry, 512)
     if data is None:

@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path, PurePath
 
-from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError
 
 from character_workflow.lib import data_root
@@ -412,6 +411,7 @@ def _thumb_path(library_id: str, entry: TeamLibraryIndexEntry, width: int) -> Pa
 def thumbnail_bytes(
     mount: TeamLibraryMount, entry: TeamLibraryIndexEntry, width: int
 ) -> bytes | None:
+    from PIL import Image, ImageOps, UnidentifiedImageError
     if not entry.mime_type or not entry.mime_type.startswith("image/"):
         return None
     snapped = next((w for w in _THUMB_WIDTHS if w >= width), _THUMB_WIDTHS[-1])
@@ -457,6 +457,7 @@ def read_prompt_preview_files(asset_dir: Path, previews: list[PromptPreviewImage
 def prompt_preview_thumbnail_bytes(
     mount: TeamLibraryMount, entry: TeamLibraryIndexEntry, file: str, width: int,
 ) -> bytes | None:
+    from PIL import Image, ImageOps
     if entry.kind != "prompt" or entry.status != "ready":
         return None
     try:

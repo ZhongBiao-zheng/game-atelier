@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from PIL import Image, ImageOps
 from pydantic import TypeAdapter, ValidationError
 
 from character_workflow.lib import data_root
@@ -407,6 +406,7 @@ def _preview_path(asset_id: str, file: str) -> Path:
 
 def _preview_image(body: bytes, mime_type: str, source_job_id: str | None,
                    source_model: str | None) -> PromptPreviewImage:
+    from PIL import Image
     if not body or len(body) > PROMPT_PREVIEW_MAX_BYTES:
         raise ValueError("效果图不能为空，且单张不能超过 20MB")
     try:
@@ -487,6 +487,7 @@ def add_prompt_previews(asset_id: str, uploads: list[tuple[bytes, str]], *,
 
 
 def add_prompt_preview_from_job(asset_id: str, job_id: str, output_index: int) -> CreationAsset:
+    from PIL import Image
     from character_workflow.lib.jobs import read_job
     job = read_job(job_id)
     if job.kind != "image" or not 0 <= output_index < len(job.output_paths):
@@ -531,6 +532,7 @@ def reorder_prompt_previews(asset_id: str, files: list[str]) -> CreationAsset:
 
 
 def prompt_preview_bytes(asset_id: str, file: str, width: int | None = None) -> tuple[bytes, str]:
+    from PIL import Image, ImageOps
     from character_workflow.lib.team_library_index import _THUMB_WIDTHS
     with file_lock(_catalog_lock_path()):
         asset = _preview_asset(_read_catalog_unlocked(), asset_id)

@@ -5,7 +5,6 @@ import base64
 import io
 import json
 
-from PIL import Image, ImageOps
 from pydantic import TypeAdapter, ValidationError
 
 from character_workflow.lib import keys
@@ -25,6 +24,7 @@ class ClassificationError(ValueError):
 
 
 def classify_assets(project_id: str, payload: CanvasClassifyRequest) -> list[CanvasCategorySuggestion]:
+    from PIL import Image, ImageOps
     project = read_canvas_project(project_id)
     if len(set(payload.asset_ids)) != len(payload.asset_ids):
         raise ClassificationError("DUPLICATE_ASSETS", "分类列表含重复资产")

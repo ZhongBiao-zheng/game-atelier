@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     thread,
@@ -39,6 +39,9 @@ struct Shell {
     shown: Mutex<Option<Server>>,
     booting: AtomicBool,
     quitting: AtomicBool,
+    /// First-start unpacking: compressed bytes read and the seed size (0 when not unpacking).
+    unpacked: AtomicU64,
+    unpack_total: AtomicU64,
 }
 
 fn smoke_mode() -> bool {
@@ -140,7 +143,11 @@ fn prepare_runtime(app: &AppHandle) -> Result<Arc<Runtime>, String> {
                 runtime::seed_version(&seed)
             ));
             navigate(app, local_page(app, &[("stage", "preparing")]), None);
-            runtime::prepare(&parent, &seed)?
+            let shell = app.state::<Shell>();
+            runtime::prepare(&parent, &seed, &|done, total| {
+                shell.unpacked.store(done, Ordering::Relaxed);
+                shell.unpack_total.store(total, Ordering::Relaxed);
+            })?
         }
     };
     let runtime = Arc::new(Runtime { root });
@@ -179,10 +186,13 @@ fn boot(app: AppHandle) {
                 return Ok((server, data_root));
             }
             let started = runtime.start();
-            // First start may have just written the platform data-root config.
-            let data_root = runtime.data_root()?;
-            // The launcher gives up after 8 s, but a fresh runtime compiles every module on its
-            // first import and can take longer: wait for the record instead of reporting failure.
+            // The launcher reports the data root it started with (first start writes the config).
+            let data_root = match &started {
+                Ok(root) => root.clone(),
+                Err(_) => runtime.data_root()?,
+            };
+            // The launcher gives up after 8 s, but a freshly unpacked runtime waits on the system's
+            // first-load check of every native library: wait for the record instead of failing.
             let server = wait_for_server(&data_root).ok_or_else(|| {
                 started
                     .err()
@@ -321,6 +331,16 @@ fn retry(app: AppHandle) {
     boot(app);
 }
 
+/// Unpacking progress for the bundled local page: `[done, total]` bytes, total 0 when idle.
+#[tauri::command]
+fn startup_progress(app: AppHandle) -> [u64; 2] {
+    let shell = app.state::<Shell>();
+    [
+        shell.unpacked.load(Ordering::Relaxed),
+        shell.unpack_total.load(Ordering::Relaxed),
+    ]
+}
+
 #[tauri::command]
 fn open_log(app: AppHandle) {
     let data_root = app.state::<Shell>().data_root.lock().unwrap().clone();
@@ -441,7 +461,7 @@ fn main() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .manage(Shell::default())
-        .invoke_handler(tauri::generate_handler![retry, open_log])
+        .invoke_handler(tauri::generate_handler![retry, open_log, startup_progress])
         .setup(|app| {
             if let Ok(local) = app.path().local_data_dir() {
                 runtime::runtime_parent(&local);

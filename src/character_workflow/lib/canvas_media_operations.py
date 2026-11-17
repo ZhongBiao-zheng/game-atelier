@@ -11,9 +11,10 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from threading import BoundedSemaphore
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from PIL import Image, ImageOps, UnidentifiedImageError
+if TYPE_CHECKING:
+    from PIL import Image
 
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.canvas_projects import (
@@ -232,6 +233,7 @@ def _validate_source(
 
 
 def _decode_source(path: Path, version: CanvasMediaVersion) -> Image.Image:
+    from PIL import Image, ImageOps, UnidentifiedImageError
     if _file_sha256(path) != version.sha256:
         raise CanvasMediaOperationError(
             "canvas_media_source_missing",

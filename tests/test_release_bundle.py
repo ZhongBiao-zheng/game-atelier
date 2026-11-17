@@ -217,6 +217,30 @@ def test_bundle_dispatches_selected_interpreter_and_clean_environment(versioned_
     assert boot.launch_selected_version(service=service) == 0
 
 
+def test_desktop_start_dispatches_the_fast_launch_and_prints_the_data_root_last(
+    versioned_bundle, monkeypatch, capsys,
+):
+    boot, root = versioned_bundle
+    monkeypatch.setenv("GAME_ATELIER_NO_UPDATE_CHECK", "1")
+    commands = []
+    def run(command, *, env):
+        commands.append(command)
+        print("child output")
+        return subprocess.CompletedProcess(command, 0)
+    monkeypatch.setattr(boot.subprocess, "run", run)
+    assert boot.launch_selected_version(open_browser=False, desktop=True) == 0
+    assert commands[0][-3:] == ["--launch", "--no-browser", "--desktop"]
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert lines[-1] == str(boot.effective_data_root())
+
+
+def test_desktop_start_prints_nothing_extra_when_the_launch_fails(versioned_bundle, monkeypatch, capsys):
+    boot, root = versioned_bundle
+    monkeypatch.setattr(boot.subprocess, "run", lambda command, *, env: subprocess.CompletedProcess(command, 1))
+    assert boot.launch_selected_version(open_browser=False, desktop=True) == 1
+    assert capsys.readouterr().out == ""
+
+
 @pytest.fixture
 def release_checkout(tmp_path):
     """只向临时 bare 仓库推 tag，绝不触及真实 origin。"""

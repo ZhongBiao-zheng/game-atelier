@@ -22,7 +22,6 @@ from typing import Any
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 import requests
-from PIL import Image, ImageOps, UnidentifiedImageError
 
 from character_workflow.lib import keys
 from character_workflow.lib.callers.image_output import write_image
@@ -172,6 +171,7 @@ def _error(payload: dict, status: int, secret: str) -> str:
 
 
 def _image_info(content: bytes) -> tuple[tuple[int, int], str]:
+    from PIL import Image, UnidentifiedImageError
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -255,6 +255,7 @@ def _reference_url(value: str, key) -> str:
 
 def _edit_source(value: str) -> tuple[bytes, tuple[int, int]]:
     """Match the Canvas display orientation before measuring, masking and uploading."""
+    from PIL import Image, ImageOps
     content, _size, _mime = _read_input(value)
     with Image.open(io.BytesIO(content)) as image:
         displayed = ImageOps.exif_transpose(image)
@@ -271,6 +272,7 @@ def _edit_source(value: str) -> tuple[bytes, tuple[int, int]]:
 
 def mask_data_uri(path: str | Path, source_size: tuple[int, int]) -> str:
     """Internal white=keep, black=edit → EvoLink opaque black=keep, white=repaint."""
+    from PIL import Image, ImageOps
     try:
         with Image.open(path) as image:
             if image.size != source_size:

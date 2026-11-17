@@ -11,11 +11,12 @@ import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import requests
-from PIL import Image
+if TYPE_CHECKING:
+    from PIL import Image
 
 from character_workflow.lib import data_root, net_env
 
@@ -158,6 +159,7 @@ def _get_session() -> Any:
 
 def remove_background(image: Image.Image) -> Image.Image:
     """返回 RGBA；源图自带的透明度与预测出的前景掩码相乘，不会把已透明区域补回来。"""
+    from PIL import Image
     session = _get_session()
     rgba = image.convert("RGBA")
     # 透明区域喂黑色会被模型当成实体前景（实测），先合成到白底。

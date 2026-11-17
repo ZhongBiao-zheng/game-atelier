@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from PIL import Image, ImageChops, ImageFilter, ImageOps
+if TYPE_CHECKING:
+    from PIL import Image
 
 from .openai_image import image_family, supports_image_mask
 
@@ -52,6 +53,7 @@ def edit_transport_for_key(key, model: str, mode: str = "inpaint") -> str | None
 
 
 def expanded_source(source: Path, options: dict) -> tuple[Image.Image, Image.Image]:
+    from PIL import Image, ImageOps
     with Image.open(source) as opened:
         original = ImageOps.exif_transpose(opened).convert("RGBA")
     width, height = int(options["width"]), int(options["height"])
@@ -77,6 +79,7 @@ OUTPAINT_SEAM_MAX = 64
 
 def outpaint_seam_mask(options: dict, source_size: tuple[int, int]) -> Image.Image:
     """Keep the source, ramping into generated pixels only along edges that were extended."""
+    from PIL import Image, ImageChops
     width, height = int(options["width"]), int(options["height"])
     x, y = int(options["x"]), int(options["y"])
     w, h = source_size
@@ -99,6 +102,7 @@ def outpaint_seam_mask(options: dict, source_size: tuple[int, int]) -> Image.Ima
 
 
 def composite_result(source: Path, mask_path: Path, result: Path, options: dict) -> Path:
+    from PIL import Image, ImageFilter, ImageOps
     if options.get("mode") == "outpaint":
         base, _ = expanded_source(source, options)
     else:
@@ -146,6 +150,7 @@ def _record_inputs(params: dict, work: Path, prompt: str, files: list[tuple[str,
 
 def render(*, prompt: str, model: str, alias: str, output_dir: Path,
            params: dict[str, Any], **kwargs) -> list[str]:
+    from PIL import Image, ImageOps
     from character_workflow.lib import keys
     from . import dispatch
 

@@ -745,3 +745,16 @@ def test_start_points_to_stop_when_own_server_is_alive_but_silent(tmp_path, monk
         server.cmd_start(background=True)
     assert "stop" in capsys.readouterr().err
     assert read_pid(runtime) == os.getpid()
+
+
+@pytest.mark.parametrize("skip_check, gate_calls", [(False, 1), (True, 0)])
+def test_bundle_start_skips_the_check_only_when_asked(tmp_path, monkeypatch, skip_check, gate_calls):
+    runtime = tmp_path / ".runtime"
+    runtime.mkdir()
+    monkeypatch.setattr(data_root, "runtime_dir", lambda: runtime)
+    monkeypatch.setattr(server, "_bundled", lambda: True)
+    calls = []
+    monkeypatch.setattr(server, "_bootstrap_gate", lambda background: calls.append(background) or True)
+    monkeypatch.setattr(server, "_start_locked", lambda runtime, **kwargs: None)
+    server.cmd_start(background=True, open_browser=False, skip_check=skip_check)
+    assert len(calls) == gate_calls

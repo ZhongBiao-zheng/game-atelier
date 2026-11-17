@@ -111,6 +111,40 @@ def test_launcher_double_click_selects_version(tmp_path):
     assert forwarded == ["--select-version"]
 
 
+def _quarantined(path: Path) -> bool:
+    return subprocess.run(["xattr", "-p", "com.apple.quarantine", str(path)],
+                          capture_output=True).returncode == 0
+
+
+def _quarantine(path: Path) -> None:
+    subprocess.run(["xattr", "-w", "com.apple.quarantine", "0081;00000000;Test;", str(path)], check=True)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS quarantine attribute")
+def test_launcher_clears_quarantine_from_a_downloaded_bundle(tmp_path):
+    launcher = _launcher_with_stub_runtime(tmp_path)
+    python = launcher.parent / "versions/1.2.3/python/bin/python3"
+    other = launcher.parent / "versions/1.2.3/app.txt"
+    other.write_text("x", encoding="utf-8")
+    _quarantine(python)
+    _quarantine(other)
+    subprocess.run([str(launcher), "--print-data-root"], capture_output=True, check=True)
+    assert not _quarantined(python)
+    assert not _quarantined(other)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS quarantine attribute")
+def test_launcher_skips_the_tree_walk_once_the_interpreter_is_clear(tmp_path):
+    # Walking ~12k files costs about a second on every call; the desktop shell calls the
+    # launcher on each start, so the walk only runs while the interpreter is still marked.
+    launcher = _launcher_with_stub_runtime(tmp_path)
+    marker = launcher.parent / "versions/1.2.3/app.txt"
+    marker.write_text("x", encoding="utf-8")
+    _quarantine(marker)
+    subprocess.run([str(launcher), "--print-data-root"], capture_output=True, check=True)
+    assert _quarantined(marker)
+
+
 ORIGIN = "http://127.0.0.1:5174"
 
 

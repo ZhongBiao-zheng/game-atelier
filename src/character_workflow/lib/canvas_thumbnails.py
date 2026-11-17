@@ -16,7 +16,6 @@ import warnings
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image, ImageOps, UnidentifiedImageError
 
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_bytes
@@ -59,6 +58,7 @@ def resolve_canvas_thumbnail(
     发原图的情形：不是图片、原图本来就不比缩略图大、动图（缩了会变成静止的一帧）、
     以及任何解码失败。缩略图是纯优化，失败时退回原图而不是报错——画师看到的还是图。
     """
+    from PIL import Image, UnidentifiedImageError
     if version.kind != "image":
         return None
     target_width = snap_thumbnail_width(width)
@@ -87,6 +87,7 @@ def resolve_canvas_thumbnail(
 
 
 def _render_thumbnail(source: Path, target_width: int) -> bytes | None:
+    from PIL import Image, ImageOps
     with warnings.catch_warnings():
         warnings.simplefilter("error", Image.DecompressionBombWarning)
         with Image.open(source) as opened:
