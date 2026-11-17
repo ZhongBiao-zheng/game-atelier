@@ -662,8 +662,17 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", format!("显示 {name}"), true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", format!("退出 {name}"), true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit_item])?;
+    // macOS: the bare glyph as a template image (the app icon's backplate disappears into the
+    // menu bar and leaves a 9 px squiggle); scripts/build_tray_icon.py makes it.
+    #[cfg(target_os = "macos")]
+    let icon = tauri::image::Image::from_bytes(include_bytes!(
+        "../../../assets/brand/atelier-tray-template.png"
+    ))?;
+    #[cfg(not(target_os = "macos"))]
+    let icon = app.default_window_icon().unwrap().clone();
     TrayIconBuilder::with_id("main")
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(icon)
+        .icon_as_template(cfg!(target_os = "macos"))
         .tooltip(&name)
         .menu(&menu)
         .show_menu_on_left_click(cfg!(target_os = "macos"))
