@@ -200,10 +200,12 @@ def test_thumbnail_returns_none_on_decompression_bomb(isolated_data_root, tmp_pa
     (folder / "a.png").write_bytes(_PNG)
     entry = scan_and_cache(mount).entries[0]
 
-    def boom(*_args, **_kwargs):
-        raise idx.Image.DecompressionBombError("too big")
+    from PIL import Image  # the module imports PIL lazily, inside thumbnail_bytes
 
-    monkeypatch.setattr(idx.Image, "open", boom)
+    def boom(*_args, **_kwargs):
+        raise Image.DecompressionBombError("too big")
+
+    monkeypatch.setattr(Image, "open", boom)
     assert idx.thumbnail_bytes(mount, entry, 256) is None
 
 
