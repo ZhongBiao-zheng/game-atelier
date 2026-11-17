@@ -27,6 +27,8 @@ const PROBE_INTERVAL: Duration = Duration::from_secs(3);
 const FAILED_PROBES_BEFORE_ERROR: u32 = 3;
 const DOWNLOAD_EVENT: &str = "atelier:download-saved";
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(180);
+/// Extra time for a first start after the launcher's own 8 s check has given up.
+const SLOW_START_GRACE: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
 struct Shell {
@@ -146,6 +148,19 @@ fn prepare_runtime(app: &AppHandle) -> Result<Arc<Runtime>, String> {
     Ok(runtime)
 }
 
+fn wait_for_server(data_root: &Path) -> Option<Server> {
+    let started = Instant::now();
+    loop {
+        if let Some(server) = runtime::verified_server(data_root) {
+            return Some(server);
+        }
+        if started.elapsed() > SLOW_START_GRACE {
+            return None;
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
+}
+
 /// Attach to the recorded server, or start one through the fixed launcher.
 fn boot(app: AppHandle) {
     if app.state::<Shell>().booting.swap(true, Ordering::SeqCst) {
@@ -163,11 +178,16 @@ fn boot(app: AppHandle) {
                 ));
                 return Ok((server, data_root));
             }
-            runtime.start()?;
+            let started = runtime.start();
             // First start may have just written the platform data-root config.
             let data_root = runtime.data_root()?;
-            let server =
-                runtime::verified_server(&data_root).ok_or("服务启动后没有通过实例验证")?;
+            // The launcher gives up after 8 s, but a fresh runtime compiles every module on its
+            // first import and can take longer: wait for the record instead of reporting failure.
+            let server = wait_for_server(&data_root).ok_or_else(|| {
+                started
+                    .err()
+                    .unwrap_or_else(|| "服务启动后没有通过实例验证".into())
+            })?;
             runtime::mark_owned(&data_root, &server);
             log(&format!("started {server:?}"));
             Ok((server, data_root))
@@ -206,6 +226,10 @@ fn watchdog(app: AppHandle) {
                     // Restarted elsewhere (in-app update, another launcher): follow the record.
                     failures = 0;
                     log(&format!("server moved {shown:?} -> {server:?}"));
+                    // An update restarts our server as a new instance; it is still ours to stop.
+                    if runtime::is_owned(&data_root, &shown) {
+                        runtime::mark_owned(&data_root, &server);
+                    }
                     navigate(&app, server_url(&server), Some(server));
                 }
                 None if runtime.is_some_and(|r| r.update_in_progress(&data_root)) => failures = 0,
