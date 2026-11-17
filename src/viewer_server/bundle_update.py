@@ -90,18 +90,24 @@ def _status(runtime: Path):
     return probe_connection_status(port) if port else None
 
 
-def _waiting_owner_alive(runtime: Path, pending: dict) -> bool:
-    """The drain coordinator lives in the old server, before any executor holds its lock."""
+def _server_alive(runtime: Path, instance: str | None) -> bool:
+    """The recorded server of `instance` still runs, answering or not (same checks as stop)."""
     from viewer_server.pid import is_viewer_server_process
-    owner = pending.get("from_instance")
+    if instance is None:
+        return False
     status = _status(runtime)
-    if status is not None and status.instance_id == owner:
+    if status is not None and status.instance_id == instance:
         return True
     pid = read_pid(runtime)
-    # A temporarily unresponsive server may still be completing a paid request. Unknown
-    # command-line access is not evidence that it exited; preserve the drain conservatively.
-    return bool(pid is not None and read_instance(runtime) == owner and _is_alive(pid)
+    # A server that is busy or still importing may not answer yet. Unknown command-line access
+    # is not evidence that it exited, so it counts as alive.
+    return bool(pid is not None and read_instance(runtime) == instance and _is_alive(pid)
                 and is_viewer_server_process(pid) is not False)
+
+
+def _waiting_owner_alive(runtime: Path, pending: dict) -> bool:
+    """The drain coordinator lives in the old server, before any executor holds its lock."""
+    return _server_alive(runtime, pending.get("from_instance"))
 
 
 def _stop(runtime: Path, *, expected_instance: str | None = None) -> None:
@@ -145,8 +151,16 @@ def _start(root: Path, runtime: Path, version: str, *, service: bool, update_id:
         command += ["--no-browser"]
     # --select-version for a transaction starts directly without launch()'s stop/restart.
     result = subprocess.run(command, env=env, timeout=40, check=False)
-    if result.returncode:
+    if not result.returncode:
+        return
+    # The start command gives up after its own short instance check but leaves the process
+    # running. _stop cleared the records beforehand, so a recorded live server is the one just
+    # started: a freshly unpacked version may still be importing. The readiness handshake and
+    # its deadline decide; a server that never started still fails here at once.
+    if not _server_alive(runtime, read_instance(runtime)):
         raise RuntimeError("服务启动命令失败")
+    print("启动命令未在时限内确认实例，候选进程仍在运行，按报到预算继续等待。",
+          file=sys.stderr, flush=True)
 
 
 def _wait_ready(

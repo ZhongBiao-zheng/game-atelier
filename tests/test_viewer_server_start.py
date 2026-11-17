@@ -13,6 +13,7 @@ import pytest
 
 from character_workflow.lib import data_root
 from character_workflow.lib.file_lock import try_file_lock
+from viewer_server import bundle_update as _bundle_update
 from viewer_server import server
 from viewer_server.connection_status import INSTANCE_ENV, LocalConnectionStatus
 from viewer_server.pid import (
@@ -118,6 +119,85 @@ def test_bundle_update_failed_initialization_marker_ends_wait_immediately(update
     monkeypatch.setattr(update, "_status", lambda runtime: pytest.fail("must fail before probing"))
     assert not update._wait_ready(runtime, "5.130.0", update_id=pending["update_id"],
                                   ready=True, timeout=60)
+
+
+REAL_UPDATE_START = _bundle_update._start
+
+
+@pytest.fixture
+def slow_start_command(update_transaction, monkeypatch):
+    """Real _start; the start command exits 1 after its short instance check, as on a slow first
+    import. `candidate` decides what it left behind: a live process, a dead one, or nothing."""
+    update, root, runtime, pending, actions = update_transaction
+    monkeypatch.setattr(update, "_start", REAL_UPDATE_START)
+    monkeypatch.setattr(update, "_status", lambda runtime: None)  # Still importing: no answer.
+    monkeypatch.setattr("viewer_server.pid.is_viewer_server_process", lambda pid: True)
+    state = {"candidate": "alive"}
+    dead = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"],
+                          capture_output=True, text=True, check=True)
+    dead_pid = int(dead.stdout)
+
+    def start_command(command, **kwargs):
+        version = command[command.index("--to") + 1]
+        actions.append(("start", version, state["candidate"]))
+        for name in ("server.pid", "server.port", "server.instance"):
+            (runtime / name).unlink(missing_ok=True)
+        if state["candidate"] != "missing":
+            write_pid(runtime, os.getpid() if state["candidate"] == "alive" else dead_pid)
+            write_port(runtime, 5174)
+            write_instance(runtime, os.urandom(16).hex())
+        return subprocess.CompletedProcess(command, 1)
+
+    monkeypatch.setattr(update.subprocess, "run", start_command)
+    return update, root, runtime, pending, actions, state
+
+
+def _report(runtime, pending, version, **kwargs):
+    phase = "ready" if kwargs.get("ready") else "started"
+    (runtime / f"update-{phase}-{pending['update_id']}").write_text("instance")
+    return True
+
+
+def test_bundle_update_waits_for_a_slow_candidate_instead_of_rolling_back(slow_start_command, monkeypatch):
+    update, root, runtime, pending, actions, state = slow_start_command
+    waited = []
+    monkeypatch.setattr(update, "_wait_ready", lambda runtime, version, **kwargs:
+                        waited.append(version) or _report(runtime, pending, version, **kwargs))
+    assert update.apply_update(root, runtime, "5.130.0", pending["update_id"]) == 0
+    assert waited == ["5.130.0", "5.130.0"]
+    assert (root / "last-good").read_text().strip() == "5.130.0"
+    assert update.read_json(runtime / "update-result.json")["status"] == "succeeded"
+
+
+@pytest.mark.parametrize("candidate", ["missing", "dead"])
+def test_bundle_update_rolls_back_at_once_when_no_candidate_runs(slow_start_command, monkeypatch, candidate):
+    update, root, runtime, pending, actions, state = slow_start_command
+    state["candidate"] = candidate
+    monkeypatch.setattr(update, "_wait_ready", lambda runtime, version, **kwargs:
+                        pytest.fail("a candidate that never ran must not consume the readiness budget")
+                        if version == "5.130.0" else True)
+    started = time.monotonic()
+    assert update.apply_update(root, runtime, "5.130.0", pending["update_id"]) == 1
+    assert time.monotonic() - started < 5
+    result = update.read_json(runtime / "update-result.json")
+    assert result["status"] == "failed" and result["reason"].startswith("服务启动命令失败")
+    assert "5.130.0" in update.read_json(root / "updates/blocked.json")
+    assert (root / "last-good").read_text().strip() == "5.129.0"
+
+
+def test_bundle_update_stops_a_hung_candidate_before_restoring_the_old_version(slow_start_command, monkeypatch):
+    update, root, runtime, pending, actions, state = slow_start_command
+    # The candidate stays alive but never reports: the budget runs out, then rollback.
+    monkeypatch.setattr(update, "_wait_ready", lambda runtime, version, **kwargs: version == "5.129.0")
+    assert update.apply_update(root, runtime, "5.130.0", pending["update_id"]) == 1
+    # Stop the old server, start the candidate, stop the candidate, then start the old version:
+    # never two servers at once.
+    assert actions == ["stop", ("start", "5.130.0", "alive"), "stop", ("start", "5.129.0", "alive")]
+    result = update.read_json(runtime / "update-result.json")
+    assert result["status"] == "failed" and result["reason"] == "新版未能在时限内启动"
+    assert "5.130.0" in update.read_json(root / "updates/blocked.json")
+    assert (root / "current").read_text().strip() == "5.129.0"
+    assert (root / "last-good").read_text().strip() == "5.129.0"
 
 
 def test_bundle_update_crash_recovery_stops_survivor_before_restoring_pointer(update_transaction, monkeypatch):
