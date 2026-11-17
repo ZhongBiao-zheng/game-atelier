@@ -7,6 +7,7 @@ import { ProviderRow, providerHost } from '@/components/keys/ProviderRow';
 import { providerLabel } from '@/lib/providerLabels';
 import { fetchGatewayMembers } from '@/api/gateway';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
+import { openOnboarding } from '@/lib/onboardingGuide';
 import { KeyForm } from './KeyForm';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { listKeys, deleteKey, patchKey } from '@/api/keys';
@@ -196,8 +197,9 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
         <div className="space-y-4">
         {!(embedded && activeKeys.length === 0 && closedKeys.length > 0) && <div className="overflow-hidden rounded-xl border border-border bg-card">
           {keys.length === 0 ? (
-            <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+            <div className="flex flex-col items-center gap-3 px-4 py-10 text-center text-sm text-muted-foreground">
               还没有配置供应商
+              {embedded && <Button type="button" onClick={() => openOnboarding('providers')}>连接模型</Button>}
             </div>
           ) : (
             <div className="divide-y divide-border">

@@ -12,6 +12,8 @@ import { ApiError } from '@/api/http';
 import { listHttpProtocols } from '@/api/httpProtocols';
 import type { HttpProtocolKind, HttpProtocolRow } from '@/schema/httpProtocols';
 import { CustomInterfaceDialog } from './CustomInterfaceDialog';
+import { probeKey, recordOnboardingEvent, type KeyProbeResult } from '@/api/onboarding';
+import { modelCatalog } from '@/lib/modelCatalog';
 
 import { PROVIDER_PRESETS, providerPresetId, type ProviderKind } from './providerPresets';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -73,9 +75,15 @@ interface Props {
   onDelete?: () => void;
   submitLabel?: string;
   mode?: 'create' | 'edit';
+  /** 首启引导：粘贴密钥后自动拉模型、预选本仓认得的图片 / 视频模型，并探一次密钥是否有效（只提示）。 */
+  autoDetect?: boolean;
 }
 
-export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, submitLabel = '保存', mode = 'create' }: Props) {
+/** 粘贴后停顿多久再自动检测，避免逐字输入时连发。 */
+const AUTO_DETECT_DELAY_MS = 500;
+const MIN_KEY_LENGTH = 8;
+
+export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, submitLabel = '保存', mode = 'create', autoDetect = false }: Props) {
   const initialPreset = PROVIDER_PRESETS.find(p => p.id === presetId) ?? providerByValue(providerPresetId(initial ?? { provider: 'openai' }));
   const [activePresetId, setActivePresetId] = useState(initialPreset.id);
   const [enabled, setEnabled] = useState(initial?.enabled !== false);
@@ -172,6 +180,40 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
     }
   };
   const isLocked = (model: EditableModel) => model._locked === true;
+
+  const [probe, setProbe] = useState<KeyProbeResult | null>(null);
+  const detectRun = useRef(0);
+  useEffect(() => {
+    if (!autoDetect || editing) return;
+    const key = accessKey.trim();
+    setProbe(null);
+    if (key.length < MIN_KEY_LENGTH) return;
+    const run = ++detectRun.current;
+    const timer = setTimeout(() => {
+      const defaultIds = new Set(preset.defaultModels.map(model => model.id));
+      setFetching(true);
+      setFetchError(null);
+      previewModels({ alias: null, provider: provider || null, base_url: fetchModelsBaseUrl || null, access_key: key, include_all: false })
+        .then(remote => {
+          if (run !== detectRun.current) return;
+          const picked = remote.models.filter(m => (m.modality === 'image' || m.modality === 'video')
+            && (modelCatalog(m.id) !== undefined || defaultIds.has(m.id)));
+          if (picked.length > 0) {
+            setModels(picked.map((m): EditableModel => ({ name: m.name, id: m.id, modality: m.modality, protocol: m.protocol, input_modalities: m.input_modalities })));
+          }
+          setPreview(null);
+          void recordOnboardingEvent({ event: 'models_detected', count: picked.length });
+        })
+        .catch(e => { if (run === detectRun.current) setFetchError(e instanceof Error ? e.message : String(e)); })
+        .finally(() => { if (run === detectRun.current) setFetching(false); });
+      void probeKey(activePresetId, key).then(result => {
+        if (run !== detectRun.current) return;
+        setProbe(result);
+        void recordOnboardingEvent({ event: 'key_probed', result });
+      });
+    }, AUTO_DETECT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [accessKey, autoDetect]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const changeProvider = (nextProvider: string) => {
     if (editing) return;
@@ -499,6 +541,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                 </Button>
               </div>
               {(initial?.api_key_url || preset.apiKeyUrl) && <a href={initial?.api_key_url || preset.apiKeyUrl} target="_blank" rel="noreferrer" className="whitespace-nowrap text-xs text-primary">获取密钥 ↗</a>}
+              {probe === 'ok' && <p role="status" className="basis-full text-xs text-[color:var(--status-done)]">Key 有效</p>}
+              {probe === 'invalid' && <p role="alert" className="basis-full text-xs text-destructive">Key 无效</p>}
             </div>
             </>}
             <span className="pt-2 text-xs text-muted-foreground">{isComfy ? '工作流' : '模型'}</span>

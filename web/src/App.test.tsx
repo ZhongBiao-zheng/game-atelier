@@ -78,7 +78,21 @@ describe('App onboarding gate', () => {
     }
   });
 
-  it('opens the home page when API keys have not been added yet', async () => {
+  it('shows the connect-a-model step before any key is added', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => path === '/api/onboarding/status'
+      ? new Response(JSON.stringify({ status: 'needs_first_key', data_root: '/tmp/workflow', uv_path: null,
+        venv_python: null, platform: 'darwin', next_action: 'add_key', onboarding_skipped: false }))
+      : new Response(JSON.stringify({}), { status: 404 })));
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: '连接一个模型' })).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: /第 2 步/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '稍后' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('作品集首页')).not.toBeInTheDocument();
+  });
+
+  it('opens the home page once the connect-a-model step was skipped', async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({
         ok: true,
@@ -89,6 +103,7 @@ describe('App onboarding gate', () => {
           venv_python: null,
           platform: 'darwin',
           next_action: 'add_key',
+          onboarding_skipped: true,
         }),
       })
       .mockResolvedValueOnce({

@@ -45,3 +45,19 @@ it('shows audio unit prices per thousand characters or per song', () => {
   expect(within(screen.getByRole('option', { name: 'Song' })).getByText('0.22¥/首')).toBeInTheDocument();
   metrics.prices = {};
 });
+
+it('lists every model a guided key preselected', () => {
+  const images = ['gpt-image-2', 'gpt-image-2.5', 'gpt-image-2.6', 'nano-banana-2', 'nano-banana-pro',
+    'doubao-seedream-5-0-lite-260128', 'doubao-seedream-5-0-pro-260628', 'doubao-seedream-5-5-261028',
+    'doubao-seedream-4-5-251128', 'mj_imagine', 'flux-3-image'];
+  const videos = ['doubao-seedance-2-0-260128', 'doubao-seedance-2-5-260628', 'sora-2-pro', 'kling-4.0', 'happyhorse-1.1'];
+  const tuzi = key('Tuzi', [
+    ...images.map(id => ({ id, name: id, modality: 'image' as const })),
+    ...videos.map(id => ({ id, name: id, modality: 'video' as const })),
+  ]);
+  const onSelect = vi.fn();
+  render(<ModelPickerList selected="" sections initialKind="image" onSelect={onSelect} choices={tuzi.models.map(model => ({ key: tuzi, model }))} />);
+  const options = screen.getAllByRole('option');
+  expect(options).toHaveLength(images.length + videos.length);
+  expect(new Set(options.map(option => option.textContent)).size).toBe(options.length);
+});

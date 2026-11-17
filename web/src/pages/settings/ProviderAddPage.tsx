@@ -5,7 +5,7 @@ import { AddIcon, SearchIcon } from '@/components/ui/icons';
 import { getChatGPTSubscription, type ChatGPTSubscriptionStatus, listKeys, type KeyView, type KeyCreatePayload } from '@/api/keys';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { KeyForm } from './KeyForm';
-import { PROVIDER_PRESETS, providerPresetId, type ProviderPreset } from './providerPresets';
+import { PROVIDER_PRESETS, presetInitial, providerPresetId, type ProviderPreset } from './providerPresets';
 import { Input } from '@/components/ui/input';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { Button } from '@/components/ui/button';
@@ -38,11 +38,7 @@ export function ProviderAddPage() {
     return () => { active = false; };
   }, []);
   const open = (preset: ProviderPreset, baseUrl = preset.defaultBaseUrl) => {
-    setSelected({ preset, initial: {
-      provider: preset.value, alias: preset.kind === 'custom' ? '' : preset.label,
-      base_url: baseUrl, models: preset.defaultModels, modalities: preset.modalities,
-      homepage_url: preset.homepageUrl, docs_url: preset.docsUrl, api_key_url: preset.apiKeyUrl,
-    } });
+    setSelected({ preset, initial: presetInitial(preset, baseUrl) });
   };
   const custom = () => {
     try {

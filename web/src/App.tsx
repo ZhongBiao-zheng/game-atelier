@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchOnboardingStatus, type OnboardingState } from './api/onboarding';
 import { DataRootPage } from './pages/onboarding/DataRoot';
+import { FirstRunGuide } from './pages/onboarding/FirstRunGuide';
 import { KeysPage } from './pages/settings/Keys';
 import { AppShell } from '@/components/AppShell';
 import { LocalConnectionGate } from '@/components/LocalConnectionGate';
@@ -85,6 +86,8 @@ function ConnectedApp() {
     case 'needs_keys_repair':
       return <KeysPage mode="onboarding" onComplete={reload} />;
     case 'needs_first_key':
+      if (!state.onboarding_skipped) return <FirstRunGuide onComplete={reload} />;
+      return <AppShell runtimeMode={state.runtime_mode ?? 'source'} latestRelease={state.update?.update_available ? state.update.latest : null} />;
     case 'ready':
     default:
       return <AppShell runtimeMode={state.runtime_mode ?? 'source'} latestRelease={state.update?.update_available ? state.update.latest : null} />;

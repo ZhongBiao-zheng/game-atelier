@@ -19,9 +19,11 @@ describe('DataRootPage', () => {
       });
     const onComplete = vi.fn();
     render(<DataRootPage onComplete={onComplete} />);
+    expect(screen.queryByLabelText(/数据目录路径/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: '自定义' }));
     fireEvent.click(screen.getByText(/选择文件夹/));
     await waitFor(() => expect(screen.getByLabelText(/数据目录路径/)).toHaveValue('/tmp/x'));
-    fireEvent.click(screen.getByText(/保存/));
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
     await waitFor(() => expect(onComplete).toHaveBeenCalled());
     expect(globalThis.fetch).toHaveBeenLastCalledWith(
       '/api/onboarding/data-root',
@@ -34,6 +36,7 @@ describe('DataRootPage', () => {
 
   it('shows the platform default as an option', () => {
     render(<DataRootPage onComplete={() => {}} />);
-    expect(screen.getByText(/Game Atelier/)).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /~\/game-atelier.*推荐/ })).toBeChecked();
+    expect(screen.queryByText(/Game Atelier/)).not.toBeInTheDocument();
   });
 });

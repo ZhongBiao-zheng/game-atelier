@@ -16,6 +16,7 @@ import { ConsoleLayout, rememberCreativeLocation } from '@/pages/settings/Consol
 import { setTheme, useTheme, type Theme } from '@/lib/theme';
 import { SwapIcon } from '@/components/ui/swap-icon';
 import { AnnouncementHost } from '@/components/AnnouncementDialog';
+import { OnboardingHost } from '@/components/OnboardingHost';
 import { UpdateButton, UpdateProvider } from '@/components/UpdateControl';
 import { Button } from '@/components/ui/button';
 
@@ -163,6 +164,7 @@ function AppShellContent() {
       </ContentTag>
       <TeamShareReminder ref={reminderRef} />
       <AnnouncementHost />
+      <OnboardingHost />
     </div>
   );
 }

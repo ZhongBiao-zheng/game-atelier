@@ -1,4 +1,4 @@
-import type { KeyModel } from '@/api/keys';
+import type { KeyCreatePayload, KeyModel } from '@/api/keys';
 
 export type ProviderKind = 'official' | 'relay' | 'custom' | 'team' | 'subscription' | 'local';
 type ApiModality = 'image' | 'video' | 'audio' | 'llm';
@@ -43,3 +43,12 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   // 局域网里另一台开了「局域网共享」的 Atelier（ADR-0025）：模型由网关决定，连接后自动带回。
   { id: 'atelier', value: 'atelier', label: 'Remote Atelier', kind: 'team', modalities: ['image'], defaultBaseUrl: '', defaultModels: [] },
 ];
+
+/** 从预设打开新建表单时的初始值（添加页与首启引导共用）。 */
+export function presetInitial(preset: ProviderPreset, baseUrl = preset.defaultBaseUrl): Partial<KeyCreatePayload> {
+  return {
+    provider: preset.value, alias: preset.kind === 'custom' ? '' : preset.label,
+    base_url: baseUrl, models: preset.defaultModels, modalities: preset.modalities,
+    homepage_url: preset.homepageUrl, docs_url: preset.docsUrl, api_key_url: preset.apiKeyUrl,
+  };
+}

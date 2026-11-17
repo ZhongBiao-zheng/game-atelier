@@ -302,6 +302,7 @@ Studio 作品总是混入。画布作品由 `/config` 的 `show_canvas_on_home` 
 
 `POST /keys` `PATCH /keys/{alias}` `DELETE /keys/{alias}` `POST /keys/models-preview`
 `POST /config` `POST /gallery/{hidden,favorites,ratings}` `POST /onboarding/data-root` `POST /folder-picker`
+`POST /onboarding/events` `POST /onboarding/key-probe`
 `POST /clipboard-attempt`
 `POST /jobs/{id}/{confirm,cancel}` `DELETE /jobs/{id}` `DELETE /jobs/{id}/image`
 `POST /canvas/projects` `PATCH /canvas/projects/{id}` `PUT /canvas/projects/{id}/document`
@@ -327,7 +328,7 @@ Studio 作品总是混入。画布作品由 `/config` 的 `show_canvas_on_home` 
 `PUT /canvas/ui-preferences`
 
 **只读**
-`GET /jobs` `/jobs/{id}` `/config` `/keys` `/onboarding/status`
+`GET /jobs` `/jobs/{id}` `/config` `/keys` `/onboarding/status` `/onboarding/metrics`
 `GET /gallery/{recent,hidden,favorites,ratings,image}` `GET /raw`
 `GET /canvas/projects` `/canvas/project-options` `/canvas/projects/{id}/document` `/canvas/projects/{id}/jobs`
 `GET /canvas/projects/{id}/versions/{version_id}/media`
@@ -1410,3 +1411,11 @@ multipart 里的数组值展开成同名重复字段。
 - 精灵表节点类型开启 `expand_result_stack`。帧新增可选字段 `src`（源图序号，省略为 0）；`/repack` 的源图是界面带来的全部图片（结果组按组内顺序），帧按 `src` 取图；界面带来多张图又没给 `frames` 时，每张图一帧（整张图，再按 `trim` 裁透明边）。`src` 越界或不是整数时返回 422「帧的来源图不对」。`/detect` 与手动网格仍只针对第一张图。
 - Agent 工具 `plugin_sprite_sheet_repack` 新增 `image_node_ids`（1–65 个，按顺序，每张图一帧），与 `image_node_id` 二选一。
 - 服务端 `sheet.repack(sources, frames, …)` 的第一个参数改为源图列表。
+
+## 首次启动引导（2026-11-17）
+
+- `GET /onboarding/status` 在 bootstrap 结果上多带 `onboarding_skipped: bool`：`needs_first_key` 且未跳过时前端显示「连接一个模型」整页，跳过后进首页。
+- `POST /onboarding/events`（204）：本机度量，只收枚举。`event ∈ guide_opened | path_selected | step_opened | models_detected | key_probed | provider_saved | skipped | closed`；可选 `source ∈ first_run | model_chip | providers`、`path ∈ key | chatgpt | comfyui | gateway | other`、`vendor ∈ tuzi | tokendance`、`step ∈ signup | topup | key_page | key_form`、`count`（0–10000）、`result ∈ ok | invalid | unknown`。其他字段或取值返回 422。`skipped` 同时写入跳过时间。
+- `GET /onboarding/metrics`：`first_seen_at`、`data_root_set_at`、`skipped_at`、`paths_tried`（`key:tuzi` 形式）、`completed_path`、`last_event`、`first_generation`（`.runtime/jobs/` 里 `completed_at ≥ data_root_set_at` 的第一条 DONE）、`seconds_to_first_generation`、`event_count`。
+- 存储：`<data_root>/.runtime/onboarding.json`，事件最多 500 条，只存本机、不上报。`first_seen_at` 为服务进程首次回 `needs_data_root` 的时间，选定数据目录时落盘，复用旧目录不覆盖。
+- `POST /onboarding/key-probe {preset, access_key}` → `{result: ok | invalid | unknown}`：只对服务端写死的厂商账户接口发一次请求（tuzi / openai-hk：`/v1/dashboard/billing/subscription`；openrouter：`/api/v1/key`；tokendance：`/portal/api/v1/user/balance`；seedream：Ark `/models`），不计费。401/403 或响应体带 `error` 为 invalid，网络失败与其他状态为 unknown。密钥只用于这一次请求，不落盘。结果只用于提示，不拦保存。

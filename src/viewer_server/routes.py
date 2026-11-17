@@ -717,7 +717,14 @@ def onboarding_status() -> dict:
     )
     if proc.returncode != 0:
         raise HTTPException(500, f"检查 Python 运行环境失败（bootstrap --check）：{proc.stderr}")
-    return json.loads(proc.stdout)
+    from character_workflow.lib import onboarding_metrics
+
+    body = json.loads(proc.stdout)
+    if body.get("status") == "needs_data_root":
+        onboarding_metrics.note_first_seen()
+    root = body.get("data_root")
+    body["onboarding_skipped"] = bool(root) and onboarding_metrics.is_skipped(Path(root))
+    return body
 
 
 @router.post("/folder-picker")
@@ -744,7 +751,43 @@ def set_data_root(payload: _DataRootPayload) -> dict:
     body = json.loads(proc.stdout)
     if root := body.get("data_root"):
         os.environ["GAME_ATELIER_DATA_ROOT"] = root
+        from character_workflow.lib import onboarding_metrics
+
+        onboarding_metrics.record_data_root_set(Path(root))
     return body
+
+
+@router.post("/onboarding/events", status_code=204)
+def onboarding_event(payload: dict = Body(...)) -> Response:
+    """引导的本机度量：只收枚举事件（见 onboarding_metrics），不上报。"""
+    from character_workflow.lib import onboarding_metrics
+
+    try:
+        event = onboarding_metrics.OnboardingEvent.model_validate(payload)
+    except ValidationError as e:
+        raise HTTPException(422, "不支持的引导事件") from e
+    onboarding_metrics.append_event(event)
+    return Response(status_code=204)
+
+
+@router.get("/onboarding/metrics")
+def onboarding_metrics_summary() -> dict:
+    from character_workflow.lib import onboarding_metrics
+
+    return onboarding_metrics.metrics()
+
+
+class _KeyProbePayload(BaseModel):
+    preset: str = Field(max_length=40)
+    access_key: str = Field(max_length=4096)
+
+
+@router.post("/onboarding/key-probe")
+def onboarding_key_probe(payload: _KeyProbePayload) -> dict:
+    """引导里粘贴密钥后的有效性提示；结果不拦保存。密钥只用于这一次请求，不落盘、不进日志。"""
+    from character_workflow.lib import onboarding_metrics
+
+    return {"result": onboarding_metrics.probe_key(payload.preset, payload.access_key)}
 
 
 class _KeyCreatePayload(BaseModel):

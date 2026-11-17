@@ -5,6 +5,7 @@ import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { ModelBrandIcon } from '@/components/ModelBrandIcon';
 import { type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { openOnboarding } from '@/lib/onboardingGuide';
 import { AddIcon, ArrowUpIcon, AspectRatioIcon, AudioIcon, ChevronRightIcon, CloseIcon, ImageIcon, ImagesIcon, SaveAssetIcon, VideoIcon, WorkflowIcon, iconMarkup } from '@/components/ui/icons';
 import { prefetchModelPickerMetrics } from '@/lib/useModelPickerMetrics';
 import { Segmented, SegmentedItem } from '@/components/ui/segmented';
@@ -1133,8 +1134,7 @@ export function PromptInput({
             <ControlButton
               active={openPanel === 'provider'}
               aria-label="选择厂商"
-              onClick={() => setOpenPanel(openPanel === 'provider' ? null : 'provider')}
-              disabled={visibleProviders.length === 0}
+              onClick={() => visibleProviders.length === 0 ? openOnboarding('model_chip') : setOpenPanel(openPanel === 'provider' ? null : 'provider')}
             >
               <ProviderBrandIcon provider={provider} size="sm" /> {providerDisplayName}
             </ControlButton>
@@ -1181,8 +1181,7 @@ export function PromptInput({
               aria-label="选择模型"
               onPointerEnter={() => void prefetchModelPickerMetrics(pickerChoices, pickerParams)}
               onFocus={() => void prefetchModelPickerMetrics(pickerChoices, pickerParams)}
-              onClick={() => setOpenPanel(openPanel === 'model' ? null : 'model')}
-              disabled={!provider || models.length === 0}
+              onClick={() => !provider || models.length === 0 ? openOnboarding('model_chip') : setOpenPanel(openPanel === 'model' ? null : 'model')}
             >
               {selectedModel?.id.startsWith('comfyui-') ? <WorkflowIcon size="sm" aria-hidden /> : <ModelBrandIcon brand={modelBrand(selectedModel?.id ?? '')} size="sm" />} {selectedModel ? modelDisplayName(selectedModel) : models.length > 0 ? '选择模型' : '未配置模型'}
             </ControlButton>
