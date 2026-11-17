@@ -658,8 +658,9 @@ def _pick_folder_macos(payload: "_FolderPickerPayload") -> dict:
     if payload.initial_path:
         initial = Path(os.path.expandvars(os.path.expanduser(payload.initial_path)))
         script += f" default location POSIX file {_osascript_string(str(initial))}"
+    # 服务是后台进程，osascript 不先 activate 时对话框只浮在最上层、拿不到键盘焦点（桌面外壳与浏览器都一样）。
     proc = subprocess.run(
-        ["osascript", "-e", f"POSIX path of ({script})"],
+        ["osascript", "-e", "activate", "-e", f"POSIX path of ({script})"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:

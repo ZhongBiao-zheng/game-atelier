@@ -68,6 +68,26 @@ def test_folder_picker_returns_selected_path(client, tmp_path, monkeypatch):
     assert run is None
 
 
+def test_folder_picker_macos_activates_before_asking(client, tmp_path, monkeypatch):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = f"{tmp_path}\n"
+        stderr = ""
+
+    def fake_run(argv, *_, **__):
+        calls.append(argv)
+        return Result()
+
+    monkeypatch.setattr("viewer_server.routes.sys.platform", "darwin")
+    monkeypatch.setattr("viewer_server.routes.subprocess.run", fake_run)
+    assert client.post("/api/folder-picker", json={"title": "选择数据目录"}).status_code == 200
+    # The dialog only takes keyboard focus when osascript activates itself first.
+    assert calls == [["osascript", "-e", "activate", "-e",
+                      'POSIX path of (choose folder with prompt "选择数据目录")']]
+
+
 def test_folder_picker_cancel_returns_null(client, monkeypatch):
     class Result:
         returncode = 1
