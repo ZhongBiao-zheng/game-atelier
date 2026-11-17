@@ -17,6 +17,8 @@ PLATFORMS = {"macos-arm64": ("dmg", "dmg")}
 def build(seed: Path, output: Path, platform: str) -> Path:
     bundle, suffix = PLATFORMS[platform]
     version = json.loads((REPO / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
+    # Product name lives only in tauri.conf.json (rename-ready); the seed keeps its runtime name.
+    product = json.loads((DESKTOP / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))["productName"]
     expected = f"GameAtelier-{version}-{platform}."
     if not seed.name.startswith(expected):
         raise SystemExit(f"seed {seed.name} does not match {expected}*")
@@ -28,7 +30,7 @@ def build(seed: Path, output: Path, platform: str) -> Path:
                    cwd=DESKTOP, check=True)
     built = next((DESKTOP / "src-tauri/target/release/bundle" / bundle).glob(f"*.{suffix}"))
     output.mkdir(parents=True, exist_ok=True)
-    target = output / f"Atelier-{version}-{platform}.{suffix}"
+    target = output / f"{product}-{version}-{platform}.{suffix}"
     shutil.copy2(built, target)
     with target.open("rb") as source:
         digest = hashlib.file_digest(source, "sha256").hexdigest()

@@ -131,7 +131,7 @@ jobs:
         run: uv run --no-project python scripts/smoke_desktop.py --installer "$(ls desktop-build/*.dmg)"
       - uses: actions/upload-artifact@v4
         with:
-          name: Atelier-desktop-${{ matrix.platform }}
+          name: desktop-installer-${{ matrix.platform }}
           path: desktop-build/*
           if-no-files-found: error
   publish:
@@ -162,7 +162,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: Atelier-desktop-*
+          pattern: desktop-installer-*
           path: installers
           merge-multiple: true
       - name: Attach installers to the published release

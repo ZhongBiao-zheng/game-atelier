@@ -1,4 +1,4 @@
-// Atelier desktop shell: a window, a tray icon and the viewer-server's lifetime. No business logic.
+// Desktop shell: a window, a tray icon and the viewer-server's lifetime. No business logic.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod runtime;
@@ -299,7 +299,7 @@ fn quit(app: &AppHandle) {
 }
 
 fn run_smoke(app: AppHandle) {
-    // CI: boot, wait for the Atelier page, then go through the normal quit path.
+    // CI: boot, wait for the server page, then go through the normal quit path.
     thread::spawn(move || {
         let started = Instant::now();
         while app.state::<Shell>().shown.lock().unwrap().is_none() {
