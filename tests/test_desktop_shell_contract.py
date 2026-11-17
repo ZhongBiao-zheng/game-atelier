@@ -214,3 +214,27 @@ def test_control_file_is_owner_only(shell_client):
     from character_workflow.lib import data_root
     mode = (data_root.runtime_dir() / "shell-control.json").stat().st_mode
     assert stat.S_IMODE(mode) == 0o600
+
+
+def test_the_atelier_page_gets_only_three_window_commands():
+    # docs/contracts/desktop-shell.md: drag, title-bar double click, theme. Nothing else.
+    import json
+    capabilities = REPO_ROOT / "desktop/src-tauri/capabilities"
+    remote = [json.loads(p.read_text(encoding="utf-8")) for p in capabilities.glob("*.json")]
+    remote = [c for c in remote if "remote" in c]
+    assert len(remote) == 1
+    assert remote[0]["remote"] == {"urls": ["http://127.0.0.1:*/*"]}
+    assert sorted(remote[0]["permissions"]) == [
+        "core:window:allow-internal-toggle-maximize",
+        "core:window:allow-set-theme",
+        "core:window:allow-start-dragging",
+    ]
+
+
+def test_shell_commands_are_declared_so_remote_pages_cannot_reach_them():
+    # Undeclared app commands would be callable from any origin a capability lets in.
+    build = (REPO_ROOT / "desktop/src-tauri/build.rs").read_text(encoding="utf-8")
+    main = (REPO_ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
+    handlers = main.split("generate_handler![", 1)[1].split("]", 1)[0]
+    for command in (c.strip() for c in handlers.split(",") if c.strip()):
+        assert f'"{command}"' in build, f"{command} is not declared in the app manifest"
