@@ -10,6 +10,7 @@ import random
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -653,24 +654,63 @@ def _ps_single_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def _pick_folder_macos(payload: "_FolderPickerPayload") -> dict:
-    script = f"choose folder with prompt {_osascript_string(payload.title)}"
-    if payload.initial_path:
-        initial = Path(os.path.expandvars(os.path.expanduser(payload.initial_path)))
-        script += f" default location POSIX file {_osascript_string(str(initial))}"
-    # 服务是后台进程，osascript 不先 activate 时对话框只浮在最上层、拿不到键盘焦点（桌面外壳与浏览器都一样）。
-    proc = subprocess.run(
-        ["osascript", "-e", "activate", "-e", f"POSIX path of ({script})"],
+_FOLDER_APPLET = "选择文件夹.app"
+
+
+def _run_folder_applet(source: str, work: Path) -> None:
+    """经 LaunchServices 打开一个现编的小应用来弹框。
+
+    服务是后台进程；macOS 14 起后台进程自己 activate 会被系统忽略，osascript 直接弹出的对话框
+    只浮在最上层、拿不到键盘焦点（桌面外壳与浏览器都一样）。用 `open` 启动的应用会被带到前台。
+    """
+    script = work / "picker.applescript"
+    script.write_text(source, encoding="utf-8")
+    applet = work / _FOLDER_APPLET
+    compiled = subprocess.run(
+        ["osacompile", "-o", str(applet), str(script)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
-    if proc.returncode != 0:
-        stderr = (proc.stderr or "").strip()
-        if "User canceled" in stderr or "用户已取消" in stderr:
-            return {"path": None}
+    if compiled.returncode != 0:
         raise HTTPException(
-            500, detail=f"打不开系统文件夹选择器：{stderr or '子进程没有给出原因'}"
+            500, detail=f"打不开系统文件夹选择器：{compiled.stderr.strip() or '子进程没有给出原因'}"
         )
-    return {"path": str(Path(proc.stdout.strip()).expanduser().resolve())}
+    subprocess.run(["open", "-W", "-n", str(applet)], capture_output=True, check=False)
+
+
+def _pick_folder_macos(payload: "_FolderPickerPayload") -> dict:
+    choose = f"choose folder with prompt {_osascript_string(payload.title)}"
+    if payload.initial_path:
+        initial = Path(os.path.expandvars(os.path.expanduser(payload.initial_path)))
+        choose += f" default location POSIX file {_osascript_string(str(initial))}"
+    with tempfile.TemporaryDirectory(prefix="atelier-folder-") as temporary:
+        work = Path(temporary).resolve()
+        chosen, failed = work / "chosen.txt", work / "error.txt"
+
+        def write(target: Path, value: str) -> list[str]:
+            return [
+                f"set handle to open for access POSIX file {_osascript_string(str(target))} "
+                "with write permission",
+                f"write {value} to handle as «class utf8»",
+                "close access handle",
+            ]
+
+        source = "\n".join([
+            "activate",
+            "try",
+            f"set picked to {choose}",
+            *write(chosen, "(POSIX path of picked)"),
+            "on error message number code",
+            "if code is not -128 then",  # -128 = 用户取消
+            *write(failed, "message"),
+            "end if",
+            "end try",
+        ])
+        _run_folder_applet(source, work)
+        if failed.exists():
+            reason = failed.read_text(encoding="utf-8", errors="replace").strip()
+            raise HTTPException(500, detail=f"打不开系统文件夹选择器：{reason or '子进程没有给出原因'}")
+        picked = chosen.read_text(encoding="utf-8").strip() if chosen.exists() else ""
+    return {"path": str(Path(picked).expanduser().resolve()) if picked else None}
 
 
 def _pick_folder_windows(payload: "_FolderPickerPayload") -> dict:
