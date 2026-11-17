@@ -87,6 +87,53 @@ jobs:
             release-build/*.tar.gz
             release-build/*.sha256
           if-no-files-found: error
+  # 桌面安装器以对应平台的压缩包为种子。第一、二批期间它失败不挡压缩包发布与 CNB 同步，
+  # 但 job 失败照样让整个 run 变红，不用 continue-on-error 盖住。
+  desktop:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: macos-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: GameAtelier-${{ matrix.platform }}
+          path: seed
+      - uses: astral-sh/setup-uv@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - name: Install Tauri CLI
+        working-directory: desktop
+        run: pnpm install --frozen-lockfile
+      - name: Build installer around the runtime bundle
+        shell: bash
+        run: |
+          rustc -vV
+          seed="$(find seed -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)"
+          uv run --no-project python scripts/build_desktop.py --seed "$seed" --output desktop-build --platform ${{ matrix.platform }}
+      - name: Install, open and quit the installed app
+        run: uv run --no-project python scripts/smoke_desktop.py --installer "$(ls desktop-build/*.dmg)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Atelier-desktop-${{ matrix.platform }}
+          path: desktop-build/*
+          if-no-files-found: error
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: build
@@ -106,9 +153,27 @@ jobs:
         run: |
           python -c 'import json, os; assert os.environ["RELEASE_TAG"] == "v" + json.load(open(".claude-plugin/plugin.json"))["version"]'
           gh release create "$RELEASE_TAG" bundles/* --verify-tag --title "Game Atelier $RELEASE_TAG" --notes-file docs/release-notes.md
-  mirror:
+  publish-desktop:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: publish
+    needs: [publish, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Atelier-desktop-*
+          path: installers
+          merge-multiple: true
+      - name: Attach installers to the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release upload "$RELEASE_TAG" installers/* --repo "$GITHUB_REPOSITORY"
+  mirror:
+    # 等安装器上传结束（成功或失败）再同步，CNB 拿到的附件与 GitHub 一致；压缩包发布失败才不同步。
+    if: always() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.publish.result == 'success'
+    needs: [publish, publish-desktop]
     uses: ./.github/workflows/sync-cnb.yml
     with:
       release_tag: ${{ github.ref_name }}

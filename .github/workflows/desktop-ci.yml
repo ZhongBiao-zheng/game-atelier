@@ -1,0 +1,63 @@
+name: Desktop
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - 'scripts/build_desktop.py'
+      - 'scripts/smoke_desktop.py'
+      - 'scripts/build_release.py'
+      - 'scripts/bootstrap.py'
+      - 'src/viewer_server/shell_control.py'
+      - '.github/workflows/desktop-ci.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'scripts/build_desktop.py'
+      - 'scripts/smoke_desktop.py'
+      - 'scripts/build_release.py'
+      - 'scripts/bootstrap.py'
+      - 'src/viewer_server/shell_control.py'
+      - '.github/workflows/desktop-ci.yml'
+  workflow_dispatch:
+
+# 不设 continue-on-error：失败就是红的。发版不依赖本 workflow，release.yml 的 desktop job 会自己构建并冒烟。
+jobs:
+  shell:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - name: Install Tauri CLI and generate icons
+        working-directory: desktop
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm icons
+      - name: Lint and unit-test the shell
+        working-directory: desktop/src-tauri
+        run: |
+          cargo fmt --check
+          cargo clippy --release -- -D warnings
+          cargo test --release
+      - name: Build the runtime bundle used as the seed
+        run: uv run --no-project python scripts/build_release.py --output release-build --platform macos-arm64
+      - name: Build installer
+        run: uv run --no-project python scripts/build_desktop.py --seed "$(ls release-build/*.tar.gz)" --output desktop-build --platform macos-arm64
+      - name: Install, open and quit the installed app
+        run: uv run --no-project python scripts/smoke_desktop.py --installer "$(ls desktop-build/*.dmg)"
