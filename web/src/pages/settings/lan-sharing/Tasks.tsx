@@ -75,7 +75,7 @@ export function Tasks({ onFinished, gatewayAlias }: { onFinished: () => void; ga
         const src = gatewayOutputUrl(task.task_id, i);
         return mime.startsWith('video/') ? <video key={i} src={src} muted controls preload="metadata" className="h-24 max-w-full rounded-md" />
           : mime.startsWith('audio/') ? <audio key={i} src={src} controls preload="none" className="max-w-full" />
-            : <Button key={i} variant="bare" type="button" aria-label={`查看 ${task.key_name} 的产物 ${i + 1}`} onClick={() => setZoomed(src)} className="block cursor-zoom-in p-0"><img src={src} alt={`${task.key_name} 的产物 ${i + 1}`} loading="lazy" className="size-24 rounded-md object-contain" /></Button>;
+            : <Button key={i} variant="ghost" type="button" aria-label={`查看 ${task.key_name} 的产物 ${i + 1}`} onClick={() => setZoomed(src)} className="h-auto cursor-zoom-in p-0"><img src={src} alt={`${task.key_name} 的产物 ${i + 1}`} loading="lazy" className="size-24 rounded-md object-contain" /></Button>;
       })}</div>}
     </li>;
   }
