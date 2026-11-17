@@ -6,6 +6,7 @@ import { AiIcon, CanvasIcon, DarkModeIcon, HomeIcon, LightModeIcon, SettingsIcon
 import { ChangelogButton } from '@/components/ChangelogButton';
 import { AtelierMark } from '@/components/AtelierMark';
 import { TeamShareReminder, type TeamShareReminderHandle } from '@/components/team/TeamShareReminder';
+import { DesktopDownloadNotice } from '@/components/DesktopDownloadNotice';
 import { useSSE } from '@/hooks/useSSE';
 import { publishGatewayTask, publishGatewayConnected } from '@/api/gatewayEvents';
 import { Home } from '@/pages/Home';
@@ -163,6 +164,7 @@ function AppShellContent() {
         </Switch>
       </ContentTag>
       <TeamShareReminder ref={reminderRef} />
+      <DesktopDownloadNotice />
       <AnnouncementHost />
       <OnboardingHost />
     </div>

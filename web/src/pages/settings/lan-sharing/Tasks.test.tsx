@@ -45,3 +45,13 @@ it('shows ComfyUI queue position and clears it when execution starts', async () 
   expect(screen.queryByText('排队第 3 位')).not.toBeInTheDocument();
   expect(screen.getByText('已提交')).toBeInTheDocument();
 });
+
+it('opens an output image in the page instead of a new tab', async () => {
+  vi.mocked(fetchGatewayTasks).mockImplementation(async scope => scope === 'recent'
+    ? [task({ status: 'done', outputs: 1, output_types: ['image/png'] })] : []);
+  render(<Tasks onFinished={vi.fn()} />);
+  const open = await screen.findByRole('button', { name: '查看 A 的产物 1' });
+  expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  act(() => open.click());
+  expect(document.querySelector('.fixed.inset-0 img')).toHaveAttribute('src', '/preview/t/0');
+});

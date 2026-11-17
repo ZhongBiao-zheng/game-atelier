@@ -5,6 +5,8 @@ import { date } from './shared';
 
 import { KindBadge } from '../usage/KindBadge';
 import { Hint } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
+import { Lightbox } from '@/components/Lightbox';
 
 export const isActive = (task: GatewayTask) => task.status === 'pending' || task.status === 'running';
 export function mergeTask(rows: GatewayTask[], next: GatewayTask) {
@@ -19,6 +21,8 @@ export function Tasks({ onFinished, gatewayAlias }: { onFinished: () => void; ga
   const [recent, setRecent] = useState<GatewayTask[]>([]);
   const [error, setError] = useState('');
   const [now, setNow] = useState(Date.now());
+  // 页内大图：新标签页拿不到本机会话，桌面外壳里还会被转去系统浏览器。
+  const [zoomed, setZoomed] = useState<string | null>(null);
   const activeRef = useRef(active); activeRef.current = active;
   const finishedRef = useRef(onFinished); finishedRef.current = onFinished;
   const latest = useRef(new Map<string, string>());
@@ -71,7 +75,7 @@ export function Tasks({ onFinished, gatewayAlias }: { onFinished: () => void; ga
         const src = gatewayOutputUrl(task.task_id, i);
         return mime.startsWith('video/') ? <video key={i} src={src} muted controls preload="metadata" className="h-24 max-w-full rounded-md" />
           : mime.startsWith('audio/') ? <audio key={i} src={src} controls preload="none" className="max-w-full" />
-            : <a key={i} href={src} target="_blank" rel="noreferrer"><img src={src} alt={`${task.key_name} 的产物 ${i + 1}`} loading="lazy" className="size-24 rounded-md object-contain" /></a>;
+            : <Button key={i} variant="bare" type="button" aria-label={`查看 ${task.key_name} 的产物 ${i + 1}`} onClick={() => setZoomed(src)} className="block cursor-zoom-in p-0"><img src={src} alt={`${task.key_name} 的产物 ${i + 1}`} loading="lazy" className="size-24 rounded-md object-contain" /></Button>;
       })}</div>}
     </li>;
   }
@@ -81,5 +85,6 @@ export function Tasks({ onFinished, gatewayAlias }: { onFinished: () => void; ga
     <ul aria-label="运行中任务">{active.map(task => row(task))}</ul>
     {!active.length && <p className="text-xs text-muted-foreground">暂无运行中任务</p>}
     <details><summary className="cursor-pointer text-sm">最近 24 小时 · {recent.length}</summary><ul>{recent.map(task => row(task, true))}</ul></details>
+    {zoomed && <Lightbox src={zoomed} onClose={() => setZoomed(null)} />}
   </section>;
 }
