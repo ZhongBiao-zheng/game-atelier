@@ -75,7 +75,9 @@ def test_folder_picker_returns_selected_path(client, tmp_path, monkeypatch):
     assert resp.json() == {"path": str(picked.resolve())}
     # The applet activates itself before asking, so the dialog takes keyboard focus.
     assert sources[0].startswith("activate\n")
-    assert f'choose folder with prompt "选择项目文件夹" default location POSIX file "{tmp_path}"' in sources[0]
+    from viewer_server.routes import _osascript_string
+    expected = f'choose folder with prompt "选择项目文件夹" default location POSIX file {_osascript_string(str(tmp_path))}'
+    assert expected in sources[0]
 
 
 def test_folder_picker_cancel_returns_null(client, monkeypatch):
