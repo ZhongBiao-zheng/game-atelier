@@ -330,10 +330,11 @@ def _fetch_latest_release(
         return None, f"更新检查超过 {budget:g} 秒预算"
 
 
-def latest_release(*, use_git: bool = False, fresh: bool = False) -> dict | None:
+def latest_release(*, use_git: bool = False, fresh: bool = False, network: bool = True) -> dict | None:
     """源码与安装包共用发现/缓存；HTTP 模式不读取只被 tag 确认的结果。
 
-    fresh=True 给一键启动：不读缓存、用长预算查一次，结果照样写缓存供应用内提示复用。"""
+    fresh=True 给一键启动：不读缓存、用长预算查一次，结果照样写缓存供应用内提示复用。
+    network=False 只读缓存（不论新旧），不联网。"""
     if os.environ.get("GAME_ATELIER_NO_UPDATE_CHECK"):
         return None
     cache = _read_update_cache()
@@ -351,6 +352,8 @@ def latest_release(*, use_git: bool = False, fresh: bool = False) -> dict | None
     ttl = UPDATE_CACHE_TTL_OK if release else UPDATE_CACHE_TTL_FAIL
     if not fresh and valid and isinstance(checked_at, (int, float)) and 0 <= now - checked_at < ttl:
         return release
+    if not network:
+        return release if valid else None
     release, error = (_fetch_latest_release(use_git, LAUNCH_FETCH_TIMEOUT, LAUNCH_CNB_TIMEOUT)
                       if fresh else _fetch_latest_release(use_git))
     cache.update({"channel": UPDATE_CACHE_CHANNEL, "mode": mode, "checked_at": now,
@@ -378,7 +381,7 @@ def _write_update_cache(cache: dict) -> None:
         pass
 
 
-def update_info() -> dict | None:
+def update_info(*, network: bool = True) -> dict | None:
     """--check 顺路的更新检查。返回 None = 当前版本未知（异常安装），不提更新。
 
     dismissed=True 表示用户对 latest 这个版本明确说过"这次不更新"（--dismiss-update），
@@ -392,7 +395,7 @@ def update_info() -> dict | None:
     if current is None:
         return None
 
-    release = latest_release(use_git=not is_bundle())
+    release = latest_release(use_git=not is_bundle(), network=network)
     latest = release["version"] if release else None
     cache = _read_update_cache()
     info = {"current": current, "latest": latest, "update_available": False, "dismissed": False}
@@ -783,7 +786,9 @@ def main() -> int:
 
     if args.check:
         result = check()
-        result["update"] = update_info()
+        # 页面首屏要等这个结果。运行包的更新由服务端自己检查（UpdateService），这里只读缓存，
+        # 不让首屏等最多 3 秒的联网（GitHub 连不上时失败缓存 1 小时，之后每次都要等）。
+        result["update"] = update_info(network=not is_bundle())
         result["runtime_mode"] = "bundle" if is_bundle() else "source"
         print(json.dumps(result, ensure_ascii=False))
         return 0

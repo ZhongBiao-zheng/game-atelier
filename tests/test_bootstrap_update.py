@@ -386,3 +386,21 @@ def test_version_line_source_launcher_rechecks_main_after_branch_switch(
     assert git(local, "branch", "--show-current") == "main"
     assert updater.version_at("HEAD") == "0.5.134"
     assert "发现新版本 5.133.0 → 0.5.134" in capsys.readouterr().out
+
+
+def test_cache_only_lookup_never_touches_the_network(update_env, monkeypatch):
+    monkeypatch.setattr(bootstrap, "_fetch_latest_release",
+                        lambda *args, **kwargs: pytest.fail("must not fetch"))
+    assert bootstrap.update_info(network=False)["latest"] is None
+    seed_cache(age=bootstrap.UPDATE_CACHE_TTL_OK + 1)
+    assert bootstrap.update_info(network=False)["latest"] == "5.128.0"
+
+
+def test_bundle_check_reads_the_cache_without_waiting_for_the_network(update_env, monkeypatch, capsys):
+    # The page waits for --check before it renders; bundle updates come from the server itself.
+    monkeypatch.setattr(bootstrap, "is_bundle", lambda: True)
+    monkeypatch.setattr(bootstrap, "_fetch_latest_release",
+                        lambda *args, **kwargs: pytest.fail("must not fetch"))
+    monkeypatch.setattr(sys, "argv", ["bootstrap.py", "--check"])
+    assert bootstrap.main() == 0
+    assert json.loads(capsys.readouterr().out)["runtime_mode"] == "bundle"
