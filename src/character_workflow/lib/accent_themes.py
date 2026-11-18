@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pydantic import ValidationError
 
 from character_workflow.lib import data_root
-from character_workflow.lib.atomic_io import atomic_write_json
+from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.schemas import AccentThemes, AccentThemesUpdate
 
@@ -30,9 +30,14 @@ def _read_unlocked() -> AccentThemes:
     path = data_root.accent_themes_file()
     if not path.exists():
         return AccentThemes()
+    # GET 不持锁：Windows 上撞上另一请求的原子替换会瞬时拒访，带重试读；读不出来不等于文件坏了。
     try:
-        return AccentThemes.model_validate_json(path.read_text(encoding="utf-8"))
-    except (OSError, ValidationError, json.JSONDecodeError) as error:
+        text = read_text_with_retry(path)
+    except OSError as error:
+        raise AccentThemesError(f"读取主题色文件失败（.config/accent-themes.json）：{error}") from error
+    try:
+        return AccentThemes.model_validate_json(text)
+    except (ValidationError, json.JSONDecodeError) as error:
         raise AccentThemesError("主题色文件损坏，请检查 .config/accent-themes.json") from error
 
 

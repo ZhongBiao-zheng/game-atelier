@@ -1,9 +1,11 @@
 import re
 from pathlib import Path
 
+import pytest
+
 from tests.local_client import LocalTestClient as TestClient
 
-from character_workflow.lib import data_root
+from character_workflow.lib import accent_themes, atomic_io, data_root
 from character_workflow.lib.schemas import (
     ACCENT_USER_THEME_MAX,
     BUILTIN_ACCENT_THEMES,
@@ -125,3 +127,51 @@ def test_builtin_themes_can_be_renamed_and_names_freed(isolated_data_root):
     assert color_only.status_code == 200
     assert color_only.json()["overrides"]["pink"]["name"] is None
     assert "name" not in data_root.accent_themes_file().read_text(encoding="utf-8").split('"pink"')[1]
+
+
+def test_corrupt_json_is_reported_as_corrupt(isolated_data_root):
+    path = data_root.accent_themes_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(accent_themes.AccentThemesError, match="损坏"):
+        accent_themes.read_accent_themes()
+
+
+def test_read_retries_while_file_is_being_replaced_on_windows(isolated_data_root, monkeypatch):
+    # GET 不持锁：Windows 上正好撞上 PUT 的 os.replace 会拿到 PermissionError，重试后应读到内容而不是报损坏。
+    client = _client(isolated_data_root)
+    assert client.put("/api/accent-themes", json=_payload(active="blue")).status_code == 200
+    # 先把路径建好再切 os.name：nt 下 pathlib 会去实例化 WindowsPath。
+    path = data_root.accent_themes_file()
+    monkeypatch.setattr(accent_themes.data_root, "accent_themes_file", lambda: path)
+    monkeypatch.setattr(atomic_io.os, "name", "nt")
+    monkeypatch.setattr(atomic_io.time, "sleep", lambda _s: None)
+    calls = {"n": 0}
+    real_read = Path.read_text
+
+    def flaky_read(self, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise PermissionError(13, "Permission denied")
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", flaky_read)
+
+    assert accent_themes.read_accent_themes().active == "blue"
+    assert calls["n"] == 3
+
+
+def test_unreadable_file_is_not_reported_as_corrupt(isolated_data_root, monkeypatch):
+    client = _client(isolated_data_root)
+    assert client.put("/api/accent-themes", json=_payload()).status_code == 200
+
+    def denied(self, *args, **kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "read_text", denied)
+
+    with pytest.raises(accent_themes.AccentThemesError) as caught:
+        accent_themes.read_accent_themes()
+    assert "损坏" not in str(caught.value)
+    assert "读取主题色文件失败" in str(caught.value)
