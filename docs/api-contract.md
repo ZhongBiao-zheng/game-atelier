@@ -1243,9 +1243,9 @@ timeout_seconds`；超时默认 1800 秒，允许 1–86400 秒。inspect 不写
 - 路由 id 为 `declarative:<模板 id>:<模型 id>`，不与内置渠道合组。
 - 局域网网关（批次 4）：模板可用的路由照常发布。`/gateway/v1/models` 对这类路由多给只读 `declared`（能力，
   不含模板正文、模板 id、路径与鉴权），成员快照的 `base_url` 置空；模板损坏 / 被删 / 解绑时路由从
-  成员列表、提交校验、`/api/gateway/options`、`/gateway/v1/admin/options` 同时消失。两个 options 接口的
-  `models[].unpriced` 标出未计价路由。设了金额上限（`limits` 非空）的网关密钥看不到、也不能提交未计价路由
-  （403，文案写明原因）。接入端把 `declared` 存进 `ModelSpec.declared_snapshot`（null 不序列化），
+  成员列表、提交校验、`/api/gateway/options`、`/gateway/v1/admin/options` 同时消失。未计价路由对所有网关密钥可见、可用
+  （2026-11-18 起，含设了金额上限的密钥）；密钥任一限额窗口「已用 + 预占 ≥ 上限」后，受理一律 429，
+  包括未计价与扣 0 的渠道和文本。接入端把 `declared` 存进 `ModelSpec.declared_snapshot`（null 不序列化），
   `GET /api/keys` 以 `declared` 返回。任务状态里未计价任务的 `charged_cny` 为 null，两侧用量都计入「未计价」。
 
 模板（版本 1，Pydantic `http_protocol_schema.HttpProtocol` ↔ TS `web/src/schema/httpProtocols.ts`，

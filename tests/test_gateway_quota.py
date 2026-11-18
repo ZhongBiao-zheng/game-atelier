@@ -427,3 +427,49 @@ def test_check_gateway_explains_common_failures(monkeypatch, health, info, messa
     with pytest.raises(atelier_gateway.GatewayError, match=message) as raised:
         atelier_gateway.check_gateway("http://127.0.0.1:5180", "test")
     assert "gateway api" not in str(raised.value)
+
+
+# ---- 额度用光后一律拦下（第三批第 2 步）----
+
+def test_exhausted_quota_blocks_even_unpriced_channels(owner):
+    """已用 + 预占 ≥ 上限后，估价为 0 的未计价渠道也不能再用。"""
+    write_usage(NOW, owner.id, 1)  # 今日上限 1 元，已用满
+    keys.patch_key("A", {"base_url": "https://unpriced.example"})
+    keys.patch_key("B", {"base_url": "https://unpriced.example"})
+    with pytest.raises(gateway_tasks.GatewayRequestError) as exc:
+        submit(owner, "after-exhausted")
+    assert exc.value.status == 429
+    assert exc.value.message == "中转额度已用完：今日 ¥1（已用 ¥1），11-02 00:00 重置"
+
+
+def test_unpriced_channels_stay_usable_until_the_quota_is_used_up(owner):
+    write_usage(NOW, owner.id, 0.99)
+    keys.patch_key("A", {"base_url": "https://unpriced.example"})
+    keys.patch_key("B", {"base_url": "https://unpriced.example"})
+    task = submit(owner, "still-room")
+    assert task.estimated_cny is None and task.status == "pending"
+
+
+def test_reservations_count_toward_used_up_and_queued_tasks_still_run(owner, monkeypatch):
+    owner = gateway_keys.update_key(owner.id, limits=[{"period": "day", "cap_cny": .08}])
+    queued = submit(owner, "queued")  # 预占 0.08 = 上限
+    keys.patch_key("A", {"base_url": "https://unpriced.example"})
+    keys.patch_key("B", {"base_url": "https://unpriced.example"})
+    with pytest.raises(gateway_tasks.GatewayRequestError) as exc:
+        submit(owner, "blocked")
+    assert exc.value.status == 429
+    keys.patch_key("A", {"base_url": "https://api.openai-hk.com"})
+    monkeypatch.setattr(callers, "dispatch", _dispatch([]))
+    assert gateway_tasks.run_task(queued).status == "done"  # 已受理的照常跑完
+
+
+def test_exhausted_quota_blocks_text_relay(owner):
+    from character_workflow.lib.gateway_text import TextCall
+
+    write_usage(NOW, owner.id, 1)
+    route = model_routes.find_route("image", "gpt-image-2")
+    key = keys.find_by_alias("A")
+    model = next(m for m in key.models if m.id == "gpt-image-2")
+    with pytest.raises(gateway_tasks.GatewayRequestError) as exc:
+        TextCall(owner, route.id, (key, model), 100, False)
+    assert exc.value.status == 429 and "中转额度已用完" in exc.value.message

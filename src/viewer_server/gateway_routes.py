@@ -145,9 +145,8 @@ def revoke_gateway_key(key_id: str) -> dict:
 @gateway_router.get("/options")
 def gateway_options() -> dict:
     return {
-        # 与 /gateway/v1/models 同一发布判据；未计价的路由标出来，设了金额上限的密钥用不了。
-        "models": [{"id": route.id, "name": route.name, "modality": route.modality,
-                    "unpriced": gateway_access.is_unpriced_route(route)}
+        # 与 /gateway/v1/models 同一发布判据。
+        "models": [{"id": route.id, "name": route.name, "modality": route.modality}
                    for route in model_routes.list_routes() if gateway_access.publishable(route)],
         "aliases": [{"alias": key.alias, "provider": key.provider, "name": key.alias}
                     for key in keys.read_keys_db().keys if key.enabled and key.provider != "atelier"],

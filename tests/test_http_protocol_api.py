@@ -176,7 +176,6 @@ def test_routes_and_gateway_keep_declarative_models_apart(client):
     custom = routes[f"declarative:{identifier}:m1"]
     # 批次 4：模板可用即可发布；坏模板的路由不发布。
     assert gateway_access.publishable(routes["m1"]) and gateway_access.publishable(custom)
-    assert gateway_access.is_unpriced_route(custom) and not gateway_access.is_unpriced_route(routes["m1"])
     (data_root.config_dir() / "http-protocols" / f"{identifier}.json").write_text("{", encoding="utf-8")
     assert not gateway_access.publishable(model_routes.find_route("image", custom.id))
 

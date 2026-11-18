@@ -73,8 +73,11 @@ def admit(key: GatewayKeyRecord, estimate_cny: float, now: datetime | None = Non
     from character_workflow.lib.gateway_tasks import GatewayRequestError
 
     now = now or _local_now()
-    exceeded = [row for row in usage_summary(key, now)
-                if round(row["used_cny"] + row["reserved_cny"] + estimate_cny, 6) > row["cap_cny"]]
+    summary = usage_summary(key, now)
+    # 用光（已用 + 预占 ≥ 上限）就一律拒绝，包括估价为 0 的未计价渠道与文本（飙哥 2026-11-18 定）。
+    exceeded = [row for row in summary
+                if round(row["used_cny"] + row["reserved_cny"], 6) >= row["cap_cny"]
+                or round(row["used_cny"] + row["reserved_cny"] + estimate_cny, 6) > row["cap_cny"]]
     if not exceeded:
         return
     limit = max(exceeded, key=lambda row: datetime.fromisoformat(row["resets_at"]))

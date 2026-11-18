@@ -80,14 +80,12 @@ def test_models_carry_capabilities_but_no_template_or_host_address(vendor):
     assert "declarative_id" not in text
 
 
-def test_capped_key_cannot_see_or_use_unpriced_routes(vendor):
+def test_capped_key_can_see_and_use_unpriced_routes(vendor):
+    """2026-11-18 起：设了金额上限的密钥也能用未计价路由，额度用光后才被拦（见 test_gateway_quota）。"""
     _, route_id = host_setup(vendor)
     client, _ = member_client(limits=[{"period": "day", "cap_cny": 5}])
-    assert client.get("/gateway/v1/models").json()["models"] == []
-    response = submit(client, route_id, {"ratio": "1:1"})
-    assert response.status_code == 403
-    assert "金额上限" in response.json()["detail"] and "未计价" in response.json()["detail"]
-    assert vendor.received == []
+    assert [m["id"] for m in client.get("/gateway/v1/models").json()["models"]] == [route_id]
+    assert submit(client, route_id, {"ratio": "1:1"}).status_code == 202
 
 
 def test_broken_template_disappears_from_every_view(vendor):
@@ -97,8 +95,7 @@ def test_broken_template_disappears_from_every_view(vendor):
     from viewer_server.gateway_admin import route_options
 
     assert [m["id"] for m in member.get("/gateway/v1/models").json()["models"]] == [route_id]
-    assert [(m["id"], m["unpriced"]) for m in local.get("/api/gateway/options").json()["models"]] \
-        == [(route_id, True)]
+    assert [m["id"] for m in local.get("/api/gateway/options").json()["models"]] == [route_id]
     assert [m["id"] for m in route_options()["models"]] == [route_id]
 
     (data_root.config_dir() / "http-protocols" / f"{identifier}.json").write_text("{", encoding="utf-8")

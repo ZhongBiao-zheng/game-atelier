@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import socket
+import json
 import struct
 import time
 import zlib
@@ -322,3 +323,19 @@ def test_member_records_the_confirmed_charge_of_a_failed_gateway_task(gateway, m
     with pytest.raises(job_runner.JobRunnerError):
         job_runner.run_job(_job("job-uncharged").job_id)
     assert read_job("job-uncharged").params.actual_cost_cny is None
+
+
+def test_member_sees_the_quota_is_used_up_when_no_fallback(gateway, upstream):
+    """额度用光后成员端看到的提示（第三批第 2 步，未计价渠道也拦）。"""
+    record = gateway_keys.read_config().keys[0]
+    gateway_keys.update_key(record.id, limits=[{"period": "day", "cap_cny": 0.01}])
+    usage = gateway_tasks.usage_file(gateway_tasks._now().astimezone().strftime("%Y-%m"))
+    usage.parent.mkdir(parents=True, exist_ok=True)
+    usage.write_text(json.dumps({"time": gateway_tasks._now().isoformat(), "key_id": record.id,
+                                 "charged_cny": 0.01}) + "\n", encoding="utf-8")
+    with pytest.raises(job_runner.JobRunnerError):
+        job_runner.run_job(_job("job-exhausted", route_id=None).job_id)
+    error = read_job("job-exhausted").error
+    print("MEMBER-SEES:", error)
+    assert "中转额度已用完" in error and "重置" in error
+    assert upstream["calls"] == []

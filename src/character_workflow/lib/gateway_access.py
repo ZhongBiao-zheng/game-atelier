@@ -32,16 +32,6 @@ def publishable(route: model_routes.ModelRoute) -> bool:
                for m in route.members)
 
 
-def is_unpriced_route(route: model_routes.ModelRoute) -> bool:
-    """自定义接口一律未计价；路由 id 带模板 id，组内只会是同一模板的成员。"""
-    return any(m.protocol == "declarative" for m in route.members)
-
-
-def blocked_by_limits(key: GatewayKeyRecord, route: model_routes.ModelRoute) -> bool:
-    # 金额上限是为了控制花费：未计价的模型无法计入上限，设了上限的密钥一律不能用。
-    return bool(key.limits) and is_unpriced_route(route)
-
-
 def declared_view(route: model_routes.ModelRoute) -> dict | None:
     """给接入端的能力快照：只含能力，不含模板正文、模板 id、路径与鉴权方式。"""
     for member in route.members:
@@ -53,7 +43,8 @@ def declared_view(route: model_routes.ModelRoute) -> dict | None:
 
 
 def route_visible(key: GatewayKeyRecord, route: model_routes.ModelRoute) -> bool:
-    return (publishable(route) and not blocked_by_limits(key, route)
+    # 未计价的路由限额密钥也能用（飙哥 2026-11-18 定）：额度用光后由受理时的额度检查一律拦下。
+    return (publishable(route)
             and model_allowed(key, route.id) and any(
                 m.provider != "atelier" and member_allowed(key, m.alias) for m in route.members))
 
@@ -69,10 +60,6 @@ def check_route(key: GatewayKeyRecord, modality, route_id: str) -> model_routes.
         raise GatewayRequestError(404, f"网关没有模型 {route_id}")
     if not model_allowed(key, route_id):
         raise GatewayRequestError(403, f"这把密钥不能用模型 {route_id}")
-    if blocked_by_limits(key, route):
-        raise GatewayRequestError(
-            403, f"这把密钥设了金额上限，不能用未计价的模型「{route.name}」：它的费用无法计入上限，"
-                 "请联系管理员调整密钥")
     if not route_visible(key, route):
         raise GatewayRequestError(403, f"这把密钥能用的供应商都不提供 {route_id}")
     return route
