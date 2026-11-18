@@ -8,9 +8,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
-Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+Add-Type -TypeDefinition @'
 using System;
-using System.Drawing;
 using System.Runtime.InteropServices;
 public static class ShellIcon {
     [ComImport, Guid("bcc18b79-ba16-442f-80c4-8a59c30c463b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -18,21 +17,23 @@ public static class ShellIcon {
     [StructLayout(LayoutKind.Sequential)] struct SIZE { public int cx; public int cy; }
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
     static extern void SHCreateItemFromParsingName(string path, IntPtr bc, [MarshalAs(UnmanagedType.LPStruct)] Guid riid, out IShellItemImageFactory item);
-    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr handle);
-    // SIIGBF_ICONONLY: the file's icon as Explorer draws it, never a thumbnail.
-    public static Bitmap Get(string path, int size) {
+    [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr handle);
+    // SIIGBF_ICONONLY: the file's icon as Explorer draws it, never a thumbnail. The caller frees it.
+    public static IntPtr Get(string path, int size) {
         IShellItemImageFactory factory;
         SHCreateItemFromParsingName(path, IntPtr.Zero, typeof(IShellItemImageFactory).GUID, out factory);
         IntPtr handle;
         factory.GetImage(new SIZE { cx = size, cy = size }, 0x4, out handle);
-        try { return Image.FromHbitmap(handle); } finally { DeleteObject(handle); }
+        return handle;
     }
 }
 '@
 
 function Save-Icons([string]$Path, [string]$Name) {
     foreach ($size in 16, 32, 256) {
-        $bitmap = [ShellIcon]::Get($Path, $size)
+        $handle = [ShellIcon]::Get($Path, $size)
+        $bitmap = [System.Drawing.Image]::FromHbitmap($handle)
+        [ShellIcon]::DeleteObject($handle) | Out-Null
         $bitmap.Save((Join-Path $Output "icon-$Name-$size.png"), [System.Drawing.Imaging.ImageFormat]::Png)
         $bitmap.Dispose()
     }
