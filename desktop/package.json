@@ -7,12 +7,10 @@
   "main": "src/main.mjs",
   "scripts": {
     "icons": "node scripts/icons.mjs",
-    "test": "node --test test/*.test.mjs",
-    "tauri-icons": "tauri icon ../assets/brand/atelier-icon-macos.svg --output src-tauri/icons"
+    "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "2.6.2",
-    "@tauri-apps/cli": "2.12.5",
     "electron": "45.3.4",
     "electron-builder": "26.18.0"
   }

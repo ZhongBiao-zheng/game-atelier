@@ -40,7 +40,7 @@ use windows::{
     },
 };
 
-/// Same key the shell's Tauri runtime reads for WebView2 (Evergreen runtime client id).
+/// Evergreen WebView2 runtime client id: the installer's own window runs on WebView2.
 const WEBVIEW2_CLIENT: &str =
     r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
 

@@ -216,32 +216,8 @@ def test_control_file_is_owner_only(shell_client):
     assert stat.S_IMODE(mode) == 0o600
 
 
-def test_the_atelier_page_gets_only_three_window_commands():
-    # docs/contracts/desktop-shell.md: drag, title-bar double click, theme. Nothing else.
-    import json
-    capabilities = REPO_ROOT / "desktop/src-tauri/capabilities"
-    remote = [json.loads(p.read_text(encoding="utf-8")) for p in capabilities.glob("*.json")]
-    remote = [c for c in remote if "remote" in c]
-    assert len(remote) == 1
-    assert remote[0]["remote"] == {"urls": ["http://127.0.0.1:*/*"]}
-    assert sorted(remote[0]["permissions"]) == [
-        "core:window:allow-internal-toggle-maximize",
-        "core:window:allow-set-theme",
-        "core:window:allow-start-dragging",
-    ]
-
-
-def test_shell_commands_are_declared_so_remote_pages_cannot_reach_them():
-    # Undeclared app commands would be callable from any origin a capability lets in.
-    build = (REPO_ROOT / "desktop/src-tauri/build.rs").read_text(encoding="utf-8")
-    main = (REPO_ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
-    handlers = main.split("generate_handler![", 1)[1].split("]", 1)[0]
-    for command in (c.strip() for c in handlers.split(",") if c.strip()):
-        assert f'"{command}"' in build, f"{command} is not declared in the app manifest"
-
-
 # One startup rule, written twice: launch.ps1 (double-click, scheduled task) and the desktop shell
-# on Windows (desktop/src-tauri/src/runtime.rs). Changing one without the other must fail here.
+# on Windows (desktop/src/runtime.mjs). Changing one without the other must fail here.
 WINDOWS_STARTUP_RULE = {
     "pointer": "last-good",
     "interpreter": ("python", "python.exe"),
@@ -261,14 +237,6 @@ def _generated_launch_ps1(tmp_path: Path) -> str:
     spec.loader.exec_module(module)
     module.write_launchers(tmp_path, windows=True)
     return (tmp_path / "launch.ps1").read_text(encoding="utf-8-sig")
-
-
-def _shell_windows_block() -> str:
-    source = (REPO_ROOT / "desktop/src-tauri/src/runtime.rs").read_text(encoding="utf-8")
-    start = source.index("#[cfg(windows)]\n        let mut cmd = {")
-    end = source.index("\n        };", start)
-    common = source[end:source.index("\n    }", end)]
-    return source[start:end] + common
 
 
 def test_launch_ps1_follows_the_windows_startup_rule(tmp_path):
@@ -305,19 +273,6 @@ def test_electron_shell_follows_the_windows_startup_rule():
         assert f"delete env.{name};" in block
 
 
-def test_desktop_shell_follows_the_windows_startup_rule():
-    rule, block = WINDOWS_STARTUP_RULE, _shell_windows_block()
-    join = lambda parts: "payload" + "".join(f'.join("{p}")' for p in parts)  # noqa: E731
-    assert f'self.root.join("{rule["pointer"]}")' in block
-    assert '.join("versions").join(&version)' in block
-    assert f"Command::new({join(rule['interpreter'])})" in block
-    assert f"arg({join(rule['entry'])})" in block
-    assert f'.env("PYTHONPATH", {join(rule["pythonpath"])})' in block
-    assert f'.env("PYTHONUTF8", "{rule["pythonutf8"]}")' in block
-    for name in rule["cleared"]:
-        assert f'.env_remove("{name}")' in block
-
-
 def test_runtime_and_shell_agree_on_the_contract_level():
     """The shell reads versions/<v>/DESKTOP_CONTRACT instead of comparing version numbers."""
     import importlib.util
@@ -333,11 +288,21 @@ def test_runtime_and_shell_agree_on_the_contract_level():
     assert declared and int(declared[1]) == module.DESKTOP_CONTRACT
     assert "const CONTRACT_FILE = 'DESKTOP_CONTRACT';" in shell
     assert '(payload / "DESKTOP_CONTRACT").write_text(f"{DESKTOP_CONTRACT}\\n"' in build
-    # The Tauri shell still ships on Windows until the Electron switch reaches it; it only needs
-    # a runtime at least as new as its own level.
-    tauri = (REPO_ROOT / "desktop/src-tauri/src/runtime.rs").read_text(encoding="utf-8")
-    level = re.search(r"pub const DESKTOP_CONTRACT: u32 = (\d+);", tauri)
-    assert level and int(level[1]) <= module.DESKTOP_CONTRACT
+
+
+def test_shell_orders_versions_like_bootstrap():
+    """The shell decides whether a runtime is older than its seed (desktop/src/runtime.mjs
+    compareVersions); bootstrap.version_key decides updates. The retired line must sort first in both."""
+    import importlib.util
+    import re
+    spec = importlib.util.spec_from_file_location("_bootstrap_versions", BOOTSTRAP)
+    bootstrap = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bootstrap)
+    shell = ELECTRON_RUNTIME.read_text(encoding="utf-8")
+    declared = re.search(r"const LEGACY_MAJOR = (\d+);", shell)
+    assert declared and int(declared[1]) == bootstrap.LEGACY_MAJOR
+    assert "parts[0] === LEGACY_MAJOR ? 0 : 1" in shell
+    assert bootstrap.version_key("5.139.0") < bootstrap.version_key("0.5.140")
 
 
 def test_seed_build_id_is_a_content_digest(tmp_path):

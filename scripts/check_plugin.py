@@ -39,8 +39,6 @@ EXCLUDED_PARTS = {
     "__pycache__",
     "node_modules",
 }
-# Desktop shell build outputs (desktop/.gitignore): Rust target, Tauri schemas, generated icons.
-EXCLUDED_DESKTOP_OUTPUTS = {"target", "gen", "icons"}
 # Electron shell: electron-builder output and what build_desktop.py / `pnpm icons` stage for it.
 EXCLUDED_ELECTRON_OUTPUTS = {"dist", "stage"}
 EXCLUDED_NAMES = {
@@ -119,8 +117,6 @@ def _excluded(repo: Path, f: Path) -> bool:
     if parts[0] in EXCLUDED_TOP_LEVEL:
         return True
     if any(part in EXCLUDED_PARTS for part in parts):
-        return True
-    if parts[:2] == ("desktop", "src-tauri") and len(parts) > 2 and parts[2] in EXCLUDED_DESKTOP_OUTPUTS:
         return True
     # The Windows installer's Rust target (desktop/setup/.gitignore).
     if parts[:3] == ("desktop", "setup", "target"):
