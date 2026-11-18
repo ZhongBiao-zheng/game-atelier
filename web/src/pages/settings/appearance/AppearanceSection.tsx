@@ -1,25 +1,61 @@
-import { accentCardContrast, accentColors, setAccent, useAccent } from '@/lib/accentTheme';
+import { useEffect, useState } from 'react';
+import {
+  accentThemes, activeTheme, builtinColors, newThemeId, sameColors, syncAccentThemes, uniqueThemeName, updateAccentThemes,
+  useAccent, type AccentDoc,
+} from '@/lib/accentTheme';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { setTheme, useTheme, useThemePreference, type ThemePreference } from '@/lib/theme';
-import type { AccentColors } from '@/lib/accentPresets';
-import { PresetGrid } from './PresetGrid';
-import { ColorField } from './ColorField';
+import { setTheme, useThemePreference, type ThemePreference } from '@/lib/theme';
+import type { AccentColors, AccentPreset } from '@/lib/accentPresets';
+import { ACCENT_USER_THEME_MAX, type AccentThemesBody } from '@/schema/accentThemes';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
+import { Collapse } from '@/components/ui/collapse';
+import { ChevronDownIcon } from '@/components/ui/icons';
+import { cn } from '@/lib/utils';
+import { ThemeGrid } from './ThemeGrid';
+import { ThemeEditor } from './ThemeEditor';
+import { ThemeDialog } from './ThemeDialog';
 
 const MODES: { value: ThemePreference; label: string }[] = [
   { value: 'dark', label: '深色' }, { value: 'light', label: '浅色' }, { value: 'system', label: '跟随系统' },
 ];
-const FIELDS: { key: keyof AccentColors; label: string; usage: string }[] = [
-  { key: 'primary', label: '主色', usage: '当前选中、主操作' },
-  { key: 'brand2', label: '副色 1', usage: '图片标签' },
-  { key: 'brand3', label: '副色 2', usage: '视频标签' },
-  { key: 'brand4', label: '副色 3', usage: '文本标签' },
-];
+const body = (doc: AccentDoc): AccentThemesBody => ({ active: doc.active, overrides: doc.overrides, custom: doc.custom });
+const message = (error: unknown) => error instanceof Error ? error.message : String(error);
+
 export function AppearanceSection() {
-  const state = useAccent();
-  const colors = accentColors(state);
+  const doc = useAccent();
   const preference = useThemePreference();
-  const mode = useTheme();
+  const themes = accentThemes(doc);
+  const theme = activeTheme(doc);
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState<{ name: string; colors: AccentColors } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  useEffect(() => { syncAccentThemes().catch(cause => setError(message(cause))); }, []);
+
+  const save = async (change: (current: AccentDoc) => AccentThemesBody) => {
+    setBusy(true);
+    try {
+      await updateAccentThemes(change);
+      setError(null);
+      return true;
+    } catch (cause) {
+      setError(message(cause));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const create = (name: string, colors: AccentColors) => {
+    const id = newThemeId();
+    void save(current => ({ ...body(current), active: id, custom: [...current.custom, { id, name, ...colors }] }))
+      .then(ok => { if (ok) setCreating(null); });
+  };
+  const saveActive = (name: string, colors: AccentColors) => void save(current => theme.builtin
+    ? { ...body(current), overrides: withOverride(current.overrides, theme.id as AccentPreset, colors) }
+    : { ...body(current), custom: current.custom.map(item => item.id === theme.id ? { id: item.id, name, ...colors } : item) });
+
   return <section id="appearance" className="scroll-mt-6 space-y-2" aria-labelledby="appearance-title">
     <h2 id="appearance-title" className="px-1 text-xs font-normal text-muted-foreground">外观</h2>
     <div className="divide-y divide-border rounded-xl border border-border bg-card">
@@ -31,19 +67,43 @@ export function AppearanceSection() {
         </ToggleGroup>
       </div>
       <div className="space-y-3 px-4.5 py-3.5">
-        <p className="text-sm">主题色</p><PresetGrid state={state} />
+        <p className="text-sm">主题色</p>
+        <ThemeGrid themes={themes} active={doc.active} canAdd={doc.custom.length < ACCENT_USER_THEME_MAX}
+          onSelect={id => void save(current => ({ ...body(current), active: id }))}
+          onAdd={() => setCreating({ name: uniqueThemeName(doc, '新主题'), colors: theme.colors })} />
+        {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       </div>
-      <details>
-        <summary className="cursor-pointer px-4.5 py-3.5 text-sm">自定义颜色{'custom' in state && <span className="ml-2 text-xs text-muted-foreground">已启用</span>}</summary>
-        <div className="space-y-3 px-4.5 pb-4">
-          <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-            {FIELDS.map(field => <ColorField key={field.key} label={field.label} usage={field.usage} value={colors[field.key]}
-              onChange={value => setAccent({ custom: { primary: colors.primary, brand2: colors.brand2, brand3: colors.brand3, brand4: colors.brand4, [field.key]: value } })} />)}
-          </div>
-          {accentCardContrast(colors.primary, mode) < 3 && <p role="status" className="text-xs text-status-running">主色与卡片对比度较低，建议调亮主色。</p>}
-          <Button variant="bare" type="button" onClick={() => setAccent({ preset: 'lime' })} className="text-xs text-muted-foreground hover:text-foreground">恢复默认</Button>
-        </div>
-      </details>
+      <div>
+        <Button type="button" variant="ghost" aria-expanded={editing} onClick={() => setEditing(open => !open)}
+          className="h-auto w-full justify-between rounded-none px-4.5 py-3.5 text-sm font-normal hover:bg-transparent">
+          编辑主题
+          <ChevronDownIcon size="sm" className={cn('text-muted-foreground transition-transform', editing && 'rotate-180')} aria-hidden />
+        </Button>
+        <Collapse open={editing}>
+          <ThemeEditor key={`${theme.id}:${theme.name}:${Object.values(theme.colors).join()}`}
+            doc={doc} theme={theme} busy={busy}
+            defaults={theme.builtin ? builtinColors(theme.id as AccentPreset) : null}
+            onSave={saveActive}
+            onSaveAs={colors => setCreating({ name: uniqueThemeName(doc, theme.name), colors })}
+            onReset={() => void save(current => ({ ...body(current), overrides: withOverride(current.overrides, theme.id as AccentPreset, null) }))}
+            onDelete={() => setDeleting(true)} />
+        </Collapse>
+      </div>
     </div>
+    {creating && <ThemeDialog doc={doc} initial={creating} busy={busy} error={error}
+      onCreate={create} onClose={() => { setCreating(null); setError(null); }} />}
+    <ConfirmDialog open={deleting} variant="destructive" title={`删除「${theme.name}」？`} message="删除后无法恢复。" confirmText="删除"
+      onCancel={() => setDeleting(false)}
+      onConfirm={() => {
+        setDeleting(false);
+        void save(current => ({ ...body(current), active: 'lime', custom: current.custom.filter(item => item.id !== theme.id) }));
+      }} />
   </section>;
+}
+
+/** 改回与内置默认一致的颜色等于没改：不留覆盖项。 */
+function withOverride(overrides: AccentDoc['overrides'], id: AccentPreset, colors: AccentColors | null) {
+  const { [id]: _previous, ...rest } = overrides;
+  if (!colors) return rest;
+  return sameColors(colors, builtinColors(id)) ? rest : { ...rest, [id]: colors };
 }

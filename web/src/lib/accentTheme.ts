@@ -1,34 +1,110 @@
 import { useSyncExternalStore } from 'react';
 import { ACCENT_PRESETS, type AccentColors, type AccentPreset } from './accentPresets';
+import { getAccentThemes, saveAccentThemes } from '@/api/accentThemes';
+import { localConnection } from '@/api/connection';
+import { ACCENT_USER_THEME_MAX, type AccentThemes, type AccentThemesBody, type AccentUserTheme } from '@/schema/accentThemes';
 
-export type AccentState = { preset: AccentPreset } | { custom: AccentColors };
-const KEY = 'atelier:accent';
-const CHANGE_EVENT = 'atelier:accent-change';
-const DEFAULT: AccentState = { preset: 'lime' };
-const COLOR_KEYS = ['primary', 'brand2', 'brand3', 'brand4'] as const;
-export const isHexColor = (value: unknown): value is string => typeof value === 'string' && /^#[\da-f]{6}$/i.test(value);
-let cachedRaw: string | null | undefined;
-let cachedState: AccentState = DEFAULT;
-
-export function loadAccent(): AccentState {
-  let raw: string | null;
-  try { raw = window.localStorage.getItem(KEY); } catch { return DEFAULT; }
-  if (raw === cachedRaw) return cachedState;
-  cachedRaw = raw;
-  cachedState = DEFAULT;
-  try {
-    const value = JSON.parse(raw ?? 'null');
-    if (value && ACCENT_PRESETS.some(preset => preset.id === value.preset)) {
-      cachedState = { preset: value.preset };
-    } else if (value?.custom && COLOR_KEYS.every(key => isHexColor(value.custom[key]))) {
-      cachedState = { custom: Object.fromEntries(COLOR_KEYS.map(key => [key, value.custom[key]])) as unknown as AccentColors };
-    }
-  } catch { /* 无效存储回到默认主题。 */ }
-  return cachedState;
+/** 客户端缓存：服务端 `.config/accent-themes.json` 的镜像，只为首帧不闪默认色；以服务端为准。 */
+export interface AccentDoc extends AccentThemesBody { revision: number }
+export interface AccentThemeView {
+  id: string;
+  name: string;
+  builtin: boolean;
+  /** 内置主题被改过颜色 */
+  edited: boolean;
+  colors: AccentColors;
 }
 
-export function accentColors(state: AccentState): AccentColors {
-  return 'custom' in state ? state.custom : ACCENT_PRESETS.find(preset => preset.id === state.preset)!;
+const KEY = 'atelier:accent';
+const CHANGE_EVENT = 'atelier:accent-change';
+const COLOR_KEYS = ['primary', 'brand2', 'brand3', 'brand4'] as const;
+const BUILTIN_IDS = new Set<string>(ACCENT_PRESETS.map(preset => preset.id));
+export const DEFAULT_ACCENT: AccentDoc = { revision: 0, active: 'lime', overrides: {}, custom: [] };
+export const isHexColor = (value: unknown): value is string => typeof value === 'string' && /^#[\da-f]{6}$/i.test(value);
+const isColors = (value: unknown): value is AccentColors =>
+  !!value && typeof value === 'object' && COLOR_KEYS.every(key => isHexColor((value as Record<string, unknown>)[key]));
+export const pickColors = (value: AccentColors): AccentColors =>
+  ({ primary: value.primary, brand2: value.brand2, brand3: value.brand3, brand4: value.brand4 });
+export const sameColors = (a: AccentColors, b: AccentColors) =>
+  COLOR_KEYS.every(key => a[key].toLowerCase() === b[key].toLowerCase());
+
+const LEGACY_NAME = '自定义';
+/** 旧版「自定义颜色」（无名称、不进网格）的 id 由颜色决定：同一份旧缓存每次读出同一个主题。 */
+const legacyTheme = (colors: AccentColors): AccentUserTheme =>
+  ({ id: `u-${COLOR_KEYS.map(key => colors[key].slice(1).toLowerCase()).join('')}`, name: LEGACY_NAME, ...pickColors(colors) });
+
+function parseDoc(value: unknown): AccentDoc | null {
+  if (!value || typeof value !== 'object') return null;
+  const doc = value as Partial<AccentDoc>;
+  if (typeof doc.revision !== 'number' || typeof doc.active !== 'string' || !Array.isArray(doc.custom)
+    || !doc.overrides || typeof doc.overrides !== 'object') return null;
+  const custom = doc.custom.filter((theme): theme is AccentUserTheme =>
+    isColors(theme) && typeof theme.id === 'string' && typeof theme.name === 'string');
+  const overrides = Object.fromEntries(Object.entries(doc.overrides)
+    .filter(([id, colors]) => BUILTIN_IDS.has(id) && isColors(colors))
+    .map(([id, colors]) => [id, pickColors(colors as AccentColors)]));
+  const active = BUILTIN_IDS.has(doc.active) || custom.some(theme => theme.id === doc.active) ? doc.active : 'lime';
+  return { revision: doc.revision, active, overrides, custom: custom.map(theme => ({ id: theme.id, name: theme.name, ...pickColors(theme) })) };
+}
+
+interface CacheRead { doc: AccentDoc; legacy: AccentColors | null }
+let cachedRaw: string | null | undefined;
+let cachedRead: CacheRead = { doc: DEFAULT_ACCENT, legacy: null };
+
+function readCache(): CacheRead {
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(KEY); } catch { return { doc: DEFAULT_ACCENT, legacy: null }; }
+  if (raw === cachedRaw) return cachedRead;
+  cachedRaw = raw;
+  cachedRead = { doc: DEFAULT_ACCENT, legacy: null };
+  try {
+    const value = JSON.parse(raw ?? 'null');
+    const doc = parseDoc(value?.doc);
+    if (doc) cachedRead = { doc, legacy: null };
+    else if (value && BUILTIN_IDS.has(value.preset)) cachedRead = { doc: { ...DEFAULT_ACCENT, active: value.preset }, legacy: null };
+    else if (isColors(value?.custom)) {
+      const theme = legacyTheme(value.custom);
+      cachedRead = { doc: { ...DEFAULT_ACCENT, active: theme.id, custom: [theme] }, legacy: pickColors(value.custom) };
+    }
+  } catch { /* 无效缓存回到默认主题，服务端同步后覆盖。 */ }
+  return cachedRead;
+}
+
+export function loadAccent(): AccentDoc {
+  return readCache().doc;
+}
+
+export function accentThemes(doc: AccentDoc): AccentThemeView[] {
+  return [
+    ...ACCENT_PRESETS.map(preset => {
+      const override = doc.overrides[preset.id];
+      return { id: preset.id, name: preset.name, builtin: true, edited: !!override, colors: override ?? pickColors(preset) };
+    }),
+    ...doc.custom.map(theme => ({ id: theme.id, name: theme.name, builtin: false, edited: false, colors: pickColors(theme) })),
+  ];
+}
+export function activeTheme(doc: AccentDoc): AccentThemeView {
+  const themes = accentThemes(doc);
+  return themes.find(theme => theme.id === doc.active) ?? themes[0];
+}
+export const activeColors = (doc: AccentDoc) => activeTheme(doc).colors;
+export const builtinColors = (id: AccentPreset) => pickColors(ACCENT_PRESETS.find(preset => preset.id === id)!);
+
+/** 名称比较去首尾空白、忽略大小写；内置与用户主题共用一个命名空间。 */
+export const normalizeThemeName = (name: string) => name.trim().toLocaleLowerCase();
+export function themeNameTaken(doc: AccentDoc, name: string, exceptId?: string) {
+  const key = normalizeThemeName(name);
+  return accentThemes(doc).some(theme => theme.id !== exceptId && normalizeThemeName(theme.name) === key);
+}
+export function uniqueThemeName(doc: AccentDoc, base: string) {
+  for (let index = 1; ; index++) {
+    const name = index === 1 ? base : `${base} ${index}`;
+    if (!themeNameTaken(doc, name)) return name;
+  }
+}
+export function newThemeId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return `u-${[...bytes].map(byte => byte.toString(36).padStart(2, '0').slice(-2)).join('')}`;
 }
 
 function linearRgb(hex: string): number[] {
@@ -89,8 +165,7 @@ export function primaryForeground(hex: string, mode: 'dark' | 'light' = 'dark') 
 export function accentCardContrast(hex: string, mode: 'dark' | 'light') {
   return ratio(accentLuminance(hex, mode), luminance(linearRgb(mode === 'dark' ? '#18181B' : '#FAFAFA')));
 }
-export function applyAccent(state: AccentState, mode: 'dark' | 'light') {
-  const colors = accentColors(state);
+export function applyAccent(colors: AccentColors, mode: 'dark' | 'light') {
   const style = document.documentElement.style;
   const color = (value: string) => mode === 'light' ? lightAccentColor(value) : value;
   style.setProperty('--primary', color(colors.primary));
@@ -100,11 +175,80 @@ export function applyAccent(state: AccentState, mode: 'dark' | 'light') {
     style.setProperty(token, color(colors[key]));
   }
 }
-export function setAccent(state: AccentState) {
-  window.localStorage.setItem(KEY, JSON.stringify(state));
-  applyAccent(loadAccent(), document.documentElement.classList.contains('light') ? 'light' : 'dark');
+const currentMode = () => document.documentElement.classList.contains('light') ? 'light' : 'dark';
+
+/** 编辑中的草稿只预览、不保存；null 回到已保存的颜色。 */
+let preview: AccentColors | null = null;
+export function currentAccentColors(): AccentColors {
+  return preview ?? activeColors(loadAccent());
+}
+export function previewAccent(colors: AccentColors | null) {
+  preview = colors;
+  applyAccent(currentAccentColors(), currentMode());
+}
+
+function writeAccent(doc: AccentDoc) {
+  try { window.localStorage.setItem(KEY, JSON.stringify({ doc })); } catch { /* 缓存只服务首帧，写不进不影响服务端。 */ }
+  applyAccent(currentAccentColors(), currentMode());
   window.dispatchEvent(new Event(CHANGE_EVENT));
 }
+const fromRemote = (remote: AccentThemes): AccentDoc =>
+  ({ revision: remote.revision, active: remote.active, overrides: remote.overrides, custom: remote.custom });
+
+/** 读服务端，并把只存在于本机缓存的选择迁移上去：
+ *  - 服务端从未保存（revision 0）：本机缓存（含旧版预设 / 自定义颜色）整份写上去；
+ *  - 服务端已有：旧版「自定义颜色」若不在任何用户主题里，追加成一个用户主题（不切换当前主题）。 */
+export async function syncAccentThemes(): Promise<AccentDoc> {
+  return enqueue(async () => {
+    const remote = fromRemote(await getAccentThemes());
+    const { doc: local, legacy } = readCache();
+    let next = remote;
+    if (remote.revision === 0 && JSON.stringify(local) !== JSON.stringify(DEFAULT_ACCENT)) {
+      next = fromRemote(await saveAccentThemes(0, local));
+    } else if (legacy && remote.custom.length < ACCENT_USER_THEME_MAX && !remote.custom.some(theme => sameColors(theme, legacy))) {
+      const theme = { ...legacyTheme(legacy), name: uniqueThemeName(remote, LEGACY_NAME) };
+      next = fromRemote(await saveAccentThemes(remote.revision, { ...remote, custom: [...remote.custom, theme] }));
+    }
+    writeAccent(next);
+    return next;
+  });
+}
+
+/** 每次本机连接进入就绪（首次连上、重连、接管编辑）都与服务端对一次：桌面版与浏览器可能各自改过。 */
+export function startAccentSync() {
+  let wasReady = false;
+  const check = () => {
+    const ready = localConnection.getSnapshot().phase === 'ready';
+    if (ready && !wasReady) syncAccentThemes().catch(error => console.warn('主题色同步失败', error));
+    wasReady = ready;
+  };
+  check();
+  return localConnection.subscribe(check);
+}
+
+/** 先落本机再写服务端；失败回滚到改动前。写入串行，revision 始终取上一笔的结果。 */
+export function updateAccentThemes(change: (doc: AccentDoc) => AccentThemesBody): Promise<AccentDoc> {
+  return enqueue(async () => {
+    const before = loadAccent();
+    const body = change(before);
+    writeAccent({ ...body, revision: before.revision });
+    try {
+      const saved = fromRemote(await saveAccentThemes(before.revision, body));
+      writeAccent(saved);
+      return saved;
+    } catch (error) {
+      writeAccent(before);
+      throw error;
+    }
+  });
+}
+let queue: Promise<unknown> = Promise.resolve();
+function enqueue<T>(task: () => Promise<T>): Promise<T> {
+  const result = queue.then(task, task);
+  queue = result.catch(() => undefined);
+  return result;
+}
+
 function subscribe(onChange: () => void) {
   const storage = (event: StorageEvent) => { if (event.key === KEY || event.key === null) onChange(); };
   window.addEventListener(CHANGE_EVENT, onChange);
@@ -115,5 +259,5 @@ function subscribe(onChange: () => void) {
   };
 }
 export function useAccent() {
-  return useSyncExternalStore(subscribe, loadAccent, () => DEFAULT);
+  return useSyncExternalStore(subscribe, loadAccent, () => DEFAULT_ACCENT);
 }

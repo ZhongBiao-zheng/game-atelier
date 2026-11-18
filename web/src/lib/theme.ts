@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { applyAccent, loadAccent } from './accentTheme';
+import { applyAccent, currentAccentColors } from './accentTheme';
 import { syncShellTheme } from './desktopShell';
 
 export type Theme = 'dark' | 'light';
@@ -18,7 +18,7 @@ export function resolveTheme(theme: ThemePreference): Theme {
 export function applyTheme(theme: ThemePreference) {
   const resolved = resolveTheme(theme);
   document.documentElement.classList.toggle('light', resolved === 'light');
-  applyAccent(loadAccent(), resolved);
+  applyAccent(currentAccentColors(), resolved);
   syncShellTheme(resolved);
 }
 export function setTheme(theme: ThemePreference) {

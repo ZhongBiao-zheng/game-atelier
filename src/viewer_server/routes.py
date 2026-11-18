@@ -41,6 +41,7 @@ from pydantic import field_validator
 
 from character_workflow.lib.schemas import (
     JOB_PARAM_PATH_FIELDS,
+    AccentThemes, AccentThemesUpdate,
     CanvasAgentSession, CanvasAgentSessionCreate, CanvasAgentSessionList,
     CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument, CanvasUpscaleRunCreate,
     CanvasCreationAssetInsertRequest, CanvasPasteRequest, CanvasReproduceRequest,
@@ -1902,6 +1903,34 @@ def put_canvas_ui_preferences(payload: CanvasUiPreferencesUpdate) -> CanvasUiPre
         }) from error
     except CanvasUiPreferencesError as error:
         raise HTTPException(409, detail=str(error)) from error
+
+
+@router.get("/accent-themes", response_model=AccentThemes)
+def get_accent_themes() -> AccentThemes:
+    from character_workflow.lib.accent_themes import AccentThemesError, read_accent_themes
+    try:
+        return read_accent_themes()
+    except AccentThemesError as error:
+        raise HTTPException(500, detail=str(error)) from error
+
+
+@router.put("/accent-themes", response_model=AccentThemes)
+def put_accent_themes(payload: AccentThemesUpdate) -> AccentThemes:
+    from character_workflow.lib.accent_themes import (
+        AccentThemesError,
+        AccentThemesRevisionConflict,
+        save_accent_themes,
+    )
+    try:
+        return save_accent_themes(payload)
+    except AccentThemesRevisionConflict as error:
+        raise HTTPException(409, detail={
+            "code": "revision_conflict",
+            "message": "主题已在别处修改",
+            "current_revision": error.current_revision,
+        }) from error
+    except AccentThemesError as error:
+        raise HTTPException(500, detail=str(error)) from error
 
 
 @router.post("/canvas/projects", response_model=CanvasProject, status_code=201)

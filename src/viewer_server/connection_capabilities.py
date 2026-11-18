@@ -111,6 +111,8 @@ GET /api/canvas/projects
 GET /api/canvas/project-options
 GET /api/canvas/ui-preferences
 PUT /api/canvas/ui-preferences
+GET /api/accent-themes
+PUT /api/accent-themes
 POST /api/canvas/projects
 PATCH /api/canvas/projects/{project_id}
 POST /api/canvas/projects/export

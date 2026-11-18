@@ -704,6 +704,66 @@ class CanvasUiPreferencesUpdate(BaseModel):
     upscale: CanvasUpscalePreferences = Field(default_factory=CanvasUpscalePreferences)
 
 
+# 主题色：内置主题的 id 与名称和 web/src/lib/accentPresets.ts 一致（tests/test_accent_themes.py 对照）。
+BUILTIN_ACCENT_THEMES: dict[str, str] = {
+    "lime": "青柠", "violet": "电光紫", "orange": "信号橙", "cyan": "冰川青",
+    "pink": "珊瑚粉", "yellow": "柠檬黄", "blue": "钴蓝",
+}
+ACCENT_THEME_NAME_MAX = 12
+ACCENT_USER_THEME_MAX = 24
+BuiltinAccentThemeId = Literal["lime", "violet", "orange", "cyan", "pink", "yellow", "blue"]
+AccentHexColor = Annotated[str, StringConstraints(pattern=r"^#[0-9A-Fa-f]{6}$")]
+AccentUserThemeId = Annotated[str, StringConstraints(pattern=r"^u-[a-z0-9]{8,32}$")]
+AccentThemeName = Annotated[str, StringConstraints(
+    strip_whitespace=True, min_length=1, max_length=ACCENT_THEME_NAME_MAX)]
+
+
+class AccentColors(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    primary: AccentHexColor
+    brand2: AccentHexColor
+    brand3: AccentHexColor
+    brand4: AccentHexColor
+
+
+class AccentUserTheme(AccentColors):
+    id: AccentUserThemeId
+    name: AccentThemeName
+
+
+class _AccentThemesBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    active: str = Field(default="lime", min_length=1, max_length=40)
+    overrides: dict[BuiltinAccentThemeId, AccentColors] = Field(default_factory=dict)
+    custom: list[AccentUserTheme] = Field(default_factory=list, max_length=ACCENT_USER_THEME_MAX)
+
+    @model_validator(mode="after")
+    def _consistent(self):
+        ids = [theme.id for theme in self.custom]
+        if len(set(ids)) != len(ids):
+            raise ValueError("主题 id 重复")
+        taken = {name.casefold() for name in BUILTIN_ACCENT_THEMES.values()}
+        for theme in self.custom:
+            key = theme.name.casefold()
+            if key in taken:
+                raise ValueError(f"已有名为「{theme.name}」的主题")
+            taken.add(key)
+        if self.active not in BUILTIN_ACCENT_THEMES and self.active not in ids:
+            raise ValueError("当前主题不存在")
+        return self
+
+
+class AccentThemes(_AccentThemesBody):
+    """`.config/accent-themes.json`：用户主题、对内置主题的改色与当前选中项。revision 0 = 从未保存。"""
+    schema_version: Literal[1] = 1
+    revision: int = Field(default=0, ge=0)
+    updated_at: datetime | None = None
+
+
+class AccentThemesUpdate(_AccentThemesBody):
+    expected_revision: int = Field(ge=0)
+
+
 class CanvasGenerationDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["text", "image", "video", "audio"]

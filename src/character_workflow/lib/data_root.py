@@ -75,6 +75,10 @@ def canvas_ui_file() -> Path:
     return config_dir() / "canvas-ui.json"
 
 
+def accent_themes_file() -> Path:
+    return config_dir() / "accent-themes.json"
+
+
 AGENT_CREDENTIAL_NAME = "agent.json"
 
 
