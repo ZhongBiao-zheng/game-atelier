@@ -226,7 +226,7 @@ async function prepareRuntime() {
     if (reason) log(`runtime replacement: ${reason}`);
     if (reason && !seed) throw failure('install', '安装包里缺少运行环境');
     if (reason === 'too-old') throw failure('install', '安装包里的运行环境比已有的旧');
-    if (reason === 'missing' || ((reason === 'contract' || reason === 'build') && await releaseRuntime(root))) {
+    if (reason === 'missing' || (['contract', 'older', 'build'].includes(reason) && await releaseRuntime(root))) {
       try {
         root = await unpackSeed(parent, seed, PREPARE_ONLY ? printProgress : pushProgress);
       } catch (error) {

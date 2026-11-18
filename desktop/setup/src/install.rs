@@ -112,23 +112,6 @@ pub fn quit_app(dir: &Path, main: &str) -> bool {
     true
 }
 
-/// `bootstrap.version_key` order: the retired 5.x line sorts before 0.x.
-fn version_key(version: &str) -> Option<(bool, Vec<u64>)> {
-    let parts: Vec<u64> = version
-        .split('.')
-        .map(|p| p.parse().ok())
-        .collect::<Option<_>>()?;
-    (parts.len() == 3).then(|| (parts[0] != 5, parts))
-}
-
-fn installed_runtime_version(root: &Path) -> Option<String> {
-    ["current", "last-good"]
-        .iter()
-        .filter_map(|name| fs::read_to_string(root.join(name)).ok())
-        .map(|v| v.trim().to_string())
-        .find(|v| version_key(v).is_some())
-}
-
 fn remove_dir_with_retry(path: &Path) -> Result<(), String> {
     let mut attempt = 0;
     loop {
@@ -194,19 +177,9 @@ pub fn install(payload: &Payload, plan: &Plan, report: &mut dyn FnMut(f64)) -> R
     installed.push(UNINSTALLER.to_string());
     payload.write_uninstaller(&dir.join(UNINSTALLER), installed)?;
 
-    // 2. Runtime: an older one is replaced by this installer's; a newer one is kept.
-    let root = runtime_parent().join(RUNTIME_DIR);
-    if let Some(installed) = installed_runtime_version(&root) {
-        let older = match (version_key(&installed), version_key(&manifest.version)) {
-            (Some(a), Some(b)) => a < b,
-            _ => true,
-        };
-        log(&format!("runtime {installed} installed, replace={older}"));
-        if older {
-            stop_processes_under(&root);
-            remove_dir_with_retry(&root)?;
-        }
-    }
+    // 2. Runtime: whether to replace it is the shell's call (`--prepare-runtime`, contract). The
+    // app has quit; anything still running from the runtime would hold its files open.
+    stop_processes_under(&runtime_parent().join(RUNTIME_DIR));
     prepare_runtime(dir, &manifest.main, &mut |fraction| {
         report(COPY_SHARE + (1.0 - COPY_SHARE) * 0.98 * fraction)
     })?;
@@ -396,18 +369,6 @@ mod tests {
             resolve_dir(Path::new(r"D:\Apps\atelier"), product),
             PathBuf::from(r"D:\Apps\atelier")
         );
-    }
-
-    #[test]
-    fn versions_order_like_bootstrap() {
-        let key = |v: &str| version_key(v).unwrap();
-        assert!(
-            key("5.139.0") < key("0.5.140"),
-            "the retired 5.x line sorts first"
-        );
-        assert!(key("0.5.9") < key("0.5.10"));
-        assert!(version_key("5.139").is_none());
-        assert!(version_key("5.x.0").is_none());
     }
 
     #[test]

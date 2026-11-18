@@ -68,10 +68,18 @@ export function validVersion(version) {
   return typeof version === 'string' && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version);
 }
 
+/** Major version of the retired 5.x line, which sorts before 0.x (bootstrap.version_key). */
+const LEGACY_MAJOR = 5;
+
+function versionKey(version) {
+  const parts = version.split('.').map(Number);
+  return [parts[0] === LEGACY_MAJOR ? 0 : 1, ...parts];
+}
+
 export function compareVersions(a, b) {
-  const pa = a.split('.').map(Number);
-  const pb = b.split('.').map(Number);
-  for (let i = 0; i < 3; i += 1) {
+  const pa = versionKey(a);
+  const pb = versionKey(b);
+  for (let i = 0; i < pa.length; i += 1) {
     if (pa[i] !== pb[i]) return pa[i] < pb[i] ? -1 : 1;
   }
   return 0;
@@ -161,20 +169,32 @@ export function buildId(root, version) {
  * - `build`: it runs the seed's version, that version directory came from a seed (the record says
  *   so and still matches), and this seed is a different build. Test packages are reinstalled under
  *   the same version number; an in-app update never writes the record.
+ * - `older`: its version is lower than the seed's (a newer installer over an older install). A
+ *   runtime at or above the seed's version is kept, so an in-app update is never rolled back.
  * - `too-old`: it does not declare the contract and the seed is older, so the seed cannot help.
+ * The runtime's version is the newer of `current` and `last-good`: during an in-app update `current`
+ * already names the version being switched to.
  */
 export function replacementReason(root, seed) {
   if (!installed(root)) return 'missing';
-  const lastGood = readTrim(path.join(root, 'last-good'));
+  const version = runtimeVersion(root);
   if (!meetsContract(root)) {
-    return compareVersions(seed.version, lastGood) >= 0 ? 'contract' : 'too-old';
+    return compareVersions(seed.version, version) >= 0 ? 'contract' : 'too-old';
   }
-  if (lastGood === seed.version && seed.build) {
+  if (compareVersions(version, seed.version) < 0) return 'older';
+  if (version === seed.version && seed.build) {
     const record = seedRecord(root);
-    const build = buildId(root, lastGood);
-    if (record?.version === lastGood && record.build === build && build !== seed.build) return 'build';
+    const build = buildId(root, version);
+    if (record?.version === version && record.build === build && build !== seed.build) return 'build';
   }
   return null;
+}
+
+/** The newer of the runtime's `current` and `last-good` versions (`installed` holds: last-good is valid). */
+export function runtimeVersion(root) {
+  const lastGood = readTrim(path.join(root, 'last-good'));
+  const current = readTrim(path.join(root, 'current'));
+  return validVersion(current) && compareVersions(current, lastGood) > 0 ? current : lastGood;
 }
 
 /** `light` / `dark` as the page last reported it. */

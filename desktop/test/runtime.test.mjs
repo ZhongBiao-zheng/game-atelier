@@ -39,6 +39,32 @@ test('version rules match the bundle layout', () => {
   assert.equal(compareVersions('5.139.0', '5.138.9'), 1);
   assert.equal(compareVersions('5.10.0', '5.9.0'), 1);
   assert.equal(compareVersions('5.138.0', '5.138.0'), 0);
+  // bootstrap.version_key: the retired 5.x line sorts before 0.x.
+  assert.equal(compareVersions('5.139.0', '0.5.140'), -1);
+  assert.equal(compareVersions('0.5.10', '0.5.9'), 1);
+});
+
+test('replacement: a runtime older than the seed is replaced, never one at or above it', () => {
+  const ok = String(DESKTOP_CONTRACT);
+  const root = bundle([['0.5.140', ok, 'a']], '0.5.140', '0.5.140');
+  assert.equal(replacementReason(root, seed('0.5.141', 'b')), 'older');
+  assert.equal(replacementReason(root, seed('0.5.140', 'b')), null);
+  assert.equal(replacementReason(root, seed('0.5.139', 'b')), null);
+  // Across the version-line change: 5.x is older than any 0.x.
+  const legacy = bundle([['5.139.0', ok, 'a']], '5.139.0', '5.139.0');
+  assert.equal(replacementReason(legacy, seed('0.5.140', 'b')), 'older');
+  assert.equal(replacementReason(root, seed('5.139.0', 'b')), null);
+});
+
+test('replacement: an in-app update in progress counts as the runtime version', () => {
+  const ok = String(DESKTOP_CONTRACT);
+  // current already names the version being switched to; last-good still names the old one.
+  const updating = bundle([['0.5.140', ok, 'a'], ['0.5.142', ok, 'u']], '0.5.142', '0.5.140');
+  assert.equal(replacementReason(updating, seed('0.5.141', 'b')), null);
+  assert.equal(replacementReason(updating, seed('0.5.143', 'b')), 'older');
+  // An unreadable current falls back to last-good.
+  fs.writeFileSync(path.join(updating, 'current'), 'garbage\n');
+  assert.equal(replacementReason(updating, seed('0.5.141', 'b')), 'older');
 });
 
 test('contract levels: plain integers only, anything else is 0', () => {

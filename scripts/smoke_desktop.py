@@ -97,6 +97,23 @@ def _seed_build(seed_dir: Path) -> tuple[str, str]:
     return info["version"], info["build"]
 
 
+def _relabel_runtime(root: Path, version: str) -> None:
+    """Make the unpacked runtime claim another version, as an older install or an in-app update
+    would have left it (a lower version is replaced by the seed, a higher one is kept)."""
+    current = (root / "last-good").read_text(encoding="utf-8").strip()
+    (root / "versions" / current).rename(root / "versions" / version)
+    for name in ("versions/" + version + "/VERSION", "current", "last-good"):
+        (root / name).write_text(version + "\n", encoding="utf-8")
+
+
+def _runtime_version(root: Path) -> str:
+    return (root / "last-good").read_text(encoding="utf-8").strip()
+
+
+# Lower than any released version (the retired 5.x line sorts before 0.x) / higher than the seed.
+OLDER_RUNTIME, NEWER_RUNTIME = "5.0.0", "999.0.0"
+
+
 def _electron_reopens(seed_dir: Path, executable: Path, env: dict[str, str], timeout: int,
                       runtime_parent: Path, data_runtime: Path) -> list[str]:
     root = runtime_parent / "GameAtelier"
@@ -118,7 +135,13 @@ def _electron_reopens(seed_dir: Path, executable: Path, env: dict[str, str], tim
         executable, env, timeout, runtime_parent, data_runtime, replacement="build")]
     if (payload / "BUILD_ID").read_text(encoding="utf-8").strip() != build:
         problems.append("other seed build: the runtime still carries the stale build")
-    # 3. Nothing to change: the runtime is kept.
+    # 3. A runtime older than the seed (a newer installer over an older install) is replaced.
+    _relabel_runtime(root, OLDER_RUNTIME)
+    problems += [f"older runtime: {p}" for p in _electron_run(
+        executable, env, timeout, runtime_parent, data_runtime, replacement="older")]
+    if _runtime_version(root) != version:
+        problems.append(f"older runtime: still at {_runtime_version(root)} after the replacement")
+    # 4. Nothing to change: the runtime is kept.
     problems += [f"current runtime: {p}" for p in _electron_run(
         executable, env, timeout, runtime_parent, data_runtime, replacement=None)]
     return problems
@@ -353,6 +376,26 @@ def smoke_windows_setup(setup: Path, timeout: int) -> int:
             problems.append("the install over the same version replaced the runtime")
         problems += [f"start after reinstall: {p}" for p in _electron_run(
             executable, env, timeout, runtime_parent, data_runtime, replacement=None)]
+
+    # A newer installer over an older install: the shell (--prepare-runtime) replaces the runtime.
+    root = runtime_parent / "GameAtelier"
+    if not problems:
+        version = _runtime_version(root)
+        _relabel_runtime(root, OLDER_RUNTIME)
+        shell_at = _size(runtime_parent / "shell.log")
+        code, _ = _timed(install, quiet)
+        decided = re.findall(r"runtime replacement: (\w[\w-]*)", _since(runtime_parent / "shell.log", shell_at))
+        if code != 0 or decided != ["older"] or _runtime_version(root) != version:
+            problems.append(f"install over an older runtime: exit {code}, shell decided {decided}, "
+                            f"runtime now {_runtime_version(root)} (expected {version})")
+        problems += [f"start after the upgrade install: {p}" for p in _electron_run(
+            executable, env, timeout, runtime_parent, data_runtime, replacement=None)]
+    # An older installer over a runtime raised by an in-app update: the runtime is never rolled back.
+    if not problems:
+        _relabel_runtime(root, NEWER_RUNTIME)
+        code, _ = _timed(install, quiet)
+        if code != 0 or _runtime_version(root) != NEWER_RUNTIME:
+            problems.append(f"install under a newer runtime: exit {code}, runtime now {_runtime_version(root)}")
 
     for log in (runtime_parent / "shell.log", data_runtime / "server.log"):
         print(f"--- {log.name}\n{_tail(log)}")
