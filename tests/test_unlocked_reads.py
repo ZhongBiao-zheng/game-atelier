@@ -85,13 +85,35 @@ def test_jobs_watcher_rides_out_the_moment_the_name_is_missing(isolated_data_roo
     assert sent == [{"job_id": job.job_id, "status": "pending"}]
 
 
-def test_a_truly_missing_file_is_not_waited_on(tmp_path, monkeypatch):
+def test_a_truly_missing_file_costs_only_one_short_second_look(tmp_path, monkeypatch):
     monkeypatch.setattr(atomic_io, "_RETRY_PERMISSION_ERRORS", True)
     slept: list[float] = []
     monkeypatch.setattr(atomic_io.time, "sleep", slept.append)
     with pytest.raises(FileNotFoundError):
         atomic_io.read_text_with_retry(tmp_path / "absent.json")
-    assert slept == []
+    assert slept == [atomic_io._MISSING_CONFIRM_DELAY]
+
+
+def test_the_instant_both_names_are_absent_is_ridden_out(tmp_path, monkeypatch):
+    """Windows CI 实测（run 44263665760）：改名瞬间临时文件和目标名都看不到，第二眼才出现。"""
+    monkeypatch.setattr(atomic_io, "_RETRY_PERMISSION_ERRORS", True)
+    target = tmp_path / "job-1.json"
+
+    def sleep(_seconds):
+        target.write_text('{"ok": true}', encoding="utf-8")  # 第二眼之前改名完成
+
+    monkeypatch.setattr(atomic_io.time, "sleep", sleep)
+    real_read = Path.read_text
+    calls = {"n": 0}
+
+    def vanishing(self, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise FileNotFoundError(2, "simulated rename instant")
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", vanishing)
+    assert atomic_io.read_text_with_retry(target) == '{"ok": true}'
 
 
 def test_a_missing_name_is_retried_only_while_a_replace_is_in_flight(tmp_path, monkeypatch):

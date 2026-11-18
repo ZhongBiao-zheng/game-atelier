@@ -21,6 +21,8 @@ _REPLACE_ATTEMPTS = 10
 _REPLACE_DELAY = 0.05
 # 只有 Windows 会在替换瞬间拒绝访问；测试把它置 True 才能在 POSIX 上模拟这一刻。
 _RETRY_PERMISSION_ERRORS = os.name == "nt"
+# 改名的一瞬间临时文件已经没了、目标名还没出现：两样都看不到时隔这么久再看一眼。
+_MISSING_CONFIRM_DELAY = 0.02
 
 
 def _replace_with_retry(tmp: Path, path: Path) -> None:
@@ -38,15 +40,23 @@ def _replace_in_flight(path: Path) -> bool:
     """目标名查不到时，判断是不是有一次替换正在进行：目标已经回来了，或者旁边还有本模块的临时文件。
 
     Windows CI 实测（2026-11-18，4 进程并发负载）：os.replace 进行中，目标名会消失 2–230 ms，
-    期间目录里只剩 `<stem>.<hex>.tmp`。真不存在的文件两个条件都不满足，立即按不存在处理、不白等。"""
-    if path.exists():
-        return True
+    期间目录里大多只剩 `<stem>.<hex>.tmp`；也有一瞬间两样都看不到，所以都看不到时隔 20 ms
+    再看一眼。真不存在的文件只多等这 20 ms。"""
     prefix = f"{path.stem}."
-    try:
-        return any(item.name.startswith(prefix) and item.name.endswith(".tmp")
-                   for item in path.parent.iterdir())
-    except OSError:
-        return False
+
+    def visible() -> bool:
+        if path.exists():
+            return True
+        try:
+            return any(item.name.startswith(prefix) and item.name.endswith(".tmp")
+                       for item in path.parent.iterdir())
+        except OSError:
+            return False
+
+    if visible():
+        return True
+    time.sleep(_MISSING_CONFIRM_DELAY)
+    return visible()
 
 
 def read_text_with_retry(path: Path, encoding: str = "utf-8") -> str:
