@@ -85,16 +85,35 @@ def test_jobs_watcher_rides_out_the_moment_the_name_is_missing(isolated_data_roo
     assert sent == [{"job_id": job.job_id, "status": "pending"}]
 
 
-def test_a_truly_missing_file_is_not_waited_on_by_default(tmp_path, monkeypatch):
+def test_a_truly_missing_file_is_not_waited_on(tmp_path, monkeypatch):
     monkeypatch.setattr(atomic_io, "_RETRY_PERMISSION_ERRORS", True)
     slept: list[float] = []
     monkeypatch.setattr(atomic_io.time, "sleep", slept.append)
     with pytest.raises(FileNotFoundError):
         atomic_io.read_text_with_retry(tmp_path / "absent.json")
     assert slept == []
-    with pytest.raises(FileNotFoundError):
-        atomic_io.read_text_with_retry(tmp_path / "absent.json", retry_missing=True)
-    assert slept == [atomic_io._MISSING_DELAY] * atomic_io._MISSING_ATTEMPTS
+
+
+def test_a_missing_name_is_retried_only_while_a_replace_is_in_flight(tmp_path, monkeypatch):
+    """Windows CI 实测：替换进行中目录里只剩 `<stem>.<hex>.tmp`，目标名消失 2–230 ms。"""
+    monkeypatch.setattr(atomic_io, "_RETRY_PERMISSION_ERRORS", True)
+    monkeypatch.setattr(atomic_io.time, "sleep", lambda _s: None)
+    target = tmp_path / "job-1.json"
+    staged = tmp_path / "job-1.0123abcd.tmp"
+    staged.write_text("{}", encoding="utf-8")
+    calls = {"n": 0}
+    real_read = Path.read_text
+
+    def vanishing(self, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] <= 3:
+            raise FileNotFoundError(2, "simulated replace")
+        target.write_text('{"ok": true}', encoding="utf-8")
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", vanishing)
+    assert atomic_io.read_text_with_retry(target) == '{"ok": true}'
+    assert calls["n"] == 4
 
 
 def test_runner_cancel_check_does_not_fail_the_job_during_a_replace(isolated_data_root, replacing):

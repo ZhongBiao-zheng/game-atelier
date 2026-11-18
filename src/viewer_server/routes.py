@@ -96,7 +96,7 @@ def get_jobs() -> list[Job]:
     for p in sorted(jobs_dir.glob("*.json")):
         # 一条坏文件（半写 / 手改 schema 不符）不能拖垮整个列表 → 跳过并留日志。
         try:
-            out.append(_load_job(json.loads(read_text_with_retry(p, retry_missing=True))))
+            out.append(_load_job(json.loads(read_text_with_retry(p))))
         except (OSError, json.JSONDecodeError, ValidationError):
             logger.warning("skipping bad job file: %s", p.name)
     return out
@@ -108,7 +108,7 @@ def get_job(job_id: str) -> Job:
     if not p.exists():
         raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）")
     # 写入方持 job_lock 原子替换；Windows 上替换那一刻打开会 PermissionError，重试越过。
-    return _load_job(json.loads(read_text_with_retry(p, retry_missing=True)))
+    return _load_job(json.loads(read_text_with_retry(p)))
 
 
 

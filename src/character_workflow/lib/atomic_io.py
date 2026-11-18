@@ -21,9 +21,6 @@ _REPLACE_ATTEMPTS = 10
 _REPLACE_DELAY = 0.05
 # 只有 Windows 会在替换瞬间拒绝访问；测试把它置 True 才能在 POSIX 上模拟这一刻。
 _RETRY_PERMISSION_ERRORS = os.name == "nt"
-# Windows CI 实测（2026-11-18）：替换进行中，目标名还会短暂查不到（FileNotFoundError）。
-_MISSING_ATTEMPTS = 3
-_MISSING_DELAY = 0.02
 
 
 def _replace_with_retry(tmp: Path, path: Path) -> None:
@@ -37,27 +34,38 @@ def _replace_with_retry(tmp: Path, path: Path) -> None:
             time.sleep(_REPLACE_DELAY)
 
 
-def read_text_with_retry(path: Path, encoding: str = "utf-8", *, retry_missing: bool = False) -> str:
+def _replace_in_flight(path: Path) -> bool:
+    """目标名查不到时，判断是不是有一次替换正在进行：目标已经回来了，或者旁边还有本模块的临时文件。
+
+    Windows CI 实测（2026-11-18，4 进程并发负载）：os.replace 进行中，目标名会消失 2–230 ms，
+    期间目录里只剩 `<stem>.<hex>.tmp`。真不存在的文件两个条件都不满足，立即按不存在处理、不白等。"""
+    if path.exists():
+        return True
+    prefix = f"{path.stem}."
+    try:
+        return any(item.name.startswith(prefix) and item.name.endswith(".tmp")
+                   for item in path.parent.iterdir())
+    except OSError:
+        return False
+
+
+def read_text_with_retry(path: Path, encoding: str = "utf-8") -> str:
     """读一个会被 `os.replace` 原地替换的文件。
 
-    Windows 上替换的瞬间目标文件不可读（PermissionError），写入方已有重试、读取方没有时，
-    恰好在这一刻读的线程会失败（实例：任务启动读 keys.json 撞上保存供应商）。POSIX 不命中，行为不变。
-
-    retry_missing：Windows 上替换进行中目标名还会短暂查不到。只有「调用方刚确认过文件存在」
-    （列目录、文件事件、必然存在的任务文件）时才传 True；否则真不存在的文件会白等 60 ms。"""
-    missing = 0
+    Windows 上替换进行中，目标要么短暂不可读（PermissionError），要么名字短暂查不到
+    （FileNotFoundError，见 `_replace_in_flight`）；两种都重试越过（实例：任务启动读 keys.json
+    撞上保存供应商；任务执行线程读任务文件撞上进度回写）。POSIX 的替换是原子的，行为不变。"""
     for attempt in range(_REPLACE_ATTEMPTS):
+        last = attempt == _REPLACE_ATTEMPTS - 1
         try:
             return path.read_text(encoding=encoding)
         except FileNotFoundError:
-            if not (retry_missing and _RETRY_PERMISSION_ERRORS) or missing >= _MISSING_ATTEMPTS:
+            if not _RETRY_PERMISSION_ERRORS or last or not _replace_in_flight(path):
                 raise
-            missing += 1
-            time.sleep(_MISSING_DELAY)
         except PermissionError:
-            if not _RETRY_PERMISSION_ERRORS or attempt == _REPLACE_ATTEMPTS - 1:
+            if not _RETRY_PERMISSION_ERRORS or last:
                 raise
-            time.sleep(_REPLACE_DELAY)
+        time.sleep(_REPLACE_DELAY)
     raise AssertionError("unreachable")
 
 
