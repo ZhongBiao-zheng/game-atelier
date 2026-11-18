@@ -1,7 +1,7 @@
 // Desktop shell: a window, a tray icon and the viewer-server's lifetime. No business logic.
 // Behaviour contract: docs/contracts/desktop-shell.md.
 import {
-  app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, screen, session, shell, Tray,
+  app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, powerMonitor, screen, session, shell, Tray,
 } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -52,6 +52,8 @@ const state = {
   currentUrl: null,
   booting: false,
   quitting: false,
+  /** Shut down / log out / session end: quit without asking, never hold up the system. */
+  systemEnding: false,
   /** Set once the seed was unpacked by this launch (a first start). */
   unpacked: false,
   progressAt: 0,
@@ -290,7 +292,8 @@ async function quit() {
     const server = await rt.verifiedServer(dataRoot);
     if (server && rt.isOwned(dataRoot, server)) {
       const work = await rt.activeWork(dataRoot, server);
-      if (work !== 0 && !SMOKE && !(await confirm(`退出 ${app.getName()}`, workMessage(work, '退出'), '仍然退出'))) {
+      const ask = work !== 0 && !SMOKE && !state.systemEnding;
+      if (ask && !(await confirm(`退出 ${app.getName()}`, workMessage(work, '退出'), '仍然退出'))) {
         state.quitting = false;
         return;
       }
@@ -301,6 +304,13 @@ async function quit() {
     }
   }
   app.exit(0);
+}
+
+/** The system is going down: stop the server this shell started, without a question. */
+function endSession(reason) {
+  log(`system ending (${reason}): quitting without confirmation`);
+  state.systemEnding = true;
+  quit();
 }
 
 function setTheme(value) {
@@ -397,6 +407,14 @@ function createWindow() {
   wc.on('did-finish-load', () => log(`page loaded ${wc.getURL()}`));
   wc.on('will-navigate', guardNavigation);
   wc.on('will-redirect', guardNavigation);
+  // Backstop: about:blank (and anything else the renderer commits without asking) never reaches
+  // will-navigate. If the main frame lands somewhere unlisted, go back to the expected page.
+  wc.on('did-navigate', (_event, url) => {
+    if (allowedNavigation(url, LOCAL_PAGE)) return;
+    log(`left the allowed pages (${url.slice(0, 120)}); going back`);
+    state.currentUrl = null;
+    navigate(state.shown ? serverUrl(state.shown) : localUrl(), state.shown);
+  });
   wc.setWindowOpenHandler(({ url }) => {
     if (allowedNavigation(url, LOCAL_PAGE)) log(`blocked same-host new window ${url}`);
     else openExternal(url);
@@ -407,6 +425,8 @@ function createWindow() {
     log(`page process gone: ${details.reason}`);
     if (!state.quitting) wc.reload();
   });
+  // Windows: the user is logging off or shutting down.
+  win.on('session-end', () => endSession('session-end'));
   win.on('close', (event) => {
     if (state.quitting) return;
     // Closing keeps the server, running jobs and agent connections alive in the tray.
@@ -524,6 +544,11 @@ function start() {
   listen('atelier:open-log', 'local', openLog);
   createWindow();
   createTray();
+  // macOS: shut down, restart or log out. preventDefault asks the system to wait for the quit.
+  powerMonitor.on('shutdown', (event) => {
+    event.preventDefault();
+    endSession('shutdown');
+  });
   boot();
   watchdog();
   if (SMOKE) runSmoke();

@@ -63,6 +63,15 @@ export async function securityProbe(win, port, webPreferences) {
   }
   await wc.executeJavaScript("document.querySelector('iframe[name=\"atelier-probe\"]')?.remove()");
 
+  // The main frame cannot stay on a page outside the allowed set (about:blank skips will-navigate).
+  await wc.executeJavaScript(`location.href = 'about:blank'; true`).catch(() => {});
+  let back = false;
+  for (let i = 0; i < 40 && !back; i += 1) {
+    await new Promise((r) => { setTimeout(r, 250); });
+    back = wc.getURL().startsWith(`http://127.0.0.1:${port}/`);
+  }
+  if (!back) problems.push(`main frame stayed on ${wc.getURL()}`);
+
   for (const [url, host] of [[`http://localhost:${port}/api/connection/status`, 'http://localhost'], ['data:text/html,<p>probe</p>', 'data://']]) {
     const other = await otherPage(url, webPreferences);
     if (other.host !== host) problems.push(`${url} did not load (${other.host})`);
