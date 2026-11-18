@@ -5,7 +5,7 @@ import json
 import logging
 import secrets
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -298,6 +298,10 @@ def clone_job_for_retry(job_id: str) -> Job:
         "evolink_state": None,
         # 「自动」重试从组内顺序重新开始，不沿用上一单已经换掉的供应商。
         "route_tried": None,
+        "gateway_idempotency_key": None,
+        "gateway_request_fingerprint": None,
+        "gateway_unconfirmed": None,
+        "gateway_reattach_of": None,
     })
     clone = src.model_copy(update={
         "job_id": new_job_id(),
@@ -331,6 +335,35 @@ def has_resumable_gateway_task(job: Job) -> bool:
     return bool(job.provider == "atelier"
                 and job.params.provider_task_protocol == "atelier_gateway"
                 and job.params.provider_task_ids)
+
+
+# 主机网关任务结束后只留 24 小时；超过这个窗口再用原幂等键，主机会当成新任务。留 4 小时余量。
+GATEWAY_REATTACH_WINDOW = timedelta(hours=20)
+
+
+def gateway_reattach_params(source: Job | None, alias: str | None) -> dict[str, Any]:
+    """「再次生成」时从原任务继承的网关接回字段；不该接回时返回空字典。
+
+    只接回：同一个局域网 Atelier 供应商、原任务失败且接入端没从主机拿到终态
+    （`gateway_unconfirmed`）、提交不满 20 小时。请求是否完全相同由 caller 按实际发给主机的
+    内容比指纹，不同就换新键下新单。
+    """
+    if (source is None or source.status != JobStatus.FAILED or source.provider != "atelier"
+            or not alias or source.alias != alias):
+        return {}
+    params = source.params
+    if not (params.gateway_unconfirmed and params.gateway_idempotency_key
+            and params.gateway_request_fingerprint):
+        return {}
+    try:
+        submitted = datetime.fromisoformat(source.submitted_at)
+    except (TypeError, ValueError):
+        return {}
+    if submitted.tzinfo is None or datetime.now(timezone.utc) - submitted > GATEWAY_REATTACH_WINDOW:
+        return {}
+    return {"gateway_idempotency_key": params.gateway_idempotency_key,
+            "gateway_request_fingerprint": params.gateway_request_fingerprint,
+            "gateway_reattach_of": source.job_id}
 
 
 def has_resumable_music_task(job: Job) -> bool:

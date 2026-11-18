@@ -248,7 +248,8 @@ def render(*, prompt: str, model: str, alias: str, output_dir: Path,
 
     def changed():
         for field in ("provider_task_ids", "provider_task_protocol", "warnings",
-                      "actual_cost_cny", "actual_n"):
+                      "actual_cost_cny", "actual_n", "gateway_idempotency_key",
+                      "gateway_request_fingerprint", "gateway_unconfirmed", "gateway_reattach_of"):
             if field in request:
                 params[field] = request[field]
         if persist:

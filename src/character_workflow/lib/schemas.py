@@ -214,6 +214,14 @@ class JobParams(BaseModel):
     # tuzi_async is a historical ownership tag, never a supported submission protocol.
     # 局域网 Atelier：网关那边实际出图的成员别名（ADR-0025）。
     gateway_member: str | None = Field(default=None, max_length=120)
+    # 局域网 Atelier（接入端，runner 独占写）：第一次提交前生成并落盘的幂等键，以及这次实际发给
+    # 主机的请求指纹（提示词、模型、参数、素材字节）。同一幂等键重发只会拿回主机上的原任务。
+    gateway_idempotency_key: str | None = Field(default=None, max_length=200)
+    gateway_request_fingerprint: str | None = Field(default=None, max_length=64)
+    # 接入端没从主机拿到这次任务的终态（提交未确认、查询失败、下载失败）；「再次生成」据此接回原任务。
+    gateway_unconfirmed: bool | None = None
+    # 这次是「再次生成」接回的哪个失败任务；主机报原任务失败时在同一次运行里换新键重新下单。
+    gateway_reattach_of: str | None = Field(default=None, max_length=200)
     provider_task_protocol: Literal[
         "tuzi_async", "tuzi_images", "seedance", "evolink", "atelier_gateway", "declarative",
         "yinchao",

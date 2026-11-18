@@ -109,6 +109,13 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   `allowed_models` / `allowed_aliases` 为 null 表示全部、空数组表示无权限；模型支持精确匹配和尾部 `*` 前缀匹配，alias 精确匹配。
   按网关本地日历零点、周一和月初重置；受理时按首个可选成员估价预占，与限额判断共用锁。
   终态优先结算实际费用，否则成功用估价、失败或取消记零；无价预占零。失败切换中各次已报告实际费用累加。
+- 接入端接回原任务（2026-11-18 起）：第一次提交前生成幂等键并连同请求指纹（提示词、模型、发给主机的参数、素材字节的 sha256）
+  落进 `params.gateway_idempotency_key` / `gateway_request_fingerprint`，之后所有重发都用这个键（主机按「成员密钥 + 幂等键」去重，
+  不比较请求体）。接入端没从主机拿到终态（提交三次都未确认、查询放弃、产物下载重试 4 次仍失败）时记 `gateway_unconfirmed=true`。
+  「再次生成」：创作台失败轮次在 `POST /api/studio/jobs` 带 `reattach_job_id`，画布由服务端取同一节点最近一次任务；原任务是
+  `gateway_unconfirmed` 的失败、同一供应商、提交不满 20 小时时，新任务继承幂等键与指纹并记 `gateway_reattach_of`。caller 按这次实际
+  要发的内容重算指纹，相同才用原键重发（主机返回原任务，接回结果），不同就换新键下新单；接回的原任务在主机上已是失败或取消时，
+  同一次运行里换新键重新下单。浏览器传来的 `gateway_*` 字段一律丢弃。
 - 接入端：`provider="atelier"` 的 KEY，`ModelSpec.via` 是网关成员快照；Job 用 `provider_task_protocol=atelier_gateway`
   与 `provider_task_ids` 记录网关任务 id，重启后只查询既有任务。caller 把网关结果映射为：401 → `gateway api 401`，
   403 → `gateway api 403`，429 → `gateway api 429`，`error_kind=unavailable` → `gateway api 503: unavailable`（均可触发接入端自动路由失败切换），

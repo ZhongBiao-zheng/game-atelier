@@ -1337,6 +1337,19 @@ def _new_result_node(
     return CanvasVideoNode(**common, type="video", size=image_size, data=data)
 
 
+def _gateway_reattach(project_id: str, surface_id: str, alias: str) -> dict[str, Any]:
+    """同一节点最近一次任务若是「网关未确认」的失败（20 小时内），重新生成时接回主机上的原任务。"""
+    from character_workflow.lib.jobs import gateway_reattach_params
+
+    previous = max(
+        (item for item in list_jobs()
+         if item.namespace == "canvas" and item.canvas_project_id == project_id
+         and item.canvas_run is not None
+         and item.canvas_run.snapshot.surface_node_id == surface_id),
+        key=lambda item: item.submitted_at, default=None)
+    return gateway_reattach_params(previous, alias)
+
+
 def _commit_frozen_run(
     project_id: str,
     current: CanvasDocument,
@@ -1411,6 +1424,8 @@ def _commit_frozen_run(
         result_node_id=result_id,
         candidates=candidates,
     )
+    if key.provider == "atelier":
+        job_params = job_params.model_copy(update=_gateway_reattach(project_id, surface.id, key.alias))
     job = Job(
         job_id=job_id,
         character_id=key.alias,

@@ -240,7 +240,7 @@ export function RoundList({
   onCancel?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   reuseParameter?: ParameterReuse;
-  onRegenerate?: (config: RoundConfig) => void | Promise<void>;
+  onRegenerate?: (config: RoundConfig, failedJobId?: string) => void | Promise<void>;
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onEditAsReference?: (path: string) => void | Promise<void>;
@@ -448,7 +448,7 @@ function PendingBatch({
   onCancel?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   reuseParameter?: ParameterReuse;
-  onRegenerate?: (config: RoundConfig) => void | Promise<void>;
+  onRegenerate?: (config: RoundConfig, failedJobId?: string) => void | Promise<void>;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   mediaActive: boolean;
 }) {
@@ -958,7 +958,7 @@ function DoneBatch({
   onToggleHidden?: (path: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   reuseParameter?: ParameterReuse;
-  onRegenerate?: (config: RoundConfig) => void | Promise<void>;
+  onRegenerate?: (config: RoundConfig, failedJobId?: string) => void | Promise<void>;
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
   onLightbox?: (src: string) => void;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
@@ -1235,7 +1235,7 @@ function FailedCard({
   onDeleteFailed?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   reuseParameter?: ParameterReuse;
-  onRegenerate?: (config: RoundConfig) => void | Promise<void>;
+  onRegenerate?: (config: RoundConfig, failedJobId?: string) => void | Promise<void>;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   mediaActive: boolean;
 }) {
@@ -1305,7 +1305,7 @@ function FailedCard({
       {config && (
         <div className={ROUND_ACTIONS_CLASS}>
           <ActionButton onClick={() => { void onReEdit?.(config, round.jobId); }}>重新编辑</ActionButton>
-          <ActionButton onClick={() => { void onRegenerate?.(config); }}>再次生成</ActionButton>
+          <ActionButton onClick={() => { void onRegenerate?.(config, round.jobId); }}>再次生成</ActionButton>
         </div>
       )}
     </section>

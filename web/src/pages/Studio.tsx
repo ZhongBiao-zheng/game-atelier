@@ -538,10 +538,10 @@ function StudioFull() {
     );
   }, [keys, providers, persistedJobs]);
 
-  const onSubmit = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
+  const onSubmit = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string, reattachJobId?: string) => {
     const wantVideo = overrideConfig ? overrideConfig.kind === 'video' : kind === 'video';
     if (wantVideo) {
-      await onSubmitVideo(prompt, overrideConfig, promptTemplate);
+      await onSubmitVideo(prompt, overrideConfig, promptTemplate, reattachJobId);
       return;
     }
     const effectiveAlias = overrideConfig?.alias ?? providerAlias;
@@ -677,6 +677,7 @@ function StudioFull() {
         alias: isAutoProvider({ alias: effectiveAlias }) ? undefined : effectiveAlias ?? undefined,
         model: effectiveModel,
         params: jobParams,
+        ...(reattachJobId ? { reattach_job_id: reattachJobId } : {}),
       });
     } catch (e: any) {
       setRounds((rs) =>
@@ -703,7 +704,7 @@ function StudioFull() {
     );
   };
 
-  const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
+  const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string, reattachJobId?: string) => {
     // 切到视频后 PromptInput 只是按模型分类过滤显示，父级 providerAlias/model 不一定已是视频 key——这里收敛。
     const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
     const videoKeys = providers.filter((item) => videoModelsOf(item).length > 0);
@@ -842,6 +843,7 @@ function StudioFull() {
         model: effectiveModel,
         params: videoParams,
         kind: 'video',
+        ...(reattachJobId ? { reattach_job_id: reattachJobId } : {}),
       });
     } catch (e: any) {
       setRounds((rs) =>
@@ -1378,7 +1380,7 @@ function StudioFull() {
     setPromptAssetId(config.promptAssetId ?? null);
   }
 
-  async function regenerate(config: RoundConfig) {
+  async function regenerate(config: RoundConfig, failedJobId?: string) {
     setRecipeNotice(null);
     if (config.alias) setProviderAlias(config.alias);
     setModel(config.model);
@@ -1398,7 +1400,7 @@ function StudioFull() {
       if (config.n) setCount(clampImageCount(config.n));
       if (config.mjParams) setMjParams(config.mjParams);
     }
-    await onSubmit(config.prompt, config);
+    await onSubmit(config.prompt, config, undefined, failedJobId);
   }
 
   async function deleteDoneBatch(jobId: string, imagePaths: string[]) {

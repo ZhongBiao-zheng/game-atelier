@@ -54,6 +54,13 @@ export interface JobParams {
   route_order?: string[];
   /** 局域网 Atelier：网关那边实际出图的成员别名。 */
   gateway_member?: string | null;
+  /** 局域网 Atelier 接入端：幂等键与请求指纹（服务端写，Web 只读）。 */
+  gateway_idempotency_key?: string | null;
+  gateway_request_fingerprint?: string | null;
+  /** 没从主机拿到终态（提交未确认 / 查询失败 / 下载失败）；服务端写。 */
+  gateway_unconfirmed?: boolean | null;
+  /** 「再次生成」接回的原失败任务 id；服务端写。 */
+  gateway_reattach_of?: string | null;
   /** 厂商订单；Web 只读。Tuzi 支持续查，Seedance 留供核对，不自动重提。 */
   provider_task_protocol?: 'tuzi_async' | 'tuzi_images' | 'seedance' | 'evolink' | 'atelier_gateway' | 'declarative' | 'yinchao';
   provider_task_ids?: string[];

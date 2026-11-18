@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import time
@@ -25,6 +26,8 @@ PROTOCOL_VERSION = 2
 SUBMIT_ATTEMPTS = 3
 POLL_INTERVAL_SECONDS = 2.0
 POLL_GIVE_UP_SECONDS = 600.0
+# 产物下载失败后的退避（秒）：共 4 次请求。
+DOWNLOAD_RETRY_DELAYS = (2.0, 5.0, 10.0)
 _TIMEOUT = (5.0, 60.0)
 _TERMINAL = {"done", "failed", "canceled"}
 _SUFFIX = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
@@ -202,30 +205,80 @@ def _run_task(
     def cancelled():
         return cancellation_observed or bool(should_cancel and should_cancel())
 
+    def unconfirmed(error: BaseException) -> BaseException:
+        # 没从主机拿到这次任务的终态：「再次生成」可以凭幂等键接回主机上的原任务。
+        params["gateway_unconfirmed"] = True
+        if on_params_changed:
+            on_params_changed()
+        return error
+
     with _session() as session:
-        existing = params.get("provider_task_ids") or []
-        if params.get("provider_task_protocol") == PROTOCOL and existing:
-            task_id = str(existing[0])
-        else:
-            wire_params = {k: v for k, v in params.items()
-                           if k in ALLOWED_PARAMS_BY_KIND[kind] and v is not None}
-            if kind == "image_edit":
-                wire_params["image_edit"] = {k: v for k, v in params.get("image_edit", {}).items()
-                                             if k in {"mode", "x", "y", "width", "height"}}
-            task_id = _submit(session, base, headers, alias=alias, kind=kind, model=model, prompt=prompt, n=n,
-                              params=wire_params,
-                              uploads={group: ([params[FILE_PARAMS[group]]] if group == "mask"
-                                               else params[FILE_PARAMS[group]])
-                                       for group in FILES_BY_KIND[kind]
-                                       if params.get(FILE_PARAMS[group])})
+        wire_params = {k: v for k, v in params.items()
+                       if k in ALLOWED_PARAMS_BY_KIND[kind] and v is not None}
+        if kind == "image_edit":
+            wire_params["image_edit"] = {k: v for k, v in params.get("image_edit", {}).items()
+                                         if k in {"mode", "x", "y", "width", "height"}}
+        uploads = {group: ([params[FILE_PARAMS[group]]] if group == "mask"
+                           else params[FILE_PARAMS[group]])
+                   for group in FILES_BY_KIND[kind] if params.get(FILE_PARAMS[group])}
+        fingerprint = _fingerprint(alias=alias, kind=kind, model=model, prompt=prompt, n=n,
+                                   params=wire_params, uploads=uploads)
+
+        def submit(*, new_key: bool) -> str:
+            if new_key:
+                params["gateway_idempotency_key"] = uuid.uuid4().hex
+                params["gateway_request_fingerprint"] = fingerprint
+                params["provider_task_protocol"] = None
+                params["provider_task_ids"] = None
+            # 幂等键先落盘再发：提交结果不确定时，下一次用同一个键只会拿回主机上的原任务。
+            params["gateway_unconfirmed"] = None
+            if on_params_changed:
+                on_params_changed()
+            try:
+                task_id = _submit(session, base, headers, alias=alias, kind=kind, model=model,
+                                  prompt=prompt, n=n, params=wire_params, uploads=uploads,
+                                  idempotency_key=params["gateway_idempotency_key"])
+            except GatewayError as error:
+                if "未确认" in str(error):
+                    raise unconfirmed(error) from error.__cause__
+                raise
             params["provider_task_protocol"] = PROTOCOL
             params["provider_task_ids"] = [task_id]
             if on_params_changed:
                 on_params_changed()
             if on_task_id:
                 on_task_id(task_id)
+            return task_id
+
+        def poll(task_id: str) -> dict[str, Any]:
+            try:
+                return _poll(session, base, headers, task_id, phase, cancelled)
+            except GatewayError as error:
+                raise unconfirmed(error) from error.__cause__
+
+        existing = params.get("provider_task_ids") or []
+        reattach_of = params.get("gateway_reattach_of")
+        if params.get("provider_task_protocol") == PROTOCOL and existing and not reattach_of:
+            task_id = str(existing[0])  # 本机服务重启后续查：只查询这个任务，不重新提交
+            reattached = False
+        else:
+            # 「再次生成」只在这次要发的请求与原任务完全相同时接回（同一幂等键，主机返回原任务）；
+            # 改过提示词、模型、参数或素材就是新单，换新键。
+            reattached = bool(reattach_of and params.get("gateway_idempotency_key")
+                              and params.get("gateway_request_fingerprint") == fingerprint)
+            if reattach_of and not reattached:
+                params["gateway_reattach_of"] = None
+            # 已有幂等键而不是「再次生成」：本任务上次提交没确认，用原键重发拿回原任务。
+            task_id = submit(new_key=not reattached and (
+                bool(reattach_of) or not params.get("gateway_idempotency_key")))
         phase("sent")
-        status = _poll(session, base, headers, task_id, phase, cancelled)
+        status = poll(task_id)
+        if reattached and status["status"] in ("failed", "canceled") and not cancelled():
+            # 接回的原任务主机已判失败：同一次运行里换新键重新下单，不让用户再点一次。
+            params["gateway_reattach_of"] = None
+            task_id = submit(new_key=True)
+            status = poll(task_id)
+        params["gateway_unconfirmed"] = None
         if status["status"] == "canceled" or cancelled():
             raise JobCanceled("已按请求停止")
         if status["status"] == "failed":
@@ -256,13 +309,24 @@ def _run_task(
             on_cost_usd(float(cost) / USD_TO_CNY)
 
         phase("downloading")
+
+        def download(url: str) -> requests.Response:
+            for delay in (*DOWNLOAD_RETRY_DELAYS, None):
+                try:
+                    response = session.get(url, headers=headers, timeout=_TIMEOUT)
+                    _raise_for_status(response)
+                    return response
+                except (requests.RequestException, GatewayError) as error:
+                    if delay is None:
+                        raise unconfirmed(GatewayError(
+                            f"网关任务 {task_id} 已完成，结果下载失败（未确认是否取回）")) from error
+                    time.sleep(delay)
+            raise AssertionError("unreachable")
         out_dir = Path(output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         paths = []
         for index in range(int(status.get("outputs") or 0)):
-            response = session.get(f"{base}/gateway/v1/tasks/{task_id}/outputs/{index}",
-                                   headers=headers, timeout=_TIMEOUT)
-            _raise_for_status(response)
+            response = download(f"{base}/gateway/v1/tasks/{task_id}/outputs/{index}")
             suffix = _SUFFIX.get(response.headers.get("content-type", "").split(";")[0], ".png")
             target = out_dir / f"gateway-{index}{suffix}"
             target.write_bytes(response.content)
@@ -275,9 +339,7 @@ def _run_task(
             folder.mkdir(parents=True, exist_ok=True)
             for item in status["extras"]:
                 index = int(item["index"])
-                response = session.get(f"{base}/gateway/v1/tasks/{task_id}/extras/{index}",
-                                       headers=headers, timeout=_TIMEOUT)
-                _raise_for_status(response)
+                response = download(f"{base}/gateway/v1/tasks/{task_id}/extras/{index}")
                 target = folder / f"{index}.png"
                 target.write_bytes(response.content)
                 inputs.append({"role": item["role"], "path": str(target)})
@@ -287,7 +349,18 @@ def _run_task(
         return paths
 
 
-def _submit(session, base, headers, *, alias, kind, model, prompt, n, params, uploads) -> str:
+def _fingerprint(*, alias, kind, model, prompt, n, params, uploads) -> str:
+    """这次实际发给主机的请求指纹：素材按字节算，路径不同但内容相同算同一请求。"""
+    files = {group: [hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in paths]
+             for group, paths in uploads.items()}
+    body = json.dumps({"alias": alias, "kind": kind, "model": model, "prompt": prompt, "n": n,
+                       "params": params, "files": files},
+                      sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _submit(session, base, headers, *, alias, kind, model, prompt, n, params, uploads,
+            idempotency_key: str | None = None) -> str:
     from character_workflow.lib.callers.openai_image import _is_pre_flight_failure
 
     files = [("mask" if group == "mask" else f"{group}_{index}",
@@ -295,8 +368,8 @@ def _submit(session, base, headers, *, alias, kind, model, prompt, n, params, up
              for group, paths in uploads.items() for index, path in enumerate(paths)]
     body = {"request": json.dumps({"kind": kind, "model": model, "prompt": prompt, "n": n,
                                    "size": params.get("size"), "params": params})}
-    # 同一次提交的重试用同一个 Idempotency-Key：网关只会建一个任务。
-    request_headers = {**headers, "Idempotency-Key": uuid.uuid4().hex}
+    # 同一个 Idempotency-Key 的重发（本次重试、日后「再次生成」接回）网关只会建一个任务。
+    request_headers = {**headers, "Idempotency-Key": idempotency_key or uuid.uuid4().hex}
     last_error: requests.RequestException | None = None
     for attempt in range(SUBMIT_ATTEMPTS):
         try:

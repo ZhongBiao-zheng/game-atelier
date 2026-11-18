@@ -234,6 +234,7 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                     "mask_image", "markup_image", "image_edit", "mj_submission_ids", "mj_submit_uncertain",
                     "evolink_state", "edit_inputs", "edit_prompt",
                     "route_id", "route_order", "route_tried",
+                    "gateway_idempotency_key", "gateway_request_fingerprint", "gateway_unconfirmed", "gateway_reattach_of",
                 ):
                     if owned in existing_params:
                         value[owned] = existing_params[owned]
@@ -1765,6 +1766,8 @@ class _StudioJobCreate(BaseModel):
     params: JobParams
     alias: str | None = None
     kind: JobKind = JobKind.IMAGE
+    # 「再次生成」来自哪个失败轮次：网关未确认的失败在 20 小时内、请求不变时接回主机上的原任务。
+    reattach_job_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,200}$")
 
 
 def _create_user_job(
@@ -1798,6 +1801,10 @@ def _create_user_job(
     params.evolink_state = None
     params.edit_inputs = None
     params.edit_prompt = None
+    params.gateway_idempotency_key = None
+    params.gateway_request_fingerprint = None
+    params.gateway_unconfirmed = None
+    params.gateway_reattach_of = None
     # 改写值与原值同类型（str / list[str]），model_copy 不需要重新校验。
     params = params.model_copy(update=_gate_browser_refs(params.model_dump()))
     route_order: list[str] = []
@@ -1819,6 +1826,15 @@ def _create_user_job(
             raise HTTPException(status_code=422, detail=str(error)) from None
         model_id = model_spec.id
     alias = key_row.alias
+    if body.reattach_job_id and key_row.provider == "atelier":
+        from character_workflow.lib.jobs import gateway_reattach_params
+
+        try:
+            source = read_job(body.reattach_job_id)
+        except (OSError, ValueError, ValidationError):
+            source = None  # 原轮次已删或读不出：按新单处理
+        if source is not None and source.namespace == "studio":
+            params = params.model_copy(update=gateway_reattach_params(source, alias))
     model_spec = next((m for m in key_row.models if m.id == model_id), None)
     if model_spec is not None and model_spec.workflow_inputs is not None:
         from character_workflow.lib.comfyui_workflows import validate_values
