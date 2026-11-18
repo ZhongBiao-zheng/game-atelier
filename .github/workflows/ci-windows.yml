@@ -17,28 +17,6 @@ on:
 
 # 日常非阻塞：job 失败时 run 结论仍为 success。Release 逐个检查 job 结论，失败照样拒绝发版。
 jobs:
-  # TMP-ADOPT-REPRO：临时循环复现并发采用 PermissionError，查清后删除。
-  tmp-adopt-repro:
-    runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [parallel-load]
-        shard: [1, 2, 3, 4]
-    env:
-      PYTHONUTF8: "1"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-      - run: uv python install 3.11
-      - run: uv sync
-      - name: serial loop
-        if: matrix.mode == 'serial'
-        run: uv run --with pytest-repeat pytest -q --count 400 "tests/test_team_library_adopt.py::test_concurrent_adoption_of_one_entry_keeps_a_single_copy" -rf
-      - name: parallel loop under load
-        if: matrix.mode == 'parallel-load'
-        run: uv run --with pytest-repeat pytest -q -n auto --count 400 "tests/test_team_library_adopt.py::test_concurrent_adoption_of_one_entry_keeps_a_single_copy" -rf
-
   pytest-windows:
     runs-on: windows-latest
     continue-on-error: true
