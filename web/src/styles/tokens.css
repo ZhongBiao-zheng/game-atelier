@@ -841,6 +841,10 @@
     color-mix(in oklab, var(--preset-primary) 35%, black));
   /* 渐变覆盖边框盒，避免默认 padding-box 的重复平铺在半透明底边露出浅色顶部。 */
   background-origin: border-box;
+  /* WebKit（Safari、桌面版）里，带动画的 ::before 合成层 + mix-blend 的 ::after 不按父元素圆角裁切，
+     四角露出直角；clip-path 同样无效。整块遮罩让子层先合进本元素再按圆角裁切。Chrome 不受影响。 */
+  -webkit-mask-image: linear-gradient(#000 0 0);
+  mask-image: linear-gradient(#000 0 0);
 }
 .accent-swatch::before {
   content: '';

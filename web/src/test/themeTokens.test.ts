@@ -95,3 +95,12 @@ describe('深色主题守卫', () => {
     expect(lightOnly.filter(({ selector }) => !selector.startsWith(':root.light')).map(({ selector }) => selector)).toEqual([]);
   });
 });
+
+describe('主题色色卡', () => {
+  // WebKit 不按圆角裁切带动画 / 混合模式的伪元素合成层，四角会露出直角；遮罩是唯一实测有效的写法（clip-path 无效）。
+  it('色卡整块遮罩，WebKit 下按圆角裁切子层', () => {
+    expect(body('.accent-swatch')).toContain('overflow: hidden;');
+    expect(body('.accent-swatch')).toContain('-webkit-mask-image: linear-gradient(#000 0 0);');
+    expect(body('.accent-swatch')).toContain('mask-image: linear-gradient(#000 0 0);');
+  });
+});
