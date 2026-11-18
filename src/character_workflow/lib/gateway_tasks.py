@@ -146,9 +146,11 @@ class GatewayTask(BaseModel):
     created_at: str
     # 开始执行（离开排队）的时间；旧任务文件没有这个字段。
     started_at: str | None = None
+    # 第一次把请求交给上游 caller 的时间（失败切换不覆盖）；None = 从没发出过。用于对账，不参与扣费。
+    sent_at: str | None = None
     updated_at: str
 
-    @field_validator("created_at", "updated_at", "started_at")
+    @field_validator("created_at", "updated_at", "started_at", "sent_at")
     @classmethod
     def _aware_iso_time(cls, value: str | None) -> str | None:
         # 清理与排序要拿它和带时区的时间比较；读不出的时间按坏文件处理，不能让清理抛错。
@@ -507,9 +509,13 @@ def run_task(task: GatewayTask) -> GatewayTask:
         if switched_from:
             alias, reason = switched_from
             warnings.append(f"{alias}{model_routes.FAILOVER_LABELS[reason]}，已改用 {key.alias}")
-        _update(task_id, member_alias=key.alias, member_provider=key.provider,
-                member_base_url=key.base_url, member_model_id=model.id, phase="sent",
-                route_tried=list(tried), member_trail=[*tried, key.alias], warnings=list(warnings))
+        sent = _update(task_id, member_alias=key.alias, member_provider=key.provider,
+                       member_base_url=key.base_url, member_model_id=model.id, phase="sent",
+                       route_tried=list(tried), member_trail=[*tried, key.alias],
+                       warnings=list(warnings))
+        if sent.sent_at is None:
+            _update(task_id, sent_at=_now().isoformat())
+        logger.info("网关任务发往上游 task=%s member=%s model=%s", task_id, key.alias, model.id)
         cost: dict[str, float] = {}
         with tempfile.TemporaryDirectory(prefix=f"gateway-{task_id[:8]}-") as tmp:
             try:
@@ -720,6 +726,9 @@ def _append_usage(task: GatewayTask) -> None:
     now = _now()
     row = {
         **_timing(task, now.isoformat()),
+        # 对账用：失败任务里「已发出、上游可能已收费」与「从没发出」要分得开。
+        "sent_to_upstream": task.sent_at is not None, "sent_at": task.sent_at,
+        "upstream_task_ids": list(task.upstream_task_ids),
         "time": now.isoformat(), "task_id": task.task_id, "key_id": task.key_id,
         "key_name": task.key_name, "route_id": task.route_id, "member_alias": task.member_alias,
         "provider": task.member_provider, "base_url": task.member_base_url,

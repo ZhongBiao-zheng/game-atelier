@@ -68,6 +68,9 @@ def test_usage_row_records_queue_and_execution_time(client, monkeypatch, caplog)
     assert row["queued_at"] == done.created_at and row["started_at"] == done.started_at
     assert row["finished_at"] == row["time"]
     assert row["queue_s"] >= 0 and row["duration_s"] >= 0
+    assert row["sent_to_upstream"] is True and row["sent_at"] == done.sent_at
+    assert row["upstream_task_ids"] == ["up-1"]
+    assert f"网关任务发往上游 task={task_id}" in caplog.text
     assert "网关任务拿到上游订单" in caplog.text and "up-1" in caplog.text
     assert f"网关任务结束 task={task_id} status=done" in caplog.text
 
@@ -92,6 +95,7 @@ def test_restart_before_start_has_queue_time_but_no_execution_time(client):
     gateway_tasks.recover_after_restart()
     [row] = _usage_rows()
     assert row["started_at"] is None and row["duration_s"] is None and row["queue_s"] >= 0
+    assert row["sent_to_upstream"] is False and row["sent_at"] is None
 
 
 def test_old_task_files_and_usage_rows_without_timing_still_read(client, tmp_path):
@@ -202,8 +206,10 @@ def test_summary_counts_failures_percentiles_and_uptime(isolated_data_root):
     base = datetime(2026, 11, 10, tzinfo=timezone.utc)
     rows = [_row(base + timedelta(minutes=i), "done", queue=float(i), duration=float(10 + i))
             for i in range(17)]
-    rows += [_row(base + timedelta(hours=1), "failed", queue=1, duration=2, error_kind="unavailable"),
-             _row(base + timedelta(hours=2), "failed", queue=1, duration=None, error_kind="unconfirmed"),
+    rows += [{**_row(base + timedelta(hours=1), "failed", queue=1, duration=2, error_kind="unavailable"),
+              "sent_to_upstream": False},
+             {**_row(base + timedelta(hours=2), "failed", queue=1, duration=None, error_kind="unconfirmed"),
+              "sent_to_upstream": True, "actual_cost_cny": None},
              _row(base + timedelta(hours=3), "canceled", queue=0, duration=None)]
     usage = gateway_tasks.usage_file("2026-11")
     usage.parent.mkdir(parents=True, exist_ok=True)
@@ -225,6 +231,7 @@ def test_summary_counts_failures_percentiles_and_uptime(isolated_data_root):
         "unavailable": {"count": 1, "rate": round(1 / 19, 4)},
         "unconfirmed": {"count": 1, "rate": round(1 / 19, 4)}}
     assert tasks["duration"] == {"samples": 18, "median_s": 17.0, "p95_s": 26.0}
+    assert tasks["failed_sent_without_actual_cost"] == 1
     assert tasks["queue"]["samples"] == 20 and tasks["queue"]["p95_s"] == 15.0
     assert host == {"starts": 3, "abnormal_ends": 1, "update_restarts": 1, "service_mode_starts": 3,
                     "online_hours": 19.0, "range_hours": 24.0}

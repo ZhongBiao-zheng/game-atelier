@@ -60,6 +60,9 @@ def _tasks(start: datetime, end: datetime) -> dict[str, Any]:
             kind: {"count": count, "rate": round(count / finished, 4)}
             for kind, count in by_kind.most_common()
         },
+        # 已发给上游却失败、又没有实付金额：上游是否收费确认不了（第三批计费的对账口径）。
+        "failed_sent_without_actual_cost": sum(
+            1 for row in failed if row.get("sent_to_upstream") is True and row.get("actual_cost_cny") is None),
         "queue": _spread(_numbers(queued, "queue_s")),
         "duration": _spread(_numbers(rows, "duration_s")),
         "rows_without_timing": sum(1 for row in rows if "finished_at" not in row),
@@ -143,6 +146,7 @@ def _format(summary: dict[str, Any]) -> str:
         spread = tasks[key]
         lines.append(f"{label} 中位数 {seconds(spread['median_s'])} · P95 {seconds(spread['p95_s'])}"
                      f"（样本 {spread['samples']}）")
+    lines.append(f"已发出但失败且无实付 {tasks['failed_sent_without_actual_cost']} 条")
     if tasks["rows_without_timing"]:
         lines.append(f"无耗时字段的旧记录 {tasks['rows_without_timing']} 条")
     lines += [
