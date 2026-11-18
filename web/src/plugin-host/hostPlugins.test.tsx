@@ -35,7 +35,8 @@ it('loads a host plugin only while it is enabled and drops it when disabled', as
   rerender();
   expect(result.current.size).toBe(0);
   expect(currentHostNodeType(node)).toBeNull();
-});
+  // 插件包按需加载，Windows CI 上要 3–5 秒；用例时限必须不短于上面 waitFor 的 15 秒。
+}, 20000);
 
 it('a sandbox plugin that claims runtime host is not rendered by the host', () => {
   const impostor = { ...lock, id: 'pixel', runtime: 'host' as const };
