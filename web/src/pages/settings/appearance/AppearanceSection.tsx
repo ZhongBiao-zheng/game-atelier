@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
-  accentThemes, activeTheme, builtinColors, newThemeId, sameColors, syncAccentThemes, uniqueThemeName, updateAccentThemes,
-  useAccent, type AccentDoc,
+  accentThemes, activeTheme, builtinColors, newThemeId, syncAccentThemes, uniqueThemeName, updateAccentThemes,
+  useAccent, withBuiltinOverride, type AccentDoc,
 } from '@/lib/accentTheme';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { setTheme, useThemePreference, type ThemePreference } from '@/lib/theme';
-import type { AccentColors, AccentPreset } from '@/lib/accentPresets';
+import { ACCENT_PRESETS, type AccentColors, type AccentPreset } from '@/lib/accentPresets';
 import { ACCENT_USER_THEME_MAX, type AccentThemesBody } from '@/schema/accentThemes';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
@@ -32,6 +32,7 @@ export function AppearanceSection() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState<{ name: string; colors: AccentColors } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [resetting, setResetting] = useState(false);
   useEffect(() => { syncAccentThemes().catch(cause => setError(message(cause))); }, []);
 
   const save = async (change: (current: AccentDoc) => AccentThemesBody) => {
@@ -53,7 +54,7 @@ export function AppearanceSection() {
       .then(ok => { if (ok) setCreating(null); });
   };
   const saveActive = (name: string, colors: AccentColors) => void save(current => theme.builtin
-    ? { ...body(current), overrides: withOverride(current.overrides, theme.id as AccentPreset, colors) }
+    ? { ...body(current), overrides: withBuiltinOverride(current.overrides, theme.id as AccentPreset, { name, colors }) }
     : { ...body(current), custom: current.custom.map(item => item.id === theme.id ? { id: item.id, name, ...colors } : item) });
 
   return <section id="appearance" className="scroll-mt-6 space-y-2" aria-labelledby="appearance-title">
@@ -82,10 +83,10 @@ export function AppearanceSection() {
         <Collapse open={editing}>
           <ThemeEditor key={`${theme.id}:${theme.name}:${Object.values(theme.colors).join()}`}
             doc={doc} theme={theme} busy={busy}
-            defaults={theme.builtin ? builtinColors(theme.id as AccentPreset) : null}
+            defaults={theme.builtin ? { name: ACCENT_PRESETS.find(preset => preset.id === theme.id)!.name, colors: builtinColors(theme.id as AccentPreset) } : null}
             onSave={saveActive}
             onSaveAs={colors => setCreating({ name: uniqueThemeName(doc, theme.name), colors })}
-            onReset={() => void save(current => ({ ...body(current), overrides: withOverride(current.overrides, theme.id as AccentPreset, null) }))}
+            onReset={() => setResetting(true)}
             onDelete={() => setDeleting(true)} />
         </Collapse>
       </div>
@@ -98,12 +99,12 @@ export function AppearanceSection() {
         setDeleting(false);
         void save(current => ({ ...body(current), active: 'lime', custom: current.custom.filter(item => item.id !== theme.id) }));
       }} />
+    <ConfirmDialog open={resetting} title={`恢复「${theme.name}」的默认设置？`} message="名称和颜色回到内置值。" confirmText="恢复"
+      onCancel={() => setResetting(false)}
+      onConfirm={() => {
+        setResetting(false);
+        void save(current => ({ ...body(current), overrides: withBuiltinOverride(current.overrides, theme.id as AccentPreset, null) }));
+      }} />
   </section>;
 }
 
-/** 改回与内置默认一致的颜色等于没改：不留覆盖项。 */
-function withOverride(overrides: AccentDoc['overrides'], id: AccentPreset, colors: AccentColors | null) {
-  const { [id]: _previous, ...rest } = overrides;
-  if (!colors) return rest;
-  return sameColors(colors, builtinColors(id)) ? rest : { ...rest, [id]: colors };
-}

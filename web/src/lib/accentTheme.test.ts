@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { ACCENT_PRESETS } from './accentPresets';
 import {
-  accentCardContrast, accentThemes, activeColors, applyAccent, DEFAULT_ACCENT, lightAccentColor, loadAccent,
+  accentCardContrast, accentThemes, activeColors, builtinColors, withBuiltinOverride, applyAccent, DEFAULT_ACCENT, lightAccentColor, loadAccent,
   primaryForeground, startAccentSync, syncAccentThemes, updateAccentThemes, useAccent, type AccentDoc,
 } from './accentTheme';
 import { localConnection, type ConnectionSnapshot } from '@/api/connection';
@@ -57,11 +57,19 @@ describe('主题缓存', () => {
     expect(primary()).toBe('#333333');
   });
   it('网格列表：内置在前、改过的内置标记 edited、用户主题在后', () => {
-    const doc: AccentDoc = { ...DEFAULT_ACCENT, overrides: { pink: LEGACY }, custom: [USER] };
+    const doc: AccentDoc = { ...DEFAULT_ACCENT, overrides: { pink: LEGACY, lime: { ...builtinColors('lime'), name: '晨光' } }, custom: [USER] };
     const themes = accentThemes(doc);
     expect(themes.map(theme => theme.id)).toEqual([...ACCENT_PRESETS.map(preset => preset.id), USER.id]);
     expect(themes.find(theme => theme.id === 'pink')).toMatchObject({ edited: true, colors: LEGACY, name: '珊瑚粉' });
+    expect(themes[0]).toMatchObject({ id: 'lime', edited: true, name: '晨光', colors: { primary: '#D4F53C' } });
     expect(themes.at(-1)).toMatchObject({ builtin: false, name: '晚霞', colors: { primary: '#FF8800' } });
+  });
+  it('内置主题改动：名称与颜色都回到默认时不留覆盖项', () => {
+    const lime = builtinColors('lime');
+    expect(withBuiltinOverride({}, 'lime', { name: '青柠', colors: lime })).toEqual({});
+    expect(withBuiltinOverride({}, 'lime', { name: '晨光', colors: lime })).toEqual({ lime: { ...lime, name: '晨光' } });
+    expect(withBuiltinOverride({}, 'lime', { name: '青柠', colors: LEGACY })).toEqual({ lime: LEGACY });
+    expect(withBuiltinOverride({ lime: LEGACY, pink: LEGACY }, 'lime', null)).toEqual({ pink: LEGACY });
   });
 });
 
@@ -73,15 +81,22 @@ describe('服务端同步', () => {
     expect(stored()).toMatchObject({ revision: 1, active: 'u-333333123456abcdef777777', custom: [{ name: '自定义', ...LEGACY }] });
     expect(JSON.parse(localStorage.getItem('atelier:accent')!).doc.revision).toBe(1);
   });
-  it('服务端已有主题：旧版自定义颜色追加成用户主题，不改当前选择，重名自动编号', async () => {
+  it('服务端已有主题：旧版自定义颜色追加成用户主题并选中，重名自动编号，只迁一次', async () => {
     const stored = fakeServer(remote({ revision: 3, active: 'cyan', custom: [{ ...USER, name: '自定义' }] }));
     localStorage.setItem('atelier:accent', JSON.stringify({ custom: LEGACY }));
     await syncAccentThemes();
-    expect(stored().active).toBe('cyan');
     expect(stored().custom.map(theme => theme.name)).toEqual(['自定义', '自定义 2']);
-    expect(primary()).toBe('#3EE6D0');
+    expect(stored().active).toBe('u-333333123456abcdef777777');
+    expect(primary()).toBe('#333333');
     await syncAccentThemes();
     expect(api.saveAccentThemes).toHaveBeenCalledTimes(1);
+  });
+  it('服务端已有同色主题：不重复追加，直接选中它', async () => {
+    const same = { ...USER, ...LEGACY };
+    const stored = fakeServer(remote({ revision: 3, active: 'cyan', custom: [same] }));
+    localStorage.setItem('atelier:accent', JSON.stringify({ custom: LEGACY }));
+    await syncAccentThemes();
+    expect(stored()).toMatchObject({ active: same.id, custom: [same] });
   });
   it('服务端已有：以服务端为准，不回写本机缓存的旧选择', async () => {
     fakeServer(remote({ revision: 2, active: USER.id, custom: [USER] }));

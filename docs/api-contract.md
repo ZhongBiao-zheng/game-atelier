@@ -436,9 +436,9 @@ sequence，只保存可见消息、reasoning summary、稳定 node/version 引�
 `{ schema_version: 1, revision, active, overrides, custom, updated_at }`；文件不存在时返回 revision 0、`active: "lime"`
 的默认值且不制造文件；损坏或不符合严格 schema 的文件返回 500，原字节保持不变（PUT 同样拒绝，不覆盖）。
 `PUT /api/accent-themes` 请求为 `{ expected_revision, active, overrides, custom }`：`overrides` 键只能是 7 个内置主题 id
-（lime / violet / orange / cyan / pink / yellow / blue），值为 `{ primary, brand2, brand3, brand4 }`；`custom` 为用户主题
+（lime / violet / orange / cyan / pink / yellow / blue），值为 `{ primary, brand2, brand3, brand4, name? }`（name 只在内置主题改过名时有值，否则为 null）；`custom` 为用户主题
 `{ id, name, primary, brand2, brand3, brand4 }`，id 形如 `u-` + 8–32 位小写字母数字，最多 24 个；颜色一律 `#RRGGBB`；
-名称去首尾空白后 1–12 字，与任何主题（含内置名称）不得重名（忽略大小写）；`active` 必须是内置 id 或某个用户主题 id。
+名称去首尾空白后 1–12 字，所有主题的生效名称（内置主题取改后的名称或默认名）互不重名（忽略大小写）；`active` 必须是内置 id 或某个用户主题 id。
 不合规 422；revision 不符 409 `{ code: "revision_conflict", current_revision }`。服务端在文件锁内校验 revision 并原子替换。
 
 画布界面与生成偏好是工作区应用级状态，文件真源为 `.config/canvas-ui.json`，不属于任何画布项目。

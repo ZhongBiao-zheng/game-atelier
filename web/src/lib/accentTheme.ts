@@ -2,7 +2,9 @@ import { useSyncExternalStore } from 'react';
 import { ACCENT_PRESETS, type AccentColors, type AccentPreset } from './accentPresets';
 import { getAccentThemes, saveAccentThemes } from '@/api/accentThemes';
 import { localConnection } from '@/api/connection';
-import { ACCENT_USER_THEME_MAX, type AccentThemes, type AccentThemesBody, type AccentUserTheme } from '@/schema/accentThemes';
+import {
+  ACCENT_USER_THEME_MAX, type AccentBuiltinOverride, type AccentThemes, type AccentThemesBody, type AccentUserTheme,
+} from '@/schema/accentThemes';
 
 /** 客户端缓存：服务端 `.config/accent-themes.json` 的镜像，只为首帧不闪默认色；以服务端为准。 */
 export interface AccentDoc extends AccentThemesBody { revision: number }
@@ -10,7 +12,7 @@ export interface AccentThemeView {
   id: string;
   name: string;
   builtin: boolean;
-  /** 内置主题被改过颜色 */
+  /** 内置主题被改过颜色或名称 */
   edited: boolean;
   colors: AccentColors;
 }
@@ -41,8 +43,11 @@ function parseDoc(value: unknown): AccentDoc | null {
   const custom = doc.custom.filter((theme): theme is AccentUserTheme =>
     isColors(theme) && typeof theme.id === 'string' && typeof theme.name === 'string');
   const overrides = Object.fromEntries(Object.entries(doc.overrides)
-    .filter(([id, colors]) => BUILTIN_IDS.has(id) && isColors(colors))
-    .map(([id, colors]) => [id, pickColors(colors as AccentColors)]));
+    .filter(([id, value]) => BUILTIN_IDS.has(id) && isColors(value))
+    .map(([id, value]) => {
+      const { name } = value as AccentBuiltinOverride;
+      return [id, { ...pickColors(value as AccentColors), ...(typeof name === 'string' && name ? { name } : {}) }];
+    }));
   const active = BUILTIN_IDS.has(doc.active) || custom.some(theme => theme.id === doc.active) ? doc.active : 'lime';
   return { revision: doc.revision, active, overrides, custom: custom.map(theme => ({ id: theme.id, name: theme.name, ...pickColors(theme) })) };
 }
@@ -78,7 +83,8 @@ export function accentThemes(doc: AccentDoc): AccentThemeView[] {
   return [
     ...ACCENT_PRESETS.map(preset => {
       const override = doc.overrides[preset.id];
-      return { id: preset.id, name: preset.name, builtin: true, edited: !!override, colors: override ?? pickColors(preset) };
+      return { id: preset.id, name: override?.name || preset.name, builtin: true, edited: !!override,
+        colors: pickColors(override ?? preset) };
     }),
     ...doc.custom.map(theme => ({ id: theme.id, name: theme.name, builtin: false, edited: false, colors: pickColors(theme) })),
   ];
@@ -89,6 +95,16 @@ export function activeTheme(doc: AccentDoc): AccentThemeView {
 }
 export const activeColors = (doc: AccentDoc) => activeTheme(doc).colors;
 export const builtinColors = (id: AccentPreset) => pickColors(ACCENT_PRESETS.find(preset => preset.id === id)!);
+/** 内置主题的改动：名称与颜色都回到默认时不留覆盖项；value 为 null 即恢复默认。 */
+export function withBuiltinOverride(overrides: AccentDoc['overrides'], id: AccentPreset,
+  value: { name: string; colors: AccentColors } | null): AccentDoc['overrides'] {
+  const { [id]: _previous, ...rest } = overrides;
+  if (!value) return rest;
+  const preset = ACCENT_PRESETS.find(item => item.id === id)!;
+  const renamed = value.name !== preset.name;
+  if (!renamed && sameColors(value.colors, pickColors(preset))) return rest;
+  return { ...rest, [id]: { ...pickColors(value.colors), ...(renamed ? { name: value.name } : {}) } };
+}
 
 /** 名称比较去首尾空白、忽略大小写；内置与用户主题共用一个命名空间。 */
 export const normalizeThemeName = (name: string) => name.trim().toLocaleLowerCase();
@@ -197,7 +213,7 @@ const fromRemote = (remote: AccentThemes): AccentDoc =>
 
 /** 读服务端，并把只存在于本机缓存的选择迁移上去：
  *  - 服务端从未保存（revision 0）：本机缓存（含旧版预设 / 自定义颜色）整份写上去；
- *  - 服务端已有：旧版「自定义颜色」若不在任何用户主题里，追加成一个用户主题（不切换当前主题）。 */
+ *  - 服务端已有：旧版「自定义颜色」追加成一个用户主题（已有同色主题则复用）并选中它（2026-11-18 飙哥定）。 */
 export async function syncAccentThemes(): Promise<AccentDoc> {
   return enqueue(async () => {
     const remote = fromRemote(await getAccentThemes());
@@ -205,9 +221,13 @@ export async function syncAccentThemes(): Promise<AccentDoc> {
     let next = remote;
     if (remote.revision === 0 && JSON.stringify(local) !== JSON.stringify(DEFAULT_ACCENT)) {
       next = fromRemote(await saveAccentThemes(0, local));
-    } else if (legacy && remote.custom.length < ACCENT_USER_THEME_MAX && !remote.custom.some(theme => sameColors(theme, legacy))) {
-      const theme = { ...legacyTheme(legacy), name: uniqueThemeName(remote, LEGACY_NAME) };
-      next = fromRemote(await saveAccentThemes(remote.revision, { ...remote, custom: [...remote.custom, theme] }));
+    } else if (legacy) {
+      const existing = remote.custom.find(theme => sameColors(theme, legacy));
+      const theme = existing ?? { ...legacyTheme(legacy), name: uniqueThemeName(remote, LEGACY_NAME) };
+      const custom = existing ? remote.custom : [...remote.custom, theme];
+      if (custom.length <= ACCENT_USER_THEME_MAX) {
+        next = fromRemote(await saveAccentThemes(remote.revision, { ...remote, active: theme.id, custom }));
+      }
     }
     writeAccent(next);
     return next;

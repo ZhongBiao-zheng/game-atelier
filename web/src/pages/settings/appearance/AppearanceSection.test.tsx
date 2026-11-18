@@ -71,11 +71,10 @@ it('用户主题到上限后不再显示「+」', async () => {
   expect(screen.queryByRole('button', { name: '新增主题' })).not.toBeInTheDocument();
 });
 
-it('编辑内置主题：草稿实时预览，保存成改色；恢复默认清掉改色', async () => {
+it('编辑内置主题：草稿实时预览，保存成改色；恢复默认要确认', async () => {
   serve({ active: 'blue' });
   await renderSection();
   openEditor();
-  expect(screen.queryByLabelText('名称')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument();
   setColor('主色', '#33');
   expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
@@ -86,9 +85,33 @@ it('编辑内置主题：草稿实时预览，保存成改色；恢复默认清�
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(stored.overrides.blue?.primary).toBe('#333333'));
   fireEvent.click(screen.getByRole('button', { name: '恢复默认' }));
+  const confirm = await screen.findByRole('alertdialog');
+  expect(confirm).toHaveTextContent('恢复「钴蓝」的默认设置？');
+  fireEvent.click(within(confirm).getByRole('button', { name: '取消' }));
+  expect(stored.overrides.blue?.primary).toBe('#333333');
+  fireEvent.click(screen.getByRole('button', { name: '恢复默认' }));
+  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '恢复' }));
   await waitFor(() => expect(stored.overrides).toEqual({}));
   expect(document.documentElement.style.getPropertyValue('--primary')).toBe('#6F8BFF');
   expect(screen.queryByRole('button', { name: '恢复默认' })).not.toBeInTheDocument();
+});
+
+it('内置主题可重命名，名称不与其他主题冲突，恢复默认后改回原名', async () => {
+  serve({ active: 'lime', custom: [USER] });
+  await renderSection();
+  openEditor();
+  fireEvent.change(screen.getByLabelText('名称'), { target: { value: '晚霞' } });
+  expect(screen.getByRole('alert')).toHaveTextContent('名称已存在');
+  fireEvent.change(screen.getByLabelText('名称'), { target: { value: '电光紫' } });
+  expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('名称'), { target: { value: ' 晨光 ' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(stored.overrides.lime).toEqual({ primary: '#D4F53C', brand2: '#6FD6F0', brand3: '#F5D06A', brand4: '#A99FF5', name: '晨光' }));
+  expect(tile('晨光')).toHaveAttribute('aria-checked', 'true');
+  fireEvent.click(screen.getByRole('button', { name: '恢复默认' }));
+  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '恢复' }));
+  await waitFor(() => expect(stored.overrides).toEqual({}));
+  expect(tile('青柠')).toHaveAttribute('aria-checked', 'true');
 });
 
 it('切走或关闭编辑区时撤掉没保存的草稿预览', async () => {

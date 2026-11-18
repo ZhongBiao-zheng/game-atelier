@@ -51,7 +51,7 @@ def test_save_round_trips_and_strips_names(isolated_data_root):
     body = saved.json()
     assert body["revision"] == 1
     assert body["custom"] == [{**_theme(1), "name": "晚霞"}]
-    assert body["overrides"] == {"lime": COLORS}
+    assert body["overrides"] == {"lime": {**COLORS, "name": None}}
     assert client.get("/api/accent-themes").json() == body
 
 
@@ -82,6 +82,9 @@ def test_invalid_documents_are_rejected(isolated_data_root):
         _payload(custom=[{**_theme(1), "id": "lime"}]),
         _payload(active="u-missing00"),
         _payload(overrides={"mint": COLORS}),
+        _payload(overrides={"lime": {**COLORS, "name": "钴蓝"}}),
+        _payload(overrides={"lime": {**COLORS, "name": "晚霞"}}, custom=[_theme(1, "晚霞")]),
+        _payload(overrides={"lime": {**COLORS, "name": " "}}),
         _payload(custom=[_theme(i) for i in range(ACCENT_USER_THEME_MAX + 1)]),
         {**_payload(), "extra": True},
     ]
@@ -106,3 +109,19 @@ def test_corrupt_file_is_reported_and_never_overwritten(isolated_data_root):
     assert "accent-themes.json" in read.json()["detail"]
     assert write.status_code == 500
     assert path.read_bytes() == original
+
+
+def test_builtin_themes_can_be_renamed_and_names_freed(isolated_data_root):
+    client = _client(isolated_data_root)
+    # 青柠改名为「晨光」后，「青柠」这个名字可以给用户主题用；两个内置互换名字也合法。
+    saved = client.put("/api/accent-themes", json=_payload(
+        overrides={"lime": {**COLORS, "name": " 晨光 "}, "violet": {**COLORS, "name": "钴蓝"}, "blue": {**COLORS, "name": "电光紫"}},
+        custom=[_theme(1, "青柠")],
+    ))
+
+    assert saved.status_code == 200, saved.json()
+    assert saved.json()["overrides"]["lime"]["name"] == "晨光"
+    color_only = client.put("/api/accent-themes", json=_payload(1, overrides={"pink": COLORS}))
+    assert color_only.status_code == 200
+    assert color_only.json()["overrides"]["pink"]["name"] is None
+    assert "name" not in data_root.accent_themes_file().read_text(encoding="utf-8").split('"pink"')[1]

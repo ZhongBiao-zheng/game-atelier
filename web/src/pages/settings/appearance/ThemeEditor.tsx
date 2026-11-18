@@ -36,7 +36,7 @@ export function ColorFields({ colors, onChange }: { colors: AccentColors; onChan
 
 /** 当前主题的编辑区：草稿实时预览，保存才落盘；切走或卸载时撤掉预览。 */
 export function ThemeEditor({ doc, theme, defaults, busy, onSave, onSaveAs, onReset, onDelete }: {
-  doc: AccentDoc; theme: AccentThemeView; defaults: AccentColors | null; busy: boolean;
+  doc: AccentDoc; theme: AccentThemeView; defaults: { name: string; colors: AccentColors } | null; busy: boolean;
   onSave: (name: string, colors: AccentColors) => void;
   onSaveAs: (colors: AccentColors) => void;
   onReset: () => void;
@@ -47,29 +47,33 @@ export function ThemeEditor({ doc, theme, defaults, busy, onSave, onSaveAs, onRe
   const [colors, setColors] = useState(theme.colors);
   const [name, setName] = useState(theme.name);
   const colorsDirty = !sameColors(colors, theme.colors);
-  const nameError = theme.builtin ? null : themeNameError(doc, name, theme.id);
-  const dirty = colorsDirty || (!theme.builtin && name.trim() !== theme.name);
+  const nameError = themeNameError(doc, name, theme.id);
+  const dirty = colorsDirty || name.trim() !== theme.name;
   const previewColors = useMemo(() => colorsDirty ? colors : null, [colorsDirty, colors]);
   useEffect(() => { previewAccent(previewColors); }, [previewColors]);
   useEffect(() => () => previewAccent(null), []);
 
   return <div className="space-y-3 px-4.5 pb-4">
-    {!theme.builtin && <div className="flex items-center justify-between gap-3">
+    <div className="flex items-center justify-between gap-3">
       <Label htmlFor={nameId} className="text-sm">名称</Label>
       <div className="flex min-w-0 flex-col items-end gap-1">
         <Input id={nameId} value={name} maxLength={ACCENT_THEME_NAME_MAX} aria-invalid={!!nameError}
           onChange={event => setName(event.target.value)} className="w-40" />
         {nameError && <p role="alert" className="text-xs text-destructive">{nameError}</p>}
       </div>
-    </div>}
+    </div>
     <ColorFields colors={colors} onChange={setColors} />
     {accentCardContrast(colors.primary, mode) < 3 && <p role="status" className="text-xs text-status-running">主色与卡片对比度较低，建议调亮主色。</p>}
     <div className="flex flex-wrap items-center gap-2">
       <Button type="button" size="sm" disabled={!dirty || !!nameError || busy} onClick={() => onSave(name.trim(), colors)}>保存</Button>
       <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onSaveAs(colors)}>另存为新主题</Button>
       <div className="ml-auto flex items-center gap-2">
-        {theme.builtin && defaults && (theme.edited || colorsDirty) && <Button type="button" size="sm" variant="ghost" disabled={busy}
-          onClick={() => { setColors(defaults); if (theme.edited) onReset(); }}>恢复默认</Button>}
+        {defaults && (theme.edited || dirty) && <Button type="button" size="sm" variant="ghost" disabled={busy}
+          onClick={() => {
+            // 已保存的改动要确认后清掉；只是没保存的草稿，直接撤回。
+            if (theme.edited) onReset();
+            else { setColors(defaults.colors); setName(defaults.name); }
+          }}>恢复默认</Button>}
         {!theme.builtin && <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onDelete}
           className="text-destructive hover:text-destructive">删除</Button>}
       </div>

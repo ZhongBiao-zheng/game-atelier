@@ -10,11 +10,16 @@ export interface AccentUserTheme extends AccentColors {
   name: string;
 }
 
+/** 改过的内置主题：四色必填；name 只在改过名时有值。 */
+export interface AccentBuiltinOverride extends AccentColors {
+  name?: string | null;
+}
+
 export interface AccentThemesBody {
   /** 内置主题 id 或用户主题 id */
   active: string;
-  /** 改过颜色的内置主题 */
-  overrides: Partial<Record<AccentPreset, AccentColors>>;
+  /** 改过颜色或名称的内置主题 */
+  overrides: Partial<Record<AccentPreset, AccentBuiltinOverride>>;
   custom: AccentUserTheme[];
 }
 

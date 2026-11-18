@@ -726,6 +726,11 @@ class AccentColors(BaseModel):
     brand4: AccentHexColor
 
 
+class AccentBuiltinOverride(AccentColors):
+    """改过的内置主题：四色必填；name 只在改过名时出现。"""
+    name: AccentThemeName | None = None
+
+
 class AccentUserTheme(AccentColors):
     id: AccentUserThemeId
     name: AccentThemeName
@@ -734,7 +739,7 @@ class AccentUserTheme(AccentColors):
 class _AccentThemesBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     active: str = Field(default="lime", min_length=1, max_length=40)
-    overrides: dict[BuiltinAccentThemeId, AccentColors] = Field(default_factory=dict)
+    overrides: dict[BuiltinAccentThemeId, AccentBuiltinOverride] = Field(default_factory=dict)
     custom: list[AccentUserTheme] = Field(default_factory=list, max_length=ACCENT_USER_THEME_MAX)
 
     @model_validator(mode="after")
@@ -742,11 +747,15 @@ class _AccentThemesBody(BaseModel):
         ids = [theme.id for theme in self.custom]
         if len(set(ids)) != len(ids):
             raise ValueError("主题 id 重复")
-        taken = {name.casefold() for name in BUILTIN_ACCENT_THEMES.values()}
-        for theme in self.custom:
-            key = theme.name.casefold()
+        builtin_names = [
+            (self.overrides[theme_id].name if theme_id in self.overrides else None) or default
+            for theme_id, default in BUILTIN_ACCENT_THEMES.items()
+        ]
+        taken: set[str] = set()
+        for name in [*builtin_names, *(theme.name for theme in self.custom)]:
+            key = name.casefold()
             if key in taken:
-                raise ValueError(f"已有名为「{theme.name}」的主题")
+                raise ValueError(f"已有名为「{name}」的主题")
             taken.add(key)
         if self.active not in BUILTIN_ACCENT_THEMES and self.active not in ids:
             raise ValueError("当前主题不存在")
