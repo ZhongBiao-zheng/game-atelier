@@ -1,5 +1,6 @@
 # Product name: desktop/package.json `productName` (the only place). Version: passed in by
-# scripts/build_desktop.py from .claude-plugin/plugin.json. Seed: staged by the same script.
+# scripts/build_desktop.py from .claude-plugin/plugin.json, together with the appId as
+# `atelierAppId` (the shell's AppUserModelID). Seed: staged by the same script.
 appId: app.atelier.desktop
 directories:
   output: dist
@@ -10,9 +11,6 @@ files:
   - src/**
   - ui/**
   - stage/icons/trayTemplate.png
-extraResources:
-  - from: stage/seed
-    to: seed
 asar: true
 afterPack: scripts/after-pack.cjs
 electronLanguages:
@@ -27,6 +25,10 @@ electronFuses:
   enableEmbeddedAsarIntegrityValidation: true
 mac:
   target: dmg
+  # The dmg carries the seed inside the bundle. On Windows the installer puts it next to the exe.
+  extraResources:
+    - from: stage/seed
+      to: seed
   icon: stage/icons/icon.png
   category: public.app-category.graphics-design
   minimumSystemVersion: '13.0'
@@ -40,4 +42,12 @@ mac:
     CFBundleLocalizations: [en, zh_CN, zh_TW]
 dmg:
   writeUpdateInfo: false
+win:
+  # Only the app folder: the Windows installer (desktop/setup) installs it with the seed beside it.
+  target: dir
+  # The same file as the installer and uninstaller icons.
+  icon: ../assets/brand/atelier.ico
+  extraResources:
+    - from: ../assets/brand/atelier.ico
+      to: icon.ico
 publish: null

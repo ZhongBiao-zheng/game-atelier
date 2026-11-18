@@ -66,7 +66,7 @@ export function Lightbox({
         type="button"
         aria-label="关闭"
         onClick={onClose}
-        className={`${CONTROL_CLASS} right-6 top-6`}
+        className={`${CONTROL_CLASS} desktop-clear-top right-6 top-6`}
       >
         <CloseIcon size="lg" />
       </Button>
@@ -76,7 +76,7 @@ export function Lightbox({
           download={downloadName}
           aria-label="下载图片"
           onClick={(e) => e.stopPropagation()}
-          className={`${CONTROL_CLASS} right-20 top-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}
+          className={`${CONTROL_CLASS} desktop-clear-top right-20 top-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}
         >
           <DownloadIcon size="lg" aria-hidden />
         </a>

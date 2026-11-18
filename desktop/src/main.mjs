@@ -27,13 +27,24 @@ const BACKGROUND = { dark: '#0A0A0B', light: '#F2F2F3' };
 const FOREGROUND = { dark: '#EDEDEF', light: '#0A0A0B' };
 /** Traffic lights centred in the page's 80 px top bar (lg:h-20). */
 const TRAFFIC_LIGHTS = { x: 20, y: 33 };
-/** Height of the Windows caption buttons drawn over the page's top-right corner. */
-const CAPTION_HEIGHT = 40;
+/**
+ * Height of the Windows caption buttons drawn over the page's top-right corner.
+ * ATELIER_CAPTION_HEIGHT exists only for the 40 / 80 px comparison screenshots (batch 3).
+ */
+const CAPTION_HEIGHT = Number(process.env.ATELIER_CAPTION_HEIGHT) || 40;
+const ARGS = process.argv.slice(1);
+/** Windows installer step: unpack the runtime from the seed, no window, then exit. */
+const PREPARE_ONLY = ARGS.includes('--prepare-runtime');
+/** Ask the running instance to go through its normal quit flow. */
+const QUIT_REQUEST = ARGS.includes('--quit');
 const SMOKE = process.env.ATELIER_SMOKE === '1';
 const MAC = process.platform === 'darwin';
 const LOCAL_PAGE = path.join(app.getAppPath(), 'ui', 'index.html');
 const PRELOAD = path.join(app.getAppPath(), 'src', 'preload.cjs');
 const TRAY_TEMPLATE = path.join(app.getAppPath(), 'stage', 'icons', 'trayTemplate.png');
+const TRAY_ICON = path.join(process.resourcesPath, 'icon.ico');
+/** macOS: inside the app bundle. Windows: next to the exe, where the installer puts it. */
+const SEED_DIR = MAC ? path.join(process.resourcesPath, 'seed') : path.join(path.dirname(process.execPath), 'seed');
 
 const localData = rt.localDataDir();
 const parent = rt.runtimeParent(localData);
@@ -143,6 +154,29 @@ function pushProgress(done, total) {
     .catch(() => {});
 }
 
+/** --prepare-runtime progress for the installer: one `progress <done> <total>` line at a time. */
+let printedAt = 0;
+function printProgress(done, total) {
+  const now = Date.now();
+  if (done < total && now - printedAt < 100) return;
+  printedAt = now;
+  process.stdout.write(`progress ${done} ${total}\n`);
+}
+
+/** Exit code for --prepare-runtime; on failure the last stderr line is the reason. */
+async function prepareOnly() {
+  log(`${app.getName()} ${app.getVersion()} --prepare-runtime`);
+  try {
+    await prepareRuntime();
+    return 0;
+  } catch (error) {
+    const reason = error.detail || error.message || '安装运行环境失败';
+    log(`prepare-runtime failed: ${reason}`);
+    process.stderr.write(`${reason}\n`);
+    return 1;
+  }
+}
+
 async function confirm(title, message, ok) {
   showMain();
   const { response } = await dialog.showMessageBox(state.win, {
@@ -167,7 +201,9 @@ async function releaseRuntime(root) {
   const server = dataRoot && await rt.verifiedServer(dataRoot);
   if (!server || !rt.isOwned(dataRoot, server)) return true;
   const work = await rt.activeWork(dataRoot, server);
-  if (work !== 0 && !SMOKE && !(await confirm(app.getName(), workMessage(work, '更新运行环境'), '仍然更新'))) {
+  // --prepare-runtime runs after the installer's --quit, which already asked.
+  const ask = work !== 0 && !SMOKE && !PREPARE_ONLY;
+  if (ask && !(await confirm(app.getName(), workMessage(work, '更新运行环境'), '仍然更新'))) {
     return false;
   }
   await old.stop(dataRoot).catch((error) => log(`stop failed: ${error.message}`));
@@ -179,18 +215,19 @@ async function prepareRuntime() {
   if (state.runtime) return state.runtime;
   let root = rt.runtimeRoot(parent);
   if (!process.env.ATELIER_RUNTIME_ROOT) {
-    const seed = rt.readSeed(path.join(process.resourcesPath, 'seed'));
+    const seed = rt.readSeed(SEED_DIR);
     log(seed ? `seed ${path.basename(seed.file)} build=${seed.build}` : 'seed missing');
     const reason = seed ? rt.replacementReason(root, seed) : rt.installed(root) ? null : 'missing';
     if (reason) log(`runtime replacement: ${reason}`);
-    if (reason === 'too-old' || (reason && !seed)) throw failure('install');
+    if (reason && !seed) throw failure('install', '安装包里缺少运行环境');
+    if (reason === 'too-old') throw failure('install', '安装包里的运行环境比已有的旧');
     if (reason === 'missing' || ((reason === 'contract' || reason === 'build') && await releaseRuntime(root))) {
       try {
-        root = await unpackSeed(parent, seed, pushProgress);
+        root = await unpackSeed(parent, seed, PREPARE_ONLY ? printProgress : pushProgress);
       } catch (error) {
         log(`runtime not ready: ${error.message}`);
         // A failed replacement leaves the old runtime in place; keep using it if it can serve.
-        if (!(rt.installed(root) && rt.meetsContract(root))) throw failure('install');
+        if (!(rt.installed(root) && rt.meetsContract(root))) throw failure('install', error.message);
       }
     } else if (reason) {
       log('runtime replacement postponed');
@@ -375,6 +412,22 @@ function contextMenu(win, params) {
   }
 }
 
+function openSettings() {
+  showMain();
+  dispatch(NAVIGATE_EVENT, { path: '/settings/providers' });
+}
+
+/** Windows has no menu bar: the menu's shortcuts are handled here. */
+function windowsShortcut(event, input) {
+  if (input.type !== 'keyDown' || input.alt || input.meta) return;
+  const key = input.key.toLowerCase();
+  if (input.control && key === ',') openSettings();
+  else if (key === 'f5' || (input.control && key === 'r')) state.win?.webContents.reload();
+  else if (key === 'f11') state.win?.setFullScreen(!state.win.isFullScreen());
+  else return;
+  event.preventDefault();
+}
+
 function guardNavigation(event, url) {
   const target = event.url ?? url;
   if (allowedNavigation(target, LOCAL_PAGE)) return;
@@ -421,6 +474,7 @@ function createWindow() {
     return { action: 'deny' };
   });
   wc.on('context-menu', (_event, params) => contextMenu(win, params));
+  if (!MAC) wc.on('before-input-event', windowsShortcut);
   wc.on('render-process-gone', (_event, details) => {
     log(`page process gone: ${details.reason}`);
     if (!state.quitting) wc.reload();
@@ -446,12 +500,13 @@ function createTray() {
     icon = nativeImage.createFromBuffer(fs.readFileSync(TRAY_TEMPLATE), { scaleFactor: 3 });
     icon.setTemplateImage(true);
   } else {
-    icon = nativeImage.createFromPath(process.execPath);
+    icon = nativeImage.createFromPath(TRAY_ICON);
   }
   const tray = new Tray(icon);
   tray.setToolTip(name);
   const menu = Menu.buildFromTemplate([
     { label: `显示 ${name}`, click: showMain },
+    ...(MAC ? [] : [{ label: '查看日志', click: openLog }]),
     { label: `退出 ${name}`, click: () => { quit(); } },
   ]);
   if (MAC) {
@@ -497,10 +552,7 @@ function setupMenu() {
   }
   app.setAboutPanelOptions({ applicationName: app.getName(), applicationVersion: app.getVersion(), version: '' });
   Menu.setApplicationMenu(buildMenu(app.getName(), {
-    settings: () => {
-      showMain();
-      dispatch(NAVIGATE_EVENT, { path: '/settings/providers' });
-    },
+    settings: openSettings,
     reload: () => state.win?.webContents.reload(),
     actualSize: () => state.win?.webContents.setZoomLevel(0),
     openLog,
@@ -535,8 +587,19 @@ function runSmoke() {
   }, 500);
 }
 
+/** Same id as the installer's shortcuts (electron-builder appId, passed in as build metadata). */
+function appUserModelId() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')).atelierAppId || null;
+  } catch {
+    return null;
+  }
+}
+
 function start() {
   log(`${app.getName()} ${app.getVersion()} starting`);
+  const appId = MAC ? null : appUserModelId();
+  if (appId) app.setAppUserModelId(appId);
   setupSession();
   setupMenu();
   listen('atelier:set-theme', 'page', setTheme);
@@ -554,10 +617,24 @@ function start() {
   if (SMOKE) runSmoke();
 }
 
-if (!app.requestSingleInstanceLock()) {
+if (PREPARE_ONLY) {
+  // No window and no single-instance lock: the installer runs this before the app is opened.
+  prepareOnly().then((code) => app.exit(code));
+} else if (!app.requestSingleInstanceLock()) {
+  // The running instance received our arguments (second-instance), --quit included.
+  app.exit(0);
+} else if (QUIT_REQUEST) {
+  // Nothing is running, so there is nothing to quit.
   app.exit(0);
 } else {
-  app.on('second-instance', showMain);
+  app.on('second-instance', (_event, argv) => {
+    if (argv.includes('--quit')) {
+      log('quit requested by another launch');
+      quit();
+    } else {
+      showMain();
+    }
+  });
   // ⌘Q, the app menu, the Dock and the tray all go through the same quit flow.
   app.on('before-quit', (event) => {
     if (state.quitting) return;

@@ -747,6 +747,14 @@
     --titlebar-inset: 6.25rem;
     /* Windows 窗口按钮占的宽度：Electron 开启标题栏叠加层时提供 titlebar-area 环境变量。 */
     --titlebar-inset-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+    /* 盖满窗口的浮层（大图预览、全屏标注）把贴顶的控件往下让，避开红绿灯与窗口按钮。 */
+    --titlebar-safe-top: 2.5rem;
+  }
+  :root[data-shell='windows'][data-titlebar='overlay'] {
+    --titlebar-safe-top: env(titlebar-area-height, 2.5rem);
+  }
+  .desktop-clear-top {
+    margin-top: var(--titlebar-safe-top, 0px);
   }
   :root[data-titlebar='overlay'] .desktop-window-handle {
     display: block;

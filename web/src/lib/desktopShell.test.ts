@@ -39,6 +39,15 @@ describe('desktop shell bridge', () => {
     expect(css).toMatch(/:root\[data-titlebar='overlay'\]\s*\{\s*app-region:\s*no-drag;\s*\}/);
   });
 
+  it('moves full-window overlays only inside the desktop shell', () => {
+    const css = readFileSync(`${process.cwd()}/src/styles/tokens.css`, 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '');
+    // The variable is only defined under data-titlebar, so in a browser the margin falls back to 0.
+    expect(css).toMatch(/\.desktop-clear-top\s*\{\s*margin-top:\s*var\(--titlebar-safe-top,\s*0px\);\s*\}/);
+    const definitions = [...css.matchAll(/([^{}]+)\{[^{}]*--titlebar-safe-top:[^{}]*\}/g)].map((m) => m[1].trim());
+    expect(definitions.length).toBeGreaterThan(0);
+    for (const selector of definitions) expect(selector).toMatch(/^:root\[data-(titlebar|shell)/);
+  });
+
   it('keeps every window-drag rule behind the shell attributes, so browsers never see one', () => {
     const css = readFileSync(`${process.cwd()}/src/styles/tokens.css`, 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '');
     const rules = [...css.matchAll(/([^{}]+)\{[^{}]*app-region[^{}]*\}/g)].map((m) => m[1].trim());

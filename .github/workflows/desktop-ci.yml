@@ -52,58 +52,26 @@ jobs:
       - name: Install the shell's dependencies
         working-directory: desktop
         run: pnpm install --frozen-lockfile
-      - name: Unit-test the Electron shell
-        if: matrix.platform == 'macos-arm64'
+      - name: Unit-test the shell
         working-directory: desktop
         run: pnpm test
-      # Windows ships the Tauri shell until the Electron switch reaches it (batch 3).
-      - uses: dtolnay/rust-toolchain@stable
-        if: matrix.platform == 'windows-x64'
-        with:
-          components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-        if: matrix.platform == 'windows-x64'
-        with:
-          workspaces: desktop/src-tauri
-      - name: Lint and unit-test the Tauri shell
-        if: matrix.platform == 'windows-x64'
-        working-directory: desktop
-        run: |
-          pnpm tauri-icons
-          cd src-tauri
-          cargo fmt --check
-          cargo clippy --release -- -D warnings
-          cargo test --release
       - name: Build the runtime bundle used as the seed
         run: uv run --no-project python scripts/build_release.py --output release-build --platform ${{ matrix.platform }}
       - name: Build installer
         run: |
           seed="$(find release-build -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)"
           uv run --no-project python scripts/build_desktop.py --seed "$seed" --output desktop-build --platform ${{ matrix.platform }}
-      - name: Capture the installer UI on this runner's locale
-        if: matrix.platform == 'windows-x64'
-        shell: pwsh
+      - name: Install, open and quit the app; installer arguments
         run: |
-          Get-WinSystemLocale | Format-List Name, DisplayName
-          Get-Culture | Format-List Name
-          $installer = Get-ChildItem desktop-build -Filter '*-setup.exe' | Select-Object -First 1
-          $process = Start-Process -FilePath $installer.FullName -PassThru
-          Start-Sleep -Seconds 10
-          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
-          [System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-          $bitmap.Save("desktop-build/installer-ui-$((Get-Culture).Name).png")
-          Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-          Get-Process | Where-Object { $_.Path -like '*nsis*' -or $_.Name -like '*setup*' } | Stop-Process -Force -ErrorAction SilentlyContinue
-      - name: Install, open, quit and uninstall the installed app
-        run: |
-          installer="$(find desktop-build -maxdepth 1 -type f \( -name '*.dmg' -o -name '*-setup.exe' \) | head -1)"
+          installer="$(find desktop-build -maxdepth 1 -type f \( -name '*.dmg' -o -name '*-windows-x64.zip' \) | head -1)"
           uv run --no-project python scripts/smoke_desktop.py --installer "$installer"
+      - name: Title bar screenshots (caption buttons 40 / 80 px, dark / light)
+        if: matrix.platform == 'windows-x64'
+        run: node desktop/scripts/window-shots.mjs desktop/dist/win-unpacked desktop-build/window-shots
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: desktop-installer-${{ matrix.platform }}
-          path: desktop-build/*
+          path: desktop-build/**
           if-no-files-found: ignore
           retention-days: 14

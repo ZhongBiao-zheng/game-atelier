@@ -110,13 +110,6 @@ jobs:
           name: GameAtelier-${{ matrix.platform }}
           path: seed
       - uses: astral-sh/setup-uv@v6
-      # Windows ships the Tauri shell until the Electron switch reaches it (batch 3).
-      - uses: dtolnay/rust-toolchain@stable
-        if: matrix.platform == 'windows-x64'
-      - uses: Swatinem/rust-cache@v2
-        if: matrix.platform == 'windows-x64'
-        with:
-          workspaces: desktop/src-tauri
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -134,9 +127,12 @@ jobs:
       - name: Install, open, quit and uninstall the installed app
         shell: bash
         run: |
-          installer="$(find desktop-build -maxdepth 1 -type f \( -name '*.dmg' -o -name '*-setup.exe' \) | head -1)"
+          installer="$(find desktop-build -maxdepth 1 -type f \( -name '*.dmg' -o -name '*-windows-x64.zip' \) | head -1)"
           uv run --no-project python scripts/smoke_desktop.py --installer "$installer"
+      # Windows: built and smoke-tested only. The release gets a Windows installer once the
+      # installer (desktop/setup) packages this app folder; until then nothing is uploaded.
       - uses: actions/upload-artifact@v4
+        if: matrix.platform == 'macos-arm64'
         with:
           name: desktop-installer-${{ matrix.platform }}
           path: desktop-build/*
