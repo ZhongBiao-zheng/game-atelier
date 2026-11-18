@@ -156,12 +156,10 @@ pub fn seed_meets_contract(seed: &Path) -> bool {
         return false;
     };
     let mut text = String::new();
-    match archive.by_name(&name) {
-        Ok(mut entry) => {
-            entry.read_to_string(&mut text).is_ok() && contract_level(&text) >= DESKTOP_CONTRACT
-        }
-        Err(_) => false,
-    }
+    let read = archive
+        .by_name(&name)
+        .is_ok_and(|mut entry| entry.read_to_string(&mut text).is_ok());
+    read && contract_level(&text) >= DESKTOP_CONTRACT
 }
 
 pub fn seed_version(seed: &Path) -> Option<String> {
