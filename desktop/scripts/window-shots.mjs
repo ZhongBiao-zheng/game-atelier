@@ -69,6 +69,11 @@ for (const height of [40, 80]) {
     await cdp.eval(`(() => { const b = document.querySelector('[aria-label="${toggle}"]'); if (b) b.click(); return !!b; })()`);
     await sleep(2000);
     const rect = await cdp.eval('[screenX, screenY, outerWidth, outerHeight]');
+    // First with whatever dialog the empty data root opens (its dimming layer runs under the
+    // caption buttons), then without it.
+    capture(rect, path.join(out, `titlebar-${height}-${theme}-dialog.png`));
+    await cdp.eval(`(document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true`);
+    await sleep(1000);
     capture(rect, path.join(out, `titlebar-${height}-${theme}.png`));
     if (height === 40 && theme === 'dark') {
       // Stand-in for the Lightbox close button (fixed, right-6 top-6) with the same class.

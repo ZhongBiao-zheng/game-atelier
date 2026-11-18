@@ -32,6 +32,11 @@ const TRAFFIC_LIGHTS = { x: 20, y: 33 };
  * ATELIER_CAPTION_HEIGHT exists only for the 40 / 80 px comparison screenshots (batch 3).
  */
 const CAPTION_HEIGHT = Number(process.env.ATELIER_CAPTION_HEIGHT) || 40;
+/**
+ * Transparent: the buttons are drawn over whatever the page shows there, so a dialog's dimming
+ * layer or the canvas runs under them too. Only the symbols follow the theme.
+ */
+const CAPTION_BACKGROUND = '#00000000';
 const ARGS = process.argv.slice(1);
 /** Windows installer step: unpack the runtime from the seed, no window, then exit. */
 const PREPARE_ONLY = ARGS.includes('--prepare-runtime');
@@ -358,7 +363,7 @@ function setTheme(value) {
   const { win } = state;
   if (!win) return;
   win.setBackgroundColor(BACKGROUND[value]);
-  if (!MAC) win.setTitleBarOverlay({ color: BACKGROUND[value], symbolColor: FOREGROUND[value], height: CAPTION_HEIGHT });
+  if (!MAC) win.setTitleBarOverlay({ color: CAPTION_BACKGROUND, symbolColor: FOREGROUND[value], height: CAPTION_HEIGHT });
 }
 
 /** IPC from the pages, each checked against the sender frame first (src/security.mjs). */
@@ -449,7 +454,7 @@ function createWindow() {
     titleBarStyle: 'hidden',
     ...(MAC
       ? { trafficLightPosition: TRAFFIC_LIGHTS }
-      : { titleBarOverlay: { color: BACKGROUND[current], symbolColor: FOREGROUND[current], height: CAPTION_HEIGHT } }),
+      : { titleBarOverlay: { color: CAPTION_BACKGROUND, symbolColor: FOREGROUND[current], height: CAPTION_HEIGHT } }),
     webPreferences: webPreferences(),
   });
   state.win = win;
