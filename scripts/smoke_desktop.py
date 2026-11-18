@@ -260,6 +260,122 @@ def smoke_windows(installer: Path, timeout: int) -> int:
     return 0
 
 
+def _wait_gone(path: Path, seconds: int) -> bool:
+    deadline = time.monotonic() + seconds
+    while path.exists() and time.monotonic() < deadline:
+        time.sleep(1)
+    return not path.exists()
+
+
+def _windows_registration(product: str) -> tuple[bool, bool]:
+    """Whether the Settings > Apps entry and the Start menu shortcut exist (the runner's real ones)."""
+    import winreg
+    try:
+        winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                       rf"Software\Microsoft\Windows\CurrentVersion\Uninstall\{product}").Close()
+        entry = True
+    except OSError:
+        entry = False
+    return entry, (_programs_dir() / f"{product}.lnk").is_file()
+
+
+def _programs_dir() -> Path:
+    return Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs"
+
+
+def _shortcut_app_id(link: Path) -> str:
+    script = (f"(New-Object -ComObject Shell.Application).NameSpace('{link.parent}')"
+              f".ParseName('{link.name}').ExtendedProperty('System.AppUserModel.ID')")
+    out = subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True,
+                         text=True, encoding="utf-8", errors="replace", check=False)
+    return out.stdout.strip()
+
+
+def _timed(command: list[str], env: dict[str, str]) -> tuple[int, float]:
+    started = time.monotonic()
+    code = subprocess.run(command, env=env, timeout=900, check=False).returncode
+    return code, time.monotonic() - started
+
+
+def smoke_windows_setup(setup: Path, timeout: int) -> int:
+    """Atelier's installer around the Electron app (desktop/setup): fresh install → first start →
+    install over the running app → start again → uninstall. Runtime and data root stay in a
+    throwaway LOCALAPPDATA; the Apps entry and Start menu are the runner's real ones."""
+    repo = Path(__file__).resolve().parent.parent
+    product = json.loads((repo / "desktop/package.json").read_text(encoding="utf-8"))["productName"]
+    app_id = re.search(r"^appId: (\S+)$", (repo / "desktop/electron-builder.yml").read_text(encoding="utf-8"),
+                       re.M)[1]
+    work = Path(tempfile.mkdtemp(prefix="atelier-setup-")).resolve()
+    install_dir, local, data = work / "app", work / "local", work / "数据目录"
+    env = {**os.environ, "LOCALAPPDATA": str(local), "GAME_ATELIER_DATA_ROOT": str(data),
+           "ATELIER_SMOKE": "1", "GAME_ATELIER_NO_UPDATE_CHECK": "1"}
+    for name in ("ATELIER_RUNTIME_ROOT", "VIRTUAL_ENV"):
+        env.pop(name, None)
+    quiet = {k: v for k, v in env.items() if k != "ATELIER_SMOKE"}
+    runtime_parent, data_runtime = local / "game-atelier/runtime", data / ".runtime"
+    executable = install_dir / f"{product}.exe"
+    install = [str(setup), "--silent", "--dir", str(install_dir)]
+    problems: list[str] = []
+
+    code, fresh = _timed(install, quiet)
+    if code != 0:
+        problems.append(f"fresh install exited {code}")
+    if not (runtime_parent / "GameAtelier/last-good").is_file():
+        problems.append("the installer did not unpack the runtime")
+    if _windows_registration(product) != (True, True):
+        problems.append(f"install registration (Apps entry, Start menu) = {_windows_registration(product)}")
+    shortcut_id = _shortcut_app_id(_programs_dir() / f"{product}.lnk")
+    if shortcut_id != app_id:
+        problems.append(f"Start menu shortcut AppUserModelID {shortcut_id!r}, expected {app_id!r}")
+    if not problems:
+        problems += [f"first start: {p}" for p in _electron_run(
+            executable, env, timeout, runtime_parent, data_runtime, replacement=None)]
+
+    # Install over the running app: the installer asks it to quit (--quit) and keeps the runtime.
+    over = 0.0
+    if not problems:
+        last_good = (runtime_parent / "GameAtelier/last-good").read_text(encoding="utf-8")
+        server_log = data_runtime / "server.log"
+        server_at = _size(server_log)
+        running = subprocess.Popen([str(executable)], env=quiet)
+        deadline = time.monotonic() + timeout
+        while SESSION_OK not in _since(server_log, server_at) and time.monotonic() < deadline:
+            time.sleep(1)
+        code, over = _timed(install, quiet)
+        if code != 0:
+            problems.append(f"install over the running app exited {code}")
+        try:
+            running.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            running.kill()
+            problems.append("the running app did not quit for the install")
+        if (runtime_parent / "GameAtelier/last-good").read_text(encoding="utf-8") != last_good:
+            problems.append("the install over the same version replaced the runtime")
+        problems += [f"start after reinstall: {p}" for p in _electron_run(
+            executable, env, timeout, runtime_parent, data_runtime, replacement=None)]
+
+    for log in (runtime_parent / "shell.log", data_runtime / "server.log"):
+        print(f"--- {log.name}\n{_tail(log)}")
+    # The uninstaller copies itself to %TEMP% and returns at once; wait for the folder to go.
+    subprocess.run([str(install_dir / "uninstall.exe"), "--silent"], env=quiet, check=True, timeout=300)
+    if not _wait_gone(install_dir, 120):
+        problems.append("uninstall left the install folder")
+    if not _wait_gone(runtime_parent, 60):
+        problems.append("uninstall left the runtime root")
+    if not (data_runtime / "server.log").is_file():
+        problems.append("uninstall touched the data root")
+    if _windows_registration(product) != (False, False):
+        problems.append(f"uninstall left registration behind: {_windows_registration(product)}")
+    print(f"installer {setup.stat().st_size / 1024**2:.1f} MiB; fresh install {fresh:.1f} s; "
+          f"install over the running app {over:.1f} s")
+    if problems:
+        print("SETUP SMOKE FAILED: " + "; ".join(problems), file=sys.stderr)
+        return 1
+    shutil.rmtree(work, ignore_errors=True)
+    print("setup smoke passed")
+    return 0
+
+
 def smoke(installer: Path, timeout: int) -> int:
     if installer.suffix.lower() == ".zip":
         return smoke_windows(installer, timeout)
@@ -268,7 +384,11 @@ def smoke(installer: Path, timeout: int) -> int:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--installer", type=Path, required=True)
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--installer", type=Path, help="dmg, or the zipped Windows app folder")
+    target.add_argument("--setup", type=Path, help="Windows: Atelier's own setup.exe")
     parser.add_argument("--timeout", type=int, default=300)
     args = parser.parse_args()
+    if args.setup:
+        sys.exit(smoke_windows_setup(args.setup, args.timeout))
     sys.exit(smoke(args.installer, args.timeout))

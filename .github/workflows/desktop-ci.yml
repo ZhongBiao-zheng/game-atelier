@@ -7,6 +7,8 @@ on:
       - 'desktop/**'
       - 'scripts/build_desktop.py'
       - 'scripts/smoke_desktop.py'
+      - 'scripts/desktop_icon_check.ps1'
+      - 'scripts/desktop_installer_screens.ps1'
       - 'scripts/build_release.py'
       - 'scripts/bootstrap.py'
       - 'src/viewer_server/shell_control.py'
@@ -16,6 +18,8 @@ on:
       - 'desktop/**'
       - 'scripts/build_desktop.py'
       - 'scripts/smoke_desktop.py'
+      - 'scripts/desktop_icon_check.ps1'
+      - 'scripts/desktop_installer_screens.ps1'
       - 'scripts/build_release.py'
       - 'scripts/bootstrap.py'
       - 'src/viewer_server/shell_control.py'
@@ -55,6 +59,21 @@ jobs:
       - name: Unit-test the shell
         working-directory: desktop
         run: pnpm test
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.platform == 'windows-x64'
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        if: matrix.platform == 'windows-x64'
+        with:
+          workspaces: desktop/setup
+      - name: Lint and unit-test the Windows installer
+        if: matrix.platform == 'windows-x64'
+        working-directory: desktop/setup
+        run: |
+          cargo fmt --check
+          cargo clippy --release -- -D warnings
+          cargo test --release
       - name: Build the runtime bundle used as the seed
         run: uv run --no-project python scripts/build_release.py --output release-build --platform ${{ matrix.platform }}
       - name: Build installer
@@ -65,6 +84,23 @@ jobs:
         run: |
           installer="$(find desktop-build -maxdepth 1 -type f \( -name '*.dmg' -o -name '*-windows-x64.zip' \) | head -1)"
           uv run --no-project python scripts/smoke_desktop.py --installer "$installer"
+      - name: Every installer screen (dark / light), a windowed install and a windowed uninstall
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem desktop-build -Filter '*-setup.exe' | Select-Object -First 1
+          ./scripts/desktop_installer_screens.ps1 -Installer $setup.FullName -Output desktop-build/installer-shots
+      - name: Installer, app and uninstaller icons, and the Apps entry
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem desktop-build -Filter '*-setup.exe' | Select-Object -First 1
+          ./scripts/desktop_icon_check.ps1 -Installer $setup.FullName -Output desktop-build/installer-shots
+      - name: Fresh install, first start, install over the running app, uninstall
+        if: matrix.platform == 'windows-x64'
+        run: |
+          setup="$(find desktop-build -maxdepth 1 -type f -name '*-setup.exe' | head -1)"
+          uv run --no-project python scripts/smoke_desktop.py --setup "$setup"
       - name: Title bar screenshots (caption buttons 40 / 80 px, dark / light)
         if: matrix.platform == 'windows-x64'
         run: node desktop/scripts/window-shots.mjs desktop/dist/win-unpacked desktop-build/window-shots

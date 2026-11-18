@@ -1,4 +1,10 @@
-"""Build the desktop installer around a runtime bundle built by build_release.py."""
+"""Build the desktop installer around a runtime bundle built by build_release.py.
+
+macOS: electron-builder's dmg. Windows: electron-builder's app folder (with the seed beside the
+exe), zipped, and wrapped by Atelier's own installer (desktop/setup) into a setup.exe: the folder,
+its main program and appId, plus the WebView2 bootstrapper, appended to the installer
+(desktop/setup/src/payload.rs).
+"""
 from __future__ import annotations
 
 import argparse
@@ -7,18 +13,25 @@ import json
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import tarfile
+import urllib.request
 import zipfile
 
 REPO = Path(__file__).resolve().parent.parent
 DESKTOP = REPO / "desktop"
-# Published file-name tail per platform. Windows ships the app folder (zipped as a CI artifact); the
-# Windows installer (desktop/setup) packages it, so this script never makes a setup.exe.
+SETUP = DESKTOP / "setup"
+# Published file-name tail per platform. On Windows the zipped app folder feeds the shell smoke
+# test; users get the setup.exe (SETUP_TAIL).
 TAILS = {
     "macos-arm64": "macos-arm64.dmg",
     "windows-x64": "windows-x64.zip",
 }
+SETUP_TAIL = "windows-x64-setup.exe"
+PAYLOAD_MAGIC = b"ATELPAY1"
+WEBVIEW2_BOOTSTRAPPER = "MicrosoftEdgeWebview2Setup.exe"
+WEBVIEW2_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
 
 
 def required_contract() -> int:
@@ -92,25 +105,76 @@ def build_electron(seed: Path, version: str, platform: str, app_id_override: str
     return app
 
 
-def build(seed: Path, output: Path, platform: str, app_id: str | None = None) -> Path:
+def write_payload(setup: Path, target: Path, *, product: str, version: str, main: str, app_id: str,
+                  app: Path, setup_files: list[Path]) -> None:
+    """`<setup exe> <files…> <manifest> <u64 LE manifest length> <magic>` (payload.rs).
+
+    Every file under `app` (the seed included) is installed at its relative path; `main` is the
+    program inside it. `setup_files` stay with the installer (`setup/`).
+    """
+    files = [(path.relative_to(app).as_posix(), path) for path in sorted(app.rglob("*")) if path.is_file()]
+    names = {name for name, _ in files}
+    if main not in names or not any(name.startswith("seed/") for name in names):
+        raise SystemExit(f"{app} lacks {main} or seed/")
+    files += [(f"setup/{path.name}", path) for path in setup_files]
+    exe = setup.read_bytes()
+    entries = []
+    with target.open("wb") as out:
+        out.write(exe)
+        for name, path in files:
+            entries.append({"path": name, "offset": out.tell(), "size": path.stat().st_size})
+            with path.open("rb") as source:
+                shutil.copyfileobj(source, out, 1 << 20)
+        manifest = json.dumps({"role": "install", "product": product, "version": version, "main": main,
+                               "app_id": app_id, "exe_len": len(exe), "files": entries}).encode()
+        out.write(manifest)
+        out.write(struct.pack("<Q", len(manifest)))
+        out.write(PAYLOAD_MAGIC)
+
+
+def _webview2_bootstrapper() -> Path:
+    cached = SETUP / "target" / WEBVIEW2_BOOTSTRAPPER
+    if not cached.is_file():
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        with urllib.request.urlopen(WEBVIEW2_URL, timeout=120) as response:
+            cached.write_bytes(response.read())
+    return cached
+
+
+def build_setup(app: Path, target: Path, product: str, version: str, identity: str) -> Path:
+    """Atelier's own installer around the Electron app folder (desktop/setup)."""
+    subprocess.run(["cargo", "build", "--release"], cwd=SETUP, check=True)
+    write_payload(SETUP / "target/release/atelier-setup.exe", target, product=product, version=version,
+                  main=f"{product}.exe", app_id=identity, app=app, setup_files=[_webview2_bootstrapper()])
+    return target
+
+
+def _write_digest(target: Path) -> None:
+    with target.open("rb") as source:
+        digest = hashlib.file_digest(source, "sha256").hexdigest()
+    target.with_name(target.name + ".sha256").write_text(f"{digest}  {target.name}\n", encoding="utf-8")
+    print(f"{target.name}: {target.stat().st_size / 1024**2:.1f} MiB")
+
+
+def build(seed: Path, output: Path, platform: str, app_id_override: str | None = None) -> Path:
     version = json.loads((REPO / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
     # The product name lives only in desktop/package.json; the seed keeps its runtime name.
     product = json.loads((DESKTOP / "package.json").read_text(encoding="utf-8"))["productName"]
     expected = f"GameAtelier-{version}-{platform}."
     if not seed.name.startswith(expected):
         raise SystemExit(f"seed {seed.name} does not match {expected}*")
-    built = build_electron(seed, version, platform, app_id)
+    built = build_electron(seed, version, platform, app_id_override)
     output.mkdir(parents=True, exist_ok=True)
     target = output / f"{product}-{version}-{TAILS[platform]}"
     if built.is_dir():
         target.unlink(missing_ok=True)
         shutil.make_archive(str(target.with_suffix("")), "zip", root_dir=built)
+        setup = build_setup(built, output / f"{product}-{version}-{SETUP_TAIL}", product, version,
+                            app_id_override or app_id())
+        _write_digest(setup)
     else:
         shutil.copy2(built, target)
-    with target.open("rb") as source:
-        digest = hashlib.file_digest(source, "sha256").hexdigest()
-    target.with_name(target.name + ".sha256").write_text(f"{digest}  {target.name}\n", encoding="utf-8")
-    print(f"{target.name}: {target.stat().st_size / 1024**2:.1f} MiB")
+    _write_digest(target)
     return target
 
 

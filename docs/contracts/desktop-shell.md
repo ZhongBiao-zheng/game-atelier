@@ -8,8 +8,8 @@
 
 | 位置 | 内容 | 谁写 |
 | --- | --- | --- |
-| 安装位置（macOS `/Applications/Atelier.app`；Windows `%LOCALAPPDATA%\Atelier\`，当前用户安装、不需要管理员） | 外壳与种子（macOS `Contents/Resources/seed/GameAtelier-<版本>-macos-arm64.tar.gz`；Windows `seed\GameAtelier-<版本>-windows-x64.zip`） | 安装器，只读 |
-| `<本地应用数据>/game-atelier/runtime/GameAtelier/` | ADR-0030 运行包布局 | 外壳首次启动时由种子解压；之后只由应用内更新修改 |
+| 安装位置（macOS `/Applications/Atelier.app`；Windows 默认 `%LOCALAPPDATA%\Atelier\`，可在安装时更改，当前用户安装、不需要管理员） | 外壳与种子（macOS `Contents/Resources/seed/GameAtelier-<版本>-macos-arm64.tar.gz`；Windows 应用目录、`seed\GameAtelier-<版本>-windows-x64.zip` 与 `seed.json`、`uninstall.exe`） | 安装器，只读 |
+| `<本地应用数据>/game-atelier/runtime/GameAtelier/` | ADR-0030 运行包布局 | 由种子解压（Windows 在安装时由安装程序调用外壳的 `--prepare-runtime`，macOS 在外壳首次启动时）；之后只由应用内更新修改 |
 | `<运行包根>/versions/<版本>/DESKTOP_CONTRACT` | 一行整数：该版本提供的外壳契约级别（见「契约级别」） | `scripts/build_release.py` |
 | `<本地应用数据>/game-atelier/runtime/shell.log` | 外壳日志 | 外壳 |
 | `<数据目录>/.runtime/` | 服务记录 | 见下 |
@@ -58,6 +58,19 @@ Windows 外壳是 electron-builder 产出的应用目录，由 Windows 安装程
 AppUserModelID 等于 `desktop/electron-builder.yml` 的 `appId`（构建时以 `atelierAppId` 写进应用元数据）；安装程序创建的快捷方式必须带同一个值。外壳继续写 `<运行包父目录>\window-theme`（`light` / `dark`），安装程序据此决定深浅色。
 
 Windows 窗口隐藏系统标题栏，最小化 / 最大化 / 关闭按钮由系统画在页面右上角（背景透明、符号颜色跟随页面深浅色），页面写 `data-titlebar="overlay"` 并按 `data-shell="windows"` 在右侧留位；Windows 没有菜单栏，`Ctrl+,` 打开设置、`F5` / `Ctrl+R` 重新载入、`F11` 全屏，托盘菜单有「显示 / 查看日志 / 退出」。
+
+## Windows 安装程序（`desktop/setup`）
+
+`Atelier-<版本>-windows-x64-setup.exe` 是 Atelier 自己的安装程序（Rust + WebView2 界面），不是 NSIS，也不认外壳用什么构建：它只接收「应用目录（含 `seed\`）+ 主程序相对路径 + `appId`」。这些附在安装程序本体后面（格式见 `desktop/setup/src/payload.rs`，`setup/` 下的条目只给安装程序自己用，即 WebView2 引导程序），由 `scripts/build_desktop.py` 的 `write_payload` 写入，守卫测试比对两边。卸载程序 `uninstall.exe` 是同一个程序去掉附件、清单标为卸载，并记下安装时放进安装目录的每个文件。
+
+| 用法 | 行为 |
+| --- | --- |
+| 双击 | 窗口：立即安装（「更改」可改位置，选的目录名不是产品名时在其下建 `Atelier\`；可关桌面快捷方式）→ 进度（复制应用目录，再调用外壳 `--prepare-runtime` 解压运行环境）→ 开始使用。已安装时为「立即更新」，沿用原位置 |
+| `--silent [--dir <路径>] [--no-desktop-shortcut]` | 无界面安装；退出码 0 成功、1 失败、3 应用仍在运行 |
+| `uninstall.exe [--silent]` | 先把自己复制到 `%TEMP%` 再运行；停止安装目录与运行包根下的进程，删除快捷方式、「设置 → 应用」条目、运行包父目录（`<本地应用数据>\game-atelier\runtime`），以及安装时记下的文件和因此变空的文件夹。数据目录与 WebView 本地存储不动 |
+| `--preview <界面>`、`--auto` | 只供 CI 截图：渲染某个界面不做任何事；自动点主按钮 |
+
+覆盖安装时先调用已安装外壳的 `--quit`（有进行中的工作由外壳确认），等安装目录里的进程全部退出再复制；运行包版本低于安装包时先删掉再解压，不低于时交给 `--prepare-runtime` 按外壳的规则决定（`replacementReason`）。写入的位置：安装目录、开始菜单与桌面 `<产品名>.lnk`（带 `System.AppUserModel.ID` = `appId`）、`HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\<产品名>`（与此前的 NSIS 安装器相同，覆盖安装会接管旧安装，旧的 `HKCU\Software\atelier\<产品名>` 被删除）。深浅色读 `<运行包父目录>\window-theme`。缺 WebView2 时先用系统对话框询问，再用附带的引导程序联网安装。安装程序的 WebView 配置放在 `%TEMP%\atelier-setup-webview2`，日志写 `%TEMP%\atelier-setup.log`。
 
 ## 服务记录（`<数据目录>/.runtime/`）
 
