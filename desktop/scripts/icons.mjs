@@ -1,6 +1,5 @@
 // `pnpm icons`: app icons from assets/brand into stage/icons (not committed).
 // - icon.png: 1024 px macOS icon (Apple grid padding is part of the SVG); electron-builder makes the icns.
-// - icon.ico: the committed Windows icon assets/brand/atelier.ico (shared with the Windows installer).
 // - trayTemplate.png: the menu-bar template image made by scripts/build_tray_icon.py (3x, 18 pt).
 import { Resvg } from '@resvg/resvg-js';
 import fs from 'node:fs';
@@ -18,6 +17,5 @@ function render(svgFile, size) {
 
 fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'icon.png'), render(path.join(brand, 'atelier-icon-macos.svg'), 1024));
-fs.copyFileSync(path.join(brand, 'atelier.ico'), path.join(out, 'icon.ico'));
 fs.copyFileSync(path.join(brand, 'atelier-tray-template.png'), path.join(out, 'trayTemplate.png'));
 console.log(`icons -> ${path.relative(desktop, out)}`);

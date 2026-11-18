@@ -1,13 +1,14 @@
-"""Install the desktop app, open it, quit it, uninstall it, and check what it left behind.
+"""Install the desktop app, open it, quit it, and check what it left behind.
 
-Exercises the real installed path: seed extraction, launcher, webview session, quit → stop.
-macOS runs in a throwaway HOME; Windows installs silently into a temporary folder (the shell reads
-%LOCALAPPDATA% through the system API, so the runtime root there is the runner's real one).
+Exercises the real installed path: seed extraction, launcher, page session, quit -> stop. Every run
+uses a throwaway HOME (macOS) or LOCALAPPDATA and data root (Windows, a Chinese path to exercise
+every encoding hop). macOS installs from the dmg; Windows unzips the app folder that the Windows
+installer (desktop/setup) packages, with the seed beside the exe.
 
-macOS (Electron) then reopens the app three times on the same runtime root: with its
-DESKTOP_CONTRACT markers removed (it must be replaced from the seed), with the version directory
-claiming a different seed build (replaced again), and unchanged (kept). Windows (Tauri until the
-Electron switch reaches it) reopens once with the markers removed and must take the old start path.
+After the first start the app is reopened on the same runtime root three times: with its
+DESKTOP_CONTRACT markers removed (replaced from the seed), with the version directory claiming a
+different seed build (replaced again), and unchanged (kept). Then the two installer arguments:
+`--prepare-runtime` on an empty runtime root, and `--quit` against a running instance.
 """
 from __future__ import annotations
 
@@ -24,10 +25,6 @@ import tempfile
 import time
 
 SESSION_OK = '"POST /api/connection/local-session HTTP/1.1" 200'
-# Tauri (Windows) log lines.
-DESKTOP_START = 'launcher ["--desktop-start"] -> Some(0)'
-LEGACY_START = 'launcher ["--select-version", "--no-browser"] -> Some(0)'
-# Electron (macOS) log lines.
 ELECTRON_START = 'launcher ["--desktop-start"] -> 0'
 PROBE_OK = "security probe: ok"
 
@@ -70,41 +67,6 @@ def _since(path: Path, offset: int) -> str:
         return handle.read().decode("utf-8", errors="replace")
 
 
-def _start_problems(shell_log: str, *, declared: bool, overlay: bool) -> list[str]:
-    """Which start path and title bar the shell chose (docs/contracts/desktop-shell.md)."""
-    problems = []
-    if declared and DESKTOP_START not in shell_log:
-        problems.append("the shell did not start the server through --desktop-start")
-    if not declared:
-        if "--desktop-start" in shell_log:
-            problems.append("the shell called --desktop-start on a runtime that does not declare it")
-        if LEGACY_START not in shell_log:
-            problems.append("the shell did not start an undeclared runtime through --select-version")
-    if f"title bar overlay={str(overlay).lower()}" not in shell_log:
-        problems.append(f"expected title bar overlay={str(overlay).lower()}")
-    return problems
-
-
-def _undeclared_run(executable: Path, env: dict[str, str], timeout: int, runtime_parent: Path,
-                    data_runtime: Path, *, overlay: bool) -> list[str]:
-    """Reopen on the same runtime with its DESKTOP_CONTRACT markers removed."""
-    markers = list((runtime_parent / "GameAtelier/versions").glob("*/DESKTOP_CONTRACT"))
-    if not markers:
-        return ["the runtime does not declare DESKTOP_CONTRACT"]
-    for marker in markers:
-        marker.unlink()
-    shell_log, server_log = runtime_parent / "shell.log", data_runtime / "server.log"
-    shell_at, server_at = _size(shell_log), _size(server_log)
-    code = _run(executable, env, timeout)
-    problems = [] if code == 0 else [f"shell exit {code}"]
-    if SESSION_OK not in _since(server_log, server_at):
-        problems.append("the page never established a local session")
-    if (data_runtime / "server.pid").exists():
-        problems.append("server records remain after quit")
-    problems += _start_problems(_since(shell_log, shell_at), declared=False, overlay=overlay)
-    return [f"undeclared runtime: {p}" for p in problems]
-
-
 def _electron_run(executable: Path, env: dict[str, str], timeout: int, runtime_parent: Path,
                   data_runtime: Path, *, replacement: str | None) -> list[str]:
     """One launch: page session, security probe, quit stops the server, and the expected
@@ -130,15 +92,15 @@ def _electron_run(executable: Path, env: dict[str, str], timeout: int, runtime_p
     return problems
 
 
-def _seed_build(app: Path) -> tuple[str, str]:
-    info = json.loads((app / "Contents/Resources/seed/seed.json").read_text(encoding="utf-8"))
+def _seed_build(seed_dir: Path) -> tuple[str, str]:
+    info = json.loads((seed_dir / "seed.json").read_text(encoding="utf-8"))
     return info["version"], info["build"]
 
 
-def _electron_reopens(app: Path, executable: Path, env: dict[str, str], timeout: int,
+def _electron_reopens(seed_dir: Path, executable: Path, env: dict[str, str], timeout: int,
                       runtime_parent: Path, data_runtime: Path) -> list[str]:
     root = runtime_parent / "GameAtelier"
-    version, build = _seed_build(app)
+    version, build = _seed_build(seed_dir)
     payload = root / "versions" / version
     problems: list[str] = []
     # 1. A runtime that does not declare the contract (unpacked by an older shell) is replaced.
@@ -162,6 +124,67 @@ def _electron_reopens(app: Path, executable: Path, env: dict[str, str], timeout:
     return problems
 
 
+def _prepare_runtime(executable: Path, env: dict[str, str], runtime_parent: Path,
+                     data_runtime: Path) -> list[str]:
+    """--prepare-runtime on an empty runtime root: progress lines, exit code, no window, no server."""
+    shutil.rmtree(runtime_parent / "GameAtelier")
+    quiet = {k: v for k, v in env.items() if k != "ATELIER_SMOKE"}
+    proc = subprocess.run([str(executable), "--prepare-runtime"], env=quiet, capture_output=True,
+                          text=True, encoding="utf-8", errors="replace", timeout=600, check=False)
+    progress = [tuple(map(int, line.split()[1:3])) for line in proc.stdout.splitlines()
+                if re.fullmatch(r"progress \d+ \d+", line.strip())]
+    problems = []
+    if proc.returncode != 0:
+        problems.append(f"exit {proc.returncode}: {proc.stderr.strip()[-300:]}")
+    if not progress:
+        problems.append(f"no progress lines (stdout: {proc.stdout[-300:]!r})")
+    elif progress[-1][0] != progress[-1][1] or any(b[0] < a[0] for a, b in zip(progress, progress[1:])):
+        problems.append(f"progress did not climb to the total: {progress[:3]} … {progress[-3:]}")
+    if not (runtime_parent / "GameAtelier/last-good").is_file():
+        problems.append("the runtime was not unpacked")
+    if (data_runtime / "server.pid").exists():
+        problems.append("it started a server")
+    print(f"--prepare-runtime: exit {proc.returncode}, {len(progress)} progress lines, last {progress[-1:] }")
+    return [f"--prepare-runtime: {p}" for p in problems]
+
+
+def _quit_request(executable: Path, env: dict[str, str], timeout: int, runtime_parent: Path,
+                  data_runtime: Path) -> list[str]:
+    """--quit sends a running instance through its normal quit flow (it stops its server)."""
+    quiet = {k: v for k, v in env.items() if k != "ATELIER_SMOKE"}
+    shell_log, server_log = runtime_parent / "shell.log", data_runtime / "server.log"
+    shell_at, server_at = _size(shell_log), _size(server_log)
+    app = subprocess.Popen([str(executable)], env=quiet)
+    deadline = time.monotonic() + timeout
+    while SESSION_OK not in _since(server_log, server_at) and time.monotonic() < deadline:
+        time.sleep(1)
+    problems = [] if SESSION_OK in _since(server_log, server_at) else ["the app never showed the page"]
+    request = subprocess.run([str(executable), "--quit"], env=quiet, timeout=60, check=False)
+    if request.returncode != 0:
+        problems.append(f"the --quit launch exited {request.returncode}")
+    try:
+        code = app.wait(timeout=60)
+        if code != 0:
+            problems.append(f"the running app exited {code}")
+    except subprocess.TimeoutExpired:
+        app.kill()
+        problems.append("the running app did not quit")
+    if "quit requested by another launch" not in _since(shell_log, shell_at):
+        problems.append("the running app never received the request")
+    if (data_runtime / "server.pid").exists():
+        problems.append("server records remain after quit")
+    nothing = subprocess.run([str(executable), "--quit"], env=quiet, timeout=60, check=False)
+    if nothing.returncode != 0:
+        problems.append(f"--quit with nothing running exited {nothing.returncode}")
+    return [f"--quit: {p}" for p in problems]
+
+
+def _installer_arguments(executable: Path, env: dict[str, str], timeout: int, runtime_parent: Path,
+                         data_runtime: Path) -> list[str]:
+    problems = _prepare_runtime(executable, env, runtime_parent, data_runtime)
+    return problems or _quit_request(executable, env, timeout, runtime_parent, data_runtime)
+
+
 def smoke_macos(installer: Path, timeout: int) -> int:
     work = Path(tempfile.mkdtemp(prefix="atelier-smoke-")).resolve()
     home = work / "home"
@@ -183,7 +206,10 @@ def smoke_macos(installer: Path, timeout: int) -> int:
     if not (runtime_parent / "GameAtelier/last-good").is_file():
         problems.append("seed was not extracted into the runtime root")
     if not problems:
-        problems += _electron_reopens(app, executable, env, timeout, runtime_parent, data_runtime)
+        problems += _electron_reopens(app / "Contents/Resources/seed", executable, env, timeout,
+                                      runtime_parent, data_runtime)
+    if not problems:
+        problems += _installer_arguments(executable, env, timeout, runtime_parent, data_runtime)
     for log in (runtime_parent / "shell.log", data_runtime / "server.log"):
         print(f"--- {log.name}\n{_tail(log)}")
     if problems:
@@ -194,59 +220,38 @@ def smoke_macos(installer: Path, timeout: int) -> int:
     return 0
 
 
-def _wait_gone(path: Path, seconds: int) -> bool:
-    deadline = time.monotonic() + seconds
-    while path.exists() and time.monotonic() < deadline:
-        time.sleep(1)
-    return not path.exists()
-
-
-def _windows_shell_problems(shell_log: str) -> list[str]:
-    """What the shell log must show on Windows (docs/contracts/desktop-shell.md)."""
-    problems = _start_problems(shell_log, declared=True, overlay=False)
-    progress = re.search(r"unpack progress: (\d+) reports, last (\d+)/(\d+)", shell_log)
-    if not progress or progress[1] == "0" or progress[2] != progress[3]:
-        problems.append("unpack progress did not reach the total entry count")
-    return problems
+def _unpack_progress(shell_log: str) -> list[str]:
+    """Windows zip extraction reports entries; the last report reaches the total."""
+    found = re.search(r"unpack progress: (\d+) reports, last (\d+)/(\d+)", shell_log)
+    if not found or found[1] == "0" or found[2] != found[3]:
+        return ["unpack progress did not reach the total entry count"]
+    return []
 
 
 def smoke_windows(installer: Path, timeout: int) -> int:
     work = Path(tempfile.mkdtemp(prefix="atelier-smoke-")).resolve()
-    install_dir = work / "app"
-    data = work / "数据目录"  # A non-ASCII data root exercises every encoding hop.
-    # NSIS: /D must be the last argument and must not be quoted.
-    subprocess.run([str(installer), "/S", f"/D={install_dir}"], check=True, timeout=600)
-    executable = next(p for p in install_dir.glob("*.exe") if p.name.lower() != "uninstall.exe")
-    env = {**os.environ, "GAME_ATELIER_DATA_ROOT": str(data), "ATELIER_SMOKE": "1",
-           "GAME_ATELIER_NO_UPDATE_CHECK": "1"}
+    app = work / "app"
+    shutil.unpack_archive(installer, app)
+    product = json.loads((Path(__file__).resolve().parent.parent / "desktop/package.json")
+                         .read_text(encoding="utf-8"))["productName"]
+    executable = app / f"{product}.exe"
+    local, data = work / "local", work / "数据目录"
+    env = {**os.environ, "LOCALAPPDATA": str(local), "GAME_ATELIER_DATA_ROOT": str(data),
+           "ATELIER_SMOKE": "1", "GAME_ATELIER_NO_UPDATE_CHECK": "1"}
     for name in ("ATELIER_RUNTIME_ROOT", "VIRTUAL_ENV"):
         env.pop(name, None)
-    runtime_parent = Path(os.environ["LOCALAPPDATA"]) / "game-atelier/runtime"
+    runtime_parent = local / "game-atelier/runtime"
     data_runtime = data / ".runtime"
-    code = _run(executable, env, timeout)
-    problems = []
-    if code != 0:
-        problems.append(f"shell exit {code}")
+    problems = _electron_run(executable, env, timeout, runtime_parent, data_runtime, replacement="missing")
+    problems += _unpack_progress(_tail(runtime_parent / "shell.log", 10**7))
     if not (runtime_parent / "GameAtelier/last-good").is_file():
         problems.append("seed was not extracted into the runtime root")
-    if SESSION_OK not in _tail(data_runtime / "server.log", 10**7):
-        problems.append("the page never established a local session")
-    if (data_runtime / "server.pid").exists():
-        problems.append("server records remain after quit")
-    problems += _windows_shell_problems(_tail(runtime_parent / "shell.log", 10**7))
     if not problems:
-        problems += _undeclared_run(executable, env, timeout, runtime_parent, data_runtime,
-                                    overlay=False)
+        problems += _electron_reopens(app / "seed", executable, env, timeout, runtime_parent, data_runtime)
+    if not problems:
+        problems += _installer_arguments(executable, env, timeout, runtime_parent, data_runtime)
     for log in (runtime_parent / "shell.log", data_runtime / "server.log"):
         print(f"--- {log.name}\n{_tail(log)}")
-    # The uninstaller copies itself to %TEMP% and returns at once; wait for the folder to go.
-    subprocess.run([str(install_dir / "uninstall.exe"), "/S"], check=True, timeout=300)
-    if not _wait_gone(install_dir, 120):
-        problems.append("uninstall left the install folder")
-    if not _wait_gone(runtime_parent, 60):
-        problems.append("uninstall left the runtime root")
-    if not (data_runtime / "server.log").is_file():
-        problems.append("uninstall touched the data root")
     if problems:
         print("SMOKE FAILED: " + "; ".join(problems), file=sys.stderr)
         return 1
@@ -256,7 +261,7 @@ def smoke_windows(installer: Path, timeout: int) -> int:
 
 
 def smoke(installer: Path, timeout: int) -> int:
-    if installer.suffix.lower() == ".exe":
+    if installer.suffix.lower() == ".zip":
         return smoke_windows(installer, timeout)
     return smoke_macos(installer, timeout)
 

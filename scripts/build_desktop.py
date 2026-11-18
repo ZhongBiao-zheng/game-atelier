@@ -13,10 +13,11 @@ import zipfile
 
 REPO = Path(__file__).resolve().parent.parent
 DESKTOP = REPO / "desktop"
-# Published file-name tail per platform.
+# Published file-name tail per platform. Windows ships the app folder (zipped as a CI artifact); the
+# Windows installer (desktop/setup) packages it, so this script never makes a setup.exe.
 TAILS = {
     "macos-arm64": "macos-arm64.dmg",
-    "windows-x64": "windows-x64-setup.exe",
+    "windows-x64": "windows-x64.zip",
 }
 
 
@@ -45,7 +46,13 @@ def seed_markers(seed: Path, version: str) -> dict[str, str]:
     return found
 
 
-def stage_seed(seed: Path, version: str) -> None:
+def app_id() -> str:
+    """The AppUserModelID / bundle id: `appId` in desktop/electron-builder.yml, the only place."""
+    text = (DESKTOP / "electron-builder.yml").read_text(encoding="utf-8")
+    return re.search(r"^appId: (\S+)$", text, re.M)[1]
+
+
+def stage_seed(seed: Path, version: str) -> Path:
     """Copy the seed where electron-builder picks it up, with the facts the shell checks at start
     (docs/contracts/desktop-shell.md): the shell never reads the archive before unpacking it."""
     markers = seed_markers(seed, version)
@@ -60,31 +67,29 @@ def stage_seed(seed: Path, version: str) -> None:
     shutil.copy2(seed, staged / seed.name)
     info = {"file": seed.name, "version": version, "build": markers["BUILD_ID"], "contract": contract}
     (staged / "seed.json").write_text(json.dumps(info) + "\n", encoding="utf-8")
+    return staged
 
 
-def build_electron(seed: Path, version: str, app_id: str | None) -> Path:
-    stage_seed(seed, version)
+def build_electron(seed: Path, version: str, platform: str, app_id_override: str | None) -> Path:
+    staged = stage_seed(seed, version)
     pnpm = shutil.which("pnpm") or "pnpm"
     # Electron 45 has no postinstall: fetch the binary electron-builder packages (no-op once present).
     subprocess.run([pnpm, "exec", "install-electron"], cwd=DESKTOP, check=True)
     subprocess.run([pnpm, "icons"], cwd=DESKTOP, check=True)
     shutil.rmtree(DESKTOP / "dist", ignore_errors=True)
-    command = [pnpm, "exec", "electron-builder", "--mac", "--arm64", "--publish", "never",
-               f"-c.extraMetadata.version={version}"]
-    if app_id:
-        command.append(f"-c.appId={app_id}")
+    target = ["--mac", "--arm64"] if platform == "macos-arm64" else ["--win", "--x64"]
+    identity = app_id_override or app_id()
+    command = [pnpm, "exec", "electron-builder", *target, "--publish", "never",
+               f"-c.extraMetadata.version={version}", f"-c.extraMetadata.atelierAppId={identity}"]
+    if app_id_override:
+        command.append(f"-c.appId={app_id_override}")
     subprocess.run(command, cwd=DESKTOP, check=True)
-    return next((DESKTOP / "dist").glob("*.dmg"))
-
-
-def build_tauri_windows(seed: Path, version: str) -> Path:
-    # Windows still ships the Tauri shell until it moves to Electron (batch 3).
-    config = {"version": version, "bundle": {"resources": {str(seed.resolve()): f"seed/{seed.name}"}}}
-    pnpm = shutil.which("pnpm") or "pnpm"
-    subprocess.run([pnpm, "tauri-icons"], cwd=DESKTOP, check=True)
-    subprocess.run([pnpm, "tauri", "build", "--bundles", "nsis", "--config", json.dumps(config)],
-                   cwd=DESKTOP, check=True)
-    return next((DESKTOP / "src-tauri/target/release/bundle/nsis").glob("*.exe"))
+    if platform == "macos-arm64":
+        return next((DESKTOP / "dist").glob("*.dmg"))
+    # Windows: the installer's layout, with the seed next to the exe (the shell looks there).
+    app = DESKTOP / "dist" / "win-unpacked"
+    shutil.copytree(staged, app / "seed")
+    return app
 
 
 def build(seed: Path, output: Path, platform: str, app_id: str | None = None) -> Path:
@@ -94,13 +99,14 @@ def build(seed: Path, output: Path, platform: str, app_id: str | None = None) ->
     expected = f"GameAtelier-{version}-{platform}."
     if not seed.name.startswith(expected):
         raise SystemExit(f"seed {seed.name} does not match {expected}*")
-    if platform == "macos-arm64":
-        built = build_electron(seed, version, app_id)
-    else:
-        built = build_tauri_windows(seed, version)
+    built = build_electron(seed, version, platform, app_id)
     output.mkdir(parents=True, exist_ok=True)
     target = output / f"{product}-{version}-{TAILS[platform]}"
-    shutil.copy2(built, target)
+    if built.is_dir():
+        target.unlink(missing_ok=True)
+        shutil.make_archive(str(target.with_suffix("")), "zip", root_dir=built)
+    else:
+        shutil.copy2(built, target)
     with target.open("rb") as source:
         digest = hashlib.file_digest(source, "sha256").hexdigest()
     target.with_name(target.name + ".sha256").write_text(f"{digest}  {target.name}\n", encoding="utf-8")

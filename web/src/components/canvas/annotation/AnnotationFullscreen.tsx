@@ -24,7 +24,7 @@ export function AnnotationFullscreen({ title, src, width, height, onCollapse, ..
     <DialogContent hideClose className="fixed inset-0 z-50 block h-dvh w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden rounded-none border-0 bg-background p-0"
       onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
       <DialogDescription className="sr-only">全屏标注</DialogDescription>
-      <header className="absolute inset-x-4 top-4 flex items-center justify-between">
+      <header className="desktop-clear-top absolute inset-x-4 top-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <Hint label="收起 Esc"><Button variant="bare" type="button" aria-label="收起" className="grid size-9 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground" onClick={onCollapse}><CollapseIcon size="lg" /></Button></Hint>
           <DialogTitle className="text-sm font-medium">{title}</DialogTitle>
@@ -32,7 +32,7 @@ export function AnnotationFullscreen({ title, src, width, height, onCollapse, ..
         </div>
         <span className="text-xs tabular-nums text-muted-foreground" aria-label="标注缩放">{Math.round(viewport.scale * 100)}%</span>
       </header>
-      <div ref={measureStage} className="absolute inset-x-0 bottom-24 top-16 overflow-hidden touch-none"
+      <div ref={measureStage} className="desktop-clear-top absolute inset-x-0 bottom-24 top-16 overflow-hidden touch-none"
         style={{ cursor: toolbar.editor.panning ? 'grab' : undefined }}
         onPointerDown={event => { if (toolbar.editor.panning || event.button === 1) viewport.startPan(event); }}
         onPointerMove={viewport.movePan} onPointerUp={viewport.endPan} onPointerCancel={viewport.endPan}>
