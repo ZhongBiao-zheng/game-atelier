@@ -46,6 +46,19 @@ Windows：外壳不经 `launch.ps1`，而是做 `launch.ps1` 做的同一件事�
 
 macOS 启动器只在当前版本的解释器带 `com.apple.quarantine` 时才递归清除运行包的隔离属性（压缩包解压出来的文件都带它）；外壳解压的种子不带，遍历约 1.2 万个文件的那一秒不再每次都付。
 
+## Windows 安装程序与外壳的参数（Electron 外壳）
+
+Windows 外壳是 electron-builder 产出的应用目录，由 Windows 安装程序（`desktop/setup`）整体安装；种子放在 exe 旁的 `seed\`（`seed.json` 描述文件名、版本、`BUILD_ID` 与契约级别，由 `scripts/build_desktop.py` 写入），外壳从 `path.dirname(process.execPath)\seed` 读取。macOS 的种子仍在 `Contents/Resources/seed/`。
+
+| 参数 | 约定 |
+| --- | --- |
+| `--prepare-runtime` | 不开窗口、不占单实例锁，按首启同一段逻辑把种子解压到运行包根（运行包已满足要求时什么都不做）。标准输出逐行 `progress <已解压> <总数>`（Windows 为 zip 条目数，macOS 为压缩字节数），数值只增不减，最后一行两数相等；退出码 0 表示运行包可用，非 0 时 stderr 末行是原因。需要替换旧运行包且其服务由外壳启动时，直接停掉该服务、不再确认（安装程序先调用过 `--quit`） |
+| `--quit` | 已有实例在运行时，该实例走正常退出流程（有进行中的任务会先确认），本次启动以 0 退出；没有实例时直接以 0 退出 |
+
+AppUserModelID 等于 `desktop/electron-builder.yml` 的 `appId`（构建时以 `atelierAppId` 写进应用元数据）；安装程序创建的快捷方式必须带同一个值。外壳继续写 `<运行包父目录>\window-theme`（`light` / `dark`），安装程序据此决定深浅色。
+
+Windows 窗口隐藏系统标题栏，最小化 / 最大化 / 关闭按钮由系统画在页面右上角（背景透明、符号颜色跟随页面深浅色），页面写 `data-titlebar="overlay"` 并按 `data-shell="windows"` 在右侧留位；Windows 没有菜单栏，`Ctrl+,` 打开设置、`F5` / `Ctrl+R` 重新载入、`F11` 全屏，托盘菜单有「显示 / 查看日志 / 退出」。
+
 ## 服务记录（`<数据目录>/.runtime/`）
 
 | 文件 | 写入方 | 外壳的用法 |
