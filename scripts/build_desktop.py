@@ -65,6 +65,8 @@ def stage_seed(seed: Path, version: str) -> None:
 def build_electron(seed: Path, version: str, app_id: str | None) -> Path:
     stage_seed(seed, version)
     pnpm = shutil.which("pnpm") or "pnpm"
+    # Electron 45 has no postinstall: fetch the binary electron-builder packages (no-op once present).
+    subprocess.run([pnpm, "exec", "install-electron"], cwd=DESKTOP, check=True)
     subprocess.run([pnpm, "icons"], cwd=DESKTOP, check=True)
     shutil.rmtree(DESKTOP / "dist", ignore_errors=True)
     command = [pnpm, "exec", "electron-builder", "--mac", "--arm64", "--publish", "never",

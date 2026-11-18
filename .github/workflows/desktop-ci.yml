@@ -49,7 +49,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 11.1.2
-      - name: Install the shell's dependencies (Electron binary included)
+      - name: Install the shell's dependencies
         working-directory: desktop
         run: pnpm install --frozen-lockfile
       - name: Unit-test the Electron shell

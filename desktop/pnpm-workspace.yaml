@@ -1,6 +1,5 @@
 # pnpm 11 reads dependency build approvals only from this file; it must be committed.
 allowBuilds:
-  # postinstall downloads the Electron binary into node_modules/electron/dist.
-  electron: true
   # Squirrel.Windows tooling pulled in by electron-builder; Atelier ships NSIS, so it never runs.
+  electron: set this to true or false
   electron-winstaller: false

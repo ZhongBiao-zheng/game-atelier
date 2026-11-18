@@ -770,7 +770,12 @@
     padding-right: calc(var(--titlebar-inset-right) + 0.5rem);
   }
   /* 拖动窗口：Electron 只认 app-region。拖动区里的元素收不到指针事件，叠在拖动区上的元素也一样，
-     所以顶栏里可交互的元素、挂到 body 下的弹层与对话框都要声明 no-drag。 */
+     所以顶栏里可交互的元素、挂到 body 下的弹层与对话框都要声明 no-drag。
+     根元素本身也声明 no-drag：页面上一个 app-region 都没有时（例如首启引导盖住顶栏），Chromium
+     不上报拖动区，外壳会沿用上一页（加载页整页可拖）的区域，整个窗口点不动、一按就拖走。 */
+  :root[data-titlebar='overlay'] {
+    app-region: no-drag;
+  }
   :root[data-titlebar='overlay'] :is(.app-titlebar, .desktop-window-handle) {
     app-region: drag;
   }
