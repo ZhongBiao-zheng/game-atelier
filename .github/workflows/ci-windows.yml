@@ -17,14 +17,9 @@ on:
 
 # 日常非阻塞：job 失败时 run 结论仍为 success。Release 逐个检查 job 结论，失败照样拒绝发版。
 jobs:
-  # TMP-1B-STRESS：临时循环验证锁外读取的两处高后果位置，查清后删除。
-  tmp-1b-stress:
+  # TMP-1B-DIAG：临时测量 Windows 替换期间目标名查不到的时长，查清后删除。
+  tmp-1b-diag:
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        test: [test_concurrent_job_rewrites_never_break_unlocked_readers, test_jobs_watcher_survives_concurrent_rewrites]
-        shard: [1, 2]
     env:
       PYTHONUTF8: "1"
     steps:
@@ -32,8 +27,8 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - run: uv python install 3.11
       - run: uv sync
-      - name: loop
-        run: uv run --with pytest-repeat pytest -q -n 4 --count 500 "tests/test_unlocked_reads.py::${{ matrix.test }}" -rf
+      - name: measure
+        run: uv run --with pytest-repeat pytest -q -s --count 20 tests/test_tmp_missing_window.py
 
   pytest-windows:
     runs-on: windows-latest
