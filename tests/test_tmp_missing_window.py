@@ -65,3 +65,6 @@ def test_measure_missing_window(isolated_data_root, monkeypatch):
           f"p99={gaps[int(len(gaps) * 0.99)] if gaps else 0:.4f}s replace_denied={replace_denied['n']}")
     for sample in samples:
         print("MISSING-SAMPLE", sample)
+    assert not gaps, (f"MISSING-WINDOW gaps={len(gaps)} max={gaps[-1]:.4f}s "
+                      f"all={[round(g, 4) for g in gaps]} samples={samples} "
+                      f"replace_denied={replace_denied['n']}")
