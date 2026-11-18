@@ -114,8 +114,8 @@ function AppShellContent() {
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
       {!immersiveCanvas && <header className="sticky top-0 z-30 shrink-0">
-        {/* 桌面版隐藏了系统标题栏：顶栏空白处拖动窗口、双击缩放；按钮与链接照常点击。浏览器里这个属性没有作用。 */}
-        <div data-tauri-drag-region="deep" className="app-titlebar mx-auto grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 lg:h-20 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:gap-4 lg:px-8 lg:py-0">
+        {/* 桌面版隐藏了系统标题栏：顶栏空白处拖动窗口、双击缩放（tokens.css 的 app-region）；浏览器里没有作用。 */}
+        <div className="app-titlebar mx-auto grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 lg:h-20 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:gap-4 lg:px-8 lg:py-0">
           <Link href="/" className="flex shrink-0 items-center gap-2 justify-self-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
             <AtelierMark />
             <span className="brand-wordmark font-display text-2xl">Atelier</span>
@@ -173,8 +173,8 @@ function AppShellContent() {
           </Route>
         </Switch>
       </ContentTag>
-      {/* 红绿灯旁的拖动把手，只在桌面版显示（沉浸式画布没有顶栏时靠它移动窗口）。 */}
-      <div data-tauri-drag-region aria-hidden className="desktop-window-handle" />
+      {/* 窗口按钮旁的拖动把手，只在桌面版显示（沉浸式画布没有顶栏时靠它移动窗口）。 */}
+      <div aria-hidden className="desktop-window-handle" />
       <TeamShareReminder ref={reminderRef} />
       <DesktopDownloadNotice />
       <AnnouncementHost />

@@ -737,25 +737,47 @@
     }
   }
 
-  /* 桌面版：外壳在页面加载前给 <html> 写 data-shell（在外壳里）与 data-titlebar="overlay"
-     （系统标题栏隐藏、红绿灯叠在页面上），见 docs/contracts/desktop-shell.md。浏览器里这些规则都不生效。 */
+  /* 桌面版：外壳在页面加载前给 <html> 写 data-shell="macos|windows"；系统标题栏隐藏时再写
+     data-titlebar="overlay"（macOS 红绿灯叠在左上，Windows 窗口按钮叠在右上），见
+     docs/contracts/desktop-shell.md。浏览器里没有这两个属性，这些规则都不生效。 */
   .desktop-window-handle {
     display: none;
   }
   :root[data-titlebar='overlay'] {
     --titlebar-inset: 6.25rem;
+    /* Windows 窗口按钮占的宽度：Electron 开启标题栏叠加层时提供 titlebar-area 环境变量。 */
+    --titlebar-inset-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
   }
   :root[data-titlebar='overlay'] .desktop-window-handle {
     display: block;
     position: fixed;
-    left: 0;
     top: 0;
     z-index: 40;
     width: var(--titlebar-inset);
     height: 5rem;
   }
-  :root[data-titlebar='overlay'] :is(.app-titlebar, .canvas-editor-top) {
+  :root[data-shell='macos'][data-titlebar='overlay'] .desktop-window-handle {
+    left: 0;
+  }
+  :root[data-shell='windows'][data-titlebar='overlay'] .desktop-window-handle {
+    right: var(--titlebar-inset-right);
+    height: env(titlebar-area-height, 2.5rem);
+  }
+  :root[data-shell='macos'][data-titlebar='overlay'] :is(.app-titlebar, .canvas-editor-top) {
     padding-left: var(--titlebar-inset);
+  }
+  :root[data-shell='windows'][data-titlebar='overlay'] .app-titlebar {
+    padding-right: calc(var(--titlebar-inset-right) + 0.5rem);
+  }
+  /* 拖动窗口：Electron 只认 app-region。拖动区里的元素收不到指针事件，叠在拖动区上的元素也一样，
+     所以顶栏里可交互的元素、挂到 body 下的弹层与对话框都要声明 no-drag。 */
+  :root[data-titlebar='overlay'] :is(.app-titlebar, .desktop-window-handle) {
+    app-region: drag;
+  }
+  :root[data-titlebar='overlay'] .app-titlebar :is(a, button, input, textarea, select, label, [role], [tabindex]),
+  :root[data-titlebar='overlay'] body > :not(#root),
+  :root[data-titlebar='overlay'] :is([data-radix-popper-content-wrapper], [role='dialog'], [role='alertdialog'], [data-sonner-toaster]) {
+    app-region: no-drag;
   }
   /* 原生应用不整页回弹、不能拖选界面文字、不能把链接拖出去；正文、提示词与输入框照常可选。 */
   :root[data-shell] {

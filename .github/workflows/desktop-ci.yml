@@ -43,26 +43,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: desktop/src-tauri
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - uses: pnpm/action-setup@v4
         with:
           version: 11.1.2
-      - name: Install Tauri CLI and generate icons
+      - name: Install the shell's dependencies (Electron binary included)
+        working-directory: desktop
+        run: pnpm install --frozen-lockfile
+      - name: Unit-test the Electron shell
+        if: matrix.platform == 'macos-arm64'
+        working-directory: desktop
+        run: pnpm test
+      # Windows ships the Tauri shell until the Electron switch reaches it (batch 3).
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.platform == 'windows-x64'
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        if: matrix.platform == 'windows-x64'
+        with:
+          workspaces: desktop/src-tauri
+      - name: Lint and unit-test the Tauri shell
+        if: matrix.platform == 'windows-x64'
         working-directory: desktop
         run: |
-          pnpm install --frozen-lockfile
-          pnpm icons
-      - name: Lint and unit-test the shell
-        working-directory: desktop/src-tauri
-        run: |
+          pnpm tauri-icons
+          cd src-tauri
           cargo fmt --check
           cargo clippy --release -- -D warnings
           cargo test --release

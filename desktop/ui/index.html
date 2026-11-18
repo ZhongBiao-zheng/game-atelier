@@ -24,6 +24,9 @@
   .actions { display: flex; gap: 8px; }
   button { background: var(--button); color: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 6px 14px; font: inherit; cursor: default; }
   [hidden] { display: none !important; }
+  /* Electron: the whole page drags the window (title bar hidden), the buttons stay clickable. */
+  body { app-region: drag; }
+  button, p { app-region: no-drag; }
 </style>
 </head>
 <body data-tauri-drag-region="deep">
@@ -47,7 +50,11 @@
   const stage = params.get('stage');
   document.title = name;
   if (params.get('theme') === 'light') document.documentElement.classList.add('light');
-  const invoke = (command) => window.__TAURI_INTERNALS__.invoke(command);
+  // Electron preload (desktop/src/preload.cjs). The Tauri branch goes with the Tauri shell (batch 4).
+  const shellApi = window.atelierLoading ?? {
+    retry: () => window.__TAURI_INTERNALS__.invoke('retry'),
+    openLog: () => window.__TAURI_INTERNALS__.invoke('open_log'),
+  };
   const $ = (id) => document.getElementById(id);
 
   const errors = {
@@ -67,8 +74,8 @@
     if (error.retry) {
       $('actions').hidden = false;
       $('retry').textContent = error.retry;
-      $('retry').onclick = () => invoke('retry');
-      $('log').onclick = () => invoke('open_log');
+      $('retry').onclick = () => shellApi.retry();
+      $('log').onclick = () => shellApi.openLog();
     }
   } else {
     // The shell pushes unpacking progress (it never answers a request: a reply arriving after the

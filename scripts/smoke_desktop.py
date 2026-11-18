@@ -1,16 +1,18 @@
 """Install the desktop app, open it, quit it, uninstall it, and check what it left behind.
 
 Exercises the real installed path: seed extraction, launcher, webview session, quit → stop.
-macOS runs in a throwaway HOME; Windows installs silently into a temporary folder (Tauri reads
-%LOCALAPPDATA% through the shell API, so the runtime root there is the runner's real one).
+macOS runs in a throwaway HOME; Windows installs silently into a temporary folder (the shell reads
+%LOCALAPPDATA% through the system API, so the runtime root there is the runner's real one).
 
-The app is then opened a second time on the same runtime with its DESKTOP_CONTRACT marker removed:
-a runtime that declares nothing (one unpacked by an earlier build of the same version) must be
-started the old way and keep the system title bar.
+macOS (Electron) then reopens the app three times on the same runtime root: with its
+DESKTOP_CONTRACT markers removed (it must be replaced from the seed), with the version directory
+claiming a different seed build (replaced again), and unchanged (kept). Windows (Tauri until the
+Electron switch reaches it) reopens once with the markers removed and must take the old start path.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import plistlib
@@ -22,8 +24,12 @@ import tempfile
 import time
 
 SESSION_OK = '"POST /api/connection/local-session HTTP/1.1" 200'
+# Tauri (Windows) log lines.
 DESKTOP_START = 'launcher ["--desktop-start"] -> Some(0)'
 LEGACY_START = 'launcher ["--select-version", "--no-browser"] -> Some(0)'
+# Electron (macOS) log lines.
+ELECTRON_START = 'launcher ["--desktop-start"] -> 0'
+PROBE_OK = "security probe: ok"
 
 
 def install_from_dmg(dmg: Path, work: Path) -> Path:
@@ -99,8 +105,64 @@ def _undeclared_run(executable: Path, env: dict[str, str], timeout: int, runtime
     return [f"undeclared runtime: {p}" for p in problems]
 
 
+def _electron_run(executable: Path, env: dict[str, str], timeout: int, runtime_parent: Path,
+                  data_runtime: Path, *, replacement: str | None) -> list[str]:
+    """One launch: page session, security probe, quit stops the server, and the expected
+    `runtime replacement` decision (None: the runtime must be kept)."""
+    shell_log, server_log = runtime_parent / "shell.log", data_runtime / "server.log"
+    shell_at, server_at = _size(shell_log), _size(server_log)
+    code = _run(executable, env, timeout)
+    shell, server = _since(shell_log, shell_at), _since(server_log, server_at)
+    problems = [] if code == 0 else [f"shell exit {code}"]
+    if SESSION_OK not in server:
+        problems.append("the page never established a local session")
+    if (data_runtime / "server.pid").exists():
+        problems.append("server records remain after quit")
+    if ELECTRON_START not in shell:
+        problems.append("the shell did not start the server through --desktop-start")
+    if PROBE_OK not in shell:
+        problems.append("the security probe did not pass")
+    if "title bar overlay=true" not in shell:
+        problems.append("expected title bar overlay=true")
+    decided = re.findall(r"runtime replacement: (\w[\w-]*)", shell)
+    if decided != ([replacement] if replacement else []):
+        problems.append(f"expected runtime replacement {replacement}, the shell logged {decided}")
+    return problems
+
+
+def _seed_build(app: Path) -> tuple[str, str]:
+    info = json.loads((app / "Contents/Resources/seed/seed.json").read_text(encoding="utf-8"))
+    return info["version"], info["build"]
+
+
+def _electron_reopens(app: Path, executable: Path, env: dict[str, str], timeout: int,
+                      runtime_parent: Path, data_runtime: Path) -> list[str]:
+    root = runtime_parent / "GameAtelier"
+    version, build = _seed_build(app)
+    payload = root / "versions" / version
+    problems: list[str] = []
+    # 1. A runtime that does not declare the contract (unpacked by an older shell) is replaced.
+    for marker in root.glob("versions/*/DESKTOP_CONTRACT"):
+        marker.unlink()
+    problems += [f"undeclared runtime: {p}" for p in _electron_run(
+        executable, env, timeout, runtime_parent, data_runtime, replacement="contract")]
+    if not (payload / "DESKTOP_CONTRACT").is_file():
+        problems.append("undeclared runtime: the marker is still missing after the replacement")
+    # 2. Same version, unpacked from another build of the seed (a reinstalled test package).
+    (payload / "BUILD_ID").write_text("stale-build\n", encoding="utf-8")
+    (root / "seed.json").write_text(json.dumps({"version": version, "build": "stale-build"}) + "\n",
+                                    encoding="utf-8")
+    problems += [f"other seed build: {p}" for p in _electron_run(
+        executable, env, timeout, runtime_parent, data_runtime, replacement="build")]
+    if (payload / "BUILD_ID").read_text(encoding="utf-8").strip() != build:
+        problems.append("other seed build: the runtime still carries the stale build")
+    # 3. Nothing to change: the runtime is kept.
+    problems += [f"current runtime: {p}" for p in _electron_run(
+        executable, env, timeout, runtime_parent, data_runtime, replacement=None)]
+    return problems
+
+
 def smoke_macos(installer: Path, timeout: int) -> int:
-    # Tauri refuses an executable path that contains a symlink on macOS, and /var -> /private/var.
     work = Path(tempfile.mkdtemp(prefix="atelier-smoke-")).resolve()
     home = work / "home"
     home.mkdir()
@@ -112,20 +174,16 @@ def smoke_macos(installer: Path, timeout: int) -> int:
         env.pop(name, None)
     runtime_parent = home / "Library/Application Support/game-atelier/runtime"
     data_runtime = home / "game-atelier/.runtime"
-    code = _run(executable, env, timeout)
     problems = []
-    if code != 0:
-        problems.append(f"shell exit {code}")
+    signed = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)],
+                            capture_output=True, text=True)
+    if signed.returncode != 0:
+        problems.append(f"the app bundle is not sealed: {signed.stderr.strip()}")
+    problems += _electron_run(executable, env, timeout, runtime_parent, data_runtime, replacement="missing")
     if not (runtime_parent / "GameAtelier/last-good").is_file():
         problems.append("seed was not extracted into the runtime root")
-    if SESSION_OK not in _tail(data_runtime / "server.log", 10**7):
-        problems.append("the page never established a local session")
-    if (data_runtime / "server.pid").exists():
-        problems.append("server records remain after quit")
-    problems += _start_problems(_tail(runtime_parent / "shell.log", 10**7), declared=True, overlay=True)
     if not problems:
-        problems += _undeclared_run(executable, env, timeout, runtime_parent, data_runtime,
-                                    overlay=False)
+        problems += _electron_reopens(app, executable, env, timeout, runtime_parent, data_runtime)
     for log in (runtime_parent / "shell.log", data_runtime / "server.log"):
         print(f"--- {log.name}\n{_tail(log)}")
     if problems:

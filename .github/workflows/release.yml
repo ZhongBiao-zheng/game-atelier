@@ -110,8 +110,11 @@ jobs:
           name: GameAtelier-${{ matrix.platform }}
           path: seed
       - uses: astral-sh/setup-uv@v6
+      # Windows ships the Tauri shell until the Electron switch reaches it (batch 3).
       - uses: dtolnay/rust-toolchain@stable
+        if: matrix.platform == 'windows-x64'
       - uses: Swatinem/rust-cache@v2
+        if: matrix.platform == 'windows-x64'
         with:
           workspaces: desktop/src-tauri
       - uses: actions/setup-node@v4
@@ -120,13 +123,12 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 11.1.2
-      - name: Install Tauri CLI
+      - name: Install the shell's dependencies
         working-directory: desktop
         run: pnpm install --frozen-lockfile
       - name: Build installer around the runtime bundle
         shell: bash
         run: |
-          rustc -vV
           seed="$(find seed -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)"
           uv run --no-project python scripts/build_desktop.py --seed "$seed" --output desktop-build --platform ${{ matrix.platform }}
       - name: Install, open, quit and uninstall the installed app

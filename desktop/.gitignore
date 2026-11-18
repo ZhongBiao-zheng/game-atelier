@@ -1,5 +1,8 @@
 node_modules/
+# electron-builder output, and what scripts/build_desktop.py / `pnpm icons` stage for it.
+dist/
+stage/
+# Tauri (Windows until batch 3 of the Electron switch).
 src-tauri/target/
 src-tauri/gen/
-# Generated from assets/brand by `pnpm icons`.
 src-tauri/icons/
