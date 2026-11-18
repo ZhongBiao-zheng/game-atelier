@@ -100,8 +100,9 @@ def test_canvas_scheduler_queues_seventh_job_without_a_thread(monkeypatch, share
         started.wait(timeout=5)
         threads = active_count()
         seventh = canvas_run_queue.submit("6")
-        # 排队的任务不占线程，也不挡其他 KEY / 项目。
-        assert active_count() == threads
+        # 排队的任务不占线程，也不挡其他 KEY / 项目。线程数只要求不增加：同一测试进程里
+        # 别的用例留下的线程可能恰好在两次计数之间结束（CI 上见过 11 != 12）。
+        assert active_count() <= threads
         assert not seventh.done()
         assert canvas_run_queue.submit("other").result(timeout=5) == "other"
         assert not seventh.done()
