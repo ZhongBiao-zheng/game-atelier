@@ -240,10 +240,8 @@ async def normal_lifespan(app: FastAPI):
             "reconciled %d canvas job(s): %s", len(reconciled), ", ".join(reconciled)
         )
     observer = start_watchers()
-    # 局域网共享（ADR-0025）：默认关闭；开着的话随主服务一起起来。
-    from character_workflow.lib.gateway_keys import read_config as read_gateway_config
-
-    await asyncio.to_thread(lambda: gateway_server.apply(read_gateway_config()))
+    # 局域网共享（ADR-0025）：默认关闭；开着的话随主服务一起起来。配置损坏时网关停在错误状态。
+    await asyncio.to_thread(gateway_server.apply_saved)
     # 接入端：网关供应商的模型列表随网关变化，启动时尽力同步一次（连不上就保留旧快照）。
     from character_workflow.lib.callers.atelier_gateway import sync_all_gateway_keys
 
@@ -355,6 +353,13 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     @app.exception_handler(ConnectionError)
     async def handle_connection_error(_request, error: ConnectionError) -> JSONResponse:
         return connection_error(error)
+
+    from character_workflow.lib.gateway_keys import GatewayConfigCorruptError
+
+    @app.exception_handler(GatewayConfigCorruptError)
+    async def handle_gateway_config_corrupt(_request, error: GatewayConfigCorruptError) -> JSONResponse:
+        # 服务端数据坏了：500，不是让用户刷新重试的 409。
+        return JSONResponse({"detail": str(error)}, status_code=500)
 
     @app.get(STATUS_PATH, response_model=LocalConnectionStatus)
     async def get_connection_status(response: Response) -> LocalConnectionStatus:

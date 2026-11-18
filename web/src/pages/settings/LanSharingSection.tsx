@@ -91,12 +91,13 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-sm font-semibold">共享本机供应商</h2>
             <span className={`rounded-full px-2 py-0.5 text-xs ${state?.enabled && state.status.running ? 'gateway-running' : 'bg-secondary text-muted-foreground'}`}>
-              {!state ? '读取中…' : !state.enabled ? '已关闭' : state.status.running ? '运行中' : state.status.error ? '启动失败' : '已关闭'}
+              {!state ? '读取中…' : state.config_error ? '配置损坏' : !state.enabled ? '已关闭' : state.status.running ? '运行中' : state.status.error ? '启动失败' : '已关闭'}
             </span>
           </div>
-          {state && <p className="text-xs text-muted-foreground">{state.enabled
-            ? <>{options.models.length} 个模型 · {state.keys.filter(key => !key.revoked_at).length} 位在用成员 · 本月全员花费 {formatGenerationCost(state.keys.reduce((sum, key) => sum + key.month_charged_cny, 0))}</>
+          {state && !state.config_error && <p className="text-xs text-muted-foreground">{state.enabled
+            ? <>{options.models.length} 个模型 · {state.keys.filter(key => !key.revoked_at).length} 位在用成员 · 本月全员花费 {formatGenerationCost(state.keys.reduce((sum, key) => sum + key.month_charged_cny, 0))}{state.quarantined_tasks ? ` · ${state.quarantined_tasks} 个损坏任务已隔离` : ''}</>
             : '开启后，同事可以用你的供应商出图，按成员限额记账'}</p>}
+          {state?.config_error && <p className="break-all text-sm text-destructive">{state.config_error}</p>}
           {state?.enabled && state.status.error && <p className="text-sm text-destructive">{state.status.error}</p>}
           </div>
         </div>
@@ -133,7 +134,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
             setEditingPort(true);
           }}>改端口</Button>
         ))}
-        <Switch size="sm" aria-label="开启局域网共享" checked={Boolean(state?.enabled)} disabled={!state || busy}
+        <Switch size="sm" aria-label="开启局域网共享" checked={Boolean(state?.enabled)} disabled={!state || busy || Boolean(state.config_error)}
           onCheckedChange={enabled => void run(() => updateGateway({ enabled })).then(saved => {
             if (saved) setEditingPort(false);
           })} />

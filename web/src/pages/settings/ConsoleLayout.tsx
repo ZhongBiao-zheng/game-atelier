@@ -56,12 +56,12 @@ function LocalGatewayStatus() {
     const unsubscribe = subscribeGatewayEvents({ onTask: () => {}, onConnect: refresh });
     return () => { sequence++; unsubscribe(); };
   }, []);
-  if (!state?.enabled) return null;
-  return <Hint label={state.status.error}><Link href="/settings/gateway"
+  if (!state?.enabled && !state?.config_error) return null;
+  return <Hint label={state.config_error ?? state.status.error}><Link href="/settings/gateway"
     className="mb-1 flex shrink-0 items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground">
     <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${state.status.running
       ? 'bg-status-done' : state.status.error ? 'bg-destructive' : 'bg-status-pending'}`} />
-    <span>局域网共享 · {state.status.running ? '运行中' : state.status.error ? '启动失败' : '未运行'}</span>
+    <span>局域网共享 · {state.config_error ? '配置损坏' : state.status.running ? '运行中' : state.status.error ? '启动失败' : '未运行'}</span>
   </Link></Hint>;
 }
 

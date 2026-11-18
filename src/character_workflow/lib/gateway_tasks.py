@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import mimetypes
 import shutil
 import tempfile
@@ -19,12 +20,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from character_workflow.lib import (
     data_root, gateway_access, gateway_keys, gateway_quota, keys, model_routes,
 )
-from character_workflow.lib.atomic_io import atomic_write_json
+from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
+from character_workflow.lib.corrupt_files import count_files, parse_reason, quarantine
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.gateway_keys import GatewayKeyRecord
 
@@ -34,6 +36,8 @@ MAX_PROMPT_CHARS = 32_000
 MAX_RUNNING = 8
 MAX_RUNNING_PER_KEY = 4
 RETENTION = timedelta(hours=24)
+
+logger = logging.getLogger(__name__)
 
 # 接入端能控制的只有这些出图参数；任何本机路径类字段（参考图、蒙版、MJ 参考）都不收，
 # 参考图只能以文件上传。否则局域网里的人能让网关读它本机的任意文件。
@@ -141,6 +145,14 @@ class GatewayTask(BaseModel):
     created_at: str
     updated_at: str
 
+    @field_validator("created_at", "updated_at")
+    @classmethod
+    def _aware_iso_time(cls, value: str) -> str:
+        # 清理与排序要拿它和带时区的时间比较；读不出的时间按坏文件处理，不能让清理抛错。
+        if datetime.fromisoformat(value).tzinfo is None:
+            raise ValueError("时间必须带时区")
+        return value
+
 
 class GatewayRequestError(Exception):
     """接入端请求不合法或不能受理；status 直接作为 HTTP 状态码。"""
@@ -168,6 +180,15 @@ def _files_dir(task_id: str) -> Path:
 
 def usage_file(month: str) -> Path:
     return _root() / "usage" / f"{month}.jsonl"
+
+
+def quarantine_dir() -> Path:
+    """读不出的任务文件原样移到这里，不再参与受理、调度、清理与恢复。"""
+    return _root() / "quarantine"
+
+
+def quarantined_count() -> int:
+    return count_files(quarantine_dir())
 
 
 def _now() -> datetime:
@@ -205,10 +226,15 @@ def _save(task: GatewayTask) -> GatewayTask:
 
 
 def _read(task_id: str) -> GatewayTask | None:
+    """读一个任务；文件损坏时隔离并当作不存在，一条坏文件不能让整个网关停摆。"""
     path = _task_file(task_id)
-    if not path.is_file():
+    try:
+        return GatewayTask.model_validate_json(read_text_with_retry(path))
+    except FileNotFoundError:
         return None
-    return GatewayTask.model_validate_json(path.read_text(encoding="utf-8"))
+    except ValueError as error:  # JSON / UTF-8 / 校验
+        quarantine(path, quarantine_dir(), f"网关任务 {parse_reason(error)}")
+        return None
 
 
 def _all_tasks() -> list[GatewayTask]:
@@ -433,7 +459,12 @@ def run_task(task: GatewayTask) -> GatewayTask:
         return bool(current and current.cancel_requested)
 
     while True:
-        owner = next((item for item in gateway_keys.read_config().keys
+        try:
+            config = gateway_keys.read_config()
+        except gateway_keys.GatewayConfigCorruptError as error:
+            return _finish(_read(task_id), status="failed", error=str(error),
+                           error_kind="unavailable")
+        owner = next((item for item in config.keys
                       if item.id == task.key_id and item.revoked_at is None), None)
         if owner is None:
             return _finish(_read(task_id), status="failed", error="网关密钥无效或已撤销")
@@ -681,16 +712,25 @@ def _append_usage(task: GatewayTask) -> None:
 
 
 def read_usage(month: str) -> list[dict[str, Any]]:
+    """逐行读；截断、乱码或不是对象的行跳过（结算与额度每次都读，一行坏不能拖垮受理）。"""
     path = usage_file(month)
     if not path.is_file():
         return []
     rows = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for raw in path.read_bytes().splitlines():
         try:
-            rows.append(json.loads(line))
-        except json.JSONDecodeError:
+            row = json.loads(raw)
+        except ValueError:  # JSONDecodeError / UnicodeDecodeError
             continue
+        if isinstance(row, dict):
+            rows.append(row)
     return rows
+
+
+def charged(row: dict[str, Any]) -> float:
+    """用量行的扣费；手改坏的非数字按 0（只读，不改原行）。"""
+    value = row.get("charged_cny")
+    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else 0.0
 
 
 def read_usage_range(start: datetime, end: datetime) -> list[dict[str, Any]]:

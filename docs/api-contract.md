@@ -124,6 +124,9 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   创建 body 为 `{name, limits, allowed_models, allowed_aliases}`，PATCH 接受任意字段子集（省略保持原值，权限 null 取消限制）。
   `GET /api/gateway/keys/{id}/token` → `{token}`，只允许本机会话管理权限，响应 `Cache-Control: no-store`；不存在或已撤销返回 404。网关端口及远程 admin 代理不提供此接口。
   `GET /api/gateway` 的密钥含 `limits_status`、`month_charged_cny`、`month_calls`、`last_used_at`；列表、更新及审计不含明文或哈希。
+  `GET /api/gateway` 另含 `quarantined_tasks`（损坏后移到 `.runtime/gateway/quarantine/` 的任务文件数）与 `config_error`
+  （`.config/gateway.json` 读不出时的原因，否则 null）。配置读不出时返回 `enabled=false`、`keys=[]`，网关保持关闭；
+  其余读写 `gateway.json` 的接口返回 500 并带同一原因，不覆盖、不重建该文件。
   `.config/gateway.json` 在仅当前系统用户可读写的文件内保存明文与 SHA-256；鉴权仍只比较 SHA-256。读取时在同一文件锁下为未撤销且缺少明文的旧记录重发密钥并原子写回，旧密钥立即失效；ID、名称、角色、额度和创建时间保持不变，已撤销记录不重发。
   `GET /api/gateway/options` → `{models: [{id, name, modality}], aliases: [{alias, provider, name}]}`，alias 排除 atelier。
   用量行新增 `kind`、`estimated_cny`、`charged_cny`、`input_tokens`、`output_tokens`、`duration`、`resolution`、`member_trail`；不存 prompt，前端直接汇总结算金额。

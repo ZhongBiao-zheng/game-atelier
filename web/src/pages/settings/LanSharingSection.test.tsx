@@ -286,3 +286,19 @@ it('自定义密钥可见，创建错误只展示消息并保留草稿', async (
   expect(await screen.findByRole('alert')).toHaveTextContent(/^密钥已存在$/);
   expect(suffix).toHaveValue('test_only_custom');
 });
+
+it('配置文件损坏时显示原因并锁住开关', async () => {
+  vi.mocked(api.fetchGateway).mockResolvedValue({
+    ...state, enabled: false, keys: [], config_error: '网关配置文件损坏：/data/.config/gateway.json（JSONDecodeError）',
+  });
+  render(<LanSharingSection />);
+  expect(await screen.findByText(/网关配置文件损坏/)).toBeInTheDocument();
+  expect(screen.getByText('配置损坏')).toBeInTheDocument();
+  expect(screen.getByRole('switch', { name: '开启局域网共享' })).toBeDisabled();
+});
+
+it('有被隔离的损坏任务时在摘要里给出数量', async () => {
+  vi.mocked(api.fetchGateway).mockResolvedValue({ ...state, quarantined_tasks: 2 });
+  render(<LanSharingSection />);
+  expect(await screen.findByText(/2 个损坏任务已隔离/)).toBeInTheDocument();
+});

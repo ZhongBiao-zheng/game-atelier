@@ -56,7 +56,7 @@ def usage_summary(key: GatewayKeyRecord, now: datetime | None = None) -> list[Li
         for limit in key.limits:
             end = window_end(limit.period, now)
             used = round(sum(
-                row.get("charged_cny", 0) or 0
+                gateway_tasks.charged(row)
                 for row in gateway_tasks.read_usage_range(window_start(limit.period, now), now)
                 if row.get("key_id") == key.id
             ), 6)
@@ -96,7 +96,7 @@ def month_summary(key: GatewayKeyRecord, now: datetime | None = None) -> dict:
         rows = [row for row in gateway_tasks.read_usage_range(window_start("month", now), now)
                 if row.get("key_id") == key.id]
         return {
-            "month_charged_cny": round(sum(row.get("charged_cny", 0) or 0 for row in rows), 6),
+            "month_charged_cny": round(sum(gateway_tasks.charged(row) for row in rows), 6),
             "month_calls": len(rows),
         }
 

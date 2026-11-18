@@ -52,6 +52,10 @@ export interface GatewayState {
   default_name: string;
   keys: GatewayKey[];
   status: { running: boolean; port: number | null; error: string | null; addresses: string[] };
+  /** gateway.json 读不出时的原因；此时 enabled=false、keys 为空，网关保持关闭。远程管理代理不返回。 */
+  config_error?: string | null;
+  /** 损坏后被移到 .runtime/gateway/quarantine/ 的任务文件数。 */
+  quarantined_tasks?: number;
 }
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };

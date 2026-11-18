@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import logging
 import socket
 import threading
 from typing import Any
@@ -23,6 +24,8 @@ from character_workflow.lib.gateway_tasks import GatewayRequestError
 PROTOCOL_VERSION = 2
 MAX_BODY_BYTES = 400 * 1024 * 1024
 CLEANUP_INTERVAL_SECONDS = 3600
+
+logger = logging.getLogger(__name__)
 
 
 class _Unauthorized(Exception):
@@ -98,6 +101,11 @@ def create_gateway_app() -> FastAPI:
     from viewer_server.gateway_shares import create_router as share_router, install_errors
     app.include_router(share_router(_require_key))
     install_errors(app)
+
+    @app.exception_handler(gateway_keys.GatewayConfigCorruptError)
+    async def config_corrupt(_request, _error):
+        # 网关开着时配置被写坏：不给接入端看本机路径，只说暂不可用。
+        return JSONResponse({"detail": "网关配置损坏，暂不可用"}, status_code=503)
 
     @app.exception_handler(gateway_keys.GatewayAdminError)
     async def admin_denied(_request, error):
@@ -315,13 +323,28 @@ class GatewayServer:
     @staticmethod
     def _cleanup_loop(stop: threading.Event) -> None:
         while not stop.wait(CLEANUP_INTERVAL_SECONDS):
-            gateway_tasks.cleanup()
+            try:
+                gateway_tasks.cleanup()
+            except Exception:  # noqa: BLE001 —— 一次清理失败不能让后续清理永远停掉
+                logger.exception("网关定时清理失败")
 
     def apply(self, config: gateway_keys.GatewayConfig) -> None:
         if config.enabled:
             self.start(config.port)
         else:
             self.stop()
+
+    def apply_saved(self) -> None:
+        """按落盘配置启停（主服务启动时用）；配置读不出时网关保持关闭并记下原因，主服务照常启动。"""
+        try:
+            config = gateway_keys.read_config()
+        except gateway_keys.GatewayConfigCorruptError as error:
+            logger.error("%s", error)
+            with self._lock:
+                self._stop_locked()
+                self.error = str(error)
+            return
+        self.apply(config)
 
     def status(self) -> dict[str, Any]:
         return {"running": self.running, "port": self.port, "error": self.error,

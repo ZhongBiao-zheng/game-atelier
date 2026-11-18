@@ -16,6 +16,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from character_workflow.lib import data_root, gateway_audit
+from character_workflow.lib.corrupt_files import parse_reason
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.private_json import read_private_json, write_private_json
 
@@ -71,6 +72,19 @@ class GatewayAdminError(PermissionError):
     pass
 
 
+class GatewayConfigCorruptError(RuntimeError):
+    """gateway.json 内容损坏或读不出。文件里有成员密钥：只报错，绝不自动覆盖或重建。
+
+    消息与 reason 只含路径和错误类型，不含文件内容（校验错误的原文会带出密钥）。
+    """
+
+    def __init__(self, path: Path, reason: str, *, unreadable: bool = False) -> None:
+        label = "网关配置文件不可读" if unreadable else "网关配置文件损坏"
+        super().__init__(f"{label}：{path}（{reason}），网关已停用，原文件未改动")
+        self.path = path
+        self.reason = reason
+
+
 class CustomGatewayTokenError(ValueError):
     pass
 
@@ -101,7 +115,12 @@ def _read_config_locked() -> GatewayConfig:
     path = gateway_file()
     if not path.exists():
         return GatewayConfig()
-    config = GatewayConfig.model_validate(read_private_json(path, _MAX_FILE_BYTES))
+    try:
+        config = GatewayConfig.model_validate(read_private_json(path, _MAX_FILE_BYTES))
+    except ValueError as error:  # JSON / UTF-8 / 校验 / 超长
+        raise GatewayConfigCorruptError(path, parse_reason(error)) from None
+    except PermissionError as error:  # 权限或属主不对：同样不能动它
+        raise GatewayConfigCorruptError(path, str(error), unreadable=True) from None
     changed = False
     for record in config.keys:
         if not record.revoked_at and not record.token:

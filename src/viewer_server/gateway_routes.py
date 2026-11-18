@@ -58,12 +58,21 @@ def _key_view(record: gateway_keys.GatewayKeyRecord) -> dict:
 
 
 def _view() -> dict:
-    config = gateway_keys.read_config()
+    health = {"quarantined_tasks": gateway_tasks.quarantined_count(), "config_error": None}
+    try:
+        config = gateway_keys.read_config()
+    except gateway_keys.GatewayConfigCorruptError as error:
+        # 页面要能看到「配置损坏」：不 500，返回空配置 + 原因；不碰原文件。
+        return {
+            "enabled": False, "port": gateway_keys.DEFAULT_PORT, "name": "",
+            "default_name": socket.gethostname(), "keys": [],
+            "status": gateway_server.status(), **health, "config_error": str(error),
+        }
     return {
         "enabled": config.enabled, "port": config.port,
         "name": config.name, "default_name": socket.gethostname(),
         "keys": [_key_view(record) for record in config.keys],
-        "status": gateway_server.status(),
+        "status": gateway_server.status(), **health,
     }
 
 
