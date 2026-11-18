@@ -2,7 +2,7 @@
   "name": "atelier-desktop",
   "private": true,
   "scripts": {
-    "icons": "tauri icon ../assets/brand/atelier-icon-macos.svg --output src-tauri/icons",
+    "icons": "tauri icon ../assets/brand/atelier-icon-macos.svg --output src-tauri/icons && tauri icon ../assets/brand/atelier-icon.svg --output src-tauri/icons/windows",
     "build": "tauri build",
     "dev-build": "tauri build --debug"
   },

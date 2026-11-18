@@ -54,7 +54,26 @@ macOS 启动器只在当前版本的解释器带 `com.apple.quarantine` 时才�
 - 窗口加载 `http://127.0.0.1:<端口>/`，页面与浏览器访问同源，会话与编辑租约照常工作。
 - 页面只能调用三条外壳命令（`capabilities/server-page.json`，只匹配 `http://127.0.0.1:*`）：`plugin:window|start_dragging`（顶栏 `data-tauri-drag-region` 拖动窗口）、`plugin:window|internal_toggle_maximize`（双击缩放）、`plugin:window|set_theme`（页面的深浅色，外壳记下来，下次启动的窗口底色与加载页跟着走）。外壳自己的命令（重试、查看日志）只给内置加载页。插件的沙箱 iframe（`srcdoc`，origin 为 `null`）拿不到 IPC。
 - 外壳在 `127.0.0.1` 页面的主框架里，于页面脚本之前运行一段初始化脚本：给 `<html>` 写 `data-shell="macos|windows"`；macOS 隐藏系统标题栏时再写 `data-titlebar="overlay"`（页面据此给红绿灯留位）；屏蔽网页自带的右键菜单（输入框与选中文字除外）。
-- 外壳向页面派发的 `window` 事件：下载落盘后 `atelier:download-saved`（`detail: { name }`）；系统菜单「设置…」`atelier:navigate`（`detail: { path }`，站内路径）。页面可选择监听，浏览器里不会出现。
+- 外壳向页面派发的 `window` 事件：下载落盘后 `atelier:download-saved`（`detail: { name }`）；macOS 系统菜单「设置…」与 Windows 的 Ctrl+, `atelier:navigate`（`detail: { path }`，站内路径）。页面可选择监听，浏览器里不会出现。
 - 运行包版本低于外壳版本时（重装安装器、保留了旧运行包），旧页面不会给红绿灯留位，外壳改用系统标题栏。这在窗口创建前决定；运行中改标题栏样式在实测里会让网页消失。
 - `127.0.0.1` 以外的导航与新窗口转交系统浏览器。
+
+## 菜单与图标
+
+系统菜单只在 macOS 建。Windows 会把应用菜单画成窗口里的一行灰色菜单栏，所以不建；冒烟测试检查外壳日志 `menu bar=false`。macOS 菜单项在 Windows 上的去处：
+
+| macOS 菜单项 | Windows |
+| --- | --- |
+| 设置…（⌘,） | 页面顶栏的设置入口；Ctrl+, 由外壳注入的页面脚本派发 `atelier:navigate` |
+| 退出（⌘Q） | 通知区域图标菜单「退出」，走同一个退出流程；关窗口收进托盘 |
+| 撤销、重做、剪切、拷贝、粘贴、全选 | WebView2 在输入框里原生处理 Ctrl+Z / Ctrl+Y / Ctrl+X / Ctrl+C / Ctrl+V / Ctrl+A |
+| 重新载入（⌘R） | WebView2 的浏览器快捷键 F5 / Ctrl+R |
+| 实际大小（⌘0） | 不需要：缩放快捷键未开启，页面不会被缩放 |
+| 最小化、缩放、关闭窗口、进入全屏幕 | 系统标题栏按钮与 Win 键组合 |
+| 查看日志 | 通知区域图标菜单「查看日志」；出错页的「查看日志」 |
+| 关于、隐藏、全部显示 | macOS 专有，无对应 |
+
+Windows 标题栏深浅色跟随页面：页面调用 `set_theme`，系统标题栏随之切换；下次启动按外壳记下的深浅色创建窗口。
+
+图标：macOS 用 `assets/brand/atelier-icon-macos.svg`（含 Apple 图标网格的留白），Windows 用无留白的 `assets/brand/atelier-icon.svg`，都由 `desktop/` 下 `pnpm icons` 生成。Windows 的安装器、卸载程序、应用本身（以及开始菜单快捷方式、「设置 → 应用」条目、托盘）用同一个 `icons/windows/icon.ico`；`tests/test_desktop_shell_contract.py` 检查配置，desktop-ci 的 Windows job 用 `scripts/desktop_icon_check.ps1` 在真实安装上比对三处图标像素并把资源管理器看到的图标存进制品。
 - 关窗口收进托盘，服务继续运行；退出时只停止外壳自己启动的服务，有进行中的工作先确认。

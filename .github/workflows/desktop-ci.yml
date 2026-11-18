@@ -7,6 +7,7 @@ on:
       - 'desktop/**'
       - 'scripts/build_desktop.py'
       - 'scripts/smoke_desktop.py'
+      - 'scripts/desktop_icon_check.ps1'
       - 'scripts/build_release.py'
       - 'scripts/bootstrap.py'
       - 'src/viewer_server/shell_control.py'
@@ -16,6 +17,7 @@ on:
       - 'desktop/**'
       - 'scripts/build_desktop.py'
       - 'scripts/smoke_desktop.py'
+      - 'scripts/desktop_icon_check.ps1'
       - 'scripts/build_release.py'
       - 'scripts/bootstrap.py'
       - 'src/viewer_server/shell_control.py'
@@ -88,10 +90,16 @@ jobs:
           $bitmap.Save("desktop-build/installer-ui-$((Get-Culture).Name).png")
           Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           Get-Process | Where-Object { $_.Path -like '*nsis*' -or $_.Name -like '*setup*' } | Stop-Process -Force -ErrorAction SilentlyContinue
+      - name: Check the Windows icons (installer, app, uninstaller, Apps entry)
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem desktop-build -Filter '*-setup.exe' | Select-Object -First 1
+          ./scripts/desktop_icon_check.ps1 -Installer $installer.FullName -Output desktop-build
       - name: Install, open, quit and uninstall the installed app
         run: |
           installer="$(find desktop-build -maxdepth 1 -type f \( -name '*.dmg' -o -name '*-setup.exe' \) | head -1)"
-          uv run --no-project python scripts/smoke_desktop.py --installer "$installer"
+          uv run --no-project python scripts/smoke_desktop.py --installer "$installer" --screenshot desktop-build/app-window.png
       - uses: actions/upload-artifact@v4
         if: always()
         with:

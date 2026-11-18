@@ -294,3 +294,17 @@ def test_desktop_shell_follows_the_windows_startup_rule():
     assert f'.env("PYTHONUTF8", "{rule["pythonutf8"]}")' in block
     for name in rule["cleared"]:
         assert f'.env_remove("{name}")' in block
+
+
+def test_windows_installer_uninstaller_and_app_share_one_icon():
+    # The stock NSIS icon on the installer and uninstaller reads as pirated software; the app exe
+    # (and with it the Apps entry, the shortcuts and the tray) takes the first .ico in bundle.icon.
+    import json
+    desktop = REPO_ROOT / "desktop"
+    bundle = json.loads((desktop / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))["bundle"]
+    ico = next(icon for icon in bundle["icon"] if icon.endswith(".ico"))
+    nsis = bundle["windows"]["nsis"]
+    assert nsis["installerIcon"] == ico == nsis["uninstallerIcon"]
+    # Windows icons have no macOS safe-area margin: the .ico comes from the full-bleed source.
+    script = json.loads((desktop / "package.json").read_text(encoding="utf-8"))["scripts"]["icons"]
+    assert f"brand/atelier-icon.svg --output src-tauri/{Path(ico).parent.as_posix()}" in script

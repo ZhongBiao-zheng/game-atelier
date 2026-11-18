@@ -89,13 +89,44 @@ def _windows_shell_problems(shell_log: str) -> list[str]:
         problems.append("the shell did not start the server through --desktop-start")
     if "title bar overlay=false" not in shell_log:
         problems.append("the window did not keep the system title bar")
+    if "menu bar=false" not in shell_log:
+        problems.append("the window shows a menu bar")
     progress = re.search(r"unpack progress: (\d+) reports, last (\d+)/(\d+)", shell_log)
     if not progress or progress[1] == "0" or progress[2] != progress[3]:
         problems.append("unpack progress did not reach the total entry count")
     return problems
 
 
-def smoke_windows(installer: Path, timeout: int) -> int:
+# The whole primary screen, as the runner's desktop shows it (evidence for reviewers).
+_CAPTURE_SCREEN = """
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+[System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+$bitmap.Save($env:ATELIER_CAPTURE)
+"""
+
+
+def _run_windows_shell(executable: Path, env: dict[str, str], timeout: int, server_log: Path,
+                       screenshot: Path | None) -> int | str:
+    """Run the shell to its smoke quit; capture the window once the page has its session."""
+    process = subprocess.Popen([str(executable)], env=env)
+    deadline = time.monotonic() + timeout
+    while screenshot and process.poll() is None and time.monotonic() < deadline:
+        if SESSION_OK in _tail(server_log, 10**7):
+            time.sleep(3)  # Let the page paint; the shell quits about 8 s after showing it.
+            subprocess.run(["powershell", "-NoProfile", "-Command", _CAPTURE_SCREEN],
+                           env={**os.environ, "ATELIER_CAPTURE": str(screenshot.resolve())}, check=False)
+            break
+        time.sleep(1)
+    try:
+        return process.wait(timeout=max(deadline - time.monotonic(), 1))
+    except subprocess.TimeoutExpired:
+        process.kill()
+        return "timeout"
+
+
+def smoke_windows(installer: Path, timeout: int, screenshot: Path | None = None) -> int:
     work = Path(tempfile.mkdtemp(prefix="atelier-smoke-")).resolve()
     install_dir = work / "app"
     data = work / "数据目录"  # A non-ASCII data root exercises every encoding hop.
@@ -108,10 +139,7 @@ def smoke_windows(installer: Path, timeout: int) -> int:
         env.pop(name, None)
     runtime_parent = Path(os.environ["LOCALAPPDATA"]) / "game-atelier/runtime"
     data_runtime = data / ".runtime"
-    try:
-        code: int | str = subprocess.run([str(executable)], env=env, timeout=timeout, check=False).returncode
-    except subprocess.TimeoutExpired:
-        code = "timeout"
+    code = _run_windows_shell(executable, env, timeout, data_runtime / "server.log", screenshot)
     problems = []
     if code != 0:
         problems.append(f"shell exit {code}")
@@ -140,9 +168,9 @@ def smoke_windows(installer: Path, timeout: int) -> int:
     return 0
 
 
-def smoke(installer: Path, timeout: int) -> int:
+def smoke(installer: Path, timeout: int, screenshot: Path | None = None) -> int:
     if installer.suffix.lower() == ".exe":
-        return smoke_windows(installer, timeout)
+        return smoke_windows(installer, timeout, screenshot)
     return smoke_macos(installer, timeout)
 
 
@@ -150,5 +178,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--installer", type=Path, required=True)
     parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--screenshot", type=Path, help="Windows: save the running window here")
     args = parser.parse_args()
-    sys.exit(smoke(args.installer, args.timeout))
+    sys.exit(smoke(args.installer, args.timeout, args.screenshot))
