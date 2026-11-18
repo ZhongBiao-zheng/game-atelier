@@ -97,6 +97,7 @@ def test_task_with_unparseable_timestamp_is_quarantined_not_crashing_cleanup(cli
     (_tasks_dir() / f"{bad_id}.json").write_text(
         json.dumps({**raw, "task_id": bad_id, "idempotency_key": "other", "created_at": "昨天"}),
         encoding="utf-8")
+    gateway_tasks.cancel(client.record.id, good)  # 第 2 批起没结束的任务不清理
     assert gateway_tasks.cleanup(gateway_tasks._now() + timedelta(hours=25)) == 1
     assert [name[:32] for name in _quarantined()] == [bad_id]
 
@@ -108,8 +109,8 @@ def test_bad_usage_lines_do_not_block_settlement_or_quota(client):
                      + json.dumps({"time": gateway_tasks._now().isoformat(), "key_id": client.record.id,
                                    "charged_cny": "abc"}).encode() + b"\n")
     pending = _submit(client).json()["task_id"]
-    gateway_tasks.recover_after_restart()
-    assert gateway_tasks.get_task(client.record.id, pending).status == "failed"
+    # 第 2 批起重启不再结束排队任务；用取消触发结算写用量。
+    assert gateway_tasks.cancel(client.record.id, pending).status == "canceled"
     assert _submit(client, key="again").status_code == 202
 
 

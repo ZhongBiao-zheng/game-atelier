@@ -294,6 +294,7 @@ class GatewayServer:
                 return
             gateway_tasks.recover_after_restart()
             gateway_tasks.cleanup()
+            gateway_tasks.pump()  # 重启后继续排队与续查的任务
             config = uvicorn.Config(
                 create_gateway_app(), host=self.host, port=port, log_level="warning",
                 access_log=False, lifespan="off", ws="none",

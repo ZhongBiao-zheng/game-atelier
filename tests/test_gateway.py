@@ -207,7 +207,8 @@ def test_cancel_pending_task(client):
 
 # ---- 重启与清理 ----
 
-def test_restart_marks_pending_as_not_started_and_running_as_unconfirmed(client):
+def test_restart_keeps_pending_queued_and_marks_running_unconfirmed(client):
+    # 第 2 批 D1：从没发给上游的排队任务重启后继续排队（原先判「未开始」失败）。
     pending = _submit(client, key="p").json()["task_id"]
     running = _submit(client, key="r").json()["task_id"]
     gateway_tasks._update(running, status="running")
@@ -215,7 +216,7 @@ def test_restart_marks_pending_as_not_started_and_running_as_unconfirmed(client)
     gateway_tasks.recover_after_restart()
 
     key_id = client.record.id
-    assert gateway_tasks.get_task(key_id, pending).error_kind == "unavailable"
+    assert gateway_tasks.get_task(key_id, pending).status == "pending"
     unconfirmed = gateway_tasks.get_task(key_id, running)
     assert unconfirmed.error_kind == "unconfirmed" and "未确认" in unconfirmed.error
 
@@ -223,6 +224,9 @@ def test_restart_marks_pending_as_not_started_and_running_as_unconfirmed(client)
 def test_cleanup_removes_tasks_older_than_a_day(client):
     task_id = _submit(client, files={"ref_0": ("r.png", b"x", "image/png")}).json()["task_id"]
     assert gateway_tasks.cleanup() == 0
+    # 没结束的任务不删（第 2 批）；结束后满 24 小时才删。
+    assert gateway_tasks.cleanup(gateway_tasks._now() + timedelta(hours=25)) == 0
+    gateway_tasks.cancel(client.record.id, task_id)
     assert gateway_tasks.cleanup(gateway_tasks._now() + timedelta(hours=25)) == 1
     assert client.get(f"/gateway/v1/tasks/{task_id}").status_code == 404
     assert not gateway_tasks._files_dir(task_id).exists()
