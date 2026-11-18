@@ -36,6 +36,7 @@ MAX_PROMPT_CHARS = 32_000
 MAX_RUNNING = 8
 MAX_RUNNING_PER_KEY = 4
 RETENTION = timedelta(hours=24)
+QUARANTINE_RETENTION = timedelta(days=30)
 
 logger = logging.getLogger(__name__)
 
@@ -143,13 +144,15 @@ class GatewayTask(BaseModel):
     error_kind: ErrorKind | None = None
     cancel_requested: bool = False
     created_at: str
+    # 开始执行（离开排队）的时间；旧任务文件没有这个字段。
+    started_at: str | None = None
     updated_at: str
 
-    @field_validator("created_at", "updated_at")
+    @field_validator("created_at", "updated_at", "started_at")
     @classmethod
-    def _aware_iso_time(cls, value: str) -> str:
+    def _aware_iso_time(cls, value: str | None) -> str | None:
         # 清理与排序要拿它和带时区的时间比较；读不出的时间按坏文件处理，不能让清理抛错。
-        if datetime.fromisoformat(value).tzinfo is None:
+        if value is not None and datetime.fromisoformat(value).tzinfo is None:
             raise ValueError("时间必须带时区")
         return value
 
@@ -345,6 +348,8 @@ def submit(
             member_provider=picked[0].provider, member_base_url=picked[0].base_url,
             member_model_id=picked[1].id,
         ))
+    logger.info("网关任务受理 task=%s key=%s route=%s kind=%s n=%d member=%s", task.task_id,
+                task.key_id, task.route_id, task.kind, task.n, task.member_alias)
     pump()
     return task
 
@@ -404,6 +409,7 @@ def cancel(key_id: str, task_id: str) -> GatewayTask:
         current = _read(task_id)
         if current and current.status == "pending":
             return _finish(current, status="canceled", error="已停止")
+    logger.info("网关任务请求取消 task=%s", task_id)
     return _update(task_id, cancel_requested=True)
 
 
@@ -424,7 +430,11 @@ def pump() -> None:
             if sum(1 for owner in _running.values() if owner == task.key_id) >= MAX_RUNNING_PER_KEY:
                 continue
             _running[task.task_id] = task.key_id
-            _save(task.model_copy(update={"status": "running", "phase": "queued"}))
+            started = _now()
+            _save(task.model_copy(update={"status": "running", "phase": "queued",
+                                          "started_at": started.isoformat()}))
+            logger.info("网关任务开始 task=%s 排队=%.1fs", task.task_id,
+                        _seconds(task.created_at, started.isoformat()) or 0)
             threading.Thread(target=_execute, args=(task.task_id,), daemon=True,
                              name=f"gateway-{task.task_id[:8]}").start()
 
@@ -510,6 +520,8 @@ def run_task(task: GatewayTask) -> GatewayTask:
                     ids = list((_read(task_id)).upstream_task_ids)
                     if identifier not in ids:
                         _update(task_id, upstream_task_ids=[*ids, identifier])
+                        logger.info("网关任务拿到上游订单 task=%s member=%s upstream=%s",
+                                    task_id, key.alias, identifier)
 
                 def on_submission(attempt):
                     previous = [a for a in _read(task_id).submission_attempts
@@ -680,12 +692,34 @@ def _finish(task: GatewayTask, **changes: Any) -> GatewayTask:
         )
         # Keep reservation -> settlement atomic to admission and /me readers.
         _append_usage(done)
-        return _save(done)
+        saved = _save(done)
+    timing = _timing(saved, saved.updated_at)
+    logger.info("网关任务结束 task=%s status=%s error_kind=%s member=%s 排队=%s 执行=%s",
+                saved.task_id, saved.status, saved.error_kind, saved.member_alias,
+                timing["queue_s"], timing["duration_s"])
+    return saved
+
+
+def _seconds(start: str | None, end: str | None) -> float | None:
+    if not start or not end:
+        return None
+    return round(max(0.0, (datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds()), 1)
+
+
+def _timing(task: GatewayTask, finished_at: str) -> dict[str, Any]:
+    """排队 = 受理到开始（没开始就到结束）；执行 = 开始到结束。文本调用受理即开始。"""
+    started = task.started_at or (task.created_at if task.kind == "text" else None)
+    return {
+        "queued_at": task.created_at, "started_at": started, "finished_at": finished_at,
+        "queue_s": _seconds(task.created_at, started or finished_at),
+        "duration_s": _seconds(started, finished_at),
+    }
 
 
 def _append_usage(task: GatewayTask) -> None:
     now = _now()
     row = {
+        **_timing(task, now.isoformat()),
         "time": now.isoformat(), "task_id": task.task_id, "key_id": task.key_id,
         "key_name": task.key_name, "route_id": task.route_id, "member_alias": task.member_alias,
         "provider": task.member_provider, "base_url": task.member_base_url,
@@ -769,6 +803,9 @@ def recover_after_restart() -> None:
         for task in _all_tasks():
             if task.task_id in _running:
                 continue
+            if task.status in ("pending", "running"):
+                logger.warning("网关任务因重启中断 task=%s 原状态=%s upstream=%d", task.task_id,
+                               task.status, len(task.upstream_task_ids))
             if task.status == "pending":
                 _finish(task, status="failed", error="网关重启，任务未开始",
                         error_kind="unavailable")
@@ -777,10 +814,26 @@ def recover_after_restart() -> None:
                         error_kind="unconfirmed")
 
 
+def _prune_quarantine(now: datetime) -> None:
+    """隔离文件按文件名里的隔离时间保留 30 天；名字解析不出的不动。"""
+    cutoff = now - QUARANTINE_RETENTION
+    folder = quarantine_dir()
+    if not folder.is_dir():
+        return
+    for path in folder.glob("*.json"):
+        try:
+            stamp = datetime.strptime(path.stem.rsplit(".", 1)[-1], "%Y%m%dT%H%M%S%fZ")
+        except ValueError:
+            continue
+        if stamp.replace(tzinfo=timezone.utc) < cutoff:
+            path.unlink(missing_ok=True)
+
+
 def cleanup(now: datetime | None = None) -> int:
-    """删除 24 小时前的任务与图片；返回删掉的任务数。"""
+    """删除 24 小时前的任务与图片、30 天前的隔离文件；返回删掉的任务数。"""
     cutoff = (now or _now()) - RETENTION
     removed = 0
+    _prune_quarantine(now or _now())
     with _lock:
         for task in _all_tasks():
             if task.task_id in _running or datetime.fromisoformat(task.created_at) > cutoff:

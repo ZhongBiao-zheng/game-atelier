@@ -324,7 +324,7 @@ def cmd_stop() -> None:
         _stop_locked(runtime)
 
 
-def _stop_locked(runtime: Path) -> None:
+def _stop_locked(runtime: Path, *, reason: str = "normal") -> None:
     cleanup_stale_pid(runtime)
     pid = read_pid(runtime)
     if not pid:
@@ -342,6 +342,7 @@ def _stop_locked(runtime: Path) -> None:
     ):
         print("无法验证运行实例，未向该 PID 发送停止信号。请检查原启动终端。", file=sys.stderr)
         sys.exit(1)
+    _record_stop(runtime, pid, reason)
     if not _terminate(pid):
         print(f"pid {pid} not found — cleaning stale PID")
         cleanup_stale_pid(runtime)
@@ -360,6 +361,17 @@ def _stop_locked(runtime: Path) -> None:
         return
     print(f"pid {pid} 无法结束，启动记录保留；请手动结束该进程后再启动。", file=sys.stderr)
     sys.exit(1)
+
+
+def _record_stop(runtime: Path, pid: int, reason: str) -> None:
+    """Windows 的停止是 taskkill /F，服务自己记不了：由发起停止的这一方写进启停记录。"""
+    from character_workflow.lib import host_lifecycle
+
+    try:
+        host_lifecycle.record_stop(reason="update" if reason == "update" else "normal",
+                                   pid=pid, source="cli", runtime=runtime)
+    except OSError as error:
+        print(f"启停记录写入失败：{error}", file=sys.stderr)
 
 
 def cmd_open_browser() -> None:

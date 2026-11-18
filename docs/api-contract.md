@@ -1045,6 +1045,10 @@ failed 只计 actual。非失败且无价格的任务 `cost_cny=null`（未计�
 `project_key` 为 `canvas:<id>` 或 `studio`（创作台出图，团队为 null），`member_key` 为团队成员 ID（本机为 null）；筛选使用 key，不使用可能重名的显示名称。
 status 保留真实状态（含 pending、done、failed，以及团队 canceled 等）；成功筛选只匹配 done，不把取消算成功。
 本机 duration_s 为终态 completed_at−submitted_at 的秒数，未完成或无完成时间为 null；项目显示画布名称（项目已删除显示「已删除的项目」）或「创作台」，member_label=null。
+团队 duration_s 取网关用量行的执行时长（开始执行→结束，没开始执行即结束的任务为 null；旧行无此字段为 null）。
+网关用量行（`.runtime/gateway/usage/YYYY-MM.jsonl`）另记 `queued_at / started_at / finished_at`（ISO，带时区）与
+`queue_s`（受理→开始，未开始则受理→结束）、`duration_s`；文本调用受理即开始。汇总脚本：
+`uv run python -m character_workflow.lib.gateway_stats [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--days N] [--json]`（只读）。
 团队 project_label=null、member_label 为成员名，cost_cny 始终使用账本 charged_cny（空值按既有账务记 0）；旧账本无执行耗时则 duration_s=null，账本视频 duration 是素材时长，不能当作耗时。
 任务表不为团队全量读取产物或 prompt。
 

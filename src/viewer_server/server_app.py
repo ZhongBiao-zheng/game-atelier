@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from character_workflow.lib import host_lifecycle
 from character_workflow.lib.jobs import fail_orphan_studio_jobs, read_job, resumable_studio_jobs
 from character_workflow.lib.secret_filter import SecretRedactionFilter
 from viewer_server.connection_status import (
@@ -170,6 +171,29 @@ async def lifespan(app: FastAPI):
         await service.close()
 
 
+async def _record_host_lifecycle(app: FastAPI) -> None:
+    """记一条主机启动，然后每 5 分钟刷新心跳；记录失败只告警，不挡服务。"""
+    from viewer_server.connection_status import app_version
+
+    log = logging.getLogger(__name__)
+    try:
+        row = await asyncio.to_thread(
+            host_lifecycle.record_start, version=app_version(),
+            service_mode=os.environ.get("GAME_ATELIER_SERVICE") == "1", pid=os.getpid(),
+            instance_id=app.state.connection_status.instance_id,
+        )
+        log.info("主机启动 版本=%s 服务模式=%s 上次=%s", row["version"], row["service_mode"],
+                 row["previous"])
+    except OSError as error:
+        log.warning("host lifecycle start not recorded: %s", error)
+    while True:
+        await asyncio.sleep(host_lifecycle.HEARTBEAT_SECONDS)
+        try:
+            await asyncio.to_thread(host_lifecycle.heartbeat)
+        except OSError as error:
+            log.warning("host lifecycle heartbeat failed: %s", error)
+
+
 @asynccontextmanager
 async def normal_lifespan(app: FastAPI):
     hub.set_loop(asyncio.get_running_loop())
@@ -242,6 +266,7 @@ async def normal_lifespan(app: FastAPI):
     observer = start_watchers()
     # 局域网共享（ADR-0025）：默认关闭；开着的话随主服务一起起来。配置损坏时网关停在错误状态。
     await asyncio.to_thread(gateway_server.apply_saved)
+    heartbeat_task = asyncio.create_task(_record_host_lifecycle(app))
     # 接入端：网关供应商的模型列表随网关变化，启动时尽力同步一次（连不上就保留旧快照）。
     from character_workflow.lib.callers.atelier_gateway import sync_all_gateway_keys
 
@@ -294,6 +319,11 @@ async def normal_lifespan(app: FastAPI):
     finally:
         from viewer_server.routes import _stop_studio_recovery_workers
 
+        heartbeat_task.cancel()
+        try:
+            host_lifecycle.record_stop(reason="normal", pid=os.getpid(), source="server")
+        except OSError as error:
+            logging.getLogger(__name__).warning("host lifecycle stop not recorded: %s", error)
         _stop_studio_recovery_workers()
         maintenance_task.cancel()
         for task in resume_tasks:

@@ -176,3 +176,12 @@ def test_quarantined_count_is_reported_on_the_settings_view(client, tmp_path):
     local = LocalTestClient(build_app(dist_dir=tmp_path), base_url=ORIGIN)
     state = local.get("/api/gateway").json()
     assert state["quarantined_tasks"] == 1 and state["config_error"] is None
+
+
+def test_quarantined_files_are_kept_for_thirty_days(client):
+    _plant("empty", b"")
+    gateway_tasks._all_tasks()
+    assert gateway_tasks.cleanup(gateway_tasks._now() + timedelta(days=29)) == 0
+    assert gateway_tasks.quarantined_count() == 1
+    gateway_tasks.cleanup(gateway_tasks._now() + timedelta(days=31))
+    assert gateway_tasks.quarantined_count() == 0

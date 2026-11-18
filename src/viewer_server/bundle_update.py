@@ -118,7 +118,7 @@ def _stop(runtime: Path, *, expected_instance: str | None = None) -> None:
         if read_pid(runtime) and expected_instance and read_instance(runtime) != expected_instance:
             raise RuntimeError("服务实例已改变，未停止其他实例")
         try:
-            _stop_locked(runtime)
+            _stop_locked(runtime, reason="update")
         except SystemExit as exc:
             raise RuntimeError("无法安全停止服务") from exc
 

@@ -53,6 +53,8 @@ export GAME_ATELIER_DATA_ROOT=/tmp/test-data-root
 | `.config/http-protocols/<id>.json` | Web (`/api/http-protocols`) | 自定义接口执行器（`callers/declarative.py`，ADR-0036） |
 | `.runtime/gallery-hidden.json` | Web (`POST /api/gallery/hidden`) | viewer-server（`/api/gallery/recent` 过滤首页作品展示） |
 | `.runtime/server.{pid,port,log}` | viewer-server CLI（log 为后台服务本次运行的 stdout/stderr，含 500 traceback） | viewer-server CLI / 排障 |
+| `.runtime/host-lifecycle.jsonl`（+ `.1.jsonl`、`.alive`） | 服务启动（lifespan）/ `server.py stop` / 更新执行器追加启停；1 MiB 轮转留一份 | `gateway_stats` 汇总在线时长与异常结束 |
+| `.runtime/gateway/quarantine/` | `gateway_tasks` 把读不出的任务文件原样移入 | 排障；网关设置页显示数量 |
 | `.config/keys.json` | Skill / Web (`POST /api/keys`) | Skill 通过 `lib/keys.py` 读 |
 | `.config/accent-themes.json` | Web (`PUT /api/accent-themes`) | Web 外观设置（主题色；localStorage 只缓存首帧镜像） |
 | `.config/plugins.json` | Web (`POST /api/plugins/{id}/enable\|disable`) | viewer-server（`lib/plugin_registry.py`，决定加载哪些插件） |

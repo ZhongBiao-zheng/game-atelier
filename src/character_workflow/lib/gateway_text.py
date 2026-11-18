@@ -29,7 +29,7 @@ class TextCall:
             self.task = gateway_tasks.GatewayTask(
                 task_id=uuid.uuid4().hex, idempotency_key="", key_id=owner.id, key_name=owner.name,
                 kind="text", route_id=route_id, route_order=route_order, prompt="", n=0, status="running",
-                created_at=now, updated_at=now, estimated_cny=estimate, reserved_cny=estimate or 0,
+                created_at=now, started_at=now, updated_at=now, estimated_cny=estimate, reserved_cny=estimate or 0,
             )
             gateway_quota._inflight[self.task.task_id] = (owner.id, estimate or 0)
         self.stream = stream
