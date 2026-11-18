@@ -314,3 +314,60 @@ def test_runtime_and_shell_agree_on_the_contract_level():
     main = (REPO_ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
     assert "package_info().version" not in main.split("fn overlay_title_bar")[1].split("\nfn ")[0]
     assert "runtime::meets_contract(&root)" in main
+
+
+def test_windows_installer_uninstaller_and_app_share_one_icon():
+    # A setup.exe with the stock installer icon reads as pirated software. The app exe (and with it
+    # the Apps entry, the shortcuts and the tray) takes the first .ico in bundle.icon; the installer
+    # and its uninstaller (the same exe) embed that same committed file, whatever builds the app.
+    import json
+    import struct
+    desktop = REPO_ROOT / "desktop"
+    bundle = json.loads((desktop / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))["bundle"]
+    ico = next(icon for icon in bundle["icon"] if icon.endswith(".ico"))
+    brand_ico = REPO_ROOT / "assets/brand/atelier.ico"
+    assert (desktop / "src-tauri" / ico).resolve() == brand_ico
+    assert '1 ICON "../../assets/brand/atelier.ico"' in (desktop / "setup/setup.rc").read_text(encoding="utf-8")
+    # Full-bleed artwork (no macOS margin) with every size Explorer asks for, 16 to 256.
+    data = brand_ico.read_bytes()
+    count = struct.unpack("<H", data[4:6])[0]
+    sizes = {data[6 + 16 * i] or 256 for i in range(count)}
+    assert {16, 24, 32, 48, 64, 128, 256} <= sizes
+
+
+def test_windows_installer_never_asks_for_administrator_rights():
+    # Windows elevates an exe named "*setup*" unless its manifest says asInvoker.
+    manifest = (REPO_ROOT / "desktop/setup/setup.exe.manifest").read_text(encoding="utf-8")
+    assert 'requestedExecutionLevel level="asInvoker"' in manifest
+
+
+def test_installer_and_build_script_share_the_payload_format(tmp_path):
+    import importlib.util
+    import json
+    import struct
+    spec = importlib.util.spec_from_file_location("_build_desktop", REPO_ROOT / "scripts/build_desktop.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    app = tmp_path / "app"
+    (app / "resources").mkdir(parents=True)
+    (app / "Atelier.exe").write_bytes(b"MZ-app")
+    (app / "resources/app.asar").write_bytes(b"asar")
+    setup, seed, extra = tmp_path / "setup.exe", tmp_path / "GameAtelier-1.2.3-windows-x64.zip", tmp_path / "boot.exe"
+    setup.write_bytes(b"MZ-setup")
+    seed.write_bytes(b"PK-seed")
+    extra.write_bytes(b"MZ-boot")
+    target = tmp_path / "out.exe"
+    module.write_payload(setup, target, product="Atelier", version="1.2.3", main="Atelier.exe",
+                         app=app, seed=seed, setup_files=[extra])
+    data = target.read_bytes()
+    source = (REPO_ROOT / "desktop/setup/src/payload.rs").read_text(encoding="utf-8")
+    assert f'const MAGIC: &[u8; 8] = b"{module.PAYLOAD_MAGIC.decode()}";' in source
+    assert 'pub const SETUP_ONLY: &str = "setup/";' in source
+    assert data.endswith(module.PAYLOAD_MAGIC) and data.startswith(b"MZ-setup")
+    (length,) = struct.unpack("<Q", data[-16:-8])
+    manifest = json.loads(data[-16 - length:-16])
+    assert manifest["role"] == "install" and manifest["main"] == "Atelier.exe"
+    assert manifest["exe_len"] == len(b"MZ-setup")
+    contents = {e["path"]: data[e["offset"]:e["offset"] + e["size"]] for e in manifest["files"]}
+    assert contents == {"Atelier.exe": b"MZ-app", "resources/app.asar": b"asar",
+                        "seed/GameAtelier-1.2.3-windows-x64.zip": b"PK-seed", "setup/boot.exe": b"MZ-boot"}

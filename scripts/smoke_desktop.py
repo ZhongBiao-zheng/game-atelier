@@ -1,8 +1,9 @@
 """Install the desktop app, open it, quit it, uninstall it, and check what it left behind.
 
 Exercises the real installed path: seed extraction, launcher, webview session, quit → stop.
-macOS runs in a throwaway HOME; Windows installs silently into a temporary folder (Tauri reads
-%LOCALAPPDATA% through the shell API, so the runtime root there is the runner's real one).
+macOS runs in a throwaway HOME; Windows installs silently into a temporary folder with Atelier's own
+installer (desktop/setup), which also unpacks the runtime; %LOCALAPPDATA% and the Start menu are
+the runner's real ones.
 
 The app is then opened a second time on the same runtime with its DESKTOP_CONTRACT marker removed:
 a runtime that declares nothing (one unpacked by an earlier build of the same version) must be
@@ -146,27 +147,75 @@ def _wait_gone(path: Path, seconds: int) -> bool:
 def _windows_shell_problems(shell_log: str) -> list[str]:
     """What the shell log must show on Windows (docs/contracts/desktop-shell.md)."""
     problems = _start_problems(shell_log, declared=True, overlay=False)
+    if "menu bar=false" not in shell_log:
+        problems.append("the window shows a menu bar")
     progress = re.search(r"unpack progress: (\d+) reports, last (\d+)/(\d+)", shell_log)
     if not progress or progress[1] == "0" or progress[2] != progress[3]:
         problems.append("unpack progress did not reach the total entry count")
     return problems
 
 
-def smoke_windows(installer: Path, timeout: int) -> int:
+# The whole primary screen, as the runner's desktop shows it (evidence for reviewers).
+_CAPTURE_SCREEN = """
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+[System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+$bitmap.Save($env:ATELIER_CAPTURE)
+"""
+
+
+def _run_windows_shell(executable: Path, env: dict[str, str], timeout: int, server_log: Path,
+                       screenshot: Path | None) -> int | str:
+    """Run the shell to its smoke quit; capture the window once the page has its session."""
+    process = subprocess.Popen([str(executable)], env=env)
+    deadline = time.monotonic() + timeout
+    while screenshot and process.poll() is None and time.monotonic() < deadline:
+        if SESSION_OK in _tail(server_log, 10**7):
+            time.sleep(3)  # Let the page paint; the shell quits about 8 s after showing it.
+            subprocess.run(["powershell", "-NoProfile", "-Command", _CAPTURE_SCREEN],
+                           env={**os.environ, "ATELIER_CAPTURE": str(screenshot.resolve())}, check=False)
+            break
+        time.sleep(1)
+    try:
+        return process.wait(timeout=max(deadline - time.monotonic(), 1))
+    except subprocess.TimeoutExpired:
+        process.kill()
+        return "timeout"
+
+
+def _windows_registration(product: str) -> tuple[bool, bool]:
+    """Whether the Settings > Apps entry and the Start menu shortcut exist."""
+    import winreg
+    try:
+        winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                       rf"Software\Microsoft\Windows\CurrentVersion\Uninstall\{product}").Close()
+        entry = True
+    except OSError:
+        entry = False
+    programs = Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs"
+    return entry, (programs / f"{product}.lnk").is_file()
+
+
+def smoke_windows(installer: Path, timeout: int, screenshot: Path | None = None) -> int:
     work = Path(tempfile.mkdtemp(prefix="atelier-smoke-")).resolve()
     install_dir = work / "app"
     data = work / "数据目录"  # A non-ASCII data root exercises every encoding hop.
-    # NSIS: /D must be the last argument and must not be quoted.
-    subprocess.run([str(installer), "/S", f"/D={install_dir}"], check=True, timeout=600)
+    runtime_parent = Path(os.environ["LOCALAPPDATA"]) / "game-atelier/runtime"
+    subprocess.run([str(installer), "--silent", "--dir", str(install_dir)], check=True, timeout=600)
     executable = next(p for p in install_dir.glob("*.exe") if p.name.lower() != "uninstall.exe")
+    product = executable.stem
+    problems = []
+    if not (runtime_parent / "GameAtelier/last-good").is_file():
+        problems.append("the installer did not unpack the runtime")
+    if _windows_registration(product) != (True, True):
+        problems.append(f"install registration (Apps entry, Start menu) = {_windows_registration(product)}")
     env = {**os.environ, "GAME_ATELIER_DATA_ROOT": str(data), "ATELIER_SMOKE": "1",
            "GAME_ATELIER_NO_UPDATE_CHECK": "1"}
     for name in ("ATELIER_RUNTIME_ROOT", "VIRTUAL_ENV"):
         env.pop(name, None)
-    runtime_parent = Path(os.environ["LOCALAPPDATA"]) / "game-atelier/runtime"
     data_runtime = data / ".runtime"
-    code = _run(executable, env, timeout)
-    problems = []
+    code = _run_windows_shell(executable, env, timeout, data_runtime / "server.log", screenshot)
     if code != 0:
         problems.append(f"shell exit {code}")
     if not (runtime_parent / "GameAtelier/last-good").is_file():
@@ -182,13 +231,15 @@ def smoke_windows(installer: Path, timeout: int) -> int:
     for log in (runtime_parent / "shell.log", data_runtime / "server.log"):
         print(f"--- {log.name}\n{_tail(log)}")
     # The uninstaller copies itself to %TEMP% and returns at once; wait for the folder to go.
-    subprocess.run([str(install_dir / "uninstall.exe"), "/S"], check=True, timeout=300)
+    subprocess.run([str(install_dir / "uninstall.exe"), "--silent"], check=True, timeout=300)
     if not _wait_gone(install_dir, 120):
         problems.append("uninstall left the install folder")
     if not _wait_gone(runtime_parent, 60):
         problems.append("uninstall left the runtime root")
     if not (data_runtime / "server.log").is_file():
         problems.append("uninstall touched the data root")
+    if _windows_registration(product) != (False, False):
+        problems.append(f"uninstall left registration behind: {_windows_registration(product)}")
     if problems:
         print("SMOKE FAILED: " + "; ".join(problems), file=sys.stderr)
         return 1
@@ -197,9 +248,9 @@ def smoke_windows(installer: Path, timeout: int) -> int:
     return 0
 
 
-def smoke(installer: Path, timeout: int) -> int:
+def smoke(installer: Path, timeout: int, screenshot: Path | None = None) -> int:
     if installer.suffix.lower() == ".exe":
-        return smoke_windows(installer, timeout)
+        return smoke_windows(installer, timeout, screenshot)
     return smoke_macos(installer, timeout)
 
 
@@ -207,5 +258,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--installer", type=Path, required=True)
     parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--screenshot", type=Path, help="Windows: save the running window here")
     args = parser.parse_args()
-    sys.exit(smoke(args.installer, args.timeout))
+    sys.exit(smoke(args.installer, args.timeout, args.screenshot))

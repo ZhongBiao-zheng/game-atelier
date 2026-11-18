@@ -7,6 +7,8 @@ on:
       - 'desktop/**'
       - 'scripts/build_desktop.py'
       - 'scripts/smoke_desktop.py'
+      - 'scripts/desktop_icon_check.ps1'
+      - 'scripts/desktop_installer_screens.ps1'
       - 'scripts/build_release.py'
       - 'scripts/bootstrap.py'
       - 'src/viewer_server/shell_control.py'
@@ -16,6 +18,8 @@ on:
       - 'desktop/**'
       - 'scripts/build_desktop.py'
       - 'scripts/smoke_desktop.py'
+      - 'scripts/desktop_icon_check.ps1'
+      - 'scripts/desktop_installer_screens.ps1'
       - 'scripts/build_release.py'
       - 'scripts/bootstrap.py'
       - 'src/viewer_server/shell_control.py'
@@ -48,7 +52,9 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: desktop/src-tauri
+          workspaces: |
+            desktop/src-tauri
+            desktop/setup
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -66,32 +72,36 @@ jobs:
           cargo fmt --check
           cargo clippy --release -- -D warnings
           cargo test --release
+      - name: Lint and unit-test the Windows installer
+        if: matrix.platform == 'windows-x64'
+        working-directory: desktop/setup
+        run: |
+          cargo fmt --check
+          cargo clippy --release -- -D warnings
+          cargo test --release
       - name: Build the runtime bundle used as the seed
         run: uv run --no-project python scripts/build_release.py --output release-build --platform ${{ matrix.platform }}
       - name: Build installer
         run: |
           seed="$(find release-build -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)"
           uv run --no-project python scripts/build_desktop.py --seed "$seed" --output desktop-build --platform ${{ matrix.platform }}
-      - name: Capture the installer UI on this runner's locale
+      - name: Capture every installer screen, a windowed install and a windowed uninstall
         if: matrix.platform == 'windows-x64'
         shell: pwsh
         run: |
-          Get-WinSystemLocale | Format-List Name, DisplayName
           Get-Culture | Format-List Name
           $installer = Get-ChildItem desktop-build -Filter '*-setup.exe' | Select-Object -First 1
-          $process = Start-Process -FilePath $installer.FullName -PassThru
-          Start-Sleep -Seconds 10
-          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
-          [System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-          $bitmap.Save("desktop-build/installer-ui-$((Get-Culture).Name).png")
-          Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-          Get-Process | Where-Object { $_.Path -like '*nsis*' -or $_.Name -like '*setup*' } | Stop-Process -Force -ErrorAction SilentlyContinue
+          ./scripts/desktop_installer_screens.ps1 -Installer $installer.FullName -Output desktop-build
+      - name: Check the Windows icons (installer, app, uninstaller, Apps entry)
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem desktop-build -Filter '*-setup.exe' | Select-Object -First 1
+          ./scripts/desktop_icon_check.ps1 -Installer $installer.FullName -Output desktop-build
       - name: Install, open, quit and uninstall the installed app
         run: |
           installer="$(find desktop-build -maxdepth 1 -type f \( -name '*.dmg' -o -name '*-setup.exe' \) | head -1)"
-          uv run --no-project python scripts/smoke_desktop.py --installer "$installer"
+          uv run --no-project python scripts/smoke_desktop.py --installer "$installer" --screenshot desktop-build/app-window.png
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -1,6 +1,7 @@
 // Desktop shell: a window, a tray icon and the viewer-server's lifetime. No business logic.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(target_os = "macos")]
 mod menu;
 mod runtime;
 
@@ -31,6 +32,11 @@ const PROBE_INTERVAL: Duration = Duration::from_secs(3);
 const FAILED_PROBES_BEFORE_ERROR: u32 = 3;
 const DOWNLOAD_EVENT: &str = "atelier:download-saved";
 const NAVIGATE_EVENT: &str = "atelier:navigate";
+const SETTINGS_PATH: &str = "/settings/providers";
+/// Installer-facing arguments (docs/contracts/desktop-shell.md).
+#[cfg(windows)]
+const PREPARE_RUNTIME_ARG: &str = "--prepare-runtime";
+const QUIT_ARG: &str = "--quit";
 /// Height of the page's top bar (lg:h-20); the traffic lights sit centred in it.
 #[cfg(target_os = "macos")]
 const TRAFFIC_LIGHTS: tauri::LogicalPosition<f64> = tauri::LogicalPosition { x: 20.0, y: 42.0 };
@@ -45,6 +51,7 @@ const PAGE_SCRIPT: &str = r#"(function () {
   var root = document.documentElement;
   root.dataset.shell = '__SHELL__';
   __TITLEBAR__
+  __SETTINGS_SHORTCUT__
   document.addEventListener('contextmenu', function (event) {
     if (event.defaultPrevented) return;
     var target = event.target;
@@ -54,6 +61,15 @@ const PAGE_SCRIPT: &str = r#"(function () {
     event.preventDefault();
   });
 })();"#;
+/// Windows has no menu bar, so Ctrl+, (the macOS menu's Settings… shortcut) is the page's.
+#[cfg(windows)]
+const SETTINGS_SHORTCUT: &str = r#"document.addEventListener('keydown', function (event) {
+    if (event.defaultPrevented || event.key !== ',' || !event.ctrlKey || event.altKey || event.shiftKey || event.metaKey) return;
+    event.preventDefault();
+    window.dispatchEvent(new CustomEvent('__NAVIGATE__', { detail: { path: '__PATH__' } }));
+  });"#;
+#[cfg(not(windows))]
+const SETTINGS_SHORTCUT: &str = "";
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(180);
 /// Extra time for a first start after the launcher's own 8 s check has given up.
 const SLOW_START_GRACE: Duration = Duration::from_secs(30);
@@ -203,7 +219,11 @@ fn show_error(app: &AppHandle, failure: &Failure) {
 }
 
 fn seed_archive(app: &AppHandle) -> Option<PathBuf> {
-    let dir = app.path().resource_dir().ok()?.join("seed");
+    find_seed(&app.path().resource_dir().ok()?)
+}
+
+fn find_seed(resources: &Path) -> Option<PathBuf> {
+    let dir = resources.join("seed");
     log(&format!("looking for the seed in {}", dir.display()));
     std::fs::read_dir(dir)
         .ok()?
@@ -541,6 +561,9 @@ fn page_script(overlay: bool) -> String {
     PAGE_SCRIPT
         .replace("__SHELL__", shell)
         .replace("__TITLEBAR__", titlebar)
+        .replace("__SETTINGS_SHORTCUT__", SETTINGS_SHORTCUT)
+        .replace("__NAVIGATE__", NAVIGATE_EVENT)
+        .replace("__PATH__", SETTINGS_PATH)
 }
 
 fn build_window(app: &tauri::App) -> tauri::Result<()> {
@@ -635,6 +658,7 @@ fn build_window(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
 fn handle_menu(app: &AppHandle, id: &str) {
     let Some(window) = app.get_webview_window("main") else {
         return;
@@ -643,7 +667,7 @@ fn handle_menu(app: &AppHandle, id: &str) {
         menu::SETTINGS => {
             show_main(app);
             if app.state::<Shell>().shown.lock().unwrap().is_some() {
-                let detail = serde_json::json!({ "path": "/settings/providers" });
+                let detail = serde_json::json!({ "path": SETTINGS_PATH });
                 let _ = window.eval(format!(
                     "window.dispatchEvent(new CustomEvent({}, {{ detail: {detail} }}))",
                     serde_json::Value::from(NAVIGATE_EVENT),
@@ -666,7 +690,13 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let name = app.package_info().name.clone();
     let show = MenuItem::with_id(app, "show", format!("显示 {name}"), true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", format!("退出 {name}"), true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &quit_item])?;
+    // Windows has no menu bar, so the Help menu's log item lives here.
+    let log_item = MenuItem::with_id(app, "log", "查看日志", true, None::<&str>)?;
+    let menu = if cfg!(windows) {
+        Menu::with_items(app, &[&show, &log_item, &quit_item])?
+    } else {
+        Menu::with_items(app, &[&show, &quit_item])?
+    };
     // macOS: the bare glyph as a template image (the app icon's backplate disappears into the
     // menu bar and leaves a 9 px squiggle); scripts/build_tray_icon.py makes it.
     #[cfg(target_os = "macos")]
@@ -683,6 +713,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .show_menu_on_left_click(cfg!(target_os = "macos"))
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main(app),
+            "log" => open_log(app.clone()),
             "quit" => quit(app),
             _ => {}
         })
@@ -700,10 +731,51 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// `Atelier.exe --prepare-runtime` (Windows installer, docs/contracts/desktop-shell.md): unpack the
+/// seed exactly as a first start would, printing `progress <done> <total>` lines, then exit.
+#[cfg(windows)]
+fn prepare_runtime_cli() -> i32 {
+    use std::io::Write;
+    let report = |done: u64, total: u64| {
+        let mut out = std::io::stdout();
+        let _ = writeln!(out, "progress {done} {total}");
+        let _ = out.flush();
+    };
+    let result = (|| -> Result<PathBuf, String> {
+        let local = std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA is not set")?;
+        let parent = runtime::runtime_parent(Path::new(&local));
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let dir = exe.parent().ok_or("no install directory")?;
+        let seed = find_seed(dir).ok_or("安装包里缺少运行环境")?;
+        log(&format!("prepare-runtime from {}", seed.display()));
+        runtime::prepare(&parent, &seed, &report)
+    })();
+    match result {
+        Ok(root) => {
+            log(&format!("prepare-runtime ready at {}", root.display()));
+            0
+        }
+        Err(error) => {
+            log(&format!("prepare-runtime failed: {error}"));
+            let _ = writeln!(std::io::stderr(), "{error}");
+            1
+        }
+    }
+}
+
 fn main() {
+    #[cfg(windows)]
+    if std::env::args().any(|a| a == PREPARE_RUNTIME_ARG) {
+        std::process::exit(prepare_runtime_cli());
+    }
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            show_main(app)
+        // `--quit` from the installer asks a running shell to go through its quit flow.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|a| a == QUIT_ARG) {
+                quit(app);
+            } else {
+                show_main(app);
+            }
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(
@@ -714,6 +786,11 @@ fn main() {
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![retry, open_log])
         .setup(|app| {
+            if std::env::args().any(|a| a == QUIT_ARG) {
+                // Nothing was running: there is nothing to quit.
+                exit_now(app.handle(), 0);
+                return Ok(());
+            }
             if let Ok(local) = app.path().local_data_dir() {
                 let parent = runtime::runtime_parent(&local);
                 *app.state::<Shell>().runtime_parent.lock().unwrap() = Some(parent);
@@ -723,8 +800,14 @@ fn main() {
                 app.package_info().name,
                 app.package_info().version
             ));
-            app.set_menu(menu::build(app.handle())?)?;
-            app.on_menu_event(|app, event| handle_menu(app, event.id().as_ref()));
+            // Windows would draw the app menu as a grey bar inside the window; the title bar, the
+            // tray, the page and WebView2's own keys cover it there (docs/contracts/desktop-shell.md).
+            #[cfg(target_os = "macos")]
+            {
+                app.set_menu(menu::build(app.handle())?)?;
+                app.on_menu_event(|app, event| handle_menu(app, event.id().as_ref()));
+            }
+            log(&format!("menu bar={}", app.menu().is_some()));
             build_window(app)?;
             build_tray(app)?;
             boot(app.handle().clone());
