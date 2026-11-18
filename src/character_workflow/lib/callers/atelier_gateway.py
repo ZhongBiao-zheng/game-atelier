@@ -231,9 +231,15 @@ def _run_task(
         if status["status"] == "failed":
             # 主机只对能确认上游已收费的失败扣额度；扣了多少就记在这次任务上，两边账对得上。
             charged = status.get("charged_cny")
-            if isinstance(charged, int | float) and charged > 0 and on_cost_usd:
-                on_cost_usd(float(charged) / USD_TO_CNY)
-            raise _task_error(status)
+            error = _task_error(status)
+            if isinstance(charged, int | float) and charged > 0:
+                if on_cost_usd:
+                    on_cost_usd(float(charged) / USD_TO_CNY)
+                # 成员最容易来问的情况：任务失败却扣了钱。一句话说清扣了多少、为什么。
+                # 不写「额度 / 余额」：job_runner._friendly_error 见到这两个词会把整条失败
+                # 改判成「厂商余额不足」。
+                error = GatewayError(f"{error}（已扣 ¥{charged:g}：上游已对完成的部分收费）")
+            raise error
 
         member = status.get("member_alias")
         warnings = [f"网关：{item}" for item in status.get("warnings") or []]

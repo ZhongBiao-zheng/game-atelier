@@ -2,7 +2,7 @@ import { checkComfyUI } from '@/api/comfyui';
 import { ComfyWorkflows } from './ComfyWorkflows';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { useEffect, useRef, useState } from 'react';
-import { CloseIcon, HideIcon, ShowIcon } from '@/components/ui/icons';
+import { CloseIcon, HelpIcon, HideIcon, ShowIcon } from '@/components/ui/icons';
 import { Toggle } from '@/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { getChatGPTSubscription, type ChatGPTSubscriptionStatus, createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelInputModality, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
@@ -65,7 +65,17 @@ const TEXT_INPUT_MODALITIES = [
 
 // 仅前端的行级标记：编辑态「打开表单时已存在的模型」分类锁死为只读，新增行不带此标记。
 // _locked 随 spread 在每次 setModels 中传递，增删行都不会错乱（不依赖 id 值或行下标）。
-type EditableModel = KeyModel & { _locked?: boolean };
+type EditableModel = KeyModel & { _locked?: boolean; _price?: string };
+
+const PRICE_HELP = '没有同步价时按此价估算，并计入网关额度；留空为未计价';
+// 输入中的文本优先（允许「0.」这类中间态），否则回显已存的单价。
+const priceText = (model: EditableModel) => model._price ?? (model.per_call_cny != null ? String(model.per_call_cny) : '');
+function parsePrice(text: string): number | null | undefined {
+  const value = text.trim();
+  if (!value) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 && number <= 10000 ? number : undefined;
+}
 
 interface Props {
   initial?: Partial<KeyCreatePayload>;
@@ -358,6 +368,10 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
 
   const submit = async () => {
     if (unresolvedChecked.length) return;
+    if (models.some(model => parsePrice(priceText(model)) === undefined)) {
+      setError('单价请填 0 到 10000 之间的数字');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -375,6 +389,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
             protocol: bound ? 'declarative' : model.protocol === 'declarative' ? null : model.protocol ?? null,
             input_modalities: inputModalities,
             ...(bound ? { declarative_id: model.declarative_id } : {}),
+            ...(parsePrice(priceText(model)) != null ? { per_call_cny: parsePrice(priceText(model)) } : {}),
           };
         })
         .filter((model) => model.name && model.id);
@@ -715,6 +730,20 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                                 {label}
                               </Label>
                             ))}
+                          </div>
+                        )}
+                        {model.unpriced && (
+                          <div className="flex items-center gap-1.5">
+                            <Input
+                              aria-label={`单价 ${index + 1}`}
+                              inputMode="decimal"
+                              value={priceText(model)}
+                              onChange={(e) => setModels(models.map((m, i) => i === index ? { ...m, _price: e.target.value } : m))}
+                              placeholder="单价"
+                              className="h-7 w-20 text-xs"
+                            />
+                            <span className="text-xs text-muted-foreground">元/次</span>
+                            <Hint label={PRICE_HELP}><span tabIndex={0} aria-label="单价说明" className="text-muted-foreground"><HelpIcon size="sm" /></span></Hint>
                           </div>
                         )}
                       </div>

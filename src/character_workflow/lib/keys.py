@@ -72,12 +72,14 @@ class ModelSpec(BaseModel):
     declarative_id: str | None = None
     # 局域网网关上自定义接口模型的能力快照（只含能力，不含模板与密钥），由同步网关写入。
     declared_snapshot: dict | None = None
+    # 主机手设的每次调用价格（元 / 次）：只在没有同步价时用于估价与网关扣费（第三批，2026-11-18）。
+    per_call_cny: float | None = Field(default=None, ge=0, le=10_000, allow_inf_nan=False)
 
     @model_serializer(mode="wrap")
     def _omit_empty_via(self, handler):
         # 普通 KEY 没有 via：不写进 keys.json / API，旧数据与旧断言保持原样。
         data = handler(self)
-        for field in ("via", "workflow_inputs", "declarative_id", "declared_snapshot"):
+        for field in ("via", "workflow_inputs", "declarative_id", "declared_snapshot", "per_call_cny"):
             if data.get(field) is None:
                 data.pop(field, None)
         return data
@@ -381,6 +383,7 @@ def preferred_alias_for_kind(kind: Kind) -> str | None:
 
 
 def keys_for_api() -> list[dict]:
+    from character_workflow.lib import generation_pricing
     from character_workflow.lib.http_protocols import declared_for
 
     db = read_keys_db()
@@ -390,6 +393,8 @@ def keys_for_api() -> list[dict]:
         for spec, row in zip(k.models, d["models"]):
             if (declared := declared_for(spec)) is not None:
                 row["declared"] = declared
+            if generation_pricing.has_no_synced_price(k, spec):
+                row["unpriced"] = True  # 只在未定价时出现：供应商页据此显示「单价」框
         d["access_key"] = _mask(d.get("access_key"))
         d["secret_key"] = None
         d["is_default"] = (k.alias == db.default_alias)

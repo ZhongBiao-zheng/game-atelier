@@ -336,21 +336,51 @@ def estimate_text_cost_cny(
 AUDIO_UNIT_CHARACTERS = 1000
 
 
-def audio_unit_cost_cny(key, model) -> float | None:
+def with_manual_price(estimate: float | None, model) -> float | None:
+    """没有同步价时用主机手设的每次调用价格（`ModelSpec.per_call_cny`，元 / 次）；同步价优先。"""
+    if estimate is not None or model is None:
+        return estimate
+    return getattr(model, "per_call_cny", None)
+
+
+def audio_unit_cost_cny(key, model, *, manual: bool = True) -> float | None:
     """模型菜单与「最便宜」排序用的音频单价：语音每千字、音乐每首。"""
     from character_workflow.lib.audio_caps import audio_caps
 
     caps = audio_caps(key, model)
     if caps is None:
-        return None
+        return with_manual_price(None, model) if manual else None
     common = {"kind": "audio", "provider": key.provider, "base_url": key.base_url,
               "model_id": model.id, "protocol": model.protocol}
     if caps.family == "music":
-        return estimate_cost_cny(**common, n=1)
-    return estimate_cost_cny(**common, text_length=AUDIO_UNIT_CHARACTERS)
+        synced = estimate_cost_cny(**common, n=1)
+    else:
+        synced = estimate_cost_cny(**common, text_length=AUDIO_UNIT_CHARACTERS)
+    return with_manual_price(synced, model) if manual else synced
 
 
-def estimate_submission(key, model_id: str, kind: str, params: dict) -> float | None:
+# 判断「有没有同步价」用的代表性参数：图片按默认尺寸，视频按 5 秒 720p 16:9。
+_PROBE_PARAMS = {"image": {}, "video": {"duration": 5, "resolution": "720p", "ratio": "16:9"}}
+
+
+def has_no_synced_price(key, model) -> bool | None:
+    """供应商页「单价」框的显示判据：按代表性参数估价，拿不到同步价就是未定价。
+
+    文本（第 4 步才计价）与局域网 Atelier 供应商（价格在主机那边）返回 None，不给这个标记。
+    """
+    from character_workflow.lib.keys import model_modality
+
+    modality = model_modality(model, key)
+    if key.provider == "atelier" or modality not in ("image", "video", "audio"):
+        return None
+    if modality == "audio":
+        return audio_unit_cost_cny(key, model, manual=False) is None
+    return estimate_submission(key, model.id, modality, dict(_PROBE_PARAMS[modality]),
+                               manual=False) is None
+
+
+def estimate_submission(key, model_id: str, kind: str, params: dict, *,
+                        manual: bool = True) -> float | None:
     """Use the same frozen size intent as submission, without creating a job.
 
     音频没有文本就没有总价，这里返回单价（见 audio_unit_cost_cny）。
@@ -362,14 +392,15 @@ def estimate_submission(key, model_id: str, kind: str, params: dict) -> float | 
     if model is None:
         return None
     if kind == "audio":
-        return audio_unit_cost_cny(key, model)
+        return audio_unit_cost_cny(key, model, manual=manual)
+    priced_model = model
     key, model = size_channel(key, model)
     model_id = model.id
     try:
         values = normalize_image_size_params(key, model_id, params) if kind == "image" else params
     except ValueError:
         return None
-    return estimate_cost_cny(
+    synced = estimate_cost_cny(
         kind=kind, provider=key.provider, base_url=key.base_url, billing_group=key.billing_group,
         model_id=model_id, protocol=model.protocol, n=values.get("n") or 1,
         size=values.get("size"), size_mode=values.get("size_mode"), quality=values.get("quality"),
@@ -381,3 +412,4 @@ def estimate_submission(key, model_id: str, kind: str, params: dict) -> float | 
                                   1 if values.get("image_edit") else 0),
         layer_decomposition=bool(values.get("layer_decomposition")),
     )
+    return with_manual_price(synced, priced_model) if manual else synced

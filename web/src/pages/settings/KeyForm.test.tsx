@@ -179,3 +179,55 @@ it('can disable an existing subscription even after Codex logout', async () => {
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   await waitFor(() => expect(patchKey).toHaveBeenCalledWith('chatgpt', expect.objectContaining({ enabled: false })));
 });
+
+describe('未计价模型的单价', () => {
+  const initial = {
+    alias: 'Vendor', provider: 'custom' as const, base_url: 'https://api.example.com', access_key: 'sk...mask',
+    models: [
+      { id: 'cheap', name: '未定价模型', modality: 'image' as const, unpriced: true },
+      { id: 'priced', name: '有同步价', modality: 'image' as const },
+    ],
+  };
+
+  it('只在未计价的模型行出现，已存的分类仍是只读', () => {
+    render(<KeyForm mode="edit" initial={initial} onCreated={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByText('模型详情'));
+    expect(screen.getByLabelText('单价 1')).toBeInTheDocument();
+    expect(screen.queryByLabelText('单价 2')).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: '模型分类 1' })).toHaveTextContent('图片');
+  });
+
+  it('保存时带上单价，清空即回到未计价', async () => {
+    vi.mocked(patchKey).mockResolvedValue(undefined);
+    render(<KeyForm mode="edit" initial={initial} onCreated={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByText('模型详情'));
+    fireEvent.change(screen.getByLabelText('单价 1'), { target: { value: '0.3' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(patchKey).toHaveBeenCalled());
+    const [first, second] = vi.mocked(patchKey).mock.calls[0][1].models!;
+    expect(first).toMatchObject({ id: 'cheap', per_call_cny: 0.3 });
+    expect(first).not.toHaveProperty('unpriced');
+    expect(second).not.toHaveProperty('per_call_cny');
+  });
+
+  it('回显已存单价，清空后不再提交', async () => {
+    vi.mocked(patchKey).mockResolvedValue(undefined);
+    render(<KeyForm mode="edit" initial={{ ...initial, models: [{ ...initial.models[0], per_call_cny: 0.5 }] }}
+      onCreated={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByText('模型详情'));
+    expect(screen.getByLabelText('单价 1')).toHaveValue('0.5');
+    fireEvent.change(screen.getByLabelText('单价 1'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(patchKey).toHaveBeenCalled());
+    expect(vi.mocked(patchKey).mock.calls[0][1].models![0]).not.toHaveProperty('per_call_cny');
+  });
+
+  it('非法单价不提交', () => {
+    render(<KeyForm mode="edit" initial={initial} onCreated={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByText('模型详情'));
+    fireEvent.change(screen.getByLabelText('单价 1'), { target: { value: '-1' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(screen.getByText('单价请填 0 到 10000 之间的数字')).toBeInTheDocument();
+    expect(patchKey).not.toHaveBeenCalled();
+  });
+});

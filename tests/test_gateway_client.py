@@ -317,6 +317,8 @@ def test_member_records_the_confirmed_charge_of_a_failed_gateway_task(gateway, m
     failed = read_job("job-partial")
     assert failed.status == JobStatus.FAILED
     assert failed.params.actual_cost_cny == round(0.1 * job_runner.USD_TO_CNY, 6)
+    print("MEMBER-FAILED-CHARGED:", failed.error)
+    assert failed.error == f"第二段失败（已扣 ¥{round(0.1 * job_runner.USD_TO_CNY, 6):g}：上游已对完成的部分收费）"
 
     monkeypatch.setattr(openai_image, "render", lambda **_kwargs: (_ for _ in ()).throw(
         RuntimeError("内容审核未通过")))

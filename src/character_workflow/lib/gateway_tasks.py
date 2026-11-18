@@ -365,6 +365,8 @@ def _estimate(picked, n: int, size: str | None, params: dict, kind="image",
     from character_workflow.lib.generation_pricing import estimate_cost_cny
     from character_workflow.lib.image_size import normalize_image_size_params
 
+    from character_workflow.lib.generation_pricing import with_manual_price
+
     member, model = picked
     effective = {**params, "n": n}
     if size is not None:
@@ -374,7 +376,7 @@ def _estimate(picked, n: int, size: str | None, params: dict, kind="image",
             effective = normalize_image_size_params(member, model.id, effective)
         except ValueError as error:
             raise GatewayRequestError(422, str(error)) from error
-    return estimate_cost_cny(
+    return with_manual_price(estimate_cost_cny(
         kind=modality_for(kind), provider=member.provider, base_url=member.base_url,
         billing_group=member.billing_group, model_id=model.id, protocol=model.protocol, n=n,
         size=effective.get("size"), size_mode=effective.get("size_mode"),
@@ -383,7 +385,7 @@ def _estimate(picked, n: int, size: str | None, params: dict, kind="image",
         generate_audio=effective.get("generate_audio", False),
         has_reference_video=has_reference_video, image_edit=kind == "image_edit",
         text_length=text_length,
-    )
+    ), model)
 
 
 def get_task(key_id: str, task_id: str) -> GatewayTask:

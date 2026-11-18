@@ -399,7 +399,7 @@ def _params(job: Job) -> dict[str, Any]:
 
 def _freeze_estimated_cost(job: Job, params: dict[str, Any]) -> None:
     """提交方没冻结预计费用的任务（画布、Agent、自动路由）按实际渠道补一份，用量页才不会算成未计价。"""
-    from character_workflow.lib.generation_pricing import estimate_cost_cny
+    from character_workflow.lib.generation_pricing import estimate_cost_cny, with_manual_price
     from character_workflow.lib.keys import find_by_alias
 
     key = find_by_alias(job.alias or "")
@@ -433,6 +433,8 @@ def _freeze_estimated_cost(job: Job, params: dict[str, Any]) -> None:
         layer_decomposition=bool(params.get("layer_decomposition")),
         text_length=len(job.prompt.strip()) if job.kind.value == "audio" else None,
     )
+    # 主机手设的每次调用价格：没有同步价时也用于本机任务的估价（第三批，2026-11-18）。
+    estimate = with_manual_price(estimate, model)
     if estimate is not None:
         params["estimated_cost_cny"] = estimate
         update_job_params(job.job_id, params)

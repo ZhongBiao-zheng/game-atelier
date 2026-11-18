@@ -110,7 +110,7 @@ export function ModelPickerList({ choices, selected, initialKind, sections = fal
               {entry && !subscription && <span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{entry.description}</span>}
               {(seconds != null || cost != null || subscription || local || custom) && <span className="mt-2 flex justify-between gap-2 text-xs tabular-nums text-muted-foreground">
                 {seconds != null && <MetaTag>{formatModelDuration(seconds)}</MetaTag>}
-                {local ? <MetaTag className="ml-auto">本机</MetaTag> : subscription ? <MetaTag className="ml-auto">订阅</MetaTag> : custom ? <MetaTag className="ml-auto">未计价</MetaTag> : cost != null && <MetaTag className="ml-auto">{formatGenerationCost(cost)}{costUnit}</MetaTag>}
+                {local ? <MetaTag className="ml-auto">本机</MetaTag> : subscription ? <MetaTag className="ml-auto">订阅</MetaTag> : custom && cost == null ? <MetaTag className="ml-auto">未计价</MetaTag> : cost != null && <MetaTag className="ml-auto">{formatGenerationCost(cost)}{costUnit}</MetaTag>}
               </span>}
             </span>
           </Button>;
