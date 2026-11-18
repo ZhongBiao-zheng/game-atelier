@@ -33,6 +33,10 @@ const FAILED_PROBES_BEFORE_ERROR: u32 = 3;
 const DOWNLOAD_EVENT: &str = "atelier:download-saved";
 const NAVIGATE_EVENT: &str = "atelier:navigate";
 const SETTINGS_PATH: &str = "/settings/providers";
+/// Installer-facing arguments (docs/contracts/desktop-shell.md).
+#[cfg(windows)]
+const PREPARE_RUNTIME_ARG: &str = "--prepare-runtime";
+const QUIT_ARG: &str = "--quit";
 /// Height of the page's top bar (lg:h-20); the traffic lights sit centred in it.
 #[cfg(target_os = "macos")]
 const TRAFFIC_LIGHTS: tauri::LogicalPosition<f64> = tauri::LogicalPosition { x: 20.0, y: 42.0 };
@@ -215,7 +219,11 @@ fn show_error(app: &AppHandle, failure: &Failure) {
 }
 
 fn seed_archive(app: &AppHandle) -> Option<PathBuf> {
-    let dir = app.path().resource_dir().ok()?.join("seed");
+    find_seed(&app.path().resource_dir().ok()?)
+}
+
+fn find_seed(resources: &Path) -> Option<PathBuf> {
+    let dir = resources.join("seed");
     log(&format!("looking for the seed in {}", dir.display()));
     std::fs::read_dir(dir)
         .ok()?
@@ -726,10 +734,51 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// `Atelier.exe --prepare-runtime` (Windows installer, docs/contracts/desktop-shell.md): unpack the
+/// seed exactly as a first start would, printing `progress <done> <total>` lines, then exit.
+#[cfg(windows)]
+fn prepare_runtime_cli() -> i32 {
+    use std::io::Write;
+    let report = |done: u64, total: u64| {
+        let mut out = std::io::stdout();
+        let _ = writeln!(out, "progress {done} {total}");
+        let _ = out.flush();
+    };
+    let result = (|| -> Result<PathBuf, String> {
+        let local = std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA is not set")?;
+        let parent = runtime::runtime_parent(Path::new(&local));
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let dir = exe.parent().ok_or("no install directory")?;
+        let seed = find_seed(dir).ok_or("安装包里缺少运行环境")?;
+        log(&format!("prepare-runtime from {}", seed.display()));
+        runtime::prepare(&parent, &seed, &report)
+    })();
+    match result {
+        Ok(root) => {
+            log(&format!("prepare-runtime ready at {}", root.display()));
+            0
+        }
+        Err(error) => {
+            log(&format!("prepare-runtime failed: {error}"));
+            let _ = writeln!(std::io::stderr(), "{error}");
+            1
+        }
+    }
+}
+
 fn main() {
+    #[cfg(windows)]
+    if std::env::args().any(|a| a == PREPARE_RUNTIME_ARG) {
+        std::process::exit(prepare_runtime_cli());
+    }
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            show_main(app)
+        // `--quit` from the installer asks a running shell to go through its quit flow.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|a| a == QUIT_ARG) {
+                quit(app);
+            } else {
+                show_main(app);
+            }
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(
@@ -740,6 +789,11 @@ fn main() {
         .manage(Shell::default())
         .invoke_handler(tauri::generate_handler![retry, open_log])
         .setup(|app| {
+            if std::env::args().any(|a| a == QUIT_ARG) {
+                // Nothing was running: there is nothing to quit.
+                exit_now(app.handle(), 0);
+                return Ok(());
+            }
             if let Ok(local) = app.path().local_data_dir() {
                 let parent = runtime::runtime_parent(&local);
                 *app.state::<Shell>().runtime_parent.lock().unwrap() = Some(parent);

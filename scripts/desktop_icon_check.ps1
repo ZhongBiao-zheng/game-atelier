@@ -51,8 +51,7 @@ function Get-Pixels([string]$Path) {
 New-Item -ItemType Directory -Force -Path $Output | Out-Null
 $installer = (Resolve-Path $Installer).Path
 $work = Join-Path ([System.IO.Path]::GetTempPath()) "atelier-icon-$PID"
-# NSIS: /D must be the last argument and must not be quoted.
-Start-Process -FilePath $installer -ArgumentList '/S', "/D=$work" -Wait
+Start-Process -FilePath $installer -ArgumentList '--silent', '--dir', "`"$work`"" -Wait
 $app = Get-ChildItem $work -Filter '*.exe' | Where-Object { $_.Name -ne 'uninstall.exe' } | Select-Object -First 1
 $uninstaller = Join-Path $work 'uninstall.exe'
 $entry = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' |
@@ -75,7 +74,7 @@ if (-not $displayIcon -or -not (Test-Path $displayIcon) -or (Get-Item $displayIc
 
 # The uninstaller copies itself to %TEMP% and returns at once; wait for it to finish so the
 # next install does not race it for the same uninstall key.
-Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait
+Start-Process -FilePath $uninstaller -ArgumentList '--silent' -Wait
 $deadline = (Get-Date).AddSeconds(120)
 while ((Test-Path $work) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
 if (Test-Path $work) { $problems += 'uninstall left the install folder' }

@@ -297,14 +297,44 @@ def test_desktop_shell_follows_the_windows_startup_rule():
 
 
 def test_windows_installer_uninstaller_and_app_share_one_icon():
-    # The stock NSIS icon on the installer and uninstaller reads as pirated software; the app exe
-    # (and with it the Apps entry, the shortcuts and the tray) takes the first .ico in bundle.icon.
+    # A setup.exe with the stock installer icon reads as pirated software. The app exe (and with it
+    # the Apps entry, the shortcuts and the tray) takes the first .ico in bundle.icon; the installer
+    # and its uninstaller (the same exe) embed that same file.
     import json
     desktop = REPO_ROOT / "desktop"
     bundle = json.loads((desktop / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))["bundle"]
     ico = next(icon for icon in bundle["icon"] if icon.endswith(".ico"))
-    nsis = bundle["windows"]["nsis"]
-    assert nsis["installerIcon"] == ico == nsis["uninstallerIcon"]
+    assert f'1 ICON "../src-tauri/{ico}"' in (desktop / "setup/setup.rc").read_text(encoding="utf-8")
     # Windows icons have no macOS safe-area margin: the .ico comes from the full-bleed source.
     script = json.loads((desktop / "package.json").read_text(encoding="utf-8"))["scripts"]["icons"]
     assert f"brand/atelier-icon.svg --output src-tauri/{Path(ico).parent.as_posix()}" in script
+
+
+def test_windows_installer_never_asks_for_administrator_rights():
+    # Windows elevates an exe named "*setup*" unless its manifest says asInvoker.
+    manifest = (REPO_ROOT / "desktop/setup/setup.exe.manifest").read_text(encoding="utf-8")
+    assert 'requestedExecutionLevel level="asInvoker"' in manifest
+
+
+def test_installer_and_build_script_share_the_payload_format(tmp_path):
+    import importlib.util
+    import json
+    import struct
+    spec = importlib.util.spec_from_file_location("_build_desktop", REPO_ROOT / "scripts/build_desktop.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    setup, app, seed = tmp_path / "setup.exe", tmp_path / "Atelier.exe", tmp_path / "GameAtelier-1.2.3-windows-x64.zip"
+    setup.write_bytes(b"MZ-setup")
+    app.write_bytes(b"MZ-app")
+    seed.write_bytes(b"PK-seed")
+    target = tmp_path / "out.exe"
+    module.write_payload(setup, target, "Atelier", "1.2.3", [("Atelier.exe", app), (f"seed/{seed.name}", seed)])
+    data = target.read_bytes()
+    source = (REPO_ROOT / "desktop/setup/src/payload.rs").read_text(encoding="utf-8")
+    assert f'const MAGIC: &[u8; 8] = b"{module.PAYLOAD_MAGIC.decode()}";' in source
+    assert data.endswith(module.PAYLOAD_MAGIC)
+    (length,) = struct.unpack("<Q", data[-16:-8])
+    manifest = json.loads(data[-16 - length:-16])
+    assert manifest["role"] == "install" and manifest["exe_len"] == len(b"MZ-setup")
+    for entry, expected in zip(manifest["files"], (b"MZ-app", b"PK-seed")):
+        assert data[entry["offset"]:entry["offset"] + entry["size"]] == expected

@@ -28,21 +28,6 @@
     "macOS": {
       "signingIdentity": "-",
       "minimumSystemVersion": "13.0"
-    },
-    "windows": {
-      "webviewInstallMode": {
-        "type": "embedBootstrapper"
-      },
-      "nsis": {
-        "installMode": "currentUser",
-        "installerIcon": "icons/windows/icon.ico",
-        "uninstallerIcon": "icons/windows/icon.ico",
-        "languages": [
-          "SimpChinese"
-        ],
-        "displayLanguageSelector": false,
-        "installerHooks": "windows/installer-hooks.nsh"
-      }
     }
   }
 }

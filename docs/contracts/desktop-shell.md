@@ -8,12 +8,12 @@
 
 | 位置 | 内容 | 谁写 |
 | --- | --- | --- |
-| 安装位置（macOS `/Applications/Atelier.app`；Windows `%LOCALAPPDATA%\Atelier\`，当前用户安装、不需要管理员） | 外壳与种子（macOS `Contents/Resources/seed/GameAtelier-<版本>-macos-arm64.tar.gz`；Windows `seed\GameAtelier-<版本>-windows-x64.zip`） | 安装器，只读 |
-| `<本地应用数据>/game-atelier/runtime/GameAtelier/` | ADR-0030 运行包布局 | 外壳首次启动时由种子解压；之后只由应用内更新修改 |
+| 安装位置（macOS `/Applications/Atelier.app`；Windows 默认 `%LOCALAPPDATA%\Atelier\`，可在安装时更改，当前用户安装、不需要管理员） | 外壳与种子（macOS `Contents/Resources/seed/GameAtelier-<版本>-macos-arm64.tar.gz`；Windows `Atelier.exe`、`seed\GameAtelier-<版本>-windows-x64.zip`、`uninstall.exe`） | 安装器，只读 |
+| `<本地应用数据>/game-atelier/runtime/GameAtelier/` | ADR-0030 运行包布局 | 由种子解压（Windows 在安装时由安装程序调用外壳的 `--prepare-runtime`；macOS 与其他情况在外壳首次启动时）；之后只由应用内更新修改 |
 | `<本地应用数据>/game-atelier/runtime/shell.log` | 外壳日志 | 外壳 |
 | `<数据目录>/.runtime/` | 服务记录 | 见下 |
 
-本地应用数据：macOS 是 `~/Library/Application Support`，Windows 是 `%LOCALAPPDATA%`。Windows 卸载时删除运行包根，数据目录不动。运行包根已存在且 `last-good` 指向完整版本时，外壳不再碰种子。
+本地应用数据：macOS 是 `~/Library/Application Support`，Windows 是 `%LOCALAPPDATA%`。Windows 卸载时删除运行包根，数据目录不动。运行包根已存在且 `last-good` 指向完整版本时，外壳不再碰种子。Windows 覆盖安装时，已有运行包版本不低于安装包时保留，低于时先删掉再按新种子解压。
 外壳所在路径不能包含符号链接（Tauri 会拒绝解析资源目录），装在 `/Applications` 不受影响。
 
 ## 固定启动器
@@ -75,5 +75,25 @@ macOS 启动器只在当前版本的解释器带 `com.apple.quarantine` 时才�
 
 Windows 标题栏深浅色跟随页面：页面调用 `set_theme`，系统标题栏随之切换；下次启动按外壳记下的深浅色创建窗口。
 
-图标：macOS 用 `assets/brand/atelier-icon-macos.svg`（含 Apple 图标网格的留白），Windows 用无留白的 `assets/brand/atelier-icon.svg`，都由 `desktop/` 下 `pnpm icons` 生成。Windows 的安装器、卸载程序、应用本身（以及开始菜单快捷方式、「设置 → 应用」条目、托盘）用同一个 `icons/windows/icon.ico`；`tests/test_desktop_shell_contract.py` 检查配置，desktop-ci 的 Windows job 用 `scripts/desktop_icon_check.ps1` 在真实安装上比对三处图标像素并把资源管理器看到的图标存进制品。
+图标：macOS 用 `assets/brand/atelier-icon-macos.svg`（含 Apple 图标网格的留白），Windows 用无留白的 `assets/brand/atelier-icon.svg`，都由 `desktop/` 下 `pnpm icons` 生成。Windows 的应用本身（以及开始菜单快捷方式、「设置 → 应用」条目、托盘）取 `bundle.icon` 里的 `icons/windows/icon.ico`，安装程序与卸载程序由 `desktop/setup/setup.rc` 嵌入同一个文件；`tests/test_desktop_shell_contract.py` 检查配置，desktop-ci 的 Windows job 用 `scripts/desktop_icon_check.ps1` 在真实安装上比对三处图标像素并把资源管理器看到的图标存进制品。
+
+## Windows 安装程序
+
+`Atelier-<版本>-windows-x64-setup.exe` 是 Atelier 自己的安装程序（`desktop/setup`，Rust + WebView2），不是 NSIS。安装程序本体后面附着外壳、种子与 WebView2 引导程序，格式见 `desktop/setup/src/payload.rs`，由 `scripts/build_desktop.py` 写入（守卫测试比对两边）。卸载程序 `uninstall.exe` 是同一个程序去掉附件、清单标为卸载。
+
+| 用法 | 行为 |
+| --- | --- |
+| 双击 | 窗口：立即安装（可更改位置、是否建桌面快捷方式）→ 进度（复制文件，再调用外壳 `--prepare-runtime` 解压运行环境）→ 开始使用。已安装时为「立即更新」，沿用原位置 |
+| `--silent [--dir <路径>] [--no-desktop-shortcut]` | 无界面安装，退出码 0 成功、1 失败、3 应用仍在运行 |
+| `uninstall.exe [--silent]` | 先把自己复制到 `%TEMP%` 再运行；停止安装目录与运行包根下的进程，删除快捷方式、「设置 → 应用」条目、运行包根和安装目录里安装程序放的文件。数据目录与 WebView 本地存储不动 |
+| `--preview <界面>`、`--auto` | 只供 CI 截图：渲染某个界面不做任何事；自动点主按钮 |
+
+写入的位置：安装目录、开始菜单与桌面 `Atelier.lnk`、`HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Atelier`（与此前的 NSIS 安装器相同，所以覆盖安装会直接接管旧安装；旧的 `HKCU\Software\atelier\Atelier` 会被删除）。安装或卸载时 Atelier 正在运行，会先用 `Atelier.exe --quit` 请它走自己的退出流程（有进行中的工作会先确认），等它退出再继续。缺 WebView2 时先用系统对话框询问，再用附带的引导程序联网安装。安装程序的 WebView 配置放在 `%TEMP%\atelier-setup-webview2`，日志写 `%TEMP%\atelier-setup.log`。
+
+外壳为安装程序提供的参数（只在 Windows）：
+
+| 调用 | 约定 |
+| --- | --- |
+| `Atelier.exe --prepare-runtime` | 不开窗口，按首次启动的同一段代码从安装目录 `seed\` 解压运行包到运行包根；标准输出逐行 `progress <已解压> <总数>`；退出码 0 表示运行包可用，非 0 时 stderr 末行是原因 |
+| `Atelier.exe --quit` | 已在运行时请那个实例走退出流程；没有实例时直接退出 |
 - 关窗口收进托盘，服务继续运行；退出时只停止外壳自己启动的服务，有进行中的工作先确认。
