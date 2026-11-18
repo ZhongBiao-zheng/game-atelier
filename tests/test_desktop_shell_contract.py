@@ -294,3 +294,23 @@ def test_desktop_shell_follows_the_windows_startup_rule():
     assert f'.env("PYTHONUTF8", "{rule["pythonutf8"]}")' in block
     for name in rule["cleared"]:
         assert f'.env_remove("{name}")' in block
+
+
+def test_runtime_and_shell_agree_on_the_contract_level():
+    """The shell reads versions/<v>/DESKTOP_CONTRACT instead of comparing version numbers."""
+    import importlib.util
+    import re
+    spec = importlib.util.spec_from_file_location(
+        "_build_release_contract", REPO_ROOT / "scripts/build_release.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    build = (REPO_ROOT / "scripts/build_release.py").read_text(encoding="utf-8")
+    shell = (REPO_ROOT / "desktop/src-tauri/src/runtime.rs").read_text(encoding="utf-8")
+    declared = re.search(r"pub const DESKTOP_CONTRACT: u32 = (\d+);", shell)
+    assert declared and int(declared[1]) == module.DESKTOP_CONTRACT
+    assert 'const CONTRACT_FILE: &str = "DESKTOP_CONTRACT";' in shell
+    assert '(payload / "DESKTOP_CONTRACT").write_text(f"{DESKTOP_CONTRACT}\\n"' in build
+    main = (REPO_ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
+    assert "package_info().version" not in main.split("fn overlay_title_bar")[1].split("\nfn ")[0]
+    assert "runtime::meets_contract(&root)" in main

@@ -10,11 +10,23 @@
 | --- | --- | --- |
 | 安装位置（macOS `/Applications/Atelier.app`；Windows `%LOCALAPPDATA%\Atelier\`，当前用户安装、不需要管理员） | 外壳与种子（macOS `Contents/Resources/seed/GameAtelier-<版本>-macos-arm64.tar.gz`；Windows `seed\GameAtelier-<版本>-windows-x64.zip`） | 安装器，只读 |
 | `<本地应用数据>/game-atelier/runtime/GameAtelier/` | ADR-0030 运行包布局 | 外壳首次启动时由种子解压；之后只由应用内更新修改 |
+| `<运行包根>/versions/<版本>/DESKTOP_CONTRACT` | 一行整数：该版本提供的外壳契约级别（见「契约级别」） | `scripts/build_release.py` |
 | `<本地应用数据>/game-atelier/runtime/shell.log` | 外壳日志 | 外壳 |
 | `<数据目录>/.runtime/` | 服务记录 | 见下 |
 
 本地应用数据：macOS 是 `~/Library/Application Support`，Windows 是 `%LOCALAPPDATA%`。Windows 卸载时删除运行包根，数据目录不动。运行包根已存在且 `last-good` 指向完整版本时，外壳不再碰种子。
 外壳所在路径不能包含符号链接（Tauri 会拒绝解析资源目录），装在 `/Applications` 不受影响。
+
+## 契约级别
+
+外壳不比较版本号判断运行包能做什么：同一版本号的测试包重装时，外壳是新的，已解压的运行包却还是早先那份，版本号相同、内容更旧。运行包改为显式声明，外壳只认声明。
+
+- `scripts/build_release.py` 的 `DESKTOP_CONTRACT` 写进每个版本目录的 `DESKTOP_CONTRACT`；外壳要求的级别是 `desktop/src-tauri/src/runtime.rs` 的同名常量，两边必须相等（守卫测试检查）。
+- 级别 1：`bootstrap.py` 认识 `--desktop-start`；页面在 `data-titlebar="overlay"` 下给红绿灯留位。外壳开始依赖运行包的新能力时，两边一起加一。
+- 外壳读 `current` 与 `last-good` 两个版本的标记，两个都达到要求才算满足：`last-good` 的 `bootstrap.py` 负责解析参数，`current` 提供页面（回滚时改由 `last-good` 提供）。文件缺失、内容不是整数，一律按 0 处理。
+- 满足：用 `--desktop-start` 启动；macOS 用隐藏标题栏（红绿灯压在页面顶栏上）。不满足：用 `--select-version --no-browser` 启动、再用 `--print-data-root` 取数据目录，即第一版外壳的做法；窗口保留系统标题栏。
+- 首次启动还没有运行包时，标题栏按种子里的同一个标记判断（标记在压缩包靠前的位置，读几条条目即可；没有标记的旧种子要读完整个压缩包，约一秒）。Windows 的启动路径走同一判断；Windows 窗口始终用系统标题栏。
+- 应用内更新从同一种发布压缩包解出整个版本目录，标记随之更新。
 
 ## 固定启动器
 
@@ -27,7 +39,7 @@ Windows：外壳不经 `launch.ps1`，而是做 `launch.ps1` 做的同一件事�
 | 调用 | 用途 | 约定 |
 | --- | --- | --- |
 | `--print-data-root` | 数据目录 | 标准输出只有一行绝对路径；与服务端 `data_root.resolve_data_root()` 结果一致。外壳不另写解析规则 |
-| `--desktop-start` | 启动服务 | 外壳确认没有可用实例后才调用。选版本、恢复更新事务与 `--select-version` 相同；之后不联网检查更新（运行中的服务自己检查），没有启动记录时不先停服务，服务端跳过运行包模式下的 `bootstrap --check`。退出码 0 表示服务已通过实例验证，标准输出最后一行是服务使用的数据目录；非 0 时 stderr 末尾是给用户看的原因。不打开浏览器 |
+| `--desktop-start` | 启动服务 | 外壳确认没有可用实例、且运行包声明了契约级别 1 后才调用（否则改用 `--select-version --no-browser`，见「契约级别」）。选版本、恢复更新事务与 `--select-version` 相同；之后不联网检查更新（运行中的服务自己检查），没有启动记录时不先停服务，服务端跳过运行包模式下的 `bootstrap --check`。退出码 0 表示服务已通过实例验证，标准输出最后一行是服务使用的数据目录；非 0 时 stderr 末尾是给用户看的原因。不打开浏览器 |
 | `--run -m viewer_server.server stop` | 停止服务 | 外壳显式传 `GAME_ATELIER_DATA_ROOT` 为它接管服务时的数据目录（页面可能已改了配置的数据目录，服务记录仍在旧目录） |
 
 启动器自带 8 秒验证时限；首次启动可能更久，外壳在启动器失败后会再按服务记录等最多 30 秒。
@@ -55,6 +67,6 @@ macOS 启动器只在当前版本的解释器带 `com.apple.quarantine` 时才�
 - 页面只能调用三条外壳命令（`capabilities/server-page.json`，只匹配 `http://127.0.0.1:*`）：`plugin:window|start_dragging`（顶栏 `data-tauri-drag-region` 拖动窗口）、`plugin:window|internal_toggle_maximize`（双击缩放）、`plugin:window|set_theme`（页面的深浅色，外壳记下来，下次启动的窗口底色与加载页跟着走）。外壳自己的命令（重试、查看日志）只给内置加载页。插件的沙箱 iframe（`srcdoc`，origin 为 `null`）拿不到 IPC。
 - 外壳在 `127.0.0.1` 页面的主框架里，于页面脚本之前运行一段初始化脚本：给 `<html>` 写 `data-shell="macos|windows"`；macOS 隐藏系统标题栏时再写 `data-titlebar="overlay"`（页面据此给红绿灯留位）；屏蔽网页自带的右键菜单（输入框与选中文字除外）。
 - 外壳向页面派发的 `window` 事件：下载落盘后 `atelier:download-saved`（`detail: { name }`）；系统菜单「设置…」`atelier:navigate`（`detail: { path }`，站内路径）。页面可选择监听，浏览器里不会出现。
-- 运行包版本低于外壳版本时（重装安装器、保留了旧运行包），旧页面不会给红绿灯留位，外壳改用系统标题栏。这在窗口创建前决定；运行中改标题栏样式在实测里会让网页消失。
+- 运行包没有声明契约级别 1 时（例如重装安装器后保留了旧运行包），旧页面不会给红绿灯留位，外壳改用系统标题栏。这在窗口创建前决定；运行中改标题栏样式在实测里会让网页消失。
 - `127.0.0.1` 以外的导航与新窗口转交系统浏览器。
 - 关窗口收进托盘，服务继续运行；退出时只停止外壳自己启动的服务，有进行中的工作先确认。

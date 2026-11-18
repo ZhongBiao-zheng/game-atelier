@@ -260,9 +260,7 @@ fn prepare_runtime_inner(app: &AppHandle) -> Result<Arc<Runtime>, String> {
             })?
         }
     };
-    let shell_version = app.package_info().version.to_string();
-    let current =
-        runtime::installed_version(&root).is_some_and(|v| runtime::at_least(&v, &shell_version));
+    let current = runtime::meets_contract(&root);
     log(&format!("runtime current={current}"));
     let runtime = Arc::new(Runtime { root, current });
     *app.state::<Shell>().runtime.lock().unwrap() = Some(runtime.clone());
@@ -513,21 +511,20 @@ fn initial_size(app: &tauri::App) -> LogicalSize<f64> {
     }
 }
 
-/// Pages older than this shell leave no room for the traffic lights, so they keep the system title
-/// bar. Decided once, before the window exists: Tauri cannot switch the style of a live window
-/// reliably (the web view went blank in testing). The seed always matches the shell, so only an
-/// older runtime kept from a previous install gets the system title bar.
+/// Pages from a runtime that does not declare `runtime::DESKTOP_CONTRACT` leave no room for the
+/// traffic lights, so they keep the system title bar. Decided once, before the window exists:
+/// Tauri cannot switch the style of a live window reliably (the web view went blank in testing).
 fn overlay_title_bar(app: &tauri::App) -> bool {
     if !cfg!(target_os = "macos") {
         return false;
     }
     let parent = app.state::<Shell>().runtime_parent.lock().unwrap().clone();
-    // Before the first unpack, the page that will be shown is the seed's.
-    let installed = parent
-        .and_then(|p| runtime::installed_version(&runtime::runtime_root(&p)))
-        .or_else(|| seed_archive(app.handle()).and_then(|s| runtime::seed_version(&s)));
-    let shell = app.package_info().version.to_string();
-    installed.is_none_or(|v| runtime::at_least(&v, &shell))
+    let root = parent.map(|p| runtime::runtime_root(&p));
+    match root {
+        Some(root) if runtime::installed(&root) => runtime::meets_contract(&root),
+        // Before the first unpack, the page that will be shown is the seed's.
+        _ => seed_archive(app.handle()).is_some_and(|s| runtime::seed_meets_contract(&s)),
+    }
 }
 
 fn page_script(overlay: bool) -> String {

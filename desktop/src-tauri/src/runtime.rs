@@ -14,6 +14,13 @@ use std::{
 /// Shared with the Python side (`APP_NAME`), independent of the product name.
 const APP_DIR: &str = "game-atelier";
 const BUNDLE_DIR: &str = "GameAtelier";
+/// What this shell relies on: `bootstrap.py --desktop-start`, and a page that leaves room for the
+/// traffic lights under `data-titlebar="overlay"`. Runtimes declare what they offer in
+/// `versions/<version>/DESKTOP_CONTRACT` (scripts/build_release.py, same number); a runtime
+/// without the file is older than the contract whatever its version number says, because
+/// reinstalling a test build of the same version keeps the runtime unpacked from an earlier one.
+pub const DESKTOP_CONTRACT: u32 = 1;
+const CONTRACT_FILE: &str = "DESKTOP_CONTRACT";
 
 static LOG_FILE: OnceLock<PathBuf> = OnceLock::new();
 
@@ -77,6 +84,84 @@ fn validate_bundle(root: &Path) -> Result<(), String> {
         return Err(format!("运行包版本目录不完整：{version}"));
     }
     Ok(())
+}
+
+/// Whether `prepare` keeps this runtime (and leaves the seed alone).
+pub fn installed(root: &Path) -> bool {
+    validate_bundle(root).is_ok()
+}
+
+fn contract_level(text: &str) -> u32 {
+    text.trim().parse().unwrap_or(0)
+}
+
+/// Both versions the launcher may use must offer the contract: `last-good` runs `bootstrap.py`
+/// (which parses `--desktop-start`), `current` serves the page unless it is rolled back.
+pub fn meets_contract(root: &Path) -> bool {
+    let levels: Vec<u32> = ["current", "last-good"]
+        .iter()
+        .filter_map(|name| read_trim(&root.join(name)))
+        .filter(|v| valid_version(v))
+        .map(|v| {
+            read_trim(&root.join("versions").join(v).join(CONTRACT_FILE))
+                .map_or(0, |t| contract_level(&t))
+        })
+        .collect();
+    !levels.is_empty() && levels.iter().all(|&level| level >= DESKTOP_CONTRACT)
+}
+
+/// The same question for a seed that is not unpacked yet. build_release.py writes the marker near
+/// the start of the archive, so a current seed answers after a few entries; an older seed without
+/// it is read to the end (about a second, first start only).
+#[cfg(not(windows))]
+pub fn seed_meets_contract(seed: &Path) -> bool {
+    let Some(version) = seed_version(seed) else {
+        return false;
+    };
+    let wanted = Path::new(BUNDLE_DIR)
+        .join("versions")
+        .join(version)
+        .join(CONTRACT_FILE);
+    let Ok(file) = fs::File::open(seed) else {
+        return false;
+    };
+    let mut archive =
+        tar::Archive::new(flate2::read::GzDecoder::new(std::io::BufReader::new(file)));
+    let Ok(entries) = archive.entries() else {
+        return false;
+    };
+    for entry in entries {
+        let Ok(mut entry) = entry else {
+            return false;
+        };
+        if entry.path().is_ok_and(|p| p == wanted) {
+            let mut text = String::new();
+            return entry.read_to_string(&mut text).is_ok()
+                && contract_level(&text) >= DESKTOP_CONTRACT;
+        }
+    }
+    false
+}
+
+#[cfg(windows)]
+pub fn seed_meets_contract(seed: &Path) -> bool {
+    let Some(version) = seed_version(seed) else {
+        return false;
+    };
+    let name = format!("{BUNDLE_DIR}/versions/{version}/{CONTRACT_FILE}");
+    let Ok(mut archive) = fs::File::open(seed)
+        .map_err(|e| e.to_string())
+        .and_then(|f| zip::ZipArchive::new(f).map_err(|e| e.to_string()))
+    else {
+        return false;
+    };
+    let mut text = String::new();
+    match archive.by_name(&name) {
+        Ok(mut entry) => {
+            entry.read_to_string(&mut text).is_ok() && contract_level(&text) >= DESKTOP_CONTRACT
+        }
+        Err(_) => false,
+    }
 }
 
 pub fn seed_version(seed: &Path) -> Option<String> {
@@ -221,23 +306,6 @@ pub fn prepare(parent: &Path, seed: &Path, report: &dyn Fn(u64, u64)) -> Result<
     result.map(|()| root)
 }
 
-/// Ordering key shared with `bootstrap.version_key`: 5.x is the retired line and sorts first.
-fn version_key(version: &str) -> Option<(u8, Vec<u64>)> {
-    if !valid_version(version) {
-        return None;
-    }
-    let parts: Vec<u64> = version.split('.').filter_map(|p| p.parse().ok()).collect();
-    Some((u8::from(parts[0] != 5), parts))
-}
-
-/// Whether `runtime` is at least `shell`; unknown versions count as older.
-pub fn at_least(runtime: &str, shell: &str) -> bool {
-    match (version_key(runtime), version_key(shell)) {
-        (Some(a), Some(b)) => a >= b,
-        _ => false,
-    }
-}
-
 /// `light` / `dark` as the page last reported it (see `save_theme`).
 pub fn saved_theme(parent: &Path) -> Option<String> {
     read_trim(&parent.join("window-theme")).filter(|t| t == "light" || t == "dark")
@@ -245,14 +313,6 @@ pub fn saved_theme(parent: &Path) -> Option<String> {
 
 pub fn save_theme(parent: &Path, theme: &str) {
     let _ = fs::write(parent.join("window-theme"), theme);
-}
-
-/// The version the launcher would start (`current`, falling back to `last-good`), if installed.
-pub fn installed_version(root: &Path) -> Option<String> {
-    ["current", "last-good"]
-        .iter()
-        .filter_map(|name| read_trim(&root.join(name)))
-        .find(|v| valid_version(v))
 }
 
 /// Where the runtime lives (or will be unpacked to); `ATELIER_RUNTIME_ROOT` is for development.
@@ -264,7 +324,7 @@ pub fn runtime_root(parent: &Path) -> PathBuf {
 
 pub struct Runtime {
     pub root: PathBuf,
-    /// At least as new as the shell, so its launcher knows `--desktop-start`. An older runtime
+    /// Declares `DESKTOP_CONTRACT`, so its launcher knows `--desktop-start`. Any other runtime
     /// (kept from an earlier install) is started the way the first shell did.
     pub current: bool,
 }
@@ -476,15 +536,91 @@ mod tests {
         assert!(!valid_version("../1.2.3"));
     }
 
+    fn bundle(
+        name: &str,
+        versions: &[(&str, Option<&str>)],
+        current: &str,
+        last_good: &str,
+    ) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("atelier-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for (version, level) in versions {
+            let payload = root.join("versions").join(version);
+            fs::create_dir_all(&payload).unwrap();
+            if let Some(level) = level {
+                fs::write(payload.join(CONTRACT_FILE), level).unwrap();
+            }
+        }
+        fs::write(root.join("current"), current).unwrap();
+        fs::write(root.join("last-good"), last_good).unwrap();
+        root
+    }
+
     #[test]
-    fn versions_order_like_bootstrap() {
-        assert!(at_least("5.139.0", "5.138.0"));
-        assert!(at_least("5.138.0", "5.138.0"));
-        assert!(!at_least("5.137.9", "5.138.0"));
-        // 0.5.x replaced the retired 5.x line (ADR-0032).
-        assert!(at_least("0.5.134", "5.138.0"));
-        assert!(!at_least("5.200.0", "0.5.134"));
-        assert!(!at_least("garbage", "5.138.0"));
+    fn the_runtime_declares_the_contract_not_its_version() {
+        // A test build reinstalled with the same version keeps the runtime unpacked from the
+        // earlier build: same number, no marker, no --desktop-start.
+        let old = bundle(
+            "same-version",
+            &[("5.138.0", None)],
+            "5.138.0\n",
+            "5.138.0\n",
+        );
+        assert!(!meets_contract(&old));
+        let new = bundle(
+            "declared",
+            &[("5.138.0", Some("1\n"))],
+            "5.138.0\n",
+            "5.138.0\n",
+        );
+        assert!(meets_contract(&new));
+        // last-good runs bootstrap.py, current serves the page: both must declare it.
+        let mixed = bundle(
+            "mixed",
+            &[("5.138.0", None), ("5.139.0", Some("1"))],
+            "5.139.0",
+            "5.138.0",
+        );
+        assert!(!meets_contract(&mixed));
+        let garbage = bundle("garbage", &[("5.138.0", Some("one"))], "5.138.0", "5.138.0");
+        assert!(!meets_contract(&garbage));
+        for root in [old, new, mixed, garbage] {
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn seed(name: &str, marker: Option<&str>) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("atelier-seed-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let payload = dir.join("GameAtelier/versions/5.138.0");
+        fs::create_dir_all(payload.join("app")).unwrap();
+        fs::write(payload.join("VERSION"), "5.138.0\n").unwrap();
+        if let Some(level) = marker {
+            fs::write(payload.join(CONTRACT_FILE), level).unwrap();
+        }
+        let archive = dir.join("GameAtelier-5.138.0-macos-arm64.tar.gz");
+        let gz = flate2::write::GzEncoder::new(
+            fs::File::create(&archive).unwrap(),
+            flate2::Compression::fast(),
+        );
+        let mut tar = tar::Builder::new(gz);
+        tar.append_dir_all("GameAtelier", dir.join("GameAtelier"))
+            .unwrap();
+        tar.into_inner().unwrap().finish().unwrap();
+        archive
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_seed_declares_the_contract_too() {
+        let old = seed("old", None);
+        assert!(!seed_meets_contract(&old));
+        let new = seed("new", Some("1\n"));
+        assert!(seed_meets_contract(&new));
+        for archive in [old, new] {
+            fs::remove_dir_all(archive.parent().unwrap()).unwrap();
+        }
     }
 
     #[test]

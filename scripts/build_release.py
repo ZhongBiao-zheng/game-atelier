@@ -10,6 +10,11 @@ import shutil
 import subprocess
 
 REPO = Path(__file__).resolve().parent.parent
+# What this runtime offers the desktop shell (docs/contracts/desktop-shell.md); the shell reads it
+# from versions/<version>/DESKTOP_CONTRACT. 1: bootstrap.py --desktop-start, and the page leaves
+# room for the traffic lights under data-titlebar="overlay". Raise it when the shell starts
+# relying on something new, together with DESKTOP_CONTRACT in desktop/src-tauri/src/runtime.rs.
+DESKTOP_CONTRACT = 1
 
 
 def write_launchers(folder: Path, *, windows: bool) -> None:
@@ -96,6 +101,7 @@ def build(output: Path, platform: str) -> Path:
     for name in ("pyproject.toml", "uv.lock", ".python-version"):
         shutil.copy2(REPO / name, app / name)
     (payload / "VERSION").write_text(version + "\n", encoding="utf-8")
+    (payload / "DESKTOP_CONTRACT").write_text(f"{DESKTOP_CONTRACT}\n", encoding="utf-8")
     write_launchers(folder, windows=os.name == "nt")
     archive = Path(shutil.make_archive(
         str(output.resolve() / f"GameAtelier-{version}-{platform}"),
