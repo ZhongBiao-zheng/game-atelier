@@ -20,6 +20,10 @@ jobs:
   # TMP-1B-DIAG：临时测量 Windows 替换期间目标名查不到的时长，查清后删除。
   tmp-1b-diag:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     env:
       PYTHONUTF8: "1"
     steps:
@@ -28,7 +32,7 @@ jobs:
       - run: uv python install 3.11
       - run: uv sync
       - name: measure
-        run: uv run --with pytest-repeat pytest -q -s --count 20 tests/test_tmp_missing_window.py
+        run: uv run --with pytest-repeat pytest -q -s --count 100 tests/test_tmp_missing_window.py
 
   pytest-windows:
     runs-on: windows-latest
