@@ -122,6 +122,9 @@ def _excluded(repo: Path, f: Path) -> bool:
         return True
     if parts[:2] == ("desktop", "src-tauri") and len(parts) > 2 and parts[2] in EXCLUDED_DESKTOP_OUTPUTS:
         return True
+    # The Windows installer's Rust target (desktop/setup/.gitignore).
+    if parts[:3] == ("desktop", "setup", "target"):
+        return True
     if parts[0] == "desktop" and len(parts) > 1 and parts[1] in EXCLUDED_ELECTRON_OUTPUTS:
         return True
     if parts[0] == "docs" and len(parts) > 1 and parts[1] in EXCLUDED_DOC_DIRS:

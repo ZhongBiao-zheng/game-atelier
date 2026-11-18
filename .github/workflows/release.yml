@@ -119,6 +119,12 @@ jobs:
       - name: Install the shell's dependencies
         working-directory: desktop
         run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.platform == 'windows-x64'
+      - uses: Swatinem/rust-cache@v2
+        if: matrix.platform == 'windows-x64'
+        with:
+          workspaces: desktop/setup
       - name: Build installer around the runtime bundle
         shell: bash
         run: |
@@ -129,13 +135,21 @@ jobs:
         run: |
           installer="$(find desktop-build -maxdepth 1 -type f \( -name '*.dmg' -o -name '*-windows-x64.zip' \) | head -1)"
           uv run --no-project python scripts/smoke_desktop.py --installer "$installer"
-      # Windows: built and smoke-tested only. The release gets a Windows installer once the
-      # installer (desktop/setup) packages this app folder; until then nothing is uploaded.
+      - name: Fresh install, first start, install over the running app, uninstall
+        if: matrix.platform == 'windows-x64'
+        shell: bash
+        run: |
+          setup="$(find desktop-build -maxdepth 1 -type f -name '*-setup.exe' | head -1)"
+          uv run --no-project python scripts/smoke_desktop.py --setup "$setup"
+      # Users get the dmg and the setup.exe; the zipped Windows app folder only feeds the smoke test.
       - uses: actions/upload-artifact@v4
-        if: matrix.platform == 'macos-arm64'
         with:
           name: desktop-installer-${{ matrix.platform }}
-          path: desktop-build/*
+          path: |
+            desktop-build/*.dmg
+            desktop-build/*.dmg.sha256
+            desktop-build/*-setup.exe
+            desktop-build/*-setup.exe.sha256
           if-no-files-found: error
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')

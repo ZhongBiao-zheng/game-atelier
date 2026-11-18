@@ -397,3 +397,58 @@ def test_electron_pages_run_sandboxed_without_node():
     for fuse in ("runAsNode: false", "enableNodeOptionsEnvironmentVariable: false",
                  "enableNodeCliInspectArguments: false", "onlyLoadAppFromAsar: true"):
         assert fuse in builder, fuse
+
+
+def test_windows_exe_installer_and_uninstaller_share_one_icon():
+    # A setup.exe with the stock installer icon reads as pirated software: the Electron exe
+    # (electron-builder `win.icon`) and the installer / uninstaller (setup.rc) embed the same file.
+    import struct
+    builder = (REPO_ROOT / "desktop/electron-builder.yml").read_text(encoding="utf-8")
+    assert "  icon: ../assets/brand/atelier.ico" in builder.split("\nwin:", 1)[1]
+    assert '1 ICON "../../assets/brand/atelier.ico"' in (REPO_ROOT / "desktop/setup/setup.rc").read_text(
+        encoding="utf-8")
+    # Full-bleed artwork (no macOS margin) with every size Explorer asks for, 16 to 256.
+    data = (REPO_ROOT / "assets/brand/atelier.ico").read_bytes()
+    sizes = {data[6 + 16 * i] or 256 for i in range(struct.unpack("<H", data[4:6])[0])}
+    assert {16, 24, 32, 48, 64, 128, 256} <= sizes
+
+
+def test_windows_installer_never_asks_for_administrator_rights():
+    # Windows elevates an exe named "*setup*" unless its manifest says asInvoker.
+    manifest = (REPO_ROOT / "desktop/setup/setup.exe.manifest").read_text(encoding="utf-8")
+    assert 'requestedExecutionLevel level="asInvoker"' in manifest
+
+
+def test_installer_and_build_script_share_the_payload_format(tmp_path):
+    import importlib.util
+    import json
+    import struct
+    spec = importlib.util.spec_from_file_location("_build_desktop", REPO_ROOT / "scripts/build_desktop.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    app = tmp_path / "win-unpacked"
+    (app / "resources").mkdir(parents=True)
+    (app / "seed").mkdir()
+    (app / "Atelier.exe").write_bytes(b"MZ-app")
+    (app / "resources/app.asar").write_bytes(b"asar")
+    (app / "seed/GameAtelier-1.2.3-windows-x64.zip").write_bytes(b"PK-seed")
+    setup, extra = tmp_path / "setup.exe", tmp_path / "boot.exe"
+    setup.write_bytes(b"MZ-setup")
+    extra.write_bytes(b"MZ-boot")
+    target = tmp_path / "out.exe"
+    module.write_payload(setup, target, product="Atelier", version="1.2.3", main="Atelier.exe",
+                         app_id="app.atelier.desktop", app=app, setup_files=[extra])
+    data = target.read_bytes()
+    source = (REPO_ROOT / "desktop/setup/src/payload.rs").read_text(encoding="utf-8")
+    assert f'const MAGIC: &[u8; 8] = b"{module.PAYLOAD_MAGIC.decode()}";' in source
+    assert 'pub const SETUP_ONLY: &str = "setup/";' in source
+    for field in ("pub main: String", "pub app_id: String", "pub exe_len: u64"):
+        assert field in source, field
+    assert data.endswith(module.PAYLOAD_MAGIC) and data.startswith(b"MZ-setup")
+    (length,) = struct.unpack("<Q", data[-16:-8])
+    manifest = json.loads(data[-16 - length:-16])
+    assert manifest["role"] == "install" and manifest["main"] == "Atelier.exe"
+    assert manifest["app_id"] == "app.atelier.desktop" and manifest["exe_len"] == len(b"MZ-setup")
+    contents = {e["path"]: data[e["offset"]:e["offset"] + e["size"]] for e in manifest["files"]}
+    assert contents == {"Atelier.exe": b"MZ-app", "resources/app.asar": b"asar",
+                        "seed/GameAtelier-1.2.3-windows-x64.zip": b"PK-seed", "setup/boot.exe": b"MZ-boot"}
