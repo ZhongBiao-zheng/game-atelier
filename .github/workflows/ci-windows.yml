@@ -32,7 +32,7 @@ jobs:
       - run: uv python install 3.11
       - run: uv sync
       - name: measure
-        run: uv run --with pytest-repeat pytest -q -s --count 100 tests/test_tmp_missing_window.py
+        run: uv run --with pytest-repeat pytest -q -s -n 4 --count 100 tests/test_tmp_missing_window.py
 
   pytest-windows:
     runs-on: windows-latest
