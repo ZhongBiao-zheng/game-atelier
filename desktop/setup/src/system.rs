@@ -31,7 +31,7 @@ use windows::{
         UI::{
             Shell::{
                 FOLDERID_Desktop, FOLDERID_Programs, IShellLinkW, PropertiesSystem::IPropertyStore,
-                SHGetKnownFolderPath, ShellLink, KF_FLAG_DEFAULT,
+                SHGetKnownFolderPath, SHStrDupW, ShellLink, KF_FLAG_DEFAULT,
             },
             WindowsAndMessaging::{
                 MessageBoxW, IDOK, MB_ICONERROR, MB_ICONINFORMATION, MB_OKCANCEL,
@@ -135,23 +135,23 @@ const PKEY_APP_USER_MODEL_ID: PROPERTYKEY = PROPERTYKEY {
     pid: 5,
 };
 
-/// Set the shortcut's AppUserModelID (a VT_LPWSTR the store copies before we drop the buffer).
+/// Set the shortcut's AppUserModelID as a VT_LPWSTR. The string must come from the COM allocator:
+/// the `windows` crate drops a PROPVARIANT with PropVariantClear, which frees it with
+/// CoTaskMemFree (a Rust-owned buffer here corrupted the heap).
 fn set_app_user_model_id(shell_link: &IShellLinkW, app_id: &str) -> Result<(), String> {
-    let mut value: Vec<u16> = app_id.encode_utf16().chain(Some(0)).collect();
-    let variant = PROPVARIANT {
-        Anonymous: PROPVARIANT_0 {
-            Anonymous: std::mem::ManuallyDrop::new(PROPVARIANT_0_0 {
-                vt: VT_LPWSTR,
-                wReserved1: 0,
-                wReserved2: 0,
-                wReserved3: 0,
-                Anonymous: PROPVARIANT_0_0_0 {
-                    pwszVal: PWSTR(value.as_mut_ptr()),
-                },
-            }),
-        },
-    };
     unsafe {
+        let value = SHStrDupW(&HSTRING::from(app_id)).map_err(|e| e.to_string())?;
+        let variant = PROPVARIANT {
+            Anonymous: PROPVARIANT_0 {
+                Anonymous: std::mem::ManuallyDrop::new(PROPVARIANT_0_0 {
+                    vt: VT_LPWSTR,
+                    wReserved1: 0,
+                    wReserved2: 0,
+                    wReserved3: 0,
+                    Anonymous: PROPVARIANT_0_0_0 { pwszVal: value },
+                }),
+            },
+        };
         let store: IPropertyStore = shell_link.cast().map_err(|e| e.to_string())?;
         store
             .SetValue(&PKEY_APP_USER_MODEL_ID, &variant)
