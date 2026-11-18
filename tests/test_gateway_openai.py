@@ -133,7 +133,7 @@ def test_pre_stream_failure_switches_member(setup, failure):
     assert rows()[0]['status'] == 'done'
 
 
-def test_mid_stream_failure_never_switches_and_settles_known_usage(setup, monkeypatch):
+def test_mid_stream_failure_never_switches_and_charges_nothing(setup, monkeypatch):
     _, _, seen, upstream, _, client = setup
     monkeypatch.setitem(generation_pricing._PRICES['text_yuan_per_million_tokens'],
                         'vendor/gpt-test', {'input': 1, 'output': 2})
@@ -147,7 +147,12 @@ def test_mid_stream_failure_never_switches_and_settles_known_usage(setup, monkey
         'model': 'gpt-test', 'stream': True,
     }).content == wire
     assert len(seen) == 1 and source.closed
-    assert rows()[0]['status'] == 'failed' and rows()[0]['charged_cny'] == .00005
+    # 第三批规则①：价格表算出的金额不算确认收费，失败扣 0；用量与金额照记，供对账。
+    row = rows()[0]
+    assert row['status'] == 'failed' and row['charged_cny'] == 0
+    assert (row['input_tokens'], row['output_tokens']) == (10, 20)
+    assert row['actual_cost_cny'] == .00005 and row['actual_cost_source'] == 'price_table'
+    assert row['usage_missing'] is None
     assert not gateway_quota._inflight
 
 

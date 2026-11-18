@@ -1,4 +1,5 @@
 """Text admission and settlement share the image-task quota lock and usage journal."""
+import math
 import uuid
 from datetime import datetime
 
@@ -23,7 +24,7 @@ class TextCall:
         now = gateway_tasks._now().isoformat()
         with gateway_tasks._lock:
             estimate = generation_pricing.estimate_text_cost_cny(
-                model.id, body_size // 3, average_output_tokens(owner.id),
+                model.id, body_size // 3, average_output_tokens(owner.id), key=key,
             )
             gateway_quota.admit(owner, estimate or 0)
             self.task = gateway_tasks.GatewayTask(
@@ -34,9 +35,14 @@ class TextCall:
             gateway_quota._inflight[self.task.task_id] = (owner.id, estimate or 0)
         self.stream = stream
         self.finished = False
+        # 上游返回了 2xx（之后才可能计费）；用来区分「没回用量」与「根本没执行」。
+        self.accepted = False
+        self.cached_tokens = 0
+        self.upstream_cost_usd: float | None = None
         self.member(key, model)
 
     def member(self, key, model):
+        self.key = key
         self.task.member_alias = key.alias
         self.task.member_model_id = model.id
         self.task.member_provider = key.provider
@@ -57,20 +63,30 @@ class TextCall:
         usage = payload.get("usage")
         if not isinstance(usage, dict):
             return
-        for field, names in [("input_tokens", ("input_tokens", "prompt_tokens")),
-                             ("output_tokens", ("output_tokens", "completion_tokens"))]:
-            value = next((usage[name] for name in names if name in usage), None)
+        # chat/completions 用 prompt/completion；有的上游（Tuzi 转 Claude）同时回 output_tokens=0，
+        # 账单按 completion_tokens 扣（2026-11-18 付费小测）。responses 接口只有 input/output。
+        chat = "prompt_tokens" in usage or "completion_tokens" in usage
+        names = ("prompt_tokens", "completion_tokens") if chat else ("input_tokens", "output_tokens")
+        for field, name in zip(("input_tokens", "output_tokens"), names):
+            value = usage.get(name)
             if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
                 setattr(self.task, field, value)
+        details = usage.get("prompt_tokens_details" if chat else "input_tokens_details")
+        cached = details.get("cached_tokens") if isinstance(details, dict) else None
+        if isinstance(cached, int) and not isinstance(cached, bool) and cached >= 0:
+            self.cached_tokens = cached
+        # OpenRouter 的 usage.cost 是上游确认的实付（美元）；其他上游的同名字段含义未核实，不用。
+        cost = usage.get("cost")
+        if (self.key.provider == "openrouter" and isinstance(cost, int | float)
+                and not isinstance(cost, bool) and math.isfinite(cost) and cost >= 0):
+            self.upstream_cost_usd = float(cost)
 
     def finish(self, status):
         with gateway_tasks._lock:
             if self.finished:
                 return
             self.task.status = status
-            self.task.charged_cny = generation_pricing.estimate_text_cost_cny(
-                self.task.member_model_id, self.task.input_tokens or 0, self.task.output_tokens or 0,
-            ) or 0
+            self._settle()
             self.task.updated_at = datetime.now().astimezone().isoformat()
             try:
                 gateway_tasks._append_usage(self.task)
@@ -78,3 +94,30 @@ class TextCall:
                 gateway_quota._inflight.pop(self.task.task_id, None)
                 self.finished = True
                 gateway_live.finish(self.task.task_id, status)
+
+    def _settle(self):
+        """结算（飙哥定：失败只扣能确认上游已收费的；拿不到用量的扣 0，由主机承担）。
+
+        - 上游回了实付（OpenRouter usage.cost）：成功、失败都按它扣。
+        - 有用量：按 token 同步价算出金额（价格表来源），只在成功时扣。
+        - 上游接受了请求却没回用量：记 usage_missing，扣 0。
+        """
+        task = self.task
+        has_usage = task.input_tokens is not None or task.output_tokens is not None
+        if self.upstream_cost_usd is not None:
+            from character_workflow.lib.job_runner import USD_TO_CNY
+
+            task.actual_cost_cny = round(self.upstream_cost_usd * USD_TO_CNY, 6)
+            task.actual_cost_source = "upstream"
+        elif has_usage:
+            priced = generation_pricing.estimate_text_cost_cny(
+                task.member_model_id, task.input_tokens or 0, task.output_tokens or 0,
+                key=self.key, cached_tokens=self.cached_tokens,
+            )
+            if priced is not None:
+                task.actual_cost_cny = priced
+                task.actual_cost_source = "price_table"
+        task.usage_missing = True if self.accepted and not has_usage else None
+        confirmed = task.actual_cost_source == "upstream" or (
+            task.status == "done" and task.actual_cost_source == "price_table")
+        task.charged_cny = (task.actual_cost_cny or 0) if confirmed else 0

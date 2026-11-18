@@ -91,12 +91,13 @@ def call_model(key: keys.KeySpec, model: keys.ModelSpec, system: str, user: str,
     return text or "", tokens_in, tokens_out
 
 
-def cost_of(model_id: str, tokens_in: int | None, tokens_out: int | None) -> float | None:
+def cost_of(key: keys.KeySpec, model_id: str, tokens_in: int | None,
+            tokens_out: int | None) -> float | None:
     from character_workflow.lib.generation_pricing import estimate_text_cost_cny
 
     if tokens_in is None or tokens_out is None:
         return None
-    return estimate_text_cost_cny(model_id, tokens_in, tokens_out)
+    return estimate_text_cost_cny(model_id, tokens_in, tokens_out, key=key)
 
 
 def record_job(key: keys.KeySpec, model: keys.ModelSpec, *, prompt: str, started: str,

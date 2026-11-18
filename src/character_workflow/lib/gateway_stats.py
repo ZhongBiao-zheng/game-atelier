@@ -63,6 +63,8 @@ def _tasks(start: datetime, end: datetime) -> dict[str, Any]:
         # 已发给上游却失败、又没有实付金额：上游是否收费确认不了（第三批计费的对账口径）。
         "failed_sent_without_actual_cost": sum(
             1 for row in failed if row.get("sent_to_upstream") is True and row.get("actual_cost_cny") is None),
+        # 文本：上游接受了请求却没回用量，成员扣 0、由主机承担的条数。
+        "text_usage_missing": sum(1 for row in rows if row.get("usage_missing") is True),
         "queue": _spread(_numbers(queued, "queue_s")),
         "duration": _spread(_numbers(rows, "duration_s")),
         "rows_without_timing": sum(1 for row in rows if "finished_at" not in row),
@@ -144,6 +146,7 @@ def _format(summary: dict[str, Any]) -> str:
         lines.append(f"{label} 中位数 {seconds(spread['median_s'])} · P95 {seconds(spread['p95_s'])}"
                      f"（样本 {spread['samples']}）")
     lines.append(f"已发出但失败且无实付 {tasks['failed_sent_without_actual_cost']} 条")
+    lines.append(f"文本没回用量（扣 0）{tasks['text_usage_missing']} 条")
     if tasks["rows_without_timing"]:
         lines.append(f"无耗时字段的旧记录 {tasks['rows_without_timing']} 条")
     lines += [

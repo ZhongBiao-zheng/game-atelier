@@ -323,10 +323,63 @@ def estimate_cost_cny(
     return None
 
 
+def _token_tier_fits(plan: dict, prompt_tokens: int) -> bool:
+    bounds = plan.get("range")
+    if bounds is None:
+        return True
+    if not isinstance(bounds, dict) or bounds.get("unit") != "kTokens" or not str(
+            bounds.get("item", "")).endswith("prompt_tokens"):
+        return False
+    ktokens = prompt_tokens / 1000
+    return (float(bounds.get("lower", 0)) <= ktokens
+            and ("upper" not in bounds or ktokens < float(bounds["upper"])))
+
+
+def _tokendance_text(model_id: str, input_tokens: int, output_tokens: int,
+                     cached_tokens: int) -> float | None:
+    """TokenDance 公开价：元 / 百万 token，按本次 prompt 长度分档（2026-11-18 付费小测逐位对上）。"""
+    from character_workflow.lib.tokendance_prices import model_pricing
+
+    items = (model_pricing(model_id) or {}).get("items") or []
+
+    def rate(name: str) -> float | None:
+        item = next((entry for entry in items if isinstance(entry, dict)
+                     and entry.get("id") == f"openai:chat-completions:{name}"), None)
+        rates = {_rate(plan.get("rate")) for plan in (item or {}).get("plans") or []
+                 if isinstance(plan, dict) and plan.get("unit") == "millionTokens"
+                 and _token_tier_fits(plan, input_tokens)}
+        return rates.pop() if len(rates) == 1 and None not in rates else None
+
+    cached = min(max(0, cached_tokens), input_tokens)
+    input_rate, output_rate = rate("input_tokens"), rate("completion_tokens")
+    cached_rate = rate("cached_tokens") if cached else 0
+    if input_rate is None or output_rate is None or cached_rate is None:
+        return None
+    return _priced(((input_tokens - cached) * input_rate + cached * cached_rate
+                    + output_tokens * output_rate) / 1_000_000)
+
+
 def estimate_text_cost_cny(
-    model_id: str, input_tokens: int, output_tokens: int,
+    model_id: str, input_tokens: int, output_tokens: int, *, key: Any = None,
+    cached_tokens: int = 0,
 ) -> float | None:
-    """Exact model IDs only; an empty price table intentionally leaves text unpriced."""
+    """文本按 token 估价；None 表示未计价。
+
+    传了 key 时按供应商的同步价：Tuzi、TokenDance 已用付费小测核对；OpenAI-HK 的 token 换算
+    核对不了（密钥读不到账单），一律未计价。其余渠道只认打包价格表里的精确模型 ID（目前为空）。
+    """
+    if key is not None:
+        host = _hostname(key.base_url)
+        if _domain(host, "tu-zi.com"):
+            from character_workflow.lib.tuzi_estimate import text_cost_cny
+
+            return text_cost_cny(billing_group=key.billing_group, model_id=model_id,
+                                 input_tokens=input_tokens, output_tokens=output_tokens,
+                                 cached_tokens=cached_tokens)
+        if key.provider == "tokendance":
+            return _tokendance_text(model_id, input_tokens, output_tokens, cached_tokens)
+        if _domain(host, "openai-hk.com"):
+            return None
     rate = _PRICES["text_yuan_per_million_tokens"].get(model_id)
     if rate is None:
         return None

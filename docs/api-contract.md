@@ -143,7 +143,9 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 - `GET /gateway/v1/openai/models` → OpenAI `{object: "list", data: [{id, object: "model", owned_by: "atelier", ...能力字段}]}`。只列获准的文本路由，能力取首个获准成员的上游 `/models`，取不到则声明 `supported_parameters: ["tools"]`。
 - `POST /gateway/v1/openai/chat/completions`、`POST /gateway/v1/openai/responses`：Bearer 鉴权；JSON 请求体最多 32 MiB。model 为路由 id，上游改为实际成员 id；非流式响应的 model 改回路由 id，流式 SSE 字节不改写。
 - 仅生成上游 Authorization、Content-Type、Accept 头，不转发接入端 cookie 或其他请求头。chat 流缺少 `stream_options.include_usage` 时自动设 true；旁路提取 chat 或 Responses 用量。
-- 按请求字节数 / 3 和该密钥最近 50 次文本输出平均 token（无历史 1000）估价预占。结束按已收到的实际 token 估价结算；无价记零，断流也结算已知用量，取消/结束释放预占。用量行 kind=text，不存 prompt；进行中调用在 gateway_live 登记。
+- 按请求字节数 / 3 和该密钥最近 50 次文本输出平均 token（无历史 1000）估价预占，取消/结束释放预占。用量行 kind=text，不存 prompt；进行中调用在 gateway_live 登记。
+- 文本计价（2026-11-18 起，价格见 `docs/references/generation-pricing.md`「文本按 token」）：按实际服务的成员 KEY 与模型计价。用量优先读 `prompt_tokens` / `completion_tokens`（chat/completions），没有时读 `input_tokens` / `output_tokens`（responses）；`*_tokens_details.cached_tokens` 为缓存命中部分。
+- 文本结算：OpenRouter 回报 `usage.cost`（美元）时记为上游实付（`actual_cost_source="upstream"`），成功、失败都按它扣；其余按 token 同步价算出的金额记为 `"price_table"`，只在成功时扣，失败扣 0；无价扣 0。上游返回 2xx 却始终没有用量时，用量行记 `usage_missing: true`、扣 0，由主机承担（`gateway_stats` 单列条数）；从未被上游接受的调用不记 `usage_missing`。
 - 只在发出首字节之前对确定可切换的错误换成员；已转发后的中断结束当前流、记 failed，不重发请求。流前错误形状统一为 `{error: {message, type, code}}`；全部成员不可用为 503 / gateway_unavailable，限额为 429 并带 Retry-After。上游可能已执行的错误为 503 / gateway_upstream_error，接入端不得切换本机 KEY 重发。
 - 接入端 `key_api_root` 将 atelier 的文本/Agent URL 指向上述前缀；同步文本模型保留协议。文本 Job 收到 503 gateway_unavailable 时可按自动路由切回本机 KEY。
 

@@ -80,3 +80,43 @@ def estimate(*, model_id, provider, base_url, billing_group, protocol, n, size, 
         return math.floor(result * 1_000_000 + 0.5) / 1_000_000 if math.isfinite(result) else None
     except (UnsupportedBillingExpr, ValueError, TypeError, AttributeError, OverflowError):
         return None
+
+
+# new-api 的额度单位：500000 = 1 美元；倍率 1 = 每百万 token 2 美元。
+_QUOTA_PER_USD = 500_000
+
+
+def text_cost_cny(*, billing_group, model_id, input_tokens, output_tokens, cached_tokens=0):
+    """按 token 计费的文本模型；只认 2026-11-18 付费小测逐位核对过的情形，其余返回 None（未计价）。
+
+    账单公式：quota = (输入 - 缓存命中 + 缓存命中 × cache_ratio + 输出 × completion_ratio)
+    × model_ratio × 分组倍率；再按 500000 quota = 1 美元、乘 usd_exchange_rate 换成人民币。
+    核对过的只有分组倍率 1、没有生效分组倍率与模型乘数的情形（default 分组下 group_override
+    与 global_fallback 各一条），其余倍率组合没对过账，先不计价。缓存命中的折扣没有实测。
+    """
+    group = (billing_group or "").strip()
+    if not group:
+        return None
+    snapshot = load_snapshot()
+    rate = snapshot.get("usd_exchange_rate")
+    if isinstance(rate, bool) or not isinstance(rate, (int, float)) or rate <= 0:
+        return None
+    if group not in snapshot.get("models", {}).get(model_id, {}).get("enable_groups", []):
+        return None
+    entry = snapshot.get("text_ratio", {}).get(group, {}).get(model_id)
+    if not isinstance(entry, dict) or snapshot.get("group_ratio", {}).get(group) != 1:
+        return None
+    if (entry.get("pricing_source") not in ("group_override", "global_fallback")
+            or entry.get("effective_group_ratio") not in (None, 1)
+            or entry.get("model_multiplier") not in (None, 1)):
+        return None
+    ratio, completion = entry.get("model_ratio"), entry.get("completion_ratio")
+    cache = entry.get("cache_ratio")
+    if not isinstance(ratio, (int, float)) or not isinstance(completion, (int, float)):
+        return None
+    cached = min(max(0, cached_tokens or 0), input_tokens)
+    weighted = (input_tokens - cached + cached * (cache if isinstance(cache, (int, float)) else 1)
+                + output_tokens * completion)
+    # 账单的 quota 是整数（31.1 记 31）。
+    result = math.floor(weighted * ratio + 0.5) / _QUOTA_PER_USD * rate
+    return math.floor(result * 1_000_000 + 0.5) / 1_000_000 if math.isfinite(result) else None

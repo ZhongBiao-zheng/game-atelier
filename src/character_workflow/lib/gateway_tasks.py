@@ -120,6 +120,8 @@ class GatewayTask(BaseModel):
     charged_cny: float = 0
     input_tokens: int | None = None
     output_tokens: int | None = None
+    # 文本：上游已接受请求却没回用量（流式中途断开、没有用量块）。成员扣 0，由主机承担。
+    usage_missing: bool | None = None
     prompt: str
     n: int
     size: str | None = None
@@ -760,6 +762,7 @@ def _append_usage(task: GatewayTask) -> None:
         "error_kind": task.error_kind, "kind": task.kind,
         "estimated_cny": task.estimated_cny, "charged_cny": task.charged_cny,
         "input_tokens": task.input_tokens, "output_tokens": task.output_tokens,
+        "usage_missing": task.usage_missing,
         "duration": task.params.get("duration"),
         "member_trail": list(dict.fromkeys([
             *task.route_tried, *([task.member_alias] if task.member_alias else []),

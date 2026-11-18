@@ -270,16 +270,17 @@ def shape_document(document: dict[str, Any], kind: str) -> tuple[dict[str, Any],
 # ---------------------------------------------------------------- 对话模型
 
 
-def max_cost_cny(model_id: str) -> float | None:
+def max_cost_cny(key: keys.KeySpec, model_id: str) -> float | None:
     from character_workflow.lib.generation_pricing import estimate_text_cost_cny
 
     # 资料上限按一字一 token 估上界。
-    return estimate_text_cost_cny(model_id, MAX_TOTAL_CHARS + len(SPEC) + 2000, MAX_OUTPUT_TOKENS)
+    return estimate_text_cost_cny(model_id, MAX_TOTAL_CHARS + len(SPEC) + 2000, MAX_OUTPUT_TOKENS,
+                                  key=key)
 
 
 def candidates() -> list[dict[str, Any]]:
     return [{"alias": key.alias, "model_id": model.id, "name": model.name or model.id,
-             "max_cost_cny": max_cost_cny(model.id)}
+             "max_cost_cny": max_cost_cny(key, model.id)}
             for key, model in structured_text_call.text_models()]
 
 
@@ -317,7 +318,7 @@ def draft(*, kind: str, alias: str, model_id: str, text: str | None, urls: list[
         _record(key, model, kind, started=started, cost=None,
                 error=f"{reason}（原始报错：{raw}）")
         raise AssistError(reason, 502, raw=raw) from None
-    cost = structured_text_call.cost_of(model.id, tokens_in, tokens_out)
+    cost = structured_text_call.cost_of(key, model.id, tokens_in, tokens_out)
     usage = {"input_tokens": tokens_in, "output_tokens": tokens_out, "cost_cny": cost,
              "job_id": _record(key, model, kind, started=started, cost=cost, error=None)}
     document = parse_output(output)

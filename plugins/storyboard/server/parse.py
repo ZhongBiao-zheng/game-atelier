@@ -244,17 +244,18 @@ def shape_output(output: dict[str, Any], known_names: list[str]
 # ---------------------------------------------------------------- 调用
 
 
-def max_cost_cny(model_id: str) -> float | None:
+def max_cost_cny(key, model_id: str) -> float | None:
     from character_workflow.lib.generation_pricing import estimate_text_cost_cny
 
     # 一段上限按一字一 token 估上界，加上提示词与已有条目。
-    return estimate_text_cost_cny(model_id, MAX_SEGMENT_CHARS + len(SPEC) + 6000, MAX_OUTPUT_TOKENS)
+    return estimate_text_cost_cny(model_id, MAX_SEGMENT_CHARS + len(SPEC) + 6000, MAX_OUTPUT_TOKENS,
+                                  key=key)
 
 
 def candidates() -> list[dict[str, Any]]:
     """可用的对话模型；max_cost_cny 是解析一段的最高花费，没有价格时为 None。"""
     return [{"alias": key.alias, "model_id": model.id, "name": model.name or model.id,
-             "max_cost_cny": max_cost_cny(model.id)}
+             "max_cost_cny": max_cost_cny(key, model.id)}
             for key, model in structured_text_call.text_models()]
 
 
@@ -284,7 +285,7 @@ def parse_segment(*, project_id: str, document: Any, script_node_ids: list[str],
         structured_text_call.record_job(key, model, prompt=label, started=started, cost=None,
                                         error=f"{reason}（原始报错：{raw}）", project_id=project_id)
         raise ParseError(reason, 502, raw=raw) from None
-    cost = structured_text_call.cost_of(model.id, tokens_in, tokens_out)
+    cost = structured_text_call.cost_of(key, model.id, tokens_in, tokens_out)
     usage = {"input_tokens": tokens_in, "output_tokens": tokens_out, "cost_cny": cost,
              "job_id": structured_text_call.record_job(
                  key, model, prompt=label, started=started, cost=cost, error=None,

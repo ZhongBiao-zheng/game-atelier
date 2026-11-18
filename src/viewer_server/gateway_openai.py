@@ -169,6 +169,7 @@ async def _relay(request, owner, endpoint):
                             break
                     raise RuntimeError(f"text api {response.status_code}: "
                                        + detail.decode("utf-8", errors="replace"))
+                call.accepted = True
                 if not streaming:
                     raw = await response.aread()
                     result = json.loads(raw)

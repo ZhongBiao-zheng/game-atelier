@@ -121,6 +121,21 @@ HK caller保留模型ID，仅传递支持的quality与归一化尺寸，未把Na
 局部修改/扩图复用 `POST /api/pricing/estimate`；创作台前端返回null，由runner执行前冻结费用。
 本次仅用已有账单与本地估价核对，无真实生成。完整对账留在本地 `.scratch/openai-hk-pricing/`。
 
+## 文本按 token：2026-11-18 起
+
+只用于局域网网关的文本 / Agent 转发与主机本机的结构化文本调用（AI 帮我配置、分镜解析）。按实际服务的成员 KEY 计价，入口 `generation_pricing.estimate_text_cost_cny(..., key=)`。
+2026-11-18 每家两次 `max_tokens=16` 的付费小测（共约 0.003 元），用密钥读回逐条账单核对；记录在本地 `.scratch/team-reliability/PAID-TEXT-PRICING.md`。
+
+- **Tuzi**：`quota = (输入 − 缓存命中 + 缓存命中 × cache_ratio + 输出 × completion_ratio) × model_ratio`，取整；500000 quota = 1 美元，再乘 `usd_exchange_rate`。
+  倍率取 `group_model_pricing[分组]` 的 `model_ratio` / `model_completion_ratio` / `model_cache_ratio`，补全倍率缺失时用模型行的 `completion_ratio`（账单：gpt-4.1-nano 用了 4）。
+  同步时存入快照 `text_ratio`。按 token 计费的模型 `quota_type` 也是 1，判断依据是分组表里有 `model_ratio` 且没有表达式。
+  核对过的只有分组倍率 1、`pricing_source` 为 `group_override` / `global_fallback`、无生效分组倍率、无模型乘数的情形（claude-sonnet-5-5 1093 quota、gpt-4.1-nano 31 quota 两条逐位一致）。其余组合（如 `effective_group=azTb` ×2.86、`model_multiplier`、非 1 的分组倍率、表达式计价的文本模型）先未计价。缓存折扣没有实测。
+- **TokenDance**：公开接口 `pricing.items` 中 `openai:chat-completions:input_tokens` / `completion_tokens` / `cached_tokens` 的 `millionTokens` 单价（元），按本次 prompt 千 token 数选档（下界含、上界不含）。
+  账单两条：53/37 token 记 82 微元（计算 82.5，取整方式未确认）、1149/38 记 413 微元。推理模型的输出 token 不受 `max_tokens` 约束（seed-2.0-lite 限 16 实出 37）。
+- **OpenAI-HK**：未计价。密钥的余额 / 用量接口被关（「请联系管理员打开余额查询接口」），按 token 的模型是否乘分组倍率 7 无法核对。
+- **OpenRouter**：用响应 `usage.cost`（美元 × `USD_TO_CNY`）作为上游实付，不查价格表。
+- 其他渠道：只认打包价格表 `text_yuan_per_million_tokens` 的精确模型 ID（当前为空）。
+
 ## 下次调价
 
 OpenAI-HK上述已核实型号的单价、Tuzi已支持规则内的单价、系数与阈值调整会在下次同步生效，无须发版；新增函数或请求模式

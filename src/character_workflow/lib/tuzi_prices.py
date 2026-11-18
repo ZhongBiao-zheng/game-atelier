@@ -84,6 +84,45 @@ def _expression_multipliers(
     return multipliers
 
 
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(value)
+
+
+def _text_ratios(
+    group_prices: dict[str, Any], rows: dict[str, dict], ratios: dict[str, Any], ids: set[str],
+) -> dict[str, dict[str, Any]]:
+    """按 token 计费的模型在这个分组下的倍率（2026-11-18 付费小测核对的口径）。
+
+    分组表里有 `model_ratio`、又没有表达式的模型才算按 token 计费；Tuzi 这类模型的 `quota_type`
+    也是 1，不能拿它判断。分组表缺补全倍率时用模型行的（账单：gpt-4.1-nano 用了行里的 4）。
+    """
+    def field(name: str, model_id: str) -> Any:
+        table = group_prices.get(name)
+        return table.get(model_id) if isinstance(table, dict) else None
+
+    expressions = group_prices.get("billing_expr") or {}
+    result: dict[str, dict[str, Any]] = {}
+    for model_id in ids:
+        ratio = _number(field("model_ratio", model_id))
+        if ratio is None or ratio <= 0 or model_id in expressions:
+            continue
+        completion = _number(field("model_completion_ratio", model_id))
+        if completion is None:
+            completion = _number((rows.get(model_id) or {}).get("completion_ratio"))
+        effective = field("effective_group", model_id)
+        result[model_id] = {
+            "model_ratio": ratio,
+            "completion_ratio": completion,
+            "cache_ratio": _number(field("model_cache_ratio", model_id)),
+            "pricing_source": field("pricing_source", model_id),
+            "effective_group_ratio": _number(ratios.get(effective)) if effective else None,
+            "model_multiplier": _number(field("model_multiplier", model_id)),
+        }
+    return result
+
+
 def sync() -> dict[str, Any]:
     """Publish both public responses atomically; failed refreshes keep the old snapshot."""
     configured = _configured_models()
@@ -111,17 +150,20 @@ def sync() -> dict[str, Any]:
             raise ValueError("pricing fields missing")
         model_ids = set().union(*configured.values())
         models = {}
+        rows_by_id: dict[str, dict] = {}
         for row in rows:
             if not isinstance(row, dict):
                 raise ValueError("invalid model pricing row")
             model_id = row.get("model_name")
             if model_id in model_ids:
+                rows_by_id[model_id] = row
                 models[model_id] = {
                     field: row.get(field)
                     for field in ("quota_type", "model_price", "enable_groups")
                 }
         expressions = {}
         multipliers = {}
+        text_ratios = {}
         from character_workflow.lib.tuzi_billing_expr import (
             UnsupportedBillingExpr, compile_expression,
         )
@@ -138,6 +180,7 @@ def sync() -> dict[str, Any]:
                 if model_id in ids
             }
             multipliers[group] = _expression_multipliers(group_prices, ratios, expressions[group])
+            text_ratios[group] = _text_ratios(group_prices, rows_by_id, ratios, ids)
             for model_id, expression in expressions[group].items():
                 try:
                     compile_expression(expression)
@@ -149,6 +192,7 @@ def sync() -> dict[str, Any]:
             "group_ratio": {group: ratios[group] for group in configured if group in ratios},
             "billing_expr": expressions,
             "expr_multiplier": multipliers,
+            "text_ratio": text_ratios,
             "models": models,
         }
         atomic_write_json(snapshot_path(), snapshot)
