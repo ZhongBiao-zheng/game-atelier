@@ -302,3 +302,23 @@ def test_audio_job_and_canvas_capability_use_gateway(gateway, monkeypatch):
     assert done.status == JobStatus.DONE
     assert done.params.provider_task_protocol == "atelier_gateway"
     assert Path(done.output_paths[0]).read_bytes() == b"ID3audio"
+
+
+def test_member_records_the_confirmed_charge_of_a_failed_gateway_task(gateway, monkeypatch):
+    """主机对失败任务只扣上游回报的真实金额；成员端把这部分记到这次任务上，两边账一致。"""
+    def partial_then_fail(*, on_cost_usd, **_kwargs):
+        on_cost_usd(0.1)  # 上游已回报 0.1 美元（如多任务中第一段已完成）
+        raise RuntimeError("第二段失败")
+
+    monkeypatch.setattr(openai_image, "render", partial_then_fail)
+    with pytest.raises(job_runner.JobRunnerError):
+        job_runner.run_job(_job("job-partial").job_id)
+    failed = read_job("job-partial")
+    assert failed.status == JobStatus.FAILED
+    assert failed.params.actual_cost_cny == round(0.1 * job_runner.USD_TO_CNY, 6)
+
+    monkeypatch.setattr(openai_image, "render", lambda **_kwargs: (_ for _ in ()).throw(
+        RuntimeError("内容审核未通过")))
+    with pytest.raises(job_runner.JobRunnerError):
+        job_runner.run_job(_job("job-uncharged").job_id)
+    assert read_job("job-uncharged").params.actual_cost_cny is None

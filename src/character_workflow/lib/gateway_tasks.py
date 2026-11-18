@@ -91,6 +91,9 @@ class GatewayExtra(BaseModel):
 
 
 TaskStatus = Literal["pending", "running", "done", "failed", "canceled"]
+# 实付金额从哪来：upstream = 上游回报的真实金额（EvoLink / OpenRouter 的 usage.cost）；
+# price_table = 本机价格表 × 上游回报的数量（语音字数、图层数、歌曲数）。旧任务没有这个字段（None）。
+CostSource = Literal["upstream", "price_table"]
 ErrorKind = Literal["unavailable", "unconfirmed", "failed"]
 TERMINAL: frozenset[str] = frozenset({"done", "failed", "canceled"})
 
@@ -139,6 +142,7 @@ class GatewayTask(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     actual_size: str | None = None
     actual_cost_cny: float | None = None
+    actual_cost_source: CostSource | None = None
     outputs: list[str] = Field(default_factory=list)
     error: str | None = None
     error_kind: ErrorKind | None = None
@@ -616,7 +620,7 @@ def _record_cost(task_id: str, cost_usd: float | None) -> None:
 
     with _lock:
         task = _read(task_id)
-        _update(task_id, actual_cost_cny=round(
+        _update(task_id, actual_cost_source="upstream", actual_cost_cny=round(
             (task.actual_cost_cny or 0) + cost_usd * USD_TO_CNY, 6,
         ))
 
@@ -630,7 +634,8 @@ def _store_outputs(task_id: str, paths: list[Path], cost_usd: float | None,
     params = params or {}
     # 按人民币回报实付的 caller（语音按计费字数、图层拆分按层数）直接写进 params。
     if cost_usd is None and isinstance(params.get("actual_cost_cny"), int | float):
-        _update(task_id, actual_cost_cny=float(params["actual_cost_cny"]))
+        _update(task_id, actual_cost_cny=float(params["actual_cost_cny"]),
+                actual_cost_source="price_table")
     task = _read(task_id)
     modality = modality_for(task.kind)
     validate = {"image": image_dimensions, "video": is_valid_video, "audio": is_valid_audio}[modality]
@@ -687,15 +692,28 @@ def _safe_error(error: BaseException) -> str:
     return message
 
 
+def settled_charge(task: GatewayTask) -> float:
+    """这次任务扣成员额度多少（飙哥定：失败只扣能确认上游已收费的）。
+
+    - 成功：有实付扣实付，没有按估价扣（含主机手设单价）。
+    - 失败 / 取消：只扣上游回报的真实金额（如多任务中途失败时已完成部分的 usage.cost）；
+      价格表算出来的金额不算确认收费，扣 0。
+    - 旧任务没有实付来源：沿用原规则（有实付就扣实付）。
+    """
+    if task.actual_cost_cny is not None and (
+        task.status == "done" or task.actual_cost_source in (None, "upstream")
+    ):
+        return task.actual_cost_cny
+    return (task.estimated_cny or 0) if task.status == "done" else 0
+
+
 def _finish(task: GatewayTask, **changes: Any) -> GatewayTask:
     with _lock:
         current = _read(task.task_id)
         if current is not None and current.status in TERMINAL:
             return current
         done = task.model_copy(update={**changes, "phase": None})
-        done.charged_cny = done.actual_cost_cny if done.actual_cost_cny is not None else (
-            (done.estimated_cny or 0) if done.status == "done" else 0
-        )
+        done.charged_cny = settled_charge(done)
         # Keep reservation -> settlement atomic to admission and /me readers.
         _append_usage(done)
         saved = _save(done)
@@ -736,6 +754,7 @@ def _append_usage(task: GatewayTask) -> None:
         "requested_n": task.n, "size": task.actual_size or task.params.get("size") or task.size,
         "quality": task.params.get("quality"), "resolution": task.params.get("resolution"),
         "status": task.status, "actual_cost_cny": task.actual_cost_cny,
+        "actual_cost_source": task.actual_cost_source,
         "error_kind": task.error_kind, "kind": task.kind,
         "estimated_cny": task.estimated_cny, "charged_cny": task.charged_cny,
         "input_tokens": task.input_tokens, "output_tokens": task.output_tokens,

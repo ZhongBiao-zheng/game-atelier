@@ -130,6 +130,7 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   `.config/gateway.json` 在仅当前系统用户可读写的文件内保存明文与 SHA-256；鉴权仍只比较 SHA-256。读取时在同一文件锁下为未撤销且缺少明文的旧记录重发密钥并原子写回，旧密钥立即失效；ID、名称、角色、额度和创建时间保持不变，已撤销记录不重发。
   `GET /api/gateway/options` → `{models: [{id, name, modality}], aliases: [{alias, provider, name}]}`，alias 排除 atelier。
   用量行新增 `kind`、`estimated_cny`、`charged_cny`、`input_tokens`、`output_tokens`、`duration`、`resolution`、`member_trail`；不存 prompt，前端直接汇总结算金额。
+  结算（`charged_cny`）：成功任务有实付扣实付、没有按估价扣；失败 / 取消只扣上游回报的真实金额（`actual_cost_source="upstream"`，如 EvoLink / OpenRouter 的 `usage.cost`，含多任务中途失败前已完成的部分），按本机价格表算出的金额（`"price_table"`：语音字数、图层数、歌曲数）失败时扣 0。旧任务没有 `actual_cost_source`，沿用「有实付扣实付」。用量行同步记录 `actual_cost_source`。接入端在失败任务的 `charged_cny > 0` 时把这部分记为该任务实付。
   `GET /api/model-routes/member-status` → `{members: [{modality, alias, reason, since, next_probe_at, route_ids}], unavailable_routes: [{id, name, modality}]}`。
   欠费状态跨重启保留；`unavailable_routes` 只计非 atelier 成员且均在欠费冷却期的路由。
   `POST /api/model-routes/member-status/restore {modality, alias}` 清除该成员欠费及内存冷却，返回同一状态视图；两接口仅本机管理权限可用。

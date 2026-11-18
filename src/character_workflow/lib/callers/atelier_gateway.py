@@ -229,6 +229,10 @@ def _run_task(
         if status["status"] == "canceled" or cancelled():
             raise JobCanceled("已按请求停止")
         if status["status"] == "failed":
+            # 主机只对能确认上游已收费的失败扣额度；扣了多少就记在这次任务上，两边账对得上。
+            charged = status.get("charged_cny")
+            if isinstance(charged, int | float) and charged > 0 and on_cost_usd:
+                on_cost_usd(float(charged) / USD_TO_CNY)
             raise _task_error(status)
 
         member = status.get("member_alias")
