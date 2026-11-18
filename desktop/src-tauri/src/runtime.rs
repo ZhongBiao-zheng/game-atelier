@@ -171,12 +171,13 @@ fn extract(seed: &Path, staging: &Path, report: &dyn Fn(u64, u64)) -> Result<(),
             .collect();
         // Progress is entries extracted / total entries. Only this thread calls `report`, and the
         // counter only grows, so the reported values never go backwards.
-        let mut reported = 0;
+        let (mut reported, mut reports) = (0, 0);
         loop {
             let finished = workers.iter().all(|worker| worker.is_finished());
             let now = done.load(Ordering::Relaxed);
             if now != reported {
                 reported = now;
+                reports += 1;
                 report(now, total as u64);
             }
             if finished {
@@ -184,6 +185,9 @@ fn extract(seed: &Path, staging: &Path, report: &dyn Fn(u64, u64)) -> Result<(),
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+        log(&format!(
+            "unpack progress: {reports} reports, last {reported}/{total}"
+        ));
         workers.into_iter().try_for_each(|worker| {
             worker
                 .join()

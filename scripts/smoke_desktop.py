@@ -10,6 +10,7 @@ import argparse
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -81,6 +82,19 @@ def _wait_gone(path: Path, seconds: int) -> bool:
     return not path.exists()
 
 
+def _windows_shell_problems(shell_log: str) -> list[str]:
+    """What the shell log must show on Windows (docs/contracts/desktop-shell.md)."""
+    problems = []
+    if 'launcher ["--desktop-start"] -> Some(0)' not in shell_log:
+        problems.append("the shell did not start the server through --desktop-start")
+    if "title bar overlay=false" not in shell_log:
+        problems.append("the window did not keep the system title bar")
+    progress = re.search(r"unpack progress: (\d+) reports, last (\d+)/(\d+)", shell_log)
+    if not progress or progress[1] == "0" or progress[2] != progress[3]:
+        problems.append("unpack progress did not reach the total entry count")
+    return problems
+
+
 def smoke_windows(installer: Path, timeout: int) -> int:
     work = Path(tempfile.mkdtemp(prefix="atelier-smoke-")).resolve()
     install_dir = work / "app"
@@ -107,6 +121,7 @@ def smoke_windows(installer: Path, timeout: int) -> int:
         problems.append("the page never established a local session")
     if (data_runtime / "server.pid").exists():
         problems.append("server records remain after quit")
+    problems += _windows_shell_problems(_tail(runtime_parent / "shell.log", 10**7))
     for log in (runtime_parent / "shell.log", data_runtime / "server.log"):
         print(f"--- {log.name}\n{_tail(log)}")
     # The uninstaller copies itself to %TEMP% and returns at once; wait for the folder to go.
