@@ -1,0 +1,30 @@
+name: TMP adopt repro (Windows)
+
+# 临时：循环跑并发采用用例到复现 PermissionError，查清后删除。
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: repeat count per job
+        default: "400"
+
+jobs:
+  loop:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [serial, parallel-load]
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv python install 3.11
+      - run: uv sync
+      - name: serial loop
+        if: matrix.mode == 'serial'
+        run: uv run --with pytest-repeat pytest -q --count ${{ inputs.count }} "tests/test_team_library_adopt.py::test_concurrent_adoption_of_one_entry_keeps_a_single_copy" -rf
+      - name: parallel loop under load
+        if: matrix.mode == 'parallel-load'
+        run: uv run --with pytest-repeat pytest -q -n auto --count ${{ inputs.count }} "tests/test_team_library_adopt.py::test_concurrent_adoption_of_one_entry_keeps_a_single_copy" -rf

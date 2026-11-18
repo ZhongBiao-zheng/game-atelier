@@ -656,6 +656,7 @@ def test_concurrent_adoption_of_one_entry_keeps_a_single_copy(
 ):
     """四个请求同时越过锁外的预查：只允许建出一条，其余拿回同一条且 created=False。"""
     import threading
+    import traceback
 
     from character_workflow.lib import team_library_adopt as adopt
 
@@ -691,14 +692,15 @@ def test_concurrent_adoption_of_one_entry_keeps_a_single_copy(
         try:
             results.append(adopt_team_asset(mount=mount, entry=entry, project_id=project_id))
         except Exception as error:  # noqa: BLE001 - 线程里的失败要带回主线程断言
-            errors.append(error)
+            # 带完整堆栈：Windows 偶发失败只在 CI 出现，只有异常对象时看不出是哪一步。
+            errors.append("".join(traceback.format_exception(error)))
 
     threads = [threading.Thread(target=run, args=(f"p{i}",)) for i in range(4)]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join()
-    assert errors == []
+    assert not errors, "\n".join(errors)
     assert sorted(created for _, created in results) == [False, False, False, True]
     assert len({asset.asset_id for asset, _ in results}) == 1
     catalog = list_creation_assets().assets
