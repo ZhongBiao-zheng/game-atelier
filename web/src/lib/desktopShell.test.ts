@@ -34,6 +34,11 @@ describe('desktop shell bridge', () => {
     expect(setTheme).toHaveBeenCalledWith('light');
   });
 
+  it('declares an app-region on the root, so a page without a top bar still resets the drag regions', () => {
+    const css = readFileSync(`${process.cwd()}/src/styles/tokens.css`, 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(css).toMatch(/:root\[data-titlebar='overlay'\]\s*\{\s*app-region:\s*no-drag;\s*\}/);
+  });
+
   it('keeps every window-drag rule behind the shell attributes, so browsers never see one', () => {
     const css = readFileSync(`${process.cwd()}/src/styles/tokens.css`, 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '');
     const rules = [...css.matchAll(/([^{}]+)\{[^{}]*app-region[^{}]*\}/g)].map((m) => m[1].trim());
