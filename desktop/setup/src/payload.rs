@@ -24,12 +24,38 @@ pub enum Role {
     Uninstall,
 }
 
+/// How an entry's bytes are stored: app files are raw deflate, archives (the seed) as they are.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Codec {
+    #[default]
+    Store,
+    Deflate,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Entry {
     /// Path inside the install directory, `/`-separated.
     pub path: String,
     pub offset: u64,
+    /// Stored size (compressed when `codec` is deflate).
     pub size: u64,
+    #[serde(default)]
+    pub codec: Codec,
+}
+
+/// Counts stored bytes as they are read, so progress follows the payload whatever the codec.
+struct Counted<'a, R> {
+    inner: R,
+    report: &'a mut dyn FnMut(u64),
+}
+
+impl<R: Read> Read for Counted<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        (self.report)(n as u64);
+        Ok(n)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -125,18 +151,15 @@ impl Payload {
         let partial = partial_path(dest);
         let mut out =
             File::create(&partial).map_err(|e| format!("无法写入 {}：{e}", dest.display()))?;
-        let mut left = entry.size;
-        let mut buf = vec![0u8; 1 << 20];
-        while left > 0 {
-            let n = (buf.len() as u64).min(left) as usize;
-            source
-                .read_exact(&mut buf[..n])
-                .map_err(|e| e.to_string())?;
-            out.write_all(&buf[..n])
-                .map_err(|e| format!("写入失败：{e}"))?;
-            left -= n as u64;
-            report(n as u64);
-        }
+        let stored = Counted {
+            inner: io::BufReader::with_capacity(1 << 20, source.take(entry.size)),
+            report,
+        };
+        let copied = match entry.codec {
+            Codec::Store => io::copy(&mut { stored }, &mut out),
+            Codec::Deflate => io::copy(&mut flate2::read::DeflateDecoder::new(stored), &mut out),
+        };
+        copied.map_err(|e| format!("写入 {} 失败：{e}", dest.display()))?;
         out.sync_all().map_err(|e| e.to_string())?;
         drop(out);
         std::fs::rename(&partial, dest).map_err(|e| format!("无法替换 {}：{e}", dest.display()))

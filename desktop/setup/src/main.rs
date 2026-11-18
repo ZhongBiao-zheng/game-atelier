@@ -69,6 +69,8 @@ mod windows_main {
     }
 
     pub fn run() -> i32 {
+        // Release builds abort on panic without a console: leave the reason in the setup log.
+        std::panic::set_hook(Box::new(|info| install::log(&format!("panic: {info}"))));
         let args = parse_args();
         let payload = match Payload::read_self() {
             Ok(payload) => payload,

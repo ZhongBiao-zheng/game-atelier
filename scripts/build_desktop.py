@@ -18,6 +18,7 @@ import subprocess
 import tarfile
 import urllib.request
 import zipfile
+import zlib
 
 REPO = Path(__file__).resolve().parent.parent
 DESKTOP = REPO / "desktop"
@@ -110,7 +111,8 @@ def write_payload(setup: Path, target: Path, *, product: str, version: str, main
     """`<setup exe> <files…> <manifest> <u64 LE manifest length> <magic>` (payload.rs).
 
     Every file under `app` (the seed included) is installed at its relative path; `main` is the
-    program inside it. `setup_files` stay with the installer (`setup/`).
+    program inside it. `setup_files` stay with the installer (`setup/`). App files are stored as
+    raw deflate; archives (the seed) and the installer's own files as they are.
     """
     files = [(path.relative_to(app).as_posix(), path) for path in sorted(app.rglob("*")) if path.is_file()]
     names = {name for name, _ in files}
@@ -122,9 +124,18 @@ def write_payload(setup: Path, target: Path, *, product: str, version: str, main
     with target.open("wb") as out:
         out.write(exe)
         for name, path in files:
-            entries.append({"path": name, "offset": out.tell(), "size": path.stat().st_size})
+            store = name.startswith("setup/") or path.suffix.lower() == ".zip"
+            start = out.tell()
             with path.open("rb") as source:
-                shutil.copyfileobj(source, out, 1 << 20)
+                if store:
+                    shutil.copyfileobj(source, out, 1 << 20)
+                else:
+                    deflate = zlib.compressobj(9, zlib.DEFLATED, -15)
+                    while chunk := source.read(1 << 20):
+                        out.write(deflate.compress(chunk))
+                    out.write(deflate.flush())
+            entries.append({"path": name, "offset": start, "size": out.tell() - start,
+                            "codec": "store" if store else "deflate"})
         manifest = json.dumps({"role": "install", "product": product, "version": version, "main": main,
                                "app_id": app_id, "exe_len": len(exe), "files": entries}).encode()
         out.write(manifest)

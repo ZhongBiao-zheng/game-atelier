@@ -449,6 +449,13 @@ def test_installer_and_build_script_share_the_payload_format(tmp_path):
     manifest = json.loads(data[-16 - length:-16])
     assert manifest["role"] == "install" and manifest["main"] == "Atelier.exe"
     assert manifest["app_id"] == "app.atelier.desktop" and manifest["exe_len"] == len(b"MZ-setup")
-    contents = {e["path"]: data[e["offset"]:e["offset"] + e["size"]] for e in manifest["files"]}
+    import zlib
+    contents = {}
+    for e in manifest["files"]:
+        stored = data[e["offset"]:e["offset"] + e["size"]]
+        contents[e["path"]] = zlib.decompress(stored, -15) if e["codec"] == "deflate" else stored
     assert contents == {"Atelier.exe": b"MZ-app", "resources/app.asar": b"asar",
                         "seed/GameAtelier-1.2.3-windows-x64.zip": b"PK-seed", "setup/boot.exe": b"MZ-boot"}
+    codecs = {e["path"]: e["codec"] for e in manifest["files"]}
+    assert codecs["Atelier.exe"] == "deflate" and codecs["seed/GameAtelier-1.2.3-windows-x64.zip"] == "store"
+    assert 'Deflate,' in source and "flate2::read::DeflateDecoder" in source

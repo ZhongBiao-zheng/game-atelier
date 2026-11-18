@@ -28,6 +28,13 @@ function Save-Preview([string]$State, [string]$Name = $State) {
     Start-Sleep -Seconds 1
 }
 
+function Show-Logs([string]$Why) {
+    Write-Output "--- $Why"
+    foreach ($log in (Join-Path $env:TEMP 'atelier-setup.log'), (Join-Path $runtimeParent 'shell.log')) {
+        if (Test-Path $log) { Write-Output "--- $log"; Get-Content $log -Tail 60 }
+    }
+}
+
 function Wait-For([scriptblock]$Condition, [int]$Seconds) {
     $deadline = (Get-Date).AddSeconds($Seconds)
     while (-not (& $Condition) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
@@ -53,14 +60,15 @@ $programs = [Environment]::GetFolderPath('Programs')
 $installed = Wait-For { Test-Path (Join-Path $programs "$product.lnk") } 300
 Start-Sleep -Seconds 3
 Save-Screen 'gui-done'
+$exited = if ($setup.HasExited) { "exited with $($setup.ExitCode)" } else { 'still running' }
 Stop-Process -Id $setup.Id -Force -ErrorAction SilentlyContinue
-if (-not $installed) { throw 'windowed install did not finish' }
+if (-not $installed) { Show-Logs "windowed install did not finish; installer $exited"; throw 'windowed install did not finish' }
 
 Start-Process -FilePath (Join-Path $work 'uninstall.exe') -ArgumentList '--auto'
 $removed = Wait-For { -not (Test-Path $work) } 120
 Start-Sleep -Seconds 2
 Save-Screen 'gui-uninstalled'
 Get-Process | Where-Object { $_.Name -like 'atelier-uninstall-*' } | Stop-Process -Force -ErrorAction SilentlyContinue
-if (-not $removed) { throw 'windowed uninstall left the install folder' }
+if (-not $removed) { Show-Logs 'windowed uninstall left the install folder'; throw 'windowed uninstall left the install folder' }
 if (Test-Path $runtimeParent) { throw 'windowed uninstall left the runtime root' }
 Write-Output 'installer screens captured'
