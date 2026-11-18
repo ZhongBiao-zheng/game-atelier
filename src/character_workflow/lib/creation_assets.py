@@ -1337,10 +1337,15 @@ def migrate_creation_asset_catalog_schema() -> None:
     server 启动时已经跑过一次；Skill CLI / workshop 这些非 server 入口没有 lifespan，
     不在这里补一次就会在 `_read_catalog_unlocked` 里以「创作资产库状态损坏」炸出来。
     延迟 import：迁移模块反向依赖 canvas_projects / jobs。
+
+    持目录锁读：每个调用方都在锁外先跑这一步，而写入方持锁 os.replace 目录文件；Windows 上
+    替换的那一刻锁外打开会 PermissionError(13)（2026-11-18 并发采用 CI 偶发失败的根因）。
+    调用方都在拿锁之前调用它，这里不会重入。
     """
     from character_workflow.lib.creation_assets_migration import migrate_creation_assets_to_v4
 
-    migrate_creation_assets_to_v4()
+    with file_lock(_catalog_lock_path()):
+        migrate_creation_assets_to_v4()
 
 
 def migrate_legacy_canvas_libraries() -> int:

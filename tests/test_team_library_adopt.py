@@ -920,3 +920,30 @@ def test_invalid_team_category_is_ignored_not_fatal(isolated_data_root, tmp_path
                                    ensure_ascii=False), "utf-8")
     [entry] = scan_and_cache(mount).entries
     assert entry.status == "ready" and entry.category is None
+
+
+def test_catalog_schema_check_reads_under_the_catalog_lock(isolated_data_root, monkeypatch):
+    """Windows：别的线程持锁 os.replace 目录文件时，锁外打开它会 PermissionError(13)。
+
+    2026-11-18 CI 循环复现：create_adopted_asset 先在锁外跑迁移检查读 catalog.json，撞上并发采用的写入。
+    迁移检查必须和所有写入方持同一把目录锁。
+    """
+    import threading
+
+    from character_workflow.lib import creation_assets, creation_assets_migration
+    from character_workflow.lib.file_lock import try_file_lock
+
+    held: list[bool] = []
+
+    def probe():
+        def check():
+            with try_file_lock(creation_assets._catalog_lock_path()) as acquired:
+                held.append(not acquired)
+
+        thread = threading.Thread(target=check)
+        thread.start()
+        thread.join()
+
+    monkeypatch.setattr(creation_assets_migration, "migrate_creation_assets_to_v4", probe)
+    creation_assets.migrate_creation_asset_catalog_schema()
+    assert held == [True]
