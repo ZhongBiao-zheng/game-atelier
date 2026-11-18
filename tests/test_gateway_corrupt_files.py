@@ -136,6 +136,7 @@ def test_main_service_starts_with_corrupt_gateway_config(isolated_data_root, tmp
         assert view.status_code == 200
         state = view.json()
         assert state["config_error"] and "gateway.json" in state["config_error"]
+        assert "修好或移走后刷新本页，重新开启网关" in state["config_error"]
         assert state["enabled"] is False and state["keys"] == []
         assert not gateway_server.running and gateway_server.status()["error"]
         refused = local.put("/api/gateway", json={"enabled": True})

@@ -80,7 +80,7 @@ class GatewayConfigCorruptError(RuntimeError):
 
     def __init__(self, path: Path, reason: str, *, unreadable: bool = False) -> None:
         label = "网关配置文件不可读" if unreadable else "网关配置文件损坏"
-        super().__init__(f"{label}：{path}（{reason}），网关已停用，原文件未改动")
+        super().__init__(f"{label}：{path}（{reason}）。原文件未改动；修好或移走后刷新本页，重新开启网关")
         self.path = path
         self.reason = reason
 
