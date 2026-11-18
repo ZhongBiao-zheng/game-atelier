@@ -90,9 +90,10 @@ def test_lifecycle_logs_cover_admission_start_cancel_and_restart_without_prompt(
     assert "一只猫" not in text and client.headers["Authorization"].split()[1] not in text
 
 
-def test_restart_before_start_has_queue_time_but_no_execution_time(client):
-    _submit(client)
-    gateway_tasks.recover_after_restart()
+def test_ended_before_start_has_queue_time_but_no_execution_time(client):
+    # 第 2 批起重启不再结束排队任务；没开始就结束的任务改用取消来造。
+    task_id = _submit(client).json()["task_id"]
+    gateway_tasks.cancel(client.record.id, task_id)
     [row] = _usage_rows()
     assert row["started_at"] is None and row["duration_s"] is None and row["queue_s"] >= 0
     assert row["sent_to_upstream"] is False and row["sent_at"] is None

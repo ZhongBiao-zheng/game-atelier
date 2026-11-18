@@ -131,12 +131,13 @@ def test_usage_fields_and_member_trail(owner, monkeypatch):
     assert "prompt" not in row and done.status == "done"
 
 
-def test_restart_releases_pending_and_running(owner):
+def test_restart_keeps_pending_reserved_and_releases_running(owner):
+    # 第 2 批 D1：排队任务重启后继续排队，预占保留；执行中且无法续查的判未确认、释放。
     submit(owner)
     second = submit(owner, "two")
     gateway_tasks._update(second.task_id, status="running")
     gateway_tasks.recover_after_restart()
-    assert gateway_quota.usage_summary(owner)[0]["reserved_cny"] == 0
+    assert gateway_quota.usage_summary(owner)[0]["reserved_cny"] == .08
     assert gateway_quota.month_summary(owner)["month_charged_cny"] == 0
 
 

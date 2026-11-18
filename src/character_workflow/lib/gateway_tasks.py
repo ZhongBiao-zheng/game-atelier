@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import mimetypes
@@ -96,6 +97,12 @@ TaskStatus = Literal["pending", "running", "done", "failed", "canceled"]
 CostSource = Literal["upstream", "price_table"]
 ErrorKind = Literal["unavailable", "unconfirmed", "failed"]
 TERMINAL: frozenset[str] = frozenset({"done", "failed", "canceled"})
+# caller 落进 params 的续查状态；本机任务重启续查用的是同一组键（lib/jobs.py）。
+RESUME_KEYS = ("provider_task_protocol", "provider_task_ids", "mj_submission_ids",
+               "mj_submit_uncertain", "evolink_state")
+# 带着已存订单只轮询、不重新提交的协议（callers：openai_image 的 Tuzi 异步、declarative、
+# evolink、yinchao_music；MJ 任务代理看 mj_submission_ids）。
+RESUMABLE_PROTOCOLS = frozenset({"tuzi_images", "declarative", "evolink", "yinchao"})
 
 
 def is_unpriced(record: Any) -> bool:
@@ -132,6 +139,8 @@ class GatewayTask(BaseModel):
     output_types: list[str] = Field(default_factory=list)
     member_trail: list[str] = Field(default_factory=list)
     upstream_task_ids: list[str] = Field(default_factory=list)
+    # caller 续查要用的状态（订单号、协议、MJ 提交号、EvoLink 状态）；主机重启后凭它只轮询、不重提。
+    resume_params: dict[str, Any] | None = None
     submission_attempts: list[dict] = Field(default_factory=list)
     status: TaskStatus = "pending"
     phase: str | None = None
@@ -441,8 +450,9 @@ def pump() -> None:
                 continue
             _running[task.task_id] = task.key_id
             started = _now()
-            _save(task.model_copy(update={"status": "running", "phase": "queued",
-                                          "started_at": started.isoformat()}))
+            _save(task.model_copy(update={
+                "status": "running", "phase": "resuming" if task.resume_params else "queued",
+                "started_at": task.started_at or started.isoformat()}))
             logger.info("网关任务开始 task=%s 排队=%.1fs", task.task_id,
                         _seconds(task.created_at, started.isoformat()) or 0)
             threading.Thread(target=_execute, args=(task.task_id,), daemon=True,
@@ -492,16 +502,24 @@ def run_task(task: GatewayTask) -> GatewayTask:
             gateway_access.check_route(owner, modality, task.route_id)
         except GatewayRequestError as error:
             return _finish(_read(task_id), status="failed", error=error.message)
-        try:
-            picked = _pick_member(task.route_id, tried, owner, modality,
-                                  route_order=task.route_order, params=task.params)
-        except GatewayRequestError as error:
-            return _finish(_read(task_id), status="failed", error=error.message,
-                           error_kind="unavailable")
-        if picked is None:
-            return _exhausted(task_id, tried, warnings, switched_from, last_error)
+        resume = _read(task_id).resume_params
+        if resume:
+            # 主机重启后续查：只找原来那一家，凭已存订单轮询；不选别家、不重新提交。
+            picked = _resume_member(_read(task_id))
+            if picked is None:
+                return _finish(_read(task_id), status="failed", error_kind="unconfirmed",
+                               error="网关重启后原供应商已不可用，未确认是否已出图")
+        else:
+            try:
+                picked = _pick_member(task.route_id, tried, owner, modality,
+                                      route_order=task.route_order, params=task.params)
+            except GatewayRequestError as error:
+                return _finish(_read(task_id), status="failed", error=error.message,
+                               error_kind="unavailable")
+            if picked is None:
+                return _exhausted(task_id, tried, warnings, switched_from, last_error)
         key, model = picked
-        params: dict[str, Any] = {**task.params, "n": task.n}
+        params: dict[str, Any] = {**task.params, "n": task.n, **copy.deepcopy(resume or {})}
         if task.size is not None:
             params["size"] = task.size
         for group, names in task.files.items():
@@ -528,7 +546,10 @@ def run_task(task: GatewayTask) -> GatewayTask:
         with tempfile.TemporaryDirectory(prefix=f"gateway-{task_id[:8]}-") as tmp:
             try:
                 def changed():
-                    _update(task_id, upstream_task_ids=params.get("provider_task_ids") or [])
+                    state = {name: copy.deepcopy(params[name]) for name in RESUME_KEYS
+                             if params.get(name) not in (None, [], {})}
+                    _update(task_id, upstream_task_ids=params.get("provider_task_ids") or [],
+                            resume_params=state or None)
 
                 def on_task_id(identifier):
                     ids = list((_read(task_id)).upstream_task_ids)
@@ -568,7 +589,7 @@ def run_task(task: GatewayTask) -> GatewayTask:
                                    error_kind="unconfirmed" if error.execution_started else "unavailable")
                 current = _read(task_id)
                 uncertain = any(a.get("outcome") == "unconfirmed" for a in current.submission_attempts)
-                if current.upstream_task_ids or uncertain:
+                if current.upstream_task_ids or current.resume_params or uncertain:
                     return _finish(current, status="failed", error="上游任务结果未确认：" + _safe_error(error),
                                    error_kind="unconfirmed")
                 reason = model_routes.failover_reason(error)
@@ -581,6 +602,26 @@ def run_task(task: GatewayTask) -> GatewayTask:
                 switched_from = (key.alias, reason)
                 last_error = error
                 continue
+
+
+def resumable(task: GatewayTask) -> bool:
+    """这个任务有没有能续查的上游订单（主机重启后只轮询、不重提）。"""
+    state = task.resume_params or {}
+    if state.get("provider_task_protocol") in RESUMABLE_PROTOCOLS and state.get("provider_task_ids"):
+        return True
+    # MJ 任务代理：提交结果未确认的不续查（caller 自己也拒绝重提）。
+    return bool(state.get("mj_submission_ids")) and not state.get("mj_submit_uncertain")
+
+
+def _resume_member(task: GatewayTask):
+    """续查只能用原来那一家：KEY 还在、启用、模型还在。"""
+    if not task.member_alias or not task.member_model_id:
+        return None
+    key = keys.find_by_alias(task.member_alias)
+    if key is None or not key.enabled:
+        return None
+    model = next((item for item in key.models if item.id == task.member_model_id), None)
+    return (key, model) if model is not None else None
 
 
 def _pick_member(
@@ -831,20 +872,30 @@ def last_used_at(key_id: str) -> str | None:
 # ---- 启动恢复与清理 ----
 
 def recover_after_restart() -> None:
-    """网关进程重启：没开始的任务可以放心让接入端换家；执行中的不能确认有没有出图。"""
+    """网关进程重启后：
+
+    - 还在排队、从没发给上游的任务：继续排队（不存在重复提交）。
+    - 执行中且有能续查的上游订单、原供应商还在：改回排队，由 `pump` 续查，只轮询不重提。
+    - 其余执行中的任务：不能确认有没有出图，判「未确认」失败，扣 0。
+
+    调用方随后要 `pump()` 才会开始执行。
+    """
     with _lock:
         for task in _all_tasks():
-            if task.task_id in _running:
+            if task.task_id in _running or task.status not in ("pending", "running"):
                 continue
-            if task.status in ("pending", "running"):
-                logger.warning("网关任务因重启中断 task=%s 原状态=%s upstream=%d", task.task_id,
-                               task.status, len(task.upstream_task_ids))
             if task.status == "pending":
-                _finish(task, status="failed", error="网关重启，任务未开始",
-                        error_kind="unavailable")
-            elif task.status == "running":
-                _finish(task, status="failed", error="网关重启，未确认是否已出图",
-                        error_kind="unconfirmed")
+                logger.info("网关任务重启后继续排队 task=%s", task.task_id)
+                continue
+            if resumable(task) and _resume_member(task) is not None:
+                logger.warning("网关任务因重启转为续查 task=%s member=%s upstream=%d", task.task_id,
+                               task.member_alias, len(task.upstream_task_ids))
+                _save(task.model_copy(update={"status": "pending", "phase": "resuming"}))
+                continue
+            logger.warning("网关任务因重启中断 task=%s 原状态=%s upstream=%d", task.task_id,
+                           task.status, len(task.upstream_task_ids))
+            _finish(task, status="failed", error="网关重启，未确认是否已出图",
+                    error_kind="unconfirmed")
 
 
 def _prune_quarantine(now: datetime) -> None:
@@ -869,7 +920,9 @@ def cleanup(now: datetime | None = None) -> int:
     _prune_quarantine(now or _now())
     with _lock:
         for task in _all_tasks():
-            if task.task_id in _running or datetime.fromisoformat(task.created_at) > cutoff:
+            # 没结束的任务（排队、执行、重启后待续查）不删：删了预占和接入端的结果都会丢。
+            if (task.task_id in _running or task.status not in TERMINAL
+                    or datetime.fromisoformat(task.created_at) > cutoff):
                 continue
             shutil.rmtree(_files_dir(task.task_id), ignore_errors=True)
             _task_file(task.task_id).unlink(missing_ok=True)
