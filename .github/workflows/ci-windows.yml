@@ -23,7 +23,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [serial, parallel-load]
+        mode: [parallel-load]
+        shard: [1, 2, 3, 4]
     env:
       PYTHONUTF8: "1"
     steps:
