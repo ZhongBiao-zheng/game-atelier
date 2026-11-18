@@ -28,7 +28,9 @@ from character_workflow.lib import data_root, keys, model_routes
 from character_workflow.lib.atomic_io import (
     atomic_write_bytes,
     atomic_write_json,
+    read_text_with_retry,
 )
+from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.job_runner import image_dimensions_from_bytes
 from character_workflow.lib.local_paths import data_root_file
 from character_workflow.lib.jobs import (
@@ -94,7 +96,7 @@ def get_jobs() -> list[Job]:
     for p in sorted(jobs_dir.glob("*.json")):
         # 一条坏文件（半写 / 手改 schema 不符）不能拖垮整个列表 → 跳过并留日志。
         try:
-            out.append(_load_job(json.loads(p.read_text(encoding="utf-8"))))
+            out.append(_load_job(json.loads(read_text_with_retry(p))))
         except (OSError, json.JSONDecodeError, ValidationError):
             logger.warning("skipping bad job file: %s", p.name)
     return out
@@ -105,7 +107,8 @@ def get_job(job_id: str) -> Job:
     p = _runtime() / "jobs" / f"{job_id}.json"
     if not p.exists():
         raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）")
-    return _load_job(json.loads(p.read_text(encoding="utf-8")))
+    # 写入方持 job_lock 原子替换；Windows 上替换那一刻打开会 PermissionError，重试越过。
+    return _load_job(json.loads(read_text_with_retry(p)))
 
 
 
@@ -138,7 +141,7 @@ def _read_config() -> dict:
     if not p.exists():
         return {}
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(read_text_with_retry(p))
     except (OSError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
@@ -607,34 +610,36 @@ def post_job_cancel(job_id: str) -> dict:
 @router.post("/config")
 def post_config(payload: dict = Body(...)) -> dict:
     """合并式补丁：只更新请求里出现的已知键，其余键保留。"""
-    cfg = _read_config()
-    updated = False
-    if "image_storage_root" in payload:
-        raw = (payload.get("image_storage_root") or "").strip()
-        if not raw:
-            raise HTTPException(422, detail="图片存储目录不能为空")
-        # Expand ~ and env vars; resolve to absolute path so future reads are stable.
-        expanded = Path(os.path.expandvars(os.path.expanduser(raw)))
-        try:
-            expanded.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            raise HTTPException(422, detail=f"无法创建目录：{e}") from e
-        if not os.access(expanded, os.W_OK):
-            raise HTTPException(422, detail=f"目录不可写：{expanded}")
-        cfg["image_storage_root"] = str(expanded.resolve())
-        updated = True
-    if "show_canvas_on_home" in payload:
-        value = payload["show_canvas_on_home"]
-        if not isinstance(value, bool):
-            raise HTTPException(422, detail="show_canvas_on_home 必须是布尔值（true / false）")
-        cfg["show_canvas_on_home"] = value
-        updated = True
-    if not updated:
-        raise HTTPException(
-            422, detail="没有可识别的设置项：只接受 image_storage_root / show_canvas_on_home"
-        )
-    atomic_write_json(_runtime() / "config.json", cfg)
-    return {"ok": True, **cfg}
+    # 读→改→写持锁：并发保存不互相覆盖。叶子锁，内部不取别的锁。
+    with file_lock((_runtime() / "config.json").with_suffix(".lock")):
+        cfg = _read_config()
+        updated = False
+        if "image_storage_root" in payload:
+            raw = (payload.get("image_storage_root") or "").strip()
+            if not raw:
+                raise HTTPException(422, detail="图片存储目录不能为空")
+            # Expand ~ and env vars; resolve to absolute path so future reads are stable.
+            expanded = Path(os.path.expandvars(os.path.expanduser(raw)))
+            try:
+                expanded.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                raise HTTPException(422, detail=f"无法创建目录：{e}") from e
+            if not os.access(expanded, os.W_OK):
+                raise HTTPException(422, detail=f"目录不可写：{expanded}")
+            cfg["image_storage_root"] = str(expanded.resolve())
+            updated = True
+        if "show_canvas_on_home" in payload:
+            value = payload["show_canvas_on_home"]
+            if not isinstance(value, bool):
+                raise HTTPException(422, detail="show_canvas_on_home 必须是布尔值（true / false）")
+            cfg["show_canvas_on_home"] = value
+            updated = True
+        if not updated:
+            raise HTTPException(
+                422, detail="没有可识别的设置项：只接受 image_storage_root / show_canvas_on_home"
+            )
+        atomic_write_json(_runtime() / "config.json", cfg)
+        return {"ok": True, **cfg}
 
 
 class _DataRootPayload(BaseModel):
@@ -1588,7 +1593,7 @@ def _read_gallery_hidden() -> list[str]:
     if not path.is_file():
         return []
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(read_text_with_retry(path))
     except (OSError, json.JSONDecodeError):
         return []
     paths = payload.get("paths") if isinstance(payload, dict) else None
@@ -1624,10 +1629,12 @@ def gallery_hidden() -> dict:
 @router.post("/gallery/hidden")
 def post_gallery_hidden(patch: _GalleryHiddenPatch) -> dict:
     target = _normalize_gallery_path(patch.path)
-    paths = [p for p in _read_gallery_hidden() if p != target]
-    if patch.hidden:
-        paths.append(target)
-    atomic_write_json(_gallery_hidden_file(), {"paths": paths})
+    # 读→改→写持锁：读失败按空处理时，不持锁的并发写会把整份列表覆盖成空。叶子锁，内部不取别的锁。
+    with file_lock(_gallery_hidden_file().with_suffix(".lock")):
+        paths = [p for p in _read_gallery_hidden() if p != target]
+        if patch.hidden:
+            paths.append(target)
+        atomic_write_json(_gallery_hidden_file(), {"paths": paths})
     return {"paths": paths}
 
 
@@ -1640,7 +1647,7 @@ def _read_gallery_favorites() -> list[str]:
     if not p.exists():
         return []
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(read_text_with_retry(p))
     except (OSError, json.JSONDecodeError):
         return []
     paths = data.get("paths") if isinstance(data, dict) else None
@@ -1663,10 +1670,11 @@ def gallery_favorites() -> dict:
 @router.post("/gallery/favorites")
 def post_gallery_favorites(patch: _GalleryFavoritePatch) -> dict:
     target = _normalize_gallery_path(patch.path)
-    paths = [p for p in _read_gallery_favorites() if p != target]
-    if patch.favorite:
-        paths.append(target)
-    atomic_write_json(_gallery_favorites_file(), {"paths": paths})
+    with file_lock(_gallery_favorites_file().with_suffix(".lock")):
+        paths = [p for p in _read_gallery_favorites() if p != target]
+        if patch.favorite:
+            paths.append(target)
+        atomic_write_json(_gallery_favorites_file(), {"paths": paths})
     return {"paths": paths}
 
 
@@ -1679,7 +1687,7 @@ def _read_gallery_ratings() -> dict[str, float]:
     if not p.exists():
         return {}
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(read_text_with_retry(p))
     except (OSError, json.JSONDecodeError):
         return {}
     ratings = data.get("ratings") if isinstance(data, dict) else None
@@ -1713,12 +1721,13 @@ def gallery_ratings() -> dict:
 @router.post("/gallery/ratings")
 def post_gallery_ratings(patch: _GalleryRatingPatch) -> dict:
     target = _normalize_gallery_path(patch.path)
-    ratings = _read_gallery_ratings()
-    if patch.rating == 0:
-        ratings.pop(target, None)
-    else:
-        ratings[target] = patch.rating
-    atomic_write_json(_gallery_ratings_file(), {"ratings": ratings})
+    with file_lock(_gallery_ratings_file().with_suffix(".lock")):
+        ratings = _read_gallery_ratings()
+        if patch.rating == 0:
+            ratings.pop(target, None)
+        else:
+            ratings[target] = patch.rating
+        atomic_write_json(_gallery_ratings_file(), {"ratings": ratings})
     return {"ratings": ratings}
 
 

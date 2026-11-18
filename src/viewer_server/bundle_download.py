@@ -22,7 +22,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 
-from character_workflow.lib.atomic_io import atomic_write_json
+from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
 from character_workflow.lib.file_lock import file_lock, try_file_lock
 
 CNB = "https://cnb.cool/ZhongBiao-zheng/game-atelier/-/releases"
@@ -41,7 +41,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def _read_json(path: Path) -> dict:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(read_text_with_retry(path))
         return value if isinstance(value, dict) else {}
     except (OSError, ValueError, http.client.HTTPException):
         return {}

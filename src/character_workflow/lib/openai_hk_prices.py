@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 import requests
 
 from character_workflow.lib import data_root
-from character_workflow.lib.atomic_io import atomic_write_json
+from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
 
 SYNC_INTERVAL_SECONDS = 6 * 3600
 _log = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ def snapshot_path():
 
 def load_snapshot() -> dict:
     try:
-        value = json.loads(snapshot_path().read_text(encoding="utf-8"))
+        value = json.loads(read_text_with_retry(snapshot_path()))
         if isinstance(value, dict) and isinstance(value.get("models"), dict):
             return value
     except (OSError, ValueError):

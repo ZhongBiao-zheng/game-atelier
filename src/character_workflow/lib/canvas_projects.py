@@ -13,7 +13,7 @@ from typing import Callable
 from pydantic import ValidationError
 
 from character_workflow.lib import data_root
-from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
+from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json, read_text_with_retry
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.jobs import list_jobs, read_job
 from character_workflow.lib.media_probe import mp4_track_dimensions
@@ -248,7 +248,7 @@ def create_canvas_project(name: str) -> CanvasProject:
 
 
 def read_canvas_project(project_id: str) -> CanvasProject:
-    return CanvasProject.model_validate_json(_project_path(project_id).read_text(encoding="utf-8"))
+    return CanvasProject.model_validate_json(read_text_with_retry(_project_path(project_id)))
 
 
 def rename_canvas_project(project_id: str, name: str) -> CanvasProject:

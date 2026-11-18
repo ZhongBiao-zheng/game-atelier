@@ -171,6 +171,16 @@ async def lifespan(app: FastAPI):
         await service.close()
 
 
+async def _repeat_forever(interval_seconds: float, work, label: str) -> None:
+    """每隔 interval 在线程池里跑一次 work；一轮抛错只记日志，循环继续（否则一次失败就永久停掉）。"""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await asyncio.to_thread(work)
+        except Exception:  # noqa: BLE001
+            logging.getLogger(__name__).exception("%s失败", label)
+
+
 async def _record_host_lifecycle(app: FastAPI) -> None:
     """记一条主机启动，然后每 5 分钟刷新心跳；记录失败只告警，不挡服务。"""
     from viewer_server.connection_status import app_version
@@ -184,14 +194,14 @@ async def _record_host_lifecycle(app: FastAPI) -> None:
         )
         log.info("主机启动 版本=%s 服务模式=%s 上次=%s", row["version"], row["service_mode"],
                  row["previous"])
-    except OSError as error:
-        log.warning("host lifecycle start not recorded: %s", error)
+    except Exception:  # noqa: BLE001 —— 启停记录失败不挡服务，也不能让心跳循环起不来
+        log.exception("host lifecycle start not recorded")
     while True:
         await asyncio.sleep(host_lifecycle.HEARTBEAT_SECONDS)
         try:
             await asyncio.to_thread(host_lifecycle.heartbeat)
-        except OSError as error:
-            log.warning("host lifecycle heartbeat failed: %s", error)
+        except Exception:  # noqa: BLE001 —— 单次失败继续下一次心跳
+            log.exception("host lifecycle heartbeat failed")
 
 
 @asynccontextmanager
@@ -275,12 +285,8 @@ async def normal_lifespan(app: FastAPI):
     share_sync = asyncio.create_task(run_periodic())
     resume_tasks: set[asyncio.Task[None]] = set()
 
-    async def maintain_canvas_lifecycle() -> None:
-        while True:
-            await asyncio.sleep(6 * 60 * 60)
-            await asyncio.to_thread(maintain_canvas_package_lifecycle)
-
-    maintenance_task = asyncio.create_task(maintain_canvas_lifecycle())
+    maintenance_task = asyncio.create_task(
+        _repeat_forever(6 * 60 * 60, maintain_canvas_package_lifecycle, "画布包定期维护"))
 
     async def resume_canvas_job(job_id: str) -> None:
         try:

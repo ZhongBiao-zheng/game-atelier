@@ -21,7 +21,7 @@ from typing import Literal
 import requests
 
 from character_workflow.lib import data_root
-from character_workflow.lib.atomic_io import atomic_write_json
+from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.keys import (
     KeysDB,
@@ -374,7 +374,7 @@ def _status_file():
 def member_statuses() -> list[dict]:
     path = _status_file()
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(read_text_with_retry(path))
         members = payload["members"]
         if not isinstance(members, list):
             raise ValueError("members must be a list")

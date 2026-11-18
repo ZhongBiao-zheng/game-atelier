@@ -142,10 +142,10 @@ def test_read_retries_while_file_is_being_replaced_on_windows(isolated_data_root
     # GET 不持锁：Windows 上正好撞上 PUT 的 os.replace 会拿到 PermissionError，重试后应读到内容而不是报损坏。
     client = _client(isolated_data_root)
     assert client.put("/api/accent-themes", json=_payload(active="blue")).status_code == 200
-    # 先把路径建好再切 os.name：nt 下 pathlib 会去实例化 WindowsPath。
+    # 只打开 atomic_io 的 Windows 重试开关，不改全局 os.name。
     path = data_root.accent_themes_file()
     monkeypatch.setattr(accent_themes.data_root, "accent_themes_file", lambda: path)
-    monkeypatch.setattr(atomic_io.os, "name", "nt")
+    monkeypatch.setattr(atomic_io, "_RETRY_PERMISSION_ERRORS", True)
     monkeypatch.setattr(atomic_io.time, "sleep", lambda _s: None)
     calls = {"n": 0}
     real_read = Path.read_text

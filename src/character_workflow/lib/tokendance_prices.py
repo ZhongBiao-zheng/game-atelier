@@ -21,7 +21,7 @@ from urllib.parse import quote, urlsplit
 import requests
 
 from character_workflow.lib import data_root
-from character_workflow.lib.atomic_io import atomic_write_json
+from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
 
 SYNC_INTERVAL_SECONDS = 6 * 3600
 # 补拉失败（上游没有这个模型、网络不通）后多久内不再为同一模型重试，避免每个任务都等一次超时。
@@ -50,7 +50,7 @@ def load_snapshot() -> dict[str, Any]:
         return {"synced_at": None, "models": {}}
     if _cache is None or _cache[0] != mtime:
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
+            value = json.loads(read_text_with_retry(path))
         except (OSError, ValueError):
             return {"synced_at": None, "models": {}}
         if not isinstance(value, dict) or not isinstance(value.get("models"), dict):

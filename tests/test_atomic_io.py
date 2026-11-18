@@ -14,7 +14,7 @@ import character_workflow.lib.atomic_io as aio
 
 
 def test_replace_retries_then_succeeds_on_windows(tmp_path, monkeypatch):
-    monkeypatch.setattr(aio.os, "name", "nt")
+    monkeypatch.setattr(aio, "_RETRY_PERMISSION_ERRORS", True)
     monkeypatch.setattr(aio.time, "sleep", lambda _s: None)
     calls = {"n": 0}
     real_replace = Path.replace
@@ -36,7 +36,7 @@ def test_replace_retries_then_succeeds_on_windows(tmp_path, monkeypatch):
 
 
 def test_replace_reraises_after_exhausting_attempts(tmp_path, monkeypatch):
-    monkeypatch.setattr(aio.os, "name", "nt")
+    monkeypatch.setattr(aio, "_RETRY_PERMISSION_ERRORS", True)
     monkeypatch.setattr(aio.time, "sleep", lambda _s: None)
 
     def always_denied(self, dst):
@@ -54,7 +54,7 @@ def test_replace_reraises_after_exhausting_attempts(tmp_path, monkeypatch):
 
 def test_read_retries_while_file_is_being_replaced_on_windows(tmp_path, monkeypatch):
     # 保存供应商时 keys.json 被原地替换，同一瞬间启动的任务读它会拿到 PermissionError（Windows CI 实测）。
-    monkeypatch.setattr(aio.os, "name", "nt")
+    monkeypatch.setattr(aio, "_RETRY_PERMISSION_ERRORS", True)
     monkeypatch.setattr(aio.time, "sleep", lambda _s: None)
     target = tmp_path / "keys.json"
     target.write_text('{"keys": []}', encoding="utf-8")

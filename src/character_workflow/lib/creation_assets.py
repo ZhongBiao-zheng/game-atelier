@@ -23,7 +23,7 @@ from character_workflow.lib.canvas_projects import (
     canvas_project_dir,
     canvas_project_lock_path,
 )
-from character_workflow.lib.file_lock import file_lock
+from character_workflow.lib.file_lock import file_lock, try_file_lock
 from character_workflow.lib.media_probe import mp4_track_dimensions as video_dimensions_from_bytes
 from character_workflow.lib.prompt_variables import build_prompt_variable_template
 from character_workflow.lib.schemas import (
@@ -1367,7 +1367,11 @@ def migrate_legacy_canvas_libraries() -> int:
             asset_path = project_dir / "library" / "assets.json"
             prompt_path = project_dir / "library" / "prompts.json"
             try:
-                with file_lock(canvas_project_lock_path(project_id)):
+                # 持目录锁时只「试」项目锁：update_canvas_categories 是「项目锁 → 目录锁」，这里若等项目锁，
+                # 两边会互等。拿不到就本轮跳过、不登记，下一次资产库读写再迁。
+                with try_file_lock(canvas_project_lock_path(project_id)) as acquired:
+                    if not acquired:
+                        continue
                     document = _read_canvas_document_unlocked(project_id)
                     legacy_assets = (
                         RevisionedSidecar[CanvasLibraryAsset].model_validate_json(

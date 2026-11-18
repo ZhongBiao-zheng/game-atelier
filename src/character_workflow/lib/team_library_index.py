@@ -12,7 +12,7 @@ from pathlib import Path, PurePath
 from pydantic import ValidationError
 
 from character_workflow.lib import data_root
-from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
+from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json, read_text_with_retry
 from character_workflow.lib.schemas import (
     TeamAssetFile,
     PromptPreviewImage,
@@ -273,7 +273,7 @@ def read_index(library_id: str) -> TeamLibraryIndex | None:
     if not path.is_file():
         return None
     try:
-        return TeamLibraryIndex.model_validate_json(path.read_text(encoding="utf-8"))
+        return TeamLibraryIndex.model_validate_json(read_text_with_retry(path))
     except (OSError, ValidationError):
         return None
 

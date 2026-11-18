@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pydantic import ValidationError
 
 from character_workflow.lib import data_root
-from character_workflow.lib.atomic_io import atomic_write_json
+from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.schemas import (
     CanvasGenerationDefaults,
@@ -51,7 +51,7 @@ def _read_unlocked() -> CanvasUiPreferences:
     if not path.exists():
         return default_canvas_ui_preferences()
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(read_text_with_retry(path))
         # Trigger: 5.48.1 曾把「显示按钮文字」存成 image_toolbar.show_labels，5.49.1 起文字常显、字段退役
         # Why: schema 是 extra=forbid，不丢这个键，升级前写过偏好的用户会被判成文件损坏
         # Outcome: 只丢这一个键，其余内容照常严格校验

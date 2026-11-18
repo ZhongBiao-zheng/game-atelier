@@ -19,6 +19,8 @@ from typing import Any
 # POSIX 的 replace 原子、不命中此竞态，故仅在 nt 上重试，其它平台行为不变。
 _REPLACE_ATTEMPTS = 10
 _REPLACE_DELAY = 0.05
+# 只有 Windows 会在替换瞬间拒绝访问；测试把它置 True 才能在 POSIX 上模拟这一刻。
+_RETRY_PERMISSION_ERRORS = os.name == "nt"
 
 
 def _replace_with_retry(tmp: Path, path: Path) -> None:
@@ -27,7 +29,7 @@ def _replace_with_retry(tmp: Path, path: Path) -> None:
             tmp.replace(path)
             return
         except PermissionError:
-            if os.name != "nt" or attempt == _REPLACE_ATTEMPTS - 1:
+            if not _RETRY_PERMISSION_ERRORS or attempt == _REPLACE_ATTEMPTS - 1:
                 raise
             time.sleep(_REPLACE_DELAY)
 
@@ -41,7 +43,7 @@ def read_text_with_retry(path: Path, encoding: str = "utf-8") -> str:
         try:
             return path.read_text(encoding=encoding)
         except PermissionError:
-            if os.name != "nt" or attempt == _REPLACE_ATTEMPTS - 1:
+            if not _RETRY_PERMISSION_ERRORS or attempt == _REPLACE_ATTEMPTS - 1:
                 raise
             time.sleep(_REPLACE_DELAY)
     raise AssertionError("unreachable")

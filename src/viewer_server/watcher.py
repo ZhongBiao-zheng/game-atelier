@@ -14,6 +14,7 @@ from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from character_workflow.lib import data_root
+from character_workflow.lib.atomic_io import read_text_with_retry
 from viewer_server.sse import hub
 
 if TYPE_CHECKING:
@@ -22,7 +23,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class JobsHandler(FileSystemEventHandler):
+class GuardedHandler(FileSystemEventHandler):
+    """watchdog 6 的分发线程对处理器异常不设防（observers/api.py：dispatch_events 无 try，
+    run() 只接 queue.Empty）：任何一个处理器抛一次，整个 Observer 的分发线程退出，所有监听
+    （任务、画布、图片、团队库）永久停推。所有处理器都从这里继承：单次失败记日志，继续分发。"""
+
+    def dispatch(self, event: FileSystemEvent) -> None:
+        try:
+            super().dispatch(event)
+        except Exception:  # noqa: BLE001 —— 不能让一次事件处理失败停掉全部监听
+            logger.exception("文件监听处理失败：%s", getattr(event, "src_path", ""))
+
+
+class JobsHandler(GuardedHandler):
     # jobs 文件全部走 tmp+replace 原子写；inotify（Linux）对 replace 发的是 moved，
     # mac FSEvents 合并成 modified —— 不补 on_moved 在 Linux 上会整体丢推送。
     def on_modified(self, event: FileSystemEvent) -> None:
@@ -42,7 +55,8 @@ class JobsHandler(FileSystemEventHandler):
         if p.suffix != ".json" or p.name.endswith(".tmp"):
             return
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            # 写入方持 job_lock 原子替换；Windows 上替换那一刻打开会 PermissionError，重试越过。
+            data = json.loads(read_text_with_retry(p))
         except (FileNotFoundError, json.JSONDecodeError):
             return
         hub.broadcast("job-changed", {
@@ -51,7 +65,7 @@ class JobsHandler(FileSystemEventHandler):
         })
 
 
-class CanvasDocumentsHandler(FileSystemEventHandler):
+class CanvasDocumentsHandler(GuardedHandler):
     # 画布文档 canvas.json 也是 tmp+replace 原子写：Linux 发 moved，首次建项目是 created。
     # Agent（canvas_apply_changes / import_media / run）与浏览器都经 save_canvas_document 落盘，
     # 只盯文件就能覆盖全部写入方；浏览器拿到事件后按 revision 决定要不要重载。
@@ -72,7 +86,7 @@ class CanvasDocumentsHandler(FileSystemEventHandler):
         if p.name != "canvas.json":
             return
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            data = json.loads(read_text_with_retry(p))
         except (OSError, json.JSONDecodeError):
             return
         hub.broadcast("canvas-document-changed", {
@@ -81,7 +95,7 @@ class CanvasDocumentsHandler(FileSystemEventHandler):
         })
 
 
-class ImagesHandler(FileSystemEventHandler):
+class ImagesHandler(GuardedHandler):
     def __init__(self, character_resolver):
         self._resolve = character_resolver
 
@@ -95,7 +109,7 @@ class ImagesHandler(FileSystemEventHandler):
         hub.broadcast("image-added", {"character_id": cid, "path": str(p)})
 
 
-class TeamLibraryHandler(FileSystemEventHandler):
+class TeamLibraryHandler(GuardedHandler):
     """挂载目录任何变化 → 防抖后全量重扫 → 按 diff 广播 team-library-changed。
 
     团队库是活的 SVN / 网盘工作副本：一次 update 会发出成百上千条事件，逐条解析没有意义，

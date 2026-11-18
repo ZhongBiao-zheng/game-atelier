@@ -256,7 +256,10 @@ async def run_periodic():
     _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix='gateway-share')
     try:
         while True:
-            await asyncio.to_thread(schedule_all)
+            try:
+                await asyncio.to_thread(schedule_all)
+            except Exception:  # noqa: BLE001 —— 一轮失败只记日志，不能让周期同步永久停掉
+                logging.getLogger(__name__).exception("团队库共享同步调度失败")
             await asyncio.sleep(600)
     finally:
         with _guard:

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from character_workflow.lib import data_root, plugin_registry
-from character_workflow.lib.atomic_io import atomic_write_json
+from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
 from character_workflow.lib.canvas_projects import canvas_project_dir, read_canvas_project
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.plugin_registry import PluginError
@@ -42,7 +42,7 @@ def _require_project(project_id: str) -> None:
 def _read_unlocked(project_id: str) -> dict[str, dict[str, Any]]:
     """读不出就当没批准过：最坏结果是用户再点一次「允许」，不会放大权限。"""
     try:
-        raw = json.loads(_grants_path(project_id).read_text(encoding="utf-8"))
+        raw = json.loads(read_text_with_retry(_grants_path(project_id)))
     except FileNotFoundError:
         return {}
     except (OSError, ValueError) as error:
