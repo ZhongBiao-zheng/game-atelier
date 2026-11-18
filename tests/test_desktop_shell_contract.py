@@ -283,6 +283,28 @@ def test_launch_ps1_follows_the_windows_startup_rule(tmp_path):
         assert f"Remove-Item Env:{name}" in script
 
 
+def _electron_windows_block() -> str:
+    source = (ELECTRON_RUNTIME).read_text(encoding="utf-8")
+    start = source.index("  launcher(args) {")
+    return source[start:source.index("\n  }\n", start)]
+
+
+ELECTRON_RUNTIME = REPO_ROOT / "desktop/src/runtime.mjs"
+
+
+def test_electron_shell_follows_the_windows_startup_rule():
+    rule, block = WINDOWS_STARTUP_RULE, _electron_windows_block()
+    join = lambda parts: "path.join(payload, " + ", ".join(f"'{p}'" for p in parts) + ")"  # noqa: E731
+    assert f"readTrim(path.join(this.root, '{rule['pointer']}'))" in block
+    assert "path.join(this.root, 'versions', version)" in block
+    assert f"file: {join(rule['interpreter'])}" in block
+    assert f"args: [{join(rule['entry'])}, ...args]" in block
+    assert f"env.PYTHONPATH = {join(rule['pythonpath'])}" in block
+    assert f"env.PYTHONUTF8 = '{rule['pythonutf8']}'" in block
+    for name in rule["cleared"]:
+        assert f"delete env.{name};" in block
+
+
 def test_desktop_shell_follows_the_windows_startup_rule():
     rule, block = WINDOWS_STARTUP_RULE, _shell_windows_block()
     join = lambda parts: "payload" + "".join(f'.join("{p}")' for p in parts)  # noqa: E731
@@ -306,11 +328,72 @@ def test_runtime_and_shell_agree_on_the_contract_level():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     build = (REPO_ROOT / "scripts/build_release.py").read_text(encoding="utf-8")
-    shell = (REPO_ROOT / "desktop/src-tauri/src/runtime.rs").read_text(encoding="utf-8")
-    declared = re.search(r"pub const DESKTOP_CONTRACT: u32 = (\d+);", shell)
+    shell = (REPO_ROOT / "desktop/src/runtime.mjs").read_text(encoding="utf-8")
+    declared = re.search(r"export const DESKTOP_CONTRACT = (\d+);", shell)
     assert declared and int(declared[1]) == module.DESKTOP_CONTRACT
-    assert 'const CONTRACT_FILE: &str = "DESKTOP_CONTRACT";' in shell
+    assert "const CONTRACT_FILE = 'DESKTOP_CONTRACT';" in shell
     assert '(payload / "DESKTOP_CONTRACT").write_text(f"{DESKTOP_CONTRACT}\\n"' in build
-    main = (REPO_ROOT / "desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
-    assert "package_info().version" not in main.split("fn overlay_title_bar")[1].split("\nfn ")[0]
-    assert "runtime::meets_contract(&root)" in main
+    # The Tauri shell still ships on Windows until the Electron switch reaches it; it only needs
+    # a runtime at least as new as its own level.
+    tauri = (REPO_ROOT / "desktop/src-tauri/src/runtime.rs").read_text(encoding="utf-8")
+    level = re.search(r"pub const DESKTOP_CONTRACT: u32 = (\d+);", tauri)
+    assert level and int(level[1]) <= module.DESKTOP_CONTRACT
+
+
+def test_seed_build_id_is_a_content_digest(tmp_path):
+    """Same code, same id; any change under app/ or in the pinned requirements, another id."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_build_release_id", REPO_ROOT / "scripts/build_release.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    payload = tmp_path / "5.139.0"
+    (payload / "app/src").mkdir(parents=True)
+    (payload / "requirements.txt").write_text("fastapi==1\n", encoding="utf-8")
+    (payload / "app/src/a.py").write_text("x = 1\n", encoding="utf-8")
+    first = module.build_id(payload)
+    assert first == module.build_id(payload)
+    (payload / "app/src/a.py").write_text("x = 2\n", encoding="utf-8")
+    assert module.build_id(payload) != first
+    (payload / "app/src/a.py").write_text("x = 1\n", encoding="utf-8")
+    (payload / "requirements.txt").write_text("fastapi==2\n", encoding="utf-8")
+    assert module.build_id(payload) != first
+
+
+ELECTRON = REPO_ROOT / "desktop/src"
+
+
+def test_preload_exposes_only_the_documented_interfaces():
+    # docs/contracts/desktop-shell.md: the Atelier page gets setTheme, the bundled page retry and
+    # openLog, every other page nothing.
+    import re
+    preload = (ELECTRON / "preload.cjs").read_text(encoding="utf-8")
+    exposed = re.findall(r"exposeInMainWorld\('(\w+)', \{(.*?)\n  \}\);", preload, re.S)
+    assert [name for name, _ in exposed] == ["atelierShell", "atelierLoading"]
+    keys = {name: re.findall(r"^\s+(\w+): ", body, re.M) for name, body in exposed}
+    assert keys == {"atelierShell": ["setTheme"], "atelierLoading": ["retry", "openLog"]}
+    assert "protocol === 'http:' && hostname === '127.0.0.1'" in preload
+    assert "exposeInMainWorld('ipcRenderer'" not in preload
+
+
+def test_every_ipc_message_is_checked_against_the_sender_frame():
+    import re
+    main = (ELECTRON / "main.mjs").read_text(encoding="utf-8")
+    # The only ipcMain listener is the checked one.
+    assert re.findall(r"ipcMain\.(\w+)\(", main) == ["on"]
+    listener = main.split("ipcMain.on(channel, (event, ...args) => {", 1)[1].split("\n  });", 1)[0]
+    assert "trustedSender(event.senderFrame, state.win?.webContents.mainFrame, kind, context)" in listener
+    assert listener.index("trustedSender") < listener.index("handler(...args)")
+    channels = re.findall(r"listen\('([\w:-]+)', '(\w+)'", main)
+    assert channels == [("atelier:set-theme", "page"), ("atelier:retry", "local"), ("atelier:open-log", "local")]
+
+
+def test_electron_pages_run_sandboxed_without_node():
+    main = (ELECTRON / "main.mjs").read_text(encoding="utf-8")
+    prefs = main.split("function webPreferences() {", 1)[1].split("\n}", 1)[0]
+    for setting in ("contextIsolation: true", "nodeIntegration: false", "sandbox: true",
+                    "nodeIntegrationInSubFrames: false", "webviewTag: false"):
+        assert setting in prefs, setting
+    builder = (REPO_ROOT / "desktop/electron-builder.yml").read_text(encoding="utf-8")
+    for fuse in ("runAsNode: false", "enableNodeOptionsEnvironmentVariable: false",
+                 "enableNodeCliInspectArguments: false", "onlyLoadAppFromAsar: true"):
+        assert fuse in builder, fuse

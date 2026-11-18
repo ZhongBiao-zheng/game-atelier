@@ -11,10 +11,23 @@ import subprocess
 
 REPO = Path(__file__).resolve().parent.parent
 # What this runtime offers the desktop shell (docs/contracts/desktop-shell.md); the shell reads it
-# from versions/<version>/DESKTOP_CONTRACT. 1: bootstrap.py --desktop-start, and the page leaves
-# room for the traffic lights under data-titlebar="overlay". Raise it when the shell starts
-# relying on something new, together with DESKTOP_CONTRACT in desktop/src-tauri/src/runtime.rs.
-DESKTOP_CONTRACT = 1
+# from versions/<version>/DESKTOP_CONTRACT. 2: bootstrap.py --desktop-start; the page declares its
+# drag regions with app-region, reports its theme through window.atelierShell and leaves room for
+# the window controls under data-titlebar="overlay". Raise it when the shell starts relying on
+# something new, together with DESKTOP_CONTRACT in desktop/src/runtime.mjs.
+DESKTOP_CONTRACT = 2
+
+
+def build_id(payload: Path) -> str:
+    """Content digest of what this build adds on top of the interpreter: app/ and the pinned
+    requirements. Two builds of the same version share it only when their code is identical, so
+    the desktop shell can tell a reinstalled test package from the one it unpacked before."""
+    digest = hashlib.sha256()
+    files = [payload / "requirements.txt", *(p for p in (payload / "app").rglob("*") if p.is_file())]
+    for name in sorted(file.relative_to(payload).as_posix() for file in files):
+        digest.update(name.encode("utf-8") + b"\0")
+        digest.update(hashlib.sha256((payload / name).read_bytes()).digest())
+    return digest.hexdigest()
 
 
 def write_launchers(folder: Path, *, windows: bool) -> None:
@@ -102,6 +115,7 @@ def build(output: Path, platform: str) -> Path:
         shutil.copy2(REPO / name, app / name)
     (payload / "VERSION").write_text(version + "\n", encoding="utf-8")
     (payload / "DESKTOP_CONTRACT").write_text(f"{DESKTOP_CONTRACT}\n", encoding="utf-8")
+    (payload / "BUILD_ID").write_text(build_id(payload) + "\n", encoding="utf-8")
     write_launchers(folder, windows=os.name == "nt")
     archive = Path(shutil.make_archive(
         str(output.resolve() / f"GameAtelier-{version}-{platform}"),

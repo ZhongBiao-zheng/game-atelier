@@ -41,6 +41,8 @@ EXCLUDED_PARTS = {
 }
 # Desktop shell build outputs (desktop/.gitignore): Rust target, Tauri schemas, generated icons.
 EXCLUDED_DESKTOP_OUTPUTS = {"target", "gen", "icons"}
+# Electron shell: electron-builder output and what build_desktop.py / `pnpm icons` stage for it.
+EXCLUDED_ELECTRON_OUTPUTS = {"dist", "stage"}
 EXCLUDED_NAMES = {
     ".DS_Store",
     "Thumbs.db",
@@ -119,6 +121,8 @@ def _excluded(repo: Path, f: Path) -> bool:
     if any(part in EXCLUDED_PARTS for part in parts):
         return True
     if parts[:2] == ("desktop", "src-tauri") and len(parts) > 2 and parts[2] in EXCLUDED_DESKTOP_OUTPUTS:
+        return True
+    if parts[0] == "desktop" and len(parts) > 1 and parts[1] in EXCLUDED_ELECTRON_OUTPUTS:
         return True
     if parts[0] == "docs" and len(parts) > 1 and parts[1] in EXCLUDED_DOC_DIRS:
         return True

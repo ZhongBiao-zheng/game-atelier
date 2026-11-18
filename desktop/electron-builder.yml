@@ -1,0 +1,43 @@
+# Product name: desktop/package.json `productName` (the only place). Version: passed in by
+# scripts/build_desktop.py from .claude-plugin/plugin.json. Seed: staged by the same script.
+appId: app.atelier.desktop
+directories:
+  output: dist
+  buildResources: build
+electronDist: node_modules/electron/dist
+files:
+  - package.json
+  - src/**
+  - ui/**
+  - stage/icons/trayTemplate.png
+extraResources:
+  - from: stage/seed
+    to: seed
+asar: true
+afterPack: scripts/after-pack.cjs
+electronLanguages:
+  - zh_CN
+  - zh_TW
+  - en
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: true
+mac:
+  target: dmg
+  icon: stage/icons/icon.png
+  category: public.app-category.graphics-design
+  minimumSystemVersion: '13.0'
+  # Ad-hoc signature: no certificate, but a sealed bundle (unsigned arm64 apps do not run).
+  identity: '-'
+  hardenedRuntime: false
+  extendInfo:
+    # The bundle has no .lproj of its own; this tells macOS which languages system-provided menu
+    # items (dictation, emoji, window list) may use.
+    CFBundleDevelopmentRegion: en
+    CFBundleLocalizations: [en, zh_CN, zh_TW]
+dmg:
+  writeUpdateInfo: false
+publish: null
