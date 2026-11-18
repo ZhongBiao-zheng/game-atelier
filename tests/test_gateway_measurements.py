@@ -267,3 +267,39 @@ def test_stop_command_writes_the_stop_record_before_terminating(tmp_path, monkey
     monkeypatch.setattr(server, "_wait_for_exit", lambda pid: True)
     server.cmd_stop()
     assert [(row["event"], row["reason"], row["pid"]) for row in seen[0]] == [("stop", "normal", os.getpid())]
+
+
+def test_coarse_filesystem_clock_does_not_lose_the_last_alive_time(isolated_data_root):
+    """Linux 的文件时间戳取自粗粒度时钟，可能早于紧挨着之前的 Python 时间（CI 3000 次里 290 次）。
+
+    心跳时间必须和启停记录同一个时钟：这里把 .alive 的修改时间压到启动记录之前 2 ms，模拟 Linux。
+    """
+    start = host_lifecycle.record_start(version="1.0", service_mode=False, pid=1, instance_id=None)
+    before = datetime.fromisoformat(start["time"]).timestamp() - 0.002
+    os.utime(host_lifecycle.alive_file(), (before, before))
+    abnormal = host_lifecycle.record_start(version="1.0", service_mode=False, pid=2, instance_id=None)
+    assert abnormal["previous"] == "abnormal"
+    assert abnormal["previous_last_alive_at"] is not None
+    assert abnormal["previous_last_alive_at"] >= start["time"]
+
+
+def test_empty_alive_file_from_older_versions_falls_back_to_its_mtime(isolated_data_root):
+    start = host_lifecycle.record_start(version="0.9", service_mode=False, pid=1, instance_id=None)
+    later = datetime.fromisoformat(start["time"]).timestamp() + 60
+    host_lifecycle.alive_file().write_text("", encoding="utf-8")  # 旧版本只 touch，不写内容
+    os.utime(host_lifecycle.alive_file(), (later, later))
+    abnormal = host_lifecycle.record_start(version="1.0", service_mode=False, pid=2, instance_id=None)
+    assert abnormal["previous_last_alive_at"] == datetime.fromtimestamp(later, timezone.utc).isoformat()
+
+
+def test_summary_counts_an_abnormal_session_without_last_alive_as_zero_hours(isolated_data_root):
+    base = datetime(2026, 11, 10, tzinfo=timezone.utc)
+    _write_events([
+        {"event": "start", "time": base.isoformat(), "previous": "first"},
+        {"event": "start", "time": (base + timedelta(hours=5)).isoformat(), "previous": "abnormal",
+         "previous_last_alive_at": None},
+        {"event": "stop", "time": (base + timedelta(hours=6)).isoformat(), "reason": "normal"},
+    ])
+    host = gateway_stats.summarize(base, base + timedelta(hours=6), now=base + timedelta(hours=7))["host"]
+    # 不知道异常结束前活到几点：那一段按 0 计，只算有据可查的第二段 1 小时。
+    assert (host["abnormal_ends"], host["online_hours"]) == (1, 1.0)

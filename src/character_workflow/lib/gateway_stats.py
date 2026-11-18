@@ -70,11 +70,8 @@ def _tasks(start: datetime, end: datetime) -> dict[str, Any]:
 
 
 def _alive_at() -> datetime | None:
-    try:
-        stamp = host_lifecycle.alive_file().stat().st_mtime
-    except FileNotFoundError:
-        return None
-    return datetime.fromtimestamp(stamp).astimezone()
+    alive = host_lifecycle.last_alive()
+    return alive.astimezone() if alive is not None else None
 
 
 def _sessions(events: list[dict], now: datetime) -> list[dict[str, Any]]:

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from character_workflow.lib import data_root
+from character_workflow.lib.atomic_io import atomic_write_text, read_text_with_retry
 from character_workflow.lib.file_lock import file_lock
 
 HEARTBEAT_SECONDS = 300
@@ -76,16 +77,28 @@ def _append(row: dict[str, Any], runtime: Path | None = None) -> None:
 
 
 def heartbeat() -> None:
+    # 把时间写进文件内容，和启停记录用同一个时钟。不能只 touch 用修改时间：Linux 的文件时间戳
+    # 取自内核粗粒度时钟，可能比紧挨着之前读到的 Python 时间还早约 1 ms（CI 实测 3000 次里 290 次），
+    # 刚启动就写的心跳会被判成「早于上次启动」而丢掉最后存活时间。
+    atomic_write_text(alive_file(), _now().isoformat())
+
+
+def last_alive() -> datetime | None:
+    """最后一次心跳的时间。旧版本只 touch 不写内容：内容为空时退回修改时间。"""
     path = alive_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.touch()
+    try:
+        text = read_text_with_retry(path).strip()
+        if text:
+            parsed = datetime.fromisoformat(text)
+            return parsed if parsed.tzinfo is not None else None
+        return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+    except (OSError, ValueError):
+        return None
 
 
 def _alive_at() -> str | None:
-    try:
-        return datetime.fromtimestamp(alive_file().stat().st_mtime, timezone.utc).isoformat()
-    except FileNotFoundError:
-        return None
+    alive = last_alive()
+    return alive.isoformat() if alive is not None else None
 
 
 def record_start(*, version: str, service_mode: bool, pid: int, instance_id: str | None) -> dict[str, Any]:
