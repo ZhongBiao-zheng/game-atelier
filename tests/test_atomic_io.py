@@ -74,7 +74,7 @@ def test_read_retries_while_file_is_being_replaced_on_windows(tmp_path, monkeypa
 
 
 def test_read_does_not_retry_off_windows(tmp_path, monkeypatch):
-    monkeypatch.setattr(aio.os, "name", "posix")
+    monkeypatch.setattr(aio, "_RETRY_PERMISSION_ERRORS", False)
     calls = {"n": 0}
 
     def denied(self, *args, **kwargs):

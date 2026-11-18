@@ -123,7 +123,7 @@ def list_jobs() -> list[Job]:
     for p in sorted(jobs_dir.glob("*.json")):
         # 一条坏文件（半写 / 手改 schema 不符）不能拖垮整个列表 → 跳过并留日志。
         try:
-            jobs.append(_load_job(json.loads(read_text_with_retry(p))))
+            jobs.append(_load_job(json.loads(read_text_with_retry(p, retry_missing=True))))
         except (OSError, json.JSONDecodeError, ValidationError):
             logger.warning("skipping bad job file: %s", p.name)
     return jobs
@@ -135,7 +135,7 @@ def last_used_by_alias() -> dict[str, str]:
     latest: dict[str, tuple[datetime, str]] = {}
     for p in jobs_dir.glob("*.json") if jobs_dir.exists() else []:
         try:
-            raw = json.loads(read_text_with_retry(p))
+            raw = json.loads(read_text_with_retry(p, retry_missing=True))
             alias, submitted = raw.get("alias"), raw.get("submitted_at")
             if not alias or not submitted:
                 continue
@@ -187,7 +187,7 @@ def write_job(
 
 def read_job(job_id: str) -> Job:
     # 锁外读：写入方持 job_lock 原子替换，Windows 上替换那一刻打开会 PermissionError，读取方重试越过。
-    return _load_job(json.loads(read_text_with_retry(_path(job_id))))
+    return _load_job(json.loads(read_text_with_retry(_path(job_id), retry_missing=True)))
 
 
 def update_job_status(

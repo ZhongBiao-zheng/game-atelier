@@ -36,20 +36,20 @@ def replacing(monkeypatch):
     """让指定文件的前 n 次打开撞上「正在被替换」。返回 arm(path, n)。"""
     monkeypatch.setattr(atomic_io, "_RETRY_PERMISSION_ERRORS", True)
     monkeypatch.setattr(atomic_io.time, "sleep", lambda _s: None)
-    pending: dict[Path, int] = {}
+    pending: dict[Path, list[type[OSError]]] = {}
     real_read = Path.read_text
 
     def flaky(self, *args, **kwargs):
-        left = pending.get(Path(self), 0)
-        if left:
-            pending[Path(self)] = left - 1
-            raise PermissionError(13, "Permission denied")
+        queue = pending.get(Path(self))
+        if queue:
+            error = queue.pop(0)
+            raise error(13 if error is PermissionError else 2, "simulated replace")
         return real_read(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", flaky)
 
-    def arm(path: Path, times: int = 2) -> None:
-        pending[Path(path)] = times
+    def arm(path: Path, times: int = 2, error: type[OSError] = PermissionError) -> None:
+        pending[Path(path)] = [error] * times
 
     return arm
 
@@ -62,6 +62,39 @@ def test_read_job_retries_through_a_replace(isolated_data_root, replacing):
     job = _job()
     replacing(jobs._path(job.job_id))
     assert jobs.read_job(job.job_id).job_id == job.job_id
+
+
+def test_read_job_rides_out_the_moment_the_name_is_missing(isolated_data_root, replacing):
+    # Windows CI 实测：替换进行中，目标名会短暂查不到。
+    from character_workflow.lib import jobs
+
+    job = _job()
+    replacing(jobs._path(job.job_id), error=FileNotFoundError)
+    assert jobs.read_job(job.job_id).job_id == job.job_id
+
+
+def test_jobs_watcher_rides_out_the_moment_the_name_is_missing(isolated_data_root, replacing, monkeypatch):
+    from character_workflow.lib import jobs
+    from viewer_server import watcher
+
+    sent: list[dict] = []
+    monkeypatch.setattr(watcher.hub, "broadcast", lambda event, data: sent.append(data))
+    job = _job()
+    replacing(jobs._path(job.job_id), error=FileNotFoundError)
+    watcher.JobsHandler()._emit(str(jobs._path(job.job_id)), False)
+    assert sent == [{"job_id": job.job_id, "status": "pending"}]
+
+
+def test_a_truly_missing_file_is_not_waited_on_by_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(atomic_io, "_RETRY_PERMISSION_ERRORS", True)
+    slept: list[float] = []
+    monkeypatch.setattr(atomic_io.time, "sleep", slept.append)
+    with pytest.raises(FileNotFoundError):
+        atomic_io.read_text_with_retry(tmp_path / "absent.json")
+    assert slept == []
+    with pytest.raises(FileNotFoundError):
+        atomic_io.read_text_with_retry(tmp_path / "absent.json", retry_missing=True)
+    assert slept == [atomic_io._MISSING_DELAY] * atomic_io._MISSING_ATTEMPTS
 
 
 def test_runner_cancel_check_does_not_fail_the_job_during_a_replace(isolated_data_root, replacing):
@@ -398,21 +431,26 @@ def test_concurrent_job_rewrites_never_break_unlocked_readers(isolated_data_root
     errors: list[str] = []
     stop = threading.Event()
 
+    import traceback
+
     def writer():
         try:
             for index in range(150):
                 jobs.update_job_phase(job.job_id, f"queued:{index + 1}")
+        except BaseException as error:  # noqa: BLE001
+            errors.append("writer: " + "".join(traceback.format_exception(error)))
         finally:
             stop.set()
 
     def reader():
-        import traceback
+        # 读取之间让 1 ms：真实的读取方是轮询 / 文件事件，不会无间隔地一直占着文件。
         while not stop.is_set():
             try:
                 jobs.read_job(job.job_id)
             except BaseException as error:  # noqa: BLE001
-                errors.append("".join(traceback.format_exception(error)))
+                errors.append("reader: " + "".join(traceback.format_exception(error)))
                 return
+            time.sleep(0.001)
 
     threads = [threading.Thread(target=writer), *(threading.Thread(target=reader) for _ in range(3))]
     for thread in threads:

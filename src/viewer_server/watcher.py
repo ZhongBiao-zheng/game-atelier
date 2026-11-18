@@ -56,7 +56,7 @@ class JobsHandler(GuardedHandler):
             return
         try:
             # 写入方持 job_lock 原子替换；Windows 上替换那一刻打开会 PermissionError，重试越过。
-            data = json.loads(read_text_with_retry(p))
+            data = json.loads(read_text_with_retry(p, retry_missing=True))
         except (FileNotFoundError, json.JSONDecodeError):
             return
         hub.broadcast("job-changed", {
@@ -86,7 +86,7 @@ class CanvasDocumentsHandler(GuardedHandler):
         if p.name != "canvas.json":
             return
         try:
-            data = json.loads(read_text_with_retry(p))
+            data = json.loads(read_text_with_retry(p, retry_missing=True))
         except (OSError, json.JSONDecodeError):
             return
         hub.broadcast("canvas-document-changed", {

@@ -33,7 +33,7 @@ jobs:
       - run: uv python install 3.11
       - run: uv sync
       - name: loop
-        run: uv run --with pytest-repeat pytest -q -n 4 --count 200 "tests/test_unlocked_reads.py::${{ matrix.test }}" -rf
+        run: uv run --with pytest-repeat pytest -q -n 4 --count 500 "tests/test_unlocked_reads.py::${{ matrix.test }}" -rf
 
   pytest-windows:
     runs-on: windows-latest
