@@ -119,7 +119,8 @@ def test_cnb_timeout_leaves_budget_for_github(monkeypatch):
     monkeypatch.setattr(bootstrap.subprocess, "run", timeout)
     def urlopen(request, timeout):
         assert request.full_url == bootstrap.LATEST_RELEASE_URL
-        assert 0 < timeout <= 3
+        # Windows 的 monotonic 精度约 15.6 ms，(t + 3) - t 的浮点舍入可能比 3 大 3e-14。
+        assert 0 < timeout <= 3 + 1e-9
         return io.BytesIO(json.dumps(github_payload()).encode())
     monkeypatch.setattr(bootstrap.urllib.request, "urlopen", urlopen)
     assert bootstrap._query_latest_release(True, time.monotonic() + 3)["source"] == "github"

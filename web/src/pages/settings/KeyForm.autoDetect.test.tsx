@@ -94,7 +94,8 @@ it('keeps many preselected models valid for the selection view and the save payl
   expect(new Set(models.map(model => model.id)).size).toBe(count);
   for (const model of models) expect(['image', 'video']).toContain(model.modality);
   expect(models.map(model => model.id)).not.toEqual(expect.arrayContaining(['veo3.1']));
-});
+  // 22 个模型的渲染平时 1–3 秒，机器负载高时超过默认的 5 秒（macOS CI 实测 6.1 秒）。
+}, 20000);
 
 it('shows an invalid key without blocking save', async () => {
   vi.mocked(previewModels).mockResolvedValue({ models: [remote('gpt-image-2', 'image')], total: 1, excluded: 0 });
