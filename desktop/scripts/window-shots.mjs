@@ -1,5 +1,4 @@
-// CI only (Windows): screenshots for choosing the caption-button height — 40 / 80 px × dark / light
-// — plus where a full-window overlay's top-right control lands (the `desktop-clear-top` rule).
+// CI only (Windows): the title bar with its caption buttons in dark and light — plus where a full-window overlay's top-right control lands (the `desktop-clear-top` rule).
 // Real screen captures, so the system-drawn caption buttons are in them.
 // usage: node window-shots.mjs <app-folder> <out-dir>
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -58,34 +57,32 @@ function capture(rect, file) {
 
 const prepared = spawnSync(exe, ['--prepare-runtime'], { env, encoding: 'utf8' });
 console.log('prepare-runtime', prepared.status, prepared.stdout.trim().split('\n').at(-1));
-for (const height of [40, 80]) {
-  for (const theme of ['dark', 'light']) {
-    const app = spawn(exe, [`--remote-debugging-port=${PORT}`], { env: { ...env, ATELIER_CAPTION_HEIGHT: String(height) }, stdio: 'ignore' });
-    const cdp = await page();
-    await sleep(3000);
-    await cdp.eval(`(() => { const b = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === '稍后'); if (b) b.click(); return !!b; })()`);
-    await sleep(1500);
-    const toggle = theme === 'light' ? '切换到浅色主题' : '切换到深色主题';
-    await cdp.eval(`(() => { const b = document.querySelector('[aria-label="${toggle}"]'); if (b) b.click(); return !!b; })()`);
-    await sleep(2000);
-    const rect = await cdp.eval('[screenX, screenY, outerWidth, outerHeight]');
-    // First with whatever dialog the empty data root opens (its dimming layer runs under the
-    // caption buttons), then without it.
-    capture(rect, path.join(out, `titlebar-${height}-${theme}-dialog.png`));
-    await cdp.eval(`(document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true`);
-    await sleep(1000);
-    capture(rect, path.join(out, `titlebar-${height}-${theme}.png`));
-    if (height === 40 && theme === 'dark') {
-      // Stand-in for the Lightbox close button (fixed, right-6 top-6) with the same class.
-      await cdp.eval(`(() => { const b = document.createElement('div'); b.className = 'desktop-clear-top';
-        Object.assign(b.style, { position: 'fixed', right: '24px', top: '24px', width: '40px', height: '40px', borderRadius: '20px', background: '#e5484d', zIndex: 60 });
-        document.body.appendChild(b); return true; })()`);
-      await sleep(500);
-      capture(rect, path.join(out, 'overlay-top-right-40-dark.png'));
-    }
-    cdp.close();
-    spawnSync(exe, ['--quit'], { env, timeout: 60000 });
-    await new Promise((resolve) => { if (app.exitCode !== null) resolve(); else app.once('exit', resolve); });
-    console.log(`titlebar ${height} ${theme}: captured`, rect);
+for (const theme of ['dark', 'light']) {
+  const app = spawn(exe, [`--remote-debugging-port=${PORT}`], { env, stdio: 'ignore' });
+  const cdp = await page();
+  await sleep(3000);
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === '稍后'); if (b) b.click(); return !!b; })()`);
+  await sleep(1500);
+  const toggle = theme === 'light' ? '切换到浅色主题' : '切换到深色主题';
+  await cdp.eval(`(() => { const b = document.querySelector('[aria-label="${toggle}"]'); if (b) b.click(); return !!b; })()`);
+  await sleep(2000);
+  const rect = await cdp.eval('[screenX, screenY, outerWidth, outerHeight]');
+  // First with whatever dialog the empty data root opens (its dimming layer runs under the
+  // caption buttons), then without it.
+  capture(rect, path.join(out, `titlebar-${theme}-dialog.png`));
+  await cdp.eval(`(document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true`);
+  await sleep(1000);
+  capture(rect, path.join(out, `titlebar-${theme}.png`));
+  if (theme === 'dark') {
+    // Stand-in for the Lightbox close button (fixed, right-6 top-6) with the same class.
+    await cdp.eval(`(() => { const b = document.createElement('div'); b.className = 'desktop-clear-top';
+      Object.assign(b.style, { position: 'fixed', right: '24px', top: '24px', width: '40px', height: '40px', borderRadius: '20px', background: '#e5484d', zIndex: 60 });
+      document.body.appendChild(b); return true; })()`);
+    await sleep(500);
+    capture(rect, path.join(out, 'overlay-top-right-dark.png'));
   }
+  cdp.close();
+  spawnSync(exe, ['--quit'], { env, timeout: 60000 });
+  await new Promise((resolve) => { if (app.exitCode !== null) resolve(); else app.once('exit', resolve); });
+  console.log(`titlebar ${theme}: captured`, rect);
 }

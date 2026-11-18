@@ -101,7 +101,7 @@ jobs:
         run: |
           $setup = Get-ChildItem desktop-build -Filter '*-setup.exe' | Select-Object -First 1
           ./scripts/desktop_icon_check.ps1 -Installer $setup.FullName -Output desktop-build/installer-shots
-      - name: Title bar screenshots (caption buttons 40 / 80 px, dark / light)
+      - name: Title bar screenshots (dark / light)
         if: matrix.platform == 'windows-x64'
         run: node desktop/scripts/window-shots.mjs desktop/dist/win-unpacked desktop-build/window-shots
       - uses: actions/upload-artifact@v4

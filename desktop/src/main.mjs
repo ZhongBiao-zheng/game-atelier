@@ -27,11 +27,8 @@ const BACKGROUND = { dark: '#0A0A0B', light: '#F2F2F3' };
 const FOREGROUND = { dark: '#EDEDEF', light: '#0A0A0B' };
 /** Traffic lights centred in the page's 80 px top bar (lg:h-20). */
 const TRAFFIC_LIGHTS = { x: 20, y: 33 };
-/**
- * Height of the Windows caption buttons drawn over the page's top-right corner.
- * ATELIER_CAPTION_HEIGHT exists only for the 40 / 80 px comparison screenshots (batch 3).
- */
-const CAPTION_HEIGHT = Number(process.env.ATELIER_CAPTION_HEIGHT) || 40;
+/** Height of the Windows caption buttons drawn over the page's top-right corner (system standard). */
+const CAPTION_HEIGHT = 40;
 /**
  * Transparent: the buttons are drawn over whatever the page shows there, so a dialog's dimming
  * layer or the canvas runs under them too. Only the symbols follow the theme.
