@@ -19,6 +19,8 @@ from character_workflow.mcp.tool_catalog import ALL_TOOL_INPUT_MODELS, TOOL_DEFI
 def operation_of(name: str) -> str:
     if name.startswith("canvas_"):
         return "canvas-" + name.removeprefix("canvas_").replace("_", "-")
+    if name.startswith("ps_"):
+        return "ps-" + name.removeprefix("ps_")
     return ""
 
 
@@ -33,7 +35,7 @@ def _error_result(error: AdapterError) -> CallToolResult:
 def _success_result(operation: str, result: dict) -> CallToolResult:
     content = []
     metadata = dict(result)
-    preview = metadata.pop("preview", None) if operation.endswith("read-media") else None
+    preview = metadata.pop("preview", None) if operation in ("canvas-read-media", "ps-preview") else None
     if preview is not None:
         try:
             if not isinstance(preview, dict) or preview.get("mime_type") != "image/jpeg":
@@ -71,6 +73,19 @@ async def _strict_tool_arguments(context, call_next):
     return result
 
 
+def _plugin_tool_filter(client: CanvasClient):
+    """列工具时去掉服务端此刻不可用的 PS 联动工具（插件未启用、脚本开关关着、服务连不上）。ADR-0043。"""
+    async def middleware(context, call_next):
+        result = await call_next(context)
+        if context.method == "tools/list" and isinstance(result, dict):
+            available = await asyncio.to_thread(client.available_plugin_tools)
+            result["tools"] = [tool for tool in result.get("tools", [])
+                               if not tool.get("name", "").startswith("ps_")
+                               or operation_of(tool["name"]) in available]
+        return result
+    return middleware
+
+
 def create_server(client: CanvasClient) -> MCPServer:
     @asynccontextmanager
     async def lifespan(_server):
@@ -83,7 +98,7 @@ def create_server(client: CanvasClient) -> MCPServer:
         "game-atelier-canvas", version="1.0.0", log_level="WARNING",
         instructions=("Use authorized Canvas projects only. Ask the human before paid generation. "
                       "Do not bypass denied permissions using shell or provider calls."),
-        lifespan=lifespan, middleware=[_strict_tool_arguments],
+        lifespan=lifespan, middleware=[_strict_tool_arguments, _plugin_tool_filter(client)],
     )
     slots = asyncio.Semaphore(4)
 
@@ -108,7 +123,7 @@ def create_server(client: CanvasClient) -> MCPServer:
             bind(tool), description=tool.description,
             annotations=ToolAnnotations(
                 read_only_hint=tool.read_only,
-                destructive_hint=tool.operation == "canvas-apply-changes",
+                destructive_hint=tool.operation in ("canvas-apply-changes", "ps-execute"),
                 idempotent_hint=True, open_world_hint=False,
             ),
         )

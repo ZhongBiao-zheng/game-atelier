@@ -29,6 +29,17 @@ HTTP 端点 `POST /api/canvas-agent/<op>`，请求体 JSON ≤ 1 MiB，参数包
 | `canvas_get_run` | project_id、run_id → 状态、候选与产物 version_id | canvas_read |
 | `canvas_read_media` | project_id、version_id → 有界 JPEG 预览或元数据 | canvas_read |
 
+### 插件工具（ADR-0043）
+
+只对白名单里的插件开放，目前只有 PS 联动（`ps-bridge`）。适配器静态登记 `ps_inspect` / `ps_import` / `ps_place` / `ps_preview` / `ps_execute`，列工具时按服务端此刻的可用情况过滤（插件未启用、脚本开关关着时 `ps_execute` 不列出），调用时以服务端判断为准。
+
+| HTTP | 输入 → 结果 | 能力 |
+| --- | --- | --- |
+| `POST /api/canvas-agent/plugin-tools` | `{}` → `{tools: [{plugin_id, tool, read_only, description, parameters}]}` | Agent 凭据 |
+| `POST /api/canvas-agent/plugin-tools/<plugin_id>/<tool>` | `{project_id, arguments}` → 插件工具的结果（`preview` 字段为 `{mime_type, data_base64}` 图片） | 只读工具 canvas_read，其余 canvas_edit |
+
+两个接口只认 Agent 凭据，本机页面的会话走到这里也返回 403。工具当前不可用返回 404 `TOOL_NOT_AVAILABLE`。
+
 ### change set
 
 `changes` 每项以 `op` 区分，一次最多 50 条，整批在同一 `expected_revision` 上原子提交：

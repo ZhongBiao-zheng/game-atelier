@@ -18,8 +18,11 @@ _CANVAS_OPERATIONS = (
     "get-run", "read-media",
 )
 # 操作名 → 本机 HTTP 路径。画布操作以 "canvas-" 前缀区分，工具名相应为 canvas_*。
+_PS_TOOLS = ("inspect", "import", "place", "preview", "execute")
 OPERATIONS: dict[str, str] = {
     **{f"canvas-{name}": f"/api/canvas-agent/{name}" for name in _CANVAS_OPERATIONS},
+    # PS 联动插件的工具（ADR-0043），走插件工具接口，请求体为 {project_id, arguments}。
+    **{f"ps-{name}": f"/api/canvas-agent/plugin-tools/ps-bridge/{name}" for name in _PS_TOOLS},
 }
 _ERROR_MESSAGES = {
     "CONNECTION_REQUIRED": "请在本机 Atelier 管理页重新授权 Agent。",
@@ -137,6 +140,31 @@ def load_credentials(path: Path) -> Credentials:
         ) from None
 
 
+def _server_error(error: dict) -> "AdapterError":
+    code = error.get("code")
+    message = error.get("message")
+    # PS 联动插件的错误（ADR-0043）原话透传：「Photoshop 未启动」「脚本第 3 行出错」是 Agent 要的信息。
+    passthrough = (isinstance(code, str) and (code.startswith("PS_") or code == "TOOL_NOT_AVAILABLE")
+                   and isinstance(message, str) and bool(message))
+    code = code if isinstance(code, str) and (code in _ERROR_MESSAGES or passthrough) else "WORKSHOP_REQUEST_FAILED"
+    request_id = error.get("request_id")
+    if not (
+        isinstance(request_id, str) and len(request_id) <= 128
+        and request_id.replace("-", "").replace("_", "").isalnum()
+    ):
+        request_id = None
+    text = message[:500] if passthrough else _ERROR_MESSAGES.get(code, "画布操作失败，请在本机页面检查。")
+    return AdapterError(code, text, request_id)
+
+
+def _request_body(operation: str, payload: BaseModel) -> dict:
+    """画布工具的请求体就是参数本身；插件工具（ps-*）包成 {project_id, arguments}。"""
+    body = payload.model_dump(mode="json")
+    if operation.startswith("ps-"):
+        return {"project_id": body.pop("project_id"), "arguments": body}
+    return body
+
+
 def _safe_result(value: object, depth: int = 0) -> bool:
     if depth > 32:
         return False
@@ -244,21 +272,7 @@ class CanvasClient:
                     raise AdapterError("RESPONSE_INVALID", "本机服务返回格式不正确。")
                 if response.status_code >= 400:
                     error = result.get("error")
-                    error = error if isinstance(error, dict) else {}
-                    code = error.get("code")
-                    code = (
-                        code if isinstance(code, str) and code in _ERROR_MESSAGES
-                        else "WORKSHOP_REQUEST_FAILED"
-                    )
-                    request_id = error.get("request_id")
-                    if not (
-                        isinstance(request_id, str) and len(request_id) <= 128
-                        and request_id.replace("-", "").replace("_", "").isalnum()
-                    ):
-                        request_id = None
-                    raise AdapterError(
-                        code, _ERROR_MESSAGES.get(code, "画布操作失败，请在本机页面检查。"), request_id,
-                    )
+                    raise _server_error(error if isinstance(error, dict) else {})
                 return result
         except requests.RequestException:
             # No retry after an ambiguous write: the server may already have committed it.
@@ -302,6 +316,21 @@ class CanvasClient:
             except AdapterError:
                 pass
 
+    def available_plugin_tools(self) -> set[str]:
+        """服务端此刻可用的插件工具操作名（ps-*）；连不上、未授权时为空集（列工具时就不显示它们）。"""
+        with self._lock:
+            try:
+                credentials = self._load_credentials()
+                status = self._status(credentials)
+                if self._session is None or self._session.instance_id != status.instance_id:
+                    self._connect(credentials, status)
+                result = self._request("POST", "/api/canvas-agent/plugin-tools", {})
+            except AdapterError:
+                return set()
+        tools = result.get("tools") if isinstance(result, dict) else None
+        return {f"ps-{item['tool']}" for item in tools or []
+                if isinstance(item, dict) and item.get("plugin_id") == "ps-bridge" and f"ps-{item.get('tool')}" in OPERATIONS}
+
     def call(self, operation: str, payload: BaseModel) -> dict:
         if operation not in OPERATIONS:
             raise AdapterError("TOOL_NOT_ALLOWED", "此操作不属于画布工具。")
@@ -313,19 +342,16 @@ class CanvasClient:
                 or _parse_expiry(self._session.expires_at) <= datetime.now(timezone.utc)
             ):
                 self._connect(credentials, status)
+            body = _request_body(operation, payload)
             try:
-                result = self._request(
-                    "POST", OPERATIONS[operation], payload.model_dump(mode="json"),
-                )
+                result = self._request("POST", OPERATIONS[operation], body)
             except AdapterError as error:
                 if error.code != "SESSION_EXPIRED":
                     raise
                 # SESSION_EXPIRED is emitted before the route reads or executes the operation.
                 self._session = None
                 self._connect(credentials, self._status(credentials))
-                result = self._request(
-                    "POST", OPERATIONS[operation], payload.model_dump(mode="json"),
-                )
+                result = self._request("POST", OPERATIONS[operation], body)
             if not _safe_result(result):
                 raise AdapterError("RESPONSE_INVALID", "画布响应包含不允许通过工具返回的字段。")
             return result

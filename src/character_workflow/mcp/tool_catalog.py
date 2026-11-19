@@ -1,5 +1,8 @@
 """Canvas MCP 注册元数据；不依赖 MCP SDK，供本地管理页面读取。"""
 from dataclasses import dataclass
+from typing import Literal
+
+from pydantic import Field
 
 from character_workflow.lib.canvas_agent_schema import CANVAS_TOOL_INPUT_MODELS, StrictInput
 
@@ -23,6 +26,43 @@ _READ_ONLY = frozenset({
 })
 
 
+# PS 联动插件的 Agent 工具（ADR-0043）：只对白名单插件开放，这里静态登记，列工具时按服务端此刻的可用情况过滤。
+class PsProjectInput(StrictInput):
+    project_id: str = Field(min_length=1, max_length=160)
+
+
+class PsImportInput(PsProjectInput):
+    scope: Literal["merged", "layer"] = "merged"
+
+
+class PsPlaceInput(PsProjectInput):
+    node_id: str = Field(min_length=1, max_length=120)
+
+
+class PsPreviewInput(PsProjectInput):
+    document_id: int = Field(default=0, ge=0)
+
+
+class PsExecuteInput(PsProjectInput):
+    code: str = Field(min_length=1, max_length=3600)
+    document_id: int = Field(default=0, ge=0)
+
+
+PS_TOOLS = {
+    "inspect": (PsProjectInput, True, "Read local Photoshop: version, open documents (id, name, size), the active "
+                "document and its layers. Errors if Photoshop is not running; never launches it. Call first."),
+    "import": (PsImportInput, False, "Bring the Photoshop selection (or whole document) into the canvas as an image "
+               "node and remember where it came from. scope=merged takes visible pixels, layer the current layer."),
+    "place": (PsPlaceInput, False, "Place a canvas image node into Photoshop as a smart object layer; images that "
+              "came from Photoshop (or were generated from one) go back to their document and position."),
+    "preview": (PsPreviewInput, True, "Export a preview image (long edge <= 1600) of a Photoshop document; never "
+                "modifies it. Use to check edits."),
+    "execute": (PsExecuteInput, False, "Run an ExtendScript (ES3) function body in local Photoshop and return plain "
+                "JSON. Only listed when the user turned on Agent scripts in Atelier settings; every run is logged. "
+                "Inspect first; save copies instead of overwriting; failures do not roll back."),
+}
+
+
 @dataclass(frozen=True)
 class ToolDefinition:
     operation: str
@@ -44,5 +84,9 @@ TOOL_DEFINITIONS = tuple(
         billable=name == "run",
     )
     for name, model in CANVAS_TOOL_INPUT_MODELS.items()
+) + tuple(
+    ToolDefinition(operation=f"ps-{name}", input_model=model, description=description,
+                   read_only=read_only, billable=False)
+    for name, (model, read_only, description) in PS_TOOLS.items()
 )
 ALL_TOOL_INPUT_MODELS = {tool.operation: tool.input_model for tool in TOOL_DEFINITIONS}

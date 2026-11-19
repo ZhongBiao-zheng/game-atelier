@@ -5,7 +5,7 @@ import type { HostPluginApi } from '@/plugin-host/hostPlugins';
 import type { CanvasContentNode, CanvasDocument, CanvasNode } from '@/schema/canvas';
 
 import manifest from '../manifest.json';
-import { PsBridgeSettings } from './PsBridgeSettings';
+import { PsAgentScripts, PsBridgeSettings } from './PsBridgeSettings';
 import { importImage, placeImage, plugin, psBridgeBusy } from './psBridge';
 
 afterEach(() => { vi.unstubAllGlobals(); });
@@ -141,4 +141,35 @@ it('status area shows a probe failure as one line', async () => {
   await screen.findByText('Photoshop 已启动');
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: '检测' })); });
   expect(await screen.findByRole('alert')).toHaveTextContent(denied);
+});
+
+it('the agent script switch starts off and warns in one line once turned on', async () => {
+  const calls: Array<{ url: string; body: unknown }> = [];
+  let allowed = false;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as { params: { allow_scripts?: boolean } };
+    calls.push({ url, body });
+    if (url.endsWith('/settings')) {
+      if (typeof body.params.allow_scripts === 'boolean') allowed = body.params.allow_scripts;
+      return new Response(JSON.stringify({ result: { allow_scripts: allowed } }));
+    }
+    return new Response(JSON.stringify({ result: { entries: [
+      { at: '2026-11-19T12:00:00+00:00', caller: '外部 Agent', project_id: 'canvas-ps', document_id: 7,
+        code: '\nvar d = app.activeDocument;\nreturn d.name;', ok: false, error: '找不到文档', duration_ms: 12 },
+    ] } }));
+  }));
+  render(<PsAgentScripts />);
+  const toggle = await screen.findByRole('switch', { name: '允许 Agent 执行脚本' });
+  await waitFor(() => expect(toggle).toBeEnabled());
+  expect(toggle).not.toBeChecked();
+  expect(screen.queryByText('脚本可以读写本机文件')).toBeNull();
+  fireEvent.click(toggle);
+  expect(await screen.findByText('脚本可以读写本机文件')).toBeInTheDocument();
+  expect(calls.find(call => call.url.endsWith('/settings') && JSON.stringify(call.body).includes('true'))?.body)
+    .toEqual({ params: { allow_scripts: true } });
+  fireEvent.click(screen.getByRole('button', { name: '最近执行 1' }));
+  const log = await screen.findByRole('list', { name: '最近执行' });
+  expect(log).toHaveTextContent('外部 Agent');
+  expect(log).toHaveTextContent('失败');
+  expect(log).toHaveTextContent('var d = app.activeDocument;');
 });

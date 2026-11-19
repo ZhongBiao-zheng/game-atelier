@@ -195,6 +195,81 @@ var ATELIER_ARGS = (typeof arguments !== 'undefined' && arguments) ? arguments :
         result.placed_bounds = boundsPx(layer.bounds);
     }
 
+    function layerTree(container, depth, budget) {
+        var items = [], i, layer, item;
+        for (i = 0; i < container.layers.length && budget.left > 0; i++) {
+            layer = container.layers[i];
+            budget.left--;
+            item = { id: layer.id, name: layer.name, type: layer.typename, visible: layer.visible, opacity: layer.opacity };
+            if (layer.typename === 'LayerSet') {
+                if (depth < 10) item.layers = layerTree(layer, depth + 1, budget);
+            } else item.kind = String(layer.kind);
+            items.push(item);
+        }
+        return items;
+    }
+
+    // 给 Agent 看的文档状态：文档列表、活动文档、活动文档的图层（最多 300 个）。
+    function inspect(result) {
+        var docs = [], i, budget = { left: 300 };
+        for (i = 0; i < app.documents.length; i++) docs.push(describe(app.documents[i]));
+        result.version = app.version;
+        result.documents = docs;
+        result.active_document = app.documents.length ? app.activeDocument.name : null;
+        result.active_document_id = app.documents.length ? app.activeDocument.id : null;
+        if (app.documents.length) {
+            result.layers = layerTree(app.activeDocument, 0, budget);
+            result.layers_truncated = budget.left <= 0;
+        }
+    }
+
+    function documentById(id) {
+        for (var i = 0; i < app.documents.length; i++) if (app.documents[i].id === id) return app.documents[i];
+        throw new Error('DOCUMENT_NOT_FOUND');
+    }
+
+    // 预览：复制活动文档（或指定文档）、合并、转 RGB 8 位、长边缩到 1600，存 PNG；原文档不动。
+    function previewDocument(cfg, result) {
+        if (!app.documents.length) throw new Error('NO_DOCUMENT');
+        var doc = cfg.document_id ? documentById(cfg.document_id) : app.activeDocument;
+        var active = app.activeDocument;
+        var copy = doc.duplicate('atelier-preview', true);
+        try {
+            app.activeDocument = copy;
+            if (copy.mode !== DocumentMode.RGB) copy.changeMode(ChangeMode.RGB);
+            if (copy.bitsPerChannel !== BitsPerChannelType.EIGHT) copy.bitsPerChannel = BitsPerChannelType.EIGHT;
+            var w = px(copy.width), h = px(copy.height), edge = 1600;
+            if (Math.max(w, h) > edge) {
+                if (w >= h) copy.resizeImage(UnitValue(edge, 'px'), UnitValue(Math.round(h * edge / w), 'px'), null, ResampleMethod.BICUBIC);
+                else copy.resizeImage(UnitValue(Math.round(w * edge / h), 'px'), UnitValue(edge, 'px'), null, ResampleMethod.BICUBIC);
+            }
+            var options = new PNGSaveOptions();
+            options.compression = 6;
+            copy.saveAs(new File(cfg.out_png), options, true, Extension.LOWERCASE);
+        } finally {
+            copy.close(SaveOptions.DONOTSAVECHANGES);
+            app.activeDocument = active;
+        }
+        result.document = describe(doc);
+    }
+
+    // Agent 写的 ExtendScript 函数体（ADR-0043）。脚本里的 alert / confirm / prompt 不弹框（弹框会让调用挂住），
+    // 执行出错不回滚，回执里带错误与行号以及执行后的文档状态。
+    function runScript(cfg, result) {
+        if (cfg.document_id) app.activeDocument = documentById(cfg.document_id);
+        var host = $.global, saved = { alert: host.alert, confirm: host.confirm, prompt: host.prompt };
+        host.alert = function (message) { $.writeln(String(message)); };
+        host.confirm = function () { return true; };
+        host.prompt = function (message, fallback) { return fallback; };
+        try {
+            var value = new Function('atelier', cfg.code)({ version: app.version });
+            try { result.value = eval('(' + toJson(value === undefined ? null : value) + ')'); }
+            catch (e) { result.value = String(value); }
+        } finally {
+            host.alert = saved.alert; host.confirm = saved.confirm; host.prompt = saved.prompt;
+        }
+    }
+
     var result = { ok: false, timings: {} }, cfg = null;
     var started = now();
     var previous = { dialogs: app.displayDialogs, ruler: app.preferences.rulerUnits };
@@ -209,9 +284,13 @@ var ATELIER_ARGS = (typeof arguments !== 'undefined' && arguments) ? arguments :
         if (cfg.action === 'version') {
             result.version = app.version;
             result.active_document = app.documents.length ? app.activeDocument.name : null;
-        } else if (cfg.action === 'import') exportImage(cfg, result);
+        } else if (cfg.action === 'inspect') inspect(result);
+        else if (cfg.action === 'import') exportImage(cfg, result);
         else if (cfg.action === 'place') placeImage(cfg, result);
-        else throw new Error('UNKNOWN_ACTION');
+        else if (cfg.action === 'preview') previewDocument(cfg, result);
+        else if (cfg.action === 'execute') {
+            try { runScript(cfg, result); } finally { inspect(result); }
+        } else throw new Error('UNKNOWN_ACTION');
         result.ok = true;
     } catch (e) {
         result.error = String(e);

@@ -100,6 +100,8 @@ describe('设置页「插件」· 宿主插件的设置区', () => {
           supported: true, installed: true, running: false, responsible_app: 'Atelier', version: null, active_document: null,
         } }));
       }
+      if (url === '/api/plugins/ps-bridge/routes/settings') return new Response(JSON.stringify({ result: { allow_scripts: false } }));
+      if (url === '/api/plugins/ps-bridge/routes/execute-log') return new Response(JSON.stringify({ result: { entries: [] } }));
       expect(url).toBe('/api/plugins');
       return new Response(JSON.stringify({ app_version: '5.138.0', plugins: [entry] }));
     }));

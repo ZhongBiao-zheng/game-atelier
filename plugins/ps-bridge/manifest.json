@@ -61,8 +61,130 @@
           "method": "POST",
           "path": "/place",
           "access": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/settings",
+          "access": "edit"
+        },
+        {
+          "method": "POST",
+          "path": "/execute-log",
+          "access": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/inspect",
+          "access": "read",
+          "agent_only": true
+        },
+        {
+          "method": "POST",
+          "path": "/preview",
+          "access": "read",
+          "agent_only": true
+        },
+        {
+          "method": "POST",
+          "path": "/execute",
+          "access": "edit",
+          "agent_only": true
         }
       ]
-    }
+    },
+    "agent_tools": [
+      {
+        "name": "inspect",
+        "route": "/inspect",
+        "read_only": true,
+        "description": "读取本机 Photoshop：版本、打开的文档（id、名字、尺寸）、活动文档和它的图层。PS 没开时报错，不会启动它。操作 PS 前先调用。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "import",
+        "route": "/import",
+        "read_only": false,
+        "description": "把 Photoshop 活动文档的选区（无选区为整张）取到画布上，成为普通图片节点并记住来源位置。scope=merged 取合并可见，layer 只取当前图层。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "enum": [
+                "merged",
+                "layer"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "place",
+        "route": "/place",
+        "read_only": false,
+        "description": "把画布上的一张图片节点置入 Photoshop，成为智能对象图层。图片取自 PS（或由取自 PS 的图生成）时放回原文档原位置，否则放进活动文档中心。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "node_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "node_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "preview",
+        "route": "/preview",
+        "read_only": true,
+        "description": "导出 Photoshop 文档的预览图给你看（长边 ≤ 1600），不修改文档。改完用它检查结果。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "document_id": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "inspect 返回的文档 id；0 表示活动文档"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "execute",
+        "route": "/execute",
+        "read_only": false,
+        "always_confirm": true,
+        "summary_field": "code",
+        "description": "在本机 Photoshop 执行一段 ExtendScript（ES3）函数体，可 return 普通 JSON 数据；可用 app、SolidColor、UnitValue 等 Photoshop DOM。脚本能读写本机文件，用户每次都要确认。先 inspect；已有文档先另存副本，不要覆盖原件；出错不会回滚，先 inspect 再判断，不要盲目重试。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "maxLength": 3600,
+              "description": "ExtendScript 函数体"
+            },
+            "document_id": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "先切到这个文档；0 表示不切换"
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ]
   }
 }

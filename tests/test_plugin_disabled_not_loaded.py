@@ -21,6 +21,8 @@ from viewer_server.server_app import build_app
 
 REPO = Path(__file__).resolve().parent.parent
 OFFICIAL = sorted(path.parent.name for path in (REPO / "plugins").glob("*/manifest.json"))
+# 官方插件刚启用时（默认设置下）允许藏起的 Agent 工具：PS 联动的脚本执行在开关打开前不出现。
+ALLOWED_HIDDEN_TOOLS = {"ps-bridge": {"execute"}}
 
 
 def test_every_official_plugin_is_covered():
@@ -76,9 +78,12 @@ def test_disabled_official_plugin_loads_nothing_and_disabling_unloads_it(officia
     assert client.post(f"/api/plugins/{plugin_id}/enable", json={}).status_code == 200
     for item in lock["files"]:
         assert client.get(f"/api/plugins/{plugin_id}/package/{item['path']}").status_code == 200
-    declared_tools = lock["contributes"].get("agent_tools", [])
-    assert len([spec for spec in runtime.plugin_tools().values() if spec["plugin_id"] == plugin_id]) \
-        == len(declared_tools)
+    declared = {tool["name"] for tool in lock["contributes"].get("agent_tools", [])}
+    registered = {spec["tool"] for spec in runtime.plugin_tools().values() if spec["plugin_id"] == plugin_id}
+    hidden = plugin_server.hidden_agent_tools(plugin_id)
+    # 插件此刻可以藏起的工具必须登记在这张表里（ADR-0043），新增一项等于过一次审；其余官方插件不许藏任何工具。
+    assert hidden == ALLOWED_HIDDEN_TOOLS.get(plugin_id, set())
+    assert registered == declared - hidden
     if lock["contributes"].get("server"):
         plugin_server._handlers(plugin_registry.find(plugin_id))
         assert plugin_server._module_name(plugin_id) in sys.modules

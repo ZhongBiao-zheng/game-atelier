@@ -1,10 +1,13 @@
 """PS 联动插件的服务端模块（宿主插件，ADR-0039 / ADR-0041）。
 
-三个能力，界面入口只有这三个：
+界面入口（第 1 批）：
 - `/status`：是否安装、是否运行、授权记在哪个应用名下；`probe` 为真时才真的和 PS 说话（第一次会触发系统授权弹窗）。
 - `/import`：PS 活动文档的选区（无选区为整张）→ 画布上的普通图片节点，记下来源。
 - `/place`：画布图片节点 → PS 里的智能对象图层；有来源时放回原文档原位置。
-请求参数只有 id 与枚举，不接受任何文件路径。
+- `/settings`、`/execute-log`：设置页的脚本开关与最近执行记录。
+Agent 工具（第 2 批，ADR-0043）：上面的 import / place，加 `/inspect`（文档与图层）、`/preview`（预览图）、
+`/execute`（任意 ExtendScript，只给 Agent，开关关着时藏起）。
+请求参数只有 id、枚举与 Agent 的脚本正文，不接受任何文件路径。
 """
 from __future__ import annotations
 
@@ -17,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from character_workflow.lib.plugin_registry import PluginError
 
-from . import bridge, origins
+from . import agent, bridge, origins
 
 
 class _Status(BaseModel):
@@ -33,6 +36,26 @@ class _Import(BaseModel):
 class _Place(BaseModel):
     model_config = ConfigDict(extra="forbid")
     node_id: str = Field(min_length=1, max_length=120)
+
+
+class _Empty(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class _Document(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    document_id: int = Field(default=0, ge=0)
+
+
+class _Execute(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str = Field(min_length=1, max_length=agent.MAX_CODE_CHARS)
+    document_id: int = Field(default=0, ge=0)
+
+
+class _Settings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    allow_scripts: bool | None = None
 
 
 def _plugin_error(error: bridge.PsError) -> PluginError:
@@ -130,7 +153,45 @@ def _place(ctx, node_id: str) -> dict:
             "returned_to_origin": origin is not None}
 
 
+def _guarded(work):
+    try:
+        return work()
+    except bridge.PsError as error:
+        raise _plugin_error(error) from None
+
+
 def register(api) -> None:
+    @api.hidden_agent_tools
+    def hidden() -> set[str]:
+        return set() if agent.scripts_allowed() else {"execute"}
+
+    @api.route("POST", "/settings")
+    def settings(ctx, params: dict) -> dict:
+        body = _Settings.model_validate(params)
+        if body.allow_scripts is not None:
+            agent.set_scripts_allowed(body.allow_scripts)
+        return {"allow_scripts": agent.scripts_allowed()}
+
+    @api.route("POST", "/execute-log")
+    def execute_log(ctx, params: dict) -> dict:
+        _Empty.model_validate(params)
+        return {"entries": agent.recent_log()}
+
+    @api.route("POST", "/inspect")
+    def inspect(ctx, params: dict) -> dict:
+        _Empty.model_validate(params)
+        return _guarded(agent.inspect)
+
+    @api.route("POST", "/preview")
+    def preview(ctx, params: dict) -> dict:
+        body = _Document.model_validate(params)
+        return _guarded(lambda: agent.preview(body.document_id))
+
+    @api.route("POST", "/execute")
+    def execute(ctx, params: dict) -> dict:
+        body = _Execute.model_validate(params)
+        return _guarded(lambda: agent.execute(body.code, body.document_id, ctx.caller, ctx.project_id))
+
     @api.route("POST", "/status")
     def status(ctx, params: dict) -> dict:
         body = _Status.model_validate(params)

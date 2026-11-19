@@ -41,3 +41,24 @@ export function placeInPhotoshop(projectId: string, nodeId: string) {
   return route<{ document: string | null; layer: string; returned_to_origin: boolean }>(
     projectId, '/place', '发到 Photoshop', { node_id: nodeId });
 }
+
+export interface PsExecuteLogEntry {
+  at: string;
+  caller: string;
+  project_id: string | null;
+  document_id: number;
+  code: string;
+  ok: boolean;
+  error: string | null;
+  duration_ms: number;
+}
+
+/** 脚本开关（ADR-0043）：allowScripts 省略时只读当前值。 */
+export function psScriptSettings(allowScripts?: boolean) {
+  return route<{ allow_scripts: boolean }>(null, '/settings', '保存 PS 联动设置',
+    allowScripts === undefined ? {} : { allow_scripts: allowScripts });
+}
+
+export function fetchPsExecuteLog() {
+  return route<{ entries: PsExecuteLogEntry[] }>(null, '/execute-log', '读取执行记录', {});
+}

@@ -8,7 +8,7 @@ import type { HostPluginApi, HostPluginBusy, HostPluginModule } from '@/plugin-h
 import type { CanvasContentNode } from '@/schema/canvas';
 
 import { importFromPhotoshop, placeInPhotoshop, type PsImportScope } from './api';
-import { PsBridgeSettings } from './PsBridgeSettings';
+import { PsBridgeSettingsArea } from './PsBridgeSettings';
 
 let busy = false;
 const listeners = new Set<() => void>();
@@ -65,5 +65,5 @@ export const plugin: HostPluginModule = {
     import_layer: (api, position) => { void importImage(api, position, 'layer'); },
   },
   busy: psBridgeBusy,
-  Settings: PsBridgeSettings,
+  Settings: PsBridgeSettingsArea,
 };

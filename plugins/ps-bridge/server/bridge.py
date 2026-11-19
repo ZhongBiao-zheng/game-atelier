@@ -248,6 +248,8 @@ def receipt_error(receipt: dict[str, Any]) -> PsError:
     error = str(receipt.get("error") or "").removeprefix("Error: ")
     if error.startswith("NO_DOCUMENT"):
         return PsError("PS_NO_DOCUMENT", "Photoshop 里没有打开的文档", 409)
+    if error.startswith("DOCUMENT_NOT_FOUND"):
+        return PsError("PS_DOCUMENT_NOT_FOUND", "找不到这个文档（可能已关闭），请先读取 Photoshop 文档列表", 409)
     if error.startswith("TARGET_NOT_OPEN"):
         name = str(receipt.get("target_name") or "")
         return PsError("PS_TARGET_NOT_OPEN",
