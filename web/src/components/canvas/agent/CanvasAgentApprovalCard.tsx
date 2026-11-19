@@ -4,6 +4,23 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import type { CanvasAgentApproval } from '@/schema/canvas';
 
+const COLLAPSED_LINES = 12;
+
+/** 摘要原文；很长时（如 PS 联动的脚本全文，ADR-0043）先显示前几行，能展开看全。 */
+function ApprovalSummary({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const lines = text.split('\n');
+  const long = lines.length > COLLAPSED_LINES;
+  const shown = long && !expanded ? lines.slice(0, COLLAPSED_LINES).join('\n') : text;
+  return <>
+    <p className="mt-0.5 whitespace-pre-wrap break-words text-muted-foreground">{shown}</p>
+    {long && <Button variant="ghost" size="sm" className="-ml-2 mt-0.5"
+      onClick={event => { event.preventDefault(); event.stopPropagation(); setExpanded(value => !value); }}>
+      {expanded ? '收起' : `展开全文（共 ${lines.length} 行）`}
+    </Button>}
+  </>;
+}
+
 /**
  * 待确认的工具调用：多条时逐条勾选，「执行」只执行勾上的，其余按拒绝回给 Agent；
  * 「拒绝」全部拒绝。摘要由服务端写好（生成会带模型与预计费用）。
@@ -32,7 +49,7 @@ export function CanvasAgentApprovalCard({ approvals, labels, disabled, onDecide 
         const body = (
           <>
             <p className="font-medium text-foreground">{labels[item.tool] ?? item.tool}</p>
-            <p className="mt-0.5 whitespace-pre-line break-words text-muted-foreground">{item.summary}</p>
+            <ApprovalSummary text={item.summary} />
           </>
         );
         return multiple ? (

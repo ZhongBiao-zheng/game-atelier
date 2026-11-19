@@ -35,6 +35,7 @@ class PluginServerAPI:
     def __init__(self) -> None:
         self.handlers: dict[tuple[str, str], Handler] = {}
         self.agent_views: dict[str, AgentView] = {}
+        self.tool_filter: Callable[[], set[str]] | None = None
 
     def route(self, method: str, path: str) -> Callable[[Handler], Handler]:
         def decorate(handler: Handler) -> Handler:
@@ -47,6 +48,12 @@ class PluginServerAPI:
             self.agent_views[node_type] = view
             return view
         return decorate
+
+    def hidden_agent_tools(self, filter_: Callable[[], set[str]]) -> Callable[[], set[str]]:
+        """登记「此刻要藏起来的 Agent 工具名」（ADR-0043，只给宿主插件）：画布 Agent 与 Canvas MCP 都不列出它们，
+        直接调用也拒绝。例：PS 联动的脚本开关关着时藏起 execute。"""
+        self.tool_filter = filter_
+        return filter_
 
 
 MEDIA_KINDS = ("image", "video", "audio")
@@ -82,6 +89,10 @@ class PluginRequest:
     inputs: list[PluginMedia] = field(default_factory=list)
     created_node_ids: list[str] = field(default_factory=list)
     plugin_version: str = ""
+    # Agent 调用时是谁（「画布 Agent」或「外部 Agent」），给插件记日志用；其余入口为空。
+    caller: str = ""
+    # 宿主插件（ADR-0039）：代码与宿主同源可信，不论经界面还是 Agent 调用都不走项目批准（ADR-0043）。
+    trusted: bool = False
 
     def _project(self) -> str:
         if self.project_id is None:
@@ -90,7 +101,7 @@ class PluginRequest:
 
     def _allows(self, capability: str) -> bool:
         # 宿主插件的代码与宿主同源可信（ADR-0039 / ADR-0041），不经项目批准。
-        return self.origin == "host" or capability in self.capabilities
+        return self.trusted or capability in self.capabilities
 
     def media_of_node(self, node_id: str, kinds: tuple[str, ...] = ("image",)) -> PluginMedia:
         """按节点 id 取素材，只认 `kinds` 里的类型。给 Agent 与宿主插件用：沙箱界面只能用 `inputs`。"""
@@ -181,7 +192,7 @@ class PluginRequest:
         return _update_plugin_state(self._project(), self.plugin_id, self.plugin_version, change)
 
     def _require_host_state(self) -> None:
-        if self.origin != "host":
+        if not self.trusted:
             raise PluginError("CAPABILITY_DENIED", "只有宿主插件可以读写项目状态", status=403)
 
 
@@ -464,9 +475,9 @@ def _api(record: PluginRecord) -> PluginServerAPI:
             sys.modules.pop(name, None)
             logger.exception("plugin %s server module failed to load", record.plugin_id)
             raise PluginError("PLUGIN_BROKEN", "插件服务端模块加载失败", status=500) from error
-        if api.agent_views and not plugin_registry.is_host(record):
+        if (api.agent_views or api.tool_filter) and not plugin_registry.is_host(record):
             sys.modules.pop(name, None)
-            raise PluginError("PLUGIN_BROKEN", "只有宿主插件可以登记 Agent 节点摘要", status=500)
+            raise PluginError("PLUGIN_BROKEN", "只有宿主插件可以登记 Agent 节点摘要或隐藏工具", status=500)
         _loaded[record.plugin_id] = (record.lock.digest, api)
     return api
 
@@ -487,7 +498,22 @@ def declared_access(plugin_id: str, method: str, path: str) -> str | None:
     server = record.lock.contributes.server if record.lock else None
     route = next((item for item in (server.routes if server else [])
                   if item.method == method and item.path == path), None)
-    return route.access if route else None
+    # 只给 Agent 的路由（ADR-0043）对浏览器入口等于没声明：中间件按未登记拒绝。
+    return route.access if route and not route.agent_only else None
+
+
+def hidden_agent_tools(plugin_id: str) -> set[str]:
+    """此刻要藏起来的 Agent 工具名（清单里的短名）。判断出错时整组藏起（宁可不给，也不误给）。"""
+    record = plugin_registry.find(plugin_id)
+    if (record is None or record.lock is None or not plugin_registry.is_host(record)
+            or plugin_id not in plugin_registry.enabled_ids() or not record.lock.contributes.agent_tools):
+        return set()
+    try:
+        filter_ = _api(record).tool_filter
+        return set(filter_()) if filter_ is not None else set()
+    except Exception:
+        logger.exception("plugin %s hidden_agent_tools failed", plugin_id)
+        return {tool.name for tool in record.lock.contributes.agent_tools}
 
 
 def _surface_inputs(record: PluginRecord, project_id: str, node_id: str | None,
@@ -524,17 +550,23 @@ def _surface_inputs(record: PluginRecord, project_id: str, node_id: str | None,
 
 def call(plugin_id: str, method: str, path: str, *, project_id: str | None, origin: str,
          params: dict | None = None, node_id: str | None = None,
-         input_version_ids: list[str] | None = None) -> tuple[dict, list[str]]:
+         input_version_ids: list[str] | None = None, caller: str = "") -> tuple[dict, list[str]]:
     """调用一条插件路由。返回 (结果, 这次调用新建的节点 id)。"""
     record = _enabled_record(plugin_id)
     assert record.lock is not None
     server = record.lock.contributes.server
-    if server is None or not any(item.method == method and item.path == path for item in server.routes):
+    route = next((item for item in (server.routes if server else [])
+                  if item.method == method and item.path == path), None)
+    if route is None:
         raise PluginError("ROUTE_NOT_DECLARED", "插件没有声明这个接口", status=404)
-    if (origin == "host") != plugin_registry.is_host(record):
-        # 宿主插件只走宿主入口；沙箱插件不能借宿主入口绕过项目批准。
+    if route.agent_only and origin != "agent":
+        raise PluginError("CAPABILITY_DENIED", "这个接口只给 Agent 用", status=403)
+    host = plugin_registry.is_host(record)
+    if (origin == "host" and not host) or (origin == "surface" and host):
+        # 宿主插件的界面走宿主入口、沙箱插件的界面走 surface 入口；沙箱插件不能借宿主入口绕过项目批准。
+        # Agent 入口两种插件都可以（宿主插件的 Agent 工具，ADR-0043）。
         raise PluginError("CAPABILITY_DENIED", "这个入口不能调用此插件", status=403)
-    if origin == "host":
+    if host:
         capabilities: frozenset[str] = frozenset()
     elif project_id is None:
         raise PluginError("PROJECT_REQUIRED", "这个操作需要在画布项目里进行", status=422)
@@ -546,7 +578,8 @@ def call(plugin_id: str, method: str, path: str, *, project_id: str | None, orig
     if origin == "surface" and "server.call" not in capabilities:
         raise PluginError("CAPABILITY_DENIED", "本项目没有允许这项能力", status=403)
     request = PluginRequest(plugin_id, project_id, origin, capabilities, node_id=node_id,
-                            plugin_version=record.lock.version)
+                            plugin_version=record.lock.version, caller=caller if origin == "agent" else "",
+                            trusted=host)
     if origin == "surface":
         request.inputs = _surface_inputs(record, project_id, node_id, input_version_ids or [])
     handler = _handlers(record).get((method, path))

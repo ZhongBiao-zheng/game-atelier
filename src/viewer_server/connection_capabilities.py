@@ -303,6 +303,12 @@ CANVAS_TOOLS = frozenset({
     "list-projects", "get-document", "list-models", "apply-changes", "import-media", "run",
     "get-run", "read-media",
 })
+
+
+def is_canvas_tool_path(rest: str) -> bool:
+    """`/api/canvas-agent/` 后面的部分是不是画布工具：固定那几条，加插件工具（ADR-0043，接口里再核对是 Agent）。"""
+    return rest in CANVAS_TOOLS or rest == "plugin-tools" or (
+        rest.startswith("plugin-tools/") and rest.count("/") == 2)
 LOCAL_RULES = [
     (method, path, compile_path(path)[0])
     for entry in _LOCAL_ROUTES

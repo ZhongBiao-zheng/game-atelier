@@ -8,11 +8,27 @@ Chat Completions 的工具结果只收文本（SDK 默认丢掉图片），各�
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
+import re
 import time
+import uuid
 from typing import Any, Callable
 
+from character_workflow.lib import data_root
+
 ATTACH_KEY = "attach_images"
+# 插件工具返回的预览图（不是画布版本）存这里，attach_images 里写 PREVIEW_PREFIX + 文件名（ADR-0043）。
+PREVIEW_PREFIX = "agent-image:"
+# 只存工具结果里带回来的图（文件名由这里生成，不接受外部给的名字），24 小时后清理，
+# 总量超过 MAX_PREVIEWS 张或 MAX_PREVIEW_TOTAL 字节时先删最旧的。会话历史里只留 agent-image: 引用，不落 data URL。
+PREVIEW_TTL_S = 24 * 3600
+MAX_PREVIEW_BYTES = 2 * 1024 * 1024
+MAX_PREVIEWS = 200
+MAX_PREVIEW_TOTAL = 64 * 1024 * 1024
+_PREVIEW_TYPES = {"image/jpeg": "jpg", "image/png": "png"}
+_PREVIEW_NAME = re.compile(r"^[0-9a-f]{32}\.(jpg|png)$")
 MAX_ATTACH_OUTPUTS = 2
 MAX_ATTACH_IMAGES = 4
 WAIT_SECONDS = 240
@@ -82,3 +98,62 @@ def with_attached_images(items: list[Any], data_url: Callable[[str], str | None]
                 result.append({"role": "user", "content": content})
             pending = []
     return result
+
+
+def _previews_dir():
+    return data_root.runtime_dir() / "agent-images"
+
+
+def store_preview(preview: Any) -> str | None:
+    """把 {mime_type, data_base64} 存成临时图片，返回可放进 attach_images 的引用；格式不对返回 None。"""
+    if not isinstance(preview, dict) or preview.get("mime_type") not in _PREVIEW_TYPES:
+        return None
+    try:
+        data = base64.b64decode(str(preview.get("data_base64", "")), validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    if not data or len(data) > MAX_PREVIEW_BYTES:
+        return None
+    directory = _previews_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    _prune_previews(directory, incoming=len(data))
+    name = f"{uuid.uuid4().hex}.{_PREVIEW_TYPES[preview['mime_type']]}"
+    (directory / name).write_bytes(data)
+    return PREVIEW_PREFIX + name
+
+
+def _prune_previews(directory, incoming: int) -> None:
+    """删过期的；再按从旧到新删，直到加上这一张后不超过张数与总量上限。"""
+    cutoff = time.time() - PREVIEW_TTL_S
+    kept = []
+    for path in directory.iterdir():
+        try:
+            stat = path.stat()
+            if stat.st_mtime < cutoff or not _PREVIEW_NAME.fullmatch(path.name):
+                path.unlink()
+            else:
+                kept.append((stat.st_mtime, stat.st_size, path))
+        except OSError:
+            continue
+    kept.sort()
+    total = sum(size for _, size, _ in kept) + incoming
+    while kept and (len(kept) + 1 > MAX_PREVIEWS or total > MAX_PREVIEW_TOTAL):
+        _, size, path = kept.pop(0)
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        total -= size
+
+
+def preview_data_url(ref: str) -> str | None:
+    """attach_images 里的预览引用 → data URL；过期、被清掉或名字不合规时为 None。"""
+    name = ref.removeprefix(PREVIEW_PREFIX)
+    if not _PREVIEW_NAME.fullmatch(name):
+        return None
+    try:
+        data = (_previews_dir() / name).read_bytes()
+    except OSError:
+        return None
+    mime = "image/png" if name.endswith(".png") else "image/jpeg"
+    return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"

@@ -108,6 +108,8 @@
 插件启用后，工具以 `plugin_<id 中的 - 换成 _>_<name>` 为名加入画布内置 Agent 的工具列表（例：`plugin_sprite_sheet_detect`）。每次组装 Agent 时读一遍已启用插件，所以启停在下一轮对话生效。
 
 - `read_only` 为真时不需要用户确认；否则按当前权限模式（审查模式下确认，自动模式下直接执行）。
-- 调用同样要求本项目已批准该插件。
-- 工具调用走 `route` 指向的同一个处理函数，`ctx.origin` 为 `"agent"`。
-- 外部 MCP（Claude Code 等）的工具列表不包含插件工具。
+- 沙箱插件的调用同样要求本项目已批准该插件；宿主插件（ADR-0043）不经项目批准。
+- 工具调用走 `route` 指向的同一个处理函数，`ctx.origin` 为 `"agent"`，`ctx.caller` 为「画布 Agent」或「外部 Agent」。
+- 只给宿主插件的三项（ADR-0043）：`"always_confirm": true` 每次都确认（Auto 模式也一样）；`"summary_field": "<参数名>"` 确认卡显示这个参数的原文；路由上的 `"agent_only": true` 让它只能作为 Agent 工具调用，浏览器经插件路由调不到。
+- 宿主插件的服务端模块可以用 `@api.hidden_agent_tools` 返回此刻要藏起的工具短名（如开关关着时的脚本执行），画布 Agent 与 Canvas MCP 都不列出、直接调用也拒绝。
+- 外部 MCP（Claude Code 等）的工具列表只包含白名单里的插件工具，目前只有 PS 联动（`ps_*`）。

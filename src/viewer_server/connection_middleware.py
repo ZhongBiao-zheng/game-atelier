@@ -10,7 +10,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from viewer_server.connection_auth import ConnectionError, ConnectionStore, cookie_name
 from viewer_server.connection_capabilities import (
-    CANVAS_TOOLS, is_media_route, local_capability,
+    is_canvas_tool_path, is_media_route, local_capability,
 )
 from viewer_server.request_boundary import _authority, _header
 from viewer_server.shell_control import ACTIVE_WORK_PATH, ShellControl
@@ -110,7 +110,8 @@ class ConnectionMiddleware:
                     raise ConnectionError("CONNECTION_REQUIRED", "请先连接本机画布", 401)
                 state["connection_session"] = session
                 state["connection_principal"] = session.principal
-                tool = method == "POST" and path.removeprefix("/api/canvas-agent/") in CANVAS_TOOLS
+                tool = method == "POST" and path.startswith("/api/canvas-agent/") \
+                    and is_canvas_tool_path(path.removeprefix("/api/canvas-agent/"))
                 if session.principal.kind == "agent":
                     if not tool:
                         raise ConnectionError("CAPABILITY_DENIED", "此 Agent 仅可使用授权画布工具")

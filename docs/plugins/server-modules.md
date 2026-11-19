@@ -49,7 +49,9 @@ def register(api) -> None:
 | `ctx.read_state()` / `ctx.update_state(change)` | 只给宿主插件（ADR-0041）：读本插件在本项目的状态（`state.json` 的 `data`，没有时为 `None`）；`update_state` 持画布项目锁读-改-写，`change(旧值)` 返回新值，超过 1 MiB 报 413、文件读不出报 500（不当成空状态） |
 | `ctx.create_image_group(pngs, title, beside_node_id=None)` | 把 1–65 张 PNG 一次提交落成一个结果组（封面 + 成员，与生成出多张时的结果组相同：可收起、成员是普通图片节点），需要 `resource.create`，返回 `{node_id, member_node_ids}`。单张 ≤ 64 MiB、合计 ≤ 256 MiB |
 
-宿主插件的代码与宿主同源可信，`create_*` 不检查 `resource.create`（宿主插件没有项目批准）。
+宿主插件的代码与宿主同源可信，`create_*` 不检查 `resource.create`（宿主插件没有项目批准），经界面或 Agent 调用都一样（`ctx.trusted`，ADR-0043）。
+
+宿主插件还可以用 `@api.hidden_agent_tools` 登记 `() -> set[str]`，返回此刻要藏起的 Agent 工具短名；Agent 调用时 `ctx.caller` 是调用方（「画布 Agent」或「外部 Agent」）。
 
 新建的节点放在 `beside_node_id`（默认当前节点）旁边；画布正在自动保存时会重读重试，最多三次。
 

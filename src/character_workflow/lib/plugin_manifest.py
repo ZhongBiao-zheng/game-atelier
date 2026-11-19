@@ -116,6 +116,8 @@ class PluginServerRoute(_Model):
     path: Annotated[str, StringConstraints(pattern=_ROUTE_PATH)]
     access: Literal["read", "edit"]
     long_running: bool = False
+    # 只给 Agent 调（ADR-0043）：浏览器经插件路由调不到，只能作为 Agent 工具调用。只有宿主插件可用。
+    agent_only: bool = False
 
 
 class PluginServerContribution(_Model):
@@ -129,6 +131,10 @@ class PluginAgentTool(_Model):
     parameters: dict[str, Any]
     read_only: bool
     route: Annotated[str, StringConstraints(pattern=_ROUTE_PATH)]
+    # 以下两项只有宿主插件可用（ADR-0043）。always_confirm：画布 Agent 每次调用都确认，Auto 模式也一样。
+    always_confirm: bool = False
+    # 确认卡显示这个参数的原文（如脚本全文），而不是参数 JSON 的前 500 字。
+    summary_field: Annotated[str, StringConstraints(pattern=_NAME)] | None = None
 
 
 class PluginContributes(_Model):
@@ -212,11 +218,16 @@ class PluginManifest(_Model):
         for tool in contributes.agent_tools:
             if ("POST", tool.route) not in routes:
                 raise ValueError(f"agent tool {tool.name} must point at a declared POST route")
+            if (tool.always_confirm or tool.summary_field) and not host:
+                raise ValueError(f"agent tool {tool.name}: always_confirm / summary_field are only for host plugins")
+        if any(route.agent_only for route in declared) and not host:
+            raise ValueError("agent_only routes are only for host plugins")
         has_surface = contributes.nodes or contributes.image_actions or contributes.video_actions \
             or contributes.text_actions
         if host:
-            if self.ui is not None or self.capabilities or contributes.agent_tools:
-                raise ValueError("host plugin must not declare ui, capabilities or agent tools")
+            # 宿主插件可以声明 Agent 工具（ADR-0043，PS 联动）；不声明 ui 与 capabilities（没有沙箱与项目批准）。
+            if self.ui is not None or self.capabilities:
+                raise ValueError("host plugin must not declare ui or capabilities")
         elif has_surface and self.ui is None:
             raise ValueError("plugin with node or action contributions must declare ui")
         return self

@@ -155,7 +155,10 @@ def needs_confirmation(tool: str, mode: str) -> bool:
 def confirmation_required(project_id: str, tool: str, arguments: dict, mode: str) -> bool:
     """一次工具调用要不要停下来等用户确认。审查模式：写操作都确认。
     Auto：只有这里列出的情况确认（新增一种就在这里加一条，别散到别处）：
-    - 生成估价超过确认金额（2026-11-19 定）。删除维持不确认（2026-11-19 飙哥再次确认）。"""
+    - 生成估价超过确认金额（2026-11-19 定）。删除维持不确认（2026-11-19 飙哥再次确认）。
+    - 插件工具声明了 always_confirm（ADR-0043）：PS 联动的脚本执行，每次都确认（2026-11-19 管理会话定）。"""
+    if tool.startswith(PLUGIN_TOOL_PREFIX) and plugin_tools().get(tool, {}).get("always_confirm"):
+        return True
     if needs_confirmation(tool, mode):
         return True
     if tool == "run_generation":
@@ -181,19 +184,25 @@ PLUGIN_TOOL_PREFIX = "plugin_"
 
 
 def plugin_tools() -> dict[str, dict]:
-    """已启用插件在清单里声明的 Agent 工具。只读清单，不加载插件代码。"""
-    from character_workflow.lib import plugin_registry
+    """已启用插件在清单里声明的 Agent 工具。沙箱插件只读清单；宿主插件登记了 hidden_agent_tools 时
+    加载它的服务端模块问一次此刻要藏起哪些（ADR-0043）。"""
+    from character_workflow.lib import plugin_registry, plugin_server
     enabled = plugin_registry.enabled_ids()
     found: dict[str, dict] = {}
     for record in plugin_registry.scan():
         if record.lock is None or record.plugin_id not in enabled:
             continue
+        hidden = plugin_server.hidden_agent_tools(record.plugin_id) if record.lock.contributes.agent_tools else set()
         for tool in record.lock.contributes.agent_tools:
+            if tool.name in hidden:
+                continue
             name = f"{PLUGIN_TOOL_PREFIX}{record.plugin_id.replace('-', '_')}_{tool.name}"
             found[name] = {
-                "plugin_id": record.plugin_id, "route": tool.route, "read_only": tool.read_only,
+                "plugin_id": record.plugin_id, "tool": tool.name, "route": tool.route,
+                "read_only": tool.read_only,
                 "description": f"（插件：{record.lock.name}）{tool.description}",
                 "parameters": tool.parameters,
+                "always_confirm": tool.always_confirm, "summary_field": tool.summary_field,
             }
     return found
 
@@ -210,10 +219,17 @@ def _execute_plugin_tool(project_id: str, tool: str, arguments: dict) -> tuple[d
         raise CanvasToolError("INVALID_TARGET", f"未知工具 {tool}（插件可能已停用）", 422)
     tools.authorize(LOCAL, project_id, "canvas_read" if spec["read_only"] else "canvas_edit")
     try:
-        return plugin_server.call(spec["plugin_id"], "POST", spec["route"], project_id=project_id,
-                                  origin="agent", params=arguments)
+        result, created = plugin_server.call(spec["plugin_id"], "POST", spec["route"], project_id=project_id,
+                                             origin="agent", params=arguments, caller="画布 Agent")
     except PluginError as error:
         raise CanvasToolError(error.code, error.message, error.status) from None
+    # 插件返回的预览图（如 PS 文档的样子）不进工具结果文本：存进临时图片，由 vision 在调模型前附上。
+    preview = result.pop("preview", None)
+    if preview is not None:
+        ref = vision.store_preview(preview)
+        if ref is not None:
+            result[vision.ATTACH_KEY] = [ref]
+    return result, created
 
 
 # ── 工具执行（同步，跑在线程里）──────────────────────────────────────────────────
@@ -569,6 +585,8 @@ def _media_data_url(project_id: str, version_id: str) -> str | None:
     from character_workflow.lib.canvas_agent_library import (
         ASSET_IMAGE_PREFIX, TEAM_ASSET_PREFIX, preview, team_preview,
     )
+    if version_id.startswith(vision.PREVIEW_PREFIX):
+        return vision.preview_data_url(version_id)
     if version_id.startswith(TEAM_ASSET_PREFIX):
         try:
             return team_preview(project_id, version_id)
@@ -709,6 +727,12 @@ def summarize_call(tool: str, arguments: dict) -> str:
         return f"{arguments.get('name', '')} · {PurePosixPath(str(arguments.get('path', ''))).name}"
     if tool in READ_LABELS:
         return READ_LABELS[tool]
+    if tool.startswith(PLUGIN_TOOL_PREFIX):
+        spec = plugin_tools().get(tool, {})
+        field = spec.get("summary_field")
+        if field and isinstance(arguments.get(field), str):
+            # 确认卡显示这个参数的原文（PS 联动：脚本全文），前面一行说明是哪个工具。
+            return f"{spec.get('description', tool)}\n{arguments[field]}"
     if tool == "run_generation":
         return f"在节点 {arguments.get('surface_node_id')} 上生成 {arguments.get('count', 1)} 个结果"
     if tool == "apply_changes":

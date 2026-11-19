@@ -41,3 +41,18 @@ describe('CanvasAgentApprovalCard', () => {
     expect([...onDecide.mock.calls[0][0]]).toEqual(['c1']);
   });
 });
+
+describe('CanvasAgentApprovalCard · 很长的摘要', () => {
+  it('先显示前 12 行，能展开看全并收起', () => {
+    const script = Array.from({ length: 20 }, (_, index) => `  line${index + 1};`).join('\n');
+    render(<CanvasAgentApprovalCard labels={LABELS} onDecide={vi.fn()} approvals={[
+      approval('c1', 'plugin_ps_bridge_execute', `（插件：PS 联动）执行脚本\n${script}`),
+    ]} />);
+    expect(screen.queryByText(/line20;/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '展开全文（共 21 行）' }));
+    expect(screen.getByText(/line20;/)).toBeInTheDocument();
+    expect(screen.getByText(/line20;/).textContent).toContain('\n  line1;');
+    fireEvent.click(screen.getByRole('button', { name: '收起' }));
+    expect(screen.queryByText(/line20;/)).toBeNull();
+  });
+});

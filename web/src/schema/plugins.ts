@@ -53,6 +53,8 @@ export interface PluginServerRoute {
   path: string;
   access: 'read' | 'edit';
   long_running: boolean;
+  /** 只给 Agent 调（ADR-0043），浏览器经插件路由调不到；只有宿主插件可用。 */
+  agent_only?: boolean;
 }
 
 export interface PluginAgentTool {
@@ -61,6 +63,9 @@ export interface PluginAgentTool {
   parameters: Record<string, unknown>;
   read_only: boolean;
   route: string;
+  /** 只有宿主插件可用（ADR-0043）：画布 Agent 每次调用都确认；确认卡显示 summary_field 参数的原文。 */
+  always_confirm?: boolean;
+  summary_field?: string | null;
 }
 
 export interface PluginAsset {
