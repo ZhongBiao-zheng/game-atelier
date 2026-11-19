@@ -198,3 +198,25 @@ jobs:
     with:
       release_tag: ${{ github.ref_name }}
     secrets: inherit
+  # 桌面安装包首启从 CNB / GitHub 下载同版本运行包：镜像结束后逐个来源、逐个平台请求运行包与 .sha256
+  # 的第一个字节，缺任何一个就失败，提醒补同步（不下载整个文件）。
+  release-assets:
+    if: always() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.publish.result == 'success'
+    needs: [publish, mirror]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every source serves every runtime archive and its checksum
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          missing=0
+          for base in https://cnb.cool/ZhongBiao-zheng/game-atelier/-/releases https://github.com/ZhongBiao-zheng/game-atelier/releases; do
+            for asset in "GameAtelier-$version-windows-x64.zip" "GameAtelier-$version-macos-arm64.tar.gz" "GameAtelier-$version-linux-x64.tar.gz"; do
+              for file in "$asset" "$asset.sha256"; do
+                url="$base/download/$RELEASE_TAG/$file"
+                if curl -fsSL --retry 3 -r 0-0 -o /dev/null "$url"; then echo "ok      $url"; else echo "MISSING $url"; missing=1; fi
+              done
+            done
+          done
+          exit $missing

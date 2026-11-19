@@ -4,7 +4,9 @@ status: accepted
 
 # 桌面外壳从 Tauri 换成 Electron
 
-2026-11-18 定：桌面外壳（`desktop/`）改用 Electron，Tauri 外壳删除。外壳与运行包之间的契约（运行包位置、种子、`--desktop-start`、`DESKTOP_CONTRACT`、服务记录、控制接口）不变，见 `docs/contracts/desktop-shell.md`。
+2026-11-18 定：桌面外壳（`desktop/`）改用 Electron，Tauri 外壳删除。
+
+> 2026-11-19 起安装包不再内嵌运行包、首次启动下载（ADR-0042）。下文「种子解压」「是否用种子替换」两条与代价里的 dmg 体积按当时的做法记录，现行规则见 ADR-0042 与 `docs/contracts/desktop-shell.md`。外壳与运行包之间的契约（运行包位置、种子、`--desktop-start`、`DESKTOP_CONTRACT`、服务记录、控制接口）不变，见 `docs/contracts/desktop-shell.md`。
 
 ## 背景
 
