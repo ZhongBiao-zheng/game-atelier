@@ -81,6 +81,101 @@ def select_bundle_version(root: Path) -> Path:
     raise ValueError("安装包版本目录不完整，请重新下载安装包。")
 
 
+# ---- 常驻看护：只在 --service（Windows 计划任务）路径生效 ----
+# 服务进程卡死但没退出时，计划任务实例一直算「在运行」，每分钟的触发被 IgnoreNew 忽略，没有任何东西会重启它。
+# 看护每 30 秒探一次本机连接状态（超时 5 秒）；连续 4 次没应答（约 2 分钟）就结束这个子进程并原地重启。
+# 子进程自己退出（正常停止、更新执行器停掉旧版本、崩溃）时不重启，照旧把退出码交回计划任务。
+WATCH_INTERVAL_SECONDS = 30.0
+WATCH_PROBE_TIMEOUT_SECONDS = 5.0
+WATCH_FAILURES = 4
+WATCH_STARTUP_GRACE_SECONDS = 180.0
+WATCH_KILL_WAIT_SECONDS = 30.0
+
+
+def _service_responds(runtime: Path, pid: int, timeout: float) -> bool | None:
+    """True：应答且实例对得上；False：没应答；None：这个子进程还不是记录里的服务（启动中 / 拒绝启动）。"""
+    from viewer_server.connection_status import probe_connection_status
+    from viewer_server.pid import read_instance, read_pid, read_port
+
+    port, instance = read_port(runtime), read_instance(runtime)
+    if read_pid(runtime) != pid or port is None or instance is None:
+        return None
+    status = probe_connection_status(port, timeout=timeout)
+    return status is not None and status.instance_id == instance
+
+
+def _is_service_process(pid: int) -> bool:
+    from viewer_server.pid import is_viewer_server_process
+
+    return is_viewer_server_process(pid) is True
+
+
+def _record_unresponsive(runtime: Path, pid: int, since: str) -> None:
+    from character_workflow.lib import host_lifecycle
+
+    try:
+        host_lifecycle.record_stop(reason="unresponsive", pid=pid, source="watchdog",
+                                   runtime=runtime, unresponsive_since=since)
+    except OSError as error:
+        print(f"启停记录写入失败：{error}", file=sys.stderr)
+
+
+def supervise_service(
+    command: list[str], env: dict[str, str], runtime: Path, *,
+    interval: float = WATCH_INTERVAL_SECONDS, timeout: float = WATCH_PROBE_TIMEOUT_SECONDS,
+    failures: int = WATCH_FAILURES, grace: float = WATCH_STARTUP_GRACE_SECONDS,
+    responds=None, updating=None, owned=None, popen=subprocess.Popen,
+) -> int:
+    """启动服务子进程并看护；返回子进程自己退出时的退出码。
+
+    只结束自己启动的这一个子进程（Popen 句柄，不按进程树、不按 PID 去找），结束前再核对两件事：
+    运行记录里的 PID 就是它、命令行是 viewer_server。核对不过就不动它，只记一行。
+    """
+    from datetime import datetime, timezone
+
+    if responds is None:
+        responds = lambda pid: _service_responds(runtime, pid, timeout)  # noqa: E731
+    if updating is None:
+        def updating():
+            from viewer_server import bundle_update
+            return bundle_update.update_running(runtime)
+    owned = owned or _is_service_process
+    while True:
+        child = popen(command, env=env)
+        started = time.monotonic()
+        misses, since, answered = 0, None, False
+        while True:
+            try:
+                return child.wait(timeout=interval)
+            except subprocess.TimeoutExpired:
+                pass
+            if updating():
+                misses, since = 0, None  # 更新执行器在停旧起新，不判
+                continue
+            if responds(child.pid):
+                misses, since, answered = 0, None, True
+                continue
+            if not answered and time.monotonic() - started < grace:
+                continue  # 刚启动，给足时间
+            misses += 1
+            since = since or datetime.now(timezone.utc).isoformat()
+            if misses < failures:
+                continue
+            if not owned(child.pid):
+                print(f"服务无应答，但核对不到 pid={child.pid} 是本服务，未结束它。", file=sys.stderr)
+                misses, since = 0, None
+                continue
+            _record_unresponsive(runtime, child.pid, since)
+            print(f"服务自 {since} 起无应答，结束 pid={child.pid} 并重新启动。", file=sys.stderr)
+            child.kill()
+            try:
+                child.wait(timeout=WATCH_KILL_WAIT_SECONDS)
+            except subprocess.TimeoutExpired:
+                print(f"pid={child.pid} 结束不了，交还计划任务。", file=sys.stderr)
+                return 1
+            break
+
+
 def launch_selected_version(
     *, service: bool = False, to_version: str | None = None,
     update_id: str | None = None, open_browser: bool = True, desktop: bool = False,
@@ -139,7 +234,10 @@ def launch_selected_version(
         if desktop:
             command.append("--desktop")
     # Keep the foreground child inside the scheduled task's process lifetime on Windows.
-    result = subprocess.run(command, env=env).returncode
+    if service and runtime is not None:
+        result = supervise_service(command, env, runtime)
+    else:
+        result = subprocess.run(command, env=env).returncode
     if desktop and result == 0:
         # Desktop shell contract: the last stdout line is the data root the server now uses.
         print(effective_data_root(), flush=True)

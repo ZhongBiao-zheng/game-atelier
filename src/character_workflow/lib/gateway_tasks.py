@@ -30,6 +30,7 @@ from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_r
 from character_workflow.lib.corrupt_files import count_files, parse_reason, quarantine
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.gateway_keys import GatewayKeyRecord
+from character_workflow.lib.timed_lock import TimedLock
 
 GATEWAY_PROVIDER = "atelier"
 MAX_IMAGES_PER_TASK = 8
@@ -219,7 +220,8 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-_lock = threading.RLock()
+# 受理、调度、额度、结算共用；持有超过 200 ms 记一条告警（timed_lock），用来判断锁内全量扫盘是否成了瓶颈。
+_lock = TimedLock("gateway_tasks._lock")
 _running: dict[str, str] = {}  # task_id → key_id
 
 

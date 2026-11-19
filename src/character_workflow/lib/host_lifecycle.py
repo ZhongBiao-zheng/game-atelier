@@ -1,7 +1,7 @@
 """主机进程启停记录：`.runtime/host-lifecycle.jsonl`，供在线时长与异常结束次数统计。
 
 每次启动追加一条 start（时间、版本、是否服务模式、上次是正常停止还是异常结束），每次停止追加
-一条 stop（normal / update）。Windows 上 `server.py stop` 用 taskkill /F 强杀，服务进程自己的
+一条 stop（normal / update / unresponsive）。Windows 上 `server.py stop` 用 taskkill /F 强杀，服务进程自己的
 关闭钩子不会执行，所以停止记录由发起停止的一方（命令行 / 更新执行器）写；前台 Ctrl+C 等
 优雅退出由服务进程自己补一条。上一条是 start 而后面没有 stop = 上次异常结束。
 
@@ -26,7 +26,8 @@ from character_workflow.lib.file_lock import file_lock
 HEARTBEAT_SECONDS = 300
 MAX_BYTES = 1024 * 1024
 
-StopReason = Literal["normal", "update"]
+# unresponsive：常驻看护（bootstrap --service）判定无应答后结束了进程，记录里带无应答开始的时间。
+StopReason = Literal["normal", "update", "unresponsive"]
 
 
 def lifecycle_file(runtime: Path | None = None) -> Path:
@@ -118,11 +119,14 @@ def record_start(*, version: str, service_mode: bool, pid: int, instance_id: str
     return row
 
 
-def record_stop(*, reason: StopReason, pid: int, source: Literal["cli", "server"],
-                runtime: Path | None = None) -> None:
+def record_stop(*, reason: StopReason, pid: int, source: Literal["cli", "server", "watchdog"],
+                runtime: Path | None = None, unresponsive_since: str | None = None) -> None:
     if source == "server":
         events = read_events(runtime)
         if events and events[-1]["event"] == "stop" and events[-1].get("pid") == pid:
             return  # 发起停止的命令行已经记过（它知道是不是更新），服务端不再重复
-    _append({"event": "stop", "time": _now().isoformat(), "reason": reason, "pid": pid,
-             "source": source}, runtime)
+    row = {"event": "stop", "time": _now().isoformat(), "reason": reason, "pid": pid,
+           "source": source}
+    if unresponsive_since is not None:
+        row["unresponsive_since"] = unresponsive_since
+    _append(row, runtime)

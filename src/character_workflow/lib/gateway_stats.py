@@ -90,7 +90,10 @@ def _sessions(events: list[dict], now: datetime) -> list[dict[str, Any]]:
                 sessions.append({**current, "end": max(end, current["start"]), "ended": "abnormal"})
             current = {"start": at}
         elif current is not None:
-            sessions.append({**current, "end": at, "ended": event.get("reason", "normal")})
+            # 看护结束卡死进程：无应答那段不算在线，会话截止到无应答开始。
+            stalled = _time(event.get("unresponsive_since")) if event.get("reason") == "unresponsive" else None
+            end = max(min(stalled, at), current["start"]) if stalled is not None else at
+            sessions.append({**current, "end": end, "ended": event.get("reason", "normal")})
             current = None
     if current is not None:
         alive = _alive_at()
@@ -124,7 +127,16 @@ def _host(start: datetime, end: datetime, now: datetime) -> dict[str, Any]:
 def summarize(start: datetime, end: datetime, now: datetime | None = None) -> dict[str, Any]:
     now = now or datetime.now().astimezone()
     return {"since": start.isoformat(), "until": end.isoformat(),
-            "tasks": _tasks(start, end), "host": _host(start, end, now)}
+            "tasks": _tasks(start, end), "host": _host(start, end, now),
+            "watchdog": _watchdog(start, end)}
+
+
+def _watchdog(start: datetime, end: datetime) -> dict[str, Any]:
+    """常驻看护判定无应答、结束并重启服务的次数（停止原因 unresponsive）。"""
+    events = host_lifecycle.read_events()
+    return {"unresponsive_restarts": sum(
+        1 for event in events if event["event"] == "stop" and event.get("reason") == "unresponsive"
+        and (at := _time(event["time"])) is not None and start <= at <= end)}
 
 
 def _format(summary: dict[str, Any]) -> str:
@@ -151,7 +163,8 @@ def _format(summary: dict[str, Any]) -> str:
         lines.append(f"无耗时字段的旧记录 {tasks['rows_without_timing']} 条")
     lines += [
         f"主机启动 {host['starts']} 次（服务模式 {host['service_mode_starts']}），异常结束 "
-        f"{host['abnormal_ends']} 次，更新重启 {host['update_restarts']} 次",
+        f"{host['abnormal_ends']} 次，更新重启 {host['update_restarts']} 次，"
+        f"无应答被看护重启 {summary['watchdog']['unresponsive_restarts']} 次",
         f"在线 {host['online_hours']} / {host['range_hours']} 小时",
     ]
     return "\n".join(lines)
