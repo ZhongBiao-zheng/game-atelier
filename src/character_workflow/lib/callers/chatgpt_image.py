@@ -46,6 +46,11 @@ def _headers(credentials: chatgpt_auth.Credentials) -> dict[str, str]:
     }
 
 
+def _retry_pause(attempt: int) -> None:
+    """退避重试的等待（测试只替换它，不碰全局 time.sleep）。"""
+    time.sleep(1 + attempt)
+
+
 def _post(url: str, payload: dict, timeout) -> dict:
     credentials = chatgpt_auth.get_credentials()
     auth_recovered = False
@@ -70,7 +75,7 @@ def _post(url: str, payload: dict, timeout) -> dict:
                 raise openai_image.OpenAIImageError(FORBIDDEN) from RuntimeError("HTTP 403")
             if response.status_code >= 300:
                 if openai_image._is_retryable(response.status_code, response.text) and attempt < 2:
-                    time.sleep(1 + attempt)
+                    _retry_pause(attempt)
                     continue
                 # Do not persist upstream bodies that could echo credentials or reference images.
                 raise openai_image.OpenAIImageError(f"ChatGPT 出图失败（HTTP {response.status_code}）")
@@ -87,7 +92,7 @@ def _post(url: str, payload: dict, timeout) -> dict:
                 cause = (requests.ConnectTimeout("connection failed")
                          if openai_image._is_pre_flight_failure(error) else None)
                 raise openai_image.OpenAIImageError("ChatGPT 出图网络请求失败，请检查网络") from cause
-            time.sleep(1 + attempt)
+            _retry_pause(attempt)
     raise openai_image.OpenAIImageError("ChatGPT 出图重试失败")
 
 

@@ -1024,7 +1024,7 @@ def _post_json(url: str, api_key: str, payload: dict, *, timeout: float | tuple[
                 # 瞬时网关错误复用网络异常那套退避重试（continue 进下一轮）；其余当场抛。
                 if (_is_retryable(resp.status_code, resp.text) and attempt < 2
                         and not _is_tuzi_gpt2_auto(url, payload.get("model"), payload.get("size"))):
-                    time.sleep(1 + attempt)
+                    _retry_pause(attempt)
                     continue
                 raise err
             return resp.json()
@@ -1037,37 +1037,26 @@ def _post_json(url: str, api_key: str, payload: dict, *, timeout: float | tuple[
         except requests.RequestException as e:
             if not _is_pre_flight_failure(e) or attempt >= 2:
                 raise OpenAIImageError(str(e)) from e
-            time.sleep(1 + attempt)
+            _retry_pause(attempt)
     # 循环只经 return / raise 退出（末轮走上面的 raise）；防御性兜底。
     raise OpenAIImageError("image api: retries exhausted")
 
 
 def _is_pre_flight_failure(error: BaseException) -> bool:
-    """请求是否**没能送达上游** —— 只有这类失败重试才不会重复计费。
+    """请求是否**确定没能送达上游** —— 只有这类失败重试 / 换家才不会重复计费。
 
-    同步出图端点在图出完之前一个字节都不吐，所以「读超时」几乎必然意味着上游正在真跑：
-    重试等于再买一次。实测记录（memory: image-upload-timeout-and-gateway-drop）：读超时
-    180s 时 HK 复杂生成假超时 → 重试 → 墙钟 180s 翻到 350s + 厂商双计费。同理，连接建立
-    之后被掐（RemoteDisconnected / reset）也说明请求已经发出去了。
-
-    只有连接**建立阶段**的失败（连接超时、DNS、拒绝连接）能安全重试。
+    委托给 `connect_failure.never_sent`（正向识别，认不出的一律算可能已送达）。同步出图端点在图出完之前
+    一个字节都不吐，「读超时」与连上后被掐都说明上游可能正在真跑，重试等于再买一次（实测记录见 memory:
+    image-upload-timeout-and-gateway-drop）。2026-11-19 起不再用「已送达报文名单、其余算没送达」的反向判断。
     """
-    if isinstance(error, requests.ConnectTimeout):  # 必须排在 ConnectionError 之前
-        return True
-    if isinstance(error, requests.ReadTimeout):
-        return False
-    if isinstance(error, requests.ConnectionError):
-        # ConnectionError 同时涵盖「连不上」与「连上后被掐」，只能按报文区分。
-        # 后三个是「响应头已到、读响应体时失败」：requests 在 stream=False 下读体超时抛的是
-        # ConnectionError("Read timed out.") 而不是 ReadTimeout，原先被当成没送达而重试
-        # （本机假服务实测同一请求提交 3 次）。这时上游早已受理，必须当场致命。
-        sent = (
-            "remote end closed", "remotedisconnected", "connection reset",
-            "reset by peer", "connection aborted", "broken pipe",
-            "read timed out", "connection broken", "incompleteread", "incomplete read",
-        )
-        return not any(marker in str(error).lower() for marker in sent)
-    return False
+    from .connect_failure import never_sent
+
+    return never_sent(error)
+
+
+def _retry_pause(attempt: int) -> None:
+    """退避重试的等待（测试只替换它，不碰全局 time.sleep）。"""
+    time.sleep(1 + attempt)
 
 
 def _write_outputs(payload: dict, output_dir: Path, *, start_index: int = 1) -> list[str]:
