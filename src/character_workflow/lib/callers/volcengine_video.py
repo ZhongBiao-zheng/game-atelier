@@ -8,19 +8,15 @@ OpenAI-chat 式 content[] 数组带 role。提交 POST /contents/generations/tas
 from __future__ import annotations
 
 import base64
-import re
-import time
 from collections.abc import Callable
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
 from character_workflow.lib import keys as _keys
 from character_workflow.lib import oss_upload
-from character_workflow.lib.callers import video_poll
+from character_workflow.lib.callers import task_submission, video_poll
 from character_workflow.lib.video_caps import seedance_limits
 
 DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
@@ -38,73 +34,25 @@ class VolcengineVideoError(RuntimeError):
     pass
 
 
+class VolcengineVideoUnconfirmed(VolcengineVideoError, task_submission.SubmissionUnconfirmed):
+    """提交可能已被上游受理（见 task_submission）：不重发、不换家。"""
+
+
 def _submit_task(tasks_url, headers, body, attempt, on_submission):
-    """Submit once; persist only allowlisted metadata, never credentials or media bodies."""
-    parsed = urlsplit(tasks_url)
-    host = parsed.hostname or ""
-    if parsed.port:
-        host = f"{host}:{parsed.port}"
-    diagnostic = {
-        "attempt": attempt,
-        "method": "POST",
-        "url": urlunsplit((parsed.scheme, host, parsed.path, "", "")),
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "outcome": "submitting",
-    }
-    started = time.monotonic()
-    if on_submission:
-        on_submission(dict(diagnostic))
-    try:
-        resp = requests.post(tasks_url, headers=headers, json=body, timeout=600)
-    except requests.RequestException as error:
-        diagnostic.update(outcome="unconfirmed", error_type=type(error).__name__,
-                          elapsed_ms=round((time.monotonic() - started) * 1000))
-        if on_submission:
-            on_submission(dict(diagnostic))
-        raise VolcengineVideoError(
-            "视频提交结果未确认：网络请求未完成，未自动重新提交。"
-            "请先核对厂商记录，避免重复计费。"
-        ) from error
-    diagnostic.update(http_status=resp.status_code,
-                      elapsed_ms=round((time.monotonic() - started) * 1000))
-    response_headers = getattr(resp, "headers", {})
-    request_ids = {}
-    for name in ("x-request-id", "x-trace-id", "request-id", "x-tt-logid"):
-        value = response_headers.get(name, "")
-        if (re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", value)
-                and value not in headers["Authorization"]):
-            request_ids[name] = value
-    diagnostic["request_ids"] = request_ids
-    diagnostic["outcome"] = "unconfirmed" if resp.status_code >= 500 else "response"
-    if on_submission:
-        on_submission(dict(diagnostic))
-    if resp.status_code >= 500:
-        raise VolcengineVideoError(
-            f"视频提交结果未确认：厂商接口返回 HTTP {resp.status_code}，未自动重新提交。"
-            "请先核对厂商记录，避免重复计费。"
-        )
-    try:
-        payload = resp.json()
-        if not isinstance(payload, dict):
-            raise ValueError("expected an object")
-    except (ValueError, TypeError) as error:
-        if not resp.ok:
-            raise VolcengineVideoError(f"视频提交被拒：HTTP {resp.status_code}") from error
-        diagnostic["outcome"] = "unconfirmed"
-        if on_submission:
-            on_submission(dict(diagnostic))
-        raise VolcengineVideoError(
-            "视频提交结果未确认：响应无法解析，未自动重新提交。请先核对厂商记录。"
-        ) from error
-    if not resp.ok:
-        raise VolcengineVideoError(f"视频提交被拒：HTTP {resp.status_code}；{_err(payload, resp.status_code)}")
+    """提交一次（判据见 task_submission）；上游直接给了视频地址、没有任务号的那单也算受理。"""
+    def rejected(payload: dict[str, Any], status: int) -> str:
+        detail = f"；{_err(payload, status)}" if payload else ""
+        return f"视频提交被拒：HTTP {status}{detail}"
+
+    submitted = task_submission.submit_task(
+        url=tasks_url, headers=headers, body=body, attempt=attempt, on_submission=on_submission,
+        rejected=VolcengineVideoError, unconfirmed=VolcengineVideoUnconfirmed,
+        reject_message=rejected)
+    payload = submitted.payload
     if not _extract_task_id(payload) and _extract_status(payload) not in _FAILURE:
         picked = _pick_video_url(_dedupe(_collect_video_urls(payload)), _sent_urls(body["content"]))
         if not picked or _extract_status(payload) not in _SUCCESS | {""}:
-            diagnostic["outcome"] = "unconfirmed"
-            if on_submission:
-                on_submission(dict(diagnostic))
-            raise VolcengineVideoError("视频提交结果未确认：未返回任务 ID，请先核对厂商记录。")
+            raise submitted.unconfirmed(task_submission.MISSING_ID_UNCONFIRMED.format(noun="视频"))
     return payload
 
 
@@ -466,7 +414,8 @@ def render_video(
                 ready.append((picked, ""))
                 submitted.append({"url": picked, **({"id": task_id} if task_id else {})})
             elif not task_id:
-                raise VolcengineVideoError("视频提交结果未确认：未返回任务 ID，请先核对厂商记录。")
+                raise VolcengineVideoUnconfirmed(
+                    task_submission.MISSING_ID_UNCONFIRMED.format(noun="视频"))
             else:
                 pending_ids.append(task_id)
                 submitted.append({"id": task_id})

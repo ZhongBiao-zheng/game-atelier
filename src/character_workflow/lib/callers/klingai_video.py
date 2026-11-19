@@ -19,16 +19,15 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Callable
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 import requests
 
 from character_workflow.lib import keys as _keys
 from character_workflow.lib import oss_upload
-from character_workflow.lib.callers import video_poll
+from character_workflow.lib.callers import task_submission, video_poll
 from character_workflow.lib.video_caps import KlingSpec, kling_spec
 
 _SUCCESS = {"SUCCEEDED", "SUCCEED", "SUCCESS", "COMPLETED"}
@@ -37,6 +36,10 @@ _FAILURE = {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED"}
 
 class KlingaiVideoError(RuntimeError):
     pass
+
+
+class KlingaiVideoUnconfirmed(KlingaiVideoError, task_submission.SubmissionUnconfirmed):
+    """提交可能已被上游受理（见 task_submission）：不重发、不换家。"""
 
 
 def _is_tuzi(key) -> bool:
@@ -224,45 +227,19 @@ def _video_urls(task: dict[str, Any], sent: set[str]) -> list[str]:
 
 def _submit(url: str, headers: dict[str, str], body: dict[str, Any], attempt: int,
             on_submission: Callable[[dict[str, Any]], None] | None) -> str:
-    """提交一次，不自动重试：网络断在半路时上游可能已经建单计费。"""
-    parsed = urlsplit(url)
-    diagnostic: dict[str, Any] = {
-        "attempt": attempt,
-        "method": "POST",
-        "url": urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", "")),
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "outcome": "submitting",
-    }
-    if on_submission:
-        on_submission(dict(diagnostic))
-    try:
-        resp = requests.post(url, headers=headers, json=body, timeout=600)
-    except requests.RequestException as error:
-        diagnostic.update(outcome="unconfirmed", error_type=type(error).__name__)
-        if on_submission:
-            on_submission(dict(diagnostic))
-        raise KlingaiVideoError(
-            "视频提交结果未确认：网络请求未完成，未自动重新提交。请先核对厂商记录，避免重复计费。"
-        ) from error
-    diagnostic["http_status"] = resp.status_code
-    diagnostic["outcome"] = "unconfirmed" if resp.status_code >= 500 else "response"
-    if on_submission:
-        on_submission(dict(diagnostic))
-    if resp.status_code >= 500:
-        raise KlingaiVideoError(
-            f"视频提交结果未确认：厂商接口返回 HTTP {resp.status_code}，未自动重新提交。"
-            "请先核对厂商记录，避免重复计费。"
-        )
-    payload = _json(resp)
-    if not resp.ok:
-        raise KlingaiVideoError(f"视频提交被拒：HTTP {resp.status_code}；{_err(payload, resp.status_code)}")
+    """提交一次，不自动重试（判据见 task_submission）。"""
+    submitted = task_submission.submit_task(
+        url=url, headers=headers, body=body, attempt=attempt, on_submission=on_submission,
+        rejected=KlingaiVideoError, unconfirmed=KlingaiVideoUnconfirmed,
+        reject_message=lambda payload, status: f"视频提交被拒：HTTP {status}；{_err(payload, status)}")
+    payload = submitted.payload
     code = payload.get("code")
     if code not in (None, 0, "0"):
-        raise KlingaiVideoError(f"视频提交被拒：{_err(payload, resp.status_code)}")
+        raise KlingaiVideoError(f"视频提交被拒：{_err(payload, submitted.status)}")
     task = _task(payload)
     task_id = task.get("id") or task.get("task_id")
     if not task_id:
-        raise KlingaiVideoError("视频提交结果未确认：未返回任务 ID，请先核对厂商记录。")
+        raise submitted.unconfirmed(task_submission.MISSING_ID_UNCONFIRMED.format(noun="视频"))
     return str(task_id)
 
 

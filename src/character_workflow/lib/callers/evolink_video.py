@@ -21,7 +21,7 @@ import requests
 
 from character_workflow.lib import keys as _keys
 from character_workflow.lib.callers import evolink as _evo
-from character_workflow.lib.callers import video_poll
+from character_workflow.lib.callers import task_submission, video_poll
 from character_workflow.lib.callers.klingai_video import split_references
 from character_workflow.lib.video_caps import KlingSpec, kling_spec
 
@@ -30,6 +30,10 @@ _TASK_SUFFIX = re.compile(r"-(?:text-to-video|image-to-video|reference-to-video|
 
 class EvoLinkVideoError(RuntimeError):
     pass
+
+
+class EvoLinkVideoUnconfirmed(EvoLinkVideoError, task_submission.SubmissionUnconfirmed):
+    """提交可能已被上游受理（见 task_submission）：不重发、不换家。"""
 
 
 def family(model: str) -> str:
@@ -145,37 +149,16 @@ def _json(resp) -> dict[str, Any]:
 
 def _submit(root: str, key, body: dict[str, Any], attempt: int,
             on_submission: Callable[[dict[str, Any]], None] | None) -> str:
-    """提交一次，不自动重试：网络断在半路时上游可能已经建单计费。"""
-    url = f"{root}/v1/videos/generations"
-    diagnostic: dict[str, Any] = {"attempt": attempt, "method": "POST", "url": url,
-                                  "outcome": "submitting"}
-    if on_submission:
-        on_submission(dict(diagnostic))
-    try:
-        resp = requests.post(url, headers={"Authorization": f"Bearer {key.access_key}"},
-                             json=body, timeout=(10, 120), allow_redirects=False)
-    except requests.RequestException as error:
-        diagnostic.update(outcome="unconfirmed", error_type=type(error).__name__)
-        if on_submission:
-            on_submission(dict(diagnostic))
-        raise EvoLinkVideoError(
-            "视频提交结果未确认：网络请求未完成，未自动重新提交。请先核对厂商记录，避免重复计费。"
-        ) from error
-    diagnostic.update(http_status=resp.status_code,
-                      outcome="unconfirmed" if resp.status_code >= 500 else "response")
-    if on_submission:
-        on_submission(dict(diagnostic))
-    if resp.status_code >= 500:
-        raise EvoLinkVideoError(
-            f"视频提交结果未确认：厂商接口返回 HTTP {resp.status_code}，未自动重新提交。"
-            "请先核对厂商记录，避免重复计费。"
-        )
-    payload = _json(resp)
-    if not resp.ok:
-        raise EvoLinkVideoError(_evo._error(payload, resp.status_code, key.access_key))
-    task_id = payload.get("id")
+    """提交一次，不自动重试（判据见 task_submission）。"""
+    submitted = task_submission.submit_task(
+        url=f"{root}/v1/videos/generations", headers={"Authorization": f"Bearer {key.access_key}"},
+        body=body, attempt=attempt, on_submission=on_submission, rejected=EvoLinkVideoError,
+        unconfirmed=EvoLinkVideoUnconfirmed,
+        reject_message=lambda payload, status: _evo._error(payload, status, key.access_key),
+        timeout=(10, 120), allow_redirects=False)
+    task_id = submitted.payload.get("id")
     if not isinstance(task_id, str) or not task_id:
-        raise EvoLinkVideoError("视频提交结果未确认：未返回任务 ID，请先核对厂商记录。")
+        raise submitted.unconfirmed(task_submission.MISSING_ID_UNCONFIRMED.format(noun="视频"))
     return task_id
 
 

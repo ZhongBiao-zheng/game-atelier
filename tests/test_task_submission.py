@@ -1,6 +1,6 @@
 """第 5 批 5-1：异步任务提交的统一判据（callers/task_submission）。
 
-各视频协议都用真实 caller，只替换 requests 的网络调用（假上游）。判据（2026-11-19 飙哥定 Q1-1=A）：
+六个视频协议都用真实 caller，只替换 requests 的网络调用（假上游）。判据（2026-11-19 飙哥定 Q1-1=A）：
 任何网络异常（含连接建立前）、HTTP ≥ 500、2xx 非 JSON、2xx 无任务号都算「未确认」——不重发、不换家、扣 0；
 4xx 是明确拒绝。
 """
@@ -14,11 +14,18 @@ import requests
 from character_workflow.lib import gateway_keys, gateway_quota, gateway_tasks, keys, model_routes
 from character_workflow.lib.callers import task_submission
 
+ARK = "https://ark.cn-beijing.volces.com/api/v3"
 HK = "https://api.openai-hk.com/v1"
 TD = "https://tokendance.space/gateway/v1"
 
 # (协议, 供应商, base_url, 模型, 路由 id, 上游受理时的响应)
 PROTOCOLS = [
+    ("seedance", "seedance", ARK, "doubao-seedance-2-0-fast-260128",
+     "seedance:doubao-seedance-2-0-fast-260128", {"id": "t-1", "status": "queued"}),
+    ("klingai", "tokendance", TD, "kling-4.0", "klingai:kling-4.0",
+     {"code": 0, "data": {"id": "t-1", "status": "submitted"}}),
+    ("evolink", "evolink", "https://api.evolink.ai/v1", "kling-v4-flash-text-to-video",
+     "evolink:kling-v4-flash-text-to-video", {"id": "t-1", "status": "pending"}),
     ("kling", "custom", HK, "kling-v2-6", "kling:kling-v2-6",
      {"data": {"task_id": "t-1", "task_status": "submitted"}}),
     ("dashscope", "tokendance", TD, "happyhorse-1.0-t2v", "dashscope:happyhorse-1.0-t2v",
@@ -142,10 +149,16 @@ def test_second_order_dropped_after_the_first_was_accepted(
 
 
 def test_error_types_keep_their_caller_class_and_are_unconfirmed_by_type():
-    from character_workflow.lib.callers import happyhorse_video, kling_video, openrouter_video
+    from character_workflow.lib.callers import (
+        evolink_video, happyhorse_video, kling_video, klingai_video, openrouter_video,
+        volcengine_video,
+    )
     from character_workflow.lib.model_routes import failover_reason
 
-    pairs = [(kling_video.KlingVideoError, kling_video.KlingVideoUnconfirmed),
+    pairs = [(volcengine_video.VolcengineVideoError, volcengine_video.VolcengineVideoUnconfirmed),
+             (klingai_video.KlingaiVideoError, klingai_video.KlingaiVideoUnconfirmed),
+             (evolink_video.EvoLinkVideoError, evolink_video.EvoLinkVideoUnconfirmed),
+             (kling_video.KlingVideoError, kling_video.KlingVideoUnconfirmed),
              (happyhorse_video.HappyHorseVideoError, happyhorse_video.HappyHorseVideoUnconfirmed),
              (openrouter_video.OpenRouterVideoError, openrouter_video.OpenRouterVideoUnconfirmed)]
     for base, unconfirmed in pairs:
@@ -177,3 +190,27 @@ def test_local_auto_video_job_does_not_fail_over_after_an_unsure_submission(monk
     assert job.status == JobStatus.FAILED and job.alias == "first"
     assert len(posts) == 1
     assert [a.outcome for a in job.params.video_submission_attempts] == ["unconfirmed"]
+
+
+def test_local_evolink_video_job_records_its_submission(monkeypatch):
+    """以前 EvoLink 视频的提交记录缺 started_at，本机任务第一次回调就校验失败、发不出去。"""
+    from character_workflow.lib import job_runner
+    from character_workflow.lib.jobs import read_job, save_job
+    from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
+
+    keys.add_key(keys.KeySpec(
+        alias="evo", provider="evolink", access_key="evo-test-secret",
+        base_url="https://api.evolink.ai/v1", modalities=["video"], created_at="test",
+        models=[keys.ModelSpec(id="kling-v4-flash-text-to-video", name="k", modality="video")]))
+    posts = _posting(monkeypatch, lambda: _resp({"id": "evo-1", "status": "pending"}))
+    save_job(Job(job_id="local-evo", character_id="A", prompt="海边的灯塔",
+                 submitted_at="2026-11-19T00:00:00+00:00", model="kling-v4-flash-text-to-video",
+                 params=JobParams(n=1, duration=5), output_paths=[], status=JobStatus.PENDING,
+                 error=None, kind=JobKind.VIDEO, namespace="studio", alias="evo",
+                 provider="evolink"))
+    with pytest.raises(_Stop):
+        job_runner.run_job("local-evo")
+    job = read_job("local-evo")
+    assert len(posts) == 1
+    assert job.params.provider_task_ids == ["evo-1"]
+    assert [a.outcome for a in job.params.video_submission_attempts] == ["response"]
