@@ -38,6 +38,19 @@ class SubmissionUnconfirmed(Exception):
     """提交可能已被上游受理，但没拿到明确结果：不重发、不换家。"""
 
 
+def network_outcome(error: BaseException) -> str:
+    """网络异常的提交结局。连接建立前的失败（上游肯定没收到）在这里、也只在这里分类。
+
+    2026-11-19 飙哥定 Q1-1=A：仍按未确认处理（不重发、不换家）。将来改判「未送达、可换家」只改这一个分支，
+    另加一个 outcome 取值（`VideoSubmissionAttempt.outcome` 双端同步）。
+    """
+    from character_workflow.lib.callers.openai_image import _is_pre_flight_failure
+
+    if _is_pre_flight_failure(error):
+        return "unconfirmed"
+    return "unconfirmed"  # 连接建立后断开、读超时：请求可能已到上游
+
+
 def is_unconfirmed(error: BaseException | None) -> bool:
     """错误链上有没有「提交未确认」（按类型，沿 __cause__ 找）。"""
     seen: list[BaseException] = []
@@ -108,17 +121,8 @@ def submit_task(
     try:
         resp = requests.post(url, headers=headers, json=body, timeout=timeout, **request_kwargs)
     except requests.RequestException as error:
-        from character_workflow.lib.callers.openai_image import _is_pre_flight_failure
-
-        diagnostic.update(error_type=type(error).__name__,
+        diagnostic.update(outcome=network_outcome(error), error_type=type(error).__name__,
                           elapsed_ms=round((time.monotonic() - started) * 1000))
-        if _is_pre_flight_failure(error):
-            # 连接都没建立：上游肯定没收到。2026-11-19 飙哥定 Q1-1=A，仍按未确认处理（不重发、不换家）。
-            # 将来改判「未送达、可换家」只改这一个分支（另加一个 outcome 取值）。
-            outcome = "unconfirmed"
-        else:
-            outcome = "unconfirmed"  # 连接建立后断开、读超时：请求可能已到上游
-        diagnostic["outcome"] = outcome
         report(diagnostic)
         raise unconfirmed(NETWORK_UNCONFIRMED.format(noun=noun)) from error
     status = resp.status_code

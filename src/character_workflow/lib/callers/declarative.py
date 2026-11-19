@@ -34,7 +34,7 @@ from character_workflow.lib.http_protocols import (
     PROTOCOL, ProtocolUnavailableError, read_protocol,
 )
 
-from . import video_poll
+from . import task_submission, video_poll
 from .image_output import image_extension, write_image
 
 TASK_PROTOCOL = PROTOCOL
@@ -56,6 +56,10 @@ _MIME = {".png": "image/png", ".jpg": "image/jpeg", ".gif": "image/gif", ".webp"
 
 class DeclarativeError(RuntimeError):
     pass
+
+
+class DeclarativeUnconfirmed(DeclarativeError, task_submission.SubmissionUnconfirmed):
+    """异步提交可能已被厂商受理（判据见 task_submission）：不重发、不换家。"""
 
 
 class DeclarativePendingError(DeclarativeError):
@@ -340,8 +344,16 @@ def _transport_error(call: PreparedCall, error: requests.RequestException, *, re
     return f"custom api request failed ({safe_url(call)})：{stage}：{redact(call, str(error))}"
 
 
-def send(call: PreparedCall, *, timeout, error_path: str | None) -> Any:
+def _backoff(attempt: int) -> None:
+    time.sleep(1 + attempt)
+
+
+def send(call: PreparedCall, *, timeout, error_path: str | None, task: bool = False) -> Any:
     """发提交请求：只在确定没送达的失败上重试；返回解析后的 JSON。
+
+    `task=True`（异步提交，拿任务号再轮询）按 task_submission 的统一判据：5xx 不重发、算未确认；
+    重试用尽仍连不上、读体失败、响应不是 JSON 都抛 `DeclarativeUnconfirmed`。同步模板维持
+    ADR-0036 的「502/503/504 重发」（同步接口没有任务号，未确认等于让用户手动重做）。
 
     响应头一旦到达，请求就已被厂商受理（多半已计费）：读体阶段的任何失败都当场致命。
     requests 在读体超时时抛的是 ConnectionError("Read timed out") 而不是 ReadTimeout，
@@ -359,9 +371,12 @@ def send(call: PreparedCall, *, timeout, error_path: str | None) -> Any:
             )
         except requests.RequestException as error:
             if _is_pre_flight_failure(error) and attempt < 2:
-                time.sleep(1 + attempt)
+                _backoff(attempt)
                 continue
-            raise DeclarativeError(_transport_error(call, error, received=False)) from None
+            message = _transport_error(call, error, received=False)
+            if task and task_submission.network_outcome(error) == "unconfirmed":
+                raise DeclarativeUnconfirmed(message) from None
+            raise DeclarativeError(message) from None
         with response:
             status = response.status_code
             try:
@@ -369,18 +384,23 @@ def send(call: PreparedCall, *, timeout, error_path: str | None) -> Any:
             except outbound_guard.OutboundError as error:
                 raise DeclarativeError(f"custom api 响应过大：{error}") from None
             except requests.RequestException as error:
-                raise DeclarativeError(_transport_error(call, error, received=True)) from None
+                failed = DeclarativeUnconfirmed if task else DeclarativeError
+                raise failed(_transport_error(call, error, received=True)) from None
         payload = _decode_json(raw)
         if 300 <= status < 400:
             raise DeclarativeError(f"custom api {status}: 接口返回了重定向，自定义接口不跟随重定向")
+        if task and status >= 500:
+            raise DeclarativeUnconfirmed(
+                f"custom api {status}: {_error_text(payload, raw, error_path)}"
+                "（任务提交结果未确认，未自动重新提交，请先到厂商后台核对）")
         if status >= 400:
             if status in _RETRYABLE_STATUS and attempt < 2:
-                time.sleep(1 + attempt)
+                _backoff(attempt)
                 continue
             raise DeclarativeError(f"custom api {status}: {_error_text(payload, raw, error_path)}")
         if payload is None:
-            raise DeclarativeError(
-                "custom api 返回的内容不是 JSON，这次请求可能已经执行，请先到厂商后台确认")
+            failed = DeclarativeUnconfirmed if task else DeclarativeError
+            raise failed("custom api 返回的内容不是 JSON，这次请求可能已经执行，请先到厂商后台确认")
         return payload
     raise DeclarativeError("custom api: retries exhausted")
 
@@ -590,10 +610,11 @@ def _run_async(binding: Binding, context: dict[str, Any], params: dict[str, Any]
         if should_cancel and should_cancel():
             raise DeclarativeError("生成已按请求停止，尚未提交厂商任务")
         call = prepare(binding.base, binding.key.access_key, protocol, context)
-        payload = send(call, timeout=ASYNC_SUBMIT_TIMEOUT, error_path=protocol.result.error)
+        payload = send(call, timeout=ASYNC_SUBMIT_TIMEOUT, error_path=protocol.result.error,
+                       task=True)
         found = _task_id(first_value(payload, poll.task_id))
         if not found:
-            raise DeclarativeError(
+            raise DeclarativeUnconfirmed(
                 f"custom api 提交后按 {poll.task_id} 取不到任务号；厂商响应：{_summary(payload)}")
         task_id = found
         params["provider_task_protocol"] = TASK_PROTOCOL
