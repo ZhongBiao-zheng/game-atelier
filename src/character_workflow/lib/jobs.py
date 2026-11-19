@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -345,7 +346,7 @@ def gateway_reattach_params(source: Job | None, alias: str | None) -> dict[str, 
     """「再次生成」时从原任务继承的网关接回字段；不该接回时返回空字典。
 
     只接回：同一个局域网 Atelier 供应商、原任务失败且接入端没从主机拿到终态
-    （`gateway_unconfirmed`）、提交不满 20 小时。请求是否完全相同由 caller 按实际发给主机的
+    （`gateway_unconfirmed`）、这把幂等键第一次发出不满 20 小时。请求是否完全相同由 caller 按实际发给主机的
     内容比指纹，不同就换新键下新单。
     """
     if (source is None or source.status != JobStatus.FAILED or source.provider != "atelier"
@@ -355,11 +356,11 @@ def gateway_reattach_params(source: Job | None, alias: str | None) -> dict[str, 
     if not (params.gateway_unconfirmed and params.gateway_idempotency_key
             and params.gateway_request_fingerprint):
         return {}
-    try:
-        submitted = datetime.fromisoformat(source.submitted_at)
-    except (TypeError, ValueError):
-        return {}
-    if submitted.tzinfo is None or datetime.now(timezone.utc) - submitted > GATEWAY_REATTACH_WINDOW:
+    # 窗口从这把键第一次发出时算（签发时间编在键里），连续再次生成不会把窗口往后推。
+    from character_workflow.lib.callers.atelier_gateway import idempotency_key_issued_at
+
+    issued = idempotency_key_issued_at(params.gateway_idempotency_key)
+    if issued is None or time.time() - issued > GATEWAY_REATTACH_WINDOW.total_seconds():
         return {}
     return {"gateway_idempotency_key": params.gateway_idempotency_key,
             "gateway_request_fingerprint": params.gateway_request_fingerprint,

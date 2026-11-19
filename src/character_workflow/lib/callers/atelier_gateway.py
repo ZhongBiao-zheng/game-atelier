@@ -233,13 +233,16 @@ def _run_task(
                                    params=wire_params, uploads=uploads)
 
         def submit(*, new_key: bool) -> str:
+            # gateway_unconfirmed = 「这把幂等键在主机上的结局还不知道」。新键第一次发送前主机肯定没有；
+            # 沿用旧键（接回、本任务上次提交未确认后重发）时，主机可能已经在出图，标记保持到主机对这把键
+            # 给出终态为止，中途连不上也不清。
             if new_key:
-                params["gateway_idempotency_key"] = uuid.uuid4().hex
+                params["gateway_idempotency_key"] = new_idempotency_key()
                 params["gateway_request_fingerprint"] = fingerprint
                 params["provider_task_protocol"] = None
                 params["provider_task_ids"] = None
+            params["gateway_unconfirmed"] = None if new_key else True
             # 幂等键先落盘再发：提交结果不确定时，下一次用同一个键只会拿回主机上的原任务。
-            params["gateway_unconfirmed"] = None
             if on_params_changed:
                 on_params_changed()
             try:
@@ -248,8 +251,14 @@ def _run_task(
                                   idempotency_key=params["gateway_idempotency_key"])
             except GatewayUnconfirmed as error:
                 raise unconfirmed(error) from error.__cause__
+            except requests.RequestException as error:
+                if new_key:
+                    raise  # 新键、连接都没建立：主机没收到，接入端可以换家
+                # 旧键连不上：主机上可能有原任务在出图，不能换家重出。
+                raise unconfirmed(GatewayUnconfirmed("网关连不上，原任务结果未确认")) from error
             params["provider_task_protocol"] = PROTOCOL
             params["provider_task_ids"] = [task_id]
+            params["gateway_unconfirmed"] = True  # 主机已受理，结局要等它给出终态
             if on_params_changed:
                 on_params_changed()
             if on_task_id:
@@ -284,7 +293,10 @@ def _run_task(
             params["gateway_reattach_of"] = None
             task_id = submit(new_key=True)
             status = poll(task_id)
-        params["gateway_unconfirmed"] = None
+        if status["status"] in ("failed", "canceled"):
+            params["gateway_unconfirmed"] = None  # 主机对这把键给了明确终态
+            if on_params_changed:
+                on_params_changed()
         if status["status"] == "canceled" or cancelled():
             raise JobCanceled("已按请求停止")
         if status["status"] == "failed":
@@ -350,9 +362,23 @@ def _run_task(
                 target.write_bytes(response.content)
                 inputs.append({"role": item["role"], "path": str(target)})
             params["edit_inputs"] = inputs
+        params["gateway_unconfirmed"] = None  # 结果已取回
         if on_params_changed:
             on_params_changed()
         return paths
+
+
+def new_idempotency_key() -> str:
+    """幂等键里带上它第一次发出的时间（秒），「再次生成」的接回窗口从这里算，不另外落盘。"""
+    return f"{int(time.time())}-{uuid.uuid4().hex}"
+
+
+def idempotency_key_issued_at(key: str | None) -> float | None:
+    """`new_idempotency_key` 生成的键的签发时间；不是这种格式就返回 None（不接回）。"""
+    stamp, separator, rest = (key or "").partition("-")
+    if not separator or not stamp.isdigit() or len(rest) != 32:
+        return None
+    return float(stamp)
 
 
 def _fingerprint(*, alias, kind, model, prompt, n, params, uploads) -> str:

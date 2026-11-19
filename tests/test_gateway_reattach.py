@@ -26,11 +26,17 @@ gateway = _harness.gateway
 upstream = _harness.upstream
 
 
+class _Crash(BaseException):
+    """成员端进程在发送途中死掉：不是 Exception，谁也接不住。"""
+
+
 class _Faults:
     """lost_posts：提交照发、回应丢失；down_gets / down_outputs：查询 / 下载连不上。"""
 
     def __init__(self):
         self.lost_posts = 0
+        self.down_posts = 0      # 提交时连接都没建立（主机没收到）
+        self.crash_posts = 0     # 提交途中成员端进程崩溃
         self.down_gets = 0
         self.down_outputs = 0
 
@@ -41,6 +47,12 @@ def faults(monkeypatch):
 
     class FaultySession(requests.Session):
         def request(self, method, url, *args, **kwargs):
+            if method == "POST" and url.endswith("/gateway/v1/tasks") and state.crash_posts:
+                state.crash_posts -= 1
+                raise _Crash()
+            if method == "POST" and url.endswith("/gateway/v1/tasks") and state.down_posts:
+                state.down_posts -= 1
+                raise requests.ConnectTimeout("connect timed out")
             if method == "POST" and url.endswith("/gateway/v1/tasks") and state.lost_posts:
                 state.lost_posts -= 1
                 super().request(method, url, *args, **kwargs)
@@ -165,19 +177,25 @@ def test_download_that_keeps_failing_is_unconfirmed_and_regenerate_downloads_the
     assert len(_host_tasks()) == 1 and len(upstream["calls"]) == 1
 
 
-def test_reattach_window_and_other_guards():
-    params = SimpleNamespace(gateway_unconfirmed=True, gateway_idempotency_key="k",
-                             gateway_request_fingerprint="f" * 64)
-    now = datetime.now(timezone.utc)
+def _key(hours_ago: float) -> str:
+    return f"{int(time.time() - hours_ago * 3600)}-{'0' * 32}"
 
-    def source(**changes):
+
+def test_reattach_window_and_other_guards():
+    def params(key):
+        return SimpleNamespace(gateway_unconfirmed=True, gateway_idempotency_key=key,
+                               gateway_request_fingerprint="f" * 64)
+
+    def source(key=None, **changes):
         base = dict(job_id="job-x", status=JobStatus.FAILED, provider="atelier", alias="Hub",
-                    params=params, submitted_at=(now - timedelta(hours=1)).isoformat())
+                    params=params(key or _key(1)),
+                    submitted_at=datetime.now(timezone.utc).isoformat())
         return SimpleNamespace(**{**base, **changes})
 
     assert gateway_reattach_params(source(), "Hub")["gateway_reattach_of"] == "job-x"
-    assert gateway_reattach_params(
-        source(submitted_at=(now - timedelta(hours=21)).isoformat()), "Hub") == {}
+    # 窗口按幂等键第一次发出的时间算，不按任务提交时间：刚提交的任务带着 21 小时前的键也不接回。
+    assert gateway_reattach_params(source(_key(21)), "Hub") == {}
+    assert gateway_reattach_params(source("legacy-key-without-time"), "Hub") == {}
     assert gateway_reattach_params(source(alias="Other"), "Hub") == {}
     assert gateway_reattach_params(source(status=JobStatus.DONE), "Hub") == {}
     assert gateway_reattach_params(source(provider="openai"), "Hub") == {}
@@ -188,7 +206,7 @@ def test_reattach_window_and_other_guards():
 def test_canvas_regenerate_finds_the_latest_job_of_the_same_node(monkeypatch):
     from character_workflow.lib import canvas_runs
 
-    params = SimpleNamespace(gateway_unconfirmed=True, gateway_idempotency_key="k",
+    params = SimpleNamespace(gateway_unconfirmed=True, gateway_idempotency_key=_key(1),
                              gateway_request_fingerprint="f" * 64)
     now = datetime.now(timezone.utc)
 
@@ -244,6 +262,40 @@ def _png_bytes() -> bytes:
     return buffer.getvalue()
 
 
+def _canvas_project() -> str:
+    """参考图节点连到生成节点（指定 Hub）的画布项目。"""
+    from character_workflow.lib.canvas_projects import (
+        create_canvas_project, read_canvas_document, replace_canvas_node_media,
+        save_canvas_document,
+    )
+    from character_workflow.lib.schemas import CanvasDocument
+
+    now = datetime.now(timezone.utc).isoformat()
+    pid = create_canvas_project("网关接回").project_id
+    current = read_canvas_document(pid)
+    payload = current.model_dump(mode="json")
+    payload.update({
+        "nodes": [
+            {"id": "ref", "title": "参考", "type": "image", "position": {"x": 0, "y": 0},
+             "z_index": 0, "data": {"current_version_id": None, "generation_draft": None,
+                                    "active_run_id": None,
+                                    "display": {"fit": "contain", "free_resize": False}}},
+            {"id": "config", "title": "生成", "type": "image", "position": {"x": 300, "y": 0},
+             "z_index": 0, "data": {"generation_draft": {
+                 "mode": "image", "prompt": "一只纸雕狐狸", "input_policy": "all_connected",
+                 "model": "gpt-image-2", "alias": "Hub", "params": {"ratio": "1:1"},
+                 "updated_at": now}}},
+        ],
+        "connections": [{"id": "edge-ref", "role": "input", "source_node_id": "ref",
+                         "target_node_id": "config"}],
+    })
+    saved = save_canvas_document(pid, CanvasDocument.model_validate(payload), current.revision)
+    _v, saved, _ = replace_canvas_node_media(pid, "ref", "ref.png", ".png", _png_bytes(), "image",
+                                             saved.revision)
+
+    return pid
+
+
 def test_studio_regenerate_through_the_real_route_keeps_the_fingerprint(gateway, upstream, faults,
                                                                         monkeypatch):
     from tests.local_client import LocalTestClient
@@ -276,35 +328,12 @@ def test_studio_regenerate_through_the_real_route_keeps_the_fingerprint(gateway,
 def test_canvas_regenerate_through_the_real_run_path_keeps_the_fingerprint(gateway, upstream,
                                                                            faults):
     from character_workflow.lib.canvas_projects import (
-        create_canvas_project, read_canvas_document, replace_canvas_node_media,
-        save_canvas_document,
+        read_canvas_document,
     )
     from character_workflow.lib.canvas_runs import run_canvas_job, submit_canvas_run
-    from character_workflow.lib.schemas import CanvasDocument
 
-    now = datetime.now(timezone.utc).isoformat()
-    pid = create_canvas_project("网关接回").project_id
-    current = read_canvas_document(pid)
-    payload = current.model_dump(mode="json")
-    payload.update({
-        "nodes": [
-            {"id": "ref", "title": "参考", "type": "image", "position": {"x": 0, "y": 0},
-             "z_index": 0, "data": {"current_version_id": None, "generation_draft": None,
-                                    "active_run_id": None,
-                                    "display": {"fit": "contain", "free_resize": False}}},
-            {"id": "config", "title": "生成", "type": "image", "position": {"x": 300, "y": 0},
-             "z_index": 0, "data": {"generation_draft": {
-                 "mode": "image", "prompt": "一只纸雕狐狸", "input_policy": "all_connected",
-                 "model": "gpt-image-2", "alias": "Hub", "params": {"ratio": "1:1"},
-                 "updated_at": now}}},
-        ],
-        "connections": [{"id": "edge-ref", "role": "input", "source_node_id": "ref",
-                         "target_node_id": "config"}],
-    })
-    saved = save_canvas_document(pid, CanvasDocument.model_validate(payload), current.revision)
-    _v, saved, _ = replace_canvas_node_media(pid, "ref", "ref.png", ".png", _png_bytes(), "image",
-                                             saved.revision)
-
+    pid = _canvas_project()
+    saved = read_canvas_document(pid)
     first, _doc = submit_canvas_run(pid, "config", saved.revision)
     faults.lost_posts = 3
     try:
@@ -332,3 +361,133 @@ def test_gateway_error_mentioning_unconfirmed_is_not_treated_as_unconfirmed(gate
     with pytest.raises(job_runner.JobRunnerError):
         job_runner.run_job(_now_job("job-text").job_id)
     assert not read_job("job-text").params.gateway_unconfirmed
+
+
+# ---------------------------------------------------------------- 接回链不能在中间断开
+# 任务 1 提交回应丢失（主机已收到、在出图）→ 任务 2 再次生成时连接都没建立 → 网络恢复后任务 3
+# 再次生成：必须仍然接回任务 1 在主机上的那一单。
+
+
+def _studio(monkeypatch):
+    from tests.local_client import LocalTestClient
+    from viewer_server import routes
+    from viewer_server.server_app import build_app
+
+    monkeypatch.setattr(routes, "_start_studio_job_task", lambda job_id: None)
+    client = LocalTestClient(base_url="http://127.0.0.1", app=build_app())
+    body = {"prompt": "一只橘猫", "model": "gpt-image-2", "alias": "Hub",
+            "params": {"n": 1, "ratio": "1:1", "size_mode": "ratio"}}
+
+    def create(reattach=None):
+        extra = {"reattach_job_id": reattach} if reattach else {}
+        return client.post("/api/studio/jobs", json={**body, **extra}).json()["job_id"]
+    return create
+
+
+def _run_failing(job_id):
+    with pytest.raises(job_runner.JobRunnerError):
+        job_runner.run_job(job_id)
+    return read_job(job_id)
+
+
+@pytest.mark.parametrize("regenerate_from", ["task2", "task1"])
+def test_studio_chain_survives_a_middle_regenerate_that_could_not_connect(
+        gateway, upstream, faults, monkeypatch, regenerate_from):
+    create = _studio(monkeypatch)
+    faults.lost_posts = 3
+    task1 = _run_failing(create())
+    assert task1.params.gateway_unconfirmed is True and len(_host_tasks()) == 1
+
+    faults.down_posts = 3  # 网络断着：任务 2 沿用旧键，连接都没建立
+    task2 = _run_failing(create(task1.job_id))
+    assert task2.params.gateway_idempotency_key == task1.params.gateway_idempotency_key
+    assert task2.params.gateway_unconfirmed is True  # 结局仍未知，标记不能丢
+    assert "未确认" in task2.error
+    faults.down_posts = 0  # 网络恢复
+
+    source = task2 if regenerate_from == "task2" else task1
+    task3 = job_runner.run_job(create(source.job_id))
+    assert task3.status == JobStatus.DONE and not task3.params.gateway_unconfirmed
+    [host] = _host_tasks()
+    assert task3.params.provider_task_ids == [host.task_id]  # 拿回的是任务 1 在主机上的那一单
+    assert len(upstream["calls"]) == 1
+
+
+def test_canvas_chain_survives_a_middle_regenerate_that_could_not_connect(gateway, upstream,
+                                                                          faults):
+    from character_workflow.lib.canvas_projects import read_canvas_document
+    from character_workflow.lib.canvas_runs import run_canvas_job, submit_canvas_run
+
+    pid = _canvas_project()
+
+    def attempt():
+        job, _doc = submit_canvas_run(pid, "config", read_canvas_document(pid).revision)
+        try:
+            run_canvas_job(job.job_id)
+        except Exception:  # noqa: BLE001 — 失败时画布 runner 可能抛出，下面看落盘结果
+            pass
+        return read_job(job.job_id)
+
+    faults.lost_posts = 3
+    task1 = attempt()
+    assert task1.params.gateway_unconfirmed is True
+    faults.down_posts = 3
+    task2 = attempt()  # 服务端取的是同一节点最近一次（任务 1）
+    assert task2.params.gateway_reattach_of == task1.job_id and task2.params.gateway_unconfirmed
+    faults.down_posts = 0  # 网络恢复
+    task3 = attempt()  # 最近一次是任务 2
+    assert task3.status == JobStatus.DONE and task3.params.gateway_reattach_of == task2.job_id
+    [host] = _host_tasks()
+    assert task3.params.provider_task_ids == [host.task_id] and len(upstream["calls"]) == 1
+
+
+def test_chain_older_than_twenty_hours_places_a_new_order(gateway, upstream, faults, monkeypatch):
+    create = _studio(monkeypatch)
+    faults.lost_posts = 3
+    task1 = _run_failing(create())
+    # 把这把键的签发时间改到 21 小时前（键在主机上的那一单保持不变）。
+    old_key = f"{int(time.time()) - 21 * 3600}-" + task1.params.gateway_idempotency_key.split("-")[1]
+    save_job(task1.model_copy(update={"params": task1.params.model_copy(update={
+        "gateway_idempotency_key": old_key})}))
+    task2 = job_runner.run_job(create(task1.job_id))
+    assert task2.status == JobStatus.DONE and task2.params.gateway_reattach_of is None
+    assert task2.params.gateway_idempotency_key != old_key
+    assert len(_host_tasks()) == 2
+
+
+def test_reattach_waits_while_the_original_is_still_running_on_the_host(gateway, upstream, faults,
+                                                                        monkeypatch):
+    import threading
+
+    from character_workflow.lib.callers import openai_image
+
+    release = threading.Event()
+    real_render = openai_image.render
+
+    def slow_render(**kwargs):
+        release.wait(10)  # 主机上的原任务一直在跑，直到放行
+        return real_render(**kwargs)
+
+    monkeypatch.setattr(openai_image, "render", slow_render)
+    create = _studio(monkeypatch)
+    faults.lost_posts = 3
+    task1 = _run_failing(create())
+    assert _host_tasks()[0].status in ("pending", "running")
+    threading.Timer(1.0, release.set).start()
+    task2 = job_runner.run_job(create(task1.job_id))  # 接着等原任务出完，不报失败
+    assert task2.status == JobStatus.DONE
+    assert len(_host_tasks()) == 1 and len(upstream["calls"]) == 1
+
+
+def test_flag_is_saved_before_resending_an_old_key(gateway, upstream, faults, monkeypatch):
+    """沿用旧键发送前就记「结局未知」：发送途中成员端崩溃，落盘的任务仍能被下一次再次生成接回。"""
+    create = _studio(monkeypatch)
+    faults.lost_posts = 3
+    task1 = _run_failing(create())
+    task2_id = create(task1.job_id)
+    faults.crash_posts = 1
+    with pytest.raises(_Crash):
+        job_runner.run_job(task2_id)
+    task2 = read_job(task2_id)
+    assert task2.params.gateway_unconfirmed is True
+    assert task2.params.gateway_idempotency_key == task1.params.gateway_idempotency_key
