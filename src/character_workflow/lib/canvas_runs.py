@@ -1843,6 +1843,9 @@ def submit_layer_decomposition_run(
             layer_decomposition=True,
             layer_max_images=max_images,
         )
+        if key.provider == "atelier":
+            job_params = job_params.model_copy(
+                update=_gateway_reattach(project_id, surface.id, key.alias))
         job = Job(
             job_id=job_id,
             character_id=key.alias,
