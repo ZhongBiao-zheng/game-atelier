@@ -258,6 +258,49 @@ def test_old_host_without_cancel_by_key_falls_back_to_the_task_id(monkeypatch):
     assert body["cancel_outcome"] == "canceled"
 
 
+def test_running_stop_that_cannot_reach_the_gateway_wakes_the_outbox_after_it_is_saved(
+        gateway, upstream, monkeypatch):
+    """运行中停止、网关连不上：补发线程被叫醒时任务必须已落 CANCELED，否则它找不到这条、直接退出，再也不补发。"""
+    release = threading.Event()
+    fast_render = _member.openai_image.render
+    monkeypatch.setattr(_member.openai_image, "render",
+                        lambda **kwargs: (release.wait(10), fast_render(**kwargs))[1])
+    down = threading.Event()
+    real_session = atelier_gateway._session
+
+    class DownSession(type(real_session())):
+        def request(self, method, url, *args, **kwargs):
+            if down.is_set():
+                raise atelier_gateway.requests.ConnectionError("gateway down")
+            return super().request(method, url, *args, **kwargs)
+
+    def session():
+        made = DownSession()
+        made.trust_env = False
+        return made
+
+    monkeypatch.setattr(atelier_gateway, "_session", session)
+    seen: list[list[str]] = []
+    monkeypatch.setattr(gateway_cancel_outbox, "wake",
+                        lambda: seen.append(gateway_cancel_outbox.pending_job_ids()))
+
+    def should_cancel():
+        tasks = gateway_tasks._all_tasks()
+        if tasks and tasks[0].sent_at:
+            down.set()
+        return down.is_set()
+
+    job = _reattach._now_job("job-stop-down")
+    with pytest.raises(job_runner.JobCanceled):
+        job_runner.run_job(job.job_id, should_cancel=should_cancel)
+    release.set()
+    stopped = read_job(job.job_id)
+    assert stopped.status == JobStatus.CANCELED and stopped.params.gateway_cancel_pending is True
+    assert stopped.error == job_runner.GATEWAY_CANCEL_UNDELIVERED
+    assert seen == [[job.job_id]]
+    _reattach._host_settled()
+
+
 def test_outbox_thread_exits_when_nothing_is_pending(isolated_data_root):
     gateway_cancel_outbox.wake()
     thread = gateway_cancel_outbox._thread

@@ -342,15 +342,12 @@ def _run_task(
         if status["status"] == "canceled" and (status.get("delivered") is False
                                                or status.get("cancel_outcome") in ("continuing", "finished")):
             # 停止没送到主机（连不上），或主机答「已发上游、会跑完并计费」：这把键在主机上的结局仍未知，
-            # 保留标记，「再次生成」请求相同时接回取结果。没送到的记下来，恢复连接后补发（gateway_cancel_outbox）。
+            # 保留标记，「再次生成」请求相同时接回取结果。没送到的记下来，job_runner 落 CANCELED 后叫醒补发线程（gateway_cancel_outbox）。
             params["gateway_unconfirmed"] = True
             if status.get("delivered") is False:
                 params["gateway_cancel_pending"] = True
             if on_params_changed:
                 on_params_changed()
-            if status.get("delivered") is False:
-                from character_workflow.lib import gateway_cancel_outbox
-                gateway_cancel_outbox.wake()
             raise JobCanceled("已按请求停止")
         if status["status"] in ("failed", "canceled"):
             params["gateway_unconfirmed"] = None  # 主机对这把键给了明确终态

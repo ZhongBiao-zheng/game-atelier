@@ -145,6 +145,14 @@ def _raise_if_canceled(should_cancel: Callable[[], bool]) -> None:
         raise JobCanceled("已按请求停止")
 
 
+def _settle_canceled(job_id: str, params: dict[str, Any]) -> None:
+    update_job_status(job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
+    if params.get("gateway_cancel_pending"):
+        # 停止没送到网关主机：任务落 CANCELED 之后再叫醒补发线程，它只找已停止的任务。
+        from character_workflow.lib import gateway_cancel_outbox
+        gateway_cancel_outbox.wake()
+
+
 def _canceled_error(params: dict[str, Any]) -> str:
     if params.get("provider_task_protocol") == "atelier_gateway" or params.get("gateway_idempotency_key"):
         # 局域网网关（飙哥定 Q3-1=B）：按停止请求有没有送到、主机怎么答来选文案，不按状态猜。
@@ -800,7 +808,7 @@ def _run_once(
 
         # 停止请求压过一切：Tuzi 轮询被打断时抛的也是 PendingError，不能让它把 job 留在 PENDING。
         if should_cancel():
-            update_job_status(job.job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
+            _settle_canceled(job.job_id, params)
             raise JobCanceled("已按请求停止") from e
         if (parked := _park_gateway_wait(job, e, park_gateway_wait)) is not None:
             return parked
@@ -953,7 +961,7 @@ def _run_audio_job(job: Job, *, park_gateway_wait: bool = False) -> Job:
         )
     except Exception as error:
         if should_cancel():
-            update_job_status(job.job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
+            _settle_canceled(job.job_id, params)
             raise JobCanceled("已按请求停止") from error
         if (parked := _park_gateway_wait(job, error, park_gateway_wait)) is not None:
             return parked
@@ -1038,7 +1046,7 @@ def _run_video_job(job: Job, *, park_gateway_wait: bool = False) -> Job:
             )
     except Exception as e:
         if should_cancel():
-            update_job_status(job.job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
+            _settle_canceled(job.job_id, params)
             raise JobCanceled("已按请求停止") from e
         if (parked := _park_gateway_wait(job, e, park_gateway_wait)) is not None:
             return parked
