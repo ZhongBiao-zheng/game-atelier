@@ -164,3 +164,58 @@ def test_the_main_service_loop_is_watched(isolated_data_root):
                 w.name == "主服务" for w in loop_watch._watches):
             time.sleep(0.05)
         assert any(w.name == "主服务" for w in loop_watch._watches)
+
+
+# ---------------------------------------------------------------- 常驻线程不空转
+# 测试常把 time.sleep 整个换成空操作（如 `monkeypatch.setattr(video_poll.time, "sleep", ...)`）。
+# 常驻线程若用 time.sleep 等待，这时会空转抢解释器：4-2 合入后全量测试慢了约 110 秒。
+
+
+def _counting_threads(monkeypatch):
+    import time as time_module
+
+    counts = {"watch": 0, "supervise": 0}
+    monkeypatch.setattr(gateway_app, "SUPERVISE_SECONDS", 0.05)
+    monkeypatch.setattr(time_module, "sleep", lambda _seconds: None)
+
+    class Probe:
+        name = "计数"
+
+        def check(self, now):
+            counts["watch"] += 1
+
+    probe = Probe()
+    loop_watch._register(probe)
+    server = gateway_app.GatewayServer(host="127.0.0.1")
+    monkeypatch.setattr(server, "supervise_once",
+                        lambda: counts.__setitem__("supervise", counts["supervise"] + 1))
+    with server._lock:
+        server._desired_port = 1  # 网关「应该开着」：看护线程一直在
+        server._ensure_supervisor()
+    return counts, probe, server
+
+
+def test_background_threads_do_not_spin_when_time_sleep_is_patched(monkeypatch):
+    import threading
+
+    counts, probe, server = _counting_threads(monkeypatch)
+    try:
+        threading.Event().wait(0.5)  # time.sleep 已被换掉
+        # 间隔 0.05 秒：0.5 秒内约 10 次；空转时是几十万次。
+        assert counts["watch"] <= 30 and counts["supervise"] <= 30
+        assert counts["supervise"] >= 3  # 看护线程确实在跑
+    finally:
+        loop_watch._unregister(probe)
+        server.stop()
+
+
+def test_idle_background_threads_exit(monkeypatch):
+    _counts, probe, server = _counting_threads(monkeypatch)
+    watcher, supervisor = loop_watch._watcher, server._supervisor
+    assert watcher.is_alive() and supervisor.is_alive()
+    loop_watch._unregister(probe)
+    server.stop()  # 关掉网关：看护线程被叫停
+    supervisor.join(2)
+    assert not supervisor.is_alive()
+    watcher.join(2)  # 没有被监测的事件循环：看守线程退出，下次登记再起
+    assert not watcher.is_alive() or loop_watch._watches

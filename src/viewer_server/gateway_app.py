@@ -11,7 +11,6 @@ import json
 import logging
 import socket
 import threading
-import time
 from typing import Any
 
 import uvicorn
@@ -282,6 +281,7 @@ class GatewayServer:
         # 应该开着的端口（设置里开着网关）；看护线程据此把意外退出的网关线程、被占的端口重新拉起。
         self._desired_port: int | None = None
         self._supervisor: threading.Thread | None = None
+        self._supervisor_stop = threading.Event()
 
     @property
     def running(self) -> bool:
@@ -338,17 +338,25 @@ class GatewayServer:
     def stop(self) -> None:
         with self._lock:
             self._desired_port = None
+            self._supervisor_stop.set()  # 看护线程立即醒来退出
             self._stop_locked()
 
     def _ensure_supervisor(self) -> None:
-        if self._supervisor is None or not self._supervisor.is_alive():
-            self._supervisor = threading.Thread(target=self._supervise_loop, daemon=True,
+        # 已叫停的看护线程可能还没退出：不能复用它，另起一个。
+        if (self._supervisor is None or not self._supervisor.is_alive()
+                or self._supervisor_stop.is_set()):
+            self._supervisor_stop = threading.Event()
+            self._supervisor = threading.Thread(target=self._supervise_loop,
+                                                args=(self._supervisor_stop,), daemon=True,
                                                 name="lan-gateway-supervisor")
             self._supervisor.start()
 
-    def _supervise_loop(self) -> None:
-        while True:
-            time.sleep(SUPERVISE_SECONDS)
+    def _supervise_loop(self, stop: threading.Event) -> None:
+        # Event 的带超时等待而不是 time.sleep：能被 stop() 立即叫停，也不受测试把 time.sleep 换成空操作影响。
+        while not stop.wait(SUPERVISE_SECONDS):
+            with self._lock:
+                if self._desired_port is None:
+                    return  # 网关关了：看护退出，下次打开时再起
             try:
                 self.supervise_once()
             except Exception:  # noqa: BLE001 — 看护线程不能因为一次失败退出
@@ -400,6 +408,7 @@ class GatewayServer:
             logger.error("%s", error)
             with self._lock:
                 self._desired_port = None
+                self._supervisor_stop.set()
                 self._stop_locked()
                 self.error = str(error)
             return

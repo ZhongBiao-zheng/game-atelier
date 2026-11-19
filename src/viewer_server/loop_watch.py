@@ -99,11 +99,21 @@ def _unregister(watch: LoopWatch) -> None:
         _watches.discard(watch)
 
 
+# 看守线程用 Event 的带超时等待，不用 time.sleep：测试会把 time.sleep 整个换成空操作，
+# 常驻线程跟着空转会抢占解释器（第 4 批 4-2 合入后全量测试慢了约 110 秒）。这个 Event 不会被 set。
+_tick = threading.Event()
+
+
 def _watch_loop() -> None:
+    global _watcher
     while True:
-        time.sleep(_CHECK_SECONDS)
+        _tick.wait(_CHECK_SECONDS)
         with _watches_lock:
             watches = list(_watches)
+            if not watches:
+                # 没有被监测的事件循环了：退出，下次有循环登记时再起。
+                _watcher = None
+                return
         now = time.monotonic()
         for watch in watches:
             try:
