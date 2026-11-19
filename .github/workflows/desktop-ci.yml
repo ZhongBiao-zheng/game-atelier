@@ -104,10 +104,24 @@ jobs:
       - name: Title bar screenshots (dark / light)
         if: matrix.platform == 'windows-x64'
         run: node desktop/scripts/window-shots.mjs desktop/dist/win-unpacked desktop-build/window-shots
+      # 给人下载的产物只放安装文件；Windows 应用文件夹的 zip 只供上面的冒烟步骤用，不上传。
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: desktop-installer-${{ matrix.platform }}
-          path: desktop-build/**
+          path: |
+            desktop-build/*.dmg
+            desktop-build/*.dmg.sha256
+            desktop-build/*-setup.exe
+            desktop-build/*-setup.exe.sha256
+          if-no-files-found: ignore
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.platform == 'windows-x64'
+        with:
+          name: desktop-screenshots-${{ matrix.platform }}
+          path: |
+            desktop-build/installer-shots/**
+            desktop-build/window-shots/**
           if-no-files-found: ignore
           retention-days: 14
