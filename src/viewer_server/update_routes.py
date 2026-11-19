@@ -22,6 +22,7 @@ from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.file_lock import try_file_lock
 
 WAIT_SECONDS = 600
+UPDATING_CODE = "updating"
 WORK_READ_SECONDS = 30
 CHECK_SECONDS = 3600
 router = APIRouter(prefix="/api/update")
@@ -101,7 +102,8 @@ class UpdateAdmissionMiddleware:
         }
         if (gate.initializing and path.startswith("/api/")
                 and (scope["method"], path) not in initialization_routes):
-            await JSONResponse({"detail": "正在更新，请稍后"}, status_code=503)(scope, receive, send)
+            await JSONResponse({"detail": "正在更新，请稍后", "code": UPDATING_CODE},
+                               status_code=503)(scope, receive, send)
             return
         if not work_request(path, scope["method"]):
             await self.app(scope, receive, send)
@@ -111,8 +113,9 @@ class UpdateAdmissionMiddleware:
             if not blocked:
                 gate.requests += 1
         if blocked:
-            await JSONResponse({"detail": "正在更新，请稍后", "reason": "正在更新，请稍后"},
-                               status_code=503)(scope, receive, send)
+            # code 是结构化标记：请求在受理前就被挡下，没有建任务，调用方可以原样重发。
+            await JSONResponse({"detail": "正在更新，请稍后", "reason": "正在更新，请稍后",
+                                "code": UPDATING_CODE}, status_code=503)(scope, receive, send)
             return
         try:
             await self.app(scope, receive, send)

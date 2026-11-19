@@ -580,19 +580,36 @@ CANVAS_GATEWAY_POLL_GIVE_UP_SECONDS = 30 * 60
 
 def _gateway_kwargs(job: Job) -> dict[str, Any]:
     if job.provider == "atelier" and job.namespace == "canvas":
-        return {"gateway_poll_give_up": CANVAS_GATEWAY_POLL_GIVE_UP_SECONDS}
+        kwargs: dict[str, Any] = {"gateway_poll_give_up": CANVAS_GATEWAY_POLL_GIVE_UP_SECONDS}
+        if not job.params.route_id:
+            # 明确选了网关：主机没收下提交（正在更新 / 连不上）时在线程里等，同一把键重发。
+            # 选「自动」的不传，照旧换组内下一家。
+            kwargs["gateway_submit_wait"] = CANVAS_GATEWAY_POLL_GIVE_UP_SECONDS
+        return kwargs
     return {}
 
 
 def _park_gateway_wait(job: Job, error: BaseException, park: bool) -> Job | None:
     """创作台后台等待者跑的任务：网关结果没拿到（提交未确认、查询放弃、下载失败、连不上原任务）
-    且这把幂等键还在 20 小时内时，留在 PENDING「等待网关」，等网关恢复后凭同一把键接回原任务。"""
-    from character_workflow.lib.callers.atelier_gateway import GatewayUnconfirmed
+    且这把幂等键还在 20 小时内时，留在 PENDING「等待网关」，等网关恢复后凭同一把键接回原任务。
+
+    主机确定没收下的提交（`GatewayNotAccepted`：正在更新 / 连不上）只在明确选了网关时等待；
+    选「自动」的交给 `_switch_route` 换组内下一家。"""
+    from character_workflow.lib.callers.atelier_gateway import GatewayNotAccepted, GatewayUnconfirmed
     from character_workflow.lib.jobs import gateway_key_expired
 
-    if not park or not isinstance(error, GatewayUnconfirmed):
+    if not park or not isinstance(error, (GatewayUnconfirmed, GatewayNotAccepted)):
         return None
     current = read_job(job.job_id)
+    if isinstance(error, GatewayNotAccepted):
+        if current.params.route_id:
+            return None
+        # 下一轮用同一把键重发（caller 见到已有键就沿用）；按「这把键的结局还不知道」挂着，
+        # 与提交未确认同一套等待、重启续查与 20 小时期限。
+        with job_lock(job.job_id):
+            latest = read_job(job.job_id)
+            current = write_job_under_lock(latest.model_copy(update={
+                "params": latest.params.model_copy(update={"gateway_unconfirmed": True})}))
     if gateway_key_expired(current.params.gateway_idempotency_key):
         return None
     update_job_status(job.job_id, status=JobStatus.PENDING, error=_friendly_error(error))

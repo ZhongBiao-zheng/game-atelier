@@ -139,6 +139,11 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   停止：等待中、没有线程在跑的创作台任务立即落 `canceled`「已停止（网关上的任务可能仍在执行）」；正在轮询时网关连不上，
   停止请求送不到主机，本机立即停；两种情况主机上的原任务都可能照常完成并扣额度。
   本机服务关停不算停止：等待者跑的局域网 Atelier 任务正在轮询时，停下轮询、不向主机发取消，留在「等待网关」，下次启动（lifespan 开始时复位关停信号）接回；已在等待中的任务关停时保持 `pending`。
+- 主机确定没收下的提交（2026-11-19 起）：主机更新排空时回 `503 {"detail","reason","code":"updating"}`，`code` 是结构化标记
+  （请求在受理前被挡下，主机没建任务）；接入端按状态码 + `code` 判断，与连接都没建立一起抛 `GatewayNotAccepted`，原样重发不会重复下单。
+  选「自动」的任务照旧换组内下一家（换家原因 `updating`「正在更新」或 `unreachable`）；明确选了网关的，创作台进上面的「等待网关」
+  （用同一把幂等键重发，`gateway_unconfirmed` 置 true，同一套 20 小时期限与重启续上），画布在线程里每 10 秒用同一把键重发、最多 30 分钟。
+  旧主机的 503 没有 `code`，接入端照旧判失败。CLI 等直接 `run_job` 的路径照旧判失败。
 - 接入端：`provider="atelier"` 的 KEY，`ModelSpec.via` 是网关成员快照；Job 用 `provider_task_protocol=atelier_gateway`
   与 `provider_task_ids` 记录网关任务 id，重启后只查询既有任务。caller 把网关结果映射为：401 → `gateway api 401`，
   403 → `gateway api 403`，429 → `gateway api 429`，`error_kind=unavailable` → `gateway api 503: unavailable`（均可触发接入端自动路由失败切换），
@@ -1164,7 +1169,7 @@ status 保留真实状态（含 pending、done、failed，以及团队 canceled 
 - `POST /api/update/cancel`：仅等待阶段可取消，返回 status=cancelled；开始重启后409。
 - `GET /api/update/result?id=…`：仅返回匹配ID的终态 succeeded/failed/cancelled，含 from/to/reason/finished_at（ISO时间）；未落盘或ID不匹配返回null。
 
-维护期间新生成/Agent消息/网关生成返回503，已接入工作、审批与取消仍可完成。候选初始化期间仅放行本机会话建立、编辑租约及更新状态/结果，其他业务API暂时503。
+维护期间新生成/Agent消息/网关生成返回503（响应体带 `code: "updating"`），已接入工作、审批与取消仍可完成。候选初始化期间仅放行本机会话建立、编辑租约及更新状态/结果，其他业务API暂时503。
 
 ## ChatGPT 订阅供应商
 

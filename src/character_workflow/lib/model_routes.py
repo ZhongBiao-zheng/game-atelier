@@ -270,7 +270,8 @@ def _member_key_and_model(member: RouteMember) -> tuple[KeySpec, ModelSpec]:
 # 计费，但那笔钱换不换都花了）。超时、5xx、连上后被掐、响应解析失败一律不换：上游可能
 # 已经在跑。参数错误、内容审核（多为 400）也不换：换哪家都一样会失败，只会多花钱。
 
-FailoverReason = Literal["unreachable", "auth", "unavailable", "rate_limited", "insufficient_balance"]
+FailoverReason = Literal["unreachable", "auth", "unavailable", "rate_limited", "insufficient_balance",
+                         "updating"]
 
 FAILOVER_LABELS: dict[FailoverReason, str] = {
     "unreachable": "连不上",
@@ -278,6 +279,7 @@ FAILOVER_LABELS: dict[FailoverReason, str] = {
     "unavailable": "没有开通这个模型",
     "rate_limited": "限流",
     "insufficient_balance": "欠费",
+    "updating": "正在更新",
 }
 
 _COOLDOWN_SECONDS: dict[FailoverReason, float] = {
@@ -286,6 +288,7 @@ _COOLDOWN_SECONDS: dict[FailoverReason, float] = {
     "insufficient_balance": 3600,
     "auth": 1800,
     "unavailable": 1800,
+    "updating": 120,
 }
 
 _STATUS = re.compile(r"(?:\bapi|\bHTTP)\s*(\d{3})\b")
@@ -298,6 +301,7 @@ _BALANCE_MARKERS = ("insufficient_quota", "insufficient balance", "余额不足"
 
 def failover_reason(error: BaseException) -> FailoverReason | None:
     """这次失败能不能换下一家；能就返回原因，不能返回 None。"""
+    from character_workflow.lib.callers.atelier_gateway import GatewayNotAccepted
     from character_workflow.lib.callers.openai_image import _is_pre_flight_failure
 
     chain: list[BaseException] = []
@@ -305,6 +309,10 @@ def failover_reason(error: BaseException) -> FailoverReason | None:
     while current is not None and current not in chain:
         chain.append(current)
         current = current.__cause__
+    # 局域网 Atelier 确定没收下这次提交（连不上 / 正在更新）：按类型判断，不看文案。
+    not_accepted = next((item for item in chain if isinstance(item, GatewayNotAccepted)), None)
+    if not_accepted is not None:
+        return not_accepted.reason
     if any(isinstance(item, requests.RequestException) for item in chain):
         network = next(item for item in chain if isinstance(item, requests.RequestException))
         return "unreachable" if _is_pre_flight_failure(network) else None

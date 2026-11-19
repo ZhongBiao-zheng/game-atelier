@@ -26,6 +26,10 @@ PROTOCOL_VERSION = 2
 SUBMIT_ATTEMPTS = 3
 POLL_INTERVAL_SECONDS = 2.0
 POLL_GIVE_UP_SECONDS = 600.0
+# 主机确定没收下提交时，画布在线程里重发的间隔（秒）。
+SUBMIT_RETRY_SECONDS = 10.0
+# 主机更新排空时 503 响应里的结构化标记（vs/update_routes.UPDATING_CODE）。
+HOST_UPDATING_CODE = "updating"
 # 产物下载失败后的退避（秒）：共 4 次请求。
 DOWNLOAD_RETRY_DELAYS = (2.0, 5.0, 10.0)
 _TIMEOUT = (5.0, 60.0)
@@ -56,6 +60,18 @@ class GatewayUnconfirmed(GatewayError):
     """
 
 
+class GatewayNotAccepted(GatewayError):
+    """主机确定没收下这次提交：更新排空时回了带 `code: "updating"` 的 503，或连接都没建立。
+
+    主机上没有建任务，用同一把幂等键原样重发不会重复下单。`reason` 是换家时的原因
+    （`model_routes.FailoverReason`）。
+    """
+
+    def __init__(self, message: str, *, reason: str):
+        super().__init__(message)
+        self.reason = reason
+
+
 
 # 文本 / Agent 这类不走 _session() 的请求也要直连网关：把环境代理逐个置空（requests 合并时删除）。
 DIRECT_PROXIES = {"http": None, "https": None}
@@ -71,11 +87,15 @@ def _session() -> requests.Session:
 def _raise_for_status(response: requests.Response) -> None:
     if response.status_code < 400:
         return
+    code = None
     try:
         body = response.json()
         detail = body.get("detail") or (body.get("error", {}).get("message") if isinstance(body.get("error"), dict) else None)
+        code = body.get("code") if isinstance(body, dict) else None
     except ValueError:
         detail = None
+    if response.status_code == 503 and code == HOST_UPDATING_CODE:
+        raise GatewayNotAccepted(f"gateway api 503: {detail or '正在更新'}", reason="updating")
     retry_after = None
     if response.status_code == 429:
         try:
@@ -208,6 +228,8 @@ def _run_task(
     give_up = float(_kwargs.get("gateway_poll_give_up") or POLL_GIVE_UP_SECONDS)
     # 本机服务关停（不是用户停止）：停下轮询、不向主机发取消，任务留着下次启动接回。
     should_stop = _kwargs.get("gateway_should_stop") or (lambda: False)
+    # 主机确定没收下提交时在线程里重发多久（秒）；只有画布明确选了网关时由 job_runner 传入。
+    submit_wait = float(_kwargs.get("gateway_submit_wait") or 0)
     from character_workflow.lib.jobs import gateway_key_expired
 
     if params.get("gateway_unconfirmed") and gateway_key_expired(params.get("gateway_idempotency_key")):
@@ -258,17 +280,27 @@ def _run_task(
             # 幂等键先落盘再发：提交结果不确定时，下一次用同一个键只会拿回主机上的原任务。
             if on_params_changed:
                 on_params_changed()
-            try:
-                task_id = _submit(session, base, headers, alias=alias, kind=kind, model=model,
-                                  prompt=prompt, n=n, params=wire_params, uploads=uploads,
-                                  idempotency_key=params["gateway_idempotency_key"])
-            except GatewayUnconfirmed as error:
-                raise unconfirmed(error) from error.__cause__
-            except requests.RequestException as error:
-                if new_key:
-                    raise  # 新键、连接都没建立：主机没收到，接入端可以换家
-                # 旧键连不上：主机上可能有原任务在出图，不能换家重出。
-                raise unconfirmed(GatewayUnconfirmed("网关连不上，原任务结果未确认")) from error
+            deadline = time.monotonic() + submit_wait
+            while True:
+                try:
+                    task_id = _submit(session, base, headers, alias=alias, kind=kind, model=model,
+                                      prompt=prompt, n=n, params=wire_params, uploads=uploads,
+                                      idempotency_key=params["gateway_idempotency_key"])
+                    break
+                except GatewayUnconfirmed as error:
+                    raise unconfirmed(error) from error.__cause__
+                except GatewayNotAccepted as error:
+                    if not new_key:
+                        # 旧键：这次没收下，但之前用这把键发过的那次可能在出图，不能换家重出。
+                        raise unconfirmed(GatewayUnconfirmed(
+                            "网关暂不可用，原任务结果未确认")) from error
+                    if cancelled():
+                        raise JobCanceled("已按请求停止") from error
+                    if should_stop() or time.monotonic() >= deadline:
+                        raise
+                    # 画布明确选了网关：主机没收下，在线程里等一会儿用同一把键重发。
+                    phase("waiting_gateway")
+                    time.sleep(SUBMIT_RETRY_SECONDS)
             params["provider_task_protocol"] = PROTOCOL
             params["provider_task_ids"] = [task_id]
             params["gateway_unconfirmed"] = True  # 主机已受理，结局要等它给出终态
@@ -436,7 +468,8 @@ def _submit(session, base, headers, *, alias, kind, model, prompt, n, params, up
                                     headers=request_headers, timeout=_TIMEOUT)
         except (requests.ConnectionError, requests.Timeout) as error:
             if attempt == 0 and _is_pre_flight_failure(error):
-                raise  # 连接都没建立：网关没收到，接入端可以换家
+                # 连接都没建立：网关没收到，接入端可以换家或原样重发。
+                raise GatewayNotAccepted("网关连不上，任务未提交", reason="unreachable") from error
             last_error = error
             continue
         try:
