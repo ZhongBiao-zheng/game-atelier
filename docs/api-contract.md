@@ -554,6 +554,12 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 - `/parse`（edit），`params = {script_node_ids, segment_index, segment_count, alias, model_id, entities: [{kind, name, description}], style_prefix}` → `{segment_index, segment_count, entities, shots, notices, usage: {input_tokens, output_tokens, cost_cny, job_id}}`。一次请求只解析一段、只调一次对话模型，不带 tools，失败不重试；`segment_count` 与服务端按当前剧本算出的段数不一致时 409「剧本已变化」且不调模型。返回的 `entities` 只含新条目，`shots[].entities` 用名称引用；每段最多 80 镜。模型输出不可用时 422，上游失败 502，`detail = {message, code: "STORYBOARD_PARSE_FAILED", raw}`（`raw` 已遮掉密钥）。
 - 每次调用（成功或失败）记一条 `namespace=assist, kind=text, output_paths=[]` 的任务，`prompt` 为「剧本解析 · N 字」，项目 id 记在 `params.assist_project_id`（`Job.canvas_project_id` 只给 `namespace=canvas` 用）；用量页据此归到该画布项目。
 
+PS 联动插件（`ps-bridge`，宿主插件，ADR-0041，默认关闭，第 1 批只支持 macOS）。三条插件路由 `POST /api/plugins/ps-bridge/routes/<path>`，请求体 `{project_id, params}`；`params` 只有下列字段（`extra=forbid`，不接受任何文件路径或脚本）。服务端经 `osascript` 让 Photoshop 执行插件里固定的 `server/atelier_ps.jsx`，同一时刻只跑一个请求（第二个返回 409 `PS_BUSY`），超时写取消标记后返回 503 `PS_BUSY`：
+- `/status`（read），`params = {probe?: bool}` → `{supported, installed, running, responsible_app, version, active_document}`。`probe` 为假时不和 Photoshop 说话（用 `lsappinfo` 判断是否运行，不触发自动化授权）；为真且 Photoshop 在运行时读版本与活动文档名。`responsible_app` 是 macOS 自动化授权会记在其名下的应用。
+- `/import`（edit），`params = {scope: "merged" | "layer"}` → `{node_id, title}`。取活动文档的合并可见内容或当前图层；有选区时按选区形状抠、裁到外接框，无选区取整张；落成普通图片节点，并在插件项目状态 `data.origins[<version_id>]` 记 `{document: {id, name, path, width, height}, bounds: [l, t, r, b], scope, layer, at}`（最多 500 条）。
+- `/place`（read），`params = {node_id}` → `{document, layer, returned_to_origin}`。把图片节点置入 Photoshop 成为智能对象图层，图层名为节点标题；来源按顺序取：图片自己的 `origins` 记录 → 输入连线里恰好一张有记录的图片 → 无（放进活动文档中心，没有打开的文档时新建）。有来源时目标文档按名字与路径找，找不到返回 409 `PS_TARGET_NOT_OPEN`，不换文档。
+- 错误码：`PS_NOT_RUNNING`（409）、`PS_NO_DOCUMENT`（409）、`PS_TARGET_NOT_OPEN`（409）、`PS_CANCELLED`（409）、`PS_BUSY`（409 / 503）、`PS_AUTOMATION_DENIED`（403）、`PS_BAD_IMAGE`（422）、`PS_TOO_LARGE`（413）、`PS_UNSUPPORTED`（501）、`PS_FAILED`（502）。
+
 四模态均进入同一个 Job Runner：图片/视频沿用既有厂商协议；文本只接受明确可执行的
 OpenAI-compatible `chat/completions` 或 `responses`，后者支持 `reasoning_effort`，其中 `auto` 只作为
 Draft 选择且冻结/请求时省略；音频只接受 OpenAI-compatible `audio/speech`，冻结并发送白名单内的
@@ -1416,7 +1422,7 @@ multipart 里的数组值展开成同名重复字段。
 
 ### 宿主插件（ADR-0039）
 
-- 清单 `runtime: "sandbox" | "host"`，缺省 `sandbox`。是否为宿主插件以服务端白名单 `plugin_registry.HOST_PLUGIN_IDS` 为准：白名单外的包声明 `host`、或白名单里的包不声明 `host`，一律 `availability = "invalid"`，不能启用。宿主插件不声明 `ui`、`capabilities`、`agent_tools`。目前只有 `storyboard`（分镜）。
+- 清单 `runtime: "sandbox" | "host"`，缺省 `sandbox`。是否为宿主插件以服务端白名单 `plugin_registry.HOST_PLUGIN_IDS` 为准：白名单外的包声明 `host`、或白名单里的包不声明 `host`，一律 `availability = "invalid"`，不能启用。宿主插件不声明 `ui`、`capabilities`、`agent_tools`。目前有 `storyboard`（分镜）与 `ps-bridge`（PS 联动）。
 - 宿主插件的界面是宿主代码，编进 `web/dist/assets/<id>.js` 单独的分块，只在插件启用时由画布 import（前端白名单 `web/src/plugin-host/hostPlugins.ts`）；插件关闭时不加载这个分块，它的节点显示占位、`payload` 原样保留。
 - 清单新增贡献点 `contributes.text_actions[]`：形状同 `image_actions`，按钮出现在文本节点工具栏。沙箱插件的 `create_node` 从文本节点连一条输入线到新节点，目标节点必须收 `text`；宿主插件不连线，把来源节点交给插件代码。
 - `POST /api/plugins/{plugin_id}/routes/{path}` 的 `node_id` 改为可选：沙箱界面必须带；宿主插件走 `origin = "host"`，不检查项目批准与输入，其余（已启用、路由已声明、读写类别、结果大小）不变。沙箱插件不能走宿主入口（403 `CAPABILITY_DENIED`）。插件错误体可带 `raw`（遮掉密钥的上游原文）：`{detail: {message, code, raw?}}`。

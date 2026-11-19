@@ -31,7 +31,7 @@ LOCK_NAME = "manifest.lock.json"
 STATE_SCHEMA_VERSION = 1
 # 界面是宿主代码的插件（ADR-0039）。这里是唯一判据：清单写 `runtime: host` 不算数，
 # 不在这里的插件声明 host 一律拒绝加载；在这里的插件也必须声明 host。
-HOST_PLUGIN_IDS = frozenset({"storyboard"})
+HOST_PLUGIN_IDS = frozenset({"storyboard", "ps-bridge"})
 
 
 class PluginError(Exception):

@@ -1,0 +1,40 @@
+{
+  "manifest_version": 1,
+  "id": "ps-bridge",
+  "name": "PS 联动",
+  "version": "0.1.0",
+  "description": "和 PS 互传图片",
+  "icon": "layers",
+  "publisher": {
+    "id": "atelier",
+    "name": "Atelier"
+  },
+  "sdk_version": "1",
+  "app_version": {
+    "min": "5.138.0"
+  },
+  "runtime": "host",
+  "contributes": {
+    "nodes": [],
+    "server": {
+      "module": "server",
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/status",
+          "access": "read"
+        },
+        {
+          "method": "POST",
+          "path": "/import",
+          "access": "edit"
+        },
+        {
+          "method": "POST",
+          "path": "/place",
+          "access": "read"
+        }
+      ]
+    }
+  }
+}

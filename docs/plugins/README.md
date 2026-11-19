@@ -41,7 +41,7 @@ plugins/<id>/server/        ── 首次调用时加载 ─►  /api/plugins/<i
 - [安全与隔离](security.md)：隔离能保证什么、不能保证什么
 - [完整示例：精灵表调整](example-sprite-sheet.md)
 
-官方插件：`plugins/sprite-sheet/`（精灵表调整）、`plugins/frames/`（序列帧：视频抽帧、补间）、`plugins/pixel/`（像素化）、`plugins/storyboard/`（分镜，宿主插件）。
+官方插件：`plugins/sprite-sheet/`（精灵表调整）、`plugins/frames/`（序列帧：视频抽帧、补间）、`plugins/pixel/`（像素化）、`plugins/storyboard/`（分镜，宿主插件）、`plugins/ps-bridge/`（PS 联动，宿主插件）。
 
 ## 宿主插件
 
