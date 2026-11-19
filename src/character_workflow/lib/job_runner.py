@@ -574,18 +574,49 @@ def _write_sidecar(path: Path, job: Job, params: dict[str, Any]) -> None:
     path.with_suffix(".md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+# 画布任务连不上局域网 Atelier 时在线程里等多久（创作台另有等待网关的后台接回，用 caller 默认值）。
+CANVAS_GATEWAY_POLL_GIVE_UP_SECONDS = 30 * 60
+
+
+def _gateway_kwargs(job: Job) -> dict[str, Any]:
+    if job.provider == "atelier" and job.namespace == "canvas":
+        return {"gateway_poll_give_up": CANVAS_GATEWAY_POLL_GIVE_UP_SECONDS}
+    return {}
+
+
+def _park_gateway_wait(job: Job, error: BaseException, park: bool) -> Job | None:
+    """创作台后台等待者跑的任务：网关结果没拿到（提交未确认、查询放弃、下载失败、连不上原任务）
+    且这把幂等键还在 20 小时内时，留在 PENDING「等待网关」，等网关恢复后凭同一把键接回原任务。"""
+    from character_workflow.lib.callers.atelier_gateway import GatewayUnconfirmed
+    from character_workflow.lib.jobs import gateway_key_expired
+
+    if not park or not isinstance(error, GatewayUnconfirmed):
+        return None
+    current = read_job(job.job_id)
+    if gateway_key_expired(current.params.gateway_idempotency_key):
+        return None
+    update_job_status(job.job_id, status=JobStatus.PENDING, error=_friendly_error(error))
+    return update_job_phase(job.job_id, "waiting_gateway")
+
+
 def run_job(
     job_id: str,
     *,
     defer_terminal: bool = False,
     should_cancel: Callable[[], bool] | None = None,
+    park_gateway_wait: bool = False,
 ) -> Job:
-    """Run at most one provider worker for a Job across threads and viewer-server processes."""
+    """Run at most one provider worker for a Job across threads and viewer-server processes.
+
+    park_gateway_wait：只有创作台的后台等待者（它会定时重跑）才传 True——局域网 Atelier 暂时
+    连不上时任务留在 PENDING「等待网关」，而不是判失败；其他调用方没有人来接着跑，照旧判失败。
+    """
     with job_execution_lock(job_id) as acquired:
         if not acquired:
             raise JobExecutionBusy(f"job {job_id} is already running")
         return _run_job_claimed(
             job_id, defer_terminal=defer_terminal, should_cancel_external=should_cancel,
+            park_gateway_wait=park_gateway_wait,
         )
 
 
@@ -594,10 +625,16 @@ def _run_job_claimed(
     *,
     defer_terminal: bool = False,
     should_cancel_external: Callable[[], bool] | None = None,
+    park_gateway_wait: bool = False,
 ) -> Job:
     # 国产厂商 host 绕过系统/坏代理（NO_PROXY），覆盖 skill（run-job）与 Studio（后台任务）两条路。
     net_env.configure_proxy_bypass()
     job = read_job(job_id)
+    gateway_stop: Callable[[], bool] | None = None
+    if park_gateway_wait and job.provider == "atelier":
+        # 本机服务关停不是用户停止：局域网 Atelier 的任务不向主机发取消、不落「已停止」，
+        # 而是停下轮询、留在「等待网关」，下次启动凭同一把幂等键接回。
+        gateway_stop, should_cancel_external = should_cancel_external, None
     should_cancel = _cancel_checker(job, should_cancel_external)
 
     def on_phase(phase: str) -> None:
@@ -613,6 +650,7 @@ def _run_job_claimed(
     while True:
         try:
             return _run_once(job, defer_terminal=defer_terminal, should_cancel=should_cancel,
+                             park_gateway_wait=park_gateway_wait, gateway_stop=gateway_stop,
                              on_phase=on_phase)
         except _RouteSwitched:
             job = read_job(job_id)
@@ -624,14 +662,16 @@ def _run_once(
     defer_terminal: bool,
     should_cancel: Callable[[], bool],
     on_phase: Callable[[str], None],
+    park_gateway_wait: bool = False,
+    gateway_stop: Callable[[], bool] | None = None,
 ) -> Job:
     from character_workflow.lib.schemas import JobKind
     if job.kind == JobKind.TEXT:
         return _run_text_job(job)
     if job.kind == JobKind.VIDEO:
-        return _run_video_job(job)
+        return _run_video_job(job, park_gateway_wait=park_gateway_wait)
     if job.kind == JobKind.AUDIO:
-        return _run_audio_job(job)
+        return _run_audio_job(job, park_gateway_wait=park_gateway_wait)
 
     job = _normalize_reference_images(job)
     params = _params(job)
@@ -676,6 +716,8 @@ def _run_once(
                 on_params_changed=on_params_changed,
                 on_cost_usd=_actual_cost_recorder(job.job_id, params),
                 should_cancel=should_cancel,
+                **_gateway_kwargs(job),
+                **({"gateway_should_stop": gateway_stop} if gateway_stop else {}),
             )
             selected = [(Path(p), dims) for p in paths if (dims := image_dimensions(Path(p)))]
             if not selected:
@@ -729,6 +771,8 @@ def _run_once(
         if should_cancel():
             update_job_status(job.job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
             raise JobCanceled("已按请求停止") from e
+        if (parked := _park_gateway_wait(job, e, park_gateway_wait)) is not None:
+            return parked
         # Canvas settles to FAILED + explicit "continue query"; Studio owns a polling worker.
         from character_workflow.lib.callers.declarative import DeclarativePendingError
 
@@ -827,7 +871,7 @@ def _run_text_job(job: Job) -> Job:
         raise JobRunnerError(str(error)) from error
 
 
-def _run_audio_job(job: Job) -> Job:
+def _run_audio_job(job: Job, *, park_gateway_wait: bool = False) -> Job:
     params = _params(job)
     _freeze_estimated_cost(job, params)
     should_cancel = _cancel_checker(job)
@@ -846,6 +890,7 @@ def _run_audio_job(job: Job) -> Job:
                 on_phase=lambda phase: update_job_phase(job.job_id, phase),
                 on_cost_usd=_actual_cost_recorder(job.job_id, params),
                 should_cancel=should_cancel,
+                **_gateway_kwargs(job),
             )
             valid = [Path(path) for path in outputs if is_valid_audio(Path(path))]
             if not valid:
@@ -872,6 +917,8 @@ def _run_audio_job(job: Job) -> Job:
         if should_cancel():
             update_job_status(job.job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
             raise JobCanceled("已按请求停止") from error
+        if (parked := _park_gateway_wait(job, error, park_gateway_wait)) is not None:
+            return parked
         if _switch_route(job.job_id, error):
             raise _RouteSwitched() from error
         update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(error))
@@ -880,7 +927,7 @@ def _run_audio_job(job: Job) -> Job:
         raise JobRunnerError(str(error)) from error
 
 
-def _run_video_job(job: Job) -> Job:
+def _run_video_job(job: Job, *, park_gateway_wait: bool = False) -> Job:
     """视频分支 —— 复用 PENDING→DONE/FAILED 脚手架的形状，但派发/校验/落盘换成视频版。
 
     不做图片专属的 image_dimensions / actual_size；输出 .mp4 到 job_output_dir_for(job)。
@@ -927,6 +974,7 @@ def _run_video_job(job: Job) -> Job:
                 on_submission=on_submission,
                 on_cost_usd=_actual_cost_recorder(job.job_id, params),
                 should_cancel=should_cancel,
+                **_gateway_kwargs(job),
             )
             valid = [Path(p) for p in paths if is_valid_video(Path(p))]
             if not valid:
@@ -954,6 +1002,8 @@ def _run_video_job(job: Job) -> Job:
         if should_cancel():
             update_job_status(job.job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
             raise JobCanceled("已按请求停止") from e
+        if (parked := _park_gateway_wait(job, e, park_gateway_wait)) is not None:
+            return parked
         if _switch_route(job.job_id, e):
             raise _RouteSwitched() from e
         update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(e))

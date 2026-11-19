@@ -116,6 +116,16 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   `gateway_unconfirmed` 的失败、同一供应商、这把幂等键首次发出不满 20 小时时（按键里的时间算，连续再次生成不会顺延），新任务继承幂等键与指纹并记 `gateway_reattach_of`。caller 按这次实际
   要发的内容重算指纹，相同才用原键重发（主机返回原任务，接回结果），不同就换新键下新单；接回的原任务在主机上已是失败或取消时，
   同一次运行里换新键重新下单。浏览器传来的 `gateway_*` 字段一律丢弃。
+- 接入端等待网关（2026-11-19 起）：创作台任务由后台等待者（`_run_studio_job_safely`，创作台专用线程池，不在事件循环里）
+  运行时，没拿到网关结果（`GatewayUnconfirmed`：提交未确认、查询放弃、下载失败、旧键连不上）且这把幂等键首次发出不满 20 小时，
+  任务保持 `pending`、`progress_phase="waiting_gateway"`（界面显示「等待网关」），等待者约 30 秒一轮，先用 3 秒的健康检查探网关，
+  连上才凭同一把键接回原任务；本机服务重启后同样续上。超过 20 小时（与「再次生成」接回同一判据，按键里的时间算）判失败
+  「网关任务结果未确认：已超过 20 小时，不再等待」。轮询中网关暂时连不上时阶段先切到 `waiting_gateway`，恢复后改回；
+  主机对任务号回 404 时判失败，不再等。画布任务没有后台等待者：在线程里最多等 30 分钟（`CANVAS_GATEWAY_POLL_GIVE_UP_SECONDS`），
+  到期判失败并保留标记，「重新生成」时接回。CLI 等其他直接 `run_job` 的路径不进入等待，照旧判失败。
+  停止：等待中、没有线程在跑的创作台任务立即落 `canceled`「已停止（网关上的任务可能仍在执行）」；正在轮询时网关连不上，
+  停止请求送不到主机，本机立即停；两种情况主机上的原任务都可能照常完成并扣额度。
+  本机服务关停不算停止：等待者跑的局域网 Atelier 任务正在轮询时，停下轮询、不向主机发取消，留在「等待网关」，下次启动（lifespan 开始时复位关停信号）接回；已在等待中的任务关停时保持 `pending`。
 - 接入端：`provider="atelier"` 的 KEY，`ModelSpec.via` 是网关成员快照；Job 用 `provider_task_protocol=atelier_gateway`
   与 `provider_task_ids` 记录网关任务 id，重启后只查询既有任务。caller 把网关结果映射为：401 → `gateway api 401`，
   403 → `gateway api 403`，429 → `gateway api 429`，`error_kind=unavailable` → `gateway api 503: unavailable`（均可触发接入端自动路由失败切换），
@@ -1208,7 +1218,7 @@ Tuzi GPT Image 2.5 与 2.6 系列在 Studio 与 Canvas 提供五档质量：低/
 - JobParams 新增 `workflow_inputs: Record<string, string | number | boolean | null>`，
   只允许普通参数和种子值；prompt、图片、mask 仍使用现有专用字段。seed 的 null 表示随机。
   未声明参数、越界值、错误类型和非法选项直接拒绝。固定种子要求 n=1。
-- Job.progress_phase 扩展为 `sent | downloading | queued:<正整数> | null`。
+- Job.progress_phase 扩展为 `sent | downloading | waiting_gateway | queued:<正整数> | null`（`waiting_gateway` 见网关一节的「等待网关」）。
   前端将 queued:N 显示为「排队第 N 位」。终态仍清空。
 
 本机管理接口（需要本机会话和管理权限，未挂载到网关）：

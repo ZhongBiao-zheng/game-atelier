@@ -601,7 +601,7 @@ function ProgressBadge({
       data-testid="progress-badge"
       className="absolute left-2 top-2 rounded-full bg-scrim px-2.5 py-1 text-xs text-white backdrop-blur-glass"
     >
-      {round.progressPhase?.startsWith('queued:') ? `排队第 ${round.progressPhase.slice(7)} 位` : `${percent}% 生成中`}
+      {round.progressPhase === 'waiting_gateway' ? '等待网关' : round.progressPhase?.startsWith('queued:') ? `排队第 ${round.progressPhase.slice(7)} 位` : `${percent}% 生成中`}
     </span>
   );
 }

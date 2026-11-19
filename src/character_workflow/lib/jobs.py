@@ -342,6 +342,25 @@ def has_resumable_gateway_task(job: Job) -> bool:
 GATEWAY_REATTACH_WINDOW = timedelta(hours=20)
 
 
+def gateway_key_expired(key: str | None) -> bool:
+    """这把幂等键是否已超过接回窗口（从键第一次发出时算，签发时间编在键里）。
+
+    「再次生成」接回与「等待网关」的 20 小时期限用的是这同一个判据；连续再次生成不会把窗口往后推。
+    不是带时间格式的键一律算过期（不接回、不等待）。
+    """
+    from character_workflow.lib.callers.atelier_gateway import idempotency_key_issued_at
+
+    issued = idempotency_key_issued_at(key)
+    return issued is None or time.time() - issued > GATEWAY_REATTACH_WINDOW.total_seconds()
+
+
+def is_waiting_gateway_job(job: Job) -> bool:
+    """创作台「等待网关」的任务：这把幂等键在主机上的结局还不知道，且还在 20 小时内。"""
+    return bool(job.provider == "atelier" and job.status == JobStatus.PENDING
+                and job.params.gateway_unconfirmed and job.params.gateway_idempotency_key
+                and not gateway_key_expired(job.params.gateway_idempotency_key))
+
+
 def gateway_reattach_params(source: Job | None, alias: str | None) -> dict[str, Any]:
     """「再次生成」时从原任务继承的网关接回字段；不该接回时返回空字典。
 
@@ -356,11 +375,7 @@ def gateway_reattach_params(source: Job | None, alias: str | None) -> dict[str, 
     if not (params.gateway_unconfirmed and params.gateway_idempotency_key
             and params.gateway_request_fingerprint):
         return {}
-    # 窗口从这把键第一次发出时算（签发时间编在键里），连续再次生成不会把窗口往后推。
-    from character_workflow.lib.callers.atelier_gateway import idempotency_key_issued_at
-
-    issued = idempotency_key_issued_at(params.gateway_idempotency_key)
-    if issued is None or time.time() - issued > GATEWAY_REATTACH_WINDOW.total_seconds():
+    if gateway_key_expired(params.gateway_idempotency_key):
         return {}
     return {"gateway_idempotency_key": params.gateway_idempotency_key,
             "gateway_request_fingerprint": params.gateway_request_fingerprint,
@@ -377,6 +392,8 @@ def is_resumable_studio_job(job: Job) -> bool:
         from .canvas_image_edits import has_resumable_mj_task
         return (job.namespace == "studio" and job.status == JobStatus.PENDING
                 and has_resumable_mj_task(job))
+    if job.namespace == "studio" and is_waiting_gateway_job(job):
+        return True  # 等待网关：凭幂等键接回主机上的原任务，不会重复下单
     return bool(
         job.namespace == "studio"
         and job.status == JobStatus.PENDING

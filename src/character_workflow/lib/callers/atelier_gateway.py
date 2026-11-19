@@ -44,6 +44,10 @@ class GatewayError(RuntimeError):
         self.detail = detail
 
 
+class GatewayTaskGone(GatewayError):
+    """主机明确答复没有这个任务（已过保留期被清理，或不属于这把密钥）：不再等，按失败处理。"""
+
+
 class GatewayUnconfirmed(GatewayError):
     """接入端没从网关拿到这次任务的结果：提交未确认、查询放弃、产物下载失败。
 
@@ -200,6 +204,15 @@ def _run_task(
     base = key.base_url.rstrip("/")
     headers = {"Authorization": f"Bearer {key.access_key}"}
     cancellation_observed = False
+    # 画布任务在线程里等得更久（30 分钟，它没有创作台那样的等待网关后台接回）；其余用默认。
+    give_up = float(_kwargs.get("gateway_poll_give_up") or POLL_GIVE_UP_SECONDS)
+    # 本机服务关停（不是用户停止）：停下轮询、不向主机发取消，任务留着下次启动接回。
+    should_stop = _kwargs.get("gateway_should_stop") or (lambda: False)
+    from character_workflow.lib.jobs import gateway_key_expired
+
+    if params.get("gateway_unconfirmed") and gateway_key_expired(params.get("gateway_idempotency_key")):
+        # 主机终态任务只留 24 小时：再等或再用这把键重发，可能被主机当成新单。
+        raise GatewayError("网关任务结果未确认：已超过 20 小时，不再等待")
 
     def phase(value):
         nonlocal cancellation_observed
@@ -267,7 +280,8 @@ def _run_task(
 
         def poll(task_id: str) -> dict[str, Any]:
             try:
-                return _poll(session, base, headers, task_id, phase, cancelled)
+                return _poll(session, base, headers, task_id, phase, cancelled, give_up=give_up,
+                             should_stop=should_stop)
             except GatewayUnconfirmed as error:
                 raise unconfirmed(error) from error.__cause__
 
@@ -368,6 +382,19 @@ def _run_task(
         return paths
 
 
+def gateway_reachable(alias: str | None) -> bool:
+    """创作台等待网关时的轻量探测（只打不鉴权的健康检查，3 秒超时）；连上了才值得重跑任务。"""
+    key = _keys.find_by_alias(alias or "")
+    if key is None or key.provider != "atelier" or not key.base_url or not key.enabled:
+        return False
+    try:
+        with _session() as session:
+            response = session.get(f"{key.base_url.rstrip('/')}/gateway/v1/health", timeout=(3, 3))
+            return response.ok and response.json().get("ok") is True
+    except (requests.RequestException, ValueError):
+        return False
+
+
 def new_idempotency_key() -> str:
     """幂等键里带上它第一次发出的时间（秒），「再次生成」的接回窗口从这里算，不另外落盘。"""
     return f"{int(time.time())}-{uuid.uuid4().hex}"
@@ -424,11 +451,16 @@ def _submit(session, base, headers, *, alias, kind, model, prompt, n, params, up
     raise GatewayUnconfirmed("网关提交结果未确认，未自动重新提交") from last_error
 
 
-def _poll(session, base, headers, task_id, phase, cancelled) -> dict[str, Any]:
+def _poll(session, base, headers, task_id, phase, cancelled,
+          give_up: float = POLL_GIVE_UP_SECONDS,
+          should_stop: Callable[[], bool] = lambda: False) -> dict[str, Any]:
     last_ok = time.monotonic()
     last_phase = None
     cancel_sent = False
+    waiting = False
     while True:
+        if should_stop():
+            raise GatewayUnconfirmed(f"本机服务关停，网关任务 {task_id} 结果未确认")
         if cancelled() and not cancel_sent:
             try:
                 response = session.post(f"{base}/gateway/v1/tasks/{task_id}/cancel", headers=headers,
@@ -440,14 +472,28 @@ def _poll(session, base, headers, task_id, phase, cancelled) -> dict[str, Any]:
         try:
             response = session.get(f"{base}/gateway/v1/tasks/{task_id}", headers=headers,
                                    timeout=_TIMEOUT)
+            if response.status_code == 404:
+                # 主机明确答复：没有这个任务（已过保留期被清理，或不属于这把密钥）。
+                raise GatewayTaskGone(f"网关已找不到任务 {task_id}（可能已超过保留期）")
             _raise_for_status(response)
             status = response.json()
             last_ok = time.monotonic()
         except (requests.RequestException, GatewayError) as error:
-            if time.monotonic() - last_ok > POLL_GIVE_UP_SECONDS:
+            if isinstance(error, GatewayTaskGone):
+                raise
+            if cancelled():
+                # 用户要停、网关又连不上：停止请求送不到主机，只能本机先停；主机上的任务可能仍会完成。
+                return {"status": "canceled"}
+            if time.monotonic() - last_ok > give_up:
                 raise GatewayUnconfirmed(f"网关任务 {task_id} 结果未确认（查询失败）") from error
+            if not waiting:
+                waiting = True
+                phase("waiting_gateway")
             time.sleep(POLL_INTERVAL_SECONDS)
             continue
+        if waiting:
+            waiting = False
+            phase(last_phase or "sent")
         if status.get("status") in _TERMINAL:
             return status
         if status.get("phase") and status["phase"] != last_phase:

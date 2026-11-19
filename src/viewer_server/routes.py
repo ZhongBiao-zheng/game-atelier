@@ -590,6 +590,15 @@ def post_job_cancel(job_id: str) -> dict:
         (_runtime() / "jobs" / f"{job_id}.json").unlink()
         return {"ok": True, "job_id": job_id, "deleted": True}
     if job.status == JobStatus.PENDING:
+        from character_workflow.lib.jobs import is_waiting_gateway_job, job_execution_lock
+
+        if is_waiting_gateway_job(job):
+            # 等待网关且此刻没有线程在跑它：直接停。网关那边的原任务可能仍会完成并扣额度。
+            with job_execution_lock(job_id) as idle:
+                if idle:
+                    update_job_status(job_id, status=JobStatus.CANCELED,
+                                      error="已停止（网关上的任务可能仍在执行）")
+                    return {"ok": True, "job_id": job_id, "status": JobStatus.CANCELED.value}
         age = _pending_age_minutes(job)
         if not is_resumable_studio_job(job) and (age is None or age >= STALE_PENDING_MINUTES):
             update_job_status(
@@ -3519,10 +3528,21 @@ def _run_studio_job_once(
     This synchronous function runs only in the dedicated Studio executor. Recovery delays live in
     the async wrapper, so pending Tuzi tasks do not occupy FastAPI's shared AnyIO thread pool.
     """
+    from character_workflow.lib.callers.atelier_gateway import gateway_reachable
     from character_workflow.lib.job_runner import JobExecutionBusy, run_job
+    from character_workflow.lib.jobs import is_waiting_gateway_job
 
     try:
-        job = run_job(job_id, should_cancel=_STUDIO_SHUTDOWN_EVENT.is_set)
+        current = read_job(job_id)
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError):
+        current = None
+    # 等待网关：先用 3 秒的健康检查探一下，连不上就不跑（不占执行线程），下一轮再看。
+    if current is not None and is_waiting_gateway_job(current) and not gateway_reachable(current.alias):
+        return True
+    try:
+        job = run_job(job_id, should_cancel=_STUDIO_SHUTDOWN_EVENT.is_set, park_gateway_wait=True)
     except JobExecutionBusy:
         # Startup recovery and the original BackgroundTask can overlap. The lock owner is already
         # handling this exact Job. Keep a Tuzi recovery waiter alive in case that owner disappears.
@@ -3558,11 +3578,17 @@ async def _run_studio_job_safely(
     loop = asyncio.get_running_loop()
     while not _STUDIO_SHUTDOWN_EVENT.is_set():
         attempts += 1
-        should_retry = await loop.run_in_executor(
-            _STUDIO_RUNNER_EXECUTOR,
-            _run_studio_job_once,
-            job_id,
-        )
+        try:
+            should_retry = await loop.run_in_executor(
+                _STUDIO_RUNNER_EXECUTOR,
+                _run_studio_job_once,
+                job_id,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 —— 一轮出错不能让等待者退出（任务会永远挂着），下一轮再试
+            logging.getLogger(__name__).exception("创作台任务后台重跑出错 job=%s", job_id)
+            should_retry = True
         if not should_retry:
             return
         if max_recovery_attempts is not None and attempts >= max_recovery_attempts:

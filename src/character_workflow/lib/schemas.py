@@ -393,7 +393,9 @@ class Job(BaseModel):
     retry_of: str | None = None
     # 2026-06-12: 出图进度真实卡点（视频 caller 经 job_runner 回写；Web 不能改）。
     # sent=任务已全部提交上游；downloading=任务成功、产物下载中。终态时清空。
-    progress_phase: str | None = Field(default=None, pattern=r"^(sent|downloading|queued:[1-9][0-9]*)$")
+    # waiting_gateway：局域网 Atelier 暂时连不上，接入端在等它恢复（第 2 批 B2）。
+    progress_phase: str | None = Field(
+        default=None, pattern=r"^(sent|downloading|waiting_gateway|queued:[1-9][0-9]*)$")
     # 2026-07-08: 出图完成时间戳（update_job_status 在 DONE/FAILED 终态回写；Web 不能改）。
     # Studio 卡片用它算出图耗时（completed_at − submitted_at）+ 展示生成时间。旧 job 无此字段=None。
     completed_at: str | None = None

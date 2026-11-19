@@ -227,7 +227,8 @@ export interface Job {
   // 2026-06-10: retry-job 克隆 failed job 时指回原 job_id — 与 schemas.py 同步
   retry_of?: string | null;
   // 2026-06-12: 出图进度真实卡点（视频 caller 回写；Web 只读）— 与 schemas.py 同步
-  progress_phase?: 'sent' | 'downloading' | `queued:${number}` | null;
+  /** waiting_gateway：局域网 Atelier 暂时连不上，在等它恢复。 */
+  progress_phase?: 'sent' | 'downloading' | 'waiting_gateway' | `queued:${number}` | null;
   // 2026-07-08: 出图完成时间戳（DONE/FAILED 终态回写；Web 只读）— 与 schemas.py 同步
   completed_at?: string | null;
   runner_started_at?: string | null;
