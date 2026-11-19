@@ -239,7 +239,21 @@ def create_gateway_app() -> FastAPI:
 
     @app.post("/gateway/v1/tasks/{task_id}/cancel")
     def task_cancel(task_id: str, key: GatewayKeyRecord = Depends(_require_key)) -> dict:
-        return _task_view(gateway_tasks.cancel(key.id, task_id))
+        task = gateway_tasks.cancel(key.id, task_id)
+        return {**_task_view(task), "cancel_outcome": gateway_tasks.cancel_outcome(task)}
+
+    @app.post("/gateway/v1/tasks/cancel")
+    async def task_cancel_by_key(request: Request,
+                                 key: GatewayKeyRecord = Depends(_require_key)) -> dict:
+        try:
+            body = await request.json()
+        except ValueError as error:
+            raise GatewayRequestError(422, "请求体不是 JSON") from error
+        idempotency_key = body.get("idempotency_key") if isinstance(body, dict) else None
+        if not isinstance(idempotency_key, str) or not 0 < len(idempotency_key) <= 200:
+            raise GatewayRequestError(422, "缺少幂等键")
+        task = await asyncio.to_thread(gateway_tasks.cancel_by_key, key, idempotency_key)
+        return {**_task_view(task), "cancel_outcome": gateway_tasks.cancel_outcome(task)}
 
     return app
 

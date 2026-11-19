@@ -61,6 +61,8 @@ export interface JobParams {
   gateway_unconfirmed?: boolean | null;
   /** 「再次生成」接回的原失败任务 id；服务端写。 */
   gateway_reattach_of?: string | null;
+  /** 停止请求还没送到主机（网关连不上），恢复连接后补发；服务端写。 */
+  gateway_cancel_pending?: boolean | null;
   /** 厂商订单；Web 只读。Tuzi 支持续查，Seedance 留供核对，不自动重提。 */
   provider_task_protocol?: 'tuzi_async' | 'tuzi_images' | 'seedance' | 'evolink' | 'atelier_gateway' | 'declarative' | 'yinchao';
   provider_task_ids?: string[];

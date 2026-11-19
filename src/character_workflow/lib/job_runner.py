@@ -122,6 +122,10 @@ def _switch_route(job_id: str, error: BaseException) -> bool:
     return False
 
 
+GATEWAY_CANCEL_UNDELIVERED = "已停止（网关上的任务可能仍在执行）"
+GATEWAY_CANCEL_CONTINUING = "已停止（已提交的任务仍会完成并计费）"
+
+
 class JobCanceled(JobRunnerError):
     """画师请求停止；runner 在可中断点抛出，终态落 CANCELED 而非 FAILED。"""
 
@@ -142,6 +146,13 @@ def _raise_if_canceled(should_cancel: Callable[[], bool]) -> None:
 
 
 def _canceled_error(params: dict[str, Any]) -> str:
+    if params.get("provider_task_protocol") == "atelier_gateway" or params.get("gateway_idempotency_key"):
+        # 局域网网关（飙哥定 Q3-1=B）：按停止请求有没有送到、主机怎么答来选文案，不按状态猜。
+        if params.get("gateway_cancel_pending"):
+            return GATEWAY_CANCEL_UNDELIVERED
+        if params.get("gateway_unconfirmed"):
+            return GATEWAY_CANCEL_CONTINUING
+        return "已停止"
     ids = [str(task_id) for task_id in (params.get("provider_task_ids") or []) if task_id]
     if not ids or params.get("actual_cost_cny") == 0:
         return "已停止"

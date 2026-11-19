@@ -224,6 +224,9 @@ class JobParams(BaseModel):
     gateway_unconfirmed: bool | None = None
     # 这次是「再次生成」接回的哪个失败任务；主机报原任务失败时在同一次运行里换新键重新下单。
     gateway_reattach_of: str | None = Field(default=None, max_length=200)
+    # 用户停止了、停止请求还没送到主机（网关连不上）；由 gateway_cancel_outbox 恢复连接后按幂等键补发，
+    # 主机答复后清掉。
+    gateway_cancel_pending: bool | None = None
     provider_task_protocol: Literal[
         "tuzi_async", "tuzi_images", "seedance", "evolink", "atelier_gateway", "declarative",
         "yinchao",

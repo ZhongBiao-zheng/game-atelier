@@ -339,10 +339,16 @@ async def normal_lifespan(app: FastAPI):
     start_tuzi_sync()
     start_hk_sync()
     start_announcement_sync()
+    from character_workflow.lib import gateway_cancel_outbox
+
+    if gateway_cancel_outbox.pending_job_ids():
+        gateway_cancel_outbox.wake()  # 上次没送到主机的停止请求，启动后补发
     try:
         yield
     finally:
         from viewer_server.routes import _stop_studio_recovery_workers
+
+        gateway_cancel_outbox.stop()
 
         heartbeat_task.cancel()
         loop_watch_task.cancel()

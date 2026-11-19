@@ -303,6 +303,7 @@ def clone_job_for_retry(job_id: str) -> Job:
         "gateway_request_fingerprint": None,
         "gateway_unconfirmed": None,
         "gateway_reattach_of": None,
+        "gateway_cancel_pending": None,
     })
     clone = src.model_copy(update={
         "job_id": new_job_id(),
@@ -368,7 +369,9 @@ def gateway_reattach_params(source: Job | None, alias: str | None) -> dict[str, 
     （`gateway_unconfirmed`）、这把幂等键第一次发出不满 20 小时。请求是否完全相同由 caller 按实际发给主机的
     内容比指纹，不同就换新键下新单。
     """
-    if (source is None or source.status != JobStatus.FAILED or source.provider != "atelier"
+    # 「已停止」的也接回：主机已发上游的跑完并计费（飙哥定 Q3-1=B），请求相同就取回结果，不再下新单。
+    if (source is None or source.status not in (JobStatus.FAILED, JobStatus.CANCELED)
+            or source.provider != "atelier"
             or not alias or source.alias != alias):
         return {}
     params = source.params

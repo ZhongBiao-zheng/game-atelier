@@ -234,7 +234,7 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                     "mask_image", "markup_image", "image_edit", "mj_submission_ids", "mj_submit_uncertain",
                     "evolink_state", "edit_inputs", "edit_prompt",
                     "route_id", "route_order", "route_tried",
-                    "gateway_idempotency_key", "gateway_request_fingerprint", "gateway_unconfirmed", "gateway_reattach_of",
+                    "gateway_idempotency_key", "gateway_request_fingerprint", "gateway_unconfirmed", "gateway_reattach_of", "gateway_cancel_pending",
                 ):
                     if owned in existing_params:
                         value[owned] = existing_params[owned]
@@ -596,8 +596,15 @@ def post_job_cancel(job_id: str) -> dict:
             # 等待网关且此刻没有线程在跑它：直接停。网关那边的原任务可能仍会完成并扣额度。
             with job_execution_lock(job_id) as idle:
                 if idle:
-                    update_job_status(job_id, status=JobStatus.CANCELED,
-                                      error="已停止（网关上的任务可能仍在执行）")
+                    # 停止请求交给补发线程按幂等键送到主机（不在请求线程里打网络）：没发上游的主机会取消、
+                    # 扣 0；已发上游的跑完并计费（飙哥定 Q3-1=B）。送达后按主机答复改文案。
+                    from character_workflow.lib import gateway_cancel_outbox
+                    from character_workflow.lib.job_runner import GATEWAY_CANCEL_UNDELIVERED
+                    from character_workflow.lib.jobs import update_job_params
+
+                    update_job_params(job_id, job.params.model_copy(update={"gateway_cancel_pending": True}))
+                    update_job_status(job_id, status=JobStatus.CANCELED, error=GATEWAY_CANCEL_UNDELIVERED)
+                    gateway_cancel_outbox.wake()
                     return {"ok": True, "job_id": job_id, "status": JobStatus.CANCELED.value}
         age = _pending_age_minutes(job)
         if not is_resumable_studio_job(job) and (age is None or age >= STALE_PENDING_MINUTES):
@@ -1814,6 +1821,7 @@ def _create_user_job(
     params.gateway_request_fingerprint = None
     params.gateway_unconfirmed = None
     params.gateway_reattach_of = None
+    params.gateway_cancel_pending = None
     # 改写值与原值同类型（str / list[str]），model_copy 不需要重新校验。
     params = params.model_copy(update=_gate_browser_refs(params.model_dump()))
     route_order: list[str] = []

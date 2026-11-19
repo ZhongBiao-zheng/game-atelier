@@ -339,6 +339,19 @@ def _run_task(
             params["gateway_reattach_of"] = None
             task_id = submit(new_key=True)
             status = poll(task_id)
+        if status["status"] == "canceled" and (status.get("delivered") is False
+                                               or status.get("cancel_outcome") in ("continuing", "finished")):
+            # 停止没送到主机（连不上），或主机答「已发上游、会跑完并计费」：这把键在主机上的结局仍未知，
+            # 保留标记，「再次生成」请求相同时接回取结果。没送到的记下来，恢复连接后补发（gateway_cancel_outbox）。
+            params["gateway_unconfirmed"] = True
+            if status.get("delivered") is False:
+                params["gateway_cancel_pending"] = True
+            if on_params_changed:
+                on_params_changed()
+            if status.get("delivered") is False:
+                from character_workflow.lib import gateway_cancel_outbox
+                gateway_cancel_outbox.wake()
+            raise JobCanceled("已按请求停止")
         if status["status"] in ("failed", "canceled"):
             params["gateway_unconfirmed"] = None  # 主机对这把键给了明确终态
             if on_params_changed:
@@ -427,6 +440,30 @@ def gateway_reachable(alias: str | None) -> bool:
         return False
 
 
+def cancel_by_key(key: _keys.KeySpec, idempotency_key: str,
+                  task_ids: list[str] | None = None) -> dict[str, Any]:
+    """把停止请求按幂等键送到主机，返回主机的任务视图（含 `cancel_outcome`）。旧主机没有按键取消的接口时
+    退回按任务号取消；连任务号都没有就返回 `{"cancel_outcome": "unsupported"}`。"""
+    base = (key.base_url or "").rstrip("/")
+    headers = {"Authorization": f"Bearer {key.access_key}"}
+    with _session() as session:
+        response = session.post(f"{base}/gateway/v1/tasks/cancel", headers=headers,
+                                json={"idempotency_key": idempotency_key}, timeout=_TIMEOUT)
+        if response.status_code in (404, 405):
+            if not task_ids:
+                return {"cancel_outcome": "unsupported"}
+            response = session.post(f"{base}/gateway/v1/tasks/{task_ids[0]}/cancel",
+                                    headers=headers, timeout=_TIMEOUT)
+            if response.status_code == 404:
+                return {"cancel_outcome": "unsupported"}
+        _raise_for_status(response)
+        body = response.json()
+    if "cancel_outcome" not in body:  # 旧主机按任务号取消：按状态推断
+        body["cancel_outcome"] = ("canceled" if body.get("status") == "canceled"
+                                  else "finished" if body.get("status") in _TERMINAL else "continuing")
+    return body
+
+
 def new_idempotency_key() -> str:
     """幂等键里带上它第一次发出的时间（秒），「再次生成」的接回窗口从这里算，不另外落盘。"""
     return f"{int(time.time())}-{uuid.uuid4().hex}"
@@ -500,7 +537,11 @@ def _poll(session, base, headers, task_id, phase, cancelled,
                                         timeout=_TIMEOUT)
                 _raise_for_status(response)
                 cancel_sent = True
-            except (requests.RequestException, GatewayError):
+                outcome = response.json().get("cancel_outcome")
+                if outcome in ("continuing", "finished"):
+                    # 主机已发上游（飙哥定 Q3-1=B：跑完并计费）：不再等，本机立即停。旧主机没有这个字段，照旧等终态。
+                    return {"status": "canceled", "cancel_outcome": outcome}
+            except (requests.RequestException, GatewayError, ValueError):
                 pass
         try:
             response = session.get(f"{base}/gateway/v1/tasks/{task_id}", headers=headers,
@@ -515,8 +556,8 @@ def _poll(session, base, headers, task_id, phase, cancelled,
             if isinstance(error, GatewayTaskGone):
                 raise
             if cancelled():
-                # 用户要停、网关又连不上：停止请求送不到主机，只能本机先停；主机上的任务可能仍会完成。
-                return {"status": "canceled"}
+                # 用户要停、网关又连不上：本机先停；停止请求没送到的，由 gateway_cancel_outbox 恢复连接后补发。
+                return {"status": "canceled", "delivered": cancel_sent}
             if time.monotonic() - last_ok > give_up:
                 raise GatewayUnconfirmed(f"网关任务 {task_id} 结果未确认（查询失败）") from error
             if not waiting:

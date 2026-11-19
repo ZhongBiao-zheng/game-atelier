@@ -426,16 +426,79 @@ def extra_file(key_id: str, task_id: str, index: int) -> Path:
     return _files_dir(task_id) / "extras" / task.extras[index].file
 
 
+# 按幂等键取消、主机还没收到这把键时记的「已取消」占位任务：route_id 为空，不写用量行。
+TOMBSTONE_ROUTE = ""
+TOMBSTONE_LIMIT = 200  # 每把网关密钥在保留期（24 小时）内最多这么多个占位
+CancelOutcome = Literal["canceled", "continuing", "finished"]
+
+
 def cancel(key_id: str, task_id: str) -> GatewayTask:
+    """成员停止（飙哥定 Q3-1=B「跑完并计费」）：还没发上游的取消、扣 0；已发上游的照常跑完、按成功规则计费，
+    不设取消标记。回应里的 `cancel_outcome`（见 `cancel_outcome`）告诉成员是哪一种。"""
     task = get_task(key_id, task_id)
     if task.status in TERMINAL:
         return task
+    logger.info("网关任务请求取消 task=%s", task_id)
     with _lock:
         current = _read(task_id)
         if current and current.status == "pending":
             return _finish(current, status="canceled", error="已停止")
-    logger.info("网关任务请求取消 task=%s", task_id)
-    return _update(task_id, cancel_requested=True)
+        if current and current.status == "running" and (
+                current.sent_at is None or _runs_on_this_host(current)):
+            # 刚开始执行、还没发出：run_task 发上游前在同一把锁里看到标记就取消。
+            # 主机本机执行的任务例外（见 _runs_on_this_host）：能真正中断、不计费，「跑完并计费」的理由不成立。
+            return _update(task_id, cancel_requested=True)
+        return current or task
+
+
+def _runs_on_this_host(task: GatewayTask) -> bool:
+    """任务是不是在主机本机执行（目前只有本机 ComfyUI）：按执行方式判断——供应商是 ComfyUI 且地址是本机。
+    这类任务不经任何计费上游、能中断或移出队列，停止时真的取消、扣 0（对 Q3-1「跑完并计费」的解释，
+    理由是那条决定针对上游取消不了或取消照扣的任务）。计费的云端 ComfyUI（如 RunningHub）走别的协议或非本机地址，
+    不在其列。"""
+    if task.member_provider != "comfyui":
+        return False
+    from character_workflow.lib.comfyui_schema import local_base_url
+
+    try:
+        local_base_url(task.member_base_url)
+    except ValueError:
+        return False
+    return True
+
+
+def cancel_outcome(task: GatewayTask) -> CancelOutcome:
+    """取消请求的结果：canceled（没发上游，已取消或马上取消、扣 0）/ continuing（已发上游，会跑完并计费）/
+    finished（取消前已经结束，按原结局）。成员端文案按它选，不按状态猜。"""
+    if task.status == "canceled" or (task.status not in TERMINAL and task.cancel_requested):
+        return "canceled"
+    if task.status in TERMINAL:
+        return "finished"
+    return "continuing"
+
+
+def cancel_by_key(key: GatewayKeyRecord, idempotency_key: str) -> GatewayTask:
+    """按幂等键取消（成员不知道主机任务号时，例如提交结果未确认）。主机还没收到这把键时记一个「已取消」占位：
+    后到的同键提交直接拿到它，不会执行。只接受格式合法、签发不满 20 小时的键；查找与建占位在同一把锁里，
+    与 `submit` 的去重查找互斥。"""
+    from character_workflow.lib.jobs import gateway_key_expired
+
+    if gateway_key_expired(idempotency_key):
+        raise GatewayRequestError(422, "幂等键格式不对或已超过 20 小时")
+    with _lock:
+        tasks = [task for task in _all_tasks() if task.key_id == key.id]
+        existing = next((task for task in tasks if task.idempotency_key == idempotency_key), None)
+        if existing is None:
+            if sum(task.route_id == TOMBSTONE_ROUTE for task in tasks) >= TOMBSTONE_LIMIT:
+                raise GatewayRequestError(429, "停止请求太多，请稍后再试")
+            now = _now().isoformat()
+            placeholder = _save(GatewayTask(
+                task_id=uuid.uuid4().hex, key_id=key.id, key_name=key.name,
+                idempotency_key=idempotency_key, route_id=TOMBSTONE_ROUTE, prompt="", n=0,
+                status="canceled", error="已停止", created_at=now, updated_at=now))
+            logger.info("网关任务按幂等键取消，主机未收到，记占位 task=%s", placeholder.task_id)
+            return placeholder
+    return cancel(key.id, existing.task_id)
 
 
 def _is_task_id(value: str) -> bool:
@@ -559,12 +622,16 @@ def run_task(task: GatewayTask) -> GatewayTask:
         if switched_from:
             alias, reason = switched_from
             warnings.append(f"{alias}{model_routes.FAILOVER_LABELS[reason]}，已改用 {key.alias}")
-        sent = _update(task_id, member_alias=key.alias, member_provider=key.provider,
-                       member_base_url=key.base_url, member_model_id=model.id, phase="sent",
-                       route_tried=list(tried), member_trail=[*tried, key.alias],
-                       warnings=list(warnings))
-        if sent.sent_at is None:
-            _update(task_id, sent_at=_now().isoformat())
+        with _lock:
+            if _read(task_id).cancel_requested:
+                # 成员在发上游之前停止了（cancel 在同一把锁里只对还没发出的任务设标记）：取消、扣 0。
+                return _finish(_read(task_id), status="canceled", error="已停止")
+            sent = _update(task_id, member_alias=key.alias, member_provider=key.provider,
+                           member_base_url=key.base_url, member_model_id=model.id, phase="sent",
+                           route_tried=list(tried), member_trail=[*tried, key.alias],
+                           warnings=list(warnings))
+            if sent.sent_at is None:
+                _update(task_id, sent_at=_now().isoformat())
         logger.info("网关任务发往上游 task=%s member=%s model=%s", task_id, key.alias, model.id)
         cost: dict[str, float] = {}
         with tempfile.TemporaryDirectory(prefix=f"gateway-{task_id[:8]}-") as tmp:
