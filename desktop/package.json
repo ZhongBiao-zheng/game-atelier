@@ -6,7 +6,7 @@
   "description": "Atelier desktop shell",
   "main": "src/main.mjs",
   "scripts": {
-    "icons": "node scripts/icons.mjs",
+    "stage": "node scripts/stage.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {

@@ -89,7 +89,7 @@ def build_electron(seed: Path, version: str, platform: str, app_id_override: str
     pnpm = shutil.which("pnpm") or "pnpm"
     # Electron 45 has no postinstall: fetch the binary electron-builder packages (no-op once present).
     subprocess.run([pnpm, "exec", "install-electron"], cwd=DESKTOP, check=True)
-    subprocess.run([pnpm, "icons"], cwd=DESKTOP, check=True)
+    subprocess.run([pnpm, "stage"], cwd=DESKTOP, check=True)
     shutil.rmtree(DESKTOP / "dist", ignore_errors=True)
     target = ["--mac", "--arm64"] if platform == "macos-arm64" else ["--win", "--x64"]
     identity = app_id_override or app_id()

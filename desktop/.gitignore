@@ -1,4 +1,4 @@
 node_modules/
-# electron-builder output, and what scripts/build_desktop.py / `pnpm icons` stage for it.
+# electron-builder output, and what scripts/build_desktop.py / `pnpm stage` stage for it.
 dist/
 stage/

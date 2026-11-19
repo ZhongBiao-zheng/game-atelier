@@ -34,3 +34,14 @@ def test_the_updater_keeps_no_copy_of_the_download_rules():
     assert "releases/download" not in SOURCE
     assert "github.com/ZhongBiao-zheng/game-atelier/releases\"" not in SOURCE
     assert "GameAtelier-{version}" not in SOURCE
+
+
+def test_the_desktop_shell_downloads_with_the_same_file():
+    stage = (REPO_ROOT / "desktop/scripts/stage.mjs").read_text(encoding="utf-8")
+    assert "'src', 'viewer_server', 'release_sources.json'" in stage
+    assert "path.join(stage, 'release_sources.json')" in stage
+    builder = (REPO_ROOT / "desktop/electron-builder.yml").read_text(encoding="utf-8")
+    assert "  - stage/release_sources.json\n" in builder
+    download = (REPO_ROOT / "desktop/src/download.mjs").read_text(encoding="utf-8")
+    for copy in ("cnb.cool", "github.com", "releases/download", "GameAtelier-$", ".sha256'"):
+        assert copy not in download, copy

@@ -39,7 +39,7 @@ EXCLUDED_PARTS = {
     "__pycache__",
     "node_modules",
 }
-# Electron shell: electron-builder output and what build_desktop.py / `pnpm icons` stage for it.
+# Electron shell: electron-builder output and what build_desktop.py / `pnpm stage` stage for it.
 EXCLUDED_ELECTRON_OUTPUTS = {"dist", "stage"}
 EXCLUDED_NAMES = {
     ".DS_Store",
