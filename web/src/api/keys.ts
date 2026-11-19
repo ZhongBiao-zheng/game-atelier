@@ -63,7 +63,10 @@ export interface KeyModel {
   declared?: ModelDeclared;
   /** 主机手设的每次调用价格（元 / 次）：没有同步价时用于估价与网关扣费。 */
   per_call_cny?: number | null;
-  /** 服务端算出的只读标记：按代表性参数拿不到同步价。只在为 true 时出现。 */
+  /** 文本模型的手设单价（元 / 百万 token，输入、输出各一个，两个都填才生效）：没有同步价时用。 */
+  input_cny_per_m?: number | null;
+  output_cny_per_m?: number | null;
+  /** 服务端算出的只读标记：至少有一种参数组合拿不到同步价。只在为 true 时出现。 */
   unpriced?: boolean;
 }
 

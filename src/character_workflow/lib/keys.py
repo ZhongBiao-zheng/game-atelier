@@ -74,12 +74,16 @@ class ModelSpec(BaseModel):
     declared_snapshot: dict | None = None
     # 主机手设的每次调用价格（元 / 次）：只在没有同步价时用于估价与网关扣费（第三批，2026-11-18）。
     per_call_cny: float | None = Field(default=None, ge=0, le=10_000, allow_inf_nan=False)
+    # 文本模型的手设单价（元 / 百万 token，输入、输出各一个）：只在没有同步价时用（第 5 批 5-5，2026-11-19）。
+    input_cny_per_m: float | None = Field(default=None, ge=0, le=10_000, allow_inf_nan=False)
+    output_cny_per_m: float | None = Field(default=None, ge=0, le=10_000, allow_inf_nan=False)
 
     @model_serializer(mode="wrap")
     def _omit_empty_via(self, handler):
         # 普通 KEY 没有 via：不写进 keys.json / API，旧数据与旧断言保持原样。
         data = handler(self)
-        for field in ("via", "workflow_inputs", "declarative_id", "declared_snapshot", "per_call_cny"):
+        for field in ("via", "workflow_inputs", "declarative_id", "declared_snapshot", "per_call_cny",
+                      "input_cny_per_m", "output_cny_per_m"):
             if data.get(field) is None:
                 data.pop(field, None)
         return data

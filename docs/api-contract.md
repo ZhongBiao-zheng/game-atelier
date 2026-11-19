@@ -1309,8 +1309,14 @@ timeout_seconds`；超时默认 1800 秒，允许 1–86400 秒。inspect 不写
   `GET /api/keys` 以 `declared` 返回。任务状态里未计价任务的 `charged_cny` 为 null，两侧用量都计入「未计价」。
 - 主机手设单价（2026-11-18）：`ModelSpec.per_call_cny`（元 / 次，0–10000，null 不序列化）只在没有同步价时
   用于估价（本机任务、模型菜单、网关受理预占与结算），同步价优先；按「每次调用」计，不乘张数。`GET /api/keys`
-  对按代表性参数（图片默认尺寸、视频 5 秒 720p 16:9、音频单价）拿不到同步价的图片 / 视频 / 音频模型给只读
-  `unpriced: true`（定价的不出现该字段；文本与局域网 Atelier 供应商不给），供应商页据此显示单价框。
+  对「至少有一种参数组合拿不到同步价」的模型给只读 `unpriced: true`（定价的不出现该字段；局域网 Atelier 供应商不给），
+  供应商页据此显示单价框。图片 / 视频按代表性参数（图片默认尺寸、视频 5 秒 720p 16:9）加逐维变体探测：视频带参考视频
+  （模型声明支持时）/ 生成音频，图片带参考图 / 图片编辑 / 图层拆分（模型支持时）；分辨率与时长不枚举。音频取单价，
+  文本按 1000 / 1000 token 估一次（2026-11-19，第 5 批 5-5）。
+- 文本模型手设单价（2026-11-19）：`ModelSpec.input_cny_per_m` / `output_cny_per_m`（元 / 百万 token，0–10000，
+  null 不序列化），两个都填才生效，只在没有同步价时用；网关文本中转受理预占与结算、本机「AI 帮我配置」与分镜解析的
+  花费都按它算（`generation_pricing.estimate_text_cost_cny` 一处兜底）。结算来源记 `price_table`：成功才扣，失败扣 0；
+  上游没回用量（`usage_missing`）扣 0。文本模型不用 `per_call_cny`。
   接入端：网关失败任务若 `charged_cny > 0`，任务错误末尾附「（已扣 ¥x：上游已对完成的部分收费）」。
 
 模板（版本 1，Pydantic `http_protocol_schema.HttpProtocol` ↔ TS `web/src/schema/httpProtocols.ts`，

@@ -65,11 +65,14 @@ const TEXT_INPUT_MODALITIES = [
 
 // 仅前端的行级标记：编辑态「打开表单时已存在的模型」分类锁死为只读，新增行不带此标记。
 // _locked 随 spread 在每次 setModels 中传递，增删行都不会错乱（不依赖 id 值或行下标）。
-type EditableModel = KeyModel & { _locked?: boolean; _price?: string };
+type EditableModel = KeyModel & { _locked?: boolean; _price?: string; _priceIn?: string; _priceOut?: string };
 
 const PRICE_HELP = '没有同步价时按此价估算，并计入网关额度；留空为未计价';
 // 输入中的文本优先（允许「0.」这类中间态），否则回显已存的单价。
 const priceText = (model: EditableModel) => model._price ?? (model.per_call_cny != null ? String(model.per_call_cny) : '');
+const TEXT_PRICE_HELP = '没有同步价时按此价估算，并计入网关额度；输入、输出都填才生效，留空为未计价';
+const priceInText = (model: EditableModel) => model._priceIn ?? (model.input_cny_per_m != null ? String(model.input_cny_per_m) : '');
+const priceOutText = (model: EditableModel) => model._priceOut ?? (model.output_cny_per_m != null ? String(model.output_cny_per_m) : '');
 function parsePrice(text: string): number | null | undefined {
   const value = text.trim();
   if (!value) return null;
@@ -368,7 +371,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
 
   const submit = async () => {
     if (unresolvedChecked.length) return;
-    if (models.some(model => parsePrice(priceText(model)) === undefined)) {
+    if (models.some(model => [priceText(model), priceInText(model), priceOutText(model)]
+      .some(text => parsePrice(text) === undefined))) {
       setError('单价请填 0 到 10000 之间的数字');
       return;
     }
@@ -389,7 +393,9 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
             protocol: bound ? 'declarative' : model.protocol === 'declarative' ? null : model.protocol ?? null,
             input_modalities: inputModalities,
             ...(bound ? { declarative_id: model.declarative_id } : {}),
-            ...(parsePrice(priceText(model)) != null ? { per_call_cny: parsePrice(priceText(model)) } : {}),
+            ...(modality !== 'text' && parsePrice(priceText(model)) != null ? { per_call_cny: parsePrice(priceText(model)) } : {}),
+            ...(modality === 'text' && parsePrice(priceInText(model)) != null ? { input_cny_per_m: parsePrice(priceInText(model)) } : {}),
+            ...(modality === 'text' && parsePrice(priceOutText(model)) != null ? { output_cny_per_m: parsePrice(priceOutText(model)) } : {}),
           };
         })
         .filter((model) => model.name && model.id);
@@ -732,7 +738,29 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                             ))}
                           </div>
                         )}
-                        {model.unpriced && (
+                        {model.unpriced && (model.modality ?? 'image') === 'text' && (
+                          <div className="flex items-center gap-1.5">
+                            <Input
+                              aria-label={`输入单价 ${index + 1}`}
+                              inputMode="decimal"
+                              value={priceInText(model)}
+                              onChange={(e) => setModels(models.map((m, i) => i === index ? { ...m, _priceIn: e.target.value } : m))}
+                              placeholder="输入"
+                              className="h-7 w-16 text-xs"
+                            />
+                            <Input
+                              aria-label={`输出单价 ${index + 1}`}
+                              inputMode="decimal"
+                              value={priceOutText(model)}
+                              onChange={(e) => setModels(models.map((m, i) => i === index ? { ...m, _priceOut: e.target.value } : m))}
+                              placeholder="输出"
+                              className="h-7 w-16 text-xs"
+                            />
+                            <span className="text-xs text-muted-foreground">元/百万 token</span>
+                            <Hint label={TEXT_PRICE_HELP}><span tabIndex={0} aria-label="单价说明" className="text-muted-foreground"><HelpIcon size="sm" /></span></Hint>
+                          </div>
+                        )}
+                        {model.unpriced && (model.modality ?? 'image') !== 'text' && (
                           <div className="flex items-center gap-1.5">
                             <Input
                               aria-label={`单价 ${index + 1}`}

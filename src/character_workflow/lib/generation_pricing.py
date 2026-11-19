@@ -361,13 +361,29 @@ def _tokendance_text(model_id: str, input_tokens: int, output_tokens: int,
 
 def estimate_text_cost_cny(
     model_id: str, input_tokens: int, output_tokens: int, *, key: Any = None,
-    cached_tokens: int = 0,
+    cached_tokens: int = 0, manual: bool = True,
 ) -> float | None:
     """文本按 token 估价；None 表示未计价。
 
     传了 key 时按供应商的同步价：Tuzi、TokenDance 已用付费小测核对；OpenAI-HK 用控制台账单核对，
     只认 default 分组。其余渠道只认打包价格表里的精确模型 ID（目前为空）。
+    拿不到同步价时，用主机手设的输入 / 输出单价（`ModelSpec.input_cny_per_m` / `output_cny_per_m`，
+    元 / 百万 token，两个都填才生效）；同步价优先。网关受理、结算与本机花费显示都经过这里。
     """
+    synced = _synced_text_cost(model_id, input_tokens, output_tokens, key=key,
+                               cached_tokens=cached_tokens)
+    if synced is not None or not manual or key is None:
+        return synced
+    spec = next((item for item in getattr(key, "models", None) or [] if item.id == model_id), None)
+    rate_in = getattr(spec, "input_cny_per_m", None)
+    rate_out = getattr(spec, "output_cny_per_m", None)
+    if rate_in is None or rate_out is None:
+        return None
+    return _priced((input_tokens * rate_in + output_tokens * rate_out) / 1_000_000)
+
+
+def _synced_text_cost(model_id: str, input_tokens: int, output_tokens: int, *, key: Any,
+                      cached_tokens: int) -> float | None:
     if key is not None:
         host = _hostname(key.base_url)
         if _domain(host, "tu-zi.com"):
@@ -417,22 +433,60 @@ def audio_unit_cost_cny(key, model, *, manual: bool = True) -> float | None:
 
 # 判断「有没有同步价」用的代表性参数：图片按默认尺寸，视频按 5 秒 720p 16:9。
 _PROBE_PARAMS = {"image": {}, "video": {"duration": 5, "resolution": "720p", "ratio": "16:9"}}
+# 文本按 1000 / 1000 token 估一次。
+_TEXT_PROBE_TOKENS = 1000
+
+
+def _probe_variants(key, model, modality: str) -> list[dict]:
+    """代表性参数 + 逐维变体（每次只变一维）。只取会让定价分支返回无价、且该模型声明支持的功能开关：
+    视频带参考视频 / 生成音频，图片带参考图 / 图片编辑 / 图层拆分。分辨率、时长后端没有统一能力表，不枚举。"""
+    base = dict(_PROBE_PARAMS[modality])
+    variants = [base]
+    if modality == "video":
+        variants.append({**base, "generate_audio": True})
+        if _accepts_reference_video(key, model):
+            variants.append({**base, "reference_videos": ["probe.mp4"]})
+        return variants
+    variants.append({**base, "reference_images": ["probe.png"]})
+    variants.append({**base, "image_edit": {"mode": "inpaint"}, "reference_images": ["probe.png"]})
+    from character_workflow.lib.callers.openai_image import supports_layer_decomposition
+
+    if supports_layer_decomposition(key, model.id):
+        variants.append({**base, "layer_decomposition": True, "reference_images": ["probe.png"]})
+    return variants
+
+
+def _accepts_reference_video(key, model) -> bool:
+    from character_workflow.lib.callers import _effective_protocol
+    from character_workflow.lib.video_caps import kling_spec, seedance_limits
+
+    protocol = _effective_protocol(key, model.id)
+    if protocol == "seedance":
+        return seedance_limits(model.id).max_videos > 0
+    if protocol in ("klingai", "evolink"):
+        spec = kling_spec(model.id)
+        return bool(spec and spec.max_videos > 0)
+    return False
 
 
 def has_no_synced_price(key, model) -> bool | None:
-    """供应商页「单价」框的显示判据：按代表性参数估价，拿不到同步价就是未定价。
+    """供应商页「单价」框的显示判据：至少有一种参数组合拿不到同步价，就是未定价（第 5 批 5-5）。
 
-    文本（第 4 步才计价）与局域网 Atelier 供应商（价格在主机那边）返回 None，不给这个标记。
+    图片 / 视频按代表性参数 + 逐维变体探测（`_probe_variants`），例如 Ark 视频带参考视频时不估价；
+    文本按 1000 / 1000 token 估一次；局域网 Atelier 供应商（价格在主机那边）返回 None，不给这个标记。
     """
     from character_workflow.lib.keys import model_modality
 
     modality = model_modality(model, key)
-    if key.provider == "atelier" or modality not in ("image", "video", "audio"):
+    if key.provider == "atelier" or modality not in ("image", "video", "audio", "text"):
         return None
     if modality == "audio":
         return audio_unit_cost_cny(key, model, manual=False) is None
-    return estimate_submission(key, model.id, modality, dict(_PROBE_PARAMS[modality]),
-                               manual=False) is None
+    if modality == "text":
+        return estimate_text_cost_cny(model.id, _TEXT_PROBE_TOKENS, _TEXT_PROBE_TOKENS, key=key,
+                                      manual=False) is None
+    return any(estimate_submission(key, model.id, modality, params, manual=False) is None
+               for params in _probe_variants(key, model, modality))
 
 
 def estimate_submission(key, model_id: str, kind: str, params: dict, *,
