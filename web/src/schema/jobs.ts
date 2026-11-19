@@ -74,6 +74,8 @@ export interface JobParams {
     http_status?: number | null;
     error_type?: string | null;
     request_ids: Record<string, string>;
+    /** 连接都没建立、请求确定没发出（outcome 保持 submitting）。 */
+    not_sent?: boolean | null;
   }>;
   // 图片参数 —— 与 schemas.py::JobParams 同步（Tuzi GPT 2.5 quality: low|medium|high|xhigh|max）
   ratio?: string;

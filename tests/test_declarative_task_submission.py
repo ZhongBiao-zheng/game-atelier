@@ -114,8 +114,8 @@ def test_gateway_marks_it_unconfirmed_and_keeps_the_other_key_idle(vendor):
     assert len(vendor.calls("POST", "/v1/tasks")) == 1
 
 
-def test_async_refused_connection_retries_then_is_unconfirmed(tmp_path, monkeypatch):
-    """连接建立前的失败：先按原规则自动重试（确定没送达），用尽后按 Q1-1=A 算未确认。"""
+def test_async_refused_connection_retries_then_is_not_sent(tmp_path, monkeypatch):
+    """连接建立前的失败：先按原规则自动重试（确定没送达），用尽后是「未送达」（可换家），不是未确认。"""
     import socket
 
     sock = socket.socket()
@@ -125,6 +125,36 @@ def test_async_refused_connection_retries_then_is_unconfirmed(tmp_path, monkeypa
     _bind(f"http://127.0.0.1:{port}", ASYNC)
     backoffs: list[int] = []
     monkeypatch.setattr(declarative, "_backoff", backoffs.append)
-    with pytest.raises(declarative.DeclarativeUnconfirmed):
+    with pytest.raises(declarative.DeclarativeError) as error:
         _run(tmp_path)
     assert backoffs == [0, 1]
+    assert task_submission.is_not_sent(error.value)
+    assert not task_submission.is_unconfirmed(error.value)
+
+
+def test_gateway_fails_over_when_the_first_key_cannot_connect(vendor, monkeypatch):
+    """连接被拒（请求没发出）：主机换到同路由的第二把 KEY。自定义接口的报错不带原始异常链（防密钥外泄），
+    靠「未送达」类型判断，不靠链上的 requests 异常。"""
+    import socket
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    closed = f"http://127.0.0.1:{sock.getsockname()[1]}"
+    sock.close()
+    stored = http_protocols.save_protocol(copy.deepcopy(ASYNC))
+    for alias, base in (("first", closed), ("second", vendor.url)):
+        keys.add_key(keys.KeySpec(
+            alias=alias, provider="custom", base_url=base, access_key=SECRET,
+            models=[keys.ModelSpec(id="m1", name="m1", modality="image", protocol="declarative",
+                                   declarative_id=stored.id)],
+            created_at="2026-11-19T00:00:00Z"))
+    vendor.on("POST", "/v1/tasks", {"data": {"id": "t-9"}})
+    vendor.on("GET", "/v1/tasks/t-9", {"data": {"status": "SUCCESS",
+                                                "images": [vendor.url + "/files/a.png"]}})
+    monkeypatch.setattr(declarative, "_backoff", lambda _attempt: None)
+    owner = gateway_keys.create_key("小王")[0]
+    task = gateway_tasks.submit(owner, idempotency_key="k2", model=f"declarative:{stored.id}:m1",
+                                prompt="一只猫", n=1, size=None, params={}, files={}, kind="image")
+    done = gateway_tasks.run_task(gateway_tasks._update(task.task_id, status="running"))
+    assert done.status == "done", done.error
+    assert done.member_alias == "second" and len(vendor.calls("POST", "/v1/tasks")) == 1

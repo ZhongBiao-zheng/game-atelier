@@ -1,7 +1,8 @@
 """第 5 批 5-1：异步任务提交的统一判据（callers/task_submission）。
 
-六个视频协议都用真实 caller，只替换 requests 的网络调用（假上游）。判据（2026-11-19 飙哥定 Q1-1=A）：
-任何网络异常（含连接建立前）、HTTP ≥ 500、2xx 非 JSON、2xx 无任务号都算「未确认」——不重发、不换家、扣 0；
+六个视频协议都用真实 caller，只替换 requests 的网络调用（假上游）。判据：
+连接建立后的网络异常、HTTP ≥ 500、2xx 非 JSON、2xx 无任务号都算「未确认」——不重发、不换家、扣 0；
+连接都没建立（被拒、DNS、连接超时）是「未送达」——「自动」换下一把 KEY，无家可换时普通失败（2026-11-19 飙哥定）；
 4xx 是明确拒绝。
 """
 from __future__ import annotations
@@ -12,7 +13,7 @@ import pytest
 import requests
 
 from character_workflow.lib import gateway_keys, gateway_quota, gateway_tasks, keys, model_routes
-from character_workflow.lib.callers import task_submission
+from character_workflow.lib.callers import task_submission, video_poll
 
 ARK = "https://ark.cn-beijing.volces.com/api/v3"
 HK = "https://api.openai-hk.com/v1"
@@ -54,7 +55,6 @@ def _resp(payload=None, *, status=200, json_error=False):
 FAULTS = {
     "aborted": lambda: requests.ConnectionError("('Connection aborted.', RemoteDisconnected())"),
     "read_timeout": lambda: requests.ReadTimeout("read timed out"),
-    "connect_refused": lambda: requests.ConnectionError("Failed to establish a new connection"),
     "503_no_channel": lambda: _resp({"error": {"message": "无可用渠道 no available channel"}},
                                     status=503),
     "2xx_not_json": lambda: _resp(json_error=True),
@@ -118,6 +118,132 @@ def test_unsure_submission_is_unconfirmed_and_never_fails_over(
     assert len(posts) == 1 and "second" not in posts[0]  # 不重发，也不换到第二把 KEY
     [attempt] = failed.submission_attempts
     assert attempt["outcome"] == "unconfirmed" and attempt["started_at"]
+
+
+def _max_retry(reason):
+    """与 requests 真实抛出的形状一致：ConnectionError(MaxRetryError(reason=<urllib3 异常>))。"""
+    from urllib3.exceptions import MaxRetryError
+
+    return MaxRetryError(None, "/v1/tasks", reason=reason)
+
+
+def _refused():
+    from urllib3.exceptions import NewConnectionError
+
+    inner = NewConnectionError(None, "Failed to establish a new connection: [Errno 61] Connection refused")
+    inner.__cause__ = ConnectionRefusedError(61, "Connection refused")
+    return requests.ConnectionError(_max_retry(inner))
+
+
+def _dns():
+    import socket
+
+    from urllib3.exceptions import NameResolutionError
+
+    return requests.ConnectionError(_max_retry(NameResolutionError(
+        "vendor.test", None, socket.gaierror(8, "nodename nor servname provided"))))
+
+
+def _connect_timeout():
+    from urllib3.exceptions import ConnectTimeoutError
+
+    return requests.ConnectTimeout(_max_retry(ConnectTimeoutError(None, "connect timed out")))
+
+
+NOT_SENT = {"connect_refused": _refused, "dns_failure": _dns, "connect_timeout": _connect_timeout}
+
+
+@pytest.mark.parametrize("fault", list(NOT_SENT))
+@pytest.mark.parametrize(("protocol", "provider", "base_url", "model", "route_id", "ok"),
+                         PROTOCOLS, ids=IDS)
+def test_submission_that_never_left_fails_over_to_the_next_key(
+        monkeypatch, protocol, provider, base_url, model, route_id, ok, fault):
+    owner = _two_members(provider, base_url, model, protocol)
+    posts: list[str] = []
+
+    def post(url, headers=None, **_kwargs):
+        auth = str((headers or {}).get("Authorization", ""))
+        posts.append(auth)
+        if "first" in auth:
+            raise NOT_SENT[fault]()
+        return _resp(ok)
+
+    def stop_polling(*_args, **_kwargs):
+        raise _Stop()
+
+    monkeypatch.setattr(requests, "post", post)
+    monkeypatch.setattr(requests, "get", stop_polling)
+    # 第二把 KEY 提交成功后进入轮询：在轮询入口停下，不等轮询间隔（不替换 time.sleep）。
+    monkeypatch.setattr(video_poll, "poll_responses", stop_polling)
+    task = _gateway_task(owner, route_id)
+    with pytest.raises(_Stop):
+        gateway_tasks.run_task(task)
+    assert len(posts) == 2 and "first" in posts[0] and "second" in posts[1]
+    current = gateway_tasks._read(task.task_id)
+    assert current.member_alias == "second" and current.upstream_task_ids == ["t-1"]
+    assert current.error_kind is None
+
+
+@pytest.mark.parametrize("fault", list(NOT_SENT))
+def test_not_sent_attempt_keeps_submitting_and_is_marked(monkeypatch, fault):
+    """未送达的尝试记录：outcome 保持 submitting（不动落盘枚举），另记 not_sent。"""
+    records: list[dict] = []
+    monkeypatch.setattr(requests, "post", lambda *_a, **_k: (_ for _ in ()).throw(NOT_SENT[fault]()))
+
+    class Rejected(RuntimeError):
+        pass
+
+    class Unsure(Rejected, task_submission.SubmissionUnconfirmed):
+        pass
+
+    with pytest.raises(Rejected) as error:
+        task_submission.submit_task(
+            url="https://user:pw@vendor.test/v1/tasks?sig=1", headers={"Authorization": "Bearer s"},
+            body={}, attempt=1, on_submission=records.append, rejected=Rejected,
+            unconfirmed=Unsure, reject_message=lambda _p, s: f"HTTP {s}")
+    assert task_submission.is_not_sent(error.value) and not task_submission.is_unconfirmed(error.value)
+    assert "未确认" not in str(error.value)
+    last = records[-1]
+    assert last["outcome"] == "submitting" and last["not_sent"] is True
+    assert last["url"] == "https://vendor.test/v1/tasks" and last["error_type"]
+
+
+@pytest.mark.parametrize(("protocol", "provider", "base_url", "model", "route_id", "_ok"),
+                         PROTOCOLS, ids=IDS)
+def test_submission_that_never_left_with_no_other_key_is_a_plain_failure(
+        monkeypatch, protocol, provider, base_url, model, route_id, _ok):
+    keys.add_key(keys.KeySpec(
+        alias="only", provider=provider, access_key="only-test-secret", base_url=base_url,
+        modalities=["video"], created_at="test",
+        models=[keys.ModelSpec(id=model, name=model, modality="video", protocol=protocol)]))
+    owner = gateway_keys.create_key("小王")[0]
+    posts = _posting(monkeypatch, NOT_SENT["connect_refused"])
+    failed = gateway_tasks.run_task(_gateway_task(owner, route_id))
+    assert failed.status == "failed" and failed.error_kind != "unconfirmed"
+    assert "未确认" not in (failed.error or "")
+    assert failed.charged_cny == 0 and len(posts) == 1
+
+
+def test_not_sent_record_still_reads_as_an_old_style_attempt():
+    """旧版的 VideoSubmissionAttempt 没有 not_sent：多出的字段被忽略、outcome 仍是旧枚举里的值。"""
+    from pydantic import BaseModel, Field
+    from typing import Literal
+
+    class OldAttempt(BaseModel):  # 67c33005 的定义
+        attempt: int = Field(ge=1, le=4)
+        method: Literal["POST"] = "POST"
+        url: str
+        started_at: str
+        outcome: Literal["submitting", "response", "unconfirmed"]
+        elapsed_ms: int | None = None
+        http_status: int | None = None
+        error_type: str | None = None
+        request_ids: dict[str, str] = Field(default_factory=dict)
+
+    record = {"attempt": 1, "method": "POST", "url": "https://x/v1", "started_at": "2026-11-19T00:00:00",
+              "outcome": "submitting", "error_type": "ConnectTimeout", "elapsed_ms": 3,
+              "not_sent": True}
+    assert OldAttempt.model_validate(record).outcome == "submitting"
 
 
 @pytest.mark.parametrize(("protocol", "provider", "base_url", "model", "route_id", "_ok"),
@@ -203,6 +329,7 @@ def test_local_evolink_video_job_records_its_submission(monkeypatch):
         base_url="https://api.evolink.ai/v1", modalities=["video"], created_at="test",
         models=[keys.ModelSpec(id="kling-v4-flash-text-to-video", name="k", modality="video")]))
     posts = _posting(monkeypatch, lambda: _resp({"id": "evo-1", "status": "pending"}))
+    monkeypatch.setattr(video_poll, "poll_responses", lambda *_a, **_k: (_ for _ in ()).throw(_Stop()))
     save_job(Job(job_id="local-evo", character_id="A", prompt="海边的灯塔",
                  submitted_at="2026-11-19T00:00:00+00:00", model="kling-v4-flash-text-to-video",
                  params=JobParams(n=1, duration=5), output_paths=[], status=JobStatus.PENDING,

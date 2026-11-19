@@ -317,6 +317,9 @@ def failover_reason(error: BaseException) -> FailoverReason | None:
     # 异步任务提交可能已被上游受理（task_submission）：不换家，否则可能两家各下一单。
     if task_submission.is_unconfirmed(error):
         return None
+    # 连接都没建立、请求确定没发出：与「连不上」同一个换家原因。
+    if task_submission.is_not_sent(error):
+        return "unreachable"
     # 局域网 Atelier 确定没收下这次提交（连不上 / 正在更新）：按类型判断，不看文案。
     not_accepted = next((item for item in chain if isinstance(item, GatewayNotAccepted)), None)
     if not_accepted is not None:

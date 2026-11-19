@@ -374,8 +374,11 @@ def send(call: PreparedCall, *, timeout, error_path: str | None, task: bool = Fa
                 _backoff(attempt)
                 continue
             message = _transport_error(call, error, received=False)
-            if task and task_submission.network_outcome(error) == "unconfirmed":
-                raise DeclarativeUnconfirmed(message) from None
+            if task:
+                failed = (task_submission.not_sent_error(DeclarativeError)
+                          if task_submission.network_outcome(error) == "not_sent"
+                          else DeclarativeUnconfirmed)
+                raise failed(message) from None
             raise DeclarativeError(message) from None
         with response:
             status = response.status_code

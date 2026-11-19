@@ -151,6 +151,8 @@ class VideoSubmissionAttempt(BaseModel):
     http_status: int | None = None
     error_type: str | None = None
     request_ids: dict[str, str] = Field(default_factory=dict)
+    # 连接都没建立、请求确定没发出（outcome 保持 submitting）。可选字段：旧版读到会忽略，不动 outcome 枚举。
+    not_sent: bool | None = None
 
 
 class EditInput(BaseModel):

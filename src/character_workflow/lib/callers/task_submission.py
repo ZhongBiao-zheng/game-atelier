@@ -3,15 +3,21 @@
 所有「提交 → 回任务号 → 轮询」的协议共用这一套，不各写一份：
 
 - 发一次，不自动重发。发送前记 `submitting`，之后按结果改写同一条尝试记录（`on_submission`）。
+- 未送达（`SubmissionNotSent`）：连接都没建立（连接被拒、DNS 失败、连接超时），请求确定没发出。
+  可以换家（「自动」换下一把 KEY），无家可换时是普通失败、扣 0。2026-11-19 飙哥定。
 - 未确认（`SubmissionUnconfirmed`）：请求可能已到上游，结局不知道。不重发、不换家，由人核对或凭任务号续查。
-  - 任何网络异常（连接建立前的失败也算，与已接的 Seedance / 可灵新版 / EvoLink 一致，2026-11-19 飙哥定）；
+  - 连接建立后的网络异常（断开、读超时）；
   - HTTP ≥ 500（不论文案：网关回 503「无可用渠道」也可能是上游已建单后才超时）；
   - 2xx 但响应不是 JSON 对象；
   - 2xx 但取不到任务号（由调用方判断后调 `Submitted.unconfirmed`）。
 - 拒绝：4xx，按调用方的报错类与文案抛出，上游明确没受理。
 
 调用方的报错类各派生一个「未确认」子类（同时继承 `SubmissionUnconfirmed`），原有的 `except <报错类>`
-与报错文案都不变；主机与本机的「换不换家、算不算未确认」按类型判断（`is_unconfirmed`），不看文案。
+与报错文案都不变；主机与本机的「换不换家、算不算未确认」按类型判断（`is_unconfirmed` / `is_not_sent`），不看文案。
+
+未送达的尝试记录：`outcome` 保持 `submitting`（请求没离开本机），加 `not_sent: true`。不给落盘枚举加取值——
+旧版读到新取值会校验失败（ADR-0030 要求旧版能读新数据）；旧版忽略多出的字段，按 `submitting` 处理，
+它的换家 / 续查只认 `unconfirmed`，行为一致。
 """
 from __future__ import annotations
 
@@ -29,6 +35,7 @@ STATUS_UNCONFIRMED = ("{noun}提交结果未确认：厂商接口返回 HTTP {st
                       "请先核对厂商记录，避免重复计费。")
 UNPARSEABLE_UNCONFIRMED = "{noun}提交结果未确认：响应无法解析，未自动重新提交。请先核对厂商记录。"
 MISSING_ID_UNCONFIRMED = "{noun}提交结果未确认：未返回任务 ID，请先核对厂商记录。"
+NOT_SENT = "{noun}提交失败：连不上厂商接口，请求没有发出。"
 
 _REQUEST_ID_HEADERS = ("x-request-id", "x-trace-id", "request-id", "x-tt-logid")
 _SAFE_HEADER_VALUE = re.compile(r"[A-Za-z0-9._:-]{1,200}")
@@ -38,28 +45,50 @@ class SubmissionUnconfirmed(Exception):
     """提交可能已被上游受理，但没拿到明确结果：不重发、不换家。"""
 
 
+class SubmissionNotSent(Exception):
+    """连接都没建立，请求确定没发出：可以换家。"""
+
+
+_NOT_SENT_TYPES: dict[type[Exception], type[Exception]] = {}
+
+
+def not_sent_error(rejected: type[Exception]) -> type[Exception]:
+    """调用方报错类的「未送达」版本（同时继承 `SubmissionNotSent`），原有 `except <报错类>` 照常接得住。"""
+    if rejected not in _NOT_SENT_TYPES:
+        _NOT_SENT_TYPES[rejected] = type(f"{rejected.__name__}NotSent",
+                                         (rejected, SubmissionNotSent), {})
+    return _NOT_SENT_TYPES[rejected]
+
+
 def network_outcome(error: BaseException) -> str:
     """网络异常的提交结局。连接建立前的失败（上游肯定没收到）在这里、也只在这里分类。
 
-    2026-11-19 飙哥定 Q1-1=A：仍按未确认处理（不重发、不换家）。将来改判「未送达、可换家」只改这一个分支，
-    另加一个 outcome 取值（`VideoSubmissionAttempt.outcome` 双端同步）。
+    返回 `"not_sent"`（明确认出连接建立阶段就失败，可以换家，2026-11-19 飙哥定）或 `"unconfirmed"`
+    （其余一切，包括认不出的连接错误：默认按可能已送达处理，见 `connect_failure`）。
     """
-    from character_workflow.lib.callers.openai_image import _is_pre_flight_failure
+    from character_workflow.lib.callers.connect_failure import never_sent
 
-    if _is_pre_flight_failure(error):
-        return "unconfirmed"
-    return "unconfirmed"  # 连接建立后断开、读超时：请求可能已到上游
+    return "not_sent" if never_sent(error) else "unconfirmed"
 
 
-def is_unconfirmed(error: BaseException | None) -> bool:
-    """错误链上有没有「提交未确认」（按类型，沿 __cause__ 找）。"""
+def _in_chain(error: BaseException | None, kind: type[Exception]) -> bool:
     seen: list[BaseException] = []
     while error is not None and error not in seen:
-        if isinstance(error, SubmissionUnconfirmed):
+        if isinstance(error, kind):
             return True
         seen.append(error)
         error = error.__cause__
     return False
+
+
+def is_unconfirmed(error: BaseException | None) -> bool:
+    """错误链上有没有「提交未确认」（按类型，沿 __cause__ 找）。"""
+    return _in_chain(error, SubmissionUnconfirmed)
+
+
+def is_not_sent(error: BaseException | None) -> bool:
+    """错误链上有没有「提交未送达」（按类型，沿 __cause__ 找）。"""
+    return _in_chain(error, SubmissionNotSent)
 
 
 @dataclass
@@ -121,8 +150,13 @@ def submit_task(
     try:
         resp = requests.post(url, headers=headers, json=body, timeout=timeout, **request_kwargs)
     except requests.RequestException as error:
-        diagnostic.update(outcome=network_outcome(error), error_type=type(error).__name__,
+        diagnostic.update(error_type=type(error).__name__,
                           elapsed_ms=round((time.monotonic() - started) * 1000))
+        if network_outcome(error) == "not_sent":
+            diagnostic["not_sent"] = True  # outcome 保持 submitting，见模块说明
+            report(diagnostic)
+            raise not_sent_error(rejected)(NOT_SENT.format(noun=noun)) from error
+        diagnostic["outcome"] = "unconfirmed"
         report(diagnostic)
         raise unconfirmed(NETWORK_UNCONFIRMED.format(noun=noun)) from error
     status = resp.status_code
