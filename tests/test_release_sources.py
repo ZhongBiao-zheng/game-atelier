@@ -45,3 +45,21 @@ def test_the_desktop_shell_downloads_with_the_same_file():
     download = (REPO_ROOT / "desktop/src/download.mjs").read_text(encoding="utf-8")
     for copy in ("cnb.cool", "github.com", "releases/download", "GameAtelier-$", ".sha256'"):
         assert copy not in download, copy
+
+
+def test_cnb_is_tried_without_a_proxy_first_then_through_the_system_proxy(monkeypatch):
+    import urllib.request
+    flags = {source["id"]: source.get("direct_first", False) for source in bundle_download.RELEASE["sources"]}
+    assert flags == {"cnb": True, "github": False}
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("https_proxy", "http://127.0.0.1:9")
+    direct, system = bundle_download._routes(bundle_download.RELEASE["sources"][0])
+
+    def proxied(opener):
+        return any(isinstance(h, urllib.request.ProxyHandler) and h.proxies for h in opener.handlers)
+    assert not proxied(direct()), "the first try ignores the system proxy"
+    assert proxied(system()), "the second try goes through it"
+    assert system is urllib.request.build_opener
+    assert bundle_download._routes(bundle_download.RELEASE["sources"][1]) == [urllib.request.build_opener]
+    shell = (REPO_ROOT / "desktop/src/download.mjs").read_text(encoding="utf-8")
+    assert "source.direct_first" in shell and "source.id === 'cnb'" not in shell

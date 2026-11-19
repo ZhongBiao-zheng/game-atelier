@@ -95,37 +95,56 @@ def _tag_from_url(location: str) -> str:
     return tag[1:]
 
 
-def latest_version() -> str:
-    feed = _test_feed()
-    request = urllib.request.Request((feed + "/latest") if feed else CNB + "/latest",
-                                     headers={"User-Agent": "GameAtelier-Updater"})
-    opener = urllib.request.build_opener(_NoRedirect())
-    try:
-        try:
-            with opener.open(request, timeout=10) as response:
-                if not feed:
-                    raise ValueError("CNB 未返回版本跳转。")
-                data = json.loads(response.read(65537))
-        except urllib.error.HTTPError as error:
-            if error.code != 307:
-                raise
-            location = urllib.parse.urljoin(request.full_url, error.headers.get("Location", ""))
-            parsed = urllib.parse.urlsplit(location)
-            if not feed and (parsed.scheme != "https" or parsed.netloc != "cnb.cool"
-                             or not parsed.path.startswith("/ZhongBiao-zheng/game-atelier/-/releases/tag/")):
-                raise ValueError("CNB 版本跳转地址无效。") from None
-            return _tag_from_url(location)
-    except (OSError, ValueError):
-        if feed:
-            raise
-        with urllib.request.urlopen(urllib.request.Request(
-            GITHUB_LATEST, headers={"Accept": "application/vnd.github+json",
-                                    "User-Agent": "GameAtelier-Updater"}), timeout=10) as response:
-            data = json.loads(response.read(65537))
+def _routes(source: dict) -> list:
+    """How to reach one source, in order: without any proxy first when release_sources.json says
+    `direct_first` (CNB: a broken local proxy is the usual reason a domestic download stalls),
+    then through the system proxy. The desktop shell reads the same flag."""
+    def direct(*handlers):
+        return urllib.request.build_opener(urllib.request.ProxyHandler({}), *handlers)
+    if source.get("direct_first"):
+        return [direct, urllib.request.build_opener]
+    return [urllib.request.build_opener]
+
+
+def _release_tag(data) -> str:
     if (not isinstance(data, dict) or data.get("draft") is not False
             or data.get("prerelease") is not False or not data.get("published_at")):
         raise ValueError("更新源没有正式发布版。")
     return _tag_from_url(str(data.get("tag_name", "")))
+
+
+def _latest_from(opener, url: str, feed: str | None) -> str:
+    request = urllib.request.Request(url, headers={"User-Agent": "GameAtelier-Updater"})
+    try:
+        with opener.open(request, timeout=10) as response:
+            if not feed:
+                raise ValueError("CNB 未返回版本跳转。")
+            return _release_tag(json.loads(response.read(65537)))
+    except urllib.error.HTTPError as error:
+        if error.code != 307:
+            raise
+        location = urllib.parse.urljoin(request.full_url, error.headers.get("Location", ""))
+        parsed = urllib.parse.urlsplit(location)
+        if not feed and (parsed.scheme != "https" or parsed.netloc != "cnb.cool"
+                         or not parsed.path.startswith("/ZhongBiao-zheng/game-atelier/-/releases/tag/")):
+            raise ValueError("CNB 版本跳转地址无效。") from None
+        return _tag_from_url(location)
+
+
+def latest_version() -> str:
+    feed = _test_feed()
+    if feed:
+        return _latest_from(urllib.request.build_opener(_NoRedirect()), feed + "/latest", feed)
+    cnb = next(source for source in RELEASE["sources"] if source["id"] == "cnb")
+    for route in _routes(cnb):
+        try:
+            return _latest_from(route(_NoRedirect()), CNB + "/latest", None)
+        except (OSError, ValueError, http.client.HTTPException):
+            continue
+    with urllib.request.urlopen(urllib.request.Request(
+        GITHUB_LATEST, headers={"Accept": "application/vnd.github+json",
+                                "User-Agent": "GameAtelier-Updater"}), timeout=10) as response:
+        return _release_tag(json.loads(response.read(65537)))
 
 
 def _member_path(name: str) -> PurePosixPath:
@@ -254,18 +273,20 @@ class BundleDownloader:
         archive = self.updates / filename
         part = archive.with_name(filename + ".part")
         feed = _test_feed()
-        sources = [feed] if feed else SOURCES
-        for base in sources:
+        attempts = ([(feed, urllib.request.build_opener)] if feed else
+                    [(source["base"], route) for source in RELEASE["sources"] for route in _routes(source)])
+        for base, route in attempts:
+            opener = route()
             try:
                 url = asset_url(base, version, filename)
-                with urllib.request.urlopen(url + RELEASE["checksum_suffix"], timeout=15) as response:
+                with opener.open(url + RELEASE["checksum_suffix"], timeout=15) as response:
                     checksum = response.read(1025).decode("ascii").split()
                 if not checksum or not re.fullmatch(r"[a-fA-F0-9]{64}", checksum[0]):
                     raise ValueError("安装包校验文件无效。")
                 digest = hashlib.sha256()
                 size = 0
                 deadline = time.monotonic() + 15 * 60
-                with urllib.request.urlopen(url, timeout=15) as response, part.open("wb") as output:
+                with opener.open(url, timeout=15) as response, part.open("wb") as output:
                     if int(response.headers.get("Content-Length", 0)) > MAX_ARCHIVE:
                         raise ValueError("安装包大小超出限制。")
                     while chunk := response.read(1024 * 1024):
