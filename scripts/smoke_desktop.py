@@ -25,7 +25,8 @@ import tempfile
 import time
 
 SESSION_OK = '"POST /api/connection/local-session HTTP/1.1" 200'
-ELECTRON_START = 'launcher ["--desktop-start"] -> 0'
+DESKTOP_START = re.compile(r'launcher \["--desktop-start"\] -> (-?\d+)')
+SHELL_STARTED = "started { port: "
 PROBE_OK = "security probe: ok"
 
 
@@ -67,6 +68,23 @@ def _since(path: Path, offset: int) -> str:
         return handle.read().decode("utf-8", errors="replace")
 
 
+def _start_problems(shell: str) -> list[str]:
+    """The shell starts the server with `--desktop-start` and ends up with a verified server.
+    The launcher stops waiting for verification after 8 s and exits 1; on a slow machine (first
+    start after a runtime replacement) the shell then waits on the server record itself
+    (docs/contracts/desktop-shell.md). So the launcher's exit code alone is not the verdict: what
+    must follow the last call is the shell's `started` line."""
+    calls = list(DESKTOP_START.finditer(shell))
+    if not calls:
+        return ["the shell did not start the server through --desktop-start"]
+    last = calls[-1]
+    if SHELL_STARTED not in shell[last.end():]:
+        return [f"--desktop-start exited {last[1]} and the shell never verified a server"]
+    if last[1] != "0":
+        print(f"note: --desktop-start exited {last[1]}; the shell verified the server from its record")
+    return []
+
+
 def _electron_run(executable: Path, env: dict[str, str], timeout: int, runtime_parent: Path,
                   data_runtime: Path, *, replacement: str | None) -> list[str]:
     """One launch: page session, security probe, quit stops the server, and the expected
@@ -80,8 +98,7 @@ def _electron_run(executable: Path, env: dict[str, str], timeout: int, runtime_p
         problems.append("the page never established a local session")
     if (data_runtime / "server.pid").exists():
         problems.append("server records remain after quit")
-    if ELECTRON_START not in shell:
-        problems.append("the shell did not start the server through --desktop-start")
+    problems += _start_problems(shell)
     if PROBE_OK not in shell:
         problems.append("the security probe did not pass")
     if "title bar overlay=true" not in shell:
