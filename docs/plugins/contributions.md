@@ -44,6 +44,8 @@
 
 `create_node`：在图片右侧新建该类型的插件节点，并从图片连一条输入连线；`open_panel` 为真时，本项目批准通过后自动打开编辑面板。目标节点类型的 `input_modalities` 必须包含 `image`，否则清单无效。另一种 `open_panel` 动作已在清单 schema 里定义，宿主尚未实现。
 
+`host_call`（只有宿主插件可用，ADR-0041）：`{ "kind": "host_call" }`，不建节点，点击后宿主加载插件分块，把这张图片节点交给分块里 `imageActions[<动作 id>]`。插件分块提供 `busy` 时，处理期间按钮置灰。沙箱插件声明它、或在其他工具栏声明它，清单无效。
+
 ## 视频工具栏动作 `contributes.video_actions[]`
 
 形状与 `image_actions[]` 相同：
@@ -65,6 +67,16 @@
 ```
 
 文本为空时按钮置灰。沙箱插件的 `create_node` 在文本右侧建节点并从文本连线，目标节点类型的 `input_modalities` 必须包含 `text`；宿主插件不连线，来源节点交给插件代码处理。插件关闭时按钮不出现。
+
+## 画布入口 `contributes.canvas_actions[]`
+
+只有宿主插件可用（ADR-0041），动作只能是 `host_call`：
+
+```json
+{ "id": "import_merged", "label": "从 Photoshop 取图", "icon": "photoshop", "action": { "kind": "host_call" } }
+```
+
+出现在画布左侧「添加节点」菜单里，排在插件节点之后，副标题是插件的一句话说明。点击后关闭菜单，宿主加载插件分块，调用 `canvasActions[<动作 id>](api, 落点)`；落点是当前视口中心的画布坐标。插件分块提供 `busy` 时，处理期间置灰并提示「正在处理上一个请求」。最多 8 项，id 不能重复；插件关闭时不出现。
 
 ## 服务端路由 `contributes.server`
 

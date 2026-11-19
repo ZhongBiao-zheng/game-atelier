@@ -1,7 +1,7 @@
 import { SetPromptPreviewDialog, type PromptPreviewRequest } from '@/components/assets/SetPromptPreviewDialog';
 import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
 import { pluginInputsFromDocument } from '@/plugin-host/inputs';
-import type { PluginMediaAction, PluginNodeContribution, PluginPackageLock } from '@/schema/plugins';
+import type { PluginCanvasAction, PluginMediaAction, PluginNodeContribution, PluginPackageLock } from '@/schema/plugins';
 import { requestPluginPanel } from '@/plugin-host/panelRequests';
 import { pluginIcon } from '@/components/ui/icons';
 import { canvasPromptPreviewSource } from '@/lib/promptPreviewSource';
@@ -32,7 +32,7 @@ import {
   useStoreApi,
 } from '@xyflow/react';
 import { AddIcon, AiIcon, AudioFileIcon, MusicFileIcon, BackIcon, BlankIcon, ChevronDownIcon, CloseIcon, CompareIcon, CopyIcon, DeleteIcon, DotGridIcon, DownloadIcon, EditIcon, ExpandIcon, GridIcon, HelpIcon, HideIcon, ImageFileIcon, InfoIcon, LayersIcon, LibraryIcon, LoadingIcon, MinimapIcon, MinusIcon, MoreIcon, ParamsIcon, SelectIcon, SettingsIcon, ShowIcon, TextIcon, UploadIcon, VideoFileIcon } from '@/components/ui/icons';
-import { currentHostNodeType, loadHostPlugin, useHostPlugins, type HostPluginApi } from '@/plugin-host/hostPlugins';
+import { currentHostNodeType, isHostPluginId, loadHostPlugin, useHostPlugins, type HostPluginApi } from '@/plugin-host/hostPlugins';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { Link, useLocation } from 'wouter';
 
@@ -75,6 +75,7 @@ import { canvasEdgeTypes } from '@/components/canvas/CanvasConnectionEdge';
 import { CanvasConnectionLine, CanvasPendingConnection } from '@/components/canvas/CanvasConnectionLine';
 import {
   AddMenuButton,
+  PluginCanvasActionItems,
   CanvasMobileGenerationPanel,
   CanvasNodeContext,
   EditorMessage,
@@ -4684,6 +4685,12 @@ function CanvasEditorInner({
   createPluginNodeFromMediaHandler.current = (node, plugin, action) => {
     const current = latestDocument.current;
     const target = action.action;
+    if (target.kind === 'host_call') {
+      // 调用型动作（ADR-0041）：不建节点，把来源节点交给宿主插件分块里同 id 的处理函数。
+      if (plugin.runtime !== 'host' || !isHostPluginId(plugin.id)) return;
+      void loadHostPlugin(plugin.id).then(module => module?.imageActions?.[action.id]?.(node, hostPluginApi));
+      return;
+    }
     const contribution = target.kind === 'create_node'
       ? plugin.contributes.nodes.find(item => item.type === target.node_type) : undefined;
     if (!current || !contribution || target.kind !== 'create_node') return;
@@ -4781,6 +4788,7 @@ function CanvasEditorInner({
     projectId, findNode, listNodes, resolveVersion, updateNode, reportError,
     recordHistory: recordHistorySnapshot, selectNode: selectOnlyNode,
     clearError: () => setError(null),
+    announce: message => announceToolNotice(message),
     savePendingEdits: () => hostPluginLatest.current.savePendingEdits(),
     lastRunFailed: nodeId => hostPluginLatest.current.jobsByResultNodeId.get(nodeId)?.some(job => job.status === 'failed') ?? false,
     currentDocument: () => latestDocument.current,
@@ -4797,7 +4805,13 @@ function CanvasEditorInner({
     providers: () => hostPluginLatest.current.providers,
     generationDefault: slot => hostPluginLatest.current.defaults[slot],
     newId: makeId,
-  }), [projectId, findNode, listNodes, resolveVersion, updateNode, reportError, recordHistorySnapshot, selectOnlyNode]);
+  }), [projectId, findNode, listNodes, resolveVersion, updateNode, reportError, recordHistorySnapshot, selectOnlyNode, announceToolNotice]);
+  const runPluginCanvasAction = (plugin: PluginPackageLock, action: PluginCanvasAction) => {
+    setAddOpen(false);
+    if (plugin.runtime !== 'host' || !isHostPluginId(plugin.id)) return;
+    const position = defaultPosition();
+    void loadHostPlugin(plugin.id).then(module => module?.canvasActions?.[action.id]?.(hostPluginApi, position));
+  };
 
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
     projectCategories, resolveFinalCategory, finalizationRevision, finalizeNode, saveCategories,
@@ -5536,6 +5550,7 @@ function CanvasEditorInner({
               <p className="px-2 pb-2 pt-1 text-xs text-muted-foreground">添加节点</p>
               <CanvasCreateMenuItems allowEmptyNodes allowUpload onAddCompare={() => addCompareNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null, 'speech')} onAddMusic={() => addGenerationNode('audio', null, 'music')} onUpload={() => uploadRef.current?.click()} />
               <PluginCreateMenuItems onAdd={addPluginNode} />
+              <PluginCanvasActionItems hostPlugins={hostPlugins} onRun={runPluginCanvasAction} />
             </div>
           )}
           </div>

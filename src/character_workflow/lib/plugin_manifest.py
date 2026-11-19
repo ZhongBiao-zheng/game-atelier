@@ -85,13 +85,29 @@ class PluginOpenPanelAction(_Model):
     panel: Annotated[str, StringConstraints(pattern=_NAME)]
 
 
+class PluginHostCallAction(_Model):
+    """只有宿主插件可用（ADR-0041）：点击后把来源节点（画布入口为落点）交给插件分块里同 id 的处理函数。"""
+
+    kind: Literal["host_call"]
+
+
 class PluginMediaAction(_Model):
     """图片 / 视频节点工具栏「更多」或文本节点工具栏里的一项；按钮由宿主按清单画，点击前不运行插件代码。"""
 
     id: Annotated[str, StringConstraints(pattern=_NAME)]
     label: str = Field(min_length=1, max_length=20)
     icon: IconName
-    action: Annotated[PluginCreateNodeAction | PluginOpenPanelAction, Field(discriminator="kind")]
+    action: Annotated[PluginCreateNodeAction | PluginOpenPanelAction | PluginHostCallAction,
+                      Field(discriminator="kind")]
+
+
+class PluginCanvasAction(_Model):
+    """画布添加菜单里的一项（ADR-0041），只有宿主插件可用，动作只能是 host_call。"""
+
+    id: Annotated[str, StringConstraints(pattern=_NAME)]
+    label: str = Field(min_length=1, max_length=20)
+    icon: IconName
+    action: PluginHostCallAction
 
 
 class PluginServerRoute(_Model):
@@ -120,6 +136,7 @@ class PluginContributes(_Model):
     image_actions: list[PluginMediaAction] = Field(default_factory=list, max_length=16)
     video_actions: list[PluginMediaAction] = Field(default_factory=list, max_length=16)
     text_actions: list[PluginMediaAction] = Field(default_factory=list, max_length=16)
+    canvas_actions: list[PluginCanvasAction] = Field(default_factory=list, max_length=8)
     server: PluginServerContribution | None = None
     agent_tools: list[PluginAgentTool] = Field(default_factory=list, max_length=32)
 
@@ -168,6 +185,9 @@ class PluginManifest(_Model):
             if len(set(action_ids)) != len(action_ids):
                 raise ValueError(f"plugin {kind} action ids must be unique")
             for action in actions:
+                if action.action.kind == "host_call" and (not host or kind != "image"):
+                    # 宿主目前只在图片工具栏实现 host_call（ADR-0041），其余工具栏不接受，免得按钮点了没反应。
+                    raise ValueError(f"{kind} action {action.id}: host_call is only for host plugin image actions")
                 if action.action.kind != "create_node":
                     continue
                 target = nodes.get(action.action.node_type)
@@ -177,6 +197,11 @@ class PluginManifest(_Model):
                 # 宿主插件不连线：来源节点交给插件代码处理（分镜把剧本来源记进 payload）。
                 if not host and kind not in target.input_modalities:
                     raise ValueError(f"{kind} action {action.id} targets a node that does not accept {kind}")
+        canvas_ids = [action.id for action in contributes.canvas_actions]
+        if len(set(canvas_ids)) != len(canvas_ids):
+            raise ValueError("plugin canvas action ids must be unique")
+        if contributes.canvas_actions and not host:
+            raise ValueError("canvas actions are only for host plugins")
         declared = contributes.server.routes if contributes.server else []
         routes = {(route.method, route.path) for route in declared}
         if len(routes) != len(declared):

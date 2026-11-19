@@ -1060,6 +1060,7 @@ function hostApi(): HostPluginApi {
   return {
     projectId: 'canvas-test', findNode: () => undefined, listNodes: () => [], resolveVersion: () => undefined,
     updateNode: vi.fn(), recordHistory: vi.fn(), selectNode: vi.fn(), reportError: vi.fn(), clearError: vi.fn(),
+    announce: vi.fn(),
     savePendingEdits: vi.fn(async () => undefined), lastRunFailed: () => false, currentDocument: () => null,
     commitDocument: vi.fn(), submitRun: vi.fn(async () => ({ status: 'error' as const })),
     waitForDocument: vi.fn(async () => true), providers: () => [], generationDefault: () => undefined,
@@ -1135,5 +1136,70 @@ it('offers 拆分镜 on a text node only while the storyboard plugin is enabled'
   second.unmount();
   render(view('   '));
   expect(screen.getByRole('button', { name: '用 文本 拆分镜' })).toBeDisabled();
+  act(() => setPluginsSnapshot([]));
+});
+
+it('hands a host plugin image action to the plugin and greys it out while the plugin is busy', async () => {
+  // 白名单里的宿主插件（此处借 storyboard 的 id）声明 host_call：点了不建节点，交给画布的插件动作入口。
+  const base = storyboardLock as unknown as PluginPackageLock;
+  const plugin: PluginPackageLock = {
+    ...base,
+    contributes: { ...base.contributes, image_actions: [{ id: 'send', label: '发到外部', icon: 'grid', action: { kind: 'host_call' } }] },
+  };
+  const image = { ...nodes[1], data: { ...nodes[1].data, current_version_id: 'version-image' } } as CanvasNode;
+  let busy = false;
+  const listeners = new Set<() => void>();
+  const module = {
+    nodeTypes: {},
+    busy: { get: () => busy, subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; } },
+  };
+  const createPluginNodeFromMedia = vi.fn();
+  const context = nodeContext({
+    createPluginNodeFromMedia,
+    hostPlugins: new Map([[plugin.id, module]]),
+    resolveVersion: versionResolver({
+      'version-image': {
+        version_id: 'version-image', kind: 'image', created_at: '2026-08-25T00:00:00Z', sha256: 'a'.repeat(64),
+        origin: { kind: 'upload', upload_id: 'upload-image' }, path: 'uploads/upload-image.png',
+        mime_type: 'image/png', bytes: 42, width: 64, height: 64,
+      },
+    }),
+  });
+  setPluginsSnapshot([{ id: plugin.id, availability: 'ok', reason: null, enabled: true, manifest: plugin }]);
+  render(<CanvasNodeContext.Provider value={context}><NodeCard data={{ domain: image }} selected /></CanvasNodeContext.Provider>);
+
+  fireEvent.keyDown(screen.getByRole('button', { name: '图片 的更多工具' }), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: '发到外部' }));
+  expect(createPluginNodeFromMedia).toHaveBeenCalledWith(image, plugin, plugin.contributes.image_actions[0]);
+
+  act(() => { busy = true; listeners.forEach(listener => listener()); });
+  fireEvent.keyDown(screen.getByRole('button', { name: '图片 的更多工具' }), { key: 'Enter' });
+  expect(await screen.findByRole('menuitem', { name: '发到外部' })).toHaveAttribute('aria-disabled', 'true');
+  act(() => setPluginsSnapshot([]));
+});
+
+it('ignores host_call image actions from plugins outside the host allowlist', async () => {
+  const base = spriteLock as unknown as PluginPackageLock;
+  const plugin: PluginPackageLock = {
+    ...base,
+    runtime: 'host',
+    contributes: { ...base.contributes, image_actions: [{ id: 'send', label: '冒充宿主', icon: 'grid', action: { kind: 'host_call' } }] },
+  };
+  const image = { ...nodes[1], data: { ...nodes[1].data, current_version_id: 'version-image' } } as CanvasNode;
+  const context = nodeContext({
+    createPluginNodeFromMedia: vi.fn(),
+    resolveVersion: versionResolver({
+      'version-image': {
+        version_id: 'version-image', kind: 'image', created_at: '2026-08-25T00:00:00Z', sha256: 'a'.repeat(64),
+        origin: { kind: 'upload', upload_id: 'upload-image' }, path: 'uploads/upload-image.png',
+        mime_type: 'image/png', bytes: 42, width: 64, height: 64,
+      },
+    }),
+  });
+  setPluginsSnapshot([{ id: plugin.id, availability: 'ok', reason: null, enabled: true, manifest: plugin }]);
+  render(<CanvasNodeContext.Provider value={context}><NodeCard data={{ domain: image }} selected /></CanvasNodeContext.Provider>);
+  fireEvent.keyDown(screen.getByRole('button', { name: '图片 的更多工具' }), { key: 'Enter' });
+  await screen.findByRole('menuitem', { name: 'AI高清 图片' });
+  expect(screen.queryByRole('menuitem', { name: '冒充宿主' })).toBeNull();
   act(() => setPluginsSnapshot([]));
 });

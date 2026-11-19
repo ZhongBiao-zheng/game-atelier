@@ -24,9 +24,13 @@ export interface PluginNodeContribution {
   expand_result_stack: boolean;
 }
 
+/** host_call 只有宿主插件可用、目前只在图片工具栏与画布入口实现：点击后交给插件分块里同 id 的处理函数（ADR-0041）。 */
+export interface PluginHostCallTarget { kind: 'host_call' }
+
 export type PluginMediaActionTarget =
   | { kind: 'create_node'; node_type: string; open_panel: boolean }
-  | { kind: 'open_panel'; panel: string };
+  | { kind: 'open_panel'; panel: string }
+  | PluginHostCallTarget;
 
 /** 图片 / 视频节点工具栏「更多」里的一项（清单 image_actions / video_actions）。 */
 export interface PluginMediaAction {
@@ -34,6 +38,14 @@ export interface PluginMediaAction {
   label: string;
   icon: string;
   action: PluginMediaActionTarget;
+}
+
+/** 画布添加菜单里的一项（清单 canvas_actions，只有宿主插件可用）。 */
+export interface PluginCanvasAction {
+  id: string;
+  label: string;
+  icon: string;
+  action: PluginHostCallTarget;
 }
 
 export interface PluginServerRoute {
@@ -84,6 +96,7 @@ export interface PluginPackageLock {
     video_actions: PluginMediaAction[];
     /** 文本节点工具栏上的按钮。 */
     text_actions?: PluginMediaAction[];
+    canvas_actions?: PluginCanvasAction[];
     server: { module: 'server'; routes: PluginServerRoute[] } | null;
     agent_tools: PluginAgentTool[];
   };

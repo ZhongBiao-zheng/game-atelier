@@ -8,7 +8,8 @@ import { useEffect, useMemo, useSyncExternalStore, type ComponentType } from 're
 
 import type { KeyView } from '@/api/keys';
 import type {
-  CanvasContentVersion, CanvasDocument, CanvasGenerationDefault, CanvasGenerationSlot, CanvasNode, CanvasPluginNode, JsonValue,
+  CanvasContentNode, CanvasContentVersion, CanvasDocument, CanvasGenerationDefault, CanvasGenerationSlot, CanvasNode,
+  CanvasPluginNode, JsonValue,
 } from '@/schema/canvas';
 
 import { enabledPlugins, usePlugins } from './registry';
@@ -30,6 +31,8 @@ export interface HostPluginApi {
   selectNode: (id: string) => void;
   reportError: (message: string) => void;
   clearError: () => void;
+  /** 画布顶部的一行提示（几秒后消失），用于操作成功等不需要用户处理的结果。 */
+  announce: (message: string) => void;
   /** 把页面上还没保存的编辑落盘（服务端只读已保存的文档）。 */
   savePendingEdits: () => Promise<void>;
   lastRunFailed: (nodeId: string) => boolean;
@@ -72,8 +75,27 @@ export interface HostPluginNodeType {
   textContent?: boolean;
 }
 
+/** host_call 动作正在处理时为 true：宿主把这个插件的入口置灰，避免重复提交（ADR-0041）。 */
+export interface HostPluginBusy {
+  subscribe: (listener: () => void) => () => void;
+  get: () => boolean;
+}
+
 export interface HostPluginModule {
   nodeTypes: Readonly<Record<string, HostPluginNodeType>>;
+  /** 清单 image_actions 里 host_call 动作的处理函数，按动作 id 登记。 */
+  imageActions?: Readonly<Record<string, (node: CanvasContentNode, api: HostPluginApi) => void>>;
+  /** 清单 canvas_actions 的处理函数；position 是画布坐标里的建议落点。 */
+  canvasActions?: Readonly<Record<string, (api: HostPluginApi, position: { x: number; y: number }) => void>>;
+  busy?: HostPluginBusy;
+}
+
+const noBusySubscription = () => () => undefined;
+const notBusy = () => false;
+
+/** 宿主插件是否有 host_call 动作在处理中；插件没加载或不提供时为 false。 */
+export function useHostPluginBusy(module: HostPluginModule | null | undefined): boolean {
+  return useSyncExternalStore(module?.busy?.subscribe ?? noBusySubscription, module?.busy?.get ?? notBusy);
 }
 
 const LOADERS: Readonly<Record<string, () => Promise<HostPluginModule>>> = {

@@ -6,7 +6,7 @@
 |---|---|---|
 | 单个节点的数据 | 画布文档里节点的 `data.payload`（≤ 256 KiB） | 项目：随画布保存、撤销、复制、导出 |
 | 插件产出的图片与文本 | 画布上的普通节点（`create_image` / `create_text`） | 项目：与插件无关的普通内容 |
-| 项目级插件状态 | `canvases/<project>/plugins/<id>/state.json`（≤ 1 MiB） | 项目；已在项目包里，接口尚未开放 |
+| 项目级插件状态 | `canvases/<project>/plugins/<id>/state.json`（≤ 1 MiB） | 项目；已在项目包里。宿主插件经服务端 `ctx.read_state()` / `ctx.update_state()` 读写（ADR-0041），沙箱插件的接口尚未开放 |
 | 应用级启用状态 | `<data_root>/.config/plugins.json` | 本机 |
 | 项目批准 | `canvases/<project>/plugin-grants.json` | 本机，不进项目包 |
 

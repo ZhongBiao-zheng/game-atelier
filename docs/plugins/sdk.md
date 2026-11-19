@@ -64,7 +64,7 @@ const off = client.on('node.changed', () => {});  // 也有 'inputs.changed'、'
 | `node.write_self` | `node.writeSelf` |
 | `resource.read_inputs` | `inputs.list`、`inputs.read*`：读到连给本节点的素材完整内容 |
 | `resource.create` | 服务端模块新建画布节点（`create_image`、`create_text`） |
-| `storage.project` | 项目级插件状态（已定义，宿主尚未开放接口） |
+| `storage.project` | 项目级插件状态（已定义，沙箱插件的接口尚未开放；宿主插件见 ADR-0041） |
 | `server.call` | `server.call` |
 | `generation.draft` | 服务端模块用 `ctx.create_generation_draft` 在画布上新建生成节点并填好草稿（不运行，用户点生成才计费） |
 

@@ -1,8 +1,10 @@
 import { AnnotationFullscreen } from './annotation/AnnotationFullscreen';
 import { PluginNodeBody, type PluginNodeInput } from '@/plugin-host/PluginNodeBody';
 import { enabledPlugins, usePlugins } from '@/plugin-host/registry';
-import { hostNodeType, type HostPluginApi, type HostPluginModule } from '@/plugin-host/hostPlugins';
-import type { PluginMediaAction, PluginPackageLock } from '@/schema/plugins';
+import {
+  hostNodeType, isHostPluginId, useHostPluginBusy, type HostPluginApi, type HostPluginModule,
+} from '@/plugin-host/hostPlugins';
+import type { PluginCanvasAction, PluginMediaAction, PluginPackageLock } from '@/schema/plugins';
 import { pluginIcon } from '@/components/ui/icons';
 import { useAnnotationEditor } from './annotation/useAnnotationEditor';
 import { AnnotationToolbar } from './annotation/AnnotationToolbar';
@@ -28,7 +30,8 @@ import { AddIcon, AddImageIcon, AiIcon, AudioFileIcon, BrushIcon, ChatIcon, Chec
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
   useRef, useState,
-  type FocusEvent as ReactFocusEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject,
+  type ComponentType, type FocusEvent as ReactFocusEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref,
+  type RefObject,
 } from 'react';
 import { Reorder } from 'motion/react';
 import { gsap, MOTION_DURATION, MOTION_STAGGER, prefersReducedMotion, useAnimateOnChange, useGSAP } from '@/lib/motion';
@@ -1873,8 +1876,10 @@ function ImageNodeToolbar({
 }) {
   // 已启用插件在清单里声明的图片动作：按钮是宿主按清单画的，点之前不运行插件代码。
   const plugins = usePlugins();
+  // host_call（ADR-0041）只认白名单里的宿主插件：点了交给插件分块，不建节点。
   const pluginImageActions = useMemo(() => enabledPlugins(plugins).flatMap(plugin => (
-    plugin.contributes.image_actions.filter(action => action.action.kind === 'create_node')
+    plugin.contributes.image_actions.filter(action => action.action.kind === 'create_node'
+      || (action.action.kind === 'host_call' && plugin.runtime === 'host' && isHostPluginId(plugin.id)))
       .map(action => ({ plugin, action, Icon: pluginIcon(action.icon) }))
   )), [plugins]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -2155,10 +2160,9 @@ function ImageNodeToolbar({
           {content?.kind === 'image' && context.createPluginNodeFromMedia && pluginImageActions.length > 0 && <>
             <DropdownMenuSeparator />
             {pluginImageActions.map(({ plugin, action, Icon }) => (
-              <DropdownMenuItem key={`${plugin.id}:${action.id}`} className="gap-2"
-                onSelect={() => context.createPluginNodeFromMedia?.(node, plugin, action)}>
-                <Icon />{action.label}
-              </DropdownMenuItem>
+              <PluginImageActionItem key={`${plugin.id}:${action.id}`} label={action.label} Icon={Icon}
+                module={context.hostPlugins?.get(plugin.id)}
+                onSelect={() => context.createPluginNodeFromMedia?.(node, plugin, action)} />
             ))}
           </>}
           <DropdownMenuSeparator />
@@ -3379,6 +3383,43 @@ function MediaToolLink({ label, text, href, children }: {
       {text && <span className="text-xs">{text}</span>}
     </a></Hint>
   );
+}
+
+/** 宿主插件在添加菜单里的调用型入口（清单 canvas_actions，ADR-0041）；插件关闭时不出现。 */
+export function PluginCanvasActionItems({ hostPlugins, onRun }: {
+  hostPlugins: ReadonlyMap<string, HostPluginModule>;
+  onRun: (plugin: PluginPackageLock, action: PluginCanvasAction) => void;
+}) {
+  const plugins = usePlugins();
+  return <>
+    {enabledPlugins(plugins)
+      .filter(plugin => plugin.runtime === 'host' && isHostPluginId(plugin.id) && (plugin.contributes.canvas_actions ?? []).length > 0)
+      .map(plugin => <PluginCanvasActionGroup key={plugin.id} plugin={plugin} module={hostPlugins.get(plugin.id)} onRun={onRun} />)}
+  </>;
+}
+
+function PluginCanvasActionGroup({ plugin, module, onRun }: {
+  plugin: PluginPackageLock;
+  module: HostPluginModule | undefined;
+  onRun: (plugin: PluginPackageLock, action: PluginCanvasAction) => void;
+}) {
+  const busy = useHostPluginBusy(module);
+  return <>
+    {(plugin.contributes.canvas_actions ?? []).map(action => {
+      const Icon = pluginIcon(action.icon);
+      return <AddMenuButton key={`${plugin.id}:${action.id}`} icon={<Icon />} title={action.label}
+        description={plugin.description} disabledReason={busy ? '正在处理上一个请求' : undefined}
+        onClick={() => onRun(plugin, action)} />;
+    })}
+  </>;
+}
+
+/** 图片「更多」菜单里的插件动作；宿主插件的调用型动作在处理中时置灰。 */
+function PluginImageActionItem({ label, Icon, module, onSelect }: {
+  label: string; Icon: ComponentType; module: HostPluginModule | undefined; onSelect: () => void;
+}) {
+  const busy = useHostPluginBusy(module);
+  return <DropdownMenuItem className="gap-2" disabled={busy} onSelect={onSelect}><Icon />{label}</DropdownMenuItem>;
 }
 
 export function AddMenuButton({ icon, title, description, onClick, disabledReason }: { icon: React.ReactNode; title: string; description?: string; onClick: () => void; disabledReason?: string }) {

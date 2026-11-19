@@ -37,16 +37,19 @@ def register(api) -> None:
 
 | 成员 | 说明 |
 |---|---|
-| `ctx.origin` | `"surface"`（插件界面经宿主发起）或 `"agent"`（内置 Agent 调用） |
+| `ctx.origin` | `"surface"`（插件界面经宿主发起）、`"agent"`（内置 Agent 调用）或 `"host"`（宿主插件的界面发起，ADR-0039） |
 | `ctx.plugin_id`、`ctx.project_id`、`ctx.node_id` | 当前插件、项目、节点（Agent 调用时 `node_id` 为空） |
 | `ctx.capabilities` | 本项目批准的能力 |
 | `ctx.inputs` | 界面带来的、已核对的素材：`kind`（`image` / `video` / `audio`）、`node_id`、`version_id`、`title`、`path`、`width`、`height`、`duration_ms`（可能为空）。`path` 只在服务端使用，不要回传给界面 |
-| `ctx.media_of_node(node_id, kinds)` | 按节点 id 取素材，只认 `kinds` 里的类型，只在 Agent 调用时可用 |
+| `ctx.media_of_node(node_id, kinds)` | 按节点 id 取素材，只认 `kinds` 里的类型；Agent 调用与宿主插件（ADR-0041）可用，沙箱界面不可用 |
 | `ctx.image_of_node(node_id)` | 等于 `media_of_node(node_id, ("image",))` |
 | `ctx.create_image(png_bytes, title, beside_node_id=None)` | 把 PNG 落成画布上的普通图片节点，需要 `resource.create`，返回 `{node_id}` |
 | `ctx.create_generation_draft(prompt, first_node_id, last_node_id, title="首尾帧补间")` | 新建一个视频生成节点：首帧、尾帧槽分别连好，草稿填好提示词与参数，**不运行**；需要 `generation.draft`。模型取用户的默认视频模型（能做首尾帧时），否则按供应商顺序取第一个能做首尾帧的（Seedance、可灵）；时长与分辨率取最低档，Seedance 显式关水印。没有可用模型时报「没有可用的首尾帧视频模型」。界面发起时首尾帧必须是连到本节点的图片。返回 `{node_id, model, alias, duration, …}` |
 | `ctx.create_text(text, title, beside_node_id=None)` | 落成普通文本节点（正文 ≤ 40000 字符），需要 `resource.create` |
+| `ctx.read_state()` / `ctx.update_state(change)` | 只给宿主插件（ADR-0041）：读本插件在本项目的状态（`state.json` 的 `data`，没有时为 `None`）；`update_state` 持画布项目锁读-改-写，`change(旧值)` 返回新值，超过 1 MiB 报 413、文件读不出报 500（不当成空状态） |
 | `ctx.create_image_group(pngs, title, beside_node_id=None)` | 把 1–65 张 PNG 一次提交落成一个结果组（封面 + 成员，与生成出多张时的结果组相同：可收起、成员是普通图片节点），需要 `resource.create`，返回 `{node_id, member_node_ids}`。单张 ≤ 64 MiB、合计 ≤ 256 MiB |
+
+宿主插件的代码与宿主同源可信，`create_*` 不检查 `resource.create`（宿主插件没有项目批准）。
 
 新建的节点放在 `beside_node_id`（默认当前节点）旁边；画布正在自动保存时会重读重试，最多三次。
 

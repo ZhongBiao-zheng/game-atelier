@@ -80,10 +80,15 @@ class PluginRequest:
     node_id: str | None = None
     inputs: list[PluginMedia] = field(default_factory=list)
     created_node_ids: list[str] = field(default_factory=list)
+    plugin_version: str = ""
+
+    def _allows(self, capability: str) -> bool:
+        # 宿主插件的代码与宿主同源可信（ADR-0039 / ADR-0041），不经项目批准。
+        return self.origin == "host" or capability in self.capabilities
 
     def media_of_node(self, node_id: str, kinds: tuple[str, ...] = ("image",)) -> PluginMedia:
-        """按节点 id 取素材，只认 `kinds` 里的类型。只给 Agent 用：界面只能用 `inputs`。"""
-        if self.origin != "agent":
+        """按节点 id 取素材，只认 `kinds` 里的类型。给 Agent 与宿主插件用：沙箱界面只能用 `inputs`。"""
+        if self.origin not in ("agent", "host"):
             raise PluginError("CAPABILITY_DENIED", "界面只能读取连到本节点的素材", status=403)
         from character_workflow.lib.canvas_projects import read_canvas_document
         document = read_canvas_document(self.project_id)
@@ -98,7 +103,7 @@ class PluginRequest:
 
     def create_image(self, png: bytes, title: str, beside_node_id: str | None = None) -> dict:
         """把结果落成画布上的一个普通图片节点，返回 `{node_id}`。"""
-        if "resource.create" not in self.capabilities:
+        if not self._allows("resource.create"):
             raise PluginError("CAPABILITY_DENIED", "本项目没有允许这项能力", status=403)
         if len(png) > MAX_IMAGE_BYTES:
             raise PluginError("PAYLOAD_TOO_LARGE", "图片过大", status=413)
@@ -108,7 +113,7 @@ class PluginRequest:
 
     def create_image_group(self, pngs: list[bytes], title: str, beside_node_id: str | None = None) -> dict:
         """把多张 PNG 落成一个结果组（封面 + 成员，一次提交），返回 `{node_id, member_node_ids}`。"""
-        if "resource.create" not in self.capabilities:
+        if not self._allows("resource.create"):
             raise PluginError("CAPABILITY_DENIED", "本项目没有允许这项能力", status=403)
         if not pngs:
             raise PluginError("BAD_REQUEST", "没有可输出的图片", status=422)
@@ -148,11 +153,83 @@ class PluginRequest:
 
     def create_text(self, text: str, title: str, beside_node_id: str | None = None) -> dict:
         """把一段文本落成画布上的普通文本节点，返回 `{node_id}`。"""
-        if "resource.create" not in self.capabilities:
+        if not self._allows("resource.create"):
             raise PluginError("CAPABILITY_DENIED", "本项目没有允许这项能力", status=403)
         node_id = _create_text_node(self.project_id, text, title, beside_node_id or self.node_id)
         self.created_node_ids.append(node_id)
         return {"node_id": node_id}
+
+
+    def read_state(self) -> Any:
+        """本项目里本插件的项目级状态（`canvases/<project>/plugins/<id>/state.json` 的 `data`），没有时为 None。
+
+        只给宿主插件（ADR-0041）；沙箱插件的 `storage.project` 仍未开放。
+        """
+        self._require_host_state()
+        state = _read_plugin_state(self.project_id, self.plugin_id)
+        return state.data if state is not None else None
+
+    def update_state(self, change: Callable[[Any], Any]) -> Any:
+        """读-改-写本插件的项目级状态：`change(旧 data 或 None)` 返回新 data（≤ 1 MiB），持画布项目锁完成。"""
+        self._require_host_state()
+        return _update_plugin_state(self.project_id, self.plugin_id, self.plugin_version, change)
+
+    def _require_host_state(self) -> None:
+        if self.origin != "host":
+            raise PluginError("CAPABILITY_DENIED", "只有宿主插件可以读写项目状态", status=403)
+
+
+def _plugin_state_path(project_id: str, plugin_id: str) -> Path:
+    from character_workflow.lib.canvas_projects import canvas_project_dir
+    try:
+        return canvas_project_dir(project_id) / "plugins" / plugin_id / "state.json"
+    except KeyError:
+        raise PluginError("NOT_FOUND", "找不到这个画布项目（可能已被删除）", status=404) from None
+
+
+def _read_plugin_state(project_id: str, plugin_id: str):
+    from pydantic import ValidationError
+
+    from character_workflow.lib.atomic_io import read_text_with_retry
+    from character_workflow.lib.schemas import CanvasPluginState
+    path = _plugin_state_path(project_id, plugin_id)
+    try:
+        text = read_text_with_retry(path)
+    except FileNotFoundError:
+        return None
+    try:
+        state = CanvasPluginState.model_validate_json(text)
+    except ValidationError as error:
+        # 读不出的状态不能静默当空：插件会在旧数据上重建，丢掉用户的记录。
+        raise PluginError("PLUGIN_STATE_BROKEN", "插件的项目状态文件损坏", status=500) from error
+    if state.plugin_id != plugin_id:
+        raise PluginError("PLUGIN_STATE_BROKEN", "插件的项目状态文件损坏", status=500)
+    return state
+
+
+def _update_plugin_state(project_id: str, plugin_id: str, plugin_version: str,
+                         change: Callable[[Any], Any]) -> Any:
+    from pydantic import ValidationError
+
+    from character_workflow.lib.atomic_io import atomic_write_text
+    from character_workflow.lib.canvas_projects import canvas_project_lock_path
+    from character_workflow.lib.file_lock import file_lock
+    from character_workflow.lib.schemas import CanvasPluginState
+    path = _plugin_state_path(project_id, plugin_id)
+    with file_lock(canvas_project_lock_path(project_id)):
+        current = _read_plugin_state(project_id, plugin_id)
+        data = change(current.data if current is not None else None)
+        try:
+            state = CanvasPluginState(
+                schema_version=1, revision=(current.revision + 1) if current is not None else 1,
+                plugin_id=plugin_id, plugin_version=plugin_version or "0.0.0", data=data)
+        except ValidationError as error:
+            if "exceeds 1 MiB" in str(error):
+                raise PluginError("PAYLOAD_TOO_LARGE", "插件的项目状态超过 1 MiB", status=413) from error
+            raise PluginError("PLUGIN_FAILED", "插件的项目状态不是合法的 JSON 数据", status=500) from error
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(path, state.model_dump_json())
+    return data
 
 
 def _first_last_video_model(width: int, height: int) -> tuple[str, str, dict]:
@@ -460,7 +537,8 @@ def call(plugin_id: str, method: str, path: str, *, project_id: str, origin: str
         capabilities = frozenset(granted["capabilities"])
     if origin == "surface" and "server.call" not in capabilities:
         raise PluginError("CAPABILITY_DENIED", "本项目没有允许这项能力", status=403)
-    request = PluginRequest(plugin_id, project_id, origin, capabilities, node_id=node_id)
+    request = PluginRequest(plugin_id, project_id, origin, capabilities, node_id=node_id,
+                            plugin_version=record.lock.version)
     if origin == "surface":
         request.inputs = _surface_inputs(record, project_id, node_id, input_version_ids or [])
     handler = _handlers(record).get((method, path))
