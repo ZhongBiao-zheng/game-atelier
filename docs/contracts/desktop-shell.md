@@ -1,6 +1,6 @@
 # 桌面外壳契约
 
-桌面外壳（`desktop/`，Electron，ADR-0040）只负责窗口、托盘、单实例和 viewer-server 的启停，不含业务逻辑。
+桌面外壳（`desktop/`，Electron，ADR-0040；首次启动下载运行包，ADR-0042）只负责窗口、托盘、单实例和 viewer-server 的启停，不含业务逻辑。
 它与运行包之间只通过下面列出的接口交互。改动其中任何一项都是破坏性变更：已经装在用户机器上的外壳不会随应用内更新一起更新，
 必须保持旧外壳可用。守卫测试：`tests/test_desktop_shell_contract.py`。
 
@@ -8,28 +8,45 @@
 
 | 位置 | 内容 | 谁写 |
 | --- | --- | --- |
-| 安装位置（macOS `/Applications/Atelier.app`；Windows 默认 `%LOCALAPPDATA%\Atelier\`，可在安装时更改，当前用户安装、不需要管理员） | 外壳与种子（macOS `Contents/Resources/seed/GameAtelier-<版本>-macos-arm64.tar.gz`；Windows 应用目录、`seed\GameAtelier-<版本>-windows-x64.zip` 与 `seed.json`、`uninstall.exe`） | 安装器，只读 |
-| `<本地应用数据>/game-atelier/runtime/GameAtelier/` | ADR-0030 运行包布局 | 由种子解压（Windows 在安装时由安装程序调用外壳的 `--prepare-runtime`，macOS 在外壳启动时），何时替换见「运行包替换」；之后只由应用内更新修改 |
+| 安装位置（macOS `/Applications/Atelier.app`；Windows 默认 `%LOCALAPPDATA%\Atelier\`，可在安装时更改，当前用户安装、不需要管理员） | 外壳（macOS 应用包；Windows 应用目录与 `uninstall.exe`）。不带运行包，只带 `stage/runtime.json`：配套运行包的版本、文件名、整个压缩包的 sha256、版本目录的 `BUILD_ID` 与契约级别（`scripts/build_desktop.py` 从压缩包本身算出） | 安装器，只读 |
+| `<本地应用数据>/game-atelier/runtime/GameAtelier/` | ADR-0030 运行包布局 | 外壳首次启动时下载并解压（见「运行包下载」），何时替换见「运行包替换」；之后只由应用内更新修改 |
 | `<运行包根>/versions/<版本>/DESKTOP_CONTRACT` | 一行整数：该版本提供的外壳契约级别（见「契约级别」） | `scripts/build_release.py` |
-| `<本地应用数据>/game-atelier/runtime/shell.log` | 外壳日志 | 外壳 |
+| `<本地应用数据>/game-atelier/runtime/download/` | 下载中的运行包：`<文件>.part` 与记录版本、sha256 的 `.part.json`；解压后删除 | 外壳 |
+| `<本地应用数据>/game-atelier/runtime/shell.log` | 外壳日志（含每个来源的下载结果、用时与速度） | 外壳 |
 | `<数据目录>/.runtime/` | 服务记录 | 见下 |
 
-本地应用数据：macOS 是 `~/Library/Application Support`，Windows 是 `%LOCALAPPDATA%`。Windows 卸载时删除运行包根，数据目录不动。
+本地应用数据：macOS 是 `~/Library/Application Support`，Windows 是 `%LOCALAPPDATA%`。Windows 卸载时删除运行包父目录（下载残留一并删除），数据目录不动。
 
 ## 运行包替换
 
-是否用种子重建运行包根只由外壳判断（`desktop/src/runtime.mjs` 的 `replacementReason`），两个平台同一套规则；Windows 安装程序不比较版本，只调用 `--prepare-runtime`。运行包的版本取 `current` 与 `last-good` 中较新的一个（应用内更新进行中时 `current` 已指向新版本）。版本先后与 `bootstrap.version_key` 相同：已退役的 5.x 排在 0.x 之前。
+外壳是否需要另一份运行包只由外壳判断（`desktop/src/runtime.mjs` 的 `replacementReason`，对照 `stage/runtime.json`），两个平台同一套规则；安装程序不碰运行包。运行包的版本取 `current` 与 `last-good` 中较新的一个（应用内更新进行中时 `current` 已指向新版本）。版本先后与 `bootstrap.version_key` 相同：已退役的 5.x 排在 0.x 之前。
 
 | 判定 | 条件 | 处理 |
 | --- | --- | --- |
-| `missing` | 没有可用的运行包（首次启动、上次解压中断） | 解压种子 |
-| `contract` | 运行包没有声明外壳要求的契约级别，且种子不比它旧 | 替换 |
-| `older` | 运行包版本低于种子（新安装包装在旧安装上） | 替换 |
-| `build` | 版本相同、该版本目录由种子解出（`seed.json` 记录仍吻合），但种子是另一次构建（同版本号重装的测试包） | 替换 |
-| `too-old` | 运行包没有声明契约级别，且种子比它旧 | 报错，不动运行包 |
-| 无 | 运行包版本不低于种子（包括应用内更新升上去的版本） | 保留，绝不降级 |
+| `missing` | 没有可用的运行包（首次启动、上次解压中断） | 下载并解压 |
+| `contract` | 运行包没有声明外壳要求的契约级别，且不比外壳新 | 下载并替换 |
+| `build` | 运行包版本与外壳相同，但该版本目录的 `BUILD_ID` 不是本次构建记下的（或没有）。日常提交不改版本号，未发版构建与已发布版本同号，外壳绝不在用户不知情时沿用不配套的同版本运行包 | 下载并替换 |
+| `too-old` | 运行包没有声明契约级别，且比外壳新 | 报错（请安装新版 Atelier），不动运行包 |
+| 无 | 其他：版本不同且满足契约级别（更旧的由应用内更新升级，更新的绝不降级），或同版本且 `BUILD_ID` 相同（含经应用内更新升到同版本的情况，压缩包里本就带 `BUILD_ID`） | 保留 |
 
-替换时先把种子解到临时目录并校验，再整体换入，失败时旧运行包原样保留。旧运行包的服务由外壳启动且有进行中的工作时先确认（`--prepare-runtime` 不确认，安装程序已先调用 `--quit`）；用户取消则本次沿用旧运行包。
+替换时先把压缩包解到临时目录并校验，再整体换入，失败时旧运行包原样保留；下载失败时不回落到旧运行包（`contract` 下它不满足契约，`build` 下它不配套），显示失败页。旧运行包的服务由外壳启动且有进行中的工作时先确认；用户取消则本次沿用旧运行包（明示的选择）。解压或下载途中退出：先中止再退出，下次启动清掉临时目录，未解压的完整压缩包校验通过即直接使用。
+
+## 运行包下载
+
+来源、文件名与地址只写在 `src/viewer_server/release_sources.json` 一处，外壳（经 `pnpm stage` 打进应用的副本）与应用内更新（`bundle_download.py`）都读它，守卫测试 `tests/test_release_sources.py` 断言两边没有各自的副本。
+
+| 项 | 约定 |
+| --- | --- |
+| 版本 | 与外壳同版本（`stage/runtime.json` 的 `version`）；升级交给应用内更新 |
+| 来源顺序 | 按文件里的顺序：CNB（`direct_first`：先不经代理，再按系统代理）→ GitHub（系统代理）。只有网络错误、5xx、404 或校验预检不符才换下一个 |
+| 地址 | `<来源>/download/v<版本>/GameAtelier-<版本>-<平台>.<zip / tar.gz>`，同目录 `.sha256` |
+| 校验 | 信任锚是构建时记下的 sha256，不取自来源。每个来源先取 `.sha256`（≤1 KiB）预检：与内嵌值不同或取不到就跳过该来源、不下载；下载完对整份文件按内嵌值校验，不符则删掉换下一个来源 |
+| 续传 | `.part` 与记录的版本、sha256 一致时带 `Range` 继续；来源不支持 Range 则从头下 |
+| 重试 | 同一来源网络错误、5xx 重试 2 次（2 s、5 s）；30 秒没有数据算卡住；不设总时限 |
+| 空间 | 开始前检查：剩余字节 + 400 MiB（解压后）+ 100 MiB，不够直接显示还需多少 |
+| 取消 | 保留 `.part`，加载页显示「下载已暂停」：继续下载（续传）/ 从文件导入 |
+| 从文件导入 | 文件名须为 `GameAtelier-<外壳版本>-<平台>.<扩展名>`，sha256 须等于内嵌值，否则拒绝并提示需要的版本，运行包根不变。离线安装与未发版构建试装都走这条 |
+| 测试源 | `GAME_ATELIER_TEST_UPDATE_FEED`（仅在 `GAME_ATELIER_TESTING=1` 时生效，只许本机 http 地址）替换全部来源；外壳另允许逗号分隔多个地址。与应用内更新同名同限制 |
 
 ## 契约级别
 
@@ -38,7 +55,7 @@
 - `scripts/build_release.py` 的 `DESKTOP_CONTRACT` 写进每个版本目录的 `DESKTOP_CONTRACT`；外壳要求的级别是 `desktop/src/runtime.mjs` 的同名常量，两边必须相等（守卫测试检查）。
 - 级别 2：`bootstrap.py` 认识 `--desktop-start`；页面用 `app-region` 声明拖动区、通过 `window.atelierShell` 报告深浅色、在 `data-titlebar="overlay"` 下给窗口按钮留位。外壳开始依赖运行包的新能力时，两边一起加一。
 - 外壳读 `current` 与 `last-good` 两个版本的标记，两个都达到要求才算满足：`last-good` 的 `bootstrap.py` 负责解析参数，`current` 提供页面（回滚时改由 `last-good` 提供）。文件缺失、内容不是整数，一律按 0 处理。
-- 不满足的运行包按「运行包替换」换成种子，外壳只用 `--desktop-start` 启动，窗口始终隐藏系统标题栏。
+- 不满足的运行包按「运行包替换」下载替换，外壳只用 `--desktop-start` 启动，窗口始终隐藏系统标题栏。
 - 应用内更新从同一种发布压缩包解出整个版本目录，标记随之更新。
 
 ## 固定启动器
@@ -57,15 +74,14 @@ Windows：外壳不经 `launch.ps1`，而是做 `launch.ps1` 做的同一件事�
 
 启动器自带 8 秒验证时限，超时以 1 退出（stderr 为「尚未通过实例验证」），但服务进程照常在启动。换上新运行包后的首次启动常超过这个时限（系统要先检查一遍原生库），所以外壳不以启动器的退出码作结论：`--desktop-start` 返回后，无论退出码是几，外壳都再按服务记录（`server.port` + 状态接口核对 `server.instance`）等最多 30 秒，核对到服务就照常使用并记为外壳启动的服务；等不到才显示启动失败，原因取启动器 stderr 的末尾。
 
-macOS 启动器只在当前版本的解释器带 `com.apple.quarantine` 时才递归清除运行包的隔离属性（压缩包解压出来的文件都带它）；外壳解压的种子不带，遍历约 1.2 万个文件的那一秒不再每次都付。
+macOS 启动器只在当前版本的解释器带 `com.apple.quarantine` 时才递归清除运行包的隔离属性（压缩包解压出来的文件都带它）；外壳下载并解压的运行包不带，遍历约 1.2 万个文件的那一秒不再每次都付。
 
 ## 安装程序与外壳的参数
 
-Windows 外壳是 electron-builder 产出的应用目录，由 Windows 安装程序（`desktop/setup`）整体安装；种子放在 exe 旁的 `seed\`（`seed.json` 描述文件名、版本、`BUILD_ID` 与契约级别，由 `scripts/build_desktop.py` 写入），外壳从 `path.dirname(process.execPath)\seed` 读取。macOS 的种子在 `Contents/Resources/seed/`。
+Windows 外壳是 electron-builder 产出的应用目录，由 Windows 安装程序（`desktop/setup`）整体安装；macOS 外壳是 dmg 里的应用包。两者都不带运行包，首次启动下载（见「运行包下载」）。
 
 | 参数 | 约定 |
 | --- | --- |
-| `--prepare-runtime` | 不开窗口、不占单实例锁，按「运行包替换」的同一规则决定是否解压种子（不需要替换时什么都不做）。标准输出逐行 `progress <已解压> <总数>`（Windows 为 zip 条目数，macOS 为压缩字节数），数值只增不减，最后一行两数相等；退出码 0 表示运行包可用，非 0 时 stderr 末行是原因。需要替换旧运行包且其服务由外壳启动时，直接停掉该服务、不再确认（安装程序先调用过 `--quit`） |
 | `--quit` | 已有实例在运行时，该实例走正常退出流程（有进行中的任务会先确认），本次启动以 0 退出；没有实例时直接以 0 退出 |
 
 AppUserModelID 等于 `desktop/electron-builder.yml` 的 `appId`（构建时以 `atelierAppId` 写进应用元数据）；安装程序创建的快捷方式必须带同一个值。外壳继续写 `<运行包父目录>\window-theme`（`light` / `dark`），安装程序据此决定深浅色。
@@ -74,16 +90,16 @@ Windows 没有菜单栏，`Ctrl+,` 打开设置、`F5` / `Ctrl+R` 重新载入�
 
 ## Windows 安装程序（`desktop/setup`）
 
-`Atelier-<版本>-windows-x64-setup.exe` 是 Atelier 自己的安装程序（Rust + WebView2 界面，不用 NSIS），不认外壳用什么构建：它只接收「应用目录（含 `seed\`）+ 主程序相对路径 + `appId`」。这些附在安装程序本体后面（格式见 `desktop/setup/src/payload.rs`，`setup/` 下的条目只给安装程序自己用，即 WebView2 引导程序），由 `scripts/build_desktop.py` 的 `write_payload` 写入，守卫测试比对两边。卸载程序 `uninstall.exe` 是同一个程序去掉附件、清单标为卸载，并记下安装时放进安装目录的每个文件。
+`Atelier-<版本>-windows-x64-setup.exe` 是 Atelier 自己的安装程序（Rust + WebView2 界面，不用 NSIS），不认外壳用什么构建：它只接收「应用目录 + 主程序相对路径 + `appId`」，不带运行包。这些附在安装程序本体后面（格式见 `desktop/setup/src/payload.rs`，`setup/` 下的条目只给安装程序自己用，即 WebView2 引导程序），由 `scripts/build_desktop.py` 的 `write_payload` 写入，守卫测试比对两边。卸载程序 `uninstall.exe` 是同一个程序去掉附件、清单标为卸载，并记下安装时放进安装目录的每个文件。
 
 | 用法 | 行为 |
 | --- | --- |
-| 双击 | 窗口：立即安装（「更改」可改位置，选的目录名不是产品名时在其下建 `Atelier\`；可关桌面快捷方式）→ 进度（复制应用目录，再调用外壳 `--prepare-runtime` 解压运行环境）→ 开始使用。已安装时为「立即更新」，沿用原位置 |
+| 双击 | 窗口：立即安装（「更改」可改位置，选的目录名不是产品名时在其下建 `Atelier\`；可关桌面快捷方式）→ 进度（复制应用目录）→ 开始使用（打开应用，由应用下载运行环境）。已安装时为「立即更新」，沿用原位置 |
 | `--silent [--dir <路径>] [--no-desktop-shortcut]` | 无界面安装；退出码 0 成功、1 失败、3 应用仍在运行 |
 | `uninstall.exe [--silent]` | 先把自己复制到 `%TEMP%` 再运行；停止安装目录与运行包根下的进程，删除快捷方式、「设置 → 应用」条目、运行包父目录（`<本地应用数据>\game-atelier\runtime`），以及安装时记下的文件和因此变空的文件夹。数据目录与 WebView 本地存储不动 |
 | `--preview <界面>`、`--auto` | 只供 CI 截图：渲染某个界面不做任何事；自动点主按钮 |
 
-覆盖安装时先调用已安装外壳的 `--quit`（有进行中的工作由外壳确认），等安装目录里的进程全部退出再复制；再停掉运行包根下仍在运行的进程，然后调用 `--prepare-runtime`，是否替换运行包由外壳决定（见「运行包替换」）。写入的位置：安装目录、开始菜单与桌面 `<产品名>.lnk`（带 `System.AppUserModel.ID` = `appId`）、`HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\<产品名>`（与此前的 NSIS 安装器相同，覆盖安装会接管旧安装，旧的 `HKCU\Software\atelier\<产品名>` 被删除）。深浅色读 `<运行包父目录>\window-theme`。缺 WebView2 时先用系统对话框询问，再用附带的引导程序联网安装。安装程序的 WebView 配置放在 `%TEMP%\atelier-setup-webview2`，日志写 `%TEMP%\atelier-setup.log`。
+覆盖安装时先调用已安装外壳的 `--quit`（有进行中的工作由外壳确认），等安装目录里的进程全部退出再复制；不碰运行包，是否需要另一份运行包由外壳下次启动时决定（见「运行包替换」）。写入的位置：安装目录、开始菜单与桌面 `<产品名>.lnk`（带 `System.AppUserModel.ID` = `appId`）、`HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\<产品名>`（与此前的 NSIS 安装器相同，覆盖安装会接管旧安装，旧的 `HKCU\Software\atelier\<产品名>` 被删除）。深浅色读 `<运行包父目录>\window-theme`。缺 WebView2 时先用系统对话框询问，再用附带的引导程序联网安装。安装程序的 WebView 配置放在 `%TEMP%\atelier-setup-webview2`，日志写 `%TEMP%\atelier-setup.log`。
 
 ## 服务记录（`<数据目录>/.runtime/`）
 
@@ -103,7 +119,7 @@ Windows 没有菜单栏，`Ctrl+,` 打开设置、`F5` / `Ctrl+R` 重新载入�
 ## 窗口与页面
 
 - 窗口加载 `http://127.0.0.1:<端口>/`，页面与浏览器访问同源，会话与编辑租约照常工作。
-- 页面只拿到一个接口：preload 暴露的 `window.atelierShell.setTheme("light" | "dark")`（页面的深浅色，外壳记下来，下次启动的窗口底色与加载页跟着走）。内置加载页另有 `window.atelierLoading.retry()` / `openLog()`。主进程收到的每条消息都核对发送方是主框架且来自本机服务或加载页；页面运行在沙箱里、没有 Node。插件的沙箱 iframe（`srcdoc`，origin 为 `null`）拿不到任何接口。
+- 页面只拿到一个接口：preload 暴露的 `window.atelierShell.setTheme("light" | "dark")`（页面的深浅色，外壳记下来，下次启动的窗口底色与加载页跟着走）。内置加载页另有 `window.atelierLoading.retry()` / `openLog()` / `cancel()` / `resume()` / `importFile()`。主进程收到的每条消息都核对发送方是主框架且来自本机服务或加载页；页面运行在沙箱里、没有 Node。插件的沙箱 iframe（`srcdoc`，origin 为 `null`）拿不到任何接口。
 - 拖动窗口与双击缩放由页面的 `app-region: drag`（顶栏）交给系统处理；根元素声明 `no-drag`，避免沿用上一页的拖动区。
 - preload 在页面脚本之前给 `<html>` 写 `data-shell="macos|windows"` 与 `data-titlebar="overlay"`：macOS 页面给左上红绿灯留位，Windows 页面给右上系统按钮留位（`env(titlebar-area-*)`，按钮高 40px、背景透明、符号颜色跟随深浅色）；铺满窗口的浮层用 `desktop-clear-top` 避开它们。网页自带的右键菜单被屏蔽（输入框与选中文字除外）。
 - 外壳向页面派发的 `window` 事件：下载落盘后 `atelier:download-saved`（`detail: { name }`）；系统菜单「设置…」`atelier:navigate`（`detail: { path }`，站内路径）。页面可选择监听，浏览器里不会出现。
