@@ -93,13 +93,25 @@ def key_last_used() -> dict[str, str]:
     return jobs.last_used_by_alias()
 
 
+def _agent_records(projects, names: dict[str, str], now: datetime) -> list[dict]:
+    """画布内置 Agent 调对话模型的花费（.runtime/agent-usage），按会话、日期、模型合成一条。"""
+    from character_workflow.lib import agent_usage
+    from character_workflow.lib.canvas_agent_sessions import list_canvas_agent_sessions
+
+    rows = agent_usage.read_rows()
+    if not rows:
+        return []
+    titles = {(item.project_id, item.session_id): item.title for project in projects
+              for item in list_canvas_agent_sessions(project.project_id).sessions}
+    return agent_usage.usage_records(rows, titles, names, now)
+
+
 def _usage_records(scope: str, period: str, now: datetime) -> tuple[list[dict], list[dict]]:
     members = []
     if scope == "mine":
-        records = mine_records(
-            jobs.list_jobs(),
-            {project.project_id: project.name for project in canvas_projects.list_canvas_projects()},
-        )
+        projects = canvas_projects.list_canvas_projects()
+        names = {project.project_id: project.name for project in projects}
+        records = mine_records(jobs.list_jobs(), names) + _agent_records(projects, names, now)
     else:
         config = gateway_keys.read_config()
         if not config.enabled:

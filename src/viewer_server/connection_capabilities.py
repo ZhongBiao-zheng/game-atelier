@@ -129,8 +129,11 @@ PATCH /api/canvas/projects/{project_id}/agent/sessions/{session_id}
 POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/messages
 POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/approvals
 POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/cancel
+GET /api/canvas/projects/{project_id}/agent/sessions/{session_id}/usage
 GET /api/canvas/agent/models
 GET /api/canvas/agent/generation-models
+GET /api/canvas/agent/settings
+PUT /api/canvas/agent/settings
 GET /api/canvas/agent/skills
 POST /api/canvas/agent/skills/import
 DELETE /api/canvas/agent/skills/{name}
@@ -270,6 +273,8 @@ LOCAL_MANAGEMENT = frozenset({
     "/api/plugins/{plugin_id}/enable", "/api/plugins/{plugin_id}/disable",
     # 导入 / 删除 Agent Skill 改写数据目录里的说明文件，Agent 每轮都会读，只给本机页面。
     "/api/canvas/agent/skills/import", "/api/canvas/agent/skills/{name}",
+    # Agent 出图的确认金额是花钱的闸门，只给本机页面。
+    "/api/canvas/agent/settings",
 })
 # 已脱敏的 Key 列表（alias / 能力 / 掩码）是选模型的依据，网站会话也要读；增删改与 reveal 仍属管理。
 # 已挂载的团队库列表同理：网站会话要读它才能浏览 / 采用。

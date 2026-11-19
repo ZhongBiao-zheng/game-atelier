@@ -4,12 +4,15 @@ import {
   createCanvasAgentSession,
   decideCanvasAgentApprovals,
   getCanvasAgentSession,
+  getCanvasAgentSessionUsage,
+  getCanvasAgentSettings,
   listCanvasAgentChatModels,
   listCanvasAgentGenerationModels,
   listCanvasAgentSessions,
   listCanvasAgentSkills,
   sendCanvasAgentMessage,
   updateCanvasAgentSession,
+  updateCanvasAgentSettings,
 } from '@/api/canvas';
 import { useSSE, type CanvasAgentEventPayload } from '@/hooks/useSSE';
 import type {
@@ -18,6 +21,7 @@ import type {
   CanvasAgentSession,
   CanvasAgentSessionSummary,
   CanvasAgentSessionUpdate,
+  CanvasAgentSessionUsage,
   CanvasAgentSkill,
 } from '@/schema/canvas';
 
@@ -85,6 +89,8 @@ export function useCanvasAgent(projectId: string, open: boolean) {
   const [skills, setSkills] = useState<CanvasAgentSkill[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [usage, setUsage] = useState<CanvasAgentSessionUsage | null>(null);
+  const [confirmAbove, setConfirmAbove] = useState<number | null>(null);
   // 还没有会话时的设置：只记在本地，发第一条消息建会话时一并写入，不为选个模型就建空会话。
   const [draft, setDraft] = useState<CanvasAgentSessionUpdate>(() => {
     const model = rememberedModel();
@@ -105,11 +111,17 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     if (sessionIdRef.current !== sessionId) return;  // 期间切到了别的会话
     setSession(loaded);
     if (loaded.status !== 'running') { setStreaming(''); setActiveTool(null); }
+    // 用量只用于显示：读不到不报错，下次会话刷新再读。
+    getCanvasAgentSessionUsage(projectId, sessionId).then(
+      loadedUsage => { if (sessionIdRef.current === sessionId) setUsage(loadedUsage); },
+      () => undefined,
+    );
   }, [projectId]);
 
   const selectSession = useCallback(async (sessionId: string) => {
     setError(null);
     setStreaming('');
+    setUsage(null);
     sessionIdRef.current = sessionId;
     writeStorage(sessionStorageKey(projectId), sessionId);
     try {
@@ -153,6 +165,14 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     listCanvasAgentSkills().then(result => setSkills(result.skills), loadError => setError(messageOf(loadError)));
   }, []);
   useEffect(() => { if (open) reloadSkills(); }, [open, reloadSkills]);
+
+  useEffect(() => {
+    if (!open || confirmAbove !== null) return;
+    getCanvasAgentSettings().then(
+      settings => setConfirmAbove(settings.confirm_above_cny),
+      loadError => setError(messageOf(loadError)),
+    );
+  }, [open, confirmAbove]);
 
   useSSE({
     enabled: open,
@@ -210,6 +230,7 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     if (session) setDraft(carriedSettings(session));
     sessionIdRef.current = null;
     setSession(null);
+    setUsage(null);
     setStreaming('');
     setActiveTool(null);
     setError(null);
@@ -249,10 +270,13 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     return updated;
   }), [createSession, projectId, refreshList, run, session]);
 
-  const decide = useCallback((approve: boolean) => run(async () => {
+  /** approved：每个待确认调用是否执行；没列出的按拒绝。 */
+  const decide = useCallback((approved: ReadonlySet<string>) => run(async () => {
     if (!session) return undefined;
     setStreaming('');
-    const decisions = session.pending_approvals.map(item => ({ call_id: item.call_id, approve }));
+    const decisions = session.pending_approvals.map(item => ({
+      call_id: item.call_id, approve: approved.has(item.call_id),
+    }));
     const updated = await decideCanvasAgentApprovals(projectId, session.session_id, decisions);
     setSession(updated);
     return updated;
@@ -266,12 +290,19 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     return updated;
   }), [projectId, run, session]);
 
+  const updateConfirmAbove = useCallback((value: number) => run(async () => {
+    const saved = await updateCanvasAgentSettings({ confirm_above_cny: value });
+    setConfirmAbove(saved.confirm_above_cny);
+    return saved;
+  }), [run]);
+
   const clearError = useCallback(() => setError(null), []);
 
   return {
     sessions, session, draft, streaming, activeTool, models, generationModels, skills, error, pending,
+    usage, confirmAbove,
     reloadSkills,
-    selectSession, newSession, updateSettings, send, decide, stop, clearError,
+    selectSession, newSession, updateSettings, send, decide, stop, updateConfirmAbove, clearError,
   };
 }
 

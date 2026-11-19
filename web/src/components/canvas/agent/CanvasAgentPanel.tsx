@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { ArrowUpIcon, AttachIcon, AutoModeIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon, ConfirmModeIcon, ErrorIcon, ImageFileIcon, LoadingIcon, NewChatIcon, SkillIcon, StopIcon, TextFileIcon, ThinkingIcon, ToolIcon, VideoFileIcon } from '@/components/ui/icons';
+import { ArrowUpIcon, AttachIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon, ErrorIcon, ImageFileIcon, LoadingIcon, NewChatIcon, SkillIcon, StopIcon, TextFileIcon, ThinkingIcon, ToolIcon, VideoFileIcon } from '@/components/ui/icons';
 import { canvasMediaUrl } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
@@ -9,7 +9,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import type { CanvasAgentCreationMode, CanvasAgentMessage } from '@/schema/canvas';
+import { CanvasAgentApprovalCard } from './CanvasAgentApprovalCard';
 import { CanvasAgentModeMenu } from './CanvasAgentModeMenu';
+import { CanvasAgentPermissionMenu } from './CanvasAgentPermissionMenu';
+import { agentUsageLabel } from './canvasAgentUsage';
 import { CanvasAgentModelPicker } from './CanvasAgentModelPicker';
 import { CanvasAgentPreferencePicker } from './CanvasAgentPreferencePicker';
 import { CanvasAgentReferenceThumb } from './CanvasAgentReferenceThumb';
@@ -233,6 +236,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const empty = messages.length === 0 && !running && !awaiting;
+  const usageLabel = session ? agentUsageLabel(agent.usage) : null;
 
   // 选中的节点变了：之前移除过的不再记着，免得重新选中却带不进来。
   const selectionKey = selectedNodes.map(node => node.id).join(',');
@@ -302,6 +306,11 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+        {usageLabel && (
+          <Hint label={usageLabel.detail}>
+            <span aria-label={`本对话用量：${usageLabel.text}`} className="shrink-0 px-1 text-xs tabular-nums text-muted-foreground">{usageLabel.text}</span>
+          </Hint>
+        )}
         <Hint label="新对话"><Button variant="bare" type="button" aria-label="新对话" disabled={pending || running} onClick={() => void agent.newSession()} className={ICON_BUTTON}><NewChatIcon /></Button></Hint>
         <Hint label="关闭"><Button variant="bare" type="button" aria-label="关闭 Agent" onClick={onClose} className={ICON_BUTTON}><CloseIcon /></Button></Hint>
       </header>
@@ -333,18 +342,13 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
           </p>
         )}
         {awaiting && session && (
-          <div className="flex flex-col gap-2 rounded-lg border border-primary/40 p-3">
-            {session.pending_approvals.map(item => (
-              <div key={item.call_id} className="text-xs">
-                <p className="font-medium text-foreground">{TOOL_LABELS[item.tool] ?? item.tool}</p>
-                <p className="mt-0.5 whitespace-pre-line break-words text-muted-foreground">{item.summary}</p>
-              </div>
-            ))}
-            <div className="flex justify-end gap-2">
-              <Button size="sm" variant="secondary" disabled={pending} onClick={() => void agent.decide(false)}>拒绝</Button>
-              <Button size="sm" disabled={pending} onClick={() => void agent.decide(true)}>执行</Button>
-            </div>
-          </div>
+          <CanvasAgentApprovalCard
+            key={session.pending_approvals.map(item => item.call_id).join(',')}
+            approvals={session.pending_approvals}
+            labels={TOOL_LABELS}
+            disabled={pending}
+            onDecide={approved => void agent.decide(approved)}
+          />
         )}
       </div>
 
@@ -444,13 +448,13 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             onPressedChange={on => void agent.updateSettings({ effort: on ? 'high' : 'off' })}
             className={cn(ICON_BUTTON, 'min-w-7 px-0 data-[state=on]:bg-transparent data-[state=on]:text-primary')}
           ><ThinkingIcon /></Toggle></Hint>
-          <Hint label={autoMode ? 'Auto：全部直接执行，不再确认' : '审查：每一步都先确认'}><Button variant="bare"
-            type="button"
-            aria-label={autoMode ? '权限模式：Auto' : '权限模式：审查'}
+          <CanvasAgentPermissionMenu
+            auto={autoMode}
+            confirmAbove={agent.confirmAbove}
             disabled={running || pending}
-            onClick={() => void agent.updateSettings({ permission_mode: autoMode ? 'review' : 'auto' })}
-            className={cn(ICON_BUTTON, autoMode && 'text-primary')}
-          >{autoMode ? <AutoModeIcon /> : <ConfirmModeIcon />}</Button></Hint>
+            onModeChange={mode => void agent.updateSettings({ permission_mode: mode })}
+            onConfirmAboveChange={value => void agent.updateConfirmAbove(value)}
+          />
           <span className="min-w-1 flex-1" />
           {running ? (
             <Hint label="停止"><Button variant="bare" type="button" aria-label="停止" onClick={() => void agent.stop()} className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-foreground hover:bg-secondary/80"><StopIcon size="sm" className="fill-current" /></Button></Hint>

@@ -477,6 +477,17 @@ sequence，只保存可见消息、reasoning summary、稳定 node/version 引�
 与会话历史，只重写 `project_id`。当前打开会话、panel 宽度、焦点和流式临时态属于浏览器呈现，
 不进入 Session 或 `canvas.json`。
 
+Agent 每次调对话模型都在 `.runtime/agent-usage/YYYY-MM.jsonl` 追加一行
+`{ time, project_id, session_id, alias, model, provider, source, input_tokens, output_tokens, cached_tokens, cost_cny, cost_source }`（只有统计字段，不记提示词与对话内容），
+按请求计价（`estimate_text_cost_cny`），`cost_cny: null` 为未计价；`cost_source` 为 `price_table` / `host` / null。经局域网网关（provider=atelier）的请求由主机结算，本机记 null、`source: "lan"`、`cost_source: "host"`。
+只追加不替换，追加在文件锁内一行写完；读取跳过解析不了的行并在日志里记跳过数。画布或会话删除后记录保留，用量页显示「已删除的项目」「Agent 对话：已删除的对话」。
+不记成 Job（/api/jobs 每个任务文件约 60µs，随 Agent 使用线性变慢）。`GET .../agent/sessions/{session_id}/usage`
+返回会话累计 `{ requests, input_tokens, output_tokens, cost_cny, unpriced, source }`，`cost_cny` 只合计有价格的请求；
+`GET /api/usage?scope=mine` 与 `/api/usage/tasks` 把这些行按会话、日期、模型合成 `kind: "text"` 的记录。
+`GET / PUT /api/canvas/agent/settings`（仅本机页面）读写 `{ confirm_above_cny }`（0–10000，默认 10，存 `.config/canvas-agent.json`）：
+Agent 发起的生成单次估价超过它时，Auto 下也停在待确认；估价与界面模型菜单同源，未计价不拦。
+`run_generation` 待确认摘要第二行为「模型 · 预计 X¥」或「模型 · 未计价」，超过时第三行写「超过确认金额 X¥」。
+
 主题色是工作区应用级状态，文件真源为 `.config/accent-themes.json`（桌面版与浏览器共用；浏览器 localStorage
 `atelier:accent` 只缓存一份镜像供首帧上色，以服务端为准）。`GET /api/accent-themes` 返回
 `{ schema_version: 1, revision, active, overrides, custom, updated_at }`；文件不存在时返回 revision 0、`active: "lime"`

@@ -7,9 +7,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, FastAPI, File, Form, Response, UploadFile
+from pydantic import BaseModel, ConfigDict, Field
 
+from character_workflow.lib import agent_usage
+from character_workflow.lib import canvas_agent_cost as cost
 from character_workflow.lib import canvas_agent_runtime as runtime
 from character_workflow.lib import canvas_agent_skills as skills
 from character_workflow.lib.canvas_agent_models import list_chat_models
@@ -108,6 +112,35 @@ def _generation_models() -> dict:
 async def get_generation_models() -> dict:
     """模型偏好可选的图片 / 视频模型（与 Agent 的 list_models 同源）。"""
     return await asyncio.to_thread(_generation_models)
+
+
+class CanvasAgentSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # Agent 发起的生成单次估价超过这个金额时，Auto 模式下也先确认；0 = 有价格的生成都确认。
+    confirm_above_cny: float = Field(ge=0, le=cost.MAX_CONFIRM_ABOVE_CNY)
+
+
+@router.get("/agent/settings", response_model=CanvasAgentSettings)
+async def get_agent_settings() -> CanvasAgentSettings:
+    return CanvasAgentSettings(confirm_above_cny=await asyncio.to_thread(cost.confirm_above_cny))
+
+
+@router.put("/agent/settings", response_model=CanvasAgentSettings)
+async def put_agent_settings(payload: CanvasAgentSettings) -> CanvasAgentSettings:
+    value = await asyncio.to_thread(cost.write_confirm_above_cny, payload.confirm_above_cny)
+    return CanvasAgentSettings(confirm_above_cny=value)
+
+
+def _session_usage(project_id: str, session_id: str) -> dict:
+    session = read_canvas_agent_session(project_id, session_id)
+    return agent_usage.session_totals(project_id, session_id,
+                                      datetime.fromisoformat(session.created_at))
+
+
+@router.get(f"{SESSION}/usage")
+async def get_session_usage(project_id: str, session_id: str) -> dict:
+    """本会话调对话模型的累计用量；经局域网网关的请求由主机结算，这里只有 token。"""
+    return await _call(_session_usage, project_id, session_id)
 
 
 @router.patch(SESSION, response_model=CanvasAgentSession)

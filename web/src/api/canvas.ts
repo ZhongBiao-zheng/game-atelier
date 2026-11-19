@@ -7,6 +7,8 @@ import type {
   CanvasAgentSession,
   CanvasAgentSessionList,
   CanvasAgentSessionUpdate,
+  CanvasAgentSessionUsage,
+  CanvasAgentSettings,
   CanvasAgentSkill,
   CanvasAgentTurnCreate,
   CanvasConnection,
@@ -136,6 +138,18 @@ export function decideCanvasAgentApprovals(
   decisions: CanvasAgentApprovalDecision[],
 ): Promise<CanvasAgentSession> {
   return sendAgentJson(`${agentSessionPath(projectId, sessionId)}/approvals`, '确认 Agent 操作', { decisions });
+}
+
+export function getCanvasAgentSessionUsage(projectId: string, sessionId: string): Promise<CanvasAgentSessionUsage> {
+  return requestJson<CanvasAgentSessionUsage>(`${agentSessionPath(projectId, sessionId)}/usage`, '读取 Agent 用量');
+}
+
+export function getCanvasAgentSettings(): Promise<CanvasAgentSettings> {
+  return requestJson<CanvasAgentSettings>('/api/canvas/agent/settings', '读取 Agent 设置');
+}
+
+export function updateCanvasAgentSettings(settings: CanvasAgentSettings): Promise<CanvasAgentSettings> {
+  return sendAgentJson('/api/canvas/agent/settings', '修改 Agent 设置', settings, 'PUT');
 }
 
 export function cancelCanvasAgentTurn(projectId: string, sessionId: string): Promise<CanvasAgentSession> {

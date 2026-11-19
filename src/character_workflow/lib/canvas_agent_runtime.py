@@ -18,6 +18,8 @@ from pathlib import PurePosixPath
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable
 
+from character_workflow.lib import agent_usage
+from character_workflow.lib import canvas_agent_cost as cost
 from character_workflow.lib import canvas_agent_layout as layout
 from character_workflow.lib import canvas_agent_skills as skills
 from character_workflow.lib import canvas_agent_tools as tools
@@ -136,13 +138,41 @@ class TurnContext:
     permission_mode: str
     created_node_ids: set[str] = field(default_factory=set)
     scope: ModelScope = ALL_MODELS
+    # 用量记录用：每次模型请求结束记一行（usage_hooks）。
+    session_id: str = ""
+    model_alias: str = ""
+    model: str = ""
 
 
 # ── 权限 ────────────────────────────────────────────────────────────────────────
 
 def needs_confirmation(tool: str, mode: str) -> bool:
-    """审查模式：所有写操作都确认。Auto：一律直接执行，出图、修改、删除都不再询问（2026-10-09 定）。"""
+    """审查模式：所有写操作都确认。Auto：出图、修改、删除都不询问（2026-10-09 定），
+    唯一例外是估价超过确认金额的生成（2026-11-19 定，见 generation_over_threshold）。"""
     return tool not in READ_TOOLS and not _plugin_tool_is_read_only(tool) and mode != "auto"
+
+
+def confirmation_required(project_id: str, tool: str, arguments: dict, mode: str) -> bool:
+    """一次工具调用要不要停下来等用户确认。审查模式：写操作都确认。
+    Auto：只有这里列出的情况确认（新增一种就在这里加一条，别散到别处）：
+    - 生成估价超过确认金额（2026-11-19 定）。删除维持不确认（2026-11-19 飙哥再次确认）。"""
+    if needs_confirmation(tool, mode):
+        return True
+    if tool == "run_generation":
+        return generation_over_threshold(project_id, arguments)
+    return False
+
+
+def generation_over_threshold(project_id: str, arguments: dict) -> bool:
+    """Auto 下 run_generation 估价超过确认金额时也要确认；未计价不拦。"""
+    estimate = cost.generation_estimate(project_id, str(arguments.get("surface_node_id", "")),
+                                        _count(arguments))
+    return cost.needs_cost_confirmation(estimate["estimate_cny"])
+
+
+def _count(arguments: dict) -> int:
+    value = arguments.get("count", 1)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 1
 
 
 # ── 插件贡献的工具（ADR-0037）────────────────────────────────────────────────────
@@ -515,7 +545,8 @@ def build_tools() -> list:
             turn: TurnContext = ctx.context
             if not arguments_valid(turn.project_id, name, arguments):
                 return False  # 执行时会因校验失败直接返回错误，没有任何副作用
-            return needs_confirmation(name, turn.permission_mode)
+            return await asyncio.to_thread(confirmation_required, turn.project_id, name,
+                                           arguments, turn.permission_mode)
 
         # 只读工具直接给 False：部分模型（Tuzi 的 Claude）对无参工具传空字符串参数，SDK 判为
         # 「参数无法解析」后会无视回调、一律要求人工确认，读画布也弹确认卡。
@@ -642,6 +673,32 @@ READ_LABELS = {"get_canvas": "读取画布", "list_models": "查看可用模型"
                "read_media": "读取媒体信息", "wait_for_run": "等待生成结果",
                "search_library": "查找项目参考", "search_team": "查找团队库参考",
                "read_spec": "读取类别规范"}
+
+
+def _money(value: float) -> str:
+    """与前端 formatGenerationCost 同一写法：两位小数去尾零，不足一分写 <0.01¥。"""
+    rounded = round(value + 1e-12, 2)
+    if value > 0 and rounded == 0:
+        return "<0.01¥"
+    return f"{rounded:.2f}".rstrip("0").rstrip(".") + "¥"
+
+
+def generation_summary(project_id: str, arguments: dict, batch_changes: list[dict]) -> str:
+    """确认卡上的生成摘要：节点、张数、模型、估价；未计价照写。"""
+    count = _count(arguments)
+    node_id = str(arguments.get("surface_node_id", ""))
+    try:
+        estimate = cost.generation_estimate(project_id, node_id, count, batch_changes)
+    except Exception:  # noqa: BLE001 — 摘要只是展示，读不到 draft 也要能弹卡
+        logger.warning("canvas agent generation estimate failed", exc_info=True)
+        estimate = {"model": None, "estimate_cny": None}
+    lines = [f"在节点 {node_id} 上生成 {count} 个结果"]
+    if estimate["model"]:
+        price = estimate["estimate_cny"]
+        lines.append(f"{estimate['model']} · {'未计价' if price is None else '预计 ' + _money(price)}")
+        if cost.needs_cost_confirmation(price):
+            lines.append(f"超过确认金额 {_money(cost.confirm_above_cny())}")
+    return "\n".join(lines)
 
 
 def summarize_call(tool: str, arguments: dict) -> str:
@@ -808,9 +865,10 @@ async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: D
     from agents import Runner
     agent = build_agent(session)
     context = TurnContext(session.project_id, session.permission_mode,
-                          set(session.created_node_ids), ModelScope.of(session))
+                          set(session.created_node_ids), ModelScope.of(session),
+                          session.session_id, session.model_alias or "", session.model or "")
     result = Runner.run_streamed(agent, history, context=context, max_turns=MAX_TURNS,
-                                 run_config=_run_config(session.project_id))
+                                 hooks=usage_hooks(), run_config=_run_config(session.project_id))
     async for event in result.stream_events():
         data = getattr(event, "data", None)
         if getattr(event, "type", "") == "raw_response_event" \
@@ -821,6 +879,31 @@ async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: D
             buffer.tool(str(getattr(getattr(event.item, "raw_item", None), "name", "")))
     buffer.flush()
     return result, context
+
+
+def usage_hooks():
+    """每次对话模型请求结束就记一行用量：中途失败、被停止的轮次，已经发生的请求也记得上。"""
+    from agents import RunHooks
+
+    class UsageHooks(RunHooks):
+        async def on_llm_end(self, context, agent, response) -> None:
+            await asyncio.to_thread(record_usage, context.context, response.usage)
+
+    return UsageHooks()
+
+
+def record_usage(turn: TurnContext, usage: Any) -> None:
+    details = getattr(usage, "input_tokens_details", None)
+    try:
+        agent_usage.record_request(
+            project_id=turn.project_id, session_id=turn.session_id,
+            key=keys.find_by_alias(turn.model_alias), alias=turn.model_alias, model=turn.model,
+            input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
+            output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
+            cached_tokens=int(getattr(details, "cached_tokens", 0) or 0),
+        )
+    except Exception:  # noqa: BLE001 — 记账失败不能打断对话；日志里留原因
+        logger.warning("canvas agent usage not recorded", exc_info=True)
 
 
 # 测试替换点：(session, hydrated history, buffer) → (RunResult-like, TurnContext)
@@ -856,11 +939,16 @@ async def run_turn(project_id: str, session_id: str, notify: Notify) -> None:
     items = dehydrate(_jsonable(result.to_input_list()), reverse)
     new_items = items[len(base):]
     pending = []
-    for interruption in result.interruptions:
-        call = interruption.raw_item
+    calls = [interruption.raw_item for interruption in result.interruptions]
+    batch_changes = [change for call in calls if call.name == "apply_changes"
+                     for change in _arguments(call.arguments).get("changes") or []]
+    for call in calls:
+        arguments = _arguments(call.arguments)
+        summary = (await asyncio.to_thread(generation_summary, project_id, arguments, batch_changes)
+                   if call.name == "run_generation" else summarize_call(call.name, arguments))
         pending.append(CanvasAgentApproval(
             call_id=call.call_id, tool=call.name, arguments=call.arguments or "{}",
-            summary=redact(summarize_call(call.name, _arguments(call.arguments)))[:4000],
+            summary=redact(summary)[:4000],
         ))
     usage = result.context_wrapper.usage
 

@@ -523,6 +523,22 @@ export interface CanvasAgentSkill {
   has_scripts: boolean;
 }
 
+/** 会话调对话模型的累计用量（服务端 agent_usage.session_totals）。cost_cny 只合计有价格的请求。 */
+export interface CanvasAgentSessionUsage {
+  requests: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_cny: number | null;
+  /** 没有价格的请求数；经局域网网关的请求由主机结算，本机都算这里。 */
+  unpriced: number;
+  source: 'local' | 'lan' | 'mixed';
+}
+
+/** Agent 发起的生成单次估价超过 confirm_above_cny 时，Auto 下也先确认（服务端 canvas_agent_cost）。 */
+export interface CanvasAgentSettings {
+  confirm_above_cny: number;
+}
+
 export interface CanvasAgentApprovalDecision {
   call_id: string;
   approve: boolean;
