@@ -51,6 +51,11 @@ function connect(url) {
         id += 1; pending.set(id, (d) => r(d.result?.result?.value));
         ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
       }),
+      // A page cannot send itself to file:// (Chromium blocks it); the debugger can.
+      navigate: (target) => new Promise((r) => {
+        id += 1; pending.set(id, (d) => r(d.result));
+        ws.send(JSON.stringify({ id, method: 'Page.navigate', params: { url: target } }));
+      }),
       close: () => ws.close(),
     });
   });
@@ -104,8 +109,9 @@ for (const theme of ['dark', 'light']) {
   for (const [state, query, feed] of loadingStates) {
     const url = pathToFileURL(LOADING);
     for (const [key, value] of Object.entries({ name: product, theme, ...query })) url.searchParams.set(key, String(value));
-    await cdp.eval(`location.href = ${JSON.stringify(url.href)}, true`);
+    await cdp.navigate(url.href);
     await sleep(1500);
+    if (await cdp.eval('location.protocol') !== 'file:') throw new Error(`the window did not open the loading page (${state})`);
     await cdp.eval(feed);
     await sleep(300);
     capture(rect, path.join(out, `loading-${theme}-${state}.png`));
