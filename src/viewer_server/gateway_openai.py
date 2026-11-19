@@ -36,7 +36,7 @@ class _RelayStream(StreamingResponse):
             await super().__call__(scope, receive, send)
         finally:
             # Also covers disconnects before the body iterator starts.
-            self.call.finish("failed")
+            await _finish(self.call, "failed")
             await asyncio.shield(self.stack.aclose())
 
 
@@ -138,12 +138,22 @@ def _check_media_urls(value):
             _check_media_urls(item)
 
 
+async def _finish(call: TextCall, status: str) -> None:
+    # 结算持 gateway_tasks._lock 并读写用量文件：放进线程池，网关事件循环不等锁。
+    # shield：客户端断开取消了这个协程时，结算照样做完。
+    await asyncio.shield(asyncio.to_thread(call.finish, status))
+
+
 async def _relay(request, owner, endpoint):
     payload, body_size = await _body(request)
     route_id, streaming = payload["model"], payload.get("stream", False)
     route_order: list[str] = []
-    picked = _pick(owner, route_id, [], params=payload, freeze_order=route_order, consume=True)
-    call = TextCall(owner, route_id, picked, body_size, streaming, route_order=route_order)
+    # 选成员（读 KEY 文件、路由锁）与受理（持 gateway_tasks._lock、读用量算预占）都是同步阻塞调用，
+    # 不能在网关事件循环里做：锁被图片任务的调度 / 结算占着时，整个网关端口（轮询、健康检查）一起停。
+    picked = await asyncio.to_thread(_pick, owner, route_id, [], params=payload,
+                                     freeze_order=route_order, consume=True)
+    call = await asyncio.to_thread(TextCall, owner, route_id, picked, body_size, streaming,
+                                   route_order=route_order)
     if streaming and endpoint == "chat/completions":
         payload["stream_options"] = {"include_usage": True, **payload.get("stream_options", {})}
     handed_off = False
@@ -180,7 +190,7 @@ async def _relay(request, owner, endpoint):
                         raise ValueError("上游返回错误响应")
                     result["model"] = route_id
                     model_routes.mark_healthy("text", key.alias)
-                    call.finish("done")
+                    await _finish(call, "done")
                     await stack.aclose()
                     return JSONResponse(result)
                 # Prime before sending headers: connection failures before any byte may fail over.
@@ -196,7 +206,8 @@ async def _relay(request, owner, endpoint):
                         503, gateway_tasks._safe_error(error),
                     ) from error
                 model_routes.cool_down("text", key.alias, reason)
-                picked = _pick(owner, route_id, call.task.route_tried, route_order=route_order, params=payload)
+                picked = await asyncio.to_thread(_pick, owner, route_id, call.task.route_tried,
+                                                 route_order=route_order, params=payload)
                 continue
             except BaseException:
                 await stack.aclose()
@@ -222,14 +233,27 @@ async def _relay(request, owner, endpoint):
                         # Headers/bytes are already sent. Do not retry or inject a fake SSE event.
                         pass
                     finally:
-                        call.finish(status)
+                        await _finish(call, status)
                         await asyncio.shield(stack.aclose())
 
                 return _RelayStream(stream(), call, stack)
             await stack.aclose()
     finally:
         if not handed_off:
-            call.finish("failed")
+            await _finish(call, "failed")
+
+
+def _visible_members(owner):
+    """这把网关密钥能看到的文本路由与各自首个可用成员；读 KEY 文件与路由锁，在线程池里调用。"""
+    visible = []
+    for route in model_routes.list_routes("text"):
+        if not gateway_access.route_visible(owner, route):
+            continue
+        member = next(m for m in route.members if m.provider != "atelier"
+                      and gateway_access.member_allowed(owner, m.alias))
+        key, model = model_routes._member_key_and_model(member)
+        visible.append((route, key, model))
+    return visible
 
 
 def create_router(require_key):
@@ -239,13 +263,9 @@ def create_router(require_key):
     async def models(owner=Depends(require_key)):
         rows = []
         upstreams = {}
+        visible = await asyncio.to_thread(_visible_members, owner)
         async with _client() as client:
-            for route in model_routes.list_routes("text"):
-                if not gateway_access.route_visible(owner, route):
-                    continue
-                member = next(m for m in route.members if m.provider != "atelier"
-                              and gateway_access.member_allowed(owner, m.alias))
-                key, model = model_routes._member_key_and_model(member)
+            for route, key, model in visible:
                 if key.alias not in upstreams:
                     try:
                         response = await client.get(
