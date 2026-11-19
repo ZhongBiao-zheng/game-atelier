@@ -1,4 +1,4 @@
-// One worker of the zip extraction (src/seed.mjs). Runs as an eval'd worker_threads script, so it
+// One worker of the zip extraction (src/unpack.mjs). Runs as an eval'd worker_threads script, so it
 // only uses Node built-ins. Every worker reads the central directory itself and extracts entries
 // index, index + count, index + 2·count, …; file creation (the slow part on NTFS) happens on this
 // thread with synchronous calls, so the workers really run in parallel.
@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
 
-const { seed, staging, index, count, counter } = workerData;
+const { file, staging, index, count, counter } = workerData;
 const done = new Int32Array(counter);
 const root = path.resolve(staging);
 
@@ -59,7 +59,7 @@ function target(name) {
   return resolved;
 }
 
-const fd = fs.openSync(seed, 'r');
+const fd = fs.openSync(file, 'r');
 try {
   const entries = centralDirectory(fd);
   parentPort.postMessage({ total: entries.length });

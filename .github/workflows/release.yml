@@ -87,8 +87,9 @@ jobs:
             release-build/*.tar.gz
             release-build/*.sha256
           if-no-files-found: error
-  # 桌面安装器以对应平台的压缩包为种子。第一、二批期间它失败不挡压缩包发布与 CNB 同步，
-  # 但 job 失败照样让整个 run 变红，不用 continue-on-error 盖住。
+  # 桌面安装器不带运行包：记下对应平台压缩包的 sha256 与 BUILD_ID，首启从 Release 下载同一份字节
+  # （与 publish 取同一个构建产物）。它失败不挡压缩包发布与 CNB 同步，但 job 失败照样让整个 run
+  # 变红，不用 continue-on-error 盖住。
   desktop:
     needs: build
     strategy:
@@ -108,7 +109,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: GameAtelier-${{ matrix.platform }}
-          path: seed
+          path: runtime
       - uses: astral-sh/setup-uv@v6
       - uses: actions/setup-node@v4
         with:
@@ -125,22 +126,24 @@ jobs:
         if: matrix.platform == 'windows-x64'
         with:
           workspaces: desktop/setup
-      - name: Build installer around the runtime bundle
+      - name: Build installer for the runtime bundle
         shell: bash
         run: |
-          seed="$(find seed -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)"
-          uv run --no-project python scripts/build_desktop.py --seed "$seed" --output desktop-build --platform ${{ matrix.platform }}
+          echo "RUNTIME=$(find runtime -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)" >> "$GITHUB_ENV"
+          runtime="$(find runtime -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)"
+          uv run --no-project python scripts/build_desktop.py --runtime "$runtime" --output desktop-build --platform ${{ matrix.platform }}
+      # Before the release exists the app downloads from the smoke's local feed (same bytes).
       - name: Install, open, quit and uninstall the installed app
         shell: bash
         run: |
           installer="$(find desktop-build -maxdepth 1 -type f \( -name '*.dmg' -o -name '*-windows-x64.zip' \) | head -1)"
-          uv run --no-project python scripts/smoke_desktop.py --installer "$installer"
+          uv run --no-project python scripts/smoke_desktop.py --installer "$installer" --runtime "$RUNTIME"
       - name: Fresh install, first start, install over the running app, uninstall
         if: matrix.platform == 'windows-x64'
         shell: bash
         run: |
           setup="$(find desktop-build -maxdepth 1 -type f -name '*-setup.exe' | head -1)"
-          uv run --no-project python scripts/smoke_desktop.py --setup "$setup"
+          uv run --no-project python scripts/smoke_desktop.py --setup "$setup" --runtime "$RUNTIME"
       # Users get the dmg and the setup.exe; the zipped Windows app folder only feeds the smoke test.
       - uses: actions/upload-artifact@v4
         with:

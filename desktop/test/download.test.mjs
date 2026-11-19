@@ -75,7 +75,7 @@ async function serve(sources) {
 
 function options(dir, sources, extra = {}) {
   return {
-    release: RELEASE, version: VERSION, platform: PLATFORM, dir, sources,
+    release: RELEASE, version: VERSION, platform: PLATFORM, sha256: SHA, dir, sources,
     fetchFor: () => fetch, statfs: () => PLENTY, retryDelays: [10, 10], stallMs: 2000, ...extra,
   };
 }
@@ -127,7 +127,7 @@ test('a complete archive left by a quit before unpacking is reused, not fetched 
     fs.writeFileSync(path.join(dir, ASSET), ARCHIVE);
     const file = await downloadRuntime(options(dir, [srv.source('a')]));
     assert.deepEqual(fs.readFileSync(file), ARCHIVE);
-    assert.ok(!srv.log.some((r) => r.file.endsWith('.zip')), 'only the checksum was requested');
+    assert.deepEqual(srv.log, [], 'no network at all');
   } finally { await srv.close(); }
 });
 
@@ -161,13 +161,36 @@ test('5xx is retried on the same source', async () => {
   } finally { await srv.close(); }
 });
 
-test('a wrong checksum everywhere fails with nothing left behind', async () => {
+test('sources whose checksum is not this build\'s are skipped without downloading', async () => {
+  // An unreleased build: the published archive of the same version is a different one.
   const srv = await serve({ a: { checksum: '0'.repeat(64) }, b: { checksum: '1'.repeat(64) } });
   try {
     const dir = tmp();
     await assert.rejects(downloadRuntime(options(dir, [srv.source('a'), srv.source('b')])),
       (e) => e instanceof DownloadError && e.kind === 'checksum' && e.failures.length === 2);
-    assert.deepEqual(fs.readdirSync(dir), []);
+    assert.deepEqual(fs.readdirSync(dir).filter((name) => !name.endsWith('.json')), []);
+    assert.ok(!srv.log.some((r) => r.file.endsWith('.zip')), 'the archive was never requested');
+  } finally { await srv.close(); }
+});
+
+test('a source whose checksum cannot be read is skipped, never downloaded unchecked', async () => {
+  const srv = await serve({ a: { failFirst: 99 }, b: {} });
+  try {
+    const file = await downloadRuntime(options(tmp(), [srv.source('a'), srv.source('b')]));
+    assert.deepEqual(fs.readFileSync(file), ARCHIVE);
+    assert.ok(!srv.log.some((r) => r.prefix === 'a' && r.file.endsWith('.zip')));
+  } finally { await srv.close(); }
+});
+
+test('the archive must hash to what the build recorded, whatever the source says', async () => {
+  const other = Buffer.from(ARCHIVE);
+  other[0] ^= 1;
+  const otherSha = createHash('sha256').update(other).digest('hex');
+  const srv = await serve({ a: { archive: other, checksum: otherSha } });
+  try {
+    const dir = tmp();
+    await assert.rejects(downloadRuntime(options(dir, [srv.source('a')])), (e) => e.kind === 'checksum');
+    assert.ok(!srv.log.some((r) => r.file.endsWith('.zip')), 'the source\'s own checksum is not trusted');
   } finally { await srv.close(); }
 });
 
@@ -240,19 +263,22 @@ test('a source that ignores Range is downloaded again from the start', async () 
   } finally { await srv.close(); }
 });
 
-test('importing a file: it must be this version, and its checksum file must agree', async () => {
+test('importing a file of another version is refused, naming the version needed', async () => {
   const dir = tmp();
-  const ctx = { release: RELEASE, version: VERSION, platform: PLATFORM };
   const other = path.join(dir, 'GameAtelier-0.5.139-windows-x64.zip');
   fs.writeFileSync(other, ARCHIVE);
-  await assert.rejects(checkImported(other, ctx), (e) => e.kind === 'version' && e.message === `需要 ${VERSION} 的运行包`);
+  await assert.rejects(checkImported(other, { release: RELEASE, version: VERSION, platform: PLATFORM, sha256: SHA }),
+    (e) => e.kind === 'version' && e.message === `需要 ${VERSION} 的运行包`);
+});
+
+test('importing a file that is not this build\'s runtime is refused, naming the version needed', async () => {
+  const dir = tmp();
   const file = path.join(dir, ASSET);
   fs.writeFileSync(file, ARCHIVE);
-  assert.equal(await checkImported(file, ctx), file, 'no .sha256 beside it: accepted, unpacking validates it');
-  fs.writeFileSync(`${file}.sha256`, `${'2'.repeat(64)}  ${ASSET}\n`);
-  await assert.rejects(checkImported(file, ctx), (e) => e.kind === 'checksum');
-  fs.writeFileSync(`${file}.sha256`, `${SHA}  ${ASSET}\n`);
-  assert.equal(await checkImported(file, ctx), file);
+  const ctx = { release: RELEASE, version: VERSION, platform: PLATFORM };
+  await assert.rejects(checkImported(file, { ...ctx, sha256: '3'.repeat(64) }),
+    (e) => e.kind === 'checksum' && e.message.includes(VERSION));
+  assert.equal(await checkImported(file, { ...ctx, sha256: SHA }), file, 'no .sha256 beside it is needed');
 });
 
 test('source order: CNB direct, CNB through the system proxy, then GitHub; the test feed replaces them', () => {

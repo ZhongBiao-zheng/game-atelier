@@ -1,25 +1,25 @@
-// Unpacking the seed bundle that ships inside the installer into the runtime root.
+// Unpacking a runtime archive (downloaded, or imported from a file) into the runtime root.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
-import { BUNDLE_DIR, log, validateBundle, writeSeedRecord } from './runtime.mjs';
+import { BUNDLE_DIR, log, validateBundle } from './runtime.mjs';
 
 /**
  * macOS: the system bsdtar unpacks at native speed (it refuses `..` and absolute paths, keeps
  * modes and mtimes). The archive is streamed into its stdin, so the bytes read so far give real
  * progress.
  */
-function extractTarGz(seed, staging, report, signal) {
+function extractTarGz(file, staging, report, signal) {
   return new Promise((resolve, reject) => {
-    const total = fs.statSync(seed).size;
+    const total = fs.statSync(file).size;
     let done = 0;
     const tar = spawn('/usr/bin/tar', ['-xzf', '-', '-C', staging], { stdio: ['pipe', 'ignore', 'pipe'] });
     let stderr = '';
     tar.stderr.on('data', (chunk) => { stderr += chunk; });
-    const input = fs.createReadStream(seed);
+    const input = fs.createReadStream(file);
     input.on('data', (chunk) => {
       done += chunk.length;
       report(done, total);
@@ -43,7 +43,7 @@ function extractTarGz(seed, staging, report, signal) {
  * entries are split across worker threads (src/unzip-worker.cjs). Progress is entries extracted
  * out of all entries; only this thread reports, and the shared counter only grows.
  */
-function extractZip(seed, staging, report, signal) {
+function extractZip(file, staging, report, signal) {
   const source = fs.readFileSync(fileURLToPath(new URL('./unzip-worker.cjs', import.meta.url)), 'utf8');
   const count = Math.min(Math.max(os.availableParallelism(), 1), 8);
   const counter = new SharedArrayBuffer(4);
@@ -52,7 +52,7 @@ function extractZip(seed, staging, report, signal) {
   let reported = -1;
   let reports = 0;
   const workers = Array.from({ length: count }, (_, index) => new Worker(source, {
-    eval: true, workerData: { seed, staging, index, count, counter },
+    eval: true, workerData: { file, staging, index, count, counter },
   }));
   const tick = () => {
     const now = Atomics.load(done, 0);
@@ -81,8 +81,8 @@ function extractZip(seed, staging, report, signal) {
     });
 }
 
-function extract(seed, staging, report, signal) {
-  return seed.endsWith('.zip') ? extractZip(seed, staging, report, signal) : extractTarGz(seed, staging, report, signal);
+function extract(file, staging, report, signal) {
+  return file.endsWith('.zip') ? extractZip(file, staging, report, signal) : extractTarGz(file, staging, report, signal);
 }
 
 /** Folders an earlier attempt left behind (the app quit or crashed while unpacking). */
@@ -97,11 +97,11 @@ function removeQuietly(dir) {
 }
 
 /**
- * (Re)creates `<parent>/GameAtelier` from the seed. The new bundle is unpacked into a staging
+ * (Re)creates `<parent>/GameAtelier` from a runtime archive. The new bundle is unpacked into a staging
  * folder and validated first; only then is the old root moved aside and the new one moved in.
  * If moving in fails, the old root is put back untouched.
  */
-export async function unpackSeed(parent, seed, report, signal) {
+export async function unpackRuntime(parent, archive, report, signal) {
   const root = path.join(parent, BUNDLE_DIR);
   // Unique per attempt: a retry in the same process must not meet an earlier attempt's folders.
   const attempt = `${process.pid}-${Date.now()}`;
@@ -112,12 +112,11 @@ export async function unpackSeed(parent, seed, report, signal) {
   fs.mkdirSync(staging, { recursive: true });
   const started = Date.now();
   try {
-    await extract(seed.file, staging, report, signal);
+    await extract(archive.file, staging, report, signal);
     if (signal?.aborted) throw new Error('解压已取消');
     const extracted = path.join(staging, BUNDLE_DIR);
     validateBundle(extracted);
-    writeSeedRecord(extracted, seed);
-    log(`unpacked ${path.basename(seed.file)} in ${Date.now() - started} ms`);
+    log(`unpacked ${path.basename(archive.file)} in ${Date.now() - started} ms`);
     if (!fs.existsSync(root)) {
       fs.renameSync(extracted, root);
       return root;

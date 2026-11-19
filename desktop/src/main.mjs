@@ -13,7 +13,7 @@ import { buildMenu } from './menu.mjs';
 import { securityProbe } from './probe.mjs';
 import * as rt from './runtime.mjs';
 import { allowedNavigation, externalAllowed, trustedSender } from './security.mjs';
-import { unpackSeed } from './seed.mjs';
+import { unpackRuntime } from './unpack.mjs';
 import { initialBounds, MIN_SIZE, saveBounds } from './window-state.mjs';
 
 const { log } = rt;
@@ -38,8 +38,6 @@ const CAPTION_HEIGHT = 40;
  */
 const CAPTION_BACKGROUND = '#00000000';
 const ARGS = process.argv.slice(1);
-/** Windows installer step: unpack the runtime from the seed, no window, then exit. */
-const PREPARE_ONLY = ARGS.includes('--prepare-runtime');
 /** Ask the running instance to go through its normal quit flow. */
 const QUIT_REQUEST = ARGS.includes('--quit');
 const SMOKE = process.env.ATELIER_SMOKE === '1';
@@ -51,8 +49,8 @@ const TRAY_ICON = path.join(process.resourcesPath, 'icon.ico');
 /** Where the runtime is downloaded from (src/viewer_server/release_sources.json, staged by `pnpm stage`). */
 const RELEASE_FILE = path.join(app.getAppPath(), 'stage', 'release_sources.json');
 const PLATFORM = MAC ? 'macos-arm64' : 'windows-x64';
-/** macOS: inside the app bundle. Windows: next to the exe, where the installer puts it. */
-const SEED_DIR = MAC ? path.join(process.resourcesPath, 'seed') : path.join(path.dirname(process.execPath), 'seed');
+/** The runtime this build goes with (scripts/build_desktop.py): downloaded on first start, checked against it. */
+const RUNTIME_INFO = path.join(app.getAppPath(), 'stage', 'runtime.json');
 
 const localData = rt.localDataDir();
 const parent = rt.runtimeParent(localData);
@@ -73,7 +71,7 @@ const state = {
   quitting: false,
   /** Shut down / log out / session end: quit without asking, never hold up the system. */
   systemEnding: false,
-  /** Set once the seed was unpacked by this launch (a first start). */
+  /** Set once a runtime was unpacked by this launch (a first start). */
   unpacked: false,
   progressAt: 0,
   /** The runtime download in progress: its AbortController and the last progress. */
@@ -101,6 +99,11 @@ function showMain() {
   const { win } = state;
   if (!win) return;
   if (win.isMinimized()) win.restore();
+  // A smoke run must not take focus from whoever is using the machine.
+  if (SMOKE) {
+    win.showInactive();
+    return;
+  }
   win.show();
   win.focus();
 }
@@ -193,7 +196,7 @@ async function unpack(archive) {
   const controller = new AbortController();
   state.unpack = controller;
   try {
-    return await unpackSeed(parent, archive, pushProgress, controller.signal);
+    return await unpackRuntime(parent, archive, pushProgress, controller.signal);
   } finally {
     state.unpack = null;
   }
@@ -210,16 +213,16 @@ async function unpackArchive(file, version) {
  * Downloads this shell's runtime and unpacks it. Cancelling raises `paused`; the loading page then
  * offers to resume (boot again, continuing the partial file) or to import a file instead.
  */
-async function downloadAndUnpack() {
+async function downloadAndUnpack(info) {
   const release = readRelease(RELEASE_FILE);
-  const version = app.getVersion();
+  const { version, sha256 } = info;
   const controller = new AbortController();
   state.download = { controller, done: 0, total: 0 };
   navigate(localUrl({ stage: 'download' }));
   const started = Date.now();
   try {
     const file = await downloadRuntime({
-      release, version, platform: PLATFORM, dir: path.join(parent, 'download'),
+      release, version, platform: PLATFORM, sha256, dir: path.join(parent, 'download'),
       sources: plannedSources(release), fetchFor, onProgress: pushDownload, signal: controller.signal,
       onSource: (source) => log(`download ${version} from ${source.id} (${source.proxy})`),
     });
@@ -249,8 +252,10 @@ function cancelDownload() {
 /** A runtime archive the user downloaded in a browser. Nothing changes unless it checks out. */
 async function importRuntime() {
   if (state.booting) return;
+  const info = rt.readRuntimeInfo(RUNTIME_INFO);
+  if (!info) return;
   const release = readRelease(RELEASE_FILE);
-  const version = app.getVersion();
+  const { version, sha256 } = info;
   const ext = release.archive_ext[PLATFORM].replace(/^\./, '').split('.').pop();
   const { canceled, filePaths } = await dialog.showOpenDialog(state.win, {
     properties: ['openFile'], filters: [{ name: '运行包', extensions: [ext] }],
@@ -258,7 +263,7 @@ async function importRuntime() {
   if (canceled || !filePaths[0]) return;
   state.booting = true;
   try {
-    const file = await checkImported(filePaths[0], { release, version, platform: PLATFORM });
+    const file = await checkImported(filePaths[0], { release, version, platform: PLATFORM, sha256 });
     log(`importing ${file}`);
     await unpack({ file, version });
   } catch (error) {
@@ -269,29 +274,6 @@ async function importRuntime() {
     state.booting = false;
   }
   boot();
-}
-
-/** --prepare-runtime progress for the installer: one `progress <done> <total>` line at a time. */
-let printedAt = 0;
-function printProgress(done, total) {
-  const now = Date.now();
-  if (done < total && now - printedAt < 100) return;
-  printedAt = now;
-  process.stdout.write(`progress ${done} ${total}\n`);
-}
-
-/** Exit code for --prepare-runtime; on failure the last stderr line is the reason. */
-async function prepareOnly() {
-  log(`${app.getName()} ${app.getVersion()} --prepare-runtime`);
-  try {
-    await prepareRuntime();
-    return 0;
-  } catch (error) {
-    const reason = error.detail || error.message || '安装运行环境失败';
-    log(`prepare-runtime failed: ${reason}`);
-    process.stderr.write(`${reason}\n`);
-    return 1;
-  }
 }
 
 async function confirm(title, message, ok) {
@@ -318,8 +300,7 @@ async function releaseRuntime(root) {
   const server = dataRoot && await rt.verifiedServer(dataRoot);
   if (!server || !rt.isOwned(dataRoot, server)) return true;
   const work = await rt.activeWork(dataRoot, server);
-  // --prepare-runtime runs after the installer's --quit, which already asked.
-  const ask = work !== 0 && !SMOKE && !PREPARE_ONLY;
+  const ask = work !== 0 && !SMOKE;
   if (ask && !(await confirm(app.getName(), workMessage(work, '更新运行环境'), '仍然更新'))) {
     return false;
   }
@@ -332,25 +313,14 @@ async function prepareRuntime() {
   if (state.runtime) return state.runtime;
   let root = rt.runtimeRoot(parent);
   if (!process.env.ATELIER_RUNTIME_ROOT) {
-    const seed = rt.readSeed(SEED_DIR);
-    log(seed ? `seed ${path.basename(seed.file)} build=${seed.build}` : 'seed missing');
-    const reason = seed ? rt.replacementReason(root, seed) : rt.installed(root) ? null : 'missing';
+    const info = rt.readRuntimeInfo(RUNTIME_INFO);
+    if (!info) throw failure('install');
+    log(`runtime for this build: ${info.file} build=${info.build}`);
+    const reason = rt.replacementReason(root, info);
     if (reason) log(`runtime replacement: ${reason}`);
-    if (reason && !seed) {
-      // No runtime in the package: download this shell's version (docs/contracts/desktop-shell.md).
-      root = await downloadAndUnpack();
-      state.runtime = new rt.Runtime(root);
-      return state.runtime;
-    }
-    if (reason === 'too-old') throw failure('install', '安装包里的运行环境比已有的旧');
-    if (reason === 'missing' || (['contract', 'older', 'build'].includes(reason) && await releaseRuntime(root))) {
-      try {
-        root = PREPARE_ONLY ? await unpackSeed(parent, seed, printProgress) : await unpack(seed);
-      } catch (error) {
-        log(`runtime not ready: ${error.message}`);
-        // A failed replacement leaves the old runtime in place; keep using it if it can serve.
-        if (!(rt.installed(root) && rt.meetsContract(root))) throw failure('install', error.message);
-      }
+    if (reason === 'too-old') throw failure('install', '已有的运行环境比本安装包新，请安装新版 Atelier');
+    if (reason === 'missing' || (reason && await releaseRuntime(root))) {
+      root = await downloadAndUnpack(info);
     } else if (reason) {
       log('runtime replacement postponed');
     }
@@ -585,7 +555,8 @@ function createWindow() {
   state.win = win;
   if (bounds.x === undefined) win.center();
   if (maximized) win.maximize();
-  win.show();
+  if (SMOKE) win.showInactive();
+  else win.show();
   const wc = win.webContents;
   wc.on('did-finish-load', () => log(`page loaded ${wc.getURL()}`));
   wc.on('will-navigate', guardNavigation);
@@ -728,6 +699,8 @@ function appUserModelId() {
 
 function start() {
   log(`${app.getName()} ${app.getVersion()} starting`);
+  // Smoke runs on a developer's Mac: no Dock icon, never activated.
+  if (SMOKE && MAC) app.setActivationPolicy('accessory');
   const appId = MAC ? null : appUserModelId();
   if (appId) app.setAppUserModelId(appId);
   setupSession();
@@ -750,10 +723,7 @@ function start() {
   if (SMOKE) runSmoke();
 }
 
-if (PREPARE_ONLY) {
-  // No window and no single-instance lock: the installer runs this before the app is opened.
-  prepareOnly().then((code) => app.exit(code));
-} else if (!app.requestSingleInstanceLock()) {
+if (!app.requestSingleInstanceLock()) {
   // The running instance received our arguments (second-instance), --quit included.
   app.exit(0);
 } else if (QUIT_REQUEST) {
