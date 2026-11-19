@@ -767,7 +767,7 @@ def display_messages(items: list[dict], turn_id: str) -> list[CanvasAgentMessage
 
 # ── 一轮对话 ────────────────────────────────────────────────────────────────────
 
-def build_agent(session: CanvasAgentSession):
+def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None] | None = None):
     from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, set_tracing_disabled
     from openai import AsyncOpenAI, DefaultAsyncHttpxClient
     from openai.types.shared import Reasoning
@@ -777,9 +777,15 @@ def build_agent(session: CanvasAgentSession):
         raise CanvasToolError("INVALID_PARAMETERS", "请先选择对话模型", 422)
     if not key.enabled:
         raise CanvasToolError("MODEL_UNAVAILABLE", "供应商已停用", 422)
-    # 局域网网关直连，不读本机代理环境（与图片 caller 一致）。
-    http_client = DefaultAsyncHttpxClient(trust_env=False) if key.provider == "atelier" else None
-    client = AsyncOpenAI(base_url=chat_base_url(key), api_key=key.access_key, max_retries=2,
+    # 局域网网关：直连不读本机代理；SDK 自带重试关掉（读超时也会重发，可能重复计费），
+    # 只保留「主机确定没收下才重发」（gateway_text_wait，第 5 批 5-4）。
+    http_client, retries = None, 2
+    if key.provider == "atelier":
+        from character_workflow.lib.gateway_text_wait import UpdatingAwareTransport
+        http_client = DefaultAsyncHttpxClient(
+            trust_env=False, transport=UpdatingAwareTransport(on_wait=on_gateway_wait))
+        retries = 0
+    client = AsyncOpenAI(base_url=chat_base_url(key), api_key=key.access_key, max_retries=retries,
                          http_client=http_client)
     settings = ModelSettings(reasoning=Reasoning(effort=session.effort)) if session.effort \
         else ModelSettings()
@@ -863,7 +869,9 @@ def _run_config(project_id: str):
 
 async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: DeltaBuffer):
     from agents import Runner
-    agent = build_agent(session)
+
+    from character_workflow.lib.gateway_text_wait import WAITING_LABEL
+    agent = build_agent(session, on_gateway_wait=lambda: buffer.tool(WAITING_LABEL))
     context = TurnContext(session.project_id, session.permission_mode,
                           set(session.created_node_ids), ModelScope.of(session),
                           session.session_id, session.model_alias or "", session.model or "")

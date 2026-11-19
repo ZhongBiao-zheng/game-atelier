@@ -687,7 +687,7 @@ def _run_once(
 ) -> Job:
     from character_workflow.lib.schemas import JobKind
     if job.kind == JobKind.TEXT:
-        return _run_text_job(job)
+        return _run_text_job(job, should_cancel=should_cancel, on_phase=on_phase)
     if job.kind == JobKind.VIDEO:
         return _run_video_job(job, park_gateway_wait=park_gateway_wait)
     if job.kind == JobKind.AUDIO:
@@ -850,8 +850,14 @@ def _with_reference_numbering(prompt: str, params: dict[str, Any]) -> str:
     return f"{_REFERENCE_NUMBERING_MARK}{labels}。请按这些编号理解提示词中的引用。\n\n{prompt}"
 
 
-def _run_text_job(job: Job) -> Job:
+def _run_text_job(job: Job, *, should_cancel: Callable[[], bool] | None = None,
+                  on_phase: Callable[[str], None] | None = None) -> Job:
+    from character_workflow.lib.gateway_text_wait import Waiting
+
     params = _params(job)
+    # 画布文本节点能显示「等待网关」：经局域网 Atelier 时主机更新期间等待重发（第 5 批 5-4）。
+    gateway_wait = (Waiting(on_phase=on_phase, should_cancel=should_cancel, resume_phase="sent")
+                    if job.provider == "atelier" and job.namespace == "canvas" else None)
     try:
         if not job.alias:
             raise JobRunnerError("text job requires an alias to route to a provider")
@@ -861,6 +867,7 @@ def _run_text_job(job: Job) -> Job:
             alias=job.alias,
             n=max(1, int(params.get("n") or 1)),
             params=params,
+            gateway_wait=gateway_wait,
         )
         texts = [text for text in outputs if text and len(text) <= 40_000]
         if not texts:
