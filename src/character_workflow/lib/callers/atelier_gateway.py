@@ -44,6 +44,14 @@ class GatewayError(RuntimeError):
         self.detail = detail
 
 
+class GatewayUnconfirmed(GatewayError):
+    """接入端没从网关拿到这次任务的结果：提交未确认、查询放弃、产物下载失败。
+
+    网关那边可能已经在出图或已经出完；不能换自家 KEY 重出，「再次生成」凭幂等键接回。
+    按类型判断，不靠报错文案。
+    """
+
+
 
 # 文本 / Agent 这类不走 _session() 的请求也要直连网关：把环境代理逐个置空（requests 合并时删除）。
 DIRECT_PROXIES = {"http": None, "https": None}
@@ -238,10 +246,8 @@ def _run_task(
                 task_id = _submit(session, base, headers, alias=alias, kind=kind, model=model,
                                   prompt=prompt, n=n, params=wire_params, uploads=uploads,
                                   idempotency_key=params["gateway_idempotency_key"])
-            except GatewayError as error:
-                if "未确认" in str(error):
-                    raise unconfirmed(error) from error.__cause__
-                raise
+            except GatewayUnconfirmed as error:
+                raise unconfirmed(error) from error.__cause__
             params["provider_task_protocol"] = PROTOCOL
             params["provider_task_ids"] = [task_id]
             if on_params_changed:
@@ -253,7 +259,7 @@ def _run_task(
         def poll(task_id: str) -> dict[str, Any]:
             try:
                 return _poll(session, base, headers, task_id, phase, cancelled)
-            except GatewayError as error:
+            except GatewayUnconfirmed as error:
                 raise unconfirmed(error) from error.__cause__
 
         existing = params.get("provider_task_ids") or []
@@ -318,7 +324,7 @@ def _run_task(
                     return response
                 except (requests.RequestException, GatewayError) as error:
                     if delay is None:
-                        raise unconfirmed(GatewayError(
+                        raise unconfirmed(GatewayUnconfirmed(
                             f"网关任务 {task_id} 已完成，结果下载失败（未确认是否取回）")) from error
                     time.sleep(delay)
             raise AssertionError("unreachable")
@@ -389,7 +395,7 @@ def _submit(session, base, headers, *, alias, kind, model, prompt, n, params, up
                 model_routes.cool_down(modality_for(kind), alias, "rate_limited", seconds=error.retry_after)
             raise
         return str(response.json()["task_id"])
-    raise GatewayError("网关提交结果未确认，未自动重新提交") from last_error
+    raise GatewayUnconfirmed("网关提交结果未确认，未自动重新提交") from last_error
 
 
 def _poll(session, base, headers, task_id, phase, cancelled) -> dict[str, Any]:
@@ -413,7 +419,7 @@ def _poll(session, base, headers, task_id, phase, cancelled) -> dict[str, Any]:
             last_ok = time.monotonic()
         except (requests.RequestException, GatewayError) as error:
             if time.monotonic() - last_ok > POLL_GIVE_UP_SECONDS:
-                raise GatewayError(f"网关任务 {task_id} 结果未确认（查询失败）") from error
+                raise GatewayUnconfirmed(f"网关任务 {task_id} 结果未确认（查询失败）") from error
             time.sleep(POLL_INTERVAL_SECONDS)
             continue
         if status.get("status") in _TERMINAL:

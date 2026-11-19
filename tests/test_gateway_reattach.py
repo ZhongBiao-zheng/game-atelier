@@ -227,3 +227,108 @@ def test_studio_create_only_inherits_from_an_unconfirmed_failed_studio_job(gatew
     assert forged.json()["params"].get("gateway_idempotency_key") is None
     assert client.post("/api/studio/jobs",
                        json={**body, "reattach_job_id": "../x"}).status_code == 422
+
+
+# ---------------------------------------------------------------- 真实建任务入口
+# 第一次任务以「网关未确认」失败后，不改任何输入、经真实入口再次生成：
+# 新任务算出的指纹必须与原任务落盘的指纹相等，主机任务数为 1。
+
+
+def _png_bytes() -> bytes:
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (8, 8), (200, 80, 40)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def test_studio_regenerate_through_the_real_route_keeps_the_fingerprint(gateway, upstream, faults,
+                                                                        monkeypatch):
+    from tests.local_client import LocalTestClient
+    from viewer_server import routes
+    from viewer_server.server_app import build_app
+
+    monkeypatch.setattr(routes, "_start_studio_job_task", lambda job_id: None)
+    client = LocalTestClient(base_url="http://127.0.0.1", app=build_app())
+    uploaded = client.post("/api/uploads", files={"file": ("ref.png", _png_bytes(), "image/png")})
+    assert uploaded.status_code == 200
+    body = {"prompt": "一只橘猫", "model": "gpt-image-2", "alias": "Hub",
+            "params": {"n": 1, "ratio": "1:1", "size_mode": "ratio",
+                       "reference_images": [uploaded.json()["path"]]}}
+
+    first = client.post("/api/studio/jobs", json=body).json()
+    faults.lost_posts = 3
+    with pytest.raises(job_runner.JobRunnerError):
+        job_runner.run_job(first["job_id"])
+    failed = read_job(first["job_id"])
+    assert failed.params.gateway_unconfirmed is True
+
+    second = client.post("/api/studio/jobs", json={**body, "reattach_job_id": failed.job_id}).json()
+    done = job_runner.run_job(second["job_id"])
+    assert done.status == JobStatus.DONE
+    assert done.params.gateway_request_fingerprint == failed.params.gateway_request_fingerprint
+    assert done.params.gateway_reattach_of == failed.job_id
+    assert len(_host_tasks()) == 1 and len(upstream["calls"]) == 1
+
+
+def test_canvas_regenerate_through_the_real_run_path_keeps_the_fingerprint(gateway, upstream,
+                                                                           faults):
+    from character_workflow.lib.canvas_projects import (
+        create_canvas_project, read_canvas_document, replace_canvas_node_media,
+        save_canvas_document,
+    )
+    from character_workflow.lib.canvas_runs import run_canvas_job, submit_canvas_run
+    from character_workflow.lib.schemas import CanvasDocument
+
+    now = datetime.now(timezone.utc).isoformat()
+    pid = create_canvas_project("网关接回").project_id
+    current = read_canvas_document(pid)
+    payload = current.model_dump(mode="json")
+    payload.update({
+        "nodes": [
+            {"id": "ref", "title": "参考", "type": "image", "position": {"x": 0, "y": 0},
+             "z_index": 0, "data": {"current_version_id": None, "generation_draft": None,
+                                    "active_run_id": None,
+                                    "display": {"fit": "contain", "free_resize": False}}},
+            {"id": "config", "title": "生成", "type": "image", "position": {"x": 300, "y": 0},
+             "z_index": 0, "data": {"generation_draft": {
+                 "mode": "image", "prompt": "一只纸雕狐狸", "input_policy": "all_connected",
+                 "model": "gpt-image-2", "alias": "Hub", "params": {"ratio": "1:1"},
+                 "updated_at": now}}},
+        ],
+        "connections": [{"id": "edge-ref", "role": "input", "source_node_id": "ref",
+                         "target_node_id": "config"}],
+    })
+    saved = save_canvas_document(pid, CanvasDocument.model_validate(payload), current.revision)
+    _v, saved, _ = replace_canvas_node_media(pid, "ref", "ref.png", ".png", _png_bytes(), "image",
+                                             saved.revision)
+
+    first, _doc = submit_canvas_run(pid, "config", saved.revision)
+    faults.lost_posts = 3
+    try:
+        run_canvas_job(first.job_id)
+    except Exception:  # noqa: BLE001 — 画布 runner 失败时可能抛出，下面看落盘结果
+        pass
+    failed = read_job(first.job_id)
+    assert failed.status == JobStatus.FAILED and failed.params.gateway_unconfirmed is True
+
+    second, _doc = submit_canvas_run(pid, "config", read_canvas_document(pid).revision)
+    assert second.params.gateway_reattach_of == failed.job_id
+    done = run_canvas_job(second.job_id)
+    assert done.status == JobStatus.DONE
+    assert done.params.gateway_request_fingerprint == failed.params.gateway_request_fingerprint
+    assert len(_host_tasks()) == 1 and len(upstream["calls"]) == 1
+
+
+def test_gateway_error_mentioning_unconfirmed_is_not_treated_as_unconfirmed(gateway, upstream,
+                                                                           monkeypatch):
+    """按类型判断：主机明确拒绝、文案里碰巧带「未确认」的错误，不记 gateway_unconfirmed。"""
+    def reject(*_args, **_kwargs):
+        raise atelier_gateway.GatewayError("gateway api 422: 素材来源未确认")
+
+    monkeypatch.setattr(atelier_gateway, "_submit", reject)
+    with pytest.raises(job_runner.JobRunnerError):
+        job_runner.run_job(_now_job("job-text").job_id)
+    assert not read_job("job-text").params.gateway_unconfirmed
