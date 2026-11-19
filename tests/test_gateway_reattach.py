@@ -80,6 +80,17 @@ def _host_tasks():
     return gateway_tasks._all_tasks()
 
 
+def _host_settled(timeout: float = 10.0):
+    """等主机上的任务都进终态再数上游调用：它们在主机自己的线程里跑，成员端拿到结果不代表别的任务也跑完了。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        tasks = _host_tasks()
+        if tasks and all(task.status in gateway_tasks.TERMINAL for task in tasks):
+            return tasks
+        time.sleep(0.05)
+    raise AssertionError(f"主机任务 {timeout:.0f} 秒内没有全部结束")
+
+
 def _now_job(job_id, *, prompt="一只猫", **params):
     """_job 的提交时间是固定的旧日期；接回有 20 小时窗口，这里改成现在。"""
     return save_job(_job(job_id, **params).model_copy(update={
@@ -124,7 +135,8 @@ def test_regenerate_after_changing_the_prompt_places_a_new_order(gateway, upstre
     failed = _fail_unconfirmed("job-b", faults)
     done = _regenerate(failed, "job-b2", prompt="一只狗")
     assert done.status == JobStatus.DONE
-    assert len(_host_tasks()) == 2 and len(upstream["calls"]) == 2
+    # 主机上的任务 1（提交回应丢了的那单）在另一个线程里跑，不能假定它已经调过上游。
+    assert len(_host_settled()) == 2 and len(upstream["calls"]) == 2
     assert done.params.gateway_idempotency_key != failed.params.gateway_idempotency_key
     assert done.params.gateway_reattach_of is None
 
