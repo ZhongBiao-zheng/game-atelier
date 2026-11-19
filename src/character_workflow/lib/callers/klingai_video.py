@@ -336,21 +336,32 @@ def render_video(
     if key is None:
         raise KlingaiVideoError(f"未找到 Key: {alias}")
     tuzi = _is_tuzi(key)
-    spec, endpoint, body = build_request(prompt, model, params, unified=tuzi)
-    url = (f"{_tuzi_root(key)}/v1/videos" if tuzi
-           else f"{_gateway_root(key)}/kling/{spec.endpoint_version}/{endpoint}")
     headers = {"Authorization": f"Bearer {key.access_key}", "Content-Type": "application/json"}
-    sent = _sent_urls(body)
-    n = max(1, min(4, int(params.get("n") or 1)))
-
+    resume = _kwargs.get("resume_video")
+    report = _kwargs.get("on_resume_state")
     task_ids: list[str] = []
-    for index in range(n):
-        if should_cancel and should_cancel():
-            raise KlingaiVideoError("生成已按请求停止")
-        task_id = _submit(url, headers, body, index + 1, on_submission)
-        if on_task_id:
-            on_task_id(task_id)
-        task_ids.append(task_id)
+    if resume:
+        # 主机重启后续查：只轮询已存的订单，不再提交。也不重建请求——本地参考视频会经 OSS 重新上传
+        # 成新地址，回显过滤就对不上了；任务地址与回显过滤集合都用提交时存下的。
+        url = str(resume["url"])
+        sent = set(resume.get("sent") or [])
+        task_ids = [str(item["id"]) for item in resume.get("tasks") or []]
+    else:
+        spec, endpoint, body = build_request(prompt, model, params, unified=tuzi)
+        url = (f"{_tuzi_root(key)}/v1/videos" if tuzi
+               else f"{_gateway_root(key)}/kling/{spec.endpoint_version}/{endpoint}")
+        sent = _sent_urls(body)
+        n = max(1, min(4, int(params.get("n") or 1)))
+        for index in range(n):
+            if should_cancel and should_cancel():
+                raise KlingaiVideoError("生成已按请求停止")
+            task_id = _submit(url, headers, body, index + 1, on_submission)
+            if on_task_id:
+                on_task_id(task_id)
+            task_ids.append(task_id)
+            if report:
+                report({"tasks": [{"id": item} for item in task_ids], "url": url,
+                        "sent": sorted(sent)})
     if on_phase:
         on_phase("sent")
 

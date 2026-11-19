@@ -105,7 +105,8 @@ RESUME_KEYS = ("provider_task_protocol", "provider_task_ids", "mj_submission_ids
 RESUMABLE_PROTOCOLS = frozenset({"tuzi_images", "declarative", "evolink", "yinchao"})
 # 视频协议里有「凭已存订单只轮询」入口的（callers 收 resume_video、回报 on_resume_state）。
 # 续查状态存在 resume_params["video"]：{"protocol", "tasks": [{"id", ...}], "sent"?}，内容由各 caller 定。
-VIDEO_RESUMABLE_PROTOCOLS = frozenset({"evolink", "openrouter"})
+VIDEO_RESUMABLE_PROTOCOLS = frozenset({
+    "evolink", "openrouter", "seedance", "kling", "klingai", "dashscope"})
 
 
 def is_unpriced(record: Any) -> bool:
@@ -497,15 +498,23 @@ def run_task(task: GatewayTask) -> GatewayTask:
         except gateway_keys.GatewayConfigCorruptError as error:
             return _finish(_read(task_id), status="failed", error=str(error),
                            error_kind="unavailable")
+        resume = _read(task_id).resume_params
+
+        def refuse(message: str) -> GatewayTask:
+            # 续查时上游已有订单：停在这里也只能判「未确认」，不能当成没执行。
+            if resume:
+                return _finish(_read(task_id), status="failed", error_kind="unconfirmed",
+                               error=f"网关重启后无法续查（{message}），上游任务结果未确认")
+            return _finish(_read(task_id), status="failed", error=message)
+
         owner = next((item for item in config.keys
                       if item.id == task.key_id and item.revoked_at is None), None)
         if owner is None:
-            return _finish(_read(task_id), status="failed", error="网关密钥无效或已撤销")
+            return refuse("网关密钥无效或已撤销")
         try:
             gateway_access.check_route(owner, modality, task.route_id)
         except GatewayRequestError as error:
-            return _finish(_read(task_id), status="failed", error=error.message)
-        resume = _read(task_id).resume_params
+            return refuse(error.message)
         if resume:
             # 主机重启后续查：只找原来那一家，凭已存订单轮询；不选别家、不重新提交。
             picked = _resume_member(_read(task_id))
@@ -590,6 +599,11 @@ def run_task(task: GatewayTask) -> GatewayTask:
                     video_protocol = _effective_protocol(key, model.id)
                     video_kwargs["on_resume_state"] = on_resume_state
                     if resume and resume.get("video"):
+                        if resume["video"].get("protocol") != video_protocol:
+                            # 停机期间 KEY 被改过，按 KEY 算出的协议对不上存下的订单：
+                            # 不把别的协议的续查状态交给 caller。
+                            return _finish(_read(task_id), status="failed", error_kind="unconfirmed",
+                                           error="网关重启后原供应商的视频接口已变，未确认是否已出片")
                         video_kwargs["resume_video"] = copy.deepcopy(resume["video"])
                 paths = render(
                     prompt=task.prompt, model=model.id, alias=key.alias, output_dir=Path(tmp),

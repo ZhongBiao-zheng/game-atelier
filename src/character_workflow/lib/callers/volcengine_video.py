@@ -377,6 +377,33 @@ def _poll_video_task(
     raise VolcengineVideoError(f"视频任务轮询超时: {task_id}")
 
 
+def _request_body(prompt: str, model: str, params: dict[str, Any]) -> dict[str, Any]:
+    content = _build_content(
+        prompt,
+        params.get("reference_images") or [],
+        params.get("reference_videos") or [],
+        params.get("reference_audios") or [],
+        params.get("frame_mode") or "auto",
+        model or DEFAULT_MODEL,
+    )
+    body: dict[str, Any] = {"model": model or DEFAULT_MODEL, "content": content}
+    if params.get("duration") is not None:
+        body["duration"] = int(params["duration"])
+    if params.get("resolution"):
+        body["resolution"] = str(params["resolution"])
+    ratio = params.get("ratio") or params.get("aspect_ratio")
+    if ratio:
+        body["ratio"] = str(ratio)
+    if params.get("seed") is not None and int(params["seed"]) >= 0:
+        body["seed"] = int(params["seed"])
+    # 上游默认 true（2.0 系）：关闭必须显式发 false，省略字段≠关闭。
+    if params.get("generate_audio") is not None:
+        body["generate_audio"] = bool(params["generate_audio"])
+    if params.get("watermark") is not None:
+        body["watermark"] = bool(params["watermark"])
+    return body
+
+
 def render_video(
     *,
     prompt: str,
@@ -401,56 +428,50 @@ def render_video(
         raise VolcengineVideoError(f"未找到 Key: {alias}")
     tasks_url = _tasks_url(_base_url(key))
     headers = {"Authorization": f"Bearer {key.access_key}", "Content-Type": "application/json"}
-    content = _build_content(
-        prompt,
-        params.get("reference_images") or [],
-        params.get("reference_videos") or [],
-        params.get("reference_audios") or [],
-        params.get("frame_mode") or "auto",
-        model or DEFAULT_MODEL,
-    )
-    body: dict[str, Any] = {"model": model or DEFAULT_MODEL, "content": content}
-    if params.get("duration") is not None:
-        body["duration"] = int(params["duration"])
-    if params.get("resolution"):
-        body["resolution"] = str(params["resolution"])
-    ratio = params.get("ratio") or params.get("aspect_ratio")
-    if ratio:
-        body["ratio"] = str(ratio)
-    if params.get("seed") is not None and int(params["seed"]) >= 0:
-        body["seed"] = int(params["seed"])
-    # 上游默认 true（2.0 系）：关闭必须显式发 false，省略字段≠关闭。
-    if params.get("generate_audio") is not None:
-        body["generate_audio"] = bool(params["generate_audio"])
-    if params.get("watermark") is not None:
-        body["watermark"] = bool(params["watermark"])
-
     out_dir = Path(output_dir)
-    n = max(1, min(4, int(params.get("n") or 1)))
-    sent_urls = _sent_urls(content)
-    # 先把 n 条任务全部提交（上游并行跑），再逐个轮询取结果。
+    resume = _kwargs.get("resume_video")
+    report = _kwargs.get("on_resume_state")
     # ready: (下载地址, task_id)——task_id 只为报错留痕，内联直出的那条没有。
     ready: list[tuple[str, str]] = []
     pending_ids: list[str] = []
-    for index in range(n):
-        if should_cancel and should_cancel():
-            raise VolcengineVideoError("生成已按请求停止")
-        payload = _submit_task(tasks_url, headers, body, index + 1, on_submission)
-        task_id = _extract_task_id(payload)
-        if task_id and on_task_id:
-            on_task_id(task_id)
-        status = _extract_status(payload)
-        if status in _FAILURE:
-            raise VolcengineVideoError(_fail_reason(payload))
-        # 提交响应里的 URL 更不能盲信：这里连 status 门都没有，回显的输入原片会被
-        # 当成「同步直出」直接下载。只有在没被判失败、且挑出的不是回显输入时才认。
-        picked = _pick_video_url(_dedupe(_collect_video_urls(payload)), sent_urls)
-        if picked and (not status or status in _SUCCESS):
-            ready.append((picked, ""))
-            continue
-        if not task_id:
-            raise VolcengineVideoError("视频提交结果未确认：未返回任务 ID，请先核对厂商记录。")
-        pending_ids.append(task_id)
+    if resume:
+        # 主机重启后续查：只轮询已存的订单（提交时已直出的直接下载），不再提交。也不重建请求——
+        # 本地参考视频会经 OSS 重新上传成新地址，回显过滤就对不上了；用提交时存下的那一份。
+        sent_urls = set(resume.get("sent") or [])
+        for item in resume.get("tasks") or []:
+            if item.get("url"):
+                ready.append((str(item["url"]), ""))
+            else:
+                pending_ids.append(str(item["id"]))
+    else:
+        body = _request_body(prompt, model, params)
+        sent_urls = _sent_urls(body["content"])
+        n = max(1, min(4, int(params.get("n") or 1)))
+        submitted: list[dict[str, str]] = []
+        # 先把 n 条任务全部提交（上游并行跑），再逐个轮询取结果。
+        for index in range(n):
+            if should_cancel and should_cancel():
+                raise VolcengineVideoError("生成已按请求停止")
+            payload = _submit_task(tasks_url, headers, body, index + 1, on_submission)
+            task_id = _extract_task_id(payload)
+            if task_id and on_task_id:
+                on_task_id(task_id)
+            status = _extract_status(payload)
+            if status in _FAILURE:
+                raise VolcengineVideoError(_fail_reason(payload))
+            # 提交响应里的 URL 更不能盲信：这里连 status 门都没有，回显的输入原片会被
+            # 当成「同步直出」直接下载。只有在没被判失败、且挑出的不是回显输入时才认。
+            picked = _pick_video_url(_dedupe(_collect_video_urls(payload)), sent_urls)
+            if picked and (not status or status in _SUCCESS):
+                ready.append((picked, ""))
+                submitted.append({"url": picked, **({"id": task_id} if task_id else {})})
+            elif not task_id:
+                raise VolcengineVideoError("视频提交结果未确认：未返回任务 ID，请先核对厂商记录。")
+            else:
+                pending_ids.append(task_id)
+                submitted.append({"id": task_id})
+            if report:
+                report({"tasks": list(submitted), "sent": sorted(sent_urls)})
     if on_phase:
         on_phase("sent")
     for task_id in pending_ids:

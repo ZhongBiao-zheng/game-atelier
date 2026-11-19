@@ -258,6 +258,7 @@ def render_video(
     poll_interval: float = 15.0,  # 官方建议 15s 轮询（查询 RPS 上限 20）
     on_phase: Callable[[str], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    on_task_id: Callable[[str], None] | None = None,
     **_kwargs,
 ) -> list[str]:
     """提交 n 条 HappyHorse 视频任务（先全部提交再逐个轮询），下 .mp4，返回本地路径 list[str]。
@@ -273,24 +274,34 @@ def render_video(
         "Content-Type": "application/json",
         "X-DashScope-Async": "enable",  # 缺了直接报错（官方硬要求）
     }
-    body = _build_body(prompt, model, params)
-    # video-edit 的输入视频只能是公网直链，最容易被回显成「产物」；参考图若也是直链一并排除。
-    sent_urls = video_poll.sent_url_set([
-        str(m.get("url") or "") for m in (body.get("input", {}).get("media") or [])
-    ])
-    submit_url = _synthesis_url(base)
-
-    n = max(1, min(4, int(params.get("n") or 1)))
+    resume = _kwargs.get("resume_video")
+    report = _kwargs.get("on_resume_state")
     task_ids: list[str] = []
-    for _ in range(n):
-        resp = requests.post(submit_url, headers=headers, json=body, timeout=600)
-        payload = _json(resp)
-        if not resp.ok:
-            raise HappyHorseVideoError(_err(payload, resp.status_code))
-        task_id = _extract_task_id(payload)
-        if not task_id:
-            raise HappyHorseVideoError(f"HappyHorse 提交后未返回 task id: {payload!r}")
-        task_ids.append(task_id)
+    if resume:
+        # 主机重启后续查：只轮询已存的订单，不再提交；回显过滤集合用提交时存下的。
+        sent_urls = set(resume.get("sent") or [])
+        task_ids = [str(item["id"]) for item in resume.get("tasks") or []]
+    else:
+        body = _build_body(prompt, model, params)
+        # video-edit 的输入视频只能是公网直链，最容易被回显成「产物」；参考图若也是直链一并排除。
+        sent_urls = video_poll.sent_url_set([
+            str(m.get("url") or "") for m in (body.get("input", {}).get("media") or [])
+        ])
+        submit_url = _synthesis_url(base)
+        n = max(1, min(4, int(params.get("n") or 1)))
+        for _ in range(n):
+            resp = requests.post(submit_url, headers=headers, json=body, timeout=600)
+            payload = _json(resp)
+            if not resp.ok:
+                raise HappyHorseVideoError(_err(payload, resp.status_code))
+            task_id = _extract_task_id(payload)
+            if not task_id:
+                raise HappyHorseVideoError(f"HappyHorse 提交后未返回 task id: {payload!r}")
+            if on_task_id:
+                on_task_id(task_id)
+            task_ids.append(task_id)
+            if report:
+                report({"tasks": [{"id": item} for item in task_ids], "sent": sorted(sent_urls)})
     if on_phase:
         on_phase("sent")
 

@@ -223,6 +223,7 @@ def render_video(
     poll_interval: float = 5.0,
     on_phase: Callable[[str], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    on_task_id: Callable[[str], None] | None = None,
     **_kwargs,
 ) -> list[str]:
     """提交 n 条可灵视频任务（先全部提交再逐个轮询），下 .mp4，返回本地路径 list[str]。
@@ -234,23 +235,36 @@ def render_video(
         raise KlingVideoError(f"未找到 Key: {alias}")
     root = _api_root(key)
     headers = {"Authorization": f"Bearer {key.access_key}", "Content-Type": "application/json"}
-    act, body = _act_and_body(prompt, model, params)
-    # image / image_tail 可能是公网直链（本地文件已被编成裸 base64，不进排除集）。
-    sent_urls = video_poll.sent_url_set([
-        str(body[k]) for k in ("image", "image_tail") if isinstance(body.get(k), str)
-    ])
-    n = max(1, min(4, int(params.get("n") or 1)))
-
+    resume = _kwargs.get("resume_video")
+    report = _kwargs.get("on_resume_state")
     task_ids: list[str] = []
-    for _ in range(n):
-        resp = requests.post(f"{root}/kling/v1/videos/{act}", headers=headers, json=body, timeout=600)
-        payload = _json(resp)
-        if not resp.ok:
-            raise KlingVideoError(_err(payload, resp.status_code))
-        task_id = _extract_task_id(payload)
-        if not task_id:
-            raise KlingVideoError(f"可灵提交后未返回 task id: {payload!r}")
-        task_ids.append(task_id)
+    if resume:
+        # 主机重启后续查：只轮询已存的订单，不再提交；端点与回显过滤集合用提交时存下的。
+        act = str(resume["act"])
+        sent_urls = set(resume.get("sent") or [])
+        task_ids = [str(item["id"]) for item in resume.get("tasks") or []]
+    else:
+        act, body = _act_and_body(prompt, model, params)
+        # image / image_tail 可能是公网直链（本地文件已被编成裸 base64，不进排除集）。
+        sent_urls = video_poll.sent_url_set([
+            str(body[k]) for k in ("image", "image_tail") if isinstance(body.get(k), str)
+        ])
+        n = max(1, min(4, int(params.get("n") or 1)))
+        for _ in range(n):
+            resp = requests.post(f"{root}/kling/v1/videos/{act}", headers=headers, json=body,
+                                 timeout=600)
+            payload = _json(resp)
+            if not resp.ok:
+                raise KlingVideoError(_err(payload, resp.status_code))
+            task_id = _extract_task_id(payload)
+            if not task_id:
+                raise KlingVideoError(f"可灵提交后未返回 task id: {payload!r}")
+            if on_task_id:
+                on_task_id(task_id)
+            task_ids.append(task_id)
+            if report:
+                report({"tasks": [{"id": item} for item in task_ids], "act": act,
+                        "sent": sorted(sent_urls)})
     if on_phase:
         on_phase("sent")
 
