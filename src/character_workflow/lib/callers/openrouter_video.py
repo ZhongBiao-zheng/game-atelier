@@ -19,7 +19,7 @@ from typing import Any
 import requests
 
 from character_workflow.lib import keys as _keys
-from character_workflow.lib.callers import video_poll
+from character_workflow.lib.callers import task_submission, video_poll
 from character_workflow.lib.callers.openrouter_usage import cost_usd
 
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
@@ -29,6 +29,10 @@ _TERMINAL_FAILURE = {"failed", "cancelled", "expired"}
 
 class OpenRouterVideoError(RuntimeError):
     pass
+
+
+class OpenRouterVideoUnconfirmed(OpenRouterVideoError, task_submission.SubmissionUnconfirmed):
+    """提交可能已被上游受理（见 task_submission）：不重发、不换家。"""
 
 
 def _json(resp) -> dict[str, Any]:
@@ -194,15 +198,16 @@ def render_video(
     else:
         body = _build_body(prompt, model, params)
         n = max(1, min(4, int(params.get("n") or 1)))
-        for _ in range(n):
-            resp = requests.post(f"{base}/videos", headers=headers, json=body, timeout=600)
-            payload = _json(resp)
-            if not resp.ok:
-                raise OpenRouterVideoError(_err(payload, resp.status_code))
+        for index in range(n):
+            submitted = task_submission.submit_task(
+                url=f"{base}/videos", headers=headers, body=body, attempt=index + 1,
+                on_submission=_kwargs.get("on_submission"), rejected=OpenRouterVideoError,
+                unconfirmed=OpenRouterVideoUnconfirmed, reject_message=_err)
+            payload = submitted.payload
             job_id = str(payload.get("id") or "")
             polling_url = payload.get("polling_url") or (f"{base}/videos/{job_id}" if job_id else None)
             if not polling_url:
-                raise OpenRouterVideoError(f"OpenRouter 提交后未返回 job id: {payload!r}")
+                raise submitted.unconfirmed(task_submission.MISSING_ID_UNCONFIRMED.format(noun="视频"))
             jobs.append((str(polling_url), job_id))
             # 订单号一拿到就报：之后失败不会被当成「没执行」换别家重提，主机重启也能续查。
             if on_task_id and job_id:

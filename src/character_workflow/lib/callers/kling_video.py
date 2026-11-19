@@ -23,7 +23,7 @@ from urllib.parse import urlsplit
 import requests
 
 from character_workflow.lib import keys as _keys
-from character_workflow.lib.callers import video_poll
+from character_workflow.lib.callers import task_submission, video_poll
 
 _SUCCESS = {"SUCCEED", "SUCCEEDED", "SUCCESS"}
 _FAILURE = {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED", "TIMEOUT", "REJECTED"}
@@ -31,6 +31,10 @@ _FAILURE = {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED", "TIMEOUT", "REJE
 
 class KlingVideoError(RuntimeError):
     pass
+
+
+class KlingVideoUnconfirmed(KlingVideoError, task_submission.SubmissionUnconfirmed):
+    """提交可能已被上游受理（见 task_submission）：不重发、不换家。"""
 
 
 def _api_root(key) -> str:
@@ -224,6 +228,7 @@ def render_video(
     on_phase: Callable[[str], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
     on_task_id: Callable[[str], None] | None = None,
+    on_submission: Callable[[dict[str, Any]], None] | None = None,
     **_kwargs,
 ) -> list[str]:
     """提交 n 条可灵视频任务（先全部提交再逐个轮询），下 .mp4，返回本地路径 list[str]。
@@ -250,15 +255,14 @@ def render_video(
             str(body[k]) for k in ("image", "image_tail") if isinstance(body.get(k), str)
         ])
         n = max(1, min(4, int(params.get("n") or 1)))
-        for _ in range(n):
-            resp = requests.post(f"{root}/kling/v1/videos/{act}", headers=headers, json=body,
-                                 timeout=600)
-            payload = _json(resp)
-            if not resp.ok:
-                raise KlingVideoError(_err(payload, resp.status_code))
-            task_id = _extract_task_id(payload)
+        for index in range(n):
+            submitted = task_submission.submit_task(
+                url=f"{root}/kling/v1/videos/{act}", headers=headers, body=body,
+                attempt=index + 1, on_submission=on_submission, rejected=KlingVideoError,
+                unconfirmed=KlingVideoUnconfirmed, reject_message=_err)
+            task_id = _extract_task_id(submitted.payload)
             if not task_id:
-                raise KlingVideoError(f"可灵提交后未返回 task id: {payload!r}")
+                raise submitted.unconfirmed(task_submission.MISSING_ID_UNCONFIRMED.format(noun="视频"))
             if on_task_id:
                 on_task_id(task_id)
             task_ids.append(task_id)

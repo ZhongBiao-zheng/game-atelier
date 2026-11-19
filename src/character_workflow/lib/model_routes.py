@@ -301,6 +301,7 @@ _BALANCE_MARKERS = ("insufficient_quota", "insufficient balance", "余额不足"
 
 def failover_reason(error: BaseException) -> FailoverReason | None:
     """这次失败能不能换下一家；能就返回原因，不能返回 None。"""
+    from character_workflow.lib.callers import task_submission
     from character_workflow.lib.callers.atelier_gateway import GatewayNotAccepted, GatewayUnconfirmed
     from character_workflow.lib.callers.openai_image import _is_pre_flight_failure
 
@@ -312,6 +313,9 @@ def failover_reason(error: BaseException) -> FailoverReason | None:
     # 这把幂等键在主机上的结局还不知道（之前那次可能在出图）：不管这次为什么失败都不换家，
     # 否则主机上的原单照常出图扣额度，换的那家又出一张。要先于下面的「没收下」判断。
     if any(isinstance(item, GatewayUnconfirmed) for item in chain):
+        return None
+    # 异步任务提交可能已被上游受理（task_submission）：不换家，否则可能两家各下一单。
+    if task_submission.is_unconfirmed(error):
         return None
     # 局域网 Atelier 确定没收下这次提交（连不上 / 正在更新）：按类型判断，不看文案。
     not_accepted = next((item for item in chain if isinstance(item, GatewayNotAccepted)), None)

@@ -634,7 +634,10 @@ def run_task(task: GatewayTask) -> GatewayTask:
                     return _finish(_read(task_id), status="failed", error=str(error),
                                    error_kind="unconfirmed" if error.execution_started else "unavailable")
                 current = _read(task_id)
-                uncertain = any(a.get("outcome") == "unconfirmed" for a in current.submission_attempts)
+                from character_workflow.lib.callers.task_submission import is_unconfirmed
+
+                uncertain = (any(a.get("outcome") == "unconfirmed" for a in current.submission_attempts)
+                             or is_unconfirmed(error))
                 if current.upstream_task_ids or current.resume_params or uncertain:
                     return _finish(current, status="failed", error="上游任务结果未确认：" + _safe_error(error),
                                    error_kind="unconfirmed")

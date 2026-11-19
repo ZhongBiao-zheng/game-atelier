@@ -78,7 +78,7 @@ def _switch_route(job_id: str, error: BaseException) -> bool:
     if (evo_state.get("uncertain") or evo_state.get("task_id")
             or evo_state.get("terminal") in ("completed", "failed")):
         return False
-    if any(item.get("outcome") == "unconfirmed" for item in params.video_submission_attempts or []):
+    if any(item.outcome == "unconfirmed" for item in params.video_submission_attempts or []):
         return False
     reason = model_routes.failover_reason(error)
     if reason is None:
