@@ -91,3 +91,53 @@ def test_status_reports_which_hosts_connected(client, tmp_path, monkeypatch):  #
         "enabled": False, "connections": {}, **metadata,
     }
     assert native.post("/api/connection/agent-sessions", json=payload).status_code == 403
+
+
+def _codex_entry(tmp_path):
+    return tomllib.loads((tmp_path / "config.toml").read_text(encoding="utf-8"))["mcp_servers"]["game-atelier"]
+
+
+def test_bundle_codex_entry_starts_through_bootstrap(client, tmp_path, monkeypatch):  # noqa: F811
+    # 运行包的解释器里没有装本项目，Codex 直接 `python -m character_workflow.mcp` 会找不到模块；
+    # 要和 Claude Code 插件一样经 bootstrap --run 带上 PYTHONPATH 启动。
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[1]
+    monkeypatch.setattr(sys, "executable", str(repo.parent / "python" / "bin" / "python3"))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text("", encoding="utf-8")
+    bootstrap(client)
+    client.put("/api/connection/agent", json={})
+    assert _codex_entry(tmp_path)["args"] == [
+        str(repo / "scripts" / "bootstrap.py"), "--run",
+        "-m", "character_workflow.mcp", "--client", "codex",
+    ]
+
+
+def test_codex_entry_follows_the_runtime_after_an_update(tmp_path, monkeypatch):
+    # 更新器只保留三个版本目录：开关打开时写下的解释器路径会在两次更新后被删掉。
+    # 新版本启动时要把已有条目改写成当前解释器，Codex 才不会突然失去 Atelier 工具。
+    from viewer_server.server_app import build_app
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text("", encoding="utf-8")
+    monkeypatch.setattr(sys, "executable", "/install/versions/0.5.1/python/bin/python3")
+    first = TestClient(build_app(dist_dir=tmp_path), base_url=ORIGIN)
+    bootstrap(first)
+    first.put("/api/connection/agent", json={})
+    assert _codex_entry(tmp_path)["command"] == "/install/versions/0.5.1/python/bin/python3"
+
+    monkeypatch.setattr(sys, "executable", "/install/versions/0.5.2/python/bin/python3")
+    with TestClient(build_app(dist_dir=tmp_path), base_url=ORIGIN):
+        pass
+    assert _codex_entry(tmp_path)["command"] == "/install/versions/0.5.2/python/bin/python3"
+
+
+def test_startup_leaves_codex_config_alone_when_agent_is_off(tmp_path, monkeypatch):
+    from viewer_server.server_app import build_app
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(EXISTING, encoding="utf-8")
+    with TestClient(build_app(dist_dir=tmp_path), base_url=ORIGIN):
+        pass
+    assert (tmp_path / "config.toml").read_text(encoding="utf-8") == EXISTING

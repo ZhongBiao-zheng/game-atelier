@@ -244,6 +244,7 @@ compare 节点不提供任何连线、不参与生成。显示的是来源节点
 `connections` 为各宿主本次进程内最近连接时间；`config_paths` 为宿主到实际配置/凭据路径的映射：
 `claude-code` 使用 `<data_root>/.config/connections/agent.json`（插件直接读取的凭据文件，不写 `.claude.json`），
 `codex` 使用 `CODEX_HOME/config.toml` 或默认 `~/.codex/config.toml`；路径只表示目标位置，不保证文件已创建。
+运行包里条目经 `scripts/bootstrap.py --run` 启动适配器（包内解释器没有安装本项目）；开关打开时，服务每次启动都把已有条目改写成本次的解释器，更新删掉旧版本目录后 Codex 仍能连上。
 `tools` 为 `{name: string, billable: boolean}[]`，与 MCP 注册共享工具元数据，使用真实的 `canvas_*` 工具名；
 只有生成工具标为计费。该字段是展示信息，不改变授权机制：计费工具需先获得用户授权。
 响应只返回路径和元数据，不包含凭据内容或 token。

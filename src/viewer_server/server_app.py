@@ -204,6 +204,19 @@ async def _record_host_lifecycle(app: FastAPI) -> None:
             log.exception("host lifecycle heartbeat failed")
 
 
+def _refresh_agent_clients(app: FastAPI) -> None:
+    """开关打开时把 Codex 配置里的条目改写成本次启动的解释器：更新后旧版本目录会被删掉。"""
+    import sys
+
+    from viewer_server.codex_config import refresh_codex_entry
+    try:
+        if app.state.connection_store.agent_status()["enabled"] and refresh_codex_entry(sys.executable):
+            logging.getLogger(__name__).info("codex mcp entry now points at %s", sys.executable)
+    except (ConnectionError, OSError) as error:
+        # 只影响 Codex 里的 Atelier 工具；不能因此挡住服务启动。
+        logging.getLogger(__name__).warning("codex mcp entry not refreshed: %s", error)
+
+
 @asynccontextmanager
 async def normal_lifespan(app: FastAPI):
     hub.set_loop(asyncio.get_running_loop())
@@ -213,6 +226,7 @@ async def normal_lifespan(app: FastAPI):
     except OSError as error:
         # 只影响桌面外壳退出前的确认；不能因此挡住服务启动。
         logging.getLogger(__name__).warning("desktop shell control token unavailable: %s", error)
+    _refresh_agent_clients(app)
     from character_workflow.lib import gateway_live
     def gateway_listener(snapshot):
         hub.broadcast("gateway_task", snapshot)
