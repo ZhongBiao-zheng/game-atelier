@@ -121,22 +121,38 @@ class UpdateAdmissionMiddleware:
                 gate.requests -= 1
 
 
-def active_work() -> dict[str, int]:
-    from character_workflow.lib.jobs import list_jobs
+def gateway_work(*, update_drain: bool) -> int:
+    """进行中的网关工作数（含文本中转）。
+
+    update_drain=True：只数「执行中且重启后不能续查」的任务——排队中的重启后保持排队，能续查的重启后
+    凭已存订单接着查（A1 / A2），都不必拦着应用内更新。False：全部非终态任务（桌面外壳退出确认用：
+    退出后不会自动重启，排队任务要等下次打开才跑）。
+    """
     from character_workflow.lib import gateway_tasks, gateway_live
+
+    with gateway_tasks._lock:
+        tasks = gateway_tasks._all_tasks()
+        if update_drain:
+            count = sum(t.status == "running" and not gateway_tasks.resumable(t) for t in tasks)
+        else:
+            count = sum(t.status not in gateway_tasks.TERMINAL for t in tasks)
+    return count + len(gateway_live.active())
+
+
+def active_work() -> dict[str, int]:
+    """拦着应用内更新的进行中工作。"""
+    from character_workflow.lib.jobs import list_jobs
     from character_workflow.lib.canvas_projects import list_canvas_projects
     from character_workflow.lib.canvas_agent_sessions import list_canvas_agent_sessions
     # Read producers before their jobs: an agent may schedule a job and become idle
     # between reads. The inverse order can miss both sides of that handoff.
     sessions = [s for p in list_canvas_projects()
                 for s in list_canvas_agent_sessions(p.project_id).sessions]
-    with gateway_tasks._lock:
-        gateway = sum(t.status not in gateway_tasks.TERMINAL for t in gateway_tasks._all_tasks())
-    live_gateway = len(gateway_live.active())
+    gateway = gateway_work(update_drain=True)
     jobs = sum(j.status.value in {"pending", "running"} for j in list_jobs())
     return {"jobs": jobs, "agents": sum(s.status == "running" for s in sessions),
             "approvals": sum(s.status == "awaiting_approval" for s in sessions),
-            "gateway": gateway + live_gateway}
+            "gateway": gateway}
 
 
 class UpdateController:
@@ -205,6 +221,11 @@ class UpdateController:
             (self.gate.runtime / "maintenance").unlink(missing_ok=True)
             self.phase = "idle"
             self.waiting = 0
+        # 更新期间排队的网关任务没启动；更新取消或失败、留在原进程时接着调度（不在事件循环里扫盘）。
+        from character_workflow.lib import gateway_tasks
+
+        threading.Thread(target=gateway_tasks.pump, daemon=True,
+                         name="gateway-pump-after-update").start()
 
     def begin(self) -> str:
         if not self.downloader:

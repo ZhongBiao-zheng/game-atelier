@@ -39,5 +39,6 @@ router = APIRouter()
 
 @router.get(ACTIVE_WORK_PATH)
 def shell_active_work() -> dict[str, int]:
-    from viewer_server.update_routes import active_work
-    return active_work()
+    from viewer_server.update_routes import active_work, gateway_work
+    # 外壳退出 / 换运行环境后服务不会自动起来：排队中、能续查的网关任务也要算进去（与更新排空不同）。
+    return {**active_work(), "gateway": gateway_work(update_drain=False)}
