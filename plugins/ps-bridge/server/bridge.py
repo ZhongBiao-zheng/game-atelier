@@ -148,7 +148,9 @@ EXECUTOR: Executor = MacExecutor() if sys.platform == "darwin" else UnsupportedE
 
 
 def busy_timeout() -> PsError:
-    return PsError("PS_BUSY", "Photoshop 正忙，已取消这次操作；请关闭 Photoshop 里的对话框后重试", 503)
+    # 两种原因都表现为调用挂到超时：PS 弹着对话框；或系统的自动化授权窗口在等用户点（第 0 批探针第 6、7 项）。
+    return PsError("PS_BUSY", "Photoshop 没有响应，已取消这次操作；请关闭 Photoshop 里的对话框，"
+                   "或在系统弹出的授权窗口里点「允许」后重试", 503)
 
 
 def cancel(request_dir: Path) -> None:

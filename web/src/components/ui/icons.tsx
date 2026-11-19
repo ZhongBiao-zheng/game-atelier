@@ -176,6 +176,7 @@ const PluginPixelIcon = defineIcon(Huge.Grid02Icon, 'plugin-pixel');
 /** 插件清单 `icon` 字段可用的名字。插件不能自带图形，新名字先在这里登记。 */
 const PLUGIN_ICONS: Record<string, AppIcon> = {
   frames: PluginFramesIcon, film: PluginFilmIcon, tween: PluginTweenIcon, pixel: PluginPixelIcon, grid: GridIcon, cube: ModelIcon, layers: LayersIcon, scissors: CutIcon, storyboard: StoryboardIcon,
+  exchange: ExchangeIcon, export: ExportFileIcon, 'add-image': AddImageIcon,
 };
 /** 未登记的名字回落到通用插件图标，旧版宿主遇到新名字不报错。 */
 export function pluginIcon(name: string): AppIcon {

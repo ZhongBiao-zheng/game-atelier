@@ -87,3 +87,26 @@ describe('设置页「插件」', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('返回格式不对');
   });
 });
+
+describe('设置页「插件」· 宿主插件的设置区', () => {
+  it('启用的宿主插件在自己那一行下面显示设置区，状态接口不带项目', async () => {
+    const psLock = (await import('../../../../plugins/ps-bridge/package/manifest.lock.json')).default as unknown as NonNullable<PluginEntry['manifest']>;
+    const entry: PluginEntry = { id: 'ps-bridge', availability: 'ok', reason: null, enabled: true, manifest: psLock };
+    const bodies: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/plugins/ps-bridge/routes/status') {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ result: {
+          supported: true, installed: true, running: false, responsible_app: 'Atelier', version: null, active_document: null,
+        } }));
+      }
+      expect(url).toBe('/api/plugins');
+      return new Response(JSON.stringify({ app_version: '5.138.0', plugins: [entry] }));
+    }));
+    render(<PluginsPage />);
+    const row = within(await screen.findByRole('list', { name: '插件' })).getByRole('listitem');
+    expect(await within(row).findByText('Photoshop 未启动', {}, { timeout: 15000 })).toBeInTheDocument();
+    expect(within(row).getByRole('button', { name: '检测' })).toBeEnabled();
+    expect(bodies).toEqual([{ params: { probe: false } }]);
+  });
+});

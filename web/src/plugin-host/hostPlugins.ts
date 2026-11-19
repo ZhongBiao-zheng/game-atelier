@@ -88,6 +88,8 @@ export interface HostPluginModule {
   /** 清单 canvas_actions 的处理函数；position 是画布坐标里的建议落点。 */
   canvasActions?: Readonly<Record<string, (api: HostPluginApi, position: { x: number; y: number }) => void>>;
   busy?: HostPluginBusy;
+  /** 设置 → 插件里这个插件下方的区域（状态、检测按钮）；插件启用时才渲染。不在项目里，路由调用不带项目。 */
+  Settings?: ComponentType;
 }
 
 const noBusySubscription = () => () => undefined;
@@ -100,6 +102,7 @@ export function useHostPluginBusy(module: HostPluginModule | null | undefined): 
 
 const LOADERS: Readonly<Record<string, () => Promise<HostPluginModule>>> = {
   storyboard: () => import('../../../plugins/storyboard/host/storyboard').then(module => module.plugin),
+  'ps-bridge': () => import('../../../plugins/ps-bridge/host/psBridge').then(module => module.plugin),
 };
 
 export function isHostPluginId(pluginId: string): boolean {

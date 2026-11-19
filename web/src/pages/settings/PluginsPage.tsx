@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ComponentType } from 'react';
 
 import { fetchPlugins, setPluginEnabled } from '@/api/plugins';
 import { pluginIcon, PluginIcon } from '@/components/ui/icons';
 import { Switch } from '@/components/ui/switch';
 import { Hint } from '@/components/ui/tooltip';
+import { useHostPlugins } from '@/plugin-host/hostPlugins';
 import { setPluginsSnapshot } from '@/plugin-host/registry';
 import type { PluginEntry } from '@/schema/plugins';
 
-function PluginRow({ plugin, busy, onToggle }: {
-  plugin: PluginEntry; busy: boolean; onToggle: (enabled: boolean) => void;
+function PluginRow({ plugin, busy, onToggle, Settings }: {
+  plugin: PluginEntry; busy: boolean; onToggle: (enabled: boolean) => void; Settings?: ComponentType;
 }) {
   const manifest = plugin.manifest;
   const Icon = manifest ? pluginIcon(manifest.icon) : PluginIcon;
@@ -26,6 +27,7 @@ function PluginRow({ plugin, busy, onToggle }: {
         : !usable
           ? <p className="text-xs text-destructive">{plugin.reason}</p>
           : <p className="truncate text-xs text-muted-foreground">{manifest?.description}</p>}
+      {plugin.enabled && usable && Settings && <Settings />}
     </div>
     <Switch checked={plugin.enabled} aria-label={`启用${name}`} disabled={!usable || busy} onCheckedChange={onToggle} />
   </li>;
@@ -36,6 +38,8 @@ export function PluginsPage() {
   // 画布的添加菜单与插件节点读的是全局注册表，这里的变化要同步过去。
   const setPlugins = (next: PluginEntry[]) => { setLocalPlugins(next); setPluginsSnapshot(next); };
   const [busyId, setBusyId] = useState<string | null>(null);
+  // 已启用的宿主插件（ADR-0039 / ADR-0041）在这里加载分块，渲染它们的设置区；关闭的不加载。
+  const hostPlugins = useHostPlugins();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -65,7 +69,7 @@ export function PluginsPage() {
     </div>}
     {plugins && plugins.length > 0 && <ul aria-label="插件" className="divide-y divide-border rounded-xl border border-border bg-card p-5">
       {plugins.map(plugin => <PluginRow key={plugin.id} plugin={plugin} busy={busyId !== null}
-        onToggle={enabled => void toggle(plugin.id, enabled)} />)}
+        Settings={hostPlugins.get(plugin.id)?.Settings} onToggle={enabled => void toggle(plugin.id, enabled)} />)}
     </ul>}
     {!plugins && !error && <p role="status" className="text-xs text-muted-foreground">读取中…</p>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

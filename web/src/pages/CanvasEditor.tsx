@@ -5535,6 +5535,7 @@ function CanvasEditorInner({
               <ToolButton label="添加语音节点" onClick={() => addGenerationNode('audio', null, 'speech')}><AudioFileIcon /></ToolButton>
               <ToolButton label="添加音乐节点" onClick={() => addGenerationNode('audio', null, 'music')}><MusicFileIcon /></ToolButton>
               <ToolButton label="上传素材" onClick={() => uploadRef.current?.click()}><UploadIcon /></ToolButton>
+              <PluginCanvasActionItems hostPlugins={hostPlugins} onRun={runPluginCanvasAction} layout="toolbar" />
             </div>
           </div>
           {/* 窄屏没有底部两组浮条，视图与资产入口并进这条工具栏。 */}

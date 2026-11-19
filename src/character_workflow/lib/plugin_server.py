@@ -72,7 +72,8 @@ class PluginMedia:
 @dataclass
 class PluginRequest:
     plugin_id: str
-    project_id: str
+    # 宿主插件可以不带项目调用（设置页的状态区，ADR-0041）：这时读写项目的能力都不可用。
+    project_id: str | None
     # surface：界面经宿主发起，只能碰连在自己节点上的素材。agent：本机 Agent 的一轮对话里发起。
     # host：宿主插件（ADR-0039）的宿主代码发起，不经过项目批准。
     origin: str
@@ -81,6 +82,11 @@ class PluginRequest:
     inputs: list[PluginMedia] = field(default_factory=list)
     created_node_ids: list[str] = field(default_factory=list)
     plugin_version: str = ""
+
+    def _project(self) -> str:
+        if self.project_id is None:
+            raise PluginError("PROJECT_REQUIRED", "这个操作需要在画布项目里进行", status=422)
+        return self.project_id
 
     def _allows(self, capability: str) -> bool:
         # 宿主插件的代码与宿主同源可信（ADR-0039 / ADR-0041），不经项目批准。
@@ -91,12 +97,12 @@ class PluginRequest:
         if self.origin not in ("agent", "host"):
             raise PluginError("CAPABILITY_DENIED", "界面只能读取连到本节点的素材", status=403)
         from character_workflow.lib.canvas_projects import read_canvas_document
-        document = read_canvas_document(self.project_id)
+        document = read_canvas_document(self._project())
         node = next((item for item in document.nodes if item.id == node_id), None)
         if node is None or node.type not in kinds or not node.data.current_version_id:
             raise PluginError("INVALID_TARGET", "找不到这张图片" if kinds == ("image",) else "找不到这份素材",
                               status=422)
-        return _media(self.project_id, node, node.data.current_version_id)
+        return _media(self._project(), node, node.data.current_version_id)
 
     def image_of_node(self, node_id: str) -> PluginMedia:
         return self.media_of_node(node_id, ("image",))
@@ -107,7 +113,7 @@ class PluginRequest:
             raise PluginError("CAPABILITY_DENIED", "本项目没有允许这项能力", status=403)
         if len(png) > MAX_IMAGE_BYTES:
             raise PluginError("PAYLOAD_TOO_LARGE", "图片过大", status=413)
-        node_id = _create_image_node(self.project_id, png, title, beside_node_id or self.node_id)
+        node_id = _create_image_node(self._project(), png, title, beside_node_id or self.node_id)
         self.created_node_ids.append(node_id)
         return {"node_id": node_id}
 
@@ -121,7 +127,7 @@ class PluginRequest:
             raise PluginError("PAYLOAD_TOO_LARGE", f"一组最多 {MAX_GROUP_IMAGES} 张", status=413)
         if any(len(png) > MAX_IMAGE_BYTES for png in pngs) or sum(map(len, pngs)) > MAX_GROUP_BYTES:
             raise PluginError("PAYLOAD_TOO_LARGE", "图片过大", status=413)
-        node_ids = _create_image_group(self.plugin_id, self.project_id, pngs, title,
+        node_ids = _create_image_group(self.plugin_id, self._project(), pngs, title,
                                        beside_node_id or self.node_id)
         self.created_node_ids.extend(node_ids)
         return {"node_id": node_ids[0], "member_node_ids": node_ids[1:]}
@@ -146,7 +152,7 @@ class PluginRequest:
             if image is None:
                 raise PluginError("INVALID_HANDLE", "首尾帧要是连到本节点的图片", status=403)
             frames.append(image)
-        node_id = _create_generation_draft(self.project_id, prompt.strip(), frames, title,
+        node_id = _create_generation_draft(self._project(), prompt.strip(), frames, title,
                                            self.node_id or frames[-1].node_id)
         self.created_node_ids.append(node_id["node_id"])
         return node_id
@@ -155,7 +161,7 @@ class PluginRequest:
         """把一段文本落成画布上的普通文本节点，返回 `{node_id}`。"""
         if not self._allows("resource.create"):
             raise PluginError("CAPABILITY_DENIED", "本项目没有允许这项能力", status=403)
-        node_id = _create_text_node(self.project_id, text, title, beside_node_id or self.node_id)
+        node_id = _create_text_node(self._project(), text, title, beside_node_id or self.node_id)
         self.created_node_ids.append(node_id)
         return {"node_id": node_id}
 
@@ -166,13 +172,13 @@ class PluginRequest:
         只给宿主插件（ADR-0041）；沙箱插件的 `storage.project` 仍未开放。
         """
         self._require_host_state()
-        state = _read_plugin_state(self.project_id, self.plugin_id)
+        state = _read_plugin_state(self._project(), self.plugin_id)
         return state.data if state is not None else None
 
     def update_state(self, change: Callable[[Any], Any]) -> Any:
         """读-改-写本插件的项目级状态：`change(旧 data 或 None)` 返回新 data（≤ 1 MiB），持画布项目锁完成。"""
         self._require_host_state()
-        return _update_plugin_state(self.project_id, self.plugin_id, self.plugin_version, change)
+        return _update_plugin_state(self._project(), self.plugin_id, self.plugin_version, change)
 
     def _require_host_state(self) -> None:
         if self.origin != "host":
@@ -516,7 +522,7 @@ def _surface_inputs(record: PluginRecord, project_id: str, node_id: str | None,
     return media
 
 
-def call(plugin_id: str, method: str, path: str, *, project_id: str, origin: str,
+def call(plugin_id: str, method: str, path: str, *, project_id: str | None, origin: str,
          params: dict | None = None, node_id: str | None = None,
          input_version_ids: list[str] | None = None) -> tuple[dict, list[str]]:
     """调用一条插件路由。返回 (结果, 这次调用新建的节点 id)。"""
@@ -530,6 +536,8 @@ def call(plugin_id: str, method: str, path: str, *, project_id: str, origin: str
         raise PluginError("CAPABILITY_DENIED", "这个入口不能调用此插件", status=403)
     if origin == "host":
         capabilities: frozenset[str] = frozenset()
+    elif project_id is None:
+        raise PluginError("PROJECT_REQUIRED", "这个操作需要在画布项目里进行", status=422)
     else:
         granted = plugin_grants.active_grants(project_id).get(plugin_id)
         if granted is None:

@@ -368,3 +368,12 @@ def test_origin_records_are_capped_by_age(ps):
         data = origins.record(data, f"v{index}", {"at": f"2026-11-19T00:00:{index:05d}"})
     assert len(data["origins"]) == origins.MAX_ORIGINS
     assert "v0" not in data["origins"] and f"v{origins.MAX_ORIGINS + 2}" in data["origins"]
+
+
+def test_status_works_without_a_project_for_the_settings_page(ps):
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
+    response = client.post(f"/api/plugins/{PLUGIN_ID}/routes/status", json={"params": {"probe": False}})
+    assert response.status_code == 200, response.text
+    assert response.json()["result"]["running"] is True
+    import_response = client.post(f"/api/plugins/{PLUGIN_ID}/routes/import", json={"params": {"scope": "merged"}})
+    assert import_response.status_code == 422 and import_response.json()["detail"]["code"] == "PROJECT_REQUIRED"

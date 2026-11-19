@@ -38,7 +38,7 @@ def register(api) -> None:
 | 成员 | 说明 |
 |---|---|
 | `ctx.origin` | `"surface"`（插件界面经宿主发起）、`"agent"`（内置 Agent 调用）或 `"host"`（宿主插件的界面发起，ADR-0039） |
-| `ctx.plugin_id`、`ctx.project_id`、`ctx.node_id` | 当前插件、项目、节点（Agent 调用时 `node_id` 为空） |
+| `ctx.plugin_id`、`ctx.project_id`、`ctx.node_id` | 当前插件、项目、节点（Agent 调用时 `node_id` 为空；宿主插件不带项目调用时 `project_id` 为空，读写项目的能力报 `PROJECT_REQUIRED`，ADR-0041） |
 | `ctx.capabilities` | 本项目批准的能力 |
 | `ctx.inputs` | 界面带来的、已核对的素材：`kind`（`image` / `video` / `audio`）、`node_id`、`version_id`、`title`、`path`、`width`、`height`、`duration_ms`（可能为空）。`path` 只在服务端使用，不要回传给界面 |
 | `ctx.media_of_node(node_id, kinds)` | 按节点 id 取素材，只认 `kinds` 里的类型；Agent 调用与宿主插件（ADR-0041）可用，沙箱界面不可用 |

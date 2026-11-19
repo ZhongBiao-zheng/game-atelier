@@ -54,3 +54,14 @@ it('shows no canvas actions for plugins outside the host allowlist', () => {
   expect(screen.queryByRole('menuitem', { name: /取回来/ })).toBeNull();
   act(() => setPluginsSnapshot([]));
 });
+
+it('puts canvas actions on the wide-screen toolbar as icon buttons', () => {
+  const plugin = hostPlugin();
+  const onRun = vi.fn();
+  setPluginsSnapshot([{ id: plugin.id, availability: 'ok', reason: null, enabled: true, manifest: plugin }]);
+  render(<PluginCanvasActionItems hostPlugins={new Map()} onRun={onRun} layout="toolbar" />);
+  fireEvent.click(screen.getByRole('button', { name: '取回来' }));
+  expect(onRun).toHaveBeenCalledWith(plugin, action);
+  expect(screen.queryByRole('menuitem')).toBeNull();
+  act(() => setPluginsSnapshot([]));
+});

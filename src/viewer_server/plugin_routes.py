@@ -80,7 +80,8 @@ def revoke_plugin(project_id: str, plugin_id: str) -> dict:
 
 class PluginCall(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    project_id: str = Field(min_length=1, max_length=160)
+    # 宿主插件可以不带项目（设置页的状态区，ADR-0041）；沙箱插件必须带，服务端在 plugin_server.call 里核对。
+    project_id: str | None = Field(default=None, min_length=1, max_length=160)
     # 沙箱界面必须带（服务端核对素材连在这个节点上）；宿主插件不按节点核对，可以不带。
     node_id: str | None = Field(default=None, min_length=1, max_length=120)
     inputs: list[str] = Field(default_factory=list, max_length=64)

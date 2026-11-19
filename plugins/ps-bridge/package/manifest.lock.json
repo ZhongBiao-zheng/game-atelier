@@ -4,7 +4,7 @@
   "name": "PS 联动",
   "version": "0.1.0",
   "description": "和 PS 互传图片",
-  "icon": "layers",
+  "icon": "exchange",
   "publisher": {
     "id": "atelier",
     "name": "Atelier"
@@ -16,6 +16,34 @@
   "runtime": "host",
   "contributes": {
     "nodes": [],
+    "image_actions": [
+      {
+        "id": "place",
+        "label": "发到 Photoshop",
+        "icon": "export",
+        "action": {
+          "kind": "host_call"
+        }
+      }
+    ],
+    "canvas_actions": [
+      {
+        "id": "import_merged",
+        "label": "从 Photoshop 取图",
+        "icon": "add-image",
+        "action": {
+          "kind": "host_call"
+        }
+      },
+      {
+        "id": "import_layer",
+        "label": "从 Photoshop 取图层",
+        "icon": "layers",
+        "action": {
+          "kind": "host_call"
+        }
+      }
+    ],
     "server": {
       "module": "server",
       "routes": [
@@ -39,5 +67,5 @@
   },
   "files": [],
   "source": "bundled",
-  "digest": "sha256:4fb09efa57772d1a7ef4f98824a1967264f6acf8f06da0bc94a6a77d25144466"
+  "digest": "sha256:45226e953352ea5cf795789deb7d66850dcb30f42164809eeaf7dafd797f5469"
 }

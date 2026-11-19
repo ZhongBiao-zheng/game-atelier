@@ -3386,27 +3386,34 @@ function MediaToolLink({ label, text, href, children }: {
 }
 
 /** 宿主插件在添加菜单里的调用型入口（清单 canvas_actions，ADR-0041）；插件关闭时不出现。 */
-export function PluginCanvasActionItems({ hostPlugins, onRun }: {
+export function PluginCanvasActionItems({ hostPlugins, onRun, layout = 'menu' }: {
   hostPlugins: ReadonlyMap<string, HostPluginModule>;
   onRun: (plugin: PluginPackageLock, action: PluginCanvasAction) => void;
+  /** menu：窄屏的「添加节点」菜单；toolbar：宽屏左侧工具栏（宽屏没有添加菜单）。 */
+  layout?: 'menu' | 'toolbar';
 }) {
   const plugins = usePlugins();
   return <>
     {enabledPlugins(plugins)
       .filter(plugin => plugin.runtime === 'host' && isHostPluginId(plugin.id) && (plugin.contributes.canvas_actions ?? []).length > 0)
-      .map(plugin => <PluginCanvasActionGroup key={plugin.id} plugin={plugin} module={hostPlugins.get(plugin.id)} onRun={onRun} />)}
+      .map(plugin => <PluginCanvasActionGroup key={plugin.id} plugin={plugin} module={hostPlugins.get(plugin.id)} onRun={onRun} layout={layout} />)}
   </>;
 }
 
-function PluginCanvasActionGroup({ plugin, module, onRun }: {
+function PluginCanvasActionGroup({ plugin, module, onRun, layout }: {
   plugin: PluginPackageLock;
   module: HostPluginModule | undefined;
   onRun: (plugin: PluginPackageLock, action: PluginCanvasAction) => void;
+  layout: 'menu' | 'toolbar';
 }) {
   const busy = useHostPluginBusy(module);
   return <>
     {(plugin.contributes.canvas_actions ?? []).map(action => {
       const Icon = pluginIcon(action.icon);
+      if (layout === 'toolbar') {
+        return <ToolButton key={`${plugin.id}:${action.id}`} label={busy ? `${action.label}（正在处理上一个请求）` : action.label}
+          popup={false} disabled={busy} onClick={() => onRun(plugin, action)}><Icon /></ToolButton>;
+      }
       return <AddMenuButton key={`${plugin.id}:${action.id}`} icon={<Icon />} title={action.label}
         description={plugin.description} disabledReason={busy ? '正在处理上一个请求' : undefined}
         onClick={() => onRun(plugin, action)} />;

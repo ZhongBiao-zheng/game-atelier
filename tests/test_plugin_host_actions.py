@@ -181,3 +181,31 @@ def test_only_the_host_entry_can_touch_plugin_state(host):
     assert denied.value.code == "CAPABILITY_DENIED"
     with pytest.raises(plugin_server.PluginError):
         request.update_state(lambda data: {"x": 1})
+
+
+# ── 不带项目的调用（设置页的状态区）──────────────────────────────────
+
+
+def test_host_plugin_routes_can_be_called_without_a_project_but_cannot_touch_one(host):
+    # 宿主插件的设置区不在任何项目里：路由可以不带项目，但读写项目的能力都要拒绝。
+    with pytest.raises(plugin_server.PluginError) as no_project:
+        call(None, "/read")
+    assert (no_project.value.code, no_project.value.status) == ("PROJECT_REQUIRED", 422)
+    with pytest.raises(plugin_server.PluginError) as no_create:
+        call(None, "/make")
+    assert no_create.value.code == "PROJECT_REQUIRED"
+
+
+def test_sandbox_plugin_routes_still_need_a_project(tmp_path, monkeypatch):
+    root = tmp_path / "plugins"
+    use_plugins_root(monkeypatch, root)
+    write_plugin(root, "demo", server_source="def register(api):\n    @api.route('POST', '/echo')\n    def echo(ctx, params):\n        return {}\n",
+                 contributes={"server": {"module": "server", "routes": [
+                     {"method": "POST", "path": "/echo", "access": "read"}]}})
+    plugin_registry.set_enabled("demo", True)
+    try:
+        with pytest.raises(plugin_server.PluginError) as error:
+            plugin_server.call("demo", "POST", "/echo", project_id=None, origin="surface")
+        assert error.value.code == "PROJECT_REQUIRED"
+    finally:
+        plugin_server.unload("demo")

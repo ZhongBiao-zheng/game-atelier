@@ -9,9 +9,11 @@ status: accepted
 ## 决策
 
 - **`host_call` 动作**：`image_actions[]` 新增动作 `{ "kind": "host_call" }`。点击后宿主加载插件分块，把来源图片节点交给分块里同 id 的处理函数（`HostPluginModule.imageActions`），不建节点、不连线。只有宿主插件可用；目前只在图片工具栏实现，在文本 / 视频工具栏声明判为清单无效（免得按钮点了没反应）。
-- **`canvas_actions[]` 贡献点**：画布左侧「添加节点」菜单里的入口，排在插件节点之后，动作只能是 `host_call`，处理函数收到 `HostPluginApi` 与视口中心的画布坐标。只有宿主插件可用，最多 8 项。
+- **`canvas_actions[]` 贡献点**：画布左侧的入口：窄屏在「添加节点」菜单里，排在插件节点之后；宽屏没有添加菜单，放在左侧工具栏末尾的图标按钮。动作只能是 `host_call`，处理函数收到 `HostPluginApi` 与视口中心的画布坐标。只有宿主插件可用，最多 8 项。
 - **忙碌状态**：插件分块可以提供 `busy`（订阅 + 读取）。处理期间宿主把这个插件的两类入口置灰，防止重复点击；服务端仍要自己挡并发，前端置灰只是体验。
 - **`HostPluginApi.announce`**：画布顶部的一行提示，给「已发到 Photoshop」这类不需要用户处理的结果用。
+- **设置区**：插件分块可以提供 `Settings` 组件，设置 → 插件里在这个插件那一行下方渲染（插件启用时才加载分块）。给「是否连上外部软件」这类不属于任何项目的状态用。
+- **不带项目的调用**：宿主插件的路由调用可以省略 `project_id`（设置区不在项目里），这时 `ctx.project_id` 为 `None`，读素材、建节点、读写项目状态一律报 422 `PROJECT_REQUIRED`。沙箱插件仍必须带项目（项目批准按项目核对）。
 - **宿主入口的 `ctx`**：宿主插件的服务端代码走 `host` 入口时，`media_of_node` / `image_of_node` 可以读本项目任意节点的素材，`create_*` 不检查 `resource.create`。理由与 ADR-0039 相同：宿主插件与宿主同源可信、没有项目批准这一步；原先 host 入口的能力集是空集，等于宿主插件什么也建不了。沙箱插件的界面仍只能读连到自己节点的素材。
 - **项目状态**：`ctx.read_state()` / `ctx.update_state(change)` 读写 `canvases/<project>/plugins/<id>/state.json`（`CanvasPluginState`，≤ 1 MiB，已随项目包导出导入）。`update_state` 持画布项目锁（锁文件按 `canvas_project_lock_path` 放在 `.runtime/locks/`，不进项目目录）做读-改-写，revision 加一。文件读不出时报错，不当成空状态（否则插件在空状态上重建，丢掉用户记录）。只给宿主插件；沙箱插件的 `storage.project` 仍未开放。
 
