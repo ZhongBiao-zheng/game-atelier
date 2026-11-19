@@ -291,8 +291,8 @@ def test_runtime_and_shell_agree_on_the_contract_level():
 
 
 def test_shell_orders_versions_like_bootstrap():
-    """The shell decides whether a runtime is older than its seed (desktop/src/runtime.mjs
-    compareVersions); bootstrap.version_key decides updates. The retired line must sort first in both."""
+    """The shell compares its own version with the runtime's (desktop/src/runtime.mjs compareVersions:
+    contract or too-old); bootstrap.version_key decides updates. The retired line must sort first in both."""
     import importlib.util
     import re
     spec = importlib.util.spec_from_file_location("_bootstrap_versions", BOOTSTRAP)
@@ -305,7 +305,7 @@ def test_shell_orders_versions_like_bootstrap():
     assert bootstrap.version_key("5.139.0") < bootstrap.version_key("0.5.140")
 
 
-def test_seed_build_id_is_a_content_digest(tmp_path):
+def test_runtime_build_id_is_a_content_digest(tmp_path):
     """Same code, same id; any change under app/ or in the pinned requirements, another id."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("_build_release_id", REPO_ROOT / "scripts/build_release.py")
@@ -395,10 +395,8 @@ def test_installer_and_build_script_share_the_payload_format(tmp_path):
     spec.loader.exec_module(module)
     app = tmp_path / "win-unpacked"
     (app / "resources").mkdir(parents=True)
-    (app / "seed").mkdir()
     (app / "Atelier.exe").write_bytes(b"MZ-app")
     (app / "resources/app.asar").write_bytes(b"asar")
-    (app / "seed/GameAtelier-1.2.3-windows-x64.zip").write_bytes(b"PK-seed")
     setup, extra = tmp_path / "setup.exe", tmp_path / "boot.exe"
     setup.write_bytes(b"MZ-setup")
     extra.write_bytes(b"MZ-boot")
@@ -421,8 +419,9 @@ def test_installer_and_build_script_share_the_payload_format(tmp_path):
     for e in manifest["files"]:
         stored = data[e["offset"]:e["offset"] + e["size"]]
         contents[e["path"]] = zlib.decompress(stored, -15) if e["codec"] == "deflate" else stored
-    assert contents == {"Atelier.exe": b"MZ-app", "resources/app.asar": b"asar",
-                        "seed/GameAtelier-1.2.3-windows-x64.zip": b"PK-seed", "setup/boot.exe": b"MZ-boot"}
+    assert contents == {"Atelier.exe": b"MZ-app", "resources/app.asar": b"asar", "setup/boot.exe": b"MZ-boot"}
     codecs = {e["path"]: e["codec"] for e in manifest["files"]}
-    assert codecs["Atelier.exe"] == "deflate" and codecs["seed/GameAtelier-1.2.3-windows-x64.zip"] == "store"
+    assert codecs["Atelier.exe"] == "deflate" and codecs["setup/boot.exe"] == "store"
+    # The installer carries no runtime: the app downloads it on first start.
+    assert not any(e["path"].startswith("seed/") for e in manifest["files"])
     assert 'Deflate,' in source and "flate2::read::DeflateDecoder" in source

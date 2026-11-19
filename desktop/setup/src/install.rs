@@ -1,7 +1,8 @@
 //! Install and uninstall steps (docs/contracts/desktop-shell.md「Windows 安装程序」).
 //!
 //! Whatever the app is built with, it arrives as files (`payload.rs`): they go into the install
-//! folder as they are, next to `seed\GameAtelier-*` and `uninstall.exe`. Start menu and desktop
+//! folder as they are, next to `uninstall.exe`; the app downloads its runtime on first start.
+//! Start menu and desktop
 //! `<product>.lnk` and `HKCU\…\Uninstall\<product>` are the same as the earlier NSIS installer
 //! wrote, so an install over it takes it over in place.
 
@@ -11,10 +12,9 @@ use crate::{
 };
 use std::{
     fs,
-    io::{BufRead, BufReader, Read},
     os::windows::process::CommandExt,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Command,
     thread,
     time::{Duration, Instant},
 };
@@ -25,10 +25,7 @@ const UNINSTALL_ROOT: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninsta
 const NSIS_PUBLISHER_KEY: &str = r"Software\atelier";
 /// Shared with the shell and the Python side, independent of the product name.
 const RUNTIME_PARENT: &str = r"game-atelier\runtime";
-const RUNTIME_DIR: &str = "GameAtelier";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-/// Share of the bar for copying files; unpacking the runtime takes the rest.
-const COPY_SHARE: f64 = 0.15;
 const QUIT_WAIT: Duration = Duration::from_secs(90);
 const UNINSTALLER: &str = "uninstall.exe";
 
@@ -154,21 +151,17 @@ pub fn install(payload: &Payload, plan: &Plan, report: &mut dyn FnMut(f64)) -> R
         return Err(format!("{product} 没有退出，请从任务栏通知区域退出后重试"));
     }
 
-    // 1. Files: the app as built, then the seed, then the uninstaller that remembers them all.
+    // 1. Files: the app as built, then the uninstaller that remembers them all. The runtime is
+    // the app's own business: it downloads it on first start (contract).
     let total = payload.app_files().map(|f| f.size).sum::<u64>().max(1) as f64;
     let mut copied = 0u64;
     let mut progress = |n: u64| {
         copied += n;
-        report(COPY_SHARE * copied as f64 / total);
+        report(0.98 * copied as f64 / total);
     };
     if !payload.app_files().any(|f| f.path == manifest.main) {
         return Err("安装程序里缺少应用".into());
     }
-    if !payload.app_files().any(|f| f.path.starts_with("seed/")) {
-        return Err("安装程序里缺少运行环境".into());
-    }
-    // A seed from an earlier version would be picked up by the shell first.
-    let _ = fs::remove_dir_all(dir.join("seed"));
     let mut installed = Vec::new();
     for entry in payload.app_files() {
         payload.extract(entry, &dir.join(&entry.path), &mut progress)?;
@@ -177,14 +170,7 @@ pub fn install(payload: &Payload, plan: &Plan, report: &mut dyn FnMut(f64)) -> R
     installed.push(UNINSTALLER.to_string());
     payload.write_uninstaller(&dir.join(UNINSTALLER), installed)?;
 
-    // 2. Runtime: whether to replace it is the shell's call (`--prepare-runtime`, contract). The
-    // app has quit; anything still running from the runtime would hold its files open.
-    stop_processes_under(&runtime_parent().join(RUNTIME_DIR));
-    prepare_runtime(dir, &manifest.main, &mut |fraction| {
-        report(COPY_SHARE + (1.0 - COPY_SHARE) * 0.98 * fraction)
-    })?;
-
-    // 3. Shortcuts and the Settings > Apps entry.
+    // 2. Shortcuts and the Settings > Apps entry.
     let exe = app_exe(dir, &manifest.main);
     let link = format!("{product}.lnk");
     if let Some(programs) = system::programs_dir() {
@@ -202,50 +188,6 @@ pub fn install(payload: &Payload, plan: &Plan, report: &mut dyn FnMut(f64)) -> R
     report(1.0);
     log("install finished");
     Ok(())
-}
-
-/// Unpack the seed through the installed shell itself (`--prepare-runtime`), so the installer
-/// and a first start share one implementation.
-fn prepare_runtime(dir: &Path, main: &str, report: &mut dyn FnMut(f64)) -> Result<(), String> {
-    let mut child = Command::new(app_exe(dir, main))
-        .arg("--prepare-runtime")
-        .current_dir(dir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .map_err(|e| format!("无法启动 {main}：{e}"))?;
-    let mut stderr = child.stderr.take().unwrap();
-    let errors = thread::spawn(move || {
-        let mut text = String::new();
-        let _ = stderr.read_to_string(&mut text);
-        text
-    });
-    let stdout = BufReader::new(child.stdout.take().unwrap());
-    for line in stdout.lines().map_while(Result::ok) {
-        let mut parts = line.split_whitespace();
-        if parts.next() != Some("progress") {
-            continue;
-        }
-        let numbers: Vec<f64> = parts.filter_map(|p| p.parse().ok()).collect();
-        if let [done, total] = numbers[..] {
-            if total > 0.0 {
-                report(done / total);
-            }
-        }
-    }
-    let status = child.wait().map_err(|e| e.to_string())?;
-    let errors = errors.join().unwrap_or_default();
-    if status.success() {
-        return Ok(());
-    }
-    log(&format!("prepare-runtime failed ({status}): {errors}"));
-    let reason = errors
-        .lines()
-        .rev()
-        .find(|l| !l.trim().is_empty() && !l.starts_with("[shell]"))
-        .unwrap_or("运行环境没有准备好");
-    Err(reason.trim().to_string())
 }
 
 fn dir_size_kb(dir: &Path) -> u32 {
@@ -378,25 +320,21 @@ mod tests {
         for path in [
             "Atelier.exe",
             "resources/app.asar",
-            "seed/GameAtelier-1.zip",
+            "locales/zh-CN.pak",
             "notes.txt",
         ] {
             let file = dir.join(path);
             fs::create_dir_all(file.parent().unwrap()).unwrap();
             fs::write(file, b"x").unwrap();
         }
-        let installed = [
-            "Atelier.exe",
-            "resources/app.asar",
-            "seed/GameAtelier-1.zip",
-        ]
-        .map(String::from);
+        let installed =
+            ["Atelier.exe", "resources/app.asar", "locales/zh-CN.pak"].map(String::from);
         remove_installed(&dir, &installed);
         assert!(
             dir.join("notes.txt").is_file(),
             "a file the user put there stays"
         );
-        assert!(!dir.join("resources").exists() && !dir.join("seed").exists());
+        assert!(!dir.join("resources").exists() && !dir.join("locales").exists());
         fs::remove_file(dir.join("notes.txt")).unwrap();
         remove_installed(&dir, &[]);
         let _ = fs::remove_dir(&dir);

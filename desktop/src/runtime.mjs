@@ -19,8 +19,6 @@ export const DESKTOP_CONTRACT = 2;
 const CONTRACT_FILE = 'DESKTOP_CONTRACT';
 /** Content digest written by scripts/build_release.py next to VERSION. */
 const BUILD_FILE = 'BUILD_ID';
-/** Which seed build the shell unpacked into this runtime root (see `seedRecord`). */
-const SEED_RECORD = 'seed.json';
 
 let logFile = null;
 
@@ -130,31 +128,20 @@ export function meetsContract(root) {
 }
 
 /**
- * `<resources>/seed/seed.json`, written by scripts/build_desktop.py from the archive itself:
- * `{ file, version, build, contract }`. Null when the install ships no usable seed.
+ * The runtime this build goes with: stage/runtime.json, written by scripts/build_desktop.py from
+ * the archive itself — `{ version, file, sha256, build, contract }`. The download is checked
+ * against `sha256`, an unpacked version directory against `build` (its BUILD_ID). Null when the
+ * file is missing or incomplete (an install that cannot get its runtime).
  */
-export function readSeed(seedDir) {
+export function readRuntimeInfo(file) {
   try {
-    const info = JSON.parse(fs.readFileSync(path.join(seedDir, 'seed.json'), 'utf8'));
-    const file = path.join(seedDir, path.basename(String(info.file)));
-    if (!validVersion(info.version) || !fs.existsSync(file)) return null;
-    return { file, version: info.version, build: String(info.build || ''), contract: contractLevel(info.contract) };
+    const info = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const ok = validVersion(info.version) && typeof info.file === 'string' && info.file.length > 0
+      && /^[0-9a-f]{64}$/.test(info.sha256) && typeof info.build === 'string' && info.build.length > 0;
+    return ok ? { version: info.version, file: info.file, sha256: info.sha256, build: info.build } : null;
   } catch {
     return null;
   }
-}
-
-export function seedRecord(root) {
-  try {
-    const record = JSON.parse(fs.readFileSync(path.join(root, SEED_RECORD), 'utf8'));
-    return validVersion(record.version) ? { version: record.version, build: String(record.build || '') } : null;
-  } catch {
-    return null;
-  }
-}
-
-export function writeSeedRecord(root, seed) {
-  fs.writeFileSync(path.join(root, SEED_RECORD), `${JSON.stringify({ version: seed.version, build: seed.build })}\n`);
 }
 
 export function buildId(root, version) {
@@ -162,31 +149,27 @@ export function buildId(root, version) {
 }
 
 /**
- * Why the runtime must be (re)created from the seed, or null to keep it.
+ * Why this shell needs another runtime, or null to keep the one it has. `info` is the runtime the
+ * shell was built with (readRuntimeInfo).
  * - `missing`: no usable runtime yet (first start, or an interrupted earlier attempt).
- * - `contract`: it does not declare DESKTOP_CONTRACT and the seed is not older. Contract levels only
- *   grow with builds, so a runtime newer than the seed always declares it.
- * - `build`: it runs the seed's version, that version directory came from a seed (the record says
- *   so and still matches), and this seed is a different build. Test packages are reinstalled under
- *   the same version number; an in-app update never writes the record.
- * - `older`: its version is lower than the seed's (a newer installer over an older install). A
- *   runtime at or above the seed's version is kept, so an in-app update is never rolled back.
- * - `too-old`: it does not declare the contract and the seed is older, so the seed cannot help.
+ * - `contract`: it does not declare DESKTOP_CONTRACT and is not newer than the shell's version.
+ *   Contract levels only grow with builds, so the shell's own runtime declares it.
+ * - `too-old`: it does not declare the contract and is newer than the shell: nothing to fetch fixes that.
+ * - `build`: it runs the shell's version but its version directory's BUILD_ID is not the one this
+ *   shell was built with (or it has none): an unreleased build reuses the released version number,
+ *   and the shell must never run a runtime it does not go with without saying so. An in-app update
+ *   unpacks the released archive, BUILD_ID included, so it is never mistaken for one.
+ * Any other version that declares the contract is kept, older or newer: an in-app update moves it on.
  * The runtime's version is the newer of `current` and `last-good`: during an in-app update `current`
  * already names the version being switched to.
  */
-export function replacementReason(root, seed) {
+export function replacementReason(root, info) {
   if (!installed(root)) return 'missing';
   const version = runtimeVersion(root);
   if (!meetsContract(root)) {
-    return compareVersions(seed.version, version) >= 0 ? 'contract' : 'too-old';
+    return compareVersions(info.version, version) >= 0 ? 'contract' : 'too-old';
   }
-  if (compareVersions(version, seed.version) < 0) return 'older';
-  if (version === seed.version && seed.build) {
-    const record = seedRecord(root);
-    const build = buildId(root, version);
-    if (record?.version === version && record.build === build && build !== seed.build) return 'build';
-  }
+  if (version === info.version && buildId(root, version) !== info.build) return 'build';
   return null;
 }
 

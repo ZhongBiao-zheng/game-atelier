@@ -24,7 +24,7 @@ pub enum Role {
     Uninstall,
 }
 
-/// How an entry's bytes are stored: app files are raw deflate, archives (the seed) as they are.
+/// How an entry's bytes are stored: app files are raw deflate, the installer's own files as they are.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Codec {
@@ -87,7 +87,7 @@ pub struct Payload {
 
 const INCOMPLETE: &str = "安装程序不完整，请重新下载";
 
-/// Next to `dest` but never matching `GameAtelier-*` (the shell picks the seed by that prefix).
+/// Next to `dest`, hidden, with a suffix nothing else uses: a half-written file is never taken for the real one.
 fn partial_path(dest: &Path) -> PathBuf {
     let name = dest.file_name().unwrap_or_default().to_string_lossy();
     dest.with_file_name(format!(".{name}.partial"))

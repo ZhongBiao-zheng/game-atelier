@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
-  compareVersions, contractLevel, DESKTOP_CONTRACT, meetsContract, readSeed, replacementReason,
-  uniqueDownloadPath, validVersion, writeSeedRecord,
+  compareVersions, contractLevel, DESKTOP_CONTRACT, meetsContract, readRuntimeInfo, replacementReason,
+  uniqueDownloadPath, validVersion,
 } from '../src/runtime.mjs';
 
 function tmp(name) {
@@ -29,7 +29,8 @@ function bundle(versions, current, lastGood) {
   return root;
 }
 
-const seed = (version, build) => ({ file: 'x', version, build, contract: DESKTOP_CONTRACT });
+/** The runtime a shell was built with (stage/runtime.json). */
+const shell = (version, build) => ({ version, build, file: 'x', sha256: 'f'.repeat(64) });
 
 test('version rules match the bundle layout', () => {
   assert.ok(validVersion('5.138.0'));
@@ -44,29 +45,25 @@ test('version rules match the bundle layout', () => {
   assert.equal(compareVersions('0.5.10', '0.5.9'), 1);
 });
 
-test('replacement: a runtime older than the seed is replaced, never one at or above it', () => {
+test('replacement: another version that declares the contract is kept, older or newer', () => {
   const ok = String(DESKTOP_CONTRACT);
   const root = bundle([['0.5.140', ok, 'a']], '0.5.140', '0.5.140');
-  assert.equal(replacementReason(root, seed('0.5.141', 'b')), 'older');
-  assert.equal(replacementReason(root, seed('0.5.140', 'b')), null);
-  assert.equal(replacementReason(root, seed('0.5.139', 'b')), null);
-  // Across the version-line change: 5.x is older than any 0.x.
+  assert.equal(replacementReason(root, shell('0.5.141', 'b')), null, 'older than the shell: the in-app update moves it on');
+  assert.equal(replacementReason(root, shell('0.5.139', 'b')), null, 'newer than the shell: never rolled back');
+  // Across the version-line change: 5.x is older than any 0.x, still kept.
   const legacy = bundle([['5.139.0', ok, 'a']], '5.139.0', '5.139.0');
-  assert.equal(replacementReason(legacy, seed('0.5.140', 'b')), 'older');
-  assert.equal(replacementReason(root, seed('5.139.0', 'b')), null);
+  assert.equal(replacementReason(legacy, shell('0.5.140', 'b')), null);
 });
-
 test('replacement: an in-app update in progress counts as the runtime version', () => {
-  const ok = String(DESKTOP_CONTRACT);
   // current already names the version being switched to; last-good still names the old one.
-  const updating = bundle([['0.5.140', ok, 'a'], ['0.5.142', ok, 'u']], '0.5.142', '0.5.140');
-  assert.equal(replacementReason(updating, seed('0.5.141', 'b')), null);
-  assert.equal(replacementReason(updating, seed('0.5.143', 'b')), 'older');
+  // Neither declares the contract, so the newer one decides between contract and too-old.
+  const updating = bundle([['0.5.140', '1', 'a'], ['0.5.142', '1', 'u']], '0.5.142', '0.5.140');
+  assert.equal(replacementReason(updating, shell('0.5.141', 'b')), 'too-old');
+  assert.equal(replacementReason(updating, shell('0.5.142', 'b')), 'contract');
   // An unreadable current falls back to last-good.
   fs.writeFileSync(path.join(updating, 'current'), 'garbage\n');
-  assert.equal(replacementReason(updating, seed('0.5.141', 'b')), 'older');
+  assert.equal(replacementReason(updating, shell('0.5.141', 'b')), 'contract');
 });
-
 test('contract levels: plain integers only, anything else is 0', () => {
   assert.equal(contractLevel('2\n'), 2);
   assert.equal(contractLevel('one'), 0);
@@ -84,56 +81,46 @@ test('the runtime declares the contract, not its version', () => {
 });
 
 test('replacement: missing or incomplete runtime', () => {
-  assert.equal(replacementReason(path.join(tmp('none'), 'GameAtelier'), seed('5.139.0', 'b')), 'missing');
+  assert.equal(replacementReason(path.join(tmp('none'), 'GameAtelier'), shell('5.139.0', 'b')), 'missing');
   const broken = bundle([['5.139.0', '2', 'b']], '5.139.0', '5.139.0');
   fs.rmSync(path.join(broken, 'versions', '5.139.0', 'VERSION'));
-  assert.equal(replacementReason(broken, seed('5.139.0', 'b')), 'missing');
+  assert.equal(replacementReason(broken, shell('5.139.0', 'b')), 'missing');
 });
 
-test('replacement: a runtime without the contract is replaced unless the seed is older', () => {
+test('replacement: a runtime without the contract is replaced unless the shell is older', () => {
   const old = bundle([['5.138.0', '1', null]], '5.138.0', '5.138.0');
-  assert.equal(replacementReason(old, seed('5.139.0', 'b')), 'contract');
-  assert.equal(replacementReason(old, seed('5.138.0', 'b')), 'contract');
-  assert.equal(replacementReason(old, seed('5.137.0', 'b')), 'too-old');
+  assert.equal(replacementReason(old, shell('5.139.0', 'b')), 'contract');
+  assert.equal(replacementReason(old, shell('5.138.0', 'b')), 'contract');
+  assert.equal(replacementReason(old, shell('5.137.0', 'b')), 'too-old');
 });
 
-test('replacement: same version, unpacked from a different seed build', () => {
+test('replacement: the shell\'s version from another build is replaced, never run unnoticed', () => {
   const ok = String(DESKTOP_CONTRACT);
-  const root = bundle([['5.139.0', ok, 'first']], '5.139.0', '5.139.0');
-  writeSeedRecord(root, seed('5.139.0', 'first'));
-  assert.equal(replacementReason(root, seed('5.139.0', 'first')), null);
-  assert.equal(replacementReason(root, seed('5.139.0', 'second')), 'build');
+  const root = bundle([['5.139.0', ok, 'released']], '5.139.0', '5.139.0');
+  assert.equal(replacementReason(root, shell('5.139.0', 'released')), null);
+  assert.equal(replacementReason(root, shell('5.139.0', 'unreleased')), 'build');
+  const unmarked = bundle([['5.139.0', ok, null]], '5.139.0', '5.139.0');
+  assert.equal(replacementReason(unmarked, shell('5.139.0', 'released')), 'build', 'no BUILD_ID: cannot tell, replace');
 });
-
-test('replacement: versions the seed did not unpack are kept', () => {
+test('replacement: an in-app update to the shell\'s version is the same build, kept', () => {
   const ok = String(DESKTOP_CONTRACT);
-  // In-app update to a newer version: the record names the older seed version.
-  const updated = bundle([['5.139.0', ok, 'seed'], ['5.140.0', ok, 'update']], '5.140.0', '5.140.0');
-  writeSeedRecord(updated, seed('5.139.0', 'seed'));
-  assert.equal(replacementReason(updated, seed('5.140.0', 'other')), null);
-  assert.equal(replacementReason(updated, seed('5.139.0', 'other')), null);
-  // No record (unpacked by something else): never replaced for a build difference.
-  const unknown = bundle([['5.139.0', ok, 'x']], '5.139.0', '5.139.0');
-  assert.equal(replacementReason(unknown, seed('5.139.0', 'y')), null);
-  // The record no longer matches the directory (rewritten since): keep it.
-  const rewritten = bundle([['5.139.0', ok, 'later']], '5.139.0', '5.139.0');
-  writeSeedRecord(rewritten, seed('5.139.0', 'first'));
-  assert.equal(replacementReason(rewritten, seed('5.139.0', 'third')), null);
+  // Updated in the app from 5.139.0 to the released 5.140.0, then the 5.140.0 installer installed.
+  const updated = bundle([['5.139.0', ok, 'installed-5.139'], ['5.140.0', ok, 'released-5.140']], '5.140.0', '5.140.0');
+  assert.equal(replacementReason(updated, shell('5.140.0', 'released-5.140')), null);
+  assert.equal(replacementReason(updated, shell('5.139.0', 'released-5.139')), null, 'another version: kept');
 });
-
-test('the seed description must name an existing archive', () => {
-  const dir = tmp('seed');
-  assert.equal(readSeed(dir), null);
-  fs.writeFileSync(path.join(dir, 'seed.json'), JSON.stringify({ file: 'GameAtelier-5.139.0-macos-arm64.tar.gz', version: '5.139.0', build: 'b', contract: 2 }));
-  assert.equal(readSeed(dir), null);
-  fs.writeFileSync(path.join(dir, 'GameAtelier-5.139.0-macos-arm64.tar.gz'), '');
-  assert.deepEqual(readSeed(dir), {
-    file: path.join(dir, 'GameAtelier-5.139.0-macos-arm64.tar.gz'), version: '5.139.0', build: 'b', contract: 2,
-  });
-  fs.writeFileSync(path.join(dir, 'seed.json'), JSON.stringify({ file: '../../etc/x', version: '5.139.0' }));
-  assert.equal(readSeed(dir), null);
+test('the build\'s runtime description needs a version, a sha256 and a BUILD_ID', () => {
+  const dir = tmp('info');
+  const file = path.join(dir, 'runtime.json');
+  assert.equal(readRuntimeInfo(file), null, 'missing file');
+  const good = { version: '5.139.0', file: 'GameAtelier-5.139.0-macos-arm64.tar.gz', sha256: 'a'.repeat(64), build: 'b', contract: 2 };
+  fs.writeFileSync(file, JSON.stringify(good));
+  assert.deepEqual(readRuntimeInfo(file), { version: '5.139.0', file: good.file, sha256: good.sha256, build: 'b' });
+  for (const broken of [{ version: '5.139' }, { sha256: 'abc' }, { sha256: 'A'.repeat(64) }, { build: '' }, { file: '' }]) {
+    fs.writeFileSync(file, JSON.stringify({ ...good, ...broken }));
+    assert.equal(readRuntimeInfo(file), null, JSON.stringify(broken));
+  }
 });
-
 test('downloads never overwrite', () => {
   const dir = tmp('dl');
   assert.equal(uniqueDownloadPath(dir, 'a.png'), path.join(dir, 'a.png'));

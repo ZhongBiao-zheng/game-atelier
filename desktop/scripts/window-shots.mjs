@@ -1,21 +1,27 @@
 // CI only (Windows): the title bar with its caption buttons in dark and light — plus where a full-window overlay's top-right control lands (the `desktop-clear-top` rule),
 // and the loading page's runtime-download states drawn in the same window (values fed to the page).
 // Real screen captures, so the system-drawn caption buttons are in them.
-// usage: node window-shots.mjs <app-folder> <out-dir>
+// usage: node window-shots.mjs <app-folder> <out-dir> <runtime archive>
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { unpackRuntime } from '../src/unpack.mjs';
 
-const [appDir, out] = process.argv.slice(2);
+const [appDir, out, runtimeArchive] = process.argv.slice(2);
 const desktop = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const product = JSON.parse(fs.readFileSync(path.join(desktop, 'package.json'), 'utf8')).productName;
 const exe = path.join(appDir, `${product}.exe`);
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-shots-'));
+// The runtime unpacked once with the shell's own code (src/unpack.mjs, as a first start does; tar
+// on the runner either cannot read zip or skips entries it cannot name): the shots are about the
+// window, the download itself is covered by the smoke.
+const runtimeParent = path.join(work, 'runtime');
+await unpackRuntime(runtimeParent, { file: runtimeArchive }, () => {});
 const env = {
   ...process.env, LOCALAPPDATA: path.join(work, 'local'), GAME_ATELIER_DATA_ROOT: path.join(work, 'data'),
-  GAME_ATELIER_NO_UPDATE_CHECK: '1',
+  GAME_ATELIER_NO_UPDATE_CHECK: '1', ATELIER_RUNTIME_ROOT: path.join(runtimeParent, 'GameAtelier'),
 };
 const PORT = 9340;
 const MB = 1024 * 1024;
@@ -69,8 +75,6 @@ function capture(rect, file) {
     $b.Save('${file.replace(/'/g, "''")}')`]);
 }
 
-const prepared = spawnSync(exe, ['--prepare-runtime'], { env, encoding: 'utf8' });
-console.log('prepare-runtime', prepared.status, prepared.stdout.trim().split('\n').at(-1));
 for (const theme of ['dark', 'light']) {
   const app = spawn(exe, [`--remote-debugging-port=${PORT}`], { env, stdio: 'ignore' });
   const cdp = await page();

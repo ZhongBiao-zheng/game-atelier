@@ -1,6 +1,7 @@
 // Downloading the runtime (the release archive GameAtelier-<version>-<platform>) on first start.
 // Sources, names and addresses come from src/viewer_server/release_sources.json, the same file the
-// in-app update reads (docs/contracts/desktop-shell.md「运行包下载」).
+// in-app update reads (docs/contracts/desktop-shell.md「运行包下载」). What the archive must hash to
+// is not taken from the source: the shell was built with it (stage/runtime.json `sha256`).
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -176,12 +177,15 @@ async function fetchArchive(fetchFn, url, part, { signal, stallMs, onProgress, c
 }
 
 /**
- * Downloads and verifies the runtime archive into `dir`; returns its path. A `.part` file and a
- * `.part.json` record survive an interruption, so the next call continues where it stopped. The
- * whole file is hashed after the last byte; a mismatch deletes it and moves on to the next source.
+ * Downloads the runtime archive this shell was built with into `dir`; returns its path. `sha256`
+ * is the one the build recorded. Each source's `.sha256` is only a cheap check first: when it is
+ * not this build's (an unreleased build shares the released version number) or cannot be read, the
+ * source is skipped without downloading. A `.part` file and a `.part.json` record survive an
+ * interruption, so the next call continues where it stopped; the whole file is then hashed, and a
+ * mismatch deletes it and moves on to the next source.
  */
 export async function downloadRuntime({
-  release, version, platform, dir, sources, fetchFor, onProgress = () => {}, onSource = () => {},
+  release, version, platform, sha256, dir, sources, fetchFor, onProgress = () => {}, onSource = () => {},
   signal, statfs = fs.statfsSync, stallMs = STALL_MS, retryDelays = RETRY_DELAYS_MS,
 }) {
   fs.mkdirSync(dir, { recursive: true });
@@ -195,6 +199,8 @@ export async function downloadRuntime({
     const free = freeBytes(dir, statfs);
     if (free < need) throw new DownloadError('disk', '磁盘空间不足', { need: need - free });
   };
+  // Downloaded before but never unpacked (the app quit meanwhile): use it, no network needed.
+  if (fs.existsSync(final) && await sha256File(final) === sha256) return final;
   for (const source of sources) {
     if (signal?.aborted) throw cancelled();
     const fetchFn = fetchFor(source.proxy);
@@ -211,8 +217,7 @@ export async function downloadRuntime({
           await sleep(retryDelays[attempt], signal);
         }
       }
-      // Downloaded before but never unpacked (the app quit meanwhile): no need to fetch it again.
-      if (fs.existsSync(final) && await sha256File(final) === checksum) return final;
+      if (checksum !== sha256) throw new DownloadError('checksum', '文件校验未通过');
       const saved = readJson(record);
       if (!(saved?.version === version && saved.sha256 === checksum)) fs.rmSync(part, { force: true });
       fs.writeFileSync(record, JSON.stringify({ version, sha256: checksum, source: source.id }));
@@ -226,7 +231,7 @@ export async function downloadRuntime({
           await sleep(retryDelays[attempt], signal);
         }
       }
-      if (await sha256File(part) !== checksum) {
+      if (await sha256File(part) !== sha256) {
         fs.rmSync(part, { force: true });
         fs.rmSync(record, { force: true });
         throw new DownloadError('checksum', '文件校验未通过');
@@ -247,18 +252,16 @@ export async function downloadRuntime({
 }
 
 /**
- * A runtime archive the user picked (downloaded in a browser from the release page). It must be
- * this shell's version; a `.sha256` next to it is checked when present.
+ * A runtime archive the user picked (downloaded in a browser, or the CI artifact of an unreleased
+ * build). It must be the archive this shell was built with: its name and its sha256.
  */
-export async function checkImported(file, { release, version, platform }) {
+export async function checkImported(file, { release, version, platform, sha256 }) {
   const expected = assetName(release, version, platform);
   if (path.basename(file) !== expected) {
     throw new DownloadError('version', `需要 ${version} 的运行包`, { expected });
   }
-  const checksumFile = file + release.checksum_suffix;
-  if (fs.existsSync(checksumFile)) {
-    const checksum = parseChecksum(fs.readFileSync(checksumFile, 'utf8').slice(0, CHECKSUM_LIMIT));
-    if (await sha256File(file) !== checksum) throw new DownloadError('checksum', '文件校验未通过');
+  if (await sha256File(file) !== sha256) {
+    throw new DownloadError('checksum', `文件校验未通过，需要与本安装包配套的 ${version} 运行包`);
   }
   return file;
 }

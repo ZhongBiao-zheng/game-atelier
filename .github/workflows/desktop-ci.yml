@@ -74,21 +74,23 @@ jobs:
           cargo fmt --check
           cargo clippy --release -- -D warnings
           cargo test --release
-      - name: Build the runtime bundle used as the seed
-        run: uv run --no-project python scripts/build_release.py --output release-build --platform ${{ matrix.platform }}
-      - name: Build installer
+      # The runtime this build goes with: the installer records its sha256 and BUILD_ID, the app
+      # downloads it on first start (here from a local stand-in, the smoke's feed).
+      - name: Build the runtime bundle the app downloads
         run: |
-          seed="$(find release-build -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)"
-          uv run --no-project python scripts/build_desktop.py --seed "$seed" --output desktop-build --platform ${{ matrix.platform }}
-      - name: Install, open and quit the app; installer arguments
+          uv run --no-project python scripts/build_release.py --output release-build --platform ${{ matrix.platform }}
+          echo "RUNTIME=$(find release-build -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | head -1)" >> "$GITHUB_ENV"
+      - name: Build installer
+        run: uv run --no-project python scripts/build_desktop.py --runtime "$RUNTIME" --output desktop-build --platform ${{ matrix.platform }}
+      - name: Install, open and quit the app; runtime download, resume and replacement
         run: |
           installer="$(find desktop-build -maxdepth 1 -type f \( -name '*.dmg' -o -name '*-windows-x64.zip' \) | head -1)"
-          uv run --no-project python scripts/smoke_desktop.py --installer "$installer"
+          uv run --no-project python scripts/smoke_desktop.py --installer "$installer" --runtime "$RUNTIME"
       - name: Fresh install, first start, install over the running app, uninstall
         if: matrix.platform == 'windows-x64'
         run: |
           setup="$(find desktop-build -maxdepth 1 -type f -name '*-setup.exe' | head -1)"
-          uv run --no-project python scripts/smoke_desktop.py --setup "$setup"
+          uv run --no-project python scripts/smoke_desktop.py --setup "$setup" --runtime "$RUNTIME"
       - name: Every installer screen (dark / light), a windowed install and a windowed uninstall
         if: matrix.platform == 'windows-x64'
         shell: pwsh
@@ -103,7 +105,7 @@ jobs:
           ./scripts/desktop_icon_check.ps1 -Installer $setup.FullName -Output desktop-build/installer-shots
       - name: Title bar screenshots (dark / light)
         if: matrix.platform == 'windows-x64'
-        run: node desktop/scripts/window-shots.mjs desktop/dist/win-unpacked desktop-build/window-shots
+        run: node desktop/scripts/window-shots.mjs desktop/dist/win-unpacked desktop-build/window-shots "$RUNTIME"
       # 给人下载的产物只放安装文件；Windows 应用文件夹的 zip 只供上面的冒烟步骤用，不上传。
       - uses: actions/upload-artifact@v4
         if: always()
@@ -114,6 +116,18 @@ jobs:
             desktop-build/*.dmg.sha256
             desktop-build/*-setup.exe
             desktop-build/*-setup.exe.sha256
+          if-no-files-found: ignore
+          retention-days: 14
+      # An unreleased build's runtime is not on any release: trying the installer means importing
+      # this archive on the first-start page (「从文件导入」).
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-runtime-${{ matrix.platform }}
+          path: |
+            release-build/*.zip
+            release-build/*.tar.gz
+            release-build/*.sha256
           if-no-files-found: ignore
           retention-days: 14
       - uses: actions/upload-artifact@v4
