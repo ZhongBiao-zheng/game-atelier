@@ -6,15 +6,22 @@
 <title></title>
 <style>
   /* Same colours as web/src/styles/tokens.css (--background / --foreground / --muted-foreground). */
-  :root { --bg: #0A0A0B; --fg: #EDEDEF; --muted: #8E8E93; --track: rgba(255, 255, 255, 0.08); --line: rgba(255, 255, 255, 0.14); --button: #18181B; }
-  :root.light { --bg: #F2F2F3; --fg: #0A0A0B; --muted: #6E6E73; --track: rgba(0, 0, 0, 0.08); --line: rgba(0, 0, 0, 0.1); --button: #FFFFFF; }
+  /* --primary / --on-primary: the default theme colour and its text (tokens.css --primary / --primary-foreground). */
+  :root { --bg: #0A0A0B; --fg: #EDEDEF; --muted: #8E8E93; --track: rgba(255, 255, 255, 0.08); --line: rgba(255, 255, 255, 0.14); --button: #18181B;
+          --primary: #D4F53C; --on-primary: #0A0A0B; }
+  :root.light { --bg: #F2F2F3; --fg: #0A0A0B; --muted: #6E6E73; --track: rgba(0, 0, 0, 0.08); --line: rgba(0, 0, 0, 0.1); --button: #FFFFFF;
+                --primary: oklch(from #D4F53C 0.5 c h); --on-primary: #FFFFFF; }
   html, body { height: 100%; }
-  body { margin: 0; display: grid; place-items: center; background: var(--bg); color: var(--fg); overscroll-behavior: none;
+  body { margin: 0; background: var(--bg); color: var(--fg); overscroll-behavior: none;
          font: 14px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; -webkit-user-select: none; user-select: none; cursor: default; }
-  main { display: flex; flex-direction: column; align-items: center; gap: 28px; width: 320px; text-align: center; }
+  /* The mark stays put across states (download, paused, preparing, failed): the block hangs from a
+     fixed point a little above the middle, whatever follows the title. */
+  main { position: absolute; left: 50%; top: calc(50% - 120px); transform: translateX(-50%);
+         display: flex; flex-direction: column; align-items: center; gap: 28px; width: 320px; text-align: center; }
   .mark { width: 72px; height: 72px; fill: var(--fg); }
-  .bar { position: relative; width: 160px; height: 3px; overflow: hidden; border-radius: 3px; background: var(--track); }
-  .bar > span { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 3px; background: var(--fg); transition: width 120ms linear; }
+  .bar { position: relative; width: 300px; height: 4px; overflow: hidden; border-radius: 4px; background: var(--track); }
+  .bar > span { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 4px; background: var(--fg); transition: width 120ms linear; }
+  .bar:not(.busy) > span { min-width: 8px; }
   .bar.busy > span { width: 30%; animation: slide 1.1s ease-in-out infinite; }
   @keyframes slide { from { left: -30%; } to { left: 100%; } }
   @media (prefers-reduced-motion: reduce) { .bar.busy > span { animation: none; left: 35%; } }
@@ -25,6 +32,8 @@
   p { margin: -16px 0 0; color: var(--muted); white-space: pre-wrap; -webkit-user-select: text; user-select: text; }
   .actions { display: flex; gap: 8px; }
   button { background: var(--button); color: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 6px 14px; font: inherit; cursor: default; }
+  button.primary { background: var(--primary); color: var(--on-primary); border-color: transparent; }
+  button.text { background: transparent; border-color: transparent; color: var(--muted); }
   [hidden] { display: none !important; }
   /* Electron: the whole page drags the window (title bar hidden), the buttons stay clickable. */
   body { app-region: drag; }
@@ -57,9 +66,10 @@
   const show = (id, visible) => { $(id).hidden = !visible; };
   const title = (text) => { show('title', Boolean(text)); $('title').textContent = text || ''; };
   const buttons = (list) => {
-    $('actions').replaceChildren(...list.map(([label, run]) => {
+    $('actions').replaceChildren(...list.map(([label, run, kind]) => {
       const button = document.createElement('button');
       button.type = 'button';
+      if (kind) button.className = kind;
       button.textContent = label;
       button.onclick = run;
       return button;
@@ -77,12 +87,12 @@
     : `${Math.floor(seconds / 60)} 分 ${Math.ceil(seconds % 60)} 秒`);
 
   const errors = {
-    start: { title: `${name} 没能打开`, actions: [['重试', () => shellApi.retry()], ['查看日志', () => shellApi.openLog()]] },
-    stopped: { title: `${name} 意外停止了`, actions: [['重新打开', () => shellApi.retry()], ['查看日志', () => shellApi.openLog()]] },
+    start: { title: `${name} 没能打开`, actions: [['重试', () => shellApi.retry(), 'primary'], ['查看日志', () => shellApi.openLog(), 'text']] },
+    stopped: { title: `${name} 意外停止了`, actions: [['重新打开', () => shellApi.retry(), 'primary'], ['查看日志', () => shellApi.openLog(), 'text']] },
     install: { title: '安装文件不完整', detail: '请重新下载安装', actions: [] },
     download: {
       title: '运行环境下载失败',
-      actions: [['重试', () => shellApi.retry()], ['从文件导入', () => shellApi.importFile()], ['查看日志', () => shellApi.openLog()]],
+      actions: [['重试', () => shellApi.retry(), 'primary'], ['从文件导入', () => shellApi.importFile()], ['查看日志', () => shellApi.openLog(), 'text']],
     },
   };
   const error = errors[params.get('error')];
@@ -108,14 +118,17 @@
       const seconds = (now - since) / 1000;
       const rate = seconds > 0 ? (done - from) / seconds : 0;
       const parts = [`${size(done)} / ${size(total)} MB`];
-      if (seconds >= 3 && rate > 0) parts.push(`${(rate / MB).toFixed(1)} MB/s`, duration((total - done) / rate));
+      if (seconds >= 3 && rate > 0) parts.push(`${(rate / MB).toFixed(1)} MB/s`, `剩余 ${duration((total - done) / rate)}`);
       $('hint').textContent = total ? parts.join(' · ') : '';
     };
   } else if (stage === 'paused') {
     title('下载已暂停');
-    fill(Number(params.get('done')) || 0, Number(params.get('total')) || 0);
+    const done = Number(params.get('done')) || 0;
+    const total = Number(params.get('total')) || 0;
+    fill(done, total);
     $('bar').classList.remove('busy');
-    buttons([['继续下载', () => shellApi.resume()], ['从文件导入', () => shellApi.importFile()]]);
+    if (total) $('hint').textContent = `${size(done)} / ${size(total)} MB`;
+    buttons([['继续下载', () => shellApi.resume(), 'primary'], ['从文件导入', () => shellApi.importFile()]]);
   } else {
     // The shell pushes unpacking progress (it never answers a request: a reply arriving after the
     // window navigated away would abort the web view). Afterwards the bar only says "still working".

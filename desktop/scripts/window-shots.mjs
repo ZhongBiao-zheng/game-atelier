@@ -95,6 +95,8 @@ for (const theme of ['dark', 'light']) {
     await sleep(500);
     capture(rect, path.join(out, 'overlay-top-right-dark.png'));
   }
+  // Switching state must not move the mark or the title (they hang from a fixed point).
+  const positions = [];
   for (const [state, query, feed] of loadingStates) {
     const url = pathToFileURL(LOADING);
     for (const [key, value] of Object.entries({ name: product, theme, ...query })) url.searchParams.set(key, String(value));
@@ -103,7 +105,12 @@ for (const theme of ['dark', 'light']) {
     await cdp.eval(feed);
     await sleep(300);
     capture(rect, path.join(out, `loading-${theme}-${state}.png`));
+    positions.push([state, await cdp.eval(`[document.querySelector('.mark').getBoundingClientRect().top,
+      document.getElementById('title').getBoundingClientRect().top]`)]);
   }
+  const moved = positions.filter(([, at]) => at[0] !== positions[0][1][0] || at[1] !== positions[0][1][1]);
+  console.log(`loading ${theme}: mark / title top`, JSON.stringify(positions));
+  if (moved.length) throw new Error(`the mark or title moved between loading states: ${JSON.stringify(positions)}`);
   cdp.close();
   spawnSync(exe, ['--quit'], { env, timeout: 60000 });
   await new Promise((resolve) => { if (app.exitCode !== null) resolve(); else app.once('exit', resolve); });
