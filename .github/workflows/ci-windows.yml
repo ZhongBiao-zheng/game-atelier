@@ -53,6 +53,18 @@ jobs:
             uv run --no-project python scripts/bootstrap.py --run -m viewer_server.server stop
           }
 
+      - name: TEMP loop reattach timing (remove before delivery)
+        shell: pwsh
+        run: |
+          $fixed = 0; $unfixed = 0
+          for ($i = 1; $i -le 30; $i++) {
+            uv run pytest -q -n auto -p no:randomly tests/test_gateway_reattach.py *> $null
+            if ($LASTEXITCODE -ne 0) { $fixed++ }
+            uv run pytest -q -n auto -p no:randomly tests/test_tmp_reattach_unfixed.py *> $null
+            if ($LASTEXITCODE -ne 0) { $unfixed++ }
+          }
+          Write-Host "LOOP RESULT fixed_failed=$fixed/30 unfixed_failed=$unfixed/30"
+
       - name: Run pytest
         run: uv run pytest -v -n auto
 
