@@ -1,0 +1,10 @@
+{
+  "sources": [
+    {"id": "cnb", "base": "https://cnb.cool/ZhongBiao-zheng/game-atelier/-/releases"},
+    {"id": "github", "base": "https://github.com/ZhongBiao-zheng/game-atelier/releases"}
+  ],
+  "asset": "GameAtelier-{version}-{platform}{ext}",
+  "archive_ext": {"windows-x64": ".zip", "macos-arm64": ".tar.gz", "linux-x64": ".tar.gz"},
+  "download": "{base}/download/v{version}/{asset}",
+  "checksum_suffix": ".sha256"
+}

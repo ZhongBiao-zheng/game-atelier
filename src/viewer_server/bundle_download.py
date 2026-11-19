@@ -25,13 +25,25 @@ import zipfile
 from character_workflow.lib.atomic_io import atomic_write_json, read_text_with_retry
 from character_workflow.lib.file_lock import file_lock, try_file_lock
 
-CNB = "https://cnb.cool/ZhongBiao-zheng/game-atelier/-/releases"
-GITHUB = "https://github.com/ZhongBiao-zheng/game-atelier/releases"
+# Where release archives live and how they are named: one file shared with the desktop shell, which
+# downloads the runtime on first start (docs/contracts/desktop-shell.md).
+RELEASE = json.loads((Path(__file__).with_name("release_sources.json")).read_text(encoding="utf-8"))
+SOURCES = [source["base"] for source in RELEASE["sources"]]
+CNB = next(source["base"] for source in RELEASE["sources"] if source["id"] == "cnb")
 GITHUB_LATEST = "https://api.github.com/repos/ZhongBiao-zheng/game-atelier/releases/latest"
 VERSION = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
 MAX_ARCHIVE = 2 * 1024**3
 MAX_UNPACKED = 4 * 1024**3
 MAX_MEMBERS = 100_000
+
+
+def asset_name(version: str, platform_name: str) -> str:
+    return RELEASE["asset"].format(version=version, platform=platform_name,
+                                   ext=RELEASE["archive_ext"][platform_name])
+
+
+def asset_url(base: str, version: str, filename: str) -> str:
+    return RELEASE["download"].format(base=base, version=version, asset=filename)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -238,16 +250,15 @@ class BundleDownloader:
 
     def _download(self, version: str) -> Path:
         target_platform = _platform_name()
-        suffix = ".zip" if target_platform == "windows-x64" else ".tar.gz"
-        filename = f"GameAtelier-{version}-{target_platform}{suffix}"
+        filename = asset_name(version, target_platform)
         archive = self.updates / filename
         part = archive.with_name(filename + ".part")
         feed = _test_feed()
-        sources = [feed] if feed else [CNB, GITHUB]
+        sources = [feed] if feed else SOURCES
         for base in sources:
             try:
-                url = f"{base}/download/v{version}/{filename}"
-                with urllib.request.urlopen(url + ".sha256", timeout=15) as response:
+                url = asset_url(base, version, filename)
+                with urllib.request.urlopen(url + RELEASE["checksum_suffix"], timeout=15) as response:
                     checksum = response.read(1025).decode("ascii").split()
                 if not checksum or not re.fullmatch(r"[a-fA-F0-9]{64}", checksum[0]):
                     raise ValueError("安装包校验文件无效。")
