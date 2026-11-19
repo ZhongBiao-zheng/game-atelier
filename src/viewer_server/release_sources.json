@@ -1,6 +1,6 @@
 {
   "sources": [
-    {"id": "cnb", "base": "https://cnb.cool/ZhongBiao-zheng/game-atelier/-/releases"},
+    {"id": "cnb", "base": "https://cnb.cool/ZhongBiao-zheng/game-atelier/-/releases", "direct_first": true},
     {"id": "github", "base": "https://github.com/ZhongBiao-zheng/game-atelier/releases"}
   ],
   "asset": "GameAtelier-{version}-{platform}{ext}",

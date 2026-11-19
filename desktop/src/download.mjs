@@ -37,15 +37,16 @@ export function assetUrl(release, base, version, asset) {
 }
 
 /**
- * The order the shell tries: CNB first without any proxy (a broken local proxy is the usual reason
- * a domestic download stalls), then CNB and the other sources through the system proxy.
+ * The order the shell tries: each source in release_sources.json order, without any proxy first
+ * when it says `direct_first` (CNB: a broken local proxy is the usual reason a domestic download
+ * stalls), then through the system proxy. The in-app update reads the same flag.
  * GAME_ATELIER_TEST_UPDATE_FEED (with GAME_ATELIER_TESTING=1, local http only, comma separated)
  * replaces them all, as it does for the in-app update.
  */
 export function plannedSources(release, env = process.env) {
   const feed = testFeeds(env);
   if (feed) return feed.map((base, index) => ({ id: `test${index}`, base, proxy: 'direct' }));
-  return release.sources.flatMap((source) => (source.id === 'cnb'
+  return release.sources.flatMap((source) => (source.direct_first
     ? [{ ...source, proxy: 'direct' }, { ...source, proxy: 'system' }]
     : [{ ...source, proxy: 'system' }]));
 }
