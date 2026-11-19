@@ -214,7 +214,14 @@ def test_bundle_dispatches_selected_interpreter_and_clean_environment(versioned_
             assert command[-1] == "--launch"
         return subprocess.CompletedProcess(command, 0)
     monkeypatch.setattr(boot.subprocess, "run", run)
+    supervised = []
+    # 第 4 批 4-2：常驻路径改由看护进程启动服务（Popen + 看护），命令与环境照旧。
+    def supervise(command, env, runtime):
+        supervised.append(runtime)
+        return run(command, env=env).returncode
+    monkeypatch.setattr(boot, "supervise_service", supervise)
     assert boot.launch_selected_version(service=service) == 0
+    assert len(supervised) == (1 if service else 0)
 
 
 def test_desktop_start_dispatches_the_fast_launch_and_prints_the_data_root_last(

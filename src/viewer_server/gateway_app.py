@@ -11,6 +11,7 @@ import json
 import logging
 import socket
 import threading
+import time
 from typing import Any
 
 import uvicorn
@@ -20,10 +21,13 @@ from fastapi.responses import FileResponse, JSONResponse
 from character_workflow.lib import gateway_access, gateway_keys, gateway_quota, gateway_tasks, model_routes
 from character_workflow.lib.gateway_keys import GatewayKeyRecord
 from character_workflow.lib.gateway_tasks import GatewayRequestError
+from viewer_server import loop_watch
 
 PROTOCOL_VERSION = 2
 MAX_BODY_BYTES = 400 * 1024 * 1024
 CLEANUP_INTERVAL_SECONDS = 3600
+# 看护线程检查网关是否应开未开的间隔（秒）。
+SUPERVISE_SECONDS = 10.0
 
 logger = logging.getLogger(__name__)
 
@@ -275,6 +279,9 @@ class GatewayServer:
         self._cleanup_stop = threading.Event()
         self.port: int | None = None
         self.error: str | None = None
+        # 应该开着的端口（设置里开着网关）；看护线程据此把意外退出的网关线程、被占的端口重新拉起。
+        self._desired_port: int | None = None
+        self._supervisor: threading.Thread | None = None
 
     @property
     def running(self) -> bool:
@@ -282,36 +289,86 @@ class GatewayServer:
 
     def start(self, port: int) -> None:
         with self._lock:
+            self._desired_port = port
+            self._ensure_supervisor()
             if self.running and self.port == port:
                 return
             self._stop_locked()
-            self.error = None
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-                    probe.bind((self.host, port))
-            except OSError:
-                self.error = f"端口 {port} 已被占用"
-                return
+            self._start_locked(port, recover=True)
+
+    def _start_locked(self, port: int, *, recover: bool) -> bool:
+        self.error = None
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind((self.host, port))
+        except OSError:
+            self.error = f"端口 {port} 已被占用"
+            return False
+        if recover:
+            # 只在主服务启动 / 设置里打开网关时做；网关线程意外退出后的重启不做——任务线程还在跑。
             gateway_tasks.recover_after_restart()
-            gateway_tasks.cleanup()
-            gateway_tasks.pump()  # 重启后继续排队与续查的任务
-            config = uvicorn.Config(
-                create_gateway_app(), host=self.host, port=port, log_level="warning",
-                access_log=False, lifespan="off", ws="none",
-            )
-            server = uvicorn.Server(config)
-            # 主线程以外不能装信号处理器；关闭由 should_exit 控制。
-            server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
-            thread = threading.Thread(target=server.run, daemon=True, name="lan-gateway")
-            thread.start()
-            self._server, self._thread, self.port = server, thread, port
-            self._cleanup_stop = threading.Event()
-            threading.Thread(target=self._cleanup_loop, args=(self._cleanup_stop,),
-                             daemon=True, name="lan-gateway-cleanup").start()
+        gateway_tasks.cleanup()
+        gateway_tasks.pump()  # 重启后继续排队与续查的任务
+        config = uvicorn.Config(
+            create_gateway_app(), host=self.host, port=port, log_level="warning",
+            access_log=False, lifespan="off", ws="none",
+        )
+        server = uvicorn.Server(config)
+        # 主线程以外不能装信号处理器；关闭由 should_exit 控制。
+        server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
+        serve = server.serve
+
+        async def serve_watched(sockets=None):
+            # 网关事件循环：延迟超过 200 ms 记告警，卡住 30 秒写所有线程的栈（loop_watch）。
+            watch = loop_watch.start("网关", warn_after=0.2)
+            try:
+                await serve(sockets=sockets)
+            finally:
+                watch.cancel()
+
+        server.serve = serve_watched  # type: ignore[method-assign]
+        thread = threading.Thread(target=server.run, daemon=True, name="lan-gateway")
+        thread.start()
+        self._server, self._thread, self.port = server, thread, port
+        self._cleanup_stop = threading.Event()
+        threading.Thread(target=self._cleanup_loop, args=(self._cleanup_stop,),
+                         daemon=True, name="lan-gateway-cleanup").start()
+        return True
 
     def stop(self) -> None:
         with self._lock:
+            self._desired_port = None
             self._stop_locked()
+
+    def _ensure_supervisor(self) -> None:
+        if self._supervisor is None or not self._supervisor.is_alive():
+            self._supervisor = threading.Thread(target=self._supervise_loop, daemon=True,
+                                                name="lan-gateway-supervisor")
+            self._supervisor.start()
+
+    def _supervise_loop(self) -> None:
+        while True:
+            time.sleep(SUPERVISE_SECONDS)
+            try:
+                self.supervise_once()
+            except Exception:  # noqa: BLE001 — 看护线程不能因为一次失败退出
+                logger.exception("网关看护失败")
+
+    def supervise_once(self) -> None:
+        """网关应该开着却没在跑（线程意外退出、启动时端口被占）：重新拉起。"""
+        with self._lock:
+            port = self._desired_port
+            if port is None or self.running:
+                return
+            died = self._thread is not None
+            previous_error = self.error
+            if died:
+                logger.error("网关线程已退出，正在重新启动 port=%s", port)
+                self._stop_locked()
+            if self._start_locked(port, recover=False):
+                logger.warning("网关已重新启动 port=%s", port)
+            elif self.error != previous_error:
+                logger.warning("网关端口 %s 被占用，稍后重试", port)
 
     def _stop_locked(self) -> None:
         self._cleanup_stop.set()
@@ -342,6 +399,7 @@ class GatewayServer:
         except gateway_keys.GatewayConfigCorruptError as error:
             logger.error("%s", error)
             with self._lock:
+                self._desired_port = None
                 self._stop_locked()
                 self.error = str(error)
             return

@@ -1091,6 +1091,7 @@ status 保留真实状态（含 pending、done、failed，以及团队 canceled 
 网关用量行（`.runtime/gateway/usage/YYYY-MM.jsonl`）另记 `queued_at / started_at / finished_at`（ISO，带时区）与
 `queue_s`（受理→开始，未开始则受理→结束）、`duration_s`；文本调用受理即开始。还记 `sent_to_upstream`、`sent_at`（第一次交给上游 caller 的时间）与 `upstream_task_ids`，只用于对账，不参与扣费。汇总脚本：
 `uv run python -m character_workflow.lib.gateway_stats [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--days N] [--json]`（只读）。
+输出另含 `watchdog.unresponsive_restarts`（常驻看护判定无应答、结束并重启服务的次数）；停止原因 `unresponsive` 的会话按 `unresponsive_since` 截止，无应答那段不计在线。
 团队 project_label=null、member_label 为成员名，cost_cny 始终使用账本 charged_cny（空值按既有账务记 0）；旧账本无执行耗时则 duration_s=null，账本视频 duration 是素材时长，不能当作耗时。
 任务表不为团队全量读取产物或 prompt。
 

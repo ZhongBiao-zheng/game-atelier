@@ -56,7 +56,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def probe_connection_status(port: int) -> LocalConnectionStatus | None:
+def probe_connection_status(port: int, *, timeout: float = 0.5) -> LocalConnectionStatus | None:
     """Read only a bounded loopback response, without proxies or redirected requests."""
     if type(port) is not int or not 1 <= port <= 65535:
         return None
@@ -65,7 +65,7 @@ def probe_connection_status(port: int) -> LocalConnectionStatus | None:
         f"http://127.0.0.1:{port}{STATUS_PATH}", headers={"Accept": "application/json"},
     )
     try:
-        with opener.open(request, timeout=0.5) as response:
+        with opener.open(request, timeout=timeout) as response:
             if response.status != 200 or response.headers.get_content_type() != "application/json":
                 return None
             raw = response.read(_MAX_STATUS_BYTES + 1)

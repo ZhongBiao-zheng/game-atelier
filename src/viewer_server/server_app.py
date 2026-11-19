@@ -277,6 +277,10 @@ async def normal_lifespan(app: FastAPI):
     # 局域网共享（ADR-0025）：默认关闭；开着的话随主服务一起起来。配置损坏时网关停在错误状态。
     await asyncio.to_thread(gateway_server.apply_saved)
     heartbeat_task = asyncio.create_task(_record_host_lifecycle(app))
+    from viewer_server import loop_watch
+
+    # 主服务事件循环卡住 30 秒就把所有线程的栈写进 server.log（常驻看护约 2 分钟才结束进程，栈先落盘）。
+    loop_watch_task = loop_watch.start("主服务")
     # 接入端：网关供应商的模型列表随网关变化，启动时尽力同步一次（连不上就保留旧快照）。
     from character_workflow.lib.callers.atelier_gateway import sync_all_gateway_keys
 
@@ -326,6 +330,7 @@ async def normal_lifespan(app: FastAPI):
         from viewer_server.routes import _stop_studio_recovery_workers
 
         heartbeat_task.cancel()
+        loop_watch_task.cancel()
         try:
             host_lifecycle.record_stop(reason="normal", pid=os.getpid(), source="server")
         except OSError as error:
