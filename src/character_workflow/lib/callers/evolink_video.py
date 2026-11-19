@@ -254,18 +254,27 @@ def render_video(
         root = _evo._api_root(key)
     except _evo.EvoLinkError as error:
         raise EvoLinkVideoError(str(error)) from error
-    _spec, body = build_request(prompt, model, params, key)
-    sent = _sent(body)
-    n = max(1, min(4, int(params.get("n") or 1)))
-
+    resume = _kwargs.get("resume_video")
+    report = _kwargs.get("on_resume_state")
     task_ids: list[str] = []
-    for index in range(n):
-        if should_cancel and should_cancel():
-            raise EvoLinkVideoError("生成已按请求停止")
-        task_id = _submit(root, key, body, index + 1, on_submission)
-        if on_task_id:
-            on_task_id(task_id)
-        task_ids.append(task_id)
+    if resume:
+        # 主机重启后续查：只轮询已存的订单，不再提交。也不重建请求——build_request 会把本地参考图
+        # 重新上传成新地址，回显过滤就对不上了；用提交时存下的那一份。
+        task_ids = [str(item["id"]) for item in resume.get("tasks") or []]
+        sent = set(resume.get("sent") or [])
+    else:
+        _spec, body = build_request(prompt, model, params, key)
+        sent = _sent(body)
+        n = max(1, min(4, int(params.get("n") or 1)))
+        for index in range(n):
+            if should_cancel and should_cancel():
+                raise EvoLinkVideoError("生成已按请求停止")
+            task_id = _submit(root, key, body, index + 1, on_submission)
+            if on_task_id:
+                on_task_id(task_id)
+            task_ids.append(task_id)
+            if report:
+                report({"tasks": [{"id": item} for item in task_ids], "sent": sorted(sent)})
     if on_phase:
         on_phase("sent")
 

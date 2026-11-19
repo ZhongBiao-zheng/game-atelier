@@ -99,6 +99,11 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 - 视频上游订单号/提交诊断仅存在网关；已获订单号或提交未确认后禁止换供应商重发。
 - 任务只对创建它的密钥可见（其他密钥 404）；已结束的任务与文件自创建起保留 24 小时，没结束的（排队、执行、待续查）不清理。
 - 网关重启（2026-11-18 起）：从没发给上游的排队任务继续排队；执行中且有能续查订单的任务（Tuzi 异步图片、自定义接口异步、EvoLink MJ、MJ 任务代理、音潮音乐）改回排队，`phase="resuming"`，只用原来那一家凭已存订单轮询，不换家、不重新提交，出错按 `unconfirmed` 失败；其余执行中任务判 `unconfirmed` 失败、扣 0。续查任务在结束前一直占着额度预占，结束后按原结算规则扣费。续查状态存在任务文件的 `resume_params`。
+- 视频续查（2026-11-19 起，逐协议接入）：视频 caller 每提交一单就回报续查状态（`on_resume_state`），网关存进 `resume_params.video` =
+  `{protocol, tasks: [{id, poll_url?}], sent?}`；续查时把它作为 `resume_video` 交回 caller，只轮询这些订单、不提交、不重新上传素材。
+  已接入：EvoLink 可灵视频（`sent` 为提交时的回显过滤集合，原样存下，因为重建请求会重新上传、得到不同地址）、OpenRouter 视频
+  （存上游给的 `polling_url`，结果走 `unsigned_urls`，不需要回显过滤）。任一提交尝试为「未确认」的视频任务不续查，按 `unconfirmed` 失败。
+  OpenRouter 视频提交后立即上报订单号，之后失败不再被当成「没执行」换别家重提。
 - 任务参数补充：`prompt` 最多 32,000 字符，除 layer_split 外不能为空；`n` 为 1–8。生成任务最多同时运行 8 个、每把密钥最多 4 个，剩余已受理任务排队。
   各类型允许的文件组：image 为 ref/mj_sref/mj_cref/mj_oref，image_edit 为 ref/mask，layer_split 为 ref，video 为 ref/video/audio，audio 不接受文件。
   图片控制字段白名单为 size/size_mode/custom_size/ratio/resolution/quality/background/complexity/output_format/frame_count/frame_duration_ms/steps/cfg_scale/requested_size、

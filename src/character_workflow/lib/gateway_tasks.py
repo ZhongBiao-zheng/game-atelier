@@ -103,6 +103,9 @@ RESUME_KEYS = ("provider_task_protocol", "provider_task_ids", "mj_submission_ids
 # 带着已存订单只轮询、不重新提交的协议（callers：openai_image 的 Tuzi 异步、declarative、
 # evolink、yinchao_music；MJ 任务代理看 mj_submission_ids）。
 RESUMABLE_PROTOCOLS = frozenset({"tuzi_images", "declarative", "evolink", "yinchao"})
+# 视频协议里有「凭已存订单只轮询」入口的（callers 收 resume_video、回报 on_resume_state）。
+# 续查状态存在 resume_params["video"]：{"protocol", "tasks": [{"id", ...}], "sent"?}，内容由各 caller 定。
+VIDEO_RESUMABLE_PROTOCOLS = frozenset({"evolink", "openrouter"})
 
 
 def is_unpriced(record: Any) -> bool:
@@ -519,7 +522,8 @@ def run_task(task: GatewayTask) -> GatewayTask:
             if picked is None:
                 return _exhausted(task_id, tried, warnings, switched_from, last_error)
         key, model = picked
-        params: dict[str, Any] = {**task.params, "n": task.n, **copy.deepcopy(resume or {})}
+        params: dict[str, Any] = {**task.params, "n": task.n, **{
+            name: copy.deepcopy(value) for name, value in (resume or {}).items() if name in RESUME_KEYS}}
         if task.size is not None:
             params["size"] = task.size
         for group, names in task.files.items():
@@ -548,8 +552,17 @@ def run_task(task: GatewayTask) -> GatewayTask:
                 def changed():
                     state = {name: copy.deepcopy(params[name]) for name in RESUME_KEYS
                              if params.get(name) not in (None, [], {})}
+                    video_state = (_read(task_id).resume_params or {}).get("video")
+                    if video_state:
+                        state["video"] = video_state
                     _update(task_id, upstream_task_ids=params.get("provider_task_ids") or [],
                             resume_params=state or None)
+
+                def on_resume_state(video_state):
+                    # 视频 caller 每提交一单就回报一次续查所需的全部状态（订单、轮询地址、回显过滤集合）。
+                    current = dict(_read(task_id).resume_params or {})
+                    current["video"] = {"protocol": video_protocol, **copy.deepcopy(video_state)}
+                    _update(task_id, resume_params=current)
 
                 def on_task_id(identifier):
                     ids = list((_read(task_id)).upstream_task_ids)
@@ -570,13 +583,21 @@ def run_task(task: GatewayTask) -> GatewayTask:
                     render = dispatch_video
                 elif task.kind == "audio":
                     render = dispatch_audio
+                video_kwargs: dict[str, Any] = {}
+                if task.kind == "video":
+                    from character_workflow.lib.callers import _effective_protocol
+
+                    video_protocol = _effective_protocol(key, model.id)
+                    video_kwargs["on_resume_state"] = on_resume_state
+                    if resume and resume.get("video"):
+                        video_kwargs["resume_video"] = copy.deepcopy(resume["video"])
                 paths = render(
                     prompt=task.prompt, model=model.id, alias=key.alias, output_dir=Path(tmp),
                     n=task.n, size=params.get("size"), params=params, job_id=task_id,
                     on_phase=lambda phase: _update(task_id, phase=phase),
                     on_params_changed=changed, on_task_id=on_task_id, on_submission=on_submission,
                     on_cost_usd=lambda usd: cost.__setitem__("usd", usd),
-                    should_cancel=should_cancel,
+                    should_cancel=should_cancel, **video_kwargs,
                 )
                 return _store_outputs(task_id, [Path(path) for path in paths],
                                       0.0 if key.provider == "comfyui" else cost.pop("usd", None), params)
@@ -609,6 +630,12 @@ def resumable(task: GatewayTask) -> bool:
     state = task.resume_params or {}
     if state.get("provider_task_protocol") in RESUMABLE_PROTOCOLS and state.get("provider_task_ids"):
         return True
+    video = state.get("video") or {}
+    if video:
+        # 提交结果未确认（没拿到订单号）的那一单可能也在上游跑：整个任务不续查，按未确认处理。
+        unconfirmed = any(a.get("outcome") == "unconfirmed" for a in task.submission_attempts)
+        return (video.get("protocol") in VIDEO_RESUMABLE_PROTOCOLS and bool(video.get("tasks"))
+                and not unconfirmed)
     # MJ 任务代理：提交结果未确认的不续查（caller 自己也拒绝重提）。
     return bool(state.get("mj_submission_ids")) and not state.get("mj_submit_uncertain")
 

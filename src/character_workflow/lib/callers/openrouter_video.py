@@ -182,21 +182,33 @@ def render_video(
         "Authorization": f"Bearer {key.access_key}",
         "Content-Type": "application/json",
     }
-    body = _build_body(prompt, model, params)
-
-    n = max(1, min(4, int(params.get("n") or 1)))
+    resume = _kwargs.get("resume_video")
+    report = _kwargs.get("on_resume_state")
+    on_task_id = _kwargs.get("on_task_id")
     # (polling_url, job id)——id 是报错时唯一能拿去找回产物的标识，单独留着。
     jobs: list[tuple[str, str]] = []
-    for _ in range(n):
-        resp = requests.post(f"{base}/videos", headers=headers, json=body, timeout=600)
-        payload = _json(resp)
-        if not resp.ok:
-            raise OpenRouterVideoError(_err(payload, resp.status_code))
-        job_id = str(payload.get("id") or "")
-        polling_url = payload.get("polling_url") or (f"{base}/videos/{job_id}" if job_id else None)
-        if not polling_url:
-            raise OpenRouterVideoError(f"OpenRouter 提交后未返回 job id: {payload!r}")
-        jobs.append((str(polling_url), job_id))
+    if resume:
+        # 主机重启后续查：用提交时上游给的 polling_url 只轮询，不再提交。
+        # 结果走 unsigned_urls，没有回显输入素材的问题，不需要回显过滤集合。
+        jobs = [(str(item["poll_url"]), str(item["id"])) for item in resume.get("tasks") or []]
+    else:
+        body = _build_body(prompt, model, params)
+        n = max(1, min(4, int(params.get("n") or 1)))
+        for _ in range(n):
+            resp = requests.post(f"{base}/videos", headers=headers, json=body, timeout=600)
+            payload = _json(resp)
+            if not resp.ok:
+                raise OpenRouterVideoError(_err(payload, resp.status_code))
+            job_id = str(payload.get("id") or "")
+            polling_url = payload.get("polling_url") or (f"{base}/videos/{job_id}" if job_id else None)
+            if not polling_url:
+                raise OpenRouterVideoError(f"OpenRouter 提交后未返回 job id: {payload!r}")
+            jobs.append((str(polling_url), job_id))
+            # 订单号一拿到就报：之后失败不会被当成「没执行」换别家重提，主机重启也能续查。
+            if on_task_id and job_id:
+                on_task_id(job_id)
+            if report:
+                report({"tasks": [{"id": jid, "poll_url": url} for url, jid in jobs]})
     if on_phase:
         on_phase("sent")
 
