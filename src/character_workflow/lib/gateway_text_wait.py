@@ -17,7 +17,9 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-import httpx
+# openai 3.x 的客户端基于 httpx2（SDK 自带的 httpx 分支）：transport 必须与客户端是同一个库，
+# 用普通 httpx 的 transport 会在第一个请求就断言失败（2026-11-19 页面验证时发现）。
+import httpx2 as httpx
 
 UPDATE_WAIT_SECONDS = 660.0  # 主机排空上限 600 秒 + 重启约 1 分钟
 RETRY_SECONDS = 10.0
@@ -42,6 +44,17 @@ def is_updating(status: int, body: bytes | str | None) -> bool:
     except (ValueError, TypeError):
         return False
     return isinstance(payload, dict) and payload.get("code") == HOST_UPDATING_CODE
+
+
+def updating_message(error: BaseException | None) -> str | None:
+    """错误链上有「主机正在更新」时返回它的文案（按类型，沿 __cause__ 找），给只显示一句原因的入口用。"""
+    seen: list[BaseException] = []
+    while error is not None and error not in seen:
+        if isinstance(error, GatewayTextUpdating):
+            return str(error)
+        seen.append(error)
+        error = error.__cause__
+    return None
 
 
 def expired_message() -> str:
@@ -110,6 +123,17 @@ async def _async_pause(seconds: float) -> None:
     await asyncio.sleep(seconds)
 
 
+_BODY_HEADERS = frozenset({"content-encoding", "content-length", "transfer-encoding"})
+
+
+def _rebuilt(response: httpx.Response, body: bytes, request: httpx.Request) -> httpx.Response:
+    """把已读出（已解码）的响应体原样交回。去掉描述原始传输形态的三个头：`aread()` 拿到的是解码后的内容，
+    留着 content-encoding 会被再解码一次，content-length / transfer-encoding 也对不上。"""
+    headers = [(name, value) for name, value in response.headers.multi_items()
+               if name.lower() not in _BODY_HEADERS]
+    return httpx.Response(response.status_code, headers=headers, content=body, request=request)
+
+
 class UpdatingAwareTransport(httpx.AsyncBaseTransport):
     """Agent 经网关的 httpx transport：SDK 自带重试已关，这里只做两件事。
 
@@ -137,7 +161,7 @@ class UpdatingAwareTransport(httpx.AsyncBaseTransport):
             return response
         body = await response.aread()
         if not is_updating(503, body):
-            return httpx.Response(503, headers=response.headers, content=body, request=request)
+            return _rebuilt(response, body, request)
         if self._on_wait:
             self._on_wait()
         deadline = time.monotonic() + UPDATE_WAIT_SECONDS
@@ -155,8 +179,7 @@ class UpdatingAwareTransport(httpx.AsyncBaseTransport):
                 return response
             body = await response.aread()
             if not is_updating(503, body):
-                return httpx.Response(503, headers=response.headers, content=body,
-                                      request=request)
+                return _rebuilt(response, body, request)
 
     async def aclose(self) -> None:
         await self._inner.aclose()

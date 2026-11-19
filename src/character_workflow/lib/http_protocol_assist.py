@@ -314,7 +314,7 @@ def draft(*, kind: str, alias: str, model_id: str, text: str | None, urls: list[
             key, model, system, user, max_output_tokens=MAX_OUTPUT_TOKENS, timeout=TIMEOUT)
     except Exception as error:  # noqa: BLE001 —— 失败也要记账，再按原因报错
         raw = redact_secrets(str(error))[0][:500]
-        reason = failure_reason(raw)
+        reason = failure_reason(raw, error)
         _record(key, model, kind, started=started, cost=None,
                 error=f"{reason}（原始报错：{raw}）")
         raise AssistError(reason, 502, raw=raw) from None

@@ -33,8 +33,14 @@ def find_text_model(alias: str, model_id: str) -> tuple[keys.KeySpec, keys.Model
                  if key.alias == alias and model.id == model_id), None)
 
 
-def failure_reason(raw: str) -> str:
-    """对话模型调用失败的中文原因。欠费排在 403 前面：方舟欠费回的就是 403 AccountOverdueError。"""
+def failure_reason(raw: str, error: BaseException | None = None) -> str:
+    """对话模型调用失败的中文原因。欠费排在 403 前面：方舟欠费回的就是 403 AccountOverdueError。
+
+    `error` 是原始异常：经局域网网关、主机正在更新时按类型直接给「网关正在更新，请稍后重试」。"""
+    from character_workflow.lib.gateway_text_wait import updating_message
+
+    if (updating := updating_message(error)) is not None:
+        return updating
     low = raw.lower()
     if any(word in low for word in ("accountoverdue", "overdue", "insufficient", "quota",
                                      "balance", "余额", "欠费", "额度")):

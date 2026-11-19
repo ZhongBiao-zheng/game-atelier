@@ -11,6 +11,7 @@ import json
 from types import SimpleNamespace
 
 import httpx
+import httpx2
 import pytest
 import requests
 
@@ -163,7 +164,7 @@ def test_real_pause_returns_early_when_stopped():
 # ---------------------------------------------------------------- Agent transport
 
 
-class _Inner(httpx.AsyncBaseTransport):
+class _Inner(httpx2.AsyncBaseTransport):
     def __init__(self, answers):
         self.answers = list(answers)
         self.sent = 0
@@ -174,7 +175,7 @@ class _Inner(httpx.AsyncBaseTransport):
         if isinstance(answer, BaseException):
             raise answer
         status, payload = answer
-        return httpx.Response(status, json=payload, request=request)
+        return httpx2.Response(status, json=payload, request=request)
 
 
 def _transport(monkeypatch, answers):
@@ -190,12 +191,12 @@ def _transport(monkeypatch, answers):
 
 def _send(transport):
     async def go():
-        async with httpx.AsyncClient(transport=transport) as client:
+        async with httpx2.AsyncClient(transport=transport) as client:
             return await client.post("http://hub/gateway/v1/openai/chat/completions", json={})
     return asyncio.run(go())
 
 
-CONNECT = httpx.ConnectError("connection refused")
+CONNECT = httpx2.ConnectError("connection refused")
 
 
 def test_agent_transport_waits_through_the_update_and_restart(monkeypatch):
@@ -208,14 +209,14 @@ def test_agent_transport_retries_a_refused_connection_at_most_twice(monkeypatch)
     inner, _waits, transport = _transport(monkeypatch, [CONNECT, CONNECT, (200, {})])
     assert _send(transport).status_code == 200 and inner.sent == 3
     inner, _waits, transport = _transport(monkeypatch, [CONNECT, CONNECT, CONNECT, (200, {})])
-    with pytest.raises(httpx.ConnectError):
+    with pytest.raises(httpx2.ConnectError):
         _send(transport)
     assert inner.sent == 3
 
 
 def test_agent_transport_never_resends_after_the_connection_was_made(monkeypatch):
-    inner, _waits, transport = _transport(monkeypatch, [httpx.ReadError("reset"), (200, {})])
-    with pytest.raises(httpx.ReadError):
+    inner, _waits, transport = _transport(monkeypatch, [httpx2.ReadError("reset"), (200, {})])
+    with pytest.raises(httpx2.ReadError):
         _send(transport)
     assert inner.sent == 1
 
@@ -312,4 +313,192 @@ def test_studio_text_job_does_not_wait(text_gateway, monkeypatch):
         job_runner.run_job("studio-text-1")
     failed = jobs.read_job("studio-text-1")
     assert failed.status == JobStatus.FAILED and "网关正在更新，请稍后重试" in failed.error
+    assert text_gateway["calls"] == []
+
+
+def _sse_chunks(text):
+    chunk = {"id": "c1", "object": "chat.completion.chunk", "created": 1, "model": "m",
+             "choices": [{"index": 0, "delta": {"role": "assistant", "content": text},
+                          "finish_reason": None}]}
+    done = {**chunk, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+    return (b"data: " + json.dumps(chunk).encode() + b"\n\n"
+            + b"data: " + json.dumps(done).encode() + b"\n\ndata: [DONE]\n\n")
+
+
+class _FakeGateway:
+    """本机真实套接字的假网关：前 updating_first 次回 503 updating，之后回流式补全。"""
+
+    def __init__(self, updating_first=0):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        self.seen: list[str] = []
+        outer = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                outer.seen.append(self.path)
+                if len(outer.seen) <= updating_first:
+                    body = json.dumps({"detail": "正在更新，请稍后", "code": "updating"}).encode()
+                    self.send_response(503)
+                    self.send_header("Content-Type", "application/json")
+                else:
+                    body = _sse_chunks("海边的灯塔")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.base = f"http://127.0.0.1:{self.server.server_port}/gateway/v1/openai"
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+class _RefuseFirstConnect(httpx2.AsyncBaseTransport):
+    """第一次真的去连一个关着的端口（拿到真实的 httpx2.ConnectError），之后正常发。"""
+
+    def __init__(self):
+        import socket
+
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        self.closed_port = sock.getsockname()[1]
+        sock.close()
+        self.real = httpx2.AsyncHTTPTransport()
+        self.refused = 0
+
+    async def handle_async_request(self, request):
+        if not self.refused:
+            self.refused += 1
+            probe = httpx2.Request("POST", request.url.copy_with(port=self.closed_port), content=b"{}")
+            await self.real.handle_async_request(probe)
+        return await self.real.handle_async_request(request)
+
+    async def aclose(self):
+        await self.real.aclose()
+
+
+@pytest.mark.parametrize("case", ["normal", "updating_then_recovers", "refused_then_resent"])
+def test_real_sdk_streaming_client_over_a_socket(monkeypatch, case):
+    """真实 AsyncOpenAI 流式客户端（Agent 走 run_streamed）+ 本机真实套接字假网关，读到内容为止。
+    transport 必须与 SDK 实际用的 HTTP 库（httpx2）一致，否则第一个请求就断言失败。"""
+    from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+
+    async def no_wait(_seconds):
+        return None
+
+    monkeypatch.setattr(gateway_text_wait, "_async_pause", no_wait)
+    gateway = _FakeGateway(updating_first=1 if case == "updating_then_recovers" else 0)
+    inner = _RefuseFirstConnect() if case == "refused_then_resent" else None
+    waits: list[int] = []
+
+    async def go():
+        client = AsyncOpenAI(base_url=gateway.base, api_key="t", max_retries=0,
+                             http_client=DefaultAsyncHttpxClient(
+                                 trust_env=False, transport=gateway_text_wait.UpdatingAwareTransport(
+                                     inner, on_wait=lambda: waits.append(1))))
+        try:
+            stream = await client.chat.completions.create(
+                model="m", messages=[{"role": "user", "content": "hi"}], stream=True)
+            return "".join([chunk.choices[0].delta.content or "" async for chunk in stream
+                            if chunk.choices])
+        finally:
+            await client.close()
+
+    try:
+        text = asyncio.run(go())
+    finally:
+        gateway.close()
+    assert text == "海边的灯塔"
+    expected_posts, expected_waits = {"normal": (1, []), "updating_then_recovers": (2, [1]),
+                                      "refused_then_resent": (1, [])}[case]
+    assert len(gateway.seen) == expected_posts and waits == expected_waits
+    if inner is not None:
+        assert inner.refused == 1
+
+
+def test_real_sdk_client_reads_a_compressed_plain_503(monkeypatch):
+    """网关加了压缩、回一个普通（非 updating）503：SDK 拿到可读的 503，不是解码异常。"""
+    import gzip
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from openai import APIStatusError, AsyncOpenAI, DefaultAsyncHttpxClient
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            body = gzip.compress(json.dumps({"error": {"message": "no channel"}}).encode())
+            self.send_response(503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    async def go():
+        client = AsyncOpenAI(
+            base_url=f"http://127.0.0.1:{server.server_port}/gateway/v1/openai", api_key="t",
+            max_retries=0, http_client=DefaultAsyncHttpxClient(
+                trust_env=False, transport=gateway_text_wait.UpdatingAwareTransport()))
+        try:
+            return await client.chat.completions.create(
+                model="m", messages=[{"role": "user", "content": "hi"}])
+        finally:
+            await client.close()
+
+    try:
+        with pytest.raises(APIStatusError) as error:
+            asyncio.run(go())
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert error.value.status_code == 503
+    assert error.value.body == {"error": {"message": "no channel"}} or "no channel" in str(error.value)
+
+
+def test_agent_on_other_providers_keeps_the_sdk_defaults(isolated_data_root):
+    """不经局域网 Atelier 的 Agent 不受 5-4 影响：SDK 自带重试仍是 2 次，客户端是 SDK 默认的。"""
+    from character_workflow.lib import canvas_agent_runtime
+    from character_workflow.lib.canvas_projects import create_canvas_project
+
+    project_id = create_canvas_project("Agent 其他供应商").project_id
+    keys.add_key(keys.KeySpec(alias="Direct", provider="openrouter", access_key="t",
+                              base_url="https://openrouter.ai/api/v1", created_at="test", models=[]))
+    session = SimpleNamespace(model_alias="Direct", model="gpt-test", effort=None,
+                              creation_mode=next(iter(canvas_agent_runtime.CREATION_MODE_PROMPTS)),
+                              project_id=project_id)
+    client = canvas_agent_runtime.build_agent(session, on_gateway_wait=lambda: None).model._client
+    assert client.max_retries == 2
+    assert not isinstance(client._client._transport, gateway_text_wait.UpdatingAwareTransport)
+
+
+def test_ai_configure_reports_the_update_as_its_headline(text_gateway, monkeypatch):
+    """「AI 帮我配置」没有进度位置：不等待，标题就是「网关正在更新，请稍后重试」（按类型，不靠文案猜）。"""
+    from character_workflow.lib import http_protocol_assist
+    from character_workflow.lib.callers import atelier_gateway
+
+    routes = atelier_gateway.check_gateway(text_gateway["base"], text_gateway["token"])["models"]
+    keys.patch_key("Hub", {"models": atelier_gateway.gateway_models(routes)})
+    monkeypatch.setattr(gateway_text_wait, "_pause", lambda *_a: pytest.fail("不应等待"))
+    _drain._set_updating(True)
+    with pytest.raises(http_protocol_assist.AssistError) as error:
+        http_protocol_assist.draft(kind="image", alias="Hub", model_id=TEXT,
+                                   text="POST /v1/images/generations 返回 data[].url", urls=[])
+    assert str(error.value) == "网关正在更新，请稍后重试"
     assert text_gateway["calls"] == []

@@ -281,7 +281,7 @@ def parse_segment(*, project_id: str, document: Any, script_node_ids: list[str],
             key, model, system, user, max_output_tokens=MAX_OUTPUT_TOKENS, timeout=TIMEOUT)
     except Exception as error:  # noqa: BLE001 —— 失败也要记账，再按原因报错
         raw = _redact(str(error))[:500]
-        reason = structured_text_call.failure_reason(raw)
+        reason = structured_text_call.failure_reason(raw, error)
         structured_text_call.record_job(key, model, prompt=label, started=started, cost=None,
                                         error=f"{reason}（原始报错：{raw}）", project_id=project_id)
         raise ParseError(reason, 502, raw=raw) from None
