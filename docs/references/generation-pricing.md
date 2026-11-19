@@ -7,7 +7,7 @@ Tuzi、OpenAI-HK 与 TokenDance 使用本机同步快照；Tuzi 和 OpenAI-HK �
 
 | 渠道 | 表项 | 单位 |
 |---|---|---|
-| OpenAI-HK | `.runtime/prices/openai-hk.json` | 元 / 次，目前仅核实单张 |
+| OpenAI-HK | `.runtime/prices/openai-hk.json` | 图片元 / 次，目前仅核实单张；文本按 token 倍率换算积分 |
 | EvoLink Midjourney V8.2 | `EVOLINK_MIDJOURNEY_USD_PER_REQUEST` | 美元 / 请求，最多四张结果仍只计一次 |
 | Tuzi | `.runtime/prices/tuzi.json` | 公开表达式或固定请求价，经人民币系数换算 |
 | TokenDance（全部模型） | 不入价格表，见下方「TokenDance 实时同步」 | 按其接口：元 / 张、元 / 百万输出 token、元 / 秒 |
@@ -132,7 +132,13 @@ HK caller保留模型ID，仅传递支持的quality与归一化尺寸，未把Na
   核对过的只有分组倍率 1、`pricing_source` 为 `group_override` / `global_fallback`、无生效分组倍率、无模型乘数的情形（claude-sonnet-5-5 1093 quota、gpt-4.1-nano 31 quota 两条逐位一致）。其余组合（如 `effective_group=azTb` ×2.86、`model_multiplier`、非 1 的分组倍率、表达式计价的文本模型）先未计价。缓存折扣没有实测。
 - **TokenDance**：公开接口 `pricing.items` 中 `openai:chat-completions:input_tokens` / `completion_tokens` / `cached_tokens` 的 `millionTokens` 单价（元），按本次 prompt 千 token 数选档（下界含、上界不含）。
   账单两条：53/37 token 记 82 微元（计算 82.5，取整方式未确认）、1149/38 记 413 微元。推理模型的输出 token 不受 `max_tokens` 约束（seed-2.0-lite 限 16 实出 37）。
-- **OpenAI-HK**：未计价。密钥的余额 / 用量接口被关（「请联系管理员打开余额查询接口」），按 token 的模型是否乘分组倍率 7 无法核对。
+- **OpenAI-HK**（2026-11-19 起）：`积分 = ⌈(输入 + 输出 × completion_ratio) × model_ratio × 2 × 分组倍率 ÷ 1e6 × 10000⌉`，积分 ÷ 10000 为元（倍率 1 = 每百万 token 2 元）。
+  倍率全部取同步快照：模型行的 `model_ratio` / `completion_ratio`、`group_ratio.default`（当前 7）；任一缺失即未计价。只对 default 分组、`quota_type=0` 且 `enable_groups` 含 default 的模型计价，其余未计价。
+  密钥读不到账单，核对用的是控制台的三条 gpt-4.1-nano default 账单（倍率 0.05 / 补全 2 / 分组 7）：14/1 token 计算 0.112 记 1 积分、18015/1 计算 126.119 记 127、22/1500 计算 21.154 记 22。三条都说明乘了分组倍率 7、不足整积分向上取整。
+  未核实：
+  - 缓存命中折扣：价格表只有 `create_cache_ratio`，没有读缓存倍率；现在缓存命中按全价算，可能偏高。核对办法：同一段 1024 token 以上的前缀连发两次，控制台看第二次积分是否低于全价计算值，响应 `usage.prompt_tokens_details.cached_tokens` 记命中数。
+  - 只核对过 gpt-4.1-nano 一个模型；其他模型沿用同一公式，未逐个核对。
+  - 其他分组（倍率不是 7 的）没有账单，一律未计价。
 - **OpenRouter**：用响应 `usage.cost`（美元 × `USD_TO_CNY`）作为上游实付，不查价格表。
 - 其他渠道：只认打包价格表 `text_yuan_per_million_tokens` 的精确模型 ID（当前为空）。
 

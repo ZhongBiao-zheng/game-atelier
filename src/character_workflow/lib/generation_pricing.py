@@ -365,8 +365,8 @@ def estimate_text_cost_cny(
 ) -> float | None:
     """文本按 token 估价；None 表示未计价。
 
-    传了 key 时按供应商的同步价：Tuzi、TokenDance 已用付费小测核对；OpenAI-HK 的 token 换算
-    核对不了（密钥读不到账单），一律未计价。其余渠道只认打包价格表里的精确模型 ID（目前为空）。
+    传了 key 时按供应商的同步价：Tuzi、TokenDance 已用付费小测核对；OpenAI-HK 用控制台账单核对，
+    只认 default 分组。其余渠道只认打包价格表里的精确模型 ID（目前为空）。
     """
     if key is not None:
         host = _hostname(key.base_url)
@@ -379,7 +379,10 @@ def estimate_text_cost_cny(
         if key.provider == "tokendance":
             return _tokendance_text(model_id, input_tokens, output_tokens, cached_tokens)
         if _domain(host, "openai-hk.com"):
-            return None
+            from character_workflow.lib.openai_hk_prices import text_cost_cny as hk_text_cost
+
+            return hk_text_cost(model_id=model_id, input_tokens=input_tokens,
+                                output_tokens=output_tokens, billing_group=key.billing_group)
     rate = _PRICES["text_yuan_per_million_tokens"].get(model_id)
     if rate is None:
         return None

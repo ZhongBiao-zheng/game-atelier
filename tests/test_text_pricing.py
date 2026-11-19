@@ -7,8 +7,9 @@ from fastapi.testclient import TestClient
 
 from character_workflow.lib import (
     gateway_keys, gateway_live, gateway_quota, gateway_stats, gateway_tasks, generation_pricing,
-    keys, model_routes, tokendance_prices, tuzi_prices,
+    keys, model_routes, openai_hk_prices, tokendance_prices, tuzi_prices,
 )
+from character_workflow.lib.atomic_io import atomic_write_json
 from viewer_server import gateway_openai
 from viewer_server.gateway_app import create_gateway_app
 
@@ -129,11 +130,46 @@ def test_tokendance_text_price_matches_the_bill():
         SEED, 1000, 0, key=key, cached_tokens=1000) == 0.00006
 
 
-def test_openai_hk_text_stays_unpriced(monkeypatch):
+def _hk_snapshot(**row_overrides):
+    row = {"quota_type": 0, "model_price": 0, "model_ratio": 0.05, "completion_ratio": 2,
+           "enable_groups": ["default", "vip"]}
+    row.update(row_overrides)
+    atomic_write_json(openai_hk_prices.snapshot_path(), {
+        "synced_at": "test", "models": {NANO: row}, "group_ratio": {"default": 7, "vip": 3}})
+
+
+HK = _key("HK", base_url="https://api.openai-hk.com", model=NANO)
+
+
+def test_openai_hk_text_matches_console_bills(isolated_data_root):
+    _hk_snapshot()
+    # 控制台账单（gpt-4.1-nano，default 分组）：0.112 记 1 积分、126.119 记 127、21.154 记 22。
+    assert generation_pricing.estimate_text_cost_cny(NANO, 14, 1, key=HK) == 0.0001
+    assert generation_pricing.estimate_text_cost_cny(NANO, 18015, 1, key=HK) == 0.0127
+    assert generation_pricing.estimate_text_cost_cny(NANO, 22, 1500, key=HK) == 0.0022
+    # 缓存命中没有读缓存倍率，按全价。
+    assert generation_pricing.estimate_text_cost_cny(
+        NANO, 18015, 1, key=HK, cached_tokens=18000) == 0.0127
+
+
+@pytest.mark.parametrize("group, row, note", [
+    ("vip", {}, "非 default 分组"),
+    (None, {"quota_type": 1, "model_price": 0.08}, "按次计价"),
+    (None, {"model_ratio": None}, "缺模型倍率"),
+    (None, {"completion_ratio": None}, "缺补全倍率"),
+    (None, {"enable_groups": ["vip"]}, "default 分组未开通"),
+])
+def test_openai_hk_text_outside_the_verified_case_stays_unpriced(isolated_data_root, monkeypatch,
+                                                                 group, row, note):
     monkeypatch.setitem(generation_pricing._PRICES["text_yuan_per_million_tokens"],
-                        NANO, {"input": 1, "output": 1})
-    key = _key("HK", base_url="https://api.openai-hk.com", model=NANO)
-    assert generation_pricing.estimate_text_cost_cny(NANO, 1000, 1000, key=key) is None
+                        NANO, {"input": 1, "output": 1})  # 不回落到打包价格表
+    _hk_snapshot(**row)
+    key = _key("HK", base_url="https://api.openai-hk.com", model=NANO, group=group)
+    assert generation_pricing.estimate_text_cost_cny(NANO, 1000, 1000, key=key) is None, note
+
+
+def test_openai_hk_text_without_a_synced_row_stays_unpriced(isolated_data_root):
+    assert generation_pricing.estimate_text_cost_cny(NANO, 1000, 1000, key=HK) is None
 
 
 # ---------------------------------------------------------------- 网关结算
@@ -171,6 +207,17 @@ def test_success_charges_token_price_and_reads_completion_tokens(relay):
     assert (row["input_tokens"], row["output_tokens"]) == (1088, 1)
     assert row["charged_cny"] == row["actual_cost_cny"] == 0.00153
     assert row["actual_cost_source"] == "price_table" and row["usage_missing"] is None
+
+
+def test_openai_hk_text_through_the_gateway_is_charged(relay):
+    """以前经网关转发到 OpenAI-HK 的文本 / Agent 调用扣 0；现在按控制台账单的公式计价。"""
+    _hk_snapshot()
+    client = relay(HK, lambda request: httpx.Response(200, json={"choices": [], "usage": {
+        "prompt_tokens": 18015, "completion_tokens": 1}}))
+    assert client.post(f"{BASE}/chat/completions", json={"model": NANO}).status_code == 200
+    row = _rows()[0]
+    assert row["charged_cny"] == row["actual_cost_cny"] == 0.0127
+    assert row["actual_cost_source"] == "price_table"
 
 
 def test_openrouter_usage_cost_is_charged_even_when_the_stream_fails(relay):

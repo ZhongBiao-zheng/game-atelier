@@ -7,6 +7,7 @@ import math
 import threading
 import time
 from datetime import datetime, timezone
+from decimal import ROUND_CEILING, Decimal
 from urllib.parse import urlsplit
 
 import requests
@@ -118,3 +119,42 @@ def estimate(*, model_id: str, n: int, billing_group: str | None) -> float | Non
             or not math.isfinite(amount) or amount <= 0):
         return None
     return math.floor(amount * 1_000_000 + 0.5) / 1_000_000
+
+
+# 倍率 1 = 每百万 token 2 元；1 元 = 10000 积分。
+_YUAN_PER_MILLION_AT_RATIO_1 = 2
+_CREDITS_PER_YUAN = 10000
+
+
+def _positive(value) -> Decimal | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return Decimal(str(value)) if value > 0 else None
+
+
+def text_cost_cny(*, model_id: str, input_tokens: int, output_tokens: int,
+                  billing_group: str | None) -> float | None:
+    """按 token 计费的文本：积分 = ⌈(输入 + 输出 × completion_ratio) × model_ratio × 2 × 分组倍率
+    ÷ 1e6 × 10000⌉，再 ÷ 10000 换成元。
+
+    2026-11-19 用 gpt-4.1-nano default 分组三条账单核对（14/1 → 1 积分、18015/1 → 127、
+    22/1500 → 22）。只认 default 分组、`quota_type=0`；缓存命中按全价（价格表没有读缓存倍率，
+    未核实）。其余返回 None。
+    """
+    group = (billing_group or "default").strip()
+    if group != "default" or input_tokens < 0 or output_tokens < 0:
+        return None
+    snapshot = load_snapshot()
+    row = snapshot.get("models", {}).get(model_id)
+    if not isinstance(row, dict) or row.get("quota_type") != 0:
+        return None
+    if group not in (row.get("enable_groups") or []):
+        return None
+    model_ratio = _positive(row.get("model_ratio"))
+    completion_ratio = _positive(row.get("completion_ratio"))
+    group_ratio = _positive((snapshot.get("group_ratio") or {}).get(group))
+    if model_ratio is None or completion_ratio is None or group_ratio is None:
+        return None
+    credits = ((input_tokens + output_tokens * completion_ratio) * model_ratio
+               * _YUAN_PER_MILLION_AT_RATIO_1 * group_ratio * _CREDITS_PER_YUAN / 1_000_000)
+    return float(credits.to_integral_value(rounding=ROUND_CEILING) / _CREDITS_PER_YUAN)

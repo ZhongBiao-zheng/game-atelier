@@ -24,6 +24,7 @@ OpenAI-HK快照（5.116.4）位于 `<data_root>/.runtime/prices/openai-hk.json`�
 启动及每6小时同步固定官网 `https://www.openai-hk.com/ccapi/pricing`，只留配置模型，失败保留旧快照。
 估价接口仅对已核实五个型号的default单张请求按 `quota_type=1` 的 `model_price`（元）返回金额，
 不乘分组倍率。Nano Banana 2、多张、其他型号/分组及按token计费返回null；前端不保存HK价格表。
+文本（网关文本 / Agent 转发、主机本机结构化文本调用）另走 `openai_hk_prices.text_cost_cny`：仅 default 分组、`quota_type=0`，积分 = ⌈(输入 + 输出 × completion_ratio) × model_ratio × 2 × 分组倍率 ÷ 1e6 × 10000⌉，÷ 10000 为元；倍率缺失或其他情形返回null。
 
 ### 图片尺寸意图（5.42.0）
 
