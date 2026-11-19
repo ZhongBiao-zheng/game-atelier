@@ -71,6 +71,9 @@ def _switch_route(job_id: str, error: BaseException) -> bool:
     params = job.params
     if not params.route_id or not job.alias or params.provider_task_ids:
         return False
+    if params.gateway_unconfirmed:
+        # 网关上这把幂等键的结局未知（20 小时内）：原单可能还在出图，不换家。
+        return False
     evo_state = params.evolink_state or {}
     if (evo_state.get("uncertain") or evo_state.get("task_id")
             or evo_state.get("terminal") in ("completed", "failed")):

@@ -145,3 +145,101 @@ def test_direct_run_job_without_the_studio_waiter_still_fails(gateway, upstream)
     with _host_updating(), pytest.raises(job_runner.JobRunnerError):
         job_runner.run_job(job_id)
     assert read_job(job_id).status == JobStatus.FAILED
+
+
+# ---------------------------------------------------------------- 结局未知时「自动」也不换家
+# 任务 1 提交回应丢失（主机已收到、在出图）；重新生成的任务 2 沿用这把键，主机连不上或正在更新时
+# 不能换到成员本机 KEY：主机上的原单照常出图扣额度，本机 KEY 又出一张。
+
+
+def _auto_canvas_project() -> str:
+    """生成节点选「自动」（alias 为空：route_id = 模型，组内 Hub 在前、Local 在后）。"""
+    from character_workflow.lib.canvas_projects import read_canvas_document, save_canvas_document
+    from character_workflow.lib.schemas import CanvasDocument
+
+    pid = _reattach_harness._canvas_project()
+    current = read_canvas_document(pid)
+    payload = current.model_dump(mode="json")
+    for node in payload["nodes"]:
+        if node["id"] == "config":
+            node["data"]["generation_draft"]["alias"] = None
+    save_canvas_document(pid, CanvasDocument.model_validate(payload), current.revision)
+    return pid
+
+
+def _canvas_attempt(pid):
+    from character_workflow.lib.canvas_projects import read_canvas_document
+    from character_workflow.lib.canvas_runs import run_canvas_job, submit_canvas_run
+
+    job, _doc = submit_canvas_run(pid, "config", read_canvas_document(pid).revision)
+    try:
+        run_canvas_job(job.job_id)
+    except Exception:  # noqa: BLE001 — 画布 runner 失败时可能抛出，下面看落盘结果
+        pass
+    return read_job(job.job_id)
+
+
+def _host_settled(timeout=10.0):
+    """主机上的任务都进终态（它们在别的线程里跑），再数上游调用。"""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        tasks = _host_tasks()
+        if tasks and all(task.status in ("done", "failed", "canceled") for task in tasks):
+            return tasks
+        time.sleep(0.05)
+    raise AssertionError("主机任务没有在时限内结束")
+
+
+def test_auto_canvas_never_fails_over_while_the_original_outcome_is_unknown(gateway, upstream,
+                                                                           faults):
+    pid = _auto_canvas_project()
+    faults.lost_posts = 3  # 主机收到了，回应丢了
+    task1 = _canvas_attempt(pid)
+    assert task1.status == JobStatus.FAILED and task1.params.gateway_unconfirmed is True
+    assert task1.params.route_id == "gpt-image-2" and task1.alias == "Hub"
+    _host_settled()
+    calls_after_task1 = len(upstream["calls"])
+
+    faults.down_posts = 3  # 主机连不上
+    task2 = _canvas_attempt(pid)
+    assert task2.params.gateway_reattach_of == task1.job_id
+    assert task2.status == JobStatus.FAILED and task2.alias == "Hub"  # 没有换家
+    assert "未确认" in task2.error and "可改选其他供应商" in task2.error
+    assert not task2.params.warnings  # 没有「已改用 …」
+    assert len(upstream["calls"]) == calls_after_task1  # 成员本机 KEY 没有出图
+
+    faults.down_posts = 0  # 主机恢复
+    task3 = _canvas_attempt(pid)
+    assert task3.status == JobStatus.DONE and task3.alias == "Hub"
+    [host] = _host_settled()
+    assert task3.params.provider_task_ids == [host.task_id] and len(upstream["calls"]) == 1
+
+
+def test_auto_canvas_with_a_fresh_key_still_fails_over_when_not_accepted(gateway, upstream,
+                                                                         faults):
+    """Q2=A：新键、主机没收下（连不上）时「自动」照旧换家——上面的守卫没有误伤。"""
+    pid = _auto_canvas_project()
+    faults.down_posts = 1
+    done = _canvas_attempt(pid)
+    assert done.status == JobStatus.DONE and done.alias == "Local"
+    assert any("连不上" in warning for warning in done.params.warnings or [])
+    assert _host_tasks() == []
+
+
+def test_failover_reason_refuses_when_the_key_outcome_is_unknown():
+    not_accepted = atelier_gateway.GatewayNotAccepted("x", reason="updating")
+    try:
+        raise atelier_gateway.GatewayUnconfirmed("原任务结果未确认") from not_accepted
+    except atelier_gateway.GatewayUnconfirmed as error:
+        assert model_routes.failover_reason(error) is None
+    assert model_routes.failover_reason(not_accepted) == "updating"
+
+
+def test_switch_route_refuses_while_the_gateway_key_is_unconfirmed(gateway):
+    job = _now_job("job-guard", gateway_unconfirmed=True)  # 自动路由
+    error = atelier_gateway.GatewayNotAccepted("x", reason="unreachable")
+    assert model_routes.failover_reason(error) == "unreachable"  # 单看错误是可以换家的
+    assert job_runner._switch_route(job.job_id, error) is False
+    assert read_job(job.job_id).alias == "Hub"

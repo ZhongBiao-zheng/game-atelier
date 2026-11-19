@@ -293,7 +293,7 @@ def _run_task(
                     if not new_key:
                         # 旧键：这次没收下，但之前用这把键发过的那次可能在出图，不能换家重出。
                         raise unconfirmed(GatewayUnconfirmed(
-                            "网关暂不可用，原任务结果未确认")) from error
+                            "网关暂不可用，原任务结果未确认；可改选其他供应商重新生成")) from error
                     if cancelled():
                         raise JobCanceled("已按请求停止") from error
                     if should_stop() or time.monotonic() >= deadline:

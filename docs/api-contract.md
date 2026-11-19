@@ -144,6 +144,9 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   选「自动」的任务照旧换组内下一家（换家原因 `updating`「正在更新」或 `unreachable`）；明确选了网关的，创作台进上面的「等待网关」
   （用同一把幂等键重发，`gateway_unconfirmed` 置 true，同一套 20 小时期限与重启续上），画布在线程里每 10 秒用同一把键重发、最多 30 分钟。
   旧主机的 503 没有 `code`，接入端照旧判失败。CLI 等直接 `run_job` 的路径照旧判失败。
+  这把幂等键在主机上的结局未知时（`gateway_unconfirmed` 为真，或错误链上有 `GatewayUnconfirmed`），即使选了「自动」也不换家：
+  `failover_reason` 返回 null、`_switch_route` 不换，按「未确认」失败，文案「网关暂不可用，原任务结果未确认；可改选其他供应商重新生成」。
+  原任务结局未知的 20 小时内（与接回同一期限）不会自动换家；明确改选别的供应商时别名不同，不接回，按新单出图。
 - 接入端：`provider="atelier"` 的 KEY，`ModelSpec.via` 是网关成员快照；Job 用 `provider_task_protocol=atelier_gateway`
   与 `provider_task_ids` 记录网关任务 id，重启后只查询既有任务。caller 把网关结果映射为：401 → `gateway api 401`，
   403 → `gateway api 403`，429 → `gateway api 429`，`error_kind=unavailable` → `gateway api 503: unavailable`（均可触发接入端自动路由失败切换），
