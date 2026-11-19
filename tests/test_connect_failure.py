@@ -110,10 +110,9 @@ def test_request_received_but_never_answered_is_unconfirmed():
 @pytest.mark.parametrize("error", [
     requests.ConnectionError("reset"),
     requests.ConnectionError("something unexpected"),
-    requests.exceptions.ProxyError("Unable to connect to proxy: connection refused"),
     requests.exceptions.SSLError("certificate verify failed"),
     requests.exceptions.ChunkedEncodingError("Connection broken"),
-], ids=["bare-reset", "unknown", "proxy", "ssl", "chunked"])
+], ids=["bare-reset", "unknown", "ssl", "chunked"])
 def test_anything_not_recognised_counts_as_possibly_sent(error):
     assert not never_sent(error)
 
@@ -122,3 +121,42 @@ def test_text_is_only_a_fallback_when_there_is_no_exception_object():
     assert never_sent(requests.ConnectionError(
         "Failed to establish a new connection: [Errno 61] Connection refused"))
     assert never_sent(requests.ConnectTimeout("connect timed out"))
+
+
+def _post_through_proxy(proxy_port: int) -> requests.RequestException:
+    with pytest.raises(requests.RequestException) as error:
+        _session().post("https://vendor.example/v1/tasks", json={}, timeout=(2.0, 2.0),
+                        proxies={"https": f"http://127.0.0.1:{proxy_port}"})
+    return error.value
+
+
+def test_proxy_that_cannot_be_reached_is_never_sent():
+    """本机代理挂了（端口关着）：连代理都没连上，请求没离开本机。"""
+    error = _post_through_proxy(_closed_port())
+    assert isinstance(error, requests.exceptions.ProxyError)
+    assert never_sent(error)
+
+
+def test_proxy_that_answers_502_to_the_tunnel_is_possibly_sent():
+    """代理连得上、隧道回 502：请求可能已交给代理，按可能已送达。"""
+    proxy = socket.socket()
+    proxy.bind(("127.0.0.1", 0))
+    proxy.listen(4)
+
+    def serve():
+        while True:
+            try:
+                conn, _ = proxy.accept()
+            except OSError:
+                return
+            conn.recv(65536)
+            conn.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+            conn.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        error = _post_through_proxy(proxy.getsockname()[1])
+    finally:
+        proxy.close()
+    assert isinstance(error, requests.exceptions.ProxyError)
+    assert not never_sent(error)

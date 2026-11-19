@@ -11,9 +11,14 @@
 
 类型一个都拿不到时（只有报错文本），才看报文，且只收几种明确的说法。
 
-`requests.ProxyError` / `requests.SSLError` 一律算可能已送达：
-- 代理：连上代理之后，请求体可能已经交给代理转发，本机无从知道代理有没有发往上游；
-- TLS：握手失败多半发生在发请求之前，但证书校验失败与握手后被掐在 requests 里是同一个类型，分不开。
+代理（`ProxyError`）只认一个子情况为没送达：链上是到代理本身的 `NewConnectionError` / `ConnectTimeoutError` /
+`NameResolutionError`——连代理都没连上，请求没离开本机（本机代理挂掉，出图失败的常见原因）。代理连上之后的任何失败
+（隧道 4xx / 5xx、代理断开）都算可能已送达：请求体可能已经交给代理，本机无从知道代理有没有发往上游。
+实测形状：代理端口关着 → ProxyError → MaxRetryError → ProxyError → NewConnectionError → ConnectionRefusedError；
+代理回 502 → ProxyError → MaxRetryError → ProxyError → OSError('Tunnel connection failed: 502 Bad Gateway')。
+
+`SSLError` 一律算可能已送达：握手失败多半发生在发请求之前，但证书校验失败与握手后被掐在 requests 里是同一个类型，
+分不开。
 """
 from __future__ import annotations
 
@@ -38,10 +43,9 @@ _CONNECT_TYPES = (
     socket.gaierror,
     ConnectionRefusedError,
 )
-_UNKNOWN_DELIVERY = (
-    requests.exceptions.ProxyError, requests.exceptions.SSLError,
-    urllib3_exceptions.ProxyError, urllib3_exceptions.SSLError,
-)
+_SSL = (requests.exceptions.SSLError, urllib3_exceptions.SSLError)
+_PROXY = (requests.exceptions.ProxyError, urllib3_exceptions.ProxyError)
+_CONNECT_TO_PROXY = (urllib3_exceptions.NewConnectionError, urllib3_exceptions.ConnectTimeoutError)
 
 
 def _related(error: BaseException) -> list[BaseException]:
@@ -64,8 +68,11 @@ def _walk(error: BaseException) -> list[BaseException]:
 def never_sent(error: BaseException) -> bool:
     """这次失败是不是「连接建立阶段失败、请求确定没发出」。认不出的返回 False。"""
     chain = _walk(error)
-    if any(isinstance(item, _UNKNOWN_DELIVERY) for item in chain):
+    if any(isinstance(item, _SSL) for item in chain):
         return False
+    if any(isinstance(item, _PROXY) for item in chain):
+        # 经代理：只有连代理本身都没连上才算没送达（NameResolutionError 是 NewConnectionError 的子类）。
+        return any(isinstance(item, _CONNECT_TO_PROXY) for item in chain)
     if isinstance(error, requests.exceptions.ConnectTimeout):
         return True
     for item in chain:
