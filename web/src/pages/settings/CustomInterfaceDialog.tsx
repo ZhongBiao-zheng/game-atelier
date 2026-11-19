@@ -6,17 +6,20 @@ import type {
   HttpProtocolCallPreview, HttpProtocolDocument, HttpProtocolIssue, HttpProtocolKind, HttpProtocolValidation,
 } from '@/schema/httpProtocols';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import manual from '../../../../src/character_workflow/data/http_protocol_manual.md?raw';
 import examples from './customInterfaceExamples.json';
 import { CustomInterfaceAssist } from './CustomInterfaceAssist';
 import { KEYS_CHANGED_EVENT } from '@/lib/announcements';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { FileInput } from '@/components/ui/file-input';
-import { AiIcon, HelpIcon } from '@/components/ui/icons';
+import { AiIcon, CheckIcon, CopyIcon, HelpIcon } from '@/components/ui/icons';
 import { Textarea } from '@/components/ui/textarea';
 import { Hint } from '@/components/ui/tooltip';
 
 const VALIDATE_DELAY_MS = 400;
+const COPIED_MS = 2000;
+const MANUAL_FILENAME = 'Atelier 自定义接口接入说明.md';
 
 /** 新建时可以从示例开始（同一份 JSON 由 pytest 逐条校验，示例本身必定合法）。 */
 const EXAMPLES = examples as { id: string; label: string; document: HttpProtocolDocument }[];
@@ -85,6 +88,7 @@ export function CustomInterfaceDialog({ identifier, kind, baseUrl, model, onSave
   // 生成前的模板正文：草稿直接填进编辑区，撤销回到这份。
   const [beforeDraft, setBeforeDraft] = useState<string | null>(null);
   const editor = useRef<HTMLTextAreaElement>(null);
+  const [manualCopied, setManualCopied] = useState(false);
 
   useEffect(() => {
     if (!identifier) return;
@@ -134,11 +138,26 @@ export function CustomInterfaceDialog({ identifier, kind, baseUrl, model, onSave
     }
   };
 
-  const exportDocument = () => {
-    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
-    const anchor = Object.assign(document.createElement('a'), { href: url, download: `${documentName(text)}.json` });
+  const download = (content: string, type: string, filename: string) => {
+    const url = URL.createObjectURL(new Blob([content], { type }));
+    const anchor = Object.assign(document.createElement('a'), { href: url, download: filename });
     anchor.click();
     URL.revokeObjectURL(url);
+  };
+  const exportDocument = () => download(text, 'application/json', `${documentName(text)}.json`);
+
+  // 接入说明与「AI 帮我配置」的提示词同源（data/http_protocol_manual.md），给用户粘给自己的 AI 代理。
+  // 浏览器不让写剪贴板时改为下载同一份文件，说明总能交到用户手里。
+  const copyManual = async () => {
+    setError(null);
+    try {
+      await navigator.clipboard.writeText(manual);
+      setManualCopied(true);
+      window.setTimeout(() => setManualCopied(false), COPIED_MS);
+    } catch {
+      download(manual, 'text/markdown', MANUAL_FILENAME);
+      setError('浏览器不允许写入剪贴板，已下载为文件');
+    }
   };
 
   return (
@@ -151,6 +170,8 @@ export function CustomInterfaceDialog({ identifier, kind, baseUrl, model, onSave
           <Hint label={HELP}><span tabIndex={0} aria-label="写法说明" className="text-muted-foreground"><HelpIcon size="sm" /></span></Hint>
           <Button variant="ghost" size="sm" type="button" aria-pressed={assistOpen} disabled={loading}
             onClick={() => setAssistOpen(!assistOpen)}><AiIcon size="sm" />AI 帮我配置</Button>
+          <Button variant="ghost" size="sm" type="button" onClick={() => void copyManual()}>
+            {manualCopied ? <CheckIcon size="sm" /> : <CopyIcon size="sm" />}{manualCopied ? '已复制' : '复制接入说明'}</Button>
           {!identifier && kindExamples.length > 1 && <Select value={exampleId} onValueChange={value => {
             const example = kindExamples.find(item => item.id === value);
             if (!example) return;

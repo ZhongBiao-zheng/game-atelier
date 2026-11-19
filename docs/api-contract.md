@@ -1388,6 +1388,8 @@ multipart 里的数组值展开成同名重复字段。
 | GET | `/api/http-protocols/assist/models` | 「AI 帮我配置」可用的对话模型：`{models:[{alias, model_id, name, max_cost_cny}]}`（启用的文本模型；`max_cost_cny` 按资料上限估，无价格为 null） |
 | POST | `/api/http-protocols/assist` | 计费调用：`{kind, alias, model_id, text?, urls?≤3}` → `{document, notices, usage:{input_tokens, output_tokens, cost_cny, job_id}}`。只起草不保存；不收供应商密钥；网址走出站检查（只放行公网，≤2 MB，只收 html / plain / markdown / json）；资料单份 ≤60K、合计 ≤120K 字符；资料与输出里有明确密钥特征的值替换为 `<redacted>`，长串只提示；输出只保留模板顶层字段，`version` / `kind` 强制覆盖；请求不带 tools、不重试、`max_tokens` 4096；抓取失败在调用前报错（502，不计费），模型失败 502、输出不是 JSON 422（都已记账）；后两种的 `detail` 为 `{message, code: "ASSIST_FAILED", raw}`：`message` 是中文原因（欠费 / 密钥或权限 / 限流 / 超时 / 连不上），`raw` 是遮掉密钥的上游原文 |
 
+接入说明唯一来源是 `src/character_workflow/data/http_protocol_manual.md`：自定义接口编辑弹窗的「复制接入说明」整份复制（前端构建时 `?raw` 内联同一文件；浏览器不让写剪贴板时下载为 `.md`），「AI 帮我配置」的提示词只取其中「模板规范（版本 1）」一节。改模板规则时改这一份。
+
 ## 网关共享库（ADR-0034）
 
 本机管理：`GET /api/team-library-gateway-share` 返回 `shared_library_ids` 与 `gateway_enabled`；
