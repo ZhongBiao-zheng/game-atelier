@@ -205,16 +205,17 @@ async def _record_host_lifecycle(app: FastAPI) -> None:
 
 
 def _refresh_agent_clients(app: FastAPI) -> None:
-    """开关打开时把 Codex 配置里的条目改写成本次启动的解释器：更新后旧版本目录会被删掉。"""
+    """开关打开时把各客户端配置里我们那一条改写成本次启动的解释器：更新后旧版本目录会被删掉。"""
     import sys
 
-    from viewer_server.codex_config import refresh_codex_entry
+    from viewer_server.agent_clients import refresh_all
     try:
-        if app.state.connection_store.agent_status()["enabled"] and refresh_codex_entry(sys.executable):
-            logging.getLogger(__name__).info("codex mcp entry now points at %s", sys.executable)
+        if app.state.connection_store.agent_status()["enabled"]:
+            for client in refresh_all(sys.executable):
+                logging.getLogger(__name__).info("%s mcp entry now points at %s", client, sys.executable)
     except (ConnectionError, OSError) as error:
-        # 只影响 Codex 里的 Atelier 工具；不能因此挡住服务启动。
-        logging.getLogger(__name__).warning("codex mcp entry not refreshed: %s", error)
+        # 只影响外部客户端里的 Atelier 工具；不能因此挡住服务启动。
+        logging.getLogger(__name__).warning("agent client entries not refreshed: %s", error)
 
 
 @asynccontextmanager

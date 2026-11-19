@@ -23,6 +23,7 @@ _CONTROL_ROUTES = {
     ("GET", "/api/connection/agent"),
     ("PUT", "/api/connection/agent"),
     ("DELETE", "/api/connection/agent"),
+    ("POST", "/api/connection/agent/client-config"),
 }
 
 

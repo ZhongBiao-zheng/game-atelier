@@ -446,21 +446,22 @@ def test_hot_path_reads_grants_file_only_when_it_changes(client, monkeypatch):
 
 
 def test_agent_status_paths_and_tool_catalog_for_all_control_responses(client, tmp_path, monkeypatch):
-    from viewer_server.codex_config import codex_config_path
+    from viewer_server.agent_clients import CLIENT_IDS, codex_config_path
     from character_workflow.mcp.tool_catalog import TOOL_DEFINITIONS
 
     codex_home = tmp_path / "codex-config"
     codex_home.mkdir()
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
     bootstrap(client)
-    expected_paths = {"claude-code": str(data_root.agent_credential_file()), "codex": str(codex_config_path())}
     expected_tools = [{"name": tool.name, "billable": tool.billable} for tool in TOOL_DEFINITIONS]
     for method, enabled in (("GET", False), ("PUT", True), ("DELETE", False)):
         response = client.request(method, "/api/connection/agent", **({} if method == "GET" else {"json": {}}))
         assert response.status_code == 200
         status = response.json()
         assert status["enabled"] is enabled
-        assert status["config_paths"] == expected_paths
+        assert status["credential_path"] == str(data_root.agent_credential_file())
+        assert [row["id"] for row in status["clients"]] == list(CLIENT_IDS)
+        assert next(row for row in status["clients"] if row["id"] == "codex")["path"] == str(codex_config_path())
         assert status["tools"] == expected_tools
         assert [tool["name"] for tool in status["tools"] if tool["billable"]] == ["canvas_run"]
         assert "grant_token" not in response.text and ".claude.json" not in response.text

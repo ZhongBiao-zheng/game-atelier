@@ -13,7 +13,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Atelier Canvas stdio MCP adapter")
     # 省略时读默认授权的固定凭据（<data_root>/.config/connections/agent.json），插件自带的配置就这么写。
     parser.add_argument("--credentials", type=Path)
-    parser.add_argument("--client", choices=["claude-code", "codex"])
+    # 与 viewer_server.agent_clients.CLIENT_IDS 一致（适配器不导入服务端模块）。
+    parser.add_argument("--client", choices=["claude-code", "codex", "cursor", "claude-desktop",
+                                             "trae", "workbuddy"])
     args = parser.parse_args()
     client = CanvasClient(args.credentials, args.client)
     threading.Thread(target=client.warm_up, daemon=True).start()

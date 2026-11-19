@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react';
 import { ChevronRightIcon } from '@/components/ui/icons';
 
-import { disableAgent, enableAgent, fetchAgentStatus, type AgentClient, type AgentStatus } from '@/api/agentConnection';
+import { disableAgent, enableAgent, fetchAgentStatus, writeAgentClientConfig, type AgentClient, type AgentStatus } from '@/api/agentConnection';
+import { AgentClientCard } from './AgentClientCard';
 import { Button } from '@/components/ui/button';
 import { Collapse } from '@/components/ui/collapse';
 import { Switch } from '@/components/ui/switch';
 import { Hint } from '@/components/ui/tooltip';
 
-const CLIENT_LABEL: Record<AgentClient, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
 // Agent 一开会话就会连过来，开着设置页时轮询，状态自己亮。
 const POLL_MS = 5000;
 
-/** 一个开关：打开即允许本机的 Claude Code / Codex 操作全部项目与画布。 */
+/** 一个开关：打开即允许本机的 Agent 客户端操作全部项目与画布；下面按客户端写入或复制配置。 */
 export function AgentSection() {
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -40,34 +40,32 @@ export function AgentSection() {
     }
   }
 
-  const connected = status
-    ? (Object.keys(CLIENT_LABEL) as AgentClient[]).filter(client => status.connections[client])
-    : [];
+  async function writeConfig(client: AgentClient) {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await writeAgentClientConfig(client));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const connected = status ? status.clients.filter(row => status.connections[row.id]) : [];
 
   return <div className="min-w-0 space-y-5">
     <section aria-label="Agent 状态" className="flex items-center gap-4 rounded-xl border border-border bg-card p-5">
       <div className="min-w-0 flex-1 space-y-1">
         <h2 className="text-sm font-semibold">允许本机 Agent 操作项目与画布</h2>
-        <p role="status" className="text-xs text-muted-foreground">{!status ? '读取中…' : status.enabled ? `${connected.length} 个已连接` : '关闭后 Claude Code 与 Codex 无法读写画布'}</p>
+        <p role="status" className="text-xs text-muted-foreground">{!status ? '读取中…' : status.enabled ? `${connected.length} 个已连接` : '关闭后本机 Agent 无法读写画布'}</p>
       </div>
       <Switch checked={Boolean(status?.enabled)} aria-label="允许 Agent 操作本机" disabled={!status || busy} onCheckedChange={next => void toggle(next)} />
     </section>
     {status?.enabled && <>
-      <div className="grid min-w-0 gap-3 md:grid-cols-2">
-        {(Object.keys(CLIENT_LABEL) as AgentClient[]).map(client => <section key={client} aria-label={CLIENT_LABEL[client]} className="min-w-0 space-y-3.5 rounded-xl border border-border bg-card p-4.5">
-          <div className="flex flex-wrap items-center gap-3">
-            <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-xs">{client === 'codex' ? 'CX' : 'CC'}</span>
-            <h3 className="flex-1 text-sm font-medium">{CLIENT_LABEL[client]}</h3>
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${status.connections[client] ? 'bg-status-done' : 'bg-subtle-foreground'}`} />
-              {status.connections[client] ? `已连接 · ${new Date(status.connections[client]!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '等待连接'}
-            </span>
-          </div>
-          <div className="flex items-start gap-2 text-xs">
-            <span className="shrink-0 text-muted-foreground">{client === 'claude-code' ? '凭据' : '配置'}</span>
-            <span className="min-w-0 break-all font-mono">{status.config_paths[client] ?? '—'}</span>
-          </div>
-        </section>)}
+      <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {status.clients.map(row => <AgentClientCard key={row.id} row={row} connectedAt={status.connections[row.id]}
+          busy={busy} onWrite={client => void writeConfig(client)} />)}
       </div>
       <section aria-label="可用工具" className="space-y-2.5">
         <h2 className="text-sm font-semibold"><Button variant="ghost" size="sm" aria-expanded={toolsOpen} onClick={() => setToolsOpen(!toolsOpen)} className="-ml-2 gap-1 px-2 text-sm font-semibold">

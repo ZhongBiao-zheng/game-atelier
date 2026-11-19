@@ -20,3 +20,4 @@ status: accepted
 - 管理端点只剩 `GET / PUT / DELETE /api/connection/agent`；`agent-grants` 与 `codex-config` 端点删除。
 - 运行会话不再携带 `project_ids` / `canvas_project_ids`，工具判权只看能力与目标是否真实存在、是否属于声明的项目。
 - 要给外部或不同信任级别的 Agent 开窄权限时，需要重新设计授权模型，不能把旧的自定义授权加回来了事。
+- 2026-11-19：开关仍是唯一的授权；设置页按客户端列出 Claude Code、Codex、Cursor、Claude Desktop、TRAE、WorkBuddy。Codex、Cursor、Claude Desktop 可一键写入（只动我们那一条，写前备份），其余给可复制的配置；凭据仍不进客户端配置。开关打开时服务每次启动都把已写入的条目改写成本次的解释器（运行包更新后旧版本目录会被删掉）。契约见 `docs/api-contract.md`。

@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import * as http from './http';
-import { fetchAgentStatus, enableAgent, disableAgent } from './agentConnection';
+import { fetchAgentStatus, enableAgent, disableAgent, writeAgentClientConfig } from './agentConnection';
 import { fetchGateway, updateGateway } from './gateway';
 import { subscribeGatewayEvents } from './gatewayEvents';
 
@@ -47,22 +47,28 @@ it('shows connection boundary failures without leaking diagnostic metadata', asy
 });
 
 
-it('parses actual Agent paths and tool metadata on read, enable and disable', async () => {
-  const status = { enabled: true, connections: { codex: '2026-10-25' },
-    config_paths: { 'claude-code': '/data/.config/connections/agent.json', codex: '/custom/config.toml' },
-    tools: [{ name: 'canvas_run', billable: true }, { name: 'canvas_get_document', billable: false }] };
-  vi.spyOn(http, 'requestJson').mockResolvedValue(status);
-  for (const request of [fetchAgentStatus, enableAgent, disableAgent]) {
-    expect(await request()).toEqual(status);
+const CLIENT_ROW = { id: 'cursor', mode: 'write', path: '/home/.cursor/mcp.json', written: false, snippet: '{}', warning: null };
+const GOOD_STATUS = { enabled: true, connections: { codex: '2026-10-25' }, credential_path: '/data/.config/connections/agent.json',
+  clients: [CLIENT_ROW, { id: 'trae', mode: 'copy', path: null, written: false, snippet: '{}', warning: null }],
+  tools: [{ name: 'canvas_run', billable: true }, { name: 'canvas_get_document', billable: false }] };
+
+it('parses Agent clients and tool metadata on read, enable, disable and client write', async () => {
+  vi.spyOn(http, 'requestJson').mockResolvedValue(GOOD_STATUS);
+  for (const request of [fetchAgentStatus, enableAgent, disableAgent, () => writeAgentClientConfig('cursor')]) {
+    expect(await request()).toEqual(GOOD_STATUS);
   }
 });
 
 it.each([
   { enabled: true, connections: {} },
-  { enabled: true, connections: [], config_paths: {}, tools: [] },
-  { enabled: true, connections: {}, config_paths: { codex: 1 }, tools: [] },
-  { enabled: true, connections: {}, config_paths: {}, tools: [{ name: 'canvas_run', billable: 'yes' }] },
-  { enabled: true, connections: {}, config_paths: {}, tools: [null] },
+  { ...GOOD_STATUS, connections: [] },
+  { ...GOOD_STATUS, connections: { unknown: '2026-10-25' } },
+  { ...GOOD_STATUS, credential_path: 1 },
+  { ...GOOD_STATUS, clients: [{ ...CLIENT_ROW, id: 'unknown' }] },
+  { ...GOOD_STATUS, clients: [{ ...CLIENT_ROW, mode: 'auto' }] },
+  { ...GOOD_STATUS, clients: [{ ...CLIENT_ROW, written: 'yes' }] },
+  { ...GOOD_STATUS, tools: [{ name: 'canvas_run', billable: 'yes' }] },
+  { ...GOOD_STATUS, tools: [null] },
 ])('rejects malformed Agent status without crashing the page', async status => {
   vi.spyOn(http, 'requestJson').mockResolvedValue(status);
   await expect(fetchAgentStatus()).rejects.toThrow('读取 Agent 连接失败：返回格式不对');

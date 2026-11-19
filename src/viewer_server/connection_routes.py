@@ -3,15 +3,15 @@ from __future__ import annotations
 
 import sys
 import time
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from character_workflow.lib import data_root
 from character_workflow.mcp.tool_catalog import TOOL_DEFINITIONS
-from viewer_server.codex_config import codex_config_path, write_codex_entry_if_installed
-from viewer_server.connection_auth import ConnectionStore, cookie_name, iso_time
+from viewer_server import agent_clients
+from viewer_server.connection_auth import ConnectionError, ConnectionStore, cookie_name, iso_time
 
 TextId = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")]
 
@@ -29,7 +29,11 @@ class AgentSessionPayload(ControlPayload):
     grant_id: TextId
     grant_token: Annotated[str, StringConstraints(min_length=32, max_length=128)]
     instance_id: TextId
-    client: Literal["claude-code", "codex"] | None = None
+    client: agent_clients.AgentClientId | None = None
+
+
+class ClientConfigPayload(ControlPayload):
+    client: agent_clients.AgentClientId
 
 
 def connection_router(store: ConnectionStore) -> APIRouter:
@@ -61,10 +65,8 @@ def connection_router(store: ConnectionStore) -> APIRouter:
     def agent_status() -> dict:
         return {
             **store.agent_status(),
-            "config_paths": {
-                "claude-code": str(data_root.agent_credential_file()),
-                "codex": str(codex_config_path()),
-            },
+            "credential_path": str(data_root.agent_credential_file()),
+            "clients": agent_clients.status(sys.executable),
             "tools": [{"name": tool.name, "billable": tool.billable} for tool in TOOL_DEFINITIONS],
         }
 
@@ -76,7 +78,15 @@ def connection_router(store: ConnectionStore) -> APIRouter:
     def enable_agent(payload: ControlPayload, request: Request) -> dict:
         store.enable_agent(request.state.connection_base_url)
         # Claude Code 由插件自带 MCP 读同一份凭据；Codex 没有插件，装了就顺手写进它的配置。
-        write_codex_entry_if_installed(sys.executable)
+        agent_clients.write_codex_if_installed(sys.executable)
+        return agent_status()
+
+    @router.post("/agent/client-config")
+    def write_client_config(payload: ClientConfigPayload) -> dict:
+        """一键把适配器写进某个客户端的配置；只在开关打开时可用（写进去也连不上）。"""
+        if not store.agent_status()["enabled"]:
+            raise ConnectionError("AGENT_DISABLED", "先打开 Agent 连接", 409)
+        agent_clients.write(payload.client, sys.executable)
         return agent_status()
 
     @router.delete("/agent")

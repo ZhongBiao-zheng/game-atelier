@@ -240,11 +240,25 @@ compare 节点不提供任何连线、不参与生成。显示的是来源节点
 托管网站方案已弃用（ADR-0023），只有本机页面与本机 Agent 两种访问方式。
 
 `GET /api/connection/agent`、`PUT /api/connection/agent`、`DELETE /api/connection/agent`
-统一返回 `{enabled, connections, config_paths, tools}`，仅本机管理会话可读。
-`connections` 为各宿主本次进程内最近连接时间；`config_paths` 为宿主到实际配置/凭据路径的映射：
-`claude-code` 使用 `<data_root>/.config/connections/agent.json`（插件直接读取的凭据文件，不写 `.claude.json`），
-`codex` 使用 `CODEX_HOME/config.toml` 或默认 `~/.codex/config.toml`；路径只表示目标位置，不保证文件已创建。
-运行包里条目经 `scripts/bootstrap.py --run` 启动适配器（包内解释器没有安装本项目）；开关打开时，服务每次启动都把已有条目改写成本次的解释器，更新删掉旧版本目录后 Codex 仍能连上。
+统一返回 `{enabled, connections, credential_path, clients, tools}`，仅本机管理会话可读。
+`connections` 为各宿主本次进程内最近连接时间（宿主名见下）；`credential_path` 为适配器读取的凭据文件
+`<data_root>/.config/connections/agent.json`（客户端配置里不放凭据）。
+`clients` 按固定顺序列出 `claude-code / codex / cursor / claude-desktop / trae / workbuddy`，每项
+`{ id, mode, path, written, snippet, warning }`：`mode` 为 `write`（可一键写入：codex、cursor、claude-desktop）、
+`copy`（只给配置片段：claude-code、trae、workbuddy）或 `plugin`（Claude Code 已装 Atelier 插件，无需配置）；
+`path` 为该客户端配置文件位置（`copy` 类为 null；codex 使用 `CODEX_HOME/config.toml` 或 `~/.codex/config.toml`，
+cursor 为 `~/.cursor/mcp.json`，claude-desktop 为 macOS `~/Library/Application Support/Claude/claude_desktop_config.json`、
+Windows `%APPDATA%\Claude\claude_desktop_config.json`）；`written` 表示配置里我们那一条已是本次服务的启动命令；
+`warning` 为该客户端用不了这份配置的原因（目前只有 TRAE：官方要求 command 不含空格，路径含空格时为「安装路径含空格，TRAE 无法启动」），否则 null；
+`snippet` 为可复制内容（claude-code 为 `claude mcp add -s user atelier -- …` 命令，codex 为 TOML，其余为
+`{"mcpServers": {"atelier": {command, args}}}`）。启动命令只有一套判断：运行包经 `scripts/bootstrap.py --run`
+启动适配器（包内解释器没有安装本项目），源码安装直接 `-m character_workflow.mcp`，参数末尾带 `--client <id>`。
+`POST /api/connection/agent/client-config` `{client}` 把这一条写进该客户端配置：只增改我们那一条（Codex
+`[mcp_servers.game-atelier]`，JSON 客户端 `mcpServers.atelier`，保留用户在这一条里加的其他键），写前备份为
+`<文件名>.atelier-backup`、写后回读核对；开关未开 409 `AGENT_DISABLED`，`copy` 类客户端 422 `CLIENT_NOT_WRITABLE`，
+配置目录不存在 404 `CLIENT_NOT_FOUND`，读不懂的配置 500 `CLIENT_CONFIG_INVALID` 且原文件不变。打开开关时仍顺手写 Codex
+（装了才写）。开关打开时服务每次启动都把各可写客户端里已有的我们那一条改写成本次的启动命令，条目不存在不新建。
+`POST /api/connection/agent-sessions` 的 `client` 接受上述六个宿主名。
 `tools` 为 `{name: string, billable: boolean}[]`，与 MCP 注册共享工具元数据，使用真实的 `canvas_*` 工具名；
 只有生成工具标为计费。该字段是展示信息，不改变授权机制：计费工具需先获得用户授权。
 响应只返回路径和元数据，不包含凭据内容或 token。

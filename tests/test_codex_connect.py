@@ -59,7 +59,7 @@ def test_invalid_codex_config_is_reported_and_left_untouched(client, tmp_path, m
     bootstrap(client)
     response = client.put("/api/connection/agent", json={})
     assert response.status_code == 500
-    assert response.json()["error"]["code"] == "CODEX_CONFIG_INVALID"
+    assert response.json()["error"]["code"] == "CLIENT_CONFIG_INVALID"
     assert path.read_text(encoding="utf-8") == "[mcp_servers\n"
     # Claude Code 不受 Codex 配置坏掉的影响：开关照样是开的。
     assert client.get("/api/connection/agent").json()["enabled"] is True
@@ -70,11 +70,14 @@ def test_status_reports_which_hosts_connected(client, tmp_path, monkeypatch):  #
     bootstrap(client)
     from character_workflow.mcp.tool_catalog import TOOL_DEFINITIONS
 
+    from viewer_server.agent_clients import status
+
     metadata = {
-        "config_paths": {"claude-code": str(data_root.agent_credential_file()),
-                         "codex": str(tmp_path / "absent" / "config.toml")},
+        "credential_path": str(data_root.agent_credential_file()),
+        "clients": status(sys.executable),
         "tools": [{"name": tool.name, "billable": tool.billable} for tool in TOOL_DEFINITIONS],
     }
+    assert metadata["clients"][1]["path"] == str(tmp_path / "absent" / "config.toml")
     assert client.get("/api/connection/agent").json() == {"enabled": False, "connections": {}, **metadata}
     assert client.put("/api/connection/agent", json={}).json() == {"enabled": True, "connections": {}, **metadata}
     credential = read_private_json(data_root.agent_credential_file())
@@ -85,7 +88,9 @@ def test_status_reports_which_hosts_connected(client, tmp_path, monkeypatch):  #
     assert native.post("/api/connection/agent-sessions", json=payload).status_code == 200
     assert list(client.get("/api/connection/agent").json()["connections"]) == ["codex"]
     assert native.post("/api/connection/agent-sessions",
-                       json={**payload, "client": "cursor"}).status_code == 422
+                       json={**payload, "client": "cursor"}).status_code == 200
+    assert native.post("/api/connection/agent-sessions",
+                       json={**payload, "client": "unknown-host"}).status_code == 422
     # 关掉开关：状态清空，旧凭据换不到会话。
     assert client.request("DELETE", "/api/connection/agent", json={}).json() == {
         "enabled": False, "connections": {}, **metadata,

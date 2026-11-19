@@ -4,6 +4,7 @@ import { pluginInputsFromDocument } from '@/plugin-host/inputs';
 import type { PluginCanvasAction, PluginMediaAction, PluginNodeContribution, PluginPackageLock } from '@/schema/plugins';
 import { requestPluginPanel } from '@/plugin-host/panelRequests';
 import { pluginIcon } from '@/components/ui/icons';
+import { CanvasCopyForAgentItem } from '@/components/canvas/CanvasCopyForAgentItem';
 import { canvasPromptPreviewSource } from '@/lib/promptPreviewSource';
 import { flushSync } from 'react-dom';
 import { createAnnotatedGeneration, ensureAnnotatedInputs, type AnnotationDocumentBridge } from '@/components/canvas/annotation/annotationRendering';
@@ -5424,6 +5425,7 @@ function CanvasEditorInner({
                     <DropdownMenuItem className="gap-2" onSelect={() => setShortcutsOpen(true)}>
                       <HelpIcon aria-hidden="true" />快捷键
                     </DropdownMenuItem>
+                    <CanvasCopyForAgentItem name={projectName} projectId={projectId} />
                     {/* 沉浸式画布把整条顶栏（含设置入口）藏了：没有密钥的新用户在画布里点不动「生成」，
                         也没有任何地方能去配置。这一项是画布内唯一的全局设置出口。 */}
                     <DropdownMenuItem asChild className="gap-2">
