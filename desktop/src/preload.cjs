@@ -30,5 +30,8 @@ if (protocol === 'http:' && hostname === '127.0.0.1') {
   contextBridge.exposeInMainWorld('atelierLoading', {
     retry: () => ipcRenderer.send('atelier:retry'),
     openLog: () => ipcRenderer.send('atelier:open-log'),
+    cancel: () => ipcRenderer.send('atelier:cancel'),
+    resume: () => ipcRenderer.send('atelier:resume'),
+    importFile: () => ipcRenderer.send('atelier:import'),
   });
 }

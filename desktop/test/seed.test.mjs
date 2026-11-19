@@ -117,3 +117,31 @@ test('an incomplete seed leaves the old runtime untouched', { skip: !tarGz }, as
   assert.equal(readTrim(path.join(root, 'versions', '5.139.0', 'MARKER')), 'one');
   assert.equal(readTrim(path.join(root, 'last-good')), '5.139.0');
 });
+
+test('quitting mid-unpack stops it and leaves the old runtime untouched', async () => {
+  const parent = tmp('parent');
+  const root = await unpackSeed(parent, makeZipSeed('5.139.0', 'zip-one'), () => {});
+  const controller = new AbortController();
+  const next = makeZipSeed('5.139.0', 'zip-two', Array.from({ length: 400 }, (_, i) => [`GameAtelier/versions/5.139.0/extra/${i}.txt`, 'x'.repeat(2000)]));
+  const run = unpackSeed(parent, next, () => controller.abort(), controller.signal);
+  await assert.rejects(run);
+  assert.equal(readTrim(path.join(root, 'versions', '5.139.0', 'MARKER')), 'zip-one');
+  assert.deepEqual(fs.readdirSync(parent).filter((name) => name.startsWith('.staging-')), []);
+});
+
+test('quitting mid-unpack of a tar.gz rejects and leaves no runtime behind', { skip: !tarGz }, async () => {
+  const parent = tmp('parent');
+  const controller = new AbortController();
+  const run = unpackSeed(parent, makeSeed('5.139.0', 'one'), () => controller.abort(), controller.signal);
+  await assert.rejects(run);
+  assert.ok(!fs.existsSync(path.join(parent, 'GameAtelier')));
+});
+
+test('folders left by an interrupted earlier attempt are cleared', async () => {
+  const parent = tmp('parent');
+  fs.mkdirSync(path.join(parent, '.staging-1-2', 'GameAtelier'), { recursive: true });
+  fs.mkdirSync(path.join(parent, '.old-1-2'));
+  await unpackSeed(parent, makeZipSeed('5.139.0', 'zip-one'), () => {});
+  await new Promise((resolve) => { setTimeout(resolve, 200); });
+  assert.deepEqual(fs.readdirSync(parent).sort(), ['GameAtelier']);
+});

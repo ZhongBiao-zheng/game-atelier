@@ -6,6 +6,9 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import {
+  checkImported, downloadRuntime, plannedSources, readRelease,
+} from './download.mjs';
 import { buildMenu } from './menu.mjs';
 import { securityProbe } from './probe.mjs';
 import * as rt from './runtime.mjs';
@@ -45,6 +48,9 @@ const LOCAL_PAGE = path.join(app.getAppPath(), 'ui', 'index.html');
 const PRELOAD = path.join(app.getAppPath(), 'src', 'preload.cjs');
 const TRAY_TEMPLATE = path.join(app.getAppPath(), 'stage', 'icons', 'trayTemplate.png');
 const TRAY_ICON = path.join(process.resourcesPath, 'icon.ico');
+/** Where the runtime is downloaded from (src/viewer_server/release_sources.json, staged by `pnpm stage`). */
+const RELEASE_FILE = path.join(app.getAppPath(), 'stage', 'release_sources.json');
+const PLATFORM = MAC ? 'macos-arm64' : 'windows-x64';
 /** macOS: inside the app bundle. Windows: next to the exe, where the installer puts it. */
 const SEED_DIR = MAC ? path.join(process.resourcesPath, 'seed') : path.join(path.dirname(process.execPath), 'seed');
 
@@ -70,6 +76,11 @@ const state = {
   /** Set once the seed was unpacked by this launch (a first start). */
   unpacked: false,
   progressAt: 0,
+  /** The runtime download in progress: its AbortController and the last progress. */
+  download: null,
+  downloadAt: 0,
+  /** Aborts the unpack in progress (tar or the unzip workers) when the app quits. */
+  unpack: null,
 };
 
 const delay = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
@@ -156,6 +167,110 @@ function pushProgress(done, total) {
     .catch(() => {});
 }
 
+/** Download progress for the loading page, at most every 200 ms. */
+function pushDownload(done, total) {
+  if (state.download) Object.assign(state.download, { done, total });
+  const now = Date.now();
+  if (done < total && now - state.downloadAt < 200) return;
+  state.downloadAt = now;
+  state.win?.webContents
+    .executeJavaScript(`window.atelierDownload && window.atelierDownload(${done}, ${total})`)
+    .catch(() => {});
+}
+
+const downloadSessions = {};
+/** CNB is tried without any proxy first; everything else goes through the system proxy. */
+function fetchFor(proxy) {
+  if (!downloadSessions[proxy]) {
+    const ses = session.fromPartition(`atelier-download-${proxy}`);
+    downloadSessions[proxy] = ses.setProxy({ mode: proxy === 'direct' ? 'direct' : 'system' }).then(() => ses);
+  }
+  return async (url, options) => (await downloadSessions[proxy]).fetch(url, options);
+}
+
+/** Unpacks into the runtime root; quitting meanwhile stops it (see quit). */
+async function unpack(archive) {
+  const controller = new AbortController();
+  state.unpack = controller;
+  try {
+    return await unpackSeed(parent, archive, pushProgress, controller.signal);
+  } finally {
+    state.unpack = null;
+  }
+}
+
+/** The downloaded release archive into the runtime root, then the archive is removed. */
+async function unpackArchive(file, version) {
+  const root = await unpack({ file, version });
+  fs.rmSync(file, { force: true });
+  return root;
+}
+
+/**
+ * Downloads this shell's runtime and unpacks it. Cancelling raises `paused`; the loading page then
+ * offers to resume (boot again, continuing the partial file) or to import a file instead.
+ */
+async function downloadAndUnpack() {
+  const release = readRelease(RELEASE_FILE);
+  const version = app.getVersion();
+  const controller = new AbortController();
+  state.download = { controller, done: 0, total: 0 };
+  navigate(localUrl({ stage: 'download' }));
+  const started = Date.now();
+  try {
+    const file = await downloadRuntime({
+      release, version, platform: PLATFORM, dir: path.join(parent, 'download'),
+      sources: plannedSources(release), fetchFor, onProgress: pushDownload, signal: controller.signal,
+      onSource: (source) => log(`download ${version} from ${source.id} (${source.proxy})`),
+    });
+    const seconds = (Date.now() - started) / 1000;
+    const bytes = fs.statSync(file).size;
+    log(`downloaded ${path.basename(file)}: ${bytes} bytes in ${seconds.toFixed(1)} s (${(bytes / 1024 ** 2 / seconds).toFixed(1)} MB/s)`);
+    return await unpackArchive(file, version);
+  } catch (error) {
+    if (error.kind === 'cancelled') {
+      log('download paused');
+      const { done, total } = state.download;
+      throw Object.assign(failure('paused'), { done, total });
+    }
+    if (error.failures) for (const f of error.failures) log(`download failed at ${f.source} (${f.proxy}): ${f.kind} ${f.message}`);
+    log(`download failed: ${error.kind || ''} ${error.message}`);
+    if (error.kind === 'disk' && error.need) throw failure('download', `磁盘空间不足，还需 ${Math.ceil(error.need / 1024 ** 2)} MB`);
+    throw failure('download', error.kind ? error.message : '网络连接失败');
+  } finally {
+    state.download = null;
+  }
+}
+
+function cancelDownload() {
+  state.download?.controller.abort();
+}
+
+/** A runtime archive the user downloaded in a browser. Nothing changes unless it checks out. */
+async function importRuntime() {
+  if (state.booting) return;
+  const release = readRelease(RELEASE_FILE);
+  const version = app.getVersion();
+  const ext = release.archive_ext[PLATFORM].replace(/^\./, '').split('.').pop();
+  const { canceled, filePaths } = await dialog.showOpenDialog(state.win, {
+    properties: ['openFile'], filters: [{ name: '运行包', extensions: [ext] }],
+  });
+  if (canceled || !filePaths[0]) return;
+  state.booting = true;
+  try {
+    const file = await checkImported(filePaths[0], { release, version, platform: PLATFORM });
+    log(`importing ${file}`);
+    await unpack({ file, version });
+  } catch (error) {
+    log(`import failed: ${error.message}`);
+    showError('download', error.message);
+    return;
+  } finally {
+    state.booting = false;
+  }
+  boot();
+}
+
 /** --prepare-runtime progress for the installer: one `progress <done> <total>` line at a time. */
 let printedAt = 0;
 function printProgress(done, total) {
@@ -221,11 +336,16 @@ async function prepareRuntime() {
     log(seed ? `seed ${path.basename(seed.file)} build=${seed.build}` : 'seed missing');
     const reason = seed ? rt.replacementReason(root, seed) : rt.installed(root) ? null : 'missing';
     if (reason) log(`runtime replacement: ${reason}`);
-    if (reason && !seed) throw failure('install', '安装包里缺少运行环境');
+    if (reason && !seed) {
+      // No runtime in the package: download this shell's version (docs/contracts/desktop-shell.md).
+      root = await downloadAndUnpack();
+      state.runtime = new rt.Runtime(root);
+      return state.runtime;
+    }
     if (reason === 'too-old') throw failure('install', '安装包里的运行环境比已有的旧');
     if (reason === 'missing' || (['contract', 'older', 'build'].includes(reason) && await releaseRuntime(root))) {
       try {
-        root = await unpackSeed(parent, seed, PREPARE_ONLY ? printProgress : pushProgress);
+        root = PREPARE_ONLY ? await unpackSeed(parent, seed, printProgress) : await unpack(seed);
       } catch (error) {
         log(`runtime not ready: ${error.message}`);
         // A failed replacement leaves the old runtime in place; keep using it if it can serve.
@@ -279,6 +399,11 @@ async function boot() {
     state.dataRoot = dataRoot;
     navigate(serverUrl(server), server);
   } catch (error) {
+    if (error.kind === 'paused') {
+      const { done = 0, total = 0 } = error;
+      navigate(localUrl({ stage: 'paused', done, total }));
+      return;
+    }
     if (!error.kind) log(`boot failed: ${error.stack || error.message}`);
     showError(error.kind || 'start', error.kind ? error.detail : '');
   } finally {
@@ -326,6 +451,9 @@ async function quit() {
   if (state.quitting) return;
   state.quitting = true;
   saveBounds(parent, state.win);
+  // A download or unpack still running would keep the process alive after exit.
+  state.download?.controller.abort();
+  state.unpack?.abort();
   const { runtime, dataRoot } = state;
   if (runtime && dataRoot) {
     const server = await rt.verifiedServer(dataRoot);
@@ -607,6 +735,9 @@ function start() {
   listen('atelier:set-theme', 'page', setTheme);
   listen('atelier:retry', 'local', () => { boot(); });
   listen('atelier:open-log', 'local', openLog);
+  listen('atelier:cancel', 'local', cancelDownload);
+  listen('atelier:resume', 'local', () => { boot(); });
+  listen('atelier:import', 'local', () => { importRuntime(); });
   createWindow();
   createTray();
   // macOS: shut down, restart or log out. preventDefault asks the system to wait for the quit.

@@ -328,14 +328,15 @@ ELECTRON = REPO_ROOT / "desktop/src"
 
 
 def test_preload_exposes_only_the_documented_interfaces():
-    # docs/contracts/desktop-shell.md: the Atelier page gets setTheme, the bundled page retry and
-    # openLog, every other page nothing.
+    # docs/contracts/desktop-shell.md: the Atelier page gets setTheme, the bundled loading page
+    # retry, openLog and the runtime download's cancel / resume / importFile, every other page nothing.
     import re
     preload = (ELECTRON / "preload.cjs").read_text(encoding="utf-8")
     exposed = re.findall(r"exposeInMainWorld\('(\w+)', \{(.*?)\n  \}\);", preload, re.S)
     assert [name for name, _ in exposed] == ["atelierShell", "atelierLoading"]
     keys = {name: re.findall(r"^\s+(\w+): ", body, re.M) for name, body in exposed}
-    assert keys == {"atelierShell": ["setTheme"], "atelierLoading": ["retry", "openLog"]}
+    assert keys == {"atelierShell": ["setTheme"],
+                    "atelierLoading": ["retry", "openLog", "cancel", "resume", "importFile"]}
     assert "protocol === 'http:' && hostname === '127.0.0.1'" in preload
     assert "exposeInMainWorld('ipcRenderer'" not in preload
 
@@ -349,7 +350,8 @@ def test_every_ipc_message_is_checked_against_the_sender_frame():
     assert "trustedSender(event.senderFrame, state.win?.webContents.mainFrame, kind, context)" in listener
     assert listener.index("trustedSender") < listener.index("handler(...args)")
     channels = re.findall(r"listen\('([\w:-]+)', '(\w+)'", main)
-    assert channels == [("atelier:set-theme", "page"), ("atelier:retry", "local"), ("atelier:open-log", "local")]
+    assert channels == [("atelier:set-theme", "page"), ("atelier:retry", "local"), ("atelier:open-log", "local"),
+                        ("atelier:cancel", "local"), ("atelier:resume", "local"), ("atelier:import", "local")]
 
 
 def test_electron_pages_run_sandboxed_without_node():

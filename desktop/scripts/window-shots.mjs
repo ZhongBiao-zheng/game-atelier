@@ -1,11 +1,12 @@
-// CI only (Windows): the title bar with its caption buttons in dark and light — plus where a full-window overlay's top-right control lands (the `desktop-clear-top` rule).
+// CI only (Windows): the title bar with its caption buttons in dark and light — plus where a full-window overlay's top-right control lands (the `desktop-clear-top` rule),
+// and the loading page's runtime-download states drawn in the same window (values fed to the page).
 // Real screen captures, so the system-drawn caption buttons are in them.
 // usage: node window-shots.mjs <app-folder> <out-dir>
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const [appDir, out] = process.argv.slice(2);
 const desktop = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -17,6 +18,19 @@ const env = {
   GAME_ATELIER_NO_UPDATE_CHECK: '1',
 };
 const PORT = 9340;
+const MB = 1024 * 1024;
+const TOTAL = Math.round(142.9 * MB);
+// The loading page in the packaged app, with the state the shell would put in its query.
+const LOADING = path.join(appDir, 'resources', 'app.asar', 'ui', 'index.html');
+const loadingStates = [
+  ['download', { stage: 'download' },
+    `(async () => { for (let i = 0; i <= 40; i += 1) { window.atelierDownload(Math.round((12 + i * 0.42) * ${MB}), ${TOTAL});
+      await new Promise((r) => { setTimeout(r, 100); }); } return true; })()`],
+  ['paused', { stage: 'paused', done: 56 * MB, total: TOTAL }, 'true'],
+  ['preparing', { stage: 'preparing' }, 'window.atelierProgress(6200, 13452), true'],
+  ['fail-network', { error: 'download', detail: '网络连接失败' }, 'true'],
+  ['fail-checksum', { error: 'download', detail: '文件校验未通过' }, 'true'],
+];
 const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
 fs.mkdirSync(out, { recursive: true });
 
@@ -80,6 +94,15 @@ for (const theme of ['dark', 'light']) {
       document.body.appendChild(b); return true; })()`);
     await sleep(500);
     capture(rect, path.join(out, 'overlay-top-right-dark.png'));
+  }
+  for (const [state, query, feed] of loadingStates) {
+    const url = pathToFileURL(LOADING);
+    for (const [key, value] of Object.entries({ name: product, theme, ...query })) url.searchParams.set(key, String(value));
+    await cdp.eval(`location.href = ${JSON.stringify(url.href)}, true`);
+    await sleep(1500);
+    await cdp.eval(feed);
+    await sleep(300);
+    capture(rect, path.join(out, `loading-${theme}-${state}.png`));
   }
   cdp.close();
   spawnSync(exe, ['--quit'], { env, timeout: 60000 });

@@ -12,7 +12,7 @@ import { BUNDLE_DIR, log, validateBundle, writeSeedRecord } from './runtime.mjs'
  * modes and mtimes). The archive is streamed into its stdin, so the bytes read so far give real
  * progress.
  */
-function extractTarGz(seed, staging, report) {
+function extractTarGz(seed, staging, report, signal) {
   return new Promise((resolve, reject) => {
     const total = fs.statSync(seed).size;
     let done = 0;
@@ -27,6 +27,8 @@ function extractTarGz(seed, staging, report) {
     input.on('error', (error) => { tar.kill(); reject(new Error(`打不开运行包：${error.message}`)); });
     tar.stdin.on('error', () => { /* tar exited early; its exit code says why */ });
     input.pipe(tar.stdin);
+    // Quitting mid-unpack: left alone, tar waits for the rest of its input and the app never exits.
+    signal?.addEventListener('abort', () => { input.destroy(); tar.kill(); }, { once: true });
     tar.on('error', (error) => reject(new Error(`解压运行包失败：${error.message}`)));
     tar.on('close', (code) => {
       if (code === 0) resolve();
@@ -41,7 +43,7 @@ function extractTarGz(seed, staging, report) {
  * entries are split across worker threads (src/unzip-worker.cjs). Progress is entries extracted
  * out of all entries; only this thread reports, and the shared counter only grows.
  */
-function extractZip(seed, staging, report) {
+function extractZip(seed, staging, report, signal) {
   const source = fs.readFileSync(fileURLToPath(new URL('./unzip-worker.cjs', import.meta.url)), 'utf8');
   const count = Math.min(Math.max(os.availableParallelism(), 1), 8);
   const counter = new SharedArrayBuffer(4);
@@ -61,6 +63,7 @@ function extractZip(seed, staging, report) {
     }
   };
   const timer = setInterval(tick, 50);
+  signal?.addEventListener('abort', () => { for (const worker of workers) worker.terminate(); }, { once: true });
   const finished = workers.map((worker) => new Promise((resolve, reject) => {
     worker.on('message', (message) => { if (message.total) total = message.total; });
     worker.on('error', reject);
@@ -78,8 +81,15 @@ function extractZip(seed, staging, report) {
     });
 }
 
-function extract(seed, staging, report) {
-  return seed.endsWith('.zip') ? extractZip(seed, staging, report) : extractTarGz(seed, staging, report);
+function extract(seed, staging, report, signal) {
+  return seed.endsWith('.zip') ? extractZip(seed, staging, report, signal) : extractTarGz(seed, staging, report, signal);
+}
+
+/** Folders an earlier attempt left behind (the app quit or crashed while unpacking). */
+function removeLeftovers(parent) {
+  for (const name of fs.readdirSync(parent)) {
+    if (name.startsWith('.staging-') || name.startsWith('.old-')) removeQuietly(path.join(parent, name));
+  }
 }
 
 function removeQuietly(dir) {
@@ -91,16 +101,19 @@ function removeQuietly(dir) {
  * folder and validated first; only then is the old root moved aside and the new one moved in.
  * If moving in fails, the old root is put back untouched.
  */
-export async function unpackSeed(parent, seed, report) {
+export async function unpackSeed(parent, seed, report, signal) {
   const root = path.join(parent, BUNDLE_DIR);
   // Unique per attempt: a retry in the same process must not meet an earlier attempt's folders.
   const attempt = `${process.pid}-${Date.now()}`;
   const staging = path.join(parent, `.staging-${attempt}`);
   const aside = path.join(parent, `.old-${attempt}`);
+  fs.mkdirSync(parent, { recursive: true });
+  removeLeftovers(parent);
   fs.mkdirSync(staging, { recursive: true });
   const started = Date.now();
   try {
-    await extract(seed.file, staging, report);
+    await extract(seed.file, staging, report, signal);
+    if (signal?.aborted) throw new Error('解压已取消');
     const extracted = path.join(staging, BUNDLE_DIR);
     validateBundle(extracted);
     writeSeedRecord(extracted, seed);

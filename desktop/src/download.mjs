@@ -211,6 +211,8 @@ export async function downloadRuntime({
           await sleep(retryDelays[attempt], signal);
         }
       }
+      // Downloaded before but never unpacked (the app quit meanwhile): no need to fetch it again.
+      if (fs.existsSync(final) && await sha256File(final) === checksum) return final;
       const saved = readJson(record);
       if (!(saved?.version === version && saved.sha256 === checksum)) fs.rmSync(part, { force: true });
       fs.writeFileSync(record, JSON.stringify({ version, sha256: checksum, source: source.id }));

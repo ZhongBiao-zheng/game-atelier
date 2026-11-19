@@ -120,6 +120,17 @@ test('a resumed file that does not hash right is deleted, never kept half-done',
   } finally { await srv.close(); }
 });
 
+test('a complete archive left by a quit before unpacking is reused, not fetched again', async () => {
+  const srv = await serve({ a: {} });
+  try {
+    const dir = tmp();
+    fs.writeFileSync(path.join(dir, ASSET), ARCHIVE);
+    const file = await downloadRuntime(options(dir, [srv.source('a')]));
+    assert.deepEqual(fs.readFileSync(file), ARCHIVE);
+    assert.ok(!srv.log.some((r) => r.file.endsWith('.zip')), 'only the checksum was requested');
+  } finally { await srv.close(); }
+});
+
 test('a part recorded for another version or checksum starts over', async () => {
   const srv = await serve({ a: {} });
   try {
