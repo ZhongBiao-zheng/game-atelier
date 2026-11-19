@@ -109,6 +109,9 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   存下的 `protocol` 与这次按 KEY 算出的协议不同（停机期间 KEY 被改过）时不续查，按 `unconfirmed` 失败；续查时原路由已不存在或网关密钥已撤销，
   同样按 `unconfirmed` 失败（上游已有订单）。
   OpenRouter、可灵旧版、DashScope 视频提交后立即上报订单号，之后失败不再被当成「没执行」换别家重提。
+- 应用内更新与网关任务（2026-11-19 起）：更新排空只等「执行中且重启后不能续查」的网关任务（`update_routes.gateway_work(update_drain=True)`）；
+  排队中的重启后保持排队、能续查的（`gateway_tasks.resumable`）重启后凭已存订单接着查，都不拦更新。更新期间 `pump()` 不启动排队任务；
+  更新取消或失败、留在原进程时接着调度。桌面外壳的 `/api/shell/active-work` 仍按全部非终态网关任务计数（外壳退出后服务不会自动起来）。
 - 任务参数补充：`prompt` 最多 32,000 字符，除 layer_split 外不能为空；`n` 为 1–8。生成任务最多同时运行 8 个、每把密钥最多 4 个，剩余已受理任务排队。
   各类型允许的文件组：image 为 ref/mj_sref/mj_cref/mj_oref，image_edit 为 ref/mask，layer_split 为 ref，video 为 ref/video/audio，audio 不接受文件。
   图片控制字段白名单为 size/size_mode/custom_size/ratio/resolution/quality/background/complexity/output_format/frame_count/frame_duration_ms/steps/cfg_scale/requested_size、

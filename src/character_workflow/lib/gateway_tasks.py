@@ -442,8 +442,17 @@ def _is_task_id(value: str) -> bool:
 
 # ---- 调度 ----
 
+def _update_in_progress() -> bool:
+    """主机正在应用内更新（排空或等重启）：排队任务留着，更新后的新进程接着跑（排队任务重启后保持排队）。"""
+    from viewer_server.update_routes import admission
+
+    return admission().blocked()
+
+
 def pump() -> None:
-    """按提交顺序启动排队任务：全局最多 8 个、每把密钥最多 4 个同时执行。"""
+    """按提交顺序启动排队任务：全局最多 8 个、每把密钥最多 4 个同时执行；主机更新期间不启动。"""
+    if _update_in_progress():
+        return
     with _lock:
         for task in _all_tasks():
             if len(_running) >= MAX_RUNNING:
