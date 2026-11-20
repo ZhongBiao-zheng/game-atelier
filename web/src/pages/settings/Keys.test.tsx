@@ -767,3 +767,20 @@ describe('KeyForm 模型选择器', () => {
     ]);
   });
 });
+
+// I1：列表与编辑表单都要拿到 /api/keys 的 icon（逐字段转换时不能丢）。
+describe('供应商图标经过列表转换', () => {
+  it('供应商页（embedded）列表显示 KEY 的图标，编辑表单头部也是它', async () => {
+    const sha = 'd'.repeat(64);
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ keys: [{ ...mockKey, alias: 'relay', provider: 'custom', base_url: 'https://relay.example/v1',
+        icon: `file:${sha}` }], default_alias: 'relay' }),
+    });
+    const { container } = render(<KeysPage embedded />);
+    await waitFor(() => expect(container.querySelector(`img[src="/api/provider-icons/${sha}"]`)).not.toBeNull());
+    fireEvent.click(await screen.findByLabelText('编辑 relay'));
+    expect(screen.getByRole('button', { name: '更换图标' }).querySelector('img'))
+      .toHaveAttribute('src', `/api/provider-icons/${sha}`);
+  });
+});

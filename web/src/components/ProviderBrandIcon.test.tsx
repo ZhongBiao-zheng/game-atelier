@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { ProviderBrandIcon } from './ProviderBrandIcon';
 import { PROVIDER_BRANDS, brandOfIcon } from './providerBrands';
@@ -91,5 +91,29 @@ describe('自定义图标与首字母兜底', () => {
     expect(brandOfIcon('file:' + 'a'.repeat(64))).toBeNull();
     expect(brandOfIcon('gemini')).toBeNull();
     expect(brandOfIcon(null)).toBeNull();
+  });
+});
+
+describe('上传的图标', () => {
+  const sha = 'b'.repeat(64);
+
+  it('file: 显示图片，按原色（不走遮罩）', () => {
+    const { container } = render(<ProviderBrandIcon provider={{ provider: 'custom', base_url: 'https://api.tu-zi.com', icon: `file:${sha}` }} size="sm" />);
+    const image = container.querySelector('img')!;
+    expect(image).toHaveAttribute('src', `/api/provider-icons/${sha}`);
+    expect(image.style.width).toBe('14px');
+    expect(container.querySelector('.bg-current')).toBeNull();
+  });
+
+  it('图片读不到（文件不在）时退回默认规则，不报错', () => {
+    const { container } = render(<ProviderBrandIcon provider={{ provider: 'custom', base_url: 'https://relay.example', alias: 'relay', icon: `file:${sha}` }} />);
+    fireEvent.error(container.querySelector('img')!);
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('[data-icon="initial"]')).toHaveTextContent('R');
+  });
+
+  it('不合规的 file: 引用直接走默认规则', () => {
+    const { container } = render(<ProviderBrandIcon provider={{ provider: 'custom', alias: 'x', icon: 'file:../keys.json' }} />);
+    expect(container.querySelector('img')).toBeNull();
   });
 });

@@ -21,6 +21,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
+import { useState } from 'react';
+import { providerIconUrl } from '@/api/providerIcons';
 import { ICON_PX, ProviderIcon, RouteIcon, WorkflowIcon, type IconSize } from '@/components/ui/icons';
 import { providerPresetId } from '@/pages/settings/providerPresets';
 import { BrandGlyph, brandOfIcon, type ProviderBrand } from './providerBrands';
@@ -42,13 +44,19 @@ export function providerInitial(alias: string | undefined): string {
   return first ? first.toLocaleUpperCase() : '';
 }
 
-/** 显示优先级：用户选的内置品牌 → 预置 / 域名规则 → 名称首字母 → 通用图标。 */
+/** 显示优先级：上传的图片 → 用户选的内置品牌 → 预置 / 域名规则 → 名称首字母 → 通用图标。
+ * 图片按原色显示；文件不在（拷贝了 keys.json、清理竞态）时退回后面的规则。 */
 export function ProviderBrandIcon({ provider, size = 'lg' }: {
   provider?: { provider?: string; base_url?: string | null; alias?: string; icon?: string | null } | null;
   size?: IconSize;
 }) {
   const px = ICON_PX[size];
+  const [broken, setBroken] = useState<string | null>(null);
   if (provider?.provider === 'auto') return <RouteIcon size={size} className="shrink-0" aria-hidden="true" />;
+  const image = providerIconUrl(provider?.icon);
+  if (image && image !== broken) {
+    return <img src={image} alt="" aria-hidden="true" width={px} height={px} className="shrink-0 object-contain" style={{ width: px, height: px }} onError={() => setBroken(image)} />;
+  }
   const chosen = brandOfIcon(provider?.icon);
   if (chosen) return <BrandGlyph brand={chosen} size={size} />;
   const id = providerPresetId(provider);
