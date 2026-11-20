@@ -25,6 +25,7 @@ from character_workflow.lib.canvas_specs import SPEC_FILENAME, validate_text
 from character_workflow.lib.canvas_agent_sessions import (
     canvas_agent_sessions_lock_path, public_session,
 )
+from character_workflow.lib.llm_protocols.gemini import mark_signatures_dropped
 from character_workflow.lib.canvas_projects import (
     _project_dir_unchecked,
     _read_canvas_document_unlocked,
@@ -510,8 +511,10 @@ def export_canvas_projects(
                         or session.session_id != PurePosixPath(path).stem
                     ):
                         raise CanvasPackageError(f"Agent Session 归属或文件名不一致：{path}")
-                    # 导出包不带 Gemini thought signature（可能很大，换一台机器也用不上更早轮次的签名）。
-                    body = public_session(session).model_dump_json(indent=2).encode("utf-8")
+                    # 导出包不带 Gemini thought signature（可能很大，换一台机器也用不上更早轮次的签名），
+                    # id 的签名状态一并改成「没保留」（ADR-0044 第 5 批）。
+                    body = json.dumps(mark_signatures_dropped(public_session(session).model_dump(mode="json")),
+                                      ensure_ascii=False, indent=2).encode("utf-8")
                 if "/plugins/" in path:
                     try:
                         plugin_state = CanvasPluginState.model_validate(payload)

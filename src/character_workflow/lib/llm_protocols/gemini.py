@@ -23,6 +23,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 from character_workflow.lib.llm_protocols import ProtocolError
 from character_workflow.lib.llm_protocols.usage import from_gemini, to_chat
 
+_ENDPOINTS = ("/chat/completions", "/responses", "/messages", "/models")
 _SUFFIXES = ("/v1beta/openai", "/v1beta", "/v1")
 _FINISH = {
     "STOP": "stop", "MAX_TOKENS": "length",
@@ -78,6 +79,20 @@ def with_signature(tool_call: dict, signature: str) -> dict:
     return {**tool_call, "extra_content": {"google": {"thought_signature": signature}}}
 
 
+def mark_signatures_dropped(value: Any) -> Any:
+    """导出包去掉签名后，把 id 里的签名状态 s 改成 x（没保留），id 在会话里出现的每一处一起改。
+
+    否则在「等确认」时导出、导入后批准续跑：已确认的工具（可能是计费生成）已经执行，下一次请求却因
+    「签名丢失」报错。改成 x 后按「签名没进会话」处理，填官方占位值。"""
+    if isinstance(value, dict):
+        return {key: mark_signatures_dropped(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [mark_signatures_dropped(item) for item in value]
+    if isinstance(value, str) and (match := _CALL_ID.match(value)) and match.group(1) == SIGNED:
+        return f"g{OVERSIZED}{value[2:]}"
+    return value
+
+
 def drop_signatures(items: list[dict]) -> list[dict]:
     """会话历史出本机（会话接口的响应、项目导出包）前去掉签名；落盘的会话文件保留。"""
     out = []
@@ -97,6 +112,10 @@ def api_root(base_url: str) -> str:
     原生地址、New API 习惯写的 `/v1` 都能填），再补 `/v1beta`。"""
     parts = urlsplit(base_url.strip())
     path = parts.path.rstrip("/")
+    for endpoint in _ENDPOINTS:  # 填了完整端点地址（如 OpenAI 兼容的 …/chat/completions）也能用
+        if path.endswith(endpoint):
+            path = path[: -len(endpoint)].rstrip("/")
+            break
     for suffix in _SUFFIXES:
         if path.endswith(suffix):
             path = path[: -len(suffix)].rstrip("/")
@@ -223,6 +242,17 @@ def to_upstream(payload: dict) -> dict:
     contents: list[dict] = []
     names: dict[str, str] = {}  # tool_call id → 函数名（functionResponse 要带名字）
     upstream_ids: dict[str, str] = {}  # tool_call id → Gemini 自己给的 functionCall.id
+    # 上一步的调用（按顺序）与已收到的结果：结果要按调用的顺序发（审查模式下需确认的那个结果最后才到，
+    # 同名调用又没有 id 时 Gemini 按顺序配对），缺一个都不发。
+    pending: list[str] = []
+    results: dict[str, dict] = {}
+
+    def flush_results() -> None:
+        if missing := [names[call_id] for call_id in pending if call_id not in results]:
+            raise ProtocolError(f"工具调用缺少结果：{'、'.join(missing)}")
+        _append(contents, "user", [results[call_id] for call_id in pending])
+        pending.clear()
+        results.clear()
     messages = payload.get("messages") or []
     model = str(payload.get("model") or "")
     # 当前轮：最后一条 user 消息（带文本或图片的那种；工具结果是 role:tool）之后的部分。
@@ -230,6 +260,8 @@ def to_upstream(payload: dict) -> dict:
     for position, message in enumerate(messages):
         role = message.get("role")
         content = message.get("content")
+        if role != "tool" and pending:
+            flush_results()
         if role in ("system", "developer"):
             if text := _text_of(content):
                 system.append(text)
@@ -249,17 +281,20 @@ def to_upstream(payload: dict) -> dict:
                         call, current_turn=position > turn_start, model=model)):
                     part["thoughtSignature"] = signature
                 parts.append(part)
+                pending.append(str(call.get("id")))
             _append(contents, "model", parts)
         elif role == "tool":
             call_id = str(message.get("tool_call_id"))
-            if call_id not in names:
+            if call_id not in pending:
                 raise ProtocolError("工具结果找不到对应的调用")
             response: dict[str, Any] = {"name": names[call_id], "response": _response_value(content)}
             if call_id in upstream_ids:
                 response["id"] = upstream_ids[call_id]
-            _append(contents, "user", [{"functionResponse": response}])
+            results[call_id] = {"functionResponse": response}
         else:
             raise ProtocolError(f"Gemini 接口不认识这种消息角色：{role}")
+    if pending:
+        flush_results()
     body: dict[str, Any] = {"contents": contents}
     if system:
         body["systemInstruction"] = {"parts": [{"text": "\n\n".join(system)}]}
@@ -284,9 +319,20 @@ def to_upstream(payload: dict) -> dict:
             "parametersJsonSchema": tool["function"].get("parameters")
             or {"type": "object", "properties": {}},
         } for tool in tools]}]
-    if (mode := _TOOL_CHOICE.get(payload.get("tool_choice"))) and body.get("tools"):
-        body["toolConfig"] = {"functionCallingConfig": {"mode": mode}}
+    if body.get("tools") and (config := _tool_config(payload.get("tool_choice"))):
+        body["toolConfig"] = {"functionCallingConfig": config}
     return body
+
+
+def _tool_config(choice: Any) -> dict | None:
+    """`tool_choice`：auto / none / required → AUTO / NONE / ANY；指定一个函数 → ANY + allowedFunctionNames。"""
+    if isinstance(choice, str):
+        return {"mode": _TOOL_CHOICE[choice]} if choice in _TOOL_CHOICE else None
+    if isinstance(choice, dict) and choice.get("type") == "function":
+        name = (choice.get("function") or {}).get("name")
+        if isinstance(name, str) and name:
+            return {"mode": "ANY", "allowedFunctionNames": [name]}
+    return None
 
 
 def _blocked(body: dict) -> ProtocolError:
@@ -296,10 +342,29 @@ def _blocked(body: dict) -> ProtocolError:
     return ProtocolError("Gemini 没有返回内容")
 
 
+def _upstream_error(body: dict) -> ProtocolError | None:
+    """HTTP 200 但内容是错误（OpenAI-HK 等中转站余额不足时就这样回）：把上游原文带出来。"""
+    error = body.get("error")
+    if error is None:
+        return None
+    message = error.get("message") if isinstance(error, dict) else error
+    return ProtocolError(f"上游返回错误：{message or json.dumps(error, ensure_ascii=False)[:300]}")
+
+
+def _empty_finish(candidate: dict) -> ProtocolError:
+    """没有文本也没有调用、又不是正常结束（如 MALFORMED_FUNCTION_CALL、SAFETY、MAX_TOKENS 被思考用完）：
+    当错误报，不能当成「回答了空字符串」。"""
+    reason = candidate.get("finishReason")
+    detail = candidate.get("finishMessage")
+    return ProtocolError(f"Gemini 没有生成内容（{reason}）" + (f"：{detail}" if detail else ""))
+
+
 def from_upstream(body: Any, model: str = "") -> dict:
     """generateContent 非流式响应 → Chat Completions 响应（用量已按含缓存的总输入归一）。"""
     if not isinstance(body, dict):
         raise ProtocolError("Gemini 接口返回的不是 JSON 对象")
+    if error := _upstream_error(body):
+        raise error
     candidates = body.get("candidates") if isinstance(body.get("candidates"), list) else []
     if not candidates:
         raise _blocked(body)
@@ -308,6 +373,8 @@ def from_upstream(body: Any, model: str = "") -> dict:
     text = "".join(str(part.get("text") or "") for part in parts
                    if isinstance(part, dict) and "text" in part and not part.get("thought"))
     calls = _function_calls([part for part in parts if isinstance(part, dict)])
+    if not text and not calls and candidate.get("finishReason") not in (None, "STOP"):
+        raise _empty_finish(candidate)
     message: dict[str, Any] = {"role": "assistant", "content": text or None}
     if calls:  # 非流式的 tool_calls 没有 index
         message["tool_calls"] = [{k: v for k, v in call.items() if k != "index"} for call in calls]
@@ -350,8 +417,8 @@ def _function_calls(parts: list[dict]) -> list[dict]:
             calls.append(part["functionCall"])
             if len(calls) == 1:
                 signature = _part_signature(part)
-        elif calls and signature is None:
-            signature = _part_signature(part)
+        elif calls and signature is None and not part.get("text"):
+            signature = _part_signature(part)  # 只认空文本 part 上的；有文本的签名属于那段文本
     return [_tool_call(call, index, signature if index == 0 else None)
             for index, call in enumerate(calls)]
 
@@ -375,36 +442,57 @@ class StreamTranslator:
         self._usage: dict | None = None
         self._finish: str | None = None
         self._started = False
+        self._text = False  # 这一步已经发出过正文
+        self._other = b""  # 不是 SSE 的内容（200 + JSON 错误体），收尾时读出上游原文
         self.finished = False
 
     def feed(self, chunk: bytes) -> bytes:
         self._buffer += chunk
-        out: list[bytes] = []
         *lines, self._buffer = self._buffer.split(b"\n")
-        for raw in lines:
-            line = raw.rstrip(b"\r")
-            if not line.startswith(b"data:") or self.finished:
-                continue
-            try:
-                event = json.loads(line[5:].strip())
-            except ValueError:
-                continue
-            if isinstance(event, dict):
-                out.extend(self._handle(event))
-        return b"".join(out)
+        return b"".join(self._line(raw) for raw in lines)
 
-    def finish(self) -> bytes:
+    def _line(self, raw: bytes) -> bytes:
+        line = raw.rstrip(b"\r")
         if self.finished:
             return b""
+        if not line.startswith(b"data:"):
+            if len(self._other) < 65536:
+                self._other += line + b"\n"
+            return b""
+        try:
+            event = json.loads(line[5:].strip())
+        except ValueError:
+            return b""
+        return b"".join(self._handle(event)) if isinstance(event, dict) else b""
+
+    def finish(self) -> bytes:
+        # 最后一行没有换行结尾也要处理。
+        head = self._line(self._buffer) if self._buffer.strip() else b""
+        self._buffer = b""
+        if self.finished:
+            return head
         self.finished = True
         if self._finish is None:
-            return _sse({"error": {"message": "Gemini 流式响应中途结束", "type": "incomplete_stream"}})
-        out = []
+            return head + _sse({"error": self._unfinished_error()})
+        out = [head]
         if (usage := from_gemini(self._usage)) is not None:
             out.append(_sse({"id": self._id, "object": "chat.completion.chunk", "created": self._created,
                              "model": self._model, "choices": [], "usage": to_chat(usage)}))
         out.append(b"data: [DONE]\n\n")
         return b"".join(out)
+
+    def _unfinished_error(self) -> dict:
+        """没收到 finishReason：上游回的若是 JSON 错误体（HTTP 200），把原文带出来；否则是中途断了。"""
+        raw = self._other.decode("utf-8", "replace").strip()
+        if not self._started and raw:
+            try:
+                body = json.loads(raw)
+            except ValueError:
+                return {"message": f"Gemini 返回的不是流式数据：{raw[:300]}", "type": "api_error"}
+            if isinstance(body, dict) and (error := _upstream_error(body)):
+                return {"message": str(error), "type": "api_error"}
+            return {"message": f"Gemini 返回的不是流式数据：{raw[:300]}", "type": "api_error"}
+        return {"message": "Gemini 流式响应中途结束", "type": "incomplete_stream"}
 
     def _chunk(self, delta: dict, finish: str | None = None) -> bytes:
         return _sse({"id": self._id, "object": "chat.completion.chunk", "created": self._created,
@@ -434,13 +522,19 @@ class StreamTranslator:
         for part in (candidate.get("content") or {}).get("parts") or []:
             if not isinstance(part, dict):
                 continue
-            if "functionCall" in part or (self._parts and _part_signature(part)):
+            if "functionCall" in part or (self._parts and _part_signature(part) and not part.get("text")):
                 self._parts.append(part)
             elif part.get("text") and not part.get("thought"):
+                self._text = True
                 out.append(self._chunk({"content": part["text"]}))
         if reason := candidate.get("finishReason"):
             calls = _function_calls(self._parts)
             self._parts = []
+            if not calls and not self._text and reason != "STOP":
+                self.finished = True
+                out.append(_sse({"error": {"message": str(_empty_finish(candidate)),
+                                           "type": str(reason)}}))
+                return out
             if calls:
                 out.append(self._chunk({"tool_calls": calls}))
             self._finish = "tool_calls" if calls else _FINISH.get(reason, "stop")

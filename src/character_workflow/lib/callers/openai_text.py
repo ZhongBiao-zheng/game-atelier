@@ -208,6 +208,9 @@ def _post_json(
 ) -> object:
     """`headers` 不传时用 OpenAI 的 Bearer 鉴权；其他协议由适配器给（例如 Anthropic 的 x-api-key）。
 
+    自定义鉴权头的请求不跟随重定向：requests 跨主机只去掉 `Authorization`，`x-api-key` / `x-goog-api-key`
+    会原样带到第二跳。3xx 当错误报。
+
     `gateway_wait`（`gateway_text_wait.Waiting`）：经局域网网关、主机正在更新时等待重发；
     不传就直接报「网关正在更新，请稍后重试」（没有进度位置的入口不让用户干等）。"""
     from character_workflow.lib import gateway_text_wait
@@ -224,6 +227,7 @@ def _post_json(
             },
             json=payload,
             timeout=timeout,
+            **({"allow_redirects": False} if headers else {}),
             # 局域网网关不走本机代理（Clash / VPN 会拖死 192.168.x.x），与图片 caller 一致。
             **({"proxies": DIRECT_PROXIES} if gateway_alias else {}),
         )
@@ -250,6 +254,9 @@ def _post_json(
             raise
     if response.status_code >= 400:
         raise OpenAITextError(f"text api {response.status_code}: {response.text[:500]}")
+    if headers and 300 <= response.status_code < 400:
+        raise OpenAITextError(f"text api {response.status_code}: 上游要求跳转到 "
+                              f"{response.headers.get('Location') or '别的地址'}，带密钥的请求不跟随")
     try:
         return response.json()
     except ValueError as error:
