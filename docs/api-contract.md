@@ -1463,6 +1463,7 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
 - 只在 `POST/PATCH /api/keys` 写入边界校验；`file:` 引用的文件写入时必须存在，否则 422。读盘不校验：文件后来不在（手改配置、拷贝 keys.json 给同事、清理竞态）时 `/api/keys` 照常返回，界面退回首字母。
 - `GET /api/provider-icons/{sha}`：sha 只收 64 位小写十六进制；只读 `<data_root>/.config/provider-icons/<sha>.png`；`image/png`、`nosniff`、`private, max-age=31536000, immutable`。不存在或不合规为 404。本地会话可读（网站会话也可读，模型菜单显示）；网关应用不挂这条路由。
 - `POST /api/provider-icons`（multipart，字段 `file`，单文件）：校验、重新编码、落盘，返回 `{icon: "file:<sha256>"}`；不改任何 KEY，由表单保存时写进 `icon`。超过 1 MiB 为 413；SVG、HTML、伪装扩展名、截断或尺寸超限为 422。属于供应商管理，只给本机页面。
+- 局域网网关 `GET /gateway/v1/models` 的成员新增可选 `icon`，只在主机为该 KEY 选了内置品牌时出现（`brand:<id>`）；上传的图片（`file:`）是主机本地文件，不下发。成员端 `ViaMember.icon` 也只收 `brand:`。
 - 图片一律是重新编码后的 128×128 透明底 PNG，文件名为内容 sha256。每次写 `keys.json` 后清理没有引用、修改时间超过 1 小时的文件。
 
 ## 网关共享库（ADR-0034）

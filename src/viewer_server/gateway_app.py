@@ -74,6 +74,8 @@ def _route_view(route: model_routes.ModelRoute, key: GatewayKeyRecord) -> dict[s
             "base_url": None if m.protocol == "declarative" else m.base_url,
             "billing_group": m.billing_group,
             "model_id": m.model_id, "name": m.name, "protocol": m.protocol,
+            # 只下发内置品牌；上传的图片（file:）是主机本地文件，不经网关。
+            **({"icon": m.icon} if m.icon and m.icon.startswith("brand:") else {}),
         } for m in members],
     }
     if (declared := gateway_access.declared_view(route)) is not None:
