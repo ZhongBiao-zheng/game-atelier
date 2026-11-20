@@ -1019,25 +1019,23 @@ def start_host_settlement(session: CanvasAgentSession) -> None:
     threading.Thread(target=work, name="agent-host-settlement", daemon=True).start()
 
 
-def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None] | None = None,
-                call_tag: str | None = None):
-    from agents import (
-        Agent, ModelSettings, OpenAIChatCompletionsModel, OpenAIResponsesModel, set_tracing_disabled,
-    )
+SOCKS_PROXY_MESSAGE = ("环境变量里的代理是 socks 地址（ALL_PROXY、HTTPS_PROXY 等），Agent 连不了 socks 代理："
+                       "改成 http 代理地址，或从没有设置这个变量的终端启动 Atelier")
+
+
+def _is_socks_proxy_error(error: BaseException) -> bool:
+    """httpx 按环境代理构造 transport 时的两种失败：socks5 / socks5h 缺 socksio，socks:// 不认识。"""
+    text = str(error)
+    if isinstance(error, ImportError):
+        return "socksio" in text
+    return "Unknown scheme for proxy URL" in text and "socks" in text.lower()
+
+
+def _agent_client(key: keys.KeySpec, protocol: str | None,
+                  on_gateway_wait: Callable[[], None] | None, call_tag: str | None):
     from openai import AsyncOpenAI, DefaultAsyncHttpxClient
-    from openai.types.shared import Reasoning
 
     from character_workflow.lib import llm_protocols
-    set_tracing_disabled(True)  # 否则 SDK 会把对话轨迹上传到 OpenAI
-    key = keys.find_by_alias(session.model_alias or "")
-    if key is None or not session.model:
-        raise CanvasToolError("INVALID_PARAMETERS", "请先选择对话模型", 422)
-    if not key.enabled:
-        raise CanvasToolError("MODEL_UNAVAILABLE", "供应商已停用", 422)
-    spec = next((m for m in key.models if m.id == session.model), None)
-    if not agent_can_use(spec):
-        raise CanvasToolError("MODEL_UNAVAILABLE", "该模型的接口暂不支持 Agent", 422)
-    protocol = spec.protocol if spec is not None else None
     # 局域网网关：直连不读本机代理；SDK 自带重试关掉（读超时也会重发，可能重复计费），
     # 只保留「主机确定没收下才重发」（gateway_text_wait，第 5 批 5-4）。
     http_client, retries = None, 2
@@ -1057,8 +1055,34 @@ def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None]
             base_url=(key.base_url or "").strip(), access_key=key.access_key))
     # 经网关时带关联标记，主机把它记在这把密钥的用量行上，成员每轮结束按它查回结算额。
     headers = {"X-Atelier-Call-Tag": call_tag} if key.provider == "atelier" and call_tag else None
-    client = AsyncOpenAI(base_url=chat_base_url(key), api_key=key.access_key, max_retries=retries,
-                         http_client=http_client, default_headers=headers)
+    return AsyncOpenAI(base_url=chat_base_url(key), api_key=key.access_key, max_retries=retries,
+                       http_client=http_client, default_headers=headers)
+
+
+def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None] | None = None,
+                call_tag: str | None = None):
+    from agents import (
+        Agent, ModelSettings, OpenAIChatCompletionsModel, OpenAIResponsesModel, set_tracing_disabled,
+    )
+    from openai.types.shared import Reasoning
+
+    from character_workflow.lib import llm_protocols
+    set_tracing_disabled(True)  # 否则 SDK 会把对话轨迹上传到 OpenAI
+    key = keys.find_by_alias(session.model_alias or "")
+    if key is None or not session.model:
+        raise CanvasToolError("INVALID_PARAMETERS", "请先选择对话模型", 422)
+    if not key.enabled:
+        raise CanvasToolError("MODEL_UNAVAILABLE", "供应商已停用", 422)
+    spec = next((m for m in key.models if m.id == session.model), None)
+    if not agent_can_use(spec):
+        raise CanvasToolError("MODEL_UNAVAILABLE", "该模型的接口暂不支持 Agent", 422)
+    protocol = spec.protocol if spec is not None else None
+    try:
+        client = _agent_client(key, protocol, on_gateway_wait, call_tag)
+    except (ImportError, ValueError) as error:
+        if isinstance(error, CanvasToolError) or not _is_socks_proxy_error(error):
+            raise
+        raise CanvasToolError("MODEL_UNAVAILABLE", SOCKS_PROXY_MESSAGE, 422) from error
     settings = ModelSettings(reasoning=Reasoning(effort=session.effort)) if session.effort \
         else ModelSettings()
     return Agent(
