@@ -478,10 +478,10 @@ def test_inline_images_are_reserved_per_image_not_per_byte(setup, monkeypatch):
     after = generation_pricing.estimate_text_cost_cny(
         'vendor/gpt-test', text_bytes // 3 + 3 * IMAGE_INPUT_TOKENS_ESTIMATE, 1000)
     actual = generation_pricing.estimate_text_cost_cny('vendor/gpt-test', 4300, 20)
-    assert input_tokens_estimate(payload, body_size) == text_bytes // 3 + 3 * 1600
-    # 改前按字节估：约 15 万 token；改后按张数：约 4800；上游实际 4300。
+    assert input_tokens_estimate(payload, body_size) == text_bytes // 3 + 3 * 3800
+    # 改前按字节估：约 15 万 token；改后按张数：约 11400；上游实际 4300。
     assert (before, row['estimated_cny'], row['charged_cny']) == (0.152114, after, actual)
-    assert after == 0.006891 and actual == 0.00434
+    assert after == 0.013491 and actual == 0.00434
     assert after >= actual and before > 30 * actual
 
 

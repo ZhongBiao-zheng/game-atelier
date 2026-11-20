@@ -7,11 +7,13 @@ from datetime import datetime
 from character_workflow.lib import gateway_live, gateway_quota, gateway_tasks, generation_pricing
 
 
-# 准入时一张内嵌图片按这么多输入 token 预扣。出处：Anthropic 视觉文档，约 1.15MP 以内的图片约
-# 宽×高÷750 token，上限约 1600；Atelier 给模型附的图长边不超过 1024，落在这个范围内。同尺寸的图按
-# OpenAI 的分块计法约 765，所以对 OpenAI 偏高、对 Claude 接近上限。偏低的后果：这一次调用的预扣
-# 少于实际结算，成员可能在这一次里略超额度，下一次准入时被拦下。只影响预扣，结算照旧按上游用量。
-IMAGE_INPUT_TOKENS_ESTIMATE = 1600
+# 准入时一张内嵌图片按这么多输入 token 预扣。只影响预扣，结算照旧按上游用量。
+# 2026-11-20 付费实测（Tuzi / claude-sonnet-5-5，单一模型的一个样本）：一张长边 1024 的联系表请求
+# 输入约 3400–3800 token（含少量文字），原先的 1600（按 Anthropic 文档 宽×高÷750、上限约 1600 定的）
+# 只估到一半。每张图实际 token 远高于 宽×高÷750 的原因未查明。取 3800：预占偏高的代价只是临近额度
+# 上限时提前拒绝，偏低则成员可能在一次调用里超出额度（一次附 4 张图时少估的部分输出预留盖不住）。
+# 同尺寸的图按 OpenAI 的分块计法约 765，对 OpenAI 系模型预扣偏多。
+IMAGE_INPUT_TOKENS_ESTIMATE = 3800
 IMAGE_URL_KEYS = ("url", "image_url")
 # 成员端给每轮 Agent 对话带的关联标记：主机只把它记在这把密钥自己的用量行上，供成员按标记查回结算额。
 CALL_TAG_HEADER = "x-atelier-call-tag"
