@@ -10,4 +10,10 @@ Bundled locally; no runtime requests to provider websites.
 All marks inherit the surrounding text color. Raster resources and the embedded EvoLink raster are at most 64px; all four masks are small enough for Vite to inline.
 
 Fetched 2026-10-27. Provider marks remain the property of their respective owners.
-Volcengine / OpenRouter paths are inlined from LobeHub lobe-icons (MIT) in ProviderBrandIcon.tsx.
+Built-in brand marks (the `brand:<id>` choices in the provider icon picker) are monochrome paths inlined in
+`components/providerBrands.tsx` and `components/ModelBrandIcon.tsx`, from LobeHub lobe-icons
+(`@lobehub/icons-static-svg` 1.101.0 / 1.104.0, MIT, https://github.com/lobehub/lobe-icons):
+volcengine, openrouter, google, doubao, baidu, tencent, runway, xai, mistral, azure, aws, siliconcloud,
+newapi, replicate, fal, plus the model brands in ModelBrandIcon. Only path data is copied; no color.
+Fetched 2026-11-20. These marks are trademarks of their respective owners and are shown only to identify
+the provider the user configured.
