@@ -91,3 +91,19 @@ def family_protocol(family: str | None) -> str | None:
     """列表形状对应的默认对话协议（New API 逐模型定，这里给的是没认出时的默认）。"""
     return {"anthropic": ANTHROPIC_MESSAGES, "gemini": GEMINI_GENERATE_CONTENT, "new-api": OPENAI_CHAT,
             "openrouter": OPENAI_CHAT, "openai": OPENAI_CHAT}.get(family or "")
+
+
+# ── 中转站的 Gemini 原生格式不进 Agent（2026-11-20 管理会话定） ─────────────────────────────
+AGENT_UNVERIFIED = ("这个模型经中转站走 Gemini 格式，工具调用未经验证，不能用于 Agent：到「设置 → 供应商」把这个"
+                    "供应商的「对话接口」改成 OpenAI Chat，或确认该中转站支持工具调用后手动选「Gemini」")
+
+
+def agent_tools_unverified(key: Any, model: Any) -> bool:
+    """自动识别成 Gemini 原生格式、地址又不是 Google 官方的模型：工具调用未经验证（P5 实测 Tuzi 的这种入口
+    两次都没有函数调用），不进 Agent。手动选了 Gemini（`KeySpec.text_protocol`）或官方地址照常可用；一次性
+    文本调用不受影响。Agent 模型列表、`build_agent`、`/api/keys` 的 `agent_unverified` 标记都读这一处。"""
+    if model is None or getattr(model, "protocol", None) != GEMINI_GENERATE_CONTENT:
+        return False
+    if getattr(key, "text_protocol", None) == GEMINI_GENERATE_CONTENT:
+        return False
+    return (urlsplit(getattr(key, "base_url", None) or "").hostname or "").lower() != GOOGLE_HOST

@@ -1443,6 +1443,9 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
       - `protocol` 是这把 KEY 的默认对话协议；
       - `label` 只在 New API 且 `/api/status` 可读时给，形如「兔子API v0.9」，否则为 null。
     - New API 的文本模型按 `supported_endpoint_types` 逐个返回 `protocol`。
+- `GET /api/keys` 的模型新增只读 `agent_unverified: true`，只在不进 Agent 时出现：自动识别成 `gemini-generate-content`、地址不是 `generativelanguage.googleapis.com`、`text_protocol` 也不是 Gemini。
+  - 这类模型不出现在 `GET /api/canvas/agent/models`。
+  - 用它构造 Agent 时报 422 `MODEL_UNAVAILABLE`，说明原因与改法。
     - 选了具体接口时不识别，响应里没有 `detected`。
     - 不跟随重定向的请求遇到 3xx 也按失败处理（502）。
 - 一次性文本调用（画布文本节点、AI 帮我配置、分镜解析、分类）按模型协议发请求；Anthropic 走 `POST {根}/v1/messages`，

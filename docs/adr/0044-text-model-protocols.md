@@ -95,7 +95,11 @@ Gemini 兼容、One API / New API 等等，还要有检测协议」。方案与�
     同时有 OpenAI 与 Gemini 格式的取 Chat。
   - **只有 gemini 端点的模型，经中转站走原生格式时工具调用未经验证**：2026-11-20 实测，Tuzi 的 Gemini 格式入口
     在内部转成 OpenAI Chat（响应里 `billing_usage.source = "oai_chat"`），两次都没有函数调用、没有签名。
-    这类模型在 Agent 里怎么处理另定。
+    - 这类模型**不进 Agent**（2026-11-20 管理会话定）：自动识别成 `gemini-generate-content`、地址又不是 Google 官方时，Agent 模型列表不列。
+    - 已有会话正选着它、或直接构造 Agent 时，`build_agent` 报明确原因，并说明去哪里改：把「对话接口」改成 OpenAI Chat，或确认该中转站支持工具调用后手动选 Gemini。
+    - 手动选了 Gemini（`KeySpec.text_protocol`）或官方地址照常可用；一次性文本调用不受影响。
+    - 判据只在 `detect.agent_tools_unverified` 一处：Agent 列表、`build_agent`、`/api/keys` 模型上的 `agent_unverified` 标记（表单据此在模型行显示「不进 Agent」）都读它。
+    - 官方域名与地址识别用同一个 `detect.GOOGLE_HOST`。
 
 ## 与自定义接口（ADR-0036）的分工
 

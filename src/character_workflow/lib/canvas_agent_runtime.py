@@ -1223,6 +1223,10 @@ def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None]
     spec = next((m for m in key.models if m.id == session.model), None)
     if not agent_can_use(spec):
         raise CanvasToolError("MODEL_UNAVAILABLE", "该模型的接口暂不支持 Agent", 422)
+    from character_workflow.lib.llm_protocols import detect
+    if detect.agent_tools_unverified(key, spec):
+        # 列表里本来就不列；已有会话正选着它、或直接调接口构造时给明确原因与去哪里改。
+        raise CanvasToolError("MODEL_UNAVAILABLE", detect.AGENT_UNVERIFIED, 422)
     protocol = spec.protocol if spec is not None else None
     try:
         client = _agent_client(key, protocol, on_gateway_wait, call_tag)

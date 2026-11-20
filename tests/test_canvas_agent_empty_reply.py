@@ -291,7 +291,9 @@ def gemini(text: str = "") -> bytes:
 def test_gemini_stop_with_nothing_is_an_empty_reply_and_the_session_continues(client, upstream):
     """P5 实测里 Tuzi 的 Gemini 入口回过「STOP、文本与调用都空」：转换层把它当空回答交给 SDK，
     run_turn 的空结束判定接住，会话 failed 并提示；下一次请求里没有空的 model content（Gemini 拒收空 parts）。"""
+    # 手动选了 Gemini（中转地址上自动识别的 Gemini 不进 Agent，P3）。
     keys.add_key(keys.KeySpec(alias="gem", provider="custom", base_url=upstream.base,
+                              text_protocol="gemini-generate-content",
                               access_key="local-fake-not-a-key", created_at="2026-11-20T00:00:00Z",
                               models=[keys.ModelSpec(id="m", name="m", modality="text",
                                                      protocol="gemini-generate-content")]))

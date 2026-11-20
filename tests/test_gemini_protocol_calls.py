@@ -41,6 +41,8 @@ def _clean(isolated_data_root, monkeypatch):
 def add_gemini(base_url: str, alias: str = "gem", model_id: str = "gemini-x"):
     keys.add_key(keys.KeySpec(
         alias=alias, provider="custom", base_url=base_url, access_key=SECRET,
+        # 手动选了 Gemini：中转地址上自动识别的 Gemini 不进 Agent（P3），这些用例测的是用户明确选 Gemini 的路径。
+        text_protocol="gemini-generate-content",
         models=[keys.ModelSpec(id=model_id, name=model_id, modality="text",
                                protocol="gemini-generate-content", input_modalities=["text", "image"])],
         created_at="2026-11-20T00:00:00Z"))
@@ -199,3 +201,61 @@ def test_one_shot_call_does_not_follow_a_redirect_with_the_key(protocol, path, m
         with pytest.raises(openai_text.OpenAITextError, match="307"):
             openai_text.generate(prompt="x", model=model_id, alias="k")
         assert other.calls() == []  # 第二跳收不到密钥，也收不到请求体
+
+
+# --- 中转站上自动识别的 Gemini 不进 Agent（P3，2026-11-20 管理会话定；判据只在 detect.agent_tools_unverified） ---
+
+def _relay_gemini(base_url: str, alias: str = "relay", text_protocol: str | None = None):
+    keys.add_key(keys.KeySpec(
+        alias=alias, provider="custom", base_url=base_url, access_key=SECRET, text_protocol=text_protocol,
+        models=[keys.ModelSpec(id="gemini-x", name="gemini-x", modality="text",
+                               protocol="gemini-generate-content"),
+                keys.ModelSpec(id="gpt-x", name="gpt-x", modality="text", protocol="openai-chat")],
+        created_at="2026-11-20T00:00:00Z"))
+
+
+def test_auto_detected_relay_gemini_is_left_out_of_the_agent_list():
+    with FakeVendor() as relay:
+        relay.on("GET", "/v1/models", {"data": [{"id": "gpt-x"}]})
+        relay.on("GET", "/v1beta/models", {"models": [{"name": "gemini-x", "supportedGenerationMethods": []}]})
+        _relay_gemini(relay.url)
+        result = canvas_agent_models.list_chat_models()
+    assert [row["model"] for row in result["models"]] == ["gpt-x"]
+
+
+def test_build_agent_explains_why_and_where_to_change_it():
+    from types import SimpleNamespace
+
+    from character_workflow.lib import canvas_agent_runtime
+    from character_workflow.lib.canvas_tool_common import CanvasToolError
+
+    _relay_gemini("https://relay.example")
+    with pytest.raises(CanvasToolError) as caught:
+        canvas_agent_runtime.build_agent(SimpleNamespace(
+            project_id="p", model_alias="relay", model="gemini-x", effort=None, creation_mode="all"))
+    message = caught.value.message
+    assert "工具调用未经验证" in message and "对话接口" in message and "OpenAI Chat" in message
+
+
+def test_manual_choice_and_the_official_address_still_reach_the_agent():
+    from character_workflow.lib.llm_protocols import detect
+
+    gemini = keys.ModelSpec(id="g", name="g", modality="text", protocol="gemini-generate-content")
+    relay = keys.KeySpec(alias="a", provider="custom", base_url="https://relay.example", access_key="k",
+                         created_at="t", models=[gemini])
+    assert detect.agent_tools_unverified(relay, gemini) is True
+    assert detect.agent_tools_unverified(relay.model_copy(update={"text_protocol": "gemini-generate-content"}),
+                                         gemini) is False
+    official = relay.model_copy(update={"base_url": "https://generativelanguage.googleapis.com"})
+    assert detect.agent_tools_unverified(official, gemini) is False
+    chat = gemini.model_copy(update={"protocol": "openai-chat"})
+    assert detect.agent_tools_unverified(relay, chat) is False
+
+
+def test_keys_api_marks_only_the_models_left_out_of_the_agent(client):
+    _relay_gemini("https://relay.example")
+    _relay_gemini("https://manual.example", alias="manual", text_protocol="gemini-generate-content")
+    rows = {key["alias"]: {m["id"]: m for m in key["models"]} for key in client.get("/api/keys").json()["keys"]}
+    assert rows["relay"]["gemini-x"]["agent_unverified"] is True
+    assert "agent_unverified" not in rows["relay"]["gpt-x"]
+    assert "agent_unverified" not in rows["manual"]["gemini-x"]

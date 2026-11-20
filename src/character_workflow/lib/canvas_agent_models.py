@@ -154,8 +154,10 @@ def _upstream_for(key: keys.KeySpec, now: float) -> tuple[dict[str, dict], str |
 def _models_for(key: keys.KeySpec, now: float) -> tuple[list[dict], str | None]:
     upstream, error = _upstream_for(key, now)
     rows = []
+    from character_workflow.lib.llm_protocols import detect
+
     for model in enabled_text_models(key):
-        if not agent_can_use(model):
+        if not agent_can_use(model) or detect.agent_tools_unverified(key, model):
             continue
         info = upstream.get(model.id)
         if info is not None and not info["agent"]:

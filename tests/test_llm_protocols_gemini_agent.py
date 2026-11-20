@@ -90,6 +90,8 @@ def _setup(vendor: FakeVendor) -> tuple[str, str]:
               ("claude-test", "anthropic-messages")]
     keys.write_keys_db(keys.KeysDB(keys=[keys.KeySpec(
         alias="v", provider="custom", base_url=vendor.url, access_key="secret-key", modalities=["llm"],
+        # 手动选了 Gemini：中转地址上自动识别的 Gemini 不进 Agent（P3），这些用例测的是用户明确选 Gemini 的路径。
+        text_protocol="gemini-generate-content",
         models=[keys.ModelSpec(id=mid, name=mid, modality="text", protocol=protocol)
                 for mid, protocol in models],
         created_at="2026-11-20T00:00:00Z")]))

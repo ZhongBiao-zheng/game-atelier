@@ -394,6 +394,7 @@ def keys_for_api() -> list[dict]:
     from character_workflow.lib import generation_pricing
     from character_workflow.lib.callers.openai_text import text_callable
     from character_workflow.lib.http_protocols import declared_for
+    from character_workflow.lib.llm_protocols import detect
 
     db = read_keys_db()
     out = []
@@ -404,6 +405,8 @@ def keys_for_api() -> list[dict]:
                 row["declared"] = declared
             if model_modality(spec, k) == "text" and not text_callable(k.provider, spec.protocol):
                 row["text_unsupported"] = True  # 只在不能调用时出现：前端据此判断，不另抄协议表
+            if detect.agent_tools_unverified(k, spec):
+                row["agent_unverified"] = True  # 只在不进 Agent 时出现：表单据此提示，判据只在 detect 一处
             if generation_pricing.has_no_synced_price(k, spec):
                 row["unpriced"] = True  # 只在未定价时出现：供应商页据此显示「单价」框
         d["access_key"] = _mask(d.get("access_key"))
