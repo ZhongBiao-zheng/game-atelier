@@ -99,7 +99,7 @@ const defaultManualType = (preset: { modalities: readonly string[] }): ModelModa
 const AUTO_INTERFACE = 'auto';
 const INTERFACE_OPTIONS: [string, string][] = [
   [AUTO_INTERFACE, '自动'], ['openai-chat', 'OpenAI Chat'], ['openai-responses', 'OpenAI Responses'],
-  ['anthropic-messages', 'Anthropic'],
+  ['anthropic-messages', 'Anthropic'], ['gemini-generate-content', 'Gemini'],
 ];
 const INTERFACE_HELP = '对话模型的调用格式，按供应商文档选。自动：按 OpenAI Chat 调用。';
 
