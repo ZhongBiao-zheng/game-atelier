@@ -4,7 +4,7 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from character_workflow.lib import provider_icons
@@ -23,3 +23,17 @@ def get_provider_icon(sha: str) -> FileResponse:
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, max-age=31536000, immutable",
     })
+
+
+@provider_icon_router.post("/provider-icons")
+def upload_provider_icon(file: UploadFile = File(...)) -> dict:
+    """校验、重新编码并落盘，只返回 `{icon: "file:<sha>"}`；不改 KEY，由表单保存时一并写入。
+
+    文件名与 Content-Type 一概不看，只认文件头。同步路由：解码在线程池里跑，不占事件循环。"""
+    raw = file.file.read(provider_icons.MAX_BYTES + 1)
+    if len(raw) > provider_icons.MAX_BYTES:
+        raise HTTPException(413, "图片超过 1 MB")
+    try:
+        return {"icon": provider_icons.store(raw)}
+    except provider_icons.IconRejected as error:
+        raise HTTPException(422, str(error)) from None

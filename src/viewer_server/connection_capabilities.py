@@ -30,6 +30,7 @@ GET /api/onboarding/metrics
 POST /api/onboarding/key-probe
 GET /api/keys
 GET /api/provider-icons/{sha}
+POST /api/provider-icons
 GET /api/subscriptions/chatgpt
 POST /api/comfyui/connection
 GET /api/comfyui/{alias}/workflows
@@ -251,6 +252,8 @@ LOCAL_MANAGEMENT = frozenset({
     "/api/gateway/providers/{alias}/admin/usage/tasks",
 
     "/api/config", "/api/keys", "/api/keys/{alias}", "/api/keys/{alias}/reveal",
+    # 上传供应商图标往数据目录写文件，属于供应商管理，只给本机页面。
+    "/api/provider-icons",
     "/api/subscriptions/chatgpt",
     "/api/comfyui/connection", "/api/comfyui/{alias}/workflows",
     "/api/comfyui/{alias}/inspect", "/api/comfyui/{alias}/workflows/{identifier}",

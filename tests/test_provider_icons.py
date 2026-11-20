@@ -295,3 +295,48 @@ def test_prune_leaves_unrelated_files_alone(isolated_data_root):
     os.utime(other, (0, 0))
     provider_icons.prune(set())
     assert other.exists()
+
+
+# --- 上传接口（I1 2/n）：只返回引用、不改 KEY -------------------------------------------------
+
+def _upload(client, raw: bytes, name="icon.png", content_type="image/png"):
+    return client.post("/api/provider-icons", files={"file": (name, raw, content_type)})
+
+
+def test_upload_returns_a_reference_and_does_not_touch_keys(client):
+    response = _upload(client, _image("WEBP"), name="logo.webp", content_type="image/webp")
+    assert response.status_code == 200, response.text
+    icon = response.json()["icon"]
+    assert icon.startswith("file:") and provider_icons.file_path(icon[5:]) is not None
+    assert not data_root.keys_file().exists()
+    assert client.post("/api/keys", json=_custom(icon=icon)).status_code == 201
+
+
+@pytest.mark.parametrize(("raw", "name", "content_type"), [
+    (b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', "logo.png", "image/png"),
+    (b"<!doctype html><title>x</title>", "favicon.ico", "image/x-icon"),
+    (b"\x89PNG\r\n\x1a\n" + b"\x00" * 40, "broken.png", "image/png"),
+])
+def test_upload_rejects_disguised_or_broken_files(client, raw, name, content_type):
+    response = _upload(client, raw, name=name, content_type=content_type)
+    assert response.status_code == 422
+    assert not provider_icons.icons_dir().exists() or not any(provider_icons.icons_dir().iterdir())
+
+
+def test_upload_over_one_megabyte_is_413(client):
+    response = _upload(client, _image("PNG")[:8] + b"\x00" * (provider_icons.MAX_BYTES + 10))
+    assert response.status_code == 413
+
+
+def test_upload_needs_the_local_session(isolated_data_root):
+    anonymous = TestClient(build_app(), base_url="http://127.0.0.1:5174")
+    anonymous.headers.update({"Origin": "http://127.0.0.1:5174", "Sec-Fetch-Site": "same-origin"})
+    response = anonymous.post("/api/provider-icons", files={"file": ("a.png", _image("PNG"), "image/png")})
+    assert response.status_code == 401
+
+
+def test_upload_is_management_and_reading_is_not():
+    from viewer_server.connection_capabilities import local_capability
+
+    assert local_capability("POST", "/api/provider-icons") == "manage"
+    assert local_capability("GET", "/api/provider-icons/" + "a" * 64) == "read"
