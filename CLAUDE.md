@@ -55,10 +55,12 @@ export GAME_ATELIER_DATA_ROOT=/tmp/test-data-root
 | `.runtime/server.{pid,port,log}` | viewer-server CLI（log 为后台服务本次运行的 stdout/stderr，含 500 traceback） | viewer-server CLI / 排障 |
 | `.runtime/host-lifecycle.jsonl`（+ `.1.jsonl`、`.alive`） | 服务启动（lifespan）/ `server.py stop` / 更新执行器 / 常驻看护（无应答重启）追加启停；1 MiB 轮转留一份 | `gateway_stats` 汇总在线时长、异常结束与无应答重启 |
 | `.runtime/gateway/quarantine/` | `gateway_tasks` 把读不出的任务文件原样移入 | 排障；网关设置页显示数量 |
+| `.runtime/gateway-charges/<幂等键>.json` | 成员端：`job_runner` 记网关扣费、停止补发线程回写结算（`lib/gateway_charges.py`，先到先登记，48 小时清理） | 同一把网关幂等键的主机扣费只记一次：后到的任务读它，记 `gateway_charged_on` |
 | `.config/keys.json` | Skill / Web (`POST /api/keys`) | Skill 通过 `lib/keys.py` 读 |
 | `.config/accent-themes.json` | Web (`PUT /api/accent-themes`) | Web 外观设置（主题色；localStorage 只缓存首帧镜像） |
 | `.config/canvas-agent.json` | Web (`PUT /api/canvas/agent/settings`) | 画布 Agent（生成估价超过确认金额时 Auto 下也先确认） |
 | `.runtime/agent-usage/YYYY-MM.jsonl` | 画布 Agent（每次调对话模型追加一行） | 面板会话花费、用量页「我的」 |
+| `canvases/<project_id>/agent/plans/<session_id>.json` | 画布 Agent（`update_plan`，整份替换；删会话时一起删） | 画布 Agent 面板顶部待办（`GET …/agent/sessions/{id}/plan`）；不进项目导出包 |
 | `.runtime/agent-images/` | 画布 Agent（插件工具返回的预览图，服务端生成文件名；24 小时 / 200 张 / 64 MiB 清理） | 画布 Agent vision（调模型前附图） |
 | `.runtime/ps-bridge/execute-log.jsonl`（+ `.1.jsonl`） | PS 联动插件（Agent 执行脚本，1 MiB 轮转留一份） | 设置 → 插件 → PS 联动（最近 20 条）；只在本机，网关、用量统计、项目包都不读 |
 | `.config/ps-bridge.json` | 设置 → 插件 → PS 联动（「允许 Agent 执行脚本」，默认关） | PS 联动插件（关着时藏起 execute） |
