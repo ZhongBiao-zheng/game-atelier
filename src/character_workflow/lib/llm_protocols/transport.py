@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
-from urllib.parse import urlsplit
-from urllib.request import getproxies, proxy_bypass
-
 import httpx2 as httpx
+from httpx2._utils import URLPattern, get_environment_proxies
 
 from character_workflow.lib.llm_protocols import ProtocolError, anthropic
+
+
+# 上游错误响应里 SDK 用来决定重发的头（openai SDK 的 `_should_retry`）。
+_RETRY_HEADERS = ("x-should-retry", "retry-after", "retry-after-ms")
 
 
 class _TranslatedStream(httpx.AsyncByteStream):
@@ -37,14 +39,24 @@ class _TranslatedStream(httpx.AsyncByteStream):
         await self._upstream.aclose()
 
 
+def environment_proxy_for(url: str) -> str | None:
+    """SDK 默认客户端（`trust_env=True`）对这个地址会用的代理；`None` = 直连。
+
+    直接用 httpx2 自己的两段逻辑：`get_environment_proxies`（http / https / all 三个变量与 NO_PROXY，系统代理经
+    `urllib.request.getproxies`）与客户端选挂载点的规则（`URLPattern` 排序后取第一个匹配的）。不自己拼，
+    才能与 SDK 默认行为一致（如只设 `ALL_PROXY`、`https_proxy` 优先于 `all_proxy`、NO_PROXY 的域名后缀匹配）。"""
+    target = httpx.URL(url)
+    mounts = sorted((URLPattern(key), proxy) for key, proxy in get_environment_proxies().items())
+    return next((proxy for pattern, proxy in mounts if pattern.matches(target)), None)
+
+
 def direct_or_proxied(url: str) -> httpx.AsyncHTTPTransport:
-    """连上游用的内层 transport，代理规则与 SDK 默认客户端（trust_env）相同：系统 / 环境代理，NO_PROXY 直连。
+    """连上游用的内层 transport，代理按 `environment_proxy_for` 选。
 
     装了本 transport 的客户端必须 `trust_env=False`：否则 httpx 按环境代理把请求直接交给代理的 transport，
-    绕过协议转换（OpenAI 格式的请求原样打到上游）。代理改在这里按上游地址选。"""
-    parts = urlsplit(url)
-    proxy = None if proxy_bypass(parts.hostname or "") else getproxies().get(parts.scheme)
-    return httpx.AsyncHTTPTransport(proxy=proxy)
+    绕过协议转换（OpenAI 格式的请求原样打到上游）。代理改在这里按上游地址选。socks5 / socks5h 代理需要
+    `socksio`，本项目没装：与 SDK 默认客户端一样在构造时报 ImportError。"""
+    return httpx.AsyncHTTPTransport(proxy=environment_proxy_for(url))
 
 
 class ProtocolTransport(httpx.AsyncBaseTransport):
@@ -82,18 +94,21 @@ class ProtocolTransport(httpx.AsyncBaseTransport):
         response = await self._inner.handle_async_request(sent)
         if response.status_code >= 400:
             # 错误体原样给 SDK（Anthropic 的 {"type":"error","error":{…}} 里同样有 error.message）。
+            # 重试相关的头一起带上：SDK 按 x-should-retry / retry-after 决定要不要重发。
             body = await response.aread()
             await response.aclose()
-            return httpx.Response(response.status_code, request=request, content=body,
-                                  headers={"Content-Type": response.headers.get(
-                                      "Content-Type", "application/json")})
+            headers = {"Content-Type": response.headers.get("Content-Type", "application/json")}
+            headers.update({name: response.headers[name] for name in _RETRY_HEADERS
+                            if name in response.headers})
+            return httpx.Response(response.status_code, request=request, content=body, headers=headers)
         if not stream:
             body = await response.aread()
             await response.aclose()
             try:
                 converted = anthropic.from_upstream(json.loads(body))
             except (ValueError, ProtocolError) as error:
-                return httpx.Response(502, request=request, json={
+                # 上游已经按 200 收下（已计费）：不让 SDK 按 5xx 重发。
+                return httpx.Response(502, request=request, headers={"x-should-retry": "false"}, json={
                     "error": {"message": f"Anthropic 响应无法解析：{error}", "type": "api_error"}})
             return httpx.Response(200, request=request, json=converted)
         translator = anthropic.StreamTranslator(model=str(payload.get("model") or ""))

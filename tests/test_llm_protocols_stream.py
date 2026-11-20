@@ -13,7 +13,7 @@ import pytest
 
 from character_workflow.lib import gateway_text_wait
 from character_workflow.lib.llm_protocols import anthropic
-from character_workflow.lib.llm_protocols.transport import ProtocolTransport
+from character_workflow.lib.llm_protocols.transport import ProtocolTransport, environment_proxy_for
 from tests.fake_http_vendor import FakeVendor
 
 FIXTURES = Path(__file__).parent / "fixtures" / "anthropic_stream"
@@ -127,11 +127,11 @@ def test_stream_cut_before_message_stop_is_an_error():
 
 # --- 真实 AsyncOpenAI + 本机套接字假上游 ---------------------------------------------------
 
-def _client(base_url: str, inner=None):
+def _client(base_url: str, inner=None, max_retries: int = 0):
     from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
     return AsyncOpenAI(
-        base_url=f"{base_url}/v1", api_key="placeholder", max_retries=0,
+        base_url=f"{base_url}/v1", api_key="placeholder", max_retries=max_retries,
         http_client=DefaultAsyncHttpxClient(trust_env=False, transport=ProtocolTransport(
             base_url=base_url, access_key=SECRET, inner=inner)))
 
@@ -230,6 +230,45 @@ def test_real_client_surfaces_upstream_errors():
             _run(go)
 
 
+def _send_once(vendor: FakeVendor, max_retries: int) -> Exception:
+    async def go():
+        client = _client(vendor.url, max_retries=max_retries)
+        try:
+            await client.chat.completions.create(
+                model="claude-x", messages=[{"role": "user", "content": "hi"}])
+        finally:
+            await client.close()
+
+    with pytest.raises(Exception) as caught:
+        _run(go)
+    return caught.value
+
+
+def test_unparsable_success_is_not_resent_by_the_sdk():
+    """上游 200（已计费）但响应读不出：转成 502 且带 x-should-retry: false，SDK 默认重试 2 次也只发一次。"""
+    from openai import InternalServerError
+
+    with FakeVendor() as vendor:
+        vendor.on("POST", "/v1/messages", b"not json")
+        error = _send_once(vendor, max_retries=2)
+        assert len(vendor.calls("POST", "/v1/messages")) == 1
+    assert isinstance(error, InternalServerError) and "无法解析" in str(error)
+
+
+@pytest.mark.parametrize(("headers", "sent"), [
+    # Anthropic 在错误响应里说不要重发：照办。
+    ({"x-should-retry": "false"}, 1),
+    # 没说：与 OpenAI 格式的直连一样，SDK 按 5xx 重发（retry-after-ms 一起透传，等 1 毫秒）。
+    ({"retry-after-ms": "1"}, 2),
+])
+def test_upstream_retry_headers_reach_the_sdk(headers, sent):
+    with FakeVendor() as vendor:
+        vendor.on("POST", "/v1/messages", (529, {"type": "error", "error": {
+            "type": "overloaded_error", "message": "Overloaded"}}, headers))
+        _send_once(vendor, max_retries=1)
+        assert len(vendor.calls("POST", "/v1/messages")) == sent
+
+
 def test_agent_tool_round_trip_through_the_sdk():
     """真实 openai-agents Runner：第一轮 Claude 调工具，SDK 执行后第二轮把 tool_result 带回去。"""
     from agents import Agent, OpenAIChatCompletionsModel, Runner, function_tool, set_tracing_disabled
@@ -311,15 +350,52 @@ def test_other_paths_pass_through_untouched():
     assert response.status_code == 200 and response.json() == {"data": []}
 
 
-def test_environment_proxy_is_used_after_conversion(monkeypatch):
+PROXY_VARIABLES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
+
+
+def _clear_proxy_environment(monkeypatch):
+    for name in PROXY_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+
+
+@pytest.mark.parametrize(("variables", "url", "expected"), [
+    # 只设 all_proxy：SDK 默认客户端会走它，转换后的请求也要走它。
+    ({"all_proxy": "http://all.proxy:7890"}, "https://api.anthropic.com/v1/messages", "http://all.proxy:7890"),
+    # https_proxy 与 all_proxy 同时有：按 httpx 的挂载点排序，scheme 专属的优先。
+    ({"https_proxy": "http://https.proxy:7890", "all_proxy": "http://all.proxy:7890"},
+     "https://api.anthropic.com/v1/messages", "http://https.proxy:7890"),
+    # 命中 NO_PROXY（域名后缀）：直连。
+    ({"https_proxy": "http://https.proxy:7890", "all_proxy": "http://all.proxy:7890",
+      "no_proxy": "anthropic.com"}, "https://api.anthropic.com/v1/messages", None),
+])
+def test_environment_proxy_matches_the_sdk_default_client(monkeypatch, variables, url, expected):
+    """内层选的代理与 SDK 默认客户端（trust_env=True）对同一地址选的一致。"""
+    from openai import DefaultAsyncHttpxClient
+
+    _clear_proxy_environment(monkeypatch)
+    for name, value in variables.items():
+        monkeypatch.setenv(name, value)
+    assert environment_proxy_for(url) == expected
+    # 对照：SDK 默认客户端对同一地址选中的挂载点（None = 直连的默认 transport）。
+    client = DefaultAsyncHttpxClient()
+    chosen = client._transport_for_url(httpx2.URL(url))
+    pool = getattr(chosen, "_pool", None)
+    proxy_url = getattr(pool, "_proxy_url", None)
+    sdk_proxy = None if proxy_url is None else (
+        f"{proxy_url.scheme.decode()}://{proxy_url.host.decode()}:{proxy_url.port}")
+    assert sdk_proxy == expected
+
+
+@pytest.mark.parametrize("variable", ["HTTP_PROXY", "ALL_PROXY"])
+def test_environment_proxy_is_used_after_conversion(monkeypatch, variable):
     """客户端 trust_env=False 时，代理由内层按上游地址选：请求先转换、再经代理发出（不会原样绕过转换）。"""
     from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
-    for name in ("NO_PROXY", "no_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"):
-        monkeypatch.delenv(name, raising=False)
+    _clear_proxy_environment(monkeypatch)
     with FakeVendor() as proxy:
         proxy.on("POST", "/v1/messages", TEXT)
-        monkeypatch.setenv("HTTP_PROXY", proxy.url)
+        monkeypatch.setenv(variable, proxy.url)
 
         async def go():
             client = AsyncOpenAI(
