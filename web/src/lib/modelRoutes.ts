@@ -189,6 +189,7 @@ function memberChoice(auto: KeyView, model: KeyModel, member: ModelRouteMember) 
   return {
     key: { ...auto, alias: member.alias, provider: member.provider, base_url: member.base_url, billing_group: member.billing_group, models: [] },
     model: { id: member.model_id, name: member.name, modality: model.modality, protocol: member.protocol,
+      ...(member.text_unsupported ? { text_unsupported: true } : {}),
       ...(model.workflow_inputs != null ? { workflow_inputs: model.workflow_inputs } : {}),
       // 网关上的自定义接口：能力只来自主机下发的快照（批次 4）。
       ...(model.declared ? { declared: model.declared } : {}) },

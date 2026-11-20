@@ -35,8 +35,9 @@ it('keeps reasoning effort only for the Responses protocol', () => {
     'openai-chat',
     { n: 2, reasoning_effort: 'high' },
   )).toEqual({ n: 2 });
-  expect(supportsCanvasTextGeneration('openai', 'openai-responses')).toBe(true);
-  expect(supportsCanvasTextGeneration('custom', 'anthropic:messages')).toBe(false);
+  // 判据在服务端：responses 模型不带标记，原样存下的未知标注（anthropic:messages）带 text_unsupported。
+  expect(supportsCanvasTextGeneration({})).toBe(true);
+  expect(supportsCanvasTextGeneration({ text_unsupported: true })).toBe(false);
 });
 
 it('normalizes speech controls and removes foreign modality parameters', () => {

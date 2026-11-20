@@ -12,6 +12,8 @@ export interface ModelRouteMember {
   model_id: string;
   name: string;
   protocol: string | null;
+  /** 与 KeyModel 同一标记：文本成员调不了时为 true。 */
+  text_unsupported?: boolean;
   /** 成员是局域网 Atelier 时：网关那边的成员快照。 */
   via?: ModelRouteMember[];
 }

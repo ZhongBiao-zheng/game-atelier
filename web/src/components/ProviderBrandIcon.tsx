@@ -44,6 +44,7 @@ export function ProviderBrandIcon({ provider, size = 'lg' }: {
   const id = providerPresetId(provider);
   if (id === 'comfyui') return <WorkflowIcon size={size} aria-hidden="true" />;
   if (id === 'openai' || id === 'chatgpt') return <ModelBrandIcon brand="openai" size={size} />;
+  if (id === 'anthropic') return <ModelBrandIcon brand="anthropic" size={size} />;
   if (id === 'seedream' || id === 'openrouter') {
     return <svg viewBox="0 0 24 24" width={px} height={px} fill="currentColor" fillRule="evenodd" className="shrink-0" aria-hidden="true">{paths[id]}</svg>;
   }

@@ -5,7 +5,7 @@ import { imageControlCaps, MJ_IMAGES_PER_TASK, type ImageControlCaps, type Quali
 import { hasChannelMembers, providerForAlias, routeChannel, routeMemberChoices, selectionImageCaps, storedAlias } from '@/lib/modelRoutes';
 import type { Job, JobParams } from '@/schema/jobs';
 import { availableDeclared, type ModelDeclared } from '@/schema/httpProtocols';
-import { modelModality, type KeyView } from '@/api/keys';
+import { modelModality, type KeyModel, type KeyView } from '@/api/keys';
 import { imageFamily, isEvolinkMidjourney, supportsImageQuality } from '@/lib/modelFamily';
 import { maxReferenceImages } from '@/lib/referenceLimits';
 import { audioCapsOf, audioProtocolOf, declaredAudioCaps, normalizeMusicParams, normalizeSpeechParams } from '@/lib/audioCaps';
@@ -1017,8 +1017,7 @@ export function canvasGenerationModelSupportsMode(
       || (supportsCanvasAudioGeneration(model.id, key.provider, model.protocol, model.declared)
         && (!options.audioFamily
           || audioCapsOf(model.id, key.provider, model.protocol, model.declared)?.family === options.audioFamily)))
-    && (mode !== 'text'
-      || supportsCanvasTextGeneration(key.provider, model.protocol));
+    && (mode !== 'text' || supportsCanvasTextGeneration(model));
 }
 
 export function firstCanvasGenerationModel(
@@ -1327,14 +1326,9 @@ export function supportsCanvasTextReasoning(protocol: string | null | undefined)
   return protocol === 'openai-responses';
 }
 
-export function supportsCanvasTextGeneration(
-  provider: string | null | undefined,
-  protocol: string | null | undefined,
-) {
-  const supportedProtocols = [null, undefined, 'openai', 'openai-chat', 'chat-completions', 'openai-responses'];
-  const declared = protocol != null && supportedProtocols.includes(protocol);
-  return supportedProtocols.includes(protocol)
-    && (['openai', 'openrouter', 'seedream', 'tokendance', 'custom'].includes(String(provider)) || declared);
+/** 能不能调用由服务端判（`text_unsupported`，openai_text.text_callable），这里不另抄协议表（ADR-0044）。 */
+export function supportsCanvasTextGeneration(model: Pick<KeyModel, 'text_unsupported'>) {
+  return !model.text_unsupported;
 }
 
 export function normalizeCanvasTextParams(

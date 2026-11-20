@@ -92,6 +92,17 @@ interface Props {
   autoDetect?: boolean;
 }
 
+/** 只有文本模型的预置（如 Anthropic），手动添加的模型默认就是文本。 */
+const defaultManualType = (preset: { modalities: readonly string[] }): ModelModality =>
+  preset.modalities.length === 1 && preset.modalities[0] === 'llm' ? 'text' : 'image';
+
+const AUTO_INTERFACE = 'auto';
+const INTERFACE_OPTIONS: [string, string][] = [
+  [AUTO_INTERFACE, '自动'], ['openai-chat', 'OpenAI Chat'], ['openai-responses', 'OpenAI Responses'],
+  ['anthropic-messages', 'Anthropic'],
+];
+const INTERFACE_HELP = '对话模型的调用格式，按供应商文档选。自动：按 OpenAI Chat 调用。';
+
 /** 粘贴后停顿多久再自动检测，避免逐字输入时连发。 */
 const AUTO_DETECT_DELAY_MS = 500;
 const MIN_KEY_LENGTH = 8;
@@ -103,7 +114,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState('');
   const [manualId, setManualId] = useState('');
-  const [manualType, setManualType] = useState<ModelModality>('image');
+  const [manualType, setManualType] = useState<ModelModality>(defaultManualType(initialPreset));
   const [testing, setTesting] = useState(false);
   const [connectionTest, setConnectionTest] = useState<{ ok: boolean; message: string } | null>(null);
   const [alias, setAlias] = useState(initial?.alias ?? initialPreset.label);
@@ -112,6 +123,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   const [billingGroup, setBillingGroup] = useState(initial?.billing_group ?? '');
   const [homepage, setHomepage] = useState(initial?.homepage_url ?? initialPreset.homepageUrl ?? '');
   const [accessKey, setAccessKey] = useState(initial?.access_key ?? '');
+  // 对话接口（ADR-0044）：null = 自动。只有用户填地址的自定义供应商能改；对话接口固定的预置随预置带。
+  const [textProtocol, setTextProtocol] = useState<string | null>(initial?.text_protocol ?? initialPreset.textProtocol ?? null);
   // 编辑旧 Key 时模型可能没标注分类——载入即用 key 级 modalities 兜底值固化进每行，
   // 保存后 key 级 modalities 改为由模型标注派生，老 key 的视频可见性不丢。
   // 编辑态打开时已存在的行打 _locked，分类锁死为只读；新增行不带标记，仍可选分类。
@@ -228,6 +241,17 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
     return () => clearTimeout(timer);
   }, [accessKey, autoDetect]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 只有用户自己填地址的自定义供应商要选接口；预置的接口是确定的。
+  const showInterface = provider === 'custom' && activePresetId === 'custom';
+  const changeInterface = (value: string) => {
+    const next = value === AUTO_INTERFACE ? null : value;
+    setTextProtocol(next);
+    // 选了具体接口：已有的文本模型都按它调用（与服务端写入时一致）；改回自动不动各模型。
+    if (next) setModels(current => current.map(model => (model.modality === 'text' && model.protocol !== 'declarative'
+      ? { ...model, protocol: next } : model)));
+    setPreview(null);
+    setConnectionTest(null);
+  };
   const changeProvider = (nextProvider: string) => {
     if (editing) return;
     const nextPreset = providerByValue(nextProvider);
@@ -237,6 +261,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
     setBaseUrl(nextPreset.defaultBaseUrl ?? '');
     setBillingGroup('');
     setHomepage(nextPreset.homepageUrl ?? '');
+    setTextProtocol(nextPreset.textProtocol ?? null);
+    setManualType(defaultManualType(nextPreset));
     setModels(nextPreset.defaultModels);
     setUrlTest(null);
     setPreview(null);
@@ -264,6 +290,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         access_key: !editing || keyChanged ? accessKey.trim() || null : null,
         include_all: includeAll,
         protocol_id: catalogProtocolId,
+        text_protocol: textProtocol,
       });
       const order = (m: RemoteModel) => ['text', 'image', 'video', 'audio', 'unknown', 'excluded'].indexOf(m.category);
       const sorted = [...remote.models].sort((a, b) => order(a) - order(b));
@@ -419,6 +446,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         api_key_url: initial?.api_key_url ?? preset.apiKeyUrl ?? null,
         modalities: derivedModalities,
         notes: '',
+        ...(textProtocol ? { text_protocol: textProtocol } : {}),
       };
       if (editing && initial?.alias) {
         const patch: Partial<KeyCreatePayload> = {
@@ -435,6 +463,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
           modalities: payload.modalities,
           notes: payload.notes,
         };
+        if (textProtocol !== (initial.text_protocol ?? null)) patch.text_protocol = textProtocol;
         if (!accessKey.trim() || accessKey === initial.access_key) delete patch.access_key;
         if (isComfy) delete patch.models;
         await patchKey(initial.alias, patch);
@@ -497,7 +526,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
       const keyChanged = accessKey.trim() && accessKey !== initial?.access_key;
       await previewModels({ alias: editing ? initial?.alias ?? null : null, provider,
         base_url: fetchModelsBaseUrl, access_key: !editing || keyChanged ? accessKey.trim() || null : null,
-        include_all: false });
+        include_all: false, text_protocol: textProtocol });
       setConnectionTest({ ok: true, message: `可用 · ${Math.round(performance.now() - started)} ms` });
     } catch (error) {
       setConnectionTest({ ok: false, message: error instanceof Error ? error.message : String(error) });
@@ -565,6 +594,18 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
               {probe === 'ok' && <p role="status" className="basis-full text-xs text-[color:var(--status-done)]">Key 有效</p>}
               {probe === 'invalid' && <p role="alert" className="basis-full text-xs text-destructive">Key 无效</p>}
             </div>
+            </>}
+            {showInterface && <>
+              <Label htmlFor="key-text-protocol" className="pt-2 text-xs text-muted-foreground">对话接口</Label>
+              <div className="flex items-center gap-2">
+                <Select value={textProtocol ?? AUTO_INTERFACE} onValueChange={changeInterface}>
+                  <SelectTrigger id="key-text-protocol" className="w-56"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {INTERFACE_OPTIONS.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Hint label={INTERFACE_HELP}><span tabIndex={0} aria-label="对话接口说明" className="text-muted-foreground"><HelpIcon size="sm" /></span></Hint>
+              </div>
             </>}
             <span className="pt-2 text-xs text-muted-foreground">{isComfy ? '工作流' : '模型'}</span>
             <div className="min-w-0 space-y-3">
