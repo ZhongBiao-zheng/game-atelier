@@ -873,6 +873,7 @@ class _KeyCreatePayload(BaseModel):
     notes: str = ""
     created_at: str | None = None
     text_protocol: str | None = None
+    icon: str | None = None
 
     @field_validator("models", mode="before")
     @classmethod
@@ -900,6 +901,8 @@ class _KeyPatchPayload(BaseModel):
     notes: str | None = None
     # 显式传 null = 改回自动；不传 = 不改。
     text_protocol: str | None = None
+    # 显式传 null = 恢复默认图标；不传 = 不改。
+    icon: str | None = None
 
     @field_validator("models", mode="before")
     @classmethod
@@ -1024,6 +1027,16 @@ def _checked_text_protocol(provider: str, value: str | None) -> str | None:
     return value
 
 
+def _checked_icon(value: str | None) -> str | None:
+    """自定义图标只在写入边界校验（I1）：`brand:<id>` 或已落盘的 `file:<sha256>`。"""
+    from character_workflow.lib import provider_icons
+
+    try:
+        return provider_icons.checked_icon(value)
+    except provider_icons.IconRejected as error:
+        raise HTTPException(422, str(error)) from None
+
+
 def _stamp_text_protocol(text_protocol: str | None, modalities: list[str],
                          models: list[keys.ModelSpec]) -> list[keys.ModelSpec]:
     """手动选了接口：这把 KEY 的文本模型都按它调用；自动（None）时各模型保持原样。"""
@@ -1056,6 +1069,7 @@ def create_key(payload: _KeyCreatePayload) -> dict:
     payload.models = _checked_bindings(payload.provider, payload.models)
     text_protocol = _checked_text_protocol(payload.provider, payload.text_protocol)
     payload.models = _stamp_text_protocol(text_protocol, payload.modalities, payload.models)
+    icon = _checked_icon(payload.icon)
     try:
         spec = keys.KeySpec(
             alias=payload.alias, provider=payload.provider, enabled=payload.enabled,
@@ -1071,6 +1085,7 @@ def create_key(payload: _KeyCreatePayload) -> dict:
             notes=payload.notes,
             created_at=payload.created_at or datetime.now(timezone.utc).isoformat(),
             text_protocol=text_protocol,
+            icon=icon,
         )
     except Exception as e:
         detail = "ChatGPT 订阅配置无效" if payload.provider == "chatgpt" else str(e)
@@ -1108,6 +1123,8 @@ def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
         patch_data["models"] = [model.model_dump() for model in _stamp_text_protocol(
             chosen, patch_data.get("modalities", stored.modalities),
             [keys.ModelSpec.model_validate(m) for m in current])]
+    if "icon" in payload.model_fields_set:
+        patch_data["icon"] = _checked_icon(payload.icon)
     if "access_key" in patch_data and not str(patch_data["access_key"]).strip():
         raise HTTPException(422, "供应商密钥不能为空")
     try:

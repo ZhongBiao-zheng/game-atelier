@@ -25,6 +25,8 @@ export interface KeyView {
   created_at: string;
   /** 手动选的对话接口（ADR-0044）；没有 = 自动。 */
   text_protocol?: string | null;
+  /** 自定义图标（I1）：`brand:<id>` 或 `file:<sha256>`；没有 = 按默认规则。 */
+  icon?: string | null;
 }
 
 export interface KeyCreatePayload {
@@ -45,6 +47,8 @@ export interface KeyCreatePayload {
   notes?: string;
   /** 手动选的对话接口；null = 自动。只有自定义供应商可以选。 */
   text_protocol?: string | null;
+  /** 自定义图标；PATCH 传 null = 恢复默认。 */
+  icon?: string | null;
 }
 
 export interface KeyModel {

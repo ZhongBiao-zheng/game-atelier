@@ -109,6 +109,8 @@ class KeySpec(BaseModel):
     created_at: str
     # 用户手动选的对话接口（ADR-0044）；None = 自动。取值只在 API 写入边界检查，读盘不校验。
     text_protocol: str | None = None
+    # 自定义图标（I1）：`brand:<id>` 或 `file:<sha256>`；None = 按默认规则显示。只在 API 写入边界校验。
+    icon: str | None = None
 
     @model_validator(mode="after")
     def _subscription_contract(self):
@@ -139,7 +141,7 @@ class KeySpec(BaseModel):
     def _omit_empty_auth_source(self, handler):
         data = handler(self)
         # 没设的可选字段不写进 keys.json / API：旧数据与精确比对的断言保持原样。
-        for field in ("auth_source", "text_protocol"):
+        for field in ("auth_source", "text_protocol", "icon"):
             if data.get(field) is None:
                 data.pop(field, None)
         return data
@@ -280,6 +282,9 @@ def write_keys_db(db: KeysDB) -> None:
         _replace_with_retry(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
+    # 引用集合只在这里变：每次写完顺手清掉没人引用、过了宽限期的图标文件（调用方已持 keys_lock）。
+    from character_workflow.lib import provider_icons
+    provider_icons.prune(provider_icons.referenced_shas([k.icon for k in db.keys]))
 
 
 def _restrict_permissions(path: Path) -> None:

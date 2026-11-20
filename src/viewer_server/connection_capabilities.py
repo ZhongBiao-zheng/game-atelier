@@ -29,6 +29,7 @@ POST /api/onboarding/events
 GET /api/onboarding/metrics
 POST /api/onboarding/key-probe
 GET /api/keys
+GET /api/provider-icons/{sha}
 GET /api/subscriptions/chatgpt
 POST /api/comfyui/connection
 GET /api/comfyui/{alias}/workflows
@@ -300,6 +301,8 @@ MEDIA_ROUTES = frozenset({
     "/api/team-libraries/{library_id}/assets/{entry_id}/content",
     "/api/team-libraries/{library_id}/assets/{entry_id}/thumb",
     "/api/team-libraries/{library_id}/assets/{entry_id}/previews/{file}/thumb",
+    # 供应商自定义图标：文件名即内容 sha256，自带 immutable 缓存；模型菜单也显示，网站会话可读。
+    "/api/provider-icons/{sha}",
 })
 CANVAS_TOOLS = frozenset({
     "list-projects", "get-document", "list-models", "apply-changes", "import-media", "run",

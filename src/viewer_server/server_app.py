@@ -464,6 +464,8 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(gateway_admin_proxy)
     app.include_router(member_status_router)
     app.include_router(usage_router)
+    from viewer_server.provider_icon_routes import provider_icon_router
+    app.include_router(provider_icon_router)
     app.include_router(sse_router)
 
     from viewer_server.canvas_agent_routes import handle_canvas_tool_error
