@@ -27,6 +27,10 @@ DIRECT_HOST_SUFFIXES: tuple[str, ...] = (
     "aiproxy.vip",
     "tu-zi.com",
     "evolink.ai",  # API、免费文件上传与结果 CDN 均支持国内直连。
+    "deepseek.com",  # 第 3 批对话模型预置（ADR-0044）：DeepSeek、Kimi、智谱、硅基流动的国内入口（通义走 aliyuncs.com）。
+    "moonshot.cn",
+    "bigmodel.cn",
+    "siliconflow.cn",
     "hf-mirror.com",  # 抠图模型下载（国内 Hugging Face 镜像）  # 兔子 API（国内聚合商）；实测：未放行时小火箭代理 1082 隧道不通 → ProxyError。
 )
 

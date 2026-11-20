@@ -162,6 +162,8 @@ export interface ModelsPreview {
   excluded: number;
   /** 按自定义接口的目录发现（protocol_id）：发现不代表可用。 */
   discovered?: boolean;
+  /** 自定义供应商、对话接口为自动时的识别结果（ADR-0044 第 3 批）；不存进 KEY。 */
+  detected?: { protocol: string | null; family: string; label: string | null };
 }
 
 export async function previewModels(payload: {

@@ -102,6 +102,20 @@ const INTERFACE_OPTIONS: [string, string][] = [
   ['anthropic-messages', 'Anthropic'], ['gemini-generate-content', 'Gemini'],
 ];
 const INTERFACE_HELP = '对话模型的调用格式，按供应商文档选。自动：按地址与模型列表识别，识别不出按 OpenAI Chat 调用。经中转站走 Gemini 格式时不进 Agent，手动选 Gemini 后可用。';
+const INTERFACE_LABELS = new Map(INTERFACE_OPTIONS);
+
+/** 「自动」后面跟的识别结果：本次检测到的优先，否则按已存模型的协议汇总（识别结果不存进 KEY）。 */
+export function autoInterfaceText(detected: ModelsPreview['detected'] | null, models: { modality?: string | null; protocol?: string | null }[]): string {
+  if (detected) {
+    if (detected.family === 'new-api') return detected.label ? `New API（${detected.label}）` : 'New API';
+    return INTERFACE_LABELS.get(detected.protocol ?? 'openai-chat') ?? '';
+  }
+  const protocols = new Set(models.filter(m => m.modality === 'text' && m.protocol !== 'declarative')
+    .map(m => (m.protocol && INTERFACE_LABELS.has(m.protocol) ? m.protocol : 'openai-chat')));
+  if (protocols.size === 0) return '';
+  return protocols.size === 1 ? INTERFACE_LABELS.get([...protocols][0]) ?? '' : '逐模型';
+}
+
 const AGENT_UNVERIFIED_HELP = '经中转站走 Gemini 格式时工具调用未经验证，不进 Agent。把「对话接口」改成 OpenAI Chat，或确认该中转站支持工具调用后手动选 Gemini。';
 
 /** 粘贴后停顿多久再自动检测，避免逐字输入时连发。 */
@@ -126,6 +140,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   const [accessKey, setAccessKey] = useState(initial?.access_key ?? '');
   // 对话接口（ADR-0044）：null = 自动。只有用户填地址的自定义供应商能改；对话接口固定的预置随预置带。
   const [textProtocol, setTextProtocol] = useState<string | null>(initial?.text_protocol ?? initialPreset.textProtocol ?? null);
+  const [detected, setDetected] = useState<ModelsPreview['detected'] | null>(null);
   // 编辑旧 Key 时模型可能没标注分类——载入即用 key 级 modalities 兜底值固化进每行，
   // 保存后 key 级 modalities 改为由模型标注派生，老 key 的视频可见性不丢。
   // 编辑态打开时已存在的行打 _locked，分类锁死为只读；新增行不带标记，仍可选分类。
@@ -223,6 +238,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
       previewModels({ alias: null, provider: provider || null, base_url: fetchModelsBaseUrl || null, access_key: key, include_all: false })
         .then(remote => {
           if (run !== detectRun.current) return;
+          setDetected(remote.detected ?? null);
           const picked = remote.models.filter(m => (m.modality === 'image' || m.modality === 'video')
             && (modelCatalog(m.id) !== undefined || defaultIds.has(m.id)));
           if (picked.length > 0) {
@@ -244,6 +260,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
 
   // 只有用户自己填地址的自定义供应商要选接口；预置的接口是确定的。
   const showInterface = provider === 'custom' && activePresetId === 'custom';
+  const autoText = showInterface ? autoInterfaceText(detected, models) : '';
   const changeInterface = (value: string) => {
     const next = value === AUTO_INTERFACE ? null : value;
     setTextProtocol(next);
@@ -293,6 +310,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         protocol_id: catalogProtocolId,
         text_protocol: textProtocol,
       });
+      setDetected(remote.detected ?? null);
       const order = (m: RemoteModel) => ['text', 'image', 'video', 'audio', 'unknown', 'excluded'].indexOf(m.category);
       const sorted = [...remote.models].sort((a, b) => order(a) - order(b));
       const enabledIds = new Set(models.map((m) => m.id.trim()).filter(Boolean));
@@ -525,9 +543,10 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         return;
       }
       const keyChanged = accessKey.trim() && accessKey !== initial?.access_key;
-      await previewModels({ alias: editing ? initial?.alias ?? null : null, provider,
+      const remote = await previewModels({ alias: editing ? initial?.alias ?? null : null, provider,
         base_url: fetchModelsBaseUrl, access_key: !editing || keyChanged ? accessKey.trim() || null : null,
         include_all: false, text_protocol: textProtocol });
+      setDetected(remote.detected ?? null);
       setConnectionTest({ ok: true, message: `可用 · ${Math.round(performance.now() - started)} ms` });
     } catch (error) {
       setConnectionTest({ ok: false, message: error instanceof Error ? error.message : String(error) });
@@ -600,7 +619,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
               <Label htmlFor="key-text-protocol" className="pt-2 text-xs text-muted-foreground">对话接口</Label>
               <div className="flex items-center gap-2">
                 <Select value={textProtocol ?? AUTO_INTERFACE} onValueChange={changeInterface}>
-                  <SelectTrigger id="key-text-protocol" className="w-56"><SelectValue /></SelectTrigger>
+                  {/* 选项文字不变；只有选中「自动」时，显示值后面跟识别结果。 */}
+                  <SelectTrigger id="key-text-protocol" className="w-56"><SelectValue>{!textProtocol && autoText ? `自动 · ${autoText}` : undefined}</SelectValue></SelectTrigger>
                   <SelectContent>
                     {INTERFACE_OPTIONS.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
                   </SelectContent>
@@ -815,6 +835,10 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                             <span className="text-xs text-muted-foreground">元/次</span>
                             <Hint label={PRICE_HELP}><span tabIndex={0} aria-label="单价说明" className="text-muted-foreground"><HelpIcon size="sm" /></span></Hint>
                           </div>
+                        )}
+                        {showInterface && !textProtocol && (model.modality ?? 'image') === 'text' && model.protocol
+                          && model.protocol !== 'declarative' && model.protocol !== (detected?.protocol ?? 'openai-chat') && (
+                          <div className="text-xs text-muted-foreground">对话接口：{INTERFACE_LABELS.get(model.protocol) ?? model.protocol}</div>
                         )}
                         {model.agent_unverified && (
                           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createKey, patchKey, previewModels } from '@/api/keys';
 import { chooseOption } from '@/test/select';
-import { KeyForm } from './KeyForm';
+import { KeyForm, autoInterfaceText } from './KeyForm';
 import { PROVIDER_PRESETS, presetInitial, providerPresetId } from './providerPresets';
 
 vi.mock('@/api/keys', async importOriginal => ({
@@ -130,5 +130,56 @@ describe('Anthropic 预置', () => {
     expect(payload).toMatchObject({ provider: 'custom', base_url: 'https://api.anthropic.com',
       text_protocol: 'anthropic-messages' });
     expect(payload.models![0]).toMatchObject({ id: 'claude-sonnet-5-5', protocol: 'anthropic-messages' });
+  });
+});
+
+// ADR-0044 第 3 批：「自动」后面显示识别结果；识别结果不存进 KEY，重开表单按已存模型的协议汇总。
+describe('自动 · 识别结果', () => {
+  it('优先用本次检测的结果，New API 带站点名', () => {
+    expect(autoInterfaceText({ protocol: 'openai-chat', family: 'new-api', label: '兔子API v0.9' }, [])).toBe('New API（兔子API v0.9）');
+    expect(autoInterfaceText({ protocol: 'openai-chat', family: 'new-api', label: null }, [])).toBe('New API');
+    expect(autoInterfaceText({ protocol: 'anthropic-messages', family: 'anthropic', label: null }, [])).toBe('Anthropic');
+  });
+
+  it('没检测过时按已存的文本模型协议汇总', () => {
+    const text = (protocol: string | null) => ({ modality: 'text', protocol });
+    expect(autoInterfaceText(null, [text('anthropic-messages'), text('anthropic-messages')])).toBe('Anthropic');
+    expect(autoInterfaceText(null, [text(null)])).toBe('OpenAI Chat');
+    expect(autoInterfaceText(null, [text('openai-chat'), text('gemini-generate-content')])).toBe('逐模型');
+    expect(autoInterfaceText(null, [{ modality: 'image', protocol: null }])).toBe('');
+  });
+
+  it('测试连接拿到识别结果后，下拉显示「自动 · New API（站点名）」', async () => {
+    vi.mocked(previewModels).mockResolvedValue({ models: [], total: 0, excluded: 0,
+      detected: { protocol: 'openai-chat', family: 'new-api', label: '兔子API v0.9' } });
+    openCustom();
+    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '对话接口' }))
+      .toHaveTextContent('自动 · New API（兔子API v0.9）'));
+  });
+});
+
+// ADR-0044 第 3 批的六家对话模型预置：没用真实密钥核对过的模型 id 不写死（管理会话 2026-11-20 定）。
+describe('六家对话模型预置', () => {
+  const byId = (id: string) => PROVIDER_PRESETS.find(preset => preset.id === id)!;
+
+  it.each([
+    ['https://generativelanguage.googleapis.com/v1beta/openai', 'gemini'],
+    ['https://api.deepseek.com', 'deepseek'],
+    ['https://api.moonshot.cn/v1', 'kimi'],
+    ['https://api.moonshot.ai/v1', 'kimi'],
+    ['https://open.bigmodel.cn/api/paas/v4', 'zhipu'],
+    ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen'],
+    ['https://api.siliconflow.cn/v1', 'siliconflow'],
+  ])('按域名识别 %s → %s，预置地址也落在这个域名上', (url, id) => {
+    expect(providerPresetId({ provider: 'custom', base_url: url })).toBe(id);
+    expect(providerPresetId({ provider: 'custom', base_url: byId(id).defaultBaseUrl })).toBe(id);
+    expect(byId(id)).toMatchObject({ value: 'custom', modalities: ['llm'] });
+  });
+
+  it('能拉模型列表的五家不带默认模型；通义只带 qwen-plus', () => {
+    for (const id of ['gemini', 'deepseek', 'kimi', 'zhipu', 'siliconflow']) expect(byId(id).defaultModels).toEqual([]);
+    expect(byId('qwen').defaultModels.map(model => [model.id, model.modality, model.protocol])).toEqual([
+      ['qwen-plus', 'text', 'openai-chat']]);
   });
 });
