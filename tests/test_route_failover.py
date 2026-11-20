@@ -9,6 +9,7 @@ import pytest
 import requests
 
 from character_workflow.lib import job_runner, keys, model_routes
+from character_workflow.lib.callers import task_submission
 from character_workflow.lib.callers.openai_image import OpenAIImageError
 from character_workflow.lib.jobs import read_job, save_job
 from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
@@ -19,6 +20,10 @@ def _clear_cooldowns():
     model_routes._cooldowns.clear()
     yield
     model_routes._cooldowns.clear()
+
+
+class _Unsure(RuntimeError, task_submission.SubmissionUnconfirmed):
+    pass
 
 
 def _wrapped(message: str, cause: BaseException) -> OpenAIImageError:
@@ -43,7 +48,11 @@ def _wrapped(message: str, cause: BaseException) -> OpenAIImageError:
     (OpenAIImageError("image api 400: content policy violation"), None),
     (_wrapped("read timeout", requests.ReadTimeout("read timed out")), None),
     (_wrapped("dropped", requests.ConnectionError("Remote end closed connection")), None),
-    (RuntimeError("视频提交结果未确认：厂商接口返回 HTTP 401，未自动重新提交。"), None),
+    # 未确认按类型判断（第 6 批 6-1 删了 `"未确认" in text`）：带类型的文案里有 4xx 也不换家。
+    (_Unsure("视频提交结果未确认：厂商接口返回 HTTP 401，未自动重新提交。"), None),
+    # 不带类型、只是文案写着「未确认」：现在只看状态码，401 判 auth。生产里到不了这里——所有「未确认」抛点
+    # 都带类型，网关转述的主机未确认映射成 GatewayHostUnconfirmed，成员拿到主机任务号后本来也不换家。
+    (RuntimeError("视频提交结果未确认：厂商接口返回 HTTP 401，未自动重新提交。"), "auth"),
     (RuntimeError("returned no valid image artifacts"), None),
 ])
 def test_failover_reason_only_for_requests_that_never_ran(error, reason):

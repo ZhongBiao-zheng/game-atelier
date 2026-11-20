@@ -20,6 +20,7 @@ from typing import Any
 import requests
 
 from character_workflow.lib import keys as _keys
+from character_workflow.lib.callers import task_submission
 
 PROTOCOL = "atelier_gateway"
 PROTOCOL_VERSION = 2
@@ -57,6 +58,15 @@ class GatewayUnconfirmed(GatewayError):
 
     网关那边可能已经在出图或已经出完；不能换自家 KEY 重出，「再次生成」凭幂等键接回。
     按类型判断，不靠报错文案。
+    """
+
+
+class GatewayHostUnconfirmed(GatewayError, task_submission.SubmissionUnconfirmed):
+    """主机任务已终态失败、但主机判定「上游结局未确认」（error_kind=unconfirmed）：上游可能已出图并扣费。
+
+    成员端「自动」不换家（failover_reason 按类型返回 None）。不用 GatewayUnconfirmed：那个类型表示
+    「成员还没从主机拿到结果」，创作台会挂起「等待网关」凭幂等键再接回——而主机这单已是终态，接回只会
+    再拿到同一个失败，一直等到 20 小时期限。第 6 批 6-1 删掉按文案判断后补的类型（管理会话指出的转述路径）。
     """
 
 
@@ -365,7 +375,8 @@ def _run_task(
                 # 成员最容易来问的情况：任务失败却扣了钱。一句话说清扣了多少、为什么。
                 # 不写「额度 / 余额」：job_runner._friendly_error 见到这两个词会把整条失败
                 # 改判成「厂商余额不足」。
-                error = GatewayError(f"{error}（已扣 ¥{charged:g}：上游已对完成的部分收费）")
+                # 保留类型（主机判未确认的仍是 GatewayHostUnconfirmed），只补一句扣费。
+                error = type(error)(f"{error}（已扣 ¥{charged:g}：上游已对完成的部分收费）")
             raise error
 
         member = status.get("member_alias")
@@ -575,7 +586,10 @@ def _poll(session, base, headers, task_id, phase, cancelled,
 
 
 def _task_error(status: dict[str, Any]) -> GatewayError:
+    """主机任务失败的结构化字段 → 成员端错误类型。分类只看 error_kind，不看主机转述的文案。"""
     message = status.get("error") or "网关任务失败"
     if status.get("error_kind") == "unavailable":
         return GatewayError(f"gateway api 503: gateway_unavailable — {message}")
+    if status.get("error_kind") == "unconfirmed":
+        return GatewayHostUnconfirmed(message)
     return GatewayError(message)
