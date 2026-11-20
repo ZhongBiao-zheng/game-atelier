@@ -231,19 +231,46 @@ def test_no_hard_links_concurrent_settlement_and_reattach_still_charge_once(isol
         assert _usage_total(stopped_id, again_id) == pytest.approx(CHARGED)
 
 
-def test_reader_waits_for_a_claim_file_that_is_still_being_written(isolated_data_root):
-    """独占创建的一方「文件已建、内容未写」时，另一方等一下再读，不抛错、不误判成自己。"""
+def test_reader_waits_for_a_claim_file_that_is_still_being_written(isolated_data_root, monkeypatch):
+    """独占创建的一方「文件已建、内容未写」时，另一方等一下再读，不抛错、不误判成自己。
+
+    不靠计时：读方第一次等待时由用例把内容写进去（相当于写方恰好在这时写完），之后读方应读到写方。
+    """
     from character_workflow.lib import gateway_charges
 
     key = _key(fill="e")
     final = gateway_charges._folder() / f"{key}.json"
     final.write_text("", encoding="utf-8")
-    writer = threading.Timer(0.1, lambda: final.write_text('{"job_id": "job-first"}', encoding="utf-8"))
-    writer.start()
-    try:
-        assert gateway_charges.claim(key, "job-second") == "job-first"
-    finally:
-        writer.join(5)
+    waits: list[float] = []
+
+    class WriterFinishesDuringTheWait:
+        def wait(self, seconds):
+            waits.append(seconds)
+            if len(waits) == 1:
+                final.write_text('{"job_id": "job-first"}', encoding="utf-8")
+            return False
+
+    monkeypatch.setattr(gateway_charges.threading, "Event", WriterFinishesDuringTheWait)
+    assert gateway_charges.claim(key, "job-second") == "job-first"
+    assert len(waits) == 1  # 读到空文件时等了一次，没有当场判成自己
+
+
+def test_reader_gives_up_on_a_claim_file_that_never_completes(isolated_data_root, monkeypatch):
+    """一直读不出（写方崩在写入前）：等满次数后记日志、按「登记到自己」处理，不抛。"""
+    from character_workflow.lib import gateway_charges
+
+    key = _key(fill="d")
+    (gateway_charges._folder() / f"{key}.json").write_text("", encoding="utf-8")
+    waits: list[float] = []
+
+    class NeverCompletes:
+        def wait(self, seconds):
+            waits.append(seconds)
+            return False
+
+    monkeypatch.setattr(gateway_charges.threading, "Event", NeverCompletes)
+    assert gateway_charges.claim(key, "job-second") == "job-second"
+    assert len(waits) == gateway_charges.READ_ATTEMPTS
 
 
 @pytest.mark.parametrize("failure", ["folder", "write", "read"])

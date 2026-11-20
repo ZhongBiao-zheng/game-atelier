@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import MANUAL from '../../../../src/character_workflow/data/http_protocol_manual.md?raw';
 import { CustomInterfaceDialog } from './CustomInterfaceDialog';
 
@@ -29,6 +29,13 @@ describe('复制接入说明', () => {
   it('copies the whole manual file to the clipboard and says so', async () => {
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    // 「已复制」2 秒后自动恢复：把组件这一个定时器扣下由用例触发，不靠「2 秒内找到它」（其余定时器照常）。
+    const held: Array<() => void> = [];
+    const original = window.setTimeout;
+    vi.spyOn(window, 'setTimeout').mockImplementation(((handler: () => void, ms?: number, ...rest: unknown[]) => {
+      if (ms === 2000) { held.push(handler); return 0; }
+      return original(handler, ms, ...rest);
+    }) as typeof window.setTimeout);
     render(<CustomInterfaceDialog identifier={null} kind="image" onSaved={() => {}} onClose={() => {}} />);
 
     fireEvent.click(screen.getByRole('button', { name: '复制接入说明' }));
@@ -36,6 +43,9 @@ describe('复制接入说明', () => {
     expect(await screen.findByRole('button', { name: '已复制' })).toBeInTheDocument();
     expect(writeText).toHaveBeenCalledWith(MANUAL);
     expect(MANUAL).toContain('## 模板规范（版本 1）');
+    expect(held).toHaveLength(1);
+    act(() => held[0]());
+    expect(screen.getByRole('button', { name: '复制接入说明' })).toBeInTheDocument();
   });
 
   it('downloads the same file when the browser blocks the clipboard', async () => {

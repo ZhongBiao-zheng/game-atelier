@@ -113,12 +113,17 @@ it('一次点击只解析一段：先保存，再预览，点写入才进分镜'
 });
 
 it('模型列表晚到时，按钮先禁用、可点后才解析（第 6 批 6-3 的确定性复现）', async () => {
-  models.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({ models: [
-    { alias: 'chat', model_id: 'writer', name: '写手', max_cost_cny: null },
-  ] }), 20)));
+  // 模型列表由用例手动放行，不靠计时：放行前按钮一定是禁用的。
+  let release: (value: Awaited<ReturnType<typeof listStoryboardParseModels>>) => void = () => undefined;
+  models.mockImplementation(() => new Promise(resolve => { release = resolve; }));
   parse.mockResolvedValue(result(0, 1, '进门'));
   render(<Harness initial={{ script_node_ids: ['text-1'] }} />);
-  expect(await runButton()).toBeDisabled();  // 以前的写法就是在这时点下去的
+  const early = await runButton();
+  expect(early).toBeDisabled();
+  fireEvent.click(early);  // 以前的写法就是在这时点下去的：点在禁用按钮上什么都不发生
+  await waitFor(() => expect(models).toHaveBeenCalledTimes(1));
+  expect(parse).not.toHaveBeenCalled();
+  release({ models: [{ alias: 'chat', model_id: 'writer', name: '写手', max_cost_cny: null }] });
   fireEvent.click(await enabledRunButton());
   expect(await screen.findByText(/1 镜 · 4 秒 · 新增条目 1/)).toBeInTheDocument();
   expect(parse).toHaveBeenCalledTimes(1);
