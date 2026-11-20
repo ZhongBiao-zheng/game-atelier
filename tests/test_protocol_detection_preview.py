@@ -118,3 +118,17 @@ def test_redirect_with_a_json_body_is_not_taken_as_a_listing(client):
         response = _preview(client, relay.url)
         assert other.calls() == []
     assert response.status_code == 502
+
+
+def test_domestic_chat_presets_connect_directly(monkeypatch):
+    """第 3 批的国内对话模型预置（DeepSeek、Kimi、智谱、通义、硅基流动）进直连白名单：本机坏代理不拖死它们。"""
+    from requests.utils import should_bypass_proxies
+
+    from character_workflow.lib import net_env
+
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    monkeypatch.delenv("no_proxy", raising=False)
+    net_env.configure_proxy_bypass()
+    for host in ("api.deepseek.com", "api.moonshot.cn", "open.bigmodel.cn", "dashscope.aliyuncs.com",
+                 "api.siliconflow.cn"):
+        assert should_bypass_proxies(f"https://{host}", no_proxy=None), host
