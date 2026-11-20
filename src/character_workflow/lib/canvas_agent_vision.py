@@ -66,6 +66,33 @@ async def wait_for_run(get_run: Callable[[], dict], is_image: Callable[[str], bo
     return {**view, ATTACH_KEY: images} if images else view
 
 
+async def wait_for_runs(get_runs: dict[str, Callable[[], dict]]) -> dict[str, dict]:
+    """一起等多个 run 到终态，最长 WAIT_SECONDS；查询出错的 run（带 lookup_error）不再查。"""
+    deadline = time.monotonic() + WAIT_SECONDS
+
+    def done(view: dict) -> bool:
+        return "lookup_error" in view or view.get("status") in TERMINAL_STATUSES
+
+    views = {run_id: await asyncio.to_thread(get) for run_id, get in get_runs.items()}
+    while not all(done(view) for view in views.values()) and time.monotonic() < deadline:
+        await asyncio.sleep(POLL_SECONDS)
+        for run_id, get in get_runs.items():
+            if not done(views[run_id]):
+                views[run_id] = await asyncio.to_thread(get)
+    return {run_id: view if done(view) else {**view, "note": "还在生成，稍后可再次调用 wait_for_runs"}
+            for run_id, view in views.items()}
+
+
+def pick_attachments(per_run: dict[str, list[str]]) -> tuple[list[str], list[str]]:
+    """多个 run 的附图：总数不超过 MAX_ATTACH_IMAGES 时全附；超过时每个 run 只附第一张，
+    仍超出就按顺序取前 MAX_ATTACH_IMAGES 个 run。返回 (附上的图, 一张都没附上的 run)。"""
+    if sum(len(refs) for refs in per_run.values()) <= MAX_ATTACH_IMAGES:
+        return [ref for refs in per_run.values() for ref in refs], []
+    firsts = [(run_id, refs[0]) for run_id, refs in per_run.items() if refs]
+    chosen = firsts[:MAX_ATTACH_IMAGES]
+    return [ref for _, ref in chosen], [run_id for run_id, _ in firsts[MAX_ATTACH_IMAGES:]]
+
+
 def attached_ids(item: Any) -> list[str]:
     if not isinstance(item, dict) or item.get("type") != "function_call_output":
         return []

@@ -290,3 +290,101 @@ def test_card_rejects_single_items_and_the_model_sees_which(client, fake_estimat
     assert len(scheduled) == 2
     panel = next(m.text for m in done.messages if m.title == "run_generations")
     assert panel.startswith("已提交 2 项，已拒绝 1 项\n批量生成 3 项")
+
+
+# ── 一起等多个 run（wait_for_runs）────────────────────────────────────────────────
+
+def test_attachments_are_all_or_first_of_each_run():
+    from character_workflow.lib import canvas_agent_vision as vision
+
+    assert vision.pick_attachments({"r1": ["a", "b"], "r2": ["c"]}) == (["a", "b", "c"], [])
+    assert vision.pick_attachments({"r1": ["a", "b"], "r2": ["c", "d"], "r3": ["e"]}) == (
+        ["a", "c", "e"], [])
+    runs = {f"r{i}": [f"v{i}a", f"v{i}b"] for i in range(1, 7)}
+    assert vision.pick_attachments(runs) == (["v1a", "v2a", "v3a", "v4a"], ["r5", "r6"])
+    assert vision.pick_attachments({"r1": [], "r2": []}) == ([], [])
+
+
+async def test_runs_are_waited_together_and_lookup_errors_stop_early(monkeypatch):
+    from character_workflow.lib import canvas_agent_vision as vision
+
+    monkeypatch.setattr(vision, "POLL_SECONDS", 0)
+    polls = {"slow": 0, "missing": 0}
+
+    def slow():
+        polls["slow"] += 1
+        return {"status": "done" if polls["slow"] >= 3 else "running"}
+
+    def missing():
+        polls["missing"] += 1
+        return {"lookup_error": "INVALID_TARGET：找不到这次生成"}
+
+    views = await vision.wait_for_runs({"slow": slow, "missing": missing,
+                                        "fast": lambda: {"status": "failed", "error": "x"}})
+    assert views["slow"]["status"] == "done" and polls == {"slow": 3, "missing": 1}
+    monkeypatch.setattr(vision, "WAIT_SECONDS", 0)
+    stuck = await vision.wait_for_runs({"r": lambda: {"status": "running"}})
+    assert "wait_for_runs" in stuck["r"]["note"]
+
+
+def _fake_views(monkeypatch, views: dict[str, dict]) -> dict[str, bool]:
+    """返回每个跑完的 run 是否被允许做联系表。"""
+    sheets: dict[str, bool] = {}
+
+    def lookup(_project_id, run_id):
+        return views[run_id]
+
+    def checks(_project_id, run_id, view, sheet=True):
+        sheets[run_id] = sheet
+        return {**view, "checked": True}
+
+    monkeypatch.setattr(runtime, "_lookup_run", lookup)
+    monkeypatch.setattr(runtime, "_is_image_version", lambda _project_id, vid: vid.startswith("img"))
+    monkeypatch.setattr(runtime, "_with_run_checks", checks)
+    return sheets
+
+
+def _done(*version_ids: str) -> dict:
+    return {"status": "done", "error": None, "candidates": [
+        {"index": i, "status": "succeeded", "version_id": vid, "error": None}
+        for i, vid in enumerate(version_ids)]}
+
+
+async def test_wait_for_runs_reports_each_run_and_caps_attachments(monkeypatch):
+    from character_workflow.lib import canvas_agent_vision as vision
+
+    monkeypatch.setattr(vision, "POLL_SECONDS", 0)
+    quota = "中转额度已用完：今日 ¥0.5（已用 ¥0.32），11-21 00:00 重置"
+    views = {f"run-{i}": _done(f"img-{i}a", f"img-{i}b") for i in range(1, 6)}
+    views["run-x"] = {"status": "failed", "error": quota, "candidates": [
+        {"index": 0, "status": "failed", "version_id": None, "error": quota}]}
+    views["run-?"] = {"run_id": "run-?", "lookup_error": "INVALID_TARGET：找不到这次生成"}
+    sheets = _fake_views(monkeypatch, views)
+    tool = {t.name: t for t in runtime.build_tools()}["wait_for_runs"]
+    assert tool.needs_approval is False  # 只读，不弹确认
+    ctx = SimpleNamespace(context=runtime.TurnContext("canvas-aaaaaaaa", "review"))
+    text = await tool.on_invoke_tool(ctx, json.dumps({"run_ids": [*views, "run-1"]}))
+    result = json.loads(text)
+    assert [run["run_id"] for run in result["runs"]] == list(views)  # 去重、按给的顺序
+    by_id = {run["run_id"]: run for run in result["runs"]}
+    # 额度用完这类失败把原因原样给模型（内置 Agent 用本机身份，看得到 job.error）。
+    assert by_id["run-x"]["error"] == quota and by_id["run-x"]["checked"]
+    assert by_id["run-?"]["lookup_error"].startswith("INVALID_TARGET")
+    assert result["counts"] == {"done": 5, "failed": 1, "lookup_error": 1}
+    assert result[vision.ATTACH_KEY] == ["img-1a", "img-2a", "img-3a", "img-4a"]
+    assert "run-5" in result["note"] and "read_media" in result["note"]
+    # 视频联系表只给附得上图的前 4 个 run 做，第 5 个起不再解码视频。
+    assert [run_id for run_id, allowed in sheets.items() if allowed] == [
+        "run-1", "run-2", "run-3", "run-4"]
+
+
+async def test_wait_for_runs_attaches_everything_when_few_and_rejects_bad_input(monkeypatch):
+    from character_workflow.lib import canvas_agent_vision as vision
+
+    monkeypatch.setattr(vision, "POLL_SECONDS", 0)
+    _fake_views(monkeypatch, {"a": _done("img-a1", "img-a2"), "b": _done("img-b1", "vid-b2")})
+    result = json.loads(await runtime._wait_for_runs("canvas-aaaaaaaa", ["a", "b"]))
+    assert result[vision.ATTACH_KEY] == ["img-a1", "img-a2", "img-b1"] and "note" not in result
+    assert (await runtime._wait_for_runs("canvas-aaaaaaaa", [])).startswith("错误（INVALID_PARAMETERS）")
+    too_many = [f"r{i}" for i in range(21)]
+    assert (await runtime._wait_for_runs("canvas-aaaaaaaa", too_many)).startswith("错误")

@@ -44,6 +44,7 @@ const TOOL_LABELS: Record<string, string> = {
   read_video_frames: '查看视频画面',
   check_run: '核对生成结果',
   wait_for_run: '等待生成结果',
+  wait_for_runs: '等待多个生成结果',
   load_skill: '读取 Skill',
   read_skill_file: '读取 Skill 文件',
 };

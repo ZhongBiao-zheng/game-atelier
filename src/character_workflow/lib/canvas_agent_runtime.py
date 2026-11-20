@@ -55,7 +55,8 @@ LOCAL = SimpleNamespace(kind="local", session_id="canvas-chat", grant_id=None)
 READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "check_run", "read_media",
                         "read_video_frames",
                         "load_skill",
-                        "read_skill_file", "wait_for_run", "read_spec", "search_library",
+                        "read_skill_file", "wait_for_run", "wait_for_runs", "read_spec",
+                        "search_library",
                         "search_team"})
 
 INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术和策划在无限画布上出图、出视频。
@@ -66,7 +67,8 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
   set_draft 写提示词、模型（alias 与 model 是两个独立的字段，都必须来自 list_models；alias 为 null 的那行是「自动」，
   按设定顺序选供应商，优先用它）、参数 → 需要参考图时 connect
   把参考节点连到它 → run_generation 发起生成。一次要出多个节点时，配好全部 draft 后用
-  run_generations 一次发起（最多 20 项）；结果逐项返回，部分成功不回滚。
+  run_generations 一次发起（最多 20 项）；结果逐项返回，部分成功不回滚。之后用 wait_for_runs
+  一起等这些 run_id，每个 run 的状态、checks 与失败原因逐项给出。
 - 这几步放进同一次 apply_changes：add_surface 时自己指定 node_id（如 cat-1），同一批后面的
   set_draft / connect 用这个 node_id 引用它；节点标题不能当 id 用。
 - 用画布上已有的图当参考（用户带进来的节点、上一次出的图）：直接 connect 那个节点到新的生成节点，
@@ -425,7 +427,7 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
 GENERATIONS_NOTE = ("部分成功不回滚：已提交的项照常运行并计费，不会因为别的项失败而撤销。"
                     "status=rejected 是用户在确认卡上拒绝的项，不要再发起；status=failed 是提交时出错，"
                     "不要自动重试，告诉用户原因。网关额度等限制在任务运行时逐项判定，"
-                    "已提交的项也可能失败，用 wait_for_run 查看每一项的最终结果。")
+                    "已提交的项也可能失败，用 wait_for_runs 查看每一项的最终结果。")
 
 
 def _run_generations(project_id: str, arguments: dict, scope: ModelScope,
@@ -607,6 +609,11 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
     "wait_for_run": ("等一次生成跑完（最多约 4 分钟），返回状态与产物版本；成功的图片会附给你看。",
                      {"type": "object", "required": ["run_id"],
                       "properties": {"run_id": {"type": "string"}}}),
+    "wait_for_runs": ("一起等多个生成跑完（1–20 个 run_id，最多约 4 分钟），逐项返回状态、产物版本、checks "
+                      "与失败原因。附图最多 4 张：总数不超过 4 张时全附，否则每个 run 只附第一张。只读。",
+                      {"type": "object", "required": ["run_ids"], "properties": {
+                          "run_ids": {"type": "array", "minItems": 1, "maxItems": 20,
+                                      "items": {"type": "string"}}}}),
     "load_skill": ("读取一个 Skill 的完整说明（名称见系统提示里的 Skill 列表）。",
                    {"type": "object", "required": ["name"],
                     "properties": {"name": {"type": "string"}}}),
@@ -690,15 +697,61 @@ async def _wait_for_run(project_id: str, run_id: str) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-def _with_run_checks(project_id: str, run_id: str, result: dict) -> dict:
-    """跑完的生成：附上 check_run 的检查结果；第一个成功的视频附一张联系表。检查失败不影响结果。"""
+async def _wait_for_runs(project_id: str, run_ids: list) -> str:
+    """多个 run 一起等；每个 run 跑完附上 checks，附图按 vision.pick_attachments 挑。"""
+    wanted = list(dict.fromkeys(str(run_id) for run_id in run_ids or []))
+    if not 1 <= len(wanted) <= MAX_BATCH_GENERATIONS:
+        return f"错误（INVALID_PARAMETERS）：run_ids 需为 1–{MAX_BATCH_GENERATIONS} 个"
+    views = await vision.wait_for_runs(
+        {run_id: (lambda run_id=run_id: _lookup_run(project_id, run_id)) for run_id in wanted})
+    result = await asyncio.to_thread(_runs_result, project_id, views)
+    return json.dumps(result, ensure_ascii=False)
+
+
+def _lookup_run(project_id: str, run_id: str) -> dict:
+    try:
+        return tools.get_run(LOCAL, GetRunInput(project_id=project_id, run_id=run_id))
+    except CanvasToolError as error:
+        return {"run_id": run_id, "lookup_error": f"{error.code}：{error.message}"}
+
+
+def _runs_result(project_id: str, views: dict[str, dict]) -> dict:
+    runs: list[dict] = []
+    media: dict[str, list[str]] = {}
+    for run_id, view in views.items():
+        if view.get("status") in vision.TERMINAL_STATUSES:
+            # 联系表只给可能附得上的 run 做：附图最多 4 个 run。
+            view = _with_run_checks(project_id, run_id, view,
+                                    sheet=len(media) < vision.MAX_ATTACH_IMAGES)
+            refs = [vid for vid in vision.succeeded_version_ids(view)
+                    if _is_image_version(project_id, vid)] + view.pop(vision.ATTACH_KEY, [])
+            if refs:
+                media[run_id] = refs
+        runs.append({"run_id": run_id, **view})
+    attached, skipped = vision.pick_attachments(media)
+    statuses = [run.get("status") or "lookup_error" for run in runs]
+    result: dict = {"runs": runs, "counts": {status: statuses.count(status)
+                                              for status in dict.fromkeys(statuses)}}
+    if attached:
+        result[vision.ATTACH_KEY] = attached
+    if sum(len(refs) for refs in media.values()) > len(attached):
+        note = f"附图最多 {vision.MAX_ATTACH_IMAGES} 张，每个 run 只附了第一张"
+        if skipped:
+            note += f"，这些 run 没有附图：{', '.join(skipped)}"
+        result["note"] = note + "；要看其余结果用 read_media。"
+    return result
+
+
+def _with_run_checks(project_id: str, run_id: str, result: dict, sheet: bool = True) -> dict:
+    """跑完的生成：附上 check_run 的检查结果；第一个成功的视频附一张联系表（sheet=False 时不做）。
+    检查失败不影响结果。"""
     try:
         checked = tools.check_run(LOCAL, GetRunInput(project_id=project_id, run_id=run_id))
     except CanvasToolError:
         return result
     result = {**result, "candidates": checked["candidates"]}
     document = read_canvas_document(project_id)
-    video = next((c["version_id"] for c in checked["candidates"] if c["status"] == "succeeded"
+    video = sheet and next((c["version_id"] for c in checked["candidates"] if c["status"] == "succeeded"
                   and getattr(document.content_versions.get(c["version_id"] or ""), "kind", None) == "video"),
                  None)
     if video:
@@ -722,6 +775,9 @@ def build_tools() -> list:
             arguments = json.loads(raw or "{}")
             if name == "wait_for_run":
                 return await _wait_for_run(turn.project_id, str(arguments.get("run_id", "")))
+            if name == "wait_for_runs":
+                run_ids = arguments.get("run_ids")
+                return await _wait_for_runs(turn.project_id, run_ids if isinstance(run_ids, list) else [])
             text, created = await asyncio.to_thread(run_tool_safely, turn.project_id, name,
                                                     arguments, turn.scope,
                                                     frozenset(turn.created_node_ids))
@@ -861,6 +917,7 @@ def _arguments(raw: str | None) -> dict:
 READ_LABELS = {"get_canvas": "读取画布", "list_models": "查看可用模型", "get_run": "查询生成进度",
                "read_video_frames": "查看视频画面", "check_run": "核对生成结果",
                "read_media": "读取媒体信息", "wait_for_run": "等待生成结果",
+               "wait_for_runs": "等待多个生成结果",
                "search_library": "查找项目参考", "search_team": "查找团队库参考",
                "read_spec": "读取类别规范"}
 

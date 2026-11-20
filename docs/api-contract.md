@@ -520,6 +520,7 @@ Agent 发起的生成单次估价超过它时，Auto 下也停在待确认；估
 不带即全部执行；只对 `run_generations` 有效，否则 422）。工具结果逐项给 `status`：`submitted`（带 run_id）/
 `rejected`（用户在确认卡上拒绝）/ `failed`（提交时出错，带 error；未预期异常也逐项记成 failed，已提交项的 run_id 照常返回），部分成功不回滚。同一 `surface_node_id` 在一批里只能出现一次：两次提交会落进同一个结果节点并发写入，所以整批按 `INVALID_PARAMETERS` 退回给模型、不弹确认卡（同一节点要多张用 count）。摘要里每项的节点标题与模型名去掉换行、各截到 40 字。网关额度在任务运行时按任务逐个准入，
 已提交的项也可能在运行时因额度用完失败。
+`wait_for_runs`（只读，1–20 个 run_id，去重后按给的顺序）一起等到终态，最长 240 秒；每项返回 run 视图并带 checks，查不到的 run 带 `lookup_error`，`counts` 按状态计数。附图最多 4 张：总数不超过 4 时全附，否则每个 run 只附第一张、取前 4 个 run，`note` 列出没附图的 run；视频联系表也只给前 4 个有产物的 run 做。
 
 主题色是工作区应用级状态，文件真源为 `.config/accent-themes.json`（桌面版与浏览器共用；浏览器 localStorage
 `atelier:accent` 只缓存一份镜像供首帧上色，以服务端为准）。`GET /api/accent-themes` 返回
