@@ -518,7 +518,7 @@ Agent 发起的生成单次估价超过它时，Auto 下也停在待确认；估
 末行「合计预计 X¥（K 项未计价）」或「合计未计价」，超过时再加「超过确认金额 X¥」；面板按「序号. 」认出每一项。
 `POST .../agent/sessions/{session_id}/approvals` 的每条决定可带 `items`（批量生成里勾选执行的下标，至少一项，
 不带即全部执行；只对 `run_generations` 有效，否则 422）。工具结果逐项给 `status`：`submitted`（带 run_id）/
-`rejected`（用户在确认卡上拒绝）/ `failed`（提交时出错，带 error），部分成功不回滚。网关额度在任务运行时按任务逐个准入，
+`rejected`（用户在确认卡上拒绝）/ `failed`（提交时出错，带 error；未预期异常也逐项记成 failed，已提交项的 run_id 照常返回），部分成功不回滚。同一 `surface_node_id` 在一批里只能出现一次：两次提交会落进同一个结果节点并发写入，所以整批按 `INVALID_PARAMETERS` 退回给模型、不弹确认卡（同一节点要多张用 count）。摘要里每项的节点标题与模型名去掉换行、各截到 40 字。网关额度在任务运行时按任务逐个准入，
 已提交的项也可能在运行时因额度用完失败。
 
 主题色是工作区应用级状态，文件真源为 `.config/accent-themes.json`（桌面版与浏览器共用；浏览器 localStorage

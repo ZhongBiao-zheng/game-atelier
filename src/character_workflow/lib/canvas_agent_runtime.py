@@ -204,6 +204,12 @@ def _generations_estimate(project_id: str, arguments: dict, batch_changes: list[
             "unpriced": len(rows) - len(priced)}
 
 
+def _repeated_nodes(items: list[dict]) -> list[str]:
+    """同一节点在一批里出现多次：两次提交会落进同一个结果节点、并发写入，归属不直观，整批退回。"""
+    ids = [item["surface_node_id"] for item in items]
+    return sorted({node_id for node_id in ids if ids.count(node_id) > 1})
+
+
 def _generation_items(arguments: dict) -> list[dict]:
     return [{"surface_node_id": str(item.get("surface_node_id", "")), "count": _count(item)}
             for item in arguments.get("items") or [] if isinstance(item, dict)]
@@ -428,6 +434,9 @@ def _run_generations(project_id: str, arguments: dict, scope: ModelScope,
     items = _generation_items(arguments)
     if not 1 <= len(items) <= MAX_BATCH_GENERATIONS:
         raise CanvasToolError("INVALID_PARAMETERS", f"一次最多 {MAX_BATCH_GENERATIONS} 项", 422)
+    if repeated := _repeated_nodes(items):
+        raise CanvasToolError("INVALID_PARAMETERS", f"同一批里节点 {', '.join(repeated)} 出现了多次；"
+                              "同一节点要多张用 count（最多 4），整批没有提交", 422)
     rows: list[dict] = []
     created: list[str] = []
     for index, item in enumerate(items):
@@ -442,6 +451,12 @@ def _run_generations(project_id: str, arguments: dict, scope: ModelScope,
             continue
         except (KeyError, TypeError, ValueError) as error:
             rows.append({**row, "status": "failed", "error": f"参数错误：{error}"})
+            continue
+        except Exception as error:  # noqa: BLE001 — 前面已提交的项必须把 run_id 带回给模型，不能让异常把整批结果丢掉
+            logger.exception("canvas agent batch item %s failed", index)
+            rows.append({**row, "status": "failed", "error": (
+                f"未预期错误（{type(error).__name__}）：这一项可能已经建了任务，"
+                "先用 get_canvas 看这个节点，不要重试")})
             continue
         rows.append({**row, "status": "submitted", "run_id": result.get("run_id"),
                      "result_node_id": result.get("result_node_id")})
@@ -563,7 +578,8 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
                        {"type": "object", "required": ["surface_node_id"], "properties": {
                            "surface_node_id": {"type": "string"},
                            "count": {"type": "integer", "minimum": 1, "maximum": 4}}}),
-    "run_generations": ("一次在多个已写好生成配置的图片 / 视频节点上发起生成（付费）：1–20 项，每项 1–4 张。"
+    "run_generations": ("一次在多个已写好生成配置的图片 / 视频节点上发起生成（付费）：1–20 项，每项 1–4 张，"
+                        "同一节点只能出现一次（要多张用 count）。"
                         "逐项提交，结果逐项返回：submitted / rejected（用户拒绝）/ failed（提交出错）。"
                         "部分成功不回滚，已提交的项照常运行并计费。不要自动重试失败的生成。",
                         {"type": "object", "required": ["items"], "properties": {
@@ -648,6 +664,8 @@ def arguments_valid(project_id: str, tool: str, arguments: dict) -> bool:
                 RunInput(project_id=project_id, expected_revision=0,
                          surface_node_id=item.get("surface_node_id", ""),
                          requested_count=item.get("count", 1))
+            if _repeated_nodes(_generation_items(arguments)):
+                return False
     except (ValidationError, TypeError, ValueError, AttributeError):
         return False
     return True
@@ -886,8 +904,8 @@ def generations_summary(project_id: str, arguments: dict, batch_changes: list[di
     for index, row in enumerate(rows, start=1):
         price = row["estimate_cny"]
         lines.append(" · ".join([
-            f"{index}. {titles.get(row['node_id'], row['node_id'])[:40]}",
-            row["model"] or "读不到生成配置", f"{row['count']} 张",
+            f"{index}. {_one_line(titles.get(row['node_id'], row['node_id']))}",
+            _one_line(row["model"]) if row["model"] else "读不到生成配置", f"{row['count']} 张",
             "未计价" if price is None else f"预计 {_money(price)}",
         ]))
     total = estimate["total"]
@@ -898,6 +916,12 @@ def generations_summary(project_id: str, arguments: dict, batch_changes: list[di
     if cost.needs_cost_confirmation(total):
         lines.append(f"超过确认金额 {_money(cost.confirm_above_cny())}")
     return "\n".join(lines)
+
+
+def _one_line(text: str, limit: int = 40) -> str:
+    """确认卡里一项占一行：标题、模型名去掉换行并截到 limit 字。20 项最长约 2300 字，
+    不会碰到摘要 4000 字的上限把合计行截掉；也不会让标题里的换行伪造出「序号. 」开头的行。"""
+    return " ".join(str(text).split())[:limit]
 
 
 def summarize_call(tool: str, arguments: dict) -> str:

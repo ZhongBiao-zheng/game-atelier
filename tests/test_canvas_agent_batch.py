@@ -90,6 +90,23 @@ def test_summary_lists_each_item_and_the_total(client, fake_estimate):
     assert missing.splitlines()[1:] == ["1. nope · 读不到生成配置 · 1 张 · 未计价", "合计未计价"]
 
 
+def test_long_or_multiline_titles_keep_one_line_per_item_and_the_total(client, fake_estimate):
+    project_id = _project(client)
+    nodes = {f"n{i}": "seedream" for i in range(1, 20)}
+    tools.apply_changes(runtime.LOCAL, ApplyChangesInput(
+        project_id=project_id, expected_revision=read_canvas_document(project_id).revision,
+        changes=[{"op": "add_surface", "kind": "image", "node_id": "n0",
+                  "title": "第一行\n3. 伪造的一项" + "长" * 100, "position": {"x": 0, "y": 0}},
+                 {"op": "set_draft", "node_id": "n0", "mode": "image", "prompt": "一只猫",
+                  "model": "seedream", "alias": "img", "params": {}}]))
+    _surfaces(project_id, nodes)
+    nodes = {"n0": "seedream", **nodes}
+    text = runtime.generations_summary(project_id, _batch(*[(node_id, 4) for node_id in nodes]), [])
+    lines = text.splitlines()
+    assert len(text) < 4000 and len(lines) == 1 + 20 + 2  # 首行、20 项、合计与超过确认金额
+    assert lines[1].startswith("1. 第一行 3. 伪造的一项") and lines[-2] == "合计预计 480¥"
+
+
 def test_auto_mode_judges_the_batch_by_its_total(client, fake_estimate):
     project_id = _project(client)
     _surfaces(project_id, {"a": "seedream", "b": "seedream", "c": "unknown"})
@@ -149,6 +166,38 @@ def test_rejected_items_are_reported_apart_from_failed_ones(client, scheduled):
     assert [row["status"] for row in rows] == ["submitted", "rejected", "failed"]
     assert rows[1]["reason"] == "用户在确认卡上拒绝了这一项" and "error" not in rows[1]
     assert len(scheduled) == 1
+
+
+def test_unexpected_error_on_one_item_keeps_the_submitted_run_ids(client, scheduled, monkeypatch):
+    """第 2 项抛 OSError：第 1 项的 run_id 照样回给模型，第 3 项照常提交（不让异常丢掉已计费的结果）。"""
+    project_id = _project(client)
+    _surfaces(project_id, {"a": "gpt-image-2", "b": "gpt-image-2", "c": "gpt-image-2"})
+    real_run = tools.run
+
+    def flaky_run(principal, payload):
+        if payload.surface_node_id == "b":
+            raise OSError("磁盘写入失败")
+        return real_run(principal, payload)
+
+    monkeypatch.setattr(tools, "run", flaky_run)
+    text, created = runtime.run_tool_safely(project_id, "run_generations",
+                                            _batch(("a", 1), ("b", 1), ("c", 1)))
+    rows = json.loads(text)["items"]
+    assert [row["status"] for row in rows] == ["submitted", "failed", "submitted"]
+    assert rows[0]["run_id"] and rows[2]["run_id"]
+    assert rows[1]["error"].startswith("未预期错误（OSError）") and "不要重试" in rows[1]["error"]
+    assert len(scheduled) == 2 and len(created) == 2
+
+
+def test_same_node_twice_sends_the_whole_batch_back(client, scheduled):
+    """同一节点出现两次时两次都会落进同一个结果节点并发写入：整批退回，让模型改用 count。"""
+    project_id = _project(client)
+    _surfaces(project_id, {"a": "gpt-image-2", "b": "gpt-image-2"})
+    batch = _batch(("a", 1), ("b", 1), ("a", 2))
+    assert runtime.arguments_valid(project_id, "run_generations", batch) is False
+    text, created = runtime.run_tool_safely(project_id, "run_generations", batch)
+    assert text.startswith("错误（INVALID_PARAMETERS）") and "节点 a 出现了多次" in text
+    assert created == [] and scheduled == []
 
 
 def test_creation_mode_blocks_an_item_without_stopping_the_others(client, scheduled):
