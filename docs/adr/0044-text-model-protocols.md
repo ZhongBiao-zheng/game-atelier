@@ -24,8 +24,12 @@ Gemini 兼容、One API / New API 等等，还要有检测协议」。方案与�
   3.x 自带的 `httpx2`。与局域网网关的 `UpdatingAwareTransport` 叠加时转换在外层、等待重发在内层（重发的是转换后的
   同一个请求）。流式里 Anthropic `message_delta` 的用量是累计值，取最后一次；`error` 事件转成 `{"error": …}` 数据块，
   流没收到 `message_stop` 就断了按错误处理。装了这个 transport 的客户端必须 `trust_env=False`：否则 httpx 按环境代理
-  把请求直接交给代理的 transport，绕过转换；代理改由内层按上游地址选（`transport.direct_or_proxied`，规则同 SDK
-  默认：系统 / 环境代理，`NO_PROXY` 直连）。`openai-responses` 模型用 SDK 的 `OpenAIResponsesModel`，不经转换。
+  把请求直接交给代理的 transport，绕过转换；代理改由内层按上游地址选（`transport.environment_proxy_for`，直接用 httpx2
+  的 `get_environment_proxies` 与挂载点匹配规则，与 SDK 默认客户端一致：http / https / all 与 `NO_PROXY`；socks
+  代理需要 `socksio`，本项目没装，两条路径都在构造客户端时报 ImportError）。Anthropic 没有默认地址，KEY 没填
+  `base_url` 时构造 Agent 就报「供应商缺少 API 地址」（与一次性调用一致）。SDK 重试沿用 OpenAI 路径（2 次）：
+  上游错误响应的 `x-should-retry` / `retry-after` 原样透传；上游 200 但响应读不出时返回 502 并带
+  `x-should-retry: false`，不让 SDK 重发已计费的请求。`openai-responses` 模型用 SDK 的 `OpenAIResponsesModel`，不经转换。
   Anthropic 首版不开思考（飙哥定），Agent 列表里这类模型不显示思考档位；Agent 列模型时按 Anthropic 的鉴权头拉。
 - **用量归一**：`llm_protocols.usage.Usage` 的输入总量含缓存命中与缓存写入（Anthropic 的 `input_tokens` 不含缓存，
   要加上 `cache_read_input_tokens` 与 `cache_creation_input_tokens`；Gemini 的 `promptTokenCount` 已含缓存、输出要加

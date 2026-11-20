@@ -336,6 +336,20 @@ def test_build_agent_uses_the_protocol_transport_for_anthropic(monkeypatch):
     assert http_client._trust_env is False and not http_client._mounts
 
 
+def test_build_agent_refuses_anthropic_without_base_url():
+    """Anthropic 没有默认地址（一次性调用同样报错）：构造时就报，不拼出相对地址再让 SDK 报「Connection error」。"""
+    from types import SimpleNamespace
+
+    from character_workflow.lib import canvas_agent_runtime
+    from character_workflow.lib.canvas_tool_common import CanvasToolError
+
+    add_claude("  ")
+    with pytest.raises(CanvasToolError) as caught:
+        canvas_agent_runtime.build_agent(SimpleNamespace(
+            project_id="p", model_alias="claude", model="claude-x", effort=None, creation_mode="all"))
+    assert "缺少 API 地址" in str(caught.value)
+
+
 def test_build_agent_still_refuses_unknown_protocols():
     from types import SimpleNamespace
 

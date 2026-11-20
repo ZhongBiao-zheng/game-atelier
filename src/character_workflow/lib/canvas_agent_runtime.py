@@ -895,11 +895,14 @@ def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None]
             trust_env=False, transport=UpdatingAwareTransport(on_wait=on_gateway_wait))
         retries = 0
     elif protocol == llm_protocols.ANTHROPIC_MESSAGES:
+        # 与一次性调用相同：Anthropic 没有默认地址，没填就报错（否则拼出相对地址，SDK 报「Connection error」）。
+        if not (key.base_url or "").strip():
+            raise CanvasToolError("MODEL_UNAVAILABLE", "供应商缺少 API 地址", 422)
         # SDK 只会发 Chat Completions：在 HTTP 层转成 Anthropic Messages（ADR-0044）。
         # trust_env=False：否则环境代理会让请求绕过转换；代理改由内层按上游地址选。
         from character_workflow.lib.llm_protocols.transport import ProtocolTransport
         http_client = DefaultAsyncHttpxClient(trust_env=False, transport=ProtocolTransport(
-            base_url=key.base_url or "", access_key=key.access_key))
+            base_url=(key.base_url or "").strip(), access_key=key.access_key))
     # 经网关时带关联标记，主机把它记在这把密钥的用量行上，成员每轮结束按它查回结算额。
     headers = {"X-Atelier-Call-Tag": call_tag} if key.provider == "atelier" and call_tag else None
     client = AsyncOpenAI(base_url=chat_base_url(key), api_key=key.access_key, max_retries=retries,
