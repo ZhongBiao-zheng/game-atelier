@@ -8,7 +8,7 @@ export function providerPresetId(key?: { provider?: string; base_url?: string | 
   if (key?.provider && key.provider !== 'custom') return key.provider;
   try {
     const host = new URL(key?.base_url || '').hostname;
-    for (const [domain, id] of [['tu-zi.com', 'tuzi'], ['openai-hk.com', 'openai-hk']]) {
+    for (const [domain, id] of [['tu-zi.com', 'tuzi'], ['openai-hk.com', 'openai-hk'], ['api.anthropic.com', 'anthropic']]) {
       if (host === domain || host.endsWith(`.${domain}`)) return id;
     }
   } catch { /* An unconfigured or invalid address is a custom provider. */ }
@@ -27,11 +27,14 @@ export interface ProviderPreset {
   apiKeyUrl?: string;
   defaultBaseUrl?: string | null;
   defaultModels: KeyModel[];
+  /** 对话接口固定的预置（ADR-0044）；不写 = 自动。 */
+  textProtocol?: string;
 }
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: 'comfyui', value: 'comfyui', label: 'ComfyUI', kind: 'local', modalities: ['image'], defaultBaseUrl: 'http://127.0.0.1:8188', defaultModels: [] },
   { id: 'openai', value: 'openai', label: 'OpenAI', kind: 'official', modalities: ['image', 'llm'], homepageUrl: 'https://platform.openai.com', docsUrl: 'https://platform.openai.com/docs', apiKeyUrl: 'https://platform.openai.com/api-keys', defaultBaseUrl: 'https://api.openai.com/v1', defaultModels: [{ name: 'GPT Image 1', id: 'gpt-image-1' }, { name: 'GPT 5', id: 'gpt-5', modality: 'text', protocol: 'openai-responses', input_modalities: ['text'] }] },
+  { id: 'anthropic', value: 'custom', label: 'Anthropic', kind: 'official', modalities: ['llm'], homepageUrl: 'https://www.anthropic.com', docsUrl: 'https://platform.claude.com/docs', apiKeyUrl: 'https://platform.claude.com/settings/keys', defaultBaseUrl: 'https://api.anthropic.com', textProtocol: 'anthropic-messages', defaultModels: [{ name: 'Claude Sonnet 5.5', id: 'claude-sonnet-5-5', modality: 'text', protocol: 'anthropic-messages', input_modalities: ['text', 'image'] }] },
   { id: 'seedream', value: 'seedream', label: 'Volcengine Ark', kind: 'official', modalities: ['image', 'llm'], homepageUrl: 'https://www.volcengine.com', docsUrl: 'https://www.volcengine.com/docs/82379/1399008', apiKeyUrl: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModels: [{ name: '图片 5.0', id: 'doubao-seedream-5-0-260128' }, { name: '豆包 Seed 1.8', id: 'doubao-seed-1-8-251228', modality: 'text', protocol: 'openai-chat', input_modalities: ['text'] }] },
   { id: 'tokendance', value: 'tokendance', label: 'TokenDance', kind: 'relay', modalities: ['image', 'video'], homepageUrl: 'https://tokendance.space', docsUrl: 'https://tokendance.space/docs/quickstart', apiKeyUrl: 'https://tokendance.space/keys', defaultBaseUrl: 'https://tokendance.space/gateway/v1', defaultModels: [{ name: 'Seedream 5.0 Lite', id: 'seedream-5.0-lite', modality: 'image', protocol: 'openai' }, { name: 'Seedream 5.0 Pro', id: 'seedream-5.0-pro', modality: 'image', protocol: 'ark' }, { name: 'Seedance 2.0', id: 'seedance-2.0', modality: 'video', protocol: 'seedance' }] },
   { id: 'openrouter', value: 'openrouter', label: 'OpenRouter', kind: 'relay', modalities: ['image', 'video'], homepageUrl: 'https://openrouter.ai', docsUrl: 'https://openrouter.ai/docs/quickstart', apiKeyUrl: 'https://openrouter.ai/settings/keys', defaultBaseUrl: 'https://openrouter.ai/api/v1', defaultModels: [{ name: 'GPT Image 2', id: 'openai/gpt-image-2', modality: 'image' }, { name: 'Google: Veo 3.1', id: 'google/veo-3.1', modality: 'video' }] },
@@ -50,5 +53,6 @@ export function presetInitial(preset: ProviderPreset, baseUrl = preset.defaultBa
     provider: preset.value, alias: preset.kind === 'custom' ? '' : preset.label,
     base_url: baseUrl, models: preset.defaultModels, modalities: preset.modalities,
     homepage_url: preset.homepageUrl, docs_url: preset.docsUrl, api_key_url: preset.apiKeyUrl,
+    ...(preset.textProtocol ? { text_protocol: preset.textProtocol } : {}),
   };
 }

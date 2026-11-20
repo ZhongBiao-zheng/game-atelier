@@ -23,6 +23,8 @@ export interface KeyView {
   modalities?: ApiModality[];
   notes: string;
   created_at: string;
+  /** 手动选的对话接口（ADR-0044）；没有 = 自动。 */
+  text_protocol?: string | null;
 }
 
 export interface KeyCreatePayload {
@@ -41,6 +43,8 @@ export interface KeyCreatePayload {
   api_key_url?: string | null;
   modalities?: ApiModality[];
   notes?: string;
+  /** 手动选的对话接口；null = 自动。只有自定义供应商可以选。 */
+  text_protocol?: string | null;
 }
 
 export interface KeyModel {
@@ -68,6 +72,8 @@ export interface KeyModel {
   output_cny_per_m?: number | null;
   /** 服务端算出的只读标记：至少有一种参数组合拿不到同步价。只在为 true 时出现。 */
   unpriced?: boolean;
+  /** 服务端算出的只读标记：文本模型的协议调不了（ADR-0044）。只在为 true 时出现；前端不另抄协议表。 */
+  text_unsupported?: boolean;
 }
 
 export interface WorkflowInput {
@@ -165,6 +171,8 @@ export async function previewModels(payload: {
   include_all?: boolean;
   /** 按这份自定义接口的 catalog 发现模型（ADR-0036）。 */
   protocol_id?: string | null;
+  /** 表单上当前选的对话接口：Anthropic 按它的鉴权头列模型。 */
+  text_protocol?: string | null;
 }): Promise<ModelsPreview> {
   // 这条报错直接贴在密钥表单里给画师看，detail 已是中文（routes.py 的 502/422 分支）。
   return requestJson<ModelsPreview>('/api/keys/models-preview', '拉取模型列表', {

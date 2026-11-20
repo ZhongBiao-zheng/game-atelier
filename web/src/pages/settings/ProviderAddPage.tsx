@@ -87,7 +87,7 @@ export function ProviderAddPage() {
     {visible.length === 0 && <p className="text-sm text-muted-foreground">没有匹配的供应商</p>}
     <form autoComplete="off" onSubmit={e => { e.preventDefault(); custom(); }} className="mt-auto flex flex-wrap items-center gap-3 border-t border-border pt-5">
       <Label htmlFor="custom-provider-address" className="flex items-center gap-1.5 text-sm font-medium text-primary"><AddIcon size="sm" aria-hidden />自定义供应商</Label>
-      <Input id="custom-provider-address" aria-label="自定义供应商地址" placeholder="任意 OpenAI 兼容地址，如 https://api.example.com/v1"
+      <Input id="custom-provider-address" aria-label="自定义供应商地址" placeholder="API 地址，如 https://api.example.com/v1"
         value={address} onChange={e => setAddress(e.target.value)}
         className="min-w-0 flex-[1_1_360px] font-mono" />
       <Button type="submit" disabled={!address.trim()}>继续</Button>
