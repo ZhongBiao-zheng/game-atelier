@@ -1,6 +1,6 @@
 import { checkComfyUI } from '@/api/comfyui';
 import { ComfyWorkflows } from './ComfyWorkflows';
-import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
+import { ProviderIconPicker } from '@/components/keys/ProviderIconPicker';
 import { useEffect, useRef, useState } from 'react';
 import { CloseIcon, HelpIcon, HideIcon, ShowIcon } from '@/components/ui/icons';
 import { Toggle } from '@/components/ui/toggle';
@@ -140,6 +140,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
   const [accessKey, setAccessKey] = useState(initial?.access_key ?? '');
   // 对话接口（ADR-0044）：null = 自动。只有用户填地址的自定义供应商能改；对话接口固定的预置随预置带。
   const [textProtocol, setTextProtocol] = useState<string | null>(initial?.text_protocol ?? initialPreset.textProtocol ?? null);
+  const [icon, setIcon] = useState<string | null>(initial?.icon ?? null);
   const [detected, setDetected] = useState<ModelsPreview['detected'] | null>(null);
   // 编辑旧 Key 时模型可能没标注分类——载入即用 key 级 modalities 兜底值固化进每行，
   // 保存后 key 级 modalities 改为由模型标注派生，老 key 的视频可见性不丢。
@@ -468,6 +469,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
         modalities: derivedModalities,
         notes: '',
         ...(textProtocol ? { text_protocol: textProtocol } : {}),
+        ...(icon ? { icon } : {}),
       };
       if (editing && initial?.alias) {
         const patch: Partial<KeyCreatePayload> = {
@@ -485,6 +487,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
           notes: payload.notes,
         };
         if (textProtocol !== (initial.text_protocol ?? null)) patch.text_protocol = textProtocol;
+        if (icon !== (initial.icon ?? null)) patch.icon = icon;
         if (!accessKey.trim() || accessKey === initial.access_key) delete patch.access_key;
         if (isComfy) delete patch.models;
         await patchKey(initial.alias, patch);
@@ -571,7 +574,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
     <Dialog open onOpenChange={open => { if (!open && !saving) onCancel(); }}>
       <DialogContent hideClose aria-describedby={undefined} className="flex max-h-[90dvh] max-w-[680px] flex-col gap-0 overflow-hidden p-0">
         <header className="flex shrink-0 items-center gap-3 border-b border-border px-6 py-4">
-          <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-xs"><ProviderBrandIcon provider={{ provider: preset.value, base_url: preset.defaultBaseUrl }} /></span>
+          <ProviderIconPicker icon={icon} onChange={setIcon}
+            display={{ provider, base_url: baseUrl.trim() || preset.defaultBaseUrl, alias: alias.trim() || preset.label }} />
           <DialogTitle className="min-w-0 flex-1 truncate">{title}</DialogTitle>
           {homepage && <a href={homepage} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:text-primary">官网 ↗</a>}
           <Switch size="sm" checked={enabled} onCheckedChange={setEnabled} aria-label={`启用 ${alias || preset.label}`} />

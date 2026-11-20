@@ -25,6 +25,8 @@ export interface KeyRow {
   notes?: string;
   last_used_at?: string | null;
   created_at?: string | null;
+  /** 自定义图标（I1）。 */
+  icon?: string | null;
 }
 
 interface Props {

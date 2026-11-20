@@ -312,6 +312,7 @@ function toKeyRow(k: {
   notes?: string;
   last_used_at?: string | null;
   created_at?: string | null;
+  icon?: string | null;
 }): KeyRow {
   return {
     alias: k.alias,
@@ -329,6 +330,7 @@ function toKeyRow(k: {
     notes: k.notes ?? '',
     last_used_at: k.last_used_at ?? null,
     created_at: k.created_at ?? null,
+    icon: k.icon ?? null,
   };
 }
 
@@ -347,5 +349,6 @@ function toKeyFormInitial(row: KeyRow): Partial<KeyCreatePayload> {
     api_key_url: row.api_key_url ?? null,
     modalities: row.modalities ?? [],
     notes: row.notes ?? '',
+    icon: row.icon ?? null,
   };
 }
