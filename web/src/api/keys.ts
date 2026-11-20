@@ -74,6 +74,8 @@ export interface KeyModel {
   unpriced?: boolean;
   /** 服务端算出的只读标记：文本模型的协议调不了（ADR-0044）。只在为 true 时出现；前端不另抄协议表。 */
   text_unsupported?: boolean;
+  /** 服务端给的只读标记：经中转站走 Gemini 格式、工具调用未经验证，不进 Agent（判据在后端 detect 一处）。 */
+  agent_unverified?: boolean;
 }
 
 export interface WorkflowInput {

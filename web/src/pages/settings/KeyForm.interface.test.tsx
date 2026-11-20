@@ -79,6 +79,19 @@ describe('对话接口', () => {
     expect(vi.mocked(previewModels).mock.calls[0][0].text_protocol).toBe('anthropic-messages');
   });
 
+  it('服务端标了 agent_unverified 的模型行显示「不进 Agent」（第 3 批）', () => {
+    const initial = { alias: 'relay', provider: 'custom', base_url: 'https://relay.example', access_key: 'sk...mask',
+      models: [
+        { id: 'gemini-x', name: 'Gemini X', modality: 'text' as const, protocol: 'gemini-generate-content',
+          agent_unverified: true },
+        { id: 'gpt-x', name: 'GPT X', modality: 'text' as const, protocol: 'openai-chat' },
+      ] };
+    render(<KeyForm mode="edit" initial={initial} onCreated={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByText('模型详情'));
+    expect(screen.getAllByText('不进 Agent')).toHaveLength(1);
+    expect(screen.getByLabelText('不进 Agent 说明')).toBeInTheDocument();
+  });
+
   it('编辑时改回自动提交 null，未改动不提交', async () => {
     vi.mocked(patchKey).mockResolvedValue(undefined);
     const initial = { alias: 'relay', provider: 'custom', base_url: 'https://relay.example/v1', access_key: 'sk...mask',

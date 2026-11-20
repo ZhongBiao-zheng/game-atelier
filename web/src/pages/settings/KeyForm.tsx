@@ -101,7 +101,8 @@ const INTERFACE_OPTIONS: [string, string][] = [
   [AUTO_INTERFACE, '自动'], ['openai-chat', 'OpenAI Chat'], ['openai-responses', 'OpenAI Responses'],
   ['anthropic-messages', 'Anthropic'], ['gemini-generate-content', 'Gemini'],
 ];
-const INTERFACE_HELP = '对话模型的调用格式，按供应商文档选。自动：按 OpenAI Chat 调用。';
+const INTERFACE_HELP = '对话模型的调用格式，按供应商文档选。自动：按地址与模型列表识别，识别不出按 OpenAI Chat 调用。经中转站走 Gemini 格式时不进 Agent，手动选 Gemini 后可用。';
+const AGENT_UNVERIFIED_HELP = '经中转站走 Gemini 格式时工具调用未经验证，不进 Agent。把「对话接口」改成 OpenAI Chat，或确认该中转站支持工具调用后手动选 Gemini。';
 
 /** 粘贴后停顿多久再自动检测，避免逐字输入时连发。 */
 const AUTO_DETECT_DELAY_MS = 500;
@@ -813,6 +814,12 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
                             />
                             <span className="text-xs text-muted-foreground">元/次</span>
                             <Hint label={PRICE_HELP}><span tabIndex={0} aria-label="单价说明" className="text-muted-foreground"><HelpIcon size="sm" /></span></Hint>
+                          </div>
+                        )}
+                        {model.agent_unverified && (
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            不进 Agent
+                            <Hint label={AGENT_UNVERIFIED_HELP}><span tabIndex={0} aria-label="不进 Agent 说明" className="text-muted-foreground"><HelpIcon size="sm" /></span></Hint>
                           </div>
                         )}
                       </div>
