@@ -19,6 +19,11 @@ Gemini 兼容、One API / New API 等等，还要有检测协议」。方案与�
   的 `to_upstream` / `from_upstream`）。同一份转换给三处用：一次性文本调用（画布文本节点、AI 帮我配置、分镜解析、
   分类）、内置 Agent（第 2 批：给 `AsyncOpenAI` 换一个做转换的 transport，SDK 不变）、局域网网关主机端（第 4 批）。
   不引入 LiteLLM 等转换库：依赖大，2026 年其 PyPI 包两次被投毒，且网关与一次性调用仍要自己的转换。
+- **Agent 的转换在 HTTP 层**（第 2 批）：`llm_protocols.transport.ProtocolTransport` 装进 `AsyncOpenAI` 的
+  `DefaultAsyncHttpxClient`，拦下 `POST …/chat/completions` 改写成上游协议，响应与流式转回 Chat 形状；必须用 openai
+  3.x 自带的 `httpx2`。与局域网网关的 `UpdatingAwareTransport` 叠加时转换在外层、等待重发在内层（重发的是转换后的
+  同一个请求）。流式里 Anthropic `message_delta` 的用量是累计值，取最后一次；`error` 事件转成 `{"error": …}` 数据块，
+  流没收到 `message_stop` 就断了按错误处理。
 - **用量归一**：`llm_protocols.usage.Usage` 的输入总量含缓存命中与缓存写入（Anthropic 的 `input_tokens` 不含缓存，
   要加上 `cache_read_input_tokens` 与 `cache_creation_input_tokens`；Gemini 的 `promptTokenCount` 已含缓存、输出要加
   `thoughtsTokenCount`）。转回 Chat 形状时缓存写入放在 `prompt_tokens_details.cache_write_tokens`（与 OpenAI

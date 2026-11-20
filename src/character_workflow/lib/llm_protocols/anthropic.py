@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -204,3 +205,105 @@ def from_upstream(body: Any) -> dict:
     if (usage := from_anthropic(body.get("usage"))) is not None:
         result["usage"] = to_chat(usage)
     return result
+
+
+class StreamTranslator:
+    """Anthropic 流式事件 → Chat Completions 流式块（SSE 字节）。带状态，逐块喂；字节可以在任意位置切开。
+
+    契约出处：https://platform.claude.com/docs/en/build-with-claude/streaming
+    - `message_start` 给输入用量；`message_delta` 的用量是**累计值**（取最后一次，不相加）。
+    - `content_block_start(tool_use)` 开一个工具调用，`input_json_delta` 逐段给参数；文本是 `text_delta`。
+    - `message_stop` 收尾：先发一个 `choices: []` 带 usage 的块（与 OpenAI `include_usage` 同形），再发 `[DONE]`。
+    - `error` 事件：发一个 `{"error": …}` 数据块（openai SDK 见到就抛 APIError），不发 `[DONE]`。
+    思考块（thinking / signature）不转：Agent 对 Anthropic 不开思考（ADR-0044）。
+    """
+
+    def __init__(self, model: str) -> None:
+        self._model = model
+        self._id = ""
+        self._created = int(time.time())
+        self._buffer = b""
+        self._tools: dict[int, int] = {}  # Anthropic 内容块下标 → Chat 工具调用下标
+        self._usage: dict[str, int] = {}
+        self.finished = False
+
+    def feed(self, chunk: bytes) -> bytes:
+        self._buffer += chunk
+        out: list[bytes] = []
+        *lines, self._buffer = self._buffer.split(b"\n")
+        for raw in lines:
+            line = raw.rstrip(b"\r")
+            if not line.startswith(b"data:") or self.finished:
+                continue
+            try:
+                event = json.loads(line[5:].strip())
+            except ValueError:
+                continue
+            if isinstance(event, dict):
+                out.extend(self._handle(event))
+        return b"".join(out)
+
+    def finish(self) -> bytes:
+        """上游流结束时调用：没收到 `message_stop` 就是中途断了，发一个错误块。"""
+        if self.finished:
+            return b""
+        self.finished = True
+        return _sse({"error": {"message": "Anthropic 流式响应中途结束", "type": "incomplete_stream"}})
+
+    def _chunk(self, delta: dict, finish: str | None = None) -> bytes:
+        return _sse({"id": self._id, "object": "chat.completion.chunk", "created": self._created,
+                     "model": self._model,
+                     "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
+
+    def _handle(self, event: dict) -> list[bytes]:
+        kind = event.get("type")
+        if kind == "message_start":
+            message = event.get("message") or {}
+            self._id = str(message.get("id") or "")
+            self._usage.update({k: v for k, v in (message.get("usage") or {}).items()
+                                if isinstance(v, int)})
+            return [self._chunk({"role": "assistant", "content": ""})]
+        if kind == "content_block_start":
+            block = event.get("content_block") or {}
+            if block.get("type") != "tool_use":
+                return []
+            position = self._tools.setdefault(event.get("index"), len(self._tools))
+            return [self._chunk({"tool_calls": [{
+                "index": position, "id": block.get("id"), "type": "function",
+                "function": {"name": block.get("name"), "arguments": ""}}]})]
+        if kind == "content_block_delta":
+            delta = event.get("delta") or {}
+            if delta.get("type") == "text_delta" and delta.get("text"):
+                return [self._chunk({"content": delta["text"]})]
+            if delta.get("type") == "input_json_delta" and delta.get("partial_json"):
+                position = self._tools.get(event.get("index"))
+                if position is None:
+                    return []
+                return [self._chunk({"tool_calls": [{
+                    "index": position, "function": {"arguments": delta["partial_json"]}}]})]
+            return []
+        if kind == "message_delta":
+            # 累计值：后来的覆盖先前的，不相加。
+            self._usage.update({k: v for k, v in (event.get("usage") or {}).items()
+                                if isinstance(v, int)})
+            stop = (event.get("delta") or {}).get("stop_reason")
+            return [self._chunk({}, _FINISH.get(stop, "stop"))] if stop else []
+        if kind == "message_stop":
+            self.finished = True
+            out = []
+            if (usage := from_anthropic(self._usage)) is not None:
+                out.append(_sse({"id": self._id, "object": "chat.completion.chunk",
+                                 "created": self._created, "model": self._model, "choices": [],
+                                 "usage": to_chat(usage)}))
+            out.append(b"data: [DONE]\n\n")
+            return out
+        if kind == "error":
+            self.finished = True
+            error = event.get("error") or {}
+            return [_sse({"error": {"message": error.get("message") or "Anthropic 返回错误",
+                                    "type": error.get("type") or "api_error"}})]
+        return []  # ping、content_block_stop 与未知事件不转
+
+
+def _sse(payload: dict) -> bytes:
+    return b"data: " + json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n\n"
