@@ -25,7 +25,7 @@ from character_workflow.lib.canvas_projects import (
 )
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasListModelsInput, CanvasListProjectsInput, CanvasProjectInput,
-    CanvasReadMediaInput, GetRunInput, ImportMediaInput, RunInput,
+    CanvasReadMediaInput, CanvasReadVideoFramesInput, GetRunInput, ImportMediaInput, RunInput,
 )
 from character_workflow.lib.jobs import list_jobs
 from character_workflow.lib.schemas import (
@@ -494,3 +494,28 @@ def read_media(principal: Any, payload: CanvasReadMediaInput) -> dict:
                              "data_base64": base64.b64encode(buffer.getvalue()).decode()}
     result.setdefault("mime_type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
     return result
+
+
+def read_video_frames(principal: Any, payload: CanvasReadVideoFramesInput) -> dict:
+    """视频等间隔取帧拼成一张联系表（只读）。preview 与 read_media 同一形状，由调用方决定怎么给模型看。"""
+    from character_workflow.lib import canvas_agent_video as video
+
+    authorize(principal, payload.project_id, "canvas_read")
+    try:
+        path, version = resolve_canvas_media(payload.project_id, payload.version_id)
+    except (FileNotFoundError, PermissionError, KeyError):
+        raise CanvasToolError("REFERENCE_NOT_ALLOWED", "媒体版本不属于这个画布", 403) from None
+    if version.kind != "video":
+        raise CanvasToolError("INVALID_TARGET", "这个版本不是视频，看图请用 read_media", 422)
+    try:
+        info, picks, sheet = video.contact_sheet_for(path, payload.count, payload.start_ms, payload.end_ms)
+    except video.VideoReadError as error:
+        raise CanvasToolError("MEDIA_UNREADABLE", f"视频无法解码：{error}", 422) from None
+    except ValueError as error:
+        raise CanvasToolError("INVALID_PARAMETERS", str(error), 422) from None
+    return {
+        "version_id": version.version_id, "duration_ms": info["duration_ms"], "fps": info["fps"],
+        "width": info["width"], "height": info["height"],
+        "frames": [{"index": index, "t_ms": t_ms} for index, t_ms in picks],
+        "preview": {"mime_type": "image/jpeg", "data_base64": base64.b64encode(sheet).decode()},
+    }

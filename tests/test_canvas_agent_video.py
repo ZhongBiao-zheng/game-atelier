@@ -69,3 +69,64 @@ def test_unreadable_files_raise_a_video_error(tmp_path):
         video.probe(broken)
     with pytest.raises(video.VideoReadError):
         video.read_frames(broken, [0])
+
+
+def test_frames_are_shrunk_to_the_cell_as_they_are_read():
+    frames = video.read_frames(FIXTURE, [0, 12], size=(48, 32))
+    assert [frame.size for frame in frames] == [(48, 32), (48, 32)]
+    info, picks, data = video.contact_sheet_for(FIXTURE, 4)
+    assert len(picks) == 4 and info["duration_ms"] == 1000
+    columns, rows, cell = video.layout(96, 64, 4)
+    gap, label = video.GAP, video.LABEL_HEIGHT
+    assert Image.open(io.BytesIO(data)).size == (gap + columns * (cell[0] + gap),
+                                                 gap + rows * (cell[1] + label + gap))
+
+
+@pytest.fixture
+def video_project(isolated_data_root):
+    from character_workflow.lib import canvas_agent_runtime as runtime
+    from character_workflow.lib import canvas_agent_tools as tools
+    from character_workflow.lib.canvas_agent_schema import ImportMediaInput
+    from character_workflow.lib.canvas_projects import create_canvas_project
+
+    project_id = create_canvas_project("短片").project_id
+    clip = isolated_data_root / "clip.mp4"
+    clip.write_bytes(FIXTURE.read_bytes())
+    still = isolated_data_root / "still.png"
+    Image.new("RGB", (8, 8), "red").save(still)
+    video_id = tools.import_media(runtime.LOCAL, ImportMediaInput(
+        project_id=project_id, expected_revision=0, path=str(clip)))["version_id"]
+    from character_workflow.lib.canvas_projects import read_canvas_document
+    image_id = tools.import_media(runtime.LOCAL, ImportMediaInput(
+        project_id=project_id, expected_revision=read_canvas_document(project_id).revision,
+        path=str(still)))["version_id"]
+    return project_id, video_id, image_id
+
+
+def test_agent_reads_a_video_as_one_attached_contact_sheet(video_project):
+    from character_workflow.lib import canvas_agent_runtime as runtime
+    from character_workflow.lib import canvas_agent_vision as vision
+
+    project_id, video_id, _ = video_project
+    result, created = runtime.execute_tool(project_id, "read_video_frames",
+                                           {"version_id": video_id, "count": 4})
+    assert created == [] and "preview" not in result
+    assert [frame["index"] for frame in result["frames"]] == [3, 9, 15, 21]
+    [ref] = result[vision.ATTACH_KEY]
+    assert ref.startswith(vision.PREVIEW_PREFIX)
+    assert vision.preview_data_url(ref).startswith("data:image/jpeg;base64,")
+    assert "read_video_frames" in runtime.READ_TOOLS  # 只读，不弹确认
+
+
+@pytest.mark.parametrize(("arguments", "code"), [
+    ({"which": "image"}, "INVALID_TARGET"),
+    ({"count": 10}, "参数错误"),  # 入参模型校验失败走所有工具共用的「参数错误」
+    ({"start_ms": 900, "end_ms": 500}, "INVALID_PARAMETERS"),
+])
+def test_agent_gets_a_readable_error(video_project, arguments, code):
+    from character_workflow.lib import canvas_agent_runtime as runtime
+
+    project_id, video_id, image_id = video_project
+    target = image_id if arguments.pop("which", None) == "image" else video_id
+    text, _ = runtime.run_tool_safely(project_id, "read_video_frames", {"version_id": target, **arguments})
+    assert runtime.is_tool_error(text) and code in text

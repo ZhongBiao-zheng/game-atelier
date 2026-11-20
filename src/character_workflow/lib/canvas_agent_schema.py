@@ -143,6 +143,13 @@ class CanvasReadMediaInput(CanvasProjectInput):
     version_id: EdgeId
 
 
+class CanvasReadVideoFramesInput(CanvasProjectInput):
+    version_id: EdgeId
+    count: int = Field(default=6, ge=1, le=9)
+    start_ms: int | None = Field(default=None, ge=0)
+    end_ms: int | None = Field(default=None, ge=1)
+
+
 class CanvasListModelsInput(CanvasProjectInput):
     mode: Literal["image", "video"] = "image"
 

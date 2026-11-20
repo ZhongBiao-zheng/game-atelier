@@ -29,7 +29,7 @@ from character_workflow.lib import keys, canvas_specs, team_library_specs
 from character_workflow.lib.canvas_agent_models import chat_base_url
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasChange, CanvasListModelsInput, CanvasProjectInput,
-    CanvasReadMediaInput, CanvasSearchLibraryInput, CanvasSearchTeamInput, GetRunInput, RunInput,
+    CanvasReadMediaInput, CanvasReadVideoFramesInput, CanvasSearchLibraryInput, CanvasSearchTeamInput, GetRunInput, RunInput,
 )
 from character_workflow.lib.canvas_agent_sessions import (
     mutate_canvas_agent_session, read_canvas_agent_session, with_appended_messages,
@@ -51,7 +51,8 @@ DELTA_FLUSH_SECONDS = 0.15
 MEDIA_SCHEME = "atelier-media://"
 LOCAL = SimpleNamespace(kind="local", session_id="canvas-chat", grant_id=None)
 
-READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "read_media", "load_skill",
+READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "read_media", "read_video_frames",
+                        "load_skill",
                         "read_skill_file", "wait_for_run", "read_spec", "search_library",
                         "search_team"})
 
@@ -74,7 +75,8 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
   即可，不用自己计算。
 - 发起生成后调用 wait_for_run 等结果，结果图会附在工具结果后面给你看。看完向用户简短汇报：
   画面是否符合要求、哪里需要改。只有用户明确让你「多试几次 / 迭代到满意」时才自己改提示词重跑。
-- 想看画布上已有的某张图，用 read_media，图片同样会附给你。
+- 想看画布上已有的某张图，用 read_media，图片同样会附给你。想看视频的画面，用 read_video_frames：
+  等间隔取帧拼成一张带时间码的联系表附给你（默认 6 帧，最多 9 帧，可限定时间范围）。
 - 图片尺寸：要固定像素写 size（如 1024x1536），按比例写 ratio（可加 resolution），二选一；
   不要同时写，界面按你写的那种显示。
 - 对比节点（type=compare）只接两张图：connect 时 slot 填 before 或 after；不填则先 before 后 after，
@@ -334,6 +336,15 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
         if result.get("kind") == "image":
             result[vision.ATTACH_KEY] = [payload.version_id]
         return result, []
+    if tool == "read_video_frames":
+        payload = CanvasReadVideoFramesInput(project_id=project_id, **arguments)
+        result = tools.read_video_frames(LOCAL, payload)
+        # 联系表落临时文件（.runtime/agent-images/，与插件工具附图同一机制），调模型前再附上。
+        ref = vision.store_preview(result.pop("preview"))
+        if ref is None:
+            raise CanvasToolError("CONTENT_TOO_LARGE", "联系表太大，减少帧数后重试", 413)
+        result[vision.ATTACH_KEY] = [ref]
+        return result, []
     if tool == "load_skill":
         return {"name": arguments["name"], "content": skills.read_skill(arguments["name"])}, []
     if tool == "read_skill_file":
@@ -469,6 +480,13 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
     "read_media": ("读取一个媒体版本的元数据（类型、尺寸、时长）。",
                    {"type": "object", "required": ["version_id"],
                     "properties": {"version_id": {"type": "string"}}}),
+    "read_video_frames": ("看一个视频版本的画面：等间隔取 count 帧（1–9，默认 6）拼成一张带时间码的"
+                          "联系表附给你；可用 start_ms / end_ms 限定时间范围。只读。",
+                          {"type": "object", "required": ["version_id"], "properties": {
+                              "version_id": {"type": "string"},
+                              "count": {"type": "integer", "minimum": 1, "maximum": 9},
+                              "start_ms": {"type": "integer", "minimum": 0},
+                              "end_ms": {"type": "integer", "minimum": 1}}}),
     "wait_for_run": ("等一次生成跑完（最多约 4 分钟），返回状态与产物版本；成功的图片会附给你看。",
                      {"type": "object", "required": ["run_id"],
                       "properties": {"run_id": {"type": "string"}}}),
@@ -689,6 +707,7 @@ def _arguments(raw: str | None) -> dict:
 
 
 READ_LABELS = {"get_canvas": "读取画布", "list_models": "查看可用模型", "get_run": "查询生成进度",
+               "read_video_frames": "查看视频画面",
                "read_media": "读取媒体信息", "wait_for_run": "等待生成结果",
                "search_library": "查找项目参考", "search_team": "查找团队库参考",
                "read_spec": "读取类别规范"}

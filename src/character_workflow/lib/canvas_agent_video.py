@@ -64,7 +64,18 @@ def sample_indices(info: dict, count: int, start_ms: int | None = None,
     return sorted(picked.items())
 
 
-def read_frames(path: Path, indices: list[int]) -> list[Image.Image]:
+def layout(width: int, height: int, count: int) -> tuple[int, int, tuple[int, int]]:
+    """联系表排布：(列数, 行数, 每格尺寸)。近似方阵，整张长边不超过 SHEET_LONG_EDGE，小视频不放大。"""
+    columns = math.ceil(math.sqrt(count))
+    rows = math.ceil(count / columns)
+    scale = min(1.0, (SHEET_LONG_EDGE - GAP * (columns + 1)) / (columns * width),
+                (SHEET_LONG_EDGE - (GAP + LABEL_HEIGHT) * rows - GAP) / (rows * height))
+    return columns, rows, (max(1, int(width * scale)), max(1, int(height * scale)))
+
+
+def read_frames(path: Path, indices: list[int], size: tuple[int, int] | None = None) -> list[Image.Image]:
+    """按帧号取帧（RGB）。给了 size 就每读出一帧立即缩到这么大再保留：4K 视频取 9 帧按原尺寸留在
+    内存里要两百多 MB。"""
     wanted, found = set(indices), {}
     capture = cv2.VideoCapture(str(path))
     try:
@@ -74,6 +85,8 @@ def read_frames(path: Path, indices: list[int]) -> list[Image.Image]:
             if index in wanted:
                 ok, frame = capture.read()
                 if ok:
+                    if size is not None and (frame.shape[1], frame.shape[0]) != size:
+                        frame = cv2.resize(frame, size, interpolation=cv2.INTER_AREA)
                     found[index] = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), "RGB")
             else:
                 ok = capture.grab()
@@ -91,12 +104,7 @@ def _label(t_ms: int) -> str:
 
 def contact_sheet(frames: list[tuple[int, Image.Image]]) -> bytes:
     """[(毫秒, 帧)] → JPEG：近似方阵排布，每格下方标时间，整张长边不超过 SHEET_LONG_EDGE。"""
-    columns = math.ceil(math.sqrt(len(frames)))
-    rows = math.ceil(len(frames) / columns)
-    width, height = frames[0][1].size
-    scale = min(1.0, (SHEET_LONG_EDGE - GAP * (columns + 1)) / (columns * width),
-                (SHEET_LONG_EDGE - (GAP + LABEL_HEIGHT) * rows - GAP) / (rows * height))
-    cell = (max(1, int(width * scale)), max(1, int(height * scale)))
+    columns, rows, cell = layout(*frames[0][1].size, len(frames))
     sheet = Image.new("RGB", (GAP + columns * (cell[0] + GAP),
                               GAP + rows * (cell[1] + LABEL_HEIGHT + GAP)), "black")
     draw = ImageDraw.Draw(sheet)
@@ -104,8 +112,18 @@ def contact_sheet(frames: list[tuple[int, Image.Image]]) -> bytes:
     for position, (t_ms, frame) in enumerate(frames):
         x = GAP + (position % columns) * (cell[0] + GAP)
         y = GAP + (position // columns) * (cell[1] + LABEL_HEIGHT + GAP)
-        sheet.paste(frame.resize(cell, Image.Resampling.LANCZOS), (x, y))
+        sheet.paste(frame if frame.size == cell else frame.resize(cell, Image.Resampling.LANCZOS), (x, y))
         draw.text((x + 4, y + cell[1] + 3), _label(t_ms), fill="white", font=font)
     buffer = io.BytesIO()
     sheet.save(buffer, "JPEG", quality=82)
     return buffer.getvalue()
+
+
+def contact_sheet_for(path: Path, count: int = DEFAULT_FRAMES, start_ms: int | None = None,
+                      end_ms: int | None = None) -> tuple[dict, list[tuple[int, int]], bytes]:
+    """探测 → 取点 → 读帧（读出即缩到格子大小）→ 联系表。返回 (视频信息, [(帧号, 毫秒)], JPEG)。"""
+    info = probe(path)
+    picks = sample_indices(info, count, start_ms, end_ms)
+    _, _, cell = layout(info["width"], info["height"], len(picks))
+    frames = read_frames(path, [index for index, _ in picks], cell)
+    return info, picks, contact_sheet([(t_ms, frame) for (_, t_ms), frame in zip(picks, frames)])
