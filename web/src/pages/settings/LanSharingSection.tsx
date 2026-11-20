@@ -34,7 +34,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
   const [tab, setTab] = useState('members');
   const [state, setState] = useState<GatewayState | null>(null);
   const [service, setService] = useState<GatewayService | null>(null);
-  const [options, setOptions] = useState<GatewayOptions>({ models: [], aliases: [] });
+  const [options, setOptions] = useState<GatewayOptions>({ providers: [] });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [port, setPort] = useState('');
@@ -95,7 +95,7 @@ export function LanSharingSection({ gatewayAlias }: { gatewayAlias?: string }) {
             </span>
           </div>
           {state && !state.config_error && <p className="text-xs text-muted-foreground">{state.enabled
-            ? <>{options.models.length} 个模型 · {state.keys.filter(key => !key.revoked_at).length} 位在用成员 · 本月全员花费 {formatGenerationCost(state.keys.reduce((sum, key) => sum + key.month_charged_cny, 0))}{state.quarantined_tasks ? ` · ${state.quarantined_tasks} 个损坏任务已隔离` : ''}</>
+            ? <>{new Set((options.providers ?? []).filter(p => p.enabled).flatMap(p => p.models.map(m => m.route_id))).size} 个模型 · {state.keys.filter(key => !key.revoked_at).length} 位在用成员 · 本月全员花费 {formatGenerationCost(state.keys.reduce((sum, key) => sum + key.month_charged_cny, 0))}{state.quarantined_tasks ? ` · ${state.quarantined_tasks} 个损坏任务已隔离` : ''}</>
             : '开启后，同事可以用你的供应商出图，按成员限额记账'}</p>}
           {state?.config_error && <p className="break-all text-sm text-destructive">{state.config_error}</p>}
           {state?.enabled && state.status.error && <p className="text-sm text-destructive">{state.status.error}</p>}

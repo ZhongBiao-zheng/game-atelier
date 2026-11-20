@@ -15,12 +15,14 @@ export interface LimitStatus extends GatewayLimit {
   left_cny: number;
   resets_at: string;
 }
+/** 范围里的一个供应商：models 为 null 时是它的全部模型（含以后新增）。 */
+export interface ScopeEntry { alias: string; models: string[] | null }
 export interface GatewayKeyInput {
   name: string;
   role?: 'member' | 'admin';
   limits: GatewayLimit[];
-  allowed_models: string[] | null;
-  allowed_aliases: string[] | null;
+  /** null = 全部模型（所有供应商，含以后新增）。 */
+  scope: ScopeEntry[] | null;
 }
 export interface GatewayKey extends GatewayKeyInput {
   id: string;
@@ -39,10 +41,12 @@ export interface GatewayMe {
   month_charged_cny: number;
   month_calls: number;
 }
-export interface GatewayOptions {
-  models: { id: string; name: string; modality: 'image' | 'video' | 'audio' | 'text' }[];
-  aliases: { alias: string; provider: string; name: string }[];
+export interface ScopeProviderModel {
+  id: string; name: string; modality: 'image' | 'video' | 'audio' | 'text'; route_id: string | null;
 }
+export interface ScopeProvider { alias: string; provider: string; enabled: boolean; models: ScopeProviderModel[] }
+/** 旧主机回 {models, aliases}，没有 providers：界面据此提示先更新主机。 */
+export interface GatewayOptions { providers?: ScopeProvider[] }
 
 export interface GatewayState {
   enabled: boolean;

@@ -39,4 +39,16 @@ describe('局域网 Atelier 供应商', () => {
       modalities: ['image'], models: [{ id: 'gpt-image-2', via }],
     });
   });
+
+  it('连上网关但这把密钥没有可用模型：说清原因，保存仍禁用（第 7 批）', async () => {
+    vi.mocked(checkGateway).mockResolvedValue({ info: { name: '美术组', version: '5.99.0', protocol: 2 }, models: [] });
+    render(<KeyForm onCreated={vi.fn()} onCancel={vi.fn()} />);
+    await chooseOption(screen.getByLabelText('供应商选择'), /^Remote Atelier ·/);
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '美术组网关' } });
+    fireEvent.change(screen.getByLabelText('网关地址'), { target: { value: 'http://192.168.1.20:5180' } });
+    fireEvent.change(screen.getByLabelText('网关密钥'), { target: { value: 'atg_x' } });
+    fireEvent.click(screen.getByRole('button', { name: '连接网关' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('这把网关密钥没有可用的模型，请联系主机管理员');
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+  });
 });

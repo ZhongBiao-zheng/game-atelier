@@ -214,6 +214,8 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
       });
       setGatewayModels(result.models);
       setGatewayInfo(`${result.info.name} · ${result.info.version}`);
+      // 连上了但一个模型都没有：保存仍禁用，说清原因（第 7 批前这里静默）。
+      if (!result.models.length) setGatewayError('这把网关密钥没有可用的模型，请联系主机管理员');
     } catch (e) {
       // 服务端已给出能照着做的原因，不再附带「（HTTP 502）」这类状态码。
       setGatewayError(e instanceof ApiError && e.reason ? `连接网关失败：${e.reason}` : e instanceof Error ? e.message : String(e));

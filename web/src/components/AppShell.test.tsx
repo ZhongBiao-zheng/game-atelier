@@ -148,7 +148,7 @@ describe('AppShell', () => {
       ok: true,
       json: async () => (String(url) === '/api/gateway'
         ? { enabled: true, port: 5180, keys: [], status: { running: false, addresses: [] } }
-        : String(url) === '/api/gateway/options' ? { models: [], aliases: [] }
+        : String(url) === '/api/gateway/options' ? { providers: [] }
         : String(url) === '/api/gateway-shares' ? { libraries: [], size_bytes: 0 }
         : String(url) === '/api/profile' ? { display_name: '我' } : {}),
     }));

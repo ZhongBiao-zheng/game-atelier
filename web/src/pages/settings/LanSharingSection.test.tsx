@@ -11,12 +11,13 @@ vi.mock('@/hooks/useSSE', () => ({ useSSE: vi.fn() }));
 vi.mock('@/api/gateway', () => ({ GATEWAY_TOKEN_LENGTH: 47, adminBase: (alias: string) => `/api/gateway/providers/${alias}/admin`, fetchGateway: vi.fn(), fetchGatewayOptions: vi.fn(), fetchGatewayService: vi.fn(),
   fetchGatewayTasks: vi.fn(), fetchGatewayMembers: vi.fn(), createGatewayKey: vi.fn(), updateGatewayKey: vi.fn(),
   resetGatewayKey: vi.fn(), revealGatewayKey: vi.fn(), revokeGatewayKey: vi.fn(), updateGateway: vi.fn(), gatewayOutputUrl: vi.fn() }));
-const key: api.GatewayKey = { id: 'k1', name: '小王', limits: [], allowed_models: null, allowed_aliases: null,
+const key: api.GatewayKey = { id: 'k1', name: '小王', limits: [], scope: null,
   created_at: '', revoked_at: null, month_charged_cny: .5, month_calls: 1, last_used_at: null, limits_status: [] };
 const state: api.GatewayState = { enabled: true, port: 5180, name: '', default_name: 'mac', keys: [key], status: { running: true, port: 5180, error: null, addresses: ['192.168.1.20'] } };
 beforeEach(() => { vi.clearAllMocks();
   vi.mocked(api.fetchGateway).mockResolvedValue(state);
-  vi.mocked(api.fetchGatewayOptions).mockResolvedValue({ models: [{ id: 'gpt', name: 'GPT', modality: 'image' }], aliases: [{ alias: 'HK', name: 'HK', provider: 'custom' }] });
+  vi.mocked(api.fetchGatewayOptions).mockResolvedValue({ providers: [{ alias: 'HK', provider: 'custom', enabled: true,
+    models: [{ id: 'gpt', name: 'GPT', modality: 'image', route_id: 'gpt' }] }] });
   vi.mocked(api.fetchGatewayTasks).mockResolvedValue([]);
   vi.mocked(api.fetchGatewayMembers).mockResolvedValue({ members: [], unavailable_routes: [] });
   vi.mocked(api.fetchGatewayService).mockResolvedValue({ state: 'unsupported', install_command: null });
@@ -40,7 +41,7 @@ describe('LAN sharing', () => {
     fireEvent.change(name, { target: { value: '小李' } });
     fireEvent.change(screen.getByLabelText('自定义密钥（可选）'), { target: { value: 'test_only_custom' } });
     fireEvent.submit(name.closest('form')!);
-    await waitFor(() => expect(api.createGatewayKey).toHaveBeenCalledWith({ role: 'member', name: '小李', token: 'test_only_custom', limits: [], allowed_models: null, allowed_aliases: null }));
+    await waitFor(() => expect(api.createGatewayKey).toHaveBeenCalledWith({ role: 'member', name: '小李', token: 'test_only_custom', limits: [], scope: null }));
     await waitFor(() => expect(screen.queryByLabelText('名称')).not.toBeInTheDocument());
     expect(screen.queryByText('atg_test_only_custom')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '新建成员密钥' }));
@@ -245,13 +246,13 @@ it('模型与额度在关闭弹层时保存，失败后回滚到服务器值', a
   render(<LanSharingSection />);
   fireEvent.click(await screen.findByRole('button', { name: '全部模型' }));
   fireEvent.click(screen.getByRole('switch', { name: '全部模型' }));
-  fireEvent.click(screen.getByLabelText('GPT'));
-  fireEvent.keyDown(screen.getByLabelText('模型与供应商'), { key: 'Escape' });
-  await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { allowed_models: ['gpt'], allowed_aliases: null }));
+  fireEvent.click(within(screen.getByRole('region', { name: 'HK' })).getAllByRole('checkbox')[1]);
+  fireEvent.keyDown(screen.getByLabelText('可用模型'), { key: 'Escape' });
+  await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { scope: [{ alias: 'HK', models: ['gpt'] }] }));
   expect(await screen.findByRole('alert')).toHaveTextContent('保存失败');
   fireEvent.click(screen.getByRole('button', { name: '全部模型' }));
   expect(screen.getByRole('switch', { name: '全部模型' })).toBeChecked();
-  fireEvent.keyDown(screen.getByLabelText('模型与供应商'), { key: 'Escape' });
+  fireEvent.keyDown(screen.getByLabelText('可用模型'), { key: 'Escape' });
   vi.mocked(api.updateGatewayKey).mockResolvedValue(key);
   fireEvent.click(screen.getByRole('button', { name: '额度' }));
   fireEvent.change(screen.getByLabelText('今日限额'), { target: { value: '10' } });
