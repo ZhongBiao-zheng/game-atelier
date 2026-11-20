@@ -340,3 +340,40 @@ def test_upload_is_management_and_reading_is_not():
 
     assert local_capability("POST", "/api/provider-icons") == "manage"
     assert local_capability("GET", "/api/provider-icons/" + "a" * 64) == "read"
+
+
+# --- 网关只下发 brand:（I1 5/n）----------------------------------------------------------
+
+def _gateway_with_member_icons(icons: dict[str, str | None]):
+    from character_workflow.lib import gateway_keys
+
+    for alias, icon in icons.items():
+        keys.add_key(keys.KeySpec(
+            alias=alias, provider="custom", base_url=f"https://{alias.lower()}.example/v1",
+            access_key="host-secret", modalities=["image"], icon=icon, created_at="t",
+            models=[keys.ModelSpec(id="img-x", name="Img X", modality="image")]))
+    _, token = gateway_keys.create_key("成员")
+    gateway = TestClient(create_gateway_app(), headers={"Authorization": f"Bearer {token}"})
+    return gateway.get("/gateway/v1/models").json()["models"]
+
+
+def test_gateway_sends_brand_icons_but_never_uploaded_files(isolated_data_root):
+    uploaded = provider_icons.store(_image("PNG"))
+    [route] = _gateway_with_member_icons({"Brand": "brand:deepseek", "Upload": uploaded, "Plain": None})
+    members = {member["alias"]: member for member in route["members"]}
+    assert members["Brand"]["icon"] == "brand:deepseek"
+    assert "icon" not in members["Upload"] and "icon" not in members["Plain"]
+    assert uploaded[5:] not in json.dumps(route) and "host-secret" not in json.dumps(route)
+
+
+def test_member_snapshot_keeps_only_brand_icons():
+    from character_workflow.lib.callers.atelier_gateway import gateway_models
+
+    route = {"id": "img-x", "name": "Img X", "modality": "image", "members": [
+        {"alias": "A", "provider": "custom", "model_id": "img-x", "name": "Img X", "icon": "brand:gemini"},
+        {"alias": "B", "provider": "custom", "model_id": "img-x", "name": "Img X", "icon": "file:" + "c" * 64},
+        {"alias": "C", "provider": "custom", "model_id": "img-x", "name": "Img X"},
+    ]}
+    [model] = gateway_models([route])
+    assert [member.icon for member in model.via] == ["brand:gemini", None, None]
+    assert [("icon" in member.model_dump()) for member in model.via] == [True, False, False]

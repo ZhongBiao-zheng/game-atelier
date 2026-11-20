@@ -52,6 +52,21 @@ class ViaMember(BaseModel):
     name: str
     protocol: str | None = None
     billing_group: str | None = None
+    # 主机为这个成员选的内置品牌（I1）：只收 brand: 形式，上传的图片不经网关。
+    icon: str | None = None
+
+    @field_validator("icon")
+    @classmethod
+    def _brand_only(cls, value: str | None) -> str | None:
+        return value if value and value.startswith("brand:") else None
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_icon(self, handler):
+        # 没有图标时不写进快照：旧数据与精确比对的断言保持原样。
+        data = handler(self)
+        if data.get("icon") is None:
+            data.pop("icon", None)
+        return data
 
 
 class ModelSpec(BaseModel):

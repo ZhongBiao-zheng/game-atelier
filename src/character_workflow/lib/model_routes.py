@@ -63,6 +63,8 @@ class RouteMember:
     # 成员是局域网 Atelier 时：网关那边的成员快照（能力、估价按它算）。
     via: tuple[dict, ...] = ()
     billing_group: str | None = None
+    # KEY 的自定义图标（I1）；网关只把 brand: 形式下发给成员。
+    icon: str | None = None
 
 
 @dataclass(frozen=True)
@@ -113,7 +115,7 @@ def _routes(database: KeysDB) -> list[ModelRoute]:
                 alias=key.alias, provider=key.provider, base_url=key.base_url,
                 model_id=model.id, name=model.name or model.id, protocol=model.protocol,
                 via=tuple(item.model_dump() for item in model.via or ()),
-                billing_group=key.billing_group,
+                billing_group=key.billing_group, icon=key.icon,
             ))
     return [
         ModelRoute(

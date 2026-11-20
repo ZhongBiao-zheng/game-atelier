@@ -16,6 +16,8 @@ export interface ModelRouteMember {
   text_unsupported?: boolean;
   /** 成员是局域网 Atelier 时：网关那边的成员快照。 */
   via?: ModelRouteMember[];
+  /** 网关成员快照里主机选的内置品牌（I1）：只会是 brand: 形式。 */
+  icon?: string | null;
 }
 
 /** 路由组：成员按当前方式排列，实际提交会按当次参数冻结顺序。 */
