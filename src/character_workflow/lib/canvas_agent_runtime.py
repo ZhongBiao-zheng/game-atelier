@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -791,7 +792,31 @@ def display_messages(items: list[dict], turn_id: str) -> list[CanvasAgentMessage
 
 # ── 一轮对话 ────────────────────────────────────────────────────────────────────
 
-def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None] | None = None):
+def call_tag_for(session: CanvasAgentSession) -> str:
+    """经网关时每轮带的关联标记：会话 id + 会话 revision（每次写会话都 +1，同一轮内不变）。"""
+    return f"{session.session_id}:{session.revision}"
+
+
+def start_host_settlement(session: CanvasAgentSession) -> None:
+    """经网关的会话：登记这一轮的关联标记，后台向主机查结算额（查不到就留到下一轮或下次打开面板）。"""
+    key = keys.find_by_alias(session.model_alias or "")
+    if key is None or key.provider != agent_usage.GATEWAY_PROVIDER:
+        return
+
+    def work() -> None:
+        try:
+            agent_usage.add_pending(project_id=session.project_id, session_id=session.session_id,
+                                    call_tag=call_tag_for(session), alias=key.alias,
+                                    model=session.model or "")
+            agent_usage.settle_pending(session.project_id, session.session_id)
+        except Exception:  # noqa: BLE001 — 结算只是显示用，失败下次补查
+            logger.warning("canvas agent host settlement failed", exc_info=True)
+
+    threading.Thread(target=work, name="agent-host-settlement", daemon=True).start()
+
+
+def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None] | None = None,
+                call_tag: str | None = None):
     from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, set_tracing_disabled
     from openai import AsyncOpenAI, DefaultAsyncHttpxClient
     from openai.types.shared import Reasoning
@@ -809,8 +834,10 @@ def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None]
         http_client = DefaultAsyncHttpxClient(
             trust_env=False, transport=UpdatingAwareTransport(on_wait=on_gateway_wait))
         retries = 0
+    # 经网关时带关联标记，主机把它记在这把密钥的用量行上，成员每轮结束按它查回结算额。
+    headers = {"X-Atelier-Call-Tag": call_tag} if key.provider == "atelier" and call_tag else None
     client = AsyncOpenAI(base_url=chat_base_url(key), api_key=key.access_key, max_retries=retries,
-                         http_client=http_client)
+                         http_client=http_client, default_headers=headers)
     settings = ModelSettings(reasoning=Reasoning(effort=session.effort)) if session.effort \
         else ModelSettings()
     return Agent(
@@ -895,7 +922,8 @@ async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: D
     from agents import Runner
 
     from character_workflow.lib.gateway_text_wait import WAITING_LABEL
-    agent = build_agent(session, on_gateway_wait=lambda: buffer.tool(WAITING_LABEL))
+    agent = build_agent(session, on_gateway_wait=lambda: buffer.tool(WAITING_LABEL),
+                        call_tag=call_tag_for(session))
     context = TurnContext(session.project_id, session.permission_mode,
                           set(session.created_node_ids), ModelScope.of(session),
                           session.session_id, session.model_alias or "", session.model or "")
@@ -967,6 +995,9 @@ async def run_turn(project_id: str, session_id: str, notify: Notify) -> None:
                                 "failed", friendly_error(error))
         notify_session(notify, project_id, session_id)
         return
+    finally:
+        # 成功、失败、被停止都查：已经发生的请求主机都结算了。
+        start_host_settlement(session)
 
     items = dehydrate(_jsonable(result.to_input_list()), reverse)
     new_items = items[len(base):]

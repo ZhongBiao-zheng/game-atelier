@@ -81,7 +81,7 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 
 - `GET /gateway/v1/info` → `{name, version, protocol: 2}`。协议版本不一致时接入端直接报错，不做兼容。
 - `GET /gateway/v1/models` → 返回 `{models: [{id, name, modality, members}]}`，成员为供应商公开信息，含全部模态；控制台专用的 `mode / candidate_alias / estimate_cny` 不属于此目录协议；按当前密钥的模型与 alias 权限过滤，排除 atelier 成员，视频成员保留 `protocol`。
-- `GET /gateway/v1/me` → `{id, role, name, limits: [{period, cap_cny, used_cny, reserved_cny, left_cny, resets_at}], month_charged_cny, month_calls}`，只读当前密钥。
+- `GET /gateway/v1/me` → `{id, role, name, limits: [{period, cap_cny, used_cny, reserved_cny, left_cny, resets_at}], month_charged_cny, month_calls}`，只读当前密钥。可选 `?call_tag=<标记>`（格式 `^[A-Za-z0-9:_-]{1,128}$`）时多回 `call_tag: {requests, charged_cny}`：近 40 天里这把密钥名下带这个标记的文本调用次数与结算额，别的密钥的行一律不算；格式不对当没带，不回该字段。
 - `POST /gateway/v1/tasks`：multipart，字段 `request`（JSON：`kind`、`model` 路由 id、`prompt`、`n`、`size`、`params`）+ 素材文件。
   `kind` 为 image / image_edit / layer_split / video / audio；文件组 `ref_0`…`ref_15`、`mask`、
   `mj_sref_0`…`mj_sref_7` / `mj_cref_0`…`mj_cref_7` / `mj_oref_0`…`mj_oref_7`、
@@ -193,6 +193,7 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 - `GET /gateway/v1/openai/models` → OpenAI `{object: "list", data: [{id, object: "model", owned_by: "atelier", ...能力字段}]}`。只列获准的文本路由，能力取首个获准成员的上游 `/models`，取不到则声明 `supported_parameters: ["tools"]`。
 - `POST /gateway/v1/openai/chat/completions`、`POST /gateway/v1/openai/responses`：Bearer 鉴权；JSON 请求体最多 32 MiB。model 为路由 id，上游改为实际成员 id；非流式响应的 model 改回路由 id，流式 SSE 字节不改写。
 - 仅生成上游 Authorization、Content-Type、Accept 头，不转发接入端 cookie 或其他请求头。chat 流缺少 `stream_options.include_usage` 时自动设 true；旁路提取 chat 或 Responses 用量。
+- 请求头 `X-Atelier-Call-Tag`（格式同上）：合法时只记在这一次调用的用量行上（`call_tag` 字段），不转给上游、不进任务文件和主机用量页；不合规当没带，照常中转。旧版本读用量行按整行字典解析，多出的键不影响。
 - 按输入估算 token 和该密钥最近 50 次文本输出平均 token（无历史 1000）估价预占，取消/结束释放预占。输入估算：`url` / `image_url` 字段里的每张内嵌图片（`data:image/…`）按 1600 token 计（`gateway_text.IMAGE_INPUT_TOKENS_ESTIMATE`，出处 Anthropic 视觉文档，约 1.15MP 以内的图片约 宽×高÷750、上限约 1600），其余请求字节 / 3；以前图片也按 base64 字节 / 3，一张 1024px 的图会被估成几万 token。只影响预扣，结算照旧按上游用量；估值偏低时这一次调用可能略超额度，下一次准入时被拦。用量行 kind=text，不存 prompt；进行中调用在 gateway_live 登记。
 - 文本计价（2026-11-18 起，价格见 `docs/references/generation-pricing.md`「文本按 token」）：按实际服务的成员 KEY 与模型计价。用量优先读 `prompt_tokens` / `completion_tokens`（chat/completions），没有时读 `input_tokens` / `output_tokens`（responses）；`*_tokens_details.cached_tokens` 为缓存命中部分。
 - 文本结算：OpenRouter 回报 `usage.cost`（美元）时记为上游实付（`actual_cost_source="upstream"`），成功、失败都按它扣；其余按 token 同步价算出的金额记为 `"price_table"`，只在成功时扣，失败扣 0；无价扣 0。上游返回 2xx 却始终没有用量时，用量行记 `usage_missing: true`、扣 0，由主机承担（`gateway_stats` 单列条数）；从未被上游接受的调用不记 `usage_missing`。
@@ -504,7 +505,7 @@ sequence，只保存可见消息、reasoning summary、稳定 node/version 引�
 
 Agent 每次调对话模型都在 `.runtime/agent-usage/YYYY-MM.jsonl` 追加一行
 `{ time, project_id, session_id, alias, model, provider, source, input_tokens, output_tokens, cached_tokens, cost_cny, cost_source }`（只有统计字段，不记提示词与对话内容），
-按请求计价（`estimate_text_cost_cny`），`cost_cny: null` 为未计价；`cost_source` 为 `price_table` / `host` / null。经局域网网关（provider=atelier）的请求由主机结算，本机记 null、`source: "lan"`、`cost_source: "host"`。
+按请求计价（`estimate_text_cost_cny`），`cost_cny: null` 为未计价；`cost_source` 为 `price_table` / `host` / null。经局域网网关（provider=atelier）的请求由主机结算，本机记 null、`source: "lan"`、`cost_source: "host"`；每轮对话带 `X-Atelier-Call-Tag: <session_id>:<会话 revision>`，轮次结束（含失败、停止）后台查 `/gateway/v1/me?call_tag=`，查到后追加一行 `kind: "host_settlement"`（token 记 0、`cost_cny` 为主机结算额），会话合计与用量页的经网关金额只取这些行。查不到（主机不可达、还没写完用量）的标记存在 `.runtime/agent-usage/pending-host.json`，下一轮结束或读会话用量时补查，超过 1 天放弃；旧主机不回 `call_tag` 字段时放弃补查，界面保持「主机结算」。
 只追加不替换，追加在文件锁内一行写完；读取跳过解析不了的行并在日志里记跳过数。画布或会话删除后记录保留，用量页显示「已删除的项目」「Agent 对话：已删除的对话」。
 不记成 Job（/api/jobs 每个任务文件约 60µs，随 Agent 使用线性变慢）。`GET .../agent/sessions/{session_id}/usage`
 返回会话累计 `{ requests, input_tokens, output_tokens, cost_cny, unpriced, source }`，`cost_cny` 只合计有价格的请求；

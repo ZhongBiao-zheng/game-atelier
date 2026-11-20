@@ -502,3 +502,36 @@ def test_image_estimate_only_counts_image_data_urls():
         {'type': 'text', 'text': prompt}, {'type': 'input_audio', 'url': audio},
         {'type': 'input_image', 'image_url': 'https://example.com/a.png'}]}]}
     assert input_tokens_estimate(payload, 9000) == 3000
+
+
+def test_call_tag_lands_only_on_the_callers_usage_row_and_bad_tags_are_ignored(setup, monkeypatch):
+    client = _priced_setup(setup, monkeypatch, {'prompt_tokens': 1000, 'completion_tokens': 1000})
+    seen = setup[2]
+    payload = {'model': 'gpt-test', 'messages': []}
+    tagged = client.post(f'{BASE}/chat/completions', json=payload,
+                         headers={'X-Atelier-Call-Tag': 'session-abc12345:7'})
+    assert tagged.status_code == 200
+    assert 'x-atelier-call-tag' not in {name.lower() for name in seen[-1].headers}  # 不转给上游
+    for bad in ('has space', 'x' * 129, '中文', 'a/b'):
+        response = client.post(f'{BASE}/chat/completions', json=payload,
+                               headers={'X-Atelier-Call-Tag': bad.encode('utf-8')})
+        assert response.status_code == 200  # 不合规的标记当没带，照常中转
+    usage = rows()
+    assert usage[0]['call_tag'] == 'session-abc12345:7'
+    assert all('call_tag' not in row for row in usage[1:])
+
+
+def test_me_reports_a_call_tag_only_for_the_asking_key(setup, monkeypatch):
+    client = _priced_setup(setup, monkeypatch, {'prompt_tokens': 1000, 'completion_tokens': 1000})
+    for _ in range(2):
+        client.post(f'{BASE}/chat/completions', json={'model': 'gpt-test', 'messages': []},
+                    headers={'X-Atelier-Call-Tag': 'session-abc12345:7'})
+    charged = sum(row['charged_cny'] for row in rows())
+    me = client.get('/gateway/v1/me', params={'call_tag': 'session-abc12345:7'}).json()
+    assert me['call_tag'] == {'requests': 2, 'charged_cny': round(charged, 6)} and charged == 0.006
+    assert client.get('/gateway/v1/me').json().get('call_tag') is None
+    assert 'call_tag' not in client.get('/gateway/v1/me', params={'call_tag': 'bad tag'}).json()
+    _, other_token = gateway_keys.create_key('另一个成员')
+    other = TestClient(setup[4], headers={'Authorization': f'Bearer {other_token}'})
+    assert other.get('/gateway/v1/me', params={'call_tag': 'session-abc12345:7'}).json()['call_tag'] \
+        == {'requests': 0, 'charged_cny': 0}

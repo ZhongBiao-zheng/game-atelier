@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from character_workflow.lib import gateway_access, gateway_keys, gateway_quota, gateway_tasks, model_routes
 from character_workflow.lib.gateway_keys import GatewayKeyRecord
 from character_workflow.lib.gateway_tasks import GatewayRequestError
+from character_workflow.lib.gateway_text import valid_call_tag
 from viewer_server import loop_watch
 
 PROTOCOL_VERSION = 2
@@ -156,8 +157,9 @@ def create_gateway_app() -> FastAPI:
         return {"models": [_route_view(route, key) for route in routes]}
 
     @app.get("/gateway/v1/me")
-    def me(key: GatewayKeyRecord = Depends(_require_key)) -> dict[str, Any]:
-        return gateway_quota.me(key)
+    def me(call_tag: str | None = None, key: GatewayKeyRecord = Depends(_require_key)) -> dict[str, Any]:
+        # 格式不对的标记当没带：不报错，也不回 call_tag 字段（成员端据此保持「主机结算」）。
+        return gateway_quota.me(key, call_tag=valid_call_tag(call_tag))
 
     @app.post("/gateway/v1/tasks", status_code=202)
     async def submit(request: Request, key: GatewayKeyRecord = Depends(_require_key)) -> dict:

@@ -1,5 +1,6 @@
 """Text admission and settlement share the image-task quota lock and usage journal."""
 import math
+import re
 import uuid
 from datetime import datetime
 
@@ -12,6 +13,14 @@ from character_workflow.lib import gateway_live, gateway_quota, gateway_tasks, g
 # 少于实际结算，成员可能在这一次里略超额度，下一次准入时被拦下。只影响预扣，结算照旧按上游用量。
 IMAGE_INPUT_TOKENS_ESTIMATE = 1600
 IMAGE_URL_KEYS = ("url", "image_url")
+# 成员端给每轮 Agent 对话带的关联标记：主机只把它记在这把密钥自己的用量行上，供成员按标记查回结算额。
+CALL_TAG_HEADER = "x-atelier-call-tag"
+_CALL_TAG = re.compile(r"^[A-Za-z0-9:_-]{1,128}$")
+
+
+def valid_call_tag(value: object) -> str | None:
+    """格式不对就当没带（照常中转，不拒绝请求）。"""
+    return value if isinstance(value, str) and _CALL_TAG.fullmatch(value) else None
 
 
 def _inline_images(value) -> tuple[int, int]:
@@ -51,8 +60,10 @@ def average_output_tokens(key_id: str) -> int:
 
 
 class TextCall:
-    def __init__(self, owner, route_id, picked, input_tokens: int, stream: bool, *, route_order=None):
-        """input_tokens：准入用的输入 token 估算（input_tokens_estimate）。"""
+    def __init__(self, owner, route_id, picked, input_tokens: int, stream: bool, *, route_order=None,
+                 call_tag: str | None = None):
+        """input_tokens：准入用的输入 token 估算（input_tokens_estimate）；call_tag 已校验过。"""
+        self.call_tag = call_tag
         key, model = picked
         now = gateway_tasks._now().isoformat()
         with gateway_tasks._lock:
@@ -122,7 +133,8 @@ class TextCall:
             self._settle()
             self.task.updated_at = datetime.now().astimezone().isoformat()
             try:
-                gateway_tasks._append_usage(self.task)
+                gateway_tasks._append_usage(
+                    self.task, {"call_tag": self.call_tag} if self.call_tag else None)
             finally:
                 gateway_quota._inflight.pop(self.task.task_id, None)
                 self.finished = True

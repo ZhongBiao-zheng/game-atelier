@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from datetime import datetime
 
 from fastapi import APIRouter, FastAPI, File, Form, Response, UploadFile
@@ -133,8 +134,18 @@ async def put_agent_settings(payload: CanvasAgentSettings) -> CanvasAgentSetting
 
 def _session_usage(project_id: str, session_id: str) -> dict:
     session = read_canvas_agent_session(project_id, session_id)
+    # 经网关的会话：打开面板时在后台补查主机结算，这次先返回已有的数，下次读到补上的。
+    threading.Thread(target=_settle_quietly, args=(project_id, session_id),
+                     name="agent-host-settlement", daemon=True).start()
     return agent_usage.session_totals(project_id, session_id,
                                       datetime.fromisoformat(session.created_at))
+
+
+def _settle_quietly(project_id: str, session_id: str) -> None:
+    try:
+        agent_usage.settle_pending(project_id, session_id)
+    except Exception:  # noqa: BLE001 — 只是显示用，下次再补
+        logger.warning("canvas agent host settlement failed", exc_info=True)
 
 
 @router.get(f"{SESSION}/usage")

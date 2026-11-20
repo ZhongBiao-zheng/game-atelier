@@ -104,9 +104,26 @@ def month_summary(key: GatewayKeyRecord, now: datetime | None = None) -> dict:
         }
 
 
-def me(key: GatewayKeyRecord, now: datetime | None = None) -> dict:
+CALL_TAG_LOOKBACK = timedelta(days=40)
+
+
+def call_tag_summary(key: GatewayKeyRecord, call_tag: str, now: datetime) -> dict:
+    """这把密钥名下带这个关联标记的文本调用：次数与结算额。别的密钥的行一律不算。"""
+    from character_workflow.lib import gateway_tasks
+
+    rows = [row for row in gateway_tasks.read_usage_range(now - CALL_TAG_LOOKBACK, now)
+            if row.get("key_id") == key.id and row.get("call_tag") == call_tag]
+    return {"requests": len(rows),
+            "charged_cny": round(sum(gateway_tasks.charged(row) for row in rows), 6)}
+
+
+def me(key: GatewayKeyRecord, now: datetime | None = None, call_tag: str | None = None) -> dict:
     from character_workflow.lib import gateway_tasks
 
     now = now or _local_now()
     with gateway_tasks._lock:
-        return {"id": key.id, "role": key.role, "name": key.name, "limits": usage_summary(key, now), **month_summary(key, now)}
+        result = {"id": key.id, "role": key.role, "name": key.name,
+                  "limits": usage_summary(key, now), **month_summary(key, now)}
+        if call_tag is not None:
+            result["call_tag"] = call_tag_summary(key, call_tag, now)
+        return result

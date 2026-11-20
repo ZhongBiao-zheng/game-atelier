@@ -24,6 +24,12 @@ describe('agentUsageLabel', () => {
     });
   });
 
+  it('shows the host-settled amount once it has been fetched', () => {
+    expect(agentUsageLabel(usage({ source: 'lan', cost_cny: 0.02, unpriced: 3 }))).toEqual({
+      text: '1.2万 token · 0.02¥', detail: '输入 1.2万 · 输出 400',
+    });
+  });
+
   it('formats token counts', () => {
     expect(formatTokens(9_999)).toBe('9999');
     expect(formatTokens(247_000)).toBe('24.7万');

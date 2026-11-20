@@ -11,7 +11,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from character_workflow.lib import gateway_access, gateway_tasks, model_routes
 from character_workflow.lib.callers.openai_compat import key_api_root
-from character_workflow.lib.gateway_text import TextCall, input_tokens_estimate
+from character_workflow.lib.gateway_text import (
+    CALL_TAG_HEADER, TextCall, input_tokens_estimate, valid_call_tag,
+)
 
 MAX_BODY_BYTES = 32 * 1024 * 1024
 _CAPABILITIES = ("supported_parameters", "architecture", "supported_endpoint_types",
@@ -154,7 +156,8 @@ async def _relay(request, owner, endpoint):
                                      freeze_order=route_order, consume=True)
     call = await asyncio.to_thread(TextCall, owner, route_id, picked,
                                    input_tokens_estimate(payload, body_size), streaming,
-                                   route_order=route_order)
+                                   route_order=route_order,
+                                   call_tag=valid_call_tag(request.headers.get(CALL_TAG_HEADER)))
     if streaming and endpoint == "chat/completions":
         payload["stream_options"] = {"include_usage": True, **payload.get("stream_options", {})}
     handed_off = False

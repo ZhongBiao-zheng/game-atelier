@@ -907,7 +907,8 @@ def _timing(task: GatewayTask, finished_at: str) -> dict[str, Any]:
     }
 
 
-def _append_usage(task: GatewayTask) -> None:
+def _append_usage(task: GatewayTask, extra: dict[str, Any] | None = None) -> None:
+    """extra：只属于这一行的附加字段（文本中转的 call_tag），不进任务文件。"""
     now = _now()
     row = {
         **_timing(task, now.isoformat()),
@@ -930,6 +931,7 @@ def _append_usage(task: GatewayTask) -> None:
         "member_trail": list(dict.fromkeys([
             *task.route_tried, *([task.member_alias] if task.member_alias else []),
         ])),
+        **(extra or {}),
     }
     path = usage_file(now.astimezone().strftime("%Y-%m"))
     path.parent.mkdir(parents=True, exist_ok=True)

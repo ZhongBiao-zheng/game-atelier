@@ -356,3 +356,132 @@ def test_mine_usage_includes_agent_conversations(isolated_data_root, priced_text
         ("m", 6.0, "帕伯里"), ("unpriced-model", None, "帕伯里")]
     assert agent[0]["prompt"] == "Agent 对话：新对话" and agent[0]["href"] == f"/canvas/{project_id}"
     assert totals["cost_cny"] == 6.0 and totals["unpriced"] == 1 and totals["by_kind"] == {"text": 2}
+
+
+# ── 经网关会话的主机结算（批 3 的 3-5）─────────────────────────────────────────────────
+
+def _pending(tag="session-aaaaaaaa:3"):
+    agent_usage.add_pending(project_id="canvas-aaaaaaaa", session_id="session-aaaaaaaa",
+                            call_tag=tag, alias="team", model="glm-5")
+
+
+def _since():
+    return datetime.now(timezone.utc) - timedelta(hours=1)
+
+
+def test_settlement_takes_the_host_amount_and_counts_no_extra_request(isolated_data_root, priced_text):
+    _record(GATEWAY, model="glm-5")
+    _pending()
+    assert agent_usage.settle_pending(fetch=lambda alias, tag: {"requests": 2, "charged_cny": 0.0123}) == 1
+    totals = agent_usage.session_totals("canvas-aaaaaaaa", "session-aaaaaaaa", _since())
+    assert (totals["cost_cny"], totals["requests"], totals["source"]) == (0.0123, 1, "lan")
+    [record] = agent_usage.usage_records(agent_usage.read_rows(), {}, {}, datetime.now().astimezone())
+    assert record["cost_cny"] == 0.0123 and record["source"] == "lan"
+    assert agent_usage._read_pending() == []
+
+
+def test_unreachable_host_keeps_the_tag_until_a_later_check(isolated_data_root, priced_text):
+    _record(GATEWAY)
+    _pending()
+    assert agent_usage.settle_pending(fetch=lambda alias, tag: None) == 0
+    assert agent_usage.session_totals("canvas-aaaaaaaa", "session-aaaaaaaa", _since())["cost_cny"] is None
+    # 主机已收到但还没写完用量（requests=0）同样留着补查。
+    assert agent_usage.settle_pending(fetch=lambda alias, tag: {"requests": 0, "charged_cny": 0}) == 0
+    assert agent_usage.settle_pending(fetch=lambda alias, tag: {"requests": 1, "charged_cny": 0.5}) == 1
+    assert agent_usage.session_totals("canvas-aaaaaaaa", "session-aaaaaaaa", _since())["cost_cny"] == 0.5
+
+
+def test_old_hosts_and_stale_tags_are_given_up(isolated_data_root, priced_text, monkeypatch):
+    _record(GATEWAY)
+    _pending("session-aaaaaaaa:3")
+
+    def old_host(alias, tag):
+        raise agent_usage.HostUnsupported(alias)
+    assert agent_usage.settle_pending(fetch=old_host) == 0
+    assert agent_usage._read_pending() == []
+    assert agent_usage.session_totals("canvas-aaaaaaaa", "session-aaaaaaaa", _since())["cost_cny"] is None
+    _pending("session-aaaaaaaa:4")
+    monkeypatch.setattr(agent_usage, "PENDING_MAX_AGE", timedelta(seconds=-1))
+    assert agent_usage.settle_pending(fetch=lambda alias, tag: None) == 0
+    assert agent_usage._read_pending() == []
+
+
+def test_settlement_only_checks_the_requested_session(isolated_data_root):
+    _pending("session-aaaaaaaa:3")
+    agent_usage.add_pending(project_id="canvas-bbbbbbbb", session_id="session-bbbbbbbb",
+                            call_tag="session-bbbbbbbb:1", alias="team", model="glm-5")
+    asked = []
+    agent_usage.settle_pending("canvas-bbbbbbbb", "session-bbbbbbbb",
+                               fetch=lambda alias, tag: asked.append(tag) or None)
+    assert asked == ["session-bbbbbbbb:1"] and len(agent_usage._read_pending()) == 2
+
+
+def test_gateway_requests_carry_the_call_tag_and_direct_ones_do_not(isolated_data_root):
+    from character_workflow.lib.schemas import CanvasAgentSession
+
+    from character_workflow.lib.canvas_projects import create_canvas_project
+
+    keys.write_keys_db(keys.KeysDB(keys=[PRICED, GATEWAY]))
+    project_id = create_canvas_project("帕伯里").project_id
+    session = CanvasAgentSession(session_id="session-aaaaaaaa", project_id=project_id,
+                                 title="t", model="glm-5", model_alias="team", revision=7,
+                                 created_at="2026-11-20T00:00:00Z", updated_at="2026-11-20T00:00:00Z")
+    agent = runtime.build_agent(session, call_tag=runtime.call_tag_for(session))
+    assert agent.model._client.default_headers["X-Atelier-Call-Tag"] == "session-aaaaaaaa:7"
+    direct = runtime.build_agent(session.model_copy(update={"model_alias": "chat"}), call_tag="x:1")
+    assert "X-Atelier-Call-Tag" not in direct.model._client.default_headers
+
+
+def test_member_amount_equals_the_host_usage_row(isolated_data_root, monkeypatch):
+    """真实网关中转 + 本机假上游：成员端查回来的金额就是主机用量行上的 charged_cny。"""
+    import httpx
+    from fastapi.testclient import TestClient
+
+    from character_workflow.lib import gateway_keys, gateway_tasks, generation_pricing
+    from character_workflow.lib.callers import atelier_gateway
+    from viewer_server import gateway_openai
+    from viewer_server.gateway_app import create_gateway_app
+
+    keys.add_key(keys.KeySpec(alias="up", provider="custom", access_key="test-only-upstream",
+                              base_url="https://up.example", created_at="test",
+                              models=[keys.ModelSpec(id="gpt-test", name="gpt-test", modality="text",
+                                                     protocol="openai-chat")]))
+    monkeypatch.setitem(generation_pricing._PRICES["text_yuan_per_million_tokens"], "gpt-test",
+                        {"input": 1, "output": 2})
+    monkeypatch.setattr(gateway_openai, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"model": "gpt-test", "choices": [], "usage": {
+            "prompt_tokens": 3000, "completion_tokens": 500}}))))
+    _, token = gateway_keys.create_key("成员")
+    host = create_gateway_app()
+    member = TestClient(host, headers={"Authorization": f"Bearer {token}"})
+    tag = "session-aaaaaaaa:9"
+    assert member.post("/gateway/v1/openai/chat/completions", json={"model": "gpt-test", "messages": []},
+                       headers={"X-Atelier-Call-Tag": tag}).status_code == 200
+    host_row = gateway_tasks.read_usage(gateway_tasks._now().astimezone().strftime("%Y-%m"))[0]
+    keys.add_key(keys.KeySpec(alias="team", provider="atelier", access_key=token,
+                              base_url="http://gateway.test", created_at="test"))
+    monkeypatch.setattr(atelier_gateway, "_session", lambda: TestClient(host))
+    _pending(tag)
+    assert agent_usage.settle_pending() == 1
+    totals = agent_usage.session_totals("canvas-aaaaaaaa", "session-aaaaaaaa", _since())
+    assert totals["cost_cny"] == host_row["charged_cny"] == 0.004
+
+
+def test_unreachable_host_is_not_an_error(isolated_data_root, monkeypatch):
+    import requests
+
+    from character_workflow.lib.callers import atelier_gateway
+
+    keys.write_keys_db(keys.KeysDB(keys=[GATEWAY]))
+
+    class Down:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get(self, *args, **kwargs):
+            raise requests.ConnectionError("host offline")
+    monkeypatch.setattr(atelier_gateway, "_session", Down)
+    assert agent_usage.fetch_host_call_tag("team", "session-aaaaaaaa:1") is None
