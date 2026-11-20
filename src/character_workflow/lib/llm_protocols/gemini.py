@@ -221,7 +221,8 @@ def _signature_for(call: dict, *, current_turn: bool, model: str) -> str | None:
     1. 模型名不含 "gemini"：openai-agents 不往回放签名；
     2. 签名超过上限没进会话（OVERSIZED）；
     3. 不是 Gemini 产生的调用（等确认时换成了 Gemini）。
-    Gemini 本来就没给签名的调用（UNSIGNED，如不思考的模型）原样不带。更早的轮次不校验，缺了也不填。"""
+    Gemini 本来就没给签名的调用（UNSIGNED，如不思考的模型）原样不带。更早的轮次不校验，缺了也不填。
+    看图时插入的图片消息也算 user 消息：它之前的调用算更早的轮次，上面三种情况也不填（见 `to_upstream`）。"""
     if signature := signature_of(call):
         return signature
     if not current_turn:
@@ -255,7 +256,9 @@ def to_upstream(payload: dict) -> dict:
         results.clear()
     messages = payload.get("messages") or []
     model = str(payload.get("model") or "")
-    # 当前轮：最后一条 user 消息（带文本或图片的那种；工具结果是 role:tool）之后的部分。
+    # 当前轮：最后一条 user 消息（带文本或图片的那种；工具结果是 role:tool）之后的部分。看图时 Agent 在工具结果后
+    # 插入的图片消息也是 user 消息，所以那之前的调用都算更早的轮次（与官方「最近一条带普通内容的 user 消息开始
+    # 当前轮」一致）。
     turn_start = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=-1)
     for position, message in enumerate(messages):
         role = message.get("role")
