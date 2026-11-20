@@ -519,3 +519,85 @@ def read_video_frames(principal: Any, payload: CanvasReadVideoFramesInput) -> di
         "frames": [{"index": index, "t_ms": t_ms} for index, t_ms in picks],
         "preview": {"mime_type": "image/jpeg", "data_base64": base64.b64encode(sheet).decode()},
     }
+
+
+RATIO_TOLERANCE = 0.02
+DURATION_TOLERANCE_S = 1.0
+
+
+def _size_checks(params: Any, width: int | None, height: int | None) -> list[dict]:
+    if not width or not height:
+        return []
+    actual = f"{width}x{height}"
+    if params.size and params.size_mode in (None, "custom") and "x" in params.size:
+        return [{"name": "size", "expected": params.size, "actual": actual, "ok": params.size == actual}]
+    if params.ratio and ":" in params.ratio:
+        try:
+            a, b = (float(part) for part in params.ratio.split(":", 1))
+            ok = abs(width / height - a / b) <= RATIO_TOLERANCE * (a / b)
+        except (ValueError, ZeroDivisionError):
+            return []
+        return [{"name": "ratio", "expected": params.ratio, "actual": actual, "ok": ok}]
+    return []
+
+
+def _transparency(path: Path) -> dict:
+    from PIL import Image
+
+    with Image.open(path) as image:
+        if "A" not in image.getbands():
+            return {"name": "transparency", "actual": "无透明通道", "ok": None}
+        alpha = image.getchannel("A")
+        histogram = alpha.histogram()
+        opaque = 1 - histogram[0] / max(1, alpha.width * alpha.height)
+    return {"name": "transparency", "actual": f"有透明通道，不透明区域占 {opaque:.0%}", "ok": None}
+
+
+def _candidate_checks(project_id: str, version: Any, params: Any) -> list[dict]:
+    """确定性检查：尺寸 / 比例、视频时长、透明通道、格式。ok=None 表示只报事实，由模型结合需求判断。"""
+    checks = _size_checks(params, version.width, version.height)
+    duration_ms = version.duration_ms
+    if version.kind == "video" and params.duration and not duration_ms:
+        # 导入的视频版本不一定记了时长：读文件探测一次。
+        from character_workflow.lib import canvas_agent_video as video
+        try:
+            path, _ = resolve_canvas_media(project_id, version.version_id)
+            duration_ms = video.probe(path)["duration_ms"]
+        except (OSError, KeyError, PermissionError, ValueError):
+            duration_ms = None
+    if version.kind == "video" and params.duration and duration_ms:
+        seconds = round(duration_ms / 1000, 1)
+        checks.append({"name": "duration", "expected": f"{params.duration}s", "actual": f"{seconds}s",
+                       "ok": abs(seconds - params.duration) <= DURATION_TOLERANCE_S})
+    if version.kind == "image":
+        try:
+            path, _ = resolve_canvas_media(project_id, version.version_id)
+            checks.append(_transparency(path))
+        except (OSError, KeyError, PermissionError, ValueError):
+            checks.append({"name": "transparency", "actual": "读不出图片", "ok": False})
+    checks.append({"name": "format", "actual": version.mime_type, "ok": None})
+    return checks
+
+
+def _run_job(project_id: str, run_id: str) -> Job:
+    job = next((j for j in list_jobs() if j.namespace == "canvas"
+                and j.canvas_project_id == project_id
+                and j.canvas_run and j.canvas_run.run_id == run_id), None)
+    if job is None:
+        raise CanvasToolError("INVALID_TARGET", "找不到这次生成", 404)
+    return job
+
+
+def check_run(principal: Any, payload: GetRunInput) -> dict:
+    """核对一次生成的结果：每个成功候选给确定性检查，失败的给原因（Agent 看到的是不带细节的「生成失败」）。"""
+    from character_workflow.lib.canvas_projects import read_canvas_document
+
+    authorize(principal, payload.project_id, "canvas_read")
+    job = _run_job(payload.project_id, payload.run_id)
+    view = _job_view(job, agent=principal.kind == "agent")
+    versions = read_canvas_document(payload.project_id).content_versions
+    for candidate in view["candidates"]:
+        version = versions.get(candidate["version_id"] or "")
+        if candidate["status"] == "succeeded" and version is not None:
+            candidate["checks"] = _candidate_checks(payload.project_id, version, job.params)
+    return view

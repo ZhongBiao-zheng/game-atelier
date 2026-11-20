@@ -41,6 +41,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_run: '查询生成进度',
   read_media: '读取媒体信息',
   read_video_frames: '查看视频画面',
+  check_run: '核对生成结果',
   wait_for_run: '等待生成结果',
   load_skill: '读取 Skill',
   read_skill_file: '读取 Skill 文件',

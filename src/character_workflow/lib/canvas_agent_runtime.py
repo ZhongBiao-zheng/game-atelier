@@ -51,7 +51,8 @@ DELTA_FLUSH_SECONDS = 0.15
 MEDIA_SCHEME = "atelier-media://"
 LOCAL = SimpleNamespace(kind="local", session_id="canvas-chat", grant_id=None)
 
-READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "read_media", "read_video_frames",
+READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "check_run", "read_media",
+                        "read_video_frames",
                         "load_skill",
                         "read_skill_file", "wait_for_run", "read_spec", "search_library",
                         "search_team"})
@@ -73,7 +74,8 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
   只连一张会丢掉另一个角色的特征。
 - 新节点的位置由系统自动排在上一次出图的右侧、不和其他节点重叠；add_* 的 position 填 {x: 0, y: 0}
   即可，不用自己计算。
-- 发起生成后调用 wait_for_run 等结果，结果图会附在工具结果后面给你看。看完向用户简短汇报：
+- 发起生成后调用 wait_for_run 等结果，结果图会附在工具结果后面给你看（视频附一张联系表），并带上
+  checks：尺寸 / 比例、视频时长是否符合配置，有没有透明通道、格式。ok=false 的要向用户指出；之后想再核对用 check_run。看完向用户简短汇报：
   画面是否符合要求、哪里需要改。只有用户明确让你「多试几次 / 迭代到满意」时才自己改提示词重跑。
 - 想看画布上已有的某张图，用 read_media，图片同样会附给你。想看视频的画面，用 read_video_frames：
   等间隔取帧拼成一张带时间码的联系表附给你（默认 6 帧，最多 9 帧，可限定时间范围）。
@@ -326,6 +328,8 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
         payload = CanvasListModelsInput(project_id=project_id, mode=arguments.get("mode", "image"))
         tools.authorize(LOCAL, payload.project_id, "canvas_read")
         return {"models": scope.models(payload.mode)}, []
+    if tool == "check_run":
+        return tools.check_run(LOCAL, GetRunInput(project_id=project_id, run_id=arguments["run_id"])), []
     if tool == "get_run":
         payload = GetRunInput(project_id=project_id, run_id=arguments["run_id"])
         return tools.get_run(LOCAL, payload), []
@@ -480,6 +484,10 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
     "read_media": ("读取一个媒体版本的元数据（类型、尺寸、时长）。",
                    {"type": "object", "required": ["version_id"],
                     "properties": {"version_id": {"type": "string"}}}),
+    "check_run": ("核对一次生成的结果：每个成功的候选给出尺寸 / 比例、视频时长是否符合配置，"
+                  "有没有透明通道与格式（ok=null 只报事实）。只读。",
+                  {"type": "object", "required": ["run_id"],
+                   "properties": {"run_id": {"type": "string"}}}),
     "read_video_frames": ("看一个视频版本的画面：等间隔取 count 帧（1–9，默认 6）拼成一张带时间码的"
                           "联系表附给你；可用 start_ms / end_ms 限定时间范围。只读。",
                           {"type": "object", "required": ["version_id"], "properties": {
@@ -558,7 +566,32 @@ async def _wait_for_run(project_id: str, run_id: str) -> str:
         )
     except CanvasToolError as error:
         return f"错误（{error.code}）：{error.message}"
+    if result.get("status") in vision.TERMINAL_STATUSES:
+        result = await asyncio.to_thread(_with_run_checks, project_id, run_id, result)
     return json.dumps(result, ensure_ascii=False)
+
+
+def _with_run_checks(project_id: str, run_id: str, result: dict) -> dict:
+    """跑完的生成：附上 check_run 的检查结果；第一个成功的视频附一张联系表。检查失败不影响结果。"""
+    try:
+        checked = tools.check_run(LOCAL, GetRunInput(project_id=project_id, run_id=run_id))
+    except CanvasToolError:
+        return result
+    result = {**result, "candidates": checked["candidates"]}
+    document = read_canvas_document(project_id)
+    video = next((c["version_id"] for c in checked["candidates"] if c["status"] == "succeeded"
+                  and getattr(document.content_versions.get(c["version_id"] or ""), "kind", None) == "video"),
+                 None)
+    if video:
+        try:
+            frames = tools.read_video_frames(LOCAL, CanvasReadVideoFramesInput(
+                project_id=project_id, version_id=video))
+            ref = vision.store_preview(frames["preview"])
+        except CanvasToolError:
+            ref = None
+        if ref:
+            result[vision.ATTACH_KEY] = [*result.get(vision.ATTACH_KEY, []), ref]
+    return result
 
 
 def build_tools() -> list:
@@ -707,7 +740,7 @@ def _arguments(raw: str | None) -> dict:
 
 
 READ_LABELS = {"get_canvas": "读取画布", "list_models": "查看可用模型", "get_run": "查询生成进度",
-               "read_video_frames": "查看视频画面",
+               "read_video_frames": "查看视频画面", "check_run": "核对生成结果",
                "read_media": "读取媒体信息", "wait_for_run": "等待生成结果",
                "search_library": "查找项目参考", "search_team": "查找团队库参考",
                "read_spec": "读取类别规范"}

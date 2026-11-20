@@ -460,7 +460,20 @@ def test_member_amount_equals_the_host_usage_row(isolated_data_root, monkeypatch
     host_row = gateway_tasks.read_usage(gateway_tasks._now().astimezone().strftime("%Y-%m"))[0]
     keys.add_key(keys.KeySpec(alias="team", provider="atelier", access_key=token,
                               base_url="http://gateway.test", created_at="test"))
-    monkeypatch.setattr(atelier_gateway, "_session", lambda: TestClient(host))
+    class HostSession:
+        """把 requests 风格的 get(url, timeout=…) 转给 TestClient；TestClient 不接受 timeout。"""
+
+        def __enter__(self):
+            self.client = TestClient(host)
+            return self
+
+        def __exit__(self, *exc):
+            self.client.close()
+            return False
+
+        def get(self, url, timeout=None, **kwargs):
+            return self.client.get(url, **kwargs)
+    monkeypatch.setattr(atelier_gateway, "_session", HostSession)
     _pending(tag)
     assert agent_usage.settle_pending() == 1
     totals = agent_usage.session_totals("canvas-aaaaaaaa", "session-aaaaaaaa", _since())

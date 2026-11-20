@@ -130,3 +130,79 @@ def test_agent_gets_a_readable_error(video_project, arguments, code):
     target = image_id if arguments.pop("which", None) == "image" else video_id
     text, _ = runtime.run_tool_safely(project_id, "read_video_frames", {"version_id": target, **arguments})
     assert runtime.is_tool_error(text) and code in text
+
+
+def _fake_run(monkeypatch, params, candidates):
+    from types import SimpleNamespace
+
+    from character_workflow.lib import canvas_agent_tools as tools
+
+    job = SimpleNamespace(
+        job_id="job-1", status=SimpleNamespace(value="partial"), error=None, params=params,
+        canvas_run=SimpleNamespace(run_id="run-1", result_node_id="n1", candidates=[
+            SimpleNamespace(index=i, status=status, version_id=vid, error=error)
+            for i, (status, vid, error) in enumerate(candidates)]))
+    monkeypatch.setattr(tools, "_run_job", lambda project_id, run_id: job)
+
+
+def _checks(view, index=0):
+    return {check["name"]: check for check in view["candidates"][index]["checks"]}
+
+
+def test_check_run_reports_size_transparency_and_format(video_project, monkeypatch, isolated_data_root):
+    from character_workflow.lib import canvas_agent_runtime as runtime
+    from character_workflow.lib import canvas_agent_tools as tools
+    from character_workflow.lib.canvas_agent_schema import GetRunInput, ImportMediaInput
+    from character_workflow.lib.canvas_projects import read_canvas_document
+    from character_workflow.lib.schemas import JobParams
+
+    project_id, _, _ = video_project
+    sprite = isolated_data_root / "sprite.png"
+    image = Image.new("RGBA", (8, 8), (0, 0, 0, 0))
+    image.paste((255, 0, 0, 255), (0, 0, 4, 4))  # 四分之一不透明
+    image.save(sprite)
+    sprite_id = tools.import_media(runtime.LOCAL, ImportMediaInput(
+        project_id=project_id, expected_revision=read_canvas_document(project_id).revision,
+        path=str(sprite)))["version_id"]
+    _fake_run(monkeypatch, JobParams(size="8x8", size_mode="custom"),
+              [("succeeded", sprite_id, None), ("failed", None, "上游超时")])
+    view = tools.check_run(runtime.LOCAL, GetRunInput(project_id=project_id, run_id="run-1"))
+    checks = _checks(view)
+    assert checks["size"] == {"name": "size", "expected": "8x8", "actual": "8x8", "ok": True}
+    assert checks["transparency"]["actual"] == "有透明通道，不透明区域占 25%"
+    assert checks["format"]["actual"] == "image/png"
+    assert "checks" not in view["candidates"][1] and view["candidates"][1]["error"] == "上游超时"
+    _fake_run(monkeypatch, JobParams(size="16x16", size_mode="custom"), [("succeeded", sprite_id, None)])
+    assert _checks(tools.check_run(runtime.LOCAL, GetRunInput(project_id=project_id, run_id="run-1")))[
+        "size"]["ok"] is False
+    _fake_run(monkeypatch, JobParams(ratio="1:1", size_mode="ratio"), [("succeeded", sprite_id, None)])
+    assert _checks(tools.check_run(runtime.LOCAL, GetRunInput(project_id=project_id, run_id="run-1")))[
+        "ratio"] == {"name": "ratio", "expected": "1:1", "actual": "8x8", "ok": True}
+
+
+@pytest.mark.parametrize(("duration", "ok"), [(1, True), (5, False)])
+def test_check_run_compares_video_duration(video_project, monkeypatch, duration, ok):
+    from character_workflow.lib import canvas_agent_runtime as runtime
+    from character_workflow.lib import canvas_agent_tools as tools
+    from character_workflow.lib.canvas_agent_schema import GetRunInput
+    from character_workflow.lib.schemas import JobParams
+
+    project_id, video_id, _ = video_project
+    _fake_run(monkeypatch, JobParams(duration=duration), [("succeeded", video_id, None)])
+    checks = _checks(tools.check_run(runtime.LOCAL, GetRunInput(project_id=project_id, run_id="run-1")))
+    assert checks["duration"] == {"name": "duration", "expected": f"{duration}s", "actual": "1.0s", "ok": ok}
+    assert "transparency" not in checks
+
+
+def test_finished_wait_carries_checks_and_a_video_contact_sheet(video_project, monkeypatch):
+    from character_workflow.lib import canvas_agent_runtime as runtime
+    from character_workflow.lib import canvas_agent_vision as vision
+    from character_workflow.lib.schemas import JobParams
+
+    project_id, video_id, _ = video_project
+    _fake_run(monkeypatch, JobParams(duration=1), [("succeeded", video_id, None)])
+    result = runtime._with_run_checks(project_id, "run-1", {"status": "done", "candidates": []})
+    assert result["candidates"][0]["checks"][0]["name"] == "duration"
+    [ref] = result[vision.ATTACH_KEY]
+    assert vision.preview_data_url(ref).startswith("data:image/jpeg;base64,")
+    assert "check_run" in runtime.READ_TOOLS
