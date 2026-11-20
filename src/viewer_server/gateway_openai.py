@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from character_workflow.lib import gateway_access, gateway_tasks, model_routes
 from character_workflow.lib.callers.openai_compat import key_api_root
-from character_workflow.lib.gateway_text import TextCall
+from character_workflow.lib.gateway_text import TextCall, input_tokens_estimate
 
 MAX_BODY_BYTES = 32 * 1024 * 1024
 _CAPABILITIES = ("supported_parameters", "architecture", "supported_endpoint_types",
@@ -152,7 +152,8 @@ async def _relay(request, owner, endpoint):
     # 不能在网关事件循环里做：锁被图片任务的调度 / 结算占着时，整个网关端口（轮询、健康检查）一起停。
     picked = await asyncio.to_thread(_pick, owner, route_id, [], params=payload,
                                      freeze_order=route_order, consume=True)
-    call = await asyncio.to_thread(TextCall, owner, route_id, picked, body_size, streaming,
+    call = await asyncio.to_thread(TextCall, owner, route_id, picked,
+                                   input_tokens_estimate(payload, body_size), streaming,
                                    route_order=route_order)
     if streaming and endpoint == "chat/completions":
         payload["stream_options"] = {"include_usage": True, **payload.get("stream_options", {})}

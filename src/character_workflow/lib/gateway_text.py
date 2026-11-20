@@ -6,6 +6,38 @@ from datetime import datetime
 from character_workflow.lib import gateway_live, gateway_quota, gateway_tasks, generation_pricing
 
 
+# 准入时一张内嵌图片按这么多输入 token 预扣。出处：Anthropic 视觉文档，约 1.15MP 以内的图片约
+# 宽×高÷750 token，上限约 1600；Atelier 给模型附的图长边不超过 1024，落在这个范围内。同尺寸的图按
+# OpenAI 的分块计法约 765，所以对 OpenAI 偏高、对 Claude 接近上限。偏低的后果：这一次调用的预扣
+# 少于实际结算，成员可能在这一次里略超额度，下一次准入时被拦下。只影响预扣，结算照旧按上游用量。
+IMAGE_INPUT_TOKENS_ESTIMATE = 1600
+IMAGE_URL_KEYS = ("url", "image_url")
+
+
+def _inline_images(value) -> tuple[int, int]:
+    """(图片 data URL 的个数, 它们占的字节数)；只看 url / image_url 字段，不看提示词和工具参数。"""
+    count = size = 0
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in IMAGE_URL_KEYS and isinstance(item, str) and item.startswith("data:image/"):
+                count, size = count + 1, size + len(item.encode("utf-8"))
+            else:
+                more, extra = _inline_images(item)
+                count, size = count + more, size + extra
+    elif isinstance(value, list):
+        for item in value:
+            more, extra = _inline_images(item)
+            count, size = count + more, size + extra
+    return count, size
+
+
+def input_tokens_estimate(payload: dict, body_size: int) -> int:
+    """准入用的输入 token 估算：文字按请求体字节 / 3；内嵌图片按张数 × IMAGE_INPUT_TOKENS_ESTIMATE。
+    以前图片也按 base64 字节 / 3 算，一张 1024px 的 JPEG 会被估成几万 token，额度紧的成员被误拦。"""
+    count, size = _inline_images(payload)
+    return max(0, body_size - size) // 3 + count * IMAGE_INPUT_TOKENS_ESTIMATE
+
+
 def average_output_tokens(key_id: str) -> int:
     rows = []
     for path in sorted((gateway_tasks._root() / "usage").glob("*.jsonl"), reverse=True):
@@ -19,12 +51,13 @@ def average_output_tokens(key_id: str) -> int:
 
 
 class TextCall:
-    def __init__(self, owner, route_id, picked, body_size: int, stream: bool, *, route_order=None):
+    def __init__(self, owner, route_id, picked, input_tokens: int, stream: bool, *, route_order=None):
+        """input_tokens：准入用的输入 token 估算（input_tokens_estimate）。"""
         key, model = picked
         now = gateway_tasks._now().isoformat()
         with gateway_tasks._lock:
             estimate = generation_pricing.estimate_text_cost_cny(
-                model.id, body_size // 3, average_output_tokens(owner.id), key=key,
+                model.id, input_tokens, average_output_tokens(owner.id), key=key,
             )
             gateway_quota.admit(owner, estimate or 0)
             self.task = gateway_tasks.GatewayTask(

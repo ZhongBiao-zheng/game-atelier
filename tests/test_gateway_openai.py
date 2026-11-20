@@ -441,3 +441,64 @@ def test_local_media_paths_rejected_without_exposing_path(setup):
     ]})
     assert response.status_code == 422 and '/private/local.png' not in response.text
     assert not setup[2]
+
+
+def _priced_setup(setup, monkeypatch, usage):
+    _, _, seen, upstream, _, client = setup
+    monkeypatch.setitem(generation_pricing._PRICES['text_yuan_per_million_tokens'],
+                        'vendor/gpt-test', {'input': 1, 'output': 2})
+
+    def handle(request):
+        seen.append(request)
+        return httpx.Response(200, json={'model': 'vendor/gpt-test', 'choices': [], 'usage': usage})
+    upstream(handle)
+    return client
+
+
+def _post_raw(client, payload):
+    body = json.dumps(payload).encode('utf-8')
+    response = client.post(f'{BASE}/chat/completions', content=body,
+                           headers={'Content-Type': 'application/json'})
+    assert response.status_code == 200, response.text
+    return len(body)
+
+
+def test_inline_images_are_reserved_per_image_not_per_byte(setup, monkeypatch):
+    from character_workflow.lib.gateway_text import IMAGE_INPUT_TOKENS_ESTIMATE, input_tokens_estimate
+
+    client = _priced_setup(setup, monkeypatch, {'prompt_tokens': 4300, 'completion_tokens': 20})
+    image = 'data:image/jpeg;base64,' + 'A' * 150_000  # 约 110 KB 的 JPEG
+    payload = {'model': 'gpt-test', 'messages': [{'role': 'user', 'content': [
+        {'type': 'text', 'text': '看这三张图'},
+        *({'type': 'image_url', 'image_url': {'url': image}} for _ in range(3))]}]}
+    body_size = _post_raw(client, payload)
+    row = rows()[0]
+    text_bytes = body_size - 3 * len(image)
+    before = generation_pricing.estimate_text_cost_cny('vendor/gpt-test', body_size // 3, 1000)
+    after = generation_pricing.estimate_text_cost_cny(
+        'vendor/gpt-test', text_bytes // 3 + 3 * IMAGE_INPUT_TOKENS_ESTIMATE, 1000)
+    actual = generation_pricing.estimate_text_cost_cny('vendor/gpt-test', 4300, 20)
+    assert input_tokens_estimate(payload, body_size) == text_bytes // 3 + 3 * 1600
+    # 改前按字节估：约 15 万 token；改后按张数：约 4800；上游实际 4300。
+    assert (before, row['estimated_cny'], row['charged_cny']) == (0.152114, after, actual)
+    assert after == 0.006891 and actual == 0.00434
+    assert after >= actual and before > 30 * actual
+
+
+def test_text_only_reservation_is_unchanged(setup, monkeypatch):
+    client = _priced_setup(setup, monkeypatch, {'prompt_tokens': 10, 'completion_tokens': 20})
+    payload = {'model': 'gpt-test', 'messages': [{'role': 'user', 'content': '只有文字' * 50}]}
+    body_size = _post_raw(client, payload)
+    assert rows()[0]['estimated_cny'] == generation_pricing.estimate_text_cost_cny(
+        'vendor/gpt-test', body_size // 3, 1000)
+
+
+def test_image_estimate_only_counts_image_data_urls():
+    from character_workflow.lib.gateway_text import input_tokens_estimate
+
+    audio = 'data:audio/wav;base64,' + 'B' * 3000
+    prompt = 'data:image/png;base64,' + 'C' * 3000  # 写在提示词里，不是图片字段
+    payload = {'messages': [{'role': 'user', 'content': [
+        {'type': 'text', 'text': prompt}, {'type': 'input_audio', 'url': audio},
+        {'type': 'input_image', 'image_url': 'https://example.com/a.png'}]}]}
+    assert input_tokens_estimate(payload, 9000) == 3000
