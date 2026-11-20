@@ -21,6 +21,8 @@ const statuses: { value: UsageTaskFilter; label: string }[] = [
 ];
 const statusLabels: Record<string, string> = { done: '成功', failed: '失败', pending: '进行中', running: '进行中', canceled: '已取消' };
 const statusColors: Record<string, string> = { done: 'bg-[color:var(--status-done)]', failed: 'bg-destructive', pending: 'bg-[color:var(--status-running)]', running: 'bg-[color:var(--status-running)]' };
+const CHARGED_AFTER_STOP = '停止前上游已经开始执行并扣费，金额为实际扣费';
+const chargedAfterStop = (task: UsageTask) => task.status === 'canceled' && (task.cost_cny ?? 0) > 0;
 const cell = 'px-4 py-3';
 const warning = 'text-[color:var(--status-running)]';
 function duration(seconds: number | null) {
@@ -85,6 +87,15 @@ export function TaskTable(filters: Filters) {
     return value;
   }
 
+  function statusCell(task: UsageTask) {
+    const label = <span className={`flex items-center gap-1.5 ${task.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
+      <span aria-hidden className={`size-1.5 rounded-full ${statusColors[task.status] ?? 'bg-muted-foreground'}`} />{statusLabels[task.status] ?? task.status}
+      {chargedAfterStop(task) && ' · 已扣费'}
+    </span>;
+    // 已停止的任务一般不计；停止前上游已经扣了费的（含网关主机跑完后回写的）按实际扣费计入，这里说明来由。
+    return chargedAfterStop(task) ? <Hint label={CHARGED_AFTER_STOP}><span tabIndex={0} className="inline-flex">{label}</span></Hint> : label;
+  }
+
   function row(task: UsageTask) {
     const slow = ['image', 'image_edit', 'layer_split'].includes(task.kind) && task.duration_s !== null && task.duration_s > 60;
     return <tr key={task.id} onClick={e => {
@@ -100,9 +111,7 @@ export function TaskTable(filters: Filters) {
         kindLabels[['image_edit', 'layer_split'].includes(task.kind) ? 'image' : task.kind] ?? task.kind, <KindBadge kind={task.kind} />)}</td>
       <td className={`${cell} whitespace-nowrap text-right tabular-nums ${slow ? warning : 'text-muted-foreground'}`}>{duration(task.duration_s)}</td>
       <td className={`${cell} whitespace-nowrap text-right tabular-nums ${task.cost_cny === null ? warning : ''}`}>{task.cost_cny === null ? '未计价' : formatGenerationCost(task.cost_cny)}</td>
-      <td className={`${cell} whitespace-nowrap`}><span className={`flex items-center gap-1.5 ${task.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
-        <span aria-hidden className={`size-1.5 rounded-full ${statusColors[task.status] ?? 'bg-muted-foreground'}`} />{statusLabels[task.status] ?? task.status}
-      </span></td>
+      <td className={`${cell} whitespace-nowrap`}>{statusCell(task)}</td>
     </tr>;
   }
 

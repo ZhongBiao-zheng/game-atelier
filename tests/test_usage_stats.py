@@ -359,3 +359,24 @@ def test_gateway_unpriced_rows_count_as_unpriced_not_free():
     assert costs == {"unpriced": None, "priced": 0.2, "failed": 0}
     totals = aggregate_usage(team_records(rows, set()), scope="team", period="today", now=NOW)["totals"]
     assert totals["unpriced"] == 1 and totals["cost_cny"] == 0.2
+
+
+@pytest.mark.parametrize("provider,actual,counted", [
+    # 非网关：EvoLink（evolink.py 在下载产物前回报上游金额）、OpenRouter 视频（每完成一单累计回报）
+    # 停止在下载 / 后一单时，任务落「已停止」但钱已经花了——第 6 批起按实际扣费计入（有意修正「已花的钱不显示」）。
+    ("evolink", 0.3, True),
+    ("openrouter", 1.2, True),
+    # 网关：停止后主机跑完回写的扣费（gateway_settlement=settled）。
+    ("atelier", 0.5, True),
+    # 没有扣费的已停止照旧不计；记 0 的也不计（订阅、本机工作流停止时写 0）。
+    ("evolink", None, False),
+    ("chatgpt", 0.0, False),
+])
+def test_stopped_jobs_count_only_when_money_was_actually_spent(provider, actual, counted):
+    stopped = job(status="canceled", provider=provider, params=JobParams(
+        actual_cost_cny=actual, estimated_cost_cny=9))
+    rows = mine([stopped])
+    assert bool(rows) is counted
+    if counted:
+        assert rows[0]["cost_cny"] == actual and rows[0]["status"] == "canceled"
+        assert stats(rows)["totals"]["cost_cny"] == actual  # 按实际扣费，不按预计
