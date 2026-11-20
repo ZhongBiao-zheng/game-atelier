@@ -11,8 +11,8 @@ vi.mock('@/hooks/useSSE', () => ({ useSSE: vi.fn() }));
 vi.mock('@/api/gateway', () => ({ GATEWAY_TOKEN_LENGTH: 47, adminBase: (alias: string) => `/api/gateway/providers/${alias}/admin`, fetchGateway: vi.fn(), fetchGatewayOptions: vi.fn(), fetchGatewayService: vi.fn(),
   fetchGatewayTasks: vi.fn(), fetchGatewayMembers: vi.fn(), createGatewayKey: vi.fn(), updateGatewayKey: vi.fn(),
   resetGatewayKey: vi.fn(), revealGatewayKey: vi.fn(), revokeGatewayKey: vi.fn(), updateGateway: vi.fn(), gatewayOutputUrl: vi.fn() }));
-const key: api.GatewayKey = { id: 'k1', name: '小王', limits: [], scope: null,
-  created_at: '', revoked_at: null, month_charged_cny: .5, month_calls: 1, last_used_at: null, limits_status: [] };
+const key: api.GatewayKey = { id: 'k1', name: '小王', quota: null, scope: null,
+  created_at: '', revoked_at: null, month_charged_cny: .5, month_calls: 1, last_used_at: null, quota_status: null };
 const state: api.GatewayState = { enabled: true, port: 5180, name: '', default_name: 'mac', keys: [key], status: { running: true, port: 5180, error: null, addresses: ['192.168.1.20'] } };
 beforeEach(() => { vi.clearAllMocks();
   vi.mocked(api.fetchGateway).mockResolvedValue(state);
@@ -41,7 +41,7 @@ describe('LAN sharing', () => {
     fireEvent.change(name, { target: { value: '小李' } });
     fireEvent.change(screen.getByLabelText('自定义密钥（可选）'), { target: { value: 'test_only_custom' } });
     fireEvent.submit(name.closest('form')!);
-    await waitFor(() => expect(api.createGatewayKey).toHaveBeenCalledWith({ role: 'member', name: '小李', token: 'test_only_custom', limits: [], scope: null }));
+    await waitFor(() => expect(api.createGatewayKey).toHaveBeenCalledWith({ role: 'member', name: '小李', token: 'test_only_custom', quota: null, scope: null }));
     await waitFor(() => expect(screen.queryByLabelText('名称')).not.toBeInTheDocument());
     expect(screen.queryByText('atg_test_only_custom')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '新建成员密钥' }));
@@ -127,9 +127,9 @@ it('关闭后仅状态卡显示摘要，开启继续沿用原操作', async () =
 });
 
 it('成员额度超过85%才变橙，撤销行整体变淡且不可操作', async () => {
-  const limited = { ...key, limits_status: [{ period: 'month' as const, cap_cny: 100, used_cny: 85, reserved_cny: 0, left_cny: 15, resets_at: '2026-11-01' }] };
+  const limited = { ...key, quota_status: { period: 'month' as const, cap_cny: 100, used_cny: 85, reserved_cny: 0, left_cny: 15, resets_at: '2026-11-01' } };
   vi.mocked(api.fetchGateway).mockResolvedValue({ ...state, keys: [limited,
-    { ...limited, id: 'k2', name: '小李', limits_status: [{ ...limited.limits_status[0], reserved_cny: 1 }] },
+    { ...limited, id: 'k2', name: '小李', quota_status: { ...limited.quota_status, reserved_cny: 1 } },
     { ...key, id: 'k3', name: '已离开', revoked_at: '2026-10-25' }] });
   render(<LanSharingSection />);
   const regular = await screen.findByRole('progressbar', { name: '小王本月额度' });
@@ -255,24 +255,26 @@ it('模型与额度在关闭弹层时保存，失败后回滚到服务器值', a
   fireEvent.keyDown(screen.getByLabelText('可用模型'), { key: 'Escape' });
   vi.mocked(api.updateGatewayKey).mockResolvedValue(key);
   fireEvent.click(screen.getByRole('button', { name: '额度' }));
-  fireEvent.change(screen.getByLabelText('今日限额'), { target: { value: '10' } });
+  fireEvent.change(screen.getByLabelText('额度金额'), { target: { value: '10' } });
+  await chooseOption(screen.getByLabelText('额度周期'), '每天');
   fireEvent.keyDown(screen.getByLabelText('额度'), { key: 'Escape' });
-  await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { limits: [{ period: 'day', cap_cny: 10 }] }));
+  await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { quota: { cap_cny: 10, period: 'day' } }));
 });
 
 it('非法额度保留弹层和输入，修正后才允许关闭并保存', async () => {
   vi.mocked(api.updateGatewayKey).mockResolvedValue(key);
   render(<LanSharingSection />);
   fireEvent.click(await screen.findByRole('button', { name: '额度' }));
-  fireEvent.change(screen.getByLabelText('今日限额'), { target: { value: '0' } });
+  fireEvent.change(screen.getByLabelText('额度金额'), { target: { value: '0' } });
+  await chooseOption(screen.getByLabelText('额度周期'), '每天');
   fireEvent.keyDown(screen.getByLabelText('额度'), { key: 'Escape' });
   expect(screen.getByRole('alert')).toHaveTextContent('额度须大于 0 且不超过 100 万');
-  expect(screen.getByLabelText('今日限额')).toHaveValue(0);
+  expect(screen.getByLabelText('额度金额')).toHaveValue(0);
   expect(api.updateGatewayKey).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText('今日限额'), { target: { value: '25' } });
+  fireEvent.change(screen.getByLabelText('额度金额'), { target: { value: '25' } });
   fireEvent.keyDown(screen.getByLabelText('额度'), { key: 'Escape' });
-  await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { limits: [{ period: 'day', cap_cny: 25 }] }));
-  expect(screen.queryByLabelText('今日限额')).toBeNull();
+  await waitFor(() => expect(api.updateGatewayKey).toHaveBeenCalledWith('k1', { quota: { cap_cny: 25, period: 'day' } }));
+  expect(screen.queryByLabelText('额度金额')).toBeNull();
 });
 
 it('自定义密钥可见，创建错误只展示消息并保留草稿', async () => {

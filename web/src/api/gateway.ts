@@ -7,20 +7,23 @@ import { publishGatewayConnected } from './gatewayEvents';
 export const GATEWAY_TOKEN_LENGTH = 47;
 
 /** 局域网共享（ADR-0025）：本机作为网关的设置、网关密钥与用量；接入端测试连接与同步模型。 */
-export type LimitPeriod = 'day' | 'week' | 'month';
-export interface GatewayLimit { period: LimitPeriod; cap_cny: number }
-export interface LimitStatus extends GatewayLimit {
+/** 额度周期按主机本机时区；每周从周一起算；none 不重置，从设额度起累计（第 7 批）。 */
+export type QuotaPeriod = 'day' | 'week' | 'month' | 'none';
+export interface GatewayQuota { cap_cny: number; period: QuotaPeriod; since?: string | null }
+export interface QuotaStatus {
+  period: QuotaPeriod;
+  cap_cny: number;
   used_cny: number;
   reserved_cny: number;
   left_cny: number;
-  resets_at: string;
+  resets_at: string | null;
 }
 /** 范围里的一个供应商：models 为 null 时是它的全部模型（含以后新增）。 */
 export interface ScopeEntry { alias: string; models: string[] | null }
 export interface GatewayKeyInput {
   name: string;
   role?: 'member' | 'admin';
-  limits: GatewayLimit[];
+  quota: GatewayQuota | null;
   /** null = 全部模型（所有供应商，含以后新增）。 */
   scope: ScopeEntry[] | null;
 }
@@ -28,16 +31,22 @@ export interface GatewayKey extends GatewayKeyInput {
   id: string;
   created_at: string;
   revoked_at: string | null;
-  limits_status: LimitStatus[];
+  quota_status: QuotaStatus | null;
   month_charged_cny: number;
   month_calls: number;
   last_used_at: string | null;
+}
+/** 旧主机（第 7 批前）的 /me 只回 limits；新主机两个都回。 */
+export interface LegacyLimitStatus extends Omit<QuotaStatus, 'period' | 'resets_at'> {
+  period: 'day' | 'week' | 'month';
+  resets_at: string;
 }
 export interface GatewayMe {
   id?: string;
   role?: 'member' | 'admin';
   name: string;
-  limits: LimitStatus[];
+  quota?: QuotaStatus | null;
+  limits: LegacyLimitStatus[];
   month_charged_cny: number;
   month_calls: number;
 }

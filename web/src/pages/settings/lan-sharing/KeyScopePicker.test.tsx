@@ -23,7 +23,7 @@ const options: GatewayOptions = {
 
 function key(overrides: Partial<GatewayKey> = {}): GatewayKey {
   return {
-    id: 'k1', name: '小王', role: 'member', limits: [], scope: null, limits_status: [],
+    id: 'k1', name: '小王', role: 'member', quota: null, scope: null, quota_status: null,
     created_at: '', revoked_at: null, month_charged_cny: 0, month_calls: 0, last_used_at: null, ...overrides,
   };
 }

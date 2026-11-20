@@ -21,6 +21,6 @@ export interface TeamLibraryGatewayState {
 }
 export interface GatewayKeyCreate {
   name: string; token?: string; role: 'member' | 'admin';
-  limits: { period: 'day' | 'week' | 'month'; cap_cny: number }[];
+  quota: { cap_cny: number; period: 'day' | 'week' | 'month' | 'none' } | null;
   scope: { alias: string; models: string[] | null }[] | null;
 }
