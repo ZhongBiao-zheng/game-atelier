@@ -130,17 +130,35 @@ def test_restart_keeps_waiting_jobs(gateway, upstream, faults):
     assert read_job(job_id).status == JobStatus.PENDING
 
 
-def test_stopping_a_waiting_job_ends_it_at_once(gateway, upstream, faults):
+def test_stopping_a_waiting_job_ends_it_at_once(gateway, upstream, faults, monkeypatch):
+    """停止当下就落「已停止」；停止请求由补发线程送到主机后，文案按主机答复改（第 5 批 5-3）。
+
+    两段都是确定的：先挡住叫醒补发线程，看停止当下的状态；再在本线程同步补发一轮，看主机答复后的文案。
+    以前停止后直接读文案，补发线程抢在读之前送达就会读到主机答复那句（macOS CI 时红时绿）。
+    """
+    from character_workflow.lib import gateway_cancel_outbox
     from tests.local_client import LocalTestClient
     from viewer_server.server_app import build_app
 
+    woken = []
+    monkeypatch.setattr(gateway_cancel_outbox, "wake", lambda: woken.append(True))
     job_id = _job("job-stop").job_id
     _park(job_id, faults)
+    _reattach_harness._host_settled()  # 主机其实收到了提交（丢的是回应）并已跑完
     client = LocalTestClient(base_url="http://127.0.0.1", app=build_app())
     assert client.post(f"/api/jobs/{job_id}/cancel").json()["status"] == "canceled"
     stopped = read_job(job_id)
-    assert stopped.status == JobStatus.CANCELED and "网关" in stopped.error
+    assert stopped.status == JobStatus.CANCELED
+    assert stopped.error == job_runner.GATEWAY_CANCEL_UNDELIVERED  # 「网关上的任务可能仍在执行」
+    assert stopped.params.gateway_cancel_pending is True and woken == [True]
     assert _studio_run(job_id) is False  # 等待者随后退出
+
+    assert gateway_cancel_outbox.deliver_once() is False
+    landed = read_job(job_id)
+    # 主机答「已结束、已出图」：结局仍按跑完计费，文案改成对应那句，标记清除。
+    assert landed.status == JobStatus.CANCELED
+    assert landed.error == job_runner.GATEWAY_CANCEL_CONTINUING
+    assert landed.params.gateway_cancel_pending is None
 
 
 def test_waiter_keeps_going_after_one_round_raises(monkeypatch):

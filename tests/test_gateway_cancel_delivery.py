@@ -328,3 +328,46 @@ def test_only_comfyui_running_on_this_host_is_really_canceled_after_sending(host
     view = client.post(f"/gateway/v1/tasks/{task_id}/cancel").json()
     assert view["cancel_outcome"] == expected
     assert gateway_tasks.get_task(client.record.id, task_id).cancel_requested is (expected == "canceled")
+
+
+# ---------------------------------------------------------------- 用例之间的隔离
+# 下面两条按顺序跑：前一条故意留下一个活着的补发线程和一条送不到的待补发任务；conftest 的
+# _gateway_cancel_outbox_stopped 应在用例结束时停掉它，后一条里线程不存在、也不会读后一条的数据目录。
+
+_LEFTOVER_SEEN: list[str] = []
+
+
+def test_isolation_1_leaves_a_live_outbox_thread_with_an_undeliverable_stop(isolated_data_root,
+                                                                          monkeypatch):
+    from types import SimpleNamespace
+
+    from character_workflow.lib import keys
+
+    tried = threading.Event()
+
+    def unreachable(*_args, **_kwargs):
+        _LEFTOVER_SEEN.append(str(isolated_data_root))
+        tried.set()
+        raise atelier_gateway.requests.ConnectionError("gateway down")
+
+    monkeypatch.setattr(keys, "find_by_alias", lambda _alias: SimpleNamespace(
+        provider="atelier", base_url="http://hub", access_key="t"))
+    monkeypatch.setattr(atelier_gateway, "cancel_by_key", unreachable)
+    job = _reattach._now_job("job-left-behind", gateway_idempotency_key=_key(),
+                             gateway_cancel_pending=True)
+    save_job(read_job(job.job_id).model_copy(update={"status": JobStatus.CANCELED}))
+    gateway_cancel_outbox.wake()
+    assert tried.wait(5)
+    assert gateway_cancel_outbox._thread.is_alive()  # 送不到：线程等 30 秒再试，活过本用例
+    assert gateway_cancel_outbox.pending_job_ids() == [job.job_id]
+
+
+def test_isolation_2_the_next_test_sees_no_outbox_thread(isolated_data_root):
+    thread = gateway_cancel_outbox._thread
+    assert thread is None or not thread.is_alive()
+    job = _reattach._now_job("job-next-test", gateway_idempotency_key=_key(),
+                             gateway_cancel_pending=True)
+    save_job(read_job(job.job_id).model_copy(update={"status": JobStatus.CANCELED}))
+    assert gateway_cancel_outbox.pending_job_ids() == [job.job_id]  # 本目录确有活可干
+    assert all(root != str(isolated_data_root) for root in _LEFTOVER_SEEN)  # 没有线程读过这里
+    assert read_job(job.job_id).params.gateway_cancel_pending is True

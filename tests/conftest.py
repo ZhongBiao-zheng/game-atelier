@@ -41,3 +41,20 @@ def isolated_data_root(tmp_path, monkeypatch):
     # 公告源同理：启动不拉 CNB / GitHub。
     monkeypatch.setattr(announcement_feed, "start_background_sync", lambda: None)
     return root
+
+
+@pytest.fixture(autouse=True)
+def _gateway_cancel_outbox_stopped(isolated_data_root):
+    """停止补发线程（gateway_cancel_outbox）是进程内的后台线程：用例结束时停掉并等它退出。
+
+    否则上一条用例留下的待补发任务会让线程活过用例边界（连不上时每 30 秒再试），在下一条用例里读到下一条的
+    数据目录、把那里的待补发任务送出去，时序不定。依赖 isolated_data_root：线程先退出，数据目录才还原。
+    """
+    yield
+    from character_workflow.lib import gateway_cancel_outbox
+
+    gateway_cancel_outbox.stop()
+    thread = gateway_cancel_outbox._thread
+    if thread is not None:
+        thread.join(10)
+        assert not thread.is_alive(), "停止补发线程 10 秒内没有退出"
