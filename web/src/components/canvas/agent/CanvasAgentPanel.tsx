@@ -189,6 +189,9 @@ function Message({ projectId, message }: { projectId: string; message: CanvasAge
   if (message.role === 'error') {
     return <p role="alert" className="text-xs text-destructive">{message.text}</p>;
   }
+  if (message.role === 'system') {
+    return <p className="text-xs text-muted-foreground">{message.text}</p>;
+  }
   return (
     <div className="flex flex-col gap-1">
       {message.reasoning_summary && (

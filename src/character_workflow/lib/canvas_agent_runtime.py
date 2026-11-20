@@ -1265,12 +1265,21 @@ _NO_IMAGE_SUPPORT = re.compile(
 
 
 def friendly_error(error: BaseException) -> str:
-    from agents.exceptions import MaxTurnsExceeded
+    from agents.exceptions import MaxTurnsExceeded, ModelBehaviorError, ModelRefusalError
     from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError
     if isinstance(error, CanvasToolError):
         return error.message
     if isinstance(error, MaxTurnsExceeded):
         return "这一轮步骤太多，已停下；可以让它继续"
+    if isinstance(error, ModelRefusalError):
+        return ("模型拒绝了这次请求（服务商内容审核），可以换个说法或换个模型"
+                f"（原始报错：{redact(str(error.refusal))[:300]}）")
+    if isinstance(error, ModelBehaviorError):
+        raw = redact(str(error.message))[:300]
+        if "finish_reason='length'" in error.message:
+            return f"模型的输出额度在给出内容前用完了，可以重试、关掉思考或换个模型（原始报错：{raw}）"
+        if "`response.incomplete`" in error.message or "`response.failed`" in error.message:
+            return f"对话模型返回错误：{raw}"
     if isinstance(error, APITimeoutError):
         return "对话模型响应超时"
     if isinstance(error, APIConnectionError):
@@ -1435,14 +1444,29 @@ async def run_turn(project_id: str, session_id: str, notify: Notify) -> None:
             summary=redact(summary)[:4000],
         ))
     usage = result.context_wrapper.usage
+    notes: list[CanvasAgentMessageCreate] = []
+    status = "awaiting_approval" if pending else "idle"
+    error = None
+    if not pending:
+        items = _drop_trailing_empty_output(items, len(base))
+        new_items = items[len(base):]
+        if _ended_without_reply(items):
+            # 模型正常结束但最后一次响应既没有文字也没有工具调用（各协议都会出现，SDK 照常结束）。
+            # 这一轮执行过工具：只是少了总结，加一条面板提示；没执行过：算失败。都不自动重试。
+            if _tools_ran_this_turn(items):
+                notes = [CanvasAgentMessageCreate(role="system", turn_id=turn_id, text=NO_SUMMARY_NOTE)]
+            else:
+                status = "failed"
+                error = _empty_reply_message(session, result)
+                notes = [CanvasAgentMessageCreate(role="error", turn_id=turn_id, text=error)]
 
     def update(current: CanvasAgentSession, now: str) -> dict:
         return {
-            **with_appended_messages(current, display_messages(new_items, turn_id), now),
+            **with_appended_messages(current, [*display_messages(new_items, turn_id), *notes], now),
             "history": items,
             "pending_approvals": pending,
-            "status": "awaiting_approval" if pending else "idle",
-            "error": None,
+            "status": status,
+            "error": error,
             "created_node_ids": sorted(set(current.created_node_ids) | context.created_node_ids),
             "token_usage": {
                 "input_tokens": current.token_usage.input_tokens + usage.input_tokens,
@@ -1452,6 +1476,61 @@ async def run_turn(project_id: str, session_id: str, notify: Notify) -> None:
 
     await asyncio.to_thread(mutate_canvas_agent_session, project_id, session_id, update)
     notify_session(notify, project_id, session_id)
+
+
+NO_SUMMARY_NOTE = "模型没有补充说明"
+
+
+def _drop_trailing_empty_output(items: list, start: int) -> list:
+    """去掉这一轮末尾没有内容的模型输出（空的 assistant 消息、单独的 reasoning）：它们留在历史里，
+    下一轮发给上游时会变成空内容消息（Anthropic 拒收）或没有后续条目的 reasoning（Responses 拒收）。"""
+    end = len(items)
+    while end > start:
+        item = items[end - 1]
+        if not isinstance(item, dict):
+            break
+        empty_message = (item.get("type") in (None, "message") and item.get("role") == "assistant"
+                         and not _output_text(item).strip() and not _has_refusal(item))
+        if not (empty_message or item.get("type") == "reasoning"):
+            break
+        end -= 1
+    return items[:end]
+
+
+def _has_refusal(item: dict) -> bool:
+    return any(isinstance(part, dict) and part.get("type") == "refusal"
+               for part in item.get("content") or [])
+
+
+def _ended_without_reply(items: list) -> bool:
+    """去掉末尾空输出后，最后一条不是有文字的 assistant 消息 = 这一轮模型最后什么都没说。"""
+    if not items:
+        return False
+    last = items[-1]
+    return not (isinstance(last, dict) and last.get("role") == "assistant"
+                and (_output_text(last).strip() or _has_refusal(last)))
+
+
+def _tools_ran_this_turn(items: list) -> bool:
+    """最后一条用户消息之后有工具输出：包括确认后续跑时、确认那一步执行的工具。"""
+    for item in reversed(items):
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "function_call_output":
+            return True
+        if item.get("role") == "user":
+            return False
+    return False
+
+
+def _empty_reply_message(session: CanvasAgentSession, result: Any) -> str:
+    responses = getattr(result, "raw_responses", None) or []
+    usage = getattr(responses[-1], "usage", None) if responses else None
+    output = int(getattr(usage, "output_tokens", 0) or 0)
+    details = getattr(usage, "output_tokens_details", None)
+    reasoning = int(getattr(details, "reasoning_tokens", 0) or 0)
+    tokens = f"输出 {output} token" + (f"，其中思考 {reasoning}" if reasoning else "")
+    return f"模型没有返回内容，可以重试或换个模型（{session.model_alias} / {session.model} · {tokens}）"
 
 
 def _finish_failed(project_id: str, session_id: str, turn_id: str, status: str,

@@ -32,6 +32,11 @@ describe('buildCanvasAgentTimeline', () => {
       .toEqual(['出图', 'process:2', '失败一次', '完成了', '再来', '读画布']);
   });
 
+  it('keeps the no-summary note visible after a collapsed process', () => {
+    const quiet = [message('user', '出图'), message('tool', '生成'), message('system', '模型没有补充说明')];
+    expect(shape(buildCanvasAgentTimeline(quiet, false))).toEqual(['出图', 'process:1', '模型没有补充说明']);
+  });
+
   it('leaves turns without tool steps as plain messages', () => {
     const chat = [message('user', '你好'), message('assistant', '你好呀')];
     expect(shape(buildCanvasAgentTimeline(chat, false))).toEqual(['你好', '你好呀']);

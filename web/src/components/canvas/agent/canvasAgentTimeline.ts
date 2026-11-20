@@ -1,6 +1,6 @@
 import type { CanvasAgentMessage } from '@/schema/canvas';
 
-/** 对话时间线：已结束的一轮里，中间过程（工具步骤、过程中的说明）收成一组，最终回复与报错照常显示。 */
+/** 对话时间线：已结束的一轮里，中间过程（工具步骤、过程中的说明）收成一组，最终回复、报错与提示照常显示。 */
 export type CanvasAgentTimelineBlock =
   | { kind: 'message'; message: CanvasAgentMessage }
   | { kind: 'process'; id: string; messages: CanvasAgentMessage[]; steps: number };
@@ -27,14 +27,16 @@ export function buildCanvasAgentTimeline(
     const collapsible = !(live && index === turns.length - 1);
     const last = body[body.length - 1];
     const final = last?.role === 'assistant' ? last : null;
-    const process = body.filter(message => message !== final && message.role !== 'error');
+    // 报错与系统提示（如「模型没有补充说明」）不收进过程组。
+    const shown = (message: CanvasAgentMessage) => message.role === 'error' || message.role === 'system';
+    const process = body.filter(message => message !== final && !shown(message));
     const steps = process.filter(message => message.role === 'tool').length;
     if (!collapsible || steps === 0) {
       body.forEach(message => blocks.push({ kind: 'message', message }));
       return;
     }
     blocks.push({ kind: 'process', id: process[0].message_id, messages: process, steps });
-    body.filter(message => message.role === 'error').forEach(message => blocks.push({ kind: 'message', message }));
+    body.filter(shown).forEach(message => blocks.push({ kind: 'message', message }));
     if (final) blocks.push({ kind: 'message', message: final });
   });
   return blocks;
