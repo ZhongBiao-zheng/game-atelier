@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createKey, patchKey } from '@/api/keys';
-import { uploadProviderIcon } from '@/api/providerIcons';
+import { defaultIconUrl, fetchProviderIcon, uploadProviderIcon } from '@/api/providerIcons';
 import { KeyForm } from './KeyForm';
 import { PROVIDER_PRESETS, presetInitial } from './providerPresets';
 
@@ -15,6 +15,7 @@ vi.mock('@/api/keys', async importOriginal => ({
 vi.mock('@/api/providerIcons', async importOriginal => ({
   ...await importOriginal<typeof import('@/api/providerIcons')>(),
   uploadProviderIcon: vi.fn(),
+  fetchProviderIcon: vi.fn(),
 }));
 
 beforeEach(() => vi.clearAllMocks());
@@ -93,5 +94,39 @@ describe('供应商图标弹层', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(patchKey).toHaveBeenCalledTimes(2));
     expect(vi.mocked(patchKey).mock.calls[1][1].icon).toBeNull();
+  });
+});
+
+// I1 6/n：按网址获取，默认填官网，没有官网时取接口地址的 origin。
+describe('按网址获取图标', () => {
+  it('默认地址：官网优先，其次接口地址的 origin', () => {
+    expect(defaultIconUrl('https://home.example', 'https://api.example/v1')).toBe('https://home.example');
+    expect(defaultIconUrl('', 'https://api.example/v1')).toBe('https://api.example');
+    expect(defaultIconUrl(null, 'not a url')).toBe('');
+  });
+
+  it('网址页签预填接口地址的 origin，获取成功后保存带上引用', async () => {
+    vi.mocked(fetchProviderIcon).mockResolvedValue({ icon: `file:${SHA}` });
+    vi.mocked(createKey).mockResolvedValue({ alias: 'relay' });
+    openNew();
+    fireEvent.click(screen.getByRole('button', { name: '更换图标' }));
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: '网址' }), { button: 0 });
+    expect(await screen.findByLabelText('图标网址')).toHaveValue('https://relay.example');
+    fireEvent.click(screen.getByRole('button', { name: '获取' }));
+    await waitFor(() => expect(fetchProviderIcon).toHaveBeenCalledWith('https://relay.example'));
+    fireEvent.click(await screen.findByRole('button', { name: '保存' }));
+    await waitFor(() => expect(createKey).toHaveBeenCalled());
+    expect(vi.mocked(createKey).mock.calls[0][0].icon).toBe(`file:${SHA}`);
+  });
+
+  it('取不到时显示原因', async () => {
+    vi.mocked(fetchProviderIcon).mockRejectedValue(new Error('获取图标失败：没有找到图标'));
+    openNew();
+    fireEvent.click(screen.getByRole('button', { name: '更换图标' }));
+    fireEvent.mouseDown(await screen.findByRole('tab', { name: '网址' }), { button: 0 });
+    fireEvent.change(await screen.findByLabelText('图标网址'), { target: { value: 'https://other.example' } });
+    fireEvent.click(screen.getByRole('button', { name: '获取' }));
+    await waitFor(() => expect(fetchProviderIcon).toHaveBeenCalledWith('https://other.example'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('没有找到图标');
   });
 });

@@ -377,3 +377,163 @@ def test_member_snapshot_keeps_only_brand_icons():
     [model] = gateway_models([route])
     assert [member.icon for member in model.via] == ["brand:gemini", None, None]
     assert [("icon" in member.model_dump()) for member in model.via] == [True, False, False]
+
+
+# --- 按网址获取（I1 6/n）：全部走 outbound_guard -----------------------------------------------
+
+class _Site:
+    """outbound_guard.fetch_document / fetch 的替身：按地址回内容，记录请求顺序。"""
+
+    def __init__(self, pages: dict[str, object]):
+        self.pages = pages
+        self.seen: list[str] = []
+
+    def _get(self, url):
+        from character_workflow.lib import outbound_guard
+
+        self.seen.append(url)
+        value = self.pages.get(url)
+        if value is None:
+            raise outbound_guard.OutboundError("下载失败：HTTP 404")
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    def document(self, url, *, max_bytes, timeout):
+        from character_workflow.lib import provider_icon_fetch
+
+        assert max_bytes == provider_icon_fetch.PAGE_MAX_BYTES
+        value = self._get(url)
+        return value if isinstance(value, tuple) else (value, "text/html")
+
+    def fetch(self, url, *, max_bytes, timeout, **_):
+        assert max_bytes == provider_icons.MAX_BYTES
+        value = self._get(url)
+        return value[0] if isinstance(value, tuple) else value
+
+
+@pytest.fixture
+def site(monkeypatch):
+    from character_workflow.lib import outbound_guard
+
+    holder = _Site({})
+    monkeypatch.setattr(outbound_guard, "fetch_document", holder.document)
+    monkeypatch.setattr(outbound_guard, "fetch", holder.fetch)
+    return holder
+
+
+def _fetch(client, url):
+    return client.post("/api/provider-icons/fetch", json={"url": url})
+
+
+def test_candidates_prefer_declared_icons_by_size_then_favicon():
+    from character_workflow.lib.provider_icon_fetch import candidates
+
+    html = """<html><head><base href="/static/">
+      <link rel="icon" href="small.png" sizes="16x16">
+      <link rel="apple-touch-icon" href="touch.png">
+      <link rel="icon" type="image/svg+xml" href="logo.svg">
+      <link rel="shortcut icon" href="https://cdn.example/fav.ico">
+      <link rel="stylesheet" href="x.css">
+      <link rel="icon" href="javascript:alert(1)">
+      <link rel="icon" href="data:image/png;base64,AAAA">
+    </head></html>"""
+    assert candidates("https://site.example/docs/", html) == [
+        "https://site.example/static/touch.png", "https://site.example/static/small.png",
+        "https://cdn.example/fav.ico", "https://site.example/favicon.ico"]
+    assert candidates("https://site.example/a", "") == ["https://site.example/favicon.ico"]
+
+
+def test_page_link_wins_over_favicon(client, site):
+    site.pages = {
+        "https://site.example/": b'<link rel="icon" href="/brand.png" sizes="64x64">',
+        "https://site.example/brand.png": _image("PNG", color=(0, 200, 0, 255)),
+        "https://site.example/favicon.ico": _image("ICO"),
+    }
+    response = _fetch(client, "https://site.example/")
+    assert response.status_code == 200, response.text
+    assert site.seen == ["https://site.example/", "https://site.example/brand.png"]
+    png = provider_icons.file_path(response.json()["icon"][5:]).read_bytes()
+    assert _decoded(png).getpixel((64, 64))[1] > 150
+
+
+def test_html_or_svg_pretending_to_be_an_icon_is_skipped(client, site):
+    site.pages = {
+        "https://site.example/": b'<link rel="icon" href="/a.png"><link rel="icon" href="/b.png">',
+        "https://site.example/a.png": b"<!doctype html><title>login</title>",
+        "https://site.example/b.png": b"<svg xmlns='http://www.w3.org/2000/svg'/>",
+        "https://site.example/favicon.ico": _image("ICO"),
+    }
+    response = _fetch(client, "https://site.example/")
+    assert response.status_code == 200
+    assert site.seen[-1] == "https://site.example/favicon.ico"
+
+
+def test_redirect_into_private_network_on_a_candidate_is_skipped(client, site):
+    from character_workflow.lib import outbound_guard
+
+    site.pages = {
+        "https://site.example/": b'<link rel="icon" href="/hop.png">',
+        "https://site.example/hop.png": outbound_guard.OutboundError("结果地址不能指向本机或私有网络"),
+        "https://site.example/favicon.ico": _image("PNG"),
+    }
+    assert _fetch(client, "https://site.example/").status_code == 200
+
+
+def test_nothing_usable_is_422_and_stores_nothing(client, site):
+    site.pages = {"https://site.example/": b'<link rel="icon" href="/1.png"><link rel="icon" href="/2.png">'
+                                           b'<link rel="icon" href="/3.png"><link rel="icon" href="/4.png">'}
+    response = _fetch(client, "https://site.example/")
+    assert response.status_code == 422 and "没有找到图标" in response.json()["detail"]
+    assert len(site.seen) == 1 + 4  # 页面加最多 4 个候选
+    assert not provider_icons.icons_dir().exists() or not any(provider_icons.icons_dir().iterdir())
+
+
+def test_a_direct_image_address_is_used_as_is(client, site):
+    site.pages = {"https://cdn.example/logo.webp": (_image("WEBP"), "image/webp")}
+    response = _fetch(client, "https://cdn.example/logo.webp")
+    assert response.status_code == 200 and site.seen == ["https://cdn.example/logo.webp"]
+
+
+def test_total_time_budget_stops_trying_candidates(client, site, monkeypatch):
+    from character_workflow.lib import provider_icon_fetch
+
+    clock = iter([0.0, 100.0])
+    monkeypatch.setattr(provider_icon_fetch, "_now", lambda: next(clock, 100.0))
+    site.pages = {"https://site.example/": b'<link rel="icon" href="/a.png">'}
+    assert _fetch(client, "https://site.example/").status_code == 422
+    assert site.seen == ["https://site.example/"]
+
+
+@pytest.mark.parametrize("url", [
+    "http://127.0.0.1:9/", "http://localhost/", "http://192.168.1.5/", "http://10.0.0.2/x",
+    "http://169.254.169.254/latest/meta-data", "http://printer.local/", "file:///etc/passwd",
+    "ftp://example.com/x",
+])
+def test_private_and_non_http_addresses_never_leave_the_machine(client, url, monkeypatch):
+    """真实的 outbound_guard：本机、私网、链路本地、非 http(s) 都在连出去之前被拒。"""
+    from character_workflow.lib import outbound_guard
+
+    monkeypatch.setattr(outbound_guard.requests.Session, "get",
+                        lambda *a, **k: pytest.fail("不应发出请求"))
+    monkeypatch.setattr(outbound_guard.requests, "get", lambda *a, **k: pytest.fail("不应发出请求"))
+    response = _fetch(client, url)
+    assert response.status_code == 422 and "没有找到图标" in response.json()["detail"]
+
+
+def test_dns_that_resolves_to_a_private_address_is_refused(client, monkeypatch):
+    from character_workflow.lib import outbound_guard
+
+    monkeypatch.setattr(outbound_guard.requests.utils, "get_environ_proxies", lambda _u: {})
+    monkeypatch.setattr(outbound_guard.socket, "getaddrinfo",
+                        lambda *_a, **_k: [(2, 1, 6, "", ("192.168.1.5", 443))])
+    monkeypatch.setattr(outbound_guard.requests.Session, "get",
+                        lambda *a, **k: pytest.fail("不应发出请求"))
+    response = _fetch(client, "https://rebind.example/")
+    assert response.status_code == 422 and "私有网络" in response.json()["detail"]
+
+
+def test_fetch_is_management_only():
+    from viewer_server.connection_capabilities import local_capability
+
+    assert local_capability("POST", "/api/provider-icons/fetch") == "manage"

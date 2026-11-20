@@ -1,24 +1,28 @@
 import { useRef, useState } from 'react';
-import { uploadProviderIcon } from '@/api/providerIcons';
+import { fetchProviderIcon, uploadProviderIcon } from '@/api/providerIcons';
 import { ProviderBrandIcon } from '@/components/ProviderBrandIcon';
 import { BrandGlyph, PROVIDER_BRANDS } from '@/components/providerBrands';
 import { Button } from '@/components/ui/button';
 import { FileInput } from '@/components/ui/file-input';
+import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Hint } from '@/components/ui/tooltip';
 
 type Display = { provider?: string; base_url?: string | null; alias?: string };
 
-/** 供应商图标弹层（I1）：选内置品牌、上传图片、恢复默认。只改表单里的值，保存时随 KEY 一起写。 */
-export function ProviderIconPicker({ icon, display, onChange }: {
+/** 供应商图标弹层（I1）：选内置品牌、上传图片、按网址获取、恢复默认。只改表单里的值，保存时随 KEY 一起写。 */
+export function ProviderIconPicker({ icon, display, defaultUrl, onChange }: {
   icon: string | null;
   display: Display;
+  /** 按网址获取的默认地址（官网或接口地址的 origin）。 */
+  defaultUrl: string;
   onChange: (icon: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const choose = (next: string | null) => {
@@ -26,12 +30,11 @@ export function ProviderIconPicker({ icon, display, onChange }: {
     setError(null);
     setOpen(false);
   };
-  const upload = async (file: File | undefined) => {
-    if (!file) return;
+  const run = async (task: () => Promise<{ icon: string }>) => {
     setUploading(true);
     setError(null);
     try {
-      choose((await uploadProviderIcon(file)).icon);
+      choose((await task()).icon);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -39,6 +42,8 @@ export function ProviderIconPicker({ icon, display, onChange }: {
       if (fileRef.current) fileRef.current.value = '';
     }
   };
+  const upload = (file: File | undefined) => file ? run(() => uploadProviderIcon(file)) : Promise.resolve();
+  const address = (url ?? defaultUrl).trim();
 
   return (
     <Popover open={open} onOpenChange={next => { setOpen(next); if (!next) setError(null); }}>
@@ -53,6 +58,7 @@ export function ProviderIconPicker({ icon, display, onChange }: {
           <TabsList className="w-full">
             <TabsTrigger value="brand">品牌</TabsTrigger>
             <TabsTrigger value="upload">上传</TabsTrigger>
+            <TabsTrigger value="url">网址</TabsTrigger>
           </TabsList>
           <TabsContent value="brand">
             <div className="grid grid-cols-7 gap-1">
@@ -75,6 +81,13 @@ export function ProviderIconPicker({ icon, display, onChange }: {
             <FileInput ref={fileRef} aria-label="图标图片" accept="image/png,image/jpeg,image/webp,image/gif,image/x-icon,.ico"
               onChange={event => void upload(event.target.files?.[0])} />
             <p className="text-xs text-muted-foreground">PNG、JPEG、WebP、GIF、ICO，1 MB 以内</p>
+          </TabsContent>
+          <TabsContent value="url" className="space-y-2 py-1">
+            <Input aria-label="图标网址" placeholder="https://" value={url ?? defaultUrl} onChange={event => setUrl(event.target.value)}
+              onKeyDown={event => { if (event.key === 'Enter' && address && !uploading) { event.preventDefault(); void run(() => fetchProviderIcon(address)); } }} />
+            <Button variant="outline" type="button" className="w-full" disabled={uploading || !address} onClick={() => void run(() => fetchProviderIcon(address))}>
+              {uploading ? '获取中…' : '获取'}
+            </Button>
           </TabsContent>
         </Tabs>
         {error && <p role="alert" className="mt-2 text-xs text-destructive">{error}</p>}
