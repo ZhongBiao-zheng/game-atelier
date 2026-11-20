@@ -36,7 +36,14 @@ SESSION = "/projects/{project_id}/agent/sessions/{session_id}"
 _tasks: dict[tuple[str, str], asyncio.Task] = {}
 
 
+# 正在执行确认的会话：resolve_approvals 认领后状态已是 running，但这一轮的任务要等执行完才调度，
+# 这段时间里刷新面板不能被 recover_if_stale 当成「服务中途退出」标成中断。
+_resolving: set[tuple[str, str]] = set()
+
+
 def is_running(project_id: str, session_id: str) -> bool:
+    if (project_id, session_id) in _resolving:
+        return True
     task = _tasks.get((project_id, session_id))
     return task is not None and not task.done()
 
@@ -189,8 +196,15 @@ async def post_approvals(project_id: str, session_id: str,
     decisions = {decision.call_id: decision.approve for decision in payload.decisions}
     items = {decision.call_id: decision.items for decision in payload.decisions
              if decision.approve and decision.items is not None}
-    session = await _call(runtime.resolve_approvals, project_id, session_id, decisions, items)
-    _schedule(project_id, session_id)
+    key = (project_id, session_id)
+    if key in _resolving:
+        raise CanvasToolError("SESSION_BUSY", "没有待确认的操作", 409)
+    _resolving.add(key)
+    try:
+        session = await _call(runtime.resolve_approvals, project_id, session_id, decisions, items)
+        _schedule(project_id, session_id)
+    finally:
+        _resolving.discard(key)
     return session
 
 

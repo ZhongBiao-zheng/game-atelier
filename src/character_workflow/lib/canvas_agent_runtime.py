@@ -529,10 +529,22 @@ def run_tool_safely(project_id: str, tool: str, arguments: dict, scope: ModelSco
         return f"错误（{error.code}）：{error.message}", []
     except (KeyError, TypeError, ValueError) as error:
         return f"参数错误：{error}", []
+    except Exception as error:  # noqa: BLE001 — 穿出去会让 Auto 整轮失败、确认路径返回 500 后被重复执行
+        logger.exception("canvas agent tool %s failed unexpectedly", tool)
+        return redact(UNEXPECTED_ERROR.format(kind=type(error).__name__)), []
     text = json.dumps(result, ensure_ascii=False)
     if tool != "read_spec" and len(text) > TOOL_OUTPUT_LIMIT:
         text = text[:TOOL_OUTPUT_LIMIT] + "…（已截断）"
     return text, created
+
+
+# 工具执行中出现未预期的异常：操作可能已部分生效（任务已建、改动已提交、外部脚本已跑），不能重跑。
+# 只写异常类型名，不带异常原文（可能含本机路径或密钥）；完整堆栈在日志里。
+UNEXPECTED_ERROR = ("错误（UNEXPECTED）：执行时出现未预期错误（{kind}），这个操作可能已经部分生效。"
+                    "先用 get_canvas / get_run 查看现状，再告诉用户；不要重试。")
+UNEXPECTED_LABEL = "执行出错，可能已部分生效，请查看画布"
+INTERRUPTED_OUTPUT = ("服务中断，这个操作已中断、结果未知，可能已经部分生效。"
+                      "先用 get_canvas / get_run 查看现状，再告诉用户；不要重试。")
 
 
 def is_tool_error(text: str) -> bool:
@@ -543,6 +555,8 @@ def tool_error_label(text: str) -> str:
     """面板上的一行说明；完整的校验信息只给模型看（它要靠这个改参数）。"""
     if text.startswith("参数错误"):
         return "参数不合规，已退回模型修正"
+    if text.startswith("错误（UNEXPECTED）"):
+        return UNEXPECTED_LABEL
     return text.splitlines()[0][:200]
 
 
@@ -565,8 +579,8 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
     "append_lesson": ("记录一条待审项目经验，用户采纳后才生效。",
                       {"type": "object", "required": ["text"],
                        "properties": {"text": {"type": "string", "minLength": 1, "maxLength": 300}}}),
-    "get_canvas": ("读取当前画布：节点、文本、生成配置、连线、媒体版本。画布较大时返回概览，"
-                   "再用 node_ids 读取具体节点。",
+    "get_canvas": ("读取当前画布：节点、文本、生成配置、连线、媒体版本。不传 node_ids 读整张画布"
+                   "（画布较大时返回概览）；node_ids 只能填画布上已有节点的 id，用来读概览里的具体节点。",
                    {"type": "object", "properties": {
                        "node_ids": {"type": "array", "items": {"type": "string"},
                                     "minItems": 1, "maxItems": 20}}}),
@@ -1431,22 +1445,26 @@ def resolve_approvals(project_id: str, session_id: str, decisions: dict[str, boo
                       items: dict[str, list[int]] | None = None) -> CanvasAgentSession:
     """Execute approved calls, reject the rest, append their outputs, mark running.
 
-    items：run_generations 调用里用户勾选执行的项（下标）；没给就是全部执行。"""
-    session = read_canvas_agent_session(project_id, session_id)
-    if session.status != "awaiting_approval":
-        raise CanvasToolError("SESSION_BUSY", "没有待确认的操作", 409)
-    if set(decisions) != {approval.call_id for approval in session.pending_approvals}:
-        raise CanvasToolError("INVALID_PARAMETERS", "请对每个待确认操作都给出决定", 422)
+    items：run_generations 调用里用户勾选执行的项（下标）；没给就是全部执行。
+
+    先认领再执行：在会话锁里把 awaiting_approval 改成 running、清空待确认，之后才执行。执行过的调用
+    不能再执行（任务已建、改动已提交），所以并发的第二个裁决拿到 409；执行中出现任何异常都变成
+    那个调用的错误输出，会话照常 running 让模型继续。认领后进程退出的，mark_interrupted 补输出。"""
     items = items or {}
-    rejected_items: dict[str, frozenset[int]] = {}
-    for approval in session.pending_approvals:
-        if approval.call_id not in items:
-            continue
-        total = len(_generation_items(_arguments(approval.arguments)))
-        chosen = set(items[approval.call_id])
-        if approval.tool != "run_generations" or not chosen or not chosen <= set(range(total)):
-            raise CanvasToolError("INVALID_PARAMETERS", "逐项选择只适用于批量生成，且至少选一项", 422)
-        rejected_items[approval.call_id] = frozenset(set(range(total)) - chosen)
+    claimed: dict = {}
+
+    def claim(current: CanvasAgentSession, _now: str) -> dict:
+        if current.status != "awaiting_approval":
+            raise CanvasToolError("SESSION_BUSY", "没有待确认的操作", 409)
+        if set(decisions) != {approval.call_id for approval in current.pending_approvals}:
+            raise CanvasToolError("INVALID_PARAMETERS", "请对每个待确认操作都给出决定", 422)
+        claimed["rejected"] = _rejected_items(current.pending_approvals, items)
+        claimed["session"] = current
+        return {"status": "running", "pending_approvals": []}
+
+    mutate_canvas_agent_session(project_id, session_id, claim)
+    session: CanvasAgentSession = claimed["session"]
+    rejected_items: dict[str, frozenset[int]] = claimed["rejected"]
     outputs: list[dict] = []
     results: list[CanvasAgentMessageCreate] = []
     created: set[str] = set()
@@ -1476,18 +1494,49 @@ def resolve_approvals(project_id: str, session_id: str, decisions: dict[str, boo
             record if record is not None else f"{label}\n{approval.summary}")))
 
     def update(current: CanvasAgentSession, now: str) -> dict:
-        if current.status != "awaiting_approval":
-            raise CanvasToolError("SESSION_BUSY", "没有待确认的操作", 409)
+        # 认领之后状态应仍是 running；万一已被别处改掉，也要把输出写回，不能留下没有输出的调用。
+        answered = _answered_call_ids(current.history)
         return {**with_appended_messages(current, results, now),
-                "history": [*current.history, *outputs], "pending_approvals": [],
-                "status": "running",
+                "history": [*current.history,
+                            *(item for item in outputs if item["call_id"] not in answered)],
                 "created_node_ids": sorted(set(current.created_node_ids) | created)}
 
     return mutate_canvas_agent_session(project_id, session_id, update)
 
 
+def _rejected_items(approvals: list, items: dict[str, list[int]]) -> dict[str, frozenset[int]]:
+    rejected: dict[str, frozenset[int]] = {}
+    for approval in approvals:
+        if approval.call_id not in items:
+            continue
+        total = len(_generation_items(_arguments(approval.arguments)))
+        chosen = set(items[approval.call_id])
+        if approval.tool != "run_generations" or not chosen or not chosen <= set(range(total)):
+            raise CanvasToolError("INVALID_PARAMETERS", "逐项选择只适用于批量生成，且至少选一项", 422)
+        rejected[approval.call_id] = frozenset(set(range(total)) - chosen)
+    return rejected
+
+
+def _answered_call_ids(history: list) -> set[str]:
+    return {item.get("call_id") for item in history
+            if isinstance(item, dict) and item.get("type") == "function_call_output"}
+
+
 def mark_interrupted(project_id: str, session_id: str) -> CanvasAgentSession:
-    """running with no live task (server restarted mid-turn) → interrupted."""
+    """running with no live task (server restarted mid-turn) → interrupted.
+
+    确认后执行到一半进程退出时，历史里有调用没有输出：补一条「已中断、可能已部分生效、不要重试」，
+    否则下一轮请求会因为缺少工具输出被上游拒绝。"""
+    def answer_dangling(current: CanvasAgentSession, _now: str) -> dict:
+        answered = _answered_call_ids(current.history)
+        dangling = [{"type": "function_call_output", "call_id": item["call_id"],
+                     "output": INTERRUPTED_OUTPUT}
+                    for item in current.history
+                    if isinstance(item, dict) and item.get("type") == "function_call"
+                    and item.get("call_id") not in answered]
+        return {"history": [*current.history, *dangling]} if dangling else {}
+
+    mutate_canvas_agent_session(project_id, session_id, answer_dangling)
     _finish_failed(project_id, session_id, f"turn-{int(time.time() * 1000)}", "interrupted",
                    "服务重启，这一轮已中断")
     return read_canvas_agent_session(project_id, session_id)
