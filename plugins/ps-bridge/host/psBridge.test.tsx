@@ -100,7 +100,7 @@ it('runs one request at a time and is busy while it runs', async () => {
 
 it('status area does not talk to Photoshop until asked, then shows the version', async () => {
   const bodies: unknown[] = [];
-  const status = { supported: true, installed: true, running: true, responsible_app: 'Atelier', version: null, active_document: null };
+  const status = { supported: true, unsupported_reason: null, installed: true, running: true, responsible_app: 'Atelier', version: null, active_document: null };
   vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as { params: { probe: boolean } };
     bodies.push(body);
@@ -117,7 +117,7 @@ it('status area does not talk to Photoshop until asked, then shows the version',
 });
 
 it('status area says when Photoshop is missing or the system is unsupported', async () => {
-  const base = { installed: false, running: false, responsible_app: null, version: null, active_document: null };
+  const base = { unsupported_reason: null, installed: false, running: false, responsible_app: null, version: null, active_document: null };
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ result: { ...base, supported: true } }))));
   const { unmount } = render(<PsBridgeSettings />);
   expect(await screen.findByText('未检测到 Photoshop')).toBeInTheDocument();
@@ -128,8 +128,19 @@ it('status area says when Photoshop is missing or the system is unsupported', as
   expect(screen.getByRole('button', { name: '检测' })).toBeDisabled();
 });
 
+it('status area shows the reason the server gives, such as the Windows service mode', async () => {
+  const reason = '常驻模式下不能连接 Photoshop，请用桌面应用或启动器运行 Atelier';
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ result: {
+    supported: false, unsupported_reason: reason, installed: true, running: false, responsible_app: null,
+    version: null, active_document: null,
+  } }))));
+  render(<PsBridgeSettings />);
+  expect(await screen.findByText(reason)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '检测' })).toBeDisabled();
+});
+
 it('status area shows a probe failure as one line', async () => {
-  const status = { supported: true, installed: true, running: true, responsible_app: 'Atelier', version: null, active_document: null };
+  const status = { supported: true, unsupported_reason: null, installed: true, running: true, responsible_app: 'Atelier', version: null, active_document: null };
   const denied = '需要在「系统设置 → 隐私与安全性 → 自动化」里允许 Atelier 控制 Photoshop';
   vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
     const probe = (JSON.parse(String(init?.body)) as { params: { probe: boolean } }).params.probe;

@@ -61,6 +61,7 @@ class PsError(Exception):
 
 
 class Executor(Protocol):
+    def unsupported_reason(self) -> str | None: ...
     def running(self) -> bool: ...
     def installed(self) -> bool: ...
     def call(self, request_dir: Path, config: dict[str, Any], timeout_s: int) -> dict[str, Any]: ...
@@ -86,6 +87,9 @@ def responsible_app() -> str | None:
 
 
 class MacExecutor:
+    def unsupported_reason(self) -> str | None:
+        return None
+
     def running(self) -> bool:
         # lsappinfo 走 LaunchServices：不发 Apple 事件、不触发授权、不经 System Events，PS 没开不会被拉起。
         try:
@@ -134,6 +138,9 @@ class MacExecutor:
 
 
 class UnsupportedExecutor:
+    def unsupported_reason(self) -> str | None:
+        return "当前系统暂不支持 Photoshop 联动"
+
     def running(self) -> bool:
         return False
 
@@ -144,7 +151,16 @@ class UnsupportedExecutor:
         raise PsError("PS_UNSUPPORTED", "当前系统暂不支持 Photoshop 联动", 501)
 
 
-EXECUTOR: Executor = MacExecutor() if sys.platform == "darwin" else UnsupportedExecutor()
+def _platform_executor() -> Executor:
+    if sys.platform == "darwin":
+        return MacExecutor()
+    if sys.platform == "win32":
+        from .executor_windows import windows_executor  # 它反过来用本模块的 PsError / cancel / SCRIPT
+        return windows_executor()
+    return UnsupportedExecutor()
+
+
+EXECUTOR: Executor = _platform_executor()
 
 
 def busy_timeout() -> PsError:

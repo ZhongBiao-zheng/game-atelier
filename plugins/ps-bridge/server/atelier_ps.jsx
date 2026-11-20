@@ -1,8 +1,10 @@
 // Atelier PS 联动（ps-bridge）在 Photoshop 里执行的脚本。ES3 / ExtendScript。
-// viewer-server 经 osascript「do javascript」传入加载器文本 $.evalFile(本文件)，唯一参数是请求目录里
-// config.json 的路径。配置由服务端 json.dumps(ensure_ascii=True) 写出，只含 ASCII，按 JSON 读。
+// viewer-server 传入加载器文本 $.evalFile(本文件)：macOS 经 osascript「do javascript」，Windows 经 COM DoJavaScript。
+// 唯一参数是请求目录里 config.json 的路径；Windows 的加载器另外把它放进全局 ATELIER_CONFIG_PATH，优先读。
+// 配置由服务端 json.dumps(ensure_ascii=True) 写出，只含 ASCII，按 JSON 读。
 // 结果写到 config.result；PS 侧的任何异常都写进回执，不弹框。
-var ATELIER_ARGS = (typeof arguments !== 'undefined' && arguments) ? arguments : [];
+var ATELIER_ARGS = (typeof ATELIER_CONFIG_PATH === 'string') ? [ATELIER_CONFIG_PATH]
+    : ((typeof arguments !== 'undefined' && arguments) ? arguments : []);
 
 (function (args) {
     function now() { return new Date().getTime(); }

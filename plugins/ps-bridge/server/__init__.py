@@ -64,9 +64,11 @@ def _plugin_error(error: bridge.PsError) -> PluginError:
 
 def _status(probe: bool) -> dict:
     executor = bridge.EXECUTOR
+    reason = executor.unsupported_reason()
     running = executor.running()
     result = {
-        "supported": not isinstance(executor, bridge.UnsupportedExecutor),
+        "supported": reason is None,
+        "unsupported_reason": reason,
         "installed": running or executor.installed(),
         "running": running,
         "responsible_app": bridge.responsible_app(),

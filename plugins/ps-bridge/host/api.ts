@@ -18,6 +18,8 @@ async function route<T>(projectId: string | null, path: string, action: string, 
 
 export interface PsBridgeStatus {
   supported: boolean;
+  /** supported 为假时的原因（如 Windows 常驻模式），否则为 null。 */
+  unsupported_reason: string | null;
   installed: boolean;
   running: boolean;
   /** macOS 的自动化授权会记在这个应用名下。 */

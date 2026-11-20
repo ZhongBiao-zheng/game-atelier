@@ -97,7 +97,7 @@ describe('设置页「插件」· 宿主插件的设置区', () => {
       if (url === '/api/plugins/ps-bridge/routes/status') {
         bodies.push(JSON.parse(String(init?.body)));
         return new Response(JSON.stringify({ result: {
-          supported: true, installed: true, running: false, responsible_app: 'Atelier', version: null, active_document: null,
+          supported: true, unsupported_reason: null, installed: true, running: false, responsible_app: 'Atelier', version: null, active_document: null,
         } }));
       }
       if (url === '/api/plugins/ps-bridge/routes/settings') return new Response(JSON.stringify({ result: { allow_scripts: false } }));

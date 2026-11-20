@@ -44,6 +44,9 @@ class FakePhotoshop:
         self.placed: dict | None = None
         self.failure = None
 
+    def unsupported_reason(self) -> str | None:
+        return None
+
     def running(self) -> bool:
         return self.is_running
 
@@ -131,7 +134,7 @@ def test_ps_bridge_is_a_host_plugin_that_ships_disabled(isolated_data_root):
 def test_status_without_probe_does_not_talk_to_photoshop(ps):
     project_id = create_canvas_project("PS").project_id
     assert call(project_id, "/status") == {
-        "supported": True, "installed": True, "running": True, "responsible_app": "Atelier",
+        "supported": True, "unsupported_reason": None, "installed": True, "running": True, "responsible_app": "Atelier",
         "version": None, "active_document": None}
     assert ps.calls == []
 

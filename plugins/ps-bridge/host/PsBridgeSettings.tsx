@@ -11,7 +11,7 @@ import {
 } from './api';
 
 function statusText(status: PsBridgeStatus): string {
-  if (!status.supported) return '当前系统暂不支持';
+  if (!status.supported) return status.unsupported_reason ?? '当前系统暂不支持';
   if (status.version) return `Photoshop ${status.version}${status.active_document ? ` · ${status.active_document}` : ''}`;
   if (status.running) return 'Photoshop 已启动';
   return status.installed ? 'Photoshop 未启动' : '未检测到 Photoshop';
