@@ -51,7 +51,8 @@ _ERROR_MESSAGES = {
     "CONNECTION_RATE_LIMITED": "调用过于频繁，请稍后重试。",
     "REVISION_CONFLICT": "内容修订已变化，请重新读取后再操作。",
 }
-_PRIVATE_KEYS = frozenset({
+# 工具结果里不允许出现的字段名（不分大小写）。服务端的干跑校验预览按同一份名单藏字段（canvas_agent_routes）。
+PRIVATE_KEYS = frozenset({
     "access_key", "secret_key", "api_key", "grant_token", "session_token", "authorization",
     "data_root", "output_paths", "source_image", "absolute_path", "credential_path",
 })
@@ -173,7 +174,7 @@ def _safe_result(value: object, depth: int = 0) -> bool:
         return False
     if isinstance(value, dict):
         return all(
-            key.lower() not in _PRIVATE_KEYS and _safe_result(item, depth + 1)
+            key.lower() not in PRIVATE_KEYS and _safe_result(item, depth + 1)
             for key, item in value.items()
         )
     if isinstance(value, list):

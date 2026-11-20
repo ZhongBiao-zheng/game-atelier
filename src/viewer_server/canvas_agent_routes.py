@@ -151,17 +151,37 @@ def protocol_validate(request: Request, payload: ProtocolValidateRequest):
                               f"接口模板 {size // 1024} KB，超过 200 KB 上限", 413)
     result = validate_document(payload.document)
     if result["preview"]:
-        result["preview"] = {name: _without_auth_header(call) for name, call in result["preview"].items()}
+        result["preview"] = {name: _hide_private_fields(call) for name, call in result["preview"].items()}
     return result
 
 
-def _without_auth_header(call: dict) -> dict:
-    """预览里的鉴权头只是 `***` 占位，但 MCP 适配器拒绝任何名为 authorization 的字段：拿掉它，只报头名。"""
-    headers = call.get("headers") or {}
-    auth = [name for name in headers if name.lower() == "authorization"]
-    view = {**call, "headers": {name: value for name, value in headers.items() if name not in auth}}
-    if auth:
-        view["auth_header"] = auth[0]
+def _hide_private_fields(call: dict) -> dict:
+    """MCP 适配器拒绝任何名字在 PRIVATE_KEYS 里的字段（authorization、api_key 等），整份结果作废。
+
+    预览里这类字段只可能是鉴权头的 `***` 占位，或模板请求体 / 请求头里同名的字段：拿掉它们，把路径报在
+    `hidden_fields`，其余预览照常返回。查询串鉴权在 url 字符串里（`?api_key=***`），不是字段名，不受影响。
+    """
+    from character_workflow.mcp.client import PRIVATE_KEYS
+
+    hidden: list[str] = []
+
+    def walk(value, path: str):
+        if isinstance(value, dict):
+            kept = {}
+            for key, item in value.items():
+                here = f"{path}.{key}" if path else str(key)
+                if str(key).lower() in PRIVATE_KEYS:
+                    hidden.append(here)
+                    continue
+                kept[key] = walk(item, here)
+            return kept
+        if isinstance(value, list):
+            return [walk(item, f"{path}.{index}") for index, item in enumerate(value)]
+        return value
+
+    view = walk(call, "")
+    if hidden:
+        view["hidden_fields"] = hidden
     return view
 
 

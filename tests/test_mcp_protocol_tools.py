@@ -106,9 +106,32 @@ def test_validate_reports_issues_then_a_preview_without_the_auth_header(agent):
     assert result["valid"] is True and result["declared"]["kind"] == "image"
     submit = result["preview"]["submit"]
     assert submit["url"].startswith("https://服务地址/")
-    assert submit["auth_header"] == "Authorization"
+    assert submit["hidden_fields"] == ["headers.Authorization"]
     assert all(name.lower() != "authorization" for name in submit["headers"])
     assert adapter._safe_result(result)  # MCP 适配器会放行（含 authorization 字段的结果会被它拒掉）
+
+
+@pytest.mark.parametrize(("auth", "body_extra", "hidden", "in_url"), [
+    # 请求体里有同名字段（如厂商要求把 key 放进 JSON 体，模板里先写占位）：拿掉，报路径。
+    ({"type": "none"}, {"api_key": "fill-in", "options": {"Access_Key": "x"}},
+     ["body.api_key", "body.options.Access_Key"], None),
+    # 查询串鉴权：在 url 字符串里，不是字段名，原样返回。
+    ({"type": "query", "name": "api_key"}, {}, None, "api_key=%2A%2A%2A"),
+    # 请求头鉴权：头名与 PRIVATE_KEYS 同名（不分大小写）时拿掉，报路径。
+    ({"type": "header", "name": "Api_Key"}, {}, ["headers.Api_Key"], None),
+    ({"type": "header", "name": "X-Api-Key"}, {}, None, None),
+])
+def test_fields_the_mcp_adapter_refuses_are_hidden_not_fatal(agent, auth, body_extra, hidden, in_url):
+    document = {**IMAGE, "auth": auth,
+                "submit": {**IMAGE["submit"], "body": {**IMAGE["submit"]["body"], **body_extra}}}
+    result = _post(agent, "protocol-validate", {"document": document}).json()
+    assert result["valid"] is True
+    submit = result["preview"]["submit"]
+    assert submit.get("hidden_fields") == hidden
+    assert submit["body"]["prompt"] == "示例提示词"  # 其余预览照常
+    if in_url:
+        assert in_url in submit["url"]
+    assert adapter._safe_result(result)
 
 
 def _config_snapshot(root: Path) -> dict[str, bytes]:

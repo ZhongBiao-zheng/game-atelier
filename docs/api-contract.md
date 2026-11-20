@@ -1396,7 +1396,7 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/api/canvas-agent/protocol-manual` | `{}` → `{markdown}`：接入说明全文 |
-| POST | `/api/canvas-agent/protocol-validate` | `{document}`（请求上限 200 KB，超出 413 `CONTENT_TOO_LARGE`；模板本身上限仍是 64 KB，超出时 `valid:false`）→ 与 `POST /api/http-protocols/validate` 同形状；预览用占位服务地址与 `model-id`，鉴权头不出现在 `headers` 里，只在 `auth_header` 给出头名。不写盘、不发请求、不读已有模板与密钥 |
+| POST | `/api/canvas-agent/protocol-validate` | `{document}`（请求上限 200 KB，超出 413 `CONTENT_TOO_LARGE`；模板本身上限仍是 64 KB，超出时 `valid:false`）→ 与 `POST /api/http-protocols/validate` 同形状；预览用占位服务地址与 `model-id`；名字在 MCP 适配器禁止字段名单里的字段（`Authorization` 头、请求体或请求头里的 `api_key` / `access_key` 等，不分大小写）从预览里拿掉，路径列在该次调用的 `hidden_fields`（如 `headers.Authorization`、`body.api_key`）；查询串鉴权在 `url` 里，不受影响。不写盘、不发请求、不读已有模板与密钥 |
 
 ## 网关共享库（ADR-0034）
 

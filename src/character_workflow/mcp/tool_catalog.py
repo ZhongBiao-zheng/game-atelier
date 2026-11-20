@@ -79,8 +79,9 @@ PROTOCOL_TOOLS = {
                "Read it before writing a template for a model vendor."),
     "validate": (ProtocolValidateInput, "Dry-run a custom interface template (JSON object, <= 200 KB): returns "
                  "{valid, issues, declared, preview}. Never saves, never sends requests, never reads stored "
-                 "templates or keys. Fix issues until valid, then give the JSON to the user to paste and save "
-                 "in Atelier settings."),
+                 "templates or keys. Fields whose names look like credentials (Authorization, api_key, ...) are left "
+                 "out of the preview and listed in hidden_fields. Fix issues until valid, then give the JSON to "
+                 "the user to paste and save in Atelier settings."),
 }
 
 

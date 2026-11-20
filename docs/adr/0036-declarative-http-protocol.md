@@ -40,7 +40,7 @@ status: accepted
 - 模板的读取、保存、删除与绑定属于本机管理权限，网站会话、Canvas Agent 与网关成员不可调用；
   接入说明与干跑校验（不写盘、不发请求、不读已有模板与密钥）对本机 Agent 连接开放（2026-11-20，第 5 批 5-6B）：
   Canvas MCP 的 `atelier_protocol_manual` 返回 `data/http_protocol_manual.md` 全文，`atelier_protocol_validate`
-  走与设置页同一段校验与请求预览（占位服务地址，不接受 `base_url` / `model`，预览不带鉴权头）。
+  走与设置页同一段校验与请求预览（占位服务地址，不接受 `base_url` / `model`；预览里与 MCP 适配器禁止字段同名的字段——鉴权头 `Authorization`、请求体或请求头里的 `api_key` 等——拿掉并在 `hidden_fields` 报路径）。
   有效的本机 Agent 会话即可调用，不另设能力开关、不挂项目；对 Agent 开放的只有这两项。
   干跑校验会透露一条本机状态：是否配置了对象存储（`encode: "url"` 时报需要先配置）。
 
