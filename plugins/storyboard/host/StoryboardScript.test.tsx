@@ -60,6 +60,13 @@ beforeEach(() => {
 });
 
 const runButton = () => screen.findByRole('button', { name: /解析.*消耗对话额度/ });
+// 解析按钮先以禁用态渲染，模型列表返回后才可点；findByRole 一找到就返回，点在禁用按钮上什么都不发生。
+// 要点它就等到可点（第 6 批 6-3：以前靠 React 的状态更新先于 Testing Library 的 setTimeout(0) 执行，高负载下会反过来）。
+const enabledRunButton = async () => {
+  const button = await runButton();
+  await waitFor(() => expect(button).toBeEnabled());
+  return button;
+};
 
 it('列出剧本来源与对话模型，没有价格时写未计价', async () => {
   render(<Harness initial={{ script_node_ids: ['text-1', 'text-empty', 'ghost'] }} />);
@@ -84,7 +91,7 @@ it('一次点击只解析一段：先保存，再预览，点写入才进分镜'
   const onWritten = vi.fn();
   render(<Harness initial={{ script_node_ids: ['text-1'], style_prefix: '水墨' }} host={{ savePendingEdits }}
     onPayload={onPayload} onWritten={onWritten} />);
-  fireEvent.click(await runButton());
+  fireEvent.click(await enabledRunButton());
   expect(await screen.findByText(/1 镜 · 4 秒 · 新增条目 1/)).toBeInTheDocument();
   expect(savePendingEdits).toHaveBeenCalledTimes(1);
   expect(parse).toHaveBeenCalledTimes(1);
@@ -105,11 +112,23 @@ it('一次点击只解析一段：先保存，再预览，点写入才进分镜'
   expect(parse).toHaveBeenCalledTimes(1);
 });
 
+it('模型列表晚到时，按钮先禁用、可点后才解析（第 6 批 6-3 的确定性复现）', async () => {
+  models.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({ models: [
+    { alias: 'chat', model_id: 'writer', name: '写手', max_cost_cny: null },
+  ] }), 20)));
+  parse.mockResolvedValue(result(0, 1, '进门'));
+  render(<Harness initial={{ script_node_ids: ['text-1'] }} />);
+  expect(await runButton()).toBeDisabled();  // 以前的写法就是在这时点下去的
+  fireEvent.click(await enabledRunButton());
+  expect(await screen.findByText(/1 镜 · 4 秒 · 新增条目 1/)).toBeInTheDocument();
+  expect(parse).toHaveBeenCalledTimes(1);
+});
+
 it('长剧本逐段解析：每段各点一次，前面得到的条目带给后一段', async () => {
   plan.mockResolvedValue({ total_chars: 20000, segments: [0, 1, 2].map(index => ({ index, chars: 7000, preview: '' })) });
   parse.mockResolvedValueOnce(result(0, 3, '一')).mockResolvedValueOnce(result(1, 3, '二', { entities: [] }));
   render(<Harness initial={{ script_node_ids: ['text-1'] }} />);
-  fireEvent.click(await runButton());
+  fireEvent.click(await enabledRunButton());
   const second = await screen.findByRole('button', { name: '解析第 2 / 3 段（消耗对话额度）' });
   expect(parse).toHaveBeenCalledTimes(1);
   expect(screen.getByText(/已解析 1 \/ 3 段 · 1 镜/)).toBeInTheDocument();
@@ -129,7 +148,7 @@ it('失败时显示原因与详情，不自动重试，已解析的段保留', a
     status: 502, reason: '对话模型响应超时，可以缩短内容或换一个更快的模型后再试', raw: 'Read timed out. (read timeout=180)',
   }));
   render(<Harness initial={{ script_node_ids: ['text-1'] }} />);
-  fireEvent.click(await runButton());
+  fireEvent.click(await enabledRunButton());
   fireEvent.click(await screen.findByRole('button', { name: '解析第 2 / 2 段（消耗对话额度）' }));
   const alert = await screen.findByRole('alert');
   expect(alert).toHaveTextContent('对话模型响应超时');
@@ -144,7 +163,7 @@ it('失败时显示原因与详情，不自动重试，已解析的段保留', a
 it('剧本在解析途中变了就从头来', async () => {
   parse.mockRejectedValue(new ApiError('解析剧本失败', { status: 409, reason: '剧本已变化，请重新开始解析' }));
   render(<Harness initial={{ script_node_ids: ['text-1'] }} />);
-  fireEvent.click(await runButton());
+  fireEvent.click(await enabledRunButton());
   expect(await screen.findByRole('alert')).toHaveTextContent('剧本已变化');
   expect(await screen.findByRole('button', { name: '解析（消耗对话额度）' })).toBeEnabled();
   expect(screen.queryByRole('region', { name: '解析结果' })).toBeNull();
@@ -155,12 +174,12 @@ it('已有镜头时默认追加，可以改成替换', async () => {
   const onPayload = vi.fn();
   const initial = { script_node_ids: ['text-1'], shots: [{ id: 'old', visual: '旧' }] };
   const { unmount } = render(<Harness initial={initial} onPayload={onPayload} />);
-  fireEvent.click(await runButton());
+  fireEvent.click(await enabledRunButton());
   fireEvent.click(await screen.findByRole('button', { name: '写入' }));
   expect((onPayload.mock.calls.at(-1)![0] as StoryboardPayload).shots.map(shot => shot.visual)).toEqual(['旧', '新']);
   unmount();
   render(<Harness initial={initial} onPayload={onPayload} />);
-  fireEvent.click(await runButton());
+  fireEvent.click(await enabledRunButton());
   await screen.findByRole('button', { name: '写入' });
   fireEvent.click(screen.getByRole('radio', { name: '替换' }));
   fireEvent.click(screen.getByRole('button', { name: '写入' }));
@@ -171,7 +190,7 @@ it('放弃预览不写分镜', async () => {
   parse.mockResolvedValue(result(0, 1, '新'));
   const onPayload = vi.fn();
   render(<Harness initial={{ script_node_ids: ['text-1'] }} onPayload={onPayload} />);
-  fireEvent.click(await runButton());
+  fireEvent.click(await enabledRunButton());
   fireEvent.click(await screen.findByRole('button', { name: '放弃' }));
   await waitFor(() => expect(screen.queryByRole('region', { name: '解析结果' })).toBeNull());
   expect(onPayload).not.toHaveBeenCalled();
