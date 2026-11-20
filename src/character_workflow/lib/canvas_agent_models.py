@@ -19,8 +19,10 @@ import requests
 
 from character_workflow.lib import keys
 from character_workflow.lib.callers.openai_compat import key_api_root
-from character_workflow.lib.llm_protocols import ANTHROPIC_MESSAGES, TEXT_PROTOCOLS, speaks_openai
-from character_workflow.lib.llm_protocols import anthropic
+from character_workflow.lib.llm_protocols import (
+    ANTHROPIC_MESSAGES, GEMINI_GENERATE_CONTENT, TEXT_PROTOCOLS, speaks_openai,
+)
+from character_workflow.lib.llm_protocols import anthropic, gemini
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +93,8 @@ def _fetch(key: keys.KeySpec) -> dict[str, dict]:
     """上游 /models 里每个模型的能力：{id: {"agent": bool, "reasoning": bool | None}}。
 
     按这把 KEY 里文本模型的协议分别拉：OpenAI 格式的用 Bearer 拉 `{root}/models`；Anthropic 的按 Anthropic 的鉴权头
-    拉 `{root}/v1/models`（ADR-0044）。只有 Anthropic 模型的 KEY 不发 Bearer 那一次。"""
+    拉 `{root}/v1/models`；Gemini 的按 `x-goog-api-key` 拉 `{root}/v1beta/models`（ADR-0044）。没有 OpenAI 格式
+    模型的 KEY 不发 Bearer 那一次。"""
     from character_workflow.lib.callers.atelier_gateway import DIRECT_PROXIES
 
     models = enabled_text_models(key)
@@ -118,6 +121,18 @@ def _fetch(key: keys.KeySpec) -> dict[str, dict]:
         data = response.json().get("data") or []
         out.update({str(item["id"]): {"agent": True, "reasoning": False}
                     for item in data if isinstance(item, dict) and item.get("id")})
+    if key.base_url and any(model.protocol == GEMINI_GENERATE_CONTENT for model in models):
+        # 首版不开思考控制；New API 的 supportedGenerationMethods 是空数组，非空时才要求 generateContent。
+        response = requests.get(f"{gemini.models_url(key.base_url)}?pageSize=1000",
+                                headers=gemini.headers(key.access_key),
+                                timeout=FETCH_TIMEOUT, allow_redirects=False)
+        response.raise_for_status()
+        for item in response.json().get("models") or []:
+            if not isinstance(item, dict) or not item.get("name"):
+                continue
+            methods = item.get("supportedGenerationMethods") or []
+            out[str(item["name"]).removeprefix("models/")] = {
+                "agent": not methods or "generateContent" in methods, "reasoning": False}
     return out
 
 
@@ -145,8 +160,9 @@ def _models_for(key: keys.KeySpec, now: float) -> tuple[list[dict], str | None]:
         info = upstream.get(model.id)
         if info is not None and not info["agent"]:
             continue
-        # Anthropic 首版不开思考：列表里没拉到也标成不支持，面板不显示思考档位。
-        reasoning = False if model.protocol == ANTHROPIC_MESSAGES else (info["reasoning"] if info else None)
+        # Anthropic、Gemini 首版不开思考：列表里没拉到也标成不支持，面板不显示思考档位。
+        reasoning = (False if model.protocol in (ANTHROPIC_MESSAGES, GEMINI_GENERATE_CONTENT)
+                     else (info["reasoning"] if info else None))
         rows.append({"alias": key.alias, "model": model.id, "name": model.name or model.id,
                      "reasoning": reasoning})
     return rows, error

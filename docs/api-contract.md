@@ -1423,20 +1423,27 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
 ## 对话模型协议（ADR-0044）
 
 - `ModelSpec.protocol` 的文本取值：`openai-chat`（旧值 `null` / `openai` / `chat-completions` 同义）、`openai-responses`、
-  `anthropic-messages`。协议表在 `lib/llm_protocols`，能否调用的唯一判据是 `openai_text.text_callable`。
+  `anthropic-messages`、`gemini-generate-content`。协议表在 `lib/llm_protocols`，能否调用的唯一判据是 `openai_text.text_callable`。
 - `GET /api/keys` 的文本模型、`GET /api/models` 的文本路由成员：不能调用时给只读 `text_unsupported: true`，能调用时不出现
   该字段。前端只读它，不另抄协议表。
-- `KeySpec` / `KeyCreatePayload` 新增可选 `text_protocol`（`openai-chat` / `openai-responses` / `anthropic-messages`，
+- `KeySpec` / `KeyCreatePayload` 新增可选 `text_protocol`（`openai-chat` / `openai-responses` / `anthropic-messages` /
+  `gemini-generate-content`，
   null 不序列化 = 自动）。只在 `POST/PATCH /api/keys` 校验：取值必须在上表里、供应商必须是 custom，否则 422。选了具体接口时，
   写入时把这把 KEY 的文本模型（`declarative` 除外）的 `protocol` 都改成它；PATCH 显式传 null 改回自动，各模型协议不动。
 - `POST /api/keys/models-preview` 新增可选 `text_protocol`（不传时用已存的）。为 `anthropic-messages` 时改为
   `GET {根}/v1/models?limit=1000` + `x-api-key` + `anthropic-version`，不跟随重定向；文本模型的 `protocol` 返回
   `anthropic-messages`，`capabilities.image_input` 映射到 `input_modalities`。上游只声明 `anthropic:messages` 的模型
-  分类为 text、协议 `anthropic-messages`；同时声明 OpenAI 格式的取 `openai-chat`。
+  分类为 text、协议 `anthropic-messages`；同时声明 OpenAI 格式的取 `openai-chat`。为 `gemini-generate-content` 时改为
+  `GET {根}/v1beta/models?pageSize=1000` + `x-goog-api-key`，不跟随重定向；条目取 `models[].name`（去掉 `models/` 前缀）与
+  `displayName`，`supportedGenerationMethods` 非空且不含 `generateContent` 的不列。
 - 一次性文本调用（画布文本节点、AI 帮我配置、分镜解析、分类）按模型协议发请求；Anthropic 走 `POST {根}/v1/messages`，
+  Gemini 走 `POST {根}/v1beta/models/{id}:generateContent`，
   响应转回 Chat 形状，用量按「含缓存的总输入」归一。协议选错时 `job.error` / 失败原因提示到供应商里改「对话接口」，不自动换协议重试。
-- 局域网网关与内置 Agent 暂只接 OpenAI 格式：`anthropic-messages` 成员不出现在 `/gateway/v1/models` 的成员与路由里、
-  不被选中转发；不进 `GET /api/canvas/agent/models`。
+- 内置 Agent 接全部四种协议（Anthropic、Gemini 在 HTTP 层转换）；`GET /api/canvas/agent/models` 里这两种模型的
+  `reasoning` 为 false。Agent 会话接口（创建、读取、修改、发消息、确认、停止）返回的 `history` 去掉
+  `provider_data.thought_signature`；项目导出包里的会话同样去掉，落盘文件保留。
+- 局域网网关暂只接 OpenAI 格式（第 4 批前）：`anthropic-messages`、`gemini-generate-content` 成员不出现在
+  `/gateway/v1/models` 的成员与路由里、不被选中转发。
 
 ## 网关共享库（ADR-0034）
 

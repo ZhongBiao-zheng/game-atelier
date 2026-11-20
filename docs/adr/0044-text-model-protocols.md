@@ -11,8 +11,8 @@ Gemini 兼容、One API / New API 等等，还要有检测协议」。方案与�
 ## 决策
 
 - **协议挂在模型上**：对话模型的调用协议存 `ModelSpec.protocol`。取值 `openai-chat`（含旧值 `None` / `openai` /
-  `chat-completions`）、`openai-responses`、`anthropic-messages`；Gemini 首选 Google 官方的 OpenAI 兼容入口
-  （即 `openai-chat` + `…/v1beta/openai`），同时做原生 generateContent 适配（飙哥 2026-11-20 定，排在 Agent 流式之后）。协议表只有一份：
+  `chat-completions`）、`openai-responses`、`anthropic-messages`、`gemini-generate-content`（第 5 批，原生
+  generateContent）；Gemini 也可以走 Google 官方的 OpenAI 兼容入口（`openai-chat` + `…/v1beta/openai`）。协议表只有一份：
   `lib/llm_protocols`；能不能调用只有一个判据：`openai_text.text_callable`。前端不抄协议表，读服务端给的
   `text_unsupported`（只在不能调用时出现，`/api/keys` 的模型与 `/api/models` 的路由成员都带）。
 - **内部统一用 OpenAI Chat Completions 的请求 / 响应形状**，发请求前、收响应后按协议转换（`llm_protocols.anthropic`
@@ -48,9 +48,25 @@ Gemini 兼容、One API / New API 等等，还要有检测协议」。方案与�
 - **鉴权与地址**：Anthropic 发 `x-api-key` + `anthropic-version: 2023-06-01`（OpenRouter 用 Bearer），路径
   `{根}/v1/messages`，根地址归一见 `anthropic.api_root`；`max_tokens` 必填，调用方没给时用 8192。`temperature` 范围是 0–1（OpenAI 是 0–2），超出的按 1 发（画布「发散」档 1.3）。按 Anthropic 列模型
   时带 `limit=1000`，带着密钥的请求不跟随重定向。
-- **转换接上之前的临时边界**：局域网网关只按 OpenAI 格式收发。在它接上转换之前，`anthropic-messages`
-  成员不进网关的路由列表、成员快照与选成员（`gateway_access.member_relayable`，四处共用）。**网关的边界在第 4 批
-  完成后移除**，对应用例改成断言转换后的行为，不删。成员端始终用 OpenAI 格式打网关，主机按成员上游协议转换。
+- **Gemini generateContent**（第 5 批）：`llm_protocols.gemini`，一次性调用与 Agent（同一个 `ProtocolTransport`，
+  按协议选转换）共用。路径 `{根}/v1beta/models/{id}:generateContent`、流式 `:streamGenerateContent?alt=sse`，根地址
+  去掉末尾的 `/v1beta/openai`、`/v1beta`、`/v1` 再补 `/v1beta`；鉴权只发 `x-goog-api-key`，不用 `?key=`。工具定义用
+  `parametersJsonSchema`（JSON Schema 原样）；图片只收 base64；首版不开思考控制。用量：输入含缓存与
+  `toolUsePromptTokenCount`，输出含 `thoughtsTokenCount`。
+  - **thought signature 不进 tool_call id**：换模型后历史里的 id 会原样发给别家，OpenAI Chat 的 id 上限 40、Anthropic
+    只收 `[A-Za-z0-9_-]` 且 ≤ 64（服务端报错原文，官方文档无明文），签名放不下。id 一律是短 id
+    `g{签名状态 s/n/x}{来源 u/r}_{尾巴}`（≤ 40）：Gemini 给了 `functionCall.id` 且合规时尾巴用它并原样带回
+    `functionResponse.id`。签名走 openai-agents 0.23 自带的通道：tool_call 的 `extra_content.google.thought_signature`
+    → 会话条目的 `provider_data.thought_signature`，模型名含 "gemini" 时 SDK 原样放回；对它的依赖只在
+    `gemini.signature_of` / `with_signature` 两个函数里，升级 openai-agents 先跑 `test_llm_protocols_gemini_agent.py`。
+  - **缺签名**：只校验「当前轮」（最后一条 user 消息之后）的每一步第一个 functionCall。只在三种情况填官方占位值
+    `skip_thought_signature_validator`：模型名不含 gemini（SDK 不回放）、不是 Gemini 产生的调用（等确认时换成了
+    Gemini）、签名超过 256 KB 没进会话（只记长度的日志）。其余缺签名报错，不静默填占位值。更早的轮次不填也不报错。
+  - **签名不出本机**：会话接口的响应（`canvas_agent_sessions.public_session`）与项目导出包去掉签名，落盘的会话文件保留。
+- **转换接上之前的临时边界**：局域网网关只按 OpenAI 格式收发。在它接上转换之前，`anthropic-messages`、
+  `gemini-generate-content` 成员不进网关的路由列表、成员快照与选成员（`gateway_access.member_relayable`，四处共用）。**网关的边界在第 4 批
+  完成后移除**，对应用例改成断言转换后的行为，不删。成员端始终用 OpenAI 格式打网关，主机按成员上游协议转换；
+  Gemini 成员的 `extra_content`（签名）要原样穿过主机。
   Agent 的边界已在第 2 批移除：`canvas_agent_models.agent_can_use` 改为「协议在 `TEXT_PROTOCOLS` 里」，原样存下的
   未知标注（如 `anthropic:messages`）仍报「该模型的接口暂不支持 Agent」。
 - **协议检测只发不计费的 GET**（第 3 批）：先看地址，再看 `GET /models` 的返回形状，必要时对用户填的同一个 origin

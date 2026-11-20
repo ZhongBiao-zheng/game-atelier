@@ -134,6 +134,14 @@ def list_canvas_agent_sessions(project_id: str) -> CanvasAgentSessionList:
     return CanvasAgentSessionList(sessions=summaries, corrupt_session_ids=sorted(corrupt_ids))
 
 
+def public_session(session: CanvasAgentSession) -> CanvasAgentSession:
+    """会话接口返回给页面的样子：去掉历史里的 Gemini thought signature（可能很大，页面也不用）。
+
+    只用于输出，不落盘；落盘的会话文件保留签名，下一轮要发回 Gemini（ADR-0044 第 5 批）。"""
+    from character_workflow.lib.llm_protocols.gemini import drop_signatures
+    return session.model_copy(update={"history": drop_signatures(session.history)})
+
+
 def create_canvas_agent_session(project_id: str, title: str) -> CanvasAgentSession:
     with file_lock(canvas_agent_sessions_lock_path(project_id)):
         directory = _sessions_dir(project_id)

@@ -19,7 +19,7 @@ from character_workflow.lib import canvas_agent_runtime as runtime
 from character_workflow.lib import canvas_agent_skills as skills
 from character_workflow.lib.canvas_agent_models import list_chat_models
 from character_workflow.lib.canvas_agent_sessions import (
-    mutate_canvas_agent_session, read_canvas_agent_session,
+    mutate_canvas_agent_session, public_session, read_canvas_agent_session,
 )
 from character_workflow.lib.schemas import (
     CanvasAgentApprovalsSubmit, CanvasAgentBatchItems, CanvasAgentPlan, CanvasAgentSession,
@@ -173,7 +173,7 @@ async def patch_session(project_id: str, session_id: str,
             raise CanvasToolError("SESSION_BUSY", "这一轮结束后才能修改设置", 409)
         return fields
 
-    return await _call(mutate_canvas_agent_session, project_id, session_id, update)
+    return public_session(await _call(mutate_canvas_agent_session, project_id, session_id, update))
 
 
 @router.post(f"{SESSION}/messages", response_model=CanvasAgentSession, status_code=202)
@@ -185,7 +185,7 @@ async def post_message(project_id: str, session_id: str,
     session = await _call(runtime.begin_user_turn, project_id, session_id, payload.text,
                           payload.node_ids, payload.skill)
     _schedule(project_id, session_id)
-    return session
+    return public_session(session)
 
 
 @router.post(f"{SESSION}/approvals", response_model=CanvasAgentSession, status_code=202)
@@ -205,7 +205,7 @@ async def post_approvals(project_id: str, session_id: str,
         _schedule(project_id, session_id)
     finally:
         _resolving.discard(key)
-    return session
+    return public_session(session)
 
 
 @router.get(f"{SESSION}/approvals/{{call_id}}/items", response_model=CanvasAgentBatchItems)
@@ -246,7 +246,7 @@ async def post_cancel(project_id: str, session_id: str) -> CanvasAgentSession:
         session = await _call(mutate_canvas_agent_session, project_id, session_id,
                               _reject_pending)
         runtime.notify_session(hub.broadcast, project_id, session_id)
-    return await _call(recover_if_stale, session)
+    return public_session(await _call(recover_if_stale, session))
 
 
 @router.get("/agent/skills")

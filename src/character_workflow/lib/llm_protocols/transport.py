@@ -1,4 +1,4 @@
-"""给 openai SDK 用的协议转换 transport（ADR-0044 第 2 批）。
+"""给 openai SDK 用的协议转换 transport（ADR-0044 第 2 批；第 5 批加 Gemini）。
 
 内置 Agent 用 openai-agents 的 `OpenAIChatCompletionsModel`，SDK 只会发 Chat Completions。把这个 transport 装进
 `AsyncOpenAI(http_client=DefaultAsyncHttpxClient(transport=...))`：它拦下 `POST …/chat/completions`，按上游协议改写
@@ -16,7 +16,11 @@ from collections.abc import AsyncIterator
 import httpx2 as httpx
 from httpx2._utils import URLPattern, get_environment_proxies
 
-from character_workflow.lib.llm_protocols import ProtocolError, anthropic
+from character_workflow.lib.llm_protocols import (
+    ANTHROPIC_MESSAGES, GEMINI_GENERATE_CONTENT, ProtocolError, anthropic, gemini,
+)
+
+_LABELS = {ANTHROPIC_MESSAGES: "Anthropic", GEMINI_GENERATE_CONTENT: "Gemini"}
 
 
 # 上游错误响应里 SDK 用来决定重发的头（openai SDK 的 `_should_retry`）。
@@ -24,7 +28,8 @@ _RETRY_HEADERS = ("x-should-retry", "retry-after", "retry-after-ms")
 
 
 class _TranslatedStream(httpx.AsyncByteStream):
-    def __init__(self, upstream: httpx.Response, translator: anthropic.StreamTranslator) -> None:
+    def __init__(self, upstream: httpx.Response,
+                 translator: anthropic.StreamTranslator | gemini.StreamTranslator) -> None:
         self._upstream = upstream
         self._translator = translator
 
@@ -60,31 +65,45 @@ def direct_or_proxied(url: str) -> httpx.AsyncHTTPTransport:
 
 
 class ProtocolTransport(httpx.AsyncBaseTransport):
-    """把 Chat Completions 请求转成 Anthropic Messages（目前唯一需要转换的对话协议）。
+    """把 Chat Completions 请求转成 `protocol` 的上游格式（Anthropic Messages 或 Gemini generateContent）。
 
     `base_url` / `access_key` 是供应商的地址与密钥：SDK 带的 `Authorization: Bearer` 不往上游发，
-    鉴权头按 Anthropic 重新给。其余路径原样交给内层。
+    鉴权头按上游协议重新给。其余路径原样交给内层。
     """
 
-    def __init__(self, *, base_url: str, access_key: str,
+    def __init__(self, *, protocol: str, base_url: str, access_key: str,
                  inner: httpx.AsyncBaseTransport | None = None) -> None:
+        if protocol not in _LABELS:
+            raise ValueError(f"不需要转换的协议：{protocol}")
+        self._protocol = protocol
         self._base_url = base_url
         self._access_key = access_key
-        self._inner = inner or direct_or_proxied(anthropic.messages_url(base_url))
+        root = anthropic.api_root(base_url) if protocol == ANTHROPIC_MESSAGES else gemini.api_root(base_url)
+        self._inner = inner or direct_or_proxied(root)
+
+    def _target(self, model: str, stream: bool) -> tuple[str, dict[str, str]]:
+        if self._protocol == ANTHROPIC_MESSAGES:
+            return (anthropic.messages_url(self._base_url),
+                    anthropic.headers(self._base_url, self._access_key))
+        return (gemini.generate_url(self._base_url, model, stream=stream),
+                gemini.headers(self._access_key))
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         if request.method != "POST" or not request.url.path.endswith("/chat/completions"):
             return await self._inner.handle_async_request(request)
         payload = json.loads(await request.aread())
+        adapter = anthropic if self._protocol == ANTHROPIC_MESSAGES else gemini
+        model = str(payload.get("model") or "")
         try:
-            upstream = anthropic.to_upstream(payload)
+            upstream = adapter.to_upstream(payload)
         except ProtocolError as error:
             return httpx.Response(400, request=request, json={
                 "error": {"message": str(error), "type": "invalid_request_error"}})
         stream = bool(payload.get("stream"))
+        url, auth = self._target(model, stream)
         sent = httpx.Request(
-            "POST", anthropic.messages_url(self._base_url),
-            headers={**anthropic.headers(self._base_url, self._access_key),
+            "POST", url,
+            headers={**auth,
                      "Accept": "text/event-stream" if stream else "application/json",
                      # 转换器直接读上游原始字节：不要压缩。
                      "Accept-Encoding": "identity"},
@@ -93,7 +112,8 @@ class ProtocolTransport(httpx.AsyncBaseTransport):
         )
         response = await self._inner.handle_async_request(sent)
         if response.status_code >= 400:
-            # 错误体原样给 SDK（Anthropic 的 {"type":"error","error":{…}} 里同样有 error.message）。
+            # 错误体原样给 SDK（Anthropic 的 {"type":"error","error":{…}}、Gemini 的 {"error":{…}} 里都有
+            # error.message）。
             # 重试相关的头一起带上：SDK 按 x-should-retry / retry-after 决定要不要重发。
             body = await response.aread()
             await response.aclose()
@@ -105,13 +125,16 @@ class ProtocolTransport(httpx.AsyncBaseTransport):
             body = await response.aread()
             await response.aclose()
             try:
-                converted = anthropic.from_upstream(json.loads(body))
+                body = json.loads(body)
+                converted = (anthropic.from_upstream(body) if adapter is anthropic
+                             else gemini.from_upstream(body, model))
             except (ValueError, ProtocolError) as error:
                 # 上游已经按 200 收下（已计费）：不让 SDK 按 5xx 重发。
                 return httpx.Response(502, request=request, headers={"x-should-retry": "false"}, json={
-                    "error": {"message": f"Anthropic 响应无法解析：{error}", "type": "api_error"}})
+                    "error": {"message": f"{_LABELS[self._protocol]} 响应无法解析：{error}",
+                              "type": "api_error"}})
             return httpx.Response(200, request=request, json=converted)
-        translator = anthropic.StreamTranslator(model=str(payload.get("model") or ""))
+        translator = adapter.StreamTranslator(model=model)
         return httpx.Response(200, request=request,
                               headers={"Content-Type": "text/event-stream"},
                               stream=_TranslatedStream(response, translator))

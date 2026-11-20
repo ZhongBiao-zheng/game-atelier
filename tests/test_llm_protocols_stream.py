@@ -12,7 +12,7 @@ import httpx2
 import pytest
 
 from character_workflow.lib import gateway_text_wait
-from character_workflow.lib.llm_protocols import anthropic
+from character_workflow.lib.llm_protocols import ANTHROPIC_MESSAGES, anthropic
 from character_workflow.lib.llm_protocols.transport import ProtocolTransport, environment_proxy_for
 from tests.fake_http_vendor import FakeVendor
 
@@ -133,7 +133,7 @@ def _client(base_url: str, inner=None, max_retries: int = 0):
     return AsyncOpenAI(
         base_url=f"{base_url}/v1", api_key="placeholder", max_retries=max_retries,
         http_client=DefaultAsyncHttpxClient(trust_env=False, transport=ProtocolTransport(
-            base_url=base_url, access_key=SECRET, inner=inner)))
+            protocol=ANTHROPIC_MESSAGES, base_url=base_url, access_key=SECRET, inner=inner)))
 
 
 def _run(coroutine_factory):
@@ -342,7 +342,8 @@ def test_other_paths_pass_through_untouched():
         vendor.on("GET", "/v1/models", {"data": []})
 
         async def go():
-            transport = ProtocolTransport(base_url=vendor.url, access_key=SECRET)
+            transport = ProtocolTransport(protocol=ANTHROPIC_MESSAGES, base_url=vendor.url,
+                                          access_key=SECRET)
             async with httpx2.AsyncClient(transport=transport) as client:
                 return await client.get(f"{vendor.url}/v1/models")
 
@@ -401,7 +402,8 @@ def test_environment_proxy_is_used_after_conversion(monkeypatch, variable):
             client = AsyncOpenAI(
                 base_url="http://claude.invalid/v1", api_key="placeholder", max_retries=0,
                 http_client=DefaultAsyncHttpxClient(trust_env=False, transport=ProtocolTransport(
-                    base_url="http://claude.invalid", access_key=SECRET)))
+                    protocol=ANTHROPIC_MESSAGES, base_url="http://claude.invalid",
+                    access_key=SECRET)))
             try:
                 stream = await client.chat.completions.create(
                     model="claude-x", messages=[{"role": "user", "content": "hi"}], stream=True)

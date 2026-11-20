@@ -8,25 +8,28 @@ from __future__ import annotations
 OPENAI_CHAT = "openai-chat"
 OPENAI_RESPONSES = "openai-responses"
 ANTHROPIC_MESSAGES = "anthropic-messages"
+GEMINI_GENERATE_CONTENT = "gemini-generate-content"
 
 # 走 OpenAI 线路格式的协议；None = 未标注，按 Chat 处理；另两个是旧数据里出现过的写法。
 OPENAI_WIRE: frozenset[str | None] = frozenset({
     None, "openai", OPENAI_CHAT, "chat-completions", OPENAI_RESPONSES,
 })
-TEXT_PROTOCOLS: frozenset[str | None] = OPENAI_WIRE | {ANTHROPIC_MESSAGES}
+TEXT_PROTOCOLS: frozenset[str | None] = OPENAI_WIRE | {ANTHROPIC_MESSAGES, GEMINI_GENERATE_CONTENT}
 
 # 供应商级「对话接口」可以手动选的值（`KeySpec.text_protocol`）；None = 自动。
-MANUAL_CHOICES: tuple[str, ...] = (OPENAI_CHAT, OPENAI_RESPONSES, ANTHROPIC_MESSAGES)
+MANUAL_CHOICES: tuple[str, ...] = (OPENAI_CHAT, OPENAI_RESPONSES, ANTHROPIC_MESSAGES,
+                                   GEMINI_GENERATE_CONTENT)
 
 LABELS = {
     OPENAI_CHAT: "OpenAI Chat",
     OPENAI_RESPONSES: "OpenAI Responses",
     ANTHROPIC_MESSAGES: "Anthropic",
+    GEMINI_GENERATE_CONTENT: "Gemini",
 }
 
 
 def speaks_openai(protocol: str | None) -> bool:
-    """按 OpenAI 格式（Chat / Responses）收发，不需要转换。局域网网关与内置 Agent 目前只接这类。"""
+    """按 OpenAI 格式（Chat / Responses）收发，不需要转换。局域网网关目前只接这类（第 4 批前）。"""
     return protocol in OPENAI_WIRE
 
 
@@ -43,7 +46,7 @@ _RESPONSES_ONLY = ("only supported in v1/responses", "not supported in v1/chat/c
 _WRONG_ENDPOINT = ("invalid url", "404 page not found", "convert_request_failed",
                    "not implemented", "unsupported endpoint")
 SWITCH_TO_RESPONSES = "这个模型只能用 OpenAI Responses 接口调用：到「设置 → 供应商」把这个供应商的「对话接口」改成 OpenAI Responses 后重试"
-SWITCH_INTERFACE = "供应商不支持当前的调用接口：到「设置 → 供应商」把这个供应商的「对话接口」换成 OpenAI Chat、OpenAI Responses 或 Anthropic 后重试"
+SWITCH_INTERFACE = "供应商不支持当前的调用接口：到「设置 → 供应商」把这个供应商的「对话接口」换成 OpenAI Chat、OpenAI Responses、Anthropic 或 Gemini 后重试"
 NOT_AN_API = "供应商地址返回的不是接口数据：检查请求地址，或到「设置 → 供应商」换一种「对话接口」后重试"
 
 
