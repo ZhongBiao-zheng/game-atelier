@@ -1243,6 +1243,27 @@ def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None]
     )
 
 
+# 上游明确说模型不支持工具调用的句式（样例与来源见 tests/test_canvas_agent_errors.py）。
+_NO_TOOL_SUPPORT = re.compile(
+    r"(does not|doesn't|do not) support (tools?|tool[ _-]?(use|calling|calls?)|function[ _-]?call(ing|s)?)"
+    r"|(function[ _-]?calling|tool[ _-]?(use|calling)|tools?)( parameter)? (is|are) not (supported|enabled)"
+    r"|function calling is not enabled for"
+    r"|no endpoints found that support tool use"
+    r"|unsupported parameter:? '?tools'?"
+    r"|\"?auto\"? tool choice requires --enable-auto-tool-choice"
+    r"|不支持(工具|函数|function|tool)",
+    re.IGNORECASE)
+# 上游明确说模型不能接收图片的句式。
+_NO_IMAGE_SUPPORT = re.compile(
+    r"(does not|doesn't|do not) support (images?|image inputs?|vision|multi-?modal)"
+    r"|(images?|image inputs?|vision|multi-?modal)( content)? (is|are) not supported"
+    r"|image_url is only supported by certain models"
+    r"|unknown variant .?image_url.?, expected .?text"
+    r"|not a (multi-?modal|vision) model"
+    r"|不支持(图片|图像|视觉|多模态|image)",
+    re.IGNORECASE)
+
+
 def friendly_error(error: BaseException) -> str:
     from agents.exceptions import MaxTurnsExceeded
     from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError
@@ -1259,11 +1280,13 @@ def friendly_error(error: BaseException) -> str:
         if isinstance(error.body, dict):
             detail = error.body.get("error", error.body)
             message = str(detail.get("message") if isinstance(detail, dict) else detail)
-        lowered = message.lower()
-        if "image" in lowered or "vision" in lowered or "multimodal" in lowered:
-            return f"该模型不能看图，请换一个支持图片输入的模型（{error.status_code}）"
-        if "tool" in lowered or "function" in lowered:
-            return f"该模型不支持工具调用，请换一个（{error.status_code}）"
+        raw = f"{error.status_code} {redact(message)[:300]}"
+        # 只有上游明确说「不支持」时才给换模型的提示，并附上原文；签名缺失、调用与结果不配对、
+        # 图片太大这类工具 / 图片相关的错误不是模型的问题，原样显示，不猜原因。
+        if _NO_IMAGE_SUPPORT.search(message):
+            return f"该模型不能看图，请换一个支持图片输入的模型（原始报错：{raw}）"
+        if _NO_TOOL_SUPPORT.search(message):
+            return f"该模型不支持工具调用，请换一个（原始报错：{raw}）"
         return f"对话模型返回错误 {error.status_code}：{redact(message)[:300]}"
     if isinstance(error, APIError):  # 流式响应里的错误不带状态码（如模型已下线的 410）
         return f"对话模型返回错误：{redact(str(error.message))[:300]}"
