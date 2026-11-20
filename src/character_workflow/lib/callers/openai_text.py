@@ -10,7 +10,7 @@ import requests
 
 from character_workflow.lib import llm_protocols, net_env
 from character_workflow.lib.callers.openai_compat import key_api_root
-from character_workflow.lib.llm_protocols import anthropic
+from character_workflow.lib.llm_protocols import anthropic, gemini
 
 
 class OpenAITextError(RuntimeError):
@@ -62,7 +62,7 @@ def supports_model(key: Any, model: Any) -> bool:
 
 def supports_input_modality(provider: str, protocol: str | None, modality: str) -> bool:
     """Whether this caller has a wire format for one declared model input."""
-    if protocol == llm_protocols.ANTHROPIC_MESSAGES:
+    if protocol in (llm_protocols.ANTHROPIC_MESSAGES, llm_protocols.GEMINI_GENERATE_CONTENT):
         return modality == "image"
     if modality == "image":
         return True
@@ -267,8 +267,8 @@ def chat_completion(
 ) -> object:
     """按模型协议发一次 Chat Completions 形状的请求，返回 Chat 形状的响应（用量已归一）。
 
-    Anthropic 走 `/v1/messages` 并在这里转换；其余按 OpenAI Chat 原样发。不带 `n`：
-    Anthropic 一次只出一条，要多条由调用方循环。"""
+    Anthropic 走 `/v1/messages`、Gemini 走 `:generateContent`，都在这里转换；其余按 OpenAI Chat 原样发。
+    这两种不带 `n`：一次只出一条，要多条由调用方循环。"""
     if protocol == llm_protocols.ANTHROPIC_MESSAGES:
         base_url = (key.base_url or "").strip()
         if not base_url:
@@ -282,6 +282,21 @@ def chat_completion(
                           headers=anthropic.headers(base_url, key.access_key))
         try:
             return anthropic.from_upstream(body)
+        except llm_protocols.ProtocolError as error:
+            raise OpenAITextError(f"text api returned no text: {error}") from error
+    if protocol == llm_protocols.GEMINI_GENERATE_CONTENT:
+        base_url = (key.base_url or "").strip()
+        if not base_url:
+            raise OpenAITextError("text provider requires base_url")
+        try:
+            upstream = gemini.to_upstream(payload)
+        except llm_protocols.ProtocolError as error:
+            raise OpenAITextError(str(error)) from error
+        model = str(payload.get("model") or "")
+        body = _post_json(url=gemini.generate_url(base_url, model), access_key=key.access_key,
+                          payload=upstream, timeout=timeout, headers=gemini.headers(key.access_key))
+        try:
+            return gemini.from_upstream(body, model)
         except llm_protocols.ProtocolError as error:
             raise OpenAITextError(f"text api returned no text: {error}") from error
     return _post_json(url=f"{key_api_root(key)}/chat/completions", access_key=key.access_key,
@@ -406,8 +421,8 @@ def generate(
         payload["temperature"] = float(options["temperature"])
     if options.get("max_tokens") is not None:
         payload["max_tokens"] = int(options["max_tokens"])
-    # OpenAI Chat 一次请求出 n 条；Anthropic 没有 n，按条数循环。
-    single = protocol == llm_protocols.ANTHROPIC_MESSAGES
+    # OpenAI Chat 一次请求出 n 条；Anthropic 没有 n，Gemini 的 candidateCount 不是每个模型都支持：按条数循环。
+    single = protocol in (llm_protocols.ANTHROPIC_MESSAGES, llm_protocols.GEMINI_GENERATE_CONTENT)
     if not single:
         payload["n"] = count
     generated: list[str] = []

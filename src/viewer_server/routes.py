@@ -1351,7 +1351,8 @@ def _protocol_is_openai_speech(protocol: str) -> bool:
     )
 
 
-def _fetch_model_rows(url: str, headers: dict, *, follow_redirects: bool = True) -> list:
+def _fetch_model_rows(url: str, headers: dict, *, follow_redirects: bool = True,
+                      rows_key: str = "data") -> list:
     """拉一次上游模型列表并归一成 list；任何一步失败都抛 502 带上游原文。"""
     import requests
 
@@ -1367,10 +1368,27 @@ def _fetch_model_rows(url: str, headers: dict, *, follow_redirects: bool = True)
         body = resp.json()
     except ValueError as e:
         raise HTTPException(502, f"上游响应非 JSON: {resp.text[:200]}") from e
-    rows = body.get("data") if isinstance(body, dict) else body
+    rows = body.get(rows_key) if isinstance(body, dict) else body
     if not isinstance(rows, list):
-        raise HTTPException(502, "上游响应缺少模型列表（data）")
+        raise HTTPException(502, f"上游响应缺少模型列表（{rows_key}）")
     return rows
+
+
+def _gemini_model_rows(rows: list) -> list[dict]:
+    """Gemini 列表 `models[]{name, displayName, supportedGenerationMethods}` → 与 OpenAI 列表同形的条目。
+
+    官方的 `name` 带 `models/` 前缀，New API 模拟的不带；New API 的 `supportedGenerationMethods` 是空数组，
+    所以只在它非空时才要求含 `generateContent`（2026-11-20 对 Tuzi、OpenAI-HK 的免费探针）。"""
+    out = []
+    for item in rows:
+        if not isinstance(item, dict) or not item.get("name"):
+            continue
+        methods = item.get("supportedGenerationMethods") or []
+        if methods and "generateContent" not in methods:
+            continue
+        model_id = str(item["name"]).removeprefix("models/")
+        out.append({"id": model_id, "name": str(item.get("displayName") or model_id)})
+    return out
 
 
 def _model_list_url(base_url: str, provider: str) -> str:
@@ -1480,15 +1498,21 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
         return _catalog_preview(payload, preview_provider, base_url, access_key)
 
     from character_workflow.lib import llm_protocols
-    from character_workflow.lib.llm_protocols import anthropic
+    from character_workflow.lib.llm_protocols import anthropic, gemini
 
     text_protocol = payload.text_protocol if "text_protocol" in payload.model_fields_set else (
         stored.text_protocol if payload.alias else None)
     anthropic_listing = text_protocol == llm_protocols.ANTHROPIC_MESSAGES
+    gemini_listing = text_protocol == llm_protocols.GEMINI_GENERATE_CONTENT
     if anthropic_listing:
         # Anthropic 默认一页 20 条；带着密钥的请求不跟随重定向，不把密钥带到别的主机。
         rows = _fetch_model_rows(f"{anthropic.models_url(base_url)}?limit=1000",
                                  anthropic.headers(base_url, access_key), follow_redirects=False)
+    elif gemini_listing:
+        # Gemini 一页最多 1000 条（官方默认 50）；同样不跟随重定向。
+        rows = _gemini_model_rows(_fetch_model_rows(
+            f"{gemini.models_url(base_url)}?pageSize=1000", gemini.headers(access_key),
+            follow_redirects=False, rows_key="models"))
     else:
         url = _model_list_url(base_url, preview_provider)
         headers = {"Authorization": f"Bearer {access_key}"} if access_key else {}
@@ -1531,7 +1555,9 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
         elif modality == "image":
             protocol = _image_protocol(item)
         elif modality == "text":
-            protocol = llm_protocols.ANTHROPIC_MESSAGES if anthropic_listing else _text_protocol(item)
+            protocol = (llm_protocols.ANTHROPIC_MESSAGES if anthropic_listing
+                        else llm_protocols.GEMINI_GENERATE_CONTENT if gemini_listing
+                        else _text_protocol(item))
         elif modality == "audio":
             protocol = _audio_protocol(item)
         else:
@@ -2299,12 +2325,14 @@ def get_canvas_agent_session(
     session_id: str,
     response: Response,
 ) -> CanvasAgentSession:
-    from character_workflow.lib.canvas_agent_sessions import read_canvas_agent_session
+    from character_workflow.lib.canvas_agent_sessions import (
+        public_session, read_canvas_agent_session,
+    )
     from viewer_server.canvas_chat_routes import recover_if_stale
     try:
         session = recover_if_stale(read_canvas_agent_session(project_id, session_id))
         response.headers["ETag"] = f'"{session.revision}"'
-        return session
+        return public_session(session)
     except (KeyError, ValueError) as error:
         _raise_canvas_agent_session_error(error)
 
