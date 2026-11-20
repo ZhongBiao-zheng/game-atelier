@@ -158,12 +158,12 @@ def test_mid_stream_failure_never_switches_and_charges_nothing(setup, monkeypatc
 
 def test_quota_admission_settlement_and_error_shape(setup, monkeypatch):
     owner, _, seen, upstream, _, client = setup
-    gateway_keys.update_key(owner.id, limits=[{'period': 'day', 'cap_cny': .0021}])
+    gateway_keys.update_key(owner.id, quota={'period': 'day', 'cap_cny': .0021})
     monkeypatch.setitem(generation_pricing._PRICES['text_yuan_per_million_tokens'],
                         'vendor/gpt-test', {'input': 1, 'output': 2})
     def handle(request):
         seen.append(request)
-        active = gateway_quota.usage_summary(gateway_keys.read_config().keys[0])[0]
+        active = gateway_quota.quota_status(gateway_keys.read_config().keys[0])
         assert active['reserved_cny'] > .002
         assert active['used_cny'] == 0
         return httpx.Response(200, json={'model': 'vendor/gpt-test',
@@ -414,7 +414,7 @@ def test_text_admission_is_atomic_with_reservation(setup, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
     from character_workflow.lib.gateway_text import TextCall
-    owner = gateway_keys.update_key(setup[0].id, limits=[{'period': 'day', 'cap_cny': .0021}])
+    owner = gateway_keys.update_key(setup[0].id, quota={'period': 'day', 'cap_cny': .0021})
     monkeypatch.setitem(generation_pricing._PRICES['text_yuan_per_million_tokens'],
                         'vendor/gpt-test', {'input': 1, 'output': 2})
     barrier = Barrier(2)

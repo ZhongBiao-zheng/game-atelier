@@ -51,7 +51,7 @@ class GatewayKeyPatch(BaseModel):
     role: Literal["member", "admin"] | None = None
     model_config = ConfigDict(extra="forbid")
     name: str | None = Field(default=None, min_length=1, max_length=40)
-    limits: list[gateway_keys.GatewayLimit] | None = Field(default=None, max_length=3)
+    quota: gateway_keys.GatewayQuota | None = None
     scope: list[gateway_keys.ScopeEntry] | None = Field(default=None, max_length=200)
 
     _scope_not_empty = field_validator("scope")(_no_new_empty_scope)
@@ -61,7 +61,7 @@ def _key_view(record: gateway_keys.GatewayKeyRecord) -> dict:
     with gateway_tasks._lock:
         return {
             **record.model_dump(mode="json", exclude={"token_sha256", "token"}),
-            "limits_status": gateway_quota.usage_summary(record),
+            "quota_status": gateway_quota.quota_status(record),
             **gateway_quota.month_summary(record),
             "last_used_at": gateway_tasks.last_used_at(record.id),
         }

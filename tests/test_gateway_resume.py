@@ -41,7 +41,7 @@ def isolated_state(isolated_data_root, monkeypatch):
 @pytest.fixture
 def owner():
     _seed_keys()
-    return gateway_keys.create_key("小王", [{"period": "day", "cap_cny": 1}])[0]
+    return gateway_keys.create_key("小王", {"period": "day", "cap_cny": 1})[0]
 
 
 def _submit(owner, nonce="one"):
@@ -87,14 +87,14 @@ def test_restart_resumes_the_saved_order_without_resubmitting(owner, monkeypatch
     assert waiting.status == "pending" and waiting.phase == "resuming"
     assert waiting.resume_params == STATES[name]
     # 续查期间预占还在。
-    assert gateway_quota.usage_summary(owner)[0]["reserved_cny"] == .08
+    assert gateway_quota.quota_status(owner)["reserved_cny"] == .08
 
     done = gateway_tasks.run_task(waiting)
     assert [kind for kind, *_ in calls] == ["submit", "poll"]
     assert calls[1][2] == STATES[name]
     assert done.status == "done" and done.charged_cny == .08
     assert len(_rows()) == 1
-    assert gateway_quota.usage_summary(owner)[0]["reserved_cny"] == 0
+    assert gateway_quota.quota_status(owner)["reserved_cny"] == 0
 
 
 def test_resume_stays_on_the_original_member_even_when_it_is_cooling_down(owner, monkeypatch):

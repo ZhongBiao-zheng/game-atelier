@@ -36,7 +36,7 @@ def test_manual_price_is_used_only_without_a_synced_price(unpriced):
 
 
 def test_gateway_reserves_and_charges_the_manual_price(unpriced, monkeypatch):
-    owner, _token = gateway_keys.create_key("小王", [{"period": "day", "cap_cny": 1}])
+    owner, _token = gateway_keys.create_key("小王", {"period": "day", "cap_cny": 1})
     model_routes.put_alias_first("A")
     task = gateway_tasks.submit(owner, idempotency_key="m", model="gpt-image-2", prompt="猫", n=1,
                                 size=None, params={}, files={})

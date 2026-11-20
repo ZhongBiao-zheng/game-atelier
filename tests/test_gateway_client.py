@@ -159,7 +159,7 @@ def test_unreachable_gateway_switches_to_the_local_key(gateway, upstream):
 
 def test_gateway_quota_switches_to_the_local_key(gateway, upstream):
     record = gateway_keys.read_config().keys[0]
-    gateway_keys.update_key(record.id, limits=[{"period": "day", "cap_cny": 0.01}])
+    gateway_keys.update_key(record.id, quota={"period": "day", "cap_cny": 0.01})
     keys.patch_key("Local", {"base_url": "https://api.openai-hk.com"})
     done = job_runner.run_job(_job("job-quota").job_id)
     assert (done.status, done.alias) == (JobStatus.DONE, "Local")
@@ -330,7 +330,7 @@ def test_member_records_the_confirmed_charge_of_a_failed_gateway_task(gateway, m
 def test_member_sees_the_quota_is_used_up_when_no_fallback(gateway, upstream):
     """额度用光后成员端看到的提示（第三批第 2 步，未计价渠道也拦）。"""
     record = gateway_keys.read_config().keys[0]
-    gateway_keys.update_key(record.id, limits=[{"period": "day", "cap_cny": 0.01}])
+    gateway_keys.update_key(record.id, quota={"period": "day", "cap_cny": 0.01})
     usage = gateway_tasks.usage_file(gateway_tasks._now().astimezone().strftime("%Y-%m"))
     usage.parent.mkdir(parents=True, exist_ok=True)
     usage.write_text(json.dumps({"time": gateway_tasks._now().isoformat(), "key_id": record.id,
@@ -347,7 +347,7 @@ def test_quota_rejects_batch_items_one_by_one(gateway, upstream, monkeypatch):
     """Agent 批量生成（run_generations）经网关时额度按任务逐个准入：前面的照常出图，
     用光后的那一项才被拒，已出的不回滚（批 4 的 4-1）。提交阶段只建任务、不查额度。"""
     record = gateway_keys.read_config().keys[0]
-    gateway_keys.update_key(record.id, limits=[{"period": "day", "cap_cny": 0.5}])
+    gateway_keys.update_key(record.id, quota={"period": "day", "cap_cny": 0.5})
     monkeypatch.setattr(gateway_tasks, "_estimate", lambda *_args, **_kwargs: 0.32)
     first, second = _job("job-batch-1", route_id=None), _job("job-batch-2", route_id=None)
 

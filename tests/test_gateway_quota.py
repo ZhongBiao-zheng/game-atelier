@@ -35,10 +35,12 @@ def isolated_state(isolated_data_root, monkeypatch):
 @pytest.fixture
 def owner():
     _seed_keys()
-    return gateway_keys.create_key("小王", [
-        {"period": "day", "cap_cny": 1}, {"period": "week", "cap_cny": 2},
-        {"period": "month", "cap_cny": 3},
-    ])[0]
+    # 第 7 批：一把密钥一条额度（金额 + 周期）。原来的日 1 / 周 2 / 月 3 三条里，判定由日额度决定。
+    return gateway_keys.create_key("小王", {"period": "day", "cap_cny": 1})[0]
+
+
+def with_period(owner, period):
+    return gateway_keys.update_key(owner.id, quota={"period": period, "cap_cny": 1})
 
 
 def submit(owner, nonce="one", **kwargs):
@@ -49,7 +51,7 @@ def submit(owner, nonce="one", **kwargs):
 
 def client_for(owner):
     record, token = gateway_keys.create_key(
-        "http", owner.limits, owner.scope,
+        "http", owner.quota, owner.scope,
     )
     return TestClient(create_gateway_app(), headers={"Authorization": f"Bearer {token}"}), record
 
@@ -81,26 +83,29 @@ def test_reset_boundaries(now, period, end):
     assert gateway_quota.window_end(period, datetime.fromisoformat(now)).isoformat() == end
 
 
-def test_windows_include_boundary_and_cross_month_week(owner):
+@pytest.mark.parametrize(("period", "used"), [("day", .4), ("week", .9), ("month", .4)])
+def test_windows_include_boundary_and_cross_month_week(owner, period, used):
+    owner = with_period(owner, period)
     write_usage(datetime(2026, 10, 26, tzinfo=TZ) - timedelta(microseconds=1), owner.id, 100)
     write_usage(datetime(2026, 10, 26, tzinfo=TZ), owner.id, .2)
     write_usage(datetime(2026, 10, 31, 23, 59, tzinfo=TZ), owner.id, .3)
     write_usage(datetime(2026, 11, 1, tzinfo=TZ), owner.id, .4)
     write_usage(NOW, "other", 100)
     write_usage(NOW + timedelta(seconds=1), owner.id, 100)
-    assert [r["used_cny"] for r in gateway_quota.usage_summary(owner)] == [.4, .9, .4]
+    assert gateway_quota.quota_status(owner)["used_cny"] == used
     assert gateway_quota.month_summary(owner) == {"month_charged_cny": .4, "month_calls": 1}
 
 
-def test_reservation_in_every_window_includes_text_and_survives_midnight(owner):
+@pytest.mark.parametrize("period", ["day", "week", "month"])
+def test_reservation_in_every_window_includes_text_and_survives_midnight(owner, period):
+    owner = with_period(owner, period)
     task = submit(owner)
     gateway_quota._inflight["text-1"] = (owner.id, .2)
     gateway_quota._inflight["other"] = ("other", 50)
-    rows = gateway_quota.usage_summary(owner, NOW + timedelta(days=1))
-    assert [r["reserved_cny"] for r in rows] == [.28, .28, .28]
+    assert gateway_quota.quota_status(owner, NOW + timedelta(days=1))["reserved_cny"] == .28
     assert task.estimated_cny == task.reserved_cny == .08
     gateway_tasks.cancel(owner.id, task.task_id)
-    assert gateway_quota.usage_summary(owner)[0]["reserved_cny"] == .2
+    assert gateway_quota.quota_status(owner)["reserved_cny"] == .2
 
 
 @pytest.mark.parametrize("status,actual,expected", [
@@ -111,7 +116,7 @@ def test_settlement_and_release(owner, status, actual, expected):
     task = submit(owner)
     done = gateway_tasks._finish(task, status=status, actual_cost_cny=actual)
     assert done.charged_cny == expected
-    row = gateway_quota.usage_summary(owner)[0]
+    row = gateway_quota.quota_status(owner)
     assert (row["used_cny"], row["reserved_cny"]) == (expected, 0)
     gateway_tasks._finish(task, status=status, actual_cost_cny=actual)
     assert gateway_quota.month_summary(owner)["month_calls"] == 1
@@ -137,7 +142,7 @@ def test_restart_keeps_pending_reserved_and_releases_running(owner):
     second = submit(owner, "two")
     gateway_tasks._update(second.task_id, status="running")
     gateway_tasks.recover_after_restart()
-    assert gateway_quota.usage_summary(owner)[0]["reserved_cny"] == .08
+    assert gateway_quota.quota_status(owner)["reserved_cny"] == .08
     assert gateway_quota.month_summary(owner)["month_charged_cny"] == 0
 
 
@@ -149,7 +154,7 @@ def test_unknown_price_reserves_and_charges_zero(owner):
 
 
 def test_parallel_admission_only_accepts_one(owner, monkeypatch):
-    owner = gateway_keys.update_key(owner.id, limits=[{"period": "day", "cap_cny": .08}])
+    owner = gateway_keys.update_key(owner.id, quota={"period": "day", "cap_cny": .08})
     barrier = threading.Barrier(2)
     original = gateway_tasks._save
 
@@ -173,7 +178,7 @@ def test_parallel_admission_only_accepts_one(owner, monkeypatch):
 
 
 def test_settlement_has_no_admission_gap(owner, monkeypatch):
-    owner = gateway_keys.update_key(owner.id, limits=[{"period": "day", "cap_cny": .08}])
+    owner = gateway_keys.update_key(owner.id, quota={"period": "day", "cap_cny": .08})
     task = submit(owner)
     entered, release = threading.Event(), threading.Event()
     original = gateway_tasks._append_usage
@@ -198,17 +203,19 @@ def test_settlement_has_no_admission_gap(owner, monkeypatch):
         assert exc.value.status == 429
 
 
-def test_retry_after_uses_latest_reset_not_limit_order(owner):
-    owner = gateway_keys.update_key(owner.id, limits=[
-        {"period": "month", "cap_cny": .01}, {"period": "week", "cap_cny": .01},
-        {"period": "day", "cap_cny": .01},
-    ])
+# 第 7 批：一把密钥只有一条额度，原「多条额度取最晚重置」改成每个周期各自的重置时间。
+@pytest.mark.parametrize(("period", "label", "reset"), [
+    ("day", "今日", datetime(2026, 11, 2, tzinfo=TZ)),
+    ("week", "本周", datetime(2026, 11, 2, tzinfo=TZ)),
+    ("month", "本月", datetime(2026, 12, 1, tzinfo=TZ)),
+])
+def test_retry_after_uses_the_reset_of_the_quota_period(owner, period, label, reset):
+    owner = gateway_keys.update_key(owner.id, quota={"period": period, "cap_cny": .01})
     client, _ = client_for(owner)
     response = _submit(client)
     assert response.status_code == 429
-    assert response.json()["detail"] == "中转额度已用完：本月 ¥0.01（已用 ¥0），12-01 00:00 重置"
-    assert int(response.headers["retry-after"]) == int(
-        (datetime(2026, 12, 1, tzinfo=TZ) - NOW).total_seconds())
+    assert response.json()["detail"] == f"中转额度已用完：{label} ¥0.01（已用 ¥0），{reset:%m-%d} 00:00 重置"
+    assert int(response.headers["retry-after"]) == int((reset - NOW).total_seconds())
     assert not gateway_tasks._all_tasks()
 
 
@@ -280,7 +287,8 @@ def test_models_all_modalities_filtered_and_me_private(owner):
     view = client.get("/gateway/v1/me").json()
     assert view["month_charged_cny"] == .2 and view["month_calls"] == 1
     assert view["name"] == "http"
-    assert set(view) == {"id", "role", "name", "limits", "month_charged_cny", "month_calls"}
+    # 第 7 批多一个 quota；limits 保留给旧成员（ADR-0025）。
+    assert set(view) == {"id", "role", "name", "quota", "limits", "month_charged_cny", "month_calls"}
     for secret in ["token_sha256", "upstream-secret", "access_key", "base_url"]:
         assert secret not in json.dumps(view)
     assert TestClient(create_gateway_app()).get("/gateway/v1/me").status_code == 401
@@ -294,21 +302,21 @@ def test_key_update_unset_vs_none_and_old_field_discard(owner):
     payload = json.loads(gateway_keys.gateway_file().read_text())
     payload["keys"][0]["daily_image_limit"] = 1
     gateway_keys.gateway_file().write_text(json.dumps(payload))
-    assert gateway_keys.read_config().keys[0].limits == owner.limits
+    assert gateway_keys.read_config().keys[0].quota == owner.quota
     gateway_keys.update_key(owner.id, name="clean")
     assert "daily_image_limit" not in gateway_keys.gateway_file().read_text()
 
 
-@pytest.mark.parametrize("limits", [
-    [{"period": "day", "cap_cny": 1}, {"period": "day", "cap_cny": 2}],
-    [{"period": "hour", "cap_cny": 1}], [{"period": "day", "cap_cny": 0}],
-    [{"period": "day", "cap_cny": -1}], [{"period": "day", "cap_cny": 1_000_001}],
-    [{"period": "day", "cap_cny": float("nan")}],
-    [{"period": "day", "cap_cny": 1, "extra": 1}],
+# 第 7 批：一条额度。原「同周期两条」的校验没有了（结构上只有一条）；其余边界照旧。
+@pytest.mark.parametrize("quota", [
+    {"period": "hour", "cap_cny": 1}, {"period": "day", "cap_cny": 0},
+    {"period": "day", "cap_cny": -1}, {"period": "day", "cap_cny": 1_000_001},
+    {"period": "day", "cap_cny": float("nan")},
+    {"period": "day", "cap_cny": 1, "extra": 1},
 ])
-def test_key_limit_validation(limits):
+def test_key_limit_validation(quota):
     with pytest.raises(ValidationError):
-        gateway_keys.create_key("invalid", limits)
+        gateway_keys.create_key("invalid", quota)
 
 
 def test_management_patch_options_and_no_secrets(owner):
@@ -323,7 +331,7 @@ def test_management_patch_options_and_no_secrets(owner):
     assert local_capability("GET", "/api/gateway/options") == "manage"
     url = f"/api/gateway/keys/{owner.id}"
     for payload in [{"name": None}, {"limits": None}, {"unknown": True}, {"name": "  "},
-                    {"limits": [{"period": "day", "cap_cny": 1}] * 2}]:
+                    {"quota": {"period": "hour", "cap_cny": 1}}]:
         assert client.patch(url, json=payload).status_code == 422
     only_a = [{"alias": "A", "models": None}]
     assert client.patch(url, json={"scope": [{"alias": "A"}]}).json()["scope"] == only_a
@@ -395,7 +403,7 @@ def test_failover_preserves_all_reported_costs(owner, monkeypatch, second_cost, 
 def test_idempotency_does_not_reserve_twice(owner):
     first = submit(owner)
     assert submit(owner).task_id == first.task_id
-    assert gateway_quota.usage_summary(owner)[0]["reserved_cny"] == .08
+    assert gateway_quota.quota_status(owner)["reserved_cny"] == .08
 
 
 def test_v1_gateway_is_rejected(monkeypatch):
@@ -457,7 +465,7 @@ def test_unpriced_channels_stay_usable_until_the_quota_is_used_up(owner):
 
 
 def test_reservations_count_toward_used_up_and_queued_tasks_still_run(owner, monkeypatch):
-    owner = gateway_keys.update_key(owner.id, limits=[{"period": "day", "cap_cny": .08}])
+    owner = gateway_keys.update_key(owner.id, quota={"period": "day", "cap_cny": .08})
     queued = submit(owner, "queued")  # 预占 0.08 = 上限
     keys.patch_key("A", {"base_url": "https://unpriced.example"})
     keys.patch_key("B", {"base_url": "https://unpriced.example"})

@@ -63,7 +63,7 @@ def _dispatch(calls: list[dict], fail: dict[str, BaseException] | None = None):
 @pytest.fixture
 def client(isolated_data_root):
     _seed_keys()
-    record, token = gateway_keys.create_key("小王", limits=[{"period": "day", "cap_cny": 0.24}])
+    record, token = gateway_keys.create_key("小王", quota={"period": "day", "cap_cny": 0.24})
     test_client = TestClient(create_gateway_app())
     test_client.headers["Authorization"] = f"Bearer {token}"
     test_client.record = record  # type: ignore[attr-defined]
@@ -135,7 +135,7 @@ def test_same_idempotency_key_returns_the_same_task(client):
 
 
 def test_money_limit_returns_429(client):
-    gateway_keys.update_key(client.record.id, limits=[{"period": "day", "cap_cny": 0.12}])
+    gateway_keys.update_key(client.record.id, quota={"period": "day", "cap_cny": 0.12})
     assert _submit(client, key="a", n=1).status_code == 202
     response = _submit(client, key="b", n=1)
     assert response.status_code == 429 and "中转额度已用完：今日" in response.json()["detail"]
@@ -244,7 +244,7 @@ def test_management_api_creates_keys_toggles_and_reports_usage(isolated_data_roo
     monkeypatch.setattr(gateway_routes.gateway_server, "apply",
                         lambda config: applied.append(config.enabled))
     local = LocalTestClient(base_url="http://127.0.0.1", app=build_app())
-    created = local.post("/api/gateway/keys", json={"name": "小王", "limits": [{"period": "day", "cap_cny": 50}]})
+    created = local.post("/api/gateway/keys", json={"name": "小王", "quota": {"period": "day", "cap_cny": 50}})
     assert created.status_code == 201
     token, key_id = created.json()["token"], created.json()["key"]["id"]
     view = local.get("/api/gateway").json()
@@ -252,9 +252,9 @@ def test_management_api_creates_keys_toggles_and_reports_usage(isolated_data_roo
     assert view["keys"][0] == {**view["keys"][0], "name": "小王", "month_charged_cny": 0}
     assert local.put("/api/gateway", json={"enabled": True}).json()["enabled"] is True
     assert applied == [True]
-    assert local.patch(f"/api/gateway/keys/{key_id}",
-                       json={"limits": [{"period": "week", "cap_cny": 10}]}).json()["limits"] == [
-                           {"period": "week", "cap_cny": 10}]
+    quota = local.patch(f"/api/gateway/keys/{key_id}",
+                        json={"quota": {"period": "week", "cap_cny": 10}}).json()["quota"]
+    assert (quota["period"], quota["cap_cny"]) == ("week", 10) and quota["since"]
     assert local.post(f"/api/gateway/keys/{key_id}/revoke").json()["revoked_at"]
     assert local.get("/api/usage?scope=team").json()["totals"]["count"] == 0
     assert local.get("/api/usage?range=bad").status_code == 422

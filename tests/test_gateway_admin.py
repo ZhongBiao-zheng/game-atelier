@@ -18,6 +18,8 @@ def admin():
     record, token = gateway_keys.create_key("管理员", role="admin")
     client = TestClient(create_gateway_app())
     client.headers["Authorization"] = f"Bearer {token}"
+    # 本机管理代理会带的版本头（第 7 批：成员密钥管理要求两边同版本）。
+    client.headers["X-Atelier-Admin-Api"] = "2"
     return client, record, token
 
 
@@ -39,9 +41,9 @@ def test_members_lifecycle_and_audit_never_contain_credentials(admin):
     created = response.json()
     key_id, token = created["key"]["id"], created["token"]
     response = client.patch(f"/gateway/v1/admin/keys/{key_id}", json={
-        "role": "member", "limits": [{"period": "month", "cap_cny": 30}]})
+        "role": "member", "quota": {"period": "month", "cap_cny": 30}})
     assert response.status_code == 200
-    assert response.json()["limits"][0]["cap_cny"] == 30
+    assert response.json()["quota"]["cap_cny"] == 30
     assert client.post(f"/gateway/v1/admin/keys/{key_id}/revoke").status_code == 200
     assert gateway_keys.authenticate(token) is None
     listed = client.get("/gateway/v1/admin/keys").text

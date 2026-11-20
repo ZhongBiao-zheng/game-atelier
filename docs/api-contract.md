@@ -81,7 +81,7 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 
 - `GET /gateway/v1/info` → `{name, version, protocol: 2}`。协议版本不一致时接入端直接报错，不做兼容。
 - `GET /gateway/v1/models` → 返回 `{models: [{id, name, modality, members}]}`，成员为供应商公开信息，含全部模态；控制台专用的 `mode / candidate_alias / estimate_cny` 不属于此目录协议；按当前密钥的模型与 alias 权限过滤，排除 atelier 成员，视频成员保留 `protocol`。
-- `GET /gateway/v1/me` → `{id, role, name, limits: [{period, cap_cny, used_cny, reserved_cny, left_cny, resets_at}], month_charged_cny, month_calls}`，只读当前密钥。可选 `?call_tag=<标记>`（格式 `^[A-Za-z0-9:_-]{1,128}$`）时多回 `call_tag: {requests, charged_cny}`：近 40 天里这把密钥名下带这个标记的文本调用次数与结算额，别的密钥的行一律不算；格式不对当没带，不回该字段。
+- `GET /gateway/v1/me` → `{id, role, name, quota: {period, cap_cny, used_cny, reserved_cny, left_cny, resets_at} | null, limits: [...], month_charged_cny, month_calls}`，只读当前密钥。`quota.period` 为 day|week|month|none，none 时 `resets_at` 为 null。`limits` 是给第 7 批前成员的兼容层（与 quota 同一条，none 时为空列表，字段同 quota 但 period 只有 day|week|month），下次改 PROTOCOL_VERSION 时删（ADR-0025）。可选 `?call_tag=<标记>`（格式 `^[A-Za-z0-9:_-]{1,128}$`）时多回 `call_tag: {requests, charged_cny}`：近 40 天里这把密钥名下带这个标记的文本调用次数与结算额，别的密钥的行一律不算；格式不对当没带，不回该字段。
 - `POST /gateway/v1/tasks`：multipart，字段 `request`（JSON：`kind`、`model` 路由 id、`prompt`、`n`、`size`、`params`）+ 素材文件。
   `kind` 为 image / image_edit / layer_split / video / audio；文件组 `ref_0`…`ref_15`、`mask`、
   `mj_sref_0`…`mj_sref_7` / `mj_cref_0`…`mj_cref_7` / `mj_oref_0`…`mj_oref_7`、
@@ -118,9 +118,10 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   bot_type/mj_version/mj_stylize/mj_chaos/mj_weird/mj_seed/mj_no/mj_tile/mj_iw/mj_sref_code/mj_profile/mj_sw/mj_cw/mj_ow/mj_flags；
   image_edit 额外接收 image_edit 对象，layer_split 额外接收 layer_decomposition。未声明字段返回 422。
   `layer_result.outputs` 以 output_index 关联产物，包含 z_index、size、output_format 和前景 bounding_box（absolute 像素坐标 / normalized 千分坐标）；不含本机路径。
-- 密钥策略：`limits: [{period: day|week|month, cap_cny}]`（最多三条且 period 唯一，金额 >0 且 ≤1,000,000）；
-  `allowed_models` / `allowed_aliases` 为 null 表示全部、空数组表示无权限；模型支持精确匹配和尾部 `*` 前缀匹配，alias 精确匹配。
-  按网关本地日历零点、周一和月初重置；受理时按首个可选成员估价预占，与限额判断共用锁。
+- 密钥策略（第 7 批）：`quota: {cap_cny, period: day|week|month|none, since} | null`（金额 >0 且 ≤1,000,000；since 由主机写，只改金额时保留、改周期时重置）；
+  `scope: [{alias, models: [model_id] | null}] | null`：null 表示全部模型；条目 `models: null` 表示该供应商全部（含以后新增），列表是该供应商自己的 model id。
+  同一 alias 只能出现一次；新保存不允许空范围（`[]` 或某条 `models: []` 返回 422），旧数据转换出的空范围照常读出。旧 `limits` / `allowed_*` 读入时转换并写回（ADR-0025）。
+  day / week / month 按网关本地日历零点、周一和月初重置，none 不重置、从 since 起累计；受理时按首个可选成员估价预占，与限额判断共用锁。
   终态优先结算实际费用，否则成功用估价、失败或取消记零；无价预占零。失败切换中各次已报告实际费用累加。
 - 接入端接回原任务（2026-11-18 起）：第一次提交前生成幂等键并连同请求指纹（提示词、模型、发给主机的参数、素材字节的 sha256）
   落进 `params.gateway_idempotency_key` / `gateway_request_fingerprint`，之后所有重发都用这个键（主机按「成员密钥 + 幂等键」去重，
@@ -182,9 +183,10 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   控制台复用 AppShell 现有 SSE 连接；文本结束事件只用于即时通知，文本调用不持久化为生成任务，刷新后的 recent 列表只含落盘的生成任务。
 - 本机管理（管理权限）：`GET/PUT /api/gateway`（开关 / 端口 / 名称 + 运行状态）、`POST /api/gateway/keys`（返回明文 `token`）、
   `PATCH /api/gateway/keys/{id}`（名称、金额窗口、模型与 alias 权限）、`POST /api/gateway/keys/{id}/revoke`；使用记录见 `GET /api/usage?scope=team`。
-  创建 body 为 `{name, limits, allowed_models, allowed_aliases}`，PATCH 接受任意字段子集（省略保持原值，权限 null 取消限制）。
+  创建 body 为 `{name, role?, token?, quota, scope}`，PATCH 接受任意字段子集（省略保持原值，`quota` / `scope` 传 null 取消限制）。
+  `GET /api/gateway/options` → `{providers: [{alias, provider, enabled, models: [{id, name, modality, route_id}]}]}`：按供应商列出可经网关提供的模型；停用的供应商 `enabled=false`、`route_id=null`。
   `GET /api/gateway/keys/{id}/token` → `{token}`，只允许本机会话管理权限，响应 `Cache-Control: no-store`；不存在或已撤销返回 404。网关端口及远程 admin 代理不提供此接口。
-  `GET /api/gateway` 的密钥含 `limits_status`、`month_charged_cny`、`month_calls`、`last_used_at`；列表、更新及审计不含明文或哈希。
+  `GET /api/gateway` 的密钥含 `quota_status`（同 /me 的 quota，未设额度为 null）、`month_charged_cny`、`month_calls`、`last_used_at`；列表、更新及审计不含明文或哈希。
   `GET /api/gateway` 另含 `quarantined_tasks`（损坏后移到 `.runtime/gateway/quarantine/` 的任务文件数）与 `config_error`
   （`.config/gateway.json` 读不出时的原因，否则 null）。配置读不出时返回 `enabled=false`、`keys=[]`，网关保持关闭；
   其余读写 `gateway.json` 的接口返回 500 并带同一原因，不覆盖、不重建该文件。
@@ -1211,15 +1213,15 @@ status 保留真实状态（含 pending、done、failed，以及团队 canceled 
 
 `GatewayKeyRecord.role` 为 `member | admin`，默认 `member`。本机创建/修改成员同样支持角色；`GET /api/gateway/audit` 返回最近200条 `{entries}` 操作日志。日志含 time（带时区）、actor_id/name、action、target_id、summary，不含 token 或哈希。
 
-`/gateway/v1/admin` 下所有端点每次请求校验有效 admin，成员403、无效凭据401。管理写入持锁复查；不能远程撤销/降级自己，最后管理员只能本机撤权。
+`/gateway/v1/admin` 下所有端点每次请求校验有效 admin，成员403、无效凭据401。成员密钥管理（`/keys` 各端点与 `/options`）另要求请求头 `X-Atelier-Admin-Api: 2`（本机管理代理自动加），缺少或不一致返回 426「远程管理需要本机与主机是同一版本」；其余端点不查（第 7 批）。管理写入持锁复查；不能远程撤销/降级自己，最后管理员只能本机撤权。
 
 | 方法与后缀 | 响应与作用 |
 |---|---|
 | GET /keys | `{keys}`，成员记录不含token_sha256 |
-| POST /keys | 201 `{key, token}`，明文仅此次响应；输入name/role/limits/allowed_models/allowed_aliases |
+| POST /keys | 201 `{key, token}`，明文仅此次响应；输入name/role/quota/scope |
 | PATCH /keys/{id} | 修改成员，返回脱敏记录 |
 | POST /keys/{id}/revoke | 撤销，返回脱敏记录 |
-| GET /options | 可授权的模型与上游alias |
+| GET /options | 同本机 `/api/gateway/options`：按供应商分组的可授权模型 |
 | GET /usage、/usage/tasks | 与本机用量结构一致，固定team；range/member筛选；tasks另支持status/offset/limit/project/model/alias/kind |
 | GET /tasks | scope=active/recent，所有成员任务的安全快照 |
 | GET /live | SSE task事件，4秒心跳；发送前复查权限，客户端另每4秒轮询tasks |

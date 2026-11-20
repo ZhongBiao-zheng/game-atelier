@@ -43,7 +43,8 @@ def endpoint(method, template):
             try:
                 response = session.request(method, key.base_url.rstrip("/") + "/gateway/v1/admin" + suffix,
                     params=request.query_params, data=body or None,
-                    headers={"Authorization": f"Bearer {key.access_key}", "Content-Type": "application/json"},
+                    headers={"Authorization": f"Bearer {key.access_key}", "Content-Type": "application/json",
+                             atelier_gateway.ADMIN_API_HEADER: str(atelier_gateway.ADMIN_API_VERSION)},
                     timeout=(3, 10), allow_redirects=False, stream=template == "/live")
                 return session, response
             except requests.RequestException:

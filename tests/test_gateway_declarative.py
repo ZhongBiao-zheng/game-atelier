@@ -52,8 +52,8 @@ def host_setup(vendor) -> tuple[str, str]:
     return stored.id, f"declarative:{stored.id}:m1"
 
 
-def member_client(*, limits=None) -> tuple[TestClient, object]:
-    record, token = gateway_keys.create_key("小王", limits=limits)
+def member_client(*, quota=None) -> tuple[TestClient, object]:
+    record, token = gateway_keys.create_key("小王", quota=quota)
     client = TestClient(create_gateway_app())
     client.headers["Authorization"] = f"Bearer {token}"
     return client, record
@@ -83,7 +83,7 @@ def test_models_carry_capabilities_but_no_template_or_host_address(vendor):
 def test_capped_key_can_see_and_use_unpriced_routes(vendor):
     """2026-11-18 起：设了金额上限的密钥也能用未计价路由，额度用光后才被拦（见 test_gateway_quota）。"""
     _, route_id = host_setup(vendor)
-    client, _ = member_client(limits=[{"period": "day", "cap_cny": 5}])
+    client, _ = member_client(quota={"period": "day", "cap_cny": 5})
     assert [m["id"] for m in client.get("/gateway/v1/models").json()["models"]] == [route_id]
     assert submit(client, route_id, {"ratio": "1:1"}).status_code == 202
 

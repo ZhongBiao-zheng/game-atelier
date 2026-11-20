@@ -51,6 +51,17 @@ def scope_options() -> dict:
     return {"providers": list(providers.values())}
 
 
+def _same_admin_api(request: Request) -> None:
+    """成员密钥的管理接口只接受同一版本的远程管理端（第 7 批）。
+
+    旧版本机代理不带这个请求头，也解析不了新形状（scope / quota）：回一个旧版能照常显示的错误，
+    而不是让它的设置页拿到读不懂的数据后白屏。用量、任务、路由等形状没变的接口不查。"""
+    from character_workflow.lib.callers import atelier_gateway
+
+    if request.headers.get(atelier_gateway.ADMIN_API_HEADER) != str(atelier_gateway.ADMIN_API_VERSION):
+        raise HTTPException(426, "远程管理需要本机与主机是同一版本的 Atelier：请把两边都更新到最新版本后再管理成员")
+
+
 def create_router(require_key):
     from viewer_server.gateway_routes import (
         GatewayKeyCreate, GatewayKeyPatch, _key_view, gateway_options, gateway_task_list,
@@ -65,12 +76,13 @@ def create_router(require_key):
         return key
 
     router = APIRouter(prefix="/gateway/v1/admin", dependencies=[Depends(admin)])
+    same_version = [Depends(_same_admin_api)]
 
-    @router.get("/keys")
+    @router.get("/keys", dependencies=same_version)
     def members():
         return {"keys": [_key_view(key) for key in gateway_keys.read_config().keys]}
 
-    @router.post("/keys", status_code=201)
+    @router.post("/keys", status_code=201, dependencies=same_version)
     def create(body: GatewayKeyCreate, actor=Depends(admin)):
         try:
             key, token = gateway_keys.create_key(**body.model_dump(), actor_id=actor.id)
@@ -78,21 +90,21 @@ def create_router(require_key):
             raise HTTPException(422, str(error)) from None
         return {"key": _key_view(key), "token": token}
 
-    @router.patch("/keys/{key_id}")
+    @router.patch("/keys/{key_id}", dependencies=same_version)
     def update(key_id: str, body: GatewayKeyPatch, actor=Depends(admin)):
         return _key_view(gateway_keys.update_key(
             key_id, **body.model_dump(exclude_unset=True), actor_id=actor.id))
 
-    @router.post('/keys/{key_id}/reset')
+    @router.post('/keys/{key_id}/reset', dependencies=same_version)
     def reset(key_id: str, actor=Depends(admin)):
         key, token = gateway_keys.reset_key(key_id, actor_id=actor.id)
         return {'key': _key_view(key), 'token': token}
 
-    @router.post("/keys/{key_id}/revoke")
+    @router.post("/keys/{key_id}/revoke", dependencies=same_version)
     def revoke(key_id: str, actor=Depends(admin)):
         return _key_view(gateway_keys.revoke_key(key_id, actor_id=actor.id))
 
-    @router.get("/options")
+    @router.get("/options", dependencies=same_version)
     def options():
         return gateway_options()
 

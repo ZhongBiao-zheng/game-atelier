@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from character_workflow.lib import data_root, gateway_audit
 from character_workflow.lib.corrupt_files import parse_reason
@@ -28,14 +28,22 @@ TOKEN_PREFIX = "atg_"
 _MAX_FILE_BYTES = 256 * 1024
 
 
-LimitPeriod = Literal["day", "week", "month"]
+QuotaPeriod = Literal["day", "week", "month", "none"]
 _UNSET = object()
+# 旧数据里多条额度并存时取周期最长的一条（飙哥 2026-11-20：现有密钥没有同时设多条的，直接改）。
+_PERIOD_LENGTH = {"day": 1, "week": 2, "month": 3}
 
 
-class GatewayLimit(BaseModel):
+class GatewayQuota(BaseModel):
+    """一把网关密钥的额度：一个金额 + 一个周期（第 7 批，取代多条 limits）。
+
+    周期按主机本机时区：day = 自然日，week = 周一 00:00 起，month = 自然月，none = 不重置、从 since 起累计。
+    since 由主机写：设置额度或改周期时记当时时间；只改金额时保留（已用量不变）。
+    """
     model_config = ConfigDict(extra="forbid")
-    period: LimitPeriod
-    cap_cny: float = Field(gt=0, le=1_000_000)
+    cap_cny: float = Field(gt=0, le=1_000_000, allow_inf_nan=False)
+    period: QuotaPeriod
+    since: str | None = None
 
 
 class ScopeEntry(BaseModel):
@@ -46,27 +54,32 @@ class ScopeEntry(BaseModel):
 
 
 class GatewayPolicy(BaseModel):
-    """网关密钥的可用范围与额度（第 7 批起范围按供应商列出）。
+    """网关密钥的可用范围与额度（第 7 批）。
 
     scope 为 None 是全部模型（所有供应商，含以后新增）；否则按供应商列出——模型挂在供应商下面，
     表达不出「选了模型但供应商没开」。判定只有一处：gateway_access.member_in_scope。
     """
     model_config = ConfigDict(extra="forbid")
-    limits: list[GatewayLimit] = Field(default_factory=list, max_length=3)
+    quota: GatewayQuota | None = None
     scope: list[ScopeEntry] | None = Field(default=None, max_length=200)
-
-    @field_validator("limits")
-    @classmethod
-    def unique_periods(cls, limits):
-        if len({limit.period for limit in limits}) != len(limits):
-            raise ValueError("同一限额窗口只能设置一次")
-        return limits
 
     @model_validator(mode="after")
     def unique_aliases(self):
         if self.scope is not None and len({entry.alias for entry in self.scope}) != len(self.scope):
             raise ValueError("同一供应商只能出现一次")
         return self
+
+
+def _legacy_limits_to_quota(limits: list) -> dict | None:
+    """旧的多条 limits → 一条 quota。一条原样转；多条取周期最长的一条并记日志。读不出的条目跳过。"""
+    usable = [item for item in limits if isinstance(item, dict)
+              and item.get("period") in _PERIOD_LENGTH and isinstance(item.get("cap_cny"), int | float)]
+    if not usable:
+        return None
+    chosen = max(usable, key=lambda item: _PERIOD_LENGTH[item["period"]])
+    if len(usable) > 1:
+        logger.warning("网关密钥有 %d 条旧额度，按周期最长的一条（%s）转换", len(usable), chosen["period"])
+    return {"cap_cny": chosen["cap_cny"], "period": chosen["period"], "since": _now()}
 
 
 def _legacy_pattern_matches(pattern: str, route_id: str) -> bool:
@@ -151,6 +164,16 @@ class GatewayKeyRecord(GatewayPolicy):
     # 本机旧配置中的 daily_image_limit 读入即丢弃，不迁移、不保留旧协议。
     model_config = ConfigDict(extra="ignore")
 
+    @model_validator(mode="before")
+    @classmethod
+    def convert_legacy_limits(cls, data):
+        """第 7 批前的 `limits` 列表读入时转成 `quota`；旧字段不保留，下次写盘即是新格式。"""
+        if isinstance(data, dict) and "limits" in data:
+            data = dict(data)
+            limits = data.pop("limits")
+            if data.get("quota") is None and isinstance(limits, list):
+                data["quota"] = _legacy_limits_to_quota(limits)
+        return data
     id: str
     name: str = Field(min_length=1, max_length=40)
     role: Literal["member", "admin"] = "member"
@@ -221,9 +244,11 @@ def _read_config_locked() -> GatewayConfig:
     except PermissionError as error:  # 权限或属主不对：同样不能动它
         raise GatewayConfigCorruptError(path, str(error), unreadable=True) from None
     # 第 7 批前的旧字段读入即转换，并写回一次新格式；转换不了时不写回。
+    legacy_limits = isinstance(raw, dict) and any(
+        isinstance(item, dict) and "limits" in item for item in raw.get("keys") or [])
     deferred = False
     try:
-        changed = _convert_legacy_scopes(raw) if isinstance(raw, dict) else False
+        changed = (_convert_legacy_scopes(raw) if isinstance(raw, dict) else False) or legacy_limits
     except _LegacyScopeDeferred:
         changed, deferred = False, True
     try:
@@ -261,7 +286,7 @@ def update_settings(
 
 
 def create_key(
-    name: str, limits: list[GatewayLimit] | None = None,
+    name: str, quota: GatewayQuota | dict | None = None,
     scope: list[ScopeEntry] | list[dict] | None = None,
     *, role: Literal["member", "admin"] = "member", actor_id: str | None = None,
     token: str | None = None,
@@ -272,7 +297,7 @@ def create_key(
     token = TOKEN_PREFIX + (token if token is not None else secrets.token_urlsafe(32))
     record = GatewayKeyRecord(
         id=uuid.uuid4().hex[:12], name=name.strip(), token_sha256=digest(token), token=token,
-        limits=limits or [], scope=scope,
+        quota=_with_since(quota, None), scope=scope,
         created_at=_now(), role=role,
     )
     with _lock():
@@ -286,16 +311,31 @@ def create_key(
 
 
 def update_key(
-    key_id: str, *, name=_UNSET, limits=_UNSET,
+    key_id: str, *, name=_UNSET, quota=_UNSET,
     scope=_UNSET, role=_UNSET, actor_id: str | None = None,
 ) -> GatewayKeyRecord:
     patch = {k: v for k, v in {
-        "name": name, "limits": limits, "scope": scope, "role": role,
+        "name": name, "quota": quota, "scope": scope, "role": role,
     }.items() if v is not _UNSET}
     if isinstance(patch.get("name"), str):
         patch["name"] = patch["name"].strip()
-    return _replace(key_id, lambda record: GatewayKeyRecord.model_validate(
-        {**record.model_dump(), **patch}), actor_id, "member.update")
+
+    def change(record):
+        values = {**record.model_dump(), **patch}
+        if "quota" in patch:
+            values["quota"] = _with_since(patch["quota"], record.quota)
+        return GatewayKeyRecord.model_validate(values)
+
+    return _replace(key_id, change, actor_id, "member.update")
+
+
+def _with_since(quota: GatewayQuota | dict | None, before: GatewayQuota | None) -> GatewayQuota | None:
+    """主机写 since：只改金额（周期不变）时沿用原来的起点，其余（新设、改周期）从现在起算。"""
+    if quota is None:
+        return None
+    parsed = quota if isinstance(quota, GatewayQuota) else GatewayQuota.model_validate(quota)
+    since = before.since if before is not None and before.period == parsed.period and before.since else _now()
+    return parsed.model_copy(update={"since": since})
 
 
 def drop_alias_from_scopes(alias: str) -> None:
@@ -356,7 +396,7 @@ def _replace(key_id: str, change, actor_id: str | None, action: str) -> GatewayK
 
 
 def _summary(record):
-    return record.model_dump(mode="json", include={"name", "role", "limits", "scope", "revoked_at"})
+    return record.model_dump(mode="json", include={"name", "role", "quota", "scope", "revoked_at"})
 
 
 def reveal_token(key_id: str) -> str:

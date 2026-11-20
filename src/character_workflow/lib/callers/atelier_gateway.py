@@ -24,6 +24,11 @@ from character_workflow.lib.callers import task_submission
 
 PROTOCOL = "atelier_gateway"
 PROTOCOL_VERSION = 2
+# 远程管理（成员管理员经本机代理管主机）的成员密钥接口版本，由本机代理加在请求头上。
+# 与 PROTOCOL_VERSION 分开：只影响远程管理，不影响成员连接、出图与看额度。
+# 2 = 第 7 批（密钥的范围改成 scope、额度改成一条 quota）；密钥管理接口的返回形状再变时加一。
+ADMIN_API_HEADER = "X-Atelier-Admin-Api"
+ADMIN_API_VERSION = 2
 SUBMIT_ATTEMPTS = 3
 POLL_INTERVAL_SECONDS = 2.0
 POLL_GIVE_UP_SECONDS = 600.0

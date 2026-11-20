@@ -20,7 +20,7 @@ _REAL_PUMP = gateway_tasks.pump
 def client(isolated_data_root, monkeypatch):
     monkeypatch.setattr(gateway_tasks, "pump", lambda: None)
     _seed_keys()
-    record, token = gateway_keys.create_key("小王", limits=[{"period": "day", "cap_cny": 5}])
+    record, token = gateway_keys.create_key("小王", quota={"period": "day", "cap_cny": 5})
     test_client = TestClient(create_gateway_app())
     test_client.headers["Authorization"] = f"Bearer {token}"
     test_client.record = record  # type: ignore[attr-defined]

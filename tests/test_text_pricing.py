@@ -263,11 +263,11 @@ def test_admission_reserves_with_the_token_price(relay):
     seen = []
 
     def handle(request):
-        seen.append(gateway_quota.usage_summary(gateway_keys.read_config().keys[0])[0])
+        seen.append(gateway_quota.quota_status(gateway_keys.read_config().keys[0]))
         return httpx.Response(200, json={"choices": [], "usage": {
             "prompt_tokens": 10, "completion_tokens": 1}})
     gateway_keys.update_key(gateway_keys.read_config().keys[0].id,
-                            limits=[{"period": "day", "cap_cny": 1}])
+                            quota={"period": "day", "cap_cny": 1})
     client = relay(TUZI, handle)
     client.post(f"{BASE}/chat/completions", json={"model": SONNET, "messages": ["x" * 3000]})
     assert seen and seen[0]["reserved_cny"] > 0
