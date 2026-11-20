@@ -59,6 +59,9 @@ export GAME_ATELIER_DATA_ROOT=/tmp/test-data-root
 | `.config/accent-themes.json` | Web (`PUT /api/accent-themes`) | Web 外观设置（主题色；localStorage 只缓存首帧镜像） |
 | `.config/canvas-agent.json` | Web (`PUT /api/canvas/agent/settings`) | 画布 Agent（生成估价超过确认金额时 Auto 下也先确认） |
 | `.runtime/agent-usage/YYYY-MM.jsonl` | 画布 Agent（每次调对话模型追加一行） | 面板会话花费、用量页「我的」 |
+| `.runtime/agent-images/` | 画布 Agent（插件工具返回的预览图，服务端生成文件名；24 小时 / 200 张 / 64 MiB 清理） | 画布 Agent vision（调模型前附图） |
+| `.runtime/ps-bridge/execute-log.jsonl`（+ `.1.jsonl`） | PS 联动插件（Agent 执行脚本，1 MiB 轮转留一份） | 设置 → 插件 → PS 联动（最近 20 条）；只在本机，网关、用量统计、项目包都不读 |
+| `.config/ps-bridge.json` | 设置 → 插件 → PS 联动（「允许 Agent 执行脚本」，默认关） | PS 联动插件（关着时藏起 execute） |
 | `.config/plugins.json` | Web (`POST /api/plugins/{id}/enable\|disable`) | viewer-server（`lib/plugin_registry.py`，决定加载哪些插件） |
 | `.config/venv-hash` | `bootstrap.py --ensure-venv` | `bootstrap.py --check` |
 
