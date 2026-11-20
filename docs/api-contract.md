@@ -1437,6 +1437,14 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
   分类为 text、协议 `anthropic-messages`；同时声明 OpenAI 格式的取 `openai-chat`。为 `gemini-generate-content` 时改为
   `GET {根}/v1beta/models?pageSize=1000` + `x-goog-api-key`，不跟随重定向；条目取 `models[].name`（去掉 `models/` 前缀）与
   `displayName`，`supportedGenerationMethods` 非空且不含 `generateContent` 的不列。
+  - 自定义供应商、`text_protocol` 为自动（null）时先自动识别（ADR-0044 第 3 批）。
+    - 响应多一个 `detected: {protocol, family, label}`：
+      - `family` 取 `address`（只看地址定下）/ `new-api` / `anthropic` / `gemini` / `openrouter` / `openai`；
+      - `protocol` 是这把 KEY 的默认对话协议；
+      - `label` 只在 New API 且 `/api/status` 可读时给，形如「兔子API v0.9」，否则为 null。
+    - New API 的文本模型按 `supported_endpoint_types` 逐个返回 `protocol`。
+    - 选了具体接口时不识别，响应里没有 `detected`。
+    - 不跟随重定向的请求遇到 3xx 也按失败处理（502）。
 - 一次性文本调用（画布文本节点、AI 帮我配置、分镜解析、分类）按模型协议发请求；Anthropic 走 `POST {根}/v1/messages`，
   Gemini 走 `POST {根}/v1beta/models/{id}:generateContent`，
   响应转回 Chat 形状，用量按「含缓存的总输入」归一。协议选错时 `job.error` / 失败原因提示到供应商里改「对话接口」，不自动换协议重试。

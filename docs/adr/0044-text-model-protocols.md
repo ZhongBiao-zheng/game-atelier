@@ -83,6 +83,19 @@ Gemini 兼容、One API / New API 等等，还要有检测协议」。方案与�
   换鉴权头再 GET；不发任何 POST（「校验类 400 不计费」没有官方依据），不跟随重定向。检测不出时按 OpenAI Chat，
   保留手动选择。One API / New API 不做单独的供应商类型：由「自定义供应商」入口识别，按 `/v1/models` 的
   `supported_endpoint_types` 给每个模型定协议。
+  - 实现（第 3 批）：纯函数在 `llm_protocols.detect`。发请求的是 `models-preview`，只在自定义供应商、「对话接口」为自动时执行：
+    1. 先看地址：端点后缀、`/anthropic`、`/v1beta/openai`，以及官方域名 api.anthropic.com、
+       generativelanguage.googleapis.com、api.openai.com、openrouter.ai。
+    2. 再用 Bearer 拉 `/models` 看形状。
+    3. Bearer 失败、地址又定不下时，对同一个 origin 依次换 `x-api-key` 与 `x-goog-api-key` 各 GET 一次（不跟随重定向，3xx 算失败）。
+    4. 认出 New API 时，另 GET 公开的 `/api/status`（不带密钥）取站点名与版本，只用于显示。
+    - 识别结果只写进各模型的 `protocol` 与预览响应的 `detected`，不存进 KEY（重开表单按模型协议显示）。
+  - `supported_endpoint_types` 大小写不敏感、只认已知值（`openai` / `openai-chat`、`openai-response`、`anthropic`、
+    `gemini` / `gemini generateContent`）。一个模型声明多种时按 Chat > Anthropic > Responses > Gemini 取：
+    同时有 OpenAI 与 Gemini 格式的取 Chat。
+  - **只有 gemini 端点的模型，经中转站走原生格式时工具调用未经验证**：2026-11-20 实测，Tuzi 的 Gemini 格式入口
+    在内部转成 OpenAI Chat（响应里 `billing_usage.source = "oai_chat"`），两次都没有函数调用、没有签名。
+    这类模型在 Agent 里怎么处理另定。
 
 ## 与自定义接口（ADR-0036）的分工
 

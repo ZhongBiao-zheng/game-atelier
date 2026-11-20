@@ -277,3 +277,35 @@ def test_sdk_refusal_length_and_incomplete_errors_are_explained():
     assert incomplete.startswith("对话模型返回错误：Responses stream ended with terminal event `response.incomplete`")
     other = runtime.friendly_error(ModelBehaviorError("Tool not_a_tool not found in agent"))
     assert other == "对话出错，详情见服务日志"
+
+
+# ── Gemini generateContent（供应商协议 P5）：上游 STOP 但文本与调用都空，同样按空结束处理 ────────────
+
+def gemini(text: str = "") -> bytes:
+    parts = [{"text": text}] if text else []
+    return _sse([(None, {"candidates": [{"content": {"role": "model", "parts": parts}, "finishReason": "STOP"}],
+                         "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 3,
+                                           "totalTokenCount": 13}})])
+
+
+def test_gemini_stop_with_nothing_is_an_empty_reply_and_the_session_continues(client, upstream):
+    """P5 实测里 Tuzi 的 Gemini 入口回过「STOP、文本与调用都空」：转换层把它当空回答交给 SDK，
+    run_turn 的空结束判定接住，会话 failed 并提示；下一次请求里没有空的 model content（Gemini 拒收空 parts）。"""
+    keys.add_key(keys.KeySpec(alias="gem", provider="custom", base_url=upstream.base,
+                              access_key="local-fake-not-a-key", created_at="2026-11-20T00:00:00Z",
+                              models=[keys.ModelSpec(id="m", name="m", modality="text",
+                                                     protocol="gemini-generate-content")]))
+    project_id, session_id, base = _session(client, "gem")
+    upstream.script.extend([gemini(""), gemini("好")])
+    failed = _say(client, base, project_id, session_id, "画一只猫")
+    assert failed.status == "failed"
+    assert failed.error.startswith("模型没有返回内容，可以重试或换个模型（gem / m · 输出 3 token")
+    _no_empty_output(failed.history)
+
+    done = _say(client, base, project_id, session_id, "再试一次")
+    assert done.status == "idle" and done.messages[-1].text == "好"
+    assert len(upstream.requests) == 2  # 没有自动重试
+    sent_path, sent = upstream.requests[1]
+    assert sent_path.startswith("/v1beta/models/m:streamGenerateContent")
+    assert {content["role"] for content in sent["contents"]} == {"user"}
+    assert all(content["parts"] for content in sent["contents"])

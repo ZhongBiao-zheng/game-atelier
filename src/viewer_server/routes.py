@@ -1351,9 +1351,9 @@ def _protocol_is_openai_speech(protocol: str) -> bool:
     )
 
 
-def _fetch_model_rows(url: str, headers: dict, *, follow_redirects: bool = True,
-                      rows_key: str = "data") -> list:
-    """拉一次上游模型列表并归一成 list；任何一步失败都抛 502 带上游原文。"""
+def _fetch_model_body(url: str, headers: dict, *, follow_redirects: bool = True) -> object:
+    """拉一次上游模型列表，返回解析后的 JSON；任何一步失败都抛 502 带上游原文。
+    不跟随重定向时 3xx 也算失败（带着密钥的请求不去别的地址，3xx 的响应体不当列表用）。"""
     import requests
 
     try:
@@ -1362,16 +1362,75 @@ def _fetch_model_rows(url: str, headers: dict, *, follow_redirects: bool = True,
         resp = requests.get(url, headers=headers, timeout=20, **extra)
     except requests.RequestException as e:
         raise HTTPException(502, f"请求上游失败: {e}") from e
-    if resp.status_code >= 400:
+    if resp.status_code >= 400 or (not follow_redirects and resp.status_code >= 300):
         raise HTTPException(502, f"上游 {resp.status_code}: {resp.text[:200]}")
     try:
-        body = resp.json()
+        return resp.json()
     except ValueError as e:
         raise HTTPException(502, f"上游响应非 JSON: {resp.text[:200]}") from e
+
+
+def _model_rows(body: object, rows_key: str = "data") -> list:
     rows = body.get(rows_key) if isinstance(body, dict) else body
     if not isinstance(rows, list):
         raise HTTPException(502, f"上游响应缺少模型列表（{rows_key}）")
     return rows
+
+
+def _fetch_model_rows(url: str, headers: dict, *, follow_redirects: bool = True,
+                      rows_key: str = "data") -> list:
+    """拉一次上游模型列表并归一成 list；任何一步失败都抛 502 带上游原文。"""
+    return _model_rows(_fetch_model_body(url, headers, follow_redirects=follow_redirects), rows_key)
+
+
+def _new_api_label(base_url: str) -> str | None:
+    """New API 的公开 `/api/status`（不带密钥、不跟随重定向）给出的站点名与版本，只用于显示；拿不到就不显示
+    （OpenAI-HK 回 404，2026-11-20 免费探针）。"""
+    import requests
+
+    parts = urlsplit(base_url)
+    try:
+        resp = requests.get(f"{parts.scheme}://{parts.netloc}/api/status", timeout=10, allow_redirects=False)
+        data = resp.json().get("data") if resp.status_code == 200 else None
+    except (requests.RequestException, ValueError, AttributeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    name = str(data.get("system_name") or "").strip()
+    version = str(data.get("version") or "").strip()
+    return " ".join(part for part in (name, version) if part)[:80] or None
+
+
+def _detect_listing(base_url: str, access_key: str, provider: str) -> tuple[list, str | None, str | None]:
+    """自动识别（ADR-0044 第 3 批）：先用 OpenAI 的 Bearer 拉列表看形状；失败且地址定不下时，对同一个 origin
+    换 Anthropic、Gemini 的鉴权头各试一次（不跟随重定向）。返回 (条目, 家族, 默认协议)，全失败抛第一次的错误。"""
+    from character_workflow.lib.llm_protocols import anthropic, detect, gemini
+
+    headers = {"Authorization": f"Bearer {access_key}"} if access_key else {}
+    try:
+        body = _fetch_model_body(_model_list_url(base_url, provider), headers)
+    except HTTPException as first_error:
+        if not access_key or detect.from_address(base_url) is not None:
+            raise
+        fallbacks = (
+            (f"{anthropic.models_url(base_url)}?limit=1000", anthropic.headers(base_url, access_key), "data"),
+            (f"{gemini.models_url(base_url)}?pageSize=1000", gemini.headers(access_key), "models"),
+        )
+        for url, auth, rows_key in fallbacks:
+            try:
+                body = _fetch_model_body(url, auth, follow_redirects=False)
+            except HTTPException:
+                continue
+            family = detect.listing_family(body)
+            if family in ("anthropic", "gemini"):
+                rows = _model_rows(body, rows_key)
+                return (_gemini_model_rows(rows) if family == "gemini" else rows), family, \
+                    detect.family_protocol(family)
+        raise first_error
+    family = detect.listing_family(body)
+    if family == "gemini":
+        return _gemini_model_rows(_model_rows(body, "models")), family, detect.family_protocol(family)
+    return _model_rows(body), family, detect.from_address(base_url) or detect.family_protocol(family)
 
 
 def _gemini_model_rows(rows: list) -> list[dict]:
@@ -1498,12 +1557,19 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
         return _catalog_preview(payload, preview_provider, base_url, access_key)
 
     from character_workflow.lib import llm_protocols
-    from character_workflow.lib.llm_protocols import anthropic, gemini
+    from character_workflow.lib.llm_protocols import anthropic, detect, gemini
 
     text_protocol = payload.text_protocol if "text_protocol" in payload.model_fields_set else (
         stored.text_protocol if payload.alias else None)
-    anthropic_listing = text_protocol == llm_protocols.ANTHROPIC_MESSAGES
-    gemini_listing = text_protocol == llm_protocols.GEMINI_GENERATE_CONTENT
+    # 自定义供应商选「自动」时先看地址：地址能定成 Anthropic / Gemini 的，直接按那种格式列模型。
+    auto = text_protocol is None and preview_provider == "custom"
+    by_address = detect.from_address(base_url) if auto else None
+    listing_protocol = text_protocol or (
+        by_address if by_address in (llm_protocols.ANTHROPIC_MESSAGES, llm_protocols.GEMINI_GENERATE_CONTENT)
+        else None)
+    anthropic_listing = listing_protocol == llm_protocols.ANTHROPIC_MESSAGES
+    gemini_listing = listing_protocol == llm_protocols.GEMINI_GENERATE_CONTENT
+    detected: dict | None = None
     if anthropic_listing:
         # Anthropic 默认一页 20 条；带着密钥的请求不跟随重定向，不把密钥带到别的主机。
         rows = _fetch_model_rows(f"{anthropic.models_url(base_url)}?limit=1000",
@@ -1513,10 +1579,18 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
         rows = _gemini_model_rows(_fetch_model_rows(
             f"{gemini.models_url(base_url)}?pageSize=1000", gemini.headers(access_key),
             follow_redirects=False, rows_key="models"))
+    elif auto:
+        rows, family, default = _detect_listing(base_url, access_key, preview_provider)
+        anthropic_listing = family == "anthropic"
+        gemini_listing = family == "gemini"
+        detected = {"protocol": default, "family": family,
+                    "label": _new_api_label(base_url) if family == "new-api" else None}
     else:
         url = _model_list_url(base_url, preview_provider)
         headers = {"Authorization": f"Bearer {access_key}"} if access_key else {}
         rows = _fetch_model_rows(url, headers)
+    if auto and detected is None:
+        detected = {"protocol": listing_protocol, "family": "address", "label": None}
 
     from character_workflow.lib.callers.video_registry import resolve_protocol
 
@@ -1555,9 +1629,11 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
         elif modality == "image":
             protocol = _image_protocol(item)
         elif modality == "text":
+            # New API 逐模型按 supported_endpoint_types 定（两种都有取 Chat）；TokenDance 按 supported_protocols。
             protocol = (llm_protocols.ANTHROPIC_MESSAGES if anthropic_listing
                         else llm_protocols.GEMINI_GENERATE_CONTENT if gemini_listing
-                        else _text_protocol(item))
+                        else detect.endpoint_protocol(item.get("supported_endpoint_types"))
+                        or _text_protocol(item))
         elif modality == "audio":
             protocol = _audio_protocol(item)
         else:
@@ -1571,7 +1647,10 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
             "protocol": protocol,
             "input_modalities": _model_input_modalities(item),
         })
-    return {"models": models, "total": total, "excluded": excluded}
+    result = {"models": models, "total": total, "excluded": excluded}
+    if detected is not None:
+        result["detected"] = detected
+    return result
 
 
 def _catalog_preview(payload: _ModelsPreviewPayload, provider: str, base_url: str,
