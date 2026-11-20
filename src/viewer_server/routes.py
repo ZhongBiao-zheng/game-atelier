@@ -235,6 +235,7 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                     "evolink_state", "edit_inputs", "edit_prompt",
                     "route_id", "route_order", "route_tried",
                     "gateway_idempotency_key", "gateway_request_fingerprint", "gateway_unconfirmed", "gateway_reattach_of", "gateway_cancel_pending",
+                    "gateway_settlement", "gateway_charged_on",
                 ):
                     if owned in existing_params:
                         value[owned] = existing_params[owned]
@@ -1895,6 +1896,8 @@ def _create_user_job(
     params.gateway_unconfirmed = None
     params.gateway_reattach_of = None
     params.gateway_cancel_pending = None
+    params.gateway_settlement = None
+    params.gateway_charged_on = None
     # 改写值与原值同类型（str / list[str]），model_copy 不需要重新校验。
     params = params.model_copy(update=_gate_browser_refs(params.model_dump()))
     route_order: list[str] = []

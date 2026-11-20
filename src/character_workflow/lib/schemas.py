@@ -227,6 +227,10 @@ class JobParams(BaseModel):
     # 用户停止了、停止请求还没送到主机（网关连不上）；由 gateway_cancel_outbox 恢复连接后按幂等键补发，
     # 主机答复后清掉。
     gateway_cancel_pending: bool | None = None
+    # 停止已送到主机、主机答「已发上游、会跑完」：等主机终态回写扣费（gateway_cancel_outbox）。pending 等待中，settled 已结算。
+    gateway_settlement: Literal["pending", "settled"] | None = None
+    # 同一把幂等键的主机扣费只记一次（谁先拿到主机终态谁记，gateway_charges）：这条没记，金额记在这个任务上。
+    gateway_charged_on: str | None = Field(default=None, max_length=200)
     provider_task_protocol: Literal[
         "tuzi_async", "tuzi_images", "seedance", "evolink", "atelier_gateway", "declarative",
         "yinchao",

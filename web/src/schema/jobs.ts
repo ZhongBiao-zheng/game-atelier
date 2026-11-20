@@ -63,6 +63,10 @@ export interface JobParams {
   gateway_reattach_of?: string | null;
   /** 停止请求还没送到主机（网关连不上），恢复连接后补发；服务端写。 */
   gateway_cancel_pending?: boolean | null;
+  /** 停止后等主机终态回写扣费：pending 等待中，settled 已结算；服务端写。 */
+  gateway_settlement?: 'pending' | 'settled' | null;
+  /** 同一把幂等键的主机扣费记在了另一条任务上（这条不记金额）；服务端写。 */
+  gateway_charged_on?: string | null;
   /** 厂商订单；Web 只读。Tuzi 支持续查，Seedance 留供核对，不自动重提。 */
   provider_task_protocol?: 'tuzi_async' | 'tuzi_images' | 'seedance' | 'evolink' | 'atelier_gateway' | 'declarative' | 'yinchao';
   provider_task_ids?: string[];

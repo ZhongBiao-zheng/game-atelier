@@ -140,6 +140,13 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
   `JobParams.gateway_cancel_pending`（后端独占），文案「已停止（网关上的任务可能仍在执行）」，由
   `gateway_cancel_outbox` 连上主机后按幂等键补发，主机答复后清掉并改文案；键超过 20 小时不再补发。旧主机没有按键取消的
   接口（404 / 405）时退回按任务号取消。
+  结算（第 6 批，2026-11-20）：主机答「已发上游、会跑完」（含轮询中直接送达）时记 `JobParams.gateway_settlement="pending"`
+  （后端独占），补发线程每轮按幂等键再问主机，主机到终态时置 `settled`：扣费 > 0 记 `actual_cost_cny` 并在文案末尾附
+  「（已扣 ¥x）」，主机失败 / 取消的基础文案为「已停止」；同一把幂等键的主机扣费在接入端只记一次——谁先拿到主机终态谁记
+  （`<data_root>/.runtime/gateway-charges/<幂等键>.json` 先到先登记），另一条（原「已停止」那条或「再次生成」接回的那条）
+  不记金额，记 `JobParams.gateway_charged_on=<记了金额的任务 id>`，原任务文案为「（费用记在再次生成的任务上）」。
+  用量页「我的」计入 `canceled` 且 `actual_cost_cny > 0` 的任务。主机任务终态 `error_kind="unconfirmed"` 时接入端抛
+  `GatewayHostUnconfirmed`（未确认类型，「自动」不换家，不挂「等待网关」）。
 - 接入端等待网关（2026-11-19 起）：创作台任务由后台等待者（`_run_studio_job_safely`，创作台专用线程池，不在事件循环里）
   运行时，没拿到网关结果（`GatewayUnconfirmed`：提交未确认、查询放弃、下载失败、旧键连不上）且这把幂等键首次发出不满 20 小时，
   任务保持 `pending`、`progress_phase="waiting_gateway"`（界面显示「等待网关」），等待者约 30 秒一轮，先用 3 秒的健康检查探网关，

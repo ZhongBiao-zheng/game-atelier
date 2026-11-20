@@ -42,7 +42,20 @@ def _actual_cost_recorder(job_id: str, params: dict[str, Any]) -> Callable[[floa
     def record(cost_usd: float) -> None:
         if not math.isfinite(cost_usd) or cost_usd < 0:
             return
-        params["actual_cost_cny"] = round(cost_usd * USD_TO_CNY, 6)
+        cost_cny = round(cost_usd * USD_TO_CNY, 6)
+        key = params.get("gateway_idempotency_key")
+        if key and cost_cny > 0:
+            # 同一把网关幂等键的主机扣费只记一次（第 6 批 6-2a）：「再次生成」接回原任务时，原「已停止」那条
+            # 可能已由补发线程回写过；谁先登记谁记，另一条只指明记在哪条。
+            from character_workflow.lib import gateway_charges
+
+            holder = gateway_charges.claim(key, job_id)
+            if holder != job_id:
+                params.pop("actual_cost_cny", None)
+                params["gateway_charged_on"] = holder
+                update_job_params(job_id, params)
+                return
+        params["actual_cost_cny"] = cost_cny
         update_job_params(job_id, params)
 
     return record
@@ -146,9 +159,14 @@ def _raise_if_canceled(should_cancel: Callable[[], bool]) -> None:
 
 
 def _settle_canceled(job_id: str, params: dict[str, Any]) -> None:
+    gateway = params.get("provider_task_protocol") == "atelier_gateway" or params.get("gateway_idempotency_key")
+    if gateway and params.get("gateway_unconfirmed") and not params.get("gateway_cancel_pending"):
+        # 停止已送到主机、主机答「已发上游、会跑完并计费」：等主机终态回写扣费（第 6 批 6-2a）。
+        params["gateway_settlement"] = "pending"
+        update_job_params(job_id, params)
     update_job_status(job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
-    if params.get("gateway_cancel_pending"):
-        # 停止没送到网关主机：任务落 CANCELED 之后再叫醒补发线程，它只找已停止的任务。
+    if params.get("gateway_cancel_pending") or params.get("gateway_settlement") == "pending":
+        # 补发停止 / 等主机结算都由补发线程做：任务落 CANCELED 之后再叫醒，它只找已停止的任务。
         from character_workflow.lib import gateway_cancel_outbox
         gateway_cancel_outbox.wake()
 

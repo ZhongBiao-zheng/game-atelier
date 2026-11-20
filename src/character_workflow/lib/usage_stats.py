@@ -49,8 +49,10 @@ def mine_records(
     records = []
     for job in jobs:
         assist = job.namespace == "assist"
+        # 已停止的任务一般不计；但停止后主机仍跑完并扣了费、回写到这条上的（第 6 批 6-2a）按实际扣费计入。
+        settled_charge = job.status == "canceled" and (job.params.actual_cost_cny or 0) > 0
         if (job.kind not in {"image", "video", "audio"} and not assist) \
-                or job.status in {"pending_confirm", "canceled"}:
+                or job.status == "pending_confirm" or (job.status == "canceled" and not settled_charge):
             continue
         cost = job.params.actual_cost_cny
         if cost is None and job.status != "failed":

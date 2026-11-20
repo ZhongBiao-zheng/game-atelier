@@ -304,6 +304,8 @@ def clone_job_for_retry(job_id: str) -> Job:
         "gateway_unconfirmed": None,
         "gateway_reattach_of": None,
         "gateway_cancel_pending": None,
+        "gateway_settlement": None,
+        "gateway_charged_on": None,
     })
     clone = src.model_copy(update={
         "job_id": new_job_id(),
