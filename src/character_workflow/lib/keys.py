@@ -107,6 +107,8 @@ class KeySpec(BaseModel):
     modalities: list[str] = Field(default_factory=list)
     notes: str = ""
     created_at: str
+    # 用户手动选的对话接口（ADR-0044）；None = 自动。取值只在 API 写入边界检查，读盘不校验。
+    text_protocol: str | None = None
 
     @model_validator(mode="after")
     def _subscription_contract(self):
@@ -136,8 +138,10 @@ class KeySpec(BaseModel):
     @model_serializer(mode="wrap")
     def _omit_empty_auth_source(self, handler):
         data = handler(self)
-        if data.get("auth_source") is None:
-            data.pop("auth_source", None)
+        # 没设的可选字段不写进 keys.json / API：旧数据与精确比对的断言保持原样。
+        for field in ("auth_source", "text_protocol"):
+            if data.get(field) is None:
+                data.pop(field, None)
         return data
 
     @field_validator("models", mode="before")
@@ -388,6 +392,7 @@ def preferred_alias_for_kind(kind: Kind) -> str | None:
 
 def keys_for_api() -> list[dict]:
     from character_workflow.lib import generation_pricing
+    from character_workflow.lib.callers.openai_text import text_callable
     from character_workflow.lib.http_protocols import declared_for
 
     db = read_keys_db()
@@ -397,6 +402,8 @@ def keys_for_api() -> list[dict]:
         for spec, row in zip(k.models, d["models"]):
             if (declared := declared_for(spec)) is not None:
                 row["declared"] = declared
+            if model_modality(spec, k) == "text" and not text_callable(k.provider, spec.protocol):
+                row["text_unsupported"] = True  # 只在不能调用时出现：前端据此判断，不另抄协议表
             if generation_pricing.has_no_synced_price(k, spec):
                 row["unpriced"] = True  # 只在未定价时出现：供应商页据此显示「单价」框
         d["access_key"] = _mask(d.get("access_key"))

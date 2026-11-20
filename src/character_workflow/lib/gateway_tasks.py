@@ -756,7 +756,8 @@ def _pick_member(
     except model_routes.NoSuchRouteError:
         return None
     excluded = [m.alias for m in route.members
-                if m.provider == GATEWAY_PROVIDER or not gateway_access.member_allowed(owner, m.alias)]
+                if m.provider == GATEWAY_PROVIDER or not gateway_access.member_allowed(owner, m.alias)
+                or not gateway_access.member_relayable(modality, m)]
     if len(excluded) == len(route.members):
         return None
     if route_order is None and not tried:

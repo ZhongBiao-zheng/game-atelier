@@ -19,6 +19,7 @@ import requests
 
 from character_workflow.lib import keys
 from character_workflow.lib.callers.openai_compat import key_api_root
+from character_workflow.lib.llm_protocols import speaks_openai
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,12 @@ def _supports_reasoning(item: dict[str, Any]) -> bool | None:
     return None
 
 
+def agent_can_use(model: keys.ModelSpec | None) -> bool:
+    """临时边界（ADR-0044）：Agent 目前只按 OpenAI 格式收发（SDK 的 Chat Completions），Anthropic 等协议
+    等 Agent 接上转换（第 2 批）再放开，P2 完成后移除。KEY 里没登记的模型按未标注处理（OpenAI 格式）。"""
+    return model is None or speaks_openai(model.protocol)
+
+
 def enabled_text_models(key: keys.KeySpec) -> list[keys.ModelSpec]:
     """用户在这把 Key 里启用的文本模型；未标模态的模型只在 Key 只开了 llm 时算文本。"""
     llm_only = set(key.modalities) == {"llm"}
@@ -116,6 +123,8 @@ def _models_for(key: keys.KeySpec, now: float) -> tuple[list[dict], str | None]:
     upstream, error = _upstream_for(key, now)
     rows = []
     for model in enabled_text_models(key):
+        if not agent_can_use(model):
+            continue
         info = upstream.get(model.id)
         if info is not None and not info["agent"]:
             continue
@@ -129,7 +138,7 @@ def list_chat_models() -> dict:
     candidates = [
         key for key in keys.read_keys_db().keys
         if key.enabled and key.provider in CHAT_PROVIDERS and (key.base_url or key.provider == "openai")
-        and enabled_text_models(key)
+        and any(agent_can_use(model) for model in enabled_text_models(key))
     ]
     if not candidates:
         return {"models": [], "errors": []}

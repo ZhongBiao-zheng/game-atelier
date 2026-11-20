@@ -264,6 +264,11 @@ def _redact_local_paths(message: str) -> str:
 
 def _error_hint(low: str) -> str | None:
     """按报文特征给中文提示；认不出返回 None（调用方原样透出）。"""
+    if low.startswith("text api"):
+        from character_workflow.lib.llm_protocols import mismatch_hint
+
+        if (hint := mismatch_hint(low)) is not None:
+            return hint
     # 聚合商（Tuzi 等 new-api）在扣费预留阶段撞上自家数据库故障：
     # `transaction token_count_reserve failed: stage=token_idempotency db_code=mysql:1290`。
     # 与我们的参数无关，也没扣到费，稍后重试即可。

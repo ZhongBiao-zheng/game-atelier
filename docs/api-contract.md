@@ -1398,6 +1398,24 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
 | POST | `/api/canvas-agent/protocol-manual` | `{}` → `{markdown}`：接入说明全文 |
 | POST | `/api/canvas-agent/protocol-validate` | `{document}`（请求上限 200 KB，超出 413 `CONTENT_TOO_LARGE`；模板本身上限仍是 64 KB，超出时 `valid:false`）→ 与 `POST /api/http-protocols/validate` 同形状；预览用占位服务地址与 `model-id`；名字在 MCP 适配器禁止字段名单里的字段（`Authorization` 头、请求体或请求头里的 `api_key` / `access_key` 等，不分大小写）从预览里拿掉，路径列在该次调用的 `hidden_fields`（如 `headers.Authorization`、`body.api_key`）；查询串鉴权在 `url` 里，不受影响。不写盘、不发请求、不读已有模板与密钥 |
 
+## 对话模型协议（ADR-0044）
+
+- `ModelSpec.protocol` 的文本取值：`openai-chat`（旧值 `null` / `openai` / `chat-completions` 同义）、`openai-responses`、
+  `anthropic-messages`。协议表在 `lib/llm_protocols`，能否调用的唯一判据是 `openai_text.text_callable`。
+- `GET /api/keys` 的文本模型、`GET /api/models` 的文本路由成员：不能调用时给只读 `text_unsupported: true`，能调用时不出现
+  该字段。前端只读它，不另抄协议表。
+- `KeySpec` / `KeyCreatePayload` 新增可选 `text_protocol`（`openai-chat` / `openai-responses` / `anthropic-messages`，
+  null 不序列化 = 自动）。只在 `POST/PATCH /api/keys` 校验：取值必须在上表里、供应商必须是 custom，否则 422。选了具体接口时，
+  写入时把这把 KEY 的文本模型（`declarative` 除外）的 `protocol` 都改成它；PATCH 显式传 null 改回自动，各模型协议不动。
+- `POST /api/keys/models-preview` 新增可选 `text_protocol`（不传时用已存的）。为 `anthropic-messages` 时改为
+  `GET {根}/v1/models?limit=1000` + `x-api-key` + `anthropic-version`，不跟随重定向；文本模型的 `protocol` 返回
+  `anthropic-messages`，`capabilities.image_input` 映射到 `input_modalities`。上游只声明 `anthropic:messages` 的模型
+  分类为 text、协议 `anthropic-messages`；同时声明 OpenAI 格式的取 `openai-chat`。
+- 一次性文本调用（画布文本节点、AI 帮我配置、分镜解析、分类）按模型协议发请求；Anthropic 走 `POST {根}/v1/messages`，
+  响应转回 Chat 形状，用量按「含缓存的总输入」归一。协议选错时 `job.error` / 失败原因提示到供应商里改「对话接口」，不自动换协议重试。
+- 局域网网关与内置 Agent 暂只接 OpenAI 格式：`anthropic-messages` 成员不出现在 `/gateway/v1/models` 的成员与路由里、
+  不被选中转发；不进 `GET /api/canvas/agent/models`。
+
 ## 网关共享库（ADR-0034）
 
 本机管理：`GET /api/team-library-gateway-share` 返回 `shared_library_ids` 与 `gateway_enabled`；

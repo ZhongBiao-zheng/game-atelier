@@ -8,8 +8,9 @@ from typing import Any
 
 import requests
 
-from character_workflow.lib import net_env
+from character_workflow.lib import llm_protocols, net_env
 from character_workflow.lib.callers.openai_compat import key_api_root
+from character_workflow.lib.llm_protocols import anthropic
 
 
 class OpenAITextError(RuntimeError):
@@ -44,25 +45,25 @@ _AUDIO_FORMAT = {
 _MAX_INLINE_IMAGE_BYTES = 25 * 1024 * 1024
 _MAX_INLINE_AUDIO_BYTES = 25 * 1024 * 1024
 _MAX_INLINE_VIDEO_BYTES = 50 * 1024 * 1024
-_SUPPORTED_PROTOCOLS = {
-    None, "openai", "openai-chat", "chat-completions", "openai-responses",
-}
+_UNDECLARED_PROVIDERS = {"openai", "openrouter", "seedream", "tokendance", "custom", "atelier"}
+
+
+def text_callable(provider: str, protocol: str | None) -> bool:
+    """文本模型能不能调用的唯一判据（前端读 `text_unsupported`，不另抄一份）。
+
+    协议未标注时只认已知会讲 OpenAI 格式的供应商；明确标注了已实现协议的，任何供应商都可以。"""
+    return protocol in llm_protocols.TEXT_PROTOCOLS and (
+        protocol is not None or provider in _UNDECLARED_PROVIDERS)
 
 
 def supports_model(key: Any, model: Any) -> bool:
-    protocol = model.protocol if model is not None else None
-    declared = protocol in _SUPPORTED_PROTOCOLS - {None}
-    return (
-        protocol in _SUPPORTED_PROTOCOLS
-        and (
-            key.provider in {"openai", "openrouter", "seedream", "tokendance", "custom", "atelier"}
-            or declared
-        )
-    )
+    return text_callable(key.provider, model.protocol if model is not None else None)
 
 
 def supports_input_modality(provider: str, protocol: str | None, modality: str) -> bool:
     """Whether this caller has a wire format for one declared model input."""
+    if protocol == llm_protocols.ANTHROPIC_MESSAGES:
+        return modality == "image"
     if modality == "image":
         return True
     if protocol == "openai-responses":
@@ -203,8 +204,11 @@ def _post_json(
     timeout: float | tuple[float, float],
     gateway_alias: str | None = None,
     gateway_wait: Any = None,
+    headers: dict[str, str] | None = None,
 ) -> object:
-    """`gateway_wait`（`gateway_text_wait.Waiting`）：经局域网网关、主机正在更新时等待重发；
+    """`headers` 不传时用 OpenAI 的 Bearer 鉴权；其他协议由适配器给（例如 Anthropic 的 x-api-key）。
+
+    `gateway_wait`（`gateway_text_wait.Waiting`）：经局域网网关、主机正在更新时等待重发；
     不传就直接报「网关正在更新，请稍后重试」（没有进度位置的入口不让用户干等）。"""
     from character_workflow.lib import gateway_text_wait
 
@@ -214,7 +218,7 @@ def _post_json(
     def send() -> requests.Response:
         return requests.post(
             url,
-            headers={
+            headers=headers or {
                 "Authorization": f"Bearer {access_key}",
                 "Content-Type": "application/json",
             },
@@ -250,6 +254,39 @@ def _post_json(
         return response.json()
     except ValueError as error:
         raise OpenAITextError(f"text api response is not JSON: {error}") from error
+
+
+def chat_completion(
+    key: Any,
+    protocol: str | None,
+    payload: dict[str, Any],
+    *,
+    timeout: float | tuple[float, float],
+    gateway_alias: str | None = None,
+    gateway_wait: Any = None,
+) -> object:
+    """按模型协议发一次 Chat Completions 形状的请求，返回 Chat 形状的响应（用量已归一）。
+
+    Anthropic 走 `/v1/messages` 并在这里转换；其余按 OpenAI Chat 原样发。不带 `n`：
+    Anthropic 一次只出一条，要多条由调用方循环。"""
+    if protocol == llm_protocols.ANTHROPIC_MESSAGES:
+        base_url = (key.base_url or "").strip()
+        if not base_url:
+            raise OpenAITextError("text provider requires base_url")
+        try:
+            upstream = anthropic.to_upstream(payload)
+        except llm_protocols.ProtocolError as error:
+            raise OpenAITextError(str(error)) from error
+        body = _post_json(url=anthropic.messages_url(base_url), access_key=key.access_key,
+                          payload=upstream, timeout=timeout,
+                          headers=anthropic.headers(base_url, key.access_key))
+        try:
+            return anthropic.from_upstream(body)
+        except llm_protocols.ProtocolError as error:
+            raise OpenAITextError(f"text api returned no text: {error}") from error
+    return _post_json(url=f"{key_api_root(key)}/chat/completions", access_key=key.access_key,
+                      payload=payload, timeout=timeout, gateway_alias=gateway_alias,
+                      gateway_wait=gateway_wait)
 
 
 def generate(
@@ -359,27 +396,30 @@ def generate(
             generated.append(text)
         return generated
 
+    count = max(1, int(n))
     payload: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": content}],
-        "n": max(1, int(n)),
         "stream": False,
     }
     if options.get("temperature") is not None:
         payload["temperature"] = float(options["temperature"])
     if options.get("max_tokens") is not None:
         payload["max_tokens"] = int(options["max_tokens"])
-    body = _post_json(
-        url=f"{key_api_root(key)}/chat/completions",
-        access_key=key.access_key,
-        payload=payload,
-        timeout=timeout,
-        gateway_alias=alias if key.provider == "atelier" else None,
-        gateway_wait=_kwargs.get("gateway_wait"),
-    )
-    choices = body.get("choices") if isinstance(body, dict) else None
-    outputs = [_content_text(choice) for choice in choices] if isinstance(choices, list) else []
-    generated = [item for item in outputs if item]
-    if not generated:
-        raise OpenAITextError(f"text api returned no text: {body!r}")
-    return generated[: max(1, int(n))]
+    # OpenAI Chat 一次请求出 n 条；Anthropic 没有 n，按条数循环。
+    single = protocol == llm_protocols.ANTHROPIC_MESSAGES
+    if not single:
+        payload["n"] = count
+    generated: list[str] = []
+    for _ in range(count if single else 1):
+        body = chat_completion(
+            key, protocol, payload, timeout=timeout,
+            gateway_alias=alias if key.provider == "atelier" else None,
+            gateway_wait=_kwargs.get("gateway_wait"),
+        )
+        choices = body.get("choices") if isinstance(body, dict) else None
+        outputs = [_content_text(choice) for choice in choices] if isinstance(choices, list) else []
+        generated.extend(item for item in outputs if item)
+        if not generated:
+            raise OpenAITextError(f"text api returned no text: {body!r}")
+    return generated[:count]
