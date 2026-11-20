@@ -64,7 +64,8 @@ def _task_view(task: gateway_tasks.GatewayTask) -> dict[str, Any]:
 
 def _route_view(route: model_routes.ModelRoute, key: GatewayKeyRecord) -> dict[str, Any]:
     members = [m for m in route.members if m.provider != gateway_tasks.GATEWAY_PROVIDER
-               and gateway_access.member_allowed(key, m.alias)]
+               and gateway_access.member_allowed(key, m.alias)
+               and gateway_access.member_relayable(route.modality, m)]
     view = {
         "id": route.id, "name": members[0].name, "modality": route.modality,
         "members": [{

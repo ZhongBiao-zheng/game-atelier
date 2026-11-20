@@ -39,8 +39,12 @@ def failure_reason(raw: str, error: BaseException | None = None) -> str:
     `error` 是原始异常：经局域网网关、主机正在更新时按类型直接给「网关正在更新，请稍后重试」。"""
     from character_workflow.lib.gateway_text_wait import updating_message
 
+    from character_workflow.lib.llm_protocols import mismatch_hint
+
     if (updating := updating_message(error)) is not None:
         return updating
+    if (hint := mismatch_hint(raw)) is not None:
+        return hint
     low = raw.lower()
     if any(word in low for word in ("accountoverdue", "overdue", "insufficient", "quota",
                                      "balance", "余额", "欠费", "额度")):
@@ -74,7 +78,7 @@ def call_model(key: keys.KeySpec, model: keys.ModelSpec, system: str, user: str,
     """调一次对话模型，不带 tools、不重试。返回 (输出文本, 输入 token, 输出 token)。"""
     from character_workflow.lib.callers.openai_compat import key_api_root
     from character_workflow.lib.callers.openai_text import (
-        _content_text, _post_json, _response_text,
+        _content_text, _post_json, _response_text, chat_completion,
     )
 
     gateway = key.alias if key.provider == "atelier" else None
@@ -88,9 +92,8 @@ def call_model(key: keys.KeySpec, model: keys.ModelSpec, system: str, user: str,
         payload = {"model": model.id, "stream": False, "max_tokens": max_output_tokens,
                    "messages": [{"role": "system", "content": system},
                                 {"role": "user", "content": user}]}
-        body = _post_json(url=f"{key_api_root(key)}/chat/completions",
-                          access_key=key.access_key, payload=payload, timeout=timeout,
-                          gateway_alias=gateway)
+        body = chat_completion(key, model.protocol, payload, timeout=timeout,
+                               gateway_alias=gateway)
         choices = body.get("choices") if isinstance(body, dict) else None
         text = _content_text(choices[0]) if isinstance(choices, list) and choices else None
     tokens_in, tokens_out = usage_of(body)

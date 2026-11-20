@@ -26,7 +26,7 @@ from character_workflow.lib import canvas_agent_skills as skills
 from character_workflow.lib import canvas_agent_tools as tools
 from character_workflow.lib import canvas_agent_vision as vision
 from character_workflow.lib import keys, canvas_specs, team_library_specs
-from character_workflow.lib.canvas_agent_models import chat_base_url
+from character_workflow.lib.canvas_agent_models import agent_can_use, chat_base_url
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasChange, CanvasListModelsInput, CanvasProjectInput,
     CanvasReadMediaInput, CanvasSearchLibraryInput, CanvasSearchTeamInput, GetRunInput, RunInput,
@@ -826,6 +826,9 @@ def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None]
         raise CanvasToolError("INVALID_PARAMETERS", "请先选择对话模型", 422)
     if not key.enabled:
         raise CanvasToolError("MODEL_UNAVAILABLE", "供应商已停用", 422)
+    # 临时边界（ADR-0044）：Agent 接上协议转换（第 2 批）之前只按 OpenAI 格式收发，P2 完成后移除。
+    if not agent_can_use(next((m for m in key.models if m.id == session.model), None)):
+        raise CanvasToolError("MODEL_UNAVAILABLE", "该模型的接口暂不支持 Agent", 422)
     # 局域网网关：直连不读本机代理；SDK 自带重试关掉（读超时也会重发，可能重复计费），
     # 只保留「主机确定没收下才重发」（gateway_text_wait，第 5 批 5-4）。
     http_client, retries = None, 2

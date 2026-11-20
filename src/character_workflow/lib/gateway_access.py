@@ -7,6 +7,16 @@ def member_allowed(key: GatewayKeyRecord, alias: str) -> bool:
     return key.allowed_aliases is None or alias in key.allowed_aliases
 
 
+def member_relayable(modality: str, member: model_routes.RouteMember) -> bool:
+    """网关能不能转这个成员：文本成员目前只转 OpenAI 格式（Chat / Responses）。
+
+    接入端始终按 OpenAI 格式打网关；Anthropic 等协议要等主机端转换才放进来。
+    临时边界（ADR-0044），第 4 批完成后移除。"""
+    from character_workflow.lib.llm_protocols import speaks_openai
+
+    return modality != "text" or speaks_openai(member.protocol)
+
+
 def model_allowed(key: GatewayKeyRecord, route_id: str) -> bool:
     return key.allowed_models is None or any(
         route_id == pattern or (pattern.endswith("*") and route_id.startswith(pattern[:-1]))
@@ -46,7 +56,8 @@ def route_visible(key: GatewayKeyRecord, route: model_routes.ModelRoute) -> bool
     # 未计价的路由限额密钥也能用（飙哥 2026-11-18 定）：额度用光后由受理时的额度检查一律拦下。
     return (publishable(route)
             and model_allowed(key, route.id) and any(
-                m.provider != "atelier" and member_allowed(key, m.alias) for m in route.members))
+                m.provider != "atelier" and member_allowed(key, m.alias)
+                and member_relayable(route.modality, m) for m in route.members))
 
 
 def check_route(key: GatewayKeyRecord, modality, route_id: str) -> model_routes.ModelRoute:

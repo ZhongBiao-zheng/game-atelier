@@ -26,7 +26,7 @@
 |---|---|---|
 | `category` | `text` / `image` / `video` / `audio` / `unknown` / `excluded` | 分类结果。`excluded` 只在 `include_all: true` 时出现在 `models` 里 |
 | `modality` | `text` / `image` / `video` / `audio` / `null` | 四种生成类别给值；`unknown` / `excluded` 为 `null`，由画师在 picker 显式指定（不静默兜底成 image）|
-| `protocol` | 见各厂契约 / `null` | 对话=openai-chat·openai-responses；视频=seedance·kling·klingai·evolink·dashscope·openrouter；图片=ark·openai；语音合成=openai-speech·minimax-t2a（可执行），ark-tts·kling-tts（已识别，本机暂无执行器）|
+| `protocol` | 见各厂契约 / `null` | 对话=openai-chat·openai-responses·anthropic-messages（ADR-0044）；视频=seedance·kling·klingai·evolink·dashscope·openrouter；图片=ark·openai；语音合成=openai-speech·minimax-t2a（可执行），ark-tts·kling-tts（已识别，本机暂无执行器）|
 | `input_modalities` | 数组 | 上游显式声明的 text / image / video / audio 输入，不凭模型名猜能力 |
 | `total` / `excluded` | 数字 | 上游去重总数 / 明确不可生成而未返回的条数；「显示全部」可查看被过滤项 |
 

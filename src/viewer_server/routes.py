@@ -871,6 +871,7 @@ class _KeyCreatePayload(BaseModel):
     modalities: list[str] = []
     notes: str = ""
     created_at: str | None = None
+    text_protocol: str | None = None
 
     @field_validator("models", mode="before")
     @classmethod
@@ -896,6 +897,8 @@ class _KeyPatchPayload(BaseModel):
     api_key_url: str | None = None
     modalities: list[str] | None = None
     notes: str | None = None
+    # 显式传 null = 改回自动；不传 = 不改。
+    text_protocol: str | None = None
 
     @field_validator("models", mode="before")
     @classmethod
@@ -924,6 +927,8 @@ def list_keys() -> dict:
 
 
 def _route_payload(route: model_routes.ModelRoute) -> dict:
+    from character_workflow.lib.callers.openai_text import text_callable
+
     members, candidate_alias, estimates = model_routes.route_preview(route)
     return {
         "mode": route.mode, "candidate_alias": candidate_alias,
@@ -932,7 +937,10 @@ def _route_payload(route: model_routes.ModelRoute) -> dict:
             {"alias": m.alias, "provider": m.provider, "base_url": m.base_url,
              "billing_group": m.billing_group, "estimate_cny": estimates[m.alias],
              "model_id": m.model_id, "name": m.name, "protocol": m.protocol,
-             **({"via": list(m.via)} if m.via else {})}
+             **({"via": list(m.via)} if m.via else {}),
+             # 与 /api/keys 同一判据：只在文本成员不能调用时出现。
+             **({"text_unsupported": True} if route.modality == "text"
+                and not text_callable(m.provider, m.protocol) else {})}
             for m in members
         ],
     }
@@ -1002,6 +1010,33 @@ def _checked_bindings(provider: str, models: list[keys.ModelSpec]) -> list[keys.
         raise HTTPException(422, str(error)) from None
 
 
+def _checked_text_protocol(provider: str, value: str | None) -> str | None:
+    """供应商级「接口」只在写入边界校验（ADR-0044）：只有自定义供应商可以手动选。"""
+    from character_workflow.lib import llm_protocols
+
+    if value is None:
+        return None
+    if value not in llm_protocols.MANUAL_CHOICES:
+        raise HTTPException(422, f"不认识的接口：{value}")
+    if provider != "custom":
+        raise HTTPException(422, "只有自定义供应商可以选择接口")
+    return value
+
+
+def _stamp_text_protocol(text_protocol: str | None, modalities: list[str],
+                         models: list[keys.ModelSpec]) -> list[keys.ModelSpec]:
+    """手动选了接口：这把 KEY 的文本模型都按它调用；自动（None）时各模型保持原样。"""
+    if text_protocol is None:
+        return models
+    llm_only = set(modalities) == {"llm"}
+    return [
+        model.model_copy(update={"protocol": text_protocol})
+        if (model.modality == "text" or (model.modality is None and llm_only))
+        and model.protocol != "declarative" else model
+        for model in models
+    ]
+
+
 def _sync_new_model_prices(provider: str) -> None:
     """新加的 TokenDance 模型不等下一轮全量同步，后台补拉价格，模型菜单与估价马上可用。"""
     if provider == "tokendance":
@@ -1018,6 +1053,8 @@ def create_key(payload: _KeyCreatePayload) -> dict:
     if payload.provider == "comfyui" and payload.models:
         raise HTTPException(422, "请通过工作流导入添加 ComfyUI 模型")
     payload.models = _checked_bindings(payload.provider, payload.models)
+    text_protocol = _checked_text_protocol(payload.provider, payload.text_protocol)
+    payload.models = _stamp_text_protocol(text_protocol, payload.modalities, payload.models)
     try:
         spec = keys.KeySpec(
             alias=payload.alias, provider=payload.provider, enabled=payload.enabled,
@@ -1032,6 +1069,7 @@ def create_key(payload: _KeyCreatePayload) -> dict:
             modalities=payload.modalities,
             notes=payload.notes,
             created_at=payload.created_at or datetime.now(timezone.utc).isoformat(),
+            text_protocol=text_protocol,
         )
     except Exception as e:
         detail = "ChatGPT 订阅配置无效" if payload.provider == "chatgpt" else str(e)
@@ -1061,6 +1099,14 @@ def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
     # billing_group 留空表示明确关闭聚合商计价；不能像密钥字段一样把显式 null 当作“未传”。
     if "billing_group" in payload.model_fields_set:
         patch_data["billing_group"] = payload.billing_group
+    if stored is not None and "text_protocol" in payload.model_fields_set:
+        patch_data["text_protocol"] = _checked_text_protocol(stored.provider, payload.text_protocol)
+    if stored is not None and ("text_protocol" in patch_data or "models" in patch_data):
+        chosen = patch_data.get("text_protocol", stored.text_protocol)
+        current = patch_data.get("models", [m.model_dump() for m in stored.models])
+        patch_data["models"] = [model.model_dump() for model in _stamp_text_protocol(
+            chosen, patch_data.get("modalities", stored.modalities),
+            [keys.ModelSpec.model_validate(m) for m in current])]
     if "access_key" in patch_data and not str(patch_data["access_key"]).strip():
         raise HTTPException(422, "供应商密钥不能为空")
     try:
@@ -1109,6 +1155,8 @@ class _ModelsPreviewPayload(BaseModel):
     access_key: str | None = None
     # 逃生舱：连判定为不可生成的模型也一并返回（词表判过头时用）。
     include_all: bool = False
+    # 表单上当前选的「接口」（ADR-0044）；不传时用已存的。Anthropic 按它的鉴权头与路径列模型。
+    text_protocol: str | None = None
     # 按自定义接口模板的 catalog 发现模型（ADR-0036）；不带时走默认 GET /models。
     protocol_id: str | None = None
 
@@ -1153,6 +1201,7 @@ _PROTOCOL_UNSUPPORTED_AUDIO_GENERATION_HINTS = (
 )
 _PROTOCOL_TEXT_GENERATION_HINTS = (
     "chat-completions", "chat/completions", "openai:responses", "openai/responses",
+    "anthropic:messages", "anthropic/messages",
 )
 _PROTOCOL_UNSUPPORTED_TEXT_GENERATION_HINTS = ("messages", "completions")
 # 明确不能生成四模态内容的协议动词：全部命中才判 excluded。
@@ -1249,6 +1298,9 @@ def _text_protocol(item: dict) -> str | None:
         return "openai-responses"
     if any("chat-completions" in p or "chat/completions" in p for p in protocols):
         return "openai-chat"
+    # 只声明 Anthropic 格式时才走它（同时有 OpenAI 格式的取 OpenAI，转换最少）。
+    if any("anthropic:messages" in p or "anthropic/messages" in p for p in protocols):
+        return "anthropic-messages"
     return None
 
 
@@ -1298,12 +1350,14 @@ def _protocol_is_openai_speech(protocol: str) -> bool:
     )
 
 
-def _fetch_model_rows(url: str, headers: dict) -> list:
+def _fetch_model_rows(url: str, headers: dict, *, follow_redirects: bool = True) -> list:
     """拉一次上游模型列表并归一成 list；任何一步失败都抛 502 带上游原文。"""
     import requests
 
     try:
-        resp = requests.get(url, headers=headers, timeout=20)
+        # 默认调用保持原样；不跟随重定向时才显式传参。
+        extra = {} if follow_redirects else {"allow_redirects": False}
+        resp = requests.get(url, headers=headers, timeout=20, **extra)
     except requests.RequestException as e:
         raise HTTPException(502, f"请求上游失败: {e}") from e
     if resp.status_code >= 400:
@@ -1370,12 +1424,20 @@ def _image_protocol(item: dict) -> str | None:
     return None
 
 
+def _supported(value: object) -> bool:
+    return value is True or (isinstance(value, dict) and value.get("supported") is True)
+
+
 def _model_input_modalities(item: dict) -> list[str]:
     """Normalize explicit upstream input modality declarations; never infer vision from model ids."""
     arch = item.get("architecture")
     raw = item.get("input_modalities")
     if raw is None and isinstance(arch, dict):
         raw = arch.get("input_modalities")
+    capabilities = item.get("capabilities")
+    if raw is None and isinstance(capabilities, dict) and "image_input" in capabilities:
+        # Anthropic Models API 的能力字段（ADR-0044）。
+        raw = ["text", "image"] if _supported(capabilities["image_input"]) else ["text"]
     if not isinstance(raw, list):
         return []
     allowed = {"text", "image", "video", "audio"}
@@ -1416,9 +1478,20 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
     if payload.protocol_id:
         return _catalog_preview(payload, preview_provider, base_url, access_key)
 
-    url = _model_list_url(base_url, preview_provider)
-    headers = {"Authorization": f"Bearer {access_key}"} if access_key else {}
-    rows = _fetch_model_rows(url, headers)
+    from character_workflow.lib import llm_protocols
+    from character_workflow.lib.llm_protocols import anthropic
+
+    text_protocol = payload.text_protocol if "text_protocol" in payload.model_fields_set else (
+        stored.text_protocol if payload.alias else None)
+    anthropic_listing = text_protocol == llm_protocols.ANTHROPIC_MESSAGES
+    if anthropic_listing:
+        # Anthropic 默认一页 20 条；带着密钥的请求不跟随重定向，不把密钥带到别的主机。
+        rows = _fetch_model_rows(f"{anthropic.models_url(base_url)}?limit=1000",
+                                 anthropic.headers(base_url, access_key), follow_redirects=False)
+    else:
+        url = _model_list_url(base_url, preview_provider)
+        headers = {"Authorization": f"Bearer {access_key}"} if access_key else {}
+        rows = _fetch_model_rows(url, headers)
 
     from character_workflow.lib.callers.video_registry import resolve_protocol
 
@@ -1457,7 +1530,7 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
         elif modality == "image":
             protocol = _image_protocol(item)
         elif modality == "text":
-            protocol = _text_protocol(item)
+            protocol = llm_protocols.ANTHROPIC_MESSAGES if anthropic_listing else _text_protocol(item)
         elif modality == "audio":
             protocol = _audio_protocol(item)
         else:
