@@ -59,6 +59,10 @@ def _format(raw: bytes) -> str | None:
     return None
 
 
+def is_image(raw: bytes) -> bool:
+    return _format(raw) is not None
+
+
 def _check_dims(width: int, height: int) -> None:
     if width <= 0 or height <= 0:
         raise IconRejected(UNREADABLE)

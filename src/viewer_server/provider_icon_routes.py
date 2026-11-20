@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from character_workflow.lib import provider_icons
 
@@ -36,4 +37,20 @@ def upload_provider_icon(file: UploadFile = File(...)) -> dict:
     try:
         return {"icon": provider_icons.store(raw)}
     except provider_icons.IconRejected as error:
+        raise HTTPException(422, str(error)) from None
+
+
+class _FetchPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    url: str = Field(min_length=1, max_length=2048)
+
+
+@provider_icon_router.post("/provider-icons/fetch")
+def fetch_provider_icon(payload: _FetchPayload) -> dict:
+    """按网址取站点图标（走 outbound_guard，只连公网、重定向逐跳重查）；同样只返回引用、不改 KEY。"""
+    from character_workflow.lib import provider_icon_fetch
+
+    try:
+        return {"icon": provider_icon_fetch.fetch_site_icon(payload.url.strip())}
+    except provider_icon_fetch.IconNotFound as error:
         raise HTTPException(422, str(error)) from None

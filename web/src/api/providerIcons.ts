@@ -7,6 +7,23 @@ export function uploadProviderIcon(file: File): Promise<{ icon: string }> {
   return requestJson<{ icon: string }>('/api/provider-icons', '上传图标', { method: 'POST', body: form });
 }
 
+/** 按网址取站点图标：服务端只连公网地址，取到后同样只返回引用。 */
+export function fetchProviderIcon(url: string): Promise<{ icon: string }> {
+  return requestJson<{ icon: string }>('/api/provider-icons/fetch', '获取图标', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+  });
+}
+
+/** 按网址获取的默认地址：官网，没有时取接口地址的 origin。 */
+export function defaultIconUrl(homepage: string | null | undefined, baseUrl: string | null | undefined): string {
+  if (homepage?.trim()) return homepage.trim();
+  try {
+    return baseUrl?.trim() ? new URL(baseUrl.trim()).origin : '';
+  } catch {
+    return '';
+  }
+}
+
 /** `file:<sha256>` → 读取地址；不是这种形式返回 null。 */
 export function providerIconUrl(icon: string | null | undefined): string | null {
   const sha = icon?.startsWith('file:') ? icon.slice(5) : null;

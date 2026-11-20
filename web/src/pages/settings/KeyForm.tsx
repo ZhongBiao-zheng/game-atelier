@@ -1,6 +1,7 @@
 import { checkComfyUI } from '@/api/comfyui';
 import { ComfyWorkflows } from './ComfyWorkflows';
 import { ProviderIconPicker } from '@/components/keys/ProviderIconPicker';
+import { defaultIconUrl } from '@/api/providerIcons';
 import { useEffect, useRef, useState } from 'react';
 import { CloseIcon, HelpIcon, HideIcon, ShowIcon } from '@/components/ui/icons';
 import { Toggle } from '@/components/ui/toggle';
@@ -574,7 +575,7 @@ export function KeyForm({ initial, presetId, onCreated, onCancel, onDelete, subm
     <Dialog open onOpenChange={open => { if (!open && !saving) onCancel(); }}>
       <DialogContent hideClose aria-describedby={undefined} className="flex max-h-[90dvh] max-w-[680px] flex-col gap-0 overflow-hidden p-0">
         <header className="flex shrink-0 items-center gap-3 border-b border-border px-6 py-4">
-          <ProviderIconPicker icon={icon} onChange={setIcon}
+          <ProviderIconPicker icon={icon} onChange={setIcon} defaultUrl={defaultIconUrl(homepage || preset.homepageUrl, baseUrl || preset.defaultBaseUrl)}
             display={{ provider, base_url: baseUrl.trim() || preset.defaultBaseUrl, alias: alias.trim() || preset.label }} />
           <DialogTitle className="min-w-0 flex-1 truncate">{title}</DialogTitle>
           {homepage && <a href={homepage} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground hover:text-primary">官网 ↗</a>}
