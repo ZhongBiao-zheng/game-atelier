@@ -237,3 +237,27 @@ def test_through_the_gateway_kind_and_failover_follow_the_table(monkeypatch, cal
         if upstream:
             upstream.close()
     assert sent == (["first", "second"] if host_kind == "switch" else ["first"])
+
+
+@pytest.mark.parametrize("fault", ["refused", "dns"])
+def test_yinchao_connection_never_made_says_it_could_not_connect(monkeypatch, tmp_path, fault):
+    """管理会话同意 Q6-2：连接被拒与 DNS 失败和连接超时同一句「音乐接口连不上」，行为仍是「未送达、可换家」。"""
+    _add("yinchao", "first")
+    if fault == "dns":
+        original = socket.getaddrinfo
+
+        def getaddrinfo(host, *args, **kwargs):
+            if host == "atelier-unresolvable.invalid":
+                raise socket.gaierror(socket.EAI_NONAME, "nodename nor servname provided, or not known")
+            return original(host, *args, **kwargs)
+
+        monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+        target = "http://atelier-unresolvable.invalid"
+    else:
+        target = _closed_base()
+    _route_posts(monkeypatch, {"first": target})
+    with pytest.raises(yinchao_music.YinchaoMusicError, match="^音乐接口连不上：") as error:
+        _render("yinchao", "first", tmp_path, {})
+    assert task_submission.is_not_sent(error.value) and not task_submission.is_unconfirmed(error.value)
+    assert "未确认" not in str(error.value)
+    assert model_routes.failover_reason(error.value) == "unreachable"

@@ -11,11 +11,15 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 import requests
 
-from . import video_poll
+from . import task_submission, video_poll
 
 
 class TuziAsyncError(RuntimeError):
     pass
+
+
+class TuziAsyncUnconfirmed(TuziAsyncError, task_submission.SubmissionUnconfirmed):
+    """提交可能已被受理但没拿到可用的任务号：不重发、不换家（第 6 批按统一判据对齐，task_submission）。"""
 
 
 class TuziAsyncPendingError(TuziAsyncError):
@@ -86,6 +90,43 @@ def _result_json(payload: dict[str, Any], task_id: str) -> dict[str, Any]:
     return {"data": [{"url": url}]}
 
 
+_UNCONFIRMED_SUFFIX = "（提交结果未确认，未自动重新提交；请先核对厂商记录，避免重复计费）"
+
+
+def _submit(submit: Callable[[str, dict[str, str]], Any], async_url: str, headers: dict[str, str]) -> str:
+    """发一次提交，按 task_submission 的统一判据分类（第 6 批）：
+
+    - 连接都没建立：原样抛 requests 异常（「未送达」，「自动」换下一把 KEY）；
+    - 连上后的网络异常、HTTP ≥ 500、2xx 非 JSON / 不是对象、2xx 取不到可用任务号：未确认（不重发、不换家）；
+    - 4xx：拒绝（`TuziAsyncError`，文案不变）。
+    未确认的文案保留原来那句在前，后面说明未确认。
+    """
+    try:
+        response = submit(async_url, headers)
+    except requests.RequestException as error:
+        if task_submission.network_outcome(error) == "not_sent":
+            raise
+        raise TuziAsyncUnconfirmed(task_submission.NETWORK_UNCONFIRMED.format(noun="图片")) from error
+    status = int(response.status_code)
+    try:
+        payload = _json(response)
+    except TuziAsyncError as error:
+        if 400 <= status < 500:
+            raise
+        raise TuziAsyncUnconfirmed(f"{error}{_UNCONFIRMED_SUFFIX}") from error
+    if status >= 500:
+        raise TuziAsyncUnconfirmed(f"{_message(payload, status)}{_UNCONFIRMED_SUFFIX}")
+    if not 200 <= status < 300:
+        raise TuziAsyncError(_message(payload, status))
+    try:
+        current = _task_id(payload)
+    except TuziAsyncError as error:
+        raise TuziAsyncUnconfirmed(f"{error}{_UNCONFIRMED_SUFFIX}") from error
+    if not current:
+        raise TuziAsyncUnconfirmed(f"Tuzi 异步提交未返回任务 ID: {payload!r}{_UNCONFIRMED_SUFFIX}")
+    return current
+
+
 def _execute(
     *,
     url: str,
@@ -103,13 +144,7 @@ def _execute(
     if not current:
         if should_cancel and should_cancel():
             raise TuziAsyncError("生成已按请求停止，尚未提交厂商任务")
-        response = submit(_async_url(url), headers)
-        payload = _json(response)
-        if not 200 <= int(response.status_code) < 300:
-            raise TuziAsyncError(_message(payload, int(response.status_code)))
-        current = _task_id(payload)
-        if not current:
-            raise TuziAsyncError(f"Tuzi 异步提交未返回任务 ID: {payload!r}")
+        current = _submit(submit, _async_url(url), headers)
         # Persist before the first poll.  From this point onward the request may already be billed.
         if on_task_id:
             on_task_id(current)

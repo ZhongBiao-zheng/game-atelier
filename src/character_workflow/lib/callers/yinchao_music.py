@@ -64,13 +64,11 @@ def _submit(base: str, headers: dict[str, str], model: str, prompt: str,
             body["lyric"] = settings["lyrics"]
     try:
         response = requests.post(url, headers=headers, json=body, timeout=SUBMIT_TIMEOUT)
-    except requests.ConnectTimeout as error:
-        # 连接都没建立：请求肯定没送达，可以放心报「连不上」。
-        raise task_submission.not_sent_error(YinchaoMusicError)(f"音乐接口连不上：{error}") from error
     except requests.RequestException as error:
         if task_submission.network_outcome(error) == "not_sent":
-            # 连接被拒 / DNS 失败 / 代理不通：同样没送达（以前靠 requests 链被判成「连不上」换家，行为不变）。
-            raise task_submission.not_sent_error(YinchaoMusicError)(_UNCONFIRMED) from error
+            # 连接都没建立（连接超时 / 被拒 / DNS 失败 / 代理不通）：请求肯定没送达，报「连不上」、可以换家。
+            # 第 6 批前被拒与 DNS 失败的文案写成「未确认」，行为同样是换家；文案按管理会话同意改成这句。
+            raise task_submission.not_sent_error(YinchaoMusicError)(f"音乐接口连不上：{error}") from error
         raise YinchaoMusicUnconfirmed(_UNCONFIRMED) from error
     if response.status_code >= 500:
         raise YinchaoMusicUnconfirmed(
