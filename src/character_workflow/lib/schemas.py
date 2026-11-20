@@ -2015,6 +2015,9 @@ class CanvasAgentApprovalDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     call_id: str = Field(min_length=1, max_length=200)
     approve: bool
+    # 批量生成（run_generations）里勾选执行的项（下标）；不给就是全部执行。只在请求里出现，不落盘。
+    items: list[Annotated[int, Field(ge=0, le=19)]] | None = Field(default=None, min_length=1,
+                                                                   max_length=20)
 
 
 class CanvasAgentApprovalsSubmit(BaseModel):

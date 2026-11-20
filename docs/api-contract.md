@@ -513,6 +513,13 @@ Agent 每次调对话模型都在 `.runtime/agent-usage/YYYY-MM.jsonl` 追加一
 `GET / PUT /api/canvas/agent/settings`（仅本机页面）读写 `{ confirm_above_cny }`（0–10000，默认 10，存 `.config/canvas-agent.json`）：
 Agent 发起的生成单次估价超过它时，Auto 下也停在待确认；估价与界面模型菜单同源，未计价不拦。
 `run_generation` 待确认摘要第二行为「模型 · 预计 X¥」或「模型 · 未计价」，超过时第三行写「超过确认金额 X¥」。
+`run_generations`（批量，1–20 项、每项 1–4 张）在 Auto 下按合计估价判断，未计价的项不计入合计、也不单独拦；
+待确认摘要首行「批量生成 N 项，共 M 张」，每项一行「序号. 节点标题 · 模型 · 张数 · 预计 X¥ / 未计价」，
+末行「合计预计 X¥（K 项未计价）」或「合计未计价」，超过时再加「超过确认金额 X¥」；面板按「序号. 」认出每一项。
+`POST .../agent/sessions/{session_id}/approvals` 的每条决定可带 `items`（批量生成里勾选执行的下标，至少一项，
+不带即全部执行；只对 `run_generations` 有效，否则 422）。工具结果逐项给 `status`：`submitted`（带 run_id）/
+`rejected`（用户在确认卡上拒绝）/ `failed`（提交时出错，带 error），部分成功不回滚。网关额度在任务运行时按任务逐个准入，
+已提交的项也可能在运行时因额度用完失败。
 
 主题色是工作区应用级状态，文件真源为 `.config/accent-themes.json`（桌面版与浏览器共用；浏览器 localStorage
 `atelier:accent` 只缓存一份镜像供首帧上色，以服务端为准）。`GET /api/accent-themes` 返回

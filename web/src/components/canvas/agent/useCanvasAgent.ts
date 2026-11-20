@@ -270,13 +270,17 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     return updated;
   }), [createSession, projectId, refreshList, run, session]);
 
-  /** approved：每个待确认调用是否执行；没列出的按拒绝。 */
-  const decide = useCallback((approved: ReadonlySet<string>) => run(async () => {
+  /** approved：每个待确认调用是否执行；没列出的按拒绝。items：批量生成里勾选执行的项（没给就是全部）。 */
+  const decide = useCallback((
+    approved: ReadonlySet<string>,
+    items: ReadonlyMap<string, readonly number[]> = new Map(),
+  ) => run(async () => {
     if (!session) return undefined;
     setStreaming('');
-    const decisions = session.pending_approvals.map(item => ({
-      call_id: item.call_id, approve: approved.has(item.call_id),
-    }));
+    const decisions = session.pending_approvals.map(item => {
+      const chosen = approved.has(item.call_id) ? items.get(item.call_id) : undefined;
+      return { call_id: item.call_id, approve: approved.has(item.call_id), ...(chosen ? { items: [...chosen] } : {}) };
+    });
     const updated = await decideCanvasAgentApprovals(projectId, session.session_id, decisions);
     setSession(updated);
     return updated;

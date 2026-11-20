@@ -341,3 +341,21 @@ def test_member_sees_the_quota_is_used_up_when_no_fallback(gateway, upstream):
     print("MEMBER-SEES:", error)
     assert "中转额度已用完" in error and "重置" in error
     assert upstream["calls"] == []
+
+
+def test_quota_rejects_batch_items_one_by_one(gateway, upstream, monkeypatch):
+    """Agent 批量生成（run_generations）经网关时额度按任务逐个准入：前面的照常出图，
+    用光后的那一项才被拒，已出的不回滚（批 4 的 4-1）。提交阶段只建任务、不查额度。"""
+    record = gateway_keys.read_config().keys[0]
+    gateway_keys.update_key(record.id, limits=[{"period": "day", "cap_cny": 0.5}])
+    monkeypatch.setattr(gateway_tasks, "_estimate", lambda *_args, **_kwargs: 0.32)
+    first, second = _job("job-batch-1", route_id=None), _job("job-batch-2", route_id=None)
+
+    assert job_runner.run_job(first.job_id).status == JobStatus.DONE
+    with pytest.raises(job_runner.JobRunnerError):
+        job_runner.run_job(second.job_id)
+    rejected = read_job(second.job_id)
+    assert rejected.status == JobStatus.FAILED
+    assert "中转额度已用完" in rejected.error
+    assert read_job(first.job_id).status == JobStatus.DONE
+    assert [c["alias"] for c in upstream["calls"]] == ["Local"]

@@ -38,6 +38,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_models: '查看可用模型',
   apply_changes: '修改画布',
   run_generation: '生成',
+  run_generations: '批量生成',
   get_run: '查询生成进度',
   read_media: '读取媒体信息',
   read_video_frames: '查看视频画面',
@@ -349,7 +350,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             approvals={session.pending_approvals}
             labels={TOOL_LABELS}
             disabled={pending}
-            onDecide={approved => void agent.decide(approved)}
+            onDecide={(approved, items) => void agent.decide(approved, items)}
           />
         )}
       </div>

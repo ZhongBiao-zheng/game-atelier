@@ -47,6 +47,7 @@ Notify = Callable[[str, dict], None]
 
 MAX_TURNS = 30
 TOOL_OUTPUT_LIMIT = 20_000
+MAX_BATCH_GENERATIONS = 20
 DELTA_FLUSH_SECONDS = 0.15
 MEDIA_SCHEME = "atelier-media://"
 LOCAL = SimpleNamespace(kind="local", session_id="canvas-chat", grant_id=None)
@@ -64,7 +65,8 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
 - 生成一张图或一段视频的标准步骤：apply_changes 里 add_surface 建一个空的图片/视频节点 →
   set_draft 写提示词、模型（alias 与 model 是两个独立的字段，都必须来自 list_models；alias 为 null 的那行是「自动」，
   按设定顺序选供应商，优先用它）、参数 → 需要参考图时 connect
-  把参考节点连到它 → run_generation 发起生成。
+  把参考节点连到它 → run_generation 发起生成。一次要出多个节点时，配好全部 draft 后用
+  run_generations 一次发起（最多 20 项）；结果逐项返回，部分成功不回滚。
 - 这几步放进同一次 apply_changes：add_surface 时自己指定 node_id（如 cat-1），同一批后面的
   set_draft / connect 用这个 node_id 引用它；节点标题不能当 id 用。
 - 用画布上已有的图当参考（用户带进来的节点、上一次出的图）：直接 connect 那个节点到新的生成节点，
@@ -168,6 +170,8 @@ def confirmation_required(project_id: str, tool: str, arguments: dict, mode: str
         return True
     if tool == "run_generation":
         return generation_over_threshold(project_id, arguments)
+    if tool == "run_generations":
+        return generations_over_threshold(project_id, arguments)
     return False
 
 
@@ -176,6 +180,33 @@ def generation_over_threshold(project_id: str, arguments: dict) -> bool:
     estimate = cost.generation_estimate(project_id, str(arguments.get("surface_node_id", "")),
                                         _count(arguments))
     return cost.needs_cost_confirmation(estimate["estimate_cny"])
+
+
+def generations_over_threshold(project_id: str, arguments: dict) -> bool:
+    """Auto 下 run_generations 按合计估价判断；未计价的项不计入合计，也不单独拦。"""
+    return cost.needs_cost_confirmation(_generations_estimate(project_id, arguments, [])["total"])
+
+
+def _generations_estimate(project_id: str, arguments: dict, batch_changes: list[dict]) -> dict:
+    """{rows: [{node_id, count, model, estimate_cny}], total, unpriced}；total 只算有价格的项，全部未计价时为 None。"""
+    rows = []
+    for item in _generation_items(arguments):
+        try:
+            estimate = cost.generation_estimate(project_id, item["surface_node_id"], item["count"],
+                                                batch_changes)
+        except Exception:  # noqa: BLE001 — 估价只用于展示和金额判断，读不到 draft 按未计价
+            logger.warning("canvas agent generation estimate failed", exc_info=True)
+            estimate = {"model": None, "estimate_cny": None}
+        rows.append({"node_id": item["surface_node_id"], "count": item["count"],
+                     "model": estimate["model"], "estimate_cny": estimate["estimate_cny"]})
+    priced = [row["estimate_cny"] for row in rows if row["estimate_cny"] is not None]
+    return {"rows": rows, "total": round(sum(priced), 6) if priced else None,
+            "unpriced": len(rows) - len(priced)}
+
+
+def _generation_items(arguments: dict) -> list[dict]:
+    return [{"surface_node_id": str(item.get("surface_node_id", "")), "count": _count(item)}
+            for item in arguments.get("items") or [] if isinstance(item, dict)]
 
 
 def _count(arguments: dict) -> int:
@@ -304,10 +335,12 @@ def _with_draft_aliases(changes: list, scope: ModelScope) -> list:
 
 
 def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope = ALL_MODELS,
-                 created_ids: frozenset[str] = frozenset()) -> tuple[dict, list[str]]:
+                 created_ids: frozenset[str] = frozenset(),
+                 rejected: frozenset[int] = frozenset()) -> tuple[dict, list[str]]:
     """Run one tool call; returns (result, node ids it created). Raises CanvasToolError.
 
-    created_ids: 本会话已建的节点，新节点排位时用来找「上一次出图」。"""
+    created_ids: 本会话已建的节点，新节点排位时用来找「上一次出图」。
+    rejected: run_generations 里用户在确认卡上拒绝的项（下标）。"""
     if tool == "search_library":
         from character_workflow.lib.canvas_agent_library import search_library
         payload = CanvasSearchLibraryInput(project_id=project_id, **arguments)
@@ -376,9 +409,60 @@ def execute_tool(project_id: str, tool: str, arguments: dict, scope: ModelScope 
             return result
         result = _with_fresh_revision(project_id, submit)
         return result, [result["result_node_id"]] if result.get("result_node_id") else []
+    if tool == "run_generations":
+        return _run_generations(project_id, arguments, scope, rejected)
     if tool.startswith(PLUGIN_TOOL_PREFIX):
         return _execute_plugin_tool(project_id, tool, arguments)
     raise CanvasToolError("INVALID_TARGET", f"未知工具 {tool}", 422)
+
+
+GENERATIONS_NOTE = ("部分成功不回滚：已提交的项照常运行并计费，不会因为别的项失败而撤销。"
+                    "status=rejected 是用户在确认卡上拒绝的项，不要再发起；status=failed 是提交时出错，"
+                    "不要自动重试，告诉用户原因。网关额度等限制在任务运行时逐项判定，"
+                    "已提交的项也可能失败，用 wait_for_run 查看每一项的最终结果。")
+
+
+def _run_generations(project_id: str, arguments: dict, scope: ModelScope,
+                     rejected: frozenset[int]) -> tuple[dict, list[str]]:
+    """逐项走 run_generation；一项失败不影响其他项，已提交的不回滚。"""
+    items = _generation_items(arguments)
+    if not 1 <= len(items) <= MAX_BATCH_GENERATIONS:
+        raise CanvasToolError("INVALID_PARAMETERS", f"一次最多 {MAX_BATCH_GENERATIONS} 项", 422)
+    rows: list[dict] = []
+    created: list[str] = []
+    for index, item in enumerate(items):
+        row = {"index": index, "surface_node_id": item["surface_node_id"], "count": item["count"]}
+        if index in rejected:
+            rows.append({**row, "status": "rejected", "reason": "用户在确认卡上拒绝了这一项"})
+            continue
+        try:
+            result, new_nodes = execute_tool(project_id, "run_generation", item, scope)
+        except CanvasToolError as error:
+            rows.append({**row, "status": "failed", "error": f"{error.code}：{error.message}"})
+            continue
+        except (KeyError, TypeError, ValueError) as error:
+            rows.append({**row, "status": "failed", "error": f"参数错误：{error}"})
+            continue
+        rows.append({**row, "status": "submitted", "run_id": result.get("run_id"),
+                     "result_node_id": result.get("result_node_id")})
+        created.extend(new_nodes)
+    counts = {status: sum(1 for row in rows if row["status"] == status)
+              for status in ("submitted", "rejected", "failed")}
+    return {"items": rows, **counts, "note": GENERATIONS_NOTE}, created
+
+
+def generations_outcome(text: str) -> str | None:
+    """run_generations 结果在面板上的一行说明；不是这个形状时返回 None。"""
+    try:
+        result = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(result, dict) or "items" not in result:
+        return None
+    parts = [f"{label} {result.get(key, 0)} 项"
+             for key, label in (("submitted", "已提交"), ("rejected", "已拒绝"), ("failed", "失败"))
+             if result.get(key)]
+    return "，".join(parts) or "没有执行任何项"
 
 
 def canvas_view(project_id: str, node_ids: list[str] | None) -> dict:
@@ -419,10 +503,11 @@ def canvas_view(project_id: str, node_ids: list[str] | None) -> dict:
 
 
 def run_tool_safely(project_id: str, tool: str, arguments: dict, scope: ModelScope = ALL_MODELS,
-                    created_ids: frozenset[str] = frozenset()) -> tuple[str, list[str]]:
+                    created_ids: frozenset[str] = frozenset(),
+                    rejected: frozenset[int] = frozenset()) -> tuple[str, list[str]]:
     """Tool output text for the model; errors become text the model can react to."""
     try:
-        result, created = execute_tool(project_id, tool, arguments, scope, created_ids)
+        result, created = execute_tool(project_id, tool, arguments, scope, created_ids, rejected)
     except CanvasToolError as error:
         return f"错误（{error.code}）：{error.message}", []
     except (KeyError, TypeError, ValueError) as error:
@@ -478,6 +563,14 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
                        {"type": "object", "required": ["surface_node_id"], "properties": {
                            "surface_node_id": {"type": "string"},
                            "count": {"type": "integer", "minimum": 1, "maximum": 4}}}),
+    "run_generations": ("一次在多个已写好生成配置的图片 / 视频节点上发起生成（付费）：1–20 项，每项 1–4 张。"
+                        "逐项提交，结果逐项返回：submitted / rejected（用户拒绝）/ failed（提交出错）。"
+                        "部分成功不回滚，已提交的项照常运行并计费。不要自动重试失败的生成。",
+                        {"type": "object", "required": ["items"], "properties": {
+                            "items": {"type": "array", "minItems": 1, "maxItems": 20, "items": {
+                                "type": "object", "required": ["surface_node_id"], "properties": {
+                                    "surface_node_id": {"type": "string"},
+                                    "count": {"type": "integer", "minimum": 1, "maximum": 4}}}}}}),
     "get_run": ("查询一次生成的状态与产物版本。",
                 {"type": "object", "required": ["run_id"],
                  "properties": {"run_id": {"type": "string"}}}),
@@ -547,7 +640,15 @@ def arguments_valid(project_id: str, tool: str, arguments: dict) -> bool:
             RunInput(project_id=project_id, expected_revision=0,
                      surface_node_id=arguments.get("surface_node_id", ""),
                      requested_count=arguments.get("count", 1))
-    except (ValidationError, TypeError, ValueError):
+        elif tool == "run_generations":
+            items = arguments.get("items")
+            if not isinstance(items, list) or not 1 <= len(items) <= MAX_BATCH_GENERATIONS:
+                return False
+            for item in items:
+                RunInput(project_id=project_id, expected_revision=0,
+                         surface_node_id=item.get("surface_node_id", ""),
+                         requested_count=item.get("count", 1))
+    except (ValidationError, TypeError, ValueError, AttributeError):
         return False
     return True
 
@@ -769,6 +870,33 @@ def generation_summary(project_id: str, arguments: dict, batch_changes: list[dic
         lines.append(f"{estimate['model']} · {'未计价' if price is None else '预计 ' + _money(price)}")
         if cost.needs_cost_confirmation(price):
             lines.append(f"超过确认金额 {_money(cost.confirm_above_cny())}")
+    return "\n".join(lines)
+
+
+def generations_summary(project_id: str, arguments: dict, batch_changes: list[dict]) -> str:
+    """批量生成的确认卡：首行总数，每项一行「序号. 节点 · 模型 · 张数 · 估价」，末尾合计。
+    面板按「序号. 」开头认出每一项并给它一个勾选框，改格式要同步 CanvasAgentApprovalCard。"""
+    estimate = _generations_estimate(project_id, arguments, batch_changes)
+    try:
+        titles = {node.id: node.title for node in read_canvas_document(project_id).nodes}
+    except Exception:  # noqa: BLE001 — 只是展示，读不到就显示节点 id
+        titles = {}
+    rows = estimate["rows"]
+    lines = [f"批量生成 {len(rows)} 项，共 {sum(row['count'] for row in rows)} 张"]
+    for index, row in enumerate(rows, start=1):
+        price = row["estimate_cny"]
+        lines.append(" · ".join([
+            f"{index}. {titles.get(row['node_id'], row['node_id'])[:40]}",
+            row["model"] or "读不到生成配置", f"{row['count']} 张",
+            "未计价" if price is None else f"预计 {_money(price)}",
+        ]))
+    total = estimate["total"]
+    footer = "合计未计价" if total is None else f"合计预计 {_money(total)}"
+    if estimate["unpriced"] and total is not None:
+        footer += f"（{estimate['unpriced']} 项未计价）"
+    lines.append(footer)
+    if cost.needs_cost_confirmation(total):
+        lines.append(f"超过确认金额 {_money(cost.confirm_above_cny())}")
     return "\n".join(lines)
 
 
@@ -1074,8 +1202,12 @@ async def run_turn(project_id: str, session_id: str, notify: Notify) -> None:
                      for change in _arguments(call.arguments).get("changes") or []]
     for call in calls:
         arguments = _arguments(call.arguments)
-        summary = (await asyncio.to_thread(generation_summary, project_id, arguments, batch_changes)
-                   if call.name == "run_generation" else summarize_call(call.name, arguments))
+        if call.name == "run_generation":
+            summary = await asyncio.to_thread(generation_summary, project_id, arguments, batch_changes)
+        elif call.name == "run_generations":
+            summary = await asyncio.to_thread(generations_summary, project_id, arguments, batch_changes)
+        else:
+            summary = summarize_call(call.name, arguments)
         pending.append(CanvasAgentApproval(
             call_id=call.call_id, tool=call.name, arguments=call.arguments or "{}",
             summary=redact(summary)[:4000],
@@ -1140,14 +1272,26 @@ def begin_user_turn(project_id: str, session_id: str, text: str, node_ids: list[
     return mutate_canvas_agent_session(project_id, session_id, update)
 
 
-def resolve_approvals(project_id: str, session_id: str,
-                      decisions: dict[str, bool]) -> CanvasAgentSession:
-    """Execute approved calls, reject the rest, append their outputs, mark running."""
+def resolve_approvals(project_id: str, session_id: str, decisions: dict[str, bool],
+                      items: dict[str, list[int]] | None = None) -> CanvasAgentSession:
+    """Execute approved calls, reject the rest, append their outputs, mark running.
+
+    items：run_generations 调用里用户勾选执行的项（下标）；没给就是全部执行。"""
     session = read_canvas_agent_session(project_id, session_id)
     if session.status != "awaiting_approval":
         raise CanvasToolError("SESSION_BUSY", "没有待确认的操作", 409)
     if set(decisions) != {approval.call_id for approval in session.pending_approvals}:
         raise CanvasToolError("INVALID_PARAMETERS", "请对每个待确认操作都给出决定", 422)
+    items = items or {}
+    rejected_items: dict[str, frozenset[int]] = {}
+    for approval in session.pending_approvals:
+        if approval.call_id not in items:
+            continue
+        total = len(_generation_items(_arguments(approval.arguments)))
+        chosen = set(items[approval.call_id])
+        if approval.tool != "run_generations" or not chosen or not chosen <= set(range(total)):
+            raise CanvasToolError("INVALID_PARAMETERS", "逐项选择只适用于批量生成，且至少选一项", 422)
+        rejected_items[approval.call_id] = frozenset(set(range(total)) - chosen)
     outputs: list[dict] = []
     results: list[CanvasAgentMessageCreate] = []
     created: set[str] = set()
@@ -1156,9 +1300,15 @@ def resolve_approvals(project_id: str, session_id: str,
             text, new_nodes = run_tool_safely(project_id, approval.tool,
                                               _arguments(approval.arguments),
                                               ModelScope.of(session),
-                                              frozenset(session.created_node_ids) | created)
+                                              frozenset(session.created_node_ids) | created,
+                                              rejected_items.get(approval.call_id, frozenset()))
             created.update(new_nodes)
-            label = tool_error_label(text) if is_tool_error(text) else "已执行"
+            if is_tool_error(text):
+                label = tool_error_label(text)
+            elif approval.tool == "run_generations":
+                label = generations_outcome(text) or "已执行"
+            else:
+                label = "已执行"
         else:
             text, label = "用户拒绝了这个操作。", "已拒绝"
         outputs.append({"type": "function_call_output", "call_id": approval.call_id,

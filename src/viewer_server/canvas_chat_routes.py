@@ -187,7 +187,9 @@ async def post_approvals(project_id: str, session_id: str,
     if not await _previous_turn_done(project_id, session_id):
         raise CanvasToolError("SESSION_BUSY", "上一轮还没结束", 409)
     decisions = {decision.call_id: decision.approve for decision in payload.decisions}
-    session = await _call(runtime.resolve_approvals, project_id, session_id, decisions)
+    items = {decision.call_id: decision.items for decision in payload.decisions
+             if decision.approve and decision.items is not None}
+    session = await _call(runtime.resolve_approvals, project_id, session_id, decisions, items)
     _schedule(project_id, session_id)
     return session
 

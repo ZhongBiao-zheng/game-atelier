@@ -542,6 +542,8 @@ export interface CanvasAgentSettings {
 export interface CanvasAgentApprovalDecision {
   call_id: string;
   approve: boolean;
+  /** 批量生成（run_generations）里勾选执行的项（下标）；不给就是全部执行。 */
+  items?: number[];
 }
 
 export interface CanvasAgentChatModel {
