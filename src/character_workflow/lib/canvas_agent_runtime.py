@@ -948,30 +948,77 @@ def generation_summary(project_id: str, arguments: dict, batch_changes: list[dic
     return "\n".join(lines)
 
 
-def generations_summary(project_id: str, arguments: dict, batch_changes: list[dict]) -> str:
-    """批量生成的确认卡：首行总数，每项一行「序号. 节点 · 模型 · 张数 · 估价」，末尾合计。
-    面板按「序号. 」开头认出每一项并给它一个勾选框，改格式要同步 CanvasAgentApprovalCard。"""
-    estimate = _generations_estimate(project_id, arguments, batch_changes)
+def generation_rows(project_id: str, arguments: dict, batch_changes: list[dict]) -> list[dict]:
+    """批量生成每一项：{index, node_id, title, model, count, estimate_cny}；估价按调用时的 draft 与价格现算。
+    确认卡（逐项接口）、待确认摘要、执行记录都用这一份，Auto 判断用同一个 _generations_estimate。"""
     try:
         titles = {node.id: node.title for node in read_canvas_document(project_id).nodes}
     except Exception:  # noqa: BLE001 — 只是展示，读不到就显示节点 id
         titles = {}
-    rows = estimate["rows"]
-    lines = [f"批量生成 {len(rows)} 项，共 {sum(row['count'] for row in rows)} 张"]
-    for index, row in enumerate(rows, start=1):
-        price = row["estimate_cny"]
-        lines.append(" · ".join([
-            f"{index}. {_one_line(titles.get(row['node_id'], row['node_id']))}",
-            _one_line(row["model"]) if row["model"] else "读不到生成配置", f"{row['count']} 张",
-            "未计价" if price is None else f"预计 {_money(price)}",
-        ]))
-    total = estimate["total"]
-    footer = "合计未计价" if total is None else f"合计预计 {_money(total)}"
-    if estimate["unpriced"] and total is not None:
-        footer += f"（{estimate['unpriced']} 项未计价）"
-    lines.append(footer)
+    return [{"index": index, "node_id": row["node_id"],
+             "title": _one_line(titles.get(row["node_id"], row["node_id"])),
+             "model": _one_line(row["model"]) if row["model"] else None,
+             "count": row["count"], "estimate_cny": row["estimate_cny"]}
+            for index, row in enumerate(_generations_estimate(project_id, arguments, batch_changes)["rows"])]
+
+
+def _row_line(row: dict) -> str:
+    price = row["estimate_cny"]
+    return " · ".join([f"{row['index'] + 1}. {row['title']}", row["model"] or "读不到生成配置",
+                       f"{row['count']} 张", "未计价" if price is None else f"预计 {_money(price)}"])
+
+
+def _rows_total(rows: list[dict], label: str) -> str:
+    priced = [row["estimate_cny"] for row in rows if row["estimate_cny"] is not None]
+    if not priced:
+        return f"{label}未计价"
+    text = f"{label}预计 {_money(round(sum(priced), 6))}"
+    return text + (f"（{len(rows) - len(priced)} 项未计价）" if len(priced) < len(rows) else "")
+
+
+def generations_summary(project_id: str, arguments: dict, batch_changes: list[dict]) -> str:
+    """批量生成待确认的文字摘要：首行总数，每项一行，末尾合计。面板的勾选与重算走逐项接口
+    （batch_items），这段文字只在逐项接口拿不到时整段显示，并写进会话里的执行记录。"""
+    rows = generation_rows(project_id, arguments, batch_changes)
+    lines = [f"批量生成 {len(rows)} 项，共 {sum(row['count'] for row in rows)} 张",
+             *(_row_line(row) for row in rows), _rows_total(rows, "合计")]
+    total = _generations_estimate(project_id, arguments, batch_changes)["total"]
     if cost.needs_cost_confirmation(total):
         lines.append(f"超过确认金额 {_money(cost.confirm_above_cny())}")
+    return "\n".join(lines)
+
+
+def batch_items(project_id: str, session_id: str, call_id: str) -> dict:
+    """确认卡的逐项数据（只在响应里，不落盘）：这次待确认里的这一个批量生成调用，估价按现在的 draft 现算。"""
+    session = read_canvas_agent_session(project_id, session_id)
+    approval = next((item for item in session.pending_approvals if item.call_id == call_id), None) \
+        if session.status == "awaiting_approval" else None
+    if approval is None or approval.tool != "run_generations":
+        raise CanvasToolError("NOT_FOUND", "没有这个待确认的批量生成", 404)
+    batch_changes = [change for item in session.pending_approvals if item.tool == "apply_changes"
+                     for change in _arguments(item.arguments).get("changes") or []]
+    return {"confirm_above_cny": cost.confirm_above_cny(),
+            "items": generation_rows(project_id, _arguments(approval.arguments), batch_changes)}
+
+
+def generations_record(rows: list[dict], text: str) -> str | None:
+    """执行记录：每项标出已提交 / 已拒绝 / 失败，末行是已提交项按执行那一刻估价的合计。
+    rows 在执行前现算；text 不是批量结果的形状（整批被退回等）时返回 None。"""
+    try:
+        result = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(result, dict) or not isinstance(result.get("items"), list):
+        return None
+    status = {item.get("index"): item for item in result["items"] if isinstance(item, dict)}
+    labels = {"submitted": "已提交", "rejected": "已拒绝"}
+    lines = [generations_outcome(text) or "没有执行任何项"]
+    for row in rows:
+        item = status.get(row["index"], {})
+        mark = labels.get(item.get("status")) or f"失败：{item.get('error') or '未执行'}"
+        lines.append(f"{_row_line(row)} — {mark}")
+    submitted = [row for row in rows if status.get(row["index"], {}).get("status") == "submitted"]
+    lines.append(_rows_total(submitted, "已提交项合计") if submitted else "没有提交任何项")
     return "\n".join(lines)
 
 
@@ -1404,7 +1451,11 @@ def resolve_approvals(project_id: str, session_id: str, decisions: dict[str, boo
     results: list[CanvasAgentMessageCreate] = []
     created: set[str] = set()
     for approval in session.pending_approvals:
+        record = None
         if decisions[approval.call_id]:
+            # 执行记录的估价取执行这一刻的（等待确认期间 draft 可能改过），不复用卡片上的数。
+            rows = (generation_rows(project_id, _arguments(approval.arguments), [])
+                    if approval.tool == "run_generations" else [])
             text, new_nodes = run_tool_safely(project_id, approval.tool,
                                               _arguments(approval.arguments),
                                               ModelScope.of(session),
@@ -1413,16 +1464,16 @@ def resolve_approvals(project_id: str, session_id: str, decisions: dict[str, boo
             created.update(new_nodes)
             if is_tool_error(text):
                 label = tool_error_label(text)
-            elif approval.tool == "run_generations":
-                label = generations_outcome(text) or "已执行"
             else:
                 label = "已执行"
+                if approval.tool == "run_generations":
+                    record = generations_record(rows, text)
         else:
             text, label = "用户拒绝了这个操作。", "已拒绝"
         outputs.append({"type": "function_call_output", "call_id": approval.call_id,
                         "output": text})
-        results.append(CanvasAgentMessageCreate(role="tool", title=approval.tool,
-                                                text=redact(f"{label}\n{approval.summary}")))
+        results.append(CanvasAgentMessageCreate(role="tool", title=approval.tool, text=redact(
+            record if record is not None else f"{label}\n{approval.summary}")))
 
     def update(current: CanvasAgentSession, now: str) -> dict:
         if current.status != "awaiting_approval":

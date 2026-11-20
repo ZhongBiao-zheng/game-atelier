@@ -128,6 +128,7 @@ DELETE /api/canvas/projects/{project_id}/agent/sessions/{session_id}
 PATCH /api/canvas/projects/{project_id}/agent/sessions/{session_id}
 POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/messages
 POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/approvals
+GET /api/canvas/projects/{project_id}/agent/sessions/{session_id}/approvals/{call_id}/items
 POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/cancel
 GET /api/canvas/projects/{project_id}/agent/sessions/{session_id}/usage
 GET /api/canvas/agent/models

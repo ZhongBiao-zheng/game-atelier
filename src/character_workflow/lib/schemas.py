@@ -2020,6 +2020,23 @@ class CanvasAgentApprovalDecision(BaseModel):
                                                                    max_length=20)
 
 
+class CanvasAgentBatchItem(BaseModel):
+    """批量生成确认卡的一项（只在响应里，不落盘）；估价按打开卡片时的 draft 现算，None = 未计价。"""
+    model_config = ConfigDict(extra="forbid")
+    index: int = Field(ge=0, le=19)
+    node_id: str
+    title: str
+    model: str | None = None
+    count: int = Field(ge=1)
+    estimate_cny: float | None = None
+
+
+class CanvasAgentBatchItems(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm_above_cny: float
+    items: list[CanvasAgentBatchItem] = Field(max_length=20)
+
+
 class CanvasAgentApprovalsSubmit(BaseModel):
     model_config = ConfigDict(extra="forbid")
     decisions: list[CanvasAgentApprovalDecision] = Field(min_length=1, max_length=50)

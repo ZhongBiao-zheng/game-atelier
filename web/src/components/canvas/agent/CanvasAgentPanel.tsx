@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ArrowUpIcon, AttachIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon, ErrorIcon, ImageFileIcon, LoadingIcon, NewChatIcon, SkillIcon, StopIcon, TextFileIcon, ThinkingIcon, ToolIcon, VideoFileIcon } from '@/components/ui/icons';
-import { canvasMediaUrl } from '@/api/canvas';
+import { canvasMediaUrl, getCanvasAgentBatchItems } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
 import {
@@ -352,6 +352,7 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
             labels={TOOL_LABELS}
             disabled={pending}
             onDecide={(approved, items) => void agent.decide(approved, items)}
+            loadBatchItems={callId => getCanvasAgentBatchItems(projectId, session.session_id, callId)}
           />
         )}
       </div>

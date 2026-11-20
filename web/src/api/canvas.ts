@@ -2,6 +2,7 @@ import { request, requestJson } from './http';
 import type { Job } from '@/schema/jobs';
 import type {
   CanvasAgentApprovalDecision,
+  CanvasAgentBatchItems,
   CanvasAgentChatModelList,
   CanvasAgentGenerationModel,
   CanvasAgentSession,
@@ -138,6 +139,15 @@ export function decideCanvasAgentApprovals(
   decisions: CanvasAgentApprovalDecision[],
 ): Promise<CanvasAgentSession> {
   return sendAgentJson(`${agentSessionPath(projectId, sessionId)}/approvals`, '确认 Agent 操作', { decisions });
+}
+
+export function getCanvasAgentBatchItems(
+  projectId: string,
+  sessionId: string,
+  callId: string,
+): Promise<CanvasAgentBatchItems> {
+  return requestJson<CanvasAgentBatchItems>(
+    `${agentSessionPath(projectId, sessionId)}/approvals/${encodeURIComponent(callId)}/items`, '读取批量生成明细');
 }
 
 export function getCanvasAgentSessionUsage(projectId: string, sessionId: string): Promise<CanvasAgentSessionUsage> {

@@ -546,6 +546,21 @@ export interface CanvasAgentApprovalDecision {
   items?: number[];
 }
 
+/** 批量生成确认卡的一项（服务端现算，不落盘）；estimate_cny 为 null = 未计价。 */
+export interface CanvasAgentBatchItem {
+  index: number;
+  node_id: string;
+  title: string;
+  model: string | null;
+  count: number;
+  estimate_cny: number | null;
+}
+
+export interface CanvasAgentBatchItems {
+  confirm_above_cny: number;
+  items: CanvasAgentBatchItem[];
+}
+
 export interface CanvasAgentChatModel {
   alias: string;
   model: string;

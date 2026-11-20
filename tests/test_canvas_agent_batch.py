@@ -289,7 +289,13 @@ def test_card_rejects_single_items_and_the_model_sees_which(client, fake_estimat
     assert outputs["m1"] == "用户拒绝了这个操作。"
     assert len(scheduled) == 2
     panel = next(m.text for m in done.messages if m.title == "run_generations")
-    assert panel.startswith("已提交 2 项，已拒绝 1 项\n批量生成 3 项")
+    assert panel.splitlines() == [
+        "已提交 2 项，已拒绝 1 项",
+        "1. 角色1 · gpt-image-2 · 1 张 · 未计价 — 已提交",
+        "2. 角色2 · seedream · 2 张 · 预计 12¥ — 已拒绝",
+        "3. 角色3 · gpt-image-2 · 1 张 · 未计价 — 已提交",
+        "已提交项合计未计价",
+    ]
 
 
 # ── 一起等多个 run（wait_for_runs）────────────────────────────────────────────────
@@ -388,3 +394,112 @@ async def test_wait_for_runs_attaches_everything_when_few_and_rejects_bad_input(
     assert (await runtime._wait_for_runs("canvas-aaaaaaaa", [])).startswith("错误（INVALID_PARAMETERS）")
     too_many = [f"r{i}" for i in range(21)]
     assert (await runtime._wait_for_runs("canvas-aaaaaaaa", too_many)).startswith("错误")
+
+
+# ── 确认卡的逐项接口与执行记录 ───────────────────────────────────────────────────
+
+def _paused_batch(client, monkeypatch, batch: dict, extra_calls: list | None = None):
+    """会话停在待确认：一个 run_generations（call_id g1）加可选的其他调用。返回 (project_id, base, calls)。"""
+    calls: list[list[dict]] = []
+
+    async def fake_run_model(session, history, buffer):
+        calls.append(history)
+        context = runtime.TurnContext(session.project_id, session.permission_mode)
+        if len(calls) == 1:
+            raws = [*(extra_calls or []),
+                    SimpleNamespace(call_id="g1", name="run_generations", arguments=json.dumps(batch))]
+            items = [*history, *({"type": "function_call", "call_id": r.call_id, "name": r.name,
+                                  "arguments": r.arguments} for r in raws)]
+            return FakeResult(items, [SimpleNamespace(raw_item=r) for r in raws]), context
+        reply = {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "好"}]}
+        return FakeResult([*history, reply]), context
+
+    monkeypatch.setattr(runtime, "run_model", fake_run_model)
+    project_id = _project(client)
+    session_id = client.post(f"/api/canvas/projects/{project_id}/agent/sessions",
+                             json={}).json()["session_id"]
+    base = f"/api/canvas/projects/{project_id}/agent/sessions/{session_id}"
+    client.patch(base, json={"model": "glm-5", "model_alias": "chat", "permission_mode": "review"})
+    return project_id, session_id, base, calls
+
+
+def test_card_items_are_computed_now_and_include_drafts_from_the_same_batch(client, fake_estimate,
+                                                                           monkeypatch):
+    draft_c = SimpleNamespace(call_id="m1", name="apply_changes", arguments=json.dumps({"changes": [
+        {"op": "set_draft", "node_id": "c", "mode": "image", "prompt": "x", "model": "cheap",
+         "alias": "img", "params": {}}]}))
+    project_id, session_id, base, _calls = _paused_batch(
+        client, monkeypatch, _batch(("a", 1), ("c", 3)), [draft_c])
+    _surfaces(project_id, {"a": "seedream", "c": "unknown"})
+    assert client.post(f"{base}/messages", json={"text": "出图"}).status_code == 202
+    _wait_status(project_id, session_id, {"awaiting_approval", "failed"})
+
+    response = client.get(f"{base}/approvals/g1/items")
+    assert response.status_code == 200, response.text
+    assert response.json() == {"confirm_above_cny": 10.0, "items": [
+        {"index": 0, "node_id": "a", "title": "角色1", "model": "seedream", "count": 1, "estimate_cny": 6.0},
+        # 同一批待确认的 set_draft 计入估价（画布上的 draft 还是 unknown）。
+        {"index": 1, "node_id": "c", "title": "角色2", "model": "cheap", "count": 3, "estimate_cny": 0.6},
+    ]}
+    # 现算：等待期间 a 的 draft 改了，卡片拿到的是新估价。
+    _set_model(project_id, "a", "cheap")
+    assert client.get(f"{base}/approvals/g1/items").json()["items"][0]["estimate_cny"] == 0.2
+    # 不是批量的调用、不存在的调用都是 404。
+    assert client.get(f"{base}/approvals/m1/items").status_code == 404
+    assert client.get(f"{base}/approvals/nope/items").status_code == 404
+
+
+def test_card_items_are_gone_once_decided_and_closed_to_agent_connections(client, isolated_data_root,
+                                                                         fake_estimate, scheduled,
+                                                                         monkeypatch):
+    from character_workflow.lib import data_root
+    from character_workflow.lib.private_json import read_private_json
+
+    project_id, session_id, base, _calls = _paused_batch(client, monkeypatch, _batch(("a", 1)))
+    _surfaces(project_id, {"a": "seedream"})
+    client.post(f"{base}/messages", json={"text": "出图"})
+    _wait_status(project_id, session_id, {"awaiting_approval", "failed"})
+
+    store = client.app.state.connection_store
+    store.enable_agent("http://127.0.0.1")
+    credential = read_private_json(data_root.agent_credential_file())
+    anonymous = LocalTestClient.__mro__[1](client.app, base_url="http://127.0.0.1")
+    token = anonymous.post("/api/connection/agent-sessions", json={
+        "grant_id": credential["grant_id"], "grant_token": credential["grant_token"],
+        "instance_id": store.instance_id}).json()["session_token"]
+    denied = anonymous.get(f"{base}/approvals/g1/items", headers={"Authorization": f"Bearer {token}"})
+    assert denied.status_code == 403
+
+    client.post(f"{base}/approvals", json={"decisions": [{"call_id": "g1", "approve": False}]})
+    _wait_status(project_id, session_id, {"idle", "failed"})
+    assert client.get(f"{base}/approvals/g1/items").status_code == 404  # 会话已不在待确认
+
+
+def test_record_marks_each_item_and_totals_at_execution_time(client, fake_estimate, scheduled,
+                                                             monkeypatch):
+    project_id, session_id, base, _calls = _paused_batch(
+        client, monkeypatch, _batch(("a", 1), ("b", 2), ("missing", 1)))
+    _surfaces(project_id, {"a": "gpt-image-2", "b": "gpt-image-2"})
+    client.post(f"{base}/messages", json={"text": "出图"})
+    paused = _wait_status(project_id, session_id, {"awaiting_approval", "failed"})
+    card = next(a for a in paused.pending_approvals if a.tool == "run_generations")
+    assert "未计价" in card.summary.splitlines()[1]
+    # 卡片生成之后估价变了（价格表更新）：执行记录用执行那一刻的估价。
+    monkeypatch.setattr(cost, "_estimate", lambda _kind, _alias, model, params: 1.5 * params.get("n", 1))
+    decided = client.post(f"{base}/approvals", json={"decisions": [
+        {"call_id": "g1", "approve": True, "items": [0, 2]}]})
+    assert decided.status_code == 202
+    done = _wait_status(project_id, session_id, {"idle", "failed"})
+    record = next(m.text for m in done.messages if m.title == "run_generations").splitlines()
+    assert record[0] == "已提交 1 项，已拒绝 1 项，失败 1 项"
+    assert record[1] == "1. 角色1 · gpt-image-2 · 1 张 · 预计 1.5¥ — 已提交"
+    assert record[2] == "2. 角色2 · gpt-image-2 · 2 张 · 预计 3¥ — 已拒绝"
+    assert record[3] == "3. missing · 读不到生成配置 · 1 张 · 未计价 — 失败：INVALID_TARGET：找不到这个生成节点"
+    assert record[4] == "已提交项合计预计 1.5¥"
+
+
+def _set_model(project_id: str, node_id: str, model: str) -> None:
+    tools.apply_changes(runtime.LOCAL, ApplyChangesInput(
+        project_id=project_id, expected_revision=read_canvas_document(project_id).revision,
+        changes=[{"op": "set_draft", "node_id": node_id, "mode": "image", "prompt": "一只猫",
+                  "model": model, "alias": "img", "params": {}}]))

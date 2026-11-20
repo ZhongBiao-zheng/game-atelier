@@ -515,7 +515,8 @@ Agent 发起的生成单次估价超过它时，Auto 下也停在待确认；估
 `run_generation` 待确认摘要第二行为「模型 · 预计 X¥」或「模型 · 未计价」，超过时第三行写「超过确认金额 X¥」。
 `run_generations`（批量，1–20 项、每项 1–4 张）在 Auto 下按合计估价判断，未计价的项不计入合计、也不单独拦；
 待确认摘要首行「批量生成 N 项，共 M 张」，每项一行「序号. 节点标题 · 模型 · 张数 · 预计 X¥ / 未计价」，
-末行「合计预计 X¥（K 项未计价）」或「合计未计价」，超过时再加「超过确认金额 X¥」；面板按「序号. 」认出每一项。
+末行「合计预计 X¥（K 项未计价）」或「合计未计价」，超过时再加「超过确认金额 X¥」。这段文字只在逐项数据拿不到时整段显示（只能整条执行或拒绝），并作为待确认的摘要落盘。
+`GET .../agent/sessions/{session_id}/approvals/{call_id}/items`（仅本机页面）返回 `{ confirm_above_cny, items: [{ index, node_id, title, model | null, count, estimate_cny | null }] }`，只对会话当前待确认里的 `run_generations` 调用有效，否则 404；不落盘，每次请求按当时的 draft 与价格现算（同一批待确认的 set_draft 计入），等待期间 draft 改过时以现算为准。面板按勾选重算合计、未计价项数与是否超过确认金额。执行后面板的记录每项一行标「已提交 / 已拒绝 / 失败：原因」，末行「已提交项合计」用执行那一刻现算的估价，不复用卡片上的数。
 `POST .../agent/sessions/{session_id}/approvals` 的每条决定可带 `items`（批量生成里勾选执行的下标，至少一项，
 不带即全部执行；只对 `run_generations` 有效，否则 422）。工具结果逐项给 `status`：`submitted`（带 run_id）/
 `rejected`（用户在确认卡上拒绝）/ `failed`（提交时出错，带 error；未预期异常也逐项记成 failed，已提交项的 run_id 照常返回），部分成功不回滚。同一 `surface_node_id` 在一批里只能出现一次：两次提交会落进同一个结果节点并发写入，所以整批按 `INVALID_PARAMETERS` 退回给模型、不弹确认卡（同一节点要多张用 count）。摘要里每项的节点标题与模型名去掉换行、各截到 40 字。网关额度在任务运行时按任务逐个准入，

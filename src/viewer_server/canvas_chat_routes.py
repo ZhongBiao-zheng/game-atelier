@@ -22,8 +22,8 @@ from character_workflow.lib.canvas_agent_sessions import (
     mutate_canvas_agent_session, read_canvas_agent_session,
 )
 from character_workflow.lib.schemas import (
-    CanvasAgentApprovalsSubmit, CanvasAgentSession, CanvasAgentSessionUpdate,
-    CanvasAgentTurnCreate,
+    CanvasAgentApprovalsSubmit, CanvasAgentBatchItems, CanvasAgentSession,
+    CanvasAgentSessionUpdate, CanvasAgentTurnCreate,
 )
 from character_workflow.lib.canvas_tool_common import CanvasToolError
 from viewer_server.sse import hub
@@ -192,6 +192,12 @@ async def post_approvals(project_id: str, session_id: str,
     session = await _call(runtime.resolve_approvals, project_id, session_id, decisions, items)
     _schedule(project_id, session_id)
     return session
+
+
+@router.get(f"{SESSION}/approvals/{{call_id}}/items", response_model=CanvasAgentBatchItems)
+async def get_batch_items(project_id: str, session_id: str, call_id: str) -> CanvasAgentBatchItems:
+    """批量生成确认卡的逐项数据；只有本机页面能访问（Agent 连接只能用 /api/canvas-agent/ 下的工具）。"""
+    return CanvasAgentBatchItems(**await _call(runtime.batch_items, project_id, session_id, call_id))
 
 
 def _reject_pending(current: CanvasAgentSession, _now: str) -> dict:
