@@ -285,3 +285,88 @@ def test_drop_signatures_keeps_everything_else():
         {"type": "message", "role": "user", "content": "hi"},
     ]
     assert items[0]["provider_data"] == {"thought_signature": "SIG"}  # 不改原对象
+
+
+# ── 审查补的用例（2026-11-20） ─────────────────────────────────────────────────────
+
+def test_results_are_sent_in_call_order_and_a_missing_one_is_refused():
+    calls = [_assistant_call(f"gnr_{c * 24}", "run") for c in "abc"]
+    messages = [{"role": "user", "content": "go"},
+                {"role": "assistant", "content": None, "tool_calls": calls},
+                {"role": "tool", "tool_call_id": calls[0]["id"], "content": "r1"},
+                {"role": "tool", "tool_call_id": calls[2]["id"], "content": "r3"},
+                {"role": "tool", "tool_call_id": calls[1]["id"], "content": "r2"}]
+    body = gemini.to_upstream({"model": "gemini-3-flash", "messages": messages})
+    assert [p["functionResponse"]["response"]["result"] for p in body["contents"][2]["parts"]] == [
+        "r1", "r2", "r3"]
+    with pytest.raises(ProtocolError, match="缺少结果"):
+        gemini.to_upstream({"model": "gemini-3-flash", "messages": messages[:3]})
+    with pytest.raises(ProtocolError, match="缺少结果"):
+        gemini.to_upstream({"model": "gemini-3-flash",
+                            "messages": [*messages[:3], {"role": "user", "content": "继续"}]})
+
+
+@pytest.mark.parametrize("reason", ["MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL", "OTHER",
+                                    "LANGUAGE", "MISSING_THOUGHT_SIGNATURE", "SAFETY", "MAX_TOKENS"])
+def test_non_stop_finish_without_content_is_an_error_with_the_finish_message(reason):
+    candidate = {"finishReason": reason, "finishMessage": "Malformed function call: print("}
+    with pytest.raises(ProtocolError, match=f"{reason}.*Malformed function call"):
+        gemini.from_upstream({"candidates": [candidate]})
+    translator = gemini.StreamTranslator(model="m")
+    [first, error] = _blocks(translator.feed(_sse({"candidates": [candidate]})))
+    assert reason in error["error"]["message"] and "Malformed" in error["error"]["message"]
+    assert translator.finish() == b""
+
+
+def test_upstream_error_inside_http_200_keeps_the_original_text():
+    with pytest.raises(ProtocolError, match="insufficient balance"):
+        gemini.from_upstream({"error": {"message": "insufficient balance", "type": "quota"}})
+    translator = gemini.StreamTranslator(model="m")
+    assert translator.feed(b'{"error": {"message": "insufficient balance",\n "type": "quota"}}') == b""
+    [block] = _blocks(translator.finish())
+    assert "insufficient balance" in block["error"]["message"]
+
+
+def test_last_data_line_without_a_newline_is_not_lost():
+    translator = gemini.StreamTranslator(model="m")
+    event = {"candidates": [{"content": {"parts": [{"text": "完"}]}, "finishReason": "STOP"}]}
+    translator.feed(b"data: " + json.dumps(event).encode())  # 没有换行结尾
+    blocks = _blocks(translator.finish())
+    assert blocks[-1] == "[DONE]" and not any(isinstance(b, dict) and "error" in b for b in blocks)
+    assert "完" in json.dumps(blocks, ensure_ascii=False)
+
+
+def test_text_after_a_call_is_shown_and_keeps_its_own_signature():
+    translator = gemini.StreamTranslator(model="m")
+    data = translator.feed(_sse({"candidates": [{"content": {"parts": [
+        {"functionCall": {"name": "a", "args": {}}},
+        {"text": "我先看看", "thoughtSignature": "TEXT-SIG"}]}, "finishReason": "STOP"}]}))
+    blocks = [b for b in _blocks(data) if isinstance(b, dict) and b.get("choices")]
+    assert "我先看看" in "".join(b["choices"][0]["delta"].get("content") or "" for b in blocks)
+    [calls] = [b["choices"][0]["delta"]["tool_calls"] for b in blocks if "tool_calls" in b["choices"][0]["delta"]]
+    assert gemini.signature_of(calls[0]) is None and calls[0]["id"].startswith("gn")
+
+
+def test_tool_choice_object_and_endpoint_suffixes():
+    tools = [{"type": "function", "function": {"name": "a", "parameters": {"type": "object"}}}]
+    body = gemini.to_upstream({"model": "m", "messages": [{"role": "user", "content": "x"}], "tools": tools,
+                               "tool_choice": {"type": "function", "function": {"name": "a"}}})
+    assert body["toolConfig"] == {"functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": ["a"]}}
+    odd = gemini.to_upstream({"model": "m", "messages": [{"role": "user", "content": "x"}], "tools": tools,
+                              "tool_choice": {"type": "allowed_tools"}})
+    assert "toolConfig" not in odd
+    assert gemini.api_root("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions") == \
+        "https://generativelanguage.googleapis.com/v1beta"
+    assert gemini.api_root("https://relay.example/v1/models") == "https://relay.example/v1beta"
+
+
+def test_exported_ids_say_the_signature_was_not_kept_so_the_turn_uses_the_placeholder():
+    session = {"history": [{"type": "function_call", "call_id": "gsr_" + "a" * 24},
+                           {"type": "function_call_output", "call_id": "gsr_" + "a" * 24}],
+               "pending_approvals": [{"call_id": "gsu_fc-1"}], "other": "gsr_not-a-call id"}
+    marked = gemini.mark_signatures_dropped(session)
+    assert marked["history"][0]["call_id"] == marked["history"][1]["call_id"] == "gxr_" + "a" * 24
+    assert marked["pending_approvals"][0]["call_id"] == "gxu_fc-1"
+    assert marked["other"] == "gsr_not-a-call id"  # 只改整串是 id 的
+    part = _first_part("gemini-3-flash", _assistant_call(marked["history"][0]["call_id"]))
+    assert part["thoughtSignature"] == gemini.PLACEHOLDER_SIGNATURE

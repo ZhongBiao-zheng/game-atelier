@@ -181,3 +181,21 @@ def test_gateway_skips_gemini_members(monkeypatch):
                            json={"model": "shared", "messages": [{"role": "user", "content": "x"}]})
     assert response.status_code == 200, response.text
     assert [str(request.url) for request in seen] == ["https://relay.example/v1/chat/completions"]
+
+
+# --- 带自定义鉴权头的一次性调用不跟随跳转（审查第 2 条） ------------------------------------
+
+@pytest.mark.parametrize(("protocol", "path", "model_id"), [
+    ("gemini-generate-content", "/v1beta/models/m:generateContent", "m"),
+    ("anthropic-messages", "/v1/messages", "m"),
+])
+def test_one_shot_call_does_not_follow_a_redirect_with_the_key(protocol, path, model_id):
+    with FakeVendor() as other, FakeVendor() as server:
+        other.on("POST", path, REPLY)
+        server.on("POST", path, (307, {}, {"Location": f"{other.url}{path}"}))
+        keys.add_key(keys.KeySpec(alias="k", provider="custom", base_url=server.url, access_key=SECRET,
+                                  created_at="t", models=[keys.ModelSpec(
+                                      id=model_id, name=model_id, modality="text", protocol=protocol)]))
+        with pytest.raises(openai_text.OpenAITextError, match="307"):
+            openai_text.generate(prompt="x", model=model_id, alias="k")
+        assert other.calls() == []  # 第二跳收不到密钥，也收不到请求体

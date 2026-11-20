@@ -261,3 +261,154 @@ def test_session_api_and_export_package_leave_the_signature_out(tmp_path):
     with zipfile.ZipFile(archive) as package:
         sessions = [name for name in package.namelist() if "/agent/sessions/" in name]
         assert sessions and all(SIG.encode() not in package.read(name) for name in sessions)
+        # 签名去掉了，id 的签名状态也改成「没保留」：导入后续跑填占位值，不报「签名丢失」。
+        exported = b"".join(package.read(name) for name in sessions)
+        assert b'"gsr_' not in exported and b'"gxr_' in exported
+
+
+# ── 审查补的四种场景：并行调用、上游 id、看图、非 STOP 结束（直接用 Runner + 进程内上游） ──────
+
+class _Upstream:
+    """进程内假上游：记下发给 Gemini 的请求体，按顺序回放响应。"""
+
+    def __init__(self, *replies: bytes) -> None:
+        import httpx2
+
+        self.replies = list(replies)
+        self.requests: list[dict] = []
+        outer = self
+
+        class Transport(httpx2.AsyncBaseTransport):
+            async def handle_async_request(self, request):
+                outer.requests.append(json.loads(await request.aread()))
+                reply = outer.replies.pop(0) if len(outer.replies) > 1 else outer.replies[0]
+                return httpx2.Response(200, content=reply, request=request,
+                                       headers={"Content-Type": "text/event-stream"})
+
+        self.transport = Transport()
+
+
+def _agent(upstream: _Upstream, tools: list, model: str = "gemini-2.5-pro"):
+    from agents import Agent, OpenAIChatCompletionsModel, set_tracing_disabled
+    from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+
+    from character_workflow.lib.llm_protocols.transport import ProtocolTransport
+
+    set_tracing_disabled(True)
+    client = AsyncOpenAI(base_url="https://gem.example/v1", api_key="k", max_retries=0,
+                         http_client=DefaultAsyncHttpxClient(trust_env=False, transport=ProtocolTransport(
+                             protocol="gemini-generate-content", base_url="https://gem.example",
+                             access_key="k", inner=upstream.transport)))
+    return Agent(name="a", instructions="sys", tools=tools,
+                 model=OpenAIChatCompletionsModel(model=model, openai_client=client))
+
+
+async def _drain(result):
+    async for _ in result.stream_events():
+        pass
+    return result
+
+
+def _gem_calls(*calls: dict, signature: str | None = SIG) -> bytes:
+    parts = [{"functionCall": call} for call in calls]
+    if signature:
+        parts[0]["thoughtSignature"] = signature
+    return _gem({"candidates": [{"content": {"role": "model", "parts": parts}, "finishReason": "STOP"}],
+                 "usageMetadata": USAGE})
+
+
+def test_parallel_results_reach_gemini_in_call_order_even_when_one_waited_for_approval():
+    """审查模式下并行三个同名调用、第二个要确认：结果到达顺序是 1、3、2，发给 Gemini 时要按 1、2、3。"""
+    from agents import Runner, function_tool
+
+    async def needs(_ctx, args, _call_id):
+        return args.get("n") == 2
+
+    @function_tool(needs_approval=needs)
+    def run_generation(n: int) -> str:
+        """gen"""
+        return f"result-{n}"
+
+    async def go():
+        upstream = _Upstream(_gem_calls(*({"name": "run_generation", "args": {"n": n}} for n in (1, 2, 3))),
+                             _gem_text())
+        agent = _agent(upstream, [run_generation])
+        first = await _drain(Runner.run_streamed(agent, "go", max_turns=4))
+        [pending] = first.interruptions
+        history = json.loads(json.dumps(first.to_input_list(), default=str))
+        history.append({"type": "function_call_output", "call_id": pending.raw_item.call_id,
+                        "output": "result-2"})
+        await _drain(Runner.run_streamed(agent, history, max_turns=4))
+        return upstream.requests[-1]
+
+    body = asyncio.run(go())
+    responses = [part["functionResponse"] for content in body["contents"] for part in content["parts"]
+                 if "functionResponse" in part]
+    assert [r["response"]["result"] for r in responses] == ["result-1", "result-2", "result-3"]
+    calls = _function_calls(body)
+    assert [c["functionCall"]["args"]["n"] for c in calls] == [1, 2, 3]
+    assert [("thoughtSignature" in c) for c in calls] == [True, False, False]
+
+
+def test_gemini_call_ids_come_back_on_the_function_response():
+    from agents import Runner, function_tool
+
+    @function_tool
+    def get_canvas() -> str:
+        """read"""
+        return "{}"
+
+    async def go():
+        upstream = _Upstream(_gem_calls({"name": "get_canvas", "args": {}, "id": "fc-1"},
+                                        {"name": "get_canvas", "args": {}, "id": "fc-2"}), _gem_text())
+        await _drain(Runner.run_streamed(_agent(upstream, [get_canvas]), "go", max_turns=4))
+        return upstream.requests[1]
+
+    body = asyncio.run(go())
+    assert [c["functionCall"]["id"] for c in _function_calls(body)] == ["fc-1", "fc-2"]
+    assert [part["functionResponse"]["id"] for content in body["contents"] for part in content["parts"]
+            if "functionResponse" in part] == ["fc-1", "fc-2"]
+
+
+def test_attached_images_follow_the_function_responses_as_inline_data():
+    """看图主流程（工具结果带 attach_images，调模型前插一条 user 图片消息）：发给 Gemini 的是
+    [functionResponse, text, inlineData]。真实 Gemini 是否接受这个形状要计费实测确认（P5-points 场景 A）。"""
+    from agents import RunConfig, Runner, function_tool
+    from agents.run_config import ModelInputData
+
+    from character_workflow.lib import canvas_agent_vision as vision
+
+    @function_tool
+    def read_media() -> str:
+        """read"""
+        return json.dumps({"ok": True, vision.ATTACH_KEY: ["ver-1"]})
+
+    async def attach(data):
+        return ModelInputData(input=vision.with_attached_images(
+            list(data.model_data.input), lambda _v: "data:image/png;base64,AAAA"),
+            instructions=data.model_data.instructions)
+
+    async def go():
+        upstream = _Upstream(_gem_calls({"name": "read_media", "args": {}}), _gem_text())
+        await _drain(Runner.run_streamed(_agent(upstream, [read_media]), "看图", max_turns=4,
+                                         run_config=RunConfig(call_model_input_filter=attach)))
+        return upstream.requests[1]
+
+    body = asyncio.run(go())
+    last_user = [c for c in body["contents"] if c["role"] == "user"][-1]
+    kinds = [next(iter(part)) for part in last_user["parts"]]
+    assert kinds[0] == "functionResponse" and "inlineData" in kinds
+    assert {"inlineData": {"mimeType": "image/png", "data": "AAAA"}} in last_user["parts"]
+
+
+@pytest.mark.parametrize("reason", ["MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL", "OTHER",
+                                    "LANGUAGE", "MISSING_THOUGHT_SIGNATURE", "SAFETY", "MAX_TOKENS"])
+def test_non_stop_finish_without_content_fails_the_turn_with_the_upstream_reason(reason):
+    with FakeVendor() as vendor:
+        vendor.on("POST", _gem_path(), _gem({"candidates": [{
+            "finishReason": reason, "finishMessage": "Malformed function call: print(default_api.x("}],
+            "usageMetadata": USAGE}))
+        pid, sid = _setup(vendor)
+        session = _turn(pid, sid, GEMINI)
+    assert session.status == "failed"
+    assert reason in (session.error or "") and "Malformed function call" in (session.error or "")

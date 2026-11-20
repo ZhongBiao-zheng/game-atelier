@@ -47,7 +47,8 @@ Gemini 兼容、One API / New API 等等，还要有检测协议」。方案与�
   回到自动，不影响已存的模型协议。
 - **鉴权与地址**：Anthropic 发 `x-api-key` + `anthropic-version: 2023-06-01`（OpenRouter 用 Bearer），路径
   `{根}/v1/messages`，根地址归一见 `anthropic.api_root`；`max_tokens` 必填，调用方没给时用 8192。`temperature` 范围是 0–1（OpenAI 是 0–2），超出的按 1 发（画布「发散」档 1.3）。按 Anthropic 列模型
-  时带 `limit=1000`，带着密钥的请求不跟随重定向。
+  时带 `limit=1000`，带着密钥的请求不跟随重定向。一次性调用里用自定义鉴权头（`x-api-key`、`x-goog-api-key`）的请求
+  同样不跟随重定向，3xx 当错误报：requests 跨主机只去掉 `Authorization`，这两个头会原样带到第二跳。
 - **Gemini generateContent**（第 5 批）：`llm_protocols.gemini`，一次性调用与 Agent（同一个 `ProtocolTransport`，
   按协议选转换）共用。路径 `{根}/v1beta/models/{id}:generateContent`、流式 `:streamGenerateContent?alt=sse`，根地址
   去掉末尾的 `/v1beta/openai`、`/v1beta`、`/v1` 再补 `/v1beta`；鉴权只发 `x-goog-api-key`，不用 `?key=`。工具定义用
@@ -63,6 +64,12 @@ Gemini 兼容、One API / New API 等等，还要有检测协议」。方案与�
     `skip_thought_signature_validator`：模型名不含 gemini（SDK 不回放）、不是 Gemini 产生的调用（等确认时换成了
     Gemini）、签名超过 256 KB 没进会话（只记长度的日志）。其余缺签名报错，不静默填占位值。更早的轮次不填也不报错。
   - **签名不出本机**：会话接口的响应（`canvas_agent_sessions.public_session`）与项目导出包去掉签名，落盘的会话文件保留。
+    导出包同时把 id 的签名状态 s 改成 x（`gemini.mark_signatures_dropped`）：在等确认时导出、导入后批准续跑，按
+    「签名没保留」填占位值，不因「签名丢失」让已执行的工具白跑。
+  - **转换的硬规则**：同一步的工具结果按调用顺序发（等确认的那个结果最后才到，同名又没有 id 时 Gemini 按顺序配对），
+    缺任何一个结果就报错，不发出去等上游 400；结束原因不是 STOP、又没有文本和调用（如 `MALFORMED_FUNCTION_CALL`、
+    `SAFETY`、思考用完 `MAX_TOKENS`）时报错并带上 `finishMessage`，不当成空回答；HTTP 200 但内容是
+    `{"error": …}`（中转站余额不足常这样回）时把上游原文报出来；流式最后一行没有换行结尾也照常处理。
 - **转换接上之前的临时边界**：局域网网关只按 OpenAI 格式收发。在它接上转换之前，`anthropic-messages`、
   `gemini-generate-content` 成员不进网关的路由列表、成员快照与选成员（`gateway_access.member_relayable`，四处共用）。**网关的边界在第 4 批
   完成后移除**，对应用例改成断言转换后的行为，不删。成员端始终用 OpenAI 格式打网关，主机按成员上游协议转换；
