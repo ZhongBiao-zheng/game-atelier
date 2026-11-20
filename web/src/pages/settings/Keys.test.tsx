@@ -784,3 +784,17 @@ describe('供应商图标经过列表转换', () => {
       .toHaveAttribute('src', `/api/provider-icons/${sha}`);
   });
 });
+
+// ADR-0044 补漏：已选的对话接口要带进编辑表单，否则重开时下拉显示「自动」。
+it('编辑表单显示 KEY 已选的对话接口', async () => {
+  (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({ keys: [{ ...mockKey, alias: 'relay', provider: 'custom', base_url: 'https://relay.example/v1',
+      text_protocol: 'anthropic-messages', models: [{ id: 'claude-x', name: 'Claude', modality: 'text', protocol: 'anthropic-messages' }] }],
+    default_alias: 'relay' }),
+  });
+  render(<KeysPage embedded />);
+  fireEvent.click(await screen.findByLabelText('编辑 relay'));
+  expect(screen.getByRole('combobox', { name: '对话接口' })).toHaveTextContent('Anthropic');
+  expect(screen.getByRole('combobox', { name: '对话接口' })).not.toHaveTextContent('自动');
+});

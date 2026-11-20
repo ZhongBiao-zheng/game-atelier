@@ -27,6 +27,8 @@ export interface KeyRow {
   created_at?: string | null;
   /** 自定义图标（I1）。 */
   icon?: string | null;
+  /** 手动选的对话接口（ADR-0044）；没有 = 自动。 */
+  text_protocol?: string | null;
 }
 
 interface Props {
