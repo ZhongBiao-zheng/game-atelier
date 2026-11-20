@@ -200,16 +200,45 @@ def test_a_browser_session_cannot_call_a_plugin_tool_through_the_canvas_agent_en
     assert response.status_code == 403
 
 
-def test_agent_images_are_capped_by_count_and_bytes(isolated_data_root, monkeypatch):
+def _png_preview(data: bytes) -> dict:
     import base64
+    return {"mime_type": "image/png", "data_base64": base64.b64encode(data).decode()}
+
+
+def test_agent_images_are_capped_by_count_and_bytes(isolated_data_root, monkeypatch):
+    import os
     monkeypatch.setattr(vision, "MAX_PREVIEWS", 3)
     monkeypatch.setattr(vision, "MAX_PREVIEW_TOTAL", 25)
-    refs = [vision.store_preview({"mime_type": "image/png", "data_base64": base64.b64encode(b"x" * 10).decode()})
-            for _ in range(5)]
+    # 同一时刻连续写入（Windows 上 mtime 刻度粗时就是这样）：时钟停住，每张写完把所有文件 mtime 拉成一样。
+    frozen = 1_800_000_000_000_000_000
+    monkeypatch.setattr(vision.time, "time_ns", lambda: frozen)
+    monkeypatch.setattr(vision, "_last_preview_seq", 0)
     directory = data_root.runtime_dir() / "agent-images"
+    refs = []
+    for _ in range(5):
+        refs.append(vision.store_preview(_png_preview(b"x" * 10)))
+        for path in directory.iterdir():
+            os.utime(path, ns=(frozen, frozen))
     files = sorted(path.name for path in directory.iterdir())
     assert len(files) == 2  # 每张 10 字节，总量上限 25：最多留两张
     assert {ref.removeprefix(vision.PREVIEW_PREFIX) for ref in refs[-2:]} == set(files)
     (directory / "keys.json").write_text("{}", encoding="utf-8")
-    vision.store_preview({"mime_type": "image/png", "data_base64": base64.b64encode(b"y").decode()})
+    vision.store_preview(_png_preview(b"y"))
     assert not (directory / "keys.json").exists(), "目录里只留服务端生成的文件名"
+
+
+def test_agent_images_expire_after_a_day_by_their_write_order_not_file_times(isolated_data_root, monkeypatch):
+    import os
+    now = [1_800_000_000_000_000_000]
+    monkeypatch.setattr(vision.time, "time_ns", lambda: now[0])
+    monkeypatch.setattr(vision, "_last_preview_seq", 0)
+    old = vision.store_preview(_png_preview(b"old"))
+    now[0] += vision.PREVIEW_TTL_S * 1_000_000_000 - 1
+    recent = vision.store_preview(_png_preview(b"recent"))
+    directory = data_root.runtime_dir() / "agent-images"
+    for path in directory.iterdir():
+        os.utime(path, ns=(now[0], now[0]))  # 文件时间一律「刚写」，过期只看写入序号
+    now[0] += 2
+    vision.store_preview(_png_preview(b"new"))
+    assert vision.preview_data_url(old) is None
+    assert vision.preview_data_url(recent) is not None

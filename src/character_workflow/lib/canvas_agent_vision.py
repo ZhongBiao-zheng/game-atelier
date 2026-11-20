@@ -12,6 +12,7 @@ import base64
 import binascii
 import json
 import re
+import threading
 import time
 import uuid
 from typing import Any, Callable
@@ -28,7 +29,18 @@ MAX_PREVIEW_BYTES = 2 * 1024 * 1024
 MAX_PREVIEWS = 200
 MAX_PREVIEW_TOTAL = 64 * 1024 * 1024
 _PREVIEW_TYPES = {"image/jpeg": "jpg", "image/png": "png"}
-_PREVIEW_NAME = re.compile(r"^[0-9a-f]{32}\.(jpg|png)$")
+# 文件名 = 20 位写入序号 + 随机后缀：序号是进程内严格递增的纳秒时间，清理按文件名排序、过期按序号判断，
+# 不依赖文件系统时间戳的分辨率（Windows 上连续写入的几张 mtime 可能相同）。
+_PREVIEW_NAME = re.compile(r"^(\d{20})-[0-9a-f]{12}\.(jpg|png)$")
+_preview_seq_lock = threading.Lock()
+_last_preview_seq = 0
+
+
+def _next_preview_seq() -> int:
+    global _last_preview_seq
+    with _preview_seq_lock:
+        _last_preview_seq = max(time.time_ns(), _last_preview_seq + 1)
+        return _last_preview_seq
 MAX_ATTACH_OUTPUTS = 2
 MAX_ATTACH_IMAGES = 4
 WAIT_SECONDS = 240
@@ -117,22 +129,22 @@ def store_preview(preview: Any) -> str | None:
     directory = _previews_dir()
     directory.mkdir(parents=True, exist_ok=True)
     _prune_previews(directory, incoming=len(data))
-    name = f"{uuid.uuid4().hex}.{_PREVIEW_TYPES[preview['mime_type']]}"
+    name = f"{_next_preview_seq():020d}-{uuid.uuid4().hex[:12]}.{_PREVIEW_TYPES[preview['mime_type']]}"
     (directory / name).write_bytes(data)
     return PREVIEW_PREFIX + name
 
 
 def _prune_previews(directory, incoming: int) -> None:
-    """删过期的；再按从旧到新删，直到加上这一张后不超过张数与总量上限。"""
-    cutoff = time.time() - PREVIEW_TTL_S
+    """删过期的；再按写入序号从旧到新删，直到加上这一张后不超过张数与总量上限。"""
+    cutoff = time.time_ns() - PREVIEW_TTL_S * 1_000_000_000
     kept = []
     for path in directory.iterdir():
+        match = _PREVIEW_NAME.fullmatch(path.name)
         try:
-            stat = path.stat()
-            if stat.st_mtime < cutoff or not _PREVIEW_NAME.fullmatch(path.name):
+            if match is None or int(match.group(1)) < cutoff:
                 path.unlink()
             else:
-                kept.append((stat.st_mtime, stat.st_size, path))
+                kept.append((path.name, path.stat().st_size, path))
         except OSError:
             continue
     kept.sort()
