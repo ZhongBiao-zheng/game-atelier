@@ -19,7 +19,8 @@ import requests
 
 from character_workflow.lib import keys
 from character_workflow.lib.callers.openai_compat import key_api_root
-from character_workflow.lib.llm_protocols import speaks_openai
+from character_workflow.lib.llm_protocols import ANTHROPIC_MESSAGES, TEXT_PROTOCOLS, speaks_openai
+from character_workflow.lib.llm_protocols import anthropic
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +75,9 @@ def _supports_reasoning(item: dict[str, Any]) -> bool | None:
 
 
 def agent_can_use(model: keys.ModelSpec | None) -> bool:
-    """临时边界（ADR-0044）：Agent 目前只按 OpenAI 格式收发（SDK 的 Chat Completions），Anthropic 等协议
-    等 Agent 接上转换（第 2 批）再放开，P2 完成后移除。KEY 里没登记的模型按未标注处理（OpenAI 格式）。"""
-    return model is None or speaks_openai(model.protocol)
+    """Agent 能接的协议与一次性调用相同（ADR-0044）：OpenAI Chat / Responses 原样，Anthropic 经协议转换。
+    原样存下的未知标注（如 `anthropic:messages`）不能用。KEY 里没登记的模型按未标注处理（OpenAI 格式）。"""
+    return model is None or model.protocol in TEXT_PROTOCOLS
 
 
 def enabled_text_models(key: keys.KeySpec) -> list[keys.ModelSpec]:
@@ -87,21 +88,37 @@ def enabled_text_models(key: keys.KeySpec) -> list[keys.ModelSpec]:
 
 
 def _fetch(key: keys.KeySpec) -> dict[str, dict]:
-    """上游 /models 里每个模型的能力：{id: {"agent": bool, "reasoning": bool | None}}。"""
+    """上游 /models 里每个模型的能力：{id: {"agent": bool, "reasoning": bool | None}}。
+
+    按这把 KEY 里文本模型的协议分别拉：OpenAI 格式的用 Bearer 拉 `{root}/models`；Anthropic 的按 Anthropic 的鉴权头
+    拉 `{root}/v1/models`（ADR-0044）。只有 Anthropic 模型的 KEY 不发 Bearer 那一次。"""
     from character_workflow.lib.callers.atelier_gateway import DIRECT_PROXIES
 
-    response = requests.get(
-        f"{chat_base_url(key)}/models",
-        headers={"Authorization": f"Bearer {key.access_key}"},
-        timeout=FETCH_TIMEOUT,
-        **({"proxies": DIRECT_PROXIES} if key.provider == "atelier" else {}),
-    )
-    response.raise_for_status()
-    data = response.json().get("data") or []
-    return {
-        str(item["id"]): {"agent": is_chat_model(item), "reasoning": _supports_reasoning(item)}
-        for item in data if isinstance(item, dict) and item.get("id")
-    }
+    models = enabled_text_models(key)
+    out: dict[str, dict] = {}
+    if any(speaks_openai(model.protocol) for model in models):
+        response = requests.get(
+            f"{chat_base_url(key)}/models",
+            headers={"Authorization": f"Bearer {key.access_key}"},
+            timeout=FETCH_TIMEOUT,
+            **({"proxies": DIRECT_PROXIES} if key.provider == "atelier" else {}),
+        )
+        response.raise_for_status()
+        data = response.json().get("data") or []
+        out.update({
+            str(item["id"]): {"agent": is_chat_model(item), "reasoning": _supports_reasoning(item)}
+            for item in data if isinstance(item, dict) and item.get("id")
+        })
+    if key.base_url and any(model.protocol == ANTHROPIC_MESSAGES for model in models):
+        # Anthropic 的对话模型都支持工具；首版不开思考（飙哥定 Q2），思考档位不显示。带密钥不跟随重定向。
+        response = requests.get(f"{anthropic.models_url(key.base_url)}?limit=1000",
+                                headers=anthropic.headers(key.base_url, key.access_key),
+                                timeout=FETCH_TIMEOUT, allow_redirects=False)
+        response.raise_for_status()
+        data = response.json().get("data") or []
+        out.update({str(item["id"]): {"agent": True, "reasoning": False}
+                    for item in data if isinstance(item, dict) and item.get("id")})
+    return out
 
 
 def _upstream_for(key: keys.KeySpec, now: float) -> tuple[dict[str, dict], str | None]:
@@ -128,8 +145,10 @@ def _models_for(key: keys.KeySpec, now: float) -> tuple[list[dict], str | None]:
         info = upstream.get(model.id)
         if info is not None and not info["agent"]:
             continue
+        # Anthropic 首版不开思考：列表里没拉到也标成不支持，面板不显示思考档位。
+        reasoning = False if model.protocol == ANTHROPIC_MESSAGES else (info["reasoning"] if info else None)
         rows.append({"alias": key.alias, "model": model.id, "name": model.name or model.id,
-                     "reasoning": info["reasoning"] if info else None})
+                     "reasoning": reasoning})
     return rows, error
 
 

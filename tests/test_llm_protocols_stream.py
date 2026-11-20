@@ -309,3 +309,31 @@ def test_other_paths_pass_through_untouched():
 
         response = _run(go)
     assert response.status_code == 200 and response.json() == {"data": []}
+
+
+def test_environment_proxy_is_used_after_conversion(monkeypatch):
+    """客户端 trust_env=False 时，代理由内层按上游地址选：请求先转换、再经代理发出（不会原样绕过转换）。"""
+    from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+
+    for name in ("NO_PROXY", "no_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    with FakeVendor() as proxy:
+        proxy.on("POST", "/v1/messages", TEXT)
+        monkeypatch.setenv("HTTP_PROXY", proxy.url)
+
+        async def go():
+            client = AsyncOpenAI(
+                base_url="http://claude.invalid/v1", api_key="placeholder", max_retries=0,
+                http_client=DefaultAsyncHttpxClient(trust_env=False, transport=ProtocolTransport(
+                    base_url="http://claude.invalid", access_key=SECRET)))
+            try:
+                stream = await client.chat.completions.create(
+                    model="claude-x", messages=[{"role": "user", "content": "hi"}], stream=True)
+                return "".join([c.choices[0].delta.content or "" async for c in stream if c.choices])
+            finally:
+                await client.close()
+
+        text = _run(go)
+        [sent] = proxy.calls("POST", "/v1/messages")
+    assert text == "Hello!"
+    assert {k.lower(): v for k, v in sent.headers.items()}["x-api-key"] == SECRET

@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from urllib.parse import urlsplit
+from urllib.request import getproxies, proxy_bypass
 
 import httpx2 as httpx
 
@@ -35,6 +37,16 @@ class _TranslatedStream(httpx.AsyncByteStream):
         await self._upstream.aclose()
 
 
+def direct_or_proxied(url: str) -> httpx.AsyncHTTPTransport:
+    """连上游用的内层 transport，代理规则与 SDK 默认客户端（trust_env）相同：系统 / 环境代理，NO_PROXY 直连。
+
+    装了本 transport 的客户端必须 `trust_env=False`：否则 httpx 按环境代理把请求直接交给代理的 transport，
+    绕过协议转换（OpenAI 格式的请求原样打到上游）。代理改在这里按上游地址选。"""
+    parts = urlsplit(url)
+    proxy = None if proxy_bypass(parts.hostname or "") else getproxies().get(parts.scheme)
+    return httpx.AsyncHTTPTransport(proxy=proxy)
+
+
 class ProtocolTransport(httpx.AsyncBaseTransport):
     """把 Chat Completions 请求转成 Anthropic Messages（目前唯一需要转换的对话协议）。
 
@@ -46,7 +58,7 @@ class ProtocolTransport(httpx.AsyncBaseTransport):
                  inner: httpx.AsyncBaseTransport | None = None) -> None:
         self._base_url = base_url
         self._access_key = access_key
-        self._inner = inner or httpx.AsyncHTTPTransport()
+        self._inner = inner or direct_or_proxied(anthropic.messages_url(base_url))
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         if request.method != "POST" or not request.url.path.endswith("/chat/completions"):

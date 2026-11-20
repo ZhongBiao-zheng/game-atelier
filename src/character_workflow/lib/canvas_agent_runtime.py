@@ -869,18 +869,23 @@ def start_host_settlement(session: CanvasAgentSession) -> None:
 
 def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None] | None = None,
                 call_tag: str | None = None):
-    from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, set_tracing_disabled
+    from agents import (
+        Agent, ModelSettings, OpenAIChatCompletionsModel, OpenAIResponsesModel, set_tracing_disabled,
+    )
     from openai import AsyncOpenAI, DefaultAsyncHttpxClient
     from openai.types.shared import Reasoning
+
+    from character_workflow.lib import llm_protocols
     set_tracing_disabled(True)  # 否则 SDK 会把对话轨迹上传到 OpenAI
     key = keys.find_by_alias(session.model_alias or "")
     if key is None or not session.model:
         raise CanvasToolError("INVALID_PARAMETERS", "请先选择对话模型", 422)
     if not key.enabled:
         raise CanvasToolError("MODEL_UNAVAILABLE", "供应商已停用", 422)
-    # 临时边界（ADR-0044）：Agent 接上协议转换（第 2 批）之前只按 OpenAI 格式收发，P2 完成后移除。
-    if not agent_can_use(next((m for m in key.models if m.id == session.model), None)):
+    spec = next((m for m in key.models if m.id == session.model), None)
+    if not agent_can_use(spec):
         raise CanvasToolError("MODEL_UNAVAILABLE", "该模型的接口暂不支持 Agent", 422)
+    protocol = spec.protocol if spec is not None else None
     # 局域网网关：直连不读本机代理；SDK 自带重试关掉（读超时也会重发，可能重复计费），
     # 只保留「主机确定没收下才重发」（gateway_text_wait，第 5 批 5-4）。
     http_client, retries = None, 2
@@ -889,6 +894,12 @@ def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None]
         http_client = DefaultAsyncHttpxClient(
             trust_env=False, transport=UpdatingAwareTransport(on_wait=on_gateway_wait))
         retries = 0
+    elif protocol == llm_protocols.ANTHROPIC_MESSAGES:
+        # SDK 只会发 Chat Completions：在 HTTP 层转成 Anthropic Messages（ADR-0044）。
+        # trust_env=False：否则环境代理会让请求绕过转换；代理改由内层按上游地址选。
+        from character_workflow.lib.llm_protocols.transport import ProtocolTransport
+        http_client = DefaultAsyncHttpxClient(trust_env=False, transport=ProtocolTransport(
+            base_url=key.base_url or "", access_key=key.access_key))
     # 经网关时带关联标记，主机把它记在这把密钥的用量行上，成员每轮结束按它查回结算额。
     headers = {"X-Atelier-Call-Tag": call_tag} if key.provider == "atelier" and call_tag else None
     client = AsyncOpenAI(base_url=chat_base_url(key), api_key=key.access_key, max_retries=retries,
@@ -900,7 +911,8 @@ def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None]
         instructions=INSTRUCTIONS + CREATION_MODE_PROMPTS[session.creation_mode]
         + skills.skills_prompt() + team_library_specs.agent_instructions(session.project_id),
         tools=build_tools(),
-        model=OpenAIChatCompletionsModel(model=session.model, openai_client=client),
+        model=(OpenAIResponsesModel if protocol == llm_protocols.OPENAI_RESPONSES
+               else OpenAIChatCompletionsModel)(model=session.model, openai_client=client),
         model_settings=settings,
     )
 

@@ -243,8 +243,8 @@ def test_anthropic_only_annotation_is_classified_as_callable_text():
     assert _text_protocol(both) == "openai-chat"
 
 
-# --- 接上转换之前：局域网网关与 Agent 不碰 Anthropic 成员 ----------------------------------
-# 临时边界（ADR-0044）：Agent 在第 2 批、网关在第 4 批接上转换后，这几条改成断言转换后的行为，不要删。
+# --- 局域网网关：接上主机端转换（第 4 批）之前不碰 Anthropic 成员 -------------------------
+# 临时边界（ADR-0044）：第 4 批完成后这几条改成断言转换后的行为，不要删。Agent 的边界已在第 2 批改写（见下）。
 
 def _gateway(monkeypatch):
     seen = []
@@ -295,27 +295,75 @@ def test_gateway_snapshot_for_members_keeps_old_shape_and_openai_protocol(monkey
     assert model.protocol == "openai-chat"
 
 
-def test_agent_model_list_leaves_out_anthropic_models(monkeypatch):
+def test_agent_model_list_includes_anthropic_models_listed_with_anthropic_headers():
+    """第 2 批：Agent 接上协议转换后，Anthropic 模型进列表；按 x-api-key 列模型、不显示思考档位。
+    （第 1 批的临时边界用例「列表里不出现」改写而来。）"""
+    with FakeVendor() as claude, FakeVendor() as relay:
+        claude.on("GET", "/v1/models", {"data": [{"type": "model", "id": "claude-x",
+                                                  "display_name": "Claude X"}], "has_more": False})
+        relay.on("GET", "/v1/models", {"data": [{"id": "gpt-x"}]})
+        add_claude(claude.url)
+        keys.add_key(keys.KeySpec(alias="relay", provider="custom", base_url=f"{relay.url}/v1",
+                                  access_key="r", created_at="t", models=[
+            keys.ModelSpec(id="gpt-x", name="gpt-x", modality="text", protocol="openai-chat")]))
+        result = canvas_agent_models.list_chat_models()
+        [listed] = claude.calls("GET", "/v1/models")
+    rows = {row["model"]: row for row in result["models"]}
+    assert set(rows) == {"claude-x", "gpt-x"} and result["errors"] == []
+    assert rows["claude-x"]["reasoning"] is False
+    headers = {name.lower(): value for name, value in listed.headers.items()}
+    assert headers["x-api-key"] == SECRET and "authorization" not in headers
+    assert listed.query == "limit=1000"
+
+
+def test_build_agent_uses_the_protocol_transport_for_anthropic(monkeypatch):
+    """第 2 批：直接构造 Agent 时给 Anthropic 模型装上协议转换（第 1 批的临时边界用例「直接构造报错」改写而来）。
+    客户端不读环境代理（否则请求会绕过转换），代理由内层按上游地址选。"""
+    from types import SimpleNamespace
+
+    from character_workflow.lib import canvas_agent_runtime
+    from character_workflow.lib.llm_protocols.transport import ProtocolTransport
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
     add_claude("https://claude.example")
-    keys.add_key(keys.KeySpec(alias="relay", provider="custom", base_url="https://relay.example/v1",
-                              access_key="r", created_at="t", models=[
-        keys.ModelSpec(id="gpt-x", name="gpt-x", modality="text", protocol="openai-chat")]))
-    fetched = []
-    monkeypatch.setattr(canvas_agent_models, "_fetch", lambda key: fetched.append(key.alias) or {})
-    result = canvas_agent_models.list_chat_models()
-    assert [row["model"] for row in result["models"]] == ["gpt-x"]
-    assert fetched == ["relay"]  # 只有 Anthropic 模型的 KEY 连能力列表都不拉
+    from character_workflow.lib.canvas_projects import create_canvas_project
+    project = create_canvas_project("协议")
+    agent = canvas_agent_runtime.build_agent(SimpleNamespace(
+        project_id=project.project_id, model_alias="claude", model="claude-x", effort=None,
+        creation_mode="all"))
+    http_client = agent.model._client._client
+    assert isinstance(http_client._transport, ProtocolTransport)
+    assert http_client._trust_env is False and not http_client._mounts
 
 
-def test_build_agent_refuses_anthropic_model_directly():
-    """会话里存着的模型后来被改成 Anthropic 接口：构造时直接报错，不按 Chat 打到 Anthropic 上游。"""
+def test_build_agent_still_refuses_unknown_protocols():
     from types import SimpleNamespace
 
     from character_workflow.lib import canvas_agent_runtime
     from character_workflow.lib.canvas_tool_common import CanvasToolError
 
-    add_claude("https://claude.example")
+    keys.add_key(keys.KeySpec(alias="td", provider="custom", base_url="https://td.example/v1",
+                              access_key="k", created_at="t", models=[
+        keys.ModelSpec(id="raw", name="r", modality="text", protocol="anthropic:messages")]))
     with pytest.raises(CanvasToolError) as caught:
         canvas_agent_runtime.build_agent(SimpleNamespace(
-            project_id="p", model_alias="claude", model="claude-x", effort=None, creation_mode="all"))
+            project_id="p", model_alias="td", model="raw", effort=None, creation_mode="all"))
     assert caught.value.message == "该模型的接口暂不支持 Agent"
+
+
+def test_build_agent_uses_responses_model_for_responses_protocol():
+    from types import SimpleNamespace
+
+    from agents import OpenAIResponsesModel
+
+    from character_workflow.lib import canvas_agent_runtime
+
+    keys.add_key(keys.KeySpec(alias="oa", provider="custom", base_url="https://oa.example/v1",
+                              access_key="k", created_at="t", models=[
+        keys.ModelSpec(id="gpt-r", name="r", modality="text", protocol="openai-responses")]))
+    from character_workflow.lib.canvas_projects import create_canvas_project
+    project = create_canvas_project("协议")
+    agent = canvas_agent_runtime.build_agent(SimpleNamespace(
+        project_id=project.project_id, model_alias="oa", model="gpt-r", effort=None,
+        creation_mode="all"))
+    assert isinstance(agent.model, OpenAIResponsesModel)

@@ -23,7 +23,10 @@ Gemini 兼容、One API / New API 等等，还要有检测协议」。方案与�
   `DefaultAsyncHttpxClient`，拦下 `POST …/chat/completions` 改写成上游协议，响应与流式转回 Chat 形状；必须用 openai
   3.x 自带的 `httpx2`。与局域网网关的 `UpdatingAwareTransport` 叠加时转换在外层、等待重发在内层（重发的是转换后的
   同一个请求）。流式里 Anthropic `message_delta` 的用量是累计值，取最后一次；`error` 事件转成 `{"error": …}` 数据块，
-  流没收到 `message_stop` 就断了按错误处理。
+  流没收到 `message_stop` 就断了按错误处理。装了这个 transport 的客户端必须 `trust_env=False`：否则 httpx 按环境代理
+  把请求直接交给代理的 transport，绕过转换；代理改由内层按上游地址选（`transport.direct_or_proxied`，规则同 SDK
+  默认：系统 / 环境代理，`NO_PROXY` 直连）。`openai-responses` 模型用 SDK 的 `OpenAIResponsesModel`，不经转换。
+  Anthropic 首版不开思考（飙哥定），Agent 列表里这类模型不显示思考档位；Agent 列模型时按 Anthropic 的鉴权头拉。
 - **用量归一**：`llm_protocols.usage.Usage` 的输入总量含缓存命中与缓存写入（Anthropic 的 `input_tokens` 不含缓存，
   要加上 `cache_read_input_tokens` 与 `cache_creation_input_tokens`；Gemini 的 `promptTokenCount` 已含缓存、输出要加
   `thoughtsTokenCount`）。转回 Chat 形状时缓存写入放在 `prompt_tokens_details.cache_write_tokens`（与 OpenAI
@@ -41,11 +44,11 @@ Gemini 兼容、One API / New API 等等，还要有检测协议」。方案与�
 - **鉴权与地址**：Anthropic 发 `x-api-key` + `anthropic-version: 2023-06-01`（OpenRouter 用 Bearer），路径
   `{根}/v1/messages`，根地址归一见 `anthropic.api_root`；`max_tokens` 必填，调用方没给时用 8192。`temperature` 范围是 0–1（OpenAI 是 0–2），超出的按 1 发（画布「发散」档 1.3）。按 Anthropic 列模型
   时带 `limit=1000`，带着密钥的请求不跟随重定向。
-- **转换接上之前的临时边界**：局域网网关与内置 Agent 只按 OpenAI 格式收发。在它们接上转换之前，`anthropic-messages`
-  成员不进网关的路由列表、成员快照与选成员（`gateway_access.member_relayable`，四处共用），不进 Agent 的模型列表，
-  直接构造 Agent 时报「该模型的接口暂不支持 Agent」（`canvas_agent_models.agent_can_use`）。**Agent 的边界在第 2 批、
-  网关的边界在第 4 批完成后移除**，对应用例改成断言转换后的行为，不删。成员端始终用 OpenAI 格式打网关，主机按成员
-  上游协议转换。
+- **转换接上之前的临时边界**：局域网网关只按 OpenAI 格式收发。在它接上转换之前，`anthropic-messages`
+  成员不进网关的路由列表、成员快照与选成员（`gateway_access.member_relayable`，四处共用）。**网关的边界在第 4 批
+  完成后移除**，对应用例改成断言转换后的行为，不删。成员端始终用 OpenAI 格式打网关，主机按成员上游协议转换。
+  Agent 的边界已在第 2 批移除：`canvas_agent_models.agent_can_use` 改为「协议在 `TEXT_PROTOCOLS` 里」，原样存下的
+  未知标注（如 `anthropic:messages`）仍报「该模型的接口暂不支持 Agent」。
 - **协议检测只发不计费的 GET**（第 3 批）：先看地址，再看 `GET /models` 的返回形状，必要时对用户填的同一个 origin
   换鉴权头再 GET；不发任何 POST（「校验类 400 不计费」没有官方依据），不跟随重定向。检测不出时按 OpenAI Chat，
   保留手动选择。One API / New API 不做单独的供应商类型：由「自定义供应商」入口识别，按 `/v1/models` 的
