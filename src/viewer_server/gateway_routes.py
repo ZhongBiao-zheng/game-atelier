@@ -14,10 +14,10 @@ from typing import Annotated, Literal
 import requests
 from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from character_workflow.lib import (
-    gateway_access, gateway_keys, gateway_quota, gateway_tasks, keys, model_routes,
+    gateway_keys, gateway_quota, gateway_tasks, keys,
 )
 from character_workflow.lib.callers import atelier_gateway
 from viewer_server.gateway_app import gateway_server
@@ -32,10 +32,19 @@ class GatewaySettingsPatch(BaseModel):
     name: str | None = Field(default=None, max_length=40)
 
 
+def _no_new_empty_scope(scope):
+    """新保存不允许空范围（一个模型都没有）；已存在的空范围（旧数据转换来的）照常读出与显示。只在接口写入边界查。"""
+    if scope is not None and (not scope or any(entry.models == [] for entry in scope)):
+        raise ValueError("至少选一个模型")
+    return scope
+
+
 class GatewayKeyCreate(gateway_keys.GatewayPolicy):
     token: str | None = Field(default=None, min_length=16, max_length=64, pattern=r"^[A-Za-z0-9_-]+$", repr=False)
     role: Literal["member", "admin"] = "member"
     name: Annotated[str, Field(min_length=1, max_length=40)]
+
+    _scope_not_empty = field_validator("scope")(_no_new_empty_scope)
 
 
 class GatewayKeyPatch(BaseModel):
@@ -43,8 +52,9 @@ class GatewayKeyPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str | None = Field(default=None, min_length=1, max_length=40)
     limits: list[gateway_keys.GatewayLimit] | None = Field(default=None, max_length=3)
-    allowed_models: list[str] | None = None
-    allowed_aliases: list[str] | None = None
+    scope: list[gateway_keys.ScopeEntry] | None = Field(default=None, max_length=200)
+
+    _scope_not_empty = field_validator("scope")(_no_new_empty_scope)
 
 
 def _key_view(record: gateway_keys.GatewayKeyRecord) -> dict:
@@ -144,13 +154,10 @@ def revoke_gateway_key(key_id: str) -> dict:
 
 @gateway_router.get("/options")
 def gateway_options() -> dict:
-    return {
-        # 与 /gateway/v1/models 同一发布判据。
-        "models": [{"id": route.id, "name": route.name, "modality": route.modality}
-                   for route in model_routes.list_routes() if gateway_access.publishable(route)],
-        "aliases": [{"alias": key.alias, "provider": key.provider, "name": key.alias}
-                    for key in keys.read_keys_db().keys if key.enabled and key.provider != "atelier"],
-    }
+    """本机设置页的密钥范围选项：与管理员远程管理同一份（按供应商分组，第 7 批）。"""
+    from viewer_server.gateway_admin import scope_options
+
+    return scope_options()
 
 
 # ---- 接入端：局域网 Atelier 供应商 ----

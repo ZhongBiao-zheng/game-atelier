@@ -89,7 +89,7 @@ def test_concurrent_status_writes_preserve_members():
 
 def owner():
     _seed_keys()
-    return gateway_keys.create_key('P2', allowed_aliases=['A', 'B'])[0]
+    return gateway_keys.create_key('P2', scope=[{'alias': 'A'}, {'alias': 'B'}])[0]
 
 
 def submit(key):

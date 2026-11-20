@@ -187,9 +187,9 @@ def test_invalid_requests_openai_errors(setup, status, payload):
 def test_permission_auth_and_body_limit(setup, monkeypatch):
     owner, _, seen, _, app, client = setup
     assert TestClient(app).get(f'{BASE}/models').json()['error']['code'] == 401
-    gateway_keys.update_key(owner.id, allowed_models=[])
+    gateway_keys.update_key(owner.id, scope=[])
     assert client.post(f'{BASE}/responses', json={'model': 'gpt-test'}).status_code == 403
-    gateway_keys.update_key(owner.id, allowed_models=None, allowed_aliases=[])
+    gateway_keys.update_key(owner.id, scope=[{'alias': 'A', 'models': ['other']}])
     assert client.post(f'{BASE}/responses', json={'model': 'gpt-test'}).status_code == 403
     monkeypatch.setattr(gateway_openai, 'MAX_BODY_BYTES', 10)
     assert client.post(f'{BASE}/responses', content=b'12345678901').status_code == 413
@@ -207,11 +207,11 @@ def test_models_preserve_capabilities_and_filter_permissions(setup):
     assert result[0]['id'] == 'gpt-test' and canvas_agent_models.is_chat_model(result[0])
     assert result[0]['supported_parameters'] == ['tools', 'reasoning']
     assert 'access_key' not in result[0]
-    gateway_keys.update_key(owner.id, allowed_aliases=['B'])
+    gateway_keys.update_key(owner.id, scope=[{'alias': 'B'}])
     result = client.get(f'{BASE}/models').json()['data']
     assert result[0]['supported_parameters'] == ['tools']
     assert canvas_agent_models.is_chat_model(result[0])
-    gateway_keys.update_key(owner.id, allowed_models=[])
+    gateway_keys.update_key(owner.id, scope=[])
     assert client.get(f'{BASE}/models').json()['data'] == []
 
 
@@ -376,7 +376,7 @@ def test_recent_output_estimate_uses_latest_fifty_calls(setup):
 
 def test_alias_permission_and_cooldown_fallback_never_use_denied_member(setup):
     owner, _, seen, _, _, client = setup
-    gateway_keys.update_key(owner.id, allowed_aliases=['B'])
+    gateway_keys.update_key(owner.id, scope=[{'alias': 'B'}])
     model_routes.cool_down('text', 'B', 'rate_limited')
     assert client.post(f'{BASE}/responses', json={'model': 'gpt-test'}).status_code == 200
     assert seen[0].url.host == 'b.example'

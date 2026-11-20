@@ -3,8 +3,13 @@ from character_workflow.lib import model_routes
 from character_workflow.lib.gateway_keys import GatewayKeyRecord
 
 
-def member_allowed(key: GatewayKeyRecord, alias: str) -> bool:
-    return key.allowed_aliases is None or alias in key.allowed_aliases
+def member_in_scope(key: GatewayKeyRecord, member: model_routes.RouteMember) -> bool:
+    """这把密钥能不能用这个路由成员（某供应商的某个模型）。范围判定的唯一来源（第 7 批）：
+    成员列表、执行时挑成员、文本中转、「自动」都只用它。"""
+    if key.scope is None:
+        return True
+    entry = next((item for item in key.scope if item.alias == member.alias), None)
+    return entry is not None and (entry.models is None or member.model_id in entry.models)
 
 
 def member_relayable(modality: str, member: model_routes.RouteMember) -> bool:
@@ -15,13 +20,6 @@ def member_relayable(modality: str, member: model_routes.RouteMember) -> bool:
     from character_workflow.lib.llm_protocols import speaks_openai
 
     return modality != "text" or speaks_openai(member.protocol)
-
-
-def model_allowed(key: GatewayKeyRecord, route_id: str) -> bool:
-    return key.allowed_models is None or any(
-        route_id == pattern or (pattern.endswith("*") and route_id.startswith(pattern[:-1]))
-        for pattern in key.allowed_models
-    )
 
 
 def member_declared(member: model_routes.RouteMember) -> dict | None:
@@ -54,10 +52,9 @@ def declared_view(route: model_routes.ModelRoute) -> dict | None:
 
 def route_visible(key: GatewayKeyRecord, route: model_routes.ModelRoute) -> bool:
     # 未计价的路由限额密钥也能用（飙哥 2026-11-18 定）：额度用光后由受理时的额度检查一律拦下。
-    return (publishable(route)
-            and model_allowed(key, route.id) and any(
-                m.provider != "atelier" and member_allowed(key, m.alias)
-                and member_relayable(route.modality, m) for m in route.members))
+    return publishable(route) and any(
+        m.provider != "atelier" and member_in_scope(key, m) and member_relayable(route.modality, m)
+        for m in route.members)
 
 
 def check_route(key: GatewayKeyRecord, modality, route_id: str) -> model_routes.ModelRoute:
@@ -69,8 +66,6 @@ def check_route(key: GatewayKeyRecord, modality, route_id: str) -> model_routes.
         raise GatewayRequestError(404, f"网关没有模型 {route_id}") from error
     if not publishable(route) or not any(m.provider != "atelier" for m in route.members):
         raise GatewayRequestError(404, f"网关没有模型 {route_id}")
-    if not model_allowed(key, route_id):
-        raise GatewayRequestError(403, f"这把密钥不能用模型 {route_id}")
     if not route_visible(key, route):
-        raise GatewayRequestError(403, f"这把密钥能用的供应商都不提供 {route_id}")
+        raise GatewayRequestError(403, f"这把密钥不能用模型 {route_id}")
     return route

@@ -254,7 +254,7 @@ def _visible_members(owner):
         if not gateway_access.route_visible(owner, route):
             continue
         member = next(m for m in route.members if m.provider != "atelier"
-                      and gateway_access.member_allowed(owner, m.alias)
+                      and gateway_access.member_in_scope(owner, m)
                       and gateway_access.member_relayable("text", m))
         key, model = model_routes._member_key_and_model(member)
         visible.append((route, key, model))

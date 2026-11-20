@@ -49,7 +49,7 @@ def submit(owner, nonce="one", **kwargs):
 
 def client_for(owner):
     record, token = gateway_keys.create_key(
-        "http", owner.limits, owner.allowed_models, owner.allowed_aliases,
+        "http", owner.limits, owner.scope,
     )
     return TestClient(create_gateway_app(), headers={"Authorization": f"Bearer {token}"}), record
 
@@ -212,46 +212,50 @@ def test_retry_after_uses_latest_reset_not_limit_order(owner):
     assert not gateway_tasks._all_tasks()
 
 
-@pytest.mark.parametrize("patterns,route,allowed", [
-    (None, "anything", True), ([], "gpt-image-2", False),
-    (["gpt-image-2"], "gpt-image-2", True), (["gpt-image-2"], "GPT-image-2", False),
-    (["seedance:*"], "seedance:model", True), (["seedance:*"], "other:model", False),
-    (["gpt*2"], "gpt-image-2", False), (["gpt?image-2"], "gpt-image-2", False),
+# 第 7 批：范围不再有 * 前缀。「以后新增的模型自动包含」改由「某供应商全部」表达。
+@pytest.mark.parametrize(("scope", "allowed"), [
+    (None, True), ([], False), ([{"alias": "A"}], True),
+    ([{"alias": "A", "models": ["gpt-image-2"]}], False), ([{"alias": "B"}], False),
 ])
-def test_model_permissions(owner, patterns, route, allowed):
-    owner = gateway_keys.update_key(owner.id, allowed_models=patterns)
-    assert gateway_access.model_allowed(owner, route) is allowed
+def test_model_permissions(owner, scope, allowed):
+    owner = gateway_keys.update_key(owner.id, scope=scope)
+    spec = keys.find_by_alias("A")
+    keys.patch_key("A", {"models": [*[m.model_dump() for m in spec.models],
+                                    {"id": "gpt-image-1", "name": "gpt-image-1", "modality": "image"}]})
+    route = model_routes.find_route("image", "gpt-image-1")  # 设范围之后才加的模型
+    assert gateway_access.route_visible(owner, route) is allowed
 
 
 def test_permission_checked_before_parameter_validation(owner):
-    owner = gateway_keys.update_key(owner.id, allowed_models=[])
+    owner = gateway_keys.update_key(owner.id, scope=[])
     client, _ = client_for(owner)
     assert _submit(client, params={"mask_image": "/etc/passwd"}).status_code == 403
     assert _submit(client, model="unknown", params={"mask_image": "/etc/passwd"}).status_code == 404
 
 
 def test_alias_exclusion_applies_to_cooldown_fallback_and_estimate(owner):
-    owner = gateway_keys.update_key(owner.id, allowed_aliases=["B"])
+    owner = gateway_keys.update_key(owner.id, scope=[{"alias": "B"}])
     keys.patch_key("B", {"base_url": "https://api.tu-zi.com", "billing_group": "绘画"})
     model_routes.cool_down("image", "B", "auth")
     assert gateway_tasks._pick_member("gpt-image-2", [], owner)[0].alias == "B"
     assert submit(owner).estimated_cny is None
-    owner = gateway_keys.update_key(owner.id, allowed_aliases=[])
+    owner = gateway_keys.update_key(owner.id, scope=[])
     client, _ = client_for(owner)
     response = _submit(client)
-    assert response.status_code == 403 and "能用的供应商都不提供" in response.json()["detail"]
+    # 第 7 批：两条 403 文案合成一条（范围按供应商→模型，不再分「模型不行」与「供应商不行」）。
+    assert response.status_code == 403 and "这把密钥不能用模型 gpt-image-2" in response.json()["detail"]
     assert gateway_tasks._pick_member("gpt-image-2", [], owner) is None
 
 
 def test_execution_skips_forbidden_alias_and_newly_revoked_permissions(owner, monkeypatch):
-    owner = gateway_keys.update_key(owner.id, allowed_aliases=["B"])
+    owner = gateway_keys.update_key(owner.id, scope=[{"alias": "B"}])
     calls = []
     monkeypatch.setattr(callers, "dispatch", _dispatch(calls))
     task = submit(owner)
     assert gateway_tasks.run_task(task).member_alias == "B"
     assert [call["alias"] for call in calls] == ["B"]
     task = submit(owner, "two")
-    gateway_keys.update_key(owner.id, allowed_models=[])
+    gateway_keys.update_key(owner.id, scope=[])
     assert gateway_tasks.run_task(task).status == "failed"
     assert len(calls) == 1
 
@@ -266,8 +270,8 @@ def test_models_all_modalities_filtered_and_me_private(owner):
     models = client.get("/gateway/v1/models").json()["models"]
     assert {m["modality"] for m in models} == {"image", "video", "audio", "text"}
     assert next(m for m in models if m["modality"] == "video")["members"][0]["protocol"] == "seedance"
-    gateway_keys.update_key(me.id, allowed_models=["seedance:*", "gpt-image-2"],
-                            allowed_aliases=["B", "video"])
+    gateway_keys.update_key(me.id, scope=[{"alias": "B", "models": ["gpt-image-2"]},
+                                          {"alias": "video", "models": ["video"]}])
     models = client.get("/gateway/v1/models").json()["models"]
     assert [m["alias"] for m in models[0]["members"]] == ["B"]
     assert len(models) == 2
@@ -283,10 +287,10 @@ def test_models_all_modalities_filtered_and_me_private(owner):
 
 
 def test_key_update_unset_vs_none_and_old_field_discard(owner):
-    owner = gateway_keys.update_key(owner.id, allowed_aliases=["A"], allowed_models=["gpt-image-2"])
+    owner = gateway_keys.update_key(owner.id, scope=[{"alias": "A", "models": ["gpt-image-2"]}])
     renamed = gateway_keys.update_key(owner.id, name="new")
-    assert renamed.allowed_aliases == ["A"] and renamed.allowed_models == ["gpt-image-2"]
-    assert gateway_keys.update_key(owner.id, allowed_aliases=None).allowed_aliases is None
+    assert [entry.model_dump() for entry in renamed.scope] == [{"alias": "A", "models": ["gpt-image-2"]}]
+    assert gateway_keys.update_key(owner.id, scope=None).scope is None
     payload = json.loads(gateway_keys.gateway_file().read_text())
     payload["keys"][0]["daily_image_limit"] = 1
     gateway_keys.gateway_file().write_text(json.dumps(payload))
@@ -314,17 +318,18 @@ def test_management_patch_options_and_no_secrets(owner):
 
     client = LocalTestClient(base_url="http://127.0.0.1", app=build_app())
     options = client.get("/api/gateway/options").json()
-    assert [a["alias"] for a in options["aliases"]] == ["A", "B"]
-    assert options["models"][0]["id"] == "gpt-image-2"
+    assert [p["alias"] for p in options["providers"]] == ["A", "B"]
+    assert options["providers"][0]["models"][0]["id"] == "gpt-image-2"
     assert local_capability("GET", "/api/gateway/options") == "manage"
     url = f"/api/gateway/keys/{owner.id}"
     for payload in [{"name": None}, {"limits": None}, {"unknown": True}, {"name": "  "},
                     {"limits": [{"period": "day", "cap_cny": 1}] * 2}]:
         assert client.patch(url, json=payload).status_code == 422
-    assert client.patch(url, json={"allowed_models": []}).json()["allowed_models"] == []
+    only_a = [{"alias": "A", "models": None}]
+    assert client.patch(url, json={"scope": [{"alias": "A"}]}).json()["scope"] == only_a
     result = client.patch(url, json={"name": "renamed"}).json()
-    assert result["allowed_models"] == []
-    assert client.patch(url, json={"allowed_models": None}).json()["allowed_models"] is None
+    assert result["scope"] == only_a
+    assert client.patch(url, json={"scope": None}).json()["scope"] is None
     task = submit(gateway_keys.read_config().keys[0])
     gateway_tasks._finish(task, status="done")
     result = client.get("/api/gateway").json()["keys"][0]

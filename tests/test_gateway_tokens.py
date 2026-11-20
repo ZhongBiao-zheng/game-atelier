@@ -17,7 +17,7 @@ from viewer_server.server_app import build_app
 def legacy_config():
     active, old_token = gateway_keys.create_key(
         "设计师", role="admin", limits=[gateway_keys.GatewayLimit(period="month", cap_cny=25)],
-        allowed_models=["gpt-image-2"], allowed_aliases=["upstream"],
+        scope=[{"alias": "upstream", "models": ["gpt-image-2"]}],
     )
     revoked, revoked_token = gateway_keys.create_key("已撤销")
     gateway_keys.revoke_key(revoked.id)

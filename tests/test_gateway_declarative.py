@@ -88,6 +88,12 @@ def test_capped_key_can_see_and_use_unpriced_routes(vendor):
     assert submit(client, route_id, {"ratio": "1:1"}).status_code == 202
 
 
+def option_routes(local):
+    """设置页范围选项（第 7 批按供应商分组）里出现的路由。"""
+    return [model["route_id"] for provider in local.get("/api/gateway/options").json()["providers"]
+            for model in provider["models"] if model["route_id"]]
+
+
 def test_broken_template_disappears_from_every_view(vendor):
     identifier, route_id = host_setup(vendor)
     member, _ = member_client()
@@ -95,12 +101,12 @@ def test_broken_template_disappears_from_every_view(vendor):
     from viewer_server.gateway_admin import route_options
 
     assert [m["id"] for m in member.get("/gateway/v1/models").json()["models"]] == [route_id]
-    assert [m["id"] for m in local.get("/api/gateway/options").json()["models"]] == [route_id]
+    assert option_routes(local) == [route_id]
     assert [m["id"] for m in route_options()["models"]] == [route_id]
 
     (data_root.config_dir() / "http-protocols" / f"{identifier}.json").write_text("{", encoding="utf-8")
     assert member.get("/gateway/v1/models").json()["models"] == []
-    assert local.get("/api/gateway/options").json()["models"] == []
+    assert option_routes(local) == []
     assert route_options()["models"] == []
     assert submit(member, route_id, {"ratio": "1:1"}).status_code == 404
 

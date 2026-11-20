@@ -1123,7 +1123,10 @@ def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
 
 @router.delete("/keys/{alias}", status_code=204)
 def delete_key_endpoint(alias: str) -> None:
+    from character_workflow.lib import gateway_keys
+
     keys.delete_key(alias)
+    gateway_keys.drop_alias_from_scopes(alias)  # 网关密钥范围里去掉它（第 7 批）
     return None
 
 

@@ -35,7 +35,7 @@ def test_catalog_snapshot_and_permissions(client, monkeypatch):
     monkeypatch.setattr(atelier_gateway, "check_gateway", lambda *args: {"models": routes})
     atelier_gateway.sync_gateway_key("Hub")
     assert keys.find_by_alias("Hub").models[0].workflow_inputs == workflow.inputs
-    gateway_keys.update_key(client.record.id, allowed_aliases=["other"])
+    gateway_keys.update_key(client.record.id, scope=[{"alias": "other"}])
     assert client.get("/gateway/v1/models").json()["models"] == []
 
 

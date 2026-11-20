@@ -25,6 +25,32 @@ def route_options() -> dict:
                        and gateway_access.publishable(route)]}
 
 
+def scope_options() -> dict:
+    """设置页密钥范围弹层的选项：按供应商分组列出它能经网关提供的模型（第 7 批）。
+
+    模型 id 是供应商自己的 model id（范围按它记）；停用的供应商也列出（enabled=False），界面灰显、不能勾。"""
+    from character_workflow.lib import gateway_access, keys
+
+    providers: dict[str, dict] = {}
+    for route in model_routes.list_routes():
+        if not gateway_access.publishable(route):
+            continue
+        for member in route.members:
+            if member.provider == "atelier" or not gateway_access.member_relayable(route.modality, member):
+                continue
+            entry = providers.setdefault(member.alias, {
+                "alias": member.alias, "provider": member.provider, "enabled": True, "models": []})
+            if all(model["id"] != member.model_id for model in entry["models"]):
+                entry["models"].append({"id": member.model_id, "name": member.name,
+                                        "modality": route.modality, "route_id": route.id})
+    for key in keys.read_keys_db().keys:
+        if key.provider != "atelier" and not key.enabled and key.alias not in providers:
+            providers[key.alias] = {"alias": key.alias, "provider": key.provider, "enabled": False, "models": [
+                {"id": model.id, "name": model.name or model.id, "modality": model.modality, "route_id": None}
+                for model in key.models if model.id]}
+    return {"providers": list(providers.values())}
+
+
 def create_router(require_key):
     from viewer_server.gateway_routes import (
         GatewayKeyCreate, GatewayKeyPatch, _key_view, gateway_options, gateway_task_list,
