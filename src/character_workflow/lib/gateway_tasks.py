@@ -710,9 +710,9 @@ def run_task(task: GatewayTask) -> GatewayTask:
                                    error_kind="unconfirmed")
                 reason = model_routes.failover_reason(error)
                 if reason is None:
-                    message = _safe_error(error)
-                    kind: ErrorKind = "unconfirmed" if "未确认" in message else "failed"
-                    return _finish(_read(task_id), status="failed", error=message, error_kind=kind)
+                    # 未确认已在上面按类型（is_unconfirmed）与尝试记录处理；到这里的是明确的失败（第 6 批删了按文案判断）。
+                    return _finish(_read(task_id), status="failed", error=_safe_error(error),
+                                   error_kind="failed")
                 model_routes.cool_down(modality, key.alias, reason)
                 tried.append(key.alias)
                 switched_from = (key.alias, reason)

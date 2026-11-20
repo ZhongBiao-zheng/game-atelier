@@ -24,6 +24,7 @@ from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 import requests
 
 from character_workflow.lib import keys
+from character_workflow.lib.callers import task_submission
 from character_workflow.lib.callers.image_output import write_image
 
 DEFAULT_BASE_URL = "https://api.evolink.ai"
@@ -51,6 +52,10 @@ _NUMERIC_FLAGS = {
 
 class EvoLinkError(RuntimeError):
     """A rejected request, uncertain submission or provider-declared terminal failure."""
+
+
+class EvoLinkUnconfirmed(EvoLinkError, task_submission.SubmissionUnconfirmed):
+    """提交受理结果未确认（发送前已落 uncertain）：不重提、不换家。按类型判断，不看文案（第 6 批）。"""
 
 
 class EvoLinkPendingError(EvoLinkError):
@@ -504,7 +509,7 @@ def render(
         raise EvoLinkError("EvoLink 已保存的任务 ID 无效")
     if not task_id:
         if state.get("uncertain"):
-            raise EvoLinkError("EvoLink 上次提交结果未确认，请核对供应商订单；不会重复提交")
+            raise EvoLinkUnconfirmed("EvoLink 上次提交结果未确认，请核对供应商订单；不会重复提交")
         _integer(n, "单次张数", 1, 4)
         _validate_options(prompt, params, editing=bool(params.get("image_edit")))
         if canceled():
@@ -521,11 +526,11 @@ def render(
                                      headers={"Authorization": f"Bearer {key.access_key}"},
                                      json=body, timeout=(10, 120), allow_redirects=False)
         except requests.RequestException:
-            raise EvoLinkError("EvoLink 提交响应中断，受理结果未确认；请核对订单，不会重复提交") from None
+            raise EvoLinkUnconfirmed("EvoLink 提交响应中断，受理结果未确认；请核对订单，不会重复提交") from None
         try:
             payload = _json(response)
         except EvoLinkError:
-            raise EvoLinkError("EvoLink 提交返回异常，受理结果未确认；请核对订单，不会重复提交") from None
+            raise EvoLinkUnconfirmed("EvoLink 提交返回异常，受理结果未确认；请核对订单，不会重复提交") from None
         candidate = str(payload.get("id") or "")
         if candidate and _TASK_ID.fullmatch(candidate):
             task_id = candidate
@@ -538,7 +543,7 @@ def render(
             save()
             raise EvoLinkError(message)
         else:
-            raise EvoLinkError("EvoLink 提交未返回任务 ID，受理结果未确认；请核对订单，不会重复提交")
+            raise EvoLinkUnconfirmed("EvoLink 提交未返回任务 ID，受理结果未确认；请核对订单，不会重复提交")
     params.update(provider_task_ids=[task_id], provider_task_protocol="evolink")
     state.update(channel=channel, uncertain=False, poll_paused=False)
     save()

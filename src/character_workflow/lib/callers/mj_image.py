@@ -37,7 +37,7 @@ from urllib.parse import urlsplit
 import requests
 
 from character_workflow.lib import keys as _keys
-from character_workflow.lib.callers import video_poll
+from character_workflow.lib.callers import task_submission, video_poll
 from character_workflow.lib.callers.image_output import write_image
 
 # 提交受理码：1=成功，21=任务已存在（同 prompt 被兼容层归并），22=排队中。
@@ -73,6 +73,10 @@ _UPSTREAM_MESSAGES = {
 
 class MidjourneyError(RuntimeError):
     pass
+
+
+class MidjourneyUnconfirmed(MidjourneyError, task_submission.SubmissionUnconfirmed):
+    """上次提交受理结果未确认（发送前已落 mj_submit_uncertain）：不重提、不换家。按类型判断（第 6 批）。"""
 
 
 class MidjourneyPendingError(MidjourneyError):
@@ -500,7 +504,7 @@ def render(
     persist = _kwargs.get("on_params_changed")
     saved_ids = list(params.get("mj_submission_ids") or [])
     if params.get("mj_submit_uncertain"):
-        raise MidjourneyError("MJ 上次提交结果未确认，请先核对供应商订单；不会重复提交")
+        raise MidjourneyUnconfirmed("MJ 上次提交结果未确认，请先核对供应商订单；不会重复提交")
     for _ in range(submissions):
         if len(task_ids) < len(saved_ids):
             task_ids.append(saved_ids[len(task_ids)])

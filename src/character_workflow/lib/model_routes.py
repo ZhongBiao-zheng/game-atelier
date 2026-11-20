@@ -329,7 +329,8 @@ def failover_reason(error: BaseException) -> FailoverReason | None:
         return "unreachable" if _is_pre_flight_failure(network) else None
     text = " ".join(str(item) for item in chain)
     low = text.lower()
-    if "未确认" in text or "gateway_upstream_error" in low:
+    # 网关转述的上游错误（文本中转的 error code）：结局在网关那边，不换家。
+    if "gateway_upstream_error" in low:
         return None
     # 网关已在内部换过家：错误文案里转述的上游欠费属于网关成员，不能让接入端把整个网关标成欠费。
     if "gateway_unavailable" in low:

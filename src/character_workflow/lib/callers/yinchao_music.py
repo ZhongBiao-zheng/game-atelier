@@ -19,6 +19,7 @@ import requests
 
 from character_workflow.lib import outbound_guard
 from character_workflow.lib.audio_caps import AUDIO_CAPS, normalize_music_params
+from character_workflow.lib.callers import task_submission
 from character_workflow.lib.callers.video_poll import poll_responses, with_task_ref
 
 PROTOCOL = "yinchao-song"
@@ -36,6 +37,10 @@ _UNCONFIRMED = "音乐提交结果未确认：网络请求未完成，未自动�
 
 class YinchaoMusicError(RuntimeError):
     pass
+
+
+class YinchaoMusicUnconfirmed(YinchaoMusicError, task_submission.SubmissionUnconfirmed):
+    """提交可能已被厂商受理、结局不知道：不重发、不换家（第 6 批：按类型判断，不看文案）。"""
 
 
 def api_base(base_url: str) -> str:
@@ -61,11 +66,14 @@ def _submit(base: str, headers: dict[str, str], model: str, prompt: str,
         response = requests.post(url, headers=headers, json=body, timeout=SUBMIT_TIMEOUT)
     except requests.ConnectTimeout as error:
         # 连接都没建立：请求肯定没送达，可以放心报「连不上」。
-        raise YinchaoMusicError(f"音乐接口连不上：{error}") from error
+        raise task_submission.not_sent_error(YinchaoMusicError)(f"音乐接口连不上：{error}") from error
     except requests.RequestException as error:
-        raise YinchaoMusicError(_UNCONFIRMED) from error
+        if task_submission.network_outcome(error) == "not_sent":
+            # 连接被拒 / DNS 失败 / 代理不通：同样没送达（以前靠 requests 链被判成「连不上」换家，行为不变）。
+            raise task_submission.not_sent_error(YinchaoMusicError)(_UNCONFIRMED) from error
+        raise YinchaoMusicUnconfirmed(_UNCONFIRMED) from error
     if response.status_code >= 500:
-        raise YinchaoMusicError(
+        raise YinchaoMusicUnconfirmed(
             f"音乐提交结果未确认：厂商接口返回 HTTP {response.status_code}，未自动重新提交。"
         )
     if response.status_code >= 400:
@@ -73,10 +81,10 @@ def _submit(base: str, headers: dict[str, str], model: str, prompt: str,
     try:
         payload = response.json()
     except ValueError as error:
-        raise YinchaoMusicError(f"音乐提交结果未确认：响应不是 JSON：{response.text[:200]}") from error
+        raise YinchaoMusicUnconfirmed(f"音乐提交结果未确认：响应不是 JSON：{response.text[:200]}") from error
     task_id = str(payload.get("id") or "").strip() if isinstance(payload, dict) else ""
     if not task_id or len(task_id) > 200:
-        raise YinchaoMusicError(f"音乐提交结果未确认：响应里没有任务号：{json.dumps(payload)[:200]}")
+        raise YinchaoMusicUnconfirmed(f"音乐提交结果未确认：响应里没有任务号：{json.dumps(payload)[:200]}")
     return task_id
 
 
