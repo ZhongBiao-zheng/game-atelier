@@ -56,7 +56,7 @@ READ_TOOLS = frozenset({"get_canvas", "list_models", "get_run", "check_run", "re
                         "read_video_frames",
                         "load_skill",
                         "read_skill_file", "wait_for_run", "wait_for_runs", "read_spec",
-                        "search_library",
+                        "search_library", "update_plan",
                         "search_team"})
 
 INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术和策划在无限画布上出图、出视频。
@@ -101,6 +101,8 @@ INSTRUCTIONS = """你是 Game Atelier 画布里的创作助手，帮游戏美术
   每个参考必须成为可见节点和 input 连线，不得隐藏输入。add_asset_node 返回 asset_nodes 与
   node_aliases；已有同一资产时复用原节点及其冻结版本，同批连线会自动改用真实节点 ID。
   不要为已有参考创建重复节点；只有用户明确要求生成时才 run_generation。
+- 要三步以上才能做完的任务（例如批量出多张图、查参考 → 生成 → 核对），开始时用 update_plan 列出待办，
+  每完成一步就整份更新一次状态；一两步就能做完的不用写。
 - 用户纠正了规律性问题时，用 append_lesson 记下经验，等用户采纳。
 - 回复用中文，简短直接。"""
 
@@ -151,6 +153,8 @@ class TurnContext:
     session_id: str = ""
     model_alias: str = ""
     model: str = ""
+    # 工具在本轮里推送面板事件用（update_plan 写完待办推 kind=plan）；测试里不传就不推。
+    notify: Notify | None = None
 
 
 # ── 权限 ────────────────────────────────────────────────────────────────────────
@@ -628,6 +632,14 @@ TOOL_SPECS: dict[str, tuple[str, dict]] = {
                       {"type": "object", "required": ["run_ids"], "properties": {
                           "run_ids": {"type": "array", "minItems": 1, "maxItems": 20,
                                       "items": {"type": "string"}}}}),
+    "update_plan": ("写下或更新这次任务的待办清单，面板顶部显示给用户：最多 12 条，每条 title + status"
+                    "（pending / in_progress / completed），每次整份替换。不改画布，不需要确认。",
+                    {"type": "object", "required": ["items"], "properties": {
+                        "items": {"type": "array", "maxItems": 12, "items": {
+                            "type": "object", "required": ["title", "status"], "properties": {
+                                "title": {"type": "string", "minLength": 1, "maxLength": 80},
+                                "status": {"type": "string",
+                                           "enum": ["pending", "in_progress", "completed"]}}}}}}),
     "load_skill": ("读取一个 Skill 的完整说明（名称见系统提示里的 Skill 列表）。",
                    {"type": "object", "required": ["name"],
                     "properties": {"name": {"type": "string"}}}),
@@ -722,6 +734,21 @@ async def _wait_for_runs(project_id: str, run_ids: list) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
+def _update_plan(turn: TurnContext, arguments: dict) -> str:
+    from pydantic import ValidationError
+
+    from character_workflow.lib import canvas_agent_plans as plans
+    try:
+        plan = plans.write_plan(turn.project_id, turn.session_id, arguments.get("items"))
+    except ValidationError as error:
+        return f"参数错误：{error}"
+    if turn.notify is not None:
+        turn.notify("canvas-agent", {"project_id": turn.project_id, "session_id": turn.session_id,
+                                     "kind": "plan"})
+    done = sum(1 for item in plan.items if item.status == "completed")
+    return json.dumps({"ok": True, "items": len(plan.items), "completed": done}, ensure_ascii=False)
+
+
 def _lookup_run(project_id: str, run_id: str) -> dict:
     try:
         return tools.get_run(LOCAL, GetRunInput(project_id=project_id, run_id=run_id))
@@ -789,6 +816,8 @@ def build_tools() -> list:
             arguments = json.loads(raw or "{}")
             if name == "wait_for_run":
                 return await _wait_for_run(turn.project_id, str(arguments.get("run_id", "")))
+            if name == "update_plan":
+                return await asyncio.to_thread(_update_plan, turn, arguments)
             if name == "wait_for_runs":
                 run_ids = arguments.get("run_ids")
                 return await _wait_for_runs(turn.project_id, run_ids if isinstance(run_ids, list) else [])
@@ -931,7 +960,7 @@ def _arguments(raw: str | None) -> dict:
 READ_LABELS = {"get_canvas": "读取画布", "list_models": "查看可用模型", "get_run": "查询生成进度",
                "read_video_frames": "查看视频画面", "check_run": "核对生成结果",
                "read_media": "读取媒体信息", "wait_for_run": "等待生成结果",
-               "wait_for_runs": "等待多个生成结果",
+               "wait_for_runs": "等待多个生成结果", "update_plan": "更新待办",
                "search_library": "查找项目参考", "search_team": "查找团队库参考",
                "read_spec": "读取类别规范"}
 
@@ -1290,7 +1319,8 @@ async def _run_model(session: CanvasAgentSession, history: list[dict], buffer: D
                         call_tag=call_tag_for(session))
     context = TurnContext(session.project_id, session.permission_mode,
                           set(session.created_node_ids), ModelScope.of(session),
-                          session.session_id, session.model_alias or "", session.model or "")
+                          session.session_id, session.model_alias or "", session.model or "",
+                          buffer.notify)
     result = Runner.run_streamed(agent, history, context=context, max_turns=MAX_TURNS,
                                  hooks=usage_hooks(), run_config=_run_config(session.project_id))
     async for event in result.stream_events():

@@ -522,6 +522,7 @@ Agent 发起的生成单次估价超过它时，Auto 下也停在待确认；估
 `rejected`（用户在确认卡上拒绝）/ `failed`（提交时出错，带 error；未预期异常也逐项记成 failed，已提交项的 run_id 照常返回），部分成功不回滚。同一 `surface_node_id` 在一批里只能出现一次：两次提交会落进同一个结果节点并发写入，所以整批按 `INVALID_PARAMETERS` 退回给模型、不弹确认卡（同一节点要多张用 count）。摘要里每项的节点标题与模型名去掉换行、各截到 40 字。网关额度在任务运行时按任务逐个准入，
 已提交的项也可能在运行时因额度用完失败。
 `POST .../approvals` 先认领再执行：在会话锁里把 awaiting_approval 改成 running、清空待确认后才执行，并发的第二个裁决返回 409（`SESSION_BUSY`），执行过的调用不会再执行。执行中出现未预期异常时，该调用的输出为「错误（UNEXPECTED）：执行时出现未预期错误（异常类型），这个操作可能已经部分生效……不要重试」（只写异常类型，不带异常原文；堆栈只进日志），面板显示「执行出错，可能已部分生效，请查看画布」，其余调用照常执行，会话照常 running 续跑；Auto 下同样不再让整轮失败。认领后进程退出的会话在下次读取时标成 interrupted，历史里没有输出的调用补上「服务中断，这个操作已中断、结果未知，可能已经部分生效……不要重试」。
+`update_plan`（不改画布、不弹确认）：Agent 写本会话的待办，最多 12 条 `{ title（1–80 字）, status: pending | in_progress | completed }`，每次整份替换，存 `canvases/<project_id>/agent/plans/<session_id>.json`（`{ schema_version: 1, items, updated_at }`，不进 CanvasAgentSession，删会话时一起删，不随项目导出包），写完推 SSE `canvas-agent` 事件 `kind: "plan"`。`GET .../agent/sessions/{session_id}/plan`（仅本机页面）返回这份待办，没写过或文件读不出时为 null，会话不存在 404。
 `wait_for_runs`（只读，1–20 个 run_id，去重后按给的顺序）一起等到终态，最长 240 秒；每项返回 run 视图并带 checks，查不到的 run 带 `lookup_error`，`counts` 按状态计数。附图最多 4 张：总数不超过 4 时全附，否则每个 run 只附第一张、取前 4 个 run，`note` 列出没附图的 run；视频联系表也只给前 4 个有产物的 run 做。
 
 主题色是工作区应用级状态，文件真源为 `.config/accent-themes.json`（桌面版与浏览器共用；浏览器 localStorage

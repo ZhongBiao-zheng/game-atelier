@@ -4,6 +4,7 @@ import {
   createCanvasAgentSession,
   decideCanvasAgentApprovals,
   getCanvasAgentSession,
+  getCanvasAgentPlan,
   getCanvasAgentSessionUsage,
   getCanvasAgentSettings,
   listCanvasAgentChatModels,
@@ -21,6 +22,7 @@ import type {
   CanvasAgentSession,
   CanvasAgentSessionSummary,
   CanvasAgentSessionUpdate,
+  CanvasAgentPlan,
   CanvasAgentSessionUsage,
   CanvasAgentSkill,
 } from '@/schema/canvas';
@@ -90,6 +92,7 @@ export function useCanvasAgent(projectId: string, open: boolean) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [usage, setUsage] = useState<CanvasAgentSessionUsage | null>(null);
+  const [plan, setPlan] = useState<CanvasAgentPlan | null>(null);
   const [confirmAbove, setConfirmAbove] = useState<number | null>(null);
   // 还没有会话时的设置：只记在本地，发第一条消息建会话时一并写入，不为选个模型就建空会话。
   const [draft, setDraft] = useState<CanvasAgentSessionUpdate>(() => {
@@ -106,6 +109,14 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     return list.sessions;
   }, [projectId]);
 
+  // 待办只用于显示：读不到不报错，保持上一次的。
+  const loadPlan = useCallback((sessionId: string) => {
+    getCanvasAgentPlan(projectId, sessionId).then(
+      loaded => { if (sessionIdRef.current === sessionId) setPlan(loaded); },
+      () => undefined,
+    );
+  }, [projectId]);
+
   const loadSession = useCallback(async (sessionId: string) => {
     const loaded = await getCanvasAgentSession(projectId, sessionId);
     if (sessionIdRef.current !== sessionId) return;  // 期间切到了别的会话
@@ -116,12 +127,14 @@ export function useCanvasAgent(projectId: string, open: boolean) {
       loadedUsage => { if (sessionIdRef.current === sessionId) setUsage(loadedUsage); },
       () => undefined,
     );
-  }, [projectId]);
+    loadPlan(sessionId);
+  }, [loadPlan, projectId]);
 
   const selectSession = useCallback(async (sessionId: string) => {
     setError(null);
     setStreaming('');
     setUsage(null);
+    setPlan(null);
     sessionIdRef.current = sessionId;
     writeStorage(sessionStorageKey(projectId), sessionId);
     try {
@@ -181,6 +194,7 @@ export function useCanvasAgent(projectId: string, open: boolean) {
       if (event.session_id !== sessionIdRef.current) return;
       if (event.kind === 'delta' && event.text) { setStreaming(current => current + event.text); setActiveTool(null); }
       if (event.kind === 'tool' && event.text) setActiveTool(event.text);
+      if (event.kind === 'plan') loadPlan(event.session_id);
       if (event.kind === 'session') {
         void loadSession(event.session_id).catch(() => undefined);
         void refreshList().catch(() => undefined);
@@ -231,6 +245,7 @@ export function useCanvasAgent(projectId: string, open: boolean) {
     sessionIdRef.current = null;
     setSession(null);
     setUsage(null);
+    setPlan(null);
     setStreaming('');
     setActiveTool(null);
     setError(null);
@@ -304,7 +319,7 @@ export function useCanvasAgent(projectId: string, open: boolean) {
 
   return {
     sessions, session, draft, streaming, activeTool, models, generationModels, skills, error, pending,
-    usage, confirmAbove,
+    usage, confirmAbove, plan,
     reloadSkills,
     selectSession, newSession, updateSettings, send, decide, stop, updateConfirmAbove, clearError,
   };

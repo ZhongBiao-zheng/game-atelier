@@ -2037,6 +2037,24 @@ class CanvasAgentBatchItems(BaseModel):
     items: list[CanvasAgentBatchItem] = Field(max_length=20)
 
 
+CanvasAgentPlanStatus = Literal["pending", "in_progress", "completed"]
+
+
+class CanvasAgentPlanItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=80)
+    status: CanvasAgentPlanStatus = "pending"
+
+
+class CanvasAgentPlan(BaseModel):
+    """Agent 的待办（update_plan）：存会话旁的 `canvases/<id>/agent/plans/<session_id>.json`，
+    不进 CanvasAgentSession（会话模型 extra=forbid，加字段会让回滚后的旧版本读不出会话，ADR-0030）。"""
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1] = 1
+    items: list[CanvasAgentPlanItem] = Field(max_length=12)
+    updated_at: str
+
+
 class CanvasAgentApprovalsSubmit(BaseModel):
     model_config = ConfigDict(extra="forbid")
     decisions: list[CanvasAgentApprovalDecision] = Field(min_length=1, max_length=50)

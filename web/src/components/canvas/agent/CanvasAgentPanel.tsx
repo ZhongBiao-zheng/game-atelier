@@ -10,6 +10,7 @@ import {
 import { cn } from '@/lib/utils';
 import type { CanvasAgentCreationMode, CanvasAgentMessage } from '@/schema/canvas';
 import { CanvasAgentApprovalCard } from './CanvasAgentApprovalCard';
+import { CanvasAgentPlanList } from './CanvasAgentPlanList';
 import { CanvasAgentModeMenu } from './CanvasAgentModeMenu';
 import { CanvasAgentPermissionMenu } from './CanvasAgentPermissionMenu';
 import { agentUsageLabel } from './canvasAgentUsage';
@@ -39,6 +40,7 @@ const TOOL_LABELS: Record<string, string> = {
   apply_changes: '修改画布',
   run_generation: '生成',
   run_generations: '批量生成',
+  update_plan: '更新待办',
   get_run: '查询生成进度',
   read_media: '读取媒体信息',
   read_video_frames: '查看视频画面',
@@ -318,6 +320,8 @@ export function CanvasAgentPanel({ projectId, selectedNodes, onClose, onUpload, 
         <Hint label="新对话"><Button variant="bare" type="button" aria-label="新对话" disabled={pending || running} onClick={() => void agent.newSession()} className={ICON_BUTTON}><NewChatIcon /></Button></Hint>
         <Hint label="关闭"><Button variant="bare" type="button" aria-label="关闭 Agent" onClick={onClose} className={ICON_BUTTON}><CloseIcon /></Button></Hint>
       </header>
+
+      <CanvasAgentPlanList plan={agent.plan} running={running} />
 
       <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
         {empty && (

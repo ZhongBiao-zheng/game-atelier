@@ -5,6 +5,7 @@ import type {
   CanvasAgentBatchItems,
   CanvasAgentChatModelList,
   CanvasAgentGenerationModel,
+  CanvasAgentPlan,
   CanvasAgentSession,
   CanvasAgentSessionList,
   CanvasAgentSessionUpdate,
@@ -148,6 +149,11 @@ export function getCanvasAgentBatchItems(
 ): Promise<CanvasAgentBatchItems> {
   return requestJson<CanvasAgentBatchItems>(
     `${agentSessionPath(projectId, sessionId)}/approvals/${encodeURIComponent(callId)}/items`, '读取批量生成明细');
+}
+
+/** 没写过待办或文件读不出时为 null。 */
+export function getCanvasAgentPlan(projectId: string, sessionId: string): Promise<CanvasAgentPlan | null> {
+  return requestJson<CanvasAgentPlan | null>(`${agentSessionPath(projectId, sessionId)}/plan`, '读取 Agent 待办');
 }
 
 export function getCanvasAgentSessionUsage(projectId: string, sessionId: string): Promise<CanvasAgentSessionUsage> {

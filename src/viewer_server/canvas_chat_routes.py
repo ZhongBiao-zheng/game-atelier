@@ -22,7 +22,7 @@ from character_workflow.lib.canvas_agent_sessions import (
     mutate_canvas_agent_session, read_canvas_agent_session,
 )
 from character_workflow.lib.schemas import (
-    CanvasAgentApprovalsSubmit, CanvasAgentBatchItems, CanvasAgentSession,
+    CanvasAgentApprovalsSubmit, CanvasAgentBatchItems, CanvasAgentPlan, CanvasAgentSession,
     CanvasAgentSessionUpdate, CanvasAgentTurnCreate,
 )
 from character_workflow.lib.canvas_tool_common import CanvasToolError
@@ -212,6 +212,15 @@ async def post_approvals(project_id: str, session_id: str,
 async def get_batch_items(project_id: str, session_id: str, call_id: str) -> CanvasAgentBatchItems:
     """批量生成确认卡的逐项数据；只有本机页面能访问（Agent 连接只能用 /api/canvas-agent/ 下的工具）。"""
     return CanvasAgentBatchItems(**await _call(runtime.batch_items, project_id, session_id, call_id))
+
+
+@router.get(f"{SESSION}/plan", response_model=CanvasAgentPlan | None)
+async def get_plan(project_id: str, session_id: str) -> CanvasAgentPlan | None:
+    """Agent 用 update_plan 写的待办；没写过或文件读不出时为 null。"""
+    from character_workflow.lib import canvas_agent_plans as plans
+
+    await _call(read_canvas_agent_session, project_id, session_id)  # 会话不存在 → 404
+    return await _call(plans.read_plan, project_id, session_id)
 
 
 def _reject_pending(current: CanvasAgentSession, _now: str) -> dict:

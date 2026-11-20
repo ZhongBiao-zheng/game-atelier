@@ -561,6 +561,20 @@ export interface CanvasAgentBatchItems {
   items: CanvasAgentBatchItem[];
 }
 
+export type CanvasAgentPlanStatus = 'pending' | 'in_progress' | 'completed';
+
+export interface CanvasAgentPlanItem {
+  title: string;
+  status: CanvasAgentPlanStatus;
+}
+
+/** Agent 用 update_plan 写的待办（会话旁的 sidecar 文件，服务端 CanvasAgentPlan）。 */
+export interface CanvasAgentPlan {
+  schema_version: 1;
+  items: CanvasAgentPlanItem[];
+  updated_at: string;
+}
+
 export interface CanvasAgentChatModel {
   alias: string;
   model: string;

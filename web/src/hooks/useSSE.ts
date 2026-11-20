@@ -18,7 +18,7 @@ export interface CanvasDocumentChangedPayload {
 export interface CanvasAgentEventPayload {
   project_id?: string;
   session_id?: string;
-  kind?: 'delta' | 'tool' | 'session';
+  kind?: 'delta' | 'tool' | 'session' | 'plan';
   text?: string;
 }
 

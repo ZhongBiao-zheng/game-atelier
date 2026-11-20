@@ -53,6 +53,12 @@ def _validate_session_id(session_id: str) -> str:
     return session_id
 
 
+def canvas_agent_plan_path(project_id: str, session_id: str) -> Path:
+    """会话的待办 sidecar（canvas_agent_plans）；删会话时一起删。"""
+    _validate_session_id(session_id)
+    return canvas_project_dir(project_id) / "agent" / "plans" / f"{session_id}.json"
+
+
 def _session_path(project_id: str, session_id: str) -> Path:
     _validate_session_id(session_id)
     return _sessions_dir(project_id) / f"{session_id}.json"
@@ -250,3 +256,4 @@ def delete_canvas_agent_session(
             if current.revision != expected_revision:
                 raise RuntimeError(f"revision_conflict:{current.revision}")
             _session_path(project_id, session_id).unlink()
+            canvas_agent_plan_path(project_id, session_id).unlink(missing_ok=True)

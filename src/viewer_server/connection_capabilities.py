@@ -131,6 +131,7 @@ POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/approvals
 GET /api/canvas/projects/{project_id}/agent/sessions/{session_id}/approvals/{call_id}/items
 POST /api/canvas/projects/{project_id}/agent/sessions/{session_id}/cancel
 GET /api/canvas/projects/{project_id}/agent/sessions/{session_id}/usage
+GET /api/canvas/projects/{project_id}/agent/sessions/{session_id}/plan
 GET /api/canvas/agent/models
 GET /api/canvas/agent/generation-models
 GET /api/canvas/agent/settings
