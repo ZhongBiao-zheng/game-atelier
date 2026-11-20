@@ -23,6 +23,9 @@ OPERATIONS: dict[str, str] = {
     **{f"canvas-{name}": f"/api/canvas-agent/{name}" for name in _CANVAS_OPERATIONS},
     # PS 联动插件的工具（ADR-0043），走插件工具接口，请求体为 {project_id, arguments}。
     **{f"ps-{name}": f"/api/canvas-agent/plugin-tools/ps-bridge/{name}" for name in _PS_TOOLS},
+    # 自定义接口的接入说明与干跑校验（ADR-0036），不挂项目，请求体就是参数本身。
+    "atelier-protocol-manual": "/api/canvas-agent/protocol-manual",
+    "atelier-protocol-validate": "/api/canvas-agent/protocol-validate",
 }
 _ERROR_MESSAGES = {
     "CONNECTION_REQUIRED": "请在本机 Atelier 管理页重新授权 Agent。",

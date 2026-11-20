@@ -1391,6 +1391,13 @@ multipart 里的数组值展开成同名重复字段。
 
 接入说明唯一来源是 `src/character_workflow/data/http_protocol_manual.md`：自定义接口编辑弹窗的「复制接入说明」整份复制（前端构建时 `?raw` 内联同一文件；浏览器不让写剪贴板时下载为 `.md`），「AI 帮我配置」的提示词只取其中「模板规范（版本 1）」一节。改模板规则时改这一份。
 
+Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机页面会话 403 `CAPABILITY_DENIED`，无会话 401）：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/canvas-agent/protocol-manual` | `{}` → `{markdown}`：接入说明全文 |
+| POST | `/api/canvas-agent/protocol-validate` | `{document}`（请求上限 200 KB，超出 413 `CONTENT_TOO_LARGE`；模板本身上限仍是 64 KB，超出时 `valid:false`）→ 与 `POST /api/http-protocols/validate` 同形状；预览用占位服务地址与 `model-id`，鉴权头不出现在 `headers` 里，只在 `auth_header` 给出头名。不写盘、不发请求、不读已有模板与密钥 |
+
 ## 网关共享库（ADR-0034）
 
 本机管理：`GET /api/team-library-gateway-share` 返回 `shared_library_ids` 与 `gateway_enabled`；

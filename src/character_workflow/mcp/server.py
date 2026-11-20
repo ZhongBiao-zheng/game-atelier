@@ -21,6 +21,8 @@ def operation_of(name: str) -> str:
         return "canvas-" + name.removeprefix("canvas_").replace("_", "-")
     if name.startswith("ps_"):
         return "ps-" + name.removeprefix("ps_")
+    if name.startswith("atelier_protocol_"):
+        return "atelier-protocol-" + name.removeprefix("atelier_protocol_")
     return ""
 
 

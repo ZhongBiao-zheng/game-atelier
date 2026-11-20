@@ -78,11 +78,11 @@ class PluginToolCall(BaseModel):
     arguments: dict = Field(default_factory=dict)
 
 
-def _agent(request: Request):
-    """插件工具接口只认 Agent 凭据：本机页面的会话也能走到 /api/canvas-agent/，在这里拒掉。"""
+def _agent(request: Request, message: str = "插件工具只给 Agent 用"):
+    """插件工具与自定义接口工具只认 Agent 凭据：本机页面的会话也能走到 /api/canvas-agent/，在这里拒掉。"""
     current = principal(request)
     if current is None or current.kind != "agent":
-        raise CanvasToolError("CAPABILITY_DENIED", "插件工具只给 Agent 用", 403)
+        raise CanvasToolError("CAPABILITY_DENIED", message, 403)
     return current
 
 
@@ -114,6 +114,55 @@ def call_plugin_tool(request: Request, plugin_id: str, tool: str, payload: Plugi
     except PluginError as error:
         raise CanvasToolError(error.code, error.message, error.status) from None
     return result
+
+
+# 自定义接口的接入说明与干跑校验（ADR-0036，第 5 批 5-6B）：让用户自己的 AI 代理读说明、改模板到校验通过。
+# 不挂项目、不加能力开关：只要是有效的本机 Agent 会话。不写盘、不发出站请求、不读已有模板与密钥；
+# 保存与绑定仍只在本机设置页（/api/http-protocols* 对 Agent 会话是 401）。
+PROTOCOL_DOCUMENT_MAX_BYTES = 200 * 1024
+
+
+class ProtocolManualRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProtocolValidateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    document: dict
+
+
+@router.post("/protocol-manual")
+def protocol_manual(request: Request, payload: ProtocolManualRequest):
+    from importlib.resources import files
+    _agent(request, "自定义接口说明只给 Agent 用")
+    text = files("character_workflow").joinpath("data/http_protocol_manual.md").read_text(encoding="utf-8")
+    return {"markdown": text}
+
+
+@router.post("/protocol-validate")
+def protocol_validate(request: Request, payload: ProtocolValidateRequest):
+    import json
+
+    from viewer_server.http_protocol_routes import validate_document
+    _agent(request, "自定义接口干跑校验只给 Agent 用")
+    size = len(json.dumps(payload.document, ensure_ascii=False).encode("utf-8"))
+    if size > PROTOCOL_DOCUMENT_MAX_BYTES:
+        raise CanvasToolError("CONTENT_TOO_LARGE",
+                              f"接口模板 {size // 1024} KB，超过 200 KB 上限", 413)
+    result = validate_document(payload.document)
+    if result["preview"]:
+        result["preview"] = {name: _without_auth_header(call) for name, call in result["preview"].items()}
+    return result
+
+
+def _without_auth_header(call: dict) -> dict:
+    """预览里的鉴权头只是 `***` 占位，但 MCP 适配器拒绝任何名为 authorization 的字段：拿掉它，只报头名。"""
+    headers = call.get("headers") or {}
+    auth = [name for name in headers if name.lower() == "authorization"]
+    view = {**call, "headers": {name: value for name, value in headers.items() if name not in auth}}
+    if auth:
+        view["auth_header"] = auth[0]
+    return view
 
 
 def register_canvas_agent_routes(app: FastAPI) -> None:

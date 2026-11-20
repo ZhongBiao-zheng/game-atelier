@@ -18,7 +18,7 @@ def test_assist_prompt_carries_exactly_the_spec_section_of_the_manual():
     section = rest.split("\n## ", 1)[0].strip()
     assert section and system.endswith(section)
     # 其他节（分流、计费、自测、安全）是给用户 AI 代理看的，不进「AI 帮我配置」的提示词。
-    for heading in ("## 先判断要不要写模板", "## 提交、失败与计费", "## 自测", "## 安全"):
+    for heading in ("## 先判断要不要写模板", "## 提交、失败与计费", "## 自测", "## 用 MCP 自检", "## 安全"):
         assert heading in MANUAL
         assert heading not in system
 

@@ -303,11 +303,13 @@ CANVAS_TOOLS = frozenset({
     "list-projects", "get-document", "list-models", "apply-changes", "import-media", "run",
     "get-run", "read-media",
 })
+# 自定义接口的接入说明与干跑校验（ADR-0036，第 5 批 5-6B）：不挂项目，接口里再核对是 Agent。
+PROTOCOL_TOOLS = frozenset({"protocol-manual", "protocol-validate"})
 
 
 def is_canvas_tool_path(rest: str) -> bool:
-    """`/api/canvas-agent/` 后面的部分是不是画布工具：固定那几条，加插件工具（ADR-0043，接口里再核对是 Agent）。"""
-    return rest in CANVAS_TOOLS or rest == "plugin-tools" or (
+    """`/api/canvas-agent/` 后面的部分是不是 Agent 工具：画布那几条、自定义接口两条、插件工具（ADR-0043）；后两类接口里再核对是 Agent。"""
+    return rest in CANVAS_TOOLS or rest in PROTOCOL_TOOLS or rest == "plugin-tools" or (
         rest.startswith("plugin-tools/") and rest.count("/") == 2)
 LOCAL_RULES = [
     (method, path, compile_path(path)[0])

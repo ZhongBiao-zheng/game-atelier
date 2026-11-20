@@ -1,6 +1,6 @@
 """Canvas MCP 注册元数据；不依赖 MCP SDK，供本地管理页面读取。"""
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -63,6 +63,27 @@ PS_TOOLS = {
 }
 
 
+# 自定义接口的接入说明与干跑校验（ADR-0036，第 5 批 5-6B）：有效的本机 Agent 会话即可调用，不挂项目。
+# 只读：不写盘、不发出站请求、不读已有模板与密钥；保存与绑定仍只在本机设置页。
+class ProtocolManualInput(StrictInput):
+    pass
+
+
+class ProtocolValidateInput(StrictInput):
+    document: dict[str, Any]
+
+
+PROTOCOL_TOOLS = {
+    "manual": (ProtocolManualInput, "Read the Atelier custom interface manual (Markdown): when a template is "
+               "needed, the template spec (version 1), submit/failure/billing rules, self-test and safety. "
+               "Read it before writing a template for a model vendor."),
+    "validate": (ProtocolValidateInput, "Dry-run a custom interface template (JSON object, <= 200 KB): returns "
+                 "{valid, issues, declared, preview}. Never saves, never sends requests, never reads stored "
+                 "templates or keys. Fix issues until valid, then give the JSON to the user to paste and save "
+                 "in Atelier settings."),
+}
+
+
 @dataclass(frozen=True)
 class ToolDefinition:
     operation: str
@@ -88,5 +109,9 @@ TOOL_DEFINITIONS = tuple(
     ToolDefinition(operation=f"ps-{name}", input_model=model, description=description,
                    read_only=read_only, billable=False)
     for name, (model, read_only, description) in PS_TOOLS.items()
+) + tuple(
+    ToolDefinition(operation=f"atelier-protocol-{name}", input_model=model, description=description,
+                   read_only=True, billable=False)
+    for name, (model, description) in PROTOCOL_TOOLS.items()
 )
 ALL_TOOL_INPUT_MODELS = {tool.operation: tool.input_model for tool in TOOL_DEFINITIONS}

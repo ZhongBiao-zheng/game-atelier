@@ -56,9 +56,17 @@ def listing() -> dict:
 
 @router.post("/validate")
 def validate(body: _Validate) -> dict:
-    """校验 + 请求预览，不发请求、不写盘。设置页与后续的「AI 帮我配置」共用这一个入口。"""
+    """校验 + 请求预览，不发请求、不写盘。设置页与「AI 帮我配置」共用这一个入口。"""
+    return validate_document(body.document, base_url=body.base_url, model=body.model)
+
+
+def validate_document(document: Any, *, base_url: str | None = None, model: str | None = None) -> dict:
+    """干跑校验：结构 → 本机环境 → 请求预览。不发请求、不写盘、不读已有模板与密钥。
+
+    本机页面（上面的 /validate）与 Agent 的 atelier_protocol_validate 共用（第 5 批 5-6B）。
+    """
     try:
-        protocol = parse_protocol(body.document)
+        protocol = parse_protocol(document)
     except ProtocolInvalidError as error:
         return {"valid": False, "issues": [i.model_dump() for i in error.issues],
                 "declared": None, "preview": None}
@@ -67,7 +75,7 @@ def validate(body: _Validate) -> dict:
         return {"valid": False, "issues": [i.model_dump() for i in environment],
                 "declared": declared_capabilities(protocol), "preview": None}
     try:
-        preview = _preview(protocol, body.base_url or _PREVIEW_BASE, body.model or "model-id")
+        preview = _preview(protocol, base_url or _PREVIEW_BASE, model or "model-id")
     except (declarative.DeclarativeError, ValueError) as error:
         return {"valid": False, "issues": [{"path": "(预览)", "message": str(error)}],
                 "declared": declared_capabilities(protocol), "preview": None}
