@@ -46,6 +46,22 @@ describe('对话接口', () => {
       ['claude-x', 'anthropic-messages'], ['img', null]]);
   });
 
+  it('选 Gemini 后保存与测试连接都带上 gemini-generate-content（第 5 批）', async () => {
+    vi.mocked(createKey).mockResolvedValue({ alias: 'relay' });
+    vi.mocked(previewModels).mockResolvedValue({ models: [], total: 0, excluded: 0 });
+    openCustom();
+    await chooseOption(screen.getByRole('combobox', { name: '对话接口' }), 'Gemini');
+    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+    await waitFor(() => expect(previewModels).toHaveBeenCalled());
+    expect(vi.mocked(previewModels).mock.calls[0][0].text_protocol).toBe('gemini-generate-content');
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(createKey).toHaveBeenCalled());
+    const payload = vi.mocked(createKey).mock.calls[0][0];
+    expect(payload.text_protocol).toBe('gemini-generate-content');
+    expect(payload.models!.map(model => [model.id, model.protocol])).toEqual([
+      ['claude-x', 'gemini-generate-content'], ['img', null]]);
+  });
+
   it('自动时不提交接口字段', async () => {
     vi.mocked(createKey).mockResolvedValue({ alias: 'relay' });
     openCustom();
