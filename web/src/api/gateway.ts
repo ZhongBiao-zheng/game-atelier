@@ -144,6 +144,8 @@ export interface GatewayTask {
   status: 'pending' | 'running' | 'done' | 'failed' | 'canceled';
   created_at: string; updated_at: string; prompt: string | null; n: number;
   outputs: number; output_types: string[]; error: string | null; workflow_name?: string | null;
+  /** 按幂等键取消、主机没收到提交时记的占位：没有路由、提示词与用量。旧主机不回这个字段。 */
+  placeholder?: boolean;
 }
 export type GatewayMembers = import('@/schema/modelRouteStatus').ModelRouteMemberStatusResponse;
 export async function fetchGatewayTasks(scope: 'active' | 'recent', alias?: string) {

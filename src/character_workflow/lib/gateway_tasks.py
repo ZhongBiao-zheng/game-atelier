@@ -240,7 +240,9 @@ def task_snapshot(task: GatewayTask) -> dict:
     return {**task.model_dump(include={"task_id", "kind", "key_name", "route_id", "member_alias",
             "member_trail", "phase", "status", "created_at", "updated_at", "n", "output_types", "error"}),
             "prompt": task.prompt if task.kind != "text" else None, "outputs": len(task.outputs),
-            "workflow_name": _workflow_name(task)}
+            "workflow_name": _workflow_name(task),
+            # 按幂等键取消、主机没收到提交时记的占位（第 5 批 5-3）：没有路由、提示词、用量，任务列表单独标出。
+            "placeholder": task.route_id == TOMBSTONE_ROUTE}
 
 
 def _save(task: GatewayTask) -> GatewayTask:

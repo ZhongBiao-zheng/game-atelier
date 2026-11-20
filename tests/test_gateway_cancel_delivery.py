@@ -100,6 +100,20 @@ def test_cancel_by_key_before_the_host_got_it_blocks_the_late_submit(host):
     assert _usage_count() == rows_before  # 占位不写用量行
 
 
+def test_admin_task_list_marks_placeholders(host):
+    """第 6 批 6-2(b)：主机设置页任务列表按 placeholder 单独标「已取消的提交」，普通任务不带。"""
+    from viewer_server.gateway_routes import gateway_task_list
+
+    client, _calls = host
+    placeholder = client.post("/gateway/v1/tasks/cancel", json={"idempotency_key": _key()}).json()
+    normal = _submit(client, _key(fill="d"))
+    gateway_tasks._update(normal, status="done")
+    rows = {row["task_id"]: row for row in gateway_task_list("recent")["tasks"]}
+    assert rows[placeholder["task_id"]]["placeholder"] is True
+    assert rows[placeholder["task_id"]]["route_id"] == "" and rows[placeholder["task_id"]]["prompt"] == ""
+    assert rows[normal]["placeholder"] is False
+
+
 def test_cancel_by_key_rejects_bad_or_old_keys_and_caps_placeholders(host, monkeypatch):
     client, _calls = host
     assert client.post("/gateway/v1/tasks/cancel", json={"idempotency_key": "abc"}).status_code == 422

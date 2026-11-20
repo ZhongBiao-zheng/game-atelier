@@ -5,6 +5,7 @@ import { date } from './shared';
 
 import { KindBadge } from '../usage/KindBadge';
 import { Hint } from '@/components/ui/tooltip';
+import { HelpIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
 import { Lightbox } from '@/components/Lightbox';
 
@@ -14,6 +15,7 @@ export function mergeTask(rows: GatewayTask[], next: GatewayTask) {
   if (old && old.updated_at > next.updated_at) return rows;
   return [next, ...rows.filter(row => row.task_id !== next.task_id)].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 }
+const PLACEHOLDER_HINT = '成员停止时主机还没收到这次提交；之后到达的同一请求不会执行，不计费';
 const PHASES: Record<string, string> = { queued: '排队', sent: '已提交', downloading: '下载中', pending: '排队', running: '生成中', done: '完成', failed: '失败', canceled: '已停止' };
 
 export function Tasks({ onFinished, gatewayAlias }: { onFinished: () => void; gatewayAlias?: string }) {
@@ -62,6 +64,13 @@ export function Tasks({ onFinished, gatewayAlias }: { onFinished: () => void; ga
     return () => { clearInterval(clock); clearInterval(poll); };
   }, [running, refresh, gatewayAlias]);
   function row(task: GatewayTask, preview = false) {
+    if (task.placeholder) return <li key={task.task_id} className="border-t border-border py-3 text-xs">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span>{task.key_name}</span><span className="text-muted-foreground">已取消的提交</span>
+        <Hint label={PLACEHOLDER_HINT}><span tabIndex={0} aria-label="已取消的提交说明" className="text-muted-foreground"><HelpIcon size="sm" /></span></Hint>
+        <span className="tabular-nums text-muted-foreground">{date(task.updated_at)}</span>
+      </div>
+    </li>;
     return <li key={task.task_id} className="space-y-2 border-t border-border py-3 text-xs">
       <div className="flex flex-wrap gap-x-3 gap-y-1">
         <KindBadge kind={task.kind} /><span>{task.key_name}</span><Hint label={task.route_id}><span className="max-w-64 truncate">{task.workflow_name ?? task.route_id}</span></Hint>
@@ -84,7 +93,8 @@ export function Tasks({ onFinished, gatewayAlias }: { onFinished: () => void; ga
     {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     <ul aria-label="运行中任务">{active.map(task => row(task))}</ul>
     {!active.length && <p className="text-xs text-muted-foreground">暂无运行中任务</p>}
-    <details><summary className="cursor-pointer text-sm">最近 24 小时 · {recent.length}</summary><ul>{recent.map(task => row(task, true))}</ul></details>
+    {/* 占位任务（已取消的提交）列出但不计数：统计里一律不含它们（第 6 批 6-2b）。 */}
+    <details><summary className="cursor-pointer text-sm">最近 24 小时 · {recent.filter(task => !task.placeholder).length}</summary><ul>{recent.map(task => row(task, true))}</ul></details>
     {zoomed && <Lightbox src={zoomed} onClose={() => setZoomed(null)} />}
   </section>;
 }
