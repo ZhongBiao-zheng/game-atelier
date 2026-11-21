@@ -66,7 +66,7 @@ export function ProviderIconPicker({ icon, display, defaultUrl, onChange }: {
     <Popover open={open} onOpenChange={next => { setOpen(next); if (!next) settle(); }}>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon" type="button" aria-label="更换图标"
-          className="h-8 w-8 shrink-0 bg-secondary text-xs [&_svg]:size-5">
+          className="h-8 w-8 shrink-0 bg-secondary text-xs [&_img]:size-5 [&_svg]:size-5">
           <ProviderBrandIcon provider={{ ...display, icon }} />
         </Button>
       </PopoverTrigger>
@@ -84,7 +84,7 @@ export function ProviderIconPicker({ icon, display, defaultUrl, onChange }: {
                 return <Hint key={brand.id} label={brand.label} side="bottom">
                   <Button variant="ghost" size="icon" type="button" aria-label={brand.label}
                     aria-pressed={icon === value} onClick={() => choose(value)}
-                    className="text-muted-foreground hover:text-foreground aria-pressed:bg-secondary aria-pressed:text-foreground aria-pressed:ring-1 aria-pressed:ring-inset aria-pressed:ring-primary/60">
+                    className="text-muted-foreground hover:text-foreground [&_img]:size-4 aria-pressed:bg-secondary aria-pressed:text-foreground aria-pressed:ring-1 aria-pressed:ring-inset aria-pressed:ring-primary/60">
                     <BrandGlyph brand={brand.id} />
                   </Button>
                 </Hint>;

@@ -1,5 +1,5 @@
 import { act, render } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { COLOR_BRANDS, MONO_IN, colorBrandSource } from './brandColors';
 import { ModelBrandIcon } from './ModelBrandIcon';
 import { ProviderBrandIcon } from './ProviderBrandIcon';
@@ -78,5 +78,27 @@ describe('品牌图标「黑白 / 彩色」', () => {
       expect(container.querySelector('.bg-current')).not.toBeNull();
       unmount();
     }
+  });
+});
+
+describe('读写本机存储失败', () => {
+  it('读不了按黑白、写不了忽略，图标照常渲染', () => {
+    // 只让品牌图标这个键读写失败：深浅色模式的读取（theme.ts）不在这次范围内。
+    const realGet = Storage.prototype.getItem;
+    const realSet = Storage.prototype.setItem;
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === 'atelier:brand-icons') throw new Error('SecurityError');
+      return realGet.call(this, key);
+    });
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === 'atelier:brand-icons') throw new Error('QuotaExceededError');
+      return realSet.call(this, key, value);
+    });
+    expect(loadBrandIconMode()).toBe('mono');
+    expect(() => setBrandIconMode('color')).not.toThrow();
+    const { container } = render(<ModelBrandIcon brand="deepseek" size="sm" />);
+    expect(container.querySelector('svg')).toHaveAttribute('fill', 'currentColor');
+    getItem.mockRestore();
+    setItem.mockRestore();
   });
 });
