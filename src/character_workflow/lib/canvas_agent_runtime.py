@@ -1166,16 +1166,8 @@ def start_host_settlement(session: CanvasAgentSession) -> None:
     threading.Thread(target=work, name="agent-host-settlement", daemon=True).start()
 
 
-SOCKS_PROXY_MESSAGE = ("环境变量里的代理是 socks 地址（ALL_PROXY、HTTPS_PROXY 等），Agent 连不了 socks 代理："
-                       "改成 http 代理地址，或从没有设置这个变量的终端启动 Atelier")
-
-
-def _is_socks_proxy_error(error: BaseException) -> bool:
-    """httpx 按环境代理构造 transport 时的两种失败：socks5 / socks5h 缺 socksio，socks:// 不认识。"""
-    text = str(error)
-    if isinstance(error, ImportError):
-        return "socksio" in text
-    return "Unknown scheme for proxy URL" in text and "socks" in text.lower()
+SOCKS_PROXY_MESSAGE = ("环境变量里的 socks:// 代理缺少版本号，请改成 socks5://、socks5h:// "
+                       "或 http 代理地址")
 
 
 def _agent_client(key: keys.KeySpec, protocol: str | None,
@@ -1214,7 +1206,6 @@ def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None]
     from openai.types.shared import Reasoning
 
     from character_workflow.lib import llm_protocols
-    set_tracing_disabled(True)  # 否则 SDK 会把对话轨迹上传到 OpenAI
     key = keys.find_by_alias(session.model_alias or "")
     if key is None or not session.model:
         raise CanvasToolError("INVALID_PARAMETERS", "请先选择对话模型", 422)
@@ -1229,9 +1220,10 @@ def build_agent(session: CanvasAgentSession, on_gateway_wait: Callable[[], None]
         raise CanvasToolError("MODEL_UNAVAILABLE", detect.AGENT_UNVERIFIED, 422)
     protocol = spec.protocol if spec is not None else None
     try:
+        set_tracing_disabled(True)  # SDK 首次构造 tracing 客户端也会读取代理环境。
         client = _agent_client(key, protocol, on_gateway_wait, call_tag)
-    except (ImportError, ValueError) as error:
-        if isinstance(error, CanvasToolError) or not _is_socks_proxy_error(error):
+    except ValueError as error:
+        if "Unknown scheme for proxy URL" not in str(error) or "socks://" not in str(error).lower():
             raise
         raise CanvasToolError("MODEL_UNAVAILABLE", SOCKS_PROXY_MESSAGE, 422) from error
     settings = ModelSettings(reasoning=Reasoning(effort=session.effort)) if session.effort \
