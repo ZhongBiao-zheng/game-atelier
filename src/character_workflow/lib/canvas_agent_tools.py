@@ -9,11 +9,13 @@ import asyncio
 import base64
 import hashlib
 import io
+import logging
 import mimetypes
 import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from pydantic import ValidationError
@@ -25,7 +27,7 @@ from character_workflow.lib.canvas_projects import (
     save_canvas_document, save_canvas_upload, upload_max_bytes,
 )
 from character_workflow.lib.canvas_agent_schema import (
-    ApplyChangesInput, CanvasListModelsInput, CanvasListProjectsInput, CanvasProjectInput,
+    MAX_BATCH_GENERATIONS, RunBatchInput, ApplyChangesInput, CanvasListModelsInput, CanvasListProjectsInput, CanvasProjectInput,
     CanvasReadSpecInput, CanvasSearchLibraryInput, CanvasSearchTeamInput,
     CanvasReadMediaInput, CanvasReadVideoFramesInput, GetRunInput, ImportMediaInput, RunInput,
 )
@@ -442,17 +444,29 @@ def _check_import_boundary(real: Path, project_id: str) -> None:
         raise CanvasToolError("REFERENCE_NOT_ALLOWED", "不能读取其他画布的文件", 403)
 
 
+# Gateway admission emits a public quota/reset message. Other provider errors may contain local paths or keys.
+_QUOTA_AMOUNT = r"[0-9]+(?:\.[0-9]+)?(?:e[+-][0-9]+)?"
+_GATEWAY_QUOTA_ERROR = re.compile(
+    rf"(?:部分候选没有生成成功：)?中转额度已用完：(今日|本周|本月|累计) ¥{_QUOTA_AMOUNT}（已用 ¥{_QUOTA_AMOUNT}），"
+    r"(?:[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} 重置|不会自动重置，请联系主机管理员)")
+
+
 def _job_view(job: Job, *, agent: bool) -> dict:
     run = job.canvas_run
-    error = job.error
-    if agent and error:
-        error = "生成失败，请在画布查看详情；不要自动重试"
+
+    def visible_error(error, fallback):
+        if not error or not agent:
+            return error
+        if getattr(job, "provider", None) == "atelier" and _GATEWAY_QUOTA_ERROR.fullmatch(error):
+            return error
+        return fallback
     return {
         "job_id": job.job_id, "run_id": run.run_id if run else None, "status": job.status.value,
-        "error": error, "result_node_id": run.result_node_id if run else None,
+        "error": visible_error(job.error, "生成失败，请在画布查看详情；不要自动重试"),
+        "result_node_id": run.result_node_id if run else None,
         "candidates": [
             {"index": c.index, "status": c.status, "version_id": c.version_id,
-             "error": ("生成失败" if agent and c.error else c.error)}
+             "error": visible_error(c.error, "生成失败")}
             for c in (run.candidates if run else [])
         ],
     }
@@ -476,6 +490,79 @@ def run(principal: Any, payload: RunInput) -> tuple[dict, Job]:
     except ValueError as error:
         raise CanvasToolError("INVALID_PARAMETERS", str(error), 422) from None
     return {"revision": document.revision, **_job_view(job, agent=principal.kind == "agent")}, job
+
+
+def repeated_nodes(items: list[dict]) -> list[str]:
+    """同一节点在一批里出现多次：两次提交会落进同一个结果节点、并发写入，归属不直观，整批退回。"""
+    ids = [item["surface_node_id"] for item in items]
+    return sorted({node_id for node_id in ids if ids.count(node_id) > 1})
+
+
+GENERATIONS_NOTE = ("部分成功不回滚：已提交的项照常运行并计费，不会因为别的项失败而撤销。"
+                    "status=rejected 是用户在确认卡上拒绝的项，不要再发起；status=failed 是提交时出错，"
+                    "不要自动重试，告诉用户原因。网关额度等限制在任务运行时逐项判定，"
+                    "已提交的项也可能失败，请按 run_id 查询每一项的最终结果。")
+
+
+def submit_batch(items: list[dict], submit: Callable[[dict], tuple[dict, list[str]]], *,
+                 rejected: frozenset[int] = frozenset()) -> tuple[dict, list[str]]:
+    """Each accepted item runs independently. Always return the IDs already submitted."""
+    if not 1 <= len(items) <= MAX_BATCH_GENERATIONS:
+        raise CanvasToolError("INVALID_PARAMETERS", f"一次最多 {MAX_BATCH_GENERATIONS} 项", 422)
+    if repeated := repeated_nodes(items):
+        raise CanvasToolError("INVALID_PARAMETERS", f"同一批里节点 {', '.join(repeated)} 出现了多次；"
+                              "同一节点要多张用 count（最多 4），整批没有提交", 422)
+    rows: list[dict] = []
+    created: list[str] = []
+    for index, item in enumerate(items):
+        row = {"index": index, "surface_node_id": item["surface_node_id"], "count": item["count"]}
+        if index in rejected:
+            rows.append({**row, "status": "rejected", "reason": "用户在确认卡上拒绝了这一项"})
+            continue
+        try:
+            result, new_nodes = submit(item)
+        except CanvasToolError as error:
+            rows.append({**row, "status": "failed", "error": f"{error.code}：{error.message}"})
+            continue
+        except (KeyError, TypeError, ValueError) as error:
+            rows.append({**row, "status": "failed", "error": f"参数错误：{error}"})
+            continue
+        except Exception as error:  # noqa: BLE001 — 前面已提交的项必须把 run_id 带回给模型，不能让异常把整批结果丢掉
+            logging.getLogger(__name__).exception("canvas agent batch item %s failed", index)
+            rows.append({**row, "status": "failed", "error": (
+                f"未预期错误（{type(error).__name__}）：这一项可能已经建了任务，"
+                "先查看画布上的这个节点，不要重试")})
+            continue
+        rows.append({**row, "status": "submitted", "run_id": result.get("run_id"),
+                     "result_node_id": result.get("result_node_id")})
+        created.extend(new_nodes)
+    counts = {status: sum(1 for row in rows if row["status"] == status)
+              for status in ("submitted", "rejected", "failed")}
+    return {"items": rows, **counts, "note": GENERATIONS_NOTE}, created
+
+
+def run_batch(principal: Any, payload: RunBatchInput, schedule: Callable[[str], None]) -> dict:
+    authorize(principal, payload.project_id, "canvas_generate")
+    revision = payload.expected_revision
+    if read_canvas_document(payload.project_id).revision != revision:
+        raise CanvasToolError("DOCUMENT_CONFLICT", "画布已变化，请重新读取后再改")
+
+    def submit(item: dict) -> tuple[dict, list[str]]:
+        nonlocal revision
+        result, job = run(principal, RunInput(
+            project_id=payload.project_id, surface_node_id=item["surface_node_id"],
+            expected_revision=revision, requested_count=item["count"]))
+        revision = result["revision"]
+        schedule(job.job_id)
+        return result, []
+
+    result, _ = submit_batch([item.model_dump() for item in payload.items], submit)
+    from character_workflow.lib.schemas import redact_canvas_agent_private_text
+
+    for row in result["items"]:
+        if "error" in row:
+            row["error"] = redact_canvas_agent_private_text(row["error"])
+    return result
 
 
 def get_run(principal: Any, payload: GetRunInput) -> dict:

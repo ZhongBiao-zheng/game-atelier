@@ -14,7 +14,13 @@ from character_workflow.mcp.server import create_server
 from character_workflow.mcp.tool_catalog import ALL_TOOL_INPUT_MODELS
 from tests.mcp_local_service import adapter_session
 from tests.test_mcp_ps_tools import FakeCanvas
-pytest_plugins = ["tests.test_canvas_agent_video"]
+from tests import test_canvas_agent_tools, test_canvas_agent_video, test_gateway_client
+
+canvas = test_canvas_agent_tools.canvas
+team = test_canvas_agent_tools.team
+gateway = test_gateway_client.gateway
+upstream = test_gateway_client.upstream
+video_project = test_canvas_agent_video.video_project
 
 
 CASES = [
@@ -23,6 +29,8 @@ CASES = [
     ("wait_for_run", {"run_id": "run-a"}, {"run_id": 1}),
     ("check_run", {"run_id": "run-a"}, {"run_id": 1}),
     ("read_video_frames", {"version_id": "v"}, {"version_id": "v", "count": True}),
+    ("run_batch", {"expected_revision": 0, "items": [{"surface_node_id": "one"}]},
+     {"expected_revision": 0, "items": [{"surface_node_id": "one", "count": "2"}]}),
     ("read_spec", {"category": "cat"}, {"category": False}),
 ]
 
@@ -40,7 +48,8 @@ async def test_strict_inputs_and_capability(name, valid, invalid):
     model = ALL_TOOL_INPUT_MODELS["canvas-" + name.replace("_", "-")]
     principal = SimpleNamespace(kind="agent", grant_id="test", capabilities=[])
     with pytest.raises(CanvasToolError) as caught:
-        value = getattr(tools, name)(principal, model(project_id=project_id, **valid))
+        extra = {"schedule": lambda _: pytest.fail("unauthorized submission")} if name == "run_batch" else {}
+        value = getattr(tools, name)(principal, model(project_id=project_id, **valid), **extra)
         if inspect.isawaitable(value):
             await value
     assert caught.value.code == "TARGET_NOT_AUTHORIZED" and caught.value.status == 403
@@ -128,3 +137,147 @@ async def test_wait_expires_with_current_state_and_leaves_other_slots_free(isola
         finally:
             released.set()
             adapter.close()
+
+
+async def test_batch_rejects_oversize_and_unknown_item_fields():
+    fake = FakeCanvas(set())
+    async with Client(create_server(fake)) as client:
+        for items in ([{"surface_node_id": str(i)} for i in range(21)],
+                      [{"surface_node_id": "one", "token": "x"}], [],
+                      [{"surface_node_id": "one", "count": 5}]):
+            result = await client.call_tool("canvas_run_batch", {"payload": {
+                "project_id": "project", "expected_revision": 0, "items": items}})
+            assert result.is_error and result.structured_content["error"]["code"] == "INVALID_TOOL_INPUT"
+    assert not fake.calls
+
+
+async def test_real_adapter_runs_each_accepted_item_once(isolated_data_root, tmp_path, monkeypatch):
+    import base64
+    from character_workflow.lib import keys
+    from character_workflow.lib.canvas_projects import read_canvas_document
+    from tests.fake_http_vendor import FakeVendor, png_bytes
+    from tests.test_canvas_agent_batch import IMAGE_KEY, _surfaces
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("no_proxy", "*")
+    pid = create_canvas_project("Batch").project_id
+    path = "/v1/images/generations"
+    with FakeVendor() as vendor:
+        keys.write_keys_db(keys.KeysDB(keys=[IMAGE_KEY.model_copy(update={"base_url": vendor.url + "/v1"})]))
+        _surfaces(pid, {"first": "gpt-image-2", "last": "gpt-image-2"})
+        vendor.on("POST", path, {"data": [{"b64_json": base64.b64encode(png_bytes()).decode()}]},
+                  (403, {"error": {"message": "fake quota exhausted"}}))
+        revision = read_canvas_document(pid).revision
+        async with adapter_session(isolated_data_root, tmp_path) as client:
+            async def submit(ids, rev):
+                return await client.call_tool("canvas_run_batch", {"payload": {
+                    "project_id": pid, "expected_revision": rev,
+                    "items": [{"surface_node_id": node} for node in ids]}})
+            stale = await submit(["first"], revision - 1)
+            assert stale.is_error and stale.structured_content["error"]["code"] == "DOCUMENT_CONFLICT"
+            repeated = await submit(["first", "first"], revision)
+            assert repeated.is_error and repeated.structured_content["error"]["code"] == "INVALID_PARAMETERS"
+            assert not vendor.received
+            batch = await submit(["first", "missing", "last"], revision)
+            assert not batch.is_error, batch.content
+            result = batch.structured_content
+            assert (result["submitted"], result["failed"], result["rejected"]) == (2, 1, 0)
+            assert [item["status"] for item in result["items"]] == ["submitted", "failed", "submitted"]
+            assert result["items"][1]["error"].startswith("INVALID_TARGET")
+            terminal = []
+            for item in result["items"]:
+                if item["status"] == "submitted":
+                    view = await client.call_tool("canvas_wait_for_run", {"payload": {
+                        "project_id": pid, "run_id": item["run_id"]}})
+                    assert not view.is_error, view.content
+                    terminal.append(view.structured_content["status"])
+                    if terminal[-1] == "done":
+                        assert view.structured_content["candidates"][0]["checks"]
+                        assert any(part.type == "image" for part in view.content)
+            assert sorted(terminal) == ["done", "failed"]
+            assert len(vendor.calls("POST", path)) == len(vendor.received) == 2
+
+
+async def test_real_batch_preserves_gateway_quota_result(isolated_data_root, tmp_path, gateway, upstream, monkeypatch):
+    from character_workflow.lib import gateway_keys, gateway_tasks
+    from character_workflow.lib.callers import atelier_gateway
+    from character_workflow.lib.canvas_agent_schema import ApplyChangesInput
+    from character_workflow.lib.canvas_agent_runtime import LOCAL
+    from character_workflow.lib.jobs import list_jobs
+
+    record = gateway_keys.read_config().keys[0]
+    gateway_keys.update_key(record.id, quota={"period": "day", "cap_cny": 0.5})
+    monkeypatch.setattr(gateway_tasks, "_estimate", lambda *_a, **_kw: 0.32)
+    monkeypatch.setattr(atelier_gateway, "POLL_INTERVAL_SECONDS", 0.05)
+    pid = create_canvas_project("Gateway batch").project_id
+    changes = []
+    for x, node in enumerate(["one", "two"]):
+        changes.extend([{"op": "add_surface", "kind": "image", "title": node, "node_id": node,
+                         "position": {"x": x * 300, "y": 0}},
+                        {"op": "set_draft", "node_id": node, "mode": "image", "prompt": "cat",
+                         "model": "gpt-image-2", "alias": "Hub", "params": {}}])
+    doc = tools.apply_changes(LOCAL, ApplyChangesInput(project_id=pid, expected_revision=0, changes=changes))
+    async with adapter_session(isolated_data_root, tmp_path) as client:
+        batch = await client.call_tool("canvas_run_batch", {"payload": {"project_id": pid,
+            "expected_revision": doc["revision"], "items": [{"surface_node_id": n} for n in ("one", "two")]}})
+        assert not batch.is_error and batch.structured_content["submitted"] == 2
+        views = []
+        for row in batch.structured_content["items"]:
+            waited = await client.call_tool("canvas_wait_for_run", {"payload": {
+                "project_id": pid, "run_id": row["run_id"]}})
+            assert not waited.is_error, waited.content
+            views.append(waited.structured_content)
+    assert sorted(v["status"] for v in views) == ["done", "failed"]
+    failed = next(v for v in views if v["status"] == "failed")
+    stored = next(job for job in list_jobs() if job.job_id == failed["job_id"])
+    assert "中转额度已用完" in failed["error"] == stored.error
+    assert failed["candidates"][0]["error"] == stored.canvas_run.candidates[0].error
+    assert len(upstream["calls"]) == 1
+
+
+async def test_four_outstanding_waits_bound_adapter_concurrency():
+    class BlockingCanvas(FakeCanvas):
+        def __init__(self):
+            super().__init__(set())
+            self.entered = threading.Barrier(5, timeout=4)
+            self.release = threading.Event()
+
+        def call(self, operation, payload):
+            if operation == "canvas-wait-for-run":
+                self.entered.wait()
+                assert self.release.wait(5)
+            return {"status": "pending"}
+
+    fake = BlockingCanvas()
+    async with Client(create_server(fake)) as client:
+        payload = {"payload": {"project_id": "p", "run_id": "r"}}
+        waits = [asyncio.create_task(client.call_tool("canvas_wait_for_run", payload)) for _ in range(4)]
+        try:
+            await asyncio.to_thread(fake.entered.wait)
+            waits[0].cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waits[0]
+            fifth = await client.call_tool("canvas_check_run", payload)
+            assert fifth.is_error and fifth.structured_content["error"]["code"] == "CONNECTION_RATE_LIMITED"
+        finally:
+            fake.release.set()
+            await asyncio.gather(*waits, return_exceptions=True)
+        assert not (await client.call_tool("canvas_check_run", payload)).is_error
+
+
+async def test_search_results_identify_each_native_thumbnail(isolated_data_root, tmp_path, canvas, team):
+    from character_workflow.lib.canvas_agent_schema import ApplyChangesInput
+
+    pid = canvas.project.project_id
+    added = tools.apply_changes(canvas.agent, ApplyChangesInput(project_id=pid, expected_revision=0,
+        changes=[{"op": "add_asset_node", "asset_id": team.ref, "node_id": "ref"}]))
+    asset = added["team_assets"][team.ref]
+    async with adapter_session(isolated_data_root, tmp_path) as client:
+        for name, identifier, ref in [("search_team", team.ref, team.ref),
+                                      ("search_library", asset, "asset:" + asset)]:
+            result = await client.call_tool("canvas_" + name, {"payload": {
+                "project_id": pid, "category": "角色", "limit": 1}})
+            assert not result.is_error and result.structured_content["assets"][0]["asset_id"] == identifier
+            assert result.structured_content["attach_images"] == [ref]
+            [image] = [part for part in result.content if part.type == "image"]
+            assert image.mime_type == "image/jpeg" and image.data

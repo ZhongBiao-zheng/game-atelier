@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from character_workflow.lib import canvas_agent_tools as tools
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasListModelsInput, CanvasListProjectsInput, CanvasProjectInput,
-    CanvasSearchLibraryInput, CanvasSearchTeamInput, CanvasReadSpecInput,
+    RunBatchInput, CanvasSearchLibraryInput, CanvasSearchTeamInput, CanvasReadSpecInput,
     CanvasReadVideoFramesInput, CanvasReadMediaInput, GetRunInput, ImportMediaInput, RunInput,
 )
 
@@ -96,6 +96,14 @@ def run(request: Request, payload: RunInput, background: BackgroundTasks):
     result, job = tools.run(principal(request), payload)
     background.add_task(web_routes._run_canvas_job_safely, job.job_id)
     return result
+
+
+@router.post("/run-batch")
+def run_batch(request: Request, payload: RunBatchInput, background: BackgroundTasks):
+    from viewer_server import routes as web_routes
+
+    return tools.run_batch(principal(request), payload,
+                           lambda job_id: background.add_task(web_routes._run_canvas_job_safely, job_id))
 
 
 @router.post("/get-run")

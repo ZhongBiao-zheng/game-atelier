@@ -139,6 +139,19 @@ class RunInput(CanvasProjectInput):
     requested_count: int = Field(default=1, ge=1, le=4)
 
 
+MAX_BATCH_GENERATIONS = 20
+
+
+class GenerationItem(StrictInput):
+    surface_node_id: NodeId
+    count: int = Field(default=1, ge=1, le=4)
+
+
+class RunBatchInput(CanvasProjectInput):
+    expected_revision: int = Field(ge=0)
+    items: list[GenerationItem] = Field(min_length=1, max_length=MAX_BATCH_GENERATIONS)
+
+
 class GetRunInput(CanvasProjectInput):
     run_id: EdgeId
 
@@ -169,6 +182,7 @@ CANVAS_TOOL_INPUT_MODELS: dict[str, type[StrictInput]] = {
     "apply-changes": ApplyChangesInput,
     "import-media": ImportMediaInput,
     "run": RunInput,
+    "run-batch": RunBatchInput,
     "get-run": GetRunInput,
     "wait-for-run": GetRunInput,
     "check-run": GetRunInput,
