@@ -21,6 +21,7 @@ export interface TeamLibraryGatewayState {
 }
 export interface GatewayKeyCreate {
   name: string; token?: string; role: 'member' | 'admin';
-  quota: { cap_cny: number; period: 'day' | 'week' | 'month' | 'none' } | null;
-  scope: { alias: string; models: string[] | null }[] | null;
+  /** 不传 = 不限；新建时不传，新旧主机都按默认处理（旧主机不认识这两个字段）。 */
+  quota?: { cap_cny: number; period: 'day' | 'week' | 'month' | 'none' } | null;
+  scope?: { alias: string; models: string[] | null }[] | null;
 }

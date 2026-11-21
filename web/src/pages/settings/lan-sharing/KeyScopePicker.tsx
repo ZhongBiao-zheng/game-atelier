@@ -23,14 +23,13 @@ export function KeyScopePicker({ record, options, busy, onSave }: {
   const allRef = useRef<HTMLButtonElement>(null);
   // 旧主机（远程管理）不回 scope / providers：只提示更新，不发新字段。
   const providers = record.scope === undefined ? undefined : options.providers;
-  // 新保存不允许空范围；旧数据转换出的空范围原样打开再关上不算保存。
-  const empty = draft !== null && draft.length === 0 && !sameScope(draft, record.scope ?? null);
+  // 新保存不允许空范围：草稿取消到空时提示，关闭 = 放弃这次修改（不保存）。旧数据转换出的空范围原样打开再关上不提示。
+  const empty = Boolean(providers) && draft !== null && draft.length === 0 && !sameScope(draft, record.scope ?? null);
   const label = !providers ? '模型' : record.scope === null ? '全部模型'
     : record.scope.length === 0 ? '未选择模型' : `${scopeModelCount(record.scope, providers)} 个模型`;
   return <Popover open={open} onOpenChange={next => {
-    if (next) setDraft(record.scope);
-    else if (empty) return;
-    else if (providers && !sameScope(draft, record.scope)) void onSave({ scope: draft });
+    if (next) setDraft(record.scope ?? null);
+    else if (providers && !empty && !sameScope(draft, record.scope ?? null)) void onSave({ scope: draft });
     setOpen(next);
   }}>
     <Hint label="选择此密钥可用的模型"><PopoverTrigger asChild>

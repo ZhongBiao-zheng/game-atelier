@@ -18,7 +18,7 @@ export function KeyInlineCreate({ gatewayAlias, onCancel, onCreated }: {
   }} onSubmit={event => {
     event.preventDefault(); if (!name.trim() || busy) return;
     setBusy(true); setError('');
-    void createGatewayKey({ name: name.trim(), role: 'member', quota: null, scope: null,
+    void createGatewayKey({ name: name.trim(), role: 'member',
       ...(suffix ? { token: suffix } : {}) }, ...(gatewayAlias ? [gatewayAlias] as const : []))
       .then(result => onCreated(result.key, result.token)).catch(cause => setError(errorMessage(cause))).finally(() => setBusy(false));
   }}>

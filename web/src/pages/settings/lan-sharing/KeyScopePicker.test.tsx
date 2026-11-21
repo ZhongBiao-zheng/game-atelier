@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { GatewayKey, GatewayOptions } from '@/api/gateway';
 import { KeyScopePicker } from './KeyScopePicker';
 import { scopeModelCount, toggleModel, toggleProvider } from './keyScope';
@@ -73,13 +73,30 @@ describe('成员行「模型」弹层', () => {
     expect(screen.getByRole('button', { name: '2 个模型' })).toBeInTheDocument();
   });
 
-  it('什么都没勾时提示且不保存、弹层不关', () => {
-    const onSave = openScope(key());
-    fireEvent.click(screen.getByRole('switch', { name: '全部模型' }));
-    close('可用模型');
+  it('取消到空时提示「至少选一个模型」', () => {
+    openScope(key({ scope: [{ alias: 'HK', models: ['gpt-image-2'] }] }));
+    fireEvent.click(within(screen.getByRole('region', { name: 'HK' })).getAllByRole('checkbox')[1]);
     expect(screen.getByRole('alert')).toHaveTextContent('至少选一个模型');
-    expect(screen.getByLabelText('可用模型')).toBeInTheDocument();
+  });
+
+  // R7：草稿为空时关闭 = 放弃修改，不保存，下次打开回到已保存的范围。
+  it.each([
+    ['Esc', async () => close('可用模型')],
+    ['点外面', async () => {
+      await act(() => new Promise(resolve => setTimeout(resolve, 0)));  // Radix 挂载后下一拍才监听外部点击
+      fireEvent.pointerDown(document.body);
+    }],
+  ])('草稿为空时%s关闭弹层：放弃修改、不保存', async (_way, dismiss) => {
+    const saved = [{ alias: 'HK', models: ['gpt-image-2'] }];
+    const onSave = openScope(key({ scope: saved }));
+    fireEvent.click(within(screen.getByRole('region', { name: 'HK' })).getAllByRole('checkbox')[1]);
+    await dismiss();
+    expect(screen.queryByLabelText('可用模型')).not.toBeInTheDocument();
     expect(onSave).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '1 个模型' }));
+    const hk = screen.getByRole('region', { name: 'HK' });
+    expect(within(hk).getAllByRole('checkbox')[1]).toBeChecked();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('旧数据转换出的空范围显示「未选择模型」；原样关上不报错也不保存', () => {
@@ -98,10 +115,13 @@ describe('成员行「模型」弹层', () => {
     expect(within(old).getByRole('checkbox', { name: '旧账号 的全部模型' })).toBeDisabled();
   });
 
-  it('主机版本较旧（没有 providers）时只提示更新、不保存', () => {
-    const onSave = openScope(key(), undefined, {});
+  // R2：旧主机的真实形状——记录里没有 scope 键，选项里没有 providers。打开不能抛错。
+  it('旧主机：只提示更新，打开关上都不抛错、不保存', () => {
+    const { scope: _omitted, ...oldHostRecord } = key();
+    const onSave = openScope(oldHostRecord as GatewayKey, undefined, { models: [], aliases: [] } as unknown as GatewayOptions);
     expect(screen.getByText('主机版本较旧，更新主机后才能设置')).toBeInTheDocument();
     close('可用模型');
+    expect(screen.queryByLabelText('可用模型')).not.toBeInTheDocument();
     expect(onSave).not.toHaveBeenCalled();
   });
 });

@@ -41,7 +41,7 @@ describe('LAN sharing', () => {
     fireEvent.change(name, { target: { value: '小李' } });
     fireEvent.change(screen.getByLabelText('自定义密钥（可选）'), { target: { value: 'test_only_custom' } });
     fireEvent.submit(name.closest('form')!);
-    await waitFor(() => expect(api.createGatewayKey).toHaveBeenCalledWith({ role: 'member', name: '小李', token: 'test_only_custom', quota: null, scope: null }));
+    await waitFor(() => expect(api.createGatewayKey).toHaveBeenCalledWith({ role: 'member', name: '小李', token: 'test_only_custom' }));
     await waitFor(() => expect(screen.queryByLabelText('名称')).not.toBeInTheDocument());
     expect(screen.queryByText('atg_test_only_custom')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '新建成员密钥' }));

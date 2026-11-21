@@ -28,7 +28,9 @@ export function KeyQuotaPicker({ record, busy, onSave }: {
       setError('');
     } else if (record.quota !== undefined) {
       const cap = Number(amount);
-      if (amount.trim() && (!Number.isFinite(cap) || cap <= 0 || cap > 1000000)) { setError('额度须大于 0 且不超过 100 万'); return; }
+      // 输入了读不成数字的内容（如「1e」「-」）时 value 是空串：按无效处理，不能当成「清空即不限」。
+      const unreadable = amountRef.current?.validity.badInput ?? false;
+      if (unreadable || (amount.trim() && (!Number.isFinite(cap) || cap <= 0 || cap > 1000000))) { setError('额度须大于 0 且不超过 100 万'); return; }
       const quota = amount.trim() ? { cap_cny: cap, period } : null;
       if (quota?.cap_cny !== record.quota?.cap_cny || quota?.period !== record.quota?.period) void onSave({ quota });
     }
