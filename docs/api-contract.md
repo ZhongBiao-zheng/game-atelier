@@ -1465,7 +1465,8 @@ Agent 侧（Canvas MCP，ADR-0036，只认 Agent 会话、不挂项目；本机�
   `reasoning` 为 false。Agent 会话接口（创建、读取、修改、发消息、确认、停止）返回的 `history` 去掉
   `provider_data.thought_signature`；项目导出包里的会话同样去掉，落盘文件保留。
 - 局域网网关的 Chat 入口可选 OpenAI Chat、Anthropic Messages 和 Gemini generateContent；Responses 入口只选 OpenAI Responses。所有选择都受成员密钥范围约束。
-- `GET /gateway/v1/models` 的文本路由中，`members[].protocol` 是接入协议，只有可见成员全部使用 Responses 才返回 `openai-responses`，其余返回 `openai-chat`。`upstream_protocol` 可选，表示成员真实上游协议。主机确认某成员的工具调用未经验证时附 `agent_tools_unverified: true`，成员端 Agent 对该路由执行与本机相同的限制。
+- `GET /gateway/v1/models` 的文本路由中，`members[].protocol` 是接入协议，只有可见成员全部使用 Responses 才返回 `openai-responses`，其余返回 `openai-chat`。`upstream_protocol` 可选，表示成员真实上游协议。主机确认某成员的工具调用未经验证时附 `agent_tools_unverified: true`，只有这把密钥可选的 Chat 成员全部带此标记，路由才因此对 Agent 不可用。非空 `tools` 请求只选择通过工具筛选的成员。
+- 原生上游明确拒绝且已无可换成员时，网关返回 HTTP 503 和 `error.type=gateway_unavailable`，`error.upstream_status` 保留上游状态码，`error.message` 带脱敏诊断。
 - 转换后的 Chat 响应和 SSE 使用量中，`prompt_tokens` 包含缓存读取与写入，明细分别为 `prompt_tokens_details.cached_tokens`、`cache_write_tokens`。主机文本用量行与本机 agent-usage 行记录可选的 `cache_write_tokens`。同步价缺缓存写入价时按输入价估算，可能低于实际账单。
 
 ## 供应商自定义图标（I1）

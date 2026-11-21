@@ -72,6 +72,16 @@ def _pick(owner, route_id, tried, *, endpoint="chat/completions", params=None, r
     return picked
 
 
+def _text_api_error(status, detail):
+    if 400 <= status < 500 and "\\u" in detail:
+        # A JSON-escaped refusal has the same meaning as its UTF-8 spelling.
+        try:
+            detail = json.dumps(json.loads(detail), ensure_ascii=False)
+        except (ValueError, RecursionError):
+            pass
+    return RuntimeError(f"text api {status}: {detail}")
+
+
 def _reason(error):
     if isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ProxyError)):
         return "unreachable"
@@ -200,11 +210,11 @@ async def _relay(request, owner, endpoint):
                         detail.extend(chunk[:65536 - len(detail)])
                         if len(detail) >= 65536:
                             break
+                    body_text = detail.decode("utf-8", errors="replace")
                     if adapter:
                         # The member must never mistake a provider's error for host admission (updating).
-                        raise _UpstreamFailure(response.status_code, detail.decode("utf-8", errors="replace"))
-                    raise RuntimeError(f"text api {response.status_code}: "
-                                       + detail.decode("utf-8", errors="replace"))
+                        raise _UpstreamFailure(response.status_code, body_text)
+                    raise _text_api_error(response.status_code, body_text)
                 call.accepted = True
                 if not streaming:
                     raw = await response.aread()
@@ -237,9 +247,11 @@ async def _relay(request, owner, endpoint):
                 if isinstance(error, _UpstreamFailure):
                     # Only an explicit refusal can move a request to a different authorized member.
                     # Never probe a different endpoint on this member after a native failure.
-                    if error.status not in {401, 402, 403, 404, 429}:
+                    if not 400 <= error.status < 500:
                         raise
-                    reason = _reason(RuntimeError(f"text api {error.status}"))
+                    reason = _reason(_text_api_error(error.status, error.message))
+                    if reason is None:
+                        raise
                 else:
                     reason = None if call.accepted else _reason(error)
                 if reason is None:

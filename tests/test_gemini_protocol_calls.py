@@ -1,7 +1,7 @@
 """Gemini generateContent 协议的端到端行为（ADR-0044 第 5 批）：本机真实套接字的假上游，不发任何真实请求。
 
 覆盖：一次性文本调用、按 x-goog-api-key 列模型（models-preview 与 Agent 列表）且不跟随重定向、
-「对话接口」可以选 Gemini、局域网网关在接上主机端转换（第 4 批）之前把 Gemini 成员挡在外面。
+「对话接口」可以选 Gemini、局域网网关通过 Chat 入口转发原生 Gemini 成员。
 """
 import httpx
 import pytest
@@ -156,7 +156,7 @@ def test_agent_model_list_includes_gemini_models_listed_with_the_goog_key():
     assert headers["x-goog-api-key"] == SECRET and "authorization" not in headers
 
 
-# --- 局域网网关：接上主机端转换（第 4 批）之前不碰 Gemini 成员 ---------------------------
+# --- 局域网网关：通过 Chat 入口公开并选择原生 Gemini 成员 ---------------------------
 # 临时边界（ADR-0044）：第 4 批完成后改成断言转换后的行为，不要删。
 
 def test_gateway_converts_gemini_members(monkeypatch):
